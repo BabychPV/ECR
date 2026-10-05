@@ -145,7 +145,9 @@ public sealed class RegistriesController(
 
     /// <summary>
     /// Зберігає чернетку опису; опублікований опис не змінюється. Право
-    /// <c>Registry.EditDefinition</c> (`BE-24`).
+    /// <c>Registry.EditDefinition</c> (`BE-24`). Потребує заголовок <c>If-Match</c> з
+    /// <c>definitionVersion</c> опису, з якого збудовано форму: без нього <c>422 ECR-REQ-0422</c>
+    /// (<c>definitionVersionRequired</c>), інша версія — <c>409 ECR-REG-0409</c> (<c>definitionChanged</c>).
     /// </summary>
     /// <param name="code">Код довідника.</param>
     /// <param name="request">Повний стан полів і правил, причина, версія чернетки.</param>

@@ -4158,6 +4158,12 @@ public sealed class NotFoundException(string errorCode, string message)
 > ✎ 2026-10-02 (ФВ-8.14, B5.4): `UsageItemDto` дістала необов'язкове `name` (читабельна
 > назва: колонка шаблону, поле довідника, методика; `null` — назви немає, клієнт показує`n> `label`). `label` лишається кодом — семантику не змінено.
 
+> ✎ 2026-10-05 (AN-35, L5-02, **breaking для старих клієнтів**): `PUT /registries/{code}/definition/draft`
+> потребує заголовок `If-Match` = `definitionVersion` опису, з якого збудовано форму (як
+> `PUT …/definition`). Без нього — `422 ECR-REQ-0422` (`err.ECR-REQ-0422.definitionVersionRequired`),
+> інша версія — `409 ECR-REG-0409` (`err.ECR-REG-0409.definitionChanged`). Заголовок не `[FromHeader]`
+> (конвенція проєкту) і описаний у `summary` ендпоінта; коди 409/422 вже були в `responses`.
+
 > ✎ 2026-09-29 (RT-11, FEATURE-REGISTRY-TABLES §4.1, §4.8, §7.1): опис довідника
 > (`GET`/`PUT …/definition`, `…/definition/draft`, `…/definition/publish`) несе
 > `keys[]` (`RegistryKeyDto`/`RegistryKeySaveDto`: `code`, `nameL10n`,
