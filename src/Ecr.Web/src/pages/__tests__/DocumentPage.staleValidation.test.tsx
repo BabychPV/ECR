@@ -1,6 +1,6 @@
 import type { JSX } from 'react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { act, render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -158,6 +158,46 @@ afterEach(() => {
 });
 
 /**
+ * Усі чанки, які `DocumentPage` тягне за `import()` (лініві панелі, поле періоду,
+ * сітка й перехід до комірки, перелік проєктів).
+ *
+ * ⛔ Навіщо (гейт `client`, 2026-10-04/05: воркер мовчав ~12 хв на цьому файлі й
+ * падав `Worker exited unexpectedly`, без жодного впалого тесту). Зупинений у
+ * налагоджувачі воркер стояв на ПЕРШОМУ `fireEvent.click` нижче: `act()` →
+ * `flushActQueue` → `performWorkOnRootViaSchedulerTask` → рендер/коміт по колу.
+ * У корені — повторні спроби (`RetryLane`) меж `<Suspense>` лінивих панелей,
+ * чий чанк ще вантажився (`DocumentHeaderPanel`: проміс без статусу). Синхронний
+ * `act()` React 19.0 крутить такі спроби, доки черга не спорожніє, а вона не
+ * спорожніє: імпорт чанка довантажується лише через цикл подій воркера, який цей
+ * самий `act()` і тримає. Таймер тесту (400 с) теж не спрацює — цикл не
+ * віддається, купа росте, і за ~12 хв воркер гине.
+ *
+ * ⚠ Тому лише на повільному раннері: кнопка «Перевірити» з'являється в тому ж
+ * коміті, що й лініві панелі, і тест тисне її одразу. Швидка машина встигає
+ * довантажити чанки між цими двома моментами, повільна — ні (локально на двох
+ * ядрах під повним набором — 2 зависання з 4 прогонів).
+ *
+ * ⛔ Ліки — асинхронний `act` навколо очікування цих самих модулів ПЕРЕД першою
+ * дією: він відпускає цикл подій, доки імпорти не прийдуть, і доводить до кінця
+ * повторні спроби меж. Після нього жодна лінива панель не чекає чанка, і
+ * синхронний `act()` кліку більше нема чим зациклити.
+ */
+const loadDocumentPageChunks = (): Promise<unknown> =>
+  Promise.all([
+    import('@/features/documents/DocumentHeaderPanel'),
+    import('@/features/documents/DocumentVersionCompare'),
+    import('@/features/documents/ValidationPanel'),
+    import('@/features/grid/RestoreEditsBanner'),
+    import('@/features/grid/SheetTables'),
+    import('@/features/grid/cellNavigation'),
+    import('@/features/import/ImportPanel'),
+    import('@/features/methodologies/CalculationResultsPanel'),
+    import('@/features/projects/allProjects'),
+    import('@/features/workflow/WorkflowHistory'),
+    import('@/shared/ui/PeriodPicker'),
+  ]);
+
+/**
  * Mantine у jsdom іде довго (`D1-12`) — той самий поріг, що в
  * `DocumentsPage.periodFilter`, але лише на ПЕРШИЙ рендер сторінки.
  *
@@ -175,13 +215,16 @@ describe('DocumentPage: результат перевірки не пережи�
       mockFetch();
       show();
 
-      fireEvent.click(
-        await screen.findByRole(
-          'button',
-          { name: '⟦document.validate⟧' },
-          { timeout: SlowEnvTimeout },
-        ),
+      const validate = await screen.findByRole(
+        'button',
+        { name: '⟦document.validate⟧' },
+        { timeout: SlowEnvTimeout },
       );
+
+      // ⛔ До першої дії — усі лініві чанки сторінки на місці (`loadDocumentPageChunks`).
+      await act(loadDocumentPageChunks);
+
+      fireEvent.click(validate);
 
       // Перевірка 202401 дала зауваження — вони на екрані.
       await waitFor(() => expect(screen.getByText(Message202401)).toBeTruthy(), {
