@@ -289,7 +289,8 @@ public sealed class ContractIntegrityTests
             // незакритими помилками (ФВ-5.19).
             EditRules.CanSubmit(profile, AccessBuilder.Cell(), hasBlockingErrors: true).Reason,
 
-            // ⚠ InsufficientGrantLevel: грант Є (Write), але нижчий за Submit
+            // ⚠ InsufficientGrantLevel: грант Є (Write, без права Document.Submit,
+            // D-285 — з правом Write подає), але нижчий за Submit
             // — окрема причина від NoGrant (справжньої відсутності гранта,
             // уже покрита вище через `stranger`).
             EditRules.CanSubmit(
