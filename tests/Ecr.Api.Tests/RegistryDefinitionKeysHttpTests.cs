@@ -88,6 +88,82 @@ public sealed partial class RegistryDefinitionKeysHttpTests(SqlServerFixture sql
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "ФВ-8.15")]
+    public async Task Первинний_ключ_на_записах_з_порожньою_частиною_422_primaryKeyEmptyParts()
+    {
+        // ⛔ Мутація (L4-06 / L5-03): прибрати перевірку порожніх частин у `PublishKeysAsync` →
+        // перший assert отримує 200: первинний ключ опублікований, а записи без значення тихо
+        // лишилися поза його унікальністю (рядка ключа в них немає, хеш = null).
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app);
+        var registry = await GroupedRegistryAsync(client);
+
+        await CreateAsync(client, registry, "A", new() { ["NAME"] = "a", ["GROUP"] = "North" });
+        await CreateAsync(client, registry, "B", new() { ["NAME"] = "b" });
+        await CreateAsync(client, registry, "C", new() { ["NAME"] = "c", ["GROUP"] = "   " });
+
+        // GROUP стає обов'язковим разом із первинним ключем на ньому — але B і C значення не мають.
+        var refused = await SaveDefinitionAsync(client, registry, keys: [GroupPrimaryKey()], groupRequired: true);
+        var body = await refused.Content.ReadAsStringAsync();
+        Assert.True(refused.StatusCode == HttpStatusCode.UnprocessableEntity, $"{refused.StatusCode}: {body}\n{app.ErrorsText}");
+        var problem = JsonDocument.Parse(body).RootElement;
+        Assert.Equal("ECR-REG-0422", problem.GetProperty("errorCode").GetString());
+        Assert.Equal("err.ECR-REG-0422.primaryKeyEmptyParts", problem.GetProperty("messageKey").GetString());
+        Assert.Equal("BY_GROUP", problem.GetProperty("key").GetString());
+        Assert.Equal("2", problem.GetProperty("entries").GetString());
+        Assert.Equal(
+            [$"B{registry.Tag}", $"C{registry.Tag}"],
+            problem.GetProperty("sample").EnumerateArray().Select(e => e.GetProperty("code").GetString()!).Order(StringComparer.Ordinal).ToArray());
+
+        // Відмова — уся транзакція: ні ключа, ні нової версії опису, ні обов'язковості поля.
+        await using (var db = new EcrDbContext(Options()))
+        {
+            Assert.False(await db.RegistryKeyDefs.AnyAsync(k => k.RegistryDefId == registry.Id));
+            Assert.Equal(2, await db.RegistryDefs.Where(d => d.Id == registry.Id).Select(d => d.DefinitionVersion).SingleAsync());
+            Assert.False(await db.RegistryFieldDefs.Where(f => f.RegistryDefId == registry.Id && f.Code == "GROUP").Select(f => f.IsRequired).SingleAsync());
+        }
+
+        // Контроль: коли в усіх живих записів частина ключа є, той самий опис проходить.
+        foreach (var code in new[] { "B", "C" })
+        {
+            var id = await EntryIdAsync(registry, $"{code}{registry.Tag}");
+            var deleted = await client.DeleteAsync(new Uri($"/api/v1/registries/{registry.Code}/entries/{id}", UriKind.Relative));
+            Assert.True(deleted.StatusCode == HttpStatusCode.NoContent, $"{deleted.StatusCode}: {await deleted.Content.ReadAsStringAsync()}");
+        }
+
+        var ok = await SaveDefinitionAsync(client, registry, keys: [GroupPrimaryKey()], groupRequired: true);
+        Assert.True(ok.IsSuccessStatusCode, $"{ok.StatusCode}: {await ok.Content.ReadAsStringAsync()}\n{app.ErrorsText}");
+
+        await using var after = new EcrDbContext(Options());
+        var key = await after.RegistryKeyDefs.AsNoTracking().SingleAsync(k => k.RegistryDefId == registry.Id);
+        Assert.True(key.IsPrimary);
+        Assert.Equal(1, await after.RegistryEntryKeys.CountAsync(k => k.RegistryKeyDefId == key.Id && k.IsLive));
+    }
+
+    private async Task<long> EntryIdAsync(Registry registry, string code)
+    {
+        await using var db = new EcrDbContext(Options());
+        return await db.RegistryEntries.AsNoTracking()
+            .Where(e => e.RegistryDefId == registry.Id && e.Code == code)
+            .Select(e => e.Id)
+            .SingleAsync();
+    }
+
+    private static object GroupPrimaryKey()
+        => new
+        {
+            id = (int?)null,
+            code = "BY_GROUP",
+            nameL10n = new { values = new Dictionary<string, string> { ["en"] = "By group" } },
+            fieldCodes = GroupFields,
+            isPrimary = true,
+            ignoreCase = true,
+            isActive = true,
+        };
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-8.15")]
     public async Task Ключ_без_дублікатів_заповнює_рядки_в_тій_самій_транзакції()
     {
         using var app = new EcrApiFactory(sql);
@@ -268,7 +344,8 @@ public sealed partial class RegistryDefinitionKeysHttpTests(SqlServerFixture sql
         return registry with { FieldIds = await FieldIdsAsync(client, registry.Code) };
     }
 
-    private static async Task<HttpResponseMessage> SaveDefinitionAsync(HttpClient client, Registry registry, object[] keys)
+    private static async Task<HttpResponseMessage> SaveDefinitionAsync(
+        HttpClient client, Registry registry, object[] keys, bool groupRequired = false)
         => await client.PutDefinitionAsync(
             new Uri($"/api/v1/registries/{registry.Code}/definition", UriKind.Relative),
             new
@@ -276,7 +353,7 @@ public sealed partial class RegistryDefinitionKeysHttpTests(SqlServerFixture sql
                 fields = new object[]
                 {
                     Field(registry.FieldIds["NAME"], "NAME", "String", 1, isKey: true),
-                    Field(registry.FieldIds["GROUP"], "GROUP", "String", 2),
+                    Field(registry.FieldIds["GROUP"], "GROUP", "String", 2, isRequired: groupRequired),
                 },
                 rules = Array.Empty<object>(),
                 reason = "RT-11 key",
@@ -331,7 +408,7 @@ public sealed partial class RegistryDefinitionKeysHttpTests(SqlServerFixture sql
         return (parent, child);
     }
 
-    private static object Field(int? id, string code, string dataType, int ordinal, bool isKey = false)
+    private static object Field(int? id, string code, string dataType, int ordinal, bool isKey = false, bool isRequired = false)
         => new
         {
             id,
@@ -339,7 +416,7 @@ public sealed partial class RegistryDefinitionKeysHttpTests(SqlServerFixture sql
             nameL10n = Name(code),
             dataType,
             ordinal,
-            isRequired = false,
+            isRequired,
             isKey,
             lookupRegistryDefId = (int?)null,
             unitId = (int?)null,
