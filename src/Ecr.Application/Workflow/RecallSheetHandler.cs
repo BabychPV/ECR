@@ -19,9 +19,11 @@ public sealed record RecallAvailabilityDto(bool CanRecall);
 /// підписано (<c>BE-31</c>, рішення Q15-04): <c>Submitted → Draft</c> з причиною.
 /// </summary>
 /// <remarks>
-/// ⛔ Право — той самий рівень гранта, що для подання (<see cref="GrantLevel.Submit"/>),
-/// але НЕ <c>CanSubmitAsync</c>: те рішення відмовляє на поданому аркуші ще до
-/// перевірки гранта. Рівень рахує те саме <see cref="EditRules.Effective"/>.
+/// ⛔ Право — ті самі повноваження, що для подання (<see cref="EditRules.MeetsSubmit"/>:
+/// рівень <see cref="GrantLevel.Submit"/> АБО <see cref="GrantLevel.Write"/> разом із
+/// проєктним правом <c>Document.Submit</c>, D-285), але НЕ <c>CanSubmitAsync</c>: те рішення
+/// відмовляє на поданому аркуші ще до перевірки гранта. Рівень рахує те саме
+/// <see cref="EditRules.Effective"/>.
 ///
 /// ⚠ Зріз подання (<c>calc.SubmissionSnapshot</c>) лишається — це факт, що
 /// подання було. Заморожений зріз ЗВІТНОСТІ теж не відкочується, як і при
