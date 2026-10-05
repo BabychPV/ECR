@@ -569,6 +569,40 @@ public sealed class RegistrySyncApplyTests(SqlServerFixture sql)
         }
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "D-212")]
+    public async Task L4_08_Синк_довідника_не_виконується_двічі_одночасно_зайнятий_лок_відкладає_задачу()
+    {
+        var stand = await ArrangeAsync(RegistrySourceKind.External, e1Author: Author.Svc);
+        await using var provider = BuildProvider();
+
+        try
+        {
+            // Інша задача (розклад або ручне «Зібрати») тримає синк цього довідника цього з'єднання.
+            var resource = RegistrySyncJob.LockResource(stand.DataSourceId, stand.RegistryId);
+            await using (var held = await SqlDistributedLock.TryAcquireAsync(sql.ConnectionString, resource, CancellationToken.None))
+            {
+                Assert.NotNull(held);
+
+                var deferred = await Assert.ThrowsAsync<JobDeferredException>(() => RunAsync(provider, stand));
+                Assert.Equal(resource, deferred.Resource);
+                await using var db = Context();
+                Assert.False(await db.RegistryEntries.AnyAsync(e => e.RegistryDefId == stand.RegistryId && e.Id > stand.E2));
+            }
+
+            // Лок звільнено - наступний прогін виконується й створює запис для нового елемента.
+            await RunAsync(provider, stand);
+            await using var after = Context();
+            Assert.True(await after.RegistryEntries.AnyAsync(e => e.RegistryDefId == stand.RegistryId && e.Id > stand.E2));
+        }
+        finally
+        {
+            await DeactivateAsync(stand);
+        }
+    }
+
     /// <summary>По одній відмові writer'а на E1 і E2 — з очікуваною ознакою причини.</summary>
     private static void AssertRejected(IReadOnlyList<CollectionCoverage> events, Stand stand, string reason)
     {

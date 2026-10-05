@@ -160,6 +160,11 @@ public sealed class RegistrySyncJob(
                             ?? throw new InvalidOperationException(
                                 $"Сутність джерела {sourceEntityId} не прив'язана до довідника: синк довідника їй не належить.");
 
+        // L4-08: синк одного довідника цього з'єднання не виконується двічі одночасно (розклад + ручне
+        // «Зібрати»): дві задачі з однаковим GUID у знімку створили б дубль запису й впали б на
+        // UQ_RegistryExternalKey. Лок на окремому з'єднанні, поза транзакцією; зайнято - відкладення.
+        await using var gate = await AcquireGateAsync(entity.DataSourceId, registryDefId, ct).ConfigureAwait(false);
+
         var dataSource = await db.DataSources
                              .AsNoTracking()
                              .FirstOrDefaultAsync(s => s.Id == entity.DataSourceId && s.IsActive, ct)
@@ -1253,6 +1258,25 @@ public sealed class RegistrySyncJob(
                 status,
                 $"entry={entry}; rule={v.Rule}",
                 $"severity={v.Severity}; messageKey={v.MessageKey}; message={message}; value={valueParam}"));
+    }
+
+    /// <summary>Ім'я applock-а синку довідника: одне з'єднання - один довідник.</summary>
+    public static string LockResource(int dataSourceId, int registryDefId)
+        => string.Create(CultureInfo.InvariantCulture, $"ecr.registry-sync:{dataSourceId}:{registryDefId}");
+
+    /// <summary>Лок синку; <c>null</c> - не SQL Server (тести на провайдері пам'яті). Зайнято - <see cref="JobDeferredException"/>.</summary>
+    private async Task<SqlDistributedLock?> AcquireGateAsync(int dataSourceId, int registryDefId, CancellationToken ct)
+    {
+        if (!db.Database.IsSqlServer() || db.Database.GetConnectionString() is not { } connectionString)
+        {
+            return null;
+        }
+
+        var resource = LockResource(dataSourceId, registryDefId);
+
+        return await SqlDistributedLock.TryAcquireAsync(connectionString, resource, ct).ConfigureAwait(false)
+               ?? throw new JobDeferredException(
+                   TimeSpan.FromSeconds(30), "Синк довідника вже виконується; відкладено на 30 с.", resource);
     }
 
     /// <summary>
