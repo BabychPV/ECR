@@ -32,6 +32,7 @@ public sealed class DocumentReadScope
     private readonly TemplateVersionSnapshot _snapshot;
     private readonly Dictionary<int, string> _sheetCodes = [];
     private readonly Dictionary<int, int> _sheetOfTable = [];
+    private readonly Dictionary<int, List<int>> _tablesOfSheet = [];
     private readonly Dictionary<int, int> _tableOfColumn = [];
     private readonly Dictionary<int, List<int>> _columnsOfTable = [];
     private readonly Dictionary<int, bool> _tables = [];
@@ -48,6 +49,7 @@ public sealed class DocumentReadScope
         foreach (var sheet in snapshot.Sheets)
         {
             _sheetCodes[sheet.Id] = sheet.Code;
+            _tablesOfSheet[sheet.Id] = [.. sheet.Tables.Select(t => t.Id)];
 
             foreach (var table in sheet.Tables)
             {
@@ -136,6 +138,30 @@ public sealed class DocumentReadScope
 
         _tables[tableDefId] = readable;
         return readable;
+    }
+
+    /// <summary>
+    /// Чи бачить профіль аркуш: перегляд, а не дані — версії, події й журнал, що називають
+    /// аркуш (його код, автора, час), показуються лише тому, хто його бачить (L1-18).
+    /// </summary>
+    /// <param name="sheetDefId">Аркуш версії шаблону.</param>
+    /// <remarks>
+    /// ⚠ Та сама семантика, що в таблиці: <c>Deny</c> на аркуш (чи проєкт) закриває аркуш; аркуш,
+    /// усі таблиці якого закриті (заборона на кожну або на всі їхні колонки), теж закритий — нічого
+    /// з його вмісту питальний не бачить. Аркуш без таблиць видимий, коли видимий сам.
+    /// Аркуш, невідомий знімку (версія з іншого шаблону), вирішується лише за власною забороною
+    /// (код невідомий — звужена ролі область його не відкриває).
+    /// </remarks>
+    public bool CanReadSheet(int sheetDefId)
+    {
+        if (!Readable(sheetDefId, tableDefId: 0, columnDefId: 0))
+        {
+            return false;
+        }
+
+        return !_tablesOfSheet.TryGetValue(sheetDefId, out var tables)
+               || tables.Count == 0
+               || tables.Exists(CanReadTable);
     }
 
     /// <summary>
