@@ -49,6 +49,22 @@ public sealed class UpdateSourceEventMapHandler(
             SourceEventMapSupport.RequireProjectManage(profile, document.ProjectId);
         }
 
+        // AN-40 / L9-06: пауза з кешованого рядка переліку — повна заміна; без звірки версії вона мовчки
+        // повертала поля, звуження й одиниці, які інший адміністратор щойно змінив. Та сама відмова, що й у
+        // прив'язки вікна рядка (UpdateRowWindowMapHandler).
+        if (command.RowVersion is { } expected
+            && !string.Equals(expected, Convert.ToHexString(map.RowVersion), StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ConcurrencyConflictException(
+                ErrorCodes.EntityFieldMapStateConflict,
+                $"Мапінг подій {id} змінили після того, як ви його прочитали.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-INT-0409.eventMapConcurrency",
+                    ["eventMapId"] = id.ToString(CultureInfo.InvariantCulture),
+                });
+        }
+
         SourceEventMapSupport.RequireShape(
             command.VolumeMode, command.FilterAttribute, command.FilterScope, command.FilterValue, command.Fields);
 
@@ -73,6 +89,8 @@ public sealed class UpdateSourceEventMapHandler(
         {
             map.Deactivate();
         }
+
+        store.MarkChanged(map);
 
         await uow.ExecuteInTransactionAsync(async innerCt =>
         {

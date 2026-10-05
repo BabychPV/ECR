@@ -57,6 +57,20 @@ public interface IUiStringCatalog
     public Task<IReadOnlyList<LanguageDto>> ListLanguagesAsync(CancellationToken ct);
 
     /// <summary>
+    /// Коди мов, у яких є хоч один власний рядок, що відрізняється від мови за замовчуванням (<c>R-16</c>);
+    /// <c>null</c> — невідомо.
+    /// </summary>
+    /// <remarks>
+    /// AN-40 / L9-13: перемикач мови вирішував це сам, тягнучи ПОВНИЙ приватний каталог кожної мови (~4000
+    /// ключів, ~1 МБ на перше відкриття меню). Тепер ту саму ознаку рахує база одним запитом.
+    ///
+    /// Типова реалізація — для тестових підробок без реєстру: «невідомо», і клієнт повертається до порівняння
+    /// каталогів.
+    /// </remarks>
+    public Task<IReadOnlySet<string>?> ListTranslatedLanguagesAsync(CancellationToken ct)
+        => Task.FromResult<IReadOnlySet<string>?>(null);
+
+    /// <summary>
     /// Код увімкненої мови реєстру, що відповідає <paramref name="languageCode"/>;
     /// невідома або вимкнена мова — мова за замовчуванням.
     /// </summary>
@@ -134,7 +148,19 @@ public sealed record UiStringRawRow(string Key, string Reference, string? Value)
 /// <param name="Code">Код мови, напр. <c>en</c>.</param>
 /// <param name="NameNative">Назва мови нею самою: «Русский», «Қазақша».</param>
 /// <param name="IsDefault">Чи це мова за замовчуванням; така рівно одна.</param>
-public sealed record LanguageDto(string Code, string NameNative, bool IsDefault);
+/// <param name="HasTranslations">
+/// Чи є в мові хоч один власний переклад (<c>R-16</c>, AN-40 / L9-13); <c>null</c> — сервер цього не рахував
+/// (анонімний <c>bootstrap</c>, підробки), і клієнт вирішує сам за каталогом.
+/// ⛔ <c>null</c> у JSON не пишеться: анонімний <c>GET /public/bootstrap</c> віддає рівно три поля мови
+/// (<c>PublicBootstrapTests</c>), і нове поле туди не просочується.
+/// </param>
+public sealed record LanguageDto(
+    string Code,
+    string NameNative,
+    bool IsDefault,
+    [property: System.Text.Json.Serialization.JsonIgnore(
+        Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    bool? HasTranslations = null);
 
 /// <param name="LanguageCode">Мова зрізу.</param>
 /// <param name="Revision">Версія каталогу; слугує <c>ETag</c>.</param>

@@ -6580,8 +6580,12 @@ USING (VALUES
     (N'err.ECR-DOC-4091.structureChanged',      N'en', N'The document was moved to another template version while your changes were being saved. Nothing was saved; reload the page and try again.', 1),
     (N'err.ECR-DOC-4091.structureChanging',     N'en', N'The document is being moved to another template version right now. Your changes were not saved; try again in a moment.', 1),
     (N'err.ECR-DOC-4091.documentBeingEdited',   N'en', N'The document is being edited right now. The template version was not changed; try again in a moment.', 1),
-    (N'err.ECR-DOC-4091.headerBeingEdited',     N'en', N'The document header is being saved right now. The sheet was not submitted; try again in a moment.', 1)
+    (N'err.ECR-DOC-4091.headerBeingEdited',     N'en', N'The document header is being saved right now. The sheet was not submitted; try again in a moment.', 1),
     -- COLL:an36 ── кінець секції ──
+    -- COLL:an40c ── AN-40 контрактний хвіст (L9-06 версія мапінгу подій, L9-27 шлях чужого каталогу); ru/kz — порцією COLL:an40c у блоці I18N нижче ──
+    (N'err.ECR-INT-0409.eventMapConcurrency',     N'en', N'Event mapping {eventMapId} was changed after you read it. Reload it and apply your changes again.', 1),
+    (N'err.ECR-REQ-0422.sourceEntityPathForeign', N'en', N'Path {path} does not belong to the catalog of connection {dataSource} (its AF database: {database}). Open this connection''s catalog and choose the entity again.', 1)
+    -- COLL:an40c ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -15513,6 +15517,18 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:an36 ── кінець секції ──
+-- COLL:an40c ── ru/kz AN-40 контрактного хвоста (L9-06, L9-27); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-INT-0409.eventMapConcurrency', N'ru', N'Сопоставление событий {eventMapId} изменили после того, как вы его прочитали. Перечитайте его и примените изменения заново.'),
+    (N'err.ECR-REQ-0422.sourceEntityPathForeign', N'ru', N'Путь {path} не относится к каталогу подключения {dataSource} (его база AF: {database}). Откройте каталог этого подключения и выберите сущность заново.'),
+    (N'err.ECR-INT-0409.eventMapConcurrency', N'kz', N'{eventMapId} оқиғалар сәйкестендіруін сіз оқығаннан кейін өзгерткен. Оны қайта оқып, өзгерістерді қайта қолданыңыз.'),
+    (N'err.ECR-REQ-0422.sourceEntityPathForeign', N'kz', N'{path} жолы {dataSource} қосылымының каталогына жатпайды (оның AF базасы: {database}). Осы қосылымның каталогын ашып, нысанды қайта таңдаңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:an40c ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

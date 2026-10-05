@@ -83,6 +83,38 @@ public sealed class UiStringCatalogStore(EcrDbContext db, IMemoryCache memory) :
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// Те саме правило, що клієнт застосовував до каталогів (<c>useTranslatedLanguages</c>): у мові є рядок, якого
+    /// немає мовою за замовчуванням, або текст якого відрізняється від неї. ⚠ Порівняння побайтове
+    /// (<c>Latin1_General_BIN2</c>): правка лише регістру — теж переклад, як і при порівнянні рядків у клієнті.
+    /// </remarks>
+    public async Task<IReadOnlySet<string>?> ListTranslatedLanguagesAsync(CancellationToken ct)
+    {
+        await using var connection = new SqlConnection(db.Database.GetConnectionString());
+        await connection.OpenAsync(ct).ConfigureAwait(false);
+
+        await using var command = connection.CreateCommand();
+        command.CommandText =
+            "SELECT l.Code FROM sys_ecr.Language l "
+            + "WHERE l.IsActive = 1 AND l.IsDefault = 0 AND EXISTS ("
+            + "SELECT 1 FROM sys_ecr.UiString s "
+            + "LEFT JOIN sys_ecr.UiString d ON d.[Key] = s.[Key] "
+            + "AND d.LanguageCode = (SELECT TOP (1) Code FROM sys_ecr.Language WHERE IsDefault = 1) "
+            + "WHERE s.LanguageCode = l.Code "
+            + "AND (d.[Key] IS NULL OR s.Value COLLATE Latin1_General_BIN2 <> d.Value COLLATE Latin1_General_BIN2));";
+
+        var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            result.Add(reader.GetString(0));
+        }
+
+        return result;
+    }
+
+    /// <inheritdoc />
     public async Task<string> ResolveLanguageAsync(string languageCode, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(languageCode))

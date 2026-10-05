@@ -88,6 +88,16 @@ public interface ISourceEventMapStore
     /// </remarks>
     public void ReleaseFields(SourceEventMap map);
 
+    /// <summary>
+    /// Позначає сам мапінг зміненим, щоб наступний <see cref="SaveAsync"/> підняв його <c>RowVersion</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ AN-40 / L9-06: правка лише полів чи відповідностей (дочірні таблиці) рядок <c>ext.SourceEventMap</c> не
+    /// змінює, тож без цієї позначки версія лишалася б старою — і друга правка з тим самим <c>rowVersion</c> пройшла
+    /// б перевірку, затерши першу.
+    /// </remarks>
+    public void MarkChanged(SourceEventMap map);
+
     /// <summary>Видаляє мапінг разом з полями й відповідностями значень.</summary>
     public Task RemoveMapAsync(SourceEventMap map, CancellationToken ct);
 

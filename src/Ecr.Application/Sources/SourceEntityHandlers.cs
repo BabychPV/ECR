@@ -27,6 +27,15 @@ namespace Ecr.Application.Sources;
 /// (<c>GET /data-sources/{id}/catalog</c>); повторне звернення до чужої
 /// системи зробило б заведення конфігурації залежним від того, чи відповідає
 /// PI саме зараз, — а збір за неіснуючим кодом і так видно в журналі покриття.
+///
+/// ✎ AN-40 / L9-27: виняток — КОРІНЬ каталогу, і лише для шляхів AF
+/// (<c>\\сервер\база\…</c>). Шухляда одного з'єднання, перевикористана для
+/// іншого, слала шлях каталогу A з <c>dataSourceId</c> B, і сервер це приймав:
+/// сутність B збирала б дані бази A. Тому, коли корінь каталогу з'єднання
+/// читається, шлях мусить лежати в одній із його баз AF — інакше
+/// <c>422 sourceEntityPathForeign</c>. Корінь не прочитався (джерело лежить,
+/// межа очікування, не AF) — перевірка пропускається, і заведення не залежить
+/// від доступності PI, як і раніше.
 /// </remarks>
 public sealed class CreateSourceEntityHandler(
     ICollectionStore sources,
@@ -35,7 +44,9 @@ public sealed class CreateSourceEntityHandler(
     ICurrentUser currentUser,
     IUnitOfWork uow,
     IAuditWriter audit,
-    IClock clock)
+    IClock clock,
+    ISourceCatalogReader catalog,
+    SourceCatalogPolicy catalogPolicy)
 {
     /// <summary>Право на керування інтеграцією (`02-contracts.md` §9).</summary>
     public const string Permission = "Integration.Manage";
@@ -101,8 +112,11 @@ public sealed class CreateSourceEntityHandler(
                 });
         }
 
+        var path = Blank(command.EntityPath);
+        await RequirePathOfSourceAsync(dataSource, path, ct).ConfigureAwait(false);
+
         var entity = new SourceEntity(dataSource.Id, code, kind);
-        entity.Describe(Blank(command.DisplayName), Blank(command.EntityPath));
+        entity.Describe(Blank(command.DisplayName), path);
 
         // ФВ-12.10: заведення сутності збору лишає слід у журналі структурних змін (в одній транзакції).
         SourceEntity? created = null;
@@ -121,6 +135,75 @@ public sealed class CreateSourceEntityHandler(
     }
 
     private static string? Blank(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    /// <summary>
+    /// База AF шляху — <c>\\сервер\база</c>; <c>null</c> — шлях не AF (SQL-джерело, відносний шлях) або коротший
+    /// за «сервер\база\елемент».
+    /// </summary>
+    /// <param name="path">Шлях з каталогу.</param>
+    public static string? AfDatabaseOf(string? path)
+    {
+        if (path is null || !path.StartsWith(@"\\", StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        var parts = path[2..].Split('\\');
+
+        return parts.Length < 3 || parts[0].Length == 0 || parts[1].Length == 0 || parts[2].Length == 0
+            ? null
+            : $@"\\{parts[0]}\{parts[1]}";
+    }
+
+    /// <summary>
+    /// Шлях AF має лежати в базі, яку віддає корінь каталогу з'єднання (L9-27); коли корінь не прочитано —
+    /// без перевірки.
+    /// </summary>
+    private async Task RequirePathOfSourceAsync(DataSource dataSource, string? path, CancellationToken ct)
+    {
+        var database = AfDatabaseOf(path);
+        if (database is null)
+        {
+            return;
+        }
+
+        HashSet<string> known;
+        using (var bounded = CancellationTokenSource.CreateLinkedTokenSource(ct))
+        {
+            bounded.CancelAfter(catalogPolicy.Timeout);
+
+            try
+            {
+                var roots = await catalog.BrowseAsync(dataSource.Id, null, bounded.Token).ConfigureAwait(false);
+                known = new HashSet<string>(
+                    roots.Select(r => AfDatabaseOf(r.EntityPath)).OfType<string>(),
+                    StringComparer.OrdinalIgnoreCase);
+            }
+
+            // ⚠ Будь-яка відмова читання — «не знаємо», а не «чуже»: заведення конфігурації не залежить від того,
+            // чи відповідає PI саме зараз (див. remarks класу). Скасування самого запиту — не ковтається.
+            catch (Exception e) when (e is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                return;
+            }
+        }
+
+        if (known.Count == 0 || known.Contains(database))
+        {
+            return;
+        }
+
+        throw new BusinessRuleException(
+            ErrorCodes.RequestInvalid,
+            $"Шлях «{path}» не належить каталогу з'єднання «{dataSource.Code}»: його база AF — {string.Join(", ", known.Order(StringComparer.OrdinalIgnoreCase))}.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-REQ-0422.sourceEntityPathForeign",
+                ["path"] = path,
+                ["dataSource"] = dataSource.Code,
+                ["database"] = string.Join(", ", known.Order(StringComparer.OrdinalIgnoreCase)),
+            });
+    }
 }
 
 /// <summary>
