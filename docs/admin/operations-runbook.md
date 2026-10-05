@@ -550,6 +550,12 @@ BACKUP LOG      [Ecr] TO DISK = N'<шлях>\Ecr_log.trn'  WITH CHECKSUM, COMPRE
 `arc.usp_ArchiveYear @ProjectId, @FromPeriodKey, @ToPeriodKey, @BatchSize = 500000`
 (`03-archive-proc.sql`) переносить дані з `DATA_HOT` в `DATA_ARCHIVE`.
 
+**Права.** `usp_ArchiveYear`, `usp_RestoreYear` і `usp_RestoreArchiveConstraints` —
+`WITH EXECUTE AS OWNER` (аудит L10-08): зняття й повернення ключів і
+`TRUNCATE … WITH (PARTITIONS)` ідуть від імені власника, викликачу потрібне лише
+`EXECUTE` на процедуру. Перевірено тестом під користувачем без логіна з єдиним
+правом `EXECUTE` (`ArchiveLeastPrivilegeTests`).
+
 | Помилка | Значення |
 |---|---|
 | 50012 | у діапазоні є періоди проєктів, які ще не архівовано (`Status <> 4`) |
@@ -1634,7 +1640,7 @@ powershell -File tools\setup-dev-db.ps1 -Server localhost -Database EcrDev -View
 
 ⚠ Через DENY на стовпці члени `ecr_viewer` отримають відмову на `SELECT * FROM sec.[User]` — перелічуйте стовпці явно (без `PasswordHash`, `SecurityStamp`; висновок із семантики column-DENY SQL Server, тестом не перевірено). Зашифровані секрети каналів сповіщень і пароль SMTP роль читає лише як шифротекст: ключі Data Protection їй закриті.
 
-**Права облікового запису служби** в базі скрипти **не** видають — це робить DBA (`deploy-ecr.ps1` виконує DDL під обліковим записом DBA, не під `-ServiceAccount`; у службі DDL немає, `D-66`). За кодом потрібні: `SELECT/INSERT/UPDATE/DELETE` на таблицях (сід виконується на кожному старті), `UPDATE` на послідовностях, `EXECUTE` на TVP-типах `doc.CellValueTvp`, `aud.CellChangeTvp` і на `arc.usp_ArchiveYear`, `arc.usp_EnsureAuditPartitions`, `arc.usp_ArchiveAudit` (п. 7.3–7.4). Чи досить `db_datareader` + `db_datawriter` + `EXECUTE`, не перевірено (відкрите питання DBA, `DB-1`).
+**Права облікового запису служби** в базі скрипти **не** видають — це робить DBA (`deploy-ecr.ps1` виконує DDL під обліковим записом DBA, не під `-ServiceAccount`; у службі DDL немає, `D-66`). За кодом потрібні: `SELECT/INSERT/UPDATE/DELETE` на таблицях (сід виконується на кожному старті), `UPDATE` на послідовностях, `EXECUTE` на TVP-типах `doc.CellValueTvp`, `aud.CellChangeTvp` і на `arc.usp_ArchiveYear`, `arc.usp_EnsureAuditPartitions`, `arc.usp_ArchiveAudit` (п. 7, 7.3–7.4; усі три — `WITH EXECUTE AS OWNER`, DDL-прав служба не потребує). Чи досить `db_datareader` + `db_datawriter` + `EXECUTE`, не перевірено (відкрите питання DBA, `DB-1`).
 
 Перевірка:
 

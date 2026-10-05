@@ -10,8 +10,15 @@ SET QUOTED_IDENTIFIER ON;
 GO
 
 -- src/Ecr.Infrastructure/Persistence/Sql/03-archive-proc.sql
--- Виконується SQL Agent під окремим principal: у застосунку немає ані DDL-прав,
--- ані права запису в arc.* (D-66, B01 §6.4).
+-- У застосунку немає ані DDL-прав, ані права запису в arc.* (D-66, B01 §6.4).
+--
+-- ⚠ Тому всі три процедури — `WITH EXECUTE AS OWNER` (той самий механізм D-66,
+-- що в 04/05; аудит L10-08). Викликачу (`ArchiveJob` під обліковим записом
+-- служби, DBA вручну) потрібне лише `EXECUTE`. Без цього `ALTER TABLE … DROP
+-- CONSTRAINT` і динамічний `TRUNCATE … WITH (PARTITIONS)` перевіряються на
+-- праві `ALTER` САМОГО викликача: ланцюжок власності DDL і динамічний SQL не
+-- покриває, і архівація під службою падала б відмовою в правах
+-- (тест `ArchiveLeastPrivilegeTests`).
 -- РУЧНИЙ ІНСТРУМЕНТ DBA. Штатний шлях його НЕ ПОТРЕБУЄ (`D-117`).
 --
 -- ⛔ Зі штатного шляху процедуру прибрано. Зняття і повернення ключів тепер
@@ -26,6 +33,7 @@ GO
 -- ⚠ WITH CHECK, а не NOCHECK: недовірене обмеження оптимізатор ігнорує, і
 -- «ключ є» перетворилося б на «ключ намальовано».
 CREATE OR ALTER PROCEDURE arc.usp_RestoreArchiveConstraints
+WITH EXECUTE AS OWNER
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -47,6 +55,7 @@ CREATE OR ALTER PROCEDURE arc.usp_ArchiveYear
     @FromPeriodKey int,
     @ToPeriodKey   int,
     @BatchSize     int = 500000
+WITH EXECUTE AS OWNER
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -455,6 +464,7 @@ CREATE OR ALTER PROCEDURE arc.usp_RestoreYear
     @ProjectId     int,
     @FromPeriodKey int,
     @ToPeriodKey   int
+WITH EXECUTE AS OWNER
 AS
 BEGIN
     SET NOCOUNT ON;

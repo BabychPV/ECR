@@ -82,7 +82,7 @@ PI AF система лише **читає** (запису в AF немає, `D-
 | RCSI | `READ_COMMITTED_SNAPSHOT` обов'язковий (`D-29`); вмикає `06-rcsi.sql` у складі розгортання. Без RCSI перевірка `db` — `Unhealthy` |
 | Collation бази | `Latin1_General_100_CI_AS_SC`; з `-CreateDatabaseIfMissing` скрипт створює базу сам |
 | Права виконавця розгортання | облікові дані того, хто запускає `deploy-ecr.ps1`/майстер (`-SqlLogin` або інтегровані) — потрібне право `CREATE DATABASE` (для створення бази) і виконання DDL. Сам `-ServiceAccount` у DDL-кроці **не бере участі** (`D-66`) |
-| Права облікового запису служби на базу | У репозиторії немає жодного `GRANT`/`CREATE USER`/`db_datareader`; вимога лише негативна: **без DDL** (`D-66`, `Schema:StartupMode=Validate`). Мінімум **за кодом** (не задекларований, **не перевірений на замкненому логіні**): `SELECT/INSERT/UPDATE/DELETE` на таблицях (застосунок сам виконує `09-seed.sql` на кожному старті); `UPDATE` на послідовностях (`NEXT VALUE FOR`, `sp_sequence_get_range`); `EXECUTE` на TVP-типах `doc.CellValueTvp`, `aud.CellChangeTvp`; `EXECUTE` на `arc.usp_ArchiveYear` (`TRUNCATE … PARTITIONS` — права для неї не визначені); `sp_getapplock` (доступний `public`); читання `sys.filegroups` і `partition_*`. `db_owner` за кодом не потрібен. **Чи вистачить `db_datareader` + `db_datawriter` + `EXECUTE` — не встановлено: питання DBA.** Порада: `DENY` на `sec.DataProtectionKey` усім, крім облікового запису служби (`DatabaseHealthCheck.cs:37`). Якщо на стенді служба падає з `permission denied`, це дефект **документації**, а не обов'язково продукту — запишіть точну відмову й об'єкт |
+| Права облікового запису служби на базу | У репозиторії немає жодного `GRANT`/`CREATE USER`/`db_datareader`; вимога лише негативна: **без DDL** (`D-66`, `Schema:StartupMode=Validate`). Мінімум **за кодом** (не задекларований, **не перевірений на замкненому логіні**): `SELECT/INSERT/UPDATE/DELETE` на таблицях (застосунок сам виконує `09-seed.sql` на кожному старті); `UPDATE` на послідовностях (`NEXT VALUE FOR`, `sp_sequence_get_range`); `EXECUTE` на TVP-типах `doc.CellValueTvp`, `aud.CellChangeTvp`; `EXECUTE` на `arc.usp_ArchiveYear` (процедура `WITH EXECUTE AS OWNER`: `TRUNCATE … PARTITIONS` і ключі — від імені власника, викликачу досить `EXECUTE`, аудит L10-08); `sp_getapplock` (доступний `public`); читання `sys.filegroups` і `partition_*`. `db_owner` за кодом не потрібен. **Чи вистачить `db_datareader` + `db_datawriter` + `EXECUTE` — не встановлено: питання DBA.** Порада: `DENY` на `sec.DataProtectionKey` усім, крім облікового запису служби (`DatabaseHealthCheck.cs:37`). Якщо на стенді служба падає з `permission denied`, це дефект **документації**, а не обов'язково продукту — запишіть точну відмову й об'єкт |
 | Інстанс | для іменованого екземпляра — `<Сервер>\<Екземпляр>`, не голий `localhost` |
 | Без Docker | не потрібен ні для інсталяції, ні для роботи |
 
@@ -1278,8 +1278,9 @@ D2, `D-226…D-239`). Раніше: Negotiate, одиниці в методол�
 - **Права облікового запису служби на БД не задекларовані й не перевірені на
   замкненому логіні** (п. 2.2). Питання до DBA: чи вистачить
   `db_datareader` + `db_datawriter` + `EXECUTE`. `arc.usp_ArchiveYear`
-  (`TRUNCATE … PARTITIONS`) права не визначені; відповідь замовника відсутня,
-  нічний розклад архівації не вмикався.
+  тепер `WITH EXECUTE AS OWNER` (аудит L10-08): викликачу досить `EXECUTE`
+  (перевірено тестом на користувачі без логіна); нічний розклад архівації не
+  вмикався.
 - Підпис `Ecr.msi` — окремий крок (`sign-msi.ps1`, потрібен сертифікат), у
   збірку не входить: **[перевірити: чи підписані артефакти, які видають]**;
   непідписаний файл дасть попередження Windows SmartScreen/UAC. Питання оплати
