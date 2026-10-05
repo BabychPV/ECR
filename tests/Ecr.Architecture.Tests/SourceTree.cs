@@ -81,8 +81,11 @@ internal static partial class SourceTree
                 inBlockComment = false;
             }
 
+            // ⚠ `/*` усередині рядкового коментаря (`// Caching/**`, `/// Persistence/*Store.cs`) — не
+            // початок блоку: інакше решта файла до першого `*/` зникала б для всіх сторожів.
+            var lineComment = line.IndexOf("//", StringComparison.Ordinal);
             var blockStart = line.IndexOf("/*", StringComparison.Ordinal);
-            if (blockStart >= 0)
+            if (blockStart >= 0 && (lineComment < 0 || blockStart < lineComment))
             {
                 inBlockComment = !line[blockStart..].Contains("*/", StringComparison.Ordinal);
                 line = line[..blockStart];
