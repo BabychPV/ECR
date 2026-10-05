@@ -209,6 +209,19 @@ const devRoutes = import.meta.env.DEV
           </Chunk>
         ),
       },
+      {
+        // ⚠ Те саме у справжньому `DocumentGrid` із сервером у браузері (T5-01).
+        path: '/_key-commit-gate/document',
+        element: (
+          <Chunk>
+            {createElement(
+              lazy(async () => ({
+                default: (await import('@/pages/DocumentGridGateStandPage')).DocumentGridGateStandPage,
+              })),
+            )}
+          </Chunk>
+        ),
+      },
     ]
   : [];
 

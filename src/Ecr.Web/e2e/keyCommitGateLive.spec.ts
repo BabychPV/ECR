@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type CDPSession, type Page } from '@playwright/test';
 
 /**
  * Гейт для класу дефектів T3-01 → T4-01 (швидкий ввід склеює значення або
@@ -87,4 +87,101 @@ test.describe('Швидкий ввід у справжньому RevoGrid (T3-01
 
     expect(broken.length, 'без черги дефект не відтворюється — стенд не відтворює умов RevoGrid').toBeGreaterThan(0);
   });
+});
+
+/*
+ * ⛔ T5-01 (прохід 5, main c4d64f41): на 50–80 мс значення все ще лягало в чужий
+ * рядок або губилось (≈4 %), а гейт вище був зелений (16/16, 320/320). Голий
+ * RevoGrid цього не відтворює: збій вимагає ПОВІЛЬНОГО переходу - перерендеру
+ * `DocumentGrid` після фіксації на навантаженій машині. Звідси дві умови цього
+ * блоку: справжній `DocumentGrid` (`/_key-commit-gate/document`, сервер у
+ * браузері) і CPU ×4 через CDP. Без них та сама сітка інтервалів була чиста:
+ * 0 з 400 без навантаження; під ×4 до фіксу - 3 з 200.
+ *
+ * ⚠ Збій імовірнісний (~1.5 % прогону до фіксу), тож прогонів багато: 7 інтервалів
+ * × `DocRepeats` × дві послідовності. Мірило подвійне: значення в DOM і тіла PATCH.
+ */
+const DocStand = '/_key-commit-gate/document';
+const DocIntervalsMs = [50, 55, 60, 65, 70, 75, 80];
+const DocRepeats = Number(process.env['ECR_GATE_REPEATS'] ?? '6');
+const CpuSlowdown = 4;
+
+const Sequences = {
+  /** Сканер: Enter відкриває, значення, Enter фіксує. */
+  A: { keys: ['1', '2', '3'].flatMap((value) => ['Enter', value, 'Enter']), expected: ['1', '2', '3'] },
+  /** Друк одразу в комірку (символ відкриває редактор), Enter фіксує. */
+  B: { keys: ['5', '7', '9'].flatMap((value) => [value, 'Enter']), expected: ['5', '7', '9'] },
+} as const;
+
+async function openDocumentStand(page: Page): Promise<void> {
+  await page.goto(DocStand);
+  const firstQty = page.locator('revo-grid revogr-data[type="rgRow"] .rgCell[data-rgcol="1"][data-rgrow="0"]');
+  await expect(firstQty).toBeVisible({ timeout: 30_000 });
+  await firstQty.click();
+  // Як у тестувальника: пауза після кліку, далі - послідовність без пауз людини.
+  await page.waitForTimeout(400);
+}
+
+/** QTY у R1..R5 з DOM і рядки, що пішли в PATCH (`rowKey=значення`). */
+async function documentState(page: Page): Promise<{ shown: string[]; patched: string[] }> {
+  // ⚠ Автозбереження - через 500 мс тиші після останньої правки, плюс затримка стенда.
+  await page.waitForTimeout(1_300);
+
+  return page.evaluate(() => {
+    const shown = Array.from({ length: 5 }, (_, row) => {
+      const cell = document.querySelector(
+        `revo-grid revogr-data[type="rgRow"] .rgCell[data-rgcol="1"][data-rgrow="${String(row)}"]`,
+      );
+
+      return cell?.textContent?.trim() ?? '?';
+    });
+    const patches = (window as unknown as { __standPatches?: { rowKey: string; cells: { value: unknown }[] }[] })
+      .__standPatches;
+    const patched = (patches ?? []).map((row) => `${row.rowKey}=${row.cells.map((cell) => String(cell.value)).join(',')}`);
+
+    return { shown, patched };
+  });
+}
+
+test.describe('Швидкий ввід у справжньому DocumentGrid під навантаженням CPU (T5-01)', () => {
+  // ⚠ 7 × DocRepeats × ~5 с на CPU ×4 - бюджет тесту з запасом.
+  test.setTimeout(DocRepeats * 60_000);
+
+  let cdp: CDPSession | null = null;
+
+  test.beforeEach(async ({ page }) => {
+    cdp = await page.context().newCDPSession(page);
+    await cdp.send('Emulation.setCPUThrottlingRate', { rate: CpuSlowdown });
+  });
+
+  test.afterEach(async () => {
+    await cdp?.send('Emulation.setCPUThrottlingRate', { rate: 1 });
+    cdp = null;
+  });
+
+  for (const [name, sequence] of Object.entries(Sequences)) {
+    test(`послідовність ${name}, 50–80 мс: кожне значення у своєму рядку і в PATCH`, async ({ page }) => {
+      const failures: string[] = [];
+      const expectedPatched = sequence.expected.map((value, row) => `R${String(row + 1)}=${value}`);
+
+      for (const intervalMs of DocIntervalsMs) {
+        for (let attempt = 1; attempt <= DocRepeats; attempt += 1) {
+          await openDocumentStand(page);
+          for (const key of sequence.keys) {
+            await page.keyboard.press(key);
+            await page.waitForTimeout(intervalMs);
+          }
+
+          const { shown, patched } = await documentState(page);
+          const shownOk = JSON.stringify(shown) === JSON.stringify([...sequence.expected, '', '']);
+          const patchedOk = JSON.stringify([...patched].sort()) === JSON.stringify(expectedPatched);
+          if (!shownOk || !patchedOk) {
+            failures.push(`${String(intervalMs)} мс #${String(attempt)}: DOM ${shown.join('|')}, PATCH ${patched.join(' ')}`);
+          }
+        }
+      }
+
+      expect(failures, `збої з ${String(DocIntervalsMs.length * DocRepeats)} прогонів`).toEqual([]);
+    });
+  }
 });
