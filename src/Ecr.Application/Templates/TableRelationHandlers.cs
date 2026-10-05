@@ -129,6 +129,7 @@ public sealed class SaveTableRelationHandler(
     IRepository<TableRelationDef, int> relations,
     ITemplateVersionStore store,
     ChangeClassifier classifier,
+    IMetadataCache metadataCache,
     IAuditWriter audit,
     IUnitOfWork uow,
     IClock clock,
@@ -247,6 +248,11 @@ public sealed class SaveTableRelationHandler(
 
             await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
         }, ct).ConfigureAwait(false);
+
+        // ⛔ T6-01: кеш метаданих ключується PresentationRevision, а правка зв'язку його не піднімає, тож без явної
+        // інвалідації прогрітий знімок тримав старий HasActiveRollupOrCheck (до 30 хв): Validate бачив Check і
+        // показував Error, а Submit не запускав перевірку й віддавав 204 (Block не блокував).
+        await metadataCache.InvalidateAsync(templateVersionId, ct).ConfigureAwait(false);
 
         // ⚠ `existing` завжди присвоєно всередині щойно завершеного замикання
         // — той самий довід, що в `SaveColumnDefHandler`.
@@ -399,6 +405,7 @@ public sealed class DeleteTableRelationHandler(
     IRepository<TableRelationDef, int> relations,
     ITemplateVersionStore store,
     ChangeClassifier classifier,
+    IMetadataCache metadataCache,
     IAuditWriter audit,
     IUnitOfWork uow,
     IClock clock,
@@ -471,5 +478,10 @@ public sealed class DeleteTableRelationHandler(
 
             await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
         }, ct).ConfigureAwait(false);
+
+        // ⛔ T6-01: кеш метаданих ключується PresentationRevision, а правка зв'язку його не піднімає, тож без явної
+        // інвалідації прогрітий знімок тримав старий HasActiveRollupOrCheck (до 30 хв): Validate бачив Check і
+        // показував Error, а Submit не запускав перевірку й віддавав 204 (Block не блокував).
+        await metadataCache.InvalidateAsync(templateVersionId, ct).ConfigureAwait(false);
     }
 }
