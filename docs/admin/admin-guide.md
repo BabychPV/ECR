@@ -23,7 +23,7 @@
 | `SystemAdministrator` | усі права (`%`), **крім небезпечних** |
 | `TemplateAdministrator` | `Template.*`, `Registry.View`, `Calculation.View`, `Document.View`, `System.ViewHealth` |
 | `PeriodAdministrator` | `Period.*` (крім небезпечного `Period.Reopen`), `Project.Manage`, `Document.View`, `System.ViewHealth` |
-| `DataEntry` | `Document.View/Create/Import/Export`, `Template.View`, `Registry.View`, `Calculation.View`, `Report.Export` |
+| `DataEntry` | `Document.View/Create/Import/Export/Submit`, `Template.View`, `Registry.View`, `Calculation.View`, `Report.Export` |
 | `Approver` | `Document.View/Export/Reopen`, `Registry.View`, `Calculation.View`, `Report.*` без небезпечних (`ViewRegulatory`, `ViewSnapshot`, `BuildSnapshot`, `Export`) і окремим рядком — небезпечне `Report.EditDefinition` (`D-203`) |
 | `Viewer` | `Document.View`, `Registry.View`, `Calculation.View`, `Report.ViewRegulatory`, `Report.Export` |
 | `Auditor` | `Document.View`, `Registry.View`, `Calculation.View`, `Template.View`, `Integration.View`, `Report.ViewRegulatory`, `Report.ViewSnapshot` (без `Report.Export`), `Security.ViewAudit`, `System.ViewHealth` |
@@ -35,6 +35,16 @@
 `Security.ManageRoles`) і `Approver` (`Report.EditDefinition`, `D-203`). Решту небезпечних
 прав адміністратор дає, **створюючи роль** із ними (п. 2.3); у журналі безпеки — подія
 `DangerousPermissionsGranted`.
+
+⚠ **BREAKING для адміністраторів (`D-285`, 2026-10-05).** Рівень гранта `Write` САМ
+подання аркуша не дає (як і раніше), але тепер його складає право `Document.Submit`:
+`Write` + `Document.Submit` = подання, відкликання автором і активна кнопка «Submit».
+Вбудована `DataEntry` і `SystemAdministrator` отримують право на наступному старті
+застосунку (сід, секція `SEC:SUBMIT`). **Власні ролі** з `Write`, носії яких мають
+подавати, права не отримують — видайте його ролі (`/admin/security`) або підніміть
+рівень до `Submit`. Інтерфейс бачить лише глобальні права профілю: для ролі, обмеженої
+областю проєкту, кнопка «Submit» лишається сірою з поясненням, хоча сервер подання
+дозволить.
 
 ### 1.2. Каталог прав
 
@@ -54,6 +64,7 @@
 | `Document.Delete` | | видалення документа | SysAdm |
 | `Document.Import` / `Document.Export` | | імпорт / експорт Excel | DataEntry (обидва), Approver (Export), SysAdm |
 | `Document.Reopen` | | повторне відкриття поданого | Approver, SysAdm |
+| `Document.Submit` | | подання (і відкликання автором) аркуша на погодження для рівня гранта `Write` (`D-285`, варіант B′): подати можна з рівнем `Submit` і вище АБО з рівнем `Write` разом із цим правом; сам `Write` подання не дає, а право без рівня `Write` нічого не підіймає. Проєктне; **не** звужується областю аркуша/періоду. Заборона (`IsDeny`) на проєкт/аркуш/таблицю/колонку перемагає | DataEntry, SysAdm |
 | `Document.ChangeKey` | так | зміна бізнес-ключа (номера справи) документа | — |
 | `Project.Manage` | | проєкти | PeriodAdm, SysAdm |
 | `Period.Configure` | | календар періодів, `/admin/periods` | PeriodAdm, SysAdm |
