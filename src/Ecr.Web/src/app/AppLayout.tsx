@@ -29,9 +29,9 @@ import { Breadcrumbs, isRouteHandle } from './Breadcrumbs';
 import { NavbarCollapseToggle } from './NavbarCollapseToggle';
 import { NavRouteLink } from './NavRouteLink';
 import { NotFoundPage } from './NotFoundPage';
-import { canAccessRoute } from './routeAccess';
 import { NavGroupSection } from './NavGroupSection';
-import { navGroups, routes, type RouteHandle } from './routes';
+import { routes, type RouteHandle } from './routes';
+import { visibleNavGroups } from './visibleNavGroups';
 import { routeTransitionClassName } from './motionTokens';
 import { useRouteTransitionFocus } from './useRouteTransitionFocus';
 import { usePreferenceSync } from '@/features/preferences/usePreferenceSync';
@@ -358,11 +358,7 @@ export function AppLayout(): JSX.Element {
   }
 
   // T1-15 (б): пунктів меню під примусовою зміною пароля немає зовсім.
-  const visibleNavGroups = me.mustChangePassword
-    ? []
-    : navGroups
-        .map((group) => ({ ...group, items: group.routes.filter((route) => canAccessRoute(me, route.handle)) }))
-        .filter((group) => group.items.length > 0);
+  const navGroupsForMe = visibleNavGroups(me);
 
   return (
     <>
@@ -490,8 +486,9 @@ export function AppLayout(): JSX.Element {
                   виходом. */}
               {!me.mustChangePassword && (
                 <>
-                  {/* Пошук даних (BE-19): у статичному бандлі — лише кнопка й Ctrl+K. */}
-                  <SearchLauncher />
+                  {/* Командна палітра (UI-30) і пошук даних (BE-19): у статичному бандлі —
+                      лише кнопка й Ctrl+K. Екрани — ті самі групи, що й меню. */}
+                  <SearchLauncher groups={navGroupsForMe} />
 
                   {/* ⛔ «My tasks» (UI-07, UX-09) — БЕЗ перевірки права, навмисно:
                       директива №15, бекенд §BE-08 — «шухляда «My tasks» у шапці
@@ -514,7 +511,7 @@ export function AppLayout(): JSX.Element {
                 згорнута панель лишала б їх у дереві й у порядку Tab. */}
             {/* UI-12: пункти — групами Work · Configure · Access · Operate (`navGroups`,
                 макет); група без жодного дозволеного пункту не малюється. */}
-            {visibleNavGroups.map((group, index) => (
+            {navGroupsForMe.map((group, index) => (
               <NavGroupSection key={group.id} group={group} first={index === 0} collapsed={iconsOnly}>
                 {group.items.map((route) => (
                   // Фільтр ховає пункти навігації, на які немає права: нема
