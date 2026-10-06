@@ -1,5 +1,5 @@
-import { lazy, Suspense, useEffect, useState, type JSX } from 'react';
-import { Button, Code, Group, Skeleton, Stack, Table, Text } from '@mantine/core';
+import { lazy, Suspense, useEffect, useRef, useState, type JSX } from 'react';
+import { ActionIcon, Badge, Box, Button, Code, Group, Skeleton, Table, Text, VisuallyHidden } from '@mantine/core';
 import { useQueries, useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { apiFetch } from '@/api/client';
@@ -8,15 +8,19 @@ import { listDocuments, type DocumentListPage } from '@/features/documents/api';
 import { DocumentListFilterBar } from '@/features/documents/DocumentListFilterBar';
 import { DocumentListSummaryStrip } from '@/features/documents/DocumentListSummaryStrip';
 import { useDocumentListFilters } from '@/features/documents/documentListFilters';
+import { documentState, hasSheetStates, sheetLabels } from '@/features/documents/documentSheets';
 import { LateEditsMark } from '@/features/documents/LateEditsMark';
 import { newestOpenPeriodKey } from '@/features/documents/newDocumentPeriod';
 import { formatNumber } from '@/shared/format';
 import { can, useSession } from '@/shared/session/useSession';
-import { localized, type LocalizedText } from '@/shared/i18n/localized';
+import { localized } from '@/shared/i18n/localized';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
+import { useDetailPanel } from '@/shared/ui/DetailDrawer';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
+import { FilterInline } from '@/shared/ui/FilterBar';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { PeriodPicker } from '@/shared/ui/PeriodPicker';
+import { SegmentBar } from '@/shared/ui/SegmentBar';
 import { StatusBadge } from '@/shared/ui/StatusBadge';
 import { Timestamp } from '@/shared/ui/Timestamp';
 import { useUrlNumber, useUrlParamsSetter, useUrlState } from '@/shared/ui/useUrlState';
@@ -39,6 +43,14 @@ const CreateDocumentModal = lazy(async () => ({
 }));
 
 /** A3-02: скільки проєктів максимум опитуємо заради типового періоду; більше — вибір лишається людині. */
+/**
+ * Швидкий перегляд документа (`UI-29`) — за `import()`: шторку відкривають
+ * рідко, а бюджет маршруту (`D-132`) не має рости заради неї.
+ */
+const DocumentQuickLook = lazy(async () => ({
+  default: (await import('@/features/documents/DocumentQuickLook')).DocumentQuickLook,
+}));
+
 const AUTO_PICK_MAX_PROJECTS = 10;
 
 /**
@@ -63,6 +75,18 @@ export function DocumentsPage(): JSX.Element {
   // що й до лінивого чанка, коли компонент був змонтований одразу).
   const [creatingRequested, setCreatingRequested] = useState(false);
   const session = useSession();
+  const [panel, setPanel] = useDetailPanel();
+
+  /*
+   * ⚠ Шторка, раз відкрита, лишається змонтованою з останнім `?panel=`, а
+   * «око»-відкривач запам'ятовується явно. Причина виміряна в Chromium:
+   * лінива шторка монтується ВЖЕ відкритою, і `returnFocus` Mantine (він
+   * ловить відкривач лише на ПЕРЕХОДІ `opened`) після Esc кидав фокус на
+   * `body`. Вміст шторки й запити однаково живуть лише відкритої.
+   */
+  const quickLookOpener = useRef<HTMLButtonElement | null>(null);
+  const [quickLookId, setQuickLookId] = useState<string | null>(panel);
+  if (panel !== null && panel !== quickLookId) setQuickLookId(panel);
 
   // `BE-09b`: стан і «мої» — теж в адресі; без періоду стан у запит не йде.
   const filters = useDocumentListFilters(periodKey);
@@ -267,6 +291,17 @@ export function DocumentsPage(): JSX.Element {
           порожній результат — ховав би кнопку, якою фільтр і знімають.
           ⚠ І в ТОМУ САМОМУ ряду, що й фільтри (рішення людини 2026-10-06). */}
       <DocumentListFilterBar periodKey={periodKey} filters={filters}>
+        {/* ✎ `UI-18` (макет `FilterBar`, KIT §3): «Clear filters» з'являється
+            сама, щойно є активний фільтр, і скидає все ОДНИМ переходом
+            (`filters.reset` — один `setSearchParams`). Без фільтрів кнопки
+            немає зовсім — не вимкнена, а відсутня. */}
+        {filters.active && (
+          <FilterInline>
+            <Button variant="subtle" onClick={filters.reset} data-clear-filters="">
+              {t('documents.clearFilters')}
+            </Button>
+          </FilterInline>
+        )}
         <DocumentListSummaryStrip periodKey={periodKey} filters={filters} />
       </DocumentListFilterBar>
 
@@ -311,133 +346,130 @@ export function DocumentsPage(): JSX.Element {
               <ErrorAlert error={projects.error} onRetry={() => void projects.refetch()} />
             )}
 
-            <Table striped highlightOnHover className="ecr-sticky-head">
+            {/*
+             * ✎ `UI-19` (макет `screens-work.js` → екран «/», `10-docs-list-light.png`):
+             * Document (назва + ключ і проєкт другим рядком) · Sheets (смужка станів
+             * аркушів + «N of M approved») · Issues · Updated (хто, коли, пізня
+             * правка) · State (стан документа, `quiet`) · «око» — швидкий перегляд.
+             * Окремої колонки Project більше немає: проєкт — другим рядком.
+             * ⚠ Колонки Period з макета немає навмисно: перелік завжди за ОДИН
+             * період (він у полі «Period» над таблицею), а періодичність проєкту
+             * в рядку не приходить — підпис «Sep 2026» для квартального проєкту
+             * був би неправдою.
+             *
+             * ⛔ Прихований аркуш (P1, безпека): усе в рядку — лише з відповіді
+             * сервера. «N of M» рахує ВИДИМІ аркуші (`sheets`/`sheetStates`), а не
+             * `sheetCount`, — інакше число видало б існування прихованого аркуша.
+             */}
+            <Table highlightOnHover className="ecr-sticky-head" data-documents-table="">
               <Table.Thead>
                 <Table.Tr>
-                  <Table.Th>{t('documents.key')}</Table.Th>
-                  <Table.Th>{t('documents.project')}</Table.Th>
+                  <Table.Th>{t('documents.document')}</Table.Th>
                   <Table.Th>{t('documents.sheets')}</Table.Th>
+                  <Table.Th>{t('documents.issues')}</Table.Th>
+                  <Table.Th>{t('documents.updated')}</Table.Th>
                   <Table.Th>{t('documents.state')}</Table.Th>
-                  <Table.Th>{t('documents.errors')}</Table.Th>
-                  <Table.Th>{t('documents.modified')}</Table.Th>
+                  <Table.Th>
+                    <VisuallyHidden>{t('documents.quickLookColumn')}</VisuallyHidden>
+                  </Table.Th>
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
                 {page.items.map((document) => {
                   const name = localized(document.nameL10n);
+                  const state = documentState(document);
+                  const errors = document.errorCount;
 
                   return (
-                  <Table.Tr key={document.id}>
-                    <Table.Td>
-                      {/* ⛔ Директива "людське ім'я документа": показуємо
-                          ім'я ПОРУЧ із бізнес-ключем, а не замість нього —
-                          ключ бере участь в експортах і аудиті, і має
-                          лишатися видимим завжди. */}
-                      {name.length > 0 ? (
-                        <Stack gap="xs">
-                          <Link to={documentHref(document.id)}>{name}</Link>
-                          <Text size="xs" c="dimmed">
-                            {document.businessKey}
-                          </Text>
-                        </Stack>
-                      ) : (
-                        <Link to={documentHref(document.id)}>{document.businessKey}</Link>
-                      )}
-                    </Table.Td>
-                    <Table.Td>
-                      {/* ⚠ Доки перелік у дорозі, місце тримає скелет, а не
-                          число: інакше на кожному відкритті сторінки колонка
-                          на мить показувала б ідентифікатори. */}
-                      {projects.isPending ? (
-                        <Skeleton height={12} width={60} radius="sm" data-projects="pending" />
-                      ) : (
-                        projectCodeOf(document.projectId)
-                      )}
-                    </Table.Td>
-                    <Table.Td>{document.sheetCount}</Table.Td>
-                    <Table.Td>
-                      {/* ⛔ UI-walkthrough F6: за період, якого немає в
-                          календарі (`/?periodKey=190001`), клітинка була
-                          ПОРОЖНЯ — і ніщо не відрізняло «за цей період станів
-                          немає» від «не завантажилося». Порожнеча в таблиці
-                          читається двояко; видима позначка відсутності —
-                          читається однозначно.
-
-                          ⚠ Символ, а не рядок каталогу, навмисно: «—» однакове
-                          в усіх мовах і не потребує перекладу, тож позначка
-                          не залежить від рядка, якого в каталозі ще немає. */}
-                      {Object.keys(document.sheetStates).length === 0 ? (
-                        <Text c="dimmed">—</Text>
-                      ) : (
-                        /*
-                         * ⛔ UI-06: тут стояв власний `<Badge variant="light">`
-                         * із `{sheet}: {state}` — п'ятий спосіб показу статусу,
-                         * названий у шапці `StatusBadge.tsx` поіменно. Він був
-                         * гірший за решту чотирьох одразу двічі: друкував КОД
-                         * СЕРВЕРА як текст інтерфейсу і не фарбував НІЧОГО —
-                         * `Rejected` («аркуш повернено, робота стоїть») виглядав
-                         * рівно так само, як `Approved`. Колір тут не окраса:
-                         * перелік документів — екран, з якого починають день, і
-                         * єдине, заради чого в ньому є колонка стану, — побачити,
-                         * де саме щось не так, не відкриваючи кожен документ.
-                         *
-                         * ⚠ Код аркуша лишається видимим ПОРУЧ із бейджем:
-                         * `StatusBadge` малює лише перекладений стан, а аркушів у
-                         * документі кілька, і без коду незрозуміло, ЧИЙ це стан.
-                         * Пара «код + бейдж» загорнута у власний `wrap="nowrap"`
-                         * саме тому, що перенос рядка всередині пари відірвав би
-                         * стан від аркуша й дав би читати його як чужий.
-                         *
-                         * ⚠ Зовнішній проміжок БІЛЬШИЙ за внутрішній (`md` проти
-                         * `xs`, обидва зі шкали теми — `ФВ-14.12`): саме різниця
-                         * проміжків і робить пару «код + стан» однією річчю. За
-                         * однакових проміжків чотири аркуші читалися б як вісім
-                         * незалежних написів.
-                         */
-                        <Group gap="md">
-                          {sheetLabels(document).map(({ code, label, state }) => (
-                            <Group key={code} gap="xs" wrap="nowrap">
-                              {/* ⛔ Аркуш ОДИН — підпис лише шум: питання «чий
-                                  це стан» не виникає.
-                                  ⚠ Аркушів кілька — НАЗВА аркуша мовою
-                                  інтерфейсу, а не внутрішній код
-                                  (`S99819007`), який людині нічого не каже.
-                                  Код — лише запасний варіант (див.
-                                  `sheetLabels`). */}
-                              {!isSingleSheet(document) && (
-                                <Text size="xs" c="dimmed">
-                                  {label}
-                                </Text>
-                              )}
-                              <StatusBadge kind="sheet" state={state} />
-                            </Group>
-                          ))}
-                        </Group>
-                      )}
-                    </Table.Td>
-                    <Table.Td data-document-errors={document.errorCount ?? 'none'}>
-                      {/* ⛔ BE-09: `null` — документ за цей період НЕ ПЕРЕВІРЯЛИ, і
-                          це «—», а не «0»: зелений нуль під неперевіреним
-                          документом — та сама неправда, що `A7-28`. */}
-                      {document.errorCount === null || document.errorCount === undefined ? (
-                        <Text c="dimmed">—</Text>
-                      ) : (
-                        formatNumber(document.errorCount)
-                      )}
-                    </Table.Td>
-                    <Table.Td>
-                      <Stack gap="xs">
-                        <Timestamp value={document.modifiedAt} />
-                        {typeof document.modifiedByDisplayName === 'string' && (
-                          <Text size="xs" c="dimmed">
-                            {document.modifiedByDisplayName}
+                    <Table.Tr key={document.id} data-document-row={document.businessKey}>
+                      <Table.Td data-column="document">
+                        {/* ⛔ Директива «людське ім'я документа»: ім'я ПОРУЧ із
+                            бізнес-ключем, а не замість нього — ключ бере участь в
+                            експортах і аудиті й лишається видимим завжди. */}
+                        <Box>
+                          <Link to={documentHref(document.id)}>{name.length > 0 ? name : document.businessKey}</Link>
+                          <Group gap="xs" wrap="nowrap">
+                            {name.length > 0 && (
+                              <Text size="xs" c="dimmed" ff="monospace">
+                                {document.businessKey}
+                              </Text>
+                            )}
+                            {name.length > 0 && (
+                              <Text size="xs" c="dimmed" aria-hidden="true">
+                                ·
+                              </Text>
+                            )}
+                            {/* ⚠ Доки перелік у дорозі, місце тримає скелет, а не
+                                число: інакше колонка на мить показувала б
+                                ідентифікатори. */}
+                            {projects.isPending ? (
+                              <Skeleton height={10} width={40} radius="sm" data-projects="pending" />
+                            ) : (
+                              <Text size="xs" c="dimmed" data-document-project="">
+                                {projectCodeOf(document.projectId)}
+                              </Text>
+                            )}
+                          </Group>
+                        </Box>
+                      </Table.Td>
+                      <Table.Td data-column="sheets">
+                        {/* ⛔ UI-walkthrough F6: станів за період немає — видиме
+                            «—», а не порожнеча, яка читається і як «не
+                            завантажилось». */}
+                        {hasSheetStates(document) ? (
+                          <SegmentBar segments={sheetLabels(document)} />
+                        ) : (
+                          <Text c="dimmed">—</Text>
+                        )}
+                      </Table.Td>
+                      <Table.Td data-column="issues" data-document-errors={errors ?? 'none'}>
+                        {/* ⛔ BE-09: `null` — документ НЕ ПЕРЕВІРЯЛИ (або роль не
+                            бачить усіх аркушів) — «—», а не «0»: нуль під
+                            неперевіреним документом — та сама неправда, що `A7-28`. */}
+                        {errors === null || errors === undefined ? (
+                          <Text c="dimmed">—</Text>
+                        ) : errors > 0 ? (
+                          <IssueCount count={errors} />
+                        ) : (
+                          <Text size="sm" c="dimmed">
+                            {formatNumber(errors)}
                           </Text>
                         )}
-                        {/* `BE-09b`: пізні правки за період (без періоду — за будь-який). */}
-                        {document.hasLateEdits && <LateEditsMark />}
-                      </Stack>
-                    </Table.Td>
-                  </Table.Tr>
+                      </Table.Td>
+                      <Table.Td data-column="updated">
+                        <Box>
+                          {typeof document.modifiedByDisplayName === 'string' && (
+                            <Text size="sm">{document.modifiedByDisplayName}</Text>
+                          )}
+                          <Group gap="xs" wrap="nowrap">
+                            <Text size="xs" c="dimmed">
+                              <Timestamp value={document.modifiedAt} />
+                            </Text>
+                            {/* `BE-09b`: пізні правки за період (без періоду — за будь-який). */}
+                            {document.hasLateEdits && <LateEditsMark />}
+                          </Group>
+                        </Box>
+                      </Table.Td>
+                      <Table.Td data-column="state">
+                        {state === null ? <Text c="dimmed">—</Text> : <StatusBadge kind="sheet" state={state} quiet />}
+                      </Table.Td>
+                      <Table.Td data-column="quick-look">
+                        {/* `UI-29`: швидкий перегляд у шторці під `?panel=<id>`. */}
+                        <ActionIcon
+                          size="sm"
+                          variant="subtle"
+                          color="gray"
+                          aria-label={t('documents.quickLook', { key: document.businessKey })}
+                          data-quick-look={document.id}
+                          onClick={(event) => {
+                            quickLookOpener.current = event.currentTarget;
+                            setPanel(String(document.id));
+                          }}
+                        >
+                          <EyeIcon />
+                        </ActionIcon>
+                      </Table.Td>
+                    </Table.Tr>
                   );
                 })}
               </Table.Tbody>
@@ -454,6 +486,28 @@ export function DocumentsPage(): JSX.Element {
         )}
       </AsyncBoundary>
 
+      {/* ⚠ Шторка монтується лише за `?panel=` — запити заповненості й історії
+          йдуть після відкриття, а не для кожного рядка. Документ береться з уже
+          завантаженої сторінки; посилання на документ поза нею шторка дочитує
+          сама. */}
+      {quickLookId !== null && (
+        <Suspense fallback={null}>
+          <DocumentQuickLook
+            panelId={quickLookId}
+            periodKey={periodKey}
+            document={query.data?.items.find((item) => String(item.id) === quickLookId)}
+            listReady={query.data !== undefined}
+            onClose={() => {
+              // Після зняття шторки — фокус назад на «око» (KIT §5; «Аудит»: e2e -Grep "модальний").
+              const opener = quickLookOpener.current;
+              window.setTimeout(() => opener?.focus(), 0);
+            }}
+            projectCode={(projectId) => projects.data?.items.find((project) => project.id === projectId)?.code}
+            documentHref={documentHref}
+          />
+        </Suspense>
+      )}
+
       {creatingRequested && (
         <Suspense fallback={null}>
           <CreateDocumentModal opened={creating} onClose={() => setCreating(false)} />
@@ -463,47 +517,41 @@ export function DocumentsPage(): JSX.Element {
   );
 }
 
-/**
- * Чи в документа рівно один аркуш — тоді стан у переліку не потребує коду.
- *
- * ⚠ Обидві умови разом: `sheetCount` — скільки аркушів у документі, а
- * `sheetStates` — скільки з них мають рядок стану за період. Якщо аркушів
- * два, а стан є лише в одного, код ще потрібен: без нього не видно, ЧИЙ це
- * стан.
- */
-function isSingleSheet(document: { sheetCount: number; sheetStates: Record<string, string> }): boolean {
-  return document.sheetCount <= 1 && Object.keys(document.sheetStates).length === 1;
+
+/** Число відкритих помилок — червона «пігулка», як у макеті (`.count.bad`). */
+function IssueCount({ count }: { readonly count: number }): JSX.Element {
+  return (
+    <Badge
+      size="sm"
+      variant="transparent"
+      radius="xl"
+      c="var(--ecr-danger)"
+      bg="var(--ecr-danger-soft)"
+      ff="monospace"
+      title={t('documents.issuesHint', { count })}
+      data-issue-count={count}
+    >
+      {formatNumber(count)}
+    </Badge>
+  );
 }
 
-/** Аркуш у колонці «State»: код (ключ), підпис для людини, стан. */
-interface SheetLabel {
-  readonly code: string;
-  readonly label: string;
-  readonly state: string;
-}
-
-/**
- * Аркуші документа для колонки «State» — у порядку аркушів і з назвою.
- *
- * ⚠ Джерело — `sheets` (сервер віддає їх у порядку `SheetDef.Ordinal`, з
- * `nameL10n`). Поле адитивне й необов'язкове в контракті, тож без нього —
- * старий шлях: словник `sheetStates`, підпис — код.
- *
- * ⚠ Назва порожня (не задана жодною мовою) — підпис знову КОД: «чий це стан»
- * без підпису не прочитати, а порожній `<Text>` поруч із бейджем виглядав би
- * як зламана клітинка.
- */
-function sheetLabels(document: {
-  sheetStates: Record<string, string>;
-  sheets?: readonly { code: string; nameL10n: LocalizedText; state: string }[] | null;
-}): SheetLabel[] {
-  if (document.sheets !== undefined && document.sheets !== null && document.sheets.length > 0) {
-    return document.sheets.map((sheet) => {
-      const name = localized(sheet.nameL10n);
-
-      return { code: sheet.code, label: name.length > 0 ? name : sheet.code, state: sheet.state };
-    });
-  }
-
-  return Object.entries(document.sheetStates).map(([code, state]) => ({ code, label: code, state }));
+/** «Око» швидкого перегляду (`kit.js` → `I.eye`). */
+function EyeIcon(): JSX.Element {
+  return (
+    <svg
+      width={16}
+      height={16}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.75}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12zM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" />
+    </svg>
+  );
 }
