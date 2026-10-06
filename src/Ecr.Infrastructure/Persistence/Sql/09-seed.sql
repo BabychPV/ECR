@@ -7146,7 +7146,21 @@ USING (VALUES
     (N'registries.list.manage', N'en', N'Entries and validity', 1),
     (N'registries.list.back', N'en', N'All registries', 1),
     (N'registries.list.searchPlaceholder', N'en', N'Registry name or code', 1),
-    (N'registries.list.noMatches', N'en', N'No registries match these filters.', 1)
+    (N'registries.list.noMatches', N'en', N'No registries match these filters.', 1),
+    (N'registries.list.entries', N'en', N'Entries', 1),
+    (N'registries.list.entriesHint', N'en', N'Valid today; closed entries are kept for old documents.', 1),
+    (N'registries.list.usedInHint', N'en', N'Template columns that pick values from this registry', 1),
+    (N'registries.list.usedInValue', N'en', N'columns: {columns} · templates: {templates}', 1),
+    (N'registries.list.updated', N'en', N'Entries changed', 1),
+    (N'registries.list.state', N'en', N'State', 1),
+    (N'registries.list.statEntries', N'en', N'entries', 1),
+    (N'registries.list.statChanged', N'en', N'changed this month', 1),
+    (N'registries.list.statUsedIn', N'en', N'template columns use them', 1),
+    (N'registries.list.definition', N'en', N'Definition', 1),
+    (N'registries.list.definitionValue', N'en', N'v{version} published', 1),
+    (N'registries.list.definitionDraft', N'en', N'v{version} published · draft in progress', 1),
+    (N'registries.list.draftTitle', N'en', N'The definition has unpublished changes', 1),
+    (N'registries.list.draftText', N'en', N'Entries keep working with the published definition until the draft is published.', 1)
     -- COLL:ui35registries ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
@@ -17285,7 +17299,35 @@ SELECT v.[Key], v.Lang, v.Val
     (N'registries.list.searchPlaceholder', N'ru', N'Название или код справочника'),
     (N'registries.list.searchPlaceholder', N'kz', N'Анықтамалық атауы немесе коды'),
     (N'registries.list.noMatches', N'ru', N'Нет справочников, подходящих под эти фильтры.'),
-    (N'registries.list.noMatches', N'kz', N'Бұл сүзгілерге сәйкес анықтамалық жоқ.')
+    (N'registries.list.noMatches', N'kz', N'Бұл сүзгілерге сәйкес анықтамалық жоқ.'),
+    (N'registries.list.entries', N'ru', N'Записи'),
+    (N'registries.list.entries', N'kz', N'Жазбалар'),
+    (N'registries.list.entriesHint', N'ru', N'Действующие сегодня; закрытые записи хранятся для старых документов.'),
+    (N'registries.list.entriesHint', N'kz', N'Бүгін қолданыстағы; жабылған жазбалар ескі құжаттар үшін сақталады.'),
+    (N'registries.list.usedInHint', N'ru', N'Колонки шаблонов, которые берут значения из этого справочника'),
+    (N'registries.list.usedInHint', N'kz', N'Осы анықтамалықтан мән алатын үлгі бағандары'),
+    (N'registries.list.usedInValue', N'ru', N'колонок: {columns} · шаблонов: {templates}'),
+    (N'registries.list.usedInValue', N'kz', N'бағандар: {columns} · үлгілер: {templates}'),
+    (N'registries.list.updated', N'ru', N'Записи изменены'),
+    (N'registries.list.updated', N'kz', N'Жазбалар өзгертілді'),
+    (N'registries.list.state', N'ru', N'Состояние'),
+    (N'registries.list.state', N'kz', N'Күйі'),
+    (N'registries.list.statEntries', N'ru', N'записей'),
+    (N'registries.list.statEntries', N'kz', N'жазба'),
+    (N'registries.list.statChanged', N'ru', N'изменены в этом месяце'),
+    (N'registries.list.statChanged', N'kz', N'осы айда өзгертілген'),
+    (N'registries.list.statUsedIn', N'ru', N'колонок шаблонов используют'),
+    (N'registries.list.statUsedIn', N'kz', N'үлгі бағаны пайдаланады'),
+    (N'registries.list.definition', N'ru', N'Описание'),
+    (N'registries.list.definition', N'kz', N'Сипаттама'),
+    (N'registries.list.definitionValue', N'ru', N'v{version} опубликована'),
+    (N'registries.list.definitionValue', N'kz', N'v{version} жарияланған'),
+    (N'registries.list.definitionDraft', N'ru', N'v{version} опубликована · есть черновик'),
+    (N'registries.list.definitionDraft', N'kz', N'v{version} жарияланған · жоба бар'),
+    (N'registries.list.draftTitle', N'ru', N'В описании есть неопубликованные изменения'),
+    (N'registries.list.draftTitle', N'kz', N'Сипаттамада жарияланбаған өзгерістер бар'),
+    (N'registries.list.draftText', N'ru', N'Записи работают по опубликованному описанию, пока черновик не опубликован.'),
+    (N'registries.list.draftText', N'kz', N'Жоба жарияланғанша жазбалар жарияланған сипаттама бойынша жұмыс істейді.')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO

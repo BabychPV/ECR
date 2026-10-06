@@ -1,15 +1,16 @@
 import type { JSX } from 'react';
-import { Badge, Button, Stack, Title } from '@mantine/core';
+import { Badge, Button, Stack } from '@mantine/core';
 import { Link } from 'react-router-dom';
-import type { RegistryDefDto } from '@/api/types';
 import { RegistryUsagePanel } from '@/features/registries/RegistryUsage';
 import { t } from '@/shared/i18n';
 import { DetailDrawer } from '@/shared/ui/DetailDrawer';
+import { Banner } from '@/shared/ui/Banner';
 import { KeyValue } from '@/shared/ui/KeyValue';
-import { isSynced, sourceKindLabel, registryName } from './registryList';
+import { Timestamp } from '@/shared/ui/Timestamp';
+import { isSynced, registryName, sourceKindLabel, type RegistryListItem } from './registryList';
 
 interface RegistryDetailDrawerProps {
-  readonly registry: RegistryDefDto;
+  readonly registry: RegistryListItem;
 
   /** «Де використано» — лише з `Registry.EditDefinition` (право `GET …/usage`, `BE-24`). */
   readonly canSeeUsage: boolean;
@@ -25,9 +26,9 @@ interface RegistryDetailDrawerProps {
  * `Drawer` і «де використано» не потрапляють у чанк маршруту, доки шторку не
  * відкрили.
  *
- * ⛔ З макетних рядків лишилися ті, що мають дані: «Fields», ознаки, master
- * (D-211) і «Used in» (`GET {code}/usage`). «Entries», «Definition vN» і
- * «Updated by» — поля, яких у `RegistryDefDto` немає (`D15-06`).
+ * ⛔ Рядки макета — лише ті, що мають дані: Entries, Fields, Used in (колонки й
+ * шаблони + перелік `GET {code}/usage`), Definition vN, дата зміни записів,
+ * ознаки, master (D-211). «Updated by» і «cells» сервер не віддає (`D15-06`).
  */
 export function RegistryDetailDrawer({
   registry,
@@ -40,6 +41,17 @@ export function RegistryDetailDrawer({
     registry.isTemporal ? t('registries.temporal') : null,
     registry.isHierarchical ? t('registries.hierarchical') : null,
   ].filter((trait): trait is string => trait !== null);
+
+  // «N колонок у M шаблонах»; нуль — «ніде» (дані), `null` — рядка немає (без права).
+  const usedIn =
+    registry.usedInColumns === null || registry.usedInColumns === undefined
+      ? null
+      : registry.usedInColumns === 0
+        ? t('registries.usageNone')
+        : t('registries.list.usedInValue', {
+            columns: registry.usedInColumns,
+            templates: registry.usedInTemplates ?? 0,
+          });
 
   return (
     <DetailDrawer
@@ -72,12 +84,37 @@ export function RegistryDetailDrawer({
       <KeyValue
         items={[
           {
+            label: t('registries.list.entries'),
+            // ⚠ `null`/відсутнє поле — рядка немає (`KeyValue` не малює порожнє значення).
+            value: registry.entryCount === null || registry.entryCount === undefined ? null : String(registry.entryCount),
+            hint: t('registries.list.entriesHint'),
+          },
+          {
             label: t('registries.fields'),
             value: String(registry.fields.length),
             hint:
               registry.fields.length === 0
                 ? undefined
                 : registry.fields.map((field) => field.code).join(', '),
+          },
+          {
+            label: t('registries.list.usedIn'),
+            value: usedIn,
+          },
+          {
+            label: t('registries.list.definition'),
+            value:
+              registry.definitionVersion === null || registry.definitionVersion === undefined
+                ? null
+                : registry.hasDraft === true
+                  ? t('registries.list.definitionDraft', { version: registry.definitionVersion })
+                  : t('registries.list.definitionValue', { version: registry.definitionVersion }),
+          },
+          {
+            label: t('registries.list.updated'),
+            value: registry.dataChangedAt === null || registry.dataChangedAt === undefined ? null : (
+              <Timestamp value={registry.dataChangedAt} />
+            ),
           },
           {
             label: t('registries.list.traits'),
@@ -92,11 +129,17 @@ export function RegistryDetailDrawer({
         ]}
       />
 
+      {registry.hasDraft === true && (
+        <Banner
+          tone="info"
+          title={t('registries.list.draftTitle')}
+          text={t('registries.list.draftText')}
+        />
+      )}
+
       {canSeeUsage && (
+        // ⚠ Без власного заголовка: підпис «Used in» уже стоїть рядком вище в `KeyValue`.
         <Stack gap="xs" data-registry-drawer-usage="">
-          <Title order={4} size="h6">
-            {t('registries.list.usedIn')}
-          </Title>
           <RegistryUsagePanel code={registry.code} />
         </Stack>
       )}
