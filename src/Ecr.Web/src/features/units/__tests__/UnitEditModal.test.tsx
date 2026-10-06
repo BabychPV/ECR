@@ -3,6 +3,7 @@ import { render, screen, fireEvent, waitFor, within } from '@testing-library/rea
 import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { loadCatalog } from '@/shared/i18n';
+import { MemoryRouter } from 'react-router-dom';
 import { UnitsPage } from '@/pages/admin/UnitsPage';
 import { testTheme } from '@/test/render';
 
@@ -163,14 +164,19 @@ async function openEdit(code = 'lb'): Promise<HTMLElement> {
   render(
     <MantineProvider theme={testTheme}>
       <QueryClientProvider client={client}>
-        <UnitsPage />
+        <MemoryRouter>
+          <UnitsPage />
+        </MemoryRouter>
       </QueryClientProvider>
     </MantineProvider>,
   );
 
-  fireEvent.click(await screen.findByRole('button', { name: `Edit ${code}` }));
+  // UI-21: «Edit» — у шторці одиниці, а не кнопкою в рядку.
+  fireEvent.click(await screen.findByRole('button', { name: code }));
+  const drawer = await screen.findByRole('dialog', { name: new RegExp(`^${code}`) });
+  fireEvent.click(within(drawer).getByRole('button', { name: 'Edit' }));
 
-  const dialog = await screen.findByRole('dialog');
+  const dialog = await screen.findByRole('dialog', { name: `Edit unit ${code}` });
   await within(dialog).findByLabelText(/^Symbol/);
   return dialog;
 }
@@ -225,7 +231,7 @@ describe('UnitEditModal: правка одиниці (BE-15 ч.2)', () => {
 
     // Успіх: діалог закрито, перелік перечитано.
     await waitFor(() => {
-      expect(screen.queryByRole('dialog')).toBeNull();
+      expect(screen.queryByRole('dialog', { name: /^Edit unit/ })).toBeNull();
     });
     expect(api.listCalls()).toBeGreaterThan(lists);
   });
