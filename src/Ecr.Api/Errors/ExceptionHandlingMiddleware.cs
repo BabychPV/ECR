@@ -601,6 +601,15 @@ public sealed partial class ExceptionHandlingMiddleware(
         BusinessRuleException e when e.ErrorCode == ErrorCodes.LastSourceOfPublishedColumn =>
             (StatusCodes.Status409Conflict, e.ErrorCode, e.Message, e.Details),
 
+        // ⛔ L7-01: сторож стека рекурсивного обходу дерева виразу. Вираз той самий — і
+        // відмова та сама, тож це вердикт про вхід (422), а не збій сервера (500). Тип
+        // запечатаний і в `src/` кидається лише сторожами обходів дерева виразу
+        // (`AstTraversalRecursionCoverageTests` їх і вимагає), тому арм — на тип. Текст
+        // винятку не їде: подробиця — лише ключ каталогу.
+        InsufficientExecutionStackException =>
+            (StatusCodes.Status422UnprocessableEntity, ErrorCodes.ExpressionTooComplex,
+             "Вираз занадто складний для обробки. Розбийте його на кілька формул.", ExpressionTooComplexDetails),
+
         BusinessRuleException e =>
             (StatusCodes.Status422UnprocessableEntity, e.ErrorCode, e.Message, e.Details),
 
@@ -648,6 +657,10 @@ public sealed partial class ExceptionHandlingMiddleware(
         || (code.Length >= 5
             && string.CompareOrdinal(code, code.Length - 5, "-409", 0, 4) == 0
             && char.IsAsciiDigit(code[^1]));
+
+    /// <summary>Подробиця <c>ECR-EXPR-0422</c>: ключ каталогу <c>expr.tooComplex</c> (en/ru/kz уже в сіді).</summary>
+    private static readonly IReadOnlyDictionary<string, object?> ExpressionTooComplexDetails =
+        new Dictionary<string, object?> { [MessageKeyDetailName] = "expr.tooComplex" };
 
     /// <summary>Подробиця 500-ї: лише ключ каталогу, жодних даних винятку.</summary>
     private static readonly IReadOnlyDictionary<string, object?> InternalDetails =
