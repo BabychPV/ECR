@@ -42,7 +42,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       # ⚠ Пароль генерується на кожен прогін і маскується — як у `server-part`.
       - name: SQL Server у контейнері
@@ -54,7 +54,7 @@ jobs:
           docker run -d --name ecr-mssql -e ACCEPT_EULA=Y -e "MSSQL_SA_PASSWORD=$SA" \
             -p 1433:1433 mcr.microsoft.com/mssql/server:2019-latest
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
         with:
           global-json-file: global.json
 
@@ -94,7 +94,7 @@ jobs:
 
       - name: dotnet ef
         run: |
-          dotnet tool install --global dotnet-ef
+          dotnet tool install --global dotnet-ef --version 10.0.11
           echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
 
       # ⚠ Без restore `dotnet ef migrations script` у `setup-dev-db.ps1` падає з
@@ -116,7 +116,7 @@ jobs:
 
       - name: Журнали застосунку
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: smoke-logs
           path: |
