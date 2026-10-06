@@ -62,16 +62,3 @@ export function parseUserDate(text: string, language: string): Date | null {
 
   return null;
 }
-
-/**
- * `Date` → `yyyy-MM-dd` за місцевим календарем — те саме, що `formatDateOnly` (`shared/format`).
- *
- * ⚠ Копія свідома, а не недогляд: `DateOnlyInput` живе в лінивому чанку поля дати, і імпорт
- * `shared/format` додав би той чанк у карту передзавантаження маршрутів, що його не мали (бюджет
- * `D-132`, PeriodsPage). Розходження копій ловить `userDate.test.ts` («збігається з formatDateOnly»).
- */
-export function formatIsoDay(date: Date): string {
-  const pad = (part: number, width: number): string => String(part).padStart(width, '0');
-
-  return `${pad(date.getFullYear(), 4)}-${pad(date.getMonth() + 1, 2)}-${pad(date.getDate(), 2)}`;
-}
