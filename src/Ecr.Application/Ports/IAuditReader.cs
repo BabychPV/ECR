@@ -61,6 +61,17 @@ public sealed record CellChangeView(
     Ecr.Domain.ValueObjects.LocalizedText? TableNameL10n = null,
     Ecr.Domain.ValueObjects.LocalizedText? RowLabelL10n = null);
 
+/// <summary>Підсумок журналу змін комірок за вікном (UI-38, C2) — лише те, що читач бачить.</summary>
+/// <param name="Total">Усього змін у вікні й за фільтром.</param>
+/// <param name="Today">З них — за поточну добу UTC (зміни вікна, що припали на сьогодні).</param>
+/// <param name="ByImport">З них — імпортом (<c>Origin = Import</c>).</param>
+/// <param name="ByRecalculation">З них — перерахунком (<c>Origin = Recalculation</c>).</param>
+/// <remarks>
+/// ⚠ Лічильника пізніх правок (<c>late</c>) тут немає навмисно — рішення координатора: індексу по
+/// <c>IsLateEdit</c> у <c>aud.CellChange</c> немає, і його не додаємо без виміру.
+/// </remarks>
+public sealed record CellChangeSummaryView(long Total, long Today, long ByImport, long ByRecalculation);
+
 /// <summary>Лічильники журналу в розрізі колонки: сирі, ще БЕЗ відсіву за межами читання.</summary>
 /// <param name="ColumnDefId">Колонка.</param>
 /// <param name="Total">Усього змін.</param>

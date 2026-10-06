@@ -1,4 +1,4 @@
-﻿// tests/Ecr.Architecture.Tests/EndpointCoverageTests.cs
+// tests/Ecr.Architecture.Tests/EndpointCoverageTests.cs
 using System.Globalization;
 using System.Reflection;
 using System.Text.RegularExpressions;
@@ -1218,6 +1218,11 @@ public sealed partial class EndpointCoverageTests
         // переліку), яка ще не влита; рядок ПРИБРАТИ в тому ж коміті, що
         // додасть виклик у `features/` (інакше звільнення стане неправдою).
         "GET /api/v1/consistency/summary",
+
+        // UI-38 (хвиля 3): серверна частина підсумку журналу змін (всього/сьогодні/імпорт/перерахунок);
+        // смуга показників сторінки «Аудит» ще не під'єднана — споживач з'явиться разом із UI-38.
+        // ⚠ Звільнення тимчасове: прибрати в тому ж коміті, що додає виклик у `features/audit`.
+        "GET /api/v1/audit/cells/summary",
 
         // ⚠ Тут стояла ще й `POST /api/v1/units/convert` з поясненням
         // «числа конвертуються там, де їх вводять». Пояснення було
