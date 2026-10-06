@@ -142,17 +142,23 @@ public static class CheckEvaluator
             _ => ValidationSeverity.Info,
         };
 
-        return [.. failures.Select(f =>
-        {
-            // T2-07: ключ + підстановки зберігаються, текст — запасний (мова автора запуску); читання збирає його
-            // мовою читача. Значення джерела (Left) лежать лише в Params, а їх назовні не віддають.
-            var parameters = Params(spec, f);
-            return new ValidationMessage(
-                severity, "REL-" + relationCode, ValidationMessageTemplates.Render(ValidationMessageTemplates.CheckMismatch, language, parameters),
-                targetTableDefId, f.TargetRowKey, spec.Right, BlocksSave: false,
-                SourceTableDefId: sourceTableDefId, SourceColumnCode: sourceTableDefId is null ? null : spec.Left,
-                MessageKey: ValidationMessageTemplates.CheckMismatch, Params: parameters);
-        })];
+        // A2-04: без ключів зіставлення ОДИН рядок приймача порівнюється з КОЖНИМ рядком джерела, тож кілька
+        // знахідок мають ту саму адресу (рядок/колонка приймача). Текст несе рядок джерела ({sourceRow}), інакше
+        // панель показувала N однакових рядків; повністю однакові знахідки (той самий рядок джерела, напр. з двох
+        // екземплярів таблиці) зводяться в одну.
+        return [.. failures
+            .DistinctBy(f => (f.TargetRowKey, f.SourceRowKey, f.Left, f.Right))
+            .Select(f =>
+            {
+                // T2-07: ключ + підстановки зберігаються, текст — запасний (мова автора запуску); читання збирає
+                // його мовою читача. Значення джерела (Left) лежать лише в Params, а їх назовні не віддають.
+                var parameters = Params(spec, f);
+                return new ValidationMessage(
+                    severity, "REL-" + relationCode, ValidationMessageTemplates.Render(ValidationMessageTemplates.CheckMismatchRow, language, parameters),
+                    targetTableDefId, f.TargetRowKey, spec.Right, BlocksSave: false,
+                    SourceTableDefId: sourceTableDefId, SourceColumnCode: sourceTableDefId is null ? null : spec.Left,
+                    MessageKey: ValidationMessageTemplates.CheckMismatchRow, Params: parameters);
+            })];
     }
 
     /// <summary>
@@ -210,6 +216,7 @@ public static class CheckEvaluator
         {
             ["left"] = s.Left,
             ["leftValue"] = ValidationMessageTemplates.Num(f.Left),
+            ["sourceRow"] = f.SourceRowKey,
             ["right"] = s.Right,
             ["rightValue"] = ValidationMessageTemplates.Num(f.Right),
             ["deviation"] = ValidationMessageTemplates.Num(f.Deviation),
