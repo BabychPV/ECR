@@ -21972,8 +21972,26 @@ export interface components {
         RegistryDefDto: {
             /** @description Код довідника. */
             code: string;
+            /**
+             * Format: date-time
+             * @description Коли востаннє змінювалися записи, UTC; `null` — не змінювалися.
+             */
+            dataChangedAt?: null | string;
+            /**
+             * Format: int32
+             * @description Версія опису довідника.
+             */
+            definitionVersion?: null | number;
+            /**
+             * Format: int32
+             * @description Чинних записів сьогодні (UTC): активні, не видалені, у вікні дії. Лише в переліку; в інших
+             *     відповідях `null`.
+             */
+            entryCount?: null | number;
             /** @description Поля довідника. */
             fields: components["schemas"]["RegistryFieldDto"][];
+            /** @description Чи є незавершена чернетка опису; `null` без права `Registry.EditDefinition`. */
+            hasDraft?: null | boolean;
             /**
              * Format: int32
              * @description Ідентифікатор визначення.
@@ -21989,6 +22007,17 @@ export interface components {
              *     перемикання: без нього довідник, який уже в цільовому режимі, і той, який
              *     ще ні, у переліку виглядають однаково. */
             sourceKind: components["schemas"]["RegistrySourceKind"];
+            /**
+             * Format: int32
+             * @description Скільки колонок шаблонів беруть значення з довідника. `null` без права
+             *     `Registry.EditDefinition` (те саме, що в `GET {code}/usage`): «не знаю» ≠ «ніде».
+             */
+            usedInColumns?: null | number;
+            /**
+             * Format: int32
+             * @description У скількох шаблонах; `null` за тих самих умов.
+             */
+            usedInTemplates?: null | number;
         };
         /** @description Чернетка опису довідника. */
         RegistryDefinitionDraftDto: {

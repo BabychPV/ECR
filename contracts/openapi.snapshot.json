@@ -9249,12 +9249,43 @@
             "description": "Код довідника.",
             "type": "string"
           },
+          "dataChangedAt": {
+            "description": "Коли востаннє змінювалися записи, UTC; `null` — не змінювалися.",
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "definitionVersion": {
+            "description": "Версія опису довідника.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "entryCount": {
+            "description": "Чинних записів сьогодні (UTC): активні, не видалені, у вікні дії. Лише в переліку; в інших\nвідповідях `null`.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
           "fields": {
             "description": "Поля довідника.",
             "items": {
               "$ref": "#/components/schemas/RegistryFieldDto"
             },
             "type": "array"
+          },
+          "hasDraft": {
+            "description": "Чи є незавершена чернетка опису; `null` без права `Registry.EditDefinition`.",
+            "type": [
+              "null",
+              "boolean"
+            ]
           },
           "id": {
             "description": "Ідентифікатор визначення.",
@@ -9276,6 +9307,22 @@
           "sourceKind": {
             "$ref": "#/components/schemas/RegistrySourceKind",
             "description": "Хто master (`ФВ-8.9`). Потрібен тому, хто складає набір для\nперемикання: без нього довідник, який уже в цільовому режимі, і той, який\nще ні, у переліку виглядають однаково."
+          },
+          "usedInColumns": {
+            "description": "Скільки колонок шаблонів беруть значення з довідника. `null` без права\n`Registry.EditDefinition` (те саме, що в `GET {code}/usage`): «не знаю» ≠ «ніде».",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "usedInTemplates": {
+            "description": "У скількох шаблонах; `null` за тих самих умов.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
           }
         },
         "required": [
