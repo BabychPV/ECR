@@ -10,6 +10,7 @@ import { humanizeJobId } from '@/features/workflow/jobLabel';
 import { useFocusAfterBusy } from '@/shared/a11y/focus';
 import { t } from '@/shared/i18n';
 import { can, useSession } from '@/shared/session/useSession';
+import { RouteHeadingClass } from '@/shared/theme/routeHeading';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { PageHeader } from '@/shared/ui/PageHeader';
@@ -136,7 +137,7 @@ function ImpactJob({
     <Card withBorder data-impact-job={jobId}>
       <Stack gap="xs">
         <Group justify="space-between">
-          <Text ref={heading} tabIndex={-1} fw={600} data-impact-job-heading="">
+          <Text ref={heading} tabIndex={-1} fw={600} className={RouteHeadingClass} data-impact-job-heading="">
             {t('registries.impact.jobQueued', { jobId: humanizeJobId(jobId) })}
           </Text>
           {status !== undefined && <StatusBadge kind="job" state={badgeStateOf(status)} />}

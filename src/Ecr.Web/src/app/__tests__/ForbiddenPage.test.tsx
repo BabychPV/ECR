@@ -6,6 +6,7 @@ import { loadCatalog } from '@/shared/i18n';
 import { ForbiddenPage } from '@/app/ForbiddenPage';
 import { router } from '@/app/router';
 import { theme } from '@/shared/theme/theme';
+import { RouteHeadingClass } from '@/shared/theme/routeHeading';
 
 /**
  * Маршрут `/403` (`UI-09`, L-правило про доступ) — сторінка призначення
@@ -115,5 +116,33 @@ describe('router — каталог маршрутів застосунку', ()
 
     const forbiddenRoute = descendants(root?.children ?? []).find((route) => route.path === '403');
     expect(forbiddenRoute, 'router.tsx має нести path: "403" серед дітей кореня "/"').toBeDefined();
+  });
+});
+
+/**
+ * ✎ 2026-10-06, вимога людини: «треба прибрати рамку, у текст в одну строку».
+ *
+ * ⚠ jsdom не верстає й не рахує `:focus-visible`, тому тут — рішення розмітки:
+ * заголовок несе клас без рамки (`motion.css`, `motion.test.tsx`) і розмір
+ * із гібридного макета (`.work-state-h` 15px = `md`), а контейнер — ширину
+ * `.work-state` 560px замість 420px, у яких 26px заголовок ламався надвоє.
+ * Справжні рядки й `outline` у Chromium — `e2e/errorPageHeading.spec.ts`.
+ */
+describe('ForbiddenPage: заголовок без рамки, в один рядок', () => {
+  it('заголовок фокусований, без зупинки Tab, з класом без рамки і розміром макета', async () => {
+    await renderResolved({ permission: 'Security.ManageRoles' });
+
+    const heading = screen.getByRole('heading', { name: 'You do not have permission for this action.' });
+
+    expect(document.activeElement).toBe(heading);
+    expect(heading.getAttribute('tabindex')).toBe('-1');
+    expect(heading.classList.contains(RouteHeadingClass)).toBe(true);
+    expect(heading.style.fontSize).toBe('var(--mantine-font-size-md)');
+  });
+
+  it('контейнер відмови — 560px макета, не 420px', async () => {
+    await renderResolved({ permission: 'Security.ManageRoles' });
+
+    expect(screen.getByRole('alert').style.maxWidth).toBe('calc(35rem * var(--mantine-scale))');
   });
 });
