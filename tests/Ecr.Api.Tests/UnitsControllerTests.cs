@@ -71,6 +71,11 @@ public sealed class UnitsControllerTests(SqlServerFixture sql)
             .Single(u => string.Equals(u.GetProperty("code").GetString(), "m3", StringComparison.Ordinal));
 
         Assert.Equal("Volume", cubicMetre.GetProperty("dimensionCode").GetString());
+
+        // Без Uom.EditCatalog лічильник використання не віддається (null/відсутнє, не 0).
+        Assert.True(
+            !kilogram.TryGetProperty("usedIn", out var usedIn) || usedIn.ValueKind == JsonValueKind.Null,
+            "usedIn віддано без права Uom.EditCatalog.");
     }
 
     [Fact]
@@ -95,6 +100,9 @@ public sealed class UnitsControllerTests(SqlServerFixture sql)
         // UI-21: без цих полів колонки «Unit» і «Base unit» потребували б N+1 по `GET /units/{id}`.
         var kilogram = Unit(units, "kg");
         Assert.True(kilogram.GetProperty("isBase").GetBoolean());
+
+        // З правом Uom.EditCatalog — число (базова kg тримає колонки/поля сіду або 0, але не null).
+        Assert.Equal(JsonValueKind.Number, kilogram.GetProperty("usedIn").ValueKind);
         Assert.Equal(JsonValueKind.Object, kilogram.GetProperty("symbolL10n").ValueKind);
         Assert.NotEmpty(kilogram.GetProperty("symbolL10n").EnumerateObject());
         Assert.Equal(JsonValueKind.Object, kilogram.GetProperty("nameL10n").ValueKind);

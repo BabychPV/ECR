@@ -44,6 +44,18 @@ public interface IUnitStore
     public Task<Common.UsageResponse> FindUnitUsageAsync(int unitId, int take, CancellationToken ct);
 
     /// <summary>
+    /// Скільки колонок шаблонів і полів довідників тримає кожну одиницю (UI-21, колонка
+    /// «Used in» переліку): два агрегатні запити на весь перелік замість <c>GET /units/{id}/usage</c>
+    /// по одній одиниці. Одиниці без посилань у словнику немає.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Лічильник відкриває лише факт і кількість, але не назви шаблонів, тож віддається тим
+    /// самим, хто має право <c>Uom.EditCatalog</c> (як <c>GET /units/{id}/usage</c>).
+    /// </remarks>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<IReadOnlyDictionary<int, int>> CountUnitStructuralUsageAsync(CancellationToken ct);
+
+    /// <summary>
     /// Одиниця, прочитана під блокуванням рядка до кінця транзакції; <c>null</c> — немає
     /// (аудит C6).
     /// </summary>
