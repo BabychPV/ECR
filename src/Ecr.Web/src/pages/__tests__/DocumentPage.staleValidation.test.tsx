@@ -248,10 +248,15 @@ describe('DocumentPage: результат перевірки не пережи�
        * що перезавантаження почалося, потім — що воно скінчилося, і лише на
        * повністю перемальованій сторінці 202402 дивимось, що на ній.
        */
-      await waitFor(() => expect(screen.queryByRole('status')).not.toBeNull(), {
+      // ✎ UI-14: стан збереження в рядку дій — теж `role="status"`, але
+      // постійний; скелет перезавантаження — це решта статусів.
+      const skeletons = (): HTMLElement[] =>
+        screen.queryAllByRole('status').filter((element) => element.dataset.testid !== 'document-save-state');
+
+      await waitFor(() => expect(skeletons()).not.toHaveLength(0), {
         timeout: SettleTimeout,
       });
-      await waitFor(() => expect(screen.queryByRole('status')).toBeNull(), {
+      await waitFor(() => expect(skeletons()).toHaveLength(0), {
         timeout: SettleTimeout,
       });
 

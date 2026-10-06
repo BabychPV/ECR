@@ -1,6 +1,6 @@
 import type { JSX } from 'react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -106,6 +106,10 @@ async function show(scenario: Scenario): Promise<HTMLInputElement> {
       </MemoryRouter>
     </MantineProvider>,
   );
+
+  // ✎ UI-16: шапка згорнута, поки нічого не вимагає уваги — розгорнути.
+  const toggle = await screen.findByTestId('document-header-toggle', {}, { timeout: SlowEnvTimeout });
+  if (toggle.getAttribute('aria-expanded') === 'false') fireEvent.click(toggle);
 
   const field = await screen.findByRole('textbox', { name: /Header note/ }, { timeout: SlowEnvTimeout });
 
