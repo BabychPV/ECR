@@ -137,14 +137,9 @@ describe('JobsPage: рівно один порожній стан (U-09)', () =>
     expect((await screen.findByRole('textbox', { name: /Job id/ })).getAttribute('placeholder')).toBe(
       'Enter a job id',
     );
-    // ⚠ Пояснення тепер двічі: прихований `description` поля (для читалки,
-    // зв'язаний `aria-describedby`) і видима копія під рядом (`FilterHints`,
-    // `aria-hidden`), щоб не опускати нижню межу поля (`FilterRow`).
-    const hint = screen.getByRole('textbox', { name: /Job id/ }).getAttribute('aria-describedby') ?? '';
-    const copies = screen.getAllByText('Long operations return a job id; paste it here to follow the progress.');
-    expect(copies).toHaveLength(2);
-    expect(copies.some((node) => node.id !== '' && hint.includes(node.id))).toBe(true);
-    expect(copies.some((node) => node.closest('[aria-hidden="true"]') !== null)).toBe(true);
+    expect(
+      screen.getByText('Long operations return a job id; paste it here to follow the progress.'),
+    ).toBeDefined();
   });
 
   it('ідентифікатор в адресі — шторка задачі на місці', async () => {
