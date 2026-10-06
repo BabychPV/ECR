@@ -4,6 +4,7 @@ import { MantineProvider } from '@mantine/core';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { JobsPage } from '@/pages/admin/JobsPage';
+import { findRowOfState, openDrawerOf, rowOfState } from './jobsTestKit';
 
 /**
  * Перелік `RecentJobs` (`#/admin/jobs`): «Повторити» й посилання на файл
@@ -102,37 +103,18 @@ function show(): void {
   );
 }
 
-/** Рядок переліку, впізнаний за значком стану (`data-status-state`, той самий локатор, що в `JobsPage.cancelJob.test.tsx`). */
-function rowOfState(state: string): HTMLElement {
-  const row = document.querySelector(`[data-status-state="${state}"]`)?.closest('tr') ?? null;
-  expect(row, `рядок задачі у стані «${state}»`).not.toBeNull();
-
-  return row as HTMLElement;
-}
-
-async function findRowOfState(state: string): Promise<HTMLElement> {
-  await waitFor(() =>
-    expect(document.querySelector(`[data-status-state="${state}"]`)).not.toBeNull(),
-  );
-
-  return rowOfState(state);
-}
-
 afterEach(() => {
   vi.unstubAllGlobals();
   posted.length = 0;
 });
 
-describe('JobsPage: «Повторити» в переліку останніх задач', () => {
+describe('JobsPage: «Повторити» у шторці задачі', () => {
   it('провалена задача — кнопка «Повторити» є й шле POST на /restart', async () => {
     mockFetch();
     show();
 
-    const retryInRow = within(await findRowOfState('Failed')).getByRole('button', {
-      name: '⟦jobs.restart⟧',
-    });
-
-    fireEvent.click(retryInRow);
+    const drawer = await openDrawerOf('Failed');
+    fireEvent.click(await within(drawer).findByRole('button', { name: '⟦jobs.restart⟧' }));
 
     // ⚠ Той самий привід, що в `cancelJob.test.tsx`: `#` у `jobId` починає
     // фрагмент URL і мусить бути закодований.
@@ -145,34 +127,36 @@ describe('JobsPage: «Повторити» в переліку останніх 
     mockFetch();
     show();
 
-    await findRowOfState('Failed');
-
     /*
      * ⛔ Мутаційний доказ: приберіть умову видимості (`canRestartJob` /
-     * `state === 'Failed'`) — і кнопка з'явиться в рядку `Running` та
-     * `Succeeded`, а цей тест впаде. Сусідній рядок `Failed` доводить, що
-     * кнопка взагалі рендериться в цьому переліку.
+     * `state === 'Failed'`) — і кнопка з'явиться в шторці `Running` та
+     * `Succeeded`, а цей тест впаде. Шторка `Failed` доводить, що кнопка
+     * взагалі рендериться.
      */
-    expect(
-      within(rowOfState('Running')).queryByRole('button', { name: '⟦jobs.restart⟧' }),
-    ).toBeNull();
-    expect(
-      within(rowOfState('Succeeded')).queryByRole('button', { name: '⟦jobs.restart⟧' }),
-    ).toBeNull();
-    expect(
-      within(rowOfState('Failed')).getByRole('button', { name: '⟦jobs.restart⟧' }),
-    ).toBeTruthy();
+    // ⚠ Підвал шторки вже є: у `Running` — «Cancel job», у `Succeeded` — файл.
+    const running = await openDrawerOf('Running');
+    await within(running).findByRole('button', { name: '⟦jobs.cancel⟧' });
+    expect(within(running).queryByRole('button', { name: '⟦jobs.restart⟧' })).toBeNull();
+
+    const done = await openDrawerOf('Succeeded');
+    await within(done).findByRole('link', { name: '⟦jobs.resultDownload⟧' });
+    expect(within(done).queryByRole('button', { name: '⟦jobs.restart⟧' })).toBeNull();
+
+    const failed = await openDrawerOf('Failed');
+    expect(await within(failed).findByRole('button', { name: '⟦jobs.restart⟧' })).toBeTruthy();
+
+    // ⚠ У рядку переліку кнопок дій більше немає (UI-28).
+    expect(within(rowOfState('Failed')).queryByRole('button', { name: '⟦jobs.restart⟧' })).toBeNull();
   });
 });
 
-describe('JobsPage: посилання на файл результату в переліку останніх задач', () => {
+describe('JobsPage: посилання на файл результату у шторці задачі', () => {
   it('resultUrl не null — посилання веде саме на нього', async () => {
     mockFetch();
     show();
 
-    const link = within(await findRowOfState('Succeeded')).getByRole('link', {
-      name: '⟦jobs.resultDownload⟧',
-    });
+    const drawer = await openDrawerOf('Succeeded');
+    const link = await within(drawer).findByRole('link', { name: '⟦jobs.resultDownload⟧' });
 
     /*
      * ⛔ Мутаційний доказ: підставте замість `job.resultUrl` побудову адреси
@@ -186,13 +170,14 @@ describe('JobsPage: посилання на файл результату в п�
     mockFetch();
     show();
 
-    await findRowOfState('Failed');
+    const failed = await openDrawerOf('Failed');
+    await within(failed).findByRole('button', { name: '⟦jobs.restart⟧' });
+    expect(within(failed).queryByRole('link', { name: '⟦jobs.resultDownload⟧' })).toBeNull();
 
-    expect(
-      within(rowOfState('Failed')).queryByRole('link', { name: '⟦jobs.resultDownload⟧' }),
-    ).toBeNull();
-    expect(
-      within(rowOfState('Running')).queryByRole('link', { name: '⟦jobs.resultDownload⟧' }),
-    ).toBeNull();
+    const running = await openDrawerOf('Running');
+    await within(running).findByRole('button', { name: '⟦jobs.cancel⟧' });
+    expect(within(running).queryByRole('link', { name: '⟦jobs.resultDownload⟧' })).toBeNull();
+
+    await findRowOfState('Succeeded');
   });
 });

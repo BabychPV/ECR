@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MantineProvider } from '@mantine/core';
 import { MemoryRouter, useLocation } from 'react-router-dom';
@@ -58,9 +58,14 @@ describe('JobsPage: Enter у полі ідентифікатора запуск�
     const user = userEvent.setup();
     show();
 
-    const input = screen.getByLabelText('⟦jobs.id⟧');
+    // ✎ UI-28: поле ідентифікатора — у діалозі «Find a job by id» з шапки
+    // (макет поля над переліком не має), задача відкривається шторкою.
+    await user.click(await screen.findByRole('button', { name: '⟦jobs.findById⟧' }));
+    const input = await screen.findByLabelText('⟦jobs.id⟧');
     await user.type(input, 'job-abc-123{Enter}');
 
-    expect((globalThis as { __search?: string }).__search).toBe('?id=job-abc-123');
+    await waitFor(() => expect((globalThis as { __search?: string }).__search).toBe('?panel=job-abc-123'));
+    // Діалог закрився — ідентифікатор не лишається висіти над шторкою.
+    await waitFor(() => expect(screen.queryByLabelText('⟦jobs.id⟧')).toBeNull());
   });
 });
