@@ -1923,6 +1923,7 @@ USING (VALUES
     (N'err.ECR-DOC-0409.deleteHasEventMap',     N'en', N'The document cannot be deleted: a source event mapping writes into it. Remove the mapping first.', 1),
     -- Document.ChangeKey: controlled business key change (FV-3.9).
     (N'err.ECR-DOC-0409.rekeyLocked',           N'en', N'The document key cannot be changed: sheet {sheetDefId} for period {periodKey} is {reason}.', 1),
+    (N'err.ECR-DOC-0409.rekeyLockedHidden',     N'en', N'The document key cannot be changed: the document has submitted or approved sheets.', 1),
     (N'err.ECR-DOC-0409.rekeyDuplicate',        N'en', N'Another document of this project already has the key "{businessKey}".', 1),
     (N'err.ECR-DOC-0409.rekeyStale',            N'en', N'The document key has changed since it was read; it is now "{businessKey}".', 1),
     (N'err.ECR-DOC-0422.rekeyReasonRequired',   N'en', N'A reason is required to change the document key.', 1),
@@ -7227,6 +7228,7 @@ SELECT v.[Key], v.Lang, v.Val
     (N'err.ECR-DOC-0409.deleteNotDraft', N'ru', N'Удалить можно только документ-черновик; лист {sheetDefId} за период {periodKey} — {reason}.'),
     (N'err.ECR-DOC-0409.deleteHasHistory', N'ru', N'Удалить можно только документ-черновик; этот документ уже проходил согласование.'),
     (N'err.ECR-DOC-0409.rekeyLocked', N'ru', N'Ключ документа нельзя изменить: лист {sheetDefId} за период {periodKey} — {reason}.'),
+    (N'err.ECR-DOC-0409.rekeyLockedHidden', N'ru', N'Ключ документа нельзя изменить: в документе есть поданные или утверждённые листы.'),
     (N'err.ECR-DOC-0409.rekeyDuplicate', N'ru', N'У другого документа этого проекта уже есть ключ «{businessKey}».'),
     (N'err.ECR-DOC-0409.rekeyStale', N'ru', N'Ключ документа изменился после чтения; теперь он — «{businessKey}».'),
     (N'err.ECR-DOC-0422.rekeyReasonRequired', N'ru', N'Для изменения ключа документа требуется причина.'),
@@ -10255,6 +10257,7 @@ SELECT v.[Key], v.Lang, v.Val
     (N'err.ECR-DOC-0409.deleteNotDraft', N'kz', N'Тек нобай құжатты жоюға болады; {periodKey} кезеңіне арналған {sheetDefId} парағы — {reason}.'),
     (N'err.ECR-DOC-0409.deleteHasHistory', N'kz', N'Тек нобай құжатты жоюға болады; бұл құжат келісуден өтіп қойған.'),
     (N'err.ECR-DOC-0409.rekeyLocked', N'kz', N'Құжат кілтін өзгертуге болмайды: {periodKey} кезеңіне арналған {sheetDefId} парағы — {reason}.'),
+    (N'err.ECR-DOC-0409.rekeyLockedHidden', N'kz', N'Құжат кілтін өзгертуге болмайды: құжатта тапсырылған немесе бекітілген парақтар бар.'),
     (N'err.ECR-DOC-0409.rekeyDuplicate', N'kz', N'Осы жобаның басқа құжатында «{businessKey}» кілті бұрыннан бар.'),
     (N'err.ECR-DOC-0409.rekeyStale', N'kz', N'Құжат кілті оқылғаннан кейін өзгерді; енді ол — «{businessKey}».'),
     (N'err.ECR-DOC-0422.rekeyReasonRequired', N'kz', N'Құжат кілтін өзгерту үшін себеп қажет.'),

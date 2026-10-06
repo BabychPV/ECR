@@ -9,7 +9,8 @@ namespace Ecr.Application.Documents;
 
 /// <summary>Перелік документів. Право <c>Document.View</c>.</summary>
 public sealed class ListDocumentsHandler(
-    IDocumentStore documents, IAccessDecisionService access, ICurrentUser currentUser)
+    IDocumentStore documents, IAccessDecisionService access, ICurrentUser currentUser,
+    IDocumentListSummaryStore samples)
 {
     /// <summary>Право перегляду документів.</summary>
     public const string Permission = "Document.View";
@@ -57,6 +58,17 @@ public sealed class ListDocumentsHandler(
         // ⛔ ФВ-6.14: лише проєкти, де є і грант, і саме право перегляду —
         // оператор з областю «A» бачить документи лише A.
         var visibleProjects = ReadableProjects(profile, Permission);
+
+        // ⛔ Фільтр за станом рахується лише по аркушах, які читач бачить: інакше `state=Rejected`
+        // знаходить документ, відхилений схованим аркушем, — оракул (смуга зведення цього не показує).
+        if (filter.State is not null && periodKey is { } stateKey)
+        {
+            filter = filter with
+            {
+                HiddenSheetDefIds = await DocumentSheetVisibility
+                    .HiddenSheetIdsAsync(samples, access, profile, visibleProjects, stateKey, ct).ConfigureAwait(false),
+            };
+        }
 
         var all = await documents
             .ListAsync(projectId, new PeriodKeyFilter(periodKey), filter, page, visibleProjects, ct)

@@ -151,6 +151,11 @@ public sealed class SubmitSheetHandler(
                 });
         }
 
+        // ⛔ Схований від читача аркуш — та сама відмова, що й аркуш поза складом, ДО перевірки
+        // стану/гранта (інакше `reason` розповідав би про стан аркуша, якого читач не бачить).
+        await Documents.DocumentVisibility
+            .RequireSheetVisibleAsync(documents, access, profile, documentId, sheetDefId, key, ct).ConfigureAwait(false);
+
         // ⛔ Уся перевірка й сам зріз — ПІД винятковим блокуванням аркуша × періоду,
         // однією транзакцією (`ISheetEditGate`, `SubmitEditRaceTests`). Доти
         // транзакція відкривалась лише навколо запису зрізу і не брала жодного

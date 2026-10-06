@@ -84,7 +84,14 @@ public sealed record DocumentSheetState(string Code, LocalizedText NameL10n, str
 /// (<c>aud.CellChange.IsLateEdit = 1</c>, <c>D-70</c>), що обчислює позначку в
 /// рядку (<c>BE-09b</c>) — не друге визначення «пізньої правки».
 /// </param>
-public readonly record struct DocumentListFilter(DocumentStatus? State, int? MineUserId, bool? HasLateEdits = null);
+/// <param name="HiddenSheetDefIds">
+/// Аркуші, яких читач не бачить: зведений стан для <paramref name="State"/> рахується
+/// лише по решті (інакше фільтр за станом знаходить документ за станом схованого аркуша —
+/// оракул). <c>null</c> — читач без обмежень.
+/// </param>
+public readonly record struct DocumentListFilter(
+    DocumentStatus? State, int? MineUserId, bool? HasLateEdits = null,
+    IReadOnlyCollection<int>? HiddenSheetDefIds = null);
 
 /// <summary>Порушення правила складу документа.</summary>
 /// <param name="SheetGroup">Група аркушів.</param>

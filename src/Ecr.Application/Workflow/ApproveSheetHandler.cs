@@ -16,7 +16,8 @@ public sealed class ApproveSheetHandler(
     IUnitOfWork uow,
     ICurrentUser currentUser,
     IClock clock,
-    IAuditWriter audit)
+    IAuditWriter audit,
+    IDocumentStore documents)
 {
     /// <summary>Затверджує або відхиляє аркуш.</summary>
     /// <param name="documentId">Документ.</param>
@@ -43,6 +44,11 @@ public sealed class ApproveSheetHandler(
         // документа, а не `403` з рішення про затвердження (той сам по собі каже,
         // що документ існує).
         await Documents.DocumentVisibility.RequireVisibleAsync(access, profile, documentId, ct).ConfigureAwait(false);
+
+        // ⛔ Схований від читача аркуш — та сама відмова, що й аркуш поза складом, ДО гранта й стану:
+        // «аркуш у стані Submitted, а не …» розповідало б про стан аркуша, якого читач не бачить.
+        await Documents.DocumentVisibility
+            .RequireSheetVisibleAsync(documents, access, profile, documentId, sheetDefId, key, ct).ConfigureAwait(false);
 
         var decision = await access.CanApproveAsync(profile, documentId, sheetDefId, key, ct)
                                    .ConfigureAwait(false);

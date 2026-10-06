@@ -22,7 +22,8 @@ public sealed class ReopenDocumentHandler(
     IAccessDecisionService access,
     IUnitOfWork uow,
     ICurrentUser currentUser,
-    IClock clock)
+    IClock clock,
+    IDocumentStore documents)
 {
     /// <summary>Право, без якого повернення в роботу неможливе (ФВ-6.12).</summary>
     public const string Permission = "Document.Reopen";
@@ -52,6 +53,10 @@ public sealed class ReopenDocumentHandler(
         // «немає Document.Reopen» на невидимому документі теж підтверджувала б,
         // що він існує. Невидимий документ — `404`, як на кожному маршруті.
         await Documents.DocumentVisibility.RequireVisibleAsync(access, profile, documentId, ct).ConfigureAwait(false);
+
+        // ⛔ Схований від читача аркуш — та сама відмова, що й аркуш поза складом, ДО гранта й стану.
+        await Documents.DocumentVisibility
+            .RequireSheetVisibleAsync(documents, access, profile, documentId, sheetDefId, key, ct).ConfigureAwait(false);
 
         // Право небезпечне і тому перевіряється окремо від грантів: воно дає
         // змогу змінити вже подані числа (ФВ-6.12).

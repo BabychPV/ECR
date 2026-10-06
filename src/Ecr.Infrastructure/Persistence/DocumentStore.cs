@@ -146,7 +146,7 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
 
         if (filter.State is { } state && period.Value is { } periodKey)
         {
-            documents = WhereState(documents, state, periodKey);
+            documents = WhereState(documents, state, periodKey, filter.HiddenSheetDefIds?.ToArray());
         }
 
         // BE-09b: та сама умова, що дає позначку в рядку (`LateEditDocumentIds`),
@@ -759,9 +759,13 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
     /// Approved — усі аркуші. Інше правило дало б фільтр, що розходиться з цифрою
     /// над таблицею.
     /// </remarks>
-    private IQueryable<Document> WhereState(IQueryable<Document> documents, DocumentStatus state, int periodKey)
+    private IQueryable<Document> WhereState(
+        IQueryable<Document> documents, DocumentStatus state, int periodKey, int[]? hiddenSheetDefIds)
     {
-        var sheets = db.DocumentSheets.Where(s => s.IsIncluded);
+        // ⛔ Схований від читача аркуш не бере участі в зведеному стані (ту саму межу накладає смуга):
+        // інакше `state=Rejected` знаходив би документ, відхилений лише схованим аркушем.
+        var hidden = hiddenSheetDefIds ?? [];
+        var sheets = db.DocumentSheets.Where(s => s.IsIncluded && !hidden.Contains(s.SheetDefId));
         var states = db.ApprovalStates.Where(a => a.PeriodKey == periodKey);
 
         Expression<Func<Document, bool>> rejected = d => sheets.Any(s => s.DocumentId == d.Id

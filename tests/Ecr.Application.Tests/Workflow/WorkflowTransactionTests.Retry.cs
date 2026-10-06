@@ -68,7 +68,7 @@ public sealed partial class WorkflowTransactionTests
             user.UserId.Returns(ApproverId);
             var handler = new ApproveSheetHandler(
                 new WorkflowStore(db), AccessAt(step: null), new ReportSnapshotSync(NoSnapshots(), Documents(world)),
-                new UnitOfWork(db), user, new TestClock(Now), new AuditWriter(db));
+                new UnitOfWork(db), user, new TestClock(Now), new AuditWriter(db), Documents(world));
 
             await handler
                 .HandleAsync(world.DocumentId, world.SheetDefId, PeriodKeyValue, approved: true, reason: null, CancellationToken.None)

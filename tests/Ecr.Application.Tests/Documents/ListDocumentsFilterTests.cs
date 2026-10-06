@@ -93,5 +93,5 @@ public sealed class ListDocumentsFilterTests
         Assert.Equal("err.ECR-REQ-0422.documentStateNeedsPeriod", refused.Details!["messageKey"]);
     }
 
-    private ListDocumentsHandler Handler() => new(_documents, _access, _user);
+    private ListDocumentsHandler Handler() => new(_documents, _access, _user, Substitute.For<IDocumentListSummaryStore>());
 }

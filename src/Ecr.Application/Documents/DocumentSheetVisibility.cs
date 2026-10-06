@@ -76,6 +76,61 @@ public static class DocumentSheetVisibility
         return scopes;
     }
 
+    /// <summary>
+    /// Аркуші, яких читач не бачить у жодному з проєктів, — для фільтра переліку за станом.
+    /// Ідентифікатор аркуша належить версії шаблону, тож плоский перелік по проєктах не плутається.
+    /// </summary>
+    /// <param name="samples">Порт, що дає по одному документу проєкту для побудови меж.</param>
+    /// <param name="access">Служба доступу.</param>
+    /// <param name="profile">Профіль читача.</param>
+    /// <param name="projects">Проєкти, документи яких перелічуються.</param>
+    /// <param name="periodKey">Період запиту.</param>
+    /// <param name="ct">Скасування.</param>
+    public static async Task<IReadOnlyCollection<int>?> HiddenSheetIdsAsync(
+        IDocumentListSummaryStore samples, IAccessDecisionService access, AccessProfile profile,
+        IReadOnlyCollection<int> projects, int periodKey, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(samples);
+
+        if (!HasRestrictions(profile))
+        {
+            return null;
+        }
+
+        var sample = await samples.SampleDocumentPerProjectAsync(projects, ct).ConfigureAwait(false);
+        var scopes = await ScopesAsync(access, profile, sample.Select(s => (s.Key, s.Value)), periodKey, ct)
+            .ConfigureAwait(false);
+
+        return [.. scopes.Values.SelectMany(s => s.HiddenSheetIds()).Distinct().Order()];
+    }
+
+    /// <summary>
+    /// Стани аркушів документа, яких читач не бачить, — для відмов (видалення, зміна ключа), що інакше
+    /// називали б код і стан схованого аркуша. Читач без обмежень — порожньо й без запитів.
+    /// </summary>
+    /// <param name="access">Служба доступу.</param>
+    /// <param name="profile">Профіль читача.</param>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="states">Стани аркуш × період документа.</param>
+    /// <param name="ct">Скасування.</param>
+    public static async Task<IReadOnlyList<Ecr.Domain.Entities.Workflow.ApprovalState>> HiddenStatesAsync(
+        IAccessDecisionService access, AccessProfile profile, long documentId,
+        IReadOnlyCollection<Ecr.Domain.Entities.Workflow.ApprovalState> states, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(access);
+        ArgumentNullException.ThrowIfNull(states);
+
+        if (states.Count == 0 || !HasRestrictions(profile))
+        {
+            return [];
+        }
+
+        var scope = await access.ReadScopeAsync(profile, documentId, ct).ConfigureAwait(false);
+
+        return [.. states.Where(s =>
+            !(new PeriodKey(s.PeriodKey).IsValid ? scope.InPeriod(new PeriodKey(s.PeriodKey)) : scope).CanReadSheet(s.SheetDefId))];
+    }
+
     /// <summary>Чи є в структурі версії шаблону щось, чого межі читача не відкривають.</summary>
     /// <param name="scope">Межі читання проєкту.</param>
     /// <param name="sheetCodes">Коди аркушів структури, що перевіряються.</param>

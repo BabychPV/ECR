@@ -196,6 +196,10 @@ public sealed class DocumentReadScope
     public IReadOnlyList<string> HiddenSheetCodes()
         => [.. _sheetCodes.Where(s => !CanReadSheet(s.Key)).Select(s => s.Value).Order(StringComparer.Ordinal)];
 
+    /// <summary>Ідентифікатори аркушів структури, яких профіль НЕ бачить, — за зростанням (фільтр переліку за станом).</summary>
+    public IReadOnlyList<int> HiddenSheetIds()
+        => [.. _sheetCodes.Keys.Where(id => !CanReadSheet(id)).Order()];
+
     /// <summary>Таблиці структури, яких профіль НЕ бачить, — за зростанням.</summary>
     /// <remarks>
     /// Для шляхів, що рахують межі тут, а застосовують деінде: задача експорту

@@ -114,7 +114,7 @@ public sealed class ListDocumentsGrantScopeTests
         Assert.Equal("c1", result.NextCursor);
     }
 
-    private ListDocumentsHandler Handler() => new(_documents, _access, _user);
+    private ListDocumentsHandler Handler() => new(_documents, _access, _user, Substitute.For<IDocumentListSummaryStore>());
 
     private void Page(PagedResult<DocumentSummary> result)
         => _documents.ListAsync(

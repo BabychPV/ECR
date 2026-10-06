@@ -83,6 +83,10 @@ public sealed class RecallSheetHandler(
                 });
         }
 
+        // ⛔ Схований від читача аркуш — та сама відмова, що й аркуш поза складом, ДО гранта й стану.
+        await Documents.DocumentVisibility
+            .RequireSheetVisibleAsync(documents, access, profile, documentId, sheetDefId, key, ct).ConfigureAwait(false);
+
         var projectId = await documents.FindProjectIdAsync(documentId, ct).ConfigureAwait(false);
 
         if (!HasSubmitGrant(profile, projectId, sheetDefId))
