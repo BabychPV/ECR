@@ -6858,8 +6858,22 @@ USING (VALUES
     (N'templates.notPublished', N'en', N'Not published yet', 1),
     (N'templates.draft', N'en', N'Draft', 1),
     (N'templates.state', N'en', N'State', 1),
-    (N'templates.noMatch', N'en', N'No templates match the filters', 1)
+    (N'templates.noMatch', N'en', N'No templates match the filters', 1),
     -- COLL:ui34tpl ── кінець секції ──
+    -- COLL:ui38audit ── UI-38: журнал змін у формі макета (Was → becomes, Δ, Late, походження словом) і ім'я кнопки очищення дати; ru/kz — порцією COLL:ui38audit у блоці I18N нижче ──
+    (N'audit.documentCell', N'en', N'Document · cell', 1),
+    (N'audit.wasBecomes', N'en', N'Was → becomes', 1),
+    (N'audit.lateMark', N'en', N'Late', 1),
+    (N'audit.lateHint', N'en', N'Made after the data entry deadline', 1),
+    (N'audit.newValue', N'en', N'new', 1),
+    (N'audit.delta', N'en', N'Difference', 1),
+    (N'audit.originLabel.UserEdit', N'en', N'Typed by a user', 1),
+    (N'audit.originLabel.Import', N'en', N'Excel import', 1),
+    (N'audit.originLabel.Recalculation', N'en', N'Recalculation', 1),
+    (N'audit.originLabel.Migration', N'en', N'Migration', 1),
+    (N'dates.clear', N'en', N'Clear the date', 1),
+    (N'dates.clearNamed', N'en', N'Clear {field}', 1)
+    -- COLL:ui38audit ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -16361,6 +16375,38 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:ui34tpl ── кінець секції ──
+-- COLL:ui38audit ── ru/kz UI-38: журнал змін у формі макета, ім'я кнопки очищення дати; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'audit.documentCell', N'ru', N'Документ · ячейка'),
+    (N'audit.documentCell', N'kz', N'Құжат · ұяшық'),
+    (N'audit.wasBecomes', N'ru', N'Было → стало'),
+    (N'audit.wasBecomes', N'kz', N'Болған → болды'),
+    (N'audit.lateMark', N'ru', N'Запоздалая'),
+    (N'audit.lateMark', N'kz', N'Кешіккен'),
+    (N'audit.lateHint', N'ru', N'Внесена после срока ввода данных'),
+    (N'audit.lateHint', N'kz', N'Деректерді енгізу мерзімінен кейін енгізілген'),
+    (N'audit.newValue', N'ru', N'новое'),
+    (N'audit.newValue', N'kz', N'жаңа'),
+    (N'audit.delta', N'ru', N'Разница'),
+    (N'audit.delta', N'kz', N'Айырма'),
+    (N'audit.originLabel.UserEdit', N'ru', N'Введено пользователем'),
+    (N'audit.originLabel.UserEdit', N'kz', N'Пайдаланушы енгізген'),
+    (N'audit.originLabel.Import', N'ru', N'Импорт из Excel'),
+    (N'audit.originLabel.Import', N'kz', N'Excel-ден импорт'),
+    (N'audit.originLabel.Recalculation', N'ru', N'Пересчёт'),
+    (N'audit.originLabel.Recalculation', N'kz', N'Қайта есептеу'),
+    (N'audit.originLabel.Migration', N'ru', N'Миграция'),
+    (N'audit.originLabel.Migration', N'kz', N'Көшіру'),
+    (N'dates.clear', N'ru', N'Очистить дату'),
+    (N'dates.clear', N'kz', N'Күнді тазалау'),
+    (N'dates.clearNamed', N'ru', N'Очистить: {field}'),
+    (N'dates.clearNamed', N'kz', N'Тазалау: {field}')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:ui38audit ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t
