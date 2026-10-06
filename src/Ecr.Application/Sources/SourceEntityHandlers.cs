@@ -168,10 +168,9 @@ public sealed class CreateSourceEntityHandler(
         }
 
         HashSet<string> known;
-        using (var bounded = CancellationTokenSource.CreateLinkedTokenSource(ct))
+        using (var deadline = catalogPolicy.StartDeadline())
+        using (var bounded = CancellationTokenSource.CreateLinkedTokenSource(ct, deadline.Token))
         {
-            bounded.CancelAfter(catalogPolicy.Timeout);
-
             try
             {
                 var roots = await catalog.BrowseAsync(dataSource.Id, null, bounded.Token).ConfigureAwait(false);

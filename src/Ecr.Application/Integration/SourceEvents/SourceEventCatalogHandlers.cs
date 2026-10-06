@@ -49,8 +49,8 @@ internal static class SourceEventReading
         Func<CancellationToken, Task<T>> read,
         CancellationToken ct)
     {
-        using var bounded = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        bounded.CancelAfter(policy.Timeout);
+        using var deadline = policy.StartDeadline();
+        using var bounded = CancellationTokenSource.CreateLinkedTokenSource(ct, deadline.Token);
 
         try
         {
