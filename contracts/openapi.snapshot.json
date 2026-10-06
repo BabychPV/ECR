@@ -15579,12 +15579,119 @@
         ],
         "type": "object"
       },
+      "SystemFactsAboutDto": {
+        "description": "Блок «Про систему».",
+        "properties": {
+          "build": {
+            "description": "Версія збірки без метаданих (як `productVersion`).",
+            "type": "string"
+          },
+          "languages": {
+            "description": "Коди увімкнених мов у порядку показу.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "lastErrorAt": {
+            "description": "Момент останнього провалу задачі чи збору, UTC; `null` — не було.",
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "signInMode": {
+            "description": "Режим входу: `Windows`, `Local`, `WindowsAndLocal`, `None`.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "build",
+          "signInMode",
+          "languages",
+          "lastErrorAt"
+        ],
+        "type": "object"
+      },
+      "SystemFactsDbDto": {
+        "description": "Стан БД: лише число й мітки часу, без шляхів чи імен.",
+        "properties": {
+          "freeSpaceDataDiskGb": {
+            "description": "Вільне місце диска даних, ГБ; `null` — СУБД не віддала.",
+            "format": "int64",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "lastBackupAt": {
+            "description": "Остання копія БД, UTC; `null` — немає копій або права.",
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "maintenanceWindow": {
+            "description": "Вікно обслуговування; `null` — у моделі налаштувань його немає (не вигадується).",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "freeSpaceDataDiskGb",
+          "lastBackupAt",
+          "maintenanceWindow"
+        ],
+        "type": "object"
+      },
+      "SystemFactsJobsDto": {
+        "description": "Лічильники черги фонових задач.",
+        "properties": {
+          "failed24h": {
+            "description": "Завершились провалом за останню добу.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "queued": {
+            "description": "Стоять у черзі.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "running": {
+            "description": "Виконуються зараз.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "running",
+          "queued",
+          "failed24h"
+        ],
+        "type": "object"
+      },
       "SystemFactsResponse": {
         "description": "Факти про піднятий процес.",
         "properties": {
+          "about": {
+            "$ref": "#/components/schemas/SystemFactsAboutDto",
+            "description": "Блок «Про систему»."
+          },
+          "db": {
+            "$ref": "#/components/schemas/SystemFactsDbDto",
+            "description": "Стан БД (число й мітки часу, без шляхів)."
+          },
           "environment": {
             "description": "Ім'я середовища хосту (`Production`, `Development`).",
             "type": "string"
+          },
+          "jobs": {
+            "$ref": "#/components/schemas/SystemFactsJobsDto",
+            "description": "Лічильники черги фонових задач."
           },
           "logDirectory": {
             "description": "Тека файлового журналу; `null`, коли файл не пишеться.",
@@ -15601,6 +15708,10 @@
             "description": "Версія продукту без метаданих збірки.",
             "type": "string"
           },
+          "sources": {
+            "$ref": "#/components/schemas/SystemFactsSourcesDto",
+            "description": "Лічильники джерел збору (лише числа)."
+          },
           "startedAt": {
             "description": "Коли стартував процес, UTC.",
             "format": "date-time",
@@ -15612,7 +15723,37 @@
           "startedAt",
           "environment",
           "notificationTransport",
-          "logDirectory"
+          "logDirectory",
+          "jobs",
+          "sources",
+          "db",
+          "about"
+        ],
+        "type": "object"
+      },
+      "SystemFactsSourcesDto": {
+        "description": "Лічильники джерел збору: лише числа, без назв і адрес.",
+        "properties": {
+          "active": {
+            "description": "Налаштованих активних джерел.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "failed": {
+            "description": "Активних джерел, чий останній запуск збору провалився.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "gaps": {
+            "description": "Подій покриття за тиждень, де дані за інтервал не перенесено.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "active",
+          "failed",
+          "gaps"
         ],
         "type": "object"
       },

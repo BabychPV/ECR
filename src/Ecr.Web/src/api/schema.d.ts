@@ -24954,21 +24954,94 @@ export interface components {
             /** @description Нове джерело для всіх перелічених. */
             sourceKind: components["schemas"]["RegistrySourceKind"];
         };
+        /** @description Блок «Про систему». */
+        SystemFactsAboutDto: {
+            /** @description Версія збірки без метаданих (як `productVersion`). */
+            build: string;
+            /** @description Коди увімкнених мов у порядку показу. */
+            languages: string[];
+            /**
+             * Format: date-time
+             * @description Момент останнього провалу задачі чи збору, UTC; `null` — не було.
+             */
+            lastErrorAt: null | string;
+            /** @description Режим входу: `Windows`, `Local`, `WindowsAndLocal`, `None`. */
+            signInMode: string;
+        };
+        /** @description Стан БД: лише число й мітки часу, без шляхів чи імен. */
+        SystemFactsDbDto: {
+            /**
+             * Format: int64
+             * @description Вільне місце диска даних, ГБ; `null` — СУБД не віддала.
+             */
+            freeSpaceDataDiskGb: null | number;
+            /**
+             * Format: date-time
+             * @description Остання копія БД, UTC; `null` — немає копій або права.
+             */
+            lastBackupAt: null | string;
+            /** @description Вікно обслуговування; `null` — у моделі налаштувань його немає (не вигадується). */
+            maintenanceWindow: null | string;
+        };
+        /** @description Лічильники черги фонових задач. */
+        SystemFactsJobsDto: {
+            /**
+             * Format: int32
+             * @description Завершились провалом за останню добу.
+             */
+            failed24h: number;
+            /**
+             * Format: int32
+             * @description Стоять у черзі.
+             */
+            queued: number;
+            /**
+             * Format: int32
+             * @description Виконуються зараз.
+             */
+            running: number;
+        };
         /** @description Факти про піднятий процес. */
         SystemFactsResponse: {
+            /** @description Блок «Про систему». */
+            about: components["schemas"]["SystemFactsAboutDto"];
+            /** @description Стан БД (число й мітки часу, без шляхів). */
+            db: components["schemas"]["SystemFactsDbDto"];
             /** @description Ім'я середовища хосту (`Production`, `Development`). */
             environment: string;
+            /** @description Лічильники черги фонових задач. */
+            jobs: components["schemas"]["SystemFactsJobsDto"];
             /** @description Тека файлового журналу; `null`, коли файл не пишеться. */
             logDirectory: null | string;
             /** @description Стан транспорту сповіщень. */
             notificationTransport: components["schemas"]["NotificationTransportDto"];
             /** @description Версія продукту без метаданих збірки. */
             productVersion: string;
+            /** @description Лічильники джерел збору (лише числа). */
+            sources: components["schemas"]["SystemFactsSourcesDto"];
             /**
              * Format: date-time
              * @description Коли стартував процес, UTC.
              */
             startedAt: string;
+        };
+        /** @description Лічильники джерел збору: лише числа, без назв і адрес. */
+        SystemFactsSourcesDto: {
+            /**
+             * Format: int32
+             * @description Налаштованих активних джерел.
+             */
+            active: number;
+            /**
+             * Format: int32
+             * @description Активних джерел, чий останній запуск збору провалився.
+             */
+            failed: number;
+            /**
+             * Format: int32
+             * @description Подій покриття за тиждень, де дані за інтервал не перенесено.
+             */
+            gaps: number;
         };
         TableDto: {
             /** @description Код — ідентичність таблиці й адреса в `PUT …/sheets/{sheetCode}/tables/{code}`. */
