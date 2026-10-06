@@ -69,7 +69,7 @@ describe('L8-10: проєкти поза першою сторінкою', () =>
       </MantineProvider>,
     );
 
-    const select = await waitFor(() => screen.getByLabelText(/documents\.project/));
+    const select = await waitFor(() => screen.getByLabelText(/documents\.project/, { selector: 'input' }));
     fireEvent.click(select);
 
     expect(await screen.findByRole('option', { name: /LATE/ })).toBeDefined();

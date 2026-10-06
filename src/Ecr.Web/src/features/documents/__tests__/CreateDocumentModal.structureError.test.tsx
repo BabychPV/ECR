@@ -122,7 +122,7 @@ function show(): void {
  * шукаються через `screen`.
  */
 async function pickProject(): Promise<void> {
-  fireEvent.click(await screen.findByLabelText('⟦documents.project⟧'));
+  fireEvent.click(await screen.findByLabelText(/documents\.project/, { selector: 'input' }));
   fireEvent.click(await screen.findByRole('option', { name: 'PRJ' }));
 }
 
@@ -154,11 +154,14 @@ describe('CreateDocumentModal: збій запиту структури не в�
 
     await pickProject();
 
-    await waitFor(() => expect(screen.getByText('General (GEN)')).toBeTruthy());
+    // ⚠ Версію видно, але обирати її нема з чого: її визначає проєкт.
+    await waitFor(() => expect(screen.getByText(/AIR · v1\.0/)).toBeTruthy());
     expect(screen.queryByRole('alert')).toBeNull();
 
-    // ⚠ Версію видно, але обирати її нема з чого: її визначає проєкт.
-    expect(screen.getByText(/AIR · 1\.0/)).toBeTruthy();
+    // ✎ UI-31: аркуші — у кроці Sheets майстра (Project → Period → Sheets).
+    fireEvent.click(screen.getByRole('button', { name: '⟦wizard.next⟧' }));
+    fireEvent.click(await screen.findByRole('button', { name: '⟦wizard.next⟧' }));
+    await waitFor(() => expect(screen.getByText('General (GEN)')).toBeTruthy());
   });
 
   it('V-12: діалог не питає жодного ендпоінта шаблонів (Template.View)', async () => {
@@ -167,7 +170,7 @@ describe('CreateDocumentModal: збій запиту структури не в�
     show();
 
     await pickProject();
-    await waitFor(() => expect(screen.getByText('General (GEN)')).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/AIR · v1\.0/)).toBeTruthy());
 
     const urls = (vi.mocked(fetch).mock.calls as [RequestInfo | URL][]).map(([input]) => String(input));
     expect(urls.some((url) => url.includes('/api/v1/projects/1/document-template'))).toBe(true);
