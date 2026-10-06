@@ -6684,8 +6684,14 @@ USING (VALUES
     (N'version.publishProblems', N'en', N'The version was not published. Problems to fix: {count}', 1),
     -- COLL:a201pub ── кінець секції ──
     -- COLL:a2s ── A2-03: підказка (Info) для Check без ключів; ru/kz — порцією COLL:a2s у блоці I18N нижче ──
-    (N'validation.check.noKeys', N'en', N'A Check without keys compares only when the receiving table has exactly one row; it has {targetRows}, so nothing was compared. Unknown row matching fields are ignored.', 1)
+    (N'validation.check.noKeys', N'en', N'A Check without keys compares only when the receiving table has exactly one row; it has {targetRows}, so nothing was compared. Unknown row matching fields are ignored.', 1),
     -- COLL:a2s ── кінець секції ──
+    -- COLL:a212 ── A2-12: поля шапки документа в експорті (аркуш «Header» у xlsx); ru/kz — порцією COLL:a212 у блоці I18N нижче ──
+    (N'export.header.sheet', N'en', N'Header', 1),
+    (N'export.header.field', N'en', N'Field', 1),
+    (N'export.header.code', N'en', N'Code', 1),
+    (N'export.header.value', N'en', N'Value', 1)
+    -- COLL:a212 ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -15791,6 +15797,22 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:a2s ── кінець секції ──
+-- COLL:a212 ── ru/kz A2-12: поля шапки документа в експорті; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'export.header.sheet', N'ru', N'Шапка'),
+    (N'export.header.field', N'ru', N'Поле'),
+    (N'export.header.code', N'ru', N'Код'),
+    (N'export.header.value', N'ru', N'Значение'),
+    (N'export.header.sheet', N'kz', N'Тақырып'),
+    (N'export.header.field', N'kz', N'Өріс'),
+    (N'export.header.code', N'kz', N'Код'),
+    (N'export.header.value', N'kz', N'Мәні')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:a212 ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t
