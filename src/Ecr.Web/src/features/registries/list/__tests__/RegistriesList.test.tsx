@@ -258,4 +258,73 @@ describe('RegistriesList (UI-35)', () => {
     const violations = await findViolations(container.ownerDocument.body);
     expect(violations, report(violations)).toEqual([]);
   });
+
+  describe('агрегати переліку (lane ui-registry-def-ext)', () => {
+    const month = new Date().toISOString().slice(0, 7);
+
+    const Extended = [
+      {
+        ...Registries[0],
+        entryCount: 12,
+        definitionVersion: 2,
+        dataChangedAt: `${month}-02T10:00:00Z`,
+        usedInColumns: 0,
+        usedInTemplates: 0,
+        hasDraft: false,
+      },
+      {
+        ...Registries[1],
+        entryCount: 30,
+        definitionVersion: 3,
+        dataChangedAt: '2020-01-05T10:00:00Z',
+        usedInColumns: 7,
+        usedInTemplates: 2,
+        hasDraft: true,
+      },
+    ];
+
+    it('колонки Entries / Used in / Entries changed / State і смуга макета', async () => {
+      mockFetch(['Registry.View', 'Registry.EditDefinition'], Extended);
+      await loadCatalog('en', 'private');
+      show('/admin/registries');
+
+      await screen.findByRole('button', { name: 'Units of measure' });
+      const headers = screen.getAllByRole('columnheader').map((cell) => cell.textContent?.trim());
+      expect(headers).toEqual(['Registry', 'Entries', 'Fields', 'Used in', 'Entries changed', 'State', 'Properties']);
+
+      const strip = screen.getByRole('group', { name: 'Registry summary' });
+      expect(strip.textContent).toContain('42');
+      expect(strip.textContent).toContain('entries');
+
+      // «changed this month» фільтрує: лишається лише UNITS.
+      fireEvent.click(within(strip).getByRole('button', { name: /changed this month/ }));
+      await waitFor(() => expect(screen.queryByRole('button', { name: 'Emission sources' })).toBeNull());
+      expect(screen.getByRole('button', { name: 'Units of measure' })).toBeTruthy();
+    });
+
+    it('без права: usedIn/hasDraft = null — колонок Used in і State немає', async () => {
+      mockFetch(
+        ['Registry.View'],
+        Extended.map((row) => ({ ...row, usedInColumns: null, usedInTemplates: null, hasDraft: null })),
+      );
+      await loadCatalog('en', 'private');
+      show('/admin/registries');
+
+      await screen.findByRole('button', { name: 'Units of measure' });
+      const headers = screen.getAllByRole('columnheader').map((cell) => cell.textContent?.trim());
+      expect(headers).toEqual(['Registry', 'Entries', 'Fields', 'Entries changed', 'Properties']);
+    });
+
+    it('шторка: записи, використання, версія з чернеткою і банер', async () => {
+      mockFetch(['Registry.View', 'Registry.EditDefinition'], Extended);
+      await loadCatalog('en', 'private');
+      show('/admin/registries?panel=SOURCES');
+
+      const drawer = await screen.findByRole('dialog');
+      expect(within(drawer).getByText('30')).toBeTruthy();
+      expect(within(drawer).getByText('columns: 7 · templates: 2')).toBeTruthy();
+      expect(within(drawer).getByText('v3 published · draft in progress')).toBeTruthy();
+      expect(within(drawer).getByText('The definition has unpublished changes')).toBeTruthy();
+    });
+  });
 });
