@@ -6746,8 +6746,18 @@ USING (VALUES
     (N'nav.audit.description', N'en', N'Every change of every number: who, when, what it was and what it became. Nothing here can be edited or deleted.', 1),
     (N'nav.consistency.description', N'en', N'Every night ECR compares numbers that must agree with each other across sheets, documents and registries. Each finding is listed here.', 1),
     (N'nav.uiStrings.description', N'en', N'Every label, message and button text of ECR. English is the source; missing translations fall back to English.', 1),
-    (N'nav.health.description', N'en', N'Is ECR working right now? Warnings appear only when there is something to do.', 1)
+    (N'nav.health.description', N'en', N'Is ECR working right now? Warnings appear only when there is something to do.', 1),
     -- COLL:uishell ── кінець секції ──
+    -- COLL:uiperiod ── UI-13: PeriodPicker за макетом (сітка періодів, стан, «closes in»); ru/kz — порцією COLL:uiperiod у блоці I18N нижче ──
+    (N'period.group', N'en', N'Reporting period', 1),
+    (N'period.choose', N'en', N'Choose a period', 1),
+    (N'period.gridTitle', N'en', N'Reporting period · {year}', 1),
+    (N'period.closesIn.one', N'en', N'closes in {count} day', 1),
+    (N'period.closesIn.few', N'en', N'closes in {count} days', 1),
+    (N'period.closesIn.many', N'en', N'closes in {count} days', 1),
+    (N'period.closesIn.other', N'en', N'closes in {count} days', 1),
+    (N'period.stateInProjects', N'en', N'{state} in {count} of {total} projects', 1)
+    -- COLL:uiperiod ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -16010,6 +16020,30 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:uishell ── кінець секції ──
+-- COLL:uiperiod ── ru/kz: UI-13: PeriodPicker за макетом (сітка періодів, стан, «closes in»); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'period.group', N'ru', N'Отчётный период'),
+    (N'period.group', N'kz', N'Есепті кезең'),
+    (N'period.choose', N'ru', N'Выбрать период'),
+    (N'period.choose', N'kz', N'Кезеңді таңдау'),
+    (N'period.gridTitle', N'ru', N'Отчётный период · {year}'),
+    (N'period.gridTitle', N'kz', N'Есепті кезең · {year}'),
+    (N'period.closesIn.one', N'ru', N'закрывается через {count} день'),
+    (N'period.closesIn.one', N'kz', N'{count} күннен кейін жабылады'),
+    (N'period.closesIn.few', N'ru', N'закрывается через {count} дня'),
+    (N'period.closesIn.few', N'kz', N'{count} күннен кейін жабылады'),
+    (N'period.closesIn.many', N'ru', N'закрывается через {count} дней'),
+    (N'period.closesIn.many', N'kz', N'{count} күннен кейін жабылады'),
+    (N'period.closesIn.other', N'ru', N'закрывается через {count} дня'),
+    (N'period.closesIn.other', N'kz', N'{count} күннен кейін жабылады'),
+    (N'period.stateInProjects', N'ru', N'{state} в {count} из {total} проектов'),
+    (N'period.stateInProjects', N'kz', N'{total} жобаның {count} жобасында: {state}')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:uiperiod ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

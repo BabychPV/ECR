@@ -148,7 +148,7 @@ describe('PeriodPicker: стрілки крокують КАЛЕНДАРЕМ (R-
  * однозначно відкидає обидві стрілки.
  */
 describe('PeriodPicker: e2e/keyboardPath.spec.ts:101 — локатор поля не має плутати його зі стрілками', () => {
-  it('getAllByLabelText(/period/i) без ролі повертає ТРИ елементи, коли період не обрано', () => {
+  it('getAllByLabelText(/period/i) без ролі повертає П\'ЯТЬ елементів, коли період не обрано', () => {
     renderWithMantine(<PeriodPicker value={null} onChange={vi.fn()} />);
 
     // ⛔ Це й є пастка, у яку впав старий e2e-локатор: три елементи, а не
@@ -157,7 +157,10 @@ describe('PeriodPicker: e2e/keyboardPath.spec.ts:101 — локатор поля
     // елементи, знайдені через асоціацію з `<label>`, і лише потім —
     // знайдені через `aria-label`), тому індекс `[0]` тут навмисно не
     // перевіряється: наступний тест бере справжній DOM-порядок напряму.
-    expect(screen.getAllByLabelText(/period/i)).toHaveLength(3);
+    // ✎ UI-13: ще двоє — група контрола (`period.group`) і кнопка сітки
+    // (`period.choose`); роль `textbox` і далі однозначна.
+    expect(screen.getAllByLabelText(/period/i)).toHaveLength(5);
+    expect(screen.getAllByRole('textbox', { name: /period/i })).toHaveLength(1);
   });
 
   it('DOM-порядок: кнопка «previous» стоїть у документі ПЕРЕД полем — так само, як бачить Playwright getByLabel().first()', () => {
