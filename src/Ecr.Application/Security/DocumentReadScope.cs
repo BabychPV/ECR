@@ -192,6 +192,9 @@ public sealed class DocumentReadScope
            && (columnCode is null
                || (_columnByCode.TryGetValue((tableDefId, columnCode), out var columnDefId) && CanReadColumn(columnDefId)));
 
+    /// <summary>Усі таблиці структури (для пошуку прив'язок результатів методологій).</summary>
+    public IReadOnlyList<int> TableIds() => [.. _sheetOfTable.Keys.Order()];
+
     /// <summary>Коди аркушів структури, яких профіль НЕ бачить, — за зростанням (зведення переліку).</summary>
     public IReadOnlyList<string> HiddenSheetCodes()
         => [.. _sheetCodes.Where(s => !CanReadSheet(s.Key)).Select(s => s.Value).Order(StringComparer.Ordinal)];

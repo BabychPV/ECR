@@ -160,6 +160,35 @@ public sealed class HiddenSheetOracleTests(SqlServerFixture sql)
         }
     }
 
+    // ── Шляхи, що вже мали межу, але без власного доказу ───────────────────────────────────
+
+    [Theory]
+    [InlineData("scope")]
+    [InlineData("deny")]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-6.14")]
+    public async Task Таблиці_статус_таблиць_і_валідація_не_називають_схований_аркуш_і_його_таблицю(string how)
+    {
+        var s = await ArrangeAsync(how, DocumentStatus.Rejected).ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
+        var tag = s.HiddenCode["HIDOR".Length..];
+
+        var tables = await client.GetStringAsync(
+            new Uri($"/api/v1/documents/{s.DocumentId}/tables?periodKey={s.PeriodKey}", UriKind.Relative)).ConfigureAwait(true);
+        var status = await client.GetStringAsync(
+            new Uri($"/api/v1/documents/{s.DocumentId}/tables/status?periodKey={s.PeriodKey}", UriKind.Relative)).ConfigureAwait(true);
+        using var validateResponse = await client.PostAsJsonAsync(
+            new Uri($"/api/v1/documents/{s.DocumentId}/validate", UriKind.Relative), new { periodKey = s.PeriodKey }).ConfigureAwait(true);
+        var validate = await validateResponse.Content.ReadAsStringAsync().ConfigureAwait(true);
+
+        Assert.DoesNotContain(tag, tables, StringComparison.Ordinal);
+        Assert.DoesNotContain(tag, status, StringComparison.Ordinal);
+        Assert.DoesNotContain(tag, validate, StringComparison.Ordinal);
+        Assert.DoesNotContain("SECRET", validate, StringComparison.Ordinal);
+    }
+
     // ── R-5: 409 видалення / зміни ключа без деталей схованого аркуша ──────────────────────
 
     [Theory]
@@ -243,8 +272,8 @@ public sealed class HiddenSheetOracleTests(SqlServerFixture sql)
     /// <summary>Тіло без ідентифікаторів запиту й шумових полів: порівнюються код, ключ, текст і деталі.</summary>
     private static string Normalize(string body, long sheetId)
     {
-        var text = body.Replace(sheetId.ToString(CultureInfo.InvariantCulture), "<SHEET>", StringComparison.Ordinal);
-        return Regex.Replace(text, "\"(traceId|correlationId|requestId|instance)\"\\s*:\\s*\"[^\"]*\",?", string.Empty);
+        var text = Regex.Replace(body, "\"(traceId|correlationId|requestId)\"\\s*:\\s*\"[^\"]*\",?", string.Empty);
+        return Regex.Replace(text, $"(?<![0-9A-Za-z]){sheetId.ToString(CultureInfo.InvariantCulture)}(?![0-9A-Za-z])", "<SHEET>");
     }
 
     private static void AssertVisibleOnly(string endpoint, string body, JsonElement doc, Scenario s, bool withPeriod)
