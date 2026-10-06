@@ -10,7 +10,7 @@ import { DocumentListSummaryStrip } from '@/features/documents/DocumentListSumma
 import { useDocumentListFilters } from '@/features/documents/documentListFilters';
 import { EyeIcon, IssueCount } from '@/features/documents/DocumentListMarks';
 import { documentState, hasSheetStates, sheetLabels } from '@/features/documents/documentSheets';
-import { parseDocumentsView } from '@/features/documents/documentsBoard';
+import { parseDocumentsView } from '@/features/documents/documentsBoardModel';
 import '@/features/documents/documentsList.css';
 import { LateEditsMark } from '@/features/documents/LateEditsMark';
 import { newestOpenPeriodKey } from '@/features/documents/newDocumentPeriod';

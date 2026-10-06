@@ -9,7 +9,7 @@ import { StatusBadge } from '@/shared/ui/StatusBadge';
 import { Timestamp } from '@/shared/ui/Timestamp';
 import { EyeIcon, IssueCount } from './DocumentListMarks';
 import { documentState, hasSheetStates, sheetLabels } from './documentSheets';
-import { boardColumns, type BoardColumnId } from './documentsBoard';
+import { boardColumns, type BoardColumnId } from './documentsBoardModel';
 import { LateEditsMark } from './LateEditsMark';
 import './documentsBoard.css';
 
