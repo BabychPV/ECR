@@ -75,7 +75,10 @@ public sealed class ValidationEngine(IFormulaEngine formulaEngine)
                 continue;
             }
 
-            Evaluate(rule, CellContext(column, value, headers, registryFields), column.TableDefId, null, column.Code, language, messages);
+            // A2-02: коміркове правило бачить лише СВОЮ колонку — Null від решти
+            // означає «не обчислено тут», а не зламане правило.
+            Evaluate(rule, CellContext(column, value, headers, registryFields), column.TableDefId, null, column.Code, language, messages,
+                partialContext: true);
         }
 
         // ⚠ Повертаються ВСІ порушення, а не перше: користувач має побачити
@@ -93,10 +96,17 @@ public sealed class ValidationEngine(IFormulaEngine formulaEngine)
     /// </param>
     /// <param name="language">Мова запиту (B-11) — див. <see cref="ValidateCell"/>.</param>
     /// <param name="registryFields">Знімок довідника для <c>REGFIELD</c> — див. <see cref="ValidateCell"/>.</param>
+    /// <param name="partialContext">
+    /// A2-02: <c>true</c> — контекст бачить НЕ всі значення (шлях <c>PATCH</c>: лише
+    /// надіслані комірки), тож результат <c>Null</c> означає «правило тут не
+    /// обчислено» і Warning <c>ECR-VAL-RULE</c> не дає. «Перевірити»/подання
+    /// читають повний зріз і лишають <c>false</c> — їхній результат не змінюється.
+    /// </param>
     public IReadOnlyList<ValidationMessage> ValidateScope(
         byte scope, IReadOnlyList<ValidationRule> rules, IValidationContext context,
         IReadOnlyDictionary<string, ExpressionValue> headers, string language,
-        IReadOnlyDictionary<long, IReadOnlyDictionary<string, ExpressionValue>>? registryFields = null)
+        IReadOnlyDictionary<long, IReadOnlyDictionary<string, ExpressionValue>>? registryFields = null,
+        bool partialContext = false)
     {
         ArgumentNullException.ThrowIfNull(rules);
         ArgumentNullException.ThrowIfNull(context);
@@ -108,7 +118,8 @@ public sealed class ValidationEngine(IFormulaEngine formulaEngine)
 
         foreach (var rule in rules.Where(r => r.IsActive && r.Scope == scope))
         {
-            Evaluate(rule, new ScopeContext(context, registryFields) { Headers = headers }, rule.TableDefId, null, null, language, messages);
+            Evaluate(rule, new ScopeContext(context, registryFields) { Headers = headers }, rule.TableDefId, null, null, language, messages,
+                partialContext);
         }
 
         return messages;
@@ -180,7 +191,8 @@ public sealed class ValidationEngine(IFormulaEngine formulaEngine)
         string? rowKey,
         string? columnCode,
         string language,
-        List<ValidationMessage> messages)
+        List<ValidationMessage> messages,
+        bool partialContext)
     {
         var parsed = formulaEngine.Parse(rule.Expression, ExpressionDialect.Template);
         if (!parsed.IsSuccess || parsed.Expression is null)
@@ -196,6 +208,17 @@ public sealed class ValidationEngine(IFormulaEngine formulaEngine)
 
         var result = formulaEngine.Evaluate(parsed.Expression, context);
         var value = result.Value;
+
+        // ⛔ A2-02: на шляху PATCH контекст неповний (коміркове правило бачить лише
+        // свою колонку, рядкове — лише надіслані комірки), і `[Mass] <= [Limit]`
+        // давало Null → Warning «did not return a logical answer: Null» на
+        // КОРЕКТНИХ даних. Null тут — «не обчислено», не зламане правило; повну
+        // оцінку дає «Перевірити»/подання. Помилки (#VALUE, #REF…) і нелогічні
+        // типи (число, текст) і далі повідомляються.
+        if (partialContext && value.Type == ExpressionValueType.Null)
+        {
+            return;
+        }
 
         // ⚠ Помилка ОБЧИСЛЕННЯ виразу — це Warning про несправне ПРАВИЛО, а не
         // Error даних. Інакше зламане правило заблокувало б роботу з цілком

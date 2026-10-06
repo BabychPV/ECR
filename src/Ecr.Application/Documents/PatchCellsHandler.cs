@@ -2679,7 +2679,7 @@ public sealed partial class PatchCellsHandler(
             messages.AddRange(validation
                 .ValidateScope(
                     scope: 1, rules, new PatchRowValidationContext(row.RowKey, typed), headerValues,
-                    currentUser.Language, registryFields)
+                    currentUser.Language, registryFields, partialContext: true)
                 .Select(m => m with { RowKey = row.RowKey }));
         }
 
