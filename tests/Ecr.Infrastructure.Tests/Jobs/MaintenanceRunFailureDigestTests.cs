@@ -94,9 +94,10 @@ public sealed class MaintenanceRunFailureDigestTests(SqlServerFixture sql)
             Assert.NotNull(run.FinishedAt);
             Assert.Equal(now, run.FinishedAt);
 
-            // Причина зберігається — без неї рядок каже «щось упало» і не
-            // каже, куди йти.
-            Assert.Contains(reason, run.DetailsJson!, StringComparison.Ordinal);
+            // SEC (TIER2): сирий текст довільного винятку в DetailsJson не йде
+            // (він лишається журналу) — лише код каталогу й кореляція прогону.
+            Assert.DoesNotContain(reason, run.DetailsJson!, StringComparison.Ordinal);
+            Assert.Contains("ECR-SYS-0500", run.DetailsJson!, StringComparison.Ordinal);
         }
         finally
         {
@@ -172,12 +173,14 @@ public sealed class MaintenanceRunFailureDigestTests(SqlServerFixture sql)
             {
                 var scanner = Substitute.For<IOrphanScanner>();
                 scanner.ScanAllAsync(Arg.Any<CancellationToken>())
-                    .Returns<Task<Ecr.Application.Registries.OrphanScanSummary>>(_ => throw new InvalidOperationException(reason));
+                    .Returns<Task<Ecr.Application.Registries.OrphanScanSummary>>(
+                        _ => throw new Ecr.Application.Errors.BusinessRuleException(
+                            Ecr.Domain.Errors.ErrorCodes.SourceUnavailable, reason));
 
                 var failing = new ConsistencyCheckJob(
                     db, scanner, clock, Substitute.For<IConsistencyMetrics>());
 
-                await Assert.ThrowsAsync<InvalidOperationException>(
+                await Assert.ThrowsAsync<Ecr.Application.Errors.BusinessRuleException>(
                     () => failing.ExecuteAsync(null, Substitute.For<IJobProgress>(), CancellationToken.None));
             }
 

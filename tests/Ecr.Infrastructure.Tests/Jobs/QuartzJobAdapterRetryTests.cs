@@ -203,7 +203,9 @@ public sealed class QuartzJobAdapterRetryTests
            && envelope.Key == "jobs.retryScheduled"
            && envelope.Params!["attempt"] == "1"
            && envelope.Params["max"] == QuartzJobAdapter.MaxRetryAttempts.ToString(CultureInfo.InvariantCulture)
-           && envelope.Params["error"].Contains("транзієнтної", StringComparison.Ordinal);
+           // SEC (TIER2): текст довільного винятку («Симуляція транзієнтної помилки») в `/jobs` не йде.
+           && envelope.Params["error"].Contains("ECR-SYS-0500", StringComparison.Ordinal)
+           && !envelope.Params["error"].Contains("транзієнтної", StringComparison.Ordinal);
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
@@ -221,8 +223,8 @@ public sealed class QuartzJobAdapterRetryTests
         Assert.IsType<InvalidOperationException>(thrown.InnerException);
 
         await progress.Received(1).FinishAsync(
-            JobId, "Failed", Arg.Is<string?>(m => m != null && m.Contains("транзієнтної")),
-            Arg.Any<DateTime>(), Arg.Any<CancellationToken>(), "ECR-SYS-0500"); // BE-08: непередбачена — системний код
+            JobId, "Failed", Arg.Is<string?>(m => m != null && m.Contains("ECR-SYS-0500") && !m.Contains("транзієнтної")),
+            Arg.Any<DateTime>(), Arg.Any<CancellationToken>(), "ECR-SYS-0500"); // SEC + BE-08: непередбачена — системний код
 
         // ⛔ Жодного нового триґера — саме це і є «зупинка на межі», а не
         // «спроба нескінченно».

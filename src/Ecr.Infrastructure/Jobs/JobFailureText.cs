@@ -1,5 +1,7 @@
 // src/Ecr.Infrastructure/Jobs/JobFailureText.cs
 using System.Data.Common;
+using Ecr.Application.Errors;
+using Ecr.Domain.Abstractions;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 
@@ -42,9 +44,21 @@ internal static class JobFailureText
     {
         ArgumentNullException.ThrowIfNull(error);
 
+        // ⛔ SEC (TIER2): сирий `Exception.Message` довільного винятку (рядок
+        // підключення з Password=…, шлях файлу, ім'я сервера, SQL) у `/jobs` і
+        // `System.ViewHealth` не йде. Показується лише текст власних винятків
+        // продукту (EcrException/DomainException — його пише розробник, і він
+        // однаково їде клієнтові через ExceptionHandlingMiddleware); решта —
+        // код каталогу + кореляція, а повний виняток лишається журналу сервера.
+        if (error is EcrException or DomainException)
+        {
+            return error.Message;
+        }
+
         return IsDatabaseError(error)
             ? $"A database error interrupted the job. The details are in the server log (correlation {correlationId})."
-            : error.Message;
+            : $"The job failed with an unexpected error ({JobRetryPolicy.ErrorCodeOf(error)}). "
+              + $"The details are in the server log (correlation {correlationId}).";
     }
 
     /// <summary>Порушення обмеження бази — повтор нічого не змінить.</summary>
