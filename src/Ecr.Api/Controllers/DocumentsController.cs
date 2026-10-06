@@ -68,6 +68,7 @@ public sealed class DocumentsController(
         [FromQuery] string? state,
         [FromQuery] bool mine,
         [FromQuery] bool? hasLateEdits,
+        [FromQuery] string? q,
         CancellationToken ct)
     {
         var page = new CursorRequest(limit == 0 ? 50 : limit, cursor);
@@ -90,7 +91,7 @@ public sealed class DocumentsController(
         // вказано період: без періоду «стан документа» не визначений — аркуші
         // за різні періоди бувають у різних станах одночасно (D-93).
         return Ok(await listDocuments
-            .HandleAsync(projectId, periodKey, state, mine, hasLateEdits, page, ct)
+            .HandleAsync(projectId, periodKey, state, mine, hasLateEdits, q, page, ct)
             .ConfigureAwait(false));
     }
 

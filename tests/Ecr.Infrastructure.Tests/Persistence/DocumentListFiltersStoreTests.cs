@@ -196,6 +196,115 @@ public sealed class DocumentListFiltersStoreTests(SqlServerFixture sql)
         Assert.DoesNotContain(mineOnTime, ids);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Пошук_знаходить_за_кодом_і_кириличною_назвою_без_регістру()
+    {
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var chain = await builder.BuildAsync(ct: CancellationToken.None);
+        await using var db = builder.CreateContext();
+
+        var tag = Guid.NewGuid().ToString("N")[..6].ToUpperInvariant();
+        var byKey = await NamedAsync(db, chain, $"QKEY-{tag}", null);
+        var byName = await NamedAsync(db, chain, $"QOTHER-{tag}", $"Річний звіт ТЕЦ {tag}");
+        await NamedAsync(db, chain, $"QNONE-{tag}", "Інший документ");
+
+        // Код — без регістру.
+        Assert.Equal([byKey], await QueryAsync(db, chain, $"qkey-{tag.ToLowerInvariant()}"));
+
+        // Кирилиця — з назви в JSON (`\uXXXX` у сирому стовпці), без регістру.
+        Assert.Equal([byName], await QueryAsync(db, chain, $"РІЧНИЙ звіт тец {tag}"));
+
+        // Порожнього збігу немає.
+        Assert.Empty(await QueryAsync(db, chain, $"ЗБІГУ-НЕМАЄ-{tag}"));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Пошук_екранує_метасимволи_LIKE()
+    {
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var chain = await builder.BuildAsync(ct: CancellationToken.None);
+        await using var db = builder.CreateContext();
+
+        var tag = Guid.NewGuid().ToString("N")[..6].ToUpperInvariant();
+        var percent = await NamedAsync(db, chain, $"E{tag}-50%", null);
+        var plain = await NamedAsync(db, chain, $"E{tag}-50X", null);
+        var underscore = await NamedAsync(db, chain, $"E{tag}_U", null);
+        var other = await NamedAsync(db, chain, $"E{tag}XU", null);
+        var bracket = await NamedAsync(db, chain, $"E{tag}[1]", null);
+
+        // `%` шукає саме «50%», а не все з «50»; `_` — саме «_», а не будь-який символ.
+        Assert.Equal([percent], await QueryAsync(db, chain, $"E{tag}-50%"));
+        Assert.Equal([underscore], await QueryAsync(db, chain, $"E{tag}_U"));
+        Assert.Equal([bracket], await QueryAsync(db, chain, $"E{tag}[1]"));
+        Assert.DoesNotContain(plain, await QueryAsync(db, chain, $"E{tag}-50%"));
+        Assert.DoesNotContain(other, await QueryAsync(db, chain, $"E{tag}_U"));
+
+        // Лише метасимвол — не «все».
+        Assert.DoesNotContain(plain, await QueryAsync(db, chain, "%"));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Пошук_не_розширює_видимість_і_стоїть_до_стелі_сторінки_й_курсора()
+    {
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var mine = await builder.BuildAsync(ct: CancellationToken.None);
+        var foreign = await builder.BuildAsync(ct: CancellationToken.None);
+        await using var db = builder.CreateContext();
+
+        var tag = Guid.NewGuid().ToString("N")[..6].ToUpperInvariant();
+
+        // Чужий проєкт має збіг, на який немає гранта: ні в сторінці, ні в курсорі.
+        var foreignHit = await NamedAsync(db, foreign, $"PG{tag}-FOREIGN", null);
+        var visible = new List<long>();
+        for (var i = 0; i < 3; i++)
+        {
+            visible.Add(await NamedAsync(db, mine, $"PG{tag}-{i}", null));
+        }
+
+        // Пошук ДО `Take`: сторінка по одному елементу проходить рівно три збіги,
+        // а не «першу сторінку з усіх документів, з якої потім викинуто невідповідні».
+        var seen = new List<long>();
+        string? cursor = null;
+        do
+        {
+            var page = await new DocumentStore(db).ListAsync(
+                null, new PeriodKeyFilter(mine.PeriodKey.Value),
+                new DocumentListFilter(null, null, null, Query: $"PG{tag}"), new CursorRequest(Limit: 1, cursor),
+                visibleProjectIds: [mine.ProjectId], CancellationToken.None);
+
+            seen.AddRange(page.Items.Select(d => d.Id));
+            cursor = page.NextCursor;
+        }
+        while (cursor is not null);
+
+        Assert.Equal(visible.Order(), seen.Order());
+        Assert.DoesNotContain(foreignHit, seen);
+    }
+
+    private static async Task<long[]> QueryAsync(EcrDbContext db, TestDocument chain, string q)
+        => await IdsAsync(
+            db, chain.ProjectId, chain.PeriodKey.Value, new DocumentListFilter(null, null, null, Query: q), null);
+
+    private static async Task<long> NamedAsync(EcrDbContext db, TestDocument chain, string key, string? name)
+    {
+        var document = new Document(chain.ProjectId, key, 1, Now);
+        if (name is not null)
+        {
+            document.SetName(new Ecr.Domain.ValueObjects.LocalizedText(
+                new Dictionary<string, string> { ["uk"] = name }));
+        }
+
+        db.Documents.Add(document);
+        await db.SaveChangesAsync(CancellationToken.None);
+        return document.Id;
+    }
+
     private static async Task<long[]> IdsAsync(
         EcrDbContext db, int? projectId, int periodKey, DocumentListFilter filter, int[]? visibleProjects)
     {

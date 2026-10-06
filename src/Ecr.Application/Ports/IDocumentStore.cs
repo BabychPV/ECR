@@ -101,11 +101,18 @@ public sealed record DocumentSheetState(string Code, LocalizedText NameL10n, str
 /// (інакше позначка розкриває активність схованого аркуша, R-7). <c>null</c> — немає.
 /// </param>
 /// <param name="HiddenColumnDefIds">Колонки, яких читач не бачить: те саме, що й для таблиць.</param>
+/// <param name="Query">
+/// Пошук (UI-18): підрядок у коді (<c>BusinessKey</c>) або назві документа, без
+/// урахування регістру; <c>null</c> — без пошуку. Шукає ЛИШЕ по полях самого
+/// документа — не по аркушах і таблицях, тож не розкриває прихованого. Метасимволи
+/// <c>LIKE</c> екранує сховище; довжину й порожнечу нормалізує обробник.
+/// </param>
 public readonly record struct DocumentListFilter(
     DocumentStatus? State, int? MineUserId, bool? HasLateEdits = null,
     IReadOnlyCollection<int>? HiddenSheetDefIds = null,
     IReadOnlyCollection<int>? HiddenTableDefIds = null,
-    IReadOnlyCollection<int>? HiddenColumnDefIds = null);
+    IReadOnlyCollection<int>? HiddenColumnDefIds = null,
+    string? Query = null);
 
 /// <summary>Порушення правила складу документа.</summary>
 /// <param name="SheetGroup">Група аркушів.</param>
