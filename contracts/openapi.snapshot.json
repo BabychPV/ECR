@@ -1913,6 +1913,44 @@
         ],
         "type": "object"
       },
+      "ConsistencyIssuePage": {
+        "description": "Сторінка знахідок із загальними лічильниками.",
+        "properties": {
+          "items": {
+            "description": "Елементи сторінки.",
+            "items": {
+              "$ref": "#/components/schemas/ConsistencyIssueView"
+            },
+            "type": "array"
+          },
+          "nextCursor": {
+            "description": "Курсор наступної сторінки; `null` — кінець.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "totalCount": {
+            "description": "Скільки знахідок збігається з УСІМА фільтрами (разом із вагою).",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "totals": {
+            "$ref": "#/components/schemas/ConsistencySeverityTotals",
+            "description": "Розбивка за вагою за фільтрами без ваги."
+          }
+        },
+        "required": [
+          "items",
+          "nextCursor",
+          "totalCount",
+          "totals"
+        ],
+        "type": "object"
+      },
       "ConsistencyIssueView": {
         "description": "Знахідка перевірки узгодженості, як її бачить читач.",
         "properties": {
@@ -1981,6 +2019,73 @@
           "message",
           "resolvedAt",
           "resolvedByUserId"
+        ],
+        "type": "object"
+      },
+      "ConsistencySeverityTotals": {
+        "description": "Лічильники знахідок за вагою в межах фільтра переліку (без фільтра ваги).",
+        "properties": {
+          "errors": {
+            "description": "Вага 3.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "info": {
+            "description": "Вага 1.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "warnings": {
+            "description": "Вага 2.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "info",
+          "warnings",
+          "errors"
+        ],
+        "type": "object"
+      },
+      "ConsistencySummary": {
+        "description": "Загальні лічильники журналу знахідок.",
+        "properties": {
+          "errors": {
+            "description": "Знахідок ваги 3 (помилка).",
+            "format": "int32",
+            "type": "integer"
+          },
+          "info": {
+            "description": "Знахідок ваги 1 (інформація).",
+            "format": "int32",
+            "type": "integer"
+          },
+          "lastDetectedAt": {
+            "description": "Момент найновішої знахідки в UTC; `null` — журнал порожній.",
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "total": {
+            "description": "Усього (інша вага, якщо така з'явиться, потрапляє лише сюди).",
+            "format": "int32",
+            "type": "integer"
+          },
+          "warnings": {
+            "description": "Знахідок ваги 2 (попередження).",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "info",
+          "warnings",
+          "errors",
+          "total",
+          "lastDetectedAt"
         ],
         "type": "object"
       },
@@ -7429,39 +7534,6 @@
             "description": "Елементи сторінки.",
             "items": {
               "$ref": "#/components/schemas/CollectionRunView"
-            },
-            "type": "array"
-          },
-          "nextCursor": {
-            "description": "Курсор наступної сторінки; `null` — кінець.",
-            "type": [
-              "null",
-              "string"
-            ]
-          },
-          "totalCount": {
-            "description": "Загальна кількість; `null`, якщо підрахунок дорогий.",
-            "format": "int32",
-            "type": [
-              "null",
-              "integer"
-            ]
-          }
-        },
-        "required": [
-          "items",
-          "nextCursor",
-          "totalCount"
-        ],
-        "type": "object"
-      },
-      "PagedResultOfConsistencyIssueView": {
-        "description": "Сторінка результатів. Ендпоінтів, що повертають «усе», не існує —\nперевіряється архітектурним тестом.",
-        "properties": {
-          "items": {
-            "description": "Елементи сторінки.",
-            "items": {
-              "$ref": "#/components/schemas/ConsistencyIssueView"
             },
             "type": "array"
           },
@@ -18968,6 +19040,21 @@
           },
           {
             "in": "query",
+            "name": "severity",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
             "name": "limit",
             "schema": {
               "format": "int32",
@@ -18987,17 +19074,17 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PagedResultOfConsistencyIssueView"
+                  "$ref": "#/components/schemas/ConsistencyIssuePage"
                 }
               },
               "text/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PagedResultOfConsistencyIssueView"
+                  "$ref": "#/components/schemas/ConsistencyIssuePage"
                 }
               },
               "text/plain": {
                 "schema": {
-                  "$ref": "#/components/schemas/PagedResultOfConsistencyIssueView"
+                  "$ref": "#/components/schemas/ConsistencyIssuePage"
                 }
               }
             },
@@ -19156,6 +19243,66 @@
           }
         },
         "summary": "Прогін перевірки узгодженості на вимогу. Право `System.RunJob`.",
+        "tags": [
+          "Consistency"
+        ]
+      }
+    },
+    "/api/v1/consistency/summary": {
+      "get": {
+        "description": "⚠ Лічильники рахуються по ВСЬОМУ журналу, а не по сторінці: сторінка\nкурсорна, і сума по ній збрехала б про стан системи. Без права —\n`403`, а не нулі. Знахідки не розрізняються за проєктами (журнал\nсистемний, право адміністративне), тож прихованих документів тут немає.",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "openOnly",
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsistencySummary"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsistencySummary"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsistencySummary"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "summary": "Загальні лічильники знахідок за вагою для смуги показників.\nПраво `System.ViewHealth`.",
         "tags": [
           "Consistency"
         ]
