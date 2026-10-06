@@ -123,7 +123,7 @@ export function ValidationPanel({ messages, onSelect, canSelect }: ValidationPan
                 </Table.Td>
                 <Table.Td>{message.rowKey ?? '—'}</Table.Td>
                 <Table.Td>{message.columnCode ?? '—'}</Table.Td>
-                <Table.Td title={message.ruleCode}>{ruleLabel(message.ruleCode)}</Table.Td>
+                <Table.Td title={message.ruleCode}>{message.displayCode ?? ruleLabel(message.ruleCode)}</Table.Td>
                 <Table.Td>
                   {onSelect === undefined || canSelect?.(message) === false ? (
                     message.message

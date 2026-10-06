@@ -1,6 +1,7 @@
 // tests/Ecr.Api.Tests/ValidationFindingTableTests.cs
 using System.Net.Http.Json;
 using System.Text.Json;
+using Ecr.Api.Controllers;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Entities.Documents;
 using Ecr.Domain.Entities.Security;
@@ -115,6 +116,14 @@ public sealed class ValidationFindingTableTests(SqlServerFixture sql)
         // цей рядок, а разом із ним і рядок першої таблиці нижче.
         Assert.Equal(scenario.SecondTableDefId, byRule[scenario.SecondRuleCode]);
         Assert.Equal(scenario.FirstTableDefId, byRule[scenario.FirstRuleCode]);
+
+        // A3: displayCode віддається в обох місцях відображення (validate і збережений підсумок).
+        foreach (var message in messages)
+        {
+            Assert.Equal(
+                ValidationFindingDto.DisplayCodeOf(message.GetProperty("ruleCode").GetString()!),
+                message.GetProperty("displayCode").GetString());
+        }
     }
 
     /// <summary>Клієнт із чинним сеансом уже заведеного локального користувача.</summary>

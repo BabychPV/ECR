@@ -25519,6 +25519,11 @@ export interface components {
             blocksSave: boolean;
             /** @description Колонка; `null` — зауваження до рядка. */
             columnCode: null | string;
+            /** @description Код для показу людині (A3): для знахідки Check — код зв'язку без службових `REL-` і суфікса
+             *     `_vN` (номер версії), який дописує клон шаблону; для решти правил — той самий `RuleCode`.
+             *     ⛔ `RuleCode` НЕ змінюється: за ним `GetValidationResultHandler` зіставляє збережені знахідки
+             *     із зв'язками, а клієнт — адресу знахідки. */
+            displayCode?: null | string;
             /** @description Текст, уже локалізований. */
             message: string;
             /** @description Рядок; `null` — зауваження до таблиці. */

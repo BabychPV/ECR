@@ -247,7 +247,10 @@ public sealed class DocumentsController(
         return Ok(new ValidationResultResponse(
             id,
             periodKey,
-            [.. messages.Select(ValidationFindingDto.From)],
+            [.. messages.Select(m => new ValidationFindingDto(
+                m.Severity.ToString(), m.RuleCode, m.Message,
+                m.TableDefId, m.RowKey, m.ColumnCode, m.BlocksSave,
+                ValidationFindingDto.DisplayCodeOf(m.RuleCode)))],
             Validated: true));
     }
 
@@ -298,7 +301,10 @@ public sealed class DocumentsController(
                 // це серіалізований `List<ValidationMessage>` цілком
                 // (`ValidateDocumentHandler.cs:106`), тож таблиця в ньому
                 // вже є і міграція для цього поля не потрібна.
-                [.. messages.Select(ValidationFindingDto.From)],
+                [.. messages.Select(m => new ValidationFindingDto(
+                    m.Severity.ToString(), m.RuleCode, m.Message,
+                    m.TableDefId, m.RowKey, m.ColumnCode, m.BlocksSave,
+                    ValidationFindingDto.DisplayCodeOf(m.RuleCode)))],
                 Validated: true));
     }
 
@@ -721,7 +727,7 @@ public sealed record ValidationResultResponse(
 /// </remarks>
 /// <param name="DisplayCode">
 /// Код для показу людині (A3): для знахідки Check — код зв'язку без службових <c>REL-</c> і суфікса
-/// <c>_v&lt;id версії&gt;</c>, який дописує клон шаблону; для решти правил — той самий <c>RuleCode</c>.
+/// <c>_vN</c> (номер версії), який дописує клон шаблону; для решти правил — той самий <c>RuleCode</c>.
 /// ⛔ <c>RuleCode</c> НЕ змінюється: за ним <c>GetValidationResultHandler</c> зіставляє збережені знахідки
 /// із зв'язками, а клієнт — адресу знахідки.
 /// </param>
@@ -730,18 +736,6 @@ public sealed record ValidationFindingDto(
     string? DisplayCode = null)
 {
     private const string RelationPrefix = "REL-";
-
-    /// <summary>Відображення зауваження двигуна в DTO (єдине місце: перевірка і збережений підсумок).</summary>
-    /// <param name="message">Зауваження.</param>
-    public static ValidationFindingDto From(Ecr.Application.Validation.ValidationMessage message)
-    {
-        ArgumentNullException.ThrowIfNull(message);
-
-        return new ValidationFindingDto(
-            message.Severity.ToString(), message.RuleCode, message.Message,
-            message.TableDefId, message.RowKey, message.ColumnCode, message.BlocksSave,
-            DisplayCodeOf(message.RuleCode));
-    }
 
     /// <summary>
     /// Код для показу: <c>REL-CHK_TOT_v5</c> → <c>CHK_TOT</c>. Лише кінцевий суфікс <c>_v</c> + цифри;
