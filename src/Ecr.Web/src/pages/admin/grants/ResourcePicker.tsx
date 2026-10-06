@@ -1,7 +1,7 @@
 import type { JSX } from 'react';
 import { Group, Select } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
-import { apiFetch } from '@/api/client';
+import { apiFetch, EcrApiError } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
 import type {
   GrantableProject,
@@ -77,6 +77,19 @@ function idOrNull(value: string | null): number | null {
   return value === null ? null : Number(value);
 }
 
+/**
+ * ⛔ A1-05: 403 на каскаді шаблону — не «не вдалося завантажити». Список
+ * шаблонів (`GET /templates`) вимагає `Template.View`, тобто роль
+ * TemplateAdministrator; адміністратор безпеки без неї (напр. `bootstrap`)
+ * бачив загальну помилку й не знав, чого бракує.
+ */
+function failureText(error: Error | null, forbiddenKey?: string): string | null {
+  if (error === null) return null;
+  if (forbiddenKey !== undefined && error instanceof EcrApiError && error.problem.status === 403) return t(forbiddenKey);
+
+  return t('grants.pickerLoadFailed');
+}
+
 function selected(id: number): string | null {
   return id > 0 ? String(id) : null;
 }
@@ -141,7 +154,7 @@ export function ResourcePicker({
   // ⚠ `aria-label` стоїть на кожному полі явно, а не в спільних пропах: так
   // його бачить лінт ФВ-14.20.
   const aria = (label: string): string => `${label} ${n}`;
-  const common = (label: string, failed: boolean) => ({
+  const common = (label: string, failure: string | null) => ({
     size: 'xs' as const,
     miw: 150,
     searchable: !readOnly,
@@ -149,7 +162,7 @@ export function ResourcePicker({
     readOnly,
     placeholder: label,
     nothingFoundMessage: t('grants.pickerNothingFound'),
-    ...(failed ? { error: t('grants.pickerLoadFailed') } : {}),
+    ...(failure !== null ? { error: failure } : {}),
   });
 
   if (kind === 'Project') {
@@ -157,7 +170,7 @@ export function ResourcePicker({
 
     return (
       <Select
-        {...common(t('grants.pickerProject'), Boolean(projects.error))}
+        {...common(t('grants.pickerProject'), failureText(projects.error))}
         aria-label={aria(t('grants.pickerProject'))}
         data={items.map((p) => ({ value: String(p.id), label: nameWithCode(localized(p.nameL10n), p.code) }))}
         value={selected(resourceId)}
@@ -174,7 +187,7 @@ export function ResourcePicker({
 
     return (
       <Select
-        {...common(t('grants.pickerRegistry'), Boolean(registries.error))}
+        {...common(t('grants.pickerRegistry'), failureText(registries.error))}
         aria-label={aria(t('grants.pickerRegistry'))}
         data={items.map((r) => ({ value: String(r.id), label: nameWithCode(localized(r.nameL10n), r.code) }))}
         value={selected(resourceId)}
@@ -199,14 +212,14 @@ export function ResourcePicker({
   return (
     <Group gap="xs" wrap="wrap">
       <Select
-        {...common(t('grants.pickerTemplate'), Boolean(templates.error))}
+        {...common(t('grants.pickerTemplate'), failureText(templates.error, 'grants.pickerForbidden'))}
         aria-label={aria(t('grants.pickerTemplate'))}
         data={(templates.data?.items ?? []).map((tp) => ({ value: String(tp.id), label: tp.code }))}
         value={path.templateId === null ? null : String(path.templateId)}
         onChange={(value) => pick(-1, null, undefined, { ...EmptyPath, templateId: idOrNull(value) })}
       />
       <Select
-        {...common(t('grants.pickerVersion'), Boolean(versions.error))}
+        {...common(t('grants.pickerVersion'), failureText(versions.error, 'grants.pickerForbidden'))}
         aria-label={aria(t('grants.pickerVersion'))}
         disabled={path.templateId === null}
         data={(versions.data?.items ?? []).map((v) => ({ value: String(v.id), label: v.version }))}
@@ -216,7 +229,7 @@ export function ResourcePicker({
         }
       />
       <Select
-        {...common(t('grants.pickerSheet'), Boolean(structure.error))}
+        {...common(t('grants.pickerSheet'), failureText(structure.error, 'grants.pickerForbidden'))}
         aria-label={aria(t('grants.pickerSheet'))}
         disabled={path.versionId === null}
         data={sheets.map((s) => ({ value: String(s.id), label: nameWithCode(localized(s.nameL10n), s.code) }))}
@@ -228,7 +241,7 @@ export function ResourcePicker({
       />
       {depth >= 2 && (
         <Select
-          {...common(t('grants.pickerTable'), false)}
+          {...common(t('grants.pickerTable'), null)}
           aria-label={aria(t('grants.pickerTable'))}
           disabled={sheet === undefined}
           data={(sheet?.tables ?? []).map((tb) => ({
@@ -244,7 +257,7 @@ export function ResourcePicker({
       )}
       {depth >= 3 && (
         <Select
-          {...common(t('grants.pickerColumn'), false)}
+          {...common(t('grants.pickerColumn'), null)}
           aria-label={aria(t('grants.pickerColumn'))}
           disabled={table === undefined}
           data={(table?.columns ?? []).map((c) => ({
