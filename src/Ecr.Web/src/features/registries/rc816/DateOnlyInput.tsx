@@ -32,7 +32,7 @@ export function DateOnlyInput({
   readonly clearable?: boolean | undefined;
 }): JSX.Element {
   return (
-    <Suspense fallback={<Skeleton height={30} width={140} />}>
+    <Suspense fallback={<Skeleton height="var(--ecr-ctl-height)" width={140} />}>
       <DateInput
         size="xs"
         miw={140}

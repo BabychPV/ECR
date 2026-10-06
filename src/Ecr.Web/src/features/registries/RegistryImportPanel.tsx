@@ -132,7 +132,6 @@ export function RegistryImportPanel({ registryCode, disabled = false }: Registry
       />
 
       <Button
-        size="xs"
         variant="default"
         disabled={disabled}
         loading={previewLoading}

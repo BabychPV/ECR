@@ -49,7 +49,7 @@ export function SourceKindSwitch({ registries }: { registries: RegistryDefDto[] 
 
   return (
     <>
-      <Button size="xs" variant="default" onClick={() => setOpened(true)}>
+      <Button variant="default" onClick={() => setOpened(true)}>
         {t('registries.sourceSwitch')}
       </Button>
 

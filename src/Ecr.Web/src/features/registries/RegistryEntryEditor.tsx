@@ -365,7 +365,7 @@ export function ValidityEditor({
 
   return (
     <Modal opened={entry !== null} onClose={onClose} title={t('registries.validity')}>
-      <Suspense fallback={<Skeleton height={36} />}>
+      <Suspense fallback={<Skeleton height="var(--ecr-ctl-height)" />}>
         <DateOnlyInput
           label={t('registries.validFrom')}
           description={t('registries.validityHint')}
@@ -376,7 +376,7 @@ export function ValidityEditor({
       </Suspense>
 
       <Box mt="sm">
-        <Suspense fallback={<Skeleton height={36} />}>
+        <Suspense fallback={<Skeleton height="var(--ecr-ctl-height)" />}>
           <DateOnlyInput label={t('registries.validTo')} value={to} onChange={setTo} />
         </Suspense>
       </Box>

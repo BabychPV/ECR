@@ -433,7 +433,7 @@ export function MethodologyVersionsPage(): JSX.Element {
                   <Table.Td>
                     <Group gap="xs" wrap="nowrap">
                       <Button
-                        size="compact-xs"
+                        size="xs"
                         variant={selected?.id === version.id ? 'filled' : 'subtle'}
                         onClick={() => setSelectedId(String(version.id))}
                       >
@@ -447,7 +447,7 @@ export function MethodologyVersionsPage(): JSX.Element {
                           константи, золотий набір). */}
                       {version.status !== 'Published' && mayPublish && (
                         <Button
-                          size="compact-xs"
+                          size="xs"
                           variant="default"
                           onClick={() => setPublishing({ versionId: version.id })}
                         >
@@ -459,7 +459,7 @@ export function MethodologyVersionsPage(): JSX.Element {
                           діалог відкривався б без базової версії. */}
                       {list.length > 1 && (
                         <Button
-                          size="compact-xs"
+                          size="xs"
                           variant="subtle"
                           onClick={() => setCompareTarget(version)}
                         >
@@ -504,7 +504,7 @@ export function MethodologyVersionsPage(): JSX.Element {
 
             {editable && (
               <Button
-                size="compact-sm"
+                size="xs"
                 variant="default"
                 onClick={() => {
                   setEditing({
@@ -564,7 +564,7 @@ export function MethodologyVersionsPage(): JSX.Element {
                         {editable && (
                           <Group gap="xs">
                             <Button
-                              size="compact-xs"
+                              size="xs"
                               variant="subtle"
                               onClick={() => {
                                 setEditing({
@@ -582,7 +582,7 @@ export function MethodologyVersionsPage(): JSX.Element {
                               {t('methodologies.editFormula')}
                             </Button>
                             <Button
-                              size="compact-xs"
+                              size="xs"
                               variant="subtle"
                               color="statusError"
                               onClick={() =>
@@ -967,7 +967,7 @@ export function MethodologyVersionsPage(): JSX.Element {
             data-autofocus
           />
 
-          <Suspense fallback={<Skeleton height={36} />}>
+          <Suspense fallback={<Skeleton height="var(--ecr-ctl-height)" />}>
             <DateOnlyInput
               label={t('methodologies.effectiveFrom')}
               description={t('methodologies.effectiveFromHint')}

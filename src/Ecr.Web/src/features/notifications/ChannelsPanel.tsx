@@ -147,7 +147,7 @@ export function ChannelsPanel(): JSX.Element {
           {t('notifications.channels')}
         </Title>
 
-        <Button size="xs" variant="default" onClick={() => setDraft(emptyDraft())}>
+        <Button variant="default" onClick={() => setDraft(emptyDraft())}>
           {t('notifications.addChannel')}
         </Button>
       </Group>
@@ -243,7 +243,7 @@ export function ChannelsPanel(): JSX.Element {
                           `common.edit`: такого ключа в каталозі немає, і
                           заводити спільний рядок заради одного екрана означало б
                           вирішувати за всі інші, як у них зветься ця дія. */}
-                      <Button size="compact-xs" variant="subtle" onClick={() => setDraft(draftOf(channel))}>
+                      <Button size="xs" variant="subtle" onClick={() => setDraft(draftOf(channel))}>
                         {t('notifications.editChannel')}
                       </Button>
                       {/* ⚠ Дія є лише там, де секрет справді читають: для пошти
@@ -251,7 +251,7 @@ export function ChannelsPanel(): JSX.Element {
                           налаштування. */}
                       {channel.kind === 'TeamsWebhook' && (
                         <Button
-                          size="compact-xs"
+                          size="xs"
                           variant="subtle"
                           onClick={() => {
                             setSecretFor(channel);
@@ -262,7 +262,7 @@ export function ChannelsPanel(): JSX.Element {
                         </Button>
                       )}
                       <Button
-                        size="compact-xs"
+                        size="xs"
                         variant="subtle"
                         loading={testLoading && test.variables === channel.id}
                         onClick={() => {
@@ -273,7 +273,7 @@ export function ChannelsPanel(): JSX.Element {
                         {t('notifications.testChannel')}
                       </Button>
                       <Button
-                        size="compact-xs"
+                        size="xs"
                         variant="subtle"
                         color="statusError"
                         loading={removeLoading && remove.variables === channel.id}

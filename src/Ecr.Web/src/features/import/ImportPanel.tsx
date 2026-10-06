@@ -173,7 +173,6 @@ export function ImportPanel({ documentId, periodKey }: ImportPanelProps): JSX.El
       />
 
       <Button
-        size="xs"
         variant="default"
         loading={loadPhase !== 'none'}
         onClick={() => {

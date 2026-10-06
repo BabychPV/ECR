@@ -142,7 +142,7 @@ export function HealthPage(): JSX.Element {
       <Stack gap="xs">
         <Group justify="space-between">
           <Text fw={600}>{t('health.database')}</Text>
-          <Button variant="default" size="xs" onClick={() => void copyPartitionScript()}>
+          <Button variant="default" onClick={() => void copyPartitionScript()}>
             {t('health.copyPartitionScript')}
           </Button>
         </Group>

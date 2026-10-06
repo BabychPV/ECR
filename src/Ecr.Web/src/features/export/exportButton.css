@@ -1,0 +1,30 @@
+/*
+ * Експорт у роботі (`U-25`, `ExportButton.tsx`): смужка внизу кнопки замість
+ * зміни підпису — ширина кнопки лишається рівною сусідам і не стрибає.
+ */
+.ecr-export-button {
+  position: relative;
+}
+
+.ecr-export-button[data-export-state='running']::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 40%;
+  height: 2px;
+  background: var(--mantine-primary-color-filled);
+  animation: ecr-export-progress 1.2s linear infinite;
+}
+
+@keyframes ecr-export-progress {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(250%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ecr-export-button[data-export-state='running']::after {
+    animation: none;
+    width: 100%;
+  }
+}

@@ -59,7 +59,7 @@ export function DeleteMappingAction({
   return (
     <Stack gap="xs" miw="fit-content">
       <Button
-        size="compact-xs"
+        size="xs"
         variant="subtle"
         color="statusError"
         onClick={() => {

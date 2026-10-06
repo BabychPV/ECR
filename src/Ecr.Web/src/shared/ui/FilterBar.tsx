@@ -178,7 +178,6 @@ export function FilterBar({
       {hasValues && (
         <Button
           variant="default"
-          size="xs"
           data-filter-clear="true"
           onClick={() => {
             /*

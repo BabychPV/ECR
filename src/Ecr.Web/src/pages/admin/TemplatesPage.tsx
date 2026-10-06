@@ -222,7 +222,7 @@ export function TemplatesPage(): JSX.Element {
               «якому саме» не має виникати. */}
           {editable && (
             <Button
-              size="compact-xs"
+              size="xs"
               variant="default"
               onClick={() => setVersioning(template.id)}
             >
@@ -240,7 +240,7 @@ export function TemplatesPage(): JSX.Element {
         title={t('templates.title')}
         actions={
           editable && (
-            <Button size="xs" onClick={() => setCreating(true)}>
+            <Button onClick={() => setCreating(true)}>
               {t('templates.create')}
             </Button>
           )

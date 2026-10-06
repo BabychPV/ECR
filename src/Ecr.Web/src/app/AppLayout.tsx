@@ -265,7 +265,7 @@ export function AppLayout(): JSX.Element {
           <Stack gap="xs" align="flex-start">
             <Text size="sm">{t('app.languageAfterSave')}</Text>
             <Button
-              size="compact-xs"
+              size="xs"
               variant="light"
               onClick={() => {
                 // Знову спершу зберегти: між тостом і кліком могло з'явитися нове набране.

@@ -57,7 +57,7 @@ export default function RegistryExportMenu({ registryCode, asOf }: RegistryExpor
   return (
     <Popover opened={opened} onChange={setOpened} position="bottom-end" width={320} withinPortal trapFocus>
       <Popover.Target>
-        <Button size="xs" variant="default" onClick={() => setOpened((o) => !o)} aria-expanded={opened}>
+        <Button variant="default" onClick={() => setOpened((o) => !o)} aria-expanded={opened}>
           {t('registries.export.button')}
         </Button>
       </Popover.Target>
@@ -76,10 +76,10 @@ export default function RegistryExportMenu({ registryCode, asOf }: RegistryExpor
             checked={IncludeChildrenAvailable && includeChildren}
             onChange={(event) => setIncludeChildren(event.currentTarget.checked)}
           />
-          <Button size="xs" variant="default" loading={busy === 'csv'} disabled={busy !== null} onClick={() => void run('csv')}>
+          <Button variant="default" loading={busy === 'csv'} disabled={busy !== null} onClick={() => void run('csv')}>
             {t('registries.export.csv')}
           </Button>
-          <Button size="xs" variant="default" loading={busy === 'xlsx'} disabled={busy !== null} onClick={() => void run('xlsx')}>
+          <Button variant="default" loading={busy === 'xlsx'} disabled={busy !== null} onClick={() => void run('xlsx')}>
             {t('registries.export.xlsx')}
           </Button>
           {shown !== null && (

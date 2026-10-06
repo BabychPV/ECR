@@ -95,7 +95,7 @@ export function PeriodPolicyManager(): JSX.Element {
 
   return (
     <>
-      <Button size="xs" variant="default" onClick={() => setOpened(true)}>
+      <Button variant="default" onClick={() => setOpened(true)}>
         {t('periods.managePolicies')}
       </Button>
 
@@ -202,7 +202,7 @@ export function PeriodPolicyManager(): JSX.Element {
                       </Table.Td>
                       <Table.Td>
                         <Button
-                          size="compact-xs"
+                          size="xs"
                           variant="subtle"
                           loading={update.isPending && update.variables === policy.id}
                           onClick={() => update.mutate(policy.id)}

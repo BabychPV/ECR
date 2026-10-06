@@ -73,7 +73,6 @@ export function SearchLauncher(): JSX.Element {
     <>
       <Button
         variant="default"
-        size="xs"
         aria-label={label}
         aria-haspopup="dialog"
         aria-keyshortcuts="Control+K Meta+K"

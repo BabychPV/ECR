@@ -329,7 +329,7 @@ export function RowWindowMapModal({
                   </Table.Td>
                   <Table.Td>
                     <Button
-                      size="compact-xs"
+                      size="xs"
                       variant="subtle"
                       color="statusError"
                       onClick={() => patch({ sources: state.sources.filter((item) => item.key !== source.key) })}
@@ -344,7 +344,6 @@ export function RowWindowMapModal({
         </Table.ScrollContainer>
         <Group>
           <Button
-            size="xs"
             variant="default"
             onClick={() => patch({ sources: [...state.sources, newSourceRow({ sourceEntityId: defaultEntityId })] })}
             data-row-window-source-add=""

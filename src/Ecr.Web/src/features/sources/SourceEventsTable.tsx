@@ -342,7 +342,6 @@ export function SourceEventsTable({
         {canManage && (
           <Button
             ref={syncFocus.ref}
-            size="xs"
             loading={sync.isPending}
             onClick={() => {
               syncFocus.arm();
@@ -362,7 +361,6 @@ export function SourceEventsTable({
             <Group gap="xs">
               <Text size="sm">{t("sourceEvents.syncNoMapHint")}</Text>
               <Button
-                size="xs"
                 variant="default"
                 onClick={onCreateMap}
                 data-source-events-sync-create-map=""
@@ -408,7 +406,7 @@ export function SourceEventsTable({
               return (
                 <Button
                   key={status}
-                  size="compact-xs"
+                  size="xs"
                   variant={on ? "filled" : "default"}
                   aria-pressed={on}
                   onClick={() =>
@@ -510,7 +508,6 @@ export function SourceEventsTable({
       {events.hasNextPage && (
         <Group justify="center">
           <Button
-            size="xs"
             variant="default"
             loading={events.isFetchingNextPage}
             onClick={() => void events.fetchNextPage()}
