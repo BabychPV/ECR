@@ -134,6 +134,7 @@ export function EntryDrawer({ registry, row, fields, asOf, readOnly }: EntryDraw
                 size="xs"
                 label={t('registries.data.valuesAsOf')}
                 description={t('registries.data.valuesAsOfHint')}
+                valueFormat="YYYY-MM-DD"
                 clearable
                 value={day}
                 onChange={setDay}
