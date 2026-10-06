@@ -43,6 +43,7 @@ const Strings: Record<string, string> = {
   'grants.pickerColumn': 'Column',
   'grants.pickerNothingFound': 'Nothing found',
   'grants.pickerLoadFailed': 'Load failed',
+  'grants.pickerForbidden': 'Needs TemplateAdministrator',
   'grants.projectsCatalogHint': 'All projects hint',
   'grants.unsaved': 'Unsaved changes',
   'grants.pickResourceFirst': 'Pick a resource first',
@@ -106,6 +107,8 @@ const Structure = {
 let serverGrants: Record<number, ResourceGrantDto[]>;
 let puts: { url: string; body: { grants: ResourceGrantDto[] } }[];
 let grantGets: number;
+/** A1-05: статус відповіді `GET /templates` (200 — список). */
+let templatesStatus: number;
 
 function json(data: unknown): Response {
   return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
@@ -115,6 +118,7 @@ beforeEach(() => {
   serverGrants = { 10: [], 11: [] };
   puts = [];
   grantGets = 0;
+  templatesStatus = 200;
   securityProjectGets = 0;
 
   vi.stubGlobal(
@@ -148,6 +152,12 @@ beforeEach(() => {
       }
       if (url.includes('/api/v1/templates/7/versions')) {
         return json({ items: [{ id: 70, version: '1.0', status: 'Published', publishedAt: null, clonedFromVersionId: null, presentationRevision: 1 }], nextCursor: null, totalCount: 1 });
+      }
+      if (url.includes('/api/v1/templates') && templatesStatus !== 200) {
+        return new Response(
+          JSON.stringify({ title: 'Error', status: templatesStatus, errorCode: 'ECR-AUTH-0403', correlationId: 'c' }),
+          { status: templatesStatus, headers: { 'Content-Type': 'application/problem+json' } },
+        );
       }
       if (url.includes('/api/v1/templates')) return json({ items: [{ id: 7, code: 'TPL-HSE', versionCount: 1 }], nextCursor: null, totalCount: 1 });
       if (url.includes('/template-versions/70/structure')) return json(Structure);
@@ -239,6 +249,23 @@ describe('GrantsPanel: вибір ресурсу за назвою (U6)', () => 
     expect(puts[0]?.body.grants).toEqual([
       expect.objectContaining({ resourceKind: 'Column', resourceId: 702 }),
     ]);
+  });
+
+  // A1-05: без ролі TemplateAdministrator `GET /templates` дає 403 — поле
+  // каже, чого бракує, а не загальне «не вдалося завантажити».
+  it.each([
+    [403, 'Needs TemplateAdministrator', 'Load failed'],
+    [500, 'Load failed', 'Needs TemplateAdministrator'],
+  ])('%i на /templates у каскаді: «%s»', async (status, shown, hidden) => {
+    templatesStatus = status;
+    await renderPanel();
+    await openRole('Auditor');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add grant' }));
+    await choose('Resource kind 1', 'Колонка');
+
+    expect(await screen.findByText(shown)).not.toBeNull();
+    expect(screen.queryByText(hidden)).toBeNull();
   });
 
   it('рядок без обраного ресурсу не зберігається (грант «ні на що»)', async () => {
