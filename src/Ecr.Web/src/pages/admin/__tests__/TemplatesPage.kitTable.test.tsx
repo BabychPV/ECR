@@ -35,8 +35,8 @@ import { testTheme } from '@/test/render';
  */
 const templates = {
   items: [
-    { id: 7, code: 'BRAVO', versionCount: 1 },
-    { id: 3, code: 'ALPHA', versionCount: 1 },
+    { id: 7, code: 'BRAVO', versionCount: 1, documentCount: 0, isArchived: false },
+    { id: 3, code: 'ALPHA', versionCount: 1, documentCount: 0, isArchived: false },
   ],
   nextCursor: null,
   totalCount: 2,

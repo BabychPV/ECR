@@ -1,20 +1,44 @@
 import type { TemplateSummary, TemplateVersionSummary } from '@/api/types';
+import { localized, type LocalizedText } from '@/shared/i18n/localized';
 
 /** Стан версії шаблону (`schema.d.ts` → `TemplateVersionStatus`). */
 type TemplateVersionStatus = TemplateVersionSummary['status'];
 
 /**
+ * Шаблон переліку з полями, що їх додає контракт «Аналізу»
+ * (`lane/analiz/ui-template-summary-ext`).
+ *
+ * ⚠ Поля НЕОБОВ'ЯЗКОВІ навмисно: гілка мусить збиратися й працювати і до, і
+ * після того контракту. Без поля (старий сервер) колонка/показник не
+ * малюються (`D15-06`), а не показують «0». Коли контракт у `schema.d.ts`,
+ * перетин просто збігається з `TemplateSummary`.
+ */
+export type TemplateListSummary = TemplateSummary & {
+  readonly nameL10n?: LocalizedText | null;
+  readonly isArchived?: boolean;
+  readonly documentCount?: number;
+  readonly updatedAt?: string | null;
+  readonly draftAuthorDisplayName?: string | null;
+  readonly draftCreatedAt?: string | null;
+};
+
+/** Стан шаблону в переліку: стан версій або архів самого шаблону. */
+export type TemplateListState = TemplateVersionStatus | 'Archived';
+
+/**
  * Рядок переліку шаблонів (`UI-34`, макет `screens-templates.js` → «1.
  * /admin/templates — перелік»): поточна опублікована версія, чернетка і стан
- * шаблону — з ТИХ даних, що вже є (`TemplateSummary` + пакет версій).
+ * шаблону — з `TemplateSummary` (назва, архів, документи, дата, автор
+ * чернетки) і пакета версій.
  *
- * ⛔ Колонок «Documents», «Updated» і автора чернетки («… is editing») тут НЕМАЄ
- * навмисно: у `GET /templates` і `GET /templates/versions?ids=` цих полів немає
- * (лічильник документів — лише на картці, `BE-26`). Нуль чи порожня клітинка
- * замість невідомого числа збрехали б (`D15-06`, критерій 3 картки `UI-34`).
+ * ⛔ Того, чого сервер не віддає (момент останньої правки чернетки, дата
+ * архівування), тут НЕМАЄ навмисно (`D15-06`): вигадана клітинка збрехала б.
  */
 export interface TemplateListRow {
-  readonly template: TemplateSummary;
+  readonly template: TemplateListSummary;
+
+  /** Назва мовою інтерфейсу; порожньо — сервер назви не дав. */
+  readonly name: string;
 
   /** Версії шаблону в порядку відповіді сервера (за зростанням Id). */
   readonly versions: readonly TemplateVersionSummary[];
@@ -34,12 +58,13 @@ export interface TemplateListRow {
   /**
    * Стан шаблону для колонки й фільтра «State».
    *
-   * ⚠ Похідний від версій: є опублікована → `Published`; інакше є чернетка →
-   * `Draft`; інакше лише застарілі → `Deprecated`; версій немає → `null`.
-   * Власного стану «архівовано» в переліку сервер не віддає (TODO-контракт у
-   * листі готовності), тож вигадувати його з версій не можна.
+   * ⚠ Архів шаблону (`isArchived`) перемагає версії: архівований шаблон не
+   * пропонується для нових документів, хоч би яка версія була опублікована.
+   * Інакше — похідний від версій: є опублікована → `Published`; інакше є
+   * чернетка → `Draft`; інакше лише застарілі → `Deprecated`; версій немає →
+   * `null`.
    */
-  readonly state: TemplateVersionStatus | null;
+  readonly state: TemplateListState | null;
 }
 
 function lastOf(
@@ -56,23 +81,31 @@ function lastOf(
 
 /** Будує рядок переліку з шаблону і його версій. */
 export function toTemplateListRow(
-  template: TemplateSummary,
+  template: TemplateListSummary,
   versions: readonly TemplateVersionSummary[],
 ): TemplateListRow {
   const current = lastOf(versions, 'Published');
   const draft = lastOf(versions, 'Draft');
   const lastDeprecated = current === null ? lastOf(versions, 'Deprecated') : null;
 
-  const state: TemplateVersionStatus | null =
-    current !== null ? 'Published' : draft !== null ? 'Draft' : lastDeprecated !== null ? 'Deprecated' : null;
+  const state: TemplateListState | null = template.isArchived === true
+    ? 'Archived'
+    : current !== null
+      ? 'Published'
+      : draft !== null
+        ? 'Draft'
+        : lastDeprecated !== null
+          ? 'Deprecated'
+          : null;
 
-  return { template, versions, current, draft, lastDeprecated, state };
+  return { template, name: localized(template.nameL10n), versions, current, draft, lastDeprecated, state };
 }
 
 /** Чи проходить рядок обраний показник смуги. */
 export function matchesStat(row: TemplateListRow, stat: string | null): boolean {
   if (stat === 'published') return row.current !== null;
   if (stat === 'drafts') return row.draft !== null;
+  if (stat === 'documents') return (row.template.documentCount ?? 0) > 0;
 
   return true;
 }
@@ -85,6 +118,19 @@ export function publishedVersionCount(rows: readonly TemplateListRow[]): number 
   );
 }
 
+/**
+ * Скільки документів спирається на шаблони (макет: «documents using them»).
+ *
+ * ⚠ Сервер рахує лише документи проєктів, видимих цьому читачеві: сума — «ваші
+ * документи», не всі в системі.
+ */
+export function documentCount(rows: readonly TemplateListRow[]): number | null {
+  // ⚠ `null` — сервер лічильника не віддає (до контракту): показника немає.
+  if (!rows.some((row) => row.template.documentCount !== undefined)) return null;
+
+  return rows.reduce((sum, row) => sum + (row.template.documentCount ?? 0), 0);
+}
+
 /** Скільки шаблонів мають відкриту чернетку (макет: «drafts in progress»). */
 export function draftCount(rows: readonly TemplateListRow[]): number {
   return rows.filter((row) => row.draft !== null).length;
@@ -93,8 +139,8 @@ export function draftCount(rows: readonly TemplateListRow[]): number {
 /**
  * Фільтр переліку: пошук за кодом (без регістру), стан і показник смуги.
  *
- * ⚠ Пошук — лише за кодом: назви шаблону в `TemplateSummary` немає
- * (TODO-контракт), а шукати за тим, чого не видно в рядку, — означало б
+ * ⚠ Пошук — за кодом і назвою мовою інтерфейсу: рівно тим, що видно в
+ * рядку. Шукати за тим, чого на екрані немає (назва іншою мовою), означало б
  * знаходити рядки «ні за що».
  */
 export function filterTemplateRows(
@@ -105,7 +151,9 @@ export function filterTemplateRows(
 
   return rows.filter(
     (row) =>
-      (needle.length === 0 || row.template.code.toLowerCase().includes(needle)) &&
+      (needle.length === 0 ||
+        row.template.code.toLowerCase().includes(needle) ||
+        row.name.toLowerCase().includes(needle)) &&
       (filter.state === null || row.state === filter.state) &&
       matchesStat(row, filter.stat),
   );

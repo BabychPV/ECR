@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import type { TemplateSummary, TemplateVersionSummary } from '@/api/types';
+import type { TemplateVersionSummary } from '@/api/types';
 import {
+  documentCount,
   draftCount,
   filterTemplateRows,
   publishedVersionCount,
   toTemplateListRow,
+  type TemplateListSummary,
 } from '@/features/templates/templateListModel';
 
 /**
@@ -16,7 +18,12 @@ import {
  * ще не опубліковано.
  */
 
-const template = (id: number, code: string): TemplateSummary => ({ id, code, versionCount: 0 });
+const template = (id: number, code: string, extra: Partial<TemplateListSummary> = {}): TemplateListSummary => ({
+  id,
+  code,
+  versionCount: 0,
+  ...extra,
+});
 
 const version = (
   id: number,
@@ -61,6 +68,19 @@ describe('toTemplateListRow', () => {
     expect(row.lastDeprecated?.id).toBe(2);
   });
 
+  it('архів шаблону перемагає опубліковану версію', () => {
+    const row = toTemplateListRow(template(1, 'A', { isArchived: true }), [version(1, 'Published')]);
+
+    expect(row.state).toBe('Archived');
+    // ⚠ Поточна версія лишається названою: документи на ній працюють далі.
+    expect(row.current?.id).toBe(1);
+  });
+
+  it('назва — мовою інтерфейсу з nameL10n; без неї порожньо', () => {
+    expect(toTemplateListRow(template(1, 'A', { nameL10n: { values: { en: 'Air' } } }), []).name).toBe('Air');
+    expect(toTemplateListRow(template(1, 'A'), []).name).toBe('');
+  });
+
   it('без версій — стану немає (не вигадуємо «Draft»)', () => {
     const row = toTemplateListRow(template(1, 'A'), []);
 
@@ -83,6 +103,16 @@ describe('показники смуги', () => {
 
   it('чернетки — кількість шаблонів із відкритою чернеткою', () => {
     expect(draftCount(rows)).toBe(2);
+  });
+
+  it('документи — сума documentCount по шаблонах', () => {
+    const counted = [
+      toTemplateListRow(template(1, 'A', { documentCount: 5 }), []),
+      toTemplateListRow(template(2, 'B', { documentCount: 0 }), []),
+      toTemplateListRow(template(3, 'C', { documentCount: 7 }), []),
+    ];
+
+    expect(documentCount(counted)).toBe(12);
   });
 });
 
@@ -114,6 +144,28 @@ describe('filterTemplateRows', () => {
 
   it('показник «published» — шаблони з поточною версією', () => {
     expect(codes({ query: null, state: null, stat: 'published' })).toEqual(['AIR-QUARTERLY']);
+  });
+
+  it('пошук бачить і назву, не лише код', () => {
+    const named = [
+      toTemplateListRow(template(1, 'GEN07131100', { nameL10n: { values: { en: 'Air emissions' } } }), []),
+      toTemplateListRow(template(2, 'WATER'), []),
+    ];
+
+    expect(filterTemplateRows(named, { query: 'emiss', state: null, stat: null }).map((r) => r.template.code)).toEqual([
+      'GEN07131100',
+    ]);
+  });
+
+  it('показник «documents» — шаблони, на які спираються документи', () => {
+    const counted = [
+      toTemplateListRow(template(1, 'A', { documentCount: 3 }), []),
+      toTemplateListRow(template(2, 'B'), []),
+    ];
+
+    expect(filterTemplateRows(counted, { query: null, state: null, stat: 'documents' }).map((r) => r.template.code)).toEqual([
+      'A',
+    ]);
   });
 
   it('фільтри складаються через «і»', () => {
