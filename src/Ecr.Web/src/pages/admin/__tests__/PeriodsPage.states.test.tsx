@@ -158,7 +158,11 @@ describe('PeriodsPage — стани календаря обраного про�
     show('/admin/periods?projectId=1');
 
     expect(await screen.findByText('⟦periods.noPeriods⟧')).toBeTruthy();
-    expect(screen.queryByRole('table')).toBeNull();
+    // ✎ UI-33: таблиця «All projects» під календарем — інша таблиця; календаря
+    // проєкту (рядків періодів) немає.
+    const tables = screen.queryAllByRole('table');
+    expect(tables.filter((table) => table.closest('[data-testid="periods-overview"]') === null)).toHaveLength(0);
+    expect(document.querySelector('[data-period-row]')).toBeNull();
   });
 
   it('у дорозі: «завантаження», а не «періодів немає»', async () => {
