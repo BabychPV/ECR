@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, type JSX, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type JSX, type ReactNode } from 'react';
 import { Drawer, Group, Stack, Text } from '@mantine/core';
 import { useMediaQuery } from '@mantine/hooks';
 import { useUrlState } from '@/shared/ui/useUrlState';
@@ -94,33 +94,34 @@ export function DetailDrawer({
   const opened = panel === panelId;
 
   /*
-   * ⛔ WCAG 2.4.3: `returnFocus` Mantine спрацьовує лише на ЗАКРИТТІ, а
-   * `ListPage` (журнал задач, узгодженість) прибирає шторку з дерева разом із
-   * `?panel=` — після `Esc` на вузькому екрані фокус падав на `body`. Тому
-   * той, хто відкрив, запам'ятовується тут, і при демонтажі фокус
-   * повертається до нього, якщо його ніхто не забрав і він ще в документі.
+   * ⛔ Відкривач запам'ятовується ТУТ, а не покладається на `returnFocus`
+   * Mantine. Той ловить відкривач лише на ПЕРЕХОДІ `opened` усередині вже
+   * змонтованої шторки і лише з пасткою фокуса. А `ListPage` (Jobs,
+   * Consistency) монтує шторку вже відкритою й знімає її разом із `?panel=` —
+   * і після Esc фокус падав на `<body>` (живий прогін пачки batch-2-a, 1100 px).
+   * Читання `activeElement` у рендері — свідоме: на кадрі відкриття фокус ще
+   * стоїть на кнопці, що змінила адресу.
    */
-  const opener = useRef<HTMLElement | null>(null);
-  useLayoutEffect(() => {
-    if (!opened) return;
-    const active = document.activeElement;
-    if (active instanceof HTMLElement && active !== document.body) opener.current = active;
-  }, [opened]);
-  useEffect(
-    () => () => {
-      const target = opener.current;
-      window.setTimeout(() => {
-        const active = document.activeElement;
-        const lost = active === null || active === document.body || !active.isConnected;
-        if (lost && target?.isConnected === true) target.focus();
-      }, 0);
-    },
-    [],
-  );
+  const [wasOpened, setWasOpened] = useState(false);
+  const [opener, setOpener] = useState<HTMLElement | null>(null);
+  if (opened !== wasOpened) {
+    setWasOpened(opened);
+    if (opened) setOpener(focusedOutside(panelId));
+  }
+
+  /*
+   * ⛔ WCAG 2.4.3 (a11y-pass): шторку можуть зняти й без `close` — `ListPage`
+   * прибирає її з дерева разом із `?panel=` (кнопка «Назад», перехід за
+   * адресою). Тоді фокус повертається при демонтажі за тим самим правилом.
+   */
+  const openerRef = useRef<HTMLElement | null>(null);
+  openerRef.current = opened ? opener : null;
+  useEffect(() => () => returnFocusTo(openerRef.current, panelId), [panelId]);
 
   const close = (): void => {
     setPanel(null);
     onClose?.();
+    returnFocusTo(opener, panelId);
   };
 
   return (
@@ -161,4 +162,40 @@ export function DetailDrawer({
       </Stack>
     </Drawer>
   );
+}
+
+/** Що зараз у фокусі, якщо це не `<body>` і не сама шторка. */
+function focusedOutside(panelId: string): HTMLElement | null {
+  const active = document.activeElement;
+  if (!(active instanceof HTMLElement) || active === document.body) return null;
+
+  return insidePanel(active, panelId) ? null : active;
+}
+
+/**
+ * Повертає фокус на відкривач після закриття.
+ *
+ * ⚠ Лише якщо фокус загубився (на `<body>`) або лишився в шторці, що
+ * зникає. На широкому екрані сторінка жива: людина могла вже перейти до
+ * іншого поля, і висмикувати її звідти назад на відкривач — гірше, ніж нічого.
+ * Таймер — щоб шторка встигла зникнути з адреси й розмітки.
+ */
+function returnFocusTo(opener: HTMLElement | null, panelId: string): void {
+  if (opener === null) return;
+
+  window.setTimeout(() => {
+    if (!opener.isConnected) return;
+
+    const active = document.activeElement;
+    const lost =
+      active === null ||
+      active === document.body ||
+      !active.isConnected ||
+      insidePanel(active, panelId);
+    if (lost) opener.focus({ preventScroll: true });
+  }, 0);
+}
+
+function insidePanel(element: Element, panelId: string): boolean {
+  return element.closest('[data-panel]')?.getAttribute('data-panel') === panelId;
 }
