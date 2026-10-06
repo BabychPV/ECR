@@ -8,6 +8,8 @@ import { loadCatalog, resetMissingReports, t } from '@/shared/i18n';
 import { theme } from '@/shared/theme/theme';
 import {
   StatusBadge,
+  badgeLook,
+  statusIconName,
   isKnownStatus,
   statusKey,
   statusTable,
@@ -356,22 +358,25 @@ describe('StatusBadge: невідомий стан', () => {
 });
 
 describe('StatusBadge: тон доходить до розмітки', () => {
-  it('відмова малюється токеном відмови, а не нейтральним', () => {
+  it('відмова малюється токенами відмови — м\'яке тло й піктограма, а не нейтральна рамка', () => {
     const probe = show(<StatusBadge kind="sheet" state="Rejected" />);
     const style = badge(probe, 'Rejected').getAttribute('style') ?? '';
 
-    // ⛔ Саме токен, а не «якийсь колір»: мутація «завжди нейтральний» дала б
-    // тут `var(--ecr-text)`, і рядок нижче впав би з видимою різницею.
+    // ⛔ Саме токени, а не «якийсь колір»: мутація «завжди нейтральний» дала б
+    // тут прозоре тло з рамкою `var(--ecr-border)`, і обидва рядки нижче впали б.
+    expect(style).toContain('var(--ecr-danger-soft)');
     expect(style).toContain('var(--ecr-danger)');
-    expect(style).not.toContain('var(--ecr-text)');
+    expect(style).not.toContain('var(--ecr-border)');
   });
 
-  it('нейтральний бере власну пару токенів — текст і тло', () => {
+  it('нейтральний — без заливки, з тонкою рамкою і звичайним текстом (UI-27, макет `.badge`)', () => {
     const probe = show(<StatusBadge kind="sheet" state="Draft" />);
     const style = badge(probe, 'Draft').getAttribute('style') ?? '';
 
     expect(style).toContain('var(--ecr-text)');
-    expect(style).toContain('var(--ecr-sunken)');
+    expect(style).toContain('var(--ecr-border)');
+    expect(style).toContain('background: transparent');
+    expect(style).not.toContain('-soft)');
   });
 
   it('«чекає дії» і «в роботі» — один тон info, з акцентними токенами', () => {
@@ -402,20 +407,75 @@ describe('StatusBadge: тон доходить до розмітки', () => {
     expect(badge(probe, 'Published').getAttribute('style') ?? '').toContain('var(--ecr-text)');
   });
 
-  it('quiet прибирає заливку, лишаючи текст (щільні таблиці)', () => {
+  it('quiet знімає рамку й приглушує нейтральний підпис (щільні таблиці)', () => {
+    const root = badge(show(<StatusBadge kind="sheet" state="Draft" quiet />), 'Draft');
+    const style = root.getAttribute('style') ?? '';
+
+    expect(root.getAttribute('data-status-quiet')).toBe('true');
+    expect(style).toContain('var(--ecr-muted)');
+    expect(style).not.toContain('var(--ecr-border)');
+  });
+
+  it('quiet НЕ знімає кольору з проблеми — колір лишається там, де щось не так (KIT §1.3)', () => {
     const root = badge(show(<StatusBadge kind="job" state="Failed" quiet />), 'Failed');
     const style = root.getAttribute('style') ?? '';
 
-    expect(root.getAttribute('data-variant')).toBe('transparent');
+    expect(style).toContain('var(--ecr-danger-soft)');
     expect(style).toContain('var(--ecr-danger)');
-    expect(style).not.toContain('var(--ecr-sunken)');
+    expect(style).not.toContain('var(--ecr-muted)');
   });
 
-  it('за замовчуванням заливка є — рамка й тло з токенів теми', () => {
+  it('за замовчуванням проблема — м\'яке тло без рамки', () => {
     const root = badge(show(<StatusBadge kind="job" state="Failed" />), 'Failed');
+    const style = root.getAttribute('style') ?? '';
 
-    expect(root.getAttribute('data-variant')).toBe('default');
-    expect(root.getAttribute('style') ?? '').toContain('var(--ecr-sunken)');
+    expect(root.getAttribute('data-status-quiet')).toBeNull();
+    expect(style).toContain('var(--ecr-danger-soft)');
+    expect(style).toContain('1px solid transparent');
+  });
+});
+
+/**
+ * `UI-27`: вигляд макета — звичайний регістр і піктограма стану.
+ *
+ * ⛔ Капітель («APPROVED») кричала навіть у нейтральному стані; макет пише
+ * стан звичайним регістром і ставить піктограму ліворуч (`kit.js` → `BADGES`).
+ * jsdom не застосовує CSS Mantine, тож перевіряється саме інлайн-перебиття
+ * `text-transform`, яке й робить підпис звичайним.
+ */
+describe('StatusBadge: вигляд макета (UI-27)', () => {
+  it('підпис — звичайним регістром, не капітеллю', () => {
+    const root = badge(show(<StatusBadge kind="sheet" state="Approved" />), 'Approved');
+
+    expect(root.getAttribute('style') ?? '').toContain('text-transform: none');
+  });
+
+  it.each(expected)('%s/%s — має піктограму', (kind, state) => {
+    const root = badge(show(<StatusBadge kind={kind} state={state} />), state);
+    const icon = root.querySelector('svg[data-status-icon]');
+
+    expect(icon, `${kind}/${state}`).not.toBeNull();
+    expect(icon?.getAttribute('aria-hidden')).toBe('true');
+  });
+
+  it('піктограма йде за станом, а не за тоном: Draft і Approved обидва нейтральні, але різні', () => {
+    expect(statusIconName('sheet', 'Draft')).toBe('pencil');
+    expect(statusIconName('sheet', 'Approved')).toBe('checkCircle');
+    expect(statusIconName('sheet', 'Submitted')).toBe('send');
+    expect(statusIconName('sheet', 'Rejected')).toBe('xCircle');
+  });
+
+  it('невідомий стан — піктограма «увага», навіть якщо слово відоме іншому різновиду', () => {
+    // `Approved` є в `sheet`, але не в `job` — піктограма не має казати «гаразд».
+    expect(statusIconName('job', 'Approved')).toBe('alert');
+    expect(statusIconName('sheet', 'Returned')).toBe('alert');
+  });
+
+  it('колір піктограми — токен тону, переданий змінною', () => {
+    const root = badge(show(<StatusBadge kind="sheet" state="Submitted" />), 'Submitted');
+
+    expect(root.getAttribute('style') ?? '').toContain('--ecr-badge-icon: var(--ecr-accent-text)');
+    expect(badgeLook('warning').bg).toBe('var(--ecr-warning-soft)');
   });
 });
 
