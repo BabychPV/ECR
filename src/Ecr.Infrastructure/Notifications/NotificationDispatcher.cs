@@ -1,8 +1,11 @@
 ﻿// src/Ecr.Infrastructure/Notifications/NotificationDispatcher.cs
 using System.Globalization;
+using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.Notifications;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Ecr.Infrastructure.Notifications;
 
@@ -19,9 +22,15 @@ namespace Ecr.Infrastructure.Notifications;
 /// мовчить, бо надіслала, і система, що мовчить, бо не мала кому, ззовні
 /// однакові.
 /// </remarks>
-public sealed class NotificationDispatcher(
-    INotificationDispatchStore store, IEnumerable<INotificationChannelSender> senders, IClock clock)
+public sealed partial class NotificationDispatcher(
+    INotificationDispatchStore store, IEnumerable<INotificationChannelSender> senders, IClock clock,
+    ILogger<NotificationDispatcher>? logger = null)
 {
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "NotificationDispatcher: канал {ChannelId} відмовив; кореляція {CorrelationId}.")]
+    private static partial void LogChannelFailed(ILogger logger, int channelId, string correlationId, Exception exception);
+
     /// <summary>
     /// Як часто той самий <c>EventKey</c> може піти в той самий канал.
     /// </summary>
@@ -129,7 +138,7 @@ public sealed class NotificationDispatcher(
     /// виняток стає ЗНАЧЕННЯМ і йде в журнал. Нагору летить лише скасування —
     /// зупинка застосунку не є відмовою каналу.
     /// </remarks>
-    private static async Task<string?> TrySendAsync(
+    private async Task<string?> TrySendAsync(
         INotificationChannelSender sender,
         NotificationChannel channel,
         NotificationEvent notification,
@@ -156,7 +165,16 @@ public sealed class NotificationDispatcher(
 #pragma warning restore CA1031
         {
             // ⛔ Без стека (ФВ-6.11): текст видно в інтерфейсі обслуговування.
-            return error.Message;
+            // ⛔ SEC (TIER2): без сирого `error.Message` (вебхук/SMTP: URL, хост, логін) —
+            // власний виняток продукту як є, решта — код каталогу + кореляція; повний
+            // виняток — у журналі сервера.
+            var correlationId = SafeErrorText.NewCorrelationId();
+            if (!SafeErrorText.IsOwn(error))
+            {
+                LogChannelFailed(logger ?? NullLogger<NotificationDispatcher>.Instance, channel.Id, correlationId, error);
+            }
+
+            return SafeErrorText.For(error, correlationId, "the delivery");
         }
     }
 

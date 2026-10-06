@@ -1,9 +1,12 @@
 // src/Ecr.Infrastructure/Integration/OutboxDispatcher.cs
+using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.Integration;
 using Ecr.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Ecr.Infrastructure.Integration;
 
@@ -79,8 +82,14 @@ namespace Ecr.Infrastructure.Integration;
 /// <b>at-least-once</b>, а вікно дубля звужене до однієї події, що саме в
 /// дорозі, замість цілої партії.
 /// </remarks>
-public sealed class OutboxDispatcher(EcrDbContext db, IClock clock, INotificationSender sender)
+public sealed partial class OutboxDispatcher(
+    EcrDbContext db, IClock clock, INotificationSender sender, ILogger<OutboxDispatcher>? logger = null)
 {
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "OutboxDispatcher: відправка події {EventId} не вдалася; кореляція {CorrelationId}.")]
+    private static partial void LogSendFailed(ILogger logger, long eventId, string correlationId, Exception exception);
+
     /// <summary>Скільки подій відправляти за один прогін.</summary>
     /// <remarks>
     /// Задача працює щогодини. Дві сотні листів за раз — це межа, за якою
@@ -225,7 +234,16 @@ public sealed class OutboxDispatcher(EcrDbContext db, IClock clock, INotificatio
             {
                 // ⛔ Текст без стека (ФВ-6.11): він видимий в інтерфейсі
                 // обслуговування.
-                item.MarkFailed(error.Message, MaxAttempts);
+                // ⛔ SEC (TIER2): без сирого `error.Message` (SMTP: ім'я/адреса сервера,
+                // логін, хост із помилки з'єднання) — власний виняток продукту як є, решта —
+                // код каталогу + кореляція; повний виняток — у журналі сервера.
+                var correlationId = SafeErrorText.NewCorrelationId();
+                if (!SafeErrorText.IsOwn(error))
+                {
+                    LogSendFailed(logger ?? NullLogger<OutboxDispatcher>.Instance, item.Id, correlationId, error);
+                }
+
+                item.MarkFailed(SafeErrorText.For(error, correlationId, "the delivery"), MaxAttempts);
             }
 
             // ⛔ Фіксація ОДРАЗУ, ще до наступної відправки. Раніше тут не було

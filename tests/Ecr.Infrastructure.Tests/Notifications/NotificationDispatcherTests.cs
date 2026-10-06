@@ -77,7 +77,14 @@ public sealed class NotificationDispatcherTests(SqlServerFixture sql)
 
         var failed = Assert.Single(await DeliveriesAsync(failingId, key));
         Assert.Equal(NotificationDeliveryStatus.Failed, failed.Status);
-        Assert.Contains("500", failed.Error!, StringComparison.Ordinal);
+        // ⛔ SEC (TIER2): у журнал доставки (його читає інтерфейс) сирий текст винятку каналу
+        // не йде — лише код і кореляція. Мутація: повернути `error.Message` — тест червоний.
+        Assert.Contains("ECR-SYS-0500", failed.Error!, StringComparison.Ordinal);
+        Assert.Contains("correlation", failed.Error!, StringComparison.Ordinal);
+        foreach (var secret in new[] { "Secret123", "db01", "pi01.internal", "вебхук" })
+        {
+            Assert.DoesNotContain(secret, failed.Error!, StringComparison.Ordinal);
+        }
 
         var sent = Assert.Single(await DeliveriesAsync(workingId, key));
         Assert.Equal(NotificationDeliveryStatus.Sent, sent.Status);
@@ -197,7 +204,10 @@ public sealed class NotificationDispatcherTests(SqlServerFixture sql)
 
         var failed = Assert.Single(await DeliveriesAsync(refusedId, key));
         Assert.Equal(NotificationDeliveryStatus.Failed, failed.Status);
-        Assert.Contains("550", failed.Error!, StringComparison.Ordinal);
+        // ⛔ SEC (TIER2): текст релея (хост, логін) у журнал доставки не йде.
+        Assert.Contains("ECR-SYS-0500", failed.Error!, StringComparison.Ordinal);
+        Assert.DoesNotContain("smtp.corp.internal", failed.Error!, StringComparison.Ordinal);
+        Assert.DoesNotContain("Secret123", failed.Error!, StringComparison.Ordinal);
 
         // ⛔ Адресат і тема беруться з КАНАЛУ, а не з конфігурації процесу:
         // саме це відрізняє відправника каналу від транспорту під ним.
@@ -276,7 +286,8 @@ public sealed class NotificationDispatcherTests(SqlServerFixture sql)
             if (recipients.Contains(refuses, StringComparer.Ordinal))
             {
                 return Task.FromException(
-                    new InvalidOperationException("Relay refused the recipient: 550 5.1.1."));
+                    new InvalidOperationException(
+                        "Relay smtp.corp.internal refused the recipient: 550 5.1.1. User Id=svc;Password=Secret123"));
             }
 
             Delivered.Add((recipients, subject, body));
@@ -299,7 +310,8 @@ public sealed class NotificationDispatcherTests(SqlServerFixture sql)
             Channels.Add(channel.Id);
 
             return fails
-                ? Task.FromException(new InvalidOperationException("Канал «boom»: вебхук відповів 500."))
+                ? Task.FromException(new InvalidOperationException(
+                    "Канал «boom»: вебхук https://pi01.internal:5450/hook відповів 500. Server=db01;Password=Secret123"))
                 : Task.CompletedTask;
         }
     }
