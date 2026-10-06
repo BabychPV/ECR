@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useRef, useState, type JSX } from 'react';
-import { ActionIcon, Badge, Box, Button, Code, Group, Skeleton, Table, Text, VisuallyHidden } from '@mantine/core';
+import { ActionIcon, Box, Button, Code, Group, SegmentedControl, Skeleton, Table, Text, VisuallyHidden } from '@mantine/core';
 import { useQueries, useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { apiFetch } from '@/api/client';
@@ -8,7 +8,9 @@ import { listDocuments, type DocumentListPage } from '@/features/documents/api';
 import { DocumentListFilterBar } from '@/features/documents/DocumentListFilterBar';
 import { DocumentListSummaryStrip } from '@/features/documents/DocumentListSummaryStrip';
 import { useDocumentListFilters } from '@/features/documents/documentListFilters';
+import { EyeIcon, IssueCount } from '@/features/documents/DocumentListMarks';
 import { documentState, hasSheetStates, sheetLabels } from '@/features/documents/documentSheets';
+import { parseDocumentsView } from '@/features/documents/documentsBoard';
 import { LateEditsMark } from '@/features/documents/LateEditsMark';
 import { newestOpenPeriodKey } from '@/features/documents/newDocumentPeriod';
 import { formatNumber } from '@/shared/format';
@@ -51,6 +53,14 @@ const DocumentQuickLook = lazy(async () => ({
   default: (await import('@/features/documents/DocumentQuickLook')).DocumentQuickLook,
 }));
 
+/**
+ * Подання «Board» (`UI-40`) — за `import()`: більшість відкриттів переліку — таблиця, і бюджет
+ * маршруту (`D-132`) не має рости заради дошки.
+ */
+const DocumentsBoard = lazy(async () => ({
+  default: (await import('@/features/documents/DocumentsBoard')).DocumentsBoard,
+}));
+
 const AUTO_PICK_MAX_PROJECTS = 10;
 
 /**
@@ -67,6 +77,9 @@ export function DocumentsPage(): JSX.Element {
   // посилання вело б на порожній екран із проханням обрати період наново.
   const [periodKey] = useUrlNumber('periodKey');
   const [cursor] = useUrlState('cursor');
+  // `UI-40`: подання — в адресі (`?view=board`, як у макеті), щоб посилання відкривало дошку.
+  const [viewParam] = useUrlState('view');
+  const view = parseDocumentsView(viewParam);
   const setUrlParams = useUrlParamsSetter();
   const [creating, setCreating] = useState(false);
   // ⚠ Лишається `true` назавжди після першого відкриття — так само, як
@@ -303,6 +316,21 @@ export function DocumentsPage(): JSX.Element {
           </FilterInline>
         )}
         <DocumentListSummaryStrip periodKey={periodKey} filters={filters} />
+        {/* ✎ `UI-40` (макет: `E.Segmented` «Table · Board» праворуч у рядку фільтрів):
+            фільтри, період і курсор — СПІЛЬНІ для обох подань, бо лежать в адресі. */}
+        <FilterInline ml="auto">
+          <SegmentedControl
+            size="xs"
+            aria-label={t('documents.view')}
+            value={view}
+            onChange={(value) => setUrlParams({ view: value === 'board' ? 'board' : null })}
+            data={[
+              { value: 'table', label: t('documents.viewTable') },
+              { value: 'board', label: t('documents.viewBoard') },
+            ]}
+            data-documents-view={view}
+          />
+        </FilterInline>
       </DocumentListFilterBar>
 
       {/* ⛔ `ФВ-14.22`: відмова календаря не показувалась ніде — автовибір
@@ -361,119 +389,133 @@ export function DocumentsPage(): JSX.Element {
              * сервера. «N of M» рахує ВИДИМІ аркуші (`sheets`/`sheetStates`), а не
              * `sheetCount`, — інакше число видало б існування прихованого аркуша.
              */}
-            <Table highlightOnHover className="ecr-sticky-head" data-documents-table="">
-              <Table.Thead>
-                <Table.Tr>
-                  <Table.Th>{t('documents.document')}</Table.Th>
-                  <Table.Th>{t('documents.sheets')}</Table.Th>
-                  <Table.Th>{t('documents.issues')}</Table.Th>
-                  <Table.Th>{t('documents.updated')}</Table.Th>
-                  <Table.Th>{t('documents.state')}</Table.Th>
-                  <Table.Th>
-                    <VisuallyHidden>{t('documents.quickLookColumn')}</VisuallyHidden>
-                  </Table.Th>
-                </Table.Tr>
-              </Table.Thead>
-              <Table.Tbody>
-                {page.items.map((document) => {
-                  const name = localized(document.nameL10n);
-                  const state = documentState(document);
-                  const errors = document.errorCount;
+            {view === 'board' ? (
+              <Suspense fallback={<Skeleton height={240} />}>
+                <DocumentsBoard
+                  documents={page.items}
+                  documentHref={documentHref}
+                  projectCode={(projectId) => projects.data?.items.find((project) => project.id === projectId)?.code}
+                  onQuickLook={(documentId, opener) => {
+                    quickLookOpener.current = opener;
+                    setPanel(String(documentId));
+                  }}
+                />
+              </Suspense>
+            ) : (
+              <Table highlightOnHover className="ecr-sticky-head" data-documents-table="">
+                <Table.Thead>
+                  <Table.Tr>
+                    <Table.Th>{t('documents.document')}</Table.Th>
+                    <Table.Th>{t('documents.sheets')}</Table.Th>
+                    <Table.Th>{t('documents.issues')}</Table.Th>
+                    <Table.Th>{t('documents.updated')}</Table.Th>
+                    <Table.Th>{t('documents.state')}</Table.Th>
+                    <Table.Th>
+                      <VisuallyHidden>{t('documents.quickLookColumn')}</VisuallyHidden>
+                    </Table.Th>
+                  </Table.Tr>
+                </Table.Thead>
+                <Table.Tbody>
+                  {page.items.map((document) => {
+                    const name = localized(document.nameL10n);
+                    const state = documentState(document);
+                    const errors = document.errorCount;
 
-                  return (
-                    <Table.Tr key={document.id} data-document-row={document.businessKey}>
-                      <Table.Td data-column="document">
-                        {/* ⛔ Директива «людське ім'я документа»: ім'я ПОРУЧ із
-                            бізнес-ключем, а не замість нього — ключ бере участь в
-                            експортах і аудиті й лишається видимим завжди. */}
-                        <Box>
-                          <Link to={documentHref(document.id)}>{name.length > 0 ? name : document.businessKey}</Link>
-                          <Group gap="xs" wrap="nowrap">
-                            {name.length > 0 && (
-                              <Text size="xs" c="dimmed" ff="monospace">
-                                {document.businessKey}
-                              </Text>
-                            )}
-                            {name.length > 0 && (
-                              <Text size="xs" c="dimmed" aria-hidden="true">
-                                ·
-                              </Text>
-                            )}
-                            {/* ⚠ Доки перелік у дорозі, місце тримає скелет, а не
-                                число: інакше колонка на мить показувала б
-                                ідентифікатори. */}
-                            {projects.isPending ? (
-                              <Skeleton height={10} width={40} radius="sm" data-projects="pending" />
-                            ) : (
-                              <Text size="xs" c="dimmed" data-document-project="">
-                                {projectCodeOf(document.projectId)}
-                              </Text>
-                            )}
-                          </Group>
-                        </Box>
-                      </Table.Td>
-                      <Table.Td data-column="sheets">
-                        {/* ⛔ UI-walkthrough F6: станів за період немає — видиме
-                            «—», а не порожнеча, яка читається і як «не
-                            завантажилось». */}
-                        {hasSheetStates(document) ? (
-                          <SegmentBar segments={sheetLabels(document)} />
-                        ) : (
-                          <Text c="dimmed">—</Text>
-                        )}
-                      </Table.Td>
-                      <Table.Td data-column="issues" data-document-errors={errors ?? 'none'}>
-                        {/* ⛔ BE-09: `null` — документ НЕ ПЕРЕВІРЯЛИ (або роль не
-                            бачить усіх аркушів) — «—», а не «0»: нуль під
-                            неперевіреним документом — та сама неправда, що `A7-28`. */}
-                        {errors === null || errors === undefined ? (
-                          <Text c="dimmed">—</Text>
-                        ) : errors > 0 ? (
-                          <IssueCount count={errors} />
-                        ) : (
-                          <Text size="sm" c="dimmed">
-                            {formatNumber(errors)}
-                          </Text>
-                        )}
-                      </Table.Td>
-                      <Table.Td data-column="updated">
-                        <Box>
-                          {typeof document.modifiedByDisplayName === 'string' && (
-                            <Text size="sm">{document.modifiedByDisplayName}</Text>
+                    return (
+                      <Table.Tr key={document.id} data-document-row={document.businessKey}>
+                        <Table.Td data-column="document">
+                          {/* ⛔ Директива «людське ім'я документа»: ім'я ПОРУЧ із
+                              бізнес-ключем, а не замість нього — ключ бере участь в
+                              експортах і аудиті й лишається видимим завжди. */}
+                          <Box>
+                            <Link to={documentHref(document.id)}>{name.length > 0 ? name : document.businessKey}</Link>
+                            <Group gap="xs" wrap="nowrap">
+                              {name.length > 0 && (
+                                <Text size="xs" c="dimmed" ff="monospace">
+                                  {document.businessKey}
+                                </Text>
+                              )}
+                              {name.length > 0 && (
+                                <Text size="xs" c="dimmed" aria-hidden="true">
+                                  ·
+                                </Text>
+                              )}
+                              {/* ⚠ Доки перелік у дорозі, місце тримає скелет, а не
+                                  число: інакше колонка на мить показувала б
+                                  ідентифікатори. */}
+                              {projects.isPending ? (
+                                <Skeleton height={10} width={40} radius="sm" data-projects="pending" />
+                              ) : (
+                                <Text size="xs" c="dimmed" data-document-project="">
+                                  {projectCodeOf(document.projectId)}
+                                </Text>
+                              )}
+                            </Group>
+                          </Box>
+                        </Table.Td>
+                        <Table.Td data-column="sheets">
+                          {/* ⛔ UI-walkthrough F6: станів за період немає — видиме
+                              «—», а не порожнеча, яка читається і як «не
+                              завантажилось». */}
+                          {hasSheetStates(document) ? (
+                            <SegmentBar segments={sheetLabels(document)} />
+                          ) : (
+                            <Text c="dimmed">—</Text>
                           )}
-                          <Group gap="xs" wrap="nowrap">
-                            <Text size="xs" c="dimmed">
-                              <Timestamp value={document.modifiedAt} />
+                        </Table.Td>
+                        <Table.Td data-column="issues" data-document-errors={errors ?? 'none'}>
+                          {/* ⛔ BE-09: `null` — документ НЕ ПЕРЕВІРЯЛИ (або роль не
+                              бачить усіх аркушів) — «—», а не «0»: нуль під
+                              неперевіреним документом — та сама неправда, що `A7-28`. */}
+                          {errors === null || errors === undefined ? (
+                            <Text c="dimmed">—</Text>
+                          ) : errors > 0 ? (
+                            <IssueCount count={errors} />
+                          ) : (
+                            <Text size="sm" c="dimmed">
+                              {formatNumber(errors)}
                             </Text>
-                            {/* `BE-09b`: пізні правки за період (без періоду — за будь-який). */}
-                            {document.hasLateEdits && <LateEditsMark />}
-                          </Group>
-                        </Box>
-                      </Table.Td>
-                      <Table.Td data-column="state">
-                        {state === null ? <Text c="dimmed">—</Text> : <StatusBadge kind="sheet" state={state} quiet />}
-                      </Table.Td>
-                      <Table.Td data-column="quick-look">
-                        {/* `UI-29`: швидкий перегляд у шторці під `?panel=<id>`. */}
-                        <ActionIcon
-                          size="sm"
-                          variant="subtle"
-                          color="gray"
-                          aria-label={t('documents.quickLook', { key: document.businessKey })}
-                          data-quick-look={document.id}
-                          onClick={(event) => {
-                            quickLookOpener.current = event.currentTarget;
-                            setPanel(String(document.id));
-                          }}
-                        >
-                          <EyeIcon />
-                        </ActionIcon>
-                      </Table.Td>
-                    </Table.Tr>
-                  );
-                })}
-              </Table.Tbody>
-            </Table>
+                          )}
+                        </Table.Td>
+                        <Table.Td data-column="updated">
+                          <Box>
+                            {typeof document.modifiedByDisplayName === 'string' && (
+                              <Text size="sm">{document.modifiedByDisplayName}</Text>
+                            )}
+                            <Group gap="xs" wrap="nowrap">
+                              <Text size="xs" c="dimmed">
+                                <Timestamp value={document.modifiedAt} />
+                              </Text>
+                              {/* `BE-09b`: пізні правки за період (без періоду — за будь-який). */}
+                              {document.hasLateEdits && <LateEditsMark />}
+                            </Group>
+                          </Box>
+                        </Table.Td>
+                        <Table.Td data-column="state">
+                          {state === null ? <Text c="dimmed">—</Text> : <StatusBadge kind="sheet" state={state} quiet />}
+                        </Table.Td>
+                        <Table.Td data-column="quick-look">
+                          {/* `UI-29`: швидкий перегляд у шторці під `?panel=<id>`. */}
+                          <ActionIcon
+                            size="sm"
+                            variant="subtle"
+                            color="gray"
+                            aria-label={t('documents.quickLook', { key: document.businessKey })}
+                            data-quick-look={document.id}
+                            onClick={(event) => {
+                              quickLookOpener.current = event.currentTarget;
+                              setPanel(String(document.id));
+                            }}
+                          >
+                            <EyeIcon />
+                          </ActionIcon>
+                        </Table.Td>
+                      </Table.Tr>
+                    );
+                  })}
+                </Table.Tbody>
+              </Table>
+            )}
 
             {/* ⚠ Курсорна пагінація, а не offset: за місяць у проєкті тисячі
                 документів, і сторінка 200 через OFFSET сканує все, що до неї. */}
@@ -514,44 +556,5 @@ export function DocumentsPage(): JSX.Element {
         </Suspense>
       )}
     </>
-  );
-}
-
-
-/** Число відкритих помилок — червона «пігулка», як у макеті (`.count.bad`). */
-function IssueCount({ count }: { readonly count: number }): JSX.Element {
-  return (
-    <Badge
-      size="sm"
-      variant="transparent"
-      radius="xl"
-      c="var(--ecr-danger)"
-      bg="var(--ecr-danger-soft)"
-      ff="monospace"
-      title={t('documents.issuesHint', { count })}
-      data-issue-count={count}
-    >
-      {formatNumber(count)}
-    </Badge>
-  );
-}
-
-/** «Око» швидкого перегляду (`kit.js` → `I.eye`). */
-function EyeIcon(): JSX.Element {
-  return (
-    <svg
-      width={16}
-      height={16}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={1.75}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-      focusable="false"
-    >
-      <path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12zM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" />
-    </svg>
   );
 }
