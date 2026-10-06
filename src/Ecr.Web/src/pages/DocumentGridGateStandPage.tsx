@@ -125,7 +125,8 @@ export function DocumentGridGateStandPage(): JSX.Element {
         tableInstanceId={StandTableInstanceId}
         tableDefId={StandTableInstanceId}
         periodKey={StandPeriodKey}
-        readOnly={false}
+        // A2: `?readonly=1` - сітка лише для читання (закритий період), `e2e/gridF2Live.spec.ts`.
+        readOnly={new URLSearchParams(window.location.search).get('readonly') === '1'}
         allowsDynamicRows={false}
         maxDynamicRows={null}
       />
