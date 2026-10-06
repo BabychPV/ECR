@@ -130,6 +130,24 @@ const singleNamed = {
   sheets: [{ code: 'S42', nameL10n: { values: { en: 'Only sheet' } }, state: 'Approved' }],
 };
 
+/*
+ * ⛔ Прихований аркуш (P1, безпека): роль бачить ОДИН аркуш із трьох. Сервер
+ * віддає лише видимий у `sheets`/`sheetStates`, а `errorCount` — `null` (по
+ * всіх аркушах роль рахувати не може). `sheetCount` навмисно лишено 3: якщо
+ * клієнт рахує «N of M» від нього, число видає існування прихованих аркушів.
+ */
+const scopedToOneSheet = {
+  id: 8,
+  businessKey: 'DOC-000008',
+  createdAt: '2026-01-01T00:00:00Z',
+  projectId: 1,
+  sheetCount: 3,
+  sheetStates: { AIR: 'Submitted' },
+  sheets: [{ code: 'AIR', nameL10n: { values: { en: 'Air emissions' } }, state: 'Submitted' }],
+  errorCount: null,
+  warningCount: null,
+};
+
 function mockFetch(): void {
   vi.stubGlobal(
     'fetch',
@@ -156,9 +174,9 @@ function mockFetch(): void {
       if (url.includes('/api/v1/documents')) {
         return new Response(
           JSON.stringify({
-            items: [withoutStates, withStates, withUnknown, singleSheet, partialStates, withNames, singleNamed],
+            items: [withoutStates, withStates, withUnknown, singleSheet, partialStates, withNames, singleNamed, scopedToOneSheet],
             nextCursor: null,
-            totalCount: 7,
+            totalCount: 8,
           }),
           { status: 200, headers: { 'Content-Type': 'application/json' } },
         );
@@ -190,47 +208,33 @@ function show(): void {
   );
 }
 
-/** Клітинка «State» рядка з таким бізнес-ключем. */
-function stateCellOf(businessKey: string): HTMLElement {
+/** Клітинка колонки рядка з таким бізнес-ключем (`data-column`). */
+function cellOf(businessKey: string, column: 'sheets' | 'state' | 'issues'): HTMLElement {
   const row = screen.getByText(businessKey).closest('tr');
   if (row === null) throw new Error(`Рядок ${businessKey} не знайдено`);
 
-  const cells = within(row).getAllByRole('cell');
+  const cell = within(row)
+    .getAllByRole('cell')
+    .find((node) => node.getAttribute('data-column') === column);
+  if (cell === undefined) throw new Error(`Колонку ${column} у рядку ${businessKey} не знайдено`);
 
-  return cells[3] as HTMLElement;
+  return cell;
 }
 
-/**
- * Бейдж стану В МЕЖАХ клітинки.
- *
- * ⛔ Пошук обмежений клітинкою навмисно: `Draft` є і в `DOC-000002`, і
- * (як стан, якого набір не знає, — ні) деінде на сторінці; глобальний
- * `document.querySelector` дозволив би тесту знайти чужий бейдж і лишитися
- * зеленим при зламаному розподілі станів по рядках.
- */
-function badgeIn(cell: HTMLElement, state: string): HTMLElement {
-  const node = cell.querySelector(`[data-status-state="${state}"]`);
-  if (node === null) throw new Error(`Бейдж стану «${state}» у клітинці не знайдено`);
+/** Сегмент смужки аркушів (`SegmentBar`) — за кодом аркуша. */
+function segmentOf(businessKey: string, code: string): HTMLElement {
+  const node = cellOf(businessKey, 'sheets').querySelector(`[data-segment="${code}"]`);
+  if (node === null) throw new Error(`Сегмент аркуша «${code}» у рядку ${businessKey} не знайдено`);
 
   return node as HTMLElement;
 }
 
-function toneIn(cell: HTMLElement, state: string): string | null {
-  return badgeIn(cell, state).getAttribute('data-status-tone');
-}
+/** Бейдж стану документа в колонці «State». */
+function stateBadgeOf(businessKey: string): HTMLElement {
+  const node = cellOf(businessKey, 'state').querySelector('[data-status-state]');
+  if (node === null) throw new Error(`Бейдж стану в рядку ${businessKey} не знайдено`);
 
-/**
- * Обгортка «код аркуша + його бейдж».
- *
- * ⚠ Саме ПАРА, а не «десь у клітинці є S3»: коли аркушів кілька, твердження
- * «на сторінці є S3» і «стан S3 — Rejected» — різні твердження, і зелене
- * перше нічого не каже про друге.
- */
-function pairOf(cell: HTMLElement, state: string): HTMLElement {
-  const pair = badgeIn(cell, state).parentElement;
-  if (pair === null) throw new Error(`Бейдж стану «${state}» не має обгортки`);
-
-  return pair;
+  return node as HTMLElement;
 }
 
 afterEach(() => {
@@ -239,46 +243,42 @@ afterEach(() => {
 
 const SlowEnvTimeout = 400_000;
 
+async function shown(businessKey: string): Promise<void> {
+  mockFetch();
+  show();
+  await screen.findByText(businessKey, {}, { timeout: SlowEnvTimeout });
+}
+
+/*
+ * ✎ `UI-19` (2026-10-06): стани аркушів переїхали з колонки «State» у смужку
+ * «Sheets» (`SegmentBar`, макет `10-docs-list-light.png`), а «State» тепер —
+ * ОДИН бейдж стану документа (найгірший з аркушів, правило сервера
+ * `DocumentListSummaryStore`). Твердження нижче ті самі, що були в UI-06/F6, —
+ * змінилось лише, ДЕ вони перевіряються: пара «аркуш + стан» — це сегмент із
+ * `data-segment` і `data-state`, назва аркуша — у його підказці.
+ */
 describe('DocumentsPage: відсутність станів позначена видимо (F6)', () => {
   it(
     'документ без станів за обраний період показує позначку відсутності, а не порожнечу',
     async () => {
-      mockFetch();
-      show();
+      await shown('DOC-000001');
 
-      await screen.findByText('DOC-000001', {}, { timeout: SlowEnvTimeout });
-
-      // ⛔ Мутаційний доказ: прибери гілку з «—» — і клітинка знову порожня,
-      // обидва очікування падають.
-      const empty = stateCellOf('DOC-000001');
-      expect(empty.textContent?.trim()).not.toBe('');
-      expect(empty.textContent?.trim()).toBe('—');
+      // ⛔ Мутаційний доказ: прибери гілку з «—» — клітинки знову порожні.
+      expect(cellOf('DOC-000001', 'sheets').textContent?.trim()).toBe('—');
+      expect(cellOf('DOC-000001', 'state').textContent?.trim()).toBe('—');
     },
     SlowEnvTimeout,
   );
 
   it(
-    'документ зі станами показує бадж, а не позначку відсутності',
+    'документ зі станами показує смужку й бейдж, а не позначку відсутності',
     async () => {
-      mockFetch();
-      show();
+      await shown('DOC-000002');
 
-      await screen.findByText('DOC-000002', {}, { timeout: SlowEnvTimeout });
-
-      const filled = stateCellOf('DOC-000002');
-
-      /*
-       * ⚠ ЗМІНА ПОВЕДІНКИ, названа явно. Тут стояло
-       * `expect(filled.textContent).toContain('S1: Draft')` — дослівний код
-       * сервера. Підпис стану більше не є кодом сервера: його дає
-       * `t('status.sheet.Draft')`, і в сіді це окремий рядок каталогу. Цей файл
-       * каталогу не завантажує, тож `t()` віддає позначений ключ (`D-138`) —
-       * і саме ключ є доказом, що підпис пройшов ЧЕРЕЗ каталог, а не через
-       * `{state}`.
-       */
-      expect(badgeIn(filled, 'Draft').textContent).toBe('⟦status.sheet.Draft⟧');
-      expect(badgeIn(filled, 'Draft').textContent).not.toBe('Draft');
-      expect(filled.textContent).not.toContain('—');
+      // Підпис — через каталог (`D-138`: незавантажений каталог дає ⟦ключ⟧).
+      expect(stateBadgeOf('DOC-000002').textContent).toBe('⟦status.sheet.Rejected⟧');
+      expect(cellOf('DOC-000002', 'sheets').querySelectorAll('[data-segment]')).toHaveLength(4);
+      expect(cellOf('DOC-000002', 'sheets').textContent).not.toContain('—');
     },
     SlowEnvTimeout,
   );
@@ -288,77 +288,51 @@ describe('DocumentsPage: тон стану аркуша приходить із 
   it(
     'чотири стани документа — і тони РІЗНІ, а не «без кольору» на всіх',
     async () => {
-      mockFetch();
-      show();
+      await shown('DOC-000002');
 
-      await screen.findByText('DOC-000002', {}, { timeout: SlowEnvTimeout });
+      const tone = (code: string): string | null => segmentOf('DOC-000002', code).getAttribute('data-tone');
 
-      const cell = stateCellOf('DOC-000002');
+      expect(tone('S3')).toBe('danger');
+      expect(tone('S2')).toBe('info');
+      expect(tone('S1')).toBe('neutral');
+      expect(tone('GEN')).toBe('neutral');
 
-      /*
-       * ⛔ Мутаційний доказ №1 (повернути `<Badge>{sheet}: {state}</Badge>`):
-       * власний бейдж не лишає в розмітці ані `data-status-state`, ані
-       * `data-status-tone`, тож `badgeIn` кидає «Бейдж стану … не знайдено».
-       */
-      expect(toneIn(cell, 'Rejected')).toBe('danger');
-      expect(toneIn(cell, 'Submitted')).toBe('info');
-      expect(toneIn(cell, 'Draft')).toBe('neutral');
-      expect(toneIn(cell, 'Approved')).toBe('neutral');
+      // ⛔ Константний стан на всіх аркушах схлопнув би множину тонів.
+      expect(new Set(['S1', 'S2', 'S3', 'GEN'].map(tone)).size).toBe(3);
 
-      /*
-       * ⛔ Мутаційний доказ №2 (підставити константу — `state="Draft"` на всіх
-       * аркушах): чотири стани дають ОДИН `data-status-state`, і множина
-       * тонів схлопується. Рядок нижче — єдиний, який ловить саме це: кожне
-       * окреме `toBe` вище можна задовольнити й одним кольором на всіх.
-       *
-       * ⚠ Три, а не чотири: `Draft` і `Approved` — обидва `neutral`, і це
-       * рішення набору, а не недогляд. `KIT.md` §1.3: «зелений не вживається
-       * для „все гаразд“» — затверджений аркуш це нормальний стан, а не
-       * досягнення, яке треба підсвітити.
-       */
-      const tones = new Set(
-        ['Draft', 'Submitted', 'Rejected', 'Approved'].map((state) => toneIn(cell, state)),
-      );
-      expect(tones.size).toBe(3);
-
-      // ⛔ Головне, заради чого колонці потрібен колір: «робота стоїть» не
-      // виглядає як «усе гаразд».
-      expect(toneIn(cell, 'Rejected')).not.toBe(toneIn(cell, 'Draft'));
-      expect(toneIn(cell, 'Rejected')).not.toBe(toneIn(cell, 'Approved'));
-      expect(toneIn(cell, 'Submitted')).not.toBe(toneIn(cell, 'Approved'));
+      // Draft і Approved — обидва нейтральні (KIT §1.3), але різні ФОРМОЮ: стан у розмітці.
+      expect(segmentOf('DOC-000002', 'S1').getAttribute('data-state')).toBe('Draft');
+      expect(segmentOf('DOC-000002', 'GEN').getAttribute('data-state')).toBe('Approved');
     },
     SlowEnvTimeout,
   );
 
   it(
-    'код аркуша видно ПОРУЧ зі своїм станом, а не десь у клітинці',
+    'стан документа — найгірший з аркушів (Rejected > Draft > Submitted > Approved), як рахує сервер',
     async () => {
-      mockFetch();
-      show();
+      await shown('DOC-000002');
 
-      await screen.findByText('DOC-000002', {}, { timeout: SlowEnvTimeout });
+      expect(stateBadgeOf('DOC-000002').getAttribute('data-status-state')).toBe('Rejected');
+      expect(stateBadgeOf('DOC-000002').getAttribute('data-status-tone')).toBe('danger');
+      expect(stateBadgeOf('DOC-000005').getAttribute('data-status-state')).toBe('Draft');
+      expect(stateBadgeOf('DOC-000007').getAttribute('data-status-state')).toBe('Approved');
+    },
+    SlowEnvTimeout,
+  );
 
-      const cell = stateCellOf('DOC-000002');
+  it(
+    'аркуш і його стан — одна пара: підказка сегмента називає саме цей аркуш',
+    async () => {
+      await shown('DOC-000002');
 
-      /*
-       * ⛔ `StatusBadge` малює ЛИШЕ перекладений стан — коду аркуша в ньому
-       * немає. Коли аркушів кілька, без коду незрозуміло, ЧИЙ це стан, тож
-       * код лишається окремим текстом поруч. Перевіряється саме пара: обгортка
-       * бейджа `Rejected` має містити `S3` — і НЕ містити коди інших аркушів.
-       */
-      const rejected = pairOf(cell, 'Rejected');
-      expect(rejected.textContent).toContain('S3');
-      expect(rejected.textContent).not.toContain('S1');
-      expect(rejected.textContent).not.toContain('S2');
-      expect(rejected.textContent).not.toContain('GEN');
+      const rejected = segmentOf('DOC-000002', 'S3');
+      expect(rejected.getAttribute('data-state')).toBe('Rejected');
+      expect(rejected.getAttribute('title')).toBe('S3 — ⟦status.sheet.Rejected⟧');
 
-      const approved = pairOf(cell, 'Approved');
-      expect(approved.textContent).toContain('GEN');
-      expect(approved.textContent).not.toContain('S3');
-
-      // ⚠ Пара не розривається переносом рядка: код без стану поруч читався б
-      // як стан СУСІДНЬОГО аркуша.
-      expect(rejected.getAttribute('style') ?? '').toContain('nowrap');
+      // Читалка отримує весь перелік пар одним текстом.
+      const label = cellOf('DOC-000002', 'sheets').querySelector('[role="img"]')?.getAttribute('aria-label') ?? '';
+      expect(label).toContain('S3: ⟦status.sheet.Rejected⟧');
+      expect(label).toContain('GEN: ⟦status.sheet.Approved⟧');
     },
     SlowEnvTimeout,
   );
@@ -366,108 +340,44 @@ describe('DocumentsPage: тон стану аркуша приходить із 
   it(
     'стан, якого набір не знає, позначений як невідомий, а не мовчки нейтральний',
     async () => {
-      /*
-       * ⛔ Фікстура мусить бути СПРАВДІ невідомим станом — інакше тест нижче
-       * перевіряв би зовсім інше, і ніхто б цього не помітив.
-       */
       expect(statusTable.sheet['Returned'], '`Returned` не має бути в таблиці набору').toBeUndefined();
       expect(statusTable.sheet['Draft'], '`Draft` — відомий стан домену').toBeDefined();
 
-      mockFetch();
-      show();
+      await shown('DOC-000003');
 
-      await screen.findByText('DOC-000003', {}, { timeout: SlowEnvTimeout });
+      expect(segmentOf('DOC-000003', 'S1').getAttribute('data-tone')).toBe('warning');
 
-      const unknown = badgeIn(stateCellOf('DOC-000003'), 'Returned');
-
+      const unknown = stateBadgeOf('DOC-000003');
       expect(unknown.getAttribute('data-status-known')).toBe('false');
       expect(unknown.getAttribute('data-status-tone')).toBe('warning');
-
-      // ⚠ Другий канал помітності (`ФВ-14.18`): рядка каталогу під цей стан
-      // теж немає, тож підпис приїжджає позначеним ключем — пропуск видно, а
-      // не лише в DevTools.
       expect(unknown.textContent).toBe('⟦status.sheet.Returned⟧');
-
-      // ⛔ І це НЕ той самий вигляд, що у відомого стану.
-      const known = badgeIn(stateCellOf('DOC-000002'), 'Draft');
-      expect(known.getAttribute('data-status-known')).toBe('true');
-      expect(unknown.getAttribute('data-status-tone')).not.toBe(
-        known.getAttribute('data-status-tone'),
-      );
     },
     SlowEnvTimeout,
   );
 });
 
-describe('DocumentsPage: код аркуша лише там, де аркушів кілька', () => {
+describe('DocumentsPage: смужка аркушів — назва аркуша, а не код', () => {
   it(
-    'документ з одним аркушем — лише бейдж, без внутрішнього коду',
+    'внутрішній код аркуша не стоїть у видимому тексті клітинки',
     async () => {
-      mockFetch();
-      show();
+      await shown('DOC-000004');
 
-      await screen.findByText('DOC-000004', {}, { timeout: SlowEnvTimeout });
-
-      const cell = stateCellOf('DOC-000004');
-
-      // ⛔ Мутаційний доказ: прибери умову `!isSingleSheet(document)` — код
-      // повернеться в клітинку, і цей рядок почервоніє.
-      expect(cell.textContent).not.toContain('S99819007');
-      expect(badgeIn(cell, 'Submitted').textContent).toBe('⟦status.sheet.Submitted⟧');
+      expect(cellOf('DOC-000004', 'sheets').textContent).not.toContain('S99819007');
+      expect(cellOf('DOC-000007', 'sheets').textContent).not.toContain('S42');
     },
     SlowEnvTimeout,
   );
 
   it(
-    'аркушів кілька, а назв сервер не віддав (`sheets` немає) — код лишається поруч зі станом',
+    'назва аркуша мовою інтерфейсу — у підказці сегмента; назви немає — код',
     async () => {
-      mockFetch();
-      show();
+      await shown('DOC-000006');
 
-      await screen.findByText('DOC-000005', {}, { timeout: SlowEnvTimeout });
-
-      // ⛔ Мутаційний доказ: сховай код завжди — обидва рядки почервоніють.
-      expect(pairOf(stateCellOf('DOC-000005'), 'Draft').textContent).toContain('S7');
-      expect(pairOf(stateCellOf('DOC-000002'), 'Rejected').textContent).toContain('S3');
-    },
-    SlowEnvTimeout,
-  );
-});
-
-describe('DocumentsPage: назва аркуша замість внутрішнього коду', () => {
-  it(
-    'аркушів кілька — поруч зі станом НАЗВА аркуша мовою інтерфейсу, а не код',
-    async () => {
-      mockFetch();
-      show();
-
-      await screen.findByText('DOC-000006', {}, { timeout: SlowEnvTimeout });
-
-      const cell = stateCellOf('DOC-000006');
-
-      // ⛔ Мутаційний доказ: поверни підпис `{code}` — обидві пари почервоніють.
-      const draft = pairOf(cell, 'Draft');
-      expect(draft.textContent).toContain('General info');
-      expect(draft.textContent).not.toContain('GEN');
-      expect(draft.textContent).not.toContain('Загальні відомості');
-
-      const submitted = pairOf(cell, 'Submitted');
-      expect(submitted.textContent).toContain('Air emissions');
-      expect(submitted.textContent).not.toContain('AIR');
-    },
-    SlowEnvTimeout,
-  );
-
-  it(
-    'назви немає жодною мовою — підпис падає на код, а не зникає',
-    async () => {
-      mockFetch();
-      show();
-
-      await screen.findByText('DOC-000006', {}, { timeout: SlowEnvTimeout });
-
-      // ⛔ Мутаційний доказ: прибери запасний варіант — підпис порожній, рядок червоний.
-      expect(pairOf(stateCellOf('DOC-000006'), 'Rejected').textContent).toContain('WTR');
+      expect(segmentOf('DOC-000006', 'GEN').getAttribute('title')).toContain('General info');
+      expect(segmentOf('DOC-000006', 'GEN').getAttribute('title')).not.toContain('Загальні відомості');
+      expect(segmentOf('DOC-000006', 'AIR').getAttribute('title')).toContain('Air emissions');
+      // ⛔ Запасний варіант: прибери його — підказка без назви.
+      expect(segmentOf('DOC-000006', 'WTR').getAttribute('title')).toContain('WTR');
     },
     SlowEnvTimeout,
   );
@@ -475,33 +385,41 @@ describe('DocumentsPage: назва аркуша замість внутрішн
   it(
     'аркуші йдуть у порядку `sheets` (порядок аркушів), а не ключів `sheetStates`',
     async () => {
-      mockFetch();
-      show();
+      await shown('DOC-000006');
 
-      await screen.findByText('DOC-000006', {}, { timeout: SlowEnvTimeout });
-
-      const states = [...stateCellOf('DOC-000006').querySelectorAll('[data-status-state]')].map((node) =>
-        node.getAttribute('data-status-state'),
+      const states = [...cellOf('DOC-000006', 'sheets').querySelectorAll('[data-segment]')].map((node) =>
+        node.getAttribute('data-state'),
       );
 
       expect(states).toEqual(['Draft', 'Submitted', 'Rejected']);
     },
     SlowEnvTimeout,
   );
+});
 
+describe('DocumentsPage: прихований аркуш не видно ні рядком, ні числом (P1)', () => {
   it(
-    'аркуш один — лише бейдж: ні назви, ні коду',
+    'роль зі scope на 1 аркуш: один сегмент, «0 of 1», помилки «—», жодного сліду інших аркушів',
     async () => {
-      mockFetch();
-      show();
+      await shown('DOC-000008');
 
-      await screen.findByText('DOC-000007', {}, { timeout: SlowEnvTimeout });
+      const sheets = cellOf('DOC-000008', 'sheets');
+      expect(sheets.querySelectorAll('[data-segment]')).toHaveLength(1);
 
-      const cell = stateCellOf('DOC-000007');
+      // ⛔ Мутаційний доказ: передай у `SegmentBar` `total={document.sheetCount}` —
+      // тут стане «0/3», тобто число видасть два приховані аркуші.
+      expect(sheets.querySelector('[data-segment-summary]')?.getAttribute('data-segment-summary')).toBe('0/1');
 
-      expect(cell.textContent).not.toContain('Only sheet');
-      expect(cell.textContent).not.toContain('S42');
-      expect(badgeIn(cell, 'Approved').textContent).toBe('⟦status.sheet.Approved⟧');
+      // `errorCount: null` — «—», а не «0».
+      expect(cellOf('DOC-000008', 'issues').textContent?.trim()).toBe('—');
+
+      // Стан документа — лише з видимого аркуша.
+      expect(stateBadgeOf('DOC-000008').getAttribute('data-status-state')).toBe('Submitted');
+
+      // Партій аркуша з частковими станами (DOC-000005: 1 стан при sheetCount 2) — так само.
+      expect(
+        cellOf('DOC-000005', 'sheets').querySelector('[data-segment-summary]')?.getAttribute('data-segment-summary'),
+      ).toBe('0/1');
     },
     SlowEnvTimeout,
   );
