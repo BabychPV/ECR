@@ -2007,6 +2007,17 @@
             "description": "Вага: 1 інформація, 2 попередження, 3 помилка.",
             "format": "uint8",
             "type": "integer"
+          },
+          "where": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ConsistencyIssueWhere",
+                "description": "Місце знахідки в структурі (документ, аркуш, таблиця, рядок, колонка) — лише КОДИ.\n`null` — місце невідоме або читач його не бачить (див. `GetConsistencyIssuesHandler`)."
+              }
+            ]
           }
         },
         "required": [
@@ -2019,6 +2030,63 @@
           "message",
           "resolvedAt",
           "resolvedByUserId"
+        ],
+        "type": "object"
+      },
+      "ConsistencyIssueWhere": {
+        "description": "Місце знахідки консистентності: лише бізнес-коди, без значень комірок і без назв.",
+        "properties": {
+          "columnCode": {
+            "description": "Код колонки; `null` — колонку не визначено.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "documentBusinessKey": {
+            "description": "Бізнес-ключ документа; `null` разом із DocumentId.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "documentId": {
+            "description": "Документ; `null` — знахідка про структуру шаблону, а не документа.",
+            "format": "int64",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "rowKey": {
+            "description": "Ключ рядка; `null` — знахідка не на рівні рядка.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "sheetCode": {
+            "description": "Код аркуша.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "tableCode": {
+            "description": "Код таблиці.",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "documentId",
+          "documentBusinessKey",
+          "sheetCode",
+          "tableCode",
+          "rowKey",
+          "columnCode"
         ],
         "type": "object"
       },

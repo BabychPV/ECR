@@ -18663,6 +18663,25 @@ export interface components {
              * @description Вага: 1 інформація, 2 попередження, 3 помилка.
              */
             severity: number;
+            where?: null | components["schemas"]["ConsistencyIssueWhere"];
+        };
+        /** @description Місце знахідки консистентності: лише бізнес-коди, без значень комірок і без назв. */
+        ConsistencyIssueWhere: {
+            /** @description Код колонки; `null` — колонку не визначено. */
+            columnCode: null | string;
+            /** @description Бізнес-ключ документа; `null` разом із DocumentId. */
+            documentBusinessKey: null | string;
+            /**
+             * Format: int64
+             * @description Документ; `null` — знахідка про структуру шаблону, а не документа.
+             */
+            documentId: null | number;
+            /** @description Ключ рядка; `null` — знахідка не на рівні рядка. */
+            rowKey: null | string;
+            /** @description Код аркуша. */
+            sheetCode: null | string;
+            /** @description Код таблиці. */
+            tableCode: null | string;
         };
         /** @description Лічильники знахідок за вагою в межах фільтра переліку (без фільтра ваги). */
         ConsistencySeverityTotals: {
