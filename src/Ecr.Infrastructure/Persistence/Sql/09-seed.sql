@@ -1540,6 +1540,7 @@ USING (VALUES
     -- дія у відповідь — тикати кнопку доти, доки не спрацює.
     (N'err.ECR-REQ-0422.consistencyRunReasonRequired', N'en', N'A reason is required to run the consistency check on demand: the run is recorded in the security journal.', 1),
     (N'err.ECR-REQ-0422.consistencyRunReasonTooLong',  N'en', N'The reason must be no longer than {max} characters.', 1),
+    (N'err.ECR-REQ-0422.consistencySeverity',          N'en', N'There is no finding severity "{severity}": use 1 (info), 2 (warning) or 3 (error).', 1),
     (N'err.ECR-REQ-0422.exportFormatUnknown',          N'en', N'There is no export format "{format}": use xlsx, csv or json.', 1),
     (N'err.ECR-JOB-0409.consistencyCheckRunning',      N'en', N'A consistency check is already in progress as job {jobId} ({state}): watch that job instead of starting a second full scan.', 1),
     -- ⚠ `BE-13`: у цьому реченні фігурні дужки лише довкола справжніх
@@ -15949,6 +15950,16 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:exprbudget ── кінець секції ──
+-- COLL:consistency-summary ── ru/kz: невідома вага знахідки в журналі узгодженості; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-REQ-0422.consistencySeverity', N'ru', N'Веса находки «{severity}» не существует: допустимо 1 (информация), 2 (предупреждение) или 3 (ошибка).'),
+    (N'err.ECR-REQ-0422.consistencySeverity', N'kz', N'«{severity}» табылым салмағы жоқ: 1 (ақпарат), 2 (ескерту) немесе 3 (қате) болуы тиіс.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:consistency-summary ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

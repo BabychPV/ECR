@@ -37,10 +37,12 @@ public sealed class GetConsistencyIssuesHandler(
     /// <summary>Повертає сторінку знахідок.</summary>
     /// <param name="ruleCode">Фільтр за кодом правила; <c>null</c> — усі.</param>
     /// <param name="openOnly">Лише ще не закриті знахідки.</param>
+    /// <param name="severity">Вага 1..3; <c>null</c> — будь-яка. Інше — <c>422</c>.</param>
+    /// <param name="query">Пошуковий рядок (текст, код правила, номер сутності); порожній — без пошуку.</param>
     /// <param name="page">Курсорна пагінація.</param>
     /// <param name="ct">Токен скасування.</param>
-    public async Task<PagedResult<ConsistencyIssueView>> HandleAsync(
-        string? ruleCode, bool openOnly, CursorRequest page, CancellationToken ct)
+    public async Task<ConsistencyIssuePage> HandleAsync(
+        string? ruleCode, bool openOnly, int? severity, string? query, CursorRequest page, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(page);
 
@@ -79,6 +81,41 @@ public sealed class GetConsistencyIssuesHandler(
         // щойно очистили, надсилає саме порожній рядок.
         var rule = string.IsNullOrWhiteSpace(ruleCode) ? null : ruleCode.Trim();
 
-        return await issues.ReadIssuesAsync(rule, openOnly, page, ct).ConfigureAwait(false);
+        // ⚠ Невідома вага — відмова, а не мовчазне «усі»: порожній екран на
+        // друкарську помилку читався б як «таких знахідок немає» (той самий
+        // вибір, що в `jobState`).
+        if (severity is < MinSeverity or > MaxSeverity)
+        {
+            throw new BusinessRuleException(
+                ErrorCodes.RequestInvalid,
+                $"Немає ваги знахідки {severity}: допустимо 1..3.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-REQ-0422.consistencySeverity",
+                    ["severity"] = severity.Value.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
+        }
+
+        // ⚠ Пошуковий рядок обрізається до межі, а не відхиляється: поле
+        // пошуку не має падати від вставленого довгого тексту. Порожній —
+        // «пошуку немає».
+        var text = string.IsNullOrWhiteSpace(query) ? null : query.Trim();
+        if (text is { Length: > MaxQueryLength })
+        {
+            text = text[..MaxQueryLength];
+        }
+
+        return await issues
+            .ReadIssuesAsync(rule, openOnly, (byte?)severity, text, page, ct)
+            .ConfigureAwait(false);
     }
+
+    /// <summary>Найменша вага знахідки (інформація).</summary>
+    public const int MinSeverity = 1;
+
+    /// <summary>Найбільша вага знахідки (помилка).</summary>
+    public const int MaxSeverity = 3;
+
+    /// <summary>Межа довжини пошукового рядка.</summary>
+    public const int MaxQueryLength = 100;
 }
