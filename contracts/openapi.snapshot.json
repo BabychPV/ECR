@@ -682,7 +682,10 @@
           "approved": {
             "description": "Усі аркуші затверджено.",
             "format": "int32",
-            "type": "integer"
+            "type": [
+              "null",
+              "integer"
+            ]
           },
           "documents": {
             "description": "Скільки документів у проєкті. `0` означає «кампанія тут ще не\nпочиналася» — і це окрема відповідь, а не «все в чернетках».",
@@ -692,7 +695,10 @@
           "draft": {
             "description": "Документи, де є аркуш у чернетці (або ще без стану) і жодного відхиленого.",
             "format": "int32",
-            "type": "integer"
+            "type": [
+              "null",
+              "integer"
+            ]
           },
           "nameL10n": {
             "$ref": "#/components/schemas/LocalizedText",
@@ -722,7 +728,10 @@
           "rejected": {
             "description": "Хоч один аркуш відхилено.",
             "format": "int32",
-            "type": "integer"
+            "type": [
+              "null",
+              "integer"
+            ]
           },
           "sheetsTotal": {
             "description": "Аркушів у складі документів проєкту (UI-33, D2); `null` — див. int? CampaignTotals.SheetsTotal.",
@@ -748,7 +757,10 @@
           "submitted": {
             "description": "Усі аркуші подано або затверджено, і хоч один ще не затверджено.",
             "format": "int32",
-            "type": "integer"
+            "type": [
+              "null",
+              "integer"
+            ]
           }
         },
         "required": [
@@ -805,7 +817,10 @@
           "approved": {
             "description": "Сума `Approved`.",
             "format": "int32",
-            "type": "integer"
+            "type": [
+              "null",
+              "integer"
+            ]
           },
           "atRisk": {
             "description": "Проєктів у стані CampaignProgress.AtRisk.",
@@ -825,7 +840,10 @@
           "draft": {
             "description": "Сума `Draft` по всіх проєктах.",
             "format": "int32",
-            "type": "integer"
+            "type": [
+              "null",
+              "integer"
+            ]
           },
           "inProgress": {
             "description": "Проєктів у стані CampaignProgress.InProgress.",
@@ -853,7 +871,10 @@
           "rejected": {
             "description": "Сума `Rejected`.",
             "format": "int32",
-            "type": "integer"
+            "type": [
+              "null",
+              "integer"
+            ]
           },
           "sheetsTotal": {
             "description": "Аркушів у складі документів усіх проєктів періоду (UI-33, D2); `null` — читач має інструменти, що ховають\nаркуші (явна заборона чи грант рівня `None`), і число розкрило б приховане (R-8, `SheetVisibility`).",
@@ -871,7 +892,10 @@
           "submitted": {
             "description": "Сума `Submitted`.",
             "format": "int32",
-            "type": "integer"
+            "type": [
+              "null",
+              "integer"
+            ]
           }
         },
         "required": [

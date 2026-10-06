@@ -17914,7 +17914,7 @@ export interface components {
              * Format: int32
              * @description Усі аркуші затверджено.
              */
-            approved: number;
+            approved: null | number;
             /**
              * Format: int32
              * @description Скільки документів у проєкті. `0` означає «кампанія тут ще не
@@ -17925,7 +17925,7 @@ export interface components {
              * Format: int32
              * @description Документи, де є аркуш у чернетці (або ще без стану) і жодного відхиленого.
              */
-            draft: number;
+            draft: null | number;
             /** @description Назва мовами каталогу. */
             nameL10n: components["schemas"]["LocalizedText"];
             /**
@@ -17946,7 +17946,7 @@ export interface components {
              * Format: int32
              * @description Хоч один аркуш відхилено.
              */
-            rejected: number;
+            rejected: null | number;
             /**
              * Format: int32
              * @description Аркушів у складі документів проєкту (UI-33, D2); `null` — див. int? CampaignTotals.SheetsTotal.
@@ -17972,7 +17972,7 @@ export interface components {
              * Format: int32
              * @description Усі аркуші подано або затверджено, і хоч один ще не затверджено.
              */
-            submitted: number;
+            submitted: null | number;
         };
         /** @description Огляд кампанії звітності за один період (`BE-22`). */
         CampaignSummaryResponse: {
@@ -18002,7 +18002,7 @@ export interface components {
              * Format: int32
              * @description Сума `Approved`.
              */
-            approved: number;
+            approved: null | number;
             /**
              * Format: int32
              * @description Проєктів у стані CampaignProgress.AtRisk.
@@ -18022,7 +18022,7 @@ export interface components {
              * Format: int32
              * @description Сума `Draft` по всіх проєктах.
              */
-            draft: number;
+            draft: null | number;
             /**
              * Format: int32
              * @description Проєктів у стані CampaignProgress.InProgress.
@@ -18048,7 +18048,7 @@ export interface components {
              * Format: int32
              * @description Сума `Rejected`.
              */
-            rejected: number;
+            rejected: null | number;
             /**
              * Format: int32
              * @description Аркушів у складі документів усіх проєктів періоду (UI-33, D2); `null` — читач має інструменти, що ховають
@@ -18064,7 +18064,7 @@ export interface components {
              * Format: int32
              * @description Сума `Submitted`.
              */
-            submitted: number;
+            submitted: null | number;
         };
         /** @description Змінена комірка; значення — рядком (decimal без втрати знаків). Тип — як у зрізі подання
          *     (string? SubmissionPayloadCell.Type): `null` — число або текст, інакше
