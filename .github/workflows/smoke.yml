@@ -1,0 +1,120 @@
+# Наскрізний сценарій `tools/smoke.ps1` у CI (спайк 05.10, варіант A).
+#
+# ⛔ НЕ обов'язковий гейт: окремий workflow, до переліку семи (`build`, `test`,
+# `honesty-guard`, `server`, `client`, `a11y (dark)`, `a11y (light)`) не
+# входить, у `server` не зводиться, `needs` не має. Червоний smoke видно на
+# коміті й у PR, але мерж він не блокує, доки «Аудит» не вирішить інакше
+# після серії зелених прогонів.
+#
+# ⚠ Окремим файлом, а не завданням у `ci.yml`: `CiPipelineTests` звіряє `-Only`
+# саме `ci.yml` з кроками `verify-all.ps1`, а там «Наскрізний сценарій» іде без
+# параметрів і лишається `ci-exempt`. Тут smoke кличеться напряму, з SQL-логіном.
+#
+# ⚠ Linux, а не Windows: сервісних контейнерів на Windows-раннерах немає, а
+# SQL Server у контейнері вже роками перевірений у `server-part` (`ci.yml`).
+# Скрипти для цього вміють `-Login` (SQL-автентифікація замість `-E`),
+# `-SmallFiles` (64 МБ замість 14 ГБ на Developer Edition) і `pwsh`.
+
+name: smoke
+
+on:
+  push:
+    branches: [ dev/integration, 'lane/**' ]
+  # Тижневий PR `rc/<дата>` → `main`.
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOTNET_NOLOGO: 'true'
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: 'true'
+
+jobs:
+  smoke:
+    name: smoke (linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      # ⚠ Пароль генерується на кожен прогін і маскується — як у `server-part`.
+      - name: SQL Server у контейнері
+        run: |
+          set -euo pipefail
+          SA="$(openssl rand -hex 16)Aa1!"
+          echo "::add-mask::$SA"
+          echo "ECR_SQL_PASSWORD=$SA" >> "$GITHUB_ENV"
+          docker run -d --name ecr-mssql -e ACCEPT_EULA=Y -e "MSSQL_SA_PASSWORD=$SA" \
+            -p 1433:1433 mcr.microsoft.com/mssql/server:2019-latest
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      # ⚠ Дослівно як у `server-part`: прицільний `apt-get update` лише нового
+      # джерела, випуск Ubuntu з `/etc/os-release`.
+      - name: sqlcmd
+        run: |
+          set -euo pipefail
+          curl -fsSL https://packages.microsoft.com/keys/microsoft.asc \
+            | gpg --dearmor --batch --yes -o microsoft-prod.gpg
+          sudo install -o root -g root -m 644 microsoft-prod.gpg /usr/share/keyrings/microsoft-prod.gpg
+          rm microsoft-prod.gpg
+          . /etc/os-release
+          echo "deb [arch=amd64 signed-by=/usr/share/keyrings/microsoft-prod.gpg] https://packages.microsoft.com/ubuntu/${VERSION_ID}/prod ${VERSION_CODENAME} main" \
+            | sudo tee /etc/apt/sources.list.d/mssql-release.list > /dev/null
+          sudo apt-get update \
+            -o Dir::Etc::sourcelist="sources.list.d/mssql-release.list" \
+            -o Dir::Etc::sourceparts="-" \
+            -o APT::Get::List-Cleanup="0"
+          sudo ACCEPT_EULA=Y apt-get install -y mssql-tools18 unixodbc-dev
+          echo "/opt/mssql-tools18/bin" >> "$GITHUB_PATH"
+
+      - name: SQL Server відповідає
+        env:
+          SQLCMDPASSWORD: ${{ env.ECR_SQL_PASSWORD }}
+        run: |
+          for i in $(seq 1 90); do
+            if sqlcmd -S localhost,1433 -U sa -C -b -Q "SELECT 1" > /dev/null 2>&1; then
+              echo "SQL Server готовий за ${i} с."
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::SQL Server не відповів за 90 с. Журнал контейнера:"
+          docker logs ecr-mssql 2>&1 | tail -40
+          exit 1
+
+      - name: dotnet ef
+        run: |
+          dotnet tool install --global dotnet-ef
+          echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
+
+      # ⚠ Порт 5098, а не 5099: `setup-dev-db.ps1` піднімає застосунок для сіду
+      # саме на 5099, і сценарій не має навіть теоретично говорити з ним.
+      # ⛔ Пароль іде оточенням (`ECR_SQL_PASSWORD`), не аргументом.
+      - name: Наскрізний сценарій (smoke.ps1)
+        env:
+          ECR_SQL_PASSWORD: ${{ env.ECR_SQL_PASSWORD }}
+        run: >-
+          pwsh -File tools/smoke.ps1
+          -Server 'localhost,1433' -Login sa -Database EcrSmokeCi -Port 5098
+          -SmallFiles -RequireFreeGb 0 -StartupTimeoutSec 180
+
+      - name: Журнали застосунку
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-logs
+          path: |
+            artifacts/smoke.api.log*
+            artifacts/setup-dev-db.api.log*
+          retention-days: 14
+          if-no-files-found: ignore
