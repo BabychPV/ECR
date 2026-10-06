@@ -23,8 +23,27 @@ namespace Ecr.Api.Controllers;
 [Route("api/v1/consistency")]
 [Authorize]
 public sealed class ConsistencyController(
-    GetConsistencyIssuesHandler issues, RunConsistencyCheckHandler run) : ControllerBase
+    GetConsistencyIssuesHandler issues,
+    GetConsistencySummaryHandler summary,
+    RunConsistencyCheckHandler run) : ControllerBase
 {
+    /// <summary>
+    /// Загальні лічильники знахідок за вагою для смуги показників.
+    /// Право <c>System.ViewHealth</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Лічильники рахуються по ВСЬОМУ журналу, а не по сторінці: сторінка
+    /// курсорна, і сума по ній збрехала б про стан системи. Без права —
+    /// <c>403</c>, а не нулі. Знахідки не розрізняються за проєктами (журнал
+    /// системний, право адміністративне), тож прихованих документів тут немає.
+    /// </remarks>
+    [HttpGet("summary")]
+    [ProducesResponseType<ConsistencySummary>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    public async Task<ActionResult<ConsistencySummary>> Summary(
+        [FromQuery] bool openOnly, CancellationToken ct)
+        => Ok(await summary.HandleAsync(openOnly, ct).ConfigureAwait(false));
+
     /// <summary>
     /// Знахідки перевірки узгодженості. Право <c>System.ViewHealth</c>.
     /// </summary>
@@ -42,7 +61,7 @@ public sealed class ConsistencyController(
     /// (<c>err.*</c>), не для цього журналу.
     /// </remarks>
     [HttpGet("issues")]
-    [ProducesResponseType<PagedResult<ConsistencyIssueView>>(StatusCodes.Status200OK)]
+    [ProducesResponseType<ConsistencyIssuePage>(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
 
     // ⚠ `422`, а не `400`: розмір сторінки поза межами — це порушення
@@ -50,9 +69,11 @@ public sealed class ConsistencyController(
     // непридатний запит. Оголошено те, що конвеєр справді віддає: перевірено
     // тестом `Розмір_сторінки_понад_максимум_відхиляється_а_не_обрізається_мовчки`.
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
-    public async Task<ActionResult<PagedResult<ConsistencyIssueView>>> Issues(
+    public async Task<ActionResult<ConsistencyIssuePage>> Issues(
         [FromQuery] string? ruleCode,
         [FromQuery] bool openOnly,
+        [FromQuery] int? severity,
+        [FromQuery] string? q,
         [FromQuery] int limit,
         [FromQuery] string? cursor,
         CancellationToken ct)
@@ -64,7 +85,7 @@ public sealed class ConsistencyController(
         var page = new CursorRequest(limit == 0 ? 50 : limit, cursor);
 
         return Ok(await issues
-            .HandleAsync(ruleCode, openOnly, page, ct)
+            .HandleAsync(ruleCode, openOnly, severity, q, page, ct)
             .ConfigureAwait(false));
     }
 
