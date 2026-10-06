@@ -1,8 +1,23 @@
-import type { JSX } from 'react';
-import { ActionIcon, Group, TextInput, type MantineSize } from '@mantine/core';
+import { lazy, Suspense, useCallback, useId, useRef, useState, type JSX, type KeyboardEvent } from 'react';
+import { Text, TextInput, type MantineSize } from '@mantine/core';
 import { formatPeriodKey } from '@/shared/format';
 import { t } from '@/shared/i18n';
+import type { PeriodStateSummary } from './periodStates';
 import { useFieldDraft } from './useFieldDraft';
+
+import './PeriodPicker.css';
+
+/**
+ * ⛔ Сітка періодів і все про стан періоду (запит календарів, чип, «closes in»)
+ * — лінивими чанками (UI-13, бюджет `D-132`): вибір періоду стоїть статично на
+ * шести сторінках, а стан потрібен лише переліку документів. Статичний
+ * імпорт `formatDate`/`formatCount`/`useQueries` звідси переносив спільні
+ * модулі в чанки цих сторінок (+3…5 КБ gzip).
+ */
+const PeriodMonthGrid = lazy(() => import('./PeriodMonthGrid'));
+const PeriodStatesLoader = lazy(() => import('./periodStates').then((m) => ({ default: m.PeriodStatesLoader })));
+const PeriodStateChip = lazy(() => import('./periodStates').then((m) => ({ default: m.PeriodStateChip })));
+const PeriodDeadline = lazy(() => import('./periodStates').then((m) => ({ default: m.PeriodDeadline })));
 
 /**
  * `PeriodPicker` (директива №15 §2, Шар 3, UI-06; те саме завдання, що
@@ -154,7 +169,11 @@ interface PeriodPickerProps {
    * `periodKey`) — `PeriodPicker` цього рішення не нав'язує.
    */
   readonly onChange: (value: number | null) => void;
-  /** За замовчуванням — `documents.period`, той самий ключ, що й у заміненого поля. */
+  /**
+   * Видимий підпис над контролом. ✎ UI-13: без пропа підпису над контролом
+   * немає (макет: сегментований контрол сам каже, що він — період), а
+   * доступне ім'я поля — `documents.period`, як і було.
+   */
   readonly label?: string;
   readonly size?: MantineSize;
   readonly miw?: number | string;
@@ -168,12 +187,24 @@ interface PeriodPickerProps {
    * підпис та крок стрілок ідуть за кварталами чи роками.
    */
   readonly periodKind?: string | undefined;
+  /**
+   * Проєкти, чиї календарі дають стан періоду (UI-13): чип «Open», значки в
+   * сітці й підпис «closes in N days · дата». Без пропа — вибір періоду без
+   * стану, як у формах.
+   */
+  readonly projectIds?: readonly number[] | undefined;
 }
 
 /**
- * Вибір звітного періоду: стрілки ‹ › (календарний крок) + пряме введення
- * `periodKey` (те саме поле, що й раніше, — набір цифр так само працює) +
- * підпис мовою інтерфейсу під полем.
+ * Вибір звітного періоду за макетом (UI-13, `KIT.md` §6.7, `kit.js`
+ * `PeriodPicker`): один сегментований контрол `‹ [календар] September 2026 ○ Open ›`,
+ * клік або ↓ відкриває сітку періодів року зі станом, поруч — «Open · closes in
+ * 12 days · 30 Sep 2026».
+ *
+ * ⛔ Людина бачить назву періоду і поза фокусом, і У ФОКУСІ (раніше у фокусі
+ * поле показувало технічний `202610`). Набір ключа лишився: фокус виділяє
+ * назву, і перша ж цифра замінює її набором `YYYYMM`; лише поки людина
+ * друкує, поле показує набране.
  */
 export function PeriodPicker({
   value,
@@ -184,6 +215,7 @@ export function PeriodPicker({
   disabled = false,
   id,
   periodKind,
+  projectIds,
 }: PeriodPickerProps): JSX.Element {
   /*
    * ⛔ Незавершений набір живе ЛИШЕ тут, у полі, і не йде в `onChange`: див.
@@ -200,10 +232,16 @@ export function PeriodPicker({
   const external = value === null ? '' : String(value);
   const field = useFieldDraft<string>(external);
   const draft = field.value;
-  // ⚠ Чернетка — рядок цифр ключа (`YYYYMM`): ключ лишається значенням для API і введення, але
-  // показується людині лише поки вона його редагує (див. `shown` нижче).
   const local = /^\d{6}$/.test(draft) ? Number(draft) : null;
   const complete = local !== null && isCompletePeriodKey(local);
+  // ⚠ Людина друкує ключ: поле показує набране, а не назву (див. опис компонента).
+  const [typing, setTyping] = useState(false);
+  const [open, setOpen] = useState<false | 'field' | 'grid'>(false);
+  const [states, setStates] = useState<ReadonlyMap<number, PeriodStateSummary> | undefined>(undefined);
+  const anchor = useRef<HTMLDivElement>(null);
+  const input = useRef<HTMLInputElement>(null);
+  const generatedId = useId();
+  const inputId = id ?? generatedId;
 
   // ⚠ Стрілки крокують від набраного, лише коли воно повне; від неповного —
   // від ЧИННОГО періоду, як і раніше.
@@ -215,25 +253,23 @@ export function PeriodPicker({
     perYear === LastMonth ? shiftPeriod(from, delta) : shiftSequence(from, delta, perYear);
   const prevValue = current === null ? null : step(current, -1);
   const nextValue = current === null ? null : step(current, 1);
-  // ⚠ Поки набір неповний, підпис попереднього періоду під полем брехав би
-  // («2026» над «September 2026») — тому підпису немає, як і для порожнього.
+  // ⚠ Поки набір неповний, назва попереднього періоду брехала б — тоді поле показує набране.
   const caption = complete ? periodCaption(local, periodKind) : undefined;
+  const shown = typing && field.focused ? draft : (caption ?? draft);
 
-  /*
-   * ⛔ Поле показує ЛЮДСЬКУ назву («October 2026» / «Қазан 2026» / «Октябрь 2026»), а не технічний
-   * ключ `202610`; окремого підпису під/над полем немає (раніше назва дублювала поле дрібним
-   * шрифтом). Ключ видно лише в РЕДАГУВАННІ — у фокусі поле показує рівно набране, тож введення
-   * `YYYYMM` працює як і раніше; на blur знову назва. `onChange` віддає ключ, як і досі.
-   */
-  const shown = !field.focused && caption !== undefined ? caption : draft;
+  const summary = complete ? states?.get(local) : undefined;
+  const gridYear = current !== null ? Math.trunc(current / YearMultiplier) : new Date().getFullYear();
 
   const commit = (next: number | null): void => {
+    setTyping(false);
     field.setValue(next === null ? '' : String(next));
     onChange(next);
   };
 
   const handleInput = (raw: string): void => {
     const next = raw.replace(/\D/g, '');
+    setTyping(true);
+    setOpen(false);
     field.setValue(next);
 
     if (next === '') {
@@ -243,64 +279,157 @@ export function PeriodPicker({
     }
   };
 
+  const close = useCallback((returnFocus: boolean): void => {
+    setOpen(false);
+    if (returnFocus) input.current?.focus();
+  }, []);
+
+  const handleFieldKey = (event: KeyboardEvent<HTMLInputElement>): void => {
+    if (event.key === 'ArrowDown' && !disabled) {
+      event.preventDefault();
+      setOpen('grid');
+    } else if (event.key === 'Escape' && open !== false) {
+      event.preventDefault();
+      setOpen(false);
+    } else if (event.key === 'Enter' && !event.nativeEvent.isComposing && complete) {
+      /*
+       * A4-02: Enter на ПОВНОМУ періоді — підтвердження: поле віддає фокус і показує назву («September 2026»),
+       * однаково на всіх екранах. Неповний набір Enter не чіпає: фокус лишається, продовжуй набір.
+       */
+      setOpen(false);
+      event.currentTarget.blur();
+    }
+  };
+
+  const fieldLabel = label ?? t('documents.period');
+
   return (
-    // ⚠ `align="flex-end"` + кнопки висотою поля (`input-${size}`): ‹ › стоять по центру поля, а не
-    // нижче нього; підпису-опису під міткою вже немає, що зсував поле відносно кнопок.
-    <Group gap="xs" align="flex-end" wrap="nowrap">
-      <ActionIcon
-        variant="default"
-        size={`input-${size}`}
-        aria-label={t('period.previous')}
-        disabled={disabled || prevValue === null}
-        onClick={() => commit(prevValue)}
-      >
-        ‹
-      </ActionIcon>
+    <div className="ecr-period-anchor" ref={anchor}>
+      {label !== undefined && (
+        <Text component="label" htmlFor={inputId} size="sm" fw={500}>
+          {label}
+        </Text>
+      )}
+      <div className="ecr-period-row">
+        <div className="ecr-period" role="group" aria-label={t('period.group')}>
+          <button
+            type="button"
+            aria-label={t('period.previous')}
+            disabled={disabled || prevValue === null}
+            onClick={() => commit(prevValue)}
+          >
+            <Chevron direction="left" />
+          </button>
 
-      <TextInput
-        id={id}
-        size={size}
-        miw={miw}
-        label={label ?? t('documents.period')}
-        inputMode="numeric"
-        disabled={disabled}
-        value={shown}
-        onChange={(event) => handleInput(event.currentTarget.value)}
-        onFocus={(event) => {
-          field.onFocus();
-          // Поле переходить від назви до ключа: виділити ключ, щоб набір `YYYYMM` замінив його.
-          const input = event.currentTarget;
-          queueMicrotask(() => input.select());
-        }}
-        /*
-         * A4-02: Enter на ПОВНОМУ періоді — підтвердження: поле віддає фокус і показує назву («September 2026»),
-         * однаково на всіх екранах. Раніше це робила лише сторінка документа (її вміст перемонтовувався
-         * зміною періоду), а на списку документів, у зрізах і кампанії поле лишалось у фокусі з ключем
-         * до Tab. Неповний набір Enter не чіпає: фокус лишається, продовжуй набір.
-         */
-        onKeyDown={(event) => {
-          if (event.key !== 'Enter' || event.nativeEvent.isComposing || !complete) return;
-          event.currentTarget.blur();
-        }}
-        // ⚠ Незавершений набір, покинутий фокусом, повертає поле до чинного
-        // періоду: інакше поле показувало б «2026», а список — інший період.
-        // Повний набір лишається: `value` у цю мить може ще нести запізніле
-        // відлуння адреси, і підтягнути його означало б стерти набране.
-        onBlur={() => {
-          field.onBlur();
-          if (!complete) field.setValue(external);
-        }}
-      />
+          <div className="ecr-period-field">
+            <button
+              type="button"
+              className="ecr-period-calendar"
+              aria-label={t('period.choose')}
+              aria-haspopup="dialog"
+              aria-expanded={open !== false}
+              disabled={disabled}
+              onClick={() => setOpen(open === false ? 'grid' : false)}
+            >
+              <CalendarIcon />
+            </button>
+            <TextInput
+              id={inputId}
+              ref={input}
+              variant="unstyled"
+              size={size}
+              miw={miw}
+              aria-label={label === undefined ? fieldLabel : undefined}
+              inputMode="numeric"
+              autoComplete="off"
+              disabled={disabled}
+              value={shown}
+              onChange={(event) => handleInput(event.currentTarget.value)}
+              onClick={() => {
+                if (!disabled && open === false) setOpen('field');
+              }}
+              onKeyDown={handleFieldKey}
+              onFocus={(event) => {
+                field.onFocus();
+                // Назва виділена: перша ж цифра замінює її набором ключа `YYYYMM`.
+                const target = event.currentTarget;
+                queueMicrotask(() => target.select());
+              }}
+              // ⚠ Незавершений набір, покинутий фокусом, повертає поле до чинного
+              // періоду: інакше поле показувало б «2026», а список — інший період.
+              // Повний набір лишається: `value` у цю мить може ще нести запізніле
+              // відлуння адреси, і підтягнути його означало б стерти набране.
+              onBlur={() => {
+                field.onBlur();
+                setTyping(false);
+                if (!complete) field.setValue(external);
+              }}
+            />
+            {summary?.uniform === true && (
+              <Suspense fallback={null}>
+                <PeriodStateChip summary={summary} />
+              </Suspense>
+            )}
+          </div>
 
-      <ActionIcon
-        variant="default"
-        size={`input-${size}`}
-        aria-label={t('period.next')}
-        disabled={disabled || nextValue === null}
-        onClick={() => commit(nextValue)}
-      >
-        ›
-      </ActionIcon>
-    </Group>
+          <button
+            type="button"
+            aria-label={t('period.next')}
+            disabled={disabled || nextValue === null}
+            onClick={() => commit(nextValue)}
+          >
+            <Chevron direction="right" />
+          </button>
+        </div>
+
+        {summary !== undefined && (
+          <Suspense fallback={null}>
+            <PeriodDeadline summary={summary} />
+          </Suspense>
+        )}
+      </div>
+
+      {open !== false && (
+        <Suspense fallback={null}>
+          <PeriodMonthGrid
+            year={gridYear}
+            perYear={perYear}
+            periodKind={periodKind}
+            value={current}
+            states={states}
+            anchor={anchor}
+            focusOnOpen={open === 'grid'}
+            onPick={(key) => {
+              commit(key);
+              close(true);
+            }}
+            onClose={close}
+          />
+        </Suspense>
+      )}
+
+      {projectIds !== undefined && projectIds.length > 0 && (
+        <Suspense fallback={null}>
+          <PeriodStatesLoader projectIds={projectIds} onChange={setStates} />
+        </Suspense>
+      )}
+    </div>
+  );
+}
+
+function Chevron({ direction }: { direction: 'left' | 'right' }): JSX.Element {
+  return (
+    <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+      <path d={direction === 'left' ? 'M15 6l-6 6 6 6' : 'M9 6l6 6-6 6'} />
+    </svg>
+  );
+}
+
+function CalendarIcon(): JSX.Element {
+  return (
+    <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+      <rect x={3} y={5} width={18} height={16} rx={2} />
+      <path d="M3 10h18M8 3v4M16 3v4" />
+    </svg>
   );
 }

@@ -221,6 +221,7 @@ export function DocumentsPage(): JSX.Element {
             <PeriodPicker
               size="xs"
               miw={120}
+              projectIds={pickProjects.map((project) => project.id)}
               value={periodKey}
               onChange={(value) => {
                 // ⛔ Людина обрала сама — автовибір більше не втручається.
