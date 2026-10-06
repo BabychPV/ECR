@@ -41,6 +41,7 @@ import {
 } from '@/shared/i18n';
 import { useCatalog } from '@/shared/i18n/useCatalog';
 import { usePublicBootstrap } from '@/features/public/api';
+import { routes } from '@/app/routes';
 import { useEffect } from 'react';
 
 /**
@@ -157,7 +158,8 @@ export function LoginPage(): JSX.Element {
   // каталогу): порядок хуків у React має бути однаковий на кожному рендері,
   // і хук після `if (…) return` — це помилка, яка проявляється лише в момент,
   // коли гілка змінюється.
-  const bootstrap = usePublicBootstrap();
+  // A2-06 п.3: 428 на bootstrap — живий сеанс із разовим паролем → одразу на зміну пароля.
+  const bootstrap = usePublicBootstrap(() => navigate(routes.changePassword.path, { replace: true }));
 
   // ✎ `R-16`: лише мови з перекладом (публічний зріз — до входу іншого немає).
   const offeredLanguages = useTranslatedLanguages(bootstrap.languages, 'public');
