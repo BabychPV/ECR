@@ -6957,8 +6957,11 @@ USING (VALUES
     (N'grid.tree.state.partial', N'en', N'Partially filled: {filled} of {total} cells', 1),
     (N'grid.tree.state.filled', N'en', N'Filled', 1),
     (N'grid.tree.state.error', N'en', N'Errors: {count}', 1),
-    (N'grid.tree.warnings', N'en', N'Warnings: {count}', 1)
+    (N'grid.tree.warnings', N'en', N'Warnings: {count}', 1),
     -- COLL:ui22tree ── кінець секції ──
+    -- COLL:ui32crumbs ── UI-32: крихти у верхній смузі (підпис області навігації); ru/kz — порцією COLL:ui32crumbs у блоці I18N нижче ──
+    (N'nav.breadcrumb', N'en', N'Breadcrumb', 1)
+    -- COLL:ui32crumbs ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -16678,6 +16681,16 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:ui22tree ── кінець секції ──
+-- COLL:ui32crumbs ── ru/kz UI-32: крихти у верхній смузі; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'nav.breadcrumb', N'ru', N'Навигационная цепочка'),
+    (N'nav.breadcrumb', N'kz', N'Навигация жолы')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:ui32crumbs ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t
