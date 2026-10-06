@@ -7074,8 +7074,12 @@ USING (VALUES
     -- COLL:ui41keys ── кінець секції ──
     -- COLL:ui42narrow ── UI-42: документ лише для читання на вузькому екрані (банер docs-narrow-note); ru/kz — порцією COLL:ui42narrow у блоці I18N нижче ──
     (N'document.narrow.title', N'en', N'Read-only on a narrow screen', 1),
-    (N'document.narrow.text', N'en', N'Values can be viewed here but not changed. To enter or correct data, open this document on a wider screen.', 1)
+    (N'document.narrow.text', N'en', N'Values can be viewed here but not changed. To enter or correct data, open this document on a wider screen.', 1),
     -- COLL:ui42narrow ── кінець секції ──
+    -- COLL:a11y-pass ── зауваження успішного PATCH у гріді; 403 у каскаді гранта (A1-05); ru/kz — порцією COLL:a11y-pass у блоці I18N нижче ──
+    (N'grid.patchNoticesTitle', N'en', N'Saved with remarks: {count}', 1),
+    (N'grants.pickerForbidden', N'en', N'No access to templates: picking a sheet, table or column needs the TemplateAdministrator role', 1)
+    -- COLL:a11y-pass ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -17050,6 +17054,18 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:ui42narrow ── кінець секції ──
+-- COLL:a11y-pass ── ru/kz: зауваження успішного PATCH; 403 у каскаді гранта; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'grid.patchNoticesTitle', N'ru', N'Сохранено с замечаниями: {count}'),
+    (N'grid.patchNoticesTitle', N'kz', N'Ескертпелермен сақталды: {count}'),
+    (N'grants.pickerForbidden', N'ru', N'Нет доступа к шаблонам: для выбора листа, таблицы или колонки нужна роль TemplateAdministrator'),
+    (N'grants.pickerForbidden', N'kz', N'Үлгілерге қол жеткізу жоқ: парақты, кестені немесе бағанды таңдау үшін TemplateAdministrator рөлі қажет')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:a11y-pass ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t
