@@ -63,7 +63,7 @@ describe('PageHeader: рамка програмного фокуса зніма�
       </MantineProvider>,
     );
 
-    const heading = document.querySelector('h3') as HTMLElement;
+    const heading = document.querySelector('h1') as HTMLElement;
 
     // ⛔ Мутація «без `quietFocus`» лишає outline браузера (живцем — Chromium).
     expect(heading.style.outline).toBe('none');
@@ -83,6 +83,6 @@ describe('PageHeader: рамка програмного фокуса зніма�
       </MantineProvider>,
     );
 
-    expect((document.querySelector('h3') as HTMLElement).style.outline).toBe('');
+    expect((document.querySelector('h1') as HTMLElement).style.outline).toBe('');
   });
 });

@@ -77,9 +77,9 @@ describe('ChangePasswordPage: PageHeader (Q-261)', () => {
 
     // ⛔ До фіксу тут стояв `<Title order={4}>` — заголовок БЕЗ ролі
     // `heading` рівня 3, без фокуса і без оголошення. Перевіряємо, що
-    // рівно ОДИН заголовок на екрані, і це саме `PageHeader` (order=3).
+    // рівно ОДИН заголовок на екрані, і це саме `PageHeader` (h1).
     const headings = screen.getAllByRole('heading');
     expect(headings).toHaveLength(1);
-    expect(headings[0]?.tagName).toBe('H3');
+    expect(headings[0]?.tagName).toBe('H1');
   });
 });

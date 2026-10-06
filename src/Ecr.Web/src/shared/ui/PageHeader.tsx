@@ -140,7 +140,7 @@ export interface PageHeaderProps {
  *
  * ⛔ Розширення (директива №15, §2, Шар 2) НЕ торкається ні фокуса, ні
  * оголошення: обидва ефекти лишилися дослівно тими самими, а весь новий вміст
- * малюється навколо того самого `<Title order={3} ref tabIndex={-1}>`. Тест
+ * малюється навколо того самого `<Title order={1} size="h3" ref tabIndex={-1}>`. Тест
  * `pages/__tests__/ChangePasswordPage.pageHeader.test.tsx` (фокус, `tabindex`,
  * `aria-live`, РІВНО один заголовок) лишився без жодної правки — це й було
  * критерієм приймання.
@@ -203,7 +203,10 @@ export function PageHeader({
      * зайве натискання на шляху до першого поля.
      */
     <Title
-      order={3}
+      // a11y (axe `page-has-heading-one`): заголовок екрана — єдиний `h1`;
+      // розділи під ним — `h2`. Вигляд — `size="h3"`, як і досі.
+      order={1}
+      size="h3"
       ref={heading}
       tabIndex={-1}
       className={RouteHeadingClass}
