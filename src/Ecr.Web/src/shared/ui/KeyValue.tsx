@@ -1,5 +1,5 @@
 import type { JSX, ReactNode } from 'react';
-import { Box, Group, Stack, Text } from '@mantine/core';
+import { Box, Stack, Text } from '@mantine/core';
 import { hasContent } from './TwoLine';
 
 /**
@@ -29,6 +29,14 @@ import { hasContent } from './TwoLine';
  */
 const NoBrowserMargin = { marginBlockStart: 0, marginBlockEnd: 0 } as const;
 const NoBrowserIndent = { ...NoBrowserMargin, marginInlineStart: 0 } as const;
+
+/** Підпис і значення в один рядок — те саме, що давав `Group gap="sm" align="baseline" wrap="nowrap"`. */
+const WideRow = {
+  display: 'grid',
+  gridTemplateColumns: 'auto minmax(0, 1fr)',
+  alignItems: 'baseline',
+  columnGap: 'var(--mantine-spacing-sm)',
+} as const;
 
 export interface KeyValueItem {
   /** Підпис. */
@@ -90,24 +98,28 @@ export function KeyValue({ items, wide = false }: KeyValueProps): JSX.Element | 
           </Text>
         );
 
+        /*
+         * ⛔ Обгортка пари — `div` ПРЯМО в `<dl>` і всередині лише `dt`/`dd`
+         * (HTML дозволяє саме так). Широкий варіант раніше клав пару ще в
+         * `Group` (`div` у `div`), а уточнення — `<p>`: axe `definition-list`
+         * і `dlitem` (serious, живий прогін batch-2-a, дефект 4). Тепер «в один
+         * рядок» робить сітка самої обгортки, а уточнення — ще один `dd`.
+         */
         return (
-          <Box key={item.label} data-key-value-item="">
-            {wide ? (
-              <Group gap="sm" align="baseline" wrap="nowrap">
-                {label}
-                {value}
-              </Group>
-            ) : (
-              <>
-                {label}
-                {value}
-              </>
-            )}
+          <Box key={item.label} data-key-value-item="" style={wide ? WideRow : undefined}>
+            {label}
+            {value}
 
             {/* ⚠ Уточнення показується лише разом зі значенням: підказка до
                 того, чого немає, — це та сама заглушка (`D15-06`). */}
             {item.hint !== undefined && item.hint.trim().length > 0 && (
-              <Text size="xs" c="dimmed" data-key-value-hint="">
+              <Text
+                component="dd"
+                size="xs"
+                c="dimmed"
+                style={wide ? { ...NoBrowserIndent, gridColumn: '1 / -1' } : NoBrowserIndent}
+                data-key-value-hint=""
+              >
                 {item.hint}
               </Text>
             )}
