@@ -554,7 +554,6 @@ export function DocumentHeaderPanel({
       {canEdit && (
         <Group gap="xs">
           <Button
-            size="xs"
             disabled={dirty.length === 0 || invalidDates.size > 0}
             loading={save.isPending}
             onClick={() => save.mutate(dirtyPatch)}
@@ -563,7 +562,7 @@ export function DocumentHeaderPanel({
           </Button>
 
           {dirty.length > 0 && (
-            <Button size="xs" variant="default" disabled={save.isPending} onClick={resetDraft}>
+            <Button variant="default" disabled={save.isPending} onClick={resetDraft}>
               {t('common.cancel')}
             </Button>
           )}

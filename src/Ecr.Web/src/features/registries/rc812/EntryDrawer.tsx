@@ -105,11 +105,11 @@ export function EntryDrawer({ registry, row, fields, asOf, readOnly }: EntryDraw
             />
             {!readOnly && (
               <Group gap="xs">
-                <Button size="xs" variant="default" onClick={() => setEditing('name')}>
+                <Button variant="default" onClick={() => setEditing('name')}>
                   {t('registries.editEntry')}
                 </Button>
                 {temporal && (
-                  <Button size="xs" variant="default" onClick={() => setEditing('validity')}>
+                  <Button variant="default" onClick={() => setEditing('validity')}>
                     {t('registries.validity')}
                   </Button>
                 )}

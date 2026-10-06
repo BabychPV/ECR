@@ -563,7 +563,6 @@ export function DocumentPage(): JSX.Element {
       <DocumentToolbar more={[businessKeyChange.menuItem, versionMigration.menuItem, deletion.menuItem]}>
         <ActionGroup name="check">
           <Button
-            size="xs"
             variant="default"
             loading={validate.isPending || validateAction.settling}
             onClick={() => validateAction.run(() => validate.mutateAsync(scope), { readOnly: true })}

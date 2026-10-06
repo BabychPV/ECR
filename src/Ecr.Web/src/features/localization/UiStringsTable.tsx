@@ -99,16 +99,16 @@ export const UiStringsTable = memo(function UiStringsTable({
                 <Group gap="xs" justify="flex-end">
                   {editingKey === key ? (
                     <>
-                      <Button size="compact-xs" variant="subtle" onClick={onCancel}>
+                      <Button size="xs" variant="subtle" onClick={onCancel}>
                         {t('common.cancel')}
                       </Button>
-                      <Button size="compact-xs" loading={saving} onClick={() => onSave(key)}>
+                      <Button size="xs" loading={saving} onClick={() => onSave(key)}>
                         {t('common.save')}
                       </Button>
                     </>
                   ) : (
                     <Button
-                      size="compact-xs"
+                      size="xs"
                       variant="subtle"
                       // ⚠ Поле відкривається з ПОРОЖНІМ значенням для
                       // неперекладеного ключа: підставлений оригінал тут —

@@ -122,10 +122,10 @@ export function RenderErrorScreen({ error }: { error: unknown }): JSX.Element {
        * від чого користувач тут і тікає.
        */}
       <Group gap="xs">
-        <Button size="xs" onClick={() => window.location.reload()}>
+        <Button onClick={() => window.location.reload()}>
           Reload page
         </Button>
-        <Button size="xs" variant="default" onClick={() => window.location.assign('/')}>
+        <Button variant="default" onClick={() => window.location.assign('/')}>
           Go to document list
         </Button>
       </Group>

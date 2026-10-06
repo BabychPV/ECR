@@ -847,7 +847,7 @@ export function TemplateVersionPage(): JSX.Element {
                 правил, і питання «чому тут замок» найчастіше веде до «а що
                 за ним налаштовано». */}
             {canEditSheets && (
-              <Button size="xs" variant="default" onClick={() => setPeriodRulesOpen(true)}>
+              <Button variant="default" onClick={() => setPeriodRulesOpen(true)}>
                 {t('periodRules.title')}
               </Button>
             )}
@@ -858,7 +858,6 @@ export function TemplateVersionPage(): JSX.Element {
                 редактор існував би лише за адресою, яку треба знати. */}
             {can(session.data, 'Template.View') && (
               <Button
-                size="xs"
                 variant="default"
                 onClick={() =>
                   void navigate(
@@ -874,13 +873,13 @@ export function TemplateVersionPage(): JSX.Element {
                 (`ФВ-7.1`). Кнопка є завжди, коли є право правити шаблони:
                 клонувати чернетку теж законно. */}
             {can(session.data, 'Template.Edit') && (
-              <Button size="xs" variant="default" onClick={() => setCloning(true)}>
+              <Button variant="default" onClick={() => setCloning(true)}>
                 {t('version.clone')}
               </Button>
             )}
 
             {canPublish && can(session.data, 'Template.Publish') && (
-              <Button size="xs" onClick={() => setPublishing(true)}>
+              <Button onClick={() => setPublishing(true)}>
                 {t('version.publish')}
               </Button>
             )}
@@ -891,7 +890,6 @@ export function TemplateVersionPage(): JSX.Element {
                 чернетці й уже виведеній з обігу версії однаково. */}
             {canWithdraw && can(session.data, 'Template.Publish') && (
               <Button
-                size="xs"
                 variant="default"
                 color="statusError"
                 onClick={() => setDeprecating(true)}
@@ -956,7 +954,6 @@ export function TemplateVersionPage(): JSX.Element {
         <Text fw={600}>{t('headerFields.title')}</Text>
         {canEditSheets && (
           <Button
-            size="xs"
             variant="default"
             onClick={() => setHeaderFieldEdit(emptyHeaderFieldDraft(null))}
           >
@@ -1010,7 +1007,7 @@ export function TemplateVersionPage(): JSX.Element {
                       {canEditSheets && (
                         <Group gap="xs" wrap="nowrap" justify="flex-end">
                           <Button
-                            size="compact-xs"
+                            size="xs"
                             variant="subtle"
                             onClick={() => setHeaderFieldEdit(headerFieldDraftOf(field))}
                           >
@@ -1081,14 +1078,14 @@ export function TemplateVersionPage(): JSX.Element {
                       {canEditSheets && (
                         <Group gap="xs" mb="sm">
                           <Button
-                            size="compact-xs"
+                            size="xs"
                             variant="subtle"
                             onClick={() => setSheetDraft(draftOf(sheet))}
                           >
                             {t('sheets.edit')}
                           </Button>
                           <Button
-                            size="compact-xs"
+                            size="xs"
                             variant="subtle"
                             color="statusError"
                             // ⛔ Лише натиснута кнопка: доти `loading` крутився
@@ -1110,7 +1107,7 @@ export function TemplateVersionPage(): JSX.Element {
                       {canEditSheets && (
                         <Group justify="flex-end" mb="xs">
                           <Button
-                            size="compact-xs"
+                            size="xs"
                             variant="default"
                             onClick={() =>
                               setTableDraft({
@@ -1149,14 +1146,14 @@ export function TemplateVersionPage(): JSX.Element {
                                 <Text fw={600}>
                                   <TableTitle table={table} />
                                 </Text>
-                                <Button size="compact-xs" variant="subtle" onClick={() => setPreviewTable(table)}>
+                                <Button size="xs" variant="subtle" onClick={() => setPreviewTable(table)}>
                                   {t('tablePreview.open')}
                                 </Button>
                               </Group>
                               {canEditSheets && (
                                 <Group gap="xs">
                                   <Button
-                                    size="compact-xs"
+                                    size="xs"
                                     variant="subtle"
                                     onClick={() =>
                                       setTableDraft({
@@ -1168,7 +1165,7 @@ export function TemplateVersionPage(): JSX.Element {
                                     {t('tableDef.edit')}
                                   </Button>
                                   <Button
-                                    size="compact-xs"
+                                    size="xs"
                                     variant="subtle"
                                     color="statusError"
                                     loading={
@@ -1187,7 +1184,7 @@ export function TemplateVersionPage(): JSX.Element {
                                     {t('tableDef.delete')}
                                   </Button>
                                   <Button
-                                    size="compact-xs"
+                                    size="xs"
                                     variant="default"
                                     onClick={() =>
                                       setColumnEdit({
@@ -1204,14 +1201,14 @@ export function TemplateVersionPage(): JSX.Element {
                                       ТАБЛИЦЕЮ — кнопка тому стоїть тут, а не
                                       на рівні аркуша чи версії. */}
                                   <Button
-                                    size="compact-xs"
+                                    size="xs"
                                     variant="subtle"
                                     onClick={() => setValidationRuleTable(table.id)}
                                   >
                                     {t('validationRules.title')}
                                   </Button>
                                   <Button
-                                    size="compact-xs"
+                                    size="xs"
                                     variant="subtle"
                                     onClick={() => setConditionalFormatTable(table)}
                                   >
@@ -1279,7 +1276,7 @@ export function TemplateVersionPage(): JSX.Element {
                                     <Table.Td>
                                       <Group gap="xs" wrap="nowrap" justify="flex-end">
                                         <Button
-                                          size="compact-xs"
+                                          size="xs"
                                           variant="subtle"
                                           data-column-usage="trigger"
                                           onClick={() => setColumnUsageFor(column.id)}
@@ -1292,7 +1289,7 @@ export function TemplateVersionPage(): JSX.Element {
                                             версії (`ФВ-7.2`). */}
                                         {can(session.data, 'Template.Edit') && (
                                           <Button
-                                            size="compact-xs"
+                                            size="xs"
                                             variant="subtle"
                                             onClick={() => {
                                               setPresentationUsed(true);
@@ -1305,7 +1302,7 @@ export function TemplateVersionPage(): JSX.Element {
                                         {canEditSheets && (
                                           <>
                                             <Button
-                                              size="compact-xs"
+                                              size="xs"
                                               variant="subtle"
                                               onClick={() =>
                                                 setColumnEdit({ tableId: table.id, code: column.code, draft: null })
@@ -1314,7 +1311,7 @@ export function TemplateVersionPage(): JSX.Element {
                                               {t('columns.edit')}
                                             </Button>
                                             <Button
-                                              size="compact-xs"
+                                              size="xs"
                                               variant="subtle"
                                               color="statusError"
                                               loading={
@@ -1333,7 +1330,7 @@ export function TemplateVersionPage(): JSX.Element {
                                               {t('columns.delete')}
                                             </Button>
                                             <Button
-                                              size="compact-xs"
+                                              size="xs"
                                               variant="subtle"
                                               onClick={() =>
                                                 setFormulaDraft(
@@ -1375,7 +1372,7 @@ export function TemplateVersionPage(): JSX.Element {
                                   </Text>
                                   {canEditSheets && (
                                     <Button
-                                      size="compact-xs"
+                                      size="xs"
                                       variant="default"
                                       onClick={() =>
                                         setRowEdit({ tableId: table.id, draft: emptyRowDraft(nextRowOrdinal) })
@@ -1437,7 +1434,7 @@ export function TemplateVersionPage(): JSX.Element {
                                             {canEditSheets && (
                                               <Group gap="xs" wrap="nowrap" justify="flex-end">
                                                 <Button
-                                                  size="compact-xs"
+                                                  size="xs"
                                                   variant="subtle"
                                                   onClick={() =>
                                                     setRowEdit({
@@ -1452,7 +1449,7 @@ export function TemplateVersionPage(): JSX.Element {
                                                   {t('rows.edit')}
                                                 </Button>
                                                 <Button
-                                                  size="compact-xs"
+                                                  size="xs"
                                                   variant="subtle"
                                                   color="statusError"
                                                   loading={
@@ -1471,7 +1468,7 @@ export function TemplateVersionPage(): JSX.Element {
                                                   {t('rows.delete')}
                                                 </Button>
                                                 <Button
-                                                  size="compact-xs"
+                                                  size="xs"
                                                   variant="subtle"
                                                   onClick={() =>
                                                     setFormulaDraft(

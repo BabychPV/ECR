@@ -173,7 +173,6 @@ export function KitchenSinkPage(): JSX.Element {
             Тема
           </Text>
           <SegmentedControl
-            size="xs"
             value={colorScheme}
             onChange={(v) => setColorScheme(v as 'light' | 'dark' | 'auto')}
             data={[
@@ -189,7 +188,6 @@ export function KitchenSinkPage(): JSX.Element {
             Щільність
           </Text>
           <SegmentedControl
-            size="xs"
             value={rows}
             onChange={(v) => changeDensity(v as Density)}
             data={[
@@ -302,7 +300,7 @@ export function KitchenSinkPage(): JSX.Element {
               isEmpty={(d) => d.length === 0}
               emptyTitle="У цьому проєкті ще немає документів"
               emptyHint="Документи з'являються після відкриття періоду."
-              emptyAction={<Button size="xs">Створити документ</Button>}
+              emptyAction={<Button>Створити документ</Button>}
             >
               {() => <div />}
             </AsyncBoundary>
@@ -450,7 +448,7 @@ export function KitchenSinkPage(): JSX.Element {
           </Hint>
 
           <Hint label="Роз'яснення другорядної дії">
-            <Button variant="subtle" size="xs">
+            <Button variant="subtle">
               Довідка
             </Button>
           </Hint>

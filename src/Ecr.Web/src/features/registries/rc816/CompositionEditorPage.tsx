@@ -67,7 +67,6 @@ function DetailChain({
     <Stack gap="md">
       {node.children.length > 1 && (
         <SegmentedControl
-          size="xs"
           aria-label={t('registries.rc816.chooseParts')}
           value={child.definition.code}
           data={node.children.map((item) => ({

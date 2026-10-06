@@ -94,7 +94,7 @@ export function TemplateVersionsSection({
         <Title order={4}>{t('templates.versions')}</Title>
 
         {editable && (
-          <Button size="xs" variant="default" onClick={() => setCreating(true)}>
+          <Button variant="default" onClick={() => setCreating(true)}>
             {t('templates.newVersion')}
           </Button>
         )}

@@ -253,7 +253,6 @@ export function GrantsPanel({ roles }: { roles: RoleView[] }): JSX.Element {
         {roleId !== null && !readOnly && (
           <>
             <Button
-              size="xs"
               variant="default"
               onClick={() =>
                 setRows((prev) => [
@@ -274,7 +273,6 @@ export function GrantsPanel({ roles }: { roles: RoleView[] }): JSX.Element {
                 чи пусткою), поки в ній нема змін і поки хоч один рядок без
                 обраного ресурсу (`resourceId` 0 — грант «ні на що»). */}
             <Button
-              size="xs"
               loading={save.isPending}
               disabled={grants.isPending || Boolean(grants.error) || !seeded || !dirty || incomplete}
               onClick={() => save.mutate({ roleId, grants: draft, etag: seed?.etag ?? null })}
@@ -296,7 +294,7 @@ export function GrantsPanel({ roles }: { roles: RoleView[] }): JSX.Element {
           <Text size="xs" c="statusError" role="alert">
             {t('grants.conflict')}
           </Text>
-          <Button size="compact-xs" variant="default" onClick={discardDraft}>
+          <Button size="xs" variant="default" onClick={discardDraft}>
             {t('grants.discardVerb')}
           </Button>
         </Group>
@@ -436,7 +434,7 @@ export function GrantsPanel({ roles }: { roles: RoleView[] }): JSX.Element {
                 <Table.Td>
                   {!readOnly && (
                     <Button
-                      size="compact-xs"
+                      size="xs"
                       color="statusError"
                       variant="subtle"
                       onClick={() => setRows((prev) => prev.filter((r) => r.key !== row.key))}

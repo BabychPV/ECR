@@ -343,7 +343,6 @@ export function SnapshotsPage(): JSX.Element {
                 завести дублікат. Вимкнено, доки перелік не приїде. */}
             {can(session.data, 'Report.EditDefinition') && (
               <Button
-                size="xs"
                 variant="default"
                 disabled={reportDefs.error !== null}
                 onClick={() => setManaging(true)}
@@ -354,7 +353,7 @@ export function SnapshotsPage(): JSX.Element {
 
             {can(session.data, 'Report.BuildSnapshot') && (
               <DisabledReason reason={projectId === null ? t('periods.pickProject') : null}>
-                <Button size="xs" onClick={() => setBuilding(true)}>
+                <Button onClick={() => setBuilding(true)}>
                   {t('snapshots.build')}
                 </Button>
               </DisabledReason>
@@ -423,7 +422,7 @@ export function SnapshotsPage(): JSX.Element {
                       */}
                       {canViewContent && (
                         <Button
-                          size="compact-xs"
+                          size="xs"
                           variant="default"
                           onClick={() => setViewing(snapshot.id)}
                         >
@@ -736,7 +735,7 @@ function VerifyCell(props: {
   return (
     <>
       <Group gap="xs" wrap="nowrap">
-        <Button size="compact-xs" variant="default" loading={props.loading} onClick={props.onVerify}>
+        <Button size="xs" variant="default" loading={props.loading} onClick={props.onVerify}>
           {t('snapshots.verify')}
         </Button>
         {result !== undefined && (

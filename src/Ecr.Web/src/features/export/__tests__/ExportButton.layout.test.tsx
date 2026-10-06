@@ -129,9 +129,14 @@ describe('U-25 · стан експорту не змінює рядка кно�
     expect(screen.queryByRole('link')).toBeNull();
   }, 20_000);
 
-  it('кнопка в роботі — підпис ПОРУЧ зі спінером, а не сам спінер, і місце під обидва підписи зарезервоване', async () => {
+  it('кнопка в роботі зберігає видимий підпис, а «Building...» чує читалка; у спокої зайвого підпису немає', async () => {
     mockServer();
     show();
+
+    // ✎ 2026-10-06: у спокої кнопка НЕ резервує місця під «Building...» — саме
+    // цей запас робив її ширшою за сусідів (знімок людини). Мутація «повернути
+    // прихований другий підпис» тут червона.
+    expect(screen.getByRole('button').textContent).toBe('⟦document.export⟧');
 
     const user = userEvent.setup();
     await user.click(screen.getByRole('button', { name: '⟦document.export⟧' }));
@@ -147,8 +152,8 @@ describe('U-25 · стан експорту не змінює рядка кно�
     expect(running.textContent).toContain('⟦document.exportBuilding⟧');
     expect(running.getAttribute('aria-hidden')).toBe('false');
 
-    // ⛔ Підпис спокою лишається в DOM (прихований), тобто ширина кнопки не
-    // падає до ширини одного з підписів і не стрибає між станами.
+    // ⛔ Видимий підпис той самий, що в спокої, тож ширина кнопки між
+    // станами не стрибає (`U-25`), а роботу показує смужка (`exportButton.css`).
     expect(button.textContent).toContain('⟦document.export⟧');
   });
 });

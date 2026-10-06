@@ -48,7 +48,6 @@ export function DocumentToolbar({
         <Menu shadow="md" position="bottom-end" withinPortal>
           <Menu.Target>
             <Button
-              size="xs"
               variant="default"
               leftSection={<span aria-hidden="true">⋯</span>}
               data-testid="document-more"

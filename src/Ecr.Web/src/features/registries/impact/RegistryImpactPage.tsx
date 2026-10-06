@@ -262,7 +262,6 @@ export function RegistryImpactPage(): JSX.Element {
           canRecalculate && (
             <Button
               ref={recalculateFocus.ref}
-              size="xs"
               disabled={!hasItems}
               loading={recalculate.isPending}
               onClick={() => setAsking(true)}

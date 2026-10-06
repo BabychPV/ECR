@@ -60,7 +60,7 @@ export function PauseResumeAction({
   return (
     <Stack gap="xs" miw="fit-content">
       <Button
-        size="compact-xs"
+        size="xs"
         variant="default"
         loading={toggle.isPending}
         onClick={() => toggle.mutate()}

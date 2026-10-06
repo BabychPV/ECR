@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type JSX } from 'react';
-import { Anchor, Button, Divider, Group, Loader, SegmentedControl } from '@mantine/core';
+import { Anchor, Button, Divider, Group, SegmentedControl, VisuallyHidden } from '@mantine/core';
+import './exportButton.css';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { apiEnqueue, apiFetch } from '@/api/client';
@@ -236,48 +237,34 @@ export function ExportButton({
       <Divider orientation="vertical" />
 
       {/*
-       * ⛔ `U-25`: кнопка в роботі зберігає ПІДПИС поруч зі спінером і НЕ
-       * змінює ширини. `loading` Mantine ховав підпис, лишаючи сам спінер, а
-       * зміна тексту «Export» → «Building...» міняла ширину — і заголовок
-       * документа перестрибував на окремий рядок. Обидва варіанти підпису
-       * лежать в ОДНІЙ комірці сітки (`gridArea: 1 / 1`), неактивний —
-       * `visibility: hidden`: ширина кнопки = ширина довшого з двох у будь-
-       * якій мові, і між станами вона не змінюється.
+       * ⛔ `U-25`: кнопка в роботі НЕ змінює ширини і не губить підпису.
+       * `loading` Mantine ховав підпис, лишаючи сам спінер, а зміна тексту
+       * «Export» → «Building...» міняла ширину — і заголовок документа
+       * перестрибував на окремий рядок.
+       *
+       * ✎ 2026-10-06 (знімок людини: «кнопка експорту виглядає більшою»):
+       * раніше обидва підписи лежали в одній комірці сітки, тож ширина кнопки
+       * В СПОКОЇ дорівнювала довшому з них — «Building...» (рос.
+       * «Формирование...»), і «Export» стояв посеред порожніх полів, ширший
+       * за сусідів. Тепер видимий підпис ОДИН і той самий в обох станах, а
+       * роботу показує смужка внизу кнопки (`exportButton.css`) і текст
+       * «Building...» для читалки — ширина рівна сусідам і не стрибає.
        */}
       <Button
-        size="xs"
         variant="default"
         disabled={running}
         aria-busy={running}
         data-export-state={running ? 'running' : 'idle'}
+        className="ecr-export-button"
         onClick={() => settled.run(() => start.mutateAsync({ documentId, periodKey, format }), { readOnly: true })}
       >
-        <span style={{ display: 'inline-grid' }}>
-          <span
-            aria-hidden={running}
-            style={{ gridArea: '1 / 1', visibility: running ? 'hidden' : 'visible' }}
-          >
-            {t('document.export')}
-          </span>
-          <span
-            aria-hidden={!running}
-            data-testid="export-running-label"
-            style={{
-              gridArea: '1 / 1',
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 6,
-              visibility: running ? 'visible' : 'hidden',
-            }}
-          >
-            <Loader size={12} />
-            {t('document.exportBuilding')}
-          </span>
-        </span>
+        {t('document.export')}
+        <VisuallyHidden aria-hidden={!running} data-testid="export-running-label">
+          {running ? t('document.exportBuilding') : ''}
+        </VisuallyHidden>
       </Button>
 
       <SegmentedControl
-        size="xs"
         aria-label={t('document.exportFormat')}
         value={format}
         onChange={(value) => setFormat(value as ExportFormat)}

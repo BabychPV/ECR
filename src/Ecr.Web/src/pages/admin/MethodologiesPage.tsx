@@ -170,7 +170,7 @@ export function MethodologiesPage(): JSX.Element {
                         «Опублікувати» поруч стояла для версій, яких він не
                         містить (`ФВ-9.15`). */}
                     <Button
-                      size="compact-xs"
+                      size="xs"
                       variant="light"
                       component={Link}
                       to={`/admin/methodologies/${String(methodology.id)}/versions`}
@@ -219,7 +219,7 @@ export function MethodologiesPage(): JSX.Element {
                             публікації — саме так звіряють розбіжність. */}
                         {can(session.data, 'Calculation.View') && (
                           <Button
-                            size="compact-xs"
+                            size="xs"
                             variant="subtle"
                             onClick={() =>
                               setSimulating({ id: methodology.id, versionId: version.id })

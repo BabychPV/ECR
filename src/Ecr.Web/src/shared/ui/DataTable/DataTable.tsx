@@ -457,7 +457,7 @@ export function DataTable<Row>({
    */
   const clearButton =
     onClearFilters === undefined ? undefined : (
-      <Button variant="default" size="xs" onClick={onClearFilters} data-table-clear-filters="true">
+      <Button variant="default" onClick={onClearFilters} data-table-clear-filters="true">
         {clearFiltersLabel}
       </Button>
     );
@@ -581,7 +581,6 @@ export function DataTable<Row>({
                 {hasMore && (
                   <Button
                     variant="default"
-                    size="xs"
                     loading={isFetchingMore}
                     onClick={onShowMore}
                     data-table-show-more="true"
