@@ -70,23 +70,56 @@ public sealed class CollectionRunnerMessageEnvelopeTests
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait("Finding", "U12")]
-    public async Task Відмова_джерела_дає_причину_конвертом_з_кодом_і_текстом_джерела_параметром()
+    public async Task Відмова_джерела_дає_причину_конвертом_з_кодом_і_безпечним_текстом_параметром()
     {
+        // ⛔ SEC (TIER2): сирий `Message` транспорту (хост, URL, порт, пароль) у причину
+        // прогону не йде — лише код і кореляція; повний виняток лишається журналу.
+        // Мутація: повернути `ex.Message` у `CollectionRunner.Refused` — тест червоний.
         var world = new World();
         world.Source.ReadAsync(Arg.Any<CollectionRequest>(), Arg.Any<CancellationToken>())
-            .Returns<Task<CollectionResult>>(_ => throw new HttpRequestException("AF is down"));
+            .Returns<Task<CollectionResult>>(_ => throw new HttpRequestException(
+                "No connection could be made (pi01.internal:5450) https://pi01.internal:5450/piwebapi "
+                + "Server=db01;Password=Secret123 C:\\Users\\svc\\app\\secret.cfg SELECT * FROM sec.User"));
 
         await world.Runner.RunAsync(SourceEntityId, Now.AddDays(-1), Now, world.Progress, CancellationToken.None);
 
-        var reason = Decode(FinishedMessage(world.Store, "Degraded"));
+        var raw = FinishedMessage(world.Store, "Degraded");
+        var reason = Decode(raw);
 
         Assert.Equal("jobs.collectionRunReason", reason.Key);
         Assert.Equal("ECR-INT-0503", reason.Params!["code"]);
         Assert.Equal("jobs.collectionSourceError", reason.Inner!.Key);
-        Assert.Equal("AF is down", reason.Inner.Params!["detail"]);
+        var detail = reason.Inner.Params!["detail"];
+        Assert.Contains("ECR-SYS-0500", detail, StringComparison.Ordinal);
+        Assert.Contains("correlation", detail, StringComparison.Ordinal);
+        foreach (var secret in new[] { "Secret123", "db01", "secret.cfg", "sec.User", "pi01.internal" })
+        {
+            Assert.DoesNotContain(secret, raw!, StringComparison.Ordinal);
+        }
 
         // Прогрес теж: частковий збір — окремий ключ, а не речення.
         Assert.Equal("jobs.collectionDonePartial", Decode(ProgressMessages(world.Progress)[^1]).Key);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "U12")]
+    public async Task Відмова_джерела_з_кодом_HTTP_називає_лише_код()
+    {
+        var world = new World();
+        world.Source.ReadAsync(Arg.Any<CollectionRequest>(), Arg.Any<CancellationToken>())
+            .Returns<Task<CollectionResult>>(_ => throw new HttpRequestException(
+                "Response status code does not indicate success: 503 (https://pi01.internal:5450/piwebapi)",
+                null,
+                System.Net.HttpStatusCode.ServiceUnavailable));
+
+        await world.Runner.RunAsync(SourceEntityId, Now.AddDays(-1), Now, world.Progress, CancellationToken.None);
+
+        var raw = FinishedMessage(world.Store, "Degraded");
+        var detail = Decode(raw).Inner!.Params!["detail"];
+
+        Assert.StartsWith("The source answered HTTP 503", detail, StringComparison.Ordinal);
+        Assert.DoesNotContain("pi01.internal", raw!, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -115,7 +148,8 @@ public sealed class CollectionRunnerMessageEnvelopeTests
         world.Source.ReadAsync(Arg.Any<CollectionRequest>(), Arg.Any<CancellationToken>())
             .Returns(new CollectionResult([], [], null));
         world.Progress.ReportAsync(Arg.Any<int>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
-            .Returns<Task>(_ => throw new InvalidOperationException("progress store is down"));
+            .Returns<Task>(_ => throw new InvalidOperationException(
+                "progress store is down: Server=db01;Password=Secret123 C:\\Users\\svc\\app\\secret.cfg"));
 
         await Assert.ThrowsAsync<InvalidOperationException>(
             () => world.Runner.RunAsync(SourceEntityId, Now.AddDays(-1), Now, world.Progress, CancellationToken.None));
@@ -123,7 +157,12 @@ public sealed class CollectionRunnerMessageEnvelopeTests
         var reason = Decode(FinishedMessage(world.Store, "Failed"));
 
         Assert.Equal("jobs.collectionRunFailed", reason.Key);
-        Assert.Equal("InvalidOperationException: progress store is down", reason.Params!["error"]);
+        // ⛔ SEC (TIER2): тип і код каталогу, без `Message` (рядок підключення, шлях); повний
+        // виняток — у журналі за номером прогону (77). Мутація: повернути
+        // `GetBaseException().Message` у `Describe` — тест червоний.
+        Assert.Equal(
+            "InvalidOperationException (ECR-SYS-0500); the details are in the server log for run 77",
+            reason.Params!["error"]);
     }
 
     [Theory]

@@ -48,7 +48,7 @@ public sealed partial class CollectionRunner
     /// автентифікація окремо (<c>H-20</c>), код каталогу — власний, решта —
     /// «джерело недоступне». Скасування летить далі.
     /// </remarks>
-    private static async Task<IReadOnlyList<ReadOutcome>> ReadRoundAsync(
+    private async Task<IReadOnlyList<ReadOutcome>> ReadRoundAsync(
         IBatchCollectionSource batch,
         DataSource dataSource,
         int sourceEntityId,
@@ -86,7 +86,7 @@ public sealed partial class CollectionRunner
         }
     }
 
-    private static ReadOutcome Outcome(BatchReadItem item) => item switch
+    private ReadOutcome Outcome(BatchReadItem item) => item switch
     {
         { Collected: { } collected } => new ReadOutcome(collected, null, null),
         // ⛔ Та сама класифікація, що в ReadAsync: автентифікація окремо, код

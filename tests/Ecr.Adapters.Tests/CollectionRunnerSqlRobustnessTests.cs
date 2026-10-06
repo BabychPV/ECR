@@ -114,7 +114,9 @@ public sealed class CollectionRunnerSqlRobustnessTests(SqlServerFixture sql)
         var reason = CollectionRunnerMessageEnvelopeTests.Decode(outcome.Run.ErrorMessage);
         Assert.Equal("jobs.collectionRunFailed", reason.Key);
         Assert.Contains("InvalidOperationException", reason.Params!["error"], StringComparison.Ordinal);
-        Assert.Contains("прогрес недоступний", reason.Params["error"], StringComparison.Ordinal);
+        // ⛔ SEC (TIER2): текст довільного винятку в причину не йде — лише тип і код.
+        Assert.DoesNotContain("прогрес недоступний", reason.Params["error"], StringComparison.Ordinal);
+        Assert.Contains("ECR-SYS-0500", reason.Params["error"], StringComparison.Ordinal);
 
         // Покрито рівно перший інтервал — прогалину до запитаного діапазону.
         var coverage = Assert.Single(outcome.Coverage);

@@ -152,7 +152,7 @@ public sealed class CollectionRunnerRefusalEventSqlTests(SqlServerFixture sql)
         try
         {
             var source = Source(request => request.FromUtc >= FromUtc
-                ? throw new HttpRequestException("AF is down")
+                ? throw new HttpRequestException("AF is down: https://pi01.internal:5450/piwebapi Server=db01;Password=Secret123")
                 : Task.FromResult(new CollectionResult([], [], null)));
 
             await RunAsync(source, stand.SourceEntityId);
@@ -165,9 +165,16 @@ public sealed class CollectionRunnerRefusalEventSqlTests(SqlServerFixture sql)
             Assert.True(
                 CollectionRunnerMessageEnvelopeTests.IsReason(run.ErrorMessage, "jobs.collectionSourceError", "ECR-INT-0503"),
                 run.ErrorMessage);
-            Assert.Equal(
-                "AF is down",
-                CollectionRunnerMessageEnvelopeTests.Decode(run.ErrorMessage).Inner!.Params!["detail"]);
+            // ⛔ SEC (TIER2): у збережене поле `itg.CollectionRun.ErrorMessage` (його читає клієнт)
+            // сирий текст транспорту не потрапляє — лише код і кореляція.
+            Assert.Contains(
+                "ECR-SYS-0500",
+                CollectionRunnerMessageEnvelopeTests.Decode(run.ErrorMessage).Inner!.Params!["detail"],
+                StringComparison.Ordinal);
+            foreach (var secret in new[] { "AF is down", "pi01.internal", "db01", "Secret123" })
+            {
+                Assert.DoesNotContain(secret, run.ErrorMessage!, StringComparison.Ordinal);
+            }
 
             Assert.Empty(await Events(check, stand.SourceEntityId));
         }
