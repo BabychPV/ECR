@@ -18,8 +18,14 @@
 name: smoke
 
 on:
+  # ✎ 2026-10-07 (аудит CI-черги, 43 queued): smoke НЕ обов'язковий і важкий
+  # (SQL Server + стенд, до 40 хв), а ~20 ліній `lane/**` давали по прогону на
+  # кожен пуш. Тепер лише вершина dev/integration, rc/** і ручний запуск; PR у
+  # main — нижче. Сім гейтів (ci.yml, evidence.yml) не змінено; їхні lane/**
+  # вже скасовують попередній прогін (cancel-in-progress), paths-ignore для
+  # lane/** неможливий: Actions застосовує його до всіх гілок того ж `push`.
   push:
-    branches: [ dev/integration, 'lane/**' ]
+    branches: [ dev/integration, 'rc/**' ]
   # Тижневий PR `rc/<дата>` → `main`.
   pull_request:
     branches: [ main ]
