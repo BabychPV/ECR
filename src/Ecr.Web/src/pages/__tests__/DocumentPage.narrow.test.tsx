@@ -1,6 +1,6 @@
 import type { JSX } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -159,6 +159,13 @@ describe('DocumentPage: вузький екран — лише читання (U
       await within(row).findByRole('button', { name: '⟦document.submit⟧' }, { timeout: SlowEnvTimeout });
       expect(within(row).queryByRole('button', { name: /workflow\.recalculate/ })).toBeNull();
       expect(screen.queryByRole('button', { name: 'import-stub' })).toBeNull();
+      // ✎ Пачка batch-3: після `UI-14` перерахунок — пункт «More»; на вузькому екрані його немає й там.
+      const more = within(row).queryByRole('button', { name: /document\.moreActions/ });
+      if (more !== null) {
+        fireEvent.click(more);
+        await screen.findAllByRole('menuitem', {}, { timeout: SlowEnvTimeout });
+        expect(screen.queryByRole('menuitem', { name: /workflow\.recalculate/ })).toBeNull();
+      }
 
       // Сітка отримала `readOnly` — підказка клавіш у режимі «лише читання».
       const hint = await waitFor(
@@ -194,7 +201,12 @@ describe('DocumentPage: вузький екран — лише читання (U
       show({ projectStatus: 'Active', periodState: 'Open', sheetState: 'Draft' });
 
       const row = await screen.findByTestId('document-actions', {}, { timeout: SlowEnvTimeout });
-      await within(row).findByRole('button', { name: /workflow\.recalculate/ }, { timeout: SlowEnvTimeout });
+      // ✎ Пачка batch-3: після `UI-14` перерахунок — пункт меню «More» (F9 — та сама дія, `UI-41`).
+      fireEvent.click(
+        await within(row).findByRole('button', { name: /document\.moreActions/ }, { timeout: SlowEnvTimeout }),
+      );
+      const recalc = await screen.findByRole('menuitem', { name: /workflow\.recalculate/ }, { timeout: SlowEnvTimeout });
+      expect(recalc.getAttribute('aria-keyshortcuts')).toBe('F9');
       expect(screen.getByRole('button', { name: 'import-stub' })).toBeTruthy();
       expect(screen.queryByTestId('docs-narrow-note')).toBeNull();
 
