@@ -14,8 +14,8 @@
  * чіпляє CSS до цього чанка й `__vitePreload` дочікується його завантаження
  * до першого кадру поля — без спалаху нестилізованого календаря.
  *
- * ⛔ Хто імпортує `@mantine/dates` СТАТИЧНО (`GroupAssignmentsPanel.tsx`) —
- * підключає `styles.css` сам, поруч зі своїм імпортом.
+ * ⛔ Статичних імпортерів `@mantine/dates` більше немає (A1-02: `GroupAssignmentsPanel.tsx` теж
+ * вантажить поле через цей модуль). Хто додасть статичний — підключає `styles.css` сам.
  */
 import '@mantine/dates/styles.css';
 
@@ -25,3 +25,6 @@ import '@mantine/dates/styles.css';
  * `2026-13-45` у 2027 рік. Ім'я лишилось, щоб лінивим завантажувачам не треба було мінятися.
  */
 export { StrictDateInput as DateInput } from './StrictDateInput';
+
+/** Те саме поле з рядковим значенням `yyyy-MM-dd` — заміна рідного `type="date"` (A1-02). */
+export { DateOnlyInput } from './DateOnlyInput';

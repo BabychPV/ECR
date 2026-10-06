@@ -1,4 +1,4 @@
-import { memo, useRef, type JSX } from 'react';
+import { lazy, memo, Suspense, useRef, type JSX } from 'react';
 import {
   Badge,
   Button,
@@ -7,6 +7,7 @@ import {
   NumberInput,
   SegmentedControl,
   Select,
+  Skeleton,
   Table,
   Text,
   TextInput,
@@ -27,6 +28,11 @@ import { useUrlNumber, useUrlParamsSetter, useUrlState } from '@/shared/ui/useUr
 import { t } from '@/shared/i18n';
 import { localized } from '@/shared/i18n/localized';
 import { formatDate, formatDecimal, todayDateOnly } from '@/shared/format';
+
+/** A1-02: поле дати — за `import()` (`D-132`), той самий прийом, що `DocumentHeaderPanel`. */
+const DateOnlyInput = lazy(async () => ({
+  default: (await import('@/shared/dates/DateInputWithStyles')).DateOnlyInput,
+}));
 
 /**
  * Журнал змін комірок (`ФВ-6.13`).
@@ -167,32 +173,32 @@ export function AuditPage(): JSX.Element {
                 { value: 'security', label: t('audit.viewSecurity') },
               ]}
             />
-            <TextInput
-              size="xs"
-              // eslint-disable-next-line no-restricted-syntax -- D15-09, борг №1/8: перехід на DateInput змінює тип значення (string → Date) і стан сторінки, тому окремим PR; список боргу сторожить lintRules.test.ts
-              type="date"
-              label={t('audit.from')}
-              value={fromField.value}
-              onFocus={fromField.onFocus}
-              onBlur={fromField.onBlur}
-              onChange={(event) => {
-                fromField.setValue(event.currentTarget.value);
-                setFrom(event.currentTarget.value);
-              }}
-            />
-            <TextInput
-              size="xs"
-              // eslint-disable-next-line no-restricted-syntax -- D15-09, борг №2/8: див. коментар вище
-              type="date"
-              label={t('audit.to')}
-              value={toField.value}
-              onFocus={toField.onFocus}
-              onBlur={toField.onBlur}
-              onChange={(event) => {
-                toField.setValue(event.currentTarget.value);
-                setTo(event.currentTarget.value);
-              }}
-            />
+            <Suspense fallback={<Skeleton height={30} width={140} />}>
+              <DateOnlyInput
+                size="xs"
+                label={t('audit.from')}
+                value={fromField.value}
+                onFocus={fromField.onFocus}
+                onBlur={fromField.onBlur}
+                onChange={(value) => {
+                  fromField.setValue(value);
+                  setFrom(value);
+                }}
+              />
+            </Suspense>
+            <Suspense fallback={<Skeleton height={30} width={140} />}>
+              <DateOnlyInput
+                size="xs"
+                label={t('audit.to')}
+                value={toField.value}
+                onFocus={toField.onFocus}
+                onBlur={toField.onBlur}
+                onChange={(value) => {
+                  toField.setValue(value);
+                  setTo(value);
+                }}
+              />
+            </Suspense>
             <NumberInput
               size="xs"
               miw={140}

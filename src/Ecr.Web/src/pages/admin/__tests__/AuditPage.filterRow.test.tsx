@@ -30,7 +30,9 @@ function mockFetch(): void {
   vi.stubGlobal(
     'fetch',
     vi.fn(async () =>
-      new Response(JSON.stringify({ items: [], nextCursor: null, totalCount: null }), {
+      // ⚠ `permissions: []` — та сама відповідь іде й на `/auth/me`: без поля `can()` падав, щойно запит
+      // доїжджав (A1-02: ліниві поля дат продовжили тест рівно настільки, щоб він доїхав).
+      new Response(JSON.stringify({ items: [], nextCursor: null, totalCount: null, permissions: [] }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
       }),
@@ -101,6 +103,8 @@ describe('U-21: ряди фільтрів журналу стоять на од�
       const root = show('?from=2026-01-01&to=2026-01-08');
 
       await screen.findByLabelText(t('audit.author'), {}, { timeout: 30_000 });
+      // A1-02: поля дат — ліниві (`DateOnlyField`); ряд міряється, коли вони вже на місці.
+      await screen.findByLabelText(t('audit.from'), {}, { timeout: 30_000 });
 
       const shapes = visibleFields(root).map(shape);
 
@@ -141,6 +145,8 @@ describe('U-21: ряди фільтрів журналу стоять на од�
       const root = show('?view=structure&from=2026-01-01&to=2026-01-08');
 
       await screen.findByLabelText(t('audit.author'), {}, { timeout: 30_000 });
+      // A1-02: поля дат — ліниві (`DateOnlyField`); ряд міряється, коли вони вже на місці.
+      await screen.findByLabelText(t('audit.from'), {}, { timeout: 30_000 });
 
       const shapes = visibleFields(root).map(shape);
 
