@@ -56,6 +56,59 @@ public sealed class CellHistoryPermissionThenReadScopeTests
             .Returns(ci => DocumentReadScope.For(ci.Arg<AccessProfile>(), Project, Snapshot));
         _audit.ReadCellChangesAsync(Arg.Any<CellChangeFilter>(), Arg.Any<CursorRequest>(), Arg.Any<CancellationToken>())
             .Returns(new PagedResult<CellChangeView>([Change(VisibleColumn), Change(HiddenColumn)], null, 2));
+
+        // Сирі лічильники вікна: 3 зміни видимої колонки і 40 — прихованої.
+        _audit.CountCellChangesByColumnAsync(Arg.Any<CellChangeFilter>(), Arg.Any<DateTime>(), Arg.Any<CancellationToken>())
+            .Returns(
+            [
+                new CellChangeColumnCount(VisibleColumn, 3, 1, 0, 0),
+                new CellChangeColumnCount(HiddenColumn, 40, 9, 0, 0),
+            ]);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-6.6")]
+    public async Task TotalCount_журналу_документа_лічить_лише_видимі_колонки()
+    {
+        // R-11 / UI-38 C4: загальне число не повинно виказувати 40 змін прихованої колонки.
+        Profile(Reader(deny: true).Permission(GetCellChangesHandler.Permission), scopedDocumentViewIn: null);
+
+        var result = await Handler().HandleAsync(
+            new CellChangeFilter(From, To, DocumentId: DocumentId), new CursorRequest(), CancellationToken.None);
+
+        Assert.Equal(3, result.TotalCount);
+        Assert.Equal([VisibleColumn], result.Items.Select(c => c.ColumnDefId));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-6.6")]
+    public async Task TotalCount_без_заборон_і_наскрізного_журналу_лічить_усе()
+    {
+        Profile(Reader(deny: false).Permission(GetCellChangesHandler.Permission), scopedDocumentViewIn: null);
+
+        var perDocument = await Handler().HandleAsync(
+            new CellChangeFilter(From, To, DocumentId: DocumentId), new CursorRequest(), CancellationToken.None);
+        var global = await Handler().HandleAsync(new CellChangeFilter(From, To), new CursorRequest(), CancellationToken.None);
+
+        Assert.Equal(43, perDocument.TotalCount);
+
+        // Наскрізний журнал за призначенням поза межами S6 (Q-177): число збігається зі сторінкою.
+        Assert.Equal(43, global.TotalCount);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-6.6")]
+    public async Task TotalCount_історії_прихованої_колонки_нуль_і_лічильники_не_читаються()
+    {
+        Profile(Reader(deny: true), scopedDocumentViewIn: Project);
+
+        var result = await Handler().HandleAsync(SingleCell(HiddenColumn), new CursorRequest(), CancellationToken.None);
+
+        Assert.Equal(0, result.TotalCount);
+        await _audit.DidNotReceiveWithAnyArgs().CountCellChangesByColumnAsync(default!, default, default);
     }
 
     [Fact]
