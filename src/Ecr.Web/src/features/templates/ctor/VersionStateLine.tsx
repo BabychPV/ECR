@@ -2,12 +2,20 @@ import type { JSX } from 'react';
 import type { TemplateVersionSummary } from '@/api/types';
 import { formatTime } from '@/shared/format';
 import { t } from '@/shared/i18n';
-import { StatusBadge, statusKey } from '@/shared/ui/StatusBadge';
+import { StatusBadge } from '@/shared/ui/StatusBadge';
 import './ctor.css';
 
 type TemplateVersionStatus = TemplateVersionSummary['status'];
 
 const Stages: readonly TemplateVersionStatus[] = ['Draft', 'Published', 'Deprecated'];
+
+// ⚠ Ключі літералами: сторож каталогу (`EndpointCoverageTests`) бачить лише їх.
+const stageLabel = (status: TemplateVersionStatus): string =>
+  status === 'Draft'
+    ? t('status.version.Draft')
+    : status === 'Published'
+      ? t('status.version.Published')
+      : t('status.version.Deprecated');
 
 /**
  * Контекстний рядок шапки конструктора (`UI-36`, макет `editor-head` → `eh-ctx`):
@@ -39,7 +47,7 @@ export function VersionStateLine({
             className="ecr-ctor-stepper"
             role="img"
             aria-label={t('ctor.stepper', {
-              state: t(statusKey('version', status)),
+              state: stageLabel(status),
               no: current + 1,
               total: Stages.length,
             })}
