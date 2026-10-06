@@ -4,6 +4,7 @@ import { useTableStatus } from '@/features/documents/api';
 import { focusSoon } from '@/shared/a11y/focus';
 import { t } from '@/shared/i18n';
 import { useUrlState } from '@/shared/ui/useUrlState';
+import { GridKeyHint } from './GridKeyHint';
 import { SheetTables, type SheetTablesProps } from './SheetTables';
 import { Icon, TableNavigator } from './TableNavigator';
 import { buildTableTree, resolveTable, tableUrlKey } from './tableTreeModel';
@@ -67,7 +68,12 @@ export function SheetWorkspace({ documentId, periodKey, readOnly, tables }: Shee
   }, [focusFor, selectedId]);
 
   if (view === 'all') {
-    return <SheetTables documentId={documentId} periodKey={periodKey} readOnly={readOnly} tables={tables} />;
+    return (
+      <>
+        <GridKeyHint readOnly={readOnly} />
+        <SheetTables documentId={documentId} periodKey={periodKey} readOnly={readOnly} tables={tables} />
+      </>
+    );
   }
 
   const toggle = (
@@ -119,6 +125,9 @@ export function SheetWorkspace({ documentId, periodKey, readOnly, tables }: Shee
           selectedTableInstanceId={selectedId}
           onSelectTable={select}
           titleStart={toggle}
+          // `UI-41`: видима підказка клавіш праворуч у рядку таблиці (у макеті — `aria-label` сітки
+          // і рядок стану внизу; під сіткою висотою 70vh її не було б видно без прокрутки).
+          titleEnd={<GridKeyHint readOnly={readOnly} />}
         />
       </div>
     </div>
