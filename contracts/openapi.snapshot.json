@@ -698,6 +698,14 @@
             "$ref": "#/components/schemas/LocalizedText",
             "description": "Назва мовами каталогу."
           },
+          "notSubmittedSheets": {
+            "description": "Аркушів, ще не поданих (чернетка/без стану/відхилено); `null` — як у SheetsTotal.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
           "progress": {
             "$ref": "#/components/schemas/CampaignProgress",
             "description": "Класифікація проєкту в кампанії (CampaignProgressRule)."
@@ -715,6 +723,14 @@
             "description": "Хоч один аркуш відхилено.",
             "format": "int32",
             "type": "integer"
+          },
+          "sheetsTotal": {
+            "description": "Аркушів у складі документів проєкту (UI-33, D2); `null` — див. int? CampaignTotals.SheetsTotal.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
           },
           "snapshots": {
             "description": "Скільки ПОТОЧНИХ зрізів звітності побудовано за цей період\n(`rpt.ReportSnapshot.IsCurrent`). Останній етап кампанії: документи\nзатверджено, але доки зрізу немає — регулятор не отримав нічого.",
@@ -816,6 +832,14 @@
             "format": "int32",
             "type": "integer"
           },
+          "notSubmittedSheets": {
+            "description": "З них — ще не подано (чернетка, без стану чи відхилено); `null` за тих самих умов, що й\nSheetsTotal.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
           "overdue": {
             "description": "Проєктів у стані CampaignProgress.Overdue.",
             "format": "int32",
@@ -830,6 +854,14 @@
             "description": "Сума `Rejected`.",
             "format": "int32",
             "type": "integer"
+          },
+          "sheetsTotal": {
+            "description": "Аркушів у складі документів усіх проєктів періоду (UI-33, D2); `null` — читач має інструменти, що ховають\nаркуші (явна заборона чи грант рівня `None`), і число розкрило б приховане (R-8, `SheetVisibility`).",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
           },
           "snapshots": {
             "description": "Сума поточних зрізів.",
@@ -8323,6 +8355,14 @@
           "isCurrent": {
             "description": "Чи є періодом за замовчуванням для UI.",
             "type": "boolean"
+          },
+          "notSubmittedSheets": {
+            "description": "Скільки аркушів проєкту в цьому періоді ще не подано (чернетка, без стану чи відхилено) — UI-33, D1.\n`null` — не запитувано (`withSheetCounts=false`) АБО читач має інструменти, що ховають аркуші, і число\nрозкрило б приховане (R-8, `SheetVisibility`). Лічильника пізніх правок немає навмисно: індексу по\n`aud.CellChange.IsLateEdit` немає.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
           },
           "periodKey": {
             "description": "`Year*100 + Sequence`; він же ключ партиції.",
@@ -28772,6 +28812,7 @@
       "get": {
         "parameters": [
           {
+            "description": "Проєкт.",
             "in": "path",
             "name": "id",
             "required": true,
@@ -28779,6 +28820,14 @@
               "format": "int32",
               "pattern": "^-?(?:0|[1-9]\\d*)$",
               "type": "integer"
+            }
+          },
+          {
+            "description": "Додати до кожного періоду кількість не поданих аркушів (`notSubmittedSheets`, UI-33); без прапорця поле\n`null`. Читачу, що має інструменти приховування аркушів, віддається `null` і з прапорцем.",
+            "in": "query",
+            "name": "withSheetCounts",
+            "schema": {
+              "type": "boolean"
             }
           }
         ],

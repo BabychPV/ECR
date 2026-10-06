@@ -8448,9 +8448,14 @@ export interface paths {
         /** Календар періодів проєкту. Право `Document.View`. */
         get: {
             parameters: {
-                query?: never;
+                query?: {
+                    /** @description Додати до кожного періоду кількість не поданих аркушів (`notSubmittedSheets`, UI-33); без прапорця поле
+                     *     `null`. Читачу, що має інструменти приховування аркушів, віддається `null` і з прапорцем. */
+                    withSheetCounts?: boolean;
+                };
                 header?: never;
                 path: {
+                    /** @description Проєкт. */
                     id: number;
                 };
                 cookie?: never;
@@ -17923,6 +17928,11 @@ export interface components {
             draft: number;
             /** @description Назва мовами каталогу. */
             nameL10n: components["schemas"]["LocalizedText"];
+            /**
+             * Format: int32
+             * @description Аркушів, ще не поданих (чернетка/без стану/відхилено); `null` — як у SheetsTotal.
+             */
+            notSubmittedSheets?: null | number;
             /** @description Класифікація проєкту в кампанії (CampaignProgressRule). */
             progress: components["schemas"]["CampaignProgress"];
             /** @description Код проєкту; ним перелік і впорядковано. */
@@ -17937,6 +17947,11 @@ export interface components {
              * @description Хоч один аркуш відхилено.
              */
             rejected: number;
+            /**
+             * Format: int32
+             * @description Аркушів у складі документів проєкту (UI-33, D2); `null` — див. int? CampaignTotals.SheetsTotal.
+             */
+            sheetsTotal?: null | number;
             /**
              * Format: int32
              * @description Скільки ПОТОЧНИХ зрізів звітності побудовано за цей період
@@ -18015,6 +18030,12 @@ export interface components {
             inProgress: number;
             /**
              * Format: int32
+             * @description З них — ще не подано (чернетка, без стану чи відхилено); `null` за тих самих умов, що й
+             *     SheetsTotal.
+             */
+            notSubmittedSheets?: null | number;
+            /**
+             * Format: int32
              * @description Проєктів у стані CampaignProgress.Overdue.
              */
             overdue: number;
@@ -18028,6 +18049,12 @@ export interface components {
              * @description Сума `Rejected`.
              */
             rejected: number;
+            /**
+             * Format: int32
+             * @description Аркушів у складі документів усіх проєктів періоду (UI-33, D2); `null` — читач має інструменти, що ховають
+             *     аркуші (явна заборона чи грант рівня `None`), і число розкрило б приховане (R-8, `SheetVisibility`).
+             */
+            sheetsTotal?: null | number;
             /**
              * Format: int32
              * @description Сума поточних зрізів.
@@ -21433,6 +21460,14 @@ export interface components {
             id: number;
             /** @description Чи є періодом за замовчуванням для UI. */
             isCurrent: boolean;
+            /**
+             * Format: int32
+             * @description Скільки аркушів проєкту в цьому періоді ще не подано (чернетка, без стану чи відхилено) — UI-33, D1.
+             *     `null` — не запитувано (`withSheetCounts=false`) АБО читач має інструменти, що ховають аркуші, і число
+             *     розкрило б приховане (R-8, `SheetVisibility`). Лічильника пізніх правок немає навмисно: індексу по
+             *     `aud.CellChange.IsLateEdit` немає.
+             */
+            notSubmittedSheets?: null | number;
             /**
              * Format: int32
              * @description `Year*100 + Sequence`; він же ключ партиції.
