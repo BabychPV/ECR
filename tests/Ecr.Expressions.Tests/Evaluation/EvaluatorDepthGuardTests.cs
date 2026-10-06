@@ -429,7 +429,7 @@ public sealed class EvaluatorDepthGuardTests
     /// переписаний перелік старіє мовчки. Той самий прийом, що й у
     /// <c>ExpressionDepthGuardTests</c>.
     /// </remarks>
-    private static List<(string Text, ExpressionDialect Dialect)> CorpusExpressions()
+    internal static List<(string Text, ExpressionDialect Dialect)> CorpusExpressions()
     {
         var directory = Path.Combine(Root(), "tests", "Ecr.TestKit", "Fixtures");
         var result = new List<(string, ExpressionDialect)>();

@@ -23,6 +23,9 @@ const Strings: Record<string, string> = {
     'Imported methodology {library} calculates in {libraryNumeric}/{libraryCalendar} mode, but this version uses {numeric}/{calendar}: its formulas would give different numbers here than in the library itself.',
   'publish.problem.rowScopeReferencesLibrarySubstance':
     'Formula {formula} is calculated once per row, but !{name} of imported methodology {library} has a value only for a substance. Make {formula} a per-substance formula or remove the reference.',
+  // RC5 — текст дослівно із секції `-- COLL:exprbudget` у 09-seed.sql.
+  'publish.problem.formulaTooDeep':
+    'Formula {formula} is too complex: nesting depth {depth}, allowed {max}. Split it into several calculated columns.',
 };
 
 async function loadStrings(): Promise<void> {
@@ -111,6 +114,12 @@ describe('publishProblemLines', () => {
       'publish.problem.rowScopeReferencesLibrarySubstance',
       { formula: 'RowSum', name: 'Mass', library: 'LIB' },
       'Formula RowSum is calculated once per row, but !Mass of imported methodology LIB has a value only for a substance. Make RowSum a per-substance formula or remove the reference.',
+    ],
+    [
+      // RC5: глибина вище межі обчислення — пояснення, а не мовчазне #BUDGET.
+      'publish.problem.formulaTooDeep',
+      { formula: 'Deep', depth: '120', max: '96' },
+      'Formula Deep is too complex: nesting depth 120, allowed 96. Split it into several calculated columns.',
     ],
   ])('%s — текст із підстановками', async (messageKey, args, expected) => {
     await loadStrings();
