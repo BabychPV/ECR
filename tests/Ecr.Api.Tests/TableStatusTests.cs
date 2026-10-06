@@ -77,6 +77,10 @@ public sealed class TableStatusTests(SqlServerFixture sql)
         // Заповнена рівно одна вхідна колонка в обох рядках. Не 4: дві
         // комірки формульної колонки — не робота людини.
         Assert.Equal(2, table.GetProperty("filledCells").GetInt32());
+
+        // UI-22: розмір таблиці й ознака «закрита» віддаються в тому самому рядку.
+        Assert.Equal(2, table.GetProperty("rowCount").GetInt32());
+        Assert.False(table.GetProperty("isClosed").GetBoolean());
     }
 
     /// <summary>
@@ -106,7 +110,10 @@ public sealed class TableStatusTests(SqlServerFixture sql)
         {
             var status = await ReadStatusAsync(before, client, scenario).ConfigureAwait(true);
 
-            Assert.Equal(4, Single(status, scenario.TableDefId).GetProperty("inputCells").GetInt32());
+            var open = Single(status, scenario.TableDefId);
+
+            Assert.Equal(4, open.GetProperty("inputCells").GetInt32());
+            Assert.False(open.GetProperty("isClosed").GetBoolean());
         }
 
         await using (var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext())
@@ -128,6 +135,10 @@ public sealed class TableStatusTests(SqlServerFixture sql)
 
         Assert.Equal(0, closed.GetProperty("inputCells").GetInt32());
         Assert.Equal(0, closed.GetProperty("filledCells").GetInt32());
+
+        // UI-22: замок у дереві — саме правило періоду, а не «InputCells = 0».
+        Assert.True(closed.GetProperty("isClosed").GetBoolean());
+        Assert.Equal(2, closed.GetProperty("rowCount").GetInt32());
     }
 
     /// <summary>
@@ -172,6 +183,9 @@ public sealed class TableStatusTests(SqlServerFixture sql)
 
         Assert.Equal(4, table.GetProperty("inputCells").GetInt32());
         Assert.Equal(0, table.GetProperty("filledCells").GetInt32());
+
+        // Розмір — з шаблону, як і знаменник, а не 0 із бази.
+        Assert.Equal(2, table.GetProperty("rowCount").GetInt32());
     }
 
     /// <summary>
