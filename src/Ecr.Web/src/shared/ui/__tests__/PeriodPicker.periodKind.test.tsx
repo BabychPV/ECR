@@ -21,8 +21,8 @@ describe('PeriodPicker: періодичність проєкту', () => {
     renderWithMantine(<PeriodPicker value={202504} onChange={vi.fn()} periodKind="Quarterly" />);
 
     // ⛔ Мутація «ігнорувати `periodKind`» повертає «April 2025».
-    expect(screen.getByText('⟦periods.quarterOf (quarter=4, year=2025)⟧')).toBeTruthy();
-    expect(screen.queryByText('April 2025')).toBeNull();
+    expect(screen.getByDisplayValue('⟦periods.quarterOf (quarter=4, year=2025)⟧')).toBeTruthy();
+    expect(screen.queryByDisplayValue('April 2025')).toBeNull();
   });
 
   it('квартальний проєкт — › з четвертого кварталу веде в перший наступного року', () => {
@@ -47,6 +47,6 @@ describe('PeriodPicker: періодичність проєкту', () => {
   it('без periodKind — як і було, місяць', () => {
     renderWithMantine(<PeriodPicker value={202504} onChange={vi.fn()} />);
 
-    expect(screen.getByText('April 2025')).toBeTruthy();
+    expect(screen.getByDisplayValue('April 2025')).toBeTruthy();
   });
 });

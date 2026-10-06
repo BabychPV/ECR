@@ -162,11 +162,12 @@ describe('SnapshotsPage: період побудови (діалог «Build sna
     // Ставимо межу року напряму (пряме введення periodKey — те саме поле,
     // що й раніше), а не покладаємось на "поточний місяць" стенда.
     fireEvent.change(input, { target: { value: '202612' } });
-    expect(input).toHaveProperty('value', '202612');
+    // Поле показує людську назву, не ключ; ключ іде в onChange/стан.
+    expect(input).toHaveProperty('value', 'December 2026');
 
     fireEvent.click(within(dialog).getByRole('button', { name: '⟦period.next⟧' }));
 
-    expect(input).toHaveProperty('value', '202701');
+    expect(input).toHaveProperty('value', 'January 2027');
   });
 
   it('очищення поля НЕ скидає період побудови — лишається попереднє значення', async () => {
@@ -183,7 +184,7 @@ describe('SnapshotsPage: період побудови (діалог «Build sna
     // мутація «скидає до `currentPeriodKey()`» лишалася б непоміченою, коли
     // збігається з сьогоднішнім місяцем випадково.
     fireEvent.change(input, { target: { value: '202503' } });
-    expect(input).toHaveProperty('value', '202503');
+    expect(input).toHaveProperty('value', 'March 2025');
 
     fireEvent.change(input, { target: { value: '' } });
 
@@ -205,6 +206,6 @@ describe('SnapshotsPage: період побудови (діалог «Build sna
      */
     fireEvent.click(within(dialog).getByRole('button', { name: '⟦period.next⟧' }));
 
-    expect(input).toHaveProperty('value', '202504');
+    expect(input).toHaveProperty('value', 'April 2025');
   });
 });
