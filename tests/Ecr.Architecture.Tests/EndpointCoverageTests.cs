@@ -539,6 +539,10 @@ public sealed partial class EndpointCoverageTests
             "shared/ui/StatusBadge.tsx", StatusKeys("version"), "Статус версії методології."),
         new("pages/admin/PeriodsPage.tsx", "statusKey('project', p.status)", 1, "shared/ui/StatusBadge.tsx",
             StatusKeys("project"), "Статус проєкту."),
+        new("features/projects/PeriodsOverview.tsx", "statusKey('period', period.state)", 1,
+            "shared/ui/StatusBadge.tsx", StatusKeys("period"), "UI-33: стан періоду в підписі плитки року."),
+        new("features/projects/PeriodsOverview.tsx", "statusKey('project', row.project.status)", 1,
+            "shared/ui/StatusBadge.tsx", StatusKeys("project"), "UI-33: стан проєкту в огляді «All projects»."),
         new("features/notifications/RulesMatrixPanel.tsx", "statusKey('severity', value)", 1,
             "shared/ui/StatusBadge.tsx", StatusKeys("severity"), "Серйозність правила сповіщення."),
 
