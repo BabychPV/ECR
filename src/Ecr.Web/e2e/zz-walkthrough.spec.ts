@@ -857,7 +857,11 @@ test.describe('WALK: прохід системою від А до Я', () => {
     });
 
     await record('export', async () => {
-      const exportButton = page.getByRole('button', { name: /Export/i }).first();
+      // ✎ UI-14: експорт — пунктом «More ▾ → Export → Excel» (макет `renderActions`),
+      // а не окремою кнопкою з перемикачем формату.
+      const more = page.getByTestId('document-more');
+      if ((await more.count()) > 0) await more.click();
+      const exportButton = page.getByRole('menuitem', { name: /^Excel$/ }).first();
       const present = (await exportButton.count()) > 0;
 
       if (present) await exportButton.click();
@@ -873,7 +877,7 @@ test.describe('WALK: прохід системою від А до Я', () => {
         data: {
           seen: await probe(page),
           buttonPresent: present,
-          buttonText: await exportButton.innerText({ timeout: 3_000 }).catch(() => null),
+          buttonText: await page.getByTestId('export-running-label').innerText({ timeout: 3_000 }).catch(() => null),
           readyLink: await page
             .locator(`a[href^="/api/v1/documents/${DocumentId}/export/"]`)
             .count(),
@@ -894,7 +898,7 @@ test.describe('WALK: прохід системою від А до Я', () => {
         note: 'експорт через ~23 с після запуску',
         data: {
           seen: await probe(page),
-          buttonText: await page.getByRole('button', { name: /Export/i }).first().innerText({ timeout: 3_000 }).catch(() => null),
+          buttonText: await page.getByTestId('export-running-label').innerText({ timeout: 3_000 }).catch(() => null),
           http: [...watcher.httpErrors],
         },
       });
