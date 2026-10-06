@@ -153,7 +153,9 @@ const RestoreEditsBanner = lazy(async () => ({
  * тому, КОЛИ монтуються сітки: у звичайній фіксації після `setState`, а не
  * всередині повторної спроби межі очікування.
  */
-type SheetTablesComponent = typeof import('@/features/grid/SheetTables')['SheetTables'];
+// ✎ `UI-22`: чанк той самий, вхід — робоче місце аркуша (дерево таблиць + одна таблиця), яке
+// всередині малює `SheetTables`.
+type SheetTablesComponent = typeof import('@/features/grid/SheetWorkspace')['SheetWorkspace'];
 
 interface GridModuleState {
   readonly component: SheetTablesComponent | null;
@@ -177,9 +179,9 @@ function useSheetTablesModule(): GridModuleState & { readonly reload: () => void
     // ⚠ Компонент лежить у ПОЛІ об'єкта стану, а не в стані напряму: `useState`
     // трактує функцію як апдейтер, і компонент (він теж функція) інакше був би
     // ВИКЛИКАНИЙ замість того, щоб бути збереженим.
-    void import('@/features/grid/SheetTables').then(
+    void import('@/features/grid/SheetWorkspace').then(
       (module) => {
-        if (alive) setState({ component: module.SheetTables, error: null });
+        if (alive) setState({ component: module.SheetWorkspace, error: null });
       },
       (error: unknown) => {
         // ⛔ Мовчазний провал тут коштував би дорожче за будь-який інший:
@@ -218,6 +220,9 @@ export function DocumentPage(): JSX.Element {
   // відкриває інший період і інший аркуш, ніж той, про який ішлося.
   const [urlPeriod, setUrlPeriod] = useUrlNumber('periodKey');
   const [sheet, setSheet] = useUrlState('sheet');
+  // `UI-22`: вибрана таблиця й режим показу читаються тут лише для заглушки чанка сітки.
+  const [tableParam] = useUrlState('table');
+  const [viewParam] = useUrlState('view');
   const periodKey = urlPeriod ?? currentPeriodKey();
   const setPeriodKey = setUrlPeriod;
 
@@ -786,7 +791,15 @@ export function DocumentPage(): JSX.Element {
                   повернув би `RevoGrid` у чанк маршруту (`D-132`). */}
               {gridModule.error === null && gridModule.component === null && (
                 <Stack gap="xs">
-                  {active.tables.map((table) => (
+                  {/* ⚠ `UI-22`: у режимі «одна таблиця» заглушка — теж одна. */}
+                  {(viewParam === 'all'
+                    ? active.tables
+                    : // ⚠ Спрощений `resolveTable` (`tableTreeModel.ts`) інлайном: модуль дерева живе в
+                      // чанку сітки, статичний імпорт додав би сторінці окремий чанк (`D-132`).
+                      [active.tables.find((table) => table.tableCode === tableParam) ?? active.tables[0]].filter(
+                        (table) => table !== undefined,
+                      )
+                  ).map((table) => (
                     <Stack
                       key={table.tableInstanceId}
                       gap="xs"
