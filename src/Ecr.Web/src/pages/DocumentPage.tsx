@@ -1,8 +1,9 @@
 import { lazy, Suspense, useEffect, useMemo, useState, type JSX } from 'react';
-import { Button, Skeleton, Stack, Tabs, Text } from '@mantine/core';
+import { Skeleton, Stack, Tabs, Text } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useParams } from 'react-router-dom';
+import { usePendingLoading } from '@/features/common/usePendingLoading';
 import { apiFetch, EcrApiError } from '@/api/client';
 import type {
   DocumentPeriodRequest,
@@ -19,14 +20,14 @@ import {
   DeleteDocumentPermission,
   useDeleteDocumentAction,
 } from '@/features/documents/DeleteDocumentAction';
-import { ActionGroup, DocumentToolbar } from '@/features/documents/DocumentToolbar';
+import { DocumentActionBar } from '@/features/documents/DocumentActionBar';
+import { DocumentSaveState } from '@/features/documents/DocumentSaveState';
 import { useVersionMigrationAction } from '@/features/documents/VersionMigrationAction';
 import { DocumentLockBanner } from '@/features/documents/DocumentLockBanner';
 import { documentLockOf, hasLockedSheet, locksDataActions } from '@/features/documents/documentLock';
-import { SheetFillSummary } from '@/features/documents/SheetFillSummary';
+import { DocumentProgress } from '@/features/documents/DocumentProgress';
 import { useDocumentPending } from '@/features/grid/autosave';
-import { ExportButton } from '@/features/export/ExportButton';
-import { SheetActions, isEditable } from '@/features/workflow/SheetActions';
+import { isEditable } from '@/features/workflow/SheetActions';
 import { can, useSession } from '@/shared/session/useSession';
 import { localized } from '@/shared/i18n/localized';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
@@ -43,7 +44,7 @@ import { registerHeldEditRevealer, useSettledAction } from '@/features/grid/sett
  * Чотири панелі нижче — за `import()`, а не статичним імпортом (`D-132`).
  *
  * ⚠ Спільне для всіх чотирьох: жодна не потрібна в момент першого малюнка
- * сторінки. `ImportPanel` і `CalculationResultsPanel` і без цього рендерилися
+ * сторінки. `ImportPanel` (✎ UI-14: тепер у `DocumentActionBar`) і `CalculationResultsPanel` рендерилися
  * УМОВНО (право/стан), тож користувач без права чи на поданому аркуші сьогодні
  * і так їх не бачить — статичний імпорт лише змушував ЙОГО бандл нести код,
  * якого він не покаже. `WorkflowHistory` і `DocumentVersionCompare` рендеряться
@@ -61,8 +62,9 @@ import { registerHeldEditRevealer, useSettledAction } from '@/features/grid/sett
  * нижче й `features/grid/SheetTables.tsx`) — ця картка змінює лише сторінку
  * навколо нього.
  */
-const loadImportPanel = () => import('@/features/import/ImportPanel');
-const ImportPanel = lazy(async () => ({ default: (await loadImportPanel()).ImportPanel }));
+
+/** Якір панелі зауважень для посилання «K issues» (UI-15). */
+const IssuesAnchorId = 'document-issues';
 
 const loadCalculationResultsPanel = () => import('@/features/methodologies/CalculationResultsPanel');
 const CalculationResultsPanel = lazy(async () => ({
@@ -321,6 +323,7 @@ export function DocumentPage(): JSX.Element {
   });
   // AN-28 P2-2: зайнятість і single-flight і на час збереження набраного.
   const validateAction = useSettledAction(validate.isPending);
+  const validateLoading = usePendingLoading(validate.isPending);
 
   /**
    * Що показувати в панелі: свіже — **лише для своєї адреси** — інакше
@@ -556,55 +559,57 @@ export function DocumentPage(): JSX.Element {
         }
       />
 
-      {/* ⚠ Щоденні дії — групами, що переносяться цілими; рідкісні й
-          небезпечні (зміна ключа, видалення) — у меню «More» праворуч.
-          Діалоги обох — поза меню: меню розмонтовує вміст, щойно
+      {/* ✎ UI-14 (макет `screen-document.js`, `renderActions`): одна головна
+          дія, ≤ 2 другорядні, решта — у меню «More»; ліворуч — стан словами.
+          Діалоги рідкісних дій — поза меню: меню розмонтовує вміст, щойно
           закривається, тобто саме тоді, коли діалог мав би відкритися. */}
-      <DocumentToolbar more={[businessKeyChange.menuItem, versionMigration.menuItem, deletion.menuItem]}>
-        <ActionGroup name="check">
-          <Button
-            variant="default"
-            loading={validate.isPending || validateAction.settling}
-            onClick={() => validateAction.run(() => validate.mutateAsync(scope), { readOnly: true })}
-          >
-            {t('document.validate')}
-          </Button>
-
-          {/* ⛔ Імпорт лише туди, куди можна писати. Кнопка над поданим
-              аркушем обіцяла б заміну чисел, яку сервер відхилить: подане
-              редагується лише після повернення в роботу (`ФВ-5.20a`). */}
-          {can(session.data, 'Document.Import') && !readOnly && (
-            <Suspense fallback={null}>
-              <ImportPanel documentId={documentId} periodKey={periodKey} />
-            </Suspense>
-          )}
-        </ActionGroup>
-
-        {can(session.data, 'Document.Export') && (
-          <ExportButton
-            documentId={documentId}
-            periodKey={periodKey}
-            language={session.data?.language ?? 'en'}
-          />
-        )}
-
-        {/* ⛔ Увесь робочий процес аркуша — в одному компоненті. До аудиту
-            тут була сама лише кнопка «Подати», і на ній процес
-            закінчувався: затвердити документ через інтерфейс було
-            неможливо (`A7-39`). */}
-        {active !== undefined && (
-          <ActionGroup name="workflow">
-            <SheetActions
-              documentId={documentId}
-              sheetDefId={active.sheetDefId}
-              sheetName={active.name}
-              periodKey={periodKey}
-              state={state}
-              lock={lock}
-            />
-          </ActionGroup>
-        )}
-      </DocumentToolbar>
+      {active !== undefined && (
+        <DocumentActionBar
+          documentId={documentId}
+          periodKey={periodKey}
+          sheetDefId={active.sheetDefId}
+          sheetName={active.name}
+          state={state}
+          lock={lock}
+          readOnly={readOnly}
+          language={session.data?.language ?? 'en'}
+          // ⛔ Імпорт лише туди, куди можна писати (`ФВ-5.20a`): пункт над
+          // поданим аркушем обіцяв би заміну чисел, яку сервер відхилить.
+          canImport={can(session.data, 'Document.Import')}
+          canExport={can(session.data, 'Document.Export')}
+          validate={{
+            loading: validateLoading || validateAction.settling,
+            run: () => validateAction.run(() => validate.mutateAsync(scope), { readOnly: true }),
+          }}
+          documentItems={[businessKeyChange.menuItem, versionMigration.menuItem, deletion.menuItem]}
+          status={
+            <>
+              {/* ✎ UI-15: чип стану аркуша, смужка аркушів, заповненість і
+                  зауваження одним рядком (макет `renderState`/`renderProgress`). */}
+              <DocumentProgress
+                documentId={documentId}
+                periodKey={periodKey}
+                sheets={sheets.map((s) => ({ code: s.code, name: s.name, state: document.sheetStates[s.code] ?? 'Draft' }))}
+                activeCode={active.code}
+                issues={
+                  shownValidation?.messages == null
+                    ? null
+                    : {
+                        errors: shownValidation.messages.filter((message) => message.severity === 'Error').length,
+                        total: shownValidation.messages.length,
+                      }
+                }
+                onShowIssues={() => {
+                  const panel = window.document.getElementById(IssuesAnchorId);
+                  panel?.scrollIntoView({ block: 'start' });
+                  panel?.focus({ preventScroll: true });
+                }}
+              />
+              <DocumentSaveState readOnly={readOnly} />
+            </>
+          }
+        />
+      )}
 
       {/* ⛔ `F-18`: ЧОМУ тут нічого не змінити — одразу під рядком дій, до
           будь-якої сітки: сірі комірки без пояснення читаються як збій. */}
@@ -641,6 +646,9 @@ export function DocumentPage(): JSX.Element {
       <Suspense fallback={null}>
         <DocumentHeaderPanel
           documentId={documentId}
+          // ✎ UI-16: згорнута з підсумком; розгортається сама, коли поле
+          // потребує уваги (обов'язкове порожнє, недійсна дата, незбережене).
+          collapsible
           // AN-39/L8-13: сервер править шапку за `EditRules.CanEdit` документа цілком - не в
           // симуляції, не в архівному проєкті, не за поданого/затвердженого аркуша.
           canEdit={
@@ -652,12 +660,9 @@ export function DocumentPage(): JSX.Element {
         />
       </Suspense>
 
-      {/* ⛔ `BE-10`. Компонент сам вирішує, чи малюватися: доки сервер не
-          відповів, він повертає `null`, а не «0 з 0» — заповненість, якої ще
-          не знають, і заповненість, якої немає, це різні твердження
-          (`D15-06`). Поруч із `ValidationPanel` він і за змістом: обидва
-          кажуть про документ за період цілком, а не про активний аркуш. */}
-      <SheetFillSummary documentId={documentId} periodKey={periodKey} />
+      {/* ✎ UI-15: `SheetFillSummary` (`BE-10`) — тепер у рядку прогресу
+          шапки (`DocumentProgress`), поруч зі смужкою аркушів і числом
+          зауважень: усі три кажуть про документ за період цілком. */}
 
       {/* ⚠ Причина стоїть РІВНО ТАМ, де мала б стояти панель зауважень, і
           перед нею: «зауваження прочитати не вдалося» — твердження про той
@@ -689,27 +694,30 @@ export function DocumentPage(): JSX.Element {
           питає. Тобто невідомість кнопки не ВІДКРИВАЄ — вона лише лишала
           оператора без єдиного попередження перед натисканням; банер вище це
           й закриває. Гейт подання за помилками — на сервері (`ECR-SUB-*`). */}
+      {/* ✎ UI-15: якір для «K issues» у рядку прогресу — фокус і прокрутка сюди. */}
       {shownValidation?.messages != null && (
-        <Suspense fallback={null}>
-          <ValidationPanel
-            messages={shownValidation.messages}
-            canSelect={(finding) => tables.data?.some((table) => table.tableDefId === finding.tableDefId) === true}
-            onSelect={(finding) => {
-              // ⛔ `ФВ-5.6`: спершу аркуш зауваження, потім запит переходу. Модуль
-              // переходу — за `import()`: він живе в чанку сітки, не сторінки
-              // (`D-132`), і сітки однаково без нього не з'являться.
-              const target = tables.data?.find((table) => table.tableDefId === finding.tableDefId);
-              if (target === undefined) return;
+        <div id={IssuesAnchorId} tabIndex={-1} aria-label={t('document.validationTitle')}>
+          <Suspense fallback={null}>
+            <ValidationPanel
+              messages={shownValidation.messages}
+              canSelect={(finding) => tables.data?.some((table) => table.tableDefId === finding.tableDefId) === true}
+              onSelect={(finding) => {
+                // ⛔ `ФВ-5.6`: спершу аркуш зауваження, потім запит переходу. Модуль
+                // переходу — за `import()`: він живе в чанку сітки, не сторінки
+                // (`D-132`), і сітки однаково без нього не з'являться.
+                const target = tables.data?.find((table) => table.tableDefId === finding.tableDefId);
+                if (target === undefined) return;
 
-              // ⚠ Лише коли аркуш інший: зміна адреси — це навігація, і на
-              // активному аркуші вона нічого не дає, крім зайвого рендеру сторінки.
-              if (target.sheetCode !== active?.code) setSheet(target.sheetCode);
-              void import('@/features/grid/cellNavigation').then((module) =>
-                module.requestCellNavigation(finding),
-              );
-            }}
-          />
-        </Suspense>
+                // ⚠ Лише коли аркуш інший: зміна адреси — це навігація, і на
+                // активному аркуші вона нічого не дає, крім зайвого рендеру сторінки.
+                if (target.sheetCode !== active?.code) setSheet(target.sheetCode);
+                void import('@/features/grid/cellNavigation').then((module) =>
+                  module.requestCellNavigation(finding),
+                );
+              }}
+            />
+          </Suspense>
+        </div>
       )}
 
       {/* `BE-11b`. Над вкладками з тієї ж причини, що й панель вище: журнал —

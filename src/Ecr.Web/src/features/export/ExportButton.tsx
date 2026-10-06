@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type JSX } from 'react';
-import { Anchor, Button, Divider, Group, SegmentedControl, VisuallyHidden } from '@mantine/core';
+import { Anchor, Button, Divider, Group, Loader, SegmentedControl, Text, VisuallyHidden } from '@mantine/core';
 import './exportButton.css';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery } from '@tanstack/react-query';
@@ -19,6 +19,18 @@ interface ExportButtonProps {
   periodKey: number;
   /** Мова книги; береться з профілю. */
   language: string;
+
+  /**
+   * ✎ UI-14: `false` — власної кнопки й перемикача формату немає; експорт
+   * запускають пункти меню «More» (макет: «Export to Excel» у меню) через
+   * `startRef`. Поки збирається файл — компактний «Building…» на місці
+   * кнопки: стеження за задачею й тост із посиланням живуть тут, тому
+   * компонент лишається змонтованим поза меню.
+   */
+  withTrigger?: boolean;
+
+  /** Куди покласти «почати експорт у формат». */
+  startRef?: { current: ((format: ExportFormat) => void) | null };
 }
 
 /**
@@ -28,7 +40,7 @@ interface ExportButtonProps {
  * `err.ECR-REQ-0422.exportFormatUnknown` на будь-яке інше), тому клієнт не
  * дублює цю перевірку — він лише не дає обрати нічого поза цими трьома.
  */
-type ExportFormat = 'xlsx' | 'csv' | 'json';
+export type ExportFormat = 'xlsx' | 'csv' | 'json';
 
 /**
  * Підпис посилання на готовий файл — ЗА ФОРМАТОМ, у якому його будували.
@@ -55,7 +67,7 @@ function exportReadyLabel(format: ExportFormat): string {
  * з каталогу (`t()`), щоб не заводити четвертий літерал в UI поруч із трьома
  * дозволеними значеннями контракту.
  */
-function exportFormatOptions(): { value: ExportFormat; label: string }[] {
+export function exportFormatOptions(): { value: ExportFormat; label: string }[] {
   return [
     { value: 'xlsx', label: t('document.exportFormatXlsx') },
     { value: 'csv', label: t('document.exportFormatCsv') },
@@ -100,7 +112,9 @@ export function ExportButton({
   documentId,
   periodKey,
   language,
-}: ExportButtonProps): JSX.Element {
+  withTrigger = true,
+  startRef,
+}: ExportButtonProps): JSX.Element | null {
   const [jobId, setJobId] = useState<string | null>(null);
 
   // ⚠ Локальний стан, не адреса: вибір формату живе рівно доти, доки відкрита
@@ -217,6 +231,33 @@ export function ExportButton({
       });
     }
   }, [jobId, outcome, job.data?.errorCode, job.data?.message, started.documentId, started.format]);
+
+  const startIn = (target: ExportFormat): void => {
+    if (running) return;
+    setFormat(target);
+    settled.run(() => start.mutateAsync({ documentId, periodKey, format: target }), { readOnly: true });
+  };
+
+  useEffect(() => {
+    if (startRef === undefined) return undefined;
+    startRef.current = startIn;
+
+    return () => {
+      if (startRef.current === startIn) startRef.current = null;
+    };
+  });
+
+  if (!withTrigger) {
+    // ⚠ `role="status"`: збірка йде у фоні, читалка має почути, що вона триває.
+    return running ? (
+      <Group gap="xs" wrap="nowrap" role="status" data-testid="export-running-label" data-export-state="running">
+        <Loader size={12} />
+        <Text size="xs" c="dimmed">
+          {t('document.exportBuilding')}
+        </Text>
+      </Group>
+    ) : null;
+  }
 
   return (
     /*

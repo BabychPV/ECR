@@ -16,8 +16,10 @@ import { describe, expect, it } from 'vitest';
  * новий рядок сітки. Перевірка В ОБИДВА БОКИ: переведене місце вимагає
  * зменшити число, інакше перелік перестає бути заміром.
  *
- * ⚠ `SheetActions.tsx`, `DocumentPage.tsx`, `PeriodsPage.tsx` — у переліку
- * СВІДОМО, хоча це щоденні шляхи: вони в графі сторінок із бюджетом `D-132`
+ * ✎ UI-14: `SheetActions.tsx` і `DocumentPage.tsx` переведено разом із панеллю
+ * дій документа (модуль хука вже в графі сторінки).
+ *
+ * ⚠ `PeriodsPage.tsx` — у переліку СВІДОМО, хоча це щоденні шляхи: вони в графі сторінок із бюджетом `D-132`
  * (≈235/234 КБ із 250), і переведення додавало ~0.2 КБ gzip кожній; те саме
  * для `PeriodPolicyManager`, `RecalculationApprovals` (статичні в `PeriodsPage`)
  * і `VersionMigrationDialog` (статичний у `DocumentPage`). Правило
@@ -70,9 +72,7 @@ const Ledger: Readonly<Record<string, number>> = {
   'features/templates/NewTemplateVersionModal.tsx': 1,
   'features/templates/PresentationEditor.tsx': 1,
   'features/units/UnitEditModal.tsx': 1,
-  'features/workflow/SheetActions.tsx': 3,
   'features/workflow/WorkflowHistory.tsx': 1,
-  'pages/DocumentPage.tsx': 1,
   'pages/admin/GrantsPanel.tsx': 1,
   'pages/admin/PeriodsPage.tsx': 7,
   'pages/admin/SourcesPage.tsx': 1,
