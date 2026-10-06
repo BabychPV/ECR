@@ -142,6 +142,52 @@ public sealed class CampaignSummaryHandlerTests
         Assert.Equal(2, summary.Totals.Projects);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "R-1")]
+    public async Task Лічильники_станів_документів_віддаються_читачу_без_інструментів_що_ховають_аркуші()
+    {
+        Profile(new AccessBuilder { UserId = 7 }.Permission(GetCampaignSummaryHandler.Permission));
+        ReturnBuckets();
+
+        var summary = await Handler().HandleAsync(202601, default);
+
+        Assert.All(summary.Projects, p => Assert.Equal((1, 0, 0, 0), (p.Draft, p.Submitted, p.Approved, p.Rejected)));
+        Assert.Equal((2, 0, 0, 0), (summary.Totals.Draft, summary.Totals.Submitted, summary.Totals.Approved, summary.Totals.Rejected));
+    }
+
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "R-1")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Лічильники_станів_документів_null_коли_у_читача_є_заборона_чи_None_на_аркуш(bool deny)
+    {
+        // ⛔ МУТАЦІЙНИЙ ДОКАЗ: повернути `p.Draft`/`b.Draft` без `allSheets ?` у `GetCampaignSummaryHandler` --
+        // червоніє: «найгірший стан серед усіх аркушів» зараховує приховані, різниця двох читачів була б оракулом стану (R-1).
+        var builder = new AccessBuilder { UserId = 7 }.Permission(GetCampaignSummaryHandler.Permission);
+        Profile(deny ? builder.Deny(ResourceKind.Sheet, 123) : builder.Grant(ResourceKind.Sheet, 123, GrantLevel.None));
+        ReturnBuckets();
+
+        var summary = await Handler().HandleAsync(202601, default);
+
+        Assert.All(summary.Projects, p =>
+        {
+            Assert.Null(p.Draft);
+            Assert.Null(p.Submitted);
+            Assert.Null(p.Approved);
+            Assert.Null(p.Rejected);
+        });
+        Assert.Null(summary.Totals.Draft);
+        Assert.Null(summary.Totals.Submitted);
+        Assert.Null(summary.Totals.Approved);
+        Assert.Null(summary.Totals.Rejected);
+
+        // Те, що не залежить від прихованого, лишається: кількість документів і зрізів (Q15-07).
+        Assert.Equal(2, summary.Totals.Documents);
+        Assert.Equal(1, summary.Totals.Snapshots);
+    }
+
     private void ReturnBuckets()
         => _store.ListAsync(Arg.Any<int>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
             .Returns(call => new CampaignProjectPage(
