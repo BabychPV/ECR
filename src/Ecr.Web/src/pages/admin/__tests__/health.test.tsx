@@ -62,7 +62,8 @@ describe('Дашборд здоров’я', () => {
 
     for (const check of sample.checks) {
       expect(await screen.findByText(check.name)).toBeDefined();
-      expect(await screen.findByText(check.description)).toBeDefined();
+      // ⚠ `findAll`: опис перевірки, що не `Healthy`, повторює ще й банер (UI-39).
+      expect(await screen.findAllByText(check.description)).not.toHaveLength(0);
     }
   });
 
@@ -227,7 +228,7 @@ describe('Дашборд здоров’я: 503 від /health/ready (аудит
     stubReady(json503(unhealthy));
     show();
 
-    expect(await screen.findByText('Database is unreachable.')).toBeDefined();
+    expect(await screen.findAllByText('Database is unreachable.')).not.toHaveLength(0);
     expect(await screen.findByText('Scheduler is running.')).toBeDefined();
 
     const alerts = await screen.findAllByRole('alert');
