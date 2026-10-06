@@ -2,11 +2,14 @@ using System.Collections.ObjectModel;
 using System.Globalization;
 using System.Text.Json;
 using Ecr.Application.Calculations;
+using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Application.Recalculation;
 using Ecr.Domain.ValueObjects;
 using Ecr.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Ecr.Infrastructure.Jobs;
 
@@ -51,15 +54,21 @@ namespace Ecr.Infrastructure.Jobs;
 /// колишній послідовний шлях у цій самій задачі.
 /// </para>
 /// </remarks>
-public sealed class RecalculationJob(
+public sealed partial class RecalculationJob(
     EcrDbContext db,
     ICalculationRunner orchestrator,
     RunCalculationHandler runs,
     RecalculationService formulas,
     Domain.Abstractions.IClock clock,
     IBackgroundJobScheduler? jobs = null,
-    RecalculationBudgetMonitor? budget = null) : IRecalculationJob
+    RecalculationBudgetMonitor? budget = null,
+    ILogger<RecalculationJob>? logger = null) : IRecalculationJob
 {
+    [LoggerMessage(
+        Level = LogLevel.Error,
+        Message = "RecalculationJob: перерахунок обірвано винятком; кореляція {CorrelationId}.")]
+    private static partial void LogRecalculationFailed(ILogger logger, string correlationId, Exception exception);
+
     /// <summary>Стеля прив'язок на прогін: методологій у системі — десятки.</summary>
     private const int MaxBindings = 5_000;
 
@@ -426,10 +435,22 @@ public sealed class RecalculationJob(
 
             if (started.Count > 0)
             {
+                // ⛔ SEC (TIER2): `calc.CalculationRun.ErrorMessage` читає клієнт (результати,
+                // журнал прогонів). Сирий `ex.Message` довільного винятку (БД, файл, мережа)
+                // туди не йде: власний виняток продукту — його текст, решта — код каталогу +
+                // кореляція; повний виняток лишається в журналі сервера (його кидає далі
+                // `throw;` нижче, плюс запис тут із тією ж кореляцією).
+                var correlationId = SafeErrorText.NewCorrelationId();
+                if (!SafeErrorText.IsOwn(ex))
+                {
+                    LogRecalculationFailed(logger ?? NullLogger<RecalculationJob>.Instance, correlationId, ex);
+                }
+
+                var errorText = SafeErrorText.For(ex, correlationId, "the recalculation");
                 foreach (var run in started)
                 {
                     db.CalculationRuns.Attach(run);
-                    run.Complete("Failed", clock.UtcNow, profileJson: null, errorMessage: ex.Message);
+                    run.Complete("Failed", clock.UtcNow, profileJson: null, errorMessage: errorText);
                 }
 
                 await db.SaveChangesAsync(ct).ConfigureAwait(false);
