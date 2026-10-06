@@ -63,6 +63,7 @@ import {
   usePendingRejections,
   usePendingSlice,
 } from './pendingStore';
+import { installF2Edit } from './f2Edit';
 import { installEnterKeyCompat } from './keyboardCompat';
 import { deferWhileCommitting, installKeyCommitGate, isInCellEditor } from './keyCommitGate';
 import { gridShortcut } from './shortcutKey';
@@ -1857,6 +1858,8 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
 
       gridListenersCleanup.current = [
         installEnterKeyCompat(node),
+        // A2: F2 відкриває редактор поточної комірки тим самим шляхом, що й Enter.
+        installF2Edit(node),
         // ⛔ T3-01: швидкий ввід (сканер, макрос) не мусить склеювати значення —
         // клавіші після Enter/Tab стають у чергу до кінця переходу фокуса.
         installKeyCommitGate(node),
