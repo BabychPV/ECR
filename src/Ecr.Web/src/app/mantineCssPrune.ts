@@ -168,3 +168,88 @@ export function findPrunedClassesInUse(
 
   return found;
 }
+
+/**
+ * Компоненти, шкалу розмірів яких задає `src/shared/theme/controls.css`
+ * (`docs/design/ui-conventions.md`, «Кнопки»).
+ */
+export const ScaleComponents: readonly string[] = ['Button', 'ActionIcon', 'Input', 'SegmentedControl'];
+
+/**
+ * Сходинки шкали Mantine, які сторож `buttonScale.test.tsx` забороняє в коді:
+ * їх не читає жоден елемент, а вони лежать у вхідному CSS кожного маршруту.
+ */
+export const ForbiddenScaleVars: readonly string[] = [
+  ...['lg', 'xl', 'compact-xs', 'compact-sm', 'compact-md', 'compact-lg', 'compact-xl'].flatMap((size) => [
+    `--button-height-${size}`,
+    `--button-padding-x-${size}`,
+  ]),
+  '--ai-size-xs',
+  '--ai-size-lg',
+  '--ai-size-xl',
+  '--ai-size-input-md',
+  '--ai-size-input-lg',
+  '--ai-size-input-xl',
+  '--sc-padding-md',
+  '--sc-padding-lg',
+  '--sc-padding-xl',
+];
+
+/** Імена власних змінних (`--…:`), оголошених у CSS. */
+export function declaredVars(css: string): Set<string> {
+  return new Set([...withoutComments(css).matchAll(/(--[a-z0-9-]+)\s*:/g)].map((match) => match[1] ?? ''));
+}
+
+/**
+ * Прибирає з кореневого правила компонента (`.m_xxx { … }`) оголошення змінних
+ * шкали, які або перевизначає `controls.css`, або забороняє сторож.
+ *
+ * ⛔ Навіщо (`D-132`): `controls.css` додає до вхідного CSS власну шкалу, а
+ * Mantine-шкала, яку вона перекриває, лишалася б поруч мертвим вантажем —
+ * `PipelinePage` за 1.8 КБ від межі. Видалене тут або перекрите рівним
+ * селектором пізніше (отже, на екрані не змінюється нічого), або належить
+ * розміру, якого в коді немає.
+ *
+ * ⚠ Лише правило з селектором РІВНО `.m_xxx` компонента зі списку — ті самі
+ * імена в інших компонентах (`--input-height-*` у `PillsInput` тощо) не
+ * зачіпаються.
+ */
+export function pruneScaleVars(
+  css: string,
+  owners: ReadonlySet<string>,
+  names: ReadonlySet<string>,
+): string {
+  let out = '';
+  let index = 0;
+
+  while (index < css.length) {
+    const open = css.indexOf('{', index);
+    if (open < 0) {
+      out += css.slice(index);
+      break;
+    }
+
+    let depth = 1;
+    let close = open + 1;
+    while (depth > 0 && close < css.length) {
+      if (css[close] === '{') depth++;
+      else if (css[close] === '}') depth--;
+      close++;
+    }
+
+    const prelude = css.slice(index, open);
+    let body = css.slice(open + 1, close - 1);
+    const head = withoutComments(prelude).trim();
+
+    if (head.startsWith('.') && owners.has(head.slice(1))) {
+      body = body.replace(/\s*(--[a-z0-9-]+)\s*:[^;{}]*;/g, (declaration, name: string) =>
+        names.has(name) ? '' : declaration,
+      );
+    }
+
+    out += `${prelude}{${body}}`;
+    index = close;
+  }
+
+  return out;
+}
