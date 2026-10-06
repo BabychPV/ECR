@@ -155,7 +155,13 @@ export function useDeleteDocumentAction({
       opened={opened}
       title={t('documents.deleteTitle', { name })}
       text={t('documents.deleteText')}
-      consequences={[{ text: t('documents.deleteNote'), note: true }]}
+      consequences={[
+        { text: t('documents.deleteNote'), note: true },
+        // ⛔ P1 «прихований аркуш»: клієнт бачить лише видимі аркуші, тож
+        // «чернетка» тут — здогад, а не факт. Перевіряє сервер (усі аркуші,
+        // зокрема приховані від цієї ролі); його відмову показує `refusal`.
+        { text: t('documents.deleteServerChecks'), note: true },
+      ]}
       verb={t('documents.delete')}
       danger
       isPending={remove.isPending}
