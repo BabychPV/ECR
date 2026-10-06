@@ -1,8 +1,9 @@
 import type { JSX } from 'react';
-import { Group, Stack, Text, UnstyledButton } from '@mantine/core';
+import { Group, Text, UnstyledButton } from '@mantine/core';
 import { useDocumentListSummary, type DocumentStateFilter } from '@/features/documents/api';
 import { formatNumber } from '@/shared/format';
 import { t } from '@/shared/i18n';
+import { FilterInline } from '@/shared/ui/FilterBar';
 import { statusKey, statusTone, toneFills, type StatusTone } from '@/shared/ui/StatusBadge';
 import type { DocumentListFilters } from './documentListFilters';
 
@@ -42,6 +43,14 @@ interface Counter {
  * ⚠ Підписи станів — ті самі рядки каталогу, що й у `<StatusBadge>`
  * (`status.sheet.*`): число над таблицею і бейдж у ній мусять називати стан
  * одним словом.
+ *
+ * ⚠ Число й підпис — В ОДИН РЯДОК («1 Draft»), і смуга стоїть у КІНЦІ ряду
+ * фільтрів (`<DocumentListFilterBar>{смуга}</…>`), по центру висоти поля —
+ * рішення людини 2026-10-06: число над підписом поруч із перемикачами «не на
+ * одному рівні, дивно виглядають». Так само малює показник `StatStrip` і
+ * макет (`.stat`: число моноширинним + дрібний підпис, `align-items:
+ * baseline`). ⚠ Відхилення від макета: там смуга — окремим рядком НАД
+ * фільтрами; тут — у тому самому ряду, як просила людина.
  *
  * ⛔ Без періоду, під час завантаження і при відмові смуги НЕМАЄ зовсім: нулі
  * на її місці читалися б як «документів немає». Без періоду вона ще й не може
@@ -95,19 +104,24 @@ export function DocumentListSummaryStrip({ periodKey, filters }: DocumentListSum
   ];
 
   return (
-    <Group gap="xl" mb="md" role="group" aria-label={t('documents.summaryLabel')}>
+    <FilterInline gap="lg" role="group" aria-label={t('documents.summaryLabel')} data-summary-strip="">
       {counters.map((counter) => {
         const pressed = counter.state !== null && counter.state === active;
 
         const content = (
-          <Stack gap="xs">
-            <Text size="xl" fw={600} {...(counter.tone === null ? {} : { c: toneFills[counter.tone].text })}>
+          <Group gap="xs" align="baseline" wrap="nowrap">
+            <Text
+              span
+              ff="monospace"
+              fw={600}
+              {...(counter.tone === null ? {} : { c: toneFills[counter.tone].text })}
+            >
               {formatNumber(counter.count)}
             </Text>
-            <Text size="xs" c="dimmed" {...(pressed ? ({ fw: 700, td: 'underline' } as const) : {})}>
+            <Text span size="xs" c="dimmed" {...(pressed ? ({ fw: 700, td: 'underline' } as const) : {})}>
               {counter.label}
             </Text>
-          </Stack>
+          </Group>
         );
 
         const marks = {
@@ -135,6 +149,6 @@ export function DocumentListSummaryStrip({ periodKey, filters }: DocumentListSum
           </UnstyledButton>
         );
       })}
-    </Group>
+    </FilterInline>
   );
 }

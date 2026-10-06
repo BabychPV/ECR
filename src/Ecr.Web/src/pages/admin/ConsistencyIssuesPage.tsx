@@ -12,6 +12,7 @@ import {
 import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { ErrorAlert, TechnicalDetails } from '@/shared/ui/ErrorAlert';
+import { FilterInline, FilterRow, readerOnlyDescription } from '@/shared/ui/FilterBar';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { ReasonModal } from '@/shared/ui/ReasonModal';
 import { Timestamp } from '@/shared/ui/Timestamp';
@@ -80,12 +81,17 @@ export function ConsistencyIssuesPage(): JSX.Element {
       <PageHeader
         title={t('consistency.title')}
         actions={
-          <Group gap="xs" align="end">
+          <FilterRow>
+            {/* ⚠ Пояснення — підказкою в порожньому полі й для читалки, а не
+                видимим рядком під полем: той опускав нижню межу поля, і
+                прапорець «Unresolved only» стояв нижче за нього (`FilterRow`). */}
             <TextInput
               size="xs"
               miw={220}
               label={t('consistency.rule')}
               description={t('consistency.ruleHint')}
+              styles={readerOnlyDescription}
+              placeholder={t('consistency.ruleHint')}
               value={ruleField.value}
               onFocus={ruleField.onFocus}
               onBlur={ruleField.onBlur}
@@ -94,23 +100,27 @@ export function ConsistencyIssuesPage(): JSX.Element {
                 setRuleCode(event.currentTarget.value);
               }}
             />
-            <Checkbox
-              label={t('consistency.openOnly')}
-              checked={openOnly}
-              onChange={(event) => {
-                setShowResolved(event.currentTarget.checked ? null : '1');
-              }}
-            />
+            <FilterInline>
+              <Checkbox
+                label={t('consistency.openOnly')}
+                checked={openOnly}
+                onChange={(event) => {
+                  setShowResolved(event.currentTarget.checked ? null : '1');
+                }}
+              />
+            </FilterInline>
             {runs && (
-              <Button
-                loading={run.isStarting}
-                disabled={run.outcome === 'running'}
-                onClick={() => setAsking(true)}
-              >
-                {t('consistency.runNow')}
-              </Button>
+              <FilterInline>
+                <Button
+                  loading={run.isStarting}
+                  disabled={run.outcome === 'running'}
+                  onClick={() => setAsking(true)}
+                >
+                  {t('consistency.runNow')}
+                </Button>
+              </FilterInline>
             )}
-          </Group>
+          </FilterRow>
         }
       />
 
