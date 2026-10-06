@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useState, type JSX } from 'react';
-import { Button, Skeleton, Stack, Tabs, Text } from '@mantine/core';
+import { Alert, Button, Skeleton, Stack, Tabs, Text } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useParams } from 'react-router-dom';
@@ -30,6 +30,7 @@ import { SheetActions, isEditable } from '@/features/workflow/SheetActions';
 import { can, useSession } from '@/shared/session/useSession';
 import { localized } from '@/shared/i18n/localized';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
+import { useNarrowScreen } from '@/shared/narrowScreen';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { showApiError } from '@/shared/ui/notify';
 import { PageHeader } from '@/shared/ui/PageHeader';
@@ -460,7 +461,15 @@ export function DocumentPage(): JSX.Element {
     sheetState: state,
   });
 
-  const readOnly = !isEditable(state) || locksDataActions(lock);
+  /*
+   * ✎ `UI-42`: на вузькому екрані (≤ 640 px, макет) документ — лише для читання з банером
+   * (`DIRECTIVE-15-FRONTEND.md`: «Сітка документа на телефоні — читання, не редагування»,
+   * `docs-narrow-note`). Набір у сітку пальцем на 500 px — шлях до помилкових чисел у звіті.
+   * ⚠ Дії робочого процесу (подати, затвердити) лишаються: вони не вводять чисел, а
+   * погоджувач із телефона — саме той, кому вузький екран і потрібен.
+   */
+  const narrow = useNarrowScreen();
+  const readOnly = !isEditable(state) || locksDataActions(lock) || narrow;
 
   // ⚠ Викликається БЕЗУМОВНО і до будь-якого розгалуження показу: правило
   // хуків не знає про `AsyncBoundary` нижче.
@@ -618,6 +627,16 @@ export function DocumentPage(): JSX.Element {
           будь-якої сітки: сірі комірки без пояснення читаються як збій. */}
       <DocumentLockBanner lock={lock} periodKey={periodKey} />
 
+      {/* `UI-42`: чому тут нічого не змінити на телефоні — тим самим місцем, що й інші блокування.
+          Аркуш і так закритий (банер вище) — другий банер не потрібен. */}
+      {narrow && lock === null && isEditable(state) && (
+        // ⚠ `Alert`, а не `shared/ui/Banner`: той самий вигляд тону `info` (`brand`, light), але без
+        // зайвого модуля в бюджеті маршруту (`D-132`), як і `DocumentLockBanner` поруч.
+        <Alert color="brand" variant="light" title={t('document.narrow.title')} data-testid="docs-narrow-note">
+          {t('document.narrow.text')}
+        </Alert>
+      )}
+
       {businessKeyChange.dialog}
 
       {versionMigration.dialog}
@@ -655,7 +674,8 @@ export function DocumentPage(): JSX.Element {
             hasProjectWriteGrant(session.data, document.projectId) &&
             session.data?.isSimulation !== true &&
             lock !== 'projectArchived' &&
-            !hasLockedSheet(document.sheetStates)
+            !hasLockedSheet(document.sheetStates) &&
+            !narrow
           }
         />
       </Suspense>

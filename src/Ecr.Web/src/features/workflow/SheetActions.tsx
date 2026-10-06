@@ -22,6 +22,7 @@ import { useRecallAvailability, type RecallSheetRequest } from './api';
 import { outcomeOf, pollInterval } from './jobFollow';
 import { useSettledAction } from '@/features/grid/settleEdits';
 import { isRecalculateKey, isTypingOrDialogTarget } from '@/features/grid/shortcutKey';
+import { useNarrowScreen } from '@/shared/narrowScreen';
 import { humanizeJobId } from './jobLabel';
 import { isAllowed, type WorkflowAction } from './transitions';
 import { t } from '@/shared/i18n';
@@ -401,6 +402,7 @@ export function SheetActions({
    * якому кнопка не показувала зайнятості. Тепер усі дії аркуша — один
    * single-flight на весь шлях «зберегти -> дія -> відповідь».
    */
+  const narrow = useNarrowScreen();
   const settled = useSettledAction(submit.isPending || decide.isPending || recalculate.isPending);
 
   const recalcJob = useQuery({
@@ -598,7 +600,9 @@ export function SheetActions({
   // а не за `Calculation.Recalculate` (те — проєктний/масовий перерахунок).
   // ✎ AN-39/L8-12: сервер (`RecalculateDocumentHandler`) відмовляє, коли ХОЧ ОДИН аркуш
   // періоду поданий чи затверджений, - кнопки, яка гарантовано дасть відмову, немає.
-  const canRecalculate = !dataLocked && !hasLockedSheet(summary?.sheetStates) && can(me, 'Document.View');
+  // ✎ `UI-42`: на вузькому екрані документ лише для читання — перерахунок, що переписує
+  // обчислені комірки, теж ні (макет: `Recalculate` вимкнений, коли `readOnlyReason()`).
+  const canRecalculate = !dataLocked && !narrow && !hasLockedSheet(summary?.sheetStates) && can(me, 'Document.View');
   const recalcBusy = recalculate.isPending || recalcRunning || settled.settling;
 
   /*

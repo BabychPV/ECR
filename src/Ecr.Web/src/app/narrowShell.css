@@ -1,0 +1,23 @@
+/*
+ * Верхня смуга на вузькому екрані (`UI-42`).
+ *
+ * ⚠ Макет `docs/design/hybrid/index.html`, `@media (max-width:640px)`: `.logo-t` (підпис біля знака)
+ * ховається, лишаються гамбургер, знак, палітра, «My tasks» і профіль. Межа 640 px — та сама, що
+ * в макеті і в `NarrowScreenQuery` (`shared/narrowScreen.ts`).
+ */
+@media (max-width: 640px) {
+  /* Підпис «ECR Web» — для ока прибрано, для читалки лишається (знак сам `aria-hidden`). */
+  .ecr-brand-text {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+
+  /* Ім'я в кнопці профілю не розсуває смугу: обрізається з трикрапкою (`.ecr-ellipsis`). */
+  .ecr-app-header .ecr-ellipsis {
+    max-width: 96px;
+  }
+}
