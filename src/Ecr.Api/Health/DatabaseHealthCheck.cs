@@ -91,6 +91,7 @@ public sealed class DatabaseHealthCheck(
                 var message = await Text(
                     "health.db.rcsiDisabled", "RCSI is disabled.", null, cancellationToken)
                     .ConfigureAwait(false);
+                data[PublicHealthReason.DataKey] = PublicHealthReason.RcsiDisabled;
                 return HealthCheckResult.Unhealthy($"{message} [{RcsiScript}]", data: data);
             }
 
@@ -100,6 +101,7 @@ public sealed class DatabaseHealthCheck(
                     "health.db.missingFilegroups", "Missing filegroups: {names}.",
                     Param("names", string.Join(", ", missing)), cancellationToken)
                     .ConfigureAwait(false);
+                data[PublicHealthReason.DataKey] = PublicHealthReason.FilegroupsMissing;
                 return HealthCheckResult.Unhealthy(message, data: data);
             }
 
@@ -114,6 +116,7 @@ public sealed class DatabaseHealthCheck(
                 var message = await Text(
                     "health.db.limitation.dataProtectionKeys", UnprotectedKeysFallback, null, cancellationToken)
                     .ConfigureAwait(false);
+                data[PublicHealthReason.DataKey] = PublicHealthReason.SessionKeysUnprotected;
                 return HealthCheckResult.Degraded(message, data: data);
             }
 
@@ -136,6 +139,7 @@ public sealed class DatabaseHealthCheck(
                 data["unreadableKeyCertificates"] = unreadable;
                 if (unreadable.Count > 0)
                 {
+                    data[PublicHealthReason.DataKey] = PublicHealthReason.KeyCertificateUnavailable;
                     return HealthCheckResult.Degraded(
                         "Data Protection key ring holds keys encrypted with certificate(s) that are not available to the service: "
                         + string.Join(", ", unreadable)
@@ -154,6 +158,7 @@ public sealed class DatabaseHealthCheck(
                         ("minimum", MinimumPartitionsAhead.ToString(CultureInfo.InvariantCulture))),
                     cancellationToken)
                     .ConfigureAwait(false);
+                data[PublicHealthReason.DataKey] = PublicHealthReason.PartitionsLow;
                 return HealthCheckResult.Degraded(message, data: data);
             }
 
@@ -188,6 +193,11 @@ public sealed class DatabaseHealthCheck(
                             : "ext.RawDataPoint holds about {rows} rows and is approaching the R2 review threshold of {threshold}.",
                         RawDataPointHealth.Parameters(rows, threshold), cancellationToken)
                         .ConfigureAwait(false);
+                    if (rawStatus == HealthStatus.Degraded)
+                    {
+                        data[PublicHealthReason.DataKey] = PublicHealthReason.RawDataVolume;
+                    }
+
                     return rawStatus == HealthStatus.Degraded
                         ? HealthCheckResult.Degraded(message, data: data)
                         : HealthCheckResult.Healthy(message, data);
@@ -203,6 +213,7 @@ public sealed class DatabaseHealthCheck(
             var message = await Text(
                 "health.db.unavailable", "Database is unavailable.", null, cancellationToken)
                 .ConfigureAwait(false);
+            data[PublicHealthReason.DataKey] = PublicHealthReason.DatabaseUnavailable;
             return HealthCheckResult.Unhealthy(message, ex, data);
         }
     }

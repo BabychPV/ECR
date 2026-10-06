@@ -1,6 +1,7 @@
 ﻿using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Ecr.Api.Health;
 using Ecr.Domain.Entities.Security;
 using Ecr.Domain.Enums;
 using Ecr.Infrastructure.Persistence;
@@ -137,10 +138,11 @@ public sealed class HealthTests(SqlServerFixture sql)
         Assert.Empty(dbCheck.GetProperty("data").EnumerateObject());
 
         // L1-11: і текст опису перевірки (RCSI-скрипт, файлові групи, відбитки сертифікатів) не віддається анонімно.
+        // A2-11: допустимо лише null (Healthy) або фраза з білого списку PublicHealthReason.
+        var description = dbCheck.GetProperty("description");
         Assert.True(
-            !dbCheck.TryGetProperty("description", out var description)
-            || description.ValueKind == JsonValueKind.Null
-            || string.IsNullOrEmpty(description.GetString()),
+            description.ValueKind == JsonValueKind.Null
+            || PublicHealthReason.KnownDescriptions.Contains(description.GetString()),
             $"description: {description}");
     }
 
