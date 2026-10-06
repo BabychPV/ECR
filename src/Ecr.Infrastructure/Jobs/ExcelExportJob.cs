@@ -74,7 +74,7 @@ public sealed class ExcelExportJob(
             content = await data
                 .ExportAsync(
                     task.DocumentId, options.PeriodKey, task.Format, options.IncludeFormulas,
-                    options.HiddenTableDefIds, options.HiddenColumnDefIds, ct)
+                    options.HiddenTableDefIds, options.HiddenColumnDefIds, ct, options.Language)
                 .ConfigureAwait(false);
         }
 

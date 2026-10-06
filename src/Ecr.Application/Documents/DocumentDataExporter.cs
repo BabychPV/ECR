@@ -75,7 +75,8 @@ public sealed class DocumentDataExporter(
     IMetadataCache metadata,
     IRegistryStore registries,
     IMethodologyStore? methodologies = null,
-    ICalculationResultStore? results = null)
+    ICalculationResultStore? results = null,
+    IDocumentHeaderStore? headers = null)
 {
     private const string RowKeyHeader = "rowKey";
 
@@ -108,9 +109,11 @@ public sealed class DocumentDataExporter(
     /// </param>
     /// <param name="hiddenColumns">Колонки, яких немає у файлі.</param>
     /// <param name="ct">Токен скасування.</param>
+    /// <param name="language">Мова підписів полів шапки (A2-12); <c>null</c> — англійська.</param>
     public async Task<byte[]> ExportAsync(
         long documentId, int periodKey, string format, bool includeFormulas,
-        IReadOnlyCollection<int>? hiddenTables, IReadOnlyCollection<int>? hiddenColumns, CancellationToken ct)
+        IReadOnlyCollection<int>? hiddenTables, IReadOnlyCollection<int>? hiddenColumns, CancellationToken ct,
+        string? language = null)
     {
         // B-16: спільний валідатор зовнішнього ключа періоду (`PeriodKey.Parse`),
         // не первинний конструктор — інші читання того самого документа
@@ -175,9 +178,15 @@ public sealed class DocumentDataExporter(
             }
         }
 
+        // A2-12: поля шапки з підписами. Права: шапка читається за правилом
+        // документа (див. `DocumentHeaderExport`), окремого рівня Deny для поля
+        // шапки в системі немає.
+        var header = await DocumentHeaderExport
+            .ReadAsync(headers, registries, snapshot, documentId, language, ct).ConfigureAwait(false);
+
         return format == DocumentExportFormat.Csv
-            ? Zip(tables)
-            : Json(documentId, periodKey, snapshot.TemplateVersionId, tables);
+            ? Zip(tables, header)
+            : Json(documentId, periodKey, snapshot.TemplateVersionId, tables, header);
     }
 
     /// <summary>Текст значення комірки; <c>null</c> — порожньо.</summary>
@@ -288,11 +297,37 @@ public sealed class DocumentDataExporter(
         return result;
     }
 
-    private static byte[] Zip(List<ExportTable> tables)
+    /// <summary>Ім'я файлу шапки в архіві CSV: нульовий номер ставить його перед таблицями.</summary>
+    internal const string HeaderCsvName = "000-header.csv";
+
+    /// <summary>Шапка як CSV: <c>code,label,value</c>, по рядку на поле.</summary>
+    internal static string HeaderCsv(IReadOnlyList<HeaderExportRow> header)
+    {
+        var text = new StringBuilder();
+        text.Append(CsvFormat.Row("code", "label", "value"));
+        foreach (var row in header)
+        {
+            // ⚠ Число — як є, текст — із захистом від формул (як у таблицях вище).
+            text.Append(CsvFormat.Field(row.Code)).Append(',').Append(CsvFormat.Field(row.Label)).Append(',')
+                .Append(row.IsNumeric ? row.Text : CsvFormat.Field(row.Text)).Append(CsvFormat.NewLine);
+        }
+
+        return text.ToString();
+    }
+
+    private static byte[] Zip(List<ExportTable> tables, IReadOnlyList<HeaderExportRow> header)
     {
         using var buffer = new MemoryStream();
         using (var zip = new ZipArchive(buffer, ZipArchiveMode.Create, leaveOpen: true))
         {
+            // Без полів шапки в шаблоні файлу шапки немає — архів лишається таким, яким був.
+            if (header.Count > 0)
+            {
+                var entry = zip.CreateEntry(HeaderCsvName, CompressionLevel.Optimal);
+                using var writer = new StreamWriter(entry.Open(), new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
+                writer.Write(HeaderCsv(header));
+            }
+
             for (var i = 0; i < tables.Count; i++)
             {
                 var t = tables[i];
@@ -354,7 +389,9 @@ public sealed class DocumentDataExporter(
         return text.ToString();
     }
 
-    private static byte[] Json(long documentId, int periodKey, int templateVersionId, List<ExportTable> tables)
+    private static byte[] Json(
+        long documentId, int periodKey, int templateVersionId, List<ExportTable> tables,
+        IReadOnlyList<HeaderExportRow> header)
     {
         using var buffer = new MemoryStream();
         using (var w = new Utf8JsonWriter(buffer, new JsonWriterOptions { Indented = true }))
@@ -363,6 +400,28 @@ public sealed class DocumentDataExporter(
             w.WriteNumber("documentId", documentId);
             w.WriteNumber("periodKey", periodKey);
             w.WriteNumber("templateVersionId", templateVersionId);
+
+            // A2-12: окрема властивість — наявних споживачів не зачіпає. Значення
+            // рядком (або null для порожнього поля), як усі значення вивантаження.
+            w.WriteStartArray("header");
+            foreach (var row in header)
+            {
+                w.WriteStartObject();
+                w.WriteString("code", row.Code);
+                w.WriteString("label", row.Label);
+                if (row.Text is { } text)
+                {
+                    w.WriteString("value", text);
+                }
+                else
+                {
+                    w.WriteNull("value");
+                }
+
+                w.WriteEndObject();
+            }
+
+            w.WriteEndArray();
             w.WriteStartArray("tables");
             foreach (var t in tables)
             {
