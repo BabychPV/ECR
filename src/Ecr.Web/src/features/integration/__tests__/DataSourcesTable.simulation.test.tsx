@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -89,6 +89,17 @@ async function openEntities(): Promise<void> {
   fireEvent.click(await screen.findByRole('tab', { name: '⟦sources.tabEntities⟧' }));
   await waitFor(() => expect(document.querySelector('[data-entity-row="FLARE-1"]')).not.toBeNull());
 }
+
+/**
+ * ⛔ Прогрів спільного модуля дат — та сама причина зависання гейта `client`, що й у
+ * `SourceEventsTab.lazy.test.tsx`: шухляда джерела тягне поля дат через
+ * `lazy(import('@/shared/dates/DateInputWithStyles'))`, і клік по вкладці (синхронний `act`), що застає цей
+ * `import()` незавершеним, крутить рендер без кінця (A1-02, 2026-10-06: воркер на 100 % CPU на цьому файлі,
+ * гейт падав кодом 134). Модулі під перевіркою не прогріваються.
+ */
+beforeAll(async () => {
+  await import('@/shared/dates/DateInputWithStyles');
+}, 60_000);
 
 afterEach(() => {
   cleanup();

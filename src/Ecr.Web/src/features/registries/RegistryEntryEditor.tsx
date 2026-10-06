@@ -1,5 +1,5 @@
-import { useState, type JSX } from 'react';
-import { Alert, Button, Fieldset, Group, Modal, Skeleton, Stack, TextInput } from '@mantine/core';
+import { lazy, Suspense, useState, type JSX } from 'react';
+import { Alert, Box, Button, Fieldset, Group, Modal, Skeleton, Stack, TextInput } from '@mantine/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
@@ -20,6 +20,11 @@ import { showApiError, showDone } from '@/shared/ui/notify';
 import { t } from '@/shared/i18n';
 import { RegistryExternalKeysPanel } from './RegistryExternalKeysPanel';
 import { usePendingLoading } from '@/features/common/usePendingLoading';
+
+/** A1-02: поле дати — за `import()` (`D-132`), той самий прийом, що `DocumentHeaderPanel`. */
+const DateOnlyInput = lazy(async () => ({
+  default: (await import('@/shared/dates/DateInputWithStyles')).DateOnlyInput,
+}));
 
 type RegistryEntryDetailDto = components['schemas']['RegistryEntryDetailDto'];
 
@@ -360,24 +365,21 @@ export function ValidityEditor({
 
   return (
     <Modal opened={entry !== null} onClose={onClose} title={t('registries.validity')}>
-      <TextInput
-        // eslint-disable-next-line no-restricted-syntax -- D15-09, борг №5/8: перехід на DateInput змінює тип значення (string → Date), тому окремим PR; список боргу сторожить lintRules.test.ts
-        type="date"
-        label={t('registries.validFrom')}
-        description={t('registries.validityHint')}
-        value={from}
-        onChange={(event) => setFrom(event.currentTarget.value)}
-        data-autofocus
-      />
+      <Suspense fallback={<Skeleton height={36} />}>
+        <DateOnlyInput
+          label={t('registries.validFrom')}
+          description={t('registries.validityHint')}
+          value={from}
+          onChange={setFrom}
+          autoFocus
+        />
+      </Suspense>
 
-      <TextInput
-        mt="sm"
-        // eslint-disable-next-line no-restricted-syntax -- D15-09, борг №6/8: див. коментар вище
-        type="date"
-        label={t('registries.validTo')}
-        value={to}
-        onChange={(event) => setTo(event.currentTarget.value)}
-      />
+      <Box mt="sm">
+        <Suspense fallback={<Skeleton height={36} />}>
+          <DateOnlyInput label={t('registries.validTo')} value={to} onChange={setTo} />
+        </Suspense>
+      </Box>
 
       <Group justify="flex-end" mt="md">
         <Button variant="default" onClick={onClose}>

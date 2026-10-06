@@ -1,4 +1,4 @@
-import { useState, type JSX } from 'react';
+import { lazy, Suspense, useState, type JSX } from 'react';
 import {
   Alert,
   Button,
@@ -16,8 +16,6 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { EcrApiError, apiFetch } from '@/api/client';
 import type { components } from '@/api/schema';
 import type { RoleView } from '@/api/types';
-import { DateInput } from '@mantine/dates';
-import '@mantine/dates/styles.css';
 import { formatDateOnly } from '@/shared/format';
 import { ConfirmModal } from '@/shared/ui/ConfirmModal';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
@@ -36,6 +34,13 @@ import {
   useProjectSheets,
   type ScopeEntry,
 } from './roleScope';
+
+/**
+ * Поле дати — за `import()` (`D-132`), як скрізь у продукті. A1-02: доти тут був статичний імпорт
+ * `@mantine/dates`, і поле строгого розбору (`StrictDateInput`) ставало окремим спільним чанком, чиє
+ * ім'я осідало в карті передзавантаження кожного маршруту з полем дати.
+ */
+const DateInput = lazy(async () => ({ default: (await import('@/shared/dates/DateInputWithStyles')).DateInput }));
 
 type Assignment = components['schemas']['GroupRoleAssignmentView'];
 type AssignRequest = components['schemas']['AssignGroupRoleRequest'];
@@ -223,24 +228,24 @@ export function GroupAssignmentsPanel({ roles }: { roles: RoleView[] }): JSX.Ele
           value={principal}
           onChange={(event) => setPrincipal(event.currentTarget.value)}
         />
-        {/* `valueFormat` заданий кодом — однозначний і не залежить від локалі браузера. */}
-        <DateInput
-          label={t('groupRoles.validFrom')}
-          valueFormat="YYYY-MM-DD"
-          placeholder={Unbounded}
-          clearable
-          value={validFrom}
-          onChange={setValidFrom}
-        />
-        <DateInput
-          label={t('groupRoles.validTo')}
-          valueFormat="YYYY-MM-DD"
-          placeholder={Unbounded}
-          clearable
-          value={validTo}
-          onChange={setValidTo}
-          error={orderBroken ? t('groupRoles.validityOrder') : undefined}
-        />
+        {/* Формат показу `YYYY-MM-DD` задає `StrictDateInput` — однозначний і не залежить від локалі браузера. */}
+        <Suspense fallback={<Skeleton height={60} />}>
+          <DateInput
+            label={t('groupRoles.validFrom')}
+            placeholder={Unbounded}
+            clearable
+            value={validFrom}
+            onChange={setValidFrom}
+          />
+          <DateInput
+            label={t('groupRoles.validTo')}
+            placeholder={Unbounded}
+            clearable
+            value={validTo}
+            onChange={setValidTo}
+            error={orderBroken ? t('groupRoles.validityOrder') : undefined}
+          />
+        </Suspense>
         <ScopeFields
           value={scope}
           onChange={setScope}

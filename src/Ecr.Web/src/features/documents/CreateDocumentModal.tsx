@@ -4,9 +4,10 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { apiFetch } from '@/api/client';
 import type { components } from '@/api/schema';
-import type { CreateDocumentRequest, DocumentIdResponse } from '@/api/types';
+import type { CreateDocumentRequest, DocumentIdResponse, PeriodCalendarDto } from '@/api/types';
 import { fetchAllProjects } from '@/features/projects/allProjects';
 import { groupRuleViolations } from './groupRuleViolations';
+import { newestOpenPeriodKey, openPeriodKeys } from './newDocumentPeriod';
 import { localized } from '@/shared/i18n/localized';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { LocalizedInput, hasAnyText, type LocalizedValue } from '@/shared/ui/LocalizedInput';
@@ -78,6 +79,18 @@ export function CreateDocumentModal({
 
   const versionId = template.data?.templateVersionId ?? null;
 
+  // A2-05: період, у якому відкриється документ (сам документ періоду не має — він живе на рядках).
+  // Типово — найновіший ВІДКРИТИЙ період проєкту; вибір людини діє, доки не змінено проєкт.
+  const [pickedPeriod, setPickedPeriod] = useState<string | null>(null);
+  const calendar = useQuery({
+    queryKey: ['periods', Number(projectId)],
+    queryFn: () => apiFetch<PeriodCalendarDto>(`/api/v1/projects/${projectId ?? ''}/periods`),
+    enabled: opened && projectId !== null,
+  });
+  const openPeriods = openPeriodKeys(calendar.data?.periods);
+  const newestOpen = newestOpenPeriodKey(calendar.data?.periods);
+  const periodKey = pickedPeriod ?? (newestOpen === null ? null : String(newestOpen));
+
   const create = useMutation({
     mutationFn: () =>
       apiFetch<DocumentIdResponse>('/api/v1/documents', {
@@ -104,7 +117,9 @@ export function CreateDocumentModal({
 
       // Одразу відкриваємо документ: інакше користувач шукає його в переліку
       // за бізнес-ключем, якого ще не бачив.
-      await navigate(`/documents/${result.documentId}`);
+      await navigate(
+        `/documents/${result.documentId}` + (periodKey === null ? '' : `?periodKey=${periodKey}`),
+      );
     },
 
     // ⚠ Порушення складу приходить переліком: «група Water вимагає всіх
@@ -151,9 +166,21 @@ export function CreateDocumentModal({
           // Аркуші належать версії проєкту: залишений вибір від попереднього
           // послав би на сервер ідентифікатори з чужої структури.
           setSheets([]);
+          setPickedPeriod(null);
         }}
         data-autofocus
       />
+
+      {openPeriods.length > 0 && (
+        <Select
+          mt="sm"
+          label={t('documents.period')}
+          data={[...openPeriods].reverse().map((key) => ({ value: String(key), label: String(key) }))}
+          value={periodKey}
+          onChange={(value) => setPickedPeriod(value)}
+          allowDeselect={false}
+        />
+      )}
 
       {/*
         ⚠ Відмова цього запиту — окремим банером: без нього «немає права» чи

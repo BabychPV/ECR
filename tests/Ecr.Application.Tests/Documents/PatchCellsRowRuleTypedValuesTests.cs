@@ -125,16 +125,68 @@ public sealed class PatchCellsRowRuleTypedValuesTests
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
     [Trait("Finding", "A1-07")]
-    public async Task Порожнє_значення_лишається_Null_і_дає_ECR_VAL_RULE_як_і_раніше()
+    [Trait("Finding", "A2-02")]
+    public async Task Порожнє_значення_лишається_Null_і_не_дає_ECR_VAL_RULE()
     {
         Arrange("[A] > 0");
 
         // Порожнє = «стерти» (R-B4): комірки в правилі немає, Null поширюється.
+        // ✎ A2-02: на шляху PATCH Null = «не обчислено» — без Warning; правило
+        // оцінює «Перевірити»/подання на повному зрізі.
         var response = await Handler().HandleAsync(
             Request(new PatchRow(ExistingRowKey, "0x0A", [new PatchCell("A", null)])), CancellationToken.None);
 
+        Assert.Empty(response.Validation);
+    }
+
+    [Theory]
+    [InlineData(ValidationSeverity.Warning)]
+    [InlineData(ValidationSeverity.Error)]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Finding", "A2-02")]
+    public async Task Правило_рядка_з_ненадісланою_колонкою_не_дає_ECR_VAL_RULE_Null(ValidationSeverity severity)
+    {
+        // ⛔ A2-02: змінено лише A, N у базі заповнена, але в батчі її немає →
+        // `[A] <= [N]` = Null → було «Rule 'ROWRULE' did not return a logical answer: Null».
+        Arrange("[A] <= [N]", severity);
+
+        var response = await Handler().HandleAsync(
+            Request(new PatchRow(ExistingRowKey, "0x0A", [new PatchCell("A", "12.5")])), CancellationToken.None);
+
+        Assert.Equal(1, response.AppliedCells);
+        Assert.Empty(response.Validation);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Finding", "A2-02")]
+    public async Task Коміркове_правило_з_чужою_колонкою_не_дає_ECR_VAL_RULE_Null()
+    {
+        // Коміркове правило бачить лише свою колонку — [N] там завжди Null.
+        Arrange("[A] <= [N]", scope: 0);
+
+        var response = await Handler().HandleAsync(
+            Request(new PatchRow(ExistingRowKey, "0x0A", [new PatchCell("A", "12.5"), new PatchCell("N", "20")])),
+            CancellationToken.None);
+
+        Assert.Equal(2, response.AppliedCells);
+        Assert.Empty(response.Validation);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Finding", "A2-02")]
+    public async Task Справді_нелогічний_результат_правила_рядка_і_далі_дає_ECR_VAL_RULE()
+    {
+        // Число замість логічного — справжня помилка конфігурації, не неповний контекст.
+        Arrange("[A] + 1");
+
+        var response = await Handler().HandleAsync(
+            Request(new PatchRow(ExistingRowKey, "0x0A", [new PatchCell("A", "12.5")])), CancellationToken.None);
+
         var message = Assert.Single(response.Validation);
         Assert.Equal(ValidationEngine.BrokenRuleCode, message.RuleCode);
+        Assert.Contains("Number", message.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -150,7 +202,7 @@ public sealed class PatchCellsRowRuleTypedValuesTests
         Assert.Equal("ECR-CELL-0422", error.ErrorCode);
     }
 
-    private void Arrange(string expression)
+    private void Arrange(string expression, ValidationSeverity severity = ValidationSeverity.Warning, byte scope = 1)
     {
         var builder = new TemplateBuilder();
         var table = builder.Table(builder.Sheet("Water"), "Main", TableRowMode.Dynamic);
@@ -160,7 +212,7 @@ public sealed class PatchCellsRowRuleTypedValuesTests
         var d = builder.Column(table, "D", CellDataType.Date);
 
         table.AddValidationRule(new ValidationRule(
-            table.Id, EcrCode.Create("ROWRULE"), ValidationSeverity.Warning, scope: 1, expression,
+            table.Id, EcrCode.Create("ROWRULE"), severity, scope, expression,
             new LocalizedText(new Dictionary<string, string> { ["en"] = "Row rule violated" })));
 
         var snapshot = builder.Build();

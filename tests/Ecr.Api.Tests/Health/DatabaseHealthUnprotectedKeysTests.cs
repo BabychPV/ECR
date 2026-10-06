@@ -32,6 +32,13 @@ public sealed class DatabaseHealthUnprotectedKeysTests(SqlServerFixture sql)
 
         Assert.Equal(HealthStatus.Degraded, result.Status);
         Assert.StartsWith(UnprotectedPrefix, result.Description, StringComparison.Ordinal);
+
+        // A2-11: анонімний /health/ready отримує лише нейтральну причину, без імені таблиці й ключа конфігурації.
+        Assert.Equal(PublicHealthReason.SessionKeysUnprotected, result.Data[PublicHealthReason.DataKey]);
+        Assert.Equal(
+            "session keys not protected",
+            PublicHealthReason.Describe(new HealthReportEntry(
+                result.Status, result.Description, TimeSpan.Zero, result.Exception, result.Data)));
     }
 
     [Fact]

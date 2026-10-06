@@ -6671,8 +6671,46 @@ USING (VALUES
     (N'err.ECR-AUTH-0403.csrfOrigin', N'en', N'This request came from another website and was rejected. Open the application at its own address and repeat the action.', 1),
     -- COLL:l104 ── кінець секції ──
     -- COLL:an43fix ── D-285: окремий текст відмови подання (reasonKey deny.InsufficientGrantLevel.Submit); ru/kz — порцією COLL:an43fix у блоці I18N нижче ──
-    (N'deny.InsufficientGrantLevel.Submit', N'en', N'Your access level is too low to submit this sheet: you need the Submit level, or the Write level together with the Submit documents right in this project. Ask an administrator to raise the level or grant the right.', 1)
+    (N'deny.InsufficientGrantLevel.Submit', N'en', N'Your access level is too low to submit this sheet: you need the Submit level, or the Write level together with the Submit documents right in this project. Ask an administrator to raise the level or grant the right.', 1),
     -- COLL:an43fix ── кінець секції ──
+    -- COLL:a1date ── A1-02: строгий розбір набраної дати в полі дати (StrictDateInput); ru/kz — порцією COLL:a1date у блоці I18N нижче ──
+    (N'dates.invalid', N'en', N'"{value}" is not a valid date. Enter the date as YYYY-MM-DD.', 1),
+    (N'dates.outOfRange', N'en', N'The date {value} is outside the allowed range.', 1),
+    (N'dates.incomplete', N'en', N'The date is incomplete or does not exist. Finish entering it or press Esc to cancel.', 1),
+    -- COLL:a1date ── кінець секції ──
+    -- COLL:a201pub ── A2-01: перелік проблем публікації шаблону читабельний (ключі діагностик 4224/4225 + заголовок переліку); ru/kz — порцією COLL:a201pub у блоці I18N нижче ──
+    (N'err.ECR-TMPL-4224.severityConflict', N'en', N'Rules {ruleCode} ({severity}) and {otherRuleCode} ({otherSeverity}) apply to the same area of table {tableCode} with different severity levels. Give them the same level or narrow the scope of one of them.', 1),
+    (N'err.ECR-TMPL-4225.requiredNotCovered', N'en', N'Column {tableCode}.{columnCode} is required, but no rule checks it and no formula fills it: an empty value would go unnoticed. Add a rule for it or make the column optional.', 1),
+    (N'version.publishProblems', N'en', N'The version was not published. Problems to fix: {count}', 1),
+    -- COLL:a201pub ── кінець секції ──
+    -- COLL:a2s ── A2-03: підказка (Info) для Check без ключів; ru/kz — порцією COLL:a2s у блоці I18N нижче ──
+    (N'validation.check.noKeys', N'en', N'A Check without keys compares only when the receiving table has exactly one row; it has {targetRows}, so nothing was compared. Unknown row matching fields are ignored.', 1),
+    -- COLL:a2s ── кінець секції ──
+    -- COLL:a212 ── A2-12: поля шапки документа в експорті (аркуш «Header» у xlsx); ru/kz — порцією COLL:a212 у блоці I18N нижче ──
+    (N'export.header.sheet', N'en', N'Header', 1),
+    (N'export.header.field', N'en', N'Field', 1),
+    (N'export.header.code', N'en', N'Code', 1),
+    (N'export.header.value', N'en', N'Value', 1),
+    -- COLL:a212 ── кінець секції ──
+    -- COLL:a2i18nmonth ── A2-10: місяць підпису періоду з каталогу (у Chrome немає ICU kk), «помилок не знайдено» на нуль; ru/kz — порцією COLL:a2i18nmonth у блоці I18N нижче ──
+    (N'periods.monthOf', N'en', N'{month} {year}', 1),
+    (N'periods.month.1', N'en', N'January', 1),
+    (N'periods.month.2', N'en', N'February', 1),
+    (N'periods.month.3', N'en', N'March', 1),
+    (N'periods.month.4', N'en', N'April', 1),
+    (N'periods.month.5', N'en', N'May', 1),
+    (N'periods.month.6', N'en', N'June', 1),
+    (N'periods.month.7', N'en', N'July', 1),
+    (N'periods.month.8', N'en', N'August', 1),
+    (N'periods.month.9', N'en', N'September', 1),
+    (N'periods.month.10', N'en', N'October', 1),
+    (N'periods.month.11', N'en', N'November', 1),
+    (N'periods.month.12', N'en', N'December', 1),
+    (N'document.validationNoErrors', N'en', N'No errors found', 1),
+    -- COLL:a2i18nmonth ── кінець секції ──
+    -- COLL:a2chk ── A2-04: знахідка Check називає рядок джерела (кілька рядків джерела проти одного рядка приймача); ru/kz — порцією COLL:a2chk у блоці I18N нижче ──
+    (N'validation.check.mismatchRow', N'en', N'Check: {left} = {leftValue} (source row {sourceRow}) does not match {right} = {rightValue}: deviation {deviation}, allowed {allowed} ({kind}).', 1)
+    -- COLL:a2chk ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -15740,6 +15778,106 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:an43fix ── кінець секції ──
+-- COLL:a1date ── ru/kz A1-02: строгий розбір набраної дати; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'dates.invalid', N'ru', N'«{value}» — некорректная дата. Введите дату в формате ДД.ММ.ГГГГ или ГГГГ-ММ-ДД.'),
+    (N'dates.outOfRange', N'ru', N'Дата {value} вне допустимого диапазона.'),
+    (N'dates.invalid', N'kz', N'«{value}» — жарамсыз күн. Күнді КК.АА.ЖЖЖЖ немесе ЖЖЖЖ-АА-КК пішімінде енгізіңіз.'),
+    (N'dates.outOfRange', N'kz', N'{value} күні рұқсат етілген ауқымнан тыс.'),
+    (N'dates.incomplete', N'ru', N'Дата введена не полностью или не существует. Допишите её или нажмите Esc для отмены.'),
+    (N'dates.incomplete', N'kz', N'Күн толық енгізілмеген немесе жоқ. Оны толықтырыңыз немесе бас тарту үшін Esc басыңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:a1date ── кінець секції ──
+-- COLL:a201pub ── ru/kz A2-01: перелік проблем публікації шаблону; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-TMPL-4224.severityConflict', N'ru', N'Правила {ruleCode} ({severity}) и {otherRuleCode} ({otherSeverity}) действуют на одну и ту же область таблицы {tableCode} с разными уровнями. Задайте им один уровень или сузьте область действия одного из них.'),
+    (N'err.ECR-TMPL-4224.severityConflict', N'kz', N'{ruleCode} ({severity}) және {otherRuleCode} ({otherSeverity}) ережелері {tableCode} кестесінің бір аймағына әртүрлі деңгеймен әрекет етеді. Оларға бірдей деңгей беріңіз немесе біреуінің қолдану аймағын тарылтыңыз.'),
+    (N'err.ECR-TMPL-4225.requiredNotCovered', N'ru', N'Столбец {tableCode}.{columnCode} обязательный, но его не проверяет ни одно правило и не заполняет ни одна формула: пустое значение останется незамеченным. Добавьте для него правило или сделайте столбец необязательным.'),
+    (N'err.ECR-TMPL-4225.requiredNotCovered', N'kz', N'{tableCode}.{columnCode} бағаны міндетті, бірақ оны ешбір ереже тексермейді және ешбір формула толтырмайды: бос мән байқалмай қалады. Оған ереже қосыңыз немесе бағанды міндетті емес етіңіз.'),
+    (N'version.publishProblems', N'ru', N'Версия не опубликована. Проблем, которые нужно исправить: {count}'),
+    (N'version.publishProblems', N'kz', N'Нұсқа жарияланбады. Түзету керек мәселелер: {count}')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:a201pub ── кінець секції ──
+-- COLL:a2s ── ru/kz A2-03: підказка для Check без ключів; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'validation.check.noKeys', N'ru', N'Сверка без ключей сравнивает только при ровно одной строке таблицы-приёмника; в ней строк: {targetRows}, поэтому ничего не сравнивалось. Неизвестные поля сопоставления строк игнорируются.'),
+    (N'validation.check.noKeys', N'kz', N'Кілтсіз салыстыру қабылдағыш кестеде дәл бір жол болғанда ғана жұмыс істейді; онда {targetRows} жол бар, сондықтан ештеңе салыстырылмады. Жолдарды сәйкестендірудің белгісіз өрістері еленбейді.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:a2s ── кінець секції ──
+-- COLL:a212 ── ru/kz A2-12: поля шапки документа в експорті; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'export.header.sheet', N'ru', N'Шапка'),
+    (N'export.header.field', N'ru', N'Поле'),
+    (N'export.header.code', N'ru', N'Код'),
+    (N'export.header.value', N'ru', N'Значение'),
+    (N'export.header.sheet', N'kz', N'Тақырып'),
+    (N'export.header.field', N'kz', N'Өріс'),
+    (N'export.header.code', N'kz', N'Код'),
+    (N'export.header.value', N'kz', N'Мәні')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:a212 ── кінець секції ──
+-- COLL:a2i18nmonth ── ru/kz A2-10: назви місяців підпису періоду, «помилок не знайдено»; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'periods.monthOf', N'ru', N'{month} {year}'),
+    (N'periods.monthOf', N'kz', N'{month} {year}'),
+    (N'periods.month.1', N'ru', N'Январь'),
+    (N'periods.month.1', N'kz', N'Қаңтар'),
+    (N'periods.month.2', N'ru', N'Февраль'),
+    (N'periods.month.2', N'kz', N'Ақпан'),
+    (N'periods.month.3', N'ru', N'Март'),
+    (N'periods.month.3', N'kz', N'Наурыз'),
+    (N'periods.month.4', N'ru', N'Апрель'),
+    (N'periods.month.4', N'kz', N'Сәуір'),
+    (N'periods.month.5', N'ru', N'Май'),
+    (N'periods.month.5', N'kz', N'Мамыр'),
+    (N'periods.month.6', N'ru', N'Июнь'),
+    (N'periods.month.6', N'kz', N'Маусым'),
+    (N'periods.month.7', N'ru', N'Июль'),
+    (N'periods.month.7', N'kz', N'Шілде'),
+    (N'periods.month.8', N'ru', N'Август'),
+    (N'periods.month.8', N'kz', N'Тамыз'),
+    (N'periods.month.9', N'ru', N'Сентябрь'),
+    (N'periods.month.9', N'kz', N'Қыркүйек'),
+    (N'periods.month.10', N'ru', N'Октябрь'),
+    (N'periods.month.10', N'kz', N'Қазан'),
+    (N'periods.month.11', N'ru', N'Ноябрь'),
+    (N'periods.month.11', N'kz', N'Қараша'),
+    (N'periods.month.12', N'ru', N'Декабрь'),
+    (N'periods.month.12', N'kz', N'Желтоқсан'),
+    (N'document.validationNoErrors', N'ru', N'Ошибок не найдено'),
+    (N'document.validationNoErrors', N'kz', N'Қате табылмады')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:a2i18nmonth ── кінець секції ──
+-- COLL:a2chk ── ru/kz A2-04: знахідка Check називає рядок джерела; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'validation.check.mismatchRow', N'ru', N'Сверка: {left} = {leftValue} (строка источника {sourceRow}) не сходится с {right} = {rightValue}: отклонение {deviation}, допустимо {allowed} ({kind}).'),
+    (N'validation.check.mismatchRow', N'kz', N'Салыстыру: {left} = {leftValue} (дереккөз жолы {sourceRow}) мәні {right} = {rightValue} мәніне сәйкес келмейді: ауытқу {deviation}, рұқсат етілгені {allowed} ({kind}).')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:a2chk ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

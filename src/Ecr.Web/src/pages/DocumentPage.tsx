@@ -598,6 +598,7 @@ export function DocumentPage(): JSX.Element {
             <SheetActions
               documentId={documentId}
               sheetDefId={active.sheetDefId}
+              sheetName={active.name}
               periodKey={periodKey}
               state={state}
               lock={lock}

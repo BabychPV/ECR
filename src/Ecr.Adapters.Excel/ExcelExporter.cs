@@ -27,7 +27,9 @@ public sealed class ExcelExporter(
     FormulaTranslator formulaTranslator,
     IMethodologyStore? methodologies = null,
     ICalculationResultStore? results = null,
-    IConditionalFormatStore? conditionalFormats = null) : IExcelExporter
+    IConditionalFormatStore? conditionalFormats = null,
+    IDocumentHeaderStore? headers = null,
+    IUiStringCatalog? catalog = null) : IExcelExporter
 {
     /// <summary>Рядок, з якого починається перший блок аркуша.</summary>
     private const int FirstRow = 1;
@@ -205,6 +207,13 @@ public sealed class ExcelExporter(
             WriteFormulas(workbook, snapshot, blocks);
         }
 
+        // A2-12: поля шапки — окремим ВИДИМИМ аркушем ПІСЛЯ аркушів даних і ПЕРЕД
+        // прихованою мапою. Не блоком зверху аркуша даних: той зсунув би рядки
+        // таблиць, а з ними карту книги, заморожений рядок і стовпці зворотного
+        // імпорту. Аркуш поза картою імпорт не читає й не сканує
+        // (`StrayValueDetector` ходить лише по аркушах блоків карти).
+        await WriteHeaderSheetAsync(workbook, snapshot, documentId, options, usedNames, ct).ConfigureAwait(false);
+
         // ⚠ P3 імпорту: відбитки обчислюваних комірок — ПІСЛЯ формул, тобто
         // рівно того, що людина отримає в книзі. Імпорт за ними розрізняє
         // «змінили обчислювану комірку» і «книга застаріла після перерахунку».
@@ -238,6 +247,70 @@ public sealed class ExcelExporter(
         }
 
         return output;
+    }
+
+    /// <summary>Аркуш з полями шапки: підпис, код, значення. Без полів шапки в шаблоні аркуша нема.</summary>
+    private async Task WriteHeaderSheetAsync(
+        XLWorkbook workbook, TemplateVersionSnapshot snapshot, long documentId, ExcelExportOptions options,
+        HashSet<string> usedNames, CancellationToken ct)
+    {
+        var rows = await Ecr.Application.Documents.DocumentHeaderExport
+            .ReadAsync(headers, registries, snapshot, documentId, options.Language, ct).ConfigureAwait(false);
+
+        if (rows.Count == 0)
+        {
+            return;
+        }
+
+        var labels = await Ecr.Application.Documents.HeaderExportLabels
+            .ResolveAsync(catalog, options.Language, ct).ConfigureAwait(false);
+
+        var sheet = workbook.Worksheets.Add(UniqueName(CleanSheetName(labels.Sheet, "Header"), usedNames));
+
+        sheet.Cell(1, 1).Value = labels.Field;
+        sheet.Cell(1, 2).Value = labels.Code;
+        sheet.Cell(1, 3).Value = labels.Value;
+        sheet.Range(1, 1, 1, 3).Style.Font.Bold = true;
+
+        var lengths = new[] { labels.Field.Length, labels.Code.Length, labels.Value.Length };
+
+        for (var i = 0; i < rows.Count; i++)
+        {
+            var row = rows[i];
+            var number = i + 2;
+
+            sheet.Cell(number, 1).Value = row.Label;
+            sheet.Cell(number, 2).Value = row.Code;
+
+            var cell = sheet.Cell(number, 3);
+            switch (row.Value)
+            {
+                case decimal numeric:
+                    cell.Value = numeric;
+                    break;
+                case bool flag:
+                    cell.Value = flag;
+                    break;
+                case DateTime date:
+                    cell.Value = date;
+                    cell.Style.DateFormat.Format = date.TimeOfDay == TimeSpan.Zero ? "yyyy-mm-dd" : "yyyy-mm-dd hh:mm:ss";
+                    break;
+                case string text:
+                    cell.Value = text;
+                    break;
+            }
+
+            lengths[0] = Math.Max(lengths[0], row.Label.Length);
+            lengths[1] = Math.Max(lengths[1], row.Code.Length);
+            lengths[2] = Math.Max(lengths[2], row.Text?.Length ?? 0);
+        }
+
+        for (var c = 0; c < lengths.Length; c++)
+        {
+            sheet.Column(c + 1).Width = Math.Min(lengths[c] + ContentPadding, MaxContentWidth);
+        }
+
+        sheet.SheetView.FreezeRows(1);
     }
 
     /// <summary>Порожній файл, який видаляє сам себе при закритті потоку.</summary>
@@ -919,7 +992,13 @@ public sealed class ExcelExporter(
     /// </remarks>
     private static string SheetName(SheetDef sheet, string language, HashSet<string> used)
     {
-        var name = sheet.NameL10n.Get(language) ?? sheet.Code;
+        return UniqueName(CleanSheetName(sheet.NameL10n.Get(language) ?? sheet.Code, sheet.Code), used);
+    }
+
+    /// <summary>Ім'я без заборонених символів, не довше межі Excel; порожнє — запасне.</summary>
+    private static string CleanSheetName(string raw, string fallback)
+    {
+        var name = raw;
 
         foreach (var symbol in ForbiddenInSheetName)
         {
@@ -930,14 +1009,15 @@ public sealed class ExcelExporter(
 
         if (name.Length == 0)
         {
-            name = sheet.Code;
+            name = fallback;
         }
 
-        if (name.Length > MaxSheetNameLength)
-        {
-            name = name[..MaxSheetNameLength];
-        }
+        return name.Length > MaxSheetNameLength ? name[..MaxSheetNameLength] : name;
+    }
 
+    /// <summary>Розводить ім'я з уже зайнятими суфіксом <c>~n</c>.</summary>
+    private static string UniqueName(string name, HashSet<string> used)
+    {
         var candidate = name;
         var suffix = 2;
 

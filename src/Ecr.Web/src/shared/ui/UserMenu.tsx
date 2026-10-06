@@ -10,7 +10,7 @@ import {
   useMantineColorScheme,
 } from '@mantine/core';
 import { useNavigate } from 'react-router-dom';
-import { apiFetch } from '@/api/client';
+import { apiFetch, beginSignOut, LOGOUT_PATH } from '@/api/client';
 import { t } from '@/shared/i18n';
 import { applyDensity, setDensity, useDensity, type Density } from '@/shared/theme/preferences';
 import { LanguageSwitcher } from '@/shared/ui/LanguageSwitcher';
@@ -142,10 +142,16 @@ export function UserMenu({
  *
  * ⚠ Помилка виходу не блокує вихід: якщо сервер недоступний, користувач усе
  * одно має піти з екрана, а cookie протухне сама.
+ *
+ * ⛔ A2-06: `beginSignOut()` — ДО запиту виходу. Інакше опитування й фонові
+ * перезапити, що спрацювали між кліком і перезавантаженням, ішли вже без
+ * cookie і давали `401` (і власне перенаправлення з `?from=`).
  */
 async function signOut(): Promise<void> {
+  beginSignOut();
+
   try {
-    await apiFetch<void>('/api/v1/logout', { method: 'POST' });
+    await apiFetch<void>(LOGOUT_PATH, { method: 'POST' });
   } finally {
     window.location.assign('/login');
   }

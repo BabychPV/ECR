@@ -274,6 +274,33 @@ public sealed class ValidationEngineTests
         Assert.Contains("разбирается", message.Message, StringComparison.Ordinal);
     }
 
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Finding", "A2-02")]
+    public void Null_на_неповному_контексті_мовчить_а_на_повному_дає_Warning_як_і_раніше()
+    {
+        Values context = new() { ["Mass"] = 5m };
+        ValidationRule[] rules = [Rule("LimitBlock", ValidationSeverity.Error, scope: 1, "[Mass] <= [Limit]")];
+
+        // PATCH: Limit не надіслано — правило тут не обчислюється.
+        Assert.Empty(Engine().ValidateScope(1, rules, context, NoHeaders, "en", partialContext: true));
+
+        // «Перевірити»/подання (повний зріз): порожній Limit — як і раніше Warning.
+        var message = Assert.Single(Engine().ValidateScope(1, rules, context, NoHeaders, "en"));
+        Assert.Equal(ValidationEngine.BrokenRuleCode, message.RuleCode);
+        Assert.Contains("Null", message.Message, StringComparison.Ordinal);
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Finding", "A2-02")]
+    public void Помилка_обчислення_на_неповному_контексті_і_далі_дає_Warning()
+    {
+        var message = Assert.Single(Engine().ValidateScope(
+            1, [Rule("DIV", ValidationSeverity.Warning, scope: 1, "[Mass] / 0 > 1")],
+            new Values { ["Mass"] = 5m }, NoHeaders, "en", partialContext: true));
+
+        Assert.Equal(ValidationEngine.BrokenRuleCode, message.RuleCode);
+    }
+
     /// <summary>Значення рядка для правил рівня рядка й вище.</summary>
     private sealed class Values : Dictionary<string, object?>, IValidationContext
     {

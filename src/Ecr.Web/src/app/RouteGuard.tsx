@@ -1,7 +1,7 @@
 import type { JSX, ReactNode } from 'react';
 import { Navigate } from 'react-router-dom';
 import { useSession } from '@/shared/session/useSession';
-import { canAccessRoute } from './routeAccess';
+import { missingRoutePermission } from './routeAccess';
 import type { RouteHandle } from './routes';
 
 /**
@@ -61,8 +61,9 @@ export function RouteGuard({
 }): JSX.Element {
   const session = useSession();
 
-  if (handle.permission !== undefined && !canAccessRoute(session.data, handle)) {
-    return <Navigate to="/403" replace state={{ permission: handle.permission }} />;
+  const missing = missingRoutePermission(session.data, handle);
+  if (missing !== undefined) {
+    return <Navigate to="/403" replace state={{ permission: missing }} />;
   }
 
   return <>{children}</>;

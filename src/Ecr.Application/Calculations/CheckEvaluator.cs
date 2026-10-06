@@ -142,17 +142,60 @@ public static class CheckEvaluator
             _ => ValidationSeverity.Info,
         };
 
-        return [.. failures.Select(f =>
+        // A2-04: без ключів зіставлення ОДИН рядок приймача порівнюється з КОЖНИМ рядком джерела, тож кілька
+        // знахідок мають ту саму адресу (рядок/колонка приймача). Текст несе рядок джерела ({sourceRow}), інакше
+        // панель показувала N однакових рядків; повністю однакові знахідки (той самий рядок джерела, напр. з двох
+        // екземплярів таблиці) зводяться в одну.
+        return [.. failures
+            .DistinctBy(f => (f.TargetRowKey, f.SourceRowKey, f.Left, f.Right))
+            .Select(f =>
+            {
+                // T2-07: ключ + підстановки зберігаються, текст — запасний (мова автора запуску); читання збирає
+                // його мовою читача. Значення джерела (Left) лежать лише в Params, а їх назовні не віддають.
+                var parameters = Params(spec, f);
+                return new ValidationMessage(
+                    severity, "REL-" + relationCode, ValidationMessageTemplates.Render(ValidationMessageTemplates.CheckMismatchRow, language, parameters),
+                    targetTableDefId, f.TargetRowKey, spec.Right, BlocksSave: false,
+                    SourceTableDefId: sourceTableDefId, SourceColumnCode: sourceTableDefId is null ? null : spec.Left,
+                    MessageKey: ValidationMessageTemplates.CheckMismatchRow, Params: parameters);
+            })];
+    }
+
+    /// <summary>
+    /// A2-03: інформаційна підказка автору шаблону — Check без ключів порівнює лише тоді, коли в приймачі рівно
+    /// один рядок; інакше (і коли невідоме поле зіставлення дало порожній <c>keys</c>) нічого не порівнюється.
+    /// Політику D-230 не змінює: це <c>Info</c>, не блокує ні збереження, ні подання.
+    /// </summary>
+    /// <param name="relationCode">Код зв'язку.</param>
+    /// <param name="targetTableDefId">Таблиця приймача.</param>
+    /// <param name="match">Зіставлення.</param>
+    /// <param name="source">Рядки джерела.</param>
+    /// <param name="target">Рядки приймача.</param>
+    /// <param name="language">Мова запиту.</param>
+    /// <returns>Повідомлення або <c>null</c>, коли підказка не потрібна.</returns>
+    public static ValidationMessage? NoKeysNotice(
+        string relationCode, int targetTableDefId, RelationMatchSpec match,
+        IReadOnlyList<RelationRow> source, IReadOnlyList<RelationRow> target, string language)
+    {
+        ArgumentNullException.ThrowIfNull(match);
+        ArgumentNullException.ThrowIfNull(source);
+        ArgumentNullException.ThrowIfNull(target);
+
+        if (match.Keys.Count != 0 || source.Count == 0 || target.Count == 1)
         {
-            // T2-07: ключ + підстановки зберігаються, текст — запасний (мова автора запуску); читання збирає його
-            // мовою читача. Значення джерела (Left) лежать лише в Params, а їх назовні не віддають.
-            var parameters = Params(spec, f);
-            return new ValidationMessage(
-                severity, "REL-" + relationCode, ValidationMessageTemplates.Render(ValidationMessageTemplates.CheckMismatch, language, parameters),
-                targetTableDefId, f.TargetRowKey, spec.Right, BlocksSave: false,
-                SourceTableDefId: sourceTableDefId, SourceColumnCode: sourceTableDefId is null ? null : spec.Left,
-                MessageKey: ValidationMessageTemplates.CheckMismatch, Params: parameters);
-        })];
+            return null;
+        }
+
+        var parameters = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["targetRows"] = target.Count.ToString(System.Globalization.CultureInfo.InvariantCulture),
+        };
+
+        return new ValidationMessage(
+            ValidationSeverity.Info, "REL-" + relationCode,
+            ValidationMessageTemplates.Render(ValidationMessageTemplates.CheckNoKeys, language, parameters),
+            targetTableDefId, RowKey: null, ColumnCode: null, BlocksSave: false,
+            MessageKey: ValidationMessageTemplates.CheckNoKeys, Params: parameters);
     }
 
     private static decimal Saturated(Func<decimal> nonNegative)
@@ -173,6 +216,7 @@ public static class CheckEvaluator
         {
             ["left"] = s.Left,
             ["leftValue"] = ValidationMessageTemplates.Num(f.Left),
+            ["sourceRow"] = f.SourceRowKey,
             ["right"] = s.Right,
             ["rightValue"] = ValidationMessageTemplates.Num(f.Right),
             ["deviation"] = ValidationMessageTemplates.Num(f.Deviation),

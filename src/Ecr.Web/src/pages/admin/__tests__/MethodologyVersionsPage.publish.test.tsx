@@ -274,9 +274,9 @@ describe('MethodologyVersionsPage: публікація версії', () => {
       const reason = within(dialog).getByLabelText('Reason for the change');
       await user.type(reason, 'Оновлено коефіцієнт викидів на 2026 рік');
 
-      const effectiveFrom = dialog.querySelector('input[type="date"]');
-      expect(effectiveFrom).not.toBeNull();
-      await user.type(effectiveFrom as HTMLInputElement, '2026-01-01');
+      // A1-02: поле дати — `DateOnlyField` (лінивий, строгий розбір), а не рідне `type="date"`.
+      const effectiveFrom = await within(dialog).findByLabelText('Effective from', {}, { timeout: 10_000 });
+      await user.type(effectiveFrom, '2026-01-01');
 
       // Кнопка підтвердження — та, що ВСЕРЕДИНІ діалогу: рядкова й
       // заголовкова кнопки з тим самим підписом лишаються поза ним.

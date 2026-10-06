@@ -199,6 +199,35 @@ function runBeforeLoginRedirect(from: string): void {
   }
 }
 
+/** Адреса виходу — єдиний запит, який ще йде після `beginSignOut()`. */
+export const LOGOUT_PATH = '/api/v1/logout';
+
+/**
+ * Чи людина вже натиснула «Вийти» в цій вкладці.
+ *
+ * ⛔ A2-06: між кліком «Вийти» і перезавантаженням сторінки на `/login` живий
+ * застосунок встигав піти ще кількома запитами (опитування «My tasks», фонові
+ * перезапити) — уже без cookie, тобто `401`. Кожен такий `401` ще й запускав
+ * `redirectToLogin` з `?from=…&reason=…`, перебиваючи чистий перехід виходу на
+ * `/login`. Після виходу сеансу немає за визначенням, тож запит навіть не
+ * надсилається: викликач отримує той самий `401`, що й від сервера, але без
+ * мережі й без повторного перенаправлення (вихід уже веде на `/login` сам).
+ *
+ * ⚠ Прапорець живе до перезавантаження сторінки, і це навмисно: новий сеанс
+ * починається лише після входу, а вхід — це завжди нове завантаження.
+ */
+let signedOut = false;
+
+/** Позначає вихід: далі в мережу йде лише сам `POST /api/v1/logout`. */
+export function beginSignOut(): void {
+  signedOut = true;
+}
+
+/** Скидає позначку виходу — лише для тестів. */
+export function resetSignOutForTests(): void {
+  signedOut = false;
+}
+
 /**
  * Тег мови інтерфейсу, який іде на сервер заголовком `Accept-Language`.
  *
@@ -281,6 +310,15 @@ async function apiFetchRaw(
   allowNotModified: boolean,
 ): Promise<Response> {
   const correlationId = newCorrelationId();
+
+  if (signedOut && path !== LOGOUT_PATH) {
+    throw new EcrApiError({
+      title: 'err.ECR-AUTH-0401.signInRequired',
+      status: 401,
+      errorCode: 'ECR-AUTH-0401',
+      correlationId,
+    });
+  }
 
   const headers = new Headers(init?.headers);
   headers.set(CORRELATION_HEADER, correlationId);

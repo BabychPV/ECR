@@ -183,7 +183,6 @@ function DateEditor({ label, value, onCommit, onCancel }: CellEditorProps): JSX.
         size="xs"
         autoFocus
         aria-label={label}
-        valueFormat="YYYY-MM-DD"
         clearable
         defaultValue={parseDateOnly(value)}
         onChange={(next) => onCommit(formatDateOnly(next), undefined, 'none')}

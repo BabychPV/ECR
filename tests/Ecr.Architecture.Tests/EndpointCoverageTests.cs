@@ -450,6 +450,16 @@ public sealed partial class EndpointCoverageTests
             ["registries.code", "registries.name"],
             "Перелік бракуючих полів форми нового довідника."),
 
+        // A2-10: назва місяця підпису періоду — з каталогу, не з Intl (у Chrome немає ICU kk).
+        new("shared/format/period.ts", "monthKey", 1, "shared/format/period.ts",
+            [
+                "periods.month.1", "periods.month.2", "periods.month.3",
+                "periods.month.4", "periods.month.5", "periods.month.6",
+                "periods.month.7", "periods.month.8", "periods.month.9",
+                "periods.month.10", "periods.month.11", "periods.month.12",
+            ],
+            "Назва місяця в підписі періоду (formatMonthYear)."),
+
         // ⚠ Опис функції в підказці редактора виразів (`hasText(key) ? t(key) : —`):
         // функцію без рядка підказка показує самою сигнатурою, тож перелік — лише
         // ті, що вже мають текст у сіді (діалекти Template і Methodology, `02b` §7–§8).
@@ -554,6 +564,11 @@ public sealed partial class EndpointCoverageTests
         new("features/registries/rc816/serverMessage.ts", "messageKey", 1, null, [],
             "ФВ-8.16: messageKey помилки рядка пакета записів довідника (RegistryBatchRowError) і порушення "
             + "правила довідника (RegistryRuleViolationDto) у редакторі master-detail — відкритий набір сервера."),
+        new("features/workflow/sheetDenial.ts", "key", 1, null, [],
+            "A2-08: messageKey відмови ECR-ACCS-0403 про аркуш (submitDenied/approveDenied/"
+            + "approveOwnSubmission/reopenDenied) — речення перескладається з назвою аркуша."),
+        new("features/workflow/sheetDenial.ts", "reasonKey", 1, null, [],
+            "A2-08: reasonKey тієї самої відмови (deny.*) — відкритий набір сервера, як WithLocalizedReason."),
 
         // F-15/B-12 (четвертий раунд UX): перелік проблем публікації методології —
         // закритий набір, що його породжує сервер (MethodologyPublishChecks).

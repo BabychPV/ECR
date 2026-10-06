@@ -72,7 +72,8 @@ public static class HealthResponse
 
                     // ⛔ L1-11 (Q-221): опис перевірки «db» несе ті самі подробиці (RCSI-скрипт, файлові групи,
                     // відбитки сертифікатів) — анонімному /health/ready його теж не віддаємо.
-                    redactedChecks?.Contains(e.Key) == true ? null : e.Value.Description,
+                    // A2-11: замість null — коротка фраза з білого списку (PublicHealthReason).
+                    Description(e.Value, redactedChecks, redacted: redactedChecks?.Contains(e.Key) == true),
                     e.Value.Duration.TotalMilliseconds,
 
                     // ⚠ Виняток НЕ віддається клієнту: у ньому бувають імена
@@ -80,9 +81,53 @@ public static class HealthResponse
                     // логи — подробиці (ФВ-6.11).
                     redactedChecks?.Contains(e.Key) == true
                         ? new Dictionary<string, object>()
-                        : e.Value.Data))
+                        : WithoutServiceKeys(e.Value.Data)))
                 .ToList());
 
         return JsonSerializer.SerializeAsync(context.Response.Body, payload, Options, context.RequestAborted);
     }
+
+    /// <summary>Опис перевірки для звіту.</summary>
+    /// <remarks>
+    /// ⛔ A2-11: якщо перевірка кинула виняток сама, фреймворк кладе в опис
+    /// <c>ex.Message</c> — а там бувають ім'я сервера, логін, шлях, фрагмент
+    /// запиту. В анонімний <c>/health/ready</c> такий текст не йде: замість нього
+    /// нейтральна фраза, подробиці — у журналі. Свідомий текст перевірки поруч
+    /// із винятком (<c>Degraded(текст, ex)</c>) лишається: він не містить
+    /// повідомлення винятку.
+    /// </remarks>
+    private static string? Description(HealthReportEntry entry, IReadOnlySet<string>? redactedChecks, bool redacted)
+    {
+        if (redacted)
+        {
+            return PublicHealthReason.Describe(entry);
+        }
+
+        if (redactedChecks is not null && entry.Description is { } text && CarriesExceptionText(text, entry.Exception))
+        {
+            return PublicHealthReason.CheckFailed;
+        }
+
+        return entry.Description;
+    }
+
+    private static bool CarriesExceptionText(string description, Exception? exception)
+    {
+        for (var ex = exception; ex is not null; ex = ex.InnerException)
+        {
+            if (!string.IsNullOrWhiteSpace(ex.Message) && description.Contains(ex.Message, StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>Подробиці без службового ключа <see cref="PublicHealthReason.DataKey"/>.</summary>
+    private static IReadOnlyDictionary<string, object> WithoutServiceKeys(IReadOnlyDictionary<string, object> data)
+        => data.ContainsKey(PublicHealthReason.DataKey)
+            ? data.Where(p => !string.Equals(p.Key, PublicHealthReason.DataKey, StringComparison.Ordinal))
+                .ToDictionary(p => p.Key, p => p.Value, StringComparer.Ordinal)
+            : data;
 }

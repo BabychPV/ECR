@@ -23,7 +23,11 @@
 - SQL Server 2016 SP1+ **Standard/Enterprise/Developer** (Express — лише з `-AllowExpress`,
   без SQL Agent). Обліковий запис, яким запускаєте скрипт, має право `CREATE DATABASE`.
 - `sqlcmd` у `PATH` (`sqlcmd -?` відповідає).
-- ~15,5 ГБ вільних на диску даних SQL Server (файлові групи).
+- Вільно **≥ 16 ГБ** на диску даних SQL Server (файлові групи; Express — 1 ГБ). `deploy-ecr.ps1`
+  вільне місце **не перевіряє**: за браку місця схема падає з `Msg 5149` (код ОС 112) — перевірте
+  наперед (`Get-PSDrive`).
+- У документах набору шляхи `tools\X.ps1` означають `.\X.ps1` у корені цього набору
+  (каталогу `tools\` в наборі немає).
 - Сертифікат із закритим ключем у `Cert:\LocalMachine\My` — один і для HTTPS, і для
   Data Protection (`D-267`). Без нього служба в Production **не стартує**. Для стенда
   годиться самопідписаний (крок 3).
@@ -37,6 +41,9 @@ Get-ChildItem -Recurse | Unblock-File          # zip із браузера/по�
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
 
 # хеш zip — проти ECR-first-test-<версія>.zip.sha256, отриманого разом із набором
+# (виконувати ДО розпакування, у каталозі з zip; обидва рядки мають збігтися)
+(Get-FileHash .\ECR-first-test-<версія>.zip -Algorithm SHA256).Hash
+(Get-Content .\ECR-first-test-<версія>.zip.sha256 -Raw).Trim().Split(' ')[0]
 .\verify-msi.ps1 -MsiPath .\Ecr.msi -IntegrityOnly   # [I1] має бути PASS
 ```
 
@@ -49,8 +56,9 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
   потрібні доступ до бази й право читання закритого ключа сертифіката
   (`certlm.msc` → сертифікат → «Усі завдання» → «Керування закритими ключами»).
 - **Стенд на одній машині** — без `-ServiceAccount`: служби стають під `LocalSystem`,
-  реєструються, але **не стартують самі** (крок 4 закінчиться очікуванням `/health/live`
-  — це не збій). Тоді в SQL Server має бути логін комп'ютера/`NT AUTHORITY\SYSTEM` з
+  реєструються, але **не стартують самі**: на кроці 7 скрипта (перевірка здоров'я, ~2 хв
+  очікування `/health/live`) він завершиться червоним «Служба не відповіла…» — це очікувано,
+  не збій (далі — `Start-Service`, розділ 4). Тоді в SQL Server має бути логін комп'ютера/`NT AUTHORITY\SYSTEM` з
   доступом до бази.
 
 ## 3. Сертифікат для стенда (якщо замовник ще не видав)
@@ -63,7 +71,18 @@ $cert = New-SelfSignedCertificate -DnsName 'ecr.test.local', $env:COMPUTERNAME `
 $cert.Thumbprint     # запишіть: він піде і в -DataProtectionThumbprint, і в -HttpsThumbprint
 ```
 
-Довіра в браузері тестувальника й запис у `hosts` — `docs/admin/https-certificate.md` §10.2.
+Довіра й ім'я (лише для стенда; на майданчику довіра — від ЦС замовника; джерело —
+`docs/admin/https-certificate.md` §10.2, де цей сценарій позначено «не виконано» на реальному
+стенді — перевіряйте результат):
+
+```powershell
+Export-Certificate -Cert $cert -FilePath .\ecr-test.cer | Out-Null
+Import-Certificate -FilePath .\ecr-test.cer -CertStoreLocation Cert:\LocalMachine\Root | Out-Null
+Add-Content "$env:SystemRoot\System32\drivers\etc\hosts" "127.0.0.1 ecr.test.local"
+```
+
+Це довіряє лише **цій** машині. Для браузера тестувальника на іншій машині імпортуйте `.cer`
+у його `Root` і додайте в його `hosts` рядок `<IP сервера> ecr.test.local`.
 PFX забекапте окремо від бази: без нього збережені сеанси й ключі не розшифрувати.
 
 ## 4. Розгортання
@@ -95,7 +114,12 @@ $bp = Read-Host -AsSecureString -Prompt 'Разовий пароль bootstrap (
 Варіанти:
 - без сертифіката HTTPS, лише стенд: замість `-HttpsThumbprint … -AppPort 443` —
   `-AllowHttp` (порт 5000; `/health/ready` буде `Degraded` через `transport` — так і має бути);
-- без `-ServiceAccount` (розділ 2): після скрипта `Start-Service EcrApi, EcrWorker`.
+- без `-ServiceAccount` (розділ 2): скрипт на кроці 7 (~2 хв) завершиться червоним «Служба не
+  відповіла…» — очікувано. Далі вручну:
+  ```powershell
+  Start-Service EcrApi, EcrWorker
+  Invoke-RestMethod https://ecr.test.local/health/ready   # або http://localhost:5000/health/ready з -AllowHttp
+  ```
 
 ## 5. Перевірка й перший вхід
 
@@ -136,9 +160,15 @@ Invoke-RestMethod https://ecr.test.local/health/ready        # status: Healthy �
    `409`; дуже швидкий набір у сітці (інтервал ≈ 0 мс) може губити символи (P3).
 9. Після набору цифри в клітинці клавіша ↓/↑ рухає курсор у полі (а не зберігає
    значення і переходить): завершуйте введення Enter або Tab, перш ніж переходити в
-   сусідню клітинку; швидкий набір різних клітинок чутливий до паузи менше 70 мс
-   (відомий залишок); F2 у сітці документа не працює. Ручний ввід дати: вводити у форматі yyyy-MM-dd (перевірте результат після введення: некоректна дата може бути розібрана неточно або очищена); строгий розбір за локаллю — наступний цикл.
-
+   сусідню клітинку (A1-03); швидкий набір різних клітинок чутливий до паузи менше 70 мс
+   і до інтервалу ≈ 0 мс (T3-01/T4-01) — відомий залишок. Ручний ввід дати: строгий розбір
+   (A1-02) і F2 у сітці виправлено в RC3.
+10. Відомі пункти приймальної №2, що лишились в RC3 (`docs/release-notes/rc-2026-10-22.md`):
+    - A1-05: користувач `bootstrap` без ролі TemplateAdministrator не видає гранти на колонки (403 `/templates`); обхід — користувач з ролями BootstrapAdministrator і TemplateAdministrator (задум).
+    - Один запит `/public/bootstrap` на сторінці входу може дати 428 у консолі (не впливає на вхід).
+    - A2-03 (задум, інформація; політика D-230/D-250): невідомі поля зв'язку (напр. `by`) ігноруються; Check без `keys` порівнює рядок джерела з приймачем лише коли в приймачі один рядок. Панель валідації тепер показує про це інформаційну підказку (Info). Див. «Row matching» у `docs/admin/admin-guide.md`.
+    - Шапка в xlsx-експорті: довгі значення обрізаються на 50 символах ширини колонки.
+    - `/me` віддає лише глобальні права ролей: для ролі з областю проєкту кнопка «Submit» може бути сірою, хоча сервер подання дозволить.
 ## 7. Дефект
 
 GitHub Issues у `BabychPV/ECR` (шаблон «defect»). У заявці: `version` і `commit` з

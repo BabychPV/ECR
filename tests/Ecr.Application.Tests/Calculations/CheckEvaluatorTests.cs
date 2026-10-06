@@ -65,6 +65,44 @@ public sealed class CheckEvaluatorTests
         Assert.True(CheckEvaluator.Evaluate(Spec("0"), null, null).Passed);
     }
 
+    [Theory]
+    [Trait("Requirement", "A2-04")]
+    [InlineData("en", "source row S2")]
+    [InlineData("ru", "строка источника S2")]
+    [InlineData("kz", "дереккөз жолы S2")]
+    public void A2_04_три_рядки_джерела_проти_одного_приймача_дають_розрізнювані_повідомлення(string lang, string s2Fragment)
+    {
+        // Сценарій A2-04: Check Block без ключів, джерело 3 рядки (7 / 9 / 7), приймач 1 рядок (8).
+        var spec = Spec("0", sev: CheckSeverity.Block);
+        var source = new[] { Row("S1", "x", fact: 7m), Row("S2", "x", fact: 9m), Row("S3", "x", fact: 7m) };
+        var f = CheckEvaluator.Failures(new RelationMatchSpec([]), spec, source, [Row("TOT", "x", total: 8m)]);
+
+        var messages = CheckEvaluator.ToMessages("CHK_TOT_v5", 42, spec, f, lang, sourceTableDefId: 7);
+
+        // Алгоритм не змінено: три знахідки, усі на тій самій адресі приймача.
+        Assert.Equal(3, messages.Count);
+        Assert.All(messages, m => Assert.Equal(("TOT", "Total", ValidationSeverity.Error), (m.RowKey, m.ColumnCode, m.Severity)));
+        // ⛔ Головне: тексти різні (раніше S1 і S3 давали буквально однаковий рядок) і кожен називає свій рядок джерела.
+        Assert.Equal(3, messages.Select(m => m.Message).Distinct(StringComparer.Ordinal).Count());
+        Assert.Equal(["S1", "S2", "S3"], messages.Select(m => m.Params!["sourceRow"]));
+        Assert.Contains(s2Fragment, messages[1].Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [Trait("Requirement", "A2-04")]
+    public void A2_04_повністю_однакові_знахідки_зводяться_в_одну()
+    {
+        // Той самий рядок джерела з двох екземплярів таблиці (раннер зливає екземпляри в один перелік рядків).
+        var spec = Spec("0");
+        var f = CheckEvaluator.Failures(new RelationMatchSpec([]), spec, [Row("S1", "x", fact: 7m), Row("S1", "x", fact: 7m), Row("S1", "x", fact: 6m)], [Row("TOT", "x", total: 8m)]);
+        Assert.Equal(3, f.Count);
+
+        var messages = CheckEvaluator.ToMessages("CHK", 1, spec, f, "en");
+
+        // Дубль зведено; інше значення того самого рядка — окрема знахідка, не ховається.
+        Assert.Equal(["7", "6"], messages.Select(m => m.Params!["leftValue"]));
+    }
+
     private static RelationRow Row(string key, string unit, decimal? fact = null, decimal? total = null)
         => new(key,
             new Dictionary<string, decimal?> { ["Fact"] = fact, ["Total"] = total },
@@ -134,8 +172,9 @@ public sealed class CheckEvaluatorTests
 
         var m = Assert.Single(CheckEvaluator.ToMessages("R", 1, spec, f, "ru", sourceTableDefId: 7));
 
-        Assert.Equal(ValidationMessageTemplates.CheckMismatch, m.MessageKey);
+        Assert.Equal(ValidationMessageTemplates.CheckMismatchRow, m.MessageKey);
         Assert.Equal("Fact", m.Params!["left"]);
+        Assert.Equal("s", m.Params["sourceRow"]);
         Assert.Equal("1", m.Params["leftValue"]);
         Assert.Equal("Total", m.Params["right"]);
         Assert.Equal("2", m.Params["rightValue"]);
@@ -143,7 +182,7 @@ public sealed class CheckEvaluatorTests
         Assert.Equal("0.2", m.Params["allowed"]);
         Assert.Equal("rel", m.Params["kind"]);
         // Запасний текст — мовою запиту й збігається з рендером шаблону.
-        Assert.Equal(ValidationMessageTemplates.Render(ValidationMessageTemplates.CheckMismatch, "ru", m.Params), m.Message);
+        Assert.Equal(ValidationMessageTemplates.Render(ValidationMessageTemplates.CheckMismatchRow, "ru", m.Params), m.Message);
         // Адреса джерела лишається: за нею читач без права на джерело отримує знеособлене.
         Assert.Equal(7, m.SourceTableDefId);
     }
@@ -248,4 +287,36 @@ public sealed class CheckEvaluatorTests
     [Fact]
     public async Task Runner_пропускає_зв_язок_зі_збереженою_раніше_хибною_схемою()
         => Assert.Empty(await Run(Build("""{"left":"Fact","right":"Total","severity":"Fatal"}""")));
+
+    private static RelationRow Row(string key)
+        => new(key, new Dictionary<string, decimal?>(), new Dictionary<string, string?>());
+
+    [Theory]
+    [InlineData(1, 3, true)]   // A2-03: без ключів і приймач із трьох рядків - підказка
+    [InlineData(1, 0, true)]
+    [InlineData(1, 1, false)]  // один рядок приймача - Check працює, підказки немає
+    [InlineData(0, 3, false)]  // у джерелі немає рядків - нічого пояснювати
+    public void A2_03_Check_без_ключів_дає_інформаційну_підказку_лише_коли_нічого_не_порівняно(int sources, int targets, bool expected)
+    {
+        var notice = CheckEvaluator.NoKeysNotice(
+            "CHK", 7, new RelationMatchSpec([]),
+            [.. Enumerable.Range(0, sources).Select(i => Row("s" + i))],
+            [.. Enumerable.Range(0, targets).Select(i => Row("t" + i))],
+            "en");
+
+        Assert.Equal(expected, notice is not null);
+        if (notice is not null)
+        {
+            Assert.Equal(ValidationSeverity.Info, notice.Severity);
+            Assert.False(notice.BlocksSave);
+            Assert.Equal(ValidationMessageTemplates.CheckNoKeys, notice.MessageKey);
+            Assert.Equal(targets.ToString(System.Globalization.CultureInfo.InvariantCulture), notice.Params!["targetRows"]);
+            Assert.Contains($"it has {targets}", notice.Message, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    public void A2_03_Check_із_ключами_підказки_не_дає()
+        => Assert.Null(CheckEvaluator.NoKeysNotice(
+            "CHK", 7, new RelationMatchSpec([new RelationKey("A", "A")]), [Row("s")], [Row("t1"), Row("t2")], "en"));
 }

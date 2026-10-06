@@ -437,7 +437,6 @@ export function SourceEventsTable({
             size="xs"
             miw={150}
             label={t("sourceEvents.filterFromUtc")}
-            valueFormat="YYYY-MM-DD"
             clearable
             value={parseDateOnly(filters.from)}
             onChange={(next) =>
@@ -451,7 +450,6 @@ export function SourceEventsTable({
             size="xs"
             miw={150}
             label={t("sourceEvents.filterToUtc")}
-            valueFormat="YYYY-MM-DD"
             clearable
             value={parseDateOnly(filters.to)}
             onChange={(next) =>
