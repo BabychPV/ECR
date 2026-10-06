@@ -155,4 +155,19 @@ describe('D15-06: пара без значення не малюється', () 
 
     expect(screen.getByText('у UTC')).toBeDefined();
   });
+
+  /*
+   * a11y (axe `definition-list` / `dlitem`): у `<dl>` — лише групи `<div>`, а в
+   * групі — лише `<dt>`/`<dd>`. До фіксу широкий рядок вкладав ще один `<div>`,
+   * а підказка була окремим `<p>` поруч із `<dd>`.
+   */
+  it.each([false, true])('wide=%s: dl → div → dt/dd без зайвих вузлів, підказка в dd', (wide) => {
+    const root = show(<KeyValue wide={wide} items={[{ label: 'Started', value: '14:01', hint: 'у UTC' }]} />);
+
+    const dl = root.querySelector('dl');
+    const groups = [...(dl?.children ?? [])];
+    expect(groups.map((node) => node.tagName)).toEqual(['DIV']);
+    expect([...(groups[0]?.children ?? [])].map((node) => node.tagName)).toEqual(['DT', 'DD']);
+    expect(screen.getByText('у UTC').closest('dd')).not.toBeNull();
+  });
 });
