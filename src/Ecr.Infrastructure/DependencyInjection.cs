@@ -432,6 +432,7 @@ public static class DependencyInjection
 
         // Сховища Етапу 5.
         services.AddScoped<IJobProgressStore, JobProgressStore>();
+        services.AddScoped<ISystemHealthStore, SystemHealthStore>();
         services.AddScoped<ICollectionStore, CollectionStore>();
         services.AddScoped<ISourceEventMapStore, SourceEventMapStore>();
         services.AddScoped<IRowWindowMapStore, RowWindowMapStore>(); // HSE301 A1
