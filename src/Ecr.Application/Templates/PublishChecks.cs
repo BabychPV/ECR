@@ -692,7 +692,16 @@ public static class PublishChecks
                         $"Правила {rule.Code} ({rule.Severity}) і {other.Code} ({other.Severity}) "
                         + $"діють на ту саму область таблиці {table.Code} з різними рівнями.",
                         0,
-                        1));
+                        1,
+                        "err.ECR-TMPL-4224.severityConflict",
+                        new Dictionary<string, string>
+                        {
+                            ["tableCode"] = table.Code,
+                            ["ruleCode"] = rule.Code,
+                            ["severity"] = rule.Severity.ToString(),
+                            ["otherRuleCode"] = other.Code,
+                            ["otherSeverity"] = other.Severity.ToString(),
+                        }));
                 }
             }
         }
@@ -743,7 +752,13 @@ public static class PublishChecks
                 $"Колонка {table.Code}.{column.Code} обов'язкова, але її не перевіряє жодне "
                 + "правило і не заповнює жодна формула: незаповнене значення не буде помічене.",
                 0,
-                1));
+                1,
+                "err.ECR-TMPL-4225.requiredNotCovered",
+                new Dictionary<string, string>
+                {
+                    ["tableCode"] = table.Code,
+                    ["columnCode"] = column.Code,
+                }));
         }
     }
 }

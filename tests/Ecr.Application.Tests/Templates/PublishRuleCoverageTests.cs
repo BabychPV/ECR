@@ -80,6 +80,47 @@ public sealed class PublishRuleCoverageTests
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
     [Trait("Requirement", "ФВ-5.10")]
+    public void Суперечність_рівнів_несе_ключ_і_підстановки_а_відмова_перелік_із_ключами()
+    {
+        var (version, table) = Structure();
+        var builder = new TemplateBuilder { TemplateVersionId = 1 };
+        var column = builder.Column(table, "Jan");
+        Rule(table, "R1", ValidationSeverity.Error, scope: 0, column.Id);
+        Rule(table, "R2", ValidationSeverity.Warning, scope: 0, column.Id);
+        var required = builder.Column(table, "Feb");
+        required.SetRequired(true);
+
+        // A2-01: діагностика без ключа давала відмову «… the first is ECR-TMPL-4224
+        // at position 0» — читабельний текст жив лише українською в `diagnostics`.
+        var diagnostics = PublishChecks.CheckRules(version);
+        var conflict = Assert.Single(diagnostics, d => d.Code == "ECR-TMPL-4224");
+
+        Assert.Equal("err.ECR-TMPL-4224.severityConflict", conflict.MessageKey);
+        Assert.Equal("R1", conflict.MessageParams!["ruleCode"]);
+        Assert.Equal("Error", conflict.MessageParams["severity"]);
+        Assert.Equal("R2", conflict.MessageParams["otherRuleCode"]);
+        Assert.Equal("Warning", conflict.MessageParams["otherSeverity"]);
+        Assert.Equal(table.Code, conflict.MessageParams["tableCode"]);
+
+        var rejection = ExpressionRejection.Build(
+            diagnostics, "err.ECR-TMPL-0422.publishRejected", "Публікацію відхилено.");
+
+        // Головна причина — читабельний ключ першої діагностики, а не загальний
+        // «publishRejected» з кодом і позицією; перелік несе ключі всіх проблем.
+        Assert.Equal("err.ECR-TMPL-4224.severityConflict", rejection.Details!["messageKey"]);
+        Assert.Equal("R1", rejection.Details["ruleCode"]);
+        Assert.False(rejection.Details.ContainsKey("position"));
+
+        var listed = ((IEnumerable<DiagnosticInfo>)rejection.Details["diagnostics"]!).ToList();
+        Assert.True(listed.Count >= 2);
+        Assert.All(listed, d => Assert.False(string.IsNullOrEmpty(d.MessageKey)));
+        Assert.Contains(listed, d => d.MessageKey == "err.ECR-TMPL-4225.requiredNotCovered"
+            && d.MessageParams!["columnCode"] == "Feb");
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "ФВ-5.10")]
     public void Правила_різних_областей_з_різними_рівнями_суперечності_не_дають()
     {
         var (version, table) = Structure();
