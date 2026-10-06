@@ -1,7 +1,9 @@
-import { lazy, Suspense, useEffect, useRef, useState, type JSX, type ReactNode } from 'react';
+import { lazy, Suspense, useContext, useEffect, useRef, useState, type JSX, type ReactNode } from 'react';
 import { Anchor, Group, Stack, Text, Title } from '@mantine/core';
 import { Link } from 'react-router-dom';
+import { PageDescriptionContext } from './pageDescription';
 import { announceRoute } from './RouteAnnouncer';
+import { t } from '@/shared/i18n';
 import { RouteHeadingClass } from '@/shared/theme/routeHeading';
 
 /**
@@ -100,6 +102,14 @@ export interface PageHeaderProps {
   /** Рядок пояснення під назвою — людською мовою, не кодом. */
   readonly meta?: ReactNode;
 
+  /**
+   * Що це за екран і що тут робити — одним-двома реченнями під назвою (UI-11,
+   * `KIT.md` §6.4 `subtitle`). Без пропа береться пояснення маршруту
+   * (`handle.descriptionKey`, `PageDescriptionContext`); `null` — без
+   * пояснення навіть там, де маршрут його має.
+   */
+  readonly description?: string | null | undefined;
+
   /** «← Back to …» для вкладеної сторінки. `label` — ВЕСЬ напис: слова
    *  «Back to» у каталозі немає, і вигадувати ключ тут не можна. */
   readonly back?: { readonly label: string; readonly href: string } | undefined;
@@ -136,7 +146,7 @@ export interface PageHeaderProps {
  * критерієм приймання.
  *
  * ⛔ `D15-06`: елемент без даних не малюється. Жодної обгортки «про запас» —
- * без `badge`/`count`/`meta`/`back`/дій розмітка дослівно та сама, що була до
+ * без `badge`/`count`/`meta`/`description`/`back`/дій розмітка дослівно та сама, що була до
  * розширення. Порожній `<div>` коштує не нічого: він з'їдає відступ і збиває
  * `justify="space-between"`.
  */
@@ -146,6 +156,7 @@ export function PageHeader({
   badge,
   count,
   meta,
+  description,
   back,
   primary,
   secondary,
@@ -154,6 +165,13 @@ export function PageHeader({
 }: PageHeaderProps): JSX.Element {
   const heading = useRef<HTMLHeadingElement>(null);
   const focused = useRef(false);
+  const routeDescriptionKey = useContext(PageDescriptionContext);
+  const explanation =
+    description !== undefined
+      ? description
+      : routeDescriptionKey !== undefined
+        ? t(routeDescriptionKey)
+        : null;
 
   // ⚠ `X-37`: живцем Chromium ігнорує `focusVisible: false` і все одно малює
   // `:focus-visible` після програмного фокуса. Тому, коли фокус переніс САМ
@@ -213,7 +231,7 @@ export function PageHeader({
     );
 
   const left =
-    back === undefined && !shown(meta) ? (
+    back === undefined && !shown(meta) && !shown(explanation) ? (
       titleRow
     ) : (
       <Stack gap="xs">
@@ -223,6 +241,14 @@ export function PageHeader({
           </Anchor>
         )}
         {titleRow}
+        {/* ⚠ Пояснення — ПІСЛЯ заголовка в розмітці: фокус і оголошення маршруту
+            (`ФВ-14.19`) лишаються на заголовку, читалка доходить до пояснення
+            наступним рядком. Дві строки й ~70 знаків — макет (`.page-sub`). */}
+        {shown(explanation) && (
+          <Text size="sm" c="dimmed" maw="70ch" lineClamp={2} data-testid="page-description">
+            {explanation}
+          </Text>
+        )}
         {shown(meta) && (
           <Text size="sm" c="dimmed">
             {meta}
