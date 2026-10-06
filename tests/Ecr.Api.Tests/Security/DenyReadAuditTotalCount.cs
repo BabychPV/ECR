@@ -18,6 +18,40 @@ public sealed partial class DenyReadTests
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "ФВ-6.6")]
+    public async Task Пошук_q_не_знаходить_рядків_забороненої_таблиці_ні_в_сторінці_ні_в_числі()
+    {
+        // UI-38, C3: збіг за ключем рядка забороненої таблиці не повинен бути оракулом існування.
+        var s = await ArrangeAsync().ConfigureAwait(true);
+        var from = DateTime.UtcNow.AddDays(-1).ToString("O", CultureInfo.InvariantCulture);
+        var to = DateTime.UtcNow.AddDays(1).ToString("O", CultureInfo.InvariantCulture);
+        var url = $"/api/v1/audit/cells?from={Uri.EscapeDataString(from)}&to={Uri.EscapeDataString(to)}"
+                  + $"&documentId={s.Doc.DocumentId}&q={Uri.EscapeDataString(s.DeniedTable.RowKeys[0])}";
+
+        using var app = new EcrApiFactory(sql);
+
+        using (var reader = await SignedInAsync(app, s.Reader).ConfigureAwait(true))
+        {
+            var (status, body) = await GetAsync(reader, url).ConfigureAwait(true);
+            Assert.True(status == HttpStatusCode.OK, $"{status}: {body}\n{app.ErrorsText}");
+
+            var root = JsonDocument.Parse(body).RootElement;
+            Assert.Equal(0, root.GetProperty("items").GetArrayLength());
+            Assert.Equal(0, root.GetProperty("totalCount").GetInt32());
+            Assert.DoesNotContain(AuditDeniedTable, body, StringComparison.Ordinal);
+        }
+
+        using (var plain = await SignedInAsync(app, s.Plain).ConfigureAwait(true))
+        {
+            var (status, body) = await GetAsync(plain, url).ConfigureAwait(true);
+            Assert.True(status == HttpStatusCode.OK, $"{status}: {body}\n{app.ErrorsText}");
+            Assert.Contains(AuditDeniedTable, body, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-6.6")]
     public async Task TotalCount_журналу_не_рахує_змін_прихованих_колонок_і_таблиць()
     {
         var s = await ArrangeAsync().ConfigureAwait(true);

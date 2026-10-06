@@ -112,6 +112,10 @@ public sealed record StructureChangeView(
 /// <param name="ChangedByUserId">Автор зміни — <b>UserId</b>, не SID (R-A2, D-86).</param>
 /// <param name="Origin">Походження: <c>UserEdit</c>, <c>Import</c>, <c>Recalculation</c>, <c>Migration</c>.</param>
 /// <param name="LateOnly">Лише пізні правки (<c>Grace</c>/після <c>Reopen</c>, D-70).</param>
+/// <param name="Query">
+/// Пошук (UI-38, C3): підрядок бізнес-ключа документа, ключа рядка або коду колонки; обробник обрізає його
+/// до 100 знаків. <c>null</c> — без пошуку. Спецсимволи <c>LIKE</c> (<c>% _ [ \</c>) — буквальні.
+/// </param>
 public sealed record CellChangeFilter(
     DateTime From,
     DateTime To,
@@ -120,7 +124,8 @@ public sealed record CellChangeFilter(
     int? ColumnDefId = null,
     int? ChangedByUserId = null,
     string? Origin = null,
-    bool LateOnly = false)
+    bool LateOnly = false,
+    string? Query = null)
 {
     /// <summary>Фільтр адресує РІВНО ОДНУ комірку — документ, рядок і колонку.</summary>
     /// <remarks>

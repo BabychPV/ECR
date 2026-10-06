@@ -54,6 +54,10 @@ public sealed class AuditController(
     /// <param name="lateOnly">Лише пізні правки (<c>Grace</c>/після <c>Reopen</c>).</param>
     /// <param name="limit">Розмір сторінки; <c>0</c> — 50.</param>
     /// <param name="cursor">Курсор наступної сторінки.</param>
+    /// <param name="q">
+    /// Пошук (UI-38): підрядок бізнес-ключа документа, ключа рядка чи коду колонки; до 100 знаків (довше
+    /// обрізається), спецсимволи <c>LIKE</c> — буквальні. Лише по видимих читачу рядках.
+    /// </param>
     /// <param name="ct">Токен скасування.</param>
     [HttpGet("cells")]
     [ProducesResponseType<Ecr.Application.Common.PagedResult<Ecr.Application.Ports.CellChangeView>>(
@@ -70,7 +74,7 @@ public sealed class AuditController(
         [FromQuery] DateTime from, [FromQuery] DateTime to,
         [FromQuery] long? documentId, [FromQuery] string? rowKey, [FromQuery] int? columnDefId,
         [FromQuery] int? author, [FromQuery] string? origin, [FromQuery] bool lateOnly,
-        [FromQuery] int limit, [FromQuery] string? cursor,
+        [FromQuery] int limit, [FromQuery] string? cursor, [FromQuery] string? q,
         CancellationToken ct)
     {
         var page = new CursorRequest(limit == 0 ? 50 : limit, cursor);
@@ -85,7 +89,8 @@ public sealed class AuditController(
             columnDefId,
             author,
             string.IsNullOrWhiteSpace(origin) ? null : origin,
-            lateOnly);
+            lateOnly,
+            string.IsNullOrWhiteSpace(q) ? null : q);
 
         // Вікно, його ширина, розмір сторінки й обидва рівні доступу
         // перевіряються в обробнику: правило «без вікна запит іде по всіх
