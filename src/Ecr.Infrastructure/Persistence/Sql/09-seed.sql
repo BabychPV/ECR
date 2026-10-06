@@ -6921,8 +6921,27 @@ USING (VALUES
     (N'inspector.info.value', N'en', N'Stored value', 1),
     (N'inspector.info.table', N'en', N'Table', 1),
     (N'inspector.info.tableIssues', N'en', N'Issues in this table', 1),
-    (N'inspector.info.tableIssuesValue', N'en', N'{errors} error(s), {warnings} warning(s)', 1)
+    (N'inspector.info.tableIssuesValue', N'en', N'{errors} error(s), {warnings} warning(s)', 1),
     -- COLL:inspector ── кінець секції ──
+    -- COLL:ui28jobs ── екран задач на шаблоні переліку (UI-28); ru/kz — порцією COLL:ui28jobs у блоці I18N нижче ──
+    (N'jobs.description', N'en', N'Exports, imports, recalculations and nightly checks run in the background. A failed job says why and can be restarted.', 1),
+    (N'jobs.statsLabel', N'en', N'Jobs at a glance', 1),
+    (N'jobs.statRunning', N'en', N'running', 1),
+    (N'jobs.statQueued', N'en', N'queued', 1),
+    (N'jobs.statFailed', N'en', N'failed', 1),
+    (N'jobs.statsHint', N'en', N'Counted over the recent jobs listed below, not the whole history.', 1),
+    (N'jobs.search', N'en', N'Search', 1),
+    (N'jobs.searchPlaceholder', N'en', N'Job, document or person', 1),
+    (N'jobs.filterType', N'en', N'Types', 1),
+    (N'jobs.filterState', N'en', N'States', 1),
+    (N'jobs.noMatch', N'en', N'No jobs match the filters.', 1),
+    (N'jobs.progress', N'en', N'Progress', 1),
+    (N'jobs.stoppedAt', N'en', N'stopped at {percent} %', 1),
+    (N'jobs.refresh', N'en', N'Refresh', 1),
+    (N'jobs.findById', N'en', N'Find a job by id', 1),
+    (N'jobs.whyFailed', N'en', N'Why it failed', 1),
+    (N'jobs.attempts', N'en', N'Attempts', 1)
+    -- COLL:ui28jobs ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -16562,6 +16581,48 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:inspector ── кінець секції ──
+-- COLL:ui28jobs ── ru/kz екран задач на шаблоні переліку (UI-28); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'jobs.description', N'ru', N'Экспорт, импорт, пересчёты и ночные проверки выполняются в фоне. Проваленная задача объясняет причину, и её можно перезапустить.'),
+    (N'jobs.description', N'kz', N'Экспорт, импорт, қайта есептеу және түнгі тексерулер фонда орындалады. Сәтсіз тапсырма себебін көрсетеді, оны қайта іске қосуға болады.'),
+    (N'jobs.statsLabel', N'ru', N'Задачи кратко'),
+    (N'jobs.statsLabel', N'kz', N'Тапсырмалар қысқаша'),
+    (N'jobs.statRunning', N'ru', N'выполняются'),
+    (N'jobs.statRunning', N'kz', N'орындалуда'),
+    (N'jobs.statQueued', N'ru', N'в очереди'),
+    (N'jobs.statQueued', N'kz', N'кезекте'),
+    (N'jobs.statFailed', N'ru', N'с ошибкой'),
+    (N'jobs.statFailed', N'kz', N'сәтсіз'),
+    (N'jobs.statsHint', N'ru', N'Подсчитано по последним задачам из списка ниже, а не по всей истории.'),
+    (N'jobs.statsHint', N'kz', N'Төмендегі тізімдегі соңғы тапсырмалар бойынша есептелген, бүкіл тарих бойынша емес.'),
+    (N'jobs.search', N'ru', N'Поиск'),
+    (N'jobs.search', N'kz', N'Іздеу'),
+    (N'jobs.searchPlaceholder', N'ru', N'Задача, документ или человек'),
+    (N'jobs.searchPlaceholder', N'kz', N'Тапсырма, құжат немесе адам'),
+    (N'jobs.filterType', N'ru', N'Типы'),
+    (N'jobs.filterType', N'kz', N'Түрлері'),
+    (N'jobs.filterState', N'ru', N'Состояния'),
+    (N'jobs.filterState', N'kz', N'Күйлері'),
+    (N'jobs.noMatch', N'ru', N'Нет задач, подходящих под фильтры.'),
+    (N'jobs.noMatch', N'kz', N'Сүзгілерге сәйкес тапсырма жоқ.'),
+    (N'jobs.progress', N'ru', N'Ход выполнения'),
+    (N'jobs.progress', N'kz', N'Орындалу барысы'),
+    (N'jobs.stoppedAt', N'ru', N'остановлена на {percent} %'),
+    (N'jobs.stoppedAt', N'kz', N'{percent} % кезінде тоқтады'),
+    (N'jobs.refresh', N'ru', N'Обновить'),
+    (N'jobs.refresh', N'kz', N'Жаңарту'),
+    (N'jobs.findById', N'ru', N'Найти задачу по идентификатору'),
+    (N'jobs.findById', N'kz', N'Тапсырманы идентификатор бойынша табу'),
+    (N'jobs.whyFailed', N'ru', N'Почему не выполнена'),
+    (N'jobs.whyFailed', N'kz', N'Неге сәтсіз аяқталды'),
+    (N'jobs.attempts', N'ru', N'Попытки'),
+    (N'jobs.attempts', N'kz', N'Әрекеттер')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:ui28jobs ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t
