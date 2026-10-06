@@ -1,6 +1,6 @@
 import type { JSX } from 'react';
 import { ActionIcon, Group, NumberInput, type MantineSize } from '@mantine/core';
-import { formatDate } from '@/shared/format';
+import { formatMonthYear } from '@/shared/format';
 import { t } from '@/shared/i18n';
 import { useFieldDraft } from './useFieldDraft';
 
@@ -147,10 +147,8 @@ function periodCaption(value: number, kind?: string): string | undefined {
   if (kind === 'Yearly') return parsed.month === 1 ? String(parsed.year) : undefined;
   if (kind === 'Custom') return t('periods.customOf', { sequence: parsed.month, year: parsed.year });
 
-  const formatted = formatDate(new Date(parsed.year, parsed.month - 1, 1), {
-    year: 'numeric',
-    month: 'long',
-  });
+  // ⚠ `A2-10`: місяць — із каталогу, а не з `Intl` (у Chrome немає `kk`).
+  const formatted = formatMonthYear(parsed.year, parsed.month);
 
   return formatted.length > 0 ? formatted : undefined;
 }

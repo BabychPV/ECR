@@ -77,7 +77,9 @@ export function ValidationPanel({ messages, onSelect, canSelect }: ValidationPan
         <Group gap="xs">
           <Text fw={600}>{t('document.validationTitle')}</Text>
           <Badge size="sm" color={errors === 0 ? 'statusWarning' : 'statusError'}>
-            {t('document.validationErrors', { count: errors })}
+            {/* ⚠ `A2-10`: нуль помилок (лише попередження) — «помилок не знайдено»,
+                а не «перевірка виявила помилки: 0». */}
+            {errors === 0 ? t('document.validationNoErrors') : t('document.validationErrors', { count: errors })}
           </Badge>
         </Group>
       }

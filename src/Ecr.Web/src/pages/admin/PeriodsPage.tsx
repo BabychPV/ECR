@@ -47,7 +47,7 @@ import { Hint } from '@/shared/ui/Hint';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { ReasonModal } from '@/shared/ui/ReasonModal';
 import { StatusBadge, statusKey } from '@/shared/ui/StatusBadge';
-import { formatDate, formatDateTime } from '@/shared/format';
+import { formatDate, formatDateTime, formatMonthYear } from '@/shared/format';
 import { notificationCloseButtonProps, showApiError, showDone } from '@/shared/ui/notify';
 import { errorCodeText } from '@/shared/ui/problemText';
 import { useUrlNumber } from '@/shared/ui/useUrlState';
@@ -228,11 +228,8 @@ function SiteTime({
  */
 export function periodCaption(year: number, sequence: number, kind: string): string {
   if (kind === 'Monthly' && sequence >= 1 && sequence <= 12) {
-    return formatDate(new Date(Date.UTC(year, sequence - 1, 1)), {
-      year: 'numeric',
-      month: 'long',
-      timeZone: 'UTC',
-    });
+    // ⚠ `A2-10`: місяць — із каталогу, а не з `Intl` (у Chrome немає `kk`).
+    return formatMonthYear(year, sequence);
   }
 
   if (kind === 'Quarterly') return t('periods.quarterOf', { quarter: sequence, year });

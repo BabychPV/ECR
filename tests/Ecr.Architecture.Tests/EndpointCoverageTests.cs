@@ -450,6 +450,16 @@ public sealed partial class EndpointCoverageTests
             ["registries.code", "registries.name"],
             "Перелік бракуючих полів форми нового довідника."),
 
+        // A2-10: назва місяця підпису періоду — з каталогу, не з Intl (у Chrome немає ICU kk).
+        new("shared/format/period.ts", "monthKey", 1, "shared/format/period.ts",
+            [
+                "periods.month.1", "periods.month.2", "periods.month.3",
+                "periods.month.4", "periods.month.5", "periods.month.6",
+                "periods.month.7", "periods.month.8", "periods.month.9",
+                "periods.month.10", "periods.month.11", "periods.month.12",
+            ],
+            "Назва місяця в підписі періоду (formatMonthYear)."),
+
         // ⚠ Опис функції в підказці редактора виразів (`hasText(key) ? t(key) : —`):
         // функцію без рядка підказка показує самою сигнатурою, тож перелік — лише
         // ті, що вже мають текст у сіді (діалекти Template і Methodology, `02b` §7–§8).
