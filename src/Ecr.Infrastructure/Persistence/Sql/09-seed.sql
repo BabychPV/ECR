@@ -645,6 +645,10 @@ UPDATE t
   FROM sys_ecr.UiString AS t
   JOIN (VALUES
     (N'common.loading',                  N'en', N'Loading…', N'Loading...'),
+    -- COLL:ui34tpl UI-34b: пошук переліку шаблонів бачить і назву (поле name з GET /templates).
+    (N'templates.searchPlaceholder', N'en', N'Template code', N'Template name or code'),
+    (N'templates.searchPlaceholder', N'ru', N'Код шаблона', N'Название или код шаблона'),
+    (N'templates.searchPlaceholder', N'kz', N'Үлгі коды', N'Үлгі атауы немесе коды'),
     -- COLL:an43fix D-285: загальний deny.InsufficientGrantLevel повернуто до загального формулювання (подання має власний ключ .Submit).
     (N'deny.InsufficientGrantLevel',     N'en', N'Your access level is too low for this action: ask for a higher level. To submit a sheet you need the Submit level, or the Write level together with the Submit documents right in this project.', N'Your grant level is too low for this action: ask for a higher grant level, not a new grant.'),
     (N'deny.InsufficientGrantLevel',     N'ru', N'Уровень вашего доступа недостаточен для этого действия: запросите более высокий уровень. Для подачи листа нужен уровень «Подача» либо уровень «Запись» вместе с правом «Подача документов» в этом проекте.', N'Уровень вашего доступа недостаточен для этого действия: запросите более высокий уровень доступа, а не новый доступ.'),
@@ -6858,13 +6862,19 @@ USING (VALUES
     (N'templates.stat.drafts', N'en', N'drafts in progress', 1),
     (N'templates.stat.draftsHint', N'en', N'Show templates with an open draft', 1),
     (N'templates.search', N'en', N'Search', 1),
-    (N'templates.searchPlaceholder', N'en', N'Template code', 1),
+    (N'templates.searchPlaceholder', N'en', N'Template name or code', 1),
     (N'templates.currentVersion', N'en', N'Current version', 1),
     (N'templates.noCurrentVersion', N'en', N'no current version', 1),
     (N'templates.notPublished', N'en', N'Not published yet', 1),
     (N'templates.draft', N'en', N'Draft', 1),
     (N'templates.state', N'en', N'State', 1),
     (N'templates.noMatch', N'en', N'No templates match the filters', 1),
+    (N'templates.draftBy', N'en', N'{name} is editing', 1),
+    (N'templates.documents', N'en', N'Documents', 1),
+    (N'templates.documentsHint', N'en', N'Documents in the projects you can see that use this template', 1),
+    (N'templates.updated', N'en', N'Updated', 1),
+    (N'templates.stat.documents', N'en', N'documents using them', 1),
+    (N'templates.stat.documentsHint', N'en', N'Show templates that documents depend on', 1),
     -- COLL:ui34tpl ── кінець секції ──
     -- COLL:ui38audit ── UI-38: журнал змін у формі макета (Was → becomes, Δ, Late, походження словом) і ім'я кнопки очищення дати; ru/kz — порцією COLL:ui38audit у блоці I18N нижче ──
     (N'audit.documentCell', N'en', N'Document · cell', 1),
@@ -16658,8 +16668,8 @@ SELECT v.[Key], v.Lang, v.Val
     (N'templates.stat.draftsHint', N'kz', N'Ашық нобайы бар үлгілерді көрсету'),
     (N'templates.search', N'ru', N'Поиск'),
     (N'templates.search', N'kz', N'Іздеу'),
-    (N'templates.searchPlaceholder', N'ru', N'Код шаблона'),
-    (N'templates.searchPlaceholder', N'kz', N'Үлгі коды'),
+    (N'templates.searchPlaceholder', N'ru', N'Название или код шаблона'),
+    (N'templates.searchPlaceholder', N'kz', N'Үлгі атауы немесе коды'),
     (N'templates.currentVersion', N'ru', N'Текущая версия'),
     (N'templates.currentVersion', N'kz', N'Ағымдағы нұсқа'),
     (N'templates.noCurrentVersion', N'ru', N'текущей версии нет'),
@@ -16671,7 +16681,19 @@ SELECT v.[Key], v.Lang, v.Val
     (N'templates.state', N'ru', N'Состояние'),
     (N'templates.state', N'kz', N'Күйі'),
     (N'templates.noMatch', N'ru', N'Нет шаблонов по этим фильтрам'),
-    (N'templates.noMatch', N'kz', N'Сүзгілерге сәйкес үлгілер жоқ')
+    (N'templates.noMatch', N'kz', N'Сүзгілерге сәйкес үлгілер жоқ'),
+    (N'templates.draftBy', N'ru', N'Редактирует {name}'),
+    (N'templates.draftBy', N'kz', N'{name} өңдеп жатыр'),
+    (N'templates.documents', N'ru', N'Документы'),
+    (N'templates.documents', N'kz', N'Құжаттар'),
+    (N'templates.documentsHint', N'ru', N'Документы в доступных вам проектах, которые используют этот шаблон'),
+    (N'templates.documentsHint', N'kz', N'Сізге көрінетін жобалардағы осы үлгіні пайдаланатын құжаттар'),
+    (N'templates.updated', N'ru', N'Обновлён'),
+    (N'templates.updated', N'kz', N'Жаңартылды'),
+    (N'templates.stat.documents', N'ru', N'документов на них'),
+    (N'templates.stat.documents', N'kz', N'оларды пайдаланатын құжат'),
+    (N'templates.stat.documentsHint', N'ru', N'Показать шаблоны, на которые опираются документы'),
+    (N'templates.stat.documentsHint', N'kz', N'Құжаттар сүйенетін үлгілерді көрсету')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
