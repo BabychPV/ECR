@@ -321,10 +321,13 @@ export function TemplatesPage(): JSX.Element {
                 {
                   id: 'state',
                   label: t('templates.state'),
-                  options: (['Published', 'Draft', 'Deprecated'] as const).map((value) => ({
-                    value,
-                    label: t(`status.version.${value}`),
-                  })),
+                  // ⚠ Ключі літералами: сторож `EndpointCoverageTests` має
+                  // бачити, які рядки каталогу доходять до екрана.
+                  options: [
+                    { value: 'Published', label: t('status.version.Published') },
+                    { value: 'Draft', label: t('status.version.Draft') },
+                    { value: 'Deprecated', label: t('status.version.Deprecated') },
+                  ],
                 },
               ]}
               clearLabel={t('filters.clear')}
