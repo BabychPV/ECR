@@ -7123,8 +7123,25 @@ USING (VALUES
     (N'document.banner.rejectedNext', N'en', N'Correct the figures, validate the sheet and submit it again.', 1),
     -- COLL:uidocgrid ── кінець секції ──
     -- COLL:uidocscope ── P1 прихований аркуш: видалення документа перевіряє сервер; ru/kz — порцією COLL:uidocscope у блоці I18N нижче ──
-    (N'documents.deleteServerChecks', N'en', N'The server checks every sheet of the document, including sheets you cannot see, and refuses if any of them is not a draft.', 1)
+    (N'documents.deleteServerChecks', N'en', N'The server checks every sheet of the document, including sheets you cannot see, and refuses if any of them is not a draft.', 1),
     -- COLL:uidocscope ── кінець секції ──
+    -- COLL:ui35registries ── UI-35: перелік довідників зі смугою показників і шторкою; ru/kz — порцією COLL:ui35registries у блоці I18N нижче ──
+    (N'registries.list.subtitle', N'en', N'Reference lists that cells, formulas and mappings pick values from: sources, substances, fuels, limits.', 1),
+    (N'registries.list.stats', N'en', N'Registry summary', 1),
+    (N'registries.list.statAll', N'en', N'registries', 1),
+    (N'registries.list.statExternal', N'en', N'synced from PI AF', 1),
+    (N'registries.list.registry', N'en', N'Registry', 1),
+    (N'registries.list.traits', N'en', N'Properties', 1),
+    (N'registries.list.source', N'en', N'Master source', 1),
+    (N'registries.list.sourceKind.Local', N'en', N'Kept in ECR', 1),
+    (N'registries.list.sourceKind.External', N'en', N'Synced from PI AF', 1),
+    (N'registries.list.sourceKind.Hybrid', N'en', N'PI AF and ECR', 1),
+    (N'registries.list.usedIn', N'en', N'Used in', 1),
+    (N'registries.list.manage', N'en', N'Entries and validity', 1),
+    (N'registries.list.back', N'en', N'All registries', 1),
+    (N'registries.list.searchPlaceholder', N'en', N'Registry name or code', 1),
+    (N'registries.list.noMatches', N'en', N'No registries match these filters.', 1)
+    -- COLL:ui35registries ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -17217,6 +17234,44 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:uidocscope ── кінець секції ──
+-- COLL:ui35registries ── ru/kz UI-35: перелік довідників зі шторкою; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'registries.list.subtitle', N'ru', N'Справочники, из которых ячейки, формулы и сопоставления берут значения: источники, вещества, топливо, лимиты.'),
+    (N'registries.list.subtitle', N'kz', N'Ұяшықтар, формулалар мен сәйкестендірулер мән алатын анықтамалықтар: көздер, заттар, отын, лимиттер.'),
+    (N'registries.list.stats', N'ru', N'Сводка по справочникам'),
+    (N'registries.list.stats', N'kz', N'Анықтамалықтар бойынша жиынтық'),
+    (N'registries.list.statAll', N'ru', N'справочников'),
+    (N'registries.list.statAll', N'kz', N'анықтамалық'),
+    (N'registries.list.statExternal', N'ru', N'синхронизируются из PI AF'),
+    (N'registries.list.statExternal', N'kz', N'PI AF-тан синхрондалады'),
+    (N'registries.list.registry', N'ru', N'Справочник'),
+    (N'registries.list.registry', N'kz', N'Анықтамалық'),
+    (N'registries.list.traits', N'ru', N'Свойства'),
+    (N'registries.list.traits', N'kz', N'Қасиеттер'),
+    (N'registries.list.source', N'ru', N'Ведущий источник'),
+    (N'registries.list.source', N'kz', N'Негізгі көз'),
+    (N'registries.list.sourceKind.Local', N'ru', N'Ведётся в ECR'),
+    (N'registries.list.sourceKind.Local', N'kz', N'ECR-де жүргізіледі'),
+    (N'registries.list.sourceKind.External', N'ru', N'Синхронизируется из PI AF'),
+    (N'registries.list.sourceKind.External', N'kz', N'PI AF-тан синхрондалады'),
+    (N'registries.list.sourceKind.Hybrid', N'ru', N'PI AF и ECR'),
+    (N'registries.list.sourceKind.Hybrid', N'kz', N'PI AF және ECR'),
+    (N'registries.list.usedIn', N'ru', N'Где используется'),
+    (N'registries.list.usedIn', N'kz', N'Қайда қолданылады'),
+    (N'registries.list.manage', N'ru', N'Записи и сроки действия'),
+    (N'registries.list.manage', N'kz', N'Жазбалар және қолданылу мерзімі'),
+    (N'registries.list.back', N'ru', N'Все справочники'),
+    (N'registries.list.back', N'kz', N'Барлық анықтамалықтар'),
+    (N'registries.list.searchPlaceholder', N'ru', N'Название или код справочника'),
+    (N'registries.list.searchPlaceholder', N'kz', N'Анықтамалық атауы немесе коды'),
+    (N'registries.list.noMatches', N'ru', N'Нет справочников, подходящих под эти фильтры.'),
+    (N'registries.list.noMatches', N'kz', N'Бұл сүзгілерге сәйкес анықтамалық жоқ.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:ui35registries ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t
