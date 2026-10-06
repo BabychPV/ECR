@@ -6725,8 +6725,25 @@ USING (VALUES
     -- COLL:exprbudget ── RC5: видима відмова за межею вкладеності (96) і кроків (20 000) замість мовчазного #BUDGET: публікація/редактор (expr.tooDeep, publish.problem.formulaTooDeep) і експлуатація (validation.rule.budget); ru/kz — порцією COLL:exprbudget у блоці I18N нижче ──
     (N'expr.tooDeep', N'en', N'The formula is too complex: nesting depth {depth}, allowed {max}. Split it into several calculated columns.', 1),
     (N'publish.problem.formulaTooDeep', N'en', N'Formula {formula} is too complex: nesting depth {depth}, allowed {max}. Split it into several calculated columns.', 1),
-    (N'validation.rule.budget', N'en', N'Rule ''{rule}'' could not be evaluated: the formula is too large for one calculation (more than 20,000 steps or 96 nesting levels). Split it into several calculated columns.', 1)
+    (N'validation.rule.budget', N'en', N'Rule ''{rule}'' could not be evaluated: the formula is too large for one calculation (more than 20,000 steps or 96 nesting levels). Split it into several calculated columns.', 1),
     -- COLL:exprbudget ── кінець секції ──
+    -- COLL:ui34tpl ── UI-34: перелік шаблонів за макетом (поточна версія, чернетка, стан, смуга, фільтри); ru/kz — порцією COLL:ui34tpl у блоці I18N нижче ──
+    (N'templates.subtitle', N'en', N'A template is the structure of a report: sheets, tables, columns, formulas and rules. Documents are created from a published version and stay on it.', 1),
+    (N'templates.stats', N'en', N'Template summary', 1),
+    (N'templates.stat.all', N'en', N'templates', 1),
+    (N'templates.stat.published', N'en', N'published versions', 1),
+    (N'templates.stat.publishedHint', N'en', N'Show templates that have a published version', 1),
+    (N'templates.stat.drafts', N'en', N'drafts in progress', 1),
+    (N'templates.stat.draftsHint', N'en', N'Show templates with an open draft', 1),
+    (N'templates.search', N'en', N'Search', 1),
+    (N'templates.searchPlaceholder', N'en', N'Template code', 1),
+    (N'templates.currentVersion', N'en', N'Current version', 1),
+    (N'templates.noCurrentVersion', N'en', N'no current version', 1),
+    (N'templates.notPublished', N'en', N'Not published yet', 1),
+    (N'templates.draft', N'en', N'Draft', 1),
+    (N'templates.state', N'en', N'State', 1),
+    (N'templates.noMatch', N'en', N'No templates match the filters', 1)
+    -- COLL:ui34tpl ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -15942,6 +15959,44 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:exprbudget ── кінець секції ──
+-- COLL:ui34tpl ── ru/kz UI-34: перелік шаблонів за макетом; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'templates.subtitle', N'ru', N'Шаблон — это структура отчёта: листы, таблицы, колонки, формулы и правила. Документы создаются из опубликованной версии и остаются на ней.'),
+    (N'templates.subtitle', N'kz', N'Үлгі — есептің құрылымы: парақтар, кестелер, бағандар, формулалар мен ережелер. Құжаттар жарияланған нұсқадан жасалады және сол нұсқада қалады.'),
+    (N'templates.stats', N'ru', N'Сводка по шаблонам'),
+    (N'templates.stats', N'kz', N'Үлгілер бойынша жиынтық'),
+    (N'templates.stat.all', N'ru', N'шаблонов'),
+    (N'templates.stat.all', N'kz', N'үлгі'),
+    (N'templates.stat.published', N'ru', N'опубликованных версий'),
+    (N'templates.stat.published', N'kz', N'жарияланған нұсқа'),
+    (N'templates.stat.publishedHint', N'ru', N'Показать шаблоны с опубликованной версией'),
+    (N'templates.stat.publishedHint', N'kz', N'Жарияланған нұсқасы бар үлгілерді көрсету'),
+    (N'templates.stat.drafts', N'ru', N'черновиков в работе'),
+    (N'templates.stat.drafts', N'kz', N'жұмыстағы нобай'),
+    (N'templates.stat.draftsHint', N'ru', N'Показать шаблоны с открытым черновиком'),
+    (N'templates.stat.draftsHint', N'kz', N'Ашық нобайы бар үлгілерді көрсету'),
+    (N'templates.search', N'ru', N'Поиск'),
+    (N'templates.search', N'kz', N'Іздеу'),
+    (N'templates.searchPlaceholder', N'ru', N'Код шаблона'),
+    (N'templates.searchPlaceholder', N'kz', N'Үлгі коды'),
+    (N'templates.currentVersion', N'ru', N'Текущая версия'),
+    (N'templates.currentVersion', N'kz', N'Ағымдағы нұсқа'),
+    (N'templates.noCurrentVersion', N'ru', N'текущей версии нет'),
+    (N'templates.noCurrentVersion', N'kz', N'ағымдағы нұсқа жоқ'),
+    (N'templates.notPublished', N'ru', N'Ещё не опубликован'),
+    (N'templates.notPublished', N'kz', N'Әлі жарияланбаған'),
+    (N'templates.draft', N'ru', N'Черновик'),
+    (N'templates.draft', N'kz', N'Нобай'),
+    (N'templates.state', N'ru', N'Состояние'),
+    (N'templates.state', N'kz', N'Күйі'),
+    (N'templates.noMatch', N'ru', N'Нет шаблонов по этим фильтрам'),
+    (N'templates.noMatch', N'kz', N'Сүзгілерге сәйкес үлгілер жоқ')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:ui34tpl ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

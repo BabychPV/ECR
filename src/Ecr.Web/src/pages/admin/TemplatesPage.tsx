@@ -1,32 +1,47 @@
-import { useState, type JSX } from 'react';
+import { useMemo, useState, type JSX } from 'react';
 import { Anchor, Button, Group, Modal, Text, TextInput } from '@mantine/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { apiFetch } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
 import type {
   CreateTemplateRequest,
   TemplateIdResponse,
   TemplatePage,
-  TemplateSummary,
   TemplateVersionsForTemplate,
   TemplateVersionSummary,
 } from '@/api/types';
-import { NewTemplateVersionModal } from '@/features/templates/NewTemplateVersionModal';
+import {
+  draftCount,
+  filterTemplateRows,
+  publishedVersionCount,
+  toTemplateListRow,
+  type TemplateListRow,
+} from '@/features/templates/templateListModel';
 import { can, useSession } from '@/shared/session/useSession';
 import { DataTable, type DataTableColumn } from '@/shared/ui/DataTable';
+import { FilterBar } from '@/shared/ui/FilterBar';
+import { ListPage } from '@/shared/ui/ListPage';
 import { LocalizedInput, hasAnyText, type LocalizedValue } from '@/shared/ui/LocalizedInput';
-import { PageHeader } from '@/shared/ui/PageHeader';
 import { StatusBadge } from '@/shared/ui/StatusBadge';
+import { TwoLine } from '@/shared/ui/TwoLine';
+import { useUrlParamsSetter, useUrlState } from '@/shared/ui/useUrlState';
 import { showApiError, showDone } from '@/shared/ui/notify';
 import { t } from '@/shared/i18n';
 
 /**
- * Перелік шаблонів і їхніх версій.
+ * Перелік шаблонів (`UI-34`): поточна версія, чернетка, стан.
  *
- * ⚠ Опублікована версія структурно **незмінна**: правка вимагає нової версії,
- * а презентаційна зміна лише піднімає `PresentationRevision` (D-16). Тому в
- * переліку видно і статус, і ревізію: без другої незрозуміло, чому кеш
+ * Макет: `docs/design/hybrid/screens-templates.js` → «1. /admin/templates —
+ * перелік» (`ListPage + StatStrip`, `KIT.md` §1.5 і §3): шапка з поясненням і
+ * однією головною дією, смуга показників, один рядок фільтрів, таблиця; клац
+ * по рядку веде на картку шаблону.
+ *
+ * ⚠ Ланцюжок бейджів УСІХ версій і кнопка «New version» у рядку прибрані за
+ * макетом: історія версій і клон живуть на картці шаблону
+ * (`TemplateVersionsSection`, `NewTemplateVersionModal`), а перелік відповідає
+ * на «що зараз чинне і що в роботі». Ревізія вигляду (`PresentationRevision`,
+ * D-16) лишається біля поточної версії — без неї незрозуміло, чому кеш
  * оновився без нової версії.
  */
 export function TemplatesPage(): JSX.Element {
@@ -36,9 +51,6 @@ export function TemplatesPage(): JSX.Element {
   const [creating, setCreating] = useState(false);
   const [code, setCode] = useState('');
   const [name, setName] = useState<LocalizedValue>({});
-
-  // Для якого шаблону заводимо версію; `null` — діалог закритий.
-  const [versioning, setVersioning] = useState<number | null>(null);
 
   const templates = useQuery({
     queryKey: queryKeys.templates.list(),
@@ -78,22 +90,6 @@ export function TemplatesPage(): JSX.Element {
 
   const versionsError = versionsBatch.error;
 
-  /*
-   * Версії РЯДКА — за ідентифікатором шаблону, а не за позицією рядка.
-   *
-   * ⛔ Доти тут стояло `versionQueries[index]`, де `index` — позиція в
-   * `page.items.map(...)`. Поки порядок рядків збігався з порядком відповіді
-   * сервера, формула працювала; шапка `DataTable` цей порядок ПЕРЕСТАВЛЯЄ, і та
-   * сама формула віддала б рядку ЧУЖИЙ перелік версій — посилання вело б на
-   * версію іншого шаблону, лишаючись при цьому цілком правдоподібним на вигляд.
-   *
-   * ⚠ Тепер джерело — Map за `templateId` із ОДНІЄЇ пакетної відповіді, а не
-   * позиція в масиві паралельних запитів: те саме правило, новий носій.
-   */
-  const versionsOf = new Map<number, readonly TemplateVersionSummary[]>(
-    (versionsBatch.data ?? []).map((entry) => [entry.templateId, entry.versions]),
-  );
-
   /**
    * Створення шаблону (`ФВ-2.1`).
    *
@@ -118,165 +114,251 @@ export function TemplatesPage(): JSX.Element {
     onError: showApiError,
   });
 
-  /**
-   * Остання версія шаблону — від неї клонується наступна.
-   *
-   * ⚠ Клон робиться з ОСТАННЬОЇ версії, якщо вона є: порожня версія поруч із
-   * наявною структурою — майже завжди помилка, а не намір. Номер задає
-   * людина: `Major.Minor.Patch.Build` несе сенс (`ФВ-2.8`), і вигадувати його
-   * за користувача означало б вигадувати клас зміни. Сам діалог —
-   * `NewTemplateVersionModal` (спільний із карткою шаблону, `U-19`).
-   */
-  const latestVersionOf = (templateId: number): number | null => {
-    const versions = versionsOf.get(templateId) ?? [];
-
-    return versions.length === 0 ? null : (versions[versions.length - 1]?.id ?? null);
-  };
-
   const editable = can(session.data, 'Template.Edit');
 
+  const navigate = useNavigate();
+  const [params] = useSearchParams();
+  const [stat, setStat] = useUrlState('stat');
+  const setParams = useUrlParamsSetter();
+
   /*
-   * ⚠ Дві колонки, межа `L5` — сім: запас є, і третьою напрошувався лічильник
-   * версій. Його тут НЕМАЄ навмисно — це рефакторинг, а нова колонка додала б
-   * на екран число, якого на ньому не було.
+   * Версії РЯДКА — за ідентифікатором шаблону, а не за позицією рядка.
    *
-   * ⛔ Колонка версій лишається `render`-колонкою і `sortable: false`: у переліку
-   * посилань немає скалярного значення, за яким їх упорядковувати, а сортування,
-   * що мовчки нічого не робить, гірше за його відсутність (`DataTableColumn.
-   * sortable`).
+   * ⛔ Доти тут стояло `versionQueries[index]`, де `index` — позиція в
+   * `page.items.map(...)`. Поки порядок рядків збігався з порядком відповіді
+   * сервера, формула працювала; шапка `DataTable` цей порядок ПЕРЕСТАВЛЯЄ, і та
+   * сама формула віддала б рядку ЧУЖИЙ перелік версій — посилання вело б на
+   * версію іншого шаблону, лишаючись при цьому цілком правдоподібним на вигляд.
+   *
+   * ⚠ Тепер джерело — Map за `templateId` із ОДНІЄЇ пакетної відповіді, а не
+   * позиція в масиві паралельних запитів: те саме правило, новий носій.
    */
-  const columns: readonly DataTableColumn<TemplateSummary>[] = [
+  /*
+   * ⚠ Рядки будуються лише коли прийшли І шаблони, І версії: рядок без версій
+   * показав би «Not published yet» там, де версії просто ще вантажаться.
+   * `undefined` — це «ще не знаємо» для `DataTable` (скелет), не «порожньо».
+   */
+  const rows = useMemo<readonly TemplateListRow[] | undefined>(() => {
+    if (templates.data === undefined) return undefined;
+    if (templates.data.items.length > 0 && versionsBatch.data === undefined) return undefined;
+
+    const versionsOf = new Map<number, readonly TemplateVersionSummary[]>(
+      (versionsBatch.data ?? []).map((entry) => [entry.templateId, entry.versions]),
+    );
+
+    return templates.data.items.map((template) =>
+      toTemplateListRow(template, versionsOf.get(template.id) ?? []),
+    );
+  }, [templates.data, versionsBatch.data]);
+
+  const query = params.get('q');
+  const state = params.get('state');
+  const filtered = query !== null || state !== null || stat !== null;
+
+  const visible = useMemo(
+    () => (rows === undefined ? undefined : filterTemplateRows(rows, { query, state, stat })),
+    [rows, query, state, stat],
+  );
+
+  const versionLink = (templateId: number, version: TemplateVersionSummary): JSX.Element => (
+    <Anchor
+      component={Link}
+      size="sm"
+      ff="monospace"
+      to={`/admin/templates/${String(templateId)}/versions/${String(version.id)}`}
+      // ⛔ Посилання на версію живе в рядку, що сам веде на картку шаблону:
+      // без цього клац по версії відкрив би версію і тут-таки картку.
+      onClick={(event) => event.stopPropagation()}
+    >
+      {version.version}
+    </Anchor>
+  );
+
+  /*
+   * ⚠ Колонки макета, для яких у переліку НЕМАЄ даних («Documents», «Updated»,
+   * автор чернетки), не малюються (`D15-06`); їх місце — TODO-контракт у листі
+   * готовності. Замість «Documents» стоїть лічильник версій — він є у
+   * `TemplateSummary.versionCount`.
+   */
+  const columns: readonly DataTableColumn<TemplateListRow>[] = [
     {
       key: 'code',
-      label: t('templates.code'),
+      label: t('templates.card'),
+      minWidth: 200,
 
       /*
-       * ⛔ `UI-09`: код став ПОСИЛАННЯМ на картку шаблону. До цього з переліку
-       * не було входу на сам шаблон узагалі — лише на його версію, — і
-       * перейменування з архівуванням лишалися недосяжними з інтерфейсу,
-       * хоча сервер обидва вміє.
+       * ⛔ `UI-09`: код — ПОСИЛАННЯ на картку шаблону; без нього з переліку не
+       * було входу на сам шаблон. Назви шаблону в `TemplateSummary` немає,
+       * тож перший рядок макета («назва + код») зводиться до коду.
        *
-       * ⚠ `sortValue` заданий явно: `render` перебиває клітинку вузлом, а
-       * сортувати перелік треба за самим кодом, не за розміткою. Без цього
-       * рядка шапка впорядкувала б стовпець за чимось, що не є текстом на
-       * екрані, — і порядок виглядав би випадковим.
+       * ⚠ `sortValue` явно: `render` дає вузол, сортувати треба за кодом.
        */
-      render: (template) => (
-        <Anchor component={Link} size="sm" to={`/admin/templates/${String(template.id)}`}>
-          {template.code}
+      render: (row) => (
+        <Anchor
+          component={Link}
+          size="sm"
+          to={`/admin/templates/${String(row.template.id)}`}
+          onClick={(event) => event.stopPropagation()}
+        >
+          {row.template.code}
         </Anchor>
       ),
-      sortValue: (template) => template.code,
+      sortValue: (row) => row.template.code,
+    },
+    {
+      key: 'current',
+      label: t('templates.currentVersion'),
+      sortValue: (row) => row.current?.version ?? '',
+      render: (row) => {
+        if (row.current !== null) {
+          return (
+            <Group gap="xs" wrap="nowrap">
+              {versionLink(row.template.id, row.current)}
+              {/* ⚠ Ревізія вигляду — лише коли вона щось каже: «r0» без
+                  підпису читався як незрозумілий код (UX-прохід 2026-09-23). */}
+              {row.current.presentationRevision > 0 && (
+                <Text size="xs" c="dimmed">
+                  {t('version.presentationRevision', {
+                    revision: row.current.presentationRevision,
+                  })}
+                </Text>
+              )}
+            </Group>
+          );
+        }
+
+        if (row.lastDeprecated !== null) {
+          return (
+            <TwoLine
+              primary={versionLink(row.template.id, row.lastDeprecated)}
+              secondary={t('templates.noCurrentVersion')}
+            />
+          );
+        }
+
+        return (
+          <Text size="sm" c="dimmed">
+            {t('templates.notPublished')}
+          </Text>
+        );
+      },
+    },
+    {
+      key: 'draft',
+      label: t('templates.draft'),
+      sortValue: (row) => row.draft?.version ?? '',
+      render: (row) => (row.draft === null ? null : versionLink(row.template.id, row.draft)),
     },
     {
       key: 'versions',
       label: t('templates.versions'),
-      sortable: false,
-      render: (template) => (
-        <Group gap="xs">
-          {(versionsOf.get(template.id) ?? []).map((version) => (
-            /*
-             * ⛔ Тут стояв ОДИН `Badge`, у тілі якого друкувався
-             * `version.status` — тобто код сервера (`Published`,
-             * `Deprecated`) як видимий текст. Це той самий дефект,
-             * що вже знято з п'яти екранів: код не є текстом
-             * інтерфейсу й не перекладається, тож казахський
-             * користувач бачив англійське слово, а `Deprecated`
-             * нічим не відрізнявся від чинної версії, окрім
-             * `variant`, який ніхто не пояснює.
-             *
-             * ⚠ `Draft` і `Published` у наборі обидва `neutral`, і
-             * це навмисно: чернетка — не проблема й не
-             * попередження. Розрізняє їх ПІДПИС із каталогу
-             * (`status.version.*`), а не колір — рівно те, чого
-             * вимагає `L3`. Знятий `variant="filled"` для
-             * `Published` нічого не повідомляв: «опублікована» — це
-             * норма, а не подія.
-             *
-             * ⚠ Посилання стало `Anchor`, а не `Badge` із
-             * `component={Link}`: перехід на версію — це посилання,
-             * і читалка має оголосити його посиланням, а не
-             * позначкою з курсором-пальцем.
-             */
-            <Group key={version.id} gap="xs" wrap="nowrap">
-              <Anchor
-                component={Link}
-                size="sm"
-                to={`/admin/templates/${template.id}/versions/${version.id}`}
-              >
-                {version.version}
-              </Anchor>
-              {/* ⚠ Лічильник правок вигляду — лише коли він щось каже: «r0»
-                  без підпису читався як незрозумілий код (UX-прохід 2026-09-23). */}
-              {version.presentationRevision > 0 && (
-                <Text size="xs" c="dimmed">
-                  {t('version.presentationRevision', { revision: version.presentationRevision })}
-                </Text>
-              )}
-              <StatusBadge kind="version" state={version.status} quiet />
-            </Group>
-          ))}
-
-          {/* ⛔ Кнопка стоїть у рядку шаблону, а не на окремому
-              екрані: версія завжди належить шаблону, і питання
-              «якому саме» не має виникати. */}
-          {editable && (
-            <Button
-              size="xs"
-              variant="default"
-              onClick={() => setVersioning(template.id)}
-            >
-              {t('templates.newVersion')}
-            </Button>
-          )}
-        </Group>
-      ),
+      num: true,
+      sortValue: (row) => row.template.versionCount,
+      render: (row) => row.template.versionCount,
+    },
+    {
+      key: 'state',
+      label: t('templates.state'),
+      sortValue: (row) => row.state ?? '',
+      render: (row) =>
+        row.state === null ? null : <StatusBadge kind="version" state={row.state} quiet />,
     },
   ];
 
+  /*
+   * ⚠ Смуга — лише з повних даних: показник «0 drafts», порахований до приходу
+   * версій, був би неправдою, а не нулем (`StatStrip`: нуль — це дані).
+   * «Documents using them» з макета немає — немає агрегату (TODO-контракт).
+   */
+  const stats =
+    rows === undefined || rows.length === 0
+      ? undefined
+      : {
+          label: t('templates.stats'),
+          items: [
+            { id: 'all', label: t('templates.stat.all'), value: rows.length, filter: false },
+            {
+              id: 'published',
+              label: t('templates.stat.published'),
+              value: publishedVersionCount(rows),
+              hint: t('templates.stat.publishedHint'),
+            },
+            {
+              id: 'drafts',
+              label: t('templates.stat.drafts'),
+              value: draftCount(rows),
+              hint: t('templates.stat.draftsHint'),
+            },
+          ] as const,
+          active: stat,
+          onSelect: setStat,
+        };
+
   return (
     <>
-      <PageHeader
-        title={t('templates.title')}
-        actions={
-          editable && (
-            <Button onClick={() => setCreating(true)}>
-              {t('templates.create')}
-            </Button>
+      <ListPage
+        header={{
+          title: t('templates.title'),
+          count: rows?.length,
+          meta: (
+            <Text size="sm" c="dimmed">
+              {t('templates.subtitle')}
+            </Text>
+          ),
+          primary: editable
+            ? { label: t('templates.create'), onClick: () => setCreating(true) }
+            : undefined,
+        }}
+        stats={stats}
+        filters={
+          rows === undefined || rows.length === 0 ? null : (
+            <FilterBar
+              search={{
+                label: t('templates.search'),
+                placeholder: t('templates.searchPlaceholder'),
+              }}
+              filters={[
+                {
+                  id: 'state',
+                  label: t('templates.state'),
+                  options: (['Published', 'Draft', 'Deprecated'] as const).map((value) => ({
+                    value,
+                    label: t(`status.version.${value}`),
+                  })),
+                },
+              ]}
+              clearLabel={t('filters.clear')}
+            />
           )
         }
-      />
-      {/*
-       * ⛔ Помилка версій підмішана до помилки переліку навмисно. Інакше
-       * шаблони показувалися б, а колонка версій була б порожньою — тобто
-       * «версій немає» замість «версії не завантажилися» (ФВ-14.22).
-       *
-       * ⛔ `DataTable` замінює `AsyncBoundary` + `<Table>` РАЗОМ, а не лише
-       * розмітку: обгортку станів набір тримає всередині себе (той самий
-       * `AsyncBoundary`, `skeleton="table"`). Лишити зовнішню поруч означало б
-       * два перемикачі станів на одну таблицю — саме ту розбіжність, заради
-       * усунення якої таблиця й стала компонентом. Правило «відмова ≠ порожньо»
-       * від цього не слабшає: воно переїхало разом із обгорткою.
-       *
-       * ⚠ `rows` — це `templates.data?.items`, тобто `undefined`, доки запиту не
-       * зробили. `?? []` перетворило б «ще не питали» на «порожньо» — рівно ту
-       * підміну, яку обгортка й ловить.
-       *
-       * ⚠ `total`/`onShowMore` не передаються, хоч відповідь і курсорна: екран
-       * бере `?limit=100` одним запитом і другої сторінки не просить. Кнопка,
-       * яка нічого не довантажує, і підсумок «2 / 2», що не є правдою про
-       * сервер, — обидва гірші за їхню відсутність (`D15-06`). `clearFiltersLabel`
-       * передавати теж нема куди: фільтрів екран не має.
-       */}
-      <DataTable<TemplateSummary>
-        columns={columns}
-        rows={templates.data?.items}
-        rowKey={(template) => String(template.id)}
-        isPending={templates.isPending}
-        error={templates.error ?? versionsError}
-        emptyTitle={t('templates.empty')}
-        emptyHint={t('templates.emptyHint')}
-        onRetry={() => void templates.refetch()}
+        table={
+          /*
+           * ⛔ Помилка версій підмішана до помилки переліку навмисно: інакше
+           * шаблони показувалися б без поточних версій — тобто «не
+           * опубліковано» замість «версії не завантажилися» (ФВ-14.22).
+           *
+           * ⚠ `rows` — `undefined`, доки дані не прийшли: `?? []` перетворило б
+           * «ще не питали» на «порожньо» (`DataTable` тримає стани сам).
+           */
+          <DataTable<TemplateListRow>
+            columns={columns}
+            rows={visible}
+            rowKey={(row) => String(row.template.id)}
+            isPending={templates.isPending || (rows === undefined && versionsBatch.isPending)}
+            error={templates.error ?? versionsError}
+            emptyTitle={t('templates.empty')}
+            emptyHint={t('templates.emptyHint')}
+            filtered={filtered}
+            noMatchTitle={t('templates.noMatch')}
+            onClearFilters={() => setParams({ q: null, state: null, stat: null })}
+            clearFiltersLabel={t('filters.clear')}
+            onRowClick={(row) => navigate(`/admin/templates/${String(row.template.id)}`)}
+            onRetry={() => {
+              void templates.refetch();
+              void versionsBatch.refetch();
+            }}
+          />
+        }
       />
 
       <Modal opened={creating} onClose={() => setCreating(false)} title={t('templates.create')}>
@@ -311,24 +393,6 @@ export function TemplatesPage(): JSX.Element {
         </Group>
       </Modal>
 
-      <NewTemplateVersionModal
-        templateId={versioning}
-        cloneFrom={versioning === null ? null : latestVersionOf(versioning)}
-        onClose={() => {
-          setVersioning(null);
-
-          /*
-           * ⚠ `NewTemplateVersionModal.onSuccess` інвалідовує
-           * `queryKeys.templates.versionsOf(templateId)` — запис кешу ІНШИХ
-           * екранів (див. коментар над `versionsBatch` вище). Пакетний
-           * запит цієї сторінки має ВЛАСНИЙ ключ і під ту інвалідацію не
-           * потрапляє, тож оновлюємо його тут явно — і на «Скасувати» теж
-           * (зайвий повторний запит дешевший за застарілий перелік версій
-           * після успішного створення).
-           */
-          void queryClient.invalidateQueries({ queryKey: queryKeys.templates.allVersionsBatch() });
-        }}
-      />
     </>
   );
 }
