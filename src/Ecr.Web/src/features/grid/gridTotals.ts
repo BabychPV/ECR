@@ -113,7 +113,7 @@ function valueAt(
  * `ECR-CELL-0422`) теж НЕ стає нулем — воно просто не бере участі. Мовчазний
  * нуль тут читався б як виміряне значення.
  */
-function addendOf(value: unknown): string | null {
+export function addendOf(value: unknown): string | null {
   if (value === null || value === undefined) return null;
   if (typeof value === 'boolean') return null;
 
@@ -124,7 +124,7 @@ function addendOf(value: unknown): string | null {
 }
 
 /** Десятковий рядок → ціле в масштабі `scale` (кількість знаків після коми). */
-function scaledOf(decimal: string, scale: number): bigint {
+export function scaledOf(decimal: string, scale: number): bigint {
   const negative = decimal.startsWith('-');
   const magnitude = negative ? decimal.slice(1) : decimal;
   const dot = magnitude.indexOf('.');
@@ -139,7 +139,7 @@ function scaledOf(decimal: string, scale: number): bigint {
 }
 
 /** Ціле в масштабі `scale` → канонічний десятковий рядок. */
-function unscale(value: bigint, scale: number): string {
+export function unscale(value: bigint, scale: number): string {
   const negative = value < 0n;
   const digits = (negative ? -value : value).toString().padStart(scale + 1, '0');
 
