@@ -1246,7 +1246,6 @@ export function PeriodsPage(): JSX.Element {
               label={t('periods.reopenUntil')}
               description={t('periods.reopenUntilHint')}
               // Формат заданий кодом — однозначний і не залежить від локалі ОС.
-              valueFormat="YYYY-MM-DD"
               clearable
               value={reopenUntil}
               onChange={setReopenUntil}

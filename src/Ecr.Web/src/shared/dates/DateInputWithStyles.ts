@@ -19,4 +19,9 @@
  */
 import '@mantine/dates/styles.css';
 
-export { DateInput } from '@mantine/dates';
+/*
+ * ⛔ Під іменем `DateInput` — поле зі СТРОГИМ розбором набраного тексту (A1-02, `StrictDateInput`),
+ * а не голий `DateInput` із `@mantine/dates`: той читав `05.10.2026` як 10 травня і перекочував
+ * `2026-13-45` у 2027 рік. Ім'я лишилось, щоб лінивим завантажувачам не треба було мінятися.
+ */
+export { StrictDateInput as DateInput } from './StrictDateInput';

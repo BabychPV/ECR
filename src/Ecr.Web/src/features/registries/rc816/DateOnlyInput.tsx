@@ -38,7 +38,6 @@ export function DateOnlyInput({
         miw={140}
         label={label}
         aria-label={ariaLabel}
-        valueFormat="YYYY-MM-DD"
         clearable={clearable === true}
         disabled={disabled === true}
         value={parseDateOnly(value)}

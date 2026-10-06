@@ -389,6 +389,20 @@ export function DocumentHeaderPanel({
   const [seed, setSeed] = useState<{ documentId: number; dto: DocumentHeaderDto } | null>(null);
   const seedFields = seed !== null && seed.documentId === documentId ? fieldsOf(seed.dto) : [];
 
+  /*
+   * A1-02: поля дати, у яких набрано нерозібраний текст. Поле не змінює значення, доки текст не
+   * дата, тож «Зберегти» записало б СТАРУ дату поруч із відмовою під полем — збереження вимкнене.
+   */
+  const [invalidDates, setInvalidDates] = useState<ReadonlySet<string>>(() => new Set());
+  const markInvalidDate = (code: string, invalid: boolean): void =>
+    setInvalidDates((current) => {
+      if (current.has(code) === invalid) return current;
+      const next = new Set(current);
+      if (invalid) next.add(code);
+      else next.delete(code);
+      return next;
+    });
+
   const dirty = seedFields.filter(
     (field) => !sameHeaderValue(field, effectiveValueOf(field, draft[field.code]), field.value),
   );
@@ -521,6 +535,7 @@ export function DocumentHeaderPanel({
             value={draft[field.code]}
             disabled={!canEdit || save.isPending}
             onChange={(value) => setField(field.code, value)}
+            onInvalidDate={(invalid) => markInvalidDate(field.code, invalid)}
             lookupEntries={
               field.lookupRegistryDefId === null || field.lookupRegistryDefId === undefined
                 ? EmptyLookupEntries
@@ -540,7 +555,7 @@ export function DocumentHeaderPanel({
         <Group gap="xs">
           <Button
             size="xs"
-            disabled={dirty.length === 0}
+            disabled={dirty.length === 0 || invalidDates.size > 0}
             loading={save.isPending}
             onClick={() => save.mutate(dirtyPatch)}
           >
@@ -566,6 +581,7 @@ function HeaderFieldInput({
   value,
   disabled,
   onChange,
+  onInvalidDate,
   lookupEntries,
   lookupPending,
   units,
@@ -574,6 +590,8 @@ function HeaderFieldInput({
   value: unknown;
   disabled: boolean;
   onChange: (value: unknown) => void;
+  /** A1-02: у полі дати набрано текст, що не є датою (`true`), або його виправили (`false`). */
+  onInvalidDate: (invalid: boolean) => void;
   /** Записи довідника поля (лише для `dataType === 'Lookup'` із заданим `lookupRegistryDefId`). */
   lookupEntries: readonly RegistryEntryDto[];
   /** Чи довідник ЦЬОГО поля ще завантажується (окремий запит на довідник). */
@@ -601,11 +619,11 @@ function HeaderFieldInput({
       <Suspense fallback={null}>
         <DateInput
           label={label}
-          valueFormat="YYYY-MM-DD"
           clearable
           disabled={disabled}
           value={typeof value === 'string' ? parseDateOnly(value) : null}
           onChange={(next) => onChange(formatDateOnly(next))}
+          onInvalidChange={onInvalidDate}
           data-header-field={field.code}
         />
       </Suspense>
