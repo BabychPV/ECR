@@ -131,11 +131,18 @@ public sealed class GetDocumentTemplateHandler(
         var snapshot = await metadata.GetAsync(templateVersionId, ct).ConfigureAwait(false);
         var groupRules = await documents.GetGroupRulesAsync(templateVersionId, ct).ConfigureAwait(false);
 
+        // ⛔ UI-31 (P1, прихований аркуш): майстер створення документа показує рівно ці аркуші,
+        // тож аркуш, якого користувач не бачить (`Deny` на аркуш, усі таблиці закриті), сюди не
+        // потрапляє — інакше його код і назва доходили б до людини раніше, ніж документ існує.
+        // Правило те саме, що для читання документа (`DocumentReadScope.CanReadSheet`, L1-18).
+        var readable = DocumentReadScope.For(profile, projectId, snapshot);
+
         return new DocumentTemplateDto(
             templateVersionId,
             template.Code,
             version.Version,
             [.. snapshot.Sheets
+                .Where(s => readable.CanReadSheet(s.Id))
                 .OrderBy(s => s.Ordinal)
                 .Select(s => new DocumentTemplateSheetDto(s.Id, s.Code, s.NameL10n, s.SheetGroup, s.IsMandatory))],
             [.. groupRules.Select(r => new SheetGroupRuleDto(r.SheetGroup, r.RuleKind, r.TargetGroup))]);
