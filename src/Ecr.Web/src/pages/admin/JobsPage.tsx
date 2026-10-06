@@ -306,7 +306,8 @@ export function JobsPage(): JSX.Element {
     <ListPage
       header={{
         title: t('jobs.title'),
-        meta: t('jobs.description'),
+        // Пояснення сторінки ЗАМІСТЬ пояснення маршруту, а не другим рядком під ним (batch-2-a, дефект 3).
+        description: t('jobs.description'),
         secondary: [
           { label: t('jobs.refresh'), onClick: () => void jobs.refetch() },
           { label: t('jobs.findById'), onClick: () => setFinding(true) },

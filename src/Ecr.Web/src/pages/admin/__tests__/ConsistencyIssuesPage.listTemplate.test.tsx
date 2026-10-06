@@ -90,7 +90,9 @@ describe('ConsistencyIssuesPage на шаблоні переліку (UI-20)', (
     show();
 
     await screen.findByText('Знахідка 1');
-    expect(screen.getByText('⟦consistency.description⟧')).toBeTruthy();
+    // Рівно одне пояснення під заголовком — у рядку пояснення, не другим `meta` (batch-2-a, дефект 3).
+    expect(screen.getAllByTestId('page-description').map((node) => node.textContent)).toEqual(['⟦consistency.description⟧']);
+    expect(screen.getAllByText('⟦consistency.description⟧')).toHaveLength(1);
 
     const strip = screen.getByRole('group', { name: '⟦consistency.statsLabel⟧' });
     const value = (label: string): string =>

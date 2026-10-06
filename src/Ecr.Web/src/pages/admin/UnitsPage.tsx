@@ -347,7 +347,8 @@ export function UnitsPage(): JSX.Element {
     <ListPage
       header={{
         title: t('units.title'),
-        meta: t('units.description'),
+        // Пояснення сторінки ЗАМІСТЬ пояснення маршруту, а не другим рядком під ним (batch-2-a, дефект 3).
+        description: t('units.description'),
         primary: canEdit ? { label: t('units.new'), onClick: () => setCreating(true) } : undefined,
         secondary: [{ label: t('units.checkConversion'), onClick: () => setConverting('') }],
       }}
