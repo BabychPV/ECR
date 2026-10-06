@@ -66,11 +66,12 @@ function show(): void {
 /** Текст клітинки значення в рядку з цим підписом. */
 async function valueOf(labelKey: string): Promise<string> {
   const label = await screen.findByText(`⟦${labelKey}⟧`);
-  const row = label.closest('tr');
+  // ⚠ UI-39: подробиці бази — перелік `KeyValue` (`<dl>`), як у макеті, а не таблиця.
+  const item = label.closest('[data-key-value-item]');
 
-  expect(row).not.toBeNull();
+  expect(item).not.toBeNull();
 
-  return row?.cells[1]?.textContent ?? '';
+  return item?.querySelector('dd')?.textContent ?? '';
 }
 
 afterEach(() => {
