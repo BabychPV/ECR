@@ -113,6 +113,23 @@ describe('SnapshotsPage: фільтр періоду — PeriodPicker заміс
     await waitFor(() => expect(seenSearch).toBe('?periodKey=202701'));
   });
 
+  it('A4-02: Enter після набору періоду — адреса оновлена, поле без фокуса й показує назву', async () => {
+    mockFetch();
+    show('/admin/snapshots?periodKey=202609');
+
+    const input = await screen.findByLabelText('⟦documents.period⟧');
+    fireEvent.focus(input);
+    input.focus();
+    fireEvent.change(input, { target: { value: '202610' } });
+    await waitFor(() => expect(seenSearch).toBe('?periodKey=202610'));
+    expect(document.activeElement).toBe(input);
+
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    expect(document.activeElement).not.toBe(input);
+    expect(input).toHaveProperty('value', 'October 2026');
+  });
+
   it('очищення поля звужує перелік до «без періоду» — параметр зникає із запиту', async () => {
     mockFetch();
     show('/admin/snapshots?periodKey=202512');
