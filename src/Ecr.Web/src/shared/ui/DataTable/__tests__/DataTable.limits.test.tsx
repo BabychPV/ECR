@@ -258,3 +258,22 @@ describe('Межа 3: `defaultSort` — порядок і `aria-sort` на ст�
     expect(headerOf('Group').getAttribute('aria-sort')).toBe('ascending');
   });
 });
+
+describe('Підсвітка рядка — токен теми (batch-2-a, дефект 5)', () => {
+  it('рядок під курсором фарбується `--ecr-hover`, а не сірим Mantine `dark-5`', () => {
+    /*
+     * ⛔ Мутаційний доказ: приберіть `highlightOnHoverColor` у `DataTable.tsx` — змінна
+     * зникне, і в темній темі приглушений другий рядок знову ляже на #3b3b3b (4.34:1).
+     */
+    renderWithMantine(
+      <DataTable<Row>
+        columns={[{ key: 'id', label: 'Id' }]}
+        rows={[row('a', 1, 'g', '1')]}
+        rowKey={(r) => r.key}
+      />,
+    );
+
+    const table = document.querySelector('table');
+    expect(table?.style.getPropertyValue('--table-highlight-on-hover-color')).toBe('var(--ecr-hover)');
+  });
+});

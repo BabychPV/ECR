@@ -207,6 +207,12 @@ describe('PeriodsPage: огляд усіх проєктів і плитки ро
     expect(within(tiles[1] as HTMLElement).getByText(/closes in 20 days/)).toBeDefined();
     expect(within(tiles[2] as HTMLElement).getByText(/^opens /)).toBeDefined();
 
+    // ⛔ «Ще не відкрито» — пунктир за макетом, БЕЗ прозорості: `opacity` топила приглушений
+    // текст плитки до 3.34:1 (batch-2-a, дефект 5).
+    for (const tile of tiles) expect(tile.style.opacity).toBe('');
+    expect(tiles[2]?.getAttribute('style')).toMatch(/border: 1px dashed/);
+    expect(tiles[1]?.getAttribute('style')).toMatch(/border: 1px solid/);
+
     // ⛔ Рішення 1: плитки не несуть дій над періодом («Open October»/«Close»).
     expect(within(year).queryByText(/Reopen|Close now|Open period/)).toBeNull();
 
