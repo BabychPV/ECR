@@ -48,6 +48,9 @@ public static class ValidationMessageTemplates
     /// <summary>Правило не дало логічної відповіді.</summary>
     public const string RuleNotLogical = "validation.rule.notLogical";
 
+    /// <summary>Правило не обчислилося: формула завелика для одного обчислення (бюджет кроків або глибини).</summary>
+    public const string RuleBudget = "validation.rule.budget";
+
     private static readonly Dictionary<string, (string En, string Ru, string Kz)> Table = new(StringComparer.Ordinal)
     {
         [CheckMismatch] = (
@@ -86,6 +89,10 @@ public static class ValidationMessageTemplates
             "Rule '{rule}' did not return a logical answer: {reason}",
             "Правило '{rule}' не дало логического ответа: {reason}",
             "'{rule}' ережесі логикалық жауап бермеді: {reason}"),
+        [RuleBudget] = (
+            "Rule '{rule}' could not be evaluated: the formula is too large for one calculation (more than 20,000 steps or 96 nesting levels). Split it into several calculated columns.",
+            "Правило '{rule}' не удалось вычислить: формула слишком велика для одного расчёта (больше 20 000 шагов или 96 уровней вложенности). Разбейте её на несколько вычисляемых колонок.",
+            "'{rule}' ережесін есептеу мүмкін болмады: формула бір есептеу үшін тым үлкен (20 000 қадамнан немесе 96 ену деңгейінен артық). Оны бірнеше есептелетін бағанға бөліңіз."),
     };
 
     /// <summary>Усі ключі шаблонів (для сторожа збігу з сідом).</summary>

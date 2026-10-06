@@ -29,6 +29,8 @@ export const PublishProblemKeys = [
   'publish.problem.importCycle',
   'publish.problem.importModeMismatch',
   'publish.problem.rowScopeReferencesLibrarySubstance',
+  // RC5: формула глибша за межу обчислення (96 рівнів) — відмова з поясненням замість #BUDGET.
+  'publish.problem.formulaTooDeep',
 ] as const;
 
 type PublishProblemKey = (typeof PublishProblemKeys)[number];

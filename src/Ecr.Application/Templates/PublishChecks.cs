@@ -328,6 +328,17 @@ public static class PublishChecks
 
         var root = parsed.Expression.Root;
 
+        // ✎ RC5: глибина вкладеності — межа СТЕКА обчислення (96 рівнів). Формулу,
+        // яку обчислювач однаково не порахує, відхиляємо тут, з поясненням, а не
+        // віддаємо автору мовчазне #BUDGET у готовому документі. Плаский ланцюг
+        // глибини не додає (обчислювач обходить лівий гребінь циклом), тож довга
+        // сума без вкладених дужок цим не зачіпається.
+        if (Ecr.Expressions.Evaluation.ExpressionNesting.Diagnose(root) is { } tooDeep)
+        {
+            diagnostics.Add(tooDeep);
+            return null;
+        }
+
         // 11. Предикат динамічного діапазону — без заборонених конструкцій.
         // ⚠ Не потребує ані структури, ані контекстів: працює завжди.
         PredicateValidator.Validate(root, diagnostics);

@@ -581,6 +581,7 @@ public sealed partial class EndpointCoverageTests
                 "publish.problem.libraryHasRules", "publish.problem.ambiguousReference",
                 "publish.problem.formulaNotFound", "publish.problem.importCycle",
                 "publish.problem.importModeMismatch", "publish.problem.rowScopeReferencesLibrarySubstance",
+                "publish.problem.formulaTooDeep",
             ],
             "Пункт переліку проблем публікації (PublishProblemKeys)."),
     ];

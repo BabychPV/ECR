@@ -133,6 +133,18 @@ public static class MethodologyPublishChecks
                 continue;
             }
 
+            // ✎ RC5: та сама межа глибини, що й у шаблонах (`PublishChecks.CheckExpression`):
+            // формулу, яку обчислювач не порахує (#BUDGET), публікація відхиляє з поясненням.
+            if (Ecr.Expressions.Evaluation.ExpressionNesting.Diagnose(formula.Root) is { MessageParams: { } deep })
+            {
+                problems.Add(PublishProblem.Of(
+                    "publish.problem.formulaTooDeep",
+                    $"Формула «{formula.Code}» надто складна: глибина {deep["depth"]}, дозволено {deep["max"]} — "
+                    + "розбийте її на кілька обчислюваних колонок.",
+                    ("formula", formula.Code), ("depth", deep["depth"]), ("max", deep["max"])));
+                continue;
+            }
+
             problems.AddRange(ConstantsInExpression(formula, byCode));
             problems.AddRange(ResultTypeProblems(formula, byCode, outputCodes));
         }
