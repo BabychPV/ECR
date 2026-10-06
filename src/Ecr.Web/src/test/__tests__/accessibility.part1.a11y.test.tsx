@@ -97,7 +97,7 @@ registerA11yFetchMock();
  * польоті» — а не на зелений прогін, який тут нічого не доводить.
  */
 beforeAll(async () => {
-  await import('@/features/grid/SheetTables');
+  await import('@/features/grid/SheetWorkspace');
 });
 
 suite.each(Themes)('Доступність маршрутів (%s)', (colorScheme) => {
