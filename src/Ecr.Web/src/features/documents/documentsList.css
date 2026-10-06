@@ -1,0 +1,17 @@
+/*
+ * Перелік документів на вузькому екрані (`UI-42`).
+ *
+ * ⚠ Макет `docs/design/hybrid/screens-work.js` (екран «/»): колонки Period і Updated — `hideSm`,
+ * тобто на ≤ 640 px їх немає; `index.html` `.hide-sm{display:none!important}`. Решта не вміщається
+ * — прокручується таблиця у власному контейнері, а сторінка горизонтальної прокрутки не має.
+ */
+.ecr-docs-table-scroll {
+  min-width: 0;
+  overflow-x: auto;
+}
+
+@media (max-width: 640px) {
+  .ecr-docs-table-scroll [data-column='updated'] {
+    display: none;
+  }
+}
