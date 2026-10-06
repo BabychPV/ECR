@@ -31,30 +31,12 @@ export function createDateCellEditor() {
     let lastKeyAt = 0;
     let focusTimer: ReturnType<typeof setTimeout> | null = null;
 
-    /** `false` — збереження відмовлено (набрана дата неповна чи не існує), редактор лишається відкритим. */
-    const commit = (viaTab: boolean): boolean => {
-      if (input === null) return false;
-
-      // ⛔ A1-02: недонабрана чи неіснуюча дата (`31.02`, лише день) дає `value === ''` — збереження
-      // такого «значення» мовчки СТЕРЛО б комірку. Відмова з поясненням замість збереження.
-      if (input.validity.badInput) {
-        input.setCustomValidity(t('dates.incomplete'));
-        input.setAttribute('aria-invalid', 'true');
-        input.reportValidity();
-        return false;
-      }
+    const commit = (viaTab: boolean): void => {
+      if (input === null) return;
 
       announceExplicitCommit(input);
       input.blur();
       save(input.value, viaTab);
-      return true;
-    };
-
-    // Людина править дату після відмови — відмова знімається, доки не підтвердить знову.
-    const onInput = (): void => {
-      if (input === null) return;
-      input.setCustomValidity('');
-      input.removeAttribute('aria-invalid');
     };
 
     const onKeyDown = (event: KeyboardEvent): void => {
@@ -66,8 +48,7 @@ export function createDateCellEditor() {
         event.stopPropagation();
         commit(false);
       } else if (event.key === 'Tab') {
-        // Відмовлено — фокус лишається в полі, а не йде в наступну комірку.
-        if (!commit(true)) event.preventDefault();
+        commit(true);
       }
     };
 
@@ -95,7 +76,6 @@ export function createDateCellEditor() {
 
         input.addEventListener('keydown', onKeyDown);
         input.addEventListener('change', onChange);
-        input.addEventListener('input', onInput);
         editor.element.replaceChildren(input);
 
         // ⚠ Той самий відкладений фокус, що й у `TextEditor` RevoGrid.
@@ -104,12 +84,8 @@ export function createDateCellEditor() {
 
       // AN-39/L8-07: клік повз редактор (`applyOnClose`) бере значення звідси; без
       // цього набрана дата губилась (сітка діставала `undefined`).
-      //
-      // ⛔ A1-02: недонабрана дата — `undefined` (комірка лишається як була), а не `''`, що стерло б її.
       getValue(): string | undefined {
-        if (input === null || input.validity.badInput) return undefined;
-
-        return input.value;
+        return input?.value;
       },
 
       beforeDisconnect(): void {
@@ -120,7 +96,6 @@ export function createDateCellEditor() {
         if (focusTimer !== null) clearTimeout(focusTimer);
         input?.removeEventListener('keydown', onKeyDown);
         input?.removeEventListener('change', onChange);
-        input?.removeEventListener('input', onInput);
         input = null;
       },
     };
