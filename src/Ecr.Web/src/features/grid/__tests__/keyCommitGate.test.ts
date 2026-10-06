@@ -35,6 +35,10 @@ interface SlowTransition {
   readonly focusMoveMs?: number;
   /** Через скільки мс після відкриття `<input>` отримує фокус. */
   readonly openFocusMs?: number;
+  /** A1-03: DOM-фокус повертається в сітку через стільки мс ПІСЛЯ `focuscell` (між ними - `<body>`). */
+  readonly domFocusLagMs?: number;
+  /** A1-03: фокус ПЕРШОГО відкритого редактора - пізніше за стелю вікна (зависла машина). */
+  readonly firstOpenFocusMs?: number;
   /** Як справжній RevoGrid: `celledit` при збереженні і `setedit` при відкритті. */
   readonly revoEvents?: boolean;
 }
@@ -58,6 +62,7 @@ function mountGrid(
   const values = Array.from({ length: rows }, () => '');
   let row = startRow;
   let editor: HTMLInputElement | null = null;
+  let opens = 0;
 
   const open = (initial: string): void => {
     const wrapper = document.createElement('div');
@@ -68,11 +73,44 @@ function mountGrid(
     overlay.appendChild(wrapper);
     editor = input;
     if (slow.revoEvents === true) container.dispatchEvent(new CustomEvent('setedit', { bubbles: true }));
-    setTimeout(() => input.focus(), slow.openFocusMs ?? 0);
+    opens += 1;
+    const focusMs = opens === 1 && slow.firstOpenFocusMs !== undefined ? slow.firstOpenFocusMs : slow.openFocusMs ?? 0;
+    setTimeout(() => input.focus(), focusMs);
+  };
+
+  /** Перехід фокуса сітки (`keyChangeSelection`): лише після паузи, з `focuscell`. */
+  const moveFocus = (delta: number): void => {
+    setTimeout(() => {
+      row = Math.min(Math.max(row + delta, 0), rows - 1);
+      if (slow.domFocusLagMs === undefined) {
+        holder.focus();
+        container.dispatchEvent(new CustomEvent('focuscell', { bubbles: true }));
+        return;
+      }
+      holder.blur();
+      container.dispatchEvent(new CustomEvent('focuscell', { bubbles: true }));
+      setTimeout(() => holder.focus(), slow.domFocusLagMs);
+    }, focusMoveMs);
   };
 
   overlay.addEventListener('keydown', (event) => {
     if (editor !== null) {
+      // A1-03: Tab у `TextEditor` зберігає з `preventFocus`; без коду Tab RevoGrid нікуди не
+      // переходить, і редактор ЛИШАЄТЬСЯ відкритим (його закриває лише зміна фокуса). Escape
+      // закриває без збереження. Стрілки в режимі редагування - курсору `<input>`.
+      if (event.key === 'Tab') {
+        values[row] = editor.value;
+        if (slow.revoEvents === true) editor.dispatchEvent(new CustomEvent('celledit', { bubbles: true }));
+        editor.blur();
+        return;
+      }
+
+      if (event.key === 'Escape') {
+        editor.parentElement?.remove();
+        editor = null;
+        return;
+      }
+
       if (event.key === 'Enter') {
         values[row] = editor.value;
         if (slow.revoEvents === true) editor.dispatchEvent(new CustomEvent('celledit', { bubbles: true }));
@@ -101,7 +139,9 @@ function mountGrid(
       return;
     }
 
-    if (event.key === 'Enter') open(values[row] ?? '');
+    if (event.key === 'ArrowDown') moveFocus(1);
+    else if (event.key === 'ArrowUp') moveFocus(-1);
+    else if (event.key === 'Enter') open(values[row] ?? '');
     // ⚠ RevoGrid не відкриває редактор від ярлика (Ctrl/Alt + символ).
     else if (event.key.length === 1 && !event.ctrlKey && !event.altKey) open(event.key);
   });
@@ -390,5 +430,110 @@ describe('installKeyCommitGate: швидкий ввід не склеює зна
 
     expect(grid.values).toEqual(['', '7']);
     grid.dispose();
+  });
+
+  it('A1-03: «7», стрілка вниз, «20» - стрілка в редакторі, відкритому набором, фіксує й переходить', () => {
+    // ⛔ Мутаційний доказ: без `commitAndMove` стрілка йде курсору `<input>`, і за БУДЬ-ЯКОЇ паузи
+    // R1 = «720», R2 порожньо (живий Chromium до фіксу - 8 з 8 на 0/100/300/1000 мс).
+    for (const gap of [0, 10, 30, 70, 150, 300, 1000]) {
+      const grid = mountGrid(5, 1, true, false, { revoEvents: true });
+
+      type(grid, ['7', 'ArrowDown', '2', '0', 'Enter'], gap);
+
+      expect(grid.values, `gap ${gap}`).toEqual(['', '7', '20', '', '']);
+      grid.dispose();
+      document.body.innerHTML = '';
+    }
+  });
+
+  it('A1-03: стрілка прийшла раніше, ніж редактор отримав фокус (з черги) - порядок клавіш збережено', () => {
+    // ⛔ Мутаційний доказ: стрілка в КІНЕЦЬ черги - «2», «0» відтворюються раніше за перехід, і
+    // «20» перезаписує «7» в R1 (живий Chromium, пауза 0 мс: 2 з 4).
+    for (const gap of [0, 10, 30]) {
+      const grid = mountGrid(5, 1, true, false, { revoEvents: true, openFocusMs: 60 });
+
+      type(grid, ['7', 'ArrowDown', '2', '0', 'Enter'], gap);
+
+      expect(grid.values, `gap ${gap}`).toEqual(['', '7', '20', '', '']);
+      grid.dispose();
+      document.body.innerHTML = '';
+    }
+  });
+
+  it('A1-03: поле отримало фокус ПІСЛЯ вікна «відкриття» (повільна машина) - стрілка все одно фіксує', () => {
+    // ⛔ Мутаційний доказ: позначка «набраного» поля лише у вікні «відкриття» - без `setedit`
+    // вікно відпущене запасним терміном (200 мс), фокус о 400 мс лишає стрілку курсору: «720».
+    const grid = mountGrid(5, 1, true, false, { firstOpenFocusMs: 400 });
+
+    type(grid, ['7'], 500);
+    type(grid, ['ArrowDown', '2', '0', 'Enter'], 30);
+
+    expect(grid.values).toEqual(['', '7', '20', '', '']);
+    grid.dispose();
+  });
+
+  it('A1-03: стрілка поза редактором і одразу цифри - значення в НОВІЙ комірці, не в старій', () => {
+    // ⛔ Мутаційний доказ: без вікна «навігації» цифра відкриває редактор на СТАРІЙ комірці
+    // до переходу фокуса (~70 мс): «20» у R1 або «2» у R1 і «0» у R2.
+    for (const gap of [0, 10, 30, 50, 60]) {
+      const grid = mountGrid(5, 1, true, false, { revoEvents: true });
+
+      type(grid, ['ArrowDown', '2', '0', 'Enter'], gap);
+
+      expect(grid.values, `gap ${gap}`).toEqual(['', '', '20', '', '']);
+      grid.dispose();
+      document.body.innerHTML = '';
+    }
+  });
+
+  it('A1-03: фокус ще на <body> після focuscell - символ у цій щілині теж чекає в черзі', () => {
+    // ⛔ Мутаційний доказ: вікно «навігації» відпускається за самим `focuscell` - символ на
+    // `<body>` іде повз чергу й мимо сітки (живий журнал CPU ×4: «204» замість «20» і «4»).
+    const grid = mountGrid(5, 1, true, false, { revoEvents: true, domFocusLagMs: 40 });
+
+    grid.press('ArrowDown');
+    vi.advanceTimersByTime(FocusMoveMs + 10);
+    type(grid, ['2', '0', 'Enter'], 5);
+
+    expect(grid.values).toEqual(['', '', '20', '', '']);
+    grid.dispose();
+  });
+
+  it('A1-03: дві стрілки підряд без пауз - обидва кроки зараховано, цифра в комірці через одну', () => {
+    const grid = mountGrid(6, 1, true, false, { revoEvents: true });
+
+    type(grid, ['ArrowDown', 'ArrowDown', '4', 'Enter'], 0);
+
+    expect(grid.values).toEqual(['', '', '', '4', '', '']);
+    grid.dispose();
+  });
+
+  it('A1-03: редактор, відкритий Enter (режим правки), - стрілки, як і раніше, рухають курсор', () => {
+    const grid = mountGrid(4, 1, true, false, { revoEvents: true });
+
+    type(grid, ['Enter', '7', 'ArrowDown', '2', 'Enter'], 30);
+
+    expect(grid.values).toEqual(['', '72', '', '']);
+    grid.dispose();
+  });
+
+  it('A1-03: клік мишею в поле, відкрите набором, повертає стрілкам курсор', () => {
+    const grid = mountGrid(4, 1, true, false, { revoEvents: true });
+
+    grid.press('7');
+    vi.advanceTimersByTime(300);
+    grid.container.querySelector('input')?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    type(grid, ['ArrowDown', '2', 'Enter'], 30);
+
+    expect(grid.values).toEqual(['', '72', '', '']);
+    grid.dispose();
+  });
+
+  it('контроль моделі A1-03: БЕЗ черги стрілка й одразу цифра пишуть у стару комірку', () => {
+    const grid = mountGrid(5, 1, false);
+
+    type(grid, ['ArrowDown', '2', '0', 'Enter'], 0);
+
+    expect(grid.values).not.toEqual(['', '', '20', '', '']);
   });
 });

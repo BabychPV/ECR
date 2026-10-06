@@ -111,7 +111,18 @@ const Sequences = {
   A: { keys: ['1', '2', '3'].flatMap((value) => ['Enter', value, 'Enter']), expected: ['1', '2', '3'] },
   /** Друк одразу в комірку (символ відкриває редактор), Enter фіксує. */
   B: { keys: ['5', '7', '9'].flatMap((value) => [value, 'Enter']), expected: ['5', '7', '9'] },
-} as const;
+  /**
+   * A1-03 (приймання A1): друк у комірку, СТРІЛКА вниз, наступне число. До фіксу - «720» в R1
+   * за будь-якої паузи (стрілка йшла курсору редактора), а на 0 мс - «20» замість «7».
+   */
+  C: { keys: ['7', 'ArrowDown', '2', '0', 'ArrowDown', '4', 'Enter'], expected: ['7', '20', '4'] },
+  /**
+   * A1-03: стрілка ПОЗА редактором і одразу цифри - до фіксу цифри лягали в стару комірку. Вікно
+   * гонки - пауза ПЕРЕХОДУ стрілкою (~70 мс від натискання), тож інтервали менші: на 50–80 мс
+   * друга клавіша приходить уже після переходу, і старий код теж зелений.
+   */
+  D: { keys: ['ArrowDown', '2', '0', 'Enter'], expected: ['', '20', ''], intervalsMs: [0, 10, 20, 30, 40] },
+} as const satisfies Record<string, { keys: readonly string[]; expected: readonly string[]; intervalsMs?: readonly number[] }>;
 
 async function openDocumentStand(page: Page): Promise<void> {
   await page.goto(DocStand);
@@ -160,11 +171,17 @@ test.describe('Швидкий ввід у справжньому DocumentGrid п
   });
 
   for (const [name, sequence] of Object.entries(Sequences)) {
-    test(`послідовність ${name}, 50–80 мс: кожне значення у своєму рядку і в PATCH`, async ({ page }) => {
-      const failures: string[] = [];
-      const expectedPatched = sequence.expected.map((value, row) => `R${String(row + 1)}=${value}`);
+    const intervals: readonly number[] = 'intervalsMs' in sequence ? sequence.intervalsMs : DocIntervalsMs;
+    const range = `${String(intervals[0])}–${String(intervals[intervals.length - 1])} мс`;
 
-      for (const intervalMs of DocIntervalsMs) {
+    test(`послідовність ${name}, ${range}: кожне значення у своєму рядку і в PATCH`, async ({ page }) => {
+      const failures: string[] = [];
+      const expectedPatched = sequence.expected
+        .map((value, row) => `R${String(row + 1)}=${value}`)
+        .filter((entry) => !entry.endsWith('='))
+        .sort();
+
+      for (const intervalMs of intervals) {
         for (let attempt = 1; attempt <= DocRepeats; attempt += 1) {
           await openDocumentStand(page);
           for (const key of sequence.keys) {
@@ -181,7 +198,7 @@ test.describe('Швидкий ввід у справжньому DocumentGrid п
         }
       }
 
-      expect(failures, `збої з ${String(DocIntervalsMs.length * DocRepeats)} прогонів`).toEqual([]);
+      expect(failures, `збої з ${String(intervals.length * DocRepeats)} прогонів`).toEqual([]);
     });
   }
 });
