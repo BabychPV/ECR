@@ -6895,8 +6895,43 @@ USING (VALUES
     (N'documents.createNoOpenPeriod', N'en', N'No period of this project is open. The document can be created, but data can be entered only after a period administrator opens a period.', 1),
     (N'documents.createSheetsHint', N'en', N'Leave out sheets that do not apply to this site. All are included by default.', 1),
     (N'documents.createNoSheets', N'en', N'Include at least one sheet: a document without sheets cannot be filled in.', 1),
-    (N'documents.createSheetsCount', N'en', N'{included} of {total}', 1)
+    (N'documents.createSheetsCount', N'en', N'{included} of {total}', 1),
     -- COLL:ui31wizard ── кінець секції ──
+    -- COLL:inspector ── UI-25: інспектор документа (Issues / History / Info); ru/kz — порцією COLL:inspector у блоці I18N нижче ──
+    (N'inspector.title', N'en', N'Inspector', 1),
+    (N'inspector.close', N'en', N'Close inspector', 1),
+    (N'inspector.tabsLabel', N'en', N'Inspector sections', 1),
+    (N'inspector.tabIssues', N'en', N'Issues', 1),
+    (N'inspector.tabHistory', N'en', N'History', 1),
+    (N'inspector.tabInfo', N'en', N'Info', 1),
+    (N'inspector.noIssues', N'en', N'No issues', 1),
+    (N'inspector.issuesCount', N'en', N'{count} issue(s)', 1),
+    (N'inspector.issuesTitle', N'en', N'{errors} error(s), {warnings} warning(s) — open the list', 1),
+    (N'inspector.historyButton', N'en', N'History of the selected cell', 1),
+    (N'inspector.notValidatedTitle', N'en', N'Not validated yet', 1),
+    (N'inspector.notValidatedHint', N'en', N'Run “Validate” to check the document for this period.', 1),
+    (N'inspector.noIssuesTitle', N'en', N'No issues found', 1),
+    (N'inspector.noIssuesHint', N'en', N'The last validation run found nothing to fix for this period.', 1),
+    (N'inspector.noCellTitle', N'en', N'No cell selected', 1),
+    (N'inspector.noCellHint', N'en', N'Select a cell in a table to see its history and details.', 1),
+    (N'inspector.loading', N'en', N'Loading…', 1),
+    (N'inspector.noHistoryTitle', N'en', N'No history', 1),
+    (N'inspector.noHistoryHint', N'en', N'This cell has not been changed in this period during the last 12 months.', 1),
+    (N'inspector.unknownAuthor', N'en', N'User #{id}', 1),
+    (N'inspector.lateEdit', N'en', N'Late edit', 1),
+    (N'inspector.info.cell', N'en', N'Cell', 1),
+    (N'inspector.info.row', N'en', N'Row', 1),
+    (N'inspector.info.column', N'en', N'Column', 1),
+    (N'inspector.info.type', N'en', N'Type', 1),
+    (N'inspector.info.input', N'en', N'Input', 1),
+    (N'inspector.info.inputCalculated', N'en', N'Calculated on the server', 1),
+    (N'inspector.info.inputReadOnly', N'en', N'Read-only', 1),
+    (N'inspector.info.inputManual', N'en', N'Manual · paste · import', 1),
+    (N'inspector.info.value', N'en', N'Stored value', 1),
+    (N'inspector.info.table', N'en', N'Table', 1),
+    (N'inspector.info.tableIssues', N'en', N'Issues in this table', 1),
+    (N'inspector.info.tableIssuesValue', N'en', N'{errors} error(s), {warnings} warning(s)', 1)
+    -- COLL:inspector ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -16484,6 +16519,80 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:ui31wizard ── кінець секції ──
+-- COLL:inspector ── ru/kz UI-25: інспектор документа; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'inspector.title', N'ru', N'Инспектор'),
+    (N'inspector.title', N'kz', N'Инспектор'),
+    (N'inspector.close', N'ru', N'Закрыть инспектор'),
+    (N'inspector.close', N'kz', N'Инспекторды жабу'),
+    (N'inspector.tabsLabel', N'ru', N'Разделы инспектора'),
+    (N'inspector.tabsLabel', N'kz', N'Инспектор бөлімдері'),
+    (N'inspector.tabIssues', N'ru', N'Замечания'),
+    (N'inspector.tabIssues', N'kz', N'Ескертулер'),
+    (N'inspector.tabHistory', N'ru', N'История'),
+    (N'inspector.tabHistory', N'kz', N'Тарих'),
+    (N'inspector.tabInfo', N'ru', N'Сведения'),
+    (N'inspector.tabInfo', N'kz', N'Мәліметтер'),
+    (N'inspector.noIssues', N'ru', N'Замечаний нет'),
+    (N'inspector.noIssues', N'kz', N'Ескертулер жоқ'),
+    (N'inspector.issuesCount', N'ru', N'Замечаний: {count}'),
+    (N'inspector.issuesCount', N'kz', N'Ескертулер: {count}'),
+    (N'inspector.issuesTitle', N'ru', N'Ошибок: {errors}, предупреждений: {warnings} — открыть список'),
+    (N'inspector.issuesTitle', N'kz', N'Қателер: {errors}, ескертулер: {warnings} — тізімді ашу'),
+    (N'inspector.historyButton', N'ru', N'История выбранной ячейки'),
+    (N'inspector.historyButton', N'kz', N'Таңдалған ұяшық тарихы'),
+    (N'inspector.notValidatedTitle', N'ru', N'Проверка ещё не запускалась'),
+    (N'inspector.notValidatedTitle', N'kz', N'Тексеру әлі іске қосылмаған'),
+    (N'inspector.notValidatedHint', N'ru', N'Нажмите «Проверить», чтобы проверить документ за этот период.'),
+    (N'inspector.notValidatedHint', N'kz', N'Құжатты осы кезеңге тексеру үшін «Тексеру» түймесін басыңыз.'),
+    (N'inspector.noIssuesTitle', N'ru', N'Замечаний не найдено'),
+    (N'inspector.noIssuesTitle', N'kz', N'Ескертулер табылмады'),
+    (N'inspector.noIssuesHint', N'ru', N'Последняя проверка не выявила в этом периоде ничего, что требует исправления.'),
+    (N'inspector.noIssuesHint', N'kz', N'Соңғы тексеру бұл кезеңде түзетуді қажет ететін ештеңе таппады.'),
+    (N'inspector.noCellTitle', N'ru', N'Ячейка не выбрана'),
+    (N'inspector.noCellTitle', N'kz', N'Ұяшық таңдалмаған'),
+    (N'inspector.noCellHint', N'ru', N'Выберите ячейку в таблице, чтобы увидеть её историю и сведения.'),
+    (N'inspector.noCellHint', N'kz', N'Тарихы мен мәліметтерін көру үшін кестеден ұяшықты таңдаңыз.'),
+    (N'inspector.loading', N'ru', N'Загрузка…'),
+    (N'inspector.loading', N'kz', N'Жүктелуде…'),
+    (N'inspector.noHistoryTitle', N'ru', N'Истории нет'),
+    (N'inspector.noHistoryTitle', N'kz', N'Тарих жоқ'),
+    (N'inspector.noHistoryHint', N'ru', N'За последние 12 месяцев эта ячейка в этом периоде не изменялась.'),
+    (N'inspector.noHistoryHint', N'kz', N'Соңғы 12 айда бұл ұяшық осы кезеңде өзгертілмеген.'),
+    (N'inspector.unknownAuthor', N'ru', N'Пользователь №{id}'),
+    (N'inspector.unknownAuthor', N'kz', N'Пайдаланушы №{id}'),
+    (N'inspector.lateEdit', N'ru', N'Поздняя правка'),
+    (N'inspector.lateEdit', N'kz', N'Кешіккен түзету'),
+    (N'inspector.info.cell', N'ru', N'Ячейка'),
+    (N'inspector.info.cell', N'kz', N'Ұяшық'),
+    (N'inspector.info.row', N'ru', N'Строка'),
+    (N'inspector.info.row', N'kz', N'Жол'),
+    (N'inspector.info.column', N'ru', N'Колонка'),
+    (N'inspector.info.column', N'kz', N'Баған'),
+    (N'inspector.info.type', N'ru', N'Тип'),
+    (N'inspector.info.type', N'kz', N'Түрі'),
+    (N'inspector.info.input', N'ru', N'Ввод'),
+    (N'inspector.info.input', N'kz', N'Енгізу'),
+    (N'inspector.info.inputCalculated', N'ru', N'Рассчитывается на сервере'),
+    (N'inspector.info.inputCalculated', N'kz', N'Серверде есептеледі'),
+    (N'inspector.info.inputReadOnly', N'ru', N'Только чтение'),
+    (N'inspector.info.inputReadOnly', N'kz', N'Тек оқу үшін'),
+    (N'inspector.info.inputManual', N'ru', N'Вручную · вставка · импорт'),
+    (N'inspector.info.inputManual', N'kz', N'Қолмен · қою · импорт'),
+    (N'inspector.info.value', N'ru', N'Сохранённое значение'),
+    (N'inspector.info.value', N'kz', N'Сақталған мән'),
+    (N'inspector.info.table', N'ru', N'Таблица'),
+    (N'inspector.info.table', N'kz', N'Кесте'),
+    (N'inspector.info.tableIssues', N'ru', N'Замечания в этой таблице'),
+    (N'inspector.info.tableIssues', N'kz', N'Осы кестедегі ескертулер'),
+    (N'inspector.info.tableIssuesValue', N'ru', N'Ошибок: {errors}, предупреждений: {warnings}'),
+    (N'inspector.info.tableIssuesValue', N'kz', N'Қателер: {errors}, ескертулер: {warnings}')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:inspector ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t
