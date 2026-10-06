@@ -7176,8 +7176,11 @@ USING (VALUES
     (N'registries.list.definitionValue', N'en', N'v{version} published', 1),
     (N'registries.list.definitionDraft', N'en', N'v{version} published · draft in progress', 1),
     (N'registries.list.draftTitle', N'en', N'The definition has unpublished changes', 1),
-    (N'registries.list.draftText', N'en', N'Entries keep working with the published definition until the draft is published.', 1)
+    (N'registries.list.draftText', N'en', N'Entries keep working with the published definition until the draft is published.', 1),
     -- COLL:ui35registries ── кінець секції ──
+    -- COLL:ui32crumbs ── UI-32: крихти у верхній смузі (підпис області навігації); ru/kz — порцією COLL:ui32crumbs у блоці I18N нижче ──
+    (N'nav.breadcrumb', N'en', N'Breadcrumb', 1)
+    -- COLL:ui32crumbs ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -17376,6 +17379,26 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:ui35registries ── кінець секції ──
+-- COLL:consistency-summary ── ru/kz: невідома вага знахідки в журналі узгодженості; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-REQ-0422.consistencySeverity', N'ru', N'Веса находки «{severity}» не существует: допустимо 1 (информация), 2 (предупреждение) или 3 (ошибка).'),
+    (N'err.ECR-REQ-0422.consistencySeverity', N'kz', N'«{severity}» табылым салмағы жоқ: 1 (ақпарат), 2 (ескерту) немесе 3 (қате) болуы тиіс.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:consistency-summary ── кінець секції ──
+-- COLL:ui32crumbs ── ru/kz UI-32: крихти у верхній смузі; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'nav.breadcrumb', N'ru', N'Навигационная цепочка'),
+    (N'nav.breadcrumb', N'kz', N'Навигация жолы')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:ui32crumbs ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t
