@@ -91,10 +91,21 @@ function show(): void {
   );
 }
 
+/** ✎ UI-31: майстер — проєкт на першому кроці, «Next» веде до кроку Period. */
 async function pickProjectAndSheet(): Promise<void> {
-  fireEvent.click(await screen.findByLabelText('⟦documents.project⟧'));
+  fireEvent.click(await screen.findByLabelText(/documents\.project/, { selector: 'input' }));
   fireEvent.click(await screen.findByRole('option', { name: 'PRJ' }));
-  fireEvent.click(await screen.findByLabelText('General (GEN)'));
+  const next = await screen.findByRole('button', { name: '⟦wizard.next⟧' });
+  await waitFor(() => expect((next as HTMLButtonElement).disabled).toBe(false));
+  fireEvent.click(next);
+}
+
+/** Period → Sheets (типово всі) → Review → «Create document». */
+async function createFromPeriodStep(): Promise<void> {
+  fireEvent.click(screen.getByRole('button', { name: '⟦wizard.next⟧' }));
+  await screen.findByLabelText('General (GEN)');
+  fireEvent.click(screen.getByRole('button', { name: '⟦wizard.next⟧' }));
+  fireEvent.click(await screen.findByRole('button', { name: '⟦documents.createApply⟧' }));
 }
 
 afterEach(() => {
@@ -115,7 +126,7 @@ describe('A2-05: період у формі створення документ�
     show();
     await pickProjectAndSheet();
 
-    const select = (await screen.findByLabelText('⟦documents.period⟧')) as HTMLInputElement;
+    const select = (await screen.findByLabelText('⟦documents.period⟧', { selector: 'input' })) as HTMLInputElement;
     // Людська назва, не технічний ключ: ключ лишається значенням для адреси й API.
     expect(select.value).toBe('October 2026');
 
@@ -128,9 +139,9 @@ describe('A2-05: період у формі створення документ�
     mockServer();
     show();
     await pickProjectAndSheet();
-    await screen.findByLabelText('⟦documents.period⟧');
+    await screen.findByLabelText('⟦documents.period⟧', { selector: 'input' });
 
-    fireEvent.click(screen.getByRole('button', { name: '⟦common.save⟧' }));
+    await createFromPeriodStep();
 
     await waitFor(() => expect((globalThis as { __where?: string }).__where).toBe('/documents/77?periodKey=202610'));
     expect(posted).not.toBeNull();
@@ -141,9 +152,9 @@ describe('A2-05: період у формі створення документ�
     show();
     await pickProjectAndSheet();
 
-    fireEvent.click(await screen.findByLabelText('⟦documents.period⟧'));
+    fireEvent.click(await screen.findByLabelText('⟦documents.period⟧', { selector: 'input' }));
     fireEvent.click(await screen.findByRole('option', { name: 'September 2026' }));
-    fireEvent.click(screen.getByRole('button', { name: '⟦common.save⟧' }));
+    await createFromPeriodStep();
 
     await waitFor(() => expect((globalThis as { __where?: string }).__where).toBe('/documents/77?periodKey=202609'));
   });

@@ -140,8 +140,9 @@ describe('CreateDocumentModal: відмова джерел не виглядає
     await waitFor(() => screen.getByRole('alert'));
 
     // ✎ V-12: версія більше не поле (її визначає проєкт) — лишається вибір проєкту.
-    expect(screen.getByLabelText(/documents\.project/)).toBeDefined();
-    expect(screen.getByRole('button', { name: /common\.save/ })).toBeDefined();
+    expect(screen.getByLabelText(/documents\.project/, { selector: 'input' })).toBeDefined();
+    // ✎ UI-31: майстер — головна кнопка першого кроку «Next».
+    expect(screen.getByRole('button', { name: /wizard\.next/ })).toBeDefined();
   });
 
   it('усе приїхало — банера немає', async () => {
@@ -151,7 +152,7 @@ describe('CreateDocumentModal: відмова джерел не виглядає
     // ⚠ Дочекатися саме наповненого переліку: запит у дорозі зробив би це
     // твердження зеленим на будь-якому коді.
     await waitFor(() => {
-      expect(screen.getByLabelText(/documents\.project/)).toBeDefined();
+      expect(screen.getByLabelText(/documents\.project/, { selector: 'input' })).toBeDefined();
     });
 
     expect(screen.queryByRole('alert')).toBeNull();
