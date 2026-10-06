@@ -238,9 +238,10 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-/** Аркуш згорнутий за замовчуванням (Mantine `Accordion`) — розгорнути. */
+/** Дочекатися робочої області першої таблиці (UI-36: вибрана за замовчуванням). */
 async function openSheet(): Promise<void> {
-  fireEvent.click(await screen.findByRole('button', { name: /Sheet \(SHEET\)/ }));
+  // UI-36: дерево конструктора відкриває першу таблицю першого аркуша одразу (макет `ctor-columns`).
+  await screen.findByTestId('ctor-table');
 }
 
 function renderPage(): ReturnType<typeof render> {
@@ -311,10 +312,10 @@ describe('TemplateVersionPage: кнопка "Formula" підвантажує н�
     renderPage();
     await openSheet();
 
-    // Дві колонки з кнопкою "Formula" йдуть першими в DOM, тому кнопка
-    // рядка R1 (з формулою) — третя за порядком.
+    // UI-36: рядки — у вкладці «Rows»; рядок R1 (з формулою) — перший.
+    fireEvent.click(await screen.findByRole('tab', { name: /ctor\.tab\.rows⟧/ }));
     const formulaButtons = await screen.findAllByRole('button', { name: /formulas\.edit⟧/ });
-    fireEvent.click(formulaButtons[2]!);
+    fireEvent.click(formulaButtons[0]!);
 
     await screen.findByRole('dialog');
 

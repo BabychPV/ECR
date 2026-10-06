@@ -175,9 +175,7 @@ async function openEditor(versionStatus: string): Promise<void> {
     </MantineProvider>,
   );
 
-  fireEvent.click(
-    await screen.findByRole("button", { name: /Sheet \(SHEET\)/ }),
-  );
+  // UI-36: перша таблиця відкрита в робочій області одразу.
   await screen.findByText("(AAA)");
   await waitFor(() =>
     expect(screen.queryAllByRole("table").length).toBeGreaterThan(0),

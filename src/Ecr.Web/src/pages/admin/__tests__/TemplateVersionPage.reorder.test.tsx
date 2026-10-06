@@ -127,10 +127,8 @@ async function renderPage(permissions: readonly string[]): Promise<void> {
     </MantineProvider>,
   );
 
-  fireEvent.click(await screen.findByRole('button', { name: /Sheet \(SHEET\)/ }));
+  // UI-36: перша таблиця відкрита в робочій області одразу.
   await screen.findByText('(AAA)');
-  // ⚠ Панель `Accordion` розкривається анімацією; доки вона не завершилась,
-  // вміст для ролей прихований.
   await waitFor(() => expect(screen.queryAllByRole('table').length).toBeGreaterThan(0));
 }
 
@@ -189,8 +187,10 @@ describe('TemplateVersionPage — перестановка колонок (ФВ-
 
   it('рядки: кнопки порядку активні, «нижче» шле PATCH з RowDef', async () => {
     await renderPage(['Template.View', 'Template.Edit']);
+    // UI-36: рядки — у вкладці «Rows».
+    fireEvent.click(screen.getByRole('tab', { name: /ctor\.tab\.rows/ }));
 
-    const down = screen.getByRole('button', { name: /reorder\.moveDown.*R1/ }) as HTMLButtonElement;
+    const down = (await screen.findByRole('button', { name: /reorder\.moveDown.*R1/ })) as HTMLButtonElement;
     expect(down.disabled).toBe(false);
     expect(screen.queryByText(/reorder\.rowsUnavailable/)).toBeNull();
 
