@@ -101,7 +101,9 @@ describe('DocumentPage: історія погоджень (BE-11b)', () => {
       );
 
       expect(toggle.getAttribute('aria-expanded')).toBe('false');
-      expect(requested.filter((url) => url.includes('/workflow/history'))).toEqual([]);
+      // ✎ UI-26: банер поданого аркуша сам читає журнал (хто й коли подав) —
+      // рівно один запит; згорнута панель історії власного не додає.
+      expect(requested.filter((url) => url.includes('/workflow/history')).length).toBeLessThanOrEqual(1);
     },
     SlowEnvTimeout,
   );
