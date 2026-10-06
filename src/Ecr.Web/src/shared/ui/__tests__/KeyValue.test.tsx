@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import axe from 'axe-core';
 import { afterEach, describe, expect, it } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
@@ -167,7 +168,36 @@ describe('D15-06: пара без значення не малюється', () 
     const dl = root.querySelector('dl');
     const groups = [...(dl?.children ?? [])];
     expect(groups.map((node) => node.tagName)).toEqual(['DIV']);
-    expect([...(groups[0]?.children ?? [])].map((node) => node.tagName)).toEqual(['DT', 'DD']);
+    // Пачка batch-4: уточнення — окремий `dd` (batch2-defects d397464c), а не `span` у значенні.
+    expect([...(groups[0]?.children ?? [])].map((node) => node.tagName)).toEqual(['DT', 'DD', 'DD']);
     expect(screen.getByText('у UTC').closest('dd')).not.toBeNull();
+  });
+});
+
+describe('KeyValue — розмітка списку означень чиста для axe (batch-2-a, дефект 4)', () => {
+  async function dlViolations(probe: HTMLElement): Promise<string[]> {
+    const results = await axe.run(probe, {
+      resultTypes: ['violations'],
+      runOnly: { type: 'rule', values: ['definition-list', 'dlitem'] },
+    });
+
+    return results.violations.map((violation) => `${violation.id}: ${violation.nodes.map((node) => node.html).join(' | ')}`);
+  }
+
+  const items = [
+    { label: 'Project', value: 'ATR', hint: 'Atyrau refinery' },
+    { label: 'Period', value: '2026-09' },
+  ];
+
+  it.each([false, true])('wide=%s: dt/dd лише прямо в dl або в div-обгортці, уточнення — теж dd', async (wide) => {
+    const probe = show(<KeyValue items={items} wide={wide} />);
+
+    expect(await dlViolations(probe)).toEqual([]);
+    for (const pair of probe.querySelectorAll('[data-key-value-item]')) {
+      expect(pair.parentElement?.tagName).toBe('DL');
+      expect([...pair.children].map((child) => child.tagName)).toEqual(
+        pair.querySelector('[data-key-value-hint]') === null ? ['DT', 'DD'] : ['DT', 'DD', 'DD'],
+      );
+    }
   });
 });
