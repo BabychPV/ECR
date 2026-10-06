@@ -214,7 +214,9 @@ public sealed class GetTableStatusHandler(
                 // `findings` є, а таблиці в ньому немає — перевірка була й
                 // порушень у цій таблиці не знайшла, і тоді саме нуль.
                 findings is null ? null : tableFindings?.Errors ?? 0,
-                findings is null ? null : tableFindings?.Warnings ?? 0));
+                findings is null ? null : tableFindings?.Warnings ?? 0,
+                shape.IsClosed,
+                rowCount));
         }
 
         return result;
