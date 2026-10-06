@@ -1,9 +1,6 @@
 // src/Ecr.Infrastructure/Jobs/JobFailureText.cs
-using System.Data.Common;
 using Ecr.Application.Errors;
-using Ecr.Domain.Abstractions;
 using Microsoft.Data.SqlClient;
-using Microsoft.EntityFrameworkCore;
 
 namespace Ecr.Infrastructure.Jobs;
 
@@ -50,23 +47,13 @@ internal static class JobFailureText
         // продукту (EcrException/DomainException — його пише розробник, і він
         // однаково їде клієнтові через ExceptionHandlingMiddleware); решта —
         // код каталогу + кореляція, а повний виняток лишається журналу сервера.
-        if (error is EcrException or DomainException)
-        {
-            return error.Message;
-        }
-
-        return IsDatabaseError(error)
-            ? $"A database error interrupted the job. The details are in the server log (correlation {correlationId})."
-            : $"The job failed with an unexpected error ({JobRetryPolicy.ErrorCodeOf(error)}). "
-              + $"The details are in the server log (correlation {correlationId}).";
+        // Сама логіка — у `SafeErrorText` (спільна для задач, збору й сповіщень).
+        return SafeErrorText.For(error, correlationId, "the job");
     }
 
     /// <summary>Порушення обмеження бази — повтор нічого не змінить.</summary>
     public static bool IsConstraintViolation(Exception error)
         => Chain(error).OfType<SqlException>().Any(e => ConstraintViolations.Contains(e.Number));
-
-    private static bool IsDatabaseError(Exception error)
-        => Chain(error).Any(e => e is DbException or DbUpdateException);
 
     private static IEnumerable<Exception> Chain(Exception error)
     {

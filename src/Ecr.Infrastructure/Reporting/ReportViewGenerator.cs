@@ -37,10 +37,26 @@ public sealed class ReportViewGenerator(EcrDbContext db, IReportViewStatus? stat
             // ⚠ Збій фіксується для /health/ready (картка `reportviews`) і кидається
             // далі: вирішує викликач — публікація й старт глушать його (найкраще
             // зусилля), тести й DBA бачать помилку.
-            status?.Failed(new ReportViewFailure(templateVersionId, ex.Number, ex.Message));
+            status?.Failed(new ReportViewFailure(templateVersionId, ex.Number, SafeMessage(ex)));
             throw;
         }
 
         status?.Succeeded(templateVersionId);
     }
+
+    /// <summary>Перший номер користувацьких повідомлень SQL Server (<c>RAISERROR</c>/<c>THROW</c>).</summary>
+    private const int FirstUserDefinedError = 50_000;
+
+    /// <summary>Текст збою для <c>/health/ready</c>: без тексту системної помилки SQL Server.</summary>
+    /// <remarks>
+    /// ⛔ SEC (TIER2): <c>SqlException.Message</c> системної помилки (номер &lt; 50000) —
+    /// імена об'єктів і значення з запиту, ім'я сервера; у відповідь вони не йдуть
+    /// (повний виняток лишається журналу сервера — викликач його кидає/логує). Власні
+    /// повідомлення процедури (<c>50422</c>, <c>50409</c>: шаблон, версія, кількість
+    /// колонок) пишемо ми самі, вони й призначені адміністратору — лишаються.
+    /// </remarks>
+    internal static string SafeMessage(SqlException ex)
+        => ex.Number >= FirstUserDefinedError
+            ? ex.Message
+            : $"SQL Server error {ex.Number.ToString(System.Globalization.CultureInfo.InvariantCulture)}; the details are in the server log.";
 }

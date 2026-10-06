@@ -128,13 +128,7 @@ public static class JobRetryPolicy
     /// Код каталогу для провалу (BE-08): власний код доменної чи прикладної
     /// помилки, інакше — <see cref="ErrorCodes.Internal"/> (непередбачена).
     /// </summary>
-    public static string ErrorCodeOf(Exception ex) => ex switch
-    {
-        EcrException e => e.ErrorCode,
-        DomainException d => d.ErrorCode,
-        InsufficientExecutionStackException => ErrorCodes.ExpressionTooComplex,
-        _ => ErrorCodes.Internal,
-    };
+    public static string ErrorCodeOf(Exception ex) => SafeErrorText.CodeOf(ex);
 
     /// <summary>
     /// Конверт прогресу «задача повторить спробу» (<c>jobs.retryScheduled</c>, Q-326),
