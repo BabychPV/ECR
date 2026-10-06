@@ -26,6 +26,10 @@ namespace Ecr.Application.Ports;
 /// Момент, коли знахідку закрили; <c>null</c> — вона ще актуальна.
 /// </param>
 /// <param name="ResolvedByUserId">Хто закрив; <c>null</c> — ніхто.</param>
+/// <param name="Where">
+/// Місце знахідки в структурі (документ, аркуш, таблиця, рядок, колонка) — лише КОДИ.
+/// <c>null</c> — місце невідоме або читач його не бачить (див. <c>GetConsistencyIssuesHandler</c>).
+/// </param>
 /// <remarks>
 /// ⚠ <paramref name="Message"/> приходить із <c>aud.ConsistencyIssue</c>
 /// українською і НЕ локалізується: механізм каталогу рядків існує для відмов
@@ -42,7 +46,41 @@ public sealed record ConsistencyIssueView(
     long? EntityId,
     string Message,
     DateTime? ResolvedAt,
-    int? ResolvedByUserId);
+    int? ResolvedByUserId,
+    ConsistencyIssueWhere? Where = null);
+
+/// <summary>Місце знахідки консистентності: лише бізнес-коди, без значень комірок і без назв.</summary>
+/// <param name="DocumentId">Документ; <c>null</c> — знахідка про структуру шаблону, а не документа.</param>
+/// <param name="DocumentBusinessKey">Бізнес-ключ документа; <c>null</c> разом із <paramref name="DocumentId"/>.</param>
+/// <param name="SheetCode">Код аркуша.</param>
+/// <param name="TableCode">Код таблиці.</param>
+/// <param name="RowKey">Ключ рядка; <c>null</c> — знахідка не на рівні рядка.</param>
+/// <param name="ColumnCode">Код колонки; <c>null</c> — колонку не визначено.</param>
+public sealed record ConsistencyIssueWhere(
+    long? DocumentId,
+    string? DocumentBusinessKey,
+    string? SheetCode,
+    string? TableCode,
+    string? RowKey,
+    string? ColumnCode);
+
+/// <summary>
+/// Сире місце знахідки з базою: ідентифікатори, потрібні обробнику для рішення про
+/// видимість, і коди для відповіді. НЕ віддається клієнтові як є.
+/// </summary>
+/// <param name="ProjectId">Проєкт документа; <c>null</c> — рівень шаблону.</param>
+/// <param name="TemplateVersionId">Версія шаблону, чия структура задає межі читання.</param>
+/// <param name="PeriodKey">Період рядка; <c>null</c> — рівень шаблону.</param>
+/// <param name="SheetDefId">Аркуш.</param>
+/// <param name="TableDefId">Таблиця.</param>
+/// <param name="Where">Коди місця.</param>
+public sealed record ConsistencyLocation(
+    int? ProjectId,
+    int TemplateVersionId,
+    int? PeriodKey,
+    int SheetDefId,
+    int TableDefId,
+    ConsistencyIssueWhere Where);
 
 /// <summary>
 /// Читання журналу знахідок <c>aud.ConsistencyIssue</c>.
@@ -87,6 +125,21 @@ public interface IConsistencyIssueReader
     /// <param name="openOnly"><c>true</c> — лише ще не закриті.</param>
     /// <param name="ct">Токен скасування.</param>
     public Task<ConsistencySummary> ReadSummaryAsync(bool openOnly, CancellationToken ct);
+
+    /// <summary>
+    /// Розкладає сутності знахідок на місце в структурі — ПАКЕТНО, не більше одного запиту
+    /// на тип сутності, незалежно від кількості знахідок.
+    /// </summary>
+    /// <param name="entities">Пари <c>(EntityType, EntityId)</c> знахідок однієї сторінки.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>
+    /// Лише розкладені пари. <c>doc.CellValue</c> (id рядка) → документ/аркуш/таблиця/рядок
+    /// (колонку не визначити: знахідка пише лише id рядка); <c>cfg.ColumnDef</c> → аркуш/таблиця/колонка.
+    /// <c>doc.TableRow</c> (екземпляра таблиці вже немає), <c>itg.ArchiveRun</c> і невідомі типи
+    /// відсутні. Пара, чия сутність зникла, теж відсутня.
+    /// </returns>
+    public Task<IReadOnlyDictionary<(string EntityType, long EntityId), ConsistencyLocation>> ResolveLocationsAsync(
+        IReadOnlyCollection<(string EntityType, long EntityId)> entities, CancellationToken ct);
 }
 
 /// <summary>Лічильники знахідок за вагою в межах фільтра переліку (без фільтра ваги).</summary>

@@ -177,6 +177,115 @@ public sealed class ConsistencyIssueReader(EcrDbContext db) : IConsistencyIssueR
             reader.IsDBNull(4) ? null : DateTime.SpecifyKind(reader.GetDateTime(4), DateTimeKind.Utc));
     }
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⛔ Лише КОДИ й ідентифікатори для рішення про видимість: жодного значення комірки
+    /// (<c>doc.CellValue</c> читається не далі рядка), жодної назви. Один запит на тип
+    /// сутності, і його розмір обмежений сторінкою (<c>Take</c> = кількість ключів).
+    /// ⚠ <c>doc.CellValue.EntityId</c> — це <c>TableRowId</c>, а не комірка: колонка не
+    /// визначається (в рядку може бути кілька осиротілих комірок). <c>doc.TableRow</c>
+    /// (<c>BROKEN_FK</c>) — екземпляра таблиці вже немає, документ невідомий; <c>itg.ArchiveRun</c>
+    /// не має місця в структурі документа. Для них — порожньо.
+    /// </remarks>
+    public async Task<IReadOnlyDictionary<(string EntityType, long EntityId), ConsistencyLocation>> ResolveLocationsAsync(
+        IReadOnlyCollection<(string EntityType, long EntityId)> entities, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(entities);
+
+        var result = new Dictionary<(string EntityType, long EntityId), ConsistencyLocation>();
+
+        var rowIds = entities
+            .Where(e => e.EntityType == "doc.CellValue")
+            .Select(e => e.EntityId)
+            .Distinct()
+            .ToList();
+
+        if (rowIds.Count > 0)
+        {
+            var rows = await (
+                from row in db.TableRows.AsNoTracking()
+                where rowIds.Contains(row.Id)
+                join instance in db.TableInstances.AsNoTracking()
+                    on new { row.PeriodKeyValue, Id = row.TableInstanceId }
+                    equals new { instance.PeriodKeyValue, instance.Id }
+                join document in db.Documents.AsNoTracking() on instance.DocumentId equals document.Id
+                join project in db.Projects.AsNoTracking() on document.ProjectId equals project.Id
+                join table in db.TableDefs.AsNoTracking() on instance.TableDefId equals table.Id
+                join sheet in db.SheetDefs.AsNoTracking() on table.SheetDefId equals sheet.Id
+                orderby row.Id
+                select new
+                {
+                    RowId = row.Id,
+                    row.PeriodKeyValue,
+                    RowKey = row.RowKeyValue,
+                    DocumentId = document.Id,
+                    document.BusinessKey,
+                    document.ProjectId,
+                    project.TemplateVersionId,
+                    SheetDefId = sheet.Id,
+                    SheetCode = sheet.Code,
+                    TableDefId = table.Id,
+                    TableCode = table.Code,
+                })
+                .Take(rowIds.Count)
+                .ToListAsync(ct)
+                .ConfigureAwait(false);
+
+            foreach (var r in rows)
+            {
+                result[("doc.CellValue", r.RowId)] = new ConsistencyLocation(
+                    r.ProjectId,
+                    r.TemplateVersionId,
+                    r.PeriodKeyValue,
+                    r.SheetDefId,
+                    r.TableDefId,
+                    new ConsistencyIssueWhere(r.DocumentId, r.BusinessKey, r.SheetCode, r.TableCode, r.RowKey, null));
+            }
+        }
+
+        var columnIds = entities
+            .Where(e => e.EntityType == "cfg.ColumnDef" && e.EntityId <= int.MaxValue)
+            .Select(e => (int)e.EntityId)
+            .Distinct()
+            .ToList();
+
+        if (columnIds.Count > 0)
+        {
+            var columns = await (
+                from column in db.ColumnDefs.AsNoTracking()
+                where columnIds.Contains(column.Id)
+                join table in db.TableDefs.AsNoTracking() on column.TableDefId equals table.Id
+                join sheet in db.SheetDefs.AsNoTracking() on table.SheetDefId equals sheet.Id
+                orderby column.Id
+                select new
+                {
+                    ColumnId = column.Id,
+                    ColumnCode = column.Code,
+                    TableDefId = table.Id,
+                    TableCode = table.Code,
+                    SheetDefId = sheet.Id,
+                    SheetCode = sheet.Code,
+                    sheet.TemplateVersionId,
+                })
+                .Take(columnIds.Count)
+                .ToListAsync(ct)
+                .ConfigureAwait(false);
+
+            foreach (var c in columns)
+            {
+                result[("cfg.ColumnDef", c.ColumnId)] = new ConsistencyLocation(
+                    null,
+                    c.TemplateVersionId,
+                    null,
+                    c.SheetDefId,
+                    c.TableDefId,
+                    new ConsistencyIssueWhere(null, null, c.SheetCode, c.TableCode, null, c.ColumnCode));
+            }
+        }
+
+        return result;
+    }
+
     /// <summary>Умова пошуку: текст, код правила або номер сутності.</summary>
     private const string QueryPredicate = """
         AND (Message LIKE @q ESCAPE N'\'
