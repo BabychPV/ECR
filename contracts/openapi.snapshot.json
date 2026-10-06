@@ -16441,11 +16441,36 @@
             "format": "int32",
             "type": "integer"
           },
+          "isBase": {
+            "default": false,
+            "description": "Базова одиниця розмірності (колонка «Base unit»).",
+            "type": "boolean"
+          },
+          "nameL10n": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Назва мовами каталогу; `null` — не задано.",
+            "type": [
+              "null",
+              "object"
+            ]
+          },
           "offsetToBase": {
             "default": "0",
             "description": "Зсув до базової; ненульовий лише в температури.",
             "format": "decimal",
             "type": "string"
+          },
+          "symbolL10n": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Позначення мовами каталогу (UI-21: колонка «Unit» переліку без N+1 по `GET /units/{id}`);\n`null` — тест-дублер не задав.",
+            "type": [
+              "null",
+              "object"
+            ]
           }
         },
         "required": [
