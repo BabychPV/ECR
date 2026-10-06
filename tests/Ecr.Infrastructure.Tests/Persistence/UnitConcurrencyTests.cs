@@ -280,6 +280,9 @@ public sealed class UnitConcurrencyTests(SqlServerFixture sql)
 
         public Task<Unit?> LockUnitAsync(int unitId, CancellationToken ct) => inner.LockUnitAsync(unitId, ct);
 
+        public Task<IReadOnlyDictionary<int, int>> CountUnitStructuralUsageAsync(CancellationToken ct)
+            => inner.CountUnitStructuralUsageAsync(ct);
+
         public async Task<UsageResponse> FindUnitUsageAsync(int unitId, int take, CancellationToken ct)
             => await PauseAfter(inner.FindUnitUsageAsync(unitId, take, ct), ct);
 
