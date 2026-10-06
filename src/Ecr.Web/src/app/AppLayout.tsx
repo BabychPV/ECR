@@ -1,4 +1,5 @@
 import {
+  lazy,
   Suspense,
   useEffect,
   useState,
@@ -29,13 +30,13 @@ import { NavbarCollapseToggle } from './NavbarCollapseToggle';
 import { NavRouteLink } from './NavRouteLink';
 import { NotFoundPage } from './NotFoundPage';
 import { canAccessRoute } from './routeAccess';
-import { navRoutes, routes, type RouteHandle } from './routes';
+import { NavGroupSection } from './NavGroupSection';
+import { navGroups, routes, type RouteHandle } from './routes';
 import { routeTransitionClassName } from './motionTokens';
 import { useRouteTransitionFocus } from './useRouteTransitionFocus';
 import { usePreferenceSync } from '@/features/preferences/usePreferenceSync';
 import { MyTasksLauncher } from '@/features/jobs/MyTasksLauncher';
 import { SearchLauncher } from '@/features/search/SearchLauncher';
-import { EndSimulationButton } from '@/features/security/SimulationPanel';
 import { useSession } from '@/shared/session/useSession';
 import { isCatalogResolved, language, loadCatalog, loginChosenLanguage, t } from '@/shared/i18n';
 import { useCatalog } from '@/shared/i18n/useCatalog';
@@ -158,8 +159,8 @@ function SkipToContentLink(): JSX.Element {
  * (`/admin/templates`) набирався рядковим літералом у ДВОХ місцях, і нічого
  * не заважало їм розійтися. `navRoutes` (`./routes`, `PR nav-arch #1`) —
  * тепер ЄДИНИЙ реєстр: `router.tsx` бере звідти `path`/`handle` для
- * `createBrowserRouter`, навбар нижче — той самий реєстр, відфільтрований за
- * `showInNav`. Порядок пунктів — порядок оголошення в реєстрі.
+ * `createBrowserRouter`, навбар нижче — той самий реєстр: групи й порядок
+ * пунктів — `navGroups` (UI-12, за макетом), відфільтровані за правом.
  */
 
 /** Каркас застосунку: навігація, профіль, вміст сторінки. */
@@ -189,6 +190,17 @@ const NavbarIconsOnlyWidth = 64;
  * бургером (`breakpoint: 'sm'` у `AppShell` нижче, 48em у Mantine).
  */
 const NavbarDesktopQuery = '(min-width: 48em)';
+
+/**
+ * Кнопка виходу із симуляції — лінивим чанком (UI-12, бюджет `D-132`).
+ *
+ * ⚠ Вона потрібна лише в сеансі симуляції, а статичний імпорт тягнув у
+ * вхідний чанк увесь `SimulationPanel` разом із `ReasonModal` — до КОЖНОГО
+ * маршруту. Групи меню коштували вхідному чанку +0.8 КБ; цей винос їх покриває.
+ */
+const EndSimulationButton = lazy(() =>
+  import('@/features/security/SimulationPanel').then((module) => ({ default: module.EndSimulationButton })),
+);
 
 /** Ідентифікатор списку пунктів меню — ціль `aria-controls` кнопки згортання. */
 const NavbarItemsId = 'app-navbar-items';
@@ -345,6 +357,13 @@ export function AppLayout(): JSX.Element {
     return <Navigate to="/change-password" replace />;
   }
 
+  // T1-15 (б): пунктів меню під примусовою зміною пароля немає зовсім.
+  const visibleNavGroups = me.mustChangePassword
+    ? []
+    : navGroups
+        .map((group) => ({ ...group, items: group.routes.filter((route) => canAccessRoute(me, route.handle)) }))
+        .filter((group) => group.items.length > 0);
+
   return (
     <>
       {/*
@@ -460,7 +479,9 @@ export function AppLayout(): JSX.Element {
                       помічає, що дивиться чужими правами, і саме тут має
                       бути вихід: інакше єдиним способом завершити сеанс
                       лишався б вихід із системи. */}
-                  <EndSimulationButton sessionId={me.simulationSessionId ?? null} />
+                  <Suspense fallback={null}>
+                    <EndSimulationButton sessionId={me.simulationSessionId ?? null} />
+                  </Suspense>
                 </>
               )}
               {/* ⛔ A2-06: під примусовою зміною пароля пошуку й «My tasks» немає зовсім, як і меню
@@ -491,28 +512,32 @@ export function AppLayout(): JSX.Element {
           <AppShell.Section grow component={ScrollArea} id={NavbarItemsId}>
             {/* T1-15 (б): пунктів меню під примусовою зміною пароля немає зовсім —
                 згорнута панель лишала б їх у дереві й у порядку Tab. */}
-            {navRoutes
-              .filter((route) => !me.mustChangePassword && canAccessRoute(me, route.handle))
-              .map((route) => (
-                // Фільтр ховає пункти навігації, на які немає права: нема
-                // сенсу пропонувати тиснути те, що все одно дасть 403. Той
-                // самий фільтр одночасно захищає прогрів за наміром (`PR nav-arch #5`):
-                // пункту без права тут просто НЕМА в дереві, тож немає й
-                // елемента, на який можна навести курсор/фокус, — прогрів
-                // для нього фізично не може спрацювати. Іконка (`PR
-                // nav-icons`, `handle.icon`/`navIcons.tsx`) — тепер
-                // відповідальність самого `NavRouteLink`, не цього рендера:
-                // компонент, що керує `leftSection`, і компонент, що
-                // прикріплює обробники наміру, — один і той самий елемент
-                // `NavLink`, тож два окремих місця виклику розійшлися б.
-                <NavRouteLink
-                  key={route.path}
-                  route={route}
-                  label={t(route.handle.labelKey)}
-                  active={location.pathname === route.path}
-                  collapsed={iconsOnly}
-                />
-              ))}
+            {/* UI-12: пункти — групами Work · Configure · Access · Operate (`navGroups`,
+                макет); група без жодного дозволеного пункту не малюється. */}
+            {visibleNavGroups.map((group, index) => (
+              <NavGroupSection key={group.id} group={group} first={index === 0} collapsed={iconsOnly}>
+                {group.items.map((route) => (
+                  // Фільтр ховає пункти навігації, на які немає права: нема
+                  // сенсу пропонувати тиснути те, що все одно дасть 403. Той
+                  // самий фільтр одночасно захищає прогрів за наміром (`PR nav-arch #5`):
+                  // пункту без права тут просто НЕМА в дереві, тож немає й
+                  // елемента, на який можна навести курсор/фокус, — прогрів
+                  // для нього фізично не може спрацювати. Іконка (`PR
+                  // nav-icons`, `handle.icon`/`navIcons.tsx`) — тепер
+                  // відповідальність самого `NavRouteLink`, не цього рендера:
+                  // компонент, що керує `leftSection`, і компонент, що
+                  // прикріплює обробники наміру, — один і той самий елемент
+                  // `NavLink`, тож два окремих місця виклику розійшлися б.
+                  <NavRouteLink
+                    key={route.path}
+                    route={route}
+                    label={t(route.handle.labelKey)}
+                    active={location.pathname === route.path}
+                    collapsed={iconsOnly}
+                  />
+                ))}
+              </NavGroupSection>
+            ))}
           </AppShell.Section>
           {!me.mustChangePassword && (
             <AppShell.Section visibleFrom="sm" pt="xs">
