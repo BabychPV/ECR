@@ -97,6 +97,12 @@ jobs:
           dotnet tool install --global dotnet-ef
           echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
 
+      # ⚠ Без restore `dotnet ef migrations script` у `setup-dev-db.ps1` падає з
+      # `NETSDK1004: Assets file … not found` (те саме, що й у свіжому worktree,
+      # CLAUDE.md). Скрипт сам restore не робить: локально дерево вже відновлене.
+      - name: dotnet restore
+        run: dotnet restore Ecr.sln
+
       # ⚠ Порт 5098, а не 5099: `setup-dev-db.ps1` піднімає застосунок для сіду
       # саме на 5099, і сценарій не має навіть теоретично говорити з ним.
       # ⛔ Пароль іде оточенням (`ECR_SQL_PASSWORD`), не аргументом.
