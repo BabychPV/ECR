@@ -2,10 +2,14 @@ import { readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
+  ForbiddenScaleVars,
+  ScaleComponents,
   UnusedMantineComponents,
+  declaredVars,
   findPrunedClassesInUse,
   mantineClassesIn,
   pruneCss,
+  pruneScaleVars,
 } from '../mantineCssPrune';
 
 const stylesDir = path.resolve(process.cwd(), 'node_modules/@mantine/core/styles');
@@ -101,5 +105,43 @@ describe('findPrunedClassesInUse', () => {
       cls,
     ]);
     expect(findPrunedClassesInUse(['const c = { root: "m_live0001" };'], slider).size).toBe(0);
+  });
+});
+
+describe('pruneScaleVars (шкала кнопок, `controls.css`)', () => {
+  const owners = new Set(['m_root0001']);
+  const names = new Set(['--button-height-xs']);
+
+  it('прибирає змінну шкали лише з кореневого правила компонента, решту лишає дослівно', () => {
+    const css =
+      '.m_root0001 {\n  --button-height-xs: 30px;\n  --button-height-sm: 36px;\n  color: red;\n}\n' +
+      '.m_root0001:where([data-x]) { --button-height-xs: 30px; }\n' +
+      '.m_other001 { --button-height-xs: 30px; }\n';
+
+    expect(pruneScaleVars(css, owners, names)).toBe(
+      '.m_root0001 {\n  --button-height-sm: 36px;\n  color: red;\n}\n' +
+        '.m_root0001:where([data-x]) { --button-height-xs: 30px; }\n' +
+        '.m_other001 { --button-height-xs: 30px; }\n',
+    );
+  });
+
+  it('на справжньому `styles.css`: шкала з `controls.css` і заборонені сходинки зникають з коренів, і лише звідти', () => {
+    const controls = readFileSync(path.resolve(process.cwd(), 'src/shared/theme/controls.css'), 'utf8');
+    const own = declaredVars(controls);
+    // ⛔ Порожній перелік зробив би перевірку нижче тривіально зеленою.
+    expect(own.has('--button-height-sm')).toBe(true);
+
+    const roots = new Set(ScaleComponents.map((component) => [...classesOf(component)][0] ?? ''));
+    const pruned = pruneScaleVars(fullCss, roots, new Set([...ForbiddenScaleVars, ...own]));
+
+    // Корінь `Button` — той, що справді оголошує шкалу (`--button-height-xs: 30px`).
+    const button = [...roots].find((cls) => new RegExp(`\\.${cls}\\s*\\{[^}]*--button-height-xs`).test(fullCss));
+    expect(button, 'корінь Button не знайдено — змінився `Button.css`').toBeDefined();
+
+    expect(pruned).not.toMatch(/--button-height-(xs|sm|lg|compact-xs)\s*:/);
+    expect(pruned).not.toMatch(/--ai-size-xl\s*:/);
+    // Решта правил — дослівно та сама (повторне відсікання нічого не змінює).
+    expect(pruned.length).toBeLessThan(fullCss.length);
+    expect(pruneCss(pruned, new Set())).toBe(pruned);
   });
 });

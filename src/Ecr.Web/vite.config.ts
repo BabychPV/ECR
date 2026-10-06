@@ -3,10 +3,14 @@ import react from '@vitejs/plugin-react';
 import path from 'node:path';
 import { readFileSync } from 'node:fs';
 import {
+  ForbiddenScaleVars,
+  ScaleComponents,
   UnusedMantineComponents,
+  declaredVars,
   findPrunedClassesInUse,
   mantineClassesIn,
   pruneCss,
+  pruneScaleVars,
 } from './src/app/mantineCssPrune';
 import { MantineUseTransitionModule, patchMantineUseTransition } from './scripts/patch-mantine-transition.mjs';
 
@@ -38,6 +42,19 @@ function pruneUnusedMantineCss(): Plugin {
   const dead = new Set(owner.keys());
   let applied = false;
 
+  // Корінь компонента — перший клас його файла (`.m_77c9d27d` у `Button.css`).
+  const scaleOwners = new Set(
+    ScaleComponents.map((component) => {
+      const first = [...mantineClassesIn(readFileSync(path.join(stylesDir, `${component}.css`), 'utf8'))][0];
+      if (first === undefined) throw new Error(`Немає класу в @mantine/core/styles/${component}.css`);
+      return first;
+    }),
+  );
+  const scaleVars = new Set([
+    ...ForbiddenScaleVars,
+    ...declaredVars(readFileSync(path.resolve(__dirname, 'src/shared/theme/controls.css'), 'utf8')),
+  ]);
+
   return {
     name: 'ecr:prune-unused-mantine-css',
     apply: 'build',
@@ -46,7 +63,7 @@ function pruneUnusedMantineCss(): Plugin {
       if (!/[\\/]@mantine[\\/]core[\\/]styles\.css(\?.*)?$/.test(id)) return null;
 
       applied = true;
-      return { code: pruneCss(code, dead), map: null };
+      return { code: pruneScaleVars(pruneCss(code, dead), scaleOwners, scaleVars), map: null };
     },
     generateBundle(_options, bundle) {
       if (!applied) {
