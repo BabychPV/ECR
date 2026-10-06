@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type JSX } from 'react';
-import { Button, Divider } from '@mantine/core';
+import { Button, Divider, Text } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiEnqueue, apiFetch, EcrApiError } from '@/api/client';
@@ -21,6 +21,7 @@ import { showApiError, showDone } from '@/shared/ui/notify';
 import { useRecallAvailability, type RecallSheetRequest } from './api';
 import { outcomeOf, pollInterval } from './jobFollow';
 import { useSettledAction } from '@/features/grid/settleEdits';
+import { isRecalculateKey, isTypingOrDialogTarget } from '@/features/grid/shortcutKey';
 import { humanizeJobId } from './jobLabel';
 import { isAllowed, type WorkflowAction } from './transitions';
 import { t } from '@/shared/i18n';
@@ -598,6 +599,35 @@ export function SheetActions({
   // ✎ AN-39/L8-12: сервер (`RecalculateDocumentHandler`) відмовляє, коли ХОЧ ОДИН аркуш
   // періоду поданий чи затверджений, - кнопки, яка гарантовано дасть відмову, немає.
   const canRecalculate = !dataLocked && !hasLockedSheet(summary?.sheetStates) && can(me, 'Document.View');
+  const recalcBusy = recalculate.isPending || recalcRunning || settled.settling;
+
+  /*
+   * ✎ `UI-41` (макет `screen-document.js`: F9 → `doRecalc`, «Recalculate» з `kbd: 'F9'`): F9
+   * запускає РІВНО ту саму дію, що й кнопка, — `settled.run`, тобто спершу зберегти набране
+   * (AN-28/L8-01). Кнопки немає (стан, права, блокування) — F9 нічого не робить.
+   *
+   * ⚠ Не з поля вводу, редактора комірки чи діалогу (`isTypingOrDialogTarget`): у редакторі
+   * набір ще не зафіксовано (`keyCommitGate`), а дія за модальним вікном сталася б непомітно.
+   * ⚠ Обробник ставиться ОДИН раз; актуальну дію він бере з `f9` (оновлюється після рендера).
+   */
+  const f9 = useRef<(() => void) | null>(null);
+  useEffect(() => {
+    f9.current = canRecalculate && !recalcBusy ? () => void settled.run(() => recalculate.mutateAsync()) : null;
+  });
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent): void => {
+      if (!isRecalculateKey(event) || isTypingOrDialogTarget(event.target)) return;
+      const run = f9.current;
+      if (run === null) return;
+
+      event.preventDefault();
+      run();
+    };
+
+    window.addEventListener('keydown', onKey);
+
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   const hasAnyAction =
     canRecalculate ||
@@ -634,9 +664,16 @@ export function SheetActions({
         <Hint label={t('workflow.recalculateHint')}>
           <Button
             variant="default"
-            loading={recalculate.isPending || recalcRunning || settled.settling}
+            loading={recalcBusy}
             // AN-28/L8-01: спершу зберегти набране; відмова збереження - дії немає.
             onClick={() => settled.run(() => recalculate.mutateAsync())}
+            // `UI-41`: читалка називає клавішу; на кнопці — видимий `F9`, як `kbd` у макеті.
+            aria-keyshortcuts="F9"
+            rightSection={
+              <Text span size="xs" ff="monospace" c="dimmed" aria-hidden="true" data-recalc-kbd="">
+                F9
+              </Text>
+            }
           >
             {recalcRunning ? t('workflow.recalcRunning') : t('workflow.recalculate')}
           </Button>
