@@ -16,8 +16,8 @@ import { TemplateVersionPage } from '@/pages/admin/TemplateVersionPage';
  * на стенді: ~212 тис. волокон React на символ, медіана 6.4 с (dev) / 2.0 с
  * (prod) від натискання до кадру; після — 317 волокон і ~31 мс.
  *
- * ⛔ Шпигун — на корені дерева структури (`Accordion` аркушів), а не на
- * сторінці: твердження саме про те, що друк не чіпає дерева.
+ * ⛔ Шпигун — на корені дерева структури (`CtorTree`, UI-36; доти — `Accordion`
+ * аркушів), а не на сторінці: твердження саме про те, що друк не чіпає дерева.
  *
  * ⛔ Мутаційний доказ: повернення чернетки «Add sheet» на сторінку
  * (`onChange={setSheetDraft}` замість локального `LocalDraft`) дає тут
@@ -26,16 +26,16 @@ import { TemplateVersionPage } from '@/pages/admin/TemplateVersionPage';
 
 const renders = vi.hoisted(() => ({ tree: 0 }));
 
-vi.mock('@mantine/core', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@mantine/core')>();
-  const Real = actual.Accordion;
+vi.mock('@/features/templates/ctor/CtorTree', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/features/templates/ctor/CtorTree')>();
+  const Real = actual.CtorTree;
 
-  function SpyAccordion(props: ComponentProps<typeof Real>): JSX.Element {
+  function SpyTree(props: ComponentProps<typeof Real>): JSX.Element {
     renders.tree += 1;
     return <Real {...props} />;
   }
 
-  return { ...actual, Accordion: Object.assign(SpyAccordion, Real) };
+  return { ...actual, CtorTree: SpyTree };
 });
 
 const SeededStrings: Record<string, string> = {
@@ -160,13 +160,13 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function renderPage(): void {
+function renderPage(entry = '/admin/templates/1/versions/1'): void {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
   render(
     <MantineProvider theme={theme}>
       <QueryClientProvider client={client}>
-        <MemoryRouter initialEntries={['/admin/templates/1/versions/1']}>
+        <MemoryRouter initialEntries={[entry]}>
           <Routes>
             <Route path="/admin/templates/:id/versions/:versionId" element={<TemplateVersionPage />} />
           </Routes>
@@ -195,7 +195,9 @@ function putBody(pathPart: string): unknown {
 
 describe('TemplateVersionPage — друк у діалозі не перерендерює дерево структури', () => {
   it('«Add sheet»: набір коду й назви не рендерить дерево, а збереження везе введене', async () => {
-    renderPage();
+    // UI-36: «Add sheet» — в огляді версії (корінь дерева).
+    renderPage('/admin/templates/1/versions/1?node=root');
+    await screen.findByTestId('ctor-tree');
 
     fireEvent.click(await screen.findByRole('button', { name: 'Add sheet' }));
     const dialog = await screen.findByRole('dialog');
@@ -221,9 +223,9 @@ describe('TemplateVersionPage — друк у діалозі не перерен
   });
 
   it('«Add table»: те саме для сусіднього діалогу', async () => {
-    renderPage();
-
-    fireEvent.click(await screen.findByRole('button', { name: /Sheet \(SHEET\)/ }));
+    // UI-36: «Add table» — в огляді аркуша.
+    renderPage('/admin/templates/1/versions/1?node=s:SHEET');
+    await screen.findByTestId('ctor-tree');
     fireEvent.click(await screen.findByRole('button', { name: 'Add table' }));
     const dialog = await screen.findByRole('dialog');
     const code = await within(dialog).findByRole('textbox', { name: /Table code/ });
