@@ -323,7 +323,13 @@ export function DataSearchPalette({ opened, onClose, onPicked, groups = NoGroups
         autoComplete="off"
       />
 
-      <div className="ecr-palette-body">
+      {/*
+       * ⚠ `tabIndex={0}`: це область прокрутки, а варіанти — `tabIndex={-1}`
+       * (обираються стрілками через `aria-activedescendant`). Без зупинки табом
+       * людина з клавіатурою не прокрутила б довгий перелік, а axe дає
+       * `scrollable-region-focusable` (живий прогін batch-2-a, дефект 6).
+       */}
+      <div className="ecr-palette-body" tabIndex={0}>
         {/* ⛔ Відмова — не «нічого не знайдено»: це два різні твердження. */}
         {!tooShort && failed && <ErrorAlert error={search.error} onRetry={retry} />}
 
