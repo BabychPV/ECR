@@ -23,11 +23,24 @@ import { formatDate } from './datetime';
 export function formatMonthYear(year: number, month: number): string {
   if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) return '';
 
-  const monthKey = `periods.month.${String(month)}`;
-
-  if (hasText('periods.monthOf') && hasText(monthKey)) {
-    return t('periods.monthOf', { month: t(monthKey), year: String(year) });
+  if (hasText('periods.monthOf') && hasText(`periods.month.${String(month)}`)) {
+    return t('periods.monthOf', { month: formatMonthName(month), year: String(year) });
   }
 
   return formatDate(new Date(Date.UTC(year, month - 1, 1)), { year: 'numeric', month: 'long', timeZone: 'UTC' });
+}
+
+/**
+ * Лише назва місяця мовою інтерфейсу («September», «Сентябрь», «Қыркүйек») —
+ * для сітки місяців `PeriodPicker` (UI-13). Ті самі ключі й той самий відкат на
+ * `Intl`, що й `formatMonthYear` вище; `month` поза 1…12 — порожній рядок.
+ */
+export function formatMonthName(month: number): string {
+  if (!Number.isInteger(month) || month < 1 || month > 12) return '';
+
+  const monthKey = `periods.month.${String(month)}`;
+
+  return hasText(monthKey)
+    ? t(monthKey)
+    : formatDate(new Date(Date.UTC(2000, month - 1, 1)), { month: 'long', timeZone: 'UTC' });
 }

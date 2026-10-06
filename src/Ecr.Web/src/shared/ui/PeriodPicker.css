@@ -1,0 +1,170 @@
+/*
+ * PeriodPicker за макетом (UI-13): docs/design/hybrid/index.html, `.period`,
+ * `.period-state`, `.months`. Кольори — лише змінні теми Mantine
+ * (світла й темна тема перемикаються самі).
+ */
+.ecr-period-anchor {
+  position: relative;
+  display: inline-flex;
+  flex-direction: column;
+  gap: var(--mantine-spacing-xs);
+}
+
+.ecr-period {
+  display: inline-flex;
+  align-items: stretch;
+  /* Висота контролу — шкала `--ecr-ctl-height` (docs/design/ui-conventions.md); 30 px — `input-xs` без неї. */
+  height: var(--ecr-ctl-height, 30px);
+  border: 1px solid var(--ecr-border-strong);
+  border-radius: var(--mantine-radius-sm);
+  background: var(--ecr-surface);
+}
+
+.ecr-period > button {
+  border: 0;
+  background: transparent;
+  color: var(--ecr-muted);
+  display: inline-flex;
+  align-items: center;
+  padding: 0 calc(var(--mantine-spacing-xs) / 2);
+  cursor: pointer;
+}
+
+.ecr-period > button:first-child {
+  border-radius: var(--mantine-radius-sm) 0 0 var(--mantine-radius-sm);
+}
+
+.ecr-period > button:last-child {
+  border-radius: 0 var(--mantine-radius-sm) var(--mantine-radius-sm) 0;
+}
+
+.ecr-period > button:hover:not(:disabled) {
+  background: var(--ecr-hover);
+  color: var(--ecr-text);
+}
+
+.ecr-period > button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.ecr-period-field {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(var(--mantine-spacing-xs) / 2);
+  padding: 0 var(--mantine-spacing-xs);
+  border-left: 1px solid var(--ecr-border);
+  border-right: 1px solid var(--ecr-border);
+}
+
+.ecr-period-field input {
+  font-weight: 500;
+}
+
+.ecr-period-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding-left: var(--mantine-spacing-xs);
+  border-left: 1px solid var(--ecr-border);
+  color: var(--ecr-muted);
+  font-size: var(--mantine-font-size-xs);
+  white-space: nowrap;
+}
+
+.ecr-period-state[data-tone='warning'] {
+  color: var(--ecr-warning);
+}
+
+.ecr-period-pop {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: var(--mantine-z-index-popover);
+  width: 18.75rem;
+  border: 1px solid var(--ecr-border);
+  border-radius: var(--mantine-radius-sm);
+  background: var(--ecr-raised);
+  box-shadow: var(--mantine-shadow-md);
+}
+
+.ecr-period-pop-title {
+  padding: var(--mantine-spacing-xs) var(--mantine-spacing-sm) 0;
+  font-size: var(--mantine-font-size-xs);
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ecr-muted);
+}
+
+.ecr-period-months {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+  padding: 4px;
+}
+
+.ecr-period-months button {
+  height: 1.875rem;
+  border: 1px solid transparent;
+  border-radius: var(--mantine-radius-xs);
+  background: transparent;
+  color: var(--ecr-text);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--mantine-spacing-xs);
+  padding: 0 var(--mantine-spacing-xs);
+  font-size: var(--mantine-font-size-sm);
+  cursor: pointer;
+}
+
+.ecr-period-months button:hover {
+  background: var(--ecr-hover);
+}
+
+.ecr-period-months button[aria-current='true'] {
+  background: var(--ecr-accent-soft);
+  color: var(--ecr-accent-text);
+  font-weight: 500;
+}
+
+.ecr-period-months svg {
+  color: var(--ecr-faint);
+  flex: none;
+}
+
+.ecr-period-row {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--mantine-spacing-sm);
+  flex-wrap: wrap;
+}
+
+.ecr-period-calendar {
+  border: 0;
+  background: transparent;
+  color: var(--ecr-muted);
+  display: inline-flex;
+  align-items: center;
+  padding: 2px;
+  border-radius: var(--mantine-radius-xs);
+  cursor: pointer;
+}
+
+.ecr-period-calendar:hover:not(:disabled) {
+  background: var(--ecr-hover);
+  color: var(--ecr-text);
+}
+
+/*
+ * ⛔ Поле без власної рамки (`variant="unstyled"`), а Mantine гасить йому
+ * `outline` на фокусі й показує фокус лише кольором рамки — тобто тут не
+ * показував би нічого. Кільце — той самий `--ecr-focus`, що й у решти
+ * елементів (`shared/theme/motion.css`); `e2e/keyboardPath.spec.ts` міряє саме його.
+ */
+.ecr-period .ecr-period-field input:focus-visible {
+  outline: 2px solid var(--ecr-focus);
+  outline-offset: 1px;
+  border-radius: var(--mantine-radius-xs);
+}
