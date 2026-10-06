@@ -24,7 +24,7 @@ import { TemplatesPage } from '@/pages/admin/TemplatesPage';
  */
 
 const templates = {
-  items: [{ id: 7, code: 'AIR', versionCount: 2 }],
+  items: [{ id: 7, code: 'AIR', versionCount: 2, documentCount: 0, isArchived: false }],
   nextCursor: null,
   totalCount: 1,
 };
