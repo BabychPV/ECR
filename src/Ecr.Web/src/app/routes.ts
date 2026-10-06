@@ -64,7 +64,21 @@ export interface RouteCrumbConfig {
   resolveParam?: string;
 
   /** Який резолвер `breadcrumbResolvers.ts` читає кеш TanStack Query для {@link resolveParam}. */
-  resolveWith?: 'templateName' | 'templateVersionLabel' | 'registryName';
+  resolveWith?: 'templateName' | 'templateVersionLabel' | 'registryName' | 'documentKey';
+
+  /**
+   * UI-32: ще одна крихта ПІСЛЯ власної — з кешу сторінки, не з реєстру
+   * (документ: «Documents › DOC-… › Air emissions», де аркуш — у `?sheet=`).
+   * Поки даних немає й запиту немає, крихти просто нема: вигаданої назви
+   * аркуша (і назви аркуша, якого API не повернув) показувати не можна.
+   */
+  trailWith?: 'documentSheet';
+
+  /**
+   * UI-32: не ставити перед ланцюжком назву групи меню («Work › …»). Макет
+   * (`screen-document.js`, `setCrumbs`) починає крихти документа з «Documents».
+   */
+  omitGroup?: boolean;
 
   /**
    * Явна ціль посилання крихти, якщо вона НЕ збігається з власним `pathname`
@@ -355,7 +369,13 @@ export const routes = {
   adminMethodologyVersions: {
     id: 'admin-methodology-versions',
     path: '/admin/methodologies/:id/versions',
-    handle: { labelKey: 'methodologies.versionsTitle', permission: 'Calculation.View', numericParams: ['id'] },
+    handle: {
+      labelKey: 'methodologies.versionsTitle',
+      permission: 'Calculation.View',
+      numericParams: ['id'],
+      // UI-32: «Configure › Methodologies › …» (макет `screens-data.js`).
+      crumb: { ancestorIds: ['admin-methodologies'] },
+    },
   },
   adminExpressions: {
     id: 'admin-expressions',
@@ -546,7 +566,13 @@ export const routes = {
     // Резолв динамічного сегмента (`:id` → бізнес-ключ із кешу запиту) —
     // задача breadcrumbs-резолвера (`PR #3`), не цієї картки.
     path: '/documents/:id',
-    handle: { labelKey: 'documents.title', numericParams: ['id'] },
+    // UI-32: «Documents › DOC-… › аркуш» (макет `screen-document.js`): назва — бізнес-ключ
+    // із кешу сторінки, аркуш — з її ж переліку таблиць.
+    handle: {
+      labelKey: 'documents.title',
+      numericParams: ['id'],
+      crumb: { ancestorIds: ['home'], resolveParam: 'id', resolveWith: 'documentKey', trailWith: 'documentSheet', omitGroup: true },
+    },
   },
 } as const satisfies Record<string, RouteEntry>;
 

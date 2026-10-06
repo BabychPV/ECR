@@ -1,6 +1,13 @@
 import type { QueryClient, QueryKey } from '@tanstack/react-query';
 import { queryKeys } from '@/api/queryKeys';
-import type { RegistryDefinitionDto, TemplateCard, TemplatePage, TemplateVersionPage } from '@/api/types';
+import type {
+  DocumentSummary,
+  DocumentTableDto,
+  RegistryDefinitionDto,
+  TemplateCard,
+  TemplatePage,
+  TemplateVersionPage,
+} from '@/api/types';
 import { templateCardKey } from '@/features/templates/templateCardQuery';
 import { localized } from '@/shared/i18n/localized';
 import type { RouteHandle } from './routes';
@@ -99,11 +106,78 @@ function registryNameLookup(params: CrumbParams): ResolverLookup {
   };
 }
 
-const lookups: Record<NonNullable<CrumbResolverId>, (params: CrumbParams) => ResolverLookup> = {
+const lookups: Record<Exclude<NonNullable<CrumbResolverId>, 'documentKey'>, (params: CrumbParams) => ResolverLookup> = {
   templateName: templateNameLookup,
   templateVersionLabel: templateVersionLabelLookup,
   registryName: registryNameLookup,
 };
+
+/**
+ * Параметри адреси (`?sheet=`, `?periodKey=`) у {@link CrumbParams} — з цим
+ * префіксом, щоб не зіткнутися з `:name` шляху (`fillParams` їх не бачить).
+ */
+export const SearchParamPrefix = '?';
+
+/**
+ * UI-32: дані сторінки документа з кешу — за ПРЕФІКСОМ ключа (`['document', id]`,
+ * `['document-tables', id]`), бо третій елемент ключа — період, а період за
+ * замовчуванням рахує сама сторінка. Перевага — запис саме для `?periodKey=`
+ * з адреси; інакше — найсвіжіший. Лише читання кешу (`findAll`), без запиту.
+ */
+function documentQueryData(
+  queryClient: QueryClient,
+  domain: 'document' | 'document-tables',
+  params: CrumbParams,
+): { data: unknown; fetching: boolean } {
+  const documentId = Number(params['id']);
+  if (!Number.isFinite(documentId)) return { data: undefined, fetching: false };
+
+  const periodKey = Number(params[`${SearchParamPrefix}periodKey`]);
+  const queries = queryClient.getQueryCache().findAll({ queryKey: [domain, documentId] });
+  // ⛔ Лише ключ сторінки `[домен, id, періодKey]`: під тим самим префіксом живуть і
+  // `['document', id, period, 'workflow-history']`, `['document', id, 'migrate-version-targets']`
+  // — свіжіші, але без бізнес-ключа (знайдено живим прогоном: крихта лишалась «Documents»).
+  const withData = queries
+    .filter((query) => query.queryKey.length === 3 && typeof query.queryKey[2] === 'number')
+    .filter((query) => query.state.data !== undefined)
+    .sort((a, b) => b.state.dataUpdatedAt - a.state.dataUpdatedAt);
+  const chosen = withData.find((query) => query.queryKey[2] === periodKey) ?? withData[0];
+
+  return {
+    data: chosen?.state.data,
+    fetching: queries.some((query) => query.state.fetchStatus === 'fetching'),
+  };
+}
+
+function documentKeyResolution(queryClient: QueryClient, params: CrumbParams): CrumbResolution {
+  const { data, fetching } = documentQueryData(queryClient, 'document', params);
+  const businessKey = (data as DocumentSummary | undefined)?.businessKey;
+  if (businessKey !== undefined && businessKey.length > 0) return { status: 'resolved', text: businessKey };
+
+  return fetching ? { status: 'loading' } : { status: 'unavailable' };
+}
+
+/**
+ * UI-32: назва аркуша документа, на якому стоїть сторінка, — той самий вибір,
+ * що в `DocumentPage` (`?sheet=`, інакше перший за порядком).
+ *
+ * ⛔ P1 прихованих аркушів: назва береться ЛИШЕ з переліку таблиць, який
+ * повернув сервер (`GET /documents/{id}/tables` прихованих аркушів не віддає).
+ * Код з адреси, якого в переліку немає, назвою не стає — як і на сторінці.
+ */
+export function resolveDocumentSheet(queryClient: QueryClient, params: CrumbParams): CrumbResolution {
+  const { data, fetching } = documentQueryData(queryClient, 'document-tables', params);
+  const tables = Array.isArray(data) ? (data as DocumentTableDto[]) : [];
+  if (tables.length === 0) return fetching ? { status: 'loading' } : { status: 'unavailable' };
+
+  const wanted = params[`${SearchParamPrefix}sheet`];
+  const sheet =
+    tables.find((table) => table.sheetCode === wanted) ??
+    [...tables].sort((a, b) => a.sheetOrdinal - b.sheetOrdinal)[0]!;
+  const name = localized(sheet.sheetNameL10n);
+
+  return { status: 'resolved', text: name.length > 0 ? name : sheet.sheetCode };
+}
 
 /** Підсумок спроби резолву однієї динамічної крихти. */
 type CrumbResolution =
@@ -127,6 +201,7 @@ export function resolveCrumbValue(
   params: CrumbParams,
 ): CrumbResolution {
   if (resolveWith === undefined) return { status: 'unavailable' };
+  if (resolveWith === 'documentKey') return documentKeyResolution(queryClient, params);
 
   let loading = false;
 
