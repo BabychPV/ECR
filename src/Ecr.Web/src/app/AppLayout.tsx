@@ -303,12 +303,12 @@ export function AppLayout(): JSX.Element {
   // було відкрите. `UserMenu` тепер підписаний на щільність сам
   // (`useDensity()`, `shared/theme/preferences.ts`) — виклик лишається
   // лише заради побічного ефекту синхронізації з сервером.
-  // A3: мова, обрана на екрані входу й відмінна від профілю, іде на сервер (`PUT …/language`).
+  // A3/A4-01: мова, обрана на екрані входу, іде на сервер (`PUT …/language`) і позначає ключ «зміненим».
+  // ⛔ Без порівняння з `me.language`: збережений у налаштуваннях вибір (`en`) може відрізнятися від
+  // профілю (`ru`) — тоді вибір на логіні, що збігається з профілем, не позначав ключ, і значення
+  // налаштувань перекривало його. Дубль запису відсікає `PreferenceSync.changed` (`known`).
   const loginChoice = loginChosenLanguage();
-  usePreferenceSync(
-    me !== undefined,
-    me !== undefined && loginChoice !== null && loginChoice !== me.language ? loginChoice : null,
-  );
+  usePreferenceSync(me !== undefined, me !== undefined ? loginChoice : null);
 
   // Приватний каталог рядків тягнеться після входу і мовою сесії (D-114).
   useEffect(() => {
