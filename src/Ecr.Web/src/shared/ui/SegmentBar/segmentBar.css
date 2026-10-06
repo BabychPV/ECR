@@ -1,0 +1,69 @@
+/*
+ * SegmentBar (`UI-15`/`UI-19`, макет `index.html` `.segbar*`, KIT.md §6.7).
+ *
+ * ⚠ Форма + колір, не лише колір (`ФВ-14.18`): затверджений — суцільний
+ * приглушений, поданий — наполовину акцентний, чернетка — пунктирна рамка,
+ * відхилений — суцільний червоний. Невідомий стан — суцільний «увага» (той
+ * самий тон, що й у бейджа, `UnknownStateTone`). Лише токени `--ecr-*`.
+ */
+.ecr-segbar {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.ecr-segbar__segs {
+  display: inline-flex;
+  gap: 2px;
+}
+
+.ecr-segbar__sg {
+  display: block;
+  box-sizing: border-box;
+  width: 14px;
+  height: 8px;
+  border-radius: 1px;
+  border: 1px solid var(--ecr-border-strong);
+  background: transparent;
+}
+
+.ecr-segbar[data-size='lg'] .ecr-segbar__sg {
+  width: 28px;
+  height: 10px;
+}
+
+.ecr-segbar__sg[data-tone='info'] {
+  background: linear-gradient(90deg, var(--ecr-accent) 50%, transparent 50%);
+  border-color: var(--ecr-accent);
+}
+
+.ecr-segbar__sg[data-tone='danger'] {
+  background: var(--ecr-danger);
+  border-color: var(--ecr-danger);
+}
+
+.ecr-segbar__sg[data-tone='warning'] {
+  background: var(--ecr-warning);
+  border-color: var(--ecr-warning);
+}
+
+.ecr-segbar__sg[data-tone='muted'] {
+  border-color: var(--ecr-faint);
+}
+
+/* Затверджений — суцільний приглушений: «готово», але не зелений (KIT §1, «Тони»). */
+.ecr-segbar__sg[data-state='Approved'][data-tone='neutral'] {
+  background: var(--ecr-muted);
+  border-color: var(--ecr-muted);
+}
+
+.ecr-segbar__sg[data-state='Draft'][data-tone='neutral'] {
+  border-style: dashed;
+}
+
+.ecr-segbar__label {
+  font-size: var(--mantine-font-size-xs);
+  color: var(--ecr-muted);
+  white-space: nowrap;
+}
