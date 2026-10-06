@@ -90,7 +90,7 @@ export function StartSimulationButton({ userId }: { userId: number }): JSX.Eleme
 
   return (
     <>
-      <Button size="compact-xs" variant="subtle" onClick={() => setAsking(true)}>
+      <Button size="xs" variant="subtle" onClick={() => setAsking(true)}>
         {t('security.simulate')}
       </Button>
 
@@ -148,7 +148,7 @@ export function EndSimulationButton({
 
   return (
     <Button
-      size="compact-xs"
+      size="xs"
       variant="white"
       color="dark"
       loading={end.isPending}

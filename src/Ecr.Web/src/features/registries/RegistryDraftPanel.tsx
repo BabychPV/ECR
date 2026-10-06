@@ -238,7 +238,6 @@ export function RegistryDraftPanel({
           />
 
           <Button
-            size="xs"
             disabled={request === null || blocked}
             loading={saveLoading}
             onClick={() => {
@@ -259,7 +258,6 @@ export function RegistryDraftPanel({
               вимагає прямий `PUT …/definition` на сервері. */}
           {mayPublish && draft === null && (
             <Button
-              size="xs"
               variant="default"
               disabled={request === null || blocked}
               loading={saveAndPublishLoading}
@@ -276,7 +274,6 @@ export function RegistryDraftPanel({
               відсутність. */}
           {draft !== null && (
             <Button
-              size="xs"
               variant="default"
               disabled={blocked}
               loading={discardLoading}
@@ -289,7 +286,6 @@ export function RegistryDraftPanel({
 
           {mayPublish && draft !== null && (
             <Button
-              size="xs"
               variant="default"
               disabled={blocked}
               loading={publishLoading}
@@ -397,7 +393,7 @@ function DraftConflictNote({
 
       {conflict.kind !== 'stale' && (
         <Group gap="xs">
-          <Button size="xs" variant="default" onClick={onTake} data-take-current-draft="">
+          <Button variant="default" onClick={onTake} data-take-current-draft="">
             {t('registries.reloadDraft')}
           </Button>
         </Group>

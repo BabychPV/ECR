@@ -164,7 +164,6 @@ export function AuditPage(): JSX.Element {
           <Group gap="xs" align="end">
             <SegmentedControl
               aria-label={t('audit.title')}
-              size="xs"
               value={structure ? 'structure' : security ? 'security' : 'cells'}
               onChange={(value) => setView(value === 'structure' || value === 'security' ? value : null)}
               data={[
@@ -173,7 +172,7 @@ export function AuditPage(): JSX.Element {
                 { value: 'security', label: t('audit.viewSecurity') },
               ]}
             />
-            <Suspense fallback={<Skeleton height={30} width={140} />}>
+            <Suspense fallback={<Skeleton height="var(--ecr-ctl-height)" width={140} />}>
               <DateOnlyInput
                 size="xs"
                 label={t('audit.from')}
@@ -186,7 +185,7 @@ export function AuditPage(): JSX.Element {
                 }}
               />
             </Suspense>
-            <Suspense fallback={<Skeleton height={30} width={140} />}>
+            <Suspense fallback={<Skeleton height="var(--ecr-ctl-height)" width={140} />}>
               <DateOnlyInput
                 size="xs"
                 label={t('audit.to')}
@@ -308,7 +307,6 @@ export function AuditPage(): JSX.Element {
           </Badge>
         )}
         <Button
-          size="xs"
           mb="xs"
           variant="subtle"
           onClick={() => {

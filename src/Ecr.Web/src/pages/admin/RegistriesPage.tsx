@@ -273,7 +273,7 @@ export function RegistriesPage(): JSX.Element {
             sortable: false,
             render: (entry: RegistryEntryDto) => (
               <Group gap="xs" justify="flex-end">
-                <Button size="compact-xs" variant="subtle" onClick={() => setEditing(entry)}>
+                <Button size="xs" variant="subtle" onClick={() => setEditing(entry)}>
                   {t('registries.editEntry')}
                 </Button>
 
@@ -282,7 +282,7 @@ export function RegistriesPage(): JSX.Element {
                     датою (`ФВ-8.5`). */}
                 {selected?.isTemporal === true && (
                   <Button
-                    size="compact-xs"
+                    size="xs"
                     variant="subtle"
                     disabled={externalReadOnly}
                     onClick={() => setValidity(entry)}
@@ -300,7 +300,7 @@ export function RegistriesPage(): JSX.Element {
                     датою, а видалення доступне лише запису, на який ще ніхто
                     не послався. */}
                 <Button
-                  size="compact-xs"
+                  size="xs"
                   variant="subtle"
                   color="statusError"
                   disabled={externalReadOnly}
@@ -359,7 +359,7 @@ export function RegistriesPage(): JSX.Element {
                 НАЯВНОГО довідника, а сам довідник заводив тільки офлайновий
                 seed — тобто довідника, якого там немає, не міг завести ніхто. */}
             {can(session.data, 'Registry.EditDefinition') && (
-              <Button size="xs" variant="default" onClick={() => setCreating(true)}>
+              <Button variant="default" onClick={() => setCreating(true)}>
                 {t('registries.newRegistry')}
               </Button>
             )}
@@ -368,7 +368,7 @@ export function RegistriesPage(): JSX.Element {
                 записів — це колонка типу `Lookup`, яка не пропонує нічого,
                 тобто документ, який неможливо заповнити. */}
             {selected !== undefined && can(session.data, 'Registry.EditData') && (
-              <Button size="xs" disabled={externalReadOnly} onClick={() => setEditing(null)}>
+              <Button disabled={externalReadOnly} onClick={() => setEditing(null)}>
                 {t('registries.newEntry')}
               </Button>
             )}
@@ -397,7 +397,6 @@ export function RegistriesPage(): JSX.Element {
               <Button
                 component={Link}
                 to={`/admin/registries/${encodeURIComponent(selected.code)}/entries`}
-                size="xs"
                 variant="default"
               >
                 {t('registries.data.open')}
@@ -412,7 +411,6 @@ export function RegistriesPage(): JSX.Element {
               <Button
                 component={Link}
                 to={`/admin/registries/${encodeURIComponent(selected.code)}/definition`}
-                size="xs"
                 variant="default"
               >
                 {t('registries.constructor')}
@@ -424,7 +422,6 @@ export function RegistriesPage(): JSX.Element {
               <Button
                 component={Link}
                 to={`/admin/registries/${encodeURIComponent(selected.code)}/impact`}
-                size="xs"
                 variant="default"
               >
                 {t('registries.impact.open')}

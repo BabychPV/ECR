@@ -125,7 +125,6 @@ export function CoverageEventsPanel(): JSX.Element {
       {events.hasNextPage && (
         <Group justify="center">
           <Button
-            size="xs"
             variant="default"
             loading={events.isFetchingNextPage}
             onClick={() => void events.fetchNextPage()}

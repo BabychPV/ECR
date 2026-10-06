@@ -57,7 +57,6 @@ export function StructureExportButton({ from, to }: { from: string; to: string }
     <Stack gap="xs" mb="md">
       <Group justify="flex-end">
         <Button
-          size="xs"
           variant="default"
           loading={busy}
           disabled={!isExportWindowValid(from, to)}

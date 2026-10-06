@@ -261,7 +261,7 @@ function UnitEditForm({ unit, onDone }: { readonly unit: UnitDetail; readonly on
             {t('err.ECR-UOM-0409.unitChanged', { code: unit.code })}
           </Text>
           <Group gap="xs">
-            <Button size="xs" variant="default" onClick={() => takeFresh(fresh)} data-take-fresh="">
+            <Button variant="default" onClick={() => takeFresh(fresh)} data-take-fresh="">
               {t('units.reloadCurrent')}
             </Button>
           </Group>

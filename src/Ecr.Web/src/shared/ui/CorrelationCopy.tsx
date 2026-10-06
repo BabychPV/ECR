@@ -25,7 +25,7 @@ export default function CorrelationCopy({
     <Group gap="xs">
       <CopyButton value={value}>
         {({ copy }) => (
-          <Button size="xs" variant="default" onClick={copy}>
+          <Button variant="default" onClick={copy}>
             {label}
           </Button>
         )}

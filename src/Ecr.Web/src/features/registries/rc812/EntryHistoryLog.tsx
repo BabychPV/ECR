@@ -89,7 +89,6 @@ export default function EntryHistoryLog({ registryCode, entryId, fields }: Entry
       {history.hasNextPage && (
         <Group justify="center" mt="xs">
           <Button
-            size="xs"
             variant="default"
             loading={history.isFetchingNextPage}
             onClick={() => void history.fetchNextPage()}

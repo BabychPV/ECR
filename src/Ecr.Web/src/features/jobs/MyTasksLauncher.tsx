@@ -52,7 +52,6 @@ export function MyTasksLauncher(): JSX.Element {
     <>
       <Button
         variant="default"
-        size="xs"
         aria-label={label}
         aria-haspopup="dialog"
         onClick={() => {

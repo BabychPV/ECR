@@ -375,7 +375,7 @@ export function UserAccessEditor({
       />
 
       {user !== null && (
-        <Button mt="sm" variant="subtle" size="compact-sm" onClick={() => setShowEffective((shown) => !shown)}>
+        <Button mt="sm" variant="subtle" size="xs" onClick={() => setShowEffective((shown) => !shown)}>
           {showEffective ? t('effectiveAccess.hide') : t('effectiveAccess.show')}
         </Button>
       )}

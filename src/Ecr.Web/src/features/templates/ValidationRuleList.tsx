@@ -78,7 +78,7 @@ export function ValidationRuleList({
             </Table.Td>
             <Table.Td>
               <Button
-                size="compact-xs"
+                size="xs"
                 variant="subtle"
                 color="statusError"
                 disabled={disabled}

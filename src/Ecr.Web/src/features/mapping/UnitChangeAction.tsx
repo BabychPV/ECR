@@ -111,7 +111,7 @@ export function UnitChangeAction({
         {allowed && (
           <Group gap="xs">
             <Button
-              size="compact-xs"
+              size="xs"
               variant="filled"
               loading={accept.isPending}
               onClick={() => accept.mutate()}
@@ -119,7 +119,7 @@ export function UnitChangeAction({
               {t('mapping.unitChangeAccept', { actualUnitCode: pending.actualUnitCode })}
             </Button>
 
-            <Button size="compact-xs" variant="default" onClick={onDismiss}>
+            <Button size="xs" variant="default" onClick={onDismiss}>
               {t('mapping.unitChangeDecline')}
             </Button>
           </Group>
