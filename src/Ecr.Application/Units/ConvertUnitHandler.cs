@@ -131,7 +131,7 @@ public sealed class ListUnitsHandler(
         }
 
         var profile = await access.BuildProfileAsync(userId.Value, ct).ConfigureAwait(false);
-        if (!profile.Has(CreateUnitHandler.Permission))
+        if (!Security.PermissionCheck.IsGranted(profile, CreateUnitHandler.Permission))
         {
             return list;
         }
