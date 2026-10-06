@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { QueryClientProvider, QueryClient } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
@@ -160,6 +160,20 @@ function renderTab(tab: 'roles' | 'users') {
   );
 }
 
+
+/**
+ * Рядок ролі в списку зліва (UI-37: вкладка — список ролей і права обраної, а
+ * не таблиця). ⚠ Назва обраної ролі стоїть ще й у заголовку праворуч, тому
+ * пошук за текстом неоднозначний — рядок береться за `data-role-item`.
+ */
+async function roleRow(code: string): Promise<HTMLElement> {
+  return waitFor(() => {
+    const row = document.querySelector<HTMLElement>(`[data-role-item="${code}"]`);
+    expect(row).not.toBeNull();
+    return row as HTMLElement;
+  });
+}
+
 describe('SecurityPage: текстовий індикатор неактивності (знахідка 2/3)', () => {
   it('роль isActive=false отримує бейдж «inactive»; активна роль — ні', async () => {
     await loadCatalog('en', 'public');
@@ -167,8 +181,8 @@ describe('SecurityPage: текстовий індикатор неактивно
 
     renderTab('roles');
 
-    const retiredCell = (await screen.findByText('RetiredRole')).closest('td');
-    const activeCell = (await screen.findByText('ActiveRole')).closest('td');
+    const retiredCell = await roleRow('RetiredRole');
+    const activeCell = await roleRow('ActiveRole');
     expect(retiredCell).not.toBeNull();
     expect(activeCell).not.toBeNull();
 
