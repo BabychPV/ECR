@@ -84,10 +84,16 @@ public sealed class GetCalculationResultsHandler(
             var bindings = await methodologies.GetColumnResultBindingsAsync(scope.TableIds(), ct).ConfigureAwait(false);
             rows =
             [
-                .. rows.Where(r => bindings.Any(b =>
-                    string.Equals(b.OutputCode, r.OutputCode, StringComparison.OrdinalIgnoreCase)
-                    && b.VersionIds.Contains(r.MethodologyVersionId)
-                    && scope.CanReadColumn(b.ColumnDefId))),
+                .. rows.Where(r =>
+                {
+                    // ⛔ Рядок результату не знає своєї таблиці, тож вихід, прив'язаний і до видимої, і до схованої
+                    // колонки, віддається лише коли читані ВСІ прив'язки (known limitation: вузький читач не бачить
+                    // такий вихід цілком; точніше відсікання за SourceRowKey -> RowDef — backlog).
+                    var matching = bindings.Where(b =>
+                        string.Equals(b.OutputCode, r.OutputCode, StringComparison.OrdinalIgnoreCase)
+                        && b.VersionIds.Contains(r.MethodologyVersionId)).ToList();
+                    return matching.Count > 0 && matching.All(b => scope.CanReadColumn(b.ColumnDefId));
+                }),
             ];
             if (rows.Count == 0)
             {
