@@ -19,6 +19,8 @@ import { expect, test, type CDPSession, type Page } from '@playwright/test';
  *
  * ⚠ Стенд не потрібен (як `cellStates.spec.ts`): запуск
  * `ECR_E2E_OPTIONAL=1 npx playwright test e2e/keyCommitGateLive.spec.ts`.
+ * Серія «інтервал 0 мс» 20 разів поспіль (на тихій машині):
+ * `ECR_E2E_OPTIONAL=1 npx playwright test e2e/keyCommitGateLive.spec.ts -g "інтервал 0 мс" --repeat-each 20`.
  */
 const Stand = '/_key-commit-gate';
 const IntervalsMs = [0, 10, 20, 30, 40, 50, 55, 60, 65, 70, 75, 80, 90, 100, 120];
@@ -201,4 +203,58 @@ test.describe('Швидкий ввід у справжньому DocumentGrid п
       expect(failures, `збої з ${String(intervals.length * DocRepeats)} прогонів`).toEqual([]);
     });
   }
+
+  /*
+   * ⛔ T5-03: Ctrl+V/Ctrl+C за 0–50 мс після ↓/↑ читали СТАРЕ виділення (фокус переходить лише
+   * через ~70 мс): вставка лягала в попередню комірку, у буфер ішла попередня. Мірило - DOM,
+   * PATCH і текст буфера.
+   */
+  const ClipIntervalsMs = [0, 10, 20, 30, 40, 50];
+
+  test(`T5-03: ↓ і за ${String(ClipIntervalsMs[0])}–${String(ClipIntervalsMs[ClipIntervalsMs.length - 1])} мс Ctrl+V - вставка в НОВУ комірку`, async ({ page }) => {
+    const failures: string[] = [];
+    for (const intervalMs of ClipIntervalsMs) {
+      for (let attempt = 1; attempt <= DocRepeats; attempt += 1) {
+        await openDocumentStand(page);
+        await page.evaluate(async () => {
+          await navigator.clipboard.writeText('42');
+        });
+        await page.keyboard.press('ArrowDown');
+        await page.waitForTimeout(intervalMs);
+        await page.keyboard.press('Control+v');
+
+        const { shown, patched } = await documentState(page);
+        if (JSON.stringify(shown) !== JSON.stringify(['', '42', '', '', '']) || JSON.stringify(patched) !== JSON.stringify(['R2=42'])) {
+          failures.push(`${String(intervalMs)} мс #${String(attempt)}: DOM ${shown.join('|')}, PATCH ${patched.join(' ')}`);
+        }
+      }
+    }
+
+    expect(failures, `збої з ${String(ClipIntervalsMs.length * DocRepeats)} прогонів`).toEqual([]);
+  });
+
+  test(`T5-03: ↑ і за ${String(ClipIntervalsMs[0])}–${String(ClipIntervalsMs[ClipIntervalsMs.length - 1])} мс Ctrl+C - у буфері НОВА комірка`, async ({ page }) => {
+    const failures: string[] = [];
+    for (const intervalMs of ClipIntervalsMs) {
+      for (let attempt = 1; attempt <= DocRepeats; attempt += 1) {
+        await openDocumentStand(page);
+        // R1 = 5, курсор на R2; далі спокій - перехід завершено.
+        await page.keyboard.press('5');
+        await page.keyboard.press('Enter');
+        await page.waitForTimeout(600);
+        await page.evaluate(async () => {
+          await navigator.clipboard.writeText('OLD');
+        });
+        await page.keyboard.press('ArrowUp');
+        await page.waitForTimeout(intervalMs);
+        await page.keyboard.press('Control+c');
+        await page.waitForTimeout(600);
+
+        const copied = await page.evaluate(async () => navigator.clipboard.readText());
+        if (copied.trim() !== '5') failures.push(`${String(intervalMs)} мс #${String(attempt)}: буфер ${JSON.stringify(copied)}`);
+      }
+    }
+
+    expect(failures, `збої з ${String(ClipIntervalsMs.length * DocRepeats)} прогонів`).toEqual([]);
+  });
 });
