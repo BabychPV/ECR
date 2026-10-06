@@ -98,6 +98,40 @@ public sealed class CellHistoryPermissionThenReadScopeTests
         Assert.Equal(43, global.TotalCount);
     }
 
+    [Theory]
+    [InlineData("   ", null)]
+    [InlineData("  K1  ", "K1")]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-6.6")]
+    public async Task Пошук_q_обрізається_від_пробілів_і_порожній_не_є_фільтром(string raw, string? expected)
+    {
+        Profile(Reader(deny: false).Permission(GetCellChangesHandler.Permission), scopedDocumentViewIn: null);
+
+        await Handler().HandleAsync(
+            new CellChangeFilter(From, To, DocumentId: DocumentId, Query: raw), new CursorRequest(), CancellationToken.None);
+
+        await _audit.Received().ReadCellChangesAsync(
+            Arg.Is<CellChangeFilter>(f => f.Query == expected), Arg.Any<CursorRequest>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-6.6")]
+    public async Task Пошук_q_довший_за_межу_обрізається_до_сотні_знаків()
+    {
+        Profile(Reader(deny: false).Permission(GetCellChangesHandler.Permission), scopedDocumentViewIn: null);
+
+        await Handler().HandleAsync(
+            new CellChangeFilter(From, To, DocumentId: DocumentId, Query: new string('x', 250)),
+            new CursorRequest(),
+            CancellationToken.None);
+
+        await _audit.Received().ReadCellChangesAsync(
+            Arg.Is<CellChangeFilter>(f => f.Query!.Length == GetCellChangesHandler.MaxQueryLength),
+            Arg.Any<CursorRequest>(),
+            Arg.Any<CancellationToken>());
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait("Requirement", "ФВ-6.6")]

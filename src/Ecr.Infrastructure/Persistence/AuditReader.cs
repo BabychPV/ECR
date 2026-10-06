@@ -20,6 +20,9 @@ public sealed class AuditReader(EcrDbContext db) : IAuditReader
     /// <summary>Довжина <c>aud.CellChange.RowKey</c> зі схеми (<c>11-audit-tables.sql</c>).</summary>
     private const int RowKeySize = 100;
 
+    /// <summary>Межа довжини пошукового рядка; обробник обрізає до неї, а розмір параметра рахується від неї.</summary>
+    private const int QueryMaxLength = 100;
+
     /// <summary>Довжина <c>aud.CellChange.Origin</c> зі схеми (<c>11-audit-tables.sql</c>).</summary>
     private const int OriginSize = 32;
 
@@ -160,6 +163,17 @@ public sealed class AuditReader(EcrDbContext db) : IAuditReader
         return counts;
     }
 
+    /// <summary>Екранує спецсимволи <c>LIKE</c> (<c>\ % _ [</c>) під <c>ESCAPE N'\'</c>; довжина — не більше межі.</summary>
+    internal static string EscapeLike(string value)
+    {
+        var text = value.Length > QueryMaxLength ? value[..QueryMaxLength] : value;
+        return text
+            .Replace("\\", "\\\\", StringComparison.Ordinal)
+            .Replace("%", "\\%", StringComparison.Ordinal)
+            .Replace("_", "\\_", StringComparison.Ordinal)
+            .Replace("[", "\\[", StringComparison.Ordinal);
+    }
+
     /// <summary>
     /// WHERE над <c>aud.CellChange</c> за фільтром: вікно, необов'язковий курсор і звуження.
     /// Параметри додаються в <paramref name="command"/>.
@@ -224,6 +238,24 @@ public sealed class AuditReader(EcrDbContext db) : IAuditReader
         if (filter.Origin is { } origin)
         {
             And("Origin = @origin", "@origin", origin, SqlDbType.NVarChar, OriginSize);
+        }
+
+        if (filter.Query is { Length: > 0 } query)
+        {
+            // ⛔ UI-38, C3: пошук за бізнес-ключем документа, ключем рядка або кодом колонки. Значення —
+            // ПАРАМЕТР, а спецсимволи LIKE екрануються (`\` як ESCAPE): користувач, що ввів `100%` чи `[a`,
+            // шукає ці знаки буквально, а не складає шаблон. Підзапити йдуть у WHERE ДО `TOP`, тож сторінка
+            // й підрахунок бачать однаковий набір; видимість (S6) відсіює обробник так само, як без пошуку.
+            And(
+                """
+                (RowKey LIKE @q ESCAPE N'\'
+                        OR DocumentId IN (SELECT Id FROM doc.Document WHERE BusinessKey LIKE @q ESCAPE N'\')
+                        OR ColumnDefId IN (SELECT Id FROM cfg.ColumnDef WHERE Code LIKE @q ESCAPE N'\'))
+                """,
+                "@q",
+                "%" + EscapeLike(query) + "%",
+                SqlDbType.NVarChar,
+                (2 * QueryMaxLength) + 2);
         }
 
         if (filter.LateOnly)

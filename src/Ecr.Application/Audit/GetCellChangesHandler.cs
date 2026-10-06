@@ -81,6 +81,7 @@ public sealed class GetCellChangesHandler(
         ArgumentNullException.ThrowIfNull(filter);
         ArgumentNullException.ThrowIfNull(page);
 
+        filter = Normalize(filter);
         var (readable, empty) = await AuthorizeAsync(filter, page, ct).ConfigureAwait(false);
         if (empty)
         {
@@ -99,6 +100,24 @@ public sealed class GetCellChangesHandler(
             : [.. result.Items.Where(c => readable.CanReadColumn(c.ColumnDefId))];
 
         return result with { Items = visible, TotalCount = (int)Math.Min(total, int.MaxValue) };
+    }
+
+    /// <summary>
+    /// Пошуковий рядок: обрізані пробіли, порожній — це не фільтр (очищене поле), довший за межу — обрізається.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Обрізання, а не відмова: нового коду помилки заради поля пошуку не заводимо, а 100 знаків із запасом
+    /// перекривають бізнес-ключ (до 64), ключ рядка (до 100) і код колонки.
+    /// </remarks>
+    private static CellChangeFilter Normalize(CellChangeFilter filter)
+    {
+        var query = filter.Query?.Trim();
+        if (string.IsNullOrEmpty(query))
+        {
+            return filter.Query is null ? filter : filter with { Query = null };
+        }
+
+        return query.Length > MaxQueryLength ? filter with { Query = query[..MaxQueryLength] } : filter with { Query = query };
     }
 
     private DateTime TodayStart() => (clock ?? TimeProvider.System).GetUtcNow().UtcDateTime.Date;
