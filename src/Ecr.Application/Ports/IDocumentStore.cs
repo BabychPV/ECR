@@ -45,6 +45,11 @@ namespace Ecr.Application.Ports;
 /// <paramref name="SheetStates"/> лишається як був. <c>null</c> — шлях читання
 /// його не несе (сховище заповнює завжди; як і стан — порожньо без періоду).
 /// </param>
+/// <param name="IncludedSheetCodes">
+/// Коди аркушів складу (і без періоду, коли <paramref name="Sheets"/> порожнє). Лише для
+/// обробника, що відсікає від читача аркуші поза його межами (<c>DocumentSheetVisibility</c>);
+/// у відповідь НЕ потрапляє (<c>JsonIgnore</c>) — це не контракт.
+/// </param>
 public sealed record DocumentSummary(
     long Id,
     int ProjectId,
@@ -58,7 +63,8 @@ public sealed record DocumentSummary(
     int? ErrorCount = null,
     int? WarningCount = null,
     bool HasLateEdits = false,
-    IReadOnlyList<DocumentSheetState>? Sheets = null);
+    IReadOnlyList<DocumentSheetState>? Sheets = null,
+    [property: System.Text.Json.Serialization.JsonIgnore] IReadOnlyList<string>? IncludedSheetCodes = null);
 
 /// <summary>Аркуш складу документа в переліку: код, назва, стан за період.</summary>
 /// <param name="Code">Код аркуша (<c>SheetDef.Code</c>); він же ключ у <c>DocumentSummary.SheetStates</c>.</param>

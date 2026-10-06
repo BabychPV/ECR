@@ -79,11 +79,39 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
 
         var sheets = await StatesAsync(documentId, period, ct).ConfigureAwait(false);
         var late = await LateEditsBatchAsync([documentId], period, ct).ConfigureAwait(false);
+        var included = await IncludedCodesBatchAsync([documentId], period, ct).ConfigureAwait(false);
 
         return new DocumentSummary(
             document.Id, document.ProjectId, document.BusinessKey, document.CreatedAt, sheetCount,
             ToStateMap(sheets), document.NameL10n, HasLateEdits: late.Contains(documentId),
-            Sheets: sheets);
+            Sheets: sheets, IncludedSheetCodes: included.GetValueOrDefault(documentId));
+    }
+
+    /// <summary>
+    /// Коди аркушів складу документів ОДНИМ запитом — для обробника, що відсікає аркуші поза
+    /// межами читача (<c>DocumentSheetVisibility</c>). З періодом склад уже є в
+    /// <c>Sheets</c> (той самий запит, <c>SheetStatesQuery</c>) — другого запиту нема (Q-167);
+    /// без періоду стану аркушів немає, а кількість видимих аркушів усе одно потрібна.
+    /// </summary>
+    private async Task<Dictionary<long, IReadOnlyList<string>>> IncludedCodesBatchAsync(
+        long[] documentIds, PeriodKeyFilter period, CancellationToken ct)
+    {
+        if (period.Value is not null)
+        {
+            return [];
+        }
+
+        var rows = await db.DocumentSheets
+            .AsNoTracking()
+            .Where(s => documentIds.Contains(s.DocumentId) && s.IsIncluded)
+            .Join(db.SheetDefs, s => s.SheetDefId, d => d.Id, (s, d) => new { s.DocumentId, d.Code, d.Ordinal })
+            .OrderBy(r => r.DocumentId).ThenBy(r => r.Ordinal).ThenBy(r => r.Code)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        return rows
+            .GroupBy(r => r.DocumentId)
+            .ToDictionary(g => g.Key, IReadOnlyList<string> (g) => [.. g.Select(r => r.Code)]);
     }
 
     /// <inheritdoc />
@@ -164,6 +192,8 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
         // BE-09b: і позначка пізніх правок — теж ОДИН запит на сторінку.
         var late = await LateEditsBatchAsync([.. page1.Select(d => d.Id)], period, ct).ConfigureAwait(false);
 
+        var includedByDocument = await IncludedCodesBatchAsync([.. page1.Select(d => d.Id)], period, ct).ConfigureAwait(false);
+
         var items = new List<DocumentSummary>(page1.Count);
         foreach (var d in page1)
         {
@@ -177,7 +207,7 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
             items.Add(new DocumentSummary(
                 d.Id, d.ProjectId, d.BusinessKey, d.CreatedAt, d.SheetCount, ToStateMap(sheets), d.NameL10n,
                 d.ModifiedAt, d.ModifiedByDisplayName, findings?.ErrorCount, findings?.WarningCount,
-                late.Contains(d.Id), sheets));
+                late.Contains(d.Id), sheets, includedByDocument.GetValueOrDefault(d.Id)));
         }
 
         return new PagedResult<DocumentSummary>(

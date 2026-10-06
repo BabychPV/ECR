@@ -69,6 +69,10 @@ public sealed class ListDocumentsHandler(
             .Where(d => profile.SeesDocumentsOf(d.ProjectId) && PermissionCheck.IsGrantedIn(profile, Permission, d.ProjectId))
             .ToList();
 
+        // ⛔ Аркуші, схована від читача (Deny / звуження ролі аркушами), не називаються ні кодом,
+        // ні назвою, ні станом, ні лічильниками: фільтр — у `DocumentSheetVisibility`.
+        visible = await DocumentSheetVisibility.ApplyAsync(access, profile, visible, periodKey, ct).ConfigureAwait(false);
+
         // ⛔ `all.TotalCount` НЕ проводиться далі як є — саме це й було дірою:
         // обробник не може перевірити, що число зі сховища враховує гранти, а
         // «1 з 5000» розкриває, скільки документів у проєктах, до яких доступу
@@ -216,10 +220,15 @@ public sealed class GetDocumentHandler(
         // Різниця між 403 і 404 тут сама по собі є відомістю: за нею видно,
         // які документи існують у проєктах, доступу до яких немає.
         // ⛔ ФВ-6.14: без права перегляду В ЦЬОМУ проєкті — так само невидимий.
-        return document is null
-               || !profile.SeesDocumentsOf(document.ProjectId)
-               || !PermissionCheck.IsGrantedIn(profile, ListDocumentsHandler.Permission, document.ProjectId)
-            ? null
-            : document;
+        if (document is null
+            || !profile.SeesDocumentsOf(document.ProjectId)
+            || !PermissionCheck.IsGrantedIn(profile, ListDocumentsHandler.Permission, document.ProjectId))
+        {
+            return null;
+        }
+
+        // ⛔ Приховані від читача аркуші не потрапляють у склад, стан і лічильники картки.
+        return (await DocumentSheetVisibility
+            .ApplyAsync(access, profile, [document], periodKey, ct).ConfigureAwait(false))[0];
     }
 }
