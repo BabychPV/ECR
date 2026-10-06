@@ -120,6 +120,13 @@ public sealed class ValidateExpressionHandler(
         var parsed = formulaEngine.Parse(request.Expression, ExpressionDialect.Report);
         diagnostics.AddRange(parsed.Diagnostics);
 
+        // ✎ RC5: та сама межа глибини, що й у PublishChecks.CheckExpression.
+        if (parsed.Expression is { } deepCheck
+            && Ecr.Expressions.Evaluation.ExpressionNesting.Diagnose(deepCheck.Root) is { } tooDeep)
+        {
+            diagnostics.Add(tooDeep);
+        }
+
         var resultType = parsed.Expression?.ResultType;
 
         if (request.Report is not { } context)

@@ -108,6 +108,46 @@ public sealed class ExpressionSaveValidationTests(SqlServerFixture sql)
             problem.GetProperty("detail").GetString());
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Формула_глибша_за_межу_обчислення_відхиляється_ECR_EXPR_0422_а_довга_сума_зберігається()
+    {
+        // ✎ RC5: глибина — межа стека обчислення (96); автор бачить причину зараз, а не
+        // мовчазне #BUDGET у документі. Пласка сума глибини не додає.
+        var draft = await ArrangeAsync();
+
+        using var app = new EcrApiFactory(sql);
+        using var client = await SystemHealthControllerTests.SignedInAsync(
+            sql, app, "Template.View", "Template.Edit", "Template.Publish");
+
+        var formulaUrl = new Uri(
+            $"/api/v1/template-versions/{draft.VersionId}/tables/{draft.TableId}/formulas/column/{draft.FormulaColumnId}",
+            UriKind.Relative);
+
+        using var deep = await client.PutAsJsonAsync(
+            formulaUrl, new { dialect = "Template", expression = string.Concat(Enumerable.Repeat("- ", 100)) + "[CDEC]" });
+        var body = await deep.Content.ReadAsStringAsync();
+        Assert.True(deep.StatusCode == HttpStatusCode.UnprocessableEntity, $"{(int)deep.StatusCode}: {body}");
+
+        var problem = JsonDocument.Parse(body).RootElement;
+        Assert.Equal("ECR-EXPR-0422", problem.GetProperty("errorCode").GetString());
+        Assert.Equal("expr.tooDeep", problem.GetProperty("messageKey").GetString());
+        Assert.Equal(
+            "The formula is too complex: nesting depth 101, allowed 96. Split it into several calculated columns.",
+            problem.GetProperty("detail").GetString());
+
+        // Нічого не лягло в структуру.
+        await using (var db = Context())
+        {
+            Assert.False(await db.FormulaDefs.AnyAsync(f => f.TableDefId == draft.TableId));
+        }
+
+        using var flat = await client.PutAsJsonAsync(
+            formulaUrl, new { dialect = "Template", expression = string.Join(" + ", Enumerable.Repeat("[CDEC]", 120)) });
+        Assert.True(flat.IsSuccessStatusCode, await flat.Content.ReadAsStringAsync());
+    }
+
     private static async Task<JsonElement> RejectedAsync(HttpResponseMessage response)
     {
         using (response)

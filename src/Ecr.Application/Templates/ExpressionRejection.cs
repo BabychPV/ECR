@@ -124,6 +124,13 @@ public static class ExpressionRejection
             .Select(d => new DiagnosticInfo(d.Code, d.Message, d.Position, d.Length, d.MessageKey, d.MessageParams))
             .ToList();
 
-        return new BusinessRuleException(ErrorCodes.TemplateInvalid, message, details);
+        // ✎ RC5: «надто глибока» — це не синтаксична помилка шаблону, а вердикт про
+        // складність виразу: той самий ECR-EXPR-0422, що й у сторожа стека обходів,
+        // з власним ключем і підстановками depth/max. Нового коду не заводиться.
+        var code = keyed?.MessageKey == Ecr.Expressions.Evaluation.ExpressionNesting.MessageKey
+            ? ErrorCodes.ExpressionTooComplex
+            : ErrorCodes.TemplateInvalid;
+
+        return new BusinessRuleException(code, message, details);
     }
 }
