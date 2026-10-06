@@ -1,4 +1,5 @@
-import { useState, type JSX, type ReactNode } from 'react';
+import { useEffect, useId, useRef, useState, type JSX, type ReactNode } from 'react';
+import { registerUnsavedSource } from '@/shared/ui/unsavedSources';
 
 /**
  * Чернетка діалогу, що живе В САМОМУ діалозі, а не на сторінці.
@@ -19,6 +20,12 @@ import { useState, type JSX, type ReactNode } from 'react';
  *
  * ⚠ Ставити ЗОВНІ `<Suspense>` лінивого редактора, а не всередині: інакше
  * підміна заглушки формою перемонтувала б і скинула б введене.
+ *
+ * ⚠ UI-36: змінена чернетка — джерело незбережених змін для `UnsavedGuard`
+ * (`unsavedSources.ts`). `flush` немає навмисно: форму пише лише її кнопка, тож
+ * вихід зі сторінки з відкритою зміненою формою показує діалог, а не тихо
+ * губить введене. «Змінена» — будь-який `setDraft` після монтування (форми
+ * віддають новий об'єкт на кожну правку); закриття діалогу знімає реєстрацію.
  */
 export function LocalDraft<T>({
   initial,
@@ -28,6 +35,14 @@ export function LocalDraft<T>({
   children: (draft: T, setDraft: (next: T) => void) => ReactNode;
 }): JSX.Element {
   const [draft, setDraft] = useState<T>(initial);
+  // ⚠ Порівняння з МОНТУВАЛЬНИМ значенням: сторінка може передавати `initial` новим
+  // об'єктом на кожен свій рендер (`emptyValidationRuleDraft()`).
+  const [start] = useState<T>(initial);
+  const dirty = useRef(false);
+  dirty.current = draft !== start;
+  const id = useId();
+
+  useEffect(() => registerUnsavedSource(`local-draft${id}`, { hasUnsaved: () => dirty.current }), [id]);
 
   return <>{children(draft, setDraft)}</>;
 }

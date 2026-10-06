@@ -147,9 +147,10 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-/** Аркуш згорнутий за замовчуванням (Mantine `Accordion`) — розгорнути. */
+/** Дочекатися робочої області першої таблиці (UI-36: вибрана за замовчуванням). */
 async function openSheet(): Promise<void> {
-  fireEvent.click(await screen.findByRole('button', { name: /Sheet \(SHEET\)/ }));
+  // UI-36: дерево конструктора відкриває першу таблицю першого аркуша одразу (макет `ctor-columns`).
+  await screen.findByTestId('ctor-table');
 }
 
 function renderPage(): ReturnType<typeof render> {
