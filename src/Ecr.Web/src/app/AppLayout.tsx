@@ -409,7 +409,9 @@ export function AppLayout(): JSX.Element {
       <UnsavedGuard />
 
       <AppShell
-        header={{ height: 56 }}
+        // UI-32: смуга 40 px, як у макеті (`.app{grid-template-rows:40px …}`); контроли в ній —
+        // висоти `--ecr-ctl-height` (28/36), тож уміщаються в обох щільностях.
+        header={{ height: 40 }}
         navbar={{
           width: iconsOnly ? NavbarIconsOnlyWidth : NavbarWidth,
           breakpoint: 'sm',
@@ -430,8 +432,8 @@ export function AppLayout(): JSX.Element {
         <RouteAnnouncer />
 
         <AppShell.Header>
-          <Group h="100%" px="md" justify="space-between">
-            <Group gap="sm">
+          <Group h="100%" px="md" justify="space-between" wrap="nowrap">
+            <Group gap="sm" wrap="nowrap" className="ecr-topbar-start">
               {!me.mustChangePassword && (
                 <Burger
                   opened={opened}
@@ -458,6 +460,14 @@ export function AppLayout(): JSX.Element {
                   Web
                 </Text>
               </Group>
+              {/*
+               * UI-32: крихти — у верхній смузі поруч із логотипом, на КОЖНОМУ екрані
+               * (макет, KIT §1.5: «Крихти живуть у верхній смузі (їх малює оболонка)»).
+               * ⚠ Досі ОДИН екземпляр на застосунок (`PR nav-arch #3`) — лише в шапці,
+               * поза `<Suspense>` навколо `<Outlet/>`: крихти не блимають, поки
+               * вантажиться чанк наступної сторінки.
+               */}
+              <Breadcrumbs />
             </Group>
 
             <Group gap="xs">
@@ -561,18 +571,6 @@ export function AppLayout(): JSX.Element {
            * інакше кожен перехід гасив би шапку й навігацію разом зі змістом, і
            * екран блимав би цілком там, де змінюється сама лише середина.
            */}
-          {/*
-           * Breadcrumbs (`PR nav-arch #3`) — ОДИН екземпляр, тут, а не в
-           * `AdminLayout`/`TemplateVersionLayout`: `useMatches()` усередині
-           * компонента сам читає ПОВНЕ дерево збігів поточної адреси (той
-           * самий аргумент, що й для `<ScrollRestoration/>` вище, `PR #2`).
-           * ПОЗА `<Suspense>` навколо `<Outlet/>` навмисно: інакше на кожному
-           * підвантаженні чанка нового маршруту крихти зникали б і з'являлися
-           * знову разом із дочірнім деревом, хоча дані для їхнього резолву
-           * (кеш TanStack Query) нікуди не зникають.
-           */}
-          <Breadcrumbs />
-
           {session.isRefetchError && (
             <Alert color="yellow" role="status" mb="sm" data-session-refetch-error>
               {t('err.http.unavailable')}

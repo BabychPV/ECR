@@ -1,11 +1,17 @@
 import { useEffect, useRef, useState, type JSX } from 'react';
-import { Anchor, Breadcrumbs as MantineBreadcrumbs, Skeleton, Text, UnstyledButton } from '@mantine/core';
+import { Anchor, Box, Breadcrumbs as MantineBreadcrumbs, Skeleton, Text, UnstyledButton } from '@mantine/core';
 import type { QueryClient } from '@tanstack/react-query';
 import { useQueryClient } from '@tanstack/react-query';
-import { Link, useMatches } from 'react-router-dom';
+import { Link, useLocation, useMatches } from 'react-router-dom';
 import { t } from '@/shared/i18n';
-import { resolveCrumbValue, type CrumbParams } from './breadcrumbResolvers';
-import { routeList, type RouteHandle } from './routes';
+import {
+  resolveCrumbValue,
+  resolveDocumentSheet,
+  SearchParamPrefix,
+  type CrumbParams,
+} from './breadcrumbResolvers';
+import { navGroups, routeList, type RouteHandle } from './routes';
+import './breadcrumbs.css';
 
 /**
  * Breadcrumbs, керовані даними маршруту (`PR nav-arch #3`, `handle.crumb` +
@@ -131,6 +137,7 @@ function crumbSignature(chain: readonly CrumbEntry[]): string {
 function useCacheVersion(
   queryClient: QueryClient,
   matches: readonly CrumbMatch[],
+  search: string,
   chain: readonly CrumbEntry[],
 ): void {
   const [, setVersion] = useState(0);
@@ -141,10 +148,12 @@ function useCacheVersion(
   // пропустити справжнє оновлення.
   const painted = useRef<string | null>(null);
   const currentMatches = useRef(matches);
+  const currentSearch = useRef(search);
 
   useEffect(() => {
     painted.current = crumbSignature(chain);
     currentMatches.current = matches;
+    currentSearch.current = search;
   });
 
   // ⚠ Підписка живе в `useEffect`, з відпискою в поверненій функції: без неї
@@ -171,7 +180,9 @@ function useCacheVersion(
         // ⛔ І лише тут — умова, якої бракувало (див. «Livelock рендера»
         // вище). Читання з кешу, без жодного запиту: `buildCrumbChain`
         // ходить виключно через `getQueryData`/`getQueryState`.
-        const next = crumbSignature(buildCrumbChain(currentMatches.current, queryClient));
+        const next = crumbSignature(
+          buildCrumbChain(currentMatches.current, queryClient, currentSearch.current),
+        );
         if (next === painted.current) return;
 
         // ⚠ Відбиток оновлюється ТУТ, а не тільки в ефекті після коміту:
@@ -217,6 +228,33 @@ export function isRouteHandle(handle: unknown): handle is RouteHandle {
   );
 }
 
+/** Параметри шляху + параметри адреси (з префіксом {@link SearchParamPrefix}). */
+function withSearchParams(params: CrumbParams, search: string): CrumbParams {
+  if (search.length === 0) return params;
+
+  const merged: Record<string, string | undefined> = { ...params };
+  new URLSearchParams(search).forEach((value, name) => {
+    merged[`${SearchParamPrefix}${name}`] = value;
+  });
+  return merged;
+}
+
+/**
+ * UI-32: ключ підпису групи меню, з якої починаються крихти («Configure › Units»,
+ * макет: без `crumbs` — `group › title`). Група — за першою крихтою ланцюжка
+ * (предок або сам маршрут), за `labelKey` пункту меню; поза меню — немає групи.
+ */
+export function crumbGroupLabelKey(matches: readonly CrumbMatch[]): string | undefined {
+  const first = matches.map((match) => match.handle).find(isRouteHandle);
+  if (first === undefined || first.crumb?.omitGroup === true) return undefined;
+
+  const ancestorId = first.crumb?.ancestorIds?.[0];
+  const head = ancestorId === undefined ? first : routeList.find((route) => route.id === ancestorId)?.handle;
+  if (head === undefined) return undefined;
+
+  return navGroups.find((group) => group.routes.some((route) => route.handle.labelKey === head.labelKey))?.labelKey;
+}
+
 /** Підставляє `:name` реєстрового шляху значеннями параметрів найглибшого матчу. */
 function fillParams(path: string, params: CrumbParams): string {
   return path.replace(/:([A-Za-z0-9_]+)/g, (literal, name: string) => params[name] ?? literal);
@@ -247,9 +285,16 @@ function crumbTextAndHref(
  * функція, окрема від рендера саме заради мутаційного тесту (підмінити
  * `queryClient` на порожній і довести, що RED, без jsdom/Mantine).
  */
-export function buildCrumbChain(matches: readonly CrumbMatch[], queryClient: QueryClient): CrumbEntry[] {
+export function buildCrumbChain(
+  matches: readonly CrumbMatch[],
+  queryClient: QueryClient,
+  search = '',
+): CrumbEntry[] {
   const entries: CrumbEntry[] = [];
-  const leafParams = matches.length > 0 ? matches[matches.length - 1]!.params : ({} as CrumbParams);
+  const leafParams = withSearchParams(
+    matches.length > 0 ? matches[matches.length - 1]!.params : ({} as CrumbParams),
+    search,
+  );
 
   for (const match of matches) {
     if (!isRouteHandle(match.handle)) continue;
@@ -276,6 +321,26 @@ export function buildCrumbChain(matches: readonly CrumbMatch[], queryClient: Que
     }
 
     const { text, href } = crumbTextAndHref(handle, match.pathname, leafParams, queryClient);
+
+    if (handle.crumb?.trailWith === 'documentSheet') {
+      // UI-32: крихта документа веде на той самий період, на якому людина стоїть.
+      const periodKey = leafParams[`${SearchParamPrefix}periodKey`];
+      const documentHref = periodKey === undefined ? href : `${href}?periodKey=${encodeURIComponent(periodKey)}`;
+      entries.push({ key: `match:${match.pathname}`, text, href: documentHref, current: false });
+
+      const sheet = resolveDocumentSheet(queryClient, leafParams);
+      // ⛔ Немає даних і запиту — немає й крихти аркуша (не вигадана назва).
+      if (sheet.status !== 'unavailable') {
+        entries.push({
+          key: `trail:${match.pathname}`,
+          text: sheet.status === 'resolved' ? sheet.text : null,
+          href: undefined,
+          current: false,
+        });
+      }
+      continue;
+    }
+
     entries.push({ key: `match:${match.pathname}`, text, href, current: false });
   }
 
@@ -290,6 +355,15 @@ export function buildCrumbChain(matches: readonly CrumbMatch[], queryClient: Que
   return entries;
 }
 
+/** Шеврон між крихтами (макет: `icon('chevR', 12)`), оздоба. */
+function CrumbSeparator(): JSX.Element {
+  return (
+    <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true" className="ecr-crumbs-sep">
+      <path d="M4.5 2.5 8 6l-3.5 3.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 /** З якого розміру ланцюжка усікати середину (директива: «довгі ланцюги (≥4 рівні)»). */
 const TruncateFrom = 4;
 
@@ -302,7 +376,7 @@ function CrumbLabel({ entry }: { entry: CrumbEntry }): JSX.Element {
 
   if (entry.current) {
     return (
-      <Text component="span" fw={600} aria-current="page">
+      <Text component="span" fw={500} className="ecr-crumbs-current" aria-current="page">
         {entry.text}
       </Text>
     );
@@ -347,37 +421,48 @@ function ExpandButton({ onClick }: { onClick: () => void }): JSX.Element {
 /** Каркас застосунку рендерить це РІВНО один раз (`AppLayout.tsx`). */
 export function Breadcrumbs(): JSX.Element | null {
   const matches = useMatches();
+  const { search } = useLocation();
   const queryClient = useQueryClient();
   const [expanded, setExpanded] = useState(false);
 
-  const chain = buildCrumbChain(matches, queryClient);
+  const chain = buildCrumbChain(matches, queryClient, search);
 
   // ⚠ Після `buildCrumbChain`, не перед: підписці потрібен саме той ланцюжок,
   // який цей рендер збирається показати (умова «змінилося те, що видно»).
   // Обидва виклики — беззастережні й до єдиного раннього `return` нижче.
-  useCacheVersion(queryClient, matches, chain);
+  useCacheVersion(queryClient, matches, search, chain);
 
-  // Акцептанс: видимі на маршрутах глибиною ≥2. «Глибина» тут — кількість
-  // РЕЗОЛВЛЕНИХ крихт (після `ancestorIds`), не кількість сегментів URL:
-  // `/admin/templates` сам по собі дає РІВНО одну крихту (`AdminLayout` —
-  // свідомо без власної, `Q-277`), і ланцюжок з одного елемента без предка
-  // не несе жодного орієнтира понад те, що вже каже заголовок сторінки.
-  if (chain.length < 2) return null;
+  // ✎ UI-32 (макет, KIT §2.1): крихти у верхній смузі видно ЗАВЖДИ — і на
+  // екрані верхнього рівня («Configure › Units»), а не лише з глибини 2
+  // (було `chain.length < 2 → null`, `Q-277`). Перший елемент — група меню.
+  if (chain.length === 0) return null;
+
+  const groupKey = crumbGroupLabelKey(matches);
 
   const visible =
     chain.length >= TruncateFrom && !expanded
       ? [chain[0]!, undefined, chain[chain.length - 2]!, chain[chain.length - 1]!]
       : chain;
 
+  // ⚠ Мантинівський `Breadcrumbs` — `div`; область навігації з підписом дає
+  // обгортка (макет: `<nav class="crumbs" aria-label="Breadcrumb">`). У вузькій
+  // смузі (< sm) крихт немає, як у макеті (`@media (max-width:640px)`).
   return (
-    <MantineBreadcrumbs mb="sm" data-testid="breadcrumbs">
-      {visible.map((entry) =>
-        entry === undefined ? (
-          <ExpandButton key="ellipsis" onClick={() => setExpanded(true)} />
-        ) : (
-          <CrumbLabel key={entry.key} entry={entry} />
-        ),
-      )}
-    </MantineBreadcrumbs>
+    <Box component="nav" aria-label={t('nav.breadcrumb')} className="ecr-crumbs" visibleFrom="sm">
+      <MantineBreadcrumbs data-testid="breadcrumbs" separator={<CrumbSeparator />} separatorMargin={4}>
+        {groupKey !== undefined && (
+          <Text component="span" key="group" data-testid="crumb-group">
+            {t(groupKey)}
+          </Text>
+        )}
+        {visible.map((entry) =>
+          entry === undefined ? (
+            <ExpandButton key="ellipsis" onClick={() => setExpanded(true)} />
+          ) : (
+            <CrumbLabel key={entry.key} entry={entry} />
+          ),
+        )}
+      </MantineBreadcrumbs>
+    </Box>
   );
 }
