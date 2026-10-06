@@ -17,6 +17,7 @@ import {
   isExternalRegistry,
 } from '@/features/registries/RegistryEntryEditor';
 import { RegistryImportPanel } from '@/features/registries/RegistryImportPanel';
+import { RegistriesList } from '@/features/registries/list/RegistriesList';
 import { RegistryExportButton } from '@/features/registries/export/RegistryExportButton';
 import { EntryUsageButton } from '@/features/registries/rc814/EntryUsageButton';
 import { SourceKindSwitch } from '@/features/registries/SourceKindSwitch';
@@ -56,13 +57,26 @@ import { problemText } from '@/shared/ui/problemText';
 const Unbounded = '…';
 
 /**
+ * `/admin/registries`: без `?code=` — перелік довідників зі шторкою (`UI-35`,
+ * `features/registries/list`); з `?code=` — сторінка одного довідника нижче.
+ *
+ * ⚠ Розгалуження ТУТ, а не всередині сторінки довідника: у двох подань різні
+ * запити й стани, а умовний ранній `return` посеред хуків порушив би їх порядок.
+ */
+export function RegistriesPage(): JSX.Element {
+  const [code] = useUrlState('code');
+
+  return code === null ? <RegistriesList /> : <RegistryOverview />;
+}
+
+/**
  * Конструктор реєстрів: схема, дані, темпоральність.
  *
  * ⚠ Вікно чинності показується завжди, навіть порожнє. Запис без вікна і
  * запис, чинний до минулого місяця, у списку виглядають однаково — і саме
  * друге робить рядки документів осиротілими (ФВ-8.13).
  */
-export function RegistriesPage(): JSX.Element {
+function RegistryOverview(): JSX.Element {
   const [code, setCode] = useUrlState('code');
   const session = useSession();
 
@@ -339,6 +353,7 @@ export function RegistriesPage(): JSX.Element {
     <>
       <PageHeader
         title={t('registries.title')}
+        back={{ label: t('registries.list.back'), href: '/admin/registries' }}
         actions={
           <FilterRow>
             <Select

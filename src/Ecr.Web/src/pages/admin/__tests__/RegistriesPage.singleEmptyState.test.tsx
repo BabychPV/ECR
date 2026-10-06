@@ -62,7 +62,7 @@ const registry = {
   fields: [],
   isTemporal: false,
   isHierarchical: false,
-  sourceKind: 'Master',
+  sourceKind: 'Local',
 };
 
 function mockFetch(registries: readonly unknown[]): void {
@@ -151,20 +151,21 @@ describe('RegistriesPage: рівно один порожній стан (U-08)',
     ).toBeNull();
   });
 
-  it('довідники є, але жоден не обрано — таблиця на місці й каже «оберіть довідник»', async () => {
+  it('довідники є, але жоден не обрано — перелік довідників, і жодного порожнього стану', async () => {
     mockFetch([registry]);
     await loadCatalog('en', 'private');
 
     show('/admin/registries');
 
     /*
-     * ⛔ Зворотний бік правила: перешкоду «довідників немає» знято, тож
-     * підпорядкований розділ ЗНОВУ має право говорити — і «Pick a registry»
-     * тут єдиний порожній стан, бо межа переліку мовчить.
+     * ⛔ Зворотний бік правила. ✎ UI-35: без `?code=` сторінка — перелік
+     * довідників (`features/registries/list`), а не таблиця записів із
+     * порадою «Pick a registry»; перешкоди немає — порожнього стану теж.
      */
-    await screen.findByText('Pick a registry above to see its entries and validity windows.');
+    await screen.findByRole('button', { name: 'Units' });
 
-    expect(emptyStateHeadings()).toEqual(['Pick a registry']);
+    expect(emptyStateHeadings()).toEqual([]);
     expect(screen.queryByText('No registries yet')).toBeNull();
+    expect(screen.queryByText('Pick a registry')).toBeNull();
   });
 });
