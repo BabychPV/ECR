@@ -76,7 +76,7 @@ Known limitations (не цього циклу): (а) заборона, дода�
 | `Document.View` | | перегляд документів | TemplateAdm, PeriodAdm, DataEntry, Approver, Viewer, Auditor, SysAdm |
 | `Document.Create` | | створення документа | DataEntry, SysAdm |
 | `Document.Delete` | | видалення документа | SysAdm |
-| `Document.Import` / `Document.Export` | | імпорт / експорт Excel | DataEntry (обидва), Approver (Export), SysAdm |
+| `Document.Import` / `Document.Export` | | імпорт / експорт Excel; експорт (xlsx/CSV/JSON) включає **поля шапки** документа з підписами (A2-12). Окремого рівня доступу до поля шапки немає — шапка вивантажується за тим самим правилом, що й сам документ (видимість документа, перевірка до постановки задачі); приховування на рівні поля, як для колонок, неможливе | DataEntry (обидва), Approver (Export), SysAdm |
 | `Document.Reopen` | | повторне відкриття поданого | Approver, SysAdm |
 | `Document.Submit` | | подання (і відкликання автором) аркуша на погодження для рівня гранта `Write` (`D-285`, варіант B′): подати можна з рівнем `Submit` і вище АБО з рівнем `Write` разом із цим правом; сам `Write` подання не дає, а право без рівня `Write` нічого не підіймає. Проєктне; **не** звужується областю аркуша/періоду. Заборона (`IsDeny`) на проєкт/аркуш/таблицю/колонку перемагає | DataEntry, SysAdm |
 | `Document.ChangeKey` | так | зміна бізнес-ключа (номера справи) документа | — |
