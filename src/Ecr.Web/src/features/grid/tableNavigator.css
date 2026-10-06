@@ -201,11 +201,6 @@
   color: var(--ecr-danger);
 }
 
-.ecr-tnav-count.ecr-tnav-count-warn {
-  background: color-mix(in srgb, var(--ecr-warning) 18%, transparent);
-  color: var(--ecr-text);
-}
-
 /* Крапки стану — `index.html` макета (`.dot.*`). */
 .ecr-dot {
   flex: none;
