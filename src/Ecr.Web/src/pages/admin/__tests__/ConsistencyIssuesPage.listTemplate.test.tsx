@@ -30,12 +30,23 @@ const issue = (id: number, severity: number, resolvedAt: string | null = null): 
 
 const Findings = [issue(1, 3), issue(2, 3), issue(3, 2), issue(4, 1), issue(5, 3, '2026-10-06T03:00:00Z')];
 
+const requested: string[] = [];
+
+/** Розклад за вагою, як його рахує СЕРВЕР по всьому журналу (LS-E). */
+const Totals = { errors: 12, warnings: 4, info: 1 };
+
 function respondWith(page: unknown, permissions: string[] = []): void {
+  requested.length = 0;
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
-      const body = url.endsWith('/api/v1/me') ? { permissions } : page;
+      requested.push(url);
+      const body = url.endsWith('/api/v1/me')
+        ? { permissions }
+        : url.includes('/consistency/summary')
+          ? { ...Totals, total: 17, lastDetectedAt: '2026-10-05T21:00:00Z' }
+          : page;
       return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
     }),
   );
@@ -63,10 +74,6 @@ function show(entry = '/admin/consistency'): void {
   );
 }
 
-function shownIds(): string[] {
-  return Array.from(document.querySelectorAll('[data-issue-open]')).map((node) => node.getAttribute('data-issue-open') ?? '');
-}
-
 afterEach(() => {
   vi.unstubAllGlobals();
 });
@@ -78,8 +85,8 @@ describe('severityState', () => {
 });
 
 describe('ConsistencyIssuesPage на шаблоні переліку (UI-20)', () => {
-  it('пояснення під заголовком; смуга рахує НЕРОЗВ’ЯЗАНІ за вагою', async () => {
-    respondWith({ items: Findings, nextCursor: null, totalCount: null });
+  it('пояснення під заголовком; смуга — розклад СЕРВЕРА (`totals`), не лічба сторінки', async () => {
+    respondWith({ items: Findings, nextCursor: null, totalCount: 17, totals: Totals });
     show();
 
     await screen.findByText('Знахідка 1');
@@ -89,39 +96,49 @@ describe('ConsistencyIssuesPage на шаблоні переліку (UI-20)', (
     const value = (label: string): string =>
       within(strip).getByText(label).closest('[data-stat]')?.querySelector('[data-stat-value]')?.textContent ?? '';
 
-    // ⛔ Мутаційний доказ: приберіть фільтр `resolvedAt === null` — помилок
-    // стане 3 (розв'язана №5 теж рахувалася б як така, що вимагає дії).
-    expect(value('⟦consistency.statErrors⟧')).toBe('2');
-    expect(value('⟦consistency.statWarnings⟧')).toBe('1');
+    // ⛔ Мутаційний доказ: поверніть лічбу по завантаженій сторінці — буде
+    // 3/1/1 замість 12/4/1, тобто перша сотня видаватиме себе за весь журнал.
+    expect(value('⟦consistency.statErrors⟧')).toBe('12');
+    expect(value('⟦consistency.statWarnings⟧')).toBe('4');
     expect(value('⟦consistency.statInfo⟧')).toBe('1');
   });
 
-  it('є наступна сторінка — смуги НЕМАЄ: перша сотня не видає себе за весь журнал', async () => {
-    respondWith({ items: Findings, nextCursor: 'c2', totalCount: null });
+  it('є наступна сторінка — смуга лишається: числа з сервера, а не з першої сотні', async () => {
+    respondWith({ items: Findings, nextCursor: 'c2', totalCount: 17, totals: Totals });
+    show();
+
+    await screen.findByText('Знахідка 1');
+    expect(screen.getByRole('group', { name: '⟦consistency.statsLabel⟧' })).toBeTruthy();
+  });
+
+  it('відповіді з підсумками ще немає — смуги немає, а не нулі', async () => {
+    respondWith({ items: Findings, nextCursor: null, totalCount: null, totals: null });
     show();
 
     await screen.findByText('Знахідка 1');
 
-    // ⛔ Мутаційний доказ: `complete = page !== undefined` без умови про
-    // `nextCursor` — смуга з'явиться з числами лише першої сторінки.
+    // ⛔ Мутаційний доказ: замініть умову на `totals ?? { errors: 0, … }` —
+    // з'явиться смуга з нулями, тобто «помилок немає», яких ніхто не рахував.
     expect(screen.queryByRole('group', { name: '⟦consistency.statsLabel⟧' })).toBeNull();
   });
 
-  it('клац по показнику фільтрує перелік і пише вагу в адресу', async () => {
-    respondWith({ items: Findings, nextCursor: null, totalCount: null });
+  it('клац по показнику просить сервер відфільтрувати вагу і пише її в адресу', async () => {
+    respondWith({ items: Findings, nextCursor: null, totalCount: 17, totals: Totals });
     show();
 
     await screen.findByText('Знахідка 1');
     fireEvent.click(screen.getByRole('button', { name: /⟦consistency.statWarnings⟧/ }));
 
+    // ⚠ Вага — фільтр СЕРВЕРА (LS-E): журнал курсорний, і фільтр по
+    // завантаженій сотні пропускав би решту. Код ваги — 2 (`ValidationSeverity`).
     await waitFor(() => {
-      expect(shownIds()).toEqual(['3']);
+      expect(requested.some((url) => url.includes('/consistency/issues') && url.includes('&severity=2'))).toBe(true);
     });
     expect(location).toContain('severity=Warning');
   });
 
   it('шторка знахідки — кнопкою в рядку, адреса ?panel=issue-<id>', async () => {
-    respondWith({ items: Findings, nextCursor: null, totalCount: null });
+    respondWith({ items: Findings, nextCursor: null, totalCount: 17, totals: Totals });
     show();
 
     fireEvent.click(await screen.findByRole('button', { name: 'Знахідка 3' }));
@@ -131,8 +148,19 @@ describe('ConsistencyIssuesPage на шаблоні переліку (UI-20)', (
     expect(await within(drawer).findByText('doc.TableRow · 4003')).toBeTruthy();
   });
 
+  it('число в шапці — весь журнал за прапорцем (`GET /consistency/summary`)', async () => {
+    respondWith({ items: Findings, nextCursor: 'c2', totalCount: 17, totals: Totals });
+    show();
+
+    await screen.findByText('Знахідка 1');
+    await waitFor(() => {
+      expect(requested.some((url) => url.endsWith('/api/v1/consistency/summary?openOnly=true'))).toBe(true);
+    });
+    expect(await screen.findByText('17')).toBeTruthy();
+  });
+
   it('«Run check now» — головна дія шапки, лише з правом System.RunJob', async () => {
-    respondWith({ items: Findings, nextCursor: null, totalCount: null }, []);
+    respondWith({ items: Findings, nextCursor: null, totalCount: 17, totals: Totals }, []);
     show();
 
     await screen.findByText('Знахідка 1');
