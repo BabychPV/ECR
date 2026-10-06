@@ -1,5 +1,5 @@
-import { useState, type JSX } from 'react';
-import { Badge, Button, Checkbox, Group, Table, Text, TextInput } from '@mantine/core';
+import { lazy, Suspense, useState, type JSX } from 'react';
+import { Badge, Button, Checkbox, Group, Text, UnstyledButton } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import type { ConsistencyIssue, ConsistencyIssuePage } from '@/api/types';
@@ -10,16 +10,27 @@ import {
   type ConsistencyRun,
 } from '@/features/jobs/useConsistencyRun';
 import { can, useSession } from '@/shared/session/useSession';
-import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
+import { DataTable, type DataTableColumn } from '@/shared/ui/DataTable';
+import { useDetailPanel } from '@/shared/ui/DetailDrawer';
 import { ErrorAlert, TechnicalDetails } from '@/shared/ui/ErrorAlert';
-import { FilterInline, FilterRow, readerOnlyDescription } from '@/shared/ui/FilterBar';
-import { PageHeader } from '@/shared/ui/PageHeader';
+import { FilterBar } from '@/shared/ui/FilterBar';
+import { ListPage } from '@/shared/ui/ListPage';
 import { ReasonModal } from '@/shared/ui/ReasonModal';
+import type { StatItem, StatStripItems } from '@/shared/ui/StatStrip';
+import { StatusBadge } from '@/shared/ui/StatusBadge';
 import { Timestamp } from '@/shared/ui/Timestamp';
+import { TwoLine } from '@/shared/ui/TwoLine';
 import { useDebouncedFilter, useFilterCursor } from '@/shared/ui/useDebouncedFilter';
-import { useFieldDraft } from '@/shared/ui/useFieldDraft';
 import { useUrlState } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
+
+/** Шторка знахідки — лінивим чанком: закрита за замовчуванням (`L2`). */
+const ConsistencyIssueDetail = lazy(() => import('@/features/consistency/ConsistencyIssueDetail'));
+
+/** Значення `?panel=` шторки знахідки. */
+export function issuePanelId(issueId: number): string {
+  return `issue-${String(issueId)}`;
+}
 
 /**
  * Журнал знахідок нічної перевірки узгодженості (`aud.ConsistencyIssue`).
@@ -38,23 +49,26 @@ import { t } from '@/shared/i18n';
  * (`consistency.messageLanguage`) каже це прямо на екрані, щоб український
  * рядок в англійському інтерфейсі не читався як дефект локалізації.
  *
+ * ⚠ UI-20 (макет `screens-ops.js` `/admin/consistency`, KIT.md §3): шаблон
+ * переліку — пояснення під заголовком, головна дія «Run check now», смуга за
+ * вагою, рядок фільтрів (`FilterBar`), таблиця, шторка `?panel=issue-<id>`.
+ *
  * ⚠ Фільтр «лише нерозв'язані» увімкнений ЗА ЗАМОВЧУВАННЯМ. Журнал накопичує
  * знахідки від кожного нічного прогону, і питання адміністратора майже завжди
  * «що зламано ЗАРАЗ», а не «що колись знаходили».
  */
 export function ConsistencyIssuesPage(): JSX.Element {
-  const [ruleCode, setRuleCode] = useUrlState('ruleCode');
+  const [ruleCode] = useUrlState('ruleCode');
   const [showResolved, setShowResolved] = useUrlState('showResolved');
+  const [severity, setSeverity] = useUrlState('severity');
+  const [panel, setPanel] = useDetailPanel();
 
   const openOnly = showResolved !== '1';
   const rule = ruleCode ?? '';
   // ⛔ Код правила набирається з клавіатури — у запит після паузи, а не на
   // кожну літеру (той самий дефект, що в журналі змін, `useDebouncedFilter`).
+  // Саме поле (з власною чернеткою, `useFieldDraft`) — пошук `FilterBar`.
   const appliedRule = useDebouncedFilter(rule);
-  // ⛔ Поле показує ВЛАСНЕ значення, а не адресу (`useFieldDraft`): кероване
-  // адресою, воно при процесорі 4× із набору `CNS-0123` лишало `"C3"`, `"S3"`
-  // (живий стенд, 5 з 5) — адреса запізнюється, і React повертав полю старе.
-  const ruleField = useFieldDraft(rule);
   // ⛔ Курсор — від застосованого фільтра, не від сирого поля (`useFilterCursor`).
   const [cursor, setCursor] = useFilterCursor(`${appliedRule}|${String(openOnly)}`);
 
@@ -76,58 +90,220 @@ export function ConsistencyIssuesPage(): JSX.Element {
       ),
   });
 
+  const page = issues.data;
+  const items = page?.items;
+
+  /*
+   * ⛔ Смуга за вагою — лише коли на екрані ВЕСЬ результат (`nextCursor ===
+   * null`). Сервер не віддає ні `totalCount`, ні розкладу за вагою, а лічба
+   * першої сотні рядків видавала б себе за число всього журналу. Є ще сторінка
+   * — смуги немає (`D15-06`), а потрібний агрегат названо TODO-контрактом.
+   *
+   * ⚠ Рахуються НЕРОЗВ'ЯЗАНІ: розв'язана знахідка нічого не вимагає (макет:
+   * `status === 'Open'`).
+   */
+  const complete = page !== undefined && page.nextCursor === null;
+  const open = items?.filter((issue) => issue.resolvedAt === null) ?? [];
+  const stats: StatStripItems | undefined = complete
+    ? ([
+        {
+          id: 'Error',
+          label: t('consistency.statErrors'),
+          tone: 'danger',
+          value: open.filter((issue) => severityState(issue.severity) === 'Error').length,
+        },
+        {
+          id: 'Warning',
+          label: t('consistency.statWarnings'),
+          tone: 'warning',
+          value: open.filter((issue) => severityState(issue.severity) === 'Warning').length,
+        },
+        {
+          id: 'Info',
+          label: t('consistency.statInfo'),
+          value: open.filter((issue) => severityState(issue.severity) === 'Info').length,
+        },
+      ] satisfies readonly [StatItem, StatItem, StatItem])
+    : undefined;
+
+  // ⚠ Вага фільтрується на клієнті — лише поверх ПОВНОГО результату (див.
+  // смугу вище); без нього фільтр за вагою не пропонується.
+  const severityFilter = complete ? severity : null;
+  const shown =
+    items === undefined || severityFilter === null
+      ? items
+      : items.filter((issue) => severityState(issue.severity) === severityFilter);
+
+  const openIssue = items?.find((issue) => issuePanelId(issue.id) === panel);
+
+  const columns: readonly DataTableColumn<ConsistencyIssue>[] = [
+    {
+      key: 'severity',
+      label: t('consistency.severity'),
+      sortValue: (issue) => -issue.severity,
+      render: (issue) => (
+        <StatusBadge kind="severity" state={severityState(issue.severity)} quiet={issue.resolvedAt !== null} />
+      ),
+    },
+    {
+      // ⚠ Головна колонка екрана: саме вона відповідає на «де саме», якого не
+      // давав лічильник. Код правила — другим рядком (`KIT.md` §1 п. 7) і
+      // кнопкою шторки (клавіатурний шлях; клац по рядку його не має).
+      //
+      // ⚠ `data-allow-dotted`: код правила — це ДАНІ з журналу, а не ключ
+      // каталогу; виняток стоїть на самих даних, не на сторінці.
+      key: 'message',
+      label: t('consistency.what'),
+      sortable: false,
+      render: (issue) => (
+        <TwoLine
+          primary={
+            <UnstyledButton
+              ta="left"
+              fz="sm"
+              data-issue-open={issue.id}
+              onClick={(event) => {
+                event.stopPropagation();
+                setPanel(issuePanelId(issue.id));
+              }}
+            >
+              {issue.message}
+            </UnstyledButton>
+          }
+          secondary={<span data-allow-dotted>{issue.ruleCode}</span>}
+          mono
+        />
+      ),
+    },
+    {
+      key: 'entity',
+      label: t('consistency.entity'),
+      sortValue: (issue) => [issue.entityType ?? '', issue.entityId ?? 0],
+      render: (issue) => (
+        <Text size="xs" data-allow-dotted>
+          {issue.entityType ?? '—'}
+          {issue.entityId === null ? '' : ` · ${String(issue.entityId)}`}
+        </Text>
+      ),
+    },
+    {
+      // ⚠ Момент знахідки — з годиною: нічна перевірка ходить раз на добу,
+      // але ручний перезапуск дає кілька за день.
+      key: 'detectedAt',
+      label: t('consistency.when'),
+      render: (issue) => <Timestamp value={issue.detectedAt} />,
+    },
+    {
+      key: 'state',
+      label: t('consistency.state'),
+      sortValue: (issue) => (issue.resolvedAt === null ? 0 : 1),
+      render: (issue) =>
+        issue.resolvedAt === null ? (
+          <Badge size="sm" variant="light" color="statusWarning">
+            {t('consistency.open')}
+          </Badge>
+        ) : (
+          // ⚠ Розв'язане — нейтрально: зелений не вживається для «все гаразд»
+          // (KIT.md §1, «Тони»).
+          <Badge size="sm" variant="default">
+            {t('consistency.resolved')}
+          </Badge>
+        ),
+    },
+  ];
+
   return (
-    <>
-      <PageHeader
-        title={t('consistency.title')}
-        actions={
-          <FilterRow>
-            {/* ⚠ Пояснення — підказкою в порожньому полі й для читалки, а не
-                видимим рядком під полем: той опускав нижню межу поля, і
-                прапорець «Unresolved only» стояв нижче за нього (`FilterRow`). */}
-            <TextInput
-              size="xs"
-              miw={220}
-              label={t('consistency.rule')}
-              description={t('consistency.ruleHint')}
-              styles={readerOnlyDescription}
-              placeholder={t('consistency.ruleHint')}
-              value={ruleField.value}
-              onFocus={ruleField.onFocus}
-              onBlur={ruleField.onBlur}
+    <ListPage
+      header={{
+        title: t('consistency.title'),
+        meta: t('consistency.description'),
+        primary: runs
+          ? { label: t('consistency.runNow'), onClick: () => setAsking(true), disabled: run.outcome === 'running' }
+          : undefined,
+      }}
+      stats={
+        stats === undefined
+          ? undefined
+          : { label: t('consistency.statsLabel'), items: stats, active: severityFilter, onSelect: setSeverity }
+      }
+      filters={
+        <FilterBar
+          /*
+           * ⚠ Пошук — за кодом правила, на СЕРВЕРІ (`ruleCode`): журнал
+           * сторінковий, і пошук по завантаженій сотні пропускав би решту.
+           * Пояснення — підказкою в порожньому полі.
+           */
+          search={{ param: 'ruleCode', label: t('consistency.rule'), placeholder: t('consistency.ruleHint') }}
+          clearLabel={t('filters.clear')}
+          right={
+            <Checkbox
+              label={t('consistency.openOnly')}
+              checked={openOnly}
               onChange={(event) => {
-                ruleField.setValue(event.currentTarget.value);
-                setRuleCode(event.currentTarget.value);
+                setShowResolved(event.currentTarget.checked ? null : '1');
               }}
             />
-            <FilterInline>
-              <Checkbox
-                label={t('consistency.openOnly')}
-                checked={openOnly}
-                onChange={(event) => {
-                  setShowResolved(event.currentTarget.checked ? null : '1');
-                }}
-              />
-            </FilterInline>
-            {runs && (
-              <FilterInline>
-                <Button
-                  loading={run.isStarting}
-                  disabled={run.outcome === 'running'}
-                  onClick={() => setAsking(true)}
-                >
-                  {t('consistency.runNow')}
-                </Button>
-              </FilterInline>
-            )}
-          </FilterRow>
-        }
-      />
+          }
+        />
+      }
+      table={
+        <>
+          {/* ⛔ `L10`: відмова постановки — видима, з кодом і текстом сервера,
+              а не тост, що зникає. */}
+          <ErrorAlert error={run.startError} />
+          <RunStatus run={run} />
 
-      {/* ⛔ `L10`: відмова постановки — видима, з кодом і текстом сервера, а не
-          тост, що зникає, і не «нічого не сталося». */}
-      <ErrorAlert error={run.startError} />
-      <RunStatus run={run} />
+          <DataTable<ConsistencyIssue>
+            columns={columns}
+            rows={shown}
+            rowKey={(issue) => String(issue.id)}
+            isPending={issues.isPending}
+            error={issues.error}
+            onRetry={() => void issues.refetch()}
+            emptyTitle={t('consistency.empty')}
+            emptyHint={t('consistency.emptyHint')}
+            filtered={severityFilter !== null || appliedRule.length > 0 || !openOnly}
+            noMatchTitle={t('consistency.noMatch')}
+            onClearFilters={severityFilter === null ? undefined : () => setSeverity(null)}
+            clearFiltersLabel={t('filters.clear')}
+            onRowClick={(issue) => setPanel(issuePanelId(issue.id))}
+            selectedKey={openIssue === undefined ? undefined : String(openIssue.id)}
+          />
+        </>
+      }
+      detail={
+        openIssue === undefined
+          ? undefined
+          : {
+              panelId: issuePanelId(openIssue.id),
+              title: openIssue.ruleCode,
+              subtitle: `#${String(openIssue.id)}`,
+              badge: <StatusBadge kind="severity" state={severityState(openIssue.severity)} />,
+              closeLabel: t('common.close'),
+              children: (
+                <Suspense fallback={<Text size="sm" c="dimmed">{t('common.loading')}</Text>}>
+                  <ConsistencyIssueDetail issue={openIssue} />
+                </Suspense>
+              ),
+            }
+      }
+    >
+      {/* Мова тексту знахідки — під таблицею, поки рядки є. */}
+      {items !== undefined && items.length > 0 && (
+        <Text size="xs" c="dimmed">
+          {t('consistency.messageLanguage')}
+        </Text>
+      )}
+
+      {/* ⚠ Курсорна пагінація: журнал росте від кожного нічного прогону,
+          і стеля одного проходу — тисяча знахідок. */}
+      {page !== undefined && page.nextCursor !== null && (
+        <Group>
+          <Button variant="default" onClick={() => setCursor(page.nextCursor)}>
+            {t('documents.more')}
+          </Button>
+        </Group>
+      )}
 
       <ReasonModal
         opened={asking}
@@ -142,94 +318,7 @@ export function ConsistencyIssuesPage(): JSX.Element {
         }}
         onClose={() => setAsking(false)}
       />
-
-      <AsyncBoundary<ConsistencyIssuePage>
-        isPending={issues.isPending}
-        error={issues.error}
-        data={issues.data}
-        isEmpty={(page) => page.items.length === 0}
-        emptyTitle={t('consistency.empty')}
-        emptyHint={t('consistency.emptyHint')}
-        skeleton="table"
-        onRetry={() => void issues.refetch()}
-      >
-        {(page) => (
-          <>
-            <Table striped className="ecr-sticky-head">
-              <Table.Thead>
-                <Table.Tr>
-                  <Table.Th>{t('consistency.when')}</Table.Th>
-                  <Table.Th>{t('consistency.severity')}</Table.Th>
-                  <Table.Th>{t('consistency.rule')}</Table.Th>
-                  <Table.Th>{t('consistency.entity')}</Table.Th>
-                  <Table.Th>{t('consistency.what')}</Table.Th>
-                  <Table.Th>{t('consistency.state')}</Table.Th>
-                </Table.Tr>
-              </Table.Thead>
-              <Table.Tbody>
-                {page.items.map((issue) => (
-                  <Table.Tr key={issue.id}>
-                    {/* ⚠ Момент знахідки — з годиною, і саме він відповідає на
-                        «якого прогону це рядок»: нічна перевірка ходить раз на
-                        добу, але ручний перезапуск дає кілька за день. Точне
-                        значення лишається в `dateTime`/`title`. */}
-                    <Table.Td>
-                      <Timestamp value={issue.detectedAt} />
-                    </Table.Td>
-                    <Table.Td>
-                      <Badge size="sm" variant="light" color={severityColor(issue.severity)}>
-                        {severityLabel(issue.severity)}
-                      </Badge>
-                    </Table.Td>
-                    {/* ⚠ `data-allow-dotted`: код правила (`ARCHIVE_CHECKSUM`) і
-                        тип сутності (`doc.CellValue`) — це ДАНІ з журналу, а не
-                        ключі каталогу. Виняток стоїть на самих комірках, а не
-                        на сторінці: сторож, вимкнений на сторінці, — це сторож,
-                        якого немає. */}
-                    <Table.Td data-allow-dotted>
-                      <Text size="xs">{issue.ruleCode}</Text>
-                    </Table.Td>
-                    <Table.Td data-allow-dotted>
-                      <Text size="xs">
-                        {issue.entityType ?? '—'}
-                        {issue.entityId === null ? '' : ` · ${String(issue.entityId)}`}
-                      </Text>
-                    </Table.Td>
-                    {/* ⚠ Головна колонка екрана: саме вона відповідає на «де
-                        саме», якого не давав лічильник. Мова тексту — див.
-                        підпис під таблицею. */}
-                    <Table.Td>{issue.message}</Table.Td>
-                    <Table.Td>
-                      {issue.resolvedAt === null ? (
-                        <Badge size="sm" variant="light" color="statusWarning">
-                          {t('consistency.open')}
-                        </Badge>
-                      ) : (
-                        <Badge size="sm" variant="light" color="statusSuccess">
-                          {t('consistency.resolved')}
-                        </Badge>
-                      )}
-                    </Table.Td>
-                  </Table.Tr>
-                ))}
-              </Table.Tbody>
-            </Table>
-
-            <Text size="xs" c="dimmed" mt="xs">
-              {t('consistency.messageLanguage')}
-            </Text>
-
-            {/* ⚠ Курсорна пагінація: журнал росте від кожного нічного прогону,
-                і стеля одного проходу — тисяча знахідок. */}
-            {page.nextCursor !== null && (
-              <Button mt="md" variant="default" onClick={() => setCursor(page.nextCursor)}>
-                {t('documents.more')}
-              </Button>
-            )}
-          </>
-        )}
-      </AsyncBoundary>
-    </>
+    </ListPage>
   );
 }
 
@@ -278,30 +367,18 @@ function RunStatus({ run }: { run: ConsistencyRun }): JSX.Element | null {
 }
 
 /**
- * Підпис ваги знахідки.
+ * Вага знахідки словником `ValidationSeverity` (`StatusBadge` `severity`).
  *
  * ⚠ Голе число (1/2/3) на екрані нічого не означає: вагу задає задача, і
- * шкала живе в її коді, а не в голові адміністратора.
+ * шкала живе в її коді. Невідоме число — `Error`: деградація в бік уваги.
  */
-function severityLabel(severity: ConsistencyIssue['severity']): string {
+export function severityState(severity: ConsistencyIssue['severity']): 'Info' | 'Warning' | 'Error' {
   switch (severity) {
     case 1:
-      return t('consistency.severityInfo');
+      return 'Info';
     case 2:
-      return t('consistency.severityWarning');
+      return 'Warning';
     default:
-      return t('consistency.severityError');
-  }
-}
-
-/** Колір ваги: інформація нейтральна, попередження жовте, помилка червона. */
-function severityColor(severity: ConsistencyIssue['severity']): string {
-  switch (severity) {
-    case 1:
-      return 'gray';
-    case 2:
-      return 'statusWarning';
-    default:
-      return 'statusError';
+      return 'Error';
   }
 }
