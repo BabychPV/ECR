@@ -1,0 +1,284 @@
+/*
+ * Дерево таблиць документа (`UI-22`).
+ *
+ * ⚠ Вигляд — з макета `docs/design/hybrid`: `screen-document.js` (`.doc-nav …`) і
+ * `index.html` (`.split>.side`, `.dot.*`, `.count`, `.icon-btn`, `.mini-empty`). Кольори —
+ * лише токени теми (`--ecr-*` з `cssVariables.ts`), тож світла й темна теми однакові за побудовою.
+ */
+
+.ecr-doc-split {
+  display: flex;
+  align-items: flex-start;
+  gap: 0;
+  min-width: 0;
+  position: relative;
+}
+
+.ecr-doc-split > .ecr-doc-work {
+  flex: 1;
+  min-width: 0;
+  padding-left: var(--mantine-spacing-sm);
+}
+
+.ecr-tnav {
+  flex: none;
+  width: 280px;
+  display: flex;
+  flex-direction: column;
+  /* Макет: `.side` має власну прокрутку; на сторінці зі стосом блоків — липка колонка. */
+  position: sticky;
+  top: 0;
+  max-height: calc(70vh + 96px);
+  min-height: 0;
+  background: var(--ecr-surface);
+  border: 1px solid var(--ecr-border);
+  border-radius: 4px;
+}
+
+.ecr-tnav[hidden] {
+  display: none;
+}
+
+.ecr-tnav-progress {
+  display: grid;
+  gap: 4px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--ecr-border);
+}
+
+.ecr-tnav-progress-line {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--ecr-muted);
+  white-space: nowrap;
+}
+
+.ecr-tnav-progress-line b {
+  font-weight: 500;
+  color: var(--ecr-text);
+}
+
+.ecr-tnav-progress-line .ecr-tnav-bad {
+  color: var(--ecr-danger);
+}
+
+.ecr-tnav-progress-line .ecr-tnav-warn {
+  color: var(--ecr-text);
+}
+
+.ecr-tnav-tools {
+  display: flex;
+  gap: 4px;
+  padding: 8px;
+  border-bottom: 1px solid var(--ecr-border);
+}
+
+.ecr-tnav-search {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+}
+
+.ecr-tnav-search > svg {
+  position: absolute;
+  left: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--ecr-muted);
+  pointer-events: none;
+}
+
+.ecr-tnav-search input {
+  flex: 1;
+  min-width: 0;
+  height: var(--ecr-ctl-height, 28px);
+  padding: 0 8px 0 28px;
+  border: 1px solid var(--ecr-border-strong);
+  border-radius: 4px;
+  background: var(--ecr-surface);
+  color: var(--ecr-text);
+  font: inherit;
+  font-size: 13px;
+}
+
+.ecr-tnav-search input::placeholder {
+  color: var(--ecr-muted);
+}
+
+.ecr-tnav-search input:focus-visible,
+.ecr-icon-btn:focus-visible,
+.ecr-tnav-item:focus-visible {
+  outline: 2px solid var(--ecr-focus);
+  outline-offset: -2px;
+}
+
+.ecr-icon-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  flex: none;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--ecr-muted);
+  cursor: pointer;
+}
+
+.ecr-icon-btn:hover {
+  background: var(--ecr-hover);
+  color: var(--ecr-text);
+}
+
+.ecr-icon-btn[aria-pressed='true'],
+.ecr-icon-btn[aria-expanded='true'] {
+  background: var(--ecr-accent-soft);
+  color: var(--ecr-accent-text);
+}
+
+.ecr-tnav-tree {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 4px 0;
+}
+
+.ecr-tnav-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: var(--ecr-row-height, 28px);
+  padding: 0 8px 0 12px;
+  color: var(--ecr-text);
+  font-size: 13px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.ecr-tnav-item:hover {
+  background: var(--ecr-hover);
+}
+
+.ecr-tnav-item[aria-selected='true'] {
+  background: var(--ecr-accent-soft);
+  color: var(--ecr-accent-text);
+  font-weight: 500;
+}
+
+.ecr-tnav-no {
+  flex: none;
+  width: 30px;
+  font: 400 12px/1 var(--mantine-font-family-monospace);
+  color: var(--ecr-muted);
+}
+
+.ecr-tnav-item[aria-selected='true'] .ecr-tnav-no {
+  color: inherit;
+}
+
+.ecr-tnav-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ecr-tnav-count {
+  display: inline-grid;
+  place-items: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  font: 500 12px/1 var(--mantine-font-family-monospace);
+  background: color-mix(in srgb, var(--ecr-danger) 14%, transparent);
+  color: var(--ecr-danger);
+}
+
+.ecr-tnav-count.ecr-tnav-count-warn {
+  background: color-mix(in srgb, var(--ecr-warning) 18%, transparent);
+  color: var(--ecr-text);
+}
+
+/* Крапки стану — `index.html` макета (`.dot.*`). */
+.ecr-dot {
+  flex: none;
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  border: 1.5px solid var(--ecr-muted);
+}
+
+.ecr-dot[data-state='filled'] {
+  background: var(--ecr-muted);
+}
+
+.ecr-dot[data-state='partial'] {
+  background: linear-gradient(90deg, var(--ecr-muted) 50%, transparent 50%);
+}
+
+.ecr-dot[data-state='empty'] {
+  border-color: var(--ecr-faint);
+}
+
+.ecr-dot[data-state='none'] {
+  border-style: dashed;
+  border-color: var(--ecr-faint);
+}
+
+.ecr-dot[data-state='unknown'] {
+  border-color: transparent;
+}
+
+.ecr-dot[data-state='error'] {
+  width: 8px;
+  height: 8px;
+  border-radius: 1px;
+  transform: rotate(45deg);
+  background: var(--ecr-danger);
+  border-color: var(--ecr-danger);
+}
+
+.ecr-tnav-empty {
+  display: grid;
+  gap: 8px;
+  justify-items: center;
+  padding: 20px 16px;
+  text-align: center;
+  color: var(--ecr-muted);
+  font-size: 13px;
+}
+
+.ecr-tnav-empty button {
+  height: 28px;
+  padding: 0 12px;
+  border: 1px solid var(--ecr-border-strong);
+  border-radius: 4px;
+  background: var(--ecr-surface);
+  color: var(--ecr-text);
+  font: inherit;
+  cursor: pointer;
+}
+
+/* Макет: на ≤ 900px `.side` — шар поверх робочої області. */
+@media (max-width: 900px) {
+  .ecr-tnav {
+    position: absolute;
+    top: 0;
+    left: 0;
+    z-index: 20;
+    max-width: 100%;
+    box-shadow: 0 8px 24px rgb(0 0 0 / 0.24);
+  }
+
+  .ecr-doc-split > .ecr-doc-work {
+    padding-left: 0;
+  }
+}
