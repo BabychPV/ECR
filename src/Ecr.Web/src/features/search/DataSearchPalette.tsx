@@ -12,7 +12,7 @@ import {
 } from '@mantine/core';
 import { useDebouncedValue } from '@mantine/hooks';
 import { useNavigate } from 'react-router-dom';
-import { NavIcon } from '@/app/navIcons';
+import { NavIcon } from '@/shared/ui/navIcons';
 import { t } from '@/shared/i18n';
 import { CodeText } from '@/shared/ui/CodeText';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
