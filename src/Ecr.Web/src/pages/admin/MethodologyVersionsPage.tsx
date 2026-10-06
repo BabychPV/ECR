@@ -6,6 +6,7 @@ import {
   Group,
   Modal,
   Select,
+  Skeleton,
   Stack,
   Table,
   Text,
@@ -53,6 +54,11 @@ import { StatusBadge, statusKey } from '@/shared/ui/StatusBadge';
 import { Timestamp } from '@/shared/ui/Timestamp';
 import { showApiError, showDone } from '@/shared/ui/notify';
 import { usePendingLoading } from '@/features/common/usePendingLoading';
+
+/** A1-02: поле дати — за `import()` (`D-132`), той самий прийом, що `DocumentHeaderPanel`. */
+const DateOnlyInput = lazy(async () => ({
+  default: (await import('@/shared/dates/DateInputWithStyles')).DateOnlyInput,
+}));
 
 /*
  * ⛔ Сім панелей змісту версії — за `import()`, і це вимога бюджету (`D-132`),
@@ -961,14 +967,14 @@ export function MethodologyVersionsPage(): JSX.Element {
             data-autofocus
           />
 
-          <TextInput
-            // eslint-disable-next-line no-restricted-syntax -- D15-09, борг №8/8: перехід на DateInput змінює тип значення (string → Date), тому окремим PR; список боргу сторожить lintRules.test.ts
-            type="date"
-            label={t('methodologies.effectiveFrom')}
-            description={t('methodologies.effectiveFromHint')}
-            value={publishEffectiveFrom}
-            onChange={(event) => setPublishEffectiveFrom(event.currentTarget.value)}
-          />
+          <Suspense fallback={<Skeleton height={36} />}>
+            <DateOnlyInput
+              label={t('methodologies.effectiveFrom')}
+              description={t('methodologies.effectiveFromHint')}
+              value={publishEffectiveFrom}
+              onChange={setPublishEffectiveFrom}
+            />
+          </Suspense>
 
           <Button
             disabled={publishReason.trim().length === 0 || publishEffectiveFrom.length === 0}

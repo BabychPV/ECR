@@ -1,4 +1,4 @@
-import { useState, type JSX } from 'react';
+import { lazy, Suspense, useState, type JSX } from 'react';
 import {
   Badge,
   Button,
@@ -7,6 +7,7 @@ import {
   Modal,
   NumberInput,
   Select,
+  Skeleton,
   Stack,
   Table,
   Text,
@@ -52,6 +53,11 @@ import {
 import { ColumnDefPicker, savedColumnLabel } from './ColumnDefPicker';
 import { MethodologyConstantUsage } from './ConstantUsage';
 import { usePendingLoading } from '@/features/common/usePendingLoading';
+
+/** A1-02: поле дати — за `import()` (`D-132`), той самий прийом, що `DocumentHeaderPanel`. */
+const DateOnlyInput = lazy(async () => ({
+  default: (await import('@/shared/dates/DateInputWithStyles')).DateOnlyInput,
+}));
 
 /**
  * Вибір із допоміжного довідника, який МОЖЕ не приїхати (директива №15, §0,
@@ -423,22 +429,22 @@ export function MethodologyConstantsPanel({
               />
             )}
 
-            <TextInput
-              // eslint-disable-next-line no-restricted-syntax -- D15-09, борг №3/8: перехід на DateInput змінює тип значення (string → Date), тому окремим PR; список боргу сторожить lintRules.test.ts
-              type="date"
-              label={t('methodologies.validFrom')}
-              value={editing.validFrom}
-              onChange={(event) => setEditing({ ...editing, validFrom: event.currentTarget.value })}
-            />
+            <Suspense fallback={<Skeleton height={36} />}>
+              <DateOnlyInput
+                label={t('methodologies.validFrom')}
+                value={editing.validFrom}
+                onChange={(validFrom) => setEditing({ ...editing, validFrom })}
+              />
+            </Suspense>
 
-            <TextInput
-              // eslint-disable-next-line no-restricted-syntax -- D15-09, борг №4/8: див. коментар вище
-              type="date"
-              label={t('methodologies.validTo')}
-              description={t('methodologies.validToHint')}
-              value={editing.validTo}
-              onChange={(event) => setEditing({ ...editing, validTo: event.currentTarget.value })}
-            />
+            <Suspense fallback={<Skeleton height={36} />}>
+              <DateOnlyInput
+                label={t('methodologies.validTo')}
+                description={t('methodologies.validToHint')}
+                value={editing.validTo}
+                onChange={(validTo) => setEditing({ ...editing, validTo })}
+              />
+            </Suspense>
 
             <TextInput
               label={t('methodologies.category')}

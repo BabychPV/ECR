@@ -422,7 +422,8 @@ describe('борг D15-09 обмежений і може лише скорочу
    * прибране — теж (число треба зменшити свідомо, а не «випадково зійшлося»).
    */
   // ✎ L9-43: було 8 — придушення в мертвому діалозі публікації `MethodologiesPage.tsx` пішло разом із ним.
-  const ExpectedSuppressions = 7;
+  // ✎ A1-02: було 7 — усі рідні поля дат переведено на `shared/dates/DateOnlyField` (строгий розбір).
+  const ExpectedSuppressions = 0;
 
   function sourceFiles(dir: string): readonly string[] {
     return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
