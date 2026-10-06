@@ -905,6 +905,38 @@
         ],
         "type": "object"
       },
+      "CellChangeSummaryView": {
+        "description": "Підсумок журналу змін комірок за вікном (UI-38, C2) — лише те, що читач бачить.",
+        "properties": {
+          "byImport": {
+            "description": "З них — імпортом (`Origin = Import`).",
+            "format": "int64",
+            "type": "integer"
+          },
+          "byRecalculation": {
+            "description": "З них — перерахунком (`Origin = Recalculation`).",
+            "format": "int64",
+            "type": "integer"
+          },
+          "today": {
+            "description": "З них — за поточну добу UTC (зміни вікна, що припали на сьогодні).",
+            "format": "int64",
+            "type": "integer"
+          },
+          "total": {
+            "description": "Усього змін у вікні й за фільтром.",
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total",
+          "today",
+          "byImport",
+          "byRecalculation"
+        ],
+        "type": "object"
+      },
       "CellChangeView": {
         "description": "Зміна комірки в журналі, як її бачить читач аудиту.",
         "properties": {
@@ -1013,6 +1045,53 @@
           "rowKey": {
             "description": "Ключ рядка — щоб журнал читався без join.",
             "type": "string"
+          },
+          "rowLabelL10n": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LocalizedText",
+                "description": "Підпис фіксованого рядка (`cfg.RowDef.LabelL10n`) за ключем рядка; `null` — рядок динамічний\nабо визначення вже немає. Лише структура, значень комірок тут немає."
+              }
+            ]
+          },
+          "sheetCode": {
+            "description": "Код аркуша колонки (UI-38, C1); `null` — колонки вже немає.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "sheetNameL10n": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LocalizedText",
+                "description": "Назва аркуша мовами каталогу."
+              }
+            ]
+          },
+          "tableCode": {
+            "description": "Код таблиці колонки.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "tableNameL10n": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LocalizedText",
+                "description": "Назва таблиці мовами каталогу."
+              }
+            ]
           }
         },
         "required": [
@@ -17797,6 +17876,14 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Пошук (UI-38): підрядок бізнес-ключа документа, ключа рядка чи коду колонки; до 100 знаків (довше\nобрізається), спецсимволи `LIKE` — буквальні. Лише по видимих читачу рядках.",
+            "in": "query",
+            "name": "q",
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -17882,6 +17969,142 @@
           }
         },
         "summary": "Історія змін комірок. Право `Security.ViewAudit` — або\n`Document.View`, коли задано повну адресу однієї комірки.",
+        "tags": [
+          "Audit"
+        ]
+      }
+    },
+    "/api/v1/audit/cells/summary": {
+      "get": {
+        "description": "⛔ Лічильники — лише за тим, що читач бачить (R-11): приховані колонки, таблиці й аркуші не рахуються.\n⚠ Лічильника пізніх правок немає навмисно: індексу по `IsLateEdit` немає, див. `ui-cell-changes-ext`.\nВікно обмежене (92 дні; 396 для адреси однієї комірки) — підрахунок читає лише партиції вікна.",
+        "parameters": [
+          {
+            "description": "Початок вікна в UTC, включно.",
+            "in": "query",
+            "name": "from",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Кінець вікна в UTC, виключно.",
+            "in": "query",
+            "name": "to",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Документ; без нього — наскрізний журнал (`Security.ViewAudit`).",
+            "in": "query",
+            "name": "documentId",
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Походження: `UserEdit`, `Import`, `Recalculation`, `Migration`.",
+            "in": "query",
+            "name": "origin",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Лише пізні правки.",
+            "in": "query",
+            "name": "lateOnly",
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CellChangeSummaryView"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CellChangeSummaryView"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/CellChangeSummaryView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Підсумок журналу змін комірок за вікном (UI-38): усього, за сьогодні, імпортом, перерахунком.\nТі самі права й вікно, що в `cells`.",
         "tags": [
           "Audit"
         ]

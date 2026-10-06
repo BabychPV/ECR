@@ -56,6 +56,9 @@ export interface paths {
                     limit?: number;
                     /** @description Курсор наступної сторінки. */
                     cursor?: string;
+                    /** @description Пошук (UI-38): підрядок бізнес-ключа документа, ключа рядка чи коду колонки; до 100 знаків (довше
+                     *     обрізається), спецсимволи `LIKE` — буквальні. Лише по видимих читачу рядках. */
+                    q?: string;
                 };
                 header?: never;
                 path?: never;
@@ -72,6 +75,94 @@ export interface paths {
                         "application/json": components["schemas"]["PagedResultOfCellChangeView"];
                         "text/json": components["schemas"]["PagedResultOfCellChangeView"];
                         "text/plain": components["schemas"]["PagedResultOfCellChangeView"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/audit/cells/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Підсумок журналу змін комірок за вікном (UI-38): усього, за сьогодні, імпортом, перерахунком.
+         *     Ті самі права й вікно, що в `cells`.
+         * @description ⛔ Лічильники — лише за тим, що читач бачить (R-11): приховані колонки, таблиці й аркуші не рахуються.
+         *     ⚠ Лічильника пізніх правок немає навмисно: індексу по `IsLateEdit` немає, див. `ui-cell-changes-ext`.
+         *     Вікно обмежене (92 дні; 396 для адреси однієї комірки) — підрахунок читає лише партиції вікна.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Початок вікна в UTC, включно. */
+                    from?: string;
+                    /** @description Кінець вікна в UTC, виключно. */
+                    to?: string;
+                    /** @description Документ; без нього — наскрізний журнал (`Security.ViewAudit`). */
+                    documentId?: number;
+                    /** @description Походження: `UserEdit`, `Import`, `Recalculation`, `Migration`. */
+                    origin?: string;
+                    /** @description Лише пізні правки. */
+                    lateOnly?: boolean;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CellChangeSummaryView"];
+                        "text/json": components["schemas"]["CellChangeSummaryView"];
+                        "text/plain": components["schemas"]["CellChangeSummaryView"];
                     };
                 };
                 /** @description Bad Request */
@@ -18170,6 +18261,29 @@ export interface components {
             rowKey: string;
             tableCode: string;
         };
+        /** @description Підсумок журналу змін комірок за вікном (UI-38, C2) — лише те, що читач бачить. */
+        CellChangeSummaryView: {
+            /**
+             * Format: int64
+             * @description З них — імпортом (`Origin = Import`).
+             */
+            byImport: number;
+            /**
+             * Format: int64
+             * @description З них — перерахунком (`Origin = Recalculation`).
+             */
+            byRecalculation: number;
+            /**
+             * Format: int64
+             * @description З них — за поточну добу UTC (зміни вікна, що припали на сьогодні).
+             */
+            today: number;
+            /**
+             * Format: int64
+             * @description Усього змін у вікні й за фільтром.
+             */
+            total: number;
+        };
         /** @description Зміна комірки в журналі, як її бачить читач аудиту. */
         CellChangeView: {
             /**
@@ -18227,6 +18341,13 @@ export interface components {
             periodKey: number;
             /** @description Ключ рядка — щоб журнал читався без join. */
             rowKey: string;
+            rowLabelL10n?: null | components["schemas"]["LocalizedText"];
+            /** @description Код аркуша колонки (UI-38, C1); `null` — колонки вже немає. */
+            sheetCode?: null | string;
+            sheetNameL10n?: null | components["schemas"]["LocalizedText"];
+            /** @description Код таблиці колонки. */
+            tableCode?: null | string;
+            tableNameL10n?: null | components["schemas"]["LocalizedText"];
         };
         /** @description Конфлікт паралельного редагування. Повертається в
          *     `Extensions2.conflicts` при `ECR-CELL-0409`.
