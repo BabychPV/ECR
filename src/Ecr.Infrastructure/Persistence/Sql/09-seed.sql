@@ -6830,6 +6830,8 @@ USING (VALUES
     (N'units.conversion', N'en', N'Conversion', 1),
     (N'units.whereUsed', N'en', N'Where used', 1),
     (N'units.noMatch', N'en', N'No units match the filters.', 1),
+    (N'units.usedIn', N'en', N'Used in', 1),
+    (N'units.statUnused', N'en', N'not used anywhere', 1),
     -- COLL:ui21units ── кінець секції ──
     -- COLL:ui33periods ── UI-33: Periods — плитки періодів року, «All projects · current period», смуга показників; ru/kz — порцією COLL:ui33periods у блоці I18N нижче ──
     (N'periods.tile.closesToday', N'en', N'closes today', 1),
@@ -16602,7 +16604,11 @@ SELECT v.[Key], v.Lang, v.Val
     (N'units.whereUsed', N'ru', N'Где используется'),
     (N'units.whereUsed', N'kz', N'Қай жерде қолданылады'),
     (N'units.noMatch', N'ru', N'Нет единиц, подходящих под фильтры.'),
-    (N'units.noMatch', N'kz', N'Сүзгілерге сәйкес бірліктер жоқ.')
+    (N'units.noMatch', N'kz', N'Сүзгілерге сәйкес бірліктер жоқ.'),
+    (N'units.usedIn', N'ru', N'Где используется'),
+    (N'units.usedIn', N'kz', N'Қолданылатын жері'),
+    (N'units.statUnused', N'ru', N'нигде не используются'),
+    (N'units.statUnused', N'kz', N'еш жерде қолданылмайды')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
