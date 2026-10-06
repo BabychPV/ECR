@@ -37,7 +37,7 @@ const source = readFileSync(
 );
 
 describe('CreateDocumentModal: чекбокс аркуша не читає event.currentTarget лінивого всередині апдейтера', () => {
-  it('onChange чекбокса аркуша читає event.currentTarget.checked ОДРАЗУ, до виклику setSheets', () => {
+  it('onChange чекбокса аркуша читає event.currentTarget.checked ОДРАЗУ, до виклику setPickedSheets', () => {
     const onChangeMatch = source.match(
       /<Checkbox\s[^]*?onChange=\{\(event\) => \{([^]*?)\}\}\s*\/>/,
     );
@@ -50,7 +50,9 @@ describe('CreateDocumentModal: чекбокс аркуша не читає event
     // усередині функції, переданої в `setSheets`.
     expect(body).toMatch(/const checked = event\.currentTarget\.checked;/);
 
-    const setSheetsCallMatch = body.match(/setSheets\(\(current\) =>([^]*?)\);/);
+    // ✎ UI-31 (майстер): стан аркушів — `setPickedSheets(<значення>)`, без апдейтера; правило те саме —
+    // аргумент виклику не читає `event.currentTarget`.
+    const setSheetsCallMatch = body.match(/setPickedSheets\(([^]*?)\);/);
     expect(setSheetsCallMatch).not.toBeNull();
 
     // ⛔ Мутаційний доказ (задокументовано, не в коміті): до фікса це саме
