@@ -126,7 +126,8 @@ describe('DocumentsPage: відмова переліку проєктів ≠ «
        * падав би з «Found multiple elements» — або, що гірше, знаходив би не ту.
        */
       const row = within(table).getByRole('row', { name: /P1-V1-0001/ });
-      const projectCell = within(row).getAllByRole('cell')[1];
+      // ✎ UI-19: окремої колонки Project немає — проєкт другим рядком колонки Document.
+      const projectCell = within(row).getAllByRole('cell')[0]?.querySelector('[data-document-project]');
 
       expect(projectCell?.querySelector('code')?.textContent).toBe('1');
     },
