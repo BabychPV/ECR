@@ -1077,7 +1077,14 @@ UPDATE t
     -- a4-03b: текст межі виразу нейтральний (для правила валідації «розбийте на кілька формул» не пасувало).
     (N'err.ECR-REQ-0422.expressionTooLong', N'en', N'The expression is too long: {length} characters, at most {max} are allowed. Split it into several formulas.', N'The expression is too long: {length} characters, at most {max} are allowed. Shorten it or split it into several.'),
     (N'err.ECR-REQ-0422.expressionTooLong', N'ru', N'Выражение слишком длинное: {length} символов, допускается не более {max}. Разбейте его на несколько формул.', N'Выражение слишком длинное: {length} символов, допускается не более {max}. Сократите его или разделите на несколько.'),
-    (N'err.ECR-REQ-0422.expressionTooLong', N'kz', N'Өрнек тым ұзын: {length} таңба, ең көбі {max} рұқсат етіледі. Оны бірнеше формулаға бөліңіз.', N'Өрнек тым ұзын: {length} таңба, ең көбі {max} рұқсат етіледі. Оны қысқартыңыз немесе бірнешеге бөліңіз.')
+    (N'err.ECR-REQ-0422.expressionTooLong', N'kz', N'Өрнек тым ұзын: {length} таңба, ең көбі {max} рұқсат етіледі. Оны бірнеше формулаға бөліңіз.', N'Өрнек тым ұзын: {length} таңба, ең көбі {max} рұқсат етіледі. Оны қысқартыңыз немесе бірнешеге бөліңіз.'),
+    -- COLL:uipalette UI-30: кнопка й поле палітри кажуть, що тут є й екрани та дії, не лише дані.
+    (N'search.open', N'en', N'Search data', N'Search or run a command'),
+    (N'search.open', N'ru', N'Поиск данных', N'Поиск или команда'),
+    (N'search.open', N'kz', N'Деректерді іздеу', N'Іздеу немесе пәрмен'),
+    (N'search.placeholder', N'en', N'Documents, templates, registries…', N'Type a screen, a document key or an action…'),
+    (N'search.placeholder', N'ru', N'Документы, шаблоны, справочники…', N'Экран, ключ документа или действие…'),
+    (N'search.placeholder', N'kz', N'Құжаттар, үлгілер, анықтамалықтар…', N'Экран, құжат кілті немесе әрекет…')
   ) AS s ([Key], Lang, OldVal, NewVal)
     ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
  WHERE t.Value = s.OldVal COLLATE Latin1_General_BIN2;
@@ -2232,8 +2239,8 @@ USING (VALUES
     (N'nav.jobs',                        N'en', N'Jobs', 1),
     (N'nav.health',                      N'en', N'Health', 1),
     -- Пошук даних у шапці (BE-19): кнопка й палітра Ctrl+K.
-    (N'search.open',                     N'en', N'Search data', 1),
-    (N'search.placeholder',              N'en', N'Documents, templates, registries…', 1),
+    (N'search.open',                     N'en', N'Search or run a command', 1),
+    (N'search.placeholder',              N'en', N'Type a screen, a document key or an action…', 1),
     (N'search.minLength',                N'en', N'Type at least {min} characters', 1),
     (N'search.empty',                    N'en', N'Nothing found', 1),
     (N'search.rateLimited',              N'en', N'Too many searches — retrying in {seconds}s', 1),
@@ -6765,8 +6772,21 @@ USING (VALUES
     (N'period.closesIn.few', N'en', N'closes in {count} days', 1),
     (N'period.closesIn.many', N'en', N'closes in {count} days', 1),
     (N'period.closesIn.other', N'en', N'closes in {count} days', 1),
-    (N'period.stateInProjects', N'en', N'{state} in {count} of {total} projects', 1)
+    (N'period.stateInProjects', N'en', N'{state} in {count} of {total} projects', 1),
     -- COLL:uiperiod ── кінець секції ──
+    -- COLL:uipalette ── UI-30 командна палітра: екрани й дії; ru/kz — порцією COLL:uipalette у блоці I18N нижче ──
+    (N'palette.title', N'en', N'Command palette', 1),
+    (N'palette.screens', N'en', N'Screens', 1),
+    (N'palette.actions', N'en', N'Actions', 1),
+    (N'palette.hintMove', N'en', N'move', 1),
+    (N'palette.hintOpen', N'en', N'open', 1),
+    (N'palette.action.themeDark', N'en', N'Switch to dark theme', 1),
+    (N'palette.action.themeLight', N'en', N'Switch to light theme', 1),
+    (N'palette.action.densityCompact', N'en', N'Use compact rows', 1),
+    (N'palette.action.densityComfortable', N'en', N'Use comfortable rows', 1),
+    (N'palette.action.collapseMenu', N'en', N'Collapse menu to icons', 1),
+    (N'palette.action.expandMenu', N'en', N'Expand menu', 1)
+    -- COLL:uipalette ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -7474,8 +7494,8 @@ SELECT v.[Key], v.Lang, v.Val
     (N'nav.sources', N'ru', N'Источники данных'),
     (N'nav.jobs', N'ru', N'Задачи'),
     (N'nav.health', N'ru', N'Состояние системы'),
-    (N'search.open', N'ru', N'Поиск данных'),
-    (N'search.placeholder', N'ru', N'Документы, шаблоны, справочники…'),
+    (N'search.open', N'ru', N'Поиск или команда'),
+    (N'search.placeholder', N'ru', N'Экран, ключ документа или действие…'),
     (N'search.minLength', N'ru', N'Введите не менее {min} символов'),
     (N'search.empty', N'ru', N'Ничего не найдено'),
     (N'search.rateLimited', N'ru', N'Слишком много поисковых запросов — повтор через {seconds} с'),
@@ -10503,8 +10523,8 @@ SELECT v.[Key], v.Lang, v.Val
     (N'nav.sources', N'kz', N'Деректер көздері'),
     (N'nav.jobs', N'kz', N'Тапсырмалар'),
     (N'nav.health', N'kz', N'Жүйенің күйі'),
-    (N'search.open', N'kz', N'Деректерді іздеу'),
-    (N'search.placeholder', N'kz', N'Құжаттар, үлгілер, анықтамалықтар…'),
+    (N'search.open', N'kz', N'Іздеу немесе пәрмен'),
+    (N'search.placeholder', N'kz', N'Экран, құжат кілті немесе әрекет…'),
     (N'search.minLength', N'kz', N'Кемінде {min} таңба енгізіңіз'),
     (N'search.empty', N'kz', N'Ештеңе табылмады'),
     (N'search.rateLimited', N'kz', N'Іздеу сұраулары тым көп — {seconds} с кейін қайталанады'),
@@ -16075,6 +16095,37 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:uiperiod ── кінець секції ──
+
+-- COLL:uipalette ── ru/kz: UI-30 командна палітра: екрани й дії; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'palette.title', N'ru', N'Командная палитра'),
+    (N'palette.title', N'kz', N'Пәрмендер палитрасы'),
+    (N'palette.screens', N'ru', N'Экраны'),
+    (N'palette.screens', N'kz', N'Экрандар'),
+    (N'palette.actions', N'ru', N'Действия'),
+    (N'palette.actions', N'kz', N'Әрекеттер'),
+    (N'palette.hintMove', N'ru', N'перейти'),
+    (N'palette.hintMove', N'kz', N'жылжу'),
+    (N'palette.hintOpen', N'ru', N'открыть'),
+    (N'palette.hintOpen', N'kz', N'ашу'),
+    (N'palette.action.themeDark', N'ru', N'Переключить на тёмную тему'),
+    (N'palette.action.themeDark', N'kz', N'Қараңғы тақырыпқа ауысу'),
+    (N'palette.action.themeLight', N'ru', N'Переключить на светлую тему'),
+    (N'palette.action.themeLight', N'kz', N'Ашық тақырыпқа ауысу'),
+    (N'palette.action.densityCompact', N'ru', N'Компактные строки'),
+    (N'palette.action.densityCompact', N'kz', N'Ықшам жолдар'),
+    (N'palette.action.densityComfortable', N'ru', N'Просторные строки'),
+    (N'palette.action.densityComfortable', N'kz', N'Кең жолдар'),
+    (N'palette.action.collapseMenu', N'ru', N'Свернуть меню до значков'),
+    (N'palette.action.collapseMenu', N'kz', N'Мәзірді белгішелерге жию'),
+    (N'palette.action.expandMenu', N'ru', N'Развернуть меню'),
+    (N'palette.action.expandMenu', N'kz', N'Мәзірді жаю')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:uipalette ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t
