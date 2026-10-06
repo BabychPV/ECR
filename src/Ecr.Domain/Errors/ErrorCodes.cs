@@ -778,4 +778,17 @@ public static class ErrorCodes
     /// рахуються ПІСЛЯ зміни, тож заміна «прив'язати нове → відв'язати старе» проходить.
     /// </remarks>
     public const string LastSourceOfPublishedColumn = "ECR-TMPL-4091";
+
+    /// <summary>
+    /// Дерево виразу надто глибоке для обходу на стеку потоку (<c>ECR-EXPR-0422</c>, L7-01).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Сторожі стека в рекурсивних обходах дерева (<c>RuntimeHelpers.EnsureSufficientExecutionStack</c>,
+    /// <c>TraversalStackGuard</c>) замість переповнення стека — яке валить увесь процес —
+    /// кидають <see cref="System.InsufficientExecutionStackException"/>. Без власного арма він
+    /// доїжджав до клієнта як <c>500 ECR-SYS-0500</c>, а фонова задача повторювала той самий
+    /// детермінований збій тричі. Вираз той самий — і відповідь та сама: 422, текст — ключ
+    /// <c>expr.tooComplex</c> («розбийте на кілька формул»), задача падає один раз.
+    /// </remarks>
+    public const string ExpressionTooComplex = "ECR-EXPR-0422";
 }

@@ -202,6 +202,34 @@ public sealed class ErrorContractTests(SqlServerFixture sql)
         Assert.Equal("ECR-AUTH-0429", code);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "L7-01")]
+    public void Надто_глибокий_вираз_повертає_422_з_ключем_а_не_500()
+    {
+        // ⛔ L7-01: сторож стека рекурсивного обходу дерева кидає
+        // InsufficientExecutionStackException замість переповнення (що валить
+        // процес). Без власного арма він падав у `_ =>` і доїжджав як
+        // 500 ECR-SYS-0500 «зверніться до адміністратора» — хоча причина у вході,
+        // і той самий вираз дає ту саму відмову щоразу.
+        var exception = new InsufficientExecutionStackException(
+            "The expression is too complex to traverse: split it into several formulas.");
+
+        var map = typeof(ExceptionHandlingMiddleware)
+            .GetMethod("Map", BindingFlags.NonPublic | BindingFlags.Static)!;
+
+        var (status, code, message, details) =
+            ((int, string, string, IReadOnlyDictionary<string, object?>?))map.Invoke(null, [exception])!;
+
+        Assert.Equal(422, status);
+        Assert.Equal(ErrorCodes.ExpressionTooComplex, code);
+        Assert.NotNull(details);
+        Assert.Equal("expr.tooComplex", details!["messageKey"]);
+
+        // Текст винятку клієнтові не їде (ФВ-6.11): лише стале речення й ключ.
+        Assert.DoesNotContain("traverse", message, StringComparison.Ordinal);
+    }
+
     [Theory]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
     [Trait("Finding", "lane1-2-4-unhandled-500-pattern")]
