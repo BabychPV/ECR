@@ -37,6 +37,12 @@ public sealed partial class DenyReadTests
 
             // Три зміни в журналі, дві — прихованих: число дорівнює видимому.
             Assert.Equal(1, root.GetProperty("totalCount").GetInt32());
+
+            // C1: імена структури лише видимого рядка; заборонена таблиця (код) у відповіді відсутня.
+            var item = root.GetProperty("items")[0];
+            Assert.Equal(JsonValueKind.String, item.GetProperty("sheetCode").ValueKind);
+            Assert.Equal(JsonValueKind.String, item.GetProperty("tableCode").ValueKind);
+            Assert.DoesNotContain(s.DeniedTable.TableCode, body, StringComparison.Ordinal);
         }
 
         // Регресія: без заборон бачимо всі три.

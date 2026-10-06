@@ -29,6 +29,14 @@ namespace Ecr.Application.Ports;
 /// за правилом показу (U-05/U-24), а не у форматі сховища
 /// (<c>53.1771000000000000</c>).
 /// </param>
+/// <param name="SheetCode">Код аркуша колонки (UI-38, C1); <c>null</c> — колонки вже немає.</param>
+/// <param name="SheetNameL10n">Назва аркуша мовами каталогу.</param>
+/// <param name="TableCode">Код таблиці колонки.</param>
+/// <param name="TableNameL10n">Назва таблиці мовами каталогу.</param>
+/// <param name="RowLabelL10n">
+/// Підпис фіксованого рядка (<c>cfg.RowDef.LabelL10n</c>) за ключем рядка; <c>null</c> — рядок динамічний
+/// або визначення вже немає. Лише структура, значень комірок тут немає.
+/// </param>
 public sealed record CellChangeView(
     DateTime ChangedAt,
     int PeriodKey,
@@ -46,7 +54,12 @@ public sealed record CellChangeView(
     string? ColumnCode = null,
     Ecr.Domain.ValueObjects.LocalizedText? ColumnHeaderL10n = null,
     string? ColumnDataType = null,
-    bool IsOutOfWindow = false);
+    bool IsOutOfWindow = false,
+    string? SheetCode = null,
+    Ecr.Domain.ValueObjects.LocalizedText? SheetNameL10n = null,
+    string? TableCode = null,
+    Ecr.Domain.ValueObjects.LocalizedText? TableNameL10n = null,
+    Ecr.Domain.ValueObjects.LocalizedText? RowLabelL10n = null);
 
 /// <summary>Лічильники журналу в розрізі колонки: сирі, ще БЕЗ відсіву за межами читання.</summary>
 /// <param name="ColumnDefId">Колонка.</param>
