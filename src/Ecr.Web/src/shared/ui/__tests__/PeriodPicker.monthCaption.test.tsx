@@ -41,10 +41,11 @@ afterAll(() => {
 });
 
 describe('підпис місяця — з каталогу мови інтерфейсу', () => {
-  it('PeriodPicker: «Қыркүйек 2026» під полем', () => {
+  it('PeriodPicker: «Қыркүйек 2026» у самому полі, без ключа', () => {
     renderWithMantine(<PeriodPicker value={202609} onChange={vi.fn()} />);
 
-    expect(screen.getByText('Қыркүйек 2026')).toBeTruthy();
+    expect(screen.getByDisplayValue('Қыркүйек 2026')).toBeTruthy();
+    expect(screen.queryByDisplayValue('202609')).toBeNull();
   });
 
   it('PeriodsPage.periodCaption: місячний період — «Қаңтар 2026»', () => {

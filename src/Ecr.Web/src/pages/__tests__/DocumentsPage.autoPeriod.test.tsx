@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MantineProvider } from '@mantine/core';
 import { MemoryRouter, useLocation } from 'react-router-dom';
@@ -337,7 +337,9 @@ describe('DocumentsPage: очищене людиною поле «Period» ав�
     expect(input.value).toBe('');
 
     // Людина відвернулась (blur) — порожнє поле так і лишається порожнім.
-    fireEvent.blur(input);
+    // ⚠ Справжній перехід фокуса, а не `fireEvent.blur`: поле показує ключ лише у фокусі, і
+    // подія без реальної зміни `activeElement` лишила б клік наступного `type` без `focus`.
+    await user.tab();
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(input.value).toBe('');
 
@@ -356,10 +358,11 @@ describe('DocumentsPage: очищене людиною поле «Period» ав�
     const input = await screen.findByRole<HTMLInputElement>('textbox', {
       name: '⟦documents.period⟧',
     });
-    await waitFor(() => expect(input.value).toBe('202610'));
+    // Поле показує людську назву автовибраного періоду, не ключ 202610.
+    await waitFor(() => expect(input.value).toBe('October 2026'));
 
     await user.clear(input);
-    fireEvent.blur(input);
+    await user.tab();
     await new Promise((resolve) => setTimeout(resolve, 150));
 
     expect(new URLSearchParams(search).get('periodKey')).toBeNull();

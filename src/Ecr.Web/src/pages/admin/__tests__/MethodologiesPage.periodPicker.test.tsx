@@ -116,11 +116,12 @@ describe('MethodologiesPage: період симуляції — PeriodPicker з
     const input = within(dialog).getByLabelText('⟦documents.period⟧');
 
     fireEvent.change(input, { target: { value: '202612' } });
-    expect(input).toHaveProperty('value', '202612');
+    // Поле показує людську назву, не ключ; ключ іде в onChange/стан.
+    expect(input).toHaveProperty('value', 'December 2026');
 
     fireEvent.click(within(dialog).getByRole('button', { name: '⟦period.next⟧' }));
 
-    expect(input).toHaveProperty('value', '202701');
+    expect(input).toHaveProperty('value', 'January 2027');
   });
 
   it('очищення поля НЕ скидає період симуляції — лишається попереднє значення', async () => {
@@ -131,7 +132,7 @@ describe('MethodologiesPage: період симуляції — PeriodPicker з
     const input = within(dialog).getByLabelText('⟦documents.period⟧');
 
     fireEvent.change(input, { target: { value: '202603' } });
-    expect(input).toHaveProperty('value', '202603');
+    expect(input).toHaveProperty('value', 'March 2026');
 
     fireEvent.change(input, { target: { value: '' } });
 
@@ -151,7 +152,7 @@ describe('MethodologiesPage: період симуляції — PeriodPicker з
      */
     fireEvent.click(within(dialog).getByRole('button', { name: '⟦period.next⟧' }));
 
-    expect(input).toHaveProperty('value', '202604');
+    expect(input).toHaveProperty('value', 'April 2026');
   });
 
   it('підказка «нічого не зберігається» лишається видимою під контролом', async () => {

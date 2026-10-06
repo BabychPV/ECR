@@ -78,12 +78,12 @@ describe('PeriodPicker: неповний набір лишається в пол
     await user.type(input, '2026', { initialSelectionStart: 0, initialSelectionEnd: 6 });
     expect((input as HTMLInputElement).value).toBe('2026');
     expect(input.getAttribute('aria-invalid')).not.toBe('true');
-    // Підпис попереднього періоду не стоїть під чужим набором.
-    expect(screen.queryByText('December 2025')).toBeNull();
+    // Назва попереднього періоду не стоїть у полі з чужим набором.
+    expect(screen.queryByDisplayValue('December 2025')).toBeNull();
 
     fireEvent.blur(input);
-    expect((input as HTMLInputElement).value).toBe('202512');
-    expect(screen.getByText('December 2025')).toBeTruthy();
+    // Поза фокусом поле знову показує людську назву чинного періоду, а не ключ.
+    expect((input as HTMLInputElement).value).toBe('December 2025');
     expect(onChange).not.toHaveBeenCalled();
   });
 

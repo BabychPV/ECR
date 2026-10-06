@@ -1,6 +1,6 @@
 import type { JSX } from 'react';
-import { ActionIcon, Group, NumberInput, type MantineSize } from '@mantine/core';
-import { formatMonthYear } from '@/shared/format';
+import { ActionIcon, Group, TextInput, type MantineSize } from '@mantine/core';
+import { formatPeriodKey } from '@/shared/format';
 import { t } from '@/shared/i18n';
 import { useFieldDraft } from './useFieldDraft';
 
@@ -137,18 +137,8 @@ function shiftSequence(value: number, delta: -1 | 1, perYear: number): number | 
 
 /** Підпис періоду мовою інтерфейсу («Вересень 2026»), чи `undefined` для невалідного значення. */
 function periodCaption(value: number, kind?: string): string | undefined {
-  const parsed = parsePeriodKey(value);
-  if (parsed === null) return undefined;
-
-  // ⚠ `X-34`: квартал і рік — за періодичністю, не як місяць.
-  if (kind === 'Quarterly') {
-    return parsed.month <= 4 ? t('periods.quarterOf', { quarter: parsed.month, year: parsed.year }) : undefined;
-  }
-  if (kind === 'Yearly') return parsed.month === 1 ? String(parsed.year) : undefined;
-  if (kind === 'Custom') return t('periods.customOf', { sequence: parsed.month, year: parsed.year });
-
-  // ⚠ `A2-10`: місяць — із каталогу, а не з `Intl` (у Chrome немає `kk`).
-  const formatted = formatMonthYear(parsed.year, parsed.month);
+  // ⚠ `X-34`/`A2-10`: квартал і рік — за періодичністю; місяць — із каталогу (форматер `A2-10`).
+  const formatted = formatPeriodKey(value, kind);
 
   return formatted.length > 0 ? formatted : undefined;
 }
@@ -207,9 +197,13 @@ export function PeriodPicker({
    * відлуння адреси при повільному рендері. Ззовні (стрілка, «Назад»,
    * навігація) `value` приймається, коли поле не у фокусі.
    */
-  const field = useFieldDraft<string | number>(value ?? '');
-  const local = field.value;
-  const complete = typeof local === 'number' && isCompletePeriodKey(local);
+  const external = value === null ? '' : String(value);
+  const field = useFieldDraft<string>(external);
+  const draft = field.value;
+  // ⚠ Чернетка — рядок цифр ключа (`YYYYMM`): ключ лишається значенням для API і введення, але
+  // показується людині лише поки вона його редагує (див. `shown` нижче).
+  const local = /^\d{6}$/.test(draft) ? Number(draft) : null;
+  const complete = local !== null && isCompletePeriodKey(local);
 
   // ⚠ Стрілки крокують від набраного, лише коли воно повне; від неповного —
   // від ЧИННОГО періоду, як і раніше.
@@ -225,26 +219,37 @@ export function PeriodPicker({
   // («2026» над «September 2026») — тому підпису немає, як і для порожнього.
   const caption = complete ? periodCaption(local, periodKind) : undefined;
 
+  /*
+   * ⛔ Поле показує ЛЮДСЬКУ назву («October 2026» / «Қазан 2026» / «Октябрь 2026»), а не технічний
+   * ключ `202610`; окремого підпису під/над полем немає (раніше назва дублювала поле дрібним
+   * шрифтом). Ключ видно лише в РЕДАГУВАННІ — у фокусі поле показує рівно набране, тож введення
+   * `YYYYMM` працює як і раніше; на blur знову назва. `onChange` віддає ключ, як і досі.
+   */
+  const shown = !field.focused && caption !== undefined ? caption : draft;
+
   const commit = (next: number | null): void => {
-    field.setValue(next ?? '');
+    field.setValue(next === null ? '' : String(next));
     onChange(next);
   };
 
-  const handleInput = (next: string | number): void => {
+  const handleInput = (raw: string): void => {
+    const next = raw.replace(/\D/g, '');
     field.setValue(next);
 
     if (next === '') {
       onChange(null);
-    } else if (typeof next === 'number' && isCompletePeriodKey(next)) {
-      onChange(next);
+    } else if (/^\d{6}$/.test(next) && isCompletePeriodKey(Number(next))) {
+      onChange(Number(next));
     }
   };
 
   return (
-    <Group gap="xs" align="end" wrap="nowrap">
+    // ⚠ `align="flex-end"` + кнопки висотою поля (`input-${size}`): ‹ › стоять по центру поля, а не
+    // нижче нього; підпису-опису під міткою вже немає, що зсував поле відносно кнопок.
+    <Group gap="xs" align="flex-end" wrap="nowrap">
       <ActionIcon
         variant="default"
-        size={size}
+        size={`input-${size}`}
         aria-label={t('period.previous')}
         disabled={disabled || prevValue === null}
         onClick={() => commit(prevValue)}
@@ -252,29 +257,34 @@ export function PeriodPicker({
         ‹
       </ActionIcon>
 
-      <NumberInput
+      <TextInput
         id={id}
         size={size}
         miw={miw}
         label={label ?? t('documents.period')}
-        description={caption}
+        inputMode="numeric"
         disabled={disabled}
-        value={local}
-        onChange={handleInput}
-        onFocus={field.onFocus}
+        value={shown}
+        onChange={(event) => handleInput(event.currentTarget.value)}
+        onFocus={(event) => {
+          field.onFocus();
+          // Поле переходить від назви до ключа: виділити ключ, щоб набір `YYYYMM` замінив його.
+          const input = event.currentTarget;
+          queueMicrotask(() => input.select());
+        }}
         // ⚠ Незавершений набір, покинутий фокусом, повертає поле до чинного
         // періоду: інакше поле показувало б «2026», а список — інший період.
         // Повний набір лишається: `value` у цю мить може ще нести запізніле
         // відлуння адреси, і підтягнути його означало б стерти набране.
         onBlur={() => {
           field.onBlur();
-          if (!complete) field.setValue(value ?? '');
+          if (!complete) field.setValue(external);
         }}
       />
 
       <ActionIcon
         variant="default"
-        size={size}
+        size={`input-${size}`}
         aria-label={t('period.next')}
         disabled={disabled || nextValue === null}
         onClick={() => commit(nextValue)}
