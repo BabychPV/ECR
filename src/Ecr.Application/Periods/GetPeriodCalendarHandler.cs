@@ -19,12 +19,17 @@ namespace Ecr.Application.Periods;
 public sealed class GetPeriodCalendarHandler(
     IPeriodStore periods,
     Security.IAccessDecisionService access,
-    Common.ICurrentUser currentUser)
+    Common.ICurrentUser currentUser,
+    ICampaignSummaryStore sheetCounts)
 {
     /// <summary>Повертає календар проєкту.</summary>
     /// <param name="projectId">Проєкт.</param>
     /// <param name="ct">Токен скасування.</param>
-    public async Task<PeriodCalendarDto> HandleAsync(int projectId, CancellationToken ct)
+    /// <param name="withSheetCounts">
+    /// Додати <c>NotSubmittedSheets</c> до кожного періоду (UI-33, D1). За замовчуванням ні: календар читають на
+    /// кожній сторінці документів, а агрегат по аркушах потрібен лише сторінці періодів.
+    /// </param>
+    public async Task<PeriodCalendarDto> HandleAsync(int projectId, CancellationToken ct, bool withSheetCounts = false)
     {
         // ⛔ Право перевіряється ТУТ (`A7-53`). До цього ендпоінт мав лише
         // `[Authorize]`, тобто оголошене контрактом право не перевіряв ніхто.
@@ -63,6 +68,12 @@ public sealed class GetPeriodCalendarHandler(
         // тож окремий запит виправданий саме цим.
         var policy = await periods.GetPolicyAsync(project.PeriodPolicyId, ct).ConfigureAwait(false);
 
+        // ⛔ R-8: не подані аркуші — лише читачу, який бачить усі аркуші проєкту (немає заборон і низьких грантів,
+        // проєкт відкритий без звуження ролі); інакше `null`. Запит не виконується взагалі, коли число не віддається.
+        var notSubmitted = withSheetCounts && Security.SheetVisibility.SeesAllSheets(profile, projectId)
+            ? await sheetCounts.NotSubmittedSheetsByPeriodAsync(projectId, ct).ConfigureAwait(false)
+            : null;
+
         var items = project.Periods
             .OrderBy(p => p.PeriodKeyValue)
             .Select(p => new PeriodDto(
@@ -81,7 +92,8 @@ public sealed class GetPeriodCalendarHandler(
 
                 // Поточний період — підказка UI, а не правило доступу (D-77).
                 project.CurrentPeriodId == p.Id,
-                p.ReopenedUntil is { } until ? ToSite(until, zone) : null))
+                p.ReopenedUntil is { } until ? ToSite(until, zone) : null,
+                notSubmitted is null ? null : notSubmitted.GetValueOrDefault(p.PeriodKeyValue)))
             .ToList();
 
         var policyDto = new PeriodPolicyDto(

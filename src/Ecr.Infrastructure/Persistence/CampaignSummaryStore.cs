@@ -206,6 +206,37 @@ public sealed class CampaignSummaryStore(EcrDbContext db) : ICampaignSummaryStor
         return rows.ToDictionary(r => r.ProjectId);
     }
 
+    /// <summary>Не подані аркуші проєкту по періодах — один агрегат (<c>UI-33</c>, D1).</summary>
+    /// <remarks>
+    /// ⚠ <c>PeriodKey</c> стоїть у предикаті приєднання партиційованої <c>wf.ApprovalState</c> (урок <c>WR-05</c>);
+    /// «подано» — статуси 1 (Submitted) і 2 (Approved), решта (немає рядка, 0, 3) — не подано.
+    /// </remarks>
+    private const string NotSubmittedByPeriodSql = """
+        SELECT p.PeriodKey AS PeriodKey,
+               CAST(COUNT(s.SheetDefId) - COUNT(CASE WHEN a.Status IN (1, 2) THEN 1 END) AS int) AS NotSubmitted
+        FROM doc.Period p
+        JOIN doc.Document d ON d.ProjectId = p.ProjectId
+        JOIN doc.DocumentSheet s ON s.DocumentId = d.Id AND s.IsIncluded = 1
+        LEFT JOIN wf.ApprovalState a
+          ON a.DocumentId = s.DocumentId AND a.SheetDefId = s.SheetDefId AND a.PeriodKey = p.PeriodKey
+        WHERE p.ProjectId = @projectId
+        GROUP BY p.PeriodKey
+        """;
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyDictionary<int, int>> NotSubmittedSheetsByPeriodAsync(int projectId, CancellationToken ct)
+    {
+        var rows = await db.Database
+            .SqlQueryRaw<PeriodSheetRow>(NotSubmittedByPeriodSql, new SqlParameter("@projectId", projectId))
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        return rows.ToDictionary(r => r.PeriodKey, r => r.NotSubmitted);
+    }
+
+    /// <summary>Рядок агрегату не поданих аркушів; імена колонок — імена властивостей.</summary>
+    public sealed record PeriodSheetRow(int PeriodKey, int NotSubmitted);
+
     /// <summary>Підсумкові групи по всіх проєктах періоду — один агрегатний запит без стелі.</summary>
     private async Task<IReadOnlyList<CampaignBucket>> BucketsAsync(int periodKey, CancellationToken ct)
     {
