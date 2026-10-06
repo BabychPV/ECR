@@ -53,6 +53,7 @@ import { errorCodeText } from '@/shared/ui/problemText';
 import { useUrlNumber } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
 import { fetchAllProjects } from '@/features/projects/allProjects';
+import { FilterInline, FilterRow } from '@/shared/ui/FilterBar';
 
 /**
  * Діалог створення проєкту і менеджер політик — за `import()` (`D-132`).
@@ -718,7 +719,7 @@ export function PeriodsPage(): JSX.Element {
       <PageHeader
         title={t('periods.title')}
         actions={
-          <Group gap="xs" align="end">
+          <FilterRow>
             <Select
               size="xs"
               miw={220}
@@ -815,13 +816,15 @@ export function PeriodsPage(): JSX.Element {
             )}
 
             {recalcFan !== null && (
-              <Text size="xs" c="dimmed" role="status" data-recalc-fanout={recalcJob.data?.effectiveState ?? ''}>
-                {t('jobs.fanOutProgress', {
-                  total: recalcFan.total,
-                  done: recalcFan.succeeded,
-                  failed: recalcFan.failed,
-                })}
-              </Text>
+              <FilterInline>
+                <Text size="xs" c="dimmed" role="status" data-recalc-fanout={recalcJob.data?.effectiveState ?? ''}>
+                  {t('jobs.fanOutProgress', {
+                    total: recalcFan.total,
+                    done: recalcFan.succeeded,
+                    failed: recalcFan.failed,
+                  })}
+                </Text>
+              </FilterInline>
             )}
 
             {/* ⚠ Архівація пропонується лише активному проєкту: чернетку
@@ -841,7 +844,7 @@ export function PeriodsPage(): JSX.Element {
                 {t('periods.archive')}
               </Button>
             )}
-          </Group>
+          </FilterRow>
         }
       />
 

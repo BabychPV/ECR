@@ -20,6 +20,7 @@ import { formatDateOnly, formatDateTime, formatNumber, parseDateOnly } from "@/s
 import { useFocusAfterBusy } from "@/shared/a11y/focus";
 import { t } from "@/shared/i18n";
 import { ErrorAlert } from "@/shared/ui/ErrorAlert";
+import { FilterInline, FilterRow } from "@/shared/ui/FilterBar";
 import { PeriodPicker } from "@/shared/ui/PeriodPicker";
 import { outcomeOf, pollInterval } from "@/features/workflow/jobFollow";
 import { humanizeJobId } from "@/features/workflow/jobLabel";
@@ -374,7 +375,7 @@ export function SourceEventsTable({
         </Stack>
       )}
 
-      <Group gap="sm" align="end" wrap="wrap" data-source-events-filters="">
+      <FilterRow gap="sm" data-source-events-filters="">
         <Select
           size="xs"
           miw={200}
@@ -397,7 +398,9 @@ export function SourceEventsTable({
           </Text>
           {/* ⚠ Кнопки-перемикачі, а не `MultiSelect`: той виносить спільний чанк комбобоксів у вхідний чанк і
               зсуває бюджет `DocumentPage` (248.6 → 253.5 КБ, `D-132`). */}
-          <Group
+          {/* ⚠ Кнопки нижчі за поле: коробка висотою поля ставить їх по центру
+              його лінії, а не на нижню межу (`FilterInline`). */}
+          <FilterInline
             gap="xs"
             role="group"
             aria-label={t("sourceEvents.filterStatus")}
@@ -425,9 +428,10 @@ export function SourceEventsTable({
                 </Button>
               );
             })}
-          </Group>
+          </FilterInline>
         </Stack>
         <PeriodPicker
+          size="xs"
           label={t("sourceEvents.filterPeriod")}
           value={filters.periodKey}
           onChange={(value) => setFilters({ ...filters, periodKey: value })}
@@ -460,7 +464,7 @@ export function SourceEventsTable({
             }
           />
         </Suspense>
-      </Group>
+      </FilterRow>
 
       {events.isError && (
         <ErrorAlert

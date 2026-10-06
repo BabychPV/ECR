@@ -17,7 +17,7 @@ import type { JobStatus, JobSummary } from '@/api/types';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { TechnicalDetails } from '@/shared/ui/ErrorAlert';
 import { DataTable } from '@/shared/ui/DataTable';
-import { FilterBar } from '@/shared/ui/FilterBar';
+import { FilterBar, FilterHints, FilterInline, FilterRow, readerOnlyDescription } from '@/shared/ui/FilterBar';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { StatusBadge } from '@/shared/ui/StatusBadge';
 import { Timestamp } from '@/shared/ui/Timestamp';
@@ -148,7 +148,10 @@ export function JobsPage(): JSX.Element {
     <>
       <PageHeader title={t('jobs.title')} />
 
-      <Group align="end" mb="md">
+      {/* ⚠ Пояснення `jobs.pickHint` — під рядом (`FilterHints`), а не під полем:
+          видиме під полем, воно опускало нижню межу поля, і кнопка «Watch»
+          ставала нижче за нього (`FilterRow`). */}
+      <FilterRow size="sm" mb="xs">
         <TextInput
           label={t('jobs.id')}
           /* ⛔ `U-09`. Обидва рядки переїхали СЮДИ з порожнього стану під
@@ -163,6 +166,7 @@ export function JobsPage(): JSX.Element {
               підказкою до дії — на самому полі, а не замість вмісту. */
           placeholder={t('jobs.pick')}
           description={t('jobs.pickHint')}
+          styles={readerOnlyDescription}
           value={input}
           onChange={(event) => setInput(event.currentTarget.value)}
           // ⚠ Без цього Enter у полі не робив нічого — ідентифікатор задачі
@@ -176,10 +180,13 @@ export function JobsPage(): JSX.Element {
           miw={280}
           flex="1"
         />
-        <Button onClick={() => setJobId(input.trim().length === 0 ? null : rawJobId(input))}>
-          {t('jobs.watch')}
-        </Button>
-      </Group>
+        <FilterInline>
+          <Button onClick={() => setJobId(input.trim().length === 0 ? null : rawJobId(input))}>
+            {t('jobs.watch')}
+          </Button>
+        </FilterInline>
+      </FilterRow>
+      <FilterHints texts={[t('jobs.pickHint')]} />
 
       {/*
        * ⛔ `U-09`, те саме правило, що встановлено в `U-08`: на екрані
@@ -384,7 +391,7 @@ function RecentJobs({ onPick }: { onPick: (jobId: string) => void }): JSX.Elemen
        */}
       <FilterBar
         right={
-          <Group align="center" gap="xs">
+          <FilterInline>
             <Checkbox
               label={t('jobs.mineOnly')}
               checked={mineOnly}
@@ -393,7 +400,7 @@ function RecentJobs({ onPick }: { onPick: (jobId: string) => void }): JSX.Elemen
             <Text size="xs" c="dimmed">
               {t('jobs.mineOnlyHint')}
             </Text>
-          </Group>
+          </FilterInline>
         }
       />
 

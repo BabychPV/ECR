@@ -11,6 +11,7 @@ import { registerUnsavedSource } from '@/shared/ui/unsavedSources';
 import { t } from '@/shared/i18n';
 import { EmptyPath, ResourcePicker, type PickPath } from '@/pages/admin/grants/ResourcePicker';
 import { roleLabel } from '@/pages/admin/grants/roleLabel';
+import { FilterInline, FilterRow } from '@/shared/ui/FilterBar';
 import {
   GrantLevels,
   ResourceKinds,
@@ -239,7 +240,7 @@ export function GrantsPanel({ roles }: { roles: RoleView[] }): JSX.Element {
 
   return (
     <>
-      <Group mb="sm" gap="xs" align="flex-end">
+      <FilterRow mb="sm">
         <Select
           size="xs"
           miw={200}
@@ -283,13 +284,15 @@ export function GrantsPanel({ roles }: { roles: RoleView[] }): JSX.Element {
             </Button>
 
             {dirty && (
-              <Text size="xs" c="dimmed" fs="italic" data-testid="grants-unsaved">
-                {incomplete ? t('grants.pickResourceFirst') : t('grants.unsaved')}
-              </Text>
+              <FilterInline>
+                <Text size="xs" c="dimmed" fs="italic" data-testid="grants-unsaved">
+                  {incomplete ? t('grants.pickResourceFirst') : t('grants.unsaved')}
+                </Text>
+              </FilterInline>
             )}
           </>
         )}
-      </Group>
+      </FilterRow>
 
       {roleId !== null && conflict && (
         <Group mb="xs" gap="xs" data-testid="grants-conflict">

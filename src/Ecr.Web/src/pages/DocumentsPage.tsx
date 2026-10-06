@@ -262,12 +262,13 @@ export function DocumentsPage(): JSX.Element {
        */}
       {/* ⚠ Фільтри — ПОЗА межею станів: коли фільтр нічого не знайшов, саме
           ними людина й виходить із порожнього стану. */}
-      <DocumentListFilterBar periodKey={periodKey} filters={filters} />
-
       {/* ⚠ Смуга — теж ПОЗА межею: її лічильники фільтрують перелік, і під
           межею кожен клік знімав би її разом із фокусом на час запиту, а
-          порожній результат — ховав би кнопку, якою фільтр і знімають. */}
-      <DocumentListSummaryStrip periodKey={periodKey} filters={filters} />
+          порожній результат — ховав би кнопку, якою фільтр і знімають.
+          ⚠ І в ТОМУ САМОМУ ряду, що й фільтри (рішення людини 2026-10-06). */}
+      <DocumentListFilterBar periodKey={periodKey} filters={filters}>
+        <DocumentListSummaryStrip periodKey={periodKey} filters={filters} />
+      </DocumentListFilterBar>
 
       {/* ⛔ `ФВ-14.22`: відмова календаря не показувалась ніде — автовибір
           періоду мовчки не ставався, і колонка «State» лишалась «—» без
