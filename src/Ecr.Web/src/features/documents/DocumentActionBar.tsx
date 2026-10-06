@@ -3,6 +3,7 @@ import { Button, Menu, Text } from '@mantine/core';
 import { ExportButton, exportFormatOptions, type ExportFormat } from '@/features/export/ExportButton';
 import { RecalculateKbd, useSheetActions } from '@/features/workflow/SheetActions';
 import type { DocumentLock } from './documentLock';
+import { DocumentSheetBanner } from './DocumentSheetBanner';
 import { DocumentToolbar } from './DocumentToolbar';
 import { t } from '@/shared/i18n';
 
@@ -15,6 +16,8 @@ interface DocumentActionBarProps {
   readonly documentId: number;
   readonly periodKey: number;
   readonly sheetDefId: number;
+  /** Код активного аркуша — для банера «хто, коли» (UI-26). */
+  readonly sheetCode: string;
   readonly sheetName: string;
   /** Стан активного аркуша за період. */
   readonly state: string;
@@ -50,6 +53,7 @@ export function DocumentActionBar({
   documentId,
   periodKey,
   sheetDefId,
+  sheetCode,
   sheetName,
   state,
   lock,
@@ -191,6 +195,18 @@ export function DocumentActionBar({
           </Button>
         )}
       </DocumentToolbar>
+
+      {/* ⛔ `F-18`: ЧОМУ тут нічого не змінити — одразу під рядком дій, до
+          будь-якої сітки; ✎ UI-26: для поданого, затвердженого й
+          відхиленого аркуша — хто, коли і що робити далі цій ролі. */}
+      <DocumentSheetBanner
+        documentId={documentId}
+        periodKey={periodKey}
+        sheetCode={sheetCode}
+        state={state}
+        lock={lock}
+        canDecide={actions.approve !== null || actions.reject !== null}
+      />
 
       {showImport && (
         <Suspense fallback={null}>
