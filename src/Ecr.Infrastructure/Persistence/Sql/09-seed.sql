@@ -6716,8 +6716,12 @@ USING (VALUES
     (N'nav.expand', N'en', N'Expand menu', 1),
     -- COLL:navcollapse ── кінець секції ──
     -- COLL:l701depth ── L7-01: заголовок коду ECR-EXPR-0422 (вираз надто глибокий для обходу; подробиця — наявний expr.tooComplex); ru/kz — порцією COLL:l701depth у блоці I18N нижче ──
-    (N'err.ECR-EXPR-0422', N'en', N'Expression too complex', 1)
+    (N'err.ECR-EXPR-0422', N'en', N'Expression too complex', 1),
     -- COLL:l701depth ── кінець секції ──
+    -- COLL:a5len ── RC5: текст довший за стовпець (1000 символів) — людська відмова в комірці й у перегляді імпорту; ru/kz — порцією COLL:a5len у блоці I18N нижче ──
+    (N'validation.column.maxLength', N'en', N'The text in column "{column}" is longer than {maxLength} characters ({actualLength}).', 1),
+    (N'err.ECR-CELL-0422.importValueTooLong', N'en', N'The text is longer than the column allows (1000 characters).', 1)
+    -- COLL:a5len ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -15907,6 +15911,18 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:l701depth ── кінець секції ──
+-- COLL:a5len ── ru/kz RC5: текст довший за стовпець; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'validation.column.maxLength', N'ru', N'Текст в колонке «{column}» длиннее {maxLength} символов ({actualLength}).'),
+    (N'validation.column.maxLength', N'kz', N'«{column}» бағанындағы мәтін {maxLength} таңбадан ұзын ({actualLength}).'),
+    (N'err.ECR-CELL-0422.importValueTooLong', N'ru', N'Текст длиннее, чем допускает колонка (1000 символов).'),
+    (N'err.ECR-CELL-0422.importValueTooLong', N'kz', N'Мәтін баған рұқсат ететіннен ұзын (1000 таңба).')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:a5len ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t
