@@ -24,9 +24,9 @@ import { PickerChangeWindowMs } from '../DateCellEditor';
  */
 
 const Units: UnitRef[] = [
-  { id: 21, code: 'kg', dimensionCode: 'Mass', dimensionId: 1, factorToBase: '1', offsetToBase: '0' },
-  { id: 22, code: 't', dimensionCode: 'Mass', dimensionId: 1, factorToBase: '1000', offsetToBase: '0' },
-  { id: 31, code: 'm3', dimensionCode: 'Volume', dimensionId: 2, factorToBase: '1', offsetToBase: '0' },
+  { id: 21, code: 'kg', dimensionCode: 'Mass', dimensionId: 1, factorToBase: '1', offsetToBase: '0', isBase: true },
+  { id: 22, code: 't', dimensionCode: 'Mass', dimensionId: 1, factorToBase: '1000', offsetToBase: '0', isBase: false },
+  { id: 31, code: 'm3', dimensionCode: 'Volume', dimensionId: 2, factorToBase: '1', offsetToBase: '0', isBase: true },
 ];
 
 function column(overrides: Partial<ColumnDto> = {}): ColumnDto {
