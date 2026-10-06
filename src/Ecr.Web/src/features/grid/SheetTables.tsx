@@ -103,6 +103,8 @@ export interface SheetTablesProps {
   readonly onSelectTable?: (tableInstanceId: number) => void;
   /** Що стоїть перед заголовком вибраної таблиці (`single`): перемикач дерева таблиць. */
   readonly titleStart?: ReactNode;
+  /** Що стоїть праворуч у рядку заголовка (`single`): підказка клавіш (`UI-41`). */
+  readonly titleEnd?: ReactNode;
 }
 
 /**
@@ -164,6 +166,7 @@ export function SheetTables({
   selectedTableInstanceId,
   onSelectTable,
   titleStart,
+  titleEnd,
 }: SheetTablesProps): JSX.Element {
   const single = layout === 'single';
 
@@ -371,6 +374,7 @@ export function SheetTables({
                   </Text>
                   {localized(table.tableNameL10n)}
                 </Text>
+                {titleEnd}
               </Group>
             ) : (
               /* `tabIndex={-1}`: сюди повертається фокус, коли заглушка, що його мала, замінюється сіткою. */
