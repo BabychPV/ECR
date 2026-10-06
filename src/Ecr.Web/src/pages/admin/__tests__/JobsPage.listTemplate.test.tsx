@@ -35,6 +35,14 @@ function respond(): void {
       const json = (body: unknown, status = 200): Response =>
         new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 
+      if (url.includes('/api/v1/jobs/summary')) {
+        return json(
+          url.includes('mine=true')
+            ? { running: 1, queued: 1, failed24h: 0, succeeded24h: 0, avgStartLatencyMs: null }
+            : { running: 2, queued: 5, failed24h: 7, succeeded24h: 40, avgStartLatencyMs: 1440 },
+        );
+      }
+
       const one = /\/api\/v1\/jobs\/([^/?]+)$/.exec(url);
       if (one !== null) {
         const job = jobs.find((row) => row.jobId === decodeURIComponent(one[1] ?? ''));
@@ -78,7 +86,7 @@ afterEach(() => {
 });
 
 describe('JobsPage на шаблоні переліку (UI-28)', () => {
-  it('пояснення під заголовком; смуга рахує виконувані, у черзі й провалені', async () => {
+  it('пояснення під заголовком; смуга — лічильники СЕРВЕРА (`GET /jobs/summary`), не перелік', async () => {
     respond();
     show();
 
@@ -89,11 +97,15 @@ describe('JobsPage на шаблоні переліку (UI-28)', () => {
     const value = (label: string): string =>
       within(strip).getByText(label).closest('[data-stat]')?.querySelector('[data-stat-value]')?.textContent ?? '';
 
-    // ⛔ Мутаційний доказ: рахуйте «провалені» за `percent < 100` замість
-    // стану — їх стане 3 (Running і Queued теж не дійшли до 100).
-    expect(value('⟦jobs.statRunning⟧')).toBe('1');
-    expect(value('⟦jobs.statQueued⟧')).toBe('1');
-    expect(value('⟦jobs.statFailed⟧')).toBe('1');
+    // ⛔ Мутаційний доказ: поверніть лічбу по переліку (`all.filter(…)`) —
+    // буде 1/1/1 замість 2/5/7: перелік — лише останні задачі, а «провалені
+    // за добу» з нього не порахувати.
+    expect(value('⟦jobs.statRunning⟧')).toBe('2');
+    expect(value('⟦jobs.statQueued⟧')).toBe('5');
+    expect(value('⟦jobs.statFailed⟧')).toBe('7');
+
+    // Затримка старту — підказкою «у черзі»: 1440 мс → 1.4 с.
+    expect(document.body.innerHTML).toContain('⟦jobs.statLatency (seconds=1.4)⟧');
   });
 
   it('клац по показнику фільтрує перелік і пише стан в адресу', async () => {
@@ -125,6 +137,8 @@ describe('JobsPage на шаблоні переліку (UI-28)', () => {
 
     await waitFor(() => expect(shownIds()).toEqual(['run-1', 'run-2']));
     expect(requested.some((url) => url.endsWith('/api/v1/jobs?mine=true'))).toBe(true);
+    // ⚠ Смуга — тієї ж межі: без права на всю чергу сервер віддає лише власні.
+    expect(requested.some((url) => url.endsWith('/api/v1/jobs/summary?mine=true'))).toBe(true);
     expect((screen.getByRole('checkbox', { name: '⟦jobs.mineOnly⟧' }) as HTMLInputElement).checked).toBe(true);
   });
 
