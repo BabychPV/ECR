@@ -293,6 +293,21 @@ public sealed class ImportDiffBuilder
                     continue;
                 }
 
+                // ⛔ RC5: текст довший за стовпець сховища (`ColumnDef.MaxStringLength`)
+                // — відмова в ПЕРЕГЛЯДІ однією коміркою. Інакше він ставав звичайною
+                // зміною, а застосування відхиляло увесь пакет (422), вже після
+                // погодженого перегляду.
+                if (incoming is string { Length: > ColumnDef.MaxStringLength }
+                    && definition.DataType == CellDataType.String)
+                {
+                    rejected.Add(new ImportRejection(
+                        row.RowKey, column.Code, CellValueReader.TypeMismatch,
+                        $"The text is longer than {ColumnDef.MaxStringLength} characters: storage cannot hold it.",
+                        table.Code, table.NameL10n, ImportMessageKeys.ValueTooLong, excelCell));
+
+                    continue;
+                }
+
                 // ⛔ F-06: тип перевіряє ТОЙ САМИЙ читач, що й запис
                 // (`CellValueReader.Read` у `PatchCellsHandler`). Доти `abc` у
                 // числовій колонці ставав звичайною зміною, Apply був активний, а
@@ -732,6 +747,9 @@ public static class ImportMessageKeys
 
     /// <summary>Число після округлення до <c>Scale</c> не вміщується в <c>Precision</c> колонки (ФВ-9.16b).</summary>
     public const string Precision = "err.ECR-CELL-0422.importPrecision";
+
+    /// <summary>Текст із книги довший за стовпець сховища (<c>ColumnDef.MaxStringLength</c>).</summary>
+    public const string ValueTooLong = "err.ECR-CELL-0422.importValueTooLong";
 
     /// <summary>Екземпляра таблиці з файлу немає в документі за цей період.</summary>
     public const string InstanceMissing = "err.ECR-IMP-0422.importInstanceMissing";

@@ -310,6 +310,13 @@ public sealed class ValidationEngine(IFormulaEngine formulaEngine)
             key = ValidationMessageTemplates.ColumnPrecision;
             parameters["precision"] = Convert.ToString(column.Precision, System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty;
         }
+        // RC5: текст довший за стовпець сховища — відмова з довжиною й межею, а не голий код.
+        else if (value.ValueString is { } text && text.Length > ColumnDef.MaxStringLength)
+        {
+            key = ValidationMessageTemplates.ColumnMaxLength;
+            parameters["maxLength"] = ColumnDef.MaxStringLength.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            parameters["actualLength"] = text.Length.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        }
         else
         {
             return (structuralCode, null, null);

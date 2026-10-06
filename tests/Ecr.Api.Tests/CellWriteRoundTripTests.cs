@@ -463,6 +463,13 @@ public sealed class CellWriteRoundTripTests(SqlServerFixture sql)
         Assert.Equal(textColumn, cell.GetProperty("columnCode").GetString());
         Assert.Equal(rowKey, cell.GetProperty("rowKey").GetString());
 
+        // RC5: клітинка називає причину людською мовою — межу й фактичну
+        // довжину, а не голий код «ECR-CELL-0422».
+        var cellMessage = cell.GetProperty("message").GetString();
+        Assert.NotEqual("ECR-CELL-0422", cellMessage);
+        Assert.Contains("1000", cellMessage, StringComparison.Ordinal);
+        Assert.Contains("1001", cellMessage, StringComparison.Ordinal);
+
         // ⛔ І головне: у базі НІЧОГО. Це те твердження, яке падало до
         // виправлення, — тоді тут лежав огризок на 1000 символів.
         await using (var db = scenario.Builder.CreateContext())

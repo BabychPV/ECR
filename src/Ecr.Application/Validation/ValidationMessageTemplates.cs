@@ -39,6 +39,9 @@ public static class ValidationMessageTemplates
     /// <summary>Значення не вміщується в точність колонки.</summary>
     public const string ColumnPrecision = "validation.column.precision";
 
+    /// <summary>Текст довший за стовпець сховища (<c>ColumnDef.MaxStringLength</c>).</summary>
+    public const string ColumnMaxLength = "validation.column.maxLength";
+
     /// <summary>Вираз правила не розбирається.</summary>
     public const string RuleParseError = "validation.rule.parseError";
 
@@ -71,6 +74,10 @@ public static class ValidationMessageTemplates
             "The value does not fit the precision of column \"{column}\" ({precision} digits).",
             "Значение не помещается в точность колонки «{column}» ({precision} цифр).",
             "Мән «{column}» бағанының дәлдігіне ({precision} сан) сыймайды."),
+        [ColumnMaxLength] = (
+            "The text in column \"{column}\" is longer than {maxLength} characters ({actualLength}).",
+            "Текст в колонке «{column}» длиннее {maxLength} символов ({actualLength}).",
+            "«{column}» бағанындағы мәтін {maxLength} таңбадан ұзын ({actualLength})."),
         [RuleParseError] = (
             "Rule '{rule}' does not parse: {detail}",
             "Правило '{rule}' не разбирается: {detail}",

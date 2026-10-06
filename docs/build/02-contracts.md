@@ -3672,6 +3672,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `err.ECR-CALC-0409.effectiveDateTaken` | 409 | публікація: у методології вже є опублікована версія від цієї дати (ФВ-13.3); подробиці `version`, `effectiveFrom` |
 | `err.ECR-CALC-0409.effectiveDateTakenNoVersion` | 409 | те саме, але виявлене базою (унікальний індекс `UQ_MV_Effective`, аудит L7-08) під час гонки двох публікацій на одну дату; версію-суперника база не називає, подробиця лише `effectiveFrom` |
 | `err.ECR-CELL-0422.importPrecision` | 422 | імпорт `.xlsx`: значення після округлення до `Scale` не вміщується в `Precision` колонки (ФВ-9.16b) |
+| `err.ECR-CELL-0422.importValueTooLong` | 422 | імпорт `.xlsx`: текст довший за стовпець сховища (1000 символів) — відмова в перегляді (RC5); у `PATCH` те саме — `validation.column.maxLength` у `cells[].message` |
 | `err.ECR-CFG-0422.condFormatColor` | 422 | правило умовного форматування: колір не у форматі `#rrggbb` |
 | `err.ECR-CFG-0422.condFormatColumn` | 422 | правило умовного форматування посилається на неіснуючу колонку таблиці |
 | `err.ECR-CFG-0422.condFormatLimit` | 422 | правил умовного форматування більше за ліміт (500) |
