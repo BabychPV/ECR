@@ -504,7 +504,9 @@ export function DataTable<Row>({
                * написане тут, розійшлося б із ним на першій же зміні токена
                * тла.
                */}
-              <Table striped highlightOnHover className="ecr-sticky-head">
+              {/* ⚠ Підсвітка рядка — токен `--ecr-hover`, а не сірий Mantine (`dark-5` = #3b3b3b): на ньому
+                  приглушений другий рядок мав 4.34:1 (живий прогін batch-2-a, дефект 5). */}
+              <Table striped highlightOnHover highlightOnHoverColor="var(--ecr-hover)" className="ecr-sticky-head">
                 {caption !== undefined && <Table.Caption>{caption}</Table.Caption>}
 
                 <Table.Thead>

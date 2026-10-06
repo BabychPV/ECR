@@ -58,6 +58,12 @@
   min-width: 0;
 }
 
+/*
+ * ⚠ Тло чипа й заголовка групи — `--ecr-sunken`, підсвітка задачі — `--ecr-hover`
+ * (макет `screen-document.js`: `.group-h` — `--sunken`, `.issue:hover` — `--hover`).
+ * Раніше — `--mantine-color-default-hover`, у темній це сірий Mantine `#3b3b3b`, і
+ * приглушений текст на ньому мав 4.34:1 (живий прогін batch-2-a, дефект 5).
+ */
 .ecr-insp-chip {
   display: inline-flex;
   align-items: center;
@@ -65,7 +71,7 @@
   padding: 0 var(--mantine-spacing-xs);
   border: 1px solid var(--mantine-color-default-border);
   border-radius: var(--mantine-radius-xs);
-  background: var(--mantine-color-default-hover);
+  background: var(--ecr-sunken);
   font-family: var(--mantine-font-family-monospace);
   font-size: var(--mantine-font-size-xs);
   font-weight: 400;
@@ -104,7 +110,7 @@
   color: var(--mantine-color-dimmed);
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  background: var(--mantine-color-default-hover);
+  background: var(--ecr-sunken);
   border-bottom: 1px solid var(--mantine-color-default-border);
   margin: 0;
 }
@@ -130,7 +136,7 @@
 }
 
 .ecr-insp-issue:not(:disabled):hover {
-  background: var(--mantine-color-default-hover);
+  background: var(--ecr-hover);
 }
 
 .ecr-insp-issue:focus-visible {

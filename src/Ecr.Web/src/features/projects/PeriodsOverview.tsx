@@ -152,10 +152,11 @@ export function PeriodYearTiles({
               aria-label={`${caption}, ${state}. ${note}`}
               onClick={() => onPick(period.periodKey)}
               p="xs"
+              // ⚠ «Ще не відкрито» — пунктирна межа, як у макеті (`.ops-month.notopened`), а не
+              // прозорість: `opacity: 0.75` топила приглушений текст до 3.34:1 (batch-2-a, дефект 5).
               style={{
-                border: `1px solid ${pressed ? 'var(--mantine-primary-color-filled)' : 'var(--mantine-color-default-border)'}`,
+                border: `1px ${period.state === 'Scheduled' ? 'dashed' : 'solid'} ${pressed ? 'var(--mantine-primary-color-filled)' : 'var(--mantine-color-default-border)'}`,
                 borderRadius: 'var(--mantine-radius-sm)',
-                opacity: period.state === 'Scheduled' ? 0.75 : undefined,
               }}
             >
               <Stack gap="xs" align="flex-start">
