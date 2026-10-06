@@ -7,9 +7,7 @@ import {
   Divider,
   Group,
   Modal,
-  Skeleton,
   Stack,
-  Table,
   Text,
   TextInput,
 } from '@mantine/core';
@@ -51,9 +49,8 @@ import {
 import { deleteColumn, saveColumn } from '@/features/templates/columnApi';
 import { emptyColumnDraft, type ColumnDraft } from '@/features/templates/column';
 import { ExistingColumn } from '@/features/templates/ExistingColumn';
-import { ReorderCell, ReorderableRows } from '@/features/templates/ReorderControls';
 import { reorderColumns, reorderRows } from '@/features/templates/reorderApi';
-import { dataTypeLabel, rowKindLabel, rowModeLabel } from '@/features/templates/enumLabels';
+import { rowModeLabel } from '@/features/templates/enumLabels';
 import { getHeaderFields, saveHeaderField } from '@/features/templates/headerFieldApi';
 import {
   emptyHeaderFieldDraft,
@@ -63,7 +60,7 @@ import {
 import { deleteRow, saveRow } from '@/features/templates/rowApi';
 import { emptyRowDraft, rowDraftOf, type RowDefDto, type RowDraft } from '@/features/templates/row';
 import { saveFormula } from '@/features/templates/formulaApi';
-import { draftOfFormula, emptyFormulaDraft, type FormulaDraft } from '@/features/templates/formula';
+import type { FormulaDraft } from '@/features/templates/formula';
 import {
   deleteValidationRule,
   saveValidationRule,
@@ -84,6 +81,10 @@ import { ReasonModal } from '@/shared/ui/ReasonModal';
 import { showApiError, showDone } from '@/shared/ui/notify';
 import { t } from '@/shared/i18n';
 import { usePendingLoading } from '@/features/common/usePendingLoading';
+import { ColumnsTable } from '@/features/templates/ctor/ColumnsTable';
+import { RowsTable } from '@/features/templates/ctor/RowsTable';
+import { HeaderFieldsSection } from '@/features/templates/ctor/HeaderFieldsSection';
+import { columnFormulaDraft, rowFormulaDraft, type TemplateTable } from '@/features/templates/ctor/ctorModel';
 
 /**
  * Редактори, що відкриваються ЛИШЕ дією — за `import()`.
@@ -195,7 +196,6 @@ const PresentationEditor = lazy(async () => ({
 }));
 
 /** Стан форми «правка правила доступу за id». */
-type TemplateTable = TemplateStructureDto['sheets'][number]['tables'][number];
 
 /**
  * Назва таблиці в дереві структури — ОДНА на заповнювач і змонтовану
@@ -950,78 +950,12 @@ export function TemplateVersionPage(): JSX.Element {
        * `structure.data?.isEditable`) забороняє й тут: другого банера немає
        * навмисно, причина заморозки на сторінці вже одна.
        */}
-      <Group justify="space-between" mb="xs" mt="md">
-        <Text fw={600}>{t('headerFields.title')}</Text>
-        {canEditSheets && (
-          <Button
-            variant="default"
-            onClick={() => setHeaderFieldEdit(emptyHeaderFieldDraft(null))}
-          >
-            {t('headerFields.add')}
-          </Button>
-        )}
-      </Group>
-
-      {headerFields.error !== null && (
-        <ErrorAlert error={headerFields.error} onRetry={() => void headerFields.refetch()} />
-      )}
-
-      {headerFields.error === null && headerFields.isPending && (
-        <Skeleton height={80} radius="sm" mb="sm" />
-      )}
-
-      {headerFields.error === null && !headerFields.isPending && (
-        headerFields.data.length === 0 ? (
-          <Text size="sm" c="dimmed" mb="sm">
-            {t('headerFields.empty')}
-          </Text>
-        ) : (
-          <Table striped withTableBorder mb="md">
-            <Table.Thead>
-              <Table.Tr>
-                <Table.Th>{t('headerFields.label')}</Table.Th>
-                <Table.Th>{t('headerFields.dataType')}</Table.Th>
-                <Table.Th />
-              </Table.Tr>
-            </Table.Thead>
-            <Table.Tbody>
-              {[...headerFields.data]
-                .sort((a, b) => a.ordinal - b.ordinal)
-                .map((field) => (
-                  <Table.Tr key={field.id}>
-                    <Table.Td>
-                      {localized(field.labelL10n) || field.code}{' '}
-                      <Text span c="dimmed">
-                        ({field.code})
-                      </Text>
-                    </Table.Td>
-                    <Table.Td>
-                      {dataTypeLabel(field.dataType)}
-                      {field.isRequired && (
-                        <Badge ml="xs" size="xs" variant="light">
-                          {t('headerFields.required')}
-                        </Badge>
-                      )}
-                    </Table.Td>
-                    <Table.Td>
-                      {canEditSheets && (
-                        <Group gap="xs" wrap="nowrap" justify="flex-end">
-                          <Button
-                            size="xs"
-                            variant="subtle"
-                            onClick={() => setHeaderFieldEdit(headerFieldDraftOf(field))}
-                          >
-                            {t('headerFields.edit')}
-                          </Button>
-                        </Group>
-                      )}
-                    </Table.Td>
-                  </Table.Tr>
-                ))}
-            </Table.Tbody>
-          </Table>
-        )
-      )}
+      <HeaderFieldsSection
+        fields={headerFields}
+        canEdit={canEditSheets}
+        onAdd={() => setHeaderFieldEdit(emptyHeaderFieldDraft(null))}
+        onEdit={(field) => setHeaderFieldEdit(headerFieldDraftOf(field))}
+      />
 
       {/*
        * ⚠ Версія без аркушів — окремий стан: опублікувати таку не можна, і
@@ -1217,285 +1151,64 @@ export function TemplateVersionPage(): JSX.Element {
                                 </Group>
                               )}
                             </Group>
-                            <Table striped withTableBorder mt="xs">
-                              <Table.Thead>
-                                <Table.Tr>
-                                  {can(session.data, 'Template.Edit') && (
-                                    <Table.Th>{t('reorder.column')}</Table.Th>
-                                  )}
-                                  <Table.Th>{t('version.column')}</Table.Th>
-                                  <Table.Th>{t('version.type')}</Table.Th>
-                                  <Table.Th>{t('version.unit')}</Table.Th>
-                                  <Table.Th />
-                                </Table.Tr>
-                              </Table.Thead>
-                              <Table.Tbody>
-                                <ReorderableRows
-                                  items={table.columns}
-                                  enabled={can(session.data, 'Template.Edit') && !reorderColumnsMutation.isPending}
-                                  onMove={(from, to) =>
-                                    reorderColumnsMutation.mutate({ columns: table.columns, from, to })
-                                  }
-                                >
-                                {(column, index, drag) => (
-                                  <Table.Tr key={column.id} {...drag.targetProps(index)}>
-                                    {can(session.data, 'Template.Edit') && (
-                                      <Table.Td>
-                                        <ReorderCell
-                                          index={index}
-                                          count={table.columns.length}
-                                          name={localized(column.headerL10n) || column.code}
-                                          disabled={reorderColumnsMutation.isPending}
-                                          onMove={(from, to) =>
-                                            reorderColumnsMutation.mutate({ columns: table.columns, from, to })
-                                          }
-                                          drag={drag}
-                                        />
-                                      </Table.Td>
-                                    )}
-                                    <Table.Td>
-                                      {localized(column.headerL10n) || column.code}{' '}
-                                      <Text span c="dimmed">
-                                        ({column.code})
-                                      </Text>
-                                      {column.isHidden && (
-                                        <Badge ml="xs" size="xs" variant="outline">
-                                          {t('version.hidden')}
-                                        </Badge>
-                                      )}
-                                    </Table.Td>
-                                    <Table.Td>
-                                      {dataTypeLabel(column.dataType)}
-                                      {column.isReadOnly && (
-                                        <Badge ml="xs" size="xs" variant="light">
-                                          {t('version.readOnly')}
-                                        </Badge>
-                                      )}
-                                    </Table.Td>
-                                    <Table.Td>{column.unitSymbol ?? '—'}</Table.Td>
-                                    <Table.Td>
-                                      <Group gap="xs" wrap="nowrap" justify="flex-end">
-                                        <Button
-                                          size="xs"
-                                          variant="subtle"
-                                          data-column-usage="trigger"
-                                          onClick={() => setColumnUsageFor(column.id)}
-                                        >
-                                          {t('registries.tabUsage')}
-                                        </Button>
-                                        {/* ⚠ Правка тут не потребує нової версії: підпис,
-                                            порядок, формат і видимість — презентаційний
-                                            шар, і його дозволено міняти в опублікованій
-                                            версії (`ФВ-7.2`). */}
-                                        {can(session.data, 'Template.Edit') && (
-                                          <Button
-                                            size="xs"
-                                            variant="subtle"
-                                            onClick={() => {
-                                              setPresentationUsed(true);
-                                              setEditing(column);
-                                            }}
-                                          >
-                                            {t('version.presentation')}
-                                          </Button>
-                                        )}
-                                        {canEditSheets && (
-                                          <>
-                                            <Button
-                                              size="xs"
-                                              variant="subtle"
-                                              onClick={() =>
-                                                setColumnEdit({ tableId: table.id, code: column.code, draft: null })
-                                              }
-                                            >
-                                              {t('columns.edit')}
-                                            </Button>
-                                            <Button
-                                              size="xs"
-                                              variant="subtle"
-                                              color="statusError"
-                                              loading={
-                                                deleteColumnMutation.isPending
-                                                && deleteColumnMutation.variables?.code === column.code
-                                              }
-                                              onClick={() =>
-                                                setPendingDelete({
-                                                  kind: 'column',
-                                                  tableId: table.id,
-                                                  code: column.code,
-                                                  name: localized(column.headerL10n) || column.code,
-                                                })
-                                              }
-                                            >
-                                              {t('columns.delete')}
-                                            </Button>
-                                            <Button
-                                              size="xs"
-                                              variant="subtle"
-                                              onClick={() =>
-                                                setFormulaDraft(
-                                                  // ⛔ Дефект 2026-09-23: раніше тут завжди був
-                                                  // emptyFormulaDraft — повторне відкриття на
-                                                  // колонці зі збереженою формулою показувало
-                                                  // порожній редактор, хоча PUT зберігав вираз
-                                                  // (структура тепер несе його — GET …/structure).
-                                                  column.formulaExpression !== null
-                                                    ? draftOfFormula(table.id, 'Column', String(column.id), {
-                                                        dialect: column.formulaDialect ?? 'Template',
-                                                        expression: column.formulaExpression,
-                                                      })
-                                                    : emptyFormulaDraft(table.id, 'Column', String(column.id)),
-                                                )
-                                              }
-                                            >
-                                              {t('formulas.edit')}
-                                            </Button>
-                                          </>
-                                        )}
-                                      </Group>
-                                    </Table.Td>
-                                  </Table.Tr>
-                                )}
-                                </ReorderableRows>
-                              </Table.Tbody>
-                            </Table>
+                            <ColumnsTable
+                              table={table}
+                              canEditPresentation={can(session.data, 'Template.Edit')}
+                              canEditStructure={canEditSheets}
+                              reorderPending={reorderColumnsMutation.isPending}
+                              deletingCode={
+                                deleteColumnMutation.isPending ? (deleteColumnMutation.variables?.code ?? null) : null
+                              }
+                              onReorder={(from, to) =>
+                                reorderColumnsMutation.mutate({ columns: table.columns, from, to })
+                              }
+                              onUsage={(column) => setColumnUsageFor(column.id)}
+                              onPresentation={(column) => {
+                                setPresentationUsed(true);
+                                setEditing(column);
+                              }}
+                              onEdit={(column) => setColumnEdit({ tableId: table.id, code: column.code, draft: null })}
+                              onDelete={(column) =>
+                                setPendingDelete({
+                                  kind: 'column',
+                                  tableId: table.id,
+                                  code: column.code,
+                                  name: localized(column.headerL10n) || column.code,
+                                })
+                              }
+                              onFormula={(column) => setFormulaDraft(columnFormulaDraft(table.id, column))}
+                            />
 
                             {/* ⚠ Рядки фіксованої таблиці. Динамічна (`RowMode.Dynamic`)
                                 не показує тут нічого й додати рядок не дає:
                                 домен (`TableDef.AddRow`) відхиляє їх шаблоном,
                                 вони з'являються під час роботи, а не тут. */}
                             {table.rowMode !== 'Dynamic' && (
-                              <>
-                                <Group justify="space-between" mt="sm">
-                                  <Text fw={600} size="sm" c="dimmed">
-                                    {t('rows.title')}
-                                  </Text>
-                                  {canEditSheets && (
-                                    <Button
-                                      size="xs"
-                                      variant="default"
-                                      onClick={() =>
-                                        setRowEdit({ tableId: table.id, draft: emptyRowDraft(nextRowOrdinal) })
-                                      }
-                                    >
-                                      {t('rows.add')}
-                                    </Button>
-                                  )}
-                                </Group>
-
-                                {table.rows.length === 0 ? (
-                                  <Text size="sm" c="dimmed">
-                                    {t('rows.empty')}
-                                  </Text>
-                                ) : (
-                                  <Table striped withTableBorder mt="xs">
-                                    <Table.Thead>
-                                      <Table.Tr>
-                                        {canEditSheets && <Table.Th>{t('reorder.column')}</Table.Th>}
-                                        <Table.Th>{t('rows.label')}</Table.Th>
-                                        <Table.Th>{t('rows.rowKind')}</Table.Th>
-                                        <Table.Th />
-                                      </Table.Tr>
-                                    </Table.Thead>
-                                    <Table.Tbody>
-                                      {/* AN-15: порядок рядків — `RowDef.Ordinal` через
-                                          `PATCH …/presentation` (`reorder.ts`). */}
-                                      <ReorderableRows
-                                        items={table.rows}
-                                        enabled={canEditSheets && !reorderRowsMutation.isPending}
-                                        onMove={(from, to) =>
-                                          reorderRowsMutation.mutate({ rows: table.rows, from, to })
-                                        }
-                                      >
-                                      {(row, index, drag) => (
-                                        <Table.Tr key={row.rowKey} {...drag.targetProps(index)}>
-                                          {canEditSheets && (
-                                            <Table.Td>
-                                              <ReorderCell
-                                                index={index}
-                                                count={table.rows.length}
-                                                name={row.label ?? row.rowKey}
-                                                disabled={reorderRowsMutation.isPending}
-                                                onMove={(from, to) =>
-                                                  reorderRowsMutation.mutate({ rows: table.rows, from, to })
-                                                }
-                                                drag={drag}
-                                              />
-                                            </Table.Td>
-                                          )}
-                                          <Table.Td>
-                                            {row.label ?? row.rowKey}{' '}
-                                            <Text span c="dimmed">
-                                              ({row.rowKey})
-                                            </Text>
-                                          </Table.Td>
-                                          <Table.Td>{rowKindLabel(row.rowKind)}</Table.Td>
-                                          <Table.Td>
-                                            {canEditSheets && (
-                                              <Group gap="xs" wrap="nowrap" justify="flex-end">
-                                                <Button
-                                                  size="xs"
-                                                  variant="subtle"
-                                                  onClick={() =>
-                                                    setRowEdit({
-                                                      tableId: table.id,
-                                                      draft: rowDraftOf(
-                                                        row,
-                                                        savedRows[`${String(table.id)}:${row.rowKey}`],
-                                                      ),
-                                                    })
-                                                  }
-                                                >
-                                                  {t('rows.edit')}
-                                                </Button>
-                                                <Button
-                                                  size="xs"
-                                                  variant="subtle"
-                                                  color="statusError"
-                                                  loading={
-                                                    deleteRowMutation.isPending
-                                                    && deleteRowMutation.variables?.rowKey === row.rowKey
-                                                  }
-                                                  onClick={() =>
-                                                    setPendingDelete({
-                                                      kind: 'row',
-                                                      tableId: table.id,
-                                                      rowKey: row.rowKey,
-                                                      name: row.label ?? row.rowKey,
-                                                    })
-                                                  }
-                                                >
-                                                  {t('rows.delete')}
-                                                </Button>
-                                                <Button
-                                                  size="xs"
-                                                  variant="subtle"
-                                                  onClick={() =>
-                                                    setFormulaDraft(
-                                                      // ⛔ Той самий фікс, що й на колонці вище
-                                                      // (2026-09-23): порожній редактор на
-                                                      // рядку зі збереженою формулою.
-                                                      row.formulaExpression !== null
-                                                        ? draftOfFormula(table.id, 'Row', row.rowKey, {
-                                                            dialect: row.formulaDialect ?? 'Template',
-                                                            expression: row.formulaExpression,
-                                                          })
-                                                        : emptyFormulaDraft(table.id, 'Row', row.rowKey),
-                                                    )
-                                                  }
-                                                >
-                                                  {t('formulas.edit')}
-                                                </Button>
-                                              </Group>
-                                            )}
-                                          </Table.Td>
-                                        </Table.Tr>
-                                      )}
-                                      </ReorderableRows>
-                                    </Table.Tbody>
-                                  </Table>
-                                )}
-                              </>
+                              <RowsTable
+                                table={table}
+                                canEditStructure={canEditSheets}
+                                reorderPending={reorderRowsMutation.isPending}
+                                deletingRowKey={
+                                  deleteRowMutation.isPending ? (deleteRowMutation.variables?.rowKey ?? null) : null
+                                }
+                                onReorder={(from, to) => reorderRowsMutation.mutate({ rows: table.rows, from, to })}
+                                onAdd={() => setRowEdit({ tableId: table.id, draft: emptyRowDraft(nextRowOrdinal) })}
+                                onEdit={(row) =>
+                                  setRowEdit({
+                                    tableId: table.id,
+                                    draft: rowDraftOf(row, savedRows[`${String(table.id)}:${row.rowKey}`]),
+                                  })
+                                }
+                                onDelete={(row) =>
+                                  setPendingDelete({
+                                    kind: 'row',
+                                    tableId: table.id,
+                                    rowKey: row.rowKey,
+                                    name: row.label ?? row.rowKey,
+                                  })
+                                }
+                                onFormula={(row) => setFormulaDraft(rowFormulaDraft(table.id, row))}
+                              />
                             )}
                           </>
                         );
