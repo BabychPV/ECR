@@ -219,7 +219,7 @@ export function NewVersionBanner({
           </Text>
         )}
         {save !== 'saving' && (
-          <Button size="xs" onClick={() => window.location.reload()}>
+          <Button onClick={() => window.location.reload()}>
             Reload page
           </Button>
         )}

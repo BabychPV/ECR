@@ -169,7 +169,6 @@ export default function SnapshotRowsModal(props: {
       {pages.hasNextPage && (
         <Group justify="center" mt="md">
           <Button
-            size="xs"
             variant="default"
             loading={pages.isFetchingNextPage}
             onClick={() => void pages.fetchNextPage()}

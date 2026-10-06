@@ -131,7 +131,6 @@ export function Banner({
             {actions.map((action) => (
               <Button
                 key={action.label}
-                size="xs"
                 variant={action.variant ?? 'default'}
                 onClick={action.onClick}
               >

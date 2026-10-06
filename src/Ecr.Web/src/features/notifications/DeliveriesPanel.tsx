@@ -174,7 +174,6 @@ export function DeliveriesPanel(): JSX.Element {
           {pages.hasNextPage && (
             <Group justify="center" mt="md">
               <Button
-                size="xs"
                 variant="default"
                 loading={pages.isFetchingNextPage}
                 onClick={() => void pages.fetchNextPage()}

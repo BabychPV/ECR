@@ -64,7 +64,7 @@ export function UserMenu({
          * на який можна перейти табом і натиснути пробілом (`ФВ-14.19`), а
          * читалці — роль, що обіцяє дію.
          */}
-        <Button variant="subtle" size="compact-sm">
+        <Button variant="subtle" size="xs">
           <span className="ecr-ellipsis">{userName}</span>
         </Button>
       </Menu.Target>

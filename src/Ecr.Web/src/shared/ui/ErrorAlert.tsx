@@ -97,7 +97,7 @@ export function ErrorAlert({
             саме так він і зробить. */}
         {onRetry !== undefined && (
           <Group gap="xs">
-            <Button size="xs" variant="default" onClick={onRetry}>
+            <Button variant="default" onClick={onRetry}>
               {t('common.retry')}
             </Button>
           </Group>

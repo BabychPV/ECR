@@ -111,7 +111,7 @@ export function RegistryExternalKeysPanel({
                   )}
                 </Table.Td>
                 <Table.Td>
-                  <Button size="xs" variant="subtle" color="statusError" onClick={() => setRemoving(link)}>
+                  <Button variant="subtle" color="statusError" onClick={() => setRemoving(link)}>
                     {t('registries.externalKeyRemove')}
                   </Button>
                 </Table.Td>

@@ -93,7 +93,7 @@ export function SourceEventMapsPanel({
       <Group justify="space-between">
         <Title order={4}>{t('sourceEvents.mapsTitle')}</Title>
         {canManage && (
-          <Button size="xs" onClick={onCreate} data-source-event-map-create="">
+          <Button onClick={onCreate} data-source-event-map-create="">
             {t('sourceEvents.mapCreate')}
           </Button>
         )}
@@ -142,7 +142,6 @@ export function SourceEventMapsPanel({
                     <Table.Td>
                       <Group gap="xs" wrap="nowrap">
                         <Button
-                          size="xs"
                           variant="default"
                           aria-label={`${t('sourceEvents.mapEdit')}: ${documentName}`}
                           onClick={() => onEdit(map)}
@@ -151,7 +150,6 @@ export function SourceEventMapsPanel({
                           {t('sourceEvents.mapEdit')}
                         </Button>
                         <Button
-                          size="xs"
                           variant="default"
                           loading={toggle.isPending && toggle.variables.id === map.id}
                           aria-label={`${map.isActive ? t('sourceEvents.mapPause') : t('sourceEvents.mapResume')}: ${documentName}`}
@@ -164,7 +162,6 @@ export function SourceEventMapsPanel({
                           {map.isActive ? t('sourceEvents.mapPause') : t('sourceEvents.mapResume')}
                         </Button>
                         <Button
-                          size="xs"
                           variant="subtle"
                           color="statusError"
                           aria-label={`${t('sourceEvents.mapDelete')}: ${documentName}`}

@@ -185,7 +185,6 @@ export function JobRetry({
 
   return (
     <Button
-      size="xs"
       variant="default"
       loading={restart.isPending}
       onClick={() => restart.mutate(jobId)}

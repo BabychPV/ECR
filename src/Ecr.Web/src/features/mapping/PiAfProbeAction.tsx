@@ -69,7 +69,7 @@ export function PiAfProbeAction({
 
   return (
     <Stack gap="xs" align="flex-start">
-      <Button size="xs" variant="default" disabled={trimmed.length === 0} loading={probe.isPending} onClick={run}>
+      <Button variant="default" disabled={trimmed.length === 0} loading={probe.isPending} onClick={run}>
         {t('mapping.probeAction')}
       </Button>
 
@@ -87,7 +87,7 @@ export function PiAfProbeAction({
 
             {problemText(failure).detail !== null && <Text size="sm">{problemText(failure).detail}</Text>}
 
-            <Button size="xs" variant="default" onClick={run}>
+            <Button variant="default" onClick={run}>
               {t('common.retry')}
             </Button>
           </Stack>

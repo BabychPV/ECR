@@ -749,7 +749,6 @@ export function PeriodsPage(): JSX.Element {
 
             {manages && (
               <Button
-                size="xs"
                 onClick={() => {
                   createFocus.remember();
                   setCreating(true);
@@ -776,7 +775,6 @@ export function PeriodsPage(): JSX.Element {
                 і йшла одним кліком. Тепер — через підтвердження нижче. */}
             {selected?.status === 'Draft' && managesProject && (
               <Button
-                size="xs"
                 loading={activate.isPending}
                 onClick={() => setConfirming('activate')}
               >
@@ -789,13 +787,13 @@ export function PeriodsPage(): JSX.Element {
                 насправді через `Project.ChangeTimeZone`, кнопка — лише
                 видимий проксі. */}
             {selected?.status === 'Draft' && managesProject && (
-              <Button size="xs" variant="default" onClick={() => setChangingTimeZone(true)}>
+              <Button variant="default" onClick={() => setChangingTimeZone(true)}>
                 {t('periods.timezoneChange')}
               </Button>
             )}
 
             {selected !== undefined && managesProject && (
-              <Button size="xs" variant="default" onClick={() => setCloning(true)}>
+              <Button variant="default" onClick={() => setCloning(true)}>
                 {t('periods.clone')}
               </Button>
             )}
@@ -805,7 +803,6 @@ export function PeriodsPage(): JSX.Element {
                 жодного документа, який можна було б перерахувати. */}
             {selected?.status === 'Active' && recalculates && (
               <Button
-                size="xs"
                 variant="default"
                 loading={recalculate.isPending || recalcRunning}
                 onClick={() => setConfirming('recalculate')}
@@ -832,7 +829,6 @@ export function PeriodsPage(): JSX.Element {
                 кнопку вторинною, але червоною. */}
             {selected?.status === 'Active' && managesProject && (
               <Button
-                size="xs"
                 variant="outline"
                 color="statusError"
                 loading={archive.isPending}
@@ -1039,7 +1035,7 @@ export function PeriodsPage(): JSX.Element {
 
                     {period.state === 'Closed' && reopens && (
                       <Button
-                        size="compact-xs"
+                        size="xs"
                         variant="subtle"
                         onClick={() => openReopen(period.id)}
                       >
@@ -1049,7 +1045,7 @@ export function PeriodsPage(): JSX.Element {
 
                     {!period.isCurrent && configures && (
                       <Button
-                        size="compact-xs"
+                        size="xs"
                         variant="subtle"
                         onClick={() => setPinning(period.id)}
                       >

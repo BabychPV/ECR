@@ -398,7 +398,7 @@ export function CompositionPanel({
                           reason={selectionLocked === true && !selected ? t('registries.rc816.selectionLocked') : null}
                         >
                           <Button
-                            size="compact-xs"
+                            size="xs"
                             variant={selected ? 'light' : 'subtle'}
                             aria-pressed={selected}
                             onClick={() => onSelect(row.id as number, row.display || row.code)}
@@ -426,7 +426,7 @@ export function CompositionPanel({
                     <Table.Td>
                       {!locked && (
                         <Button
-                          size="compact-xs"
+                          size="xs"
                           variant="subtle"
                           color={row.deleted ? 'gray' : 'statusError'}
                           disabled={busy}
@@ -445,7 +445,7 @@ export function CompositionPanel({
       )}
 
       {rowsQuery.hasNextPage && (
-        <Button size="xs" variant="default" disabled={rowsQuery.isFetchingNextPage} onClick={() => void rowsQuery.fetchNextPage()}>
+        <Button variant="default" disabled={rowsQuery.isFetchingNextPage} onClick={() => void rowsQuery.fetchNextPage()}>
           {t('registries.rc816.more')}
         </Button>
       )}
@@ -473,7 +473,6 @@ export function CompositionPanel({
       {!locked && (
         <Group gap="xs">
           <Button
-            size="xs"
             variant="default"
             disabled={busy}
             onClick={() => {
@@ -489,15 +488,14 @@ export function CompositionPanel({
           >
             {isPart ? t('registries.rc816.addPart') : t('registries.rc816.addRow')}
           </Button>
-          <Button size="xs" variant="default" disabled={dirty === 0 || busy} onClick={() => void submit(true)}>
+          <Button variant="default" disabled={dirty === 0 || busy} onClick={() => void submit(true)}>
             {t('registries.rc816.check')}
           </Button>
-          <Button size="xs" disabled={dirty === 0 || busy} loading={busy} onClick={() => void submit(false)}>
+          <Button disabled={dirty === 0 || busy} loading={busy} onClick={() => void submit(false)}>
             {t('registries.rc816.save', { count: dirty })}
           </Button>
           {dirty > 0 && (
             <Button
-              size="xs"
               variant="subtle"
               disabled={busy}
               onClick={() => {

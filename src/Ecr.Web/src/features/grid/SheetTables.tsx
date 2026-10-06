@@ -382,7 +382,6 @@ export function LazyTablePlaceholder({
       </Text>
       {onLoad !== undefined && (
         <Button
-          size="xs"
           variant="default"
           pos="absolute"
           top="calc(var(--mantine-spacing-md) + 2rem)"
