@@ -267,6 +267,9 @@ export const surfaces = {
     muted: '#5b6175',
     faint: '#7d8496',
     accentSoft: '#e7e8f8',
+    // Тло бейджа «увага» / «проблема» (`UI-27`, макет `--warning-soft`/`--danger-soft`, значення дослівно).
+    warningSoft: '#fbf2dc',
+    dangerSoft: '#fceae8',
     select: '#eeeffb',
     hover: '#f1f2f7',
     calcBg: '#f3f4f8',
@@ -284,6 +287,8 @@ export const surfaces = {
     muted: '#9aa1b5',
     faint: '#727a92',
     accentSoft: '#272b55',
+    warningSoft: '#2d2610',
+    dangerSoft: '#36191a',
     select: '#22264a',
     hover: '#202432',
     calcBg: '#1e2230',
