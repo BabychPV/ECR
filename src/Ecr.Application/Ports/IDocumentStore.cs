@@ -78,7 +78,14 @@ public sealed record DocumentSheetState(string Code, LocalizedText NameL10n, str
 /// (<c>aud.CellChange.IsLateEdit = 1</c>, <c>D-70</c>), що обчислює позначку в
 /// рядку (<c>BE-09b</c>) — не друге визначення «пізньої правки».
 /// </param>
-public readonly record struct DocumentListFilter(DocumentStatus? State, int? MineUserId, bool? HasLateEdits = null);
+/// <param name="Query">
+/// Пошук (UI-18): підрядок у коді (<c>BusinessKey</c>) або назві документа, без
+/// урахування регістру; <c>null</c> — без пошуку. Шукає ЛИШЕ по полях самого
+/// документа — не по аркушах і таблицях, тож не розкриває прихованого. Метасимволи
+/// <c>LIKE</c> екранує сховище; довжину й порожнечу нормалізує обробник.
+/// </param>
+public readonly record struct DocumentListFilter(
+    DocumentStatus? State, int? MineUserId, bool? HasLateEdits = null, string? Query = null);
 
 /// <summary>Порушення правила складу документа.</summary>
 /// <param name="SheetGroup">Група аркушів.</param>
