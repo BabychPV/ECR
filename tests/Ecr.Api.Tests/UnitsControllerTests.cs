@@ -76,6 +76,45 @@ public sealed class UnitsControllerTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Перелік_одиниць_несе_позначення_назву_і_ознаку_базової()
+    {
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, "Uom.EditCatalog").ConfigureAwait(true);
+
+        var response = await client.GetAsync(new Uri("/api/v1/units", UriKind.Relative))
+            .ConfigureAwait(true);
+
+        Assert.True(response.IsSuccessStatusCode, $"{response.StatusCode}: {app.ErrorsText}");
+
+        var units = JsonDocument.Parse(await response.Content.ReadAsStringAsync().ConfigureAwait(true))
+            .RootElement;
+
+        static JsonElement Unit(JsonElement all, string code)
+            => all.EnumerateArray().Single(u => string.Equals(u.GetProperty("code").GetString(), code, StringComparison.Ordinal));
+
+        // UI-21: без цих полів колонки «Unit» і «Base unit» потребували б N+1 по `GET /units/{id}`.
+        var kilogram = Unit(units, "kg");
+        Assert.True(kilogram.GetProperty("isBase").GetBoolean());
+        Assert.Equal(JsonValueKind.Object, kilogram.GetProperty("symbolL10n").ValueKind);
+        Assert.NotEmpty(kilogram.GetProperty("symbolL10n").EnumerateObject());
+        Assert.Equal(JsonValueKind.Object, kilogram.GetProperty("nameL10n").ValueKind);
+        Assert.NotEmpty(kilogram.GetProperty("nameL10n").EnumerateObject());
+
+        // Похідна одиниця тієї ж розмірності — не базова: значення читається з рядка, а не стала.
+        Assert.False(Unit(units, "t").GetProperty("isBase").GetBoolean());
+
+        // Позначення збігається з тим, що віддає картка одиниці: джерело одне.
+        var id = kilogram.GetProperty("id").GetInt32();
+        var detail = await client.GetAsync(new Uri($"/api/v1/units/{id}", UriKind.Relative)).ConfigureAwait(true);
+        var detailJson = JsonDocument.Parse(await detail.Content.ReadAsStringAsync().ConfigureAwait(true)).RootElement;
+        Assert.Equal(
+            detailJson.GetProperty("symbolL10n").GetRawText(),
+            kilogram.GetProperty("symbolL10n").GetRawText());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
     public async Task Створення_одиниці_віддає_201_Created_а_не_200_OK()
     {
         // ⚠ Аудит 2026-09-16, §9. Усі решта створювальних маршрутів API
