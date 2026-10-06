@@ -7,9 +7,11 @@ import { routes } from '@/app/routes';
 import { usePendingLoading } from '@/features/common/usePendingLoading';
 import { useCancelJob, useRecentJobs } from '@/features/jobs/api';
 import { useJobStatus } from '@/features/jobs/useJobStatus';
+import { useJobsSummary } from '@/features/jobs/useJobsSummary';
 import { JobAttempt, JobResultLink, JobRetry, jobAuthor } from '@/features/jobs/JobFacts';
 import { badgeStateOf } from '@/features/workflow/jobFollow';
 import { humanizeJobId, jobKindLabel, rawJobId } from '@/features/workflow/jobLabel';
+import { formatDecimal } from '@/shared/format';
 import { t } from '@/shared/i18n';
 import { DataTable, type DataTableColumn } from '@/shared/ui/DataTable';
 import { useDetailPanel } from '@/shared/ui/DetailDrawer';
@@ -139,6 +141,7 @@ export function JobsPage(): JSX.Element {
 
     setConfirming(null);
     void queryClient.invalidateQueries({ queryKey: ['jobs'] });
+    void queryClient.invalidateQueries({ queryKey: ['jobs-summary'] });
 
     if (cancelled !== null) {
       void queryClient.invalidateQueries({ queryKey: ['job', cancelled.jobId] });
@@ -149,33 +152,32 @@ export function JobsPage(): JSX.Element {
   const cancelLoading = usePendingLoading(cancel.isPending);
 
   /*
-   * ⛔ Смуга рахує ЗАВАНТАЖЕНИЙ перелік останніх задач — і так і підписана
-   * (підказка `jobs.statsHint`). Сервер віддає журнал останніх, а не всю
-   * чергу з підсумками; «провалені за 24 год» макета потребують агрегату, якого
-   * немає (TODO-контракт у листі готовності). Число з нулем — дані, а не
-   * порожнеча (`StatStrip`).
+   * ⛔ Смуга — з `GET /jobs/summary` (LS-F), а не з переліку: перелік — лише
+   * останні задачі, і лічба по ньому видавала б себе за стан усієї черги.
+   * «failed in 24 h» з переліку не порахувати взагалі. Поки лічильників немає
+   * (або відмова) — смуги немає (`D15-06`), а не нулі.
+   *
+   * ⚠ Середня затримка старту — підказкою «у черзі», а не четвертим числом:
+   * показник смуги — ціле число, а секунди з десятими в ньому збрехали б
+   * округленням. `null` (за добу не стартувало нічого) — підказки немає.
    */
+  const counters = useJobsSummary(mineOnly).data;
+  const latency = counters?.avgStartLatencyMs;
   const stats: StatStripItems | undefined =
-    all === undefined
+    counters === undefined || counters === null
       ? undefined
       : ([
-          {
-            id: 'Running',
-            label: t('jobs.statRunning'),
-            value: all.filter((job) => job.state === 'Running').length,
-          },
+          { id: 'Running', label: t('jobs.statRunning'), value: counters.running },
           {
             id: 'Queued',
             label: t('jobs.statQueued'),
-            value: all.filter((job) => job.state === 'Queued').length,
+            value: counters.queued,
+            hint:
+              latency === null || latency === undefined
+                ? undefined
+                : t('jobs.statLatency', { seconds: formatDecimal(String(Math.round(latency / 100) / 10)) ?? '' }),
           },
-          {
-            id: 'Failed',
-            label: t('jobs.statFailed'),
-            tone: 'danger',
-            hint: t('jobs.statsHint'),
-            value: all.filter((job) => job.state === 'Failed').length,
-          },
+          { id: 'Failed', label: t('jobs.statFailed'), tone: 'danger', value: counters.failed24h },
         ] satisfies readonly [StatItem, StatItem, StatItem]);
 
   // ⚠ Типи — лише ті, що є в переліку: варіант, який нічого не покаже, — шум.
@@ -393,6 +395,7 @@ export function JobsPage(): JSX.Element {
                       hasViewHealth
                       onRestarted={() => {
                         void queryClient.invalidateQueries({ queryKey: ['jobs'] });
+                        void queryClient.invalidateQueries({ queryKey: ['jobs-summary'] });
                         void queryClient.invalidateQueries({ queryKey: ['job', panel] });
                       }}
                     />
