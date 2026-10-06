@@ -3,6 +3,7 @@ import { Alert, Anchor, Badge, Group, Stack, Table, Text } from '@mantine/core';
 import type { ValidationFindingDto } from '@/api/types';
 import { t } from '@/shared/i18n';
 import { StatusBadge } from '@/shared/ui/StatusBadge';
+import { ruleLabel } from './ruleLabel';
 
 /** Що показувати в панелі зауважень. */
 interface ValidationPanelProps {
@@ -122,7 +123,7 @@ export function ValidationPanel({ messages, onSelect, canSelect }: ValidationPan
                 </Table.Td>
                 <Table.Td>{message.rowKey ?? '—'}</Table.Td>
                 <Table.Td>{message.columnCode ?? '—'}</Table.Td>
-                <Table.Td>{message.ruleCode}</Table.Td>
+                <Table.Td title={message.ruleCode}>{ruleLabel(message.ruleCode)}</Table.Td>
                 <Table.Td>
                   {onSelect === undefined || canSelect?.(message) === false ? (
                     message.message
