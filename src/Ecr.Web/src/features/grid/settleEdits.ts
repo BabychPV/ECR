@@ -180,3 +180,19 @@ export function useSettledAction(busy = false): {
 
   return { settling, run };
 }
+
+/**
+ * ✎ UI-14: показує першу утриману (відхилену сервером) правку — посилання
+ * «Show» у стані збереження над сітками. Повтор збереження лишається кнопкою
+ * сітки «Retry save» (`DocumentGrid.tsx`), тут лише перехід до неї.
+ *
+ * @returns Чи було що показати.
+ */
+export function revealFirstHeldEdit(): boolean {
+  const held = heldEditLookup?.() ?? null;
+  if (held === null || revealer === null) return false;
+
+  revealer(held);
+
+  return true;
+}
