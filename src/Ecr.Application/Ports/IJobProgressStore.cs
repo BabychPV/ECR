@@ -127,6 +127,21 @@ public interface IJobProgressStore
         JobListFilter filter, int limit, CancellationToken ct);
 
     /// <summary>
+    /// Лічильники черги для смуги показників екрана «Jobs»: активні й підсумок за добу.
+    /// </summary>
+    /// <param name="createdByUserId">
+    /// Автор; <c>null</c> — задачі всіх авторів. Береться лише з <c>ICurrentUser</c>
+    /// в обробнику (див. <see cref="JobListFilter.CreatedByUserId"/>).
+    /// </param>
+    /// <param name="utcNow">Момент відліку «за добу» в UTC.</param>
+    /// <param name="ct">Скасування.</param>
+    /// <remarks>
+    /// ⚠ Один агрегат у запиті, без читання рядків: перелік «останні 50» цих чисел
+    /// чесно не дає.
+    /// </remarks>
+    public Task<JobsSummary> SummarizeAsync(int? createdByUserId, DateTime utcNow, CancellationToken ct);
+
+    /// <summary>
     /// Підтверджує, що задача досі виконується цим процесом.
     /// </summary>
     /// <param name="jobId">Ідентифікатор задачі.</param>

@@ -3953,6 +3953,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `GET` | `/api/v1/health/partitions/script` | `System.ViewHealth` | 5 |
 | `GET` | `/api/v1/jobs` | `System.ViewHealth` | 5 |
 | `GET` | `/api/v1/jobs?mine=true` | — (власні задачі) | 5 |
+| `GET` | `/api/v1/jobs/summary` | `System.ViewHealth` (або `mine=true` — власні задачі) | 5 |
 | `GET` | `/api/v1/jobs/{jobId}` | `System.ViewHealth` | 5 |
 | `POST` | `/api/v1/jobs/{jobId}/restart` | `System.ViewHealth` | 5 |
 | `POST` | `/api/v1/jobs/{jobId}/cancel` | `System.ViewHealth` | 5 |
