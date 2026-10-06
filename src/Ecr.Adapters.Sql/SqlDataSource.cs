@@ -6,6 +6,8 @@ using Ecr.Application.Integration;
 using Ecr.Application.Ports;
 using Ecr.Domain.Enums;
 using Microsoft.Data.SqlClient;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Ecr.Adapters.Sql;
 
@@ -43,10 +45,14 @@ namespace Ecr.Adapters.Sql;
 /// <param name="store">Читання конфігурації джерела.</param>
 /// <param name="secrets">Значення секрету за іменем (ФВ-6.11).</param>
 /// <param name="settings">Канал налаштувань: тексти запитів.</param>
-public sealed class SqlDataSource(
-    ICollectionStore store, ISecretProvider secrets, ISecretProvider? settings = null)
+/// <param name="logger">Журнал: повний виняток відмови з'єднання (у текст помилки він не йде).</param>
+public sealed partial class SqlDataSource(
+    ICollectionStore store, ISecretProvider secrets, ISecretProvider? settings = null,
+    ILogger<SqlDataSource>? logger = null)
     : IExternalDataSource
 {
+    private readonly ILogger log = (ILogger?)logger ?? NullLogger.Instance;
+
     /// <summary>Стеля рядків каталогу за один обхід.</summary>
     /// <remarks>Та сама причина, що й у сусіднього транспорту: каталог читає
     /// людина, і двадцять тисяч рядків у випадному списку — не повнота.</remarks>
@@ -388,7 +394,9 @@ public sealed class SqlDataSource(
             // FormatException, `Max Pool Size=99999999999` — OverflowException (рев'ю an33d, P3-4).
             throw new BusinessRuleException(
                 SourceUnavailable,
-                $"Рядок з'єднання джерела {source.Code} не читається: {ex.Message}",
+                // ⛔ SEC (TIER2): без `ex.Message` — текст виняток-парсера йде в
+                // `itg.CollectionRun.ErrorMessage` і до клієнта; подробиці — в журнал.
+                $"Рядок з'єднання джерела {source.Code} не читається (кореляція {LogConnectionStringBroken(source.Code, ex)}); подробиці — в журналі сервера.",
                 new Dictionary<string, object?>
                 {
                     ["messageKey"] = "err.ECR-INT-0503.connectionStringBroken",
@@ -435,7 +443,7 @@ public sealed class SqlDataSource(
             {
                 throw new SourceAuthenticationException(
                     AuthenticationRefused,
-                    $"SQL-джерело {source.Code} не приймає облікові дані: {ex.Message}",
+                    $"SQL-джерело {source.Code} не приймає облікові дані (помилка SQL Server {ex.Number}, кореляція {LogConnectFailure(source.Code, ex)}); подробиці — в журналі сервера.",
                     new Dictionary<string, object?>
                     {
                         ["messageKey"] = "err.ECR-INT-0502.credentialsRefused",
@@ -445,7 +453,7 @@ public sealed class SqlDataSource(
 
             throw new BusinessRuleException(
                 SourceUnavailable,
-                $"SQL-джерело {source.Code} не з'єднується: {ex.Message}",
+                $"SQL-джерело {source.Code} не з'єднується (помилка SQL Server {ex.Number}, кореляція {LogConnectFailure(source.Code, ex)}); подробиці — в журналі сервера.",
                 new Dictionary<string, object?>
                 {
                     ["messageKey"] = "err.ECR-INT-0503.connectFailed",
@@ -467,6 +475,34 @@ public sealed class SqlDataSource(
     /// підрядка розсипався б на першій же машині з іншою локаллю.
     /// </remarks>
     private static readonly int[] AuthenticationErrors = [18456, 18452];
+
+    /// <summary>Пише повний виняток у журнал сервера і повертає кореляцію для тексту помилки.</summary>
+    private string LogConnectFailure(string sourceCode, SqlException error)
+    {
+        var correlationId = SafeErrorText.NewCorrelationId();
+        LogConnectFailed(log, sourceCode, error.Number, correlationId, error);
+        return correlationId;
+    }
+
+    /// <summary>Те саме для зіпсованого рядка з'єднання.</summary>
+    private string LogConnectionStringBroken(string sourceCode, Exception error)
+    {
+        var correlationId = SafeErrorText.NewCorrelationId();
+        LogConnectionStringUnreadable(log, sourceCode, correlationId, error);
+        return correlationId;
+    }
+
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "SqlDataSource: джерело {SourceCode} не відкрилось (помилка SQL Server {ErrorNumber}); кореляція {CorrelationId}.")]
+    private static partial void LogConnectFailed(
+        ILogger logger, string sourceCode, int errorNumber, string correlationId, Exception exception);
+
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "SqlDataSource: рядок з'єднання джерела {SourceCode} не читається; кореляція {CorrelationId}.")]
+    private static partial void LogConnectionStringUnreadable(
+        ILogger logger, string sourceCode, string correlationId, Exception exception);
 
     /// <summary>Чи це відмова саме в автентифікації.</summary>
     /// <param name="error">Виняток клієнта.</param>
