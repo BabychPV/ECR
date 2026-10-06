@@ -22,6 +22,8 @@
          EcrWorker є → Environment EcrApi має Mode=Database, Executor=Worker;
          після REINSTALL WORKER_ENABLED=0 служби нема → Executor=InProcess,
          Mode=Quartz; чужі записи Environment лишаються.
+      D4. Set-BootstrapSecretFile (L10-02): власник Administrators, захищений ACL.
+      D5. L10-04: ключ служби з паролем SQL — лише SYSTEM і Administrators.
       D3. (довідково, не падає) Чи переживає Environment EcrApi оновлення
          попередньої MSI поточною без повторного deploy-ecr.ps1.
     ⚠ Чого тут НЕМАЄ: старту служб (SQL на ранері немає, SERVICE_ACCOUNT
@@ -269,6 +271,62 @@ try {
 }
 finally {
     if (Get-Service EcrApi -ErrorAction SilentlyContinue) { Invoke-Msi "/x `"$msiPath`" /qn /l*v d2x.log" }
+}
+
+# ── D4. Set-BootstrapSecretFile (L10-02): власник і ACL до запису пароля ──
+Write-Host '── D4. Файл bootstrap-пароля: власник Administrators, захищений ACL'
+$fn = $ast.Find({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Set-BootstrapSecretFile' }, $true)
+if (-not $fn) { throw 'у deploy-ecr.ps1 немає функції Set-BootstrapSecretFile — перевірку D4 треба оновити' }
+. ([scriptblock]::Create($fn.Extent.Text))
+Test-Case 'D4. bootstrap.secret: підкладений файл замінено, власник BA, ACL лише служба (Read,Delete) і BA' {
+    $folder = Join-Path ([System.IO.Path]::GetTempPath()) "ecr-d4-$([guid]::NewGuid().ToString('N'))"
+    New-Item -ItemType Directory -Path $folder | Out-Null
+    try {
+        Set-Content -Path (Join-Path $folder 'bootstrap.secret') -Value 'planted' -NoNewline
+        Set-BootstrapSecretFile -ConfigFolder $folder -Password 'D4-Sentinel' -Principal 'NT AUTHORITY\SYSTEM'
+        $path = Join-Path $folder 'bootstrap.secret'
+        if ((Get-Content -LiteralPath $path -Raw) -ne 'D4-Sentinel') { throw 'у файлі не той пароль' }
+        $acl = Get-Acl -LiteralPath $path
+        $owner = ([System.Security.Principal.NTAccount] $acl.Owner).Translate([System.Security.Principal.SecurityIdentifier]).Value
+        if ($owner -ne 'S-1-5-32-544') { throw "власник $($acl.Owner), очікували BUILTIN\Administrators" }
+        if (-not $acl.AreAccessRulesProtected) { throw 'ACL успадковується' }
+        $rules = @($acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier]))
+        $foreign = @($rules | Where-Object { $_.IdentityReference.Value -notin 'S-1-5-18', 'S-1-5-32-544' })
+        if ($foreign) { throw "зайві ACE: $(($foreign | ForEach-Object { $_.IdentityReference.Value }) -join ', ')" }
+    }
+    finally { Remove-Item -LiteralPath $folder -Recurse -Force -ErrorAction SilentlyContinue }
+}
+
+# ── D5. Ключ служби з паролем SQL у Environment (L10-04, D-282) ─────────
+Write-Host '── D5. Ключ служби закрито від Users, служба й запис Environment працюють'
+foreach ($name in 'Test-ConnectionStringHasPassword', 'Protect-ServiceRegistryKey') {
+    $fn = $ast.Find({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name }, $true)
+    if (-not $fn) { throw "у deploy-ecr.ps1 немає функції $name — перевірку D5 треба оновити" }
+    . ([scriptblock]::Create($fn.Extent.Text))
+}
+Test-Case 'D5a. Test-ConnectionStringHasPassword: SQL-логін — так, Windows — ні' {
+    if (-not (Test-ConnectionStringHasPassword 'Server=s;Database=d;User ID=u;Password="p;x=1"')) { throw 'пароль не розпізнано' }
+    if (Test-ConnectionStringHasPassword 'Server=s;Database=d;Integrated Security=True') { throw 'Windows-автентифікацію сприйнято як пароль' }
+}
+try {
+    Test-Case 'D5b. Protect-ServiceRegistryKey: лише SYSTEM і Administrators, служба доступна через SCM' {
+        Invoke-Msi "/i `"$msiPath`" /qn /l*v d5.log"
+        Set-ServiceEnvironmentVariable -ServiceName 'EcrApi' -Name 'ECR_ConnectionStrings__Ecr' -Value 'Server=s;Database=d;User ID=u;Password=D5-Sentinel'
+        Protect-ServiceRegistryKey -ServiceName 'EcrApi'
+        $acl = Get-Acl -Path $apiKey
+        if (-not $acl.AreAccessRulesProtected) { throw 'ACL ключа успадковується' }
+        $foreign = @($acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier]) |
+            Where-Object { $_.IdentityReference.Value -notin 'S-1-5-18', 'S-1-5-32-544' })
+        if ($foreign) { throw "зайві ACE: $(($foreign | ForEach-Object { $_.IdentityReference.Value }) -join ', ')" }
+        if (-not (Get-Service EcrApi -ErrorAction SilentlyContinue)) { throw 'Get-Service EcrApi не бачить службу' }
+        if (-not (Get-CimInstance Win32_Service -Filter "Name='EcrApi'")) { throw 'WMI не бачить службу' }
+        Set-ServiceEnvironmentVariable -ServiceName 'EcrApi' -Name 'ECR_CI_After' -Value 'ok'
+        if ((Get-ApiEnvironment) -notcontains 'ECR_CI_After=ok') { throw 'запис Environment після захисту не вдався' }
+    }
+}
+finally {
+    if (Get-Service EcrApi -ErrorAction SilentlyContinue) { Invoke-Msi "/x `"$msiPath`" /qn /l*v d5x.log" }
+    if (Get-Service EcrApi -ErrorAction SilentlyContinue) { Add-Result 'D5c. Видалення після захисту ключа' 'FAIL: служба лишилась' }
 }
 
 # ── D3. (довідково) Environment EcrApi після оновлення без deploy-ecr.ps1 ──

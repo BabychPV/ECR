@@ -16,6 +16,8 @@ internal sealed class DatabaseStep : IWizardStep
     private RadioButton? _sqlAuthOption;
     private TextBox? _loginBox;
     private TextBox? _sqlPasswordBox;
+    private Label? _sqlLoginWarning;
+    private CheckBox? _sqlLoginAcknowledge;
     private CheckBox? _skipSchemaCheckBox;
 
     public DatabaseStep(WizardState state)
@@ -88,6 +90,13 @@ internal sealed class DatabaseStep : IWizardStep
             if (string.IsNullOrWhiteSpace(_sqlPasswordBox!.Text))
             {
                 error = "Enter the SQL login password.";
+                return false;
+            }
+
+            // D-282: SQL-логін служби дозволено лише свідомим вибором.
+            if (!_sqlLoginAcknowledge!.Checked)
+            {
+                error = "Confirm that the ECR service will connect with this SQL login, or choose Windows Authentication.";
                 return false;
             }
         }
@@ -168,6 +177,35 @@ internal sealed class DatabaseStep : IWizardStep
         layout.Controls.Add(new Label { Text = "Password:", AutoSize = true, Margin = new Padding(24, 6, 6, 0) }, 0, 3);
         layout.Controls.Add(_sqlPasswordBox, 1, 3);
 
+        // ⛔ L10-04 (аудит 2026-10-03), D-282 (HU-11 Q9 = A+B): SQL-логін не лише
+        // накочує схему — він стає рядком підключення СЛУЖБИ. Логін DBA дав би
+        // застосунку DDL-права всупереч D-66. Дозволено, але свідомо: попередження
+        // і обов'язкове підтвердження. Типово — Windows Authentication (gMSA).
+        _sqlLoginWarning = new Label
+        {
+            Text = "Warning: the ECR service will also use this SQL login at run time. "
+                + "A DBA login gives the application DDL rights (D-66). Prefer Windows Authentication "
+                + "with a gMSA. The password is stored in the service registry key, readable only by "
+                + "SYSTEM and Administrators.",
+            AutoSize = true,
+            MaximumSize = new Size(520, 0),
+            ForeColor = Color.DarkRed,
+            Visible = false,
+            Margin = new Padding(24, 8, 6, 0),
+        };
+        _sqlLoginAcknowledge = new CheckBox
+        {
+            Text = "I understand: the service will connect with this SQL login",
+            AutoSize = true,
+            Visible = false,
+            Margin = new Padding(24, 4, 6, 0),
+        };
+
+        layout.Controls.Add(_sqlLoginWarning, 0, 4);
+        layout.SetColumnSpan(_sqlLoginWarning, 2);
+        layout.Controls.Add(_sqlLoginAcknowledge, 0, 5);
+        layout.SetColumnSpan(_sqlLoginAcknowledge, 2);
+
         group.Controls.Add(layout);
         return group;
     }
@@ -176,6 +214,12 @@ internal sealed class DatabaseStep : IWizardStep
     {
         _loginBox!.Enabled = _sqlAuthOption!.Checked;
         _sqlPasswordBox!.Enabled = _sqlAuthOption!.Checked;
+        _sqlLoginWarning!.Visible = _sqlAuthOption!.Checked;
+        _sqlLoginAcknowledge!.Visible = _sqlAuthOption!.Checked;
+        if (!_sqlAuthOption!.Checked)
+        {
+            _sqlLoginAcknowledge.Checked = false;
+        }
     }
 
     private static SecureString ToSecure(string value)

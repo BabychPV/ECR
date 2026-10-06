@@ -97,7 +97,7 @@ internal sealed class ReviewStep(ICertificateSource certificates, Func<DateTime>
     {
         return state.ServiceAccountMode switch
         {
-            ServiceAccountMode.LocalSystem => "Local System (not recommended)",
+            ServiceAccountMode.LocalSystem => "Local System (not recommended; service registered as Manual, not started)",
             ServiceAccountMode.Gmsa => $"gMSA ({state.ServiceAccountName})",
             ServiceAccountMode.DomainUser =>
                 $"{state.ServiceAccountName}, password: {Presence(state.ServicePassword is not null)}",

@@ -306,9 +306,9 @@ public sealed class ExcelImporter(
     }
 
     /// <inheritdoc />
-    public async Task<int> CountPendingChangesAsync(string previewToken, CancellationToken ct)
+    public async Task<int> CountPendingChangesAsync(long documentId, string previewToken, CancellationToken ct)
     {
-        var plan = await LoadPlanAsync(previewToken, documentId: null, ct).ConfigureAwait(false);
+        var plan = await LoadPlanAsync(previewToken, documentId, ct).ConfigureAwait(false);
 
         return plan.Tables.Sum(t => t.Changes.Count);
     }

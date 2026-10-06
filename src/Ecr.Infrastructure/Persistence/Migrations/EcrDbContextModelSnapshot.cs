@@ -692,6 +692,11 @@ namespace Ecr.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("MethodologyId", "EffectiveFrom")
+                        .IsUnique()
+                        .HasDatabaseName("UQ_MV_Effective")
+                        .HasFilter("[Status] = 1");
+
                     b.HasIndex("MethodologyId", "Version")
                         .IsUnique()
                         .HasDatabaseName("UQ_MethodologyVersion");

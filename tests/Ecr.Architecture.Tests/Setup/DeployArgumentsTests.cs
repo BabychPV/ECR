@@ -1,3 +1,5 @@
+using System.Data.Common;
+using System.Runtime.InteropServices;
 using System.Security;
 using Ecr.Setup;
 using Ecr.TestKit;
@@ -75,6 +77,59 @@ public sealed class DeployArgumentsTests
         Assert.Equal(
             ["SkipSchema", "ServiceAccount", "ServicePassword", "SqlLogin", "SqlPassword"],
             names.SkipWhile(n => n != "SkipSchema").ToList());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Пароль_з_крапкою_з_комою_не_підміняє_параметри_рядка_підключення()
+    {
+        // L10-04: інтерполяція `Password={…};` давала паролю дописати власні параметри.
+        const string password = "p;Database=master;Integrated Security=True;\"'=";
+        using var sqlPassword = Secure(password);
+        var state = new WizardState
+        {
+            SqlInstance = @"srv\SQL",
+            Database = "ECR",
+            SqlAuthIsWindows = false,
+            SqlLogin = "ecr;app",
+            SqlLoginPassword = sqlPassword,
+        };
+
+        var parsed = Parse(DeployArguments.BuildConnectionString(state));
+
+        Assert.Equal(password, parsed["Password"]);
+        Assert.Equal("ecr;app", parsed["User ID"]);
+        Assert.Equal("ECR", parsed["Database"]);
+        Assert.False(parsed.ContainsKey("Integrated Security"));
+        Assert.Equal("Mandatory", parsed["Encrypt"]);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Типово_Windows_автентифікація_без_пароля_в_рядку()
+    {
+        // D-282: варіант A (Windows/gMSA) — типовий; секрету в рядку немає.
+        var parsed = Parse(DeployArguments.BuildConnectionString(new WizardState()));
+
+        Assert.Equal("True", parsed["Integrated Security"]);
+        Assert.False(parsed.ContainsKey("Password"));
+        Assert.False(parsed.ContainsKey("User ID"));
+        Assert.Equal("Mandatory", parsed["Encrypt"]);
+    }
+
+    private static DbConnectionStringBuilder Parse(SecureString secure)
+    {
+        var bstr = Marshal.SecureStringToBSTR(secure);
+        try
+        {
+            return new DbConnectionStringBuilder { ConnectionString = Marshal.PtrToStringBSTR(bstr) };
+        }
+        finally
+        {
+            Marshal.ZeroFreeBSTR(bstr);
+        }
     }
 
     private static SecureString Secure(string value)

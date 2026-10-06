@@ -239,7 +239,7 @@ public sealed class ApplyImportHandler(
         // ⛔ B-08: невидимий документ — 404, як неіснуючий (`DocumentVisibility`).
         await DocumentVisibility.RequireVisibleAsync(access, profile, documentId, Permission, ct).ConfigureAwait(false);
 
-        var pendingCount = await importer.CountPendingChangesAsync(previewToken, ct).ConfigureAwait(false);
+        var pendingCount = await importer.CountPendingChangesAsync(documentId, previewToken, ct).ConfigureAwait(false);
 
         if (pendingCount > LargeImportThreshold)
         {

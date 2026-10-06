@@ -521,8 +521,18 @@ export function SheetActions({
    * `SimulationReadOnly`. Адміністратор, який дивиться чужими правами
    * (`ФВ-6.16a`), не пише від чужого імені.
    */
+  /**
+   * ✎ D-285 (варіант B′, рішення координатора): сервер дозволяє подання з
+   * рівнем >= Submit АБО >= Write разом із проєктним правом `Document.Submit`.
+   * Клієнт цього права НЕ перевіряє: `/me` віддає лише глобальні права, тож
+   * для ролі з областю проєкту його не видно. Тому «Submit» активна вже з
+   * рівня `Write`, а відмову без права дає СЕРВЕР (403 `submitDenied`,
+   * `deny.InsufficientGrantLevel.Submit`) — її показує `showApiError`.
+   */
   const mayWorkflow = (action: 'submit' | 'approve' | 'reject'): boolean =>
-    me !== undefined && !me.isSimulation && meetsGrant(grant, RequiredGrant[action]);
+    me !== undefined &&
+    !me.isSimulation &&
+    meetsGrant(grant, action === 'submit' ? 'Write' : RequiredGrant[action]);
 
   // ⛔ `F-18`: архівний проєкт, закритий чи ще не відкритий період — подання й
   // перерахунок сервер однаково відхилить. Кнопка, яка гарантовано дасть
@@ -531,19 +541,6 @@ export function SheetActions({
 
   const canSubmit = !dataLocked && isAllowed('submit', state) && mayWorkflow('submit');
 
-  /*
-   * ⛔ `F-17`: оператор із грантом Write на чернетці не бачив «Submit» узагалі
-   * — і не мав звідки дізнатися чому: кнопка просто зникала. Тепер вона є,
-   * вимкнена, з поясненням, якого рівня бракує. Лише для Write: хто не має
-   * навіть права заповнювати, подавати й не збирався.
-   */
-  const submitNeedsGrant =
-    !dataLocked &&
-    isAllowed('submit', state) &&
-    me !== undefined &&
-    !me.isSimulation &&
-    meetsGrant(grant, 'Write') &&
-    !meetsGrant(grant, 'Submit');
   const canApprove = isAllowed('approve', state) && mayWorkflow('approve');
   const canReject = isAllowed('reject', state) && mayWorkflow('reject');
 
@@ -572,7 +569,6 @@ export function SheetActions({
   const hasAnyAction =
     canRecalculate ||
     canSubmit ||
-    submitNeedsGrant ||
     canApprove ||
     canReject ||
     canRecall ||
@@ -619,23 +615,6 @@ export function SheetActions({
         <Button size="xs" loading={submit.isPending || settled.settling} onClick={() => settled.run(() => submit.mutateAsync(false))}>
           {t('document.submit')}
         </Button>
-      )}
-
-      {submitNeedsGrant && (
-        // ⚠ `data-disabled`, а не `disabled`: вимкнена кнопка не отримує ні
-        // фокуса, ні наведення, і пояснення не прочитав би ніхто — саме те,
-        // заради чого вона тут стоїть.
-        <Hint label={t('workflow.submitNeedsGrant', { level: grant })}>
-          <Button
-            size="xs"
-            data-disabled
-            aria-disabled="true"
-            data-testid="submit-needs-grant"
-            onClick={(event) => event.preventDefault()}
-          >
-            {t('document.submit')}
-          </Button>
-        </Hint>
       )}
 
       {/* ⛔ Затвердження і відхилення — пара, і показуються разом. Кнопка

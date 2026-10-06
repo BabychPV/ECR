@@ -12,7 +12,9 @@ public sealed class CloneTemplateVersionHandler(
     IUnitOfWork uow,
     IClock clock,
     Security.IAccessDecisionService access,
-    Common.ICurrentUser currentUser)
+    Common.ICurrentUser currentUser,
+    IAccessProfileInvalidator profileCache,
+    Microsoft.Extensions.Logging.ILogger<CloneTemplateVersionHandler> log)
 {
     /// <summary>Клонує версію.</summary>
     /// <param name="sourceVersionId">Версія-джерело.</param>
@@ -47,6 +49,13 @@ public sealed class CloneTemplateVersionHandler(
             .ConfigureAwait(false);
 
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+
+        // ⛔ A1-04: клон скопіював гранти (Deny) на нові Id, а відбиток груп у ключі кешу профілів
+        // бачить лише групи сесії — користувач із прямою роллю тримав би застарілий профіль без
+        // заборон на колонки клону до 60 хв. Клон рідкісний, тож скидається весь кеш (fail-closed).
+        Documents.VersionMigration.GrantProfileInvalidation.Run(
+            profileCache, log, new Ports.GrantedUsers([], Overflow: true));
+
         return versionId;
     }
 }

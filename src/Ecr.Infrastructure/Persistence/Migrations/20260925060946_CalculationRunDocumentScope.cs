@@ -60,6 +60,16 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                 schema: "calc",
                 table: "CalculationRun");
 
+            // ⛔ Без цього Down падає 1505 на живих даних (аудит L10-15): після
+            // Up у одного (ProjectId, PeriodKey) законно стоїть кілька Current —
+            // прогін проєкту й по одному на документ, — а старий індекс вимагає
+            // одного. Документні знімаються з актуальності, прогін усього
+            // проєкту (DocumentId IS NULL — він один за самим індексом) лишається
+            // Current; результати не видаляються, лише перестають бути чинними.
+            migrationBuilder.Sql(
+                "UPDATE calc.CalculationRun SET Status = N'Superseded' "
+                + "WHERE Status = N'Current' AND DocumentId IS NOT NULL;");
+
             migrationBuilder.DropColumn(
                 name: "DocumentId",
                 schema: "calc",

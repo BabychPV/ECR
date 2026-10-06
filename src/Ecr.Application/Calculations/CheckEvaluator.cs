@@ -1,5 +1,4 @@
 // src/Ecr.Application/Calculations/CheckEvaluator.cs
-using System.Globalization;
 using Ecr.Application.Templates;
 using Ecr.Application.Validation;
 using Ecr.Domain.Enums;
@@ -19,7 +18,14 @@ public sealed record CheckResult(bool Compared, bool Passed, decimal Deviation, 
 /// <param name="Left">Значення left.</param>
 /// <param name="Right">Значення right.</param>
 /// <param name="Result">Результат.</param>
-public sealed record CheckRowResult(string TargetRowKey, string SourceRowKey, decimal? Left, decimal? Right, CheckResult Result);
+public sealed record CheckRowResult(string TargetRowKey, string SourceRowKey, decimal? Left, decimal? Right, CheckResult Result)
+{
+    /// <summary>|left − right|.</summary>
+    public decimal Deviation => Result.Deviation;
+
+    /// <summary>Допустиме відхилення.</summary>
+    public decimal Allowed => Result.Allowed;
+}
 
 /// <summary>
 /// Чиста функція Check (D-230; схема — ПРИПУЩЕННЯ, див. <c>RelationSpec.cs</c>):
@@ -136,9 +142,17 @@ public static class CheckEvaluator
             _ => ValidationSeverity.Info,
         };
 
-        return [.. failures.Select(f => new ValidationMessage(
-            severity, "REL-" + relationCode, Text(spec, f, language), targetTableDefId, f.TargetRowKey, spec.Right, BlocksSave: false,
-            SourceTableDefId: sourceTableDefId, SourceColumnCode: sourceTableDefId is null ? null : spec.Left))];
+        return [.. failures.Select(f =>
+        {
+            // T2-07: ключ + підстановки зберігаються, текст — запасний (мова автора запуску); читання збирає його
+            // мовою читача. Значення джерела (Left) лежать лише в Params, а їх назовні не віддають.
+            var parameters = Params(spec, f);
+            return new ValidationMessage(
+                severity, "REL-" + relationCode, ValidationMessageTemplates.Render(ValidationMessageTemplates.CheckMismatch, language, parameters),
+                targetTableDefId, f.TargetRowKey, spec.Right, BlocksSave: false,
+                SourceTableDefId: sourceTableDefId, SourceColumnCode: sourceTableDefId is null ? null : spec.Left,
+                MessageKey: ValidationMessageTemplates.CheckMismatch, Params: parameters);
+        })];
     }
 
     private static decimal Saturated(Func<decimal> nonNegative)
@@ -153,18 +167,17 @@ public static class CheckEvaluator
         }
     }
 
-    private static string N(decimal? v) => v?.ToString("0.############################", CultureInfo.InvariantCulture) ?? string.Empty;
-
-    // ⚠ Не через каталог UiString: ValidationMessage.Message — готовий текст у нормальній (200) відповіді,
-    // три мови — закритий список (D-95); та сама форма, що в ValidationEngine.L.
-    private static string Text(CheckSpec s, CheckRowResult f, string language)
+    private static Dictionary<string, string> Params(CheckSpec s, CheckRowResult f)
     {
-        var kind = s.ToleranceKind == CheckToleranceKind.Rel ? "rel" : "abs";
-        return language switch
+        return new(StringComparer.Ordinal)
         {
-            "ru" => $"Сверка: {s.Left} = {N(f.Left)} не сходится с {s.Right} = {N(f.Right)}: отклонение {N(f.Result.Deviation)}, допустимо {N(f.Result.Allowed)} ({kind}).",
-            "kz" => $"Салыстыру: {s.Left} = {N(f.Left)} мәні {s.Right} = {N(f.Right)} мәніне сәйкес келмейді: ауытқу {N(f.Result.Deviation)}, рұқсат етілгені {N(f.Result.Allowed)} ({kind}).",
-            _ => $"Check: {s.Left} = {N(f.Left)} does not match {s.Right} = {N(f.Right)}: deviation {N(f.Result.Deviation)}, allowed {N(f.Result.Allowed)} ({kind}).",
+            ["left"] = s.Left,
+            ["leftValue"] = ValidationMessageTemplates.Num(f.Left),
+            ["right"] = s.Right,
+            ["rightValue"] = ValidationMessageTemplates.Num(f.Right),
+            ["deviation"] = ValidationMessageTemplates.Num(f.Deviation),
+            ["allowed"] = ValidationMessageTemplates.Num(f.Allowed),
+            ["kind"] = s.ToleranceKind == CheckToleranceKind.Rel ? "rel" : "abs",
         };
     }
 }

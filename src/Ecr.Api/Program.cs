@@ -316,6 +316,7 @@ var staticFileOptions = new StaticFileOptions
 app.UseStaticFiles(staticFileOptions);
 
 app.UseAuthentication();
+app.UseMiddleware<Ecr.Api.Security.CsrfOriginMiddleware>(); // L1-04: небезпечний запит з чужого сайту — 403, до будь-якого обробника
 app.UseMiddleware<SecurityStampMiddleware>();   // після автентифікації, до авторизації
 app.UseMiddleware<PasswordChangeMiddleware>();   // разовий пароль закриває все, крім його зміни
 app.UseMiddleware<SimulationReadOnlyMiddleware>(); // симуляція «очима користувача» — лише читання (V-06)
@@ -389,7 +390,8 @@ app.MapFallback("/scalar/{**_}", () => Results.NotFound());
 // реально відсутній статичний файл (наприклад, видалену картинку) так
 // само лишається 404 від UseStaticFiles вище, а не підміняється
 // сторінкою застосунку.
-app.MapFallbackToFile("index.html", staticFileOptions);
+app.MapFallbackToFile("index.html", staticFileOptions)
+   .WithMetadata(Ecr.Api.Middleware.SpaShell.Metadata); // A1-01/A1-09: оболонка — без воріт сесії, див. SpaShell
 
 app.Run();
 

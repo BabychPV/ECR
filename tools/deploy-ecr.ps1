@@ -110,7 +110,8 @@
 .PARAMETER ServiceAccount
     `DOMAIN\ecr-svc$` (gMSA, рекомендовано — без пароля) або `DOMAIN\user`.
     Передається в msiexec як SERVICE_ACCOUNT. Порожнє — служба
-    реєструється, але свідомо НЕ стартує (`docs/build/10-installer.md` §1.4).
+    реєструється з типом запуску Manual і свідомо НЕ стартує, зокрема після
+    перезавантаження (`docs/build/10-installer.md` §1.4, L10-03).
 
 .PARAMETER ServicePassword
     Лише для не-gMSA облікового запису.
@@ -488,6 +489,39 @@ function Set-ServiceEnvironmentVariable {
     Set-ItemProperty -Path $keyPath -Name Environment -Value $updated -Type MultiString
 }
 
+# ⛔ L10-04 (аудит 2026-10-03), D-282: SQL-логін служби дозволено, але його
+# пароль у рядку підключення лежить у Services\<служба>\Environment, а ключі
+# служб за стандартним ACL читає BUILTIN\Users — пароль бачив би кожен
+# локальний користувач. Тоді ключ служби отримує захищений ACL: лише SYSTEM
+# (SCM читає Environment сам і передає процесу) і Administrators. Get-Service,
+# services.msc і WMI ходять через SCM, а не через реєстр, тож не страждають.
+function Test-ConnectionStringHasPassword {
+    param([Parameter(Mandatory)] [string] $ConnectionString)
+    $builder = [System.Data.Common.DbConnectionStringBuilder]::new()
+    # ⚠ set_ConnectionString, не `.ConnectionString =`: builder — IDictionary, і
+    # PowerShell присвоєння властивості перетворює на ключ "ConnectionString"
+    # (знайшов CI, D5a).
+    $builder.set_ConnectionString($ConnectionString)
+    foreach ($key in 'Password', 'Pwd') {
+        if ($builder.ContainsKey($key) -and "$($builder[$key])") { return $true }
+    }
+    return $false
+}
+
+function Protect-ServiceRegistryKey {
+    param([Parameter(Mandatory)] [string] $ServiceName)
+    $keyPath = "HKLM:\SYSTEM\CurrentControlSet\Services\$ServiceName"
+    $acl = Get-Acl -Path $keyPath
+    $acl.SetAccessRuleProtection($true, $false)
+    $acl.Access | ForEach-Object { $acl.RemoveAccessRule($_) | Out-Null }
+    foreach ($sid in 'S-1-5-18', 'S-1-5-32-544') {   # SYSTEM, BUILTIN\Administrators
+        $acl.AddAccessRule([System.Security.AccessControl.RegistryAccessRule]::new(
+            [System.Security.Principal.SecurityIdentifier]::new($sid), 'FullControl',
+            'ContainerInherit', 'None', 'Allow'))
+    }
+    Set-Acl -Path $keyPath -AclObject $acl
+}
+
 # ⚠ Директива №13 (Q-215): bootstrap-пароль — ОДНОРАЗОВИЙ, на відміну від
 # рядка підключення. У реєстрі служби він лишався б назавжди. Файл з ACL на
 # -ServiceAccount; застосунок сам читає й видаляє його при старті
@@ -500,11 +534,21 @@ function Set-BootstrapSecretFile {
     )
 
     $path = Join-Path $ConfigFolder 'bootstrap.secret'
-    Set-Content -Path $path -Value $Password -Encoding UTF8 -NoNewline
+
+    # ⛔ L10-02: спершу ПОРОЖНІЙ файл із захищеним ACL і власником
+    # Administrators, і лише потім пароль. Раніше пароль писався у файл з
+    # успадкованим ACL і обмежувався вже після — вікно, у яке файл читав
+    # будь-хто з правом читання теки. Наявний файл (міг підкласти хтось
+    # інший і лишити собі WRITE_DAC як власник) — видаляється, не
+    # перезаписується. Застосунок приймає лише файл із власником
+    # Administrators/SYSTEM (BootstrapSecretFile.UntrustedOwner).
+    if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Force }
+    New-Item -ItemType File -Path $path -Force | Out-Null
 
     $acl = Get-Acl -Path $path
     $acl.SetAccessRuleProtection($true, $false)   # прибрати успадкування — не звичайний файл конфігу
     $acl.Access | ForEach-Object { $acl.RemoveAccessRule($_) | Out-Null }
+    $acl.SetOwner([System.Security.Principal.NTAccount]::new('BUILTIN\Administrators'))
 
     $account = New-Object System.Security.Principal.NTAccount($Principal)
     $acl.AddAccessRule([System.Security.AccessControl.FileSystemAccessRule]::new(
@@ -513,6 +557,8 @@ function Set-BootstrapSecretFile {
         'BUILTIN\Administrators', 'FullControl', 'Allow'))
 
     Set-Acl -Path $path -AclObject $acl
+
+    Set-Content -LiteralPath $path -Value $Password -Encoding UTF8 -NoNewline
 }
 
 # ⚠ Окрема функція, а не вбудований код кроку 4: єдиний спосіб перевірити
@@ -1515,6 +1561,18 @@ else {
             -Value (ConvertFrom-SecureStringPlain $ConnectionString)
         Write-Host "Рядок підключення записано й для EcrWorker." -ForegroundColor Green
     }
+
+    if (Test-ConnectionStringHasPassword (ConvertFrom-SecureStringPlain $ConnectionString)) {
+        Write-Host ("⚠ Рядок підключення містить пароль SQL-логіна (D-282): служба працює під цим логіном. " +
+            "Логін DBA дає застосунку DDL-права (D-66) — рекомендовано Windows/gMSA.") -ForegroundColor Yellow
+        foreach ($service in @('EcrApi') + @(if ($workerEnabled) { 'EcrWorker' })) {
+            if ($PSCmdlet.ShouldProcess("HKLM:\SYSTEM\CurrentControlSet\Services\$service",
+                    'закрити ключ служби від BUILTIN\Users (пароль у Environment)')) {
+                Protect-ServiceRegistryKey -ServiceName $service
+                Write-Host "Ключ служби ${service}: читання лише SYSTEM і Administrators." -ForegroundColor Green
+            }
+        }
+    }
 }
 
 # ⛔ Q-221: без цього Kestrel слухає лише вбудований дефолт ASP.NET Core —
@@ -1657,7 +1715,7 @@ Write-Host ("Перерахунок: " + $(if ($workerEnabled) { 'служба E
 Write-Step "Крок 6/7: старт служби"
 
 if (-not $ServiceAccount) {
-    Write-Host "SERVICE_ACCOUNT не задано — служба зареєстрована, але не стартує (навмисно, docs/build/10-installer.md §1.4)." -ForegroundColor Yellow
+    Write-Host "SERVICE_ACCOUNT не задано — служба зареєстрована з типом запуску Manual і не стартує (навмисно, docs/build/10-installer.md §1.4, L10-03)." -ForegroundColor Yellow
     if ($workerEnabled) {
         Write-Host ("  ⚠ EcrWorker теж не стартує, а EcrApi вже налаштовано на Executor = Worker: запускай ОБИДВІ служби, " +
             "інакше перерахунок стоятиме в черзі (перевірка worker на /health/ready — Degraded).") -ForegroundColor Yellow

@@ -10,8 +10,15 @@ SET QUOTED_IDENTIFIER ON;
 GO
 
 -- src/Ecr.Infrastructure/Persistence/Sql/03-archive-proc.sql
--- Виконується SQL Agent під окремим principal: у застосунку немає ані DDL-прав,
--- ані права запису в arc.* (D-66, B01 §6.4).
+-- У застосунку немає ані DDL-прав, ані права запису в arc.* (D-66, B01 §6.4).
+--
+-- ⚠ Тому всі три процедури — `WITH EXECUTE AS OWNER` (той самий механізм D-66,
+-- що в 04/05; аудит L10-08). Викликачу (`ArchiveJob` під обліковим записом
+-- служби, DBA вручну) потрібне лише `EXECUTE`. Без цього `ALTER TABLE … DROP
+-- CONSTRAINT` і динамічний `TRUNCATE … WITH (PARTITIONS)` перевіряються на
+-- праві `ALTER` САМОГО викликача: ланцюжок власності DDL і динамічний SQL не
+-- покриває, і архівація під службою падала б відмовою в правах
+-- (тест `ArchiveLeastPrivilegeTests`).
 -- РУЧНИЙ ІНСТРУМЕНТ DBA. Штатний шлях його НЕ ПОТРЕБУЄ (`D-117`).
 --
 -- ⛔ Зі штатного шляху процедуру прибрано. Зняття і повернення ключів тепер
@@ -26,6 +33,7 @@ GO
 -- ⚠ WITH CHECK, а не NOCHECK: недовірене обмеження оптимізатор ігнорує, і
 -- «ключ є» перетворилося б на «ключ намальовано».
 CREATE OR ALTER PROCEDURE arc.usp_RestoreArchiveConstraints
+WITH EXECUTE AS OWNER
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -47,6 +55,7 @@ CREATE OR ALTER PROCEDURE arc.usp_ArchiveYear
     @FromPeriodKey int,
     @ToPeriodKey   int,
     @BatchSize     int = 500000
+WITH EXECUTE AS OWNER
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -69,6 +78,12 @@ BEGIN
     DECLARE @dstCount bigint, @dstSum decimal(38,16);
     DECLARE @p1 int, @p12 int, @range nvarchar(40), @sql nvarchar(600);
     DECLARE @periods int = @ToPeriodKey - @FromPeriodKey + 1;
+    DECLARE @lastRow bigint, @lastCol int, @hiRow bigint, @hiCol int;
+    DECLARE @lastId bigint, @hiId bigint;
+
+    -- Пакет менше одного рядка — нескінченний цикл копіювання; NULL — те саме.
+    IF @BatchSize IS NULL OR @BatchSize < 1
+        THROW 50015, N'@BatchSize має бути додатним числом.', 1;
 
     ------------------------------------------------------------------------
     -- ЗАПОБІЖНИК 1. Партиція — ПО ПЕРІОДУ, а не по проєкту.
@@ -250,23 +265,92 @@ BEGIN
                @srcSum   = ISNULL(SUM(ValueNumeric), 0)
         FROM doc.CellValue WHERE PeriodKey = @k;
 
-        -- TABLOCK → мінімальне логування і прямий запис у columnstore rowgroups.
-        INSERT INTO arc.CellValue WITH (TABLOCK)
-            (PeriodKey, TableRowId, ColumnDefId, TableDefId, ValueString, ValueNumeric,
-             ValueDate, ValueBool, ValueRegistryEntryId, ValueUnitId, IsCalculated, IsEmpty)
-        SELECT PeriodKey, TableRowId, ColumnDefId, TableDefId, ValueString, ValueNumeric,
-               ValueDate, ValueBool, ValueRegistryEntryId, ValueUnitId, IsCalculated, IsEmpty
-        FROM doc.CellValue WHERE PeriodKey = @k;
+        -- Копія — пакетами по @BatchSize рядків (аудит L10-14; розмір дає
+        -- `SqlCapabilitiesProbe.ArchiveBatchSize`: 500 тис. на Standard, 2 млн на
+        -- Enterprise). Один INSERT на період — одна транзакція на весь період, і
+        -- журнал мусить вмістити її цілком; пакети ділять її на автономні шматки.
+        -- Звірка нижче йде по ВСЬОМУ періоду, тож обірваний прогін не звітує
+        -- успіхом: розбіжність → 50010, повтор починає з очищення arc.* діапазону.
+        --
+        -- Межі пакета — за ключем (keyset), а не OFFSET: кожен пакет бере
+        -- наступні @BatchSize ключів після останнього скопійованого; верхня межа
+        -- обчислюється наперед, і INSERT копіює рівно діапазон (last, hi].
+        -- TABLOCK → мінімальне логування і прямий запис у columnstore rowgroups
+        -- (пакет ≥ 102 400 рядків одразу стає стиснутою групою).
+        SELECT @lastRow = NULL, @lastCol = NULL;
+        WHILE 1 = 1
+        BEGIN
+            SELECT @hiRow = NULL, @hiCol = NULL;
+            SELECT TOP (1) @hiRow = b.TableRowId, @hiCol = b.ColumnDefId
+            FROM (SELECT TOP (@BatchSize) TableRowId, ColumnDefId
+                    FROM doc.CellValue
+                   WHERE PeriodKey = @k
+                     AND (@lastRow IS NULL OR TableRowId > @lastRow
+                          OR (TableRowId = @lastRow AND ColumnDefId > @lastCol))
+                   ORDER BY TableRowId, ColumnDefId) AS b
+            ORDER BY b.TableRowId DESC, b.ColumnDefId DESC
+            OPTION (RECOMPILE);
 
-        INSERT INTO arc.TableRow WITH (TABLOCK)
-            (PeriodKey, Id, TableInstanceId, RowKey, RowDefId, Ordinal, IsDeleted, IsOrphaned, ModifiedAt)
-        SELECT PeriodKey, Id, TableInstanceId, RowKey, RowDefId, Ordinal, IsDeleted, IsOrphaned, ModifiedAt
-        FROM doc.TableRow WHERE PeriodKey = @k;
+            IF @hiRow IS NULL BREAK;
 
-        INSERT INTO arc.TableInstance WITH (TABLOCK)
-            (PeriodKey, Id, DocumentId, TableDefId, CreatedAt, ModifiedAt)
-        SELECT PeriodKey, Id, DocumentId, TableDefId, CreatedAt, ModifiedAt
-        FROM doc.TableInstance WHERE PeriodKey = @k;
+            INSERT INTO arc.CellValue WITH (TABLOCK)
+                (PeriodKey, TableRowId, ColumnDefId, TableDefId, ValueString, ValueNumeric,
+                 ValueDate, ValueBool, ValueRegistryEntryId, ValueUnitId, IsCalculated, IsEmpty)
+            SELECT PeriodKey, TableRowId, ColumnDefId, TableDefId, ValueString, ValueNumeric,
+                   ValueDate, ValueBool, ValueRegistryEntryId, ValueUnitId, IsCalculated, IsEmpty
+            FROM doc.CellValue
+            WHERE PeriodKey = @k
+              AND (@lastRow IS NULL OR TableRowId > @lastRow
+                   OR (TableRowId = @lastRow AND ColumnDefId > @lastCol))
+              AND (TableRowId < @hiRow OR (TableRowId = @hiRow AND ColumnDefId <= @hiCol))
+            OPTION (RECOMPILE);
+
+            SELECT @lastRow = @hiRow, @lastCol = @hiCol;
+        END;
+
+        SET @lastId = NULL;
+        WHILE 1 = 1
+        BEGIN
+            SET @hiId = NULL;
+            SELECT @hiId = MAX(b.Id)
+            FROM (SELECT TOP (@BatchSize) Id FROM doc.TableRow
+                   WHERE PeriodKey = @k AND (@lastId IS NULL OR Id > @lastId)
+                   ORDER BY Id) AS b
+            OPTION (RECOMPILE);
+
+            IF @hiId IS NULL BREAK;
+
+            INSERT INTO arc.TableRow WITH (TABLOCK)
+                (PeriodKey, Id, TableInstanceId, RowKey, RowDefId, Ordinal, IsDeleted, IsOrphaned, ModifiedAt)
+            SELECT PeriodKey, Id, TableInstanceId, RowKey, RowDefId, Ordinal, IsDeleted, IsOrphaned, ModifiedAt
+            FROM doc.TableRow
+            WHERE PeriodKey = @k AND (@lastId IS NULL OR Id > @lastId) AND Id <= @hiId
+            OPTION (RECOMPILE);
+
+            SET @lastId = @hiId;
+        END;
+
+        SET @lastId = NULL;
+        WHILE 1 = 1
+        BEGIN
+            SET @hiId = NULL;
+            SELECT @hiId = MAX(b.Id)
+            FROM (SELECT TOP (@BatchSize) Id FROM doc.TableInstance
+                   WHERE PeriodKey = @k AND (@lastId IS NULL OR Id > @lastId)
+                   ORDER BY Id) AS b
+            OPTION (RECOMPILE);
+
+            IF @hiId IS NULL BREAK;
+
+            INSERT INTO arc.TableInstance WITH (TABLOCK)
+                (PeriodKey, Id, DocumentId, TableDefId, CreatedAt, ModifiedAt)
+            SELECT PeriodKey, Id, DocumentId, TableDefId, CreatedAt, ModifiedAt
+            FROM doc.TableInstance
+            WHERE PeriodKey = @k AND (@lastId IS NULL OR Id > @lastId) AND Id <= @hiId
+            OPTION (RECOMPILE);
+
+            SET @lastId = @hiId;
+        END;
 
         SELECT @dstCount = COUNT_BIG(*),
                @dstSum   = ISNULL(SUM(ValueNumeric), 0)
@@ -455,6 +539,7 @@ CREATE OR ALTER PROCEDURE arc.usp_RestoreYear
     @ProjectId     int,
     @FromPeriodKey int,
     @ToPeriodKey   int
+WITH EXECUTE AS OWNER
 AS
 BEGIN
     SET NOCOUNT ON;

@@ -24,7 +24,10 @@ public sealed class SecurityStampMiddleware(RequestDelegate next)
 
         // Анонімні запити проходять без перевірки: перевіряти нема чого, а
         // зайвий запит до БД на кожен виклик /health коштував би дорожче.
-        if (context.User is not { Identity.IsAuthenticated: true })
+        // ⛔ A1-09: оболонка SPA штампа не звіряє. Інакше F5 після зміни прав
+        // давав сирий JSON 401 замість застосунку, а вихід на завантаженні
+        // сторінки з'їдав причину: її клієнт отримує з `/api/v1/me`.
+        if (context.User is not { Identity.IsAuthenticated: true } || Ecr.Api.Middleware.SpaShell.IsShellNavigation(context))
         {
             await next(context).ConfigureAwait(false);
             return;

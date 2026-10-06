@@ -238,7 +238,51 @@ public sealed class HiddenValidationIssuesTests
         Assert.Equal(LeakedText, Assert.Single(result!).Message);
     }
 
-    private GetValidationResultHandler Handler() => new(_results, _documents, _metadata, _access, _user, _versions);
+    // T2-07: збережений Check із ключем + підстановками. Значення джерела (777.5) лежать і в Params.
+    private static ValidationMessage KeyedCheckOnVisibleTarget()
+        => CheckOnVisibleTarget() with
+        {
+            Message = "stale text",
+            MessageKey = ValidationMessageTemplates.CheckMismatch,
+            Params = new Dictionary<string, string>
+            {
+                ["left"] = HiddenColumn, ["leftValue"] = "777.5", ["right"] = "COLVIS", ["rightValue"] = "55",
+                ["deviation"] = "722.5", ["allowed"] = "0", ["kind"] = "abs",
+            },
+        };
+
+    [Theory]
+    [InlineData(ResourceKind.Column, 52)]
+    [InlineData(ResourceKind.Table, HiddenTable)]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-6.6")]
+    public async Task T1_01_Check_з_ключем_і_прихованим_джерелом_не_віддає_значень_ні_в_тексті_ні_в_параметрах(ResourceKind kind, int id)
+    {
+        Stored(KeyedCheckOnVisibleTarget());
+        _access.ReadScopeAsync(Arg.Any<AccessProfile>(), DocumentId, Arg.Any<CancellationToken>())
+            .Returns(DocumentReadScope.For(
+                new AccessBuilder().Grant(ResourceKind.Project, AccessBuilder.ProjectId, GrantLevel.Read).Deny(kind, id).Build(),
+                AccessBuilder.ProjectId, _snapshot));
+
+        var result = await Handler().HandleAsync(DocumentId, new PeriodKey(Period), CancellationToken.None);
+
+        var only = Assert.Single(result!);
+        Assert.True(HiddenValidationIssues.IsPlaceholder(only));
+        Assert.Null(only.MessageKey);
+        Assert.Null(only.Params);
+        var json = JsonSerializer.Serialize(result);
+        foreach (var leak in new[] { "777.5", "722.5", "REL-CHK1", "COLVIS", HiddenColumn })
+        {
+            Assert.DoesNotContain(leak, json, StringComparison.Ordinal);
+        }
+
+        // Каталог для прихованого навіть не запитується: локалізувати нічого.
+        await _catalog.DidNotReceive().GetAsync(Arg.Any<string>(), Arg.Any<CancellationToken>());
+    }
+
+    private readonly IUiStringCatalog _catalog = Substitute.For<IUiStringCatalog>();
+
+    private GetValidationResultHandler Handler() => new(_results, _documents, _metadata, _access, _user, _versions, _catalog);
 
     private static ValidationMessage HiddenError()
         => new(ValidationSeverity.Error, HiddenRule, HiddenText, HiddenTable, HiddenRowKey, HiddenColumn, BlocksSave: true);

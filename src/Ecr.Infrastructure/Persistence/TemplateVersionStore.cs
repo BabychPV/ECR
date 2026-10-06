@@ -2,6 +2,7 @@ using Ecr.Application.Common;
 using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Domain.Entities.Configuration;
+using Ecr.Domain.Entities.Security;
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
 using Microsoft.Data.SqlClient;
@@ -235,6 +236,10 @@ public sealed partial class TemplateVersionStore(EcrDbContext db) : ITemplateVer
         // ключі таблиць джерела, а зв'язок посилається на таблиці числом.
         var relationTemplates = await ReadRelationTemplatesAsync(source, ct).ConfigureAwait(false);
 
+        // ⛔ A1-04: гранти посилаються на Id аркуша/таблиці/колонки, а `Prepare` ці Id скидає —
+        // ідентичності запам'ятовуються ДО нього (аркуш, аркуш+таблиця, аркуш+таблиця+колонка за кодами).
+        var grantSources = ReadGrantSources(source);
+
         var (clone, links) = TemplateVersionCloner.Prepare(source, newVersion, userId, utcNow);
 
         // ⛔ V-05: два збереження — одна транзакція. Формули посилаються на
@@ -246,7 +251,7 @@ public sealed partial class TemplateVersionStore(EcrDbContext db) : ITemplateVer
         // загубив обчислення.
         if (db.Database.CurrentTransaction is not null)
         {
-            await SaveCloneAsync(clone, links, clonedFrom, relationTemplates, ct).ConfigureAwait(false);
+            await SaveCloneAsync(clone, links, clonedFrom, relationTemplates, grantSources, ct).ConfigureAwait(false);
             return clone.Id;
         }
 
@@ -254,7 +259,7 @@ public sealed partial class TemplateVersionStore(EcrDbContext db) : ITemplateVer
         await strategy.ExecuteAsync(async () =>
         {
             await using var tx = await db.Database.BeginTransactionAsync(ct).ConfigureAwait(false);
-            await SaveCloneAsync(clone, links, clonedFrom, relationTemplates, ct).ConfigureAwait(false);
+            await SaveCloneAsync(clone, links, clonedFrom, relationTemplates, grantSources, ct).ConfigureAwait(false);
             await tx.CommitAsync(ct).ConfigureAwait(false);
         }).ConfigureAwait(false);
 
@@ -352,15 +357,104 @@ public sealed partial class TemplateVersionStore(EcrDbContext db) : ITemplateVer
         }
     }
 
+    /// <summary>Ресурс джерела для копіювання грантів: вид, Id джерела й ідентичність за кодами.</summary>
+    private sealed record GrantSource(ResourceKind Kind, int SourceId, string Sheet, string? Table, string? Column);
+
+    private static List<GrantSource> ReadGrantSources(TemplateVersion source)
+    {
+        var result = new List<GrantSource>();
+        foreach (var sheet in source.Sheets)
+        {
+            result.Add(new GrantSource(ResourceKind.Sheet, sheet.Id, sheet.Code, null, null));
+            foreach (var table in sheet.Tables)
+            {
+                result.Add(new GrantSource(ResourceKind.Table, table.Id, sheet.Code, table.Code, null));
+                result.AddRange(table.Columns.Select(
+                    c => new GrantSource(ResourceKind.Column, c.Id, sheet.Code, table.Code, c.Code)));
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// ⛔ A1-04: ресурсні гранти (Deny і дозволи) на аркуш/таблицю/колонку копіюються на нові Id клону
+    /// за кодами — так само, як це робить перенос документа між версіями. Без цього Deny на колонку
+    /// версії 1.0 мовчки не діяв на документ версії 1.1 (fail-open). Копіюється й дозвіл: рівень
+    /// під рівнем проєкту теж звужує доступ.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Копіюються ЛИШЕ звужувальні гранти: Deny і дозвіл рівня ≤ Read. Дозвіл вище Read (аркуш
+    /// Approve, колонка Write) без <c>ProjectId</c> діє в усіх проєктах версії, які користувач бачить
+    /// (ent7 P2-2, <c>EditRules.Effective</c>), тож копія могла б ПІДНЯТИ доступ на клоні без рішення
+    /// людини; Read-дозвіл підняти не може (грант діє лише при проєктному ≥ Read, S2). Не скопійований
+    /// дозвіл дає fail-closed для підвищення; відомий залишок — Allow &gt; Read, що звужував рівень
+    /// проєкту (напр. Write під Manage), на клоні не діє: адміністратор видає його заново.
+    ///
+    /// ⚠ Профіль прав кешується за відбитком грантів ролі (count і max(Id)): нові рядки його
+    /// змінюють, тож інвалідація не потрібна. Ресурс клону без відповідника за кодом неможливий
+    /// (клон ідентичний джерелу); якби трапився — гранту просто немає, він нічого не відкриває.
+    /// </remarks>
+    private async Task CloneResourceGrantsAsync(
+        TemplateVersion clone, IReadOnlyList<GrantSource> sources, CancellationToken ct)
+    {
+        var map = new Dictionary<(ResourceKind, int), int>();
+        var cloneSheets = clone.Sheets.ToDictionary(s => s.Code);
+        foreach (var src in sources)
+        {
+            if (!cloneSheets.TryGetValue(src.Sheet, out var sheet))
+            {
+                continue;
+            }
+
+            if (src.Table is null)
+            {
+                map[(src.Kind, src.SourceId)] = sheet.Id;
+                continue;
+            }
+
+            var table = sheet.Tables.FirstOrDefault(t => t.Code == src.Table);
+            if (table is null)
+            {
+                continue;
+            }
+
+            if (src.Column is null)
+            {
+                map[(src.Kind, src.SourceId)] = table.Id;
+            }
+            else if (table.Columns.FirstOrDefault(c => c.Code == src.Column) is { } column)
+            {
+                map[(src.Kind, src.SourceId)] = column.Id;
+            }
+        }
+
+        var kinds = new[] { ResourceKind.Sheet, ResourceKind.Table, ResourceKind.Column };
+        var ids = sources.Select(s => s.SourceId).Distinct().ToList();
+        var grants = await db.ResourceGrants
+            .AsNoTracking()
+            .Where(g => kinds.Contains(g.ResourceKind) && ids.Contains(g.ResourceId)
+                        && (g.IsDeny || g.Level <= GrantLevel.Read))
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        db.ResourceGrants.AddRange(grants
+            .Where(g => map.ContainsKey((g.ResourceKind, g.ResourceId)))
+            .Select(g => new ResourceGrant(
+                g.RoleId, g.ResourceKind, map[(g.ResourceKind, g.ResourceId)], g.Level, g.IsDeny)));
+    }
+
     private async Task SaveCloneAsync(
         TemplateVersion clone, TemplateVersionCloner.CloneLinks links, int clonedFrom,
-        IReadOnlyList<RelationTemplate> relationTemplates, CancellationToken ct)
+        IReadOnlyList<RelationTemplate> relationTemplates, IReadOnlyList<GrantSource> grantSources,
+        CancellationToken ct)
     {
         db.TemplateVersions.Add(clone);
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
 
         db.FormulaDefs.AddRange(TemplateVersionCloner.Relink(links));
         CloneTableRelations(clone, relationTemplates);
+        await CloneResourceGrantsAsync(clone, grantSources, ct).ConfigureAwait(false);
         await CloneConditionalFormatsAsync(clone.Id, clonedFrom, ct).ConfigureAwait(false);
         SetClonedFrom(clone, clonedFrom);
         await db.SaveChangesAsync(ct).ConfigureAwait(false);

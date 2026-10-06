@@ -2,6 +2,7 @@ using System.Diagnostics;
 using Ecr.Application.Common;
 using Ecr.Application.Documents;
 using Ecr.Application.Documents.Dto;
+using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
 using Ecr.TestKit;
@@ -51,7 +52,7 @@ public sealed class ApplyImportThresholdTests
     [Trait("Requirement", "ФВ-4.5")]
     public async Task Малий_diff_застосовується_синхронно()
     {
-        _importer.CountPendingChangesAsync(Token, Arg.Any<CancellationToken>())
+        _importer.CountPendingChangesAsync(DocumentId, Token,Arg.Any<CancellationToken>())
             .Returns(ApplyImportHandler.LargeImportThreshold);
 
         var response = new PatchCellsResponse(3, new Dictionary<string, string>(), []);
@@ -71,7 +72,7 @@ public sealed class ApplyImportThresholdTests
     [Trait("Requirement", "ФВ-4.5")]
     public async Task Великий_diff_іде_в_чергу_а_не_застосовується_синхронно()
     {
-        _importer.CountPendingChangesAsync(Token, Arg.Any<CancellationToken>())
+        _importer.CountPendingChangesAsync(DocumentId, Token,Arg.Any<CancellationToken>())
             .Returns(ApplyImportHandler.LargeImportThreshold + 1);
 
         _jobs.EnqueueAsync<IExcelImportJob>(
@@ -87,6 +88,21 @@ public sealed class ApplyImportThresholdTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "L1-20")]
+    public async Task Перегляд_іншого_документа_відмовляє_до_черги_і_нічого_не_ставить()
+    {
+        _importer.CountPendingChangesAsync(DocumentId, Token, Arg.Any<CancellationToken>())
+            .Returns<int>(_ => throw new BusinessRuleException("ECR-IMP-0422", "Перегляд належить іншому документу."));
+
+        await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Handler().HandleAsync(DocumentId, Token, CancellationToken.None));
+
+        await _jobs.DidNotReceiveWithAnyArgs().EnqueueAsync<IExcelImportJob>(default, default, default);
+        await _importer.DidNotReceiveWithAnyArgs().ApplyAsync(default, default!, default);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait("Finding", "T10-45")]
     public async Task Великий_diff_не_блокує_запит_довше_за_поріг_часу()
     {
@@ -97,7 +113,7 @@ public sealed class ApplyImportThresholdTests
         var slowApply = TimeSpan.FromSeconds(5);
         const int BudgetMs = 500;
 
-        _importer.CountPendingChangesAsync(Token, Arg.Any<CancellationToken>())
+        _importer.CountPendingChangesAsync(DocumentId, Token,Arg.Any<CancellationToken>())
             .Returns(ApplyImportHandler.LargeImportThreshold + 1);
 
         _importer.ApplyAsync(DocumentId, Token, Arg.Any<CancellationToken>())

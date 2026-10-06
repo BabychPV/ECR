@@ -705,6 +705,27 @@ public sealed class SaveRegistryDefinitionHandler(
     /// </exception>
     private async Task PublishKeysAsync(RegistryDef definition, KeyPlan plan, int userId, CancellationToken ct)
     {
+        // ⛔ L4-06 / L5-03: первинний ключ адресує КОЖЕН живий запис. Запис без значення частини
+        // не має рядка ключа (хеш = null) і лишався б поза унікальністю — тому 422 ДО створення
+        // ключа й заповнення його рядків, а не тиха публікація.
+        var fieldsByFieldId = definition.Fields.ToDictionary(f => f.Id);
+        var primaries = plan.Reactivated
+            .Where(k => k.IsPrimary)
+            .Select(k => (k.Code, k.IgnoreCase, Fields: (IReadOnlyList<RegistryFieldDef>)[.. k.Fields.OrderBy(f => f.Ordinal).Select(f => fieldsByFieldId[f.RegistryFieldDefId])]))
+            .Concat(plan.Created
+                .Where(k => k.IsPrimary && k.IsActive)
+                .Select(k => (k.Code, k.IgnoreCase, Fields: (IReadOnlyList<RegistryFieldDef>)[.. k.Fields])));
+        foreach (var (code, ignoreCase, fields) in primaries)
+        {
+            var (count, sample) = await Keys.RegistryKeyEmptyParts
+                .FindAsync(registries, definition, fields, ignoreCase, ct)
+                .ConfigureAwait(false);
+            if (count > 0)
+            {
+                throw Keys.RegistryKeyEmptyParts.Refusal(definition, code, count, sample);
+            }
+        }
+
         var fill = new List<RegistryKeyDef>(plan.Reactivated);
         foreach (var pending in plan.Created)
         {

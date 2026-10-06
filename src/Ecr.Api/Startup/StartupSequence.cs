@@ -116,6 +116,11 @@ public static partial class StartupSequence
         var secretFile = BootstrapSecretFile.ReadAndDelete(
             Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData));
 
+        if (secretFile.RejectedOwner is not null)
+        {
+            LogBootstrapSecretRejected(logger, secretFile.RejectedOwner);
+        }
+
         if (secretFile.DeleteError is not null)
         {
             LogBootstrapSecretNotDeleted(logger, secretFile.DeleteError);
@@ -307,4 +312,9 @@ public static partial class StartupSequence
         Message = "Старт: не вдалося видалити одноразовий файл bootstrap-пароля: {Error}. " +
                    "Пароль у ньому вже використано — прибери файл вручну.")]
     private static partial void LogBootstrapSecretNotDeleted(ILogger logger, string error);
+
+    [LoggerMessage(Level = LogLevel.Critical,
+        Message = "Старт: файл bootstrap-пароля відхилено — власник {Owner}, а не Administrators/SYSTEM (L10-02). " +
+                   "Пароль з нього НЕ використано, файл видалено. Хтось, крім адміністратора, писав у теку ECR/config під %ProgramData% — перевір права теки.")]
+    private static partial void LogBootstrapSecretRejected(ILogger logger, string owner);
 }

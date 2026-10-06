@@ -24,7 +24,11 @@ public interface IExcelImporter
     /// напередодні, беручи вже підрахований <c>ImportPlan</c> (той самий,
     /// що збережено при <see cref="PreviewAsync"/>), а не рахує наново з файлу.
     /// </remarks>
-    public Task<int> CountPendingChangesAsync(string previewToken, CancellationToken ct);
+    /// <para>
+    /// ⛔ L1-20: <paramref name="documentId"/> — документ ЗАПИТУ; перегляд іншого документа відмовляє
+    /// <c>ECR-IMP-0422</c> (<c>previewOtherDocument</c>) ще ДО постановки в чергу, а не лише всередині задачі.
+    /// </para>
+    public Task<int> CountPendingChangesAsync(long documentId, string previewToken, CancellationToken ct);
 }
 
 /// <summary>Результат попереднього перегляду імпорту.</summary>

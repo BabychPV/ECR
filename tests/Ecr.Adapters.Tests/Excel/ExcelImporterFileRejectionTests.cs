@@ -96,13 +96,34 @@ public sealed class ExcelImporterFileRejectionTests
         Assert.Equal("err.ECR-IMP-0422.previewExpired", apply.Details!["messageKey"]);
 
         var count = await Assert.ThrowsAsync<BusinessRuleException>(
-            () => Importer(previews, other).CountPendingChangesAsync("tok", CancellationToken.None));
+            () => Importer(previews, other).CountPendingChangesAsync(1, "tok", CancellationToken.None));
         Assert.Equal("err.ECR-IMP-0422.previewExpired", count.Details!["messageKey"]);
 
         // Власник бачить свій перегляд: рахує зміни (їх 0), а не отримує відмову.
         var owner = Substitute.For<ICurrentUser>();
         owner.UserId.Returns(5);
-        Assert.Equal(0, await Importer(previews, owner).CountPendingChangesAsync("tok", CancellationToken.None));
+        Assert.Equal(0, await Importer(previews, owner).CountPendingChangesAsync(1, "tok", CancellationToken.None));
+    }
+
+    /// <summary>
+    /// L1-20: перегляд, збудований для документа 1, не рахується (а отже, і не ставиться в чергу) із запитом для
+    /// документа 2 — відмова ДО черги, а не лише всередині задачі. До виправлення рахувалося мовчки.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public async Task Перегляд_іншого_документа_не_рахується_до_черги()
+    {
+        var plan = System.Text.Json.JsonSerializer.Serialize(new ImportPlan(1, 202601, [], UserId: 5), PlanJson);
+        var previews = Substitute.For<IImportPreviewStore>();
+        previews.FindAsync("tok", Arg.Any<CancellationToken>()).Returns(plan);
+        var owner = Substitute.For<ICurrentUser>();
+        owner.UserId.Returns(5);
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Importer(previews, owner).CountPendingChangesAsync(2, "tok", CancellationToken.None));
+
+        Assert.Equal("ECR-IMP-0422", error.ErrorCode);
+        Assert.Equal("err.ECR-IMP-0422.previewOtherDocument", error.Details!["messageKey"]);
     }
 
     private static ExcelImporter Importer(IImportPreviewStore? previews = null, ICurrentUser? user = null)

@@ -94,7 +94,7 @@ internal static class DeployScriptHarness
     }
 
     /// <summary><c>pwsh</c> з PATH; на Windows без нього — вбудований <c>powershell.exe</c>.</summary>
-    private static string FindPowerShell()
+    internal static string FindPowerShell()
     {
         var names = OperatingSystem.IsWindows() ? new[] { "pwsh.exe", "powershell.exe" } : ["pwsh"];
         var path = Environment.GetEnvironmentVariable("PATH") ?? string.Empty;

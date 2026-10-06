@@ -149,15 +149,17 @@ failed. Open Jobs to see why.»
    закриваються для правок **для всіх**: «This sheet has been submitted;
    editing is closed until it is reopened.»
 
-Кнопка **«Submit»** сіра з підказкою «Submitting needs the Submit access
-level on this project or sheet; yours is {level}…» — вам видано лише
-`Write`; попросіть адміністратора підняти рівень до `Submit`.
+Кнопка **«Submit»** активна вже з рівнем `Write`, але подання проходить лише з
+рівнем `Submit` або з `Write` разом із правом `Document.Submit` (D-285). Без права
+сервер відмовляє з поясненням «Your access level is too low to submit this sheet…»;
+попросіть адміністратора підняти рівень до `Submit` або видати це право.
 
 ### 1.6. Відкликати подання
 
 **«Recall»** повертає поданий аркуш у **Draft** («The submission has been
 recalled: the sheet is a draft again.»). Умови: ви — той, хто подав; у вас
-рівень `Submit`; погодження ще не почалося («Possible only until the first
+ті самі повноваження, що й для подання (рівень `Submit`, або `Write` разом із
+правом `Document.Submit`, D-285); погодження ще не почалося («Possible only until the first
 approver signs.»). Причина обов'язкова.
 
 ### 1.7. Аркуш повернули
@@ -365,7 +367,7 @@ sheet: there is nothing to apply.»
 | «… {rowCount} row(s) lost their registry entry.» | рядок посилається на нечинний запис довідника | розділ 3 |
 | «There are issues outside your visibility — submission is blocked. Contact the project owner.» | помилки в таблицях, яких ви не бачите | зверніться до власника проєкту |
 | «Only a draft or rejected sheet can be submitted; the sheet is {status}.» | аркуш уже подано або затверджено | оновіть сторінку; для правок потрібне повернення (розділ 2.5) |
-| Сіра **«Submit»** з «Submitting needs the Submit access level…» | у вас рівень `Write` | попросіть адміністратора видати `Submit` |
+| «Your access level is too low to submit this sheet…» після «Submit» | у вас рівень `Write` без права `Document.Submit` | попросіть адміністратора видати рівень `Submit` або право `Document.Submit` |
 | «… cannot be approved by the same person who submitted it.» | правило «чотирьох очей» | затверджує інший погоджувач |
 | «A comment is required to reject the sheet.» / «A reason is required…» | порожня причина | заповніть **«Reason»** |
 | «The sheet can no longer be recalled: approval has already started.» | перший крок погодження вже підписано | попросіть погоджувача відхилити аркуш |

@@ -1,3 +1,7 @@
+using System.Runtime.Versioning;
+using System.Security.AccessControl;
+using System.Security.Principal;
+
 namespace Ecr.Api.Startup;
 
 /// <summary>
@@ -36,13 +40,54 @@ public static class BootstrapSecretFile
     /// файл прочитано, але прибрати не вдалося: викликач має це залогувати,
     /// не проковтнути мовчки.
     /// </param>
-    public readonly record struct ReadResult(string? Password, string? DeleteError);
+    /// <param name="RejectedOwner">
+    /// <c>null</c> — файл прийнято або його не було. Непорожнє — власник
+    /// файлу не <c>BUILTIN\Administrators</c> і не <c>SYSTEM</c> (L10-02):
+    /// пароль НЕ повертається, файл видаляється, викликач пише Critical.
+    /// </param>
+    public readonly record struct ReadResult(string? Password, string? DeleteError, string? RejectedOwner = null);
+
+    /// <summary>
+    /// Власник файлу, якщо він НЕ довірений, інакше <c>null</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ L10-02 (аудит 2026-10-03): файл кладе лише deploy-ecr.ps1 від імені
+    /// адміністратора (власник — <c>BUILTIN\Administrators</c>, скрипт ставить
+    /// його явно). Файл з будь-яким іншим власником підклав хтось інший — і
+    /// пароль з нього став би паролем першого адміністратора системи. Поза
+    /// Windows (dev, CI на Linux) власника Windows немає — перевірка
+    /// пропускається.
+    /// </remarks>
+    public static string? UntrustedOwner(string path)
+        => OperatingSystem.IsWindows() ? UntrustedOwnerWindows(path) : null;
+
+    [SupportedOSPlatform("windows")]
+    private static string? UntrustedOwnerWindows(string path)
+    {
+        var owner = new FileInfo(path).GetAccessControl(AccessControlSections.Owner)
+            .GetOwner(typeof(SecurityIdentifier)) as SecurityIdentifier;
+
+        if (owner is not null
+            && (owner.IsWellKnown(WellKnownSidType.BuiltinAdministratorsSid)
+                || owner.IsWellKnown(WellKnownSidType.LocalSystemSid)))
+        {
+            return null;
+        }
+
+        return owner?.Value ?? "(невідомий)";
+    }
 
     /// <summary>
     /// Читає пароль і одразу видаляє файл — незалежно від того, чи вдасться
     /// пароль потім використати.
     /// </summary>
-    public static ReadResult ReadAndDelete(string commonApplicationDataFolder)
+    /// <param name="commonApplicationDataFolder">Тека спільних даних застосунків.</param>
+    /// <param name="untrustedOwner">
+    /// Перевірка власника; типово <see cref="UntrustedOwner"/>. Параметр — щоб
+    /// відмову можна було перевірити тестом на будь-якій ОС.
+    /// </param>
+    public static ReadResult ReadAndDelete(
+        string commonApplicationDataFolder, Func<string, string?>? untrustedOwner = null)
     {
         var path = PathUnder(commonApplicationDataFolder);
         if (!File.Exists(path))
@@ -50,7 +95,8 @@ public static class BootstrapSecretFile
             return new ReadResult(null, null);
         }
 
-        var content = File.ReadAllText(path).Trim();
+        var rejectedOwner = (untrustedOwner ?? UntrustedOwner)(path);
+        var content = rejectedOwner is null ? File.ReadAllText(path).Trim() : null;
         string? deleteError = null;
 
         try
@@ -62,6 +108,6 @@ public static class BootstrapSecretFile
             deleteError = ex.Message;
         }
 
-        return new ReadResult(string.IsNullOrEmpty(content) ? null : content, deleteError);
+        return new ReadResult(string.IsNullOrEmpty(content) ? null : content, deleteError, rejectedOwner);
     }
 }

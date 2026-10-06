@@ -34,7 +34,7 @@ vi.mock('@mantine/notifications', async (importOriginal) => {
 
 const posts: { url: string; body: unknown }[] = [];
 
-function mockFetch(options: { grants: Record<string, string>; jobState?: string }): void {
+function mockFetch(options: { grants: Record<string, string>; jobState?: string; submitDenied?: boolean }): void {
   posts.length = 0;
 
   vi.stubGlobal(
@@ -58,6 +58,22 @@ function mockFetch(options: { grants: Record<string, string>; jobState?: string 
 
       if (init?.method === 'POST') {
         posts.push({ url, body: JSON.parse(String(init.body ?? 'null')) as unknown });
+
+        // D-285: Write без проєктного права Document.Submit — рішення за сервером.
+        if (options.submitDenied === true && url.includes('/submit')) {
+          return json(
+            {
+              status: 403,
+              title: 'Forbidden',
+              errorCode: 'ECR-ACCS-0403',
+              messageKey: 'err.ECR-ACCS-0403.submitDenied',
+              reason: 'InsufficientGrantLevel',
+              reasonKey: 'deny.InsufficientGrantLevel.Submit',
+              sheetDefId: String(SheetDefId),
+            },
+            403,
+          );
+        }
 
         return url.includes('/recalculate') ? json({ jobId: 'job-1' }, 202) : json({});
       }
@@ -89,6 +105,7 @@ function show(options: {
   state: string;
   lock?: DocumentLock | null;
   jobState?: string;
+  submitDenied?: boolean;
 }): void {
   mockFetch(options);
 
@@ -123,26 +140,25 @@ afterEach(() => {
   vi.mocked(notifications.show).mockClear();
 });
 
-describe('F-17: «Submit» при гранті Write — видно, вимкнено й пояснено', () => {
+// ✎ D-285 (рішення координатора): F-17 (вимкнена «Submit» для Write) прибрано.
+// /me не віддає проєктних прав ролей з областю, тож клієнт не може знати про
+// `Document.Submit`; кнопка активна для Write, а відмову дає СЕРВЕР (403).
+describe('D-285: «Submit» при гранті Write — активна, відмову пояснює сервер', () => {
   it(
-    'кнопка є, не подає, і каже, якого рівня бракує',
+    'кнопка активна й без Document.Submit у /me; на 403 submitDenied показується помилка',
     async () => {
-      show({ grants: { 'Project:7': 'Write' }, state: 'Draft' });
+      show({ grants: { 'Project:7': 'Write' }, state: 'Draft', submitDenied: true });
 
-      const submit = await screen.findByTestId('submit-needs-grant', {}, { timeout: SlowEnvTimeout });
+      const submit = await screen.findByRole('button', { name: /document\.submit/ }, { timeout: SlowEnvTimeout });
 
-      expect(submit.getAttribute('aria-disabled')).toBe('true');
-
-      // ⚠ Пояснення прив'язане до кнопки (`aria-describedby`), а не лише в
-      // спливній підказці: читалка чує його разом із назвою кнопки.
-      const describedBy = submit.getAttribute('aria-describedby') ?? '';
-      expect(describedBy).not.toBe('');
-
-      fireEvent.focus(submit);
-      expect(await screen.findByText(/workflow\.submitNeedsGrant.*level=Write/)).toBeTruthy();
+      expect(submit.getAttribute('aria-disabled')).not.toBe('true');
+      expect(screen.queryByTestId('submit-needs-grant')).toBeNull();
 
       fireEvent.click(submit);
-      expect(posts).toHaveLength(0);
+
+      await waitFor(() => expect(posts.some((p) => p.url.includes('/submit'))).toBe(true));
+      await waitFor(() => expect(notifications.show).toHaveBeenCalled());
+      expect(vi.mocked(notifications.show).mock.calls[0]?.[0]).toMatchObject({ color: 'statusError' });
     },
     SlowEnvTimeout,
   );

@@ -17,7 +17,7 @@ public sealed class SeedTests(SqlServerFixture sql)
     /// сюди, тест впаде — і це правильно. Право, якого немає в цьому списку,
     /// ніхто не перевіряв.
     /// </remarks>
-    private const int ExpectedPermissions = 42;
+    private const int ExpectedPermissions = 43; // D-285: + Document.Submit (безпечне, ExpectedDangerous без змін)
 
     private const int ExpectedDangerous = 11;
 
@@ -550,6 +550,64 @@ public sealed class SeedTests(SqlServerFixture sql)
             WHERE r.Code = N'DataEntry'
               AND rp.PermissionCode IN (N'Template.Edit', N'Template.Publish')
             """));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Decision", "D-285")]
+    public async Task Право_Document_Submit_у_каталозі_і_видане_DataEntry_та_адміністратору()
+    {
+        // D-285: Write сам по собі подання не дає; DataEntry (заповнює й подає
+        // свої форми) отримує право, SystemAdministrator — через шаблон `%`.
+        Assert.Equal(1, await ScalarAsync(
+            "SELECT COUNT(*) FROM sec.Permission WHERE Code = N'Document.Submit' AND IsDangerous = 0"));
+
+        Assert.Equal(1, await ScalarAsync(RolePair("DataEntry")));
+        Assert.Equal(1, await ScalarAsync(RolePair("SystemAdministrator")));
+
+        // ⚠ Не для ролей, що лише читають чи погоджують (Approver подає рівнем
+        // гранта Submit, не правом).
+        Assert.Equal(0, await ScalarAsync(RolePair("Viewer")));
+        Assert.Equal(0, await ScalarAsync(RolePair("Auditor")));
+        Assert.Equal(0, await ScalarAsync(RolePair("Approver")));
+
+        static string RolePair(string role) => $"""
+            SELECT COUNT(*)
+            FROM sec.RolePermission AS rp
+            JOIN sec.Role AS r ON r.Id = rp.RoleId
+            WHERE r.Code = N'{role}' AND rp.PermissionCode = N'Document.Submit'
+            """;
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Decision", "D-285")]
+    public async Task Розгорнута_база_без_права_Submit_у_DataEntry_отримує_його_повторним_seed()
+    {
+        // ⚠ Стара база: DataEntry розгорнуто до D-285, пари немає. MERGE лише
+        // додає — наявна роль отримує право на наступному старті.
+        const string Pair = """
+            SELECT COUNT(*)
+            FROM sec.RolePermission AS rp
+            JOIN sec.Role AS r ON r.Id = rp.RoleId
+            WHERE r.Code = N'DataEntry' AND rp.PermissionCode = N'Document.Submit'
+            """;
+        await ExecuteAsync("""
+            DELETE rp
+            FROM sec.RolePermission AS rp
+            JOIN sec.Role AS r ON r.Id = rp.RoleId
+            WHERE r.Code = N'DataEntry' AND rp.PermissionCode = N'Document.Submit';
+            """);
+        Assert.Equal(0, await ScalarAsync(Pair));
+
+        await using (var db = CreateContext())
+        {
+            await new SeedRunner(db).RunAsync(CancellationToken.None);
+        }
+
+        Assert.Equal(1, await ScalarAsync(Pair));
     }
 
     [Fact]

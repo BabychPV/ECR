@@ -112,7 +112,14 @@ USING (VALUES
   (N'System.ManageNotifications', N'System',    1),
   -- НЕБЕЗПЕЧНЕ (1): зміна бізнес-ключа документа (ФВ-3.9) міняє те, під чим
   -- документ знають експорти й зовнішні системи; видається свідомо.
-  (N'Document.ChangeKey',       N'Document',    1)
+  (N'Document.ChangeKey',       N'Document',    1),
+  -- SEC:SUBMIT (D-285, варіант B′): право ПОДАННЯ аркуша для рівня Write.
+  -- Подання дозволене, якщо ефективний рівень >= Submit АБО (>= Write І це
+  -- право в проєкті документа). Сам Write подання не дає. Проєктне, не
+  -- звужуване (`PermissionScopes.Narrowable` не містить). Не небезпечне (0):
+  -- `SystemAdministrator` (`%`) отримує його цим же MERGE; роздача
+  -- `DataEntry` — секція `SEC:SUBMIT` нижче, після `SEC:RPT`.
+  (N'Document.Submit',          N'Document',    0)
 ) AS s (Code, [Group], IsDangerous)
 ON t.Code = s.Code
 WHEN NOT MATCHED THEN INSERT (Code, [Group], NameL10n, IsDangerous)
@@ -583,6 +590,31 @@ ON t.RoleId = s.RoleId AND t.PermissionCode = s.PermissionCode
 WHEN NOT MATCHED THEN INSERT (RoleId, PermissionCode) VALUES (s.RoleId, s.PermissionCode);
 GO
 -- SEC:RPT ── кінець секції ───────────────────────────────────────────────────
+
+-- SEC:SUBMIT ── DataEntry подає свої форми (D-285, рішення людини 2026-10-05) ─
+-- ✎ Варіант B′: рівень Write подання НЕ дає; його дає рівень Submit АБО
+-- Write разом із проєктним правом `Document.Submit`. Вбудована роль
+-- `DataEntry` (заповнює й подає свої форми) отримує право явно.
+-- `SystemAdministrator` — шаблоном `%` (рядок каталогу вище); `Approver`
+-- права не потребує: подає рівнем гранта Submit, а не правом.
+--
+-- ⚠ Для адміністраторів: власні (не вбудовані) ролі з рівнем Write права не
+-- отримують — щоб їхні носії подавали, право видається вручну (`/admin/security`)
+-- або рівень гранта піднімається до Submit. Наявні гранти не змінюються.
+-- ⚠ MERGE … WHEN NOT MATCHED: наявна база отримує пару на наступному старті
+-- (`SeedRunner`); якщо адміністратор право в `DataEntry` зняв — повторний seed
+-- його поверне (так само, як решту вбудованих пар).
+MERGE sec.RolePermission AS t
+USING (
+    SELECT r.Id AS RoleId, p.Code AS PermissionCode
+    FROM sec.Role AS r
+    JOIN sec.Permission AS p ON p.Code = N'Document.Submit' AND p.IsDangerous = 0
+    WHERE r.Code = N'DataEntry'
+) AS s
+ON t.RoleId = s.RoleId AND t.PermissionCode = s.PermissionCode
+WHEN NOT MATCHED THEN INSERT (RoleId, PermissionCode) VALUES (s.RoleId, s.PermissionCode);
+GO
+-- SEC:SUBMIT ── кінець секції ────────────────────────────────────────────────
 -- Політика періодів ECR
 MERGE doc.PeriodPolicy AS t USING (VALUES (N'ECR-Standard', 0, 15, 45, 45))
       AS s (Code, O, G, H, Y) ON t.Code = s.Code
@@ -613,6 +645,14 @@ UPDATE t
   FROM sys_ecr.UiString AS t
   JOIN (VALUES
     (N'common.loading',                  N'en', N'Loading…', N'Loading...'),
+    -- COLL:an43fix D-285: загальний deny.InsufficientGrantLevel повернуто до загального формулювання (подання має власний ключ .Submit).
+    (N'deny.InsufficientGrantLevel',     N'en', N'Your access level is too low for this action: ask for a higher level. To submit a sheet you need the Submit level, or the Write level together with the Submit documents right in this project.', N'Your grant level is too low for this action: ask for a higher grant level, not a new grant.'),
+    (N'deny.InsufficientGrantLevel',     N'ru', N'Уровень вашего доступа недостаточен для этого действия: запросите более высокий уровень. Для подачи листа нужен уровень «Подача» либо уровень «Запись» вместе с правом «Подача документов» в этом проекте.', N'Уровень вашего доступа недостаточен для этого действия: запросите более высокий уровень доступа, а не новый доступ.'),
+    (N'deny.InsufficientGrantLevel',     N'kz', N'Бұл әрекет үшін қолжетімділік деңгейіңіз жеткіліксіз: жоғарырақ деңгейді сұраңыз. Парақты тапсыру үшін «Тапсыру» деңгейі не осы жобада «Жазу» деңгейі мен «Құжаттарды тапсыру» құқығы қажет.', N'Бұл әрекет үшін қолжетімділік деңгейіңіз жеткіліксіз: жаңа қолжетімділік емес, жоғарырақ қолжетімділік деңгейін сұраңыз.'),
+    -- COLL:an43fix D-285: recallDenied — відкликання за тим самим правилом, що й подання.
+    (N'err.ECR-ACCS-0403.recallDenied',  N'en', N'Sheet {sheetDefId} cannot be recalled: the Submit grant level is required.', N'Sheet {sheetDefId} cannot be recalled: the Submit grant level, or the Write level together with the Submit documents right, is required.'),
+    (N'err.ECR-ACCS-0403.recallDenied',  N'ru', N'Лист {sheetDefId} нельзя отозвать: требуется уровень доступа Submit.', N'Лист {sheetDefId} нельзя отозвать: требуется уровень доступа «Подача» либо уровень «Запись» вместе с правом «Подача документов».'),
+    (N'err.ECR-ACCS-0403.recallDenied',  N'kz', N'{sheetDefId} парағын кері шақыруға болмайды: Submit қолжетімділік деңгейі қажет.', N'{sheetDefId} парағын кері шақыруға болмайды: «Тапсыру» деңгейі не «Жазу» деңгейі мен «Құжаттарды тапсыру» құқығы қажет.'),
     -- ent7 P2-1: відмова й для звужувального дозволу (Read під Write проєкту), не лише заборони.
     (N'err.ECR-SCHM-0422.migrateGrantsNotMapped', N'en', N'The target version has no sheet, table or column with the code of a resource that has a deny grant, so the deny cannot be carried over. Remove or re-create that deny deliberately before moving the project.', N'The target version has no sheet, table or column with the code of a resource that has an access grant (deny or a restricting Read), so the grant cannot be carried over and access could widen. Remove or re-create that grant deliberately before moving the project.'),
     (N'err.ECR-SCHM-0422.migrateGrantsNotMapped', N'ru', N'В целевой версии нет листа, таблицы или столбца с кодом ресурса, на котором стоит запрет, поэтому запрет не перенести. Снимите или пересоздайте этот запрет осознанно до переноса проекта.', N'В целевой версии нет листа, таблицы или столбца с кодом ресурса, на котором стоит право доступа (запрет или ограничивающее чтение), поэтому право не перенести, а доступ мог бы расшириться. Снимите или пересоздайте это право осознанно до переноса проекта.'),
@@ -1048,7 +1088,14 @@ SET @textUpdates = @@ROWCOUNT;
 DELETE t
   FROM sys_ecr.UiString AS t
   JOIN (VALUES
-    (N'campaign.truncatedHint',                    N'en', N'The server returned only part of the list. A project holding up the campaign may be among those not shown, and the totals cover only the projects shown.'),
+    -- COLL:an43fix: мертвий ключ F-17 (кнопку Submit більше не сірять; відмову дає сервер). Два значення: початкове й D-285.
+    (N'workflow.submitNeedsGrant',                 N'en', N'Submitting needs the Submit access level on this project or sheet; yours is {level}. Ask an administrator to raise it.'),
+    (N'workflow.submitNeedsGrant',                 N'ru', N'Для подачи нужен уровень доступа «Подача» к этому проекту или листу; у вас — {level}. Попросите администратора повысить его.'),
+    (N'workflow.submitNeedsGrant',                 N'kz', N'Тапсыру үшін осы жобаға немесе параққа «Тапсыру» қолжетімділік деңгейі қажет; сіздікі — {level}. Әкімшіден оны арттыруды сұраңыз.'),
+    (N'workflow.submitNeedsGrant',                 N'en', N'Submitting needs the Submit access level on this project or sheet, or the Write level together with the Submit documents right; yours is {level} without that right. Ask an administrator to raise the level or grant the right.'),
+    (N'workflow.submitNeedsGrant',                 N'ru', N'Для подачи нужен уровень доступа «Подача» к этому проекту или листу либо уровень «Запись» вместе с правом «Подача документов»; у вас — {level} без этого права. Попросите администратора повысить уровень или выдать право.'),
+    (N'workflow.submitNeedsGrant',                 N'kz', N'Тапсыру үшін осы жобаға немесе параққа «Тапсыру» қолжетімділік деңгейі не «Жазу» деңгейі мен «Құжаттарды тапсыру» құқығы қажет; сіздікі — {level}, бұл құқықсыз. Әкімшіден деңгейді арттыруды немесе құқық беруді сұраңыз.'),
+    (N'campaign.truncatedHint',                   N'en', N'The server returned only part of the list. A project holding up the campaign may be among those not shown, and the totals cover only the projects shown.'),
     (N'campaign.laggingCount',                     N'en', N'{lagging} of {shown} projects are not finished: no documents, not everything approved, or no snapshot yet.'),
     (N'campaign.nobodyLaggingHint',                N'en', N'Every project shown has all documents approved and a report snapshot.'),
     (N'registries.usageKind.templateColumn',       N'en', N'Template column'),
@@ -1865,7 +1912,7 @@ USING (VALUES
     (N'err.ECR-DOC-0422.rejectCommentRequired', N'en', N'A comment is required to reject the sheet.', 1),
 
     -- BE-31: recall of a submitted sheet by its author.
-    (N'err.ECR-ACCS-0403.recallDenied',         N'en', N'Sheet {sheetDefId} cannot be recalled: the Submit grant level is required.', 1),
+    (N'err.ECR-ACCS-0403.recallDenied',         N'en', N'Sheet {sheetDefId} cannot be recalled: the Submit grant level, or the Write level together with the Submit documents right, is required.', 1),
     (N'err.ECR-ACCS-0403.recallNotAuthor',      N'en', N'Only the person who submitted the sheet can recall it.', 1),
     (N'err.ECR-DOC-0409.recallWrongState',      N'en', N'Only a submitted sheet can be recalled; the sheet is {status}.', 1),
     (N'err.ECR-DOC-0409.recallStepSigned',      N'en', N'The sheet can no longer be recalled: approval has already started.', 1),
@@ -5532,7 +5579,6 @@ USING (VALUES
     (N'grid.tableLoadsOnScroll', N'en', N'This table loads when you scroll to it.', 1),
 
     -- F-17, F-18, X-25: пояснення рівня для подання, причина закритого документа, підтвердження затвердження.
-    (N'workflow.submitNeedsGrant', N'en', N'Submitting needs the Submit access level on this project or sheet; yours is {level}. Ask an administrator to raise it.', 1),
     (N'workflow.approveTitle', N'en', N'Approve this sheet?', 1),
     (N'workflow.approveHint', N'en', N'Approved figures become final for this period and go into regulatory reports. To change them later, the sheet has to be returned for edits.', 1),
     (N'document.lock.projectArchived', N'en', N'This project is archived: its documents are read-only.', 1),
@@ -6602,8 +6648,31 @@ USING (VALUES
     (N'err.ECR-REQ-0422.uiStringCsvUnterminatedQuote', N'en', N'The file ends inside quotation marks: a closing quote is missing. Nothing was imported.', 1),
     -- COLL:an35b ── кінець секції ──
     -- COLL:an38t5 ── T5-04: вставка неоднозначного числа — власний вступ вікна відмови, не «лише для читання»; ru/kz — порцією COLL:an38t5 у блоці I18N нижче ──
-    (N'grid.rejectedAmbiguousHint', N'en', N'Nothing from this paste was saved. In English a comma separates thousands, so a number such as 4,125 is ambiguous: enter 4125 or 4.125.', 1)
+    (N'grid.rejectedAmbiguousHint', N'en', N'Nothing from this paste was saved. In English a comma separates thousands, so a number such as 4,125 is ambiguous: enter 4125 or 4.125.', 1),
     -- COLL:an38t5 ── кінець секції ──
+    -- COLL:an38k ── L4-06/L5-03: первинний ключ на записах без значення частини; ru/kz — порцією COLL:an38k у блоці I18N нижче ──
+    (N'err.ECR-REG-0422.primaryKeyEmptyParts', N'en', N'Primary key {key} cannot be enabled: {entries} entries have no value in a part of the key. Fill it in or delete those entries first.', 1),
+    -- COLL:an38k ── кінець секції ──
+    -- COLL:an37m ── AN-37 L7-08: гонка двох публікацій на одну дату (версію-суперника база не називає); ru/kz — порцією COLL:an37m у блоці I18N нижче ──
+    (N'err.ECR-CALC-0409.effectiveDateTakenNoVersion', N'en', N'Another version of this methodology was published with effective date {effectiveFrom} at the same moment. Two published versions with the same start date make the methodology choice ambiguous: reload the methodology and publish with another date.', 1),
+    -- COLL:an37m ── кінець секції ──
+    -- COLL:an42vm ── T2-07/T3-03/T4-06: повідомлення валідації зберігаються ключем + підстановками, текст — мовою читача; ru/kz — порцією COLL:an42vm у блоці I18N нижче ──
+    (N'validation.check.mismatch', N'en', N'Check: {left} = {leftValue} does not match {right} = {rightValue}: deviation {deviation}, allowed {allowed} ({kind}).', 1),
+    (N'validation.column.required', N'en', N'Column "{column}" is required.', 1),
+    (N'validation.column.scale', N'en', N'Column "{column}" allows at most {scale} decimal places.', 1),
+    (N'validation.column.precision', N'en', N'The value does not fit the precision of column "{column}" ({precision} digits).', 1),
+    (N'validation.rule.parseError', N'en', N'Rule ''{rule}'' does not parse: {detail}', 1),
+    (N'validation.rule.notLogical', N'en', N'Rule ''{rule}'' did not return a logical answer: {reason}', 1),
+    -- COLL:an42vm ── кінець секції ──
+    -- COLL:an43sub ── D-285: право подання аркуша для рівня Write (підпис у ролі й повідомлення); ru/kz — порцією COLL:an43sub у блоці I18N нижче ──
+    (N'permission.Document.Submit', N'en', N'Submit documents (with the Write level)', 1),
+    -- COLL:an43sub ── кінець секції ──
+    -- COLL:l104 ── L1-04: небезпечний запит з чужого сайту (CSRF, Origin / Sec-Fetch-Site); ru/kz — порцією COLL:l104 у блоці I18N нижче ──
+    (N'err.ECR-AUTH-0403.csrfOrigin', N'en', N'This request came from another website and was rejected. Open the application at its own address and repeat the action.', 1),
+    -- COLL:l104 ── кінець секції ──
+    -- COLL:an43fix ── D-285: окремий текст відмови подання (reasonKey deny.InsufficientGrantLevel.Submit); ru/kz — порцією COLL:an43fix у блоці I18N нижче ──
+    (N'deny.InsufficientGrantLevel.Submit', N'en', N'Your access level is too low to submit this sheet: you need the Submit level, or the Write level together with the Submit documents right in this project. Ask an administrator to raise the level or grant the right.', 1)
+    -- COLL:an43fix ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -7097,7 +7166,7 @@ SELECT v.[Key], v.Lang, v.Val
     (N'err.ECR-DOC-0409.rejectWrongState', N'ru', N'Вернуть в работу можно только поданный лист; состояние листа — {status}.'),
     (N'err.ECR-DOC-0422.reopenReasonRequired', N'ru', N'Чтобы вернуть лист в работу, требуется причина.'),
     (N'err.ECR-DOC-0422.rejectCommentRequired', N'ru', N'Чтобы вернуть лист в работу, требуется комментарий.'),
-    (N'err.ECR-ACCS-0403.recallDenied', N'ru', N'Лист {sheetDefId} нельзя отозвать: требуется уровень доступа Submit.'),
+    (N'err.ECR-ACCS-0403.recallDenied', N'ru', N'Лист {sheetDefId} нельзя отозвать: требуется уровень доступа «Подача» либо уровень «Запись» вместе с правом «Подача документов».'),
     (N'err.ECR-ACCS-0403.recallNotAuthor', N'ru', N'Отозвать лист может только тот, кто его подал.'),
     (N'err.ECR-DOC-0409.recallWrongState', N'ru', N'Отозвать можно только поданный лист; состояние листа — {status}.'),
     (N'err.ECR-DOC-0409.recallStepSigned', N'ru', N'Лист больше нельзя отозвать: согласование уже началось.'),
@@ -9556,7 +9625,6 @@ SELECT v.[Key], v.Lang, v.Val
     (N'grid.boolYes', N'ru', N'Да'),
     (N'grid.boolNo', N'ru', N'Нет'),
     (N'grid.tableLoadsOnScroll', N'ru', N'Таблица загрузится, когда вы прокрутите до неё.'),
-    (N'workflow.submitNeedsGrant', N'ru', N'Для подачи нужен уровень доступа «Подача» к этому проекту или листу; у вас — {level}. Попросите администратора повысить его.'),
     (N'workflow.approveTitle', N'ru', N'Утвердить этот лист?'),
     (N'workflow.approveHint', N'ru', N'Утверждённые показатели становятся окончательными для этого периода и попадают в регламентированные отчёты. Чтобы изменить их позже, лист нужно вернуть в работу.'),
     (N'document.lock.projectArchived', N'ru', N'Проект перенесён в архив: его документы доступны только для чтения.'),
@@ -10126,7 +10194,7 @@ SELECT v.[Key], v.Lang, v.Val
     (N'err.ECR-DOC-0409.rejectWrongState', N'kz', N'Жұмысқа тек тапсырылған парақты қайтаруға болады; парақ күйі — {status}.'),
     (N'err.ECR-DOC-0422.reopenReasonRequired', N'kz', N'Парақты жұмысқа қайтару үшін себеп қажет.'),
     (N'err.ECR-DOC-0422.rejectCommentRequired', N'kz', N'Парақты жұмысқа қайтару үшін түсініктеме қажет.'),
-    (N'err.ECR-ACCS-0403.recallDenied', N'kz', N'{sheetDefId} парағын кері шақыруға болмайды: Submit қолжетімділік деңгейі қажет.'),
+    (N'err.ECR-ACCS-0403.recallDenied', N'kz', N'{sheetDefId} парағын кері шақыруға болмайды: «Тапсыру» деңгейі не «Жазу» деңгейі мен «Құжаттарды тапсыру» құқығы қажет.'),
     (N'err.ECR-ACCS-0403.recallNotAuthor', N'kz', N'Парақты тек оны тапсырған адам кері шақыра алады.'),
     (N'err.ECR-DOC-0409.recallWrongState', N'kz', N'Тек тапсырылған парақты кері шақыруға болады; парақ күйі — {status}.'),
     (N'err.ECR-DOC-0409.recallStepSigned', N'kz', N'Парақты енді кері шақыруға болмайды: келісу басталып кетті.'),
@@ -12585,7 +12653,6 @@ SELECT v.[Key], v.Lang, v.Val
     (N'grid.boolYes', N'kz', N'Иә'),
     (N'grid.boolNo', N'kz', N'Жоқ'),
     (N'grid.tableLoadsOnScroll', N'kz', N'Кесте оған дейін айналдырғанда жүктеледі.'),
-    (N'workflow.submitNeedsGrant', N'kz', N'Тапсыру үшін осы жобаға немесе параққа «Тапсыру» қолжетімділік деңгейі қажет; сіздікі — {level}. Әкімшіден оны арттыруды сұраңыз.'),
     (N'workflow.approveTitle', N'kz', N'Бұл парақты бекіту керек пе?'),
     (N'workflow.approveHint', N'kz', N'Бекітілген көрсеткіштер осы кезең үшін түпкілікті болады және реттелетін есептерге енеді. Оларды кейін өзгерту үшін парақты жұмысқа қайтару қажет.'),
     (N'document.lock.projectArchived', N'kz', N'Жоба мұрағатқа жіберілген: оның құжаттары тек оқу үшін қолжетімді.'),
@@ -15603,6 +15670,76 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:an38t5 ── кінець секції ──
+-- COLL:an38k── ru/kz L4-06/L5-03: первинний ключ на записах без значення частини; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-REG-0422.primaryKeyEmptyParts', N'ru', N'Первичный ключ {key} нельзя включить: у {entries} записей нет значения части ключа. Сначала заполните его или удалите эти записи.'),
+    (N'err.ECR-REG-0422.primaryKeyEmptyParts', N'kz', N'Негізгі кілт {key} қосу мүмкін емес: {entries} жазбада кілт бөлігінің мәні жоқ. Алдымен оны толтырыңыз немесе осы жазбаларды жойыңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:an38k ── кінець секції ──
+-- COLL:an37m ── ru/kz AN-37 L7-08: гонка двох публікацій на одну дату; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-CALC-0409.effectiveDateTakenNoVersion', N'ru', N'Другая версия этой методики опубликована с датой начала {effectiveFrom} в тот же момент. Две опубликованные версии с одинаковой датой начала делают выбор методики неоднозначным: перезагрузите методику и опубликуйте с другой датой.'),
+    (N'err.ECR-CALC-0409.effectiveDateTakenNoVersion', N'kz', N'Осы әдістеменің басқа нұсқасы {effectiveFrom} басталу күнімен дәл сол сәтте жарияланды. Басталу күні бірдей екі жарияланған нұсқа әдістемені таңдауды екіұшты етеді: әдістемені қайта жүктеп, басқа күнмен жариялаңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:an37m ── кінець секції ──
+-- COLL:an42vm ── ru/kz T2-07/T3-03/T4-06: повідомлення валідації за ключем; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'validation.check.mismatch', N'ru', N'Сверка: {left} = {leftValue} не сходится с {right} = {rightValue}: отклонение {deviation}, допустимо {allowed} ({kind}).'),
+    (N'validation.column.required', N'ru', N'Колонка «{column}» обязательна.'),
+    (N'validation.column.scale', N'ru', N'Колонка «{column}» допускает не более {scale} знаков после запятой.'),
+    (N'validation.column.precision', N'ru', N'Значение не помещается в точность колонки «{column}» ({precision} цифр).'),
+    (N'validation.rule.parseError', N'ru', N'Правило ''{rule}'' не разбирается: {detail}'),
+    (N'validation.rule.notLogical', N'ru', N'Правило ''{rule}'' не дало логического ответа: {reason}'),
+    (N'validation.check.mismatch', N'kz', N'Салыстыру: {left} = {leftValue} мәні {right} = {rightValue} мәніне сәйкес келмейді: ауытқу {deviation}, рұқсат етілгені {allowed} ({kind}).'),
+    (N'validation.column.required', N'kz', N'«{column}» бағаны міндетті.'),
+    (N'validation.column.scale', N'kz', N'«{column}» бағанында үтірден кейін {scale} таңбадан артық болмауы керек.'),
+    (N'validation.column.precision', N'kz', N'Мән «{column}» бағанының дәлдігіне ({precision} сан) сыймайды.'),
+    (N'validation.rule.parseError', N'kz', N'''{rule}'' ережесі талдана алмайды: {detail}'),
+    (N'validation.rule.notLogical', N'kz', N'''{rule}'' ережесі логикалық жауап бермеді: {reason}')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:an42vm ── кінець секції ──
+-- COLL:an43sub ── ru/kz D-285: підпис права Document.Submit; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'permission.Document.Submit', N'ru', N'Подача документов (при уровне «Запись»)'),
+    (N'permission.Document.Submit', N'kz', N'Құжаттарды тапсыру («Жазу» деңгейінде)')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:an43sub ── кінець секції ──
+-- COLL:l104 ── ru/kz L1-04: небезпечний запит з чужого сайту; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-AUTH-0403.csrfOrigin', N'ru', N'Запрос пришёл с другого сайта и отклонён. Откройте приложение по его собственному адресу и повторите действие.'),
+    (N'err.ECR-AUTH-0403.csrfOrigin', N'kz', N'Сұрау басқа сайттан келді және қабылданбады. Қолданбаны өз мекенжайы бойынша ашып, әрекетті қайталаңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:l104 ── кінець секції ──
+-- COLL:an43fix ── ru/kz D-285: окремий текст відмови подання; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'deny.InsufficientGrantLevel.Submit', N'ru', N'Уровень вашего доступа недостаточен для подачи этого листа: нужен уровень «Подача» либо уровень «Запись» вместе с правом «Подача документов» в этом проекте. Попросите администратора повысить уровень или выдать право.'),
+    (N'deny.InsufficientGrantLevel.Submit', N'kz', N'Бұл парақты тапсыру үшін қолжетімділік деңгейіңіз жеткіліксіз: осы жобада «Тапсыру» деңгейі не «Жазу» деңгейі мен «Құжаттарды тапсыру» құқығы қажет. Әкімшіден деңгейді арттыруды немесе құқық беруді сұраңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:an43fix ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

@@ -317,7 +317,8 @@
 | A8 | `ivanov` | запис `Waste_08` | `202604`, `Open` | `Deny(OutOfAccessWindow)` |
 | A9 | `ivanov` | запис | `202601`, документ `Submitted` | `Deny(DocumentSubmitted)` |
 | A10 | `petrenko` | запис `Main.7001001.Note` | `202601`, `Open` | `Allow` — `IsDeny` лише на `Total` |
-| A11 | `ivanov` | `Submit` аркуша `Water_07` | `202601` | `Deny(NoGrant)` — потрібен рівень `Submit` |
+| A11 | `ivanov` (`Write`, без права `Document.Submit`) | `Submit` аркуша `Water_07` | `202601` | `Deny(InsufficientGrantLevel)` — потрібен рівень `Submit` АБО `Write` + право `Document.Submit` (D-285, варіант B′; рівень `Write` сам подання не дає) |
+| A11b | `ivanov` (`Write` + право `Document.Submit`) | `Submit` аркуша `Water_07` | `202601` | `Allow` (ДО D-285 — `Deny(InsufficientGrantLevel)`); `Read`/`None` із правом — відмова; `IsDeny` на аркуш/таблицю/колонку — `Deny(NoGrant)` |
 | A12 | `shevchuk` | `Approve` | `202601`, `Submitted` | `Allow` |
 
 > **A7 — ключовий сценарій.** Закритий період блокує запис усім, включно з

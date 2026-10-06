@@ -3668,6 +3668,8 @@ public sealed class NotFoundException(string errorCode, string message)
 | `err.ECR-CALC-0422.methodologyImportBlocked` | 422 | пакет методологій має блокери (нерезолвні посилання тощо) — запис не виконується (`POST /methodologies/import`) |
 | `err.ECR-CALC-0422.methodologyImportTimeZone` | 422 | пояс дат AF в імпорті пакета невідомий |
 | `err.ECR-CALC-0409.methodologyImportConflict` | 409 | пакет змінює вже наявну версію методології без нового номера версії |
+| `err.ECR-CALC-0409.effectiveDateTaken` | 409 | публікація: у методології вже є опублікована версія від цієї дати (ФВ-13.3); подробиці `version`, `effectiveFrom` |
+| `err.ECR-CALC-0409.effectiveDateTakenNoVersion` | 409 | те саме, але виявлене базою (унікальний індекс `UQ_MV_Effective`, аудит L7-08) під час гонки двох публікацій на одну дату; версію-суперника база не називає, подробиця лише `effectiveFrom` |
 | `err.ECR-CELL-0422.importPrecision` | 422 | імпорт `.xlsx`: значення після округлення до `Scale` не вміщується в `Precision` колонки (ФВ-9.16b) |
 | `err.ECR-CFG-0422.condFormatColor` | 422 | правило умовного форматування: колір не у форматі `#rrggbb` |
 | `err.ECR-CFG-0422.condFormatColumn` | 422 | правило умовного форматування посилається на неіснуючу колонку таблиці |
@@ -4057,6 +4059,8 @@ public sealed class NotFoundException(string errorCode, string message)
 | `POST` | `/api/v1/registries/{code}/external-keys` | `Registry.EditData` | 8 |
 | `DELETE` | `/api/v1/registries/{code}/external-keys/{id}` | `Registry.EditData` | 8 |
 
+> ✎ 2026-10-05: `GET /documents/{id}` — `sheetStates` і `sheets` повертаються лише за вказаного `periodKey`: стан робочого процесу має гранулярність «аркуш × період» (`D-38`); без `periodKey` обидва поля порожні — це свідомо (`DocumentSummary`: «порожньо без періоду»). Клієнт завжди передає `periodKey`.
+
 > ✎ 2026-09-30 (ФВ-2.6/2.7): `GET /documents/{id}/tables/{tableInstanceId}` → `TableSliceDto.cellFormats`
 > (необов'язкове; `null`/відсутнє = правил немає) — `{ "{rowKey}:{columnCode}": { backgroundHex, foregroundHex, isBold } }`,
 > той самий ключ, що `cellPermissions`. Це ГОТОВИЙ результат правил версії шаблону
@@ -4156,7 +4160,8 @@ public sealed class NotFoundException(string errorCode, string message)
 > дроті незмінні.
 
 > ✎ 2026-10-02 (ФВ-8.14, B5.4): `UsageItemDto` дістала необов'язкове `name` (читабельна
-> назва: колонка шаблону, поле довідника, методика; `null` — назви немає, клієнт показує`n> `label`). `label` лишається кодом — семантику не змінено.
+> назва: колонка шаблону, поле довідника, методика; `null` — назви немає, клієнт показує
+> `label`). `label` лишається кодом — семантику не змінено.
 
 > ✎ 2026-10-05 (AN-35, L5-02, **breaking для старих клієнтів**): `PUT /registries/{code}/definition/draft`
 > потребує заголовок `If-Match` = `definitionVersion` опису, з якого збудовано форму (як
