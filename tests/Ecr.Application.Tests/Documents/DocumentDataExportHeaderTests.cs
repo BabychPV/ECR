@@ -103,7 +103,8 @@ public sealed class DocumentDataExportHeaderTests
 
         Assert.Equal(["RDATE", "OPERATOR", "QTY", "NOTE", "FORMULA"], header.Select(h => h.GetProperty("code").GetString()));
         Assert.Equal(dateLabel, header[0].GetProperty("label").GetString());
-        Assert.Equal("2026-01-31T00:00:00", header[0].GetProperty("value").GetString());
+        // A3: Date шапки — лише дата, без `T00:00:00` (мутація: повернути формат з часом — тест червоний).
+        Assert.Equal("2026-01-31", header[0].GetProperty("value").GetString());
         Assert.Equal(operatorLabel, header[1].GetProperty("label").GetString());
         Assert.Equal("I. Petrenko", header[1].GetProperty("value").GetString());
         Assert.Equal("-12.5", header[2].GetProperty("value").GetString());
@@ -112,6 +113,31 @@ public sealed class DocumentDataExportHeaderTests
         // Зворотна сумісність: решта документа — як і було.
         Assert.Equal("Main", Assert.Single(doc.RootElement.GetProperty("tables").EnumerateArray().ToList()).GetProperty("table").GetString());
         Assert.DoesNotContain("stale", Encoding.UTF8.GetString(json));
+    }
+
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [InlineData("ru-RU")]
+    [InlineData("kk-KZ")]
+    [InlineData("en-US")]
+    public async Task Date_шапки_не_залежить_від_культури_потоку(string culture)
+    {
+        var previous = System.Globalization.CultureInfo.CurrentCulture;
+        System.Globalization.CultureInfo.CurrentCulture = System.Globalization.CultureInfo.GetCultureInfo(culture);
+        try
+        {
+            var json = await Exporter().ExportAsync(
+                DocumentId, Period, DocumentExportFormat.Json, false, null, null, CancellationToken.None, "en");
+
+            using var doc = JsonDocument.Parse(json);
+            Assert.Equal(
+                "2026-01-31",
+                doc.RootElement.GetProperty("header")[0].GetProperty("value").GetString());
+        }
+        finally
+        {
+            System.Globalization.CultureInfo.CurrentCulture = previous;
+        }
     }
 
     [Fact]
@@ -127,7 +153,7 @@ public sealed class DocumentDataExportHeaderTests
         using var reader = new StreamReader(archive.GetEntry("000-header.csv")!.Open(), Encoding.UTF8);
         Assert.Equal(
             "code,label,value\r\n"
-            + "RDATE,Дата отчёта,2026-01-31T00:00:00\r\n"
+            + "RDATE,Дата отчёта,2026-01-31\r\n"
             + "OPERATOR,Оператор,I. Petrenko\r\n"
             + "QTY,Количество,-12.5\r\n"
             + "NOTE,Примечание,\r\n"

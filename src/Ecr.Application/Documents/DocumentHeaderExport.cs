@@ -140,8 +140,11 @@ public static class DocumentHeaderExport
                 return new HeaderExportRow(field.Code, label, flag ? "true" : "false", flag, false);
 
             case CellDataType.Date when value.ValueDate is { } date:
+                // A3: поле шапки типу Date — календарна дата; у CSV/JSON без нульового часу
+                // (`2026-10-05`, а не `2026-10-05T00:00:00`), формат інваріантний. Типізоване
+                // значення для xlsx лишається DateTime.
                 return new HeaderExportRow(
-                    field.Code, label, date.ToString("yyyy-MM-dd'T'HH:mm:ss", CultureInfo.InvariantCulture), date, false);
+                    field.Code, label, date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), date, false);
 
             case CellDataType.Lookup when value.ValueRegistryEntryId is { } entryId:
                 var code = field.LookupRegistryDefId is { } registry
