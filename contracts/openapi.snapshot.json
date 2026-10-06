@@ -5316,6 +5316,47 @@
         ],
         "type": "object"
       },
+      "JobsSummary": {
+        "description": "Лічильники черги фонових задач.",
+        "properties": {
+          "avgStartLatencyMs": {
+            "description": "Середня затримка між постановкою і першим стартом (мс) для задач, що стартували\nз першої спроби за останню добу; `null` — таких немає. Повтори не враховуються:\nїхній інтервал містить паузу ретраю, а не очікування черги.",
+            "format": "int64",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "failed24h": {
+            "description": "Скільки задач завершилось провалом за останню добу.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "queued": {
+            "description": "Скільки задач стоїть у черзі (усі, без вікна).",
+            "format": "int32",
+            "type": "integer"
+          },
+          "running": {
+            "description": "Скільки задач зараз виконується (усі, без вікна).",
+            "format": "int32",
+            "type": "integer"
+          },
+          "succeeded24h": {
+            "description": "Скільки задач завершилось успішно за останню добу.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "running",
+          "queued",
+          "failed24h",
+          "succeeded24h",
+          "avgStartLatencyMs"
+        ],
+        "type": "object"
+      },
       "JsonElement": {},
       "LanguageDto": {
         "description": "Мова інтерфейсу з реєстру.",
@@ -23515,6 +23556,67 @@
         ]
       }
     },
+    "/api/v1/jobs/summary": {
+      "get": {
+        "description": "⛔ Та сама межа, що в переліку: без `mine` і без права — `403`,\nне нулі; параметра з ідентифікатором автора немає. Віддаються лише\nчисла — без тексту провалів і без посилань на документи.",
+        "parameters": [
+          {
+            "description": "Лише власні задачі; не вимагає `System.ViewHealth`.",
+            "in": "query",
+            "name": "mine",
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobsSummary"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobsSummary"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobsSummary"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "summary": "Лічильники черги для смуги показників: виконуються, у черзі, провали й\nуспіхи за добу, середня затримка старту. Право `System.ViewHealth`\n— або `mine=true` для ВЛАСНИХ задач.",
+        "tags": [
+          "JobsSummary"
+        ]
+      }
+    },
     "/api/v1/jobs/{jobId}": {
       "get": {
         "description": "Усе, що довше за ~5 с, іде у фон і повертає `jobId`; саме через цей\nендпоінт UI показує прогрес. Задача, якої немає, — це 404, а не порожній\nстан: інакше клієнт нескінченно опитував би неіснуючий ідентифікатор.",
@@ -41356,6 +41458,9 @@
     },
     {
       "name": "Jobs"
+    },
+    {
+      "name": "JobsSummary"
     },
     {
       "name": "Languages"

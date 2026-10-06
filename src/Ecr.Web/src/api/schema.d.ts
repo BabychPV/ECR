@@ -4478,6 +4478,65 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/jobs/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Лічильники черги для смуги показників: виконуються, у черзі, провали й
+         *     успіхи за добу, середня затримка старту. Право `System.ViewHealth`
+         *     — або `mine=true` для ВЛАСНИХ задач.
+         * @description ⛔ Та сама межа, що в переліку: без `mine` і без права — `403`,
+         *     не нулі; параметра з ідентифікатором автора немає. Віддаються лише
+         *     числа — без тексту провалів і без посилань на документи.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Лише власні задачі; не вимагає `System.ViewHealth`. */
+                    mine?: boolean;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["JobsSummary"];
+                        "text/json": components["schemas"]["JobsSummary"];
+                        "text/plain": components["schemas"]["JobsSummary"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/jobs/{jobId}": {
         parameters: {
             query?: never;
@@ -20089,6 +20148,36 @@ export interface components {
              * @description Момент останнього оновлення в UTC.
              */
             updatedAt: string;
+        };
+        /** @description Лічильники черги фонових задач. */
+        JobsSummary: {
+            /**
+             * Format: int64
+             * @description Середня затримка між постановкою і першим стартом (мс) для задач, що стартували
+             *     з першої спроби за останню добу; `null` — таких немає. Повтори не враховуються:
+             *     їхній інтервал містить паузу ретраю, а не очікування черги.
+             */
+            avgStartLatencyMs: null | number;
+            /**
+             * Format: int32
+             * @description Скільки задач завершилось провалом за останню добу.
+             */
+            failed24h: number;
+            /**
+             * Format: int32
+             * @description Скільки задач стоїть у черзі (усі, без вікна).
+             */
+            queued: number;
+            /**
+             * Format: int32
+             * @description Скільки задач зараз виконується (усі, без вікна).
+             */
+            running: number;
+            /**
+             * Format: int32
+             * @description Скільки задач завершилось успішно за останню добу.
+             */
+            succeeded24h: number;
         };
         JsonElement: unknown;
         /** @description Мова інтерфейсу з реєстру. */
