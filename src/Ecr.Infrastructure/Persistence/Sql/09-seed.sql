@@ -7079,8 +7079,12 @@ USING (VALUES
     (N'grid.keys.undo', N'en', N'Undo or redo the last change', 1),
     (N'grid.keys.save', N'en', N'Save now', 1),
     (N'grid.keys.recalc', N'en', N'Recalculate this sheet', 1),
-    (N'grid.keys.palette', N'en', N'Search or run a command', 1)
+    (N'grid.keys.palette', N'en', N'Search or run a command', 1),
     -- COLL:ui41keys ── кінець секції ──
+    -- COLL:ui42narrow ── UI-42: документ лише для читання на вузькому екрані (банер docs-narrow-note); ru/kz — порцією COLL:ui42narrow у блоці I18N нижче ──
+    (N'document.narrow.title', N'en', N'Read-only on a narrow screen', 1),
+    (N'document.narrow.text', N'en', N'Values can be viewed here but not changed. To enter or correct data, open this document on a wider screen.', 1)
+    -- COLL:ui42narrow ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -17065,6 +17069,18 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:ui41keys ── кінець секції ──
+-- COLL:ui42narrow ── ru/kz UI-42: документ лише для читання на вузькому екрані (банер docs-narrow-note); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'document.narrow.title', N'ru', N'Только просмотр на узком экране'),
+    (N'document.narrow.title', N'kz', N'Тар экранда тек қарау'),
+    (N'document.narrow.text', N'ru', N'Здесь значения можно просматривать, но не изменять. Чтобы ввести или исправить данные, откройте документ на более широком экране.'),
+    (N'document.narrow.text', N'kz', N'Мұнда мәндерді қарауға болады, бірақ өзгертуге болмайды. Деректерді енгізу немесе түзету үшін құжатты кеңірек экранда ашыңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:ui42narrow ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t
