@@ -89,9 +89,15 @@ public sealed record DocumentSheetState(string Code, LocalizedText NameL10n, str
 /// лише по решті (інакше фільтр за станом знаходить документ за станом схованого аркуша —
 /// оракул). <c>null</c> — читач без обмежень.
 /// </param>
+/// <param name="Query">
+/// Пошук (UI-18): підрядок у коді (<c>BusinessKey</c>) або назві документа, без
+/// урахування регістру; <c>null</c> — без пошуку. Шукає ЛИШЕ по полях самого
+/// документа — не по аркушах і таблицях, тож не розкриває прихованого. Метасимволи
+/// <c>LIKE</c> екранує сховище; довжину й порожнечу нормалізує обробник.
+/// </param>
 public readonly record struct DocumentListFilter(
     DocumentStatus? State, int? MineUserId, bool? HasLateEdits = null,
-    IReadOnlyCollection<int>? HiddenSheetDefIds = null);
+    string? Query = null, IReadOnlyCollection<int>? HiddenSheetDefIds = null);
 
 /// <summary>Порушення правила складу документа.</summary>
 /// <param name="SheetGroup">Група аркушів.</param>

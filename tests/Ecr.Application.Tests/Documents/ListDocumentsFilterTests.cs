@@ -53,6 +53,37 @@ public sealed class ListDocumentsFilterTests
 
     [Theory]
     [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [InlineData("  DOC-1 ", "DOC-1")]
+    [InlineData("", null)]
+    [InlineData("   ", null)]
+    [InlineData(null, null)]
+    [InlineData("50%_[x]", "50%_[x]")]
+    public async Task Пошук_доходить_до_сховища_обрізаним_а_порожній_стає_відсутнім(string? q, string? expected)
+    {
+        await Handler().HandleAsync(null, Period, null, false, null, q, new CursorRequest(50), default);
+
+        await _documents.Received(1).ListAsync(
+            Arg.Any<int?>(), Arg.Any<PeriodKeyFilter>(),
+            new DocumentListFilter(null, null, null, expected),
+            Arg.Any<CursorRequest>(), Arg.Any<IReadOnlyCollection<int>?>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    public async Task Задовгий_пошук_обрізається_до_ліміту()
+    {
+        await Handler().HandleAsync(
+            null, Period, null, false, null, new string('a', ListDocumentsHandler.MaxQueryLength + 50),
+            new CursorRequest(50), default);
+
+        await _documents.Received(1).ListAsync(
+            Arg.Any<int?>(), Arg.Any<PeriodKeyFilter>(),
+            new DocumentListFilter(null, null, null, new string('a', ListDocumentsHandler.MaxQueryLength)),
+            Arg.Any<CursorRequest>(), Arg.Any<IReadOnlyCollection<int>?>(), Arg.Any<CancellationToken>());
+    }
+
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
     [InlineData(true)]
     [InlineData(false)]
     [InlineData(null)]

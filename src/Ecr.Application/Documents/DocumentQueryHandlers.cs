@@ -26,14 +26,36 @@ public sealed class ListDocumentsHandler(
     /// </param>
     /// <param name="page">Курсорна пагінація.</param>
     /// <param name="ct">Токен скасування.</param>
-    public async Task<PagedResult<DocumentSummary>> HandleAsync(
+    public Task<PagedResult<DocumentSummary>> HandleAsync(
         int? projectId, int? periodKey, string? state, bool mine, bool? hasLateEdits,
         CursorRequest page, CancellationToken ct)
+        => HandleAsync(projectId, periodKey, state, mine, hasLateEdits, query: null, page, ct);
+
+    /// <summary>Максимальна довжина пошукового запиту; довший обрізається мовчки.</summary>
+    public const int MaxQueryLength = 100;
+
+    /// <summary>Те саме, з пошуком <paramref name="query"/> (UI-18) за кодом і назвою документа.</summary>
+    /// <param name="projectId">Фільтр за проєктом; <c>null</c> — усі.</param>
+    /// <param name="periodKey">Період для зведеного стану; <c>null</c> — без стану.</param>
+    /// <param name="state">Зведений стан; порожньо — будь-який.</param>
+    /// <param name="mine">Лише документи, де користувач — автор або подавав аркуш.</param>
+    /// <param name="hasLateEdits">Фільтр пізніх правок; <c>null</c> — без фільтра.</param>
+    /// <param name="query">
+    /// Підрядок коду/назви; порожній чи пробіли — без пошуку; довший за
+    /// <see cref="MaxQueryLength"/> обрізається. Застосовується ЗАПИТОМ до стелі
+    /// сторінки, поруч із межею проєктів, а не постфільтром.
+    /// </param>
+    /// <param name="page">Курсорна пагінація.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public async Task<PagedResult<DocumentSummary>> HandleAsync(
+        int? projectId, int? periodKey, string? state, bool mine, bool? hasLateEdits,
+        string? query, CursorRequest page, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(page);
 
         var profile = await ProfileAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
-        var filter = new DocumentListFilter(ParseState(state, periodKey), mine ? profile.UserId : null, hasLateEdits);
+        var filter = new DocumentListFilter(
+            ParseState(state, periodKey), mine ? profile.UserId : null, hasLateEdits, NormalizeQuery(query));
 
         // ⛔ Родина REQ, а не CELL (`P-25`, рядок 1): хибний `limit` — це
         // помилка параметра запиту, і показувати її в обробнику помилок
@@ -95,6 +117,19 @@ public sealed class ListDocumentsHandler(
         var total = page.Cursor is null && all.NextCursor is null ? visible.Count : (int?)null;
 
         return new PagedResult<DocumentSummary>(visible, all.NextCursor, total);
+    }
+
+    /// <summary>Обрізає пробіли й довжину; порожній пошук — <c>null</c> (без фільтра).</summary>
+    internal static string? NormalizeQuery(string? query)
+    {
+        var trimmed = query?.Trim();
+
+        if (string.IsNullOrEmpty(trimmed))
+        {
+            return null;
+        }
+
+        return trimmed.Length > MaxQueryLength ? trimmed[..MaxQueryLength] : trimmed;
     }
 
     /// <summary>Фільтр стану: порожньо — без фільтра; невідоме ім'я або стан без періоду — 422.</summary>

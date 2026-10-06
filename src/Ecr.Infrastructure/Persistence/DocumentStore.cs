@@ -160,6 +160,15 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
                 : documents.Where(d => !lateIds.Contains(d.Id));
         }
 
+        // UI-18: пошук — теж у ЗАПИТІ до `Take`, ПОРУЧ із межею проєктів вище (а не
+        // постфільтр: той дав би хибні `NextCursor`/`TotalCount`). Лише поля самого
+        // документа — аркуші й таблиці не чіпаються, тож приховане не підтверджується.
+        if (filter.Query is { Length: > 0 } term)
+        {
+            var matched = DocumentIdsMatching(term);
+            documents = documents.Where(d => matched.Contains(d.Id));
+        }
+
         var rows = await documents
             .OrderBy(d => d.Id)
             .Take(page.Limit + 1)
@@ -793,6 +802,35 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
 
     private static Expression<Func<T, bool>> Not<T>(Expression<Func<T, bool>> predicate)
         => Expression.Lambda<Func<T, bool>>(Expression.Not(predicate.Body), predicate.Parameters);
+
+    /// <summary>
+    /// Документи, код чи назва яких містить <paramref name="term"/> (без регістру).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Сирий SQL з параметром, не склеєний рядок. Назви — JSON у <c>nvarchar(max)</c>, а
+    /// <c>ToJson</c> екранує кирилицю в <c>\uXXXX</c>, тож <c>LIKE</c> по сирому
+    /// стовпцю її не знайде: <c>OPENJSON</c> розкодовує (той самий прийом, що в
+    /// <c>SearchStore</c>). Регістр — за зіставленням бази (CI), метасимволи
+    /// екрануються. Індексу під <c>LIKE '%q%'</c> немає й не потрібен: це відбір
+    /// серед документів видимих проєктів.
+    /// </remarks>
+    private IQueryable<long> DocumentIdsMatching(string term)
+    {
+        var pattern = "%" + term
+            .Replace(@"\", @"\\", StringComparison.Ordinal)
+            .Replace("%", @"\%", StringComparison.Ordinal)
+            .Replace("_", @"\_", StringComparison.Ordinal)
+            .Replace("[", @"\[", StringComparison.Ordinal) + "%";
+
+        return db.Database
+            .SqlQuery<long>($"""
+                SELECT d.Id AS Value
+                  FROM doc.Document AS d
+                 WHERE d.BusinessKey LIKE {pattern} ESCAPE N'\'
+                    OR EXISTS (SELECT 1 FROM OPENJSON(CASE WHEN ISJSON(d.NameL10n) = 1 THEN d.NameL10n END) AS n
+                                WHERE n.value COLLATE DATABASE_DEFAULT LIKE {pattern} ESCAPE N'\')
+                """);
+    }
 
     /// <summary>Документи з хоч однією пізньою правкою (<c>D-70</c>) — не обмежено сторінкою.</summary>
     /// <remarks>
