@@ -15,7 +15,7 @@ export function RegistryExportButton(props: RegistryExportMenuProps): JSX.Elemen
   return (
     <Suspense
       fallback={
-        <Button size="xs" variant="default" disabled>
+        <Button variant="default" disabled>
           {t('registries.export.button')}
         </Button>
       }

@@ -107,7 +107,7 @@ export function SourceEntitiesTab({
           {t('sources.registryHint')}
         </Text>
         {!readOnly && (
-          <Button size="xs" onClick={() => setAdding(true)} data-add-entity-open="">
+          <Button onClick={() => setAdding(true)} data-add-entity-open="">
             {t('sources.addEntity')}
           </Button>
         )}
@@ -168,7 +168,6 @@ export function SourceEntitiesTab({
                       entity.registryDefId != null &&
                       canEditRegistrySyncPolicy(session.data, entity.registryDefId) && (
                         <Button
-                          size="xs"
                           variant="default"
                           onClick={() => setPolicyFor(entity.id)}
                           data-entity-sync-policy={entity.code}

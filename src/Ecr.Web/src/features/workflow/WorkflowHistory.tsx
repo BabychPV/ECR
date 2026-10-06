@@ -39,7 +39,6 @@ export function WorkflowHistory({ documentId, periodKey }: WorkflowHistoryProps)
   return (
     <Stack gap="xs" align="flex-start" data-testid="workflow-history">
       <Button
-        size="xs"
         variant="subtle"
         aria-expanded={opened}
         loading={opened && history.isPending}

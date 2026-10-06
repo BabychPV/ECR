@@ -28,7 +28,7 @@ export function EntryUsageButton({
   return (
     <>
       <Button
-        size="compact-xs"
+        size="xs"
         variant="subtle"
         aria-label={t('registries.entryUsage.actionFor', { code: entry.code })}
         onClick={() => setOpened(true)}

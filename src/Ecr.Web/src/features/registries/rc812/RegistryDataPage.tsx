@@ -369,7 +369,7 @@ export function RegistryDataPage(): JSX.Element {
             </Suspense>
           )}
           {!readOnly && (
-            <Button size="xs" variant="default" disabled={save.isPending} onClick={() => addRow()}>
+            <Button variant="default" disabled={save.isPending} onClick={() => addRow()}>
               {t('registries.newEntry')}
             </Button>
           )}
@@ -390,7 +390,7 @@ export function RegistryDataPage(): JSX.Element {
         emptyHint={debouncedSearch !== '' ? undefined : t('registries.data.emptyText')}
         emptyAction={
           !readOnly && debouncedSearch === '' ? (
-            <Button size="xs" onClick={() => addRow()}>
+            <Button onClick={() => addRow()}>
               {t('registries.newEntry')}
             </Button>
           ) : undefined
@@ -425,7 +425,7 @@ export function RegistryDataPage(): JSX.Element {
             />
             {rows.hasNextPage && (
               <Group justify="center">
-                <Button size="xs" variant="default" loading={rows.isFetchingNextPage} onClick={() => void rows.fetchNextPage()}>
+                <Button variant="default" loading={rows.isFetchingNextPage} onClick={() => void rows.fetchNextPage()}>
                   {t('registries.data.loadMore', { shown: loaded.length, total: totalCount })}
                 </Button>
               </Group>

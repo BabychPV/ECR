@@ -154,7 +154,7 @@ export function CollectionScheduleTab({
           <ErrorAlert error={failure} />
           {conflict && (
             <Group gap="xs">
-              <Button size="xs" variant="default" onClick={reload}>
+              <Button variant="default" onClick={reload}>
                 {t('schedule.reload')}
               </Button>
             </Group>
@@ -342,7 +342,6 @@ function ScheduleForm({
               {t('schedule.removeConfirm')}
             </Text>
             <Button
-              size="xs"
               color="statusError"
               variant="light"
               loading={busy}
@@ -351,7 +350,7 @@ function ScheduleForm({
             >
               {t('common.delete')}
             </Button>
-            <Button ref={cancelRef} size="xs" variant="default" onClick={() => setConfirming(false)}>
+            <Button ref={cancelRef} variant="default" onClick={() => setConfirming(false)}>
               {t('common.cancel')}
             </Button>
           </Group>

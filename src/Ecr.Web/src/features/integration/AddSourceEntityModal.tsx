@@ -78,7 +78,7 @@ export function AddSourceEntityModal({
 
         <Group gap="xs">
           <Button
-            size="compact-xs"
+            size="xs"
             variant="default"
             disabled={trail.length === 0}
             onClick={() => setTrail((prev) => prev.slice(0, -1))}
@@ -201,7 +201,7 @@ function CatalogLevel({
 
       {next !== null && (
         <Button
-          size="compact-xs"
+          size="xs"
           variant="subtle"
           loading={last?.isFetching === true}
           onClick={() => setCursors((prev) => [...prev, next])}

@@ -93,7 +93,6 @@ export function CodeText({
       {/* ⚠ Без фіксованої ширини (`ФВ-14.30`): казахський і російський
           переклади напису на 20–40 % довші за англійський. */}
       <Button
-        size="xs"
         variant="default"
         data-code-text-copy=""
         onClick={() => {

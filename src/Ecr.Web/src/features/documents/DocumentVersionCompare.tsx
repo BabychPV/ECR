@@ -131,7 +131,6 @@ export function DocumentVersionCompare({
   return (
     <Stack gap="xs" align="flex-start" data-testid="document-version-compare">
       <Button
-        size="xs"
         variant="subtle"
         aria-expanded={opened}
         onClick={() => setOpened((value) => !value)}
@@ -186,7 +185,6 @@ export function DocumentVersionCompare({
           />
 
           <Button
-            size="xs"
             variant="default"
             loading={compare.isFetching}
             disabled={picked.from === ''}

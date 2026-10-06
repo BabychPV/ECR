@@ -237,7 +237,7 @@ export function UnitsPage(): JSX.Element {
             render: (unit: UnitRef) => (
               <Group gap="xs" wrap="nowrap">
                 <Button
-                  size="compact-xs"
+                  size="xs"
                   variant="subtle"
                   aria-label={`${t('units.edit')} ${unit.code}`}
                   onClick={() => setEditing(unit)}
@@ -245,7 +245,7 @@ export function UnitsPage(): JSX.Element {
                   {t('units.edit')}
                 </Button>
                 <Button
-                  size="compact-xs"
+                  size="xs"
                   variant="subtle"
                   color="statusError"
                   aria-label={`${t('common.delete')} ${unit.code}`}
@@ -308,7 +308,6 @@ export function UnitsPage(): JSX.Element {
             />
 
             <Button
-              size="xs"
               // ⚠ Поле тепер текстове, тож «не число» стало можливим станом:
               // кнопка, яка веде у відому відмову сервера, гірша за вимкнену.
               disabled={fromUnit === null || toUnit === null || normalizeDecimal(value) === null}
@@ -337,7 +336,7 @@ export function UnitsPage(): JSX.Element {
             )}
 
             {can(session.data, 'Uom.EditCatalog') && (
-              <Button size="xs" variant="default" onClick={() => setCreating(true)}>
+              <Button variant="default" onClick={() => setCreating(true)}>
                 {t('units.new')}
               </Button>
             )}
