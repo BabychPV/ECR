@@ -9,7 +9,7 @@ import {
   type MouseEvent,
   type ReactElement,
 } from 'react';
-import { Popover } from '@mantine/core';
+import { Popover, type FloatingPosition } from '@mantine/core';
 
 /** Пропи тригера, які `Hint` доповнює, не затираючи власних. */
 interface TriggerProps {
@@ -38,6 +38,9 @@ interface HintProps {
    * в порядку табуляції, а зайва зупинка лише подвоїла б її.
    */
   readonly focusable?: boolean | undefined;
+
+  /** Бік, з якого стає підказка; за замовчуванням — над тригером. */
+  readonly position?: FloatingPosition | undefined;
 }
 
 /**
@@ -75,7 +78,7 @@ interface HintProps {
  * `--mantine-color-text`, тобто `surfaces.*.text` (`cssVariables.ts`).
  * Контраст обох пар міряє `Hint.test.tsx` на ЗЛИТІЙ темі застосунку.
  */
-export function Hint({ label, children, focusable = false }: HintProps): JSX.Element {
+export function Hint({ label, children, focusable = false, position = 'top' }: HintProps): JSX.Element {
   const id = `${useId()}-hint`;
   const [hovered, setHovered] = useState(false);
   const [focused, setFocused] = useState(false);
@@ -143,7 +146,7 @@ export function Hint({ label, children, focusable = false }: HintProps): JSX.Ele
         withRoles={false}
         returnFocus={false}
         trapFocus={false}
-        position="top"
+        position={position}
         withArrow
         shadow="md"
       >

@@ -1,5 +1,6 @@
 import type { JSX } from 'react';
 import { NavLink } from '@mantine/core';
+import { LazyHint } from './LazyHint';
 import { Link } from 'react-router-dom';
 import { NavIcon } from './navIcons';
 import type { RouteEntry } from './routes';
@@ -22,28 +23,59 @@ import { useRoutePrefetch } from './useRoutePrefetch';
  * обидві відповідальності мусять зійтись в ОДНОМУ елементі, а не в двох
  * незалежних рендерах, що конкурували б за той самий `<NavLink>`.
  */
+/**
+ * Пункт меню без тексту: іконка по центру вузької колонки. Без цього
+ * порожнє тіло (`flex: 1`) і відступ секції притискали іконку ліворуч.
+ */
+export const IconOnlyNavLinkStyles = {
+  root: { justifyContent: 'center' },
+  section: { marginInlineEnd: 0 },
+  body: { display: 'none' },
+} as const;
+
 export function NavRouteLink({
   route,
   label,
   active,
+  collapsed = false,
 }: {
   route: RouteEntry;
   label: string;
   active: boolean;
+  /**
+   * Меню згорнуте до іконок: назва — доступне ім'я (`aria-label`) і підказка
+   * при наведенні та фокусі, бо видимого тексту поруч з іконкою немає.
+   */
+  collapsed?: boolean;
 }): JSX.Element {
   const prefetch = useRoutePrefetch(route.id);
 
-  return (
+  const link = (
     <NavLink
       component={Link}
       to={route.path}
-      label={label}
+      label={collapsed ? undefined : label}
+      aria-label={collapsed ? label : undefined}
       leftSection={<NavIcon name={route.handle.icon} />}
       active={active}
+      styles={collapsed ? IconOnlyNavLinkStyles : {}}
       onMouseEnter={prefetch.onMouseEnter}
       onMouseLeave={prefetch.onMouseLeave}
       onFocus={prefetch.onFocus}
       onBlur={prefetch.onBlur}
     />
+  );
+
+  if (!collapsed) return link;
+
+  // ⚠ Підказка і на фокусі (`Hint`): клавіатурний користувач без миші інакше
+  // не дізнався б назви пункту, бачачи лише іконку. Доступне ім'я дає
+  // `aria-label` вище. ⛔ `Hint` (на `Popover`, лінивим чанком), а не `Tooltip` Mantine: той
+  // тягне взаємодії `@floating-ui/react` у вхідний чанк, +8 КБ gzip до КОЖНОГО
+  // маршруту, і `PipelinePage` виходила за межу `D-132`.
+  return (
+    <LazyHint label={label} position="right">
+      {link}
+    </LazyHint>
   );
 }

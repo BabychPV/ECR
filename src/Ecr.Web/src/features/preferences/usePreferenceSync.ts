@@ -8,6 +8,12 @@ import {
   setDensity,
   storedDensity,
 } from '@/shared/theme/preferences';
+import {
+  NavbarCollapsedPreferenceKey,
+  onNavbarCollapsedChosen,
+  setNavbarCollapsed,
+  storedNavbarCollapsed,
+} from '@/shared/theme/navbarCollapse';
 import { getPreferences } from './api';
 import { PreferenceSync, reportFailure, type PreferenceBinding } from './sync';
 
@@ -39,7 +45,7 @@ function storedScheme(): MantineColorScheme | undefined {
 const LanguagePattern = /^[a-z]{2,3}$/;
 
 /**
- * Синхронізує щільність, мову й тему з сервером (`BE-20`).
+ * Синхронізує щільність, мову, тему й згорнуте меню з сервером (`BE-20`).
  *
  * ⛔ `enabled` — лише після входу. Анонім на сторінці входу працює локально й
  * не робить жодного запиту.
@@ -92,6 +98,15 @@ export function usePreferenceSync(enabled: boolean, loginLanguage: string | null
           return true;
         },
       },
+      {
+        key: NavbarCollapsedPreferenceKey,
+        stored: storedNavbarCollapsed,
+        apply: (value) => {
+          if (typeof value !== 'boolean') return false;
+          setNavbarCollapsed(value);
+          return true;
+        },
+      },
     ];
 
     return new PreferenceSync(bindings);
@@ -116,10 +131,14 @@ export function usePreferenceSync(enabled: boolean, loginLanguage: string | null
     const offLanguage = onLanguageChosen((value) => {
       sync.changed('language', value);
     });
+    const offNavbar = onNavbarCollapsedChosen((value) => {
+      sync.changed(NavbarCollapsedPreferenceKey, value);
+    });
 
     return () => {
       offDensity();
       offLanguage();
+      offNavbar();
     };
   }, [enabled, sync]);
 

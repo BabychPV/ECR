@@ -21,10 +21,11 @@ import {
   Stack,
   Text,
 } from '@mantine/core';
-import { useDisclosure } from '@mantine/hooks';
+import { useDisclosure, useMediaQuery } from '@mantine/hooks';
 import { notifications } from '@mantine/notifications';
 import { Navigate, Outlet, ScrollRestoration, useLocation, useMatches } from 'react-router-dom';
 import { Breadcrumbs, isRouteHandle } from './Breadcrumbs';
+import { NavbarCollapseToggle } from './NavbarCollapseToggle';
 import { NavRouteLink } from './NavRouteLink';
 import { NotFoundPage } from './NotFoundPage';
 import { canAccessRoute } from './routeAccess';
@@ -38,6 +39,7 @@ import { EndSimulationButton } from '@/features/security/SimulationPanel';
 import { useSession } from '@/shared/session/useSession';
 import { isCatalogResolved, language, loadCatalog, loginChosenLanguage, t } from '@/shared/i18n';
 import { useCatalog } from '@/shared/i18n/useCatalog';
+import { useNavbarCollapsed } from '@/shared/theme/navbarCollapse';
 import { BrandMark } from '@/shared/ui/BrandMark';
 import { RouteAnnouncer } from '@/shared/ui/RouteAnnouncer';
 import { UnsavedGuard } from '@/shared/ui/UnsavedGuard';
@@ -175,8 +177,29 @@ function sessionLanguageOf(profileLanguage: string): string {
   return profileLanguage.length > 0 ? profileLanguage : language();
 }
 
+/**
+ * Ширина меню: повна і «лише іконки». Вузька = іконка 20 + відступи пункту
+ * (`NavLink`, 2 × 12) + відступи панелі (`p="xs"`, 2 × 10).
+ */
+const NavbarWidth = 260;
+const NavbarIconsOnlyWidth = 64;
+
+/**
+ * Ширина, від якої меню — колонка поруч зі сторінкою, а не шухляда за
+ * бургером (`breakpoint: 'sm'` у `AppShell` нижче, 48em у Mantine).
+ */
+const NavbarDesktopQuery = '(min-width: 48em)';
+
+/** Ідентифікатор списку пунктів меню — ціль `aria-controls` кнопки згортання. */
+const NavbarItemsId = 'app-navbar-items';
+
 export function AppLayout(): JSX.Element {
   const [opened, { toggle }] = useDisclosure();
+  // ⚠ Синхронно з першого рендера (не в ефекті): інакше після F5 меню спершу
+  // малювалося б широким і стрибало у вузьке — зсув усієї сторінки (CLS).
+  const desktop = useMediaQuery(NavbarDesktopQuery, true, { getInitialValueInEffect: false }) === true;
+  // На мобільному меню — шухляда на всю ширину; «лише іконки» там не діє.
+  const iconsOnly = useNavbarCollapsed() && desktop;
   const session = useSession();
   const location = useLocation();
 
@@ -373,7 +396,7 @@ export function AppLayout(): JSX.Element {
       <AppShell
         header={{ height: 56 }}
         navbar={{
-          width: 260,
+          width: iconsOnly ? NavbarIconsOnlyWidth : NavbarWidth,
           breakpoint: 'sm',
           // T1-15 (б): під примусовою зміною пароля меню не потрібне — усі API дають 428.
           collapsed: { mobile: !opened || me.mustChangePassword, desktop: me.mustChangePassword },
@@ -465,7 +488,7 @@ export function AppLayout(): JSX.Element {
         </AppShell.Header>
 
         <AppShell.Navbar p="xs">
-          <ScrollArea>
+          <AppShell.Section grow component={ScrollArea} id={NavbarItemsId}>
             {/* T1-15 (б): пунктів меню під примусовою зміною пароля немає зовсім —
                 згорнута панель лишала б їх у дереві й у порядку Tab. */}
             {navRoutes
@@ -487,9 +510,15 @@ export function AppLayout(): JSX.Element {
                   route={route}
                   label={t(route.handle.labelKey)}
                   active={location.pathname === route.path}
+                  collapsed={iconsOnly}
                 />
               ))}
-          </ScrollArea>
+          </AppShell.Section>
+          {!me.mustChangePassword && (
+            <AppShell.Section visibleFrom="sm" pt="xs">
+              <NavbarCollapseToggle collapsed={iconsOnly} controls={NavbarItemsId} />
+            </AppShell.Section>
+          )}
         </AppShell.Navbar>
 
         <AppShell.Main id={MainContentId} tabIndex={-1}>
