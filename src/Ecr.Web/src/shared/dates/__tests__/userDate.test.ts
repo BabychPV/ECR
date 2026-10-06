@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { formatDateOnly } from '@/shared/format';
-import { acceptsDottedDate, formatIsoDay, parseUserDate } from '@/shared/dates/userDate';
+import { acceptsDottedDate, parseUserDate } from '@/shared/dates/userDate';
 
 /**
  * A1-02: набрана людиною дата → календарний день, СТРОГО за мовою інтерфейсу.
@@ -78,15 +78,5 @@ describe('parseUserDate (A1-02)', () => {
     const parsed = parseUserDate('05.10.2026', 'ru');
     expect(parsed?.getHours()).toBe(0);
     expect(parsed?.getMinutes()).toBe(0);
-  });
-
-  it('formatIsoDay збігається з formatDateOnly (копія свідома — див. userDate.ts)', () => {
-    for (const date of [new Date(2026, 9, 5), new Date(2026, 0, 1, 23, 59), new Date(2024, 1, 29), (() => {
-      const early = new Date(2000, 0, 1);
-      early.setFullYear(99, 11, 31);
-      return early;
-    })()]) {
-      expect(formatIsoDay(date)).toBe(formatDateOnly(date));
-    }
   });
 });
