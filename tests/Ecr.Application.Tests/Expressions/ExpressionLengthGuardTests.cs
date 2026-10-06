@@ -50,7 +50,10 @@ public sealed class ExpressionLengthGuardTests
     {
         // 4000 символів — найдовший вираз, що зберігається
         // (`MethodologyFormula.MaxExpressionLength`); межа його не відхиляє.
-        var text = "1" + string.Concat(Enumerable.Repeat("+1", 1999)) + "0";
+        // ✎ L7-01: ланки по 4 символи (`+100`) — 1000 ланок, у межах
+        // `Parser.MaxChainLinks` (1024); вироджений `1+1+…` на 2000 ланок тепер
+        // відхиляє межа ланцюга, а не межа довжини.
+        var text = "100" + string.Concat(Enumerable.Repeat("+100", 999)) + "0";
         Assert.Equal(4000, text.Length);
 
         var result = await ValidateAsync(text, ExpressionDialect.Template);
@@ -62,7 +65,7 @@ public sealed class ExpressionLengthGuardTests
     public async Task Вираз_на_символ_понад_межу_відхиляється_а_рівно_на_межі_проходить()
     {
         // 4000 — проходить (див. тест вище), 4001 — відмова: межа точна, не «приблизно».
-        var text = "1" + string.Concat(Enumerable.Repeat("+1", 1999)) + "00";
+        var text = "100" + string.Concat(Enumerable.Repeat("+100", 999)) + "00";
         Assert.Equal(4001, text.Length);
 
         var error = await Assert.ThrowsAsync<BusinessRuleException>(
