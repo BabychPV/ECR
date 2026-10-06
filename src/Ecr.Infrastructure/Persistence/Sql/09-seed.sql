@@ -6675,7 +6675,8 @@ USING (VALUES
     -- COLL:an43fix ── кінець секції ──
     -- COLL:a1date ── A1-02: строгий розбір набраної дати в полі дати (StrictDateInput); ru/kz — порцією COLL:a1date у блоці I18N нижче ──
     (N'dates.invalid', N'en', N'"{value}" is not a valid date. Enter the date as YYYY-MM-DD.', 1),
-    (N'dates.outOfRange', N'en', N'The date {value} is outside the allowed range.', 1)
+    (N'dates.outOfRange', N'en', N'The date {value} is outside the allowed range.', 1),
+    (N'dates.incomplete', N'en', N'The date is incomplete or does not exist. Finish entering it or press Esc to cancel.', 1)
     -- COLL:a1date ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
@@ -15751,7 +15752,9 @@ SELECT v.[Key], v.Lang, v.Val
     (N'dates.invalid', N'ru', N'«{value}» — некорректная дата. Введите дату в формате ДД.ММ.ГГГГ или ГГГГ-ММ-ДД.'),
     (N'dates.outOfRange', N'ru', N'Дата {value} вне допустимого диапазона.'),
     (N'dates.invalid', N'kz', N'«{value}» — жарамсыз күн. Күнді КК.АА.ЖЖЖЖ немесе ЖЖЖЖ-АА-КК пішімінде енгізіңіз.'),
-    (N'dates.outOfRange', N'kz', N'{value} күні рұқсат етілген ауқымнан тыс.')
+    (N'dates.outOfRange', N'kz', N'{value} күні рұқсат етілген ауқымнан тыс.'),
+    (N'dates.incomplete', N'ru', N'Дата введена не полностью или не существует. Допишите её или нажмите Esc для отмены.'),
+    (N'dates.incomplete', N'kz', N'Күн толық енгізілмеген немесе жоқ. Оны толықтырыңыз немесе бас тарту үшін Esc басыңыз.')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO

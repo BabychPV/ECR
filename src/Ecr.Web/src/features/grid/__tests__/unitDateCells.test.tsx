@@ -172,6 +172,43 @@ describe('R-02: комірка Date', () => {
     expect(captureEdit(dated, { rowKey: 'R1', columnCode: 'D1', raw: '' })).toBeNull();
   });
 
+  it('A1-02: недонабрана/неіснуюча дата — НЕ збереження порожнього (стерло б комірку), а відмова в полі', () => {
+    const save = vi.fn();
+    const { node, instance } = open(
+      columnsWith(column({ code: 'D1', dataType: 'Date' }), null).editor as EditorCtrCallable,
+      '2026-09-15T00:00:00',
+      save,
+    );
+    const input = node.querySelector('input') as HTMLInputElement;
+
+    // Рідне поле з набраним `31.02.2026` чи самим днем: `badInput`, а `value` — порожній рядок.
+    let bad = true;
+    Object.defineProperty(input, 'validity', { configurable: true, get: () => ({ badInput: bad }) as ValidityState });
+    input.value = '';
+
+    press(input, 'Enter');
+    expect(save).not.toHaveBeenCalled();
+    expect(input.validationMessage).toBe('⟦dates.incomplete⟧');
+    expect(input.getAttribute('aria-invalid')).toBe('true');
+
+    const tab = new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true });
+    input.dispatchEvent(tab);
+    expect(save).not.toHaveBeenCalled();
+    expect(tab.defaultPrevented).toBe(true);
+
+    // Клік повз редактор (`applyOnClose`) — комірка лишається як була, а не стирається.
+    expect(instance.getValue?.()).toBeUndefined();
+
+    // Людина виправила дату — відмова знімається, Enter зберігає.
+    bad = false;
+    input.value = '2026-09-28';
+    input.dispatchEvent(new Event('input'));
+    expect(input.validationMessage).toBe('');
+    expect(input.hasAttribute('aria-invalid')).toBe(false);
+    press(input, 'Enter');
+    expect(save).toHaveBeenCalledWith('2026-09-28', false);
+  });
+
   it('вибір дня в календарі (change без клавіші) зберігає; change від друку — ні', () => {
     vi.useFakeTimers();
     try {
