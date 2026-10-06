@@ -15,7 +15,6 @@ import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { KeyValue } from '@/shared/ui/KeyValue';
 import { LocalizedInput, hasAnyText, type LocalizedValue } from '@/shared/ui/LocalizedInput';
 import { showDone } from '@/shared/ui/notify';
-import { statusKey } from '@/shared/ui/StatusBadge';
 import { problemText } from '@/shared/ui/problemText';
 import { Wizard, type WizardStep } from '@/shared/ui/Wizard';
 import { t } from '@/shared/i18n';
@@ -236,10 +235,13 @@ export function CreateDocumentModal({
               label={t('documents.period')}
               data={choosablePeriods.map((period) => ({
                 value: String(period.periodKey),
+                // ⚠ Ключі літералами (сторож EndpointCoverageTests): не-Open тут лише Grace і Closed.
                 label:
                   period.state === 'Open'
                     ? periodLabel(period.periodKey)
-                    : `${periodLabel(period.periodKey)} · ${t(statusKey('period', period.state))}`,
+                    : `${periodLabel(period.periodKey)} · ${
+                        period.state === 'Closed' ? t('status.period.Closed') : t('status.period.Grace')
+                      }`,
               }))}
               value={periodKey}
               onChange={(value) => setPickedPeriod(value)}
