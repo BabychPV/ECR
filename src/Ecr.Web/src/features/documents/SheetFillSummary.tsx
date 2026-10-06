@@ -49,7 +49,8 @@ export function SheetFillSummary({ documentId, periodKey }: SheetFillSummaryProp
   return (
     <Group gap="xs" data-testid="sheet-fill-summary">
       {summary.total > 0 && (
-        <Text size="sm" fw={600} data-testid="sheet-fill-count">
+        // ✎ UI-15: дрібний підпис у рядку прогресу шапки (макет `.dp-l`), не заголовок.
+        <Text size="xs" c="dimmed" data-testid="sheet-fill-count">
           {t('document.tablesFilled', { filled: summary.filled, total: summary.total })}
         </Text>
       )}
