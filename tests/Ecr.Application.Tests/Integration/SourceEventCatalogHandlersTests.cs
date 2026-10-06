@@ -26,6 +26,9 @@ public sealed class SourceEventCatalogHandlersTests
 {
     private const int Actor = 11;
     private const int SourceId = 3;
+
+    /// <summary>Запобіжник від зависання тесту, а не вимір межі: межу зсуває керований годинник.</summary>
+    private static readonly TimeSpan HangGuard = TimeSpan.FromSeconds(60);
     private static readonly DateTime Now = new(2026, 6, 1, 12, 0, 0, DateTimeKind.Utc);
 
     private readonly IDataSourceStore _store = Substitute.For<IDataSourceStore>();
@@ -103,12 +106,22 @@ public sealed class SourceEventCatalogHandlersTests
     {
         _adapter.ReadEventsAsync(Arg.Any<SourceEventQuery>(), Arg.Any<CancellationToken>())
             .Returns(call => Hang(call.Arg<CancellationToken>()));
-        var handler = new ProbeSourceEventsHandler(
-            _store, [_adapter], new SourceCatalogPolicy(TimeSpan.FromMilliseconds(200)), _access, _user, _clock);
+        var time = new ManualTimeProvider();
+        var policy = new SourceCatalogPolicy(TimeSpan.FromSeconds(10)) { Time = time };
+        var handler = new ProbeSourceEventsHandler(_store, [_adapter], policy, _access, _user, _clock);
 
-        var refused = await Assert.ThrowsAsync<BusinessRuleException>(
-            () => handler.HandleAsync(SourceId, new SourceEventProbeRequest("FlareEvent", null, null, null, null), default)
-                .WaitAsync(TimeSpan.FromSeconds(5)));
+        var probing = handler.HandleAsync(SourceId, new SourceEventProbeRequest("FlareEvent", null, null, null, null), default);
+
+        // Межа ще не настала — обробник чекає джерело. Годинник керований: жодного справжнього таймера, тож
+        // результат не залежить від навантаження CI (раніше — межа 200 мс проти запобіжника 5 с, і в CI тест падав).
+        Assert.Equal(1, time.PendingTimers);
+        time.Advance(policy.Timeout - TimeSpan.FromTicks(1));
+        Assert.False(probing.IsCompleted);
+
+        time.Advance(TimeSpan.FromTicks(1));
+
+        // ⚠ WaitAsync — лише запобіжник: без межі в обробнику тест падає, а не висить.
+        var refused = await Assert.ThrowsAsync<BusinessRuleException>(() => probing.WaitAsync(HangGuard));
 
         Assert.Equal("err.ECR-INT-0503.probeTimeout", refused.Details!["messageKey"]);
     }

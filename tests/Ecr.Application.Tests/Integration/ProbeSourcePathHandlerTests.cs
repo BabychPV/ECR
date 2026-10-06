@@ -25,7 +25,7 @@ public sealed class ProbeSourcePathHandlerTests
     private const string ElementPath = @"\Db\Unit-01";
     private static readonly DateTime Now = new(2026, 6, 1, 12, 0, 0, DateTimeKind.Utc);
 
-    /// <summary>Запобіжник від зависання тесту — у 300 разів довший за межу політики в ньому (200 мс).</summary>
+    /// <summary>Запобіжник від зависання тесту, а не вимір межі: межу зсуває керований годинник.</summary>
     private static readonly TimeSpan HangGuard = TimeSpan.FromSeconds(60);
 
     private readonly IDataSourceStore _store = Substitute.For<IDataSourceStore>();
@@ -135,15 +135,21 @@ public sealed class ProbeSourcePathHandlerTests
         _reader.AttributesAsync(SourceId, ElementPath, Arg.Any<CancellationToken>())
             .Returns(call => Hang(seen = call.Arg<CancellationToken>()));
 
-        var handler = new ProbeSourcePathHandler(
-            _store, _reader, [_adapter], new SourceCatalogPolicy(TimeSpan.FromMilliseconds(200)), _access, _user,
-            _clock);
+        var time = new ManualTimeProvider();
+        var policy = new SourceCatalogPolicy(TimeSpan.FromSeconds(10)) { Time = time };
+        var handler = new ProbeSourcePathHandler(_store, _reader, [_adapter], policy, _access, _user, _clock);
 
-        // ⚠ Зовнішня межа — лише запобіжник від справжнього зависання, а не вимір межі політики: під навантаженням
-        // CI (весь Ecr.sln паралельно) таймер і продовження пулу потоків запізнювались понад колишні 5 с, і тест
-        // падав TimeoutException із цього ж WaitAsync (прогін 37296823643), хоча обробник поводився правильно.
-        var refused = await Assert.ThrowsAsync<BusinessRuleException>(
-            () => handler.HandleAsync(SourceId, $@"{ElementPath}|Flow", default).WaitAsync(HangGuard));
+        var probing = handler.HandleAsync(SourceId, $@"{ElementPath}|Flow", default);
+
+        // ⚠ Межа — на керованому годиннику, а не на справжньому таймері: під навантаженням CI (весь Ecr.sln
+        // паралельно) таймер і продовження пулу потоків запізнювались понад 5 с, і тест падав TimeoutException
+        // із запобіжника (прогін 37296823643), хоча обробник поводився правильно.
+        Assert.Equal(1, time.PendingTimers);
+        time.Advance(policy.Timeout - TimeSpan.FromTicks(1));
+        Assert.False(probing.IsCompleted);
+
+        time.Advance(TimeSpan.FromTicks(1));
+        var refused = await Assert.ThrowsAsync<BusinessRuleException>(() => probing.WaitAsync(HangGuard));
 
         Assert.Equal("ECR-INT-0503", refused.ErrorCode);
         Assert.Equal("err.ECR-INT-0503.probeTimeout", refused.Details!["messageKey"]);
