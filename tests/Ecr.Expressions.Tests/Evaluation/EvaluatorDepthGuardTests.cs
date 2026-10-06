@@ -124,6 +124,28 @@ public sealed class EvaluatorDepthGuardTests
         Assert.Equal(ExpressionErrors.BudgetExceeded, EvalTree(RightNested(96), out _, out _).ErrorCode);
     }
 
+    [Theory]
+    [MemberData(nameof(FlatChains))]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public void Усе_що_пускає_парсер_у_плаский_ланцюг_обчислювач_рахує(string op)
+    {
+        // ✎ RC5, узгодження меж: стеля парсера (`Parser.MaxChainLinks` ланок) і
+        // межа обчислення — різні ресурси, і ланцюг найбільшої довжини, який
+        // пускає розбір, мусить рахуватися, а не мовчки давати #BUDGET.
+        // 1024 ланки = 1025 операндів = 2049 кроків — десята частина бюджету.
+        var terms = Parser.MaxChainLinks + 1;
+        var value = Eval(Chain(op, terms), out var deepest, out var spent);
+
+        Assert.False(value.IsError, $"{op}: {value.ErrorCode}");
+        Assert.Equal(Expected(op, terms), value.Value);
+        Assert.Equal(2 * terms - 1, spent);
+        Assert.True(spent * 8 <= Evaluator.MaxEvaluationSteps, $"{op}: {spent} кроків — запас менший за восьмикратний.");
+        Assert.True(deepest <= 3);
+
+        // Ланка №1025 розбір уже відхиляє: далі за ним межі обчислення не питають.
+        Assert.False(Expr.Parse(Chain(op, terms + 1), ExpressionDialect.Template).IsSuccess);
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
     public void Вкладеність_дужками_і_гілками_IF_рахується_як_глибина_а_ланцюг_ні()
