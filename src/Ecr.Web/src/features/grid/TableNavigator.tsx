@@ -213,17 +213,11 @@ export function TableNavigator({
                 <span className="ecr-tnav-name" aria-hidden="true">
                   {name}
                 </span>
-                {item.errors !== null && item.errors > 0 ? (
+                {/* Макет: у рядку — лише число помилок; попередження — у тексті стану. */}
+                {item.errors !== null && item.errors > 0 && (
                   <span className="ecr-tnav-count" aria-hidden="true">
                     {item.errors}
                   </span>
-                ) : (
-                  item.warnings !== null &&
-                  item.warnings > 0 && (
-                    <span className="ecr-tnav-count ecr-tnav-count-warn" aria-hidden="true">
-                      {item.warnings}
-                    </span>
-                  )
                 )}
               </div>
             );
