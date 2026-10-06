@@ -1,5 +1,5 @@
 import { useMemo, useState, type JSX } from 'react';
-import { Alert, Button, Group, Select, Text } from '@mantine/core';
+import { Alert, Button, Select, Text } from '@mantine/core';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import type { MappingPreview, SourceEntityStatus } from '@/api/types';
@@ -12,6 +12,7 @@ import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { useUrlNumber } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
+import { FilterRow } from '@/shared/ui/FilterBar';
 
 /**
  * Попередній перегляд мапінгу на реальних рядках джерела (`ФВ-13.14`).
@@ -58,7 +59,7 @@ export function MappingPreviewPage(): JSX.Element {
       <PageHeader
         title={t('mapping.title')}
         actions={
-          <Group gap="xs" align="end">
+          <FilterRow>
             <Select
               size="xs"
               miw={260}
@@ -79,7 +80,7 @@ export function MappingPreviewPage(): JSX.Element {
                 {t('mapping.create')}
               </Button>
             )}
-          </Group>
+          </FilterRow>
         }
       />
 

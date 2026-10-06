@@ -26,7 +26,7 @@ import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { ConfirmModal } from '@/shared/ui/ConfirmModal';
 import { DataTable, type DataTableColumn } from '@/shared/ui/DataTable';
-import { FilterBar } from '@/shared/ui/FilterBar';
+import { FilterBar, FilterRow } from '@/shared/ui/FilterBar';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { Timestamp } from '@/shared/ui/Timestamp';
 import { useUrlState } from '@/shared/ui/useUrlState';
@@ -340,7 +340,7 @@ export function RegistriesPage(): JSX.Element {
       <PageHeader
         title={t('registries.title')}
         actions={
-          <Group gap="xs" align="end">
+          <FilterRow>
             <Select
               size="xs"
               miw={220}
@@ -439,7 +439,7 @@ export function RegistriesPage(): JSX.Element {
             {can(session.data, 'Integration.Manage') && (
               <SourceKindSwitch registries={registries.data ?? []} />
             )}
-          </Group>
+          </FilterRow>
         }
       />
 

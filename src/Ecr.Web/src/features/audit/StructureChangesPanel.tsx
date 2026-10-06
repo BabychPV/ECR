@@ -1,8 +1,8 @@
 import type { JSX } from 'react';
-import { Button, Group, Select, Table, Text, TextInput } from '@mantine/core';
+import { Button, Select, Table, Text, TextInput } from '@mantine/core';
 import { structureChangesQuery, useStructureChanges, type StructureChangePage } from '@/features/audit/api';
 import { authorName, useAuthorOptions } from '@/features/audit/authorOptions';
-import { FilterHints, readerOnlyDescription } from '@/features/audit/FilterHints';
+import { FilterHints, FilterRow, readerOnlyDescription } from '@/shared/ui/FilterBar';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { Timestamp } from '@/shared/ui/Timestamp';
 import { useDebouncedFilter, useFilterCursor } from '@/shared/ui/useDebouncedFilter';
@@ -47,7 +47,7 @@ export function StructureChangesPanel({ from, to }: { from: string; to: string }
 
   return (
     <>
-      <Group gap="xs" align="end" mb="xs" wrap="wrap" data-audit-filter-row="structure">
+      <FilterRow mb="xs" data-audit-filter-row="structure">
         <TextInput
           size="xs"
           miw={200}
@@ -76,7 +76,7 @@ export function StructureChangesPanel({ from, to }: { from: string; to: string }
             setChangedBy(value === null ? null : Number(value));
           }}
         />
-      </Group>
+      </FilterRow>
 
       {/* ⚠ `U-21`: та сама будова ряду, що в журналі комірок, — див. `FilterHints`. */}
       <FilterHints texts={[t('audit.authorHint')]} />
