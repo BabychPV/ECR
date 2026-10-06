@@ -48,6 +48,7 @@ import { flushUnsaved, hasUnsavedChanges } from '@/shared/ui/unsavedSources';
 import { UserMenu } from '@/shared/ui/UserMenu';
 
 import './routeTransition.css';
+import './narrowShell.css';
 
 /**
  * Ідентифікатор основного вмісту — ціль для «Пропустити навігацію» нижче.
@@ -429,8 +430,9 @@ export function AppLayout(): JSX.Element {
         {/* Одна область оголошень на весь застосунок (ФВ-14.19). */}
         <RouteAnnouncer />
 
-        <AppShell.Header>
-          <Group h="100%" px="md" justify="space-between">
+        {/* `UI-42`: клас — для правил вузького екрана (`narrowShell.css`). */}
+        <AppShell.Header className="ecr-app-header">
+          <Group h="100%" px="md" justify="space-between" wrap="nowrap">
             <Group gap="sm">
               {!me.mustChangePassword && (
                 <Burger
@@ -445,22 +447,25 @@ export function AppLayout(): JSX.Element {
                   Зчитувач екрана має прочитати «ECR Web» рівно один раз. */}
               <Group gap="xs" wrap="nowrap">
                 <BrandMark />
-                <Text fw={700} c="brand.8" darkHidden>
-                  ECR
-                </Text>
-                <Text fw={700} c="brand.2" lightHidden>
-                  ECR
-                </Text>
-                <Text fw={500} c="brand.5" darkHidden>
-                  Web
-                </Text>
-                <Text fw={500} c="brand.4" lightHidden>
-                  Web
-                </Text>
+                {/* `UI-42`: на вузькому екрані підпис лише для читалки (макет ховає `.logo-t`). */}
+                <Group gap="xs" wrap="nowrap" className="ecr-brand-text">
+                  <Text fw={700} c="brand.8" darkHidden>
+                    ECR
+                  </Text>
+                  <Text fw={700} c="brand.2" lightHidden>
+                    ECR
+                  </Text>
+                  <Text fw={500} c="brand.5" darkHidden>
+                    Web
+                  </Text>
+                  <Text fw={500} c="brand.4" lightHidden>
+                    Web
+                  </Text>
+                </Group>
               </Group>
             </Group>
 
-            <Group gap="xs">
+            <Group gap="xs" wrap="nowrap">
               {/* ⚠ Сеанс симуляції видно ЗАВЖДИ і помітно: адміністратор, який
                   забув, що дивиться чужими правами, ухвалює рішення про чужий
                   доступ, дивлячись не на свої можливості (ФВ-6.16a). */}
