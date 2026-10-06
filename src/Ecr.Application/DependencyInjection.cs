@@ -361,6 +361,7 @@ public static class DependencyInjection
         services.AddScoped<Integration.CollectFromSourceHandler>();
         services.AddScoped<Integration.GetJobStatusHandler>();
         services.AddScoped<Integration.ListJobsHandler>();
+        services.AddScoped<Integration.GetJobsSummaryHandler>();
         services.AddScoped<Integration.RestartJobHandler>();
         services.AddScoped<Integration.CancelJobHandler>();
         services.AddScoped<Integration.CollectionScheduleApplier>();

@@ -273,6 +273,18 @@ public sealed record JobSummary(
     int? CreatedByUserId = null,
     string? EffectiveState = null);
 
+/// <summary>Лічильники черги фонових задач.</summary>
+/// <param name="Running">Скільки задач зараз виконується (усі, без вікна).</param>
+/// <param name="Queued">Скільки задач стоїть у черзі (усі, без вікна).</param>
+/// <param name="Failed24h">Скільки задач завершилось провалом за останню добу.</param>
+/// <param name="Succeeded24h">Скільки задач завершилось успішно за останню добу.</param>
+/// <param name="AvgStartLatencyMs">
+/// Середня затримка між постановкою і першим стартом (мс) для задач, що стартували
+/// з першої спроби за останню добу; <c>null</c> — таких немає. Повтори не враховуються:
+/// їхній інтервал містить паузу ретраю, а не очікування черги.
+/// </param>
+public sealed record JobsSummary(
+    int Running, int Queued, int Failed24h, int Succeeded24h, long? AvgStartLatencyMs);
 /// <summary>Фонова задача.</summary>
 public interface IBackgroundJob
 {

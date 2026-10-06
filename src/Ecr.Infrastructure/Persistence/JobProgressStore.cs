@@ -390,6 +390,50 @@ public sealed class JobProgressStore(EcrDbContext db) : IJobProgressStore
     }
 
     /// <inheritdoc />
+    public async Task<JobsSummary> SummarizeAsync(int? createdByUserId, DateTime utcNow, CancellationToken ct)
+    {
+        var since = utcNow.AddHours(-24);
+
+        // ⛔ Автор — КОН'ЮНКЦІЯ з рештою, як у `ListRecentAsync`: «мої» не може
+        // стати «мої або чужі». Значення приходить лише з `ICurrentUser`.
+        var scope = db.JobProgresses.AsNoTracking();
+        if (createdByUserId is { } author)
+        {
+            scope = scope.Where(p => p.CreatedByUserId == author);
+        }
+
+        // Активні рахуються без вікна (довга задача, що стартувала вчора, досі
+        // «виконується»); завершені — за останню добу по `UpdatedAt` (момент
+        // завершення: після `Finish` рядок більше не міняється). Іде по
+        // `IX_JobProgress_State_UpdatedAt` / `IX_JobProgress_CreatedBy_UpdatedAt`.
+        var counts = await scope
+            .Where(p => p.State == "Running" || p.State == "Queued"
+                        || ((p.State == "Failed" || p.State == "Succeeded") && p.UpdatedAt >= since))
+            .GroupBy(p => p.State)
+            .Select(g => new { State = g.Key, Count = g.Count() })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        int Of(string state) => counts.Where(c => c.State == state).Select(c => c.Count).FirstOrDefault();
+
+        // ⚠ Затримка старту — лише перша спроба (`Attempt` 1 або ще не
+        // заповнений): у повторі `StartedAt` стоїть після паузи ретраю, а це не
+        // очікування черги. Від'ємне (розсинхрон годинників процесів) → 0.
+        var latency = await scope
+            .Where(p => p.UpdatedAt >= since
+                        && p.CreatedAt != null
+                        && (p.Attempt == null || p.Attempt == 1)
+                        && (p.State == "Running" || p.State == "Succeeded" || p.State == "Failed"))
+            .Select(p => (double?)EF.Functions.DateDiffMillisecond(p.CreatedAt!.Value, p.StartedAt))
+            .AverageAsync(ct)
+            .ConfigureAwait(false);
+
+        return new JobsSummary(
+            Of("Running"), Of("Queued"), Of("Failed"), Of("Succeeded"),
+            latency is { } ms ? (long)Math.Round(Math.Max(0, ms)) : null);
+    }
+
+    /// <inheritdoc />
     public async Task<bool> HeartbeatAsync(string jobId, DateTime utcNow, CancellationToken ct)
         // ⚠ Точковий UPDATE, а не завантаження сутності: биття трапляється
         // кожні 30 секунд на КОЖНУ активну задачу, і читати заради нього цілий
