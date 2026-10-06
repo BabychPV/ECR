@@ -455,7 +455,7 @@ public sealed class RegistryDenyOverridesGlobalRightTests
     {
         Profile(b => b.Permission("Registry.View").Deny(ResourceKind.Registry, DeniedId));
 
-        var list = await new ListRegistriesHandler(_registries, _access, _user).HandleAsync(default);
+        var list = await new ListRegistriesHandler(_registries, _access, _user, Substitute.For<Ecr.Domain.Abstractions.IClock>()).HandleAsync(default);
 
         Assert.Equal(["OTHER_REG"], list.Select(d => d.Code));
     }
@@ -466,7 +466,7 @@ public sealed class RegistryDenyOverridesGlobalRightTests
     {
         Profile(b => b.Permission("Registry.View"));
 
-        var list = await new ListRegistriesHandler(_registries, _access, _user).HandleAsync(default);
+        var list = await new ListRegistriesHandler(_registries, _access, _user, Substitute.For<Ecr.Domain.Abstractions.IClock>()).HandleAsync(default);
 
         Assert.Equal(["DENIED_REG", "OTHER_REG"], list.Select(d => d.Code).Order(StringComparer.Ordinal));
     }

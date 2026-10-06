@@ -19,6 +19,20 @@ namespace Ecr.Application.Registries.Dto;
 /// </param>
 /// <param name="IsTemporal">Чи мають записи вікно дії; від цього залежить обов'язковість <c>asOf</c>.</param>
 /// <param name="Fields">Поля довідника.</param>
+/// <param name="EntryCount">
+/// Чинних записів сьогодні (UTC): активні, не видалені, у вікні дії. Лише в переліку; в інших
+/// відповідях <c>null</c>.
+/// </param>
+/// <param name="DefinitionVersion">Версія опису довідника.</param>
+/// <param name="DataChangedAt">Коли востаннє змінювалися записи, UTC; <c>null</c> — не змінювалися.</param>
+/// <param name="UsedInColumns">
+/// Скільки колонок шаблонів беруть значення з довідника. <c>null</c> без права
+/// <c>Registry.EditDefinition</c> (те саме, що в <c>GET {code}/usage</c>): «не знаю» ≠ «ніде».
+/// </param>
+/// <param name="UsedInTemplates">У скількох шаблонах; <c>null</c> за тих самих умов.</param>
+/// <param name="HasDraft">
+/// Чи є незавершена чернетка опису; <c>null</c> без права <c>Registry.EditDefinition</c>.
+/// </param>
 public sealed record RegistryDefDto(
     int Id,
     string Code,
@@ -26,7 +40,13 @@ public sealed record RegistryDefDto(
     bool IsHierarchical,
     bool IsTemporal,
     Domain.Enums.RegistrySourceKind SourceKind,
-    IReadOnlyList<RegistryFieldDto> Fields);
+    IReadOnlyList<RegistryFieldDto> Fields,
+    int? EntryCount = null,
+    int DefinitionVersion = 0,
+    DateTime? DataChangedAt = null,
+    int? UsedInColumns = null,
+    int? UsedInTemplates = null,
+    bool? HasDraft = null);
 
 /// <summary>Поле довідника.</summary>
 /// <param name="Id">Ідентифікатор поля.</param>
