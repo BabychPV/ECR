@@ -3,7 +3,6 @@ import { Anchor, Badge, Box, Button, Group, Stack } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
-import type { RegistryDefDto } from '@/api/types';
 import { CreateRegistryModal } from '@/features/registries/CreateRegistryModal';
 import { SourceKindSwitch } from '@/features/registries/SourceKindSwitch';
 import { t } from '@/shared/i18n';
@@ -11,10 +10,23 @@ import { can, useSession } from '@/shared/session/useSession';
 import { DataTable, type DataTableColumn } from '@/shared/ui/DataTable';
 import { FilterBar } from '@/shared/ui/FilterBar';
 import { PageHeader } from '@/shared/ui/PageHeader';
-import { StatStrip } from '@/shared/ui/StatStrip';
+import { StatStrip, type StatItem, type StatStripItems } from '@/shared/ui/StatStrip';
+import { StatusBadge } from '@/shared/ui/StatusBadge';
+import { Timestamp } from '@/shared/ui/Timestamp';
 import { TwoLine } from '@/shared/ui/TwoLine';
 import { useUrlParamsSetter, useUrlState } from '@/shared/ui/useUrlState';
-import { isSynced, sourceKindLabel, matchesSearch, matchesStat, parseStat, registryName } from './registryList';
+import {
+  changedThisMonth,
+  hasAny,
+  hasField,
+  isSynced,
+  matchesSearch,
+  matchesStat,
+  parseStat,
+  registryName,
+  sourceKindLabel,
+  type RegistryListItem,
+} from './registryList';
 
 /*
  * ⚠ Шторка — лінивим чанком: `Drawer` Mantine і «де використано» не потрібні,
@@ -49,7 +61,7 @@ export function RegistriesList(): JSX.Element {
 
   const registries = useQuery({
     queryKey: queryKeys.registries.list(),
-    queryFn: () => apiFetch<RegistryDefDto[]>('/api/v1/registries'),
+    queryFn: () => apiFetch<RegistryListItem[]>('/api/v1/registries'),
   });
 
   const stat = parseStat(statParam);
@@ -81,7 +93,12 @@ export function RegistriesList(): JSX.Element {
     }, 0);
   };
 
-  const columns: readonly DataTableColumn<RegistryDefDto>[] = [
+  const showEntries = hasAny(all, (registry) => registry.entryCount);
+  const showUsedIn = hasAny(all, (registry) => registry.usedInColumns);
+  const showUpdated = hasField(all, 'dataChangedAt');
+  const showState = hasAny(all, (registry) => registry.hasDraft);
+
+  const columns: readonly DataTableColumn<RegistryListItem>[] = [
     {
       key: 'registry',
       label: t('registries.list.registry'),
@@ -108,6 +125,19 @@ export function RegistriesList(): JSX.Element {
         />
       ),
     },
+    // ⛔ `D15-06`: колонка агрегату — лише коли сервер його віддав хоч одному рядку.
+    ...(showEntries
+      ? [
+          {
+            key: 'entryCount',
+            label: t('registries.list.entries'),
+            num: true,
+            sortValue: (registry: RegistryListItem) => registry.entryCount ?? null,
+            render: (registry: RegistryListItem) =>
+              registry.entryCount === null || registry.entryCount === undefined ? '—' : String(registry.entryCount),
+          } satisfies DataTableColumn<RegistryListItem>,
+        ]
+      : []),
     {
       key: 'fields',
       label: t('registries.fields'),
@@ -115,6 +145,50 @@ export function RegistriesList(): JSX.Element {
       sortValue: (registry) => registry.fields.length,
       render: (registry) => String(registry.fields.length),
     },
+    ...(showUsedIn
+      ? [
+          {
+            key: 'usedInColumns',
+            label: t('registries.list.usedIn'),
+            num: true,
+            title: t('registries.list.usedInHint'),
+            sortValue: (registry: RegistryListItem) => registry.usedInColumns ?? null,
+            // ⚠ Нуль — дані («ніде»), `null` — «не знаю» (без права): різні написи.
+            render: (registry: RegistryListItem) =>
+              registry.usedInColumns === null || registry.usedInColumns === undefined
+                ? '—'
+                : String(registry.usedInColumns),
+          } satisfies DataTableColumn<RegistryListItem>,
+        ]
+      : []),
+    ...(showUpdated
+      ? [
+          {
+            key: 'dataChangedAt',
+            label: t('registries.list.updated'),
+            sortValue: (registry: RegistryListItem) => registry.dataChangedAt ?? null,
+            render: (registry: RegistryListItem) => (
+              <Timestamp value={registry.dataChangedAt} dateOnly />
+            ),
+          } satisfies DataTableColumn<RegistryListItem>,
+        ]
+      : []),
+    ...(showState
+      ? [
+          {
+            key: 'hasDraft',
+            label: t('registries.list.state'),
+            sortValue: (registry: RegistryListItem) =>
+              registry.hasDraft === null || registry.hasDraft === undefined ? null : Number(registry.hasDraft),
+            render: (registry: RegistryListItem) =>
+              registry.hasDraft === null || registry.hasDraft === undefined ? (
+                '—'
+              ) : (
+                <StatusBadge kind="version" state={registry.hasDraft ? 'Draft' : 'Published'} quiet />
+              ),
+          } satisfies DataTableColumn<RegistryListItem>,
+        ]
+      : []),
     {
       key: 'traits',
       label: t('registries.list.traits'),
@@ -166,19 +240,7 @@ export function RegistriesList(): JSX.Element {
           label={t('registries.list.stats')}
           active={stat}
           onSelect={setStat}
-          items={[
-            { id: 'all', label: t('registries.list.statAll'), value: all.length, filter: false },
-            {
-              id: 'temporal',
-              label: t('registries.temporal'),
-              value: all.filter((registry) => registry.isTemporal).length,
-            },
-            {
-              id: 'external',
-              label: t('registries.list.statExternal'),
-              value: all.filter(isSynced).length,
-            },
-          ]}
+          items={statItems(all, showEntries, showUsedIn, showUpdated)}
         />
       )}
 
@@ -196,7 +258,7 @@ export function RegistriesList(): JSX.Element {
       )}
 
       <Box data-list-table="">
-        <DataTable<RegistryDefDto>
+        <DataTable<RegistryListItem>
           columns={columns}
           rows={rows}
           rowKey={(registry) => registry.code}
@@ -234,4 +296,42 @@ export function RegistriesList(): JSX.Element {
       <CreateRegistryModal opened={creating} onClose={() => setCreating(false)} onCreated={setCode} />
     </Stack>
   );
+}
+
+/**
+ * Показники смуги — у порядку макета (registries · entries · changed this month ·
+ * referenced by), кожен лише коли сервер віддав його дані; вільні місця до
+ * межі `L4` займають показники з наявних ознак (time-bound, synced from PI AF).
+ */
+function statItems(
+  all: readonly RegistryListItem[],
+  showEntries: boolean,
+  showUsedIn: boolean,
+  showUpdated: boolean,
+): StatStripItems {
+  const sum = (pick: (row: RegistryListItem) => number | null | undefined): number =>
+    all.reduce((total, row) => total + (pick(row) ?? 0), 0);
+
+  const first: StatItem = { id: 'all', label: t('registries.list.statAll'), value: all.length, filter: false };
+  const rest: StatItem[] = [];
+
+  if (showEntries) {
+    rest.push({ id: 'entries', label: t('registries.list.statEntries'), value: sum((row) => row.entryCount), filter: false });
+  }
+  if (showUpdated) {
+    rest.push({ id: 'changed', label: t('registries.list.statChanged'), value: all.filter((row) => changedThisMonth(row)).length });
+  }
+  if (showUsedIn) {
+    rest.push({ id: 'used', label: t('registries.list.statUsedIn'), value: sum((row) => row.usedInColumns), filter: false });
+  }
+
+  const fallback: StatItem[] = [
+    { id: 'temporal', label: t('registries.temporal'), value: all.filter((row) => row.isTemporal).length },
+    { id: 'external', label: t('registries.list.statExternal'), value: all.filter(isSynced).length },
+  ];
+
+  const [b, c, d] = [...rest, ...fallback];
+
+  // ⚠ Кортеж ≤ 4 (`L4` у типі): `rest` + `fallback` дає щонайменше два показники.
+  return d === undefined ? (c === undefined ? [first, b!] : [first, b!, c]) : [first, b!, c!, d];
 }
