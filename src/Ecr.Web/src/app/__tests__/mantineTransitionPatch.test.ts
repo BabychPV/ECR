@@ -47,6 +47,6 @@ describe('patchMantineUseTransition', () => {
   it('шаблон модуля впізнає шлях встановленого файла на обох роздільниках', () => {
     expect(MantineUseTransitionModule.test(modulePath)).toBe(true);
     expect(MantineUseTransitionModule.test(modulePath.replaceAll('/', '\\'))).toBe(true);
-    expect(MantineUseTransitionModule.test(modulePath.replace('/esm/', '/cjs/'))).toBe(false);
+    expect(MantineUseTransitionModule.test(modulePath.replaceAll('\\', '/').replace('/esm/', '/cjs/'))).toBe(false);
   });
 });
