@@ -65,7 +65,7 @@
   padding: 0 var(--mantine-spacing-xs);
   border: 1px solid var(--mantine-color-default-border);
   border-radius: var(--mantine-radius-xs);
-  background: var(--mantine-color-default-hover);
+  background: var(--ecr-hover);
   font-family: var(--mantine-font-family-monospace);
   font-size: var(--mantine-font-size-xs);
   font-weight: 400;
@@ -104,7 +104,7 @@
   color: var(--mantine-color-dimmed);
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  background: var(--mantine-color-default-hover);
+  background: var(--ecr-hover);
   border-bottom: 1px solid var(--mantine-color-default-border);
   margin: 0;
 }
@@ -130,7 +130,7 @@
 }
 
 .ecr-insp-issue:not(:disabled):hover {
-  background: var(--mantine-color-default-hover);
+  background: var(--ecr-hover);
 }
 
 .ecr-insp-issue:focus-visible {
