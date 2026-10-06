@@ -50,6 +50,7 @@ import {
   type PendingEdit,
 } from './useCellPatch';
 import { holdRejectedEdits, registerSliceSaver, scheduleAutosave } from './autosave';
+import { GridAriaPlugin } from './gridAria';
 // ⚠ Ключ комірки СХОВИЩА під власним іменем: у цьому файлі вже є `cellKey`
 // з `permissions.ts`, і хоч обидва дають `rowKey:columnCode`, ключем мапи
 // правок має бути рівно той, яким її будує сам сховищний модуль.
@@ -260,6 +261,9 @@ const RowLabelColumnWidth = 260;
  * рефетч на фокус.
  */
 const LookupEntriesStaleTimeMs = 5 * 60_000;
+
+/** Поправки ARIA поверх вбудованого `WCAGPlugin` (див. `gridAria.ts`). Масив стабільний: новий на кожен рендер перестворював би плагіни. */
+const GridPlugins = [GridAriaPlugin];
 
 /**
  * `combine` для `useQueries` записів Lookup-довідників: паралельні масиви за
@@ -2232,6 +2236,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
           // без цього набране мовчки зникало. Esc, як і раніше, скасовує
           // (`cancelChanges`); Enter/Tab фіксують, як і досі.
           applyOnClose
+          plugins={GridPlugins}
           onBeforeedit={onBeforeEdit}
           onBeforerangeedit={onBeforeRangeEdit}
           onAfteredit={onAfterEdit}
