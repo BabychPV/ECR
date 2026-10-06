@@ -50,6 +50,11 @@ public sealed record UnitCatalogSnapshot(
 /// </param>
 /// <param name="NameL10n">Назва мовами каталогу; <c>null</c> — не задано.</param>
 /// <param name="IsBase">Базова одиниця розмірності (колонка «Base unit»).</param>
+/// <param name="UsedIn">
+/// Скільки колонок шаблонів і полів довідників тримає одиницю (колонка «Used in»). Лише в
+/// <c>GET /units</c> і лише для того, хто має <c>Uom.EditCatalog</c>; інакше <c>null</c> (не нуль:
+/// «не знаю» не те саме, що «ніде»). Знімок каталогу його не несе.
+/// </param>
 /// <remarks>
 /// ⚠ Множник і зсув входять у знімок, а не читаються окремо. Без них
 /// <c>CONVERT</c> у рантаймі множив би на одиницю і мовчки повертав те саме
@@ -67,4 +72,5 @@ public sealed record UnitRef(
     string DimensionCode = "",
     IReadOnlyDictionary<string, string>? SymbolL10n = null,
     IReadOnlyDictionary<string, string>? NameL10n = null,
-    bool IsBase = false);
+    bool IsBase = false,
+    int? UsedIn = null);
