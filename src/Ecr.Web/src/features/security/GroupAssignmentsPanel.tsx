@@ -16,8 +16,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { EcrApiError, apiFetch } from '@/api/client';
 import type { components } from '@/api/schema';
 import type { RoleView } from '@/api/types';
-import { DateInput } from '@mantine/dates';
 import '@mantine/dates/styles.css';
+import { StrictDateInput as DateInput } from '@/shared/dates/StrictDateInput';
 import { formatDateOnly } from '@/shared/format';
 import { ConfirmModal } from '@/shared/ui/ConfirmModal';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
@@ -223,10 +223,9 @@ export function GroupAssignmentsPanel({ roles }: { roles: RoleView[] }): JSX.Ele
           value={principal}
           onChange={(event) => setPrincipal(event.currentTarget.value)}
         />
-        {/* `valueFormat` заданий кодом — однозначний і не залежить від локалі браузера. */}
+        {/* Формат показу `YYYY-MM-DD` задає `StrictDateInput` — однозначний і не залежить від локалі браузера. */}
         <DateInput
           label={t('groupRoles.validFrom')}
-          valueFormat="YYYY-MM-DD"
           placeholder={Unbounded}
           clearable
           value={validFrom}
@@ -234,7 +233,6 @@ export function GroupAssignmentsPanel({ roles }: { roles: RoleView[] }): JSX.Ele
         />
         <DateInput
           label={t('groupRoles.validTo')}
-          valueFormat="YYYY-MM-DD"
           placeholder={Unbounded}
           clearable
           value={validTo}
