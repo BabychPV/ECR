@@ -91,10 +91,17 @@ public static class JobRetryPolicy
     /// ⚠ <see cref="JobLeaseLostException"/> — теж ні: оренду вже тримає інший
     /// виконавець, і повтор тут означав би другу копію тієї самої роботи.
     /// </para>
+    /// <para>
+    /// ⛔ <see cref="InsufficientExecutionStackException"/> (L7-01) — ні: це сторож
+    /// стека обходу дерева виразу, а дерево від повтору не мілішає. Раніше задача
+    /// тричі повторювала той самий детермінований збій (210 с «виконується») і
+    /// падала з <c>ECR-SYS-0500</c>; тепер — одразу, з <c>ECR-EXPR-0422</c>.
+    /// </para>
     /// </remarks>
     public static bool IsWorthRetrying(Exception ex) => ex switch
     {
         SourceResponseTooLargeException => false,
+        InsufficientExecutionStackException => false,
         BusinessRuleException rule => TransientRuleCodes.Contains(rule.ErrorCode),
         DomainException
             or NotFoundException
@@ -125,6 +132,7 @@ public static class JobRetryPolicy
     {
         EcrException e => e.ErrorCode,
         DomainException d => d.ErrorCode,
+        InsufficientExecutionStackException => ErrorCodes.ExpressionTooComplex,
         _ => ErrorCodes.Internal,
     };
 
