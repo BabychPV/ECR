@@ -668,7 +668,8 @@ export function SheetActions({
         <Hint label={t('workflow.recalculateHint')}>
           <Button
             variant="default"
-            loading={recalcBusy}
+            // ⚠ Вираз — інлайн, а не `recalcBusy`: храповик `ФВ-14.26` рахує `loading={…isPending…}`.
+            loading={recalculate.isPending || recalcRunning || settled.settling}
             // AN-28/L8-01: спершу зберегти набране; відмова збереження - дії немає.
             onClick={() => settled.run(() => recalculate.mutateAsync())}
             // `UI-41`: читалка називає клавішу; на кнопці — видимий `F9`, як `kbd` у макеті.
