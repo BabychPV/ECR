@@ -19,6 +19,7 @@ import { TwoLine } from '@/shared/ui/TwoLine';
 import { useUrlParamsSetter, useUrlState } from '@/shared/ui/useUrlState';
 import { showApiError, showDone } from '@/shared/ui/notify';
 import { t } from '@/shared/i18n';
+import { localized } from '@/shared/i18n/localized';
 import { problemText } from '@/shared/ui/problemText';
 import { usePendingLoading } from '@/features/common/usePendingLoading';
 
@@ -37,8 +38,15 @@ export function unitPanelId(unitId: number): string {
 /** Показник смуги, що фільтрує: одиниці зі зсувом (температура). */
 const OffsetStat = 'offset';
 
+/** Показник смуги, що фільтрує: одиниці, яких не тримає жодна колонка чи поле. */
+const UnusedStat = 'unused';
+
 /**
- * Базова одиниця кожної розмірності: множник 1 і зсув 0.
+ * Базова одиниця кожної розмірності.
+ *
+ * ⚠ Спершу — прапорець сервера `isBase` (LS, `UnitRef.isBase`): це він каже,
+ * через яку одиницю йде конверсія. Розмірність без позначеної базової
+ * (старий сервер, тест-дублер) — за значенням: множник 1 і зсув 0.
  *
  * ⛔ `decimalEquals`, не `Number(x) === 1`: множник приходить із масштабом
  * колонки (`"1.0000000000"`), а `Number` не відрізнив би базову одиницю від
@@ -47,8 +55,13 @@ const OffsetStat = 'offset';
  */
 export function baseUnits(units: readonly UnitRef[]): ReadonlyMap<number, string> {
   const bases = new Map<number, string>();
+  const byCode = [...units].sort((a, b) => a.code.localeCompare(b.code));
 
-  for (const unit of [...units].sort((a, b) => a.code.localeCompare(b.code))) {
+  for (const unit of byCode) {
+    if (unit.isBase === true && !bases.has(unit.dimensionId)) bases.set(unit.dimensionId, unit.code);
+  }
+
+  for (const unit of byCode) {
     if (bases.has(unit.dimensionId)) continue;
     if (decimalEquals(unit.factorToBase, '1') && decimalEquals(unit.offsetToBase, '0')) {
       bases.set(unit.dimensionId, unit.code);
@@ -203,12 +216,21 @@ export function UnitsPage(): JSX.Element {
               unit.code.toLowerCase().includes(query) ||
               unit.dimensionCode.toLowerCase().includes(query)) &&
             (dimension === null || unit.dimensionCode === dimension) &&
-            (stat !== OffsetStat || !decimalEquals(unit.offsetToBase, '0')),
+            (stat !== OffsetStat || !decimalEquals(unit.offsetToBase, '0')) &&
+            (stat !== UnusedStat || unit.usedIn === 0),
         );
 
   const filtered = query.length > 0 || dimension !== null || stat !== null;
 
-  const stats: readonly [StatItem, StatItem, StatItem] = [
+  /*
+   * ⚠ `usedIn` — лише для того, хто має `Uom.EditCatalog`; інакше `null`
+   * («не знаю», а не «ніде»). Тому колонка «Used in» і показник «not used
+   * anywhere» з'являються, лише коли сервер віддав число КОЖНІЙ одиниці:
+   * лічба по частині видавала б невідоме за нуль (`D15-06`).
+   */
+  const usageKnown = all.length > 0 && all.every((unit) => unit.usedIn !== null && unit.usedIn !== undefined);
+
+  const baseStats: readonly [StatItem, StatItem, StatItem] = [
     { id: 'units', label: t('units.statUnits'), value: all.length, filter: false },
     { id: 'dimensions', label: t('units.statDimensions'), value: dimensionOptions.length, filter: false },
     {
@@ -217,6 +239,10 @@ export function UnitsPage(): JSX.Element {
       value: all.filter((unit) => !decimalEquals(unit.offsetToBase, '0')).length,
     },
   ];
+  const stats: readonly [StatItem, StatItem, StatItem] | readonly [StatItem, StatItem, StatItem, StatItem] =
+    usageKnown
+      ? [...baseStats, { id: UnusedStat, label: t('units.statUnused'), value: all.filter((unit) => unit.usedIn === 0).length }]
+      : baseStats;
 
   const openUnit = all.find((unit) => unitPanelId(unit.id) === panel);
 
@@ -241,8 +267,8 @@ export function UnitsPage(): JSX.Element {
 
       // ⚠ Код — ще й ПОСИЛАННЯ на шторку: клац по рядку (`onRowClick`) не має
       // клавіатурного шляху, а кнопка в першій клітинці — має (`Tab`, `Enter`).
-      // Назва одиниці другим рядком (макет: `twoLine(symbol, name)`) — лише
-      // коли перелік її віддає; зараз ні (TODO-контракт `UnitRef.name`).
+      // Назва одиниці другим рядком (макет: `twoLine(symbol, name)`) —
+      // `nameL10n` мовою інтерфейсу; немає назви — другого рядка немає.
       render: (unit) => (
         <TwoLine
           primary={
@@ -259,6 +285,7 @@ export function UnitsPage(): JSX.Element {
               {unit.code}
             </Anchor>
           }
+          secondary={localized({ values: unit.nameL10n ?? {} }) || undefined}
         />
       ),
     },
@@ -302,6 +329,18 @@ export function UnitsPage(): JSX.Element {
       render: (unit) =>
         decimalEquals(unit.offsetToBase, '0') ? null : (formatDecimal(unit.offsetToBase) ?? unit.offsetToBase),
     },
+    ...(usageKnown
+      ? [
+          {
+            key: 'usedIn',
+            label: t('units.usedIn'),
+            num: true,
+            // ⚠ Скільки колонок шаблонів і полів довідників тримає одиницю.
+            render: (unit: UnitRef) => (unit.usedIn === null || unit.usedIn === undefined ? '—' : String(unit.usedIn)),
+            sortValue: (unit: UnitRef) => unit.usedIn ?? -1,
+          } satisfies DataTableColumn<UnitRef>,
+        ]
+      : []),
   ];
 
   return (
