@@ -192,6 +192,7 @@ export function CollectionRunsPanel(): JSX.Element {
                 size="sm"
                 miw={160}
                 label={t('collectionRuns.filterFrom')}
+                valueFormat="YYYY-MM-DD"
                 clearable
                 value={parseDateOnly(fromDate)}
                 onChange={(next) => setFromDate(formatDateOnly(next))}
@@ -200,6 +201,7 @@ export function CollectionRunsPanel(): JSX.Element {
                 size="sm"
                 miw={160}
                 label={t('collectionRuns.filterTo')}
+                valueFormat="YYYY-MM-DD"
                 clearable
                 value={parseDateOnly(toDate)}
                 onChange={(next) => setToDate(formatDateOnly(next))}

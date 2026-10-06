@@ -6671,12 +6671,8 @@ USING (VALUES
     (N'err.ECR-AUTH-0403.csrfOrigin', N'en', N'This request came from another website and was rejected. Open the application at its own address and repeat the action.', 1),
     -- COLL:l104 ── кінець секції ──
     -- COLL:an43fix ── D-285: окремий текст відмови подання (reasonKey deny.InsufficientGrantLevel.Submit); ru/kz — порцією COLL:an43fix у блоці I18N нижче ──
-    (N'deny.InsufficientGrantLevel.Submit', N'en', N'Your access level is too low to submit this sheet: you need the Submit level, or the Write level together with the Submit documents right in this project. Ask an administrator to raise the level or grant the right.', 1),
+    (N'deny.InsufficientGrantLevel.Submit', N'en', N'Your access level is too low to submit this sheet: you need the Submit level, or the Write level together with the Submit documents right in this project. Ask an administrator to raise the level or grant the right.', 1)
     -- COLL:an43fix ── кінець секції ──
-    -- COLL:a1date ── A1-02: строгий розбір набраної дати в полі дати (StrictDateInput); ru/kz — порцією COLL:a1date у блоці I18N нижче ──
-    (N'dates.invalid', N'en', N'"{value}" is not a valid date. Enter the date as YYYY-MM-DD.', 1),
-    (N'dates.outOfRange', N'en', N'The date {value} is outside the allowed range.', 1)
-    -- COLL:a1date ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -15744,18 +15740,6 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:an43fix ── кінець секції ──
--- COLL:a1date ── ru/kz A1-02: строгий розбір набраної дати; власна порція ──
-INSERT INTO #I18N ([Key], Lang, Val)
-SELECT v.[Key], v.Lang, v.Val
-  FROM (VALUES
-    (N'dates.invalid', N'ru', N'«{value}» — некорректная дата. Введите дату в формате ДД.ММ.ГГГГ или ГГГГ-ММ-ДД.'),
-    (N'dates.outOfRange', N'ru', N'Дата {value} вне допустимого диапазона.'),
-    (N'dates.invalid', N'kz', N'«{value}» — жарамсыз күн. Күнді КК.АА.ЖЖЖЖ немесе ЖЖЖЖ-АА-КК пішімінде енгізіңіз.'),
-    (N'dates.outOfRange', N'kz', N'{value} күні рұқсат етілген ауқымнан тыс.')
-       ) AS v ([Key], Lang, Val)
-OPTION (RECOMPILE);
-GO
--- COLL:a1date ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

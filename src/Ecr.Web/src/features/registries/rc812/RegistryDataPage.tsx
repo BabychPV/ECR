@@ -363,6 +363,7 @@ export function RegistryDataPage(): JSX.Element {
               <DateInput
                 size="xs"
                 label={t('registries.data.asOf')}
+                valueFormat="YYYY-MM-DD"
                 value={parseDateOnly(asOf)}
                 onChange={(day) => setAsOf(formatDateOnly(day))}
               />

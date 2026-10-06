@@ -701,6 +701,7 @@ function ParameterField(props: {
           description={description}
           withAsterisk={declaration.required}
           // Формат заданий кодом — однозначний і не залежить від локалі браузера.
+          valueFormat="YYYY-MM-DD"
           clearable
           value={value instanceof Date ? value : null}
           onChange={(next) => props.onChange(next)}
