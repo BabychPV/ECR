@@ -94,14 +94,14 @@ const DocumentHeaderPanel = lazy(async () => ({
 }));
 
 /**
- * Перелік зауважень перевірки — шоста лінива панель (`D-132`).
- *
- * ⚠ Без результату перевірки (`messages === null`) панель не малює нічого, тож
- * до першого «Перевірити» її код (і `Table` з ним) сторінці не потрібен.
+ * Інспектор документа справа: Issues / History / Info (`UI-25`) — лінивий чанк
+ * (`D-132`). Він замінив вбудований перелік зауважень над сітками: макет
+ * (`docs/design/hybrid`, KIT.md §4) тримає зауваження в закритому за
+ * замовчуванням `.aside`, а над сітками — лише кнопку «K issues».
  */
-const loadValidationPanel = () => import('@/features/documents/ValidationPanel');
-const ValidationPanel = lazy(async () => ({
-  default: (await loadValidationPanel()).ValidationPanel,
+const loadDocumentInspector = () => import('@/features/documents/inspector/DocumentInspector');
+const DocumentInspector = lazy(async () => ({
+  default: (await loadDocumentInspector()).DocumentInspector,
 }));
 
 /**
@@ -289,6 +289,8 @@ export function DocumentPage(): JSX.Element {
   const [fresh, setFresh] = useState<{ scope: string; result: ValidationResultResponse } | null>(
     null,
   );
+  // `UI-25`: кожна завершена перевірка — сигнал інспектору відкрити Issues, якщо є що.
+  const [validatedSeq, setValidatedSeq] = useState(0);
 
   const validate = useMutation({
     mutationFn: (_scope: string) =>
@@ -303,6 +305,7 @@ export function DocumentPage(): JSX.Element {
       ),
     onSuccess: (result, requestedScope) => {
       setFresh({ scope: requestedScope, result });
+      setValidatedSeq((value) => value + 1);
 
       const errors = result.messages.filter((message) => message.severity === 'Error');
 
@@ -689,28 +692,32 @@ export function DocumentPage(): JSX.Element {
           питає. Тобто невідомість кнопки не ВІДКРИВАЄ — вона лише лишала
           оператора без єдиного попередження перед натисканням; банер вище це
           й закриває. Гейт подання за помилками — на сервері (`ECR-SUB-*`). */}
-      {shownValidation?.messages != null && (
-        <Suspense fallback={null}>
-          <ValidationPanel
-            messages={shownValidation.messages}
-            canSelect={(finding) => tables.data?.some((table) => table.tableDefId === finding.tableDefId) === true}
-            onSelect={(finding) => {
-              // ⛔ `ФВ-5.6`: спершу аркуш зауваження, потім запит переходу. Модуль
-              // переходу — за `import()`: він живе в чанку сітки, не сторінки
-              // (`D-132`), і сітки однаково без нього не з'являться.
-              const target = tables.data?.find((table) => table.tableDefId === finding.tableDefId);
-              if (target === undefined) return;
+      {/* `UI-25`: зауваження — в інспекторі справа (закритий за замовчуванням);
+          тут лише кнопки «K issues» і «History». Лічильник — лише за ВИДИМИМИ
+          таблицями (`inspectorModel.ts`). */}
+      <Suspense fallback={null}>
+        <DocumentInspector
+          documentId={documentId}
+          periodKey={periodKey}
+          tables={tables.data ?? []}
+          messages={shownValidation?.messages ?? null}
+          validatedSeq={validatedSeq}
+          onSelectFinding={(finding) => {
+            // ⛔ `ФВ-5.6`: спершу аркуш зауваження, потім запит переходу. Модуль
+            // переходу — за `import()`: він живе в чанку сітки, не сторінки
+            // (`D-132`), і сітки однаково без нього не з'являться.
+            const target = tables.data?.find((table) => table.tableDefId === finding.tableDefId);
+            if (target === undefined) return;
 
-              // ⚠ Лише коли аркуш інший: зміна адреси — це навігація, і на
-              // активному аркуші вона нічого не дає, крім зайвого рендеру сторінки.
-              if (target.sheetCode !== active?.code) setSheet(target.sheetCode);
-              void import('@/features/grid/cellNavigation').then((module) =>
-                module.requestCellNavigation(finding),
-              );
-            }}
-          />
-        </Suspense>
-      )}
+            // ⚠ Лише коли аркуш інший: зміна адреси — це навігація, і на
+            // активному аркуші вона нічого не дає, крім зайвого рендеру сторінки.
+            if (target.sheetCode !== active?.code) setSheet(target.sheetCode);
+            void import('@/features/grid/cellNavigation').then((module) =>
+              module.requestCellNavigation(finding),
+            );
+          }}
+        />
+      </Suspense>
 
       {/* `BE-11b`. Над вкладками з тієї ж причини, що й панель вище: журнал —
           про всі аркуші документа за період. Згорнутий, і до розгортання
