@@ -17,7 +17,9 @@ public sealed class ListTemplatesHandler(
     /// <summary>Повертає сторінку шаблонів.</summary>
     /// <param name="page">Курсорна пагінація.</param>
     /// <param name="ct">Токен скасування.</param>
-    public async Task<PagedResult<TemplateSummary>> HandleAsync(CursorRequest page, CancellationToken ct)
+    /// <param name="query">Пошук за кодом або назвою; порожньо — без фільтра.</param>
+    public async Task<PagedResult<TemplateSummary>> HandleAsync(
+        CursorRequest page, string? query, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(page);
 
@@ -40,7 +42,14 @@ public sealed class ListTemplatesHandler(
                 });
         }
 
-        return await templates.ListTemplatesAsync(page, ct).ConfigureAwait(false);
+        // ⛔ Лічильник документів лише за проєктами, де читач бачить документи (як GET /documents):
+        // число по всіх проєктах розкрило б, скільки документів у чужих. Перелік шаблонів відкритий
+        // за Template.View, а проєкти — ні.
+        var profile = await access.BuildProfileAsync(currentUser.UserId!.Value, ct).ConfigureAwait(false);
+        var visibleProjects = Documents.ListDocumentsHandler.ReadableProjects(
+            profile, Documents.ListDocumentsHandler.Permission);
+
+        return await templates.ListTemplatesAsync(page, query, visibleProjects, ct).ConfigureAwait(false);
     }
 
     /// <summary>Перевіряє функціональне право поточного користувача.</summary>

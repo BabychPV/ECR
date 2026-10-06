@@ -28,10 +28,10 @@ public sealed class TemplatesController(
     [HttpGet]
     [ProducesResponseType<Ecr.Application.Common.PagedResult<Ecr.Application.Ports.TemplateSummary>>(StatusCodes.Status200OK)]
     public async Task<IActionResult> List(
-        [FromQuery] int limit, [FromQuery] string? cursor, CancellationToken ct)
+        [FromQuery] int limit, [FromQuery] string? cursor, [FromQuery] string? q, CancellationToken ct)
         // Право і межі сторінки перевіряє обробник: правило має діяти
         // незалежно від того, звідки його викликали.
-        => Ok(await list.HandleAsync(new CursorRequest(limit == 0 ? 50 : limit, cursor), ct)
+        => Ok(await list.HandleAsync(new CursorRequest(limit == 0 ? 50 : limit, cursor), q, ct)
             .ConfigureAwait(false));
 
     /// <summary>Створює шаблон. Право <c>Template.Edit</c>.</summary>
