@@ -66,12 +66,51 @@ public interface IConsistencyIssueReader
     /// <param name="openOnly">
     /// <c>true</c> — лише ще не закриті (<c>ResolvedAt IS NULL</c>).
     /// </param>
+    /// <param name="severity">Вага 1..3; <c>null</c> — будь-яка.</param>
+    /// <param name="query">
+    /// Підрядок, уже обрізаний і непорожній, або <c>null</c>. Шукається в тексті,
+    /// коді правила й ідентифікаторі сутності ЗАПИТОМ, до <c>TOP</c>: постфільтр
+    /// по сторінці дав би хибні курсор і «є ще».
+    /// </param>
     /// <param name="page">Курсорна пагінація.</param>
     /// <param name="ct">Токен скасування.</param>
     /// <remarks>
     /// ⚠ Порядок — за <c>Id DESC</c>, і курсор іде тим самим напрямком: журнал
     /// читають із кінця («що знайшлося цієї ночі»), а не з початку.
     /// </remarks>
-    public Task<PagedResult<ConsistencyIssueView>> ReadIssuesAsync(
-        string? ruleCode, bool openOnly, CursorRequest page, CancellationToken ct);
+    public Task<ConsistencyIssuePage> ReadIssuesAsync(
+        string? ruleCode, bool openOnly, byte? severity, string? query, CursorRequest page, CancellationToken ct);
+
+    /// <summary>
+    /// Лічильники знахідок за вагою (усі коди правил) — для смуги показників екрана.
+    /// </summary>
+    /// <param name="openOnly"><c>true</c> — лише ще не закриті.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<ConsistencySummary> ReadSummaryAsync(bool openOnly, CancellationToken ct);
 }
+
+/// <summary>Лічильники знахідок за вагою в межах фільтра переліку (без фільтра ваги).</summary>
+/// <param name="Info">Вага 1.</param>
+/// <param name="Warnings">Вага 2.</param>
+/// <param name="Errors">Вага 3.</param>
+public sealed record ConsistencySeverityTotals(int Info, int Warnings, int Errors);
+
+/// <summary>Сторінка знахідок із загальними лічильниками.</summary>
+/// <param name="Items">Елементи сторінки.</param>
+/// <param name="NextCursor">Курсор наступної сторінки; <c>null</c> — кінець.</param>
+/// <param name="TotalCount">Скільки знахідок збігається з УСІМА фільтрами (разом із вагою).</param>
+/// <param name="Totals">Розбивка за вагою за фільтрами без ваги.</param>
+public sealed record ConsistencyIssuePage(
+    IReadOnlyList<ConsistencyIssueView> Items,
+    string? NextCursor,
+    int? TotalCount,
+    ConsistencySeverityTotals Totals);
+
+/// <summary>Загальні лічильники журналу знахідок.</summary>
+/// <param name="Info">Знахідок ваги 1 (інформація).</param>
+/// <param name="Warnings">Знахідок ваги 2 (попередження).</param>
+/// <param name="Errors">Знахідок ваги 3 (помилка).</param>
+/// <param name="Total">Усього (інша вага, якщо така з'явиться, потрапляє лише сюди).</param>
+/// <param name="LastDetectedAt">Момент найновішої знахідки в UTC; <c>null</c> — журнал порожній.</param>
+public sealed record ConsistencySummary(
+    int Info, int Warnings, int Errors, int Total, DateTime? LastDetectedAt);

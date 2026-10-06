@@ -122,7 +122,7 @@ public sealed class OutboundConnectionPolicyTests
         OwnDb("src/Ecr.Infrastructure/Startup/SqlCapabilitiesProbe.cs", 1),       // StartupSequence: db.Database
         OwnDb("src/Ecr.Infrastructure/Jobs/SqlDistributedLock.cs", 1),           // QuartzJobAdapter, RegistrySyncJob: db.Database
         OwnDb("src/Ecr.Infrastructure/Localization/UiStringCatalogStore.cs", 10),
-        OwnDb("src/Ecr.Infrastructure/Persistence/ConsistencyIssueReader.cs", 1),
+        OwnDb("src/Ecr.Infrastructure/Persistence/ConsistencyIssueReader.cs", 2),
         OwnDb("src/Ecr.Infrastructure/Persistence/AuditReader.cs", 8),
         OwnDb("src/Ecr.Infrastructure/Persistence/AuditWriter.cs", 1),
         OwnDb("src/Ecr.Infrastructure/Persistence/RuleCoverageReader.cs", 1),

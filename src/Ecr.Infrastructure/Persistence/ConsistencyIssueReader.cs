@@ -16,8 +16,8 @@ namespace Ecr.Infrastructure.Persistence;
 public sealed class ConsistencyIssueReader(EcrDbContext db) : IConsistencyIssueReader
 {
     /// <inheritdoc />
-    public async Task<PagedResult<ConsistencyIssueView>> ReadIssuesAsync(
-        string? ruleCode, bool openOnly, CursorRequest page, CancellationToken ct)
+    public async Task<ConsistencyIssuePage> ReadIssuesAsync(
+        string? ruleCode, bool openOnly, byte? severity, string? query, CursorRequest page, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(page);
 
@@ -41,6 +41,8 @@ public sealed class ConsistencyIssueReader(EcrDbContext db) : IConsistencyIssueR
              WHERE Id < @before
                    {(ruleCode is null ? string.Empty : "AND RuleCode = @ruleCode")}
                    {(openOnly ? "AND ResolvedAt IS NULL" : string.Empty)}
+                   {(severity is null ? string.Empty : "AND Severity = @severity")}
+                   {(query is null ? string.Empty : QueryPredicate)}
              ORDER BY Id DESC;
             """;
 
@@ -49,6 +51,16 @@ public sealed class ConsistencyIssueReader(EcrDbContext db) : IConsistencyIssueR
         if (ruleCode is not null)
         {
             command.Parameters.AddWithValue("@ruleCode", ruleCode);
+        }
+
+        if (severity is not null)
+        {
+            command.Parameters.AddWithValue("@severity", severity.Value);
+        }
+
+        if (query is not null)
+        {
+            command.Parameters.AddWithValue("@q", "%" + EscapeLike(query) + "%");
         }
 
         var rows = new List<(long Id, ConsistencyIssueView View)>();
@@ -78,15 +90,107 @@ public sealed class ConsistencyIssueReader(EcrDbContext db) : IConsistencyIssueR
         var hasMore = rows.Count > page.Limit;
         var items = rows.Take(page.Limit).Select(r => r.View).ToList();
 
-        return new PagedResult<ConsistencyIssueView>(
+        // ⚠ Лічильники — за тими самими фільтрами, КРІМ ваги: вкладки ваги на
+        // екрані мають показувати, скільки було б у кожній, а не нулі в усіх,
+        // крім обраної. Журнал системний (право `System.ViewHealth`), стеля
+        // знахідок за прохід — тисяча: один агрегат, без індексу.
+        await using var totalsCommand = connection.CreateCommand();
+        totalsCommand.CommandText = $"""
+            SELECT COALESCE(SUM(CASE WHEN Severity = 1 THEN 1 ELSE 0 END), 0),
+                   COALESCE(SUM(CASE WHEN Severity = 2 THEN 1 ELSE 0 END), 0),
+                   COALESCE(SUM(CASE WHEN Severity = 3 THEN 1 ELSE 0 END), 0),
+                   COUNT(*)
+              FROM aud.ConsistencyIssue
+             WHERE 1 = 1
+                   {(ruleCode is null ? string.Empty : "AND RuleCode = @ruleCode")}
+                   {(openOnly ? "AND ResolvedAt IS NULL" : string.Empty)}
+                   {(query is null ? string.Empty : QueryPredicate)};
+            """;
+        if (ruleCode is not null)
+        {
+            totalsCommand.Parameters.AddWithValue("@ruleCode", ruleCode);
+        }
+
+        if (query is not null)
+        {
+            totalsCommand.Parameters.AddWithValue("@q", "%" + EscapeLike(query) + "%");
+        }
+
+        ConsistencySeverityTotals totals;
+        int allMatching;
+        await using (var totalsReader = await totalsCommand.ExecuteReaderAsync(ct).ConfigureAwait(false))
+        {
+            await totalsReader.ReadAsync(ct).ConfigureAwait(false);
+            totals = new ConsistencySeverityTotals(
+                Info: totalsReader.GetInt32(0),
+                Warnings: totalsReader.GetInt32(1),
+                Errors: totalsReader.GetInt32(2));
+            allMatching = totalsReader.GetInt32(3);
+        }
+
+        var totalCount = severity switch
+        {
+            1 => totals.Info,
+            2 => totals.Warnings,
+            3 => totals.Errors,
+            _ => allMatching,
+        };
+
+        return new ConsistencyIssuePage(
             items,
             hasMore ? Cursor.Encode(rows[page.Limit - 1].Id) : null,
-
-            // Підрахунок тут дорогий і нікому не потрібен: адміністратор
-            // дивиться, ЩО саме зламано, а скільки всього — уже показує
-            // лічильник `ecr.consistency.issues` за типом знахідки.
-            TotalCount: null);
+            totalCount,
+            totals);
     }
+
+    /// <inheritdoc />
+    public async Task<ConsistencySummary> ReadSummaryAsync(bool openOnly, CancellationToken ct)
+    {
+        await using var connection = new SqlConnection(db.Database.GetConnectionString());
+        await connection.OpenAsync(ct).ConfigureAwait(false);
+
+        await using var command = connection.CreateCommand();
+
+        // ⚠ Один прохід по таблиці, без індексу: стеля знахідок за прохід —
+        // тисяча, і журнал читає лише `System.ViewHealth`. `Total` рахується
+        // окремо від трьох відомих ваг, щоб невідома вага (якщо правило
+        // колись її введе) не зникла зі суми мовчки.
+        command.CommandText = $"""
+            SELECT COALESCE(SUM(CASE WHEN Severity = 1 THEN 1 ELSE 0 END), 0),
+                   COALESCE(SUM(CASE WHEN Severity = 2 THEN 1 ELSE 0 END), 0),
+                   COALESCE(SUM(CASE WHEN Severity = 3 THEN 1 ELSE 0 END), 0),
+                   COUNT(*),
+                   MAX(DetectedAt)
+              FROM aud.ConsistencyIssue
+             WHERE 1 = 1
+                   {(openOnly ? "AND ResolvedAt IS NULL" : string.Empty)};
+            """;
+
+        await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        await reader.ReadAsync(ct).ConfigureAwait(false);
+
+        return new ConsistencySummary(
+            reader.GetInt32(0),
+            reader.GetInt32(1),
+            reader.GetInt32(2),
+            reader.GetInt32(3),
+            reader.IsDBNull(4) ? null : DateTime.SpecifyKind(reader.GetDateTime(4), DateTimeKind.Utc));
+    }
+
+    /// <summary>Умова пошуку: текст, код правила або номер сутності.</summary>
+    private const string QueryPredicate = """
+        AND (Message LIKE @q ESCAPE N'\'
+             OR RuleCode LIKE @q ESCAPE N'\'
+             OR CAST(EntityId AS nvarchar(20)) LIKE @q ESCAPE N'\')
+        """;
+
+    /// <summary>Екранує <c>% _ [ \</c>, щоб підрядок шукався буквально.</summary>
+    private static string EscapeLike(string value)
+        => value
+            .Replace("\\", "\\\\", StringComparison.Ordinal)
+            .Replace("%", "\\%", StringComparison.Ordinal)
+            .Replace("_", "\\_", StringComparison.Ordinal)
+            .Replace("[", "\\[", StringComparison.Ordinal);
 
     /// <summary>
     /// Межа спадного курсора: <c>long.MaxValue</c> на першій сторінці.
