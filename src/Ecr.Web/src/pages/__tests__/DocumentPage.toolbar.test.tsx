@@ -326,7 +326,7 @@ describe('DocumentPage: прогрес у шапці (UI-15)', () => {
   );
 
   it(
-    'K зауважень — посилання, що веде до панелі зауважень',
+    'K зауважень — посилання, що відкриває інспектор на вкладці Issues (UI-25)',
     async () => {
       show(AllRights, {
         validation: {
@@ -342,10 +342,24 @@ describe('DocumentPage: прогрес у шапці (UI-15)', () => {
       const link = await screen.findByTestId('document-issues-link', {}, { timeout: SlowEnvTimeout });
       expect(link.textContent).toBe('⟦document.issuesCount.other (count=2)⟧');
 
-      const panel = document.getElementById('document-issues');
-      expect(panel).not.toBeNull();
+      // ✎ Пачка batch-3: зауваження після `UI-25` живуть в інспекторі; посилання відкриває
+      // його тією ж кнопкою, що й «K issues» над сітками, — фокус на вкладку Issues.
+      const trigger = await waitFor(
+        () => {
+          const node = document.querySelector<HTMLButtonElement>('[data-inspector-issues]');
+          expect(node).not.toBeNull();
+
+          return node as HTMLButtonElement;
+        },
+        { timeout: SlowEnvTimeout },
+      );
+      expect(trigger.getAttribute('aria-pressed')).toBe('false');
       fireEvent.click(link);
-      expect(document.activeElement).toBe(panel);
+      await waitFor(() => expect(trigger.getAttribute('aria-pressed')).toBe('true'), { timeout: SlowEnvTimeout });
+      // ⚠ Вкладки аркушів сторінки теж `tab` — шукаємо лише в інспекторі (`<aside>`).
+      const inspector = await screen.findByRole('complementary', {}, { timeout: SlowEnvTimeout });
+      const tab = within(inspector).getByRole('tab', { selected: true });
+      await waitFor(() => expect(document.activeElement).toBe(tab), { timeout: SlowEnvTimeout });
     },
     SlowEnvTimeout,
   );
