@@ -1,0 +1,51 @@
+/*
+ * UI-32: крихти у верхній смузі — за макетом (`docs/design/hybrid/index.html`, `.crumbs`):
+ * приглушений текст, роздільник — тонка межа зліва від логотипа, один рядок без
+ * переносу; поточна сторінка — основним кольором і обрізається трикрапкою.
+ */
+.ecr-crumbs {
+  min-width: 0;
+  height: 20px;
+  margin-left: 4px;
+  padding-left: 12px;
+  border-left: 1px solid var(--ecr-border);
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  white-space: nowrap;
+  color: var(--ecr-muted);
+  font-size: var(--mantine-font-size-sm);
+}
+
+.ecr-crumbs .mantine-Breadcrumbs-root {
+  flex-wrap: nowrap;
+  min-width: 0;
+}
+
+.ecr-crumbs .mantine-Breadcrumbs-breadcrumb,
+.ecr-crumbs a.mantine-Anchor-root {
+  color: var(--ecr-muted);
+  font-size: inherit;
+}
+
+/* Макет: посилання крихт — приглушені, не фірмовий синій (синій — лише головна дія й активне). */
+.ecr-crumbs a.mantine-Anchor-root:hover {
+  color: var(--ecr-text);
+}
+
+.ecr-crumbs .ecr-crumbs-current {
+  color: var(--ecr-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ecr-crumbs .ecr-crumbs-sep {
+  color: var(--ecr-faint);
+  display: block;
+}
+
+/* Ліва частина смуги (меню, логотип, крихти) стискається першою: крихти обрізаються, кнопки праворуч лишаються. */
+.ecr-topbar-start {
+  flex: 1;
+  min-width: 0;
+}
