@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { loadCatalog, resetMissingReports, setLanguage } from '@/shared/i18n';
-import { formatMonthYear } from '@/shared/format';
+import { formatMonthYear, formatPeriodKey } from '@/shared/format';
 
 /**
  * `A2-10`: підпис місяця періоду — з каталогу рядків, а не з `Intl`.
@@ -112,6 +112,33 @@ describe('formatMonthYear: місяць мовою інтерфейсу з ка�
     expect(formatMonthYear(2026, 0)).toBe('');
     expect(formatMonthYear(2026, 13)).toBe('');
     expect(formatMonthYear(2026, 1.5)).toBe('');
+  });
+});
+
+describe('formatPeriodKey: людська назва за periodKey мовою інтерфейсу', () => {
+  it('місяць: en / ru / kz, а не технічний ключ 202610', () => {
+    setLanguage('en');
+    expect(formatPeriodKey(202610)).toBe('October 2026');
+    setLanguage('ru');
+    expect(formatPeriodKey(202610)).toBe('Октябрь 2026');
+    setLanguage('kz');
+    expect(formatPeriodKey(202610)).toBe('Қазан 2026');
+  });
+
+  it('невалідний ключ — порожньо', () => {
+    setLanguage('en');
+
+    expect(formatPeriodKey(202613)).toBe('');
+    expect(formatPeriodKey(202600)).toBe('');
+    expect(formatPeriodKey(Number.NaN)).toBe('');
+  });
+
+  it('рік за Yearly: лише послідовність 1; квартал за Quarterly: 1…4', () => {
+    setLanguage('en');
+
+    expect(formatPeriodKey(202601, 'Yearly')).toBe('2026');
+    expect(formatPeriodKey(202605, 'Yearly')).toBe('');
+    expect(formatPeriodKey(202605, 'Quarterly')).toBe('');
   });
 });
 
