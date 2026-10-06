@@ -25231,6 +25231,13 @@ export interface components {
             symbolL10n?: null | {
                 [key: string]: string;
             };
+            /**
+             * Format: int32
+             * @description Скільки колонок шаблонів і полів довідників тримає одиницю (колонка «Used in»). Лише в
+             *     `GET /units` і лише для того, хто має `Uom.EditCatalog`; інакше `null` (не нуль:
+             *     «не знаю» не те саме, що «ніде»). Знімок каталогу його не несе.
+             */
+            usedIn?: null | number;
         };
         /** @description Поле джерела, яке не лягає нікуди. */
         UnmappedSourceField: {
