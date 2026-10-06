@@ -91,6 +91,12 @@ export function StrictDateInput({
       {...props}
       // Підпис — від того, хто ставить поле (ФВ-14.20 перевіряє його там).
       label={label}
+      // ⛔ Кнопка очищення (`clearable`) без імені — порушення axe `button-name` (/admin/audit, темна тема):
+      // читалка казала «кнопка» без змісту. Ім'я — з підписом поля, бо поруч їх два («From», «To»).
+      clearButtonProps={{
+        'aria-label': typeof label === 'string' ? t('dates.clearNamed', { field: label }) : t('dates.clear'),
+        ...props.clearButtonProps,
+      }}
       popoverProps={dismissed ? { ...popoverProps, opened: false } : (popoverProps ?? {})}
       valueFormat="YYYY-MM-DD"
       // ⛔ `null` замість `Invalid Date`: `DateInput` тоді не змінює значення — ні перекочування, ні стирання.
