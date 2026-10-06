@@ -403,6 +403,10 @@ public sealed partial class EndpointCoverageTests
             "UI-12: підпис групи бічного меню (navGroups)."),
         new("shared/ui/PageHeader.tsx", "routeDescriptionKey", 1, "app/routes.ts", RouteDescriptionKeys,
             "UI-11: пояснення екрана під заголовком (handle.descriptionKey)."),
+        new("features/search/DataSearchPalette.tsx", "screen.handle.labelKey", 1, "app/routes.ts", RouteLabelKeys,
+            "UI-30: екран у командній палітрі — назва пункту меню."),
+        new("features/search/DataSearchPalette.tsx", "group.labelKey", 1, "app/routes.ts", NavGroupLabelKeys,
+            "UI-30: група меню як підпис екрана в палітрі."),
 
         new("features/grid/permissions.ts", "Hints[reason]", 1, "features/grid/permissions.ts",
             [
