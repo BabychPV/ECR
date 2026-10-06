@@ -153,7 +153,7 @@ public sealed class CampaignSummaryStoreTests(SqlServerFixture sql)
         Assert.Equal(205, summary.TotalProjects);
 
         var t = summary.Totals;
-        Assert.Equal((205, 1, 1, 1), (t.Projects, t.Documents, t.Approved, t.Snapshots));
+        Assert.Equal((205, 1, 1, 1), (t.Projects, t.Documents, t.Approved ?? -1, t.Snapshots));
         Assert.Equal((1, 0, 0, 204), (t.Done, t.Overdue, t.AtRisk, t.InProgress));
     }
 
@@ -349,6 +349,40 @@ public sealed class CampaignSummaryStoreTests(SqlServerFixture sql)
         Assert.Null(await NotSubmitted(Reader().Deny(ResourceKind.Sheet, chain.SheetDefId), withCounts: true));
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "R-1")]
+    public async Task Лічильники_станів_документів_null_читачу_із_забороною_на_аркуш_і_числа_читачу_без_неї()
+    {
+        // ⛔ МУТАЦІЙНИЙ ДОКАЗ: повернути `p.Draft`/`b.Draft` без `allSheets ?` у `GetCampaignSummaryHandler` --
+        // червоніє: «найгірший стан серед усіх аркушів» зараховує приховані, різниця двох читачів -- оракул стану.
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var key = await FreshPeriodKeyAsync(builder);
+        var chain = await builder.BuildAsync(periodKey: key, ct: CancellationToken.None);
+        await using var db = builder.CreateContext();
+        await ArrangeAsync(db, chain, chain.DocumentId, status: null);
+        await AddAsync(db, chain, DocumentStatus.Rejected, count: 2);
+
+        var open = await Handler(db, Now).HandleAsync(key, CancellationToken.None);
+        var narrowed = await Handler(db, Now, b => b.Deny(ResourceKind.Sheet, chain.SheetDefId))
+            .HandleAsync(key, CancellationToken.None);
+
+        Assert.Equal((1, 0, 0, 2), (open.Totals.Draft, open.Totals.Submitted, open.Totals.Approved, open.Totals.Rejected));
+        var row = Assert.Single(open.Projects);
+        Assert.Equal((1, 0, 0, 2), (row.Draft, row.Submitted, row.Approved, row.Rejected));
+
+        Assert.Null(narrowed.Totals.Draft);
+        Assert.Null(narrowed.Totals.Submitted);
+        Assert.Null(narrowed.Totals.Approved);
+        Assert.Null(narrowed.Totals.Rejected);
+        var narrowedRow = Assert.Single(narrowed.Projects);
+        Assert.Null(narrowedRow.Draft);
+        Assert.Null(narrowedRow.Rejected);
+
+        // Кількість документів і зрізів лишається видимою (Q15-07).
+        Assert.Equal(3, narrowed.Totals.Documents);
+    }
     /// <summary>Обробник календаря над справжніми сховищами; користувач описаний <paramref name="access"/>.</summary>
     private static GetPeriodCalendarHandler CalendarHandler(EcrDbContext db, AccessBuilder access)
     {
@@ -362,11 +396,11 @@ public sealed class CampaignSummaryStoreTests(SqlServerFixture sql)
     }
 
     /// <summary>Обробник над справжнім сховищем; користувач має лише право огляду.</summary>
-    private static GetCampaignSummaryHandler Handler(EcrDbContext db, DateTime utcNow)
+    private static GetCampaignSummaryHandler Handler(EcrDbContext db, DateTime utcNow, Func<AccessBuilder, AccessBuilder>? narrow = null)
     {
         var access = Substitute.For<IAccessDecisionService>();
         access.BuildProfileAsync(7, Arg.Any<CancellationToken>())
-            .Returns(new AccessBuilder { UserId = 7 }.Permission(GetCampaignSummaryHandler.Permission).Build());
+            .Returns((narrow ?? (b => b))(new AccessBuilder { UserId = 7 }.Permission(GetCampaignSummaryHandler.Permission)).Build());
 
         var user = Substitute.For<ICurrentUser>();
         user.UserId.Returns(7);

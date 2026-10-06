@@ -3,9 +3,11 @@ using System.Net;
 using System.Text.Json;
 using Ecr.Application.Reporting;
 using Ecr.Domain.Entities.Documents;
+using Ecr.Domain.Entities.Security;
 using Ecr.Domain.Entities.Workflow;
 using Ecr.Domain.Enums;
 using Ecr.TestKit;
+using Microsoft.EntityFrameworkCore;
 using Xunit;
 
 namespace Ecr.Api.Tests;
@@ -122,6 +124,49 @@ public sealed class CampaignSummaryTests(SqlServerFixture sql)
         Assert.False(row.TryGetProperty("cells", out _));
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "R-1")]
+    public async Task Лічильники_станів_на_дроті_null_коли_у_читача_є_грант_None_на_аркуш()
+    {
+        // ⛔ МУТАЦІЙНИЙ ДОКАЗ: віддати `p.Draft`/`b.Draft` без `allSheets ?` у `GetCampaignSummaryHandler` -- червоніє:
+        // «найгірший стан серед усіх аркушів» зараховує приховані, число розкрило б стан прихованого аркуша (R-1).
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var chain = await builder.BuildAsync(ct: CancellationToken.None).ConfigureAwait(true);
+
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, GetCampaignSummaryHandler.Permission).ConfigureAwait(true);
+
+        await using (var db = builder.CreateContext())
+        {
+            var roleId = await db.RolePermissions
+                .Where(p => p.PermissionCode == GetCampaignSummaryHandler.Permission)
+                .OrderByDescending(p => p.RoleId)
+                .Select(p => p.RoleId)
+                .FirstAsync(CancellationToken.None)
+                .ConfigureAwait(true);
+            db.ResourceGrants.Add(new ResourceGrant(roleId, ResourceKind.Sheet, chain.SheetDefId, GrantLevel.None));
+            await db.SaveChangesAsync(CancellationToken.None).ConfigureAwait(true);
+        }
+
+        var response = await GetAsync(client, chain.PeriodKey.Value).ConfigureAwait(true);
+        Assert.True(response.IsSuccessStatusCode, $"{response.StatusCode}: {app.ErrorsText}");
+
+        var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync().ConfigureAwait(true)).RootElement;
+        var row = body.GetProperty("projects").EnumerateArray()
+            .Single(p => p.GetProperty("projectId").GetInt32() == chain.ProjectId);
+        var totals = body.GetProperty("totals");
+
+        foreach (var field in new[] { "draft", "submitted", "approved", "rejected" })
+        {
+            Assert.Equal(JsonValueKind.Null, row.GetProperty(field).ValueKind);
+            Assert.Equal(JsonValueKind.Null, totals.GetProperty(field).ValueKind);
+        }
+
+        // Кількість документів видно й без права на аркуш (Q15-07).
+        Assert.Equal(1, row.GetProperty("documents").GetInt32());
+    }
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]

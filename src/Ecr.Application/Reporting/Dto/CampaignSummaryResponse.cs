@@ -35,6 +35,11 @@ public sealed record CampaignSummaryResponse(
 /// <param name="Submitted">Сума <c>Submitted</c>.</param>
 /// <param name="Approved">Сума <c>Approved</c>.</param>
 /// <param name="Rejected">Сума <c>Rejected</c>.</param>
+/// <remarks>
+/// ⛔ Чотири лічильники станів (<c>Draft</c>…<c>Rejected</c>) — «найгірший стан серед усіх аркушів» документа, тож
+/// зараховують і ПРИХОВАНІ аркуші: різниця між двома читачами була б оракулом стану прихованого (R-1). Тому
+/// <c>null</c> для читача без <c>SheetVisibility.SeesAllSheets</c> (так само, як <c>SheetsTotal</c>).
+/// </remarks>
 /// <param name="Snapshots">Сума поточних зрізів.</param>
 /// <param name="Done">Проєктів у стані <see cref="CampaignProgress.Done"/>.</param>
 /// <param name="Overdue">Проєктів у стані <see cref="CampaignProgress.Overdue"/>.</param>
@@ -51,10 +56,10 @@ public sealed record CampaignSummaryResponse(
 public sealed record CampaignTotals(
     int Projects,
     int Documents,
-    int Draft,
-    int Submitted,
-    int Approved,
-    int Rejected,
+    int? Draft,
+    int? Submitted,
+    int? Approved,
+    int? Rejected,
     int Snapshots,
     int Done,
     int Overdue,
@@ -120,10 +125,10 @@ public sealed record CampaignProjectSummary(
     string ProjectCode,
     LocalizedText NameL10n,
     int Documents,
-    int Draft,
-    int Submitted,
-    int Approved,
-    int Rejected,
+    int? Draft,
+    int? Submitted,
+    int? Approved,
+    int? Rejected,
     int Snapshots,
     CampaignProgress Progress,
     DateTimeOffset? SubmissionDeadline,

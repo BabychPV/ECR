@@ -62,7 +62,8 @@ public sealed class GetCampaignSummaryHandler(
 
         // ⛔ UI-33, D2 / R-8: лічильники АРКУШІВ — лише коли читач не має інструментів, що ховають аркуші
         // (явна заборона / грант None). Інакше `null`: різниця «з забороною / без» розкривала б приховане.
-        // Лічильники документів нижче лишаються як були (Q15-07: огляд кампанії — право без межі проєктів).
+        // R-1: лічильники станів документів (Draft/Submitted/Approved/Rejected) — «найгірший стан серед усіх аркушів», тож
+        // рахують і приховані; для такого читача теж `null`. Кількість документів/зрізів лишається (Q15-07: право без межі проєктів).
         var allSheets = SheetVisibility.SeesAllSheets(profile);
 
         var key = PeriodKey.Parse(periodKey);
@@ -82,7 +83,12 @@ public sealed class GetCampaignSummaryHandler(
 
             return new CampaignProjectSummary(
                 p.ProjectId, p.ProjectCode, p.NameL10n,
-                p.Documents, p.Draft, p.Submitted, p.Approved, p.Rejected, p.Snapshots,
+                p.Documents,
+                allSheets ? p.Draft : null,
+                allSheets ? p.Submitted : null,
+                allSheets ? p.Approved : null,
+                allSheets ? p.Rejected : null,
+                p.Snapshots,
                 progress,
                 p.SubmissionDeadlineUtc is { } deadline ? ToSite(deadline, zone) : null,
                 allSheets ? p.Sheets : null,
@@ -103,10 +109,10 @@ public sealed class GetCampaignSummaryHandler(
         var totals = new CampaignTotals(
             page.Buckets.Sum(b => b.Projects),
             page.Buckets.Sum(b => b.Documents),
-            page.Buckets.Sum(b => b.Draft),
-            page.Buckets.Sum(b => b.Submitted),
-            page.Buckets.Sum(b => b.Approved),
-            page.Buckets.Sum(b => b.Rejected),
+            allSheets ? page.Buckets.Sum(b => b.Draft) : null,
+            allSheets ? page.Buckets.Sum(b => b.Submitted) : null,
+            allSheets ? page.Buckets.Sum(b => b.Approved) : null,
+            allSheets ? page.Buckets.Sum(b => b.Rejected) : null,
             page.Buckets.Sum(b => b.Snapshots),
             progressCounts.GetValueOrDefault(CampaignProgress.Done),
             progressCounts.GetValueOrDefault(CampaignProgress.Overdue),
