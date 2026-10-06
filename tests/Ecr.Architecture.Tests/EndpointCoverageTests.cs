@@ -554,6 +554,11 @@ public sealed partial class EndpointCoverageTests
         new("features/registries/rc816/serverMessage.ts", "messageKey", 1, null, [],
             "ФВ-8.16: messageKey помилки рядка пакета записів довідника (RegistryBatchRowError) і порушення "
             + "правила довідника (RegistryRuleViolationDto) у редакторі master-detail — відкритий набір сервера."),
+        new("features/workflow/sheetDenial.ts", "key", 1, null, [],
+            "A2-08: messageKey відмови ECR-ACCS-0403 про аркуш (submitDenied/approveDenied/"
+            + "approveOwnSubmission/reopenDenied) — речення перескладається з назвою аркуша."),
+        new("features/workflow/sheetDenial.ts", "reasonKey", 1, null, [],
+            "A2-08: reasonKey тієї самої відмови (deny.*) — відкритий набір сервера, як WithLocalizedReason."),
 
         // F-15/B-12 (четвертий раунд UX): перелік проблем публікації методології —
         // закритий набір, що його породжує сервер (MethodologyPublishChecks).
