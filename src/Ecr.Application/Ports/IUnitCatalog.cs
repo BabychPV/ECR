@@ -44,6 +44,12 @@ public sealed record UnitCatalogSnapshot(
 /// <param name="DimensionCode">
 /// Код розмірності з довідника <c>uom.Dimension</c> (<c>kg</c> → <c>Mass</c>).
 /// </param>
+/// <param name="SymbolL10n">
+/// Позначення мовами каталогу (UI-21: колонка «Unit» переліку без N+1 по <c>GET /units/{id}</c>);
+/// <c>null</c> — тест-дублер не задав.
+/// </param>
+/// <param name="NameL10n">Назва мовами каталогу; <c>null</c> — не задано.</param>
+/// <param name="IsBase">Базова одиниця розмірності (колонка «Base unit»).</param>
 /// <remarks>
 /// ⚠ Множник і зсув входять у знімок, а не читаються окремо. Без них
 /// <c>CONVERT</c> у рантаймі множив би на одиницю і мовчки повертав те саме
@@ -58,4 +64,7 @@ public sealed record UnitCatalogSnapshot(
 /// </remarks>
 public sealed record UnitRef(
     int Id, string Code, byte DimensionId, decimal FactorToBase = 1m, decimal OffsetToBase = 0m,
-    string DimensionCode = "");
+    string DimensionCode = "",
+    IReadOnlyDictionary<string, string>? SymbolL10n = null,
+    IReadOnlyDictionary<string, string>? NameL10n = null,
+    bool IsBase = false);
