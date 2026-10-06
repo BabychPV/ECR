@@ -25212,11 +25212,25 @@ export interface components {
              */
             id: number;
             /**
+             * @description Базова одиниця розмірності (колонка «Base unit»).
+             * @default false
+             */
+            isBase: boolean;
+            /** @description Назва мовами каталогу; `null` — не задано. */
+            nameL10n?: null | {
+                [key: string]: string;
+            };
+            /**
              * Format: decimal
              * @description Зсув до базової; ненульовий лише в температури.
              * @default 0
              */
             offsetToBase: string;
+            /** @description Позначення мовами каталогу (UI-21: колонка «Unit» переліку без N+1 по `GET /units/{id}`);
+             *     `null` — тест-дублер не задав. */
+            symbolL10n?: null | {
+                [key: string]: string;
+            };
         };
         /** @description Поле джерела, яке не лягає нікуди. */
         UnmappedSourceField: {
