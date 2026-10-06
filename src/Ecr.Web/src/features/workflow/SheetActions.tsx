@@ -25,6 +25,19 @@ import { humanizeJobId } from './jobLabel';
 import { isAllowed, type WorkflowAction } from './transitions';
 import { t } from '@/shared/i18n';
 
+/**
+ * Відмова дії над аркушем — з назвою аркуша (A2-08), окремим чанком.
+ *
+ * ⚠ Lazy: модуль потрібен лише на відмові, а `SheetActions` сидить у бюджеті
+ * `DocumentPage`/`PeriodsPage` (ліміт 250 КБ). Не довантажився — текст сервера.
+ */
+function showSheetError(error: unknown, sheetName: string | null): void {
+  import('./sheetDenial').then(
+    (module) => module.showSheetError(error, sheetName),
+    () => showApiError(error),
+  );
+}
+
 /** Аркуш, над яким виконуються дії робочого процесу. */
 interface SheetActionsProps {
   /** Документ. */
@@ -35,6 +48,12 @@ interface SheetActionsProps {
   periodKey: number;
   /** Поточний стан аркуша за цей період. */
   state: string;
+
+  /**
+   * Назва аркуша мовою інтерфейсу — для відмов `ECR-ACCS-0403` (A2-08):
+   * «аркуш «Викиди» не можна…», а не «аркуш 2». Не задано — текст сервера.
+   */
+  sheetName?: string | null | undefined;
 
   /**
    * Чому документ за цей період не змінити (`F-18`): архівний проєкт, закритий
@@ -182,6 +201,7 @@ export function SheetActions({
   sheetDefId,
   periodKey,
   state,
+  sheetName = null,
   lock = null,
 }: SheetActionsProps): JSX.Element {
   const queryClient = useQueryClient();
@@ -226,7 +246,7 @@ export function SheetActions({
       const pending = warningsToConfirm(error);
       if (pending === null) {
         setWarnings(null);
-        showApiError(error);
+        showSheetError(error, sheetName);
         return;
       }
       setWarnings(pending);
@@ -249,7 +269,7 @@ export function SheetActions({
       setAsking(null);
       showDone(verdict.approved ? t('workflow.approved') : t('workflow.rejected'));
     },
-    onError: showApiError,
+    onError: (error) => showSheetError(error, sheetName),
   });
 
   const reopen = useMutation({
@@ -265,7 +285,7 @@ export function SheetActions({
     },
     // ⚠ Найчастіша відмова тут — `ECR-PRD-4223`: період закрито, і спершу
     // треба відкрити період, а це інше право (`D-67`). Текст веде саме туди.
-    onError: showApiError,
+    onError: (error) => showSheetError(error, sheetName),
   });
 
   /*
@@ -294,7 +314,7 @@ export function SheetActions({
       showDone(t('workflow.recalled'));
     },
     // ⚠ `409` тут — не збій: погоджувач устиг підписати крок, і текст каже саме це.
-    onError: showApiError,
+    onError: (error) => showSheetError(error, sheetName),
   });
 
   /**
@@ -366,7 +386,7 @@ export function SheetActions({
       // змінюється.
       showDone(t('workflow.recalcQueued', { job: humanizeJobId(job.jobId) }));
     },
-    onError: showApiError,
+    onError: (error) => showSheetError(error, sheetName),
   });
 
   /**
@@ -527,7 +547,7 @@ export function SheetActions({
    * Клієнт цього права НЕ перевіряє: `/me` віддає лише глобальні права, тож
    * для ролі з областю проєкту його не видно. Тому «Submit» активна вже з
    * рівня `Write`, а відмову без права дає СЕРВЕР (403 `submitDenied`,
-   * `deny.InsufficientGrantLevel.Submit`) — її показує `showApiError`.
+   * `deny.InsufficientGrantLevel.Submit`) — її показує `showSheetError` (з назвою аркуша, A2-08).
    */
   const mayWorkflow = (action: 'submit' | 'approve' | 'reject'): boolean =>
     me !== undefined &&
@@ -541,8 +561,21 @@ export function SheetActions({
 
   const canSubmit = !dataLocked && isAllowed('submit', state) && mayWorkflow('submit');
 
-  const canApprove = isAllowed('approve', state) && mayWorkflow('approve');
-  const canReject = isAllowed('reject', state) && mayWorkflow('reject');
+  /*
+   * ⛔ A2-08 (F-25 / D-285): автор подання не погоджує власний аркуш — сервер
+   * відповідає `403 approveOwnSubmission`. «Автора» клієнт сам не знає (`/me`
+   * і стан аркуша не кажуть, хто подав), тож ознака — СЕРВЕРНА: `canRecall`
+   * (`GET …/recall`) істинне лише для того, хто подав, і доки жоден крок не
+   * підписано. Тоді замість Approve/Reject лишається «Recall» — штатний для
+   * автора шлях забрати подання (Reject власного подання сервер пропускає, але
+   * поруч із Recall це друга кнопка для тієї самої дії).
+   * ⚠ Прогалина: якщо крок уже підписав інший погоджувач, `canRecall` хибне і
+   * кнопка автору видна — тоді відмову з назвою аркуша дає сервер.
+   */
+  const isOwnSubmission = canRecall;
+
+  const canApprove = !isOwnSubmission && isAllowed('approve', state) && mayWorkflow('approve');
+  const canReject = !isOwnSubmission && isAllowed('reject', state) && mayWorkflow('reject');
 
   // ⛔ Аудит Етапу 3, лана "Documents core" (`lane3-workflow-buttons-not-grouped`,
   // знахідка людини зі скріншотом): `DocumentPage.tsx` рендерить ОДИН
