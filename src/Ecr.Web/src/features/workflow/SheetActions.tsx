@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type JSX } from 'react';
 import { Button, Divider } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { usePendingLoading } from '@/features/common/usePendingLoading';
 import { apiEnqueue, apiFetch, EcrApiError } from '@/api/client';
 import type {
   ApproveSheetRequest,
@@ -196,14 +197,125 @@ const RequiredGrant: Readonly<Record<'submit' | 'approve' | 'reject', GrantLevel
  * помилки валідації, черга кроку маршруту — лишається за сервером, і кнопка,
  * яка через них відмовить, показує причину відмовою, а не зникненням.
  */
-export function SheetActions({
+export function SheetActions(props: SheetActionsProps): JSX.Element {
+  const actions = useSheetActions(props);
+  const { recalculate, submit, approve, reject, reopen, recall } = actions;
+  const hasAnyAction =
+    recalculate !== null || submit !== null || approve !== null || reject !== null || reopen !== null || recall !== null;
+
+  return (
+    <>
+      {hasAnyAction && (
+        // ⚠ Роздільник — лише коли є ЩО розділяти: порожній `Divider` без
+        // жодної кнопки за ним (роль без жодного права робочого процесу,
+        // напр. Auditor) виглядав би як зламаний хвіст рядка.
+        <Divider orientation="vertical" />
+      )}
+      {/*
+       * ⛔ Прогалина 2 директиви паритету зі старою системою (Q-327 →
+       * Q-331): до Q-331 кнопка стояла на екрані ОДНОГО аркуша
+       * (`SheetActions` отримує `sheetDefId`), а `POST
+       * /documents/{id}/recalculate` перераховувала ВЕСЬ документ — усі
+       * аркуші за цей період, не лише активний. Тепер `sheetDefId`
+       * справді йде в тілі запиту, і сервер звужує ЗАПИС до таблиць цього
+       * аркуша. Підказка лишається (текст оновлено), бо нюанс і досі є:
+       * формула цього аркуша має право читати дані сусіднього, тож
+       * перерахунок однаково враховує весь документ на ВХОДІ, хоч і пише
+       * лише в цей аркуш. Підпис кнопки лишається нейтральним «Recalculate»
+       * (той самий, що й на екрані проєкту, `PeriodsPage.tsx`).
+       */}
+      {recalculate !== null && (
+        // ⚠ `Hint`, а не `Tooltip`: кнопка фокусується, але `Tooltip` не
+        // давав `aria-describedby`, тож читач не чув нюансу про сусідні аркуші.
+        <Hint label={t('workflow.recalculateHint')}>
+          <Button variant="default" loading={recalculate.loading} onClick={recalculate.run}>
+            {recalculate.running ? t('workflow.recalcRunning') : t('workflow.recalculate')}
+          </Button>
+        </Hint>
+      )}
+
+      {submit !== null && (
+        <Button loading={submit.loading} onClick={submit.run}>
+          {t('document.submit')}
+        </Button>
+      )}
+
+      {/* ⛔ Затвердження і відхилення — пара, і показуються разом. Кнопка
+          «Затвердити» без «Відхилити» перетворює погодження на формальність:
+          єдиний спосіб не затвердити — не натиснути нічого, і аркуш висить
+          у `Submitted` без жодного сліду причини. */}
+      {/* ⛔ `X-05`: `color="green"` давав білий текст на заливці з
+          контрастом 2.4:1 — токен `statusSuccess` підібрано під `primaryShade`
+          цієї теми до AA 4.5:1 (`theme.ts`, `contrast.test.ts`).
+          ⛔ `X-25`: затвердження йшло одним кліком без підтвердження, хоча
+          «Reject» і «Return for edits» питають. Затверджені дані йдуть у
+          звітність регулятору — це та сама вага рішення. */}
+      {approve !== null && (
+        <Button color="statusSuccess" loading={approve.loading} onClick={approve.ask}>
+          {t('workflow.approve')}
+        </Button>
+      )}
+
+      {/* ✎ 2026-10-06: у панелі дій — лише варіанти з рамкою чи заливкою
+          (`docs/design/ui-conventions.md`, «Кнопки»): `light` без рамки
+          поруч з обвідними читався як кнопка іншого розміру. */}
+      {reject !== null && (
+        <Button color="statusError" variant="outline" onClick={reject.ask}>
+          {t('workflow.reject')}
+        </Button>
+      )}
+
+      {reopen !== null && (
+        <Button variant="default" onClick={reopen.ask}>
+          {t('workflow.reopen')}
+        </Button>
+      )}
+
+      {recall !== null && (
+        <Button variant="default" onClick={recall.ask}>
+          {t('workflow.recall')}
+        </Button>
+      )}
+
+      {actions.dialogs}
+    </>
+  );
+}
+
+/** Дія, що виконується одразу (з очікуванням збереження набраного). */
+export interface RunnableSheetAction {
+  readonly loading: boolean;
+  readonly run: () => void;
+}
+
+/**
+ * Що дозволено над аркушем і як це запустити — без розкладки кнопок.
+ *
+ * ✎ UI-14 (макет `docs/design/hybrid/screen-document.js`, `renderActions`):
+ * сторінка документа розкладає ті самі дії інакше — одна головна дія, ≤ 2
+ * другорядні, решта в меню «More» (KIT §1 п.2). Правила показу (стан, право,
+ * грант, симуляція, `F-18`, A2-08) лишаються ТУТ і не дублюються: `null` —
+ * дії немає, і розкладка її не малює. `dialogs` монтуються поза меню: меню
+ * розмонтовує вміст, щойно закривається.
+ */
+export interface SheetActionsModel {
+  readonly recalculate: (RunnableSheetAction & { readonly running: boolean }) | null;
+  readonly submit: RunnableSheetAction | null;
+  readonly approve: { readonly loading: boolean; readonly ask: () => void } | null;
+  readonly reject: { readonly ask: () => void } | null;
+  readonly reopen: { readonly ask: () => void } | null;
+  readonly recall: { readonly ask: () => void } | null;
+  readonly dialogs: JSX.Element;
+}
+
+export function useSheetActions({
   documentId,
   sheetDefId,
   periodKey,
   state,
   sheetName = null,
   lock = null,
-}: SheetActionsProps): JSX.Element {
+}: SheetActionsProps): SheetActionsModel {
   const queryClient = useQueryClient();
   const session = useSession();
 
@@ -401,6 +513,11 @@ export function SheetActions({
    * single-flight на весь шлях «зберегти -> дія -> відповідь».
    */
   const settled = useSettledAction(submit.isPending || decide.isPending || recalculate.isPending);
+  // ✎ UI-14: дії стали моделлю для панелі документа — спінер за порогом
+  // `ФВ-14.26`, а не з першого кадру (храповик `pendingSpinner.ratchet`).
+  const submitLoading = usePendingLoading(submit.isPending);
+  const decideLoading = usePendingLoading(decide.isPending);
+  const recalculateLoading = usePendingLoading(recalculate.isPending);
 
   const recalcJob = useQuery({
     queryKey: ['job', recalcJobId],
@@ -599,109 +716,24 @@ export function SheetActions({
   // періоду поданий чи затверджений, - кнопки, яка гарантовано дасть відмову, немає.
   const canRecalculate = !dataLocked && !hasLockedSheet(summary?.sheetStates) && can(me, 'Document.View');
 
-  const hasAnyAction =
-    canRecalculate ||
-    canSubmit ||
-    canApprove ||
-    canReject ||
-    canRecall ||
-    (isAllowed('reopen', state) && can(me, 'Document.Reopen'));
+  /*
+   * ⚠ Повернення в роботу — окреме небезпечне право (`ФВ-6.12`): воно
+   * дає змогу змінити вже подані числа. Тому і дія окрема, і причина
+   * обов'язкова.
+   *
+   * ⚠ Тут навмисно ЛИШЕ право, без порога гранта, хоч сервер перевіряє
+   * обидва (`ReopenDocumentHandler`: `profile.Has("Document.Reopen")`,
+   * далі `CanReopenAsync` → `EditRules.CanReopen` з порогом
+   * `GrantLevel.Approve`). Це не та розбіжність, про яку F9: дія вже
+   * закрита правом, і вужчою за сервер вона не стає. Довести її до
+   * другої умови — окремий крок: `e2e/security.spec.ts` проводить
+   * `Document.Reopen` як штатну дію для приведення аркуша в `Draft`
+   * (`makeSheetEditable`), і зміна порога тут зачіпає той прохід.
+   */
+  const canReopen = isAllowed('reopen', state) && can(me, 'Document.Reopen');
 
-  return (
+  const dialogs = (
     <>
-      {hasAnyAction && (
-        // ⚠ Роздільник — лише коли є ЩО розділяти: порожній `Divider` без
-        // жодної кнопки за ним (роль без жодного права робочого процесу,
-        // напр. Auditor) виглядав би як зламаний хвіст рядка.
-        <Divider orientation="vertical" />
-      )}
-      {/*
-       * ⛔ Прогалина 2 директиви паритету зі старою системою (Q-327 →
-       * Q-331): до Q-331 кнопка стояла на екрані ОДНОГО аркуша
-       * (`SheetActions` отримує `sheetDefId`), а `POST
-       * /documents/{id}/recalculate` перераховувала ВЕСЬ документ — усі
-       * аркуші за цей період, не лише активний. Тепер `sheetDefId`
-       * справді йде в тілі запиту, і сервер звужує ЗАПИС до таблиць цього
-       * аркуша. Підказка лишається (текст оновлено), бо нюанс і досі є:
-       * формула цього аркуша має право читати дані сусіднього, тож
-       * перерахунок однаково враховує весь документ на ВХОДІ, хоч і пише
-       * лише в цей аркуш. Підпис кнопки лишається нейтральним «Recalculate»
-       * (той самий, що й на екрані проєкту, `PeriodsPage.tsx`).
-       */}
-      {canRecalculate && (
-        // ⚠ `Hint`, а не `Tooltip`: кнопка фокусується, але `Tooltip` не
-        // давав `aria-describedby`, тож читач не чув нюансу про сусідні аркуші.
-        <Hint label={t('workflow.recalculateHint')}>
-          <Button
-            variant="default"
-            loading={recalculate.isPending || recalcRunning || settled.settling}
-            // AN-28/L8-01: спершу зберегти набране; відмова збереження - дії немає.
-            onClick={() => settled.run(() => recalculate.mutateAsync())}
-          >
-            {recalcRunning ? t('workflow.recalcRunning') : t('workflow.recalculate')}
-          </Button>
-        </Hint>
-      )}
-
-      {canSubmit && (
-        <Button loading={submit.isPending || settled.settling} onClick={() => settled.run(() => submit.mutateAsync(false))}>
-          {t('document.submit')}
-        </Button>
-      )}
-
-      {/* ⛔ Затвердження і відхилення — пара, і показуються разом. Кнопка
-          «Затвердити» без «Відхилити» перетворює погодження на формальність:
-          єдиний спосіб не затвердити — не натиснути нічого, і аркуш висить
-          у `Submitted` без жодного сліду причини. */}
-      {/* ⛔ `X-05`: `color="green"` давав білий текст на заливці з
-          контрастом 2.4:1 — токен `statusSuccess` підібрано під `primaryShade`
-          цієї теми до AA 4.5:1 (`theme.ts`, `contrast.test.ts`).
-          ⛔ `X-25`: затвердження йшло одним кліком без підтвердження, хоча
-          «Reject» і «Return for edits» питають. Затверджені дані йдуть у
-          звітність регулятору — це та сама вага рішення. */}
-      {canApprove && (
-        <Button
-          color="statusSuccess"
-          loading={decide.isPending || settled.settling}
-          onClick={() => setAsking('approve')}
-        >
-          {t('workflow.approve')}
-        </Button>
-      )}
-
-      {/* ✎ 2026-10-06: у панелі дій — лише варіанти з рамкою чи заливкою
-          (`docs/design/ui-conventions.md`, «Кнопки»): `light` без рамки
-          поруч з обвідними читався як кнопка іншого розміру. */}
-      {canReject && (
-        <Button color="statusError" variant="outline" onClick={() => setAsking('reject')}>
-          {t('workflow.reject')}
-        </Button>
-      )}
-
-      {/* ⚠ Повернення в роботу — окреме небезпечне право (`ФВ-6.12`): воно
-          дає змогу змінити вже подані числа. Тому і кнопка окрема, і
-          причина обов'язкова.
-
-          ⚠ Тут навмисно ЛИШЕ право, без порога гранта, хоч сервер перевіряє
-          обидва (`ReopenDocumentHandler`: `profile.Has("Document.Reopen")`,
-          далі `CanReopenAsync` → `EditRules.CanReopen` з порогом
-          `GrantLevel.Approve`). Це не та розбіжність, про яку F9: кнопка вже
-          закрита правом, і вужчою за сервер вона не стає. Довести її до
-          другої умови — окремий крок: `e2e/security.spec.ts` проводить
-          `Document.Reopen` як штатну дію для приведення аркуша в `Draft`
-          (`makeSheetEditable`), і зміна порога тут зачіпає той прохід. */}
-      {isAllowed('reopen', state) && can(me, 'Document.Reopen') && (
-        <Button variant="default" onClick={() => setAsking('reopen')}>
-          {t('workflow.reopen')}
-        </Button>
-      )}
-
-      {canRecall && (
-        <Button variant="default" onClick={() => setAsking('recall')}>
-          {t('workflow.recall')}
-        </Button>
-      )}
-
       <LazyConfirmModal
         opened={warnings !== null}
         title={t('workflow.submitWarningsTitle')}
@@ -759,6 +791,25 @@ export function SheetActions({
       />
     </>
   );
+
+  return {
+    recalculate: canRecalculate
+      ? {
+          loading: recalculateLoading || recalcRunning || settled.settling,
+          running: recalcRunning,
+          // AN-28/L8-01: спершу зберегти набране; відмова збереження - дії немає.
+          run: () => settled.run(() => recalculate.mutateAsync()),
+        }
+      : null,
+    submit: canSubmit
+      ? { loading: submitLoading || settled.settling, run: () => settled.run(() => submit.mutateAsync(false)) }
+      : null,
+    approve: canApprove ? { loading: decideLoading || settled.settling, ask: () => setAsking('approve') } : null,
+    reject: canReject ? { ask: () => setAsking('reject') } : null,
+    reopen: canReopen ? { ask: () => setAsking('reopen') } : null,
+    recall: canRecall ? { ask: () => setAsking('recall') } : null,
+    dialogs,
+  };
 }
 
 /**
