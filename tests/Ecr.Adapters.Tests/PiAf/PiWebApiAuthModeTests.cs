@@ -102,6 +102,32 @@ public sealed class PiWebApiAuthModeTests
         Assert.Null(Assert.Single(typed.Requests).Headers.Authorization);
     }
 
+    /// <summary>
+    /// «Negotiate + секрет»: поточний код не відхиляє й не попереджає (ILogger у адаптері
+    /// немає). Негоціація — лише за порожнім секретом або точним словом
+    /// <c>Negotiate</c>; будь-яке значення — заголовковий режим типізованим клієнтом
+    /// (<c>Negotiate abc</c> іде як схема <c>Negotiate</c>), клієнт Negotiate секрету
+    /// не отримує ніколи.
+    /// </summary>
+    [Theory]
+    [InlineData("Negotiate", false)]
+    [InlineData("   ", false)]
+    [InlineData("Negotiate abc", true)]
+    public async Task NegotiateІСекрет_СекретНіколиНеЙдеКлієнтомNegotiate(string secret, bool headerMode)
+    {
+        var fixture = new Fixture().Source("SRC", secret);
+
+        await fixture.Sut.DiscoverAsync(fixture.IdOf("SRC"), CancellationToken.None);
+
+        Assert.All(fixture.Negotiate.Requests, r => Assert.Null(r.Headers.Authorization));
+        Assert.Equal(headerMode ? 1 : 0, fixture.Header.Requests.Count);
+        Assert.Equal(headerMode ? 0 : 1, fixture.Negotiate.Requests.Count);
+        if (headerMode)
+        {
+            Assert.Equal("Negotiate", fixture.Header.Requests[0].Headers.Authorization?.Scheme);
+        }
+    }
+
     /// <summary>Відмова в автентифікації не повторюється й не містить значення секрету (ФВ-6.11).</summary>
     [Theory]
     [InlineData("Basic c3VwM3ItczNjcjN0", HttpStatusCode.Unauthorized)]
