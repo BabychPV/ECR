@@ -115,7 +115,7 @@ export function SearchLauncher({ groups = NoGroups }: { groups?: readonly Palett
   );
 }
 
-/** Лупа — той самий лінійний стиль, що в `app/navIcons.tsx`. */
+/** Лупа — той самий лінійний стиль, що в `shared/ui/navIcons.tsx`. */
 function SearchIcon(): JSX.Element {
   return (
     <svg

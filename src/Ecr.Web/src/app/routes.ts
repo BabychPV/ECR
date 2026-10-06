@@ -115,7 +115,7 @@ export interface RouteHandle {
    */
   alsoRequires?: readonly string[];
 
-  /** Ключ іконки навбару (`navIcons`, `src/app/navIcons.tsx`) — резолвиться в
+  /** Ключ іконки навбару (`navIcons`, `src/shared/ui/navIcons.tsx`) — резолвиться в
    *  компонент inline SVG на споживачі (`AppLayout.tsx`, `NavLink leftSection`).
    *  Рядковий ключ, не сама іконка чи компонент: реєстр маршрутів і далі не
    *  залежить від форми рендера — заміна бібліотеки рендера не чіпає цей файл. */
