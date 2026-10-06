@@ -83,7 +83,9 @@ describe('JobsPage на шаблоні переліку (UI-28)', () => {
     show();
 
     await waitFor(() => expect(shownIds()).toHaveLength(4));
-    expect(screen.getByText('⟦jobs.description⟧')).toBeTruthy();
+    // Рівно одне пояснення під заголовком — у рядку пояснення, не другим `meta` (batch-2-a, дефект 3).
+    expect(screen.getAllByTestId('page-description').map((node) => node.textContent)).toEqual(['⟦jobs.description⟧']);
+    expect(screen.getAllByText('⟦jobs.description⟧')).toHaveLength(1);
 
     const strip = screen.getByRole('group', { name: '⟦jobs.statsLabel⟧' });
     const value = (label: string): string =>

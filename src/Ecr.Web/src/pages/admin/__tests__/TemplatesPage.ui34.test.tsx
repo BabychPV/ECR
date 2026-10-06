@@ -223,3 +223,15 @@ describe('TemplatesPage (UI-34): рядок веде на картку', () => {
     expect(screen.queryByRole('button', { name: /templates\.newVersion⟧/ })).toBeNull();
   });
 });
+
+describe('TemplatesPage: одне пояснення під заголовком (batch-2-a, дефект 3)', () => {
+  it('пояснення — у рядку пояснення сторінки, без другого `meta` і без `<p>` у `<p>`', async () => {
+    show();
+    await loadedTable();
+
+    const lines = screen.getAllByTestId('page-description');
+    expect(lines).toHaveLength(1);
+    expect(lines[0]?.textContent).toMatch(/templates\.subtitle/);
+    expect(document.querySelectorAll('p p')).toHaveLength(0);
+  });
+});

@@ -152,7 +152,8 @@ describe('UnitsPage на шаблоні переліку (UI-21)', () => {
   it('пояснення під заголовком і смуга: одиниці, розмірності, зі зсувом', async () => {
     await show([]);
 
-    expect(screen.getByText('Units of measure grouped by dimension.')).toBeDefined();
+    // Рівно одне пояснення під заголовком — у рядку пояснення, не другим `meta` (batch-2-a, дефект 3).
+    expect(screen.getAllByTestId('page-description').map((node) => node.textContent)).toEqual(['Units of measure grouped by dimension.']);
 
     const strip = screen.getByRole('group', { name: 'Units at a glance' });
     expect(within(strip).getByText('units').closest('[data-stat]')?.textContent).toContain('4');
