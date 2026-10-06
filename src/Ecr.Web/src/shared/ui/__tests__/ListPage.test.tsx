@@ -202,3 +202,42 @@ describe('ListPage не знає конкретних реалізацій пе�
     expect(screen.getByTestId('custom')).toBeDefined();
   });
 });
+
+/*
+ * WCAG 2.4.3: `ListPage` прибирає шухляду з дерева разом із `?panel=`, і
+ * `returnFocus` Mantine (він лише на закритті) не встигав — фокус падав на
+ * `body`. Шухляда сама повертає його тому, хто відкрив.
+ */
+describe('ListPage: фокус після демонтажу шухляди', () => {
+  it('повертається на кнопку, що відкрила', async () => {
+    function Harness({ open }: { open: boolean }): JSX.Element {
+      return (
+        <MantineProvider theme={theme}>
+          <MemoryRouter initialEntries={[open ? '/admin/jobs?panel=J-10427' : '/admin/jobs']}>
+            <button type="button" data-testid="opener">
+              open
+            </button>
+            {open && <ListPage header={{ title: 'Jobs' }} table={table()} detail={detail()} />}
+          </MemoryRouter>
+        </MantineProvider>
+      );
+    }
+
+    // Кнопка в окремому вузлі, що переживає перемонтування гарнітури.
+    const opener = document.createElement('button');
+    document.body.append(opener);
+    opener.focus();
+
+    const view = render(<Harness open />);
+    expect(screen.getByTestId('panel-body')).toBeDefined();
+
+    // Фокус пішов у шухляду, потім шухляда зникла разом із вмістом.
+    screen.getByRole('button', { name: 'Close details' }).focus();
+    view.rerender(<Harness open={false} />);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    expect(document.activeElement).toBe(opener);
+    opener.remove();
+  });
+});
+

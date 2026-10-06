@@ -1,4 +1,4 @@
-import type { JSX, ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, type JSX, type ReactNode } from 'react';
 import { Drawer, Group, Stack, Text } from '@mantine/core';
 import { useMediaQuery } from '@mantine/hooks';
 import { useUrlState } from '@/shared/ui/useUrlState';
@@ -92,6 +92,31 @@ export function DetailDrawer({
   const wide = useMediaQuery(WideViewportQuery, false, { getInitialValueInEffect: false }) === true;
 
   const opened = panel === panelId;
+
+  /*
+   * ⛔ WCAG 2.4.3: `returnFocus` Mantine спрацьовує лише на ЗАКРИТТІ, а
+   * `ListPage` (журнал задач, узгодженість) прибирає шторку з дерева разом із
+   * `?panel=` — після `Esc` на вузькому екрані фокус падав на `body`. Тому
+   * той, хто відкрив, запам'ятовується тут, і при демонтажі фокус
+   * повертається до нього, якщо його ніхто не забрав і він ще в документі.
+   */
+  const opener = useRef<HTMLElement | null>(null);
+  useLayoutEffect(() => {
+    if (!opened) return;
+    const active = document.activeElement;
+    if (active instanceof HTMLElement && active !== document.body) opener.current = active;
+  }, [opened]);
+  useEffect(
+    () => () => {
+      const target = opener.current;
+      window.setTimeout(() => {
+        const active = document.activeElement;
+        const lost = active === null || active === document.body || !active.isConnected;
+        if (lost && target?.isConnected === true) target.focus();
+      }, 0);
+    },
+    [],
+  );
 
   const close = (): void => {
     setPanel(null);
