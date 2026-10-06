@@ -40,6 +40,14 @@ public sealed record CampaignSummaryResponse(
 /// <param name="Overdue">Проєктів у стані <see cref="CampaignProgress.Overdue"/>.</param>
 /// <param name="AtRisk">Проєктів у стані <see cref="CampaignProgress.AtRisk"/>.</param>
 /// <param name="InProgress">Проєктів у стані <see cref="CampaignProgress.InProgress"/>.</param>
+/// <param name="SheetsTotal">
+/// Аркушів у складі документів усіх проєктів періоду (UI-33, D2); <c>null</c> — читач має інструменти, що ховають
+/// аркуші (явна заборона чи грант рівня <c>None</c>), і число розкрило б приховане (R-8, <c>SheetVisibility</c>).
+/// </param>
+/// <param name="NotSubmittedSheets">
+/// З них — ще не подано (чернетка, без стану чи відхилено); <c>null</c> за тих самих умов, що й
+/// <paramref name="SheetsTotal"/>.
+/// </param>
 public sealed record CampaignTotals(
     int Projects,
     int Documents,
@@ -51,7 +59,9 @@ public sealed record CampaignTotals(
     int Done,
     int Overdue,
     int AtRisk,
-    int InProgress);
+    int InProgress,
+    int? SheetsTotal = null,
+    int? NotSubmittedSheets = null);
 
 /// <summary>
 /// Де проєкт у кампанії відносно строку подання — відповідь на «хто затримує».
@@ -96,6 +106,8 @@ public enum CampaignProgress
 /// агрегат, що й у смузі переліку документів (<c>BE-09</c>).
 /// </remarks>
 /// <param name="Progress">Класифікація проєкту в кампанії (<see cref="CampaignProgressRule"/>).</param>
+/// <param name="SheetsTotal">Аркушів у складі документів проєкту (UI-33, D2); <c>null</c> — див. <see cref="CampaignTotals.SheetsTotal"/>.</param>
+/// <param name="NotSubmittedSheets">Аркушів, ще не поданих (чернетка/без стану/відхилено); <c>null</c> — як у <paramref name="SheetsTotal"/>.</param>
 /// <param name="SubmissionDeadline">
 /// Строк подання в поясі проєкту, ВИКЛЮЧНО: це момент переходу періоду
 /// <c>Open → Grace</c> (<c>Period.ComputedGraceAt</c>, опівніч
@@ -114,4 +126,6 @@ public sealed record CampaignProjectSummary(
     int Rejected,
     int Snapshots,
     CampaignProgress Progress,
-    DateTimeOffset? SubmissionDeadline);
+    DateTimeOffset? SubmissionDeadline,
+    int? SheetsTotal = null,
+    int? NotSubmittedSheets = null);

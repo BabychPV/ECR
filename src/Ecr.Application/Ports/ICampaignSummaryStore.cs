@@ -51,7 +51,9 @@ public sealed record CampaignProjectFacts(
     int Rejected,
     int Snapshots,
     DateTime? SubmissionDeadlineUtc,
-    string TimeZoneId);
+    string TimeZoneId,
+    int Sheets = 0,
+    int NotSubmittedSheets = 0);
 
 /// <summary>Група проєктів з однаковими строком, поясом і готовністю; лічильники — суми по групі.</summary>
 public sealed record CampaignBucket(
@@ -65,4 +67,6 @@ public sealed record CampaignBucket(
     int Submitted,
     int Approved,
     int Rejected,
-    int Snapshots);
+    int Snapshots,
+    int Sheets = 0,
+    int NotSubmittedSheets = 0);
