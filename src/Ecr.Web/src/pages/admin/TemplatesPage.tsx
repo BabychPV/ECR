@@ -351,11 +351,8 @@ export function TemplatesPage(): JSX.Element {
         header={{
           title: t('templates.title'),
           count: rows?.length,
-          meta: (
-            <Text size="sm" c="dimmed">
-              {t('templates.subtitle')}
-            </Text>
-          ),
+          // Пояснення сторінки ЗАМІСТЬ пояснення маршруту; `<p>` у `<p>` теж зник (batch-2-a, дефект 3).
+          description: t('templates.subtitle'),
           primary: editable
             ? { label: t('templates.create'), onClick: () => setCreating(true) }
             : undefined,

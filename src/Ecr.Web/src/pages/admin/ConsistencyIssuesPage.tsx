@@ -216,7 +216,8 @@ export function ConsistencyIssuesPage(): JSX.Element {
       header={{
         title: t('consistency.title'),
         count: summary.data?.total,
-        meta: t('consistency.description'),
+        // Пояснення сторінки ЗАМІСТЬ пояснення маршруту, а не другим рядком під ним (batch-2-a, дефект 3).
+        description: t('consistency.description'),
         primary: runs
           ? { label: t('consistency.runNow'), onClick: () => setAsking(true), disabled: run.outcome === 'running' }
           : undefined,
