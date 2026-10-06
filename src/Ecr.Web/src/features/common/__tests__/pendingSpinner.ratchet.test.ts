@@ -77,7 +77,6 @@ const Ledger: Readonly<Record<string, number>> = {
   'pages/admin/SourcesPage.tsx': 1,
   'pages/admin/TableRelationsPage.tsx': 1,
   'pages/admin/TemplateCardPage.tsx': 1,
-  'pages/admin/TemplateVersionPage.tsx': 3,
   'pages/admin/TemplatesPage.tsx': 1,
   'shared/ui/ConfirmModal.tsx': 1,
   'shared/ui/ReasonModal.tsx': 1,
