@@ -42,7 +42,7 @@ public sealed record RegistryDefDto(
     Domain.Enums.RegistrySourceKind SourceKind,
     IReadOnlyList<RegistryFieldDto> Fields,
     int? EntryCount = null,
-    int DefinitionVersion = 0,
+    int? DefinitionVersion = null,
     DateTime? DataChangedAt = null,
     int? UsedInColumns = null,
     int? UsedInTemplates = null,
