@@ -85,7 +85,7 @@ export function RowWindowMapsPanel({
           </Text>
         </Stack>
         {canManage && (
-          <Button size="xs" onClick={() => setEditing({ mode: 'create' })} data-row-window-create="">
+          <Button onClick={() => setEditing({ mode: 'create' })} data-row-window-create="">
             {t('rowWindow.create')}
           </Button>
         )}
@@ -132,11 +132,10 @@ export function RowWindowMapsPanel({
                   {canManage && (
                     <Table.Td>
                       <Group gap="xs" wrap="nowrap">
-                        <Button size="xs" variant="default" onClick={() => setEditing({ mode: 'edit', map })} data-row-window-edit={map.id}>
+                        <Button variant="default" onClick={() => setEditing({ mode: 'edit', map })} data-row-window-edit={map.id}>
                           {t('rowWindow.edit')}
                         </Button>
                         <Button
-                          size="xs"
                           variant="default"
                           loading={toggle.isPending && toggle.variables.id === map.id}
                           onClick={() => toggle.mutate(map)}
@@ -144,7 +143,7 @@ export function RowWindowMapsPanel({
                         >
                           {map.isActive ? t('rowWindow.pause') : t('rowWindow.resume')}
                         </Button>
-                        <Button size="xs" variant="subtle" color="statusError" onClick={() => setDeleting(map)} data-row-window-delete={map.id}>
+                        <Button variant="subtle" color="statusError" onClick={() => setDeleting(map)} data-row-window-delete={map.id}>
                           {t('rowWindow.delete')}
                         </Button>
                       </Group>

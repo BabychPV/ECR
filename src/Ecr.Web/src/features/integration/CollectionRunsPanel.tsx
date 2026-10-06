@@ -294,7 +294,6 @@ export function CollectionRunsPanel(): JSX.Element {
       {runs.hasNextPage && (
         <Group justify="center">
           <Button
-            size="xs"
             variant="default"
             loading={runs.isFetchingNextPage}
             onClick={() => void runs.fetchNextPage()}

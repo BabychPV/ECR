@@ -165,14 +165,14 @@ export function TableRelationsPage(): JSX.Element {
                     {editable && (
                       <Group gap="xs">
                         <Button
-                          size="compact-xs"
+                          size="xs"
                           variant="subtle"
                           onClick={() => setDraft(draftOf(relation))}
                         >
                           {t('tables.editRelation')}
                         </Button>
                         <Button
-                          size="compact-xs"
+                          size="xs"
                           variant="subtle"
                           color="statusError"
                           // ⚠ Лише на натиснутій кнопці, а не на всіх рядках.

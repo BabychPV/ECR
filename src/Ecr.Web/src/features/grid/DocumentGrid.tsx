@@ -1982,14 +1982,14 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
       {slice.error !== null && <ErrorAlert error={slice.error} onRetry={() => void slice.refetch()} />}
 
       <Group gap="xs" key={historyRevision}>
-        <Button size="xs" variant="default" disabled={!history.current.canUndo} onClick={() => applyHistory(history.current.undo())}>
+        <Button variant="default" disabled={!history.current.canUndo} onClick={() => applyHistory(history.current.undo())}>
           {t('grid.undo')}
         </Button>
-        <Button size="xs" variant="default" disabled={!history.current.canRedo} onClick={() => applyHistory(history.current.redo())}>
+        <Button variant="default" disabled={!history.current.canRedo} onClick={() => applyHistory(history.current.redo())}>
           {t('grid.redo')}
         </Button>
         {Object.keys(widths).length > 0 && (
-          <Button size="xs" variant="default" onClick={resetColumnWidths}>
+          <Button variant="default" onClick={resetColumnWidths}>
             {t('grid.columnWidths.reset')}
           </Button>
         )}
@@ -2025,7 +2025,6 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
          */}
         {(saveStatus === 'error' || rejections.size > 0) && pending.size > 0 && (
           <Button
-            size="xs"
             loading={saveLoading}
             onClick={() => {
               if (isPending) return;
@@ -2115,7 +2114,6 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
             рядок зламав би і формули з діапазонами, і звірку з еталоном. */}
         {allowsDynamicRows && !readOnly && (
           <Button
-            size="xs"
             variant="default"
             loading={addRowLoading}
             disabled={maxDynamicRows !== null && (data?.rows.length ?? 0) >= maxDynamicRows}
@@ -2150,7 +2148,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         <Alert color="violet" title={t('grid.roundedTitle', { count: rounded.length })}>
           <Group gap="sm">
             <Text size="sm">{t('grid.roundedHint')}</Text>
-            <Button size="xs" variant="subtle" onClick={() => setShowRounded(true)}>
+            <Button variant="subtle" onClick={() => setShowRounded(true)}>
               {t('grid.roundedShow')}
             </Button>
           </Group>
@@ -2295,10 +2293,10 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
           {confirmRequest?.hint}
         </Text>
         <Group justify="flex-end" gap="xs">
-          <Button size="xs" variant="default" onClick={() => setConfirmRequest(null)}>
+          <Button variant="default" onClick={() => setConfirmRequest(null)}>
             {t('grid.confirmCancel')}
           </Button>
-          <Button size="xs" onClick={onConfirmEdit}>
+          <Button onClick={onConfirmEdit}>
             {t('grid.confirmProceed')}
           </Button>
         </Group>
@@ -2318,10 +2316,10 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
           {t('grid.batchConfirmBody', { count: batchConfirm?.count ?? 0 })}
         </Text>
         <Group justify="flex-end" gap="xs">
-          <Button size="xs" variant="default" onClick={() => setBatchConfirm(null)}>
+          <Button variant="default" onClick={() => setBatchConfirm(null)}>
             {t('grid.confirmCancel')}
           </Button>
-          <Button size="xs" onClick={onConfirmBatch}>
+          <Button onClick={onConfirmBatch}>
             {t('grid.confirmProceed')}
           </Button>
         </Group>

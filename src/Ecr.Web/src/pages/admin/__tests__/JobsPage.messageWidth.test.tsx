@@ -46,6 +46,6 @@ describe('JobsPage: довге повідомлення не розсуває т
     // ⛔ Мутація «повернути голий `job.message`» — ні обрізання, ні `title`.
     expect(message.classList.contains('ecr-ellipsis')).toBe(true);
     expect(message.getAttribute('title')).toBe(Key);
-    expect(screen.getByRole('button', { name: '⟦jobs.recentWatch⟧' }).getAttribute('data-size')).toBe('compact-xs');
+    expect(screen.getByRole('button', { name: '⟦jobs.recentWatch⟧' }).getAttribute('data-size')).toBe('xs');
   });
 });

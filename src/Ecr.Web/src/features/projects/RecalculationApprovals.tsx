@@ -54,7 +54,7 @@ export function RequestRecalculationButton({
 
   return (
     <>
-      <Button size="compact-xs" variant="subtle" onClick={() => setOpened(true)}>
+      <Button size="xs" variant="subtle" onClick={() => setOpened(true)}>
         {t('recalcApprovals.request')}
       </Button>
       <ReasonModal
@@ -160,7 +160,7 @@ export function RecalculationApprovalsPanel({ projectId }: { projectId: number }
                         <Group gap="xs" justify="flex-end">
                           {!confirmed && !mine && manages && (
                             <Button
-                              size="compact-xs"
+                              size="xs"
                               variant="subtle"
                               loading={confirm.isPending}
                               onClick={() => confirm.mutate(a.id)}
@@ -170,7 +170,7 @@ export function RecalculationApprovalsPanel({ projectId }: { projectId: number }
                           )}
                           {confirmed && mine && (
                             <Button
-                              size="compact-xs"
+                              size="xs"
                               variant="subtle"
                               loading={run.isPending}
                               onClick={() => run.mutate(a)}

@@ -264,7 +264,6 @@ export function JobsPage(): JSX.Element {
             {status.state === 'Failed' && (
               <Group justify="flex-end">
                 <Button
-                  size="xs"
                   variant="default"
                   loading={restartLoading}
                   onClick={() => {
@@ -508,7 +507,7 @@ function RecentJobs({ onPick }: { onPick: (jobId: string) => void }): JSX.Elemen
                 {/* ⚠ `wrap="nowrap"`: дії в одному рядку таблиці не мають
                     переносити одна одну на другий рядок і рвати висоту рядків. */}
                 <Group gap="xs" wrap="nowrap">
-                  <Button variant="subtle" size="compact-xs" onClick={() => onPick(job.jobId)}>
+                  <Button variant="subtle" size="xs" onClick={() => onPick(job.jobId)}>
                     {t('jobs.recentWatch')}
                   </Button>
 
@@ -518,7 +517,6 @@ function RecentJobs({ onPick }: { onPick: (jobId: string) => void }): JSX.Elemen
                   {isCancellable(job.state) && (
                     <Button
                       variant="subtle"
-                      size="xs"
                       color="statusError"
                       onClick={() => setConfirming(job)}
                     >

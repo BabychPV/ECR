@@ -230,7 +230,7 @@ export function SourcesPage(): JSX.Element {
                 // L9-18: під симуляцією збір (POST) сервер однаково відхилить.
                 can(session.data, 'Integration.Manage') && session.data?.isSimulation !== true ? (
                   <Button
-                    size="compact-xs"
+                    size="xs"
                     variant="default"
                     // ⛔ Аудит 2026-09-16 §10.8: тут стояло голе
                     // `collect.isPending` — ОДНЕ значення однієї мутації на

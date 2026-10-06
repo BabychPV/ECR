@@ -402,7 +402,7 @@ function DataSourceForm({
 
       {fresh !== null && (
         <Group gap="xs">
-          <Button size="xs" variant="default" onClick={() => takeFresh(fresh)} data-take-fresh="">
+          <Button variant="default" onClick={() => takeFresh(fresh)} data-take-fresh="">
             {t('sources.reloadCurrent')}
           </Button>
         </Group>

@@ -241,7 +241,6 @@ export function DocumentsPage(): JSX.Element {
                 не давала створити перший. */}
             {can(session.data, 'Document.Create') && (
               <Button
-                size="xs"
                 onClick={() => {
                   setCreatingRequested(true);
                   setCreating(true);
@@ -292,7 +291,7 @@ export function DocumentsPage(): JSX.Element {
         emptyHint={filters.active ? t('documents.noMatchHint') : t('documents.emptyHint')}
         emptyAction={
           filters.active ? (
-            <Button size="xs" variant="default" onClick={filters.reset}>
+            <Button variant="default" onClick={filters.reset}>
               {t('documents.resetFilters')}
             </Button>
           ) : undefined

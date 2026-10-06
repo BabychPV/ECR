@@ -59,7 +59,7 @@ export function PiAfCatalogButton({
 
   return (
     <Group gap="xs">
-      <Button size="xs" variant="default" onClick={() => setOpened(true)}>
+      <Button variant="default" onClick={() => setOpened(true)}>
         {t('mapping.catalogOpen')}
       </Button>
 
@@ -227,7 +227,7 @@ function CatalogLevel({
               джерело лежить (`catalogTimeout` / `catalogUnavailable`). */}
           {shown.detail !== null && <Text size="sm">{shown.detail}</Text>}
 
-          <Button size="xs" variant="default" onClick={retry}>
+          <Button variant="default" onClick={retry}>
             {t('common.retry')}
           </Button>
         </Stack>
@@ -262,7 +262,7 @@ function CatalogLevel({
         <Text size="sm" c="dimmed">
           {t('mapping.catalogSearchEmpty')}
         </Text>
-        <Button size="xs" variant="default" onClick={onClearSearch}>
+        <Button variant="default" onClick={onClearSearch}>
           {t('mapping.catalogSearchClear')}
         </Button>
       </Stack>
@@ -285,7 +285,6 @@ function CatalogLevel({
       {nextCursor !== null && (
         <Group gap="xs">
           <Button
-            size="xs"
             variant="subtle"
             onClick={() => setCursors((prev) => [...prev, nextCursor])}
           >
@@ -361,7 +360,7 @@ function CatalogRow({
     <Stack gap="xs">
       <Group gap="xs" wrap="nowrap" data-catalog-element={item.path ?? item.code}>
         <Button
-          size="compact-xs"
+          size="xs"
           variant="subtle"
           disabled={!canExpand}
           aria-expanded={expanded}

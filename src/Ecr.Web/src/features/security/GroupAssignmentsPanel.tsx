@@ -199,7 +199,7 @@ export function GroupAssignmentsPanel({ roles }: { roles: RoleView[] }): JSX.Ele
               </Table.Td>
               <Table.Td>
                 <Button
-                  size="compact-xs"
+                  size="xs"
                   variant="subtle"
                   color="statusError"
                   loading={revoke.isPending && revoke.variables === row.id}
@@ -280,7 +280,6 @@ export function GroupAssignmentsPanel({ roles }: { roles: RoleView[] }): JSX.Ele
           <Text size="sm">{dangerous.join(', ')}</Text>
           <Button
             mt="xs"
-            size="xs"
             color="statusError"
             // ⛔ X-14: без `loading` друге натискання поки летить перше давало
             // ДВА призначення небезпечної ролі.

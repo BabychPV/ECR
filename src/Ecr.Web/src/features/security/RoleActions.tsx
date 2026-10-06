@@ -119,15 +119,15 @@ export function RoleActions({ role }: { role: RoleView }): JSX.Element {
   return (
     <>
       <Group gap="xs" mt="xs" wrap="nowrap">
-        <Button size="compact-xs" variant="subtle" onClick={() => open('clone')}>
+        <Button size="xs" variant="subtle" onClick={() => open('clone')}>
           {t('security.cloneRole')}
         </Button>
         {!role.isBuiltIn && (
           <>
-            <Button size="compact-xs" variant="subtle" onClick={() => open('rename')}>
+            <Button size="xs" variant="subtle" onClick={() => open('rename')}>
               {t('security.renameRole')}
             </Button>
-            <Button size="compact-xs" variant="subtle" color="statusError" onClick={() => open('delete')}>
+            <Button size="xs" variant="subtle" color="statusError" onClick={() => open('delete')}>
               {t('common.delete')}
             </Button>
           </>

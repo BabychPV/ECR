@@ -231,7 +231,6 @@ export function SecurityPage(): JSX.Element {
         actions={
           <Group gap="xs">
             <SegmentedControl
-              size="xs"
               value={tab}
               onChange={setTab}
               data={[
@@ -245,13 +244,13 @@ export function SecurityPage(): JSX.Element {
                 поруч із матрицею прав і поруч із переліком користувачів
                 означає різне, і одна кнопка на обидві була б загадкою. */}
             {tab === 'roles' && canWrite('Security.ManageRoles') && (
-              <Button size="xs" onClick={() => setCreatingRole(true)}>
+              <Button onClick={() => setCreatingRole(true)}>
                 {t('security.createRole')}
               </Button>
             )}
 
             {tab === 'users' && canWrite('Security.ManageUsers') && (
-              <Button size="xs" onClick={() => setCreatingUser(true)}>
+              <Button onClick={() => setCreatingUser(true)}>
                 {t('security.createUser')}
               </Button>
             )}
@@ -365,7 +364,7 @@ export function SecurityPage(): JSX.Element {
                         існувало взагалі, а адреса не присвоювалася ніде —
                         обліковий запис виходив безправним і без сповіщень. */}
                     <Button
-                      size="compact-xs"
+                      size="xs"
                       variant="subtle"
                       disabled={simulated}
                       onClick={() => {
@@ -474,7 +473,6 @@ export function SecurityPage(): JSX.Element {
                   : t('common.shownOf', { shown: page.items.length, total: page.totalCount })}
               </Text>
               <Button
-                size="xs"
                 variant="default"
                 loading={users.isFetchingNextPage}
                 onClick={() => void users.fetchNextPage()}

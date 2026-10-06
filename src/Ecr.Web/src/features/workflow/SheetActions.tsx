@@ -633,7 +633,6 @@ export function SheetActions({
         // давав `aria-describedby`, тож читач не чув нюансу про сусідні аркуші.
         <Hint label={t('workflow.recalculateHint')}>
           <Button
-            size="xs"
             variant="default"
             loading={recalculate.isPending || recalcRunning || settled.settling}
             // AN-28/L8-01: спершу зберегти набране; відмова збереження - дії немає.
@@ -645,7 +644,7 @@ export function SheetActions({
       )}
 
       {canSubmit && (
-        <Button size="xs" loading={submit.isPending || settled.settling} onClick={() => settled.run(() => submit.mutateAsync(false))}>
+        <Button loading={submit.isPending || settled.settling} onClick={() => settled.run(() => submit.mutateAsync(false))}>
           {t('document.submit')}
         </Button>
       )}
@@ -662,7 +661,6 @@ export function SheetActions({
           звітність регулятору — це та сама вага рішення. */}
       {canApprove && (
         <Button
-          size="xs"
           color="statusSuccess"
           loading={decide.isPending || settled.settling}
           onClick={() => setAsking('approve')}
@@ -671,8 +669,11 @@ export function SheetActions({
         </Button>
       )}
 
+      {/* ✎ 2026-10-06: у панелі дій — лише варіанти з рамкою чи заливкою
+          (`docs/design/ui-conventions.md`, «Кнопки»): `light` без рамки
+          поруч з обвідними читався як кнопка іншого розміру. */}
       {canReject && (
-        <Button size="xs" color="statusError" variant="light" onClick={() => setAsking('reject')}>
+        <Button color="statusError" variant="outline" onClick={() => setAsking('reject')}>
           {t('workflow.reject')}
         </Button>
       )}
@@ -690,13 +691,13 @@ export function SheetActions({
           `Document.Reopen` як штатну дію для приведення аркуша в `Draft`
           (`makeSheetEditable`), і зміна порога тут зачіпає той прохід. */}
       {isAllowed('reopen', state) && can(me, 'Document.Reopen') && (
-        <Button size="xs" variant="light" onClick={() => setAsking('reopen')}>
+        <Button variant="default" onClick={() => setAsking('reopen')}>
           {t('workflow.reopen')}
         </Button>
       )}
 
       {canRecall && (
-        <Button size="xs" variant="light" onClick={() => setAsking('recall')}>
+        <Button variant="default" onClick={() => setAsking('recall')}>
           {t('workflow.recall')}
         </Button>
       )}

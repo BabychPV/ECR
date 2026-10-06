@@ -211,7 +211,7 @@ export function ReportDefinitionsModal({
                           <StatusBadge kind="version" state={reportVersion.status} />
                           {reportVersion.status === 'Draft' && (
                             <Button
-                              size="compact-xs"
+                              size="xs"
                               variant="light"
                                               onClick={() =>
                                 setPublishing({
@@ -400,7 +400,6 @@ function ColumnsEditor({
 
       <Group>
         <Button
-          size="xs"
           variant="default"
           onClick={() => onChange([...columns, emptyColumn()])}
         >

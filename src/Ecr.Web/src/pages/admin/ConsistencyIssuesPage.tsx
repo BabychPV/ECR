@@ -103,7 +103,6 @@ export function ConsistencyIssuesPage(): JSX.Element {
             />
             {runs && (
               <Button
-                size="xs"
                 loading={run.isStarting}
                 disabled={run.outcome === 'running'}
                 onClick={() => setAsking(true)}

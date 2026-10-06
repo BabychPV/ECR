@@ -123,7 +123,7 @@ export function EntityPipeline({
                   >
                     {allowed && (
                       <Group>
-                        <Button size="xs" variant="default" onClick={() => setCreateOpened(true)}>
+                        <Button variant="default" onClick={() => setCreateOpened(true)}>
                           {t('mapping.create')}
                         </Button>
                       </Group>
@@ -222,7 +222,7 @@ function SourceStep({
         ]}
       />
       <Group>
-        <Button size="xs" variant="default" component={Link} to={sourcesHref}>
+        <Button variant="default" component={Link} to={sourcesHref}>
           {t('pipeline.openSources')}
         </Button>
       </Group>

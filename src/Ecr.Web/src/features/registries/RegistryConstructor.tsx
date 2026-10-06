@@ -94,7 +94,6 @@ export function RegistryFields({
         {canEdit && (
           <Button
             ref={focus.addButton}
-            size="xs"
             variant="default"
             onClick={() => {
               focus.added();
@@ -262,7 +261,7 @@ export function RegistryFields({
 
                 <Table.Td>
                   <Button
-                    size="compact-xs"
+                    size="xs"
                     variant="subtle"
                     color="statusError"
                     disabled={!canEdit}
@@ -485,7 +484,6 @@ export function RegistryRules({
         {canEdit && (
           <Button
             ref={focus.addButton}
-            size="xs"
             variant="default"
             onClick={() => {
               focus.added();

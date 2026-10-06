@@ -65,7 +65,7 @@ export function useDeleteVersionAction({
   const triggerFor = (version: MethodologyDraftVersionDto): JSX.Element | null =>
     mayDeleteVersion(version, allowed) ? (
       <Button
-        size="compact-xs"
+        size="xs"
         variant="subtle"
         color="statusError"
         onClick={() => {

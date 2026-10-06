@@ -92,10 +92,10 @@ export function ConflictPanel({
       )}
 
       <Group gap="xs" mt="xs">
-        <Button size="xs" disabled={!canKeep} loading={busy} onClick={onKeepMine} data-testid="grid-conflict-keep">
+        <Button disabled={!canKeep} loading={busy} onClick={onKeepMine} data-testid="grid-conflict-keep">
           {t('grid.conflictKeepMine')}
         </Button>
-        <Button size="xs" variant="default" disabled={busy} onClick={onDiscardMine} data-testid="grid-conflict-discard">
+        <Button variant="default" disabled={busy} onClick={onDiscardMine} data-testid="grid-conflict-discard">
           {t('grid.conflictDiscardMine')}
         </Button>
       </Group>

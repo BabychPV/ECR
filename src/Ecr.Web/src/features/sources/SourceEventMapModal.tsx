@@ -167,7 +167,7 @@ function ValueMapEditor({
             onChange={(value) => replace(index, { ...pair, registryEntryId: value === null ? null : Number(value) })}
           />
           <Button
-            size="compact-xs"
+            size="xs"
             variant="subtle"
             color="statusError"
             aria-label={`${t('sourceEvents.remove')}: ${pair.sourceValue || String(index + 1)}`}
@@ -178,7 +178,7 @@ function ValueMapEditor({
         </Group>
       ))}
       <Button
-        size="compact-xs"
+        size="xs"
         variant="subtle"
         onClick={() => onChange([...pairs, { sourceValue: '', registryEntryId: null }])}
         data-source-event-value-add=""
@@ -555,7 +555,7 @@ export function SourceEventMapModal({
                     </Table.Td>
                     <Table.Td>
                       <Button
-                        size="compact-xs"
+                        size="xs"
                         variant="subtle"
                         color="statusError"
                         aria-label={`${t('sourceEvents.remove')}: ${field.sourceAttribute || column?.code || String(state.fields.indexOf(field) + 1)}`}
@@ -574,7 +574,6 @@ export function SourceEventMapModal({
 
         <Group>
           <Button
-            size="xs"
             variant="default"
             onClick={() => patch({ fields: [...state.fields, newFieldRow()] })}
             data-source-event-field-add=""

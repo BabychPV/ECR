@@ -75,7 +75,7 @@ export function MappingPreviewPage(): JSX.Element {
             {/* ⛔ Прогалина 1 директиви паритету: до цієї кнопки заведення
                 мапінгу мало лише один шлях — ручний SQL. */}
             {entityId !== null && can(session.data, 'Integration.Manage') && (
-              <Button size="xs" variant="default" onClick={() => setCreateOpened(true)}>
+              <Button variant="default" onClick={() => setCreateOpened(true)}>
                 {t('mapping.create')}
               </Button>
             )}

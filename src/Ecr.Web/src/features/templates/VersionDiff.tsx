@@ -65,7 +65,7 @@ export function VersionDiff({
 
   return (
     <>
-      <Button size="xs" variant="default" onClick={() => setOpened(true)}>
+      <Button variant="default" onClick={() => setOpened(true)}>
         {t('version.diff')}
       </Button>
 
