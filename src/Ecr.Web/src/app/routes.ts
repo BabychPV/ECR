@@ -105,6 +105,17 @@ export interface RouteHandle {
    */
   alsoPermittedBy?: readonly string[];
 
+  /**
+   * Права, КОЖНЕ з яких потрібне ДОДАТКОВО до `permission` (або його
+   * альтернатив з `alsoPermittedBy`) — «`permission` І всі ці». Без
+   * `permission` поле не діє. Читати лише через `canAccessRoute()`.
+   *
+   * ⛔ A2 (приймальна №2): сторінка, що на старті ходить на ендпоінти з
+   * РІЗНИМИ правами, відкривалася за одним із них — пункт є в меню, а сервер
+   * відповідає 403 на інший запит. Сюди пишеться друге право сервера.
+   */
+  alsoRequires?: readonly string[];
+
   /** Ключ іконки навбару (`navIcons`, `src/app/navIcons.tsx`) — резолвиться в
    *  компонент inline SVG на споживачі (`AppLayout.tsx`, `NavLink leftSection`).
    *  Рядковий ключ, не сама іконка чи компонент: реєстр маршрутів і далі не
@@ -342,7 +353,16 @@ export const routes = {
   adminExpressions: {
     id: 'admin-expressions',
     path: '/admin/expressions',
-    handle: { labelKey: 'nav.expressions', permission: 'Calculation.View', icon: 'expressions' },
+    // ⚠ A2: сторінка на старті читає перелік шаблонів і їх структуру
+    // (`ListTemplatesHandler`, право шаблонів), а редактор — склад мови
+    // (`GetExpressionMetadataHandler`, право розрахунків). Ролі `Viewer` і
+    // `Approver` мають лише друге й отримували 403.
+    handle: {
+      labelKey: 'nav.expressions',
+      permission: 'Calculation.View',
+      alsoRequires: ['Template.View'],
+      icon: 'expressions',
+    },
     showInNav: true,
   },
   adminUnits: {
