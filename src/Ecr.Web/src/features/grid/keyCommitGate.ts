@@ -45,6 +45,13 @@ const PollMs = 4;
 
 const EditWrapper = '.edit-input-wrapper';
 
+/**
+ * A1-03: клавіші, що переводять фокус сітки через `keyChangeSelection` RevoGrid - тобто
+ * з тією самою паузою ~70 мс (`timeout(RESIZE_INTERVAL + 30)`), що й після Enter.
+ */
+const NavKeys = new Set(['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Tab']);
+const ArrowKeys = new Set(['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight']);
+
 /** Типи `<input>`, де працює API виділення (`setRangeText`). */
 const TextLike = new Set(['text', 'search', 'url', 'tel', 'password']);
 
@@ -114,7 +121,7 @@ export function deferWhileCommitting(container: HTMLElement, run: () => void): b
 /** Встановлює чергу клавіш на контейнері сітки; повертає функцію відписки. */
 export function installKeyCommitGate(container: HTMLElement): () => void {
   const doc = container.ownerDocument;
-  let holding: 'commit' | 'open' | null = null;
+  let holding: 'commit' | 'open' | 'nav' | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
   let queue: QueuedKey[] = [];
   let afterSettled: (() => void)[] = [];
@@ -126,6 +133,22 @@ export function installKeyCommitGate(container: HTMLElement): () => void {
   let focusSeen = false;
   let editRequested = false;
   let editorSeen = false;
+  // A1-03: скільки переходів стрілкою/Tab ще без `focuscell`.
+  let navPending = 0;
+  // A1-03: коли символ поза редактором почав відкривати редактор (його поле, що першим отримає
+  // фокус, - «набране»). Не прив'язано до вікна «відкриття»: його може відпустити запасний
+  // термін раніше, ніж `<input>` отримає фокус.
+  let typedOpenAt: number | null = null;
+  // A1-03: фіксація стрілкою - без переходу фокуса, вікно чекає лише закриття редактора.
+  let inPlace = false;
+  // A1-03: власні синтетичні клавіші фіксації не мусять потрапити в чергу.
+  let passing = false;
+  /**
+   * A1-03: поля редактора, відкритого НАБОРОМ символу (як «режим вводу» Excel): стрілка в
+   * такому полі фіксує значення й переходить, а не рухає курсор. Відкритий Enter/F2/подвійним
+   * кліком (або поле, куди клацнули мишею) - стрілки, як і раніше, рухають курсор.
+   */
+  const typedEditors = new WeakSet<EventTarget>();
 
   gates.set(container, {
     isCommitting: () => holding === 'commit',
@@ -212,7 +235,14 @@ export function installKeyCommitGate(container: HTMLElement): () => void {
     const elapsed = Date.now() - startedAt;
     if (elapsed >= MaxHoldMs) return true;
 
+    // ⛔ `focuscell` приходить раніше, ніж DOM-фокус повертається в сітку (живий журнал CPU ×4:
+    // focuscell 52074, `<body>` ще активний, focusin 52097): символ на `<body>` у цій щілині
+    // йшов повз чергу - редактор відкривався не «набраним» («204» замість «20» і «4»).
+    if (holding === 'nav') return elapsed >= CommitSettleMs || (navPending <= 0 && container.contains(doc.activeElement));
+
     if (holding === 'commit') {
+      if (inPlace) return editorClosed();
+
       // Enter не зберіг комірку (список без варіанта, редактор лишився відкритим) - як раніше.
       if (!saved) return (focusSeen && editorClosed()) || elapsed >= CommitSettleMs;
 
@@ -238,8 +268,10 @@ export function installKeyCommitGate(container: HTMLElement): () => void {
     else timer = setTimeout(tick, PollMs);
   };
 
-  const hold = (kind: 'commit' | 'open'): void => {
+  const hold = (kind: 'commit' | 'open' | 'nav'): void => {
     holding = kind;
+    navPending = kind === 'nav' ? 1 : 0;
+    inPlace = false;
     startedAt = Date.now();
     saved = false;
     focusSeen = false;
@@ -250,7 +282,7 @@ export function installKeyCommitGate(container: HTMLElement): () => void {
   };
 
   const onKeyDown = (event: KeyboardEvent): void => {
-    if (event.isComposing) return;
+    if (event.isComposing || passing) return;
 
     // ⚠ Слухач стоїть на `document`: на час переходу редактор вже втратив фокус
     // (`blur` при фіксації), а нового ще немає — клавіша йде в `<body>` і до
@@ -270,6 +302,18 @@ export function installKeyCommitGate(container: HTMLElement): () => void {
     // Виняток - AltGr-символ (T4-07): він друкується, тож стає в чергу.
     const altGr = isAltGrChar(event);
     if (!altGr && (event.ctrlKey || event.metaKey || event.altKey)) return;
+
+    /*
+     * A1-03: ще одна стрілка у вікні навігації, коли черга порожня, проходить одразу (RevoGrid
+     * рахує новий крок від фокуса ПІСЛЯ паузи, тож кроки не губляться) і подовжує вікно: інакше
+     * затиснута стрілка (автоповтор) відставала б від клавіатури на секунди.
+     */
+    if (holding === 'nav' && queue.length === 0 && NavKeys.has(key) && !inEditor(target)) {
+      navPending += 1;
+      startedAt = Date.now();
+
+      return;
+    }
 
     if (holding !== null) {
       event.preventDefault();
@@ -293,7 +337,30 @@ export function installKeyCommitGate(container: HTMLElement): () => void {
     }
 
     if (inEditor(event.target)) {
+      if (ArrowKeys.has(key) && !event.shiftKey && typedEditors.has(event.target as EventTarget)) {
+        commitAndMove(event, key);
+
+        return;
+      }
+
       if (key === 'Enter' || key === 'Tab') hold('commit');
+      if (key === 'F2') typedEditors.delete(event.target as EventTarget);
+
+      return;
+    }
+
+    // Будь-яка інша клавіша поза редактором (F2, Enter, стрілка) - редактор уже не «набраний».
+    typedOpenAt = null;
+
+    /*
+     * ⛔ A1-03: стрілка/Tab поза редактором переводить фокус лише через ~70 мс (на повільній
+     * машині - довше). Цифра, набрана раніше, відкривала редактор на СТАРІЙ комірці: живий
+     * Chromium, `ArrowDown, 2, 0, Enter` з паузою 0/20/50 мс - 5/5, 5/5, 3/5 збоїв («20» у R1
+     * або «2» у R1 і «0» у R2). Тож після неї - вікно «навігації» до `focuscell`.
+     * Shift+стрілка лише розширює діапазон (фокус на місці) - вікна не треба.
+     */
+    if (NavKeys.has(key) && (key === 'Tab' || !event.shiftKey)) {
+      hold('nav');
 
       return;
     }
@@ -302,10 +369,52 @@ export function installKeyCommitGate(container: HTMLElement): () => void {
     // `<input>` він отримає не одразу.
     if (container.querySelector(EditWrapper) === null && (key === 'Enter' || isPrintable(event))) {
       hold('open');
+      if (key !== 'Enter') typedOpenAt = Date.now();
     }
   };
 
+  /*
+   * ⛔ A1-03 (приймання A1, збірка ecr-msi): «7», стрілка вниз, «20» давали «720» в одній
+   * комірці за БУДЬ-ЯКОЇ паузи (живий Chromium, 0/100/300/1000 мс - 8 з 8): стандартний
+   * редактор RevoGrid у режимі редагування віддає стрілки курсору `<input>`, а не сітці. Для
+   * користувача Excel це «режим вводу»: стрілка фіксує набране й переходить.
+   *
+   * Фіксація - тим самим шляхом, що Tab у редакторі (`TextEditor` зберігає з
+   * `preventFocus`), але БЕЗ коду клавіші Tab, тож RevoGrid нікуди не переходить; сама стрілка
+   * стає в чергу й відтворюється на сітці після закриття редактора - як звичайна навігація.
+   */
+  const commitAndMove = (event: KeyboardEvent, key: string): void => {
+    const input = event.target as HTMLElement;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    typedEditors.delete(input);
+
+    hold('commit');
+    inPlace = true;
+    // ⚠ Tab без коду: `TextEditor` зберігає (`preventFocus`), а редактор лишається відкритим -
+    // фокус не переходив. Escape його закриває (`cancelChanges` після збереження нічого не
+    // відкочує: `preventSaveOnClose` уже стоїть). Обидві клавіші - повз чергу.
+    passing = true;
+    try {
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }));
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true, cancelable: true }));
+    } finally {
+      passing = false;
+    }
+    // ⛔ На ПОЧАТОК черги: стрілка могла сама прийти з черги (набір без пауз, редактор ще без
+    // фокуса), і клавіші після неї вже там - у кінці вони б випередили перехід.
+    queue.unshift({ init: { key, code: event.code }, target: overlay() });
+  };
+
   const onFocusCell = (): void => {
+    if (holding === 'nav') {
+      navPending -= 1;
+      if (timer !== null) clearTimeout(timer);
+      tick();
+
+      return;
+    }
+
     if (holding !== 'commit') return;
 
     focusSeen = true;
@@ -323,7 +432,24 @@ export function installKeyCommitGate(container: HTMLElement): () => void {
   };
 
   const onFocusIn = (event: FocusEvent): void => {
-    if (holding === 'open' && inEditor(event.target)) release();
+    const target = event.target;
+    if (!inEditor(target)) return;
+
+    // Лише стандартний текстовий редактор (`<input>` прямо в обгортці): власні редактори
+    // (список, дата, одиниці) мають свої стрілки.
+    const typed = typedOpenAt !== null && Date.now() - typedOpenAt < MaxHoldMs;
+    typedOpenAt = null;
+    if (typed && target instanceof HTMLInputElement && target.parentElement?.matches(EditWrapper) === true) {
+      typedEditors.add(target);
+    }
+
+    if (holding === 'open') release();
+  };
+
+  // Клік мишею в поле - «режим правки» Excel: стрілки знову рухають курсор.
+  const onPointerDown = (event: Event): void => {
+    typedOpenAt = null;
+    if (event.target !== null) typedEditors.delete(event.target);
   };
 
   doc.addEventListener('keydown', onKeyDown, true);
@@ -331,6 +457,7 @@ export function installKeyCommitGate(container: HTMLElement): () => void {
   container.addEventListener('focusin', onFocusIn);
   container.addEventListener('celledit', onCellEdit);
   container.addEventListener('setedit', onSetEdit);
+  container.addEventListener('mousedown', onPointerDown, true);
 
   return () => {
     doc.removeEventListener('keydown', onKeyDown, true);
@@ -338,6 +465,7 @@ export function installKeyCommitGate(container: HTMLElement): () => void {
     container.removeEventListener('focusin', onFocusIn);
     container.removeEventListener('celledit', onCellEdit);
     container.removeEventListener('setedit', onSetEdit);
+    container.removeEventListener('mousedown', onPointerDown, true);
     if (timer !== null) clearTimeout(timer);
     queue = [];
     afterSettled = [];
