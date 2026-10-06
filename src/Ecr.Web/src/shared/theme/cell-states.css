@@ -124,6 +124,26 @@
   cursor: not-allowed;
 }
 
+/*
+ * ✎ UI-26 (макет `05-doc-submitted-approver`): замок у куті заблокованої
+ * комірки. Лише стан `read-only` — обчислена комірка не заборонена, у неї свій
+ * знак `ƒ` (нижче). Форма — маска SVG, колір — токен теми, тож замок той самий
+ * в обох темах і не залежить від шрифту емодзі.
+ */
+.ecr-cell--read-only::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 8px;
+  height: 10px;
+  background-color: var(--ecr-muted);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 8 10'%3E%3Cpath d='M2 4V3a2 2 0 0 1 4 0v1h1v6H1V4h1zm1 0h2V3a1 1 0 0 0-2 0v1z'/%3E%3C/svg%3E")
+    no-repeat center / contain;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 8 10'%3E%3Cpath d='M2 4V3a2 2 0 0 1 4 0v1h1v6H1V4h1zm1 0h2V3a1 1 0 0 0-2 0v1z'/%3E%3C/svg%3E")
+    no-repeat center / contain;
+}
+
 /* ── calculated: рахує система ─────────────────────────────────────────── */
 .ecr-cell--calculated {
   background: var(--ecr-cell-calculated-bg);
@@ -464,4 +484,57 @@
 :root revo-grid[theme] revogr-header .rgHeaderCell.ecr-header-numeric {
   justify-content: flex-end;
   text-align: right;
+}
+
+/*
+ * ── Одиниця другим рядком у заголовку колонки (UI-24) ───────────────────
+ *
+ * Макет `docs/design/hybrid` («Fuel gas / 10³ m³»): назва — вагою 600, одиниця
+ * — приглушеним моно-рядком 11 px під нею. Висота рядка шапки та сама (45 px):
+ * обидва рядки вміщаються, тож колонки без одиниці не вищають і слот таблиці
+ * (`TableSlotMinHeight`) не змінюється.
+ *
+ * ⚠ `line-height` скидається саме тут: шапка пакета центрує текст висотою
+ * рядка, і два рядки з успадкованою висотою вилізли б за межі комірки.
+ */
+:root revo-grid[theme] revogr-header .rgHeaderCell .ecr-header-two-line {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-width: 0;
+  line-height: 1.2;
+  overflow: hidden;
+}
+
+:root revo-grid[theme] revogr-header .rgHeaderCell.ecr-header-numeric .ecr-header-two-line {
+  align-items: flex-end;
+}
+
+:root revo-grid[theme] revogr-header .rgHeaderCell .ecr-header-name,
+:root revo-grid[theme] revogr-header .rgHeaderCell .ecr-header-unit {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:root revo-grid[theme] revogr-header .rgHeaderCell .ecr-header-name {
+  font-weight: 600;
+}
+
+:root revo-grid[theme] revogr-header .rgHeaderCell .ecr-header-unit {
+  color: var(--ecr-muted);
+  font-family: var(--mantine-font-family-monospace);
+  font-size: 11px;
+  font-weight: 400;
+}
+
+/* Кома між назвою й одиницею — лише для читалки («Назва, одиниця»). */
+:root revo-grid[theme] revogr-header .rgHeaderCell .ecr-header-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
 }
