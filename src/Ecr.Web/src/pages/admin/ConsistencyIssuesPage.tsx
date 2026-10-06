@@ -3,6 +3,7 @@ import { Badge, Button, Checkbox, Group, Text, UnstyledButton } from '@mantine/c
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import type { ConsistencyIssue, ConsistencyIssuePage } from '@/api/types';
+import type { components } from '@/api/schema';
 import {
   ConsistencyIssuesKey,
   RunConsistencyPermission,
@@ -26,6 +27,12 @@ import { t } from '@/shared/i18n';
 
 /** Шторка знахідки — лінивим чанком: закрита за замовчуванням (`L2`). */
 const ConsistencyIssueDetail = lazy(() => import('@/features/consistency/ConsistencyIssueDetail'));
+
+/** Загальні лічильники журналу (`GET /consistency/summary`). */
+type ConsistencySummary = components['schemas']['ConsistencySummary'];
+
+/** Вага в адресі (`?severity=Error`) → код сервера (`ValidationSeverity`). */
+const SeverityCodes: Readonly<Record<string, number>> = { Info: 1, Warning: 2, Error: 3 };
 
 /** Значення `?panel=` шторки знахідки. */
 export function issuePanelId(issueId: number): string {
@@ -70,7 +77,9 @@ export function ConsistencyIssuesPage(): JSX.Element {
   // Саме поле (з власною чернеткою, `useFieldDraft`) — пошук `FilterBar`.
   const appliedRule = useDebouncedFilter(rule);
   // ⛔ Курсор — від застосованого фільтра, не від сирого поля (`useFilterCursor`).
-  const [cursor, setCursor] = useFilterCursor(`${appliedRule}|${String(openOnly)}`);
+  // ⛔ Курсор — від застосованого фільтра, не від сирого поля (`useFilterCursor`).
+  // Вага — теж фільтр СЕРВЕРА (LS-E), тож входить у ключ курсора.
+  const [cursor, setCursor] = useFilterCursor(`${appliedRule}|${String(openOnly)}|${severity ?? ''}`);
 
   // ⚠ Дія «перевірити зараз» — лише з правом, яке вимагає сам ендпоінт
   // (`System.RunJob`), а не тим, яким відкрито екран: інакше кнопка обіцяла б
@@ -80,59 +89,49 @@ export function ConsistencyIssuesPage(): JSX.Element {
   const [asking, setAsking] = useState(false);
   const run = useConsistencyRun();
 
+  const severityCode = severity === null ? null : SeverityCodes[severity];
+
   const issues = useQuery({
-    queryKey: [...ConsistencyIssuesKey, appliedRule, openOnly, cursor],
+    queryKey: [...ConsistencyIssuesKey, appliedRule, openOnly, severityCode ?? null, cursor],
     queryFn: () =>
       apiFetch<ConsistencyIssuePage>(
         `/api/v1/consistency/issues?limit=100&openOnly=${String(openOnly)}` +
           (appliedRule.length === 0 ? '' : `&ruleCode=${encodeURIComponent(appliedRule)}`) +
+          (severityCode === undefined || severityCode === null ? '' : `&severity=${String(severityCode)}`) +
           (cursor === null ? '' : `&cursor=${encodeURIComponent(cursor)}`),
       ),
+  });
+
+  /*
+   * ⚠ Число в шапці — увесь журнал за станом прапорця (`GET /consistency/summary`),
+   * а не сторінка: журнал курсорний.
+   */
+  const summary = useQuery({
+    queryKey: [...ConsistencyIssuesKey, 'summary', openOnly],
+    queryFn: () => apiFetch<ConsistencySummary>(`/api/v1/consistency/summary?openOnly=${String(openOnly)}`),
   });
 
   const page = issues.data;
   const items = page?.items;
 
   /*
-   * ⛔ Смуга за вагою — лише коли на екрані ВЕСЬ результат (`nextCursor ===
-   * null`). Сервер не віддає ні `totalCount`, ні розкладу за вагою, а лічба
-   * першої сотні рядків видавала б себе за число всього журналу. Є ще сторінка
-   * — смуги немає (`D15-06`), а потрібний агрегат названо TODO-контрактом.
-   *
-   * ⚠ Рахуються НЕРОЗВ'ЯЗАНІ: розв'язана знахідка нічого не вимагає (макет:
-   * `status === 'Open'`).
+   * ⛔ Смуга за вагою — з `totals` СЕРВЕРА (LS-E): розклад за фільтрами без
+   * ваги по всьому журналу, а не лічба завантаженої сотні. До UI-20 + LS-E
+   * смуга показувалась лише над повним результатом, бо сервер підсумків не
+   * віддавав. Поки відповіді немає — смуги немає (`D15-06`), а не нулі.
    */
-  const complete = page !== undefined && page.nextCursor === null;
-  const open = items?.filter((issue) => issue.resolvedAt === null) ?? [];
-  const stats: StatStripItems | undefined = complete
-    ? ([
-        {
-          id: 'Error',
-          label: t('consistency.statErrors'),
-          tone: 'danger',
-          value: open.filter((issue) => severityState(issue.severity) === 'Error').length,
-        },
-        {
-          id: 'Warning',
-          label: t('consistency.statWarnings'),
-          tone: 'warning',
-          value: open.filter((issue) => severityState(issue.severity) === 'Warning').length,
-        },
-        {
-          id: 'Info',
-          label: t('consistency.statInfo'),
-          value: open.filter((issue) => severityState(issue.severity) === 'Info').length,
-        },
-      ] satisfies readonly [StatItem, StatItem, StatItem])
-    : undefined;
+  const totals = page?.totals;
+  const stats: StatStripItems | undefined =
+    totals === undefined || totals === null
+      ? undefined
+      : ([
+          { id: 'Error', label: t('consistency.statErrors'), tone: 'danger', value: totals.errors },
+          { id: 'Warning', label: t('consistency.statWarnings'), tone: 'warning', value: totals.warnings },
+          { id: 'Info', label: t('consistency.statInfo'), value: totals.info },
+        ] satisfies readonly [StatItem, StatItem, StatItem]);
 
-  // ⚠ Вага фільтрується на клієнті — лише поверх ПОВНОГО результату (див.
-  // смугу вище); без нього фільтр за вагою не пропонується.
-  const severityFilter = complete ? severity : null;
-  const shown =
-    items === undefined || severityFilter === null
-      ? items
-      : items.filter((issue) => severityState(issue.severity) === severityFilter);
+  const severityFilter = severityCode === undefined ? null : severity;
+  const shown = items;
 
   const openIssue = items?.find((issue) => issuePanelId(issue.id) === panel);
 
@@ -216,6 +215,7 @@ export function ConsistencyIssuesPage(): JSX.Element {
     <ListPage
       header={{
         title: t('consistency.title'),
+        count: summary.data?.total,
         meta: t('consistency.description'),
         primary: runs
           ? { label: t('consistency.runNow'), onClick: () => setAsking(true), disabled: run.outcome === 'running' }
