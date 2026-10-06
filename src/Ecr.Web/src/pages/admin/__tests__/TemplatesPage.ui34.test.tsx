@@ -15,12 +15,23 @@ import { testTheme } from '@/test/render';
 
 const templates = {
   items: [
-    { id: 1, code: 'AIR', versionCount: 3 },
-    { id: 2, code: 'WATER', versionCount: 1 },
-    { id: 3, code: 'WASTE', versionCount: 1 },
+    {
+      id: 1,
+      code: 'AIR',
+      versionCount: 3,
+      nameL10n: { values: { en: 'Air emissions' } },
+      documentCount: 12,
+      isArchived: false,
+      updatedAt: '2026-10-01T08:00:00Z',
+      draftAuthorDisplayName: 'G. Tulegenova',
+      draftCreatedAt: '2026-10-02T08:00:00Z',
+    },
+    { id: 2, code: 'WATER', versionCount: 1, documentCount: 0, isArchived: false },
+    { id: 3, code: 'WASTE', versionCount: 1, documentCount: 3, isArchived: false },
+    { id: 4, code: 'FLARE', versionCount: 1, documentCount: 0, isArchived: true },
   ],
   nextCursor: null,
-  totalCount: 3,
+  totalCount: 4,
 };
 
 const v = (id: number, version: string, status: string) => ({
@@ -36,9 +47,10 @@ const versions: Record<string, unknown[]> = {
   '1': [v(11, '1.0.0', 'Published'), v(12, '1.1.0', 'Published'), v(13, '1.2.0', 'Draft')],
   '2': [v(21, '0.1.0', 'Draft')],
   '3': [v(31, '1.0.0', 'Deprecated')],
+  '4': [v(41, '2.0.0', 'Published')],
 };
 
-function mockApi(): void {
+function mockApi(list: unknown = templates): void {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL) => {
@@ -66,7 +78,7 @@ function mockApi(): void {
         return json(ids.map((id) => ({ templateId: Number(id), versions: versions[id] ?? [] })));
       }
 
-      if (url.includes('/api/v1/templates')) return json(templates);
+      if (url.includes('/api/v1/templates')) return json(list);
 
       return json(null);
     }),
@@ -85,8 +97,8 @@ function Version(): JSX.Element {
   return <p>version:{location.pathname}</p>;
 }
 
-function show(entry = '/admin/templates'): void {
-  mockApi();
+function show(entry = '/admin/templates', list: unknown = templates): void {
+  mockApi(list);
 
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
@@ -133,18 +145,37 @@ describe('TemplatesPage (UI-34): колонки макета — лише з д�
 
     const links = within(air as HTMLElement).getAllByRole('link').map((link) => link.textContent);
     // ⛔ 1.0.0 (стара опублікована) у рядку НЕ показується — лише чинна і чернетка.
-    expect(links).toEqual(['AIR', '1.1.0', '1.2.0']);
+    expect(links).toEqual(['Air emissions', '1.1.0', '1.2.0']);
+    // Назва — посиланням, код — другим рядком; автор чернетки — під нею.
+    expect(air?.textContent).toContain('AIR');
+    expect(air?.textContent).toContain('templates.draftBy');
   });
 
-  it('немає колонок «Documents» і «Updated» — у переліку немає цих даних (D15-06)', async () => {
+  it('шість колонок макета: Template · Current · Draft · Documents · Updated · State', async () => {
     show();
     const table = await loadedTable();
 
     const headers = within(table)
       .getAllByRole('columnheader')
-      .map((cell) => cell.textContent ?? '');
+      .map((cell) => (cell.textContent ?? '').replace(/[⟦⟧]/g, ''));
 
-    expect(headers.some((text) => /documents|updated/i.test(text))).toBe(false);
+    expect(headers).toEqual([
+      'templates.card',
+      'templates.currentVersion',
+      'templates.draft',
+      'templates.documents',
+      'templates.updated',
+      'templates.state',
+    ]);
+  });
+
+  it('архівований шаблон має стан Archived, хоч версія й опублікована', async () => {
+    show();
+    const table = await loadedTable();
+
+    const flare = within(table).getAllByRole('row').find((row) => row.textContent?.includes('FLARE'));
+
+    expect(flare?.querySelector('[data-status-state]')?.getAttribute('data-status-state')).toBe('Archived');
   });
 
   it('шаблон без поточної версії називає останню застарілу і каже, що поточної немає', async () => {
@@ -164,9 +195,10 @@ describe('TemplatesPage (UI-34): смуга показників і фільтр
 
     const strip = screen.getByRole('group', { name: /templates\.stats⟧/ });
 
-    expect(strip.textContent).toMatch(/3\s*⟦templates\.stat\.all⟧/);
-    expect(strip.textContent).toMatch(/2\s*⟦templates\.stat\.published⟧/);
+    expect(strip.textContent).toMatch(/4\s*⟦templates\.stat\.all⟧/);
+    expect(strip.textContent).toMatch(/3\s*⟦templates\.stat\.published⟧/);
     expect(strip.textContent).toMatch(/2\s*⟦templates\.stat\.drafts⟧/);
+    expect(strip.textContent).toMatch(/15\s*⟦templates\.stat\.documents⟧/);
   });
 
   it('клац по «drafts» лишає шаблони з чернеткою', async () => {
@@ -175,7 +207,7 @@ describe('TemplatesPage (UI-34): смуга показників і фільтр
 
     fireEvent.click(screen.getByRole('button', { name: /templates\.stat\.drafts⟧/ }));
 
-    expect(codes(table)).toEqual(['AIR', 'WATER']);
+    expect(codes(table)).toEqual(['Air emissionsAIR', 'WATER']);
   });
 
   it('?state= з адреси звужує перелік одразу', async () => {
@@ -221,5 +253,31 @@ describe('TemplatesPage (UI-34): рядок веде на картку', () => {
 
     expect(screen.getByRole('button', { name: /templates\.create⟧/ })).toBeDefined();
     expect(screen.queryByRole('button', { name: /templates\.newVersion⟧/ })).toBeNull();
+  });
+});
+
+describe('TemplatesPage (UI-34b): сервер без нових полів', () => {
+  // ⚠ Старий сервер: лише {id, code, versionCount}. Колонки й показника без
+  // даних немає (D15-06), а не «0».
+  const old = {
+    items: [
+      { id: 1, code: 'AIR', versionCount: 3 },
+      { id: 2, code: 'WATER', versionCount: 1 },
+    ],
+    nextCursor: null,
+    totalCount: 2,
+  };
+
+  it('немає колонок Documents і Updated, немає показника документів', async () => {
+    show('/admin/templates', old);
+    const table = await loadedTable();
+
+    const headers = within(table)
+      .getAllByRole('columnheader')
+      .map((cell) => (cell.textContent ?? '').replace(/[⟦⟧]/g, ''));
+
+    expect(headers).toEqual(['templates.card', 'templates.currentVersion', 'templates.draft', 'templates.state']);
+    expect(screen.getByRole('group', { name: /templates\.stats⟧/ }).textContent).not.toMatch(/templates\.stat\.documents⟧/);
+    expect(codes(table)).toEqual(['AIR', 'WATER']);
   });
 });

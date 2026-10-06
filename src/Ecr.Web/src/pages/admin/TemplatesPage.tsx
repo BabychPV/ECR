@@ -12,6 +12,7 @@ import type {
   TemplateVersionSummary,
 } from '@/api/types';
 import {
+  documentCount,
   draftCount,
   filterTemplateRows,
   publishedVersionCount,
@@ -23,7 +24,9 @@ import { DataTable, type DataTableColumn } from '@/shared/ui/DataTable';
 import { FilterBar } from '@/shared/ui/FilterBar';
 import { ListPage } from '@/shared/ui/ListPage';
 import { LocalizedInput, hasAnyText, type LocalizedValue } from '@/shared/ui/LocalizedInput';
+import type { StatItem, StatStripItems } from '@/shared/ui/StatStrip';
 import { StatusBadge } from '@/shared/ui/StatusBadge';
+import { Timestamp } from '@/shared/ui/Timestamp';
 import { TwoLine } from '@/shared/ui/TwoLine';
 import { useUrlParamsSetter, useUrlState } from '@/shared/ui/useUrlState';
 import { showApiError, showDone } from '@/shared/ui/notify';
@@ -175,12 +178,19 @@ export function TemplatesPage(): JSX.Element {
   );
 
   /*
-   * ⚠ Колонки макета, для яких у переліку НЕМАЄ даних («Documents», «Updated»,
-   * автор чернетки), не малюються (`D15-06`); їх місце — TODO-контракт у листі
-   * готовності. Замість «Documents» стоїть лічильник версій — він є у
-   * `TemplateSummary.versionCount`.
+   * ⚠ Шість колонок макета: Template · Current version · Draft · Documents ·
+   * Updated · State. Чого сервер не віддає (момент правки чернетки), того в
+   * клітинках немає (`D15-06`): під чернеткою — хто і коли її СТВОРИВ.
    */
-  const columns: readonly DataTableColumn<TemplateListRow>[] = [
+  /*
+   * ⚠ Поля нового контракту (`TemplateListSummary`) необов'язкові: до нього
+   * сервер їх не віддає, і тоді колонки «Documents»/«Updated» і показник
+   * «documents using them» не малюються взагалі (`D15-06`), а не стоять нулями.
+   */
+  const hasDocuments = rows?.some((row) => row.template.documentCount !== undefined) ?? false;
+  const hasUpdated = rows?.some((row) => row.template.updatedAt !== undefined) ?? false;
+
+  const allColumns: readonly (DataTableColumn<TemplateListRow> | null)[] = [
     {
       key: 'code',
       label: t('templates.card'),
@@ -188,22 +198,31 @@ export function TemplatesPage(): JSX.Element {
 
       /*
        * ⛔ `UI-09`: код — ПОСИЛАННЯ на картку шаблону; без нього з переліку не
-       * було входу на сам шаблон. Назви шаблону в `TemplateSummary` немає,
-       * тож перший рядок макета («назва + код») зводиться до коду.
+       * було входу на сам шаблон. Два рядки, як у макеті: назва-посилання і
+       * код під нею; без назви посиланням стає сам код.
        *
-       * ⚠ `sortValue` явно: `render` дає вузол, сортувати треба за кодом.
+       * ⚠ `sortValue` явно: `render` дає вузол, сортувати треба за тим, що
+       * людина бачить першим рядком.
        */
-      render: (row) => (
-        <Anchor
-          component={Link}
-          size="sm"
-          to={`/admin/templates/${String(row.template.id)}`}
-          onClick={(event) => event.stopPropagation()}
-        >
-          {row.template.code}
-        </Anchor>
-      ),
-      sortValue: (row) => row.template.code,
+      render: (row) => {
+        const link = (
+          <Anchor
+            component={Link}
+            size="sm"
+            to={`/admin/templates/${String(row.template.id)}`}
+            onClick={(event) => event.stopPropagation()}
+          >
+            {row.name.length > 0 ? row.name : row.template.code}
+          </Anchor>
+        );
+
+        return row.name.length > 0 ? (
+          <TwoLine primary={link} secondary={row.template.code} mono />
+        ) : (
+          link
+        );
+      },
+      sortValue: (row) => (row.name.length > 0 ? row.name : row.template.code),
     },
     {
       key: 'current',
@@ -247,35 +266,67 @@ export function TemplatesPage(): JSX.Element {
       key: 'draft',
       label: t('templates.draft'),
       sortValue: (row) => row.draft?.version ?? '',
-      render: (row) => (row.draft === null ? null : versionLink(row.template.id, row.draft)),
+      render: (row) => {
+        if (row.draft === null) return null;
+
+        const author = row.template.draftAuthorDisplayName ?? null;
+
+        return author === null ? (
+          versionLink(row.template.id, row.draft)
+        ) : (
+          <TwoLine
+            primary={versionLink(row.template.id, row.draft)}
+            secondary={t('templates.draftBy', { name: author })}
+          />
+        );
+      },
     },
-    {
-      key: 'versions',
-      label: t('templates.versions'),
+    !hasDocuments ? null : {
+      key: 'documents',
+      label: t('templates.documents'),
       num: true,
-      sortValue: (row) => row.template.versionCount,
-      render: (row) => row.template.versionCount,
+      title: t('templates.documentsHint'),
+      sortValue: (row) => row.template.documentCount ?? 0,
+      render: (row) => row.template.documentCount ?? null,
+    },
+    !hasUpdated ? null : {
+      key: 'updated',
+      label: t('templates.updated'),
+      sortValue: (row) => row.template.updatedAt ?? '',
+      render: (row) => <Timestamp value={row.template.updatedAt} dateOnly />,
     },
     {
       key: 'state',
       label: t('templates.state'),
       sortValue: (row) => row.state ?? '',
       render: (row) =>
-        row.state === null ? null : <StatusBadge kind="version" state={row.state} quiet />,
+        row.state === null ? null : row.state === 'Archived' ? (
+          // ⚠ Архів — стан ШАБЛОНУ, не версії: словник `project` має той самий
+          // `Archived` (muted), а в `version` його немає.
+          <StatusBadge kind="project" state="Archived" quiet />
+        ) : (
+          <StatusBadge kind="version" state={row.state} quiet />
+        ),
     },
   ];
+  const columns = allColumns.filter(
+    (column): column is DataTableColumn<TemplateListRow> => column !== null,
+  );
+
+  const documents = rows === undefined ? null : documentCount(rows);
 
   /*
    * ⚠ Смуга — лише з повних даних: показник «0 drafts», порахований до приходу
    * версій, був би неправдою, а не нулем (`StatStrip`: нуль — це дані).
-   * «Documents using them» з макета немає — немає агрегату (TODO-контракт).
+   * «documents using them» — лише документи проєктів, видимих читачеві
+   * (`TemplateSummary.documentCount`).
    */
   const stats =
     rows === undefined || rows.length === 0
       ? undefined
       : {
           label: t('templates.stats'),
-          items: [
+          items: withDocuments(documents, [
             { id: 'all', label: t('templates.stat.all'), value: rows.length, filter: false },
             {
               id: 'published',
@@ -289,7 +340,7 @@ export function TemplatesPage(): JSX.Element {
               value: draftCount(rows),
               hint: t('templates.stat.draftsHint'),
             },
-          ] as const,
+          ] as const),
           active: stat,
           onSelect: setStat,
         };
@@ -327,6 +378,7 @@ export function TemplatesPage(): JSX.Element {
                     { value: 'Published', label: t('status.version.Published') },
                     { value: 'Draft', label: t('status.version.Draft') },
                     { value: 'Deprecated', label: t('status.version.Deprecated') },
+                    { value: 'Archived', label: t('status.project.Archived') },
                   ],
                 },
               ]}
@@ -398,4 +450,27 @@ export function TemplatesPage(): JSX.Element {
 
     </>
   );
+}
+
+/**
+ * Четвертий показник смуги — лише коли сервер віддає лічильник документів.
+ *
+ * ⚠ Окрема функція, а не умовний елемент масиву: `StatStripItems` — союз
+ * кортежів (`L4` у типі), і масив із `null` у нього не вкладається.
+ */
+function withDocuments(
+  documents: number | null,
+  base: readonly [StatItem, StatItem, StatItem],
+): StatStripItems {
+  if (documents === null) return base;
+
+  return [
+    ...base,
+    {
+      id: 'documents',
+      label: t('templates.stat.documents'),
+      value: documents,
+      hint: t('templates.stat.documentsHint'),
+    },
+  ];
 }
