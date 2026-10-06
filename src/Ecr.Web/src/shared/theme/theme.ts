@@ -453,7 +453,9 @@ export const theme = createTheme({
     Select: { defaultProps: { size: 'sm' } },
     // a11y: стрілки Mantine (data-direction, tabindex=-1) без імені; клавіатурні стрілки й ввід лишаються.
     NumberInput: { defaultProps: { size: 'sm', hideControls: true } },
-    Table: { defaultProps: { verticalSpacing: 'xs', horizontalSpacing: 'sm' } },
+    // a11y: підсвітка рядка під мишею — токен макета `hover`, а не `dark-5` Mantine
+    // (#3b3b3b): на ньому `muted` давав 4.34 < 4.5 у темній (axe, рядок під курсором).
+    Table: { defaultProps: { verticalSpacing: 'xs', horizontalSpacing: 'sm', highlightOnHoverColor: 'var(--ecr-hover)' } },
 
     // ⚠ Тривалість переходу задана ТУТ, а не в кожному діалозі: інакше перший
     // же новий екран поставить свою.
