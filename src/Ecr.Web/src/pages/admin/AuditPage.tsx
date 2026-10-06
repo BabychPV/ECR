@@ -3,7 +3,6 @@ import {
   Badge,
   Button,
   Checkbox,
-  Group,
   NumberInput,
   SegmentedControl,
   Select,
@@ -15,7 +14,7 @@ import {
 import type { CellChangePage } from '@/api/types';
 import { authorName, useAuthorOptions } from '@/features/audit/authorOptions';
 import { cellChangeOrigins, cellChangesQuery, isSingleCell, useCellChanges } from '@/features/audit/api';
-import { FilterHints, readerOnlyDescription } from '@/features/audit/FilterHints';
+import { FilterHints, FilterInline, FilterRow, readerOnlyDescription } from '@/shared/ui/FilterBar';
 import { SecurityEventsPanel } from '@/features/audit/SecurityEventsPanel';
 import { StructureChangesPanel } from '@/features/audit/StructureChangesPanel';
 import { StructureExportButton } from '@/features/audit/StructureExportButton';
@@ -161,17 +160,19 @@ export function AuditPage(): JSX.Element {
       <PageHeader
         title={t('audit.title')}
         actions={
-          <Group gap="xs" align="end">
-            <SegmentedControl
-              aria-label={t('audit.title')}
-              value={structure ? 'structure' : security ? 'security' : 'cells'}
-              onChange={(value) => setView(value === 'structure' || value === 'security' ? value : null)}
-              data={[
-                { value: 'cells', label: t('audit.viewCells') },
-                { value: 'structure', label: t('audit.viewStructure') },
-                { value: 'security', label: t('audit.viewSecurity') },
-              ]}
-            />
+          <FilterRow>
+            <FilterInline>
+              <SegmentedControl
+                aria-label={t('audit.title')}
+                value={structure ? 'structure' : security ? 'security' : 'cells'}
+                onChange={(value) => setView(value === 'structure' || value === 'security' ? value : null)}
+                data={[
+                  { value: 'cells', label: t('audit.viewCells') },
+                  { value: 'structure', label: t('audit.viewStructure') },
+                  { value: 'security', label: t('audit.viewSecurity') },
+                ]}
+              />
+            </FilterInline>
             <Suspense fallback={<Skeleton height="var(--ecr-ctl-height)" width={140} />}>
               <DateOnlyInput
                 size="xs"
@@ -217,7 +218,7 @@ export function AuditPage(): JSX.Element {
                 setDocumentId(typeof value === 'number' ? value : null);
               }}
             />
-          </Group>
+          </FilterRow>
         }
       />
 
@@ -231,7 +232,7 @@ export function AuditPage(): JSX.Element {
       <>
       {/* ⚠ Фільтри ОКРЕМИМ рядком, а не в шапці: їх шість, і в шапці вони
           витіснили б заголовок за край на ноутбучній ширині. */}
-      <Group gap="xs" align="end" mb="xs" wrap="wrap" data-audit-filter-row="cells">
+      <FilterRow mb="xs" data-audit-filter-row="cells">
         {/* ⛔ `R-18`: автор — ВИБОРОМ за іменем (`useAuthorOptions`), а не
             номером `UserId`, якого людина не знає. */}
         <Select
@@ -289,43 +290,47 @@ export function AuditPage(): JSX.Element {
             setColumnDefId(typeof value === 'number' ? value : null);
           }}
         />
-        <Checkbox
-          mb="xs"
-          label={t('audit.lateOnly')}
-          checked={lateOnly === 'true'}
-          onChange={(event) => {
-            setLateOnly(event.currentTarget.checked ? 'true' : null);
-          }}
-        />
+        <FilterInline>
+          <Checkbox
+            label={t('audit.lateOnly')}
+            checked={lateOnly === 'true'}
+            onChange={(event) => {
+              setLateOnly(event.currentTarget.checked ? 'true' : null);
+            }}
+          />
+        </FilterInline>
         {/* ⚠ Значок «історія однієї комірки» — не прикраса: саме в цьому стані
             сервер приймає запит за `Document.View` і з вікном у 13 місяців, а
             не за `Security.ViewAudit` і 92 дні. Без видимої ознаки людина не
             розуміє, чому те саме вікно то приймається, то ні. */}
         {single && (
-          <Badge mb="xs" size="sm" variant="light" color="brand">
-            {t('audit.cell')}
-          </Badge>
+          <FilterInline>
+            <Badge size="sm" variant="light" color="brand">
+              {t('audit.cell')}
+            </Badge>
+          </FilterInline>
         )}
-        <Button
-          mb="xs"
-          variant="subtle"
-          onClick={() => {
-            // ⛔ ОДИН перехід на п'ять параметрів, а не п'ять викликів
-            // `useUrlState` підряд: два синхронні `setSearchParams` в одному
-            // тіку гублять ОБИДВІ зміни, а не лише другу (див. коментар до
-            // `useUrlParamsSetter`). П'ять поспіль не скинули б нічого.
-            setParams({
-              rowKey: null,
-              columnDefId: null,
-              author: null,
-              origin: null,
-              lateOnly: null,
-            });
-          }}
-        >
-          {t('audit.reset')}
-        </Button>
-      </Group>
+        <FilterInline>
+          <Button
+            variant="subtle"
+            onClick={() => {
+              // ⛔ ОДИН перехід на п'ять параметрів, а не п'ять викликів
+              // `useUrlState` підряд: два синхронні `setSearchParams` в одному
+              // тіку гублять ОБИДВІ зміни, а не лише другу (див. коментар до
+              // `useUrlParamsSetter`). П'ять поспіль не скинули б нічого.
+              setParams({
+                rowKey: null,
+                columnDefId: null,
+                author: null,
+                origin: null,
+                lateOnly: null,
+              });
+            }}
+          >
+            {t('audit.reset')}
+          </Button>
+        </FilterInline>
+      </FilterRow>
 
       {/* ⚠ `U-21`: пояснення ПІД рядом, а не під підписами — інакше підписи
           полів із поясненням і без нього стоять на різній висоті. Пояснення
