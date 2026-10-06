@@ -222,8 +222,9 @@ Data Protection (`sec.DataProtectionKey`) інакше лежали б у баз
 - **Браузери:** перевірено на **Chromium/Chrome** (набір Playwright має один
   проєкт — `chromium`). **Edge** — на тому самому рушії Chromium, окремо не
   перевірявся. **Firefox і Safari не гарантуються.** Політики підтримуваних
-  браузерів у проєкті немає (`browserslist` не задано, `build.target` — за
-  замовчуванням Vite, `tsconfig` — ES2022); мінімальні версії не встановлені.
+  браузерів у проєкті немає (`browserslist` не задано); збірка цілиться в
+  ES2022 (`build.target` у `vite.config.ts` і `tsconfig`), тобто Chrome/Edge
+  не старші за 94.
   Тестуйте на актуальних Chrome або Edge.
 - Вхід Windows (Negotiate/Kerberos) вимагає, щоб браузер і сервер були в одному
   домені з правильним SPN. Локальний вхід (логін/пароль) працює без домену.
