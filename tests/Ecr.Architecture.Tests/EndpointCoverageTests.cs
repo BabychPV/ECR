@@ -447,6 +447,18 @@ public sealed partial class EndpointCoverageTests
         new("features/security/permissionLabel.ts", "key", 1, "features/security/permissionLabel.ts",
             PermissionLabelKeys, "Назва права в матриці /admin/security (U-11)."),
 
+        // UI-37: назва домену прав (`PermissionCatalogItem.group`) — групи майстра ролей.
+        // Запасний варіант — сам код групи (`hasText(key) ? t(key) : group`), тож нова
+        // група без рядка дасть код, не `⟦…⟧`; одинадцять відомих — названі тут.
+        new("features/security/permissionGroups.ts", "key", 1, "features/security/permissionGroups.ts",
+            [
+                "security.domain.Template", "security.domain.Registry", "security.domain.Document",
+                "security.domain.Project", "security.domain.Period", "security.domain.Calculation",
+                "security.domain.Report", "security.domain.Integration", "security.domain.Uom",
+                "security.domain.Security", "security.domain.System",
+            ],
+            "Назва групи прав у майстрі ролей /admin/security (UI-37)."),
+
         new("features/projects/CreateProjectModal.tsx", "ProjectFieldLabelKey[field]", 1,
             "features/projects/CreateProjectModal.tsx",
             ["periods.code", "periods.name", "periods.timeZone", "periods.templateVersion", "periods.policy", "periods.customCount"],
