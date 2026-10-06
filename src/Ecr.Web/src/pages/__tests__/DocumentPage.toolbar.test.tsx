@@ -326,7 +326,7 @@ describe('DocumentPage: прогрес у шапці (UI-15)', () => {
   );
 
   it(
-    'K зауважень — посилання, що веде до панелі зауважень',
+    'K зауважень — лише кнопка інспектора (UI-25), рядок прогресу другого лічильника не дублює',
     async () => {
       show(AllRights, {
         validation: {
@@ -339,13 +339,9 @@ describe('DocumentPage: прогрес у шапці (UI-15)', () => {
       });
       await actionsRow();
 
-      const link = await screen.findByTestId('document-issues-link', {}, { timeout: SlowEnvTimeout });
-      expect(link.textContent).toBe('⟦document.issuesCount.other (count=2)⟧');
-
-      const panel = document.getElementById('document-issues');
-      expect(panel).not.toBeNull();
-      fireEvent.click(link);
-      expect(document.activeElement).toBe(panel);
+      // ⚠ Лічильник інспектора рахує лише ВИДИМІ таблиці (`inspectorModel.ts`);
+      // другий — за всіма повідомленнями — розійшовся б із ним на звуженій ролі.
+      expect(screen.queryByTestId('document-issues-link')).toBeNull();
     },
     SlowEnvTimeout,
   );
