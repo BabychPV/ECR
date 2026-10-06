@@ -578,7 +578,7 @@ export type CellChangePage = Schemas['PagedResultOfCellChangeView'];
 export type ConsistencyIssue = Schemas['ConsistencyIssueView'];
 
 /** Сторінка журналу знахідок. */
-export type ConsistencyIssuePage = Schemas['PagedResultOfConsistencyIssueView'];
+export type ConsistencyIssuePage = Schemas['ConsistencyIssuePage'];
 
 /**
  * Колонка у структурі шаблону — з **усіма** мовами заголовка.

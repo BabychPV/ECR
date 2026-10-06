@@ -1086,6 +1086,8 @@ export interface paths {
                 query?: {
                     ruleCode?: string;
                     openOnly?: boolean;
+                    severity?: number;
+                    q?: string;
                     limit?: number;
                     cursor?: string;
                 };
@@ -1101,9 +1103,9 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["PagedResultOfConsistencyIssueView"];
-                        "text/json": components["schemas"]["PagedResultOfConsistencyIssueView"];
-                        "text/plain": components["schemas"]["PagedResultOfConsistencyIssueView"];
+                        "application/json": components["schemas"]["ConsistencyIssuePage"];
+                        "text/json": components["schemas"]["ConsistencyIssuePage"];
+                        "text/plain": components["schemas"]["ConsistencyIssuePage"];
                     };
                 };
                 /** @description Forbidden */
@@ -1221,6 +1223,64 @@ export interface paths {
                 };
             };
         };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/consistency/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Загальні лічильники знахідок за вагою для смуги показників.
+         *     Право `System.ViewHealth`.
+         * @description ⚠ Лічильники рахуються по ВСЬОМУ журналу, а не по сторінці: сторінка
+         *     курсорна, і сума по ній збрехала б про стан системи. Без права —
+         *     `403`, а не нулі. Знахідки не розрізняються за проєктами (журнал
+         *     системний, право адміністративне), тож прихованих документів тут немає.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    openOnly?: boolean;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ConsistencySummary"];
+                        "text/json": components["schemas"]["ConsistencySummary"];
+                        "text/plain": components["schemas"]["ConsistencySummary"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -18543,6 +18603,20 @@ export interface components {
             /** @description Верхня межа — лише для between. */
             valueTo: null | string;
         };
+        /** @description Сторінка знахідок із загальними лічильниками. */
+        ConsistencyIssuePage: {
+            /** @description Елементи сторінки. */
+            items: components["schemas"]["ConsistencyIssueView"][];
+            /** @description Курсор наступної сторінки; `null` — кінець. */
+            nextCursor: null | string;
+            /**
+             * Format: int32
+             * @description Скільки знахідок збігається з УСІМА фільтрами (разом із вагою).
+             */
+            totalCount: null | number;
+            /** @description Розбивка за вагою за фільтрами без ваги. */
+            totals: components["schemas"]["ConsistencySeverityTotals"];
+        };
         /** @description Знахідка перевірки узгодженості, як її бачить читач. */
         ConsistencyIssueView: {
             /**
@@ -18589,6 +18663,52 @@ export interface components {
              * @description Вага: 1 інформація, 2 попередження, 3 помилка.
              */
             severity: number;
+        };
+        /** @description Лічильники знахідок за вагою в межах фільтра переліку (без фільтра ваги). */
+        ConsistencySeverityTotals: {
+            /**
+             * Format: int32
+             * @description Вага 3.
+             */
+            errors: number;
+            /**
+             * Format: int32
+             * @description Вага 1.
+             */
+            info: number;
+            /**
+             * Format: int32
+             * @description Вага 2.
+             */
+            warnings: number;
+        };
+        /** @description Загальні лічильники журналу знахідок. */
+        ConsistencySummary: {
+            /**
+             * Format: int32
+             * @description Знахідок ваги 3 (помилка).
+             */
+            errors: number;
+            /**
+             * Format: int32
+             * @description Знахідок ваги 1 (інформація).
+             */
+            info: number;
+            /**
+             * Format: date-time
+             * @description Момент найновішої знахідки в UTC; `null` — журнал порожній.
+             */
+            lastDetectedAt: null | string;
+            /**
+             * Format: int32
+             * @description Усього (інша вага, якщо така з'явиться, потрапляє лише сюди).
+             */
+            total: number;
+            /**
+             * Format: int32
+             * @description Знахідок ваги 2 (попередження).
+             */
+            warnings: number;
         };
         /**
          * @description Природа значення константи методології (директива ПК-1 №05, поправка 2-біс).
@@ -21128,19 +21248,6 @@ export interface components {
         PagedResultOfCollectionRunView: {
             /** @description Елементи сторінки. */
             items: components["schemas"]["CollectionRunView"][];
-            /** @description Курсор наступної сторінки; `null` — кінець. */
-            nextCursor: null | string;
-            /**
-             * Format: int32
-             * @description Загальна кількість; `null`, якщо підрахунок дорогий.
-             */
-            totalCount: null | number;
-        };
-        /** @description Сторінка результатів. Ендпоінтів, що повертають «усе», не існує —
-         *     перевіряється архітектурним тестом. */
-        PagedResultOfConsistencyIssueView: {
-            /** @description Елементи сторінки. */
-            items: components["schemas"]["ConsistencyIssueView"][];
             /** @description Курсор наступної сторінки; `null` — кінець. */
             nextCursor: null | string;
             /**
