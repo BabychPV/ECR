@@ -31,30 +31,3 @@ export function formatMonthYear(year: number, month: number): string {
 
   return formatDate(new Date(Date.UTC(year, month - 1, 1)), { year: 'numeric', month: 'long', timeZone: 'UTC' });
 }
-
-const PeriodKeyMultiplier = 100;
-
-/**
- * Людська назва періоду за `periodKey` (`YYYYMM` / `Year*100 + Sequence`, `R-A6`)
- * мовою інтерфейсу: «October 2026», «Қазан 2026», «Q4 2025», «2026».
- * Порожній рядок — ключ не є періодом заданої періодичності.
- *
- * ⚠ Один форматер на ВСІ місця, де людині показують період (поле вибору,
- * список у формі створення документа): ключ `202610` лишається значенням для
- * API й адреси, а не текстом на екрані. `kind` — `PeriodKind` проєкту; без
- * нього — місяць (`X-34`).
- */
-export function formatPeriodKey(periodKey: number, kind?: string): string {
-  if (!Number.isInteger(periodKey)) return '';
-
-  const year = Math.trunc(periodKey / PeriodKeyMultiplier);
-  const sequence = periodKey - year * PeriodKeyMultiplier;
-
-  if (kind === 'Quarterly') {
-    return sequence >= 1 && sequence <= 4 ? t('periods.quarterOf', { quarter: sequence, year }) : '';
-  }
-  if (kind === 'Yearly') return sequence === 1 ? String(year) : '';
-  if (kind === 'Custom') return sequence >= 1 ? t('periods.customOf', { sequence, year }) : '';
-
-  return formatMonthYear(year, sequence);
-}
