@@ -285,6 +285,19 @@ public sealed class CollectionScheduleHandlersTests
         Assert.Equal(Nightly, schedule.CronExpression);
         Assert.Equal(Now, schedule.LastErrorAt);
         Assert.False(string.IsNullOrWhiteSpace(schedule.LastError));
+
+        // ⛔ SEC (TIER2): текст винятку планувальника (сховище, сервер, SQL) не йде ні у
+        // збережений `LastError`, ні у відповідь клієнту (повідомлення, `Details["reason"]`):
+        // лише код каталогу й кореляція. Мутація: повернути `e.Message` — тест червоний.
+        var reason = (string)refused.Details!["reason"]!;
+        foreach (var text in new[] { schedule.LastError!, refused.Message, reason })
+        {
+            Assert.Contains("ECR-SYS-0500", text, StringComparison.Ordinal);
+            foreach (var secret in new[] { "Secret123", "db01", "pi01.internal", "sec.User" })
+            {
+                Assert.DoesNotContain(secret, text, StringComparison.Ordinal);
+            }
+        }
     }
 
     [Fact]
@@ -839,7 +852,10 @@ public sealed class CollectionScheduleHandlersTests
         {
             if (RefuseSchedule)
             {
-                throw new ArgumentException("scheduler refused the trigger", nameof(cronExpression));
+                throw new ArgumentException(
+                    "scheduler refused the trigger: Server=db01;User Id=svc;Password=Secret123;Database=Quartz "
+                    + "https://pi01.internal:5450/piwebapi SELECT * FROM sec.User",
+                    nameof(cronExpression));
             }
 
             Scheduled.Add((cronExpression, payload));

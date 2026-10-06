@@ -9,8 +9,18 @@ using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.External;
 using Ecr.Domain.Enums;
 using Ecr.Domain.Errors;
+using Microsoft.Extensions.Logging;
 
 namespace Ecr.Application.Integration;
+
+/// <summary>Журнал відмов постановки розкладу в планувальник.</summary>
+internal static partial class SchedulerApplyLog
+{
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "CollectionSchedule {ScheduleId}: планувальник не прийняв розклад; кореляція {CorrelationId}.")]
+    public static partial void Failed(ILogger logger, int scheduleId, string correlationId, Exception exception);
+}
 
 /// <summary>Розклад збору — рядок екрана конфігуратора (ФВ-14.3, <c>BE-21b</c>).</summary>
 /// <param name="Id">Ідентифікатор розкладу.</param>
@@ -273,6 +283,7 @@ public sealed class ListCollectionSchedulesHandler(
     /// <param name="clock">Годинник.</param>
     /// <param name="schedule">Розклад у вже збереженому стані.</param>
     /// <param name="ct">Скасування.</param>
+    /// <param name="log">Журнал: повний виняток планувальника (у відповідь він не йде).</param>
     /// <remarks>
     /// ⛔ Відповідь чесна: розклад уже збережено, а в планувальнику його немає —
     /// і саме це користувач має побачити. Мовчазне <c>200</c> означало б екран,
@@ -283,7 +294,8 @@ public sealed class ListCollectionSchedulesHandler(
         IUnitOfWork uow,
         IClock clock,
         CollectionSchedule schedule,
-        CancellationToken ct)
+        CancellationToken ct,
+        ILogger? log = null)
     {
         try
         {
@@ -293,16 +305,28 @@ public sealed class ListCollectionSchedulesHandler(
         catch (Exception e) when (e is not OperationCanceledException)
 #pragma warning restore CA1031
         {
-            schedule.MarkInvalid(e.Message, clock.UtcNow);
+            // ⛔ SEC (TIER2): `e.Message` планувальника (сховище Quartz: ім'я сервера/бази,
+            // текст SQL-помилки) іде в `ext.CollectionSchedule.LastError` і у відповідь клієнту.
+            // Власний виняток продукту — його текст, решта — код каталогу + кореляція; повний
+            // виняток — у журнал сервера. Cron перевіряється ДО цього кроку (див. remarks).
+            var correlationId = SafeErrorText.NewCorrelationId();
+            if (!SafeErrorText.IsOwn(e) && log is not null)
+            {
+                SchedulerApplyLog.Failed(log, schedule.Id, correlationId, e);
+            }
+
+            var reason = SafeErrorText.For(e, correlationId, "the scheduler call");
+
+            schedule.MarkInvalid(reason, clock.UtcNow);
             await uow.SaveChangesAsync(ct).ConfigureAwait(false);
 
             throw new BusinessRuleException(
                 ErrorCodes.RequestInvalid,
-                $"Розклад {schedule.Id} збережено, але планувальник його не прийняв: {e.Message}",
+                $"Розклад {schedule.Id} збережено, але планувальник його не прийняв: {reason}",
                 new Dictionary<string, object?>
                 {
                     ["messageKey"] = "err.ECR-REQ-0422.collectionScheduleNotApplied",
-                    ["reason"] = e.Message,
+                    ["reason"] = reason,
                 });
         }
     }
@@ -351,7 +375,8 @@ public sealed class SaveCollectionScheduleHandler(
     IUnitOfWork uow,
     ICurrentUser currentUser,
     IClock clock,
-    IAuditWriter audit)
+    IAuditWriter audit,
+    ILogger<SaveCollectionScheduleHandler>? log = null)
 {
     /// <summary>Операція в журналі структурних змін (<c>ФВ-12.10</c>).</summary>
     public const string AuditOperation = "SaveCollectionSchedule";
@@ -471,7 +496,7 @@ public sealed class SaveCollectionScheduleHandler(
         // розклади читалися з бази рівно раз, на старті, і правка не доходила до
         // планувальника до перезапуску.
         await ListCollectionSchedulesHandler
-            .ApplyOrFailAsync(applier, uow, clock, row.Schedule, ct).ConfigureAwait(false);
+            .ApplyOrFailAsync(applier, uow, clock, row.Schedule, ct, log).ConfigureAwait(false);
 
         row.Schedule.ClearError();
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
@@ -506,7 +531,8 @@ public sealed class CreateCollectionScheduleHandler(
     IUnitOfWork uow,
     ICurrentUser currentUser,
     IClock clock,
-    IAuditWriter audit)
+    IAuditWriter audit,
+    ILogger<CreateCollectionScheduleHandler>? log = null)
 {
     /// <summary>Операція в журналі структурних змін (<c>ФВ-12.10</c>).</summary>
     public const string AuditOperation = "CreateCollectionSchedule";
@@ -619,7 +645,7 @@ public sealed class CreateCollectionScheduleHandler(
         }, ct)).ConfigureAwait(false);
 
         await ListCollectionSchedulesHandler
-            .ApplyOrFailAsync(applier, uow, clock, schedule, ct).ConfigureAwait(false);
+            .ApplyOrFailAsync(applier, uow, clock, schedule, ct, log).ConfigureAwait(false);
 
         return ListCollectionSchedulesHandler.ToView(
             new ScheduledSourceEntity(
