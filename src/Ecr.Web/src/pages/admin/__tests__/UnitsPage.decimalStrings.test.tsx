@@ -3,6 +3,7 @@ import { render, screen, fireEvent, waitFor, within } from '@testing-library/rea
 import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { loadCatalog } from '@/shared/i18n';
+import { MemoryRouter } from 'react-router-dom';
 import { UnitsPage } from '../UnitsPage';
 import { testTheme } from '@/test/render';
 
@@ -19,6 +20,14 @@ import { testTheme } from '@/test/render';
  */
 
 const SeededStrings: Record<string, string> = {
+  'units.checkConversion': 'Check a conversion',
+  'units.baseUnit': 'Base unit',
+  'units.swap': 'Swap units',
+  'units.search': 'Search',
+  'units.noMatch': 'No units match the filters.',
+  'units.statUnits': 'units',
+  'units.statsLabel': 'Units at a glance',
+  'common.close': 'Close',
   'units.title': 'Units of measure',
   'units.value': 'Value',
   'units.from': 'From',
@@ -144,15 +153,19 @@ function show(): void {
   render(
     <MantineProvider theme={testTheme}>
       <QueryClientProvider client={client}>
-        <UnitsPage />
+        <MemoryRouter>
+          <UnitsPage />
+        </MemoryRouter>
       </QueryClientProvider>
     </MantineProvider>,
   );
 }
 
 function rowOf(table: HTMLElement, code: string): HTMLElement {
-  const cell = within(table).getByText(code);
-  const row = cell.closest('tr');
+  // ⚠ За посиланням на шторку, а не за текстом: код базової одиниці стоїть
+  // ще й у колонці «Base unit» решти рядків розмірності (UI-21).
+  const cell = table.querySelector(`[data-unit-open="${code}"]`);
+  const row = cell?.closest('tr') ?? null;
 
   expect(row, `рядка одиниці ${code} немає в таблиці`).not.toBeNull();
   return row as HTMLElement;
@@ -169,7 +182,7 @@ describe('UnitsPage: базова одиниця впізнається по З�
     show();
 
     const table = await screen.findByRole('table');
-    await within(table).findByText('kg');
+    await within(table).findAllByText('kg');
 
     // ⛔ Мутаційний доказ: приберіть у `normalizeDecimal` обрізання хвостових
     // нулів (`fraction.replace(/0+$/, '')`) — і значок зникне, бо
@@ -201,7 +214,7 @@ describe('UnitsPage: десяткові йдуть на сервер рядко�
     show();
 
     const table = await screen.findByRole('table');
-    await within(table).findByText('kg');
+    await within(table).findAllByText('kg');
 
     fireEvent.click(await screen.findByRole('button', { name: 'New unit' }));
     const dialog = await screen.findByRole('dialog');
@@ -243,7 +256,11 @@ describe('UnitsPage: десяткові йдуть на сервер рядко�
     show();
 
     const table = await screen.findByRole('table');
-    await within(table).findByText('kg');
+    await within(table).findAllByText('kg');
+
+    // UI-21: конвертор — діалог за другою дією шапки.
+    fireEvent.click(await screen.findByRole('button', { name: 'Check a conversion' }));
+    await screen.findByRole('dialog', { name: 'Check a conversion' });
 
     fireEvent.change(screen.getByLabelText('Value'), {
       target: { value: '2.5000000000000001' },
