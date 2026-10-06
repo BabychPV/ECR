@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FocusEvent, type JSX } from 'react';
+import { useEffect, useRef, useState, type FocusEvent, type JSX, type KeyboardEvent, type MouseEvent } from 'react';
 import { DateInput, type DateInputProps } from '@mantine/dates';
 import { language, t } from '@/shared/i18n';
 import { parseUserDate } from './userDate';
@@ -20,6 +20,11 @@ import { parseUserDate } from './userDate';
  * `parseUserDate` розбирає його в будь-якій мові, тож показане поле набирається назад.
  *
  * `onInvalidChange` — для форм, що мусять не дати зберегти, поки в полі нерозібраний текст.
+ *
+ * ⛔ Календар закривають Enter і Escape (A2-09): рідний `DateInput` закривав його лише вибором дня чи
+ * виходом із поля, тож після набраної дати випадний блок лишався поверх кнопки «Зберегти» шапки, доки
+ * людина не тиснула Tab. Фокус лишається на полі (відкривачі); набір, клік чи новий фокус відкривають
+ * календар знову.
  */
 export type StrictDateInputProps = Omit<DateInputProps, 'valueFormat' | 'dateParser' | 'fixOnBlur'> & {
   readonly onInvalidChange?: ((invalid: boolean) => void) | undefined;
@@ -47,6 +52,10 @@ export function StrictDateInput({
   onInvalidChange,
   onBlur,
   onChange,
+  onFocus,
+  onClick,
+  onKeyDown,
+  popoverProps,
   error,
   label,
   ...props
@@ -56,6 +65,9 @@ export function StrictDateInput({
   const [draft, setDraft] = useState<string | null>(null);
   // Відмову показуємо після виходу з поля, а не на кожній проміжній літері.
   const [shown, setShown] = useState(false);
+  // Календар закрито з клавіатури (Enter/Escape). Стан відкриття живе всередині `DateInput`, тож
+  // закриття — накладка `popoverProps.opened = false`, яку знімає наступна дія людини в полі.
+  const [dismissed, setDismissed] = useState(false);
 
   const problem = draft === null ? null : problemOf(draft, lang, props.minDate, props.maxDate);
 
@@ -79,10 +91,12 @@ export function StrictDateInput({
       {...props}
       // Підпис — від того, хто ставить поле (ФВ-14.20 перевіряє його там).
       label={label}
+      popoverProps={dismissed ? { ...popoverProps, opened: false } : (popoverProps ?? {})}
       valueFormat="YYYY-MM-DD"
       // ⛔ `null` замість `Invalid Date`: `DateInput` тоді не змінює значення — ні перекочування, ні стирання.
       dateParser={(text) => {
         setDraft(text);
+        setDismissed(false);
         return parseUserDate(text, lang);
       }}
       // ⛔ Нерозібраний текст лишається в полі: інакше поле мовчки повернуло б попереднє значення.
@@ -92,7 +106,22 @@ export function StrictDateInput({
         // Значення прийнято (розібраний текст, день у календарі, очищення) — набраного «боргу» немає.
         setDraft(null);
         setShown(false);
+        setDismissed(false);
         onChange?.(next);
+      }}
+      onKeyDown={(event: KeyboardEvent<HTMLInputElement>) => {
+        // ⚠ Лише закриття: Enter не перехоплюється (`preventDefault` не кличемо), щоб форма навколо
+        // поводилась як і раніше; набране значення вже прийняте розбором на кожну літеру.
+        if (event.key === 'Enter' || event.key === 'Escape') setDismissed(true);
+        onKeyDown?.(event);
+      }}
+      onFocus={(event: FocusEvent<HTMLInputElement>) => {
+        setDismissed(false);
+        onFocus?.(event);
+      }}
+      onClick={(event: MouseEvent<HTMLInputElement>) => {
+        setDismissed(false);
+        onClick?.(event);
       }}
       onBlur={(event: FocusEvent<HTMLInputElement>) => {
         // ⚠ Очищення поля з `clearable` розбір не кличе — тож текст беремо з самого поля.
