@@ -14,7 +14,7 @@ import { testTheme } from '@/test/render';
  * підсумок останньої перевірки, і клієнт розрізняв рівно ОДИН випадок —
  * `404` = «ще не перевіряли». Але `403` (немає права на читання підсумку),
  * `500` і обрив мережі дають те саме `data === undefined`, тобто
- * `shownValidation === null`, тобто `ValidationPanel` не малюється ЗОВСІМ.
+ * `shownValidation === null`, тобто інспектор (`UI-25`) не має зауважень ЗОВСІМ.
  * Документ, у якому на сервері вже лежать БЛОКУВАЛЬНІ помилки, виглядав
  * рівно як неперевірений і чистий: оператор тиснув «Подати» й діставав
  * відмову `ECR-SUB-*`, не маючи на екрані жодного натяку чому.
@@ -32,7 +32,7 @@ import { testTheme } from '@/test/render';
  * ⚠ Підмінені лише важкі діти, і з названої причини: `SheetTables` тягне ядро
  * `RevoGrid`, `CalculationResultsPanel` — власні запити й числа методологій. У
  * jsdom це хвилини на рендер, а предмет перевірки — що сторінка каже про стан
- * ПЕРЕВІРКИ, а не як малюється сітка. `ValidationPanel` і `ErrorAlert` —
+ * ПЕРЕВІРКИ, а не як малюється сітка. Інспектор і `ErrorAlert` —
  * СПРАВЖНІ: саме вони і є доказ.
  */
 vi.mock('@/features/grid/SheetTables', () => ({
@@ -197,7 +197,7 @@ function show(): QueryClient {
 
   render(
     <MantineProvider theme={testTheme}>
-      <MemoryRouter initialEntries={[`/documents/1?periodKey=${String(PeriodKey)}`]}>
+      <MemoryRouter initialEntries={[`/documents/1?periodKey=${String(PeriodKey)}&panel=issues`]}>
         <QueryClientProvider client={client}>
           {/* ⚠ Саме через `Routes`: `DocumentPage` читає `id` з `useParams()`,
               і без оголошеного шаблону маршруту документ був би `NaN`. */}
