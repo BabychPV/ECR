@@ -48,6 +48,14 @@ public sealed record CellChangeView(
     string? ColumnDataType = null,
     bool IsOutOfWindow = false);
 
+/// <summary>Лічильники журналу в розрізі колонки: сирі, ще БЕЗ відсіву за межами читання.</summary>
+/// <param name="ColumnDefId">Колонка.</param>
+/// <param name="Total">Усього змін.</param>
+/// <param name="Today">За поточну добу UTC.</param>
+/// <param name="ByImport">Імпортом.</param>
+/// <param name="ByRecalculation">Перерахунком.</param>
+public sealed record CellChangeColumnCount(int ColumnDefId, long Total, long Today, long ByImport, long ByRecalculation);
+
 /// <summary>Структурна зміна в журналі, як її бачить читач.</summary>
 /// <param name="ChangedAt">Момент зміни в UTC.</param>
 /// <param name="EntityType">Сутність: <c>cfg.RegistryDef</c>, <c>cfg.RegistryRuleDef</c>.</param>
@@ -187,6 +195,19 @@ public interface IAuditReader
     /// <param name="ct">Токен скасування.</param>
     public Task<PagedResult<CellChangeView>> ReadCellChangesAsync(
         CellChangeFilter filter, CursorRequest page, CancellationToken ct);
+
+    /// <summary>
+    /// Лічильники змін комірок у вікні в розрізі колонки (UI-38, C2/C4).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Сирі лічильники по ВСІХ колонках вікна: відсів за межами читання (S6) робить виклик над словником
+    /// колонок — читач ніколи не отримує суму з прихованих. Один прохід по вікну, без N+1.
+    /// </remarks>
+    /// <param name="filter">Вікно й звуження журналу (курсор не застосовується).</param>
+    /// <param name="todayStartUtc">Початок поточної доби UTC.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<IReadOnlyList<CellChangeColumnCount>> CountCellChangesByColumnAsync(
+        CellChangeFilter filter, DateTime todayStartUtc, CancellationToken ct);
 
     /// <summary>
     /// Історія структурних змін однієї сутності конфігурації.
