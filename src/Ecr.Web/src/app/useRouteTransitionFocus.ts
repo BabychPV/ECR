@@ -117,7 +117,7 @@ export function useRouteTransitionFocus(mainContentId: string): RefObject<HTMLDi
   // забирає фокус при монтуванні — другий гравець тут зайвий).
   const previousPathname = useRef(location.pathname);
 
-  const chain = buildCrumbChain(matches, queryClient);
+  const chain = buildCrumbChain(matches, queryClient, location.search);
   const title = formatDocumentTitle(chain);
 
   // `document.title` — окремий ефект, залежний лише від самого рядка: якщо

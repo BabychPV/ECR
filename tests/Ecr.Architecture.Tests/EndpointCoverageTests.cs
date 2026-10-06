@@ -401,6 +401,8 @@ public sealed partial class EndpointCoverageTests
             "Крихта: labelKey маршруту."),
         new("app/NavGroupSection.tsx", "group.labelKey", 1, "app/routes.ts", NavGroupLabelKeys,
             "UI-12: підпис групи бічного меню (navGroups)."),
+        new("app/Breadcrumbs.tsx", "groupKey", 1, "app/routes.ts", NavGroupLabelKeys,
+            "UI-32: перший елемент крихт — група меню (navGroups)."),
         new("shared/ui/PageHeader.tsx", "routeDescriptionKey", 1, "app/routes.ts", RouteDescriptionKeys,
             "UI-11: пояснення екрана під заголовком (handle.descriptionKey)."),
         new("features/search/DataSearchPalette.tsx", "screen.handle.labelKey", 1, "app/routes.ts", RouteLabelKeys,

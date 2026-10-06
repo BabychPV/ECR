@@ -306,7 +306,8 @@ describe('Breadcrumbs — маршрут глибиною 4 (шаблон, ве�
     expect(template.getAttribute('href')).toBe('/admin/templates/1');
   });
 
-  it('маршрут з ОДНІЄЮ крихтою (без предків) не показує breadcrumbs узагалі', () => {
+  // ✎ UI-32: крихти тепер видно на КОЖНОМУ екрані (макет, KIT §2.1) — і з однією крихтою.
+  it('маршрут з ОДНІЄЮ крихтою (без предків і поза меню) показує саму поточну сторінку, без групи', () => {
     const queryClient = client();
     const router = createMemoryRouter(
       [
@@ -321,7 +322,9 @@ describe('Breadcrumbs — маршрут глибиною 4 (шаблон, ве�
 
     show(router, queryClient);
 
-    expect(screen.queryByTestId('breadcrumbs')).toBeNull();
+    expect(screen.getByTestId('breadcrumbs')).toBeTruthy();
+    expect(screen.getByText('⟦x.y⟧').getAttribute('aria-current')).toBe('page');
+    expect(screen.queryByTestId('crumb-group')).toBeNull();
   });
 });
 
