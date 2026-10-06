@@ -18,5 +18,6 @@ export { formatDate, formatDateTime, formatTime, type DateLike } from './datetim
 export { formatDateOnly, parseDateOnly, todayDateOnly } from './dateOnly';
 export { formatDecimal, formatNumber } from './number';
 export { formatCount, pluralCategory, type PluralCategory } from './plural';
-export { formatMonthYear, formatPeriodKey } from './period';
+export { formatMonthYear } from './period';
+export { formatPeriodKey } from './periodKey';
 export { decimalEquals, normalizeDecimal } from './decimal';
