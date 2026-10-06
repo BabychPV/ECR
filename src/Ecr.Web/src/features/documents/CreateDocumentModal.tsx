@@ -8,6 +8,7 @@ import type { CreateDocumentRequest, DocumentIdResponse, PeriodCalendarDto } fro
 import { fetchAllProjects } from '@/features/projects/allProjects';
 import { groupRuleViolations } from './groupRuleViolations';
 import { newestOpenPeriodKey, openPeriodKeys } from './newDocumentPeriod';
+import { formatPeriodKey } from '@/shared/format';
 import { localized } from '@/shared/i18n/localized';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { LocalizedInput, hasAnyText, type LocalizedValue } from '@/shared/ui/LocalizedInput';
@@ -175,7 +176,7 @@ export function CreateDocumentModal({
         <Select
           mt="sm"
           label={t('documents.period')}
-          data={[...openPeriods].reverse().map((key) => ({ value: String(key), label: String(key) }))}
+          data={[...openPeriods].reverse().map((key) => ({ value: String(key), label: formatPeriodKey(key, calendar.data?.periodKind) || String(key) }))}
           value={periodKey}
           onChange={(value) => setPickedPeriod(value)}
           allowDeselect={false}

@@ -116,11 +116,12 @@ describe('A2-05: період у формі створення документ�
     await pickProjectAndSheet();
 
     const select = (await screen.findByLabelText('⟦documents.period⟧')) as HTMLInputElement;
-    expect(select.value).toBe('202610');
+    // Людська назва, не технічний ключ: ключ лишається значенням для адреси й API.
+    expect(select.value).toBe('October 2026');
 
     fireEvent.click(select);
     const options = (await screen.findAllByRole('option')).map((option) => option.textContent);
-    expect(options).toEqual(['202610', '202609']);
+    expect(options).toEqual(['October 2026', 'September 2026']);
   });
 
   it('створення відкриває документ у вибраному періоді (типово 202610)', async () => {
@@ -141,7 +142,7 @@ describe('A2-05: період у формі створення документ�
     await pickProjectAndSheet();
 
     fireEvent.click(await screen.findByLabelText('⟦documents.period⟧'));
-    fireEvent.click(await screen.findByRole('option', { name: '202609' }));
+    fireEvent.click(await screen.findByRole('option', { name: 'September 2026' }));
     fireEvent.click(screen.getByRole('button', { name: '⟦common.save⟧' }));
 
     await waitFor(() => expect((globalThis as { __where?: string }).__where).toBe('/documents/77?periodKey=202609'));
