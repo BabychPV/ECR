@@ -1,0 +1,29 @@
+/*
+ * UI-39: подробиці секцій Health — дві колонки «підпис | значення», як у макеті
+ * (`docs/design/hybrid/screens-ops.js`, `/admin/health`, `E.KeyValue(…, {wide})`).
+ * Сам `KeyValue` (shared/ui) не змінюється: розкладка — лише цієї сторінки.
+ */
+.ecr-health-kv [data-key-value-item] {
+  display: grid;
+  grid-template-columns: minmax(10rem, 18rem) minmax(0, 1fr);
+  column-gap: var(--mantine-spacing-md);
+  align-items: baseline;
+}
+
+.ecr-health-kv [data-key-value-item] > dt {
+  font-size: var(--mantine-font-size-sm);
+}
+
+.ecr-health-kv [data-key-value-hint] {
+  grid-column: 2;
+}
+
+@media (max-width: 40em) {
+  .ecr-health-kv [data-key-value-item] {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .ecr-health-kv [data-key-value-hint] {
+    grid-column: 1;
+  }
+}
