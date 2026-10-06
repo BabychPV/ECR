@@ -15,6 +15,14 @@ import { testTheme } from '@/test/render';
  * самий розбір відмови (`apiFetch` → `EcrApiError` → `problemText`), що й у
  * продукті — не замокана функція показу помилки.
  */
+/** A1-02: мова інтерфейсу для розбору набраної дати; `null` — справжня `language()`. */
+const ui = vi.hoisted(() => ({ language: null as string | null }));
+
+vi.mock('@/shared/i18n', async (importOriginal) => {
+  const original = await importOriginal<typeof import('@/shared/i18n')>();
+  return { ...original, language: () => ui.language ?? original.language() };
+});
+
 vi.mock('@/shared/ui/notify', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/shared/ui/notify')>()),
   showDone: vi.fn(),
@@ -943,6 +951,87 @@ describe('DocumentHeaderPanel: дата шапки з сервера (T7-01)', (
     await waitFor(() => expect(sent.length).toBe(1));
     expect(sent[0]?.body).toEqual({
       fields: [{ code: 'NOTE', isEmpty: false, value: 'нова' }],
+      baseVersion: HeaderVersion,
+    });
+  });
+});
+
+describe('DocumentHeaderPanel: дата, набрана руками (A1-02)', () => {
+  afterEach(() => {
+    ui.language = null;
+  });
+
+  async function dateInput(): Promise<HTMLInputElement> {
+    await waitFor(() => expect(screen.queryByLabelText('Date')).not.toBeNull(), { timeout: 10_000 });
+
+    return screen.getByLabelText('Date') as HTMLInputElement;
+  }
+
+  async function saveButton(): Promise<HTMLElement> {
+    return screen.findByRole('button', { name: '⟦common.save⟧' });
+  }
+
+  it.each(['ru', 'kz'])('%s: «05.10.2026» іде в PATCH як 2026-10-05 (5 жовтня), а не 2026-05-10', async (language) => {
+    ui.language = language;
+    show({
+      fields: [field({ code: 'REPORT_DATE', dataType: 'Date', value: '2026-10-07T00:00:00', label: { values: { en: 'Date' } } })],
+    });
+
+    const input = await dateInput();
+    await waitFor(() => expect(input.value).toBe('2026-10-07'));
+
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: '05.10.2026' } });
+    fireEvent.blur(input);
+    fireEvent.click(await saveButton());
+
+    await waitFor(() => expect(sent.length).toBe(1));
+    expect(sent[0]?.body).toEqual({
+      fields: [{ code: 'REPORT_DATE', isEmpty: false, value: '2026-10-05' }],
+      baseVersion: HeaderVersion,
+    });
+  });
+
+  it('«2026-13-45» — відмова під полем, текст лишається, «Зберегти» вимкнене; виправлена дата зберігається', async () => {
+    ui.language = 'ru';
+    show({
+      fields: [
+        field({ code: 'NOTE', dataType: 'String', value: 'стара' }),
+        field({
+          code: 'REPORT_DATE',
+          dataType: 'Date',
+          headerFieldDefId: 2,
+          value: '2026-10-07T00:00:00',
+          label: { values: { en: 'Date' } },
+        }),
+      ],
+    });
+
+    const input = await dateInput();
+    await waitFor(() => expect(input.value).toBe('2026-10-07'));
+
+    fireEvent.change(await screen.findByLabelText('Label'), { target: { value: 'нова' } });
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: '2026-13-45' } });
+    fireEvent.blur(input);
+
+    // ⛔ Без строгого розбору тут було б 2027-02-14 у PATCH; без вимкненої кнопки — стара дата поруч із відмовою.
+    expect(await screen.findByText('⟦dates.invalid (value=2026-13-45)⟧')).toBeTruthy();
+    expect(input.value).toBe('2026-13-45');
+    await waitFor(async () => expect((await saveButton()).hasAttribute('disabled')).toBe(true));
+
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: '06.10.2026' } });
+    fireEvent.blur(input);
+    await waitFor(async () => expect((await saveButton()).hasAttribute('disabled')).toBe(false));
+    fireEvent.click(await saveButton());
+
+    await waitFor(() => expect(sent.length).toBe(1));
+    expect(sent[0]?.body).toEqual({
+      fields: [
+        { code: 'NOTE', isEmpty: false, value: 'нова' },
+        { code: 'REPORT_DATE', isEmpty: false, value: '2026-10-06' },
+      ],
       baseVersion: HeaderVersion,
     });
   });
