@@ -1,4 +1,5 @@
 using Ecr.Application.Ports;
+using Ecr.Domain.ValueObjects;
 using Microsoft.EntityFrameworkCore;
 
 namespace Ecr.Infrastructure.Persistence;
@@ -29,7 +30,7 @@ public sealed class UnitCatalog(EcrDbContext db) : IUnitCatalog
             .Take(MaxUnits)
             .Select(u => new UnitRow(
                 u.Id, u.Code, u.DimensionId, u.FactorToBase, u.OffsetToBase,
-                u.NumeratorUnitId, u.DenominatorUnitId))
+                u.NumeratorUnitId, u.DenominatorUnitId, u.IsBase, u.SymbolL10n, u.NameL10n))
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
@@ -58,7 +59,10 @@ public sealed class UnitCatalog(EcrDbContext db) : IUnitCatalog
                 u => u.Code,
                 u => new UnitRef(
                     u.Id, u.Code, u.DimensionId, u.FactorToBase, u.OffsetToBase,
-                    DimensionCode: dimensionCodes.GetValueOrDefault(u.DimensionId, string.Empty)),
+                    DimensionCode: dimensionCodes.GetValueOrDefault(u.DimensionId, string.Empty),
+                    SymbolL10n: u.SymbolL10n.Values,
+                    NameL10n: u.NameL10n.Values,
+                    IsBase: u.IsBase),
                 StringComparer.OrdinalIgnoreCase),
             derived);
 
@@ -78,5 +82,8 @@ public sealed class UnitCatalog(EcrDbContext db) : IUnitCatalog
         decimal FactorToBase,
         decimal OffsetToBase,
         int? NumeratorUnitId,
-        int? DenominatorUnitId);
+        int? DenominatorUnitId,
+        bool IsBase,
+        LocalizedText SymbolL10n,
+        LocalizedText NameL10n);
 }
