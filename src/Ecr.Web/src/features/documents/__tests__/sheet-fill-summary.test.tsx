@@ -54,6 +54,8 @@ function table(patch: Partial<TableStatus>): TableStatus {
     inputCells: 4,
     errorCount: null,
     warningCount: null,
+    isClosed: false,
+    rowCount: 2,
     ...patch,
   };
 }
