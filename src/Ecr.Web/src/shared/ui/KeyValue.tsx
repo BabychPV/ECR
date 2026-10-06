@@ -79,6 +79,9 @@ export function KeyValue({ items, wide = false }: KeyValueProps): JSX.Element | 
           </Text>
         );
 
+        // ⛔ Уточнення — усередині `<dd>`: у групі `<div>` всередині `<dl>`
+        // дозволені лише `<dt>`/`<dd>` (axe `definition-list`), тож окремий
+        // `<p>` поруч із ними ламав список для скрінрідера.
         const value = (
           <Text
             component="dd"
@@ -87,30 +90,28 @@ export function KeyValue({ items, wide = false }: KeyValueProps): JSX.Element | 
             {...(item.mono === true ? { ff: 'monospace' as const } : {})}
           >
             {item.value}
-          </Text>
-        );
-
-        return (
-          <Box key={item.label} data-key-value-item="">
-            {wide ? (
-              <Group gap="sm" align="baseline" wrap="nowrap">
-                {label}
-                {value}
-              </Group>
-            ) : (
-              <>
-                {label}
-                {value}
-              </>
-            )}
-
             {/* ⚠ Уточнення показується лише разом зі значенням: підказка до
                 того, чого немає, — це та сама заглушка (`D15-06`). */}
             {item.hint !== undefined && item.hint.trim().length > 0 && (
-              <Text size="xs" c="dimmed" data-key-value-hint="">
+              <Text component="span" display="block" size="xs" c="dimmed" ff="text" data-key-value-hint="">
                 {item.hint}
               </Text>
             )}
+          </Text>
+        );
+
+        // ⛔ Широкий рядок — гнучкий сам `<div>` групи, без вкладеного `<div>`
+        // між ним і `<dt>`/`<dd>` (axe `dlitem`: `<dt>` має бути дитиною
+        // `<dl>` або її `<div>`).
+        return wide ? (
+          <Group key={item.label} gap="sm" align="baseline" wrap="nowrap" data-key-value-item="">
+            {label}
+            {value}
+          </Group>
+        ) : (
+          <Box key={item.label} data-key-value-item="">
+            {label}
+            {value}
           </Box>
         );
       })}
