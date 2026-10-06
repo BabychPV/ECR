@@ -348,12 +348,90 @@ public sealed class Evaluator(
         }
     }
 
+    /// <summary>
+    /// Бінарний вузол: лівий гребінь бінарних вузлів обчислюється ЦИКЛОМ, а не
+    /// рекурсією по лівій гілці.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ RC5: плаский ланцюг <c>a+b+c+…</c> парсер будує ЦИКЛОМ у ліве дерево
+    /// глибиною N. Рекурсія по ньому робила межу глибини (96) межею РОЗМІРУ:
+    /// сума зі 97 доданків мовчки давала <c>#BUDGET</c>, хоча кроків вона коштує
+    /// ~200 із 20 000. Тепер глибину стека дає лише СПРАВЖНЯ вкладеність: праві
+    /// піддерева, аргументи функцій, гілки <c>IF</c>.
+    ///
+    /// ⚠ Порядок обчислення той самий, що й у рекурсії, бо це той самий
+    /// післяпорядковий обхід: спершу крайній лівий операнд, далі знизу вгору
+    /// «обчислити правий → <see cref="ApplyBinary"/>». Правий операнд
+    /// обчислюється й тоді, коли лівий уже помилка, як і раніше. Кроки списуються
+    /// ПО ОДНОМУ НА КОЖЕН вузол зверху вниз — у тому ж порядку, що й у рекурсії, тож
+    /// вичерпання бюджету припадає на ту саму точку, а 20 000 кроків лишається
+    /// справжньою межею розміру (1000 доданків ≈ 2000 кроків).
+    ///
+    /// ⚠ Сплющується ЛІВИЙ гребінь будь-яких бінарних вузлів, а не лише
+    /// однакового оператора: <c>a+b-c*d</c> — змішаний гребінь, і за
+    /// послідовністю обчислення він нічим не відрізняється (оператор бере
+    /// <see cref="ApplyBinary"/> з кожного вузла окремо). Асоціативність не
+    /// залучена: порядок завжди «лівий, потім правий», як і в дереві.
+    /// </remarks>
     private ExpressionValue Binary(
         BinaryNode node, IEvaluationContext context, ExpressionDialect dialect, EvaluationBudget budget)
     {
-        var left = EvaluateScalar(node.Left, context, dialect, budget);
-        var right = EvaluateScalar(node.Right, context, dialect, budget);
+        if (node.Left is not BinaryNode)
+        {
+            // Найчастіший випадок — без пулу й без циклу.
+            var single = EvaluateScalar(node.Left, context, dialect, budget);
+            var singleRight = EvaluateScalar(node.Right, context, dialect, budget);
+            return ApplyBinary(single, singleRight, node.Operator);
+        }
 
+        // Кореневий вузол свій крок уже списав в EvaluateScalar. Решта гребеня
+        // списується зверху вниз, і межа кроків зупиняє підрахунок ДО оренди
+        // масиву: ланцюг у сто тисяч вузлів не виділяє нічого.
+        var count = 1;
+        for (var next = node.Left as BinaryNode; next is not null; next = next.Left as BinaryNode)
+        {
+            if (!budget.TryConsume())
+            {
+                return ExpressionValue.Error(ExpressionErrors.BudgetExceeded);
+            }
+
+            count++;
+        }
+
+        var spine = System.Buffers.ArrayPool<BinaryNode>.Shared.Rent(count);
+        try
+        {
+            spine[0] = node;
+            for (var i = 1; i < count; i++)
+            {
+                spine[i] = (BinaryNode)spine[i - 1].Left;
+            }
+
+            var value = EvaluateScalar(spine[count - 1].Left, context, dialect, budget);
+            for (var i = count - 1; i >= 0; i--)
+            {
+                var right = EvaluateScalar(spine[i].Right, context, dialect, budget);
+                value = ApplyBinary(value, right, spine[i].Operator);
+            }
+
+            return value;
+        }
+        finally
+        {
+            System.Buffers.ArrayPool<BinaryNode>.Shared.Return(spine, clearArray: true);
+        }
+    }
+
+    /// <summary>
+    /// Один крок бінарної операції над ВЖЕ обчисленими операндами — єдине місце
+    /// правил: поширення помилки, виняток <c>null</c> для конкатенації, рівності й
+    /// ділення, далі арифметика, порівняння, логіка.
+    /// </summary>
+    /// <param name="left">Значення лівого операнда.</param>
+    /// <param name="right">Значення правого операнда.</param>
+    /// <param name="op">Оператор.</param>
+    private ExpressionValue ApplyBinary(ExpressionValue left, ExpressionValue right, BinaryOperator op)
+    {
         // Помилка поширюється через операції: #DIV/0 + 1 = #DIV/0.
         // Перехопити її можна лише IFERROR (02b §6.4).
         if (left.IsError)
@@ -366,7 +444,7 @@ public sealed class Evaluator(
             return right;
         }
 
-        switch (node.Operator)
+        switch (op)
         {
             // ⚠ ВИНЯТОК із правила поширення null: конкатенація трактує його
             // як порожній рядок. Інакше одна незаповнена комірка стирала б
@@ -386,7 +464,7 @@ public sealed class Evaluator(
         // ⚠ ТРЕТІЙ виняток, і найменш очевидний: ділення на null — це не
         // «невідомий результат», а неможлива операція, тому #DIV/0, а не null
         // (02b §6.4). Ділене при цьому null поширює як звичайно.
-        if (node.Operator is BinaryOperator.Divide or BinaryOperator.Modulo && right.IsNull)
+        if (op is BinaryOperator.Divide or BinaryOperator.Modulo && right.IsNull)
         {
             return ExpressionValue.Error(ExpressionErrors.DivideByZero);
         }
@@ -398,17 +476,17 @@ public sealed class Evaluator(
             return ExpressionValue.Null;
         }
 
-        return node.Operator switch
+        return op switch
         {
-            BinaryOperator.Add => Arithmetic(left, right, node.Operator),
-            BinaryOperator.Subtract => Arithmetic(left, right, node.Operator),
-            BinaryOperator.Multiply => Arithmetic(left, right, node.Operator),
-            BinaryOperator.Divide => Arithmetic(left, right, node.Operator),
-            BinaryOperator.Modulo => Arithmetic(left, right, node.Operator),
-            BinaryOperator.Power => Arithmetic(left, right, node.Operator),
+            BinaryOperator.Add => Arithmetic(left, right, op),
+            BinaryOperator.Subtract => Arithmetic(left, right, op),
+            BinaryOperator.Multiply => Arithmetic(left, right, op),
+            BinaryOperator.Divide => Arithmetic(left, right, op),
+            BinaryOperator.Modulo => Arithmetic(left, right, op),
+            BinaryOperator.Power => Arithmetic(left, right, op),
             BinaryOperator.Less or BinaryOperator.LessOrEqual
-                or BinaryOperator.Greater or BinaryOperator.GreaterOrEqual => Compare(left, right, node.Operator),
-            BinaryOperator.And or BinaryOperator.Or => Logic(left, right, node.Operator),
+                or BinaryOperator.Greater or BinaryOperator.GreaterOrEqual => Compare(left, right, op),
+            BinaryOperator.And or BinaryOperator.Or => Logic(left, right, op),
             _ => ExpressionValue.Error(ExpressionErrors.BadValue),
         };
     }
