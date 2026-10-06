@@ -113,6 +113,57 @@ public sealed class AuditReaderNamesTests(SqlServerFixture sql)
         Assert.Equal(DisplayName, Assert.Single(history).ChangedByDisplayName);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "R-18")]
+    public async Task Журнал_комірок_називає_аркуш_таблицю_і_рядок_без_додаткових_запитів()
+    {
+        // UI-38, C1: «Документ · Таблиця › Рядок» без розшифровки ідентифікаторів на клієнті.
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var doc = await builder.BuildAsync(ct: CancellationToken.None);
+        var userId = await CreateUserAsync("dnurlanova-c1", DisplayName);
+        var (sheetCode, tableCode, rowKey, rowLabelJson) = await StructureFactsAsync(doc);
+
+        await using var db = builder.CreateContext();
+        await new AuditWriter(db).WriteCellChangesAsync([Change(doc, userId) with { RowKey = rowKey }], CancellationToken.None);
+
+        var page = await new AuditReader(db).ReadCellChangesAsync(
+            new CellChangeFilter(At.AddMinutes(-1), At.AddMinutes(1), DocumentId: doc.DocumentId),
+            new CursorRequest(50),
+            CancellationToken.None);
+
+        var row = Assert.Single(page.Items);
+        Assert.Equal(sheetCode, row.SheetCode);
+        Assert.Equal(tableCode, row.TableCode);
+        Assert.NotNull(row.SheetNameL10n);
+        Assert.NotNull(row.TableNameL10n);
+        Assert.Equal(LocalizedText.FromJson(rowLabelJson).Values, row.RowLabelL10n!.Values);
+    }
+
+    private async Task<(string SheetCode, string TableCode, string RowKey, string RowLabelJson)> StructureFactsAsync(TestDocument doc)
+    {
+        await using var connection = new SqlConnection(sql.ConnectionString);
+        await connection.OpenAsync(CancellationToken.None);
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT TOP (1) sd.Code, td.Code, r.RowKey, r.LabelL10n
+              FROM cfg.ColumnDef AS c
+              JOIN cfg.TableDef AS td ON td.Id = c.TableDefId
+              JOIN cfg.SheetDef AS sd ON sd.Id = td.SheetDefId
+              JOIN cfg.RowDef AS r ON r.TableDefId = td.Id AND r.IsDeleted = 0
+             WHERE c.Id = @col
+             ORDER BY r.Ordinal;
+            """;
+        command.Parameters.AddWithValue("@col", doc.ColumnDefIds[1]);
+
+        await using var reader = await command.ExecuteReaderAsync(CancellationToken.None);
+        Assert.True(await reader.ReadAsync(CancellationToken.None));
+
+        return (reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3));
+    }
+
     private static CellChangeRecord Change(TestDocument doc, int userId)
         => new(
             At,

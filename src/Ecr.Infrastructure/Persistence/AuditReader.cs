@@ -49,7 +49,7 @@ public sealed class AuditReader(EcrDbContext db) : IAuditReader
             SELECT a.Id, a.ChangedAt, a.PeriodKey, a.DocumentId, a.RowKey, a.ColumnDefId,
                    a.OldValue, a.NewValue, a.ChangedByUserId, a.Origin, a.IsLateEdit,
                    u.DisplayName, d.BusinessKey, d.NameL10n, c.Code, c.HeaderL10n, c.DataType,
-                   a.IsOutOfWindow
+                   a.IsOutOfWindow, sd.Code, sd.NameL10n, td.Code, td.NameL10n, rd.LabelL10n
               FROM (
                     SELECT TOP (@take)
                            Id, ChangedAt, PeriodKey, DocumentId, RowKey, ColumnDefId,
@@ -61,6 +61,11 @@ public sealed class AuditReader(EcrDbContext db) : IAuditReader
               LEFT JOIN sec.[User] AS u ON u.Id = a.ChangedByUserId
               LEFT JOIN doc.Document AS d ON d.Id = a.DocumentId
               LEFT JOIN cfg.ColumnDef AS c ON c.Id = a.ColumnDefId
+              LEFT JOIN cfg.TableDef AS td ON td.Id = c.TableDefId
+              LEFT JOIN cfg.SheetDef AS sd ON sd.Id = td.SheetDefId
+              OUTER APPLY (SELECT TOP (1) r.LabelL10n
+                             FROM cfg.RowDef AS r
+                            WHERE r.TableDefId = c.TableDefId AND r.RowKey = a.RowKey AND r.IsDeleted = 0) AS rd
              ORDER BY a.Id;
             """;
 
@@ -95,7 +100,12 @@ public sealed class AuditReader(EcrDbContext db) : IAuditReader
                         reader.IsDBNull(16)
                             ? null
                             : ((Ecr.Domain.Enums.CellDataType)reader.GetByte(16)).ToString(),
-                        reader.GetBoolean(17))));
+                        reader.GetBoolean(17),
+                        StringOrNull(reader, 18),
+                        LocalizedOrNull(reader, 19),
+                        StringOrNull(reader, 20),
+                        LocalizedOrNull(reader, 21),
+                        LocalizedOrNull(reader, 22))));
             }
         }
 
