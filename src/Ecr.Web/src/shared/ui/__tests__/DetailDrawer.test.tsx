@@ -5,7 +5,7 @@ import { MantineProvider } from '@mantine/core';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import type { JSX } from 'react';
 import { theme } from '@/shared/theme/theme';
-import { DetailDrawer, WideViewportQuery } from '@/shared/ui/DetailDrawer';
+import { DetailDrawer, WideViewportQuery, useDetailPanel } from '@/shared/ui/DetailDrawer';
 
 /**
  * `DetailDrawer` — директива №15 §2, шар 2: «`position="right"`,
@@ -282,5 +282,111 @@ describe('DetailDrawer — елемент без даних не малюєть�
     const title = screen.getByText('Ivanov, P.').parentElement;
 
     expect(title?.querySelectorAll('p')).toHaveLength(1);
+  });
+});
+
+/**
+ * Сторінка на кшталт `ListPage` (Jobs, Consistency): шторка монтується лише за
+ * `?panel=`, тобто ВЖЕ відкритою, і зникає разом із параметром. `returnFocus`
+ * Mantine такого переходу не бачить.
+ */
+function MountOnPanel(): JSX.Element {
+  const [panel, setPanel] = useDetailPanel();
+
+  return (
+    <>
+      <button type="button" data-testid="opener" onClick={() => setPanel(Panel)}>
+        Open job
+      </button>
+      <button type="button" data-testid="elsewhere">
+        Elsewhere
+      </button>
+      {panel !== null && (
+        <DetailDrawer panelId={panel} title="Recalculate" closeLabel="Close details">
+          <button type="button" data-testid="inside">
+            Retry
+          </button>
+        </DetailDrawer>
+      )}
+    </>
+  );
+}
+
+function mountOnPanelScene(): JSX.Element {
+  return (
+    <MantineProvider theme={theme}>
+      <MemoryRouter initialEntries={['/admin/jobs']}>
+        <MountOnPanel />
+        <LocationProbe />
+      </MemoryRouter>
+    </MantineProvider>
+  );
+}
+
+describe('DetailDrawer — після закриття фокус вертається на відкривач (batch-2-a, дефект 1)', () => {
+  it('вузький екран: Escape у шторці, змонтованій уже відкритою, — фокус на відкривачі, не на body', async () => {
+    stubViewport(false);
+    const user = userEvent.setup();
+    render(mountOnPanelScene());
+
+    const opener = screen.getByTestId('opener');
+    opener.focus();
+    await user.keyboard('{Enter}');
+
+    const drawer = await screen.findByRole('dialog');
+    await waitFor(() => {
+      expect(drawer.contains(document.activeElement)).toBe(true);
+    });
+
+    await user.keyboard('{Escape}');
+
+    await waitFor(() => {
+      expect(screen.getByTestId('search').textContent).toBe('');
+    });
+    await waitFor(() => {
+      expect(document.activeElement).toBe(opener);
+    });
+  });
+
+  it('широкий екран: фокус був у шторці — після Escape він на відкривачі', async () => {
+    stubViewport(true);
+    const user = userEvent.setup();
+    render(mountOnPanelScene());
+
+    const opener = screen.getByTestId('opener');
+    opener.focus();
+    await user.keyboard('{Enter}');
+
+    screen.getByTestId('inside').focus();
+    await user.keyboard('{Escape}');
+
+    await waitFor(() => {
+      expect(screen.getByTestId('search').textContent).toBe('');
+    });
+    await waitFor(() => {
+      expect(document.activeElement).toBe(opener);
+    });
+  });
+
+  it('широкий екран: людина вже пішла на інше поле — фокус НЕ висмикується назад', async () => {
+    stubViewport(true);
+    const user = userEvent.setup();
+    render(mountOnPanelScene());
+
+    const opener = screen.getByTestId('opener');
+    opener.focus();
+    await user.keyboard('{Enter}');
+    await screen.findByRole('dialog');
+
+    const elsewhere = screen.getByTestId('elsewhere');
+    elsewhere.focus();
+    await user.keyboard('{Escape}');
+
+    await waitFor(() => {
+      expect(screen.getByTestId('search').textContent).toBe('');
+    });
+    await settle();
+
+    expect(document.activeElement).toBe(elsewhere);
   });
 });
