@@ -35,10 +35,16 @@ async function navWidth(page: Page): Promise<number> {
   return box.width;
 }
 
-async function mainLeft(page: Page): Promise<number> {
-  const box = await page.locator('main#main-content').boundingBox();
+// ⚠ Міряємо ПЕРШУ ДИТИНУ main, а не сам `main#main-content`: AppShell зсуває вміст
+// через padding-inline-start головного елемента, тож сам main завжди на x=0.
+async function contentBox(page: Page): Promise<{ x: number; width: number }> {
+  const box = await page.locator('main#main-content > *').first().boundingBox();
   if (box === null) throw new Error('вмісту не видно');
-  return box.x;
+  return box;
+}
+
+async function contentLeft(page: Page): Promise<number> {
+  return (await contentBox(page)).x;
 }
 
 const CollapseName = /Collapse menu|Свернуть меню|Мәзірді жию/;
@@ -57,7 +63,8 @@ test.describe('Бічне меню: згортання до іконок', () =>
     await expect(collapse).toHaveAttribute('aria-expanded', 'true');
 
     const wideNav = await navWidth(page);
-    const wideMain = await mainLeft(page);
+    const wideMain = await contentLeft(page);
+    const wideWidth = (await contentBox(page)).width;
 
     try {
       await collapse.click();
@@ -67,7 +74,8 @@ test.describe('Бічне меню: згортання до іконок', () =>
 
       // Меню вузьке, вміст сторінки зайняв звільнену ширину.
       await expect.poll(() => navWidth(page)).toBeLessThan(80);
-      await expect.poll(() => mainLeft(page)).toBeLessThan(wideMain - 150);
+      await expect.poll(() => contentLeft(page)).toBeLessThan(wideMain - 150);
+      await expect.poll(async () => (await contentBox(page)).width).toBeGreaterThan(wideWidth + 150);
       expect(wideNav).toBeGreaterThan(200);
 
       // Назва пункту — на фокусі з клавіатури, без миші.
@@ -75,7 +83,9 @@ test.describe('Бічне меню: згортання до іконок', () =>
       const name = await firstItem.getAttribute('aria-label');
       expect(name, 'згорнутий пункт без доступного імені').toBeTruthy();
       await firstItem.focus();
-      await expect(page.getByRole('tooltip')).toHaveText(name ?? '');
+      // ⚠ Підказка кнопки згортання (мишу після кліку лишено над нею) теж у DOM —
+      // тому шукаємо саме підказку пункту, а не «єдину».
+      await expect(page.getByRole('tooltip').filter({ hasText: name ?? '' })).toHaveText(name ?? '');
 
       // F5: вузьке з першого кадру.
       await page.reload();
