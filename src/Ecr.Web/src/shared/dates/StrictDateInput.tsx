@@ -112,7 +112,14 @@ export function StrictDateInput({
       onKeyDown={(event: KeyboardEvent<HTMLInputElement>) => {
         // ⚠ Лише закриття: Enter не перехоплюється (`preventDefault` не кличемо), щоб форма навколо
         // поводилась як і раніше; набране значення вже прийняте розбором на кожну літеру.
-        if (event.key === 'Enter' || event.key === 'Escape') setDismissed(true);
+        if (event.key === 'Enter' || event.key === 'Escape') {
+          setDismissed(true);
+          // A3-01: Enter не виводить із поля, тож без цього недійсна дата після Enter лишалась без пояснення
+          // (Save неактивний, `aria-invalid=false`) — відмову показуємо й тут, а не лише на blur.
+          const text = event.currentTarget.value;
+          setDraft(text);
+          setShown(problemOf(text, lang, props.minDate, props.maxDate) !== null);
+        }
         onKeyDown?.(event);
       }}
       onFocus={(event: FocusEvent<HTMLInputElement>) => {
