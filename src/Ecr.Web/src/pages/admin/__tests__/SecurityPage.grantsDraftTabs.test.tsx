@@ -114,14 +114,14 @@ describe('SecurityPage — чернетка грантів переживає з
     await choose('Project 1', 'PRJ-A');
     expect(hasUnsavedChanges()).toBe(true);
 
-    fireEvent.click(screen.getByRole('radio', { name: 'Roles' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Roles' }));
     // Вкладка справді змінилась: панелі грантів на екрані немає (`getByRole`
     // не бачить схованого).
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Add grant' })).toBeNull());
     // ⛔ Ховання — не розмонтування: сторож виходу й далі знає про чернетку.
     expect(hasUnsavedChanges()).toBe(true);
 
-    fireEvent.click(screen.getByRole('radio', { name: 'Grants' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Grants' }));
     await screen.findByRole('button', { name: 'Add grant' });
 
     expect((screen.getByRole('textbox', { name: 'Project 1' }) as HTMLInputElement).value).toBe('PRJ-A');
