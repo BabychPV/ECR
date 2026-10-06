@@ -24,7 +24,24 @@ import { withTestDefaults } from '@/test/render';
  * тут червоний тест — лічильник рендерів матриці росте на кожен символ.
  */
 
-const renders = vi.hoisted(() => ({ table: 0 }));
+const renders = vi.hoisted(() => ({ table: 0, roles: 0 }));
+
+/*
+ * ✎ UI-37: вкладка «Ролі» більше не таблиця — це список ролей і права
+ * обраної (`RoleBrowser`). Шпигун на ньому — те саме твердження: друк у
+ * діалозі не перерендерює вміст вкладки.
+ */
+vi.mock('@/features/security/RoleBrowser', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/features/security/RoleBrowser')>();
+  const Real = actual.RoleBrowser;
+
+  function SpyRoleBrowser(props: ComponentProps<typeof Real>): JSX.Element {
+    renders.roles += 1;
+    return <Real {...props} />;
+  }
+
+  return { ...actual, RoleBrowser: SpyRoleBrowser };
+});
 
 vi.mock('@mantine/core', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@mantine/core')>();
@@ -144,8 +161,8 @@ function typeInto(input: HTMLElement, text: string): void {
  */
 async function settle(): Promise<void> {
   let last = -1;
-  while (last !== renders.table) {
-    last = renders.table;
+  while (last !== renders.table + renders.roles) {
+    last = renders.table + renders.roles;
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
 }
@@ -161,7 +178,7 @@ function postBody(path: string): unknown {
 describe('SecurityPage — друк у діалогах не перерендерює матрицю ролей', () => {
   it('«New role»: набір коду й назви не рендерить матрицю, а збереження везе введене', async () => {
     show('roles');
-    await screen.findByText('Viewer');
+    await screen.findByRole('heading', { name: 'Viewer' });
 
     fireEvent.click(screen.getByRole('button', { name: 'New role' }));
     const dialog = await screen.findByRole('dialog');
@@ -169,7 +186,9 @@ describe('SecurityPage — друк у діалогах не переренде�
     const name = await within(dialog).findByRole('textbox', { name: /Name · English/ });
 
     await settle();
-    const before = renders.table;
+    const before = renders.roles;
+    // Шпигун справді стоїть на вкладці (інакше «0 рендерів» було б правдою завжди).
+    expect(before).toBeGreaterThan(0);
     typeInto(code, 'AUDITOR');
     typeInto(name, 'Auditor');
     fireEvent.click(within(dialog).getByRole('checkbox', { name: /Template\.Edit/ }));
@@ -178,7 +197,7 @@ describe('SecurityPage — друк у діалогах не переренде�
     // матриці» було б правдою й для зламаного поля.
     expect((code as HTMLInputElement).value).toBe('AUDITOR');
     expect((name as HTMLInputElement).value).toBe('Auditor');
-    expect(renders.table - before).toBe(0);
+    expect(renders.roles - before).toBe(0);
 
     fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
 

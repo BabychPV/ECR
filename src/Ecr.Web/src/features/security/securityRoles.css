@@ -1,0 +1,428 @@
+/*
+ * Безпека: ролі master-detail, порівняння ролей, шкала рівня гранта (`UI-37`).
+ *
+ * ⚠ Вигляд — з макета `docs/design/hybrid/screens-ops.js` (`E.css('ops', …)`:
+ * `.ops-roles`, `.ops-role-row`, `.ops-role`, `.ops-shield`, `.ops-role-head`,
+ * `.ops-perm`, `.ops-danger`, `.ops-matrix`, `.ops-ladder`) і `index.html`
+ * (`.collapsible`). Кольори — лише токени теми (`--ecr-*`), тож світла й темна
+ * теми однакові за побудовою.
+ */
+
+.ecr-sec-viewbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--mantine-spacing-sm);
+  margin-bottom: var(--mantine-spacing-sm);
+}
+
+.ecr-sec-viewbar > .ecr-sec-sp {
+  flex: 1;
+}
+
+/* ── Ролі: список зліва, роль справа ── */
+.ecr-sec-roles {
+  display: grid;
+  grid-template-columns: 320px minmax(0, 1fr);
+  gap: var(--mantine-spacing-md);
+  align-items: start;
+}
+
+@media (max-width: 760px) {
+  .ecr-sec-roles {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.ecr-sec-role-list {
+  font-size: var(--mantine-font-size-sm);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--ecr-border);
+  border-radius: 4px;
+  background: var(--ecr-surface);
+  overflow: auto;
+  max-height: calc(100vh - 220px);
+}
+
+.ecr-sec-role-row {
+  display: flex;
+  align-items: flex-start;
+  border-bottom: 1px solid var(--ecr-grid-line);
+}
+
+.ecr-sec-role-row:last-child {
+  border-bottom: 0;
+}
+
+.ecr-sec-role-row[data-current='true'] {
+  background: var(--ecr-accent-soft);
+  box-shadow: inset 2px 0 0 var(--ecr-accent);
+}
+
+.ecr-sec-role {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+  padding: var(--mantine-spacing-xs) var(--mantine-spacing-sm);
+  border: 0;
+  background: transparent;
+  color: var(--ecr-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  white-space: normal;
+}
+
+.ecr-sec-role:hover {
+  background: var(--ecr-hover);
+}
+
+.ecr-sec-role:focus-visible {
+  outline: 2px solid var(--ecr-focus);
+  outline-offset: -2px;
+}
+
+.ecr-sec-role .ecr-sec-nm {
+  font-weight: 500;
+}
+
+.ecr-sec-role .ecr-sec-ds {
+  color: var(--ecr-muted);
+  font-size: var(--mantine-font-size-xs);
+  font-family: var(--mantine-font-family-monospace);
+  overflow-wrap: anywhere;
+}
+
+.ecr-sec-tags {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px var(--mantine-spacing-sm);
+}
+
+.ecr-sec-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--ecr-muted);
+  font-size: var(--mantine-font-size-xs);
+  white-space: nowrap;
+}
+
+.ecr-sec-tag[data-tone='inactive'] {
+  padding: 0 6px;
+  border: 1px solid var(--ecr-border-strong);
+  border-radius: 999px;
+  color: var(--ecr-text);
+}
+
+.ecr-sec-tag[data-tone='warning'] {
+  color: var(--ecr-warning);
+  font-weight: 500;
+}
+
+/* Щит із кількістю небезпечних прав праворуч від рядка ролі. */
+.ecr-sec-shield {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  margin: var(--mantine-spacing-xs) var(--mantine-spacing-xs) 0 0;
+  height: 24px;
+  padding: 0 var(--mantine-spacing-xs);
+  color: var(--ecr-warning);
+  font: 500 var(--mantine-font-size-xs) / 1 var(--mantine-font-family-monospace);
+}
+
+/* ── Роль справа ── */
+.ecr-sec-detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mantine-spacing-sm);
+  min-width: 0;
+}
+
+.ecr-sec-head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--mantine-spacing-sm);
+  flex-wrap: wrap;
+}
+
+.ecr-sec-head > .ecr-sec-grow {
+  flex: 1;
+  min-width: 240px;
+  display: grid;
+  gap: 4px;
+}
+
+.ecr-sec-head h2 {
+  margin: 0;
+  font-size: var(--mantine-h3-font-size);
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.ecr-sec-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--mantine-spacing-xs) var(--mantine-spacing-sm);
+}
+
+.ecr-sec-code {
+  padding: 1px 6px;
+  border: 1px solid var(--ecr-border);
+  border-radius: 4px;
+  background: var(--ecr-sunken);
+  font: var(--mantine-font-size-xs) / 1.4 var(--mantine-font-family-monospace);
+  color: var(--ecr-text);
+}
+
+.ecr-sec-muted {
+  margin: 0;
+  color: var(--ecr-muted);
+  font-size: var(--mantine-font-size-sm);
+}
+
+/* Розгортна група прав (`index.html` `.collapsible`). */
+.ecr-sec-group {
+  border: 1px solid var(--ecr-border);
+  border-radius: 4px;
+  background: var(--ecr-surface);
+}
+
+.ecr-sec-group > .ecr-sec-group-h {
+  display: flex;
+  align-items: center;
+  gap: var(--mantine-spacing-xs);
+  width: 100%;
+  min-height: 36px;
+  padding: 0 var(--mantine-spacing-sm);
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--ecr-text);
+  font: inherit;
+  font-size: var(--mantine-font-size-sm);
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ecr-sec-group > .ecr-sec-group-h:hover {
+  background: var(--ecr-hover);
+}
+
+.ecr-sec-group > .ecr-sec-group-h:focus-visible {
+  outline: 2px solid var(--ecr-focus);
+  outline-offset: -2px;
+}
+
+.ecr-sec-group > .ecr-sec-group-h > svg {
+  flex: none;
+  color: var(--ecr-muted);
+  transition: transform 120ms ease;
+}
+
+.ecr-sec-group > .ecr-sec-group-h[aria-expanded='true'] > svg {
+  transform: rotate(90deg);
+}
+
+.ecr-sec-group > .ecr-sec-group-h > small {
+  margin-left: auto;
+  font-weight: 400;
+  color: var(--ecr-muted);
+  font-size: var(--mantine-font-size-xs);
+  white-space: nowrap;
+}
+
+.ecr-sec-group-b {
+  font-size: var(--mantine-font-size-sm);
+  margin: 0;
+  padding: var(--mantine-spacing-xs) var(--mantine-spacing-sm);
+  list-style: none;
+  border-top: 1px solid var(--ecr-border);
+}
+
+.ecr-sec-perm {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  gap: var(--mantine-spacing-xs);
+  align-items: start;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--ecr-grid-line);
+}
+
+.ecr-sec-perm:last-child {
+  border-bottom: 0;
+}
+
+.ecr-sec-perm > svg {
+  margin-top: 3px;
+  color: var(--ecr-muted);
+}
+
+.ecr-sec-perm[data-granted='false'] > svg {
+  color: var(--ecr-faint);
+}
+
+.ecr-sec-perm[data-granted='false'] [data-two-line-primary] {
+  color: var(--ecr-muted);
+}
+
+.ecr-sec-danger {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--ecr-warning);
+  font-size: var(--mantine-font-size-xs);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.ecr-sec-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* ── Порівняння ролей: права — рядки, ролі — колонки ── */
+.ecr-sec-matrix-wrap {
+  overflow: auto;
+  max-height: calc(100vh - 260px);
+  border: 1px solid var(--ecr-border);
+  border-radius: 4px;
+  background: var(--ecr-surface);
+}
+
+.ecr-sec-matrix {
+  border-collapse: separate;
+  border-spacing: 0;
+  width: 100%;
+}
+
+.ecr-sec-matrix th,
+.ecr-sec-matrix td {
+  height: var(--ecr-row-height);
+  padding: 0 var(--mantine-spacing-xs);
+  border-bottom: 1px solid var(--ecr-grid-line);
+  border-right: 1px solid var(--ecr-grid-line);
+  text-align: center;
+}
+
+.ecr-sec-matrix thead th {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  background: var(--ecr-sunken);
+  font-size: var(--mantine-font-size-xs);
+  font-weight: 500;
+  color: var(--ecr-muted);
+  vertical-align: bottom;
+  padding: var(--mantine-spacing-xs);
+  width: 104px;
+  min-width: 104px;
+  white-space: normal;
+  line-height: 1.3;
+  border-bottom: 1px solid var(--ecr-border-strong);
+}
+
+.ecr-sec-matrix thead th a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.ecr-sec-matrix thead th a:hover {
+  color: var(--ecr-text);
+  text-decoration: underline;
+}
+
+.ecr-sec-matrix th.ecr-sec-pm {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  background: var(--ecr-surface);
+  text-align: left;
+  min-width: 300px;
+  width: 300px;
+  font-weight: 400;
+  white-space: normal;
+  padding: 4px var(--mantine-spacing-sm);
+  border-right: 1px solid var(--ecr-border-strong);
+}
+
+.ecr-sec-matrix thead th.ecr-sec-pm {
+  z-index: 4;
+  background: var(--ecr-sunken);
+  font-weight: 500;
+}
+
+.ecr-sec-matrix tr.ecr-sec-dom th {
+  position: sticky;
+  left: 0;
+  background: var(--ecr-sunken);
+  text-align: left;
+  font-size: var(--mantine-font-size-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--ecr-muted);
+  font-weight: 500;
+  padding: 0 var(--mantine-spacing-sm);
+}
+
+.ecr-sec-matrix td[data-cell='y'] {
+  color: var(--ecr-text);
+}
+
+.ecr-sec-matrix td[data-cell='n'] {
+  color: var(--ecr-faint);
+}
+
+.ecr-sec-matrix td[data-cell='d'] {
+  color: var(--ecr-warning);
+}
+
+.ecr-sec-matrix td svg {
+  vertical-align: middle;
+}
+
+.ecr-sec-matrix tbody tr:hover td,
+.ecr-sec-matrix tbody tr:hover th.ecr-sec-pm {
+  background: var(--ecr-hover);
+}
+
+/* ── Шкала рівня гранта (`.ops-ladder`) ── */
+.ecr-ladder {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--mantine-spacing-xs);
+  white-space: nowrap;
+}
+
+.ecr-ladder > .ecr-ladder-ld {
+  display: inline-flex;
+  gap: 2px;
+}
+
+.ecr-ladder > .ecr-ladder-ld > i {
+  display: block;
+  width: 10px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--ecr-border);
+}
+
+.ecr-ladder > .ecr-ladder-ld > i[data-on] {
+  background: var(--ecr-muted);
+}
+
+.ecr-ladder[data-deny] > .ecr-ladder-ld > i[data-on] {
+  background: var(--ecr-danger);
+}

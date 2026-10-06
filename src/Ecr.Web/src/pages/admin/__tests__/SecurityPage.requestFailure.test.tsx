@@ -98,7 +98,9 @@ describe('SecurityPage: відмова запиту не виглядає як �
 
   it('дзеркало: обидва запити вдалі — матриця з колонкою права, банера немає', async () => {
     stubFetch('none');
-    await show('roles');
+    // ✎ UI-37: таблиця прав — подання «Compare roles»; за замовчуванням вкладка
+    // показує одну роль списком, і таблиці там немає.
+    await show('roles&view=compare');
 
     const table = await screen.findByRole('table', {}, { timeout: Slow });
     expect(within(table).getByText('Document.View')).toBeTruthy();
