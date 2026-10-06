@@ -165,6 +165,12 @@ describe('DocumentPage: перехід від зауваження до комі
       expect(gridNavigation.get(200)).toMatchObject({ tableDefId: 20, rowKey: 'R1', columnCode: 'C1' }),
     );
     expect(screen.queryByTestId('grid-100')).toBeNull();
+    // ✎ `UI-22`: на екрані одна таблиця — перехід робить вибраною таблицю зауваження, а перша
+    // таблиця аркуша (її сітка не змонтована) зникає з екрана, а не лишається стосом.
+    await waitFor(() =>
+      expect(document.querySelector('[data-table-slot="200"]')?.getAttribute('data-table-selected')).toBe('true'),
+    );
+    expect(document.querySelector('[data-table-slot="100"]')).toBeNull();
   });
 
   it('невиконаний запит скидається, коли сторінка розмонтована', async () => {

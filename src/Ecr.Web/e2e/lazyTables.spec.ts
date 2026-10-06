@@ -74,7 +74,9 @@ test.describe('Ліниве монтування таблиць аркуша', (
     await signIn(page, Operator.user, Operator.password);
 
     const startedAt = Date.now();
-    await page.goto(`/documents/${DocumentId}?periodKey=${PeriodKey}`);
+    // ✎ `UI-22`: за замовчуванням на екрані одна таблиця (дерево ліворуч); стос усіх таблиць із
+    // лінивим монтуванням, який міряє цей прогін, — режим `?view=all`.
+    await page.goto(`/documents/${DocumentId}?periodKey=${PeriodKey}&view=all`);
 
     await expect(page.getByRole('heading').first(), 'документ не відрендерився').toBeVisible({
       timeout: 30_000,

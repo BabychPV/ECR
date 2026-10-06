@@ -729,10 +729,12 @@ describe("Зворотний зв'язок під час рендера — /doc
     }
   }
 
+  // ✎ `UI-22`: стос усіх таблиць із лінивим монтуванням — режим `?view=all`; за замовчуванням
+  // на екрані одна таблиця (тест нижче).
   it('монтує рівно видимі слоти і осідає', async () => {
     vi.stubGlobal('IntersectionObserver', ViewportObserver);
 
-    await guardRoute(routes.documentDetail, <DocumentPage />, '/documents/1');
+    await guardRoute(routes.documentDetail, <DocumentPage />, '/documents/1?view=all');
 
     // ⛔ РІВНО два, а не «хоч одна» і не «менше за 91». Менше — механізм
     // мовчки перестав монтувати те, що видно (порожній екран під заглушками,
@@ -743,5 +745,19 @@ describe("Зворотний зв'язок під час рендера — /doc
       document.querySelectorAll('revo-grid'),
       `(в) /documents/1: видимих слотів ${String(VisibleSlots.length)}, а сіток у DOM інша кількість.`,
     ).toHaveLength(VisibleSlots.length);
+  }, 60_000);
+
+  it('`UI-22`, одна таблиця на екрані: монтує рівно вибрану і осідає', async () => {
+    vi.stubGlobal('IntersectionObserver', ViewportObserver);
+
+    await guardRoute(routes.documentDetail, <DocumentPage />, '/documents/1');
+
+    // ⛔ РІВНО одна: на екрані лише вибрана таблиця (перша аркуша), і решта 90 не мають навіть
+    // слота — жодного запиту зрізу заради невидимого.
+    expect(
+      document.querySelectorAll('revo-grid'),
+      '(в) /documents/1: у режимі однієї таблиці змонтовано не одну сітку.',
+    ).toHaveLength(1);
+    expect(document.querySelectorAll('[data-table-slot]')).toHaveLength(1);
   }, 60_000);
 });
