@@ -51,6 +51,7 @@ import {
 } from './useCellPatch';
 import { holdRejectedEdits, registerSliceSaver, scheduleAutosave } from './autosave';
 import { GridAriaPlugin } from './gridAria';
+import { mergePatchNotices, PatchNoticesAlert, type PatchNotice } from './patchNotices';
 // ⚠ Ключ комірки СХОВИЩА під власним іменем: у цьому файлі вже є `cellKey`
 // з `permissions.ts`, і хоч обидва дають `rowKey:columnCode`, ключем мапи
 // правок має бути рівно той, яким її будує сам сховищний модуль.
@@ -546,6 +547,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
               message: m.message,
             })),
         ]);
+        setPatchNotices((prev) => mergePatchNotices(prev, touchedRowKeys, response.validation));
 
         // ⚠ Успіх ЦЬОГО патчу знімає банер. Маркери відхилених комірок живуть у
         // сховищі (`V-01`) і знімаються там же, рівно з тими комірками, які
@@ -687,6 +689,8 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
   const [requiredInputWarnings, setRequiredInputWarnings] = useState<
     readonly RequiredInputCell[]
   >([]);
+  // Решта `Warning`/`Info` успішного патчу (`patchNotices.tsx`).
+  const [patchNotices, setPatchNotices] = useState<readonly PatchNotice[]>([]);
 
   // ⛔ Q-30x (High): раніше справжня причина відмови збереження (наприклад,
   // `Колонка «C1» очікує число.`, ECR-CELL-0422) доїжджала до клієнта
@@ -2206,6 +2210,8 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
           </List>
         </Alert>
       )}
+
+      <PatchNoticesAlert notices={patchNotices} onDismiss={() => setPatchNotices([])} />
 
       {/* ⛔ `UI-08`: рядок формули НАД сіткою — там, де він стоїть в Excel і
           де око шукає «що в комірці, на якій я стою». Під сіткою його
