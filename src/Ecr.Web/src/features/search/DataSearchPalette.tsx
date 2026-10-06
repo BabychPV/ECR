@@ -242,15 +242,26 @@ export function DataSearchPalette({ opened, onClose, onPicked, groups = NoGroups
     row.run?.();
   };
 
+  // a11y (WCAG 2.4.11): фокус живе в полі (`aria-activedescendant`), тож
+  // прокрутку до активного пункту ніхто, крім нас, не зробить — без неї
+  // стрілка вниз уводила виділення за межу видимого списку.
+  const keyMove = (index: number): void => {
+    moveTo(index);
+    requestAnimationFrame(() => {
+      const option = document.getElementById(optionId(index));
+      if (option !== null && 'scrollIntoView' in option) option.scrollIntoView({ block: 'nearest' });
+    });
+  };
+
   const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>): void => {
     if (rows.length === 0) return;
 
     if (event.key === 'ArrowDown') {
       event.preventDefault();
-      moveTo((active + 1) % rows.length);
+      keyMove((active + 1) % rows.length);
     } else if (event.key === 'ArrowUp') {
       event.preventDefault();
-      moveTo((active - 1 + rows.length) % rows.length);
+      keyMove((active - 1 + rows.length) % rows.length);
     } else if (event.key === 'Enter') {
       const row = rows[active];
       if (row === undefined) return;

@@ -217,6 +217,31 @@ describe('палітра: пошук даних', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   });
 
+  // a11y (WCAG 2.4.11): фокус лишається в полі, тож прокрутку до активного
+  // пункту робить палітра — інакше стрілка вниз виводила виділення з виду.
+  it('стрілка прокручує список до активного пункту', async () => {
+    const scrolled: string[] = [];
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+      configurable: true,
+      value(this: HTMLElement) {
+        scrolled.push(this.id);
+      },
+    });
+    try {
+      serve(() => json(Hits));
+      mount();
+      const { user, input } = await openPalette();
+      await user.type(input, 'Pe');
+      await screen.findByRole('listbox');
+
+      await user.keyboard('{ArrowUp}');
+      const last = screen.getByRole('option', { name: /Fuel types/ });
+      await waitFor(() => expect(scrolled.at(-1)).toBe(last.id));
+    } finally {
+      Reflect.deleteProperty(HTMLElement.prototype, 'scrollIntoView');
+    }
+  });
+
   it('клік по довіднику веде в його конструктор', async () => {
     serve(() => json(Hits));
     mount();
