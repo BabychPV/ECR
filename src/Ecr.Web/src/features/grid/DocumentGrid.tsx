@@ -82,6 +82,7 @@ import {
   type GridSelection,
 } from './selection';
 import { publishFocus } from './focusStore';
+import { publishSelection } from './selectionStore';
 import {
   NavigationHighlightMs,
   cellCoordinateOf,
@@ -90,6 +91,7 @@ import {
   type CellNavigationRequest,
 } from './cellNavigation';
 import { GridFormulaBar } from './GridFormulaBar';
+import { GridStatusBar } from './GridStatusBar';
 import { useOutOfWindowMarks } from './outOfWindowMarks';
 import {
   columnTotals,
@@ -745,6 +747,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
     // ⚠ І фокус — з тієї самої причини (`UI-08`): рядок формули показував би
     // вираз колонки з тим самим номером, але з іншої таблиці.
     publishFocus(tableInstanceId, periodKey, null);
+    publishSelection(tableInstanceId, periodKey, null);
 
     touchHistory();
 
@@ -1890,6 +1893,8 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         ),
         trackSelection(node, (next) => {
           selection.current = next;
+          // ✎ UI-23: рядок стану під сіткою читає виділення зі сховища.
+          publishSelection(tableInstanceId, periodKey, next.range);
         }),
 
         // ⛔ `UI-08`: фокус публікується у СХОВИЩЕ, а не в стан компонента.
@@ -2240,6 +2245,18 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         />
       </div>
 
+      {/* ✎ UI-23: рядок стану під сіткою — Count/Sum/Average виділення. */}
+      {data !== undefined && (
+        <GridStatusBar
+          tableInstanceId={tableInstanceId}
+          periodKey={periodKey}
+          slice={data}
+          columns={columns}
+          rows={rows}
+          pending={pending}
+        />
+      )}
+
       <Modal
         opened={showRounded}
         onClose={() => setShowRounded(false)}
@@ -2446,6 +2463,22 @@ export function gridColumns(
       name:
         (column.unitSymbol === null ? column.header : `${column.header}, ${column.unitSymbol}`) +
         (isRequired ? ' *' : ''),
+
+      // ✎ UI-24 (макет: «Fuel gas / 10³ m³»): одиниця — ДРУГИМ приглушеним
+      // рядком під назвою, а не через кому. `name` лишається повним текстом
+      // («Назва, одиниця *») — його читають сортування, підказки й тести;
+      // шаблон лише розкладає ту саму розмітку на два рядки, а кома для
+      // читалки лишається прихованою, тож озвучується «Назва, одиниця».
+      ...(column.unitSymbol === null
+        ? {}
+        : {
+            columnTemplate: (h) =>
+              h('span', { class: 'ecr-header-two-line' }, [
+                h('span', { class: 'ecr-header-name' }, column.header + (isRequired ? ' *' : '')),
+                h('span', { class: 'ecr-header-sr' }, ', '),
+                h('span', { class: 'ecr-header-unit' }, column.unitSymbol ?? ''),
+              ]),
+          }),
 
       // Збережена ширина цієї колонки для цього користувача (ФВ-14.29, D-201).
       size: columnWidth(widths[column.code], column.widthPx),

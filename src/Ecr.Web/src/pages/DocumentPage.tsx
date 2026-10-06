@@ -568,6 +568,7 @@ export function DocumentPage(): JSX.Element {
           documentId={documentId}
           periodKey={periodKey}
           sheetDefId={active.sheetDefId}
+          sheetCode={active.code}
           sheetName={active.name}
           state={state}
           lock={lock}
@@ -612,8 +613,9 @@ export function DocumentPage(): JSX.Element {
       )}
 
       {/* ⛔ `F-18`: ЧОМУ тут нічого не змінити — одразу під рядком дій, до
-          будь-якої сітки: сірі комірки без пояснення читаються як збій. */}
-      <DocumentLockBanner lock={lock} periodKey={periodKey} />
+          будь-якої сітки: сірі комірки без пояснення читаються як збій.
+          ✎ UI-26: за наявного аркуша банер малює панель дій (з контекстом). */}
+      {active === undefined && <DocumentLockBanner lock={lock} periodKey={periodKey} />}
 
       {businessKeyChange.dialog}
 
