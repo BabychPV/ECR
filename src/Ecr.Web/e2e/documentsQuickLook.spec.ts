@@ -24,9 +24,17 @@ test.describe('Документи: швидкий перегляд', () => {
     'ECR_E2E_OPTIONAL: стенда немає, перевіряти нічого. Стенд: tools/e2e-stand.ps1.',
   );
 
+  /*
+   * ⛔ Модальна шторка — лише на вузькому екрані: `DetailDrawer` на ≥ 1200 px
+   * свідомо знімає оверлей і пастку фокуса (директива №15 §2, «сторінка лишається
+   * живою»). Тому перевірка пастки йде на 1100 px — там, де пастка є за макетом.
+   * На дефолтних 1280 px вона була б червоною за правильної поведінки
+   * (живий прогін пачки batch-2-a, дефект 2).
+   */
   test('модальний діалог: шторка швидкого перегляду тримає фокус, Escape закриває й вертає фокус на «око»', async ({
     page,
   }) => {
+    await page.setViewportSize({ width: 1100, height: 800 });
     await signIn(page, Operator.user, Operator.password);
     await page.goto(`/?periodKey=${PeriodKey}`);
 
@@ -53,6 +61,35 @@ test.describe('Документи: швидкий перегляд', () => {
     const returned = await focusState(page);
     expect(returned.tag, 'після Escape фокус на body').not.toBe('body');
     expect(returned.label, 'після Escape фокус не повернувся на «око», яке відкрило шторку').toBe(opener.label);
+  });
+  test('широкий екран: шторка не модальна, фокус лишається на сторінці, Escape закриває без втрати фокуса', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await signIn(page, Operator.user, Operator.password);
+    await page.goto(`/?periodKey=${PeriodKey}`);
+
+    const eye = page.locator(`[data-quick-look="${DocumentId}"]`);
+    await expect(eye, 'у рядку документа немає кнопки швидкого перегляду').toBeVisible({ timeout: 30_000 });
+
+    await eye.focus();
+    const opener = await focusState(page);
+    await page.keyboard.press('Enter');
+
+    const drawer = page.getByRole('dialog');
+    await expect(drawer).toBeVisible({ timeout: 10_000 });
+    await expect(page.locator('.mantine-Drawer-overlay'), 'на широкому екрані оверлея бути не має').toHaveCount(0);
+
+    // Сторінка жива: фокус НЕ викрадено в шторку.
+    const afterOpen = await focusState(page);
+    expect(afterOpen.label, 'шторка на широкому екрані вкрала фокус').toBe(opener.label);
+
+    await page.keyboard.press('Escape');
+    await expect(drawer).toBeHidden({ timeout: 10_000 });
+
+    const returned = await focusState(page);
+    expect(returned.tag, 'після Escape фокус на body').not.toBe('body');
+    expect(returned.label).toBe(opener.label);
   });
 });
 
