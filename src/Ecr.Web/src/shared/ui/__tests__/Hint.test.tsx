@@ -157,6 +157,48 @@ describe('Hint', () => {
     expect(describedAs('button', Text)).toContain(action);
   });
 
+  it('disabled: підказки й опису немає, а тригер — той самий вузол, коли disabled знімають', async () => {
+    const view = render(
+      <MantineProvider theme={testTheme}>
+        <Hint label={Text} disabled>
+          <Button data-testid="action">Export</Button>
+        </Hint>
+      </MantineProvider>,
+    );
+
+    const action = screen.getByTestId('action');
+    action.focus();
+    expect(tooltip()).toBeNull();
+    expect(action.hasAttribute('aria-describedby')).toBe(false);
+
+    view.rerender(
+      <MantineProvider theme={testTheme}>
+        <Hint label={Text}>
+          <Button data-testid="action">Export</Button>
+        </Hint>
+      </MantineProvider>,
+    );
+
+    // ⛔ Не перемонтовано: фокус клавіатури на тригері переживає зміну стану.
+    expect(screen.getByTestId('action')).toBe(action);
+    expect(document.activeElement).toBe(action);
+    expect(describedAs('button', Text)).toContain(action);
+  });
+
+  it('текст, що дослівно повторює aria-label тригера, не стає ще й описом', async () => {
+    show(
+      <Hint label="Documents">
+        <Button aria-label="Documents">D</Button>
+      </Hint>,
+    );
+
+    const action = screen.getByRole('button', { name: 'Documents' });
+    expect(action.hasAttribute('aria-describedby')).toBe(false);
+
+    await userEvent.setup().hover(action);
+    expect(await screen.findByRole('tooltip')).toBeTruthy();
+  });
+
   it('власний aria-describedby і обробники тригера зберігаються', async () => {
     const user = userEvent.setup();
     let focused = 0;

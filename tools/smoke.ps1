@@ -51,8 +51,24 @@
     пароль, який сам цей сценарій ставить bootstrap на свіжій базі
     (крок «зміна разового пароля»), тобто база після звичайного прогону.
 
+.PARAMETER Login
+    SQL-логін замість інтегрованої автентифікації; передається й у
+    `setup-dev-db.ps1`. Пароль — `-SqlPassword` або змінна `ECR_SQL_PASSWORD`,
+    до `sqlcmd` іде через `SQLCMDPASSWORD`. Потрібен для SQL Server у
+    Linux-контейнері CI (`.github/workflows/smoke.yml`). Не задано — `-E` і
+    `Trusted_Connection=True`, як і раніше.
+
+.PARAMETER SmallFiles
+    Передається в `setup-dev-db.ps1`: позначка `Ecr_SmallFiles` до
+    `01-filegroups.sql` (64 МБ замість 14 ГБ). Для CI-раннера.
+
+.PARAMETER StartupTimeoutSec
+    Скільки чекати старту застосунку (тут і в `setup-dev-db.ps1`). Умовчання
+    60 с, як і раніше.
+
 .EXAMPLE
     powershell -File tools/smoke.ps1
+    pwsh -File tools/smoke.ps1 -Server 'localhost,1433' -Login sa -SmallFiles -RequireFreeGb 0
     powershell -File tools/smoke.ps1 -Server localhost -DataPath F:\EcrData
     powershell -File tools/smoke.ps1 -Server localhost -Database EcrUpgrade -ExistingDatabase
 #>
@@ -71,7 +87,14 @@ param(
     # ⚠ Див. `.PARAMETER ExistingDatabase`. Без перемикача поведінка рівно та
     # сама, що й до його появи.
     [switch] $ExistingDatabase,
-    [string] $AdminPassword = 'Smoke-Real-2026!'
+    [string] $AdminPassword = 'Smoke-Real-2026!',
+
+    # Див. `.PARAMETER Login`/`SmallFiles`/`StartupTimeoutSec`. Без них
+    # поведінка рівно та сама, що й до їх появи.
+    [string] $Login,
+    [string] $SqlPassword = $env:ECR_SQL_PASSWORD,
+    [switch] $SmallFiles,
+    [int] $StartupTimeoutSec = 60
 )
 
 # ⚠ Масив аргументів, а не сплат: `setup-dev-db.ps1` викликається окремим
@@ -84,6 +107,31 @@ if ($PSBoundParameters.ContainsKey('DataPath')) {
 if ($PSBoundParameters.ContainsKey('RequireFreeGb')) {
     $setupExtra += @('-RequireFreeGb', [string] $RequireFreeGb)
 }
+if ($SmallFiles) { $setupExtra += '-SmallFiles' }
+if ($PSBoundParameters.ContainsKey('StartupTimeoutSec')) {
+    $setupExtra += @('-StartupTimeoutSec', [string] $StartupTimeoutSec)
+}
+
+# ⚠ Автентифікація SQL: інтегрована (як і раніше) або SQL-логін. Пароль —
+# лише оточенням: `SQLCMDPASSWORD` для `sqlcmd` тут, `ECR_SQL_PASSWORD` для
+# дочірнього `setup-dev-db.ps1` (аргументи процесу видно всім на агенті).
+if ($Login) {
+    if (-not $SqlPassword) { throw '-Login задано, а пароля немає: передай -SqlPassword або змінну ECR_SQL_PASSWORD.' }
+    $env:SQLCMDPASSWORD = $SqlPassword
+    $env:ECR_SQL_PASSWORD = $SqlPassword
+    $sqlAuth = @('-U', $Login)
+    $setupExtra += @('-Login', $Login)
+}
+else {
+    $sqlAuth = @('-E')
+}
+
+# ⚠ Поза Windows: дочірній скрипт — `pwsh` (Windows PowerShell там немає),
+# `-ExecutionPolicy` лише у Windows, `Start-Process -WindowStyle` не існує
+# (той самий вибір, що й у `verify-all.ps1`).
+$onWindows = $IsWindows -or $PSVersionTable.PSEdition -eq 'Desktop'
+$psExe = if ($onWindows) { 'powershell' } else { 'pwsh' }
+$psPrefix = if ($onWindows) { @('-ExecutionPolicy', 'Bypass') } else { @() }
 
 $ErrorActionPreference = 'Stop'
 
@@ -190,7 +238,7 @@ if ($ExistingDatabase) {
     $previousEap = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
-        $exists = (& sqlcmd -S $Server -E -C -b -h -1 -W -d master `
+        $exists = (& sqlcmd -S $Server @sqlAuth -C -b -h -1 -W -d master `
             -Q "SET NOCOUNT ON; SELECT CASE WHEN DB_ID('$Database') IS NULL THEN 0 ELSE 1 END;") `
             | Select-Object -Last 1
     }
@@ -220,7 +268,7 @@ else {
     $previousEapGuard = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
-        $foreign = (& sqlcmd -S $Server -E -C -b -h -1 -W -d master `
+        $foreign = (& sqlcmd -S $Server @sqlAuth -C -b -h -1 -W -d master `
             -Q "SET NOCOUNT ON; DECLARE @r int = 0; IF DB_ID(N'$Database') IS NOT NULL EXEC sp_executesql N'SELECT @r = CASE WHEN EXISTS (SELECT 1 FROM [$Database].sys.extended_properties WHERE class = 0 AND name = N''Ecr_Smoke_Temp'') THEN 0 ELSE 1 END', N'@r int OUTPUT', @r OUTPUT; SELECT @r;") `
             | Select-Object -Last 1
     }
@@ -239,13 +287,18 @@ else {
     $previousEap = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
-        & powershell -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'setup-dev-db.ps1') `
-            -Server $Server -Database $Database -Documents 1 -BootstrapPassword $password @setupExtra | Out-Null
+        # ⚠ Вивід збирається, а не глушиться: при падінні його хвіст — єдина
+        # причина, яку видно (в CI іншого доступу до стенда немає).
+        $setupOutput = & $psExe @psPrefix -File (Join-Path $PSScriptRoot 'setup-dev-db.ps1') `
+            -Server $Server -Database $Database -Documents 1 -BootstrapPassword $password @setupExtra 2>&1
     }
     finally {
         $ErrorActionPreference = $previousEap
     }
-    if ($LASTEXITCODE -ne 0) { Fail 'розгортання не пройшло' }
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host (($setupOutput | Select-Object -Last 40) -join [Environment]::NewLine)
+        Fail 'розгортання не пройшло'
+    }
 
     # ⛔ Q-222 (аудит): без цієї позначки прибирання нижче видаляло б БУДЬ-ЯКУ
     # базу, названу в `-Database`, — включно з чиєюсь справжньою dev-базою
@@ -255,7 +308,7 @@ else {
     $previousEapTag = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
-        & sqlcmd -S $Server -E -C -b -d $Database `
+        & sqlcmd -S $Server @sqlAuth -C -b -d $Database `
             -Q "EXEC sys.sp_addextendedproperty @name = N'Ecr_Smoke_Temp', @value = 1;" | Out-Null
     }
     finally {
@@ -264,7 +317,12 @@ else {
     if ($LASTEXITCODE -ne 0) { Fail 'не вдалося позначити тимчасову базу' }
 }
 
-$connection = "Server=$Server;Database=$Database;Trusted_Connection=True;TrustServerCertificate=True"
+$connection = if ($Login) {
+    "Server=$Server;Database=$Database;User Id=$Login;Password=$SqlPassword;TrustServerCertificate=True"
+}
+else {
+    "Server=$Server;Database=$Database;Trusted_Connection=True;TrustServerCertificate=True"
+}
 $log = Join-Path $root 'artifacts/smoke.api.log'
 
 $env:ECR_ConnectionStrings__Ecr = $connection
@@ -282,13 +340,19 @@ $env:ECR_Auth__RequireHttps = 'false'
 $env:ECR_Auth__DataProtection__AllowUnprotectedKeys = 'true'
 
 Step 'старт застосунку'
-$api = Start-Process -PassThru -WindowStyle Hidden dotnet `
-    -ArgumentList "run --project `"$(Join-Path $root 'src/Ecr.Api')`" --no-build --no-launch-profile" `
-    -RedirectStandardOutput $log -RedirectStandardError "$log.err"
+$startArgs = @{
+    PassThru               = $true
+    FilePath               = 'dotnet'
+    ArgumentList           = "run --project `"$(Join-Path $root 'src/Ecr.Api')`" --no-build --no-launch-profile"
+    RedirectStandardOutput = $log
+    RedirectStandardError  = "$log.err"
+}
+if ($onWindows) { $startArgs.WindowStyle = 'Hidden' }
+$api = Start-Process @startArgs
 
 try {
     $ready = $false
-    foreach ($i in 1..120) {
+    foreach ($i in 1..($StartupTimeoutSec * 2)) {
         Start-Sleep -Milliseconds 500
         if ($api.HasExited) { Fail "застосунок завершився з кодом $($api.ExitCode); лог: $log" }
 
@@ -401,7 +465,9 @@ try {
     Step 'ресурсний грант на проєкт'
     # ⛔ `If-Match` обов'язковий (без нього — 422): версія набору — `ETag`
     # відповіді GET, як це робить екран грантів.
-    $grantsVersion = (Invoke-WebRequest -Uri "$base/api/v1/roles/$roleId/grants" -WebSession $session -UseBasicParsing -TimeoutSec 120).Headers['ETag']
+    # ⚠ `Select-Object -First 1`: у PowerShell 7 заголовок — `string[]`, у 5.1 — рядок.
+    $grantsVersion = (Invoke-WebRequest -Uri "$base/api/v1/roles/$roleId/grants" -WebSession $session -UseBasicParsing -TimeoutSec 120).Headers['ETag'] |
+        Select-Object -First 1
     if (-not $grantsVersion) { Fail "GET /api/v1/roles/$roleId/grants не віддав ETag" }
     Call PUT "/api/v1/roles/$roleId/grants" @{
         grants = @(@{ resourceKind = 'Project'; resourceId = 1; level = 'Manage'; isDeny = $false })
@@ -717,7 +783,12 @@ try {
     Write-Host 'Наскрізний сценарій пройдено.' -ForegroundColor Green
 }
 finally {
-    if ($api -and -not $api.HasExited) { $api.Kill(); $api.WaitForExit() }
+    if ($api -and -not $api.HasExited) {
+        # ⚠ Дерево процесів (.NET Core): інакше `Ecr.Api` під `dotnet run`
+        # переживає сценарій. У Windows PowerShell 5.1 такого перевантаження немає.
+        if ($PSVersionTable.PSEdition -eq 'Desktop') { $api.Kill() } else { $api.Kill($true) }
+        $api.WaitForExit()
+    }
 
     # ⛔ Q-222 (аудит): видаляється ЛИШЕ база з власною позначкою
     # (Ecr_Smoke_Temp, вище) — без цієї умови скрипт знищував би будь-що,
@@ -726,7 +797,7 @@ finally {
     $previousEapExists = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
-        $exists = (& sqlcmd -S $Server -E -C -b -h -1 -W -d master `
+        $exists = (& sqlcmd -S $Server @sqlAuth -C -b -h -1 -W -d master `
             -Q "SET NOCOUNT ON; SELECT CASE WHEN DB_ID('$Database') IS NULL THEN 0 ELSE 1 END;") `
             | Select-Object -Last 1
     }
@@ -740,7 +811,7 @@ finally {
         $previousEapMine = $ErrorActionPreference
         $ErrorActionPreference = 'Continue'
         try {
-            $mine = (& sqlcmd -S $Server -E -C -b -h -1 -W -d $Database `
+            $mine = (& sqlcmd -S $Server @sqlAuth -C -b -h -1 -W -d $Database `
                 -Q "SET NOCOUNT ON; SELECT COUNT(*) FROM sys.extended_properties WHERE class = 0 AND name = N'Ecr_Smoke_Temp';") `
                 | Select-Object -Last 1
         }
@@ -752,7 +823,7 @@ finally {
             $previousEap = $ErrorActionPreference
             $ErrorActionPreference = 'Continue'
             try {
-                & sqlcmd -S $Server -E -C -b -Q "ALTER DATABASE [$Database] SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE [$Database];" | Out-Null
+                & sqlcmd -S $Server @sqlAuth -C -b -Q "ALTER DATABASE [$Database] SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE [$Database];" | Out-Null
             }
             finally {
                 $ErrorActionPreference = $previousEap

@@ -78,15 +78,31 @@ public sealed partial class CspReportController(
         var buffer = new byte[MaxBodyBytes + 1];
         var total = 0;
 
-        while (total < buffer.Length)
+        try
         {
-            var read = await Request.Body.ReadAsync(buffer.AsMemory(total), ct).ConfigureAwait(false);
-            if (read == 0)
+            while (total < buffer.Length)
             {
-                break;
-            }
+                var read = await Request.Body.ReadAsync(buffer.AsMemory(total), ct).ConfigureAwait(false);
+                if (read == 0)
+                {
+                    break;
+                }
 
-            total += read;
+                total += read;
+            }
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // A3-03: браузер закрив запит посеред тіла. Це не збій сервера — без цього
+            // перехоплення виняток доходив до ExceptionHandlingMiddleware і потрапляв
+            // у журнал як «Необроблений виняток» рівня Error. Відповідь ніхто не читає.
+            return StatusCode(StatusCodes.Status499ClientClosedRequest);
+        }
+        catch (BadHttpRequestException)
+        {
+            // A3-03: «Unexpected end of request content» — обірване/некоректне тіло від
+            // клієнта (ми не вичитали його до кінця), це 400, а не 500.
+            return StatusCode(StatusCodes.Status400BadRequest);
         }
 
         if (total > MaxBodyBytes)

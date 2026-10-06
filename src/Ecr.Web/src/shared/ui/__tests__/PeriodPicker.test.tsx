@@ -52,10 +52,10 @@ describe('PeriodPicker: пряме введення periodKey — те саме 
     expect(onChange).toHaveBeenCalledWith(null);
   });
 
-  it('показує підпис періоду мовою інтерфейсу під полем', () => {
+  it('показує людську назву періоду мовою інтерфейсу в самому полі', () => {
     renderWithMantine(<PeriodPicker value={202609} onChange={vi.fn()} />);
 
-    expect(screen.getByText('September 2026')).toBeTruthy();
+    expect(screen.getByDisplayValue('September 2026')).toBeTruthy();
   });
 });
 

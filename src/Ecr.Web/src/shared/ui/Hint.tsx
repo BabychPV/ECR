@@ -9,11 +9,12 @@ import {
   type MouseEvent,
   type ReactElement,
 } from 'react';
-import { Popover } from '@mantine/core';
+import { Popover, type FloatingPosition } from '@mantine/core';
 
 /** Пропи тригера, які `Hint` доповнює, не затираючи власних. */
 interface TriggerProps {
   readonly 'aria-describedby'?: string | undefined;
+  readonly 'aria-label'?: string | undefined;
   readonly tabIndex?: number | undefined;
   readonly onFocus?: ((event: FocusEvent<HTMLElement>) => void) | undefined;
   readonly onBlur?: ((event: FocusEvent<HTMLElement>) => void) | undefined;
@@ -38,6 +39,17 @@ interface HintProps {
    * в порядку табуляції, а зайва зупинка лише подвоїла б її.
    */
   readonly focusable?: boolean | undefined;
+
+  /** Бік, з якого стає підказка; за замовчуванням — над тригером. */
+  readonly position?: FloatingPosition | undefined;
+
+  /**
+   * `true` — підказка не показується і не описує тригер, але РОЗМІТКА та
+   * сама. Для тригера, якому підказка потрібна лише в одному стані (пункт
+   * меню без тексту): умовна обгортка перемонтовувала б його при кожному
+   * перемиканні, і фокус клавіатури падав би на `body` (WCAG 2.4.3).
+   */
+  readonly disabled?: boolean | undefined;
 }
 
 /**
@@ -75,14 +87,20 @@ interface HintProps {
  * `--mantine-color-text`, тобто `surfaces.*.text` (`cssVariables.ts`).
  * Контраст обох пар міряє `Hint.test.tsx` на ЗЛИТІЙ темі застосунку.
  */
-export function Hint({ label, children, focusable = false }: HintProps): JSX.Element {
+export function Hint({
+  label,
+  children,
+  focusable = false,
+  position = 'top',
+  disabled = false,
+}: HintProps): JSX.Element {
   const id = `${useId()}-hint`;
   const [hovered, setHovered] = useState(false);
   const [focused, setFocused] = useState(false);
   const [overTip, setOverTip] = useState(false);
   const [dismissed, setDismissed] = useState(false);
 
-  const opened = (hovered || focused || overTip) && !dismissed;
+  const opened = (hovered || focused || overTip) && !dismissed && !disabled;
 
   // Escape і тоді, коли фокус не на тригері (підказку відкрила миша).
   useEffect(() => {
@@ -98,10 +116,13 @@ export function Hint({ label, children, focusable = false }: HintProps): JSX.Ele
   }, [opened]);
 
   const own = children.props;
-  const describedBy = [own['aria-describedby'], id].filter(Boolean).join(' ');
+  // ⚠ Опис, що дослівно повторює ім'я тригера (`aria-label`), читач озвучив
+  // би двічі: «Documents, посилання, Documents».
+  const describes = !disabled && own['aria-label'] !== label;
+  const describedBy = [own['aria-describedby'], describes ? id : undefined].filter(Boolean).join(' ');
 
   const trigger = cloneElement(children, {
-    'aria-describedby': describedBy,
+    'aria-describedby': describedBy.length > 0 ? describedBy : undefined,
     ...(focusable ? { tabIndex: own.tabIndex ?? 0 } : {}),
     onFocus: (event: FocusEvent<HTMLElement>) => {
       own.onFocus?.(event);
@@ -143,7 +164,7 @@ export function Hint({ label, children, focusable = false }: HintProps): JSX.Ele
         withRoles={false}
         returnFocus={false}
         trapFocus={false}
-        position="top"
+        position={position}
         withArrow
         shadow="md"
       >
@@ -163,9 +184,11 @@ export function Hint({ label, children, focusable = false }: HintProps): JSX.Ele
           {label}
         </Popover.Dropdown>
       </Popover>
-      <span id={id} hidden data-hint-text="">
-        {label}
-      </span>
+      {describes && (
+        <span id={id} hidden data-hint-text="">
+          {label}
+        </span>
+      )}
     </>
   );
 }

@@ -34,6 +34,7 @@ import {
   isCatalogFailed,
   isCatalogResolved,
   loadCatalog,
+  markLoginChosenLanguage,
   preferredLanguage,
   setLanguage,
   t,
@@ -164,6 +165,8 @@ export function LoginPage(): JSX.Element {
   // Публічний каталог рядків тягнеться ДО входу: сторінка входу не може
   // показувати ключі замість написів (D-114).
   useEffect(() => {
+    // A3: вибір мови на логіні від попереднього відвідування сторінки не переходить у нову сесію.
+    markLoginChosenLanguage(null);
     void loadCatalog(preferredLanguage(), 'public');
   }, []);
 
@@ -440,6 +443,8 @@ export function LoginPage(): JSX.Element {
                   if (value === preferredLanguage()) return;
 
                   setLanguage(value);
+                  // A3: це ВИБІР людини на логіні — оболонка після входу бере його як мову сесії.
+                  markLoginChosenLanguage(value);
 
                   // ⚠ Область `public`, а не `private`, як у перемикачі
                   // всередині застосунку: приватний зріз анонімний запит не

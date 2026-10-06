@@ -65,7 +65,12 @@ import {
 } from './pendingStore';
 import { installF2Edit } from './f2Edit';
 import { installEnterKeyCompat } from './keyboardCompat';
-import { deferWhileCommitting, installKeyCommitGate, isInCellEditor } from './keyCommitGate';
+import {
+  deferWhileCommitting,
+  installCopyDefer,
+  installKeyCommitGate,
+  isInCellEditor,
+} from './keyCommitGate';
 import { gridShortcut } from './shortcutKey';
 import { trackEditorTouched, type EditorTouched } from './editorTouched';
 import { installBodyPasteRedirect } from './bodyPaste';
@@ -1829,15 +1834,16 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
   // ЗАКРИВАЄТЬСЯ, і копіювати з нього нічого.
   const copyTextRef = useRef(copyText);
   copyTextRef.current = copyText;
+  const writeDeferredCopyRef = useRef((): void => undefined);
+  writeDeferredCopyRef.current = (): void => {
+    const text = copyTextRef.current();
+    if (text !== null) void navigator.clipboard?.writeText(text).catch(() => undefined);
+  };
   const onCopyGated = useCallback(
     (event: React.ClipboardEvent<HTMLDivElement>) => {
       const container = gridContainer.current;
       const deferred =
-        container !== null &&
-        deferWhileCommitting(container, () => {
-          const text = copyTextRef.current();
-          if (text !== null) void navigator.clipboard?.writeText(text).catch(() => undefined);
-        });
+        container !== null && deferWhileCommitting(container, () => writeDeferredCopyRef.current());
 
       if (deferred) {
         event.preventDefault();
@@ -1863,6 +1869,8 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         // ⛔ T3-01: швидкий ввід (сканер, макрос) не мусить склеювати значення —
         // клавіші після Enter/Tab стають у чергу до кінця переходу фокуса.
         installKeyCommitGate(node),
+        // ⛔ T5-02: Ctrl+C у вікні коміту, коли `copy` летить у `<body>`.
+        installCopyDefer(node, () => writeDeferredCopyRef.current()),
         (() => {
           const tracker = trackEditorTouched(node);
           editorTouched.current = tracker;

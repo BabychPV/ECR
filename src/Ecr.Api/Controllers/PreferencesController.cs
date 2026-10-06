@@ -9,7 +9,7 @@ namespace Ecr.Api.Controllers;
 /// <remarks>
 /// Лише власні: користувача бере обробник із сеансу, ідентифікатора в маршруті
 /// немає. Ключ — з білого списку (<c>theme</c>, <c>density</c>, <c>language</c>,
-/// <c>lastPeriodKey</c>, <c>lastProjectId</c>, <c>grid.*</c>), значення — JSON до 8 КБ,
+/// <c>lastPeriodKey</c>, <c>lastProjectId</c>, <c>navbarCollapsed</c>, <c>grid.*</c>), значення — JSON до 8 КБ,
 /// не більше 200 ключів; порушення — <c>422 ECR-REQ-0422</c>.
 /// </remarks>
 [ApiController]

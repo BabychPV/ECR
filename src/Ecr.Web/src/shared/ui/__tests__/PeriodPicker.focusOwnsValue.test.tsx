@@ -63,13 +63,14 @@ describe('PeriodPicker: зовнішній value не перебиває наб�
     rerender(<PeriodPicker value={202511} onChange={onChange} />);
     expect(input.value).toBe('202608');
 
+    // Поза фокусом поле показує людську назву набраного ключа (не «202511» із запізнілого value).
     fireEvent.blur(input);
-    expect(input.value).toBe('202608');
+    expect(input.value).toBe('August 2026');
     expect(onChange.mock.calls).toEqual([[202608]]);
 
     // А тепер адреса наздогнала — те саме значення, поле без змін.
     rerender(<PeriodPicker value={202608} onChange={onChange} />);
-    expect(input.value).toBe('202608');
+    expect(input.value).toBe('August 2026');
   });
 
   it('поле НЕ у фокусі — зміна value ззовні (навігація, «Назад») видна одразу', () => {
@@ -79,7 +80,8 @@ describe('PeriodPicker: зовнішній value не перебиває наб�
       rerender(<PeriodPicker value={202610} onChange={vi.fn()} />);
     });
 
-    expect(periodInput().value).toBe('202610');
-    expect(screen.getByText('October 2026')).toBeTruthy();
+    // Назва мовою інтерфейсу в самому полі; технічного ключа на екрані немає.
+    expect(periodInput().value).toBe('October 2026');
+    expect(screen.queryByText('202610')).toBeNull();
   });
 });

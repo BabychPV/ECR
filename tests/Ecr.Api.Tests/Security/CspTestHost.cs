@@ -39,6 +39,11 @@ internal sealed class CspTestHost : IAsyncDisposable
         Logs = logs;
     }
 
+    private int _unhandled;
+
+    /// <summary>Скільки винятків вилетіло з конвеєра необробленими.</summary>
+    public int Unhandled => Volatile.Read(ref _unhandled);
+
     /// <summary>Рядки журналу, записані хостом.</summary>
     public CapturingLoggerProvider Logs { get; }
 
@@ -62,8 +67,10 @@ internal sealed class CspTestHost : IAsyncDisposable
     /// <summary>Піднімає хост із заданою конфігурацією.</summary>
     /// <param name="config">Ключі конфігурації (накладаються поверх порожньої).</param>
     /// <param name="withController"><c>true</c> — додати <see cref="CspReportController"/> і обмежувач.</param>
+    /// <param name="wrapBody">Підміна тіла запиту перед контролером (імітація обриву читання).</param>
     public static async Task<CspTestHost> StartAsync(
-        IReadOnlyDictionary<string, string?>? config = null, bool withController = false)
+        IReadOnlyDictionary<string, string?>? config = null, bool withController = false,
+        Func<Stream, Stream>? wrapBody = null)
     {
         var builder = WebApplication.CreateBuilder();
         builder.WebHost.UseTestServer();
@@ -88,7 +95,33 @@ internal sealed class CspTestHost : IAsyncDisposable
         }
 
         var app = builder.Build();
+        var host = new CspTestHost(app, logs);
+
+        // Найзовнішній: лічить винятки, що вилетіли з конвеєра (у проді їх бачить
+        // ExceptionHandlingMiddleware і пише «Необроблений виняток» рівня Error).
+        app.Use(async (context, next) =>
+        {
+            try
+            {
+                await next(context).ConfigureAwait(false);
+            }
+            catch
+            {
+                Interlocked.Increment(ref host._unhandled);
+                throw;
+            }
+        });
+
         app.UseMiddleware<SecurityHeadersMiddleware>();
+
+        if (wrapBody is not null)
+        {
+            app.Use(async (context, next) =>
+            {
+                context.Request.Body = wrapBody(context.Request.Body);
+                await next(context).ConfigureAwait(false);
+            });
+        }
 
         if (withController)
         {
@@ -112,7 +145,6 @@ internal sealed class CspTestHost : IAsyncDisposable
             });
         }
 
-        var host = new CspTestHost(app, logs);
         host.ListenToMetrics();
         await app.StartAsync().ConfigureAwait(false);
         return host;

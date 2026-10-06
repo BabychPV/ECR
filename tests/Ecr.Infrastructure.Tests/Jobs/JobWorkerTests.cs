@@ -97,6 +97,24 @@ public sealed class JobWorkerTests(SqlServerFixture sql) : DbJobQueueTestsBase(s
     }
 
     [Fact]
+    [Trait("Requirement", "L7-01")]
+    public async Task Надто_глибокий_вираз_Failed_одразу_з_ECR_EXPR_0422_без_ретраїв()
+    {
+        // ⛔ L7-01: сторож стека обходу дерева виразу кидає InsufficientExecutionStackException.
+        // Дерево від повтору не мілішає — раніше задача тричі повторювала той самий збій
+        // і падала з ECR-SYS-0500, тобто без зрозумілої причини.
+        var probe = new WorkerProbe();
+        await using var host = await StartHostAsync(probe);
+
+        var jobId = await EnqueueJobAsync<WorkerTooComplexJob>(host, new { n = 1 });
+
+        var row = await WaitForStateAsync(jobId, "Failed");
+
+        Assert.Single(probe.Attempts);
+        Assert.Equal(ErrorCodes.ExpressionTooComplex, row.ErrorCode);
+    }
+
+    [Fact]
     public async Task Скасування_з_іншого_контексту_зупиняє_задачу_і_закриває_Cancelled()
     {
         var probe = new WorkerProbe();
@@ -259,6 +277,7 @@ public sealed class JobWorkerTests(SqlServerFixture sql) : DbJobQueueTestsBase(s
         services.AddScoped<WorkerProbeJob>();
         services.AddScoped<WorkerFailingJob>();
         services.AddScoped<WorkerVerdictJob>();
+        services.AddScoped<WorkerTooComplexJob>();
         services.AddScoped<WorkerBlockingJob>();
         services.AddScoped<WorkerWitnessJob>();
         services.AddScoped<WorkerDriverCancelJob>();
@@ -361,6 +380,15 @@ public sealed class WorkerVerdictJob(WorkerProbe probe) : IBackgroundJob
     {
         probe.AttemptQueue.Enqueue(probe.Clock.Elapsed);
         throw new NotFoundException("ECR-PRD-0404", "Періоду немає.");
+    }
+}
+
+public sealed class WorkerTooComplexJob(WorkerProbe probe) : IBackgroundJob
+{
+    public Task ExecuteAsync(object? payload, IJobProgress progress, CancellationToken ct)
+    {
+        probe.AttemptQueue.Enqueue(probe.Clock.Elapsed);
+        throw new InsufficientExecutionStackException("The expression is too complex to traverse: split it into several formulas.");
     }
 }
 

@@ -1059,50 +1059,52 @@ public sealed class GenericCalculationModule(
     }
 
     /// <summary>Обхід дерева у пошуку <c>CST.Code</c>.</summary>
-    private static IEnumerable<string> Walk(Expressions.Ast.AstNode node)
+    /// <remarks>
+    /// ⛔ L7-01: явним стеком, а не рекурсією. Рекурсивні вкладені ітератори були
+    /// найдорожчим обходом продукту за стеком (~0,56 КБ на рівень лівого гребеня
+    /// ланцюга — більше 1 МБ на найдовшому дозволеному ланцюгу) і квадратичними за
+    /// часом: кожен код проходив угору крізь усі рівні над собою. Порядок кодів не
+    /// важливий — споживач складає їх у множину.
+    /// </remarks>
+    private static IEnumerable<string> Walk(Expressions.Ast.AstNode root)
     {
-        switch (node)
+        var pending = new Stack<Expressions.Ast.AstNode>();
+        pending.Push(root);
+
+        while (pending.Count > 0)
         {
-            case Expressions.Ast.SymbolReferenceNode { Kind: Expressions.Ast.SymbolKind.Constant } symbol:
-                yield return symbol.Name;
-                break;
+            switch (pending.Pop())
+            {
+                case Expressions.Ast.SymbolReferenceNode { Kind: Expressions.Ast.SymbolKind.Constant } symbol:
+                    yield return symbol.Name;
+                    break;
 
-            case Expressions.Ast.BinaryNode binary:
-                foreach (var code in Walk(binary.Left).Concat(Walk(binary.Right)))
-                {
-                    yield return code;
-                }
+                case Expressions.Ast.BinaryNode binary:
+                    pending.Push(binary.Right);
+                    pending.Push(binary.Left);
+                    break;
 
-                break;
+                case Expressions.Ast.UnaryNode unary:
+                    pending.Push(unary.Operand);
+                    break;
 
-            case Expressions.Ast.UnaryNode unary:
-                foreach (var code in Walk(unary.Operand))
-                {
-                    yield return code;
-                }
+                case Expressions.Ast.ConditionalNode conditional:
+                    pending.Push(conditional.WhenFalse);
+                    pending.Push(conditional.WhenTrue);
+                    pending.Push(conditional.Condition);
+                    break;
 
-                break;
+                case Expressions.Ast.FunctionNode function:
+                    for (var i = function.Arguments.Count - 1; i >= 0; i--)
+                    {
+                        pending.Push(function.Arguments[i]);
+                    }
 
-            case Expressions.Ast.ConditionalNode conditional:
-                foreach (var code in Walk(conditional.Condition)
-                             .Concat(Walk(conditional.WhenTrue))
-                             .Concat(Walk(conditional.WhenFalse)))
-                {
-                    yield return code;
-                }
+                    break;
 
-                break;
-
-            case Expressions.Ast.FunctionNode function:
-                foreach (var code in function.Arguments.SelectMany(Walk))
-                {
-                    yield return code;
-                }
-
-                break;
-
-            default:
-                break;
+                default:
+                    break;
+            }
         }
     }
 

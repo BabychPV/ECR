@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MantineProvider } from '@mantine/core';
 import { MemoryRouter, useLocation } from 'react-router-dom';
@@ -24,10 +24,10 @@ import { testTheme } from '@/test/render';
  * ⛔ Мутаційні докази (усі перевірені):
  *   1. прибрати `useEffect` автовибору в `DocumentsPage.tsx` → червоніє перший
  *      випадок (періоду в адресі немає, стан не показано);
- *   2. замінити `projects.data?.items.length === 1 ? …` на
- *      `projects.data?.items[0]` → червоніє випадок «проєктів два»;
- *   3. замінити вибір `current ?? (open.length === 1 ? open[0] : undefined)`
- *      на `periods[0]` → червоніє випадок «поточний не перший у списку».
+ *   2. (A3-02) знову обмежити автовибір єдиним проєктом → червоніє випадок «проєктів кілька»;
+ *      зняти межу `AUTO_PICK_MAX_PROJECTS` → червоніє випадок «понад межу»;
+ *   3. (A3-02) замінити `newestOpenPeriodKey(periods)` на `periods.find(isCurrent)` або `periods[0]` →
+ *      червоніє перший випадок (поточний 202609, найновіший відкритий 202610).
  */
 
 const project = { id: 1, code: 'AUDIT_SMOKE_PRJ', status: 'Active' as const };
@@ -60,8 +60,33 @@ const calendar = {
       graceEndsAt: null,
       reopenedUntil: null,
     },
+    {
+      id: 12,
+      periodKey: 202610,
+      sequence: 10,
+      state: 'Open',
+      isCurrent: false,
+      startsAt: '2026-10-01T00:00:00Z',
+      endsAt: '2026-11-15T00:00:00Z',
+      graceEndsAt: null,
+      reopenedUntil: null,
+    },
+    {
+      id: 13,
+      periodKey: 202611,
+      sequence: 11,
+      state: 'Planned',
+      isCurrent: false,
+      startsAt: '2026-11-01T00:00:00Z',
+      endsAt: '2026-12-15T00:00:00Z',
+      graceEndsAt: null,
+      reopenedUntil: null,
+    },
   ],
 };
+
+/** Календар проєкту, де найновіший відкритий період — лише 202609 (для «серед проєктів береться максимум»). */
+const olderCalendar = { ...calendar, periods: calendar.periods.filter((period) => period.periodKey <= 202609) };
 
 const document1 = {
   id: 1,
@@ -97,7 +122,7 @@ function json(body: unknown): Response {
   });
 }
 
-function serve(projects: readonly unknown[]): void {
+function serve(projects: readonly unknown[], calendars: Record<number, unknown> = {}): void {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL) => {
@@ -128,7 +153,8 @@ function serve(projects: readonly unknown[]): void {
        * фільтрується, період керує лише колонкою стану). Якби мок фільтрував,
        * випадок «автовибір не став фільтром» нижче доводив би мок, а не код.
        */
-      if (/\/api\/v1\/projects\/\d+\/periods/.test(url)) return json(calendar);
+      const periodsOf = /\/api\/v1\/projects\/(\d+)\/periods/.exec(url);
+      if (periodsOf !== null) return json(calendars[Number(periodsOf[1])] ?? calendar);
       if (url.includes('/api/v1/projects')) {
         return json({ items: projects, nextCursor: null, totalCount: projects.length });
       }
@@ -200,7 +226,7 @@ describe('DocumentsPage: автовибір поточного періоду (U
      * воно має відкрити той самий період.
      */
     await waitFor(() => {
-      expect(new URLSearchParams(search).get('periodKey')).toBe('202609');
+      expect(new URLSearchParams(search).get('periodKey')).toBe('202610');
     });
 
     // ⚠ Рядки дочікуються ПІСЛЯ зміни адреси: вона змінює ключ запиту, тобто
@@ -210,7 +236,7 @@ describe('DocumentsPage: автовибір поточного періоду (U
     // Період видно і в посиланні на документ — інакше `DocumentPage`
     // підставив би поточний МІСЯЦЬ, а не обраний період (`UI-walkthrough F3`).
     expect(screen.getByText('DOC-000001').closest('a')?.getAttribute('href')).toContain(
-      'periodKey=202609',
+      'periodKey=202610',
     );
 
     // Стан більше не «—»: бейдж аркуша на місці.
@@ -228,7 +254,7 @@ describe('DocumentsPage: автовибір поточного періоду (U
     show();
 
     await waitFor(() => {
-      expect(new URLSearchParams(search).get('periodKey')).toBe('202609');
+      expect(new URLSearchParams(search).get('periodKey')).toBe('202610');
     });
 
     /*
@@ -245,21 +271,30 @@ describe('DocumentsPage: автовибір поточного періоду (U
     expect(new URLSearchParams(search).get('state')).toBeNull();
   });
 
-  it('проєктів два — вибір лишається людині, адреса чиста', async () => {
-    serve([project, otherProject]);
+  it('A3-02: проєктів кілька — береться НАЙНОВІШИЙ відкритий період серед усіх, а не першого проєкту', async () => {
+    // Перший проєкт має відкритий лише 202609, другий — ще й 202610.
+    serve([project, otherProject], { 1: olderCalendar });
+
+    show();
+
+    await waitFor(() => {
+      expect(new URLSearchParams(search).get('periodKey')).toBe('202610');
+    });
+    await screen.findByText('DOC-000001');
+
+    // Календарі спитано в обох: рішення без одного з них було б вибором за «першого-ліпшого».
+    expect(requested.filter((url) => /\/api\/v1\/projects\/\d+\/periods/.test(url))).toHaveLength(2);
+  });
+
+  it('A3-02: проєктів понад межу — вибір лишається людині, календарі не опитуються, адреса чиста', async () => {
+    serve(Array.from({ length: 11 }, (_, index) => ({ id: index + 1, code: `PRJ_${index + 1}`, status: 'Active' as const })));
 
     show();
 
     await screen.findByText('DOC-000001');
+    await new Promise((resolve) => setTimeout(resolve, 100));
 
-    /*
-     * ⛔ Межа автовибору. Перелік документів наскрізний по проєктах: узяти
-     * календар «першого-ліпшого» з двох означало б підставити період ЧУЖОГО
-     * проєкту — і нічого на екрані не сказало б, що вибір зроблено за людину.
-     */
     expect(new URLSearchParams(search).get('periodKey')).toBeNull();
-
-    // І календаря ніхто не питав — запиту, який нічого не вирішує, немає.
     expect(requested.some((url) => /\/api\/v1\/projects\/\d+\/periods/.test(url))).toBe(false);
   });
 });
@@ -302,7 +337,9 @@ describe('DocumentsPage: очищене людиною поле «Period» ав�
     expect(input.value).toBe('');
 
     // Людина відвернулась (blur) — порожнє поле так і лишається порожнім.
-    fireEvent.blur(input);
+    // ⚠ Справжній перехід фокуса, а не `fireEvent.blur`: поле показує ключ лише у фокусі, і
+    // подія без реальної зміни `activeElement` лишила б клік наступного `type` без `focus`.
+    await user.tab();
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(input.value).toBe('');
 
@@ -317,14 +354,15 @@ describe('DocumentsPage: очищене людиною поле «Period» ав�
 
     show('/');
 
-    await waitFor(() => expect(new URLSearchParams(search).get('periodKey')).toBe('202609'));
+    await waitFor(() => expect(new URLSearchParams(search).get('periodKey')).toBe('202610'));
     const input = await screen.findByRole<HTMLInputElement>('textbox', {
       name: '⟦documents.period⟧',
     });
-    await waitFor(() => expect(input.value).toBe('202609'));
+    // Поле показує людську назву автовибраного періоду, не ключ 202610.
+    await waitFor(() => expect(input.value).toBe('October 2026'));
 
     await user.clear(input);
-    fireEvent.blur(input);
+    await user.tab();
     await new Promise((resolve) => setTimeout(resolve, 150));
 
     expect(new URLSearchParams(search).get('periodKey')).toBeNull();

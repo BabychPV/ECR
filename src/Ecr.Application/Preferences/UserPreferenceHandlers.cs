@@ -30,7 +30,7 @@ public static partial class UserPreferenceRules
     /// <summary>Ключі без підключів: налаштування директиви BE-20.</summary>
     public static readonly IReadOnlySet<string> ExactKeys = new HashSet<string>(StringComparer.Ordinal)
     {
-        "theme", "density", "language", "lastPeriodKey", "lastProjectId",
+        "theme", "density", "language", "lastPeriodKey", "lastProjectId", "navbarCollapsed",
     };
 
     /// <summary>Простори з підключем: <c>grid.columnWidths.{tableInstanceId}</c> тощо.</summary>

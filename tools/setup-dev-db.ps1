@@ -36,6 +36,28 @@
     `09-seed.sql` поверх живих даних. Bootstrap не створюється (він уже є),
     синтетичні документи не генеруються (`-Documents` ігнорується).
 
+.PARAMETER Login
+    SQL-логін замість інтегрованої автентифікації (`sqlcmd -U`, `User Id=` у
+    рядку підключення). Потрібен там, де Windows-автентифікації немає: SQL
+    Server у Linux-контейнері CI (`.github/workflows/smoke.yml`). Не задано —
+    поведінка рівно та сама, що й до появи параметра (`-E`,
+    `Trusted_Connection=True`).
+
+.PARAMETER Password
+    Пароль до `Login`. Умовчання — змінна `ECR_SQL_PASSWORD`. До `sqlcmd` іде
+    через `SQLCMDPASSWORD`, а НЕ аргументом `-P` (той самий патерн, що й у
+    `verify-sql-scripts.ps1`).
+
+.PARAMETER SmallFiles
+    Поставити позначку `Ecr_SmallFiles` одразу після `CREATE DATABASE`, тобто
+    ДО `01-filegroups.sql`: файлові групи по 64 МБ замість 14 ГБ на
+    Developer/Enterprise. Для одноразових стендів (CI-раннер має ~14 ГБ
+    вільного). Продуктивна поведінка без перемикача не змінюється.
+
+.PARAMETER StartupTimeoutSec
+    Скільки чекати `/health/live` застосунку на старті із сідом. Умовчання 60 с
+    (як і раніше); холодному CI-раннеру дають більше параметром.
+
 .EXAMPLE
     powershell -File tools/setup-dev-db.ps1
     powershell -File tools/setup-dev-db.ps1 -Documents 0
@@ -76,7 +98,14 @@ param(
     # AN-10 (D-265): довірений акаунт, якому видається роль `ecr_viewer`
     # («бачить усе», лише читання). Порожньо — роль лишається порожньою.
     # Це НЕ акаунт служби застосунку (див. 05-rpt-views.sql).
-    [string] $ViewerAccount
+    [string] $ViewerAccount,
+
+    # Див. `.PARAMETER Login`/`Password`/`SmallFiles`/`StartupTimeoutSec`. Без
+    # них поведінка рівно та сама, що й до їх появи.
+    [string] $Login,
+    [string] $Password = $env:ECR_SQL_PASSWORD,
+    [switch] $SmallFiles,
+    [int] $StartupTimeoutSec = 60
 )
 
 $ErrorActionPreference = 'Stop'
@@ -114,12 +143,29 @@ $root = Split-Path -Parent $PSScriptRoot
 $sql = Join-Path $root 'src/Ecr.Infrastructure/Persistence/Sql'
 $artifacts = Join-Path $root 'artifacts'
 $migration = Join-Path $artifacts 'migration.sql'
-$connection = "Server=$Server;Database=$Database;Trusted_Connection=True;TrustServerCertificate=True"
+
+# ⚠ Автентифікація: інтегрована (як і раніше) або SQL-логін (`-Login`). Пароль
+# іде оточенням `SQLCMDPASSWORD`: `-P` поклав би його в командний рядок, який
+# на агенті читає будь-який процес.
+if ($Login) {
+    if (-not $Password) { throw '-Login задано, а пароля немає: передай -Password або змінну ECR_SQL_PASSWORD.' }
+    $env:SQLCMDPASSWORD = $Password
+    $sqlAuth = @('-U', $Login)
+    $connection = "Server=$Server;Database=$Database;User Id=$Login;Password=$Password;TrustServerCertificate=True"
+}
+else {
+    $sqlAuth = @('-E')
+    $connection = "Server=$Server;Database=$Database;Trusted_Connection=True;TrustServerCertificate=True"
+}
+
+# ⚠ Поза Windows (`pwsh` на Linux) `Start-Process -WindowStyle` не існує, а
+# `Process.Kill()` без дерева лишає живим дочірній `Ecr.Api` під `dotnet run`.
+$onWindows = $IsWindows -or $PSVersionTable.PSEdition -eq 'Desktop'
 
 function Invoke-Sql {
     param([string] $Db, [string] $Query, [string] $File)
 
-    $arguments = @('-S', $Server, '-E', '-C', '-b', '-I', '-d', $Db)
+    $arguments = @('-S', $Server) + $sqlAuth + @('-C', '-b', '-I', '-d', $Db)
     if ($File) { $arguments += @('-i', $File) } else { $arguments += @('-Q', $Query) }
 
     $previousEap = $ErrorActionPreference
@@ -186,7 +232,9 @@ function Get-RequiredFreeGb {
     # ⚠ Позначку `Ecr_SmallFiles` тут знати НЕМОЖЛИВО: вона ставиться на вже
     # створену базу. Тому за нею не вгадуємо — беремо повний профіль і
     # називаємо це в повідомленні, щоб число можна було перевірити.
-    $edition = (& sqlcmd -S $Server -E -C -b -h -1 -W `
+    if ($SmallFiles) { return 1.0 }   # позначка `Ecr_SmallFiles` ставиться цим же скриптом
+
+    $edition = (& sqlcmd -S $Server @sqlAuth -C -b -h -1 -W `
             -Q "SET NOCOUNT ON; SELECT CAST(SERVERPROPERTY('EngineEdition') AS int);" 2>&1 |
         Where-Object { $_ -match '^\s*\d+\s*$' } | Select-Object -First 1)
 
@@ -213,7 +261,7 @@ if ($isLocalServer) {
         # інстансу — його знає лише сервер, тому питаємо сервер, а не вгадуємо.
         $target = $DataPath
         if (-not $target) {
-            $target = (& sqlcmd -S $Server -E -C -b -h -1 -W `
+            $target = (& sqlcmd -S $Server @sqlAuth -C -b -h -1 -W `
                     -Q "SET NOCOUNT ON; SELECT CAST(SERVERPROPERTY('InstanceDefaultDataPath') AS nvarchar(260));" 2>&1 |
                 Where-Object { $_ -match ':' } | Select-Object -First 1)
         }
@@ -260,7 +308,7 @@ if ($Upgrade) {
     $previousEap = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
-        $dbOutput = & sqlcmd -S $Server -E -C -b -h -1 -W -d master `
+        $dbOutput = & sqlcmd -S $Server @sqlAuth -C -b -h -1 -W -d master `
             -Q "SET NOCOUNT ON; SELECT CASE WHEN DB_ID('$Database') IS NULL THEN 0 ELSE 1 END;" 2>&1
         $dbExitCode = $LASTEXITCODE
     }
@@ -314,6 +362,10 @@ LOG ON      (NAME = N'${Database}_log', FILENAME = N'$DataPath\${Database}_log.l
 # вичерпаний диск СПОТВОРИВ заміри гейта втричі.
 #
 # ⚠ Властивість ставиться ДО `01-filegroups.sql`, бо саме він створює файли.
+if ($SmallFiles) {
+    Invoke-Sql -Db $Database -Query "EXEC sys.sp_addextendedproperty @name = N'Ecr_SmallFiles', @value = 1;"
+}
+
 if ($DataPath) {
     if (-not (Test-Path $DataPath)) { New-Item -ItemType Directory -Force -Path $DataPath | Out-Null }
 
@@ -449,13 +501,19 @@ if ($Documents -gt 0 -or $Upgrade) {
     $log = Join-Path $artifacts 'setup-dev-db.api.log'
     $project = '"' + (Join-Path $root 'src/Ecr.Api') + '"'
 
-    $api = Start-Process -PassThru -WindowStyle Hidden dotnet `
-        -ArgumentList "run --project $project --no-build --no-launch-profile" `
-        -RedirectStandardOutput $log -RedirectStandardError "$log.err"
+    $startArgs = @{
+        PassThru               = $true
+        FilePath               = 'dotnet'
+        ArgumentList           = "run --project $project --no-build --no-launch-profile"
+        RedirectStandardOutput = $log
+        RedirectStandardError  = "$log.err"
+    }
+    if ($onWindows) { $startArgs.WindowStyle = 'Hidden' }
+    $api = Start-Process @startArgs
 
     try {
         $ready = $false
-        foreach ($i in 1..120) {
+        foreach ($i in 1..($StartupTimeoutSec * 2)) {
             Start-Sleep -Milliseconds 500
 
             if ($api.HasExited) {
@@ -470,12 +528,18 @@ if ($Documents -gt 0 -or $Upgrade) {
             catch { }
         }
 
-        if (-not $ready) { throw "Застосунок не піднявся за 60 с. Лог: $log" }
+        if (-not $ready) { throw "Застосунок не піднявся за $StartupTimeoutSec с. Лог: $log" }
         if ($Upgrade) { Write-Host '  seed виконано поверх наявних даних' }
         else { Write-Host '  seed виконано, bootstrap створено' }
     }
     finally {
-        if (-not $api.HasExited) { $api.Kill(); $api.WaitForExit() }
+        if (-not $api.HasExited) {
+            # ⚠ Дерево процесів (.NET Core): інакше `Ecr.Api` під `dotnet run`
+            # переживає скрипт і тримає порт 5099. Windows PowerShell 5.1 на
+            # .NET Framework перевантаження з деревом не має.
+            if ($PSVersionTable.PSEdition -eq 'Desktop') { $api.Kill() } else { $api.Kill($true) }
+            $api.WaitForExit()
+        }
     }
 
     if ($Upgrade) {
@@ -500,7 +564,8 @@ Write-Host ''
 Write-Host "База $Database готова." -ForegroundColor Green
 Write-Host ''
 Write-Host 'Змінні оточення для запуску:'
-Write-Host "  ECR_ConnectionStrings__Ecr = $connection"
+# ⚠ Пароль SQL-логіна на екран не виводиться.
+Write-Host "  ECR_ConnectionStrings__Ecr = $(if ($Login) { $connection.Replace("Password=$Password;", 'Password=***;') } else { $connection })"
 Write-Host "  ECR_Bootstrap__Password    = $BootstrapPassword"
 Write-Host ''
 # ⚠ На оновленій базі bootstrap уже є зі СВОЇМ паролем (`D-115`: змінна діє

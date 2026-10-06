@@ -248,6 +248,64 @@ public sealed class CspReportEndpointTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "A3-03")]
+    public async Task Скасований_клієнтом_запит_не_вилітає_з_контролера_і_не_дає_помилки_в_журналі()
+    {
+        var reading = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var host = await CspTestHost.StartAsync(
+            withController: true,
+            wrapBody: inner => new SignalOnReadStream(inner, reading)).ConfigureAwait(true);
+
+        using var cts = new CancellationTokenSource();
+        using var content = new HangingContent();
+        content.Headers.ContentType = MediaTypeHeaderValue.Parse("application/csp-report");
+
+        var send = host.Http.PostAsync(Route, content, cts.Token);
+        await reading.Task.WaitAsync(TimeSpan.FromSeconds(10)).ConfigureAwait(true);
+        await cts.CancelAsync().ConfigureAwait(true);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => send).ConfigureAwait(true);
+        await Task.Delay(200).ConfigureAwait(true);
+
+        // ⛔ Мутаційний доказ: прибрати `catch (OperationCanceledException)` у контролері —
+        // виняток вилітає в конвеєр, у проді його пише ExceptionHandlingMiddleware як
+        // «Необроблений виняток» рівня Error; тут це лічильник Unhandled.
+        Assert.Equal(0, host.Unhandled);
+        Assert.DoesNotContain(host.Logs.Entries, e => e.Level >= Microsoft.Extensions.Logging.LogLevel.Error);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "A3-03")]
+    public async Task Обірване_тіло_запиту_дає_400_а_не_необроблений_виняток()
+    {
+        await using var host = await CspTestHost.StartAsync(
+            withController: true,
+            wrapBody: _ => new ThrowingStream(
+                new Microsoft.AspNetCore.Http.BadHttpRequestException("Unexpected end of request content"))).ConfigureAwait(true);
+
+        var response = await Post(host, Legacy, "application/csp-report").ConfigureAwait(true);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(0, host.Unhandled);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "A3-03")]
+    public async Task Справжній_збій_читання_не_ковтається()
+    {
+        await using var host = await CspTestHost.StartAsync(
+            withController: true,
+            wrapBody: _ => new ThrowingStream(new InvalidOperationException("boom"))).ConfigureAwait(true);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => Post(host, Legacy, "application/csp-report")).ConfigureAwait(true);
+        Assert.Equal(1, host.Unhandled);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
     [Trait("Requirement", "S14")]
     public void Ендпоінт_анонімний_і_не_читає_бази()
     {
@@ -280,6 +338,92 @@ public sealed class CspReportEndpointTests
         // Тіло — ASCII, тож символи дорівнюють байтам.
         Assert.True(Encoding.UTF8.GetByteCount(compact) <= bytes);
         return compact + new string(' ', bytes - Encoding.UTF8.GetByteCount(compact));
+    }
+
+    /// <summary>Тіло, що кидає заданий виняток при читанні.</summary>
+    private sealed class ThrowingStream(Exception error) : Stream
+    {
+        public override bool CanRead => true;
+
+        public override bool CanSeek => false;
+
+        public override bool CanWrite => false;
+
+        public override long Length => throw new NotSupportedException();
+
+        public override long Position
+        {
+            get => throw new NotSupportedException();
+            set => throw new NotSupportedException();
+        }
+
+        public override void Flush()
+        {
+        }
+
+        public override int Read(byte[] buffer, int offset, int count) => throw error;
+
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+            => throw error;
+
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+
+        public override void SetLength(long value) => throw new NotSupportedException();
+
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    }
+
+    /// <summary>Сигналізує про перше читання й далі читає справжнє тіло.</summary>
+    private sealed class SignalOnReadStream(Stream inner, TaskCompletionSource signal) : Stream
+    {
+        public override bool CanRead => true;
+
+        public override bool CanSeek => false;
+
+        public override bool CanWrite => false;
+
+        public override long Length => throw new NotSupportedException();
+
+        public override long Position
+        {
+            get => throw new NotSupportedException();
+            set => throw new NotSupportedException();
+        }
+
+        public override void Flush()
+        {
+        }
+
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            signal.TrySetResult();
+            return inner.ReadAsync(buffer, cancellationToken);
+        }
+
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+
+        public override void SetLength(long value) => throw new NotSupportedException();
+
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    }
+
+    /// <summary>Вміст, що пише початок тіла й зависає — клієнт «йде» посеред запиту.</summary>
+    private sealed class HangingContent : HttpContent
+    {
+        protected override async Task SerializeToStreamAsync(Stream stream, System.Net.TransportContext? context)
+        {
+            await stream.WriteAsync(new byte[] { (byte)'{' }).ConfigureAwait(false);
+            await stream.FlushAsync().ConfigureAwait(false);
+            await Task.Delay(Timeout.Infinite).ConfigureAwait(false);
+        }
+
+        protected override bool TryComputeLength(out long length)
+        {
+            length = -1;
+            return false;
+        }
     }
 
     /// <summary>Вміст без відомої довжини — іде як <c>Transfer-Encoding: chunked</c>.</summary>

@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useState, type JSX } from 'react';
 import { Button, Code, Group, Skeleton, Stack, Table, Text } from '@mantine/core';
-import { useQuery } from '@tanstack/react-query';
+import { useQueries, useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { apiFetch } from '@/api/client';
 import type { PeriodCalendarDto } from '@/api/types';
@@ -9,6 +9,7 @@ import { DocumentListFilterBar } from '@/features/documents/DocumentListFilterBa
 import { DocumentListSummaryStrip } from '@/features/documents/DocumentListSummaryStrip';
 import { useDocumentListFilters } from '@/features/documents/documentListFilters';
 import { LateEditsMark } from '@/features/documents/LateEditsMark';
+import { newestOpenPeriodKey } from '@/features/documents/newDocumentPeriod';
 import { formatNumber } from '@/shared/format';
 import { can, useSession } from '@/shared/session/useSession';
 import { localized, type LocalizedText } from '@/shared/i18n/localized';
@@ -36,6 +37,9 @@ const loadCreateDocumentModal = () => import('@/features/documents/CreateDocumen
 const CreateDocumentModal = lazy(async () => ({
   default: (await loadCreateDocumentModal()).CreateDocumentModal,
 }));
+
+/** A3-02: скільки проєктів максимум опитуємо заради типового періоду; більше — вибір лишається людині. */
+const AUTO_PICK_MAX_PROJECTS = 10;
 
 /**
  * Перелік документів.
@@ -90,14 +94,10 @@ export function DocumentsPage(): JSX.Element {
    * рівно один і система його знає (`GET /projects/{id}/periods` віддає
    * `isCurrent`). Екран мовчки показував «станів немає» там, де стан є.
    *
-   * ⛔ Межа автовибору, і вона вузька в ДВІ сторони одразу:
-   *  1. проєкт має бути рівно ОДИН — перелік документів наскрізний по
-   *     проєктах, і взяти календар «першого-ліпшого» з десяти означало б
-   *     підставити в адресу період чужого проєкту;
-   *  2. період береться не «перший у списку», а позначений САМИМ сервером як
-   *     поточний (`isCurrent` — `CurrentPeriod`, `D-77`). Якщо позначки немає,
-   *     підставляється `Open`-період — і лише коли він один. Два відкриті
-   *     періоди — неоднозначність, і вибір лишається людині.
+   * ⛔ Межа автовибору (✎ A3-02: переписана — U-10 брав лише єдиний проєкт, і з п'ятьма проєктами
+   * поле лишалось порожнім): період береться не «перший у списку», а НАЙНОВІШИЙ ВІДКРИТИЙ серед
+   * календарів усіх проєктів (до `AUTO_PICK_MAX_PROJECTS`), як у формі створення документа; поточний
+   * (`isCurrent`, `D-77`) — запасний, коли відкритих немає. Проєктів понад межу — вибір людині.
    *
    * ⛔ Фільтром це НЕ стає, і ця межа тут найважливіша: перелік документів
    * періодом не фільтрується (див. шапку файла — період керує лише КОЛОНКОЮ
@@ -123,34 +123,48 @@ export function DocumentsPage(): JSX.Element {
    * Очищене руками поле — рішення людини, а не «період не обрано».
    */
   const [autoPick, setAutoPick] = useState(() => periodKey === null);
-  const onlyProject = projects.data?.items.length === 1 ? projects.data.items[0] : undefined;
-
-  const calendar = useQuery({
-    queryKey: ['periods', onlyProject?.id ?? null],
-    queryFn: () =>
-      apiFetch<PeriodCalendarDto>(`/api/v1/projects/${String(onlyProject?.id ?? 0)}/periods`),
-    enabled: autoPick && periodKey === null && onlyProject !== undefined,
+  /*
+   * ⛔ A3-02: проєктів у типовій установці кілька (приймальний стенд — п'ять), тож «рівно один проєкт»
+   * лишало поле порожнім майже завжди. Тепер календарі беруться в УСІХ проєктів (до `AUTO_PICK_MAX_PROJECTS`;
+   * `periodKey` — один календар місяців для всіх, ключі ті самі) і береться НАЙНОВІШИЙ ВІДКРИТИЙ період
+   * серед них — як у формі створення документа (`newestOpenPeriodKey`, A2-05). Проєктів більше межі —
+   * вибір лишається людині: десятки запитів заради замовчування не виправдані. Поточний (`isCurrent`)
+   * лишається запасним, коли відкритих періодів немає. Решта меж (лише при вході, не очищене поле,
+   * період — не фільтр) — без змін.
+   */
+  const pickProjects =
+    projects.data !== undefined && projects.data.items.length <= AUTO_PICK_MAX_PROJECTS
+      ? projects.data.items
+      : [];
+  const calendars = useQueries({
+    queries: pickProjects.map((project) => ({
+      queryKey: ['periods', project.id],
+      queryFn: () => apiFetch<PeriodCalendarDto>(`/api/v1/projects/${String(project.id)}/periods`),
+      enabled: autoPick && periodKey === null,
+    })),
   });
+  const calendarsReady = pickProjects.length > 0 && calendars.every((calendar) => calendar.data !== undefined);
+  // Відмова будь-якого календаря — під переліком (як і раніше), автовибір тоді не відбувається.
+  const calendarFailure = calendars.find((calendar) => calendar.error !== null);
+  const calendar = {
+    error: calendarFailure?.error ?? null,
+    refetch: () => Promise.all(calendars.map((entry) => entry.refetch())),
+  };
+
+  // `undefined` — календарі ще в дорозі; `null` — вибирати нічого.
+  let autoKey: number | null | undefined;
+  if (calendarsReady) {
+    const periods = calendars.flatMap((entry) => entry.data?.periods ?? []);
+    autoKey = newestOpenPeriodKey(periods) ?? periods.find((period) => period.isCurrent)?.periodKey ?? null;
+  }
 
   useEffect(() => {
-    if (!autoPick || periodKey !== null) return;
+    if (!autoPick || periodKey !== null || autoKey === undefined) return;
 
-    const periods = calendar.data?.periods;
-    if (periods === undefined) return;
-
-    const current = periods.find((period) => period.isCurrent);
-
-    // ⚠ `Open` береться лише коли він ОДИН: два відкриті періоди — це вибір,
-    // а не замовчування, і мовчки взяти один із них означало б показати стан
-    // не того періоду, про який думає людина.
-    const open = periods.filter((period) => period.state === 'Open');
-    const pick = current ?? (open.length === 1 ? open[0] : undefined);
-
-    // ⚠ Рішення при вході ухвалено — з вибором чи без (календар
-    // неоднозначний): далі період змінює лише людина.
+    // ⚠ Рішення при вході ухвалено — з вибором чи без: далі період змінює лише людина.
     setAutoPick(false);
-    if (pick !== undefined) setUrlParams({ periodKey: pick.periodKey, cursor: null });
-  }, [autoPick, periodKey, calendar.data, setUrlParams]);
+    if (autoKey !== null) setUrlParams({ periodKey: autoKey, cursor: null });
+  }, [autoPick, periodKey, autoKey, setUrlParams]);
 
   /**
    * ⛔ Директива D15 §0, правило L10. Тут стояло

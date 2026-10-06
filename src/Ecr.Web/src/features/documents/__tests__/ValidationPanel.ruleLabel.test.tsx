@@ -47,4 +47,16 @@ describe('A2-04 підпис правила в панелі зауважень',
     expect(cell.getAttribute('title')).toBe('REL-CHK_TOT_v5');
     expect(screen.queryByText('REL-CHK_TOT_v5')).toBeNull();
   });
+
+  it('A3: displayCode від сервера має перевагу, повний ruleCode лишається в підказці', () => {
+    render(
+      <MantineProvider>
+        <ValidationPanel messages={[Check({ displayCode: 'FROM_SERVER' })]} />
+      </MantineProvider>,
+    );
+
+    const cell = screen.getByText('FROM_SERVER');
+    expect(cell.getAttribute('title')).toBe('REL-CHK_TOT_v5');
+    expect(screen.queryByText('CHK_TOT')).toBeNull();
+  });
 });

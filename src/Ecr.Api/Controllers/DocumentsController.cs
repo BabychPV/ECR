@@ -249,7 +249,8 @@ public sealed class DocumentsController(
             periodKey,
             [.. messages.Select(m => new ValidationFindingDto(
                 m.Severity.ToString(), m.RuleCode, m.Message,
-                m.TableDefId, m.RowKey, m.ColumnCode, m.BlocksSave))],
+                m.TableDefId, m.RowKey, m.ColumnCode, m.BlocksSave,
+                ValidationFindingDto.DisplayCodeOf(m.RuleCode)))],
             Validated: true));
     }
 
@@ -295,14 +296,15 @@ public sealed class DocumentsController(
             : Ok(new ValidationResultResponse(
                 id,
                 periodKey,
+                // ⚠ Тут значення приходить зі ЗБЕРЕЖЕНОГО підсумку, а не з
+                // щойно порахованого: `wf.ValidationResult.MessagesJson` —
+                // це серіалізований `List<ValidationMessage>` цілком
+                // (`ValidateDocumentHandler.cs:106`), тож таблиця в ньому
+                // вже є і міграція для цього поля не потрібна.
                 [.. messages.Select(m => new ValidationFindingDto(
                     m.Severity.ToString(), m.RuleCode, m.Message,
-                    // ⚠ Тут значення приходить зі ЗБЕРЕЖЕНОГО підсумку, а не з
-                    // щойно порахованого: `wf.ValidationResult.MessagesJson` —
-                    // це серіалізований `List<ValidationMessage>` цілком
-                    // (`ValidateDocumentHandler.cs:106`), тож таблиця в ньому
-                    // вже є і міграція для цього поля не потрібна.
-                    m.TableDefId, m.RowKey, m.ColumnCode, m.BlocksSave))],
+                    m.TableDefId, m.RowKey, m.ColumnCode, m.BlocksSave,
+                    ValidationFindingDto.DisplayCodeOf(m.RuleCode)))],
                 Validated: true));
     }
 
@@ -723,5 +725,45 @@ public sealed record ValidationResultResponse(
 /// давно — відображення в DTO його відкидало, тож клієнт отримував
 /// зауваження, за яким не міг перейти до комірки однозначно.
 /// </remarks>
+/// <param name="DisplayCode">
+/// Код для показу людині (A3): для знахідки Check — код зв'язку без службових <c>REL-</c> і суфікса
+/// <c>_vN</c> (номер версії), який дописує клон шаблону; для решти правил — той самий <c>RuleCode</c>.
+/// ⛔ <c>RuleCode</c> НЕ змінюється: за ним <c>GetValidationResultHandler</c> зіставляє збережені знахідки
+/// із зв'язками, а клієнт — адресу знахідки.
+/// </param>
 public sealed record ValidationFindingDto(
-    string Severity, string RuleCode, string Message, int TableDefId, string? RowKey, string? ColumnCode, bool BlocksSave);
+    string Severity, string RuleCode, string Message, int TableDefId, string? RowKey, string? ColumnCode, bool BlocksSave,
+    string? DisplayCode = null)
+{
+    private const string RelationPrefix = "REL-";
+
+    /// <summary>
+    /// Код для показу: <c>REL-CHK_TOT_v5</c> → <c>CHK_TOT</c>. Лише кінцевий суфікс <c>_v</c> + цифри;
+    /// коди не-зв'язків (<c>cfg.ValidationRule</c>, <c>ECR-…</c>) — як є.
+    /// </summary>
+    /// <param name="ruleCode">Код правила.</param>
+    public static string DisplayCodeOf(string ruleCode)
+    {
+        ArgumentNullException.ThrowIfNull(ruleCode);
+
+        if (!ruleCode.StartsWith(RelationPrefix, StringComparison.Ordinal))
+        {
+            return ruleCode;
+        }
+
+        var relation = ruleCode[RelationPrefix.Length..];
+        var digits = relation.Length;
+
+        while (digits > 0 && relation[digits - 1] is >= '0' and <= '9')
+        {
+            digits--;
+        }
+
+        if (digits < relation.Length && digits >= 2 && relation[digits - 2] == '_' && relation[digits - 1] == 'v')
+        {
+            relation = relation[..(digits - 2)];
+        }
+
+        return relation.Length > 0 ? relation : ruleCode;
+    }
+}

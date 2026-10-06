@@ -298,7 +298,7 @@ public sealed class ExpressionDepthGuardTests
         Assert.False(result.IsSuccess);
         Assert.Null(result.Expression);
         var diagnostic = Assert.Single(result.Diagnostics, d => d.MessageKey == "expr.chainTooLong");
-        Assert.Equal("2048", diagnostic.MessageParams!["max"]);
+        Assert.Equal("1024", diagnostic.MessageParams!["max"]);
     }
 
     [Fact]
@@ -337,14 +337,17 @@ public sealed class ExpressionDepthGuardTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
-    public void Найдовший_вираз_що_зберігається_вкладається_в_межу_ланок()
+    public void Найдовший_вираз_із_посилань_що_зберігається_вкладається_в_межу_ланок()
     {
-        // 4000 символів (`MethodologyFormula.MaxExpressionLength`) — не більше
-        // 2000 бінарних операторів: жоден збережений вираз межа не відхиляє.
-        var text = "1" + Repeat("+1", 1999);
+        // ✎ L7-01 (межа 2048 → 1024 через стек 1 МБ): 4000 символів
+        // (`MethodologyFormula.MaxExpressionLength`) із посилань на комірки — не
+        // більше 1000 ланок, тож жодну справжню формулу межа не відхиляє. Понад
+        // 1024 дає лише вироджений `1+1+…` — і його відхиляє вже збереження.
+        var text = "[A]" + Repeat("+[A]", 999);
         Assert.True(text.Length <= 4000);
 
         Assert.True(Expr.Parse(text).IsSuccess);
+        Assert.False(Expr.Parse("1" + Repeat("+1", 1999)).IsSuccess);
     }
 
     [Fact]

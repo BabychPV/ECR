@@ -8,6 +8,7 @@ import {
   mantineClassesIn,
   pruneCss,
 } from './src/app/mantineCssPrune';
+import { MantineUseTransitionModule, patchMantineUseTransition } from './scripts/patch-mantine-transition.mjs';
 
 /**
  * Відсікає з `@mantine/core/styles.css` стилі компонентів, яких у збірці
@@ -67,6 +68,26 @@ function pruneUnusedMantineCss(): Plugin {
   };
 }
 
+/**
+ * Латає `Transition/use-transition.mjs` Mantine: повторне відкриття діалогу одразу після закриття
+ * перемонтовувало його вміст посеред вводу (`scripts/patch-mantine-transition.mjs` — чому і як).
+ *
+ * ⚠ `postinstall` уже латає `node_modules` (для `vite dev` і vitest); тут — та сама латка ще раз
+ * у збірці, щоб продукт був залатаним і після `npm ci --ignore-scripts`. Повторно — без змін.
+ */
+function patchMantineTransition(): Plugin {
+  return {
+    name: 'ecr:mantine-transition-reopen',
+    apply: 'build',
+    enforce: 'pre',
+    transform(code, id) {
+      if (!MantineUseTransitionModule.test(id.split('?')[0] ?? id)) return null;
+
+      return { code: patchMantineUseTransition(code), map: null };
+    },
+  };
+}
+
 /*
  * ⛔ Директива паралельного аудиту (2026-09-11, Wave 0 / PR-0.2): кілька
  * ліній роботи піднімають dotnet+vite одночасно, і фіксовані 5173/5080
@@ -79,7 +100,7 @@ const vitePort = Number(process.env.ECR_VITE_PORT ?? 5173);
 const apiUrl = process.env.ECR_API_URL ?? 'http://localhost:5080';
 
 export default defineConfig({
-  plugins: [react(), pruneUnusedMantineCss()],
+  plugins: [react(), pruneUnusedMantineCss(), patchMantineTransition()],
   resolve: {
     alias: { '@': path.resolve(__dirname, './src') },
   },

@@ -61,6 +61,19 @@ public sealed class JobRetryPolicyTests
     /// перший рядок; <c>BusinessRuleException =&gt; true</c> — червоні рядки 0422.
     /// </remarks>
     [Fact]
+    [Trait("Requirement", "L7-01")]
+    public void Надто_глибокий_вираз_не_повторюється_і_має_власний_код()
+    {
+        // ⛔ L7-01: сторож стека обходу дерева виразу. Той самий вираз — той самий збій:
+        // повтор лише ховав причину на 210 с і закінчувався ECR-SYS-0500.
+        var tooDeep = new InsufficientExecutionStackException("too deep");
+
+        Assert.False(JobRetryPolicy.IsWorthRetrying(tooDeep));
+        Assert.False(JobRetryPolicy.ShouldRetry(0, tooDeep));
+        Assert.Equal(ErrorCodes.ExpressionTooComplex, JobRetryPolicy.ErrorCodeOf(tooDeep));
+    }
+
+    [Fact]
     public void Прикладна_відмова_ретраїться_лише_з_кодом_недоступності()
     {
         Assert.False(JobRetryPolicy.IsWorthRetrying(

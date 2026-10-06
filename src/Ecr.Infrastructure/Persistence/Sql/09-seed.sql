@@ -6709,8 +6709,15 @@ USING (VALUES
     (N'document.validationNoErrors', N'en', N'No errors found', 1),
     -- COLL:a2i18nmonth ── кінець секції ──
     -- COLL:a2chk ── A2-04: знахідка Check називає рядок джерела (кілька рядків джерела проти одного рядка приймача); ru/kz — порцією COLL:a2chk у блоці I18N нижче ──
-    (N'validation.check.mismatchRow', N'en', N'Check: {left} = {leftValue} (source row {sourceRow}) does not match {right} = {rightValue}: deviation {deviation}, allowed {allowed} ({kind}).', 1)
+    (N'validation.check.mismatchRow', N'en', N'Check: {left} = {leftValue} (source row {sourceRow}) does not match {right} = {rightValue}: deviation {deviation}, allowed {allowed} ({kind}).', 1),
     -- COLL:a2chk ── кінець секції ──
+    -- COLL:navcollapse ── бічне меню згортається до іконок (кнопка-шеврон); ru/kz — порцією COLL:navcollapse у блоці I18N нижче ──
+    (N'nav.collapse', N'en', N'Collapse menu', 1),
+    (N'nav.expand', N'en', N'Expand menu', 1),
+    -- COLL:navcollapse ── кінець секції ──
+    -- COLL:l701depth ── L7-01: заголовок коду ECR-EXPR-0422 (вираз надто глибокий для обходу; подробиця — наявний expr.tooComplex); ru/kz — порцією COLL:l701depth у блоці I18N нижче ──
+    (N'err.ECR-EXPR-0422', N'en', N'Expression too complex', 1)
+    -- COLL:l701depth ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -15878,6 +15885,28 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:a2chk ── кінець секції ──
+-- COLL:navcollapse ── ru/kz: бічне меню згортається до іконок; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'nav.collapse', N'ru', N'Свернуть меню'),
+    (N'nav.collapse', N'kz', N'Мәзірді жию'),
+    (N'nav.expand', N'ru', N'Развернуть меню'),
+    (N'nav.expand', N'kz', N'Мәзірді жаю')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:navcollapse ── кінець секції ──
+-- COLL:l701depth ── ru/kz L7-01: заголовок коду ECR-EXPR-0422; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-EXPR-0422', N'ru', N'Выражение слишком сложное'),
+    (N'err.ECR-EXPR-0422', N'kz', N'Өрнек тым күрделі')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:l701depth ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

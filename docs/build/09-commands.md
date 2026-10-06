@@ -300,6 +300,38 @@ git tag stage-N
 git diff stage-1..HEAD --stat        # для рев'ю
 ```
 
+### Статуси задач черги з git: `tools/status-from-git.ps1`
+
+Рядок «Статус» у `docs/build/WORK-QUEUE.md` пишуть руками, і він відстає від
+git. Скрипт бере ID задач (`AN-nn`, `AU-nn`, `CL-nn`, `HU-nn`, `DB-nn`) і коди
+знахідок (`L<n>-<nn>`, `T<n>-<nn>`) з черги, шукає їх у темі й тілі комітів і
+каже, де робота: **випущено** (коміт досяжний з `origin/main`), **зведено**
+(лише в `origin/dev/integration`), **—** (комітів немає). Без комітів з ID —
+запасний доказ за хешем, який названо в самому рядку черги. Merge-коміти й
+коміти, що змінюють лише облікові файли (черга, `TODO-REMAINING.md`,
+`QUESTIONS-BUSINESS.md`), не рахуються.
+
+```powershell
+git fetch origin main dev/integration          # скрипт сам не fetch-ить
+powershell -File tools\status-from-git.ps1 -OutFile $env:TEMP\status-from-git.md
+pwsh -File tools/status-from-git.ps1 | Select-String 'AN-36'   # звіт у stdout
+```
+
+- **У репозиторій нічого не пише.** Без `-OutFile` звіт (Markdown) іде в
+  стандартний вивід; `-OutFile` усередині репозиторію — відмова. Черга не
+  змінюється: статус у ній оновлює виконавець, звіт лише підказує.
+- **Лише локальний git**: ні `gh`, ні GitHub API, ні мережі; вердиктів CI не
+  показує. Немає git, гілки чи файлу черги — рядок `status-from-git: …` у
+  stderr і код 1, звіту немає.
+- ⚠ Неглибокий клон (shallow) дає хибні «—»; звіт про це попереджає, лік —
+  `git fetch --unshallow`.
+- Параметри: `-RepoRoot`, `-Queue`, `-Integration` (типово
+  `origin/dev/integration`), `-Release` (типово `origin/main`),
+  `-IgnorePaths`, `-OutFile`. Сумісність: Windows PowerShell 5.1 і
+  PowerShell 7+.
+- Тест: `StatusFromGitScriptTests` (`Ecr.Architecture.Tests`) запускає
+  справжній скрипт у `pwsh` на тимчасовому репозиторії.
+
 ---
 
 ## 8. Журнал перевірки команд (заповнюється на ПК-2)

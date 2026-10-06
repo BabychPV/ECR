@@ -1,5 +1,6 @@
 // src/Ecr.Application/Calculations/PublishMethodologyHandler.cs
 using System.Globalization;
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 using Ecr.Application.Common;
 using Ecr.Application.Errors;
@@ -651,6 +652,9 @@ public sealed class PublishMethodologyHandler(
         Dictionary<string, MethodologyFormulaScope> scopes,
         HashSet<string> perSubstanceConstants)
     {
+        // ⛔ L7-01: лівий гребінь ланцюга — рекурсія глибиною в кількість ланок.
+        RuntimeHelpers.EnsureSufficientExecutionStack();
+
         switch (node)
         {
             case Ecr.Expressions.Ast.SymbolReferenceNode { Kind: Ecr.Expressions.Ast.SymbolKind.Formula } formula
@@ -724,6 +728,9 @@ public sealed class PublishMethodologyHandler(
     private static IEnumerable<Ecr.Expressions.Ast.FunctionNode> Calls(
         Ecr.Expressions.Ast.AstNode node)
     {
+        // ⛔ L7-01: лівий гребінь ланцюга — рекурсія глибиною в кількість ланок.
+        RuntimeHelpers.EnsureSufficientExecutionStack();
+
         if (node is Ecr.Expressions.Ast.FunctionNode function)
         {
             yield return function;
@@ -1250,6 +1257,9 @@ public sealed class PublishMethodologyHandler(
     private static IEnumerable<Ecr.Expressions.Ast.SymbolReferenceNode> FormulaReferences(
         Ecr.Expressions.Ast.AstNode node)
     {
+        // ⛔ L7-01: лівий гребінь ланцюга — рекурсія глибиною в кількість ланок.
+        RuntimeHelpers.EnsureSufficientExecutionStack();
+
         if (node is Ecr.Expressions.Ast.SymbolReferenceNode
             {
                 Kind: Ecr.Expressions.Ast.SymbolKind.Formula,

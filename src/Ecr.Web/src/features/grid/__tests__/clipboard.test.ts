@@ -35,13 +35,24 @@ describe('Вставка з буфера Excel', () => {
     const rowKeys = Array.from({ length: 500 }, (_, r) => `R${r}`);
     const columnCodes = Array.from({ length: 60 }, (_, c) => `C${c}`);
 
-    const started = performance.now();
-    const matrix = parseClipboard(rows);
-    const plan = planPaste(matrix, rowKeys, columnCodes, { rowIndex: 0, columnIndex: 0 }, () => null);
-    const elapsed = performance.now() - started;
+    const paste = () => planPaste(parseClipboard(rows), rowKeys, columnCodes, { rowIndex: 0, columnIndex: 0 }, () => null);
 
-    expect(plan.targets).toHaveLength(500 * 60);
-    expect(elapsed).toBeLessThan(200);
+    // ⚠ Один замір у CI був флейком (поріг 200 мс, локально ~5-40 мс): у нього потрапляли
+    // холодний JIT і чужі паузи (GC, інші воркери vitest на тому ж ядрі) - шум раннера, а не
+    // вартість вставки. Тому: прогрів (не міряється), далі МЕДІАНА п'яти замірів. Поріг той
+    // самий, 200 мс; повільна реалізація перевищує його в кожному замірі, тож медіана її ловить.
+    expect(paste().targets).toHaveLength(500 * 60);
+
+    const samples: number[] = [];
+    for (let i = 0; i < 5; i++) {
+      const started = performance.now();
+      const plan = paste();
+      samples.push(performance.now() - started);
+      expect(plan.targets).toHaveLength(500 * 60);
+    }
+
+    const median = [...samples].sort((a, b) => a - b)[2] ?? Number.POSITIVE_INFINITY;
+    expect(median, `заміри, мс: ${samples.map((ms) => ms.toFixed(1)).join(', ')}`).toBeLessThan(200);
   });
 
   it('вставка у read-only комірки відхиляє ВЕСЬ батч і показує перелік заборонених', () => {
