@@ -32,6 +32,12 @@ namespace Ecr.Application.Periods.Dto;
 /// </param>
 /// <param name="IsCurrent">Чи є періодом за замовчуванням для UI.</param>
 /// <param name="ReopenedUntil">Якщо період відкрито повторно — до якого моменту.</param>
+/// <param name="NotSubmittedSheets">
+/// Скільки аркушів проєкту в цьому періоді ще не подано (чернетка, без стану чи відхилено) — UI-33, D1.
+/// <c>null</c> — не запитувано (<c>withSheetCounts=false</c>) АБО читач має інструменти, що ховають аркуші, і число
+/// розкрило б приховане (R-8, <c>SheetVisibility</c>). Лічильника пізніх правок немає навмисно: індексу по
+/// <c>aud.CellChange.IsLateEdit</c> немає.
+/// </param>
 public sealed record PeriodDto(
     int Id,
     int PeriodKey,
@@ -42,7 +48,8 @@ public sealed record PeriodDto(
     DateTimeOffset EndsAt,
     DateTimeOffset? GraceEndsAt,
     bool IsCurrent,
-    DateTimeOffset? ReopenedUntil);
+    DateTimeOffset? ReopenedUntil,
+    int? NotSubmittedSheets = null);
 
 /// <summary>Календар проєкту.</summary>
 /// <remarks>

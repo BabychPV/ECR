@@ -22,6 +22,18 @@ public interface ICampaignSummaryStore
     /// </param>
     /// <param name="ct">Токен скасування.</param>
     public Task<CampaignProjectPage> ListAsync(int periodKey, int limit, CancellationToken ct);
+
+    /// <summary>
+    /// Скільки аркушів проєкту ще не подано, по кожному періоду проєкту (UI-33, D1).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Не подано = чернетка, без рядка стану чи відхилено — те саме правило, що й у
+    /// <see cref="CampaignProjectFacts.NotSubmittedSheets"/>. Періоди без документів у словнику відсутні (0).
+    /// Без звуження за читачем: його застосовує виклик (<c>SheetVisibility</c>).
+    /// </remarks>
+    /// <param name="projectId">Проєкт.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<IReadOnlyDictionary<int, int>> NotSubmittedSheetsByPeriodAsync(int projectId, CancellationToken ct);
 }
 
 /// <summary>Сторінка огляду кампанії.</summary>

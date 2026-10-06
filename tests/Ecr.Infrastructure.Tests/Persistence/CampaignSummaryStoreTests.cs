@@ -1,4 +1,5 @@
 using Ecr.Application.Common;
+using Ecr.Application.Periods;
 using Ecr.Application.Reporting;
 using Ecr.Application.Reporting.Dto;
 using Ecr.Application.Security;
@@ -310,6 +311,54 @@ public sealed class CampaignSummaryStoreTests(SqlServerFixture sql)
             new DateOnly(period.Year, period.Sequence, 1),
             new DateOnly(period.Year, period.Sequence, DateTime.DaysInMonth(period.Year, period.Sequence)))));
         await db.SaveChangesAsync(CancellationToken.None);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "R-8")]
+    public async Task Календар_віддає_не_подані_аркуші_лише_читачу_без_прихованого_і_лише_за_прапорцем()
+    {
+        // UI-33, D1: 1 + 2 + 3 + 4 документи по одному аркушу; не подано -- чернетка (1) і відхилені (4).
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var chain = await builder.BuildAsync(ct: CancellationToken.None);
+        await using var db = builder.CreateContext();
+
+        await ArrangeAsync(db, chain, chain.DocumentId, status: null);
+        await AddAsync(db, chain, DocumentStatus.Submitted, count: 2);
+        await AddAsync(db, chain, DocumentStatus.Approved, count: 3);
+        await AddAsync(db, chain, DocumentStatus.Rejected, count: 4);
+
+        async Task<int?> NotSubmitted(AccessBuilder access, bool withCounts)
+        {
+            var calendar = await CalendarHandler(db, access).HandleAsync(chain.ProjectId, CancellationToken.None, withCounts);
+            return calendar.Periods.Single(p => p.PeriodKey == chain.PeriodKey.Value).NotSubmittedSheets;
+        }
+
+        AccessBuilder Reader() => new AccessBuilder { UserId = 7 }
+            .Permission("Document.View")
+            .Grant(ResourceKind.Project, chain.ProjectId, GrantLevel.Read);
+
+        Assert.Equal(5, await NotSubmitted(Reader(), withCounts: true));
+
+        // Без прапорця календар не платить за агрегат.
+        Assert.Null(await NotSubmitted(Reader(), withCounts: false));
+
+        // ⛔ МУТАЦІЙНИЙ ДОКАЗ: прибрати SeesAllSheets з GetPeriodCalendarHandler -- червоніє: заборона на аркуш
+        // не ховає число.
+        Assert.Null(await NotSubmitted(Reader().Deny(ResourceKind.Sheet, chain.SheetDefId), withCounts: true));
+    }
+
+    /// <summary>Обробник календаря над справжніми сховищами; користувач описаний <paramref name="access"/>.</summary>
+    private static GetPeriodCalendarHandler CalendarHandler(EcrDbContext db, AccessBuilder access)
+    {
+        var decisions = Substitute.For<IAccessDecisionService>();
+        decisions.BuildProfileAsync(7, Arg.Any<CancellationToken>()).Returns(access.Build());
+
+        var user = Substitute.For<ICurrentUser>();
+        user.UserId.Returns(7);
+
+        return new GetPeriodCalendarHandler(new PeriodStore(db), decisions, user, new CampaignSummaryStore(db));
     }
 
     /// <summary>Обробник над справжнім сховищем; користувач має лише право огляду.</summary>
