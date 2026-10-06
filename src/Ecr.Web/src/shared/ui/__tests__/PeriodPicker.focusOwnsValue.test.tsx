@@ -58,7 +58,7 @@ describe('PeriodPicker: зовнішній value не перебиває наб�
     const { rerender } = renderWithMantine(<PeriodPicker value={202512} onChange={onChange} />);
     const input = periodInput();
 
-    await user.type(input, '202608', { initialSelectionStart: 0, initialSelectionEnd: 6 });
+    await user.type(input, '202608', { initialSelectionStart: 0, initialSelectionEnd: input.value.length });
     // Відлуння ще не долетіло, зате долетіло «щось старе» ззовні.
     rerender(<PeriodPicker value={202511} onChange={onChange} />);
     expect(input.value).toBe('202608');
