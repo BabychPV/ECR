@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { boardColumns, parseDocumentsView } from '../documentsBoard';
+import { boardColumns, parseDocumentsView } from '../documentsBoardModel';
 
 /** `UI-40`: стовпці дошки за станом документа (найгірший стан видимих аркушів). */
 const d = (id: number, sheetStates: Record<string, string>) => ({ id, sheetStates });
