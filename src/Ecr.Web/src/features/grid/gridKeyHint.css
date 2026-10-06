@@ -1,0 +1,74 @@
+/*
+ * Підказка клавіш під таблицею і довідка (`UI-41`).
+ *
+ * ⚠ Вигляд — з макета `docs/design/hybrid/index.html`: дрібний приглушений текст рядка стану
+ * (`.statusbar`, `--fs-xs`, `--muted`), `kbd` — моно на заглибленому тлі. Лише токени `--ecr-*`.
+ */
+.ecr-keyhint {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  /* У рядку заголовка таблиці — праворуч; назва таблиці має пріоритет, підказка стискається. */
+  margin-left: auto;
+  flex: 0 1 auto;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--ecr-muted);
+}
+
+.ecr-keyhint-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Вузький екран: лише кнопка довідки (аркуш там однаково лише для читання, `UI-42`). */
+@media (max-width: 640px) {
+  .ecr-keyhint-text {
+    display: none;
+  }
+}
+
+.ecr-keyhint-btn {
+  flex: none;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--ecr-accent-text);
+  border-radius: 4px;
+}
+
+.ecr-keyhint-btn:hover {
+  text-decoration: underline;
+}
+
+.ecr-keyhint-list {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  font-size: 13px;
+}
+
+.ecr-keyhint-row {
+  display: grid;
+  grid-template-columns: 132px minmax(0, 1fr);
+  gap: 8px;
+  align-items: baseline;
+}
+
+.ecr-keyhint-row dd {
+  margin: 0;
+  color: var(--ecr-text);
+}
+
+.ecr-keyhint kbd,
+.ecr-keyhint-list kbd {
+  font-family: var(--mantine-font-family-monospace);
+  font-size: 11px;
+  padding: 0 4px;
+  border: 1px solid var(--ecr-border);
+  border-radius: 4px;
+  background: var(--ecr-sunken);
+  color: var(--ecr-text);
+  white-space: nowrap;
+}
