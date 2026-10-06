@@ -120,7 +120,8 @@ public sealed class SaveValidationRuleHandler(
         // документа. Діалект той самий, яким правило рахує `ValidationEngine`.
         ExpressionRejection.RequireValid(
             formulaEngine, version, command.Expression, ExpressionDialect.Template,
-            new ExpressionSite(table.Id, null, command.ColumnDefId));
+            new ExpressionSite(table.Id, null, command.ColumnDefId),
+            ValidationRule.MaxExpressionLength);
 
         // ⛔ ФВ-5.9: посилання на іншу таблицю/аркуш/період контекст правила читає
         // не тим, чим воно є, — відмова на збереженні, а не тиха неправда в рантаймі.

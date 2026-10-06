@@ -38,6 +38,7 @@ public static class ExpressionRejection
     /// <param name="expression">Текст виразу.</param>
     /// <param name="dialect">Діалект.</param>
     /// <param name="site">Місце виразу: таблиця, рядок, колонка.</param>
+    /// <param name="maxLength">Довжина колонки, в яку вираз зберігається (A4-03).</param>
     /// <exception cref="BusinessRuleException"><c>ECR-TMPL-0422</c> із ключем першого зауваження.</exception>
     /// <remarks>
     /// ⚠ Типи й одиниці на збереженні НЕ перевіряються — лише синтаксис і
@@ -51,14 +52,15 @@ public static class ExpressionRejection
         TemplateVersion version,
         string expression,
         ExpressionDialect dialect,
-        ExpressionSite site)
+        ExpressionSite site,
+        int maxLength = Ecr.Application.Expressions.ExpressionLengthGuard.MaxLength)
     {
         ArgumentNullException.ThrowIfNull(formulaEngine);
         ArgumentNullException.ThrowIfNull(version);
 
         // ⛔ L7-01: довжина — ДО повної перевірки; обробники збереження формули
         // і правила кличуть цей метод раніше за власну межу колонки.
-        Ecr.Application.Expressions.ExpressionLengthGuard.Require(expression);
+        Ecr.Application.Expressions.ExpressionLengthGuard.Require(expression, maxLength);
 
         var diagnostics = new List<ExpressionDiagnostic>();
         PublishChecks.CheckExpression(

@@ -7,6 +7,9 @@ namespace Ecr.Domain.Entities.Configuration;
 /// <summary>Правило валідації. Рівень визначає, чи блокує воно запис (R-B3).</summary>
 public sealed class ValidationRule : Entity<int>
 {
+    /// <summary>Довжина колонки cfg.ValidationRule.Expression — єдине джерело межі (A4-03).</summary>
+    public const int MaxExpressionLength = 2000;
+
     private ValidationRule() { }
 
     /// <param name="tableDefId">Таблиця, якій належить правило.</param>

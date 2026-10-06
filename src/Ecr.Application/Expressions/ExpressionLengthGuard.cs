@@ -28,20 +28,30 @@ public static class ExpressionLengthGuard
     /// <summary>Відмовляє, якщо вираз довший за <see cref="MaxLength"/>.</summary>
     /// <param name="expression">Текст виразу; <c>null</c> не перевіряється.</param>
     /// <exception cref="BusinessRuleException"><c>ECR-REQ-0422</c>, ключ <c>err.ECR-REQ-0422.expressionTooLong</c>.</exception>
-    public static void Require(string? expression)
+    public static void Require(string? expression) => Require(expression, MaxLength);
+
+    /// <summary>
+    /// Відмовляє, якщо вираз довший за <paramref name="max"/> — межу КОЛОНКИ, у яку він
+    /// зберігається (A4-03: колонки правил валідації і формул вужчі, 2000, а межа 4000
+    /// пропускала 2001–4000 символів до SaveChanges, і замість 422 виходило 500).
+    /// </summary>
+    /// <param name="expression">Текст виразу; <c>null</c> не перевіряється.</param>
+    /// <param name="max">Найбільша довжина в символах.</param>
+    /// <exception cref="BusinessRuleException"><c>ECR-REQ-0422</c>, ключ <c>err.ECR-REQ-0422.expressionTooLong</c>.</exception>
+    public static void Require(string? expression, int max)
     {
-        if (expression is null || expression.Length <= MaxLength)
+        if (expression is null || expression.Length <= max)
         {
             return;
         }
 
         throw new BusinessRuleException(
             ErrorCodes.RequestInvalid,
-            $"Вираз довший за {MaxLength} символів ({expression.Length}).",
+            $"Вираз довший за {max} символів ({expression.Length}).",
             new Dictionary<string, object?>
             {
                 ["messageKey"] = "err.ECR-REQ-0422.expressionTooLong",
-                ["max"] = MaxLength.ToString(CultureInfo.InvariantCulture),
+                ["max"] = max.ToString(CultureInfo.InvariantCulture),
                 ["length"] = expression.Length.ToString(CultureInfo.InvariantCulture),
             });
     }

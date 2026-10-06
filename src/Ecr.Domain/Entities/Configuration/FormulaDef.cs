@@ -6,6 +6,9 @@ namespace Ecr.Domain.Entities.Configuration;
 /// <summary>Формула шаблону: вираз плюс область дії.</summary>
 public sealed class FormulaDef : Entity<int>
 {
+    /// <summary>Довжина колонки cfg.FormulaDef.Expression — єдине джерело межі (A4-03).</summary>
+    public const int MaxExpressionLength = 2000;
+
     private FormulaDef() { }
 
     public FormulaDef(int tableDefId, FormulaScope scope, string expression, ExpressionDialect dialect)

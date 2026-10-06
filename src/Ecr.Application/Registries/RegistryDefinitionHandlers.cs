@@ -1369,6 +1369,9 @@ public sealed class SaveRegistryDefinitionHandler(
 
         foreach (var rule in wanted)
         {
+            // A4-03: довжина — до звернення до БД; колонка вужча за 500-ту відповідь.
+            Ecr.Application.Expressions.ExpressionLengthGuard.Require(rule.Expression, RegistryRuleDef.MaxExpressionLength);
+
             if (!Enum.TryParse<ValidationSeverity>(rule.Severity, ignoreCase: false, out var severity))
             {
                 throw new BusinessRuleException(
