@@ -139,7 +139,7 @@ describe('NotificationsPage: заголовок розділяє тексти Ch
     const headings = screen.getAllByRole('heading');
 
     expect(headings.map((node) => [node.tagName, node.textContent])).toEqual([
-      ['H3', '⟦notifications.title⟧'],
+      ['H1', '⟦notifications.title⟧'],
       ['H2', '⟦smtp.title⟧'],
       ['H2', '⟦notifications.channels⟧'],
       ['H2', '⟦notifications.rules⟧'],
