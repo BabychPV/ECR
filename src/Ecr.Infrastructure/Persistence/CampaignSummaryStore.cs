@@ -34,7 +34,9 @@ public sealed class CampaignSummaryStore(EcrDbContext db) : ICampaignSummaryStor
                COALESCE(SUM(CASE WHEN x.Rejected = 0 AND (x.Draft > 0 OR x.Sheets = 0) THEN 1 ELSE 0 END), 0) AS Draft,
                COALESCE(SUM(CASE WHEN x.Rejected = 0 AND x.Draft = 0 AND x.Submitted > 0 THEN 1 ELSE 0 END), 0) AS Submitted,
                COALESCE(SUM(CASE WHEN x.Sheets > 0 AND x.Approved = x.Sheets THEN 1 ELSE 0 END), 0) AS Approved,
-               COALESCE(SUM(CASE WHEN x.Rejected > 0 THEN 1 ELSE 0 END), 0) AS Rejected
+               COALESCE(SUM(CASE WHEN x.Rejected > 0 THEN 1 ELSE 0 END), 0) AS Rejected,
+               COALESCE(SUM(x.Sheets), 0) AS Sheets,
+               COALESCE(SUM(x.Draft + x.Rejected), 0) AS NotSubmittedSheets
         FROM (
             SELECT d.Id, d.ProjectId,
                    COUNT(s.SheetDefId) AS Sheets,
@@ -66,12 +68,14 @@ public sealed class CampaignSummaryStore(EcrDbContext db) : ICampaignSummaryStor
         SELECT b.DeadlineUtc, b.TimeZoneId, b.AllApproved, b.HasSnapshot,
                COUNT(*) AS Projects,
                SUM(b.Documents) AS Documents, SUM(b.Draft) AS Draft, SUM(b.Submitted) AS Submitted,
-               SUM(b.Approved) AS Approved, SUM(b.Rejected) AS Rejected, SUM(b.Snapshots) AS Snapshots
+               SUM(b.Approved) AS Approved, SUM(b.Rejected) AS Rejected, SUM(b.Snapshots) AS Snapshots,
+               SUM(b.Sheets) AS Sheets, SUM(b.NotSubmittedSheets) AS NotSubmittedSheets
         FROM (
             SELECT pe.ComputedGraceAt AS DeadlineUtc, pr.TimeZoneId,
                    COALESCE(st.Documents, 0) AS Documents, COALESCE(st.Draft, 0) AS Draft,
                    COALESCE(st.Submitted, 0) AS Submitted, COALESCE(st.Approved, 0) AS Approved,
                    COALESCE(st.Rejected, 0) AS Rejected, COALESCE(sn.Snapshots, 0) AS Snapshots,
+                   COALESCE(st.Sheets, 0) AS Sheets, COALESCE(st.NotSubmittedSheets, 0) AS NotSubmittedSheets,
                    CAST(CASE WHEN st.Documents > 0 AND st.Approved = st.Documents THEN 1 ELSE 0 END AS bit) AS AllApproved,
                    CAST(CASE WHEN sn.Snapshots > 0 THEN 1 ELSE 0 END AS bit) AS HasSnapshot
             FROM doc.Period pe
@@ -168,7 +172,9 @@ public sealed class CampaignSummaryStore(EcrDbContext db) : ICampaignSummaryStor
                 stage?.Rejected ?? 0,
                 snapshots.GetValueOrDefault(p.Id),
                 Deadline(p.Deadline),
-                p.TimeZoneId);
+                p.TimeZoneId,
+                stage?.Sheets ?? 0,
+                stage?.NotSubmittedSheets ?? 0);
         });
 
         return new CampaignProjectPage(total, rows, buckets);
@@ -210,15 +216,15 @@ public sealed class CampaignSummaryStore(EcrDbContext db) : ICampaignSummaryStor
 
         return rows.ConvertAll(r => new CampaignBucket(
             Deadline(r.DeadlineUtc), r.TimeZoneId, r.AllApproved, r.HasSnapshot, r.Projects,
-            r.Documents, r.Draft, r.Submitted, r.Approved, r.Rejected, r.Snapshots));
+            r.Documents, r.Draft, r.Submitted, r.Approved, r.Rejected, r.Snapshots, r.Sheets, r.NotSubmittedSheets));
     }
 
     /// <summary>Рядок агрегату етапів; імена колонок — імена властивостей.</summary>
     public sealed record StageRow(
-        int ProjectId, int Documents, int Draft, int Submitted, int Approved, int Rejected);
+        int ProjectId, int Documents, int Draft, int Submitted, int Approved, int Rejected, int Sheets, int NotSubmittedSheets);
 
     /// <summary>Рядок підсумкового агрегату; імена колонок — імена властивостей.</summary>
     public sealed record BucketRow(
         DateTime DeadlineUtc, string TimeZoneId, bool AllApproved, bool HasSnapshot, int Projects,
-        int Documents, int Draft, int Submitted, int Approved, int Rejected, int Snapshots);
+        int Documents, int Draft, int Submitted, int Approved, int Rejected, int Snapshots, int Sheets, int NotSubmittedSheets);
 }

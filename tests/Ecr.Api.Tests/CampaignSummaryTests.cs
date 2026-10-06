@@ -105,6 +105,10 @@ public sealed class CampaignSummaryTests(SqlServerFixture sql)
         Assert.Equal(1, row.GetProperty("submitted").GetInt32());
         Assert.Equal(0, row.GetProperty("draft").GetInt32());
 
+        // UI-33, D2: рівень аркуша (читач без заборон) -- один поданий аркуш, не поданих немає.
+        Assert.Equal(1, row.GetProperty("sheetsTotal").GetInt32());
+        Assert.Equal(0, row.GetProperty("notSubmittedSheets").GetInt32());
+
         // Форма проводу для клієнта: класифікація — рядком, строк у будівника
         // ланцюга не пораховано (`null`), підсумки — окремим об'єктом.
         Assert.Equal("InProgress", row.GetProperty("progress").GetString());

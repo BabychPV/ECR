@@ -68,6 +68,10 @@ public sealed class CampaignSummaryStoreTests(SqlServerFixture sql)
         Assert.Equal((10, 1, 2, 3, 4),
             (row.Documents, row.Draft, row.Submitted, row.Approved, row.Rejected));
 
+        // UI-33, D2: рівень аркуша. По одному аркушу на документ: 10 аркушів, не подано -- чернетка (1) і
+        // відхилені (4); поданий (2) і затверджені (3) -- вже подані.
+        Assert.Equal((10, 5), (row.Sheets, row.NotSubmittedSheets));
+
         // Останній етап кампанії: аркуші затверджено — але доки зрізу немає,
         // регулятор не отримав нічого.
         Assert.Equal(1, row.Snapshots);

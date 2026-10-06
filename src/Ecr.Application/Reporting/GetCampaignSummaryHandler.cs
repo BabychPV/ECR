@@ -56,9 +56,14 @@ public sealed class GetCampaignSummaryHandler(
     /// <param name="ct">Токен скасування.</param>
     public async Task<CampaignSummaryResponse> HandleAsync(int periodKey, CancellationToken ct)
     {
-        await PermissionCheck
+        var profile = await PermissionCheck
             .RequireAsync(access, currentUser, Permission, ct)
             .ConfigureAwait(false);
+
+        // ⛔ UI-33, D2 / R-8: лічильники АРКУШІВ — лише коли читач не має інструментів, що ховають аркуші
+        // (явна заборона / грант None). Інакше `null`: різниця «з забороною / без» розкривала б приховане.
+        // Лічильники документів нижче лишаються як були (Q15-07: огляд кампанії — право без межі проєктів).
+        var allSheets = SheetVisibility.SeesAllSheets(profile);
 
         var key = PeriodKey.Parse(periodKey);
         var page = await store.ListAsync(key.Value, MaxProjects, ct).ConfigureAwait(false);
@@ -79,7 +84,9 @@ public sealed class GetCampaignSummaryHandler(
                 p.ProjectId, p.ProjectCode, p.NameL10n,
                 p.Documents, p.Draft, p.Submitted, p.Approved, p.Rejected, p.Snapshots,
                 progress,
-                p.SubmissionDeadlineUtc is { } deadline ? ToSite(deadline, zone) : null);
+                p.SubmissionDeadlineUtc is { } deadline ? ToSite(deadline, zone) : null,
+                allSheets ? p.Sheets : null,
+                allSheets ? p.NotSubmittedSheets : null);
         }).ToList();
 
         // ⛔ Підсумки — з агрегату по ВСІХ проєктах періоду, а не з `rows`:
@@ -104,7 +111,9 @@ public sealed class GetCampaignSummaryHandler(
             progressCounts.GetValueOrDefault(CampaignProgress.Done),
             progressCounts.GetValueOrDefault(CampaignProgress.Overdue),
             progressCounts.GetValueOrDefault(CampaignProgress.AtRisk),
-            progressCounts.GetValueOrDefault(CampaignProgress.InProgress));
+            progressCounts.GetValueOrDefault(CampaignProgress.InProgress),
+            allSheets ? page.Buckets.Sum(b => b.Sheets) : null,
+            allSheets ? page.Buckets.Sum(b => b.NotSubmittedSheets) : null);
 
         return new CampaignSummaryResponse(key.Value, page.Total, rows, totals);
     }
