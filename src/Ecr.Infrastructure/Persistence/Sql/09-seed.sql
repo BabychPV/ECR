@@ -6681,8 +6681,11 @@ USING (VALUES
     -- COLL:a201pub ── A2-01: перелік проблем публікації шаблону читабельний (ключі діагностик 4224/4225 + заголовок переліку); ru/kz — порцією COLL:a201pub у блоці I18N нижче ──
     (N'err.ECR-TMPL-4224.severityConflict', N'en', N'Rules {ruleCode} ({severity}) and {otherRuleCode} ({otherSeverity}) apply to the same area of table {tableCode} with different severity levels. Give them the same level or narrow the scope of one of them.', 1),
     (N'err.ECR-TMPL-4225.requiredNotCovered', N'en', N'Column {tableCode}.{columnCode} is required, but no rule checks it and no formula fills it: an empty value would go unnoticed. Add a rule for it or make the column optional.', 1),
-    (N'version.publishProblems', N'en', N'The version was not published. Problems to fix: {count}', 1)
+    (N'version.publishProblems', N'en', N'The version was not published. Problems to fix: {count}', 1),
     -- COLL:a201pub ── кінець секції ──
+    -- COLL:a2s ── A2-03: підказка (Info) для Check без ключів; ru/kz — порцією COLL:a2s у блоці I18N нижче ──
+    (N'validation.check.noKeys', N'en', N'A Check without keys compares only when the receiving table has exactly one row; it has {targetRows}, so nothing was compared. Unknown row matching fields are ignored.', 1)
+    -- COLL:a2s ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -15778,6 +15781,16 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:a201pub ── кінець секції ──
+-- COLL:a2s ── ru/kz A2-03: підказка для Check без ключів; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'validation.check.noKeys', N'ru', N'Сверка без ключей сравнивает только при ровно одной строке таблицы-приёмника; в ней строк: {targetRows}, поэтому ничего не сравнивалось. Неизвестные поля сопоставления строк игнорируются.'),
+    (N'validation.check.noKeys', N'kz', N'Кілтсіз салыстыру қабылдағыш кестеде дәл бір жол болғанда ғана жұмыс істейді; онда {targetRows} жол бар, сондықтан ештеңе салыстырылмады. Жолдарды сәйкестендірудің белгісіз өрістері еленбейді.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:a2s ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

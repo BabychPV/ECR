@@ -90,6 +90,11 @@ public static class RelationCheckRunner
                     continue;
                 }
 
+                if (CheckEvaluator.NoKeysNotice(relation.Code, relation.TargetTableDefId, match, source, target, language) is { } notice)
+                {
+                    messages.Add(notice);
+                }
+
                 var failures = CheckEvaluator.Failures(match, spec, source, target);
                 messages.AddRange(CheckEvaluator.ToMessages(relation.Code, relation.TargetTableDefId, spec, failures, language, relation.SourceTableDefId));
             }

@@ -20,6 +20,9 @@ public static class ValidationMessageTemplates
     /// <summary>Check: значення колонок не сходяться в межах допуску.</summary>
     public const string CheckMismatch = "validation.check.mismatch";
 
+    /// <summary>Check без ключів при приймачі не з одного рядка: нічого не порівняно (A2-03, інформація).</summary>
+    public const string CheckNoKeys = "validation.check.noKeys";
+
     /// <summary>Обов'язкова колонка без значення.</summary>
     public const string ColumnRequired = "validation.column.required";
 
@@ -41,6 +44,10 @@ public static class ValidationMessageTemplates
             "Check: {left} = {leftValue} does not match {right} = {rightValue}: deviation {deviation}, allowed {allowed} ({kind}).",
             "Сверка: {left} = {leftValue} не сходится с {right} = {rightValue}: отклонение {deviation}, допустимо {allowed} ({kind}).",
             "Салыстыру: {left} = {leftValue} мәні {right} = {rightValue} мәніне сәйкес келмейді: ауытқу {deviation}, рұқсат етілгені {allowed} ({kind})."),
+        [CheckNoKeys] = (
+            "A Check without keys compares only when the receiving table has exactly one row; it has {targetRows}, so nothing was compared. Unknown row matching fields are ignored.",
+            "Сверка без ключей сравнивает только при ровно одной строке таблицы-приёмника; в ней строк: {targetRows}, поэтому ничего не сравнивалось. Неизвестные поля сопоставления строк игнорируются.",
+            "Кілтсіз салыстыру қабылдағыш кестеде дәл бір жол болғанда ғана жұмыс істейді; онда {targetRows} жол бар, сондықтан ештеңе салыстырылмады. Жолдарды сәйкестендірудің белгісіз өрістері еленбейді."),
         [ColumnRequired] = (
             "Column \"{column}\" is required.",
             "Колонка «{column}» обязательна.",

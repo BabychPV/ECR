@@ -248,4 +248,36 @@ public sealed class CheckEvaluatorTests
     [Fact]
     public async Task Runner_пропускає_зв_язок_зі_збереженою_раніше_хибною_схемою()
         => Assert.Empty(await Run(Build("""{"left":"Fact","right":"Total","severity":"Fatal"}""")));
+
+    private static RelationRow Row(string key)
+        => new(key, new Dictionary<string, decimal?>(), new Dictionary<string, string?>());
+
+    [Theory]
+    [InlineData(1, 3, true)]   // A2-03: без ключів і приймач із трьох рядків - підказка
+    [InlineData(1, 0, true)]
+    [InlineData(1, 1, false)]  // один рядок приймача - Check працює, підказки немає
+    [InlineData(0, 3, false)]  // у джерелі немає рядків - нічого пояснювати
+    public void A2_03_Check_без_ключів_дає_інформаційну_підказку_лише_коли_нічого_не_порівняно(int sources, int targets, bool expected)
+    {
+        var notice = CheckEvaluator.NoKeysNotice(
+            "CHK", 7, new RelationMatchSpec([]),
+            [.. Enumerable.Range(0, sources).Select(i => Row("s" + i))],
+            [.. Enumerable.Range(0, targets).Select(i => Row("t" + i))],
+            "en");
+
+        Assert.Equal(expected, notice is not null);
+        if (notice is not null)
+        {
+            Assert.Equal(ValidationSeverity.Info, notice.Severity);
+            Assert.False(notice.BlocksSave);
+            Assert.Equal(ValidationMessageTemplates.CheckNoKeys, notice.MessageKey);
+            Assert.Equal(targets.ToString(System.Globalization.CultureInfo.InvariantCulture), notice.Params!["targetRows"]);
+            Assert.Contains($"it has {targets}", notice.Message, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    public void A2_03_Check_із_ключами_підказки_не_дає()
+        => Assert.Null(CheckEvaluator.NoKeysNotice(
+            "CHK", 7, new RelationMatchSpec([new RelationKey("A", "A")]), [Row("s")], [Row("t1"), Row("t2")], "en"));
 }
