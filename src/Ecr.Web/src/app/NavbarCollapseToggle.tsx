@@ -5,7 +5,6 @@ import { LazyHint } from './LazyHint';
 import { IconOnlyNavLinkStyles } from './NavRouteLink';
 import { setNavbarCollapsed } from '@/shared/theme/navbarCollapse';
 
-
 /**
  * Кнопка «Згорнути меню / Розгорнути меню» внизу бічної панелі.
  *
@@ -64,12 +63,12 @@ export function NavbarCollapseToggle({
     />
   );
 
-  // Підказка потрібна лише без видимого тексту.
-  return collapsed ? (
-    <LazyHint label={label} position="right">
+  // Підказка потрібна лише без видимого тексту. ⛔ Обгортка — в обох станах
+  // (`disabled`): умовна перемонтовувала б кнопку на кожному натисканні, і
+  // фокус клавіатури після Enter падав би на `body` (рев'ю 06.10, P2-1).
+  return (
+    <LazyHint label={label} position="right" disabled={!collapsed}>
       {button}
     </LazyHint>
-  ) : (
-    button
   );
 }

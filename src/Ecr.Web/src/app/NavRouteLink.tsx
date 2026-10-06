@@ -66,15 +66,14 @@ export function NavRouteLink({
     />
   );
 
-  if (!collapsed) return link;
-
   // ⚠ Підказка і на фокусі (`Hint`): клавіатурний користувач без миші інакше
   // не дізнався б назви пункту, бачачи лише іконку. Доступне ім'я дає
   // `aria-label` вище. ⛔ `Hint` (на `Popover`, лінивим чанком), а не `Tooltip` Mantine: той
   // тягне взаємодії `@floating-ui/react` у вхідний чанк, +8 КБ gzip до КОЖНОГО
-  // маршруту, і `PipelinePage` виходила за межу `D-132`.
+  // маршруту, і `PipelinePage` виходила за межу `D-132`. Обгортка — в обох
+  // станах (`disabled`), щоб пункт не перемонтовувався при перемиканні.
   return (
-    <LazyHint label={label} position="right">
+    <LazyHint label={label} position="right" disabled={!collapsed}>
       {link}
     </LazyHint>
   );

@@ -1,17 +1,19 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import { theme } from '@/shared/theme/theme';
 import { AppLayout } from '@/app/AppLayout';
+import { setNavbarCollapsed } from '@/shared/theme/navbarCollapse';
 
 // Фокус на пункті меню прогріває чанк сторінки (`useRoutePrefetch`); справжній
 // імпорт доїхав би вже після кінця файла.
 vi.mock('@/pages/DocumentsPage', () => ({ DocumentsPage: () => null }));
+vi.mock('@/pages/admin/RegistriesPage', () => ({ RegistriesPage: () => null }));
 
 /**
  * Бічне меню згортається до іконок і пам'ятає це (запит людини 06.10).
@@ -103,6 +105,11 @@ function visibleLabel(text: string): HTMLElement | null {
 /** Каркас домалювався: сесія приїхала, меню в дереві. */
 async function shellReady(): Promise<void> {
   await screen.findByRole('link', { name: 'Registries' });
+  // Лінивий `Hint` каркаса доїхав і замінив fallback — так, як у браузері
+  // одразу після першого кадру, ДО того, як людина щось натисне.
+  await act(async () => {
+    await import('@/shared/ui/Hint');
+  });
 }
 
 describe('AppLayout: бічне меню згортається до іконок', () => {
@@ -169,6 +176,56 @@ describe('AppLayout: бічне меню згортається до іконо�
       expect(visibleLabel('Documents')).not.toBeNull();
     });
     expect(localStorage.getItem(StorageKey)).toBe('false');
+  });
+
+  it.each(['{Enter}', ' '])(
+    'клавіша %j на кнопці перемикає меню, а фокус лишається на кнопці в обидва боки (WCAG 2.4.3)',
+    async (key) => {
+      renderAppLayout();
+      await shellReady();
+      const user = userEvent.setup();
+
+      const collapse = screen.getByRole('button', { name: 'Collapse menu' });
+      collapse.focus();
+      expect(document.activeElement).toBe(collapse);
+
+      await user.keyboard(key);
+      const expand = await screen.findByRole('button', { name: 'Expand menu' });
+      // ⛔ Той самий вузол DOM, не лише «якась кнопка з фокусом»: перемонтована
+      // кнопка теж могла б отримати фокус, але після автофокуса, не від людини.
+      expect(expand).toBe(collapse);
+      expect(document.activeElement).toBe(expand);
+
+      await user.keyboard(key);
+      expect(await screen.findByRole('button', { name: 'Collapse menu' })).toBe(collapse);
+      expect(document.activeElement).toBe(collapse);
+    },
+  );
+
+  it('пункт меню під фокусом лишається тим самим вузлом після згортання', async () => {
+    renderAppLayout();
+    await shellReady();
+
+    const registries = within(navbar()).getByRole('link', { name: 'Registries' });
+    registries.focus();
+    act(() => {
+      setNavbarCollapsed(true);
+    });
+
+    expect(await screen.findByRole('button', { name: 'Expand menu' })).toBeTruthy();
+    expect(within(navbar()).getByRole('link', { name: 'Registries' })).toBe(registries);
+    expect(document.activeElement).toBe(registries);
+  });
+
+  it('у згорнутому меню ім\'я пункту не дублюється описом (читач не каже назву двічі)', async () => {
+    localStorage.setItem(StorageKey, 'true');
+    renderAppLayout();
+    await shellReady();
+
+    const documents = within(navbar()).getByRole('link', { name: 'Documents' });
+    documents.focus();
+    await screen.findByRole('tooltip');
+    expect(documents.getAttribute('aria-describedby')).toBeNull();
   });
 
   it('у згорнутому меню назва пункту видна підказкою на фокусі з клавіатури', async () => {
