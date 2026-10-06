@@ -135,6 +135,26 @@ public sealed class CellHistoryPermissionThenReadScopeTests
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait("Requirement", "ФВ-6.6")]
+    public async Task Підсумок_лічить_лише_видимі_колонки_і_ті_самі_права_що_журнал()
+    {
+        // R-11 / UI-38 C2: 3 + 40 змін, з них прихована колонка 40 -- у відповідь потрапляє лише видимі 3.
+        Profile(Reader(deny: true).Permission(GetCellChangesHandler.Permission), scopedDocumentViewIn: null);
+        var perDocument = await Handler().SummaryAsync(
+            new CellChangeFilter(From, To, DocumentId: DocumentId), CancellationToken.None);
+
+        Assert.Equal(new CellChangeSummaryView(3, 1, 0, 0), perDocument);
+
+        // Без права -- 403, лічильники не читаються.
+        Profile(Reader(deny: true), scopedDocumentViewIn: null);
+        _audit.ClearReceivedCalls();
+        await Assert.ThrowsAsync<AccessDeniedException>(
+            () => Handler().SummaryAsync(new CellChangeFilter(From, To, DocumentId: DocumentId), CancellationToken.None));
+        await _audit.DidNotReceiveWithAnyArgs().CountCellChangesByColumnAsync(default!, default, default);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-6.6")]
     public async Task TotalCount_історії_прихованої_колонки_нуль_і_лічильники_не_читаються()
     {
         Profile(Reader(deny: true), scopedDocumentViewIn: Project);

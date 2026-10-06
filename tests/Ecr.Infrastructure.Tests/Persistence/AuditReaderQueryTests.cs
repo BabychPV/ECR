@@ -78,6 +78,58 @@ public sealed class AuditReaderQueryTests(SqlServerFixture sql)
         Assert.Equal(0, await Count("ZZ-" + Guid.NewGuid().ToString("N")));
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "R-18")]
+    public async Task Лічильники_за_колонкою_розрізняють_джерело_і_сьогодні()
+    {
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var doc = await builder.BuildAsync(ct: CancellationToken.None);
+
+        await using var db = builder.CreateContext();
+        await new AuditWriter(db).WriteCellChangesAsync(
+            [
+                Change(doc, "R-a", "Import", At),
+                Change(doc, "R-b", "Import", At.AddDays(-1)),
+                Change(doc, "R-c", "Recalculation", At),
+                Change(doc, "R-d", "UserEdit", At),
+            ],
+            CancellationToken.None);
+
+        var counts = await new AuditReader(db).CountCellChangesByColumnAsync(
+            new CellChangeFilter(At.AddDays(-2), At.AddDays(1), DocumentId: doc.DocumentId),
+            At.Date,
+            CancellationToken.None);
+
+        var column = Assert.Single(counts);
+        Assert.Equal(doc.ColumnDefIds[1], column.ColumnDefId);
+        Assert.Equal(4, column.Total);
+        Assert.Equal(3, column.Today);
+        Assert.Equal(2, column.ByImport);
+        Assert.Equal(1, column.ByRecalculation);
+
+        // Фільтр походження звужує й підрахунок.
+        var onlyImport = await new AuditReader(db).CountCellChangesByColumnAsync(
+            new CellChangeFilter(At.AddDays(-2), At.AddDays(1), DocumentId: doc.DocumentId, Origin: "Import"),
+            At.Date,
+            CancellationToken.None);
+        Assert.Equal(2, Assert.Single(onlyImport).Total);
+    }
+
+    private static CellChangeRecord Change(TestDocument doc, string rowKey, string origin, DateTime at)
+        => new(
+            at,
+            new CellAddress(doc.PeriodKey, doc.RowIds[0], doc.ColumnDefIds[1]),
+            doc.DocumentId,
+            rowKey,
+            OldValue: "1",
+            NewValue: "2",
+            ChangedByUserId: 1,
+            Origin: origin,
+            IsLateEdit: false,
+            CorrelationId: null);
+
     private static CellChangeRecord Change(TestDocument doc, string rowKey)
         => new(
             At,

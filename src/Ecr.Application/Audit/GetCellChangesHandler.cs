@@ -102,6 +102,31 @@ public sealed class GetCellChangesHandler(
         return result with { Items = visible, TotalCount = (int)Math.Min(total, int.MaxValue) };
     }
 
+    /// <summary>Підсумок журналу за вікном (UI-38, C2): ті самі права, вікно й видимість, що й у <see cref="HandleAsync"/>.</summary>
+    /// <param name="filter">Вікно й звуження журналу.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⛔ Рахується лише видиме читачу (S6, R-11): лічильники приходять із порту в розрізі колонки, і суми
+    /// з прихованих колонок, таблиць і аркушів у відповідь не потрапляють.
+    /// </remarks>
+    public async Task<CellChangeSummaryView> SummaryAsync(CellChangeFilter filter, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(filter);
+
+        filter = Normalize(filter);
+        var (readable, empty) = await AuthorizeAsync(filter, page: null, ct).ConfigureAwait(false);
+        if (empty)
+        {
+            return new CellChangeSummaryView(0, 0, 0, 0);
+        }
+
+        var counts = await audit.CountCellChangesByColumnAsync(filter, TodayStart(), ct).ConfigureAwait(false);
+        var seen = counts.Where(c => readable is null || readable.CanReadColumn(c.ColumnDefId)).ToList();
+
+        return new CellChangeSummaryView(
+            seen.Sum(c => c.Total), seen.Sum(c => c.Today), seen.Sum(c => c.ByImport), seen.Sum(c => c.ByRecalculation));
+    }
+
     /// <summary>
     /// Пошуковий рядок: обрізані пробіли, порожній — це не фільтр (очищене поле), довший за межу — обрізається.
     /// </summary>
