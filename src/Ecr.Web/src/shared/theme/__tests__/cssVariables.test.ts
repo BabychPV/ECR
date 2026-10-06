@@ -92,6 +92,8 @@ const Required = [
   '--ecr-success',
   '--ecr-warning',
   '--ecr-danger',
+  '--ecr-warning-soft',
+  '--ecr-danger-soft',
 
   // Сітка.
   '--ecr-calc-bg',
@@ -108,6 +110,9 @@ const Backdrops = [
   '--ecr-hover',
   '--ecr-calc-bg',
   '--ecr-accent-soft',
+  // UI-27: тло бейджів «увага» / «проблема» — на ньому лежить підпис стану.
+  '--ecr-warning-soft',
+  '--ecr-danger-soft',
 ] as const;
 
 /** Поверхні-«сторінки»: на них лягає контентний текст і статуси. */
@@ -187,6 +192,22 @@ describe('UI-01: резолвер віддає токени макета обо�
     }
   });
 
+  it.each(Schemes)('схема «%s»: піктограма бейджа видна на власному м\'якому тлі (UI-27)', (scheme) => {
+    const vars = resolve(scheme);
+
+    // ⚠ `AA.nonText`: піктограма — графічний знак поруч із підписом, текст
+    // несе сам підпис (його контраст на цих тлах міряє `Backdrops` вище).
+    for (const [icon, bg] of [
+      ['--ecr-warning', '--ecr-warning-soft'],
+      ['--ecr-danger', '--ecr-danger-soft'],
+      ['--ecr-accent-text', '--ecr-accent-soft'],
+    ] as const) {
+      const value = contrast(readVar(vars, icon), readVar(vars, bg));
+
+      expect(value, `${scheme}: ${icon} на ${bg}`).toBeGreaterThanOrEqual(AA.nonText);
+    }
+  });
+
   it.each(Schemes)('схема «%s»: акцентний текст і статуси читаються на сторінці', (scheme) => {
     const vars = resolve(scheme);
 
@@ -239,6 +260,8 @@ describe('UI-01: вивід не розходиться з `theme.ts`', () => {
     expect(readVar(vars, '--ecr-faint')).toBe(s.faint);
     expect(readVar(vars, '--ecr-grid-line')).toBe(s.gridLine);
     expect(readVar(vars, '--ecr-hatch')).toBe(s.hatch);
+    expect(readVar(vars, '--ecr-warning-soft')).toBe(s.warningSoft);
+    expect(readVar(vars, '--ecr-danger-soft')).toBe(s.dangerSoft);
   });
 
   it.each(Schemes)('схема «%s»: власні змінні Mantine перебиті нашими', (scheme) => {
