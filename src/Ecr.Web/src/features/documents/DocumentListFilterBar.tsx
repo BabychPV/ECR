@@ -1,5 +1,6 @@
-import type { JSX } from 'react';
-import { Group, NativeSelect, Switch } from '@mantine/core';
+import type { JSX, ReactNode } from 'react';
+import { NativeSelect, Switch, Text } from '@mantine/core';
+import { FilterInline, FilterRow, readerOnlyDescription } from '@/shared/ui/FilterBar';
 import { t } from '@/shared/i18n';
 import { statusKey } from '@/shared/ui/StatusBadge';
 import type { DocumentStateFilter } from './api';
@@ -10,16 +11,26 @@ interface DocumentListFilterBarProps {
   readonly periodKey: number | null;
 
   readonly filters: DocumentListFilters;
+
+  /**
+   * Що поставити в КІНЕЦЬ того самого ряду — смуга лічильників етапів
+   * (`DocumentListSummaryStrip`). Рішення людини 2026-10-06: «тумблери і
+   * кількість — в один рядок», а не число над підписом окремою смугою.
+   */
+  readonly children?: ReactNode;
 }
 
 /**
  * Рядок фільтрів над переліком документів (`BE-09b`).
  *
  * ⚠ Не `shared/ui/FilterBar`: його перелік не вміє бути недоступним і не має
- * перемикача, а тут потрібні обидва.
+ * перемикача, а тут потрібні обидва. Будова ряду при цьому — спільна
+ * (`FilterRow`/`FilterInline`): перемикачі стоять по центру поля «State», а не
+ * на окремому відступі `mt="lg"`, що розходився з полем за іншого шрифту.
  *
- * ⛔ Без періоду фільтр стану НЕДОСТУПНИЙ, і причина написана ПІД полем та
- * прив'язана до нього (`aria-describedby`). Тиха `422` на вибір стану — це
+ * ⛔ Без періоду фільтр стану НЕДОСТУПНИЙ, і причина написана ПІД рядом та
+ * прив'язана до поля (`description`, прихований для ока, — див. `FilterHints`:
+ * видимий опис під полем опустив би нижню межу лише цього поля й розсунув ряд). Тиха `422` на вибір стану — це
  * порожній екран без пояснення; сховане поле — функція, про яку не дізнаються.
  *
  * ⚠ `NativeSelect`, а не `Select`: п'ять сталих варіантів, пошук не потрібен,
@@ -28,7 +39,7 @@ interface DocumentListFilterBarProps {
  * ⚠ Підписи станів — ті самі рядки `status.sheet.*`, що в бейджах таблиці й у
  * смузі лічильників: один стан — одне слово на всьому екрані.
  */
-export function DocumentListFilterBar({ periodKey, filters }: DocumentListFilterBarProps): JSX.Element {
+export function DocumentListFilterBar({ periodKey, filters, children }: DocumentListFilterBarProps): JSX.Element {
   const noPeriod = periodKey === null;
 
   /*
@@ -49,47 +60,61 @@ export function DocumentListFilterBar({ periodKey, filters }: DocumentListFilter
   ];
 
   return (
-    <Group gap="lg" align="flex-start" mb="md" data-document-filters="true">
-      <NativeSelect
-        size="xs"
-        miw={180}
-        label={t('documents.state')}
-        data={options}
-        value={filters.state ?? ''}
-        disabled={noPeriod}
-        description={noPeriod ? t('documents.stateNeedsPeriod') : undefined}
-        inputWrapperOrder={['label', 'input', 'description']}
-        onChange={(event) => {
-          filters.setState(parseStateFilter(event.currentTarget.value));
-        }}
-      />
+    <>
+      <FilterRow gap="lg" mb={noPeriod ? 'xs' : 'md'} data-document-filters="true">
+        <NativeSelect
+          size="xs"
+          miw={180}
+          label={t('documents.state')}
+          data={options}
+          value={filters.state ?? ''}
+          disabled={noPeriod}
+          description={noPeriod ? t('documents.stateNeedsPeriod') : undefined}
+          styles={readerOnlyDescription}
+          onChange={(event) => {
+            filters.setState(parseStateFilter(event.currentTarget.value));
+          }}
+        />
 
-      {/* ⚠ Підпис не обіцяє більше, ніж робить сервер: «мої» — це «створені
-          або подані мною», і саме так він і читається. */}
-      <Switch
-        mt="lg"
-        size="sm"
-        label={t('documents.filterMine')}
-        checked={filters.mine}
-        onChange={(event) => {
-          filters.setMine(event.currentTarget.checked);
-        }}
-      />
+        {/* ⚠ Підпис не обіцяє більше, ніж робить сервер: «мої» — це «створені
+            або подані мною», і саме так він і читається. */}
+        <FilterInline>
+          <Switch
+            size="sm"
+            label={t('documents.filterMine')}
+            checked={filters.mine}
+            onChange={(event) => {
+              filters.setMine(event.currentTarget.checked);
+            }}
+          />
+        </FilterInline>
 
-      {/*
-       * ⚠ На відміну від фільтра стану — НЕ вимкнений без періоду
-       * (`noPeriod` тут не читається): сервер приймає `hasLateEdits` за
-       * будь-який період, так само, як позначку в самому рядку (`BE-09b`).
-       */}
-      <Switch
-        mt="lg"
-        size="sm"
-        label={t('documents.filterLateEdits')}
-        checked={filters.hasLateEdits}
-        onChange={(event) => {
-          filters.setHasLateEdits(event.currentTarget.checked);
-        }}
-      />
-    </Group>
+        {/*
+         * ⚠ На відміну від фільтра стану — НЕ вимкнений без періоду
+         * (`noPeriod` тут не читається): сервер приймає `hasLateEdits` за
+         * будь-який період, так само, як позначку в самому рядку (`BE-09b`).
+         */}
+        <FilterInline>
+          <Switch
+            size="sm"
+            label={t('documents.filterLateEdits')}
+            checked={filters.hasLateEdits}
+            onChange={(event) => {
+              filters.setHasLateEdits(event.currentTarget.checked);
+            }}
+          />
+        </FilterInline>
+
+        {children}
+      </FilterRow>
+
+      {/* Видима копія пояснення; читалка вже отримує його через поле. */}
+      {noPeriod && (
+        <Text size="xs" c="dimmed" mb="md" aria-hidden="true" data-document-filters-hint="">
+          {t('documents.stateNeedsPeriod')}
+        </Text>
+      )}
+    </>
   );
 }
+

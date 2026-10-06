@@ -170,9 +170,14 @@ describe('DocumentsPage: фільтри переліку (BE-09b)', () => {
 
       expect((field as HTMLSelectElement).disabled).toBe(true);
 
-      const reason = screen.getByText('⟦documents.stateNeedsPeriod⟧');
-      expect(field.getAttribute('aria-describedby') ?? '').toContain(reason.id);
-      expect(reason.id).not.toBe('');
+      // ⚠ Причина двічі: прихований `description` поля, зв'язаний із ним, і
+      // видима копія під рядом фільтрів (`aria-hidden`) — видимий опис під
+      // полем опускав його нижню межу й розсував ряд (`FilterRow`).
+      const reasons = screen.getAllByText('⟦documents.stateNeedsPeriod⟧');
+      const reason = reasons.find((node) => node.id !== '');
+      expect(reason).toBeDefined();
+      expect(field.getAttribute('aria-describedby') ?? '').toContain(reason?.id ?? '⟂');
+      expect(reasons.some((node) => node.getAttribute('aria-hidden') === 'true')).toBe(true);
 
       expect(listed.every((url) => !new URLSearchParams(url.split('?')[1] ?? '').has('state'))).toBe(true);
     },
