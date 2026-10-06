@@ -235,6 +235,9 @@ function schemeVariables(theme: MantineTheme, scheme: Scheme): Record<string, st
     '--ecr-success': success[StatusShade[scheme]] ?? s.text,
     '--ecr-warning': warning[StatusShade[scheme]] ?? s.text,
     '--ecr-danger': danger[StatusShade[scheme]] ?? s.text,
+    // Тло статусного бейджа «увага» / «проблема» (`UI-27`, `StatusBadge`).
+    '--ecr-warning-soft': s.warningSoft,
+    '--ecr-danger-soft': s.dangerSoft,
 
     // Сітка: тло обчисленої комірки і штриховка закритої.
     '--ecr-calc-bg': s.calcBg,
