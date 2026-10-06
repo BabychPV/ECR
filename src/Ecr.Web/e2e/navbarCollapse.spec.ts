@@ -82,6 +82,16 @@ test.describe('Бічне меню: згортання до іконок', () =>
       await expect(page.getByRole('button', { name: ExpandName })).toBeVisible({ timeout: 30_000 });
       expect(await navWidth(page)).toBeLessThan(80);
 
+      // Клавіатура (рев'ю 06.10, P2-1): Enter перемикає меню, а фокус лишається
+      // на кнопці в обидва боки — не падає на початок сторінки (WCAG 2.4.3).
+      await page.getByRole('button', { name: ExpandName }).focus();
+      await page.keyboard.press('Enter');
+      await expect(page.getByRole('button', { name: CollapseName })).toBeFocused();
+      await expect.poll(() => navWidth(page)).toBeGreaterThan(200);
+      await page.keyboard.press('Enter');
+      await expect(page.getByRole('button', { name: ExpandName })).toBeFocused();
+      await expect.poll(() => navWidth(page)).toBeLessThan(80);
+
       // Інший пристрій: свіжий контекст без localStorage бере вибір із сервера.
       const other = await browser.newContext({ viewport: { width: 1280, height: 800 } });
       try {
@@ -98,6 +108,10 @@ test.describe('Бічне меню: згортання до іконок', () =>
       await expect(page.locator('nav a').first()).toContainText(/\S/);
       await page.setViewportSize({ width: 1280, height: 800 });
     } finally {
+      // ⚠ Спершу ширина: на мобільній кнопки згортання не видно (`visibleFrom`),
+      // і без цього падіння мобільного кроку лишало б `e2e-admin` зі згорнутим
+      // меню на сервері для наступних наборів (рев'ю 06.10, P3-3).
+      await page.setViewportSize({ width: 1280, height: 800 });
       const expand = page.getByRole('button', { name: ExpandName });
       if (await expand.isVisible().catch(() => false)) await expand.click();
       await expect(page.getByRole('button', { name: CollapseName })).toBeVisible();
