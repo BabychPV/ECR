@@ -22,8 +22,16 @@ public sealed class DocumentListSummaryStore(EcrDbContext db) : IDocumentListSum
     /// (урок <c>WR-05</c>).
     /// </remarks>
     public async Task<DocumentListSummaryResponse> SummarizeAsync(
-        int? projectId, int periodKey, IReadOnlyCollection<int>? visibleProjectIds, CancellationToken ct)
+        int? projectId, int periodKey, IReadOnlyCollection<int>? visibleProjectIds,
+        SummaryRestrictions? restrictions, CancellationToken ct)
     {
+        // ⛔ Схований від читача аркуш не вносить стан (LEFT JOIN нижче його не бачить), а документ
+        // проєкту зі звуженням не потрапляє у «З зауваженнями»: збережений підсумок перевірки —
+        // по ВСЬОМУ документу, тож рахувати по ньому значить розкрити помилки схованого.
+        var hiddenJson = JsonSerializer.Serialize(
+            (restrictions?.HiddenSheets ?? []).Select(h => new { p = h.ProjectId, c = h.SheetCode }));
+        var narrowedJson = JsonSerializer.Serialize(restrictions?.NarrowedProjects ?? []);
+
         // Фільтр за проєктом і межа грантів зводяться в ОДИН перелік: сирий
         // запит не вміє «параметр або NULL» без явного типу параметра.
         IEnumerable<int>? allowed = visibleProjectIds;
@@ -53,15 +61,21 @@ public sealed class DocumentListSummaryStore(EcrDbContext db) : IDocumentListSum
                            (SELECT TOP (1) v.ErrorCount
                             FROM wf.ValidationResult v
                             WHERE v.DocumentId = d.Id AND v.PeriodKey = {periodKey}
+                              AND d.ProjectId NOT IN (SELECT CAST(n.value AS int) FROM OPENJSON({narrowedJson}) n)
                             ORDER BY v.RunAt DESC) AS LastErrorCount
                     FROM doc.Document d
                     LEFT JOIN doc.DocumentSheet s
                       ON s.DocumentId = d.Id AND s.IsIncluded = 1
+                     AND NOT EXISTS (SELECT 1
+                                     FROM cfg.SheetDef sd
+                                     JOIN OPENJSON({hiddenJson}) WITH (p int '$.p', c nvarchar(200) '$.c') h
+                                       ON h.p = d.ProjectId AND h.c = sd.Code COLLATE DATABASE_DEFAULT
+                                     WHERE sd.Id = s.SheetDefId)
                     LEFT JOIN wf.ApprovalState a
                       ON a.DocumentId = s.DocumentId AND a.SheetDefId = s.SheetDefId AND a.PeriodKey = {periodKey}
                     WHERE {restrict} = 0
                        OR d.ProjectId IN (SELECT CAST(j.value AS int) FROM OPENJSON({projectsJson}) j)
-                    GROUP BY d.Id
+                    GROUP BY d.Id, d.ProjectId
                 ) x
                 """)
             .SingleAsync(ct)
@@ -69,6 +83,22 @@ public sealed class DocumentListSummaryStore(EcrDbContext db) : IDocumentListSum
 
         return new DocumentListSummaryResponse(
             row.Draft, row.Submitted, row.Approved, row.Rejected, row.WithIssues);
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyDictionary<int, long>> SampleDocumentPerProjectAsync(
+        IReadOnlyCollection<int> projectIds, CancellationToken ct)
+    {
+        var ids = projectIds.ToArray();
+        var rows = await db.Documents
+            .AsNoTracking()
+            .Where(d => ids.Contains(d.ProjectId))
+            .GroupBy(d => d.ProjectId)
+            .Select(g => new { ProjectId = g.Key, DocumentId = g.Min(d => d.Id) })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        return rows.ToDictionary(r => r.ProjectId, r => r.DocumentId);
     }
 
     /// <summary>Рядок агрегату; імена колонок — імена властивостей.</summary>
