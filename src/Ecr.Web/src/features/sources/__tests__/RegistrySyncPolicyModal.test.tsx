@@ -203,7 +203,15 @@ function input(form: HTMLElement, selector: string): HTMLInputElement {
   return found as HTMLInputElement;
 }
 
+/**
+ * ⛔ Прогрів спільного модуля дат — та сама причина зависання гейта `client`, що й у
+ * `SourceEventsTab.lazy.test.tsx`: шухляда джерела тягне поля дат через
+ * `lazy(import('@/shared/dates/DateInputWithStyles'))`, і клік по вкладці (синхронний `act`), що застає цей
+ * `import()` незавершеним, крутить рендер без кінця (A1-02, 2026-10-06: воркер на 100 % CPU на цьому файлі,
+ * гейт падав кодом 134). Модулі під перевіркою не прогріваються.
+ */
 beforeAll(async () => {
+  await import('@/shared/dates/DateInputWithStyles');
   await import('@/features/integration/SourceEntitiesTab');
   await import('@/features/sources/RegistrySyncPolicyModal');
 });

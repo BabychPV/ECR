@@ -1,5 +1,6 @@
 // @vitest-environment node
-import { execFileSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
@@ -35,8 +36,14 @@ const Values = [
   ['01.01.2027', 'ru'],
 ];
 
-function probe(zone: string): Record<string, [string, number] | null> {
-  const output = execFileSync(
+/*
+ * ⛔ Асинхронно, а не `execFileSync`: синхронний дочірній процес блокує потік воркера `vmThreads`, і в
+ * повному прогоні (CI `client`, 2026-10-06) сусідній файл на тому ж воркері висів до падіння воркера.
+ */
+const run = promisify(execFile);
+
+async function probe(zone: string): Promise<Record<string, [string, number] | null>> {
+  const { stdout: output } = await run(
     process.execPath,
     ['--experimental-strip-types', '--no-warnings', '--input-type=module', '-e', Probe],
     {
@@ -57,8 +64,8 @@ function probe(zone: string): Record<string, [string, number] | null> {
 describe('parseUserDate у поясах браузера (A1-02)', () => {
   it.each(['Europe/Kyiv', 'Pacific/Pago_Pago', 'Pacific/Kiritimati'])(
     '%s: набраний день — той самий день опівночі; неіснуючий і неоднозначний — null',
-    (zone) => {
-      expect(probe(zone)).toEqual({
+    async (zone) => {
+      expect(await probe(zone)).toEqual({
         'ru 05.10.2026': ['2026-10-05', 0],
         'kz 05.10.2026': ['2026-10-05', 0],
         'en 05.10.2026': null,
