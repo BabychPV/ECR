@@ -19,6 +19,7 @@ import { apiFetch } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
 import type {
   CloneVersionRequest,
+  DiagnosticInfo,
   RoleView,
   DeprecateVersionRequest,
   PublishVersionRequest,
@@ -70,6 +71,7 @@ import {
 } from '@/features/templates/validationRuleApi';
 import { emptyValidationRuleDraft, type ValidationRuleDraft } from '@/features/templates/validationRule';
 import { LocalDraft } from '@/features/templates/LocalDraft';
+import { PublishProblemsAlert, publishProblemsOf } from '@/features/templates/PublishProblems';
 import { VersionDiff } from '@/features/templates/VersionDiff';
 import { LazyTableSlots, estimateTemplateTableHeight } from '@/features/templates/LazyTableSlots';
 import { localized } from '@/shared/i18n/localized';
@@ -291,6 +293,7 @@ export function TemplateVersionPage(): JSX.Element {
 
   const [cloning, setCloning] = useState(false);
   const [publishing, setPublishing] = useState(false);
+  const [publishProblems, setPublishProblems] = useState<DiagnosticInfo[]>([]);
   const [deprecating, setDeprecating] = useState(false);
   const [editing, setEditing] = useState<TemplateColumnDto | null>(null);
 
@@ -405,12 +408,26 @@ export function TemplateVersionPage(): JSX.Element {
         invalidateVersionLists(),
       ]);
       setPublishing(false);
+      setPublishProblems([]);
       showDone(t('version.published'));
     },
 
     // ⚠ Публікація падає з переліком проблем структури: показуємо саме його,
-    // а не «не вдалося опублікувати».
-    onError: showApiError,
+    // а не «не вдалося опублікувати». A2-01: перелік — блок на сторінці (код і
+    // причина кожної проблеми); тост із першим реченням («… at position 0»)
+    // лишається лише для відмов без переліку.
+    onError: (error: unknown) => {
+      const problems = publishProblemsOf(error);
+
+      if (problems.length === 0) {
+        showApiError(error);
+
+        return;
+      }
+
+      setPublishing(false);
+      setPublishProblems(problems);
+    },
   });
 
   /**
@@ -914,6 +931,10 @@ export function TemplateVersionPage(): JSX.Element {
         бачить ніколи, і повідомлення про перелік, яким вони не
         користуються, було б шумом.
       */}
+      {publishProblems.length > 0 && (
+        <PublishProblemsAlert problems={publishProblems} onClose={() => setPublishProblems([])} />
+      )}
+
       {can(session.data, 'Template.Publish') && versionsList.error !== null && (
         <ErrorAlert error={versionsList.error} onRetry={() => void versionsList.refetch()} />
       )}
