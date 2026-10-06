@@ -1,0 +1,102 @@
+/*
+ * Шкала розмірів елементів керування — ОДНА на весь застосунок
+ * (`docs/design/ui-conventions.md`, розділ «Кнопки»).
+ *
+ * ⛔ Чому це взагалі знадобилося (знімок людини, 2026-10-06: «кнопка експорту
+ * виглядає більшою… всі якось з різним розміром»). У коді жило ЧОТИРИ висоти
+ * кнопок — `sm` 36, `xs` 30, `compact-sm` 26, `compact-xs` 22 — і поле та
+ * перемикач поруч мали ще свої. Макет (`docs/design/hybrid/index.html:88–96,
+ * 128–129`, рішення `D15-01`: у питаннях вигляду правий макет) знає рівно три:
+ * `.btn` = `--ctl` (28/36 за щільністю), `.btn-sm` = 24, `.btn-lg` = 36.
+ *
+ * Відповідність розмірів Mantine макету:
+ *
+ * | Розмір | Висота | Відступ | Шрифт | Де |
+ * |---|---|---|---|---|
+ * | `sm` (без пропа) | `--ecr-ctl-height` 28/36 | 12 | 13 | усюди: шапки, панелі дій, форми, діалоги |
+ * | `xs` | 24 | 8 | 11 | рядок таблиці, дрібна дія в тексті/картці |
+ * | `md` | 36 | 16 | 15 | одна головна дія окремого екрана (вхід) |
+ *
+ * ⚠ Поле вводу і `SegmentedControl` розміру `sm` І `xs` мають ту саму висоту
+ * `--ecr-ctl-height`, що й кнопка: у макеті поле, кнопка і перемикач в одному
+ * рядку однакові (`--ctl`). `xs` у полів у коді означає «панель фільтрів», а
+ * не «дрібне», тож висота вирівнюється, а шрифт лишається.
+ *
+ * ⛔ Чому CSS, а не обгортка `<EcrButton>` чи `vars` у `theme.ts`. Обидва
+ * шляхи — це JavaScript у вхідному чанку, тобто в бюджеті КОЖНОГО маршруту
+ * (`D-132`; `PipelinePage` стоїть за 1.8 КБ від межі). Mantine оголошує
+ * шкалу змінними на власному класі (`--button-height-xs: 30px` на
+ * `.m_77c9d27d`), а розмір елемента бере як `var(--button-height-<size>)` —
+ * тож досить перевизначити ці змінні на статичному класі того ж компонента.
+ * Файл підключено ПІСЛЯ `@mantine/core/styles.css` (`main.tsx`), рівна
+ * специфічність — виграє пізніше оголошення.
+ *
+ * ⚠ Статичні класи (`mantine-Button-root`), а не хешовані (`m_77c9d27d`):
+ * хеш міняється з версією пакета мовчки. Сторож правила в коді —
+ * `src/shared/theme/__tests__/buttonScale.test.ts`.
+ */
+
+.mantine-Button-root {
+  --button-height-xs: 24px;
+  --button-height-sm: var(--ecr-ctl-height);
+  --button-height-md: 36px;
+
+  --button-padding-x-xs: 8px;
+  --button-padding-x-sm: 12px;
+  --button-padding-x-md: 16px;
+
+  /* Макет: `.btn{font-weight:500}`; Mantine — 600, і заливна кнопка через
+     це виглядала «більшою» за сусідню обвідну того ж розміру. */
+  font-weight: 500;
+}
+
+/* ⚠ Шрифт кнопки Mantine кладе ІНЛАЙН-змінною (`--button-fz`), тож змінною
+   його не перебити — лише властивістю, зі специфічністю вищою за клас. */
+.mantine-Button-root[data-size='xs'] {
+  font-size: var(--mantine-font-size-xs);
+}
+
+.mantine-Button-root[data-size='sm'] {
+  font-size: var(--mantine-font-size-sm);
+}
+
+.mantine-Button-root[data-size='md'] {
+  font-size: var(--mantine-font-size-md);
+}
+
+/* Іконка-кнопка: типовий `md` — висота контролу; `sm` — малий, як кнопка `xs`. */
+.mantine-ActionIcon-root {
+  --ai-size-sm: 24px;
+  --ai-size-md: var(--ecr-ctl-height);
+  --ai-size-input-xs: var(--ecr-ctl-height);
+  --ai-size-input-sm: var(--ecr-ctl-height);
+}
+
+/* Поле поруч із кнопкою — тієї ж висоти (`.input{height:var(--ctl)}`). */
+.mantine-Input-wrapper {
+  --input-height-xs: var(--ecr-ctl-height);
+  --input-height-sm: var(--ecr-ctl-height);
+}
+
+/*
+ * Перемикач (`SegmentedControl`): ЗОВНІШНЯ висота дорівнює кнопці того ж
+ * розміру. Mantine рахує її з відступів (4 + 5 + рядок + 5 + 4 ≈ 37 у `sm`),
+ * тож поруч із кнопкою він стояв на кілька пікселів вищим. Тут — 2 px рамки
+ * всередині й мітка рівно на решту висоти, як `.seg` у макеті.
+ */
+.mantine-SegmentedControl-root {
+  padding: 2px;
+}
+
+/* `:not(xs)`, а не `[data-size='sm']`: без пропа Mantine атрибута не ставить. */
+.mantine-SegmentedControl-root:not([data-size='xs']) .mantine-SegmentedControl-label {
+  padding: 0 10px;
+  font-size: var(--mantine-font-size-sm);
+  line-height: calc(var(--ecr-ctl-height) - 4px);
+}
+
+.mantine-SegmentedControl-root[data-size='xs'] .mantine-SegmentedControl-label {
+  padding: 0 8px;
+  font-size: var(--mantine-font-size-xs);
+  line-height: 20px;
+}

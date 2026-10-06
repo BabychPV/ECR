@@ -31,6 +31,7 @@ import '@mantine/core/styles.css';
 // поля дати (`shared/dates/DateInputWithStyles.ts`, бюджет маршруту `D-132`).
 import '@mantine/notifications/styles.css';
 import './shared/theme/tokens.css';
+import './shared/theme/controls.css';
 
 
 /*
