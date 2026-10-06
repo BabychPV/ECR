@@ -76,7 +76,7 @@ function project(id: number, code: string, progress: CampaignProgress, deadline:
 
 /** Підсумки, які рахує сервер: по ВСІХ проєктах періоду. */
 function totalsOf(all: readonly CampaignProject[]): CampaignTotals {
-  const sum = (pick: (p: CampaignProject) => number): number => all.reduce((acc, p) => acc + pick(p), 0);
+  const sum = (pick: (p: CampaignProject) => number | null): number => all.reduce((acc, p) => acc + (pick(p) ?? 0), 0);
   const count = (progress: CampaignProgress): number => all.filter((p) => p.progress === progress).length;
 
   return {
@@ -271,6 +271,28 @@ describe('огляд кампанії: підсумки з сервера', () =
     expect(document.querySelector('[data-stat="rejected"]')?.getAttribute('data-stat-tone')).toBe('danger');
   });
 
+  it('R-1: сервер віддав null лічильникам станів — смуги станів немає, є «—», а лічильники класів і перелік на місці', async () => {
+    const nulled = (p: CampaignProject): CampaignProject => ({
+      ...p,
+      draft: null,
+      submitted: null,
+      approved: null,
+      rejected: null,
+    });
+    const base = summaryOf(listed, hidden);
+    mockServer({
+      ...base,
+      projects: base.projects.map(nulled),
+      totals: { ...base.totals, draft: null, submitted: null, approved: null, rejected: null },
+    });
+    show(<CampaignOverview periodKey={Period} />);
+
+    expect(await screen.findByTestId('campaign-states-hidden')).toBeTruthy();
+    expect(document.querySelector('[data-stat="draft"]')).toBeNull();
+    expect(document.querySelector('[data-stat="rejected"]')).toBeNull();
+    expect(await stat('overdue')).toBe('2');
+    expect(rowOf('P1').textContent).toContain('\u2014');
+  });
   it('лічильники класів — з totals: прострочені, під загрозою, в роботі, завершені', async () => {
     mockServer(summaryOf(listed, hidden));
     show(<CampaignOverview periodKey={Period} />);
