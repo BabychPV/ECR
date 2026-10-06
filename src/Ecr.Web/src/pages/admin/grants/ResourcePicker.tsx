@@ -83,9 +83,10 @@ function idOrNull(value: string | null): number | null {
  * TemplateAdministrator; адміністратор безпеки без неї (напр. `bootstrap`)
  * бачив загальну помилку й не знав, чого бракує.
  */
-function failureText(error: Error | null, forbiddenKey?: string): string | null {
+function failureText(error: Error | null, explainForbidden = false): string | null {
   if (error === null) return null;
-  if (forbiddenKey !== undefined && error instanceof EcrApiError && error.problem.status === 403) return t(forbiddenKey);
+  // ⚠ Ключ — літералом: сторож каталогу (`EndpointCoverageTests`) бачить лише літерали.
+  if (explainForbidden && error instanceof EcrApiError && error.problem.status === 403) return t('grants.pickerForbidden');
 
   return t('grants.pickerLoadFailed');
 }
@@ -212,14 +213,14 @@ export function ResourcePicker({
   return (
     <Group gap="xs" wrap="wrap">
       <Select
-        {...common(t('grants.pickerTemplate'), failureText(templates.error, 'grants.pickerForbidden'))}
+        {...common(t('grants.pickerTemplate'), failureText(templates.error, true))}
         aria-label={aria(t('grants.pickerTemplate'))}
         data={(templates.data?.items ?? []).map((tp) => ({ value: String(tp.id), label: tp.code }))}
         value={path.templateId === null ? null : String(path.templateId)}
         onChange={(value) => pick(-1, null, undefined, { ...EmptyPath, templateId: idOrNull(value) })}
       />
       <Select
-        {...common(t('grants.pickerVersion'), failureText(versions.error, 'grants.pickerForbidden'))}
+        {...common(t('grants.pickerVersion'), failureText(versions.error, true))}
         aria-label={aria(t('grants.pickerVersion'))}
         disabled={path.templateId === null}
         data={(versions.data?.items ?? []).map((v) => ({ value: String(v.id), label: v.version }))}
@@ -229,7 +230,7 @@ export function ResourcePicker({
         }
       />
       <Select
-        {...common(t('grants.pickerSheet'), failureText(structure.error, 'grants.pickerForbidden'))}
+        {...common(t('grants.pickerSheet'), failureText(structure.error, true))}
         aria-label={aria(t('grants.pickerSheet'))}
         disabled={path.versionId === null}
         data={sheets.map((s) => ({ value: String(s.id), label: nameWithCode(localized(s.nameL10n), s.code) }))}
