@@ -121,7 +121,7 @@ describe('A2-05: період у формі створення документ�
     expect(newestOpenPeriodKey(undefined)).toBeNull();
   });
 
-  it('Select показує лише відкриті періоди, типово — найновіший', async () => {
+  it('Select показує відкриті й закриті періоди, типово — найновіший відкритий', async () => {
     mockServer();
     show();
     await pickProjectAndSheet();
@@ -132,7 +132,9 @@ describe('A2-05: період у формі створення документ�
 
     fireEvent.click(select);
     const options = (await screen.findAllByRole('option')).map((option) => option.textContent);
-    expect(options).toEqual(['October 2026', 'September 2026']);
+    // ✎ 2026-10-06, рішення людини: закритий період теж можна обрати (з позначкою й попередженням);
+    // ще не відкритого (Planned/Scheduled) немає.
+    expect(options).toEqual(['October 2026', 'September 2026', 'August 2026 · ⟦status.period.Closed⟧']);
   });
 
   it('створення відкриває документ у вибраному періоді (типово 202610)', async () => {
@@ -145,6 +147,19 @@ describe('A2-05: період у формі створення документ�
 
     await waitFor(() => expect((globalThis as { __where?: string }).__where).toBe('/documents/77?periodKey=202610'));
     expect(posted).not.toBeNull();
+  });
+
+  it('закритий період: попередження, але створення не блокується', async () => {
+    mockServer();
+    show();
+    await pickProjectAndSheet();
+
+    fireEvent.click(await screen.findByLabelText('⟦documents.period⟧', { selector: 'input' }));
+    fireEvent.click(await screen.findByRole('option', { name: /August 2026/ }));
+    expect(await screen.findByTestId('create-closed-period')).toBeTruthy();
+
+    await createFromPeriodStep();
+    await waitFor(() => expect((globalThis as { __where?: string }).__where).toBe('/documents/77?periodKey=202608'));
   });
 
   it('вибір людини перекриває типовий', async () => {

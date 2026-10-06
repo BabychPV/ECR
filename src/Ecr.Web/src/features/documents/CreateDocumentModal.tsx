@@ -7,7 +7,7 @@ import type { components } from '@/api/schema';
 import type { CreateDocumentRequest, DocumentIdResponse, PeriodCalendarDto } from '@/api/types';
 import { fetchAllProjects } from '@/features/projects/allProjects';
 import { groupRuleViolations } from './groupRuleViolations';
-import { newestOpenPeriodKey, openPeriodKeys } from './newDocumentPeriod';
+import { newestOpenPeriodKey } from './newDocumentPeriod';
 import { formatPeriodKey } from '@/shared/format';
 import { localized } from '@/shared/i18n/localized';
 import { Banner } from '@/shared/ui/Banner';
@@ -15,6 +15,7 @@ import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { KeyValue } from '@/shared/ui/KeyValue';
 import { LocalizedInput, hasAnyText, type LocalizedValue } from '@/shared/ui/LocalizedInput';
 import { showDone } from '@/shared/ui/notify';
+import { statusKey } from '@/shared/ui/StatusBadge';
 import { problemText } from '@/shared/ui/problemText';
 import { Wizard, type WizardStep } from '@/shared/ui/Wizard';
 import { t } from '@/shared/i18n';
@@ -116,9 +117,16 @@ export function CreateDocumentModal({
   const available = template.data?.sheets ?? [];
   const sheets = pickedSheets ?? available.map((sheet) => sheet.id);
 
-  const openPeriods = openPeriodKeys(calendar.data?.periods);
+  // ✎ 2026-10-06, рішення людини: сервер не забороняє документ у закритому періоді, і майстер
+  // теж — закритий період у переліку є, з попередженням. Не пропонуються лише ще не відкриті.
+  const choosablePeriods = (calendar.data?.periods ?? [])
+    .filter((period) => period.state === 'Open' || period.state === 'Grace' || period.state === 'Closed')
+    .sort((a, b) => b.periodKey - a.periodKey);
   const newestOpen = newestOpenPeriodKey(calendar.data?.periods);
-  const periodKey = pickedPeriod ?? (newestOpen === null ? null : String(newestOpen));
+  const periodKey =
+    pickedPeriod ??
+    (newestOpen === null ? (choosablePeriods[0] === undefined ? null : String(choosablePeriods[0].periodKey)) : String(newestOpen));
+  const pickedState = choosablePeriods.find((period) => String(period.periodKey) === periodKey)?.state ?? null;
   const periodLabel = (key: number): string =>
     formatPeriodKey(key, calendar.data?.periodKind) || String(key);
 
@@ -217,7 +225,7 @@ export function CreateDocumentModal({
       label: t('documents.period'),
       hint: t('documents.createPeriodHint'),
       render: () =>
-        calendar.data !== undefined && openPeriods.length === 0 ? (
+        calendar.data !== undefined && choosablePeriods.length === 0 ? (
           <Banner tone="warning" text={t('documents.createNoOpenPeriod')} testId="create-no-open-period" />
         ) : (
           <Stack gap="xs">
@@ -226,13 +234,22 @@ export function CreateDocumentModal({
             )}
             <Select
               label={t('documents.period')}
-              data={[...openPeriods]
-                .reverse()
-                .map((key) => ({ value: String(key), label: periodLabel(key) }))}
+              data={choosablePeriods.map((period) => ({
+                value: String(period.periodKey),
+                label:
+                  period.state === 'Open'
+                    ? periodLabel(period.periodKey)
+                    : `${periodLabel(period.periodKey)} · ${t(statusKey('period', period.state))}`,
+              }))}
               value={periodKey}
               onChange={(value) => setPickedPeriod(value)}
               allowDeselect={false}
             />
+
+            {/* ⚠ Лише попередження, не відмова: створення в закритому періоді дозволене. */}
+            {pickedState === 'Closed' && (
+              <Banner tone="warning" text={t('documents.createClosedPeriod')} testId="create-closed-period" />
+            )}
           </Stack>
         ),
     },
