@@ -47,10 +47,12 @@ const LanguagePattern = /^[a-z]{2,3}$/;
  * ⚠ localStorage лишається кешем першого рендера (без блимання); значення
  * сервера приходить пізніше й перемагає. Відмова `GET`/`PUT` мовчазна.
  *
+ * `loginLanguage` (A3) — мова, обрана на екрані входу й відмінна від профілю; `null` — вибору не було.
+ *
  * @returns Номер покоління: зростає, коли застосовано значення сервера, яке
  * компонент із власним станом (перемикач щільності) мусить перечитати.
  */
-export function usePreferenceSync(enabled: boolean): number {
+export function usePreferenceSync(enabled: boolean, loginLanguage: string | null = null): number {
   const { colorScheme, setColorScheme } = useMantineColorScheme();
   const setSchemeRef = useRef(setColorScheme);
   const [generation, setGeneration] = useState(0);
@@ -120,6 +122,14 @@ export function usePreferenceSync(enabled: boolean): number {
       offLanguage();
     };
   }, [enabled, sync]);
+
+  // A3: мова, обрана на екрані входу (до відповіді сервера), — це вибір людини: пишеться на сервер і
+  // позначає ключ «зміненим», тож значення профілю з БД його не перекриє (`reconcile` такі пропускає).
+  useEffect(() => {
+    if (!enabled || loginLanguage === null || !LanguagePattern.test(loginLanguage)) return;
+
+    sync.changed('language', loginLanguage);
+  }, [enabled, loginLanguage, sync]);
 
   // Тема живе в Mantine: зміну видно лише як новий `colorScheme`.
   // ⚠ Перше значення — це кеш першого рендера, а не вибір: його не пишемо.

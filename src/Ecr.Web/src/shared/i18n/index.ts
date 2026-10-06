@@ -330,9 +330,34 @@ export function onLanguageChosen(listener: (value: Language) => void): () => voi
   };
 }
 
+/**
+ * Мова, яку людина обрала саме на ЕКРАНІ ВХОДУ і з того часу не змінювала (A3).
+ *
+ * ⛔ Без цього вибір на логіні (форма російською) пропадав одразу після входу: оболонка вантажила
+ * приватний каталог мовою профілю з БД (`me.language`), а `loadCatalog` ставить `current`, тож
+ * інтерфейс повертався до `en`, хоч людина щойно обрала інше. Вибір свіжіший за збережений профіль
+ * (як у `PreferenceSync.changed`), тому оболонка бере його як мову сесії й пише на сервер.
+ *
+ * ⚠ Будь-який наступний `setLanguage` (перемикач, значення сервера) знімає позначку: далі мову
+ * визначає вже не логін. Сторінка входу знімає її й при монтуванні — вибір попереднього користувача
+ * на спільному вікні не переходить до наступного.
+ */
+let loginChosen: Language | null = null;
+
+/** Мова, обрана на екрані входу, або `null`. */
+export function loginChosenLanguage(): Language | null {
+  return loginChosen;
+}
+
+/** Сторінка входу: `value` — обрана людиною мова, `null` — позначку знято. */
+export function markLoginChosenLanguage(value: Language | null): void {
+  loginChosen = value;
+}
+
 /** Запам'ятовує вибір мови. */
 export function setLanguage(value: Language): void {
   current = value;
+  loginChosen = null;
   safeSet('uiLanguage', value);
   bumpCatalog();
 

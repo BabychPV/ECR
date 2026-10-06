@@ -36,7 +36,7 @@ import { MyTasksLauncher } from '@/features/jobs/MyTasksLauncher';
 import { SearchLauncher } from '@/features/search/SearchLauncher';
 import { EndSimulationButton } from '@/features/security/SimulationPanel';
 import { useSession } from '@/shared/session/useSession';
-import { isCatalogResolved, language, loadCatalog, t } from '@/shared/i18n';
+import { isCatalogResolved, language, loadCatalog, loginChosenLanguage, t } from '@/shared/i18n';
 import { useCatalog } from '@/shared/i18n/useCatalog';
 import { BrandMark } from '@/shared/ui/BrandMark';
 import { RouteAnnouncer } from '@/shared/ui/RouteAnnouncer';
@@ -164,6 +164,17 @@ function SkipToContentLink(): JSX.Element {
 /** Тост відкладеної зміни мови (L8-17): один на раз, знімається кнопкою. */
 const LanguageAfterSaveId = 'language-after-save';
 
+/**
+ * Мова сесії: обрана на екрані входу (A3) перемагає мову профілю з БД, поки профіль її не наздогнав;
+ * інакше — мова профілю, а без неї — активна.
+ */
+function sessionLanguageOf(profileLanguage: string): string {
+  const chosen = loginChosenLanguage();
+  if (chosen !== null && chosen !== profileLanguage) return chosen;
+
+  return profileLanguage.length > 0 ? profileLanguage : language();
+}
+
 export function AppLayout(): JSX.Element {
   const [opened, { toggle }] = useDisclosure();
   const session = useSession();
@@ -269,21 +280,24 @@ export function AppLayout(): JSX.Element {
   // було відкрите. `UserMenu` тепер підписаний на щільність сам
   // (`useDensity()`, `shared/theme/preferences.ts`) — виклик лишається
   // лише заради побічного ефекту синхронізації з сервером.
-  usePreferenceSync(me !== undefined);
+  // A3: мова, обрана на екрані входу й відмінна від профілю, іде на сервер (`PUT …/language`).
+  const loginChoice = loginChosenLanguage();
+  usePreferenceSync(
+    me !== undefined,
+    me !== undefined && loginChoice !== null && loginChoice !== me.language ? loginChoice : null,
+  );
 
-  // Приватний каталог рядків тягнеться після входу і мовою профілю (D-114).
+  // Приватний каталог рядків тягнеться після входу і мовою сесії (D-114).
   useEffect(() => {
     if (me === undefined) return;
 
-    void loadCatalog(me.language.length > 0 ? me.language : language(), 'private');
+    void loadCatalog(sessionLanguageOf(me.language), 'private');
   }, [me]);
 
   // ⛔ Ані профіль, ані приватний каталог іще не приїхали — тексту немає.
   // `t('app.loading')` тут показав би `⟦app.loading⟧`: цей ключ живе в
   // ПУБЛІЧНІЙ області, якої на цьому шляху ніхто не вантажив (`D-138`).
-  const catalogReady =
-    me === undefined ||
-    isCatalogResolved(me.language.length > 0 ? me.language : language(), 'private');
+  const catalogReady = me === undefined || isCatalogResolved(sessionLanguageOf(me.language), 'private');
 
   if (session.isPending || !catalogReady) {
     return (
