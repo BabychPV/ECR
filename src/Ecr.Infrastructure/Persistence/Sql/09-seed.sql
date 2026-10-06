@@ -7228,7 +7228,6 @@ SELECT v.[Key], v.Lang, v.Val
     (N'err.ECR-DOC-0409.deleteNotDraft', N'ru', N'Удалить можно только документ-черновик; лист {sheetDefId} за период {periodKey} — {reason}.'),
     (N'err.ECR-DOC-0409.deleteHasHistory', N'ru', N'Удалить можно только документ-черновик; этот документ уже проходил согласование.'),
     (N'err.ECR-DOC-0409.rekeyLocked', N'ru', N'Ключ документа нельзя изменить: лист {sheetDefId} за период {periodKey} — {reason}.'),
-    (N'err.ECR-DOC-0409.rekeyLockedHidden', N'ru', N'Ключ документа нельзя изменить: в документе есть поданные или утверждённые листы.'),
     (N'err.ECR-DOC-0409.rekeyDuplicate', N'ru', N'У другого документа этого проекта уже есть ключ «{businessKey}».'),
     (N'err.ECR-DOC-0409.rekeyStale', N'ru', N'Ключ документа изменился после чтения; теперь он — «{businessKey}».'),
     (N'err.ECR-DOC-0422.rekeyReasonRequired', N'ru', N'Для изменения ключа документа требуется причина.'),
@@ -9832,7 +9831,8 @@ SELECT v.[Key], v.Lang, v.Val
     (N'recalcApprovals.stateConfirmed', N'ru', N'Подтверждено: {name}'),
     (N'recalcApprovals.expires', N'ru', N'Действует до'),
     (N'recalcApprovals.confirm', N'ru', N'Подтвердить'),
-    (N'recalcApprovals.confirmedDone', N'ru', N'Согласование пересчёта подтверждено.')
+    (N'recalcApprovals.confirmedDone', N'ru', N'Согласование пересчёта подтверждено.'),
+    (N'err.ECR-DOC-0409.rekeyLockedHidden', N'ru', N'Ключ документа нельзя изменить: в документе есть поданные или утверждённые листы.')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
@@ -10257,7 +10257,6 @@ SELECT v.[Key], v.Lang, v.Val
     (N'err.ECR-DOC-0409.deleteNotDraft', N'kz', N'Тек нобай құжатты жоюға болады; {periodKey} кезеңіне арналған {sheetDefId} парағы — {reason}.'),
     (N'err.ECR-DOC-0409.deleteHasHistory', N'kz', N'Тек нобай құжатты жоюға болады; бұл құжат келісуден өтіп қойған.'),
     (N'err.ECR-DOC-0409.rekeyLocked', N'kz', N'Құжат кілтін өзгертуге болмайды: {periodKey} кезеңіне арналған {sheetDefId} парағы — {reason}.'),
-    (N'err.ECR-DOC-0409.rekeyLockedHidden', N'kz', N'Құжат кілтін өзгертуге болмайды: құжатта тапсырылған немесе бекітілген парақтар бар.'),
     (N'err.ECR-DOC-0409.rekeyDuplicate', N'kz', N'Осы жобаның басқа құжатында «{businessKey}» кілті бұрыннан бар.'),
     (N'err.ECR-DOC-0409.rekeyStale', N'kz', N'Құжат кілті оқылғаннан кейін өзгерді; енді ол — «{businessKey}».'),
     (N'err.ECR-DOC-0422.rekeyReasonRequired', N'kz', N'Құжат кілтін өзгерту үшін себеп қажет.'),
@@ -12864,7 +12863,8 @@ SELECT v.[Key], v.Lang, v.Val
     (N'recalcApprovals.confirmedDone', N'kz', N'Қайта есептеу келісімі расталды.'),
     -- COLL:calcrun-order ── переклади ──
     (N'jobs.calculationRunSupersededByNewer', N'ru', N'Прогон завершился после более нового прогона {runId} той же области и не заменил его результаты: они свежее.'),
-    (N'jobs.calculationRunSupersededByNewer', N'kz', N'Прогон сол аумақтағы жаңарақ {runId} прогонынан кейін аяқталды және оның нәтижелерін алмастырмады: олар жаңарақ.')
+    (N'jobs.calculationRunSupersededByNewer', N'kz', N'Прогон сол аумақтағы жаңарақ {runId} прогонынан кейін аяқталды және оның нәтижелерін алмастырмады: олар жаңарақ.'),
+    (N'err.ECR-DOC-0409.rekeyLockedHidden', N'kz', N'Құжат кілтін өзгертуге болмайды: құжатта тапсырылған немесе бекітілген парақтар бар.')
     -- COLL:calcrun-order ── кінець секції ──
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
