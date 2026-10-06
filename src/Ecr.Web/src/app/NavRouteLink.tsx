@@ -2,7 +2,7 @@ import type { JSX } from 'react';
 import { NavLink } from '@mantine/core';
 import { LazyHint } from './LazyHint';
 import { Link } from 'react-router-dom';
-import { NavIcon } from './navIcons';
+import { NavIcon } from '@/shared/ui/navIcons';
 import type { RouteEntry } from './routes';
 import { useRoutePrefetch } from './useRoutePrefetch';
 

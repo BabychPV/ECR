@@ -104,7 +104,7 @@ export function MyTasksLauncher(): JSX.Element {
   );
 }
 
-/** Перелік із галочкою — той самий лінійний стиль, що в `app/navIcons.tsx`. */
+/** Перелік із галочкою — той самий лінійний стиль, що в `shared/ui/navIcons.tsx`. */
 function TasksIcon(): JSX.Element {
   return (
     <svg
