@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { can } from '@/shared/session/useSession';
-import { childPath, navRoutes, routeList, routes } from '@/app/routes';
+import { childPath, navGroups, navRoutes, routeList, routes } from '@/app/routes';
 
 /**
  * Реєстр маршрутів (`PR nav-arch #1`).
@@ -70,6 +70,73 @@ describe('app/routes — реєстр маршрутів', () => {
     for (const route of navRoutes) {
       expect(route.showInNav).toBe(true);
     }
+  });
+
+  it('UI-12: кожен пункт навбару — рівно в одній групі, групи й порядок як у макеті', () => {
+    const grouped = navGroups.flatMap((group) => group.routes.map((route) => route.id));
+
+    // ⛔ Пункт поза групами зник би з меню мовчки; пункт у двох — двоївся б.
+    expect([...grouped].sort()).toEqual(navRoutes.map((route) => route.id).sort());
+    expect(new Set(grouped).size).toBe(grouped.length);
+
+    // Макет `docs/design/hybrid` (`kit.js` GROUPS, `order` у `screens-*.js`); пункти, яких у
+    // макеті немає (кампанія, конвеєр, сповіщення), — у кінці своєї групи.
+    expect(navGroups.map((group) => [group.id, group.routes.map((route) => route.path)])).toEqual([
+      ['work', ['/', '/my-groups', '/admin/campaign']],
+      [
+        'configure',
+        [
+          '/admin/templates',
+          '/admin/registries',
+          '/admin/methodologies',
+          '/admin/expressions',
+          '/admin/units',
+          '/admin/sources',
+          '/admin/mapping',
+          '/admin/pipeline',
+        ],
+      ],
+      ['access', ['/admin/security', '/admin/periods']],
+      [
+        'operate',
+        [
+          '/admin/jobs',
+          '/admin/snapshots',
+          '/admin/audit',
+          '/admin/consistency',
+          '/admin/ui-strings',
+          '/admin/health',
+          '/admin/notifications',
+        ],
+      ],
+    ]);
+  });
+
+  it('UI-11: пояснення є в кожного екрана-переліку, що має його в макеті', () => {
+    const described = routeList
+      .filter((route) => (route.handle as { descriptionKey?: string }).descriptionKey !== undefined)
+      .map((route) => route.path)
+      .sort();
+
+    expect(described).toEqual(
+      [
+        '/',
+        '/my-groups',
+        '/admin/templates',
+        '/admin/registries',
+        '/admin/methodologies',
+        '/admin/units',
+        '/admin/sources',
+        '/admin/mapping',
+        '/admin/periods',
+        '/admin/jobs',
+        '/admin/snapshots',
+        '/admin/audit',
+        '/admin/consistency',
+        '/admin/ui-strings',
+        '/admin/health',
+      ].sort(),
+    );
   });
 
   it('ФВ-14.2: пункт навбару без permission доступний усім, пункт із permission — лише за правом (той самий фільтр, що й старий AppLayout.tsx)', () => {
