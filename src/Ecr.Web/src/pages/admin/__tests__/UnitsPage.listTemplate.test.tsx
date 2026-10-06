@@ -42,6 +42,8 @@ const SeededStrings: Record<string, string> = {
   'units.search': 'Search',
   'units.searchPlaceholder': 'Code or dimension',
   'units.noMatch': 'No units match the filters.',
+  'units.usedIn': 'Used in',
+  'units.statUnused': 'not used anywhere',
   'units.empty': 'No units registered',
   'filters.clear': 'Clear',
   'common.delete': 'Remove',
@@ -49,13 +51,19 @@ const SeededStrings: Record<string, string> = {
 };
 
 const units = [
-  { id: 1, code: 'kg', dimensionId: 1, factorToBase: '1.0000000000', offsetToBase: '0.0000000000', dimensionCode: 'Mass' },
-  { id: 2, code: 't', dimensionId: 1, factorToBase: '1000.0000000000', offsetToBase: '0.0000000000', dimensionCode: 'Mass' },
-  { id: 3, code: 'K', dimensionId: 2, factorToBase: '1.0000000000', offsetToBase: '0.0000000000', dimensionCode: 'Temperature' },
-  { id: 4, code: 'degC', dimensionId: 2, factorToBase: '1.0000000000', offsetToBase: '273.1500000000', dimensionCode: 'Temperature' },
+  { id: 1, code: 'kg', dimensionId: 1, factorToBase: '1.0000000000', offsetToBase: '0.0000000000', dimensionCode: 'Mass', isBase: true, nameL10n: { en: 'Kilogram' }, usedIn: 4 },
+  { id: 2, code: 't', dimensionId: 1, factorToBase: '1000.0000000000', offsetToBase: '0.0000000000', dimensionCode: 'Mass', isBase: false, nameL10n: { en: 'Tonne' }, usedIn: 0 },
+  { id: 3, code: 'K', dimensionId: 2, factorToBase: '1.0000000000', offsetToBase: '0.0000000000', dimensionCode: 'Temperature', isBase: true, nameL10n: null, usedIn: 2 },
+  { id: 4, code: 'degC', dimensionId: 2, factorToBase: '1.0000000000', offsetToBase: '273.1500000000', dimensionCode: 'Temperature', isBase: false, nameL10n: null, usedIn: 0 },
 ];
 
-function mockApi(permissions: string[]): void {
+/** Те саме, але без права `Uom.EditCatalog`: сервер не каже, де вживається. */
+const unitsWithoutUsage = units.map((unit) => ({ ...unit, usedIn: null }));
+
+let listed: readonly unknown[] = units;
+
+function mockApi(permissions: string[], list: readonly unknown[] = units): void {
+  listed = list;
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -92,7 +100,7 @@ function mockApi(permissions: string[]): void {
         });
       }
 
-      if (url.endsWith('/api/v1/units') && method === 'GET') return json(units);
+      if (url.endsWith('/api/v1/units') && method === 'GET') return json(listed);
 
       throw new Error(`Немає мока для ${method} ${url}`);
     }),
@@ -106,8 +114,8 @@ function LocationProbe(): JSX.Element | null {
   return null;
 }
 
-async function show(permissions: string[], entry = '/admin/units'): Promise<HTMLElement> {
-  mockApi(permissions);
+async function show(permissions: string[], entry = '/admin/units', list: readonly unknown[] = units): Promise<HTMLElement> {
+  mockApi(permissions, list);
   await loadCatalog('en', 'private');
 
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -136,9 +144,17 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe('baseUnits: базова одиниця розмірності — за значенням, не за текстом', () => {
-  it('множник 1 і зсув 0; зсув ≠ 0 базовою не робить', () => {
-    const bases = baseUnits(units);
+describe('baseUnits: базова одиниця розмірності — прапорець сервера, інакше за значенням', () => {
+  it('isBase сервера перемагає; без нього — множник 1 і зсув 0', () => {
+    // ⛔ Мутаційний доказ: приберіть перший прохід (`isBase`) — базовою маси
+    // стане `kg` (за значенням), хоча сервер назвав базовою `t`.
+    const flagged = baseUnits([
+      { ...units[0]!, isBase: false },
+      { ...units[1]!, isBase: true },
+    ]);
+    expect(flagged.get(1)).toBe('t');
+
+    const bases = baseUnits(units.map((unit) => ({ ...unit, isBase: false })));
 
     expect(bases.get(1)).toBe('kg');
 
@@ -187,7 +203,7 @@ describe('UnitsPage на шаблоні переліку (UI-21)', () => {
   });
 
   it('колонка «Base unit»: базова позначена, решта називає свою базову', async () => {
-    const table = await show([]);
+    const table = await show([], '/admin/units', unitsWithoutUsage);
 
     const tonne = table.querySelector('[data-unit-open="t"]')?.closest('tr') as HTMLElement;
     const kilo = table.querySelector('[data-unit-open="kg"]')?.closest('tr') as HTMLElement;
@@ -217,6 +233,31 @@ describe('UnitsPage на шаблоні переліку (UI-21)', () => {
 
     expect(within(drawer).getByRole('button', { name: 'Edit' })).toBeDefined();
     expect(within(drawer).getByRole('button', { name: 'Remove' })).toBeDefined();
+  });
+
+  it('UnitRef: назва другим рядком, «Used in» і «not used anywhere», коли сервер віддав usedIn', async () => {
+    const table = await show([]);
+
+    const tonne = table.querySelector('[data-unit-open="t"]')?.closest('tr') as HTMLElement;
+    expect(within(tonne).getByText('Tonne')).toBeDefined();
+
+    expect(screen.getByRole('columnheader', { name: /Used in/ })).toBeDefined();
+    expect(within(tonne).getByText('0')).toBeDefined();
+
+    fireEvent.click(screen.getByRole('button', { name: /not used anywhere/ }));
+    await waitFor(() => {
+      expect(shownCodes(table).sort()).toEqual(['degC', 't']);
+    });
+    expect(location).toContain('stat=unused');
+  });
+
+  it('usedIn = null (немає Uom.EditCatalog) — ні колонки, ні показника: «не знаю» не нуль', async () => {
+    await show([], '/admin/units', unitsWithoutUsage);
+
+    // ⛔ Мутаційний доказ: рахуйте `usedIn ?? 0` — з'явиться «4 not used
+    // anywhere» для людини, якій сервер нічого про вжиток не сказав.
+    expect(screen.queryByRole('columnheader', { name: /Used in/ })).toBeNull();
+    expect(screen.queryByText('not used anywhere')).toBeNull();
   });
 
   it('головна дія «New unit» — лише з правом; «Check a conversion» — завжди', async () => {
