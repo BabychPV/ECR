@@ -102,6 +102,15 @@ interface GateState {
 const gates = new WeakMap<HTMLElement, GateState>();
 
 /**
+ * T5-03: сітка, з якою користувач працює зараз (останній `focuscell`/фокус/клавіша в ній). Після
+ * фіксації DOM-фокус інколи лишається на `<body>` (живий Chromium: перший Enter після
+ * завантаження), а RevoGrid однаково веде стрілки. Лише цій сітці стрілка з `<body>` відкриває
+ * вікно «навігації» - інших сіток на сторінці (лінива сторінка документа - до 91 таблиці) вона
+ * не стосується.
+ */
+let activeGrid: HTMLElement | null = null;
+
+/**
  * AN-39/L8-16: Ctrl+V за 70-250 мс після Enter (макрос, сканер) вставляв у ПОПЕРЕДНЮ комірку:
  * фокус ще не перейшов, а нативний `paste` не ставиться в чергу. Тут вставку відкладають
  * до кінця вікна коміту.
@@ -128,7 +137,8 @@ export function deferWhileCommitting(container: HTMLElement, run: () => void): b
  *
  * ⚠ Копіювання з чужого поля поза сіткою (target не `<body>` і не в контейнері) не чіпаємо.
  *
- * ⚠ Слухач НЕ змінює стан черги/вікна (лише читає `isCommitting`) і діє лише у вікні 'commit'.
+ * ⚠ Слухач НЕ змінює стан черги/вікна (лише читає `isCommitting`) і діє лише у вікні 'commit'
+ * (і, з T5-03, у вікні «навігації» після стрілки).
  * Відомий вузький випадок: Ctrl+C, коли Enter ще в черзі й редактор не відкрито (`holding` =
  * 'open'), не відкладається - щоб не зачепити чергу клавіш (гейт `keyCommitGateLive`).
  */
@@ -184,7 +194,13 @@ export function installKeyCommitGate(container: HTMLElement): () => void {
   const typedEditors = new WeakSet<EventTarget>();
 
   gates.set(container, {
-    isCommitting: () => holding === 'commit',
+    /*
+     * ⛔ T5-03: Ctrl+V/Ctrl+C за 0-50 мс після стрілки (↓/↑ поза редактором) читали СТАРЕ
+     * виділення - фокус переходить лише через ~70 мс (`keyChangeSelection`), тож вставка лягала
+     * в попередню комірку, а в буфер ішла попередня. Вікно «навігації» (A1-03) відкладає їх так
+     * само, як вікно коміту. Вікно 'open' - ні: там виділення вже на місці.
+     */
+    isCommitting: () => holding === 'commit' || holding === 'nav',
     afterSettled: (run) => {
       afterSettled.push(run);
     },
@@ -324,6 +340,26 @@ export function installKeyCommitGate(container: HTMLElement): () => void {
     const key = isEnterKeyEvent(event) ? 'Enter' : event.key;
     const inside = target instanceof Node && container.contains(target);
     const detached = target === doc.body || target === doc.documentElement;
+    if (inside) activeGrid = container;
+
+    /*
+     * ⛔ T5-03: стрілка з `<body>` (фокус не повернувся в сітку після фіксації) - RevoGrid
+     * переходить так само через ~70 мс, але вікна не було: Ctrl+C за 0 мс копіював СТАРУ комірку
+     * (живий Chromium, 1 з 8). Лише для активної сітки й лише стрілка без модифікаторів.
+     */
+    if (
+      !inside &&
+      detached &&
+      holding === null &&
+      activeGrid === container &&
+      ArrowKeys.has(key) &&
+      !(event.shiftKey || event.ctrlKey || event.metaKey || event.altKey)
+    ) {
+      hold('nav');
+
+      return;
+    }
+
     if (!inside && !(holding !== null && detached)) return;
 
     // ⛔ Модифікаторні комбінації (Ctrl/Meta/Alt+клавіша: C, V, Z, S, ...) не
@@ -440,10 +476,18 @@ export function installKeyCommitGate(container: HTMLElement): () => void {
   };
 
   const onFocusCell = (): void => {
+    activeGrid = container;
+
     if (holding === 'nav') {
       navPending -= 1;
       if (timer !== null) clearTimeout(timer);
-      tick();
+      /*
+       * ⛔ T5-03: не відпускати СИНХРОННО в цьому слухачі. Він стоїть раніше за слухача
+       * виділення `DocumentGrid` (`trackSelection`), тож відкладена вставка/копіювання
+       * виконувалась ДО оновлення якоря й читала стару комірку (живий Chromium, ↓ і Ctrl+V за
+       * 0–40 мс: «42» у R1, 7 з 12). Наступна макрозадача - вже після всіх слухачів `focuscell`.
+       */
+      timer = setTimeout(tick, 0);
 
       return;
     }
@@ -465,6 +509,7 @@ export function installKeyCommitGate(container: HTMLElement): () => void {
   };
 
   const onFocusIn = (event: FocusEvent): void => {
+    activeGrid = container;
     const target = event.target;
     if (!inEditor(target)) return;
 
@@ -485,7 +530,16 @@ export function installKeyCommitGate(container: HTMLElement): () => void {
     if (event.target !== null) typedEditors.delete(event.target);
   };
 
+  // Фокус або клік ПОЗА сіткою (не `<body>`) - сітка вже не активна.
+  const onOutside = (event: Event): void => {
+    const target = event.target;
+    if (activeGrid !== container || target === doc.body || target === doc.documentElement) return;
+    if (!(target instanceof Node && container.contains(target))) activeGrid = null;
+  };
+
   doc.addEventListener('keydown', onKeyDown, true);
+  doc.addEventListener('focusin', onOutside, true);
+  doc.addEventListener('mousedown', onOutside, true);
   container.addEventListener('focuscell', onFocusCell);
   container.addEventListener('focusin', onFocusIn);
   container.addEventListener('celledit', onCellEdit);
@@ -494,6 +548,9 @@ export function installKeyCommitGate(container: HTMLElement): () => void {
 
   return () => {
     doc.removeEventListener('keydown', onKeyDown, true);
+    doc.removeEventListener('focusin', onOutside, true);
+    doc.removeEventListener('mousedown', onOutside, true);
+    if (activeGrid === container) activeGrid = null;
     container.removeEventListener('focuscell', onFocusCell);
     container.removeEventListener('focusin', onFocusIn);
     container.removeEventListener('celledit', onCellEdit);
