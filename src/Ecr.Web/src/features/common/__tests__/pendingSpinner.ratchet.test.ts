@@ -31,7 +31,6 @@ import { describe, expect, it } from 'vitest';
 /** Замір: файл (від `src/`) → скільки `loading={…isPending…}` дозволено. */
 const Ledger: Readonly<Record<string, number>> = {
   'features/documents/BusinessKeyChangeAction.tsx': 1,
-  'features/documents/CreateDocumentModal.tsx': 1,
   'features/documents/DocumentHeaderPanel.tsx': 1,
   'features/documents/VersionMigrationDialog.tsx': 2,
   'features/expressions/TestCaseRunner.tsx': 1,
