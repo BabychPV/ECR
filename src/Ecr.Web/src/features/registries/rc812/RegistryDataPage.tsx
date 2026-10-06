@@ -27,6 +27,7 @@ import {
 } from './data';
 import { EntryDrawer, entryPanelId } from './EntryDrawer';
 import { RegistryDataGrid, type GridRow } from './RegistryDataGrid';
+import { FilterRow } from '@/shared/ui/FilterBar';
 import {
   cellValue,
   draftOf,
@@ -350,7 +351,7 @@ export function RegistryDataPage(): JSX.Element {
       )}
 
       <Group gap="sm" align="end" justify="space-between">
-        <Group gap="sm" align="end">
+        <FilterRow gap="sm">
           <TextInput
             size="xs"
             label={t('registries.search')}
@@ -375,7 +376,7 @@ export function RegistryDataPage(): JSX.Element {
           )}
           {/* RT-16: експорт — записи, чинні на ту саму дату, що й сітка. */}
           <RegistryExportButton registryCode={code} asOf={asOf} />
-        </Group>
+        </FilterRow>
         <Text size="sm" c="dimmed" aria-live="polite" data-testid="registry-data-status">
           {[status, checkSummary].filter((s) => s !== '').join(' · ')}
         </Text>

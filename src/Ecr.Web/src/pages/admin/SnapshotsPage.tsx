@@ -56,6 +56,7 @@ import { localized } from '@/shared/i18n/localized';
 import { fetchAllProjects } from '@/features/projects/allProjects';
 import { DisabledReason } from '@/features/common/DisabledReason';
 import { usePendingLoading } from '@/features/common/usePendingLoading';
+import { FilterRow } from '@/shared/ui/FilterBar';
 
 // ⚠ За `import()`: бюджет маршруту тісний, а рядки зрізу відкривають рідко.
 const SnapshotRowsModal = lazy(() => import('@/features/reports/SnapshotRowsModal'));
@@ -310,7 +311,7 @@ export function SnapshotsPage(): JSX.Element {
       <PageHeader
         title={t('snapshots.title')}
         actions={
-          <Group gap="xs" align="end">
+          <FilterRow>
             <Select
               size="xs"
               miw={200}
@@ -358,7 +359,7 @@ export function SnapshotsPage(): JSX.Element {
                 </Button>
               </DisabledReason>
             )}
-          </Group>
+          </FilterRow>
         }
       />
 

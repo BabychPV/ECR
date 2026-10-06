@@ -9,6 +9,7 @@ import { UiStringsTable } from '@/features/localization/UiStringsTable';
 import { useLanguages } from '@/shared/i18n/useLanguages';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
+import { FilterInline, FilterRow } from '@/shared/ui/FilterBar';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { showApiError, showDone } from '@/shared/ui/notify';
 import { useUrlState } from '@/shared/ui/useUrlState';
@@ -261,7 +262,7 @@ export function UiStringsPage(): JSX.Element {
       <PageHeader
         title={t('uiStrings.title')}
         actions={
-          <Group gap="xs" align="end">
+          <FilterRow>
             {/* ⛔ Директива D15 §0, правило L10: перелік мов збирався через
                 `?? []`, тож відмова `GET /api/v1/languages` давала порожній
                 `Select` — «мов у системі немає». На екрані, де ПЕРЕКЛАДАЮТЬ,
@@ -295,23 +296,27 @@ export function UiStringsPage(): JSX.Element {
 
             {/* ⚠ Для мови за замовчуванням перемикач вимкнений: вона сама є
                 еталоном, і «відсутніх» у ній не буває за визначенням. */}
-            <Switch
-              size="xs"
-              label={t('uiStrings.missingOnly')}
-              checked={onlyMissing}
-              disabled={isDefault}
-              onChange={(event) => setMissingOnly(event.currentTarget.checked)}
-            />
+            <FilterInline>
+              <Switch
+                size="xs"
+                label={t('uiStrings.missingOnly')}
+                checked={onlyMissing}
+                disabled={isDefault}
+                onChange={(event) => setMissingOnly(event.currentTarget.checked)}
+              />
+            </FilterInline>
 
             {/* ⛔ F10: підсумок «намальовано з усього». Нового рядка каталогу
                 тут не заводиться — каталог живе в сіді БД, поза цим пакетом
                 (`D-95`), — тож підпис числовий і тому однаковий усіма мовами.
                 Число праворуч і є відповідь на питання «скільки їх узагалі»,
                 якої на екрані не було зовсім. */}
-            <Text size="xs" c="dimmed" data-testid="ui-strings-count">
-              {`${String(visible.length)} / ${String(keys.length)}`}
-            </Text>
-          </Group>
+            <FilterInline>
+              <Text size="xs" c="dimmed" data-testid="ui-strings-count">
+                {`${String(visible.length)} / ${String(keys.length)}`}
+              </Text>
+            </FilterInline>
+          </FilterRow>
         }
       />
 
