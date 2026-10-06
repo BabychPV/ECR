@@ -1,6 +1,7 @@
 import type { JSX, ReactNode } from 'react';
 import { Navigate } from 'react-router-dom';
 import { useSession } from '@/shared/session/useSession';
+import { PageDescriptionContext } from '@/shared/ui/pageDescription';
 import { missingRoutePermission } from './routeAccess';
 import type { RouteHandle } from './routes';
 
@@ -66,5 +67,8 @@ export function RouteGuard({
     return <Navigate to="/403" replace state={{ permission: missing }} />;
   }
 
-  return <>{children}</>;
+  // UI-11: пояснення екрана — з реєстру маршрутів, для `PageHeader` листа.
+  return (
+    <PageDescriptionContext.Provider value={handle.descriptionKey}>{children}</PageDescriptionContext.Provider>
+  );
 }

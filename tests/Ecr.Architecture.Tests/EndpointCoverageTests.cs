@@ -399,6 +399,10 @@ public sealed partial class EndpointCoverageTests
             "Пункт меню: labelKey маршруту."),
         new("app/Breadcrumbs.tsx", "handle.labelKey", 1, "app/routes.ts", RouteLabelKeys,
             "Крихта: labelKey маршруту."),
+        new("app/NavGroupSection.tsx", "group.labelKey", 1, "app/routes.ts", NavGroupLabelKeys,
+            "UI-12: підпис групи бічного меню (navGroups)."),
+        new("shared/ui/PageHeader.tsx", "routeDescriptionKey", 1, "app/routes.ts", RouteDescriptionKeys,
+            "UI-11: пояснення екрана під заголовком (handle.descriptionKey)."),
 
         new("features/grid/permissions.ts", "Hints[reason]", 1, "features/grid/permissions.ts",
             [
@@ -596,6 +600,20 @@ public sealed partial class EndpointCoverageTests
         "nav.jobs", "nav.snapshots", "nav.campaign", "nav.audit", "nav.consistency", "nav.uiStrings",
         "nav.notifications", "nav.health", "nav.myGroups", "documents.title",
         "registries.data.title",
+    ];
+
+    /// <summary>Підписи груп бічного меню (UI-12, <c>navGroups</c> у <c>routes.ts</c>).</summary>
+    private static string[] NavGroupLabelKeys =>
+        ["nav.group.work", "nav.group.configure", "nav.group.access", "nav.group.operate"];
+
+    /// <summary>Пояснення екранів під заголовком (UI-11, <c>handle.descriptionKey</c> у <c>routes.ts</c>).</summary>
+    private static string[] RouteDescriptionKeys =>
+    [
+        "nav.documents.description", "nav.myGroups.description", "nav.templates.description",
+        "nav.registries.description", "nav.methodologies.description", "nav.units.description",
+        "nav.sources.description", "nav.mapping.description", "nav.periods.description",
+        "nav.jobs.description", "nav.snapshots.description", "nav.audit.description",
+        "nav.consistency.description", "nav.uiStrings.description", "nav.health.description",
     ];
 
     /// <summary>Назви прав <c>permission.&lt;Code&gt;</c> — 43 права каталогу <c>sec.Permission</c>.</summary>
