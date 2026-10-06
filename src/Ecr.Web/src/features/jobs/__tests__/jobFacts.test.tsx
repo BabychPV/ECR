@@ -93,17 +93,16 @@ function show(entry: string): void {
   );
 }
 
+/** Вміст шторки задачі (UI-28: картка стеження стала шторкою `?panel=`). */
 function card(): HTMLElement {
-  const title = screen.getByText(/IExcelExportJob|ExcelExport|jobs\.kind/);
-
-  return title.closest('.mantine-Card-root') as HTMLElement;
+  return document.querySelector('[data-job-detail]') as HTMLElement;
 }
 
 afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe('JobsPage: картка задачі — поля BE-08', () => {
+describe('JobsPage: шторка задачі — поля BE-08', () => {
   it('провал: спроба N з M, код через каталог, кореляція з копіюванням, документ', async () => {
     mockFetch(failedStatus, []);
     show('/admin/jobs?id=IExcelExportJob-a1');
@@ -119,7 +118,8 @@ describe('JobsPage: картка задачі — поля BE-08', () => {
       await screen.findByRole('button', { name: '⟦jobs.copyCorrelation⟧' }),
     ).toBeTruthy();
 
-    const link = screen.getByRole('link', { name: '⟦jobs.openDocument (id=42)⟧' });
+    // Документ — кнопкою-посиланням «Open document» у підвалі шторки.
+    const link = await screen.findByRole('link', { name: '⟦jobs.openDocument (id=42)⟧' });
     expect(link.getAttribute('href')).toBe('/documents/42');
 
     expect(card().querySelector('time[datetime="2026-09-20T08:00:00Z"]')).not.toBeNull();
@@ -154,7 +154,7 @@ describe('JobsPage: картка задачі — поля BE-08', () => {
     );
     show('/admin/jobs?id=IExcelExportJob-a1');
 
-    await screen.findByText(/ExcelExport|jobs\.kind/);
+    await waitFor(() => expect(card()).not.toBeNull());
 
     expect(document.querySelector('[data-job-attempt]')).toBeNull();
     expect(document.querySelector('[data-job-failure]')).toBeNull();
@@ -185,14 +185,15 @@ describe('JobsPage: перелік задач — поля BE-08', () => {
     expect(screen.getByText('⟦jobs.system⟧')).toBeTruthy();
     expect(screen.getByText('Олена Коваль')).toBeTruthy();
 
-    const link = screen.getByRole('link', { name: '⟦jobs.openDocument (id=77)⟧' });
-    expect(link.getAttribute('href')).toBe('/documents/77');
+    // ✎ UI-28: документ — другим рядком назви задачі (макет: `twoLine(type,
+    // target)`); перехід до нього — у підвалі шторки.
+    expect(screen.getByText('⟦jobs.openDocument (id=77)⟧')).toBeTruthy();
 
-    expect(screen.getByText('⟦jobs.failureUnrecorded⟧')).toBeTruthy();
-    expect(document.querySelectorAll('[data-job-failure]')).toHaveLength(1);
-
+    // ✎ UI-28: причина провалу й момент постановки — у шторці, не в рядку
+    // (макет: колонки Job / Started by / Started / Progress / State).
+    expect(document.querySelectorAll('[data-job-failure]')).toHaveLength(0);
     await waitFor(() =>
-      expect(document.querySelector('time[datetime="2026-09-20T08:59:00Z"]')).not.toBeNull(),
+      expect(document.querySelector('time[datetime="2026-09-20T09:00:00Z"]')).not.toBeNull(),
     );
 
     // L5: не більше семи колонок.
