@@ -25,6 +25,16 @@ namespace Ecr.Domain.Entities.Calculations;
 /// </remarks>
 public sealed class MethodologyConstant : Entity<int>
 {
+    /// <summary>
+    /// Категорія, під якою AF зберігає СПІЛЬНІ константи методології (<c>CInfo_Category = 'Common'</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Імпорт кладе її буквально (<c>MethodologyPackagePlanner</c> лише обрізає пробіли), тож за
+    /// заданої правилом категорії рядка резолвер (<c>ConstantResolver</c>) приймає її нарівні з
+    /// константою без категорії. Точний збіг категорії рядка виграє.
+    /// </remarks>
+    public const string CommonCategory = "Common";
+
     private MethodologyConstant() { }
 
     /// <summary>Створює числову константу (<see cref="ConstantKind.Numeric"/>).</summary>
