@@ -160,6 +160,44 @@ public sealed class RequiredByMethodologyColumnTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Finding", "C1")]
+    public async Task Вхід_із_колонкою_версії_джерела_позначає_колонку_клон_версії_за_шляхом()
+    {
+        // C1: вимога ключується Id 12 (версія-джерело), колонка Category документа на клоні має Id 13.
+        const int CloneCategoryId = 13;
+        WithMethodology();
+
+        var volume = new ColumnDef(
+            3, EcrCode.Create("Volume"), Text("Volume"), 1, CellDataType.Decimal);
+        SetId(volume, VolumeId);
+        var category = new ColumnDef(
+            3, EcrCode.Create("Category"), Text("Category"), 2, CellDataType.String);
+        SetId(category, CloneCategoryId);
+        var sheet = new SheetDef(2, EcrCode.Create("Water"), Text("Water"), 1);
+        var table = new TableDef(1, EcrCode.Create("Main"), Text("Main"), 1,
+                                 TableLayoutKind.MonthsInColumns, TableRowMode.Fixed);
+        SetId(table, 3);
+        table.AddColumn(volume);
+        table.AddColumn(category);
+        sheet.AddTable(table);
+        _metadata.GetAsync(2, Arg.Any<CancellationToken>()).Returns(
+            new TemplateVersionSnapshot(2, 0, [sheet],
+                new Dictionary<int, ColumnDef> { [VolumeId] = volume, [CloneCategoryId] = category },
+                new Dictionary<(int, string), RowDef>()));
+
+        var mapper = Substitute.For<IColumnPathMapper>();
+        mapper.MapToVersionAsync(Arg.Any<IReadOnlyCollection<int>>(), 2, Arg.Any<CancellationToken>())
+            .Returns(new Dictionary<int, int> { [CategoryId] = CloneCategoryId });
+
+        var handler = new GetTableSliceHandler(
+            _rows, _cells, _metadata, Units(), _access, _methodologies, _periods, Styles(), columnMapper: mapper);
+        var slice = await handler.HandleAsync(Document, TableInstance, Profile(), "en", CancellationToken.None);
+
+        Assert.True(slice.Columns.Single(c => c.Code == "Category").IsRequiredByMethodology);
+        Assert.False(slice.Columns.Single(c => c.Code == "Volume").IsRequiredByMethodology);
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
     public async Task Без_привязаної_методології_жодна_колонка_не_позначена()
     {
         // ⚠ Фікстура вже підставляє порожній `GetMethodologyIdsBoundToTableAsync`

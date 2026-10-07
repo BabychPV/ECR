@@ -25,4 +25,11 @@ public interface IColumnPathMapper
     /// </returns>
     public Task<IReadOnlyDictionary<int, int>> MapToVersionAsync(
         IReadOnlyCollection<int> sourceColumnIds, int targetTemplateVersionId, CancellationToken ct);
+
+    /// <summary>Версії шаблону, яким належать названі таблиці (через аркуш).</summary>
+    /// <param name="tableDefIds">Таблиці.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Таблиця → версія шаблону; невідомої таблиці в результаті немає.</returns>
+    public Task<IReadOnlyDictionary<int, int>> GetTemplateVersionsOfTablesAsync(
+        IReadOnlyCollection<int> tableDefIds, CancellationToken ct);
 }

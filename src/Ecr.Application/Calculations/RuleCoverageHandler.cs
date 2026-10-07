@@ -31,7 +31,8 @@ public sealed class RuleCoverageHandler(
     IRuleCoverageReader reader,
     IClock clock,
     IAccessDecisionService access,
-    ICurrentUser currentUser)
+    ICurrentUser currentUser,
+    IColumnPathMapper? columnMapper = null)
 {
     /// <summary>Право — як у симуляції: перегляд, не публікація.</summary>
     public const string Permission = "Calculation.View";
@@ -104,7 +105,7 @@ public sealed class RuleCoverageHandler(
         var projects = ListDocumentsHandler.ReadableProjects(profile);
         IReadOnlyList<RuleCoverageCombination> read = projects.Count == 0
             ? []
-            : await reader.ReadAsync(tables, columns, projects, from, to, MaxCombinations, ct).ConfigureAwait(false);
+            : await ReadLocalizedAsync(tables, columns, projects, from, to, ct).ConfigureAwait(false);
 
         var combinations = read
             .Take(MaxCombinations)
@@ -122,6 +123,58 @@ public sealed class RuleCoverageHandler(
             [.. rules.Select(r => new RuleCoverageRuleDto(r.Code, r.Priority))],
             combinations,
             read.Count > MaxCombinations);
+    }
+
+    /// <summary>
+    /// Читає комбінації значень, звертаючись до колонок КОЖНОЇ версії шаблону за її локальними Id (C1).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Правила ключуються Id колонок версії-джерела, а таблиці прив'язок можуть бути з різних версій шаблону
+    /// (клон). Вісь матриці лишається в Id правил (так працює <see cref="Classify"/>), а читаються комірки колонок,
+    /// що відповідають їм за шляхом у версії таблиці. Колонка без відповідника читається як Id <c>0</c> — порожнє
+    /// значення, тож рядок не покритий правилом, що її згадує (явний «пропуск», а не збіг навмання). Документ
+    /// належить одній версії, тож лічильники документів різних версій можна просто додати.
+    /// </remarks>
+    private async Task<IReadOnlyList<RuleCoverageCombination>> ReadLocalizedAsync(
+        List<int> tables, List<int> columns, IReadOnlyCollection<int> projects, int from, int to, CancellationToken ct)
+    {
+        if (columnMapper is null || tables.Count == 0 || columns.Count == 0)
+        {
+            return await reader.ReadAsync(tables, columns, projects, from, to, MaxCombinations, ct).ConfigureAwait(false);
+        }
+
+        var versions = await columnMapper.GetTemplateVersionsOfTablesAsync(tables, ct).ConfigureAwait(false);
+        var groups = tables.GroupBy(t => versions.TryGetValue(t, out var v) ? v : 0).ToList();
+
+        var merged = new Dictionary<string, (IReadOnlyList<CellValueData?> Values, long Rows, int Documents)>(StringComparer.Ordinal);
+        foreach (var group in groups)
+        {
+            var map = group.Key == 0
+                ? new Dictionary<int, int>()
+                : await columnMapper.MapToVersionAsync(columns, group.Key, ct).ConfigureAwait(false);
+            var local = columns.Select(id => map.TryGetValue(id, out var l) ? l : 0).ToList();
+
+            var part = await reader.ReadAsync([.. group], local, projects, from, to, MaxCombinations, ct)
+                .ConfigureAwait(false);
+            if (groups.Count == 1)
+            {
+                return part;
+            }
+
+            foreach (var combination in part)
+            {
+                var key = string.Join(
+                    '\u0001',
+                    combination.Values.Select(v => v is null ? "\u0000" : MethodologyRuleMatcher.Text(v) ?? "\u0000"));
+                merged[key] = merged.TryGetValue(key, out var seen)
+                    ? (seen.Values, seen.Rows + combination.Rows, seen.Documents + combination.Documents)
+                    : (combination.Values, combination.Rows, combination.Documents);
+            }
+        }
+
+        return [.. merged.Values
+            .OrderByDescending(m => m.Rows)
+            .Select(m => new RuleCoverageCombination(m.Values, m.Rows, m.Documents))];
     }
 
     private static RuleCoverageCombinationDto Classify(

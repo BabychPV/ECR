@@ -13,6 +13,27 @@ namespace Ecr.Infrastructure.Persistence;
 public sealed class ColumnPathMapper(EcrDbContext db) : IColumnPathMapper
 {
     /// <inheritdoc />
+    public async Task<IReadOnlyDictionary<int, int>> GetTemplateVersionsOfTablesAsync(
+        IReadOnlyCollection<int> tableDefIds, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(tableDefIds);
+
+        if (tableDefIds.Count == 0)
+        {
+            return new Dictionary<int, int>();
+        }
+
+        var wanted = tableDefIds.Distinct().ToList();
+        return await (
+                from table in db.TableDefs.AsNoTracking()
+                where wanted.Contains(table.Id)
+                join sheet in db.SheetDefs.AsNoTracking() on table.SheetDefId equals sheet.Id
+                select new { table.Id, sheet.TemplateVersionId })
+            .ToDictionaryAsync(t => t.Id, t => t.TemplateVersionId, ct)
+            .ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
     public async Task<IReadOnlyDictionary<int, int>> MapToVersionAsync(
         IReadOnlyCollection<int> sourceColumnIds, int targetTemplateVersionId, CancellationToken ct)
     {
