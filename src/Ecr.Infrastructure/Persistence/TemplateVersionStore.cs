@@ -453,9 +453,20 @@ public sealed partial class TemplateVersionStore(EcrDbContext db) : ITemplateVer
     /// аркуш/таблиця/колонка — тією самою ідентичністю, що й гранти.
     /// </summary>
     /// <remarks>
-    /// ⚠ Предикат (<c>MatchJson</c>) — плаский об'єкт «код колонки → значення», ідентифікаторів не
-    /// містить, тож лишається як є. Правила методології (<c>calc.MethodologyRule</c>) належать ВЕРСІЇ
-    /// МЕТОДОЛОГІЇ, а не шаблону, і клоном шаблону не чіпаються.
+    /// ⛔ Предикат (<c>MatchJson</c>) — плаский об'єкт, ключі якого — <c>ColumnDefId</c> рядком
+    /// (<c>CalculatedCellOverlay</c> зіставляє їх через <c>MethodologyRuleMatcher</c> із колонками документа
+    /// ТІЄЇ версії, на якій він живе). Тож ключі вихідної версії на клоні не збігалися б ніколи, і накладений
+    /// результат мовчки зникав би. Тому числові ключі перемапляються на Id колонок клону (за кодами, тією самою
+    /// <c>map</c>). Нечислові ключі й не-об'єкти лишаються як є: зіставлення з ними й так нічого не дає, а
+    /// змінювати їх немає підстав.
+    ///
+    /// ⛔ Fail-closed: якщо числовий ключ не має відповідника в клоні, прибрати предикат НЕ можна — це
+    /// розширило б прив'язку на всі рядки (змінило б семантику). Така прив'язка НЕ копіюється; її відсутність
+    /// на клоні виявляє наявна перевірка <c>bindingsNotMapped</c> при переносі проєкту (D-13).
+    ///
+    /// ⚠ Правила й обов'язкові входи методології (<c>calc.MethodologyRule</c>, <c>MethodologyRequiredInput</c>)
+    /// належать ВЕРСІЇ МЕТОДОЛОГІЇ, а не шаблону, і клоном шаблону не чіпаються: вони посилаються на
+    /// <c>ColumnDefId</c> версії-джерела, тож перенос проєкту на клон блокує <c>methodologyKeysNotMapped</c>.
     /// </remarks>
     private async Task CloneCalculationBindingsAsync(
         TemplateVersion clone, IReadOnlyList<GrantSource> sources, CancellationToken ct)
@@ -486,6 +497,7 @@ public sealed partial class TemplateVersionStore(EcrDbContext db) : ITemplateVer
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
+        var columnMap = map.ToDictionary(p => p.Key, p => p.Value.ColumnId);
         foreach (var b in bindings)
         {
             if (!map.TryGetValue(b.ColumnDefId, out var target))
@@ -493,14 +505,65 @@ public sealed partial class TemplateVersionStore(EcrDbContext db) : ITemplateVer
                 continue;
             }
 
-            var copy = new CalculationBinding(target.TableId, target.ColumnId, b.MethodologyId, b.OutputCode, b.MatchJson);
+            var match = RemapMatchJson(b.MatchJson, columnMap);
+            if (match is null)
+            {
+                continue;
+            }
+
+            var copy = new CalculationBinding(target.TableId, target.ColumnId, b.MethodologyId, b.OutputCode, match);
             if (!b.IsActive)
             {
-                copy.Update(b.MatchJson, isActive: false);
+                copy.Update(match, isActive: false);
             }
 
             db.CalculationBindings.Add(copy);
         }
+    }
+
+    /// <summary>
+    /// Переписує числові ключі предиката (<c>ColumnDefId</c> вихідної версії) на Id колонок клону.
+    /// <c>null</c> — числовий ключ без відповідника: предикат переписати не можна, прив'язку не копіюємо.
+    /// </summary>
+    /// <param name="matchJson">Предикат прив'язки.</param>
+    /// <param name="columnMap">Колонка вихідної версії → колонка клону.</param>
+    public static string? RemapMatchJson(string matchJson, IReadOnlyDictionary<int, int> columnMap)
+    {
+        System.Text.Json.Nodes.JsonObject? source;
+        try
+        {
+            source = System.Text.Json.Nodes.JsonNode.Parse(matchJson) as System.Text.Json.Nodes.JsonObject;
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return matchJson;
+        }
+
+        if (source is null
+            || !source.Any(p => int.TryParse(
+                p.Key, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out _)))
+        {
+            return matchJson;
+        }
+
+        var result = new System.Text.Json.Nodes.JsonObject();
+        foreach (var (key, value) in source)
+        {
+            var newKey = key;
+            if (int.TryParse(key, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var id))
+            {
+                if (!columnMap.TryGetValue(id, out var cloneId))
+                {
+                    return null;
+                }
+
+                newKey = cloneId.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            }
+
+            result[newKey] = value?.DeepClone();
+        }
+
+        return result.ToJsonString();
     }
 
     private async Task SaveCloneAsync(

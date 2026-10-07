@@ -115,6 +115,9 @@ public sealed class MigrateDocumentVersionHandler(
     /// <summary>Стеля переліку відмінностей у звіті.</summary>
     public const int MaxItems = 500;
 
+    /// <summary>Скільки ключів методологій на чужі колонки називає відмова (<c>methodologyKeys</c>).</summary>
+    public const int MaxMethodologyKeysListed = 20;
+
     /// <summary>
     /// ⛔ L1-08 (HU-11 Q3=A): перенос міняє структуру ВСІХ документів проєкту, тож потрібен грант
     /// <c>Manage</c> на проєкт (раніше досить було Read + глобального <c>Template.Edit</c>). Діє і на
@@ -167,7 +170,7 @@ public sealed class MigrateDocumentVersionHandler(
 
         if (dryRun)
         {
-            var (dto, _) = await PlanAsync(
+            var (dto, _, _) = await PlanAsync(
                 documentId, projectId, project.TemplateVersionId, target, mode, archived, dryRun: true, ct).ConfigureAwait(false);
             return dto;
         }
@@ -201,9 +204,9 @@ public sealed class MigrateDocumentVersionHandler(
                 await structureGate.EnterStructureAsync(id, exclusive: true, innerCt).ConfigureAwait(false);
             }
 
-            var (dto, plan) = await PlanAsync(
+            var (dto, plan, foreignKeys) = await PlanAsync(
                 documentId, projectId, current, target, mode, archived, dryRun: false, innerCt).ConfigureAwait(false);
-            ThrowIfRefused(dto);
+            ThrowIfRefused(dto, foreignKeys);
 
             grantedUsers = await store.ListUsersWithGrantsAsync(plan, MaxInvalidatedUsers, innerCt).ConfigureAwait(false);
             await store.ApplyAsync(projectId, target.Id, plan, innerCt).ConfigureAwait(false);
@@ -265,7 +268,7 @@ public sealed class MigrateDocumentVersionHandler(
         return new DocumentVersionMigrationTargetsDto(projectId, current.Id, current.Version, targets);
     }
 
-    private async Task<(DocumentVersionMigrationDto Dto, VersionMigrationPlan Plan)> PlanAsync(
+    private async Task<(DocumentVersionMigrationDto Dto, VersionMigrationPlan Plan, IReadOnlyList<string> ForeignKeys)> PlanAsync(
         long documentId, int projectId, int sourceVersionId, TemplateVersion target,
         VersionMigrationMode mode, bool archived, bool dryRun, CancellationToken ct)
     {
@@ -315,6 +318,17 @@ public sealed class MigrateDocumentVersionHandler(
             refusals.Add("bindingsNotMapped");
         }
 
+        // ⛔ D1: правила й обов'язкові входи методології адресують колонки числовим ColumnDefId КОНКРЕТНОЇ версії
+        // шаблону. Якщо методологія, прив'язана до цільової версії, має опубліковану версію з ключами на колонки
+        // іншої версії цього шаблону, то після переносу предикат не збігається ніколи (прогін мовчки порожній), а
+        // вимога Block блокує збереження назавжди. Блокується лише перенос, не публікація шаблону.
+        var foreignKeys = await store.ListForeignMethodologyKeysAsync(target.Id, MaxMethodologyKeysListed, ct)
+            .ConfigureAwait(false);
+        if (foreignKeys.Count > 0)
+        {
+            refusals.Add("methodologyKeysNotMapped");
+        }
+
         // Спершу те, що зачіпає введені дані, потім решта структури, потім вигляд.
         var ordered = plan.Items
             .OrderByDescending(i => i.Values > 0)
@@ -330,7 +344,7 @@ public sealed class MigrateDocumentVersionHandler(
             [.. ordered.Take(MaxItems)], ordered.Count > MaxItems,
             denied > 0 ? denied : null);
 
-        return (dto, plan);
+        return (dto, plan, foreignKeys);
     }
 
     private async Task<TemplateVersion> RequireTargetAsync(int sourceVersionId, int targetVersionId, CancellationToken ct)
@@ -391,7 +405,7 @@ public sealed class MigrateDocumentVersionHandler(
                 ["versionId"] = versionId.ToString(CultureInfo.InvariantCulture),
             });
 
-    private static void ThrowIfRefused(DocumentVersionMigrationDto dto)
+    private static void ThrowIfRefused(DocumentVersionMigrationDto dto, IReadOnlyList<string> foreignKeys)
     {
         if (dto.Refusals.Contains("projectArchived") || dto.Refusals.Contains("sheetsLocked"))
         {
@@ -433,12 +447,15 @@ public sealed class MigrateDocumentVersionHandler(
                         ? "err.ECR-SCHM-0422.migrateGrantsNotMapped"
                         : dto.Refusals.Contains("bindingsNotMapped") && dto.LostValues == 0 && dto.GuardedValues == 0
                             ? "err.ECR-SCHM-0422.migrateBindingsNotMapped"
-                            : "err.ECR-SCHM-0422.migrateDataLoss",
+                            : dto.Refusals.Contains("methodologyKeysNotMapped") && dto.LostValues == 0 && dto.GuardedValues == 0
+                                ? "err.ECR-SCHM-0422.migrateMethodologyKeysNotMapped"
+                                : "err.ECR-SCHM-0422.migrateDataLoss",
                 ["lostValues"] = dto.LostValues.ToString(CultureInfo.InvariantCulture),
                 ["guardedValues"] = dto.GuardedValues.ToString(CultureInfo.InvariantCulture),
                 ["mode"] = dto.Mode.ToString(),
                 ["refusals"] = dto.Refusals,
                 ["blockedGrantCount"] = dto.BlockedGrantCount?.ToString(CultureInfo.InvariantCulture),
+                ["methodologyKeys"] = foreignKeys.Count > 0 ? foreignKeys : null,
             });
     }
 }

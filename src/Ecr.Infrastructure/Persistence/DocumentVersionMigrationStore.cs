@@ -189,6 +189,112 @@ public sealed class DocumentVersionMigrationStore(EcrDbContext db) : IDocumentVe
     }
 
     /// <inheritdoc />
+    public async Task<IReadOnlyList<string>> ListForeignMethodologyKeysAsync(
+        int targetVersionId, int limit, CancellationToken ct)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(limit);
+
+        // Методології з активною прив'язкою на таблицях ЦІЛЬОВОЇ версії (власного TemplateVersionId прив'язка не має).
+        var methodologyIds = await (
+                from binding in db.CalculationBindings.AsNoTracking()
+                where binding.IsActive
+                join column in db.ColumnDefs.AsNoTracking() on binding.ColumnDefId equals column.Id
+                join table in db.TableDefs.AsNoTracking() on column.TableDefId equals table.Id
+                join sheet in db.SheetDefs.AsNoTracking() on table.SheetDefId equals sheet.Id
+                where sheet.TemplateVersionId == targetVersionId && !column.IsDeleted
+                select binding.MethodologyId)
+            .Distinct()
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+        if (methodologyIds.Count == 0)
+        {
+            return [];
+        }
+
+        // Історичні періоди беруть старіші версії методології, тож перевіряються ВСІ з початком дії.
+        var versions = await (
+                from v in db.MethodologyVersions.AsNoTracking()
+                join m in db.Methodologies.AsNoTracking() on v.MethodologyId equals m.Id
+                where methodologyIds.Contains(v.MethodologyId) && v.EffectiveFrom != null
+                select new { v.Id, MethodologyCode = m.Code, v.Version })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+        if (versions.Count == 0)
+        {
+            return [];
+        }
+
+        var versionIds = versions.Select(v => v.Id).ToList();
+        var rules = await db.MethodologyRules.AsNoTracking()
+            .Where(r => versionIds.Contains(r.MethodologyVersionId) && r.IsActive)
+            .Select(r => new { r.MethodologyVersionId, r.Code, r.MatchJson })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+        var inputs = await db.MethodologyRequiredInputs.AsNoTracking()
+            .Where(i => versionIds.Contains(i.MethodologyVersionId))
+            .Select(i => new { i.MethodologyVersionId, i.ColumnDefId })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        // (версія методології, звідки ключ, ColumnDefId)
+        var refs = rules
+            .SelectMany(r => MatchJsonColumnIds(r.MatchJson).Select(id => (r.MethodologyVersionId, Source: "rule " + r.Code, ColumnId: id)))
+            .Concat(inputs.Select(i => (i.MethodologyVersionId, Source: "required input", ColumnId: i.ColumnDefId)))
+            .ToList();
+        if (refs.Count == 0)
+        {
+            return [];
+        }
+
+        var wanted = refs.Select(r => r.ColumnId).Distinct().ToList();
+        var templateId = await db.TemplateVersions.AsNoTracking()
+            .Where(v => v.Id == targetVersionId).Select(v => v.TemplateId).SingleAsync(ct).ConfigureAwait(false);
+        var columns = await (
+                from column in db.ColumnDefs.AsNoTracking()
+                where wanted.Contains(column.Id)
+                join table in db.TableDefs.AsNoTracking() on column.TableDefId equals table.Id
+                join sheet in db.SheetDefs.AsNoTracking() on table.SheetDefId equals sheet.Id
+                join version in db.TemplateVersions.AsNoTracking() on sheet.TemplateVersionId equals version.Id
+                where version.TemplateId == templateId && version.Id != targetVersionId
+                select new { column.Id, Path = sheet.Code + "." + table.Code + "." + column.Code })
+            .ToDictionaryAsync(c => c.Id, c => c.Path, ct)
+            .ConfigureAwait(false);
+
+        var byVersion = versions.ToDictionary(v => v.Id);
+        return [.. refs
+            .Where(r => columns.ContainsKey(r.ColumnId))
+            .Select(r => $"{byVersion[r.MethodologyVersionId].MethodologyCode} {byVersion[r.MethodologyVersionId].Version} "
+                         + $"{r.Source}: {columns[r.ColumnId]}")
+            .Distinct(StringComparer.Ordinal)
+            .Order(StringComparer.Ordinal)
+            .Take(limit)];
+    }
+
+    /// <summary>Ключі плаского предиката-<c>MatchJson</c>, що є числами (<c>ColumnDefId</c>); зламаний JSON — порожньо.</summary>
+    private static IEnumerable<int> MatchJsonColumnIds(string matchJson)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(matchJson);
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                return [];
+            }
+
+            return [.. document.RootElement.EnumerateObject()
+                .Select(p => int.TryParse(
+                    p.Name, System.Globalization.NumberStyles.Integer,
+                    System.Globalization.CultureInfo.InvariantCulture, out var id) ? id : (int?)null)
+                .Where(id => id is not null)
+                .Select(id => id!.Value)];
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
+    }
+
+    /// <inheritdoc />
     public async Task<GrantedUsers> ListUsersWithGrantsAsync(VersionMigrationPlan plan, int limit, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(plan);
