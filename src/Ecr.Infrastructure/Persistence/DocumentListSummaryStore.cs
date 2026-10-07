@@ -50,7 +50,9 @@ public sealed class DocumentListSummaryStore(EcrDbContext db) : IDocumentListSum
                     COALESCE(SUM(CASE WHEN x.Rejected = 0 AND x.Draft = 0 AND x.Submitted > 0 THEN 1 ELSE 0 END), 0) AS Submitted,
                     COALESCE(SUM(CASE WHEN x.Sheets > 0 AND x.Approved = x.Sheets THEN 1 ELSE 0 END), 0) AS Approved,
                     COALESCE(SUM(CASE WHEN x.Rejected > 0 THEN 1 ELSE 0 END), 0) AS Rejected,
-                    COALESCE(SUM(CASE WHEN x.LastErrorCount > 0 THEN 1 ELSE 0 END), 0) AS WithIssues
+                    COALESCE(SUM(CASE WHEN x.LastErrorCount > 0 THEN 1 ELSE 0 END), 0) AS WithIssues,
+                    COALESCE(SUM(x.Approved), 0) AS SheetsApproved,
+                    COALESCE(SUM(x.Sheets), 0) AS SheetsTotal
                 FROM (
                     SELECT d.Id,
                            COUNT(s.SheetDefId) AS Sheets,
@@ -82,7 +84,8 @@ public sealed class DocumentListSummaryStore(EcrDbContext db) : IDocumentListSum
             .ConfigureAwait(false);
 
         return new DocumentListSummaryResponse(
-            row.Draft, row.Submitted, row.Approved, row.Rejected, row.WithIssues);
+            row.Draft, row.Submitted, row.Approved, row.Rejected, row.WithIssues,
+            row.SheetsApproved, row.SheetsTotal);
     }
 
     /// <inheritdoc />
@@ -102,5 +105,6 @@ public sealed class DocumentListSummaryStore(EcrDbContext db) : IDocumentListSum
     }
 
     /// <summary>Рядок агрегату; імена колонок — імена властивостей.</summary>
-    public sealed record SummaryRow(int Draft, int Submitted, int Approved, int Rejected, int WithIssues);
+    public sealed record SummaryRow(
+        int Draft, int Submitted, int Approved, int Rejected, int WithIssues, int SheetsApproved, int SheetsTotal);
 }

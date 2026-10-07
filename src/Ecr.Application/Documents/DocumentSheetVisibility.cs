@@ -202,6 +202,7 @@ public static class DocumentSheetVisibility
             // аркуша; для звуженого читача — null («—»), як і лічильники.
             ModifiedAt = narrowed ? null : document.ModifiedAt,
             ModifiedByDisplayName = narrowed ? null : document.ModifiedByDisplayName,
+            OwnerDisplayName = narrowed ? null : document.OwnerDisplayName,
         };
     }
 
