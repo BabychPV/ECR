@@ -22,6 +22,7 @@ import {
 } from '@/features/documents/DeleteDocumentAction';
 import { DocumentActionBar } from '@/features/documents/DocumentActionBar';
 import { DocumentSaveState } from '@/features/documents/DocumentSaveState';
+import { useDocumentLogActions } from '@/features/documents/DocumentLogActions';
 import { useVersionMigrationAction } from '@/features/documents/VersionMigrationAction';
 import { DocumentLockBanner } from '@/features/documents/DocumentLockBanner';
 import { documentLockOf, hasLockedSheet, locksDataActions } from '@/features/documents/documentLock';
@@ -43,16 +44,14 @@ import { t } from '@/shared/i18n';
 import { registerHeldEditRevealer, useSettledAction } from '@/features/grid/settleEdits';
 
 /**
- * Чотири панелі нижче — за `import()`, а не статичним імпортом (`D-132`).
+ * Панелі нижче — за `import()`, а не статичним імпортом (`D-132`).
  *
  * ⚠ Спільне для всіх чотирьох: жодна не потрібна в момент першого малюнка
  * сторінки. `ImportPanel` (✎ UI-14: тепер у `DocumentActionBar`) і `CalculationResultsPanel` рендерилися
  * УМОВНО (право/стан), тож користувач без права чи на поданому аркуші сьогодні
  * і так їх не бачить — статичний імпорт лише змушував ЙОГО бандл нести код,
- * якого він не покаже. `WorkflowHistory` і `DocumentVersionCompare` рендеряться
- * безумовно, але самі згорнуті — до розгортання жоден не робить запиту
- * (коментарі біля місця виклику нижче), тобто перший кадр сторінки не втрачає
- * нічого, крім самого згорнутого заголовка на час завантаження чанка.
+ * якого він не покаже. `WorkflowHistory` і `DocumentVersionCompare` — пункти «More»
+ * (`DocumentLogActions`) і лінивий діалог: до відкриття жодного запиту.
  *
  * ⚠ Стиль — той самий, що в `features/search/SearchLauncher.tsx`
  * (`loadX`/`lazy(async () => ...)`), а не інлайн `lazy(() => import(...).then(...))`
@@ -70,22 +69,12 @@ const CalculationResultsPanel = lazy(async () => ({
   default: (await loadCalculationResultsPanel()).CalculationResultsPanel,
 }));
 
-const loadWorkflowHistory = () => import('@/features/workflow/WorkflowHistory');
-const WorkflowHistory = lazy(async () => ({
-  default: (await loadWorkflowHistory()).WorkflowHistory,
-}));
-
-const loadDocumentVersionCompare = () => import('@/features/documents/DocumentVersionCompare');
-const DocumentVersionCompare = lazy(async () => ({
-  default: (await loadDocumentVersionCompare()).DocumentVersionCompare,
-}));
 
 /**
  * П'ята лінива панель — шапка документа (`GET/PATCH …/documents/{id}/header`).
  *
  * ⚠ Той самий прийом, що чотири вище: модуль вантажиться лише тоді, коли
- * панель ДІЙСНО з'являється на екрані. На відміну від `WorkflowHistory`/
- * `DocumentVersionCompare`, показ тут вирішує не право чи розгортання, а
+ * панель ДІЙСНО з'являється на екрані. На відміну від журналу й порівняння версій, показ тут вирішує не право чи розгортання, а
  * ВІДПОВІДЬ сервера (порожній перелік полів — панелі немає) — тому запит
  * усередині компонента неминучий; лінивим лишається лише сам код панелі.
  */
@@ -511,6 +500,9 @@ export function DocumentPage(): JSX.Element {
   // прогону й відмови — у самому діалозі.
   const versionMigration = useVersionMigrationAction({ documentId, document: summary.data });
 
+  // «History» і «Compare versions» — пункти «More» + лінивий діалог (макет: блоків між шапкою й сіткою немає).
+  const documentLog = useDocumentLogActions({ documentId, periodKey });
+
   const refetchBoth = (): void => {
     void summary.refetch();
     void tables.refetch();
@@ -599,7 +591,7 @@ export function DocumentPage(): JSX.Element {
             loading: validateLoading || validateAction.settling,
             run: () => validateAction.run(() => validate.mutateAsync(scope), { readOnly: true }),
           }}
-          documentItems={[businessKeyChange.menuItem, versionMigration.menuItem, deletion.menuItem]}
+          documentItems={[...documentLog.menuItems, businessKeyChange.menuItem, versionMigration.menuItem, deletion.menuItem]}
           status={
             <>
               {/* ✎ UI-15: чип стану аркуша і заповненість одним рядком
@@ -742,22 +734,7 @@ export function DocumentPage(): JSX.Element {
         />
       </Suspense>
 
-      {/* `BE-11b`. Над вкладками з тієї ж причини, що й панель вище: журнал —
-          про всі аркуші документа за період. Згорнутий, і до розгортання
-          запиту не робить; порожній — не малюється зовсім. */}
-      <Suspense fallback={null}>
-        <WorkflowHistory documentId={documentId} periodKey={periodKey} />
-      </Suspense>
-
-      {/* ⛔ `ФВ-5.22`. Поруч із журналом переходів, а не у вкладці аркуша, і з
-          тієї самої причини: версія — це зріз ПОДАННЯ документа за період, і
-          різниця охоплює всі його таблиці одразу. Під вкладкою активного аркуша
-          її бачив би лише той, хто вгадав, куди дивитися.
-
-          ⚠ Згорнутий, як і журнал: до розгортання не робить жодного запиту. */}
-      <Suspense fallback={null}>
-        <DocumentVersionCompare documentId={documentId} periodKey={periodKey} />
-      </Suspense>
+      {documentLog.dialog}
 
       {/* ✎ b4b: смуга аркушів — ПІД сіткою, як у макеті (`screen-document.js`
           `.statusbar` > `.sheet-tabs`; KIT §1.5), а не вкладками над нею. Список

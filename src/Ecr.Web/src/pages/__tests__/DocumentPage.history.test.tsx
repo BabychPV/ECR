@@ -1,13 +1,13 @@
 import type { JSX } from 'react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { DocumentPage } from '@/pages/DocumentPage';
 
 /**
- * `BE-11b`: блок «History» СТОЇТЬ НА СТОРІНЦІ згорнутим і запиту не робить.
+ * `BE-11b`: «History» — пункт меню «More», а не блок між шапкою й сіткою.
  *
  * ⚠ Поведінку самого блока доводить `features/workflow/__tests__/
  * WorkflowHistory.test.tsx`; той набір лишився б зеленим, якби блок прибрали зі
@@ -78,7 +78,7 @@ const SlowEnvTimeout = 400_000;
 
 describe('DocumentPage: історія погоджень (BE-11b)', () => {
   it(
-    'кнопка історії є на сторінці, згорнута, і запит історії не йде',
+    '«History» і «Compare versions» — у меню «More», блоків на сторінці немає',
     async () => {
       mockFetch();
 
@@ -94,15 +94,19 @@ describe('DocumentPage: історія погоджень (BE-11b)', () => {
         </MantineProvider>,
       );
 
-      const toggle = await screen.findByRole(
-        'button',
-        { name: '⟦workflow.history⟧' },
-        { timeout: SlowEnvTimeout },
-      );
+      // ✎ RC9 (макет `screen-document.js`): на сторінці між шапкою й сіткою
+      // посилань немає — «History» живе в меню «More» і відкривається діалогом.
+      const more = await screen.findByTestId('document-more', {}, { timeout: SlowEnvTimeout });
 
-      expect(toggle.getAttribute('aria-expanded')).toBe('false');
+      expect(screen.queryByTestId('workflow-history')).toBeNull();
+      expect(screen.queryByTestId('document-version-compare')).toBeNull();
+
+      fireEvent.click(more);
+      const item = await screen.findByRole('menuitem', { name: '⟦workflow.history⟧' });
+      expect(item).toBeTruthy();
+      expect(screen.getByRole('menuitem', { name: '⟦document.compare⟧' })).toBeTruthy();
       // ✎ UI-26: банер поданого аркуша сам читає журнал (хто й коли подав) —
-      // рівно один запит; згорнута панель історії власного не додає.
+      // рівно один запит; меню журналу власного не додає.
       expect(requested.filter((url) => url.includes('/workflow/history')).length).toBeLessThanOrEqual(1);
     },
     SlowEnvTimeout,

@@ -277,3 +277,24 @@
     padding-left: 0;
   }
 }
+
+/*
+ * ✎ RC9 (приймальна №6, P3): при відкритому інспекторі (320 px) на ~1280 px
+ * сітці лишалося ~600 px, і заголовок таблиці різався до «Tab…», а перша колонка
+ * — до обрізаних чисел. Дерево стискається до 224 px, довга підказка клавіш
+ * ховається (лишається кнопка довідки), а назва таблиці тримає мінімум.
+ */
+@media (min-width: 1181px) {
+  body[data-inspector-open] .ecr-tnav {
+    width: 224px;
+  }
+
+  body[data-inspector-open] .ecr-keyhint-text {
+    display: none;
+  }
+}
+
+.ecr-doc-work [data-table-title] {
+  flex: 0 1 auto;
+  min-width: 12ch;
+}

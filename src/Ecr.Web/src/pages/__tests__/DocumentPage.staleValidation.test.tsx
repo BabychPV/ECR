@@ -188,7 +188,7 @@ afterEach(() => {
 const loadDocumentPageChunks = (): Promise<unknown> =>
   Promise.all([
     import('@/features/documents/DocumentHeaderPanel'),
-    import('@/features/documents/DocumentVersionCompare'),
+    import('@/features/documents/DocumentLogDialog'),
     import('@/features/documents/inspector/DocumentInspector'),
     import('@/features/grid/RestoreEditsBanner'),
     import('@/features/grid/SheetTables'),
@@ -196,7 +196,6 @@ const loadDocumentPageChunks = (): Promise<unknown> =>
     import('@/features/import/ImportPanel'),
     import('@/features/methodologies/CalculationResultsPanel'),
     import('@/features/projects/allProjects'),
-    import('@/features/workflow/WorkflowHistory'),
     import('@/shared/ui/PeriodPicker'),
   ]);
 

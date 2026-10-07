@@ -21,6 +21,7 @@ import { showApiError, showDone } from '@/shared/ui/notify';
 import { t } from '@/shared/i18n';
 import { localized } from '@/shared/i18n/localized';
 import { problemText } from '@/shared/ui/problemText';
+import { dimensionLabel } from '@/features/units/dimensionLabel';
 import { usePendingLoading } from '@/features/common/usePendingLoading';
 
 /*
@@ -223,7 +224,7 @@ export function UnitsPage(): JSX.Element {
 
   const dimensionOptions = Array.from(new Set(all.map((unit) => unit.dimensionCode)))
     .sort((a, b) => a.localeCompare(b))
-    .map((code) => ({ value: code, label: code }));
+    .map((code) => ({ value: code, label: dimensionLabel(code) }));
 
   // ⚠ Фільтр — на клієнті: `GET /units` віддає весь довідник одним масивом.
   const shown =
@@ -234,7 +235,8 @@ export function UnitsPage(): JSX.Element {
             (query.length === 0 ||
               unit.code.toLowerCase().includes(query) ||
               unitSymbol(unit).toLowerCase().includes(query) ||
-              unit.dimensionCode.toLowerCase().includes(query)) &&
+              unit.dimensionCode.toLowerCase().includes(query) ||
+              dimensionLabel(unit.dimensionCode).toLowerCase().includes(query)) &&
             (dimension === null || unit.dimensionCode === dimension) &&
             (stat !== OffsetStat || !decimalEquals(unit.offsetToBase, '0')) &&
             (stat !== UnusedStat || unit.usedIn === 0),
@@ -315,6 +317,7 @@ export function UnitsPage(): JSX.Element {
       // сенсу для людини, що дивиться на екран.
       key: 'dimensionCode',
       label: t('units.dimension'),
+      render: (unit) => dimensionLabel(unit.dimensionCode),
 
       // ⚠ Розмірність ГРУПУЄ, а всередині групи порядок задає код — і при
       // відкритті (`defaultSort` нижче), і після клацання по шапці.
@@ -425,7 +428,7 @@ export function UnitsPage(): JSX.Element {
           : {
               panelId: unitPanelId(openUnit.id),
               title: openUnit.code,
-              subtitle: openUnit.dimensionCode,
+              subtitle: dimensionLabel(openUnit.dimensionCode),
               closeLabel: t('common.close'),
               // ⚠ Правка й видалення — тут, а не кнопками в рядку (UI-21,
               // макет: `Delete…` ліворуч, `Convert…`, `Edit` головною).
@@ -557,7 +560,7 @@ export function UnitsPage(): JSX.Element {
 
           <Select
             label={t('units.dimension')}
-            data={dimensions.map(([id, code]) => ({ value: String(id), label: code }))}
+            data={dimensions.map(([id, code]) => ({ value: String(id), label: dimensionLabel(code) }))}
             value={newDimensionId}
             onChange={setNewDimensionId}
           />

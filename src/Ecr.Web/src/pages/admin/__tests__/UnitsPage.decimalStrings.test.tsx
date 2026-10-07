@@ -36,6 +36,7 @@ const SeededStrings: Record<string, string> = {
   'units.convert': 'Convert',
   'units.code': 'Unit',
   'units.dimension': 'Dimension',
+  'units.dim.Mass': 'Mass',
   'units.factor': 'Factor to base',
   'units.offset': 'Offset to base',
   'units.base': 'base',

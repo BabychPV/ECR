@@ -34,7 +34,48 @@ public sealed class RoleNameInListApiTests(SqlServerFixture sql)
         using var app = new EcrApiFactory(sql);
         using var admin = await SignedInAsync(app).ConfigureAwait(true);
 
-        var code = $"R{Guid.NewGuid():N}"[..12];
+        // ⛔ Детермінований відтворювач флейка: у спільній базі CI ролей більше
+        // за межу ListRolesAsync (Take(500) за Code). Заповнювачі сортуються
+        // ПЕРЕД кодом тесту й прибираються наприкінці.
+        await SeedFillerRolesAsync(520).ConfigureAwait(true);
+        try
+        {
+            await RunAsync(app, admin).ConfigureAwait(true);
+        }
+        finally
+        {
+            await RemoveFillerRolesAsync().ConfigureAwait(true);
+        }
+    }
+
+    private const string FillerPrefix = "Ffill_";
+
+    private async Task SeedFillerRolesAsync(int count)
+    {
+        await using var db = new EcrDbContext(
+            new DbContextOptionsBuilder<EcrDbContext>().UseSqlServer(sql.ConnectionString).Options);
+        for (var i = 0; i < count; i++)
+        {
+            db.Roles.Add(new Role(
+                EcrCode.Create($"{FillerPrefix}{i:D4}"),
+                new LocalizedText(new Dictionary<string, string> { ["en"] = "filler" })));
+        }
+
+        await db.SaveChangesAsync().ConfigureAwait(false);
+    }
+
+    private async Task RemoveFillerRolesAsync()
+    {
+        await using var db = new EcrDbContext(
+            new DbContextOptionsBuilder<EcrDbContext>().UseSqlServer(sql.ConnectionString).Options);
+        await db.Roles.Where(r => r.Code.StartsWith(FillerPrefix)).ExecuteDeleteAsync().ConfigureAwait(false);
+    }
+
+    private static async Task RunAsync(EcrApiFactory app, HttpClient admin)
+    {
+        // ⛔ "A__" сортується першим за Code (підкреслення йде перед літерами),
+        // тож роль завжди в межах Take(500) навіть у «брудній» спільній базі.
+        var code = $"A__{Guid.NewGuid():N}"[..12];
         var created = await admin.PostAsJsonAsync(
             new Uri("/api/v1/roles", UriKind.Relative),
             new { code, nameL10n = new Dictionary<string, string> { ["en"] = "Flare operators" }, permissionCodes = Array.Empty<string>() })

@@ -5,6 +5,7 @@ import { Link } from 'react-router-dom';
 import type { UnitRef } from '@/api/types';
 import { UsageKindLabel } from '@/features/usage/UsageKindLabel';
 import { decimalEquals, formatDecimal } from '@/shared/format';
+import { dimensionLabel } from './dimensionLabel';
 import { t } from '@/shared/i18n';
 import { localized } from '@/shared/i18n/localized';
 import { KeyValue, type KeyValueItem } from '@/shared/ui/KeyValue';
@@ -62,7 +63,7 @@ export default function UnitDetailBody({
   }
 
   items.push(
-    { label: t('units.dimension'), value: unit.dimensionCode },
+    { label: t('units.dimension'), value: dimensionLabel(unit.dimensionCode) },
     { label: t('units.baseUnit'), value: isBase ? `${unit.code} (${t('units.base')})` : (baseCode ?? '') },
   );
 

@@ -119,6 +119,10 @@ interface DocumentListParams {
    * (`BE-09b`): не робити його залежним від обраного періоду.
    */
   hasLateEdits?: boolean;
+  /** Підрядок ключа чи назви документа (`UI-18`); порожній — без пошуку. */
+  q?: string;
+  /** Лише документи цього проєкту. */
+  projectId?: number | null;
 }
 
 /**
@@ -135,6 +139,8 @@ export function listDocuments(params: DocumentListParams): Promise<DocumentListP
   if (params.state) query.set('state', params.state);
   if (params.mine) query.set('mine', 'true');
   if (params.hasLateEdits) query.set('hasLateEdits', 'true');
+  if (params.q) query.set('q', params.q);
+  if (params.projectId) query.set('projectId', String(params.projectId));
 
   return apiFetch<DocumentListPage>(`/api/v1/documents?${query.toString()}`);
 }
