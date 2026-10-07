@@ -95,9 +95,17 @@ public sealed class TemplateListSummaryTests(SqlServerFixture sql)
         var byName = await ListAsync($"Template {code[3..]}", access);
         Assert.Contains(byName.Items, t => t.Id == doc.TemplateId);
 
-        // «%» і «_» — звичайні символи, а не підстановка: жоден шаблон їх у коді чи назві не має.
-        Assert.Empty((await ListAsync("%", access)).Items);
-        Assert.Empty((await ListAsync("_", access)).Items);
+        // «%» і «_» — звичайні символи, а не підстановка. База тестів спільна: інші тести лишають
+        // шаблони з «_» у коді (DUP_…), тож «порожньо» хибне. Доказ: у видачі лише ті, що
+        // ЛІТЕРАЛЬНО містять символ у коді чи назві (підстановка віддала б і решту).
+        foreach (var meta in new[] { "%", "_" })
+        {
+            var items = (await ListAsync(meta, access)).Items;
+            Assert.DoesNotContain(items, t =>
+                !t.Code.Contains(meta, StringComparison.Ordinal)
+                && !(t.NameL10n?.Values.Values.Any(v => v.Contains(meta, StringComparison.Ordinal)) ?? false));
+        }
+
         Assert.Empty((await ListAsync($"{code}zzz", access)).Items);
     }
 
