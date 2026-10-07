@@ -6731,8 +6731,11 @@ USING (VALUES
     -- COLL:exprbudget ── RC5: видима відмова за межею вкладеності (96) і кроків (20 000) замість мовчазного #BUDGET: публікація/редактор (expr.tooDeep, publish.problem.formulaTooDeep) і експлуатація (validation.rule.budget); ru/kz — порцією COLL:exprbudget у блоці I18N нижче ──
     (N'expr.tooDeep', N'en', N'The formula is too complex: nesting depth {depth}, allowed {max}. Split it into several calculated columns.', 1),
     (N'publish.problem.formulaTooDeep', N'en', N'Formula {formula} is too complex: nesting depth {depth}, allowed {max}. Split it into several calculated columns.', 1),
-    (N'validation.rule.budget', N'en', N'Rule ''{rule}'' could not be evaluated: the formula is too large for one calculation (more than 20,000 steps or 96 nesting levels). Split it into several calculated columns.', 1)
+    (N'validation.rule.budget', N'en', N'Rule ''{rule}'' could not be evaluated: the formula is too large for one calculation (more than 20,000 steps or 96 nesting levels). Split it into several calculated columns.', 1),
     -- COLL:exprbudget ── кінець секції ──
+    -- COLL:a105picker ── A1-05: вибір аркуша/таблиці/колонки в гранті без права Template.View називає причину; ru/kz — порцією COLL:a105picker у блоці I18N нижче ──
+    (N'grants.pickerForbidden', N'en', N'You cannot list templates: picking a sheet, table or column needs the Template.View permission (for example the TemplateAdministrator role). Ask a role administrator to add it to your account, then reopen the list.', 1)
+    -- COLL:a105picker ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -15960,6 +15963,16 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:consistency-summary ── кінець секції ──
+-- COLL:a105picker ── ru/kz A1-05: причина порожнього вибору аркуша/таблиці/колонки в гранті; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'grants.pickerForbidden', N'ru', N'Список шаблонов вам недоступен: для выбора листа, таблицы или столбца нужно право Template.View (например, роль TemplateAdministrator). Попросите администратора ролей добавить его вашей учётной записи и откройте список снова.'),
+    (N'grants.pickerForbidden', N'kz', N'Үлгілер тізімі Сізге қолжетімсіз: парақты, кестені немесе бағанды таңдау үшін Template.View құқығы қажет (мысалы, TemplateAdministrator рөлі). Рөл әкімшісінен оны есептік жазбаңызға қосуын сұраңыз да, тізімді қайта ашыңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:a105picker ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t
