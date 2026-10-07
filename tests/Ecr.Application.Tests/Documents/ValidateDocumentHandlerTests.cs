@@ -352,4 +352,110 @@ public sealed class ValidateDocumentHandlerTests
         Assert.Contains("ECR-CELL-0422", saved.MessagesJson);
         Assert.Contains("\"R1\"", saved.MessagesJson);
     }
+
+    private static HeaderFieldDef RequiredHeader(int id, string code)
+    {
+        var field = new HeaderFieldDef(TemplateVersionId, EcrCode.Create(code), Text(code), 1, CellDataType.String);
+        SetId(field, id);
+        field.SetRequired(true);
+        return field;
+    }
+
+    private async Task<TemplateVersionSnapshot> WithHeaderFieldsAsync(params HeaderFieldDef[] fields)
+    {
+        var snapshot = await _metadata.GetAsync(TemplateVersionId, CancellationToken.None);
+        var columns = snapshot.Sheets.SelectMany(s => s.Tables).SelectMany(t => t.Columns).ToDictionary(c => c.Id);
+        var full = new TemplateVersionSnapshot(TemplateVersionId, 0, snapshot.Sheets, columns, new Dictionary<(int, string), RowDef>())
+        {
+            HeaderFields = fields,
+        };
+        _metadata.GetAsync(TemplateVersionId, Arg.Any<CancellationToken>()).Returns(full);
+        return full;
+    }
+
+    /// <summary>
+    /// R-B3 / D-PS: «Перевірити» показує порожнє обов'язкове поле шапки так само, як подання на ньому відмовляє:
+    /// Error <c>ECR-HDR-0422</c> з ключем <c>requiredAtSubmit</c>, лише коди полів, без значень шапки.
+    /// Мутація: прибрати перевірку в <c>ValidateDocumentHandler</c> — тест червоніє.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "ФВ-5.4")]
+    public async Task Перевірити_показує_порожнє_обовязкове_поле_шапки_кодом_без_значень()
+    {
+        await WithHeaderFieldsAsync(RequiredHeader(55, "PERMIT"), RequiredHeader(56, "FILLED"));
+        _headers.GetValuesAsync(DocumentId, Arg.Any<CancellationToken>())
+            .Returns(new Dictionary<int, DocumentHeaderValueData> { [56] = new() { ValueString = "СекретнеЗначення" } });
+
+        ValidationSummary? saved = null;
+        await _results.SaveAsync(Arg.Do<ValidationSummary>(s => saved = s), Arg.Any<CancellationToken>());
+
+        try
+        {
+            await Handler().HandleAsync(DocumentId, new PeriodKey(Period), CancellationToken.None);
+        }
+        catch (NullReferenceException)
+        {
+            // ReadScopeAsync не налаштовано в цьому файлі — предмет тесту сам підсумок.
+        }
+
+        Assert.NotNull(saved);
+        Assert.Equal(1, saved!.ErrorCount);
+        Assert.Contains("ECR-HDR-0422", saved.MessagesJson, StringComparison.Ordinal);
+        Assert.Contains("err.ECR-HDR-0422.requiredAtSubmit", saved.MessagesJson, StringComparison.Ordinal);
+        Assert.Contains("PERMIT", saved.MessagesJson, StringComparison.Ordinal);
+        Assert.DoesNotContain("FILLED", saved.MessagesJson, StringComparison.Ordinal);
+        Assert.DoesNotContain("СекретнеЗначення", saved.MessagesJson, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "ФВ-5.4")]
+    public async Task Перевірити_із_заповненою_обовязковою_шапкою_помилок_не_дає()
+    {
+        await WithHeaderFieldsAsync(RequiredHeader(55, "PERMIT"));
+        _headers.GetValuesAsync(DocumentId, Arg.Any<CancellationToken>())
+            .Returns(new Dictionary<int, DocumentHeaderValueData> { [55] = new() { ValueString = "P-1" } });
+
+        ValidationSummary? saved = null;
+        await _results.SaveAsync(Arg.Do<ValidationSummary>(s => saved = s), Arg.Any<CancellationToken>());
+
+        try
+        {
+            await Handler().HandleAsync(DocumentId, new PeriodKey(Period), CancellationToken.None);
+        }
+        catch (NullReferenceException)
+        {
+        }
+
+        Assert.NotNull(saved);
+        Assert.Equal(0, saved!.ErrorCount);
+    }
+
+    /// <summary>
+    /// Шапка не має Column/Table-видимості: читач із забороною на таблицю бачить саме відмову шапки (код полів),
+    /// а не знеособлене «поза видимістю».
+    /// Мутація: прибрати виняток шапки з <c>HiddenValidationIssues.CanSee</c> — тест червоніє.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-6.6")]
+    public async Task Відмова_шапки_видима_читачеві_із_забороною_на_таблицю()
+    {
+        var full = await WithHeaderFieldsAsync(RequiredHeader(55, "PERMIT"));
+        _headers.GetValuesAsync(DocumentId, Arg.Any<CancellationToken>())
+            .Returns(new Dictionary<int, DocumentHeaderValueData>());
+        _access.ReadScopeAsync(Arg.Any<AccessProfile>(), DocumentId, Arg.Any<CancellationToken>())
+            .Returns(DocumentReadScope.For(
+                new AccessBuilder().Grant(ResourceKind.Project, AccessBuilder.ProjectId, GrantLevel.Read)
+                    .Deny(ResourceKind.Table, 3).Build(),
+                AccessBuilder.ProjectId, full));
+
+        var result = await Handler().HandleAsync(DocumentId, new PeriodKey(Period), CancellationToken.None);
+
+        var message = Assert.Single(result);
+        Assert.False(HiddenValidationIssues.IsPlaceholder(message));
+        Assert.Equal("ECR-HDR-0422", message.RuleCode);
+        Assert.Contains("PERMIT", System.Text.Json.JsonSerializer.Serialize(message), StringComparison.Ordinal);
+    }
 }
