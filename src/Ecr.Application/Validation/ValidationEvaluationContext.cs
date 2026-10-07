@@ -55,6 +55,13 @@ public abstract class ValidationEvaluationContext : IEvaluationContext
     /// </summary>
     public IReadOnlyDictionary<string, ExpressionValue> Headers { get; init; } = EmptyHeaders;
 
+    /// <summary>
+    /// D-10/L-6: правило прочитало комірку, якої контекст НЕ бачить (не надіслана
+    /// у PATCH / чужа колонка коміркового правила). На неповному контексті
+    /// порушення такого правила — «не оцінено», а не Error даних.
+    /// </summary>
+    public bool ReadUnseenCell { get; protected set; }
+
     /// <inheritdoc />
     public abstract IReadOnlyList<ExpressionValue> Read(CellReferenceNode reference);
 
