@@ -16420,7 +16420,7 @@ SELECT v.[Key], v.Lang, v.Val
     (N'err.ECR-REQ-0422.consistencySeverity', N'kz', N'«{severity}» табылым салмағы жоқ: 1 (ақпарат), 2 (ескерту) немесе 3 (қате) болуы тиіс.')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
-GO,
+GO
 -- COLL:consistency-summary ── кінець секції ──
 -- COLL:a105picker ── ru/kz A1-05: причина порожнього вибору аркуша/таблиці/колонки в гранті; власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)
