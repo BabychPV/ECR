@@ -33,7 +33,7 @@ namespace Ecr.Infrastructure.Jobs;
 /// <see cref="QuartzJobAdapter"/> у <c>itg.JobProgress</c>.
 /// </para>
 /// </remarks>
-internal static class MaintenanceRunFailure
+public static class MaintenanceRunFailure
 {
     /// <summary>Стан прогону, що завершився виключенням.</summary>
     public const string FailedStatus = "Failed";
@@ -137,7 +137,7 @@ internal static class MaintenanceRunFailure
     /// самий фільтр, що й для <c>/jobs</c> (<see cref="JobFailureText"/>); повний виняток
     /// лишається журналу. Кореляція — номер прогону.
     /// </remarks>
-    private static string Details(Exception error, long runId)
+    public static string Details(Exception error, long runId)
     {
         var message = JobFailureText.For(
             error, string.Create(System.Globalization.CultureInfo.InvariantCulture, $"maintenance run {runId}"));
