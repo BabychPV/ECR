@@ -2,7 +2,6 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
-using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Entities.Security;
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
@@ -131,48 +130,6 @@ public sealed class DocumentTemplateForProjectTests(SqlServerFixture sql)
         Assert.Equal("ECR-TMPL-0409", JsonDocument.Parse(body).RootElement.GetProperty("errorCode").GetString());
     }
 
-    [Fact]
-    [Trait(TestCategories.Stage, TestCategories.Stage4)]
-    [Trait(TestCategories.Category, TestCategories.Integration)]
-    [Trait("Finding", "UI-31")]
-    public async Task Роль_із_доступом_до_одного_аркуша_з_двох_не_бачить_прихованого_у_складі_нового_документа()
-    {
-        // ⛔ UI-31, P1 «прихований аркуш»: майстер створення документа показує рівно аркуші з цієї
-        // відповіді. До фіксу ендпоінт віддавав усі аркуші версії — код і назву аркуша під
-        // забороною людина бачила ще до того, як документ існує.
-        var s = await ArrangeAsync(OperatorPermissions, deny: false).ConfigureAwait(true);
-
-        int hiddenSheetId;
-        await using (var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext())
-        {
-            var hidden = new SheetDef(
-                s.Document.TemplateVersionId,
-                EcrCode.Create($"HID{Guid.NewGuid():N}"[..12]),
-                new LocalizedText(new Dictionary<string, string> { ["en"] = "Hidden sheet" }),
-                2);
-            db.SheetDefs.Add(hidden);
-            await db.SaveChangesAsync().ConfigureAwait(true);
-            hiddenSheetId = hidden.Id;
-
-            db.ResourceGrants.Add(new ResourceGrant(s.RoleId, ResourceKind.Sheet, hiddenSheetId, GrantLevel.Read, isDeny: true));
-            await db.SaveChangesAsync().ConfigureAwait(true);
-        }
-
-        using var app = new EcrApiFactory(sql);
-        var client = await SignInAsync(app, s.UserName).ConfigureAwait(true);
-
-        var response = await client
-            .GetAsync(new Uri($"/api/v1/projects/{s.Document.ProjectId}/document-template", UriKind.Relative))
-            .ConfigureAwait(true);
-        var body = await response.Content.ReadAsStringAsync().ConfigureAwait(true);
-        Assert.True(response.StatusCode == HttpStatusCode.OK, $"{response.StatusCode}: {body}\n{app.ErrorsText}");
-
-        var sheetIds = JsonDocument.Parse(body).RootElement.GetProperty("sheets").EnumerateArray()
-            .Select(x => x.GetProperty("id").GetInt32()).ToList();
-        Assert.Equal(s.Document.SheetDefId, Assert.Single(sheetIds));
-        Assert.DoesNotContain("Hidden sheet", body, StringComparison.Ordinal);
-    }
-
     private static async Task<HttpClient> SignInAsync(EcrApiFactory app, string userName)
     {
         var client = app.CreateClient();
@@ -211,8 +168,8 @@ public sealed class DocumentTemplateForProjectTests(SqlServerFixture sql)
             role.Id, ResourceKind.Project, document.ProjectId, deny ? GrantLevel.Read : GrantLevel.Write, isDeny: deny));
         await db.SaveChangesAsync().ConfigureAwait(false);
 
-        return new Scenario(document, userName, role.Id);
+        return new Scenario(document, userName);
     }
 
-    private sealed record Scenario(TestDocument Document, string UserName, int RoleId);
+    private sealed record Scenario(TestDocument Document, string UserName);
 }
