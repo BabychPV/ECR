@@ -138,14 +138,19 @@ public sealed class MethodologyRequiredColumnsCache(IMemoryCache? memory)
     /// не enforced.
     /// </summary>
     /// <param name="publishedVersionId">Опублікована версія методології.</param>
+    /// <param name="templateVersionId">
+    /// Версія шаблону документа (C1): Id колонок у вмісті версії методології належать іншій версії шаблону, тож
+    /// закешований набір — це набір, ЛОКАЛІЗОВАНИЙ саме до цієї версії.
+    /// </param>
     /// <param name="load">Читання вмісту версії, якщо в кеші його немає.</param>
     /// <param name="ct">Токен скасування.</param>
-    /// <returns><c>ColumnDefId</c> обов'язкових входів.</returns>
+    /// <returns><c>ColumnDefId</c> обов'язкових входів у колонках версії шаблону документа.</returns>
     public Task<IReadOnlySet<int>> RequiredColumnIdsAsync(
         int publishedVersionId,
+        int templateVersionId,
         Func<CancellationToken, Task<IReadOnlySet<int>>> load,
         CancellationToken ct)
-        => GetOrAddAsync(VersionKey(publishedVersionId), load, VersionLifetime, size: 1, ct);
+        => GetOrAddAsync(VersionKey(publishedVersionId, templateVersionId), load, VersionLifetime, size: 1, ct);
 
     private async Task<T> GetOrAddAsync<T>(
         string key,
@@ -190,6 +195,6 @@ public sealed class MethodologyRequiredColumnsCache(IMemoryCache? memory)
             CultureInfo.InvariantCulture,
             $"mrc:bind:{tableDefId}:{periodEnd:yyyyMMdd}:{string.Join('.', methodologyIds.Order())}");
 
-    private static string VersionKey(int publishedVersionId)
-        => string.Create(CultureInfo.InvariantCulture, $"mrc:cols:{publishedVersionId}");
+    private static string VersionKey(int publishedVersionId, int templateVersionId)
+        => string.Create(CultureInfo.InvariantCulture, $"mrc:cols:{publishedVersionId}:{templateVersionId}");
 }

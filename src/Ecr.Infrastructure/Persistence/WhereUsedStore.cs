@@ -78,10 +78,15 @@ public sealed class WhereUsedStore(EcrDbContext db) : IWhereUsedStore
             select new Hit(b.Id, m.Code + "." + b.OutputCode, "/admin/methodologies/" + m.Id + "/versions", m.NameL10n))
             .ConfigureAwait(false);
 
+        // ⛔ C1: правила й вимоги ключуються Id колонки тієї версії шаблону, де їх писали, а колонка клон-версії має
+        // інший Id. «Де використовується» колонки — це й посилання на її відповідники за шляхом у інших версіях
+        // того самого шаблону; інакше для колонок клону зв'язок з методологіями ховається.
+        var family = await ColumnFamilyAsync(columnDefId, ct).ConfigureAwait(false);
+
         await AddAsync(
             UsageKinds.MethodologyRequiredInput,
             from r in db.MethodologyRequiredInputs
-            where r.ColumnDefId == columnDefId
+            where family.Contains(r.ColumnDefId)
             join v in db.MethodologyVersions on r.MethodologyVersionId equals v.Id
             join m in db.Methodologies on v.MethodologyId equals m.Id
             orderby r.Id
@@ -100,17 +105,24 @@ public sealed class WhereUsedStore(EcrDbContext db) : IWhereUsedStore
         // SQL лише звужує кандидатів; остаточно рішення — за точним ключем
         // розібраного предиката, інакше `"12"` у ЗНАЧЕННІ або ключ `"123"`
         // зарахувалися б колонці 12.
-        var key = columnDefId.ToString(CultureInfo.InvariantCulture);
-        var candidates = await (
-                from r in db.MethodologyRules
-                where r.MatchJson.Contains("\"" + key + "\"")
-                join v in db.MethodologyVersions on r.MethodologyVersionId equals v.Id
-                orderby r.Id
-                select new { Rule = r, v.MethodologyId })
-            .ToListAsync(ct).ConfigureAwait(false);
+        var keys = family.Select(id => id.ToString(CultureInfo.InvariantCulture)).ToHashSet(StringComparer.Ordinal);
+        var candidates = new List<(MethodologyRule Rule, int MethodologyId)>();
+        foreach (var key in keys)
+        {
+            var found = await (
+                    from r in db.MethodologyRules
+                    where r.MatchJson.Contains("\"" + key + "\"")
+                    join v in db.MethodologyVersions on r.MethodologyVersionId equals v.Id
+                    orderby r.Id
+                    select new { Rule = r, v.MethodologyId })
+                .ToListAsync(ct).ConfigureAwait(false);
+            candidates.AddRange(found.Select(f => (f.Rule, f.MethodologyId)));
+        }
 
         var rules = candidates
-            .Where(c => MethodologyRuleMatcher.Compile([c.Rule])[0].Pairs?.Any(p => p.Key == key) == true)
+            .Where(c => MethodologyRuleMatcher.Compile([c.Rule])[0].Pairs?.Any(p => keys.Contains(p.Key)) == true)
+            .DistinctBy(c => c.Rule.Id)
+            .OrderBy(c => c.Rule.Id)
             .ToList();
 
         total += rules.Count;
@@ -119,6 +131,39 @@ public sealed class WhereUsedStore(EcrDbContext db) : IWhereUsedStore
             new Hit(c.Rule.Id, c.Rule.Code, "/admin/methodologies/" + c.MethodologyId + "/versions", null))));
 
         return new UsageResponse(total, hits);
+    }
+
+    /// <summary>Сама колонка і її відповідники за шляхом «аркуш → таблиця → колонка» в інших версіях її шаблону.</summary>
+    private async Task<List<int>> ColumnFamilyAsync(int columnDefId, CancellationToken ct)
+    {
+        var path = await (
+                from column in db.ColumnDefs.AsNoTracking()
+                where column.Id == columnDefId
+                join table in db.TableDefs.AsNoTracking() on column.TableDefId equals table.Id
+                join sheet in db.SheetDefs.AsNoTracking() on table.SheetDefId equals sheet.Id
+                join version in db.TemplateVersions.AsNoTracking() on sheet.TemplateVersionId equals version.Id
+                select new { version.TemplateId, SheetCode = sheet.Code, TableCode = table.Code, ColumnCode = column.Code })
+            .FirstOrDefaultAsync(ct).ConfigureAwait(false);
+
+        var family = new List<int> { columnDefId };
+        if (path is null)
+        {
+            return family;
+        }
+
+        var siblings = await (
+                from column in db.ColumnDefs.AsNoTracking()
+                where column.Code == path.ColumnCode && column.Id != columnDefId
+                join table in db.TableDefs.AsNoTracking() on column.TableDefId equals table.Id
+                where table.Code == path.TableCode
+                join sheet in db.SheetDefs.AsNoTracking() on table.SheetDefId equals sheet.Id
+                where sheet.Code == path.SheetCode
+                join version in db.TemplateVersions.AsNoTracking() on sheet.TemplateVersionId equals version.Id
+                where version.TemplateId == path.TemplateId
+                select column.Id)
+            .ToListAsync(ct).ConfigureAwait(false);
+        family.AddRange(siblings);
+        return family;
     }
 
     private static UsageItemDto Item(string kind, Hit hit)

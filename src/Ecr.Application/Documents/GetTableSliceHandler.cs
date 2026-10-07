@@ -1,3 +1,4 @@
+using Ecr.Application.Calculations;
 using Ecr.Application.Documents.Dto;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
@@ -37,6 +38,10 @@ namespace Ecr.Application.Documents;
 /// Журнал змін — для значка «правка поза вікном» (<c>ФВ-2.16</c>); один запит
 /// на зріз. Необов'язковий лише заради тестів, що конструюють обробник вручну.
 /// </param>
+/// <param name="columnMapper">
+/// C1: переклад Id колонок обов'язкових входів на колонки версії шаблону документа. <c>null</c> — Id локальні
+/// (лише прямий конструктор у тестах).
+/// </param>
 /// <param name="formulaEngine">
 /// Рушій виразів — для <c>ColumnDto.Expression</c> (UI-25, B4): розбір формули колонки й збір її
 /// посилань. Необов'язковий лише заради тестів; без нього вираз не віддається ніколи.
@@ -54,7 +59,8 @@ public sealed class GetTableSliceHandler(
     ICalculationResultStore? results = null,
     IConditionalFormatStore? conditionalFormats = null,
     IAuditReader? audit = null,
-    IFormulaEngine? formulaEngine = null)
+    IFormulaEngine? formulaEngine = null,
+    IColumnPathMapper? columnMapper = null)
 {
     private readonly MethodologyRequiredColumnsCache _required = new(memory);
 
@@ -226,7 +232,7 @@ public sealed class GetTableSliceHandler(
         // методології зараз чинна для цієї таблиці й що вона вимагає)
         // рахується для позначки в заголовку, а не для gate.
         var requiredByMethodology = await RequiredByMethodologyColumnIdsAsync(
-            table.Id, documentId, instance.PeriodKey, ct).ConfigureAwait(false);
+            table.Id, documentId, instance.PeriodKey, instance.TemplateVersionId, ct).ConfigureAwait(false);
 
         // ⛔ Директива registry-lookup / cell-style, PR B2: жива сітка досі не
         // показувала оформлення, задане автором шаблону (`ColumnDef.StyleId`)
@@ -471,7 +477,7 @@ public sealed class GetTableSliceHandler(
     /// склад прив'язок, який кешувати не можна (він і є ключем кешу).
     /// </remarks>
     private async Task<HashSet<int>> RequiredByMethodologyColumnIdsAsync(
-        int tableDefId, long documentId, int periodKey, CancellationToken ct)
+        int tableDefId, long documentId, int periodKey, int templateVersionId, CancellationToken ct)
     {
         // ⚠ Цей запит лишається на кожен зріз навмисно: увімкнення чи зняття
         // прив'язки (`cfg.CalculationBinding`) мусить бути видно негайно, і
@@ -499,8 +505,10 @@ public sealed class GetTableSliceHandler(
 
         foreach (var versionId in versionIds)
         {
+            // ⛔ C1: вміст версії методології — Id колонок версії-джерела; кеш ключується ще й версією шаблону
+            // документа, інакше документ на клоні отримав би закешований набір Id іншої версії.
             var columns = await _required.RequiredColumnIdsAsync(
-                versionId, token => RequiredColumnIdsOfVersionAsync(versionId, token), ct)
+                versionId, templateVersionId, token => RequiredColumnIdsOfVersionAsync(versionId, templateVersionId, token), ct)
                 .ConfigureAwait(false);
 
             result.UnionWith(columns);
@@ -562,7 +570,7 @@ public sealed class GetTableSliceHandler(
     /// версії, а не тимчасова відсутність відповіді.
     /// </remarks>
     private async Task<IReadOnlySet<int>> RequiredColumnIdsOfVersionAsync(
-        int methodologyVersionId, CancellationToken ct)
+        int methodologyVersionId, int templateVersionId, CancellationToken ct)
     {
         var rules = await methodologies.GetRulesAsync(methodologyVersionId, ct).ConfigureAwait(false);
         if (rules.Count == 0)
@@ -573,7 +581,9 @@ public sealed class GetTableSliceHandler(
         var requiredInputs = await methodologies
             .GetRequiredInputsAsync(methodologyVersionId, ct).ConfigureAwait(false);
 
-        return requiredInputs.Select(i => i.ColumnDefId).ToHashSet();
+        // Колонки без відповідника у версії документа відкидаються: зірочки на неіснуючій колонці немає.
+        return await MethodologyKeyLocalizer.LocalizeColumnIdsAsync(
+            columnMapper, templateVersionId, [.. requiredInputs.Select(i => i.ColumnDefId)], ct).ConfigureAwait(false);
     }
 
     /// <summary>Позначення одиниці колонки; <c>null</c> — колонка безрозмірна.</summary>
