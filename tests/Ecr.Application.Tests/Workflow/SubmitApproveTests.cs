@@ -732,6 +732,113 @@ public sealed class SubmitApproveTests
         Assert.StartsWith("[", snapshot.PayloadJson, StringComparison.Ordinal);
     }
 
+    /// <summary>Обов'язкове поле шапки з кодом <paramref name="code"/>.</summary>
+    private static Ecr.Domain.Entities.Configuration.HeaderFieldDef RequiredHeaderField(int id, string code)
+    {
+        var field = new Ecr.Domain.Entities.Configuration.HeaderFieldDef(
+            TemplateVersion, EcrCode.Create(code),
+            new LocalizedText(new Dictionary<string, string> { ["en"] = code }), 1, CellDataType.String);
+        typeof(Entity<int>).GetProperty("Id")!.SetValue(field, id);
+        field.SetRequired(true);
+        return field;
+    }
+
+    /// <summary>
+    /// D-PS (варіант A, DESIGN-permit-header «Прогалина 1»): <c>HeaderFieldDef.IsRequired</c> перевірявся лише
+    /// при PATCH шапки. Поле, якого ніхто не торкався, запису не має — і подання проходило з порожньою
+    /// обов'язковою шапкою. Відмова — <c>ECR-HDR-0422</c> з кодами порожніх полів, без жодних значень.
+    /// </summary>
+    /// <remarks>Мутація: прибрати перевірку в <c>SubmitSheetHandler</c> — усі «блокує»-тести червоніють.</remarks>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "ФВ-5.4")]
+    public async Task Порожня_обов_язкова_шапка_блокує_подання_кодами_полів_без_значень(bool explicitEmpty)
+    {
+        _metadata.GetAsync(TemplateVersion, Arg.Any<CancellationToken>())
+                 .Returns(Snapshot() with
+                 {
+                     HeaderFields = [RequiredHeaderField(55, "PERMIT"), AreaHeaderField(56)],
+                 });
+        var values = new Dictionary<int, DocumentHeaderValueData>
+        {
+            [56] = new() { ValueString = "СекретнеЗначення" },
+        };
+        if (explicitEmpty)
+        {
+            values[55] = DocumentHeaderValueData.Empty;
+        }
+
+        _headers.GetValuesAsync(Document, Arg.Any<CancellationToken>()).Returns(values);
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Submit().HandleAsync(Document, Water, Period, CancellationToken.None));
+
+        Assert.Equal("ECR-HDR-0422", error.ErrorCode);
+        Assert.Equal("err.ECR-HDR-0422.requiredAtSubmit", error.Details!["messageKey"]);
+        var body = System.Text.Json.JsonSerializer.Serialize(error.Details);
+        Assert.Contains("PERMIT", body, StringComparison.Ordinal);
+        Assert.DoesNotContain("AREA", body, StringComparison.Ordinal);
+        Assert.DoesNotContain("СекретнеЗначення", body, StringComparison.Ordinal);
+
+        Assert.Empty(_snapshots);
+        Assert.Equal(DocumentStatus.Draft, _sheets[Water].Status);
+        await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "ФВ-5.4")]
+    public async Task Відмова_називає_усі_порожні_обов_язкові_поля_і_лише_їх()
+    {
+        _metadata.GetAsync(TemplateVersion, Arg.Any<CancellationToken>())
+                 .Returns(Snapshot() with
+                 {
+                     HeaderFields = [RequiredHeaderField(55, "PERMIT"), RequiredHeaderField(56, "REGION"), RequiredHeaderField(57, "FILLED")],
+                 });
+        _headers.GetValuesAsync(Document, Arg.Any<CancellationToken>())
+                .Returns(new Dictionary<int, DocumentHeaderValueData> { [57] = new() { ValueString = "x" } });
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Submit().HandleAsync(Document, Water, Period, CancellationToken.None));
+
+        var body = System.Text.Json.JsonSerializer.Serialize(error.Details);
+        Assert.Contains("PERMIT", body, StringComparison.Ordinal);
+        Assert.Contains("REGION", body, StringComparison.Ordinal);
+        Assert.DoesNotContain("FILLED", body, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "ФВ-5.4")]
+    public async Task Заповнена_обов_язкова_шапка_подання_не_блокує()
+    {
+        _metadata.GetAsync(TemplateVersion, Arg.Any<CancellationToken>())
+                 .Returns(Snapshot() with { HeaderFields = [RequiredHeaderField(55, "PERMIT")] });
+        _headers.GetValuesAsync(Document, Arg.Any<CancellationToken>())
+                .Returns(new Dictionary<int, DocumentHeaderValueData> { [55] = new() { ValueString = "P-1" } });
+
+        await Submit().HandleAsync(Document, Water, Period, CancellationToken.None);
+
+        Assert.Single(_snapshots);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "ФВ-5.4")]
+    public async Task Видалене_обов_язкове_поле_шапки_подання_не_блокує()
+    {
+        var deleted = RequiredHeaderField(55, "PERMIT");
+        deleted.SoftDelete(userId: 1, Now);
+        _metadata.GetAsync(TemplateVersion, Arg.Any<CancellationToken>())
+                 .Returns(Snapshot() with { HeaderFields = [deleted] });
+
+        await Submit().HandleAsync(Document, Water, Period, CancellationToken.None);
+
+        Assert.Single(_snapshots);
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     [Trait("Requirement", "ФВ-5.4")]
