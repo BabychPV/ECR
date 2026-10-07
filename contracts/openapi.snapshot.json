@@ -3798,6 +3798,13 @@
       "DocumentSummary": {
         "description": "Документ у переліку.",
         "properties": {
+          "approverDisplayName": {
+            "description": "К6: «хто затвердив» — відображуване ім'я (`D-86`) того, хто останнім затвердив аркуш документа\n(остання подія `Approve`/`ApproveStep` журналу, інакше `ApprovalState.ApprovedByUserId`);\n`null` — затвердження ще не було. Це те саме розкриття, що й `GET /workflow/history`; складу\nролі кроку («хто може») не розкриває. ⛔ Для звуженого читача — `null` (`DocumentSheetVisibility.For`), як і автор.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
           "businessKey": {
             "description": "Бізнес-ключ, унікальний у межах проєкту.",
             "type": "string"

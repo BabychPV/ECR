@@ -19578,6 +19578,11 @@ export interface components {
         };
         /** @description Документ у переліку. */
         DocumentSummary: {
+            /** @description К6: «хто затвердив» — відображуване ім'я (`D-86`) того, хто останнім затвердив аркуш документа
+             *     (остання подія `Approve`/`ApproveStep` журналу, інакше `ApprovalState.ApprovedByUserId`);
+             *     `null` — затвердження ще не було. Це те саме розкриття, що й `GET /workflow/history`; складу
+             *     ролі кроку («хто може») не розкриває. ⛔ Для звуженого читача — `null` (`DocumentSheetVisibility.For`), як і автор. */
+            approverDisplayName?: null | string;
             /** @description Бізнес-ключ, унікальний у межах проєкту. */
             businessKey: string;
             /**
