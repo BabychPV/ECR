@@ -1,0 +1,12 @@
+{
+  "name": "ecr-land-regression",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "Регресія розрахунку Land проти еталонних CSV (без даних у репозиторії)",
+  "engines": { "node": ">=22.18" },
+  "scripts": {
+    "test": "node --test \"test/*.test.ts\"",
+    "start": "node src/run.ts"
+  }
+}

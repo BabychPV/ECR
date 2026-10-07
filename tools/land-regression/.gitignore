@@ -1,0 +1,4 @@
+# Еталонні дані з прода й результати прогонів — лише локально.
+*.csv
+*.local.json
+land-regression-result*.json

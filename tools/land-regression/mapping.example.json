@@ -1,0 +1,15 @@
+{
+  "projectId": 1,
+  "sheetDefId": 1,
+  "tableCode": "LAND",
+  "periodKey": 202601,
+  "rowKeyColumn": "Id",
+  "inputs": { "Hours": "hours" },
+  "expected": {
+    "tons_NOx": "tons_NOx",
+    "tons_301": "tons_301",
+    "gsec_NOx": "gsec_NOx"
+  },
+  "tolerance": 1e-6,
+  "reportUnexpected": false
+}
