@@ -191,13 +191,14 @@ public sealed class CoalescedRequeueScopeQuartzTests : IAsyncLifetime
             return store;
         });
 
-        // Реєстрація дзеркалить DependencyInjection: scoped.
+        // Реєстрація дзеркалить DependencyInjection: scoped, із кореневою фабрикою scope.
         services.AddScoped(sp => new QuartzJobScheduler(
             sp.GetService<ISchedulerFactory>(),
             sp.GetService<IJobProgressStore>(),
             sp.GetService<Ecr.Domain.Abstractions.IClock>(),
             null,
-            sp.GetService<ILogger<QuartzJobScheduler>>()));
+            sp.GetService<ILogger<QuartzJobScheduler>>(),
+            sp.GetService<IServiceScopeFactory>()));
 
         var provider = services.BuildServiceProvider();
         quartz.JobFactory = new AdapterFactory(provider);
