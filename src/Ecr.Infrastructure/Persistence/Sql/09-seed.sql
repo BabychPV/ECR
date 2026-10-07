@@ -6229,6 +6229,16 @@ USING (VALUES
     (N'grid.columnWidths.reset',           N'en', N'Reset column widths', 1),
     -- ru/kz — окремою порцією `COLL:d234` у блоці I18N нижче.
     -- COLL:d234 ── кінець секції ──
+    -- COLL:psp1c ── Місяць колонки (PS-P1C, D-PS-1): відмови 422 і підписи поля «Місяць колонки» в панелі колонки ──
+    (N'err.ECR-TMPL-0422.monthColumnWithoutMonth', N'en', N'Column "{columnCode}" is marked as a month column but no month is set.', 1),
+    (N'err.ECR-TMPL-0422.monthOutOfRange',         N'en', N'The month of column "{columnCode}" must be from 1 to 12, got "{monthNumber}".', 1),
+    (N'err.ECR-TMPL-0422.monthWithoutFlag',        N'en', N'Column "{columnCode}" has a month set but is not marked as a month column.', 1),
+    (N'columns.month',                             N'en', N'Column month', 1),
+    (N'columns.monthHint',                         N'en', N'The calendar month this column holds data for. Period rules (source window, outside the permit window) use it; empty means the column is not tied to a month.', 1),
+    (N'columns.monthNone',                         N'en', N'Not tied to a month', 1),
+    (N'columns.errMonth',                          N'en', N'The month must be a whole number from 1 to 12.', 1),
+    -- ru/kz — окремою порцією `COLL:psp1c` у блоці I18N нижче.
+    -- COLL:psp1c ── кінець секції ──
     -- COLL:dates ── Дата-рядок поля довідника з AF: лише MM/dd/yyyy чи ISO 8601 (`RegistrySyncValidity.TryParseFieldDate`, відповідь людини 2026-10-01) ──
     (N'err.ECR-REG-0422.dateFormatRefused', N'en', N'The source value "{value}" is not a date in the expected format ({expected}) or ISO 8601: the field is left unchanged.', 1),
     -- ru/kz — окремою порцією `COLL:dates` у блоці I18N нижче.
@@ -14828,6 +14838,29 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:d234 ── кінець секції ──
+
+-- COLL:psp1c ── ru/kz місяця колонки (PS-P1C); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-TMPL-0422.monthColumnWithoutMonth', N'ru', N'Столбец "{columnCode}" помечен как месячный, но месяц не задан.'),
+    (N'err.ECR-TMPL-0422.monthColumnWithoutMonth', N'kz', N'"{columnCode}" бағаны айлық деп белгіленген, бірақ ай көрсетілмеген.'),
+    (N'err.ECR-TMPL-0422.monthOutOfRange', N'ru', N'Месяц столбца "{columnCode}" должен быть от 1 до 12, получено "{monthNumber}".'),
+    (N'err.ECR-TMPL-0422.monthOutOfRange', N'kz', N'"{columnCode}" бағанының айы 1-ден 12-ге дейін болуы керек, алынған мән "{monthNumber}".'),
+    (N'err.ECR-TMPL-0422.monthWithoutFlag', N'ru', N'У столбца "{columnCode}" задан месяц, но столбец не помечен как месячный.'),
+    (N'err.ECR-TMPL-0422.monthWithoutFlag', N'kz', N'"{columnCode}" бағанында ай көрсетілген, бірақ баған айлық деп белгіленбеген.'),
+    (N'columns.month', N'ru', N'Месяц столбца'),
+    (N'columns.month', N'kz', N'Баған айы'),
+    (N'columns.monthHint', N'ru', N'Календарный месяц, за который столбец хранит данные. Его используют правила периода (окно источника, вне окна разрешения); пусто — столбец не привязан к месяцу.'),
+    (N'columns.monthHint', N'kz', N'Баған деректерді сақтайтын күнтізбелік ай. Оны кезең ережелері (дереккөз терезесі, рұқсат терезесінен тыс) пайдаланады; бос — баған айға байланыстырылмаған.'),
+    (N'columns.monthNone', N'ru', N'Не привязан к месяцу'),
+    (N'columns.monthNone', N'kz', N'Айға байланыстырылмаған'),
+    (N'columns.errMonth', N'ru', N'Месяц должен быть целым числом от 1 до 12.'),
+    (N'columns.errMonth', N'kz', N'Ай 1-ден 12-ге дейінгі бүтін сан болуы керек.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:psp1c ── кінець секції ──
 
 -- COLL:dates ── ru/kz відмови формату дати поля довідника з AF; власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)
