@@ -138,6 +138,59 @@ describe('RegistryImpactPage: вибір документів не пережи�
   });
 });
 
+describe('RegistryImpactPage: обране зникло поза діалогом причини (AN-35 хвіст)', () => {
+  /*
+   * Мутаційні докази (AN-35 хвіст, 2026-10-07): прибрати `if (selectionGone && !asking) setSelected(new Set())`
+   * у `useEffect` → червоні обидва тести (вибір «воскресає» разом із документом; кнопка «усі» не шле запит).
+   *
+   * ⚠ Мутація `documentIds: selected.size === 0 ? null : effective` → `effective.length === 0 ? null : …`
+   * еквівалентна: стан «обране зникло» ловить `selectionGone` в `onConfirm` ще до `mutate`, тож жодним
+   * сценарієм сторінки до тіла запиту не доходить; окремого доказу вона не має (захищено двічі навмисно).
+   */
+  it('обране зникло й повернулося в перелік — галочка знята, підпис «усі», вибір не воскресає', async () => {
+    let items = [Doc5, Doc7];
+    mockServer(() => ({ items, total: items.length, truncated: false }));
+    const client = show();
+
+    fireEvent.click(await screen.findByRole('checkbox', { name: /DOC7/ }));
+    const button = document.querySelector<HTMLButtonElement>('[data-impact-recalculate]') as HTMLButtonElement;
+    expect(button.textContent).toContain('count=1');
+
+    items = [Doc5];
+    await client.invalidateQueries({ queryKey: ['registry-impact', 'COMPONENT'] });
+    await waitFor(() => expect(document.querySelector('[data-impact-row="7"]')).toBeNull());
+    expect(button.textContent).toContain('registries.impact.recalculateAll');
+
+    // Документ повернувся (інша правка довідника): старий вибір уже не діє.
+    items = [Doc5, Doc7];
+    await client.invalidateQueries({ queryKey: ['registry-impact', 'COMPONENT'] });
+    await waitFor(() => expect(document.querySelector('[data-impact-row="7"]')).not.toBeNull());
+
+    expect((screen.getByRole('checkbox', { name: /DOC7/ }) as HTMLInputElement).checked).toBe(false);
+    expect(button.textContent).toContain('registries.impact.recalculateAll');
+    expect(button.textContent).not.toContain('count=');
+  });
+
+  it('обране зникло, діалог відкрито вже після цього — кнопка «усі» справді ставить перерахунок усіх', async () => {
+    let items = [Doc5, Doc7];
+    const server = mockServer(() => ({ items, total: items.length, truncated: false }));
+    const client = show();
+
+    fireEvent.click(await screen.findByRole('checkbox', { name: /DOC7/ }));
+    items = [Doc5];
+    await client.invalidateQueries({ queryKey: ['registry-impact', 'COMPONENT'] });
+    await waitFor(() => expect(document.querySelector('[data-impact-row="7"]')).toBeNull());
+
+    const button = document.querySelector<HTMLButtonElement>('[data-impact-recalculate]') as HTMLButtonElement;
+    await waitFor(() => expect(button.textContent).toContain('registries.impact.recalculateAll'));
+
+    // Підпис чесно каже «усі», тож і запит — усі (null), а не мовчазна відмова.
+    await recalculateWith('усі наявні');
+    await waitFor(() => expect(server.posts).toHaveLength(1));
+    expect(server.posts[0]).toEqual({ documentIds: null, reason: 'усі наявні' });
+  });
+});
+
 describe('RegistryImpactPage: обране зникло під відкритим діалогом причини (рев\'ю AN-35, P2)', () => {
   /*
    * Мутаційний доказ (перевірено руками 2026-10-04): прибрати гілку `selectionGone` в `onConfirm`
