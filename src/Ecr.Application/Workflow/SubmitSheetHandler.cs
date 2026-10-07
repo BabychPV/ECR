@@ -81,7 +81,7 @@ public sealed class SubmitSheetHandler(
     public const string SubmitInsufficientLevelReasonKey = "deny.InsufficientGrantLevel.Submit";
 
     /// <summary>Ключ каталогу відмови «обов'язкове поле шапки порожнє» (D-PS, <c>ECR-HDR-0422</c>).</summary>
-    public const string RequiredHeaderMessageKey = "err.ECR-HDR-0422.requiredAtSubmit";
+    public const string RequiredHeaderMessageKey = Validation.RequiredHeaderCheck.MessageKey;
 
     /// <summary>Тип події аудиту: подавач підтвердив попередження валідації (ФВ-5.19).</summary>
     public const string WarningsAcknowledgedEventType = "SheetSubmitWarningsAcknowledged";
@@ -442,15 +442,12 @@ public sealed class SubmitSheetHandler(
         // жодного значення; видимості поля шапки (на відміну від колонки) немає.
         // ⚠ Значення читаються лише коли в шаблоні є обов'язкове поле: типова
         // версія їх не має, і зайвого запиту під блокуванням подання немає.
-        var requiredHeaderFields = snapshot.HeaderFields.Where(f => !f.IsDeleted && f.IsRequired).ToList();
+        // Правило спільне з «Перевірити» (`RequiredHeaderCheck`, R-B3).
+        var requiredHeaderFields = Validation.RequiredHeaderCheck.RequiredFields(snapshot.HeaderFields);
         if (requiredHeaderFields.Count > 0)
         {
             var rawHeader = await headers.GetValuesAsync(documentId, ct).ConfigureAwait(false);
-            var emptyCodes = requiredHeaderFields
-                .Where(f => !rawHeader.TryGetValue(f.Id, out var value) || IsBlank(value))
-                .OrderBy(f => f.Ordinal).ThenBy(f => f.Code, StringComparer.Ordinal)
-                .Select(f => f.Code)
-                .ToList();
+            var emptyCodes = Validation.RequiredHeaderCheck.EmptyCodes(requiredHeaderFields, rawHeader);
             if (emptyCodes.Count > 0)
             {
                 throw new BusinessRuleException(
@@ -645,10 +642,6 @@ public sealed class SubmitSheetHandler(
                 shownWarnings, innerCt),
             ct).ConfigureAwait(false);
     }
-
-    /// <summary>Значення шапки порожнє: явна порожнеча або рядок із самих пробілів.</summary>
-    private static bool IsBlank(Domain.ValueObjects.DocumentHeaderValueData value)
-        => value.IsEmpty || (value.ValueString is { } text && string.IsNullOrWhiteSpace(text));
 
     /// <summary>Перелік повідомлень для тіла відмови.</summary>
     private static List<object> MessageDetails(IEnumerable<Validation.ValidationMessage> messages)
