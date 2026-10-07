@@ -3,6 +3,7 @@ import { ActionIcon, Badge, Box, Button, Group, Tabs, Text } from '@mantine/core
 import type { DocumentTableDto, ValidationFindingDto } from '@/api/types';
 import { useCellChanges } from '@/features/audit/api';
 import { useTableStatus } from '@/features/documents/api';
+import { formatCount } from '@/shared/format/plural';
 import { t } from '@/shared/i18n';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { KeyValue, type KeyValueItem } from '@/shared/ui/KeyValue';
@@ -241,7 +242,8 @@ function InspectorTriggers({
       ? t('inspector.tabIssues')
       : counts.all === 0
         ? t('inspector.noIssues')
-        : t('inspector.issuesCount', { count: counts.all });
+        : // Множина за `Intl.PluralRules` (`D15-08`), як у прогресі документа: «1 issue», «2 issues», а не «2 issue(s)».
+          formatCount(counts.all, 'document.issuesCount');
 
   return (
     <Group gap="xs" justify="flex-end" data-inspector-triggers="">
