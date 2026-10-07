@@ -38,6 +38,14 @@ public static class HeaderValueMapping
             return ExpressionValue.Text(text);
         }
 
+        // Id запису довідника — число, як і для комірки Lookup
+        // (CellValueMapping.ToExpressionValue): без цього
+        // `HDR.<Lookup>` завжди давав Null.
+        if (header.ValueRegistryEntryId is { } entryId)
+        {
+            return ExpressionValue.Number(entryId);
+        }
+
         return ExpressionValue.Null;
     }
 
