@@ -91,7 +91,8 @@ export function TemplateVersionsSection({
   return (
     <Stack gap="xs" data-template-versions>
       <Group justify="space-between">
-        <Title order={4}>{t('templates.versions')}</Title>
+        {/* ⚠ h2 під h1 картки шаблону (axe `heading-order`, прохід a11y batch-4); вигляд h4. */}
+        <Title order={2} size="h4">{t('templates.versions')}</Title>
 
         {editable && (
           <Button variant="default" onClick={() => setCreating(true)}>

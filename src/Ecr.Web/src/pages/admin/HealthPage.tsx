@@ -316,7 +316,7 @@ export function HealthPage(): JSX.Element {
         {typeof facts.data?.productVersion === 'string' && (
           <Card withBorder component="section" aria-labelledby="health-facts-h" data-health-facts="">
             <Stack gap="sm">
-              <Title order={4} fz="md" id="health-facts-h">
+              <Title order={2} size="h4" fz="md" id="health-facts-h">
                 {t('health.facts')}
               </Title>
               <Box className="ecr-health-kv">
@@ -360,7 +360,9 @@ function HealthSection({ id, title, check, children, extra }: HealthSectionProps
     <Card withBorder component="section" aria-labelledby={headingId} data-health-section={id}>
       <Stack gap="sm">
         <Group gap="sm" wrap="wrap">
-          <Title order={4} fz="md" id={headingId}>
+          {/* ⚠ `order={2}` під h1 сторінки (axe `heading-order`, прохід a11y
+              batch-4: було h1 → h4); `size="h4"` тримає вигляд макета. */}
+          <Title order={2} size="h4" fz="md" id={headingId}>
             {title}
           </Title>
           {check !== undefined && (
