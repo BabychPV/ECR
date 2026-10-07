@@ -109,6 +109,10 @@ public sealed partial class DenyLeakGuardTests
             (1, "D-12: поле шапки, яке пише сам автор запиту (неіснуючий запис довідника); шапка — не Column/Table"),
         ["src/Ecr.Application/Documents/DocumentHeaderHandlers.cs | деталь headerFieldCode | missingCode"] =
             (1, "те саме, що текст"),
+        ["src/Ecr.Application/Workflow/SubmitSheetHandler.cs | деталь fields | emptyCodes"] =
+            (1, "D-PS: коди порожніх обов'язкових полів ШАПКИ (не Column/Table, видимості у шапки немає); значень немає"),
+        ["src/Ecr.Application/Workflow/SubmitSheetHandler.cs | текст | emptyCodes.Count"] =
+            (1, "D-PS: число порожніх обов'язкових полів шапки, не колонка і не значення"),
         ["src/Ecr.Application/Documents/GetTableSliceHandler.cs | текст | code"] =
             (2, "ключ «рядок:колонка» лише для колонок, що пройшли CanReadColumn"),
         ["src/Ecr.Application/Documents/GetTableSliceHandler.cs | текст | column.Code"] =
