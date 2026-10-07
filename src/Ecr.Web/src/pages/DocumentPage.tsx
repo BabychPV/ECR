@@ -37,6 +37,7 @@ import { showApiError } from '@/shared/ui/notify';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { useProjectCurrentPeriodDefault } from '@/features/documents/useProjectCurrentPeriodDefault';
 import { StatusBadge } from '@/shared/ui/StatusBadge';
+import '@/features/documents/documentSheetStrip.css';
 import { useUrlNumber, useUrlState } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
 import { registerHeldEditRevealer, useSettledAction } from '@/features/grid/settleEdits';
@@ -545,6 +546,8 @@ export function DocumentPage(): JSX.Element {
         <ErrorAlert error={summary.error ?? tables.error} onRetry={refetchBoth} />
       )}
       <PageHeader
+        // ✎ b4b: «← Back to Documents» (KIT §1.5, макет `screen-document.js` `back`).
+        back={{ label: t('nav.backToDocuments'), href: '/' }}
         // ⛔ Директива "людське ім'я документа": ім'я ПОРУЧ із бізнес-ключем,
         // а не замість нього — ключ лишається видимим завжди.
         title={
@@ -756,15 +759,11 @@ export function DocumentPage(): JSX.Element {
         <DocumentVersionCompare documentId={documentId} periodKey={periodKey} />
       </Suspense>
 
-      <Tabs value={active?.code ?? null} onChange={setSheet}>
-        <Tabs.List>
-          {sheets.map((s) => (
-            <Tabs.Tab key={s.code} value={s.code}>
-              {s.name}{' '}
-              <StatusBadge kind="sheet" state={document.sheetStates[s.code] ?? 'Draft'} />
-            </Tabs.Tab>
-          ))}
-        </Tabs.List>
+      {/* ✎ b4b: смуга аркушів — ПІД сіткою, як у макеті (`screen-document.js`
+          `.statusbar` > `.sheet-tabs`; KIT §1.5), а не вкладками над нею. Список
+          стоїть після панелей і липне до низу вікна (`documentSheetStrip.css`).
+          ⛔ Аркуші — лише ті, що повернув API (видимі цьому користувачу, P1). */}
+      <Tabs value={active?.code ?? null} onChange={setSheet} inverted>
 
         {/* ⛔ Кожна вкладка має СВОЮ панель: Mantine ставить вкладці
             `aria-controls` на id панелі, і без панелі посилання висіло в
@@ -844,6 +843,15 @@ export function DocumentPage(): JSX.Element {
             </Stack>
           </Tabs.Panel>
         )}
+
+        <Tabs.List className="doc-sheet-strip" aria-label={t('documents.sheets')} data-doc-sheet-strip="">
+          {sheets.map((s) => (
+            <Tabs.Tab key={s.code} value={s.code} className="doc-sheet-tab">
+              {s.name}{' '}
+              <StatusBadge kind="sheet" state={document.sheetStates[s.code] ?? 'Draft'} />
+            </Tabs.Tab>
+          ))}
+        </Tabs.List>
       </Tabs>
 
       {/* ⚠ Без аркушів панелі немає, а відмова чанка має лишатися видимою —
@@ -909,7 +917,8 @@ function groupBySheet(tables: DocumentTableDto[]): SheetGroup[] {
     const group = sheets.get(table.sheetCode) ?? {
       sheetDefId: table.sheetDefId,
       code: table.sheetCode,
-      name: localized(table.sheetNameL10n) || table.sheetCode,
+      // ✎ b4b (P1 приховані аркуші): назва — лише з даних API; немає — «—», а не код.
+      name: localized(table.sheetNameL10n) || '—',
       ordinal: table.sheetOrdinal,
       tables: [],
     };

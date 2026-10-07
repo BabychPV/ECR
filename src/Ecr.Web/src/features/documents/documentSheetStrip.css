@@ -1,0 +1,34 @@
+/*
+ * b4b: смуга аркушів документа ПІД сіткою (макет `screen-document.js`:
+ * `.statusbar` 32 px + `.sheet-tabs`; KIT §1.5). Липне до низу вікна, щоб
+ * перемикач аркушів був видимий і під високою сіткою. Кольори — токени теми
+ * Mantine, тож Light/Dark беруться самі.
+ */
+.doc-sheet-strip {
+  position: sticky;
+  bottom: 0;
+  z-index: 3;
+  min-height: 32px;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: none;
+  border-top: 1px solid var(--mantine-color-default-border);
+  /* «sunken» макета: напівпрозорий `default-hover` поверх НЕПРОЗОРОГО тла сторінки —
+     інакше крізь липку смугу просвічувала б сітка. */
+  background-color: var(--mantine-color-body);
+  background-image: linear-gradient(var(--mantine-color-default-hover), var(--mantine-color-default-hover));
+}
+
+.doc-sheet-strip .doc-sheet-tab {
+  white-space: nowrap;
+  border-right: 1px solid var(--mantine-color-default-border);
+  border-radius: 0;
+  color: var(--mantine-color-dimmed);
+}
+
+.doc-sheet-strip .doc-sheet-tab[data-active] {
+  background: var(--mantine-color-body);
+  color: var(--mantine-color-text);
+  font-weight: 500;
+  box-shadow: inset 0 -2px 0 var(--mantine-primary-color-filled);
+}
