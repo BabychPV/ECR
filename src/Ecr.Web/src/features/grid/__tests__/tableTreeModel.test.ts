@@ -34,7 +34,7 @@ function table(ordinal: number, code = `T${String(ordinal)}`, instance = 100 + o
 }
 
 function status(def: number, filled: number, input: number, errors: number | null = null, warnings: number | null = null): TableStatus {
-  return { tableDefId: def, sheetCode: 'S1', filledCells: filled, inputCells: input, errorCount: errors, warningCount: warnings };
+  return { tableDefId: def, sheetCode: 'S1', filledCells: filled, inputCells: input, errorCount: errors, warningCount: warnings, isClosed: false, rowCount: 0 };
 }
 
 describe('fillStateOf', () => {

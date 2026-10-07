@@ -22,6 +22,8 @@ const template = (id: number, code: string, extra: Partial<TemplateListSummary> 
   id,
   code,
   versionCount: 0,
+  documentCount: 0,
+  isArchived: false,
   ...extra,
 });
 

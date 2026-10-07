@@ -42,11 +42,11 @@ const doc = {
 };
 
 const tables = [
-  { tableDefId: 1, sheetCode: 'GEN', inputCells: 4, filledCells: 4, errorCount: 0, warningCount: 0 },
-  { tableDefId: 2, sheetCode: 'GEN', inputCells: 2, filledCells: 2, errorCount: 0, warningCount: 0 },
-  { tableDefId: 3, sheetCode: 'AIR', inputCells: 9, filledCells: 3, errorCount: 3, warningCount: 0 },
+  { tableDefId: 1, sheetCode: 'GEN', inputCells: 4, filledCells: 4, errorCount: 0, warningCount: 0, isClosed: false, rowCount: 0 },
+  { tableDefId: 2, sheetCode: 'GEN', inputCells: 2, filledCells: 2, errorCount: 0, warningCount: 0, isClosed: false, rowCount: 0 },
+  { tableDefId: 3, sheetCode: 'AIR', inputCells: 9, filledCells: 3, errorCount: 3, warningCount: 0, isClosed: false, rowCount: 0 },
   // Таблиця без полів для людини (`R-13`) — у заповненість не входить.
-  { tableDefId: 4, sheetCode: 'AIR', inputCells: 0, filledCells: 0, errorCount: null, warningCount: null },
+  { tableDefId: 4, sheetCode: 'AIR', inputCells: 0, filledCells: 0, errorCount: null, warningCount: null, isClosed: false, rowCount: 0 },
 ];
 
 const event = (sheetCode: string, at: string, toState: string) => ({
