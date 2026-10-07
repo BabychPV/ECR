@@ -50,6 +50,11 @@ namespace Ecr.Application.Ports;
 /// обробника, що відсікає від читача аркуші поза його межами (<c>DocumentSheetVisibility</c>);
 /// у відповідь НЕ потрапляє (<c>JsonIgnore</c>) — це не контракт.
 /// </param>
+/// <param name="OwnerDisplayName">
+/// Автор документа (<c>CreatedBy</c>): відображуване ім'я, не логін (<c>D-86</c>); <c>null</c> — автора
+/// вже немає. ⛔ Для читача, чий доступ звужено нижче проєкту, — <c>null</c> (<c>DocumentSheetVisibility.For</c>):
+/// ім'я людини — окреме розкриття, його не віддаємо там, де документ показано частково.
+/// </param>
 public sealed record DocumentSummary(
     long Id,
     int ProjectId,
@@ -64,7 +69,8 @@ public sealed record DocumentSummary(
     int? WarningCount = null,
     bool HasLateEdits = false,
     IReadOnlyList<DocumentSheetState>? Sheets = null,
-    [property: System.Text.Json.Serialization.JsonIgnore] IReadOnlyList<string>? IncludedSheetCodes = null);
+    [property: System.Text.Json.Serialization.JsonIgnore] IReadOnlyList<string>? IncludedSheetCodes = null,
+    string? OwnerDisplayName = null);
 
 /// <summary>Аркуш складу документа в переліку: код, назва, стан за період.</summary>
 /// <param name="Code">Код аркуша (<c>SheetDef.Code</c>); він же ключ у <c>DocumentSummary.SheetStates</c>.</param>

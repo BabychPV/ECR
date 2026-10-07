@@ -165,6 +165,7 @@ public static class DocumentSheetVisibility
             Sheets = document.Sheets is null ? null : visibleSheets,
             ErrorCount = narrowed ? null : document.ErrorCount,
             WarningCount = narrowed ? null : document.WarningCount,
+            OwnerDisplayName = narrowed ? null : document.OwnerDisplayName,
         };
     }
 

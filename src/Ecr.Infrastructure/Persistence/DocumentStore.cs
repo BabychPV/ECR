@@ -64,7 +64,11 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
         var document = await db.Documents
             .AsNoTracking()
             .Where(d => d.Id == documentId)
-            .Select(d => new { d.Id, d.ProjectId, d.BusinessKey, d.CreatedAt, d.NameL10n })
+            .Select(d => new
+            {
+                d.Id, d.ProjectId, d.BusinessKey, d.CreatedAt, d.NameL10n,
+                Owner = db.Users.Where(u => u.Id == d.CreatedByUserId).Select(u => u.DisplayName).FirstOrDefault(),
+            })
             .FirstOrDefaultAsync(ct)
             .ConfigureAwait(false);
 
@@ -84,7 +88,8 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
         return new DocumentSummary(
             document.Id, document.ProjectId, document.BusinessKey, document.CreatedAt, sheetCount,
             ToStateMap(sheets), document.NameL10n, HasLateEdits: late.Contains(documentId),
-            Sheets: sheets, IncludedSheetCodes: included.GetValueOrDefault(documentId));
+            Sheets: sheets, IncludedSheetCodes: included.GetValueOrDefault(documentId),
+            OwnerDisplayName: document.Owner);
     }
 
     /// <summary>
@@ -171,7 +176,8 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
                 db.DocumentSheets.Count(s => s.DocumentId == d.Id && s.IsIncluded),
                 d.NameL10n,
                 d.ModifiedAt,
-                db.Users.Where(u => u.Id == d.ModifiedByUserId).Select(u => u.DisplayName).FirstOrDefault()))
+                db.Users.Where(u => u.Id == d.ModifiedByUserId).Select(u => u.DisplayName).FirstOrDefault(),
+                db.Users.Where(u => u.Id == d.CreatedByUserId).Select(u => u.DisplayName).FirstOrDefault()))
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
@@ -207,7 +213,7 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
             items.Add(new DocumentSummary(
                 d.Id, d.ProjectId, d.BusinessKey, d.CreatedAt, d.SheetCount, ToStateMap(sheets), d.NameL10n,
                 d.ModifiedAt, d.ModifiedByDisplayName, findings?.ErrorCount, findings?.WarningCount,
-                late.Contains(d.Id), sheets, includedByDocument.GetValueOrDefault(d.Id)));
+                late.Contains(d.Id), sheets, includedByDocument.GetValueOrDefault(d.Id), d.OwnerDisplayName));
         }
 
         return new PagedResult<DocumentSummary>(
@@ -863,7 +869,8 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
     /// </remarks>
     private sealed record DocumentRow(
         long Id, int ProjectId, string BusinessKey, DateTime CreatedAt, int SheetCount,
-        Domain.ValueObjects.LocalizedText? NameL10n, DateTime ModifiedAt, string? ModifiedByDisplayName);
+        Domain.ValueObjects.LocalizedText? NameL10n, DateTime ModifiedAt, string? ModifiedByDisplayName,
+        string? OwnerDisplayName);
 
     /// <summary>Стеля кількості правил складу в одній версії.</summary>
     private const int MaxRules = 500;
