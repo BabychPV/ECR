@@ -1,4 +1,4 @@
-// src/Ecr.Application/Calculations/ImportMethodologyPackageHandler.cs
+﻿// src/Ecr.Application/Calculations/ImportMethodologyPackageHandler.cs
 using System.Globalization;
 using System.Text.Json;
 using Ecr.Application.Calculations.Dto;
@@ -38,7 +38,8 @@ public sealed class ImportMethodologyPackageHandler(
     IAuditWriter audit,
     IAccessDecisionService access,
     ICurrentUser currentUser,
-    IClock clock)
+    IClock clock,
+    IFormulaEngine? formulaEngine = null)
 {
     /// <summary>Право на імпорт (`02-contracts.md` §9) — як на заведення методології.</summary>
     public const string Permission = "Calculation.EditFormula";
@@ -76,7 +77,7 @@ public sealed class ImportMethodologyPackageHandler(
         var existing = await LoadExistingAsync(package, ct).ConfigureAwait(false);
         var catalog = await units.GetAsync(ct).ConfigureAwait(false);
 
-        var plan = MethodologyPackagePlanner.Plan(package, existing, catalog, timeZone);
+        var plan = MethodologyPackagePlanner.Plan(package, existing, catalog, timeZone, formulaEngine);
 
         if (dryRun)
         {
@@ -235,6 +236,13 @@ public sealed class ImportMethodologyPackageHandler(
                     drafts.Add(new MethodologyImport(versionId, methodologyIds[imported], methodologyId));
                 }
 
+                // ✎ L-2: правило категорії константи — вузол `categoryRule` пакета. Через домен, як і решта:
+                // чернетка щойно створена, тож `SetCategoryRule` її пропускає.
+                if (v.Content.CategoryRule is { } categoryRule)
+                {
+                    drafts.Add(draft.SetCategoryRule(existing: null, categoryRule, clock.UtcNow));
+                }
+
                 await uow.SaveChangesAsync(ct).ConfigureAwait(false);
             }
         }
@@ -293,12 +301,14 @@ public sealed class ImportMethodologyPackageHandler(
         var formulas = await methodologies.GetFormulasAsync(versionId, ct).ConfigureAwait(false);
         var constants = await methodologies.GetConstantsAsync(versionId, ct).ConfigureAwait(false);
         var imports = await drafts.GetImportedMethodologyCodesAsync(versionId, ct).ConfigureAwait(false);
+        var categoryRule = await methodologies.GetCategoryRuleAsync(versionId, ct).ConfigureAwait(false);
 
         return new ImportVersionContent(
             [.. formulas.Select(f => new ImportFormulaContent(f.Code, f.Expression, f.ArgumentsCsv))],
             [.. constants.Select(c => new ImportConstantContent(
                 c.Code, c.Kind, c.Value, c.TextValue, c.UnitId, c.Category, c.ValidFrom, c.ValidTo, c.Source))],
-            imports);
+            imports,
+            string.IsNullOrWhiteSpace(categoryRule) ? null : categoryRule.Trim());
     }
 
     /// <summary>Пояс майданчика за ідентифікатором IANA.</summary>
