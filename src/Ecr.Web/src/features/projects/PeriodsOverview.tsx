@@ -1,6 +1,6 @@
 import { type JSX } from 'react';
 import { Anchor, Box, Group, SimpleGrid, Stack, Text, Title, UnstyledButton } from '@mantine/core';
-import { useQueries } from '@tanstack/react-query';
+import { useQueries, type UseQueryResult } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import type { PagedProjects, PeriodCalendarDto } from '@/api/types';
 import { formatCount, formatPeriodKey } from '@/shared/format';
@@ -198,23 +198,17 @@ function isStat(value: string | null): value is StatId {
   return value === 'open' || value === 'grace' || value === 'soon';
 }
 
-interface AllProjectsPeriodsProps {
-  readonly projects: readonly ProjectSummary[];
-  readonly selectedId: number | null;
-  readonly onPick: (projectId: number) => void;
-  readonly siteDate: SiteDate;
-}
-
 /**
- * «All projects · current period» + смуга показників над нею (макет).
+ * Рядки огляду: календар кожного проєкту → поточний період, пільговий, залишок днів.
  *
- * ⚠ Календарі — тим самим ключем `['periods', id]`, що й календар сторінки та
- * автовибір періоду в `DocumentsPage` (A3-02): кеш спільний, обраний проєкт
- * удруге не запитується.
+ * ⚠ Календарі — тим самим ключем `['periods', id]`, що й календар сторінки та автовибір періоду в
+ * `DocumentsPage` (A3-02): кеш спільний, тож смуга зверху сторінки й таблиця знизу (два споживачі цього
+ * хука) не подвоюють запитів.
  */
-export function AllProjectsPeriods({ projects, selectedId, onPick, siteDate }: AllProjectsPeriodsProps): JSX.Element {
-  const [statRaw, setStat] = useUrlState('stat');
-  const stat = isStat(statRaw) ? statRaw : null;
+function useOverviewRows(projects: readonly ProjectSummary[]): {
+  readonly rows: OverviewRow[];
+  readonly calendars: UseQueryResult<PeriodCalendarDto>[];
+} {
   const now = Date.now();
 
   const calendars = useQueries({
@@ -236,6 +230,61 @@ export function AllProjectsPeriods({ projects, selectedId, onPick, siteDate }: A
       left: current === null ? null : daysLeft(current, now),
     };
   });
+
+  return { rows, calendars };
+}
+
+/**
+ * Смуга показників НАД сторінкою (макет `/admin/periods`: «open · in grace · closing in ≤ 3 days» — перше,
+ * що бачить людина, а не підпис під плитками). Фільтр `?stat=` той самий, що звужує таблицю «All projects».
+ */
+export function PeriodsStatStrip({ projects }: { readonly projects: readonly ProjectSummary[] }): JSX.Element {
+  const [statRaw, setStat] = useUrlState('stat');
+  const stat = isStat(statRaw) ? statRaw : null;
+  const { rows } = useOverviewRows(projects);
+
+  return (
+    <StatStrip
+      label={t('periods.overview.stats')}
+      items={[
+        { id: 'open', label: t('periods.overview.stat.open'), value: rows.filter(statMatch.open).length },
+        {
+          id: 'grace',
+          label: t('periods.overview.stat.grace'),
+          value: rows.filter(statMatch.grace).length,
+          tone: 'warning',
+        },
+        {
+          id: 'soon',
+          label: t('periods.overview.stat.soon'),
+          value: rows.filter(statMatch.soon).length,
+          tone: 'warning',
+        },
+      ]}
+      active={stat}
+      onSelect={(id) => setStat(id)}
+    />
+  );
+}
+
+interface AllProjectsPeriodsProps {
+  readonly projects: readonly ProjectSummary[];
+  readonly selectedId: number | null;
+  readonly onPick: (projectId: number) => void;
+  readonly siteDate: SiteDate;
+}
+
+/**
+ * «All projects · current period» + смуга показників над нею (макет).
+ *
+ * ⚠ Календарі — тим самим ключем `['periods', id]`, що й календар сторінки та
+ * автовибір періоду в `DocumentsPage` (A3-02): кеш спільний, обраний проєкт
+ * удруге не запитується.
+ */
+export function AllProjectsPeriods({ projects, selectedId, onPick, siteDate }: AllProjectsPeriodsProps): JSX.Element {
+  const [statRaw, setStat] = useUrlState('stat');
+  const stat = isStat(statRaw) ? statRaw : null;
+  const { rows, calendars } = useOverviewRows(projects);
 
   const failure = calendars.find((entry) => entry.error !== null)?.error ?? null;
   const pending = calendars.some((entry) => entry.isPending);
@@ -321,27 +370,6 @@ export function AllProjectsPeriods({ projects, selectedId, onPick, siteDate }: A
           {t('periods.overview.hint')}
         </Text>
       </Group>
-
-      <StatStrip
-        label={t('periods.overview.stats')}
-        items={[
-          { id: 'open', label: t('periods.overview.stat.open'), value: rows.filter(statMatch.open).length },
-          {
-            id: 'grace',
-            label: t('periods.overview.stat.grace'),
-            value: rows.filter(statMatch.grace).length,
-            tone: 'warning',
-          },
-          {
-            id: 'soon',
-            label: t('periods.overview.stat.soon'),
-            value: rows.filter(statMatch.soon).length,
-            tone: 'warning',
-          },
-        ]}
-        active={stat}
-        onSelect={(id) => setStat(id)}
-      />
 
       <DataTable<OverviewRow>
         columns={columns}

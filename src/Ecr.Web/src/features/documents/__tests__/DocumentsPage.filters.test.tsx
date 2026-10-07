@@ -61,7 +61,11 @@ function mockFetch(reply: ListReply): void {
       }
 
       if (url.includes('/api/v1/projects')) {
-        return json({ items: [], nextCursor: null, totalCount: 0 });
+        return json(
+          withProject
+            ? { items: [{ id: 1, code: 'AIR', status: 'Active' }], nextCursor: null, totalCount: 1 }
+            : { items: [], nextCursor: null, totalCount: 0 },
+        );
       }
 
       return json(null);
@@ -69,6 +73,7 @@ function mockFetch(reply: ListReply): void {
   );
 }
 
+let withProject = false;
 let search = '';
 function LocationSpy(): null {
   search = useLocation().search;
@@ -96,6 +101,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
   listed.length = 0;
   search = '';
+  withProject = false;
 });
 
 /** Межа тесту — з запасом на повний прогін; очікування — коротше, щоб червоне приходило швидко. */
@@ -105,8 +111,8 @@ const Find = 45_000;
 const stateField = (): Promise<HTMLElement> =>
   screen.findByRole('combobox', { name: '⟦documents.state⟧' }, { timeout: Find });
 
-const mineSwitch = (): Promise<HTMLElement> =>
-  screen.findByRole('switch', { name: '⟦documents.filterMine⟧' }, { timeout: Find });
+const ownersField = (): Promise<HTMLElement> =>
+  screen.findByRole('combobox', { name: '⟦documents.owners⟧' }, { timeout: Find });
 
 const lateEditsSwitch = (): Promise<HTMLElement> =>
   screen.findByRole('switch', { name: '⟦documents.filterLateEdits⟧' }, { timeout: Find });
@@ -197,19 +203,18 @@ describe('DocumentsPage: фільтри переліку (BE-09b)', () => {
   );
 
   it(
-    '«мої» — перемикач: mine=true в адресі й у запиті, і знімається назад',
+    '«лише мої» — вибір «Owners»: mine=true в адресі й у запиті, і знімається назад',
     async () => {
       mockFetch('rows');
       show('/');
 
-      const toggle = await mineSwitch();
-      fireEvent.click(toggle);
+      const owners = await ownersField();
+      fireEvent.change(owners, { target: { value: 'mine' } });
 
       await waitFor(() => expect(lastListed().get('mine')).toBe('true'), { timeout: Find });
       expect(new URLSearchParams(search).get('mine')).toBe('true');
-      expect((toggle as HTMLInputElement).checked).toBe(true);
 
-      fireEvent.click(toggle);
+      fireEvent.change(owners, { target: { value: '' } });
 
       await waitFor(() => expect(new URLSearchParams(search).has('mine')).toBe(false), { timeout: Find });
       await waitFor(() => expect(lastListed().has('mine')).toBe(false), { timeout: Find });
@@ -322,6 +327,60 @@ describe('DocumentsPage: фільтри переліку (BE-09b)', () => {
       expect(alert.textContent ?? '').toContain('ECR-AUTH-0403');
       expect(screen.queryByText('⟦documents.noMatch⟧')).toBeNull();
       expect(screen.queryByText('⟦documents.empty⟧')).toBeNull();
+    },
+    Slow,
+  );
+});
+
+describe('DocumentsPage: пошук і фільтр проєкту (UI RC9, макет FilterBar)', () => {
+  it(
+    'пошук: набране йде в адресу одразу, а в запит `q` — після паузи; скидання знімає його',
+    async () => {
+      mockFetch('rows');
+      show('/?periodKey=202601');
+
+      const field = await screen.findByRole('searchbox', { name: '⟦documents.search⟧' }, { timeout: Find });
+      fireEvent.change(field, { target: { value: 'ONTIME' } });
+
+      expect(new URLSearchParams(search).get('q')).toBe('ONTIME');
+      await waitFor(() => expect(lastListed().get('q')).toBe('ONTIME'), { timeout: Find });
+
+      fireEvent.click(await screen.findByRole('button', { name: '⟦documents.clearFilters⟧' }, { timeout: Find }));
+
+      await waitFor(() => expect(new URLSearchParams(search).has('q')).toBe(false), { timeout: Find });
+      await waitFor(() => expect(lastListed().has('q')).toBe(false), { timeout: Find });
+    },
+    Slow,
+  );
+
+  it(
+    'фільтр проєкту: projectId в адресі й у запиті; без проєктів поля немає',
+    async () => {
+      withProject = true;
+      mockFetch('rows');
+      show('/?periodKey=202601');
+
+      const select = await screen.findByRole('combobox', { name: '⟦documents.project⟧' }, { timeout: Find });
+      await within(select).findByRole('option', { name: 'AIR' }, { timeout: Find });
+      fireEvent.change(select, { target: { value: '1' } });
+
+      await waitFor(() => expect(lastListed().get('projectId')).toBe('1'), { timeout: Find });
+      expect(new URLSearchParams(search).get('projectId')).toBe('1');
+    },
+    Slow,
+  );
+
+  it(
+    'порожній пошук і відсутній проєкт не потрапляють у запит',
+    async () => {
+      mockFetch('rows');
+      show('/?periodKey=202601');
+
+      await screen.findByRole('table', {}, { timeout: Find });
+
+      expect(lastListed().has('q')).toBe(false);
+      expect(lastListed().has('projectId')).toBe(false);
+      expect(screen.queryByRole('combobox', { name: '⟦documents.project⟧' })).toBeNull();
     },
     Slow,
   );

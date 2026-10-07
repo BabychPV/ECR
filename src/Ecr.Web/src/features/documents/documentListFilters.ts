@@ -35,12 +35,25 @@ export interface DocumentListFilters {
    */
   readonly hasLateEdits: boolean;
 
+  /**
+   * Пошук за ключем чи назвою документа (`q`, `UI-18`). Порожній рядок — без пошуку.
+   *
+   * ⚠ Сире значення з адреси (поле показує його одразу); у запит воно йде через
+   * `useDebouncedFilter` на сторінці, щоб набір не давав запит на кожну літеру.
+   */
+  readonly q: string;
+
+  /** Лише документи цього проєкту (`projectId`); `null` — усі проєкти. */
+  readonly projectId: number | null;
+
   /** Чи звужує перелік хоч один фільтр — те, що відрізняє «нічого не знайшлося» від «немає». */
   readonly active: boolean;
 
   readonly setState: (state: DocumentStateFilter | null) => void;
   readonly setMine: (mine: boolean) => void;
   readonly setHasLateEdits: (hasLateEdits: boolean) => void;
+  readonly setQ: (q: string) => void;
+  readonly setProjectId: (projectId: number | null) => void;
 
   /** Знімає всі фільтри; період лишається — він належить екрану. */
   readonly reset: () => void;
@@ -57,11 +70,16 @@ export function useDocumentListFilters(periodKey: number | null): DocumentListFi
   const [rawState] = useUrlState('state');
   const [rawMine] = useUrlState('mine');
   const [rawHasLateEdits] = useUrlState('hasLateEdits');
+  const [rawQ] = useUrlState('q');
+  const [rawProjectId] = useUrlState('projectId');
   const setParams = useUrlParamsSetter();
 
   const state = periodKey === null ? null : parseStateFilter(rawState);
   const mine = rawMine === 'true';
   const hasLateEdits = rawHasLateEdits === 'true';
+  const q = rawQ ?? '';
+  const parsedProject = rawProjectId === null ? Number.NaN : Number(rawProjectId);
+  const projectId = Number.isInteger(parsedProject) && parsedProject > 0 ? parsedProject : null;
 
   const setState = useCallback(
     (next: DocumentStateFilter | null) => {
@@ -84,18 +102,36 @@ export function useDocumentListFilters(periodKey: number | null): DocumentListFi
     [setParams],
   );
 
+  const setQ = useCallback(
+    (next: string) => {
+      setParams({ q: next === '' ? null : next, cursor: null });
+    },
+    [setParams],
+  );
+
+  const setProjectId = useCallback(
+    (next: number | null) => {
+      setParams({ projectId: next, cursor: null });
+    },
+    [setParams],
+  );
+
   const reset = useCallback(() => {
-    setParams({ state: null, mine: null, hasLateEdits: null, cursor: null });
+    setParams({ state: null, mine: null, hasLateEdits: null, q: null, projectId: null, cursor: null });
   }, [setParams]);
 
   return {
     state,
     mine,
     hasLateEdits,
-    active: state !== null || mine || hasLateEdits,
+    q,
+    projectId,
+    active: state !== null || mine || hasLateEdits || q.trim() !== '' || projectId !== null,
     setState,
     setMine,
     setHasLateEdits,
+    setQ,
+    setProjectId,
     reset,
   };
 }

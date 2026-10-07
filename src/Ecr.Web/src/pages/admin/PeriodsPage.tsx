@@ -73,6 +73,9 @@ const CreateProjectModal = lazy(async () => ({
 const PeriodYearTiles = lazy(async () => ({
   default: (await import('@/features/projects/PeriodsOverview')).PeriodYearTiles,
 }));
+const PeriodsStatStrip = lazy(async () => ({
+  default: (await import('@/features/projects/PeriodsOverview')).PeriodsStatStrip,
+}));
 const AllProjectsPeriods = lazy(async () => ({
   default: (await import('@/features/projects/PeriodsOverview')).AllProjectsPeriods,
 }));
@@ -784,6 +787,13 @@ export function PeriodsPage(): JSX.Element {
       >
         {() => null}
       </AsyncBoundary>
+
+      {/* UI RC9 (макет `/admin/periods`): смуга показників — ПЕРШЕ під заголовком, а не під плитками. */}
+      {(projects.data?.items.length ?? 0) > 0 && (
+        <Suspense fallback={null}>
+          <PeriodsStatStrip projects={projects.data?.items ?? []} />
+        </Suspense>
+      )}
 
       {selected?.status === 'Draft' && (
         <Text c="statusWarning" size="sm" mb="xs">

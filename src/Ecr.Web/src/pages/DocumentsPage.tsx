@@ -26,6 +26,7 @@ import { PeriodPicker } from '@/shared/ui/PeriodPicker';
 import { SegmentBar } from '@/shared/ui/SegmentBar';
 import { StatusBadge } from '@/shared/ui/StatusBadge';
 import { Timestamp } from '@/shared/ui/Timestamp';
+import { useDebouncedFilter } from '@/shared/ui/useDebouncedFilter';
 import { useUrlNumber, useUrlParamsSetter, useUrlState } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
 import { fetchAllProjects } from '@/features/projects/allProjects';
@@ -105,8 +106,11 @@ export function DocumentsPage(): JSX.Element {
   // `BE-09b`: стан і «мої» — теж в адресі; без періоду стан у запит не йде.
   const filters = useDocumentListFilters(periodKey);
 
+  // `UI-18`: пошук іде в запит після паузи в наборі; поле й адреса оновлюються одразу.
+  const appliedQ = useDebouncedFilter(filters.q.trim());
+
   const query = useQuery({
-    queryKey: ['documents', periodKey, cursor, filters.state, filters.mine, filters.hasLateEdits],
+    queryKey: ['documents', periodKey, cursor, filters.state, filters.mine, filters.hasLateEdits, appliedQ, filters.projectId],
     queryFn: () =>
       listDocuments({
         periodKey,
@@ -114,6 +118,8 @@ export function DocumentsPage(): JSX.Element {
         state: filters.state,
         mine: filters.mine,
         hasLateEdits: filters.hasLateEdits,
+        q: appliedQ,
+        projectId: filters.projectId,
       }),
   });
 
@@ -304,7 +310,7 @@ export function DocumentsPage(): JSX.Element {
           межею кожен клік знімав би її разом із фокусом на час запиту, а
           порожній результат — ховав би кнопку, якою фільтр і знімають.
           ⚠ І в ТОМУ САМОМУ ряду, що й фільтри (рішення людини 2026-10-06). */}
-      <DocumentListFilterBar periodKey={periodKey} filters={filters}>
+      <DocumentListFilterBar periodKey={periodKey} filters={filters} projects={projects.data?.items ?? []}>
         {/* ✎ `UI-18` (макет `FilterBar`, KIT §3): «Clear filters» з'являється
             сама, щойно є активний фільтр, і скидає все ОДНИМ переходом
             (`filters.reset` — один `setSearchParams`). Без фільтрів кнопки

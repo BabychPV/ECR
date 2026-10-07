@@ -1,8 +1,9 @@
 import type { JSX, ReactNode } from 'react';
-import { NativeSelect, Switch, Text } from '@mantine/core';
+import { NativeSelect, Switch, Text, TextInput } from '@mantine/core';
 import { FilterInline, FilterRow, readerOnlyDescription } from '@/shared/ui/FilterBar';
 import { t } from '@/shared/i18n';
 import { statusKey } from '@/shared/ui/StatusBadge';
+import { useFieldDraft } from '@/shared/ui/useFieldDraft';
 import type { DocumentStateFilter } from './api';
 import { DocumentStateFilters, parseStateFilter, type DocumentListFilters } from './documentListFilters';
 
@@ -11,6 +12,9 @@ interface DocumentListFilterBarProps {
   readonly periodKey: number | null;
 
   readonly filters: DocumentListFilters;
+
+  /** Проєкти для фільтра (`UI-18`); порожньо — фільтр не малюється (проєктів немає або перелік ще в дорозі). */
+  readonly projects?: readonly { readonly id: number; readonly code: string }[] | undefined;
 
   /**
    * Що поставити в КІНЕЦЬ того самого ряду — смуга лічильників етапів
@@ -39,8 +43,16 @@ interface DocumentListFilterBarProps {
  * ⚠ Підписи станів — ті самі рядки `status.sheet.*`, що в бейджах таблиці й у
  * смузі лічильників: один стан — одне слово на всьому екрані.
  */
-export function DocumentListFilterBar({ periodKey, filters, children }: DocumentListFilterBarProps): JSX.Element {
+export function DocumentListFilterBar({
+  periodKey,
+  filters,
+  projects = [],
+  children,
+}: DocumentListFilterBarProps): JSX.Element {
   const noPeriod = periodKey === null;
+  // ⛔ Поле показує ВЛАСНЕ значення, а не адресу (`useFieldDraft`), як і `FilterBar`: кероване адресою
+  // воно губило літери, бо адреса оновлюється переходом і запізнюється.
+  const search = useFieldDraft(filters.q);
 
   /*
    * ⚠ Кожен підпис — окремим викликом із ЛІТЕРАЛАМИ: сторож каталогу
@@ -62,6 +74,41 @@ export function DocumentListFilterBar({ periodKey, filters, children }: Document
   return (
     <>
       <FilterRow gap="lg" mb={noPeriod ? 'xs' : 'md'} data-document-filters="true">
+        {/* ✎ `UI-18` (макет: `FilterBar` — пошук · All projects · All states · Everyone's documents):
+            пошук іде в `q` сервера — по ключу й назві документа, а не лише по завантаженій сторінці. */}
+        <TextInput
+          size="xs"
+          miw={220}
+          type="search"
+          label={t('documents.search')}
+          placeholder={t('documents.searchPlaceholder')}
+          value={search.value}
+          onFocus={search.onFocus}
+          onBlur={search.onBlur}
+          onChange={(event) => {
+            search.setValue(event.currentTarget.value);
+            filters.setQ(event.currentTarget.value);
+          }}
+          data-documents-search=""
+        />
+
+        {projects.length > 0 && (
+          <NativeSelect
+            size="xs"
+            miw={160}
+            label={t('documents.project')}
+            data={[
+              { value: '', label: t('documents.projectAll') },
+              ...projects.map((project) => ({ value: String(project.id), label: project.code })),
+            ]}
+            value={filters.projectId === null ? '' : String(filters.projectId)}
+            onChange={(event) => {
+              const value = event.currentTarget.value;
+              filters.setProjectId(value === '' ? null : Number(value));
+            }}
+          />
+        )}
+
         <NativeSelect
           size="xs"
           miw={180}
@@ -76,18 +123,21 @@ export function DocumentListFilterBar({ periodKey, filters, children }: Document
           }}
         />
 
-        {/* ⚠ Підпис не обіцяє більше, ніж робить сервер: «мої» — це «створені
-            або подані мною», і саме так він і читається. */}
-        <FilterInline>
-          <Switch
-            size="sm"
-            label={t('documents.filterMine')}
-            checked={filters.mine}
-            onChange={(event) => {
-              filters.setMine(event.currentTarget.checked);
-            }}
-          />
-        </FilterInline>
+        {/* ⚠ Підпис не обіцяє більше, ніж робить сервер: «лише мої» — це «створені
+            або подані мною» (`documents.filterMine`). Макет: «Everyone's documents» / «Only mine». */}
+        <NativeSelect
+          size="xs"
+          miw={200}
+          label={t('documents.owners')}
+          data={[
+            { value: '', label: t('documents.ownersAll') },
+            { value: 'mine', label: t('documents.filterMine') },
+          ]}
+          value={filters.mine ? 'mine' : ''}
+          onChange={(event) => {
+            filters.setMine(event.currentTarget.value === 'mine');
+          }}
+        />
 
         {/*
          * ⚠ На відміну від фільтра стану — НЕ вимкнений без періоду

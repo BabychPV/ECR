@@ -178,7 +178,9 @@ describe('PeriodsPage: огляд усіх проєктів і плитки ро
     const overview = await screen.findByTestId('periods-overview');
     await within(overview).findByRole('button', { name: 'ALPHA' });
 
-    await userEvent.click(within(overview).getByRole('button', { name: /in grace period/ }));
+    // UI RC9: смуга показників — над сторінкою (макет), а не всередині блоку «All projects».
+    expect(within(overview).queryByRole('button', { name: /in grace period/ })).toBeNull();
+    await userEvent.click(await screen.findByRole('button', { name: /in grace period/ }));
 
     await waitFor(() => {
       expect(within(overview).queryByRole('button', { name: 'ALPHA' })).toBeNull();
