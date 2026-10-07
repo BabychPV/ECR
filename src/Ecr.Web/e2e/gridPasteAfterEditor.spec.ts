@@ -62,11 +62,19 @@ test.describe('Вставка після редактора комірки (T4-0
       if (scenario === 'escape') await page.keyboard.press('Escape');
       if (scenario === 'click-away') await cellOf(page, 1).click();
 
+      // ⚠ «Після редактора» — це коли редактор справді закрився. Клавіші, набрані до його
+      // готовності, тримає черга keyCommitGate і відтворює вже після, тож Escape/Enter ще
+      // «в польоті»: paste за десяток мс бачить відкритий редактор (ціль — revogr-edit), і сітка
+      // його справедливо не чіпає. Людина не вставляє через 10 мс після Esc; тест чекає стан.
+      await expect(page.locator('revogr-edit')).toHaveCount(0);
+
+      // Нове значення щоразу: повтор того самого `77` у той самий документ не міняє комірку.
+      const pasted = String(100 + Math.floor(Math.random() * 800));
       const patch = page.waitForResponse(
         (response) => response.request().method() === 'PATCH' && response.url().includes(`/documents/${DocumentId}`),
         { timeout: 15_000 },
       );
-      await pasteAtSelection(page, '77');
+      await pasteAtSelection(page, pasted);
 
       expect((await patch).ok(), 'вставка після редактора не дійшла до сервера').toBe(true);
     });
