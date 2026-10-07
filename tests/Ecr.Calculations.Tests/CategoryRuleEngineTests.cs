@@ -128,13 +128,14 @@ public sealed class CategoryRuleEngineTests
             }
         }
 
-        var stand = new RuleStand(rule: "@Place + '_' + @Repair + '_' + @Class")
+        var stand = new RuleStand(rule: "if(@Repair = 'AfterMR', @AfterKey, @BeforeKey)")
             .WithSubstanceFormula("Total", "@X * CST.EF")
             .WithConstants([.. constants]);
 
         // Loc_AfterMR_B — шостий у порядку створення (Loc: Before A…D = 1…4, After A…D = 5…8).
         var output = await stand.RunAsync(
-            RuleStand.In("X", 1m), RuleStand.In("Place", "Loc"), RuleStand.In("Repair", "AfterMR"), RuleStand.In("Class", "B"));
+            RuleStand.In("X", 1m), RuleStand.In("Repair", "AfterMR"),
+            RuleStand.In("AfterKey", "Loc_AfterMR_B"), RuleStand.In("BeforeKey", "Loc_BeforeMR_B"));
 
         Assert.All(output.Values.Where(v => v.OutputCode == "Total"), v => Assert.Equal(6m, v.Value));
     }
