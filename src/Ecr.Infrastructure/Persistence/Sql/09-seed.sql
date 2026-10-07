@@ -7265,8 +7265,13 @@ USING (VALUES
     -- COLL:dps-required-header ── кінець секції ──
     -- COLL:stale-err ── resultsStale у переліку документів: відмови параметрів; ru/kz — порцією COLL:stale-err нижче ──
     (N'err.ECR-REQ-0422.resultsStaleNeedsPeriod', N'en', N'Filtering by stale results needs a period: staleness belongs to a period.', 1),
-    (N'err.ECR-REQ-0422.staleBy', N'en', N'staleBy accepts only "me" and only together with resultsStale=true.', 1)
+    (N'err.ECR-REQ-0422.staleBy', N'en', N'staleBy accepts only "me" and only together with resultsStale=true.', 1),
     -- COLL:stale-err ── кінець секції ──
+    -- COLL:stale-ui ── банер "результати застаріли" у картці документа; ru/kz — порцією COLL:stale-ui нижче ──
+    (N'document.staleResults.title', N'en', N'Calculation results are out of date', 1),
+    (N'document.staleResults.hint', N'en', N'Input data was changed after the last calculation. Recalculate to refresh the results.', 1),
+    (N'document.staleResults.hintSince', N'en', N'Input data was changed on {date}, after the last calculation. Recalculate to refresh the results.', 1)
+    -- COLL:stale-ui ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -17692,6 +17697,20 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:stale-err ── кінець секції ──
+-- COLL:stale-ui ── ru/kz банера "результати застаріли" у картці документа; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'document.staleResults.title', N'ru', N'Результаты расчёта устарели'),
+    (N'document.staleResults.title', N'kz', N'Есептеу нәтижелері ескірген'),
+    (N'document.staleResults.hint', N'ru', N'Входные данные изменены после последнего расчёта. Пересчитайте, чтобы обновить результаты.'),
+    (N'document.staleResults.hint', N'kz', N'Кіріс деректер соңғы есептеуден кейін өзгерген. Нәтижелерді жаңарту үшін қайта есептеңіз.'),
+    (N'document.staleResults.hintSince', N'ru', N'Входные данные изменены {date}, после последнего расчёта. Пересчитайте, чтобы обновить результаты.'),
+    (N'document.staleResults.hintSince', N'kz', N'Кіріс деректер {date} күні, соңғы есептеуден кейін өзгерген. Нәтижелерді жаңарту үшін қайта есептеңіз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:stale-ui ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t
