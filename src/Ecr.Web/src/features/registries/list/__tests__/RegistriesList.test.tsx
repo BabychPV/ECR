@@ -356,3 +356,17 @@ describe('RegistriesList: одне пояснення під заголовко�
     expect(screen.getAllByText(/^Reference lists that cells/)).toHaveLength(1);
   });
 });
+
+describe('RegistriesList: ознаки довідника без кольору (звірка batch-4 з макетом, п.17, KIT §1.3)', () => {
+  it('усі позначки — нейтральний варіант, без заливки й кольорової рамки', async () => {
+    mockFetch(['Registry.View']);
+    await loadCatalog('en', 'private');
+    show('/admin/registries');
+
+    await screen.findByRole('button', { name: 'Emission sources' });
+    const traits = Array.from(document.querySelectorAll('[data-registry-trait]'));
+
+    expect(traits.map((node) => node.getAttribute('data-registry-trait')).sort()).toEqual(['hierarchical', 'synced', 'temporal']);
+    expect(traits.map((node) => node.getAttribute('data-variant'))).toEqual(['default', 'default', 'default']);
+  });
+});

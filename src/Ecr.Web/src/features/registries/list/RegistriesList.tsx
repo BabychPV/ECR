@@ -196,19 +196,21 @@ export function RegistriesList(): JSX.Element {
       render: (registry) =>
         registry.isTemporal || registry.isHierarchical || isSynced(registry) ? (
           <Group gap="xs" wrap="wrap">
-            {/* ⚠ `tt="none"`: тихі позначки макета (`StatusBadge` quiet), а не капс Mantine. */}
+            {/* ⚠ `tt="none"`: тихі позначки макета (`StatusBadge` quiet), а не капс Mantine.
+                ⚠ `variant="default"` — нейтрально, без кольорової заливки: колір лише для проблем
+                (KIT §1.3; звірка batch-4 з макетом, п.17). */}
             {registry.isTemporal && (
-              <Badge variant="light" tt="none">
+              <Badge variant="default" tt="none" data-registry-trait="temporal">
                 {t('registries.temporal')}
               </Badge>
             )}
             {registry.isHierarchical && (
-              <Badge variant="light" tt="none">
+              <Badge variant="default" tt="none" data-registry-trait="hierarchical">
                 {t('registries.hierarchical')}
               </Badge>
             )}
             {isSynced(registry) && (
-              <Badge variant="outline" tt="none">
+              <Badge variant="default" tt="none" data-registry-trait="synced">
                 {sourceKindLabel(registry.sourceKind)}
               </Badge>
             )}
