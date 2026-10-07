@@ -30,6 +30,10 @@ on:
         default: ''
   pull_request:
     branches: [ main, 'rc/**' ]
+  # ⛔ ТИМЧАСОВО, лише самоперевірка лінії (workflow_dispatch діє тільки з
+  # гілки за умовчанням). Інтегратор цей коміт НЕ бере.
+  push:
+    branches: [ lane/cloud/e2e-stand-9d3tb3 ]
 
 permissions:
   contents: read
