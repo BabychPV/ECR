@@ -3,8 +3,6 @@ import { Loader, Center } from '@mantine/core';
 import { createBrowserRouter, type RouteObject } from 'react-router-dom';
 import { AdminLayout } from './AdminLayout';
 import { AppLayout } from './AppLayout';
-import { ForbiddenPage } from './ForbiddenPage';
-import { NotFoundPage } from './NotFoundPage';
 import { RouteErrorPage } from './RouteErrorPage';
 import { RouteGuard } from './RouteGuard';
 import {
@@ -57,6 +55,10 @@ import { childPath, relativePath, routes, type RouteHandle } from './routes';
  * будують і бачать ЗРІЗ (`rpt.*`), який SSRS читає, а не сам звіт.
  */
 const LoginPage = lazy(async () => ({ default: (await import('@/pages/LoginPage')).LoginPage }));
+// ✎ b4b: 403/404 за макетом стали більшими (піктограма, «Did you mean», копіювання) —
+// лінивими, щоб не додавати їх у спільний чанк оболонки кожного маршруту.
+const ForbiddenPage = lazy(async () => ({ default: (await import('./ForbiddenPage')).ForbiddenPage }));
+const NotFoundPage = lazy(async () => ({ default: (await import('./NotFoundPage')).NotFoundPage }));
 
 /**
  * Дані довідника (`ФВ-8.12`) — лінивий чанк; заходять із переліку довідників, тому, як і картка
