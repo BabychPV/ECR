@@ -1,0 +1,64 @@
+/*
+ * b4b: стрічка версій на картці шаблону (макет `screens-templates.js`, `.tpl-tl`):
+ * точка зліва, вертикальна лінія між версіями, номер моноширинним, бейдж стану.
+ * Кольори — токени теми Mantine (Light/Dark).
+ */
+.tpl-tl {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+}
+
+.tpl-tl > li {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  gap: 0 12px;
+  padding-bottom: 16px;
+  position: relative;
+}
+
+.tpl-tl > li::before {
+  content: '';
+  position: absolute;
+  left: 7px;
+  top: 16px;
+  bottom: 0;
+  width: 1px;
+  background: var(--mantine-color-default-border);
+}
+
+.tpl-tl > li:last-child::before {
+  display: none;
+}
+
+.tpl-tl .tpl-tl-pt {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 20px;
+}
+
+.tpl-tl .tpl-tl-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  border: 1.5px solid var(--mantine-color-dimmed);
+}
+
+.tpl-tl .tpl-tl-dot[data-kind='current'] {
+  background: var(--mantine-color-dimmed);
+}
+
+.tpl-tl .tpl-tl-dot[data-kind='draft'] {
+  border-style: dashed;
+}
+
+.tpl-tl .tpl-tl-dot[data-kind='old'] {
+  border-color: var(--mantine-color-default-border);
+}
+
+.tpl-tl .tpl-tl-version {
+  font-family: var(--mantine-font-family-monospace);
+  font-weight: 600;
+}

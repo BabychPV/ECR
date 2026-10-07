@@ -11,7 +11,8 @@ import {
   restoreTemplate,
 } from '@/features/templates/templateApi';
 import { templateCardKey, useTemplateCard } from '@/features/templates/templateCardQuery';
-import { TemplateVersionsSection } from '@/features/templates/TemplateVersionsSection';
+import { TemplateVersionsSection, useTemplateVersions } from '@/features/templates/TemplateVersionsSection';
+import { StatusBadge } from '@/shared/ui/StatusBadge';
 import { localized } from '@/shared/i18n/localized';
 import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
@@ -171,22 +172,47 @@ export function TemplateCardPage(): JSX.Element {
    * ⚠ Умова зведена в одне місце навмисно: доки вона стояла двічі, її можна
    * було послабити в одній із копій і не зачепити жодного твердження.
    */
+  /*
+   * ✎ b4b (макет `screens-templates.js`, картка шаблону): бейдж стану біля назви,
+   * головна дія «Continue draft vX», коли чернетка є, а перейменування й
+   * архівування — у «More» (KIT §1.2). Стан — з версій: є опублікована —
+   * Published, лише чернетка — Draft; архівований шаблон — Deprecated.
+   */
+  const versions = useTemplateVersions(templateId);
+  const versionItems = versions.data?.items;
+  const draftVersion = versionItems?.find((version) => version.status === 'Draft');
+  const templateState =
+    data === undefined || versionItems === undefined
+      ? undefined
+      : !data.isActive
+        ? 'Deprecated'
+        : versionItems.some((version) => version.status === 'Published')
+          ? 'Published'
+          : draftVersion !== undefined
+            ? 'Draft'
+            : undefined;
+
   const showActions = data !== undefined && editable;
 
   const isActive = data?.isActive ?? true;
 
-  const primary: HeaderAction | undefined = showActions
-    ? {
-        label: t('templates.rename'),
-        onClick: () => {
-          setDraft(data?.nameL10n.values ?? {});
-          setDialog('rename');
-        },
-      }
-    : undefined;
+  const primary: HeaderAction | undefined =
+    editable && draftVersion !== undefined
+      ? {
+          label: t('templates.continueDraft', { version: draftVersion.version }),
+          href: `/admin/templates/${String(templateId)}/versions/${String(draftVersion.id)}`,
+        }
+      : undefined;
 
-  const secondary: readonly HeaderAction[] | undefined = showActions
+  const more: readonly HeaderAction[] | undefined = showActions
     ? [
+        {
+          label: t('templates.rename'),
+          onClick: () => {
+            setDraft(data?.nameL10n.values ?? {});
+            setDialog('rename');
+          },
+        },
         isActive
           ? {
               label: t('templates.archive'),
@@ -214,8 +240,10 @@ export function TemplateCardPage(): JSX.Element {
       <PageHeader
         title={heading}
         meta={data !== undefined && !data.isActive ? t('templates.archivedHint') : undefined}
+        back={{ label: t('nav.backToTemplates'), href: '/admin/templates' }}
+        badge={templateState === undefined ? undefined : <StatusBadge kind="version" state={templateState} />}
         primary={primary}
-        secondary={secondary}
+        more={more}
       />
 
       {/*
@@ -263,7 +291,7 @@ export function TemplateCardPage(): JSX.Element {
             {/* ⛔ U-19: версії шаблону з переходом до структури кожної —
                 раніше до редактора структури можна було дійти лише назад
                 через перелік шаблонів. */}
-            <TemplateVersionsSection templateId={templateId} editable={editable} />
+            <TemplateVersionsSection templateId={templateId} editable={editable} newVersionIsPrimary={draftVersion === undefined} />
           </Stack>
         )}
       </AsyncBoundary>

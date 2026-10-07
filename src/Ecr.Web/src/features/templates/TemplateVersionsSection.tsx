@@ -5,11 +5,12 @@ import { Link } from 'react-router-dom';
 import { apiFetch } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
 import type { TemplateVersionPage, TemplateVersionSummary } from '@/api/types';
-import { DataTable, type DataTableColumn } from '@/shared/ui/DataTable';
+import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { StatusBadge } from '@/shared/ui/StatusBadge';
 import { Timestamp } from '@/shared/ui/Timestamp';
 import { t } from '@/shared/i18n';
 import { NewTemplateVersionModal } from './NewTemplateVersionModal';
+import './templateVersionsTimeline.css';
 
 /** Адреса сторінки структури версії — та сама, що й у переліку шаблонів. */
 function templateVersionHref(templateId: number, versionId: number): string {
@@ -35,82 +36,115 @@ function templateVersionHref(templateId: number, versionId: number): string {
  * ⚠ Кнопка `variant="default"`: головна дія картки — «Rename template» у
  * шапці, а `L1` дозволяє на екрані рівно одну `filled`.
  */
-export function TemplateVersionsSection({
-  templateId,
-  editable,
-}: {
-  templateId: number;
-  editable: boolean;
-}): JSX.Element {
-  const [creating, setCreating] = useState(false);
-
-  const versions = useQuery({
+/**
+ * Версії шаблону (до 100) — один запит на картку: його читають і стрічка версій,
+ * і шапка картки (бейдж стану, «Continue draft», b4b).
+ */
+export function useTemplateVersions(templateId: number) {
+  return useQuery({
     queryKey: queryKeys.templates.versionsOf(templateId),
     queryFn: () =>
       apiFetch<TemplateVersionPage>(`/api/v1/templates/${String(templateId)}/versions?limit=100`),
   });
+}
+
+export function TemplateVersionsSection({
+  templateId,
+  editable,
+  newVersionIsPrimary = false,
+}: {
+  templateId: number;
+  editable: boolean;
+  /**
+   * b4b (макет: «New draft from vX» — головна дія картки, коли чернетки немає):
+   * тоді «New version» — заповнена кнопка; коли чернетка є, головна —
+   * «Continue draft» у шапці, а ця лишається другорядною (одна filled, L1).
+   */
+  newVersionIsPrimary?: boolean;
+}): JSX.Element {
+  const [creating, setCreating] = useState(false);
+
+  const versions = useTemplateVersions(templateId);
 
   const items = versions.data?.items;
 
   /** Остання версія — від неї клонується наступна (правило `TemplatesPage`). */
   const latest = items === undefined || items.length === 0 ? null : (items[items.length - 1]?.id ?? null);
 
-  const columns: readonly DataTableColumn<TemplateVersionSummary>[] = [
-    {
-      key: 'version',
-      label: t('templates.versionNumber'),
-      render: (version) => (
-        <Group gap="xs" wrap="nowrap">
-          <Anchor component={Link} size="sm" to={templateVersionHref(templateId, version.id)}>
-            {version.version}
-          </Anchor>
-          {/* ⚠ Лічильник правок вигляду — лише коли він щось каже (див. TemplatesPage). */}
-          {version.presentationRevision > 0 && (
-            <Text size="xs" c="dimmed">
-              {t('version.presentationRevision', { revision: version.presentationRevision })}
-            </Text>
-          )}
-        </Group>
-      ),
-      sortValue: (version) => version.version,
-    },
-    {
-      key: 'status',
-      label: t('templates.versionStatus'),
-      render: (version) => <StatusBadge kind="version" state={version.status} quiet />,
-      sortable: false,
-    },
-    {
-      key: 'publishedAt',
-      label: t('templates.versionPublishedAt'),
-      render: (version) => <Timestamp value={version.publishedAt} />,
-      sortValue: (version) => version.publishedAt ?? '',
-    },
-  ];
-
+  /*
+   * ✎ b4b (макет `screens-templates.js`, `timeline`): стрічка версій від новішої до
+   * старішої замість таблиці. «Поточна» — остання опублікована: з неї створюються
+   * нові документи. Опису зміни й автора контракт не віддає (D15-06) — їх немає.
+   */
+  const newestFirst = items === undefined ? undefined : [...items].reverse();
+  const current = newestFirst?.find((version) => version.status === 'Published')?.id ?? null;
   return (
     <Stack gap="xs" data-template-versions>
       <Group justify="space-between">
         <Title order={4}>{t('templates.versions')}</Title>
 
         {editable && (
-          <Button variant="default" onClick={() => setCreating(true)}>
+          <Button variant={newVersionIsPrimary ? 'filled' : 'default'} onClick={() => setCreating(true)}>
             {t('templates.newVersion')}
           </Button>
         )}
       </Group>
 
-      <DataTable<TemplateVersionSummary>
-        columns={columns}
-        rows={items}
-        rowKey={(version) => String(version.id)}
+      <AsyncBoundary<TemplateVersionSummary[]>
         isPending={versions.isPending}
         error={versions.error}
+        data={newestFirst}
+        isEmpty={(rows) => rows.length === 0}
         emptyTitle={t('templates.versionsEmpty')}
         emptyHint={t('templates.versionsEmptyHint')}
         onRetry={() => void versions.refetch()}
-      />
+      >
+        {(rows) => (
+          <ol className="tpl-tl" data-template-timeline="">
+            {rows.map((version) => {
+              const kind =
+                version.id === current ? 'current' : version.status === 'Draft' ? 'draft' : 'old';
 
+              return (
+                <li key={version.id} data-version-kind={kind}>
+                  <span className="tpl-tl-pt" aria-hidden="true">
+                    <span className="tpl-tl-dot" data-kind={kind} />
+                  </span>
+                  <Stack gap="xs" miw={0}>
+                    <Group gap="xs" wrap="wrap">
+                      <Anchor
+                        component={Link}
+                        to={templateVersionHref(templateId, version.id)}
+                        className="tpl-tl-version"
+                        {...(kind === 'old' ? { c: 'dimmed' } : {})}
+                      >
+                        {version.version}
+                      </Anchor>
+                      <StatusBadge kind="version" state={version.status} quiet />
+                      {kind === 'current' && (
+                        <Text size="xs" c="dimmed">
+                          {t('templates.currentVersion')}
+                        </Text>
+                      )}
+                      {/* ⚠ Лічильник правок вигляду — лише коли він щось каже (див. TemplatesPage). */}
+                      {version.presentationRevision > 0 && (
+                        <Text size="xs" c="dimmed">
+                          {t('version.presentationRevision', { revision: version.presentationRevision })}
+                        </Text>
+                      )}
+                    </Group>
+                    {version.publishedAt !== null && (
+                      <Text size="xs" c="dimmed">
+                        {t('templates.versionPublishedAt')} <Timestamp value={version.publishedAt} />
+                      </Text>
+                    )}
+                  </Stack>
+                </li>
+              );
+            })}
+          </ol>
+        )}
+      </AsyncBoundary>
       <NewTemplateVersionModal
         templateId={creating ? templateId : null}
         cloneFrom={latest}

@@ -7151,6 +7151,7 @@ USING (VALUES
     (N'nav.goToDocuments', N'en', N'Go to Documents', 1),
     (N'nav.notFound.didYouMean', N'en', N'Did you mean:', 1),
     (N'nav.notFound.search', N'en', N'Search screens and documents', 1),
+    (N'templates.continueDraft', N'en', N'Continue draft {version}', 1),
     -- COLL:mockb4b ── кінець секції ──
     -- COLL:ui35registries ── UI-35: перелік довідників зі смугою показників і шторкою; ru/kz — порцією COLL:ui35registries у блоці I18N нижче ──
     (N'registries.list.subtitle', N'en', N'Reference lists that cells, formulas and mappings pick values from: sources, substances, fuels, limits.', 1),
@@ -17321,7 +17322,9 @@ SELECT v.[Key], v.Lang, v.Val
     (N'nav.notFound.didYouMean', N'ru', N'Возможно, вы искали:'),
     (N'nav.notFound.didYouMean', N'kz', N'Мүмкін, сіз іздеген:'),
     (N'nav.notFound.search', N'ru', N'Поиск экранов и документов'),
-    (N'nav.notFound.search', N'kz', N'Экрандар мен құжаттарды іздеу')
+    (N'nav.notFound.search', N'kz', N'Экрандар мен құжаттарды іздеу'),
+    (N'templates.continueDraft', N'ru', N'Продолжить черновик {version}'),
+    (N'templates.continueDraft', N'kz', N'{version} жобасын жалғастыру')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
