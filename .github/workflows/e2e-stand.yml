@@ -72,6 +72,17 @@ jobs:
         with:
           ref: ${{ inputs.ref || (github.event_name == 'push' && env.PUSH_REF) || '' }}
 
+      # ⚠ Скрипт стенда береться з коміту САМОГО workflow (`github.sha`), а не з
+      # перевіряваного `ref`: там може не бути `-RepeatEach` (його ще немає в
+      # `main`), а стенд має бути той самий для всіх серій. Код продукту і спеки —
+      # з `ref`.
+      - name: Скрипт стенда з коміту workflow
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=1 origin "$GITHUB_SHA"
+          git checkout "$GITHUB_SHA" -- tools/e2e-stand.ps1
+
       - name: Що проганяється
         env:
           GREP: ${{ github.event_name == 'push' && env.PUSH_GREP || inputs.grep }}
