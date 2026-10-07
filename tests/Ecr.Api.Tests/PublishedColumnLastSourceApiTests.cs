@@ -160,13 +160,27 @@ public sealed class PublishedColumnLastSourceApiTests(SqlServerFixture sql)
         db.Methodologies.Add(methodology);
         await db.SaveChangesAsync();
 
-        var methodologyVersion = new MethodologyVersion(methodology.Id, "1.0", CalculationLevel.Configuration, 1, Now);
+        var methodologyVersion = new MethodologyVersion(methodology.Id, "1.0", CalculationLevel.Configuration, 9, Now);
         db.MethodologyVersions.Add(methodologyVersion);
         await db.SaveChangesAsync();
 
         var unitId = await db.Units.OrderBy(u => u.Id).Select(u => u.Id).FirstAsync();
         db.MethodologyOutputs.Add(new MethodologyOutput(methodologyVersion.Id, EcrCode.Create("OUT1"), unitId));
         db.MethodologyOutputs.Add(new MethodologyOutput(methodologyVersion.Id, EcrCode.Create("OUT2"), unitId));
+        await db.SaveChangesAsync();
+
+        // ⚠ D-R2: публікація шаблону відхиляє активну прив'язку до методології без
+        // опублікованої версії — версія стенду публікується (після виходів: вміст
+        // опублікованої версії незмінний).
+        methodology.PublishVersion(
+            methodologyVersion,
+            publishedByUserId: 10,
+            changeReason: "D-R2",
+            effectiveFrom: new DateOnly(2026, 1, 1),
+            testsPassed: true,
+            utcNow: Now);
+        await db.SaveChangesAsync();
+
         db.CalculationBindings.Add(new CalculationBinding(table.Id, column.Id, methodology.Id, "OUT1", "{}"));
         await db.SaveChangesAsync();
 

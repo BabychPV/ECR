@@ -111,6 +111,14 @@ export interface ColumnDraft {
 
   /** Типова ширина, px (D-234); `null` — типова за типом даних. */
   readonly widthPx: number | null;
+
+  /**
+   * Місяць колонки 1..12 (PS-P1C); `null` — колонка не прив'язана до місяця.
+   * Прапор `isMonthColumn` окремо не зберігається: він рівно «`monthNumber`
+   * задано», тож суперечливого стану (прапор без місяця й навпаки, що його
+   * сервер відхиляє `ECR-TMPL-0422`) форма не має як створити.
+   */
+  readonly monthNumber: number | null;
   readonly isNew: boolean;
 
   /**
@@ -149,6 +157,7 @@ export function emptyColumnDraft(nextOrdinal: number): ColumnDraft {
     lookupFilter: null,
     unitId: null,
     widthPx: null,
+    monthNumber: null,
     styleId: null,
     style: null,
     isNew: true,
@@ -178,6 +187,7 @@ export function columnDraftOf(full: ColumnDefDto): ColumnDraft {
     lookupFilter: full.lookupFilter,
     unitId: full.unitId,
     widthPx: full.widthPx ?? null,
+    monthNumber: full.isMonthColumn === true ? (full.monthNumber ?? null) : null,
     styleId: full.styleId,
     style: null,
     isNew: false,
@@ -211,6 +221,7 @@ export type ColumnBlocker =
   | 'Header'
   | 'Scale'
   | 'Width'
+  | 'Month'
   | 'StyleCode'
   | 'StyleFontSize';
 
@@ -228,6 +239,11 @@ export function whyCannotSaveColumn(draft: ColumnDraft): ColumnBlocker | null {
   // ⚠ Дзеркалить `ColumnDef.SetWidth`: ціле 40..800 px (D-234).
   if (draft.widthPx !== null && (!Number.isInteger(draft.widthPx) || draft.widthPx < 40 || draft.widthPx > 800)) {
     return 'Width';
+  }
+
+  // ⚠ Дзеркалить `ColumnDef.SetMonth`: місяць — ціле 1..12 (PS-P1C).
+  if (draft.monthNumber !== null && (!Number.isInteger(draft.monthNumber) || draft.monthNumber < 1 || draft.monthNumber > 12)) {
+    return 'Month';
   }
 
   // ⛔ Директива registry-lookup / cell-style, PR B1: перемикач «власний
@@ -287,5 +303,7 @@ export function columnBody(draft: ColumnDraft): SaveColumnDefRequest {
     lookupFilter: draft.lookupFilter,
     unitId: columnTakesUnit(draft.dataType) ? draft.unitId : null,
     widthPx: draft.widthPx,
+    isMonthColumn: draft.monthNumber !== null,
+    monthNumber: draft.monthNumber,
   };
 }

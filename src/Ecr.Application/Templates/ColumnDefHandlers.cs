@@ -238,6 +238,12 @@ public sealed class SaveColumnDefHandler(
         column.SetPresentation(command.DefaultValue, command.DisplayFormat, command.StyleId);
         column.SetWidth(command.WidthPx);
 
+        // ⚠ «Не прислано = не чіпати»: PUT старого клієнта чи імпорту без цих полів не стирає місяць.
+        if (command.IsMonthColumn is not null || command.MonthNumber is not null)
+        {
+            column.SetMonth(command.IsMonthColumn ?? true, command.MonthNumber);
+        }
+
         if (command.LookupRegistryDefId is { } lookupId)
         {
             column.SetLookup(lookupId, command.LookupFilter);
@@ -308,7 +314,8 @@ public sealed class SaveColumnDefHandler(
             column.IsRequired, column.IsReadOnly, column.IsHidden,
             column.Precision, column.Scale,
             column.DefaultValue, column.DisplayFormat, column.StyleId,
-            column.LookupRegistryDefId, column.LookupFilter, column.UnitId, column.WidthPx);
+            column.LookupRegistryDefId, column.LookupFilter, column.UnitId, column.WidthPx,
+            column.IsMonthColumn, column.MonthNumber);
 
     /// <summary>Стан колонки для аудиту.</summary>
     internal static string Describe(ColumnDef column)
@@ -330,6 +337,8 @@ public sealed class SaveColumnDefHandler(
             column.LookupFilter,
             column.UnitId,
             column.WidthPx,
+            column.IsMonthColumn,
+            column.MonthNumber,
         });
 }
 
@@ -349,6 +358,8 @@ public sealed class SaveColumnDefHandler(
 /// <param name="LookupFilter">Звуження списку довідника.</param>
 /// <param name="UnitId">Одиниця значень колонки (ФВ-16.1); не для <see cref="CellDataType.Unit"/>.</param>
 /// <param name="WidthPx">Типова ширина, px, 40..800 (D-234); <c>null</c> — типова за типом; презентаційне поле.</param>
+/// <param name="IsMonthColumn">Колонка прив'язана до календарного місяця; вимагає <paramref name="MonthNumber"/>; <c>null</c> разом з <c>MonthNumber = null</c> — не чіпати.</param>
+/// <param name="MonthNumber">Місяць 1..12; лише разом з <paramref name="IsMonthColumn"/>.</param>
 public sealed record SaveColumnDefCommand(
     IReadOnlyDictionary<string, string> HeaderL10n,
     int? Ordinal,
@@ -364,7 +375,9 @@ public sealed record SaveColumnDefCommand(
     int? LookupRegistryDefId,
     string? LookupFilter,
     int? UnitId,
-    int? WidthPx = null);
+    int? WidthPx = null,
+    bool? IsMonthColumn = null,
+    byte? MonthNumber = null);
 
 /// <summary>Колонка у відповіді на запис/читання через цей обробник.</summary>
 /// <remarks>
@@ -394,7 +407,9 @@ public sealed record ColumnDefDto(
     int? LookupRegistryDefId,
     string? LookupFilter,
     int? UnitId,
-    int? WidthPx = null);
+    int? WidthPx = null,
+    bool? IsMonthColumn = null,
+    byte? MonthNumber = null);
 
 /// <summary>
 /// Повний склад однієї колонки — те саме, що приймає й повертає

@@ -2150,6 +2150,7 @@ USING (VALUES
     (N'err.ECR-CELL-4223',  N'en', N'Reference to a missing registry entry or unit', 1),
     (N'err.ECR-HDR-0404',   N'en', N'Header field not found', 1),
     (N'err.ECR-HDR-0422',   N'en', N'Invalid header value', 1),
+    (N'err.ECR-HDR-4223',   N'en', N'The chosen registry entry cannot be used in the header', 1),
     (N'err.ECR-SUB-4221',   N'en', N'Submission is blocked', 1),
 
     -- Періоди і проєкти.
@@ -5607,6 +5608,9 @@ USING (VALUES
     (N'err.ECR-CALC-0422.unknownUnit', N'en', N'{code}: unit {unitId} does not exist in the unit catalog.', 1),
     (N'err.ECR-CALC-0422.bindingMatchInvalid', N'en', N'The match condition for output {outputCode} is not a flat JSON object of "column → value" pairs, so it would match no row.', 1),
     (N'err.ECR-CALC-0422.bindingUnknownOutput', N'en', N'No version of this methodology declares output {outputCode}: nothing would ever be calculated for this binding.', 1),
+    -- COLL:drb2 ── D-R2: прив'язка до методології без опублікованої версії; ru/kz — порцією COLL:drb2 нижче ──
+    (N'err.ECR-CALC-0422.bindingMethodologyNotPublished', N'en', N'Methodology {methodologyCode} has no published version, but it is actively bound to {bindingCount} column(s) of this template version: {bindings}. Recalculation of documents would be rejected as a whole. Publish the methodology or deactivate these bindings.', 1),
+    -- COLL:drb2 ── кінець секції ──
     (N'err.ECR-CALC-0422.noPublishedVersion', N'en', N'Methodology {methodologyId} is bound to a table but has no published version to calculate with.', 1),
     (N'err.ECR-CALC-0422.goldenTestNoPeriod', N'en', N'Golden test {test} has no period: set a document and an existing period in its input (periodKey is year × 100 + number, e.g. 202601).', 1),
     (N'publish.problemsTitle', N'en', N'What to fix before publishing', 1),
@@ -5850,6 +5854,11 @@ USING (VALUES
     (N'err.ECR-CELL-4223.deletedEntry',        N'en', N'The chosen registry entry has been deleted: {cellCount} cell(s).', 1),
     (N'err.ECR-CELL-4223.inactiveEntry',       N'en', N'The chosen registry entry is switched off: {cellCount} cell(s).', 1),
     (N'err.ECR-CELL-4223.entryNotValidOnDate', N'en', N'The chosen registry entry is not valid on {asOf}, the last day of the period: {cellCount} cell(s).', 1),
+    -- PS-P1D (D-11): поле шапки Lookup (Permit) не бере запис, якого пікер не пропонує (`PatchDocumentHeaderHandler.EnsureLookupEntriesUsableAsync`).
+    (N'err.ECR-HDR-4223.foreignRegistry',      N'en', N'The entry chosen for header field "{headerFieldCode}" belongs to a different registry than the field.', 1),
+    (N'err.ECR-HDR-4223.deletedEntry',         N'en', N'The entry chosen for header field "{headerFieldCode}" has been deleted.', 1),
+    (N'err.ECR-HDR-4223.inactiveEntry',        N'en', N'The entry chosen for header field "{headerFieldCode}" is switched off.', 1),
+    (N'err.ECR-HDR-4223.entryNotValidInWindow', N'en', N'The entry chosen for header field "{headerFieldCode}" is not valid on any day of the document period ({windowFrom} to {windowTo}).', 1),
     -- S9: межа частоти зміни пароля — на КОРИСТУВАЧА, не на адресу (`LoginRateLimiting`).
     (N'err.ECR-REQ-0429.tooManyPasswordChanges', N'en', N'Too many password change attempts. Try again in a minute.', 1),
     -- S6: зауваження лише в таблицях/колонках під забороною читача — знеособлено, без числа й адреси
@@ -6226,6 +6235,16 @@ USING (VALUES
     (N'grid.columnWidths.reset',           N'en', N'Reset column widths', 1),
     -- ru/kz — окремою порцією `COLL:d234` у блоці I18N нижче.
     -- COLL:d234 ── кінець секції ──
+    -- COLL:psp1c ── Місяць колонки (PS-P1C, D-PS-1): відмови 422 і підписи поля «Місяць колонки» в панелі колонки ──
+    (N'err.ECR-TMPL-0422.monthColumnWithoutMonth', N'en', N'Column "{columnCode}" is marked as a month column but no month is set.', 1),
+    (N'err.ECR-TMPL-0422.monthOutOfRange',         N'en', N'The month of column "{columnCode}" must be from 1 to 12, got "{monthNumber}".', 1),
+    (N'err.ECR-TMPL-0422.monthWithoutFlag',        N'en', N'Column "{columnCode}" has a month set but is not marked as a month column.', 1),
+    (N'columns.month',                             N'en', N'Column month', 1),
+    (N'columns.monthHint',                         N'en', N'The calendar month this column holds data for. Period rules (source window, outside the permit window) use it; empty means the column is not tied to a month.', 1),
+    (N'columns.monthNone',                         N'en', N'Not tied to a month', 1),
+    (N'columns.errMonth',                          N'en', N'The month must be a whole number from 1 to 12.', 1),
+    -- ru/kz — окремою порцією `COLL:psp1c` у блоці I18N нижче.
+    -- COLL:psp1c ── кінець секції ──
     -- COLL:dates ── Дата-рядок поля довідника з AF: лише MM/dd/yyyy чи ISO 8601 (`RegistrySyncValidity.TryParseFieldDate`, відповідь людини 2026-10-01) ──
     (N'err.ECR-REG-0422.dateFormatRefused', N'en', N'The source value "{value}" is not a date in the expected format ({expected}) or ISO 8601: the field is left unchanged.', 1),
     -- ru/kz — окремою порцією `COLL:dates` у блоці I18N нижче.
@@ -7227,8 +7246,15 @@ USING (VALUES
     (N'err.ECR-UOM-0422.fieldMapUnitDimensions', N'en', N'Unit "{from}" cannot be converted to "{to}": they measure different quantities, so the mapping of field "{sourceField}" would never write a value. Choose units of the same dimension.', 1),
     -- COLL:d4efmapunit ── кінець секції ──
     -- COLL:d9tpltitle ── приймальна №8, D-9: власний заголовок 409 на зайнятий код шаблону; ru/kz — порцією COLL:d9tpltitle нижче ──
-    (N'err.ECR-TMPL-0409.templateCodeTaken.title', N'en', N'Template code is already in use', 1)
+    (N'err.ECR-TMPL-0409.templateCodeTaken.title', N'en', N'Template code is already in use', 1),
     -- COLL:d9tpltitle ── кінець секції ──
+    -- COLL:l4norule ── L-4 Land Demo: рядок без жодного правила не рахується мовчки; ru/kz — порцією COLL:l4norule нижче ──
+    (N'jobs.recalcNoMatchingRule', N'en', N'No matching rule for {count} row(s) (rows: {rows}). These rows were not calculated; the other rows were.', 1),
+    -- COLL:l4norule ── кінець секції ──
+    -- COLL:d13bindings ── D-13: перенос проєкту на версію шаблону відмовляє, якщо активна прив'язка методології не має відповідника в цільовій; ru/kz — порцією COLL:d13bindings нижче ──
+    (N'err.ECR-SCHM-0422.migrateBindingsNotMapped', N'en', N'The target version has no active binding of a methodology output on the matching column (or the column itself is missing), so after the move that column would stay empty without any error. Clone the version again from the one being moved from (a clone now carries bindings), or switch the binding off deliberately, then move the project.', 1),
+    (N'documents.migrateRefusalBindingsNotMapped', N'en', N'Methodology outputs are bound to columns that have no matching binding in the target version; those columns would be left empty.', 1)
+    -- COLL:d13bindings ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -10305,6 +10331,11 @@ SELECT v.[Key], v.Lang, v.Val
     (N'err.ECR-CELL-4223.deletedEntry', N'ru', N'Выбранная запись справочника удалена; затронуто ячеек: {cellCount}.'),
     (N'err.ECR-CELL-4223.inactiveEntry', N'ru', N'Выбранная запись справочника отключена; затронуто ячеек: {cellCount}.'),
     (N'err.ECR-CELL-4223.entryNotValidOnDate', N'ru', N'Выбранная запись справочника недействительна на {asOf} — последний день периода; затронуто ячеек: {cellCount}.'),
+    (N'err.ECR-HDR-4223', N'ru', N'Выбранную запись справочника нельзя использовать в шапке'),
+    (N'err.ECR-HDR-4223.foreignRegistry', N'ru', N'Запись, выбранная для поля шапки «{headerFieldCode}», относится к другому справочнику, чем поле.'),
+    (N'err.ECR-HDR-4223.deletedEntry', N'ru', N'Запись, выбранная для поля шапки «{headerFieldCode}», удалена.'),
+    (N'err.ECR-HDR-4223.inactiveEntry', N'ru', N'Запись, выбранная для поля шапки «{headerFieldCode}», отключена.'),
+    (N'err.ECR-HDR-4223.entryNotValidInWindow', N'ru', N'Запись, выбранная для поля шапки «{headerFieldCode}», недействительна ни в один день периода документа ({windowFrom} — {windowTo}).'),
     (N'err.ECR-REQ-0429.tooManyPasswordChanges', N'ru', N'Слишком много попыток смены пароля. Повторите попытку через минуту.'),
     (N'err.ECR-SUB-4221.hiddenIssues', N'ru', N'Есть замечания вне вашей области видимости — подача заблокирована. Обратитесь к владельцу проекта.'),
     (N'permission.Report.ViewSnapshot', N'ru', N'Просмотр содержимого срезов регламентированных отчётов'),
@@ -13334,6 +13365,11 @@ SELECT v.[Key], v.Lang, v.Val
     (N'err.ECR-CELL-4223.deletedEntry', N'kz', N'Таңдалған анықтамалық жазбасы жойылған: {cellCount} ұяшық.'),
     (N'err.ECR-CELL-4223.inactiveEntry', N'kz', N'Таңдалған анықтамалық жазбасы өшірілген: {cellCount} ұяшық.'),
     (N'err.ECR-CELL-4223.entryNotValidOnDate', N'kz', N'Таңдалған анықтамалық жазбасы кезеңнің соңғы күні — {asOf} күні жарамсыз: {cellCount} ұяшық.'),
+    (N'err.ECR-HDR-4223', N'kz', N'Таңдалған анықтамалық жазбасын тақырыпта пайдалануға болмайды'),
+    (N'err.ECR-HDR-4223.foreignRegistry', N'kz', N'«{headerFieldCode}» тақырып өрісі үшін таңдалған жазба өрістің анықтамалығынан басқа анықтамалыққа тиесілі.'),
+    (N'err.ECR-HDR-4223.deletedEntry', N'kz', N'«{headerFieldCode}» тақырып өрісі үшін таңдалған жазба жойылған.'),
+    (N'err.ECR-HDR-4223.inactiveEntry', N'kz', N'«{headerFieldCode}» тақырып өрісі үшін таңдалған жазба өшірілген.'),
+    (N'err.ECR-HDR-4223.entryNotValidInWindow', N'kz', N'«{headerFieldCode}» тақырып өрісі үшін таңдалған жазба құжат кезеңінің бірде-бір күнінде жарамды емес ({windowFrom} — {windowTo}).'),
     (N'err.ECR-REQ-0429.tooManyPasswordChanges', N'kz', N'Құпиясөзді өзгерту әрекеттері тым көп. Бір минуттан кейін қайталаңыз.'),
     (N'err.ECR-SUB-4221.hiddenIssues', N'kz', N'Сіздің көру аймағыңыздан тыс ескертпелер бар — тапсыру бұғатталған. Жоба иесіне хабарласыңыз.'),
     (N'permission.Report.ViewSnapshot', N'kz', N'Реттелетін есептер кесінділерінің мазмұнын қарау'),
@@ -14818,6 +14854,29 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:d234 ── кінець секції ──
+
+-- COLL:psp1c ── ru/kz місяця колонки (PS-P1C); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-TMPL-0422.monthColumnWithoutMonth', N'ru', N'Столбец "{columnCode}" помечен как месячный, но месяц не задан.'),
+    (N'err.ECR-TMPL-0422.monthColumnWithoutMonth', N'kz', N'"{columnCode}" бағаны айлық деп белгіленген, бірақ ай көрсетілмеген.'),
+    (N'err.ECR-TMPL-0422.monthOutOfRange', N'ru', N'Месяц столбца "{columnCode}" должен быть от 1 до 12, получено "{monthNumber}".'),
+    (N'err.ECR-TMPL-0422.monthOutOfRange', N'kz', N'"{columnCode}" бағанының айы 1-ден 12-ге дейін болуы керек, алынған мән "{monthNumber}".'),
+    (N'err.ECR-TMPL-0422.monthWithoutFlag', N'ru', N'У столбца "{columnCode}" задан месяц, но столбец не помечен как месячный.'),
+    (N'err.ECR-TMPL-0422.monthWithoutFlag', N'kz', N'"{columnCode}" бағанында ай көрсетілген, бірақ баған айлық деп белгіленбеген.'),
+    (N'columns.month', N'ru', N'Месяц столбца'),
+    (N'columns.month', N'kz', N'Баған айы'),
+    (N'columns.monthHint', N'ru', N'Календарный месяц, за который столбец хранит данные. Его используют правила периода (окно источника, вне окна разрешения); пусто — столбец не привязан к месяцу.'),
+    (N'columns.monthHint', N'kz', N'Баған деректерді сақтайтын күнтізбелік ай. Оны кезең ережелері (дереккөз терезесі, рұқсат терезесінен тыс) пайдаланады; бос — баған айға байланыстырылмаған.'),
+    (N'columns.monthNone', N'ru', N'Не привязан к месяцу'),
+    (N'columns.monthNone', N'kz', N'Айға байланыстырылмаған'),
+    (N'columns.errMonth', N'ru', N'Месяц должен быть целым числом от 1 до 12.'),
+    (N'columns.errMonth', N'kz', N'Ай 1-ден 12-ге дейінгі бүтін сан болуы керек.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:psp1c ── кінець секції ──
 
 -- COLL:dates ── ru/kz відмови формату дати поля довідника з AF; власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)
@@ -17523,6 +17582,16 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:ui-rc9 ── кінець секції ──
+-- COLL:drb2 ── ru/kz D-R2: прив'язка до методології без опублікованої версії; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-CALC-0422.bindingMethodologyNotPublished', N'ru', N'У методики {methodologyCode} нет опубликованной версии, но она активно привязана к столбцам этой версии шаблона ({bindingCount}): {bindings}. Пересчёт документов отклонялся бы целиком. Опубликуйте методику или отключите эти привязки.'),
+    (N'err.ECR-CALC-0422.bindingMethodologyNotPublished', N'kz', N'{methodologyCode} әдістемесінің жарияланған нұсқасы жоқ, бірақ ол осы үлгі нұсқасының бағандарына ({bindingCount}) белсенді байланыстырылған: {bindings}. Құжаттарды қайта есептеу толығымен қабылданбас еді. Әдістемені жариялаңыз немесе осы байланыстыруларды өшіріңіз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:drb2 ── кінець секції ──
 -- COLL:d3efmap ── ru/kz D-3: дубль мапінгу пари (сутність, поле); власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val
@@ -17553,6 +17622,28 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:d9tpltitle ── кінець секції ──
+-- COLL:l4norule ── ru/kz L-4: рядок без жодного правила; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'jobs.recalcNoMatchingRule', N'ru', N'Нет подходящего правила для строк: {count} (номера: {rows}). Эти строки не рассчитаны, остальные рассчитаны.'),
+    (N'jobs.recalcNoMatchingRule', N'kz', N'{count} жол үшін сәйкес ереже жоқ (нөмірлері: {rows}). Бұл жолдар есептелмеді, қалғандары есептелді.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:l4norule ── кінець секції ──
+-- COLL:d13bindings ── ru/kz D-13: відмова переносу, коли прив'язка методології не має відповідника в цільовій версії; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-SCHM-0422.migrateBindingsNotMapped', N'ru', N'В целевой версии нет активной привязки выхода методологии на соответствующей колонке (или самой колонки), поэтому после переноса эта колонка осталась бы пустой без ошибки. Создайте версию заново клоном переносимой (клон теперь копирует привязки) или осознанно отключите привязку, затем переносите проект.'),
+    (N'err.ECR-SCHM-0422.migrateBindingsNotMapped', N'kz', N'Мақсатты нұсқада сәйкес бағанда әдістеменің шығысына белсенді байланыс жоқ (немесе бағанның өзі жоқ), сондықтан көшіруден кейін бұл баған қатесіз бос қалар еді. Нұсқаны көшірілетін нұсқадан қайта клондаңыз (клон енді байланыстарды көшіреді) немесе байланысты саналы түрде өшіріңіз, содан кейін жобаны көшіріңіз.'),
+    (N'documents.migrateRefusalBindingsNotMapped', N'ru', N'Выходы методологий привязаны к колонкам, для которых в целевой версии нет привязки; эти колонки остались бы пустыми.'),
+    (N'documents.migrateRefusalBindingsNotMapped', N'kz', N'Әдістеме шығыстары мақсатты нұсқада байланысы жоқ бағандарға байланған; бұл бағандар бос қалар еді.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:d13bindings ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

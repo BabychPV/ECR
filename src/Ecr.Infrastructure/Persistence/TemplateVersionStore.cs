@@ -398,6 +398,27 @@ public sealed partial class TemplateVersionStore(EcrDbContext db) : ITemplateVer
     private async Task CloneResourceGrantsAsync(
         TemplateVersion clone, IReadOnlyList<GrantSource> sources, CancellationToken ct)
     {
+        var map = BuildCloneIdMap(clone, sources);
+
+        var kinds = new[] { ResourceKind.Sheet, ResourceKind.Table, ResourceKind.Column };
+        var ids = sources.Select(s => s.SourceId).Distinct().ToList();
+        var grants = await db.ResourceGrants
+            .AsNoTracking()
+            .Where(g => kinds.Contains(g.ResourceKind) && ids.Contains(g.ResourceId)
+                        && (g.IsDeny || g.Level <= GrantLevel.Read))
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        db.ResourceGrants.AddRange(grants
+            .Where(g => map.ContainsKey((g.ResourceKind, g.ResourceId)))
+            .Select(g => new ResourceGrant(
+                g.RoleId, g.ResourceKind, map[(g.ResourceKind, g.ResourceId)], g.Level, g.IsDeny)));
+    }
+
+    /// <summary>Id аркуша/таблиці/колонки джерела → Id відповідника в клоні (за кодами).</summary>
+    private static Dictionary<(ResourceKind, int), int> BuildCloneIdMap(
+        TemplateVersion clone, IReadOnlyList<GrantSource> sources)
+    {
         var map = new Dictionary<(ResourceKind, int), int>();
         var cloneSheets = clone.Sheets.ToDictionary(s => s.Code);
         foreach (var src in sources)
@@ -429,19 +450,101 @@ public sealed partial class TemplateVersionStore(EcrDbContext db) : ITemplateVer
             }
         }
 
-        var kinds = new[] { ResourceKind.Sheet, ResourceKind.Table, ResourceKind.Column };
-        var ids = sources.Select(s => s.SourceId).Distinct().ToList();
-        var grants = await db.ResourceGrants
+        return map;
+    }
+
+    /// <summary>
+    /// PS-P1B: правила доступу до періоду — частина структури версії; клон копіює їх з
+    /// перемапінгом аркуша, таблиці й колонки-джерела вікна (<c>SourceColumnDefId</c>) на Id клону.
+    /// Без цього після клону лишалось правило першої версії (клон мовчки втрачав обмеження періоду).
+    /// </summary>
+    private async Task CloneAccessRulesAsync(
+        TemplateVersion clone, int sourceVersionId, IReadOnlyList<GrantSource> sources, CancellationToken ct)
+    {
+        var map = BuildCloneIdMap(clone, sources);
+        var rules = await db.PeriodAccessRules
             .AsNoTracking()
-            .Where(g => kinds.Contains(g.ResourceKind) && ids.Contains(g.ResourceId)
-                        && (g.IsDeny || g.Level <= GrantLevel.Read))
+            .Where(r => r.TemplateVersionId == sourceVersionId)
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
-        db.ResourceGrants.AddRange(grants
-            .Where(g => map.ContainsKey((g.ResourceKind, g.ResourceId)))
-            .Select(g => new ResourceGrant(
-                g.RoleId, g.ResourceKind, map[(g.ResourceKind, g.ResourceId)], g.Level, g.IsDeny)));
+        foreach (var rule in rules)
+        {
+            // Посилання, яке не вдалося перемапити, не лишається на джерело: правило з чужим
+            // ключем діяло б на іншу версію. Таке правило пропускається (клон ідентичний джерелу,
+            // тож випадок неможливий; fail-closed не ширшає доступ).
+            if (rule.SheetDefId is { } s && !map.ContainsKey((ResourceKind.Sheet, s))
+                || rule.TableDefId is { } t && !map.ContainsKey((ResourceKind.Table, t))
+                || rule.SourceColumnDefId is { } c && !map.ContainsKey((ResourceKind.Column, c)))
+            {
+                continue;
+            }
+
+            db.PeriodAccessRules.Add(rule.CopyForClone(
+                clone.Id,
+                rule.SheetDefId is { } sh ? map[(ResourceKind.Sheet, sh)] : null,
+                rule.TableDefId is { } tb ? map[(ResourceKind.Table, tb)] : null,
+                rule.SourceColumnDefId is { } col ? map[(ResourceKind.Column, col)] : null));
+        }
+    }
+
+    /// <summary>
+    /// ⛔ D-13: прив'язки результатів методологій до колонок (<c>cfg.CalculationBinding</c>) — частина
+    /// того, що колонка РАХУЄТЬСЯ. Вони посилаються на <c>ColumnDefId</c>/<c>TableDefId</c> числом і не
+    /// мають навігації з версії, тож клон їх не бачив: обчислювані колонки клону лишалися без джерела,
+    /// а повторний PUT прив'язки на клоні створював нову ВИМКНЕНУ (F-09 відхиляв її як невідому).
+    /// Копіюється кожна прив'язка (з вимкненими й предикатом без змін) на колонку клону за кодами
+    /// аркуш/таблиця/колонка — тією самою ідентичністю, що й гранти.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Предикат (<c>MatchJson</c>) — плаский об'єкт «код колонки → значення», ідентифікаторів не
+    /// містить, тож лишається як є. Правила методології (<c>calc.MethodologyRule</c>) належать ВЕРСІЇ
+    /// МЕТОДОЛОГІЇ, а не шаблону, і клоном шаблону не чіпаються.
+    /// </remarks>
+    private async Task CloneCalculationBindingsAsync(
+        TemplateVersion clone, IReadOnlyList<GrantSource> sources, CancellationToken ct)
+    {
+        var sourceColumns = sources.Where(s => s.Kind == ResourceKind.Column).ToList();
+        if (sourceColumns.Count == 0)
+        {
+            return;
+        }
+
+        var cloneSheets = clone.Sheets.ToDictionary(s => s.Code);
+        var map = new Dictionary<int, (int TableId, int ColumnId)>();
+        foreach (var src in sourceColumns)
+        {
+            if (cloneSheets.TryGetValue(src.Sheet, out var sheet)
+                && sheet.Tables.FirstOrDefault(t => t.Code == src.Table) is { } table
+                && table.Columns.FirstOrDefault(c => c.Code == src.Column) is { IsDeleted: false } column)
+            {
+                map[src.SourceId] = (table.Id, column.Id);
+            }
+        }
+
+        var ids = sourceColumns.Select(s => s.SourceId).ToList();
+        var bindings = await db.CalculationBindings
+            .AsNoTracking()
+            .Where(b => ids.Contains(b.ColumnDefId))
+            .OrderBy(b => b.Id)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        foreach (var b in bindings)
+        {
+            if (!map.TryGetValue(b.ColumnDefId, out var target))
+            {
+                continue;
+            }
+
+            var copy = new CalculationBinding(target.TableId, target.ColumnId, b.MethodologyId, b.OutputCode, b.MatchJson);
+            if (!b.IsActive)
+            {
+                copy.Update(b.MatchJson, isActive: false);
+            }
+
+            db.CalculationBindings.Add(copy);
+        }
     }
 
     private async Task SaveCloneAsync(
@@ -455,6 +558,8 @@ public sealed partial class TemplateVersionStore(EcrDbContext db) : ITemplateVer
         db.FormulaDefs.AddRange(TemplateVersionCloner.Relink(links));
         CloneTableRelations(clone, relationTemplates);
         await CloneResourceGrantsAsync(clone, grantSources, ct).ConfigureAwait(false);
+        await CloneAccessRulesAsync(clone, clonedFrom, grantSources, ct).ConfigureAwait(false);
+        await CloneCalculationBindingsAsync(clone, grantSources, ct).ConfigureAwait(false);
         await CloneConditionalFormatsAsync(clone.Id, clonedFrom, ct).ConfigureAwait(false);
         SetClonedFrom(clone, clonedFrom);
         await db.SaveChangesAsync(ct).ConfigureAwait(false);

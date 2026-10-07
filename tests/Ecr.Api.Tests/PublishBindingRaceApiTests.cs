@@ -161,6 +161,19 @@ public sealed class PublishBindingRaceApiTests(SqlServerFixture sql)
         db.Methodologies.Add(methodology);
         await db.SaveChangesAsync();
 
+        // ⚠ D-R2: публікація шаблону відхиляє активну прив'язку до методології без
+        // опублікованої версії, тож методологія стенду має бодай одну опубліковану.
+        var methodologyVersion = new MethodologyVersion(methodology.Id, "1.0", CalculationLevel.Configuration, 9, Now);
+        methodology.AddVersion(methodologyVersion);
+        methodology.PublishVersion(
+            methodologyVersion,
+            publishedByUserId: 10,
+            changeReason: "D-R2",
+            effectiveFrom: new DateOnly(2026, 1, 1),
+            testsPassed: true,
+            utcNow: Now);
+        await db.SaveChangesAsync();
+
         db.CalculationBindings.Add(new CalculationBinding(table.Id, column.Id, methodology.Id, "OUT1", "{}"));
         await db.SaveChangesAsync();
 

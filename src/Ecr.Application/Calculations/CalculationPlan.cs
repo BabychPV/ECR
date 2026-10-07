@@ -109,6 +109,7 @@ public sealed record CalculationBatch(int Ordinal, IReadOnlyList<int> Methodolog
 public sealed class ModuleProfile
 {
     private readonly Dictionary<string, ModuleStat> _stats = new(StringComparer.Ordinal);
+    private readonly List<UnmatchedRow> _unmatched = [];
 
     /// <summary>Записує виконання одного модуля.</summary>
     /// <param name="moduleCode">Код модуля.</param>
@@ -142,6 +143,8 @@ public sealed class ModuleProfile
     {
         ArgumentNullException.ThrowIfNull(other);
 
+        _unmatched.AddRange(other._unmatched);
+
         foreach (var stat in other._stats.Values)
         {
             var existing = _stats.TryGetValue(stat.Code, out var found)
@@ -164,6 +167,18 @@ public sealed class ModuleProfile
     /// <summary>Чи є хоч один запис.</summary>
     public bool IsEmpty => _stats.Count == 0;
 
+    /// <summary>Рядки, яким не підійшло жодне правило жодної прив'язки таблиці (L-4).</summary>
+    public IReadOnlyList<UnmatchedRow> UnmatchedRows => _unmatched;
+
+    /// <summary>Записує рядки без правила.</summary>
+    /// <param name="rows">Рядки без правила.</param>
+    public void RecordUnmatched(IEnumerable<UnmatchedRow> rows)
+    {
+        ArgumentNullException.ThrowIfNull(rows);
+
+        _unmatched.AddRange(rows);
+    }
+
     /// <summary>Профіль як JSON для <c>ModulesProfileJson</c>.</summary>
     /// <remarks>
     /// Порядок від найповільнішого навмисно: файл читає людина, і перший рядок
@@ -185,3 +200,9 @@ public sealed class ModuleProfile
 /// <param name="Rows">Оброблено рядків.</param>
 /// <param name="Calls">Скільки разів викликано.</param>
 public sealed record ModuleStat(string Code, TimeSpan Elapsed, int Rows, int Calls);
+
+/// <summary>Рядок таблиці, якому не підійшло жодне правило (діагностика «No matching rule»).</summary>
+/// <param name="TableInstanceId">Екземпляр таблиці.</param>
+/// <param name="RowNumber">Номер рядка, з 1, у порядку створення (за <c>TableRow.Id</c>).</param>
+/// <param name="RowKey">Публічний ключ рядка.</param>
+public sealed record UnmatchedRow(long TableInstanceId, int RowNumber, string RowKey);

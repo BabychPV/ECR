@@ -210,6 +210,10 @@ public sealed partial class DocumentVersionMigrationTests
             CancellationToken ct)
             => inner.CountDenyGrantsAsync(sheetIds, tableIds, columnIds, ct);
 
+        public Task<int> CountUnmappedBindingsAsync(
+            int sourceVersionId, IReadOnlyDictionary<int, int> columnMap, CancellationToken ct)
+            => inner.CountUnmappedBindingsAsync(sourceVersionId, columnMap, ct);
+
         public Task<GrantedUsers> ListUsersWithGrantsAsync(VersionMigrationPlan plan, int limit, CancellationToken ct)
             => inner.ListUsersWithGrantsAsync(plan, limit, ct);
 

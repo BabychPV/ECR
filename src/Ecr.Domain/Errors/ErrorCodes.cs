@@ -284,6 +284,19 @@ public static class ErrorCodes
     /// <summary>Значення поля шапки документа не відповідає типу чи обов'язковості.</summary>
     public const string HeaderValueInvalid = "ECR-HDR-0422";
 
+    /// <summary>
+    /// Поле шапки типу <c>Lookup</c> посилається на запис довідника, який не можна обрати:
+    /// запис чужого довідника, видалений, вимкнений або такий, що не чинний жодного дня
+    /// звітного вікна документа.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ PS-P1D (D-11). Дзеркало <see cref="CellRegistryEntryMissing"/> для шапки: комірка відхиляє такий
+    /// запис з <c>C7</c>, а шапка приймала будь-який існуючий (дозвіл <c>Permit</c> із закінченим строком).
+    /// Окремий код, а не <see cref="HeaderValueInvalid"/>: суб'єкт — не тип чи обов'язковість значення,
+    /// а ВИБІР запису; ЯКА саме причина — каже <c>messageKey</c>.
+    /// </remarks>
+    public const string HeaderEntryNotUsable = "ECR-HDR-4223";
+
     // Періоди і проєкти
     public const string PeriodClosed = "ECR-PRD-0409";
     public const string PeriodOutOfProject = "ECR-PRD-0422";

@@ -264,6 +264,26 @@ public sealed class PeriodAccessRuleDef : Entity<int>
         OnOutOfWindow = value;
     }
 
+    /// <summary>
+    /// Нова (незбережена) копія правила для клону версії: усі налаштування ті самі, ключі структури — клону.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Копіювання через <c>MemberwiseClone</c>, а не фабрики: фабрики відхиляють застарілий <c>Hide</c>,
+    /// а клон мусить нести правило як є; нове поле правила переноситься саме.
+    /// </remarks>
+    public PeriodAccessRuleDef CopyForClone(
+        int templateVersionId, int? sheetDefId, int? tableDefId, int? sourceColumnDefId)
+    {
+        var copy = (PeriodAccessRuleDef)MemberwiseClone();
+        copy.Id = 0;
+        copy.TemplateVersionId = templateVersionId;
+        copy.SheetDefId = sheetDefId;
+        copy.TableDefId = tableDefId;
+        copy.SourceColumnDefId = sourceColumnDefId;
+
+        return copy;
+    }
+
     /// <summary>Чи діє правило для періоду з таким порядковим номером.</summary>
     public bool AppliesTo(byte sequence)
         => (FromSequence is null || sequence >= FromSequence)

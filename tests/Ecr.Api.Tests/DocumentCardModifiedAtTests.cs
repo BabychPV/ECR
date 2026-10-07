@@ -75,6 +75,84 @@ public sealed class DocumentCardModifiedAtTests(SqlServerFixture sql)
         Assert.Equal(s.UserName, after.GetProperty("modifiedByDisplayName").GetString());
     }
 
+    /// <summary>
+    /// R-7, характеризаційний (не red-first: R-7 уже в коді): звужений читач (Deny на аркуш) бачить у картці
+    /// <c>modifiedAt</c>/<c>modifiedByDisplayName</c> = <c>null</c>, бо «хто й коли правив» стосується й схованого аркуша;
+    /// незвужений читач того самого документа бачить обидва значення.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "D-12")]
+    public async Task Картка_для_звуженого_читача_без_modifiedAt_а_для_незвуженого_з_ним()
+    {
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var doc = await builder.BuildAsync(columnCount: 2, rowCount: 1).ConfigureAwait(true);
+        var extra = await MultiTableDocument.AddTablesAsync(builder, doc, [1]).ConfigureAwait(true);
+
+        await using var db = builder.CreateContext();
+
+        var wide = new User($"wd_{Guid.NewGuid():N}"[..20], "Wide reader", AuthProvider.Local);
+        var narrow = new User($"nr_{Guid.NewGuid():N}"[..20], "Narrow reader", AuthProvider.Local);
+        wide.SetPassword(new PasswordHasher().Hash(Password));
+        narrow.SetPassword(new PasswordHasher().Hash(Password));
+        db.Users.AddRange(wide, narrow);
+
+        var viewer = new Role(
+            EcrCode.Create($"MODV_{Guid.NewGuid():N}"[..24]),
+            new LocalizedText(new Dictionary<string, string> { ["en"] = "Card viewer" }));
+        var denier = new Role(
+            EcrCode.Create($"MODD_{Guid.NewGuid():N}"[..24]),
+            new LocalizedText(new Dictionary<string, string> { ["en"] = "Card sheet denier" }));
+        db.Roles.AddRange(viewer, denier);
+        await db.SaveChangesAsync().ConfigureAwait(true);
+
+        db.RolePermissions.Add(new RolePermission(viewer.Id, "Document.View"));
+        db.ResourceGrants.Add(new ResourceGrant(viewer.Id, ResourceKind.Project, doc.ProjectId, GrantLevel.Read));
+        db.RoleAssignments.Add(new RoleAssignment(viewer.Id, wide.Id, null));
+        db.RoleAssignments.Add(new RoleAssignment(viewer.Id, narrow.Id, null));
+
+        db.RoleAssignments.Add(new RoleAssignment(denier.Id, narrow.Id, null));
+        db.ResourceGrants.Add(new ResourceGrant(denier.Id, ResourceKind.Sheet, extra[0].SheetDefId, GrantLevel.Read, isDeny: true));
+        await db.SaveChangesAsync().ConfigureAwait(true);
+
+        // Правка документа: «дотик» із автором (той самий, що робить `DocumentStore.TouchAsync`).
+        await db.Documents
+            .Where(d => d.Id == doc.DocumentId)
+            .ExecuteUpdateAsync(u => u
+                .SetProperty(d => d.ModifiedAt, DateTime.UtcNow)
+                .SetProperty(d => d.ModifiedByUserId, wide.Id))
+            .ConfigureAwait(true);
+
+        using var app = new EcrApiFactory(sql);
+
+        foreach (var (user, expectHidden) in new[] { (wide.UserName, false), (narrow.UserName, true) })
+        {
+            using var client = app.CreateClient();
+            var login = await client.PostAsJsonAsync(
+                new Uri("/api/v1/login/local", UriKind.Relative),
+                new { userName = user, password = Password }).ConfigureAwait(true);
+            Assert.True(login.IsSuccessStatusCode, $"Вхід {user}: {login.StatusCode}: {app.ErrorsText}");
+
+            using var response = await client.GetAsync(
+                new Uri($"/api/v1/documents/{doc.DocumentId}?periodKey={doc.PeriodKey.Value}", UriKind.Relative)).ConfigureAwait(true);
+            var body = await response.Content.ReadAsStringAsync().ConfigureAwait(true);
+            Assert.True(response.StatusCode == HttpStatusCode.OK, $"{user}: {response.StatusCode}: {body}\n{app.ErrorsText}");
+
+            var card = JsonDocument.Parse(body).RootElement;
+            if (expectHidden)
+            {
+                Assert.Equal(JsonValueKind.Null, card.GetProperty("modifiedAt").ValueKind);
+                Assert.Equal(JsonValueKind.Null, card.GetProperty("modifiedByDisplayName").ValueKind);
+            }
+            else
+            {
+                Assert.Equal(JsonValueKind.String, card.GetProperty("modifiedAt").ValueKind);
+                Assert.Equal("Wide reader", card.GetProperty("modifiedByDisplayName").GetString());
+            }
+        }
+    }
+
     private static async Task<JsonElement> ReadCardAsync(HttpClient client, Uri uri, EcrApiFactory app)
     {
         using var response = await client.GetAsync(uri).ConfigureAwait(false);

@@ -153,6 +153,9 @@ public sealed class CalculationOrchestrator(
         var byVersion = resolved.ToLookup(r => r.Descriptor.MethodologyVersionId);
         var done = 0;
 
+        // L-4: хто що закрив — для діагностики «No matching rule … row N».
+        var rowMatches = new ConcurrentBag<RowMatchSummary>();
+
         foreach (var batch in batches)
         {
             // 3. ⚠ Усередині пакета — ПАРАЛЕЛЬНО. Послідовний прогін у 10
@@ -190,7 +193,7 @@ public sealed class CalculationOrchestrator(
                         var stat = await ExecuteAsync(
                             scopedResolver, scopedModules, scopedInputBuilder, scopedOutputWriter,
                             calculationRunId, documentId, periodKey, binding, registries,
-                            _limits.MaxInputCellsPerBinding, token).ConfigureAwait(false);
+                            _limits.MaxInputCellsPerBinding, rowMatches, token).ConfigureAwait(false);
 
                         measured.Add(stat);
                     }
@@ -216,7 +219,46 @@ public sealed class CalculationOrchestrator(
                 .ConfigureAwait(false);
         }
 
+        profile.RecordUnmatched(UnmatchedRowsOf(rowMatches));
+
         return profile;
+    }
+
+    /// <summary>Підсумок зіставлення рядків таблиці з правилами однієї прив'язки.</summary>
+    private sealed record RowMatchSummary(
+        long TableInstanceId, IReadOnlyCollection<string> MatchedKeys, IReadOnlyList<string>? AllRowKeys);
+
+    /// <summary>
+    /// Рядки, яким не підійшло жодне правило жодної прив'язки своєї таблиці (L-4).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Саме «жодної прив'язки таблиці»: дві методології з доповняльними правилами на одну
+    /// таблицю (CO2 / NOx) не дають діагностики на рядки, які закрила хоч одна. Версія без правил
+    /// (<c>AllRowKeys = null</c>) рядків не бачить і діагностики не дає. Номер рядка — позиція
+    /// за <c>TableRow.Id</c>, з 1; значень комірок діагностика не містить.
+    /// </remarks>
+    private static List<UnmatchedRow> UnmatchedRowsOf(IEnumerable<RowMatchSummary> summaries)
+    {
+        var unmatched = new List<UnmatchedRow>();
+        foreach (var table in summaries.GroupBy(s => s.TableInstanceId).OrderBy(g => g.Key))
+        {
+            var all = table.Select(s => s.AllRowKeys).FirstOrDefault(keys => keys is not null);
+            if (all is null)
+            {
+                continue;
+            }
+
+            var matched = table.SelectMany(s => s.MatchedKeys).ToHashSet(StringComparer.Ordinal);
+            for (var i = 0; i < all.Count; i++)
+            {
+                if (!matched.Contains(all[i]))
+                {
+                    unmatched.Add(new UnmatchedRow(table.Key, i + 1, all[i]));
+                }
+            }
+        }
+
+        return unmatched;
     }
 
     /// <summary>Виконує одну прив'язку і повертає її внесок у профіль.</summary>
@@ -239,6 +281,7 @@ public sealed class CalculationOrchestrator(
         ResolvedBinding binding,
         RegistrySnapshotCache registries,
         int maxInputCells,
+        ConcurrentBag<RowMatchSummary> rowMatches,
         CancellationToken ct)
     {
         var module = scopedModules.FirstOrDefault(m => m.CanHandle(binding.Descriptor));
@@ -260,9 +303,11 @@ public sealed class CalculationOrchestrator(
                 });
         }
 
-        var rowKeys = await scopedResolver
-            .MatchRowsAsync(binding.Descriptor.MethodologyVersionId, binding.TableInstanceId, ct)
+        var outcome = await scopedResolver
+            .MatchRowsDetailedAsync(binding.Descriptor.MethodologyVersionId, binding.TableInstanceId, ct)
             .ConfigureAwait(false);
+        IReadOnlyList<string> rowKeys = [.. outcome.Matches.Select(m => m.RowKey)];
+        rowMatches.Add(new RowMatchSummary(binding.TableInstanceId, rowKeys, outcome.AllRowKeys));
 
         // 4. Входи ПАКЕТНО: один запит на методологію × період, не N на рядок.
         var inputs = await scopedInputBuilder

@@ -184,6 +184,47 @@ public sealed class DocumentHeaderPatchTests(SqlServerFixture sql)
         Assert.Null(await StoredAreaAsync(s).ConfigureAwait(true));
     }
 
+    /// <remarks>
+    /// D-12: неіснуючий запис довідника в полі шапки типу Lookup раніше падав сирим порушенням
+    /// <c>FK_DocumentHeaderValue_Entry</c> (<c>500</c>); тепер — <c>422 ECR-HDR-0422</c> і нічого не збережено.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Неіснуючий_запис_довідника_у_шапці_дає_422_а_не_500()
+    {
+        var s = await ArrangeAsync().ConfigureAwait(true);
+
+        await using (var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext())
+        {
+            var registry = new RegistryDef(
+                EcrCode.Create($"HDRLK_{Guid.NewGuid():N}"[..20]),
+                new LocalizedText(new Dictionary<string, string> { ["en"] = "Lookup" }), isTemporal: false);
+            db.RegistryDefs.Add(registry);
+            await db.SaveChangesAsync().ConfigureAwait(true);
+
+            var areaField = await db.HeaderFieldDefs.SingleAsync(f => f.Id == s.AreaFieldId).ConfigureAwait(true);
+            var lookup = new HeaderFieldDef(
+                areaField.TemplateVersionId, EcrCode.Create("LK"),
+                new LocalizedText(new Dictionary<string, string> { ["en"] = "Lookup" }), 1, CellDataType.Lookup);
+            lookup.SetLookup(registry.Id);
+            db.HeaderFieldDefs.Add(lookup);
+            await db.SaveChangesAsync().ConfigureAwait(true);
+        }
+
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
+        var baseVersion = await VersionAsync(client, app, s.DocumentId).ConfigureAwait(true);
+
+        var response = await client.PatchAsJsonAsync(
+            HeaderUri(s.DocumentId),
+            new { fields = new[] { new { code = "LK", value = (object?)"999999999", isEmpty = false } }, baseVersion })
+            .ConfigureAwait(true);
+
+        var problem = await ProblemAsync(response, HttpStatusCode.UnprocessableEntity, app).ConfigureAwait(true);
+        Assert.Equal("ECR-HDR-0422", problem.GetProperty("errorCode").GetString());
+    }
+
     private static Uri HeaderUri(long documentId)
         => new($"/api/v1/documents/{documentId.ToString(CultureInfo.InvariantCulture)}/header", UriKind.Relative);
 

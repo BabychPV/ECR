@@ -186,7 +186,7 @@ public sealed class ValidationEngine(IFormulaEngine formulaEngine)
 
     private void Evaluate(
         ValidationRule rule,
-        IEvaluationContext context,
+        ValidationEvaluationContext context,
         int tableDefId,
         string? rowKey,
         string? columnCode,
@@ -250,6 +250,15 @@ public sealed class ValidationEngine(IFormulaEngine formulaEngine)
         }
 
         if ((bool)value.Value!)
+        {
+            return;
+        }
+
+        // ⛔ D-10/L-6: на неповному контексті `false` від правила, що прочитало
+        // ненадіслану комірку (`[s] = '' OR …` над Null), — не порушення даних:
+        // комірка просто ще не в зрізі. Повну оцінку дає «Перевірити»/подання;
+        // коли ВСІ входи правила надіслані — Error лишається як був.
+        if (partialContext && context.ReadUnseenCell)
         {
             return;
         }
@@ -355,9 +364,13 @@ public sealed class ValidationEngine(IFormulaEngine formulaEngine)
         public override IReadOnlyList<ExpressionValue> Read(CellReferenceNode reference)
         {
             ArgumentNullException.ThrowIfNull(reference);
-            return [string.Equals(reference.ColumnSelector, columnCode, StringComparison.OrdinalIgnoreCase)
-                ? value
-                : ExpressionValue.Null];
+            if (!string.Equals(reference.ColumnSelector, columnCode, StringComparison.OrdinalIgnoreCase))
+            {
+                ReadUnseenCell = true;
+                return [ExpressionValue.Null];
+            }
+
+            return [value];
         }
     }
 
@@ -374,6 +387,15 @@ public sealed class ValidationEngine(IFormulaEngine formulaEngine)
             var raw = reference.Row is RowSelector.Single single
                 ? inner.GetCell(single.RowKey, reference.ColumnSelector)
                 : inner.GetCell(reference.ColumnSelector);
+
+            // D-10/L-6: комірка, якої немає в надісланому зрізі, — не «порожня»,
+            // а «невідома». Контекст без IPartialValidationContext (повний зріз,
+            // тести) нічого не позначає: там Null — справжня порожнеча.
+            if (raw is null && inner is IPartialValidationContext partial
+                && !partial.IsKnown(reference.Row is RowSelector.Single s ? s.RowKey : null, reference.ColumnSelector))
+            {
+                ReadUnseenCell = true;
+            }
 
             return [FromObject(raw)];
         }
@@ -394,6 +416,17 @@ public sealed class ValidationEngine(IFormulaEngine formulaEngine)
                 _ => ExpressionValue.Text(raw.ToString() ?? string.Empty),
             };
     }
+}
+
+/// <summary>
+/// D-10/L-6: контекст неповного зрізу (PATCH) вміє сказати, чи є комірка в зрізі.
+/// <c>GetCell</c> = <c>null</c> для ненадісланої й для стертої комірки; стерта —
+/// <c>IsKnown</c> = <c>true</c> (користувач очистив її свідомо), ненадіслана — <c>false</c>.
+/// </summary>
+public interface IPartialValidationContext : IValidationContext
+{
+    /// <summary>Чи є комірка (рядок за ключем або поточний, якщо <c>null</c>) у надісланому зрізі.</summary>
+    public bool IsKnown(string? rowKey, string columnCode);
 }
 
 /// <summary>Контекст для правил рівня рядка і вище.</summary>

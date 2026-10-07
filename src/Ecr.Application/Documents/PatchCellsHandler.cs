@@ -2678,7 +2678,10 @@ public sealed partial class PatchCellsHandler(
 
             messages.AddRange(validation
                 .ValidateScope(
-                    scope: 1, rules, new PatchRowValidationContext(row.RowKey, typed), headerValues,
+                    scope: 1, rules, new PatchRowValidationContext(
+                        row.RowKey, typed,
+                        row.Cells.Select(c => c.ColumnCode).ToHashSet(StringComparer.OrdinalIgnoreCase)),
+                    headerValues,
                     currentUser.Language, registryFields, partialContext: true)
                 .Select(m => m with { RowKey = row.RowKey }));
         }
@@ -2693,9 +2696,16 @@ public sealed partial class PatchCellsHandler(
     /// стосувалося б стану, який зараз перезаписується. Значення вже розібрані
     /// за типом колонки (див. <see cref="Validate"/>); стерта комірка — відсутня.
     /// </remarks>
-    private sealed class PatchRowValidationContext(string rowKey, IReadOnlyDictionary<string, object?> values)
-        : Validation.IValidationContext
+    private sealed class PatchRowValidationContext(
+        string rowKey, IReadOnlyDictionary<string, object?> values, IReadOnlySet<string> sentColumns)
+        : Validation.IPartialValidationContext
     {
+        // D-10/L-6: «надіслано» ≠ «має значення»: стерта комірка надіслана (відома,
+        // порожня), ненадіслана — невідома, її правила рядка не оцінюють.
+        public bool IsKnown(string? otherRowKey, string columnCode)
+            => (otherRowKey is null || string.Equals(otherRowKey, rowKey, StringComparison.Ordinal))
+               && (sentColumns.Contains(columnCode) || values.ContainsKey(columnCode));
+
         public object? GetCell(string columnCode) => values.GetValueOrDefault(columnCode);
 
         public object? GetCell(string otherRowKey, string columnCode)
