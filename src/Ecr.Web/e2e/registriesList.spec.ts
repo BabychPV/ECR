@@ -32,6 +32,20 @@ test.describe('Перелік довідників: шторка і «Open data�
     test.setTimeout(120_000);
     await page.setViewportSize({ width: 1440, height: 900 });
     await signIn(page);
+
+    // ⚠ Свіжий стенд довідників не має (сід їх не заводить — це дані), а перелік
+    // без рядків не малює таблицю. Тому спека сама заводить порожній довідник
+    // тим самим входом, що й людина (`page.request` ділить куки з вкладкою).
+    // Поле не потрібне: тут перевіряється шторка й «Open data», а не записи.
+    const existing = await page.request.get('/api/v1/registries');
+    const list = existing.ok() ? ((await existing.json()) as unknown[]) : [];
+    if (list.length === 0) {
+      const created = await page.request.post('/api/v1/registries', {
+        data: { code: `E2E_REG_${Date.now()}`, nameL10n: { en: 'E2E registry' }, isTemporal: false },
+      });
+      expect(created.status(), `створення довідника: ${await created.text()}`).toBe(201);
+    }
+
     await page.goto('/admin/registries');
 
     const table = page.locator('[data-list-table] table');
