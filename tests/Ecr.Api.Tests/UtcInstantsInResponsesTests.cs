@@ -80,8 +80,8 @@ public sealed partial class UtcInstantsInResponsesTests(SqlServerFixture sql)
         var endpoints = new (string Path, string[] Required)[]
         {
             ($"/api/v1/documents?projectId={document.ProjectId}", ["createdAt", "modifiedAt"]),
-            // Картка документа `modifiedAt` не віддає за задумом (`DocumentStore.FindAsync`).
-            ($"/api/v1/documents/{d}", ["createdAt"]),
+            // D-12: картка (`DocumentStore.FindAsync`) віддає `modifiedAt` так само, як перелік.
+            ($"/api/v1/documents/{d}", ["createdAt", "modifiedAt"]),
             ($"/api/v1/documents/{d}/versions?periodKey={p}", ["submittedAt"]),
             ($"/api/v1/documents/{d}/workflow/history?periodKey={p}", ["at"]),
             ("/api/v1/jobs?mine=true", ["createdAt", "updatedAt"]),

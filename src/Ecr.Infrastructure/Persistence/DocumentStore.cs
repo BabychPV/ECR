@@ -68,6 +68,10 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
             .Select(d => new
             {
                 d.Id, d.ProjectId, d.BusinessKey, d.CreatedAt, d.NameL10n,
+                // D-12: картка читає «коли й ким змінено» так само, як перелік (`ListAsync`); раніше ці поля тут
+                // не вибирались, і картка віддавала `null` усім. Звуженому читачеві їх знімає R-7 (`DocumentSheetVisibility.For`).
+                d.ModifiedAt,
+                ModifiedBy = db.Users.Where(u => u.Id == d.ModifiedByUserId).Select(u => u.DisplayName).FirstOrDefault(),
                 Owner = db.Users.Where(u => u.Id == d.CreatedByUserId).Select(u => u.DisplayName).FirstOrDefault(),
                 // К6: «хто затвердив» - у тому самому запиті (без додаткового роундтрипу).
                 Approver = db.Users.Where(u => u.Id ==
@@ -107,7 +111,9 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
 
         return new DocumentSummary(
             document.Id, document.ProjectId, document.BusinessKey, document.CreatedAt, sheetCount,
-            ToStateMap(sheets), document.NameL10n, HasLateEdits: late.Contains(documentId),
+            ToStateMap(sheets), document.NameL10n,
+            ModifiedAt: document.ModifiedAt, ModifiedByDisplayName: document.ModifiedBy,
+            HasLateEdits: late.Contains(documentId),
             Sheets: sheets, IncludedSheetCodes: included.GetValueOrDefault(documentId),
             OwnerDisplayName: document.Owner,
             ApproverDisplayName: document.Approver);
