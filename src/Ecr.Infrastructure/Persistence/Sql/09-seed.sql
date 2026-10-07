@@ -7261,8 +7261,12 @@ USING (VALUES
     (N'workflow.recalculateCalculations', N'en', N'Recalculate calculations', 1),
     -- COLL:b-stale-badge ── кінець секції ──
     -- COLL:dps-required-header ── D-PS: подання з порожнім обов'язковим полем шапки (SubmitSheetHandler); ru/kz — порцією COLL:dps-required-header у блоці I18N нижче ──
-    (N'err.ECR-HDR-0422.requiredAtSubmit', N'en', N'The sheet cannot be submitted: required header field(s) are empty: {headerFieldCodes}. Fill them in the document header and submit again.', 1)
+    (N'err.ECR-HDR-0422.requiredAtSubmit', N'en', N'The sheet cannot be submitted: required header field(s) are empty: {headerFieldCodes}. Fill them in the document header and submit again.', 1),
     -- COLL:dps-required-header ── кінець секції ──
+    -- COLL:mkeys ── D1: перенос проєкту відмовляє, коли правила/обов'язкові входи методології посилаються на колонки іншої версії шаблону; ru/kz — порцією COLL:mkeys нижче ──
+    (N'err.ECR-SCHM-0422.migrateMethodologyKeysNotMapped', N'en', N'A methodology bound to the target version has a published version whose rules or required inputs refer to columns of another version of this template (see methodologyKeys). After the move those rules would match no rows, so nothing would be calculated, and a blocking required input could never be satisfied. Publish a methodology version whose rules and required inputs point to the target version''s columns, then move the project.', 1),
+    (N'documents.migrateRefusalMethodologyKeysNotMapped', N'en', N'Methodology rules or required inputs refer to columns of another template version; after the move they would match nothing.', 1)
+    -- COLL:mkeys ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -17676,6 +17680,18 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:dps-required-header ── кінець секції ──
+-- COLL:mkeys ── ru/kz D1: відмова переносу, коли правила/обов'язкові входи методології посилаються на колонки іншої версії шаблону; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-SCHM-0422.migrateMethodologyKeysNotMapped', N'ru', N'У методологии, привязанной к целевой версии, есть опубликованная версия, правила или обязательные входы которой ссылаются на колонки другой версии этого шаблона (см. methodologyKeys). После переноса эти правила не совпали бы ни с одной строкой — ничего не считалось бы, а блокирующий обязательный вход нельзя было бы удовлетворить. Опубликуйте версию методологии, правила и обязательные входы которой указывают на колонки целевой версии, затем переносите проект.'),
+    (N'err.ECR-SCHM-0422.migrateMethodologyKeysNotMapped', N'kz', N'Мақсатты нұсқаға байланған әдістеменің жарияланған нұсқасы бар, оның ережелері немесе міндетті кірістері осы үлгінің басқа нұсқасының бағандарына сілтейді (methodologyKeys қараңыз). Көшіруден кейін бұл ережелер бірде-бір жолға сәйкес келмес еді — ештеңе есептелмес еді, ал бұғаттаушы міндетті кірісті қанағаттандыру мүмкін болмас еді. Ережелері мен міндетті кірістері мақсатты нұсқаның бағандарын көрсететін әдістеме нұсқасын жариялаңыз, содан кейін жобаны көшіріңіз.'),
+    (N'documents.migrateRefusalMethodologyKeysNotMapped', N'ru', N'Правила или обязательные входы методологии ссылаются на колонки другой версии шаблона; после переноса они ничему не соответствовали бы.'),
+    (N'documents.migrateRefusalMethodologyKeysNotMapped', N'kz', N'Әдістеме ережелері немесе міндетті кірістері үлгінің басқа нұсқасының бағандарына сілтейді; көшіруден кейін олар ешнәрсеге сәйкес келмес еді.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:mkeys ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

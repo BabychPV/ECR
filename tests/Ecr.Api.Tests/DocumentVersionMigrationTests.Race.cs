@@ -214,6 +214,9 @@ public sealed partial class DocumentVersionMigrationTests
             int sourceVersionId, IReadOnlyDictionary<int, int> columnMap, CancellationToken ct)
             => inner.CountUnmappedBindingsAsync(sourceVersionId, columnMap, ct);
 
+        public Task<IReadOnlyList<string>> ListForeignMethodologyKeysAsync(int targetVersionId, int limit, CancellationToken ct)
+            => inner.ListForeignMethodologyKeysAsync(targetVersionId, limit, ct);
+
         public Task<GrantedUsers> ListUsersWithGrantsAsync(VersionMigrationPlan plan, int limit, CancellationToken ct)
             => inner.ListUsersWithGrantsAsync(plan, limit, ct);
 
