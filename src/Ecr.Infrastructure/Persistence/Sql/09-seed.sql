@@ -7253,8 +7253,12 @@ USING (VALUES
     -- COLL:l4norule ── кінець секції ──
     -- COLL:d13bindings ── D-13: перенос проєкту на версію шаблону відмовляє, якщо активна прив'язка методології не має відповідника в цільовій; ru/kz — порцією COLL:d13bindings нижче ──
     (N'err.ECR-SCHM-0422.migrateBindingsNotMapped', N'en', N'The target version has no active binding of a methodology output on the matching column (or the column itself is missing), so after the move that column would stay empty without any error. Clone the version again from the one being moved from (a clone now carries bindings), or switch the binding off deliberately, then move the project.', 1),
-    (N'documents.migrateRefusalBindingsNotMapped', N'en', N'Methodology outputs are bound to columns that have no matching binding in the target version; those columns would be left empty.', 1)
+    (N'documents.migrateRefusalBindingsNotMapped', N'en', N'Methodology outputs are bound to columns that have no matching binding in the target version; those columns would be left empty.', 1),
     -- COLL:d13bindings ── кінець секції ──
+    -- COLL:b-stale-badge ── лінія B: бейдж «Результати методологій застарілі» і пункт «Recalculate calculations» у More; ru/kz — порцією COLL:b-stale-badge нижче ──
+    (N'documents.methodologyResultsStale', N'en', N'Methodology results are out of date', 1),
+    (N'workflow.recalculateCalculations', N'en', N'Recalculate calculations', 1)
+    -- COLL:b-stale-badge ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -17644,6 +17648,18 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:d13bindings ── кінець секції ──
+-- COLL:b-stale-badge ── ru/kz лінії B: бейдж застарілих результатів методологій; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'documents.methodologyResultsStale', N'ru', N'Результаты методологий устарели'),
+    (N'documents.methodologyResultsStale', N'kz', N'Әдістемелер нәтижелері ескірген'),
+    (N'workflow.recalculateCalculations', N'ru', N'Пересчитать расчёты'),
+    (N'workflow.recalculateCalculations', N'kz', N'Есептеулерді қайта есептеу')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:b-stale-badge ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

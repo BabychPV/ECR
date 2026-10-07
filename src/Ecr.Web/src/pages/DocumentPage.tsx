@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useState, type JSX } from 'react';
-import { Alert, Skeleton, Stack, Tabs, Text } from '@mantine/core';
+import { Alert, Badge, Skeleton, Stack, Tabs, Text } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useParams } from 'react-router-dom';
@@ -29,6 +29,7 @@ import { documentLockOf, hasLockedSheet, locksDataActions } from '@/features/doc
 import { DocumentProgress } from '@/features/documents/DocumentProgress';
 import { useDocumentPending } from '@/features/grid/autosave';
 import { isEditable } from '@/features/workflow/SheetActions';
+import { useCalculationsStale } from '@/features/methodologies/staleCalculations';
 import { can, useSession } from '@/shared/session/useSession';
 import { localized } from '@/shared/i18n/localized';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
@@ -503,6 +504,10 @@ export function DocumentPage(): JSX.Element {
   // «History» і «Compare versions» — пункти «More» + лінивий діалог (макет: блоків між шапкою й сіткою немає).
   const documentLog = useDocumentLogActions({ documentId, periodKey });
 
+  // ✎ Лінія B: бейдж у шапці й назва пункту «More», коли числа методологій застаріли. Запит спільний із
+  // панеллю чисел (один ключ), тож завершений перерахунок оновлює обох.
+  const calculationsStale = useCalculationsStale(documentId, periodKey, can(session.data, 'Calculation.View'));
+
   const refetchBoth = (): void => {
     void summary.refetch();
     void tables.refetch();
@@ -591,6 +596,7 @@ export function DocumentPage(): JSX.Element {
             loading: validateLoading || validateAction.settling,
             run: () => validateAction.run(() => validate.mutateAsync(scope), { readOnly: true }),
           }}
+          calculationsStale={calculationsStale}
           documentItems={[...documentLog.menuItems, businessKeyChange.menuItem, versionMigration.menuItem, deletion.menuItem]}
           status={
             <>
@@ -607,6 +613,11 @@ export function DocumentPage(): JSX.Element {
                 onShowIssues={() => undefined}
               />
               <DocumentSaveState readOnly={readOnly} />
+              {calculationsStale && (
+                <Badge color="statusWarning" variant="light" role="status" data-testid="document-methodology-stale">
+                  {t('documents.methodologyResultsStale')}
+                </Badge>
+              )}
             </>
           }
         />

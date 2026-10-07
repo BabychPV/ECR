@@ -28,6 +28,8 @@ interface DocumentActionBarProps {
   readonly language: string;
   readonly canImport: boolean;
   readonly canExport: boolean;
+  /** Числа методологій застаріли: пункт перерахунку в «More» називається «Recalculate calculations». */
+  readonly calculationsStale?: boolean;
   /** Перевірка: лише читає збережене. */
   readonly validate: { readonly loading: boolean; readonly run: () => void };
   /** Рідкісні дії документа (зміна ключа, перенос версії, видалення) — кінцем меню. */
@@ -61,6 +63,7 @@ export function DocumentActionBar({
   language,
   canImport,
   canExport,
+  calculationsStale = false,
   validate,
   documentItems,
   status,
@@ -120,7 +123,11 @@ export function DocumentActionBar({
         rightSection={<RecalculateKbd />}
       >
         <Text size="sm">
-          {actions.recalculate.running ? t('workflow.recalcRunning') : t('workflow.recalculate')}
+          {actions.recalculate.running
+            ? t('workflow.recalcRunning')
+            : calculationsStale
+              ? t('workflow.recalculateCalculations')
+              : t('workflow.recalculate')}
         </Text>
         <Text size="xs" c="dimmed" maw={280}>
           {t('workflow.recalculateHint')}
