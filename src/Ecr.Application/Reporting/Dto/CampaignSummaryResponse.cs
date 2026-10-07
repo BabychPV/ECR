@@ -39,6 +39,8 @@ public sealed record CampaignSummaryResponse(
 /// ⛔ Чотири лічильники станів (<c>Draft</c>…<c>Rejected</c>) — «найгірший стан серед усіх аркушів» документа, тож
 /// зараховують і ПРИХОВАНІ аркуші: різниця між двома читачами була б оракулом стану прихованого (R-1). Тому
 /// <c>null</c> для читача без <c>SheetVisibility.SeesAllSheets</c> (так само, як <c>SheetsTotal</c>).
+/// ⛔ Те саме для <c>Done</c>/<c>Overdue</c>/<c>AtRisk</c>/<c>InProgress</c> і <c>Progress</c> рядка: клас
+/// «усе затверджено» залежить від станів УСІХ аркушів, тож розбиття проєктів на класи розкрило б стан прихованих (R-1).
 /// </remarks>
 /// <param name="Snapshots">Сума поточних зрізів.</param>
 /// <param name="Done">Проєктів у стані <see cref="CampaignProgress.Done"/>.</param>
@@ -61,10 +63,10 @@ public sealed record CampaignTotals(
     int? Approved,
     int? Rejected,
     int Snapshots,
-    int Done,
-    int Overdue,
-    int AtRisk,
-    int InProgress,
+    int? Done,
+    int? Overdue,
+    int? AtRisk,
+    int? InProgress,
     int? SheetsTotal = null,
     int? NotSubmittedSheets = null);
 
@@ -130,7 +132,7 @@ public sealed record CampaignProjectSummary(
     int? Approved,
     int? Rejected,
     int Snapshots,
-    CampaignProgress Progress,
+    CampaignProgress? Progress,
     DateTimeOffset? SubmissionDeadline,
     int? SheetsTotal = null,
     int? NotSubmittedSheets = null);

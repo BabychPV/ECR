@@ -64,6 +64,7 @@ public sealed class GetCampaignSummaryHandler(
         // (явна заборона / грант None). Інакше `null`: різниця «з забороною / без» розкривала б приховане.
         // R-1: лічильники станів документів (Draft/Submitted/Approved/Rejected) — «найгірший стан серед усіх аркушів», тож
         // рахують і приховані; для такого читача теж `null`. Кількість документів/зрізів лишається (Q15-07: право без межі проєктів).
+        // R-1 (прогрес): Progress/Done/Overdue/AtRisk/InProgress залежать від «усе затверджено» по ВСІХ аркушах, тож теж `null`.
         var allSheets = SheetVisibility.SeesAllSheets(profile);
 
         var key = PeriodKey.Parse(periodKey);
@@ -89,7 +90,7 @@ public sealed class GetCampaignSummaryHandler(
                 allSheets ? p.Approved : null,
                 allSheets ? p.Rejected : null,
                 p.Snapshots,
-                progress,
+                allSheets ? progress : null,
                 p.SubmissionDeadlineUtc is { } deadline ? ToSite(deadline, zone) : null,
                 allSheets ? p.Sheets : null,
                 allSheets ? p.NotSubmittedSheets : null);
@@ -114,10 +115,10 @@ public sealed class GetCampaignSummaryHandler(
             allSheets ? page.Buckets.Sum(b => b.Approved) : null,
             allSheets ? page.Buckets.Sum(b => b.Rejected) : null,
             page.Buckets.Sum(b => b.Snapshots),
-            progressCounts.GetValueOrDefault(CampaignProgress.Done),
-            progressCounts.GetValueOrDefault(CampaignProgress.Overdue),
-            progressCounts.GetValueOrDefault(CampaignProgress.AtRisk),
-            progressCounts.GetValueOrDefault(CampaignProgress.InProgress),
+            allSheets ? progressCounts.GetValueOrDefault(CampaignProgress.Done) : null,
+            allSheets ? progressCounts.GetValueOrDefault(CampaignProgress.Overdue) : null,
+            allSheets ? progressCounts.GetValueOrDefault(CampaignProgress.AtRisk) : null,
+            allSheets ? progressCounts.GetValueOrDefault(CampaignProgress.InProgress) : null,
             allSheets ? page.Buckets.Sum(b => b.Sheets) : null,
             allSheets ? page.Buckets.Sum(b => b.NotSubmittedSheets) : null);
 

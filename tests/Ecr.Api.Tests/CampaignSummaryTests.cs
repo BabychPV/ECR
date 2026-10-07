@@ -116,6 +116,7 @@ public sealed class CampaignSummaryTests(SqlServerFixture sql)
         Assert.Equal("InProgress", row.GetProperty("progress").GetString());
         Assert.Equal(JsonValueKind.Null, row.GetProperty("submissionDeadline").ValueKind);
         Assert.True(body.GetProperty("totals").GetProperty("projects").GetInt32() >= 1);
+        Assert.True(body.GetProperty("totals").GetProperty("inProgress").GetInt32() >= 1);
 
         // ⛔ Лічильники — і нічого крім них (рішення `Q15-07`: «без значень»).
         // Поля зі значеннями комірок чи сумами зрізу тут бути не може: воно
@@ -161,6 +162,13 @@ public sealed class CampaignSummaryTests(SqlServerFixture sql)
         foreach (var field in new[] { "draft", "submitted", "approved", "rejected" })
         {
             Assert.Equal(JsonValueKind.Null, row.GetProperty(field).ValueKind);
+            Assert.Equal(JsonValueKind.Null, totals.GetProperty(field).ValueKind);
+        }
+
+        // R-1: клас прогресу («усе затверджено» по всіх аркушах) і лічильники класів теж null.
+        Assert.Equal(JsonValueKind.Null, row.GetProperty("progress").ValueKind);
+        foreach (var field in new[] { "done", "overdue", "atRisk", "inProgress" })
+        {
             Assert.Equal(JsonValueKind.Null, totals.GetProperty(field).ValueKind);
         }
 
