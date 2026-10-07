@@ -105,7 +105,7 @@ public sealed class RuleCoverageReader(EcrDbContext db) : IRuleCoverageReader
                 {
                     ValueString = reader.IsDBNull(o) ? null : reader.GetString(o),
                     ValueNumeric = reader.IsDBNull(o + 1) ? null : reader.GetDecimal(o + 1),
-                    ValueRegistryEntryId = reader.IsDBNull(o + 2) ? null : reader.GetInt64(o + 2),
+                    ValueRegistryEntryId = reader.IsDBNull(o + 2) ? null : Convert.ToInt64(reader.GetValue(o + 2), CultureInfo.InvariantCulture), // колонка int, властивість long
                     ValueBool = reader.IsDBNull(o + 3) ? null : reader.GetBoolean(o + 3),
                 };
                 values[i] = value is { ValueString: null, ValueNumeric: null, ValueRegistryEntryId: null, ValueBool: null }
