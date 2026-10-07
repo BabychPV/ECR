@@ -127,11 +127,11 @@ describe('PeriodPicker: сітка періодів (UI-13)', () => {
       {
         1: calendar(1, [
           { key: 202608, state: 'Closed' },
-          { key: 202609, state: 'Open', closesInDays: 12 },
+          { key: 202609, state: 'Open', closesInDays: 12.5 },
         ]),
         2: calendar(2, [
           { key: 202608, state: 'Closed' },
-          { key: 202609, state: 'Open', closesInDays: 20 },
+          { key: 202609, state: 'Open', closesInDays: 20.5 },
         ]),
       },
       <PeriodPicker value={202609} onChange={vi.fn()} projectIds={[1, 2]} />,
@@ -169,7 +169,7 @@ describe('PeriodPicker: сітка періодів (UI-13)', () => {
 describe('summarizePeriodStates', () => {
   const at = (days: number): string => new Date(Date.UTC(2026, 8, days)).toISOString();
 
-  it('однаковий стан — uniform; найвідкритіший перемагає; Open закривається на початку пільги', () => {
+  it('однаковий стан — uniform; найвідкритіший перемагає; закриття — endsAt, не початок пільги', () => {
     const states = summarizePeriodStates([
       [
         { periodKey: 202609, state: 'Open', endsAt: at(30), graceEndsAt: at(15) },
@@ -178,8 +178,9 @@ describe('summarizePeriodStates', () => {
       [{ periodKey: 202609, state: 'Grace', endsAt: at(20), graceEndsAt: at(10) }],
     ]);
 
-    expect(states.get(202609)).toEqual({ state: 'Open', uniform: false, inState: 1, total: 2, closesAt: at(15) });
-    expect(states.get(202608)).toEqual({ state: 'Closed', uniform: true, inState: 1, total: 1, closesAt: null });
+    // Закриття — `endsAt` (жорстке), а не `graceEndsAt` (початок пільги): P2-1.
+    expect(states.get(202609)).toEqual({ state: 'Open', uniform: false, inState: 1, total: 2, closesAt: at(30), closesZone: 'UTC' });
+    expect(states.get(202608)).toEqual({ state: 'Closed', uniform: true, inState: 1, total: 1, closesAt: null, closesZone: 'UTC' });
   });
 
   it('невідомий стан пропускається, а не стає «Closed»', () => {

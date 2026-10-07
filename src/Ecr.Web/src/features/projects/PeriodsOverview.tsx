@@ -4,6 +4,7 @@ import { useQueries } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import type { PagedProjects, PeriodCalendarDto } from '@/api/types';
 import { formatCount, formatPeriodKey } from '@/shared/format';
+import { DayMs, wholeDaysUntil } from '@/shared/siteMoment';
 import { DataTable, type DataTableColumn } from '@/shared/ui/DataTable';
 import { StatStrip } from '@/shared/ui/StatStrip';
 import { StatusBadge, statusKey } from '@/shared/ui/StatusBadge';
@@ -27,9 +28,6 @@ import { t } from '@/shared/i18n';
  * проєкту в API немає (`PeriodCalendarDto`, `campaign/summary` їх не несуть),
  * а порожня колонка «0» була б неправдою (`D15-06`).
  */
-
-/** Межа дня в мілісекундах — для «closes in N days». */
-const DayMs = 24 * 60 * 60 * 1000;
 
 /** Поріг показника «closing in ≤ 3 days» — як у макеті. */
 const SoonDays = 3;
@@ -60,10 +58,7 @@ export function currentPeriodOf(calendar: PeriodCalendarDto): Period | null {
 export function daysLeft(period: Period, now: number): number | null {
   if (period.state !== 'Open' && period.state !== 'Grace') return null;
 
-  const left = Date.parse(period.endsAt) - now;
-  if (!Number.isFinite(left)) return null;
-
-  return Math.max(0, Math.floor(left / DayMs));
+  return wholeDaysUntil(period.endsAt, now);
 }
 
 function closesText(days: number): string {

@@ -3,7 +3,8 @@ import { useQueries } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import type { PeriodCalendarDto } from '@/api/types';
 import { Text } from '@mantine/core';
-import { formatCount, formatDate } from '@/shared/format';
+import { formatCount } from '@/shared/format';
+import { siteMomentText, wholeDaysUntil } from '@/shared/siteMoment';
 import { t } from '@/shared/i18n';
 
 /** Стан періоду так, як його віддає календар проєкту (`PeriodDto.state`). */
@@ -30,8 +31,15 @@ export interface PeriodStateSummary {
   readonly uniform: boolean;
   readonly inState: number;
   readonly total: number;
-  /** Коли стан скінчиться (найраніше серед проєктів у цьому стані): Open — початок пільги, Grace — жорстке закриття. */
+  /**
+   * Жорстке закриття (`endsAt`, виключна межа) — найраніше серед проєктів у цьому стані, для `Open` і `Grace`.
+   *
+   * ⛔ Не `graceEndsAt`: це початок пільги, а не закриття, і підпис Documents
+   * розходився з Periods на місяць (P2-1, приймальна RC8 №6; картка UI-13).
+   */
   readonly closesAt: string | null;
+  /** Пояс проєкту, чия межа `closesAt`; у ньому й показується дата. */
+  readonly closesZone: string;
 }
 
 const Precedence: readonly PeriodStateName[] = ['Open', 'Grace', 'Scheduled', 'Closed'];
@@ -43,34 +51,37 @@ function isStateName(value: string): value is PeriodStateName {
 /** Зведення станів за `periodKey` з кількох календарів. Стан, якого клієнт не знає, пропускається. */
 export function summarizePeriodStates(
   calendars: readonly (readonly CalendarPeriod[])[],
+  /** Пояс кожного календаря (`PeriodCalendarDto.timeZoneId`), в тому ж порядку; без нього — UTC. */
+  zones: readonly string[] = [],
 ): ReadonlyMap<number, PeriodStateSummary> {
-  const byKey = new Map<number, CalendarPeriod[]>();
+  const byKey = new Map<number, { period: CalendarPeriod; zone: string }[]>();
 
-  for (const periods of calendars) {
+  calendars.forEach((periods, index) => {
     for (const period of periods) {
       if (!isStateName(period.state)) continue;
       const list = byKey.get(period.periodKey) ?? [];
-      list.push(period);
+      list.push({ period, zone: zones[index] ?? 'UTC' });
       byKey.set(period.periodKey, list);
     }
-  }
+  });
 
   const result = new Map<number, PeriodStateSummary>();
 
   for (const [key, periods] of byKey) {
-    const state = Precedence.find((name) => periods.some((period) => period.state === name)) ?? 'Closed';
-    const inState = periods.filter((period) => period.state === state);
+    const state = Precedence.find((name) => periods.some((entry) => entry.period.state === name)) ?? 'Closed';
+    const inState = periods.filter((entry) => entry.period.state === state);
     const ends = inState
-      .map((period) => (state === 'Open' ? (period.graceEndsAt ?? period.endsAt) : period.endsAt))
-      .filter((value) => !Number.isNaN(Date.parse(value)))
-      .sort((left, right) => Date.parse(left) - Date.parse(right));
+      .map((entry) => ({ at: entry.period.endsAt, zone: entry.zone }))
+      .filter((entry) => !Number.isNaN(Date.parse(entry.at)))
+      .sort((left, right) => Date.parse(left.at) - Date.parse(right.at));
 
     result.set(key, {
       state,
       uniform: inState.length === periods.length,
       inState: inState.length,
       total: periods.length,
-      closesAt: state === 'Open' || state === 'Grace' ? (ends[0] ?? null) : null,
+      closesAt: state === 'Open' || state === 'Grace' ? (ends[0]?.at ?? null) : null,
+      closesZone: ends[0]?.zone ?? 'UTC',
     });
   }
 
@@ -107,7 +118,12 @@ export function PeriodStatesLoader({
 
   useEffect(() => {
     onChange(
-      ready ? summarizePeriodStates(calendars.map((calendar) => calendar.data?.periods ?? [])) : undefined,
+      ready
+        ? summarizePeriodStates(
+            calendars.map((calendar) => calendar.data?.periods ?? []),
+            calendars.map((calendar) => calendar.data?.timeZoneId ?? 'UTC'),
+          )
+        : undefined,
     );
     // ⚠ Лише `stamp`: він описує `calendars` повністю, а `onChange` — сеттер стану.
   }, [stamp]);
@@ -173,11 +189,13 @@ export function PeriodStateChip({ summary }: { summary: PeriodStateSummary }): J
   );
 }
 
-const DayMs = 24 * 60 * 60 * 1000;
-
 /**
  * «Open · closes in 12 days · 30 Sep 2026» (макет `10-docs-list-light.png`).
  * Лише для відкритого чи пільгового періоду й лише з датою в майбутньому.
+ *
+ * ⚠ Дата й число днів — ті самі правила, що й на Periods (`wholeDaysUntil`,
+ * `siteMomentText` з `inclusiveEnd`): останній день у поясі майданчика, повні
+ * доби до жорсткого закриття (P2-1).
  */
 export function deadlineText(summary: PeriodStateSummary, now: number = Date.now()): string | null {
   if (summary.closesAt === null) return null;
@@ -185,12 +203,12 @@ export function deadlineText(summary: PeriodStateSummary, now: number = Date.now
   const at = Date.parse(summary.closesAt);
   if (Number.isNaN(at) || at <= now) return null;
 
-  const days = Math.ceil((at - now) / DayMs);
+  const days = wholeDaysUntil(summary.closesAt, now) ?? 0;
 
   return [
     periodStateText(summary),
-    formatCount(days, 'period.closesIn'),
-    formatDate(summary.closesAt, { day: 'numeric', month: 'short', year: 'numeric' }),
+    days === 0 ? t('periods.tile.closesToday') : formatCount(days, 'period.closesIn'),
+    siteMomentText(summary.closesAt, summary.closesZone, true, true) ?? summary.closesAt,
   ].join(' · ');
 }
 

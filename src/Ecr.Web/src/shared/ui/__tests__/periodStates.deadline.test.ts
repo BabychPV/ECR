@@ -46,7 +46,11 @@ function periodsNote(period: CalendarPeriod): string {
   };
   const calendar = { timeZoneId: Zone, policy: { openOffsetDays: 0 }, periods: [full] };
 
-  return periodNote(full as never, calendar as never, siteMomentText, Now);
+  // Так сторінка Periods віддає `siteDate` у `PeriodsOverview` (дата без часу).
+  const siteDate = (value: string, zone: string, inclusiveEnd: boolean): string | null =>
+    siteMomentText(value, zone, true, inclusiveEnd);
+
+  return periodNote(full as never, calendar as never, siteDate, Now);
 }
 
 describe('дедлайн періоду: Documents і Periods показують одне', () => {

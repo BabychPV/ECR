@@ -7,6 +7,21 @@ import { formatDate, formatDateTime } from '@/shared/format';
  * браузера — і дати розходилися (приймальна RC8 №6, P2-1).
  */
 
+/** Межа доби в мілісекундах. */
+export const DayMs = 24 * 60 * 60 * 1000;
+
+/**
+ * Повних діб до жорсткого закриття (`endsAt` — виключна межа); `0` — останній
+ * день сьогодні. `null` — рядок не розібрався. Єдина формула для «closes in N
+ * days» на Periods і на Documents (P2-1).
+ */
+export function wholeDaysUntil(endsAt: string, now: number): number | null {
+  const left = Date.parse(endsAt) - now;
+  if (!Number.isFinite(left)) return null;
+
+  return Math.max(0, Math.floor(left / DayMs));
+}
+
 /**
  * Годинник зони майданчика — для МАШИННОГО читання складників, не для екрана.
  *
