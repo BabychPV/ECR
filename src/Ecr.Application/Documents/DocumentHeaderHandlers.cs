@@ -167,7 +167,8 @@ public sealed class PatchDocumentHeaderHandler(
     IAuditWriter audit,
     IBackgroundJobScheduler jobs,
     Domain.Abstractions.IClock clock,
-    ISheetEditGate documentGate)
+    ISheetEditGate documentGate,
+    IRegistryStore registries)
 {
     /// <summary>Тип події журналу безпеки.</summary>
     public const string EventType = "DocumentHeaderChanged";
@@ -282,6 +283,31 @@ public sealed class PatchDocumentHeaderHandler(
             }
 
             toSave[field.Id] = data;
+        }
+
+        // ⛔ D-12: неіснуючий запис довідника в полі Lookup — 422 до запису, а не сире
+        // порушення FK_DocumentHeaderValue_Entry (500). Один запит на весь батч.
+        var lookupEntries = toSave
+            .Where(p => p.Value.ValueRegistryEntryId is not null)
+            .Select(p => (FieldId: p.Key, EntryId: p.Value.ValueRegistryEntryId!.Value))
+            .ToList();
+        if (lookupEntries.Count > 0)
+        {
+            var existing = await registries.FindExistingEntryIdsAsync(
+                [.. lookupEntries.Select(e => e.EntryId).Distinct()], ct).ConfigureAwait(false);
+            var missing = lookupEntries.FirstOrDefault(e => !existing.Contains(e.EntryId));
+            if (missing != default)
+            {
+                var missingCode = snapshot.HeaderFields.First(f => f.Id == missing.FieldId).Code;
+                throw new BusinessRuleException(
+                    ErrorCodes.HeaderValueInvalid,
+                    $"Значення поля шапки «{missingCode}» посилається на неіснуючий запис довідника {missing.EntryId}.",
+                    new Dictionary<string, object?>
+                    {
+                        ["messageKey"] = "err.ECR-HDR-0422.validationBlocked",
+                        ["headerFieldCode"] = missingCode,
+                    });
+            }
         }
 
         var codeById = snapshot.HeaderFields.ToDictionary(f => f.Id, f => f.Code);
