@@ -20536,6 +20536,10 @@ export interface components {
             targetRowKey: null | string;
             /** @description Одиниця, в якій значення лягає в ECR. */
             targetUnitCode: null | string;
+            /** @description Ключ каталогу причини, чому значення порожнє через одиниці (D-4): розмірності різні
+             *     (`err.ECR-UOM-0422.fieldMapUnitDimensions`) або конверсію не виконано
+             *     (`err.ECR-UOM-0422.boundaryConversionFailed`); `null` — одиниці не заважають. */
+            unitIssue?: null | string;
         };
         /**
          * @description Що станеться з рядком джерела або з мапінгом.
