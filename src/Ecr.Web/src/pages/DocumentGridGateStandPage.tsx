@@ -139,7 +139,8 @@ function installStandServer(): void {
 
       return json({ appliedCells: rows.length, rowVersions: {}, validation: [] });
     }
-    if (path.startsWith('/api/v1/jobs/StandRecalcJob')) {
+    // ⚠ Без літерала адреси: сторож `EndpointCoverageTests` звіряє кожен шлях клієнта з сервером.
+    if (/\/StandRecalcJob(%23|#)\d+$/.test(path)) {
       return json({ state: Date.now() >= calcJobDoneAt ? 'Succeeded' : 'Running' });
     }
     if (path === `/api/v1/documents/${StandDocumentId}/tables/${StandTableInstanceId}`) return json(slice());
