@@ -58,10 +58,12 @@ public sealed partial class DocumentVersionMigrationTests
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Finding", "D1")]
-    public async Task Методологія_з_ключами_на_колонки_вихідної_версії_блокує_перенос_і_видна_в_сухому_прогоні(KeyKind kind)
+    public async Task Методологія_з_ключами_на_колонку_якої_немає_в_цільовій_версії_блокує_перенос_і_видна_в_сухому_прогоні(KeyKind kind)
     {
-        var s = await ArrangeAsync(Target.OnlyLabels).ConfigureAwait(true);
-        await ArrangeMethodologyKeyAsync(s, s.Doc.ColumnDefIds[1], kind).ConfigureAwait(true);
+        // C1: ключ на колонку, що має відповідник за шляхом у цілі, перекладається при читанні і НЕ блокує
+        // (див. наступний тест). Відмова лишилась лише для колонки, яку ціль втратила: C3 вилучено.
+        var s = await ArrangeAsync(Target.DropsC3AddsC4AndRow).ConfigureAwait(true);
+        await ArrangeMethodologyKeyAsync(s, s.Doc.ColumnDefIds[2], kind).ConfigureAwait(true);
         var before = await SnapshotAsync(s).ConfigureAwait(true);
 
         using var app = new EcrApiFactory(sql);
@@ -79,8 +81,30 @@ public sealed partial class DocumentVersionMigrationTests
 
         // Відмова називає, ЩО саме посилається не на ту версію: код колонки в переліку.
         Assert.Contains("methodologyKeys", body, StringComparison.Ordinal);
-        Assert.Contains("C2_" + s.Tag, body, StringComparison.Ordinal);
+        Assert.Contains("C3_" + s.Tag, body, StringComparison.Ordinal);
         Assert.Equal(before, await SnapshotAsync(s).ConfigureAwait(true));
+    }
+
+    [Theory]
+    [InlineData(KeyKind.RuleKey)]
+    [InlineData(KeyKind.RequiredInput)]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "C1")]
+    public async Task Ключі_на_колонку_вихідної_версії_з_відповідником_за_шляхом_перенос_не_блокують(KeyKind kind)
+    {
+        // C1: C2 є в обох версіях під тим самим кодом аркуша/таблиці/колонки — правило/вимога перекладається при
+        // читанні (MethodologyKeyLocalizer), тож перенос безпечний.
+        var s = await ArrangeAsync(Target.OnlyLabels).ConfigureAwait(true);
+        await ArrangeMethodologyKeyAsync(s, s.Doc.ColumnDefIds[1], kind).ConfigureAwait(true);
+
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
+
+        var dry = JsonDocument.Parse(await (await PostAsync(client, s, "Safe", dryRun: true).ConfigureAwait(true))
+            .Content.ReadAsStringAsync().ConfigureAwait(true)).RootElement;
+        Assert.True(dry.GetProperty("canApply").GetBoolean(), dry.ToString());
+        Assert.DoesNotContain("methodologyKeysNotMapped", dry.GetProperty("refusals").EnumerateArray().Select(r => r.GetString()));
     }
 
     [Fact]

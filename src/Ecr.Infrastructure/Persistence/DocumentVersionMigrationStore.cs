@@ -260,9 +260,17 @@ public sealed class DocumentVersionMigrationStore(EcrDbContext db) : IDocumentVe
             .ToDictionaryAsync(c => c.Id, c => c.Path, ct)
             .ConfigureAwait(false);
 
+        // ⛔ C1: ключ, чия колонка має відповідник за шляхом (аркуш/таблиця/колонка) у цільовій версії, перекладається
+        // при читанні (`MethodologyKeyLocalizer`) і перенос НЕ блокує. Відмова лишається лише для ключів, які в
+        // цільовій версії втратили колонку (вилучена чи змінений код) — їх переклад неможливий, і правило/вхід
+        // мовчки перестали б діяти.
+        var translatable = await new ColumnPathMapper(db)
+            .MapToVersionAsync(columns.Keys.ToList(), targetVersionId, ct)
+            .ConfigureAwait(false);
+
         var byVersion = versions.ToDictionary(v => v.Id);
         return [.. refs
-            .Where(r => columns.ContainsKey(r.ColumnId))
+            .Where(r => columns.ContainsKey(r.ColumnId) && !translatable.ContainsKey(r.ColumnId))
             .Select(r => $"{byVersion[r.MethodologyVersionId].MethodologyCode} {byVersion[r.MethodologyVersionId].Version} "
                          + $"{r.Source}: {columns[r.ColumnId]}")
             .Distinct(StringComparer.Ordinal)

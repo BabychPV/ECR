@@ -3438,6 +3438,16 @@ public interface IValidationResultStore
 з іншого шаблону чи та сама — `422 ECR-TMPL-0422`. Подія — `aud.SecurityEvent`
 (`DocumentVersionMigrated`). Сигнатури — у `src/Ecr.Application/Ports/IDocumentVersionMigrationStore.cs`.
 
+#### `IColumnPathMapper`
+
+Переклад `ColumnDefId` однієї версії шаблону в Id тієї самої колонки іншої версії за шляхом «код аркуша → код
+таблиці → код колонки» (C1). Правила (`MethodologyRule.MatchJson`) й обов'язкові входи
+(`MethodologyRequiredInput.ColumnDefId`) опублікованої версії методології ключуються Id колонок версії шаблону, у якій їх
+писали, а сама версія незмінна й діє для всіх версій шаблону, тож Id у сховищі лишаються, а при читанні
+`MethodologyKeyLocalizer` перекладає їх на колонки версії документа (прогін, gate запису `ECR-CALC-0437`, зріз,
+матриця покриття, «де використовується»). Колонка без відповідника не мовчить: правило не збігається, вхід дає
+попередження. Міграцій і змін HTTP-контракту немає. Сигнатури — у `src/Ecr.Application/Ports/IColumnPathMapper.cs`.
+
 #### `IAccessProfileInvalidator`
 
 Скидання кешу профілів доступу ПРОЦЕСУ без зміни `SecurityStamp`: `InvalidateUser` видаляє
