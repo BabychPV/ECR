@@ -69,13 +69,15 @@ test.describe('Заголовок сторінки помилок: без рам
         expect(state.outline, `${path}: навколо заголовка рамка`).toBe('none');
         expect(state.lines, `${path}: заголовок переноситься`).toBe(1);
 
-        // Tab із заголовка — до посилання «Documents», і там кільце є.
+        // Tab із заголовка — до першої дії сторінки, і там кільце є. ✎ b4b: за макетом
+        // першою дією 404 може бути кнопка пошуку (Ctrl K), а не посилання.
         await page.keyboard.press('Tab');
         const next = await page.evaluate(() => {
           const a = document.activeElement;
           return a === null ? null : { tag: a.tagName, outline: getComputedStyle(a).outlineStyle };
         });
-        expect(next, `${path}: Tab із заголовка`).toEqual({ tag: 'A', outline: 'solid' });
+        expect(['A', 'BUTTON'], `${path}: Tab із заголовка — ${next?.tag ?? 'нікуди'}`).toContain(next?.tag);
+        expect(next?.outline, `${path}: кільце фокуса на першій дії`).toBe('solid');
       }
     });
   }
