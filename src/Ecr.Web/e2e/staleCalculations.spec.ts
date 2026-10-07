@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 
 /**
- * Застарілі числа методологій (лінія B) на живому стенді: бейдж у шапці документа і пункт
+ * Застарілі числа методологій (лінія B) на живому стенді: банер застарілості (StaleResultsBanner) над сіткою без бейджа в шапці і пункт
  * «Recalculate calculations» у «More». Запуск «Аудитом»: `tools/e2e-stand.ps1 … -Grep "методологій"`.
  *
  * ⚠ Числа, постановка перерахунку й стан задачі підмінені маршрутами: стенд не тримає документа зі
@@ -19,11 +19,20 @@ test.describe('застарілі результати методологій', 
     'ECR_E2E_OPTIONAL: стенда немає, перевіряти нічого. Стенд: tools/e2e-stand.ps1.',
   );
 
-  test('бейдж є, поки числа застарілі; «Recalculate calculations» перечитує числа, і бейдж зникає', async ({ page }) => {
+  test('банер є, поки числа застарілі, бейджа в шапці немає; «Recalculate calculations» перечитує числа, і пункт повертає звичайну назву', async ({ page }) => {
     test.slow();
 
     let stale = true;
     let recalcPosts = 0;
+    // Картка документа: resultsStale/resultsStaleSince керують банером; після перерахунку - свіжа.
+    await page.route(new RegExp(`/api/v1/documents/${DocumentId}(\\?.*)?$`), async (route) => {
+      const response = await route.fetch();
+      const body = (await response.json()) as Record<string, unknown>;
+      await route.fulfill({
+        response,
+        json: { ...body, resultsStale: stale, resultsStaleSince: stale ? '2026-10-07T10:00:00Z' : null },
+      });
+    });
     await page.route(`**/api/v1/documents/${DocumentId}/calculation-results**`, (route) =>
       route.fulfill({
         json: [{ rowKey: 'R1', outputCode: 'OUT', value: 1, unitId: 1, isStale: stale, changedRegistries: [] }],
@@ -39,16 +48,16 @@ test.describe('застарілі результати методологій', 
     await signIn(page);
     await page.goto(`/documents/${DocumentId}?periodKey=${PeriodKey}`);
 
-    // Початковий стан: бейдж видно.
-    const badge = page.getByTestId('document-methodology-stale');
-    await expect(badge).toBeVisible({ timeout: 60_000 });
+    // Початковий стан: банер видно, бейджа немає, у More - «Recalculate calculations».
+    const banner = page.getByTestId('document-stale-results');
+    await expect(banner).toBeVisible({ timeout: 60_000 });
+    await expect(page.getByTestId('document-methodology-stale')).toHaveCount(0);
 
-    // Дія: пункт з новою назвою в «More».
     await page.getByTestId('document-more').click();
     await page.getByRole('menuitem', { name: /Recalculate calculations|Пересчитать расчёты|Есептеулерді қайта есептеу/ }).click();
 
-    // Кінцевий стан: перерахунок поставлено, числа перечитано — бейджа немає.
-    await expect(badge).toHaveCount(0, { timeout: 30_000 });
+    // Кінцевий стан: перерахунок поставлено, картку й числа перечитано - банера немає.
+    await expect(banner).toHaveCount(0, { timeout: 30_000 });
     expect(recalcPosts).toBe(1);
   });
 });
