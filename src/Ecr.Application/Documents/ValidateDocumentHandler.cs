@@ -124,6 +124,24 @@ public sealed class ValidateDocumentHandler(
                 table, [.. table.Columns.Where(c => !c.IsDeleted && c.IsRequired)], cells, rowIds, currentUser.Language));
         }
 
+        // ⛔ D-PS / R-B3: «Перевірити» рахує те саме, що подання, — порожнє обов'язкове поле шапки.
+        // Версія — з екземплярів таблиць (документ без жодного екземпляра ще не відкривали). Значення
+        // читаються лише коли в шаблоні є обов'язкове поле. Лише коди полів, без значень.
+        if (instances.Count > 0)
+        {
+            var headerSnapshot = await metadata.GetAsync(instances[0].TemplateVersionId, ct).ConfigureAwait(false);
+            var requiredHeader = RequiredHeaderCheck.RequiredFields(headerSnapshot.HeaderFields);
+            if (requiredHeader.Count > 0)
+            {
+                var rawHeader = await headers.GetValuesAsync(documentId, ct).ConfigureAwait(false);
+                var emptyHeader = RequiredHeaderCheck.EmptyCodes(requiredHeader, rawHeader);
+                if (emptyHeader.Count > 0)
+                {
+                    messages.Add(RequiredHeaderCheck.ToMessage(emptyHeader));
+                }
+            }
+        }
+
         // D-230: зв'язки Check (ПРИПУЩЕННЯ схеми, `RelationSpec.cs`). Читаються після таблиць із
         // правилами, бо мають власну вибірку таблиць (джерело й приймач зв'язку).
         messages.AddRange(await RelationCheckRunner

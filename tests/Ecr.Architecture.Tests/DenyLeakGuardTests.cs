@@ -59,6 +59,7 @@ public sealed partial class DenyLeakGuardTests
         ["src/Ecr.Application/Validation/ValidationMessage.cs"] = "визначення запису",
         ["src/Ecr.Application/Validation/ValidationEngine.cs"] = "виробник: правила таблиці",
         ["src/Ecr.Application/Validation/TableValidation.cs"] = "виробник: структура й обов'язковість",
+        ["src/Ecr.Application/Validation/RequiredHeaderCheck.cs"] = "виробник: порожні обов'язкові поля шапки (D-PS); лише коди, без значень",
         ["src/Ecr.Application/Validation/RelationCheckRunner.cs"] = "виробник: зв'язки Check (джерело — правило 1)",
         ["src/Ecr.Application/Calculations/CheckEvaluator.cs"] = "виробник: текст звірки, SourceTableDefId",
         ["src/Ecr.Application/Validation/ValidationMessageTemplates.cs"] =

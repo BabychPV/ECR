@@ -55,6 +55,12 @@ public static class HiddenValidationIssues
         ArgumentNullException.ThrowIfNull(scope);
         ArgumentNullException.ThrowIfNull(message);
 
+        // D-PS: порожнє обов'язкове поле шапки — шапка не має видимості за таблицею/колонкою, текст несе лише коди.
+        if (RequiredHeaderCheck.IsHeaderMessage(message))
+        {
+            return true;
+        }
+
         return scope.CanReadAt(message.TableDefId, message.ColumnCode)
                && (message.SourceTableDefId is not { } source || scope.CanReadAt(source, message.SourceColumnCode));
     }
