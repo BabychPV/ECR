@@ -61,14 +61,9 @@ public sealed class ListDocumentsHandler(
 
         // ⛔ Фільтр за станом рахується лише по аркушах, які читач бачить: інакше `state=Rejected`
         // знаходить документ, відхилений схованим аркушем, — оракул (смуга зведення цього не показує).
-        if (filter.State is not null && periodKey is { } stateKey)
-        {
-            filter = filter with
-            {
-                HiddenSheetDefIds = await DocumentSheetVisibility
-                    .HiddenSheetIdsAsync(samples, access, profile, visibleProjects, stateKey, ct).ConfigureAwait(false),
-            };
-        }
+        // ⛔ Так само позначка і фільтр `hasLateEdits` не враховують пізні правки схованих колонок (R-7).
+        filter = await DocumentSheetVisibility
+            .HiddenFilterAsync(samples, access, profile, visibleProjects, periodKey, filter, ct).ConfigureAwait(false);
 
         var all = await documents
             .ListAsync(projectId, new PeriodKeyFilter(periodKey), filter, page, visibleProjects, ct)
@@ -240,7 +235,25 @@ public sealed class GetDocumentHandler(
         }
 
         // ⛔ Приховані від читача аркуші не потрапляють у склад, стан і лічильники картки.
-        return (await DocumentSheetVisibility
+        var narrowed = (await DocumentSheetVisibility
             .ApplyAsync(access, profile, [document], periodKey, ct).ConfigureAwait(false))[0];
+
+        // ⛔ R-7: позначка пізніх правок — лише по тому, що читач бачить.
+        if (narrowed.HasLateEdits && DocumentSheetVisibility.HasRestrictions(profile))
+        {
+            var scope = (await DocumentSheetVisibility
+                .ScopesAsync(access, profile, [(document.ProjectId, document.Id)], periodKey, ct)
+                .ConfigureAwait(false))[document.ProjectId];
+
+            narrowed = narrowed with
+            {
+                HasLateEdits = await documents
+                    .HasVisibleLateEditsAsync(
+                        document.Id, new PeriodKeyFilter(periodKey), DocumentSheetVisibility.HiddenOf(scope), ct)
+                    .ConfigureAwait(false),
+            };
+        }
+
+        return narrowed;
     }
 }

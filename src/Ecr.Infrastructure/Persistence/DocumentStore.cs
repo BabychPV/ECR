@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Linq.Expressions;
+using System.Text.Json;
 using Ecr.Application.Common;
 using Ecr.Application.Ports;
 using Ecr.Domain.Entities.Documents;
@@ -154,7 +155,7 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
         // правки». Без періоду діє за БУДЬ-ЯКИЙ, як і сама позначка.
         if (filter.HasLateEdits is { } wantLate)
         {
-            var lateIds = LateEditDocumentIds(period);
+            var lateIds = LateEditDocumentIds(period, filter);
             documents = wantLate
                 ? documents.Where(d => lateIds.Contains(d.Id))
                 : documents.Where(d => !lateIds.Contains(d.Id));
@@ -190,7 +191,7 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
             [.. page1.Select(d => d.Id)], period, ct).ConfigureAwait(false);
 
         // BE-09b: і позначка пізніх правок — теж ОДИН запит на сторінку.
-        var late = await LateEditsBatchAsync([.. page1.Select(d => d.Id)], period, ct).ConfigureAwait(false);
+        var late = await LateEditsBatchAsync([.. page1.Select(d => d.Id)], period, ct, filter).ConfigureAwait(false);
 
         var includedByDocument = await IncludedCodesBatchAsync([.. page1.Select(d => d.Id)], period, ct).ConfigureAwait(false);
 
@@ -808,10 +809,17 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
     /// компонується в один запит із <c>documents</c> (підзапит <c>IN</c>),
     /// виклик з позначки — звужується до сторінки нижче.
     /// </remarks>
-    private IQueryable<long> LateEditDocumentIds(PeriodKeyFilter period)
+    private IQueryable<long> LateEditDocumentIds(PeriodKeyFilter period, DocumentListFilter hidden = default)
     {
         var anyPeriod = period.Value is null ? 1 : 0;
         var periodKey = period.Value ?? 0;
+
+        // ⛔ R-7: пізня правка колонки, схованої від читача (аркуш/таблиця/колонка), не дає позначки —
+        // інакше вона розкриває, що у схованому аркуші щось правили після прогону. Ідентифікатори йдуть
+        // JSON-масивом (`OPENJSON`), бо перелік змінної довжини в сирий SQL параметрами не розгорнути.
+        var sheets = JsonSerializer.Serialize(hidden.HiddenSheetDefIds ?? []);
+        var tables = JsonSerializer.Serialize(hidden.HiddenTableDefIds ?? []);
+        var columns = JsonSerializer.Serialize(hidden.HiddenColumnDefIds ?? []);
 
         return db.Database
             .SqlQuery<long>($"""
@@ -819,12 +827,29 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
                   FROM aud.CellChange AS c
                  WHERE c.IsLateEdit = 1
                    AND ({anyPeriod} = 1 OR c.PeriodKey = {periodKey})
+                   AND NOT EXISTS (
+                       SELECT 1
+                         FROM cfg.ColumnDef AS cd
+                         JOIN cfg.TableDef AS td ON td.Id = cd.TableDefId
+                        WHERE cd.Id = c.ColumnDefId
+                          AND (cd.Id IN (SELECT CONVERT(int, j.value) FROM OPENJSON({columns}) AS j)
+                               OR td.Id IN (SELECT CONVERT(int, j.value) FROM OPENJSON({tables}) AS j)
+                               OR td.SheetDefId IN (SELECT CONVERT(int, j.value) FROM OPENJSON({sheets}) AS j)))
                 """);
+    }
+
+    /// <inheritdoc />
+    public async Task<bool> HasVisibleLateEditsAsync(
+        long documentId, PeriodKeyFilter period, DocumentListFilter hidden, CancellationToken ct)
+    {
+        var late = await LateEditsBatchAsync([documentId], period, ct, hidden).ConfigureAwait(false);
+        return late.Contains(documentId);
     }
 
     /// <summary>Документи сторінки з хоч однією пізньою правкою — одним запитом.</summary>
     private async Task<HashSet<long>> LateEditsBatchAsync(
-        IReadOnlyList<long> documentIds, PeriodKeyFilter period, CancellationToken ct)
+        IReadOnlyList<long> documentIds, PeriodKeyFilter period, CancellationToken ct,
+        DocumentListFilter hidden = default)
     {
         if (documentIds.Count == 0)
         {
@@ -835,7 +860,7 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
         // вище — `Contains` над масивом EF перекладає в параметризований `IN`.
         var ids = documentIds.ToArray();
 
-        var late = await LateEditDocumentIds(period)
+        var late = await LateEditDocumentIds(period, hidden)
             .Where(id => ids.Contains(id))
             .OrderBy(id => id)
             .Take(documentIds.Count)
