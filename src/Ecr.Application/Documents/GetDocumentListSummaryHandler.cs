@@ -35,7 +35,7 @@ public sealed class GetDocumentListSummaryHandler(
             .ConfigureAwait(false);
 
         return await summary
-            .SummarizeAsync(projectId, period, visibleProjects, restrictions, ct)
+            .SummarizeAsync(projectId, period, visibleProjects, restrictions, profile.UserId, ct)
             .ConfigureAwait(false);
     }
 

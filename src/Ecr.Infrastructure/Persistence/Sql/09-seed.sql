@@ -7233,8 +7233,12 @@ USING (VALUES
     (N'err.ECR-TMPL-0409.templateCodeTaken.title', N'en', N'Template code is already in use', 1),
     -- COLL:d9tpltitle ── кінець секції ──
     -- COLL:l4norule ── L-4 Land Demo: рядок без жодного правила не рахується мовчки; ru/kz — порцією COLL:l4norule нижче ──
-    (N'jobs.recalcNoMatchingRule', N'en', N'No matching rule for {count} row(s) (rows: {rows}). These rows were not calculated; the other rows were.', 1)
+    (N'jobs.recalcNoMatchingRule', N'en', N'No matching rule for {count} row(s) (rows: {rows}). These rows were not calculated; the other rows were.', 1),
     -- COLL:l4norule ── кінець секції ──
+    -- COLL:stale-err ── resultsStale у переліку документів: відмови параметрів; ru/kz — порцією COLL:stale-err нижче ──
+    (N'err.ECR-REQ-0422.resultsStaleNeedsPeriod', N'en', N'Filtering by stale results needs a period: staleness belongs to a period.', 1),
+    (N'err.ECR-REQ-0422.staleBy', N'en', N'staleBy accepts only "me" and only together with resultsStale=true.', 1)
+    -- COLL:stale-err ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -17579,6 +17583,18 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:l4norule ── кінець секції ──
+-- COLL:stale-err ── ru/kz resultsStale у переліку документів: відмови параметрів; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-REQ-0422.resultsStaleNeedsPeriod', N'ru', N'Для фильтра по устаревшим результатам нужен период: устаревание относится к периоду.'),
+    (N'err.ECR-REQ-0422.resultsStaleNeedsPeriod', N'kz', N'Ескірген нәтижелер бойынша сүзу үшін кезең қажет: ескіру кезеңге қатысты.'),
+    (N'err.ECR-REQ-0422.staleBy', N'ru', N'staleBy принимает только «me» и только вместе с resultsStale=true.'),
+    (N'err.ECR-REQ-0422.staleBy', N'kz', N'staleBy тек «me» мәнін және тек resultsStale=true-мен бірге қабылдайды.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:stale-err ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

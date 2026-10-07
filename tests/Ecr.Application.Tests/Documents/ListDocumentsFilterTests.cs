@@ -124,5 +124,56 @@ public sealed class ListDocumentsFilterTests
         Assert.Equal("err.ECR-REQ-0422.documentStateNeedsPeriod", refused.Details!["messageKey"]);
     }
 
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [InlineData(true, null, null)]
+    [InlineData(false, null, null)]
+    [InlineData(true, "me", UserId)]
+    [InlineData(true, " ME ", UserId)]
+    [InlineData(null, null, null)]
+    public async Task Фільтр_застарілих_результатів_доходить_до_сховища_а_staleBy_me_стає_поточним_користувачем(
+        bool? resultsStale, string? staleBy, int? expectedUser)
+    {
+        await Handler().HandleAsync(
+            null, Period, state: null, mine: false, hasLateEdits: null, query: null, resultsStale, staleBy,
+            new CursorRequest(50), default);
+
+        await _documents.Received(1).ListAsync(
+            Arg.Any<int?>(), Arg.Any<PeriodKeyFilter>(),
+            new DocumentListFilter(null, null, ResultsStale: resultsStale, StaleByUserId: expectedUser),
+            Arg.Any<CursorRequest>(), Arg.Any<IReadOnlyCollection<int>?>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    public async Task Фільтр_застарілих_без_періоду_422_а_не_мовчазне_усі()
+    {
+        var refused = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Handler().HandleAsync(
+                null, periodKey: null, state: null, mine: false, hasLateEdits: null, query: null, resultsStale: true,
+                staleBy: null, new CursorRequest(50), default));
+
+        Assert.Equal("ECR-REQ-0422", refused.ErrorCode);
+        Assert.Equal("err.ECR-REQ-0422.resultsStaleNeedsPeriod", refused.Details!["messageKey"]);
+        await _documents.DidNotReceiveWithAnyArgs().ListAsync(default, default, default, null!, null, default);
+    }
+
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [InlineData("all", true)]
+    [InlineData("me", false)]
+    [InlineData("me", null)]
+    public async Task StaleBy_приймає_лише_me_і_лише_разом_із_resultsStale_true(string staleBy, bool? resultsStale)
+    {
+        var refused = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Handler().HandleAsync(
+                null, Period, state: null, mine: false, hasLateEdits: null, query: null, resultsStale, staleBy,
+                new CursorRequest(50), default));
+
+        Assert.Equal("ECR-REQ-0422", refused.ErrorCode);
+        Assert.Equal("err.ECR-REQ-0422.staleBy", refused.Details!["messageKey"]);
+        await _documents.DidNotReceiveWithAnyArgs().ListAsync(default, default, default, null!, null, default);
+    }
+
     private ListDocumentsHandler Handler() => new(_documents, _access, _user, Substitute.For<IDocumentListSummaryStore>());
 }

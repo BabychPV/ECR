@@ -47,15 +47,39 @@ public sealed class ListDocumentsHandler(
     /// </param>
     /// <param name="page">Курсорна пагінація.</param>
     /// <param name="ct">Токен скасування.</param>
-    public async Task<PagedResult<DocumentSummary>> HandleAsync(
+    public Task<PagedResult<DocumentSummary>> HandleAsync(
         int? projectId, int? periodKey, string? state, bool mine, bool? hasLateEdits,
         string? query, CursorRequest page, CancellationToken ct)
+        => HandleAsync(projectId, periodKey, state, mine, hasLateEdits, query, resultsStale: null, staleBy: null, page, ct);
+
+    /// <summary>Допустиме значення <c>staleBy</c>: правки поточного користувача.</summary>
+    public const string StaleByMe = "me";
+
+    /// <summary>Те саме, з фільтром застарілих результатів методологій (<c>resultsStale</c>, <c>staleBy=me</c>).</summary>
+    /// <param name="projectId">Фільтр за проєктом; <c>null</c> — усі.</param>
+    /// <param name="periodKey">Період; для <paramref name="resultsStale"/> обов'язковий.</param>
+    /// <param name="state">Зведений стан; порожньо — будь-який.</param>
+    /// <param name="mine">Лише документи, де користувач — автор або подавав аркуш.</param>
+    /// <param name="hasLateEdits">Фільтр пізніх правок; <c>null</c> — без фільтра.</param>
+    /// <param name="query">Пошук за кодом і назвою; порожній — без пошуку.</param>
+    /// <param name="resultsStale">
+    /// Лише документи зі (<c>true</c>) застарілими або без (<c>false</c>) застарілих результатів; <c>null</c> — без
+    /// фільтра. ⛔ Документи проєктів, де читач не бачить хоч щось нижче проєкту, виключаються в обох напрямках.
+    /// </param>
+    /// <param name="staleBy"><c>me</c> — лише застарілі через правки поточного користувача; потребує <paramref name="resultsStale"/> = <c>true</c>.</param>
+    /// <param name="page">Курсорна пагінація.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public async Task<PagedResult<DocumentSummary>> HandleAsync(
+        int? projectId, int? periodKey, string? state, bool mine, bool? hasLateEdits,
+        string? query, bool? resultsStale, string? staleBy, CursorRequest page, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(page);
 
         var profile = await ProfileAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
+        var staleByMe = ParseStaleBy(staleBy, resultsStale, periodKey);
         var filter = new DocumentListFilter(
-            ParseState(state, periodKey), mine ? profile.UserId : null, hasLateEdits, Query: NormalizeQuery(query));
+            ParseState(state, periodKey), mine ? profile.UserId : null, hasLateEdits, Query: NormalizeQuery(query),
+            ResultsStale: resultsStale, StaleByUserId: staleByMe ? profile.UserId : null);
 
         // ⛔ Родина REQ, а не CELL (`P-25`, рядок 1): хибний `limit` — це
         // помилка параметра запиту, і показувати її в обробнику помилок
@@ -125,6 +149,41 @@ public sealed class ListDocumentsHandler(
         }
 
         return trimmed.Length > MaxQueryLength ? trimmed[..MaxQueryLength] : trimmed;
+    }
+
+    /// <summary>
+    /// Розбір <c>resultsStale</c>/<c>staleBy</c>: фільтр без періоду, невідоме <c>staleBy</c> і <c>staleBy</c> без
+    /// <c>resultsStale=true</c> — 422 (мовчазне «усі» читалося б як «застарілих немає»).
+    /// </summary>
+    /// <returns><c>true</c> — лише правки поточного користувача.</returns>
+    private static bool ParseStaleBy(string? staleBy, bool? resultsStale, int? periodKey)
+    {
+        if (resultsStale is not null && periodKey is null)
+        {
+            throw new BusinessRuleException(
+                ErrorCodes.RequestInvalid,
+                "Фільтр застарілих результатів потребує періоду.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-REQ-0422.resultsStaleNeedsPeriod" });
+        }
+
+        if (string.IsNullOrWhiteSpace(staleBy))
+        {
+            return false;
+        }
+
+        if (!string.Equals(staleBy.Trim(), StaleByMe, StringComparison.OrdinalIgnoreCase) || resultsStale != true)
+        {
+            throw new BusinessRuleException(
+                ErrorCodes.RequestInvalid,
+                $"staleBy приймає лише «{StaleByMe}» і разом із resultsStale=true.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-REQ-0422.staleBy",
+                    ["staleBy"] = staleBy,
+                });
+        }
+
+        return true;
     }
 
     /// <summary>Фільтр стану: порожньо — без фільтра; невідоме ім'я або стан без періоду — 422.</summary>
