@@ -1284,6 +1284,9 @@ public sealed class Parser
             BinaryNode binary => binary.Operator switch
             {
                 BinaryOperator.Concat => ExpressionValueType.Text,
+                BinaryOperator.Add when InferShape(binary.Left, dialect) == ExpressionValueType.Text
+                                        && InferShape(binary.Right, dialect) == ExpressionValueType.Text
+                    => ExpressionValueType.Text,
                 >= BinaryOperator.Equal and <= BinaryOperator.Or => ExpressionValueType.Boolean,
                 _ => ExpressionValueType.Number,
             },

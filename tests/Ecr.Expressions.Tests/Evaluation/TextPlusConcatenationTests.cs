@@ -14,8 +14,7 @@ namespace Ecr.Expressions.Tests.Evaluation;
 /// </summary>
 /// <remarks>
 /// Рішення: лише текст + текст. Текст + число (і навпаки) лишається <c>#VALUE</c>, як було;
-/// Null поширюється, як у решти арифметики (<c>NULL + 'a'</c> = Null) — на відміну від
-/// <c>&amp;</c>, який трактує Null порожнім рядком. Число + число та Дата + число не змінено.
+/// Null поширюється, як у решти арифметики (<c>NULL + 'a'</c> = Null) — у шаблонному діалекті на відміну від &amp;, який трактує Null порожнім рядком (у Methodology &amp; — побітове І). Число + число та Дата + число не змінено.
 /// </remarks>
 public sealed class TextPlusConcatenationTests
 {
@@ -119,9 +118,8 @@ public sealed class TextPlusConcatenationTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
-    public void Порожнє_поле_у_конкатенації_плюсом_дає_Null_а_амперсанд_лишається_порожнім_рядком()
+    public void Порожнє_поле_у_конкатенації_плюсом_дає_Null()
     {
         Assert.True(Expr.Eval("!A + '_' + !B", Fields("x", null), Dialect).IsNull);
-        Assert.Equal("x_", Expr.Eval("!A & '_' & !B", Fields("x", null), Dialect).Value);
     }
 }
