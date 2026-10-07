@@ -25,7 +25,7 @@ public sealed class DocumentListSummaryHandlerTests
     {
         _user.UserId.Returns(7);
         _store.SummarizeAsync(
-                Arg.Any<int?>(), Arg.Any<int>(), Arg.Any<IReadOnlyCollection<int>?>(), Arg.Any<SummaryRestrictions?>(), Arg.Any<CancellationToken>())
+                Arg.Any<int?>(), Arg.Any<int>(), Arg.Any<IReadOnlyCollection<int>?>(), Arg.Any<SummaryRestrictions?>(), Arg.Any<int?>(), Arg.Any<CancellationToken>())
             .Returns(new DocumentListSummaryResponse(1, 0, 0, 0, 0));
     }
 
@@ -48,6 +48,7 @@ public sealed class DocumentListSummaryHandlerTests
             202601,
             Arg.Is<IReadOnlyCollection<int>?>(ids => ids != null && ids.Count == 1 && ids.Contains(Mine)),
             null,
+            7,
             Arg.Any<CancellationToken>());
     }
 
@@ -60,7 +61,7 @@ public sealed class DocumentListSummaryHandlerTests
         await Assert.ThrowsAsync<AccessDeniedException>(
             () => Handler().HandleAsync(projectId: null, 202601, default));
 
-        await _store.DidNotReceiveWithAnyArgs().SummarizeAsync(default, default, default, default, default);
+        await _store.DidNotReceiveWithAnyArgs().SummarizeAsync(default, default, default, default, default, default);
     }
 
     private GetDocumentListSummaryHandler Handler() => new(_store, _access, _user);

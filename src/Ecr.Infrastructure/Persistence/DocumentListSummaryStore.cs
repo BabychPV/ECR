@@ -23,7 +23,7 @@ public sealed class DocumentListSummaryStore(EcrDbContext db) : IDocumentListSum
     /// </remarks>
     public async Task<DocumentListSummaryResponse> SummarizeAsync(
         int? projectId, int periodKey, IReadOnlyCollection<int>? visibleProjectIds,
-        SummaryRestrictions? restrictions, CancellationToken ct)
+        SummaryRestrictions? restrictions, int? currentUserId, CancellationToken ct)
     {
         // ⛔ Схований від читача аркуш не вносить стан (LEFT JOIN нижче його не бачить), а документ
         // проєкту зі звуженням не потрапляє у «З зауваженнями»: збережений підсумок перевірки —
@@ -83,9 +83,28 @@ public sealed class DocumentListSummaryStore(EcrDbContext db) : IDocumentListSum
             .SingleAsync(ct)
             .ConfigureAwait(false);
 
+        // Застарілі результати - ОКРЕМИЙ запит (великий агрегат вище не чіпаємо): той самий предикат, що дає
+        // позначку й фільтр у переліку (`StaleResultsQuery`), по тих самих документах, які читач бачить.
+        // ⛔ Проєкти зі звуженням не рахуються - як `WithIssues`.
+        var scope = allowed?.ToArray();
+        var narrowed = restrictions?.NarrowedProjects.ToArray() ?? [];
+        var visible = db.Documents
+            .AsNoTracking()
+            .Where(d => (scope == null || scope.Contains(d.ProjectId)) && !narrowed.Contains(d.ProjectId));
+
+        var stale = StaleResultsQuery.Documents(db, periodKey).Select(r => r.DocumentId);
+        var staleCount = await visible.CountAsync(d => stale.Contains(d.Id), ct).ConfigureAwait(false);
+
+        var staleMine = 0;
+        if (currentUserId is { } me && staleCount > 0)
+        {
+            var mineIds = StaleResultsQuery.Documents(db, periodKey, me).Select(r => r.DocumentId);
+            staleMine = await visible.CountAsync(d => mineIds.Contains(d.Id), ct).ConfigureAwait(false);
+        }
+
         return new DocumentListSummaryResponse(
             row.Draft, row.Submitted, row.Approved, row.Rejected, row.WithIssues,
-            row.SheetsApproved, row.SheetsTotal);
+            row.SheetsApproved, row.SheetsTotal, staleCount, staleMine);
     }
 
     /// <inheritdoc />

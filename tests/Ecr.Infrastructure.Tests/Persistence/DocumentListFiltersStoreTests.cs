@@ -122,10 +122,10 @@ public sealed class DocumentListFiltersStoreTests(SqlServerFixture sql)
         Assert.False(page.Items.Single(d => d.Id == onTime).HasLateEdits);
         Assert.False(page.Items.Single(d => d.Id == otherPeriod).HasLateEdits);
 
-        // Чотири документи на сторінці — чотири запити на всю сторінку
-        // (документи, стани, підсумки, пізні правки), не по запиту на рядок.
+        // Чотири документи на сторінці — п'ять запитів на всю сторінку (документи, стани, підсумки, пізні правки,
+        // застарілі результати), не по запиту на рядок.
         Assert.Equal(4, page.Items.Count);
-        Assert.True(counter.Tally.Snapshot().Total == 4, counter.Tally.Snapshot().Format());
+        Assert.True(counter.Tally.Snapshot().Total == 5, counter.Tally.Snapshot().Format());
     }
 
     [Fact]

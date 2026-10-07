@@ -23,10 +23,11 @@ public interface IDocumentListSummaryStore
     /// не потрапляють у «З зауваженнями» (збережений підсумок — по всьому документу).
     /// <c>null</c> — читач без обмежень, лічильники як є.
     /// </param>
+    /// <param name="currentUserId">Користувач для <c>StaleResultsMineCount</c> (правки цього користувача); <c>null</c> — «моїх» немає.</param>
     /// <param name="ct">Токен скасування.</param>
     public Task<DocumentListSummaryResponse> SummarizeAsync(
         int? projectId, int periodKey, IReadOnlyCollection<int>? visibleProjectIds,
-        SummaryRestrictions? restrictions, CancellationToken ct);
+        SummaryRestrictions? restrictions, int? currentUserId, CancellationToken ct);
 
     /// <summary>По одному документу кожного з проєктів — щоб побудувати межі читання проєкту.</summary>
     /// <param name="projectIds">Проєкти.</param>

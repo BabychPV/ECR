@@ -15,6 +15,12 @@ namespace Ecr.Application.Documents.Dto;
 /// <paramref name="SheetsTotal"/>: інакше різниця двох чисел розкривала б, скільки їх.
 /// </param>
 /// <param name="SheetsTotal">Скільки аркушів складу бачить читач у цих документах (без схованих).</param>
+/// <param name="StaleResultsCount">
+/// Документи зі застарілими результатами методологій за період (після останнього прогону правили вхід).
+/// ⛔ Проєкти, де читач не бачить хоч щось нижче проєкту, не рахуються (як <paramref name="WithIssues"/>):
+/// число по всьому документу розкрило б активність схованого. Те саме число дає фільтр <c>resultsStale=true</c>.
+/// </param>
+/// <param name="StaleResultsMineCount">Те саме, але лише через правки поточного користувача (<c>staleBy=me</c>).</param>
 /// <remarks>
 /// ⚠ Стан документа — найгірший зі станів аркушів складу:
 /// <c>Rejected &gt; Draft &gt; Submitted &gt; Approved</c>. Перші чотири числа в
@@ -23,4 +29,4 @@ namespace Ecr.Application.Documents.Dto;
 /// </remarks>
 public sealed record DocumentListSummaryResponse(
     int Draft, int Submitted, int Approved, int Rejected, int WithIssues,
-    int SheetsApproved = 0, int SheetsTotal = 0);
+    int SheetsApproved = 0, int SheetsTotal = 0, int StaleResultsCount = 0, int StaleResultsMineCount = 0);
