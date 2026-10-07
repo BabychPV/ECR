@@ -17902,12 +17902,8 @@ export interface components {
          * @enum {unknown}
          */
         CalendarMode: "Actual" | "Fixed365" | "Fixed360";
-        /**
-         * @description Де проєкт у кампанії відносно строку подання — відповідь на «хто затримує».
-         *     Правило — CampaignProgressRule.
-         * @enum {unknown}
-         */
-        CampaignProgress: "InProgress" | "AtRisk" | "Overdue" | "Done";
+        /** @enum {unknown} */
+        CampaignProgress: "InProgress" | "AtRisk" | "Overdue" | "Done" | null;
         /** @description Один проєкт у огляді кампанії. */
         CampaignProjectSummary: {
             /**
@@ -17933,8 +17929,7 @@ export interface components {
              * @description Аркушів, ще не поданих (чернетка/без стану/відхилено); `null` — як у SheetsTotal.
              */
             notSubmittedSheets?: null | number;
-            /** @description Класифікація проєкту в кампанії (CampaignProgressRule). */
-            progress: components["schemas"]["CampaignProgress"];
+            progress: null | components["schemas"]["CampaignProgress"];
             /** @description Код проєкту; ним перелік і впорядковано. */
             projectCode: string;
             /**
@@ -18007,7 +18002,7 @@ export interface components {
              * Format: int32
              * @description Проєктів у стані CampaignProgress.AtRisk.
              */
-            atRisk: number;
+            atRisk: null | number;
             /**
              * Format: int32
              * @description Документів у цих проєктах.
@@ -18017,7 +18012,7 @@ export interface components {
              * Format: int32
              * @description Проєктів у стані CampaignProgress.Done.
              */
-            done: number;
+            done: null | number;
             /**
              * Format: int32
              * @description Сума `Draft` по всіх проєктах.
@@ -18027,7 +18022,7 @@ export interface components {
              * Format: int32
              * @description Проєктів у стані CampaignProgress.InProgress.
              */
-            inProgress: number;
+            inProgress: null | number;
             /**
              * Format: int32
              * @description З них — ще не подано (чернетка, без стану чи відхилено); `null` за тих самих умов, що й
@@ -18038,7 +18033,7 @@ export interface components {
              * Format: int32
              * @description Проєктів у стані CampaignProgress.Overdue.
              */
-            overdue: number;
+            overdue: null | number;
             /**
              * Format: int32
              * @description Проєктів періоду; дорівнює `TotalProjects`.

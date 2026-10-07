@@ -668,12 +668,12 @@
         ]
       },
       "CampaignProgress": {
-        "description": "Де проєкт у кампанії відносно строку подання — відповідь на «хто затримує».\nПравило — CampaignProgressRule.",
         "enum": [
           "InProgress",
           "AtRisk",
           "Overdue",
-          "Done"
+          "Done",
+          null
         ]
       },
       "CampaignProjectSummary": {
@@ -713,8 +713,15 @@
             ]
           },
           "progress": {
-            "$ref": "#/components/schemas/CampaignProgress",
-            "description": "Класифікація проєкту в кампанії (CampaignProgressRule)."
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/CampaignProgress",
+                "description": "Класифікація проєкту в кампанії (CampaignProgressRule)."
+              }
+            ]
           },
           "projectCode": {
             "description": "Код проєкту; ним перелік і впорядковано.",
@@ -825,7 +832,10 @@
           "atRisk": {
             "description": "Проєктів у стані CampaignProgress.AtRisk.",
             "format": "int32",
-            "type": "integer"
+            "type": [
+              "null",
+              "integer"
+            ]
           },
           "documents": {
             "description": "Документів у цих проєктах.",
@@ -835,7 +845,10 @@
           "done": {
             "description": "Проєктів у стані CampaignProgress.Done.",
             "format": "int32",
-            "type": "integer"
+            "type": [
+              "null",
+              "integer"
+            ]
           },
           "draft": {
             "description": "Сума `Draft` по всіх проєктах.",
@@ -848,7 +861,10 @@
           "inProgress": {
             "description": "Проєктів у стані CampaignProgress.InProgress.",
             "format": "int32",
-            "type": "integer"
+            "type": [
+              "null",
+              "integer"
+            ]
           },
           "notSubmittedSheets": {
             "description": "З них — ще не подано (чернетка, без стану чи відхилено); `null` за тих самих умов, що й\nSheetsTotal.",
@@ -861,7 +877,10 @@
           "overdue": {
             "description": "Проєктів у стані CampaignProgress.Overdue.",
             "format": "int32",
-            "type": "integer"
+            "type": [
+              "null",
+              "integer"
+            ]
           },
           "projects": {
             "description": "Проєктів періоду; дорівнює `TotalProjects`.",
