@@ -41,6 +41,7 @@ public sealed class DraftVersionLockTests
     private readonly ICurrentUser _user = Substitute.For<ICurrentUser>();
     private readonly IUnitCatalog _units = Substitute.For<IUnitCatalog>();
     private readonly IStyleCatalog _styles = Substitute.For<IStyleCatalog>();
+    private readonly IConditionalFormatStore _rules = Substitute.For<IConditionalFormatStore>();
     private readonly IRepository<TemplateVersion, int> _versions = Substitute.For<IRepository<TemplateVersion, int>>();
     private readonly IRepository<TableRelationDef, int> _relations = Substitute.For<IRepository<TableRelationDef, int>>();
 
@@ -74,6 +75,7 @@ public sealed class DraftVersionLockTests
         var other = builder.Table(sheet, "T9");
         _draft = builder.Version();
 
+        _rules.GetAsync(1, Arg.Any<CancellationToken>()).Returns([]);
         _clock.UtcNow.Returns(Now);
         _user.UserId.Returns(9);
         _access.BuildProfileAsync(9, Arg.Any<CancellationToken>())
@@ -144,6 +146,7 @@ public sealed class DraftVersionLockTests
         "SaveSheet", "DeleteSheet", "SaveTable", "DeleteTable",
         "SaveColumn", "DeleteColumn", "SaveRow", "DeleteRow",
         "SaveHeaderField", "DeleteFormula", "DeleteTableRelation",
+        "SaveStyle", "SaveConditionalFormats",
     ];
 
     /// <summary>
@@ -152,8 +155,7 @@ public sealed class DraftVersionLockTests
     /// </summary>
     /// <remarks>
     /// Мутаційний доказ: прибрати <c>version.TouchDraft(...)</c> з будь-якого обробника — червоний
-    /// відповідний рядок теорії. Збереження стилю й умовного форматування не покриті навмисно
-    /// (обробники без годинника й користувача).
+    /// відповідний рядок теорії (включно зі збереженням стилю й умовного форматування).
     /// </remarks>
     [Theory]
     [MemberData(nameof(TouchingHandlers))]
@@ -217,6 +219,8 @@ public sealed class DraftVersionLockTests
             "SaveStyle" => new SaveStyleDefHandler(_styles, _store, _uow, _access, _user)
                 .HandleAsync(1, "ST1", new SaveStyleDefCommand(
                     "Calibri", 11m, false, false, null, null, null, null, null, false, null), ct),
+            "SaveConditionalFormats" => new SaveConditionalFormatsHandler(_rules, _store, _uow, _access, _user)
+                .HandleAsync(1, [], ConditionalFormatsVersion.Of([]), ct),
             "DeleteFormula" => new DeleteFormulaDefHandler(_store, classifier, _metadataCache, _audit, _uow, _clock, _access, _user)
                 .HandleAsync(1, _table.Id, FormulaScope.Column,
                     _formulaColumn.Id.ToString(System.Globalization.CultureInfo.InvariantCulture), ct),
