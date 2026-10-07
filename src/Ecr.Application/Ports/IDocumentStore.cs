@@ -55,6 +55,12 @@ namespace Ecr.Application.Ports;
 /// вже немає. ⛔ Для читача, чий доступ звужено нижче проєкту, — <c>null</c> (<c>DocumentSheetVisibility.For</c>):
 /// ім'я людини — окреме розкриття, його не віддаємо там, де документ показано частково.
 /// </param>
+/// <param name="ApproverDisplayName">
+/// К6: «хто затвердив» — відображуване ім'я (<c>D-86</c>) того, хто останнім затвердив аркуш документа
+/// (остання подія <c>Approve</c>/<c>ApproveStep</c> журналу, інакше <c>ApprovalState.ApprovedByUserId</c>);
+/// <c>null</c> — затвердження ще не було. Це те саме розкриття, що й <c>GET /workflow/history</c>; складу
+/// ролі кроку («хто може») не розкриває. ⛔ Для звуженого читача — <c>null</c> (<c>DocumentSheetVisibility.For</c>), як і автор.
+/// </param>
 public sealed record DocumentSummary(
     long Id,
     int ProjectId,
@@ -70,7 +76,8 @@ public sealed record DocumentSummary(
     bool HasLateEdits = false,
     IReadOnlyList<DocumentSheetState>? Sheets = null,
     [property: System.Text.Json.Serialization.JsonIgnore] IReadOnlyList<string>? IncludedSheetCodes = null,
-    string? OwnerDisplayName = null);
+    string? OwnerDisplayName = null,
+    string? ApproverDisplayName = null);
 
 /// <summary>Аркуш складу документа в переліку: код, назва, стан за період.</summary>
 /// <param name="Code">Код аркуша (<c>SheetDef.Code</c>); він же ключ у <c>DocumentSummary.SheetStates</c>.</param>

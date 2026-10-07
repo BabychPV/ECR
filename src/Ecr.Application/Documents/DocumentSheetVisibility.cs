@@ -203,6 +203,7 @@ public static class DocumentSheetVisibility
             ModifiedAt = narrowed ? null : document.ModifiedAt,
             ModifiedByDisplayName = narrowed ? null : document.ModifiedByDisplayName,
             OwnerDisplayName = narrowed ? null : document.OwnerDisplayName,
+            ApproverDisplayName = narrowed ? null : document.ApproverDisplayName,
         };
     }
 

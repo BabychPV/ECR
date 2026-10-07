@@ -90,8 +90,84 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
             document.Id, document.ProjectId, document.BusinessKey, document.CreatedAt, sheetCount,
             ToStateMap(sheets), document.NameL10n, HasLateEdits: late.Contains(documentId),
             Sheets: sheets, IncludedSheetCodes: included.GetValueOrDefault(documentId),
-            OwnerDisplayName: document.Owner);
+            OwnerDisplayName: document.Owner,
+            ApproverDisplayName: (await ApproverNamesBatchAsync([documentId], ct).ConfigureAwait(false))
+                .GetValueOrDefault(documentId));
     }
+
+    /// <summary>
+    /// К6: «хто затвердив» для документів ОДНИМ пакетом (без N+1): остання подія <c>Approve</c>/<c>ApproveStep</c>,
+    /// інакше останнє <c>ApprovalState.ApprovedByUserId</c>. Документ без затвердження в результаті відсутній.
+    /// </summary>
+    /// <param name="documentIds">Документи сторінки.</param>
+    /// <param name="ct">Скасування.</param>
+    private async Task<Dictionary<long, string>> ApproverNamesBatchAsync(
+        IReadOnlyCollection<long> documentIds, CancellationToken ct)
+    {
+        var ids = documentIds.ToArray();
+        var result = new Dictionary<long, string>();
+        if (ids.Length == 0)
+        {
+            return result;
+        }
+
+        var rows = await db.Documents
+            .AsNoTracking()
+            .Where(d => ids.Contains(d.Id))
+            .OrderBy(d => d.Id)
+            .Select(d => new ApproverRow(
+                d.Id,
+                db.ApprovalEvents
+                    .Where(e => e.DocumentId == d.Id && e.ByUserId != null
+                                && (e.Action == Domain.Entities.Workflow.ApprovalAction.Approve
+                                    || e.Action == Domain.Entities.Workflow.ApprovalAction.ApproveStep))
+                    .OrderByDescending(e => e.At)
+                    .Select(e => e.ByUserId)
+                    .FirstOrDefault(),
+                db.ApprovalStates
+                    .Where(a => a.DocumentId == d.Id && a.ApprovedByUserId != null)
+                    .OrderByDescending(a => a.ApprovedAt)
+                    .Select(a => a.ApprovedByUserId)
+                    .FirstOrDefault()))
+            .Take(ids.Length)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var userIds = rows
+            .Select(r => r.EventUserId ?? r.StateUserId)
+            .Where(u => u is not null)
+            .Select(u => u!.Value)
+            .Distinct()
+            .ToArray();
+        if (userIds.Length == 0)
+        {
+            return result;
+        }
+
+        var names = await db.Users
+            .AsNoTracking()
+            .Where(u => userIds.Contains(u.Id))
+            .OrderBy(u => u.Id)
+            .Select(u => new UserNameRow(u.Id, u.DisplayName))
+            .Take(userIds.Length)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+        var byId = names.ToDictionary(n => n.Id, n => n.DisplayName);
+
+        foreach (var r in rows)
+        {
+            if ((r.EventUserId ?? r.StateUserId) is { } uid && byId.TryGetValue(uid, out var name))
+            {
+                result[r.DocumentId] = name;
+            }
+        }
+
+        return result;
+    }
+
+    private sealed record ApproverRow(long DocumentId, int? EventUserId, int? StateUserId);
+
+    private sealed record UserNameRow(int Id, string DisplayName);
 
     /// <summary>
     /// Коди аркушів складу документів ОДНИМ запитом — для обробника, що відсікає аркуші поза
@@ -210,6 +286,9 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
 
         var includedByDocument = await IncludedCodesBatchAsync([.. page1.Select(d => d.Id)], period, ct).ConfigureAwait(false);
 
+        // К6: «хто затвердив» — теж ОДИН пакет на сторінку.
+        var approvers = await ApproverNamesBatchAsync([.. page1.Select(d => d.Id)], ct).ConfigureAwait(false);
+
         var items = new List<DocumentSummary>(page1.Count);
         foreach (var d in page1)
         {
@@ -223,7 +302,8 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
             items.Add(new DocumentSummary(
                 d.Id, d.ProjectId, d.BusinessKey, d.CreatedAt, d.SheetCount, ToStateMap(sheets), d.NameL10n,
                 d.ModifiedAt, d.ModifiedByDisplayName, findings?.ErrorCount, findings?.WarningCount,
-                late.Contains(d.Id), sheets, includedByDocument.GetValueOrDefault(d.Id), d.OwnerDisplayName));
+                late.Contains(d.Id), sheets, includedByDocument.GetValueOrDefault(d.Id), d.OwnerDisplayName,
+                approvers.GetValueOrDefault(d.Id)));
         }
 
         return new PagedResult<DocumentSummary>(
