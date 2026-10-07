@@ -518,6 +518,55 @@ public static class PublishChecks
     }
 
     /// <summary>
+    /// Активна прив'язка до методології без опублікованої версії (<c>ECR-CALC-0422</c>,
+    /// <c>bindingMethodologyNotPublished</c>) — одне зауваження на методологію.
+    /// </summary>
+    /// <param name="unpublished">
+    /// Активні прив'язки колонок цієї версії до методологій без опублікованої версії
+    /// (<c>ICalculationBindingStore.ListBindingsToUnpublishedMethodologiesAsync</c>).
+    /// </param>
+    /// <remarks>
+    /// ⛔ Land-регресія 2026-10-07 (D-R2): публікація приймала такі прив'язки, а далі
+    /// ВЕСЬ перерахунок документа падав («bound to a table but has no published version»,
+    /// <c>MethodologyResolver</c>) — не рахувалася жодна методологія, навіть опублікована.
+    /// Відмова, а не попередження: рушій і далі кидає, тож попередження лише відклало б
+    /// падіння до першого перерахунку, а виправляється воно просто — опублікувати
+    /// методологію або вимкнути прив'язку (вимкнена нічого не рахує).
+    /// </remarks>
+    public static IReadOnlyList<ExpressionDiagnostic> CheckBindingMethodologiesPublished(
+        IReadOnlyList<UnpublishedMethodologyBinding> unpublished)
+    {
+        ArgumentNullException.ThrowIfNull(unpublished);
+
+        return [.. unpublished
+            .GroupBy(b => b.MethodologyId)
+            .OrderBy(g => g.First().MethodologyCode, StringComparer.Ordinal)
+            .Select(g =>
+            {
+                var code = g.First().MethodologyCode;
+                var sample = string.Join(
+                    ", ",
+                    g.Take(5).Select(b => $"{b.TableCode}.{b.ColumnCode} ({b.OutputCode})"));
+                var count = g.Count();
+
+                return new ExpressionDiagnostic(
+                    "ECR-CALC-0422",
+                    $"Методологія {code} не має жодної опублікованої версії, але активно прив'язана "
+                    + $"до колонок цієї версії шаблону ({count}): {sample}. Перерахунок документа "
+                    + "відхилятиметься цілком. Опублікуйте методологію або вимкніть прив'язки.",
+                    0,
+                    1,
+                    "err.ECR-CALC-0422.bindingMethodologyNotPublished",
+                    new Dictionary<string, string>
+                    {
+                        ["methodologyCode"] = code,
+                        ["bindingCount"] = count.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                        ["bindings"] = sample,
+                    });
+            })];
+    }
+
+    /// <summary>
     /// Обчислювані колонки без джерела значення (<c>ECR-TMPL-4226</c>).
     /// </summary>
     /// <remarks>

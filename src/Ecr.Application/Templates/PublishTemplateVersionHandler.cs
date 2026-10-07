@@ -163,6 +163,14 @@ public sealed partial class PublishTemplateVersionHandler(
 
         diagnostics = [.. diagnostics, .. PublishChecks.CheckStructure(version, boundColumnIds)];
 
+        // ⛔ D-R2: активна прив'язка до методології без опублікованої версії валила б
+        // ВЕСЬ перерахунок документа — відмовляємо тут, до публікації.
+        var unpublishedBindings = await calculationBindings
+            .ListBindingsToUnpublishedMethodologiesAsync(templateVersionId, ct)
+            .ConfigureAwait(false);
+
+        diagnostics = [.. diagnostics, .. PublishChecks.CheckBindingMethodologiesPublished(unpublishedBindings)];
+
         if (diagnostics.Count > 0)
         {
             // Усі проблеми одразу, а не перша: інакше користувач публікував би

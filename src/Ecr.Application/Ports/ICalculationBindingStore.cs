@@ -111,6 +111,23 @@ public interface ICalculationBindingStore
         int templateVersionId, CancellationToken ct);
 
     /// <summary>
+    /// Активні прив'язки колонок ВЕРСІЇ шаблону до методологій, що не мають жодної
+    /// опублікованої версії — для публікаційної перевірки (D-R2, <c>ECR-CALC-0422</c>).
+    /// </summary>
+    /// <param name="templateVersionId">Версія, що публікується.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Прив'язки-порушники; порожній перелік — усе гаразд.</returns>
+    /// <remarks>
+    /// ⛔ Така прив'язка валить ВЕСЬ перерахунок документа
+    /// (<c>MethodologyResolver.ResolveVersionAsync</c>: «bound to a table but has no
+    /// published version»), разом з методологіями, що опубліковані. Лише активні:
+    /// вимкнена прив'язка нічого не рахує (<c>RecalculationJob</c> її не бере), тож
+    /// вимкнення — спосіб зняти відмову. Видалені колонки не рахуються.
+    /// </remarks>
+    public Task<IReadOnlyList<UnpublishedMethodologyBinding>> ListBindingsToUnpublishedMethodologiesAsync(
+        int templateVersionId, CancellationToken ct);
+
+    /// <summary>
     /// Код виходу методології → масштаб колонки, у яку цей вихід потрапляє
     /// (<c>cfg.ColumnDef.Scale</c>).
     /// </summary>
@@ -174,6 +191,15 @@ public interface ICalculationBindingStore
 /// (<c>ColumnDef.IsComputed</c>) — інакше <c>ECR-TMPL-4227</c>.
 /// </param>
 public sealed record BoundColumnRef(int TableDefId, string Code, Ecr.Domain.Enums.CellDataType DataType);
+
+/// <summary>Активна прив'язка колонки до методології без опублікованої версії.</summary>
+/// <param name="MethodologyId">Методологія.</param>
+/// <param name="MethodologyCode">Її код — для відмови, що називає винуватця.</param>
+/// <param name="TableCode">Код таблиці колонки.</param>
+/// <param name="ColumnCode">Код колонки.</param>
+/// <param name="OutputCode">Прив'язаний вихід.</param>
+public sealed record UnpublishedMethodologyBinding(
+    int MethodologyId, string MethodologyCode, string TableCode, string ColumnCode, string OutputCode);
 
 /// <summary>Таблиця прив'язки так, як її називає конфігуратор.</summary>
 /// <param name="Code">Код таблиці.</param>

@@ -5607,6 +5607,9 @@ USING (VALUES
     (N'err.ECR-CALC-0422.unknownUnit', N'en', N'{code}: unit {unitId} does not exist in the unit catalog.', 1),
     (N'err.ECR-CALC-0422.bindingMatchInvalid', N'en', N'The match condition for output {outputCode} is not a flat JSON object of "column → value" pairs, so it would match no row.', 1),
     (N'err.ECR-CALC-0422.bindingUnknownOutput', N'en', N'No version of this methodology declares output {outputCode}: nothing would ever be calculated for this binding.', 1),
+    -- COLL:drb2 ── D-R2: прив'язка до методології без опублікованої версії; ru/kz — порцією COLL:drb2 нижче ──
+    (N'err.ECR-CALC-0422.bindingMethodologyNotPublished', N'en', N'Methodology {methodologyCode} has no published version, but it is actively bound to {bindingCount} column(s) of this template version: {bindings}. Recalculation of documents would be rejected as a whole. Publish the methodology or deactivate these bindings.', 1),
+    -- COLL:drb2 ── кінець секції ──
     (N'err.ECR-CALC-0422.noPublishedVersion', N'en', N'Methodology {methodologyId} is bound to a table but has no published version to calculate with.', 1),
     (N'err.ECR-CALC-0422.goldenTestNoPeriod', N'en', N'Golden test {test} has no period: set a document and an existing period in its input (periodKey is year × 100 + number, e.g. 202601).', 1),
     (N'publish.problemsTitle', N'en', N'What to fix before publishing', 1),
@@ -17526,6 +17529,16 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:ui-rc9 ── кінець секції ──
+-- COLL:drb2 ── ru/kz D-R2: прив'язка до методології без опублікованої версії; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-CALC-0422.bindingMethodologyNotPublished', N'ru', N'У методики {methodologyCode} нет опубликованной версии, но она активно привязана к столбцам этой версии шаблона ({bindingCount}): {bindings}. Пересчёт документов отклонялся бы целиком. Опубликуйте методику или отключите эти привязки.'),
+    (N'err.ECR-CALC-0422.bindingMethodologyNotPublished', N'kz', N'{methodologyCode} әдістемесінің жарияланған нұсқасы жоқ, бірақ ол осы үлгі нұсқасының бағандарына ({bindingCount}) белсенді байланыстырылған: {bindings}. Құжаттарды қайта есептеу толығымен қабылданбас еді. Әдістемені жариялаңыз немесе осы байланыстыруларды өшіріңіз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:drb2 ── кінець секції ──
 -- COLL:d3efmap ── ru/kz D-3: дубль мапінгу пари (сутність, поле); власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val
