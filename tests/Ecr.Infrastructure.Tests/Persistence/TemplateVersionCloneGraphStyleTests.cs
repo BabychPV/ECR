@@ -24,7 +24,7 @@ public sealed class TemplateVersionCloneGraphStyleTests(SqlServerFixture sql)
 
     private sealed record Seed(TestDocument Doc, int StyleA, int StyleB, int StyleC);
 
-    private async Task<Seed> SeedAsync(TestDocumentBuilder builder)
+    private static async Task<Seed> SeedAsync(TestDocumentBuilder builder)
     {
         var ct = CancellationToken.None;
         var doc = await builder.BuildAsync(columnCount: 3, rowCount: 3, ct: ct);
@@ -74,7 +74,7 @@ public sealed class TemplateVersionCloneGraphStyleTests(SqlServerFixture sql)
         return new Graph(cols, rows, table, styles);
     }
 
-    private static void AssertGraph(Graph g, Seed seed, Graph source)
+    private static void AssertGraph(Graph g, Graph source)
     {
         // D2: каскад і ієрархія вказують на колонки/рядки САМОГО клону.
         Assert.Equal(g.Cols[1].Id, g.Cols[2].CascadeFromColumnId);
@@ -91,9 +91,9 @@ public sealed class TemplateVersionCloneGraphStyleTests(SqlServerFixture sql)
         var a = g.Styles[g.Cols[0].StyleId!.Value];
         var b = g.Styles[g.Rows[0].StyleId!.Value];
         var c = g.Styles[g.Table.HeaderStyleId!.Value];
-        Assert.Equal(source.Styles[seed.StyleA].Code, a.Code);
-        Assert.Equal(source.Styles[seed.StyleB].Code, b.Code);
-        Assert.Equal(source.Styles[seed.StyleC].Code, c.Code);
+        Assert.Equal(source.Styles[source.Cols[0].StyleId!.Value].Code, a.Code);
+        Assert.Equal(source.Styles[source.Rows[0].StyleId!.Value].Code, b.Code);
+        Assert.Equal(source.Styles[source.Table.HeaderStyleId!.Value].Code, c.Code);
         Assert.Equal(("Arial", 11m, true, 1, "0.00"), (a.FontName, a.FontSize, a.IsBold, (int)a.HorizontalAlign!, a.NumberFormat));
         Assert.Equal((true, unchecked((int)0xFFEEEEEE)), (b.WrapText, b.BackgroundArgb));
         Assert.Equal((true, true, 2), (c.IsBold, c.IsItalic, (int)c.VerticalAlign!));
@@ -117,7 +117,7 @@ public sealed class TemplateVersionCloneGraphStyleTests(SqlServerFixture sql)
 
         var source = await ReadAsync(builder, seed.Doc.TemplateVersionId);
         var clone = await ReadAsync(builder, cloneId);
-        AssertGraph(clone, seed, source);
+        AssertGraph(clone, source);
 
         // Джерело незмінне: його посилання — як були.
         Assert.Equal(source.Cols[1].Id, source.Cols[2].CascadeFromColumnId);
@@ -150,6 +150,6 @@ public sealed class TemplateVersionCloneGraphStyleTests(SqlServerFixture sql)
 
         var first = await ReadAsync(builder, cloneId);
         var second = await ReadAsync(builder, cloneOfCloneId);
-        AssertGraph(second, seed, first);
+        AssertGraph(second, first);
     }
 }

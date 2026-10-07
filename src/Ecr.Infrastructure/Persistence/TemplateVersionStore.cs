@@ -555,6 +555,11 @@ public sealed partial class TemplateVersionStore(EcrDbContext db) : ITemplateVer
         db.TemplateVersions.Add(clone);
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
 
+        // D3: стилі належать ВЕРСІЇ (cfg.StyleDef.TemplateVersionId, UQ_StyleDef) — клонуються за кодом, а
+        // посилання колонок/рядків/шапки таблиці перев'язуються на нові Id (спершу стилі потрібні в базі).
+        var styleIds = await CloneStylesAsync(clone.Id, clonedFrom, ct).ConfigureAwait(false);
+        TemplateVersionCloner.RelinkStyles(links, styleIds);
+
         db.FormulaDefs.AddRange(TemplateVersionCloner.Relink(links));
         CloneTableRelations(clone, relationTemplates);
         await CloneResourceGrantsAsync(clone, grantSources, ct).ConfigureAwait(false);
@@ -564,6 +569,39 @@ public sealed partial class TemplateVersionStore(EcrDbContext db) : ITemplateVer
         await CloneSheetGroupRulesAsync(clone.Id, clonedFrom, ct).ConfigureAwait(false);
         SetClonedFrom(clone, clonedFrom);
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// D3: копіює <c>cfg.StyleDef</c> версії-джерела у клон (той самий <c>Code</c>, повний вигляд) і зберігає їх,
+    /// щоб отримати нові Id. Повертає мапу «Id стилю джерела → Id стилю клону».
+    /// </summary>
+    private async Task<IReadOnlyDictionary<int, int>> CloneStylesAsync(int cloneId, int sourceId, CancellationToken ct)
+    {
+        var sources = await db.StyleDefs
+            .AsNoTracking()
+            .Where(s => s.TemplateVersionId == sourceId)
+            .OrderBy(s => s.Id)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var copies = new List<(int SourceId, StyleDef Copy)>(sources.Count);
+        foreach (var s in sources)
+        {
+            var copy = new StyleDef(cloneId, Domain.ValueObjects.EcrCode.Create(s.Code));
+            copy.SetAppearance(
+                s.FontName, s.FontSize, s.IsBold, s.IsItalic, s.ForegroundArgb, s.BackgroundArgb,
+                s.BorderJson, s.HorizontalAlign, s.VerticalAlign, s.WrapText, s.NumberFormat);
+            db.StyleDefs.Add(copy);
+            copies.Add((s.Id, copy));
+        }
+
+        if (copies.Count == 0)
+        {
+            return new Dictionary<int, int>();
+        }
+
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
+        return copies.ToDictionary(c => c.SourceId, c => c.Copy.Id);
     }
 
     /// <summary>
