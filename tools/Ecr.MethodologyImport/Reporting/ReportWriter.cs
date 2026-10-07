@@ -49,6 +49,11 @@ public static class ReportWriter
             sb.AppendLine(ci, $"Нормалізація {n.Id}: {n.From} -> {n.To} (аргументів {n.InArguments}, текстів {n.InTexts})");
         }
 
+        foreach (var rule in r.CategoryRules ?? [])
+        {
+            sb.AppendLine(ci, $"Правило категорії {rule.Methodology}/{(rule.Version.Length == 0 ? "-" : rule.Version)}: {(rule.Issue ?? "у пакеті")}");
+        }
+
         sb.AppendLine(ci, $"Токени в тексті формули, яких немає в списку аргументів: {r.UndeclaredInTextTotal} (не блокер; CLR такі токени не підставляє)");
         sb.AppendLine();
 

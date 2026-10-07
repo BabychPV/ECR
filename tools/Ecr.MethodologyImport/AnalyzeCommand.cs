@@ -8,7 +8,10 @@ namespace Ecr.MethodologyImport;
 public static class AnalyzeCommand
 {
     public static (MethodologyModel Model, AnalysisReport Report) Run(
-        Stream input, string library = MethodologyAnalyzer.DefaultLibrary, bool normalize = true)
+        Stream input,
+        string library = MethodologyAnalyzer.DefaultLibrary,
+        bool normalize = true,
+        IReadOnlyDictionary<string, string>? categoryRules = null)
     {
         var builder = new MethodologyModelBuilder();
         var readStats = AfXmlReader.Read(input, builder.Add);
@@ -19,6 +22,10 @@ public static class AnalyzeCommand
             (model, applied) = ReferenceNormalizer.Normalize(model);
         }
 
-        return (model, MethodologyAnalyzer.Analyze(model, readStats, library) with { Normalizations = applied });
+        return (model, MethodologyAnalyzer.Analyze(model, readStats, library) with
+        {
+            Normalizations = applied,
+            CategoryRules = Export.CategoryRules.Resolve(model, categoryRules),
+        });
     }
 }

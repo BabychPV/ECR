@@ -33,7 +33,8 @@ public sealed record PackageConstant(
 public sealed record PackageVersion(
     string Version,
     IReadOnlyList<PackageFormula> Formulas,
-    IReadOnlyList<PackageConstant> Constants);
+    IReadOnlyList<PackageConstant> Constants,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] PackageCategoryRule? CategoryRule = null);
 
 public sealed record PackageMethodology(string Name, IReadOnlyList<PackageVersion> Versions);
 
@@ -61,11 +62,20 @@ public sealed record MethodologyPackage(
         Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) },
     };
 
-    public static MethodologyPackage From(MethodologyModel model, AnalysisReport report, string library)
+    /// <param name="categoryRules">
+    /// Правила категорій «методологія → вираз» для вузла <c>categoryRule</c>; <c>null</c> — таблиця Land
+    /// (<see cref="CategoryRules.LandDefaults"/>), порожній словник — без правил.
+    /// </param>
+    public static MethodologyPackage From(
+        MethodologyModel model, AnalysisReport report, string library,
+        IReadOnlyDictionary<string, string>? categoryRules = null)
     {
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(report);
 
+        var rules = CategoryRules.Resolve(model, categoryRules)
+            .Where(r => r.Issue is null)
+            .ToDictionary(r => (r.Methodology, r.Version), r => new PackageCategoryRule(r.Expression));
         var formulas = model.Formulas.ToLookup(f => (f.Methodology, f.MethodologyVersion));
         var constants = model.Constants.ToLookup(c => (c.Methodology, c.MethodologyVersion));
         var keys = formulas.Select(g => g.Key).Concat(constants.Select(g => g.Key)).Distinct().ToList();
@@ -94,7 +104,8 @@ public sealed record MethodologyPackage(
                                     .OrderBy(c => c.Category, StringComparer.Ordinal).ThenBy(c => c.Version, StringComparer.Ordinal)
                                     .Select(c => new PackageConstantValue(c.Category, c.Version, c.Value, c.StartDate, c.EndDate))
                                     .ToList()))
-                            .ToList()))
+                            .ToList(),
+                        rules.GetValueOrDefault((g.Key, v))))
                     .ToList()))
             .ToList();
 

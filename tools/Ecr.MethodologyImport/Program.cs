@@ -22,6 +22,7 @@ if (args.Length < 2 || args[0] is not ("analyze" or "export" or "unresolved"))
         Використання:
           Ecr.MethodologyImport analyze <AF.xml> [--json] [--top N] [--library Common] [--out report.json]
           Ecr.MethodologyImport export  <AF.xml> --out package.json [--library Common] [--allow-blockers]
+                         [--category-rules rules.json | --no-category-rules]
           Ecr.MethodologyImport unresolved <AF.xml> [--out unresolved.md] [--library Common]
 
         analyze — сухий прогін: розбір AF XML (потоково), Trim, резолвінг !Формула і CST.Константа
@@ -42,6 +43,7 @@ var normalize = true;
 var top = 20;
 var library = MethodologyAnalyzer.DefaultLibrary;
 string? outFile = null;
+IReadOnlyDictionary<string, string>? categoryRules = null; // null = таблиця Land; порожній словник = без правил
 
 for (var i = 2; i < args.Length; i++)
 {
@@ -62,6 +64,21 @@ for (var i = 2; i < args.Length; i++)
             break;
         case "--library" when i + 1 < args.Length:
             library = args[++i];
+            break;
+        case "--no-category-rules":
+            categoryRules = new Dictionary<string, string>();
+            break;
+        case "--category-rules" when i + 1 < args.Length:
+            try
+            {
+                categoryRules = CategoryRules.ParseFile(File.ReadAllText(args[++i]));
+            }
+            catch (Exception ex) when (ex is IOException or System.Text.Json.JsonException or FormatException)
+            {
+                Console.Error.WriteLine($"Файл правил категорій не прочитано: {ex.Message}");
+                return UsageOrInputError;
+            }
+
             break;
         case "--out" when i + 1 < args.Length:
             outFile = args[++i];
@@ -92,7 +109,7 @@ try
 {
     using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 20, FileOptions.SequentialScan);
     size = stream.Length;
-    (model, report) = AnalyzeCommand.Run(stream, library, normalize);
+    (model, report) = AnalyzeCommand.Run(stream, library, normalize, categoryRules);
 }
 catch (XmlException ex)
 {
@@ -120,7 +137,7 @@ if (command == "export")
         return HasBlockers;
     }
 
-    var package = MethodologyPackage.From(model, report, library);
+    var package = MethodologyPackage.From(model, report, library, categoryRules);
     File.WriteAllText(outFile!, package.ToJson() + "\n", new UTF8Encoding(false));
     Console.Out.WriteLine(string.Create(
         CultureInfo.InvariantCulture,
