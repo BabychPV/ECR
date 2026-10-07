@@ -19191,6 +19191,20 @@ export interface components {
             rejected: number;
             /**
              * Format: int32
+             * @description Скільки аркушів складу затверджено — у сумі по документах переліку й ЛИШЕ по аркушах, які
+             *     читач бачить (UI-18: «23 із 60 затверджено»). Схований аркуш не рахується ні тут, ні в
+             *     SheetsTotal: інакше різниця двох чисел розкривала б, скільки їх.
+             * @default 0
+             */
+            sheetsApproved: number;
+            /**
+             * Format: int32
+             * @description Скільки аркушів складу бачить читач у цих документах (без схованих).
+             * @default 0
+             */
+            sheetsTotal: number;
+            /**
+             * Format: int32
              * @description Усі аркуші подано або затверджено, і хоч один ще не затверджено.
              */
             submitted: number;
@@ -19254,6 +19268,10 @@ export interface components {
             /** @description Хто змінив; `null` — користувача вже немає. */
             modifiedByDisplayName?: null | string;
             nameL10n?: null | components["schemas"]["LocalizedText"];
+            /** @description Автор документа (`CreatedBy`): відображуване ім'я, не логін (`D-86`); `null` — автора
+             *     вже немає. ⛔ Для читача, чий доступ звужено нижче проєкту, — `null` (`DocumentSheetVisibility.For`):
+             *     ім'я людини — окреме розкриття, його не віддаємо там, де документ показано частково. */
+            ownerDisplayName?: null | string;
             /**
              * Format: int32
              * @description Проєкт.
