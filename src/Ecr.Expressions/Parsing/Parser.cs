@@ -1284,8 +1284,10 @@ public sealed class Parser
             BinaryNode binary => binary.Operator switch
             {
                 BinaryOperator.Concat => ExpressionValueType.Text,
-                BinaryOperator.Add when InferShape(binary.Left, dialect) == ExpressionValueType.Text
-                                        && InferShape(binary.Right, dialect) == ExpressionValueType.Text
+                // Text + Text, а також Text + Null-форма (поле `!X`, if(...), NULL — тип відомий лише
+                // під час виконання): `!A + '_' + !B` — текст. Обидві Null-форми (`!A + !B`) і все без
+                // тексту лишається Number, як було.
+                BinaryOperator.Add when IsTextPlus(InferShape(binary.Left, dialect), InferShape(binary.Right, dialect))
                     => ExpressionValueType.Text,
                 >= BinaryOperator.Equal and <= BinaryOperator.Or => ExpressionValueType.Boolean,
                 _ => ExpressionValueType.Number,
@@ -1296,6 +1298,11 @@ public sealed class Parser
             PeriodPropertyNode => ExpressionValueType.Number,
             _ => ExpressionValueType.Null,
         };
+
+    /// <summary>Чи <c>+</c> конкатенує: хоча б один Text, а другий — Text або Null-форма.</summary>
+    private static bool IsTextPlus(ExpressionValueType left, ExpressionValueType right)
+        => (left == ExpressionValueType.Text && right is ExpressionValueType.Text or ExpressionValueType.Null)
+           || (right == ExpressionValueType.Text && left == ExpressionValueType.Null);
 
     /// <summary>Ланка посилання: код, діапазон, предикат або зсув періоду.</summary>
     private sealed record Segment(
