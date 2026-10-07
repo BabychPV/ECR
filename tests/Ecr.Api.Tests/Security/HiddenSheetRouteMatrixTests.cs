@@ -87,7 +87,7 @@ public sealed class HiddenSheetRouteMatrixTests(SqlServerFixture sql)
         {
             foreach (var (route, _) in Routes)
             {
-                // R-8 (Q15-07): лічильники огляду кампанії для читача з Deny на аркуш — окремим Skip нижче.
+                // R-8 (Q15-07): лічильники огляду кампанії для читача з Deny на аркуш: випадок додається після зведення sec-campaign-progress (його тестами покрито).
                 if (how == "deny" && route == "campaign")
                 {
                     continue;
@@ -118,13 +118,6 @@ public sealed class HiddenSheetRouteMatrixTests(SqlServerFixture sql)
     [Trait("Requirement", "ФВ-6.14")]
     public Task Маршрут_для_звуженого_читача_не_змінюється_від_появи_схованого_аркуша(string how, string route)
         => AssertRouteUnchangedAsync(how, route);
-
-    [Fact(Skip = "TODO-R8-CAMPAIGN-DENY: чекає lane ui-campaign-period-summary → sec-campaign-counters → sec-campaign-progress (Q15-07), див. ANALIZ-RC6-LANES.md")]
-    [Trait(TestCategories.Stage, TestCategories.Stage3)]
-    [Trait(TestCategories.Category, TestCategories.Integration)]
-    [Trait("Requirement", "ФВ-6.14")]
-    public Task Огляд_кампанії_для_читача_з_Deny_на_аркуш_не_змінюється_від_появи_схованого_аркуша()
-        => AssertRouteUnchangedAsync("deny", "campaign");
 
     private async Task AssertRouteUnchangedAsync(string how, string route)
     {
