@@ -5,6 +5,7 @@ import { RecalculateKbd, useSheetActions } from '@/features/workflow/SheetAction
 import type { DocumentLock } from './documentLock';
 import { DocumentSheetBanner } from './DocumentSheetBanner';
 import { DocumentToolbar } from './DocumentToolbar';
+import { StaleResultsBanner } from './StaleResultsBanner';
 import { t } from '@/shared/i18n';
 
 // ⚠ `import()` — той самий чанк, що й раніше в `DocumentPage` (`D-132`): імпорт
@@ -36,6 +37,10 @@ interface DocumentActionBarProps {
   readonly documentItems: readonly (JSX.Element | null)[];
   /** Ліва частина рядка: чип аркуша, прогрес, стан збереження. */
   readonly status?: ReactNode;
+  /** Результати методологій застаріли (сервер виводить; `null`/відсутнє — банера немає). */
+  readonly resultsStale?: boolean | null;
+  /** Відколи застаріло (UTC ISO); `null`/відсутнє — без дати. */
+  readonly resultsStaleSince?: string | null;
 }
 
 /**
@@ -67,6 +72,8 @@ export function DocumentActionBar({
   validate,
   documentItems,
   status,
+  resultsStale,
+  resultsStaleSince,
 }: DocumentActionBarProps): JSX.Element {
   const actions = useSheetActions({ documentId, sheetDefId, sheetName, periodKey, state, lock });
   const openImport = useRef<((returnTo?: HTMLElement | null) => void) | null>(null);
@@ -214,6 +221,11 @@ export function DocumentActionBar({
         lock={lock}
         canDecide={actions.approve !== null || actions.reject !== null}
       />
+
+      {/* ✎ resultsStale: входи змінилися після прогону - банер і кнопка «Recalculate» (автоперерахунку немає). */}
+      {resultsStale === true && (
+        <StaleResultsBanner since={resultsStaleSince ?? null} recalculate={actions.recalculate} />
+      )}
 
       {showImport && (
         <Suspense fallback={null}>
