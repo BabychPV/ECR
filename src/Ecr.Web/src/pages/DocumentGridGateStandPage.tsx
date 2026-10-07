@@ -42,6 +42,7 @@ const stored = new Map<string, Record<string, unknown>>();
 // відстає від правки: слайс віддає TOTAL лише з ЗАВЕРШЕНОЇ задачі перерахунку (~1.5 с після PATCH).
 const calcTotals = new Map<string, number>();
 const CalcLagMs = 1_500;
+const StandRecalcJobPrefix = 'StandRecalcJob';
 let calcJobSeq = 0;
 let calcJobDoneAt = 0;
 
@@ -131,7 +132,7 @@ function installStandServer(): void {
       if (calcEnabled()) {
         calcJobSeq += 1;
         calcJobDoneAt = Date.now() + CalcLagMs;
-        const jobId = `StandRecalcJob#${String(calcJobSeq)}`;
+        const jobId = `${StandRecalcJobPrefix}#${String(calcJobSeq)}`;
         window.setTimeout(finishCalcJob, CalcLagMs);
 
         return json({ appliedCells: rows.length, rowVersions: {}, validation: [], recalculationJobId: jobId });
@@ -139,7 +140,7 @@ function installStandServer(): void {
 
       return json({ appliedCells: rows.length, rowVersions: {}, validation: [] });
     }
-    if (path.startsWith('/api/v1/jobs/StandRecalcJob')) {
+    if (path.startsWith(`/api/v1/jobs/${StandRecalcJobPrefix}`)) {
       return json({ state: Date.now() >= calcJobDoneAt ? 'Succeeded' : 'Running' });
     }
     if (path === `/api/v1/documents/${StandDocumentId}/tables/${StandTableInstanceId}`) return json(slice());
