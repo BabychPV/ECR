@@ -85,3 +85,32 @@ describe('WorkflowHistory', () => {
     expect(screen.queryByRole('button', { name: '⟦workflow.history⟧' })).toBeNull();
   });
 });
+
+describe('WorkflowHistory (embedded, діалог «More → History»)', () => {
+  function showEmbedded(): void {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+
+    render(
+      <MantineProvider theme={testTheme}>
+        <QueryClientProvider client={client}>
+          <WorkflowHistory embedded documentId={7} periodKey={202601} />
+        </QueryClientProvider>
+      </MantineProvider>,
+    );
+  }
+
+  it('без кнопки-перемикача: подію видно одразу', async () => {
+    respond([Rejected]);
+    showEmbedded();
+
+    expect(await screen.findByText('Olena Koval')).toBeTruthy();
+    expect(screen.queryByRole('button')).toBeNull();
+  });
+
+  it('порожній журнал — текстом, а не порожнім діалогом', async () => {
+    respond([]);
+    showEmbedded();
+
+    expect(await screen.findByTestId('workflow-history-empty')).toBeTruthy();
+  });
+});

@@ -37,6 +37,9 @@ export interface DocumentVersionCompareProps {
    * (`ECR-DOC-0422 .comparePeriods`).
    */
   readonly periodKey: number;
+
+  /** Показ усередині діалогу «More → Compare versions»: без кнопки-перемикача, розгорнуто одразу. */
+  readonly embedded?: boolean;
 }
 
 /** Вибір людини: дві версії в межах одного періоду. */
@@ -77,8 +80,10 @@ interface CompareRequest {
 export function DocumentVersionCompare({
   documentId,
   periodKey,
+  embedded = false,
 }: DocumentVersionCompareProps): JSX.Element {
-  const [opened, setOpened] = useState(false);
+  const [toggled, setOpened] = useState(false);
+  const opened = embedded || toggled;
   const versions = useDocumentVersions(documentId, periodKey, opened);
 
   /*
@@ -130,13 +135,15 @@ export function DocumentVersionCompare({
 
   return (
     <Stack gap="xs" align="flex-start" data-testid="document-version-compare">
-      <Button
-        variant="subtle"
-        aria-expanded={opened}
-        onClick={() => setOpened((value) => !value)}
-      >
-        {t('document.compare')}
-      </Button>
+      {!embedded && (
+        <Button
+          variant="subtle"
+          aria-expanded={opened}
+          onClick={() => setOpened((value) => !value)}
+        >
+          {t('document.compare')}
+        </Button>
+      )}
 
       {opened && versions.error !== null && (
         <ErrorAlert error={versions.error} onRetry={() => void versions.refetch()} />

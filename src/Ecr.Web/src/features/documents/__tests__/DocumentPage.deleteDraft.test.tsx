@@ -159,8 +159,9 @@ describe('DocumentPage: кнопка «Видалити документ-чер�
       show(['Document.View', 'Document.Delete'], { GEN: 'Draft', AIR: 'Submitted' });
 
       await screen.findByRole('button', ValidateButton, { timeout: SlowEnvTimeout });
-      // ⚠ Інших пунктів меню в цього користувача немає, тож немає й самого меню.
-      expect(screen.queryByRole('button', MoreButton)).toBeNull();
+      // ✎ RC9: «History» і «Compare versions» живуть у «More» завжди, тож меню є — але без видалення.
+      fireEvent.click(screen.getByRole('button', MoreButton));
+      await screen.findByRole('menuitem', { name: '⟦workflow.history⟧' }, { timeout: SlowEnvTimeout });
       expect(screen.queryByRole('menuitem', DeleteButton)).toBeNull();
     },
     SlowEnvTimeout,

@@ -51,7 +51,7 @@ const AllRights = [
 
 function mockFetch(
   permissions: string[],
-  options: { sheetStates?: Record<string, string>; validation?: unknown } = {},
+  options: { sheetStates?: Record<string, string>; validation?: unknown; noVisibleSheets?: boolean } = {},
 ): void {
   vi.stubGlobal(
     'fetch',
@@ -90,6 +90,9 @@ function mockFetch(
       }
 
       if (url.includes('/tables/status')) return jsonResponse([]);
+
+      // ⚠ Усі аркуші сховані від користувача: API віддає порожній перелік таблиць.
+      if (url.includes('/tables') && options.noVisibleSheets === true) return jsonResponse([]);
 
       if (url.includes('/tables')) {
         return jsonResponse([
@@ -262,12 +265,31 @@ describe('DocumentPage: рядок дій (UI-14)', () => {
   );
 
   it(
-    'без жодної рідкісної дії — меню «More» немає зовсім',
+    'без рідкісних дій у «More» лише History і Compare versions',
     async () => {
       show([]);
       await actionsRow();
 
+      fireEvent.click(screen.getByRole('button', More));
+      const items = (await screen.findAllByRole('menuitem')).map((item) => item.textContent);
+
+      expect(items).toEqual(['⟦workflow.history⟧', '⟦document.compare⟧']);
+    },
+    SlowEnvTimeout,
+  );
+
+  it(
+    'усі аркуші сховані — рядка дій, а з ним «More» з History/Compare, немає',
+    async () => {
+      show(AllRights, { noVisibleSheets: true });
+
+      // ⛔ Спершу — що сторінка намальована й сказала «аркушів немає», інакше «меню немає» було б правдою лише через недомальований екран.
+      await screen.findByText('⟦document.noSheets⟧', {}, { timeout: SlowEnvTimeout });
+
+      expect(screen.queryByTestId('document-actions')).toBeNull();
       expect(screen.queryByRole('button', More)).toBeNull();
+      expect(screen.queryByRole('menuitem', { name: '⟦workflow.history⟧' })).toBeNull();
+      expect(screen.queryByRole('menuitem', { name: '⟦document.compare⟧' })).toBeNull();
     },
     SlowEnvTimeout,
   );

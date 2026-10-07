@@ -13,6 +13,13 @@ export interface WorkflowHistoryProps {
 
   /** Період: стан затвердження існує окремо на кожен (`R-A6`). */
   periodKey: number;
+
+  /**
+   * Показ усередині діалогу «More → History» (макет не має окремого блока на
+   * сторінці): без кнопки-перемикача, розгорнуто одразу; порожній журнал —
+   * текстом, бо діалог без вмісту читався б як помилка.
+   */
+  embedded?: boolean;
 }
 
 /**
@@ -28,24 +35,31 @@ export interface WorkflowHistoryProps {
  * нічого не подавав» — а це неправда. Знати, що вона порожня, можна лише
  * спитавши, тому до першого розгортання кнопка є завжди.
  */
-export function WorkflowHistory({ documentId, periodKey }: WorkflowHistoryProps): JSX.Element | null {
-  const [opened, setOpened] = useState(false);
+export function WorkflowHistory({ documentId, periodKey, embedded = false }: WorkflowHistoryProps): JSX.Element | null {
+  const [toggled, setOpened] = useState(false);
+  const opened = embedded || toggled;
   const history = useWorkflowHistory(documentId, periodKey, opened);
 
   if (history.data?.length === 0) {
-    return null;
+    return embedded ? (
+      <Text size="sm" c="dimmed" data-testid="workflow-history-empty">
+        {t('state.emptyTitle')}
+      </Text>
+    ) : null;
   }
 
   return (
     <Stack gap="xs" align="flex-start" data-testid="workflow-history">
-      <Button
-        variant="subtle"
-        aria-expanded={opened}
-        loading={opened && history.isPending}
-        onClick={() => setOpened((value) => !value)}
-      >
-        {t('workflow.history')}
-      </Button>
+      {!embedded && (
+        <Button
+          variant="subtle"
+          aria-expanded={opened}
+          loading={opened && history.isPending}
+          onClick={() => setOpened((value) => !value)}
+        >
+          {t('workflow.history')}
+        </Button>
+      )}
 
       {opened && history.error !== null && (
         <ErrorAlert error={history.error} onRetry={() => void history.refetch()} />
