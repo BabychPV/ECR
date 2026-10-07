@@ -169,3 +169,23 @@ describe('ConsistencyIssuesPage на шаблоні переліку (UI-20)', (
     expect(screen.queryByRole('button', { name: '⟦consistency.runNow⟧' })).toBeNull();
   });
 });
+
+describe('стан знахідки виглядом StatusBadge (звірка batch-4 з макетом, п.20)', () => {
+  it('звичайний регістр, нейтральний тон без помаранчевого тла, ширина не нижче тексту', async () => {
+    respondWith({ items: Findings, nextCursor: null, totalCount: 17, totals: Totals });
+    show();
+
+    await screen.findByText('Знахідка 1');
+    const open = document.querySelectorAll<HTMLElement>('[data-issue-state="open"]');
+    const resolved = document.querySelectorAll<HTMLElement>('[data-issue-state="resolved"]');
+    expect(open).toHaveLength(4);
+    expect(resolved).toHaveLength(1);
+
+    for (const badge of [...open, ...resolved]) {
+      expect(badge.style.textTransform).toBe('none');
+      expect(badge.style.width).toBe('max-content');
+      // ⛔ Не `statusWarning`: вагу несе колонка Severity, стан «відкрито» — нейтральний (KIT §1.3).
+      expect(badge.getAttribute('style') ?? '').not.toMatch(/warning/i);
+    }
+  });
+});
