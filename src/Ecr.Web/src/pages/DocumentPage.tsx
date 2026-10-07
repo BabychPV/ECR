@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useState, type JSX } from 'react';
-import { Alert, Badge, Skeleton, Stack, Tabs, Text } from '@mantine/core';
+import { Alert, Skeleton, Stack, Tabs, Text } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useParams } from 'react-router-dom';
@@ -504,8 +504,8 @@ export function DocumentPage(): JSX.Element {
   // «History» і «Compare versions» — пункти «More» + лінивий діалог (макет: блоків між шапкою й сіткою немає).
   const documentLog = useDocumentLogActions({ documentId, periodKey });
 
-  // ✎ Лінія B: бейдж у шапці й назва пункту «More», коли числа методологій застаріли. Запит спільний із
-  // панеллю чисел (один ключ), тож завершений перерахунок оновлює обох.
+  // ✎ Лінія B: назва пункту «More», коли числа методологій застаріли (банер малює DocumentActionBar, бейджа
+  // в шапці немає - без дубля). Запит спільний із панеллю чисел (один ключ), тож завершений перерахунок оновлює обох.
   const calculationsStale = useCalculationsStale(documentId, periodKey, can(session.data, 'Calculation.View'));
 
   const refetchBoth = (): void => {
@@ -615,11 +615,6 @@ export function DocumentPage(): JSX.Element {
                 onShowIssues={() => undefined}
               />
               <DocumentSaveState readOnly={readOnly} />
-              {calculationsStale && (
-                <Badge color="statusWarning" variant="light" role="status" data-testid="document-methodology-stale">
-                  {t('documents.methodologyResultsStale')}
-                </Badge>
-              )}
             </>
           }
         />

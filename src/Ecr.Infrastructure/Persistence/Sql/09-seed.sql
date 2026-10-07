@@ -7257,7 +7257,6 @@ USING (VALUES
     (N'documents.migrateRefusalBindingsNotMapped', N'en', N'Methodology outputs are bound to columns that have no matching binding in the target version; those columns would be left empty.', 1),
     -- COLL:d13bindings ── кінець секції ──
     -- COLL:b-stale-badge ── лінія B: бейдж «Результати методологій застарілі» і пункт «Recalculate calculations» у More; ru/kz — порцією COLL:b-stale-badge нижче ──
-    (N'documents.methodologyResultsStale', N'en', N'Methodology results are out of date', 1),
     (N'workflow.recalculateCalculations', N'en', N'Recalculate calculations', 1),
     -- COLL:b-stale-badge ── кінець секції ──
     -- COLL:dps-required-header ── D-PS: подання з порожнім обов'язковим полем шапки (SubmitSheetHandler); ru/kz — порцією COLL:dps-required-header у блоці I18N нижче ──
@@ -17667,8 +17666,6 @@ GO
 INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val
   FROM (VALUES
-    (N'documents.methodologyResultsStale', N'ru', N'Результаты методологий устарели'),
-    (N'documents.methodologyResultsStale', N'kz', N'Әдістемелер нәтижелері ескірген'),
     (N'workflow.recalculateCalculations', N'ru', N'Пересчитать расчёты'),
     (N'workflow.recalculateCalculations', N'kz', N'Есептеулерді қайта есептеу')
        ) AS v ([Key], Lang, Val)

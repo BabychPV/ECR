@@ -1,5 +1,5 @@
 import type { JSX } from 'react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
@@ -127,6 +127,9 @@ function mockFetch(
           projectId: 1,
           sheetCount: 1,
           sheetStates: { GEN: 'Draft' },
+          // Сервер (resultsStale) і числа методологій кажуть одне й те саме: перший прогін - застарілий.
+          resultsStale: staleSequence[0] === true,
+          resultsStaleSince: staleSequence[0] === true ? '2026-10-07T10:00:00Z' : null,
         });
       }
 
@@ -162,52 +165,78 @@ function show(
 
 const Slow = 60_000;
 const BadgeId = 'document-methodology-stale';
+const BannerId = 'document-stale-results';
+const Recalculated = { name: /⟦workflow\.recalculate⟧/ };
+const RecalculatedCalc = { name: /⟦workflow\.recalculateCalculations⟧/ };
 const MoreButton = { name: '⟦document.moreActions⟧' };
 const ValidateButton = { name: '⟦document.validate⟧' };
 
 describe('DocumentPage: застарілі числа методологій', () => {
+  // ⛔ Лінві чанки сторінки - у кеш модулів ДО першого рендера (як у DocumentPage.staleValidation): інакше
+  // повторні спроби меж <Suspense> крутяться під синхронним act() кліку, а наприкінці тесту чанк
+  // довантажується в закритий раннер ("Vite module runner has been closed").
+  beforeAll(async () => {
+    await Promise.all([
+      import('@/features/documents/DocumentHeaderPanel'),
+      import('@/features/documents/DocumentVersionCompare'),
+      import('@/features/documents/ValidationPanel'),
+      import('@/features/grid/RestoreEditsBanner'),
+      import('@/features/grid/SheetTables'),
+      import('@/features/grid/cellNavigation'),
+      import('@/features/import/ImportPanel'),
+      import('@/features/projects/allProjects'),
+      import('@/features/workflow/WorkflowHistory'),
+      import('@/shared/ui/PeriodPicker'),
+    ]);
+  }, 120_000);
+
   afterEach(() => {
     vi.unstubAllGlobals();
   });
 
   it(
-    'isStale=true — бейдж у шапці, а пункт перерахунку в «More» називається «Recalculate calculations»',
+    'застаріло — одне сповіщення (банер), без бейджа в шапці; пункт перерахунку в «More» — «Recalculate calculations»',
     async () => {
       show(['Document.View', 'Calculation.View'], [true]);
 
-      const badge = await screen.findByTestId(BadgeId, undefined, { timeout: Slow });
-      expect(badge.textContent).toBe('⟦documents.methodologyResultsStale⟧');
-
+      await screen.findByTestId(BannerId, undefined, { timeout: Slow });
       fireEvent.click(screen.getByRole('button', MoreButton));
-      expect(await screen.findByRole('menuitem', { name: /⟦workflow\.recalculateCalculations⟧/ })).toBeDefined();
+      expect(await screen.findByRole('menuitem', RecalculatedCalc, { timeout: Slow })).toBeDefined();
+      // ⛔ Банер і бейдж не показуються одночасно: дубль двох повідомлень про одне й те саме.
+      expect(screen.queryByTestId(BadgeId)).toBeNull();
+      expect(screen.getAllByTestId(BannerId)).toHaveLength(1);
     },
     Slow,
   );
 
   it(
-    'числа свіжі — бейджа немає, пункт зі звичайною назвою',
+    'числа свіжі — ні банера, ні бейджа, пункт зі звичайною назвою',
     async () => {
       show(['Document.View', 'Calculation.View'], [false]);
 
       await screen.findByRole('button', ValidateButton, { timeout: Slow });
-      // ⛔ Спершу дочекатися, що числа прочитано (меню з тією ж назвою), інакше «бейджа немає» було б правдою від нічого.
+      // ⛔ Спершу дочекатися, що числа прочитано, інакше «немає» було б правдою від нічого.
       await waitFor(() => {
         expect(vi.mocked(fetch).mock.calls.some(([u]) => String(u).includes('/calculation-results'))).toBe(true);
       });
       fireEvent.click(screen.getByRole('button', MoreButton));
-      expect(await screen.findByRole('menuitem', { name: /⟦workflow\.recalculate⟧/ })).toBeDefined();
+      expect(await screen.findByRole('menuitem', Recalculated)).toBeDefined();
+      expect(screen.queryByTestId(BannerId)).toBeNull();
       expect(screen.queryByTestId(BadgeId)).toBeNull();
-      expect(screen.queryByRole('menuitem', { name: /recalculateCalculations/ })).toBeNull();
+      expect(screen.queryByRole('menuitem', RecalculatedCalc)).toBeNull();
     },
     Slow,
   );
 
   it(
-    'без права Calculation.View — числа не читаються, бейджа немає',
+    'без права Calculation.View — числа не читаються, пункт зі звичайною назвою',
     async () => {
       show(['Document.View'], [true]);
 
       await screen.findByRole('button', ValidateButton, { timeout: Slow });
+      fireEvent.click(screen.getByRole('button', MoreButton));
+      expect(await screen.findByRole('menuitem', Recalculated)).toBeDefined();
+      expect(screen.queryByRole('menuitem', RecalculatedCalc)).toBeNull();
       expect(screen.queryByTestId(BadgeId)).toBeNull();
       expect(vi.mocked(fetch).mock.calls.some(([u]) => String(u).includes('/calculation-results'))).toBe(false);
     },
@@ -215,31 +244,39 @@ describe('DocumentPage: застарілі числа методологій', (
   );
 
   it(
-    'перерахунок завершено — числа перечитано, бейдж зникає',
+    'перерахунок із More завершено — числа перечитано, пункт знову зі звичайною назвою',
     async () => {
       const probe = show(['Document.View', 'Calculation.View'], [true, false]);
 
-      await screen.findByTestId(BadgeId, undefined, { timeout: Slow });
+      await screen.findByTestId(BannerId, undefined, { timeout: Slow });
       fireEvent.click(screen.getByRole('button', MoreButton));
-      fireEvent.click(await screen.findByRole('menuitem', { name: /⟦workflow\.recalculateCalculations⟧/ }));
+      fireEvent.click(await screen.findByRole('menuitem', RecalculatedCalc, { timeout: Slow }));
+      await waitFor(() => expect(probe.posts()).toBe(1), { timeout: Slow });
 
-      await waitFor(() => {
-        expect(probe.posts()).toBe(1);
-        expect(screen.queryByTestId(BadgeId)).toBeNull();
-      }, { timeout: Slow });
+      // Числа перечитано (другий запит calculation-results) - і лише тоді дивимось на меню.
+      await waitFor(
+        () => {
+          const reads = vi.mocked(fetch).mock.calls.filter(([u]) => String(u).includes('/calculation-results'));
+          expect(reads.length).toBeGreaterThanOrEqual(2);
+        },
+        { timeout: Slow },
+      );
+      fireEvent.click(await screen.findByRole('button', MoreButton));
+      expect(await screen.findByRole('menuitem', Recalculated, { timeout: Slow })).toBeDefined();
+      expect(screen.queryByRole('menuitem', RecalculatedCalc)).toBeNull();
     },
     Slow,
   );
 
   it(
-    '422 ECR-CALC-4221 (є подані аркуші) — помилка з поясненням, а не «перераховано»; бейдж лишається',
+    '422 ECR-CALC-4221 (є подані аркуші) — помилка з поясненням, а не «перераховано»; банер лишається',
     async () => {
       vi.mocked(notifications.show).mockClear();
       const probe = show(['Document.View', 'Calculation.View'], [true], true);
 
-      await screen.findByTestId(BadgeId, undefined, { timeout: Slow });
+      await screen.findByTestId(BannerId, undefined, { timeout: Slow });
       fireEvent.click(screen.getByRole('button', MoreButton));
-      fireEvent.click(await screen.findByRole('menuitem', { name: /⟦workflow\.recalculateCalculations⟧/ }));
+      fireEvent.click(await screen.findByRole('menuitem', RecalculatedCalc, { timeout: Slow }));
 
       await waitFor(() => expect(probe.posts()).toBe(1), { timeout: Slow });
       await waitFor(
@@ -251,7 +288,7 @@ describe('DocumentPage: застарілі числа методологій', (
       // ⛔ Мутаційний доказ: покажи «Recalculated»/«queued» на відмову — тут червоне.
       expect(shown.some((o) => o.color === 'statusSuccess')).toBe(false);
       expect(JSON.stringify(shown.find((o) => o.color === 'statusError'))).toContain('has submitted sheets: reopen the period first');
-      expect(screen.getByTestId(BadgeId)).toBeDefined();
+      expect(screen.getByTestId(BannerId)).toBeDefined();
     },
     Slow,
   );
