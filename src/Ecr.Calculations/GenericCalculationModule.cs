@@ -116,6 +116,11 @@ public sealed class GenericCalculationModule(
             ? Application.Calculations.MethodologyFormulaOrder.Topological(formulas, formulaEngine)
             : formulas.OrderBy(f => f.EvaluationOrder).ThenBy(f => f.Id).ToList();
 
+        // ✎ L-2: правило категорії константи — раз на прив'язку, тим самим проходом, що й константи.
+        // Порожній рядок = правила немає (так само відповідає і підставна заглушка сховища).
+        var categoryRule = await methodologies
+            .GetCategoryRuleAsync(methodology.MethodologyVersionId, ct).ConfigureAwait(false);
+
         var period = await PeriodAsync(methodology, documentId, periodKey, ct).ConfigureAwait(false);
 
         // ⛔ HSE301 L: формули імпортованих методологій, на які версія посилається
@@ -153,7 +158,8 @@ public sealed class GenericCalculationModule(
 
         return new CalculationBindingContext(
             methodology, documentId, periodKey, ordered, substances, outputs, period,
-            scales ?? EmptyScales, constantsByCode, snapshot, libraries);
+            scales ?? EmptyScales, constantsByCode, snapshot, libraries,
+            string.IsNullOrWhiteSpace(categoryRule) ? null : categoryRule);
     }
 
     /// <summary>
@@ -377,12 +383,18 @@ public sealed class GenericCalculationModule(
 
         // ⛔ Константи Row-формул резолвляться БЕЗ речовини: константа, задана по
         // речовинах, у Row-формулі — відмова публікації, а не «коефіцієнт першої».
+        //
+        // ✎ L-2: Row-фаза БЕЗ категорії (`category: null`) — вона й раніше була «спільною»; ключ категорії
+        // дає правило версії ПІСЛЯ Row-формул (нижче), а константи самого правила (`CST.k1_…`) читаються тут,
+        // у Row-контексті, теж без категорії.
+        var categoryRule = binding.CategoryRule is { } ruleText ? ParseCategoryRule(ruleText) : null;
         var rowConstantUnits = new Dictionary<string, int?>(StringComparer.OrdinalIgnoreCase);
         var rowContext = new MethodologyEvaluationContext(
             period,
             arguments,
             ResolveConstants(
-                version.MethodologyVersionId, rowFormulas, substanceEntryId: null, period, binding.Constants, rowConstantUnits),
+                version.MethodologyVersionId, rowFormulas, substanceEntryId: null, period, binding.Constants, rowConstantUnits,
+                category: null, extraCodes: categoryRule?.ConstantCodes),
             units,
             binding.Registries,
             library is null ? null : name => library.Resolve(name, rowPhase: true));
@@ -394,6 +406,15 @@ public sealed class GenericCalculationModule(
         {
             rowContext.SetFormulaResult(formula.Code, Evaluate(formula, rowContext, numeric, trace, rowScope));
         }
+
+        // ✎ L-2 (B13 §4.1, крок 3): категорія константи — раз на рядок, ПІСЛЯ Row-формул (правило бачить
+        // `@`, `!Row` і `CST.` без категорії) і ДО циклу речовин. Усе, що рахується далі, резолвить
+        // константи з цим ключем. Версія без правила дає `null` — побітно як до L-2.
+        var categoryKey = categoryRule is null
+            ? null
+            : EvaluateCategoryRule(categoryRule, rowContext, numeric, trace);
+
+        library?.SetCategory(categoryKey);
 
         // Рівень рядка: виходи «раз на рядок» і проміжні значення видимих Row-формул.
         foreach (var output in outputs.Where(o => !o.IsPerSubstance))
@@ -434,7 +455,7 @@ public sealed class GenericCalculationModule(
             var constantUnits = new Dictionary<string, int?>(StringComparer.OrdinalIgnoreCase);
             var resolved = ResolveConstants(
                 version.MethodologyVersionId, substanceFormulas, substance?.SubstanceEntryId, period, binding.Constants,
-                constantUnits);
+                constantUnits, categoryKey);
 
             var context = new MethodologyEvaluationContext(
                 period, arguments, resolved, units, binding.Registries,
@@ -844,6 +865,18 @@ public sealed class GenericCalculationModule(
         private readonly Dictionary<int, MethodologyEvaluationContext> _row = [];
         private Dictionary<int, MethodologyEvaluationContext> _substance = [];
         private long? _substanceId;
+        private string? _category;
+
+        /// <summary>
+        /// Ключ категорії рядка (L-2) для констант бібліотек у фазі речовини; Row-фаза категорії не має.
+        /// </summary>
+        /// <param name="category">Ключ з правила версії викликача; <c>null</c> — правила немає.</param>
+        /// <remarks>
+        /// ⚠ Ключ задає ВЕРСІЯ ВИКЛИКАЧА, а не бібліотека: ті самі рядок і категорія, що в самого
+        /// рядка. Константа бібліотеки без такої категорії (або без категорії взагалі, або «Common»)
+        /// резолвиться як і для версії викликача.
+        /// </remarks>
+        public void SetCategory(string? category) => _category = category;
 
         /// <summary>Куди веде <c>!Code</c> викликача за межу його версії; <c>null</c> — нікуди.</summary>
         /// <param name="name">Ім'я після <c>!</c>.</param>
@@ -929,7 +962,8 @@ public sealed class GenericCalculationModule(
             // HSE400 — різні коефіцієнти, і формула Common рахується своїм.
             var constantUnits = new Dictionary<string, int?>(StringComparer.OrdinalIgnoreCase);
             var constants = module.ResolveConstants(
-                library.MethodologyVersionId, group, substance, period, library.Constants, constantUnits);
+                library.MethodologyVersionId, group, substance, period, library.Constants, constantUnits,
+                rowPhase ? null : _category);
 
             var scope = new TraceScope(
                 input,
@@ -982,6 +1016,91 @@ public sealed class GenericCalculationModule(
             => library.Formulas.FirstOrDefault(f => string.Equals(f.Code, name, StringComparison.OrdinalIgnoreCase));
     }
 
+    /// <summary>Правило категорії версії, розібране раз на рядок разом із кодами його констант.</summary>
+    /// <param name="Text">Вираз як він записаний у версії.</param>
+    /// <param name="Expression">Розібраний вираз; <c>null</c> — розбір не вдався (причина в <paramref name="ParseError"/>).</param>
+    /// <param name="ParseError">Повідомлення розбору англійською; <c>null</c>, якщо розібрано.</param>
+    /// <param name="ConstantCodes">Коди <c>CST.</c> у виразі — їх треба резолвити в Row-контексті.</param>
+    private sealed record ParsedCategoryRule(
+        string Text,
+        ParsedExpression? Expression,
+        string? ParseError,
+        IReadOnlyCollection<string> ConstantCodes);
+
+    /// <summary>Розбирає правило категорії діалектом Methodology.</summary>
+    /// <param name="text">Вираз правила версії.</param>
+    /// <returns>Розібране правило; помилку розбору віддає <see cref="EvaluateCategoryRule"/> відмовою рядка.</returns>
+    private ParsedCategoryRule ParseCategoryRule(string text)
+    {
+        var parsed = formulaEngine.Parse(text, ExpressionDialect.Methodology);
+        if (!parsed.IsSuccess || parsed.Expression is null)
+        {
+            return new ParsedCategoryRule(
+                text, null, parsed.Diagnostics.Count > 0 ? parsed.Diagnostics[0].Message : "unparseable expression", []);
+        }
+
+        return new ParsedCategoryRule(text, parsed.Expression, null, [.. Walk(parsed.Expression.Root)]);
+    }
+
+    /// <summary>
+    /// Обчислює правило категорії в Row-контексті рядка й повертає ключ (L-2).
+    /// </summary>
+    /// <param name="rule">Розібране правило версії.</param>
+    /// <param name="rowContext">Row-контекст: аргументи, `!Row`-формули, `CST.` без категорії.</param>
+    /// <param name="numeric">Числова політика версії.</param>
+    /// <param name="trace">Трейс рядка.</param>
+    /// <returns>Непорожній ключ категорії.</returns>
+    /// <exception cref="Ecr.Domain.Abstractions.DomainException">
+    /// <c>ECR-CALC-0422</c> (<c>categoryRuleFailed</c>) — вираз не розібрано, дав помилку, порожнє
+    /// значення чи не текст.
+    /// </exception>
+    /// <remarks>
+    /// ⛔ Відмова РЯДКА, а не підміна на `null`: з `null` рушій повернувся б до `constantAmbiguous` (у
+    /// кращому разі) або взяв би не ту категорію (у гіршому) — той самий клас мовчазної помилки, що
+    /// старе «Category have nothing». Виняток того самого коду й виду, що й `constantAmbiguous`.
+    /// </remarks>
+    private string EvaluateCategoryRule(
+        ParsedCategoryRule rule, MethodologyEvaluationContext rowContext, NumericPolicy numeric, TraceRecorder trace)
+    {
+        static Ecr.Domain.Abstractions.DomainException Failed(ParsedCategoryRule rule, string reason)
+            => new(
+                "ECR-CALC-0422",
+                $"Правило категорії «{rule.Text}» не дало ключа категорії: {reason}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0422.categoryRuleFailed",
+                    ["expression"] = rule.Text,
+                    ["reason"] = reason,
+                });
+
+        if (rule.Expression is null)
+        {
+            throw Failed(rule, rule.ParseError ?? "unparseable expression");
+        }
+
+        var value = formulaEngine.Evaluate(rule.Expression, rowContext, numeric.Mode).Value;
+
+        if (value.IsError)
+        {
+            throw Failed(rule, value.ErrorCode ?? "#VALUE");
+        }
+
+        var key = value.Type == Expressions.Ast.ExpressionValueType.Text ? (value.Value as string)?.Trim() : null;
+        if (string.IsNullOrEmpty(key))
+        {
+            throw Failed(
+                rule,
+                value.Type == Expressions.Ast.ExpressionValueType.Text || value.IsNull
+                    ? "empty key"
+                    : $"result is {value.Type}, text expected");
+        }
+
+        // Крок «ключ категорії» — лише на Full: успішний крок без числа в `ErrorsOnly` не пишеться.
+        trace.Step("CategoryRule", $"{rule.Text} → {key}", value: null);
+
+        return key;
+    }
+
     /// <summary>Резолвить усі константи, згадані у формулах, для однієї речовини.</summary>
     /// <remarks>
     /// ⛔ Без походу в базу: кандидати прочитано в <see cref="PrepareAsync(MethodologyDescriptor, long, PeriodKey, RegistrySnapshotCache, CancellationToken)"/>
@@ -993,17 +1112,26 @@ public sealed class GenericCalculationModule(
         long? substanceEntryId,
         Expressions.PeriodContext period,
         IReadOnlyDictionary<string, IReadOnlyList<MethodologyConstant>> candidatesByCode,
-        Dictionary<string, int?> resolvedUnits)
+        Dictionary<string, int?> resolvedUnits,
+        string? category,
+        IReadOnlyCollection<string>? extraCodes = null)
     {
         var resolved = new Dictionary<string, ExpressionValue>(StringComparer.OrdinalIgnoreCase);
 
-        foreach (var code in ConstantCodes(formulas))
+        var codes = ConstantCodes(formulas);
+        if (extraCodes is not null)
+        {
+            codes.UnionWith(extraCodes);
+        }
+
+        foreach (var code in codes)
         {
             var constant = constants.Resolve(
                 candidatesByCode.TryGetValue(code, out var candidates) ? candidates : [],
                 methodologyVersionId,
                 code,
-                category: null,
+                // ✎ L-2: ключ категорії рядка з правила версії; `null` — правила немає або Row-фаза.
+                category,
                 substanceEntryId,
 
                 // ⚠ Дата періоду, а не «сьогодні»: константа темпоральна, і
