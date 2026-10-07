@@ -18709,6 +18709,7 @@ export interface components {
             dataType: string;
             defaultValue: null | string;
             displayFormat: null | string;
+            expression?: null | string;
             header: string;
             /** Format: int32 */
             id: number;

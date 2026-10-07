@@ -1923,6 +1923,12 @@
               "string"
             ]
           },
+          "expression": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
           "header": {
             "type": "string"
           },
