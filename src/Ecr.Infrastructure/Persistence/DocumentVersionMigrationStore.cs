@@ -21,6 +21,12 @@ namespace Ecr.Infrastructure.Persistence;
 /// </remarks>
 public sealed class DocumentVersionMigrationStore(EcrDbContext db) : IDocumentVersionMigrationStore
 {
+    /// <summary>N-3: скільки рядків змінює одна команда переносу.</summary>
+    public const int BatchRows = 5_000;
+
+    /// <summary>N-3: <c>CommandTimeout</c> кожної команди переносу, с (глобальний — 60).</summary>
+    public const int ApplyCommandTimeoutSeconds = 300;
+
     /// <inheritdoc />
     public async Task<int?> LockProjectVersionAsync(int projectId, CancellationToken ct)
     {
