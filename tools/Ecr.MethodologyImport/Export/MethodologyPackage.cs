@@ -62,10 +62,8 @@ public sealed record MethodologyPackage(
         Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) },
     };
 
-    /// <param name="categoryRules">
-    /// Правила категорій «методологія → вираз» для вузла <c>categoryRule</c>; <c>null</c> — таблиця Land
-    /// (<see cref="CategoryRules.LandDefaults"/>), порожній словник — без правил.
-    /// </param>
+    // categoryRules: «методологія → вираз» для вузла categoryRule; null — таблиця Land (CategoryRules.LandDefaults),
+    // порожній словник — без правил.
     public static MethodologyPackage From(
         MethodologyModel model, AnalysisReport report, string library,
         IReadOnlyDictionary<string, string>? categoryRules = null)
