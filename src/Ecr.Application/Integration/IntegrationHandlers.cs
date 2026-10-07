@@ -578,7 +578,10 @@ public sealed class RestartJobHandler(
     private async Task<bool> MayRepeatOwnAsync(
         AccessProfile profile, string jobId, long? documentId, CancellationToken ct)
     {
-        var dash = jobId.IndexOf('-', StringComparison.Ordinal);
+        // Тип — до першого `-` (черга БД і старі id: `{Тип}-{guid}`) АБО `~` (Quartz, цільові
+        // задачі: `{Тип}~{ціль}~{guid}`, QuartzJobScheduler.TargetPrefixOf). Імена типів
+        // не містять жодного з роздільників.
+        var dash = jobId.AsSpan().IndexOfAny('-', '~');
         var code = dash > 0 ? jobId[..dash] : jobId;
 
         if (code is nameof(ICollectionJob) or nameof(ISourceEventSyncJob))
@@ -591,7 +594,8 @@ public sealed class RestartJobHandler(
             return PermissionCheck.IsGranted(profile, Consistency.RunConsistencyCheckHandler.Permission);
         }
 
-        if (code == nameof(IRecalculationJob))
+        // Каскад власної правки (PatchCells) — як перерахунок: документ іде зі стану задачі.
+        if (code is nameof(IRecalculationJob) or nameof(IFormulaRecalculationJob))
         {
             if (documentId is not { } doc)
             {
