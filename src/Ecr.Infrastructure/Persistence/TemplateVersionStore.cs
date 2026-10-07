@@ -444,6 +444,65 @@ public sealed partial class TemplateVersionStore(EcrDbContext db) : ITemplateVer
                 g.RoleId, g.ResourceKind, map[(g.ResourceKind, g.ResourceId)], g.Level, g.IsDeny)));
     }
 
+    /// <summary>
+    /// ⛔ D-13: прив'язки результатів методологій до колонок (<c>cfg.CalculationBinding</c>) — частина
+    /// того, що колонка РАХУЄТЬСЯ. Вони посилаються на <c>ColumnDefId</c>/<c>TableDefId</c> числом і не
+    /// мають навігації з версії, тож клон їх не бачив: обчислювані колонки клону лишалися без джерела,
+    /// а повторний PUT прив'язки на клоні створював нову ВИМКНЕНУ (F-09 відхиляв її як невідому).
+    /// Копіюється кожна прив'язка (з вимкненими й предикатом без змін) на колонку клону за кодами
+    /// аркуш/таблиця/колонка — тією самою ідентичністю, що й гранти.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Предикат (<c>MatchJson</c>) — плаский об'єкт «код колонки → значення», ідентифікаторів не
+    /// містить, тож лишається як є. Правила методології (<c>calc.MethodologyRule</c>) належать ВЕРСІЇ
+    /// МЕТОДОЛОГІЇ, а не шаблону, і клоном шаблону не чіпаються.
+    /// </remarks>
+    private async Task CloneCalculationBindingsAsync(
+        TemplateVersion clone, IReadOnlyList<GrantSource> sources, CancellationToken ct)
+    {
+        var sourceColumns = sources.Where(s => s.Kind == ResourceKind.Column).ToList();
+        if (sourceColumns.Count == 0)
+        {
+            return;
+        }
+
+        var cloneSheets = clone.Sheets.ToDictionary(s => s.Code);
+        var map = new Dictionary<int, (int TableId, int ColumnId)>();
+        foreach (var src in sourceColumns)
+        {
+            if (cloneSheets.TryGetValue(src.Sheet, out var sheet)
+                && sheet.Tables.FirstOrDefault(t => t.Code == src.Table) is { } table
+                && table.Columns.FirstOrDefault(c => c.Code == src.Column) is { IsDeleted: false } column)
+            {
+                map[src.SourceId] = (table.Id, column.Id);
+            }
+        }
+
+        var ids = sourceColumns.Select(s => s.SourceId).ToList();
+        var bindings = await db.CalculationBindings
+            .AsNoTracking()
+            .Where(b => ids.Contains(b.ColumnDefId))
+            .OrderBy(b => b.Id)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        foreach (var b in bindings)
+        {
+            if (!map.TryGetValue(b.ColumnDefId, out var target))
+            {
+                continue;
+            }
+
+            var copy = new CalculationBinding(target.TableId, target.ColumnId, b.MethodologyId, b.OutputCode, b.MatchJson);
+            if (!b.IsActive)
+            {
+                copy.Update(b.MatchJson, isActive: false);
+            }
+
+            db.CalculationBindings.Add(copy);
+        }
+    }
+
     private async Task SaveCloneAsync(
         TemplateVersion clone, TemplateVersionCloner.CloneLinks links, int clonedFrom,
         IReadOnlyList<RelationTemplate> relationTemplates, IReadOnlyList<GrantSource> grantSources,
@@ -455,6 +514,7 @@ public sealed partial class TemplateVersionStore(EcrDbContext db) : ITemplateVer
         db.FormulaDefs.AddRange(TemplateVersionCloner.Relink(links));
         CloneTableRelations(clone, relationTemplates);
         await CloneResourceGrantsAsync(clone, grantSources, ct).ConfigureAwait(false);
+        await CloneCalculationBindingsAsync(clone, grantSources, ct).ConfigureAwait(false);
         await CloneConditionalFormatsAsync(clone.Id, clonedFrom, ct).ConfigureAwait(false);
         SetClonedFrom(clone, clonedFrom);
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
