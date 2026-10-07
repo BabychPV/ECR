@@ -143,15 +143,23 @@ public sealed class ConstantResolver(IConstantStore constants)
         //    від порядку рядків у таблиці — і змінюється від переіндексації.
         if (byCategory.Count > 1)
         {
+            // Категорії-кандидати: без них «16 кандидатів» не каже, ЩО саме не
+            // вибрано (Land Demo RC9, L-2: константи AF 5.1/5.2/6.1 мають
+            // категорії, а рушій категорію не передає).
+            var categories = string.Join(
+                ", ",
+                byCategory.Select(c => c.Category ?? "—").Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal));
+
             throw new DomainException(
                 "ECR-CALC-0422",
                 $"Константа «{code}» версії {methodologyVersionId} має {byCategory.Count} кандидатів "
-                + $"на {onDate:yyyy-MM-dd}: вибір неоднозначний.",
+                + $"на {onDate:yyyy-MM-dd}: вибір неоднозначний (категорії: {categories}).",
                 new Dictionary<string, object?>
                 {
                     ["messageKey"] = "err.ECR-CALC-0422.constantAmbiguous",
                     ["code"] = code,
                     ["count"] = byCategory.Count,
+                    ["categories"] = categories,
                     ["date"] = onDate.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture),
                 });
         }
