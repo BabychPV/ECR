@@ -1,3 +1,4 @@
+using Ecr.Application.Calculations;
 using Ecr.Application.Common;
 using Ecr.Application.Documents.Dto;
 using Ecr.Application.Errors;
@@ -51,7 +52,12 @@ public sealed partial class PatchCellsHandler(
 
     // ⛔ HSE301 A1: хук підтягування вікон рядків з PI — ОДНА точка виклику нижче, після запису.
     // Необов'язковий лише для прямого конструювання в тестах запису; контейнер його завжди передає.
-    IRowWindowTrigger? rowWindows = null)
+    IRowWindowTrigger? rowWindows = null,
+
+    // ⛔ C1: правила й вимоги методології ключуються Id колонок тієї версії шаблону, у якій їх писали; документ на
+    // клон-версії має інші Id тих самих колонок. Контейнер передає завжди; `null` (прямий конструктор у тестах) —
+    // Id вважаються локальними.
+    IColumnPathMapper? columnMapper = null)
 {
     /// <summary>Застосовує зміни.</summary>
     /// <exception cref="ConcurrencyConflictException">
@@ -1327,7 +1333,8 @@ public sealed partial class PatchCellsHandler(
         var applicable = new List<ApplicableMethodology>();
         foreach (var methodologyId in methodologyIds)
         {
-            var applied = await ResolveApplicableAsync(methodologyId, bounds.PeriodEnd, ct).ConfigureAwait(false);
+            var applied = await ResolveApplicableAsync(
+                methodologyId, bounds.PeriodEnd, context.Instance.TemplateVersionId, ct).ConfigureAwait(false);
             if (applied is not null)
             {
                 applicable.Add(applied);
@@ -1354,8 +1361,8 @@ public sealed partial class PatchCellsHandler(
     /// </summary>
     private static List<int> RequiredInputColumnIds(IReadOnlyList<ApplicableMethodology> applicable)
         => applicable
-            .SelectMany(a => a.RequiredInputs.Select(r => r.ColumnDefId))
-            .Concat(applicable.SelectMany(a => a.Rules.SelectMany(r => MatchJsonColumnIds(r.MatchJson))))
+            .SelectMany(a => a.RequiredInputs.Where(r => r.IsMapped).Select(r => r.ColumnDefId))
+            .Concat(applicable.SelectMany(a => a.Rules.SelectMany(r => MethodologyRuleMatcher.ColumnIds(r.MatchJson))))
             .Distinct()
             .ToList();
 
@@ -1434,6 +1441,23 @@ public sealed partial class PatchCellsHandler(
 
                 foreach (var required in applied.RequiredInputs)
                 {
+                    // ⛔ C1: вимога посилається на колонку, якої немає в цій версії шаблону (шлях змінено/вилучено).
+                    // Тихо пропустити = тихо зняти вимогу; блокувати — назавжди заблокувати збереження через те, чого
+                    // користувач не може заповнити. Тому — явне ПОПЕРЕДЖЕННЯ без назви колонки й методології
+                    // (читач міг не мати права їх бачити); перенос проєкту на таку версію відмовляється заздалегідь.
+                    if (!required.IsMapped)
+                    {
+                        messages.Add(new Validation.ValidationMessage(
+                            ValidationSeverity.Warning,
+                            "ECR-CALC-0437",
+                            "Обов'язкову колонку методології не знайдено в цій версії шаблону; перевірку пропущено.",
+                            context.Instance.TableDefId,
+                            rowKey,
+                            ColumnCode: null,
+                            BlocksSave: false));
+                        continue;
+                    }
+
                     if (ValueOf(required.ColumnDefId) is not null)
                     {
                         continue;
@@ -1469,7 +1493,7 @@ public sealed partial class PatchCellsHandler(
     /// перевіряти не треба (немає чинної версії, правил або вимог).
     /// </summary>
     private async Task<ApplicableMethodology?> ResolveApplicableAsync(
-        int methodologyId, DateOnly onDate, CancellationToken ct)
+        int methodologyId, DateOnly onDate, int templateVersionId, CancellationToken ct)
     {
         var versions = await methodologies.GetPublishedVersionsAsync(methodologyId, ct).ConfigureAwait(false);
 
@@ -1502,46 +1526,24 @@ public sealed partial class PatchCellsHandler(
 
         var methodology = await methodologies.FindByVersionAsync(version.Id, ct).ConfigureAwait(false);
 
+        // ⛔ C1: Id у правилах і вимогах — колонки тієї версії шаблону, де їх писали; переклад на колонки версії
+        // ДОКУМЕНТА (за шляхом аркуш/таблиця/колонка) — до будь-якого зіставлення з комірками.
+        var localized = await MethodologyKeyLocalizer
+            .LocalizeAsync(columnMapper, templateVersionId, rules, requiredInputs, ct)
+            .ConfigureAwait(false);
+
         return new ApplicableMethodology(methodology?.Code ?? methodologyId.ToString(
-            System.Globalization.CultureInfo.InvariantCulture), rules, requiredInputs);
+            System.Globalization.CultureInfo.InvariantCulture), localized.Rules, localized.RequiredInputs);
     }
 
     /// <summary>Методологія, чия версія на дату дійсно має що перевіряти в рядку.</summary>
     private sealed record ApplicableMethodology(
         string MethodologyCode,
-        IReadOnlyList<MethodologyRule> Rules,
-        IReadOnlyList<MethodologyRequiredInput> RequiredInputs);
+        IReadOnlyList<LocalizedRule> Rules,
+        IReadOnlyList<LocalizedRequiredInput> RequiredInputs);
 
-    /// <summary>
-    /// <c>ColumnDefId</c>, згадані ключами предиката <c>MatchJson</c>.
-    /// </summary>
-    /// <remarks>
-    /// ⛔ Зламаний предикат не має жодного потрібного стовпця — так само, як
-    /// <see cref="MethodologyRuleMatcher.Matches"/> вважає його таким, що не
-    /// збігається ні з чим, а не валить обробник.
-    /// </remarks>
-    private static IEnumerable<int> MatchJsonColumnIds(string matchJson)
-    {
-        try
-        {
-            using var document = System.Text.Json.JsonDocument.Parse(matchJson);
-            if (document.RootElement.ValueKind != System.Text.Json.JsonValueKind.Object)
-            {
-                return [];
-            }
-
-            return [.. document.RootElement.EnumerateObject()
-                .Select(p => int.TryParse(
-                    p.Name, System.Globalization.NumberStyles.Integer,
-                    System.Globalization.CultureInfo.InvariantCulture, out var id) ? id : (int?)null)
-                .Where(id => id is not null)
-                .Select(id => id!.Value)];
-        }
-        catch (System.Text.Json.JsonException)
-        {
-            return [];
-        }
-    }
+    // ⚠ Колонки предиката (раніше тут `MatchJsonColumnIds`) беруться з `MethodologyRuleMatcher.ColumnIds` над уже
+    // ЛОКАЛІЗОВАНИМ `MatchJson` (C1): зламаний предикат не має жодної потрібної колонки, а не валить обробник.
 
     /// <summary>Значення комірки як текст — та сама умова «заповнено», що й у зіставленні правил.</summary>
     /// <remarks>
