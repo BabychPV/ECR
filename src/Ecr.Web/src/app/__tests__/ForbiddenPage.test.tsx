@@ -45,9 +45,13 @@ afterEach(() => {
 
 async function renderResolved(state: { permission?: string } | undefined): Promise<void> {
   stubCatalog({
-    'err.ECR-AUTH-0403': 'You do not have permission for this action.',
     'err.ECR-AUTH-0403.requiresPermission': 'Requires permission',
-    'nav.documents': 'Documents',
+    'nav.accessDenied.title': 'You don’t have access to this page',
+    'nav.accessDenied.text': 'Nothing was changed. Ask a system administrator for a role that includes this permission.',
+    'nav.accessDenied.copy': 'Copy request details',
+    'nav.accessDenied.myAccess': 'See my access',
+    'nav.backToDocuments': 'Back to Documents',
+    'permission.Security.ManageRoles': 'Manage roles',
   });
 
   await act(async () => {
@@ -70,12 +74,16 @@ describe('ForbiddenPage', () => {
     await renderResolved({ permission: 'Security.ManageRoles' });
 
     const alert = screen.getByRole('alert');
-    expect(alert.textContent).toContain('You do not have permission for this action.');
+    expect(alert.textContent).toContain('You don’t have access to this page');
     expect(alert.textContent).toContain('Requires permission');
-    expect(alert.textContent).toContain('Security.ManageRoles');
+    // b4b, макет `/403`: право — людською назвою, код — окремим чипом поруч.
+    expect(alert.textContent).toContain('«Manage roles»');
+    expect(alert.querySelector('[data-forbidden-permission]')?.textContent).toBe('Security.ManageRoles');
+    expect(alert.textContent).toContain('ECR-AUTH-0403');
+    expect(screen.getByRole('button', { name: 'Copy request details' })).toBeTruthy();
 
-    const link = screen.getByRole('link', { name: 'Documents' });
-    expect(link.getAttribute('href')).toBe('/');
+    expect(screen.getByRole('link', { name: '← Back to Documents' }).getAttribute('href')).toBe('/');
+    expect(screen.getByRole('link', { name: 'See my access' }).getAttribute('href')).toBe('/my-groups');
   });
 
   // ⛔ Мутаційний доказ завдання: «причина (яке право) не передається/не
@@ -87,16 +95,18 @@ describe('ForbiddenPage', () => {
     await renderResolved(undefined);
 
     const alert = screen.getByRole('alert');
-    expect(alert.textContent).toContain('You do not have permission for this action.');
+    expect(alert.textContent).toContain('You don’t have access to this page');
     expect(alert.textContent).not.toContain('Requires permission');
+    expect(alert.querySelector('[data-forbidden-permission]')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Copy request details' })).toBeNull();
 
-    expect(screen.getByRole('link', { name: 'Documents' })).toBeTruthy();
+    expect(screen.getByRole('link', { name: '← Back to Documents' })).toBeTruthy();
   });
 
   it('фокус переходить на заголовок відмови (клавіатурний прохід, ФВ-14.19)', async () => {
     await renderResolved({ permission: 'Security.ManageRoles' });
 
-    expect(document.activeElement?.textContent).toBe('You do not have permission for this action.');
+    expect(document.activeElement?.textContent).toBe('You don’t have access to this page');
   });
 });
 
@@ -132,7 +142,7 @@ describe('ForbiddenPage: заголовок без рамки, в один ря�
   it('заголовок фокусований, без зупинки Tab, з класом без рамки і розміром макета', async () => {
     await renderResolved({ permission: 'Security.ManageRoles' });
 
-    const heading = screen.getByRole('heading', { name: 'You do not have permission for this action.' });
+    const heading = screen.getByRole('heading', { name: 'You don’t have access to this page' });
 
     expect(document.activeElement).toBe(heading);
     expect(heading.getAttribute('tabindex')).toBe('-1');

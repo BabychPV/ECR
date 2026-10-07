@@ -7139,6 +7139,19 @@ USING (VALUES
     -- COLL:uidocscope ── P1 прихований аркуш: видалення документа перевіряє сервер; ru/kz — порцією COLL:uidocscope у блоці I18N нижче ──
     (N'documents.deleteServerChecks', N'en', N'The server checks every sheet of the document, including sheets you cannot see, and refuses if any of them is not a draft.', 1),
     -- COLL:uidocscope ── кінець секції ──
+    -- COLL:mockb4b ── b4b: сторінки 403/404, «← Back» документа й шаблону за макетом; ru/kz — порцією COLL:mockb4b у блоці I18N нижче ──
+    (N'nav.accessDenied.crumb', N'en', N'Access denied', 1),
+    (N'nav.accessDenied.title', N'en', N'You don’t have access to this page', 1),
+    (N'nav.accessDenied.text', N'en', N'Nothing was changed. Ask a system administrator for a role that includes this permission.', 1),
+    (N'nav.accessDenied.copy', N'en', N'Copy request details', 1),
+    (N'nav.accessDenied.copied', N'en', N'Request details copied — paste them into your message', 1),
+    (N'nav.accessDenied.myAccess', N'en', N'See my access', 1),
+    (N'nav.backToDocuments', N'en', N'Back to Documents', 1),
+    (N'nav.backToTemplates', N'en', N'Back to Templates', 1),
+    (N'nav.goToDocuments', N'en', N'Go to Documents', 1),
+    (N'nav.notFound.didYouMean', N'en', N'Did you mean:', 1),
+    (N'nav.notFound.search', N'en', N'Search screens and documents', 1),
+    -- COLL:mockb4b ── кінець секції ──
     -- COLL:ui35registries ── UI-35: перелік довідників зі смугою показників і шторкою; ru/kz — порцією COLL:ui35registries у блоці I18N нижче ──
     (N'registries.list.subtitle', N'en', N'Reference lists that cells, formulas and mappings pick values from: sources, substances, fuels, limits.', 1),
     (N'registries.list.stats', N'en', N'Registry summary', 1),
@@ -17283,6 +17296,36 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:uidocscope ── кінець секції ──
+-- COLL:mockb4b ── ru/kz b4b: сторінки 403/404, «← Back»; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'nav.accessDenied.crumb', N'ru', N'Доступ запрещён'),
+    (N'nav.accessDenied.crumb', N'kz', N'Қолжетімділік жоқ'),
+    (N'nav.accessDenied.title', N'ru', N'У вас нет доступа к этой странице'),
+    (N'nav.accessDenied.title', N'kz', N'Бұл бетке қолжетімділігіңіз жоқ'),
+    (N'nav.accessDenied.text', N'ru', N'Ничего не изменено. Попросите системного администратора назначить вам роль с этим правом.'),
+    (N'nav.accessDenied.text', N'kz', N'Ештеңе өзгертілмеді. Жүйе әкімшісінен осы құқығы бар рөлді беруін сұраңыз.'),
+    (N'nav.accessDenied.copy', N'ru', N'Скопировать данные для запроса'),
+    (N'nav.accessDenied.copy', N'kz', N'Сұрау деректерін көшіру'),
+    (N'nav.accessDenied.copied', N'ru', N'Данные скопированы — вставьте их в сообщение'),
+    (N'nav.accessDenied.copied', N'kz', N'Деректер көшірілді — оларды хабарламаңызға қойыңыз'),
+    (N'nav.accessDenied.myAccess', N'ru', N'Мой доступ'),
+    (N'nav.accessDenied.myAccess', N'kz', N'Менің қолжетімділігім'),
+    (N'nav.backToDocuments', N'ru', N'Назад к документам'),
+    (N'nav.backToDocuments', N'kz', N'Құжаттарға оралу'),
+    (N'nav.backToTemplates', N'ru', N'Назад к шаблонам'),
+    (N'nav.backToTemplates', N'kz', N'Үлгілерге оралу'),
+    (N'nav.goToDocuments', N'ru', N'Перейти к документам'),
+    (N'nav.goToDocuments', N'kz', N'Құжаттарға өту'),
+    (N'nav.notFound.didYouMean', N'ru', N'Возможно, вы искали:'),
+    (N'nav.notFound.didYouMean', N'kz', N'Мүмкін, сіз іздеген:'),
+    (N'nav.notFound.search', N'ru', N'Поиск экранов и документов'),
+    (N'nav.notFound.search', N'kz', N'Экрандар мен құжаттарды іздеу')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:mockb4b ── кінець секції ──
 -- COLL:ui35registries ── ru/kz UI-35: перелік довідників зі шторкою; власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val

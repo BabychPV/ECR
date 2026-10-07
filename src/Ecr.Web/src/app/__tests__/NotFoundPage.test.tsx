@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, render, screen } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import type { CurrentUserDto } from '@/api/types';
 import { createMemoryRouter, RouterProvider, type RouteObject } from 'react-router-dom';
 import { loadCatalog } from '@/shared/i18n';
-import { NotFoundPage } from '@/app/NotFoundPage';
+import { NotFoundPage, nearScreens } from '@/app/NotFoundPage';
 import { router } from '@/app/router';
 import { theme } from '@/shared/theme/theme';
 
@@ -16,12 +18,14 @@ import { theme } from '@/shared/theme/theme';
  * знаходив ЖОДНОГО збігу і показував власний, беззмістовний для реального
  * користувача екран («Unexpected Application Error! ... Hey developer 👋»).
  */
+const Me = { userId: 1, displayName: 'Op', permissions: ['Template.View'] } as unknown as CurrentUserDto;
+
 function stubCatalog(strings: Record<string, string>): void {
   vi.stubGlobal(
     'fetch',
-    vi.fn(async () =>
+    vi.fn(async (input: RequestInfo | URL) =>
       Promise.resolve(
-        new Response(JSON.stringify({ languageCode: 'en', revision: 1, strings }), {
+        new Response(JSON.stringify(String(input).endsWith('/api/v1/me') ? Me : { languageCode: 'en', revision: 1, strings }), {
           status: 200,
           headers: { 'Content-Type': 'application/json', ETag: '"private-en-1"' },
         }),
@@ -40,7 +44,10 @@ describe('NotFoundPage', () => {
     stubCatalog({
       'nav.notFound.title': 'Page not found',
       'nav.notFound.hint': 'This address does not match any screen in this system.',
-      'nav.documents': 'Documents',
+      'nav.goToDocuments': 'Go to Documents',
+      'nav.notFound.search': 'Search screens and documents',
+      'nav.notFound.didYouMean': 'Did you mean:',
+      'nav.templates': 'Templates',
     });
 
     await act(async () => {
@@ -48,13 +55,15 @@ describe('NotFoundPage', () => {
     });
 
     render(
-      <MantineProvider theme={theme}>
-        <RouterProvider
-          router={createMemoryRouter([{ path: '/', element: <NotFoundPage /> }], {
-            initialEntries: ['/'],
-          })}
-        />
-      </MantineProvider>,
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <MantineProvider theme={theme}>
+          <RouterProvider
+            router={createMemoryRouter([{ path: '*', element: <NotFoundPage /> }], {
+              initialEntries: ['/admin/templ'],
+            })}
+          />
+        </MantineProvider>
+      </QueryClientProvider>,
     );
   }
 
@@ -65,8 +74,13 @@ describe('NotFoundPage', () => {
     expect(alert.textContent).toContain('Page not found');
     expect(alert.textContent).toContain('This address does not match any screen in this system.');
 
-    const link = screen.getByRole('link', { name: 'Documents' });
+    const link = screen.getByRole('link', { name: 'Go to Documents' });
     expect(link.getAttribute('href')).toBe('/');
+
+    // b4b, макет `/404`: адреса моноширинним, пошук Ctrl K, «Did you mean …?».
+    expect(alert.querySelector('[data-not-found-path]')?.textContent).toBe('/admin/templ');
+    expect(screen.getByRole('button', { name: /Search screens and documents/ })).toBeTruthy();
+    expect((await screen.findByRole('link', { name: 'Templates' })).getAttribute('href')).toBe('/admin/templates');
   });
 
   it('фокус переходить на заголовок відмови (клавіатурний прохід, ФВ-14.19)', async () => {
@@ -85,6 +99,24 @@ describe('NotFoundPage', () => {
  * серед дітей кореня — тобто що фікс живе в реальному router.tsx, а не лише
  * в ізольованому тестовому дереві вище.
  */
+describe('nearScreens — «Did you mean …?» (b4b)', () => {
+  it('лише доступні екрани меню без параметрів, за першими 5 літерами останнього сегмента', () => {
+    const near = nearScreens('/admin/template', Me).map((route) => route.path);
+    expect(near).toContain('/admin/templates');
+    expect(near.every((path) => !path.includes(':'))).toBe(true);
+  });
+
+  it('без права — без підказки на екран, що дав би 403', () => {
+    const nobody = { ...Me, permissions: [] } as CurrentUserDto;
+    expect(nearScreens('/admin/template', nobody)).toEqual([]);
+  });
+
+  it('без сесії або порожня адреса — нічого', () => {
+    expect(nearScreens('/admin/template', undefined)).toEqual([]);
+    expect(nearScreens('/', Me)).toEqual([]);
+  });
+});
+
 describe('router — каталог маршрутів застосунку', () => {
   it('корінь "/" несе дочірній маршрут-пастку "*" (Q-302)', () => {
     const root = router.routes.find((route) => route.path === '/');
