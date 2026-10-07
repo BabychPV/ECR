@@ -494,7 +494,10 @@ try {
         nameL10n        = @{ en = 'E2E administrator' }
         permissionCodes = @(
             'Template.View', 'Template.Edit', 'Template.Publish',
-            'Registry.View', 'Registry.EditData',
+            # ✎ batch-4: `Registry.EditDefinition` — `registriesList.spec` на свіжому стенді
+            # заводить порожній довідник (сід довідників не має). Лише тестова роль стенда;
+            # права bootstrap і ролей продукту не змінюються.
+            'Registry.View', 'Registry.EditData', 'Registry.EditDefinition',
             'Document.View', 'Document.Create', 'Document.Export', 'Document.Import',
             'Document.Reopen',
             'Project.Manage', 'Period.Configure', 'Period.Reopen',
