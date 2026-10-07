@@ -92,14 +92,37 @@ public sealed class CompareMethodologyVersionsHandler(
                 (MethodologyDiffFields.ExpectedJson, a.ExpectedJson != b.ExpectedJson),
                 (MethodologyDiffFields.Tolerance, a.Tolerance != b.Tolerance)));
 
+        // ✎ L-2: правило категорії — один запис на версію; його зміна міняє, яку константу бере кожен рядок.
+        var wasRule = string.IsNullOrWhiteSpace(before.CategoryRule) ? null : before.CategoryRule;
+        var nowRule = string.IsNullOrWhiteSpace(after.CategoryRule) ? null : after.CategoryRule;
+        if (!string.Equals(wasRule, nowRule, StringComparison.Ordinal))
+        {
+            items.Add(new MethodologyDiffItemDto(
+                MethodologyDiffItemKind.CategoryRule,
+                CategoryRuleCode,
+                null,
+                null,
+                null,
+                wasRule is null
+                    ? MethodologyDiffChange.Added
+                    : nowRule is null ? MethodologyDiffChange.Removed : MethodologyDiffChange.Changed,
+                wasRule is null || nowRule is null ? [] : [MethodologyDiffFields.Expression],
+                wasRule,
+                nowRule));
+        }
+
         return items;
     }
+
+    /// <summary>Код запису правила категорії в переліку відмінностей.</summary>
+    public const string CategoryRuleCode = "category-rule";
 
     private async Task<VersionContent> ReadAsync(int versionId, CancellationToken ct)
         => new(
             await methodologies.GetFormulasAsync(versionId, ct).ConfigureAwait(false),
             await methodologies.GetConstantsAsync(versionId, ct).ConfigureAwait(false),
-            await drafts.GetTestCaseEntitiesAsync(versionId, ct).ConfigureAwait(false));
+            await drafts.GetTestCaseEntitiesAsync(versionId, ct).ConfigureAwait(false),
+            await methodologies.GetCategoryRuleAsync(versionId, ct).ConfigureAwait(false));
 
     private static void Diff<T>(
         List<MethodologyDiffItemDto> items,
@@ -148,7 +171,9 @@ public sealed class CompareMethodologyVersionsHandler(
 /// <param name="Formulas">Формули.</param>
 /// <param name="Constants">Константи з усіма варіантами.</param>
 /// <param name="TestCases">Тести золотого набору.</param>
+/// <param name="CategoryRule">Вираз правила категорії константи (L-2); <c>null</c> — правила немає.</param>
 public sealed record VersionContent(
     IReadOnlyList<MethodologyFormula> Formulas,
     IReadOnlyList<MethodologyConstant> Constants,
-    IReadOnlyList<MethodologyTestCaseEntity> TestCases);
+    IReadOnlyList<MethodologyTestCaseEntity> TestCases,
+    string? CategoryRule = null);
