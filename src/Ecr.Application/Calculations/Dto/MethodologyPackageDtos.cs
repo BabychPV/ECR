@@ -34,10 +34,23 @@ public sealed record MethodologyPackageMethodologyDto(
 /// <param name="Version">Номер версії в AF.</param>
 /// <param name="Formulas">Формули (усі версії формул AF).</param>
 /// <param name="Constants">Константи зі значеннями.</param>
+/// <param name="CategoryRule">
+/// ✎ L-2: правило категорії константи версії (<c>calc.CategoryRule</c>). Необов'язкове: пакет без вузла
+/// читається як і раніше (формат v1 зворотно сумісний). Експортер AF правило сам НЕ виводить — у AF
+/// категорію вибирає C#-клас методології, а не дані, — тож вузол дописує людина чи хмарна лінія.
+/// </param>
 public sealed record MethodologyPackageVersionDto(
     string Version,
     IReadOnlyList<MethodologyPackageFormulaDto> Formulas,
-    IReadOnlyList<MethodologyPackageConstantDto> Constants);
+    IReadOnlyList<MethodologyPackageConstantDto> Constants,
+    MethodologyPackageCategoryRuleDto? CategoryRule = null);
+
+/// <summary>Правило категорії константи версії пакета (L-2).</summary>
+/// <param name="Expression">
+/// Вираз діалекту Methodology над рядком документа, що дає ключ категорії (текст):
+/// <c>!ECW_Category</c>, <c>if(@Land_TypeFuel = 'Diesel - Дизель', 'Diesel', …)</c>.
+/// </param>
+public sealed record MethodologyPackageCategoryRuleDto(string? Expression);
 
 /// <summary>Формула пакета — одна версія формули AF.</summary>
 /// <param name="Name">Ім'я — стає кодом формули.</param>
@@ -129,6 +142,11 @@ public sealed record MethodologyImportMethodologyDto(
 /// <param name="Constants">Скільки рядків констант (значень).</param>
 /// <param name="ConstantsFromLibrary">Скільки рядків констант скопійовано з бібліотеки.</param>
 /// <param name="Imports">Методології, чиї формули версія імпортує (<c>!</c>).</param>
+/// <param name="CategoryRule">
+/// L-2: що пакет робить із правилом категорії версії — <c>added</c> (створюється разом з чернеткою),
+/// <c>unchanged</c> (версія вже є з тим самим правилом), <c>conflict</c> (версія є з іншим вмістом);
+/// <c>null</c> — вузла <c>categoryRule</c> у пакеті немає.
+/// </param>
 public sealed record MethodologyImportVersionDto(
     string Version,
     string Action,
@@ -136,7 +154,8 @@ public sealed record MethodologyImportVersionDto(
     int Formulas,
     int Constants,
     int ConstantsFromLibrary,
-    IReadOnlyList<string> Imports);
+    IReadOnlyList<string> Imports,
+    string? CategoryRule = null);
 
 /// <summary>Рядок звіту: блокер, конфлікт або попередження.</summary>
 /// <param name="Kind">Вид (стабільний ключ, напр. <c>unresolvedFormula</c>).</param>
