@@ -621,6 +621,8 @@ public sealed partial class EndpointCoverageTests
                 "publish.problem.formulaNotFound", "publish.problem.importCycle",
                 "publish.problem.importModeMismatch", "publish.problem.rowScopeReferencesLibrarySubstance",
                 "publish.problem.formulaTooDeep",
+                "publish.problem.categoryRuleInvalid", "publish.problem.categoryRuleNotText",
+                "publish.problem.categoryRuleUnknownConstant", "publish.problem.categoryRuleBadFormula",
             ],
             "Пункт переліку проблем публікації (PublishProblemKeys)."),
     ];

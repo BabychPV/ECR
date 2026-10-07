@@ -110,6 +110,31 @@ public sealed class MethodologyVersionAnalysisTests
         Assert.Equal(["tolerance"], items[1].ChangedFields);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    public void Різниця_бачить_правило_категорії_додане_змінене_і_прибране()
+    {
+        // L-2: зміна ключа категорії міняє, яку константу бере кожен рядок, — це має бути видно у diff.
+        VersionContent With(string? rule) => new([], [], [], rule);
+
+        var added = Assert.Single(CompareMethodologyVersionsHandler.Compare(With(null), With("@Fuel")));
+        Assert.Equal(
+            (MethodologyDiffItemKind.CategoryRule, "category-rule", MethodologyDiffChange.Added),
+            (added.Kind, added.Code, added.Change));
+        Assert.Equal((null, "@Fuel"), (added.Before, added.After));
+
+        var changed = Assert.Single(CompareMethodologyVersionsHandler.Compare(With("@Fuel"), With("@Other")));
+        Assert.Equal(MethodologyDiffChange.Changed, changed.Change);
+        Assert.Equal(["expression"], changed.ChangedFields);
+
+        var removed = Assert.Single(CompareMethodologyVersionsHandler.Compare(With("@Fuel"), With(null)));
+        Assert.Equal(MethodologyDiffChange.Removed, removed.Change);
+
+        // Порожній рядок і відсутність правила — те саме; однакові правила — без запису.
+        Assert.Empty(CompareMethodologyVersionsHandler.Compare(With(""), With(null)));
+        Assert.Empty(CompareMethodologyVersionsHandler.Compare(With("@Fuel"), With("@Fuel")));
+    }
+
     private static MethodologyOutput Output(string code, int ordinal) => new(5, EcrCode.Create(code), Unit, ordinal);
 
     private static CalculationBinding Binding(int column, string output, bool active = true)
