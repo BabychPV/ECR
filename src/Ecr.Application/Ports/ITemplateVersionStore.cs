@@ -162,8 +162,15 @@ public interface ITemplateVersionStore
         CancellationToken ct);
 
     /// <summary>Сторінка шаблонів.</summary>
+    /// <param name="page">Курсорна пагінація.</param>
+    /// <param name="query">Пошук за кодом або назвою (підрядок, без урахування регістру); порожньо — без фільтра.</param>
+    /// <param name="visibleProjectIds">
+    /// Проєкти, документи яких бачить читач: за ними рахується <c>DocumentCount</c> (документ
+    /// проєкту без гранта в лічильник не входить).
+    /// </param>
+    /// <param name="ct">Токен скасування.</param>
     public Task<Common.PagedResult<TemplateSummary>> ListTemplatesAsync(
-        Common.CursorRequest page, CancellationToken ct);
+        Common.CursorRequest page, string? query, IReadOnlyCollection<int> visibleProjectIds, CancellationToken ct);
 
     /// <summary>
     /// Картка шаблону разом із лічильниками залежних; <c>null</c> — шаблону немає.
@@ -353,7 +360,29 @@ public sealed record TemplateVersionSummary(
 /// <param name="Id">Ідентифікатор.</param>
 /// <param name="Code">Код.</param>
 /// <param name="VersionCount">Скільки версій має шаблон.</param>
-public sealed record TemplateSummary(int Id, string Code, int VersionCount);
+/// <param name="NameL10n">Назва мовами каталогу.</param>
+/// <param name="IsArchived"><c>true</c> — шаблон архівований (<c>!IsActive</c>).</param>
+/// <param name="DocumentCount">
+/// Документів у проєктах шаблону, які бачить саме цей читач; проєкти без гранта не рахуються.
+/// </param>
+/// <param name="UpdatedAt">
+/// Остання відома зміна, UTC: найпізніша з створення шаблону, створення/публікації/виведення з
+/// обігу будь-якої його версії. Окремого журналу правок чернетки в моделі немає.
+/// </param>
+/// <param name="DraftAuthorDisplayName">
+/// Відображуване ім'я (не логін) автора найновішої чернетки; <c>null</c> — чернетки немає.
+/// </param>
+/// <param name="DraftCreatedAt">Коли чернетку створено, UTC; <c>null</c> — чернетки немає.</param>
+public sealed record TemplateSummary(
+    int Id,
+    string Code,
+    int VersionCount,
+    Domain.ValueObjects.LocalizedText? NameL10n = null,
+    bool IsArchived = false,
+    int DocumentCount = 0,
+    DateTime? UpdatedAt = null,
+    string? DraftAuthorDisplayName = null,
+    DateTime? DraftCreatedAt = null);
 
 /// <summary>Картка шаблону.</summary>
 /// <param name="Id">Ідентифікатор.</param>

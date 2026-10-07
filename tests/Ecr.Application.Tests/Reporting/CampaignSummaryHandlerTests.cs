@@ -106,13 +106,146 @@ public sealed class CampaignSummaryHandlerTests
         await _store.DidNotReceiveWithAnyArgs().ListAsync(default, default, default);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "R-8")]
+    public async Task Лічильники_аркушів_віддаються_читачу_без_інструментів_що_ховають_аркуші()
+    {
+        // UI-33, D2: 3 аркуші на проєкт, 2 з них не подано; у підсумках -- 7 / 4 по групах.
+        Profile(new AccessBuilder { UserId = 7 }.Permission(GetCampaignSummaryHandler.Permission));
+        ReturnBuckets();
+
+        var summary = await Handler().HandleAsync(202601, default);
+
+        Assert.All(summary.Projects, p => Assert.Equal((3, 2), (p.SheetsTotal, p.NotSubmittedSheets)));
+        Assert.Equal((7, 4), (summary.Totals.SheetsTotal, summary.Totals.NotSubmittedSheets));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "R-8")]
+    public async Task Лічильники_аркушів_null_коли_у_читача_є_заборона_на_аркуш()
+    {
+        // ⛔ МУТАЦІЙНИЙ ДОКАЗ: `allSheets = true` у `GetCampaignSummaryHandler` -- червоніє: заборона не ховає число.
+        // Лічильники документів при цьому лишаються (Q15-07), а різниця «з забороною / без» нічого не розкриває.
+        Profile(new AccessBuilder { UserId = 7 }
+            .Permission(GetCampaignSummaryHandler.Permission)
+            .Deny(ResourceKind.Sheet, 123));
+        ReturnBuckets();
+
+        var summary = await Handler().HandleAsync(202601, default);
+
+        Assert.All(summary.Projects, p => { Assert.Null(p.SheetsTotal); Assert.Null(p.NotSubmittedSheets); });
+        Assert.Null(summary.Totals.SheetsTotal);
+        Assert.Null(summary.Totals.NotSubmittedSheets);
+        Assert.Equal(2, summary.Projects.Count);
+        Assert.Equal(2, summary.Totals.Projects);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "R-1")]
+    public async Task Лічильники_станів_документів_віддаються_читачу_без_інструментів_що_ховають_аркуші()
+    {
+        Profile(new AccessBuilder { UserId = 7 }.Permission(GetCampaignSummaryHandler.Permission));
+        ReturnBuckets();
+
+        var summary = await Handler().HandleAsync(202601, default);
+
+        Assert.All(summary.Projects, p => Assert.Equal((1, 0, 0, 0), (p.Draft, p.Submitted, p.Approved, p.Rejected)));
+        Assert.Equal((2, 0, 0, 0), (summary.Totals.Draft, summary.Totals.Submitted, summary.Totals.Approved, summary.Totals.Rejected));
+    }
+
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "R-1")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Лічильники_станів_документів_null_коли_у_читача_є_заборона_чи_None_на_аркуш(bool deny)
+    {
+        // ⛔ МУТАЦІЙНИЙ ДОКАЗ: повернути `p.Draft`/`b.Draft` без `allSheets ?` у `GetCampaignSummaryHandler` --
+        // червоніє: «найгірший стан серед усіх аркушів» зараховує приховані, різниця двох читачів була б оракулом стану (R-1).
+        var builder = new AccessBuilder { UserId = 7 }.Permission(GetCampaignSummaryHandler.Permission);
+        Profile(deny ? builder.Deny(ResourceKind.Sheet, 123) : builder.Grant(ResourceKind.Sheet, 123, GrantLevel.None));
+        ReturnBuckets();
+
+        var summary = await Handler().HandleAsync(202601, default);
+
+        Assert.All(summary.Projects, p =>
+        {
+            Assert.Null(p.Draft);
+            Assert.Null(p.Submitted);
+            Assert.Null(p.Approved);
+            Assert.Null(p.Rejected);
+        });
+        Assert.Null(summary.Totals.Draft);
+        Assert.Null(summary.Totals.Submitted);
+        Assert.Null(summary.Totals.Approved);
+        Assert.Null(summary.Totals.Rejected);
+
+        // Те, що не залежить від прихованого, лишається: кількість документів і зрізів (Q15-07).
+        Assert.Equal(2, summary.Totals.Documents);
+        Assert.Equal(1, summary.Totals.Snapshots);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "R-1")]
+    public async Task Прогрес_і_класи_віддаються_читачу_без_інструментів_що_ховають_аркуші()
+    {
+        Profile(new AccessBuilder { UserId = 7 }.Permission(GetCampaignSummaryHandler.Permission));
+        ReturnBuckets();
+
+        var summary = await Handler().HandleAsync(202601, default);
+
+        Assert.All(summary.Projects, p => Assert.Equal(CampaignProgress.InProgress, p.Progress));
+        Assert.Equal((0, 0, 0, 2), (summary.Totals.Done, summary.Totals.Overdue, summary.Totals.AtRisk, summary.Totals.InProgress));
+    }
+
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "R-1")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Прогрес_і_класи_null_коли_у_читача_є_заборона_чи_None_на_аркуш(bool deny)
+    {
+        // ⛔ МУТАЦІЙНИЙ ДОКАЗ: віддати `progress` / `progressCounts...` без `allSheets ?` у `GetCampaignSummaryHandler` --
+        // червоніє: клас «Done» = «усе затверджено» по ВСІХ аркушах, тож розбиття проєктів на класи розкрило б приховане (R-1).
+        var builder = new AccessBuilder { UserId = 7 }.Permission(GetCampaignSummaryHandler.Permission);
+        Profile(deny ? builder.Deny(ResourceKind.Sheet, 123) : builder.Grant(ResourceKind.Sheet, 123, GrantLevel.None));
+        ReturnBuckets();
+
+        var summary = await Handler().HandleAsync(202601, default);
+
+        Assert.All(summary.Projects, p => Assert.Null(p.Progress));
+        Assert.Null(summary.Totals.Done);
+        Assert.Null(summary.Totals.Overdue);
+        Assert.Null(summary.Totals.AtRisk);
+        Assert.Null(summary.Totals.InProgress);
+
+        // Кількість проєктів і документів не залежить від прихованого (Q15-07).
+        Assert.Equal(2, summary.Totals.Projects);
+        Assert.Equal(2, summary.Totals.Documents);
+    }
+
+    private void ReturnBuckets()
+        => _store.ListAsync(Arg.Any<int>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(call => new CampaignProjectPage(
+                Total: 2,
+                Projects: [Row(Mine), Row(Foreign)],
+                Buckets:
+                [
+                    new CampaignBucket(null, "Asia/Atyrau", false, false, Projects: 1, 1, 1, 0, 0, 0, 0, Sheets: 3, NotSubmittedSheets: 2),
+                    new CampaignBucket(null, "Asia/Atyrau", false, true, Projects: 1, 1, 1, 0, 0, 0, 1, Sheets: 4, NotSubmittedSheets: 2),
+                ]));
+
     private static CampaignProjectFacts Row(int projectId)
         => new(
             projectId,
             $"P{projectId}",
             new LocalizedText(new Dictionary<string, string> { ["en"] = $"Project {projectId}" }),
             Documents: 1, Draft: 1, Submitted: 0, Approved: 0, Rejected: 0, Snapshots: 0,
-            SubmissionDeadlineUtc: null, TimeZoneId: "Asia/Atyrau");
+            SubmissionDeadlineUtc: null, TimeZoneId: "Asia/Atyrau", Sheets: 3, NotSubmittedSheets: 2);
 
     private GetCampaignSummaryHandler Handler()
         => new(_store, _access, _user, new TestClock(new DateTime(2026, 1, 20, 9, 0, 0, DateTimeKind.Utc)),

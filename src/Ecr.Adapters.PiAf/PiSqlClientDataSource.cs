@@ -7,6 +7,8 @@ using Ecr.Application.Integration;
 using Ecr.Application.Ports;
 using Ecr.Application.Sources;
 using Ecr.Domain.Enums;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Ecr.Adapters.PiAf;
 
@@ -19,9 +21,12 @@ namespace Ecr.Adapters.PiAf;
 /// працює через ODBC, не OLE DB (`D-46`). Це основний транспорт для масового
 /// читання історії й довідників.
 /// </remarks>
-public sealed class PiSqlClientDataSource(
-    ICollectionStore store, ISecretProvider secrets, ISecretProvider? settings = null) : IExternalDataSource
+public sealed partial class PiSqlClientDataSource(
+    ICollectionStore store, ISecretProvider secrets, ISecretProvider? settings = null,
+    ILogger<PiSqlClientDataSource>? logger = null) : IExternalDataSource
 {
+    private readonly ILogger log = (ILogger?)logger ?? NullLogger.Instance;
+
     /// <summary>Стеля рядків каталогу за один обхід.</summary>
     /// <remarks>
     /// Каталог читає людина в конфігураторі. Двадцять тисяч атрибутів у
@@ -1000,7 +1005,9 @@ public sealed class PiSqlClientDataSource(
             // правити треба поле Endpoint у конфігурації джерела.
             throw new BusinessRuleException(
                 SourceUnavailable,
-                $"Рядок з'єднання джерела {source.Code} не читається: {ex.Message}",
+                // ⛔ SEC (TIER2): без `ex.Message` — він іде в `itg.CollectionRun.ErrorMessage`
+                // і до клієнта; подробиці — в журнал сервера за кореляцією.
+                $"Рядок з'єднання джерела {source.Code} не читається (кореляція {LogConnectionStringBroken(source.Code, ex)}); подробиці — в журналі сервера.",
                 new Dictionary<string, object?>
                 {
                     // Той самий ключ, що SqlDataSource.cs: той самий факт («не читається»).
@@ -1046,7 +1053,7 @@ public sealed class PiSqlClientDataSource(
             {
                 throw new SourceAuthenticationException(
                     AuthenticationRefused,
-                    $"PI SQL Client не приймає облікові дані джерела {source.Code}: {ex.Message}",
+                    $"PI SQL Client не приймає облікові дані джерела {source.Code} (SQLSTATE {SqlStateOf(ex)}, кореляція {LogConnectFailure(source.Code, ex)}); подробиці — в журналі сервера.",
                     new Dictionary<string, object?>
                     {
                         // Той самий ключ, що SqlDataSource.cs: той самий факт
@@ -1058,7 +1065,7 @@ public sealed class PiSqlClientDataSource(
 
             throw new BusinessRuleException(
                 SourceUnavailable,
-                $"PI SQL Client не з'єднується з {source.Code}: {ex.Message}",
+                $"PI SQL Client не з'єднується з {source.Code} (SQLSTATE {SqlStateOf(ex)}, кореляція {LogConnectFailure(source.Code, ex)}); подробиці — в журналі сервера.",
                 new Dictionary<string, object?>
                 {
                     // Той самий ключ, що SqlDataSource.cs: той самий факт («не з'єднується»).
@@ -1082,6 +1089,38 @@ public sealed class PiSqlClientDataSource(
     /// іншою локаллю.
     /// </remarks>
     private const string AuthenticationSqlState = "28000";
+
+    /// <summary>SQLSTATE першої помилки драйвера — безпечний для показу код, на відміну від тексту.</summary>
+    private static string SqlStateOf(OdbcException error)
+        => error.Errors.Count > 0 ? error.Errors[0].SQLState : "unknown";
+
+    /// <summary>Пише повний виняток у журнал сервера і повертає кореляцію для тексту помилки.</summary>
+    private string LogConnectFailure(string sourceCode, OdbcException error)
+    {
+        var correlationId = SafeErrorText.NewCorrelationId();
+        LogConnectFailed(log, sourceCode, SqlStateOf(error), correlationId, error);
+        return correlationId;
+    }
+
+    /// <summary>Те саме для зіпсованого рядка з'єднання.</summary>
+    private string LogConnectionStringBroken(string sourceCode, Exception error)
+    {
+        var correlationId = SafeErrorText.NewCorrelationId();
+        LogConnectionStringUnreadable(log, sourceCode, correlationId, error);
+        return correlationId;
+    }
+
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "PiSqlClientDataSource: джерело {SourceCode} не відкрилось (SQLSTATE {SqlState}); кореляція {CorrelationId}.")]
+    private static partial void LogConnectFailed(
+        ILogger logger, string sourceCode, string sqlState, string correlationId, Exception exception);
+
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "PiSqlClientDataSource: рядок з'єднання джерела {SourceCode} не читається; кореляція {CorrelationId}.")]
+    private static partial void LogConnectionStringUnreadable(
+        ILogger logger, string sourceCode, string correlationId, Exception exception);
 
     /// <summary>Чи це відмова саме в автентифікації.</summary>
     /// <param name="error">Виняток драйвера.</param>

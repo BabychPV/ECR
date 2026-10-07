@@ -577,8 +577,14 @@ export type CellChangePage = Schemas['PagedResultOfCellChangeView'];
  */
 export type ConsistencyIssue = Schemas['ConsistencyIssueView'];
 
+/**
+ * Місце знахідки в структурі — лише коди; `where = null`, коли місце невідоме або
+ * читач його не бачить (приховані документи/аркуші).
+ */
+export type ConsistencyIssueWhere = Schemas['ConsistencyIssueWhere'];
+
 /** Сторінка журналу знахідок. */
-export type ConsistencyIssuePage = Schemas['PagedResultOfConsistencyIssueView'];
+export type ConsistencyIssuePage = Schemas['ConsistencyIssuePage'];
 
 /**
  * Колонка у структурі шаблону — з **усіма** мовами заголовка.

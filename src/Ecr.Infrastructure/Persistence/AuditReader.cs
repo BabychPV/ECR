@@ -20,6 +20,9 @@ public sealed class AuditReader(EcrDbContext db) : IAuditReader
     /// <summary>Довжина <c>aud.CellChange.RowKey</c> зі схеми (<c>11-audit-tables.sql</c>).</summary>
     private const int RowKeySize = 100;
 
+    /// <summary>Межа довжини пошукового рядка; обробник обрізає до неї, а розмір параметра рахується від неї.</summary>
+    private const int QueryMaxLength = 100;
+
     /// <summary>Довжина <c>aud.CellChange.Origin</c> зі схеми (<c>11-audit-tables.sql</c>).</summary>
     private const int OriginSize = 32;
 
@@ -38,10 +41,157 @@ public sealed class AuditReader(EcrDbContext db) : IAuditReader
 
         await using var command = connection.CreateCommand();
 
+        var where = BuildCellChangeWhere(filter, command, Cursor.Decode(page.Cursor));
+
+        // ⚠ `R-18`: імена — ПІСЛЯ вибору сторінки, у зовнішньому запиті. Вікно й
+        // курсор лишаються дослівно тими самими над самою `aud.CellChange`
+        // (відсікання партицій), а три LEFT JOIN торкаються лише `@take` рядків.
+        // LEFT, а не INNER: видалений автор, документ чи колонка не мають права
+        // ховати сам факт зміни — журнал append-only.
+        command.CommandText = $"""
+            SELECT a.Id, a.ChangedAt, a.PeriodKey, a.DocumentId, a.RowKey, a.ColumnDefId,
+                   a.OldValue, a.NewValue, a.ChangedByUserId, a.Origin, a.IsLateEdit,
+                   u.DisplayName, d.BusinessKey, d.NameL10n, c.Code, c.HeaderL10n, c.DataType,
+                   a.IsOutOfWindow, sd.Code, sd.NameL10n, td.Code, td.NameL10n, rd.LabelL10n
+              FROM (
+                    SELECT TOP (@take)
+                           Id, ChangedAt, PeriodKey, DocumentId, RowKey, ColumnDefId,
+                           OldValue, NewValue, ChangedByUserId, Origin, IsLateEdit, IsOutOfWindow
+                      FROM aud.CellChange
+                     WHERE {where}
+                     ORDER BY Id
+                   ) AS a
+              LEFT JOIN sec.[User] AS u ON u.Id = a.ChangedByUserId
+              LEFT JOIN doc.Document AS d ON d.Id = a.DocumentId
+              LEFT JOIN cfg.ColumnDef AS c ON c.Id = a.ColumnDefId
+              LEFT JOIN cfg.TableDef AS td ON td.Id = c.TableDefId
+              LEFT JOIN cfg.SheetDef AS sd ON sd.Id = td.SheetDefId
+              OUTER APPLY (SELECT TOP (1) r.LabelL10n
+                             FROM cfg.RowDef AS r
+                            WHERE r.TableDefId = c.TableDefId AND r.RowKey = a.RowKey AND r.IsDeleted = 0) AS rd
+             ORDER BY a.Id;
+            """;
+
+        command.Parameters.AddWithValue("@take", page.Limit + 1);
+
+        var rows = new List<(long Id, CellChangeView View)>();
+        await using (var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false))
+        {
+            while (await reader.ReadAsync(ct).ConfigureAwait(false))
+            {
+                rows.Add((
+                    reader.GetInt64(0),
+                    new CellChangeView(
+                        DateTime.SpecifyKind(reader.GetDateTime(1), DateTimeKind.Utc),
+                        reader.GetInt32(2),
+                        reader.GetInt64(3),
+                        reader.GetString(4),
+                        reader.GetInt32(5),
+                        reader.IsDBNull(6) ? null : reader.GetString(6),
+                        reader.IsDBNull(7) ? null : reader.GetString(7),
+
+                        // Автор — UserId, не SID: у локального користувача SID
+                        // не існує взагалі (R-A2, D-86).
+                        reader.GetInt32(8),
+                        reader.GetString(9),
+                        reader.GetBoolean(10),
+                        StringOrNull(reader, 11),
+                        StringOrNull(reader, 12),
+                        LocalizedOrNull(reader, 13),
+                        StringOrNull(reader, 14),
+                        LocalizedOrNull(reader, 15),
+                        reader.IsDBNull(16)
+                            ? null
+                            : ((Ecr.Domain.Enums.CellDataType)reader.GetByte(16)).ToString(),
+                        reader.GetBoolean(17),
+                        StringOrNull(reader, 18),
+                        LocalizedOrNull(reader, 19),
+                        StringOrNull(reader, 20),
+                        LocalizedOrNull(reader, 21),
+                        LocalizedOrNull(reader, 22))));
+            }
+        }
+
+        var hasMore = rows.Count > page.Limit;
+        var items = rows.Take(page.Limit).Select(r => r.View).ToList();
+
+        // ⚠ TotalCount тут null: підрахунок видимого читачу робить ОБРОБНИК
+        // (`CountCellChangesByColumnAsync` + межі читання S6) — читач порту не знає, що саме читач бачить.
+        return new PagedResult<CellChangeView>(
+            items,
+            hasMore ? Cursor.Encode(rows[page.Limit - 1].Id) : null,
+            TotalCount: null);
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<CellChangeColumnCount>> CountCellChangesByColumnAsync(
+        CellChangeFilter filter, DateTime todayStartUtc, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(filter);
+
+        await using var connection = new SqlConnection(db.Database.GetConnectionString());
+        await connection.OpenAsync(ct).ConfigureAwait(false);
+
+        await using var command = connection.CreateCommand();
+
+        // ⚠ Той самий WHERE, що й у читанні сторінки (одне джерело — BuildCellChangeWhere): вікно за
+        // ChangedAt відсікає партиції, і підрахунок читає лише їх. Без курсору.
+        var where = BuildCellChangeWhere(filter, command, afterId: null);
+
+        // ⚠ Розріз за колонкою, а не одне число: відсів за межами читання (S6) — прерогатива виклику,
+        // і сума з прихованих колонок не повинна навіть існувати поруч із відповіддю. Один прохід, без join.
+        command.CommandText = $"""
+            SELECT ColumnDefId,
+                   COUNT_BIG(*),
+                   COUNT_BIG(CASE WHEN ChangedAt >= @today THEN 1 END),
+                   COUNT_BIG(CASE WHEN Origin = N'Import' THEN 1 END),
+                   COUNT_BIG(CASE WHEN Origin = N'Recalculation' THEN 1 END)
+              FROM aud.CellChange
+             WHERE {where}
+             GROUP BY ColumnDefId;
+            """;
+        command.Parameters.Add("@today", SqlDbType.DateTime2).Value = todayStartUtc;
+
+        var counts = new List<CellChangeColumnCount>();
+        await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            counts.Add(new CellChangeColumnCount(
+                reader.GetInt32(0), reader.GetInt64(1), reader.GetInt64(2), reader.GetInt64(3), reader.GetInt64(4)));
+        }
+
+        return counts;
+    }
+
+    /// <summary>Екранує спецсимволи <c>LIKE</c> (<c>\ % _ [</c>) під <c>ESCAPE N'\'</c>; довжина — не більше межі.</summary>
+    internal static string EscapeLike(string value)
+    {
+        var text = value.Length > QueryMaxLength ? value[..QueryMaxLength] : value;
+        return text
+            .Replace("\\", "\\\\", StringComparison.Ordinal)
+            .Replace("%", "\\%", StringComparison.Ordinal)
+            .Replace("_", "\\_", StringComparison.Ordinal)
+            .Replace("[", "\\[", StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// WHERE над <c>aud.CellChange</c> за фільтром: вікно, необов'язковий курсор і звуження.
+    /// Параметри додаються в <paramref name="command"/>.
+    /// </summary>
+    private static StringBuilder BuildCellChangeWhere(CellChangeFilter filter, SqlCommand command, long? afterId)
+    {
         // ⚠ Вікно за ChangedAt стоїть ПЕРШИМ у WHERE не заради стилю: саме воно
         // відсікає партиції. Курсор за Id додається до нього, а не замість —
         // інакше сторінка 20 читала б журнал цілком.
-        var where = new StringBuilder("ChangedAt >= @from AND ChangedAt < @to\n                   AND Id > @after");
+        var where = new StringBuilder("ChangedAt >= @from AND ChangedAt < @to");
+        command.Parameters.AddWithValue("@from", filter.From);
+        command.Parameters.AddWithValue("@to", filter.To);
+
+        if (afterId is { } after)
+        {
+            where.Append("\n                   AND Id > @after");
+            command.Parameters.AddWithValue("@after", after);
+        }
 
         // ⛔ Умова додається ЛИШЕ за наявності значення, і кожна — іменованим
         // параметром. Правило «жодного значення в текст запиту» винятків не має
@@ -90,6 +240,24 @@ public sealed class AuditReader(EcrDbContext db) : IAuditReader
             And("Origin = @origin", "@origin", origin, SqlDbType.NVarChar, OriginSize);
         }
 
+        if (filter.Query is { Length: > 0 } query)
+        {
+            // ⛔ UI-38, C3: пошук за бізнес-ключем документа, ключем рядка або кодом колонки. Значення —
+            // ПАРАМЕТР, а спецсимволи LIKE екрануються (`\` як ESCAPE): користувач, що ввів `100%` чи `[a`,
+            // шукає ці знаки буквально, а не складає шаблон. Підзапити йдуть у WHERE ДО `TOP`, тож сторінка
+            // й підрахунок бачать однаковий набір; видимість (S6) відсіює обробник так само, як без пошуку.
+            And(
+                """
+                (RowKey LIKE @q ESCAPE N'\'
+                        OR DocumentId IN (SELECT Id FROM doc.Document WHERE BusinessKey LIKE @q ESCAPE N'\')
+                        OR ColumnDefId IN (SELECT Id FROM cfg.ColumnDef WHERE Code LIKE @q ESCAPE N'\'))
+                """,
+                "@q",
+                "%" + EscapeLike(query) + "%",
+                SqlDbType.NVarChar,
+                (2 * QueryMaxLength) + 2);
+        }
+
         if (filter.LateOnly)
         {
             // ⚠ Константа, а не параметр: значення приходить не ззовні, а з
@@ -98,78 +266,7 @@ public sealed class AuditReader(EcrDbContext db) : IAuditReader
             where.Append("\n                   AND IsLateEdit = 1");
         }
 
-        // ⚠ `R-18`: імена — ПІСЛЯ вибору сторінки, у зовнішньому запиті. Вікно й
-        // курсор лишаються дослівно тими самими над самою `aud.CellChange`
-        // (відсікання партицій), а три LEFT JOIN торкаються лише `@take` рядків.
-        // LEFT, а не INNER: видалений автор, документ чи колонка не мають права
-        // ховати сам факт зміни — журнал append-only.
-        command.CommandText = $"""
-            SELECT a.Id, a.ChangedAt, a.PeriodKey, a.DocumentId, a.RowKey, a.ColumnDefId,
-                   a.OldValue, a.NewValue, a.ChangedByUserId, a.Origin, a.IsLateEdit,
-                   u.DisplayName, d.BusinessKey, d.NameL10n, c.Code, c.HeaderL10n, c.DataType,
-                   a.IsOutOfWindow
-              FROM (
-                    SELECT TOP (@take)
-                           Id, ChangedAt, PeriodKey, DocumentId, RowKey, ColumnDefId,
-                           OldValue, NewValue, ChangedByUserId, Origin, IsLateEdit, IsOutOfWindow
-                      FROM aud.CellChange
-                     WHERE {where}
-                     ORDER BY Id
-                   ) AS a
-              LEFT JOIN sec.[User] AS u ON u.Id = a.ChangedByUserId
-              LEFT JOIN doc.Document AS d ON d.Id = a.DocumentId
-              LEFT JOIN cfg.ColumnDef AS c ON c.Id = a.ColumnDefId
-             ORDER BY a.Id;
-            """;
-
-        command.Parameters.AddWithValue("@take", page.Limit + 1);
-        command.Parameters.AddWithValue("@from", filter.From);
-        command.Parameters.AddWithValue("@to", filter.To);
-        command.Parameters.AddWithValue("@after", Cursor.Decode(page.Cursor));
-
-        var rows = new List<(long Id, CellChangeView View)>();
-        await using (var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false))
-        {
-            while (await reader.ReadAsync(ct).ConfigureAwait(false))
-            {
-                rows.Add((
-                    reader.GetInt64(0),
-                    new CellChangeView(
-                        DateTime.SpecifyKind(reader.GetDateTime(1), DateTimeKind.Utc),
-                        reader.GetInt32(2),
-                        reader.GetInt64(3),
-                        reader.GetString(4),
-                        reader.GetInt32(5),
-                        reader.IsDBNull(6) ? null : reader.GetString(6),
-                        reader.IsDBNull(7) ? null : reader.GetString(7),
-
-                        // Автор — UserId, не SID: у локального користувача SID
-                        // не існує взагалі (R-A2, D-86).
-                        reader.GetInt32(8),
-                        reader.GetString(9),
-                        reader.GetBoolean(10),
-                        StringOrNull(reader, 11),
-                        StringOrNull(reader, 12),
-                        LocalizedOrNull(reader, 13),
-                        StringOrNull(reader, 14),
-                        LocalizedOrNull(reader, 15),
-                        reader.IsDBNull(16)
-                            ? null
-                            : ((Ecr.Domain.Enums.CellDataType)reader.GetByte(16)).ToString(),
-                        reader.GetBoolean(17))));
-            }
-        }
-
-        var hasMore = rows.Count > page.Limit;
-        var items = rows.Take(page.Limit).Select(r => r.View).ToList();
-
-        return new PagedResult<CellChangeView>(
-            items,
-            hasMore ? Cursor.Encode(rows[page.Limit - 1].Id) : null,
-
-            // Підрахунок по вікну аудиту дорогий і нікому не потрібен: аудитор
-            // гортає, а не рахує (конвенція API — TotalCount може бути null).
-            TotalCount: null);
+        return where;
     }
 
     /// <inheritdoc />

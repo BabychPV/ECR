@@ -337,11 +337,17 @@ public sealed class ProjectsController(
     }
 
     /// <summary>Календар періодів проєкту. Право <c>Document.View</c>.</summary>
+    /// <param name="id">Проєкт.</param>
+    /// <param name="withSheetCounts">
+    /// Додати до кожного періоду кількість не поданих аркушів (<c>notSubmittedSheets</c>, UI-33); без прапорця поле
+    /// <c>null</c>. Читачу, що має інструменти приховування аркушів, віддається <c>null</c> і з прапорцем.
+    /// </param>
+    /// <param name="ct">Токен скасування.</param>
     [HttpGet("{id:int}/periods")]
     [ProducesResponseType<Ecr.Application.Periods.Dto.PeriodCalendarDto>(StatusCodes.Status200OK)]
     // ⚠ S17: невидимий проєкт — 404, як неіснуючий.
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> Periods(int id, CancellationToken ct)
+    public async Task<IActionResult> Periods(int id, [FromQuery] bool withSheetCounts, CancellationToken ct)
     {
         // Календар добудовується перед читанням: проєкт міг бути створений до
         // того, як задача станів відпрацювала, і порожній список періодів
@@ -350,7 +356,7 @@ public sealed class ProjectsController(
         await buildCalendar.HandleAsync(id, ct).ConfigureAwait(false);
 
         // ⚠ Межі віддаються в поясі майданчика, а не в UTC (D-68).
-        return Ok(await getCalendar.HandleAsync(id, ct).ConfigureAwait(false));
+        return Ok(await getCalendar.HandleAsync(id, ct, withSheetCounts).ConfigureAwait(false));
     }
 }
 

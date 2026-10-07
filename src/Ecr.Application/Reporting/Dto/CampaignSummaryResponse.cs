@@ -35,23 +35,40 @@ public sealed record CampaignSummaryResponse(
 /// <param name="Submitted">Сума <c>Submitted</c>.</param>
 /// <param name="Approved">Сума <c>Approved</c>.</param>
 /// <param name="Rejected">Сума <c>Rejected</c>.</param>
+/// <remarks>
+/// ⛔ Чотири лічильники станів (<c>Draft</c>…<c>Rejected</c>) — «найгірший стан серед усіх аркушів» документа, тож
+/// зараховують і ПРИХОВАНІ аркуші: різниця між двома читачами була б оракулом стану прихованого (R-1). Тому
+/// <c>null</c> для читача без <c>SheetVisibility.SeesAllSheets</c> (так само, як <c>SheetsTotal</c>).
+/// ⛔ Те саме для <c>Done</c>/<c>Overdue</c>/<c>AtRisk</c>/<c>InProgress</c> і <c>Progress</c> рядка: клас
+/// «усе затверджено» залежить від станів УСІХ аркушів, тож розбиття проєктів на класи розкрило б стан прихованих (R-1).
+/// </remarks>
 /// <param name="Snapshots">Сума поточних зрізів.</param>
 /// <param name="Done">Проєктів у стані <see cref="CampaignProgress.Done"/>.</param>
 /// <param name="Overdue">Проєктів у стані <see cref="CampaignProgress.Overdue"/>.</param>
 /// <param name="AtRisk">Проєктів у стані <see cref="CampaignProgress.AtRisk"/>.</param>
 /// <param name="InProgress">Проєктів у стані <see cref="CampaignProgress.InProgress"/>.</param>
+/// <param name="SheetsTotal">
+/// Аркушів у складі документів усіх проєктів періоду (UI-33, D2); <c>null</c> — читач має інструменти, що ховають
+/// аркуші (явна заборона чи грант рівня <c>None</c>), і число розкрило б приховане (R-8, <c>SheetVisibility</c>).
+/// </param>
+/// <param name="NotSubmittedSheets">
+/// З них — ще не подано (чернетка, без стану чи відхилено); <c>null</c> за тих самих умов, що й
+/// <paramref name="SheetsTotal"/>.
+/// </param>
 public sealed record CampaignTotals(
     int Projects,
     int Documents,
-    int Draft,
-    int Submitted,
-    int Approved,
-    int Rejected,
+    int? Draft,
+    int? Submitted,
+    int? Approved,
+    int? Rejected,
     int Snapshots,
-    int Done,
-    int Overdue,
-    int AtRisk,
-    int InProgress);
+    int? Done,
+    int? Overdue,
+    int? AtRisk,
+    int? InProgress,
+    int? SheetsTotal = null,
+    int? NotSubmittedSheets = null);
 
 /// <summary>
 /// Де проєкт у кампанії відносно строку подання — відповідь на «хто затримує».
@@ -96,6 +113,8 @@ public enum CampaignProgress
 /// агрегат, що й у смузі переліку документів (<c>BE-09</c>).
 /// </remarks>
 /// <param name="Progress">Класифікація проєкту в кампанії (<see cref="CampaignProgressRule"/>).</param>
+/// <param name="SheetsTotal">Аркушів у складі документів проєкту (UI-33, D2); <c>null</c> — див. <see cref="CampaignTotals.SheetsTotal"/>.</param>
+/// <param name="NotSubmittedSheets">Аркушів, ще не поданих (чернетка/без стану/відхилено); <c>null</c> — як у <paramref name="SheetsTotal"/>.</param>
 /// <param name="SubmissionDeadline">
 /// Строк подання в поясі проєкту, ВИКЛЮЧНО: це момент переходу періоду
 /// <c>Open → Grace</c> (<c>Period.ComputedGraceAt</c>, опівніч
@@ -108,10 +127,12 @@ public sealed record CampaignProjectSummary(
     string ProjectCode,
     LocalizedText NameL10n,
     int Documents,
-    int Draft,
-    int Submitted,
-    int Approved,
-    int Rejected,
+    int? Draft,
+    int? Submitted,
+    int? Approved,
+    int? Rejected,
     int Snapshots,
-    CampaignProgress Progress,
-    DateTimeOffset? SubmissionDeadline);
+    CampaignProgress? Progress,
+    DateTimeOffset? SubmissionDeadline,
+    int? SheetsTotal = null,
+    int? NotSubmittedSheets = null);

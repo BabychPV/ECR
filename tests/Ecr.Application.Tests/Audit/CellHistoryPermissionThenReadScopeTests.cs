@@ -56,6 +56,153 @@ public sealed class CellHistoryPermissionThenReadScopeTests
             .Returns(ci => DocumentReadScope.For(ci.Arg<AccessProfile>(), Project, Snapshot));
         _audit.ReadCellChangesAsync(Arg.Any<CellChangeFilter>(), Arg.Any<CursorRequest>(), Arg.Any<CancellationToken>())
             .Returns(new PagedResult<CellChangeView>([Change(VisibleColumn), Change(HiddenColumn)], null, 2));
+
+        // Сирі лічильники вікна: 3 зміни видимої колонки і 40 — прихованої.
+        _audit.CountCellChangesByColumnAsync(Arg.Any<CellChangeFilter>(), Arg.Any<DateTime>(), Arg.Any<CancellationToken>())
+            .Returns(
+            [
+                new CellChangeColumnCount(VisibleColumn, 3, 1, 0, 0),
+                new CellChangeColumnCount(HiddenColumn, 40, 9, 0, 0),
+            ]);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-6.6")]
+    public async Task TotalCount_журналу_документа_лічить_лише_видимі_колонки()
+    {
+        // R-11 / UI-38 C4: загальне число не повинно виказувати 40 змін прихованої колонки.
+        Profile(Reader(deny: true).Permission(GetCellChangesHandler.Permission), scopedDocumentViewIn: null);
+
+        var result = await Handler().HandleAsync(
+            new CellChangeFilter(From, To, DocumentId: DocumentId), new CursorRequest(), CancellationToken.None);
+
+        Assert.Equal(3, result.TotalCount);
+        Assert.Equal([VisibleColumn], result.Items.Select(c => c.ColumnDefId));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-6.6")]
+    public async Task TotalCount_без_заборон_і_наскрізного_журналу_лічить_усе()
+    {
+        Profile(Reader(deny: false).Permission(GetCellChangesHandler.Permission), scopedDocumentViewIn: null);
+
+        var perDocument = await Handler().HandleAsync(
+            new CellChangeFilter(From, To, DocumentId: DocumentId), new CursorRequest(), CancellationToken.None);
+        var global = await Handler().HandleAsync(new CellChangeFilter(From, To), new CursorRequest(), CancellationToken.None);
+
+        Assert.Equal(43, perDocument.TotalCount);
+
+        // Наскрізний журнал за призначенням поза межами S6 (Q-177): число збігається зі сторінкою.
+        Assert.Equal(43, global.TotalCount);
+    }
+
+    [Theory]
+    [InlineData("   ", null)]
+    [InlineData("  K1  ", "K1")]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-6.6")]
+    public async Task Пошук_q_обрізається_від_пробілів_і_порожній_не_є_фільтром(string raw, string? expected)
+    {
+        Profile(Reader(deny: false).Permission(GetCellChangesHandler.Permission), scopedDocumentViewIn: null);
+
+        await Handler().HandleAsync(
+            new CellChangeFilter(From, To, DocumentId: DocumentId, Query: raw), new CursorRequest(), CancellationToken.None);
+
+        await _audit.Received().ReadCellChangesAsync(
+            Arg.Is<CellChangeFilter>(f => f.Query == expected), Arg.Any<CursorRequest>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-6.6")]
+    public async Task Пошук_q_довший_за_межу_обрізається_до_сотні_знаків()
+    {
+        Profile(Reader(deny: false).Permission(GetCellChangesHandler.Permission), scopedDocumentViewIn: null);
+
+        await Handler().HandleAsync(
+            new CellChangeFilter(From, To, DocumentId: DocumentId, Query: new string('x', 250)),
+            new CursorRequest(),
+            CancellationToken.None);
+
+        await _audit.Received().ReadCellChangesAsync(
+            Arg.Is<CellChangeFilter>(f => f.Query!.Length == GetCellChangesHandler.MaxQueryLength),
+            Arg.Any<CursorRequest>(),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-6.6")]
+    public async Task Підсумок_лічить_лише_видимі_колонки_і_ті_самі_права_що_журнал()
+    {
+        // R-11 / UI-38 C2: 3 + 40 змін, з них прихована колонка 40 -- у відповідь потрапляє лише видимі 3.
+        Profile(Reader(deny: true).Permission(GetCellChangesHandler.Permission), scopedDocumentViewIn: null);
+        var perDocument = await Handler().SummaryAsync(
+            new CellChangeFilter(From, To, DocumentId: DocumentId), CancellationToken.None);
+
+        Assert.Equal(new CellChangeSummaryView(3, 1, 0, 0), perDocument);
+
+        // Без права -- 403, лічильники не читаються.
+        Profile(Reader(deny: true), scopedDocumentViewIn: null);
+        _audit.ClearReceivedCalls();
+        await Assert.ThrowsAsync<AccessDeniedException>(
+            () => Handler().SummaryAsync(new CellChangeFilter(From, To, DocumentId: DocumentId), CancellationToken.None));
+        await _audit.DidNotReceiveWithAnyArgs().CountCellChangesByColumnAsync(default!, default, default);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-6.6")]
+    public async Task TotalCount_історії_прихованої_колонки_нуль_і_лічильники_не_читаються()
+    {
+        Profile(Reader(deny: true), scopedDocumentViewIn: Project);
+
+        var result = await Handler().HandleAsync(SingleCell(HiddenColumn), new CursorRequest(), CancellationToken.None);
+
+        Assert.Equal(0, result.TotalCount);
+        await _audit.DidNotReceiveWithAnyArgs().CountCellChangesByColumnAsync(default!, default, default);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "UI-38")]
+    public async Task TotalCount_лише_на_першій_сторінці_а_на_наступних_null_і_порт_підрахунку_не_читається()
+    {
+        // ⛔ МУТАЦІЙНИЙ ДОКАЗ: рахувати `CountCellChangesByColumnAsync` завжди (без `firstPage`) у
+        // `GetCellChangesHandler` -- червоніє: на сторінці за курсором число приходить знову й порт читається.
+        Profile(Reader(deny: false).Permission(GetCellChangesHandler.Permission), scopedDocumentViewIn: null);
+        var filter = new CellChangeFilter(From, To, DocumentId: DocumentId);
+
+        var first = await Handler().HandleAsync(filter, new CursorRequest(), CancellationToken.None);
+
+        Assert.Equal(43, first.TotalCount);
+        await _audit.Received(1).CountCellChangesByColumnAsync(Arg.Any<CellChangeFilter>(), Arg.Any<DateTime>(), Arg.Any<CancellationToken>());
+
+        _audit.ClearReceivedCalls();
+        var next = await Handler().HandleAsync(filter, new CursorRequest(Cursor: "abc"), CancellationToken.None);
+
+        Assert.Null(next.TotalCount);
+        Assert.Equal(2, next.Items.Count);
+        await _audit.DidNotReceiveWithAnyArgs().CountCellChangesByColumnAsync(default!, default, default);
+
+        // Підсумок журналу (`/audit/cells/summary`) від курсора не залежить.
+        var summary = await Handler().SummaryAsync(filter, CancellationToken.None);
+        Assert.Equal(43, summary.Total);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "UI-38")]
+    public async Task TotalCount_історії_прихованої_колонки_на_наступній_сторінці_null()
+    {
+        Profile(Reader(deny: true), scopedDocumentViewIn: Project);
+
+        var result = await Handler().HandleAsync(SingleCell(HiddenColumn), new CursorRequest(Cursor: "abc"), CancellationToken.None);
+
+        Assert.Null(result.TotalCount);
+        Assert.Empty(result.Items);
     }
 
     [Fact]

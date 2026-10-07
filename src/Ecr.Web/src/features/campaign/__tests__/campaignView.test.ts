@@ -63,6 +63,12 @@ describe('хто затримує', () => {
     expect(rows.map((row) => row.projectId)).toEqual([3, 6, 1, 5]);
   });
 
+  it('R-1: клас null (прихований від читача) — не потрапляє в перелік затримуючих', () => {
+    const hiddenProgress: CampaignProject = { ...p(1, 'Overdue'), progress: null };
+
+    expect(holdingUp([hiddenProgress, p(2, 'AtRisk')]).map((row) => row.projectId)).toEqual([2]);
+  });
+
   it('дзеркало: лише Done і InProgress — не затримує ніхто', () => {
     expect(holdingUp([p(1, 'Done'), p(2, 'InProgress')])).toEqual([]);
   });

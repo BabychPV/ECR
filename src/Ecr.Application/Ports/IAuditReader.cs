@@ -29,6 +29,14 @@ namespace Ecr.Application.Ports;
 /// за правилом показу (U-05/U-24), а не у форматі сховища
 /// (<c>53.1771000000000000</c>).
 /// </param>
+/// <param name="SheetCode">Код аркуша колонки (UI-38, C1); <c>null</c> — колонки вже немає.</param>
+/// <param name="SheetNameL10n">Назва аркуша мовами каталогу.</param>
+/// <param name="TableCode">Код таблиці колонки.</param>
+/// <param name="TableNameL10n">Назва таблиці мовами каталогу.</param>
+/// <param name="RowLabelL10n">
+/// Підпис фіксованого рядка (<c>cfg.RowDef.LabelL10n</c>) за ключем рядка; <c>null</c> — рядок динамічний
+/// або визначення вже немає. Лише структура, значень комірок тут немає.
+/// </param>
 public sealed record CellChangeView(
     DateTime ChangedAt,
     int PeriodKey,
@@ -46,7 +54,31 @@ public sealed record CellChangeView(
     string? ColumnCode = null,
     Ecr.Domain.ValueObjects.LocalizedText? ColumnHeaderL10n = null,
     string? ColumnDataType = null,
-    bool IsOutOfWindow = false);
+    bool IsOutOfWindow = false,
+    string? SheetCode = null,
+    Ecr.Domain.ValueObjects.LocalizedText? SheetNameL10n = null,
+    string? TableCode = null,
+    Ecr.Domain.ValueObjects.LocalizedText? TableNameL10n = null,
+    Ecr.Domain.ValueObjects.LocalizedText? RowLabelL10n = null);
+
+/// <summary>Підсумок журналу змін комірок за вікном (UI-38, C2) — лише те, що читач бачить.</summary>
+/// <param name="Total">Усього змін у вікні й за фільтром.</param>
+/// <param name="Today">З них — за поточну добу UTC (зміни вікна, що припали на сьогодні).</param>
+/// <param name="ByImport">З них — імпортом (<c>Origin = Import</c>).</param>
+/// <param name="ByRecalculation">З них — перерахунком (<c>Origin = Recalculation</c>).</param>
+/// <remarks>
+/// ⚠ Лічильника пізніх правок (<c>late</c>) тут немає навмисно — рішення координатора: індексу по
+/// <c>IsLateEdit</c> у <c>aud.CellChange</c> немає, і його не додаємо без виміру.
+/// </remarks>
+public sealed record CellChangeSummaryView(long Total, long Today, long ByImport, long ByRecalculation);
+
+/// <summary>Лічильники журналу в розрізі колонки: сирі, ще БЕЗ відсіву за межами читання.</summary>
+/// <param name="ColumnDefId">Колонка.</param>
+/// <param name="Total">Усього змін.</param>
+/// <param name="Today">За поточну добу UTC.</param>
+/// <param name="ByImport">Імпортом.</param>
+/// <param name="ByRecalculation">Перерахунком.</param>
+public sealed record CellChangeColumnCount(int ColumnDefId, long Total, long Today, long ByImport, long ByRecalculation);
 
 /// <summary>Структурна зміна в журналі, як її бачить читач.</summary>
 /// <param name="ChangedAt">Момент зміни в UTC.</param>
@@ -91,6 +123,10 @@ public sealed record StructureChangeView(
 /// <param name="ChangedByUserId">Автор зміни — <b>UserId</b>, не SID (R-A2, D-86).</param>
 /// <param name="Origin">Походження: <c>UserEdit</c>, <c>Import</c>, <c>Recalculation</c>, <c>Migration</c>.</param>
 /// <param name="LateOnly">Лише пізні правки (<c>Grace</c>/після <c>Reopen</c>, D-70).</param>
+/// <param name="Query">
+/// Пошук (UI-38, C3): підрядок бізнес-ключа документа, ключа рядка або коду колонки; обробник обрізає його
+/// до 100 знаків. <c>null</c> — без пошуку. Спецсимволи <c>LIKE</c> (<c>% _ [ \</c>) — буквальні.
+/// </param>
 public sealed record CellChangeFilter(
     DateTime From,
     DateTime To,
@@ -99,7 +135,8 @@ public sealed record CellChangeFilter(
     int? ColumnDefId = null,
     int? ChangedByUserId = null,
     string? Origin = null,
-    bool LateOnly = false)
+    bool LateOnly = false,
+    string? Query = null)
 {
     /// <summary>Фільтр адресує РІВНО ОДНУ комірку — документ, рядок і колонку.</summary>
     /// <remarks>
@@ -187,6 +224,19 @@ public interface IAuditReader
     /// <param name="ct">Токен скасування.</param>
     public Task<PagedResult<CellChangeView>> ReadCellChangesAsync(
         CellChangeFilter filter, CursorRequest page, CancellationToken ct);
+
+    /// <summary>
+    /// Лічильники змін комірок у вікні в розрізі колонки (UI-38, C2/C4).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Сирі лічильники по ВСІХ колонках вікна: відсів за межами читання (S6) робить виклик над словником
+    /// колонок — читач ніколи не отримує суму з прихованих. Один прохід по вікну, без N+1.
+    /// </remarks>
+    /// <param name="filter">Вікно й звуження журналу (курсор не застосовується).</param>
+    /// <param name="todayStartUtc">Початок поточної доби UTC.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<IReadOnlyList<CellChangeColumnCount>> CountCellChangesByColumnAsync(
+        CellChangeFilter filter, DateTime todayStartUtc, CancellationToken ct);
 
     /// <summary>
     /// Історія структурних змін однієї сутності конфігурації.

@@ -88,6 +88,29 @@ public interface IRegistryStore
     public Task<IReadOnlyList<RegistryDef>> ListDefinitionsAsync(CancellationToken ct);
 
     /// <summary>
+    /// Скільки записів кожного довідника чинні на дату (UI-35, «Entries» у переліку): один запит
+    /// на всі довідники. Довідник без чинних записів у словнику відсутній.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Чинність — те саме вікно, що в пікері (<see cref="RegistryEntryStanding.IsValidOn"/>) плюс
+    /// <c>IsActive</c> і не видалений; у SQL умови вікна немає навмисно (два визначення «чинний»).
+    /// </remarks>
+    /// <param name="asOf">Дата, на яку рахується чинність.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<IReadOnlyDictionary<int, int>> CountCurrentEntriesAsync(DateOnly asOf, CancellationToken ct);
+
+    /// <summary>
+    /// Скільки колонок шаблонів і скількох шаблонів посилаються на кожен довідник
+    /// (<c>UsedInColumns</c>/<c>UsedInTemplates</c>); два агрегати на весь перелік.
+    /// </summary>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<IReadOnlyDictionary<int, RegistryTemplateUsage>> CountTemplateUsageAsync(CancellationToken ct);
+
+    /// <summary>Довідники, що мають незавершену чернетку опису.</summary>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<IReadOnlySet<int>> ListDefinitionIdsWithDraftAsync(CancellationToken ct);
+
+    /// <summary>
     /// Ставить нове визначення довідника в чергу на вставку; ідентифікатор
     /// з'являється після збереження.
     /// </summary>
@@ -358,6 +381,11 @@ public interface IRegistryStore
     public Task ReplaceRuleUsesAsync(
         int ruleRegistryDefId, IReadOnlyCollection<Domain.Entities.Configuration.RegistryUse> uses, CancellationToken ct);
 }
+
+/// <summary>Використання довідника колонками шаблонів.</summary>
+/// <param name="Columns">Скільки колонок (не видалених) мають його джерелом пошуку.</param>
+/// <param name="Templates">У скількох різних шаблонах ці колонки.</param>
+public sealed record RegistryTemplateUsage(int Columns, int Templates);
 
 /// <summary>Стан обігу запису довідника (<c>C7</c>).</summary>
 /// <param name="Id">Запис.</param>

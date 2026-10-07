@@ -3,9 +3,11 @@ using System.Net;
 using System.Text.Json;
 using Ecr.Application.Reporting;
 using Ecr.Domain.Entities.Documents;
+using Ecr.Domain.Entities.Security;
 using Ecr.Domain.Entities.Workflow;
 using Ecr.Domain.Enums;
 using Ecr.TestKit;
+using Microsoft.EntityFrameworkCore;
 using Xunit;
 
 namespace Ecr.Api.Tests;
@@ -105,17 +107,161 @@ public sealed class CampaignSummaryTests(SqlServerFixture sql)
         Assert.Equal(1, row.GetProperty("submitted").GetInt32());
         Assert.Equal(0, row.GetProperty("draft").GetInt32());
 
+        // UI-33, D2: рівень аркуша (читач без заборон) -- один поданий аркуш, не поданих немає.
+        Assert.Equal(1, row.GetProperty("sheetsTotal").GetInt32());
+        Assert.Equal(0, row.GetProperty("notSubmittedSheets").GetInt32());
+
         // Форма проводу для клієнта: класифікація — рядком, строк у будівника
         // ланцюга не пораховано (`null`), підсумки — окремим об'єктом.
         Assert.Equal("InProgress", row.GetProperty("progress").GetString());
         Assert.Equal(JsonValueKind.Null, row.GetProperty("submissionDeadline").ValueKind);
         Assert.True(body.GetProperty("totals").GetProperty("projects").GetInt32() >= 1);
+        Assert.True(body.GetProperty("totals").GetProperty("inProgress").GetInt32() >= 1);
 
         // ⛔ Лічильники — і нічого крім них (рішення `Q15-07`: «без значень»).
         // Поля зі значеннями комірок чи сумами зрізу тут бути не може: воно
         // перетворило б право на огляд на обхід грантів.
         Assert.False(row.TryGetProperty("values", out _));
         Assert.False(row.TryGetProperty("cells", out _));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "R-1")]
+    public async Task Лічильники_станів_на_дроті_null_коли_у_читача_є_грант_None_на_аркуш()
+    {
+        // ⛔ МУТАЦІЙНИЙ ДОКАЗ: віддати `p.Draft`/`b.Draft` без `allSheets ?` у `GetCampaignSummaryHandler` -- червоніє:
+        // «найгірший стан серед усіх аркушів» зараховує приховані, число розкрило б стан прихованого аркуша (R-1).
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var chain = await builder.BuildAsync(ct: CancellationToken.None).ConfigureAwait(true);
+
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, GetCampaignSummaryHandler.Permission).ConfigureAwait(true);
+
+        await using (var db = builder.CreateContext())
+        {
+            var roleId = await db.RolePermissions
+                .Where(p => p.PermissionCode == GetCampaignSummaryHandler.Permission)
+                .OrderByDescending(p => p.RoleId)
+                .Select(p => p.RoleId)
+                .FirstAsync(CancellationToken.None)
+                .ConfigureAwait(true);
+            db.ResourceGrants.Add(new ResourceGrant(roleId, ResourceKind.Sheet, chain.SheetDefId, GrantLevel.None));
+            await db.SaveChangesAsync(CancellationToken.None).ConfigureAwait(true);
+        }
+
+        var response = await GetAsync(client, chain.PeriodKey.Value).ConfigureAwait(true);
+        Assert.True(response.IsSuccessStatusCode, $"{response.StatusCode}: {app.ErrorsText}");
+
+        var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync().ConfigureAwait(true)).RootElement;
+        var row = body.GetProperty("projects").EnumerateArray()
+            .Single(p => p.GetProperty("projectId").GetInt32() == chain.ProjectId);
+        var totals = body.GetProperty("totals");
+
+        foreach (var field in new[] { "draft", "submitted", "approved", "rejected" })
+        {
+            Assert.Equal(JsonValueKind.Null, row.GetProperty(field).ValueKind);
+            Assert.Equal(JsonValueKind.Null, totals.GetProperty(field).ValueKind);
+        }
+
+        // R-1: клас прогресу («усе затверджено» по всіх аркушах) і лічильники класів теж null.
+        Assert.Equal(JsonValueKind.Null, row.GetProperty("progress").ValueKind);
+        foreach (var field in new[] { "done", "overdue", "atRisk", "inProgress" })
+        {
+            Assert.Equal(JsonValueKind.Null, totals.GetProperty(field).ValueKind);
+        }
+
+        // Кількість документів видно й без права на аркуш (Q15-07).
+        Assert.Equal(1, row.GetProperty("documents").GetInt32());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "R-8")]
+    public async Task Лічильники_null_коли_друга_роль_читача_звужена_кодами_аркушів_без_жодних_заборон()
+    {
+        // ⛔ Сценарій витоку: глобальне Report.ViewCampaign + друга роль зі scope sheets=[A] і Project Read.
+        // Заборон і грантів None немає, тож без обліку SheetCodes narrowed-шару читач бачив би
+        // sheetsTotal=2, draft=1, notSubmittedSheets=1, progress=InProgress -- тобто існування й стан схованого B.
+        // МУТАЦІЙНИЙ ДОКАЗ: прибрати `SheetCodes is not null` з SheetVisibility.SeesAllSheets -- червоніє.
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var chain = await builder.BuildAsync(ct: CancellationToken.None).ConfigureAwait(true);
+
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, GetCampaignSummaryHandler.Permission).ConfigureAwait(true);
+
+        await using (var db = builder.CreateContext())
+        {
+            // A подано, B (схований) не подано.
+            db.DocumentSheets.Add(new DocumentSheet(chain.DocumentId, chain.SheetDefId));
+            var state = new ApprovalState(chain.DocumentId, chain.SheetDefId, chain.PeriodKey.Value);
+            state.Submit(1, Now);
+            db.ApprovalStates.Add(state);
+
+            var tag = Guid.NewGuid().ToString("N")[..8].ToUpperInvariant();
+            var sheetB = new Ecr.Domain.Entities.Configuration.SheetDef(
+                chain.TemplateVersionId,
+                Ecr.Domain.ValueObjects.EcrCode.Create($"HIDCS{tag}"),
+                new Ecr.Domain.ValueObjects.LocalizedText(new Dictionary<string, string> { ["en"] = $"HiddenCampaign{tag}" }),
+                2);
+            db.SheetDefs.Add(sheetB);
+            await db.SaveChangesAsync(CancellationToken.None).ConfigureAwait(true);
+            db.DocumentSheets.Add(new DocumentSheet(chain.DocumentId, sheetB.Id));
+
+            // Читач із ViewCampaign: беремо його призначення й додаємо другу, звужену аркушем A роль.
+            var viewerRoleId = await db.RolePermissions
+                .Where(p => p.PermissionCode == GetCampaignSummaryHandler.Permission)
+                .OrderByDescending(p => p.RoleId)
+                .Select(p => p.RoleId)
+                .FirstAsync(CancellationToken.None)
+                .ConfigureAwait(true);
+            var userId = await db.RoleAssignments
+                .Where(a => a.RoleId == viewerRoleId)
+                .Select(a => a.UserId)
+                .FirstAsync(CancellationToken.None)
+                .ConfigureAwait(true);
+
+            var narrowedRole = new Role(
+                Ecr.Domain.ValueObjects.EcrCode.Create($"R{Guid.NewGuid():N}"[..12]),
+                new Ecr.Domain.ValueObjects.LocalizedText(new Dictionary<string, string> { ["en"] = "Narrowed by sheet" }));
+            db.Roles.Add(narrowedRole);
+            await db.SaveChangesAsync(CancellationToken.None).ConfigureAwait(true);
+
+            db.RolePermissions.Add(new RolePermission(narrowedRole.Id, "Document.View"));
+            db.ResourceGrants.Add(new ResourceGrant(narrowedRole.Id, ResourceKind.Project, chain.ProjectId, GrantLevel.Read));
+            var assignment = new RoleAssignment(narrowedRole.Id, userId, principalSid: null);
+            db.RoleAssignments.Add(assignment);
+            await db.SaveChangesAsync(CancellationToken.None).ConfigureAwait(true);
+
+            var scope = RoleAssignmentScope.Create([chain.ProjectId], [chain.SheetCode], null, null).ToJson();
+            await db.Database.ExecuteSqlInterpolatedAsync(
+                    $"UPDATE sec.RoleAssignment SET ScopeJson = {scope} WHERE Id = {assignment.Id}")
+                .ConfigureAwait(true);
+        }
+
+        var response = await GetAsync(client, chain.PeriodKey.Value).ConfigureAwait(true);
+        Assert.True(response.IsSuccessStatusCode, $"{response.StatusCode}: {app.ErrorsText}");
+
+        var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync().ConfigureAwait(true)).RootElement;
+        var row = body.GetProperty("projects").EnumerateArray()
+            .Single(p => p.GetProperty("projectId").GetInt32() == chain.ProjectId);
+        var totals = body.GetProperty("totals");
+
+        foreach (var field in new[] { "sheetsTotal", "notSubmittedSheets", "draft", "submitted", "approved", "rejected", "progress" })
+        {
+            Assert.True(
+                row.GetProperty(field).ValueKind == JsonValueKind.Null,
+                $"row.{field} = {row.GetProperty(field)}: витік існування/стану схованого аркуша");
+        }
+
+        foreach (var field in new[] { "draft", "submitted", "approved", "rejected", "done", "overdue", "atRisk", "inProgress" })
+        {
+            Assert.True(
+                totals.GetProperty(field).ValueKind == JsonValueKind.Null,
+                $"totals.{field} = {totals.GetProperty(field)}");
+        }
     }
 
     [Fact]

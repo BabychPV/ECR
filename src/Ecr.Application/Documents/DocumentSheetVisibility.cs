@@ -89,19 +89,51 @@ public static class DocumentSheetVisibility
     public static async Task<IReadOnlyCollection<int>?> HiddenSheetIdsAsync(
         IDocumentListSummaryStore samples, IAccessDecisionService access, AccessProfile profile,
         IReadOnlyCollection<int> projects, int periodKey, CancellationToken ct)
+        => (await HiddenFilterAsync(samples, access, profile, projects, periodKey, default, ct).ConfigureAwait(false))
+            .HiddenSheetDefIds;
+
+    /// <summary>
+    /// Фільтр переліку з тим, чого читач не бачить: аркуші, таблиці й колонки (R-7: пізня правка схованого
+    /// не дає позначки). Читач без обмежень — <paramref name="filter"/> без змін, без запитів.
+    /// </summary>
+    /// <param name="samples">Порт, що дає по одному документу проєкту для побудови меж.</param>
+    /// <param name="access">Служба доступу.</param>
+    /// <param name="profile">Профіль читача.</param>
+    /// <param name="projects">Проєкти, документи яких перелічуються.</param>
+    /// <param name="periodKey">Період запиту; <c>null</c> — без періоду.</param>
+    /// <param name="filter">Фільтр, який доповнюється.</param>
+    /// <param name="ct">Скасування.</param>
+    public static async Task<DocumentListFilter> HiddenFilterAsync(
+        IDocumentListSummaryStore samples, IAccessDecisionService access, AccessProfile profile,
+        IReadOnlyCollection<int> projects, int? periodKey, DocumentListFilter filter, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(samples);
 
         if (!HasRestrictions(profile))
         {
-            return null;
+            return filter;
         }
 
         var sample = await samples.SampleDocumentPerProjectAsync(projects, ct).ConfigureAwait(false);
         var scopes = await ScopesAsync(access, profile, sample.Select(s => (s.Key, s.Value)), periodKey, ct)
             .ConfigureAwait(false);
 
-        return [.. scopes.Values.SelectMany(s => s.HiddenSheetIds()).Distinct().Order()];
+        return filter with
+        {
+            HiddenSheetDefIds = [.. scopes.Values.SelectMany(s => s.HiddenSheetIds()).Distinct().Order()],
+            HiddenTableDefIds = [.. scopes.Values.SelectMany(s => s.HiddenTableIds()).Distinct().Order()],
+            HiddenColumnDefIds = [.. scopes.Values.SelectMany(s => s.HiddenColumnIds()).Distinct().Order()],
+        };
+    }
+
+    /// <summary>Межі читача як фільтр «що схованo» для одного документа (позначка пізніх правок картки).</summary>
+    /// <param name="scope">Межі читання проєкту документа.</param>
+    public static DocumentListFilter HiddenOf(DocumentReadScope scope)
+    {
+        ArgumentNullException.ThrowIfNull(scope);
+
+        return new DocumentListFilter(
+            null, null, null, scope.HiddenSheetIds(), scope.HiddenTableIds(), scope.HiddenColumnIds());
     }
 
     /// <summary>
@@ -165,6 +197,12 @@ public static class DocumentSheetVisibility
             Sheets = document.Sheets is null ? null : visibleSheets,
             ErrorCount = narrowed ? null : document.ErrorCount,
             WarningCount = narrowed ? null : document.WarningCount,
+
+            // ⛔ R-7: «хто й коли правив документ» — по ВСЬОМУ документу, тож розкриває редактора схованого
+            // аркуша; для звуженого читача — null («—»), як і лічильники.
+            ModifiedAt = narrowed ? null : document.ModifiedAt,
+            ModifiedByDisplayName = narrowed ? null : document.ModifiedByDisplayName,
+            OwnerDisplayName = narrowed ? null : document.OwnerDisplayName,
         };
     }
 

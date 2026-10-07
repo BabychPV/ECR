@@ -31,10 +31,22 @@ namespace Ecr.Application.Documents.Dto;
 /// <param name="InputCells">Скільки комірок має заповнити людина.</param>
 /// <param name="ErrorCount"><c>null</c> — не перевіряли; інакше — скільки помилок у цій таблиці.</param>
 /// <param name="WarningCount"><c>null</c> — не перевіряли; інакше — скільки попереджень.</param>
+/// <param name="IsClosed">
+/// Таблиця закрита на введення правилом доступу до періоду (замок у дереві);
+/// те саме рішення <c>PeriodAccessRules</c>, з якого рахується <c>InputCells</c>.
+/// Відрізняє «закрита» від «усі колонки формульні» (там теж <c>InputCells = 0</c>).
+/// </param>
+/// <param name="RowCount">
+/// Рядків у таблиці: більше з рядків бази й рядків шаблону (як і знаменник
+/// <c>InputCells</c>). Лише число для ВИДИМОЇ таблиці — приховані до переліку
+/// не потрапляють, тож їхні розміри нікуди не витікають.
+/// </param>
 public sealed record TableStatusDto(
     int TableDefId,
     string SheetCode,
     int FilledCells,
     int InputCells,
     int? ErrorCount,
-    int? WarningCount);
+    int? WarningCount,
+    bool IsClosed = false,
+    int RowCount = 0);

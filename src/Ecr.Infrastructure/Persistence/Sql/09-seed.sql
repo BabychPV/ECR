@@ -1073,7 +1073,11 @@ UPDATE t
     (N'err.ECR-REQ-0422.dataSourceEndpointSqlForbiddenOption', N'ru', N'Этот параметр строки подключения для источника не допускается: AttachDBFilename (и его синонимы), User Instance, Enclave Attestation Url или Server Certificate на сетевом ресурсе.', N'Этот параметр строки подключения для источника не допускается: AttachDBFilename (и его синонимы), User Instance, Enclave Attestation Url, Server SPN, Authentication, отличный от SqlPassword, или Server Certificate не в виде полного локального пути (X:\…).'),
     (N'err.ECR-REQ-0422.dataSourceEndpointSqlForbiddenOption', N'kz', N'Қосылу жолының бұл параметрі көз үшін рұқсат етілмейді: AttachDBFilename (және оның синонимдері), User Instance, Enclave Attestation Url немесе желілік ресурстағы Server Certificate.', N'Қосылу жолының бұл параметрі көз үшін рұқсат етілмейді: AttachDBFilename (және оның синонимдері), User Instance, Enclave Attestation Url, Server SPN, SqlPassword-тан басқа Authentication немесе толық жергілікті жол (X:\…) емес Server Certificate.'),
     -- AN-33e (рев'ю an33d, P3-6): «жою өткізілді» = «видалення проведено»; зміст — «пропущено», як en/ru.
-    (N'coverageEvents.eventsTruncated', N'kz', N'Көз терезесінде оқылғаннан көп оқиға бар ({pages} бетте {count}): {after} кейінгі оқиғалар бұл өткізуде синхрондалмады, жоғалғандарды жою өткізілді.', N'Көз терезесінде оқылғаннан көп оқиға бар ({pages} бетте {count}): {after} кейінгі оқиғалар бұл өткізуде синхрондалмады, жоғалғандарды жою өткізіп жіберілді.')
+    (N'coverageEvents.eventsTruncated', N'kz', N'Көз терезесінде оқылғаннан көп оқиға бар ({pages} бетте {count}): {after} кейінгі оқиғалар бұл өткізуде синхрондалмады, жоғалғандарды жою өткізілді.', N'Көз терезесінде оқылғаннан көп оқиға бар ({pages} бетте {count}): {after} кейінгі оқиғалар бұл өткізуде синхрондалмады, жоғалғандарды жою өткізіп жіберілді.'),
+    -- a4-03b: текст межі виразу нейтральний (для правила валідації «розбийте на кілька формул» не пасувало).
+    (N'err.ECR-REQ-0422.expressionTooLong', N'en', N'The expression is too long: {length} characters, at most {max} are allowed. Split it into several formulas.', N'The expression is too long: {length} characters, at most {max} are allowed. Shorten it or split it into several.'),
+    (N'err.ECR-REQ-0422.expressionTooLong', N'ru', N'Выражение слишком длинное: {length} символов, допускается не более {max}. Разбейте его на несколько формул.', N'Выражение слишком длинное: {length} символов, допускается не более {max}. Сократите его или разделите на несколько.'),
+    (N'err.ECR-REQ-0422.expressionTooLong', N'kz', N'Өрнек тым ұзын: {length} таңба, ең көбі {max} рұқсат етіледі. Оны бірнеше формулаға бөліңіз.', N'Өрнек тым ұзын: {length} таңба, ең көбі {max} рұқсат етіледі. Оны қысқартыңыз немесе бірнешеге бөліңіз.')
   ) AS s ([Key], Lang, OldVal, NewVal)
     ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
  WHERE t.Value = s.OldVal COLLATE Latin1_General_BIN2;
@@ -1536,6 +1540,7 @@ USING (VALUES
     -- дія у відповідь — тикати кнопку доти, доки не спрацює.
     (N'err.ECR-REQ-0422.consistencyRunReasonRequired', N'en', N'A reason is required to run the consistency check on demand: the run is recorded in the security journal.', 1),
     (N'err.ECR-REQ-0422.consistencyRunReasonTooLong',  N'en', N'The reason must be no longer than {max} characters.', 1),
+    (N'err.ECR-REQ-0422.consistencySeverity',          N'en', N'There is no finding severity "{severity}": use 1 (info), 2 (warning) or 3 (error).', 1),
     (N'err.ECR-REQ-0422.exportFormatUnknown',          N'en', N'There is no export format "{format}": use xlsx, csv or json.', 1),
     (N'err.ECR-JOB-0409.consistencyCheckRunning',      N'en', N'A consistency check is already in progress as job {jobId} ({state}): watch that job instead of starting a second full scan.', 1),
     -- ⚠ `BE-13`: у цьому реченні фігурні дужки лише довкола справжніх
@@ -6592,7 +6597,7 @@ USING (VALUES
     (N'err.ECR-REQ-0422.preferenceLanguageUnsupported', N'en', N'The language of preference "{key}" must be the code of an enabled interface language (for example "en", "ru" or "kz"), got: {value}.', 1),
     -- COLL:p4-t4 ── кінець секції ──
     -- COLL:an25 ── L7-01 (аудит 2026-10-03): межі виразу проти переповнення стека; ru/kz — порцією COLL:an25 у блоці I18N нижче ──
-    (N'err.ECR-REQ-0422.expressionTooLong', N'en', N'The expression is too long: {length} characters, at most {max} are allowed. Split it into several formulas.', 1),
+    (N'err.ECR-REQ-0422.expressionTooLong', N'en', N'The expression is too long: {length} characters, at most {max} are allowed. Shorten it or split it into several.', 1),
     (N'expr.chainTooLong',                   N'en', N'The expression has more than {max} operators chained together. Split it into several formulas.', 1),
     (N'expr.tooComplex',                     N'en', N'The expression is too complex to check. Split it into several formulas.', 1),
     -- COLL:an25 ── кінець секції ──
@@ -15537,8 +15542,8 @@ GO
 INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val
   FROM (VALUES
-    (N'err.ECR-REQ-0422.expressionTooLong', N'ru', N'Выражение слишком длинное: {length} символов, допускается не более {max}. Разбейте его на несколько формул.'),
-    (N'err.ECR-REQ-0422.expressionTooLong', N'kz', N'Өрнек тым ұзын: {length} таңба, ең көбі {max} рұқсат етіледі. Оны бірнеше формулаға бөліңіз.'),
+    (N'err.ECR-REQ-0422.expressionTooLong', N'ru', N'Выражение слишком длинное: {length} символов, допускается не более {max}. Сократите его или разделите на несколько.'),
+    (N'err.ECR-REQ-0422.expressionTooLong', N'kz', N'Өрнек тым ұзын: {length} таңба, ең көбі {max} рұқсат етіледі. Оны қысқартыңыз немесе бірнешеге бөліңіз.'),
     (N'expr.chainTooLong', N'ru', N'В выражении больше {max} операторов подряд. Разбейте его на несколько формул.'),
     (N'expr.chainTooLong', N'kz', N'Өрнекте қатарынан {max} оператордан артық. Оны бірнеше формулаға бөліңіз.'),
     (N'expr.tooComplex', N'ru', N'Выражение слишком сложное для проверки. Разбейте его на несколько формул.'),
@@ -15945,6 +15950,16 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:exprbudget ── кінець секції ──
+-- COLL:consistency-summary ── ru/kz: невідома вага знахідки в журналі узгодженості; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-REQ-0422.consistencySeverity', N'ru', N'Веса находки «{severity}» не существует: допустимо 1 (информация), 2 (предупреждение) или 3 (ошибка).'),
+    (N'err.ECR-REQ-0422.consistencySeverity', N'kz', N'«{severity}» табылым салмағы жоқ: 1 (ақпарат), 2 (ескерту) немесе 3 (қате) болуы тиіс.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:consistency-summary ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

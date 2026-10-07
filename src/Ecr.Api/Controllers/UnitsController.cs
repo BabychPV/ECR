@@ -119,7 +119,9 @@ public sealed class UnitsController(
                 request.DimensionId, request.FactorToBase, request.OffsetToBase, ct)
             .ConfigureAwait(false);
 
-        var created = new UnitRef(unit.Id, unit.Code, unit.DimensionId, unit.FactorToBase, unit.OffsetToBase);
+        var created = new UnitRef(
+            unit.Id, unit.Code, unit.DimensionId, unit.FactorToBase, unit.OffsetToBase,
+            SymbolL10n: unit.SymbolL10n.Values, NameL10n: unit.NameL10n.Values, IsBase: unit.IsBase);
 
         // `Location` вказує на перелік: окремого маршруту «одна одиниця» в API
         // немає, і вигадувати його заради заголовка означало б додати

@@ -97,26 +97,36 @@ function CampaignBody({ summary }: { readonly summary: CampaignSummary }): JSX.E
           там мусять називати стан одним словом. Колір — лише у відхилених і
           лише коли вони є (`L3`, `problemTone`).
         */}
-        <StatStrip
-          label={t('documents.summaryLabel')}
-          items={[
-            { id: 'draft', label: t(statusKey('sheet', 'Draft')), value: totals.draft, filter: false },
-            {
-              id: 'submitted',
-              label: t(statusKey('sheet', 'Submitted')),
-              value: totals.submitted,
-              filter: false,
-            },
-            {
-              id: 'rejected',
-              label: t(statusKey('sheet', 'Rejected')),
-              value: totals.rejected,
-              tone: 'danger',
-              filter: false,
-            },
-            { id: 'approved', label: t(statusKey('sheet', 'Approved')), value: totals.approved, filter: false },
-          ]}
-        />
+        {/*
+          ⛔ R-1: лічильники станів — «найгірший стан серед усіх аркушів», тож сервер віддає `null` читачу, що
+          має інструменти, які ховають аркуші: число розкрило б стан прихованого. Тоді замість смуги — «—».
+        */}
+        {totals.draft === null || totals.submitted === null || totals.rejected === null || totals.approved === null ? (
+          <Text c="dimmed" data-testid="campaign-states-hidden">
+            {'—'}
+          </Text>
+        ) : (
+          <StatStrip
+            label={t('documents.summaryLabel')}
+            items={[
+              { id: 'draft', label: t(statusKey('sheet', 'Draft')), value: totals.draft, filter: false },
+              {
+                id: 'submitted',
+                label: t(statusKey('sheet', 'Submitted')),
+                value: totals.submitted,
+                filter: false,
+              },
+              {
+                id: 'rejected',
+                label: t(statusKey('sheet', 'Rejected')),
+                value: totals.rejected,
+                tone: 'danger',
+                filter: false,
+              },
+              { id: 'approved', label: t(statusKey('sheet', 'Approved')), value: totals.approved, filter: false },
+            ]}
+          />
+        )}
       </Stack>
 
       <Stack gap="xs">
@@ -126,23 +136,36 @@ function CampaignBody({ summary }: { readonly summary: CampaignSummary }): JSX.E
           ⚠ Лічильники класів — з `totals` сервера, по всіх проєктах періоду.
           Колір — лише у тих, що затримують, і лише коли вони є (`L3`).
         */}
-        <StatStrip
-          label={t('campaign.laggingTitle')}
-          items={[
-            { id: 'overdue', label: progressLabel('Overdue'), value: totals.overdue, tone: 'danger', filter: false },
-            { id: 'atRisk', label: progressLabel('AtRisk'), value: totals.atRisk, tone: 'warning', filter: false },
-            { id: 'inProgress', label: progressLabel('InProgress'), value: totals.inProgress, filter: false },
-            { id: 'done', label: progressLabel('Done'), value: totals.done, filter: false },
-          ]}
-        />
+        {/*
+          ⛔ R-1: клас «Done» («усе затверджено») залежить від станів УСІХ аркушів, тож сервер віддає `null` у
+          лічильниках класів і в `progress` читачу, що має інструменти, які ховають аркуші. Тоді — «—» замість смуги й
+          переліку: порожній перелік «ніхто не затримує» був би неправдою, а не «невідомо».
+        */}
+        {totals.overdue === null || totals.atRisk === null || totals.inProgress === null || totals.done === null ? (
+          <Text c="dimmed" data-testid="campaign-progress-hidden">
+            {'—'}
+          </Text>
+        ) : (
+          <>
+            <StatStrip
+              label={t('campaign.laggingTitle')}
+              items={[
+                { id: 'overdue', label: progressLabel('Overdue'), value: totals.overdue, tone: 'danger', filter: false },
+                { id: 'atRisk', label: progressLabel('AtRisk'), value: totals.atRisk, tone: 'warning', filter: false },
+                { id: 'inProgress', label: progressLabel('InProgress'), value: totals.inProgress, filter: false },
+                { id: 'done', label: progressLabel('Done'), value: totals.done, filter: false },
+              ]}
+            />
 
-        <DataTable<CampaignProject>
-          columns={laggingColumns()}
-          rows={lagging}
-          rowKey={(project) => String(project.projectId)}
-          emptyTitle={t('campaign.nobodyLagging')}
-          emptyHint={t('campaign.nobodyLaggingServerHint')}
-        />
+            <DataTable<CampaignProject>
+              columns={laggingColumns()}
+              rows={lagging}
+              rowKey={(project) => String(project.projectId)}
+              emptyTitle={t('campaign.nobodyLagging')}
+              emptyHint={t('campaign.nobodyLaggingServerHint')}
+            />
+          </>
+        )}
       </Stack>
     </Stack>
   );
@@ -244,7 +267,7 @@ function laggingColumns(): readonly DataTableColumn<CampaignProject>[] {
       key: 'progress',
       label: t('campaign.progressColumn'),
       sortValue: (project) => holdingUpRank(project.progress),
-      render: (project) => <ProgressBadge progress={project.progress} />,
+      render: (project) => (project.progress === null ? '—' : <ProgressBadge progress={project.progress} />),
     },
     {
       key: 'lastDay',
@@ -253,7 +276,13 @@ function laggingColumns(): readonly DataTableColumn<CampaignProject>[] {
       render: (project) => <LastDay project={project} />,
     },
     { key: 'documents', label: t('campaign.documents'), num: true },
-    { key: 'rejected', label: t(statusKey('sheet', 'Rejected')), num: true },
+    {
+      key: 'rejected',
+      label: t(statusKey('sheet', 'Rejected')),
+      num: true,
+      // R-1: `null` — читач не бачить частини аркушів, число розкрило б приховане.
+      render: (project) => project.rejected ?? '—',
+    },
     { key: 'snapshots', label: t('campaign.snapshots'), num: true },
   ];
 }

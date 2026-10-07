@@ -1,4 +1,4 @@
-﻿using System.Globalization;
+using System.Globalization;
 using Ecr.Application.Common;
 using Ecr.Application.Ports;
 using Ecr.Domain.Entities.Configuration;
@@ -144,6 +144,53 @@ public sealed class RegistryStore(EcrDbContext db) : IRegistryStore
                    .Take(MaxEntries)
                    .ToListAsync(ct)
                    .ConfigureAwait(false);
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyDictionary<int, int>> CountCurrentEntriesAsync(DateOnly asOf, CancellationToken ct)
+    {
+        // Проєкція п'яти полів по активних не видалених записах; вікно чинності рахує
+        // RegistryEntryStanding.IsValidOn — те саме, що й пікер, а не друга умова в SQL.
+        var rows = await db.RegistryEntries
+            .AsNoTracking()
+            .Where(e => e.IsActive && !e.IsDeleted)
+            .Select(e => new RegistryEntryStanding(e.Id, e.RegistryDefId, e.IsActive, e.IsDeleted, e.ValidFrom, e.ValidTo))
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        return rows
+            .Where(r => r.IsValidOn(asOf))
+            .GroupBy(r => r.RegistryDefId)
+            .ToDictionary(g => g.Key, g => g.Count());
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyDictionary<int, RegistryTemplateUsage>> CountTemplateUsageAsync(CancellationToken ct)
+    {
+        var groups = await (
+            from column in db.ColumnDefs.AsNoTracking()
+            where column.LookupRegistryDefId != null && !column.IsDeleted
+            join table in db.TableDefs.AsNoTracking() on column.TableDefId equals table.Id
+            join sheet in db.SheetDefs.AsNoTracking() on table.SheetDefId equals sheet.Id
+            join version in db.TemplateVersions.AsNoTracking() on sheet.TemplateVersionId equals version.Id
+            group column by new { RegistryDefId = column.LookupRegistryDefId!.Value, version.TemplateId } into g
+            select new { g.Key.RegistryDefId, g.Key.TemplateId, Columns = g.Count() })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        return groups
+            .GroupBy(g => g.RegistryDefId)
+            .ToDictionary(g => g.Key, g => new RegistryTemplateUsage(g.Sum(x => x.Columns), g.Count()));
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlySet<int>> ListDefinitionIdsWithDraftAsync(CancellationToken ct)
+        => (await db.RegistryDefinitionDrafts
+            .AsNoTracking()
+            .Select(d => d.RegistryDefId)
+            .OrderBy(id => id)
+            .Take(MaxEntries)
+            .ToListAsync(ct)
+            .ConfigureAwait(false)).ToHashSet();
 
     /// <inheritdoc />
     public void AddDefinition(RegistryDef definition) => db.RegistryDefs.Add(definition);

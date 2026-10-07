@@ -2472,6 +2472,21 @@ public interface IJobProgressStore
 }
 ```
 
+#### `ISystemHealthStore`
+
+Агрегати екрана «Здоров'я системи» (`GET /api/v1/health/facts`, право
+`System.ViewHealth`): лічильники черги задач і джерел збору, вільне місце диска
+даних (ГБ), остання копія БД, момент останньої помилки. ⛔ Лише числа й мітки
+часу: жодних шляхів, імен серверів/баз, рядків підключення. Зонди до `msdb` і
+`sys.dm_os_volume_stats` не кидають — відмова (немає права) дає `null`.
+
+```csharp
+public interface ISystemHealthStore
+{
+    public Task<SystemHealthSnapshot> ReadAsync(DateTime utcNow, CancellationToken ct);
+}
+```
+
 #### `IJobQueue`
 
 Черга фонових задач у базі (`MI-02`, `D-208`): рядки `itg.JobProgress` з
@@ -3944,15 +3959,18 @@ public sealed class NotFoundException(string errorCode, string message)
 | `POST` | `/api/v1/users` | `Security.ManageUsers` | 3 |
 | `PUT` | `/api/v1/users/{id}/alerts` | `Security.ManageUsers` | 5 |
 | `GET` | `/api/v1/audit/cells` | `Security.ViewAudit` | 3 |
+| `GET` | `/api/v1/audit/cells/summary` | `Security.ViewAudit` | 3 |
 | `GET` | `/api/v1/audit/structure` | `Security.ViewAudit` | 7 |
 | `GET` | `/api/v1/audit/structure/export.csv` | `Security.ViewAudit` | 7 |
 | `GET` | `/api/v1/audit/security` | `Security.ViewAudit` | 7 |
 | `GET` | `/api/v1/consistency/issues` | `System.ViewHealth` | 5 |
+| `GET` | `/api/v1/consistency/summary` | `System.ViewHealth` | 5 |
 | `POST` | `/api/v1/consistency/run` | `System.RunJob` | 5 |
 | `GET` | `/api/v1/health/facts` | `System.ViewHealth` | 5 |
 | `GET` | `/api/v1/health/partitions/script` | `System.ViewHealth` | 5 |
 | `GET` | `/api/v1/jobs` | `System.ViewHealth` | 5 |
 | `GET` | `/api/v1/jobs?mine=true` | — (власні задачі) | 5 |
+| `GET` | `/api/v1/jobs/summary` | `System.ViewHealth` (або `mine=true` — власні задачі) | 5 |
 | `GET` | `/api/v1/jobs/{jobId}` | `System.ViewHealth` | 5 |
 | `POST` | `/api/v1/jobs/{jobId}/restart` | `System.ViewHealth` | 5 |
 | `POST` | `/api/v1/jobs/{jobId}/cancel` | `System.ViewHealth` | 5 |

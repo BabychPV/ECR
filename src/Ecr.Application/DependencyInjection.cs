@@ -191,6 +191,7 @@ public static class DependencyInjection
         services.AddScoped<Audit.GetSecurityEventsHandler>();
         services.AddScoped<Audit.ExportStructureChangesHandler>();
         services.AddScoped<Consistency.GetConsistencyIssuesHandler>();
+        services.AddScoped<Consistency.GetConsistencySummaryHandler>();
         services.AddScoped<Consistency.RunConsistencyCheckHandler>();
         services.AddScoped<Projects.CloneProjectHandler>();
 
@@ -361,6 +362,7 @@ public static class DependencyInjection
         services.AddScoped<Integration.CollectFromSourceHandler>();
         services.AddScoped<Integration.GetJobStatusHandler>();
         services.AddScoped<Integration.ListJobsHandler>();
+        services.AddScoped<Integration.GetJobsSummaryHandler>();
         services.AddScoped<Integration.RestartJobHandler>();
         services.AddScoped<Integration.CancelJobHandler>();
         services.AddScoped<Integration.CollectionScheduleApplier>();

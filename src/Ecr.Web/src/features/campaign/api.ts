@@ -30,8 +30,12 @@ export type CampaignTotals = components['schemas']['CampaignTotals'];
  * джерело правди для рядків і підсумків): `Done` — усе затверджено і є зріз;
  * `Overdue` — строк подання минув; `AtRisk` — до останнього дня ≤ N діб;
  * `InProgress` — решта.
+ *
+ * ⛔ R-1: у `CampaignProject.progress` і в лічильниках класів `totals` сервер віддає `null` читачу, що має
+ * інструменти, які ховають аркуші: клас `Done` («усе затверджено») залежить від станів УСІХ аркушів. Тип самого
+ * класу — без `null` (його додає генератор до переліку через nullable-поле).
  */
-export type CampaignProgress = components['schemas']['CampaignProgress'];
+export type CampaignProgress = NonNullable<components['schemas']['CampaignProgress']>;
 
 /**
  * Зведення кампанії за період.

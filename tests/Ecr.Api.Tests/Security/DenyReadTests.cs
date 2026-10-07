@@ -78,6 +78,17 @@ public sealed partial class DenyReadTests(SqlServerFixture sql)
             var statuses = JsonDocument.Parse(statusBody).RootElement.EnumerateArray()
                 .Select(t => t.GetProperty("tableDefId").GetInt32()).ToList();
 
+            // UI-22: нові поля isClosed/rowCount є лише на рядках видимих таблиць;
+            // для звуженої ролі приховані таблиці не мають жодного рядка (ні розміру, ні замка).
+            var statusRows = JsonDocument.Parse(statusBody).RootElement.EnumerateArray().ToList();
+            Assert.All(statusRows, r =>
+            {
+                Assert.True(r.TryGetProperty("isClosed", out _));
+                Assert.True(r.GetProperty("rowCount").GetInt32() >= 0);
+            });
+            Assert.Equal(expectHidden, statusRows.Any(
+                r => hidden.Contains(r.GetProperty("tableDefId").GetInt32())));
+
             foreach (var list in new[] { tables, statuses })
             {
                 Assert.Contains(s.Doc.TableDefId, list);

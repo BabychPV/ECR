@@ -11,7 +11,7 @@ namespace Ecr.Application.Audit;
 /// <c>Document.View</c>, коли запит адресує РІВНО ОДНУ комірку (D15-16).
 /// </summary>
 public sealed class GetCellChangesHandler(
-    IAuditReader audit, IAccessDecisionService access, ICurrentUser currentUser)
+    IAuditReader audit, IAccessDecisionService access, ICurrentUser currentUser, TimeProvider? clock = null)
 {
     /// <summary>Право, без якого ЗАГАЛЬНИЙ журнал не віддається.</summary>
     public const string Permission = "Security.ViewAudit";
@@ -62,16 +62,110 @@ public sealed class GetCellChangesHandler(
     /// </remarks>
     public static readonly TimeSpan MaxCellWindow = TimeSpan.FromDays(396);
 
+    /// <summary>Максимальна довжина пошукового рядка <c>q</c> (UI-38, C3).</summary>
+    public const int MaxQueryLength = 100;
+
     /// <summary>Повертає сторінку змін.</summary>
     /// <param name="filter">Вікно й звуження журналу.</param>
     /// <param name="page">Курсорна пагінація.</param>
     /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⛔ <c>TotalCount</c> (UI-38, C4) — кількість змін, які читач ВИДИТЬ: у вікні, за фільтром і за межами
+    /// читання (S6, R-11). Сума по прихованих колонках, таблицях і аркушах у число не входить так само, як
+    /// їхні рядки не входять у сторінку: інакше різниця між загальним числом і довжиною видимого була б
+    /// оракулом «там щось приховано».
+    ///
+    /// ⚠ Лише на ПЕРШІЙ сторінці (<c>Cursor == null</c>): на наступних <c>TotalCount</c> — <c>null</c>, агрегат
+    /// по вікну не рахується повторно. Число не змінюється між сторінками, тож клієнт бере його з першої.
+    /// </remarks>
     public async Task<PagedResult<CellChangeView>> HandleAsync(
         CellChangeFilter filter, CursorRequest page, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(filter);
         ArgumentNullException.ThrowIfNull(page);
 
+        filter = Normalize(filter);
+
+        // UI-38 (P3): сума по вікну лічиться ЛИШЕ на першій сторінці (курсора немає); далі `TotalCount` — `null`,
+        // а порт підрахунку не викликається: кожна наступна сторінка не повторює агрегат по всьому вікну.
+        var firstPage = page.Cursor is null;
+        var (readable, empty) = await AuthorizeAsync(filter, page, ct).ConfigureAwait(false);
+        if (empty)
+        {
+            return new PagedResult<CellChangeView>([], null, firstPage ? 0 : null);
+        }
+
+        var result = await audit.ReadCellChangesAsync(filter, page, ct).ConfigureAwait(false);
+        int? total = null;
+        if (firstPage)
+        {
+            var counts = await audit.CountCellChangesByColumnAsync(filter, TodayStart(), ct).ConfigureAwait(false);
+            total = (int)Math.Min(
+                counts.Where(c => readable is null || readable.CanReadColumn(c.ColumnDefId)).Sum(c => c.Total), int.MaxValue);
+        }
+
+        // ⚠ Журнал документа без колонки (лише `Security.ViewAudit`): рядки заборонених колонок відкидаються
+        // ПІСЛЯ читання сторінки, тож сторінка може бути коротшою за ліміт. Курсор лишається правильним: він
+        // іде за журналом, не за відфільтрованим переліком.
+        var visible = readable is null
+            ? result.Items
+            : [.. result.Items.Where(c => readable.CanReadColumn(c.ColumnDefId))];
+
+        return result with { Items = visible, TotalCount = total };
+    }
+
+    /// <summary>Підсумок журналу за вікном (UI-38, C2): ті самі права, вікно й видимість, що й у <see cref="HandleAsync"/>.</summary>
+    /// <param name="filter">Вікно й звуження журналу.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⛔ Рахується лише видиме читачу (S6, R-11): лічильники приходять із порту в розрізі колонки, і суми
+    /// з прихованих колонок, таблиць і аркушів у відповідь не потрапляють.
+    /// </remarks>
+    public async Task<CellChangeSummaryView> SummaryAsync(CellChangeFilter filter, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(filter);
+
+        filter = Normalize(filter);
+        var (readable, empty) = await AuthorizeAsync(filter, page: null, ct).ConfigureAwait(false);
+        if (empty)
+        {
+            return new CellChangeSummaryView(0, 0, 0, 0);
+        }
+
+        var counts = await audit.CountCellChangesByColumnAsync(filter, TodayStart(), ct).ConfigureAwait(false);
+        var seen = counts.Where(c => readable is null || readable.CanReadColumn(c.ColumnDefId)).ToList();
+
+        return new CellChangeSummaryView(
+            seen.Sum(c => c.Total), seen.Sum(c => c.Today), seen.Sum(c => c.ByImport), seen.Sum(c => c.ByRecalculation));
+    }
+
+    /// <summary>
+    /// Пошуковий рядок: обрізані пробіли, порожній — це не фільтр (очищене поле), довший за межу — обрізається.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Обрізання, а не відмова: нового коду помилки заради поля пошуку не заводимо, а 100 знаків із запасом
+    /// перекривають бізнес-ключ (до 64), ключ рядка (до 100) і код колонки.
+    /// </remarks>
+    private static CellChangeFilter Normalize(CellChangeFilter filter)
+    {
+        var query = filter.Query?.Trim();
+        if (string.IsNullOrEmpty(query))
+        {
+            return filter.Query is null ? filter : filter with { Query = null };
+        }
+
+        return query.Length > MaxQueryLength ? filter with { Query = query[..MaxQueryLength] } : filter with { Query = query };
+    }
+
+    private DateTime TodayStart() => (clock ?? TimeProvider.System).GetUtcNow().UtcDateTime.Date;
+
+    /// <summary>
+    /// Право, вікно й доступ до документа; повертає межі читання документа (<c>null</c> — наскрізний
+    /// журнал без <c>documentId</c>) і ознаку «порожньо» (колонка адреси прихована).
+    /// </summary>
+    private async Task<(DocumentReadScope? Readable, bool Empty)> AuthorizeAsync(
+        CellChangeFilter filter, CursorRequest? page, CancellationToken ct)
+    {
         var userId = currentUser.UserId
                      ?? throw new AccessDeniedException(
                          "ECR-AUTH-0401", "Потрібна автентифікація.",
@@ -140,7 +234,7 @@ public sealed class GetCellChangesHandler(
                 });
         }
 
-        if (!page.IsValid)
+        if (page is { IsValid: false })
         {
             throw new BusinessRuleException(
                 ErrorCodes.RequestInvalid, $"Розмір сторінки поза межами 1..{CursorRequest.MaxLimit}.",
@@ -210,25 +304,14 @@ public sealed class GetCellChangesHandler(
             // колонка існує й щось приховано.
             var readable = await access.ReadScopeAsync(profile, id, ct).ConfigureAwait(false);
 
-            if (filter.ColumnDefId is { } column && !readable.CanReadColumn(column))
-            {
-                return new PagedResult<CellChangeView>([], null, 0);
-            }
-
-            // ⚠ Журнал документа без колонки (лише `Security.ViewAudit`): рядки
-            // заборонених колонок відкидаються ПІСЛЯ читання сторінки, тож
-            // сторінка може бути коротшою за ліміт, а `TotalCount` — лічити й
-            // їх. Курсор лишається правильним: він іде за журналом, не за
-            // відфільтрованим переліком.
-            var result = await audit.ReadCellChangesAsync(filter, page, ct).ConfigureAwait(false);
-            var visible = result.Items.Where(c => readable.CanReadColumn(c.ColumnDefId)).ToList();
-
-            return visible.Count == result.Items.Count ? result : result with { Items = visible };
+            return filter.ColumnDefId is { } column && !readable.CanReadColumn(column)
+                ? (null, true)
+                : (readable, false);
         }
 
         // ⚠ Без `documentId` — наскрізний журнал для `Security.ViewAudit` поза
         // межами проєктів (рішення людини, Q-177); межі читання S6 тут не
         // застосовуються так само, як не застосовується грант на проєкт.
-        return await audit.ReadCellChangesAsync(filter, page, ct).ConfigureAwait(false);
+        return (null, false);
     }
 }

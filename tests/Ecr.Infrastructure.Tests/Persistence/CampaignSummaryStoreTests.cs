@@ -1,4 +1,5 @@
 using Ecr.Application.Common;
+using Ecr.Application.Periods;
 using Ecr.Application.Reporting;
 using Ecr.Application.Reporting.Dto;
 using Ecr.Application.Security;
@@ -67,6 +68,10 @@ public sealed class CampaignSummaryStoreTests(SqlServerFixture sql)
         // рівно це твердження: `Approved` дає 2 замість 3.
         Assert.Equal((10, 1, 2, 3, 4),
             (row.Documents, row.Draft, row.Submitted, row.Approved, row.Rejected));
+
+        // UI-33, D2: рівень аркуша. По одному аркушу на документ: 10 аркушів, не подано -- чернетка (1) і
+        // відхилені (4); поданий (2) і затверджені (3) -- вже подані.
+        Assert.Equal((10, 5), (row.Sheets, row.NotSubmittedSheets));
 
         // Останній етап кампанії: аркуші затверджено — але доки зрізу немає,
         // регулятор не отримав нічого.
@@ -148,7 +153,7 @@ public sealed class CampaignSummaryStoreTests(SqlServerFixture sql)
         Assert.Equal(205, summary.TotalProjects);
 
         var t = summary.Totals;
-        Assert.Equal((205, 1, 1, 1), (t.Projects, t.Documents, t.Approved, t.Snapshots));
+        Assert.Equal((205, 1, 1, 1), (t.Projects, t.Documents, t.Approved ?? -1, t.Snapshots));
         Assert.Equal((1, 0, 0, 204), (t.Done, t.Overdue, t.AtRisk, t.InProgress));
     }
 
@@ -308,12 +313,94 @@ public sealed class CampaignSummaryStoreTests(SqlServerFixture sql)
         await db.SaveChangesAsync(CancellationToken.None);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "R-8")]
+    public async Task Календар_віддає_не_подані_аркуші_лише_читачу_без_прихованого_і_лише_за_прапорцем()
+    {
+        // UI-33, D1: 1 + 2 + 3 + 4 документи по одному аркушу; не подано -- чернетка (1) і відхилені (4).
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var chain = await builder.BuildAsync(ct: CancellationToken.None);
+        await using var db = builder.CreateContext();
+
+        await ArrangeAsync(db, chain, chain.DocumentId, status: null);
+        await AddAsync(db, chain, DocumentStatus.Submitted, count: 2);
+        await AddAsync(db, chain, DocumentStatus.Approved, count: 3);
+        await AddAsync(db, chain, DocumentStatus.Rejected, count: 4);
+
+        async Task<int?> NotSubmitted(AccessBuilder access, bool withCounts)
+        {
+            var calendar = await CalendarHandler(db, access).HandleAsync(chain.ProjectId, CancellationToken.None, withCounts);
+            return calendar.Periods.Single(p => p.PeriodKey == chain.PeriodKey.Value).NotSubmittedSheets;
+        }
+
+        AccessBuilder Reader() => new AccessBuilder { UserId = 7 }
+            .Permission("Document.View")
+            .Grant(ResourceKind.Project, chain.ProjectId, GrantLevel.Read);
+
+        Assert.Equal(5, await NotSubmitted(Reader(), withCounts: true));
+
+        // Без прапорця календар не платить за агрегат.
+        Assert.Null(await NotSubmitted(Reader(), withCounts: false));
+
+        // ⛔ МУТАЦІЙНИЙ ДОКАЗ: прибрати SeesAllSheets з GetPeriodCalendarHandler -- червоніє: заборона на аркуш
+        // не ховає число.
+        Assert.Null(await NotSubmitted(Reader().Deny(ResourceKind.Sheet, chain.SheetDefId), withCounts: true));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "R-1")]
+    public async Task Лічильники_станів_документів_null_читачу_із_забороною_на_аркуш_і_числа_читачу_без_неї()
+    {
+        // ⛔ МУТАЦІЙНИЙ ДОКАЗ: повернути `p.Draft`/`b.Draft` без `allSheets ?` у `GetCampaignSummaryHandler` --
+        // червоніє: «найгірший стан серед усіх аркушів» зараховує приховані, різниця двох читачів -- оракул стану.
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var key = await FreshPeriodKeyAsync(builder);
+        var chain = await builder.BuildAsync(periodKey: key, ct: CancellationToken.None);
+        await using var db = builder.CreateContext();
+        await ArrangeAsync(db, chain, chain.DocumentId, status: null);
+        await AddAsync(db, chain, DocumentStatus.Rejected, count: 2);
+
+        var open = await Handler(db, Now).HandleAsync(key, CancellationToken.None);
+        var narrowed = await Handler(db, Now, b => b.Deny(ResourceKind.Sheet, chain.SheetDefId))
+            .HandleAsync(key, CancellationToken.None);
+
+        Assert.Equal((1, 0, 0, 2), (open.Totals.Draft, open.Totals.Submitted, open.Totals.Approved, open.Totals.Rejected));
+        var row = Assert.Single(open.Projects);
+        Assert.Equal((1, 0, 0, 2), (row.Draft, row.Submitted, row.Approved, row.Rejected));
+
+        Assert.Null(narrowed.Totals.Draft);
+        Assert.Null(narrowed.Totals.Submitted);
+        Assert.Null(narrowed.Totals.Approved);
+        Assert.Null(narrowed.Totals.Rejected);
+        var narrowedRow = Assert.Single(narrowed.Projects);
+        Assert.Null(narrowedRow.Draft);
+        Assert.Null(narrowedRow.Rejected);
+
+        // Кількість документів і зрізів лишається видимою (Q15-07).
+        Assert.Equal(3, narrowed.Totals.Documents);
+    }
+    /// <summary>Обробник календаря над справжніми сховищами; користувач описаний <paramref name="access"/>.</summary>
+    private static GetPeriodCalendarHandler CalendarHandler(EcrDbContext db, AccessBuilder access)
+    {
+        var decisions = Substitute.For<IAccessDecisionService>();
+        decisions.BuildProfileAsync(7, Arg.Any<CancellationToken>()).Returns(access.Build());
+
+        var user = Substitute.For<ICurrentUser>();
+        user.UserId.Returns(7);
+
+        return new GetPeriodCalendarHandler(new PeriodStore(db), decisions, user, new CampaignSummaryStore(db));
+    }
+
     /// <summary>Обробник над справжнім сховищем; користувач має лише право огляду.</summary>
-    private static GetCampaignSummaryHandler Handler(EcrDbContext db, DateTime utcNow)
+    private static GetCampaignSummaryHandler Handler(EcrDbContext db, DateTime utcNow, Func<AccessBuilder, AccessBuilder>? narrow = null)
     {
         var access = Substitute.For<IAccessDecisionService>();
         access.BuildProfileAsync(7, Arg.Any<CancellationToken>())
-            .Returns(new AccessBuilder { UserId = 7 }.Permission(GetCampaignSummaryHandler.Permission).Build());
+            .Returns((narrow ?? (b => b))(new AccessBuilder { UserId = 7 }.Permission(GetCampaignSummaryHandler.Permission)).Build());
 
         var user = Substitute.For<ICurrentUser>();
         user.UserId.Returns(7);

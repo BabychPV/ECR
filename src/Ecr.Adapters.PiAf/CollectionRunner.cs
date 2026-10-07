@@ -595,7 +595,7 @@ public sealed partial class CollectionRunner(
             // (`FailAuthenticationAsync`).
             await CloseAfterFailureAsync(
                     runId, sourceEntityId, CoveredWithInFlight(), CollectionFailure.FailedStatus, retrieved,
-                    Encode(Reason("jobs.collectionRunFailed", ("error", Trim(Describe(ex))))),
+                    Encode(Reason("jobs.collectionRunFailed", ("error", Trim(Describe(ex, runId))))),
                     ex)
                 .ConfigureAwait(false);
             throw;
@@ -626,7 +626,7 @@ public sealed partial class CollectionRunner(
             // повтор додав би ті самі інтервали ще раз поверх уже відстежених.
             await CloseAfterFailureAsync(
                     runId, sourceEntityId, [], CollectionFailure.FailedStatus, retrieved,
-                    Encode(Reason("jobs.collectionCloseFailed", ("error", Trim(Describe(ex))))),
+                    Encode(Reason("jobs.collectionCloseFailed", ("error", Trim(Describe(ex, runId))))),
                     ex)
                 .ConfigureAwait(false);
             throw;
@@ -788,8 +788,10 @@ public sealed partial class CollectionRunner(
     /// ⚠ Найглибше: у <c>DbUpdateException</c> власний текст — «див. внутрішній
     /// виняток», і саме внутрішній каже, ЯКЕ обмеження порушено.
     /// </remarks>
-    private static string Describe(Exception ex)
-        => $"{ex.GetType().Name}: {ex.GetBaseException().Message}";
+    private static string Describe(Exception ex, long runId)
+        => SafeErrorText.IsOwn(ex)
+            ? $"{ex.GetType().Name}: {ex.Message}"
+            : $"{ex.GetType().Name} ({SafeErrorText.CodeOf(ex)}); the details are in the server log for run {runId.ToString(CultureInfo.InvariantCulture)}";
 
     [LoggerMessage(
         Level = LogLevel.Error,
@@ -856,7 +858,7 @@ public sealed partial class CollectionRunner(
     /// недоступність AF валить усю задачу — і разом із нею інтервали, які
     /// прочиталися.
     /// </remarks>
-    private static async Task<ReadOutcome> ReadAsync(
+    private async Task<ReadOutcome> ReadAsync(
         IExternalDataSource adapter,
         int dataSourceId,
         int sourceEntityId,
@@ -906,15 +908,38 @@ public sealed partial class CollectionRunner(
     /// журнал видно в інтерфейсі обслуговування.
     /// </para>
     /// </remarks>
-    private static ReadOutcome Refused(Exception ex) => ex switch
+    private ReadOutcome Refused(Exception ex) => ex switch
     {
         SourceAuthenticationException auth => new ReadOutcome(null, auth.ErrorCode, auth.Message, Unauthorized: true),
         EcrException coded when IsCatalogCode(coded.ErrorCode)
             => new ReadOutcome(null, coded.ErrorCode, coded.Message, Reason: CodedReason(coded.Details, coded.Message)),
         DomainException coded when IsCatalogCode(coded.ErrorCode)
             => new ReadOutcome(null, coded.ErrorCode, coded.Message, Reason: CodedReason(coded.Details, coded.Message)),
-        _ => new ReadOutcome(null, SourceUnavailable, ex.Message),
+        _ => new ReadOutcome(null, SourceUnavailable, UnexpectedSourceFailure(ex)),
     };
+
+    /// <summary>Текст відмови сирого винятку транспорту — без його <c>Message</c>.</summary>
+    /// <remarks>
+    /// ⛔ SEC (TIER2): <c>Message</c> винятку транспорту (<c>HttpRequestException</c>,
+    /// <c>SqlException</c>, <c>SocketException</c>) називає хост, порт, URL, сервер; він
+    /// лягав у <c>itg.CollectionRun.ErrorMessage</c>, прогрес і далі до клієнта та
+    /// сповіщень. Тепер: код відповіді HTTP (якщо є) або код каталогу плюс кореляція;
+    /// повний виняток — у журналі сервера за тією ж кореляцією.
+    /// </remarks>
+    private string UnexpectedSourceFailure(Exception ex)
+    {
+        var correlationId = SafeErrorText.NewCorrelationId();
+        LogSourceReadFailed(log, correlationId, ex);
+
+        return ex is HttpRequestException { StatusCode: { } status }
+            ? $"The source answered HTTP {(int)status} (correlation {correlationId})."
+            : SafeErrorText.For(ex, correlationId, "the source request");
+    }
+
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "CollectionRunner: джерело відмовило несподіваним винятком; кореляція {CorrelationId}.")]
+    private static partial void LogSourceReadFailed(ILogger logger, string correlationId, Exception exception);
 
     /// <summary>Код каталогу помилок: <c>ECR-&lt;ОБЛАСТЬ&gt;-&lt;NNNN&gt;</c>.</summary>
     private static bool IsCatalogCode(string? code)

@@ -1,4 +1,5 @@
 // src/Ecr.Application/Units/ConvertUnitHandler.cs
+using Ecr.Application.Common;
 using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 
@@ -108,13 +109,35 @@ public sealed class ConvertUnitHandler(IUnitCatalog catalog)
 /// перевірити нічого — ні того, що конверсія можлива, ні того, що величини
 /// сумісні.
 /// </remarks>
-public sealed class ListUnitsHandler(IUnitCatalog catalog)
+public sealed class ListUnitsHandler(
+    IUnitCatalog catalog, IUnitStore units, Security.IAccessDecisionService access, ICurrentUser currentUser)
 {
     /// <summary>Читає довідник одиниць.</summary>
     /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⚠ <c>UsedIn</c> заповнюється лише тому, хто має <c>Uom.EditCatalog</c> (те саме право, що й
+    /// <c>GET /units/{id}/usage</c>); решті — <c>null</c>. Перелік одиниць відкритий усім, а число
+    /// використання в шаблонах і довідниках — ні.
+    /// </remarks>
     public async Task<IReadOnlyList<UnitRef>> HandleAsync(CancellationToken ct)
     {
         var catalogue = await catalog.GetAsync(ct).ConfigureAwait(false);
-        return catalogue.Units.Values.OrderBy(u => u.Code, StringComparer.Ordinal).ToList();
+        var list = catalogue.Units.Values.OrderBy(u => u.Code, StringComparer.Ordinal).ToList();
+
+        var userId = currentUser.UserId;
+        if (userId is null)
+        {
+            return list;
+        }
+
+        var profile = await access.BuildProfileAsync(userId.Value, ct).ConfigureAwait(false);
+        if (!Security.PermissionCheck.IsGranted(profile, CreateUnitHandler.Permission))
+        {
+            return list;
+        }
+
+        var counts = await units.CountUnitStructuralUsageAsync(ct).ConfigureAwait(false);
+
+        return list.Select(u => u with { UsedIn = counts.GetValueOrDefault(u.Id) }).ToList();
     }
 }

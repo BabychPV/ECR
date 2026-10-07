@@ -668,12 +668,12 @@
         ]
       },
       "CampaignProgress": {
-        "description": "Де проєкт у кампанії відносно строку подання — відповідь на «хто затримує».\nПравило — CampaignProgressRule.",
         "enum": [
           "InProgress",
           "AtRisk",
           "Overdue",
-          "Done"
+          "Done",
+          null
         ]
       },
       "CampaignProjectSummary": {
@@ -682,7 +682,10 @@
           "approved": {
             "description": "Усі аркуші затверджено.",
             "format": "int32",
-            "type": "integer"
+            "type": [
+              "null",
+              "integer"
+            ]
           },
           "documents": {
             "description": "Скільки документів у проєкті. `0` означає «кампанія тут ще не\nпочиналася» — і це окрема відповідь, а не «все в чернетках».",
@@ -692,15 +695,33 @@
           "draft": {
             "description": "Документи, де є аркуш у чернетці (або ще без стану) і жодного відхиленого.",
             "format": "int32",
-            "type": "integer"
+            "type": [
+              "null",
+              "integer"
+            ]
           },
           "nameL10n": {
             "$ref": "#/components/schemas/LocalizedText",
             "description": "Назва мовами каталогу."
           },
+          "notSubmittedSheets": {
+            "description": "Аркушів, ще не поданих (чернетка/без стану/відхилено); `null` — як у SheetsTotal.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
           "progress": {
-            "$ref": "#/components/schemas/CampaignProgress",
-            "description": "Класифікація проєкту в кампанії (CampaignProgressRule)."
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/CampaignProgress",
+                "description": "Класифікація проєкту в кампанії (CampaignProgressRule)."
+              }
+            ]
           },
           "projectCode": {
             "description": "Код проєкту; ним перелік і впорядковано.",
@@ -714,7 +735,18 @@
           "rejected": {
             "description": "Хоч один аркуш відхилено.",
             "format": "int32",
-            "type": "integer"
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "sheetsTotal": {
+            "description": "Аркушів у складі документів проєкту (UI-33, D2); `null` — див. int? CampaignTotals.SheetsTotal.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
           },
           "snapshots": {
             "description": "Скільки ПОТОЧНИХ зрізів звітності побудовано за цей період\n(`rpt.ReportSnapshot.IsCurrent`). Останній етап кампанії: документи\nзатверджено, але доки зрізу немає — регулятор не отримав нічого.",
@@ -732,7 +764,10 @@
           "submitted": {
             "description": "Усі аркуші подано або затверджено, і хоч один ще не затверджено.",
             "format": "int32",
-            "type": "integer"
+            "type": [
+              "null",
+              "integer"
+            ]
           }
         },
         "required": [
@@ -789,12 +824,18 @@
           "approved": {
             "description": "Сума `Approved`.",
             "format": "int32",
-            "type": "integer"
+            "type": [
+              "null",
+              "integer"
+            ]
           },
           "atRisk": {
             "description": "Проєктів у стані CampaignProgress.AtRisk.",
             "format": "int32",
-            "type": "integer"
+            "type": [
+              "null",
+              "integer"
+            ]
           },
           "documents": {
             "description": "Документів у цих проєктах.",
@@ -804,22 +845,42 @@
           "done": {
             "description": "Проєктів у стані CampaignProgress.Done.",
             "format": "int32",
-            "type": "integer"
+            "type": [
+              "null",
+              "integer"
+            ]
           },
           "draft": {
             "description": "Сума `Draft` по всіх проєктах.",
             "format": "int32",
-            "type": "integer"
+            "type": [
+              "null",
+              "integer"
+            ]
           },
           "inProgress": {
             "description": "Проєктів у стані CampaignProgress.InProgress.",
             "format": "int32",
-            "type": "integer"
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "notSubmittedSheets": {
+            "description": "З них — ще не подано (чернетка, без стану чи відхилено); `null` за тих самих умов, що й\nSheetsTotal.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
           },
           "overdue": {
             "description": "Проєктів у стані CampaignProgress.Overdue.",
             "format": "int32",
-            "type": "integer"
+            "type": [
+              "null",
+              "integer"
+            ]
           },
           "projects": {
             "description": "Проєктів періоду; дорівнює `TotalProjects`.",
@@ -829,7 +890,18 @@
           "rejected": {
             "description": "Сума `Rejected`.",
             "format": "int32",
-            "type": "integer"
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "sheetsTotal": {
+            "description": "Аркушів у складі документів усіх проєктів періоду (UI-33, D2); `null` — читач має інструменти, що ховають\nаркуші (явна заборона чи грант рівня `None`), і число розкрило б приховане (R-8, `SheetVisibility`).",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
           },
           "snapshots": {
             "description": "Сума поточних зрізів.",
@@ -839,7 +911,10 @@
           "submitted": {
             "description": "Сума `Submitted`.",
             "format": "int32",
-            "type": "integer"
+            "type": [
+              "null",
+              "integer"
+            ]
           }
         },
         "required": [
@@ -902,6 +977,38 @@
           "newValue",
           "oldType",
           "newType"
+        ],
+        "type": "object"
+      },
+      "CellChangeSummaryView": {
+        "description": "Підсумок журналу змін комірок за вікном (UI-38, C2) — лише те, що читач бачить.",
+        "properties": {
+          "byImport": {
+            "description": "З них — імпортом (`Origin = Import`).",
+            "format": "int64",
+            "type": "integer"
+          },
+          "byRecalculation": {
+            "description": "З них — перерахунком (`Origin = Recalculation`).",
+            "format": "int64",
+            "type": "integer"
+          },
+          "today": {
+            "description": "З них — за поточну добу UTC (зміни вікна, що припали на сьогодні).",
+            "format": "int64",
+            "type": "integer"
+          },
+          "total": {
+            "description": "Усього змін у вікні й за фільтром.",
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total",
+          "today",
+          "byImport",
+          "byRecalculation"
         ],
         "type": "object"
       },
@@ -1013,6 +1120,53 @@
           "rowKey": {
             "description": "Ключ рядка — щоб журнал читався без join.",
             "type": "string"
+          },
+          "rowLabelL10n": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LocalizedText",
+                "description": "Підпис фіксованого рядка (`cfg.RowDef.LabelL10n`) за ключем рядка; `null` — рядок динамічний\nабо визначення вже немає. Лише структура, значень комірок тут немає."
+              }
+            ]
+          },
+          "sheetCode": {
+            "description": "Код аркуша колонки (UI-38, C1); `null` — колонки вже немає.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "sheetNameL10n": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LocalizedText",
+                "description": "Назва аркуша мовами каталогу."
+              }
+            ]
+          },
+          "tableCode": {
+            "description": "Код таблиці колонки.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "tableNameL10n": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LocalizedText",
+                "description": "Назва таблиці мовами каталогу."
+              }
+            ]
           }
         },
         "required": [
@@ -1913,6 +2067,44 @@
         ],
         "type": "object"
       },
+      "ConsistencyIssuePage": {
+        "description": "Сторінка знахідок із загальними лічильниками.",
+        "properties": {
+          "items": {
+            "description": "Елементи сторінки.",
+            "items": {
+              "$ref": "#/components/schemas/ConsistencyIssueView"
+            },
+            "type": "array"
+          },
+          "nextCursor": {
+            "description": "Курсор наступної сторінки; `null` — кінець.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "totalCount": {
+            "description": "Скільки знахідок збігається з УСІМА фільтрами (разом із вагою).",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "totals": {
+            "$ref": "#/components/schemas/ConsistencySeverityTotals",
+            "description": "Розбивка за вагою за фільтрами без ваги."
+          }
+        },
+        "required": [
+          "items",
+          "nextCursor",
+          "totalCount",
+          "totals"
+        ],
+        "type": "object"
+      },
       "ConsistencyIssueView": {
         "description": "Знахідка перевірки узгодженості, як її бачить читач.",
         "properties": {
@@ -1969,6 +2161,17 @@
             "description": "Вага: 1 інформація, 2 попередження, 3 помилка.",
             "format": "uint8",
             "type": "integer"
+          },
+          "where": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ConsistencyIssueWhere",
+                "description": "Місце знахідки в структурі (документ, аркуш, таблиця, рядок, колонка) — лише КОДИ.\n`null` — місце невідоме або читач його не бачить (див. `GetConsistencyIssuesHandler`)."
+              }
+            ]
           }
         },
         "required": [
@@ -1981,6 +2184,130 @@
           "message",
           "resolvedAt",
           "resolvedByUserId"
+        ],
+        "type": "object"
+      },
+      "ConsistencyIssueWhere": {
+        "description": "Місце знахідки консистентності: лише бізнес-коди, без значень комірок і без назв.",
+        "properties": {
+          "columnCode": {
+            "description": "Код колонки; `null` — колонку не визначено.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "documentBusinessKey": {
+            "description": "Бізнес-ключ документа; `null` разом із DocumentId.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "documentId": {
+            "description": "Документ; `null` — знахідка про структуру шаблону, а не документа.",
+            "format": "int64",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "rowKey": {
+            "description": "Ключ рядка; `null` — знахідка не на рівні рядка.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "sheetCode": {
+            "description": "Код аркуша.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "tableCode": {
+            "description": "Код таблиці.",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "documentId",
+          "documentBusinessKey",
+          "sheetCode",
+          "tableCode",
+          "rowKey",
+          "columnCode"
+        ],
+        "type": "object"
+      },
+      "ConsistencySeverityTotals": {
+        "description": "Лічильники знахідок за вагою в межах фільтра переліку (без фільтра ваги).",
+        "properties": {
+          "errors": {
+            "description": "Вага 3.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "info": {
+            "description": "Вага 1.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "warnings": {
+            "description": "Вага 2.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "info",
+          "warnings",
+          "errors"
+        ],
+        "type": "object"
+      },
+      "ConsistencySummary": {
+        "description": "Загальні лічильники журналу знахідок.",
+        "properties": {
+          "errors": {
+            "description": "Знахідок ваги 3 (помилка).",
+            "format": "int32",
+            "type": "integer"
+          },
+          "info": {
+            "description": "Знахідок ваги 1 (інформація).",
+            "format": "int32",
+            "type": "integer"
+          },
+          "lastDetectedAt": {
+            "description": "Момент найновішої знахідки в UTC; `null` — журнал порожній.",
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "total": {
+            "description": "Усього (інша вага, якщо така з'явиться, потрапляє лише сюди).",
+            "format": "int32",
+            "type": "integer"
+          },
+          "warnings": {
+            "description": "Знахідок ваги 2 (попередження).",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "info",
+          "warnings",
+          "errors",
+          "total",
+          "lastDetectedAt"
         ],
         "type": "object"
       },
@@ -3393,6 +3720,18 @@
             "format": "int32",
             "type": "integer"
           },
+          "sheetsApproved": {
+            "default": 0,
+            "description": "Скільки аркушів складу затверджено — у сумі по документах переліку й ЛИШЕ по аркушах, які\nчитач бачить (UI-18: «23 із 60 затверджено»). Схований аркуш не рахується ні тут, ні в\nSheetsTotal: інакше різниця двох чисел розкривала б, скільки їх.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "sheetsTotal": {
+            "default": 0,
+            "description": "Скільки аркушів складу бачить читач у цих документах (без схованих).",
+            "format": "int32",
+            "type": "integer"
+          },
           "submitted": {
             "description": "Усі аркуші подано або затверджено, і хоч один ще не затверджено.",
             "format": "int32",
@@ -3504,6 +3843,13 @@
                 "$ref": "#/components/schemas/LocalizedText",
                 "description": "Людське ім'я документа мовами каталогу; `null` — не задано\n(директива \"людське ім'я документа\"). Показується ПОРУЧ із\nBusinessKey, не замість нього."
               }
+            ]
+          },
+          "ownerDisplayName": {
+            "description": "Автор документа (`CreatedBy`): відображуване ім'я, не логін (`D-86`); `null` — автора\nвже немає. ⛔ Для читача, чий доступ звужено нижче проєкту, — `null` (`DocumentSheetVisibility.For`):\nім'я людини — окреме розкриття, його не віддаємо там, де документ показано частково.",
+            "type": [
+              "null",
+              "string"
             ]
           },
           "projectId": {
@@ -5294,6 +5640,47 @@
           "percent",
           "updatedAt",
           "startedAt"
+        ],
+        "type": "object"
+      },
+      "JobsSummary": {
+        "description": "Лічильники черги фонових задач.",
+        "properties": {
+          "avgStartLatencyMs": {
+            "description": "Середня затримка між постановкою і першим стартом (мс) для задач, що стартували\nз першої спроби за останню добу; `null` — таких немає. Повтори не враховуються:\nїхній інтервал містить паузу ретраю, а не очікування черги.",
+            "format": "int64",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "failed24h": {
+            "description": "Скільки задач завершилось провалом за останню добу.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "queued": {
+            "description": "Скільки задач стоїть у черзі (усі, без вікна).",
+            "format": "int32",
+            "type": "integer"
+          },
+          "running": {
+            "description": "Скільки задач зараз виконується (усі, без вікна).",
+            "format": "int32",
+            "type": "integer"
+          },
+          "succeeded24h": {
+            "description": "Скільки задач завершилось успішно за останню добу.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "running",
+          "queued",
+          "failed24h",
+          "succeeded24h",
+          "avgStartLatencyMs"
         ],
         "type": "object"
       },
@@ -7455,39 +7842,6 @@
         ],
         "type": "object"
       },
-      "PagedResultOfConsistencyIssueView": {
-        "description": "Сторінка результатів. Ендпоінтів, що повертають «усе», не існує —\nперевіряється архітектурним тестом.",
-        "properties": {
-          "items": {
-            "description": "Елементи сторінки.",
-            "items": {
-              "$ref": "#/components/schemas/ConsistencyIssueView"
-            },
-            "type": "array"
-          },
-          "nextCursor": {
-            "description": "Курсор наступної сторінки; `null` — кінець.",
-            "type": [
-              "null",
-              "string"
-            ]
-          },
-          "totalCount": {
-            "description": "Загальна кількість; `null`, якщо підрахунок дорогий.",
-            "format": "int32",
-            "type": [
-              "null",
-              "integer"
-            ]
-          }
-        },
-        "required": [
-          "items",
-          "nextCursor",
-          "totalCount"
-        ],
-        "type": "object"
-      },
       "PagedResultOfCoverageEventView": {
         "description": "Сторінка результатів. Ендпоінтів, що повертають «усе», не існує —\nперевіряється архітектурним тестом.",
         "properties": {
@@ -8323,6 +8677,14 @@
           "isCurrent": {
             "description": "Чи є періодом за замовчуванням для UI.",
             "type": "boolean"
+          },
+          "notSubmittedSheets": {
+            "description": "Скільки аркушів проєкту в цьому періоді ще не подано (чернетка, без стану чи відхилено) — UI-33, D1.\n`null` — не запитувано (`withSheetCounts=false`) АБО читач має інструменти, що ховають аркуші, і число\nрозкрило б приховане (R-8, `SheetVisibility`). Лічильника пізніх правок немає навмисно: індексу по\n`aud.CellChange.IsLateEdit` немає.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
           },
           "periodKey": {
             "description": "`Year*100 + Sequence`; він же ключ партиції.",
@@ -9189,12 +9551,43 @@
             "description": "Код довідника.",
             "type": "string"
           },
+          "dataChangedAt": {
+            "description": "Коли востаннє змінювалися записи, UTC; `null` — не змінювалися.",
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "definitionVersion": {
+            "description": "Версія опису довідника.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "entryCount": {
+            "description": "Чинних записів сьогодні (UTC): активні, не видалені, у вікні дії. Лише в переліку; в інших\nвідповідях `null`.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
           "fields": {
             "description": "Поля довідника.",
             "items": {
               "$ref": "#/components/schemas/RegistryFieldDto"
             },
             "type": "array"
+          },
+          "hasDraft": {
+            "description": "Чи є незавершена чернетка опису; `null` без права `Registry.EditDefinition`.",
+            "type": [
+              "null",
+              "boolean"
+            ]
           },
           "id": {
             "description": "Ідентифікатор визначення.",
@@ -9216,6 +9609,22 @@
           "sourceKind": {
             "$ref": "#/components/schemas/RegistrySourceKind",
             "description": "Хто master (`ФВ-8.9`). Потрібен тому, хто складає набір для\nперемикання: без нього довідник, який уже в цільовому режимі, і той, який\nще ні, у переліку виглядають однаково."
+          },
+          "usedInColumns": {
+            "description": "Скільки колонок шаблонів беруть значення з довідника. `null` без права\n`Registry.EditDefinition` (те саме, що в `GET {code}/usage`): «не знаю» ≠ «ніде».",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "usedInTemplates": {
+            "description": "У скількох шаблонах; `null` за тих самих умов.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
           }
         },
         "required": [
@@ -15170,12 +15579,119 @@
         ],
         "type": "object"
       },
+      "SystemFactsAboutDto": {
+        "description": "Блок «Про систему».",
+        "properties": {
+          "build": {
+            "description": "Версія збірки без метаданих (як `productVersion`).",
+            "type": "string"
+          },
+          "languages": {
+            "description": "Коди увімкнених мов у порядку показу.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "lastErrorAt": {
+            "description": "Момент останнього провалу задачі чи збору, UTC; `null` — не було.",
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "signInMode": {
+            "description": "Режим входу: `Windows`, `Local`, `WindowsAndLocal`, `None`.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "build",
+          "signInMode",
+          "languages",
+          "lastErrorAt"
+        ],
+        "type": "object"
+      },
+      "SystemFactsDbDto": {
+        "description": "Стан БД: лише число й мітки часу, без шляхів чи імен.",
+        "properties": {
+          "freeSpaceDataDiskGb": {
+            "description": "Вільне місце диска даних, ГБ; `null` — СУБД не віддала.",
+            "format": "int64",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "lastBackupAt": {
+            "description": "Остання копія БД, UTC; `null` — немає копій або права.",
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "maintenanceWindow": {
+            "description": "Вікно обслуговування; `null` — у моделі налаштувань його немає (не вигадується).",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "freeSpaceDataDiskGb",
+          "lastBackupAt",
+          "maintenanceWindow"
+        ],
+        "type": "object"
+      },
+      "SystemFactsJobsDto": {
+        "description": "Лічильники черги фонових задач.",
+        "properties": {
+          "failed24h": {
+            "description": "Завершились провалом за останню добу.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "queued": {
+            "description": "Стоять у черзі.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "running": {
+            "description": "Виконуються зараз.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "running",
+          "queued",
+          "failed24h"
+        ],
+        "type": "object"
+      },
       "SystemFactsResponse": {
         "description": "Факти про піднятий процес.",
         "properties": {
+          "about": {
+            "$ref": "#/components/schemas/SystemFactsAboutDto",
+            "description": "Блок «Про систему»."
+          },
+          "db": {
+            "$ref": "#/components/schemas/SystemFactsDbDto",
+            "description": "Стан БД (число й мітки часу, без шляхів)."
+          },
           "environment": {
             "description": "Ім'я середовища хосту (`Production`, `Development`).",
             "type": "string"
+          },
+          "jobs": {
+            "$ref": "#/components/schemas/SystemFactsJobsDto",
+            "description": "Лічильники черги фонових задач."
           },
           "logDirectory": {
             "description": "Тека файлового журналу; `null`, коли файл не пишеться.",
@@ -15192,6 +15708,10 @@
             "description": "Версія продукту без метаданих збірки.",
             "type": "string"
           },
+          "sources": {
+            "$ref": "#/components/schemas/SystemFactsSourcesDto",
+            "description": "Лічильники джерел збору (лише числа)."
+          },
           "startedAt": {
             "description": "Коли стартував процес, UTC.",
             "format": "date-time",
@@ -15203,7 +15723,37 @@
           "startedAt",
           "environment",
           "notificationTransport",
-          "logDirectory"
+          "logDirectory",
+          "jobs",
+          "sources",
+          "db",
+          "about"
+        ],
+        "type": "object"
+      },
+      "SystemFactsSourcesDto": {
+        "description": "Лічильники джерел збору: лише числа, без назв і адрес.",
+        "properties": {
+          "active": {
+            "description": "Налаштованих активних джерел.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "failed": {
+            "description": "Активних джерел, чий останній запуск збору провалився.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "gaps": {
+            "description": "Подій покриття за тиждень, де дані за інтервал не перенесено.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "active",
+          "failed",
+          "gaps"
         ],
         "type": "object"
       },
@@ -15480,6 +16030,17 @@
           },
           "inputCells": {
             "description": "Скільки комірок має заповнити людина.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "isClosed": {
+            "default": false,
+            "description": "Таблиця закрита на введення правилом доступу до періоду (замок у дереві);\nте саме рішення `PeriodAccessRules`, з якого рахується `InputCells`.\nВідрізняє «закрита» від «усі колонки формульні» (там теж `InputCells = 0`).",
+            "type": "boolean"
+          },
+          "rowCount": {
+            "default": 0,
+            "description": "Рядків у таблиці: більше з рядків бази й рядків шаблону (як і знаменник\n`InputCells`). Лише число для ВИДИМОЇ таблиці — приховані до переліку\nне потрапляють, тож їхні розміри нікуди не витікають.",
             "format": "int32",
             "type": "integer"
           },
@@ -15882,10 +16443,55 @@
             "description": "Код.",
             "type": "string"
           },
+          "documentCount": {
+            "default": 0,
+            "description": "Документів у проєктах шаблону, які бачить саме цей читач; проєкти без гранта не рахуються.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "draftAuthorDisplayName": {
+            "description": "Відображуване ім'я (не логін) автора найновішої чернетки; `null` — чернетки немає.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "draftCreatedAt": {
+            "description": "Коли чернетку створено, UTC; `null` — чернетки немає.",
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
           "id": {
             "description": "Ідентифікатор.",
             "format": "int32",
             "type": "integer"
+          },
+          "isArchived": {
+            "default": false,
+            "description": "`true` — шаблон архівований (`!IsActive`).",
+            "type": "boolean"
+          },
+          "nameL10n": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LocalizedText",
+                "description": "Назва мовами каталогу."
+              }
+            ]
+          },
+          "updatedAt": {
+            "description": "Остання відома зміна, UTC: найпізніша з створення шаблону, створення/публікації/виведення з\nобігу будь-якої його версії. Окремого журналу правок чернетки в моделі немає.",
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
           },
           "versionCount": {
             "description": "Скільки версій має шаблон.",
@@ -16422,11 +17028,44 @@
             "format": "int32",
             "type": "integer"
           },
+          "isBase": {
+            "default": false,
+            "description": "Базова одиниця розмірності (колонка «Base unit»).",
+            "type": "boolean"
+          },
+          "nameL10n": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Назва мовами каталогу; `null` — не задано.",
+            "type": [
+              "null",
+              "object"
+            ]
+          },
           "offsetToBase": {
             "default": "0",
             "description": "Зсув до базової; ненульовий лише в температури.",
             "format": "decimal",
             "type": "string"
+          },
+          "symbolL10n": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Позначення мовами каталогу (UI-21: колонка «Unit» переліку без N+1 по `GET /units/{id}`);\n`null` — тест-дублер не задав.",
+            "type": [
+              "null",
+              "object"
+            ]
+          },
+          "usedIn": {
+            "description": "Скільки колонок шаблонів і полів довідників тримає одиницю (колонка «Used in»). Лише в\n`GET /units` і лише для того, хто має `Uom.EditCatalog`; інакше `null` (не нуль:\n«не знаю» не те саме, що «ніде»). Знімок каталогу його не несе.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
           }
         },
         "required": [
@@ -17517,6 +18156,14 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Пошук (UI-38): підрядок бізнес-ключа документа, ключа рядка чи коду колонки; до 100 знаків (довше\nобрізається), спецсимволи `LIKE` — буквальні. Лише по видимих читачу рядках.",
+            "in": "query",
+            "name": "q",
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -17602,6 +18249,142 @@
           }
         },
         "summary": "Історія змін комірок. Право `Security.ViewAudit` — або\n`Document.View`, коли задано повну адресу однієї комірки.",
+        "tags": [
+          "Audit"
+        ]
+      }
+    },
+    "/api/v1/audit/cells/summary": {
+      "get": {
+        "description": "⛔ Лічильники — лише за тим, що читач бачить (R-11): приховані колонки, таблиці й аркуші не рахуються.\n⚠ Лічильника пізніх правок немає навмисно: індексу по `IsLateEdit` немає, див. `ui-cell-changes-ext`.\nВікно обмежене (92 дні; 396 для адреси однієї комірки) — підрахунок читає лише партиції вікна.",
+        "parameters": [
+          {
+            "description": "Початок вікна в UTC, включно.",
+            "in": "query",
+            "name": "from",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Кінець вікна в UTC, виключно.",
+            "in": "query",
+            "name": "to",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Документ; без нього — наскрізний журнал (`Security.ViewAudit`).",
+            "in": "query",
+            "name": "documentId",
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Походження: `UserEdit`, `Import`, `Recalculation`, `Migration`.",
+            "in": "query",
+            "name": "origin",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Лише пізні правки.",
+            "in": "query",
+            "name": "lateOnly",
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CellChangeSummaryView"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CellChangeSummaryView"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/CellChangeSummaryView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Підсумок журналу змін комірок за вікном (UI-38): усього, за сьогодні, імпортом, перерахунком.\nТі самі права й вікно, що в `cells`.",
         "tags": [
           "Audit"
         ]
@@ -18968,6 +19751,21 @@
           },
           {
             "in": "query",
+            "name": "severity",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
             "name": "limit",
             "schema": {
               "format": "int32",
@@ -18987,17 +19785,17 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PagedResultOfConsistencyIssueView"
+                  "$ref": "#/components/schemas/ConsistencyIssuePage"
                 }
               },
               "text/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PagedResultOfConsistencyIssueView"
+                  "$ref": "#/components/schemas/ConsistencyIssuePage"
                 }
               },
               "text/plain": {
                 "schema": {
-                  "$ref": "#/components/schemas/PagedResultOfConsistencyIssueView"
+                  "$ref": "#/components/schemas/ConsistencyIssuePage"
                 }
               }
             },
@@ -19156,6 +19954,66 @@
           }
         },
         "summary": "Прогін перевірки узгодженості на вимогу. Право `System.RunJob`.",
+        "tags": [
+          "Consistency"
+        ]
+      }
+    },
+    "/api/v1/consistency/summary": {
+      "get": {
+        "description": "⚠ Лічильники рахуються по ВСЬОМУ журналу, а не по сторінці: сторінка\nкурсорна, і сума по ній збрехала б про стан системи. Без права —\n`403`, а не нулі. Знахідки не розрізняються за проєктами (журнал\nсистемний, право адміністративне), тож прихованих документів тут немає.",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "openOnly",
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsistencySummary"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsistencySummary"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsistencySummary"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "summary": "Загальні лічильники знахідок за вагою для смуги показників.\nПраво `System.ViewHealth`.",
         "tags": [
           "Consistency"
         ]
@@ -20283,6 +21141,13 @@
             "name": "hasLateEdits",
             "schema": {
               "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "schema": {
+              "type": "string"
             }
           }
         ],
@@ -23460,6 +24325,67 @@
         "summary": "Останні фонові задачі. Право `System.ViewHealth` — або\n`mine=true` для ВЛАСНИХ задач (BE-08).",
         "tags": [
           "Jobs"
+        ]
+      }
+    },
+    "/api/v1/jobs/summary": {
+      "get": {
+        "description": "⛔ Та сама межа, що в переліку: без `mine` і без права — `403`,\nне нулі; параметра з ідентифікатором автора немає. Віддаються лише\nчисла — без тексту провалів і без посилань на документи.",
+        "parameters": [
+          {
+            "description": "Лише власні задачі; не вимагає `System.ViewHealth`.",
+            "in": "query",
+            "name": "mine",
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobsSummary"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobsSummary"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobsSummary"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "summary": "Лічильники черги для смуги показників: виконуються, у черзі, провали й\nуспіхи за добу, середня затримка старту. Право `System.ViewHealth`\n— або `mine=true` для ВЛАСНИХ задач.",
+        "tags": [
+          "JobsSummary"
         ]
       }
     },
@@ -28772,6 +29698,7 @@
       "get": {
         "parameters": [
           {
+            "description": "Проєкт.",
             "in": "path",
             "name": "id",
             "required": true,
@@ -28779,6 +29706,14 @@
               "format": "int32",
               "pattern": "^-?(?:0|[1-9]\\d*)$",
               "type": "integer"
+            }
+          },
+          {
+            "description": "Додати до кожного періоду кількість не поданих аркушів (`notSubmittedSheets`, UI-33); без прапорця поле\n`null`. Читачу, що має інструменти приховування аркушів, віддається `null` і з прапорцем.",
+            "in": "query",
+            "name": "withSheetCounts",
+            "schema": {
+              "type": "boolean"
             }
           }
         ],
@@ -38816,6 +39751,13 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -39360,7 +40302,7 @@
     },
     "/api/v1/templates/{id}/versions": {
       "get": {
-        "description": "⛔ Q-225: раніше — `new CursorRequest()`, завжди дефолтний ліміт 50,\nбез жодного способу передати `cursor` чи `limit` від клієнта. Версія\nшаблону за 50-ту була назавжди недосяжна через цей ендпоінт. Той\nсамий патерн, що вже в Task&lt;IActionResult&gt; TemplatesController.List(int limit, string? cursor, CancellationToken ct) поруч.",
+        "description": "⛔ Q-225: раніше — `new CursorRequest()`, завжди дефолтний ліміт 50,\nбез жодного способу передати `cursor` чи `limit` від клієнта. Версія\nшаблону за 50-ту була назавжди недосяжна через цей ендпоінт. Той\nсамий патерн, що вже в Task&lt;IActionResult&gt; TemplatesController.List(int limit, string? cursor, string? q, CancellationToken ct) поруч.",
         "parameters": [
           {
             "in": "path",
@@ -41304,6 +42246,9 @@
     },
     {
       "name": "Jobs"
+    },
+    {
+      "name": "JobsSummary"
     },
     {
       "name": "Languages"

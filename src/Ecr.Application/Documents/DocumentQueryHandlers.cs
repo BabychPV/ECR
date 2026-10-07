@@ -26,14 +26,36 @@ public sealed class ListDocumentsHandler(
     /// </param>
     /// <param name="page">Курсорна пагінація.</param>
     /// <param name="ct">Токен скасування.</param>
-    public async Task<PagedResult<DocumentSummary>> HandleAsync(
+    public Task<PagedResult<DocumentSummary>> HandleAsync(
         int? projectId, int? periodKey, string? state, bool mine, bool? hasLateEdits,
         CursorRequest page, CancellationToken ct)
+        => HandleAsync(projectId, periodKey, state, mine, hasLateEdits, query: null, page, ct);
+
+    /// <summary>Максимальна довжина пошукового запиту; довший обрізається мовчки.</summary>
+    public const int MaxQueryLength = 100;
+
+    /// <summary>Те саме, з пошуком <paramref name="query"/> (UI-18) за кодом і назвою документа.</summary>
+    /// <param name="projectId">Фільтр за проєктом; <c>null</c> — усі.</param>
+    /// <param name="periodKey">Період для зведеного стану; <c>null</c> — без стану.</param>
+    /// <param name="state">Зведений стан; порожньо — будь-який.</param>
+    /// <param name="mine">Лише документи, де користувач — автор або подавав аркуш.</param>
+    /// <param name="hasLateEdits">Фільтр пізніх правок; <c>null</c> — без фільтра.</param>
+    /// <param name="query">
+    /// Підрядок коду/назви; порожній чи пробіли — без пошуку; довший за
+    /// <see cref="MaxQueryLength"/> обрізається. Застосовується ЗАПИТОМ до стелі
+    /// сторінки, поруч із межею проєктів, а не постфільтром.
+    /// </param>
+    /// <param name="page">Курсорна пагінація.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public async Task<PagedResult<DocumentSummary>> HandleAsync(
+        int? projectId, int? periodKey, string? state, bool mine, bool? hasLateEdits,
+        string? query, CursorRequest page, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(page);
 
         var profile = await ProfileAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
-        var filter = new DocumentListFilter(ParseState(state, periodKey), mine ? profile.UserId : null, hasLateEdits);
+        var filter = new DocumentListFilter(
+            ParseState(state, periodKey), mine ? profile.UserId : null, hasLateEdits, Query: NormalizeQuery(query));
 
         // ⛔ Родина REQ, а не CELL (`P-25`, рядок 1): хибний `limit` — це
         // помилка параметра запиту, і показувати її в обробнику помилок
@@ -61,14 +83,9 @@ public sealed class ListDocumentsHandler(
 
         // ⛔ Фільтр за станом рахується лише по аркушах, які читач бачить: інакше `state=Rejected`
         // знаходить документ, відхилений схованим аркушем, — оракул (смуга зведення цього не показує).
-        if (filter.State is not null && periodKey is { } stateKey)
-        {
-            filter = filter with
-            {
-                HiddenSheetDefIds = await DocumentSheetVisibility
-                    .HiddenSheetIdsAsync(samples, access, profile, visibleProjects, stateKey, ct).ConfigureAwait(false),
-            };
-        }
+        // ⛔ Так само позначка і фільтр `hasLateEdits` не враховують пізні правки схованих колонок (R-7).
+        filter = await DocumentSheetVisibility
+            .HiddenFilterAsync(samples, access, profile, visibleProjects, periodKey, filter, ct).ConfigureAwait(false);
 
         var all = await documents
             .ListAsync(projectId, new PeriodKeyFilter(periodKey), filter, page, visibleProjects, ct)
@@ -95,6 +112,19 @@ public sealed class ListDocumentsHandler(
         var total = page.Cursor is null && all.NextCursor is null ? visible.Count : (int?)null;
 
         return new PagedResult<DocumentSummary>(visible, all.NextCursor, total);
+    }
+
+    /// <summary>Обрізає пробіли й довжину; порожній пошук — <c>null</c> (без фільтра).</summary>
+    internal static string? NormalizeQuery(string? query)
+    {
+        var trimmed = query?.Trim();
+
+        if (string.IsNullOrEmpty(trimmed))
+        {
+            return null;
+        }
+
+        return trimmed.Length > MaxQueryLength ? trimmed[..MaxQueryLength] : trimmed;
     }
 
     /// <summary>Фільтр стану: порожньо — без фільтра; невідоме ім'я або стан без періоду — 422.</summary>
@@ -240,7 +270,25 @@ public sealed class GetDocumentHandler(
         }
 
         // ⛔ Приховані від читача аркуші не потрапляють у склад, стан і лічильники картки.
-        return (await DocumentSheetVisibility
+        var narrowed = (await DocumentSheetVisibility
             .ApplyAsync(access, profile, [document], periodKey, ct).ConfigureAwait(false))[0];
+
+        // ⛔ R-7: позначка пізніх правок — лише по тому, що читач бачить.
+        if (narrowed.HasLateEdits && DocumentSheetVisibility.HasRestrictions(profile))
+        {
+            var scope = (await DocumentSheetVisibility
+                .ScopesAsync(access, profile, [(document.ProjectId, document.Id)], periodKey, ct)
+                .ConfigureAwait(false))[document.ProjectId];
+
+            narrowed = narrowed with
+            {
+                HasLateEdits = await documents
+                    .HasVisibleLateEditsAsync(
+                        document.Id, new PeriodKeyFilter(periodKey), DocumentSheetVisibility.HiddenOf(scope), ct)
+                    .ConfigureAwait(false),
+            };
+        }
+
+        return narrowed;
     }
 }

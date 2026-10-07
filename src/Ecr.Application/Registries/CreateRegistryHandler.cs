@@ -104,6 +104,7 @@ public sealed class CreateRegistryHandler(
             IsHierarchical: false,
             definition.IsTemporal,
             definition.SourceKind,
-            Fields: []);
+            Fields: [],
+            DefinitionVersion: definition.DefinitionVersion);
     }
 }

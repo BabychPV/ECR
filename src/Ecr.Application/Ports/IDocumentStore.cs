@@ -50,6 +50,11 @@ namespace Ecr.Application.Ports;
 /// обробника, що відсікає від читача аркуші поза його межами (<c>DocumentSheetVisibility</c>);
 /// у відповідь НЕ потрапляє (<c>JsonIgnore</c>) — це не контракт.
 /// </param>
+/// <param name="OwnerDisplayName">
+/// Автор документа (<c>CreatedBy</c>): відображуване ім'я, не логін (<c>D-86</c>); <c>null</c> — автора
+/// вже немає. ⛔ Для читача, чий доступ звужено нижче проєкту, — <c>null</c> (<c>DocumentSheetVisibility.For</c>):
+/// ім'я людини — окреме розкриття, його не віддаємо там, де документ показано частково.
+/// </param>
 public sealed record DocumentSummary(
     long Id,
     int ProjectId,
@@ -64,7 +69,8 @@ public sealed record DocumentSummary(
     int? WarningCount = null,
     bool HasLateEdits = false,
     IReadOnlyList<DocumentSheetState>? Sheets = null,
-    [property: System.Text.Json.Serialization.JsonIgnore] IReadOnlyList<string>? IncludedSheetCodes = null);
+    [property: System.Text.Json.Serialization.JsonIgnore] IReadOnlyList<string>? IncludedSheetCodes = null,
+    string? OwnerDisplayName = null);
 
 /// <summary>Аркуш складу документа в переліку: код, назва, стан за період.</summary>
 /// <param name="Code">Код аркуша (<c>SheetDef.Code</c>); він же ключ у <c>DocumentSummary.SheetStates</c>.</param>
@@ -89,9 +95,24 @@ public sealed record DocumentSheetState(string Code, LocalizedText NameL10n, str
 /// лише по решті (інакше фільтр за станом знаходить документ за станом схованого аркуша —
 /// оракул). <c>null</c> — читач без обмежень.
 /// </param>
+/// <param name="HiddenTableDefIds">
+/// Таблиці, яких читач не бачить: пізня правка їхніх колонок не дає позначку
+/// <see cref="DocumentSummary.HasLateEdits"/> і не потрапляє у фільтр <paramref name="HasLateEdits"/>
+/// (інакше позначка розкриває активність схованого аркуша, R-7). <c>null</c> — немає.
+/// </param>
+/// <param name="HiddenColumnDefIds">Колонки, яких читач не бачить: те саме, що й для таблиць.</param>
+/// <param name="Query">
+/// Пошук (UI-18): підрядок у коді (<c>BusinessKey</c>) або назві документа, без
+/// урахування регістру; <c>null</c> — без пошуку. Шукає ЛИШЕ по полях самого
+/// документа — не по аркушах і таблицях, тож не розкриває прихованого. Метасимволи
+/// <c>LIKE</c> екранує сховище; довжину й порожнечу нормалізує обробник.
+/// </param>
 public readonly record struct DocumentListFilter(
     DocumentStatus? State, int? MineUserId, bool? HasLateEdits = null,
-    IReadOnlyCollection<int>? HiddenSheetDefIds = null);
+    IReadOnlyCollection<int>? HiddenSheetDefIds = null,
+    IReadOnlyCollection<int>? HiddenTableDefIds = null,
+    IReadOnlyCollection<int>? HiddenColumnDefIds = null,
+    string? Query = null);
 
 /// <summary>Порушення правила складу документа.</summary>
 /// <param name="SheetGroup">Група аркушів.</param>
@@ -126,6 +147,17 @@ public interface IDocumentStore
 
     /// <summary>Документ за ідентифікатором; <c>null</c> — не існує.</summary>
     public Task<DocumentSummary?> FindAsync(long documentId, PeriodKeyFilter period, CancellationToken ct);
+
+    /// <summary>
+    /// Чи є в документі пізня правка (<c>D-70</c>) поза тим, чого читач не бачить: колонки схованих
+    /// аркушів, таблиць і колонок не враховуються (R-7).
+    /// </summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="period">Період позначки.</param>
+    /// <param name="hidden">Що схована від читача — аркуші, таблиці, колонки.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<bool> HasVisibleLateEditsAsync(
+        long documentId, PeriodKeyFilter period, DocumentListFilter hidden, CancellationToken ct);
 
     /// <summary>Сторінка документів проєкту.</summary>
     /// <param name="projectId">Фільтр за проєктом; <c>null</c> — усі.</param>

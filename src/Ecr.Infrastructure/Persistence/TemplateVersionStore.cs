@@ -590,29 +590,151 @@ public sealed partial class TemplateVersionStore(EcrDbContext db) : ITemplateVer
 
     /// <inheritdoc />
     public async Task<PagedResult<TemplateSummary>> ListTemplatesAsync(
-        CursorRequest page, CancellationToken ct)
+        CursorRequest page, string? query, IReadOnlyCollection<int> visibleProjectIds, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(page);
+        ArgumentNullException.ThrowIfNull(visibleProjectIds);
 
         var after = Cursor.Decode(page.Cursor);
 
+        var templates = db.Templates.AsNoTracking().Where(t => t.Id > after);
+
+        var trimmed = query?.Trim();
+        if (!string.IsNullOrEmpty(trimmed))
+        {
+            if (trimmed.Length > 100)
+            {
+                trimmed = trimmed[..100];
+            }
+
+            var codeLike = "%" + EscapeLike(trimmed) + "%";
+
+            // ⚠ Два шаблони назви: як лежить у рядку (сід вставляє неекранованим) і як пише
+            // `LocalizedText.ToJson` (не-ASCII як `\uXXXX`). `:"%` — після першого значення, а не
+            // в ключі мови. Той самий прийом, що `ColumnDefSearchStore`.
+            var rawLike = "%:\"%" + EscapeLike(trimmed) + "%";
+            var jsonLike = "%:\"%" + EscapeLike(JsonText(trimmed)) + "%";
+
+            var nameIds = db.Database.SqlQuery<int>($"""
+                SELECT t.Id AS Value
+                  FROM cfg.Template AS t
+                 WHERE t.NameL10n LIKE {rawLike} ESCAPE '!' OR t.NameL10n LIKE {jsonLike} ESCAPE '!'
+                """);
+
+            templates = templates.Where(t =>
+                EF.Functions.Like(t.Code, codeLike, "!") || nameIds.Contains(t.Id));
+        }
+
         // Беремо на один більше за сторінку: так видно, чи є наступна, без
         // окремого COUNT по всій таблиці.
-        var rows = await db.Templates
-            .AsNoTracking()
-            .Where(t => t.Id > after)
+        var rows = await templates
             .OrderBy(t => t.Id)
             .Take(page.Limit + 1)
-            .Select(t => new TemplateSummary(
-                t.Id, t.Code, db.TemplateVersions.Count(v => v.TemplateId == t.Id)))
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
         var hasMore = rows.Count > page.Limit;
-        var items = rows.Take(page.Limit).ToList();
+        var pageRows = rows.Take(page.Limit).ToList();
+        var templateIds = pageRows.Select(t => t.Id).ToList();
+
+        // Агрегати лише по шаблонах сторінки: три запити на сторінку, а не по запиту на рядок.
+        var versions = await db.TemplateVersions
+            .AsNoTracking()
+            .Where(v => templateIds.Contains(v.TemplateId))
+            .Select(v => new
+            {
+                v.Id, v.TemplateId, v.Status, v.CreatedAt, v.CreatedByUserId, v.PublishedAt, v.DeprecatedAt,
+            })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var versionIds = versions.Select(v => v.Id).ToList();
+
+        // ⛔ Лише проєкти, де читач бачить документи; без цього число розкрило б чужі проєкти.
+        var documentsByVersion = new Dictionary<int, int>();
+        if (visibleProjectIds.Count > 0 && versionIds.Count > 0)
+        {
+            var visible = visibleProjectIds as int[] ?? [.. visibleProjectIds];
+            documentsByVersion = await db.Documents
+                .AsNoTracking()
+                .Join(
+                    db.Projects.AsNoTracking(),
+                    d => d.ProjectId,
+                    p => p.Id,
+                    (d, p) => new { p.Id, p.TemplateVersionId })
+                .Where(x => visible.Contains(x.Id) && versionIds.Contains(x.TemplateVersionId))
+                .GroupBy(x => x.TemplateVersionId)
+                .Select(g => new { VersionId = g.Key, Count = g.Count() })
+                .ToDictionaryAsync(x => x.VersionId, x => x.Count, ct)
+                .ConfigureAwait(false);
+        }
+
+        // Найновіша чернетка кожного шаблону й ім'я її автора (D-86: відображуване ім'я, не логін).
+        var drafts = versions
+            .Where(v => v.Status == TemplateVersionStatus.Draft)
+            .GroupBy(v => v.TemplateId)
+            .ToDictionary(g => g.Key, g => g.OrderByDescending(v => v.Id).First());
+
+        var authorIds = drafts.Values.Select(d => d.CreatedByUserId).Distinct().ToList();
+        var authors = authorIds.Count == 0
+            ? []
+            : await db.Users
+                .AsNoTracking()
+                .Where(u => authorIds.Contains(u.Id))
+                .ToDictionaryAsync(u => u.Id, u => u.DisplayName, ct)
+                .ConfigureAwait(false);
+
+        var items = pageRows.Select(t =>
+        {
+            var own = versions.Where(v => v.TemplateId == t.Id).ToList();
+            var updated = own
+                .SelectMany(v => new[] { v.CreatedAt, v.PublishedAt ?? default, v.DeprecatedAt ?? default })
+                .Append(t.CreatedAt)
+                .Max();
+
+            drafts.TryGetValue(t.Id, out var draft);
+
+            return new TemplateSummary(
+                t.Id,
+                t.Code,
+                own.Count,
+                t.NameL10n,
+                !t.IsActive,
+                own.Sum(v => documentsByVersion.GetValueOrDefault(v.Id)),
+                updated,
+                draft is null ? null : authors.GetValueOrDefault(draft.CreatedByUserId),
+                draft?.CreatedAt);
+        }).ToList();
 
         return new PagedResult<TemplateSummary>(
             items, hasMore ? Cursor.Encode(items[^1].Id) : null, TotalCount: null);
+    }
+
+    private const char LikeEscape = '!';
+
+    /// <summary>Екранує метасимволи <c>LIKE</c> (<c>%</c>, <c>_</c>, <c>[</c>, сам <c>!</c>).</summary>
+    private static string EscapeLike(string value)
+    {
+        var builder = new System.Text.StringBuilder(value.Length);
+
+        foreach (var ch in value)
+        {
+            if (ch is '%' or '_' or '[' or LikeEscape)
+            {
+                builder.Append(LikeEscape);
+            }
+
+            builder.Append(ch);
+        }
+
+        return builder.ToString();
+    }
+
+    /// <summary>Рядок так, як його пише <c>LocalizedText.ToJson</c>, без лапок.</summary>
+    private static string JsonText(string value)
+    {
+        var json = System.Text.Json.JsonSerializer.Serialize(value);
+        return json[1..^1];
     }
 
     /// <inheritdoc />

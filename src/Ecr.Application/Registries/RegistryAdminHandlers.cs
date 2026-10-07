@@ -18,13 +18,19 @@ namespace Ecr.Application.Registries;
 /// на вивантаження всієї бази довідників.
 /// </remarks>
 public sealed class ListRegistriesHandler(
-    IRegistryStore registries, Security.IAccessDecisionService access, ICurrentUser currentUser)
+    IRegistryStore registries, Security.IAccessDecisionService access, ICurrentUser currentUser, IClock clock)
 {
     /// <summary>Право на читання довідників (`02-contracts.md` §9).</summary>
     public const string Permission = "Registry.View";
 
     /// <summary>Читає перелік.</summary>
     /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// UI-35: лічильники (<c>EntryCount</c>, використання в шаблонах, чернетка) — три агрегатні
+    /// запити на весь перелік, а не по запиту на довідник. Використання й чернетка віддаються лише
+    /// з правом <c>Registry.EditDefinition</c>: перелік відкритий за <c>Registry.View</c>, а те, у
+    /// яких шаблонах довідник і чи правиться його опис, — підготовка до зміни опису.
+    /// </remarks>
     public async Task<IReadOnlyList<RegistryDefDto>> HandleAsync(CancellationToken ct)
     {
         await Templates.ListTemplatesHandler
@@ -35,6 +41,17 @@ public sealed class ListRegistriesHandler(
 
         // ⛔ S18: довідник із явною забороною в переліку немає — глобальне право його не повертає.
         var profile = await access.BuildProfileAsync(currentUser.UserId!.Value, ct).ConfigureAwait(false);
+
+        var entryCounts = await registries
+            .CountCurrentEntriesAsync(DateOnly.FromDateTime(clock.UtcNow), ct).ConfigureAwait(false);
+
+        var canSeeUsage = Security.PermissionCheck.IsGranted(profile, GetRegistryUsageHandler.Permission);
+        var usage = canSeeUsage
+            ? await registries.CountTemplateUsageAsync(ct).ConfigureAwait(false)
+            : null;
+        var drafts = canSeeUsage
+            ? await registries.ListDefinitionIdsWithDraftAsync(ct).ConfigureAwait(false)
+            : null;
 
         return definitions
             .Where(d => !RegistryAccess.IsDenied(profile, d.Id))
@@ -63,7 +80,13 @@ public sealed class ListRegistriesHandler(
                         IsScopeField: f.IsKey,
                         f.RefRegistryDefId,
                         f.UnitId))
-                    .ToList()))
+                    .ToList(),
+                EntryCount: entryCounts.GetValueOrDefault(d.Id),
+                DefinitionVersion: d.DefinitionVersion,
+                DataChangedAt: d.DataChangedAt,
+                UsedInColumns: usage is null ? null : usage.GetValueOrDefault(d.Id)?.Columns ?? 0,
+                UsedInTemplates: usage is null ? null : usage.GetValueOrDefault(d.Id)?.Templates ?? 0,
+                HasDraft: drafts?.Contains(d.Id)))
             .ToList();
     }
 }

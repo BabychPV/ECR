@@ -56,6 +56,9 @@ export interface paths {
                     limit?: number;
                     /** @description Курсор наступної сторінки. */
                     cursor?: string;
+                    /** @description Пошук (UI-38): підрядок бізнес-ключа документа, ключа рядка чи коду колонки; до 100 знаків (довше
+                     *     обрізається), спецсимволи `LIKE` — буквальні. Лише по видимих читачу рядках. */
+                    q?: string;
                 };
                 header?: never;
                 path?: never;
@@ -72,6 +75,94 @@ export interface paths {
                         "application/json": components["schemas"]["PagedResultOfCellChangeView"];
                         "text/json": components["schemas"]["PagedResultOfCellChangeView"];
                         "text/plain": components["schemas"]["PagedResultOfCellChangeView"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/audit/cells/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Підсумок журналу змін комірок за вікном (UI-38): усього, за сьогодні, імпортом, перерахунком.
+         *     Ті самі права й вікно, що в `cells`.
+         * @description ⛔ Лічильники — лише за тим, що читач бачить (R-11): приховані колонки, таблиці й аркуші не рахуються.
+         *     ⚠ Лічильника пізніх правок немає навмисно: індексу по `IsLateEdit` немає, див. `ui-cell-changes-ext`.
+         *     Вікно обмежене (92 дні; 396 для адреси однієї комірки) — підрахунок читає лише партиції вікна.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Початок вікна в UTC, включно. */
+                    from?: string;
+                    /** @description Кінець вікна в UTC, виключно. */
+                    to?: string;
+                    /** @description Документ; без нього — наскрізний журнал (`Security.ViewAudit`). */
+                    documentId?: number;
+                    /** @description Походження: `UserEdit`, `Import`, `Recalculation`, `Migration`. */
+                    origin?: string;
+                    /** @description Лише пізні правки. */
+                    lateOnly?: boolean;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CellChangeSummaryView"];
+                        "text/json": components["schemas"]["CellChangeSummaryView"];
+                        "text/plain": components["schemas"]["CellChangeSummaryView"];
                     };
                 };
                 /** @description Bad Request */
@@ -1086,6 +1177,8 @@ export interface paths {
                 query?: {
                     ruleCode?: string;
                     openOnly?: boolean;
+                    severity?: number;
+                    q?: string;
                     limit?: number;
                     cursor?: string;
                 };
@@ -1101,9 +1194,9 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["PagedResultOfConsistencyIssueView"];
-                        "text/json": components["schemas"]["PagedResultOfConsistencyIssueView"];
-                        "text/plain": components["schemas"]["PagedResultOfConsistencyIssueView"];
+                        "application/json": components["schemas"]["ConsistencyIssuePage"];
+                        "text/json": components["schemas"]["ConsistencyIssuePage"];
+                        "text/plain": components["schemas"]["ConsistencyIssuePage"];
                     };
                 };
                 /** @description Forbidden */
@@ -1221,6 +1314,64 @@ export interface paths {
                 };
             };
         };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/consistency/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Загальні лічильники знахідок за вагою для смуги показників.
+         *     Право `System.ViewHealth`.
+         * @description ⚠ Лічильники рахуються по ВСЬОМУ журналу, а не по сторінці: сторінка
+         *     курсорна, і сума по ній збрехала б про стан системи. Без права —
+         *     `403`, а не нулі. Знахідки не розрізняються за проєктами (журнал
+         *     системний, право адміністративне), тож прихованих документів тут немає.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    openOnly?: boolean;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ConsistencySummary"];
+                        "text/json": components["schemas"]["ConsistencySummary"];
+                        "text/plain": components["schemas"]["ConsistencySummary"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -2056,6 +2207,7 @@ export interface paths {
                     state?: string;
                     mine?: boolean;
                     hasLateEdits?: boolean;
+                    q?: string;
                 };
                 header?: never;
                 path?: never;
@@ -4459,6 +4611,65 @@ export interface paths {
                 };
                 /** @description Unprocessable Entity */
                 422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/jobs/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Лічильники черги для смуги показників: виконуються, у черзі, провали й
+         *     успіхи за добу, середня затримка старту. Право `System.ViewHealth`
+         *     — або `mine=true` для ВЛАСНИХ задач.
+         * @description ⛔ Та сама межа, що в переліку: без `mine` і без права — `403`,
+         *     не нулі; параметра з ідентифікатором автора немає. Віддаються лише
+         *     числа — без тексту провалів і без посилань на документи.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Лише власні задачі; не вимагає `System.ViewHealth`. */
+                    mine?: boolean;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["JobsSummary"];
+                        "text/json": components["schemas"]["JobsSummary"];
+                        "text/plain": components["schemas"]["JobsSummary"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -8448,9 +8659,14 @@ export interface paths {
         /** Календар періодів проєкту. Право `Document.View`. */
         get: {
             parameters: {
-                query?: never;
+                query?: {
+                    /** @description Додати до кожного періоду кількість не поданих аркушів (`notSubmittedSheets`, UI-33); без прапорця поле
+                     *     `null`. Читачу, що має інструменти приховування аркушів, віддається `null` і з прапорцем. */
+                    withSheetCounts?: boolean;
+                };
                 header?: never;
                 path: {
+                    /** @description Проєкт. */
                     id: number;
                 };
                 cookie?: never;
@@ -15620,6 +15836,7 @@ export interface paths {
                 query?: {
                     limit?: number;
                     cursor?: string;
+                    q?: string;
                 };
                 header?: never;
                 path?: never;
@@ -16034,7 +16251,7 @@ export interface paths {
          * @description ⛔ Q-225: раніше — `new CursorRequest()`, завжди дефолтний ліміт 50,
          *     без жодного способу передати `cursor` чи `limit` від клієнта. Версія
          *     шаблону за 50-ту була назавжди недосяжна через цей ендпоінт. Той
-         *     самий патерн, що вже в Task&lt;IActionResult&gt; TemplatesController.List(int limit, string? cursor, CancellationToken ct) поруч.
+         *     самий патерн, що вже в Task&lt;IActionResult&gt; TemplatesController.List(int limit, string? cursor, string? q, CancellationToken ct) поруч.
          */
         get: {
             parameters: {
@@ -17897,19 +18114,15 @@ export interface components {
          * @enum {unknown}
          */
         CalendarMode: "Actual" | "Fixed365" | "Fixed360";
-        /**
-         * @description Де проєкт у кампанії відносно строку подання — відповідь на «хто затримує».
-         *     Правило — CampaignProgressRule.
-         * @enum {unknown}
-         */
-        CampaignProgress: "InProgress" | "AtRisk" | "Overdue" | "Done";
+        /** @enum {unknown} */
+        CampaignProgress: "InProgress" | "AtRisk" | "Overdue" | "Done" | null;
         /** @description Один проєкт у огляді кампанії. */
         CampaignProjectSummary: {
             /**
              * Format: int32
              * @description Усі аркуші затверджено.
              */
-            approved: number;
+            approved: null | number;
             /**
              * Format: int32
              * @description Скільки документів у проєкті. `0` означає «кампанія тут ще не
@@ -17920,11 +18133,15 @@ export interface components {
              * Format: int32
              * @description Документи, де є аркуш у чернетці (або ще без стану) і жодного відхиленого.
              */
-            draft: number;
+            draft: null | number;
             /** @description Назва мовами каталогу. */
             nameL10n: components["schemas"]["LocalizedText"];
-            /** @description Класифікація проєкту в кампанії (CampaignProgressRule). */
-            progress: components["schemas"]["CampaignProgress"];
+            /**
+             * Format: int32
+             * @description Аркушів, ще не поданих (чернетка/без стану/відхилено); `null` — як у SheetsTotal.
+             */
+            notSubmittedSheets?: null | number;
+            progress: null | components["schemas"]["CampaignProgress"];
             /** @description Код проєкту; ним перелік і впорядковано. */
             projectCode: string;
             /**
@@ -17936,7 +18153,12 @@ export interface components {
              * Format: int32
              * @description Хоч один аркуш відхилено.
              */
-            rejected: number;
+            rejected: null | number;
+            /**
+             * Format: int32
+             * @description Аркушів у складі документів проєкту (UI-33, D2); `null` — див. int? CampaignTotals.SheetsTotal.
+             */
+            sheetsTotal?: null | number;
             /**
              * Format: int32
              * @description Скільки ПОТОЧНИХ зрізів звітності побудовано за цей період
@@ -17957,7 +18179,7 @@ export interface components {
              * Format: int32
              * @description Усі аркуші подано або затверджено, і хоч один ще не затверджено.
              */
-            submitted: number;
+            submitted: null | number;
         };
         /** @description Огляд кампанії звітності за один період (`BE-22`). */
         CampaignSummaryResponse: {
@@ -17987,12 +18209,12 @@ export interface components {
              * Format: int32
              * @description Сума `Approved`.
              */
-            approved: number;
+            approved: null | number;
             /**
              * Format: int32
              * @description Проєктів у стані CampaignProgress.AtRisk.
              */
-            atRisk: number;
+            atRisk: null | number;
             /**
              * Format: int32
              * @description Документів у цих проєктах.
@@ -18002,22 +18224,28 @@ export interface components {
              * Format: int32
              * @description Проєктів у стані CampaignProgress.Done.
              */
-            done: number;
+            done: null | number;
             /**
              * Format: int32
              * @description Сума `Draft` по всіх проєктах.
              */
-            draft: number;
+            draft: null | number;
             /**
              * Format: int32
              * @description Проєктів у стані CampaignProgress.InProgress.
              */
-            inProgress: number;
+            inProgress: null | number;
+            /**
+             * Format: int32
+             * @description З них — ще не подано (чернетка, без стану чи відхилено); `null` за тих самих умов, що й
+             *     SheetsTotal.
+             */
+            notSubmittedSheets?: null | number;
             /**
              * Format: int32
              * @description Проєктів у стані CampaignProgress.Overdue.
              */
-            overdue: number;
+            overdue: null | number;
             /**
              * Format: int32
              * @description Проєктів періоду; дорівнює `TotalProjects`.
@@ -18027,7 +18255,13 @@ export interface components {
              * Format: int32
              * @description Сума `Rejected`.
              */
-            rejected: number;
+            rejected: null | number;
+            /**
+             * Format: int32
+             * @description Аркушів у складі документів усіх проєктів періоду (UI-33, D2); `null` — читач має інструменти, що ховають
+             *     аркуші (явна заборона чи грант рівня `None`), і число розкрило б приховане (R-8, `SheetVisibility`).
+             */
+            sheetsTotal?: null | number;
             /**
              * Format: int32
              * @description Сума поточних зрізів.
@@ -18037,7 +18271,7 @@ export interface components {
              * Format: int32
              * @description Сума `Submitted`.
              */
-            submitted: number;
+            submitted: null | number;
         };
         /** @description Змінена комірка; значення — рядком (decimal без втрати знаків). Тип — як у зрізі подання
          *     (string? SubmissionPayloadCell.Type): `null` — число або текст, інакше
@@ -18050,6 +18284,29 @@ export interface components {
             oldValue: null | string;
             rowKey: string;
             tableCode: string;
+        };
+        /** @description Підсумок журналу змін комірок за вікном (UI-38, C2) — лише те, що читач бачить. */
+        CellChangeSummaryView: {
+            /**
+             * Format: int64
+             * @description З них — імпортом (`Origin = Import`).
+             */
+            byImport: number;
+            /**
+             * Format: int64
+             * @description З них — перерахунком (`Origin = Recalculation`).
+             */
+            byRecalculation: number;
+            /**
+             * Format: int64
+             * @description З них — за поточну добу UTC (зміни вікна, що припали на сьогодні).
+             */
+            today: number;
+            /**
+             * Format: int64
+             * @description Усього змін у вікні й за фільтром.
+             */
+            total: number;
         };
         /** @description Зміна комірки в журналі, як її бачить читач аудиту. */
         CellChangeView: {
@@ -18108,6 +18365,13 @@ export interface components {
             periodKey: number;
             /** @description Ключ рядка — щоб журнал читався без join. */
             rowKey: string;
+            rowLabelL10n?: null | components["schemas"]["LocalizedText"];
+            /** @description Код аркуша колонки (UI-38, C1); `null` — колонки вже немає. */
+            sheetCode?: null | string;
+            sheetNameL10n?: null | components["schemas"]["LocalizedText"];
+            /** @description Код таблиці колонки. */
+            tableCode?: null | string;
+            tableNameL10n?: null | components["schemas"]["LocalizedText"];
         };
         /** @description Конфлікт паралельного редагування. Повертається в
          *     `Extensions2.conflicts` при `ECR-CELL-0409`.
@@ -18484,6 +18748,20 @@ export interface components {
             /** @description Верхня межа — лише для between. */
             valueTo: null | string;
         };
+        /** @description Сторінка знахідок із загальними лічильниками. */
+        ConsistencyIssuePage: {
+            /** @description Елементи сторінки. */
+            items: components["schemas"]["ConsistencyIssueView"][];
+            /** @description Курсор наступної сторінки; `null` — кінець. */
+            nextCursor: null | string;
+            /**
+             * Format: int32
+             * @description Скільки знахідок збігається з УСІМА фільтрами (разом із вагою).
+             */
+            totalCount: null | number;
+            /** @description Розбивка за вагою за фільтрами без ваги. */
+            totals: components["schemas"]["ConsistencySeverityTotals"];
+        };
         /** @description Знахідка перевірки узгодженості, як її бачить читач. */
         ConsistencyIssueView: {
             /**
@@ -18530,6 +18808,71 @@ export interface components {
              * @description Вага: 1 інформація, 2 попередження, 3 помилка.
              */
             severity: number;
+            where?: null | components["schemas"]["ConsistencyIssueWhere"];
+        };
+        /** @description Місце знахідки консистентності: лише бізнес-коди, без значень комірок і без назв. */
+        ConsistencyIssueWhere: {
+            /** @description Код колонки; `null` — колонку не визначено. */
+            columnCode: null | string;
+            /** @description Бізнес-ключ документа; `null` разом із DocumentId. */
+            documentBusinessKey: null | string;
+            /**
+             * Format: int64
+             * @description Документ; `null` — знахідка про структуру шаблону, а не документа.
+             */
+            documentId: null | number;
+            /** @description Ключ рядка; `null` — знахідка не на рівні рядка. */
+            rowKey: null | string;
+            /** @description Код аркуша. */
+            sheetCode: null | string;
+            /** @description Код таблиці. */
+            tableCode: null | string;
+        };
+        /** @description Лічильники знахідок за вагою в межах фільтра переліку (без фільтра ваги). */
+        ConsistencySeverityTotals: {
+            /**
+             * Format: int32
+             * @description Вага 3.
+             */
+            errors: number;
+            /**
+             * Format: int32
+             * @description Вага 1.
+             */
+            info: number;
+            /**
+             * Format: int32
+             * @description Вага 2.
+             */
+            warnings: number;
+        };
+        /** @description Загальні лічильники журналу знахідок. */
+        ConsistencySummary: {
+            /**
+             * Format: int32
+             * @description Знахідок ваги 3 (помилка).
+             */
+            errors: number;
+            /**
+             * Format: int32
+             * @description Знахідок ваги 1 (інформація).
+             */
+            info: number;
+            /**
+             * Format: date-time
+             * @description Момент найновішої знахідки в UTC; `null` — журнал порожній.
+             */
+            lastDetectedAt: null | string;
+            /**
+             * Format: int32
+             * @description Усього (інша вага, якщо така з'явиться, потрапляє лише сюди).
+             */
+            total: number;
+            /**
+             * Format: int32
+             * @description Знахідок ваги 2 (попередження).
+             */
+            warnings: number;
         };
         /**
          * @description Природа значення константи методології (директива ПК-1 №05, поправка 2-біс).
@@ -19191,6 +19534,20 @@ export interface components {
             rejected: number;
             /**
              * Format: int32
+             * @description Скільки аркушів складу затверджено — у сумі по документах переліку й ЛИШЕ по аркушах, які
+             *     читач бачить (UI-18: «23 із 60 затверджено»). Схований аркуш не рахується ні тут, ні в
+             *     SheetsTotal: інакше різниця двох чисел розкривала б, скільки їх.
+             * @default 0
+             */
+            sheetsApproved: number;
+            /**
+             * Format: int32
+             * @description Скільки аркушів складу бачить читач у цих документах (без схованих).
+             * @default 0
+             */
+            sheetsTotal: number;
+            /**
+             * Format: int32
              * @description Усі аркуші подано або затверджено, і хоч один ще не затверджено.
              */
             submitted: number;
@@ -19254,6 +19611,10 @@ export interface components {
             /** @description Хто змінив; `null` — користувача вже немає. */
             modifiedByDisplayName?: null | string;
             nameL10n?: null | components["schemas"]["LocalizedText"];
+            /** @description Автор документа (`CreatedBy`): відображуване ім'я, не логін (`D-86`); `null` — автора
+             *     вже немає. ⛔ Для читача, чий доступ звужено нижче проєкту, — `null` (`DocumentSheetVisibility.For`):
+             *     ім'я людини — окреме розкриття, його не віддаємо там, де документ показано частково. */
+            ownerDisplayName?: null | string;
             /**
              * Format: int32
              * @description Проєкт.
@@ -20071,6 +20432,36 @@ export interface components {
              * @description Момент останнього оновлення в UTC.
              */
             updatedAt: string;
+        };
+        /** @description Лічильники черги фонових задач. */
+        JobsSummary: {
+            /**
+             * Format: int64
+             * @description Середня затримка між постановкою і першим стартом (мс) для задач, що стартували
+             *     з першої спроби за останню добу; `null` — таких немає. Повтори не враховуються:
+             *     їхній інтервал містить паузу ретраю, а не очікування черги.
+             */
+            avgStartLatencyMs: null | number;
+            /**
+             * Format: int32
+             * @description Скільки задач завершилось провалом за останню добу.
+             */
+            failed24h: number;
+            /**
+             * Format: int32
+             * @description Скільки задач стоїть у черзі (усі, без вікна).
+             */
+            queued: number;
+            /**
+             * Format: int32
+             * @description Скільки задач зараз виконується (усі, без вікна).
+             */
+            running: number;
+            /**
+             * Format: int32
+             * @description Скільки задач завершилось успішно за останню добу.
+             */
+            succeeded24h: number;
         };
         JsonElement: unknown;
         /** @description Мова інтерфейсу з реєстру. */
@@ -21031,19 +21422,6 @@ export interface components {
         };
         /** @description Сторінка результатів. Ендпоінтів, що повертають «усе», не існує —
          *     перевіряється архітектурним тестом. */
-        PagedResultOfConsistencyIssueView: {
-            /** @description Елементи сторінки. */
-            items: components["schemas"]["ConsistencyIssueView"][];
-            /** @description Курсор наступної сторінки; `null` — кінець. */
-            nextCursor: null | string;
-            /**
-             * Format: int32
-             * @description Загальна кількість; `null`, якщо підрахунок дорогий.
-             */
-            totalCount: null | number;
-        };
-        /** @description Сторінка результатів. Ендпоінтів, що повертають «усе», не існує —
-         *     перевіряється архітектурним тестом. */
         PagedResultOfCoverageEventView: {
             /** @description Елементи сторінки. */
             items: components["schemas"]["CoverageEventView"][];
@@ -21433,6 +21811,14 @@ export interface components {
             id: number;
             /** @description Чи є періодом за замовчуванням для UI. */
             isCurrent: boolean;
+            /**
+             * Format: int32
+             * @description Скільки аркушів проєкту в цьому періоді ще не подано (чернетка, без стану чи відхилено) — UI-33, D1.
+             *     `null` — не запитувано (`withSheetCounts=false`) АБО читач має інструменти, що ховають аркуші, і число
+             *     розкрило б приховане (R-8, `SheetVisibility`). Лічильника пізніх правок немає навмисно: індексу по
+             *     `aud.CellChange.IsLateEdit` немає.
+             */
+            notSubmittedSheets?: null | number;
             /**
              * Format: int32
              * @description `Year*100 + Sequence`; він же ключ партиції.
@@ -21865,8 +22251,26 @@ export interface components {
         RegistryDefDto: {
             /** @description Код довідника. */
             code: string;
+            /**
+             * Format: date-time
+             * @description Коли востаннє змінювалися записи, UTC; `null` — не змінювалися.
+             */
+            dataChangedAt?: null | string;
+            /**
+             * Format: int32
+             * @description Версія опису довідника.
+             */
+            definitionVersion?: null | number;
+            /**
+             * Format: int32
+             * @description Чинних записів сьогодні (UTC): активні, не видалені, у вікні дії. Лише в переліку; в інших
+             *     відповідях `null`.
+             */
+            entryCount?: null | number;
             /** @description Поля довідника. */
             fields: components["schemas"]["RegistryFieldDto"][];
+            /** @description Чи є незавершена чернетка опису; `null` без права `Registry.EditDefinition`. */
+            hasDraft?: null | boolean;
             /**
              * Format: int32
              * @description Ідентифікатор визначення.
@@ -21882,6 +22286,17 @@ export interface components {
              *     перемикання: без нього довідник, який уже в цільовому режимі, і той, який
              *     ще ні, у переліку виглядають однаково. */
             sourceKind: components["schemas"]["RegistrySourceKind"];
+            /**
+             * Format: int32
+             * @description Скільки колонок шаблонів беруть значення з довідника. `null` без права
+             *     `Registry.EditDefinition` (те саме, що в `GET {code}/usage`): «не знаю» ≠ «ніде».
+             */
+            usedInColumns?: null | number;
+            /**
+             * Format: int32
+             * @description У скількох шаблонах; `null` за тих самих умов.
+             */
+            usedInTemplates?: null | number;
         };
         /** @description Чернетка опису довідника. */
         RegistryDefinitionDraftDto: {
@@ -24541,21 +24956,94 @@ export interface components {
             /** @description Нове джерело для всіх перелічених. */
             sourceKind: components["schemas"]["RegistrySourceKind"];
         };
+        /** @description Блок «Про систему». */
+        SystemFactsAboutDto: {
+            /** @description Версія збірки без метаданих (як `productVersion`). */
+            build: string;
+            /** @description Коди увімкнених мов у порядку показу. */
+            languages: string[];
+            /**
+             * Format: date-time
+             * @description Момент останнього провалу задачі чи збору, UTC; `null` — не було.
+             */
+            lastErrorAt: null | string;
+            /** @description Режим входу: `Windows`, `Local`, `WindowsAndLocal`, `None`. */
+            signInMode: string;
+        };
+        /** @description Стан БД: лише число й мітки часу, без шляхів чи імен. */
+        SystemFactsDbDto: {
+            /**
+             * Format: int64
+             * @description Вільне місце диска даних, ГБ; `null` — СУБД не віддала.
+             */
+            freeSpaceDataDiskGb: null | number;
+            /**
+             * Format: date-time
+             * @description Остання копія БД, UTC; `null` — немає копій або права.
+             */
+            lastBackupAt: null | string;
+            /** @description Вікно обслуговування; `null` — у моделі налаштувань його немає (не вигадується). */
+            maintenanceWindow: null | string;
+        };
+        /** @description Лічильники черги фонових задач. */
+        SystemFactsJobsDto: {
+            /**
+             * Format: int32
+             * @description Завершились провалом за останню добу.
+             */
+            failed24h: number;
+            /**
+             * Format: int32
+             * @description Стоять у черзі.
+             */
+            queued: number;
+            /**
+             * Format: int32
+             * @description Виконуються зараз.
+             */
+            running: number;
+        };
         /** @description Факти про піднятий процес. */
         SystemFactsResponse: {
+            /** @description Блок «Про систему». */
+            about: components["schemas"]["SystemFactsAboutDto"];
+            /** @description Стан БД (число й мітки часу, без шляхів). */
+            db: components["schemas"]["SystemFactsDbDto"];
             /** @description Ім'я середовища хосту (`Production`, `Development`). */
             environment: string;
+            /** @description Лічильники черги фонових задач. */
+            jobs: components["schemas"]["SystemFactsJobsDto"];
             /** @description Тека файлового журналу; `null`, коли файл не пишеться. */
             logDirectory: null | string;
             /** @description Стан транспорту сповіщень. */
             notificationTransport: components["schemas"]["NotificationTransportDto"];
             /** @description Версія продукту без метаданих збірки. */
             productVersion: string;
+            /** @description Лічильники джерел збору (лише числа). */
+            sources: components["schemas"]["SystemFactsSourcesDto"];
             /**
              * Format: date-time
              * @description Коли стартував процес, UTC.
              */
             startedAt: string;
+        };
+        /** @description Лічильники джерел збору: лише числа, без назв і адрес. */
+        SystemFactsSourcesDto: {
+            /**
+             * Format: int32
+             * @description Налаштованих активних джерел.
+             */
+            active: number;
+            /**
+             * Format: int32
+             * @description Активних джерел, чий останній запуск збору провалився.
+             */
+            failed: number;
+            /**
+             * Format: int32
+             * @description Подій покриття за тиждень, де дані за інтервал не перенесено.
+             */
+            gaps: number;
         };
         TableDto: {
             /** @description Код — ідентичність таблиці й адреса в `PUT …/sheets/{sheetCode}/tables/{code}`. */
@@ -24714,6 +25202,21 @@ export interface components {
              * @description Скільки комірок має заповнити людина.
              */
             inputCells: number;
+            /**
+             * @description Таблиця закрита на введення правилом доступу до періоду (замок у дереві);
+             *     те саме рішення `PeriodAccessRules`, з якого рахується `InputCells`.
+             *     Відрізняє «закрита» від «усі колонки формульні» (там теж `InputCells = 0`).
+             * @default false
+             */
+            isClosed: boolean;
+            /**
+             * Format: int32
+             * @description Рядків у таблиці: більше з рядків бази й рядків шаблону (як і знаменник
+             *     `InputCells`). Лише число для ВИДИМОЇ таблиці — приховані до переліку
+             *     не потрапляють, тож їхні розміри нікуди не витікають.
+             * @default 0
+             */
+            rowCount: number;
             /** @description Код аркуша, якому належить таблиця. */
             sheetCode: string;
             /**
@@ -24920,9 +25423,34 @@ export interface components {
             code: string;
             /**
              * Format: int32
+             * @description Документів у проєктах шаблону, які бачить саме цей читач; проєкти без гранта не рахуються.
+             * @default 0
+             */
+            documentCount: number;
+            /** @description Відображуване ім'я (не логін) автора найновішої чернетки; `null` — чернетки немає. */
+            draftAuthorDisplayName?: null | string;
+            /**
+             * Format: date-time
+             * @description Коли чернетку створено, UTC; `null` — чернетки немає.
+             */
+            draftCreatedAt?: null | string;
+            /**
+             * Format: int32
              * @description Ідентифікатор.
              */
             id: number;
+            /**
+             * @description `true` — шаблон архівований (`!IsActive`).
+             * @default false
+             */
+            isArchived: boolean;
+            nameL10n?: null | components["schemas"]["LocalizedText"];
+            /**
+             * Format: date-time
+             * @description Остання відома зміна, UTC: найпізніша з створення шаблону, створення/публікації/виведення з
+             *     обігу будь-якої його версії. Окремого журналу правок чернетки в моделі немає.
+             */
+            updatedAt?: null | string;
             /**
              * Format: int32
              * @description Скільки версій має шаблон.
@@ -25212,11 +25740,32 @@ export interface components {
              */
             id: number;
             /**
+             * @description Базова одиниця розмірності (колонка «Base unit»).
+             * @default false
+             */
+            isBase: boolean;
+            /** @description Назва мовами каталогу; `null` — не задано. */
+            nameL10n?: null | {
+                [key: string]: string;
+            };
+            /**
              * Format: decimal
              * @description Зсув до базової; ненульовий лише в температури.
              * @default 0
              */
             offsetToBase: string;
+            /** @description Позначення мовами каталогу (UI-21: колонка «Unit» переліку без N+1 по `GET /units/{id}`);
+             *     `null` — тест-дублер не задав. */
+            symbolL10n?: null | {
+                [key: string]: string;
+            };
+            /**
+             * Format: int32
+             * @description Скільки колонок шаблонів і полів довідників тримає одиницю (колонка «Used in»). Лише в
+             *     `GET /units` і лише для того, хто має `Uom.EditCatalog`; інакше `null` (не нуль:
+             *     «не знаю» не те саме, що «ніде»). Знімок каталогу його не несе.
+             */
+            usedIn?: null | number;
         };
         /** @description Поле джерела, яке не лягає нікуди. */
         UnmappedSourceField: {

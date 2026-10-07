@@ -1,6 +1,9 @@
 using System.Diagnostics;
 using System.Reflection;
 using Ecr.Application.Health;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Authentication.Negotiate;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -19,7 +22,8 @@ public sealed class SystemHealthController(
     GetSystemFactsHandler facts,
     GetPartitionScriptHandler partitionScript,
     IHostEnvironment environment,
-    Ecr.Api.Observability.FileLogStatus fileLog) : ControllerBase
+    Ecr.Api.Observability.FileLogStatus fileLog,
+    IAuthenticationSchemeProvider schemes) : ControllerBase
 {
     /// <summary>
     /// Версія, час старту, середовище, транспорт сповіщень, тека журналу. Право <c>System.ViewHealth</c>.
@@ -32,13 +36,21 @@ public sealed class SystemHealthController(
     {
         using var process = Process.GetCurrentProcess();
 
+        // Режим входу — за фактично зареєстрованими схемами, як в анонімному
+        // `/public/bootstrap`, а не за ключем конфігурації.
+        var registered = await schemes.GetAllSchemesAsync().ConfigureAwait(false);
+        var names = registered.Select(scheme => scheme.Name).ToHashSet(StringComparer.Ordinal);
+
         var host = new SystemHostFacts(
             typeof(SystemHealthController).Assembly
                 .GetCustomAttribute<AssemblyInformationalVersionAttribute>()
                 ?.InformationalVersion,
             process.StartTime.ToUniversalTime(),
             environment.EnvironmentName,
-            fileLog.Directory);
+            fileLog.Directory,
+            SystemHostFacts.SignInModeOf(
+                names.Contains(NegotiateDefaults.AuthenticationScheme),
+                names.Contains(CookieAuthenticationDefaults.AuthenticationScheme)));
 
         return Ok(await facts.HandleAsync(host, ct).ConfigureAwait(false));
     }

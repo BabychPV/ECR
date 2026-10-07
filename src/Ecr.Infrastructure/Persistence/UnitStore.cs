@@ -92,6 +92,26 @@ public sealed class UnitStore(EcrDbContext db) : IUnitStore
     }
 
     /// <inheritdoc />
+    public async Task<IReadOnlyDictionary<int, int>> CountUnitStructuralUsageAsync(CancellationToken ct)
+    {
+        var columns = await db.ColumnDefs
+            .Where(c => c.UnitId != null)
+            .GroupBy(c => c.UnitId!.Value)
+            .Select(g => new { UnitId = g.Key, Count = g.Count() })
+            .ToListAsync(ct).ConfigureAwait(false);
+
+        var fields = await db.RegistryFieldDefs
+            .Where(f => f.UnitId != null)
+            .GroupBy(f => f.UnitId!.Value)
+            .Select(g => new { UnitId = g.Key, Count = g.Count() })
+            .ToListAsync(ct).ConfigureAwait(false);
+
+        return columns.Concat(fields)
+            .GroupBy(x => x.UnitId)
+            .ToDictionary(g => g.Key, g => g.Sum(x => x.Count));
+    }
+
+    /// <inheritdoc />
     public async Task<UsageResponse> FindUnitUsageAsync(int unitId, int take, CancellationToken ct)
     {
         var total = 0;
