@@ -102,7 +102,7 @@ public sealed class LandGoldenFormulaTests
         var tNox = Calc("10 * 0.01 * 60 / 1000000");
         Close(0.000006m, tNox);
         Close(0.0000048m, Calc($"{N(tNox)} * 0.8"));
-        Close(0.00016667m, Calc("0.01 / 60"));
+        Close(0.000166667m, Calc("0.01 / 60"));
     }
 
     // ---- 5.4: дизельний котел. ⚠ KNO2=0.08 ПРИПУЩЕНО (у специфікації немає) ----
