@@ -5,6 +5,7 @@ import { focusSoon } from '@/shared/a11y/focus';
 import { localized } from '@/shared/i18n/localized';
 import { t } from '@/shared/i18n';
 import { DocumentGrid } from './DocumentGrid';
+import { tableNumber } from './tableTreeModel';
 import { completeCellNavigation, useCellNavigation } from './cellNavigation';
 
 /**
@@ -370,7 +371,7 @@ export function SheetTables({
                 {titleStart}
                 <Text component="h2" size="md" fw={600} data-table-title tabIndex={-1} truncate>
                   <Text span ff="monospace" size="xs" c="dimmed" mr="xs">
-                    {table.tableOrdinal}
+                    {tableNumber(table, tables)}
                   </Text>
                   {localized(table.tableNameL10n)}
                 </Text>
