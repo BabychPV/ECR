@@ -36,8 +36,10 @@ public sealed class TemplateVersionClonePeriodAccessTests(SqlServerFixture sql)
                 PeriodAccessRuleDef.EditablePeriodOnly(doc.TemplateVersionId, OutOfWindowBehavior.ReadOnly, 2, 5)
                     .ForSheet(doc.SheetDefId).ForTable(doc.TableDefId),
                 PeriodAccessRuleDef.ForSourceWindow(
-                    doc.TemplateVersionId, doc.ColumnDefIds[1], OutOfWindowBehavior.ReadOnly),
-                PeriodAccessRuleDef.ForExpression(doc.TemplateVersionId, "true", OutOfWindowBehavior.ReadOnly));
+                    doc.TemplateVersionId, doc.ColumnDefIds[1], OutOfWindowBehavior.ReadOnly)
+                    .ForTable(doc.TableDefId),
+                PeriodAccessRuleDef.ForExpression(doc.TemplateVersionId, "true", OutOfWindowBehavior.ReadOnly)
+                    .ForSheet(doc.SheetDefId));
             await setup.SaveChangesAsync(ct);
         }
 
