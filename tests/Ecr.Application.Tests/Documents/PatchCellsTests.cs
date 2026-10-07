@@ -191,7 +191,19 @@ public sealed class PatchCellsTests
         => new(_cells, _rows, _documents, _periods, _metadata, _access,
                new Ecr.Application.Validation.ValidationEngine(new RealFormulaEngine()),
                _methodologies, _registries, _headers, _audit, _auditReader, _jobs, _uow, _user, _clock,
-               _gate, Units());
+               _gate, Units(), columnMapper: _columnMapper);
+
+    /// <summary>C1: переклад Id колонок методології на колонки версії документа; <c>null</c> — Id локальні.</summary>
+    private IColumnPathMapper? _columnMapper;
+
+    /// <summary>Колонка 12 версії-джерела відповідає колонці <paramref name="local"/> версії документа (<c>null</c> — немає).</summary>
+    private void CloneMapsCategoryTo(int? local)
+    {
+        var mapper = Substitute.For<IColumnPathMapper>();
+        mapper.MapToVersionAsync(Arg.Any<IReadOnlyCollection<int>>(), 2, Arg.Any<CancellationToken>())
+            .Returns(local is { } id ? new Dictionary<int, int> { [12] = id } : new Dictionary<int, int>());
+        _columnMapper = mapper;
+    }
 
     private static IDocumentHeaderStore CreateHeaderStore()
     {
@@ -704,6 +716,14 @@ public sealed class PatchCellsTests
         // C1: вимога ключується Id 12 (версія-джерело), а колонка Category документа на клоні має Id 13.
         // До фіксу gate шукав значення колонки 12 і блокував збереження назавжди (ECR-CALC-0437).
         WithMethodology(RequiredInputSeverity.Block, documentCategoryColumnId: 13);
+        CloneMapsCategoryTo(13);
+        _access.CanEditCellsAsync(
+                   Arg.Any<AccessProfile>(), TableInstance, Arg.Any<PeriodKey>(),
+                   Arg.Any<IReadOnlyCollection<CellAddress>>(), Arg.Any<CancellationToken>())
+               .Returns(new Dictionary<CellAddress, EditDecision>
+               {
+                   [new CellAddress(PeriodKey.Parse(Period), 1001L, 13)] = EditDecision.Allow(),
+               });
 
         var response = await Handler().HandleAsync(
             Request(new PatchRow("7001001", "0x0A", [new PatchCell("Category", "Gas")])),
@@ -718,6 +738,7 @@ public sealed class PatchCellsTests
     public async Task Незаповнений_вхід_на_клон_версії_блокує_і_називає_локальну_колонку()
     {
         WithMethodology(RequiredInputSeverity.Block, documentCategoryColumnId: 13);
+        CloneMapsCategoryTo(13);
 
         var error = await Assert.ThrowsAsync<BusinessRuleException>(
             () => Handler().HandleAsync(
@@ -727,6 +748,26 @@ public sealed class PatchCellsTests
         Assert.Equal("ECR-CALC-0437", error.ErrorCode);
         var details = System.Text.Json.JsonSerializer.Serialize(error.Details);
         Assert.Contains("Category", details, StringComparison.Ordinal);
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Finding", "C1")]
+    public async Task Вхід_без_відповідника_у_версії_документа_дає_попередження_без_назв_і_не_блокує()
+    {
+        // Колонку вилучили/перейменували між версіями: вимогу не можна ні виконати, ні мовчки зняти.
+        WithMethodology(RequiredInputSeverity.Block, documentCategoryColumnId: 13);
+        CloneMapsCategoryTo(null);
+
+        var response = await Handler().HandleAsync(
+            Request(new PatchRow("7001001", "0x0A", [new PatchCell("Volume", 12500m)])),
+            CancellationToken.None);
+
+        Assert.Equal(1, response.AppliedCells);
+        var warning = Assert.Single(response.Validation, m => m.RuleCode == "ECR-CALC-0437");
+        Assert.Equal("Warning", warning.Severity);
+        Assert.Null(warning.ColumnCode);
+        Assert.DoesNotContain("ECW_TEST", warning.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("Category", warning.Message, StringComparison.Ordinal);
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
