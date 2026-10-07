@@ -7265,8 +7265,11 @@ USING (VALUES
     -- COLL:dps-required-header ── кінець секції ──
     -- COLL:mkeys ── D1: перенос проєкту відмовляє, коли правила/обов'язкові входи методології посилаються на колонки іншої версії шаблону; ru/kz — порцією COLL:mkeys нижче ──
     (N'err.ECR-SCHM-0422.migrateMethodologyKeysNotMapped', N'en', N'A methodology bound to the target version has a published version whose rules or required inputs refer to columns of another version of this template (see methodologyKeys). After the move those rules would match no rows, so nothing would be calculated, and a blocking required input could never be satisfied. Publish a methodology version whose rules and required inputs point to the target version''s columns, then move the project.', 1),
-    (N'documents.migrateRefusalMethodologyKeysNotMapped', N'en', N'Methodology rules or required inputs refer to columns of another template version; after the move they would match nothing.', 1)
+    (N'documents.migrateRefusalMethodologyKeysNotMapped', N'en', N'Methodology rules or required inputs refer to columns of another template version; after the move they would match nothing.', 1),
     -- COLL:mkeys ── кінець секції ──
+    -- CAT:l2 ── L-2: правило категорії константи (calc.CategoryRule); ru/kz — порцією CAT:l2 нижче ──
+    (N'err.ECR-CALC-0422.categoryRuleEmpty', N'en', N'The category rule needs an expression; to have no rule, delete it.', 1)
+    -- CAT:l2 ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -17692,6 +17695,16 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:mkeys ── кінець секції ──
+-- CAT:l2 ── ru/kz L-2: правило категорії константи; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-CALC-0422.categoryRuleEmpty', N'ru', N'Правилу категории нужно выражение; чтобы правила не было, удалите его.'),
+    (N'err.ECR-CALC-0422.categoryRuleEmpty', N'kz', N'Санат ережесіне өрнек қажет; ереже болмауы үшін оны жойыңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- CAT:l2 ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

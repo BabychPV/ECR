@@ -44,6 +44,18 @@ public interface IMethodologyStore
         int methodologyVersionId, CancellationToken ct);
 
     /// <summary>
+    /// Вираз правила категорії константи версії (L-2, <c>calc.CategoryRule</c>); <c>null</c> — правила
+    /// немає, і рушій резолвить константи без категорії, як і до L-2.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Читається тим самим <c>PrepareAsync</c>, що й константи: раз на прив'язку, а не на рядок.
+    /// </remarks>
+    /// <param name="methodologyVersionId">Версія методології.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Текст виразу діалекту Methodology або <c>null</c>.</returns>
+    public Task<string?> GetCategoryRuleAsync(int methodologyVersionId, CancellationToken ct);
+
+    /// <summary>
     /// Бібліотеки, видимі виразам версії: оголошені імпорти з версією, чинною
     /// **на дату**, і кодами їхніх формул.
     /// </summary>
