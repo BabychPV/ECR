@@ -150,6 +150,45 @@ public sealed class DocumentVersionMigrationStore(EcrDbContext db) : IDocumentVe
     }
 
     /// <inheritdoc />
+    public async Task<int> CountUnmappedBindingsAsync(
+        int sourceVersionId, IReadOnlyDictionary<int, int> columnMap, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(columnMap);
+
+        // З'єднання через ColumnDef → TableDef → SheetDef: власного TemplateVersionId прив'язка не має.
+        var source = await (
+                from binding in db.CalculationBindings.AsNoTracking()
+                where binding.IsActive
+                join column in db.ColumnDefs.AsNoTracking() on binding.ColumnDefId equals column.Id
+                join table in db.TableDefs.AsNoTracking() on column.TableDefId equals table.Id
+                join sheet in db.SheetDefs.AsNoTracking() on table.SheetDefId equals sheet.Id
+                where sheet.TemplateVersionId == sourceVersionId && !column.IsDeleted
+                select new { binding.ColumnDefId, binding.MethodologyId, binding.OutputCode })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+        if (source.Count == 0)
+        {
+            return 0;
+        }
+
+        var targetColumns = columnMap.Values.Distinct().ToList();
+        var targetBindings = await db.CalculationBindings
+            .AsNoTracking()
+            .Where(b => b.IsActive && targetColumns.Contains(b.ColumnDefId))
+            .Select(b => new { b.ColumnDefId, b.MethodologyId, b.OutputCode })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        // Коди виходів порівнюються без урахування регістру — як і в CalculationBindingStore.
+        var carried = targetBindings
+            .Select(b => (b.ColumnDefId, b.MethodologyId, Output: b.OutputCode.ToUpperInvariant()))
+            .ToHashSet();
+
+        return source.Count(b => !columnMap.TryGetValue(b.ColumnDefId, out var target)
+                                 || !carried.Contains((target, b.MethodologyId, b.OutputCode.ToUpperInvariant())));
+    }
+
+    /// <inheritdoc />
     public async Task<GrantedUsers> ListUsersWithGrantsAsync(VersionMigrationPlan plan, int limit, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(plan);

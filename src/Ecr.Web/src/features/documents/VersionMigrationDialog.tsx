@@ -34,6 +34,8 @@ export function refusalText(reason: string): string {
       return t('documents.migrateRefusalArchived');
     case 'grantsNotMapped':
       return t('documents.migrateRefusalGrantsNotMapped');
+    case 'bindingsNotMapped':
+      return t('documents.migrateRefusalBindingsNotMapped');
     default:
       return reason;
   }
