@@ -16417,7 +16417,7 @@ SELECT v.[Key], v.Lang, v.Val
     (N'err.ECR-REQ-0422.consistencySeverity', N'kz', N'«{severity}» табылым салмағы жоқ: 1 (ақпарат), 2 (ескерту) немесе 3 (қате) болуы тиіс.')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
-GO,
+GO
 -- COLL:consistency-summary ── кінець секції ──
 -- COLL:ui-docs ── ru/kz UI-19/UI-29/UI-18: перелік документів і швидкий перегляд; власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)
