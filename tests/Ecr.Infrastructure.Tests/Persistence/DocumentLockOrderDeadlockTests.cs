@@ -275,7 +275,7 @@ public sealed partial class DocumentLockOrderDeadlockTests(SqlServerFixture sql)
             new PatchDocumentHeaderHandler(
                 documents, metadata, headers, access, user, periods,
                 new DocumentKeyStore(db), new DocumentDeletionStore(db), new UnitOfWork(db), new AuditWriter(db),
-                Substitute.For<IBackgroundJobScheduler>(), new FixedClock(), new SheetEditGate(db)));
+                Substitute.For<IBackgroundJobScheduler>(), new FixedClock(), new SheetEditGate(db), new RegistryStore(db)));
     }
 
     private static ChangeDocumentKeyHandler BuildChangeKeyHandler(EcrDbContext db, int projectId)
