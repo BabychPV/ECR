@@ -7,6 +7,7 @@ import {
   fillStateOf,
   resolveTable,
   sheetProgress,
+  tableNumber,
   tableUrlKey,
 } from '../tableTreeModel';
 
@@ -128,5 +129,20 @@ describe('ключ таблиці в адресі', () => {
     expect(resolveTable(null, tables)?.tableOrdinal).toBe(1);
     expect(resolveTable('NOPE', tables)?.tableOrdinal).toBe(1);
     expect(resolveTable(null, [])).toBeUndefined();
+  });
+});
+
+describe('номер таблиці для людини (звірка batch-4 з макетом, п.8b)', () => {
+  it('рахує з одиниці в порядку шаблону, а не сирий tableOrdinal з нуля чи з пропусками', () => {
+    const tables = [table(7), table(0), table(3)];
+
+    expect(tables.map((item) => tableNumber(item, tables))).toEqual([3, 1, 2]);
+  });
+
+  it('пошук у дереві — за тим самим номером', () => {
+    const items = buildTableTree([table(0, 'AAA'), table(4, 'BBB')], undefined);
+    const shown = filterTableTree(items, { query: '2', errorsOnly: false }, () => 'x');
+
+    expect(shown.map((item) => item.table.tableCode)).toEqual(['BBB']);
   });
 });

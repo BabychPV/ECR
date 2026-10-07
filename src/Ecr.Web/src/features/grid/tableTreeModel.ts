@@ -101,12 +101,13 @@ export function filterTableTree(
   nameOf: (table: DocumentTableDto) => string,
 ): TableTreeItem[] {
   const query = filter.query.trim().toLocaleLowerCase();
+  const all = items.map((item) => item.table);
 
   return items.filter((item) => {
     if (filter.errorsOnly && item.state !== 'error') return false;
     if (query.length === 0) return true;
 
-    const haystack = `${String(item.table.tableOrdinal)} ${item.table.tableCode} ${nameOf(item.table)}`;
+    const haystack = `${String(tableNumber(item.table, all))} ${item.table.tableCode} ${nameOf(item.table)}`;
     return haystack.toLocaleLowerCase().includes(query);
   });
 }
@@ -180,4 +181,22 @@ export function resolveTable(
   }
 
   return ordered[0];
+}
+
+/**
+ * Номер таблиці для людини: 1, 2, 3… у порядку шаблону на аркуші.
+ *
+ * ⚠ Не `tableOrdinal`: сервер нумерує порядок з нуля (`TableDefHandlers`, нова таблиця —
+ * `Max + 1` від 0) і допускає пропуски після перестановок, тож сирий порядок давав «0 Facility
+ * details». Макет (`screen-document.js`, `tb.no`) рахує з одиниці; груп у `DocumentTableDto`
+ * немає (D15-06), тому номер плаский, без «1.1».
+ *
+ * ⛔ Позиція — серед УСІХ таблиць аркуша, а не відфільтрованих деревом: інакше номер таблиці
+ * змінювався б від пошуку.
+ */
+export function tableNumber(table: DocumentTableDto, tables: readonly DocumentTableDto[]): number {
+  const ordered = [...tables].sort((a, b) => a.tableOrdinal - b.tableOrdinal);
+  const index = ordered.findIndex((candidate) => candidate.tableInstanceId === table.tableInstanceId);
+
+  return index < 0 ? ordered.length + 1 : index + 1;
 }

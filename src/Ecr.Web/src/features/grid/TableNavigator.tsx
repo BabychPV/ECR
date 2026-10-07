@@ -7,6 +7,7 @@ import {
   countText,
   filterTableTree,
   sheetProgress,
+  tableNumber,
   type TableFillState,
   type TableTreeItem,
 } from './tableTreeModel';
@@ -54,6 +55,7 @@ export function TableNavigator({
   const [activeId, setActiveId] = useState<number | null>(null);
   const tree = useRef<HTMLDivElement>(null);
 
+  const allTables = useMemo(() => items.map((item) => item.table), [items]);
   const shown = useMemo(
     () => filterTableTree(items, { query, errorsOnly }, tableName),
     [items, query, errorsOnly],
@@ -185,6 +187,7 @@ export function TableNavigator({
             const name = tableName(item.table);
             const state = stateText(item);
             const selected = tableId === selectedTableInstanceId;
+            const number = tableNumber(item.table, allTables);
 
             return (
               <div
@@ -192,8 +195,8 @@ export function TableNavigator({
                 role="treeitem"
                 aria-level={1}
                 aria-selected={selected}
-                aria-label={`${String(item.table.tableOrdinal)} ${name}, ${state}`}
-                title={`${String(item.table.tableOrdinal)} ${name} · ${item.table.tableCode} — ${state}`}
+                aria-label={`${String(number)} ${name}, ${state}`}
+                title={`${String(number)} ${name} · ${item.table.tableCode} — ${state}`}
                 tabIndex={tableId === tabStop ? 0 : -1}
                 className="ecr-tnav-item"
                 data-tree-table={tableId}
@@ -208,7 +211,7 @@ export function TableNavigator({
               >
                 <i className="ecr-dot" data-state={item.state} aria-hidden="true" />
                 <span className="ecr-tnav-no" aria-hidden="true">
-                  {item.table.tableOrdinal}
+                  {number}
                 </span>
                 <span className="ecr-tnav-name" aria-hidden="true">
                   {name}
