@@ -88,6 +88,102 @@ public static class MethodologyRuleMatcher
                ?? value.ValueBool?.ToString();
     }
 
+    /// <summary>Розбирає предикати один раз на правило — з уже ЛОКАЛІЗОВАНИХ ключів (C1).</summary>
+    /// <param name="ordered">Правила, уже впорядковані за <c>Priority</c>.</param>
+    public static IReadOnlyList<CompiledMethodologyRule> Compile(IEnumerable<RulePredicate> ordered)
+    {
+        ArgumentNullException.ThrowIfNull(ordered);
+
+        return [.. ordered.Select(r => new CompiledMethodologyRule(r.Code, r.Priority, Parse(r.MatchJson)))];
+    }
+
+    /// <summary><c>ColumnDefId</c>, згадані числовими ключами предиката; зламаний предикат — порожньо.</summary>
+    /// <param name="matchJson">Плаский JSON-об'єкт «ColumnDefId → очікуване значення».</param>
+    public static IReadOnlyList<int> ColumnIds(string matchJson)
+    {
+        ArgumentNullException.ThrowIfNull(matchJson);
+
+        return [.. (Parse(matchJson) ?? [])
+            .Select(p => int.TryParse(
+                p.Key, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var id)
+                ? id : (int?)null)
+            .Where(id => id is not null)
+            .Select(id => id!.Value)];
+    }
+
+    /// <summary>
+    /// Переписує числові ключі предиката (<c>ColumnDefId</c>) через <paramref name="map"/> (C1).
+    /// </summary>
+    /// <param name="matchJson">Плаский JSON-об'єкт «ColumnDefId → очікуване значення».</param>
+    /// <param name="map">Id колонки в сховищі → Id колонки цільової версії шаблону; <c>null</c> — відповідника немає.</param>
+    /// <param name="unmapped">Сюди додаються Id без відповідника.</param>
+    /// <returns>
+    /// Предикат з локальними ключами. Ключ без відповідника стає <c>"!&lt;id&gt;"</c>: такого ключа в значеннях рядка
+    /// немає ніколи, тож правило ЯВНО не збігається (а не збігається «випадково» чи, гірше, ширше). Нечислові ключі,
+    /// значення й порядок не міняються; не-об'єкт і зламаний JSON повертаються як є.
+    /// </returns>
+    public static string RewriteKeys(string matchJson, Func<int, int?> map, ICollection<int>? unmapped = null)
+    {
+        ArgumentNullException.ThrowIfNull(matchJson);
+        ArgumentNullException.ThrowIfNull(map);
+
+        try
+        {
+            using var document = JsonDocument.Parse(matchJson);
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                return matchJson;
+            }
+
+            var changed = false;
+            var keys = new List<string>();
+            foreach (var property in document.RootElement.EnumerateObject())
+            {
+                var key = property.Name;
+                if (int.TryParse(key, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var id))
+                {
+                    if (map(id) is { } local)
+                    {
+                        key = local.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                    }
+                    else
+                    {
+                        key = "!" + key;
+                        unmapped?.Add(id);
+                    }
+                }
+
+                changed |= !string.Equals(key, property.Name, StringComparison.Ordinal);
+                keys.Add(key);
+            }
+
+            if (!changed)
+            {
+                return matchJson;
+            }
+
+            using var stream = new MemoryStream();
+            using (var writer = new Utf8JsonWriter(stream))
+            {
+                writer.WriteStartObject();
+                var index = 0;
+                foreach (var property in document.RootElement.EnumerateObject())
+                {
+                    writer.WritePropertyName(keys[index++]);
+                    property.Value.WriteTo(writer);
+                }
+
+                writer.WriteEndObject();
+            }
+
+            return System.Text.Encoding.UTF8.GetString(stream.ToArray());
+        }
+        catch (JsonException)
+        {
+            return matchJson;
+        }
+    }
+
     /// <summary>Пари «колонка → очікуване»; <c>null</c> — бите правило, що не збігається ні з чим.</summary>
     private static IReadOnlyList<KeyValuePair<string, string?>>? Parse(string matchJson)
     {
@@ -123,6 +219,12 @@ public static class MethodologyRuleMatcher
                               && string.Equals(actual, p.Value, StringComparison.Ordinal));
     }
 }
+
+/// <summary>Правило з предикатом, ключі якого вже локалізовані до версії шаблону документа (C1).</summary>
+/// <param name="Code">Код правила.</param>
+/// <param name="Priority">Пріоритет; менше — вищий.</param>
+/// <param name="MatchJson">Предикат з Id колонок ЦІЄЇ версії шаблону.</param>
+public sealed record RulePredicate(string Code, int Priority, string MatchJson);
 
 /// <summary>Правило з уже розібраним предикатом.</summary>
 /// <param name="Code">Код правила.</param>

@@ -103,7 +103,7 @@ public sealed class MethodologyKeyLocalizationTests(SqlServerFixture sql)
             new CellRecord(new CellAddress(new PeriodKey(202601), 2, columns[0]), tableDefId, new CellValueData { ValueString = "Idle" }),
         ]);
 
-        return (new MethodologyResolver(new MethodologyStore(db), cells, rows), InstanceId);
+        return (new MethodologyResolver(new MethodologyStore(db), cells, rows, new ColumnPathMapper(db)), InstanceId);
     }
 
     [Fact]

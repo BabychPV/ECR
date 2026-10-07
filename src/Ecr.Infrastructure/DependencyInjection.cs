@@ -117,6 +117,7 @@ public static class DependencyInjection
         services.AddScoped<IRecalculationApprovalStore, RecalculationApprovalStore>();
         services.AddScoped<IMethodologyStore, MethodologyStore>();
         services.AddScoped<IRuleCoverageReader, RuleCoverageReader>();
+        services.AddScoped<IColumnPathMapper, ColumnPathMapper>();
         services.AddScoped<IMethodologyDraftStore, MethodologyDraftStore>();
         services.AddScoped<IMethodologyVersionDeletionStore, MethodologyVersionDeletionStore>();
         services.AddScoped<IConstantStore, ConstantStore>();

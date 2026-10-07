@@ -1,4 +1,5 @@
 using Ecr.Domain.Entities.Calculations;
+using Ecr.Application.Calculations;
 using Ecr.Application.Ports;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.ValueObjects;
@@ -9,7 +10,15 @@ namespace Ecr.Calculations;
 /// Підбирає версію методології, чинну на дату періоду, і зіставляє її з
 /// рядками документа за правилами (ФВ-13.3).
 /// </summary>
-public sealed class MethodologyResolver(IMethodologyStore store, ICellStore cells, IRowStore rows)
+/// <param name="store">Конфігурація методологій.</param>
+/// <param name="cells">Комірки документа.</param>
+/// <param name="rows">Рядки й екземпляри таблиць.</param>
+/// <param name="columnMapper">
+/// C1: переклад Id колонок із правил на колонки версії шаблону документа. <c>null</c> — Id вважаються локальними
+/// (лише прямий конструктор у тестах; контейнер передає завжди).
+/// </param>
+public sealed class MethodologyResolver(
+    IMethodologyStore store, ICellStore cells, IRowStore rows, IColumnPathMapper? columnMapper = null)
 {
     /// <summary>Знаходить чинну версію методології на дату.</summary>
     /// <param name="methodologyId">Методологія.</param>
@@ -141,6 +150,12 @@ public sealed class MethodologyResolver(IMethodologyStore store, ICellStore cell
         }
 
         var instance = await rows.ResolveTableInstanceAsync(tableInstanceId, ct).ConfigureAwait(false);
+
+        // ⛔ C1: ключі правил — Id колонок тієї версії шаблону, у якій правило писали; документ може бути на
+        // клон-версії. Без перекладу правило на клоні не збігається ні з чим.
+        var localized = await MethodologyKeyLocalizer
+            .LocalizeAsync(columnMapper, instance.TemplateVersionId, rules, requiredInputs: null, ct)
+            .ConfigureAwait(false);
         var period = new PeriodKey(instance.PeriodKey);
         var rowIds = await rows
             .GetRowIdsAsync(tableInstanceId, period, ct)
@@ -161,7 +176,7 @@ public sealed class MethodologyResolver(IMethodologyStore store, ICellStore cell
                     c => MethodologyRuleMatcher.Text(c.Value),
                     StringComparer.Ordinal));
 
-        var compiled = MethodologyRuleMatcher.Compile(rules);
+        var compiled = MethodologyRuleMatcher.Compile(localized.Predicates);
         var matched = new List<RowRuleMatch>();
 
         foreach (var (rowKey, rowId) in rowIds)
