@@ -16,7 +16,10 @@ namespace Ecr.Infrastructure.Persistence;
 /// клієнтові.
 /// </remarks>
 public sealed partial class SystemHealthStore(
-    EcrDbContext db, ILogger<SystemHealthStore> logger, HealthProbeSql? probes = null) : ISystemHealthStore
+    EcrDbContext db,
+    ILogger<SystemHealthStore> logger,
+    HealthProbeSql? probes = null,
+    HealthCountCache? failedCache = null) : ISystemHealthStore
 {
     /// <summary>Вікно «прогалин покриття».</summary>
     private static readonly TimeSpan GapWindow = TimeSpan.FromDays(7);
@@ -32,7 +35,26 @@ public sealed partial class SystemHealthStore(
         CollectionCoverage.SourceDataRefused,
     ];
 
+    /// <summary>
+    /// Число активних джерел, у яких ОСТАННІЙ запуск якоїсь сутності — провал. «Останній»
+    /// — <c>ROW_NUMBER</c> за (<c>StartedAt DESC, Id DESC</c>): один прохід і один рядок на
+    /// сутність замість <c>NOT EXISTS</c> по кожному провалу (O(N·k)). Сталий текст, без вводу.
+    /// </summary>
+    private const string FailedSourcesSql = """
+        SELECT COUNT(DISTINCT s.Id) AS Value
+          FROM (SELECT r.SourceEntityId, r.Status,
+                       ROW_NUMBER() OVER (PARTITION BY r.SourceEntityId ORDER BY r.StartedAt DESC, r.Id DESC) AS rn
+                  FROM itg.CollectionRun AS r) AS x
+          JOIN ext.SourceEntity AS e ON e.Id = x.SourceEntityId
+          JOIN ext.DataSource AS s ON s.Id = e.DataSourceId
+         WHERE x.rn = 1 AND x.Status = 'Failed' AND s.IsActive = 1
+        """;
+
     private readonly HealthProbeSql _probes = probes ?? HealthProbeSql.Default;
+
+    // Без переданого кешу (прямі виклики в тестах) — власний, на екземпляр: між викликами
+    // одного store діє, між різними — ні. У DI — синглтон хоста.
+    private readonly HealthCountCache _failedCache = failedCache ?? new HealthCountCache();
 
     /// <inheritdoc />
     public async Task<SystemHealthSnapshot> ReadAsync(DateTime utcNow, CancellationToken ct)
@@ -57,17 +79,12 @@ public sealed partial class SystemHealthStore(
 
         // Активне джерело «провалене», якщо для якоїсь його сутності останній запуск
         // збору завершився провалом (новіших запусків тієї ж сутності немає).
-        var failedSources = await (
-                from run in db.CollectionRuns.AsNoTracking()
-                where run.Status == "Failed"
-                      && !db.CollectionRuns.Any(next =>
-                          next.SourceEntityId == run.SourceEntityId && next.StartedAt > run.StartedAt)
-                join entity in db.SourceEntities.AsNoTracking() on run.SourceEntityId equals entity.Id
-                join source in db.DataSources.AsNoTracking() on entity.DataSourceId equals source.Id
-                where source.IsActive
-                select source.Id)
-            .Distinct()
-            .CountAsync(ct)
+        // ⚠ Дорогий запит (скан усіх запусків) — число кешується на 60 с (HealthCountCache).
+        var failedSources = await _failedCache
+            .GetOrComputeAsync(
+                utcNow,
+                token => db.Database.SqlQueryRaw<int>(FailedSourcesSql).SingleAsync(token),
+                ct)
             .ConfigureAwait(false);
 
         var gaps = await db.CollectionCoverages.AsNoTracking()

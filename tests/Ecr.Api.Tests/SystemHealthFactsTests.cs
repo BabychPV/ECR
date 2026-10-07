@@ -8,6 +8,7 @@ using Ecr.Domain.ValueObjects;
 using Ecr.Infrastructure.Persistence;
 using Ecr.TestKit;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
@@ -177,6 +178,10 @@ public sealed class SystemHealthFactsTests(SqlServerFixture sql)
 
         try
         {
+            // sources.failed кешується на 60 с (на хост): `before` його уже закешував, а дані
+            // щойно змінено — скидаємо кеш хоста, а не вимикаємо його в продукті.
+            app.Services.GetRequiredService<HealthCountCache>().Invalidate();
+
             var after = await ReadFactsAsync(client, app);
 
             int Delta(string block, string field)

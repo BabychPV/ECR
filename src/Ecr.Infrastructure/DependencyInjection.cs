@@ -432,6 +432,7 @@ public static class DependencyInjection
 
         // Сховища Етапу 5.
         services.AddScoped<IJobProgressStore, JobProgressStore>();
+        services.AddSingleton<HealthCountCache>(); // кеш sources.failed на 60 с (на хост)
         services.AddScoped<ISystemHealthStore, SystemHealthStore>();
         services.AddScoped<ICollectionStore, CollectionStore>();
         services.AddScoped<ISourceEventMapStore, SourceEventMapStore>();
