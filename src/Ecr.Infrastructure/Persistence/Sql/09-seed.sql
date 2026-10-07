@@ -7227,8 +7227,12 @@ USING (VALUES
     (N'err.ECR-UOM-0422.fieldMapUnitDimensions', N'en', N'Unit "{from}" cannot be converted to "{to}": they measure different quantities, so the mapping of field "{sourceField}" would never write a value. Choose units of the same dimension.', 1),
     -- COLL:d4efmapunit ── кінець секції ──
     -- COLL:d9tpltitle ── приймальна №8, D-9: власний заголовок 409 на зайнятий код шаблону; ru/kz — порцією COLL:d9tpltitle нижче ──
-    (N'err.ECR-TMPL-0409.templateCodeTaken.title', N'en', N'Template code is already in use', 1)
+    (N'err.ECR-TMPL-0409.templateCodeTaken.title', N'en', N'Template code is already in use', 1),
     -- COLL:d9tpltitle ── кінець секції ──
+    -- COLL:b-stale-badge ── лінія B: бейдж «Результати методологій застарілі» і пункт «Recalculate calculations» у More; ru/kz — порцією COLL:b-stale-badge нижче ──
+    (N'documents.methodologyResultsStale', N'en', N'Methodology results are out of date', 1),
+    (N'workflow.recalculateCalculations', N'en', N'Recalculate calculations', 1)
+    -- COLL:b-stale-badge ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -17553,6 +17557,18 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:d9tpltitle ── кінець секції ──
+-- COLL:b-stale-badge ── ru/kz лінії B: бейдж застарілих результатів методологій; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'documents.methodologyResultsStale', N'ru', N'Результаты методологий устарели'),
+    (N'documents.methodologyResultsStale', N'kz', N'Әдістемелер нәтижелері ескірген'),
+    (N'workflow.recalculateCalculations', N'ru', N'Пересчитать расчёты'),
+    (N'workflow.recalculateCalculations', N'kz', N'Есептеулерді қайта есептеу')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:b-stale-badge ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t
