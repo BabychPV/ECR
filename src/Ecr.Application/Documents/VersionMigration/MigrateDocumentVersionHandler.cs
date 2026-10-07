@@ -304,6 +304,17 @@ public sealed class MigrateDocumentVersionHandler(
             refusals.Add("grantsNotMapped");
         }
 
+        // ⛔ D-13: активна прив'язка методології до колонки вихідної версії, якої нема в цільовій, після
+        // переносу не рахувала б нічого — колонка лишалася б порожньою без помилки. Блокуємо, доки
+        // конфігуратор не перенесе прив'язку (клон версії тепер копіює їх сам) або не вимкне її.
+        var unmappedBindings = await store.CountUnmappedBindingsAsync(
+            sourceVersionId, plan.Columns.ToDictionary(c => c.SourceColumnDefId, c => c.TargetColumnDefId), ct)
+            .ConfigureAwait(false);
+        if (unmappedBindings > 0)
+        {
+            refusals.Add("bindingsNotMapped");
+        }
+
         // Спершу те, що зачіпає введені дані, потім решта структури, потім вигляд.
         var ordered = plan.Items
             .OrderByDescending(i => i.Values > 0)
@@ -420,7 +431,9 @@ public sealed class MigrateDocumentVersionHandler(
                     ? "err.ECR-SCHM-0422.migrateStructural"
                     : dto.Refusals.Contains("grantsNotMapped") && dto.LostValues == 0 && dto.GuardedValues == 0
                         ? "err.ECR-SCHM-0422.migrateGrantsNotMapped"
-                        : "err.ECR-SCHM-0422.migrateDataLoss",
+                        : dto.Refusals.Contains("bindingsNotMapped") && dto.LostValues == 0 && dto.GuardedValues == 0
+                            ? "err.ECR-SCHM-0422.migrateBindingsNotMapped"
+                            : "err.ECR-SCHM-0422.migrateDataLoss",
                 ["lostValues"] = dto.LostValues.ToString(CultureInfo.InvariantCulture),
                 ["guardedValues"] = dto.GuardedValues.ToString(CultureInfo.InvariantCulture),
                 ["mode"] = dto.Mode.ToString(),
