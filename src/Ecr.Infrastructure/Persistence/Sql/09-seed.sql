@@ -7264,7 +7264,8 @@ USING (VALUES
     (N'err.ECR-HDR-0422.requiredAtSubmit', N'en', N'The sheet cannot be submitted: required header field(s) are empty: {headerFieldCodes}. Fill them in the document header and submit again.', 1),
     -- COLL:dps-required-header ── кінець секції ──
     -- CAT:l2 ── L-2: правило категорії константи (calc.CategoryRule); ru/kz — порцією CAT:l2 нижче ──
-    (N'err.ECR-CALC-0422.categoryRuleEmpty', N'en', N'The category rule needs an expression; to have no rule, delete it.', 1)
+    (N'err.ECR-CALC-0422.categoryRuleEmpty', N'en', N'The category rule needs an expression; to have no rule, delete it.', 1),
+    (N'err.ECR-CALC-0422.categoryRuleFailed', N'en', N'The category rule "{expression}" gave no category for this row: {reason}. The row is not calculated.', 1)
     -- CAT:l2 ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
@@ -17684,7 +17685,9 @@ INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val
   FROM (VALUES
     (N'err.ECR-CALC-0422.categoryRuleEmpty', N'ru', N'Правилу категории нужно выражение; чтобы правила не было, удалите его.'),
-    (N'err.ECR-CALC-0422.categoryRuleEmpty', N'kz', N'Санат ережесіне өрнек қажет; ереже болмауы үшін оны жойыңыз.')
+    (N'err.ECR-CALC-0422.categoryRuleEmpty', N'kz', N'Санат ережесіне өрнек қажет; ереже болмауы үшін оны жойыңыз.'),
+    (N'err.ECR-CALC-0422.categoryRuleFailed', N'ru', N'Правило категории «{expression}» не дало категорию для этой строки: {reason}. Строка не рассчитана.'),
+    (N'err.ECR-CALC-0422.categoryRuleFailed', N'kz', N'«{expression}» санат ережесі осы жол үшін санат бермеді: {reason}. Жол есептелмеді.')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
