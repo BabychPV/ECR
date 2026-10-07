@@ -398,6 +398,27 @@ public sealed partial class TemplateVersionStore(EcrDbContext db) : ITemplateVer
     private async Task CloneResourceGrantsAsync(
         TemplateVersion clone, IReadOnlyList<GrantSource> sources, CancellationToken ct)
     {
+        var map = BuildCloneIdMap(clone, sources);
+
+        var kinds = new[] { ResourceKind.Sheet, ResourceKind.Table, ResourceKind.Column };
+        var ids = sources.Select(s => s.SourceId).Distinct().ToList();
+        var grants = await db.ResourceGrants
+            .AsNoTracking()
+            .Where(g => kinds.Contains(g.ResourceKind) && ids.Contains(g.ResourceId)
+                        && (g.IsDeny || g.Level <= GrantLevel.Read))
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        db.ResourceGrants.AddRange(grants
+            .Where(g => map.ContainsKey((g.ResourceKind, g.ResourceId)))
+            .Select(g => new ResourceGrant(
+                g.RoleId, g.ResourceKind, map[(g.ResourceKind, g.ResourceId)], g.Level, g.IsDeny)));
+    }
+
+    /// <summary>Id аркуша/таблиці/колонки джерела → Id відповідника в клоні (за кодами).</summary>
+    private static Dictionary<(ResourceKind, int), int> BuildCloneIdMap(
+        TemplateVersion clone, IReadOnlyList<GrantSource> sources)
+    {
         var map = new Dictionary<(ResourceKind, int), int>();
         var cloneSheets = clone.Sheets.ToDictionary(s => s.Code);
         foreach (var src in sources)
@@ -429,19 +450,42 @@ public sealed partial class TemplateVersionStore(EcrDbContext db) : ITemplateVer
             }
         }
 
-        var kinds = new[] { ResourceKind.Sheet, ResourceKind.Table, ResourceKind.Column };
-        var ids = sources.Select(s => s.SourceId).Distinct().ToList();
-        var grants = await db.ResourceGrants
+        return map;
+    }
+
+    /// <summary>
+    /// PS-P1B: правила доступу до періоду — частина структури версії; клон копіює їх з
+    /// перемапінгом аркуша, таблиці й колонки-джерела вікна (<c>SourceColumnDefId</c>) на Id клону.
+    /// Без цього після клону лишалось правило першої версії (клон мовчки втрачав обмеження періоду).
+    /// </summary>
+    private async Task CloneAccessRulesAsync(
+        TemplateVersion clone, int sourceVersionId, IReadOnlyList<GrantSource> sources, CancellationToken ct)
+    {
+        var map = BuildCloneIdMap(clone, sources);
+        var rules = await db.PeriodAccessRules
             .AsNoTracking()
-            .Where(g => kinds.Contains(g.ResourceKind) && ids.Contains(g.ResourceId)
-                        && (g.IsDeny || g.Level <= GrantLevel.Read))
+            .Where(r => r.TemplateVersionId == sourceVersionId)
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
-        db.ResourceGrants.AddRange(grants
-            .Where(g => map.ContainsKey((g.ResourceKind, g.ResourceId)))
-            .Select(g => new ResourceGrant(
-                g.RoleId, g.ResourceKind, map[(g.ResourceKind, g.ResourceId)], g.Level, g.IsDeny)));
+        foreach (var rule in rules)
+        {
+            // Посилання, яке не вдалося перемапити, не лишається на джерело: правило з чужим
+            // ключем діяло б на іншу версію. Таке правило пропускається (клон ідентичний джерелу,
+            // тож випадок неможливий; fail-closed не ширшає доступ).
+            if (rule.SheetDefId is { } s && !map.ContainsKey((ResourceKind.Sheet, s))
+                || rule.TableDefId is { } t && !map.ContainsKey((ResourceKind.Table, t))
+                || rule.SourceColumnDefId is { } c && !map.ContainsKey((ResourceKind.Column, c)))
+            {
+                continue;
+            }
+
+            db.PeriodAccessRules.Add(rule.CopyForClone(
+                clone.Id,
+                rule.SheetDefId is { } sh ? map[(ResourceKind.Sheet, sh)] : null,
+                rule.TableDefId is { } tb ? map[(ResourceKind.Table, tb)] : null,
+                rule.SourceColumnDefId is { } col ? map[(ResourceKind.Column, col)] : null));
+        }
     }
 
     private async Task SaveCloneAsync(
@@ -455,6 +499,7 @@ public sealed partial class TemplateVersionStore(EcrDbContext db) : ITemplateVer
         db.FormulaDefs.AddRange(TemplateVersionCloner.Relink(links));
         CloneTableRelations(clone, relationTemplates);
         await CloneResourceGrantsAsync(clone, grantSources, ct).ConfigureAwait(false);
+        await CloneAccessRulesAsync(clone, clonedFrom, grantSources, ct).ConfigureAwait(false);
         await CloneConditionalFormatsAsync(clone.Id, clonedFrom, ct).ConfigureAwait(false);
         SetClonedFrom(clone, clonedFrom);
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
