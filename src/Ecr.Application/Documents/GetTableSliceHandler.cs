@@ -37,6 +37,10 @@ namespace Ecr.Application.Documents;
 /// Журнал змін — для значка «правка поза вікном» (<c>ФВ-2.16</c>); один запит
 /// на зріз. Необов'язковий лише заради тестів, що конструюють обробник вручну.
 /// </param>
+/// <param name="formulaEngine">
+/// Рушій виразів — для <c>ColumnDto.Expression</c> (UI-25, B4): розбір формули колонки й збір її
+/// посилань. Необов'язковий лише заради тестів; без нього вираз не віддається ніколи.
+/// </param>
 public sealed class GetTableSliceHandler(
     IRowStore rowStore,
     ICellStore cellStore,
@@ -49,7 +53,8 @@ public sealed class GetTableSliceHandler(
     IMemoryCache? memory = null,
     ICalculationResultStore? results = null,
     IConditionalFormatStore? conditionalFormats = null,
-    IAuditReader? audit = null)
+    IAuditReader? audit = null,
+    IFormulaEngine? formulaEngine = null)
 {
     private readonly MethodologyRequiredColumnsCache _required = new(memory);
 
@@ -239,6 +244,13 @@ public sealed class GetTableSliceHandler(
         // ⛔ S6: колонка під забороною (ФВ-6.6) не віддається ЗОВСІМ — ні
         // значенням, ні описом (код, заголовок, одиниця — теж її дані), так
         // само, як прихована: сітка малює рівно ті колонки, що прийшли.
+        // ⛔ UI-25 (B4): вираз формули колонки — лише коли читач бачить усі її посилання.
+        // Формули беруться ОДИН раз на таблицю зі знімка (без запитів у БД).
+        var columnFormulas = table.Formulas
+            .Where(f => !f.IsDeleted && f.Scope == Domain.Enums.FormulaScope.Column && f.ColumnDefId is not null)
+            .GroupBy(f => f.ColumnDefId!.Value)
+            .ToDictionary(g => g.Key, g => g.First());
+
         var columns = table.Columns
             .Where(c => !c.IsDeleted && !c.IsHidden && readable.CanReadColumn(c.Id))
             .OrderBy(c => c.Ordinal)
@@ -246,7 +258,9 @@ public sealed class GetTableSliceHandler(
                 c.Id, c.Code, c.HeaderL10n.Get(language) ?? c.Code, c.DataType.ToString(),
                 c.Ordinal, c.IsReadOnly, c.IsRequired, c.DisplayFormat, c.DefaultValue,
                 c.LookupRegistryDefId, c.UnitId, SymbolOf(symbolById, c.UnitId),
-                c.Precision, c.Scale, requiredByMethodology.Contains(c.Id), StyleOf(styleById, c.StyleId), c.WidthPx))
+                c.Precision, c.Scale, requiredByMethodology.Contains(c.Id), StyleOf(styleById, c.StyleId), c.WidthPx,
+                ColumnExpressionVisibility.Visible(
+                    columnFormulas.GetValueOrDefault(c.Id), table, c.Id, snapshot, readable, formulaEngine)))
             .ToList();
 
         var columnCodeById = table.Columns.ToDictionary(c => c.Id, c => c.Code);
