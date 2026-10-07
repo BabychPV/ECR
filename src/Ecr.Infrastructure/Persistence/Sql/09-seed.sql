@@ -7218,8 +7218,17 @@ USING (VALUES
     (N'units.dim.MassPerStdVolume', N'en', N'Mass per standard volume', 1),
     (N'units.dim.EnergyPerStdVolume', N'en', N'Energy per standard volume', 1),
     (N'units.dim.EnergyPerMass', N'en', N'Energy per mass', 1),
-    (N'units.dim.MassPerAmount', N'en', N'Mass per amount of substance', 1)
+    (N'units.dim.MassPerAmount', N'en', N'Mass per amount of substance', 1),
     -- COLL:ui-rc9 ── кінець секції ──
+    -- COLL:d3efmap ── D-3 приймальної №8: другий мапінг тієї ж пари (сутність, поле) — 409, не 500; ru/kz — порцією COLL:d3efmap у блоці I18N нижче ──
+    (N'err.ECR-INT-0409.fieldMapDuplicate', N'en', N'Source entity {sourceEntityId} already has a mapping for field "{sourceField}": edit it instead of creating a second one.', 1),
+    -- COLL:d3efmap ── кінець секції ──
+    -- COLL:d4efmapunit ── D-4 приймальної №8: мапінг з одиницями різної розмірності відхиляється; ru/kz — порцією COLL:d4efmapunit у блоці I18N нижче ──
+    (N'err.ECR-UOM-0422.fieldMapUnitDimensions', N'en', N'Unit "{from}" cannot be converted to "{to}": they measure different quantities, so the mapping of field "{sourceField}" would never write a value. Choose units of the same dimension.', 1),
+    -- COLL:d4efmapunit ── кінець секції ──
+    -- COLL:d9tpltitle ── приймальна №8, D-9: власний заголовок 409 на зайнятий код шаблону; ru/kz — порцією COLL:d9tpltitle нижче ──
+    (N'err.ECR-TMPL-0409.templateCodeTaken.title', N'en', N'Template code is already in use', 1)
+    -- COLL:d9tpltitle ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -17514,6 +17523,36 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:ui-rc9 ── кінець секції ──
+-- COLL:d3efmap ── ru/kz D-3: дубль мапінгу пари (сутність, поле); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-INT-0409.fieldMapDuplicate', N'ru', N'Для сущности источника {sourceEntityId} сопоставление поля «{sourceField}» уже есть: измените его, а не создавайте второе.'),
+    (N'err.ECR-INT-0409.fieldMapDuplicate', N'kz', N'{sourceEntityId} көз нысаны үшін «{sourceField}» өрісінің сәйкестендіруі бұрыннан бар: екіншісін жасамай, оны өзгертіңіз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:d3efmap ── кінець секції ──
+-- COLL:d4efmapunit ── ru/kz D-4: одиниці мапінгу різної розмірності; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-UOM-0422.fieldMapUnitDimensions', N'ru', N'Единицу «{from}» нельзя преобразовать в «{to}»: они измеряют разные величины, поэтому сопоставление поля «{sourceField}» никогда не запишет значение. Выберите единицы одной размерности.'),
+    (N'err.ECR-UOM-0422.fieldMapUnitDimensions', N'kz', N'«{from}» бірлігін «{to}» бірлігіне түрлендіру мүмкін емес: олар әртүрлі шамаларды өлшейді, сондықтан «{sourceField}» өрісінің сәйкестендіруі ешқашан мән жазбайды. Бір өлшемділіктегі бірліктерді таңдаңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:d4efmapunit ── кінець секції ──
+-- COLL:d9tpltitle ── ru/kz заголовка 409 на зайнятий код шаблону (D-9); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-TMPL-0409.templateCodeTaken.title', N'ru', N'Код шаблона уже используется'),
+    (N'err.ECR-TMPL-0409.templateCodeTaken.title', N'kz', N'Үлгі коды бұрыннан қолданылады')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:d9tpltitle ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

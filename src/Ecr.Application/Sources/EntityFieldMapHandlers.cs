@@ -34,7 +34,8 @@ public sealed class CreateEntityFieldMapHandler(
     ICurrentUser currentUser,
     IUnitOfWork uow,
     IAuditWriter audit,
-    IClock clock)
+    IClock clock,
+    IUnitCatalog? units = null)
 {
     /// <summary>Право на керування інтеграцією (`02-contracts.md` §9).</summary>
     public const string Permission = "Integration.Manage";
@@ -88,6 +89,14 @@ public sealed class CreateEntityFieldMapHandler(
 
         await ApplyUnitsAsync(map, command, ct).ConfigureAwait(false);
 
+        // ⛔ D-3: перевірка ДО запису, а не спіймане порушення UQ_EntityFieldMap - інакше друга пара
+        // (сутність, поле) доїжджала б як збій бази (500). Гонку двох запитів закриває те саме
+        // порушення індексу в CollectionStore.AddFieldMapAsync - тією самою відмовою.
+        if (await sources.FieldMapExistsAsync(sourceEntityId, map.SourceField, ct).ConfigureAwait(false))
+        {
+            throw Duplicate(sourceEntityId, map.SourceField);
+        }
+
         if (command.TargetRowKey is not null || command.Aggregation is not null)
         {
             // ⛔ Домен сам відхиляє рядок без агрегації (`ECR-INT-0422`) —
@@ -110,6 +119,26 @@ public sealed class CreateEntityFieldMapHandler(
 
         return Map(created!);
     }
+
+    /// <summary>Ключ каталогу відмови «пара (сутність, поле) уже має мапінг».</summary>
+    public const string DuplicateKey = "err.ECR-INT-0409.fieldMapDuplicate";
+
+    /// <summary>
+    /// Відмова «мапінг цієї пари вже є» - <c>409 ECR-INT-0409</c> (конфлікт стану: треба змінити наявний
+    /// мапінг, а не заводити другий).
+    /// </summary>
+    /// <param name="sourceEntityId">Сутність джерела.</param>
+    /// <param name="sourceField">Поле в джерелі.</param>
+    public static BusinessRuleException Duplicate(int sourceEntityId, string sourceField)
+        => new(
+            ErrorCodes.EntityFieldMapStateConflict,
+            $"Для сутності джерела {sourceEntityId} мапінг поля «{sourceField}» уже є: змініть його, а не заводьте другий.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = DuplicateKey,
+                ["sourceField"] = sourceField,
+                ["sourceEntityId"] = sourceEntityId.ToString(CultureInfo.InvariantCulture),
+            });
 
     /// <summary>Будує мапінг на потрібний вид цілі, перевіривши, що вона існує.</summary>
     private async Task<EntityFieldMap> BuildTargetAsync(
@@ -271,6 +300,11 @@ public sealed class CreateEntityFieldMapHandler(
                     ["id"] = targetUnitId.ToString(CultureInfo.InvariantCulture),
                 });
         }
+
+        // ⛔ D-4: одиниці різної розмірності (MJ -> kg) - відмова зараз, а не мапінг, що мовчить.
+        await FieldMapUnitCompatibility
+            .EnsureAsync(units, command.SourceField, command.SourceUnitId, command.TargetUnitId, command.Aggregation, ct)
+            .ConfigureAwait(false);
 
         map.SetUnits(command.SourceUnitId, command.TargetUnitId);
     }

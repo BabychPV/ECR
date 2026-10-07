@@ -28,7 +28,7 @@ public sealed class DocumentVersionStore(EcrDbContext db) : IDocumentVersionStor
     public async Task<DocumentVersionPayload?> FindAsync(long documentId, long versionId, CancellationToken ct)
         => await db.SubmissionSnapshots.AsNoTracking()
             .Where(s => s.Id == versionId && s.DocumentId == documentId)
-            .Select(s => new DocumentVersionPayload(s.Id, s.PeriodKey, s.PayloadJson))
+            .Select(s => new DocumentVersionPayload(s.Id, s.PeriodKey, s.PayloadJson, s.SheetDefId))
             .FirstOrDefaultAsync(ct)
             .ConfigureAwait(false);
 

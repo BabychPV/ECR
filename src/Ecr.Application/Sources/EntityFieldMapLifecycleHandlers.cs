@@ -152,7 +152,8 @@ public sealed class AcceptSourceUnitChangeHandler(
     IUnitOfWork uow,
     IAuditWriter audit,
     ICurrentUser currentUser,
-    IClock clock)
+    IClock clock,
+    IUnitCatalog? units = null)
 {
     /// <summary>Право на керування інтеграцією (`02-contracts.md` §9).</summary>
     public const string Permission = "Integration.Manage";
@@ -225,6 +226,16 @@ public sealed class AcceptSourceUnitChangeHandler(
                     ["sourceField"] = map.SourceField,
                     ["unitCode"] = map.PendingSourceUnitCode,
                 });
+        }
+
+        // ⛔ D-4: нова одиниця джерела іншої розмірності, ніж ціль мапінгу, - відмова (422), а не
+        // прийняття, після якого збір мовчки перестане писати значення. Та сама одиниця (409 «не змінилась»)
+        // сюди не потрапляє.
+        if ((requestedSourceUnitId ?? map.PendingSourceUnitId) is { } newUnit && newUnit != map.SourceUnitId)
+        {
+            await FieldMapUnitCompatibility
+                .EnsureAsync(units, map.SourceField, newUnit, map.TargetUnitId, map.Aggregation, ct)
+                .ConfigureAwait(false);
         }
 
         var before = IntegrationConfigAudit.Snapshot(map);

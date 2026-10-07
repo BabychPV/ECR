@@ -15,7 +15,11 @@ public sealed partial class ErrorTitleOverrideKeysTests
 {
     private const string SeedFile = "src/Ecr.Infrastructure/Persistence/Sql/09-seed.sql";
 
-    private static readonly string[] Allowed = ["err.ECR-TMPL-0409.relationCodeTaken.title"];
+    private static readonly string[] Allowed =
+    [
+        "err.ECR-TMPL-0409.relationCodeTaken.title",
+        "err.ECR-TMPL-0409.templateCodeTaken.title",
+    ];
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
@@ -30,6 +34,7 @@ public sealed partial class ErrorTitleOverrideKeysTests
 
         // ⛔ Порожня множина = регулярка не збіглася, а не «усе гаразд».
         Assert.Contains("err.ECR-TMPL-0409.relationCodeTaken.title", found);
+        Assert.Contains("err.ECR-TMPL-0409.templateCodeTaken.title", found);
 
         var unexpected = found.Except(Allowed, StringComparer.Ordinal).Order(StringComparer.Ordinal).ToList();
 

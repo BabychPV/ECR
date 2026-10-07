@@ -99,6 +99,25 @@ public sealed class CreateEntityFieldMapTests
         await _audit.DidNotReceiveWithAnyArgs().WriteStructureChangeAsync(default!, default);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "D-3")]
+    public async Task D3_мапінг_пари_що_вже_є_відхиляється_409_до_запису_а_нова_пара_проходить()
+    {
+        _sources.FieldMapExistsAsync(SourceEntityId, "Flare_01_CO", Arg.Any<CancellationToken>()).Returns(true);
+
+        var ex = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Handler().HandleAsync(SourceEntityId, ColumnCommand(), CancellationToken.None));
+
+        Assert.Equal(ErrorCodes.EntityFieldMapStateConflict, ex.ErrorCode);
+        Assert.Equal(CreateEntityFieldMapHandler.DuplicateKey, ex.Details!["messageKey"]);
+        await _sources.DidNotReceiveWithAnyArgs().AddFieldMapAsync(default!, default);
+
+        // Контроль: інше поле тієї ж сутності заводиться.
+        await Handler().HandleAsync(SourceEntityId, ColumnCommand(sourceField: "Flare_02_CO"), CancellationToken.None);
+        await _sources.Received(1).AddFieldMapAsync(Arg.Any<EntityFieldMap>(), Arg.Any<CancellationToken>());
+    }
+
     /// <summary>Сутність джерела, прив'язана до <paramref name="registryDefId"/>.</summary>
     private void EntityBoundTo(int? registryDefId)
     {

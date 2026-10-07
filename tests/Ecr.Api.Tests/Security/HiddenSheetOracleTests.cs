@@ -160,6 +160,90 @@ public sealed class HiddenSheetOracleTests(SqlServerFixture sql)
         }
     }
 
+    // ── Порівняння версій: версія схованого аркуша == неіснуюча версія ─────────────────────
+
+    /// <remarks>
+    /// ⛔ До фіксу `from`/`to` схованого аркуша давали 200 (порожній diff), а неіснуючий id — 404:
+    /// оракул існування id версії. Мутаційний доказ: прибрати перевірку CanReadSheet у
+    /// <c>CompareDocumentVersionsHandler.LoadAsync</c> — червоніє рядок про <c>from</c>/<c>to</c>.
+    /// </remarks>
+    [Theory]
+    [InlineData("scope")]
+    [InlineData("deny")]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-6.14")]
+    [Trait("Requirement", "ФВ-5.22")]
+    public async Task Порівняння_з_версією_схованого_аркуша_відмовляє_так_само_як_з_неіснуючою(string how)
+    {
+        var s = await ArrangeAsync(how, DocumentStatus.Submitted).ConfigureAwait(true);
+        var hiddenVersion = await SnapshotAsync(s, (int)s.HiddenSheetId).ConfigureAwait(true);
+        var visibleVersion = await SnapshotAsync(s, s.VisibleSheetId).ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
+        const long missingVersion = 2_000_000_001L;
+
+        // from = схований  vs  from = неіснуючий.
+        var hiddenFrom = await CompareAsync(client, s, $"from={hiddenVersion}&to=current").ConfigureAwait(true);
+        var missingFrom = await CompareAsync(client, s, $"from={missingVersion}&to=current").ConfigureAwait(true);
+        AssertSameRefusal("from", hiddenFrom, hiddenVersion, missingFrom, missingVersion);
+
+        // to = схований  vs  to = неіснуючий (from — видима версія).
+        var hiddenTo = await CompareAsync(client, s, $"from={visibleVersion}&to={hiddenVersion}").ConfigureAwait(true);
+        var missingTo = await CompareAsync(client, s, $"from={visibleVersion}&to={missingVersion}").ConfigureAwait(true);
+        AssertSameRefusal("to", hiddenTo, hiddenVersion, missingTo, missingVersion);
+
+        // Контроль: видима версія порівнюється.
+        var visible = await CompareAsync(client, s, $"from={visibleVersion}&to=current").ConfigureAwait(true);
+        Assert.True(visible.Status == HttpStatusCode.OK, $"видима версія: {visible.Status}\n{visible.Body}");
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-5.22")]
+    public async Task Звичайна_роль_порівнює_з_версією_будь_якого_аркуша()
+    {
+        var s = await ArrangeAsync("none", DocumentStatus.Submitted).ConfigureAwait(true);
+        var hiddenVersion = await SnapshotAsync(s, (int)s.HiddenSheetId).ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
+
+        var reply = await CompareAsync(client, s, $"from={hiddenVersion}&to=current").ConfigureAwait(true);
+        Assert.True(reply.Status == HttpStatusCode.OK, $"{reply.Status}\n{reply.Body}");
+
+        var missing = await CompareAsync(client, s, "from=2000000001&to=current").ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.NotFound, missing.Status);
+    }
+
+    private static void AssertSameRefusal(string param, Reply hidden, long hiddenId, Reply missing, long missingId)
+    {
+        Assert.True(missing.Status == HttpStatusCode.NotFound, $"{param}: неіснуюча версія: {missing.Status}\n{missing.Body}");
+        Assert.True(hidden.Status == missing.Status, $"{param}: {hidden.Status} (схований) != {missing.Status} (неіснуючий)\n{hidden.Body}\n---\n{missing.Body}");
+        Assert.True(
+            Normalize(hidden.Body, hiddenId) == Normalize(missing.Body, missingId),
+            $"{param}: тіла різняться\n{hidden.Body}\n---\n{missing.Body}");
+    }
+
+    private static async Task<Reply> CompareAsync(HttpClient client, Scenario s, string query)
+    {
+        using var response = await client.GetAsync(
+            new Uri($"/api/v1/documents/{s.DocumentId}/compare?{query}", UriKind.Relative)).ConfigureAwait(false);
+        return new Reply(response.StatusCode, await response.Content.ReadAsStringAsync().ConfigureAwait(false));
+    }
+
+    private async Task<long> SnapshotAsync(Scenario s, int sheetDefId)
+    {
+        await using var db = Context();
+        var snapshot = new SubmissionSnapshot(
+            s.DocumentId, sheetDefId, s.PeriodKey, s.TemplateVersionId,
+            "[]", null, null, Ecr.Application.Workflow.SubmissionPayload.Write([]), new byte[32], DateTime.UtcNow, s.UserId);
+        db.SubmissionSnapshots.Add(snapshot);
+        await db.SaveChangesAsync().ConfigureAwait(false);
+
+        return snapshot.Id;
+    }
+
     // ── Шляхи, що вже мали межу, але без власного доказу ───────────────────────────────────
 
     [Theory]
@@ -324,7 +408,8 @@ public sealed class HiddenSheetOracleTests(SqlServerFixture sql)
 
     private sealed record Scenario(
         long DocumentId, int ProjectId, int PeriodKey, string UserName, string BusinessKey,
-        string VisibleCode, long HiddenSheetId, string HiddenCode, string HiddenName);
+        string VisibleCode, long HiddenSheetId, string HiddenCode, string HiddenName,
+        int VisibleSheetId = 0, int TemplateVersionId = 0, int UserId = 0);
 
     private async Task<Scenario> ArrangeAsync(string how, DocumentStatus hiddenStatus)
     {
@@ -412,7 +497,8 @@ public sealed class HiddenSheetOracleTests(SqlServerFixture sql)
         var businessKey = await db.Documents.AsNoTracking().Where(d => d.Id == b.DocumentId)
             .Select(d => d.BusinessKey).SingleAsync().ConfigureAwait(false);
 
-        return new Scenario(b.DocumentId, b.ProjectId, b.PeriodKey.Value, userName, businessKey, b.SheetCode, sheetB.Id, hiddenCode, hiddenName);
+        return new Scenario(b.DocumentId, b.ProjectId, b.PeriodKey.Value, userName, businessKey, b.SheetCode, sheetB.Id, hiddenCode, hiddenName,
+            b.SheetDefId, b.TemplateVersionId, user.Id);
     }
 
     private static async Task<HttpClient> SignedInAsync(EcrApiFactory app, string userName)

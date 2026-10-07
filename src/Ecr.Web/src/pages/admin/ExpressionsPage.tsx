@@ -36,6 +36,7 @@ import { statusKey } from '@/shared/ui/StatusBadge';
  */
 export function ExpressionsPage(): JSX.Element {
   const [dialect, setDialect] = useState<ExpressionDialect>('Template');
+  const [templateId, setTemplateId] = useState<string | null>(null);
   const [templateVersionId, setTemplateVersionId] = useState<string | null>(null);
   const [methodologyVersionId, setMethodologyVersionId] = useState<string | null>(null);
   const [expression, setExpression] = useState('');
@@ -53,7 +54,16 @@ export function ExpressionsPage(): JSX.Element {
     enabled: dialect === 'Methodology',
   });
 
-  const firstTemplateId = templates.data?.items[0]?.id;
+  // ⛔ D-2: шаблон обирається ЯВНО. Раніше версії брались у `items[0]` мовчки, і
+  // коли в першого шаблону версій немає, для решти перевірка й підказки були
+  // недоступні. Умовчання — перший шаблон, що має версії (інакше перший).
+  const templateItems = templates.data?.items ?? [];
+  const defaultTemplateId = (templateItems.find((x) => x.versionCount > 0) ?? templateItems[0])?.id;
+  const selectedTemplateId =
+    templateId !== null && templateItems.some((x) => String(x.id) === templateId)
+      ? Number(templateId)
+      : defaultTemplateId;
+  const firstTemplateId = selectedTemplateId;
 
   // ⛔ Q-275: `GET /api/v1/templates/{id}/versions` — курсорний ендпоінт
   // (Q-225), відповідь `{items, nextCursor, totalCount}`, а НЕ голий масив.
@@ -171,6 +181,23 @@ export function ExpressionsPage(): JSX.Element {
         {/* ⛔ Перелік, зібраний із відмови, не малюється зовсім (`D15-06`):
             причина вже стоїть банером угорі. Доки версії в дорозі — поле
             недоступне, а не порожнє: порожнє означало б «версій немає». */}
+        {dialect === 'Template' && templates.error === null && (
+          <Select
+            label={t('templates.card')}
+            miw={220}
+            allowDeselect={false}
+            disabled={templates.isPending}
+            value={selectedTemplateId === undefined ? null : String(selectedTemplateId)}
+            data={templateItems.map((x) => ({ value: String(x.id), label: x.code }))}
+            onChange={(value) => {
+              setTemplateId(value);
+              // Версія належить шаблону: попередня при зміні шаблону недійсна.
+              setTemplateVersionId(null);
+              setResult(null);
+            }}
+          />
+        )}
+
         {dialect === 'Template' && templates.error === null && versions.error === null && (
           <Select
             label={t('expressions.templateVersion')}

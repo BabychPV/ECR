@@ -218,9 +218,18 @@ public sealed class PreviewMappingHandler(
             // Мапінг без агрегації число не дає — і не має давати: домен його
             // з рядком-адресатом не приймає, а без адресата воно нікуди не
             // лягає.
+            var conversionFailed = false;
             var folded = kind is { } known
-                ? Fold(known, IsTimeFold(known) ? timed : numeric, fromUtc, toUtc, map, unitCatalog)
+                ? Fold(known, IsTimeFold(known) ? timed : numeric, fromUtc, toUtc, map, unitCatalog, out conversionFailed)
                 : null;
+
+            // ⛔ D-4: порожнє значення має названу причину, а не мовчить. Несумісні розмірності видно й без
+            // точок (це властивість налаштування), інша відмова конверсії - лише коли було що конвертувати.
+            var unitIssue = unitCatalog is not null
+                            && FieldMapUnitCompatibility.IsIncompatible(
+                                unitCatalog, UnitId(unitCatalog, map.SourceUnitCode), UnitId(unitCatalog, map.TargetUnitCode), kind)
+                ? FieldMapUnitCompatibility.MismatchKey
+                : conversionFailed ? ConversionFailedKey : null;
 
             result.Add(new MappedFieldPreview(
                 map.Id,
@@ -235,7 +244,8 @@ public sealed class PreviewMappingHandler(
                 numeric.Count,
                 folded,
                 map.IsActive,
-                map.PendingSourceUnitChange));
+                map.PendingSourceUnitChange,
+                unitIssue));
         }
 
         return result;
@@ -404,8 +414,10 @@ public sealed class PreviewMappingHandler(
         DateTime fromUtc,
         DateTime toUtc,
         FieldMapRef map,
-        Ports.UnitCatalogSnapshot? unitCatalog)
+        Ports.UnitCatalogSnapshot? unitCatalog,
+        out bool conversionFailed)
     {
+        conversionFailed = false;
         if (series.Count == 0 || toUtc <= fromUtc)
         {
             return null;
@@ -429,9 +441,13 @@ public sealed class PreviewMappingHandler(
         }
         catch (Exception ex) when (ex is DomainException or EcrException)
         {
+            conversionFailed = true;
             return null;
         }
     }
+
+    /// <summary>Ключ каталогу: значення не переведено в цільову одиницю (причина - у журналі задачі перенесення).</summary>
+    private const string ConversionFailedKey = "err.ECR-UOM-0422.boundaryConversionFailed";
 
     /// <summary>Ідентифікатор одиниці за кодом; <c>null</c> — код не заданий.</summary>
     /// <remarks>Код, якого немає в довіднику, дає <c>-1</c>: конверсія відмовить, а не пропустить.</remarks>
@@ -507,6 +523,11 @@ public sealed record MappingPreview(
 /// <param name="FoldedValue">Число, яке лягло б у комірку; <c>null</c> — нічого згортати.</param>
 /// <param name="IsActive">Мапінг діє; <c>false</c> — призупинений (<c>BE-27</c>), значень не пише.</param>
 /// <param name="PendingSourceUnitChange">Пауза через зміну одиниці джерела; <c>null</c> — її немає (ФВ-16.9).</param>
+/// <param name="UnitIssue">
+/// Ключ каталогу причини, чому значення порожнє через одиниці (D-4): розмірності різні
+/// (<c>err.ECR-UOM-0422.fieldMapUnitDimensions</c>) або конверсію не виконано
+/// (<c>err.ECR-UOM-0422.boundaryConversionFailed</c>); <c>null</c> — одиниці не заважають.
+/// </param>
 public sealed record MappedFieldPreview(
     int FieldMapId,
     string SourceField,
@@ -520,7 +541,8 @@ public sealed record MappedFieldPreview(
     int PointCount,
     decimal? FoldedValue,
     bool IsActive,
-    PendingSourceUnitChange? PendingSourceUnitChange);
+    PendingSourceUnitChange? PendingSourceUnitChange,
+    string? UnitIssue = null);
 
 /// <summary>Реальний рядок джерела разом із адресою, куди він лягає.</summary>
 /// <param name="SourcePath">Шлях атрибута в джерелі.</param>

@@ -37,7 +37,7 @@ public sealed record DocumentVersionRecord(
     long Id, int SheetDefId, int PeriodKey, DateTime SubmittedAt, int SubmittedByUserId, string? SubmittedByDisplayName);
 
 /// <summary>Зріз подання з вмістом.</summary>
-public sealed record DocumentVersionPayload(long Id, int PeriodKey, string PayloadJson);
+public sealed record DocumentVersionPayload(long Id, int PeriodKey, string PayloadJson, int SheetDefId);
 
 /// <summary>Підпис рядка для людини.</summary>
 public sealed record RowLabel(string TableCode, string RowKey);

@@ -494,10 +494,24 @@ public sealed class CollectionStore(EcrDbContext db, IClock clock) : ICollection
         ArgumentNullException.ThrowIfNull(map);
 
         db.EntityFieldMaps.Add(map);
-        await db.SaveChangesAsync(ct).ConfigureAwait(false);
+        try
+        {
+            await db.SaveChangesAsync(ct).ConfigureAwait(false);
+        }
+        catch (DbUpdateException ex) when (SqlConflict.ViolatesIndex(ex, "UQ_EntityFieldMap"))
+        {
+            // ⛔ D-3: перевірка обробника (FieldMapExistsAsync) програла гонці з паралельним
+            // заведенням тієї самої пари - індекс закрив її. Та сама відмова, що й у перевірки, а не 500.
+            throw CreateEntityFieldMapHandler.Duplicate(map.SourceEntityId, map.SourceField);
+        }
 
         return map;
     }
+
+    /// <inheritdoc />
+    public Task<bool> FieldMapExistsAsync(int sourceEntityId, string sourceField, CancellationToken ct)
+        => db.EntityFieldMaps.AsNoTracking()
+            .AnyAsync(m => m.SourceEntityId == sourceEntityId && m.SourceField == sourceField, ct);
 
     /// <inheritdoc />
     public Task<EntityFieldMap?> FindFieldMapAsync(int fieldMapId, CancellationToken ct)

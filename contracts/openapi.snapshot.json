@@ -5845,6 +5845,13 @@
               "null",
               "string"
             ]
+          },
+          "unitIssue": {
+            "description": "Ключ каталогу причини, чому значення порожнє через одиниці (D-4): розмірності різні\n(`err.ECR-UOM-0422.fieldMapUnitDimensions`) або конверсію не виконано\n(`err.ECR-UOM-0422.boundaryConversionFailed`); `null` — одиниці не заважають.",
+            "type": [
+              "null",
+              "string"
+            ]
           }
         },
         "required": [
@@ -23559,9 +23566,69 @@
               }
             },
             "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
           }
         },
-        "summary": "Заводить мапінг. Право `Integration.Manage`.",
+        "summary": "Заводить мапінг. Право `Integration.Manage`.\nДруга пара (сутність, поле) з тим самим полем - `409 ECR-INT-0409`.",
         "tags": [
           "EntityFieldMaps"
         ]
