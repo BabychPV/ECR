@@ -158,6 +158,9 @@ public sealed partial class RecalculationJob(
         var periodRuns = new SortedDictionary<int, (Domain.Entities.Calculations.CalculationRun Run, ModuleProfile Profile)>();
         Domain.Entities.Calculations.CalculationRun? yearRun = null;
 
+        // L-4: рядки, яким не підійшло жодне правило; назовні — лише кількість і номери.
+        var unmatchedRows = new List<UnmatchedRow>();
+
         Domain.Entities.Calculations.CalculationRun NewRun(int? periodKey)
             => new(
                 projectId, periodKey, request.TriggeredByUserId, startedAt,
@@ -381,6 +384,7 @@ public sealed partial class RecalculationJob(
                         .ConfigureAwait(false);
 
                     runProfile.Merge(profile);
+                    unmatchedRows.AddRange(profile.UnmatchedRows);
                 }
             }
 
@@ -402,6 +406,15 @@ public sealed partial class RecalculationJob(
             foreach (var (run, profile) in periodRuns.Values)
             {
                 await runs.CompleteAsync(run.Id, profile, ct).ConfigureAwait(false);
+            }
+
+            // L-4: «No matching rule … row N». Не помилка й не відмова - решта рядків уже
+            // пораховано; це слід у повідомленні задачі, щоб рядок без правила не зник мовчки.
+            if (unmatchedRows.Count > 0)
+            {
+                await progress
+                    .ReportAsync(100, JobProgressMessageCodec.Encode(NoMatchingRuleEnvelope(unmatchedRows)), ct)
+                    .ConfigureAwait(false);
             }
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -908,6 +921,29 @@ public sealed partial class RecalculationJob(
                 },
                 inner)
             : inner;
+
+    /// <summary>Скільки номерів рядків без правила називає повідомлення.</summary>
+    private const int NoMatchingRuleRowsShown = 10;
+
+    /// <summary>
+    /// Конверт «No matching rule … row N» (<c>jobs.recalcNoMatchingRule</c>): кількість рядків
+    /// і перші номери. Ключів рядків і значень комірок тут немає навмисно.
+    /// </summary>
+    /// <param name="unmatched">Рядки без правила за весь прогін.</param>
+    private static JobProgressMessageEnvelope NoMatchingRuleEnvelope(List<UnmatchedRow> unmatched)
+    {
+        var shown = string.Join(
+            ", ",
+            unmatched.Take(NoMatchingRuleRowsShown).Select(r => r.RowNumber.ToString(CultureInfo.InvariantCulture)));
+
+        return new JobProgressMessageEnvelope(
+            "jobs.recalcNoMatchingRule",
+            new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["count"] = unmatched.Count.ToString(CultureInfo.InvariantCulture),
+                ["rows"] = unmatched.Count > NoMatchingRuleRowsShown ? shown + ", …" : shown,
+            });
+    }
 
     /// <summary>Розбирає завдання черги.</summary>
     /// <remarks>

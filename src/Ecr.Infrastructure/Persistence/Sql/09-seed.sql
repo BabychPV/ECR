@@ -7227,8 +7227,11 @@ USING (VALUES
     (N'err.ECR-UOM-0422.fieldMapUnitDimensions', N'en', N'Unit "{from}" cannot be converted to "{to}": they measure different quantities, so the mapping of field "{sourceField}" would never write a value. Choose units of the same dimension.', 1),
     -- COLL:d4efmapunit ── кінець секції ──
     -- COLL:d9tpltitle ── приймальна №8, D-9: власний заголовок 409 на зайнятий код шаблону; ru/kz — порцією COLL:d9tpltitle нижче ──
-    (N'err.ECR-TMPL-0409.templateCodeTaken.title', N'en', N'Template code is already in use', 1)
+    (N'err.ECR-TMPL-0409.templateCodeTaken.title', N'en', N'Template code is already in use', 1),
     -- COLL:d9tpltitle ── кінець секції ──
+    -- COLL:l4norule ── L-4 Land Demo: рядок без жодного правила не рахується мовчки; ru/kz — порцією COLL:l4norule нижче ──
+    (N'jobs.recalcNoMatchingRule', N'en', N'No matching rule for {count} row(s) (rows: {rows}). These rows were not calculated; the other rows were.', 1)
+    -- COLL:l4norule ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -17553,6 +17556,16 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:d9tpltitle ── кінець секції ──
+-- COLL:l4norule ── ru/kz L-4: рядок без жодного правила; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'jobs.recalcNoMatchingRule', N'ru', N'Нет подходящего правила для строк: {count} (номера: {rows}). Эти строки не рассчитаны, остальные рассчитаны.'),
+    (N'jobs.recalcNoMatchingRule', N'kz', N'{count} жол үшін сәйкес ереже жоқ (нөмірлері: {rows}). Бұл жолдар есептелмеді, қалғандары есептелді.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:l4norule ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

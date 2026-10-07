@@ -109,6 +109,7 @@ public sealed record CalculationBatch(int Ordinal, IReadOnlyList<int> Methodolog
 public sealed class ModuleProfile
 {
     private readonly Dictionary<string, ModuleStat> _stats = new(StringComparer.Ordinal);
+    private readonly List<UnmatchedRow> _unmatched = [];
 
     /// <summary>Записує виконання одного модуля.</summary>
     /// <param name="moduleCode">Код модуля.</param>
@@ -142,6 +143,8 @@ public sealed class ModuleProfile
     {
         ArgumentNullException.ThrowIfNull(other);
 
+        _unmatched.AddRange(other._unmatched);
+
         foreach (var stat in other._stats.Values)
         {
             var existing = _stats.TryGetValue(stat.Code, out var found)
@@ -165,13 +168,15 @@ public sealed class ModuleProfile
     public bool IsEmpty => _stats.Count == 0;
 
     /// <summary>Рядки, яким не підійшло жодне правило жодної прив'язки таблиці (L-4).</summary>
-    public IReadOnlyList<UnmatchedRow> UnmatchedRows => [];
+    public IReadOnlyList<UnmatchedRow> UnmatchedRows => _unmatched;
 
     /// <summary>Записує рядки без правила.</summary>
     /// <param name="rows">Рядки без правила.</param>
     public void RecordUnmatched(IEnumerable<UnmatchedRow> rows)
     {
         ArgumentNullException.ThrowIfNull(rows);
+
+        _unmatched.AddRange(rows);
     }
 
     /// <summary>Профіль як JSON для <c>ModulesProfileJson</c>.</summary>

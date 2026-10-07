@@ -134,10 +134,30 @@ public sealed class MethodologyResolver(IMethodologyStore store, ICellStore cell
     public async Task<IReadOnlyList<RowRuleMatch>> MatchRowsWithRulesAsync(
         int methodologyVersionId, long tableInstanceId, CancellationToken ct)
     {
+        var outcome = await MatchRowsDetailedAsync(methodologyVersionId, tableInstanceId, ct).ConfigureAwait(false);
+
+        return outcome.Matches;
+    }
+
+    /// <summary>
+    /// Те саме, що <see cref="MatchRowsWithRulesAsync"/>, плюс <b>усі</b> живі рядки таблиці
+    /// в порядку створення — щоб оркестратор міг назвати рядки, яким не підійшло жодне правило (L-4).
+    /// </summary>
+    /// <param name="methodologyVersionId">Версія методології.</param>
+    /// <param name="tableInstanceId">Екземпляр таблиці документа.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>
+    /// Збіги й ключі всіх рядків за зростанням <c>TableRow.Id</c>; ключів <c>null</c>, коли в версії
+    /// немає жодного правила (рядки тоді не читаються, а «не підійшло правило» не має сенсу —
+    /// про версію без правил кажуть <c>methodologies.noRules</c> і попередження публікації).
+    /// </returns>
+    public async Task<RowMatchOutcome> MatchRowsDetailedAsync(
+        int methodologyVersionId, long tableInstanceId, CancellationToken ct)
+    {
         var rules = await store.GetRulesAsync(methodologyVersionId, ct).ConfigureAwait(false);
         if (rules.Count == 0)
         {
-            return [];
+            return new RowMatchOutcome([], null);
         }
 
         var instance = await rows.ResolveTableInstanceAsync(tableInstanceId, ct).ConfigureAwait(false);
@@ -183,9 +203,17 @@ public sealed class MethodologyResolver(IMethodologyStore store, ICellStore cell
             }
         }
 
-        return matched;
+        return new RowMatchOutcome(matched, [.. rowIds.OrderBy(r => r.Value).Select(r => r.Key)]);
     }
 }
+
+/// <summary>Результат зіставлення рядків таблиці з правилами версії.</summary>
+/// <param name="Matches">Рядки, що їх закрило правило.</param>
+/// <param name="AllRowKeys">
+/// Ключі всіх живих рядків за зростанням <c>TableRow.Id</c> (номер рядка = позиція + 1);
+/// <c>null</c> — у версії немає правил.
+/// </param>
+public sealed record RowMatchOutcome(IReadOnlyList<RowRuleMatch> Matches, IReadOnlyList<string>? AllRowKeys);
 
 /// <summary>Рядок і правило, яке його закрило.</summary>
 /// <param name="RowKey">Ключ рядка документа.</param>
