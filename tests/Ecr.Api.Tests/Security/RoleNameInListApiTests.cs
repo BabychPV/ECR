@@ -73,7 +73,9 @@ public sealed class RoleNameInListApiTests(SqlServerFixture sql)
 
     private static async Task RunAsync(EcrApiFactory app, HttpClient admin)
     {
-        var code = $"R{Guid.NewGuid():N}"[..12];
+        // ⛔ "A__" сортується першим за Code (підкреслення йде перед літерами),
+        // тож роль завжди в межах Take(500) навіть у «брудній» спільній базі.
+        var code = $"A__{Guid.NewGuid():N}"[..12];
         var created = await admin.PostAsJsonAsync(
             new Uri("/api/v1/roles", UriKind.Relative),
             new { code, nameL10n = new Dictionary<string, string> { ["en"] = "Flare operators" }, permissionCodes = Array.Empty<string>() })
