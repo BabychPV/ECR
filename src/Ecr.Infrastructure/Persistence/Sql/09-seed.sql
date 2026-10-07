@@ -7218,8 +7218,10 @@ USING (VALUES
     (N'units.dim.MassPerStdVolume', N'en', N'Mass per standard volume', 1),
     (N'units.dim.EnergyPerStdVolume', N'en', N'Energy per standard volume', 1),
     (N'units.dim.EnergyPerMass', N'en', N'Energy per mass', 1),
-    (N'units.dim.MassPerAmount', N'en', N'Mass per amount of substance', 1)
-    -- COLL:ui-rc9 ── кінець секції ──
+    (N'units.dim.MassPerAmount', N'en', N'Mass per amount of substance', 1),
+    -- COLL:d9tpltitle ── приймальна №8, D-9: власний заголовок 409 на зайнятий код шаблону; ru/kz — порцією COLL:d9tpltitle нижче ──
+    (N'err.ECR-TMPL-0409.templateCodeTaken.title', N'en', N'Template code is already in use', 1)
+    -- COLL:d9tpltitle ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -17514,6 +17516,16 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:ui-rc9 ── кінець секції ──
+-- COLL:d9tpltitle ── ru/kz заголовка 409 на зайнятий код шаблону (D-9); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-TMPL-0409.templateCodeTaken.title', N'ru', N'Код шаблона уже используется'),
+    (N'err.ECR-TMPL-0409.templateCodeTaken.title', N'kz', N'Үлгі коды бұрыннан қолданылады')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:d9tpltitle ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t
