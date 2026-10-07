@@ -171,7 +171,7 @@ describe('інспектор документа (UI-25)', () => {
   it('«K issues» відкриває Issues, згруповані за таблицями, фокус на вкладці', async () => {
     render(<Harness />);
 
-    const trigger = screen.getByRole('button', { name: /inspector\.issuesCount \(count=2\)/ });
+    const trigger = screen.getByRole('button', { name: /document\.issuesCount\.other \(count=2\)/ });
     trigger.focus();
     fireEvent.click(trigger);
 
@@ -199,7 +199,7 @@ describe('інспектор документа (UI-25)', () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     try {
       render(<Harness />);
-      const trigger = screen.getByRole('button', { name: /inspector\.issuesCount/ });
+      const trigger = screen.getByRole('button', { name: /document\.issuesCount/ });
       trigger.focus();
       fireEvent.click(trigger);
 
@@ -272,7 +272,7 @@ describe('Scope: роль бачить один аркуш', () => {
     expect(aside.textContent).not.toContain('SECRET');
     expect(aside.textContent).not.toContain('HIDDEN');
     // Лічильник рахує лише видиме: 2, не 3.
-    expect(screen.getByRole('button', { name: /inspector\.issuesCount \(count=2\)/ })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /document\.issuesCount\.other \(count=2\)/ })).toBeTruthy();
     expect(within(aside).getByRole('tab', { name: /inspector\.tabIssues/ }).textContent).toContain('2');
 
     act(() => publishInspectedCell(Cell));
