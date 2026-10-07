@@ -200,6 +200,52 @@ public sealed class ColumnDef : Entity<int>
     /// </remarks>
     public void SetHidden(bool hidden) => IsHidden = hidden;
 
+    /// <summary>
+    /// Прив'язує колонку до календарного місяця (ФВ-6.x, правила вікна
+    /// періоду <c>SourceWindow</c>/<c>OutsidePermitWindow</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ До PS-P1C сеттера не було: <c>IsMonthColumn</c>/<c>MonthNumber</c>
+    /// не налаштовувалися ні через API, ні в конструкторі, тож
+    /// <c>PeriodRuleFacts.ColumnMonthNumber</c> завжди був <c>null</c>, а
+    /// правила вікна — мертвими. Дзеркалить <c>CK_ColumnDef_Month</c>:
+    /// <c>IsMonthColumn = 0 OR MonthNumber BETWEEN 1 AND 12</c>; додатково
+    /// відхиляється <c>MonthNumber</c> без прапора — два незалежні поля, що
+    /// суперечать одне одному, мовчки читалися б по-різному.
+    /// </remarks>
+    /// <exception cref="DomainException"><c>ECR-TMPL-0422</c>: місяць поза 1..12, прапор без місяця або місяць без прапора.</exception>
+    public void SetMonth(bool isMonthColumn, byte? monthNumber)
+    {
+        if (isMonthColumn && monthNumber is null)
+        {
+            throw MonthError("monthColumnWithoutMonth", $"Колонка {Code} позначена місячною, але місяць не задано.", monthNumber);
+        }
+
+        if (monthNumber is { } n && (n < 1 || n > 12))
+        {
+            throw MonthError("monthOutOfRange", $"Місяць колонки {Code} має бути від 1 до 12: {n}.", monthNumber);
+        }
+
+        if (!isMonthColumn && monthNumber is not null)
+        {
+            throw MonthError("monthWithoutFlag", $"Місяць колонки {Code} заданий, але колонка не позначена місячною.", monthNumber);
+        }
+
+        IsMonthColumn = isMonthColumn;
+        MonthNumber = isMonthColumn ? monthNumber : null;
+    }
+
+    private DomainException MonthError(string key, string message, byte? month)
+        => new(
+            "ECR-TMPL-0422",
+            message,
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = $"err.ECR-TMPL-0422.{key}",
+                ["columnCode"] = Code,
+                ["monthNumber"] = month?.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            });
+
     /// <summary>Типова ширина колонки, px; <c>null</c> — скинути до типової за типом.</summary>
     /// <exception cref="DomainException">Поза межами 40..800 — <c>ECR-TMPL-0422</c>.</exception>
     public void SetWidth(int? widthPx)
