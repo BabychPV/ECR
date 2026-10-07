@@ -240,6 +240,23 @@ public sealed class AuditReader(EcrDbContext db) : IAuditReader
             And("Origin = @origin", "@origin", origin, SqlDbType.NVarChar, OriginSize);
         }
 
+        if (filter.VisibleColumnIds is { } visible)
+        {
+            // ⛔ R-11: межі читання — В ЗАПИТІ, до TOP і курсора. Відсів після читання сторінки робив
+            // nextCursor оракулом «далі є приховані зміни» і давав порожню/коротшу сторінку при limit=1.
+            // Перелік їде ОДНИМ JSON-параметром (OPENJSON), не склеюванням тексту запиту.
+            if (visible.Count == 0)
+            {
+                where.Append("\n                   AND 1 = 0");
+            }
+            else
+            {
+                where.Append("\n                   AND ColumnDefId IN (SELECT CAST([value] AS int) FROM OPENJSON(@visibleColumns))");
+                command.Parameters.Add("@visibleColumns", SqlDbType.NVarChar, -1).Value =
+                    "[" + string.Join(",", visible.Select(v => v.ToString(CultureInfo.InvariantCulture))) + "]";
+            }
+        }
+
         if (filter.Query is { Length: > 0 } query)
         {
             // ⛔ UI-38, C3: пошук за бізнес-ключем документа, ключем рядка або кодом колонки. Значення —
