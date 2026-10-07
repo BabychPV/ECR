@@ -148,7 +148,7 @@ public sealed class SetTemplateArchivedHandler(
         // (`ExceptionHandlingMiddleware.Map`).
         if (archived)
         {
-            template.Archive();
+            template.Archive(clock.UtcNow);
         }
         else
         {

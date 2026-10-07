@@ -50,7 +50,7 @@ public sealed class TemplateListSummaryTests(SqlServerFixture sql)
                 visible.TemplateId, $"9.9.{_tag}", authorId, new DateTime(2026, 3, 1, 0, 0, 0, DateTimeKind.Utc)));
 
             var archived = await db.Templates.SingleAsync(t => t.Id == hidden.TemplateId);
-            archived.Archive();
+            archived.Archive(new DateTime(2026, 4, 1, 0, 0, 0, DateTimeKind.Utc));
             await db.SaveChangesAsync();
         }
 

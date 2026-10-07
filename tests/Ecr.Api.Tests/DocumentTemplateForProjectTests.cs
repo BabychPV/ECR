@@ -114,7 +114,7 @@ public sealed class DocumentTemplateForProjectTests(SqlServerFixture sql)
                 .Select(v => v.TemplateId)
                 .Single();
             var template = db.Templates.Single(t => t.Id == templateId);
-            template.Archive();
+            template.Archive(DateTime.UtcNow);
             await db.SaveChangesAsync().ConfigureAwait(true);
         }
 

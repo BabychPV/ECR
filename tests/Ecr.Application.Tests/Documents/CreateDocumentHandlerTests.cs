@@ -141,7 +141,7 @@ public sealed class CreateDocumentHandlerTests
             new LocalizedText(new Dictionary<string, string> { ["en"] = "Archived" }),
             createdByUserId: 9,
             Now);
-        archived.Archive();
+        archived.Archive(Now);
 
         _templates.FindTemplateOfVersionAsync(TemplateVersionId, Arg.Any<CancellationToken>())
             .Returns(archived);

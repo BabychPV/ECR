@@ -45,6 +45,28 @@ public sealed class TemplateVersion : Entity<int>
     public DateTime CreatedAt { get; private set; }
     public int CreatedByUserId { get; private set; }
 
+    /// <summary>
+    /// Остання правка чернетки, UTC; <c>null</c> — чернетку не правили після створення (або вона
+    /// старша за колонку).
+    /// </summary>
+    public DateTime? UpdatedAt { get; private set; }
+
+    /// <summary>Хто останнім правив чернетку; <c>null</c> — як <see cref="UpdatedAt"/>.</summary>
+    public int? UpdatedByUserId { get; private set; }
+
+    /// <summary>
+    /// Фіксує правку чернетки (<see cref="UpdatedAt"/>, <see cref="UpdatedByUserId"/>).
+    /// Викликається обробниками структурних правок одразу після
+    /// <see cref="EnsureStructurallyMutable"/>.
+    /// </summary>
+    /// <param name="userId">Хто править.</param>
+    /// <param name="utcNow">Момент правки (UTC).</param>
+    public void TouchDraft(int userId, DateTime utcNow)
+    {
+        UpdatedAt = utcNow;
+        UpdatedByUserId = userId;
+    }
+
     public IReadOnlyList<SheetDef> Sheets => _sheets;
 
     /// <summary>Поля шапки документа — рівень усього документа, не таблиці.</summary>
