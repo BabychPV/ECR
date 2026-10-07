@@ -123,11 +123,14 @@ public sealed class ExcelImportApplyWorkbookTests(SqlServerFixture sql) : IDispo
         var before = await StateAsync(world);
 
         await using var db = CreateContext();
-        var error = await Assert.ThrowsAsync<AccessDeniedException>(
+        // D-6: deny on READING a table makes it nonexistent for the author - 404 (like an unknown table),
+        // not 403 deniedCells, so the existence of a hidden table is not disclosed. The table instance
+        // number in the message and the "nothing written" guarantee are unchanged.
+        var error = await Assert.ThrowsAsync<NotFoundException>(
             () => Importer(db, profile, plan).ApplyAsync(world.Doc.DocumentId, Token, CancellationToken.None));
 
-        Assert.Equal("ECR-ACCS-0403", error.ErrorCode);
-        Assert.Equal("err.ECR-ACCS-0403.deniedCells", error.Details!["messageKey"]);
+        Assert.Equal("ECR-DOC-0404", error.ErrorCode);
+        Assert.Equal("err.ECR-DOC-0404.tableInstance", error.Details!["messageKey"]);
         Assert.Equal(guilty.TableInstanceId.ToString(CultureInfo.InvariantCulture), error.Details["tableInstanceId"]);
         Assert.Equal(before, await StateAsync(world));
     }
