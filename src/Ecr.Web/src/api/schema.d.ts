@@ -2207,6 +2207,7 @@ export interface paths {
                     state?: string;
                     mine?: boolean;
                     hasLateEdits?: boolean;
+                    q?: string;
                 };
                 header?: never;
                 path?: never;
