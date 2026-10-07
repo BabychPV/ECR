@@ -73,6 +73,8 @@ public sealed class DocumentListSummarySheetsScopeTests(SqlServerFixture sql)
 
         AssertOwnerHidden("GET /documents", item);
         AssertOwnerHidden("GET /documents/{id}", JsonDocument.Parse(one).RootElement);
+        AssertApproverHidden("GET /documents", item);
+        AssertApproverHidden("GET /documents/{id}", JsonDocument.Parse(one).RootElement);
     }
 
     /// <summary>Звичайна роль: ім'я автора є, 2 із 2, і зведення збігається з сумою по переліку.</summary>
@@ -103,6 +105,57 @@ public sealed class DocumentListSummarySheetsScopeTests(SqlServerFixture sql)
         Assert.Equal(s.UserName, mine.GetProperty("ownerDisplayName").GetString());
     }
 
+    /// <summary>
+    /// К6 (07.10): швидкий перегляд оператора бачить і автора, і «хто затвердив» — і в переліку, і в картці.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-6.14")]
+    public async Task Звичайний_читач_бачить_автора_і_того_хто_затвердив()
+    {
+        var s = await ArrangeAsync("none").ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
+
+        var list = await client.GetStringAsync(
+            new Uri($"/api/v1/documents?limit=200&periodKey={s.PeriodKey}", UriKind.Relative)).ConfigureAwait(true);
+        var item = JsonDocument.Parse(list).RootElement.GetProperty("items").EnumerateArray()
+            .Single(d => d.GetProperty("id").GetInt64() == s.DocumentId);
+        var one = JsonDocument.Parse(await client.GetStringAsync(
+            new Uri($"/api/v1/documents/{s.DocumentId}?periodKey={s.PeriodKey}", UriKind.Relative)).ConfigureAwait(true)).RootElement;
+
+        foreach (var doc in new[] { item, one })
+        {
+            Assert.Equal(s.UserName, doc.GetProperty("ownerDisplayName").GetString());
+            Assert.Equal(s.UserName, doc.GetProperty("approverDisplayName").GetString());
+        }
+    }
+
+    /// <summary>До затвердження «хто затвердив» немає: <c>null</c>, а автор видимий.</summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-6.14")]
+    public async Task До_затвердження_approver_null_автор_видимий()
+    {
+        var s = await ArrangeAsync("none", approved: false).ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
+
+        var one = JsonDocument.Parse(await client.GetStringAsync(
+            new Uri($"/api/v1/documents/{s.DocumentId}?periodKey={s.PeriodKey}", UriKind.Relative)).ConfigureAwait(true)).RootElement;
+
+        Assert.Equal(s.UserName, one.GetProperty("ownerDisplayName").GetString());
+        AssertApproverHidden("GET /documents/{id}", one);
+    }
+
+    private static void AssertApproverHidden(string endpoint, JsonElement doc)
+    {
+        var shown = doc.TryGetProperty("approverDisplayName", out var v) && v.ValueKind != JsonValueKind.Null;
+        Assert.False(shown, $"{endpoint}: approverDisplayName має бути null — {doc}");
+    }
+
     private static void AssertOwnerHidden(string endpoint, JsonElement doc)
     {
         var shown = doc.TryGetProperty("ownerDisplayName", out var v) && v.ValueKind != JsonValueKind.Null;
@@ -111,7 +164,7 @@ public sealed class DocumentListSummarySheetsScopeTests(SqlServerFixture sql)
 
     private sealed record Scenario(long DocumentId, int PeriodKey, string UserName);
 
-    private async Task<Scenario> ArrangeAsync(string how)
+    private async Task<Scenario> ArrangeAsync(string how, bool approved = true)
     {
         var b = await new TestDocumentBuilder(sql.ConnectionString).BuildAsync().ConfigureAwait(false);
         var tag = Guid.NewGuid().ToString("N")[..8].ToUpperInvariant();
@@ -162,7 +215,11 @@ public sealed class DocumentListSummarySheetsScopeTests(SqlServerFixture sql)
         {
             var state = new ApprovalState(b.DocumentId, sheetId, b.PeriodKey.Value);
             state.Submit(user.Id, now);
-            state.Approve(user.Id, now);
+            if (approved)
+            {
+                state.Approve(user.Id, now);
+            }
+
             db.ApprovalStates.Add(state);
         }
 
