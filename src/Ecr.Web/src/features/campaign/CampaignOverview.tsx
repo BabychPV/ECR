@@ -136,23 +136,36 @@ function CampaignBody({ summary }: { readonly summary: CampaignSummary }): JSX.E
           ⚠ Лічильники класів — з `totals` сервера, по всіх проєктах періоду.
           Колір — лише у тих, що затримують, і лише коли вони є (`L3`).
         */}
-        <StatStrip
-          label={t('campaign.laggingTitle')}
-          items={[
-            { id: 'overdue', label: progressLabel('Overdue'), value: totals.overdue, tone: 'danger', filter: false },
-            { id: 'atRisk', label: progressLabel('AtRisk'), value: totals.atRisk, tone: 'warning', filter: false },
-            { id: 'inProgress', label: progressLabel('InProgress'), value: totals.inProgress, filter: false },
-            { id: 'done', label: progressLabel('Done'), value: totals.done, filter: false },
-          ]}
-        />
+        {/*
+          ⛔ R-1: клас «Done» («усе затверджено») залежить від станів УСІХ аркушів, тож сервер віддає `null` у
+          лічильниках класів і в `progress` читачу, що має інструменти, які ховають аркуші. Тоді — «—» замість смуги й
+          переліку: порожній перелік «ніхто не затримує» був би неправдою, а не «невідомо».
+        */}
+        {totals.overdue === null || totals.atRisk === null || totals.inProgress === null || totals.done === null ? (
+          <Text c="dimmed" data-testid="campaign-progress-hidden">
+            {'—'}
+          </Text>
+        ) : (
+          <>
+            <StatStrip
+              label={t('campaign.laggingTitle')}
+              items={[
+                { id: 'overdue', label: progressLabel('Overdue'), value: totals.overdue, tone: 'danger', filter: false },
+                { id: 'atRisk', label: progressLabel('AtRisk'), value: totals.atRisk, tone: 'warning', filter: false },
+                { id: 'inProgress', label: progressLabel('InProgress'), value: totals.inProgress, filter: false },
+                { id: 'done', label: progressLabel('Done'), value: totals.done, filter: false },
+              ]}
+            />
 
-        <DataTable<CampaignProject>
-          columns={laggingColumns()}
-          rows={lagging}
-          rowKey={(project) => String(project.projectId)}
-          emptyTitle={t('campaign.nobodyLagging')}
-          emptyHint={t('campaign.nobodyLaggingServerHint')}
-        />
+            <DataTable<CampaignProject>
+              columns={laggingColumns()}
+              rows={lagging}
+              rowKey={(project) => String(project.projectId)}
+              emptyTitle={t('campaign.nobodyLagging')}
+              emptyHint={t('campaign.nobodyLaggingServerHint')}
+            />
+          </>
+        )}
       </Stack>
     </Stack>
   );
@@ -254,7 +267,7 @@ function laggingColumns(): readonly DataTableColumn<CampaignProject>[] {
       key: 'progress',
       label: t('campaign.progressColumn'),
       sortValue: (project) => holdingUpRank(project.progress),
-      render: (project) => <ProgressBadge progress={project.progress} />,
+      render: (project) => (project.progress === null ? '—' : <ProgressBadge progress={project.progress} />),
     },
     {
       key: 'lastDay',
