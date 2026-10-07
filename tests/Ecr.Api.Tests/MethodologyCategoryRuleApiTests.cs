@@ -126,7 +126,118 @@ public sealed class MethodologyCategoryRuleApiTests(SqlServerFixture sql)
         Assert.Equal(HttpStatusCode.NotFound, foreign.StatusCode);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Пакет_імпорту_з_вузлом_categoryRule_створює_чернетку_з_правилом_а_повтор_без_змін()
+    {
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, ["Calculation.View", "Calculation.EditFormula", "Calculation.EditConstant"])
+            .ConfigureAwait(true);
+        var code = $"CRI{Guid.NewGuid():N}"[..16];
+
+        var dry = await ReadAsync(await ImportAsync(client, code, "@Fuel", dryRun: true).ConfigureAwait(true))
+            .ConfigureAwait(true);
+        Assert.Equal("added", Version(dry).GetProperty("categoryRule").GetString());
+
+        var applied = await ReadAsync(await ImportAsync(client, code, "@Fuel", dryRun: false).ConfigureAwait(true))
+            .ConfigureAwait(true);
+        Assert.True(applied.GetProperty("applied").GetBoolean());
+        var versionId = Version(applied).GetProperty("versionId").GetInt32();
+
+        await using (var db = new EcrDbContext(Options()))
+        {
+            var rule = await db.MethodologyCategoryRules.AsNoTracking()
+                .SingleAsync(r => r.MethodologyVersionId == versionId).ConfigureAwait(true);
+            Assert.Equal("@Fuel", rule.Expression);
+        }
+
+        // Повтор того самого пакета: версія вже є з тим самим правилом - без запису, без дубля.
+        var again = await ReadAsync(await ImportAsync(client, code, "@Fuel", dryRun: false).ConfigureAwait(true))
+            .ConfigureAwait(true);
+        Assert.Equal("unchanged", again.GetProperty("outcome").GetString());
+        Assert.Equal("unchanged", Version(again).GetProperty("categoryRule").GetString());
+        Assert.Equal(1, await RuleCountAsync(versionId).ConfigureAwait(true));
+
+        // Те саме з іншим правилом - 409 зі звітом, правило не переписується.
+        var conflict = await client.PostAsJsonAsync(
+            new Uri("/api/v1/methodologies/import?dryRun=false", UriKind.Relative), Package(code, "@Other"))
+            .ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.Conflict, conflict.StatusCode);
+
+        await using var check = new EcrDbContext(Options());
+        Assert.Equal("@Fuel", (await check.MethodologyCategoryRules.AsNoTracking()
+            .SingleAsync(r => r.MethodologyVersionId == versionId).ConfigureAwait(true)).Expression);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Пакет_імпорту_з_нерозібраним_правилом_дає_422_і_нічого_не_пише()
+    {
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, ["Calculation.View", "Calculation.EditFormula", "Calculation.EditConstant"])
+            .ConfigureAwait(true);
+        var code = $"CRB{Guid.NewGuid():N}"[..16];
+
+        var response = await ImportAsync(client, code, "@Fuel +", dryRun: false).ConfigureAwait(true);
+
+        var problem = await ProblemAsync(response, HttpStatusCode.UnprocessableEntity).ConfigureAwait(true);
+        var blocker = problem.GetProperty("report").GetProperty("blockers").EnumerateArray().Single();
+        Assert.Equal("categoryRuleInvalid", blocker.GetProperty("kind").GetString());
+
+        await using var db = new EcrDbContext(Options());
+        Assert.False(await db.Methodologies.AnyAsync(m => m.Code == code).ConfigureAwait(true));
+    }
+
     // ── Опора ─────────────────────────────────────────────────────────────
+
+    private static JsonElement Version(JsonElement report)
+        => report.GetProperty("methodologies").EnumerateArray().Single().GetProperty("versions").EnumerateArray().Single();
+
+    private static Task<HttpResponseMessage> ImportAsync(HttpClient client, string code, string rule, bool dryRun)
+        => client.PostAsJsonAsync(
+            new Uri($"/api/v1/methodologies/import?dryRun={(dryRun ? "true" : "false")}", UriKind.Relative),
+            Package(code, rule));
+
+    private static object Package(string code, string rule)
+        => new
+        {
+            format = "ecr-methodology-package",
+            version = 1,
+            library = "Common",
+            methodologies = new object[]
+            {
+                new
+                {
+                    name = code,
+                    versions = new[]
+                    {
+                        new
+                        {
+                            version = "V1",
+                            formulas = new[]
+                            {
+                                new
+                                {
+                                    name = "OUT",
+                                    version = "1",
+                                    arguments = "@A",
+                                    text = "@A",
+                                    startDate = "2023-12-31T19:00:00Z",
+                                    endDate = "9999-02-19T19:00:00Z",
+                                    isAvailable = true,
+                                    report = "",
+                                },
+                            },
+                            constants = Array.Empty<object>(),
+                            categoryRule = new { expression = rule },
+                        },
+                    },
+                },
+            },
+            blockers = Array.Empty<string>(),
+        };
 
     private static Uri Url(Stand stand)
         => new($"/api/v1/methodologies/{stand.MethodologyId}/versions/{stand.VersionId}/category-rule", UriKind.Relative);

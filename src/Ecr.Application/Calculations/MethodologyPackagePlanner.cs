@@ -40,10 +40,12 @@ public sealed record ImportConstantContent(
 /// <param name="Formulas">Формули.</param>
 /// <param name="Constants">Рядки констант.</param>
 /// <param name="Imports">Коди методологій, чиї формули версія імпортує.</param>
+/// <param name="CategoryRule">Вираз правила категорії константи (L-2); <c>null</c> — правила немає.</param>
 public sealed record ImportVersionContent(
     IReadOnlyList<ImportFormulaContent> Formulas,
     IReadOnlyList<ImportConstantContent> Constants,
-    IReadOnlyList<string> Imports)
+    IReadOnlyList<string> Imports,
+    string? CategoryRule = null)
 {
     /// <summary>Чи збігається вміст із іншим — без огляду на порядок.</summary>
     /// <param name="other">Інший вміст.</param>
@@ -80,6 +82,7 @@ public sealed record ImportVersionContent(
                     c.Source ?? "\0"))
                 .Order(StringComparer.Ordinal),
             .. content.Imports.Select(i => "I\u001f" + i.ToUpperInvariant()).Order(StringComparer.Ordinal),
+            .. content.CategoryRule is { } rule ? ["R\u001f" + rule] : Array.Empty<string>(),
         ];
 }
 
@@ -169,7 +172,10 @@ public sealed record MethodologyImportPlan(
                     v.Content.Formulas.Count,
                     v.Content.Constants.Count,
                     v.ConstantsFromLibrary,
-                    v.Content.Imports))]))],
+                    v.Content.Imports,
+                    v.Content.CategoryRule is null
+                        ? null
+                        : v.Action switch { MethodologyPackagePlanner.Create => "added", "unchanged" => "unchanged", _ => "conflict" }))]))],
             Blockers,
             Conflicts,
             Warnings,
@@ -226,12 +232,17 @@ public static class MethodologyPackagePlanner
     /// <param name="existing">Наявні методології за кодом (без огляду на регістр).</param>
     /// <param name="units">Каталог одиниць.</param>
     /// <param name="timeZone">Пояс майданчика: дати AF (UTC) переводяться в його дні.</param>
+    /// <param name="formulaEngine">
+    /// Парсер діалекту Methodology для перевірки виразів правил категорії (L-2); <c>null</c> — перевіряється
+    /// лише непорожність і довжина (сухий прогін без рушія).
+    /// </param>
     /// <returns>План.</returns>
     public static MethodologyImportPlan Plan(
         MethodologyPackageDto package,
         IReadOnlyDictionary<string, ExistingMethodology> existing,
         UnitCatalogSnapshot units,
-        TimeZoneInfo timeZone)
+        TimeZoneInfo timeZone,
+        IFormulaEngine? formulaEngine = null)
     {
         ArgumentNullException.ThrowIfNull(package);
         ArgumentNullException.ThrowIfNull(existing);
@@ -289,6 +300,8 @@ public static class MethodologyPackagePlanner
                 {
                     RequireCode(c.Name, "constant", m.Name, v.Version, c.Name, blockers);
                 }
+
+                CheckCategoryRule(v.CategoryRule, m.Name, v.Version, formulaEngine, blockers);
             }
         }
 
@@ -439,7 +452,8 @@ public static class MethodologyPackagePlanner
                 var content = new ImportVersionContent(
                     [.. formulas.Select(f => new ImportFormulaContent(f.Name.Trim(), f.Text ?? string.Empty, f.Arguments))],
                     constants,
-                    [.. imports]);
+                    [.. imports],
+                    v.CategoryRule?.Expression?.Trim());
 
                 var match = current?.Versions.FirstOrDefault(x => string.Equals(x.Version, v.Version, StringComparison.Ordinal));
                 var action = Create;
@@ -481,6 +495,61 @@ public static class MethodologyPackagePlanner
         }
 
         return new MethodologyImportPlan(planned, blockers, conflicts, warnings);
+    }
+
+    /// <summary>Вузол <c>categoryRule</c> версії пакета: непорожній, не задовгий, розбирається, не число (L-2).</summary>
+    /// <param name="rule">Вузол пакета; <c>null</c> — правила в пакеті немає.</param>
+    /// <param name="methodology">Методологія для рядка звіту.</param>
+    /// <param name="version">Версія для рядка звіту.</param>
+    /// <param name="formulaEngine">Парсер діалекту Methodology; <c>null</c> — розбір пропускається.</param>
+    /// <param name="blockers">Куди складати блокери.</param>
+    /// <remarks>
+    /// ⚠ Вузол є, а виразу немає — блокер, а не мовчазне «правила немає»: інакше пакет, у якому правило
+    /// забули заповнити, створював би версію, що публікується з <c>constantAmbiguous</c> на кожному рядку.
+    /// </remarks>
+    private static void CheckCategoryRule(
+        MethodologyPackageCategoryRuleDto? rule,
+        string methodology,
+        string version,
+        IFormulaEngine? formulaEngine,
+        List<MethodologyImportIssueDto> blockers)
+    {
+        if (rule is null)
+        {
+            return;
+        }
+
+        var expression = rule.Expression?.Trim();
+        if (string.IsNullOrEmpty(expression))
+        {
+            blockers.Add(new("categoryRuleEmpty", methodology, version, "categoryRule", "Порожній вираз правила категорії."));
+            return;
+        }
+
+        if (expression.Length > MethodologyFormula.MaxExpressionLength)
+        {
+            blockers.Add(new("categoryRuleTooLong", methodology, version, "categoryRule",
+                $"Вираз довший за {MethodologyFormula.MaxExpressionLength} символів."));
+            return;
+        }
+
+        if (formulaEngine is null)
+        {
+            return;
+        }
+
+        var parsed = formulaEngine.Parse(expression, ExpressionDialect.Methodology);
+        if (!parsed.IsSuccess || parsed.Expression is null)
+        {
+            blockers.Add(new("categoryRuleInvalid", methodology, version, "categoryRule",
+                parsed.Diagnostics.Count > 0 ? parsed.Diagnostics[0].Message : "Вираз не розбирається."));
+        }
+        else if (parsed.Expression.ResultType is Ecr.Expressions.Ast.ExpressionValueType.Number
+                 or Ecr.Expressions.Ast.ExpressionValueType.Boolean or Ecr.Expressions.Ast.ExpressionValueType.Date)
+        {
+            blockers.Add(new("categoryRuleNotText", methodology, version, "categoryRule",
+                "Правило категорії повертає не текст: ключ категорії — текст."));
+        }
     }
 
     /// <summary>Одна формула на код: доступна з найпізнішим початком дії.</summary>
