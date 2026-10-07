@@ -306,6 +306,13 @@ public sealed partial class PatchCellsHandler(
                        ?? await rowStore.ResolveTableInstanceAsync(request.TableInstanceId, ct).ConfigureAwait(false);
 
         var profile = await EnsureDocumentReadableAsync(userId, instance.DocumentId, ct).ConfigureAwait(false);
+
+        // ⛔ D-6: схована від читача таблиця для нього НЕ ІСНУЄ — 404 ДО будь-якої відмови, що називає її
+        // (409 `ECR-ROW-0409` із кодом таблиці й RowMode, період екземпляра, версії).
+        await DocumentVisibility
+            .RequireTableVisibleAsync(
+                access, profile, instance.DocumentId, instance.TableInstanceId, instance.TableDefId, instance.PeriodKey, ct)
+            .ConfigureAwait(false);
         EnsurePeriodMatches(request, instance);
 
         var snapshot = await metadata.GetAsync(instance.TemplateVersionId, ct).ConfigureAwait(false);
