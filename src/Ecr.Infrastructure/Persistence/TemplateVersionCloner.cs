@@ -36,10 +36,41 @@ public static class TemplateVersionCloner
     /// <param name="ColumnCode">Код колонки в джерелі.</param>
     public sealed record RuleLink(ValidationRule Rule, TableDef Table, string ColumnCode);
 
+    /// <summary>Ідентичність колонки у версії: код аркуша, код таблиці, код колонки.</summary>
+    public readonly record struct ColumnIdentity(string Sheet, string Table, string Column);
+
+    /// <summary>Ідентичність рядка у версії: код аркуша, код таблиці, ключ рядка.</summary>
+    public readonly record struct RowIdentity(string Sheet, string Table, string RowKey);
+
+    /// <summary>Каскад колонки (<c>CascadeFromColumnId</c>) за ідентичністю колонки-джерела списку.</summary>
+    /// <param name="Column">Колонка клону.</param>
+    /// <param name="Target">Колонка-джерело каскаду в джерелі; <c>null</c> — цілі в версії не було.</param>
+    public sealed record CascadeLink(ColumnDef Column, ColumnIdentity? Target);
+
+    /// <summary>Батьківський рядок (<c>ParentRowDefId</c>) за ідентичністю рядка.</summary>
+    /// <param name="Row">Рядок клону.</param>
+    /// <param name="Target">Батьківський рядок у джерелі; <c>null</c> — батька в версії не було.</param>
+    public sealed record ParentLink(RowDef Row, RowIdentity? Target);
+
+    /// <summary>Посилання на стиль (<c>ColumnDef.StyleId</c>, <c>RowDef.StyleId</c>, <c>TableDef.HeaderStyleId</c>).</summary>
+    /// <param name="Owner">Колонка, рядок або таблиця клону.</param>
+    /// <param name="SourceStyleId">Id стилю в джерелі.</param>
+    public sealed record StyleLink(object Owner, int SourceStyleId);
+
     /// <summary>Усе, що треба перев'язати після першого збереження клону.</summary>
     /// <param name="Formulas">Формули, вилучені з графа до першого збереження.</param>
     /// <param name="Rules">Правила рівня колонки.</param>
-    public sealed record CloneLinks(IReadOnlyList<FormulaLink> Formulas, IReadOnlyList<RuleLink> Rules);
+    /// <param name="Cascades">Каскади колонок (D2).</param>
+    /// <param name="Parents">Батьківські рядки (D2).</param>
+    /// <param name="Styles">Посилання на стилі (D3).</param>
+    /// <param name="Graph">Клон, у графі якого шукаються цілі.</param>
+    public sealed record CloneLinks(
+        IReadOnlyList<FormulaLink> Formulas,
+        IReadOnlyList<RuleLink> Rules,
+        IReadOnlyList<CascadeLink>? Cascades = null,
+        IReadOnlyList<ParentLink>? Parents = null,
+        IReadOnlyList<StyleLink>? Styles = null,
+        TemplateVersion? Graph = null);
 
     /// <summary>Готує клон і перелік посилань, які треба перев'язати після збереження.</summary>
     /// <param name="source">Версія-джерело з повністю завантаженим графом.</param>
@@ -92,6 +123,32 @@ public static class TemplateVersionCloner
             }
         }
 
+        // D2/D3: Id колонок/рядків ДЖЕРЕЛА → ідентичність, і всі посилання на
+        // колонку, рядок чи стиль — ДО скидання ключів. Скидання лишало б у
+        // клоні Id джерела: FK не падав би, а каскад, ієрархія й стиль мовчки
+        // вказували б на іншу версію.
+        var columnIdentity = new Dictionary<int, ColumnIdentity>();
+        var rowIdentity = new Dictionary<int, RowIdentity>();
+        foreach (var sheet in source.Sheets)
+        {
+            foreach (var table in sheet.Tables)
+            {
+                foreach (var column in table.Columns)
+                {
+                    columnIdentity[column.Id] = new ColumnIdentity(sheet.Code, table.Code, column.Code);
+                }
+
+                foreach (var row in table.Rows)
+                {
+                    rowIdentity[row.Id] = new RowIdentity(sheet.Code, table.Code, row.RowKeyValue);
+                }
+            }
+        }
+
+        var cascadeLinks = new List<CascadeLink>();
+        var parentLinks = new List<ParentLink>();
+        var styleLinks = new List<StyleLink>();
+
         Reset(source, nameof(TemplateVersion.Id));
         Set(source, nameof(TemplateVersion.Version), newVersion);
         Set(source, nameof(TemplateVersion.Status), TemplateVersionStatus.Draft);
@@ -111,14 +168,46 @@ public static class TemplateVersionCloner
                 Reset(table, nameof(TableDef.Id));
                 Reset(table, nameof(TableDef.SheetDefId));
 
+                if (table.HeaderStyleId is { } headerStyle)
+                {
+                    styleLinks.Add(new StyleLink(table, headerStyle));
+                    Set(table, nameof(TableDef.HeaderStyleId), null);
+                }
+
                 foreach (var column in table.Columns)
                 {
+                    if (column.CascadeFromColumnId is { } cascade)
+                    {
+                        cascadeLinks.Add(new CascadeLink(
+                            column, columnIdentity.TryGetValue(cascade, out var target) ? target : null));
+                        Set(column, nameof(ColumnDef.CascadeFromColumnId), null);
+                    }
+
+                    if (column.StyleId is { } columnStyle)
+                    {
+                        styleLinks.Add(new StyleLink(column, columnStyle));
+                        Set(column, nameof(ColumnDef.StyleId), null);
+                    }
+
                     Reset(column, nameof(ColumnDef.Id));
                     Reset(column, nameof(ColumnDef.TableDefId));
                 }
 
                 foreach (var row in table.Rows)
                 {
+                    if (row.ParentRowDefId is { } parent)
+                    {
+                        parentLinks.Add(new ParentLink(
+                            row, rowIdentity.TryGetValue(parent, out var target) ? target : null));
+                        Set(row, nameof(RowDef.ParentRowDefId), null);
+                    }
+
+                    if (row.StyleId is { } rowStyle)
+                    {
+                        styleLinks.Add(new StyleLink(row, rowStyle));
+                        Set(row, nameof(RowDef.StyleId), null);
+                    }
+
                     Reset(row, nameof(RowDef.Id));
                     Reset(row, nameof(RowDef.TableDefId));
                 }
@@ -152,7 +241,7 @@ public static class TemplateVersionCloner
             Reset(field, nameof(HeaderFieldDef.TemplateVersionId));
         }
 
-        return (source, new CloneLinks(formulaLinks, ruleLinks));
+        return (source, new CloneLinks(formulaLinks, ruleLinks, cascadeLinks, parentLinks, styleLinks, source));
     }
 
     /// <summary>
@@ -195,7 +284,81 @@ public static class TemplateVersionCloner
             Set(link.Rule, nameof(ValidationRule.ColumnDefId), ColumnId(link.Table, link.ColumnCode));
         }
 
+        RelinkGraph(links);
+
         return formulas;
+    }
+
+    /// <summary>
+    /// D2: каскад колонки й батьківський рядок — на колонки/рядки КЛОНУ за ідентичністю.
+    /// Ціль не знайдено — лишається <c>null</c> (fail-closed), а не Id чужої версії.
+    /// </summary>
+    private static void RelinkGraph(CloneLinks links)
+    {
+        if (links.Graph is not { } clone)
+        {
+            return;
+        }
+
+        var columns = new Dictionary<ColumnIdentity, int>();
+        var rows = new Dictionary<RowIdentity, int>();
+        foreach (var sheet in clone.Sheets)
+        {
+            foreach (var table in sheet.Tables)
+            {
+                foreach (var column in table.Columns)
+                {
+                    columns[new ColumnIdentity(sheet.Code, table.Code, column.Code)] = column.Id;
+                }
+
+                foreach (var row in table.Rows)
+                {
+                    rows[new RowIdentity(sheet.Code, table.Code, row.RowKeyValue)] = row.Id;
+                }
+            }
+        }
+
+        foreach (var link in links.Cascades ?? [])
+        {
+            if (link.Target is { } target && columns.TryGetValue(target, out var id))
+            {
+                Set(link.Column, nameof(ColumnDef.CascadeFromColumnId), id);
+            }
+        }
+
+        foreach (var link in links.Parents ?? [])
+        {
+            if (link.Target is { } target && rows.TryGetValue(target, out var id))
+            {
+                Set(link.Row, nameof(RowDef.ParentRowDefId), id);
+            }
+        }
+    }
+
+    /// <summary>
+    /// D3: посилання на стиль — на стилі КЛОНУ. Стиль, якого немає в мапі, лишає <c>null</c> (fail-closed).
+    /// </summary>
+    /// <param name="links">Посилання, зібрані в <see cref="Prepare"/>.</param>
+    /// <param name="styleIds">Id стилю джерела → Id стилю клону.</param>
+    public static void RelinkStyles(CloneLinks links, IReadOnlyDictionary<int, int> styleIds)
+    {
+        ArgumentNullException.ThrowIfNull(links);
+        ArgumentNullException.ThrowIfNull(styleIds);
+
+        foreach (var link in links.Styles ?? [])
+        {
+            if (!styleIds.TryGetValue(link.SourceStyleId, out var id))
+            {
+                continue;
+            }
+
+            var property = link.Owner switch
+            {
+                TableDef => nameof(TableDef.HeaderStyleId),
+                _ => nameof(ColumnDef.StyleId),
+            };
+            Set(link.Owner, property, id);
+        }
     }
 
     private static int ColumnId(TableDef table, string code)
