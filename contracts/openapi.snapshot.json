@@ -3738,6 +3738,18 @@
             "format": "int32",
             "type": "integer"
           },
+          "staleResultsCount": {
+            "default": 0,
+            "description": "Документи зі застарілими результатами методологій за період (після останнього прогону правили вхід).\n⛔ Проєкти, де читач не бачить хоч щось нижче проєкту, не рахуються (як WithIssues):\nчисло по всьому документу розкрило б активність схованого. Те саме число дає фільтр `resultsStale=true`.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "staleResultsMineCount": {
+            "default": 0,
+            "description": "Те саме, але лише через правки поточного користувача (`staleBy=me`).",
+            "format": "int32",
+            "type": "integer"
+          },
           "submitted": {
             "description": "Усі аркуші подано або затверджено, і хоч один ще не затверджено.",
             "format": "int32",
@@ -3869,6 +3881,21 @@
             "description": "Проєкт.",
             "format": "int32",
             "type": "integer"
+          },
+          "resultsStale": {
+            "description": "Чи застаріли результати методологій документа за період: після початку актуального прогону хтось правив\nвхідну комірку (або довідник, який читає методологія). ВИВОДИТЬСЯ запитом, не зберігається. Документ без\nрезультатів — `false`. ⛔ `null` — період не задано, або читач має обмеження нижче проєкту\n(`DocumentSheetVisibility.For`): «застаріло за видимими входами» не доводить, що застарів видимий вихід.",
+            "type": [
+              "null",
+              "boolean"
+            ]
+          },
+          "resultsStaleSince": {
+            "description": "Відколи застаріло (перша правка входу після прогону, UTC); `null` — не застаріло чи невідомо.",
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
           },
           "sheetCount": {
             "description": "Скільки аркушів у складі.",
@@ -21197,6 +21224,20 @@
           {
             "in": "query",
             "name": "q",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "resultsStale",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "staleBy",
             "schema": {
               "type": "string"
             }

@@ -2208,6 +2208,8 @@ export interface paths {
                     mine?: boolean;
                     hasLateEdits?: boolean;
                     q?: string;
+                    resultsStale?: boolean;
+                    staleBy?: string;
                 };
                 header?: never;
                 path?: never;
@@ -19583,6 +19585,20 @@ export interface components {
             sheetsTotal: number;
             /**
              * Format: int32
+             * @description Документи зі застарілими результатами методологій за період (після останнього прогону правили вхід).
+             *     ⛔ Проєкти, де читач не бачить хоч щось нижче проєкту, не рахуються (як WithIssues):
+             *     число по всьому документу розкрило б активність схованого. Те саме число дає фільтр `resultsStale=true`.
+             * @default 0
+             */
+            staleResultsCount: number;
+            /**
+             * Format: int32
+             * @description Те саме, але лише через правки поточного користувача (`staleBy=me`).
+             * @default 0
+             */
+            staleResultsMineCount: number;
+            /**
+             * Format: int32
              * @description Усі аркуші подано або затверджено, і хоч один ще не затверджено.
              */
             submitted: number;
@@ -19660,6 +19676,16 @@ export interface components {
              * @description Проєкт.
              */
             projectId: number;
+            /** @description Чи застаріли результати методологій документа за період: після початку актуального прогону хтось правив
+             *     вхідну комірку (або довідник, який читає методологія). ВИВОДИТЬСЯ запитом, не зберігається. Документ без
+             *     результатів — `false`. ⛔ `null` — період не задано, або читач має обмеження нижче проєкту
+             *     (`DocumentSheetVisibility.For`): «застаріло за видимими входами» не доводить, що застарів видимий вихід. */
+            resultsStale?: null | boolean;
+            /**
+             * Format: date-time
+             * @description Відколи застаріло (перша правка входу після прогону, UTC); `null` — не застаріло чи невідомо.
+             */
+            resultsStaleSince?: null | string;
             /**
              * Format: int32
              * @description Скільки аркушів у складі.
