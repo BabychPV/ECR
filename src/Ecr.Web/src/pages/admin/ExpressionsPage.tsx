@@ -1,8 +1,8 @@
-import { useMemo, useState, type JSX } from "react";
-import { Alert, Badge, Group, List, Select, Stack, Text } from "@mantine/core";
-import { useQuery } from "@tanstack/react-query";
-import { apiFetch } from "@/api/client";
-import { queryKeys } from "@/api/queryKeys";
+import { useMemo, useState, type JSX } from 'react';
+import { Alert, Badge, Group, List, Select, Stack, Text } from '@mantine/core';
+import { useQuery } from '@tanstack/react-query';
+import { apiFetch } from '@/api/client';
+import { queryKeys } from '@/api/queryKeys';
 import type {
   ExpressionDialect,
   ExpressionValidationDto,
@@ -10,16 +10,16 @@ import type {
   TemplatePage,
   TemplateStructureDto,
   TemplateVersionPage,
-} from "@/api/types";
-import { ExpressionEditor } from "@/features/expressions/ExpressionEditor";
-import { localizedMessage } from "@/features/expressions/markers";
-import { TestCaseRunner } from "@/features/expressions/TestCaseRunner";
-import type { ExpressionPlacement } from "@/features/expressions/api";
-import { t } from "@/shared/i18n";
-import { AsyncBoundary } from "@/shared/ui/AsyncBoundary";
-import { ErrorAlert } from "@/shared/ui/ErrorAlert";
-import { PageHeader } from "@/shared/ui/PageHeader";
-import { statusKey } from "@/shared/ui/StatusBadge";
+} from '@/api/types';
+import { ExpressionEditor } from '@/features/expressions/ExpressionEditor';
+import { localizedMessage } from '@/features/expressions/markers';
+import { TestCaseRunner } from '@/features/expressions/TestCaseRunner';
+import type { ExpressionPlacement } from '@/features/expressions/api';
+import { t } from '@/shared/i18n';
+import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
+import { ErrorAlert } from '@/shared/ui/ErrorAlert';
+import { PageHeader } from '@/shared/ui/PageHeader';
+import { statusKey } from '@/shared/ui/StatusBadge';
 
 /**
  * Редактор виразів (`ФВ-9.15a`, область 10 у `ФВ-14.3`).
@@ -35,39 +35,32 @@ import { statusKey } from "@/shared/ui/StatusBadge";
  * досяжним сьогодні і дає місце, де перевірка виразу нічого не змінює в даних.
  */
 export function ExpressionsPage(): JSX.Element {
-  const [dialect, setDialect] = useState<ExpressionDialect>("Template");
+  const [dialect, setDialect] = useState<ExpressionDialect>('Template');
   const [templateId, setTemplateId] = useState<string | null>(null);
-  const [templateVersionId, setTemplateVersionId] = useState<string | null>(
-    null,
-  );
-  const [methodologyVersionId, setMethodologyVersionId] = useState<
-    string | null
-  >(null);
-  const [expression, setExpression] = useState("");
+  const [templateVersionId, setTemplateVersionId] = useState<string | null>(null);
+  const [methodologyVersionId, setMethodologyVersionId] = useState<string | null>(null);
+  const [expression, setExpression] = useState('');
   const [result, setResult] = useState<ExpressionValidationDto | null>(null);
 
   const templates = useQuery({
     queryKey: queryKeys.templates.list(),
-    queryFn: () => apiFetch<TemplatePage>("/api/v1/templates?limit=100"),
-    enabled: dialect === "Template",
+    queryFn: () => apiFetch<TemplatePage>('/api/v1/templates?limit=100'),
+    enabled: dialect === 'Template',
   });
 
   const methodologies = useQuery({
     queryKey: queryKeys.methodologies.list(),
-    queryFn: () => apiFetch<MethodologyDto[]>("/api/v1/methodologies"),
-    enabled: dialect === "Methodology",
+    queryFn: () => apiFetch<MethodologyDto[]>('/api/v1/methodologies'),
+    enabled: dialect === 'Methodology',
   });
 
   // ⛔ D-2: шаблон обирається ЯВНО. Раніше версії брались у `items[0]` мовчки, і
   // коли в першого шаблону версій немає, для решти перевірка й підказки були
   // недоступні. Умовчання — перший шаблон, що має версії (інакше перший).
   const templateItems = templates.data?.items ?? [];
-  const defaultTemplateId = (
-    templateItems.find((x) => x.versionCount > 0) ?? templateItems[0]
-  )?.id;
+  const defaultTemplateId = (templateItems.find((x) => x.versionCount > 0) ?? templateItems[0])?.id;
   const selectedTemplateId =
-    templateId !== null &&
-    templateItems.some((x) => String(x.id) === templateId)
+    templateId !== null && templateItems.some((x) => String(x.id) === templateId)
       ? Number(templateId)
       : defaultTemplateId;
   const firstTemplateId = selectedTemplateId;
@@ -99,7 +92,7 @@ export function ExpressionsPage(): JSX.Element {
       apiFetch<TemplateStructureDto>(
         `/api/v1/template-versions/${String(selectedTemplateVersion)}/structure`,
       ),
-    enabled: dialect === "Template" && selectedTemplateVersion !== undefined,
+    enabled: dialect === 'Template' && selectedTemplateVersion !== undefined,
   });
 
   // Яку саме версію методології обрано — потрібні обидва ідентифікатори:
@@ -132,11 +125,7 @@ export function ExpressionsPage(): JSX.Element {
    * зникає єдиний спосіб прогнати золотий набір.
    */
   const sourceError =
-    templates.error ??
-    versions.error ??
-    methodologies.error ??
-    structure.error ??
-    null;
+    templates.error ?? versions.error ?? methodologies.error ?? structure.error ?? null;
 
   // ⚠ Перечитується лише те, що справді відмовило: `refetch()` на вимкненому
   // запиті версій сходив би по `/templates/undefined/versions`.
@@ -166,30 +155,25 @@ export function ExpressionsPage(): JSX.Element {
 
   return (
     <Stack gap="md">
-      <PageHeader title={t("expressions.title")} />
+      <PageHeader title={t('expressions.title')} />
 
-      {sourceError !== null && (
-        <ErrorAlert error={sourceError} onRetry={refetchSources} />
-      )}
+      {sourceError !== null && <ErrorAlert error={sourceError} onRetry={refetchSources} />}
 
       <Group align="flex-end" gap="md">
         <Select
-          label={t("expressions.dialect")}
+          label={t('expressions.dialect')}
           miw={220}
           allowDeselect={false}
           value={dialect}
           data={[
-            { value: "Template", label: t("expressions.dialectTemplate") },
-            {
-              value: "Methodology",
-              label: t("expressions.dialectMethodology"),
-            },
+            { value: 'Template', label: t('expressions.dialectTemplate') },
+            { value: 'Methodology', label: t('expressions.dialectMethodology') },
           ]}
           onChange={(value) => {
             // ⛔ Режиму C# у переліку НЕМАЄ — не прихований і не вимкнений
             // (`ФВ-9.15a`). Вимкнений пункт обіцяє те, чого не існує, і кожен,
             // хто його побачить, спитає, коли ввімкнуть.
-            setDialect(value === "Methodology" ? "Methodology" : "Template");
+            setDialect(value === 'Methodology' ? 'Methodology' : 'Template');
             setResult(null);
           }}
         />
@@ -197,21 +181,14 @@ export function ExpressionsPage(): JSX.Element {
         {/* ⛔ Перелік, зібраний із відмови, не малюється зовсім (`D15-06`):
             причина вже стоїть банером угорі. Доки версії в дорозі — поле
             недоступне, а не порожнє: порожнє означало б «версій немає». */}
-        {dialect === "Template" && templates.error === null && (
+        {dialect === 'Template' && templates.error === null && (
           <Select
-            label={t("templates.card")}
+            label={t('templates.card')}
             miw={220}
             allowDeselect={false}
             disabled={templates.isPending}
-            value={
-              selectedTemplateId === undefined
-                ? null
-                : String(selectedTemplateId)
-            }
-            data={templateItems.map((x) => ({
-              value: String(x.id),
-              label: x.code,
-            }))}
+            value={selectedTemplateId === undefined ? null : String(selectedTemplateId)}
+            data={templateItems.map((x) => ({ value: String(x.id), label: x.code }))}
             onChange={(value) => {
               setTemplateId(value);
               // Версія належить шаблону: попередня при зміні шаблону недійсна.
@@ -221,35 +198,33 @@ export function ExpressionsPage(): JSX.Element {
           />
         )}
 
-        {dialect === "Template" &&
-          templates.error === null &&
-          versions.error === null && (
-            <Select
-              label={t("expressions.templateVersion")}
-              placeholder={t("expressions.anyVersion")}
-              miw={260}
-              clearable
-              disabled={versionsPending}
-              value={templateVersionId}
-              /*
-               * ⚠ У варіанті списку компонента бути не може — потрібен РЯДОК.
-               * Тому підпис береться тим самим ключем каталогу, що й у
-               * `StatusBadge` (`statusKey`), а не кодом сервера: інакше та сама
-               * версія називалася б у переліку шаблонів мовою користувача, а
-               * тут — англійським `Published`.
-               */
-              data={(versions.data?.items ?? []).map((v) => ({
-                value: String(v.id),
-                label: `${v.version} · ${t(statusKey("version", v.status))}`,
-              }))}
-              onChange={setTemplateVersionId}
-            />
-          )}
-
-        {dialect === "Methodology" && methodologies.error === null && (
+        {dialect === 'Template' && templates.error === null && versions.error === null && (
           <Select
-            label={t("expressions.methodologyVersion")}
-            placeholder={t("expressions.anyVersion")}
+            label={t('expressions.templateVersion')}
+            placeholder={t('expressions.anyVersion')}
+            miw={260}
+            clearable
+            disabled={versionsPending}
+            value={templateVersionId}
+            /*
+             * ⚠ У варіанті списку компонента бути не може — потрібен РЯДОК.
+             * Тому підпис береться тим самим ключем каталогу, що й у
+             * `StatusBadge` (`statusKey`), а не кодом сервера: інакше та сама
+             * версія називалася б у переліку шаблонів мовою користувача, а
+             * тут — англійським `Published`.
+             */
+            data={(versions.data?.items ?? []).map((v) => ({
+              value: String(v.id),
+              label: `${v.version} · ${t(statusKey('version', v.status))}`,
+            }))}
+            onChange={setTemplateVersionId}
+          />
+        )}
+
+        {dialect === 'Methodology' && methodologies.error === null && (
+          <Select
+            label={t('expressions.methodologyVersion')}
+            placeholder={t('expressions.anyVersion')}
             miw={260}
             clearable
             disabled={methodologies.isPending}
@@ -270,8 +245,8 @@ export function ExpressionsPage(): JSX.Element {
         onChange={setExpression}
         dialect={dialect}
         placement={placement}
-        structure={dialect === "Template" ? structure.data : undefined}
-        ariaLabel={t("expressions.editorLabel")}
+        structure={dialect === 'Template' ? structure.data : undefined}
+        ariaLabel={t('expressions.editorLabel')}
         onValidated={setResult}
       />
 
@@ -283,7 +258,7 @@ export function ExpressionsPage(): JSX.Element {
         без неї не мала б що проганяти, а показана і бездіяльна — обіцяла б
         перевірку, якої не буде.
       */}
-      {dialect === "Methodology" && selectedMethodology !== undefined && (
+      {dialect === 'Methodology' && selectedMethodology !== undefined && (
         <TestCaseRunner
           methodologyId={selectedMethodology.methodologyId}
           methodologyVersionId={selectedMethodology.versionId}
@@ -315,35 +290,31 @@ function currentPeriodKey(): number {
  * правильний»; сплутати ці два твердження означає пообіцяти публікацію, якої не
  * буде — і дізнатися про це вже на публікації.
  */
-function Findings({
-  result,
-}: {
-  readonly result: ExpressionValidationDto | null;
-}): JSX.Element {
+function Findings({ result }: { readonly result: ExpressionValidationDto | null }): JSX.Element {
   return (
     <AsyncBoundary<ExpressionValidationDto>
       isPending={false}
       error={null}
       data={result ?? undefined}
       isEmpty={() => false}
-      emptyTitle={t("expressions.startTyping")}
-      emptyHint={t("expressions.startTypingHint")}
+      emptyTitle={t('expressions.startTyping')}
+      emptyHint={t('expressions.startTypingHint')}
       skeleton="none"
     >
       {(value) => (
         <Stack gap="xs">
           <Group gap="xs">
             {value.diagnostics.length === 0 ? (
-              <Badge color="statusSuccess">{t("expressions.noFindings")}</Badge>
+              <Badge color="statusSuccess">{t('expressions.noFindings')}</Badge>
             ) : (
               <Badge color="statusError">
-                {t("expressions.findings", { count: value.diagnostics.length })}
+                {t('expressions.findings', { count: value.diagnostics.length })}
               </Badge>
             )}
 
             {value.resultType !== null && (
               <Text size="sm" c="dimmed">
-                {t("expressions.resultType", { type: value.resultType })}
+                {t('expressions.resultType', { type: value.resultType })}
               </Text>
             )}
           </Group>
@@ -351,12 +322,10 @@ function Findings({
           {value.diagnostics.length > 0 && (
             <List size="sm" spacing="xs">
               {value.diagnostics.map((d, index) => (
-                <List.Item
-                  key={`${d.code}-${String(d.position)}-${String(index)}`}
-                >
+                <List.Item key={`${d.code}-${String(d.position)}-${String(index)}`}>
                   <Text span size="sm" fw={600}>
                     {d.code}
-                  </Text>{" "}
+                  </Text>{' '}
                   {/* ⛔ Та сама функція, що й підкреслення в Monaco
                       (`markers.ts`, `Q-303`) — не незалежна копія логіки:
                       `d.message` сервера — англійський запасний варіант, не
@@ -368,10 +337,8 @@ function Findings({
           )}
 
           {value.skippedChecks.length > 0 && (
-            <Alert color="statusWarning" title={t("expressions.skippedTitle")}>
-              {value.skippedChecks
-                .map((check) => t(`expressions.check.${check}`))
-                .join("; ")}
+            <Alert color="statusWarning" title={t('expressions.skippedTitle')}>
+              {value.skippedChecks.map((check) => t(`expressions.check.${check}`)).join('; ')}
             </Alert>
           )}
         </Stack>
