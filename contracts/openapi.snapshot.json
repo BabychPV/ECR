@@ -6919,6 +6919,13 @@
               "string"
             ]
           },
+          "resultType": {
+            "description": "Тип результату, який вивів експортер із тексту: `Text` або `Number`; порожній — `Number`.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
           "startDate": {
             "description": "Початок дії (рядок AF).",
             "type": [

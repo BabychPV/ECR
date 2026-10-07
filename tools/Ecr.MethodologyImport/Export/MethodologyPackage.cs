@@ -15,7 +15,8 @@ public sealed record PackageFormula(
     string StartDate,
     string EndDate,
     bool IsAvailable,
-    string Report);
+    string Report,
+    string ResultType = "Number");
 
 public sealed record PackageConstantValue(
     string Category,
@@ -66,6 +67,7 @@ public sealed record MethodologyPackage(
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(report);
 
+        var shapes = FormulaTypeInference.Infer(model, library);
         var formulas = model.Formulas.ToLookup(f => (f.Methodology, f.MethodologyVersion));
         var constants = model.Constants.ToLookup(c => (c.Methodology, c.MethodologyVersion));
         var keys = formulas.Select(g => g.Key).Concat(constants.Select(g => g.Key)).Distinct().ToList();
@@ -81,7 +83,8 @@ public sealed record MethodologyPackage(
                         formulas[(g.Key, v)]
                             .OrderBy(f => f.Name, StringComparer.Ordinal).ThenBy(f => f.Version, StringComparer.Ordinal)
                             .Select(f => new PackageFormula(
-                                f.Name, f.Version, f.Arguments, f.Text, f.StartDate, f.EndDate, f.Available, f.Report))
+                                f.Name, f.Version, f.Arguments, f.Text, f.StartDate, f.EndDate, f.Available, f.Report,
+                                shapes[f.Key].Kind == FormulaResultKind.Text ? "Text" : "Number"))
                             .ToList(),
                         constants[(g.Key, v)]
                             .GroupBy(c => c.Name, StringComparer.Ordinal)
@@ -89,7 +92,7 @@ public sealed record MethodologyPackage(
                             .Select(cg => new PackageConstant(
                                 cg.Key,
                                 cg.Select(c => c.Parameter).FirstOrDefault(p => p.Length > 0) ?? string.Empty,
-                                cg.Select(c => c.Unit).FirstOrDefault(u => u.Length > 0) ?? string.Empty,
+                                CanonicalUnit(cg.Select(c => c.Unit).FirstOrDefault(u => u.Length > 0)),
                                 cg.Where(c => c.HasValue)
                                     .OrderBy(c => c.Category, StringComparer.Ordinal).ThenBy(c => c.Version, StringComparer.Ordinal)
                                     .Select(c => new PackageConstantValue(c.Category, c.Version, c.Value, c.StartDate, c.EndDate))
@@ -99,6 +102,13 @@ public sealed record MethodologyPackage(
             .ToList();
 
         return new MethodologyPackage(FormatName, CurrentVersion, library, methodologies, report.Blockers);
+    }
+
+    /// <summary>Код каталогу ECR, якщо одиницю AF зведено; інакше рядок AF як є (нерезолвну звітує analyze, сервер — <c>unitUnknown</c>).</summary>
+    private static string CanonicalUnit(string? raw)
+    {
+        var r = UnitCanonicalizer.Resolve(raw);
+        return r.Code ?? (raw ?? string.Empty);
     }
 
     public string ToJson() => JsonSerializer.Serialize(this, JsonOptions).ReplaceLineEndings("\n");

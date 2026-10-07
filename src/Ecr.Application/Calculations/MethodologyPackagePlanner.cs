@@ -13,7 +13,9 @@ namespace Ecr.Application.Calculations;
 /// <param name="Code">Код.</param>
 /// <param name="Expression">Вираз.</param>
 /// <param name="ArgumentsCsv">Оголошені аргументи як є.</param>
-public sealed record ImportFormulaContent(string Code, string Expression, string? ArgumentsCsv);
+/// <param name="ResultType">Тип результату; пакет без позначки — <see cref="FormulaResultType.Number"/>.</param>
+public sealed record ImportFormulaContent(
+    string Code, string Expression, string? ArgumentsCsv, FormulaResultType ResultType = FormulaResultType.Number);
 
 /// <summary>Рядок константи версії так, як його порівнює імпорт.</summary>
 /// <param name="Code">Код.</param>
@@ -63,7 +65,8 @@ public sealed record ImportVersionContent(
     private static List<string> Keys(ImportVersionContent content)
         => [
             .. content.Formulas
-                .Select(f => string.Join('\u001f', "F", f.Code.ToUpperInvariant(), f.Expression, f.ArgumentsCsv ?? "\0"))
+                .Select(f => string.Join(
+                    '\u001f', "F", f.Code.ToUpperInvariant(), f.Expression, f.ArgumentsCsv ?? "\0", ((byte)f.ResultType).ToString(CultureInfo.InvariantCulture)))
                 .Order(StringComparer.Ordinal),
             .. content.Constants
                 .Select(c => string.Join(
@@ -437,7 +440,11 @@ public static class MethodologyPackagePlanner
                 }
 
                 var content = new ImportVersionContent(
-                    [.. formulas.Select(f => new ImportFormulaContent(f.Name.Trim(), f.Text ?? string.Empty, f.Arguments))],
+                    [.. formulas.Select(f => new ImportFormulaContent(
+                        f.Name.Trim(), f.Text ?? string.Empty, f.Arguments,
+                        string.Equals(f.ResultType?.Trim(), "Text", StringComparison.OrdinalIgnoreCase)
+                            ? FormulaResultType.Text
+                            : FormulaResultType.Number))],
                     constants,
                     [.. imports]);
 
@@ -592,7 +599,16 @@ public static class MethodologyPackagePlanner
 
         var normalized = unit.Replace(" ", string.Empty, StringComparison.Ordinal).Replace("/", "_per_", StringComparison.Ordinal);
 
-        return units.Units.TryGetValue(normalized, out var per) ? per.Id : null;
+        if (units.Units.TryGetValue(normalized, out var per))
+        {
+            return per.Id;
+        }
+
+        // Регістр і нерозривні пробіли в AF не різняться за змістом (`KG`, `kg`), а `Sm3` ≠ `Nm3` лишаються різними кодами.
+        var folded = normalized.Replace('\u00A0', ' ').Replace(" ", string.Empty, StringComparison.Ordinal);
+        var matches = units.Units.Where(kv => string.Equals(kv.Key, folded, StringComparison.OrdinalIgnoreCase)).Select(kv => kv.Value.Id).Distinct().ToList();
+
+        return matches.Count == 1 ? matches[0] : null;
     }
 
     /// <summary>Межа чинності: UTC AF → день майданчика → півінтервал (<see cref="LegacyValidityImport"/>).</summary>

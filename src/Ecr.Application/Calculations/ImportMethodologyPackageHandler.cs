@@ -207,7 +207,7 @@ public sealed class ImportMethodologyPackageHandler(
 
                 foreach (var f in v.Content.Formulas)
                 {
-                    var formula = draft.AddFormula(EcrCode.Create(f.Code), f.Expression, FormulaResultType.Number, null);
+                    var formula = draft.AddFormula(EcrCode.Create(f.Code), f.Expression, f.ResultType, null);
                     formula.SetArguments(f.ArgumentsCsv);
                     drafts.Add(formula);
                 }
@@ -295,7 +295,7 @@ public sealed class ImportMethodologyPackageHandler(
         var imports = await drafts.GetImportedMethodologyCodesAsync(versionId, ct).ConfigureAwait(false);
 
         return new ImportVersionContent(
-            [.. formulas.Select(f => new ImportFormulaContent(f.Code, f.Expression, f.ArgumentsCsv))],
+            [.. formulas.Select(f => new ImportFormulaContent(f.Code, f.Expression, f.ArgumentsCsv, f.ResultType))],
             [.. constants.Select(c => new ImportConstantContent(
                 c.Code, c.Kind, c.Value, c.TextValue, c.UnitId, c.Category, c.ValidFrom, c.ValidTo, c.Source))],
             imports);

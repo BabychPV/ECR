@@ -48,6 +48,9 @@ public sealed record MethodologyPackageVersionDto(
 /// <param name="EndDate">Кінець дії (рядок AF).</param>
 /// <param name="IsAvailable">Прапорець AF.</param>
 /// <param name="Report">Позначка звіту AF.</param>
+/// <param name="ResultType">
+/// Тип результату, який вивів експортер із тексту: <c>Text</c> або <c>Number</c>; порожній — <c>Number</c>.
+/// </param>
 public sealed record MethodologyPackageFormulaDto(
     string Name,
     string Version,
@@ -56,7 +59,8 @@ public sealed record MethodologyPackageFormulaDto(
     string? StartDate,
     string? EndDate,
     bool IsAvailable,
-    string? Report);
+    string? Report,
+    string? ResultType = null);
 
 /// <summary>Константа пакета.</summary>
 /// <param name="Name">Ім'я — те, що стоїть після <c>CST.</c>.</param>

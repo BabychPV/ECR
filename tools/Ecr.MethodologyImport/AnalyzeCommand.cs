@@ -19,6 +19,14 @@ public static class AnalyzeCommand
             (model, applied) = ReferenceNormalizer.Normalize(model);
         }
 
-        return (model, MethodologyAnalyzer.Analyze(model, readStats, library) with { Normalizations = applied });
+        var shapes = FormulaTypeInference.Infer(model, library);
+        var report = MethodologyAnalyzer.Analyze(model, readStats, library) with
+        {
+            Normalizations = applied,
+            FormulaTypes = ImportDiagnostics.FormulaTypes(model, shapes),
+            Units = ImportDiagnostics.Units(model),
+            ColumnNeeds = ImportDiagnostics.ColumnNeeds(model),
+        };
+        return (model, report);
     }
 }

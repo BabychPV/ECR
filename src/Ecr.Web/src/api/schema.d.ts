@@ -21032,6 +21032,8 @@ export interface components {
             name: string;
             /** @description Позначка звіту AF. */
             report: null | string;
+            /** @description Тип результату, який вивів експортер із тексту: `Text` або `Number`; порожній — `Number`. */
+            resultType?: null | string;
             /** @description Початок дії (рядок AF). */
             startDate: null | string;
             /** @description Вираз. */
