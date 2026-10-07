@@ -34,12 +34,6 @@ on:
         default: '1'
   pull_request:
     branches: [ main, 'rc/**' ]
-  # ⛔ ТИМЧАСОВО (не зводити): `workflow_dispatch` GitHub дозволяє лише для
-  # workflow, що вже є в гілці за умовчанням, а тут його ще немає в `main`.
-  # Тому серії запускаються пушем у цю lane; ref/grep/repeat — з блоку `env`
-  # нижче (PUSH_*). Змінити серію = один коміт у цій lane.
-  push:
-    branches: [ lane/cloud/e2e-stand-repeat-9d3tb3 ]
 
 permissions:
   contents: read
@@ -51,11 +45,6 @@ concurrency:
 env:
   DOTNET_NOLOGO: 'true'
   DOTNET_SKIP_FIRST_TIME_EXPERIENCE: 'true'
-  # ⛔ ТИМЧАСОВО: параметри серії для запуску пушем (див. `push` вище).
-  # Порожній ref — гілка пушу.
-  PUSH_REF: ''
-  PUSH_GREP: 'RevoGrid'
-  PUSH_REPEAT: '1'
 
 jobs:
   e2e:
@@ -70,7 +59,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
-          ref: ${{ inputs.ref || (github.event_name == 'push' && env.PUSH_REF) || '' }}
+          ref: ${{ inputs.ref || '' }}
 
       # ⚠ Скрипт стенда береться з коміту САМОГО workflow (`github.sha`), а не з
       # перевіряваного `ref`: там може не бути `-RepeatEach` (його ще немає в
@@ -85,8 +74,8 @@ jobs:
 
       - name: Що проганяється
         env:
-          GREP: ${{ github.event_name == 'push' && env.PUSH_GREP || inputs.grep }}
-          REPEAT: ${{ github.event_name == 'push' && env.PUSH_REPEAT || inputs.repeat || '1' }}
+          GREP: ${{ inputs.grep }}
+          REPEAT: ${{ inputs.repeat || '1' }}
         run: |
           {
             echo "### e2e-stand"
@@ -176,8 +165,8 @@ jobs:
       - name: Стенд і прогони Playwright (e2e-stand.ps1)
         env:
           ECR_SQL_PASSWORD: ${{ env.ECR_SQL_PASSWORD }}
-          E2E_GREP: ${{ github.event_name == 'push' && env.PUSH_GREP || inputs.grep }}
-          E2E_REPEAT: ${{ github.event_name == 'push' && env.PUSH_REPEAT || inputs.repeat || '1' }}
+          E2E_GREP: ${{ inputs.grep }}
+          E2E_REPEAT: ${{ inputs.repeat || '1' }}
           PLAYWRIGHT_HTML_OPEN: never
         run: |
           mkdir -p artifacts
@@ -196,6 +185,16 @@ jobs:
             src/Ecr.Web/test-results/
           retention-days: 14
           if-no-files-found: ignore
+
+      # ⚠ Артефакт з журналами з агента не завжди можна завантажити — хвіст
+      # журналу застосунку друкується прямо в журнал завдання.
+      - name: Хвіст журналу застосунку (при падінні)
+        if: failure()
+        run: |
+          for f in artifacts/setup-dev-db.api.log artifacts/setup-dev-db.api.log.err artifacts/e2e.api.log artifacts/e2e.api.log.err; do
+            [ -f "$f" ] && { echo "::group::$f"; tail -n 80 "$f"; echo "::endgroup::"; }
+          done
+          true
 
       - name: Журнали застосунку
         if: always()
