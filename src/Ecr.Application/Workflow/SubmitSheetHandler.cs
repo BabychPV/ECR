@@ -432,6 +432,39 @@ public sealed class SubmitSheetHandler(
             .Where(f => !f.IsDeleted)
             .ToDictionary(f => f.Id, f => f.Code);
 
+        // ⛔ PS-P1D (D-11): обов'язкове поле шапки (`HeaderFieldDef.IsRequired`, наприклад `Permit`) не
+        // примушувалось ніде, крім явного `PATCH` цього самого поля: документ створюється з порожньою шапкою,
+        // і ніхто її не торкався. Подання — перша точка, де документ іде далі по маршруту погодження, тож
+        // порожнє обов'язкове поле тримає його тут (ФВ-5.19 «Submit неможливий за наявності Error»).
+        //
+        // ⚠ Шапка належить документу цілком, а не аркушу: порожнє обов'язкове поле тримає подання БУДЬ-ЯКОГО
+        // аркуша. Це ЗНАЧЕННЯ, що читається свіже, а не підсумок «Перевірити». Правка шапки доступна, поки
+        // жоден аркуш не поданий; якщо інший аркуш уже подано з порожньою шапкою (документ до цієї перевірки),
+        // шапку наповнюють після `Reopen` того аркуша.
+        var requiredHeaderFields = snapshot.HeaderFields.Where(f => !f.IsDeleted && f.IsRequired).ToList();
+        if (requiredHeaderFields.Count > 0)
+        {
+            var storedHeader = await headers.GetValuesAsync(documentId, ct).ConfigureAwait(false);
+            var emptyHeaderCodes = requiredHeaderFields
+                .Where(f => !storedHeader.TryGetValue(f.Id, out var stored) || stored.IsEmpty)
+                .OrderBy(f => f.Ordinal)
+                .ThenBy(f => f.Code, StringComparer.Ordinal)
+                .Select(f => f.Code)
+                .ToList();
+
+            if (emptyHeaderCodes.Count > 0)
+            {
+                throw new BusinessRuleException(
+                    ErrorCodes.SubmitBlocked,
+                    $"Подання неможливе: порожні обов'язкові поля шапки — {string.Join(", ", emptyHeaderCodes)}.",
+                    new Dictionary<string, object?>
+                    {
+                        ["messageKey"] = "err.ECR-SUB-4221.headerRequired",
+                        ["headerFieldCodes"] = string.Join(", ", emptyHeaderCodes),
+                    });
+            }
+        }
+
         var blocking = new List<Validation.ValidationMessage>();
 
         // ФВ-5.19: `Warning` не блокує, але потребує підтвердження подавача.

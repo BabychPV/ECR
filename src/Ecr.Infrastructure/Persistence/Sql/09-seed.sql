@@ -2150,6 +2150,7 @@ USING (VALUES
     (N'err.ECR-CELL-4223',  N'en', N'Reference to a missing registry entry or unit', 1),
     (N'err.ECR-HDR-0404',   N'en', N'Header field not found', 1),
     (N'err.ECR-HDR-0422',   N'en', N'Invalid header value', 1),
+    (N'err.ECR-HDR-4223',   N'en', N'The chosen registry entry cannot be used in the header', 1),
     (N'err.ECR-SUB-4221',   N'en', N'Submission is blocked', 1),
 
     -- Періоди і проєкти.
@@ -5850,6 +5851,13 @@ USING (VALUES
     (N'err.ECR-CELL-4223.deletedEntry',        N'en', N'The chosen registry entry has been deleted: {cellCount} cell(s).', 1),
     (N'err.ECR-CELL-4223.inactiveEntry',       N'en', N'The chosen registry entry is switched off: {cellCount} cell(s).', 1),
     (N'err.ECR-CELL-4223.entryNotValidOnDate', N'en', N'The chosen registry entry is not valid on {asOf}, the last day of the period: {cellCount} cell(s).', 1),
+    -- PS-P1D (D-11): поле шапки Lookup (Permit) не бере запис, якого пікер не пропонує, і обов'язкове поле шапки тримає подання
+    -- (`PatchDocumentHeaderHandler.EnsureLookupEntriesUsableAsync`, `SubmitSheetHandler`).
+    (N'err.ECR-HDR-4223.foreignRegistry',      N'en', N'The entry chosen for header field "{headerFieldCode}" belongs to a different registry than the field.', 1),
+    (N'err.ECR-HDR-4223.deletedEntry',         N'en', N'The entry chosen for header field "{headerFieldCode}" has been deleted.', 1),
+    (N'err.ECR-HDR-4223.inactiveEntry',        N'en', N'The entry chosen for header field "{headerFieldCode}" is switched off.', 1),
+    (N'err.ECR-HDR-4223.entryNotValidInWindow', N'en', N'The entry chosen for header field "{headerFieldCode}" is not valid on any day of the document period ({windowFrom} to {windowTo}).', 1),
+    (N'err.ECR-SUB-4221.headerRequired',       N'en', N'The document cannot be submitted: required header field(s) are empty: {headerFieldCodes}.', 1),
     -- S9: межа частоти зміни пароля — на КОРИСТУВАЧА, не на адресу (`LoginRateLimiting`).
     (N'err.ECR-REQ-0429.tooManyPasswordChanges', N'en', N'Too many password change attempts. Try again in a minute.', 1),
     -- S6: зауваження лише в таблицях/колонках під забороною читача — знеособлено, без числа й адреси

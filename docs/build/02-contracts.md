@@ -3613,6 +3613,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `ECR-CELL-4223` | 422 | посилання `Lookup`-комірки на запис довідника, якого не існує |
 | `ECR-HDR-0404` | 404 | код у `PATCH …/documents/{id}/header` не відповідає жодному полю шапки версії шаблону документа |
 | `ECR-HDR-0422` | 422 | значення поля шапки документа не відповідає типу чи обов'язковості |
+| `ECR-HDR-4223` | 422 | поле шапки `Lookup` посилається на запис довідника, який не можна обрати: чужий довідник, видалений, вимкнений або нечинний жодного дня звітного вікна проєкту (дозвіл `Permit` із закінченим строком); причина — у `messageKey` (PS-P1D, D-11) |
 | `ECR-PRD-0409` | 409 | період закрито; **або** спроба змінити `TimeZoneId` після відкриття першого періоду (ФВ-1.1a) |
 | `ECR-PRD-0404` | 404 | періоду з таким ключем у проєкті немає |
 | `ECR-PRD-0422` | 422 | період поза межами проєкту (ФВ-1.11); також розбіжність періоду тіла запиту з періодом екземпляра таблиці на `PATCH …/cells` (`err.ECR-PRD-0422.periodMismatch`; раніше `ECR-REQ-0422`) |
@@ -3620,7 +3621,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `ECR-PRD-4224` | 422 | `Sequence` поза діапазоном `1…12` (ФВ-1.5a, D-108); **або** кількість періодів `Custom` не ділить рік нарівно |
 | `ECR-PRD-4225` | 422 | політика періодів: пільговий строк довший за жорстке закриття, або річний пільговий строк від'ємний (T6/#37) |
 | `ECR-PRD-4091` | 409 | політика періодів із таким кодом уже існує (`UQ_PeriodPolicy`, T6/#37) |
-| `ECR-SUB-4221` | 422 | `Submit` при наявності рядків `IsOrphaned` (ФВ-8.13); також блокувальні помилки валідації, застарілі результати методологій і — `messageKey = err.ECR-SUB-4221.warningsNeedConfirmation` — попередження (`Warning`) без `acknowledgeWarnings = true` у тілі `POST …/submit` (ФВ-5.19; підтвердження пишеться в `aud.SecurityEvent`, `SheetSubmitWarningsAcknowledged`) |
+| `ECR-SUB-4221` | 422 | `Submit` при наявності рядків `IsOrphaned` (ФВ-8.13); також порожнє обов'язкове поле шапки (`messageKey = err.ECR-SUB-4221.headerRequired`, PS-P1D) і блокувальні помилки валідації, застарілі результати методологій і — `messageKey = err.ECR-SUB-4221.warningsNeedConfirmation` — попередження (`Warning`) без `acknowledgeWarnings = true` у тілі `POST …/submit` (ФВ-5.19; підтвердження пишеться в `aud.SecurityEvent`, `SheetSubmitWarningsAcknowledged`) |
 | `ECR-SIM-0403` | 403 | спроба запису в сеансі симуляції (`SimulationReadOnly`, ФВ-6.16a) |
 | `ECR-SIM-0422` | 422 | симуляція самого себе або без причини |
 | `ECR-PWD-0428` | 428 | потрібна зміна пароля: доки `MustChangePassword`, доступні лише зміна пароля і вихід (ФВ-6.18) |
