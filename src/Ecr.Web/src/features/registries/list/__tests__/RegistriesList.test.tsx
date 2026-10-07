@@ -7,6 +7,7 @@ import type { JSX } from 'react';
 import { loadCatalog } from '@/shared/i18n';
 import { RegistriesPage } from '@/pages/admin/RegistriesPage';
 import { testTheme } from '@/test/render';
+import { PageDescriptionContext } from '@/shared/ui/pageDescription';
 import { Catalog } from '@/test/__tests__/a11yFixtures';
 import { describe as report, findViolations } from '@/test/a11y';
 
@@ -326,5 +327,32 @@ describe('RegistriesList (UI-35)', () => {
       expect(within(drawer).getByText('v3 published · draft in progress')).toBeTruthy();
       expect(within(drawer).getByText('The definition has unpublished changes')).toBeTruthy();
     });
+  });
+});
+
+describe('RegistriesList: одне пояснення під заголовком (звірка batch-4 з макетом, п.17)', () => {
+  it('власне пояснення переліку заміняє пояснення маршруту, а не стоїть другим рядком', async () => {
+    mockFetch(['Registry.View']);
+    await loadCatalog('en', 'private');
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+
+    render(
+      <MantineProvider theme={testTheme}>
+        <QueryClientProvider client={client}>
+          <MemoryRouter initialEntries={['/admin/registries']}>
+            <PageDescriptionContext.Provider value="nav.registries.description">
+              <RegistriesPage />
+            </PageDescriptionContext.Provider>
+          </MemoryRouter>
+        </QueryClientProvider>
+      </MantineProvider>,
+    );
+
+    await screen.findByRole('button', { name: 'Units of measure' });
+    const lines = screen.getAllByTestId('page-description');
+    expect(lines).toHaveLength(1);
+    expect(lines[0]?.textContent).toMatch(/^Reference lists that cells/);
+    // ⚠ Пояснення маршруту в каталозі — той самий текст, тож дубль ловиться лише числом входжень.
+    expect(screen.getAllByText(/^Reference lists that cells/)).toHaveLength(1);
   });
 });

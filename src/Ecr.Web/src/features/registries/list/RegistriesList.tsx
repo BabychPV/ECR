@@ -226,7 +226,7 @@ export function RegistriesList(): JSX.Element {
       <PageHeader
         title={t('registries.title')}
         count={registries.data === undefined ? undefined : all.length}
-        meta={t('registries.list.subtitle')}
+        description={t('registries.list.subtitle')}
         primary={
           canCreate ? { label: t('registries.newRegistry'), onClick: () => setCreating(true) } : undefined
         }

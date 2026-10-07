@@ -189,7 +189,7 @@ export function HealthPage(): JSX.Element {
     <>
       <PageHeader
         title={t('health.title')}
-        meta={t('health.subtitle')}
+        description={t('health.subtitle')}
         /* ⚠ Зведений статус і статус кожної перевірки — ОДИН словник
            (`health`), тож і рішення про колір одне, у наборі. Доти їх
            фарбувала власна `badgeColor` цієї сторінки — п'ята з п'яти

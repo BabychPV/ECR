@@ -4,6 +4,7 @@ import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { loadCatalog } from '@/shared/i18n';
 import { HealthPage, diagnostics } from '@/pages/admin/HealthPage';
+import { PageDescriptionContext } from '@/shared/ui/pageDescription';
 
 /**
  * `UI-39`: сторінка Health за макетом (`docs/design/hybrid/screens-ops.js`,
@@ -196,5 +197,26 @@ describe('UI-39: diagnostics() — білий список', () => {
     expect(text).toContain('Notifications: Smtp');
     expect(text).not.toContain('unreadableKeyCertificates');
     expect(text).not.toContain(Thumbprint);
+  });
+});
+
+describe('Health: одне пояснення під заголовком (звірка batch-4 з макетом, п.25)', () => {
+  it('пояснення сторінки заміняє пояснення маршруту, а не стоїть другим рядком', async () => {
+    ready = reportOf('Healthy', [check('db', 'Healthy', 'Database is available.')]);
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+
+    render(
+      <MantineProvider>
+        <QueryClientProvider client={client}>
+          <PageDescriptionContext.Provider value="nav.health.description">
+            <HealthPage />
+          </PageDescriptionContext.Provider>
+        </QueryClientProvider>
+      </MantineProvider>,
+    );
+
+    await screen.findByText('Database is available.');
+    expect(screen.getAllByTestId('page-description').map((node) => node.textContent)).toEqual(['⟦health.subtitle⟧']);
+    expect(screen.queryByText('⟦nav.health.description⟧')).toBeNull();
   });
 });
