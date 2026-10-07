@@ -139,8 +139,12 @@ public static class MaintenanceRunFailure
     /// </remarks>
     public static string Details(Exception error, long runId)
     {
+        // ⛔ Кореляція — та сама, що в рядках журналу задачі (scope JobWorker/Quartz); номер
+        // прогону лише запасний, коли виклик поза задачею, і його в журналі немає.
         var message = JobFailureText.For(
-            error, string.Create(System.Globalization.CultureInfo.InvariantCulture, $"maintenance run {runId}"));
+            error,
+            JobCorrelation.Current
+            ?? string.Create(System.Globalization.CultureInfo.InvariantCulture, $"maintenance run {runId}"));
 
         if (message.Length > MaxErrorLength)
         {
