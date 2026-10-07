@@ -60,6 +60,10 @@
 .PARAMETER StartupTimeoutSec
     Скільки чекати старту застосунку (тут і в `setup-dev-db.ps1`). Умовчання 60 с.
 
+.PARAMETER RepeatEach
+    Скільки разів повторити кожен прогін (`--repeat-each` Playwright); 1 (типово) —
+    без повторів, як і раніше. Для серій «N/20» на одному піднятому стенді.
+
 .PARAMETER Reporter
     Значення `--reporter` для Playwright (напр. `list,html`); порожнє —
     репортер із `playwright.config.ts`, як і раніше.
@@ -89,7 +93,8 @@ param(
     [string] $SqlPassword = $env:ECR_SQL_PASSWORD,
     [switch] $SmallFiles,
     [int] $StartupTimeoutSec = 60,
-    [string] $Reporter = ''
+    [string] $Reporter = '',
+    [int] $RepeatEach = 1
 )
 
 # ⚠ Масив аргументів, а не сплат: `setup-dev-db.ps1` викликається окремим
@@ -627,6 +632,7 @@ try {
             $pwArgs = @('playwright', 'test')
             if ($Grep) { $pwArgs += @('--grep', $Grep) }
             if ($Reporter) { $pwArgs += "--reporter=$Reporter" }
+            if ($RepeatEach -gt 1) { $pwArgs += "--repeat-each=$RepeatEach" }
             & $npxExe @pwArgs
         }
         finally {

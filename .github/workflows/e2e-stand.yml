@@ -28,19 +28,34 @@ on:
         description: 'Фільтр назв прогонів Playwright (--grep); порожнє — увесь набір'
         required: false
         default: ''
+      repeat:
+        description: 'Скільки разів повторити кожен прогін (--repeat-each); 1 — без повторів'
+        required: false
+        default: '1'
   pull_request:
     branches: [ main, 'rc/**' ]
+  # ⛔ ТИМЧАСОВО (не зводити): `workflow_dispatch` GitHub дозволяє лише для
+  # workflow, що вже є в гілці за умовчанням, а тут його ще немає в `main`.
+  # Тому серії запускаються пушем у цю lane; ref/grep/repeat — з блоку `env`
+  # нижче (PUSH_*). Змінити серію = один коміт у цій lane.
+  push:
+    branches: [ lane/cloud/e2e-stand-repeat-9d3tb3 ]
 
 permissions:
   contents: read
 
 concurrency:
-  group: e2e-stand-${{ github.event_name }}-${{ github.event.pull_request.number || inputs.ref || github.ref }}-${{ inputs.grep || '' }}
+  group: e2e-stand-${{ github.event_name }}-${{ github.event.pull_request.number || inputs.ref || github.ref }}-${{ inputs.grep || '' }}-${{ inputs.repeat || '' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   DOTNET_NOLOGO: 'true'
   DOTNET_SKIP_FIRST_TIME_EXPERIENCE: 'true'
+  # ⛔ ТИМЧАСОВО: параметри серії для запуску пушем (див. `push` вище).
+  # Порожній ref — гілка пушу.
+  PUSH_REF: ''
+  PUSH_GREP: 'RevoGrid'
+  PUSH_REPEAT: '1'
 
 jobs:
   e2e:
@@ -55,17 +70,19 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
-          ref: ${{ inputs.ref || '' }}
+          ref: ${{ inputs.ref || (github.event_name == 'push' && env.PUSH_REF) || '' }}
 
       - name: Що проганяється
         env:
-          GREP: ${{ inputs.grep }}
+          GREP: ${{ github.event_name == 'push' && env.PUSH_GREP || inputs.grep }}
+          REPEAT: ${{ github.event_name == 'push' && env.PUSH_REPEAT || inputs.repeat || '1' }}
         run: |
           {
             echo "### e2e-stand"
             echo "- коміт: \`$(git rev-parse HEAD)\`"
             echo "- подія: ${{ github.event_name }}"
             echo "- фільтр: \`${GREP:-увесь набір}\`"
+            echo "- повторів кожного прогону: ${REPEAT}"
           } >> "$GITHUB_STEP_SUMMARY"
 
       # ⚠ Пароль генерується на кожен прогін і маскується — як у `smoke.yml`.
@@ -148,14 +165,15 @@ jobs:
       - name: Стенд і прогони Playwright (e2e-stand.ps1)
         env:
           ECR_SQL_PASSWORD: ${{ env.ECR_SQL_PASSWORD }}
-          E2E_GREP: ${{ inputs.grep }}
+          E2E_GREP: ${{ github.event_name == 'push' && env.PUSH_GREP || inputs.grep }}
+          E2E_REPEAT: ${{ github.event_name == 'push' && env.PUSH_REPEAT || inputs.repeat || '1' }}
           PLAYWRIGHT_HTML_OPEN: never
         run: |
           mkdir -p artifacts
           pwsh -File tools/e2e-stand.ps1 \
             -Server 'localhost,1433' -Login sa -Database EcrE2ECi -Port 5080 \
             -SmallFiles -RequireFreeGb 0 -StartupTimeoutSec 180 \
-            -Reporter 'list,html' -Grep "$E2E_GREP"
+            -Reporter 'list,html' -Grep "$E2E_GREP" -RepeatEach "$E2E_REPEAT"
 
       - name: Звіт, трасування, знімки
         if: always()
