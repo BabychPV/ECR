@@ -115,6 +115,9 @@ public sealed class EcrDbContext(DbContextOptions<EcrDbContext> options)
     public DbSet<MethodologyOutput> MethodologyOutputs => Set<MethodologyOutput>();
     public DbSet<MethodologyRule> MethodologyRules => Set<MethodologyRule>();
 
+    /// <summary>Правило категорії константи версії — вираз «рядок → ключ категорії» (L-2, <c>calc.CategoryRule</c>).</summary>
+    public DbSet<MethodologyCategoryRule> MethodologyCategoryRules => Set<MethodologyCategoryRule>();
+
     /// <summary>Обов'язкові вхідні колонки — gate перед збереженням клітинки (директива «обов'язкові вхідні колонки методології»).</summary>
     public DbSet<MethodologyRequiredInput> MethodologyRequiredInputs => Set<MethodologyRequiredInput>();
 
