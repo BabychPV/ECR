@@ -598,6 +598,8 @@ export function DocumentPage(): JSX.Element {
           }}
           calculationsStale={calculationsStale}
           documentItems={[...documentLog.menuItems, businessKeyChange.menuItem, versionMigration.menuItem, deletion.menuItem]}
+          resultsStale={document.resultsStale ?? null}
+          resultsStaleSince={document.resultsStaleSince ?? null}
           status={
             <>
               {/* ✎ UI-15: чип стану аркуша і заповненість одним рядком
