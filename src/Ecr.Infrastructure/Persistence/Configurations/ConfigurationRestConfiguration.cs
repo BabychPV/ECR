@@ -269,6 +269,7 @@ public sealed class RegistryDefConfiguration : IEntityTypeConfiguration<Registry
         builder.Property(x => x.CodeMode).HasConversion<byte>()
                .HasDefaultValueSql("0", "DF_RegDef_CodeMode").ValueGeneratedNever();
         builder.Property(x => x.DataChangedAt).HasColumnType("datetime2(3)");
+        builder.Property(x => x.DefinitionUpdatedAt).HasColumnType("datetime2(3)");
 
         builder.HasIndex(x => x.Code).IsUnique().HasDatabaseName("UQ_RegistryDef");
         builder.Navigation(x => x.Fields).UsePropertyAccessMode(PropertyAccessMode.Field);

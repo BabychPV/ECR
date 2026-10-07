@@ -33,6 +33,14 @@ namespace Ecr.Application.Registries.Dto;
 /// <param name="HasDraft">
 /// Чи є незавершена чернетка опису; <c>null</c> без права <c>Registry.EditDefinition</c>.
 /// </param>
+/// <param name="UpdatedAt">
+/// Коли востаннє збережено опис довідника, UTC; <c>null</c> — опис не змінювали після появи поля.
+/// Лише в переліку.
+/// </param>
+/// <param name="UpdatedByDisplayName">
+/// Відображуване ім'я (не логін) того, хто зберіг опис; <c>null</c> без права
+/// <c>Registry.EditDefinition</c>, без запису або якщо користувача вже немає.
+/// </param>
 public sealed record RegistryDefDto(
     int Id,
     string Code,
@@ -46,7 +54,9 @@ public sealed record RegistryDefDto(
     DateTime? DataChangedAt = null,
     int? UsedInColumns = null,
     int? UsedInTemplates = null,
-    bool? HasDraft = null);
+    bool? HasDraft = null,
+    DateTime? UpdatedAt = null,
+    string? UpdatedByDisplayName = null);
 
 /// <summary>Поле довідника.</summary>
 /// <param name="Id">Ідентифікатор поля.</param>

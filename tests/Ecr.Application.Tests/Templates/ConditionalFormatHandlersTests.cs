@@ -52,7 +52,14 @@ public sealed class ConditionalFormatHandlersTests
             });
     }
 
-    private SaveConditionalFormatsHandler Save() => new(_rules, _store, _uow, _access, _user);
+    private SaveConditionalFormatsHandler Save() => new(_rules, _store, _uow, _access, _user, Clock());
+
+    private static IClock Clock()
+    {
+        var clock = Substitute.For<IClock>();
+        clock.UtcNow.Returns(Now);
+        return clock;
+    }
 
     private static ConditionalFormatRuleDto Rule(
         string op = "gt", string? value = "10", string? valueTo = null, string column = "VOL",

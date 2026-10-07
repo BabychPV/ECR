@@ -1,8 +1,10 @@
 // src/Ecr.Infrastructure/Reporting/ReportViewGenerator.cs
+using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Infrastructure.Persistence;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace Ecr.Infrastructure.Reporting;
 
@@ -17,7 +19,8 @@ namespace Ecr.Infrastructure.Reporting;
 /// SSRS-шар другорядний, публікація — ядро); збій лишається видимим у журналі
 /// і на <c>/health/ready</c> (<see cref="IReportViewStatus"/>).
 /// </remarks>
-public sealed class ReportViewGenerator(EcrDbContext db, IReportViewStatus? status = null) : IReportViewGenerator
+public sealed partial class ReportViewGenerator(
+    EcrDbContext db, IReportViewStatus? status = null, ILogger<ReportViewGenerator>? logger = null) : IReportViewGenerator
 {
     /// <inheritdoc />
     public async Task GenerateAsync(int? templateVersionId, CancellationToken ct)
@@ -37,12 +40,26 @@ public sealed class ReportViewGenerator(EcrDbContext db, IReportViewStatus? stat
             // ⚠ Збій фіксується для /health/ready (картка `reportviews`) і кидається
             // далі: вирішує викликач — публікація й старт глушать його (найкраще
             // зусилля), тести й DBA бачать помилку.
-            status?.Failed(new ReportViewFailure(templateVersionId, ex.Number, SafeMessage(ex)));
+            // ⛔ SEC (TIER2): та сама кореляція — у тексті для /health/ready і в рядку журналу
+            // з повним винятком, інакше оператор не зв'яже одне з другим.
+            var correlationId = SafeErrorText.NewCorrelationId();
+            if (logger is not null)
+            {
+                LogGenerationFailed(logger, templateVersionId, ex.Number, correlationId, ex);
+            }
+
+            status?.Failed(new ReportViewFailure(templateVersionId, ex.Number, SafeMessage(ex, correlationId)));
             throw;
         }
 
         status?.Succeeded(templateVersionId);
     }
+
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "ReportViewGenerator: генерація в'юх (версія {TemplateVersionId}) не вдалася, помилка SQL Server {ErrorNumber}; кореляція {CorrelationId}.")]
+    private static partial void LogGenerationFailed(
+        ILogger logger, int? templateVersionId, int errorNumber, string correlationId, Exception exception);
 
     /// <summary>Перший номер користувацьких повідомлень SQL Server (<c>RAISERROR</c>/<c>THROW</c>).</summary>
     private const int FirstUserDefinedError = 50_000;
@@ -55,8 +72,8 @@ public sealed class ReportViewGenerator(EcrDbContext db, IReportViewStatus? stat
     /// повідомлення процедури (<c>50422</c>, <c>50409</c>: шаблон, версія, кількість
     /// колонок) пишемо ми самі, вони й призначені адміністратору — лишаються.
     /// </remarks>
-    internal static string SafeMessage(SqlException ex)
+    internal static string SafeMessage(SqlException ex, string correlationId)
         => ex.Number >= FirstUserDefinedError
             ? ex.Message
-            : $"SQL Server error {ex.Number.ToString(System.Globalization.CultureInfo.InvariantCulture)}; the details are in the server log.";
+            : $"SQL Server error {ex.Number.ToString(System.Globalization.CultureInfo.InvariantCulture)}; the details are in the server log (correlation {correlationId}).";
 }

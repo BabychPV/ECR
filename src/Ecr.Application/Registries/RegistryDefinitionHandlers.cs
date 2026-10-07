@@ -603,6 +603,7 @@ public sealed class SaveRegistryDefinitionHandler(
         }
 
         definition.BumpDefinitionVersion();
+        definition.MarkDefinitionUpdated(userId, clock.UtcNow);
 
         // ⚠ Знімок «після» береться з ПАМ'ЯТІ, а не повторним читанням: щойно
         // додані правила ще не збережені, і запит до бази віддав би стан «до»

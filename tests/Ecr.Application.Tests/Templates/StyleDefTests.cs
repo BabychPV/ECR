@@ -71,7 +71,14 @@ public sealed class StyleDefTests
             fontName, fontSize, isBold, isItalic, foregroundArgb, backgroundArgb, borderJson,
             horizontalAlign, verticalAlign, wrapText, numberFormat);
 
-    private SaveStyleDefHandler Save() => new(_styles, _store, _uow, _access, _user);
+    private SaveStyleDefHandler Save() => new(_styles, _store, _uow, _access, _user, Clock());
+
+    private static IClock Clock()
+    {
+        var clock = Substitute.For<IClock>();
+        clock.UtcNow.Returns(Now);
+        return clock;
+    }
 
     private ListStyleDefsHandler List() => new(_styles, _store, _access, _user);
 

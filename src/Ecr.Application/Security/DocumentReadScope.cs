@@ -215,6 +215,10 @@ public sealed class DocumentReadScope
     public IReadOnlyList<int> HiddenColumnIds()
         => [.. _tableOfColumn.Keys.Where(c => !CanReadColumn(c)).Order()];
 
+    /// <summary>Колонки структури, які профіль БАЧИТЬ, — за зростанням (фільтр журналу змін у SQL, R-11).</summary>
+    public IReadOnlyList<int> VisibleColumnIds()
+        => [.. _tableOfColumn.Keys.Where(CanReadColumn).Order()];
+
     /// <summary>Чи бачить профіль таблицю, якій належить колонка.</summary>
     /// <param name="columnDefId">Колонка версії шаблону.</param>
     /// <remarks>

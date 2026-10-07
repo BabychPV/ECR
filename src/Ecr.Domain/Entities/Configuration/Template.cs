@@ -38,6 +38,12 @@ public sealed class Template : Entity<int>
     public DateTime CreatedAt { get; private set; }
     public int CreatedByUserId { get; private set; }
 
+    /// <summary>
+    /// Момент архівування, UTC; <c>null</c> — шаблон в обігу або заархівований до появи колонки
+    /// (тоді момент невідомий).
+    /// </summary>
+    public DateTime? ArchivedAt { get; private set; }
+
     /// <summary>Версії шаблону.</summary>
     public IReadOnlyList<TemplateVersion> Versions => _versions;
 
@@ -84,14 +90,14 @@ public sealed class Template : Entity<int>
     /// зупиняло б заповнення, обірвало б звітний період посеред роботи.
     /// Архів каже «нового на цьому шаблоні не заводимо», а не «старе зникло».
     ///
-    /// ⚠ Хто і коли архівував — у журналі безпеки, а не в колонках сутності:
-    /// <c>cfg.Template</c> не має ні <c>ArchivedAt</c>, ні
-    /// <c>ArchivedByUserId</c>, і заводити їх означало б міграцію.
+    /// ⚠ Момент архівування — <see cref="ArchivedAt"/>; хто архівував — лише в журналі
+    /// безпеки (<c>ArchivedByUserId</c> у сутності немає).
     /// </remarks>
     /// <exception cref="DomainException">
     /// <c>ECR-TMPL-0409</c> — шаблон уже архівований.
     /// </exception>
-    public void Archive()
+    /// <param name="utcNow">Момент архівування (UTC) — пишеться в <see cref="ArchivedAt"/>.</param>
+    public void Archive(DateTime utcNow)
     {
         // ⚠ Повторне архівування — помилка, а не «нічого не сталося»: воно
         // майже завжди означає, що викликач вважає стан іншим, ніж він є, а в
@@ -109,6 +115,7 @@ public sealed class Template : Entity<int>
         }
 
         IsActive = false;
+        ArchivedAt = utcNow;
     }
 
     /// <summary>Повертає архівований шаблон в обіг.</summary>
@@ -134,6 +141,7 @@ public sealed class Template : Entity<int>
         }
 
         IsActive = true;
+        ArchivedAt = null;
     }
 
     /// <summary>

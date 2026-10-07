@@ -367,12 +367,19 @@ public sealed record TemplateVersionSummary(
 /// </param>
 /// <param name="UpdatedAt">
 /// Остання відома зміна, UTC: найпізніша з створення шаблону, створення/публікації/виведення з
-/// обігу будь-якої його версії. Окремого журналу правок чернетки в моделі немає.
+/// обігу будь-якої його версії. Також правки чернетки (<c>TemplateVersion.UpdatedAt</c>); правки стилів і умовного форматування не покриті.
 /// </param>
 /// <param name="DraftAuthorDisplayName">
 /// Відображуване ім'я (не логін) автора найновішої чернетки; <c>null</c> — чернетки немає.
 /// </param>
 /// <param name="DraftCreatedAt">Коли чернетку створено, UTC; <c>null</c> — чернетки немає.</param>
+/// <param name="ArchivedAt">
+/// Коли шаблон архівовано, UTC; <c>null</c> — не архівований або архівований до появи колонки.
+/// </param>
+/// <param name="DraftEditedAt">
+/// Остання правка найновішої чернетки, UTC (якщо її не правили — момент створення); <c>null</c> —
+/// чернетки немає.
+/// </param>
 public sealed record TemplateSummary(
     int Id,
     string Code,
@@ -382,7 +389,9 @@ public sealed record TemplateSummary(
     int DocumentCount = 0,
     DateTime? UpdatedAt = null,
     string? DraftAuthorDisplayName = null,
-    DateTime? DraftCreatedAt = null);
+    DateTime? DraftCreatedAt = null,
+    DateTime? ArchivedAt = null,
+    DateTime? DraftEditedAt = null);
 
 /// <summary>Картка шаблону.</summary>
 /// <param name="Id">Ідентифікатор.</param>

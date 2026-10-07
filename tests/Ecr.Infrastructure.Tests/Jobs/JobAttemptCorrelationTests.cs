@@ -32,6 +32,17 @@ public sealed class JobAttemptCorrelationTests
             => throw new InvalidOperationException("транзієнтна");
     }
 
+    private sealed class CorrelationProbeJob : IBackgroundJob
+    {
+        public static string? Seen { get; set; }
+
+        public Task ExecuteAsync(object? payload, IJobProgress progress, CancellationToken ct)
+        {
+            Seen = JobCorrelation.Current;
+            return Task.CompletedTask;
+        }
+    }
+
     private sealed class NoopFormulaJob : IFormulaRecalculationJob
     {
         public Task ExecuteAsync(object? payload, IJobProgress progress, CancellationToken ct)
@@ -46,17 +57,18 @@ public sealed class JobAttemptCorrelationTests
         services.AddSingleton(progress);
         services.AddSingleton<IClock>(new TestClock(Now));
         services.AddScoped<FailingJob>();
+        services.AddScoped<CorrelationProbeJob>();
         services.AddScoped<IFormulaRecalculationJob, NoopFormulaJob>();
 
         return (new QuartzJobAdapter(services.BuildServiceProvider(), NullLogger<QuartzJobAdapter>.Instance), progress);
     }
 
     private static (IJobExecutionContext Context, IScheduler Scheduler) Context(
-        int retries, string? jobCorrelation, IJobDetail? detail = null)
+        int retries, string? jobCorrelation, IJobDetail? detail = null, Type? jobType = null)
     {
         var jobData = new JobDataMap
         {
-            { QuartzJobScheduler.JobCodeKey, typeof(FailingJob).FullName! },
+            { QuartzJobScheduler.JobCodeKey, (jobType ?? typeof(FailingJob)).FullName! },
             { QuartzJobScheduler.PayloadKey, "null" },
         };
 
@@ -108,6 +120,24 @@ public sealed class JobAttemptCorrelationTests
             JobId, Arg.Any<string>(), Arg.Any<DateTime>(), Arg.Any<CancellationToken>(), 1, "corr-1");
         await progress.Received(1).StartAsync(
             JobId, Arg.Any<string>(), Arg.Any<DateTime>(), Arg.Any<CancellationToken>(), 2, "corr-1");
+    }
+
+    /// <summary>
+    /// Кореляція задачі, яку бачить код усередині неї (текст провалу прогону обслуговування),
+    /// збігається з тією, що стоїть у scope журналу: оператор зв'язує екранний текст із журналом.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Directive", "SEC-TIER2")]
+    public async Task Код_усередині_задачі_бачить_ту_саму_кореляцію_що_й_журнал()
+    {
+        var (adapter, _) = Adapter();
+        CorrelationProbeJob.Seen = null;
+
+        await adapter.Execute(Context(retries: 0, "corr-seen", jobType: typeof(CorrelationProbeJob)).Context);
+
+        Assert.Equal("corr-seen", CorrelationProbeJob.Seen);
+        Assert.Null(JobCorrelation.Current);
     }
 
     [Fact]

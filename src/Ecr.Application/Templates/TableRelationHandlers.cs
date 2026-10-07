@@ -176,6 +176,7 @@ public sealed class SaveTableRelationHandler(
         // ⛔ ПЕРШИМ ділом і доменом. Усе інше нижче — перевірки самого зв'язку;
         // вони мають сенс лише там, де правка взагалі дозволена.
         version.EnsureStructurallyMutable();
+        version.TouchDraft(userId, clock.UtcNow);
 
         var tableCodes = await store.ListTableCodesAsync(templateVersionId, ct).ConfigureAwait(false);
         EnsureBelongs(tableCodes, request.SourceTableDefId, templateVersionId, "джерела");
@@ -443,6 +444,7 @@ public sealed class DeleteTableRelationHandler(
                 });
 
         version.EnsureStructurallyMutable();
+        version.TouchDraft(userId, clock.UtcNow);
 
         var relation = await store.FindTableRelationAsync(templateVersionId, code, ct).ConfigureAwait(false)
             ?? throw new NotFoundException(

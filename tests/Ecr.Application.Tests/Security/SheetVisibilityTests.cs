@@ -90,11 +90,27 @@ public sealed class SheetVisibilityTests
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait("Requirement", "R-8")]
-    public void Шар_звужений_лише_періодом_а_не_аркушами_число_не_ховає_за_кодами()
+    public void Шар_без_аркушів_і_без_періодів_не_звужує_і_число_не_ховає()
     {
-        var periodOnly = Scoped(denies: [], narrowedDenies: [], narrowedSheets: null, viewCampaign: true);
+        var unrestricted = Scoped(denies: [], narrowedDenies: [], narrowedSheets: null, viewCampaign: true);
 
-        Assert.True(SheetVisibility.SeesAllSheets(periodOnly));
+        Assert.True(SheetVisibility.SeesAllSheets(unrestricted));
+    }
+
+    [Theory]
+    [InlineData(202601, 202612)]
+    [InlineData(202601, null)]
+    [InlineData(null, 202612)]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "R-8")]
+    public void Роль_звужена_лише_періодом_без_жодних_заборон_ховає_число(int? from, int? to)
+    {
+        // Глобальне Report.ViewCampaign + роль зі scope periods (без аркушів): документи поза проміжком для
+        // читача не існують (D-214), тож агрегат по всіх аркушах усіх періодів розкрив би їх — як і за SheetCodes.
+        var periodOnly = Scoped(
+            denies: [], narrowedDenies: [], narrowedSheets: null, viewCampaign: true, periodFrom: from, periodTo: to);
+
+        Assert.False(SheetVisibility.SeesAllSheets(periodOnly));
     }
 
     [Fact]
@@ -112,7 +128,7 @@ public sealed class SheetVisibilityTests
         Assert.False(SheetVisibility.SeesAllSheets(withGrant, Project + 1));
     }
 
-    private static AccessProfile Scoped(string[] denies, string[] narrowedDenies, string[]? narrowedSheets, bool viewCampaign = false)
+    private static AccessProfile Scoped(string[] denies, string[] narrowedDenies, string[]? narrowedSheets, bool viewCampaign = false, int? periodFrom = null, int? periodTo = null)
     {
         var baseProfile = viewCampaign
             ? new AccessBuilder().Permission("Report.ViewCampaign").Build()
@@ -120,7 +136,8 @@ public sealed class SheetVisibilityTests
 
         var layer = new NarrowedAccess(
             narrowedSheets is null ? null : new HashSet<string>(narrowedSheets),
-            null, null,
+            periodFrom is { } pf ? new Ecr.Domain.ValueObjects.PeriodKey(pf) : null,
+            periodTo is { } pt ? new Ecr.Domain.ValueObjects.PeriodKey(pt) : null,
             new Dictionary<string, GrantLevel>(),
             new HashSet<string>(narrowedDenies),
             new HashSet<int>(),

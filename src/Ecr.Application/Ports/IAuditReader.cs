@@ -127,6 +127,11 @@ public sealed record StructureChangeView(
 /// Пошук (UI-38, C3): підрядок бізнес-ключа документа, ключа рядка або коду колонки; обробник обрізає його
 /// до 100 знаків. <c>null</c> — без пошуку. Спецсимволи <c>LIKE</c> (<c>% _ [ \</c>) — буквальні.
 /// </param>
+/// <param name="VisibleColumnIds">
+/// R-11 (S6): колонки, зміни яких читач БАЧИТЬ; <c>null</c> — без обмеження (наскрізний журнал без документа).
+/// Застосовується в SQL ДО <c>TOP</c>/курсора, тож сторінка, <c>nextCursor</c> і підрахунок рахуються по видимих;
+/// порожній перелік — жодного рядка. Колонка, якої немає в переліку, невидима (закрито за замовчуванням).
+/// </param>
 public sealed record CellChangeFilter(
     DateTime From,
     DateTime To,
@@ -136,7 +141,8 @@ public sealed record CellChangeFilter(
     int? ChangedByUserId = null,
     string? Origin = null,
     bool LateOnly = false,
-    string? Query = null)
+    string? Query = null,
+    IReadOnlyList<int>? VisibleColumnIds = null)
 {
     /// <summary>Фільтр адресує РІВНО ОДНУ комірку — документ, рядок і колонку.</summary>
     /// <remarks>

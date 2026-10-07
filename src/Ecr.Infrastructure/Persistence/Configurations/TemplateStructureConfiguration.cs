@@ -23,6 +23,7 @@ public sealed class TemplateConfiguration : IEntityTypeConfiguration<Template>
         // випадкове ім'я на конкретній базі.
         builder.Property(x => x.IsActive).HasDefaultValue(true, "DF_Template_Active");
         builder.LocalizedText(x => x.NameL10n);
+        builder.Property(x => x.ArchivedAt).HasColumnType("datetime2(3)");
         builder.Navigation(x => x.Versions).UsePropertyAccessMode(PropertyAccessMode.Field);
     }
 }

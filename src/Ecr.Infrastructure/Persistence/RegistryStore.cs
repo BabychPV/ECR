@@ -193,6 +193,26 @@ public sealed class RegistryStore(EcrDbContext db) : IRegistryStore
             .ConfigureAwait(false)).ToHashSet();
 
     /// <inheritdoc />
+    public async Task<IReadOnlyDictionary<int, string>> GetUserDisplayNamesAsync(
+        IReadOnlyCollection<int> userIds, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(userIds);
+
+        if (userIds.Count == 0)
+        {
+            return new Dictionary<int, string>();
+        }
+
+        var ids = userIds as int[] ?? [.. userIds];
+
+        return await db.Users
+            .AsNoTracking()
+            .Where(u => ids.Contains(u.Id))
+            .ToDictionaryAsync(u => u.Id, u => u.DisplayName, ct)
+            .ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
     public void AddDefinition(RegistryDef definition) => db.RegistryDefs.Add(definition);
 
     /// <inheritdoc />

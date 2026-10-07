@@ -86,6 +86,7 @@ public sealed class SaveTableDefHandler(
 
         // ⛔ ПЕРШИМ ділом і доменом — так само, як у `SaveSheetDefHandler`.
         version.EnsureStructurallyMutable();
+        version.TouchDraft(userId, clock.UtcNow);
 
         var sheet = version.Sheets.FirstOrDefault(
             s => string.Equals(s.Code, sheetCode, StringComparison.Ordinal))
@@ -300,6 +301,7 @@ public sealed class DeleteTableDefHandler(
         var version = await store.GetWithStructureAsync(templateVersionId, ct).ConfigureAwait(false);
 
         version.EnsureStructurallyMutable();
+        version.TouchDraft(userId, clock.UtcNow);
 
         var sheet = version.Sheets.FirstOrDefault(
             s => string.Equals(s.Code, sheetCode, StringComparison.Ordinal))

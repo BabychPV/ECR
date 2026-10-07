@@ -53,6 +53,15 @@ public sealed class ListRegistriesHandler(
             ? await registries.ListDefinitionIdsWithDraftAsync(ct).ConfigureAwait(false)
             : null;
 
+        // Ім'я автора опису — за тим самим правом, що використання й чернетка (D-86: ім'я, не логін).
+        var updaterIds = canSeeUsage
+            ? definitions.Where(d => d.DefinitionUpdatedByUserId is not null)
+                .Select(d => d.DefinitionUpdatedByUserId!.Value).Distinct().ToList()
+            : [];
+        var updaterNames = canSeeUsage
+            ? await registries.GetUserDisplayNamesAsync(updaterIds, ct).ConfigureAwait(false)
+            : null;
+
         return definitions
             .Where(d => !RegistryAccess.IsDenied(profile, d.Id))
             .Select(d => new RegistryDefDto(
@@ -86,7 +95,11 @@ public sealed class ListRegistriesHandler(
                 DataChangedAt: d.DataChangedAt,
                 UsedInColumns: usage is null ? null : usage.GetValueOrDefault(d.Id)?.Columns ?? 0,
                 UsedInTemplates: usage is null ? null : usage.GetValueOrDefault(d.Id)?.Templates ?? 0,
-                HasDraft: drafts?.Contains(d.Id)))
+                HasDraft: drafts?.Contains(d.Id),
+                UpdatedAt: d.DefinitionUpdatedAt,
+                UpdatedByDisplayName: d.DefinitionUpdatedByUserId is { } updater
+                    ? updaterNames?.GetValueOrDefault(updater)
+                    : null))
             .ToList();
     }
 }

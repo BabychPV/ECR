@@ -5,6 +5,7 @@ using Ecr.Application.Ports;
 using Ecr.Application.Security;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.Configuration;
+using Ecr.Domain.Errors;
 using Ecr.Domain.ValueObjects;
 
 namespace Ecr.Application.Templates;
@@ -38,7 +39,8 @@ public sealed class SaveStyleDefHandler(
     ITemplateVersionStore store,
     IUnitOfWork uow,
     IAccessDecisionService access,
-    ICurrentUser currentUser)
+    ICurrentUser currentUser,
+    IClock clock)
 {
     /// <summary>Право на редагування структури версії (`02-contracts.md` §9) — те саме, що на колонку.</summary>
     public const string Permission = "Template.Edit";
@@ -62,8 +64,15 @@ public sealed class SaveStyleDefHandler(
         // аркушів/таблиць), а тому, що саме цей запит уже несе
         // `EnsureStructurallyMutable()` — ту саму перевірку заморожування,
         // яку інакше довелося б дублювати окремим SELECT.
+        var userId = currentUser.UserId
+            ?? throw new AccessDeniedException(
+                ErrorCodes.Unauthorized,
+                "Сесія не містить користувача.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.anonymousWrite" });
+
         var version = await store.GetWithStructureAsync(templateVersionId, ct).ConfigureAwait(false);
         version.EnsureStructurallyMutable();
+        version.TouchDraft(userId, clock.UtcNow);
 
         var ecrCode = EcrCode.Create(code);
         StyleDef? existing = null;

@@ -1,7 +1,7 @@
 import type { JSX } from 'react';
 import { Group, Select } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
-import { apiFetch } from '@/api/client';
+import { apiFetch, EcrApiError } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
 import type {
   GrantableProject,
@@ -73,6 +73,18 @@ function nameWithCode(name: string, code: string): string {
   return name.length > 0 && name !== code ? `${name} (${code})` : code;
 }
 
+/**
+ * A1-05: `403` на ланцюзі «шаблон → версія → структура» — це брак `Template.View`
+ * (адмін безпеки `BootstrapAdministrator` його не має), і загальне «не вдалося
+ * завантажити» не називає причини. Для `403` — окреме речення з назвою права;
+ * решта відмов лишаються «не вдалося завантажити». Лише для вибору в шаблоні:
+ * проєкти й довідники мають інші права.
+ */
+function loadErrorText(cause: unknown): string {
+  const forbidden = cause instanceof EcrApiError && cause.problem.status === 403;
+  return forbidden ? t('grants.pickerForbidden') : t('grants.pickerLoadFailed');
+}
+
 function idOrNull(value: string | null): number | null {
   return value === null ? null : Number(value);
 }
@@ -141,7 +153,7 @@ export function ResourcePicker({
   // ⚠ `aria-label` стоїть на кожному полі явно, а не в спільних пропах: так
   // його бачить лінт ФВ-14.20.
   const aria = (label: string): string => `${label} ${n}`;
-  const common = (label: string, failed: boolean) => ({
+  const common = (label: string, failed: boolean, cause?: unknown) => ({
     size: 'xs' as const,
     miw: 150,
     searchable: !readOnly,
@@ -149,7 +161,7 @@ export function ResourcePicker({
     readOnly,
     placeholder: label,
     nothingFoundMessage: t('grants.pickerNothingFound'),
-    ...(failed ? { error: t('grants.pickerLoadFailed') } : {}),
+    ...(failed ? { error: loadErrorText(cause) } : {}),
   });
 
   if (kind === 'Project') {
@@ -199,14 +211,14 @@ export function ResourcePicker({
   return (
     <Group gap="xs" wrap="wrap">
       <Select
-        {...common(t('grants.pickerTemplate'), Boolean(templates.error))}
+        {...common(t('grants.pickerTemplate'), Boolean(templates.error), templates.error)}
         aria-label={aria(t('grants.pickerTemplate'))}
         data={(templates.data?.items ?? []).map((tp) => ({ value: String(tp.id), label: tp.code }))}
         value={path.templateId === null ? null : String(path.templateId)}
         onChange={(value) => pick(-1, null, undefined, { ...EmptyPath, templateId: idOrNull(value) })}
       />
       <Select
-        {...common(t('grants.pickerVersion'), Boolean(versions.error))}
+        {...common(t('grants.pickerVersion'), Boolean(versions.error), versions.error)}
         aria-label={aria(t('grants.pickerVersion'))}
         disabled={path.templateId === null}
         data={(versions.data?.items ?? []).map((v) => ({ value: String(v.id), label: v.version }))}
@@ -216,7 +228,7 @@ export function ResourcePicker({
         }
       />
       <Select
-        {...common(t('grants.pickerSheet'), Boolean(structure.error))}
+        {...common(t('grants.pickerSheet'), Boolean(structure.error), structure.error)}
         aria-label={aria(t('grants.pickerSheet'))}
         disabled={path.versionId === null}
         data={sheets.map((s) => ({ value: String(s.id), label: nameWithCode(localized(s.nameL10n), s.code) }))}

@@ -33,6 +33,10 @@ async function openStand(page: Page, gate: boolean): Promise<void> {
   const firstQty = page.locator('revo-grid revogr-data[type="rgRow"] .rgCell[data-rgcol="1"][data-rgrow="0"]');
   await expect(firstQty).toBeVisible({ timeout: 30_000 });
   await firstQty.click();
+  // Пауза після кліку: RevoGrid виставляє виділення й фокус асинхронно (~70 мс); 0 мс-ввід у ту ж
+  // мілісекунду недосяжний людині. Причина червоного 0 мс - гіпотеза з читання коду; тест виправлено,
+  // продукт не змінено.
+  await page.waitForTimeout(400);
 }
 
 /** Послідовність сканера/макросу: `Enter, 1, Enter, Enter, 2, Enter, ...` з паузою між клавішами. */

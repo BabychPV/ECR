@@ -50,7 +50,7 @@ public sealed class TemplateListSummaryTests(SqlServerFixture sql)
                 visible.TemplateId, $"9.9.{_tag}", authorId, new DateTime(2026, 3, 1, 0, 0, 0, DateTimeKind.Utc)));
 
             var archived = await db.Templates.SingleAsync(t => t.Id == hidden.TemplateId);
-            archived.Archive();
+            archived.Archive(new DateTime(2026, 4, 1, 0, 0, 0, DateTimeKind.Utc));
             await db.SaveChangesAsync();
         }
 
@@ -73,6 +73,59 @@ public sealed class TemplateListSummaryTests(SqlServerFixture sql)
         // ⛔ Документ чужого проєкту в лічильник не входить: 0, а не 1.
         Assert.Equal(0, other.DocumentCount);
         Assert.True(other.IsArchived);
+
+        // RC7: момент архівування доходить до переліку; в обігу — null.
+        Assert.Equal(new DateTime(2026, 4, 1, 0, 0, 0, DateTimeKind.Utc), other.ArchivedAt);
+        Assert.Null(seen.ArchivedAt);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Правка_чернетки_дає_draftEditedAt_і_піднімає_updatedAt_а_повернення_з_архіву_скидає_ArchivedAt()
+    {
+        var doc = await new TestDocumentBuilder(sql.ConnectionString).BuildAsync(periodKey: 202601);
+        var edited = new DateTime(2031, 5, 6, 7, 8, 9, DateTimeKind.Utc);
+        var created = new DateTime(2026, 3, 1, 0, 0, 0, DateTimeKind.Utc);
+        int draftId;
+
+        await using (var db = sql.CreateContext())
+        {
+            var draft = new TemplateVersion(doc.TemplateId, $"8.8.{_tag}", 1, created);
+            db.TemplateVersions.Add(draft);
+            await db.SaveChangesAsync();
+            draftId = draft.Id;
+        }
+
+        var access = new AccessBuilder { UserId = 9 }.Permission("Template.View");
+
+        // До правки: draftEditedAt = момент створення.
+        var before = (await ListAsync(query: null, access)).Items.Single(t => t.Id == doc.TemplateId);
+        Assert.Equal(created, before.DraftEditedAt);
+
+        await using (var db = sql.CreateContext())
+        {
+            var draft = await db.TemplateVersions.SingleAsync(v => v.Id == draftId);
+            draft.TouchDraft(7, edited);
+            var template = await db.Templates.SingleAsync(t => t.Id == doc.TemplateId);
+            template.Archive(edited);
+            await db.SaveChangesAsync();
+        }
+
+        var after = (await ListAsync(query: null, access)).Items.Single(t => t.Id == doc.TemplateId);
+        Assert.Equal(edited, after.DraftEditedAt);
+        Assert.Equal(edited, after.UpdatedAt);
+        Assert.Equal(edited, after.ArchivedAt);
+
+        await using (var db = sql.CreateContext())
+        {
+            (await db.Templates.SingleAsync(t => t.Id == doc.TemplateId)).Restore();
+            await db.SaveChangesAsync();
+        }
+
+        var restored = (await ListAsync(query: null, access)).Items.Single(t => t.Id == doc.TemplateId);
+        Assert.False(restored.IsArchived);
+        Assert.Null(restored.ArchivedAt);
     }
 
     [Fact]

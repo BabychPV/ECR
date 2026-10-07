@@ -111,6 +111,7 @@ public sealed partial class QuartzJobAdapter(
         var correlationId = CorrelationOf(context);
         using var logScope = logger.BeginScope(
             new Dictionary<string, object> { ["CorrelationId"] = correlationId });
+        using var jobCorrelation = JobCorrelation.Begin(correlationId);
 
         // ⛔ Скасовану задачу з черги не запускаємо. Скасування з ІНШОГО
         // інстанса не може зняти задачу з цієї черги (вона в пам'яті цього

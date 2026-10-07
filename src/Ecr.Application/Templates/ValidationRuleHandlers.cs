@@ -99,6 +99,7 @@ public sealed class SaveValidationRuleHandler(
 
         // ⛔ ПЕРШИМ ділом і доменом — так само, як SaveSheetDefHandler.
         version.EnsureStructurallyMutable();
+        version.TouchDraft(userId, clock.UtcNow);
 
         var table = version.Sheets
             .SelectMany(s => s.Tables)
@@ -300,6 +301,7 @@ public sealed class DeleteValidationRuleHandler(
         var version = await store.GetWithStructureAsync(templateVersionId, ct).ConfigureAwait(false);
 
         version.EnsureStructurallyMutable();
+        version.TouchDraft(userId, clock.UtcNow);
 
         var table = version.Sheets
             .SelectMany(s => s.Tables)

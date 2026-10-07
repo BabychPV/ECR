@@ -18709,6 +18709,7 @@ export interface components {
             dataType: string;
             defaultValue: null | string;
             displayFormat: null | string;
+            expression?: null | string;
             header: string;
             /** Format: int32 */
             id: number;
@@ -19577,6 +19578,11 @@ export interface components {
         };
         /** @description Документ у переліку. */
         DocumentSummary: {
+            /** @description К6: «хто затвердив» — відображуване ім'я (`D-86`) того, хто останнім затвердив аркуш документа
+             *     (остання подія `Approve`/`ApproveStep` журналу, інакше `ApprovalState.ApprovedByUserId`);
+             *     `null` — затвердження ще не було. Це те саме розкриття, що й `GET /workflow/history`; складу
+             *     ролі кроку («хто може») не розкриває. ⛔ Для звуженого читача — `null` (`DocumentSheetVisibility.For`), як і автор. */
+            approverDisplayName?: null | string;
             /** @description Бізнес-ключ, унікальний у межах проєкту. */
             businessKey: string;
             /**
@@ -22286,6 +22292,15 @@ export interface components {
              *     перемикання: без нього довідник, який уже в цільовому режимі, і той, який
              *     ще ні, у переліку виглядають однаково. */
             sourceKind: components["schemas"]["RegistrySourceKind"];
+            /**
+             * Format: date-time
+             * @description Коли востаннє збережено опис довідника, UTC; `null` — опис не змінювали після появи поля.
+             *     Лише в переліку.
+             */
+            updatedAt?: null | string;
+            /** @description Відображуване ім'я (не логін) того, хто зберіг опис; `null` без права
+             *     `Registry.EditDefinition`, без запису або якщо користувача вже немає. */
+            updatedByDisplayName?: null | string;
             /**
              * Format: int32
              * @description Скільки колонок шаблонів беруть значення з довідника. `null` без права
@@ -25419,6 +25434,11 @@ export interface components {
         };
         /** @description Шаблон у переліку. */
         TemplateSummary: {
+            /**
+             * Format: date-time
+             * @description Коли шаблон архівовано, UTC; `null` — не архівований або архівований до появи колонки.
+             */
+            archivedAt?: null | string;
             /** @description Код. */
             code: string;
             /**
@@ -25435,6 +25455,12 @@ export interface components {
              */
             draftCreatedAt?: null | string;
             /**
+             * Format: date-time
+             * @description Остання правка найновішої чернетки, UTC (якщо її не правили — момент створення); `null` —
+             *     чернетки немає.
+             */
+            draftEditedAt?: null | string;
+            /**
              * Format: int32
              * @description Ідентифікатор.
              */
@@ -25448,7 +25474,7 @@ export interface components {
             /**
              * Format: date-time
              * @description Остання відома зміна, UTC: найпізніша з створення шаблону, створення/публікації/виведення з
-             *     обігу будь-якої його версії. Окремого журналу правок чернетки в моделі немає.
+             *     обігу будь-якої його версії. Також правки чернетки (`TemplateVersion.UpdatedAt`); правки стилів і умовного форматування не покриті.
              */
             updatedAt?: null | string;
             /**

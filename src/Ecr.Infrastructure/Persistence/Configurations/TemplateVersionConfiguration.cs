@@ -25,6 +25,7 @@ public sealed class TemplateVersionConfiguration : IEntityTypeConfiguration<Temp
         // неможливо прибрати скриптом, не з'ясувавши спершу його
         // випадкове ім'я на конкретній базі.
         builder.Property(x => x.PresentationRevision).HasDefaultValue(0, "DF_TV_PresRev");
+        builder.Property(x => x.UpdatedAt).HasColumnType("datetime2(3)");
 
         // Версія унікальна в межах шаблону: «1.0.0.0» двічі означало б, що
         // посилання на версію перестало бути однозначним.

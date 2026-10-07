@@ -319,6 +319,7 @@ public sealed partial class JobWorker(
         // Кореляція постановника — у КОЖНОМУ рядку журналу задачі (BE-08), як у Quartz.
         using var logScope = logger.BeginScope(
             new Dictionary<string, object> { ["CorrelationId"] = correlationId, ["JobId"] = claim.JobId });
+        using var jobCorrelation = JobCorrelation.Begin(correlationId);
 
         await using var scope = scopes.CreateAsyncScope();
         var provider = scope.ServiceProvider;

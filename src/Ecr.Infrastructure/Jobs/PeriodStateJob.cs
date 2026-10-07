@@ -611,7 +611,7 @@ public sealed partial class PeriodStateJob(
                 failedCount = failures.Count,
                 failed = failures
                     .Take(MaxDetailItems)
-                    .Select(f => new { project = f.ProjectCode, error = Shorten(JobFailureText.For(f.Error, "period state " + f.ProjectCode)) }),
+                    .Select(f => new { project = f.ProjectCode, error = Shorten(JobFailureText.For(f.Error, JobCorrelation.Current ?? "period state " + f.ProjectCode)) }),
             },
             DetailsOptions);
 

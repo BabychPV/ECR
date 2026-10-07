@@ -104,6 +104,24 @@ public sealed class RegistryDef : Entity<int>
     /// </remarks>
     public void BumpDefinitionVersion() => DefinitionVersion++;
 
+    /// <summary>
+    /// Момент (UTC) останнього збереження <b>опису</b> довідника (склад полів і правил);
+    /// <c>null</c> — опис не змінювали після появи колонки.
+    /// </summary>
+    public DateTime? DefinitionUpdatedAt { get; private set; }
+
+    /// <summary>Хто востаннє зберіг опис; <c>null</c> — як <see cref="DefinitionUpdatedAt"/>.</summary>
+    public int? DefinitionUpdatedByUserId { get; private set; }
+
+    /// <summary>Фіксує, хто й коли зберіг опис (разом із <see cref="BumpDefinitionVersion"/>).</summary>
+    /// <param name="userId">Хто зберіг.</param>
+    /// <param name="utcNow">Момент (UTC).</param>
+    public void MarkDefinitionUpdated(int userId, DateTime utcNow)
+    {
+        DefinitionUpdatedAt = utcNow;
+        DefinitionUpdatedByUserId = userId;
+    }
+
     /// <summary>Додає поле до опису довідника.</summary>
     /// <param name="field">Поле; має належати цьому ж довіднику.</param>
     /// <exception cref="DomainException">

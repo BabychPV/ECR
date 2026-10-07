@@ -95,6 +95,12 @@ public sealed class GetCellChangesHandler(
             return new PagedResult<CellChangeView>([], null, firstPage ? 0 : null);
         }
 
+        // ⛔ R-11: видимі колонки йдуть у запит — TOP, курсор і nextCursor рахуються вже по видимих.
+        if (readable is not null)
+        {
+            filter = filter with { VisibleColumnIds = readable.VisibleColumnIds() };
+        }
+
         var result = await audit.ReadCellChangesAsync(filter, page, ct).ConfigureAwait(false);
         int? total = null;
         if (firstPage)
@@ -104,9 +110,8 @@ public sealed class GetCellChangesHandler(
                 counts.Where(c => readable is null || readable.CanReadColumn(c.ColumnDefId)).Sum(c => c.Total), int.MaxValue);
         }
 
-        // ⚠ Журнал документа без колонки (лише `Security.ViewAudit`): рядки заборонених колонок відкидаються
-        // ПІСЛЯ читання сторінки, тож сторінка може бути коротшою за ліміт. Курсор лишається правильним: він
-        // іде за журналом, не за відфільтрованим переліком.
+        // ⚠ Страхувальний другий рубіж: основний відсів уже в SQL (VisibleColumnIds), тож тут нічого не
+        // відкидається; фільтр лишено на випадок читача порту, що фільтр не застосував.
         var visible = readable is null
             ? result.Items
             : [.. result.Items.Where(c => readable.CanReadColumn(c.ColumnDefId))];
@@ -130,6 +135,11 @@ public sealed class GetCellChangesHandler(
         if (empty)
         {
             return new CellChangeSummaryView(0, 0, 0, 0);
+        }
+
+        if (readable is not null)
+        {
+            filter = filter with { VisibleColumnIds = readable.VisibleColumnIds() };
         }
 
         var counts = await audit.CountCellChangesByColumnAsync(filter, TodayStart(), ct).ConfigureAwait(false);

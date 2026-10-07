@@ -69,6 +69,25 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
             {
                 d.Id, d.ProjectId, d.BusinessKey, d.CreatedAt, d.NameL10n,
                 Owner = db.Users.Where(u => u.Id == d.CreatedByUserId).Select(u => u.DisplayName).FirstOrDefault(),
+                // К6: «хто затвердив» - у тому самому запиті (без додаткового роундтрипу).
+                Approver = db.Users.Where(u => u.Id ==
+                    (db.ApprovalEvents
+                        .Where(e => e.DocumentId == d.Id && e.ByUserId != null
+                                    && (e.Action == Domain.Entities.Workflow.ApprovalAction.Approve
+                                        || e.Action == Domain.Entities.Workflow.ApprovalAction.ApproveStep)
+                                    && (!db.ApprovalEvents.Any(r => r.DocumentId == d.Id && r.At >= e.At
+                                        && (r.Action == Domain.Entities.Workflow.ApprovalAction.Reject
+                                            || r.Action == Domain.Entities.Workflow.ApprovalAction.Reopen
+                                            || r.Action == Domain.Entities.Workflow.ApprovalAction.Recall))))
+                        .OrderByDescending(e => e.At)
+                        .Select(e => e.ByUserId)
+                        .FirstOrDefault()
+                    ?? db.ApprovalStates
+                        .Where(a => a.DocumentId == d.Id && a.Status == DocumentStatus.Approved && a.ApprovedByUserId != null)
+                        .OrderByDescending(a => a.ApprovedAt)
+                        .Select(a => a.ApprovedByUserId)
+                        .FirstOrDefault()))
+                .Select(u => u.DisplayName).FirstOrDefault(),
             })
             .FirstOrDefaultAsync(ct)
             .ConfigureAwait(false);
@@ -90,8 +109,10 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
             document.Id, document.ProjectId, document.BusinessKey, document.CreatedAt, sheetCount,
             ToStateMap(sheets), document.NameL10n, HasLateEdits: late.Contains(documentId),
             Sheets: sheets, IncludedSheetCodes: included.GetValueOrDefault(documentId),
-            OwnerDisplayName: document.Owner);
+            OwnerDisplayName: document.Owner,
+            ApproverDisplayName: document.Approver);
     }
+
 
     /// <summary>
     /// Коди аркушів складу документів ОДНИМ запитом — для обробника, що відсікає аркуші поза
@@ -187,7 +208,25 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
                 d.NameL10n,
                 d.ModifiedAt,
                 db.Users.Where(u => u.Id == d.ModifiedByUserId).Select(u => u.DisplayName).FirstOrDefault(),
-                db.Users.Where(u => u.Id == d.CreatedByUserId).Select(u => u.DisplayName).FirstOrDefault()))
+                db.Users.Where(u => u.Id == d.CreatedByUserId).Select(u => u.DisplayName).FirstOrDefault(),
+                db.Users.Where(u => u.Id ==
+                    (db.ApprovalEvents
+                        .Where(e => e.DocumentId == d.Id && e.ByUserId != null
+                                    && (e.Action == Domain.Entities.Workflow.ApprovalAction.Approve
+                                        || e.Action == Domain.Entities.Workflow.ApprovalAction.ApproveStep)
+                                    && (!db.ApprovalEvents.Any(r => r.DocumentId == d.Id && r.At >= e.At
+                                        && (r.Action == Domain.Entities.Workflow.ApprovalAction.Reject
+                                            || r.Action == Domain.Entities.Workflow.ApprovalAction.Reopen
+                                            || r.Action == Domain.Entities.Workflow.ApprovalAction.Recall))))
+                        .OrderByDescending(e => e.At)
+                        .Select(e => e.ByUserId)
+                        .FirstOrDefault()
+                    ?? db.ApprovalStates
+                        .Where(a => a.DocumentId == d.Id && a.Status == DocumentStatus.Approved && a.ApprovedByUserId != null)
+                        .OrderByDescending(a => a.ApprovedAt)
+                        .Select(a => a.ApprovedByUserId)
+                        .FirstOrDefault()))
+                .Select(u => u.DisplayName).FirstOrDefault()))
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
@@ -223,7 +262,8 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
             items.Add(new DocumentSummary(
                 d.Id, d.ProjectId, d.BusinessKey, d.CreatedAt, d.SheetCount, ToStateMap(sheets), d.NameL10n,
                 d.ModifiedAt, d.ModifiedByDisplayName, findings?.ErrorCount, findings?.WarningCount,
-                late.Contains(d.Id), sheets, includedByDocument.GetValueOrDefault(d.Id), d.OwnerDisplayName));
+                late.Contains(d.Id), sheets, includedByDocument.GetValueOrDefault(d.Id), d.OwnerDisplayName,
+                d.ApproverDisplayName));
         }
 
         return new PagedResult<DocumentSummary>(
@@ -933,7 +973,7 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
     private sealed record DocumentRow(
         long Id, int ProjectId, string BusinessKey, DateTime CreatedAt, int SheetCount,
         Domain.ValueObjects.LocalizedText? NameL10n, DateTime ModifiedAt, string? ModifiedByDisplayName,
-        string? OwnerDisplayName);
+        string? OwnerDisplayName, string? ApproverDisplayName);
 
     /// <summary>Стеля кількості правил складу в одній версії.</summary>
     private const int MaxRules = 500;

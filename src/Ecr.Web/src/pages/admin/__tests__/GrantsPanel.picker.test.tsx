@@ -43,6 +43,7 @@ const Strings: Record<string, string> = {
   'grants.pickerColumn': 'Column',
   'grants.pickerNothingFound': 'Nothing found',
   'grants.pickerLoadFailed': 'Load failed',
+  'grants.pickerForbidden': 'Needs Template.View',
   'grants.projectsCatalogHint': 'All projects hint',
   'grants.unsaved': 'Unsaved changes',
   'grants.pickResourceFirst': 'Pick a resource first',
@@ -81,6 +82,8 @@ const GrantableProjects = [
 ];
 
 let securityProjectGets: number;
+/** A1-05: адміністратор безпеки без `Template.View` — `GET /templates` відмовляє `403`. */
+let templatesForbidden: boolean;
 
 const Structure = {
   templateVersionId: 70,
@@ -116,6 +119,7 @@ beforeEach(() => {
   puts = [];
   grantGets = 0;
   securityProjectGets = 0;
+  templatesForbidden = false;
 
   vi.stubGlobal(
     'fetch',
@@ -141,6 +145,12 @@ beforeEach(() => {
         return json(GrantableProjects);
       }
       if (url.includes('/api/v1/projects')) {
+        return new Response(
+          JSON.stringify({ title: 'Forbidden', status: 403, errorCode: 'ECR-AUTH-0403', correlationId: 'c' }),
+          { status: 403, headers: { 'Content-Type': 'application/problem+json' } },
+        );
+      }
+      if (templatesForbidden && url.includes('/api/v1/templates')) {
         return new Response(
           JSON.stringify({ title: 'Forbidden', status: 403, errorCode: 'ECR-AUTH-0403', correlationId: 'c' }),
           { status: 403, headers: { 'Content-Type': 'application/problem+json' } },
@@ -239,6 +249,37 @@ describe('GrantsPanel: вибір ресурсу за назвою (U6)', () => 
     expect(puts[0]?.body.grants).toEqual([
       expect.objectContaining({ resourceKind: 'Column', resourceId: 702 }),
     ]);
+  });
+
+  it('A1-05: 403 на списку шаблонів називає причину (Template.View), а не «Load failed»', async () => {
+    templatesForbidden = true;
+    await renderPanel();
+    await openRole('Auditor');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add grant' }));
+    await choose('Resource kind 1', 'Колонка');
+
+    expect(await screen.findByText('Needs Template.View')).not.toBeNull();
+    expect(screen.queryByText('Load failed')).toBeNull();
+  });
+
+  it('A1-05: інша відмова списку шаблонів лишається «Load failed»', async () => {
+    await renderPanel();
+    await openRole('Auditor');
+    const base = globalThis.fetch;
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) =>
+      String(input).includes('/api/v1/templates?')
+        ? new Response(JSON.stringify({ title: 'Server error', status: 500, errorCode: 'ECR-SYS-0500', correlationId: 'c' }), {
+            status: 500,
+            headers: { 'Content-Type': 'application/problem+json' },
+          })
+        : base(input, init)));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add grant' }));
+    await choose('Resource kind 1', 'Колонка');
+
+    expect(await screen.findByText('Load failed')).not.toBeNull();
+    expect(screen.queryByText('Needs Template.View')).toBeNull();
   });
 
   it('рядок без обраного ресурсу не зберігається (грант «ні на що»)', async () => {
