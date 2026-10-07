@@ -50,7 +50,7 @@ public sealed class CategoryRuleEngineTests
 
         var output = await stand.RunAsync(RuleStand.In("X", 10m), RuleStand.In("Cat", "A"));
 
-        Assert.All(output.Values.Where(v => v.OutputCode == "Total"), v => Assert.Equal(10m, v.Value));
+        Assert.Equal([10m, 10m], output.Values.Where(v => v.OutputCode == "Total").Select(v => v.Value));
     }
 
     [Fact]
@@ -83,7 +83,7 @@ public sealed class CategoryRuleEngineTests
 
         var output = await stand.RunAsync(RuleStand.In("X", 10m), RuleStand.In("Cat", "Winter"));
 
-        Assert.All(output.Values.Where(v => v.OutputCode == "Total"), v => Assert.Equal(5m, v.Value));
+        Assert.Equal([5m, 5m], output.Values.Where(v => v.OutputCode == "Total").Select(v => v.Value));
     }
 
     [Fact]
@@ -103,8 +103,8 @@ public sealed class CategoryRuleEngineTests
         var summer = await stand.RunAsync(RuleStand.In("X", 10m), RuleStand.In("Month", 6m));
         var winter = await stand.RunAsync(RuleStand.In("X", 10m), RuleStand.In("Month", 12m));
 
-        Assert.All(summer.Values.Where(v => v.OutputCode == "Total"), v => Assert.Equal(5m, v.Value));
-        Assert.All(winter.Values.Where(v => v.OutputCode == "Total"), v => Assert.Equal(2.5m, v.Value));
+        Assert.Equal([5m, 5m], summer.Values.Where(v => v.OutputCode == "Total").Select(v => v.Value));
+        Assert.Equal([2.5m, 2.5m], winter.Values.Where(v => v.OutputCode == "Total").Select(v => v.Value));
     }
 
     [Fact]
@@ -137,7 +137,7 @@ public sealed class CategoryRuleEngineTests
             RuleStand.In("X", 1m), RuleStand.In("Repair", "AfterMR"),
             RuleStand.In("AfterKey", "Loc_AfterMR_B"), RuleStand.In("BeforeKey", "Loc_BeforeMR_B"));
 
-        Assert.All(output.Values.Where(v => v.OutputCode == "Total"), v => Assert.Equal(6m, v.Value));
+        Assert.Equal([6m, 6m], output.Values.Where(v => v.OutputCode == "Total").Select(v => v.Value));
     }
 
     [Fact]
@@ -171,7 +171,7 @@ public sealed class CategoryRuleEngineTests
 
         var output = await stand.RunAsync(RuleStand.In("X", 10m), RuleStand.In("Cat", "Diesel"));
 
-        Assert.All(output.Values.Where(v => v.OutputCode == "Total"), v => Assert.Equal(20m, v.Value));
+        Assert.Equal([20m, 20m], output.Values.Where(v => v.OutputCode == "Total").Select(v => v.Value));
         Assert.DoesNotContain(output.Values, v => v.OutputCode == "Extra");
         Assert.Contains(output.Trace, s => s.StepCode == "Extra" && s.TraceJson == Expressions.ExpressionErrors.BadReference);
     }
