@@ -9610,6 +9610,21 @@
             "$ref": "#/components/schemas/RegistrySourceKind",
             "description": "Хто master (`ФВ-8.9`). Потрібен тому, хто складає набір для\nперемикання: без нього довідник, який уже в цільовому режимі, і той, який\nще ні, у переліку виглядають однаково."
           },
+          "updatedAt": {
+            "description": "Коли востаннє збережено опис довідника, UTC; `null` — опис не змінювали після появи поля.\nЛише в переліку.",
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "updatedByDisplayName": {
+            "description": "Відображуване ім'я (не логін) того, хто зберіг опис; `null` без права\n`Registry.EditDefinition`, без запису або якщо користувача вже немає.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
           "usedInColumns": {
             "description": "Скільки колонок шаблонів беруть значення з довідника. `null` без права\n`Registry.EditDefinition` (те саме, що в `GET {code}/usage`): «не знаю» ≠ «ніде».",
             "format": "int32",
@@ -16439,6 +16454,14 @@
       "TemplateSummary": {
         "description": "Шаблон у переліку.",
         "properties": {
+          "archivedAt": {
+            "description": "Коли шаблон архівовано, UTC; `null` — не архівований або архівований до появи колонки.",
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
           "code": {
             "description": "Код.",
             "type": "string"
@@ -16458,6 +16481,14 @@
           },
           "draftCreatedAt": {
             "description": "Коли чернетку створено, UTC; `null` — чернетки немає.",
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "draftEditedAt": {
+            "description": "Остання правка найновішої чернетки, UTC (якщо її не правили — момент створення); `null` —\nчернетки немає.",
             "format": "date-time",
             "type": [
               "null",
@@ -16486,7 +16517,7 @@
             ]
           },
           "updatedAt": {
-            "description": "Остання відома зміна, UTC: найпізніша з створення шаблону, створення/публікації/виведення з\nобігу будь-якої його версії. Окремого журналу правок чернетки в моделі немає.",
+            "description": "Остання відома зміна, UTC: найпізніша з створення шаблону, створення/публікації/виведення з\nобігу будь-якої його версії. Також правки чернетки (`TemplateVersion.UpdatedAt`); правки стилів і умовного форматування не покриті.",
             "format": "date-time",
             "type": [
               "null",

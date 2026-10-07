@@ -22287,6 +22287,15 @@ export interface components {
              *     ще ні, у переліку виглядають однаково. */
             sourceKind: components["schemas"]["RegistrySourceKind"];
             /**
+             * Format: date-time
+             * @description Коли востаннє збережено опис довідника, UTC; `null` — опис не змінювали після появи поля.
+             *     Лише в переліку.
+             */
+            updatedAt?: null | string;
+            /** @description Відображуване ім'я (не логін) того, хто зберіг опис; `null` без права
+             *     `Registry.EditDefinition`, без запису або якщо користувача вже немає. */
+            updatedByDisplayName?: null | string;
+            /**
              * Format: int32
              * @description Скільки колонок шаблонів беруть значення з довідника. `null` без права
              *     `Registry.EditDefinition` (те саме, що в `GET {code}/usage`): «не знаю» ≠ «ніде».
@@ -25419,6 +25428,11 @@ export interface components {
         };
         /** @description Шаблон у переліку. */
         TemplateSummary: {
+            /**
+             * Format: date-time
+             * @description Коли шаблон архівовано, UTC; `null` — не архівований або архівований до появи колонки.
+             */
+            archivedAt?: null | string;
             /** @description Код. */
             code: string;
             /**
@@ -25435,6 +25449,12 @@ export interface components {
              */
             draftCreatedAt?: null | string;
             /**
+             * Format: date-time
+             * @description Остання правка найновішої чернетки, UTC (якщо її не правили — момент створення); `null` —
+             *     чернетки немає.
+             */
+            draftEditedAt?: null | string;
+            /**
              * Format: int32
              * @description Ідентифікатор.
              */
@@ -25448,7 +25468,7 @@ export interface components {
             /**
              * Format: date-time
              * @description Остання відома зміна, UTC: найпізніша з створення шаблону, створення/публікації/виведення з
-             *     обігу будь-якої його версії. Окремого журналу правок чернетки в моделі немає.
+             *     обігу будь-якої його версії. Також правки чернетки (`TemplateVersion.UpdatedAt`); правки стилів і умовного форматування не покриті.
              */
             updatedAt?: null | string;
             /**
