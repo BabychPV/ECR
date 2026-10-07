@@ -633,8 +633,13 @@ public sealed class PatchCellsTests
     /// `PatchCellsHandler.Text()` не мав гілки (аудит §3.1), і gate бачив
     /// порожнечу в заповненій комірці.
     /// </param>
+    /// <param name="documentCategoryColumnId">
+    /// Id колонки <c>Category</c> у версії шаблону ДОКУМЕНТА. Правило/вхід методології ключуються Id <c>12</c> —
+    /// колонкою версії-джерела (C1: документ на клон-версії має інший Id тієї самої колонки).
+    /// </param>
     private int WithMethodology(
-        RequiredInputSeverity severity, CellDataType categoryType = CellDataType.String)
+        RequiredInputSeverity severity, CellDataType categoryType = CellDataType.String,
+        int documentCategoryColumnId = 12)
     {
         const int CategoryColumnId = 12;
 
@@ -646,7 +651,7 @@ public sealed class PatchCellsTests
         var category = new ColumnDef(
             tableDefId: 3, EcrCode.Create("Category"),
             new LocalizedText(new Dictionary<string, string> { ["en"] = "Category" }), 2, categoryType);
-        SetId(category, CategoryColumnId);
+        SetId(category, documentCategoryColumnId);
 
         var sheet = new SheetDef(
             templateVersionId: 2, EcrCode.Create("Water"),
@@ -663,7 +668,7 @@ public sealed class PatchCellsTests
         _metadata.GetAsync(2, Arg.Any<CancellationToken>()).Returns(
             new TemplateVersionSnapshot(
                 TemplateVersionId: 2, PresentationRevision: 0, Sheets: [sheet],
-                ColumnsById: new Dictionary<int, ColumnDef> { [VolumeColumnId] = volume, [CategoryColumnId] = category },
+                ColumnsById: new Dictionary<int, ColumnDef> { [VolumeColumnId] = volume, [documentCategoryColumnId] = category },
                 RowsByKey: new Dictionary<(int, string), RowDef>()));
 
         const int MethodologyId = 100;
@@ -689,7 +694,39 @@ public sealed class PatchCellsTests
         _periods.FindPeriodBoundsAsync(700, Period, Arg.Any<CancellationToken>())
                 .Returns(new PeriodBounds(new DateOnly(2026, 1, 1), new DateOnly(2026, 1, 31)));
 
-        return CategoryColumnId;
+        return documentCategoryColumnId;
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Finding", "C1")]
+    public async Task Заповнений_вхід_на_клон_версії_не_блокує_запис_ключ_вимоги_з_версії_джерела()
+    {
+        // C1: вимога ключується Id 12 (версія-джерело), а колонка Category документа на клоні має Id 13.
+        // До фіксу gate шукав значення колонки 12 і блокував збереження назавжди (ECR-CALC-0437).
+        WithMethodology(RequiredInputSeverity.Block, documentCategoryColumnId: 13);
+
+        var response = await Handler().HandleAsync(
+            Request(new PatchRow("7001001", "0x0A", [new PatchCell("Category", "Gas")])),
+            CancellationToken.None);
+
+        Assert.Equal(1, response.AppliedCells);
+        Assert.DoesNotContain(response.Validation, m => m.RuleCode == "ECR-CALC-0437");
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Finding", "C1")]
+    public async Task Незаповнений_вхід_на_клон_версії_блокує_і_називає_локальну_колонку()
+    {
+        WithMethodology(RequiredInputSeverity.Block, documentCategoryColumnId: 13);
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Handler().HandleAsync(
+                Request(new PatchRow("7001001", "0x0A", [new PatchCell("Volume", 12500m)])),
+                CancellationToken.None));
+
+        Assert.Equal("ECR-CALC-0437", error.ErrorCode);
+        var details = System.Text.Json.JsonSerializer.Serialize(error.Details);
+        Assert.Contains("Category", details, StringComparison.Ordinal);
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
