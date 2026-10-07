@@ -298,28 +298,39 @@ public sealed class PublishMethodologyHandler(
         // як число рядка — тому це відмова публікації, а не помилка прогону.
         RejectScopeViolations(formulas, [.. parsed.Select(p => p.Root)], constants, outputs);
 
-        // ⛔ Лінія 1 захисту від мовчазного null: аргумент, який формула
-        // вживає, мусить відповідати колонці таблиці, до якої прив'язана
-        // методологія — інакше збірка (`CalculationInputBuilder`) не знайде
-        // звідки його взяти, і розрахунок «успішно» порахує порожньо.
-        // ⛔ HSE301 L: разом з аргументами формул бібліотеки із замикання — вони читають
-        // рядок ВИКЛИКАЧА, і колонки там бракуватиме так само (у рантаймі — #ARG).
-        await CheckArgumentColumnsAsync(methodology.Id, [.. parsed, .. LibraryFormulas(libraries)], ct)
-            .ConfigureAwait(false);
-
         // ⚠ Попередження НЕ валять публікацію (№05 §7): «оголошено,
         // не вжито» чинна система допускала, і ламати через це міграцію не можна.
         // Вони йдуть у відповідь публікації, а не в журнал: той, хто публікує,
         // має побачити їх у ту саму мить, а не знайти через тиждень у логах.
         var warnings = new List<string>();
 
-        // ⛔ V-18: невідома константа — іменна відмова, а не рядок у «N проблем».
-        MethodologyPublishChecks.CheckUnknownConstants(parsed, constants);
-
         // ⛔ T2-04: тексти попереджень — мовою того, хто публікує (каталог), а не зашитою українською.
         var strings = uiCatalog is null
             ? null
             : await uiCatalog.GetAsync(currentUser.Language, ct).ConfigureAwait(false);
+
+        // ✎ L-2: правило категорії константи — розбір, посилання, тип результату; попередження про версії
+        // з кількома категоріями без правила й про Row-формули, що читають категорійні константи.
+        var categoryRuleText = await methodologies
+            .GetCategoryRuleAsync(methodologyVersionId, ct).ConfigureAwait(false);
+        var categoryRule = MethodologyCategoryRuleChecks.Check(
+            categoryRuleText, formulaEngine, formulas, parsed, constants, warnings, strings);
+        problems.AddRange(categoryRule.Problems);
+
+        // ⛔ Лінія 1 захисту від мовчазного null: аргумент, який формула
+        // вживає, мусить відповідати колонці таблиці, до якої прив'язана
+        // методологія — інакше збірка (`CalculationInputBuilder`) не знайде
+        // звідки його взяти, і розрахунок «успішно» порахує порожньо.
+        // ⛔ HSE301 L: разом з аргументами формул бібліотеки із замикання — вони читають
+        // рядок ВИКЛИКАЧА, і колонки там бракуватиме так само (у рантаймі — #ARG).
+        // ✎ L-2: і `@`-аргументи правила категорії — воно читає той самий рядок.
+        ParsedFormula[] ruleFormulas = categoryRule.Rule is { } rule ? [rule] : [];
+        await CheckArgumentColumnsAsync(
+                methodology.Id, [.. parsed, .. LibraryFormulas(libraries), .. ruleFormulas], ct)
+            .ConfigureAwait(false);
+
+        // ⛔ V-18: невідома константа — іменна відмова, а не рядок у «N проблем».
+        MethodologyPublishChecks.CheckUnknownConstants(parsed, constants);
 
         problems.AddRange(MethodologyPublishChecks.Check(
             parsed,
