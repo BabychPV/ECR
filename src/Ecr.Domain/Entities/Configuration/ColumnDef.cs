@@ -216,35 +216,50 @@ public sealed class ColumnDef : Entity<int>
     /// <exception cref="DomainException"><c>ECR-TMPL-0422</c>: місяць поза 1..12, прапор без місяця або місяць без прапора.</exception>
     public void SetMonth(bool isMonthColumn, byte? monthNumber)
     {
+        // ⚠ messageKey — повні літерали в кожному кидку: сторож
+        // `ErrorTitleCatalogTests` читає їх з коду дослівно.
         if (isMonthColumn && monthNumber is null)
         {
-            throw MonthError("monthColumnWithoutMonth", $"Колонка {Code} позначена місячною, але місяць не задано.", monthNumber);
+            throw new DomainException(
+                "ECR-TMPL-0422",
+                $"Колонка {Code} позначена місячною, але місяць не задано.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-TMPL-0422.monthColumnWithoutMonth",
+                    ["columnCode"] = Code,
+                    ["monthNumber"] = monthNumber?.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
         }
 
         if (monthNumber is { } n && (n < 1 || n > 12))
         {
-            throw MonthError("monthOutOfRange", $"Місяць колонки {Code} має бути від 1 до 12: {n}.", monthNumber);
+            throw new DomainException(
+                "ECR-TMPL-0422",
+                $"Місяць колонки {Code} має бути від 1 до 12: {n}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-TMPL-0422.monthOutOfRange",
+                    ["columnCode"] = Code,
+                    ["monthNumber"] = monthNumber?.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
         }
 
         if (!isMonthColumn && monthNumber is not null)
         {
-            throw MonthError("monthWithoutFlag", $"Місяць колонки {Code} заданий, але колонка не позначена місячною.", monthNumber);
+            throw new DomainException(
+                "ECR-TMPL-0422",
+                $"Місяць колонки {Code} заданий, але колонка не позначена місячною.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-TMPL-0422.monthWithoutFlag",
+                    ["columnCode"] = Code,
+                    ["monthNumber"] = monthNumber?.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
         }
 
         IsMonthColumn = isMonthColumn;
         MonthNumber = isMonthColumn ? monthNumber : null;
     }
-
-    private DomainException MonthError(string key, string message, byte? month)
-        => new(
-            "ECR-TMPL-0422",
-            message,
-            new Dictionary<string, object?>
-            {
-                ["messageKey"] = $"err.ECR-TMPL-0422.{key}",
-                ["columnCode"] = Code,
-                ["monthNumber"] = month?.ToString(System.Globalization.CultureInfo.InvariantCulture),
-            });
 
     /// <summary>Типова ширина колонки, px; <c>null</c> — скинути до типової за типом.</summary>
     /// <exception cref="DomainException">Поза межами 40..800 — <c>ECR-TMPL-0422</c>.</exception>

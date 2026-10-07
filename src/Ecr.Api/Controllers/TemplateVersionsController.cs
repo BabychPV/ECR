@@ -977,7 +977,7 @@ public sealed record SaveTableDefRequest(
 /// <param name="LookupFilter">Звуження списку довідника.</param>
 /// <param name="UnitId">Одиниця значень колонки (ФВ-16.1); не для типу <c>Unit</c>.</param>
 /// <param name="WidthPx">Типова ширина, px, 40..800 (D-234); <c>null</c> — типова за типом.</param>
-/// <param name="IsMonthColumn">Колонка прив'язана до календарного місяця; вимагає <c>MonthNumber</c>.</param>
+/// <param name="IsMonthColumn">Колонка прив'язана до календарного місяця; вимагає <c>MonthNumber</c>; без обох полів місяць не змінюється.</param>
 /// <param name="MonthNumber">Місяць 1..12; лише разом з <c>IsMonthColumn</c>.</param>
 public sealed record SaveColumnDefRequest(
     IReadOnlyDictionary<string, string> HeaderL10n,
@@ -995,7 +995,7 @@ public sealed record SaveColumnDefRequest(
     string? LookupFilter,
     int? UnitId,
     int? WidthPx = null,
-    bool IsMonthColumn = false,
+    bool? IsMonthColumn = null,
     byte? MonthNumber = null);
 
 /// <summary>Налаштування поля шапки документа версії-чернетки.</summary>

@@ -112,6 +112,34 @@ public sealed class ColumnMonthTests(SqlServerFixture sql)
         Assert.Equal((false, (byte?)null), await MonthAsync(version.ColumnDefId));
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-6.14")]
+    public async Task PUT_без_полів_місяця_не_стирає_збережений_місяць()
+    {
+        var version = await BareVersionAsync();
+        var withMonth = new SaveColumnDefCommand(
+            new Dictionary<string, string> { ["en"] = "Jan" }, null, CellDataType.Decimal,
+            false, false, false, null, null, null, null, null, null, null, null,
+            IsMonthColumn: true, MonthNumber: 6);
+
+        await using (var db = Context())
+        {
+            await Save(db).HandleAsync(version.VersionId, version.TableDefId, "Jan", withMonth, CancellationToken.None);
+        }
+
+        // Старий клієнт / імпорт: поля місяця не прислано.
+        await using (var db = Context())
+        {
+            await Save(db).HandleAsync(
+                version.VersionId, version.TableDefId, "Jan",
+                withMonth with { IsMonthColumn = null, MonthNumber = null, IsRequired = true }, CancellationToken.None);
+        }
+
+        Assert.Equal((true, (byte?)6), await MonthAsync(version.ColumnDefId));
+    }
+
     [Theory]
     [InlineData(true, null, "monthColumnWithoutMonth")]
     [InlineData(true, (byte)13, "monthOutOfRange")]
