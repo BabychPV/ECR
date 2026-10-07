@@ -78,6 +78,28 @@ public sealed class SheetVisibilityTests
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait("Requirement", "R-8")]
+    public void Роль_звужена_кодами_аркушів_без_жодних_заборон_ховає_число()
+    {
+        // Дві ролі: глобальне Report.ViewCampaign + роль зі scope sheets=[A]. Заборон і низьких грантів немає,
+        // але аркуш B читачеві недоступний — сума по всіх аркушах розкрила б його існування й стан.
+        var narrowed = Scoped(denies: [], narrowedDenies: [], narrowedSheets: ["A"], viewCampaign: true);
+
+        Assert.False(SheetVisibility.SeesAllSheets(narrowed));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "R-8")]
+    public void Шар_звужений_лише_періодом_а_не_аркушами_число_не_ховає_за_кодами()
+    {
+        var periodOnly = Scoped(denies: [], narrowedDenies: [], narrowedSheets: null, viewCampaign: true);
+
+        Assert.True(SheetVisibility.SeesAllSheets(periodOnly));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "R-8")]
     public void Календар_проєкту_потребує_повного_відкриття_проєкту()
     {
         var withGrant = new AccessBuilder().Grant(ResourceKind.Project, Project, GrantLevel.Read).Build();
@@ -90,9 +112,11 @@ public sealed class SheetVisibilityTests
         Assert.False(SheetVisibility.SeesAllSheets(withGrant, Project + 1));
     }
 
-    private static AccessProfile Scoped(string[] denies, string[] narrowedDenies, string[]? narrowedSheets)
+    private static AccessProfile Scoped(string[] denies, string[] narrowedDenies, string[]? narrowedSheets, bool viewCampaign = false)
     {
-        var baseProfile = new AccessBuilder().Build();
+        var baseProfile = viewCampaign
+            ? new AccessBuilder().Permission("Report.ViewCampaign").Build()
+            : new AccessBuilder().Build();
 
         var layer = new NarrowedAccess(
             narrowedSheets is null ? null : new HashSet<string>(narrowedSheets),
