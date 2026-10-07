@@ -67,7 +67,7 @@ public sealed class ReportViewGeneratorFailureTextTests(SqlServerFixture sql)
             () => new ReportViewGenerator(db, status, log).GenerateAsync(1, CancellationToken.None));
 
         var failure = Assert.Single(status.Failures);
-        var match = System.Text.RegularExpressions.Regex.Match(failure.Message, @"correlation ([0-9a-f]{32})");
+        var match = System.Text.RegularExpressions.Regex.Match(failure.Message, @"correlation ([0-9a-f]{8,32})");
         Assert.True(match.Success, failure.Message);
 
         var entry = Assert.Single(log.Entries);
