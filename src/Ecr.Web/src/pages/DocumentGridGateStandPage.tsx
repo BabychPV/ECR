@@ -38,6 +38,22 @@ const standWindow = window as unknown as StandWindow;
 
 const stored = new Map<string, Record<string, unknown>>();
 
+// D-1: `?calc=1` додає обчислювану колонку TOTAL = 2 × QTY. Як на справжньому сервері, вона
+// відстає від правки: слайс віддає TOTAL лише з ЗАВЕРШЕНОЇ задачі перерахунку (~1.5 с після PATCH).
+const calcTotals = new Map<string, number>();
+const CalcLagMs = 1_500;
+let calcJobSeq = 0;
+let calcJobDoneAt = 0;
+
+const calcEnabled = (): boolean => new URLSearchParams(window.location.search).get('calc') === '1';
+
+function finishCalcJob(): void {
+  for (const [rowKey, cells] of stored) {
+    const qty = Number(cells['QTY']);
+    if (Number.isFinite(qty)) calcTotals.set(rowKey, qty * 2);
+  }
+}
+
 function column(code: string, ordinal: number, dataType: string, isReadOnly: boolean): Record<string, unknown> {
   return {
     code,
@@ -62,12 +78,20 @@ function slice(): Record<string, unknown> {
     cellPermissions: {},
     periodKey: StandPeriodKey,
     tableInstanceId: StandTableInstanceId,
-    columns: [column('CODE', 0, 'String', true), column('QTY', 1, 'Decimal', false)],
+    columns: [
+      column('CODE', 0, 'String', true),
+      column('QTY', 1, 'Decimal', false),
+      ...(calcEnabled() ? [column('TOTAL', 2, 'Decimal', true)] : []),
+    ],
     rows: Array.from({ length: StandRowCount }, (_, index) => {
       const rowKey = `R${index + 1}`;
 
       return {
-        cells: { CODE: rowKey, ...stored.get(rowKey) },
+        cells: {
+          CODE: rowKey,
+          ...stored.get(rowKey),
+          ...(calcEnabled() && calcTotals.has(rowKey) ? { TOTAL: calcTotals.get(rowKey) } : {}),
+        },
         isOrphaned: false,
         label: null,
         ordinal: index,
@@ -104,7 +128,19 @@ function installStandServer(): void {
       }
       await new Promise((resolve) => setTimeout(resolve, latency));
 
+      if (calcEnabled()) {
+        calcJobSeq += 1;
+        calcJobDoneAt = Date.now() + CalcLagMs;
+        const jobId = `StandRecalcJob#${String(calcJobSeq)}`;
+        window.setTimeout(finishCalcJob, CalcLagMs);
+
+        return json({ appliedCells: rows.length, rowVersions: {}, validation: [], recalculationJobId: jobId });
+      }
+
       return json({ appliedCells: rows.length, rowVersions: {}, validation: [] });
+    }
+    if (path.startsWith('/api/v1/jobs/StandRecalcJob')) {
+      return json({ state: Date.now() >= calcJobDoneAt ? 'Succeeded' : 'Running' });
     }
     if (path === `/api/v1/documents/${StandDocumentId}/tables/${StandTableInstanceId}`) return json(slice());
     // ⛔ `/me/preferences` теж свій: у e2e-стенді зі справжнім API сторінка поза сесією отримувала 401 →

@@ -359,6 +359,19 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
   // під виглядом «оновити обчислені колонки» не можна.
   const recalc = useRecalculationStatus(recalculationJobId);
 
+  // ⛔ `CL-01` (DoD): нуль `GET` зрізу до завершення задачі і рівно ОДИН після.
+  // Без нього обчислені колонки лишалися старими до F9 (`D-1`), хоча рядок
+  // казав «Recalculated»: локальне застосування відповіді обчислених значень
+  // не знає. Один `jobId` — один перезапит.
+  const refetchedFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (recalc.outcome !== 'succeeded' || !recalculationJobId) return;
+    if (refetchedFor.current === recalculationJobId) return;
+
+    refetchedFor.current = recalculationJobId;
+    void slice.refetch();
+  }, [recalc.outcome, recalculationJobId]);
+
   /**
    * Додавання рядка динамічної таблиці (`ФВ-3.2`).
    *
