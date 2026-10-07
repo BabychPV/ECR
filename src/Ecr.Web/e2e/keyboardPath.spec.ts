@@ -146,6 +146,28 @@ test.describe('Прохід оператора без миші (ФВ-14.16)', ()
     const link = page.locator(`a[href^="/documents/${DocumentId}"]`).first();
     await expect(link, 'документа немає в переліку за цей період').toBeVisible({ timeout: 30_000 });
 
+    // ⛔ Видиме посилання — ще не усталений перелік. Набір періоду змінює адресу
+    // (`?periodKey=`), і перелік перезапитується: рядки перемонтовуються вже ПІСЛЯ
+    // того, як старе посилання стало видимим, тож `expectFocusRing` ловив
+    // «Element is not attached to the DOM» (2 з 4 прогонів «Аудиту», 07.10).
+    // Спершу — адреса з набраним періодом, потім той самий DOM-вузол живий два
+    // вікна поспіль (~0.8 с).
+    await expect(page).toHaveURL(new RegExp(`[?&]periodKey=${PeriodKey}(&|$)`), { timeout: 30_000 });
+    let alive = 0;
+    await expect
+      .poll(
+        async () => {
+          const handle = await link.elementHandle({ timeout: 10_000 }).catch(() => null);
+          await page.waitForTimeout(400);
+          const connected = (await handle?.evaluate((element) => element.isConnected).catch(() => false)) === true;
+          await handle?.dispose();
+          alive = connected ? alive + 1 : 0;
+          return alive >= 2;
+        },
+        { message: 'перелік документів не усталився після зміни періоду', timeout: 30_000 },
+      )
+      .toBe(true);
+
     await expectFocusRing(page, link, 'посилання на документ');
     await page.keyboard.press('Enter');
 
