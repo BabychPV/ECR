@@ -5,6 +5,7 @@ import { PageDescriptionContext } from './pageDescription';
 import { announceRoute } from './RouteAnnouncer';
 import { t } from '@/shared/i18n';
 import { RouteHeadingClass } from '@/shared/theme/routeHeading';
+import { interactedSinceRouteStart } from '@/shared/a11y/routeInteraction';
 
 /**
  * ⛔ Кластер дій — ЗА `import()`, і це вимога бюджету (`D-132`), а не смак.
@@ -174,6 +175,11 @@ let coldLoad = true;
 function userAlreadyMovedFocus(heading: HTMLElement | null): boolean {
   const firstMount = coldLoad;
   coldLoad = false;
+
+  // ⛔ Фокус міг лише ТИМЧАСОВО впасти на `body`: Escape в редакторі комірки прибирає поле разом
+  // із фокусом, і шапка, що змонтувалась у цю щілину, відняла б його в сітки (e2e
+  // `gridPasteAfterEditor`, escape). Людина вже діяла на екрані — шапка не втручається.
+  if (interactedSinceRouteStart()) return true;
 
   const active = document.activeElement;
   if (active === null || active === document.body || active === document.documentElement) return false;

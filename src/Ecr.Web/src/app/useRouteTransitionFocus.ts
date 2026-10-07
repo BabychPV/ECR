@@ -1,6 +1,7 @@
 import { useEffect, useRef, type RefObject } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useLocation, useMatches } from 'react-router-dom';
+import { markRouteStart } from '@/shared/a11y/routeInteraction';
 import { buildCrumbChain, type CrumbEntry } from './Breadcrumbs';
 import {
   routeMotionDuration,
@@ -116,6 +117,15 @@ export function useRouteTransitionFocus(mainContentId: string): RefObject<HTMLDi
   // холодному завантаженні (`PageHeader` самої першої сторінки й так уже
   // забирає фокус при монтуванні — другий гравець тут зайвий).
   const previousPathname = useRef(location.pathname);
+
+  // ⚠ Мітка початку маршруту — у РЕНДЕРІ, а не в ефекті: ефект шапки нової сторінки (дитина)
+  // спрацьовує раніше за ефекти каркаса, і мітка запізнилась би. Перший рендер теж позначається:
+  // клавіші на сторінці входу не мають вважатися діями на екрані застосунку.
+  const markedPathname = useRef<string | null>(null);
+  if (markedPathname.current !== location.pathname) {
+    markedPathname.current = location.pathname;
+    markRouteStart();
+  }
 
   const chain = buildCrumbChain(matches, queryClient, location.search);
   const title = formatDocumentTitle(chain);

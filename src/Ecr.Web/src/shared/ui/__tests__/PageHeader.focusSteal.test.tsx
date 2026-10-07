@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { render } from '@testing-library/react';
+import { fireEvent, render } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { MemoryRouter } from 'react-router-dom';
 
@@ -121,5 +121,44 @@ describe('PageHeader: фокус, який людина вже поставил�
     );
 
     expect(document.activeElement).toBe(second.getByRole('heading', { level: 1 }));
+  });
+
+  it('людина вже діяла на екрані (Escape у редакторі), фокус тимчасово на body — заголовок мовчить', async () => {
+    const { markRouteStart } = await import('@/shared/a11y/routeInteraction');
+    const { PageHeader } = await import('@/shared/ui/PageHeader');
+    markRouteStart();
+    await new Promise((resolve) => setTimeout(resolve, 2));
+    fireEvent.keyDown(document.body, { key: 'Escape' });
+    expect(document.activeElement).toBe(document.body);
+
+    const view = render(
+      <MantineProvider>
+        <MemoryRouter>
+          <PageHeader title="Periods" />
+        </MemoryRouter>
+      </MantineProvider>,
+    );
+
+    // ⛔ Мутація «без перевірки дій на екрані» віддає фокус заголовку.
+    expect(document.activeElement).toBe(document.body);
+    expect(view.getByRole('heading', { level: 1 })).not.toBe(document.activeElement);
+  });
+
+  it('клік, що запустив перехід, був ДО мітки маршруту — заголовок бере фокус', async () => {
+    const { markRouteStart } = await import('@/shared/a11y/routeInteraction');
+    const { PageHeader } = await import('@/shared/ui/PageHeader');
+    fireEvent.pointerDown(document.body);
+    await new Promise((resolve) => setTimeout(resolve, 2));
+    markRouteStart();
+
+    const view = render(
+      <MantineProvider>
+        <MemoryRouter>
+          <PageHeader title="Periods" />
+        </MemoryRouter>
+      </MantineProvider>,
+    );
+
+    expect(document.activeElement).toBe(view.getByRole('heading', { level: 1 }));
   });
 });
