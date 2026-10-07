@@ -181,15 +181,39 @@ describe('TemplateCardPage: версії шаблону і один «назад
   );
 
   it(
-    'окремого посилання «← Templates» немає — назад веде хлібна крихта',
+    // ✎ b4b: макет картки (`screens-templates.js`, `back: Templates`, KIT §1.5) має
+    // «← Back to Templates» — D15-01: у вигляді правий макет. Посилання рівно ОДНЕ.
+    '«← Back to Templates» — рівно одне посилання назад, на перелік',
     async () => {
       respond(['Template.Edit']);
       show();
 
       await versionsTable();
 
-      expect(screen.queryByRole('link', { name: /←/ })).toBeNull();
-      expect(document.querySelector('a[href="/admin/templates"]')).toBeNull();
+      const back = screen.getAllByRole('link', { name: /←/ });
+      expect(back).toHaveLength(1);
+      expect(back[0]?.getAttribute('href')).toBe('/admin/templates');
+    },
+    Timeout * 3,
+  );
+
+  it(
+    'b4b: стрічка версій від новішої; поточна — остання опублікована; шапка — бейдж і «Continue draft»',
+    async () => {
+      respond(['Template.Edit']);
+      show();
+
+      const section = await versionsTable();
+      const items = [...section.querySelectorAll<HTMLElement>('[data-template-timeline] > li')];
+
+      expect(items.map((item) => item.querySelector('a')?.textContent)).toEqual(['1.1.0.0', '1.0.0.0']);
+      expect(items.map((item) => item.dataset['versionKind'])).toEqual(['draft', 'current']);
+
+      // Чернетка є → головна дія шапки веде в неї, а «New version» — другорядна.
+      const continueDraft = await screen.findByRole('link', { name: /templates\.continueDraft/ }, { timeout: Timeout });
+      expect(continueDraft.getAttribute('href')).toBe('/admin/templates/7/versions/12');
+      expect(within(section).getByRole('button', { name: /templates\.newVersion/ }).getAttribute('data-variant')).toBe('default');
+      expect(document.querySelector('h1')?.parentElement?.parentElement?.querySelector('[data-status-kind="version"]')).not.toBeNull();
     },
     Timeout * 3,
   );
