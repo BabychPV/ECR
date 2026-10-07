@@ -199,7 +199,7 @@ describe('UI-39: diagnostics() — білий список', () => {
     const text = diagnostics({
       ready: { ready: false, report: reportOf('Unhealthy', [check('db', 'Unhealthy', 'Database is unavailable.')]) as never },
       db: DbReport as never,
-      facts: Facts,
+      facts: Facts as never,
       checkedAt: '2026-10-06T20:00:00.000Z',
     });
 

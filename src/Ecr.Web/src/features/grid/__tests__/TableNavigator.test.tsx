@@ -29,9 +29,9 @@ function table(ordinal: number, name: string): DocumentTableDto {
 
 const tables = [table(1, 'Mass emissions'), table(2, 'Fuel use'), table(3, 'Operating hours')];
 const items = buildTableTree(tables, [
-  { tableDefId: 1, sheetCode: 'S1', filledCells: 5, inputCells: 5, errorCount: 0, warningCount: 0 },
-  { tableDefId: 2, sheetCode: 'S1', filledCells: 2, inputCells: 5, errorCount: 3, warningCount: 0 },
-  { tableDefId: 3, sheetCode: 'S1', filledCells: 0, inputCells: 5, errorCount: 0, warningCount: 2 },
+  { tableDefId: 1, sheetCode: 'S1', filledCells: 5, inputCells: 5, errorCount: 0, warningCount: 0, isClosed: false, rowCount: 0 },
+  { tableDefId: 2, sheetCode: 'S1', filledCells: 2, inputCells: 5, errorCount: 3, warningCount: 0, isClosed: false, rowCount: 0 },
+  { tableDefId: 3, sheetCode: 'S1', filledCells: 0, inputCells: 5, errorCount: 0, warningCount: 2, isClosed: false, rowCount: 0 },
 ]);
 
 function renderNavigator(selected = 101, onSelect = vi.fn()) {
@@ -128,9 +128,9 @@ describe('TableNavigator', () => {
     // Відповіді API після фіксу «прихований аркуш»: таблиці — лише аркуш S1; лічильники для
     // вузької ролі — null. Статус аркуша HIDDEN, навіть якби прийшов, у дерево не потрапляє.
     const scoped = buildTableTree(tables, [
-      { tableDefId: 1, sheetCode: 'S1', filledCells: 5, inputCells: 5, errorCount: null, warningCount: null },
-      { tableDefId: 2, sheetCode: 'S1', filledCells: 1, inputCells: 5, errorCount: null, warningCount: null },
-      { tableDefId: 3, sheetCode: 'HIDDEN', filledCells: 9, inputCells: 9, errorCount: 7, warningCount: 4 },
+      { tableDefId: 1, sheetCode: 'S1', filledCells: 5, inputCells: 5, errorCount: null, warningCount: null, isClosed: false, rowCount: 0 },
+      { tableDefId: 2, sheetCode: 'S1', filledCells: 1, inputCells: 5, errorCount: null, warningCount: null, isClosed: false, rowCount: 0 },
+      { tableDefId: 3, sheetCode: 'HIDDEN', filledCells: 9, inputCells: 9, errorCount: 7, warningCount: 4, isClosed: false, rowCount: 0 },
     ]);
 
     render(
