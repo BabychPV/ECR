@@ -302,6 +302,12 @@ export type MethodologyRuleDto = Schemas['MethodologyRuleDto'];
 /** Запис правила відбору рядків. */
 export type SaveMethodologyRuleRequest = Schemas['SaveMethodologyRuleRequest'];
 
+/** Правило категорії константи версії (L-2): вираз «рядок → ключ категорії»; `expression = null` — правила немає. */
+export type MethodologyCategoryRuleDto = Schemas['MethodologyCategoryRuleDto'];
+
+/** Запис правила категорії константи версії (L-2). */
+export type SaveMethodologyCategoryRuleRequest = Schemas['SaveMethodologyCategoryRuleRequest'];
+
 /** Критичність незаповненої обов'язкової вхідної колонки: блокує чи попереджає. */
 export type RequiredInputSeverity = Schemas['RequiredInputSeverity'];
 
