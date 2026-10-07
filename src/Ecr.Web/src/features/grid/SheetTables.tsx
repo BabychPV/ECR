@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState, type JSX } from 'react';
-import { Box, Button, Skeleton, Stack, Text } from '@mantine/core';
+import { useEffect, useRef, useState, type JSX, type ReactNode } from 'react';
+import { Box, Button, Group, Skeleton, Stack, Text } from '@mantine/core';
 import type { DocumentTableDto } from '@/api/types';
 import { focusSoon } from '@/shared/a11y/focus';
 import { localized } from '@/shared/i18n/localized';
 import { t } from '@/shared/i18n';
 import { DocumentGrid } from './DocumentGrid';
+import { tableNumber } from './tableTreeModel';
 import { completeCellNavigation, useCellNavigation } from './cellNavigation';
 
 /**
@@ -89,6 +90,22 @@ export interface SheetTablesProps {
   readonly periodKey: number;
   readonly readOnly: boolean;
   readonly tables: readonly DocumentTableDto[];
+  /**
+   * `stack` — усі таблиці аркуша стосом із лінивим монтуванням (як до `UI-22`);
+   * `single` — на екрані лише вибрана таблиця (макет `docs/design/hybrid`, екран документа).
+   *
+   * ⛔ У `single` сітки, які вже змонтовані, НЕ розмонтовуються при перемиканні таблиці, а
+   * лише ховаються: у них живуть незбережені правки й Undo (коментар компонента вище).
+   */
+  readonly layout?: 'stack' | 'single';
+  /** Вибрана таблиця для `single`. */
+  readonly selectedTableInstanceId?: number | undefined;
+  /** Перехід від зауваження вимагає іншу таблицю (`single`, `ФВ-5.6`). */
+  readonly onSelectTable?: (tableInstanceId: number) => void;
+  /** Що стоїть перед заголовком вибраної таблиці (`single`): перемикач дерева таблиць. */
+  readonly titleStart?: ReactNode;
+  /** Що стоїть праворуч у рядку заголовка (`single`): підказка клавіш (`UI-41`). */
+  readonly titleEnd?: ReactNode;
 }
 
 /**
@@ -146,7 +163,14 @@ export function SheetTables({
   periodKey,
   readOnly,
   tables,
+  layout = 'stack',
+  selectedTableInstanceId,
+  onSelectTable,
+  titleStart,
+  titleEnd,
 }: SheetTablesProps): JSX.Element {
+  const single = layout === 'single';
+
   /**
    * Екземпляри таблиць, чиї сітки вже змонтовані.
    *
@@ -178,15 +202,30 @@ export function SheetTables({
     focusSoon(slots.current.get(id)?.querySelector<HTMLElement>('[data-table-title]'), true);
   }, [mounted]);
 
+  /**
+   * Які слоти спостерігати. `single`: лише вибраний, ще не змонтований, — він єдиний видимий, і
+   * спостерігач змонтує його в першому ж такті (у браузері слот у полі зору одразу).
+   *
+   * ⚠ Монтування й тут — через спостерігача, а не безумовне: «сітка — лише для того, що видно»
+   * лишається однією обіцянкою для обох режимів (і `renderFeedback.test.tsx` її тримає).
+   */
   useEffect(() => {
+    const candidates = single
+      ? tables.filter((table) => table.tableInstanceId === selectedTableInstanceId)
+      : tables;
+
     /*
      * ⚠ Немає `IntersectionObserver` (дуже старий браузер) — монтуємо все, як
      * робив #295. Це свідома деградація до ПОПЕРЕДНЬОЇ, робочої поведінки, а
      * не до порожнього екрана: сторінка лишається придатною, просто дорогою.
      */
     if (typeof IntersectionObserver === 'undefined') {
-      if (tables.some((table) => !mounted.has(table.tableInstanceId))) {
-        setMounted(new Set(tables.map((table) => table.tableInstanceId)));
+      if (candidates.some((table) => !mounted.has(table.tableInstanceId))) {
+        setMounted((previous) => {
+          const next = new Set(previous);
+          for (const table of candidates) next.add(table.tableInstanceId);
+          return next;
+        });
       }
 
       return;
@@ -228,7 +267,7 @@ export function SheetTables({
      * доїхали у видиму область через цей зсув. Старий, створений до зсуву,
      * мовчав би про них до наступної прокрутки.
      */
-    for (const table of tables) {
+    for (const table of candidates) {
       if (mounted.has(table.tableInstanceId)) continue;
 
       const node = slots.current.get(table.tableInstanceId);
@@ -244,7 +283,7 @@ export function SheetTables({
      * не доставити його жодного разу. Тому `DocumentPage` мемоізує групування
      * аркушів (`useMemo(groupBySheet…)`), і це не косметика там теж.
      */
-  }, [tables, mounted]);
+  }, [tables, mounted, single, selectedTableInstanceId]);
 
   /**
    * Перехід від зауваження до комірки (`ФВ-5.6`, `cellNavigation.ts`).
@@ -272,6 +311,10 @@ export function SheetTables({
 
     const id = navigationTarget.tableInstanceId;
 
+    // ⚠ `single`: зауваження в іншій таблиці — спершу вибрати її, інакше слот прихований і
+    // прокручувати нема до чого.
+    if (single && id !== selectedTableInstanceId) onSelectTable?.(id);
+
     // ⛔ Сітка цільової таблиці може бути ще не змонтована (далеко внизу
     // аркуша): спостерігач змонтує її лише після прокрутки, а плавна
     // прокрутка сторінки проходить повз 90 заглушок не миттєво. Тому монтуємо
@@ -288,13 +331,18 @@ export function SheetTables({
     // Зауваження до таблиці цілком: слот у полі зору — перехід завершено.
     // Решту завершить сітка, коли поставить фокус на комірку.
     if (navigation.rowKey === null) completeCellNavigation(navigation.seq);
-  }, [navigation, navigationTarget, mounted]);
+  }, [navigation, navigationTarget, mounted, single, selectedTableInstanceId, onSelectTable]);
 
   return (
     <>
       {tables.map((table) => {
         const id = table.tableInstanceId;
         const isMounted = mounted.has(id);
+        const isSelected = id === selectedTableInstanceId;
+
+        // ⚠ `single`: невибрана й незмонтована таблиця слота не має зовсім — у DOM рівно
+        // одна видима таблиця плюс приховані змонтовані.
+        if (single && !isSelected && !isMounted) return null;
         const navigateTo =
           navigation !== null && navigation.rowKey !== null && navigationTarget === table
             ? navigation
@@ -310,15 +358,31 @@ export function SheetTables({
             }}
             data-table-slot={id}
             data-table-mounted={isMounted}
+            data-table-selected={single ? isSelected : undefined}
             // ⛔ Саме інлайновий `minHeight`, а не `mih` Mantine: значення —
             // умова роботи механізму (коментар компонента), і воно має бути
             // видимим і перевірюваним рівно там, де записане.
-            style={{ minHeight: TableSlotMinHeight }}
+            // ⛔ `single`: прихована сітка — `display: none`, а не розмонтування (правки, Undo).
+            style={{ minHeight: TableSlotMinHeight, display: single && !isSelected ? 'none' : undefined }}
           >
-            {/* `tabIndex={-1}`: сюди повертається фокус, коли заглушка, що його мала, замінюється сіткою. */}
-            <Text fw={600} data-table-title tabIndex={-1}>
-              {localized(table.tableNameL10n)}
-            </Text>
+            {single ? (
+              // Макет: `.tablebar` — перемикач дерева, номер і назва таблиці (`h2`).
+              <Group gap="xs" wrap="nowrap" mih={28}>
+                {titleStart}
+                <Text component="h2" size="md" fw={600} data-table-title tabIndex={-1} truncate>
+                  <Text span ff="monospace" size="xs" c="dimmed" mr="xs">
+                    {tableNumber(table, tables)}
+                  </Text>
+                  {localized(table.tableNameL10n)}
+                </Text>
+                {titleEnd}
+              </Group>
+            ) : (
+              /* `tabIndex={-1}`: сюди повертається фокус, коли заглушка, що його мала, замінюється сіткою. */
+              <Text fw={600} data-table-title tabIndex={-1}>
+                {localized(table.tableNameL10n)}
+              </Text>
+            )}
 
             {isMounted ? (
               <DocumentGrid
@@ -382,7 +446,6 @@ export function LazyTablePlaceholder({
       </Text>
       {onLoad !== undefined && (
         <Button
-          size="xs"
           variant="default"
           pos="absolute"
           top="calc(var(--mantine-spacing-md) + 2rem)"

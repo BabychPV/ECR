@@ -1,5 +1,5 @@
 import { useEffect, useState, type JSX } from 'react';
-import { Button, Checkbox, Group, Modal, Select, Stack, Text } from '@mantine/core';
+import { Checkbox, Select, Stack, Text } from '@mantine/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { apiFetch } from '@/api/client';
@@ -7,38 +7,51 @@ import type { components } from '@/api/schema';
 import type { CreateDocumentRequest, DocumentIdResponse, PeriodCalendarDto } from '@/api/types';
 import { fetchAllProjects } from '@/features/projects/allProjects';
 import { groupRuleViolations } from './groupRuleViolations';
-import { newestOpenPeriodKey, openPeriodKeys } from './newDocumentPeriod';
+import { newestOpenPeriodKey } from './newDocumentPeriod';
 import { formatPeriodKey } from '@/shared/format';
 import { localized } from '@/shared/i18n/localized';
+import { Banner } from '@/shared/ui/Banner';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
+import { KeyValue } from '@/shared/ui/KeyValue';
 import { LocalizedInput, hasAnyText, type LocalizedValue } from '@/shared/ui/LocalizedInput';
-import { showApiError, showDone } from '@/shared/ui/notify';
+import { showDone } from '@/shared/ui/notify';
+import { problemText } from '@/shared/ui/problemText';
+import { Wizard, type WizardStep } from '@/shared/ui/Wizard';
 import { t } from '@/shared/i18n';
 
 /**
- * Створення документа (`ФВ-3.1`, `ФВ-3.2`).
+ * Створення документа (`ФВ-3.1`, `ФВ-3.2`) — майстром (UI-31, `KIT.md` §6.9:
+ * «≥ 2 кроків або є що перевірити перед застосуванням (створити документ…)» →
+ * `Wizard`; макет — `docs/design/hybrid/screens-work.js`, `openCreate`).
+ *
+ * Кроки: Project → Period → Sheets → Review (додає `Wizard`). Кроку «Template»
+ * з макета немає навмисно: версію шаблону визначає ПРОЄКТ (V-12, V-11), обирати
+ * її нема з чого — тож вона показується в кроці Project і в підсумку.
  *
  * ⛔ Дії не було в інтерфейсі: сторож вважав `POST /documents` досяжним, бо
- * клієнт ЧИТАЄ `GET /documents` тією самою адресою (`A7-42`). Тобто система,
- * уся суть якої — заповнення документів, не мала способу створити перший.
+ * клієнт ЧИТАЄ `GET /documents` тією самою адресою (`A7-42`).
  *
- * ⛔ Склад аркушів обирається ЯВНО і перевіряється сервером за
- * `SheetGroupRule` (`ФВ-3.2`): `RequiresAll` вимагає всіх аркушів групи,
- * `RequiresOne` — рівно одного. Тому тут немає «створити з усіма» — вибір
- * робить людина, а правило складу підтверджує або відхиляє його з поясненням.
+ * ⛔ Склад аркушів перевіряє сервер за `SheetGroupRule` (`ФВ-3.2`); тут —
+ * live-попередження, і людина бачить склад у підсумку ДО створення («N з M»).
+ * Типово включені всі аркуші, які віддав сервер (макет: «All are included by
+ * default») — `RequiresAll`/`RequiresOne` повний склад не порушує.
  *
- * ⛔ Версію шаблону визначає ПРОЄКТ, а не вибір людини (V-12, V-11). Тут
- * стояли `GET /templates` і `GET /template-versions/{id}/structure` — обидва
- * вимагають `Template.View`, і оператор із `Document.Create` бачив «You do not
- * have permission», хоча `POST /documents` від нього — 201. До того ж діалог
- * пропонував версії всіх шаблонів, а документ на версії, іншій за версію
- * проєкту, відкривався без аркушів. Тепер — `GET /projects/{id}/document-template`
- * (те саме право, що й на створення): версія проєкту, її аркуші й правила
- * складу.
+ * ⛔ Аркуші — ЛИШЕ з відповіді `GET /projects/{id}/document-template`: сервер
+ * не віддає аркушів, яких користувач не бачить (прихований аркуш, P1), і
+ * клієнт нічого не домальовує сам.
+ *
+ * ⚠ Вибір живе в цьому компоненті, а не в `data` майстра: від проєкту
+ * залежать запити (шаблон, календар), а хуки запитів мусять жити тут.
+ * `Wizard` дає кроки, перевірку, банер помилки й підсумок.
  */
 
 // ⚠ Прямо зі схеми: `api/types.ts` — спільний файл.
 type DocumentTemplateDto = components['schemas']['DocumentTemplateDto'];
+
+/** Даних майстра немає: стан — нижче, у компоненті (див. шапку). */
+type NoData = Record<string, never>;
+const NoInitialData: NoData = {};
+
 export function CreateDocumentModal({
   opened,
   onClose,
@@ -51,19 +64,34 @@ export function CreateDocumentModal({
 
   // ⛔ T2-06: діалог монтується ВЖЕ відкритим (лінивий чанк + `creatingRequested &&` на сторінці), а
   // Mantine `useFocusReturn` запам'ятовує елемент лише при ПЕРЕХОДІ `opened` false → true. Без переходу
-  // перше закриття (Esc) лишало фокус на `BODY`; друге — уже поверталось на кнопку. Тому вузол
-  // `Modal` спершу монтується закритим і відкривається наступним рендером, поки фокус ще на кнопці.
+  // перше закриття (Esc) лишало фокус на `BODY`. Тому майстер спершу монтується закритим і
+  // відкривається наступним рендером, поки фокус ще на кнопці.
   const [armed, setArmed] = useState(false);
   useEffect(() => {
     setArmed(true);
   }, []);
 
   const [projectId, setProjectId] = useState<string | null>(null);
-  const [sheets, setSheets] = useState<number[]>([]);
 
-  // ⛔ Опційне: `BusinessKey` лишається унікальним технічним ключем
-  // незалежно від того, чи задане ім'я (директива "людське ім'я документа").
+  // `null` — типовий склад (усі аркуші з відповіді сервера); масив — вибір людини.
+  const [pickedSheets, setPickedSheets] = useState<number[] | null>(null);
+
+  // ⛔ Опційне: `BusinessKey` лишається унікальним технічним ключем незалежно від імені.
   const [name, setName] = useState<LocalizedValue>({});
+
+  // A2-05: період, у якому відкриється документ; типово — найновіший ВІДКРИТИЙ.
+  const [pickedPeriod, setPickedPeriod] = useState<string | null>(null);
+
+  // ⚠ Скидання при кожному відкритті — як і дані самого `Wizard`: вибір попереднього
+  // разу, що лишився в полях, — найтихіший спосіб створити документ не того проєкту.
+  useEffect(() => {
+    if (!opened) return;
+
+    setProjectId(null);
+    setPickedSheets(null);
+    setName({});
+    setPickedPeriod(null);
+  }, [opened]);
 
   const projects = useQuery({
     queryKey: ['projects'],
@@ -78,19 +106,38 @@ export function CreateDocumentModal({
     enabled: opened && projectId !== null,
   });
 
-  const versionId = template.data?.templateVersionId ?? null;
-
-  // A2-05: період, у якому відкриється документ (сам документ періоду не має — він живе на рядках).
-  // Типово — найновіший ВІДКРИТИЙ період проєкту; вибір людини діє, доки не змінено проєкт.
-  const [pickedPeriod, setPickedPeriod] = useState<string | null>(null);
   const calendar = useQuery({
     queryKey: ['periods', Number(projectId)],
     queryFn: () => apiFetch<PeriodCalendarDto>(`/api/v1/projects/${projectId ?? ''}/periods`),
     enabled: opened && projectId !== null,
   });
-  const openPeriods = openPeriodKeys(calendar.data?.periods);
+
+  const versionId = template.data?.templateVersionId ?? null;
+  const available = template.data?.sheets ?? [];
+  const sheets = pickedSheets ?? available.map((sheet) => sheet.id);
+
+  // ✎ 2026-10-06, рішення людини: сервер не забороняє документ у закритому періоді, і майстер
+  // теж — закритий період у переліку є, з попередженням. Не пропонуються лише ще не відкриті.
+  const choosablePeriods = (calendar.data?.periods ?? [])
+    .filter((period) => period.state === 'Open' || period.state === 'Grace' || period.state === 'Closed')
+    .sort((a, b) => b.periodKey - a.periodKey);
   const newestOpen = newestOpenPeriodKey(calendar.data?.periods);
-  const periodKey = pickedPeriod ?? (newestOpen === null ? null : String(newestOpen));
+  const periodKey =
+    pickedPeriod ??
+    (newestOpen === null ? (choosablePeriods[0] === undefined ? null : String(choosablePeriods[0].periodKey)) : String(newestOpen));
+  const pickedState = choosablePeriods.find((period) => String(period.periodKey) === periodKey)?.state ?? null;
+  const periodLabel = (key: number): string =>
+    formatPeriodKey(key, calendar.data?.periodKind) || String(key);
+
+  const projectCode =
+    projects.data?.items.find((project) => String(project.id) === projectId)?.code ?? null;
+
+  const sheetLabel = (sheet: (typeof available)[number]): string =>
+    `${localized(sheet.nameL10n) || sheet.code} (${sheet.code})`;
+
+  // ⛔ Директива «live-попередження про порушення SheetGroupRule»: не блокує — сервер
+  // лишається останньою лінією правди.
+  const violations = groupRuleViolations(template.data, sheets);
 
   const create = useMutation({
     mutationFn: () =>
@@ -101,155 +148,146 @@ export function CreateDocumentModal({
           templateVersionId: Number(versionId),
           sheetDefIds: sheets,
 
-          // ⚠ Поле пропускається цілком, а не надсилається `undefined`:
-          // порожній об'єкт і відсутність імені — те саме за змістом, і
-          // `exactOptionalPropertyTypes` не дозволяє явний `undefined` на
-          // опційному полі — лише його відсутність.
+          // ⚠ Поле пропускається цілком, а не надсилається `undefined`
+          // (`exactOptionalPropertyTypes`).
           ...(hasAnyText(name) ? { name } : {}),
         } satisfies CreateDocumentRequest),
       }),
-    onSuccess: async (result) => {
-      await queryClient.invalidateQueries({ queryKey: ['documents'] });
-
-      onClose();
-      setSheets([]);
-      setName({});
-      showDone(t('documents.created'));
-
-      // Одразу відкриваємо документ: інакше користувач шукає його в переліку
-      // за бізнес-ключем, якого ще не бачив.
-      await navigate(
-        `/documents/${result.documentId}` + (periodKey === null ? '' : `?periodKey=${periodKey}`),
-      );
-    },
-
-    // ⚠ Порушення складу приходить переліком: «група Water вимагає всіх
-    // аркушів, бракує W-02». Це те, що людина може виправити прямо тут.
-    onError: showApiError,
   });
-
-  const available = (template.data?.sheets ?? []).map((sheet) => ({
-    id: sheet.id,
-    label: `${localized(sheet.nameL10n) || sheet.code} (${sheet.code})`,
-  }));
-
-  // ⛔ Директива "live-попередження про порушення SheetGroupRule": ДО цього
-  // порушення складу дізнавалися лише після відхиленого `POST /documents`.
-  // Кнопка «Save» нижче НЕ блокується — сервер лишається останньою лінією
-  // правди про всяк випадок, якщо ця копія колись розійдеться з оригіналом.
-  const violations = groupRuleViolations(template.data, sheets);
 
   /*
    * ⛔ Перелік проєктів збирався через `?? []`, тобто відмова сервера робила
-   * його порожнім і мовчала: людина читала його як «активних проєктів немає»
-   * — і йшла заводити ще один (той самий дефект, що в `CreateProjectModal`).
+   * його порожнім і мовчала: людина читала його як «активних проєктів немає».
    */
   const sourceError = projects.error ?? null;
 
-  return (
-    <Modal opened={opened && armed} onClose={onClose} title={t('documents.create')} size="lg">
-      {/* ⛔ Перед полями: причину видно ДО того, як людина почне гадати, чому
-          переліки порожні. Решта діалогу лишається робочою. */}
-      {sourceError !== null && <ErrorAlert error={sourceError} onRetry={() => void projects.refetch()} />}
+  const steps: WizardStep<NoData>[] = [
+    {
+      id: 'project',
+      label: t('documents.project'),
+      hint: t('documents.createProjectHint'),
+      canNext: () => projectId !== null && versionId !== null,
+      render: () => (
+        <Stack gap="xs">
+          {sourceError !== null && (
+            <ErrorAlert error={sourceError} onRetry={() => void projects.refetch()} />
+          )}
 
-      <Select
-        label={t('documents.project')}
-        placeholder={t('periods.pickProject')}
-        data={(projects.data?.items ?? [])
-          // ⛔ Лише активні: у чернетці періоди закриті, і документ у ній не
-          // прийме жодного значення (`A7-25`).
-          .filter((project) => project.status === 'Active')
-          .map((project) => ({ value: String(project.id), label: project.code }))}
-        value={projectId}
-        onChange={(value) => {
-          setProjectId(value);
+          <Select
+            label={t('documents.project')}
+            placeholder={t('periods.pickProject')}
+            required
+            data={(projects.data?.items ?? [])
+              // ⛔ Лише активні: у чернетці періоди закриті (`A7-25`).
+              .filter((project) => project.status === 'Active')
+              .map((project) => ({ value: String(project.id), label: project.code }))}
+            value={projectId}
+            onChange={(value) => {
+              setProjectId(value);
 
-          // Аркуші належать версії проєкту: залишений вибір від попереднього
-          // послав би на сервер ідентифікатори з чужої структури.
-          setSheets([]);
-          setPickedPeriod(null);
-        }}
-        data-autofocus
-      />
+              // Аркуші належать версії проєкту: залишений вибір від попереднього послав би
+              // на сервер ідентифікатори з чужої структури.
+              setPickedSheets(null);
+              setPickedPeriod(null);
+            }}
+          />
 
-      {openPeriods.length > 0 && (
-        <Select
-          mt="sm"
-          label={t('documents.period')}
-          data={[...openPeriods].reverse().map((key) => ({ value: String(key), label: formatPeriodKey(key, calendar.data?.periodKind) || String(key) }))}
-          value={periodKey}
-          onChange={(value) => setPickedPeriod(value)}
-          allowDeselect={false}
-        />
-      )}
+          {/* ⚠ Відмова окремим банером: без нього «немає права» чи архівний шаблон
+              (`ECR-TMPL-0409`) виглядали б як проєкт без аркушів. */}
+          {template.error !== null && (
+            <ErrorAlert error={template.error} onRetry={() => void template.refetch()} />
+          )}
 
-      {/*
-        ⚠ Відмова цього запиту — окремим банером: без нього «немає права» чи
-        збій сервера виглядали б як проєкт без аркушів.
-      */}
-      {template.error !== null && (
-        <ErrorAlert error={template.error} onRetry={() => void template.refetch()} />
-      )}
+          {template.data !== undefined && (
+            <KeyValue
+              items={[
+                {
+                  label: t('documents.version'),
+                  value: `${template.data.templateCode} · v${template.data.version}`,
+                  hint: t('documents.createTemplateHint'),
+                },
+              ]}
+            />
+          )}
 
-      {/* ⚠ Лише показ: версію визначає проєкт, обирати її нема з чого. */}
-      {template.data !== undefined && (
-        <Text size="sm" mt="sm">
-          {t('documents.version')}: {template.data.templateCode} · {template.data.version}
-        </Text>
-      )}
+          <LocalizedInput
+            label={t('documents.name')}
+            description={t('documents.nameHint')}
+            value={name}
+            onChange={setName}
+          />
+        </Stack>
+      ),
+    },
+    {
+      id: 'period',
+      label: t('documents.period'),
+      hint: t('documents.createPeriodHint'),
+      render: () =>
+        calendar.data !== undefined && choosablePeriods.length === 0 ? (
+          <Banner tone="warning" text={t('documents.createNoOpenPeriod')} testId="create-no-open-period" />
+        ) : (
+          <Stack gap="xs">
+            {calendar.error !== null && (
+              <ErrorAlert error={calendar.error} onRetry={() => void calendar.refetch()} />
+            )}
+            <Select
+              label={t('documents.period')}
+              data={choosablePeriods.map((period) => ({
+                value: String(period.periodKey),
+                // ⚠ Ключі літералами (сторож EndpointCoverageTests): не-Open тут лише Grace і Closed.
+                label:
+                  period.state === 'Open'
+                    ? periodLabel(period.periodKey)
+                    : `${periodLabel(period.periodKey)} · ${
+                        period.state === 'Closed' ? t('status.period.Closed') : t('status.period.Grace')
+                      }`,
+              }))}
+              value={periodKey}
+              onChange={(value) => setPickedPeriod(value)}
+              allowDeselect={false}
+            />
 
-      <Stack gap="xs" mt="sm">
-        <LocalizedInput
-          label={t('documents.name')}
-          description={t('documents.nameHint')}
-          value={name}
-          onChange={setName}
-        />
-      </Stack>
-
-      {versionId !== null && (
-        <>
-          <Text size="sm" mt="sm" fw={600}>
-            {t('documents.sheets')}
-          </Text>
-          <Text size="xs" c="dimmed" mb="xs">
+            {/* ⚠ Лише попередження, не відмова: створення в закритому періоді дозволене. */}
+            {pickedState === 'Closed' && (
+              <Banner tone="warning" text={t('documents.createClosedPeriod')} testId="create-closed-period" />
+            )}
+          </Stack>
+        ),
+    },
+    {
+      id: 'sheets',
+      label: t('documents.sheets'),
+      hint: t('documents.createSheetsHint'),
+      validate: () =>
+        sheets.length === 0
+          ? { message: t('documents.createNoSheets'), focus: 'input[type="checkbox"]' }
+          : null,
+      render: () => (
+        <Stack gap="xs">
+          <Text size="xs" c="dimmed">
             {t('documents.sheetsHint')}
           </Text>
 
-          <Stack gap="xs">
-            {available.map((sheet) => (
-              <Checkbox
-                key={sheet.id}
-                label={sheet.label}
-                checked={sheets.includes(sheet.id)}
-                onChange={(event) => {
-                  // ⛔ `event.currentTarget` — поле СИНТЕТИЧНОЇ події, і React
-                  // обнуляє його одразу після завершення цього обробника
-                  // (`react.dev`: «After the event handler has been called,
-                  // event.currentTarget will be set to null»). Функція-апдейтер
-                  // `setSheets` читала його ЛІНИВО, у момент виклику React —
-                  // під `StrictMode` (є в `main.tsx`) React навмисно викликає
-                  // апдейтер ДВІЧІ, і на другому виклику `currentTarget` уже
-                  // `null`: `TypeError: Cannot read properties of null (reading
-                  // 'checked')`, і без `ErrorBoundary` на цьому маршруті — весь
-                  // застосунок замінюється голим «Unexpected Application
-                  // Error!» React Router. Тепер `checked` читається ОДРАЗУ,
-                  // синхронно в обробнику, а не всередині апдейтера.
-                  const checked = event.currentTarget.checked;
+          {available.map((sheet) => (
+            <Checkbox
+              key={sheet.id}
+              label={sheetLabel(sheet)}
+              checked={sheets.includes(sheet.id)}
+              onChange={(event) => {
+                // ⛔ `checked` читається ОДРАЗУ: `event.currentTarget` React обнуляє після
+                // обробника, а апдейтер під `StrictMode` викликається двічі.
+                const checked = event.currentTarget.checked;
 
-                  setSheets((current) =>
-                    checked ? [...current, sheet.id] : current.filter((id) => id !== sheet.id),
-                  );
-                }}
-              />
-            ))}
-          </Stack>
+                setPickedSheets(
+                  checked ? [...sheets, sheet.id] : sheets.filter((id) => id !== sheet.id),
+                );
+              }}
+            />
+          ))}
 
-          {/* ⛔ Непорушний, не блокуючий «Save»: сервер — остання лінія
-              правди (`ValidateCompositionAsync`), а тут — попередження ДО
-              спроби зберегти. */}
           {violations.length > 0 && (
-            <Stack gap="xs" mt="xs">
+            <Stack gap="xs" mt="xs" data-testid="create-group-violations">
               {violations.map((message) => (
                 <Text key={message} size="sm" c="statusError">
                   {message}
@@ -257,21 +295,77 @@ export function CreateDocumentModal({
               ))}
             </Stack>
           )}
-        </>
-      )}
+        </Stack>
+      ),
+    },
+  ];
 
-      <Group justify="flex-end" mt="md">
-        <Button variant="default" onClick={onClose}>
-          {t('common.cancel')}
-        </Button>
-        <Button
-          disabled={projectId === null || versionId === null || sheets.length === 0}
-          loading={create.isPending}
-          onClick={() => create.mutate()}
-        >
-          {t('common.save')}
-        </Button>
-      </Group>
-    </Modal>
+  const included = available.filter((sheet) => sheets.includes(sheet.id));
+
+  return (
+    <Wizard<NoData>
+      opened={opened && armed}
+      title={t('documents.create')}
+      initialData={NoInitialData}
+      steps={steps}
+      labels={{ back: t('wizard.back'), next: t('wizard.next'), review: t('wizard.review') }}
+      reviewText={t('documents.createReviewText')}
+      applyLabel={t('documents.createApply')}
+      isApplying={create.isPending}
+      summary={() => (
+        <KeyValue
+          items={[
+            { label: t('documents.project'), value: projectCode },
+            {
+              label: t('documents.version'),
+              value: template.data === undefined ? null : template.data.templateCode,
+              mono: true,
+              ...(template.data === undefined ? {} : { hint: `v${template.data.version}` }),
+            },
+            {
+              label: t('documents.period'),
+              value: periodKey === null ? null : periodLabel(Number(periodKey)),
+            },
+            {
+              label: t('documents.sheets'),
+              value: t('documents.createSheetsCount', {
+                included: included.length,
+                total: available.length,
+              }),
+              hint: included.map((sheet) => localized(sheet.nameL10n) || sheet.code).join(' · '),
+            },
+            { label: t('documents.name'), value: hasAnyText(name) ? localized({ values: name }) : null },
+          ]}
+        />
+      )}
+      onApply={(_data, api) => {
+        create.mutate(undefined, {
+          onSuccess: async (result) => {
+            await queryClient.invalidateQueries({ queryKey: ['documents'] });
+
+            api.close();
+            showDone(t('documents.created'));
+
+            // Одразу відкриваємо документ: інакше людина шукає його в переліку за
+            // бізнес-ключем, якого ще не бачила.
+            await navigate(
+              `/documents/${result.documentId}` + (periodKey === null ? '' : `?periodKey=${periodKey}`),
+            );
+          },
+
+          // ⚠ Відмова (порушення складу, 403, 409) — банером у кроці Review, без втрати
+          // введеного: «Back» веде до аркушів, де її можна виправити.
+          onError: (error) => {
+            const shown = problemText(error);
+            api.fail(shown.detail === null ? shown.title : `${shown.title}: ${shown.detail}`);
+          },
+        });
+      }}
+      onClose={onClose}
+      // ⚠ Нічого не створено до «Create document», а вибір (проєкт, період, аркуші)
+      // відновлюється за кілька кліків — питання «втратити зміни?» тут лише
+      // привчало б відповідати «так», не читаючи.
+      onExitUnsaved={() => true}
+    />
   );
 }

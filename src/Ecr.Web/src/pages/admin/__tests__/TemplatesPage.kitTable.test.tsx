@@ -35,8 +35,8 @@ import { testTheme } from '@/test/render';
  */
 const templates = {
   items: [
-    { id: 7, code: 'BRAVO', nameL10n: { values: { en: 'Bravo' } } },
-    { id: 3, code: 'ALPHA', nameL10n: { values: { en: 'Alpha' } } },
+    { id: 7, code: 'BRAVO', versionCount: 1, documentCount: 0, isArchived: false },
+    { id: 3, code: 'ALPHA', versionCount: 1, documentCount: 0, isArchived: false },
   ],
   nextCursor: null,
   totalCount: 2,
@@ -203,7 +203,7 @@ function cardLinkOf(table: HTMLElement, code: string): HTMLAnchorElement {
   return link as HTMLAnchorElement;
 }
 
-const CodeHeader = /templates\.code⟧/;
+const CodeHeader = /templates\.card⟧/;
 
 afterEach(() => {
   vi.unstubAllGlobals();

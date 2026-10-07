@@ -29,6 +29,20 @@ export interface ImportPanelProps {
   documentId: number;
   /** Період — після застосування перечитуються саме його зрізи. */
   periodKey: number;
+
+  /**
+   * ✎ UI-14: `false` — власної кнопки немає, вибір файлу відкриває пункт меню
+   * «More» через `openRef` (макет: «Import from Excel…» у меню). Компонент
+   * лишається змонтованим поза меню: у ньому поле файлу, прогрес і діалог
+   * перегляду, а меню розмонтовує вміст, щойно закривається.
+   */
+  withTrigger?: boolean;
+
+  /**
+   * Куди покласти «відкрити вибір файлу». `returnTo` — куди повернути фокус
+   * після перегляду (кнопка «More»: пункт меню на той час уже розмонтовано).
+   */
+  openRef?: { current: ((returnTo?: HTMLElement | null) => void) | null };
 }
 
 /**
@@ -43,7 +57,12 @@ export interface ImportPanelProps {
  * ⚠ Обидві дії не мали в інтерфейсі жодного споживача до аудиту (`A7-39`) —
  * тобто весь модуль імпорту існував на сервері й був недосяжний.
  */
-export function ImportPanel({ documentId, periodKey }: ImportPanelProps): JSX.Element {
+export function ImportPanel({
+  documentId,
+  periodKey,
+  withTrigger = true,
+  openRef,
+}: ImportPanelProps): JSX.Element {
   const queryClient = useQueryClient();
   const picker = useRef<HTMLInputElement>(null);
   const [preview, setPreview] = useState<ImportPreview | null>(null);
@@ -147,6 +166,24 @@ export function ImportPanel({ documentId, periodKey }: ImportPanelProps): JSX.El
   // AN-28 P2-2: Apply з тим самим previewToken - лише один, і на час збереження набраного теж.
   const settled = useSettledAction(apply.isPending);
 
+  /** Вибір файлу: спершу запам'ятати, куди повернути фокус. */
+  const pick = (returnTo?: HTMLElement | null): void => {
+    returnTo?.focus({ preventScroll: true });
+    // ⛔ Перші 100 мс кнопка не в стані `loading` (`ФВ-14.26`), тож
+    // повторне натискання відсікає обробник, а не вигляд кнопки.
+    remember();
+    if (!load.isPending) picker.current?.click();
+  };
+
+  useEffect(() => {
+    if (openRef === undefined) return undefined;
+    openRef.current = pick;
+
+    return () => {
+      if (openRef.current === pick) openRef.current = null;
+    };
+  });
+
   const blocked = (preview?.conflicts.length ?? 0) > 0 || (preview?.rejected.length ?? 0) > 0;
   const rounded = preview?.changes.filter(isRounded) ?? [];
 
@@ -172,19 +209,11 @@ export function ImportPanel({ documentId, periodKey }: ImportPanelProps): JSX.El
         }}
       />
 
-      <Button
-        size="xs"
-        variant="default"
-        loading={loadPhase !== 'none'}
-        onClick={() => {
-          // ⛔ Перші 100 мс кнопка не в стані `loading` (`ФВ-14.26`), тож
-          // повторне натискання відсікає обробник, а не вигляд кнопки.
-          remember();
-          if (!load.isPending) picker.current?.click();
-        }}
-      >
-        {t('import.pick')}
-      </Button>
+      {withTrigger && (
+        <Button variant="default" loading={loadPhase !== 'none'} onClick={() => pick()}>
+          {t('import.pick')}
+        </Button>
+      )}
 
       <DurationProgress phase={loadPhase} label={t('common.loading')} />
 

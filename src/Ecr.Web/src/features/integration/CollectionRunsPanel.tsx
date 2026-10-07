@@ -17,7 +17,7 @@ import { dataSourceName } from './DataSourceDrawer';
 import { listDataSources } from './dataSourceApi';
 import { DataSourcesQueryKey } from './dataSourcesKey';
 import { DataTable } from '@/shared/ui/DataTable';
-import { FilterBar, type FilterOption } from '@/shared/ui/FilterBar';
+import { FilterBar, type FilterOption, FilterRow } from '@/shared/ui/FilterBar';
 import { useDetailPanel } from '@/shared/ui/DetailDrawer';
 import { Timestamp } from '@/shared/ui/Timestamp';
 import { useUrlNumber, useUrlState } from '@/shared/ui/useUrlState';
@@ -187,7 +187,7 @@ export function CollectionRunsPanel(): JSX.Element {
         ]}
         right={
           <Suspense fallback={null}>
-            <Group gap="xs" align="end">
+            <FilterRow size="sm">
               <DateInput
                 size="sm"
                 miw={160}
@@ -204,7 +204,7 @@ export function CollectionRunsPanel(): JSX.Element {
                 value={parseDateOnly(toDate)}
                 onChange={(next) => setToDate(formatDateOnly(next))}
               />
-            </Group>
+            </FilterRow>
           </Suspense>
         }
       />
@@ -294,7 +294,6 @@ export function CollectionRunsPanel(): JSX.Element {
       {runs.hasNextPage && (
         <Group justify="center">
           <Button
-            size="xs"
             variant="default"
             loading={runs.isFetchingNextPage}
             onClick={() => void runs.fetchNextPage()}

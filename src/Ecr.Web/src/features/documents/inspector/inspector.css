@@ -1,0 +1,198 @@
+/*
+ * Інспектор документа (`UI-25`): макет `docs/design/hybrid` — KIT.md §4 (`.aside`,
+ * 320px, закритий за замовчуванням), `index.html` `.split>.aside`, `.pane-h`,
+ * `.tabs.inset`, `.mini-empty`, `.chip`, `.count`; `screen-document.js` `.doc-insp …`.
+ *
+ * ⚠ Кольори — лише змінні теми Mantine (ФВ-14.11): жодного власного значення.
+ */
+.ecr-insp {
+  position: fixed;
+  top: var(--app-shell-header-offset, 0px);
+  right: 0;
+  bottom: 0;
+  z-index: 150;
+  width: 320px;
+  max-width: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--mantine-color-body);
+  border-left: 1px solid var(--mantine-color-default-border);
+}
+
+/* Макет: на ≤ 1180px інспектор — шар поверх робочої області з тінню. */
+@media (max-width: 1180px) {
+  .ecr-insp {
+    box-shadow: var(--mantine-shadow-lg);
+  }
+}
+
+/*
+ * Макет: на широкому екрані робоча область СТИСКАЄТЬСЯ, а не ховається під
+ * інспектор (`.split` — колонка поруч). Сторінка позаду лишається живою.
+ */
+@media (min-width: 1181px) {
+  body[data-inspector-open] #main-content {
+    padding-inline-end: calc(320px + var(--mantine-spacing-md));
+  }
+}
+
+.ecr-insp-head {
+  display: flex;
+  align-items: center;
+  gap: var(--mantine-spacing-xs);
+  height: 36px;
+  padding: 0 var(--mantine-spacing-xs) 0 var(--mantine-spacing-sm);
+  border-bottom: 1px solid var(--mantine-color-default-border);
+  flex: none;
+}
+
+.ecr-insp-head h2 {
+  margin: 0;
+  font-size: var(--mantine-font-size-sm);
+  font-weight: 600;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: var(--mantine-spacing-xs);
+  min-width: 0;
+}
+
+/*
+ * ⚠ Тло чипа й заголовка групи — `--ecr-sunken`, підсвітка задачі — `--ecr-hover`
+ * (макет `screen-document.js`: `.group-h` — `--sunken`, `.issue:hover` — `--hover`).
+ * Раніше — `--mantine-color-default-hover`, у темній це сірий Mantine `#3b3b3b`, і
+ * приглушений текст на ньому мав 4.34:1 (живий прогін batch-2-a, дефект 5).
+ */
+.ecr-insp-chip {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 var(--mantine-spacing-xs);
+  border: 1px solid var(--mantine-color-default-border);
+  border-radius: var(--mantine-radius-xs);
+  background: var(--ecr-sunken);
+  font-family: var(--mantine-font-family-monospace);
+  font-size: var(--mantine-font-size-xs);
+  font-weight: 400;
+  line-height: 1;
+  white-space: nowrap;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ecr-insp-tabs {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.ecr-insp-tabs [role='tablist'] {
+  padding: 0 var(--mantine-spacing-sm);
+  flex: none;
+}
+
+.ecr-insp-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.ecr-insp-group {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--mantine-spacing-xs);
+  padding: var(--mantine-spacing-xs) var(--mantine-spacing-sm) 4px;
+  font-size: var(--mantine-font-size-xs);
+  font-weight: 500;
+  color: var(--mantine-color-dimmed);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  background: var(--ecr-sunken);
+  border-bottom: 1px solid var(--mantine-color-default-border);
+  margin: 0;
+}
+
+.ecr-insp-issue {
+  display: grid;
+  grid-template-columns: 16px 1fr;
+  gap: 4px var(--mantine-spacing-xs);
+  width: 100%;
+  padding: var(--mantine-spacing-xs) var(--mantine-spacing-sm);
+  border: 0;
+  border-bottom: 1px solid var(--mantine-color-default-border);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: var(--mantine-font-size-sm);
+  text-align: start;
+  cursor: pointer;
+}
+
+.ecr-insp-issue:disabled {
+  cursor: default;
+}
+
+.ecr-insp-issue:not(:disabled):hover {
+  background: var(--ecr-hover);
+}
+
+.ecr-insp-issue:focus-visible {
+  outline: 2px solid var(--mantine-primary-color-filled);
+  outline-offset: -2px;
+}
+
+.ecr-insp-issue[data-severity='Error'] .ecr-insp-sev {
+  color: var(--mantine-color-statusError-text);
+}
+
+.ecr-insp-issue:not([data-severity='Error']) .ecr-insp-sev {
+  color: var(--mantine-color-statusWarning-text);
+}
+
+.ecr-insp-where {
+  grid-column: 2;
+  color: var(--mantine-color-dimmed);
+  font-size: var(--mantine-font-size-xs);
+  display: flex;
+  gap: var(--mantine-spacing-xs);
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.ecr-insp-hist {
+  padding: var(--mantine-spacing-xs) var(--mantine-spacing-sm);
+  border-bottom: 1px solid var(--mantine-color-default-border);
+  display: grid;
+  gap: 4px;
+}
+
+.ecr-insp-diff {
+  font-family: var(--mantine-font-family-monospace);
+  font-size: var(--mantine-font-size-sm);
+  display: flex;
+  align-items: center;
+  gap: var(--mantine-spacing-xs);
+  flex-wrap: wrap;
+}
+
+.ecr-insp-diff s {
+  color: var(--mantine-color-dimmed);
+}
+
+.ecr-insp-empty {
+  padding: var(--mantine-spacing-xl) var(--mantine-spacing-lg);
+  text-align: center;
+  color: var(--mantine-color-dimmed);
+  display: grid;
+  gap: var(--mantine-spacing-xs);
+  justify-items: center;
+  font-size: var(--mantine-font-size-sm);
+}
+
+.ecr-insp-empty b {
+  color: var(--mantine-color-text);
+  font-weight: 600;
+}

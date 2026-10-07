@@ -3,6 +3,7 @@ import { render, screen, fireEvent, within } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { loadCatalog } from '@/shared/i18n';
+import { MemoryRouter } from 'react-router-dom';
 import { UnitsPage } from '../UnitsPage';
 import { testTheme } from '@/test/render';
 
@@ -22,6 +23,14 @@ import { testTheme } from '@/test/render';
  */
 
 const SeededStrings: Record<string, string> = {
+  'units.checkConversion': 'Check a conversion',
+  'units.baseUnit': 'Base unit',
+  'units.swap': 'Swap units',
+  'units.search': 'Search',
+  'units.noMatch': 'No units match the filters.',
+  'units.statUnits': 'units',
+  'units.statsLabel': 'Units at a glance',
+  'common.close': 'Close',
   'units.title': 'Units of measure',
   'units.value': 'Value',
   'units.from': 'From',
@@ -160,7 +169,9 @@ async function show(reply: UnitsReply): Promise<void> {
   render(
     <MantineProvider theme={testTheme}>
       <QueryClientProvider client={client}>
-        <UnitsPage />
+        <MemoryRouter>
+          <UnitsPage />
+        </MemoryRouter>
       </QueryClientProvider>
     </MantineProvider>,
   );
@@ -212,20 +223,45 @@ describe('UnitsPage на DataTable: порядок при відкритті н�
     expect(header(table, 'Unit').getAttribute('aria-sort')).toBe('none');
   });
 
-  it('множник показується рядком сервера, а не округленим числом', async () => {
-    await show({ kind: 'list', units: seededUnits });
+  it('множник — без хвостових нулів, з тисячами, але без жодного втраченого знака (UI-21)', async () => {
+    await show({
+      kind: 'list',
+      units: [
+        ...seededUnits,
+        {
+          id: 7,
+          code: 'z_giga',
+          dimensionId: 1,
+          factorToBase: '1000000000.000000000000000000',
+          offsetToBase: '0.0000000000',
+          dimensionCode: 'Mass',
+        },
+        {
+          id: 8,
+          code: 'z_lb',
+          dimensionId: 1,
+          factorToBase: '0.4535923700',
+          offsetToBase: '0.0000000000',
+          dimensionCode: 'Mass',
+        },
+      ],
+    });
 
     const table = await screen.findByRole('table');
     await within(table).findByText('a_nine');
 
     /*
-     * ⛔ Мутаційний доказ: приберіть `exact: true` у колонки `factorToBase` — і
-     * клітинка піде через `formatDecimal(raw, undefined, 3)` самої таблиці,
-     * тобто `'0.5000000000'` стане `'0.5'`, а масштаб колонки зникне з екрана.
-     * Саме заради цих знаків контракт і віддає `decimal` рядком (`e470777a`).
+     * ⛔ Мутаційні докази:
+     *  - поверніть `exact: true` без `render` — на екрані знову
+     *    `1000000000.000000000000000000` (макет `26-units.png`: «1000»);
+     *  - замініть `formatDecimal(x)` на стелю переліку
+     *    `formatDecimal(x, undefined, 3)` — `0.45359237` стане `0.454`, тобто
+     *    екран округлить саму відповідь, по яку сюди приходять (`e470777a`).
      */
-    expect(within(table).getByText('0.5000000000')).toBeDefined();
-    expect(within(table).getByText('10.0000000000')).toBeDefined();
+    expect(within(table).getByText('1,000,000,000')).toBeDefined();
+    expect(within(table).getByText('0.45359237')).toBeDefined();
+    expect(within(table).getByText('0.5')).toBeDefined();
+    expect(within(table).queryByText('0.5000000000')).toBeNull();
   });
 });
 

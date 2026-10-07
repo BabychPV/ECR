@@ -53,6 +53,7 @@ import { errorCodeText } from '@/shared/ui/problemText';
 import { useUrlNumber } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
 import { fetchAllProjects } from '@/features/projects/allProjects';
+import { FilterInline, FilterRow } from '@/shared/ui/FilterBar';
 
 /**
  * Діалог створення проєкту і менеджер політик — за `import()` (`D-132`).
@@ -63,6 +64,13 @@ import { fetchAllProjects } from '@/features/projects/allProjects';
  */
 const CreateProjectModal = lazy(async () => ({
   default: (await import('@/features/projects/CreateProjectModal')).CreateProjectModal,
+}));
+// UI-33: плитки року й «All projects» — окремим чанком (бюджет `D-132`).
+const PeriodYearTiles = lazy(async () => ({
+  default: (await import('@/features/projects/PeriodsOverview')).PeriodYearTiles,
+}));
+const AllProjectsPeriods = lazy(async () => ({
+  default: (await import('@/features/projects/PeriodsOverview')).AllProjectsPeriods,
 }));
 const PeriodPolicyManager = lazy(async () => ({
   default: (await import('@/features/projects/PeriodPolicyManager')).PeriodPolicyManager,
@@ -281,6 +289,8 @@ export function endOfSiteDayUtc(day: Date, timeZoneId: string): string {
  */
 export function PeriodsPage(): JSX.Element {
   const [projectId, setProjectId] = useUrlNumber('projectId');
+  // UI-33: період, обраний плиткою року, — його рядок у календарі виділено.
+  const [tileKey, setTileKey] = useState<number | null>(null);
   const queryClient = useQueryClient();
   const session = useSession();
 
@@ -670,6 +680,10 @@ export function PeriodsPage(): JSX.Element {
    */
   const siteZone = periods.data?.timeZoneId ?? 'UTC';
 
+  // UI-33: дата плиток і огляду — тим самим правилом поясу, що й колонки календаря.
+  const siteDate = (value: string, zone: string, inclusiveEnd: boolean): string | null =>
+    siteMomentText(value, zone, true, inclusiveEnd);
+
   // Те, що поїде в тіло запиту. `null` — порожнє поле, тобто «до кінця доби
   // майданчика» рішенням СЕРВЕРА, а не нашим.
   const reopenUntilIso = reopenUntil === null ? null : endOfSiteDayUtc(reopenUntil, siteZone);
@@ -718,7 +732,7 @@ export function PeriodsPage(): JSX.Element {
       <PageHeader
         title={t('periods.title')}
         actions={
-          <Group gap="xs" align="end">
+          <FilterRow>
             <Select
               size="xs"
               miw={220}
@@ -737,7 +751,10 @@ export function PeriodsPage(): JSX.Element {
                 label: `${p.code} · ${t(statusKey('project', p.status))}`,
               }))}
               value={projectId === null ? null : String(projectId)}
-              onChange={(value) => setProjectId(value === null ? null : Number(value))}
+              onChange={(value) => {
+                setTileKey(null);
+                setProjectId(value === null ? null : Number(value));
+              }}
             />
 
             {/* ⛔ Маршрут погодження (`ФВ-5.17`). Дві таблиці існували від
@@ -749,7 +766,6 @@ export function PeriodsPage(): JSX.Element {
 
             {manages && (
               <Button
-                size="xs"
                 onClick={() => {
                   createFocus.remember();
                   setCreating(true);
@@ -776,7 +792,6 @@ export function PeriodsPage(): JSX.Element {
                 і йшла одним кліком. Тепер — через підтвердження нижче. */}
             {selected?.status === 'Draft' && managesProject && (
               <Button
-                size="xs"
                 loading={activate.isPending}
                 onClick={() => setConfirming('activate')}
               >
@@ -789,13 +804,13 @@ export function PeriodsPage(): JSX.Element {
                 насправді через `Project.ChangeTimeZone`, кнопка — лише
                 видимий проксі. */}
             {selected?.status === 'Draft' && managesProject && (
-              <Button size="xs" variant="default" onClick={() => setChangingTimeZone(true)}>
+              <Button variant="default" onClick={() => setChangingTimeZone(true)}>
                 {t('periods.timezoneChange')}
               </Button>
             )}
 
             {selected !== undefined && managesProject && (
-              <Button size="xs" variant="default" onClick={() => setCloning(true)}>
+              <Button variant="default" onClick={() => setCloning(true)}>
                 {t('periods.clone')}
               </Button>
             )}
@@ -805,7 +820,6 @@ export function PeriodsPage(): JSX.Element {
                 жодного документа, який можна було б перерахувати. */}
             {selected?.status === 'Active' && recalculates && (
               <Button
-                size="xs"
                 variant="default"
                 loading={recalculate.isPending || recalcRunning}
                 onClick={() => setConfirming('recalculate')}
@@ -815,13 +829,15 @@ export function PeriodsPage(): JSX.Element {
             )}
 
             {recalcFan !== null && (
-              <Text size="xs" c="dimmed" role="status" data-recalc-fanout={recalcJob.data?.effectiveState ?? ''}>
-                {t('jobs.fanOutProgress', {
-                  total: recalcFan.total,
-                  done: recalcFan.succeeded,
-                  failed: recalcFan.failed,
-                })}
-              </Text>
+              <FilterInline>
+                <Text size="xs" c="dimmed" role="status" data-recalc-fanout={recalcJob.data?.effectiveState ?? ''}>
+                  {t('jobs.fanOutProgress', {
+                    total: recalcFan.total,
+                    done: recalcFan.succeeded,
+                    failed: recalcFan.failed,
+                  })}
+                </Text>
+              </FilterInline>
             )}
 
             {/* ⚠ Архівація пропонується лише активному проєкту: чернетку
@@ -832,7 +848,6 @@ export function PeriodsPage(): JSX.Element {
                 кнопку вторинною, але червоною. */}
             {selected?.status === 'Active' && managesProject && (
               <Button
-                size="xs"
                 variant="outline"
                 color="statusError"
                 loading={archive.isPending}
@@ -841,7 +856,7 @@ export function PeriodsPage(): JSX.Element {
                 {t('periods.archive')}
               </Button>
             )}
-          </Group>
+          </FilterRow>
         }
       />
 
@@ -869,13 +884,14 @@ export function PeriodsPage(): JSX.Element {
        * ⚠ Доки проєкт не обрано, `data` — `undefined`: запиту ще не було, і
        * обгортка каже саме це, а не «періодів немає».
        */}
+      {projectId !== null && (
       <AsyncBoundary<PeriodCalendarDto>
-        isPending={projectId !== null && periods.isPending}
+        isPending={periods.isPending}
         error={periods.error}
-        data={projectId === null ? undefined : periods.data}
+        data={periods.data}
         isEmpty={(calendar) => calendar.periods.length === 0}
-        emptyTitle={projectId === null ? t('periods.pickProject') : t('periods.noPeriods')}
-        emptyHint={projectId === null ? undefined : t('periods.noPeriodsHint')}
+        emptyTitle={t('periods.noPeriods')}
+        emptyHint={t('periods.noPeriodsHint')}
         skeleton="table"
         onRetry={() => void periods.refetch()}
       >
@@ -887,6 +903,19 @@ export function PeriodsPage(): JSX.Element {
             місцевий час того, хто дивиться. Для проєкту на `Asia/Atyrau`
             (+05:00), відкритого з Києва (+02:00/+03:00), це різниця в 2–3
             години рівно там, де вирішується, встиг чи не встиг. */}
+        <Suspense fallback={null}>
+          <PeriodYearTiles
+            calendar={calendar}
+            projectCode={selected?.code ?? ''}
+            siteDate={siteDate}
+            selectedKey={tileKey}
+            onPick={(key) => {
+              setTileKey(key);
+              document.querySelector(`[data-period-row="${String(key)}"]`)?.scrollIntoView?.({ block: 'nearest' });
+            }}
+          />
+        </Suspense>
+
         <Text size="xs" c="dimmed" mb="xs">
           {t('periods.timeZone')}: {calendar.timeZoneId}
         </Text>
@@ -948,7 +977,12 @@ export function PeriodsPage(): JSX.Element {
           </Table.Thead>
           <Table.Tbody>
             {calendar.periods.map((period) => (
-              <Table.Tr key={period.periodKey}>
+              <Table.Tr
+                key={period.periodKey}
+                data-period-row={period.periodKey}
+                data-selected={tileKey === period.periodKey ? 'true' : undefined}
+                {...(tileKey === period.periodKey ? { bg: 'var(--mantine-primary-color-light)' } : {})}
+              >
                 <Table.Td>
                   {period.periodKey}
                   {/* ⚠ `X-34`: що саме покриває період — за періодичністю
@@ -1039,7 +1073,7 @@ export function PeriodsPage(): JSX.Element {
 
                     {period.state === 'Closed' && reopens && (
                       <Button
-                        size="compact-xs"
+                        size="xs"
                         variant="subtle"
                         onClick={() => openReopen(period.id)}
                       >
@@ -1049,7 +1083,7 @@ export function PeriodsPage(): JSX.Element {
 
                     {!period.isCurrent && configures && (
                       <Button
-                        size="compact-xs"
+                        size="xs"
                         variant="subtle"
                         onClick={() => setPinning(period.id)}
                       >
@@ -1066,9 +1100,26 @@ export function PeriodsPage(): JSX.Element {
         </>
         )}
       </AsyncBoundary>
+      )}
 
       {/* ФВ-9.7, аудит S1: погодження перерахунку закритих періодів. */}
       {recalculates && projectId !== null && <RecalculationApprovalsPanel projectId={projectId} />}
+
+      {/* UI-33: «All projects · current period» — без вибору проєкту це головний
+          вміст сторінки, а не порожній «Pick a project»; рядок обирає проєкт. */}
+      {(projects.data?.items.length ?? 0) > 0 && (
+        <Suspense fallback={null}>
+          <AllProjectsPeriods
+            projects={projects.data?.items ?? []}
+            selectedId={projectId}
+            onPick={(id) => {
+              setTileKey(null);
+              setProjectId(id);
+            }}
+            siteDate={siteDate}
+          />
+        </Suspense>
+      )}
 
       {/* ⛔ Форма створення живе ОКРЕМИМ компонентом (`A7-56`). Вона
           надсилала запит без версії шаблону і без політики періодів, а сервер

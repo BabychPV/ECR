@@ -71,7 +71,7 @@ export function ApprovalRouteEditor({ projectId }: { projectId: number }): JSX.E
 
   return (
     <>
-      <Button size="xs" variant="default" onClick={() => setOpened(true)}>
+      <Button variant="default" onClick={() => setOpened(true)}>
         {t('workflow.route')}
       </Button>
 
@@ -106,7 +106,7 @@ export function ApprovalRouteEditor({ projectId }: { projectId: number }): JSX.E
                   <Badge variant="light">{index + 1}</Badge>
                   <Text style={{ flex: 1 }}>{roleName(roleId)}</Text>
                   <Button
-                    size="compact-xs"
+                    size="xs"
                     variant="subtle"
                     color="statusError"
                     onClick={() => setSteps(steps.filter((_, i) => i !== index))}

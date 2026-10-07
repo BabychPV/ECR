@@ -20,7 +20,10 @@ namespace Ecr.Infrastructure.Reporting;
 /// і на <c>/health/ready</c> (<see cref="IReportViewStatus"/>).
 /// </remarks>
 public sealed partial class ReportViewGenerator(
-    EcrDbContext db, IReportViewStatus? status = null, ILogger<ReportViewGenerator>? logger = null) : IReportViewGenerator
+    EcrDbContext db,
+    IReportViewStatus? status = null,
+    ILogger<ReportViewGenerator>? logger = null,
+    ICorrelationIdAccessor? correlation = null) : IReportViewGenerator
 {
     /// <inheritdoc />
     public async Task GenerateAsync(int? templateVersionId, CancellationToken ct)
@@ -42,7 +45,11 @@ public sealed partial class ReportViewGenerator(
             // зусилля), тести й DBA бачать помилку.
             // ⛔ SEC (TIER2): та сама кореляція — у тексті для /health/ready і в рядку журналу
             // з повним винятком, інакше оператор не зв'яже одне з другим.
-            var correlationId = SafeErrorText.NewCorrelationId();
+            // ⚠ Усередині HTTP-запиту (публікація версії) беремо ТОЙ САМИЙ id, що в заголовку
+            // X-Correlation-Id і в scope логу (CorrelationIdMiddleware), а не TraceId з Activity:
+            // інакше текст /health/ready називав би один id, а журнал із заголовком — інший.
+            // Поза запитом (старт) accessor дає null — тоді власний id.
+            var correlationId = correlation?.CorrelationId ?? SafeErrorText.NewCorrelationId();
             if (logger is not null)
             {
                 LogGenerationFailed(logger, templateVersionId, ex.Number, correlationId, ex);

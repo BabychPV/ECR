@@ -399,6 +399,18 @@ public sealed partial class EndpointCoverageTests
             "Пункт меню: labelKey маршруту."),
         new("app/Breadcrumbs.tsx", "handle.labelKey", 1, "app/routes.ts", RouteLabelKeys,
             "Крихта: labelKey маршруту."),
+        new("app/NavGroupSection.tsx", "group.labelKey", 1, "app/routes.ts", NavGroupLabelKeys,
+            "UI-12: підпис групи бічного меню (navGroups)."),
+        new("app/Breadcrumbs.tsx", "groupKey", 1, "app/routes.ts", NavGroupLabelKeys,
+            "UI-32: перший елемент крихт — група меню (navGroups)."),
+        new("shared/ui/PageHeader.tsx", "routeDescriptionKey", 1, "app/routes.ts", RouteDescriptionKeys,
+            "UI-11: пояснення екрана під заголовком (handle.descriptionKey)."),
+        new("features/search/DataSearchPalette.tsx", "screen.handle.labelKey", 1, "app/routes.ts", RouteLabelKeys,
+            "UI-30: екран у командній палітрі — назва пункту меню."),
+        new("features/search/DataSearchPalette.tsx", "group.labelKey", 1, "app/routes.ts", NavGroupLabelKeys,
+            "UI-30: група меню як підпис екрана в палітрі."),
+        new("app/NotFoundPage.tsx", "route.handle.labelKey", 1, "app/routes.ts", RouteLabelKeys,
+            "404: «Можливо, ви мали на увазі» — назва пункту меню."),
 
         new("features/grid/permissions.ts", "Hints[reason]", 1, "features/grid/permissions.ts",
             [
@@ -438,6 +450,18 @@ public sealed partial class EndpointCoverageTests
         // код, не `⟦…⟧`); повноту стереже permissionLabel.test.ts, що звіряє сід сам із собою.
         new("features/security/permissionLabel.ts", "key", 1, "features/security/permissionLabel.ts",
             PermissionLabelKeys, "Назва права в матриці /admin/security (U-11)."),
+
+        // UI-37: назва домену прав (`PermissionCatalogItem.group`) — групи майстра ролей.
+        // Запасний варіант — сам код групи (`hasText(key) ? t(key) : group`), тож нова
+        // група без рядка дасть код, не `⟦…⟧`; одинадцять відомих — названі тут.
+        new("features/security/permissionGroups.ts", "key", 1, "features/security/permissionGroups.ts",
+            [
+                "security.domain.Template", "security.domain.Registry", "security.domain.Document",
+                "security.domain.Project", "security.domain.Period", "security.domain.Calculation",
+                "security.domain.Report", "security.domain.Integration", "security.domain.Uom",
+                "security.domain.Security", "security.domain.System",
+            ],
+            "Назва групи прав у майстрі ролей /admin/security (UI-37)."),
 
         new("features/projects/CreateProjectModal.tsx", "ProjectFieldLabelKey[field]", 1,
             "features/projects/CreateProjectModal.tsx",
@@ -539,8 +563,23 @@ public sealed partial class EndpointCoverageTests
             "shared/ui/StatusBadge.tsx", StatusKeys("version"), "Статус версії методології."),
         new("pages/admin/PeriodsPage.tsx", "statusKey('project', p.status)", 1, "shared/ui/StatusBadge.tsx",
             StatusKeys("project"), "Статус проєкту."),
+        new("features/projects/PeriodsOverview.tsx", "statusKey('period', period.state)", 1,
+            "shared/ui/StatusBadge.tsx", StatusKeys("period"), "UI-33: стан періоду в підписі плитки року."),
+        new("features/projects/PeriodsOverview.tsx", "statusKey('project', row.project.status)", 1,
+            "shared/ui/StatusBadge.tsx", StatusKeys("project"), "UI-33: стан проєкту в огляді «All projects»."),
         new("features/notifications/RulesMatrixPanel.tsx", "statusKey('severity', value)", 1,
             "shared/ui/StatusBadge.tsx", StatusKeys("severity"), "Серйозність правила сповіщення."),
+        new("shared/ui/SegmentBar/SegmentBar.tsx", "statusKey(kind, segment.state)", 1, "shared/ui/StatusBadge.tsx",
+            [.. StatusKeys("sheet"), .. StatusKeys("period"), .. StatusKeys("job"), .. StatusKeys("version"),
+             .. StatusKeys("project"), .. StatusKeys("health"), .. StatusKeys("severity"),
+             .. StatusKeys("collectionRun"), .. StatusKeys("coverage"), .. StatusKeys("snapshot"),
+             .. StatusKeys("notificationDelivery")],
+            "UI-19: підпис сегмента смужки станів — та сама statusTable, що й у бейджа."),
+        new("features/audit/CellChangesTable.tsx", "`audit.originLabel.${origin}`", 1,
+            "features/audit/CellChangesTable.tsx",
+            ["audit.originLabel.UserEdit", "audit.originLabel.Import", "audit.originLabel.Recalculation",
+             "audit.originLabel.Migration"],
+            "UI-38: походження зміни словом (OriginIcons)."),
 
         // Основа множини — у формах `.one`/`.other`, їх перевіряє основний сторож.
         new("shared/format/plural.ts", "`${keyBase}.${category}`", 1, null, [],
@@ -596,6 +635,20 @@ public sealed partial class EndpointCoverageTests
         "nav.jobs", "nav.snapshots", "nav.campaign", "nav.audit", "nav.consistency", "nav.uiStrings",
         "nav.notifications", "nav.health", "nav.myGroups", "documents.title",
         "registries.data.title",
+    ];
+
+    /// <summary>Підписи груп бічного меню (UI-12, <c>navGroups</c> у <c>routes.ts</c>).</summary>
+    private static string[] NavGroupLabelKeys =>
+        ["nav.group.work", "nav.group.configure", "nav.group.access", "nav.group.operate"];
+
+    /// <summary>Пояснення екранів під заголовком (UI-11, <c>handle.descriptionKey</c> у <c>routes.ts</c>).</summary>
+    private static string[] RouteDescriptionKeys =>
+    [
+        "nav.documents.description", "nav.myGroups.description", "nav.templates.description",
+        "nav.registries.description", "nav.methodologies.description", "nav.units.description",
+        "nav.sources.description", "nav.mapping.description", "nav.periods.description",
+        "nav.jobs.description", "nav.snapshots.description", "nav.audit.description",
+        "nav.consistency.description", "nav.uiStrings.description", "nav.health.description",
     ];
 
     /// <summary>Назви прав <c>permission.&lt;Code&gt;</c> — 43 права каталогу <c>sec.Permission</c>.</summary>
@@ -1213,12 +1266,6 @@ public sealed partial class EndpointCoverageTests
         // звіт про порушення без жодної участі клієнта застосунку.
         "POST /api/v1/csp-report",
 
-        // ⏳ UI-20 / LS-E (тимчасово): лічильники для смуги показників екрана
-        // «Consistency issues». Споживач — клієнтська лінія UI-20 (шаблон
-        // переліку), яка ще не влита; рядок ПРИБРАТИ в тому ж коміті, що
-        // додасть виклик у `features/` (інакше звільнення стане неправдою).
-        "GET /api/v1/consistency/summary",
-
         // UI-38 (хвиля 3): серверна частина підсумку журналу змін (всього/сьогодні/імпорт/перерахунок);
         // смуга показників сторінки «Аудит» ще не під'єднана — споживач з'явиться разом із UI-38.
         // ⚠ Звільнення тимчасове: прибрати в тому ж коміті, що додає виклик у `features/audit`.
@@ -1229,12 +1276,6 @@ public sealed partial class EndpointCoverageTests
         // НЕПРАВДОЮ: жодне місце клієнта нічого не конвертувало.
         // Звільнення, яке стверджує неіснуючу поведінку, гірше за
         // відсутню кнопку — воно закриває питання замість відповіді.
-
-        // ⏳ UI-28 / LS-F (тимчасово): лічильники для смуги показників екрана
-        // «Jobs». Споживач — клієнтська лінія UI-28 (шаблон переліку), яка ще
-        // не влита; рядок ПРИБРАТИ в тому ж коміті, що додасть виклик у
-        // `features/` (інакше звільнення стане неправдою).
-        "GET /api/v1/jobs/summary",
     };
 
     [Fact]

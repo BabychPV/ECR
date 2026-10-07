@@ -217,6 +217,31 @@ describe('палітра: пошук даних', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   });
 
+  // a11y (WCAG 2.4.11): фокус лишається в полі, тож прокрутку до активного
+  // пункту робить палітра — інакше стрілка вниз виводила виділення з виду.
+  it('стрілка прокручує список до активного пункту', async () => {
+    const scrolled: string[] = [];
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+      configurable: true,
+      value(this: HTMLElement) {
+        scrolled.push(this.id);
+      },
+    });
+    try {
+      serve(() => json(Hits));
+      mount();
+      const { user, input } = await openPalette();
+      await user.type(input, 'Pe');
+      await screen.findByRole('listbox');
+
+      await user.keyboard('{ArrowUp}');
+      const last = screen.getByRole('option', { name: /Fuel types/ });
+      await waitFor(() => expect(scrolled.at(-1)).toBe(last.id));
+    } finally {
+      Reflect.deleteProperty(HTMLElement.prototype, 'scrollIntoView');
+    }
+  });
+
   it('клік по довіднику веде в його конструктор', async () => {
     serve(() => json(Hits));
     mount();
@@ -240,5 +265,27 @@ describe('палітра: пошук даних', () => {
 
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     await waitFor(() => expect(document.activeElement).toBe(button));
+  });
+});
+
+describe('палітра: область результатів досяжна з клавіатури (batch-2-a, дефект 6)', () => {
+  it('Tab із поля пошуку веде в область прокрутки — axe scrollable-region-focusable', async () => {
+    /*
+     * ⛔ Мутаційний доказ: приберіть `tabIndex={0}` з `.ecr-palette-body` — варіанти мають
+     * `tabIndex={-1}`, тож Tab проскакує область, і обидва твердження падають.
+     */
+    serve(() => json(Hits));
+    mount();
+    const { user, input } = await openPalette();
+
+    await user.type(input, 'Pe');
+    await screen.findByRole('listbox');
+
+    const body = document.querySelector<HTMLElement>('.ecr-palette-body');
+    expect(body?.tabIndex).toBe(0);
+
+    input.focus();
+    await user.tab();
+    expect(document.activeElement).toBe(body);
   });
 });

@@ -56,17 +56,25 @@ test.describe('Вставка після редактора комірки (T4-0
     test(`вставка працює після редактора: ${scenario}`, async ({ page }) => {
       await openGrid(page);
       await cellOf(page, 0).click();
+      // ⚠ Гонка keyCommitGate: клавіші, набрані до монтування редактора, тримає черга й відтворює
+      // після; paste за ~десяток мс бачить відкритий редактор і сітка його справедливо ігнорує.
+      // Тому спершу чекаємо ВІДКРИТТЯ редактора, потім завершуємо, потім чекаємо його ЗАКРИТТЯ.
+      const editor = page.locator('revo-grid').first().locator('.edit-input-wrapper input');
       await page.keyboard.press('Enter');
+      await expect(editor).toBeFocused();
       await page.keyboard.type('5');
       if (scenario === 'enter') await page.keyboard.press('Enter');
       if (scenario === 'escape') await page.keyboard.press('Escape');
       if (scenario === 'click-away') await cellOf(page, 1).click();
+      await expect(page.locator('.edit-input-wrapper')).toHaveCount(0);
 
+      // Нове значення щоразу: повтор того самого значення в той самий документ не дає PATCH.
+      const pasted = String(100 + Math.floor(Math.random() * 800));
       const patch = page.waitForResponse(
         (response) => response.request().method() === 'PATCH' && response.url().includes(`/documents/${DocumentId}`),
         { timeout: 15_000 },
       );
-      await pasteAtSelection(page, '77');
+      await pasteAtSelection(page, pasted);
 
       expect((await patch).ok(), 'вставка після редактора не дійшла до сервера').toBe(true);
     });

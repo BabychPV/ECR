@@ -3,6 +3,7 @@ import { render, screen, fireEvent, waitFor, within } from '@testing-library/rea
 import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { loadCatalog } from '@/shared/i18n';
+import { MemoryRouter } from 'react-router-dom';
 import { UnitsPage } from '../UnitsPage';
 import { testTheme } from '@/test/render';
 
@@ -12,6 +13,16 @@ import { testTheme } from '@/test/render';
  */
 
 const SeededStrings: Record<string, string> = {
+  'units.checkConversion': 'Check a conversion',
+  'units.convert': 'Convert',
+  'units.edit': 'Edit',
+  'units.baseUnit': 'Base unit',
+  'units.swap': 'Swap units',
+  'units.search': 'Search',
+  'units.noMatch': 'No units match the filters.',
+  'units.statUnits': 'units',
+  'units.statsLabel': 'Units at a glance',
+  'common.close': 'Close',
   'units.title': 'Units of measure',
   'units.code': 'Unit',
   'units.deleted': 'Unit removed.',
@@ -89,6 +100,20 @@ function mockApi(options: {
         return json(options.usage);
       }
 
+      if (url.endsWith('/api/v1/units/5') && method === 'GET') {
+        return json({
+          id: 5,
+          code: 'lb',
+          dimensionId: 1,
+          factorToBase: '0.4535923700',
+          offsetToBase: '0.0000000000',
+          isBase: false,
+          rowVersion: 'AAAAAAAAB9E=',
+          symbolL10n: { en: 'lb' },
+          nameL10n: { en: 'Pound' },
+        });
+      }
+
       if (url.endsWith('/api/v1/units/5') && method === 'DELETE') {
         deleteCalls.push(url);
 
@@ -131,14 +156,19 @@ async function openDialog(): Promise<HTMLElement> {
   render(
     <MantineProvider theme={testTheme}>
       <QueryClientProvider client={client}>
-        <UnitsPage />
+        <MemoryRouter>
+          <UnitsPage />
+        </MemoryRouter>
       </QueryClientProvider>
     </MantineProvider>,
   );
 
-  fireEvent.click(await screen.findByRole('button', { name: 'Remove lb' }));
+  // UI-21: «Remove» — у шторці одиниці, а не кнопкою в рядку.
+  fireEvent.click(await screen.findByRole('button', { name: 'lb' }));
+  const drawer = await screen.findByRole('dialog', { name: /lb/ });
+  fireEvent.click(within(drawer).getByRole('button', { name: 'Remove' }));
 
-  return screen.findByRole('dialog');
+  return screen.findByRole('dialog', { name: 'Remove unit "lb"?' });
 }
 
 afterEach(() => {
@@ -238,7 +268,7 @@ describe('UnitsPage: видалення одиниці (BE-15)', () => {
     });
 
     await waitFor(() => {
-      expect(screen.queryByRole('button', { name: 'Remove lb' })).toBeNull();
+      expect(screen.queryByRole('button', { name: 'lb' })).toBeNull();
     });
   });
 
@@ -270,13 +300,19 @@ describe('UnitsPage: видалення одиниці (BE-15)', () => {
     render(
       <MantineProvider theme={testTheme}>
         <QueryClientProvider client={client}>
-          <UnitsPage />
+          <MemoryRouter>
+            <UnitsPage />
+          </MemoryRouter>
         </QueryClientProvider>
       </MantineProvider>,
     );
 
-    await within(await screen.findByRole('table')).findByText('lb');
+    fireEvent.click(await within(await screen.findByRole('table')).findByRole('button', { name: 'lb' }));
+    const drawer = await screen.findByRole('dialog', { name: /lb/ });
 
-    expect(screen.queryByRole('button', { name: 'Remove lb' })).toBeNull();
+    // Шторка відкрилася, але без права в ній немає ні «Remove», ні «Edit».
+    expect(within(drawer).getByRole('button', { name: 'Convert' })).toBeTruthy();
+    expect(within(drawer).queryByRole('button', { name: 'Remove' })).toBeNull();
+    expect(within(drawer).queryByRole('button', { name: 'Edit' })).toBeNull();
   });
 });

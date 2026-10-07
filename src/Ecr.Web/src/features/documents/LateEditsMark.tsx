@@ -20,7 +20,16 @@ export function LateEditsMark(): JSX.Element {
 
   return (
     <Hint label={t('documents.lateEditsHint')} focusable>
-      <Badge size="sm" miw="fit-content" variant="default" bg={fill.bg} c={fill.text} data-late-edits="true">
+      {/* ✎ `UI-19`: за макетом — слово кольором «увага» поруч із часом
+          (`.work-late`), а не капітельний бейдж у рамці. */}
+      <Badge
+        size="sm"
+        miw="fit-content"
+        variant="transparent"
+        c={fill.text}
+        styles={{ root: { textTransform: 'none', letterSpacing: 'normal', fontWeight: 500, paddingInline: 0 } }}
+        data-late-edits="true"
+      >
         {t('documents.lateEdits')}
       </Badge>
     </Hint>

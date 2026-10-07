@@ -1,8 +1,9 @@
-import type { JSX } from 'react';
+import { useEffect, type JSX } from 'react';
 import { Badge, Group, Text } from '@mantine/core';
 import type { TableSliceDto } from '@/api/types';
 import { CodeText } from '@/shared/ui/CodeText';
 import { t } from '@/shared/i18n';
+import { publishInspectedCell } from '@/features/documents/inspector/inspectedCell';
 import { useFocusedCell } from './focusStore';
 import { formulaBarModel } from './formulaBar';
 import type { TotalsEdit } from './gridTotals';
@@ -53,6 +54,29 @@ export function GridFormulaBar(props: GridFormulaBarProps): JSX.Element {
     ...(props.expressionByColumnCode === undefined
       ? {}
       : { expressionByColumnCode: props.expressionByColumnCode }),
+  });
+
+  // `UI-25`: та сама комірка — у вкладки History/Info інспектора документа
+  // (`inspectedCell.ts`). Лише публікація; порожній фокус комірку НЕ скидає:
+  // клік в інспектор забирає фокус із сітки, і вкладка не має гаснути від цього.
+  const column = model === null ? undefined : props.slice.columns.find((c) => c.code === model.columnCode);
+  useEffect(() => {
+    if (model === null || column === undefined) return;
+    publishInspectedCell({
+      tableInstanceId: props.tableInstanceId,
+      periodKey: props.periodKey,
+      rowKey: model.rowKey,
+      rowLabel: model.rowLabel,
+      columnCode: model.columnCode,
+      columnDefId: column.id,
+      columnHeader: model.columnHeader,
+      unitSymbol: model.unitSymbol,
+      dataType: column.dataType,
+      scale: column.scale ?? null,
+      isCalculated: model.isCalculated,
+      isReadOnly: column.isReadOnly,
+      value: model.value,
+    });
   });
 
   return (

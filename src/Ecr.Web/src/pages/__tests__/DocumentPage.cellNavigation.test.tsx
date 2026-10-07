@@ -13,7 +13,7 @@ import { DocumentPage } from '@/pages/DocumentPage';
 
 /**
  * `ФВ-5.6`: клік по зауваженню перевірки передає адресу сітці ТІЄЇ таблиці,
- * якої воно стосується, — через справжні `ValidationPanel`, `import()` модуля
+ * якої воно стосується, — через справжні інспектор (`UI-25`, вкладка Issues), `import()` модуля
  * переходу і `SheetTables`.
  *
  * ⚠ Обидві таблиці — на одному аркуші, і це вимушено: перемикання аркуша в
@@ -142,7 +142,7 @@ describe('DocumentPage: перехід від зауваження до комі
 
     render(
       <MantineProvider>
-        <MemoryRouter initialEntries={['/documents/1?periodKey=202401']}>
+        <MemoryRouter initialEntries={['/documents/1?periodKey=202401&panel=issues']}>
           <QueryClientProvider client={client}>
             <Routes>
               <Route path="/documents/:id" element={<DocumentPage />} />
@@ -152,7 +152,7 @@ describe('DocumentPage: перехід від зауваження до комі
       </MantineProvider>,
     );
 
-    const finding = await screen.findByRole('button', { name: FindingText });
+    const finding = await screen.findByRole('button', { name: new RegExp(FindingText) });
 
     // Сітки ще не змонтовані: спостерігач у jsdom інертний (`src/test/setup.ts`).
     expect(screen.queryByTestId('grid-200')).toBeNull();
@@ -165,6 +165,12 @@ describe('DocumentPage: перехід від зауваження до комі
       expect(gridNavigation.get(200)).toMatchObject({ tableDefId: 20, rowKey: 'R1', columnCode: 'C1' }),
     );
     expect(screen.queryByTestId('grid-100')).toBeNull();
+    // ✎ `UI-22`: на екрані одна таблиця — перехід робить вибраною таблицю зауваження, а перша
+    // таблиця аркуша (її сітка не змонтована) зникає з екрана, а не лишається стосом.
+    await waitFor(() =>
+      expect(document.querySelector('[data-table-slot="200"]')?.getAttribute('data-table-selected')).toBe('true'),
+    );
+    expect(document.querySelector('[data-table-slot="100"]')).toBeNull();
   });
 
   it('невиконаний запит скидається, коли сторінка розмонтована', async () => {
@@ -173,7 +179,7 @@ describe('DocumentPage: перехід від зауваження до комі
 
     const { unmount } = render(
       <MantineProvider>
-        <MemoryRouter initialEntries={['/documents/1?periodKey=202401']}>
+        <MemoryRouter initialEntries={['/documents/1?periodKey=202401&panel=issues']}>
           <QueryClientProvider client={client}>
             <Routes>
               <Route path="/documents/:id" element={<DocumentPage />} />
@@ -183,7 +189,7 @@ describe('DocumentPage: перехід від зауваження до комі
       </MantineProvider>,
     );
 
-    fireEvent.click(await screen.findByRole('button', { name: FindingText }));
+    fireEvent.click(await screen.findByRole('button', { name: new RegExp(FindingText) }));
     await waitFor(() => expect(currentCellNavigation()).not.toBeNull());
 
     unmount();

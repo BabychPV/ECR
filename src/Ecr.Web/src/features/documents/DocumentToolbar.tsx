@@ -4,76 +4,88 @@ import { t } from '@/shared/i18n';
 import './documentToolbar.css';
 
 /**
- * Рядок дій сторінки документа: щоденні дії — групами ліворуч, рідкісні й
- * небезпечні — у меню «More» праворуч.
+ * Рядок дій сторінки документа (UI-14; макет `docs/design/hybrid/screen-document.js`,
+ * `renderActions` + `renderSave`; KIT §1 п.2 «одна головна дія, ≤ 2 другорядні,
+ * решта — у меню More»).
+ *
+ * Ліворуч — стан (чип аркуша, прогрес, стан збереження словами); праворуч — дії
+ * в порядку макета: другорядні → «More» → головна.
  *
  * ⛔ Знімок людини (1290 px): усі дії стояли ОДНИМ пласким рядком разом із
  * полем періоду в шапці, і при нестачі місця flex переносив їх по одній —
  * «Delete document» опинявся сам на другому рядку під полем періоду, окремо
- * від решти. Найнебезпечніша дія документа там, де її ніхто не чекає.
- *
- * ⚠ Три рішення, кожне закриває свою частину того знімка:
- * - поле періоду лишилося в шапці поруч із заголовком, а дії — ОКРЕМИЙ рядок:
- *   висока колонка періоду (підпис + опис + поле) більше не задає висоту
- *   рядка кнопок;
- * - щоденні дії — `ActionGroup`-и з `wrap="nowrap"`: при нестачі місця
- *   переноситься ціла група, а не одна кнопка з середини;
- * - меню стоїть у ЗОВНІШНЬОМУ рядку з `wrap="nowrap"`, поза групами, що
- *   переносяться, — воно завжди праворуч у першому рядку й не може «випасти».
+ * від решти. Звідси два правила, що лишаються:
+ * - поле періоду — у шапці поруч із заголовком, а дії — ОКРЕМИЙ рядок;
+ * - дії праворуч — ОДНА група з `wrap="nowrap"`: при нестачі місця переноситься
+ *   вся група цілою (під стан ліворуч), а не одна кнопка з середини. Їх тепер
+ *   щонайбільше чотири (дві другорядні, «More», головна), тож група вміщається.
  */
 export function DocumentToolbar({
+  status,
   children,
   more,
+  primary,
 }: {
-  /** Групи щоденних дій (`ActionGroup`, `ExportButton`). */
-  readonly children: ReactNode;
+  /** Стан документа й аркуша ліворуч (чип, прогрес, збереження). */
+  readonly status?: ReactNode;
+  /** Другорядні дії (≤ 2) перед меню. */
+  readonly children?: ReactNode;
   /** Пункти меню «More»; `null` — дії немає (права/стан). */
   readonly more: readonly (JSX.Element | null)[];
+  /** Головна дія екрана (одна `primary`, `L1`). */
+  readonly primary?: ReactNode;
 }): JSX.Element {
   const items = more.filter((item): item is JSX.Element => item !== null);
 
   return (
-    <Group justify="space-between" align="flex-start" wrap="nowrap" gap="md" data-testid="document-toolbar">
-      <Group
-        gap="md"
-        data-testid="document-actions"
-        style={{ flex: 1, minWidth: 0, rowGap: 'var(--mantine-spacing-xs)' }}
-      >
-        {children}
+    <Group
+      justify="space-between"
+      align="center"
+      gap="md"
+      data-testid="document-toolbar"
+      style={{ rowGap: 'var(--mantine-spacing-xs)' }}
+    >
+      <Group gap="md" data-testid="document-status" style={{ minWidth: 0, rowGap: 'var(--mantine-spacing-xs)' }}>
+        {status}
       </Group>
 
-      {/* ⛔ Меню без пунктів не малюється: оператор без права видалення й
-          зміни ключа не мусить відкривати порожній список, щоб це дізнатися. */}
-      {items.length > 0 && (
-        <Menu shadow="md" position="bottom-end" withinPortal>
-          <Menu.Target>
-            <Button
-              size="xs"
-              variant="default"
-              leftSection={<span aria-hidden="true">⋯</span>}
-              data-testid="document-more"
-              style={{ flexShrink: 0 }}
-            >
-              {t('document.moreActions')}
-            </Button>
-          </Menu.Target>
+      <Group gap="xs" wrap="nowrap" data-testid="document-actions" ml="auto">
+        {children}
 
-          <Menu.Dropdown>
-            {/* ⚠ Порядок пунктів сталий (задає сторінка), тож індекс — чесний ключ. */}
-            {items.map((item, index) => (
-              <Fragment key={index}>{item}</Fragment>
-            ))}
-          </Menu.Dropdown>
-        </Menu>
-      )}
+        {/* ⛔ Меню без пунктів не малюється: оператор без жодної рідкісної дії
+            не мусить відкривати порожній список, щоб це дізнатися. */}
+        {items.length > 0 && (
+          <Menu shadow="md" position="bottom-end" withinPortal>
+            <Menu.Target>
+              <Button
+                variant="default"
+                rightSection={<span aria-hidden="true">▾</span>}
+                data-testid="document-more"
+                style={{ flexShrink: 0 }}
+              >
+                {t('document.moreActions')}
+              </Button>
+            </Menu.Target>
+
+            <Menu.Dropdown>
+              {/* ⚠ Порядок пунктів сталий (задає сторінка), тож індекс — чесний ключ. */}
+              {items.map((item, index) => (
+                <Fragment key={index}>{item}</Fragment>
+              ))}
+            </Menu.Dropdown>
+          </Menu>
+        )}
+
+        {primary}
+      </Group>
     </Group>
   );
 }
 
 /**
- * Група щоденних дій, що переноситься ЦІЛОЮ.
+ * Група елементів, що переноситься ЦІЛОЮ.
  *
- * ⚠ Порожня група (усі кнопки сховані правами чи станом) ховається CSS
+ * ⚠ Порожня група (усе сховано правами чи станом) ховається CSS
  * (`:empty`, `documentToolbar.css`): порожній flex-елемент займав би проміжок,
  * а при переносі — окремий порожній рядок.
  */

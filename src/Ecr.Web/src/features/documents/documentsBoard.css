@@ -1,0 +1,172 @@
+/*
+ * Подання «Board» переліку документів (`UI-40`).
+ *
+ * ⚠ Вигляд — з макета `docs/design/hybrid/screens-work.js` (`.work-board`, `.work-col`,
+ * `.work-col-h`, `.work-col-empty`, `.work-bcard`, `.work-bmeta`) і `index.html` (`.panel`,
+ * `.count`, `.key`). Кольори — лише токени теми `--ecr-*`; відступи — шкала 4/8/12/16.
+ */
+
+.ecr-board {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(220px, 1fr));
+  gap: 12px;
+  align-items: start;
+  min-width: 0;
+  /* Між 641 і ~1000 px чотири стовпці по 220 px не вміщаються — прокручується дошка, не сторінка. */
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+/* П'ятий стовпець «без стану» (лише коли в ньому щось є) — та сама ширина. */
+.ecr-board:has(> .ecr-board-col:nth-child(5)) {
+  grid-template-columns: repeat(5, minmax(200px, 1fr));
+}
+
+.ecr-board-col {
+  display: grid;
+  gap: 8px;
+  align-content: start;
+  min-width: 0;
+}
+
+.ecr-board-col-h {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  color: var(--ecr-muted);
+  border-bottom: 1px solid var(--ecr-border);
+}
+
+.ecr-board-col-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ecr-text);
+}
+
+/* `.count` макета: приглушене число; колір — лише у стовпця, що чекає уваги, і лише не нуль. */
+.ecr-board-count {
+  display: inline-grid;
+  place-items: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  border-radius: 9px;
+  font-family: var(--mantine-font-family-monospace);
+  font-size: 11px;
+  color: var(--ecr-muted);
+  background: var(--ecr-sunken);
+}
+
+.ecr-board-count[data-tone='warn'] {
+  color: var(--ecr-warning);
+  background: var(--ecr-warning-soft);
+}
+
+/*
+ * ⚠ `--ecr-muted`, а не `--ecr-faint` макета (`.work-col-empty`): «Nothing
+ * here» — це текст, а `faint` за директивою №15 §1 лише для неконтентного
+ * (поріг 3:1). На тлі сторінки він дав 3.49 (light) і 4.30 (dark) < 4.5
+ * (axe `color-contrast`, прохід a11y batch-4). Вигляд — той самий приглушений
+ * сірий, на крок темніший.
+ */
+.ecr-board-col-empty {
+  margin: 0;
+  padding: 8px 0;
+  font-size: 12px;
+  color: var(--ecr-muted);
+}
+
+.ecr-board-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ecr-board-card {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 12px;
+  background: var(--ecr-surface);
+  border: 1px solid var(--ecr-border);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.ecr-board-card:hover {
+  border-color: var(--ecr-border-strong);
+  background: var(--ecr-hover);
+}
+
+.ecr-board-card:focus-within {
+  border-color: var(--ecr-border-strong);
+}
+
+.ecr-board-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.ecr-board-key {
+  /* Макет `.key`: моно 500, колір посилання — `--accent-text`. */
+  font-family: var(--mantine-font-family-monospace);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ecr-accent-text);
+}
+
+.ecr-board-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  color: var(--ecr-text);
+}
+
+.ecr-board-project {
+  color: var(--ecr-muted);
+}
+
+.ecr-board-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--ecr-muted);
+}
+
+.ecr-board-who {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ecr-board-marks {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+}
+
+.ecr-board-noissues {
+  color: var(--ecr-muted);
+}
+
+/* Макет: `@media (max-width:640px){.work-board{grid-template-columns:1fr}}`. */
+@media (max-width: 640px) {
+  .ecr-board,
+  .ecr-board:has(> .ecr-board-col:nth-child(5)) {
+    grid-template-columns: 1fr;
+  }
+}

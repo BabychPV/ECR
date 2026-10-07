@@ -27,6 +27,7 @@ import {
 } from './data';
 import { EntryDrawer, entryPanelId } from './EntryDrawer';
 import { RegistryDataGrid, type GridRow } from './RegistryDataGrid';
+import { FilterRow } from '@/shared/ui/FilterBar';
 import {
   cellValue,
   draftOf,
@@ -350,7 +351,7 @@ export function RegistryDataPage(): JSX.Element {
       )}
 
       <Group gap="sm" align="end" justify="space-between">
-        <Group gap="sm" align="end">
+        <FilterRow gap="sm">
           <TextInput
             size="xs"
             label={t('registries.search')}
@@ -369,13 +370,13 @@ export function RegistryDataPage(): JSX.Element {
             </Suspense>
           )}
           {!readOnly && (
-            <Button size="xs" variant="default" disabled={save.isPending} onClick={() => addRow()}>
+            <Button variant="default" disabled={save.isPending} onClick={() => addRow()}>
               {t('registries.newEntry')}
             </Button>
           )}
           {/* RT-16: експорт — записи, чинні на ту саму дату, що й сітка. */}
           <RegistryExportButton registryCode={code} asOf={asOf} />
-        </Group>
+        </FilterRow>
         <Text size="sm" c="dimmed" aria-live="polite" data-testid="registry-data-status">
           {[status, checkSummary].filter((s) => s !== '').join(' · ')}
         </Text>
@@ -390,7 +391,7 @@ export function RegistryDataPage(): JSX.Element {
         emptyHint={debouncedSearch !== '' ? undefined : t('registries.data.emptyText')}
         emptyAction={
           !readOnly && debouncedSearch === '' ? (
-            <Button size="xs" onClick={() => addRow()}>
+            <Button onClick={() => addRow()}>
               {t('registries.newEntry')}
             </Button>
           ) : undefined
@@ -425,7 +426,7 @@ export function RegistryDataPage(): JSX.Element {
             />
             {rows.hasNextPage && (
               <Group justify="center">
-                <Button size="xs" variant="default" loading={rows.isFetchingNextPage} onClick={() => void rows.fetchNextPage()}>
+                <Button variant="default" loading={rows.isFetchingNextPage} onClick={() => void rows.fetchNextPage()}>
                   {t('registries.data.loadMore', { shown: loaded.length, total: totalCount })}
                 </Button>
               </Group>

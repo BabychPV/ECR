@@ -3,6 +3,7 @@ import { render, screen, fireEvent, waitFor, within } from '@testing-library/rea
 import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { loadCatalog } from '@/shared/i18n';
+import { MemoryRouter } from 'react-router-dom';
 import { UnitsPage } from '../UnitsPage';
 import { testTheme } from '@/test/render';
 
@@ -22,6 +23,14 @@ import { testTheme } from '@/test/render';
  */
 
 const SeededStrings: Record<string, string> = {
+  'units.checkConversion': 'Check a conversion',
+  'units.baseUnit': 'Base unit',
+  'units.swap': 'Swap units',
+  'units.search': 'Search',
+  'units.noMatch': 'No units match the filters.',
+  'units.statUnits': 'units',
+  'units.statsLabel': 'Units at a glance',
+  'common.close': 'Close',
   'units.title': 'Units of measure',
   'units.value': 'Value',
   'units.from': 'From',
@@ -139,7 +148,9 @@ function show(): void {
   render(
     <MantineProvider theme={testTheme}>
       <QueryClientProvider client={client}>
-        <UnitsPage />
+        <MemoryRouter>
+          <UnitsPage />
+        </MemoryRouter>
       </QueryClientProvider>
     </MantineProvider>,
   );

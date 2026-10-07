@@ -1,4 +1,5 @@
 import {
+  lazy,
   Suspense,
   useEffect,
   useState,
@@ -27,15 +28,18 @@ import { Navigate, Outlet, ScrollRestoration, useLocation, useMatches } from 're
 import { Breadcrumbs, isRouteHandle } from './Breadcrumbs';
 import { NavbarCollapseToggle } from './NavbarCollapseToggle';
 import { NavRouteLink } from './NavRouteLink';
-import { NotFoundPage } from './NotFoundPage';
-import { canAccessRoute } from './routeAccess';
-import { navRoutes, routes, type RouteHandle } from './routes';
+import { NavGroupSection } from './NavGroupSection';
+import { routes, type RouteHandle } from './routes';
+import { visibleNavGroups } from './visibleNavGroups';
+
+// ✎ b4b: 404 за макетом — лінивий чанк (рендериться всередині `<Suspense>` нижче),
+// щоб не важчав спільний чанк оболонки кожного маршруту.
+const NotFoundPage = lazy(async () => ({ default: (await import('./NotFoundPage')).NotFoundPage }));
 import { routeTransitionClassName } from './motionTokens';
 import { useRouteTransitionFocus } from './useRouteTransitionFocus';
 import { usePreferenceSync } from '@/features/preferences/usePreferenceSync';
 import { MyTasksLauncher } from '@/features/jobs/MyTasksLauncher';
 import { SearchLauncher } from '@/features/search/SearchLauncher';
-import { EndSimulationButton } from '@/features/security/SimulationPanel';
 import { useSession } from '@/shared/session/useSession';
 import { isCatalogResolved, language, loadCatalog, loginChosenLanguage, t } from '@/shared/i18n';
 import { useCatalog } from '@/shared/i18n/useCatalog';
@@ -47,6 +51,7 @@ import { flushUnsaved, hasUnsavedChanges } from '@/shared/ui/unsavedSources';
 import { UserMenu } from '@/shared/ui/UserMenu';
 
 import './routeTransition.css';
+import './narrowShell.css';
 
 /**
  * Ідентифікатор основного вмісту — ціль для «Пропустити навігацію» нижче.
@@ -158,8 +163,8 @@ function SkipToContentLink(): JSX.Element {
  * (`/admin/templates`) набирався рядковим літералом у ДВОХ місцях, і нічого
  * не заважало їм розійтися. `navRoutes` (`./routes`, `PR nav-arch #1`) —
  * тепер ЄДИНИЙ реєстр: `router.tsx` бере звідти `path`/`handle` для
- * `createBrowserRouter`, навбар нижче — той самий реєстр, відфільтрований за
- * `showInNav`. Порядок пунктів — порядок оголошення в реєстрі.
+ * `createBrowserRouter`, навбар нижче — той самий реєстр: групи й порядок
+ * пунктів — `navGroups` (UI-12, за макетом), відфільтровані за правом.
  */
 
 /** Каркас застосунку: навігація, профіль, вміст сторінки. */
@@ -189,6 +194,17 @@ const NavbarIconsOnlyWidth = 64;
  * бургером (`breakpoint: 'sm'` у `AppShell` нижче, 48em у Mantine).
  */
 const NavbarDesktopQuery = '(min-width: 48em)';
+
+/**
+ * Кнопка виходу із симуляції — лінивим чанком (UI-12, бюджет `D-132`).
+ *
+ * ⚠ Вона потрібна лише в сеансі симуляції, а статичний імпорт тягнув у
+ * вхідний чанк увесь `SimulationPanel` разом із `ReasonModal` — до КОЖНОГО
+ * маршруту. Групи меню коштували вхідному чанку +0.8 КБ; цей винос їх покриває.
+ */
+const EndSimulationButton = lazy(() =>
+  import('@/features/security/SimulationPanel').then((module) => ({ default: module.EndSimulationButton })),
+);
 
 /** Ідентифікатор списку пунктів меню — ціль `aria-controls` кнопки згортання. */
 const NavbarItemsId = 'app-navbar-items';
@@ -265,7 +281,7 @@ export function AppLayout(): JSX.Element {
           <Stack gap="xs" align="flex-start">
             <Text size="sm">{t('app.languageAfterSave')}</Text>
             <Button
-              size="compact-xs"
+              size="xs"
               variant="light"
               onClick={() => {
                 // Знову спершу зберегти: між тостом і кліком могло з'явитися нове набране.
@@ -345,6 +361,9 @@ export function AppLayout(): JSX.Element {
     return <Navigate to="/change-password" replace />;
   }
 
+  // T1-15 (б): пунктів меню під примусовою зміною пароля немає зовсім.
+  const navGroupsForMe = visibleNavGroups(me);
+
   return (
     <>
       {/*
@@ -394,7 +413,9 @@ export function AppLayout(): JSX.Element {
       <UnsavedGuard />
 
       <AppShell
-        header={{ height: 56 }}
+        // UI-32: смуга 40 px, як у макеті (`.app{grid-template-rows:40px …}`); контроли в ній —
+        // висоти `--ecr-ctl-height` (28/36), тож уміщаються в обох щільностях.
+        header={{ height: 40 }}
         navbar={{
           width: iconsOnly ? NavbarIconsOnlyWidth : NavbarWidth,
           breakpoint: 'sm',
@@ -414,9 +435,10 @@ export function AppLayout(): JSX.Element {
         {/* Одна область оголошень на весь застосунок (ФВ-14.19). */}
         <RouteAnnouncer />
 
-        <AppShell.Header>
-          <Group h="100%" px="md" justify="space-between">
-            <Group gap="sm">
+        {/* `UI-42`: клас — для правил вузького екрана (`narrowShell.css`). */}
+        <AppShell.Header className="ecr-app-header">
+          <Group h="100%" px="md" justify="space-between" wrap="nowrap">
+            <Group gap="sm" wrap="nowrap" className="ecr-topbar-start">
               {!me.mustChangePassword && (
                 <Burger
                   opened={opened}
@@ -430,22 +452,33 @@ export function AppLayout(): JSX.Element {
                   Зчитувач екрана має прочитати «ECR Web» рівно один раз. */}
               <Group gap="xs" wrap="nowrap">
                 <BrandMark />
-                <Text fw={700} c="brand.8" darkHidden>
-                  ECR
-                </Text>
-                <Text fw={700} c="brand.2" lightHidden>
-                  ECR
-                </Text>
-                <Text fw={500} c="brand.5" darkHidden>
-                  Web
-                </Text>
-                <Text fw={500} c="brand.4" lightHidden>
-                  Web
-                </Text>
+                {/* `UI-42`: на вузькому екрані підпис лише для читалки (макет ховає `.logo-t`). */}
+                <Group gap="xs" wrap="nowrap" className="ecr-brand-text">
+                  <Text fw={700} c="brand.8" darkHidden>
+                    ECR
+                  </Text>
+                  <Text fw={700} c="brand.2" lightHidden>
+                    ECR
+                  </Text>
+                  <Text fw={500} c="brand.5" darkHidden>
+                    Web
+                  </Text>
+                  <Text fw={500} c="brand.4" lightHidden>
+                    Web
+                  </Text>
+                </Group>
               </Group>
+              {/*
+               * UI-32: крихти — у верхній смузі поруч із логотипом, на КОЖНОМУ екрані
+               * (макет, KIT §1.5: «Крихти живуть у верхній смузі (їх малює оболонка)»).
+               * ⚠ Досі ОДИН екземпляр на застосунок (`PR nav-arch #3`) — лише в шапці,
+               * поза `<Suspense>` навколо `<Outlet/>`: крихти не блимають, поки
+               * вантажиться чанк наступної сторінки.
+               */}
+              <Breadcrumbs />
             </Group>
 
-            <Group gap="xs">
+            <Group gap="xs" wrap="nowrap">
               {/* ⚠ Сеанс симуляції видно ЗАВЖДИ і помітно: адміністратор, який
                   забув, що дивиться чужими правами, ухвалює рішення про чужий
                   доступ, дивлячись не на свої можливості (ФВ-6.16a). */}
@@ -460,7 +493,9 @@ export function AppLayout(): JSX.Element {
                       помічає, що дивиться чужими правами, і саме тут має
                       бути вихід: інакше єдиним способом завершити сеанс
                       лишався б вихід із системи. */}
-                  <EndSimulationButton sessionId={me.simulationSessionId ?? null} />
+                  <Suspense fallback={null}>
+                    <EndSimulationButton sessionId={me.simulationSessionId ?? null} />
+                  </Suspense>
                 </>
               )}
               {/* ⛔ A2-06: під примусовою зміною пароля пошуку й «My tasks» немає зовсім, як і меню
@@ -469,8 +504,9 @@ export function AppLayout(): JSX.Element {
                   виходом. */}
               {!me.mustChangePassword && (
                 <>
-                  {/* Пошук даних (BE-19): у статичному бандлі — лише кнопка й Ctrl+K. */}
-                  <SearchLauncher />
+                  {/* Командна палітра (UI-30) і пошук даних (BE-19): у статичному бандлі —
+                      лише кнопка й Ctrl+K. Екрани — ті самі групи, що й меню. */}
+                  <SearchLauncher groups={navGroupsForMe} />
 
                   {/* ⛔ «My tasks» (UI-07, UX-09) — БЕЗ перевірки права, навмисно:
                       директива №15, бекенд §BE-08 — «шухляда «My tasks» у шапці
@@ -491,28 +527,32 @@ export function AppLayout(): JSX.Element {
           <AppShell.Section grow component={ScrollArea} id={NavbarItemsId}>
             {/* T1-15 (б): пунктів меню під примусовою зміною пароля немає зовсім —
                 згорнута панель лишала б їх у дереві й у порядку Tab. */}
-            {navRoutes
-              .filter((route) => !me.mustChangePassword && canAccessRoute(me, route.handle))
-              .map((route) => (
-                // Фільтр ховає пункти навігації, на які немає права: нема
-                // сенсу пропонувати тиснути те, що все одно дасть 403. Той
-                // самий фільтр одночасно захищає прогрів за наміром (`PR nav-arch #5`):
-                // пункту без права тут просто НЕМА в дереві, тож немає й
-                // елемента, на який можна навести курсор/фокус, — прогрів
-                // для нього фізично не може спрацювати. Іконка (`PR
-                // nav-icons`, `handle.icon`/`navIcons.tsx`) — тепер
-                // відповідальність самого `NavRouteLink`, не цього рендера:
-                // компонент, що керує `leftSection`, і компонент, що
-                // прикріплює обробники наміру, — один і той самий елемент
-                // `NavLink`, тож два окремих місця виклику розійшлися б.
-                <NavRouteLink
-                  key={route.path}
-                  route={route}
-                  label={t(route.handle.labelKey)}
-                  active={location.pathname === route.path}
-                  collapsed={iconsOnly}
-                />
-              ))}
+            {/* UI-12: пункти — групами Work · Configure · Access · Operate (`navGroups`,
+                макет); група без жодного дозволеного пункту не малюється. */}
+            {navGroupsForMe.map((group, index) => (
+              <NavGroupSection key={group.id} group={group} first={index === 0} collapsed={iconsOnly}>
+                {group.items.map((route) => (
+                  // Фільтр ховає пункти навігації, на які немає права: нема
+                  // сенсу пропонувати тиснути те, що все одно дасть 403. Той
+                  // самий фільтр одночасно захищає прогрів за наміром (`PR nav-arch #5`):
+                  // пункту без права тут просто НЕМА в дереві, тож немає й
+                  // елемента, на який можна навести курсор/фокус, — прогрів
+                  // для нього фізично не може спрацювати. Іконка (`PR
+                  // nav-icons`, `handle.icon`/`navIcons.tsx`) — тепер
+                  // відповідальність самого `NavRouteLink`, не цього рендера:
+                  // компонент, що керує `leftSection`, і компонент, що
+                  // прикріплює обробники наміру, — один і той самий елемент
+                  // `NavLink`, тож два окремих місця виклику розійшлися б.
+                  <NavRouteLink
+                    key={route.path}
+                    route={route}
+                    label={t(route.handle.labelKey)}
+                    active={location.pathname === route.path}
+                    collapsed={iconsOnly}
+                  />
+                ))}
+              </NavGroupSection>
+            ))}
           </AppShell.Section>
           {!me.mustChangePassword && (
             <AppShell.Section visibleFrom="sm" pt="xs">
@@ -539,18 +579,6 @@ export function AppLayout(): JSX.Element {
            * інакше кожен перехід гасив би шапку й навігацію разом зі змістом, і
            * екран блимав би цілком там, де змінюється сама лише середина.
            */}
-          {/*
-           * Breadcrumbs (`PR nav-arch #3`) — ОДИН екземпляр, тут, а не в
-           * `AdminLayout`/`TemplateVersionLayout`: `useMatches()` усередині
-           * компонента сам читає ПОВНЕ дерево збігів поточної адреси (той
-           * самий аргумент, що й для `<ScrollRestoration/>` вище, `PR #2`).
-           * ПОЗА `<Suspense>` навколо `<Outlet/>` навмисно: інакше на кожному
-           * підвантаженні чанка нового маршруту крихти зникали б і з'являлися
-           * знову разом із дочірнім деревом, хоча дані для їхнього резолву
-           * (кеш TanStack Query) нікуди не зникають.
-           */}
-          <Breadcrumbs />
-
           {session.isRefetchError && (
             <Alert color="yellow" role="status" mb="sm" data-session-refetch-error>
               {t('err.http.unavailable')}

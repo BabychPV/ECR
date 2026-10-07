@@ -23,7 +23,7 @@ import { DocumentPage } from '@/pages/DocumentPage';
  *
  * ⚠ Сітка й панель чисел методологій підмінені: вони тягнуть власні запити й
  * рендерять RevoGrid, до якого цей тест не має справи (`D1-12`). Панель
- * зауважень (`ValidationPanel`) — СПРАВЖНЯ: саме її вміст і є доказ.
+ * зауважень (інспектор `UI-25`, вкладка Issues) — СПРАВЖНЯ: саме її вміст і є доказ.
  */
 vi.mock('@/features/grid/DocumentGrid', () => ({
   DocumentGrid: (): JSX.Element => <div data-testid="grid-stub" />,
@@ -79,6 +79,9 @@ function mockFetch(): void {
               // сторож `Клієнт_не_згадує_кодів_яких_немає_в_каталозі`
               // (Ecr.Architecture.Tests) слушно ловить тут вигаданий `ECR-*`.
               ruleCode: 'BALANCE',
+              // ⚠ Таблиця — частина адреси (`BE-04`); інспектор (`UI-25`) показує
+              // лише зауваження видимих таблиць документа.
+              tableDefId: 1,
               rowKey: 'R1',
               columnCode: 'C1',
               message: Message202401,
@@ -186,7 +189,7 @@ const loadDocumentPageChunks = (): Promise<unknown> =>
   Promise.all([
     import('@/features/documents/DocumentHeaderPanel'),
     import('@/features/documents/DocumentVersionCompare'),
-    import('@/features/documents/ValidationPanel'),
+    import('@/features/documents/inspector/DocumentInspector'),
     import('@/features/grid/RestoreEditsBanner'),
     import('@/features/grid/SheetTables'),
     import('@/features/grid/cellNavigation'),
@@ -245,10 +248,15 @@ describe('DocumentPage: результат перевірки не пережи�
        * що перезавантаження почалося, потім — що воно скінчилося, і лише на
        * повністю перемальованій сторінці 202402 дивимось, що на ній.
        */
-      await waitFor(() => expect(screen.queryByRole('status')).not.toBeNull(), {
+      // ✎ UI-14: стан збереження в рядку дій — теж `role="status"`, але
+      // постійний; скелет перезавантаження — це решта статусів.
+      const skeletons = (): HTMLElement[] =>
+        screen.queryAllByRole('status').filter((element) => element.dataset.testid !== 'document-save-state');
+
+      await waitFor(() => expect(skeletons()).not.toHaveLength(0), {
         timeout: SettleTimeout,
       });
-      await waitFor(() => expect(screen.queryByRole('status')).toBeNull(), {
+      await waitFor(() => expect(skeletons()).toHaveLength(0), {
         timeout: SettleTimeout,
       });
 

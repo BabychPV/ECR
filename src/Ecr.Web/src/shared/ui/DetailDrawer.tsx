@@ -1,4 +1,4 @@
-import type { JSX, ReactNode } from 'react';
+import { useEffect, useRef, useState, type JSX, type ReactNode } from 'react';
 import { Drawer, Group, Stack, Text } from '@mantine/core';
 import { useMediaQuery } from '@mantine/hooks';
 import { useUrlState } from '@/shared/ui/useUrlState';
@@ -19,12 +19,14 @@ import { useUrlState } from '@/shared/ui/useUrlState';
  *     надіслати посиланням і зняти e2e-знімок. Стан НЕ в `useState`: він не
  *     переживає ані перезавантаження, ані «Назад».
  *
- * ⚠ Що зробити не вдалося, і це названо, а не замовчано: Mantine зашиває
- * `role="dialog"` і `aria-modal={true}` у `ModalBaseContent` ПІСЛЯ розгортання
- * чужих пропсів, тож немодальна шторка однаково оголошується читалці як
- * модальний діалог. Правило `L2` директиви (§0) очікує
- * `queryByRole('complementary')` — з Mantine `Drawer` цього не досягти без
- * власної копії `ModalBase`. Питання винесено у звіт PR.
+ * ⚠ Mantine зашиває `role="dialog"` і `aria-modal={true}` у `ModalBaseContent`
+ * ПІСЛЯ розгортання чужих пропсів, тож пропсом їх не перекрити. ✎ batch-4 P3:
+ * на широкому екрані `aria-modal` знімається з DOM ефектом нижче — немодальна
+ * шторка більше не оголошується читалці модальним діалогом, а `role="dialog"`
+ * (немодальний діалог — коректна роль) лишається. Вузький екран — модальний
+ * шар, там атрибут повертається. Правило `L2` директиви (§0) очікує
+ * `complementary` — з Mantine `Drawer` цього не досягти без власної копії
+ * `ModalBase`.
  */
 
 /** Ім'я параметра адреси. Одне місце на весь застосунок. */
@@ -93,9 +95,58 @@ export function DetailDrawer({
 
   const opened = panel === panelId;
 
+  /*
+   * ⛔ Відкривач запам'ятовується ТУТ, а не покладається на `returnFocus`
+   * Mantine. Той ловить відкривач лише на ПЕРЕХОДІ `opened` усередині вже
+   * змонтованої шторки і лише з пасткою фокуса. А `ListPage` (Jobs,
+   * Consistency) монтує шторку вже відкритою й знімає її разом із `?panel=` —
+   * і після Esc фокус падав на `<body>` (живий прогін пачки batch-2-a, 1100 px).
+   * Читання `activeElement` у рендері — свідоме: на кадрі відкриття фокус ще
+   * стоїть на кнопці, що змінила адресу.
+   */
+  const [wasOpened, setWasOpened] = useState(false);
+  const [opener, setOpener] = useState<HTMLElement | null>(null);
+  if (opened !== wasOpened) {
+    setWasOpened(opened);
+    if (opened) setOpener(focusedOutside(panelId));
+  }
+
+  /*
+   * ⛔ WCAG 2.4.3 (a11y-pass): шторку можуть зняти й без `close` — `ListPage`
+   * прибирає її з дерева разом із `?panel=` (кнопка «Назад», перехід за
+   * адресою). Тоді фокус повертається при демонтажі за тим самим правилом.
+   */
+  const openerRef = useRef<HTMLElement | null>(null);
+  openerRef.current = opened ? opener : null;
+  useEffect(() => () => returnFocusTo(openerRef.current, panelId), [panelId]);
+
+  /*
+   * ✎ batch-4 P3: `aria-modal` — лише там, де шторка справді модальна. React не
+   * повертає знятий атрибут сам (пропс Mantine не змінюється), тож спостерігач
+   * лише ловить вміст, змонтований переходом пізніше за цей ефект.
+   */
+  useEffect(() => {
+    if (!opened) return undefined;
+    const sync = (): void => {
+      for (const root of document.querySelectorAll('[data-panel]')) {
+        if (root.getAttribute('data-panel') !== panelId) continue;
+        for (const element of root.querySelectorAll('[role="dialog"]')) {
+          if (wide) element.removeAttribute('aria-modal');
+          else if (element.getAttribute('aria-modal') !== 'true') element.setAttribute('aria-modal', 'true');
+        }
+      }
+    };
+    sync();
+    if (!wide) return undefined;
+    const observer = new MutationObserver(sync);
+    observer.observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['aria-modal'] });
+    return () => observer.disconnect();
+  }, [opened, wide, panelId]);
+
   const close = (): void => {
     setPanel(null);
     onClose?.();
+    returnFocusTo(opener, panelId);
   };
 
   return (
@@ -136,4 +187,40 @@ export function DetailDrawer({
       </Stack>
     </Drawer>
   );
+}
+
+/** Що зараз у фокусі, якщо це не `<body>` і не сама шторка. */
+function focusedOutside(panelId: string): HTMLElement | null {
+  const active = document.activeElement;
+  if (!(active instanceof HTMLElement) || active === document.body) return null;
+
+  return insidePanel(active, panelId) ? null : active;
+}
+
+/**
+ * Повертає фокус на відкривач після закриття.
+ *
+ * ⚠ Лише якщо фокус загубився (на `<body>`) або лишився в шторці, що
+ * зникає. На широкому екрані сторінка жива: людина могла вже перейти до
+ * іншого поля, і висмикувати її звідти назад на відкривач — гірше, ніж нічого.
+ * Таймер — щоб шторка встигла зникнути з адреси й розмітки.
+ */
+function returnFocusTo(opener: HTMLElement | null, panelId: string): void {
+  if (opener === null) return;
+
+  window.setTimeout(() => {
+    if (!opener.isConnected) return;
+
+    const active = document.activeElement;
+    const lost =
+      active === null ||
+      active === document.body ||
+      !active.isConnected ||
+      insidePanel(active, panelId);
+    if (lost) opener.focus({ preventScroll: true });
+  }, 0);
+}
+
+function insidePanel(element: Element, panelId: string): boolean {
+  return element.closest('[data-panel]')?.getAttribute('data-panel') === panelId;
 }

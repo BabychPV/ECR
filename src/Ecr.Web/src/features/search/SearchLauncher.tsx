@@ -1,6 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState, type JSX } from 'react';
 import { Button, Text } from '@mantine/core';
 import { t } from '@/shared/i18n';
+import type { PaletteScreenGroup } from './commandItems';
 import { belongsToSomeoneElse, isPaletteHotkey } from './paletteHotkey';
 
 /**
@@ -23,11 +24,19 @@ function prefetchPalette(): void {
   loadPalette().catch(() => undefined);
 }
 
+/** Сталий порожній перелік: новий `[]` на кожен рендер скидав би мемо палітри. */
+const NoGroups: readonly PaletteScreenGroup[] = [];
+
 const isApple =
   typeof navigator !== 'undefined' && /Mac|iPhone|iPad/i.test(navigator.userAgent);
 
-/** Кнопка пошуку в шапці і гаряча клавіша палітри. */
-export function SearchLauncher(): JSX.Element {
+/**
+ * Кнопка пошуку в шапці і гаряча клавіша палітри.
+ *
+ * `groups` — групи меню з пунктами, дозволеними користувачеві (UI-12): палітра
+ * пропонує рівно ті екрани, що й меню (UI-30).
+ */
+export function SearchLauncher({ groups = NoGroups }: { groups?: readonly PaletteScreenGroup[] } = {}): JSX.Element {
   const [opened, setOpened] = useState(false);
   // Палітра монтується з першим відкриттям і далі лишається (анімація закриття).
   const [requested, setRequested] = useState(false);
@@ -73,7 +82,6 @@ export function SearchLauncher(): JSX.Element {
     <>
       <Button
         variant="default"
-        size="xs"
         aria-label={label}
         aria-haspopup="dialog"
         aria-keyshortcuts="Control+K Meta+K"
@@ -99,6 +107,7 @@ export function SearchLauncher(): JSX.Element {
             opened={opened}
             onClose={() => finish(true)}
             onPicked={() => finish(false)}
+            groups={groups}
           />
         </Suspense>
       )}
@@ -106,7 +115,7 @@ export function SearchLauncher(): JSX.Element {
   );
 }
 
-/** Лупа — той самий лінійний стиль, що в `app/navIcons.tsx`. */
+/** Лупа — той самий лінійний стиль, що в `shared/ui/navIcons.tsx`. */
 function SearchIcon(): JSX.Element {
   return (
     <svg

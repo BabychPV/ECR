@@ -1,8 +1,9 @@
-import { useState, type JSX } from 'react';
-import { Badge, Button, Group, Modal, Select, Stack, Text, TextInput } from '@mantine/core';
+import { lazy, Suspense, useMemo, useState, type JSX } from 'react';
+import { Anchor, Badge, Button, Group, Modal, Select, Stack, Text, TextInput } from '@mantine/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useSearchParams } from 'react-router-dom';
 import { apiFetch } from '@/api/client';
-import type { ConvertUnitRequest, ConvertUnitResponse, UnitRef } from '@/api/types';
+import type { UnitRef } from '@/api/types';
 import { createUnit, deleteUnit, unitReferences, unitUsage } from '@/features/units/api';
 import { UnitEditModal } from '@/features/units/UnitEditModal';
 import { UsageKindLabel } from '@/features/usage/UsageKindLabel';
@@ -10,11 +11,75 @@ import { decimalEquals, formatDecimal, normalizeDecimal } from '@/shared/format'
 import { can, useSession } from '@/shared/session/useSession';
 import { ConfirmModal } from '@/shared/ui/ConfirmModal';
 import { DataTable, type DataTableColumn } from '@/shared/ui/DataTable';
-import { PageHeader } from '@/shared/ui/PageHeader';
+import { useDetailPanel } from '@/shared/ui/DetailDrawer';
+import { FilterBar } from '@/shared/ui/FilterBar';
+import { ListPage } from '@/shared/ui/ListPage';
+import type { StatItem } from '@/shared/ui/StatStrip';
+import { TwoLine } from '@/shared/ui/TwoLine';
+import { useUrlParamsSetter, useUrlState } from '@/shared/ui/useUrlState';
 import { showApiError, showDone } from '@/shared/ui/notify';
 import { t } from '@/shared/i18n';
+import { localized } from '@/shared/i18n/localized';
 import { problemText } from '@/shared/ui/problemText';
 import { usePendingLoading } from '@/features/common/usePendingLoading';
+
+/*
+ * ⚠ Шторка й конвертор — ЛІНИВІ чанки (UI-21): обидва закриті за
+ * замовчуванням, і маршрут переліку не має за них платити.
+ */
+const UnitDetailBody = lazy(() => import('@/features/units/UnitDetailBody'));
+const UnitConvertModal = lazy(() => import('@/features/units/UnitConvertModal'));
+
+/** Значення `?panel=` шторки одиниці. */
+export function unitPanelId(unitId: number): string {
+  return `unit-${String(unitId)}`;
+}
+
+/** Показник смуги, що фільтрує: одиниці зі зсувом (температура). */
+const OffsetStat = 'offset';
+
+/** Показник смуги, що фільтрує: одиниці, яких не тримає жодна колонка чи поле. */
+const UnusedStat = 'unused';
+
+/**
+ * Що людина бачить як одиницю: позначення мовою інтерфейсу (`°C`, `m³`), а не код (`degC`, `m3`).
+ *
+ * ⚠ `symbolL10n` у `UnitRef` — з UI-21 (41c0fbd5); старий сервер чи дублер без нього — код, щоб
+ * рядок не лишився порожнім. Макет: колонка «Unit» = `twoLine(symbol, name)`.
+ */
+export function unitSymbol(unit: UnitRef): string {
+  return localized({ values: unit.symbolL10n ?? {} }) || unit.code;
+}
+
+/**
+ * Базова одиниця кожної розмірності.
+ *
+ * ⚠ Спершу — прапорець сервера `isBase` (LS, `UnitRef.isBase`): це він каже,
+ * через яку одиницю йде конверсія. Розмірність без позначеної базової
+ * (старий сервер, тест-дублер) — за значенням: множник 1 і зсув 0.
+ *
+ * ⛔ `decimalEquals`, не `Number(x) === 1`: множник приходить із масштабом
+ * колонки (`"1.0000000000"`), а `Number` не відрізнив би базову одиницю від
+ * такої, що відходить від неї на 17-му знаку. Кілька кандидатів (не мало б
+ * статися) — перший за кодом, щоб відповідь не залежала від порядку масиву.
+ */
+export function baseUnits(units: readonly UnitRef[]): ReadonlyMap<number, string> {
+  const bases = new Map<number, string>();
+  const byCode = [...units].sort((a, b) => a.code.localeCompare(b.code));
+
+  for (const unit of byCode) {
+    if (unit.isBase === true && !bases.has(unit.dimensionId)) bases.set(unit.dimensionId, unit.code);
+  }
+
+  for (const unit of byCode) {
+    if (bases.has(unit.dimensionId)) continue;
+    if (decimalEquals(unit.factorToBase, '1') && decimalEquals(unit.offsetToBase, '0')) {
+      bases.set(unit.dimensionId, unit.code);
+    }
+  }
+
+  return bases;
+}
 
 /**
  * Довідник одиниць і конвертор (`ФВ-16.1`, `ФВ-16.2`, `ФВ-16.5`).
@@ -39,20 +104,6 @@ export function UnitsPage(): JSX.Element {
   const session = useSession();
   const queryClient = useQueryClient();
 
-  /*
-   * ⛔ Усі три десяткові поля цього екрана — РЯДКИ, і вводяться теж рядком
-   * (`TextInput`, не `NumberInput`). `NumberInput` Mantine повертає в
-   * `onChange` `floatValue`, тобто проганяє введене через IEEE-754 ще до
-   * стану компонента: множник `0.4535923700000000` втратив би хвіст просто
-   * від того, що його надрукували. Контракт віддає й приймає `decimal`
-   * рядком саме тому (`e470777a`), і на клієнті цей рядок ніде не
-   * перетворюється на число — ані туди, ані назад.
-   */
-  const [value, setValue] = useState('1');
-  const [fromUnit, setFromUnit] = useState<string | null>(null);
-  const [toUnit, setToUnit] = useState<string | null>(null);
-  const [result, setResult] = useState<ConvertUnitResponse | null>(null);
-
   const units = useQuery({
     queryKey: ['units'],
     queryFn: () => apiFetch<UnitRef[]>('/api/v1/units'),
@@ -61,29 +112,12 @@ export function UnitsPage(): JSX.Element {
     staleTime: 60 * 60 * 1000,
   });
 
-  const all = units.data ?? [];
-  const source = all.find((unit) => unit.code === fromUnit);
+  const all = useMemo(() => units.data ?? [], [units.data]);
+  const [panel, setPanel] = useDetailPanel();
 
-  // ⛔ Лише та сама розмірність. Сервер відхилить решту `ECR-UOM-0422`, і
-  // показувати такий вибір означало б вести користувача у відмову.
-  const targets = source === undefined ? [] : all.filter((u) => u.dimensionId === source.dimensionId);
-
-  const convert = useMutation({
-    mutationFn: () =>
-      apiFetch<ConvertUnitResponse>('/api/v1/units/convert', {
-        method: 'POST',
-        body: JSON.stringify({
-          value: value.trim(),
-          fromUnit: fromUnit ?? '',
-          toUnit: toUnit ?? '',
-        } satisfies ConvertUnitRequest),
-      }),
-    onSuccess: setResult,
-    onError: showApiError,
-  });
-
-  // ⚠ `ФВ-14.26`: спінер на кнопці — лише після 100 мс дії, не з першого кадру.
-  const convertLoading = usePendingLoading(convert.isPending);
+  // UI-21: «Check a conversion» — друга дія шапки, діалогом; `null` — закритий,
+  // рядок — одиниця «From», з якої його відкрили (шторка), `''` — без неї.
+  const [converting, setConverting] = useState<string | null>(null);
 
   // ⛔ UI-аудит, lane 4: жоден обліковий запис, включно з повноправним
   // адміністратором, не мав шляху додати одиницю виміру — той самий клас
@@ -160,6 +194,9 @@ export function UnitsPage(): JSX.Element {
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['units'] });
       setDeleting(null);
+
+      // Шторка видаленої одиниці не має що показувати — і `?panel=` теж.
+      setPanel(null);
       showDone(t('units.deleted'));
     },
   });
@@ -168,13 +205,75 @@ export function UnitsPage(): JSX.Element {
   // з'явитися, поки діалог стояв відкритий.
   const dependents = unitReferences(remove.error) ?? usage.data;
 
+  const bases = baseUnits(all);
+  const byCode = new Map(all.map((unit) => [unit.code, unit]));
+  // Базова одиниця — тим самим позначенням, що й у першій колонці (`°C`, а не `degC`).
+  const baseSymbol = (dimensionId: number): string | null => {
+    const code = bases.get(dimensionId);
+    if (code === undefined) return null;
+
+    const base = byCode.get(code);
+    return base === undefined ? code : unitSymbol(base);
+  };
+  const [params] = useSearchParams();
+  const [stat, setStat] = useUrlState('stat');
+  const setParams = useUrlParamsSetter();
+  const query = (params.get('q') ?? '').trim().toLowerCase();
+  const dimension = params.get('dimension');
+
+  const dimensionOptions = Array.from(new Set(all.map((unit) => unit.dimensionCode)))
+    .sort((a, b) => a.localeCompare(b))
+    .map((code) => ({ value: code, label: code }));
+
+  // ⚠ Фільтр — на клієнті: `GET /units` віддає весь довідник одним масивом.
+  const shown =
+    units.data === undefined
+      ? undefined
+      : units.data.filter(
+          (unit) =>
+            (query.length === 0 ||
+              unit.code.toLowerCase().includes(query) ||
+              unitSymbol(unit).toLowerCase().includes(query) ||
+              unit.dimensionCode.toLowerCase().includes(query)) &&
+            (dimension === null || unit.dimensionCode === dimension) &&
+            (stat !== OffsetStat || !decimalEquals(unit.offsetToBase, '0')) &&
+            (stat !== UnusedStat || unit.usedIn === 0),
+        );
+
+  const filtered = query.length > 0 || dimension !== null || stat !== null;
+
   /*
-   * ⛔ Обидві десяткові колонки — `num` + `exact`: рядок сервера показується
-   * дослівно. Без `exact` клітинка `num` малюється зі стелею дробової частини
-   * переліку (три знаки), і множник `0.4535923700` поїхав би на екран як
-   * `0.454`. На довіднику одиниць множник — це і є те, заради чого контракт
-   * перевели на рядок (`e470777a`): округлити його означає стерти відповідь,
-   * по яку сюди приходять.
+   * ⚠ `usedIn` — лише для того, хто має `Uom.EditCatalog`; інакше `null`
+   * («не знаю», а не «ніде»). Тому колонка «Used in» і показник «not used
+   * anywhere» з'являються, лише коли сервер віддав число КОЖНІЙ одиниці:
+   * лічба по частині видавала б невідоме за нуль (`D15-06`).
+   */
+  const usageKnown = all.length > 0 && all.every((unit) => unit.usedIn !== null && unit.usedIn !== undefined);
+
+  const baseStats: readonly [StatItem, StatItem, StatItem] = [
+    { id: 'units', label: t('units.statUnits'), value: all.length, filter: false },
+    { id: 'dimensions', label: t('units.statDimensions'), value: dimensionOptions.length, filter: false },
+    {
+      id: OffsetStat,
+      label: t('units.statOffset'),
+      value: all.filter((unit) => !decimalEquals(unit.offsetToBase, '0')).length,
+    },
+  ];
+  const stats: readonly [StatItem, StatItem, StatItem] | readonly [StatItem, StatItem, StatItem, StatItem] =
+    usageKnown
+      ? [...baseStats, { id: UnusedStat, label: t('units.statUnused'), value: all.filter((unit) => unit.usedIn === 0).length }]
+      : baseStats;
+
+  const openUnit = all.find((unit) => unitPanelId(unit.id) === panel);
+
+  /*
+   * ⛔ Обидві десяткові колонки — `num` + `formatDecimal` БЕЗ стелі (UI-21):
+   * хвостові нулі масштабу колонки (`1000.000000000000000000`) зрізані,
+   * тисячі розділені мовою інтерфейсу, а значущі знаки — ВСІ. Стеля дробової
+   * частини переліку (три знаки, `CellFractionCeiling`) тут не годиться:
+   * множник `0.4535923700` поїхав би на екран як `0.454`, а він і є
+   * відповіддю, по яку сюди приходять (`e470777a`). Рядок не проходить через
+   * `Number` ніде.
    *
    * ⚠ Сам `num` лишається, і не заради вирівнювання: він вмикає ЧИСЛОВЕ
    * порівняння десяткових рядків (`compareDecimals`). Без нього колонка
@@ -185,22 +284,30 @@ export function UnitsPage(): JSX.Element {
     {
       key: 'code',
       label: t('units.code'),
-      render: (unit) => (
-        <>
-          {unit.code}
-          {/* ⚠ Базова одиниця розмірності видно окремо: саме через неї йде
-              кожна конверсія, і множник решти — це множник ДО НЕЇ.
+      sortValue: (unit) => unitSymbol(unit),
 
-              ⛔ Порівняння — `decimalEquals`, не `Number(x) === 1`. Множник
-              приходить із масштабом колонки (`"1.0000000000"`), тож рівність
-              рядків тут не працює; а `Number` не відрізнив би базову одиницю
-              від такої, що відходить від неї на 17-му знаку. */}
-          {decimalEquals(unit.factorToBase, '1') && decimalEquals(unit.offsetToBase, '0') && (
-            <Badge ml="xs" size="xs" variant="light">
-              {t('units.base')}
-            </Badge>
-          )}
-        </>
+      // ⚠ Код — ще й ПОСИЛАННЯ на шторку: клац по рядку (`onRowClick`) не має
+      // клавіатурного шляху, а кнопка в першій клітинці — має (`Tab`, `Enter`).
+      // Назва одиниці другим рядком (макет: `twoLine(symbol, name)`) —
+      // `nameL10n` мовою інтерфейсу; немає назви — другого рядка немає.
+      render: (unit) => (
+        <TwoLine
+          primary={
+            <Anchor
+              component="button"
+              type="button"
+              size="sm"
+              data-unit-open={unit.code}
+              onClick={(event) => {
+                event.stopPropagation();
+                setPanel(unitPanelId(unit.id));
+              }}
+            >
+              {unitSymbol(unit)}
+            </Anchor>
+          }
+          secondary={localized({ values: unit.nameL10n ?? {} }) || undefined}
+        />
       ),
     },
     {
@@ -214,172 +321,148 @@ export function UnitsPage(): JSX.Element {
       sortValue: (unit) => [unit.dimensionCode, unit.code],
     },
     {
+      // UI-21: базова одиниця розмірності — окремою колонкою (макет «Base
+      // unit»), а не значком у коді: саме через неї йде кожна конверсія, і
+      // множник решти — це множник ДО НЕЇ.
+      key: 'base',
+      label: t('units.baseUnit'),
+      sortValue: (unit) => bases.get(unit.dimensionId) ?? null,
+      render: (unit) =>
+        bases.get(unit.dimensionId) === unit.code ? (
+          // ⚠ Макет: приглушене слово («is the base»), а не капітельний бейдж «BASE» (звірка
+          // batch-4 з макетом, п.19): це не стан, а відповідь на питання колонки.
+          <Text span size="sm" c="dimmed" data-unit-base="">
+            {t('units.base')}
+          </Text>
+        ) : (
+          baseSymbol(unit.dimensionId)
+        ),
+    },
+    {
       key: 'factorToBase',
       label: t('units.factor'),
       num: true,
-      exact: true,
+      render: (unit) => formatDecimal(unit.factorToBase) ?? unit.factorToBase,
     },
     {
       key: 'offsetToBase',
       label: t('units.offset'),
       num: true,
-      exact: true,
+      // ⚠ Нульовий зсув — не дані, а відсутність: клітинка порожня (макет).
+      render: (unit) =>
+        decimalEquals(unit.offsetToBase, '0') ? null : (formatDecimal(unit.offsetToBase) ?? unit.offsetToBase),
     },
-    // ⚠ Колонка дій з'являється лише з правом — рівно як і до переїзду; шапка в
-    // неї порожня, а `sortable: false` тому, що в кнопки немає скалярного
-    // значення і сортування за нею мовчки не робило б нічого.
-    ...(canEdit
+    ...(usageKnown
       ? [
           {
-            key: 'actions',
-            label: '',
-            sortable: false,
-            render: (unit: UnitRef) => (
-              <Group gap="xs" wrap="nowrap">
-                <Button
-                  size="compact-xs"
-                  variant="subtle"
-                  aria-label={`${t('units.edit')} ${unit.code}`}
-                  onClick={() => setEditing(unit)}
-                >
-                  {t('units.edit')}
-                </Button>
-                <Button
-                  size="compact-xs"
-                  variant="subtle"
-                  color="statusError"
-                  aria-label={`${t('common.delete')} ${unit.code}`}
-                  onClick={() => {
-                    remove.reset();
-                    setDeleting(unit);
-                  }}
-                >
-                  {t('common.delete')}
-                </Button>
-              </Group>
-            ),
+            key: 'usedIn',
+            label: t('units.usedIn'),
+            num: true,
+            // ⚠ Скільки колонок шаблонів і полів довідників тримає одиницю.
+            render: (unit: UnitRef) => (unit.usedIn === null || unit.usedIn === undefined ? '—' : String(unit.usedIn)),
+            sortValue: (unit: UnitRef) => unit.usedIn ?? -1,
           } satisfies DataTableColumn<UnitRef>,
         ]
       : []),
   ];
 
   return (
-    <>
-      <PageHeader
-        title={t('units.title')}
-        actions={
-          <Group gap="xs" align="end">
-            <TextInput
-              size="xs"
-              miw={120}
-              inputMode="decimal"
-              label={t('units.value')}
-              value={value}
-              onChange={(event) => setValue(event.currentTarget.value)}
-            />
-
-            <Select
-              size="xs"
-              miw={130}
-              label={t('units.from')}
-              data={all.map((unit) => ({ value: unit.code, label: unit.code }))}
-              value={fromUnit}
-              onChange={(next) => {
-                setFromUnit(next);
-
-                // Цільова одиниця належала іншій розмірності — вибір більше
-                // не має сенсу, і лишити його означало б надіслати завідомо
-                // відхилений запит.
-                setToUnit(null);
-                setResult(null);
-              }}
-              searchable
-            />
-
-            <Select
-              size="xs"
-              miw={130}
-              label={t('units.to')}
-              description={source === undefined ? t('units.pickFrom') : undefined}
-              data={targets.map((unit) => ({ value: unit.code, label: unit.code }))}
-              value={toUnit}
-              onChange={setToUnit}
-              searchable
-            />
-
-            <Button
-              size="xs"
-              // ⚠ Поле тепер текстове, тож «не число» стало можливим станом:
-              // кнопка, яка веде у відому відмову сервера, гірша за вимкнену.
-              disabled={fromUnit === null || toUnit === null || normalizeDecimal(value) === null}
-              loading={convertLoading}
-              onClick={() => {
-                if (convert.isPending) return;
-                convert.mutate();
-              }}
-            >
-              {t('units.convert')}
-            </Button>
-
-            {result !== null && (
-              // ⛔ `X-36`: результат конверсії йшов на екран СИРИМ рядком
-              // сервера (`decimal(28,16)`, наприклад «0.4535923700000000»)
-              // — без розділювача тисяч і без зрізання хвостових нулів,
-              // тоді як довідник поруч (`factorToBase`/`offsetToBase`,
-              // колонки нижче) і решта продукту (`DataTable`,
-              // `SnapshotRowsModal`) показують те саме подання лише через
-              // канонічний `formatDecimal`. `?? result.value` — деградація
-              // в бік показу: не-десяткове значення (не мало б статись,
-              // сервер віддає `decimal`) лишається видним, а не зникає.
-              <Text size="sm" fw={600}>
-                {formatDecimal(result.value) ?? result.value} {result.unit}
-              </Text>
-            )}
-
-            {can(session.data, 'Uom.EditCatalog') && (
-              <Button size="xs" variant="default" onClick={() => setCreating(true)}>
-                {t('units.new')}
-              </Button>
-            )}
-          </Group>
-        }
-      />
-
-      {/*
-       * ⛔ `DataTable` замінює `AsyncBoundary` + `<Table>` РАЗОМ, а не лише
-       * розмітку: обгортку станів набір тримає всередині себе (`DataTable.tsx`
-       * — той самий `AsyncBoundary`, `skeleton="table"`). Лишити зовнішню поруч
-       * означало б два перемикачі станів на одну таблицю — саме ту розбіжність,
-       * заради усунення якої таблиця й стала компонентом. Правило «відмова ≠
-       * порожньо» від цього не слабшає: воно переїхало разом із обгорткою.
-       *
-       * ⚠ Сортування шапкою прийшло з набором, і його тут не було: чотири
-       * перші колонки стали клікабельними. Порядок при відкритті — той самий,
-       * що й до переїзду (розмірність, усередині неї код), але тепер його
-       * задає `defaultSort`, а не пресортований масив: шапка «Dimension» на
-       * старті каже `aria-sort="ascending"`, тобто правду про порядок рядків.
-       *
-       * ⛔ `rows` — сам `units.data`: `undefined` мусить лишатися `undefined`,
-       * `?? []` перетворило б «запиту ще не робили» на «порожньо».
-       *
-       * ⚠ `clearFiltersLabel`/`showMoreLabel` цьому екрану передавати НЕМА
-       * куди: фільтрів у нього немає (тож немає й `onClearFilters`), а
-       * `GET /api/v1/units` віддає довідник одним масивом без курсора (тож
-       * немає `total`/`onShowMore`). Обидві кнопки в такому разі не
-       * малюються зовсім, і проп до них був би мертвим.
-       */}
-      <DataTable<UnitRef>
-        columns={columns}
-        rows={units.data}
-        rowKey={(unit) => String(unit.id)}
-        defaultSort={{ key: 'dimensionCode', direction: 'asc' }}
-        isPending={units.isPending}
-        error={units.error}
-        emptyTitle={t('units.empty')}
-        emptyHint={t('units.emptyHint')}
-        onRetry={() => void units.refetch()}
-      />
-
+    <ListPage
+      header={{
+        title: t('units.title'),
+        // Пояснення сторінки ЗАМІСТЬ пояснення маршруту, а не другим рядком під ним (batch-2-a, дефект 3).
+        description: t('units.description'),
+        primary: canEdit ? { label: t('units.new'), onClick: () => setCreating(true) } : undefined,
+        secondary: [{ label: t('units.checkConversion'), onClick: () => setConverting('') }],
+      }}
+      stats={
+        units.data === undefined
+          ? undefined
+          : { label: t('units.statsLabel'), items: stats, active: stat, onSelect: setStat }
+      }
+      filters={
+        <FilterBar
+          search={{ label: t('units.search'), placeholder: t('units.searchPlaceholder') }}
+          filters={[{ id: 'dimension', label: t('units.dimension'), options: dimensionOptions }]}
+          clearLabel={t('filters.clear')}
+        />
+      }
+      table={
+        /*
+         * ⛔ `DataTable` тримає стани (завантаження, відмова, порожньо) сам —
+         * зовнішньої обгортки станів тут немає.
+         *
+         * ⛔ `rows` — відфільтрований `units.data`: `undefined` лишається
+         * `undefined` («запиту ще не робили» ≠ «порожньо»).
+         *
+         * ⚠ Порядок при відкритті — розмірність, усередині неї код
+         * (`defaultSort`), тож шапка «Dimension» на старті каже правду
+         * `aria-sort="ascending"`.
+         */
+        <DataTable<UnitRef>
+          columns={columns}
+          rows={shown}
+          rowKey={(unit) => String(unit.id)}
+          defaultSort={{ key: 'dimensionCode', direction: 'asc' }}
+          isPending={units.isPending}
+          error={units.error}
+          emptyTitle={t('units.empty')}
+          emptyHint={t('units.emptyHint')}
+          filtered={filtered}
+          noMatchTitle={t('units.noMatch')}
+          // ⛔ ОДИН перехід на всі параметри: кілька `setSearchParams` поспіль
+          // в одному обробнику губили зміни (`useUrlState.ts`).
+          onClearFilters={() => setParams({ q: null, dimension: null, stat: null })}
+          clearFiltersLabel={t('filters.clear')}
+          onRetry={() => void units.refetch()}
+          onRowClick={(unit) => setPanel(unitPanelId(unit.id))}
+          selectedKey={openUnit === undefined ? undefined : String(openUnit.id)}
+        />
+      }
+      detail={
+        openUnit === undefined
+          ? undefined
+          : {
+              panelId: unitPanelId(openUnit.id),
+              title: openUnit.code,
+              subtitle: openUnit.dimensionCode,
+              closeLabel: t('common.close'),
+              // ⚠ Правка й видалення — тут, а не кнопками в рядку (UI-21,
+              // макет: `Delete…` ліворуч, `Convert…`, `Edit` головною).
+              footer: (
+                <>
+                  {canEdit && (
+                    <Button
+                      // Руйнівна дія панелі — обвідна (`docs/design/ui-conventions.md`).
+                      variant="outline"
+                      color="statusError"
+                      mr="auto"
+                      onClick={() => {
+                        remove.reset();
+                        setDeleting(openUnit);
+                      }}
+                    >
+                      {t('common.delete')}
+                    </Button>
+                  )}
+                  <Button variant="default" onClick={() => setConverting(openUnit.code)}>
+                    {t('units.convert')}
+                  </Button>
+                  {canEdit && <Button onClick={() => setEditing(openUnit)}>{t('units.edit')}</Button>}
+                </>
+              ),
+              children: (
+                <Suspense fallback={<Text size="sm" c="dimmed">{t('common.loading')}</Text>}>
+                  <UnitDetailBody
+                    unit={openUnit}
+                    baseCode={bases.get(openUnit.dimensionId) ?? null}
+                    canEdit={canEdit}
+                  />
+                </Suspense>
+              ),
+            }
+      }
+    >
       {/*
        * ⛔ X-23: тут стояв голий `<Modal>` — фокус падав на хрестик (Enter
        * закривав, а не скасовував, і навпаки), заголовок «Remove kg» не казав,
@@ -449,7 +532,7 @@ export function UnitsPage(): JSX.Element {
 
       <UnitEditModal unitId={editing?.id ?? null} code={editing?.code ?? ''} onClose={() => setEditing(null)} />
 
-      <Modal opened={creating}onClose={() => setCreating(false)} title={t('units.new')}>
+      <Modal opened={creating} onClose={() => setCreating(false)} title={t('units.new')}>
         <Stack gap="sm">
           <TextInput
             label={t('units.newCode')}
@@ -521,6 +604,16 @@ export function UnitsPage(): JSX.Element {
           </Group>
         </Stack>
       </Modal>
-    </>
+
+      {converting !== null && (
+        <Suspense fallback={null}>
+          <UnitConvertModal
+            units={all}
+            initialFrom={converting === '' ? null : converting}
+            onClose={() => setConverting(null)}
+          />
+        </Suspense>
+      )}
+    </ListPage>
   );
 }

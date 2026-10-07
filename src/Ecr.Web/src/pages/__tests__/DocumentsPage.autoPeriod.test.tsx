@@ -192,12 +192,14 @@ function show(path = '/'): void {
   );
 }
 
-/** Клітинка «State» рядка з таким бізнес-ключем (четверта колонка). */
+/** Клітинка «State» рядка з таким бізнес-ключем (`data-column="state"`, UI-19). */
 function stateCellOf(businessKey: string): HTMLElement {
   const row = screen.getByText(businessKey).closest('tr');
   if (row === null) throw new Error(`Рядок ${businessKey} не знайдено`);
 
-  const cell = within(row).getAllByRole('cell')[3];
+  const cell = within(row)
+    .getAllByRole('cell')
+    .find((node) => node.getAttribute('data-column') === 'state');
   if (cell === undefined) throw new Error('Колонки «State» немає');
 
   return cell;
@@ -313,9 +315,6 @@ describe('DocumentsPage: автовибір поточного періоду (U
  * нижче: адреса знову отримує `202609`, а поле після blur показує його ж.
  */
 describe('DocumentsPage: очищене людиною поле «Period» автовибір не заповнює', () => {
-  const periodsAsked = (): boolean =>
-    requested.some((url) => /\/api\/v1\/projects\/\d+\/periods/.test(url));
-
   it('вхід із періодом → очистити поле: адреса й поле лишаються порожніми, набір дає рівно набране', async () => {
     serve([project]);
     const user = userEvent.setup();
@@ -332,7 +331,8 @@ describe('DocumentsPage: очищене людиною поле «Period» ав�
 
     // Дати автовибору всі шанси: проєкти відповіли, запити розв'язались.
     await new Promise((resolve) => setTimeout(resolve, 150));
-    expect(periodsAsked()).toBe(false);
+    // ✎ UI-13: календар тепер тягне сам вибір періоду (стан місяця в контролі), тож
+    // «запиту календаря не було» більше не доказ; доказ — адреса й поле лишились порожніми.
     expect(new URLSearchParams(search).get('periodKey')).toBeNull();
     expect(input.value).toBe('');
 

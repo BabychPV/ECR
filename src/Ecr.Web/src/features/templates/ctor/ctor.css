@@ -1,0 +1,182 @@
+/*
+ * Конструктор версії шаблону (`UI-36`).
+ *
+ * ⚠ Вигляд — з макета `docs/design/hybrid`: `KIT.md` §4 «Шаблон сторінки-редактора»
+ * (`editor-head`, `split` = `.side` 280px + `.main`), `screens-templates.js` (дерево
+ * «Structure», вкладки з лічильниками, `Stepper`). Кольори — лише токени теми
+ * (`--ecr-*`), тож світла й темна теми однакові за побудовою. Класи дерева
+ * (`.ecr-tnav-*`, `.ecr-icon-btn`) — спільні з деревом документа (`tableNavigator.css`).
+ */
+
+.ecr-ctor-ctx {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: var(--mantine-spacing-sm);
+  font-size: 13px;
+  color: var(--ecr-muted);
+}
+
+.ecr-ctor-stepper {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.ecr-ctor-stepper > i {
+  display: block;
+  width: 20px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--ecr-border-strong);
+}
+
+.ecr-ctor-stepper > i[data-done='true'] {
+  background: var(--ecr-accent);
+}
+
+.ecr-ctor-split {
+  display: flex;
+  align-items: stretch;
+  min-width: 0;
+  border: 1px solid var(--ecr-border);
+  border-radius: 4px;
+  background: var(--ecr-surface);
+}
+
+.ecr-ctor-split > .ecr-tnav {
+  position: sticky;
+  top: 0;
+  align-self: flex-start;
+  max-height: calc(100vh - 160px);
+  border: 0;
+  border-right: 1px solid var(--ecr-border);
+  border-radius: 0;
+}
+
+.ecr-ctor-main {
+  flex: 1;
+  min-width: 0;
+  /* Широка таблиця колонок прокручується всередині робочої області, а не всією сторінкою. */
+  overflow-x: auto;
+}
+
+.ecr-ctor-pane-h {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--ecr-border);
+}
+
+.ecr-ctor-pane-h h2 {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ecr-text);
+}
+
+.ecr-ctor-pane-h .ecr-ctor-meta {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--ecr-muted);
+}
+
+.ecr-ctor-pane-h .ecr-ctor-actions {
+  flex: none;
+  margin-left: auto;
+  display: flex;
+  gap: 4px;
+}
+
+.ecr-ctor-body {
+  padding: 12px 16px 16px;
+}
+
+.ecr-ctor-body .mantine-Button-root {
+  flex: none;
+}
+
+.ecr-ctor-chip {
+  flex: none;
+  padding: 1px 6px;
+  border: 1px solid var(--ecr-border);
+  border-radius: 4px;
+  font: 400 12px/18px var(--mantine-font-family-monospace);
+  color: var(--ecr-muted);
+}
+
+.ecr-ctor-hint {
+  flex: 1;
+  min-width: 0;
+  margin: 0 0 8px;
+  font-size: 13px;
+  color: var(--ecr-muted);
+}
+
+/* Дерево: рядок аркуша (рівень 1) і таблиці (рівень 2). */
+.ecr-ctor-tree .ecr-tnav-item[aria-level='2'] {
+  padding-left: 28px;
+}
+
+.ecr-ctor-tree .ecr-ctor-caret {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  color: var(--ecr-muted);
+  transition: transform 120ms;
+}
+
+.ecr-ctor-tree .ecr-tnav-item[aria-expanded='true'] .ecr-ctor-caret {
+  transform: rotate(90deg);
+}
+
+.ecr-ctor-tree .ecr-ctor-num {
+  flex: none;
+  font: 400 12px/1 var(--mantine-font-family-monospace);
+  color: var(--ecr-muted);
+}
+
+.ecr-ctor-tree .ecr-ctor-total {
+  flex: none;
+  font: 400 12px/1 var(--mantine-font-family-monospace);
+  color: var(--ecr-muted);
+}
+
+.ecr-ctor-tree .ecr-ctor-hidden {
+  flex: none;
+  font-size: 11px;
+  color: var(--ecr-muted);
+}
+
+/* Вузький екран: дерево — шар поверх, перемикач у шапці робочої області (KIT §4). */
+@media (max-width: 900px) {
+  .ecr-ctor-pane-h {
+    flex-wrap: wrap;
+    padding-block: 4px;
+  }
+
+  .ecr-ctor-split {
+    position: relative;
+  }
+
+  .ecr-ctor-split > .ecr-tnav {
+    position: absolute;
+    z-index: 3;
+    inset: 0 auto auto 0;
+    max-height: none;
+    height: 100%;
+    box-shadow: 0 8px 24px rgb(0 0 0 / 18%);
+  }
+}

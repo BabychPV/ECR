@@ -17,6 +17,7 @@ import {
   isExternalRegistry,
 } from '@/features/registries/RegistryEntryEditor';
 import { RegistryImportPanel } from '@/features/registries/RegistryImportPanel';
+import { RegistriesList } from '@/features/registries/list/RegistriesList';
 import { RegistryExportButton } from '@/features/registries/export/RegistryExportButton';
 import { EntryUsageButton } from '@/features/registries/rc814/EntryUsageButton';
 import { SourceKindSwitch } from '@/features/registries/SourceKindSwitch';
@@ -26,7 +27,7 @@ import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { ConfirmModal } from '@/shared/ui/ConfirmModal';
 import { DataTable, type DataTableColumn } from '@/shared/ui/DataTable';
-import { FilterBar } from '@/shared/ui/FilterBar';
+import { FilterBar, FilterRow } from '@/shared/ui/FilterBar';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { Timestamp } from '@/shared/ui/Timestamp';
 import { useUrlState } from '@/shared/ui/useUrlState';
@@ -56,13 +57,26 @@ import { problemText } from '@/shared/ui/problemText';
 const Unbounded = '…';
 
 /**
+ * `/admin/registries`: без `?code=` — перелік довідників зі шторкою (`UI-35`,
+ * `features/registries/list`); з `?code=` — сторінка одного довідника нижче.
+ *
+ * ⚠ Розгалуження ТУТ, а не всередині сторінки довідника: у двох подань різні
+ * запити й стани, а умовний ранній `return` посеред хуків порушив би їх порядок.
+ */
+export function RegistriesPage(): JSX.Element {
+  const [code] = useUrlState('code');
+
+  return code === null ? <RegistriesList /> : <RegistryOverview />;
+}
+
+/**
  * Конструктор реєстрів: схема, дані, темпоральність.
  *
  * ⚠ Вікно чинності показується завжди, навіть порожнє. Запис без вікна і
  * запис, чинний до минулого місяця, у списку виглядають однаково — і саме
  * друге робить рядки документів осиротілими (ФВ-8.13).
  */
-export function RegistriesPage(): JSX.Element {
+function RegistryOverview(): JSX.Element {
   const [code, setCode] = useUrlState('code');
   const session = useSession();
 
@@ -273,7 +287,7 @@ export function RegistriesPage(): JSX.Element {
             sortable: false,
             render: (entry: RegistryEntryDto) => (
               <Group gap="xs" justify="flex-end">
-                <Button size="compact-xs" variant="subtle" onClick={() => setEditing(entry)}>
+                <Button size="xs" variant="subtle" onClick={() => setEditing(entry)}>
                   {t('registries.editEntry')}
                 </Button>
 
@@ -282,7 +296,7 @@ export function RegistriesPage(): JSX.Element {
                     датою (`ФВ-8.5`). */}
                 {selected?.isTemporal === true && (
                   <Button
-                    size="compact-xs"
+                    size="xs"
                     variant="subtle"
                     disabled={externalReadOnly}
                     onClick={() => setValidity(entry)}
@@ -300,7 +314,7 @@ export function RegistriesPage(): JSX.Element {
                     датою, а видалення доступне лише запису, на який ще ніхто
                     не послався. */}
                 <Button
-                  size="compact-xs"
+                  size="xs"
                   variant="subtle"
                   color="statusError"
                   disabled={externalReadOnly}
@@ -339,8 +353,9 @@ export function RegistriesPage(): JSX.Element {
     <>
       <PageHeader
         title={t('registries.title')}
+        back={{ label: t('registries.list.back'), href: '/admin/registries' }}
         actions={
-          <Group gap="xs" align="end">
+          <FilterRow>
             <Select
               size="xs"
               miw={220}
@@ -359,7 +374,7 @@ export function RegistriesPage(): JSX.Element {
                 НАЯВНОГО довідника, а сам довідник заводив тільки офлайновий
                 seed — тобто довідника, якого там немає, не міг завести ніхто. */}
             {can(session.data, 'Registry.EditDefinition') && (
-              <Button size="xs" variant="default" onClick={() => setCreating(true)}>
+              <Button variant="default" onClick={() => setCreating(true)}>
                 {t('registries.newRegistry')}
               </Button>
             )}
@@ -368,7 +383,7 @@ export function RegistriesPage(): JSX.Element {
                 записів — це колонка типу `Lookup`, яка не пропонує нічого,
                 тобто документ, який неможливо заповнити. */}
             {selected !== undefined && can(session.data, 'Registry.EditData') && (
-              <Button size="xs" disabled={externalReadOnly} onClick={() => setEditing(null)}>
+              <Button disabled={externalReadOnly} onClick={() => setEditing(null)}>
                 {t('registries.newEntry')}
               </Button>
             )}
@@ -397,7 +412,6 @@ export function RegistriesPage(): JSX.Element {
               <Button
                 component={Link}
                 to={`/admin/registries/${encodeURIComponent(selected.code)}/entries`}
-                size="xs"
                 variant="default"
               >
                 {t('registries.data.open')}
@@ -412,7 +426,6 @@ export function RegistriesPage(): JSX.Element {
               <Button
                 component={Link}
                 to={`/admin/registries/${encodeURIComponent(selected.code)}/definition`}
-                size="xs"
                 variant="default"
               >
                 {t('registries.constructor')}
@@ -424,7 +437,6 @@ export function RegistriesPage(): JSX.Element {
               <Button
                 component={Link}
                 to={`/admin/registries/${encodeURIComponent(selected.code)}/impact`}
-                size="xs"
                 variant="default"
               >
                 {t('registries.impact.open')}
@@ -442,7 +454,7 @@ export function RegistriesPage(): JSX.Element {
             {can(session.data, 'Integration.Manage') && (
               <SourceKindSwitch registries={registries.data ?? []} />
             )}
-          </Group>
+          </FilterRow>
         }
       />
 

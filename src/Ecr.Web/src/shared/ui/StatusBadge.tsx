@@ -1,4 +1,4 @@
-import type { JSX } from 'react';
+import type { CSSProperties, JSX } from 'react';
 import { Badge } from '@mantine/core';
 import { t } from '@/shared/i18n';
 
@@ -369,6 +369,137 @@ export function statusKey(kind: StatusKind, state: string): string {
   return `status.${kind}.${state}`;
 }
 
+/**
+ * Вигляд бейджа за тоном (`UI-27`, `KIT.md` §6.7, `index.html` `.badge*`).
+ *
+ * ⛔ Окремо від `toneFills`, і це не дубль. `toneFills` — колір ТЕКСТУ стану
+ * поза бейджем (лічильники етапів, `DocumentListSummaryStrip`), а тут — уся
+ * плашка: тло, рамка, підпис і піктограма. Макет розводить їх прямо: у
+ * бейджі нейтральний стан — без заливки, з тонкою рамкою, а підпис проблеми —
+ * звичайним кольором тексту на м'якому тлі; колір несе тло й піктограма
+ * (`.badge.bad{background:var(--danger-soft)} .badge.bad svg{color:var(--danger)}`).
+ *
+ * ⚠ Відхилення від макета одне, і воно на користь контрасту: у `quiet` макет
+ * фарбує підпис у `--muted` для БУДЬ-ЯКОГО тону, тобто й поверх м'якого тла
+ * проблеми. Тут приглушується лише нейтральний і бляклий — підпис на
+ * кольоровому тлі лишається основним кольором тексту.
+ */
+interface BadgeLook {
+  readonly text: string;
+  readonly bg: string;
+  readonly border: string;
+  readonly icon: string;
+}
+
+const badgeLooks: Readonly<Record<StatusTone, BadgeLook>> = {
+  neutral: { text: 'var(--ecr-text)', bg: 'transparent', border: 'var(--ecr-border)', icon: 'var(--ecr-muted)' },
+  muted: { text: 'var(--ecr-muted)', bg: 'transparent', border: 'var(--ecr-border)', icon: 'var(--ecr-muted)' },
+  info: { text: 'var(--ecr-text)', bg: 'var(--ecr-accent-soft)', border: 'transparent', icon: 'var(--ecr-accent-text)' },
+  warning: { text: 'var(--ecr-text)', bg: 'var(--ecr-warning-soft)', border: 'transparent', icon: 'var(--ecr-warning)' },
+  danger: { text: 'var(--ecr-text)', bg: 'var(--ecr-danger-soft)', border: 'transparent', icon: 'var(--ecr-danger)' },
+};
+
+/** Вигляд бейджа тону — для тестів і для `SegmentBar`, що малює ті самі стани. */
+export function badgeLook(tone: StatusTone): BadgeLook {
+  return badgeLooks[tone];
+}
+
+/**
+ * Піктограми станів (`kit.js` → `BADGES`, другий елемент кожного запису),
+ * шляхи — з `kit.js` → `I` дослівно (viewBox 24, лінія).
+ *
+ * ⚠ Ключ — СЛОВО стану, а не пара `kind/state`: макет дає тому самому слову
+ * ту саму піктограму в усіх різновидах (`Draft` — олівець і в `sheet`, і в
+ * `version`). Слова, якого тут немає, отримують піктограму ТОНУ
+ * (`toneIcons`), тож новий стан сервера не лишається без другого знака.
+ */
+const C9 = 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z';
+const iconPaths = {
+  pencil: 'M4 20l4-1L19 8l-3-3L5 16z',
+  send: 'M21 3L10 14M21 3l-7 18-4-7-7-4z',
+  checkCircle: C9 + 'M8 12.5l3 3 5-6',
+  xCircle: C9 + 'M9 9l6 6M15 9l-6 6',
+  alertCircle: C9 + 'M12 7.5v5.5M12 16v.5',
+  alert: 'M12 4l9 16H3zM12 10v4M12 17v.5',
+  clock: C9 + 'M12 7v5l3 2',
+  lock: 'M6 11h12v9H6zM8.5 11V8a3.5 3.5 0 0 1 7 0v3',
+  archive: 'M3 5h18v4H3zM5 9v10h14V9M10 13h4',
+  minus: 'M5 12h14',
+  circle: 'M12 19a7 7 0 1 0 0-14 7 7 0 0 0 0 14z',
+  info: C9 + 'M12 11v6M12 7.5v.5',
+  spin: 'M12 3a9 9 0 1 0 9 9',
+} as const;
+
+type IconName = keyof typeof iconPaths;
+
+const stateIcons: Readonly<Record<string, IconName>> = {
+  Draft: 'pencil',
+  Submitted: 'send',
+  Approved: 'checkCircle',
+  Rejected: 'xCircle',
+  Scheduled: 'clock',
+  Open: 'circle',
+  Grace: 'clock',
+  Closed: 'lock',
+  Queued: 'clock',
+  Running: 'spin',
+  FannedOut: 'spin',
+  Succeeded: 'checkCircle',
+  SucceededWithErrors: 'alert',
+  Failed: 'xCircle',
+  Cancelled: 'minus',
+  Published: 'checkCircle',
+  Deprecated: 'archive',
+  Active: 'checkCircle',
+  Archived: 'archive',
+  Healthy: 'checkCircle',
+  Degraded: 'alert',
+  Unhealthy: 'xCircle',
+  Info: 'info',
+  Warning: 'alert',
+  Error: 'alertCircle',
+  Sent: 'checkCircle',
+  Suppressed: 'minus',
+};
+
+const toneIcons: Readonly<Record<StatusTone, IconName>> = {
+  neutral: 'circle',
+  muted: 'minus',
+  info: 'info',
+  warning: 'alert',
+  danger: 'xCircle',
+};
+
+/** Ім'я піктограми стану: власна піктограма слова, інакше — піктограма тону. */
+export function statusIconName(kind: StatusKind, state: string): IconName {
+  // ⛔ Невідомий стан — завжди «увага», навіть якщо слово збіглося з відомим
+  // в іншому різновиді: піктограма не має казати більше, ніж тон.
+  if (!isKnownStatus(kind, state)) return toneIcons[UnknownStateTone];
+
+  return stateIcons[state] ?? toneIcons[statusTone(kind, state)];
+}
+
+function StatusIcon({ name }: { readonly name: IconName }): JSX.Element {
+  return (
+    <svg
+      width={12}
+      height={12}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="var(--ecr-badge-icon)"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      focusable="false"
+      data-status-icon={name}
+      style={{ flex: 'none', display: 'block' }}
+    >
+      <path d={iconPaths[name]} />
+    </svg>
+  );
+}
+
 export interface StatusBadgeProps {
   /** Різновид статусу. */
   readonly kind: StatusKind;
@@ -376,7 +507,7 @@ export interface StatusBadgeProps {
   /** Код стану, як його назвав сервер. */
   readonly state: string;
 
-  /** Без заливки — для щільних таблиць (`KIT.md` §6.7 `quiet`). */
+  /** Без рамки — для щільних таблиць (`KIT.md` §6.7 `quiet`). */
   readonly quiet?: boolean | undefined;
 
   /** Підказка при наведенні. */
@@ -388,103 +519,73 @@ export interface StatusBadgeProps {
  *
  * ⚠ Другий носій змісту — сам ПІДПИС (`ФВ-14.18`): стан названий словом, а не
  * самим лише кольором, тож дихромат і монохромний друк читають його так само.
+ * Третій — піктограма стану (`UI-27`): олівець, галочка, літак, хрестик.
+ *
+ * ✎ `UI-27` (2026-10-06): вигляд — за макетом (`index.html` `.badge`): звичайний
+ * регістр замість жирної капітелі, вага 500, висота 20, радіус `--r1` (4),
+ * піктограма 12 px ліворуч. Нейтральний стан — без заливки, з тонкою рамкою;
+ * «чекає дії» і проблеми — м'яке тло без рамки (`badgeLooks`). Таблиця станів
+ * (`statusTable`) і тони — БЕЗ змін.
  */
 export function StatusBadge({ kind, state, quiet = false, title }: StatusBadgeProps): JSX.Element {
   const tone = statusTone(kind, state);
-  const fill = toneFills[tone];
+  const look = badgeLooks[tone];
+  const plain = tone === 'neutral' || tone === 'muted';
 
   /*
-   * ⚠ `default`, а не `light`: варіант `light` без явного `color` бере
-   * ФІРМОВИЙ відтінок (`--mantine-primary-color-light`) — тобто нейтральний
-   * стан приїхав би з синюватою заливкою під нашою. `default` бере
-   * `--mantine-color-default*`, які `cssVariables.ts` уже виводить із
-   * поверхонь теми, і дає рамку — саме її `KIT.md` §6.7 знімає прапорцем
-   * `quiet` («без рамки, у щільних таблицях»).
+   * ⚠ `quiet` (макет `.badge.quiet`): без рамки і без лівого відступу —
+   * бейдж стає «піктограма + слово» у щільній таблиці. Нейтральний підпис ще
+   * й приглушується (вага 400, `--ecr-muted`); тло проблеми лишається — колір
+   * у таблиці мусить бути там, де щось не так (`KIT.md` §1.3).
    */
-  const paint = quiet
-    ? ({ variant: 'transparent' } as const)
-    : ({ variant: 'default', bg: fill.bg } as const);
+  const text = quiet && plain ? 'var(--ecr-muted)' : look.text;
+  const border = quiet ? 'transparent' : look.border;
 
   /*
-   * ⛔ `miw="fit-content"` БЕЗУМОВНО, а не пропом сторінки. Дефект виміряний у
-   * живому браузері (UI-аудит, lane 8): `table-layout: auto` бере ширину
-   * стовпця з того, що РЕНДЕРИТЬСЯ, а власний `overflow:hidden` у
-   * `.mantine-Badge-label` дозволяє бейджу «поміститись» у будь-яку ширину —
-   * тож на ~554px «Scheduled» ставало нечитабельним «S…» замість того, щоб
-   * увімкнути горизонтальну прокрутку (`clientWidth` мітки 9px проти
-   * `scrollWidth` 65px; з цим стилем обидва збігаються).
+   * ⛔ `miw="fit-content"` + `width: max-content` — інваріант «підпис не
+   * стискається нижче власного тексту» (UI-аудит, lane 8, і 2026-09-25,
+   * `period/Grace`): `table-layout: auto` інакше обрізав «Grace period» до
+   * «Grace…». Подробиці вимірів — в історії цього файла (git log -L). Через
+   * `style`, а не `w=`, бо `ФВ-14.30` забороняє проп `w` на `Badge`.
    *
-   * ⚠ Прапорець на виклику розглянуто і відкинуто: сторінка, яка МУСИТЬ
-   * пам'ятати цей проп, — це рівно та розбіжність між екранами, заради
-   * усунення якої набір і заведено. Той самий дефект уже довелося ловити
-   * двічі окремо (`PeriodsPage.stateBadgeMinWidth`,
-   * `SnapshotsPage.statusBadgeMinWidth`), тобто наступна таблиця забула б
-   * його втретє. Обрізаний до однієї літери статус не буває бажаним: підпис —
-   * другий носій змісту (`ФВ-14.18`), і без нього лишається сам колір.
-   *
-   * ⛔ **2026-09-25: абзац вище описував лише ОДНОСЛІВНИЙ підпис — і саме тому
-   * фікс мовчки не рятував двослівний.** Живий вимір на `/admin/periods`
-   * (обидві теми, `document.querySelectorAll('[data-status-kind="period"]')`
-   * + `getBoundingClientRect`/`clientWidth`/`scrollWidth` на
-   * `.mantine-Badge-label`): `period/Grace` («Grace period») і
-   * `period/Scheduled` («Not open yet») лишались обрізаними навіть із
-   * `miw="fit-content"` — `labelClientWidth` 47px проти `labelScrollWidth`
-   * 76px і 73px відповідно.
-   *
-   * Причина — у самому Mantine (v7.15, `@mantine/core/styles.css`,
-   * `.mantine-Badge-root`): корінь `Badge` (`display: inline-grid`) має
-   * ВЛАСНЕ класове правило `width: fit-content` (не `min-width`), а формула
-   * CSS `fit-content(available) = min(max-content, max(min-content,
-   * available))`. Для односкладового «Scheduled» (пробілів немає, переносити
-   * нема де) `min-content == max-content`, тож формула завжди дає
-   * `max-content` НЕЗАЛЕЖНО від `available` — інакше кажучи, `miw="fit-
-   * content"` для цього випадку лише повторював те, що корінь і так уже
-   * порахував, і виглядав як робочий фікс випадково. Для «Grace period»/«Not
-   * open yet» (є пробіл — є точка переносу) `min-content` — ширина
-   * найдовшого СЛОВА, набагато менша за `max-content`; коли `available`
-   * (ширина, яку в цей момент пропонує колонка `table-layout: auto`, до того
-   * як таблиця остаточно зведе ширини) падає між ними, `fit-content`
-   * резолвиться в число МЕНШЕ за повний текст. А `min-width: fit-content` на
-   * тому самому елементі рахується за ТІЄЮ САМОЮ формулою з тим самим
-   * `available` і дає те саме число — тобто нічого не піднімає понад те, що
-   * вже стоїть у `width`.
-   *
-   * Тому до `miw` додано ще одну властивість, що примушує ширину кореня
-   * ЗАВЖДИ дорівнювати повній ширині тексту, а не значенню, що залежить від
-   * `available`, — і тим самим прибирає циклічну залежність від
-   * `table-layout: auto` для будь-якої кількості слів у підписі, не лише для
-   * одного. `miw="fit-content"` лишено: він нешкідливий (`max(max-content,
-   * fit-content) === max-content`) і документує первісне рішення проблеми —
-   * прибирати його немає причин, а звужувати набір пропів, які тримають цей
-   * інваріант, ризиковано.
-   *
-   * ⚠ Записано як `style={{ width: 'max-content' }}`, НЕ як проп-шорткат
-   * `w="max-content"` — хоч обидва дають той самий інлайн-стиль. Причина —
-   * `ФВ-14.30` (`eslint.config.js`): лінтер забороняє `w` саме на `Badge` й
-   * подібних, бо ФІКСОВАНА ширина (`w={260}`) обрізає довший переклад
-   * (казахська й російська на 20–40 % довші за англійську, `D-95`).
-   * Селектор правила зіставляє лише ІМ'Я пропу, не його значення — тобто
-   * гарантовано зловив би й це використання, хоча `max-content` не є тим
-   * дефектом, від якого рятує правило: він НЕ фіксований, а завжди дорівнює
-   * повній ширині ПОТОЧНОГО тексту, якою мовою його не давай. Приглушення
-   * лінтера тут означало б звужувати список придушень, який стереже
-   * `lintRules.test.ts`, — поза межами цього файлу, дозволеними завданням.
-   * `style` обходить це чесно: той самий результат, той самий механізм
-   * (інлайн-стиль перекриває клас), без конфлікту з правилом, чий намір тут
-   * і так дотримано.
+   * ⚠ Mantine `Badge` лишається коренем (тести й сторінки шукають
+   * `.mantine-Badge-root`), але все, що робить його «капітельним»,
+   * перебито: `textTransform`, `fontWeight`, `letterSpacing`.
    */
   return (
     <Badge
       size="sm"
+      variant="transparent"
       miw="fit-content"
-      style={{ width: 'max-content' }}
-      c={fill.text}
+      radius="xs"
+      c={text}
+      bg={look.bg}
+      leftSection={<StatusIcon name={statusIconName(kind, state)} />}
+      styles={{
+        root: {
+          height: 20,
+          paddingInline: quiet ? '0 var(--mantine-spacing-xs)' : '4px var(--mantine-spacing-xs)',
+          border: `1px solid ${border}`,
+          textTransform: 'none',
+          letterSpacing: 'normal',
+          fontWeight: quiet && plain ? 400 : 500,
+          fontSize: 'var(--mantine-font-size-xs)',
+          gap: 4,
+        },
+        section: { marginInlineEnd: 0 },
+      }}
+      style={
+        {
+          width: 'max-content',
+          '--ecr-badge-icon': look.icon,
+        } as CSSProperties
+      }
       title={title}
       data-status-kind={kind}
       data-status-state={state}
       data-status-tone={tone}
       data-status-known={String(isKnownStatus(kind, state))}
-      {...paint}
+      data-status-quiet={quiet ? 'true' : undefined}
     >
       {t(statusKey(kind, state))}
     </Badge>

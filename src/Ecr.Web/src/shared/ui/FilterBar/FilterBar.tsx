@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, type JSX, type ReactNode } from 'react';
-import { Button, Group, Select, TextInput } from '@mantine/core';
+import { Button, Select, TextInput } from '@mantine/core';
 import { useSearchParams } from 'react-router-dom';
-import { useFieldDraft } from './useFieldDraft';
-import { useUrlParamsSetter, useUrlState } from './useUrlState';
+import { useFieldDraft } from '../useFieldDraft';
+import { useUrlParamsSetter, useUrlState } from '../useUrlState';
+import { FilterInline, FilterRow } from './FilterRow';
 
 /**
  * Рядок фільтрів набору (`KIT.md` §6.3, директива №15 §2, Шар 3).
@@ -166,7 +167,9 @@ export function FilterBar({
   }
 
   return (
-    <Group gap="sm" align="flex-end" mb="md" data-filter-bar="true">
+    // ⚠ Поля тут без `size` — тобто `sm`; ряд мусить знати це, щоб кнопка
+    // скидання стояла по центру поля, а не на його нижній межі (`FilterRow`).
+    <FilterRow size="sm" gap="sm" mb="md" data-filter-bar="true">
       {search !== undefined && (
         <SearchField param={searchParam} label={search.label} placeholder={search.placeholder} />
       )}
@@ -176,27 +179,28 @@ export function FilterBar({
       ))}
 
       {hasValues && (
-        <Button
-          variant="default"
-          size="xs"
-          data-filter-clear="true"
-          onClick={() => {
-            /*
-             * ⛔ ОДИН перехід на всі параметри (`useUrlParamsSetter`), а не
-             * сеттер на кожен: два виклики `setSearchParams` синхронно в
-             * одному обробнику губили ОБИДВІ зміни, не лише другу
-             * (`useUrlState.ts`, UI-аудит lane 3). Скидання трьох фільтрів
-             * трьома викликами не скинуло б жодного.
-             */
-            setParams(Object.fromEntries(names.map((name) => [name, null])));
-          }}
-        >
-          {clearLabel}
-        </Button>
+        <FilterInline>
+          <Button
+            variant="default"
+            data-filter-clear="true"
+            onClick={() => {
+              /*
+               * ⛔ ОДИН перехід на всі параметри (`useUrlParamsSetter`), а не
+               * сеттер на кожен: два виклики `setSearchParams` синхронно в
+               * одному обробнику губили ОБИДВІ зміни, не лише другу
+               * (`useUrlState.ts`, UI-аудит lane 3). Скидання трьох фільтрів
+               * трьома викликами не скинуло б жодного.
+               */
+              setParams(Object.fromEntries(names.map((name) => [name, null])));
+            }}
+          >
+            {clearLabel}
+          </Button>
+        </FilterInline>
       )}
 
       {right}
-    </Group>
+    </FilterRow>
   );
 }
 

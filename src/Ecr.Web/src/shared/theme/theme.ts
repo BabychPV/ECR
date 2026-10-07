@@ -267,6 +267,9 @@ export const surfaces = {
     muted: '#5b6175',
     faint: '#7d8496',
     accentSoft: '#e7e8f8',
+    // Тло бейджа «увага» / «проблема» (`UI-27`, макет `--warning-soft`/`--danger-soft`, значення дослівно).
+    warningSoft: '#fbf2dc',
+    dangerSoft: '#fceae8',
     select: '#eeeffb',
     hover: '#f1f2f7',
     calcBg: '#f3f4f8',
@@ -284,6 +287,8 @@ export const surfaces = {
     muted: '#9aa1b5',
     faint: '#727a92',
     accentSoft: '#272b55',
+    warningSoft: '#2d2610',
+    dangerSoft: '#36191a',
     select: '#22264a',
     hover: '#202432',
     calcBg: '#1e2230',
@@ -448,7 +453,9 @@ export const theme = createTheme({
     Select: { defaultProps: { size: 'sm' } },
     // a11y: стрілки Mantine (data-direction, tabindex=-1) без імені; клавіатурні стрілки й ввід лишаються.
     NumberInput: { defaultProps: { size: 'sm', hideControls: true } },
-    Table: { defaultProps: { verticalSpacing: 'xs', horizontalSpacing: 'sm' } },
+    // a11y: підсвітка рядка під мишею — токен макета `hover`, а не `dark-5` Mantine
+    // (#3b3b3b): на ньому `muted` давав 4.34 < 4.5 у темній (axe, рядок під курсором).
+    Table: { defaultProps: { verticalSpacing: 'xs', horizontalSpacing: 'sm', highlightOnHoverColor: 'var(--ecr-hover)' } },
 
     // ⚠ Тривалість переходу задана ТУТ, а не в кожному діалозі: інакше перший
     // же новий екран поставить свою.

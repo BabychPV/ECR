@@ -1,8 +1,11 @@
-import { lazy, Suspense, useEffect, useRef, useState, type JSX, type ReactNode } from 'react';
+import { lazy, Suspense, useContext, useEffect, useRef, useState, type JSX, type ReactNode } from 'react';
 import { Anchor, Group, Stack, Text, Title } from '@mantine/core';
 import { Link } from 'react-router-dom';
+import { PageDescriptionContext } from './pageDescription';
 import { announceRoute } from './RouteAnnouncer';
+import { t } from '@/shared/i18n';
 import { RouteHeadingClass } from '@/shared/theme/routeHeading';
+import { interactedSinceRouteStart } from '@/shared/a11y/routeInteraction';
 
 /**
  * ⛔ Кластер дій — ЗА `import()`, і це вимога бюджету (`D-132`), а не смак.
@@ -100,6 +103,14 @@ export interface PageHeaderProps {
   /** Рядок пояснення під назвою — людською мовою, не кодом. */
   readonly meta?: ReactNode;
 
+  /**
+   * Що це за екран і що тут робити — одним-двома реченнями під назвою (UI-11,
+   * `KIT.md` §6.4 `subtitle`). Без пропа береться пояснення маршруту
+   * (`handle.descriptionKey`, `PageDescriptionContext`); `null` — без
+   * пояснення навіть там, де маршрут його має.
+   */
+  readonly description?: string | null | undefined;
+
   /** «← Back to …» для вкладеної сторінки. `label` — ВЕСЬ напис: слова
    *  «Back to» у каталозі немає, і вигадувати ключ тут не можна. */
   readonly back?: { readonly label: string; readonly href: string } | undefined;
@@ -130,22 +141,63 @@ export interface PageHeaderProps {
  *
  * ⛔ Розширення (директива №15, §2, Шар 2) НЕ торкається ні фокуса, ні
  * оголошення: обидва ефекти лишилися дослівно тими самими, а весь новий вміст
- * малюється навколо того самого `<Title order={3} ref tabIndex={-1}>`. Тест
+ * малюється навколо того самого `<Title order={1} size="h3" ref tabIndex={-1}>`. Тест
  * `pages/__tests__/ChangePasswordPage.pageHeader.test.tsx` (фокус, `tabindex`,
  * `aria-live`, РІВНО один заголовок) лишився без жодної правки — це й було
  * критерієм приймання.
  *
  * ⛔ `D15-06`: елемент без даних не малюється. Жодної обгортки «про запас» —
- * без `badge`/`count`/`meta`/`back`/дій розмітка дослівно та сама, що була до
+ * без `badge`/`count`/`meta`/`description`/`back`/дій розмітка дослівно та сама, що була до
  * розширення. Порожній `<div>` коштує не нічого: він з'їдає відступ і збиває
  * `justify="space-between"`.
  */
+/**
+ * Перша шапка після завантаження сторінки ще не бачила жодної навігації. Далі це `false`.
+ */
+let coldLoad = true;
+
+/**
+ * Чи людина вже сама поставила фокус, поки шапка (ліниві чанки, дані) доїжджала.
+ *
+ * ⛔ Шапка забирала фокус БЕЗУМОВНО в мить монтування. Але монтується вона не одразу:
+ * чанк маршруту й дані приходять пізніше за перший кадр, і за цей час людина вже
+ * могла поставити курсор у комірку сітки (тоді `focusin` ПОЗА сіткою роззброює
+ * вставку з буфера, `bodyPaste`, — e2e `gridPasteAfterEditor`) або натиснути Enter
+ * на кнопці згортання меню (фокус падав на `h1`, WCAG 2.4.3, e2e `navbarCollapse`).
+ *
+ * Фокус «не людини» — це `body` / `main` / вузол, якого вже немає. Усе інше — вибір
+ * людини, його не відбираємо:
+ *   — у змісті сторінки (`main`) — завжди: перехід між екранами знімає старий зміст
+ *     до ефекту шапки, тож там фокус уже `body`;
+ *   — поза ним (меню) — лише на ПЕРШОМУ монтуванні після завантаження: далі
+ *     фокус на посиланні меню — це і є перехід, заради якого шапка бере фокус.
+ */
+function userAlreadyMovedFocus(heading: HTMLElement | null): boolean {
+  const firstMount = coldLoad;
+  coldLoad = false;
+
+  // ⛔ Фокус міг лише ТИМЧАСОВО впасти на `body`: Escape в редакторі комірки прибирає поле разом
+  // із фокусом, і шапка, що змонтувалась у цю щілину, відняла б його в сітки (e2e
+  // `gridPasteAfterEditor`, escape). Людина вже діяла на екрані — шапка не втручається.
+  if (interactedSinceRouteStart()) return true;
+
+  const active = document.activeElement;
+  if (active === null || active === document.body || active === document.documentElement) return false;
+  if (!active.isConnected || active === heading) return false;
+  if (active.tagName === 'MAIN') return false;
+
+  if (heading?.closest('main')?.contains(active) === true) return true;
+
+  return firstMount;
+}
+
 export function PageHeader({
   title,
   actions,
   badge,
   count,
   meta,
+  description,
   back,
   primary,
   secondary,
@@ -154,6 +206,13 @@ export function PageHeader({
 }: PageHeaderProps): JSX.Element {
   const heading = useRef<HTMLHeadingElement>(null);
   const focused = useRef(false);
+  const routeDescriptionKey = useContext(PageDescriptionContext);
+  const explanation =
+    description !== undefined
+      ? description
+      : routeDescriptionKey !== undefined
+        ? t(routeDescriptionKey)
+        : null;
 
   // ⚠ `X-37`: живцем Chromium ігнорує `focusVisible: false` і все одно малює
   // `:focus-visible` після програмного фокуса. Тому, коли фокус переніс САМ
@@ -169,6 +228,7 @@ export function PageHeader({
     if (focused.current) return;
 
     focused.current = true;
+    if (userAlreadyMovedFocus(heading.current)) return;
     // ⚠ `focusVisible` — див. `keyboardModality` вище (`X-37`).
     if (!keyboardModality) setQuietFocus(true);
     heading.current?.focus({ focusVisible: keyboardModality } as FocusOptions);
@@ -185,7 +245,10 @@ export function PageHeader({
      * зайве натискання на шляху до першого поля.
      */
     <Title
-      order={3}
+      // a11y (axe `page-has-heading-one`): заголовок екрана — єдиний `h1`;
+      // розділи під ним — `h2`. Вигляд — `size="h3"`, як і досі.
+      order={1}
+      size="h3"
       ref={heading}
       tabIndex={-1}
       className={RouteHeadingClass}
@@ -213,7 +276,7 @@ export function PageHeader({
     );
 
   const left =
-    back === undefined && !shown(meta) ? (
+    back === undefined && !shown(meta) && !shown(explanation) ? (
       titleRow
     ) : (
       <Stack gap="xs">
@@ -223,6 +286,14 @@ export function PageHeader({
           </Anchor>
         )}
         {titleRow}
+        {/* ⚠ Пояснення — ПІСЛЯ заголовка в розмітці: фокус і оголошення маршруту
+            (`ФВ-14.19`) лишаються на заголовку, читалка доходить до пояснення
+            наступним рядком. Дві строки й ~70 знаків — макет (`.page-sub`). */}
+        {shown(explanation) && (
+          <Text size="sm" c="dimmed" maw="70ch" lineClamp={2} data-testid="page-description">
+            {explanation}
+          </Text>
+        )}
         {shown(meta) && (
           <Text size="sm" c="dimmed">
             {meta}

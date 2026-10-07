@@ -517,7 +517,12 @@ public sealed class RestartJobHandler(
         {
             var ownerId = await jobs.GetCreatedByUserIdAsync(jobId, ct).ConfigureAwait(false);
 
-            if (ownerId is null || ownerId.Value != userId)
+            // L1-19: автор повторює лише те, на що право ЩЕ за ним (збір, синк подій та
+            // перевірка узгодженості прав під час виконання не перевіряють). Відмова —
+            // та сама, що для чужої задачі: нічого про цільовий документ чи право.
+            if (ownerId is null
+                || ownerId.Value != userId
+                || !await MayRepeatOwnAsync(profile, jobId, status.DocumentId, ct).ConfigureAwait(false))
             {
                 throw new AccessDeniedException(
                     "ECR-AUTH-0403", $"Потрібне право {GetJobStatusHandler.Permission}.",
@@ -558,6 +563,60 @@ public sealed class RestartJobHandler(
                     ["jobId"] = jobId,
                 });
         }
+    }
+
+    /// <summary>
+    /// Чи ще має автор право на САМУ дію задачі (L1-19): за типом задачі (префікс
+    /// <c>{Тип}-{guid}</c>) і її документом.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Експорт та імпорт права перевіряють самі під час виконання — для них перевірки
+    /// тут немає. Невідомий тип — закрито: повторити його може лише власник
+    /// <c>System.ViewHealth</c>. Типи без документа й проєкту в стані (імпакт довідника,
+    /// скан сиріт) теж закриті: проєктне право без проєкту дало б «будь-де».
+    /// </remarks>
+    private async Task<bool> MayRepeatOwnAsync(
+        AccessProfile profile, string jobId, long? documentId, CancellationToken ct)
+    {
+        // Тип — до першого `-` (черга БД і старі id: `{Тип}-{guid}`) АБО `~` (Quartz, цільові
+        // задачі: `{Тип}~{ціль}~{guid}`, QuartzJobScheduler.TargetPrefixOf). Імена типів
+        // не містять жодного з роздільників.
+        var dash = jobId.AsSpan().IndexOfAny('-', '~');
+        var code = dash > 0 ? jobId[..dash] : jobId;
+
+        if (code is nameof(ICollectionJob) or nameof(ISourceEventSyncJob))
+        {
+            return PermissionCheck.IsGranted(profile, SaveDataSourceHandler.Permission);
+        }
+
+        if (code == nameof(IConsistencyCheckJob))
+        {
+            return PermissionCheck.IsGranted(profile, Consistency.RunConsistencyCheckHandler.Permission);
+        }
+
+        // Каскад власної правки (PatchCells) — як перерахунок: документ іде зі стану задачі.
+        if (code is nameof(IRecalculationJob) or nameof(IFormulaRecalculationJob))
+        {
+            if (documentId is not { } doc)
+            {
+                return false;
+            }
+
+            try
+            {
+                await Documents.DocumentVisibility
+                    .RequireVisibleAsync(access, profile, doc, Documents.RecalculateDocumentHandler.Permission, ct)
+                    .ConfigureAwait(false);
+
+                return true;
+            }
+            catch (Exception ex) when (ex is NotFoundException or AccessDeniedException)
+            {
+                return false;
+            }
+        }
+
+        return code is nameof(IExcelExportJob) or nameof(IExcelImportJob);
     }
 }
 

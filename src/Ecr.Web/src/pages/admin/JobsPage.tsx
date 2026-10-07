@@ -1,43 +1,33 @@
-import { useState, type JSX } from 'react';
-import {
-  Box,
-  Button,
-  Card,
-  Checkbox,
-  Group,
-  Modal,
-  Progress,
-  Stack,
-  Text,
-  TextInput,
-} from '@mantine/core';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { apiEnqueue, apiFetch } from '@/api/client';
-import type { JobStatus, JobSummary } from '@/api/types';
-import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
-import { TechnicalDetails } from '@/shared/ui/ErrorAlert';
-import { DataTable } from '@/shared/ui/DataTable';
-import { FilterBar } from '@/shared/ui/FilterBar';
-import { PageHeader } from '@/shared/ui/PageHeader';
-import { StatusBadge } from '@/shared/ui/StatusBadge';
-import { Timestamp } from '@/shared/ui/Timestamp';
-import { useUrlState } from '@/shared/ui/useUrlState';
-import { showApiError } from '@/shared/ui/notify';
-import { useCancelJob, useRecentJobs } from '@/features/jobs/api';
-import {
-  JobAttempt,
-  JobDocumentLink,
-  JobFailure,
-  JobResultLink,
-  JobRetry,
-  jobAuthor,
-} from '@/features/jobs/JobFacts';
-import { humanizeJobId, jobKindLabel, rawJobId } from '@/features/workflow/jobLabel';
-import { t } from '@/shared/i18n';
-import { generatePath } from 'react-router-dom';
+import { lazy, Suspense, useEffect, useState, type JSX } from 'react';
+import { Button, Checkbox, Group, Modal, Progress, Stack, Text, UnstyledButton } from '@mantine/core';
+import { useQueryClient } from '@tanstack/react-query';
+import { Link, generatePath } from 'react-router-dom';
+import type { JobSummary } from '@/api/types';
 import { routes } from '@/app/routes';
-import { badgeStateOf } from '@/features/workflow/jobFollow';
 import { usePendingLoading } from '@/features/common/usePendingLoading';
+import { useCancelJob, useRecentJobs } from '@/features/jobs/api';
+import { useJobStatus } from '@/features/jobs/useJobStatus';
+import { useJobsSummary } from '@/features/jobs/useJobsSummary';
+import { JobAttempt, JobResultLink, JobRetry, jobAuthor } from '@/features/jobs/JobFacts';
+import { badgeStateOf } from '@/features/workflow/jobFollow';
+import { humanizeJobId, jobKindLabel, rawJobId } from '@/features/workflow/jobLabel';
+import { formatDecimal } from '@/shared/format';
+import { t } from '@/shared/i18n';
+import { DataTable, type DataTableColumn } from '@/shared/ui/DataTable';
+import { useDetailPanel } from '@/shared/ui/DetailDrawer';
+import { FilterBar, type FilterOption } from '@/shared/ui/FilterBar';
+import { ListPage } from '@/shared/ui/ListPage';
+import type { StatItem, StatStripItems } from '@/shared/ui/StatStrip';
+import { StatusBadge, statusKey } from '@/shared/ui/StatusBadge';
+import { Timestamp } from '@/shared/ui/Timestamp';
+import { TwoLine } from '@/shared/ui/TwoLine';
+import { useUrlParamsSetter, useUrlState } from '@/shared/ui/useUrlState';
+
+/** Вміст шторки задачі — лінивим чанком: шторка закрита за замовчуванням (`L2`). */
+const JobDetailBody = lazy(() => import('@/features/jobs/JobDetailBody'));
+
+/** Діалог «Find a job by id» — лінивим чанком: потрібен рідко. */
+const FindJobModal = lazy(() => import('@/features/jobs/FindJobModal'));
 
 /** Адреса документа задачі — з реєстру маршрутів (`JobFacts` про маршрути не знає). */
 function documentHrefOf(id: number): string {
@@ -56,271 +46,102 @@ function documentHrefOf(id: number): string {
 const CancellableStates: readonly string[] = ['Queued', 'Running'];
 
 /** Чи можна ще просити задачу зупинитися. */
-function isCancellable(state: string): boolean {
+export function isCancellable(state: string): boolean {
   return CancellableStates.includes(state);
 }
 
 /**
- * Похідний стан батька-розкладу (P4): «розкладено N, виконано M з N, помилок K».
+ * Стани фільтра «States».
  *
- * ⛔ Збережений стан такого батька — `Succeeded`, хоча дочірні ще не пораховані;
- * без цього рядка оператор читав би «виконано» замість «ще не пораховано».
+ * ⚠ Підписи — `t(statusKey('job', '…'))` ЛІТЕРАЛАМИ, а не в циклі за змінною:
+ * сторож каталогу (`EndpointCoverageTests`) розбирає саме виклик із
+ * літералом, і складений ключ лишився б для нього невидимим.
  */
-function FanOutSummary({ status }: { readonly status: JobStatus }): JSX.Element | null {
-  const fan = status.fanOut;
-
-  if (fan === null || fan === undefined) return null;
-
-  const label =
-    status.effectiveState === 'FannedOut'
-      ? t('jobs.fanOutPending')
-      : status.effectiveState === 'SucceededWithErrors'
-        ? t('jobs.fanOutDoneWithErrors', { failed: fan.failed })
-        : t('jobs.fanOutDone');
-
-  return (
-    <Stack gap="xs" data-job-fanout={status.effectiveState ?? ''}>
-      <Text size="sm" fw={600}>
-        {label}
-      </Text>
-      <Text size="xs" c="dimmed">
-        {t('jobs.fanOutProgress', {
-          total: fan.total,
-          done: fan.succeeded,
-          failed: fan.failed,
-        })}
-      </Text>
-    </Stack>
-  );
+function stateOptions(): readonly FilterOption[] {
+  return [
+    { value: 'Running', label: t(statusKey('job', 'Running')) },
+    { value: 'Queued', label: t(statusKey('job', 'Queued')) },
+    { value: 'Failed', label: t(statusKey('job', 'Failed')) },
+    { value: 'Succeeded', label: t(statusKey('job', 'Succeeded')) },
+    { value: 'SucceededWithErrors', label: t(statusKey('job', 'SucceededWithErrors')) },
+    { value: 'FannedOut', label: t(statusKey('job', 'FannedOut')) },
+    { value: 'Cancelled', label: t(statusKey('job', 'Cancelled')) },
+  ];
 }
 
-/** Як часто опитувати стан задачі, поки вона виконується. */
-const PollMs = 1500;
+/** Рядок, за яким шукає поле пошуку: назва, ідентифікатор, автор, документ, повідомлення. */
+function searchText(job: JobSummary): string {
+  return [
+    jobKindLabel(job.jobCode),
+    humanizeJobId(job.jobId),
+    job.jobId,
+    jobAuthor(job.createdByDisplayName),
+    job.documentId === null || job.documentId === undefined ? '' : t('jobs.openDocument', { id: job.documentId }),
+    job.message ?? '',
+  ]
+    .join(' ')
+    .toLocaleLowerCase();
+}
 
 /**
- * Стеження за фоновою задачею.
+ * Журнал фонових задач (`/admin/jobs`).
  *
- * ⚠ Опитування зупиняється, щойно задача завершилася. Нескінченне опитування
- * завершеної задачі — це запит на секунду від кожної відкритої вкладки, і
- * саме воно перетворює нешкідливий екран на постійне навантаження.
+ * ⚠ UI-28 (макет `screens-ops.js` `/admin/jobs`, `32-jobs.png`; KIT.md §3):
+ * шаблон переліку — пояснення під заголовком, смуга «виконуються / у черзі /
+ * провалені», рядок фільтрів, таблиця без кнопок у рядку, шторка задачі
+ * `?panel=<jobId>` з причиною провалу, кореляцією й діями.
  *
- * ⚠ Невідомий ідентифікатор дає 404, а не порожній стан: інакше клієнт
- * показував би вічний прогрес задачі, якої не існує.
+ * ⛔ До шаблону задачу стежили карткою над журналом, а «Watch», «Cancel job»,
+ * «Restart» і «Download» стояли в КОЖНОМУ рядку: колонка дій займала третину
+ * ширини, і при 1280 px таблиця вилазила за край (`X-22`). Дії переїхали в
+ * підвал шторки — там вони стосуються однієї, явно обраної задачі.
+ *
+ * ⛔ Ідентифікатор відкритої задачі — в адресі (`?panel=`). Саме це посилання
+ * надсилають адміністраторові зі словами «подивись, чому впало». Старі
+ * посилання `?id=<jobId>` (`SourcesPage`, `RegistryImpactPage`, листи)
+ * перекладаються в `?panel=` — вони й далі відкривають ту саму задачу.
  */
 export function JobsPage(): JSX.Element {
-  const [input, setInput] = useState('');
-  // ⛔ Ідентифікатор задачі — в адресі. Саме це посилання надсилають
-  // адміністраторові зі словами «подивись, чому впало»; без нього доводиться
-  // диктувати GUID голосом.
-  const [jobId, setJobId] = useUrlState('id');
-
-  const job = useQuery({
-    queryKey: ['job', jobId],
-    queryFn: () => apiFetch<JobStatus>(`/api/v1/jobs/${encodeURIComponent(jobId ?? '')}`),
-    enabled: jobId !== null,
-    refetchInterval: (query) => {
-      const state = query.state.data?.state;
-
-      // ⚠ Батько-розклад (P4) уже `Succeeded`, але дочірні ще рахуються — опитування триває.
-      return state === 'Queued' || state === 'Running' || query.state.data?.effectiveState === 'FannedOut'
-        ? PollMs
-        : false;
-    },
-    retry: false,
-  });
-
-  // ⛔ Директива №11, T10 #40. До цього ендпоінта провалена задача, чию
-  // причину вже полагодили (недоступне джерело, зайняте з'єднання), можна
-  // було повторити лише поставивши НОВУ — і зв'язок зі старим прогресом,
-  // на який уже дивиться колега, губився.
-  const restart = useMutation({
-    mutationFn: () => apiEnqueue(`/api/v1/jobs/${encodeURIComponent(jobId ?? '')}/restart`),
-    // ⚠ Той самий jobId — не новий. `refetch`, а не інвалідація: опитування
-    // саме підхопить `Queued` і продовжить, як після першої постановки.
-    onSuccess: () => void job.refetch(),
-    onError: showApiError,
-  });
-
-  // ⚠ `ФВ-14.26`: спінер на кнопці — лише після 100 мс дії, не з першого кадру.
-  const restartLoading = usePendingLoading(restart.isPending);
-
-  return (
-    <>
-      <PageHeader title={t('jobs.title')} />
-
-      <Group align="end" mb="md">
-        <TextInput
-          label={t('jobs.id')}
-          /* ⛔ `U-09`. Обидва рядки переїхали СЮДИ з порожнього стану під
-              полем: доки ідентифікатора не введено, «Enter a job id» був
-              окремим екраном-заглушкою НАД журналом задач, тобто на чистій
-              базі екран показував два порожні стани поспіль («Enter a job
-              id» і «No jobs yet»), а фільтр «Only my jobs» опинявся затиснутим
-              між ними — це читається як зламана сторінка.
-
-              ⚠ Рядки каталогу ті самі (`jobs.pick`, `jobs.pickHint`), і це
-              навмисно: їх не прибрано, а поставлено туди, де вони й є
-              підказкою до дії — на самому полі, а не замість вмісту. */
-          placeholder={t('jobs.pick')}
-          description={t('jobs.pickHint')}
-          value={input}
-          onChange={(event) => setInput(event.currentTarget.value)}
-          // ⚠ Без цього Enter у полі не робив нічого — ідентифікатор задачі
-          // найчастіше приходить вставленим із чужого повідомлення
-          // («подивись, чому впало»), і природний наступний рух — Enter, не
-          // потяг миші до кнопки. Той самий обробник, що й клік «Дивитись»:
-          // одна дія, два способи її викликати, не дві копії логіки.
-          onKeyDown={(event) => {
-            if (event.key === 'Enter') setJobId(input.trim().length === 0 ? null : rawJobId(input));
-          }}
-          miw={280}
-          flex="1"
-        />
-        <Button onClick={() => setJobId(input.trim().length === 0 ? null : rawJobId(input))}>
-          {t('jobs.watch')}
-        </Button>
-      </Group>
-
-      {/*
-       * ⛔ `U-09`, те саме правило, що встановлено в `U-08`: на екрані
-       * одночасно видно рівно ОДИН порожній стан — той, що пояснює найближчу
-       * перешкоду. Картка стеження ПІДПОРЯДКОВАНА журналу нижче: саме з нього
-       * беруть ідентифікатор кнопкою «Watch», а на чистій базі брати його
-       * нізвідки. Тому доки задачу не обрано, картки немає зовсім, і єдиний
-       * порожній стан на екрані — «No jobs yet» журналу.
-       *
-       * ⚠ Підказка не зникла, а переїхала на поле вводу вище (`placeholder`/
-       * `description`) — тобто лишилася там, де по ній діють.
-       *
-       * ⚠ Невідомий ідентифікатор і далі дає 404 і показується станом
-       * помилки з кодом — клієнт не малює вічний прогрес задачі, якої немає.
-       */}
-      {jobId !== null && (
-      <AsyncBoundary<JobStatus>
-        isPending={job.isPending}
-        error={job.error}
-        data={job.data}
-        emptyTitle={t('jobs.pick')}
-        emptyHint={t('jobs.pickHint')}
-        onRetry={() => void job.refetch()}
-      >
-        {(status) => (
-        <Card withBorder>
-          <Stack gap="xs">
-            <Group justify="space-between">
-              {/* ⛔ Аудит-пас 8, lane6, п.8: `humanizeJobId` лишає GUID
-                  екземпляра (копіювати/шукати ним і далі можна), але заміняє
-                  сирий `.NET`-тип на людську назву — `IRecalculationJob-a1b2…`
-                  замінюється на `Recalculation-a1b2…`. */}
-              <Text fw={600}>{humanizeJobId(status.jobId)}</Text>
-              {/* ⛔ Тут стояла власна `stateColor`, у якої `default` — СИНІЙ.
-                  Тобто `Unknown` і `Unavailable` (планувальник вимкнено або
-                  ідентифікатора вже немає — `QuartzJobScheduler.cs`) малювалися
-                  тим самим кольором, що й `Queued`: відмова відповісти про
-                  задачу виглядала як задача в черзі. Набір дає їм `warning`. */}
-              {/* ⛔ Похідний стан розкладу: батько `Succeeded`, коли документи ще рахуються. */}
-              <StatusBadge kind="job" state={badgeStateOf(status)} />
-            </Group>
-
-            {/* ⚠ BE-08: спроба, момент постановки й документ задачі. Картка —
-                місце для всього, що не влізло в сім колонок переліку (L5). */}
-            <Group gap="md">
-              <JobAttempt attempt={status.attempt} maxAttempts={status.maxAttempts} />
-              {status.createdAt !== null && status.createdAt !== undefined && (
-                <Text size="xs" c="dimmed">
-                  {t('jobs.createdAt')}: <Timestamp value={status.createdAt} />
-                </Text>
-              )}
-              <JobDocumentLink documentId={status.documentId} documentHrefOf={documentHrefOf} />
-            </Group>
-
-            <Progress value={status.percent} animated={status.state === 'Running'} />
-
-            {status.message !== null && <Text size="sm">{status.message}</Text>}
-
-            <FanOutSummary status={status} />
-
-            <JobFailure
-              state={status.state}
-              errorCode={status.errorCode}
-              correlationId={status.correlationId}
-            />
-
-            {/* ⛔ `X-04`: сирий `error` задачі — `ex.Message` сервера
-                (українське речення розробника чи «Violation of PRIMARY KEY…»)
-                — стояв тут видимим рядком ПІД локалізованою причиною
-                `JobFailure`, тобто англійський екран показував одну відмову
-                двічі, і вдруге — чужою мовою. Причину людині каже
-                `JobFailure` (код → каталог); сирий текст лишається лише
-                згорнутим — екран і так відкривається тільки з
-                `System.ViewHealth`, тобто адміністраторові, що розбирає збій.
-                Без стека (ФВ-6.11): його сервер сюди не кладе. */}
-            {status.error !== null && status.error !== undefined && status.error !== '' && (
-              <TechnicalDetails label={t('common.technicalDetails')}>{status.error}</TechnicalDetails>
-            )}
-
-            {/* ⛔ Лише для Failed: перезапускати задачу, що виконується чи вже
-                успішна, немає сенсу — і сервер (ECR-JOB-0409) це відхилить. */}
-            {status.state === 'Failed' && (
-              <Group justify="flex-end">
-                <Button
-                  size="xs"
-                  variant="default"
-                  loading={restartLoading}
-                  onClick={() => {
-                    if (restart.isPending) return;
-                    restart.mutate();
-                  }}
-                >
-                  {restart.isPending ? t('jobs.restarting') : t('jobs.restart')}
-                </Button>
-              </Group>
-            )}
-          </Stack>
-        </Card>
-        )}
-      </AsyncBoundary>
-      )}
-
-      {/*
-       * ⛔ До цього розділу задачу можна було побачити лише знаючи її GUID:
-       * збій перерахунку існував у базі й був НЕДОСЯЖНИЙ з інтерфейсу
-       * (директива №09 §6.5, `S-25`; `ФВ-12.4`). Перелік — журнал того, що
-       * ЩОЙНО сталося, а не архів: рядок клацається і підставляє id вище.
-       */}
-      <RecentJobs onPick={setJobId} />
-    </>
-  );
-}
-
-function RecentJobs({ onPick }: { onPick: (jobId: string) => void }): JSX.Element {
   const queryClient = useQueryClient();
+  const setParams = useUrlParamsSetter();
 
-  // ⚠ Підтверджувана задача тримається в стані ЦІЛКОМ, а не самим `jobId`:
-  // заголовок і текст підтвердження називають, ЩО саме зупиняється
-  // (`Recalculation-a1b2…`), і діалог «справді скасувати?» без назви задачі —
-  // це запит на підтвердження чогось невідомого.
-  const [confirming, setConfirming] = useState<JobSummary | null>(null);
+  const [panel, setPanel] = useDetailPanel();
+  const [legacyId] = useUrlState('id');
+  const [mine, setMine] = useUrlState('mine');
+  const [query] = useUrlState('q');
+  const [type] = useUrlState('type');
+  const [state, setState] = useUrlState('state');
 
-  // ⛔ `BE-08`. Прапорець знятий за замовчуванням — цей екран відкривається
-  // лише з правом `System.ViewHealth` (`routes.ts`), і для його власника
-  // звуження до своїх було б несподіванкою. Сама ж дія `mine=true` потрібна
-  // ширше: перелік власних задач — єдиний, доступний БЕЗ цього права, і на
-  // ньому стоятиме шухляда «Мої задачі» в шапці (директива №15, фронтенд).
-  const [mineOnly, setMineOnly] = useState(false);
+  // ⚠ Старе посилання `?id=` — у `?panel=`, заміною історії: «Назад» не має
+  // повертати на адресу, яка одразу ж переписується знову.
+  useEffect(() => {
+    if (legacyId !== null) setParams({ panel: rawJobId(legacyId), id: null });
+  }, [legacyId, setParams]);
 
+  // ⛔ `BE-08`. «Лише мої» знятий за замовчуванням — екран відкривається лише з
+  // правом `System.ViewHealth`, і для його власника звуження до своїх було б
+  // несподіванкою. ✎ UI-28: прапорець — в адресі (`?mine=1`), як і решта
+  // фільтрів рядка: «Назад» повертає ціле подання, а не половину.
+  const mineOnly = mine === '1';
   const jobs = useRecentJobs(mineOnly);
+  const all = jobs.data;
+
+  const [finding, setFinding] = useState(false);
+
+  // ⚠ Підтверджувана задача тримається ЦІЛКОМ, а не самим `jobId`: діалог
+  // «справді скасувати?» називає, ЩО саме зупиняється.
+  const [confirming, setConfirming] = useState<{ jobId: string } | null>(null);
 
   // ⚠ Відповідь на скасування — `202`, не новий стан: задача бачить токен і
-  // закривається станом `Cancelled` на найближчій межі батчу. Тому після
-  // успіху інвалідуються ОБИДВА ключі — і перелік, і картка конкретної задачі
-  // вище: `['job', jobId]` не є нащадком `['jobs']` (різні рядки), тож одна
-  // інвалідація лишила б відкриту картку зі старим `Running`.
+  // закривається `Cancelled` на найближчій межі батчу. Тому інвалідуються ОБИДВА
+  // ключі — перелік і стан задачі в шторці: `['job', id]` не є нащадком
+  // `['jobs']`, і одна інвалідація лишила б відкриту шторку зі старим `Running`.
   const cancel = useCancelJob(() => {
     const cancelled = confirming;
 
     setConfirming(null);
     void queryClient.invalidateQueries({ queryKey: ['jobs'] });
+    void queryClient.invalidateQueries({ queryKey: ['jobs-summary'] });
 
     if (cancelled !== null) {
       void queryClient.invalidateQueries({ queryKey: ['job', cancelled.jobId] });
@@ -330,13 +151,278 @@ function RecentJobs({ onPick }: { onPick: (jobId: string) => void }): JSX.Elemen
   // ⚠ `ФВ-14.26`: спінер на кнопці — лише після 100 мс дії, не з першого кадру.
   const cancelLoading = usePendingLoading(cancel.isPending);
 
+  /*
+   * ⛔ Смуга — з `GET /jobs/summary` (LS-F), а не з переліку: перелік — лише
+   * останні задачі, і лічба по ньому видавала б себе за стан усієї черги.
+   * «failed in 24 h» з переліку не порахувати взагалі. Поки лічильників немає
+   * (або відмова) — смуги немає (`D15-06`), а не нулі.
+   *
+   * ⚠ Середня затримка старту — підказкою «у черзі», а не четвертим числом:
+   * показник смуги — ціле число, а секунди з десятими в ньому збрехали б
+   * округленням. `null` (за добу не стартувало нічого) — підказки немає.
+   */
+  const counters = useJobsSummary(mineOnly).data;
+  const latency = counters?.avgStartLatencyMs;
+  const stats: StatStripItems | undefined =
+    counters === undefined || counters === null
+      ? undefined
+      : ([
+          { id: 'Running', label: t('jobs.statRunning'), value: counters.running },
+          {
+            id: 'Queued',
+            label: t('jobs.statQueued'),
+            value: counters.queued,
+            hint:
+              latency === null || latency === undefined
+                ? undefined
+                : t('jobs.statLatency', { seconds: formatDecimal(String(Math.round(latency / 100) / 10)) ?? '' }),
+          },
+          { id: 'Failed', label: t('jobs.statFailed'), tone: 'danger', value: counters.failed24h },
+        ] satisfies readonly [StatItem, StatItem, StatItem]);
+
+  // ⚠ Типи — лише ті, що є в переліку: варіант, який нічого не покаже, — шум.
+  const typeOptions: FilterOption[] = [];
+  for (const job of all ?? []) {
+    if (!typeOptions.some((option) => option.value === job.jobCode)) {
+      typeOptions.push({ value: job.jobCode, label: jobKindLabel(job.jobCode) });
+    }
+  }
+
+  const needle = (query ?? '').trim().toLocaleLowerCase();
+  const shown = all?.filter(
+    (job) =>
+      (needle === '' || searchText(job).includes(needle)) &&
+      (type === null || job.jobCode === type) &&
+      (state === null || badgeStateOf(job) === state),
+  );
+
+  const summary = panel === null ? undefined : all?.find((job) => job.jobId === panel);
+
+  // ⚠ Стан для ПІДВАЛУ шторки — з `GET /jobs/{id}` (той самий запит, що читає
+  // лінивий вміст), а поки він летить — з рядка переліку. Шторку відкривають і
+  // для задачі поза переліком останніх.
+  const detail = useJobStatus(panel);
+  const openState = detail.data?.state ?? summary?.state;
+  const openBadge = detail.data ?? summary;
+  const documentId = detail.data?.documentId ?? summary?.documentId ?? null;
+  const resultUrl = detail.data?.resultUrl ?? summary?.resultUrl ?? null;
+
+  const columns: readonly DataTableColumn<JobSummary>[] = [
+    {
+      // ⚠ Назва задачі — кнопкою шторки: клац по рядку не має клавіатурного
+      // шляху. Другий рядок — документ і повідомлення сервера (уже
+      // перекладене мовою читача, показується як є).
+      key: 'jobCode',
+      label: t('jobs.recentCode'),
+      sortValue: (job) => jobKindLabel(job.jobCode),
+      minWidth: 200,
+      render: (job) => {
+        const target = [
+          job.documentId === null || job.documentId === undefined
+            ? ''
+            : t('jobs.openDocument', { id: job.documentId }),
+          job.message ?? '',
+        ]
+          .filter((part) => part !== '')
+          .join(' · ');
+
+        return (
+          <TwoLine
+            primary={
+              <UnstyledButton
+                ta="left"
+                fz="sm"
+                fw={500}
+                data-job-open={job.jobId}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setPanel(job.jobId);
+                }}
+              >
+                {jobKindLabel(job.jobCode)}
+              </UnstyledButton>
+            }
+            // ⛔ `X-22`: довге повідомлення (ключ експорту на 32 знаки)
+            // обрізається з повним текстом у `title`, а не розсуває таблицю.
+            secondary={
+              target === '' ? undefined : (
+                <span className="ecr-ellipsis" title={target} data-job-message="" style={{ maxWidth: 420, display: 'block' }}>
+                  {target}
+                </span>
+              )
+            }
+          />
+        );
+      },
+    },
+    {
+      key: 'createdByDisplayName',
+      label: t('jobs.createdBy'),
+      render: (job) => jobAuthor(job.createdByDisplayName),
+      sortValue: (job) => jobAuthor(job.createdByDisplayName),
+    },
+    {
+      /* ⚠ Момент СТАРТУ, не постановки: `JobProgress.Begin` перезаписує цей
+         стовпець при запуску. ⛔ `Timestamp` тримає читабельний текст і рівно
+         той рядок сервера в `dateTime`/`title` — для звірки з журналом. */
+      key: 'startedAt',
+      label: t('jobs.recentStarted'),
+      render: (job) => <Timestamp value={job.startedAt} />,
+    },
+    {
+      // ⚠ Прогрес — лише поки задача йде; провалена чи скасована каже, де
+      // зупинилась. Завершена — порожньо (`D15-06`): 100 % нічого не додають.
+      key: 'percent',
+      label: t('jobs.progress'),
+      sortable: false,
+      minWidth: 120,
+      render: (job) =>
+        job.state === 'Running' ? (
+          <Progress value={job.percent} aria-label={`${jobKindLabel(job.jobCode)} · ${t('jobs.progress')}`} />
+        ) : job.state === 'Failed' || job.state === 'Cancelled' ? (
+          <Text size="xs" c="dimmed">
+            {t('jobs.stoppedAt', { percent: job.percent })}
+          </Text>
+        ) : (
+          ''
+        ),
+    },
+    {
+      key: 'state',
+      label: t('jobs.recentState'),
+      render: (job) => (
+        <Stack gap="xs">
+          <StatusBadge kind="job" state={badgeStateOf(job)} />
+          {/* ⚠ «Спроба N з M» — лише з другої спроби: сигнал про ретрай. */}
+          <JobAttempt attempt={job.attempt} maxAttempts={job.maxAttempts} />
+        </Stack>
+      ),
+    },
+  ];
+
+  const filtered = needle !== '' || type !== null || state !== null;
+
   return (
-    <>
-      <Modal
-        opened={confirming !== null}
-        onClose={() => setConfirming(null)}
-        title={t('jobs.cancel')}
-      >
+    <ListPage
+      header={{
+        title: t('jobs.title'),
+        // Пояснення сторінки ЗАМІСТЬ пояснення маршруту, а не другим рядком під ним (batch-2-a, дефект 3).
+        description: t('jobs.description'),
+        secondary: [
+          { label: t('jobs.refresh'), onClick: () => void jobs.refetch() },
+          { label: t('jobs.findById'), onClick: () => setFinding(true) },
+        ],
+      }}
+      stats={stats === undefined ? undefined : { label: t('jobs.statsLabel'), items: stats, active: state, onSelect: setState }}
+      filters={
+        <FilterBar
+          search={{ label: t('jobs.search'), placeholder: t('jobs.searchPlaceholder') }}
+          filters={[
+            { id: 'type', label: t('jobs.filterType'), options: typeOptions },
+            { id: 'state', label: t('jobs.filterState'), options: stateOptions() },
+          ]}
+          clearLabel={t('filters.clear')}
+          right={
+            /* ⚠ Підказка поруч, а не в назві: знятий прапорець показує ЧУЖІ
+               задачі, і без пояснення відмова 403 у того, хто права не має,
+               читається як збій екрана, а не як межа доступу. */
+            <Group align="center" gap="xs" wrap="nowrap">
+              <Checkbox
+                label={t('jobs.mineOnly')}
+                checked={mineOnly}
+                onChange={(event) => setMine(event.currentTarget.checked ? '1' : null)}
+              />
+              <Text size="xs" c="dimmed">
+                {t('jobs.mineOnlyHint')}
+              </Text>
+            </Group>
+          }
+        />
+      }
+      table={
+        <DataTable<JobSummary>
+          columns={columns}
+          rows={shown}
+          rowKey={(job) => job.jobId}
+          isPending={jobs.isPending}
+          error={jobs.error}
+          onRetry={() => void jobs.refetch()}
+          emptyTitle={t('jobs.recentEmpty')}
+          filtered={filtered}
+          noMatchTitle={t('jobs.noMatch')}
+          onClearFilters={() => setParams({ q: null, type: null, state: null })}
+          clearFiltersLabel={t('filters.clear')}
+          onRowClick={(job) => setPanel(job.jobId)}
+          selectedKey={panel ?? undefined}
+        />
+      }
+      detail={
+        panel === null
+          ? undefined
+          : {
+              panelId: panel,
+              title: summary === undefined ? humanizeJobId(panel) : jobKindLabel(summary.jobCode),
+              subtitle: summary === undefined ? undefined : humanizeJobId(summary.jobId),
+              badge: openBadge === undefined ? undefined : <StatusBadge kind="job" state={badgeStateOf(openBadge)} />,
+              closeLabel: t('common.close'),
+              size: 'lg',
+              footer:
+                openState === undefined ? undefined : (
+                  <>
+                    {documentId !== null && (
+                      <Button component={Link} to={documentHrefOf(documentId)} variant="default" mr="auto">
+                        {t('jobs.openDocument', { id: documentId })}
+                      </Button>
+                    )}
+                    <JobResultLink resultUrl={resultUrl} />
+                    {/* ⛔ Лише `Queued`/`Running`: термінальній задачі скасовувати
+                        нічого, і сервер відповів би `409` (`ECR-JOB-0409`). */}
+                    {isCancellable(openState) && (
+                      <Button variant="outline" color="statusError" onClick={() => setConfirming({ jobId: panel })}>
+                        {t('jobs.cancel')}
+                      </Button>
+                    )}
+                    {/*
+                     * ⛔ `hasViewHealth` — буквально `true`: маршрут `/admin/jobs`
+                     * вимагає `System.ViewHealth` (`routes.ts`), тож кожен, хто
+                     * бачить шторку, право має. `isOwnJob` — `false` буквально:
+                     * перелік може містити чужі задачі, і `true` тут було б
+                     * вигадкою. Сервер перевіряє власника сам (`403`).
+                     */}
+                    <JobRetry
+                      jobId={panel}
+                      state={openState}
+                      isOwnJob={false}
+                      hasViewHealth
+                      onRestarted={() => {
+                        void queryClient.invalidateQueries({ queryKey: ['jobs'] });
+                        void queryClient.invalidateQueries({ queryKey: ['jobs-summary'] });
+                        void queryClient.invalidateQueries({ queryKey: ['job', panel] });
+                      }}
+                    />
+                  </>
+                ),
+              children: (
+                <Suspense fallback={<Text size="sm" c="dimmed">{t('common.loading')}</Text>}>
+                  <JobDetailBody jobId={panel} summary={summary} />
+                </Suspense>
+              ),
+            }
+      }
+    >
+      {finding && (
+        <Suspense fallback={null}>
+          <FindJobModal
+            onClose={() => setFinding(false)}
+            onPick={(jobId) => {
+              setFinding(false);
+              setPanel(jobId);
+            }}
+          />
+        </Suspense>
+      )}
+
+      <Modal opened={confirming !== null} onClose={() => setConfirming(null)} title={t('jobs.cancel')}>
         <Text size="sm" mb="sm">
           {t('jobs.cancelConfirm')}
         </Text>
@@ -355,8 +441,8 @@ function RecentJobs({ onPick }: { onPick: (jobId: string) => void }): JSX.Elemen
             color="statusError"
             loading={cancelLoading}
             onClick={() => {
-              // ⛔ L9-37: спінер (`usePendingLoading`) з'являється лише після 100 мс —
-              // до того кнопка активна, і подвійний клік/Enter слав два скасування.
+              // ⛔ L9-37: спінер з'являється лише після 100 мс — до того кнопка
+              // активна, і подвійний клік/Enter слав два скасування.
               if (cancel.isPending) return;
               if (confirming !== null) cancel.mutate(confirming.jobId);
             }}
@@ -365,215 +451,6 @@ function RecentJobs({ onPick }: { onPick: (jobId: string) => void }): JSX.Elemen
           </Button>
         </Group>
       </Modal>
-
-      {/*
-       * ⚠ Підказка поруч, а не в самій назві: знятий прапорець показує ЧУЖІ
-       * задачі, і без пояснення відмова 403 у того, хто права не має,
-       * читається як збій екрана, а не як межа доступу.
-       */}
-      {/*
-       * ⚠ Прапорець переїхав у правий слот `FilterBar`, а не зник: рядок
-       * фільтрів набору тримає СВОЇ поля в адресі, а цей — у `useState`, і
-       * змішувати два джерела в одному компоненті означало б, що «Назад»
-       * повертає половину подання.
-       *
-       * ⛔ Перевести його в адресу цей PR НЕ може: варіанти перемикача
-       * («усі»/«мої») потребують двох нових рядків каталогу, а `09-seed.sql`
-       * зараз змінює сусідня робота — правка туди дала б конфлікт мержу на
-       * рівному місці (CLAUDE.md, пріоритет 0). Названо в Next steps.
-       */}
-      <FilterBar
-        right={
-          <Group align="center" gap="xs">
-            <Checkbox
-              label={t('jobs.mineOnly')}
-              checked={mineOnly}
-              onChange={(event) => setMineOnly(event.currentTarget.checked)}
-            />
-            <Text size="xs" c="dimmed">
-              {t('jobs.mineOnlyHint')}
-            </Text>
-          </Group>
-        }
-      />
-
-      {/*
-       * ⛔ `DataTable` замінює `AsyncBoundary` + `<Table>` разом, а не лише
-       * розмітку: стани «триває», «порожньо» і «відмова» тепер малює він сам,
-       * і саме тому тут більше немає `data?.items ?? []` — взірця, через який
-       * невдалий запит перетворювався на «даних немає» у п'ятнадцяти областях.
-       *
-       * ⚠ Сортування прийшло разом із таблицею і його тут раніше не було:
-       * шапка стала клікабельною для трьох перших колонок. Колонка дій
-       * `sortable: false` — у кнопок немає скалярного значення, і сортування
-       * за ними мовчки не робило б нічого.
-       */}
-      <DataTable<JobSummary>
-        columns={[
-          {
-            key: 'jobCode',
-            label: t('jobs.recentCode'),
-            render: (job) => (
-              <Stack gap="xs">
-                <Text size="sm">{jobKindLabel(job.jobCode)}</Text>
-                <JobDocumentLink documentId={job.documentId} documentHrefOf={documentHrefOf} />
-              </Stack>
-            ),
-            sortValue: (job) => jobKindLabel(job.jobCode),
-            minWidth: 130,
-          },
-          {
-            key: 'state',
-            label: t('jobs.recentState'),
-            /* ⚠ `sortValue` тут НЕ потрібен, і це перевірено мутацією, а не
-               вгадано: ключ колонки — `state`, тобто `DataTable` бере
-               `row['state']` сам. Зайвий проп виглядав би як необхідний і
-               спонукав би копіювати його в колонки, де він теж зайвий. */
-            render: (job) => (
-              <Stack gap="xs">
-                <StatusBadge kind="job" state={badgeStateOf(job)} />
-                {/* ⚠ BE-08+: `JobSummary` тепер несе те саме `maxAttempts`, що й
-                    `JobStatus` картки — «спроба N з M», коли обидва відомі. */}
-                <JobAttempt attempt={job.attempt} maxAttempts={job.maxAttempts} />
-                {/* ⚠ `X-22`: ідентифікатор кореляції (32 знаки без пробілів) разом із
-                    кнопкою копіювання робив колонку стану ~360 px — переноситься. */}
-                <Box maw={240} className="ecr-wrap-anywhere" data-job-failure-cell="">
-                  <JobFailure
-                    state={job.state}
-                    errorCode={job.errorCode}
-                    correlationId={job.correlationId}
-                  />
-                </Box>
-              </Stack>
-            ),
-          },
-          {
-            /* ⛔ Уже перекладене сервером мовою читача — показується як є.
-               `t()` над ним дав би `⟦…⟧` замість тексту. */
-            key: 'message',
-            label: t('jobs.recentMessage'),
-            sortable: false,
-            // ⛔ `X-22`: при 1280 таблиця була ширша за екран, і «Started»/«Watch»
-            // стояли за правим краєм. Найширше тут — повідомлення (ключ експорту
-            // на 32 шістнадцяткові знаки): тепер воно обрізається з повним
-            // текстом у `title`, а не розсуває таблицю.
-            render: (job) =>
-              job.message === null || job.message === undefined || job.message === '' ? (
-                ''
-              ) : (
-                <Text size="sm" className="ecr-ellipsis" maw={160} title={job.message} data-job-message="">
-                  {job.message}
-                </Text>
-              ),
-          },
-          {
-            key: 'createdByDisplayName',
-            label: t('jobs.createdBy'),
-            render: (job) => jobAuthor(job.createdByDisplayName),
-            sortValue: (job) => jobAuthor(job.createdByDisplayName),
-          },
-          {
-            /* ⚠ Постановка, не старт: сусідня колонка `startedAt` перезаписується
-               при запуску, ця — ні. `null` — задача за розкладом. */
-            key: 'createdAt',
-            label: t('jobs.createdAt'),
-            render: (job) =>
-              job.createdAt === null || job.createdAt === undefined ? (
-                ''
-              ) : (
-                <Timestamp value={job.createdAt} />
-              ),
-          },
-          {
-            /* ⚠ Момент СТАРТУ, не постановки: `JobProgress.Begin` перезаписує
-               цей стовпець при запуску, і називати його «створено» означало б
-               брехати про кожну задачу, що вже працює.
-
-               ⛔ `Timestamp` тримає ОБИДВІ форми одночасно: видимий текст
-               читабельний мовою набору, а рівно той рядок, що віддав сервер,
-               лишається в `dateTime`/`title` — тобто в DOM, у копії розмітки і
-               в e2e-локаторі. Перелік задач читають поруч із журналом аудиту й
-               момент із нього копіюють у запит до бази: звіряти є з чим,
-               дивитися — на що. */
-            key: 'startedAt',
-            label: t('jobs.recentStarted'),
-            render: (job) => <Timestamp value={job.startedAt} />,
-          },
-          {
-            key: 'actions',
-            label: '',
-            sortable: false,
-            render: (job) => (
-              <Stack gap="xs">
-                {/* ⚠ `wrap="nowrap"`: дії в одному рядку таблиці не мають
-                    переносити одна одну на другий рядок і рвати висоту рядків. */}
-                <Group gap="xs" wrap="nowrap">
-                  <Button variant="subtle" size="compact-xs" onClick={() => onPick(job.jobId)}>
-                    {t('jobs.recentWatch')}
-                  </Button>
-
-                  {/* ⛔ Лише `Queued`/`Running`: термінальній задачі скасовувати
-                      нічого, і сервер відповів би `409` (`ECR-JOB-0409`) —
-                      кнопка, приречена на відмову, гірша за її відсутність. */}
-                  {isCancellable(job.state) && (
-                    <Button
-                      variant="subtle"
-                      size="xs"
-                      color="statusError"
-                      onClick={() => setConfirming(job)}
-                    >
-                      {t('jobs.cancel')}
-                    </Button>
-                  )}
-                </Group>
-
-                {/*
-                 * UX-09, директива №11, T10 #40 — той самий підхід, що вже діє
-                 * в шухляді «My tasks» (`MyTasksDrawer.tsx`): ті самі
-                 * компоненти `JobFacts`, той самий критерій показу.
-                 *
-                 * ⛔ `hasViewHealth` — буквально `true`, не заглушка. Сам
-                 * маршрут `/admin/jobs` вимагає `System.ViewHealth`
-                 * (`routes.ts` → `adminJobs.handle.permission`, застосовує
-                 * `RouteGuard`) — тобто кожен, хто взагалі бачить цей рядок,
-                 * право вже має. `isOwnJob` тому байдужий для видимості
-                 * (`canRestartJob`: `state === 'Failed' && (isOwnJob ||
-                 * hasViewHealth)`) і лишається `false` буквально, а не
-                 * підмінює встановлений факт власності — на відміну від
-                 * шухляди «My tasks», де перелік ВЖЕ звужено до власних
-                 * (`mine=true`), тут перелік може містити чужі задачі
-                 * (`mineOnly` вимкнено за замовчуванням), і `isOwnJob=true`
-                 * тут було б вигадкою.
-                 */}
-                <Group gap="xs" wrap="nowrap">
-                  <JobRetry
-                    jobId={job.jobId}
-                    state={job.state}
-                    isOwnJob={false}
-                    hasViewHealth
-                    onRestarted={() => void queryClient.invalidateQueries({ queryKey: ['jobs'] })}
-                  />
-                  <JobResultLink resultUrl={job.resultUrl} />
-                </Group>
-              </Stack>
-            ),
-          },
-        ]}
-        rows={jobs.data}
-        rowKey={(job) => job.jobId}
-        isPending={jobs.isPending}
-        error={jobs.error}
-        onRetry={() => void jobs.refetch()}
-        emptyTitle={t('jobs.recentEmpty')}
-      />
-    </>
+    </ListPage>
   );
 }
-
-/*
- * ✎ Тут стояла `stateColor(state)`. Її `default: 'blue'` і був дефектом,
- * який набір закриває: невідомий стан (а `JobStatus.state` доходить до
- * клієнта простим `string` — `schema.d.ts:9452`) мовчки ставав того ж
- * кольору, що й `Queued`. Розподіл станів тепер один на застосунок —
- * `statusTable.job` у `shared/ui/StatusBadge.tsx`, невідоме — `warning`.
- */

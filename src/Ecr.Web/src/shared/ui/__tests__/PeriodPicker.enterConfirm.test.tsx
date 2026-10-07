@@ -85,7 +85,8 @@ describe('PeriodPicker: Enter підтверджує — blur і назва', ()
     const input = periodInput();
 
     await user.click(input);
-    expect(input.value).toBe('202609');
+    // UI-13: у фокусі поле лишає назву виділеною (перша цифра замінює її ключем) — ключ не показується.
+    expect(input.value).toBe('September 2026');
     await user.keyboard('{Enter}');
 
     expect(document.activeElement).not.toBe(input);

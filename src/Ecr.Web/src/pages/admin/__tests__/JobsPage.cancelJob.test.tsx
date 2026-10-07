@@ -5,6 +5,7 @@ import { MantineProvider } from '@mantine/core';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { JobsPage } from '@/pages/admin/JobsPage';
+import { openDrawerOf, rowOfState } from './jobsTestKit';
 
 /**
  * BE-02: скасування фонової задачі з екрана.
@@ -102,57 +103,25 @@ function show(): void {
   );
 }
 
-/**
- * Рядок переліку, впізнаний за значком стану.
- *
- * ✎ 2026-09-19. Тут стояло `screen.getByText(state)` — пошук за КОДОМ СЕРВЕРА
- * (`Running`, `Succeeded`) як за видимим текстом. Відколи стан малює
- * `StatusBadge`, підпис береться з каталогу (`status.job.*`), а не з коду:
- * це та зміна поведінки, заради якої набір і заведено — код сервера не є
- * текстом інтерфейсу й не перекладається. Локатор переведено на
- * `data-status-state`, який набір кладе в розмітку саме для тестів і e2e.
- *
- * ⚠ Це не послаблення: атрибут прив'язаний до стану ТОЧНО, тоді як пошук за
- * текстом збігся б і з будь-яким іншим вузлом, що містить те саме слово.
- */
-function rowOfState(state: string): HTMLElement {
-  const row = document.querySelector(`[data-status-state="${state}"]`)?.closest('tr') ?? null;
-  expect(row, `рядок задачі у стані «${state}»`).not.toBeNull();
-
-  return row as HTMLElement;
-}
-
-/** Чекає, доки в переліку з'явиться рядок у цьому стані. */
-async function findRowOfState(state: string): Promise<HTMLElement> {
-  await waitFor(() =>
-    expect(document.querySelector(`[data-status-state="${state}"]`)).not.toBeNull(),
-  );
-
-  return rowOfState(state);
-}
-
 afterEach(() => {
   vi.unstubAllGlobals();
   posted.length = 0;
   holdCancel = false;
 });
 
-describe('JobsPage: скасування задачі з переліку', () => {
+describe('JobsPage: скасування задачі зі шторки', () => {
   it('задача, що виконується: кнопка → підтвердження → POST із закодованим «#»', async () => {
     mockFetch();
     const user = userEvent.setup();
     show();
 
-    const cancelInRow = within(await findRowOfState('Running')).getByRole('button', {
-      name: '⟦jobs.cancel⟧',
-    });
-
-    await user.click(cancelInRow);
+    const drawer = await openDrawerOf('Running');
+    await user.click(await within(drawer).findByRole('button', { name: '⟦jobs.cancel⟧' }));
 
     // ⛔ Підтвердження — ОКРЕМИЙ крок, а не тост після факту: скасування
     // обриває роботу, яку вже почали рахувати, і випадковий клік коштує
     // двадцяти хвилин чужого часу.
-    const dialog = await screen.findByRole('dialog');
+    const dialog = await screen.findByRole('dialog', { name: '⟦jobs.cancel⟧' });
     expect(within(dialog).getByText('⟦jobs.cancelConfirm⟧')).toBeTruthy();
 
     // ⚠ Доки підтвердження не натиснуте — запиту немає. Інакше «підтвердження»
@@ -174,17 +143,19 @@ describe('JobsPage: скасування задачі з переліку', () =
     show();
 
     // ⛔ Мутаційний доказ: приберіть умову видимості за станом
-    // (`isCancellable(job.state) &&` у `JobsPage.tsx`) — і кнопка з'явиться в
-    // рядку успішної задачі, а цей тест впаде. Сусідній рядок `Running`
+    // (`isCancellable(openState) &&` у `JobsPage.tsx`) — і кнопка з'явиться в
+    // шторці успішної задачі, а цей тест впаде. Шторка `Running` нижче
     // доводить, що кнопка взагалі рендериться і відсутність тут — не
     // «нічого не намалювалося».
-    expect(
-      within(await findRowOfState('Succeeded')).queryByRole('button', { name: '⟦jobs.cancel⟧' }),
-    ).toBeNull();
+    const done = await openDrawerOf('Succeeded');
+    // ⚠ Підвал уже намальований (кнопка закриття шторки є), а скасування — ні.
+    expect(within(done).queryByRole('button', { name: '⟦jobs.cancel⟧' })).toBeNull();
 
-    expect(
-      within(rowOfState('Running')).getByRole('button', { name: '⟦jobs.cancel⟧' }),
-    ).toBeTruthy();
+    const running = await openDrawerOf('Running');
+    expect(await within(running).findByRole('button', { name: '⟦jobs.cancel⟧' })).toBeTruthy();
+
+    // ⚠ У рядку переліку кнопок дій більше немає (UI-28).
+    expect(within(rowOfState('Running')).queryByRole('button', { name: '⟦jobs.cancel⟧' })).toBeNull();
   });
 
   it('повторний клік підтвердження, поки запит у польоті, другого скасування не шле (L9-37)', async () => {
@@ -193,10 +164,9 @@ describe('JobsPage: скасування задачі з переліку', () =
     const user = userEvent.setup();
     show();
 
-    await user.click(
-      within(await findRowOfState('Running')).getByRole('button', { name: '⟦jobs.cancel⟧' }),
-    );
-    const dialog = await screen.findByRole('dialog');
+    const drawer = await openDrawerOf('Running');
+    await user.click(await within(drawer).findByRole('button', { name: '⟦jobs.cancel⟧' }));
+    const dialog = await screen.findByRole('dialog', { name: '⟦jobs.cancel⟧' });
 
     await user.click(within(dialog).getByRole('button', { name: '⟦jobs.cancel⟧' }));
 

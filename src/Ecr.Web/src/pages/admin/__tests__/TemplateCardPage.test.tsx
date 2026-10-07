@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MantineProvider } from '@mantine/core';
 import { Notifications, notifications } from '@mantine/notifications';
@@ -231,6 +231,14 @@ afterEach(() => {
 // ⚠ Те саме, що в сусідніх наборах цієї теки: середовище прогону повільне.
 const SlowEnvTimeout = 400_000;
 
+/** b4b (KIT §1.2): дії картки, крім головної, — у меню «More» шапки. */
+async function findMoreItem(name: RegExp): Promise<HTMLElement> {
+  const more = await screen.findByRole('button', { name: 'More' }, { timeout: SlowEnvTimeout });
+  if (more.getAttribute('aria-expanded') !== 'true') fireEvent.click(more);
+
+  return screen.findByRole('menuitem', { name }, { timeout: SlowEnvTimeout });
+}
+
 describe('TemplateCardPage: картка шаблону (UI-09)', () => {
   it(
     'показує назву, код як CodeText і СУМУ залежних робіт',
@@ -272,8 +280,8 @@ describe('TemplateCardPage: картка шаблону (UI-09)', () => {
         { timeout: SlowEnvTimeout },
       );
 
-      expect(screen.queryByRole('button', { name: /templates\.archive/i })).toBeNull();
-      expect(screen.queryByRole('button', { name: /templates\.rename/i })).toBeNull();
+      // b4b: перейменування й архівування — у меню «More»; без права меню немає зовсім.
+      expect(screen.queryByRole('button', { name: 'More' })).toBeNull();
 
       vi.unstubAllGlobals();
       respond();
@@ -281,11 +289,7 @@ describe('TemplateCardPage: картка шаблону (UI-09)', () => {
 
       // ⛔ Дзеркало: інакше «полагодити» можна було б назавжди схованою кнопкою.
       expect(
-        await screen.findByRole(
-          'button',
-          { name: /templates\.archive/i },
-          { timeout: SlowEnvTimeout },
-        ),
+        await findMoreItem(/templates\.archive/i),
       ).toBeDefined();
     },
     SlowEnvTimeout,
@@ -304,7 +308,7 @@ describe('TemplateCardPage: картка шаблону (UI-09)', () => {
 
       // ⛔ Порожня картка була б гіршою за відмову: ані коду, ані дій.
       expect(document.querySelector('[data-code-text]')).toBeNull();
-      expect(screen.queryByRole('button', { name: /templates\.archive/i })).toBeNull();
+      expect(screen.queryByRole('button', { name: 'More' })).toBeNull();
     },
     SlowEnvTimeout,
   );
@@ -316,11 +320,7 @@ describe('TemplateCardPage: картка шаблону (UI-09)', () => {
       const user = userEvent.setup();
       show();
 
-      const button = await screen.findByRole(
-        'button',
-        { name: /templates\.archive/i },
-        { timeout: SlowEnvTimeout },
-      );
+      const button = await findMoreItem(/templates\.archive/i);
       await user.click(button);
 
       expect(state.archiveCalls).toBe(0);
@@ -349,11 +349,7 @@ describe('TemplateCardPage: картка шаблону (UI-09)', () => {
       show();
 
       await user.click(
-        await screen.findByRole(
-          'button',
-          { name: /templates\.archive/i },
-          { timeout: SlowEnvTimeout },
-        ),
+        await findMoreItem(/templates\.archive/i),
       );
 
       const dialog = await screen.findByRole('dialog', {}, { timeout: SlowEnvTimeout });
@@ -382,11 +378,7 @@ describe('TemplateCardPage: картка шаблону (UI-09)', () => {
       show();
 
       await user.click(
-        await screen.findByRole(
-          'button',
-          { name: /templates\.archive/i },
-          { timeout: SlowEnvTimeout },
-        ),
+        await findMoreItem(/templates\.archive/i),
       );
 
       const dialog = await screen.findByRole('dialog', {}, { timeout: SlowEnvTimeout });
@@ -398,13 +390,9 @@ describe('TemplateCardPage: картка шаблону (UI-09)', () => {
       // означало б обіцяти запит, що ніколи не мав сенсу.
       expect(state.restoreCalls).toBe(0);
       expect(
-        await screen.findByRole(
-          'button',
-          { name: /templates\.archive/i },
-          { timeout: SlowEnvTimeout },
-        ),
+        await findMoreItem(/templates\.archive/i),
       ).toBeDefined();
-      expect(screen.queryByRole('button', { name: /templates\.restore/i })).toBeNull();
+      expect(screen.queryByRole('menuitem', { name: /templates\.restore/i })).toBeNull();
     },
     SlowEnvTimeout,
   );
@@ -416,11 +404,7 @@ describe('TemplateCardPage: картка шаблону (UI-09)', () => {
       const user = userEvent.setup();
       show();
 
-      const renameButton = await screen.findByRole(
-        'button',
-        { name: /templates\.rename/i },
-        { timeout: SlowEnvTimeout },
-      );
+      const renameButton = await findMoreItem(/templates\.rename/i);
       await user.click(renameButton);
 
       const dialog = await screen.findByRole('dialog', {}, { timeout: SlowEnvTimeout });

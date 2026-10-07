@@ -1,5 +1,5 @@
 import { useState, type JSX } from 'react';
-import { Alert, Badge, Button, Group, Modal, Text, TextInput } from '@mantine/core';
+import { Alert, Badge, Button, Group, Menu, Modal, Text, TextInput } from '@mantine/core';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { EcrApiError, apiFetch } from '@/api/client';
 import type { components } from '@/api/schema';
@@ -64,7 +64,19 @@ type Action = 'clone' | 'rename' | 'delete';
  * ⚠ Вбудована роль отримує лише «клонувати»: сервер відмовив би на решту
  * (`409`), і кнопка, що завжди завершується відмовою, — це загадка, а не дія.
  */
-export function RoleActions({ role }: { role: RoleView }): JSX.Element {
+/**
+ * ✎ UI-37: `placement="header"` — ті самі дії в шапці обраної ролі
+ * (master-detail, макет `screens-ops.js` `paintDetail`): вбудована роль —
+ * одна кнопка «Clone as custom role», власна — меню «More» (Rename / Clone /
+ * Delete). Діалоги й запити ті самі, змінюється лише кнопка, що їх відкриває.
+ */
+export function RoleActions({
+  role,
+  placement = 'row',
+}: {
+  role: RoleView;
+  placement?: 'row' | 'header';
+}): JSX.Element {
   const queryClient = useQueryClient();
   const [action, setAction] = useState<Action | null>(null);
   const [code, setCode] = useState('');
@@ -116,23 +128,50 @@ export function RoleActions({ role }: { role: RoleView }): JSX.Element {
     setAction(next);
   };
 
+  const triggers =
+    placement === 'header' ? (
+      role.isBuiltIn ? (
+        <Button variant="default" onClick={() => open('clone')} data-testid="role-clone">
+          {t('security.cloneAsCustom')}
+        </Button>
+      ) : (
+        <Menu shadow="md" position="bottom-end" withinPortal>
+          <Menu.Target>
+            <Button variant="default" data-testid="role-more">
+              {t('security.roleMore')}
+            </Button>
+          </Menu.Target>
+          <Menu.Dropdown>
+            <Menu.Item onClick={() => open('rename')}>{t('security.renameRole')}</Menu.Item>
+            <Menu.Item onClick={() => open('clone')}>{t('security.cloneRole')}</Menu.Item>
+            <Menu.Divider />
+            <Menu.Item color="statusError" onClick={() => open('delete')}>
+              {t('common.delete')}
+            </Menu.Item>
+          </Menu.Dropdown>
+        </Menu>
+      )
+    ) : null;
+
   return (
     <>
+      {triggers ?? (
       <Group gap="xs" mt="xs" wrap="nowrap">
-        <Button size="compact-xs" variant="subtle" onClick={() => open('clone')}>
+        <Button size="xs" variant="subtle" onClick={() => open('clone')}>
           {t('security.cloneRole')}
         </Button>
         {!role.isBuiltIn && (
           <>
-            <Button size="compact-xs" variant="subtle" onClick={() => open('rename')}>
+            <Button size="xs" variant="subtle" onClick={() => open('rename')}>
               {t('security.renameRole')}
             </Button>
-            <Button size="compact-xs" variant="subtle" color="statusError" onClick={() => open('delete')}>
+            <Button size="xs" variant="subtle" color="statusError" onClick={() => open('delete')}>
               {t('common.delete')}
             </Button>
           </>
         )}
       </Group>
+      )}
 
       <Modal
         opened={action === 'clone' || action === 'rename'}

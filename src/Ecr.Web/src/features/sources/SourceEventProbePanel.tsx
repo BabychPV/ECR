@@ -135,7 +135,6 @@ export function SourceEventProbePanel({
         />
         <Button
           ref={runFocus.ref}
-          size="xs"
           variant="default"
           loading={probe.isPending}
           onClick={() => {
@@ -177,7 +176,7 @@ export function SourceEventProbePanel({
                 {unmatched.map((value) => (
                   <Button
                     key={value}
-                    size="compact-xs"
+                    size="xs"
                     variant="light"
                     onClick={() => onAddValue(field.key, value)}
                     data-source-event-probe-add={value}

@@ -217,15 +217,19 @@ describe('PeriodsPage: автовибір єдиного проєкту (U-10)',
       await new Promise((resolve) => setTimeout(resolve, 50));
     });
 
-    expect(screen.getByRole('heading', { level: 4, name: 'Pick a project' })).toBeDefined();
-    expect(new URLSearchParams(search).get('projectId')).toBeNull();
-
     /*
-     * ⛔ Найпряміший доказ: календаря ніхто не питав. Автовибір «першого з
-     * двох» одразу пішов би по `/api/v1/projects/1/periods` — тобто показав би
-     * дані проєкту, якого людина не обирала.
+     * ✎ UI-33: замість порожнього «Pick a project» без вибору сторінка
+     * показує огляд «All projects · current period» (макет `/admin/periods`).
+     * Межа автовибору від цього не змінилась: адреса без `projectId`, і
+     * календаря-ТАБЛИЦІ проєкту (рядок `202609` із діями) на екрані немає.
+     *
+     * ⚠ Запит календарів обох проєктів тепер законний — огляд показує
+     * поточний період КОЖНОГО, тож доказ «календаря ніхто не питав» замінено
+     * доказом «календар жодного проєкту не відкрито як обраний».
      */
-    expect(requested.some((url) => /\/api\/v1\/projects\/\d+\/periods/.test(url))).toBe(false);
+    expect(new URLSearchParams(search).get('projectId')).toBeNull();
+    await screen.findByTestId('periods-overview');
+    expect(screen.queryByTestId('periods-year')).toBeNull();
     expect(screen.queryByText('202609')).toBeNull();
   });
 });

@@ -4,9 +4,9 @@ import {
   Badge,
   Button,
   Group,
-  SegmentedControl,
   Switch,
   Table,
+  Tabs,
   Text,
 } from '@mantine/core';
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -20,7 +20,6 @@ import type {
 } from '@/api/types';
 import { CreateRoleModal } from '@/features/security/CreateRoleModal';
 import { CreateUserModal } from '@/features/security/CreateUserModal';
-import { RoleMatrix } from '@/features/security/RoleMatrix';
 import { StartSimulationButton } from '@/features/security/SimulationPanel';
 import { UserAdminActions } from '@/features/security/UserAdminActions';
 import { useOpenerFocusReturn } from '@/features/projects/useOpenerFocusReturn';
@@ -78,13 +77,24 @@ const UserAccessEditor = lazy(async () => ({
   default: (await import('@/features/security/UserAccessEditor')).UserAccessEditor,
 }));
 
+/**
+ * Вкладка «Ролі» (UI-37: список ролей, права групами, порівняння) — за
+ * `import()`. Маршрут стоїть під стелею 250 КБ (`D-132`), а список із групами
+ * прав і власним CSS — це +5.8 КБ, які платив би й той, хто прийшов на
+ * «Users» чи «Grants». Поки чанк їде, `AsyncBoundary` уже показав дані, тож
+ * пауза — частка секунди без скелета (той самий вибір, що й для грантів).
+ */
+const RoleBrowser = lazy(async () => ({
+  default: (await import('@/features/security/RoleBrowser')).RoleBrowser,
+}));
+
 /** Ролі груп каталогу — за `import()` з тієї ж причини, що й гранти: бюджет маршруту. */
 const GroupAssignmentsPanel = lazy(async () => ({
   default: (await import('@/features/security/GroupAssignmentsPanel')).GroupAssignmentsPanel,
 }));
 
 /**
- * Адміністрування безпеки: ролі, матриця прав, користувачі.
+ * Адміністрування безпеки: ролі (одна роль або порівняння), гранти, користувачі.
  *
  * ⚠ Матриця показує **оголошені** права ролей. Ефективні права конкретного
  * користувача рахує сервер і віддає в `/me`: складати їх тут означало б
@@ -224,34 +234,34 @@ export function SecurityPage(): JSX.Element {
     if (permissionCatalog.error !== null) void permissionCatalog.refetch();
   };
 
+  // ✎ UI-37: пояснення під назвою — своє на кожну вкладку (макет
+  // `screens-ops.js` `paintHead`: «A role is a set of permissions…» /
+  // «Who can reach which…» / «People and service accounts…»).
+  const description =
+    tab === 'grants'
+      ? t('security.subtitle.grants')
+      : tab === 'users'
+        ? t('security.subtitle.users')
+        : t('security.subtitle.roles');
+
   return (
     <>
       <PageHeader
         title={t('security.title')}
+        description={description}
         actions={
           <Group gap="xs">
-            <SegmentedControl
-              size="xs"
-              value={tab}
-              onChange={setTab}
-              data={[
-                { value: 'roles', label: t('security.roles') },
-                { value: 'grants', label: t('security.grants') },
-                { value: 'users', label: t('security.users') },
-              ]}
-            />
-
             {/* ⚠ Кнопка створення належить ВКЛАДЦІ, а не екрану: «створити»
-                поруч із матрицею прав і поруч із переліком користувачів
+                поруч із правами ролей і поруч із переліком користувачів
                 означає різне, і одна кнопка на обидві була б загадкою. */}
             {tab === 'roles' && canWrite('Security.ManageRoles') && (
-              <Button size="xs" onClick={() => setCreatingRole(true)}>
+              <Button onClick={() => setCreatingRole(true)}>
                 {t('security.createRole')}
               </Button>
             )}
 
             {tab === 'users' && canWrite('Security.ManageUsers') && (
-              <Button size="xs" onClick={() => setCreatingUser(true)}>
+              <Button onClick={() => setCreatingUser(true)}>
                 {t('security.createUser')}
               </Button>
             )}
@@ -260,51 +270,71 @@ export function SecurityPage(): JSX.Element {
       />
 
       {simulated && (
-        <Alert color="statusWarning" data-testid="security-simulation-read-only">
+        <Alert color="statusWarning" data-testid="security-simulation-read-only" mb="sm">
           {t('deny.SimulationReadOnly')}
         </Alert>
       )}
 
-      {tab === 'roles' && (
-        <AsyncBoundary<RoleView[]>
-          isPending={roles.isPending || permissionCatalog.isPending}
-          // ⛔ Матриця — це ролі × права: без каталогу прав її немає, є лише
-          // перелік ролей із порожніми рядками. Тому відмова БУДЬ-ЯКОГО з двох
-          // запитів — відмова матриці, а не «малюємо, що приїхало».
-          error={roles.error ?? permissionCatalog.error}
-          data={roles.data}
-          isEmpty={(all) => all.length === 0}
-          emptyTitle={t('security.noRoles')}
-          emptyHint={t('security.noRolesHint')}
-          skeleton="table"
-          onRetry={retryReferences}
-        >
-          {(all) => (
-            <RoleMatrix
-              roles={all}
-              permissions={permissions}
-              canManage={canWrite('Security.ManageRoles')}
-            />
+      {/* ✎ UI-37: вкладки — під шапкою, як у макеті (`E.Tabs` під
+          `PageHeader`), а не перемикач у ряду дій шапки. Вкладка й далі в
+          адресі (`?tab=`). */}
+      <Tabs
+        value={tab}
+        onChange={(next) => setTab(next === 'roles' ? null : next)}
+        keepMounted={false}
+      >
+        <Tabs.List mb="sm">
+          <Tabs.Tab value="roles">{t('security.roles')}</Tabs.Tab>
+          <Tabs.Tab value="grants">{t('security.grants')}</Tabs.Tab>
+          <Tabs.Tab value="users">{t('security.users')}</Tabs.Tab>
+        </Tabs.List>
+
+        <Tabs.Panel value="roles">
+          <AsyncBoundary<RoleView[]>
+            isPending={roles.isPending || permissionCatalog.isPending}
+            // ⛔ Права ролі — це ролі × каталог прав: без каталогу є лише
+            // перелік ролей із порожніми групами. Тому відмова БУДЬ-ЯКОГО з
+            // двох запитів — відмова вкладки, а не «малюємо, що приїхало».
+            error={roles.error ?? permissionCatalog.error}
+            data={roles.data}
+            isEmpty={(all) => all.length === 0}
+            emptyTitle={t('security.noRoles')}
+            emptyHint={t('security.noRolesHint')}
+            skeleton="table"
+            onRetry={retryReferences}
+          >
+            {(all) => (
+              <Suspense fallback={null}>
+                <RoleBrowser
+                  roles={all}
+                  permissions={permissions}
+                  canManage={canWrite('Security.ManageRoles')}
+                />
+              </Suspense>
+            )}
+          </AsyncBoundary>
+        </Tabs.Panel>
+
+        {/* ⛔ Ролі потрібні ВСІМ вкладкам (вибір ролі в грантах, групах, доступі),
+            а межа помилки вище живе лише на «Ролях». Без цього банера відмова
+            `GET /roles` на інших вкладках давала порожні випадні списки мовчки. */}
+        {tab !== 'roles' && <ErrorAlert error={roles.error} onRetry={retryReferences} />}
+
+        {/* ⛔ Гранти — окрема вкладка, а не колонка в правах ролі. Права
+            відповідають на питання «що людина вміє», гранти — «до чого саме»;
+            без другої відповіді перша не відкриває нічого (`A7-22`).
+            ⚠ `keepMounted` лише на цій панелі — див. `grantsUsed` вище. */}
+        <Tabs.Panel value="grants" keepMounted>
+          {grantsMounted && (
+            <div hidden={tab !== 'grants'} data-testid="grants-tab">
+              <Suspense fallback={null}>
+                <GrantsPanel roles={roles.data ?? []} />
+              </Suspense>
+            </div>
           )}
-        </AsyncBoundary>
-      )}
+        </Tabs.Panel>
 
-      {/* ⛔ Гранти — окрема вкладка, а не колонка в матриці прав. Права
-          відповідають на питання «що людина вміє», гранти — «до чого саме»;
-          без другої відповіді перша не відкриває нічого (`A7-22`). */}
-      {/* ⛔ Ролі потрібні ВСІМ вкладкам (вибір ролі в грантах, групах, доступі),
-          а межа помилки вище живе лише на «Ролях». Без цього банера відмова
-          `GET /roles` на інших вкладках давала порожні випадні списки мовчки. */}
-      {tab !== 'roles' && <ErrorAlert error={roles.error} onRetry={retryReferences} />}
-
-      {grantsMounted && (
-        <div hidden={tab !== 'grants'} data-testid="grants-tab">
-          <Suspense fallback={null}>
-            <GrantsPanel roles={roles.data ?? []} />
-          </Suspense>
-        </div>
-      )}
-
+        <Tabs.Panel value="users">
       {tab === 'users' && canWrite('Security.ManageUsers') && (
         <Suspense fallback={null}>
           <GroupAssignmentsPanel roles={roles.data ?? []} />
@@ -365,7 +395,7 @@ export function SecurityPage(): JSX.Element {
                         існувало взагалі, а адреса не присвоювалася ніде —
                         обліковий запис виходив безправним і без сповіщень. */}
                     <Button
-                      size="compact-xs"
+                      size="xs"
                       variant="subtle"
                       disabled={simulated}
                       onClick={() => {
@@ -474,7 +504,6 @@ export function SecurityPage(): JSX.Element {
                   : t('common.shownOf', { shown: page.items.length, total: page.totalCount })}
               </Text>
               <Button
-                size="xs"
                 variant="default"
                 loading={users.isFetchingNextPage}
                 onClick={() => void users.fetchNextPage()}
@@ -487,6 +516,8 @@ export function SecurityPage(): JSX.Element {
           )}
         </AsyncBoundary>
       )}
+        </Tabs.Panel>
+      </Tabs>
 
       <CreateRoleModal
         opened={creatingRole}

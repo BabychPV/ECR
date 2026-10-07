@@ -129,14 +129,14 @@ export function UserAdminActions({ user }: { user: UserView }): JSX.Element | nu
           кнопок читалка інакше чує десяток однакових «Lock» без рядка. */}
       <Group gap="xs" wrap="nowrap">
         {user.isLockedOut ? (
-          <Button size="compact-xs" variant="subtle"
+          <Button size="xs" variant="subtle"
             aria-label={t('security.unlockUserNamed', { userName: user.userName })}
             onClick={() => openLock('unlock')}
           >
             {t('security.unlockUser')}
           </Button>
         ) : (
-          <Button size="compact-xs" variant="subtle" color="statusError"
+          <Button size="xs" variant="subtle" color="statusError"
             aria-label={t('security.lockUserNamed', { userName: user.userName })}
             onClick={() => openLock('lock')}
           >
@@ -144,7 +144,7 @@ export function UserAdminActions({ user }: { user: UserView }): JSX.Element | nu
           </Button>
         )}
         {user.provider === 'Local' && (
-          <Button size="compact-xs" variant="subtle"
+          <Button size="xs" variant="subtle"
             aria-label={t('security.resetPasswordNamed', { userName: user.userName })}
             onClick={() => setResetting(true)}
           >

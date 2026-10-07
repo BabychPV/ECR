@@ -50,6 +50,8 @@ import {
   type PendingEdit,
 } from './useCellPatch';
 import { holdRejectedEdits, registerSliceSaver, scheduleAutosave } from './autosave';
+import { GridAriaPlugin } from './gridAria';
+import { mergePatchNotices, PatchNoticesAlert, type PatchNotice } from './patchNotices';
 // ⚠ Ключ комірки СХОВИЩА під власним іменем: у цьому файлі вже є `cellKey`
 // з `permissions.ts`, і хоч обидва дають `rowKey:columnCode`, ключем мапи
 // правок має бути рівно той, яким її будує сам сховищний модуль.
@@ -82,6 +84,7 @@ import {
   type GridSelection,
 } from './selection';
 import { publishFocus } from './focusStore';
+import { publishSelection } from './selectionStore';
 import {
   NavigationHighlightMs,
   cellCoordinateOf,
@@ -90,6 +93,7 @@ import {
   type CellNavigationRequest,
 } from './cellNavigation';
 import { GridFormulaBar } from './GridFormulaBar';
+import { GridStatusBar } from './GridStatusBar';
 import { useOutOfWindowMarks } from './outOfWindowMarks';
 import {
   columnTotals,
@@ -260,6 +264,9 @@ const RowLabelColumnWidth = 260;
  * рефетч на фокус.
  */
 const LookupEntriesStaleTimeMs = 5 * 60_000;
+
+/** Поправки ARIA поверх вбудованого `WCAGPlugin` (див. `gridAria.ts`). Масив стабільний: новий на кожен рендер перестворював би плагіни. */
+const GridPlugins = [GridAriaPlugin];
 
 /**
  * `combine` для `useQueries` записів Lookup-довідників: паралельні масиви за
@@ -542,6 +549,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
               message: m.message,
             })),
         ]);
+        setPatchNotices((prev) => mergePatchNotices(prev, touchedRowKeys, response.validation));
 
         // ⚠ Успіх ЦЬОГО патчу знімає банер. Маркери відхилених комірок живуть у
         // сховищі (`V-01`) і знімаються там же, рівно з тими комірками, які
@@ -683,6 +691,8 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
   const [requiredInputWarnings, setRequiredInputWarnings] = useState<
     readonly RequiredInputCell[]
   >([]);
+  // Решта `Warning`/`Info` успішного патчу (`patchNotices.tsx`).
+  const [patchNotices, setPatchNotices] = useState<readonly PatchNotice[]>([]);
 
   // ⛔ Q-30x (High): раніше справжня причина відмови збереження (наприклад,
   // `Колонка «C1» очікує число.`, ECR-CELL-0422) доїжджала до клієнта
@@ -745,6 +755,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
     // ⚠ І фокус — з тієї самої причини (`UI-08`): рядок формули показував би
     // вираз колонки з тим самим номером, але з іншої таблиці.
     publishFocus(tableInstanceId, periodKey, null);
+    publishSelection(tableInstanceId, periodKey, null);
 
     touchHistory();
 
@@ -1890,6 +1901,8 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         ),
         trackSelection(node, (next) => {
           selection.current = next;
+          // ✎ UI-23: рядок стану під сіткою читає виділення зі сховища.
+          publishSelection(tableInstanceId, periodKey, next.range);
         }),
 
         // ⛔ `UI-08`: фокус публікується у СХОВИЩЕ, а не в стан компонента.
@@ -1982,14 +1995,14 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
       {slice.error !== null && <ErrorAlert error={slice.error} onRetry={() => void slice.refetch()} />}
 
       <Group gap="xs" key={historyRevision}>
-        <Button size="xs" variant="default" disabled={!history.current.canUndo} onClick={() => applyHistory(history.current.undo())}>
+        <Button variant="default" disabled={!history.current.canUndo} onClick={() => applyHistory(history.current.undo())}>
           {t('grid.undo')}
         </Button>
-        <Button size="xs" variant="default" disabled={!history.current.canRedo} onClick={() => applyHistory(history.current.redo())}>
+        <Button variant="default" disabled={!history.current.canRedo} onClick={() => applyHistory(history.current.redo())}>
           {t('grid.redo')}
         </Button>
         {Object.keys(widths).length > 0 && (
-          <Button size="xs" variant="default" onClick={resetColumnWidths}>
+          <Button variant="default" onClick={resetColumnWidths}>
             {t('grid.columnWidths.reset')}
           </Button>
         )}
@@ -2025,7 +2038,6 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
          */}
         {(saveStatus === 'error' || rejections.size > 0) && pending.size > 0 && (
           <Button
-            size="xs"
             loading={saveLoading}
             onClick={() => {
               if (isPending) return;
@@ -2115,7 +2127,6 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
             рядок зламав би і формули з діапазонами, і звірку з еталоном. */}
         {allowsDynamicRows && !readOnly && (
           <Button
-            size="xs"
             variant="default"
             loading={addRowLoading}
             disabled={maxDynamicRows !== null && (data?.rows.length ?? 0) >= maxDynamicRows}
@@ -2150,7 +2161,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         <Alert color="violet" title={t('grid.roundedTitle', { count: rounded.length })}>
           <Group gap="sm">
             <Text size="sm">{t('grid.roundedHint')}</Text>
-            <Button size="xs" variant="subtle" onClick={() => setShowRounded(true)}>
+            <Button variant="subtle" onClick={() => setShowRounded(true)}>
               {t('grid.roundedShow')}
             </Button>
           </Group>
@@ -2205,6 +2216,8 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         </Alert>
       )}
 
+      <PatchNoticesAlert notices={patchNotices} onDismiss={() => setPatchNotices([])} />
+
       {/* ⛔ `UI-08`: рядок формули НАД сіткою — там, де він стоїть в Excel і
           де око шукає «що в комірці, на якій я стою». Під сіткою його
           закривав би закріплений рядок підсумків. */}
@@ -2234,6 +2247,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
           // без цього набране мовчки зникало. Esc, як і раніше, скасовує
           // (`cancelChanges`); Enter/Tab фіксують, як і досі.
           applyOnClose
+          plugins={GridPlugins}
           onBeforeedit={onBeforeEdit}
           onBeforerangeedit={onBeforeRangeEdit}
           onAfteredit={onAfterEdit}
@@ -2241,6 +2255,18 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
           style={{ height: '70vh' }}
         />
       </div>
+
+      {/* ✎ UI-23: рядок стану під сіткою — Count/Sum/Average виділення. */}
+      {data !== undefined && (
+        <GridStatusBar
+          tableInstanceId={tableInstanceId}
+          periodKey={periodKey}
+          slice={data}
+          columns={columns}
+          rows={rows}
+          pending={pending}
+        />
+      )}
 
       <Modal
         opened={showRounded}
@@ -2295,10 +2321,10 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
           {confirmRequest?.hint}
         </Text>
         <Group justify="flex-end" gap="xs">
-          <Button size="xs" variant="default" onClick={() => setConfirmRequest(null)}>
+          <Button variant="default" onClick={() => setConfirmRequest(null)}>
             {t('grid.confirmCancel')}
           </Button>
-          <Button size="xs" onClick={onConfirmEdit}>
+          <Button onClick={onConfirmEdit}>
             {t('grid.confirmProceed')}
           </Button>
         </Group>
@@ -2318,10 +2344,10 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
           {t('grid.batchConfirmBody', { count: batchConfirm?.count ?? 0 })}
         </Text>
         <Group justify="flex-end" gap="xs">
-          <Button size="xs" variant="default" onClick={() => setBatchConfirm(null)}>
+          <Button variant="default" onClick={() => setBatchConfirm(null)}>
             {t('grid.confirmCancel')}
           </Button>
-          <Button size="xs" onClick={onConfirmBatch}>
+          <Button onClick={onConfirmBatch}>
             {t('grid.confirmProceed')}
           </Button>
         </Group>
@@ -2448,6 +2474,22 @@ export function gridColumns(
       name:
         (column.unitSymbol === null ? column.header : `${column.header}, ${column.unitSymbol}`) +
         (isRequired ? ' *' : ''),
+
+      // ✎ UI-24 (макет: «Fuel gas / 10³ m³»): одиниця — ДРУГИМ приглушеним
+      // рядком під назвою, а не через кому. `name` лишається повним текстом
+      // («Назва, одиниця *») — його читають сортування, підказки й тести;
+      // шаблон лише розкладає ту саму розмітку на два рядки, а кома для
+      // читалки лишається прихованою, тож озвучується «Назва, одиниця».
+      ...(column.unitSymbol === null
+        ? {}
+        : {
+            columnTemplate: (h) =>
+              h('span', { class: 'ecr-header-two-line' }, [
+                h('span', { class: 'ecr-header-name' }, column.header + (isRequired ? ' *' : '')),
+                h('span', { class: 'ecr-header-sr' }, ', '),
+                h('span', { class: 'ecr-header-unit' }, column.unitSymbol ?? ''),
+              ]),
+          }),
 
       // Збережена ширина цієї колонки для цього користувача (ФВ-14.29, D-201).
       size: columnWidth(widths[column.code], column.widthPx),

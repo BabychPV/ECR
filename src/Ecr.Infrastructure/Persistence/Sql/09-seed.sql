@@ -645,6 +645,10 @@ UPDATE t
   FROM sys_ecr.UiString AS t
   JOIN (VALUES
     (N'common.loading',                  N'en', N'Loading…', N'Loading...'),
+    -- COLL:ui34tpl UI-34b: пошук переліку шаблонів бачить і назву (поле name з GET /templates).
+    (N'templates.searchPlaceholder', N'en', N'Template code', N'Template name or code'),
+    (N'templates.searchPlaceholder', N'ru', N'Код шаблона', N'Название или код шаблона'),
+    (N'templates.searchPlaceholder', N'kz', N'Үлгі коды', N'Үлгі атауы немесе коды'),
     -- COLL:an43fix D-285: загальний deny.InsufficientGrantLevel повернуто до загального формулювання (подання має власний ключ .Submit).
     (N'deny.InsufficientGrantLevel',     N'en', N'Your access level is too low for this action: ask for a higher level. To submit a sheet you need the Submit level, or the Write level together with the Submit documents right in this project.', N'Your grant level is too low for this action: ask for a higher grant level, not a new grant.'),
     (N'deny.InsufficientGrantLevel',     N'ru', N'Уровень вашего доступа недостаточен для этого действия: запросите более высокий уровень. Для подачи листа нужен уровень «Подача» либо уровень «Запись» вместе с правом «Подача документов» в этом проекте.', N'Уровень вашего доступа недостаточен для этого действия: запросите более высокий уровень доступа, а не новый доступ.'),
@@ -1077,7 +1081,14 @@ UPDATE t
     -- a4-03b: текст межі виразу нейтральний (для правила валідації «розбийте на кілька формул» не пасувало).
     (N'err.ECR-REQ-0422.expressionTooLong', N'en', N'The expression is too long: {length} characters, at most {max} are allowed. Split it into several formulas.', N'The expression is too long: {length} characters, at most {max} are allowed. Shorten it or split it into several.'),
     (N'err.ECR-REQ-0422.expressionTooLong', N'ru', N'Выражение слишком длинное: {length} символов, допускается не более {max}. Разбейте его на несколько формул.', N'Выражение слишком длинное: {length} символов, допускается не более {max}. Сократите его или разделите на несколько.'),
-    (N'err.ECR-REQ-0422.expressionTooLong', N'kz', N'Өрнек тым ұзын: {length} таңба, ең көбі {max} рұқсат етіледі. Оны бірнеше формулаға бөліңіз.', N'Өрнек тым ұзын: {length} таңба, ең көбі {max} рұқсат етіледі. Оны қысқартыңыз немесе бірнешеге бөліңіз.')
+    (N'err.ECR-REQ-0422.expressionTooLong', N'kz', N'Өрнек тым ұзын: {length} таңба, ең көбі {max} рұқсат етіледі. Оны бірнеше формулаға бөліңіз.', N'Өрнек тым ұзын: {length} таңба, ең көбі {max} рұқсат етіледі. Оны қысқартыңыз немесе бірнешеге бөліңіз.'),
+    -- COLL:uipalette UI-30: кнопка й поле палітри кажуть, що тут є й екрани та дії, не лише дані.
+    (N'search.open', N'en', N'Search data', N'Search or run a command'),
+    (N'search.open', N'ru', N'Поиск данных', N'Поиск или команда'),
+    (N'search.open', N'kz', N'Деректерді іздеу', N'Іздеу немесе пәрмен'),
+    (N'search.placeholder', N'en', N'Documents, templates, registries…', N'Type a screen, a document key or an action…'),
+    (N'search.placeholder', N'ru', N'Документы, шаблоны, справочники…', N'Экран, ключ документа или действие…'),
+    (N'search.placeholder', N'kz', N'Құжаттар, үлгілер, анықтамалықтар…', N'Экран, құжат кілті немесе әрекет…')
   ) AS s ([Key], Lang, OldVal, NewVal)
     ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
  WHERE t.Value = s.OldVal COLLATE Latin1_General_BIN2;
@@ -2232,8 +2243,8 @@ USING (VALUES
     (N'nav.jobs',                        N'en', N'Jobs', 1),
     (N'nav.health',                      N'en', N'Health', 1),
     -- Пошук даних у шапці (BE-19): кнопка й палітра Ctrl+K.
-    (N'search.open',                     N'en', N'Search data', 1),
-    (N'search.placeholder',              N'en', N'Documents, templates, registries…', 1),
+    (N'search.open',                     N'en', N'Search or run a command', 1),
+    (N'search.placeholder',              N'en', N'Type a screen, a document key or an action…', 1),
     (N'search.minLength',                N'en', N'Type at least {min} characters', 1),
     (N'search.empty',                    N'en', N'Nothing found', 1),
     (N'search.rateLimited',              N'en', N'Too many searches — retrying in {seconds}s', 1),
@@ -6734,8 +6745,455 @@ USING (VALUES
     (N'validation.rule.budget', N'en', N'Rule ''{rule}'' could not be evaluated: the formula is too large for one calculation (more than 20,000 steps or 96 nesting levels). Split it into several calculated columns.', 1),
     -- COLL:exprbudget ── кінець секції ──
     -- COLL:a105picker ── A1-05: вибір аркуша/таблиці/колонки в гранті без права Template.View називає причину; ru/kz — порцією COLL:a105picker у блоці I18N нижче ──
-    (N'grants.pickerForbidden', N'en', N'You cannot list templates: picking a sheet, table or column needs the Template.View permission (for example the TemplateAdministrator role). Ask a role administrator to add it to your account, then reopen the list.', 1)
+    (N'grants.pickerForbidden', N'en', N'You cannot list templates: picking a sheet, table or column needs the Template.View permission (for example the TemplateAdministrator role). Ask a role administrator to add it to your account, then reopen the list.', 1),
     -- COLL:a105picker ── кінець секції ──
+    -- COLL:uishell ── UI-11/UI-12: групи бічного меню й пояснення екранів під заголовком (макет docs/design/hybrid); ru/kz — порцією COLL:uishell у блоці I18N нижче ──
+    (N'nav.group.work', N'en', N'Work', 1),
+    (N'nav.group.configure', N'en', N'Configure', 1),
+    (N'nav.group.access', N'en', N'Access', 1),
+    (N'nav.group.operate', N'en', N'Operate', 1),
+    (N'nav.documents.description', N'en', N'Reports of your projects for one period. Open a document to work in it.', 1),
+    (N'nav.myGroups.description', N'en', N'Where your access comes from: directory groups give you roles, roles give you permissions and projects. Nothing here can be edited; an administrator changes it for you.', 1),
+    (N'nav.templates.description', N'en', N'A template is the structure of a report: sheets, tables, columns, formulas and rules. Documents are created from a published version and stay on it.', 1),
+    (N'nav.registries.description', N'en', N'Reference lists that cells, formulas and mappings pick values from: sources, substances, fuels, limits.', 1),
+    (N'nav.methodologies.description', N'en', N'How emissions are calculated: formulas, constants and the rules that bind them to table rows. A published version is what documents calculate with.', 1),
+    (N'nav.units.description', N'en', N'Units of measure grouped by dimension. Each unit converts to the base unit of its dimension, so values from sources and cells can be compared safely.', 1),
+    (N'nav.sources.description', N'en', N'Where collected values come from: the PI System and SQL databases. Each source runs on its own schedule.', 1),
+    (N'nav.mapping.description', N'en', N'Which source attribute fills which cell, shown on real values, so a wrong unit or a wrong row is visible before it reaches a report.', 1),
+    (N'nav.periods.description', N'en', N'A period is one reporting month of a project. While it is open, data can be entered; after the deadline it closes, and later it is archived.', 1),
+    (N'nav.jobs.description', N'en', N'Exports, imports, recalculations and nightly checks run in the background. A failed job shows why it failed.', 1),
+    (N'nav.snapshots.description', N'en', N'A snapshot is the exact copy of a report at the moment it was made. It never changes, even if the documents are edited later.', 1),
+    (N'nav.audit.description', N'en', N'Every change of every number: who, when, what it was and what it became. Nothing here can be edited or deleted.', 1),
+    (N'nav.consistency.description', N'en', N'Every night ECR compares numbers that must agree with each other across sheets, documents and registries. Each finding is listed here.', 1),
+    (N'nav.uiStrings.description', N'en', N'Every label, message and button text of ECR. English is the source; missing translations fall back to English.', 1),
+    (N'nav.health.description', N'en', N'Is ECR working right now? Warnings appear only when there is something to do.', 1),
+    -- COLL:uishell ── кінець секції ──
+    -- COLL:uiperiod ── UI-13: PeriodPicker за макетом (сітка періодів, стан, «closes in»); ru/kz — порцією COLL:uiperiod у блоці I18N нижче ──
+    (N'period.group', N'en', N'Reporting period', 1),
+    (N'period.choose', N'en', N'Choose a period', 1),
+    (N'period.gridTitle', N'en', N'Reporting period · {year}', 1),
+    (N'period.closesIn.one', N'en', N'closes in {count} day', 1),
+    (N'period.closesIn.few', N'en', N'closes in {count} days', 1),
+    (N'period.closesIn.many', N'en', N'closes in {count} days', 1),
+    (N'period.closesIn.other', N'en', N'closes in {count} days', 1),
+    (N'period.stateInProjects', N'en', N'{state} in {count} of {total} projects', 1),
+    -- COLL:uiperiod ── кінець секції ──
+    -- COLL:uipalette ── UI-30 командна палітра: екрани й дії; ru/kz — порцією COLL:uipalette у блоці I18N нижче ──
+    (N'palette.title', N'en', N'Command palette', 1),
+    (N'palette.screens', N'en', N'Screens', 1),
+    (N'palette.actions', N'en', N'Actions', 1),
+    (N'palette.hintMove', N'en', N'move', 1),
+    (N'palette.hintOpen', N'en', N'open', 1),
+    (N'palette.action.themeDark', N'en', N'Switch to dark theme', 1),
+    (N'palette.action.themeLight', N'en', N'Switch to light theme', 1),
+    (N'palette.action.densityCompact', N'en', N'Use compact rows', 1),
+    (N'palette.action.densityComfortable', N'en', N'Use comfortable rows', 1),
+    (N'palette.action.collapseMenu', N'en', N'Collapse menu to icons', 1),
+    (N'palette.action.expandMenu', N'en', N'Expand menu', 1),
+    -- COLL:uipalette ── кінець секції ──
+    -- COLL:ui-docs ── UI-19/UI-29/UI-18: колонки переліку документів, смужка аркушів, швидкий перегляд, Clear filters; ru/kz — порцією COLL:ui-docs у блоці I18N нижче ──
+    (N'segments.approvedOf', N'en', N'{done} of {total} approved', 1),
+    (N'documents.document', N'en', N'Document', 1),
+    (N'documents.issues', N'en', N'Issues', 1),
+    (N'documents.issuesHint', N'en', N'Open validation errors: {count}', 1),
+    (N'documents.updated', N'en', N'Updated', 1),
+    (N'documents.quickLookColumn', N'en', N'Quick look', 1),
+    (N'documents.quickLook', N'en', N'Quick look at {key}', 1),
+    (N'documents.quickLookClose', N'en', N'Close quick look', 1),
+    (N'documents.openDocument', N'en', N'Open document', 1),
+    (N'documents.quickLookNoPeriod', N'en', N'Choose a period to see sheet states and filled tables.', 1),
+    (N'documents.quickLookResponsible', N'en', N'Responsible', 1),
+    (N'documents.lastChangedBy', N'en', N'Last changed by', 1),
+    (N'documents.quickLookTablesFilled', N'en', N'{filled} of {total} tables filled', 1),
+    (N'documents.quickLookLatestChanges', N'en', N'Latest changes', 1),
+    (N'documents.clearFilters', N'en', N'Clear filters', 1),
+    -- COLL:ui-docs ── кінець секції ──
+    -- COLL:ui20consistency ── UI-20: знахідки узгодженості на шаблоні переліку (пояснення, смуга за вагою, шторка); ru/kz — порцією COLL:ui20consistency у блоці I18N нижче ──
+    (N'consistency.description', N'en', N'Every night ECR compares numbers that must agree with each other across documents, tables and registries. Each finding names the rule that failed and the record it affects.', 1),
+    (N'consistency.statsLabel', N'en', N'Unresolved findings by severity', 1),
+    (N'consistency.statErrors', N'en', N'errors', 1),
+    (N'consistency.statWarnings', N'en', N'warnings', 1),
+    (N'consistency.statInfo', N'en', N'info', 1),
+    (N'consistency.noMatch', N'en', N'No findings match the filters.', 1),
+    -- COLL:ui20consistency ── кінець секції ──
+    -- COLL:ui21units ── UI-21: довідник одиниць на шаблоні переліку (пояснення, смуга, пошук, шторка, діалог перерахунку); ru/kz — порцією COLL:ui21units у блоці I18N нижче ──
+    (N'units.description', N'en', N'Units of measure grouped by dimension. Each unit converts to the base unit of its dimension, so values from sources and cells can be compared safely.', 1),
+    (N'units.statsLabel', N'en', N'Units at a glance', 1),
+    (N'units.statUnits', N'en', N'units', 1),
+    (N'units.statDimensions', N'en', N'dimensions', 1),
+    (N'units.statOffset', N'en', N'with an offset (temperature)', 1),
+    (N'units.search', N'en', N'Search', 1),
+    (N'units.searchPlaceholder', N'en', N'Code or dimension', 1),
+    (N'units.baseUnit', N'en', N'Base unit', 1),
+    (N'units.checkConversion', N'en', N'Check a conversion', 1),
+    (N'units.swap', N'en', N'Swap units', 1),
+    (N'units.conversion', N'en', N'Conversion', 1),
+    (N'units.whereUsed', N'en', N'Where used', 1),
+    (N'units.noMatch', N'en', N'No units match the filters.', 1),
+    (N'units.usedIn', N'en', N'Used in', 1),
+    (N'units.statUnused', N'en', N'not used anywhere', 1),
+    -- COLL:ui21units ── кінець секції ──
+    -- COLL:ui33periods ── UI-33: Periods — плитки періодів року, «All projects · current period», смуга показників; ru/kz — порцією COLL:ui33periods у блоці I18N нижче ──
+    (N'periods.tile.closesToday', N'en', N'closes today', 1),
+    (N'periods.tile.closesIn.one', N'en', N'closes in {count} day', 1),
+    (N'periods.tile.closesIn.other', N'en', N'closes in {count} days', 1),
+    (N'periods.tile.closesIn.few', N'en', N'closes in {count} days', 1),
+    (N'periods.tile.closesIn.many', N'en', N'closes in {count} days', 1),
+    (N'periods.tile.reopened', N'en', N'reopened until {date} · edits are late', 1),
+    (N'periods.tile.grace', N'en', N'grace period until {date} · edits are late', 1),
+    (N'periods.tile.opens', N'en', N'opens {date}', 1),
+    (N'periods.tile.readOnly', N'en', N'read-only', 1),
+    (N'periods.tile.now', N'en', N'now', 1),
+    (N'periods.year.title', N'en', N'{project} · {year}', 1),
+    (N'periods.overview.title', N'en', N'All projects · current period', 1),
+    (N'periods.overview.hint', N'en', N'select a project to show its calendar above', 1),
+    (N'periods.overview.project', N'en', N'Project', 1),
+    (N'periods.overview.current', N'en', N'Current period', 1),
+    (N'periods.overview.state', N'en', N'State', 1),
+    (N'periods.overview.closes', N'en', N'Closes', 1),
+    (N'periods.overview.inGrace', N'en', N'for {period}', 1),
+    (N'periods.overview.stats', N'en', N'Periods of all projects', 1),
+    (N'periods.overview.stat.open', N'en', N'open', 1),
+    (N'periods.overview.stat.grace', N'en', N'in grace period', 1),
+    (N'periods.overview.stat.soon', N'en', N'closing in ≤ 3 days', 1),
+    (N'periods.overview.noMatch', N'en', N'No project matches this filter', 1),
+    -- COLL:ui33periods ── кінець секції ──
+    -- COLL:ui34tpl ── UI-34: перелік шаблонів за макетом (поточна версія, чернетка, стан, смуга, фільтри); ru/kz — порцією COLL:ui34tpl у блоці I18N нижче ──
+    (N'templates.subtitle', N'en', N'A template is the structure of a report: sheets, tables, columns, formulas and rules. Documents are created from a published version and stay on it.', 1),
+    (N'templates.stats', N'en', N'Template summary', 1),
+    (N'templates.stat.all', N'en', N'templates', 1),
+    (N'templates.stat.published', N'en', N'published versions', 1),
+    (N'templates.stat.publishedHint', N'en', N'Show templates that have a published version', 1),
+    (N'templates.stat.drafts', N'en', N'drafts in progress', 1),
+    (N'templates.stat.draftsHint', N'en', N'Show templates with an open draft', 1),
+    (N'templates.search', N'en', N'Search', 1),
+    (N'templates.searchPlaceholder', N'en', N'Template name or code', 1),
+    (N'templates.currentVersion', N'en', N'Current version', 1),
+    (N'templates.noCurrentVersion', N'en', N'no current version', 1),
+    (N'templates.notPublished', N'en', N'Not published yet', 1),
+    (N'templates.draft', N'en', N'Draft', 1),
+    (N'templates.state', N'en', N'State', 1),
+    (N'templates.noMatch', N'en', N'No templates match the filters', 1),
+    (N'templates.draftBy', N'en', N'{name} is editing', 1),
+    (N'templates.documents', N'en', N'Documents', 1),
+    (N'templates.documentsHint', N'en', N'Documents in the projects you can see that use this template', 1),
+    (N'templates.updated', N'en', N'Updated', 1),
+    (N'templates.stat.documents', N'en', N'documents using them', 1),
+    (N'templates.stat.documentsHint', N'en', N'Show templates that documents depend on', 1),
+    -- COLL:ui34tpl ── кінець секції ──
+    -- COLL:ui38audit ── UI-38: журнал змін у формі макета (Was → becomes, Δ, Late, походження словом) і ім'я кнопки очищення дати; ru/kz — порцією COLL:ui38audit у блоці I18N нижче ──
+    (N'audit.documentCell', N'en', N'Document · cell', 1),
+    (N'audit.wasBecomes', N'en', N'Was → becomes', 1),
+    (N'audit.lateMark', N'en', N'Late', 1),
+    (N'audit.lateHint', N'en', N'Made after the data entry deadline', 1),
+    (N'audit.newValue', N'en', N'new', 1),
+    (N'audit.delta', N'en', N'Difference', 1),
+    (N'audit.originLabel.UserEdit', N'en', N'Typed by a user', 1),
+    (N'audit.originLabel.Import', N'en', N'Excel import', 1),
+    (N'audit.originLabel.Recalculation', N'en', N'Recalculation', 1),
+    (N'audit.originLabel.Migration', N'en', N'Migration', 1),
+    (N'dates.clear', N'en', N'Clear the date', 1),
+    (N'dates.clearNamed', N'en', N'Clear {field}', 1),
+    -- COLL:ui38audit ── кінець секції ──
+    -- COLL:ui31wizard ── UI-31: майстер створення документа (кроки, підсумок, підписи Back/Next/Review); ru/kz — порцією COLL:ui31wizard у блоці I18N нижче ──
+    (N'wizard.back', N'en', N'Back', 1),
+    (N'wizard.next', N'en', N'Next', 1),
+    (N'wizard.review', N'en', N'Review', 1),
+    (N'documents.createApply', N'en', N'Create document', 1),
+    (N'documents.createReviewText', N'en', N'Nothing is created until you confirm. The document starts empty, as a draft.', 1),
+    (N'documents.createProjectHint', N'en', N'Which site is this report for?', 1),
+    (N'documents.createTemplateHint', N'en', N'The project decides the template version.', 1),
+    (N'documents.createPeriodHint', N'en', N'The document opens in this period. Periods not opened yet are not listed.', 1),
+    (N'documents.createNoOpenPeriod', N'en', N'No period of this project is open. The document can be created, but data can be entered only after a period administrator opens a period.', 1),
+    (N'documents.createClosedPeriod', N'en', N'This period is closed. The document will be created, but its data can be changed only after the period is reopened.', 1),
+    (N'documents.createSheetsHint', N'en', N'Leave out sheets that do not apply to this site. All are included by default.', 1),
+    (N'documents.createNoSheets', N'en', N'Include at least one sheet: a document without sheets cannot be filled in.', 1),
+    (N'documents.createSheetsCount', N'en', N'{included} of {total}', 1),
+    -- COLL:ui31wizard ── кінець секції ──
+    -- COLL:inspector ── UI-25: інспектор документа (Issues / History / Info); ru/kz — порцією COLL:inspector у блоці I18N нижче ──
+    (N'inspector.title', N'en', N'Inspector', 1),
+    (N'inspector.close', N'en', N'Close inspector', 1),
+    (N'inspector.tabsLabel', N'en', N'Inspector sections', 1),
+    (N'inspector.tabIssues', N'en', N'Issues', 1),
+    (N'inspector.tabHistory', N'en', N'History', 1),
+    (N'inspector.tabInfo', N'en', N'Info', 1),
+    (N'inspector.noIssues', N'en', N'No issues', 1),
+    (N'inspector.issuesCount', N'en', N'{count} issue(s)', 1),
+    (N'inspector.issuesTitle', N'en', N'{errors} error(s), {warnings} warning(s) — open the list', 1),
+    (N'inspector.historyButton', N'en', N'History of the selected cell', 1),
+    (N'inspector.notValidatedTitle', N'en', N'Not validated yet', 1),
+    (N'inspector.notValidatedHint', N'en', N'Run “Validate” to check the document for this period.', 1),
+    (N'inspector.noIssuesTitle', N'en', N'No issues found', 1),
+    (N'inspector.noIssuesHint', N'en', N'The last validation run found nothing to fix for this period.', 1),
+    (N'inspector.noCellTitle', N'en', N'No cell selected', 1),
+    (N'inspector.noCellHint', N'en', N'Select a cell in a table to see its history and details.', 1),
+    (N'inspector.loading', N'en', N'Loading…', 1),
+    (N'inspector.noHistoryTitle', N'en', N'No history', 1),
+    (N'inspector.noHistoryHint', N'en', N'This cell has not been changed in this period during the last 12 months.', 1),
+    (N'inspector.unknownAuthor', N'en', N'User #{id}', 1),
+    (N'inspector.lateEdit', N'en', N'Late edit', 1),
+    (N'inspector.info.cell', N'en', N'Cell', 1),
+    (N'inspector.info.row', N'en', N'Row', 1),
+    (N'inspector.info.column', N'en', N'Column', 1),
+    (N'inspector.info.type', N'en', N'Type', 1),
+    (N'inspector.info.input', N'en', N'Input', 1),
+    (N'inspector.info.inputCalculated', N'en', N'Calculated on the server', 1),
+    (N'inspector.info.inputReadOnly', N'en', N'Read-only', 1),
+    (N'inspector.info.inputManual', N'en', N'Manual · paste · import', 1),
+    (N'inspector.info.value', N'en', N'Stored value', 1),
+    (N'inspector.info.table', N'en', N'Table', 1),
+    (N'inspector.info.tableIssues', N'en', N'Issues in this table', 1),
+    (N'inspector.info.tableIssuesValue', N'en', N'{errors} error(s), {warnings} warning(s)', 1),
+    -- COLL:inspector ── кінець секції ──
+    -- COLL:ui28jobs ── екран задач на шаблоні переліку (UI-28); ru/kz — порцією COLL:ui28jobs у блоці I18N нижче ──
+    (N'jobs.description', N'en', N'Exports, imports, recalculations and nightly checks run in the background. A failed job says why and can be restarted.', 1),
+    (N'jobs.statsLabel', N'en', N'Jobs at a glance', 1),
+    (N'jobs.statRunning', N'en', N'running', 1),
+    (N'jobs.statQueued', N'en', N'queued', 1),
+    (N'jobs.statFailed', N'en', N'failed in 24 h', 1),
+    (N'jobs.statLatency', N'en', N'Average start delay over the last 24 hours: {seconds} s', 1),
+    (N'jobs.search', N'en', N'Search', 1),
+    (N'jobs.searchPlaceholder', N'en', N'Job, document or person', 1),
+    (N'jobs.filterType', N'en', N'Types', 1),
+    (N'jobs.filterState', N'en', N'States', 1),
+    (N'jobs.noMatch', N'en', N'No jobs match the filters.', 1),
+    (N'jobs.progress', N'en', N'Progress', 1),
+    (N'jobs.stoppedAt', N'en', N'stopped at {percent} %', 1),
+    (N'jobs.refresh', N'en', N'Refresh', 1),
+    (N'jobs.findById', N'en', N'Find a job by id', 1),
+    (N'jobs.whyFailed', N'en', N'Why it failed', 1),
+    (N'jobs.attempts', N'en', N'Attempts', 1),
+    -- COLL:ui28jobs ── кінець секції ──
+    -- COLL:ui22tree ── UI-22: дерево таблиць документа (фільтр, стан кожної таблиці, перемикач); ru/kz — порцією COLL:ui22tree у блоці I18N нижче ──
+    (N'grid.tree.label', N'en', N'Tables of this sheet', 1),
+    (N'grid.tree.filter', N'en', N'Filter tables', 1),
+    (N'grid.tree.errorsOnly', N'en', N'Show only tables with errors', 1),
+    (N'grid.tree.tablesFilled', N'en', N'{filled} of {total} tables filled', 1),
+    (N'grid.tree.issues', N'en', N'Issues: {count}', 1),
+    (N'grid.tree.nothingFound', N'en', N'No tables match the filter.', 1),
+    (N'grid.tree.clearFilter', N'en', N'Clear filter', 1),
+    (N'grid.tree.toggle', N'en', N'Table navigator', 1),
+    (N'grid.tree.state.unknown', N'en', N'Status not loaded yet', 1),
+    (N'grid.tree.state.none', N'en', N'Nothing to fill', 1),
+    (N'grid.tree.state.empty', N'en', N'Not filled', 1),
+    (N'grid.tree.state.partial', N'en', N'Partially filled: {filled} of {total} cells', 1),
+    (N'grid.tree.state.filled', N'en', N'Filled', 1),
+    (N'grid.tree.state.error', N'en', N'Errors: {count}', 1),
+    (N'grid.tree.warnings', N'en', N'Warnings: {count}', 1),
+    -- COLL:ui22tree ── кінець секції ──
+    -- COLL:ui37security ── UI-37: Security — ролі master-detail, порівняння ролей, шкала рівня гранта, смуга й пошук грантів; ru/kz — порцією COLL:ui37security у блоці I18N нижче ──
+    (N'security.viewLabel', N'en', N'View', 1),
+    (N'security.viewOne', N'en', N'One role', 1),
+    (N'security.viewCompare', N'en', N'Compare roles', 1),
+    (N'security.custom', N'en', N'custom', 1),
+    (N'security.customReadOnly', N'en', N'The permissions of a role are set when it is created. For a different set of permissions, create a new role.', 1),
+    (N'security.builtInReadOnlyTitle', N'en', N'Built-in role — read-only', 1),
+    (N'security.builtInReadOnlyText', N'en', N'Built-in roles ship with the product and change only with a product update, so their meaning is the same in every installation. For a different set of permissions, create a new role or clone this one.', 1),
+    (N'security.cloneAsCustom', N'en', N'Clone as custom role', 1),
+    (N'security.roleMore', N'en', N'More', 1),
+    (N'security.groupSummary', N'en', N'{granted} of {total} granted', 1),
+    (N'security.groupDangerous', N'en', N'{count} dangerous', 1),
+    (N'security.dangerousMark', N'en', N'Dangerous', 1),
+    (N'security.granted', N'en', N'granted', 1),
+    (N'security.notGranted', N'en', N'not granted', 1),
+    (N'security.domainOther', N'en', N'Other', 1),
+    (N'security.onlyDiff', N'en', N'Only differences', 1),
+    (N'security.compareHint', N'en', N'Permissions are rows, roles are columns — read across to see who can do one thing. Showing {shown} of {total} permissions for {roles} roles.', 1),
+    (N'security.identicalRoles', N'en', N'These roles are identical: they grant exactly the same permissions.', 1),
+    (N'security.permissionColumn', N'en', N'Permission', 1),
+    (N'security.matrixLabel', N'en', N'Role comparison matrix', 1),
+    (N'security.subtitle.roles', N'en', N'A role is a set of permissions. Built-in roles cannot be changed. Dangerous permissions are marked with a shield.', 1),
+    (N'security.subtitle.grants', N'en', N'Which projects, sheets, tables, columns and registries a role can reach, and at what level. The role says what a person may do; the grant says where.', 1),
+    (N'security.subtitle.users', N'en', N'People and service accounts: their roles, alerts and sign-in state.', 1),
+    (N'security.domain.Template', N'en', N'Templates', 1),
+    (N'security.domain.Registry', N'en', N'Registries', 1),
+    (N'security.domain.Document', N'en', N'Documents', 1),
+    (N'security.domain.Project', N'en', N'Projects', 1),
+    (N'security.domain.Period', N'en', N'Periods', 1),
+    (N'security.domain.Calculation', N'en', N'Calculations', 1),
+    (N'security.domain.Report', N'en', N'Reports', 1),
+    (N'security.domain.Integration', N'en', N'Data collection', 1),
+    (N'security.domain.Uom', N'en', N'Units of measure', 1),
+    (N'security.domain.Security', N'en', N'Security', 1),
+    (N'security.domain.System', N'en', N'System', 1),
+    (N'grants.stats', N'en', N'Grants of the role', 1),
+    (N'grants.stat.all', N'en', N'grants', 1),
+    (N'grants.stat.deny', N'en', N'deny rules', 1),
+    (N'grants.stat.manage', N'en', N'at Manage level', 1),
+    (N'grants.stat.unresolved', N'en', N'resources not found', 1),
+    (N'grants.search', N'en', N'Search', 1),
+    (N'grants.searchPlaceholder', N'en', N'Resource, kind or level', 1),
+    (N'grants.noMatch', N'en', N'No grants match the filter.', 1),
+    (N'grants.levelHint.Read', N'en', N'Can open and export, cannot change anything.', 1),
+    (N'grants.levelHint.Write', N'en', N'Can enter and import data.', 1),
+    (N'grants.levelHint.Submit', N'en', N'Can enter data and submit sheets for approval.', 1),
+    (N'grants.levelHint.Approve', N'en', N'Can approve, reject and return submitted sheets.', 1),
+    (N'grants.levelHint.Manage', N'en', N'Can change the settings of the resource.', 1),
+    -- COLL:ui37security ── кінець секції ──
+    -- COLL:ui36ctor ── UI-36: конструктор версії шаблону (дерево, вкладки, стан версії); ru/kz — порцією COLL:ui36ctor у блоці I18N нижче ──
+    (N'ctor.structure', N'en', N'Structure', 1),
+    (N'ctor.treeLabel', N'en', N'Sheets and tables', 1),
+    (N'ctor.findTable', N'en', N'Find a table', 1),
+    (N'ctor.toggleTree', N'en', N'Show or hide the structure', 1),
+    (N'ctor.versionNode', N'en', N'Version {version}', 1),
+    (N'ctor.versionMeta', N'en', N'Sheets: {sheets} · tables: {tables}', 1),
+    (N'ctor.sheetMeta', N'en', N'Sheet {no} of {total} · tables: {count}', 1),
+    (N'ctor.tablesCount', N'en', N'Tables: {count}', 1),
+    (N'ctor.sheets', N'en', N'Sheets', 1),
+    (N'ctor.sheetsHint', N'en', N'Pick a sheet or table to edit it', 1),
+    (N'ctor.sheet', N'en', N'Sheet', 1),
+    (N'ctor.tables', N'en', N'Tables', 1),
+    (N'ctor.tablesHint', N'en', N'In the order operators see them', 1),
+    (N'ctor.visibility', N'en', N'In documents', 1),
+    (N'ctor.visible', N'en', N'Shown', 1),
+    (N'ctor.sheetEmpty', N'en', N'This sheet has no tables. A sheet without tables cannot be published: add a table or hide the sheet.', 1),
+    (N'ctor.no', N'en', N'No.', 1),
+    (N'ctor.table', N'en', N'Table', 1),
+    (N'ctor.tableProperties', N'en', N'Table properties', 1),
+    (N'ctor.tab.columns', N'en', N'Columns', 1),
+    (N'ctor.tab.rows', N'en', N'Rows', 1),
+    (N'ctor.tab.formulas', N'en', N'Formulas', 1),
+    (N'ctor.tab.rules', N'en', N'Validation rules', 1),
+    (N'ctor.tab.preview', N'en', N'Preview', 1),
+    (N'ctor.columnsHint', N'en', N'Columns in the order operators see them. Edit changes names, type and unit; Appearance changes only the look and is allowed after publication.', 1),
+    (N'ctor.rowsDynamic', N'en', N'Rows of this table are added by operators while filling in a document; the template defines none.', 1),
+    (N'ctor.formulasHint', N'en', N'Calculated columns and rows of this table. Expressions are checked when you save; anything that does not compile blocks publishing.', 1),
+    (N'ctor.formulasEmpty', N'en', N'This table has no formulas yet. Add one with the Formula button on a column or row.', 1),
+    (N'ctor.formulaTarget', N'en', N'Target', 1),
+    (N'ctor.formulaExpression', N'en', N'Expression', 1),
+    (N'ctor.formulaRow', N'en', N'Row', 1),
+    (N'ctor.rulesHint', N'en', N'Rules are checked when operators save and submit. Errors block submission; warnings only inform.', 1),
+    (N'ctor.addRule', N'en', N'Add rule', 1),
+    (N'ctor.cloneToDraft', N'en', N'Clone to new draft', 1),
+    (N'ctor.stepper', N'en', N'Version lifecycle: {state}, stage {no} of {total}', 1),
+    (N'ctor.saved', N'en', N'Saved {time}', 1),
+    -- COLL:ui36ctor ── кінець секції ──
+    -- COLL:ui40board ── UI-40: подання Board переліку документів (перемикач Table/Board, стовпці за станом); ru/kz — порцією COLL:ui40board у блоці I18N нижче ──
+    (N'documents.view', N'en', N'View', 1),
+    (N'documents.viewTable', N'en', N'Table', 1),
+    (N'documents.viewBoard', N'en', N'Board', 1),
+    (N'documents.board.draft', N'en', N'Draft', 1),
+    (N'documents.board.waiting', N'en', N'Waiting for approval', 1),
+    (N'documents.board.rework', N'en', N'Returned or rejected', 1),
+    (N'documents.board.approved', N'en', N'Approved', 1),
+    (N'documents.board.noState', N'en', N'No state for this period', 1),
+    (N'documents.board.nothingHere', N'en', N'Nothing here', 1),
+    -- COLL:ui40board ── кінець секції ──
+    -- COLL:ui41keys ── UI-41: підказка клавіш під таблицею і довідка Keyboard shortcuts; ru/kz — порцією COLL:ui41keys у блоці I18N нижче ──
+    (N'grid.keys.hint', N'en', N'Arrow keys move · Enter or F2 edits · Ctrl+V pastes from Excel · F9 recalculates', 1),
+    (N'grid.keys.hintReadOnly', N'en', N'Arrow keys move · Ctrl+C copies', 1),
+    (N'grid.keys.help', N'en', N'Keyboard shortcuts', 1),
+    (N'grid.keys.move', N'en', N'Move between cells', 1),
+    (N'grid.keys.edit', N'en', N'Edit the cell; Enter again saves', 1),
+    (N'grid.keys.tab', N'en', N'Save and move to the next cell', 1),
+    (N'grid.keys.cancel', N'en', N'Cancel editing', 1),
+    (N'grid.keys.copy', N'en', N'Copy the selected cells', 1),
+    (N'grid.keys.paste', N'en', N'Paste from Excel', 1),
+    (N'grid.keys.undo', N'en', N'Undo or redo the last change', 1),
+    (N'grid.keys.save', N'en', N'Save now', 1),
+    (N'grid.keys.recalc', N'en', N'Recalculate this sheet', 1),
+    (N'grid.keys.palette', N'en', N'Search or run a command', 1),
+    -- COLL:ui41keys ── кінець секції ──
+    -- COLL:ui42narrow ── UI-42: документ лише для читання на вузькому екрані (банер docs-narrow-note); ru/kz — порцією COLL:ui42narrow у блоці I18N нижче ──
+    (N'document.narrow.title', N'en', N'Read-only on a narrow screen', 1),
+    (N'document.narrow.text', N'en', N'Values can be viewed here but not changed. To enter or correct data, open this document on a wider screen.', 1),
+    -- COLL:ui42narrow ── кінець секції ──
+    -- COLL:a11y-pass ── зауваження успішного PATCH у гріді; 403 у каскаді гранта (A1-05); ru/kz — порцією COLL:a11y-pass у блоці I18N нижче ──
+    (N'grid.patchNoticesTitle', N'en', N'Saved with remarks: {count}', 1),
+    -- COLL:a11y-pass ── кінець секції ──
+    -- COLL:ui39health ── UI-39: сторінка Health за макетом (банер, «Check now», «Copy diagnostics»); ru/kz — порцією COLL:ui39health у блоці I18N нижче ──
+    (N'health.subtitle', N'en', N'Is ECR working right now? Each part is checked automatically; a warning appears only when there is something to do.', 1),
+    (N'health.checkNow', N'en', N'Check now', 1),
+    (N'health.checkedNow', N'en', N'Checked just now.', 1),
+    (N'health.copyDiagnostics', N'en', N'Copy diagnostics', 1),
+    (N'health.diagnosticsCopied', N'en', N'Diagnostics copied to the clipboard. They contain no passwords or personal data.', 1),
+    (N'health.banner.title', N'en', N'{check} needs attention', 1),
+    (N'health.durationMs', N'en', N'{ms} ms response', 1),
+    (N'health.checkedAt', N'en', N'Checked', 1),
+    -- COLL:ui39health ── кінець секції ──
+    -- COLL:uidochead ── UI-14/15/16: стан збереження словами, чип аркуша, число зауважень у шапці документа; ru/kz — порцією COLL:uidochead у блоці I18N нижче ──
+    (N'document.saveState.allSaved', N'en', N'All changes saved', 1),
+    (N'document.saveState.savedAt', N'en', N'Saved {time}', 1),
+    (N'document.saveState.readOnly', N'en', N'Read-only', 1),
+    (N'document.saveState.notSaved', N'en', N'not saved', 1),
+    (N'document.saveState.show', N'en', N'Show', 1),
+    (N'document.saveState.unsaved.one', N'en', N'{count} unsaved change', 1),
+    (N'document.saveState.unsaved.few', N'en', N'{count} unsaved changes', 1),
+    (N'document.saveState.unsaved.many', N'en', N'{count} unsaved changes', 1),
+    (N'document.saveState.unsaved.other', N'en', N'{count} unsaved changes', 1),
+    (N'document.sheetStateLabel', N'en', N'Sheet:', 1),
+    (N'document.noIssues', N'en', N'No issues', 1),
+    (N'document.issuesCount.one', N'en', N'{count} issue', 1),
+    (N'document.issuesCount.few', N'en', N'{count} issues', 1),
+    (N'document.issuesCount.many', N'en', N'{count} issues', 1),
+    (N'document.issuesCount.other', N'en', N'{count} issues', 1),
+    -- COLL:uidochead ── кінець секції ──
+    -- COLL:uidocgrid ── UI-23/24/26: рядок стану сітки й банер стану аркуша (хто, коли, що далі); ru/kz — порцією COLL:uidocgrid у блоці I18N нижче ──
+    (N'grid.status.size', N'en', N'Rows: {rows} · columns: {columns}', 1),
+    (N'grid.status.average', N'en', N'Average', 1),
+    (N'grid.status.count', N'en', N'Count', 1),
+    (N'grid.status.sum', N'en', N'Sum', 1),
+    (N'document.banner.submitted', N'en', N'Submitted for approval', 1),
+    (N'document.banner.submittedBy', N'en', N'Submitted {date} by {name}', 1),
+    (N'document.banner.submittedDecide', N'en', N'Waiting for your decision: check the figures, then approve or reject with a reason.', 1),
+    (N'document.banner.submittedWait', N'en', N'Waiting for the approver''s decision.', 1),
+    (N'document.banner.approved', N'en', N'Approved', 1),
+    (N'document.banner.approvedBy', N'en', N'Approved {date} by {name}', 1),
+    (N'document.banner.rejected', N'en', N'Returned for corrections', 1),
+    (N'document.banner.rejectedBy', N'en', N'Rejected {date} by {name}', 1),
+    (N'document.banner.rejectedNext', N'en', N'Correct the figures, validate the sheet and submit it again.', 1),
+    -- COLL:uidocgrid ── кінець секції ──
+    -- COLL:uidocscope ── P1 прихований аркуш: видалення документа перевіряє сервер; ru/kz — порцією COLL:uidocscope у блоці I18N нижче ──
+    (N'documents.deleteServerChecks', N'en', N'The server checks every sheet of the document, including sheets you cannot see, and refuses if any of them is not a draft.', 1),
+    -- COLL:uidocscope ── кінець секції ──
+    -- COLL:mockb4b ── b4b: сторінки 403/404, «← Back» документа й шаблону за макетом; ru/kz — порцією COLL:mockb4b у блоці I18N нижче ──
+    (N'nav.accessDenied.crumb', N'en', N'Access denied', 1),
+    (N'nav.accessDenied.title', N'en', N'You don’t have access to this page', 1),
+    (N'nav.accessDenied.text', N'en', N'Nothing was changed. Ask a system administrator for a role that includes this permission.', 1),
+    (N'nav.accessDenied.copy', N'en', N'Copy request details', 1),
+    (N'nav.accessDenied.copied', N'en', N'Request details copied — paste them into your message', 1),
+    (N'nav.accessDenied.myAccess', N'en', N'See my access', 1),
+    (N'nav.backToDocuments', N'en', N'Back to Documents', 1),
+    (N'nav.backToTemplates', N'en', N'Back to Templates', 1),
+    (N'nav.goToDocuments', N'en', N'Go to Documents', 1),
+    (N'nav.notFound.didYouMean', N'en', N'Did you mean:', 1),
+    (N'nav.notFound.search', N'en', N'Search screens and documents', 1),
+    (N'templates.continueDraft', N'en', N'Continue draft {version}', 1),
+    -- COLL:mockb4b ── кінець секції ──
+    -- COLL:ui35registries ── UI-35: перелік довідників зі смугою показників і шторкою; ru/kz — порцією COLL:ui35registries у блоці I18N нижче ──
+    (N'registries.list.subtitle', N'en', N'Reference lists that cells, formulas and mappings pick values from: sources, substances, fuels, limits.', 1),
+    (N'registries.list.stats', N'en', N'Registry summary', 1),
+    (N'registries.list.statAll', N'en', N'registries', 1),
+    (N'registries.list.statExternal', N'en', N'synced from PI AF', 1),
+    (N'registries.list.registry', N'en', N'Registry', 1),
+    (N'registries.list.traits', N'en', N'Properties', 1),
+    (N'registries.list.source', N'en', N'Master source', 1),
+    (N'registries.list.sourceKind.Local', N'en', N'Kept in ECR', 1),
+    (N'registries.list.sourceKind.External', N'en', N'Synced from PI AF', 1),
+    (N'registries.list.sourceKind.Hybrid', N'en', N'PI AF and ECR', 1),
+    (N'registries.list.usedIn', N'en', N'Used in', 1),
+    (N'registries.list.manage', N'en', N'Entries and validity', 1),
+    (N'registries.list.back', N'en', N'All registries', 1),
+    (N'registries.list.searchPlaceholder', N'en', N'Registry name or code', 1),
+    (N'registries.list.noMatches', N'en', N'No registries match these filters.', 1),
+    (N'registries.list.entries', N'en', N'Entries', 1),
+    (N'registries.list.entriesHint', N'en', N'Valid today; closed entries are kept for old documents.', 1),
+    (N'registries.list.usedInHint', N'en', N'Template columns that pick values from this registry', 1),
+    (N'registries.list.usedInValue', N'en', N'columns: {columns} · templates: {templates}', 1),
+    (N'registries.list.updated', N'en', N'Entries changed', 1),
+    (N'registries.list.state', N'en', N'State', 1),
+    (N'registries.list.statEntries', N'en', N'entries', 1),
+    (N'registries.list.statChanged', N'en', N'changed this month', 1),
+    (N'registries.list.statUsedIn', N'en', N'template columns use them', 1),
+    (N'registries.list.definition', N'en', N'Definition', 1),
+    (N'registries.list.definitionValue', N'en', N'v{version} published', 1),
+    (N'registries.list.definitionDraft', N'en', N'v{version} published · draft in progress', 1),
+    (N'registries.list.draftTitle', N'en', N'The definition has unpublished changes', 1),
+    (N'registries.list.draftText', N'en', N'Entries keep working with the published definition until the draft is published.', 1),
+    -- COLL:ui35registries ── кінець секції ──
+    -- COLL:ui32crumbs ── UI-32: крихти у верхній смузі (підпис області навігації); ru/kz — порцією COLL:ui32crumbs у блоці I18N нижче ──
+    (N'nav.breadcrumb', N'en', N'Breadcrumb', 1)
+    -- COLL:ui32crumbs ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -7443,8 +7901,8 @@ SELECT v.[Key], v.Lang, v.Val
     (N'nav.sources', N'ru', N'Источники данных'),
     (N'nav.jobs', N'ru', N'Задачи'),
     (N'nav.health', N'ru', N'Состояние системы'),
-    (N'search.open', N'ru', N'Поиск данных'),
-    (N'search.placeholder', N'ru', N'Документы, шаблоны, справочники…'),
+    (N'search.open', N'ru', N'Поиск или команда'),
+    (N'search.placeholder', N'ru', N'Экран, ключ документа или действие…'),
     (N'search.minLength', N'ru', N'Введите не менее {min} символов'),
     (N'search.empty', N'ru', N'Ничего не найдено'),
     (N'search.rateLimited', N'ru', N'Слишком много поисковых запросов — повтор через {seconds} с'),
@@ -10472,8 +10930,8 @@ SELECT v.[Key], v.Lang, v.Val
     (N'nav.sources', N'kz', N'Деректер көздері'),
     (N'nav.jobs', N'kz', N'Тапсырмалар'),
     (N'nav.health', N'kz', N'Жүйенің күйі'),
-    (N'search.open', N'kz', N'Деректерді іздеу'),
-    (N'search.placeholder', N'kz', N'Құжаттар, үлгілер, анықтамалықтар…'),
+    (N'search.open', N'kz', N'Іздеу немесе пәрмен'),
+    (N'search.placeholder', N'kz', N'Экран, құжат кілті немесе әрекет…'),
     (N'search.minLength', N'kz', N'Кемінде {min} таңба енгізіңіз'),
     (N'search.empty', N'kz', N'Ештеңе табылмады'),
     (N'search.rateLimited', N'kz', N'Іздеу сұраулары тым көп — {seconds} с кейін қайталанады'),
@@ -15973,6 +16431,1007 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:a105picker ── кінець секції ──
+-- COLL:ui-docs ── ru/kz UI-19/UI-29/UI-18: перелік документів і швидкий перегляд; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'segments.approvedOf', N'ru', N'{done} из {total} утверждено'),
+    (N'segments.approvedOf', N'kz', N'{total} ішінен {done} бекітілді'),
+    (N'documents.document', N'ru', N'Документ'),
+    (N'documents.document', N'kz', N'Құжат'),
+    (N'documents.issues', N'ru', N'Ошибки'),
+    (N'documents.issues', N'kz', N'Қателер'),
+    (N'documents.issuesHint', N'ru', N'Открытых ошибок проверки: {count}'),
+    (N'documents.issuesHint', N'kz', N'Ашық тексеру қателері: {count}'),
+    (N'documents.updated', N'ru', N'Изменён'),
+    (N'documents.updated', N'kz', N'Өзгертілді'),
+    (N'documents.quickLookColumn', N'ru', N'Быстрый просмотр'),
+    (N'documents.quickLookColumn', N'kz', N'Жылдам қарау'),
+    (N'documents.quickLook', N'ru', N'Быстрый просмотр {key}'),
+    (N'documents.quickLook', N'kz', N'{key} — жылдам қарау'),
+    (N'documents.quickLookClose', N'ru', N'Закрыть быстрый просмотр'),
+    (N'documents.quickLookClose', N'kz', N'Жылдам қарауды жабу'),
+    (N'documents.openDocument', N'ru', N'Открыть документ'),
+    (N'documents.openDocument', N'kz', N'Құжатты ашу'),
+    (N'documents.quickLookNoPeriod', N'ru', N'Выберите период, чтобы увидеть состояния листов и заполненность таблиц.'),
+    (N'documents.quickLookNoPeriod', N'kz', N'Парақтардың күйін және кестелердің толтырылуын көру үшін кезеңді таңдаңыз.'),
+    (N'documents.quickLookResponsible', N'ru', N'Ответственные'),
+    (N'documents.quickLookResponsible', N'kz', N'Жауаптылар'),
+    (N'documents.lastChangedBy', N'ru', N'Последним изменил'),
+    (N'documents.lastChangedBy', N'kz', N'Соңғы өзгерткен'),
+    (N'documents.quickLookTablesFilled', N'ru', N'Заполнено таблиц: {filled} из {total}'),
+    (N'documents.quickLookTablesFilled', N'kz', N'Толтырылған кестелер: {filled} / {total}'),
+    (N'documents.quickLookLatestChanges', N'ru', N'Последние изменения'),
+    (N'documents.quickLookLatestChanges', N'kz', N'Соңғы өзгерістер'),
+    (N'documents.clearFilters', N'ru', N'Сбросить фильтры'),
+    (N'documents.clearFilters', N'kz', N'Сүзгілерді тазалау')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:ui-docs ── кінець секції ──
+
+-- COLL:uishell ── ru/kz: UI-11/UI-12: групи бічного меню й пояснення екранів під заголовком (макет docs/design/hybrid); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'nav.group.work', N'ru', N'Работа'),
+    (N'nav.group.work', N'kz', N'Жұмыс'),
+    (N'nav.group.configure', N'ru', N'Настройка'),
+    (N'nav.group.configure', N'kz', N'Баптау'),
+    (N'nav.group.access', N'ru', N'Доступ'),
+    (N'nav.group.access', N'kz', N'Қолжетімділік'),
+    (N'nav.group.operate', N'ru', N'Эксплуатация'),
+    (N'nav.group.operate', N'kz', N'Пайдалану'),
+    (N'nav.documents.description', N'ru', N'Отчёты ваших проектов за один период. Откройте документ, чтобы работать с ним.'),
+    (N'nav.documents.description', N'kz', N'Бір кезеңдегі жобаларыңыздың есептері. Онымен жұмыс істеу үшін құжатты ашыңыз.'),
+    (N'nav.myGroups.description', N'ru', N'Откуда берётся ваш доступ: группы каталога дают роли, роли дают права и проекты. Здесь ничего нельзя изменить; это делает администратор.'),
+    (N'nav.myGroups.description', N'kz', N'Қолжетімділігіңіз қайдан келеді: каталог топтары рөлдер береді, рөлдер құқықтар мен жобалар береді. Мұнда ештеңені өзгертуге болмайды; оны әкімші өзгертеді.'),
+    (N'nav.templates.description', N'ru', N'Шаблон — это структура отчёта: листы, таблицы, колонки, формулы и правила. Документы создаются из опубликованной версии и остаются на ней.'),
+    (N'nav.templates.description', N'kz', N'Үлгі — есептің құрылымы: парақтар, кестелер, бағандар, формулалар мен ережелер. Құжаттар жарияланған нұсқадан жасалады және сол нұсқада қалады.'),
+    (N'nav.registries.description', N'ru', N'Справочники, из которых ячейки, формулы и сопоставления берут значения: источники, вещества, топливо, лимиты.'),
+    (N'nav.registries.description', N'kz', N'Ұяшықтар, формулалар мен сәйкестендірулер мән алатын анықтамалықтар: көздер, заттар, отын, лимиттер.'),
+    (N'nav.methodologies.description', N'ru', N'Как рассчитываются выбросы: формулы, константы и правила, связывающие их со строками таблиц. Документы считаются по опубликованной версии.'),
+    (N'nav.methodologies.description', N'kz', N'Шығарындылар қалай есептеледі: формулалар, тұрақтылар және оларды кесте жолдарымен байланыстыратын ережелер. Құжаттар жарияланған нұсқа бойынша есептеледі.'),
+    (N'nav.units.description', N'ru', N'Единицы измерения, сгруппированные по величинам. Каждая единица переводится в базовую единицу своей величины, поэтому значения из источников и ячеек можно безопасно сравнивать.'),
+    (N'nav.units.description', N'kz', N'Шамалар бойынша топталған өлшем бірліктері. Әр бірлік өз шамасының негізгі бірлігіне ауыстырылады, сондықтан көздер мен ұяшықтардағы мәндерді қауіпсіз салыстыруға болады.'),
+    (N'nav.sources.description', N'ru', N'Откуда берутся собранные значения: PI System и базы данных SQL. Каждый источник работает по своему расписанию.'),
+    (N'nav.sources.description', N'kz', N'Жиналған мәндер қайдан келеді: PI System және SQL дерекқорлары. Әр көз өз кестесі бойынша жұмыс істейді.'),
+    (N'nav.mapping.description', N'ru', N'Какой атрибут источника заполняет какую ячейку, на реальных значениях: неверная единица или строка видна до того, как попадёт в отчёт.'),
+    (N'nav.mapping.description', N'kz', N'Көздің қай атрибуты қай ұяшықты толтырады, нақты мәндерде: қате бірлік немесе жол есепке түспей тұрып көрінеді.'),
+    (N'nav.periods.description', N'ru', N'Период — один отчётный месяц проекта. Пока он открыт, данные можно вводить; после срока он закрывается, а позже архивируется.'),
+    (N'nav.periods.description', N'kz', N'Кезең — жобаның бір есепті айы. Ол ашық тұрғанда деректерді енгізуге болады; мерзімнен кейін ол жабылады, кейінірек мұрағатталады.'),
+    (N'nav.jobs.description', N'ru', N'Экспорт, импорт, пересчёты и ночные проверки выполняются в фоне. У задачи с ошибкой видно, почему она не выполнилась.'),
+    (N'nav.jobs.description', N'kz', N'Экспорт, импорт, қайта есептеулер және түнгі тексерулер фонда орындалады. Қатемен аяқталған тапсырманың неге орындалмағаны көрінеді.'),
+    (N'nav.snapshots.description', N'ru', N'Снимок — точная копия отчёта в момент его создания. Он не меняется, даже если документы потом редактируют.'),
+    (N'nav.snapshots.description', N'kz', N'Сурет — есептің жасалған сәттегі дәл көшірмесі. Құжаттар кейін өзгертілсе де, ол өзгермейді.'),
+    (N'nav.audit.description', N'ru', N'Каждое изменение каждого числа: кто, когда, что было и что стало. Здесь ничего нельзя изменить или удалить.'),
+    (N'nav.audit.description', N'kz', N'Әр санның әр өзгерісі: кім, қашан, бұрын не еді және не болды. Мұнда ештеңені өзгертуге немесе жоюға болмайды.'),
+    (N'nav.consistency.description', N'ru', N'Каждую ночь ECR сверяет числа, которые должны совпадать между листами, документами и справочниками. Каждое расхождение показано здесь.'),
+    (N'nav.consistency.description', N'kz', N'ECR әр түнде парақтар, құжаттар мен анықтамалықтар арасында сәйкес келуі тиіс сандарды салыстырады. Әр сәйкессіздік осында көрсетіледі.'),
+    (N'nav.uiStrings.description', N'ru', N'Все подписи, сообщения и тексты кнопок ECR. Источник — английский; если перевода нет, показывается английский текст.'),
+    (N'nav.uiStrings.description', N'kz', N'ECR-дің барлық белгілері, хабарлары мен түйме мәтіндері. Бастапқы тіл — ағылшын; аудармасы жоқ болса, ағылшынша мәтін көрсетіледі.'),
+    (N'nav.health.description', N'ru', N'Работает ли ECR прямо сейчас? Предупреждения появляются, только когда нужно что-то сделать.'),
+    (N'nav.health.description', N'kz', N'ECR дәл қазір жұмыс істеп тұр ма? Ескертулер бір нәрсе істеу керек болғанда ғана шығады.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:uishell ── кінець секції ──
+-- COLL:uiperiod ── ru/kz: UI-13: PeriodPicker за макетом (сітка періодів, стан, «closes in»); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'period.group', N'ru', N'Отчётный период'),
+    (N'period.group', N'kz', N'Есепті кезең'),
+    (N'period.choose', N'ru', N'Выбрать период'),
+    (N'period.choose', N'kz', N'Кезеңді таңдау'),
+    (N'period.gridTitle', N'ru', N'Отчётный период · {year}'),
+    (N'period.gridTitle', N'kz', N'Есепті кезең · {year}'),
+    (N'period.closesIn.one', N'ru', N'закрывается через {count} день'),
+    (N'period.closesIn.one', N'kz', N'{count} күннен кейін жабылады'),
+    (N'period.closesIn.few', N'ru', N'закрывается через {count} дня'),
+    (N'period.closesIn.few', N'kz', N'{count} күннен кейін жабылады'),
+    (N'period.closesIn.many', N'ru', N'закрывается через {count} дней'),
+    (N'period.closesIn.many', N'kz', N'{count} күннен кейін жабылады'),
+    (N'period.closesIn.other', N'ru', N'закрывается через {count} дня'),
+    (N'period.closesIn.other', N'kz', N'{count} күннен кейін жабылады'),
+    (N'period.stateInProjects', N'ru', N'{state} в {count} из {total} проектов'),
+    (N'period.stateInProjects', N'kz', N'{total} жобаның {count} жобасында: {state}')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:uiperiod ── кінець секції ──
+
+-- COLL:uipalette ── ru/kz: UI-30 командна палітра: екрани й дії; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'palette.title', N'ru', N'Командная палитра'),
+    (N'palette.title', N'kz', N'Пәрмендер палитрасы'),
+    (N'palette.screens', N'ru', N'Экраны'),
+    (N'palette.screens', N'kz', N'Экрандар'),
+    (N'palette.actions', N'ru', N'Действия'),
+    (N'palette.actions', N'kz', N'Әрекеттер'),
+    (N'palette.hintMove', N'ru', N'перейти'),
+    (N'palette.hintMove', N'kz', N'жылжу'),
+    (N'palette.hintOpen', N'ru', N'открыть'),
+    (N'palette.hintOpen', N'kz', N'ашу'),
+    (N'palette.action.themeDark', N'ru', N'Переключить на тёмную тему'),
+    (N'palette.action.themeDark', N'kz', N'Қараңғы тақырыпқа ауысу'),
+    (N'palette.action.themeLight', N'ru', N'Переключить на светлую тему'),
+    (N'palette.action.themeLight', N'kz', N'Ашық тақырыпқа ауысу'),
+    (N'palette.action.densityCompact', N'ru', N'Компактные строки'),
+    (N'palette.action.densityCompact', N'kz', N'Ықшам жолдар'),
+    (N'palette.action.densityComfortable', N'ru', N'Просторные строки'),
+    (N'palette.action.densityComfortable', N'kz', N'Кең жолдар'),
+    (N'palette.action.collapseMenu', N'ru', N'Свернуть меню до значков'),
+    (N'palette.action.collapseMenu', N'kz', N'Мәзірді белгішелерге жию'),
+    (N'palette.action.expandMenu', N'ru', N'Развернуть меню'),
+    (N'palette.action.expandMenu', N'kz', N'Мәзірді жаю')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:uipalette ── кінець секції ──
+-- COLL:ui20consistency ── ru/kz UI-20: знахідки узгодженості на шаблоні переліку (пояснення, смуга за вагою, шторка); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'consistency.description', N'ru', N'Каждую ночь ECR сверяет числа, которые должны совпадать между документами, таблицами и справочниками. Каждая находка называет нарушенное правило и затронутую запись.'),
+    (N'consistency.description', N'kz', N'ECR әр түнде құжаттар, кестелер мен анықтамалықтар арасында сәйкес болуға тиіс сандарды салыстырады. Әр табылған жағдай бұзылған ережені және қозғалған жазбаны атайды.'),
+    (N'consistency.statsLabel', N'ru', N'Неразрешённые находки по важности'),
+    (N'consistency.statsLabel', N'kz', N'Маңыздылығы бойынша шешілмеген жағдайлар'),
+    (N'consistency.statErrors', N'ru', N'ошибок'),
+    (N'consistency.statErrors', N'kz', N'қате'),
+    (N'consistency.statWarnings', N'ru', N'предупреждений'),
+    (N'consistency.statWarnings', N'kz', N'ескерту'),
+    (N'consistency.statInfo', N'ru', N'информационных'),
+    (N'consistency.statInfo', N'kz', N'ақпараттық'),
+    (N'consistency.noMatch', N'ru', N'Нет находок, подходящих под фильтры.'),
+    (N'consistency.noMatch', N'kz', N'Сүзгілерге сәйкес жағдайлар жоқ.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:ui20consistency ── кінець секції ──
+-- COLL:ui21units ── ru/kz UI-21: довідник одиниць на шаблоні переліку; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'units.description', N'ru', N'Единицы измерения, сгруппированные по размерности. Каждая единица пересчитывается в базовую единицу своей размерности, поэтому значения из источников и ячеек можно безопасно сравнивать.'),
+    (N'units.description', N'kz', N'Өлшем бойынша топтастырылған өлшем бірліктері. Әр бірлік өз өлшемінің базалық бірлігіне қайта есептеледі, сондықтан көздер мен ұяшықтардағы мәндерді қауіпсіз салыстыруға болады.'),
+    (N'units.statsLabel', N'ru', N'Единицы — сводка'),
+    (N'units.statsLabel', N'kz', N'Бірліктер — қысқаша'),
+    (N'units.statUnits', N'ru', N'единиц'),
+    (N'units.statUnits', N'kz', N'бірлік'),
+    (N'units.statDimensions', N'ru', N'размерностей'),
+    (N'units.statDimensions', N'kz', N'өлшем'),
+    (N'units.statOffset', N'ru', N'со смещением (температура)'),
+    (N'units.statOffset', N'kz', N'ығысуы бар (температура)'),
+    (N'units.search', N'ru', N'Поиск'),
+    (N'units.search', N'kz', N'Іздеу'),
+    (N'units.searchPlaceholder', N'ru', N'Код или размерность'),
+    (N'units.searchPlaceholder', N'kz', N'Код немесе өлшем'),
+    (N'units.baseUnit', N'ru', N'Базовая единица'),
+    (N'units.baseUnit', N'kz', N'Базалық бірлік'),
+    (N'units.checkConversion', N'ru', N'Проверить пересчёт'),
+    (N'units.checkConversion', N'kz', N'Қайта есептеуді тексеру'),
+    (N'units.swap', N'ru', N'Поменять местами'),
+    (N'units.swap', N'kz', N'Орындарын ауыстыру'),
+    (N'units.conversion', N'ru', N'Пересчёт'),
+    (N'units.conversion', N'kz', N'Қайта есептеу'),
+    (N'units.whereUsed', N'ru', N'Где используется'),
+    (N'units.whereUsed', N'kz', N'Қай жерде қолданылады'),
+    (N'units.noMatch', N'ru', N'Нет единиц, подходящих под фильтры.'),
+    (N'units.noMatch', N'kz', N'Сүзгілерге сәйкес бірліктер жоқ.'),
+    (N'units.usedIn', N'ru', N'Где используется'),
+    (N'units.usedIn', N'kz', N'Қолданылатын жері'),
+    (N'units.statUnused', N'ru', N'нигде не используются'),
+    (N'units.statUnused', N'kz', N'еш жерде қолданылмайды')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:ui21units ── кінець секції ──
+-- COLL:ui33periods ── ru/kz UI-33: Periods — плитки року й огляд проєктів; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'periods.tile.closesToday', N'ru', N'закрывается сегодня'),
+    (N'periods.tile.closesIn.one', N'ru', N'закрывается через {count} день'),
+    (N'periods.tile.closesIn.few', N'ru', N'закрывается через {count} дня'),
+    (N'periods.tile.closesIn.many', N'ru', N'закрывается через {count} дней'),
+    (N'periods.tile.closesIn.other', N'ru', N'закрывается через {count} дня'),
+    (N'periods.tile.reopened', N'ru', N'переоткрыт до {date} · правки поздние'),
+    (N'periods.tile.grace', N'ru', N'льготный период до {date} · правки поздние'),
+    (N'periods.tile.opens', N'ru', N'откроется {date}'),
+    (N'periods.tile.readOnly', N'ru', N'только чтение'),
+    (N'periods.tile.now', N'ru', N'сейчас'),
+    (N'periods.year.title', N'ru', N'{project} · {year}'),
+    (N'periods.overview.title', N'ru', N'Все проекты · текущий период'),
+    (N'periods.overview.hint', N'ru', N'выберите проект, чтобы увидеть его календарь выше'),
+    (N'periods.overview.project', N'ru', N'Проект'),
+    (N'periods.overview.current', N'ru', N'Текущий период'),
+    (N'periods.overview.state', N'ru', N'Состояние'),
+    (N'periods.overview.closes', N'ru', N'Закрывается'),
+    (N'periods.overview.inGrace', N'ru', N'за {period}'),
+    (N'periods.overview.stats', N'ru', N'Периоды всех проектов'),
+    (N'periods.overview.stat.open', N'ru', N'открыто'),
+    (N'periods.overview.stat.grace', N'ru', N'в льготном периоде'),
+    (N'periods.overview.stat.soon', N'ru', N'закрываются в течение ≤ 3 дней'),
+    (N'periods.overview.noMatch', N'ru', N'Нет проектов под этот фильтр'),
+    (N'periods.tile.closesToday', N'kz', N'бүгін жабылады'),
+    (N'periods.tile.closesIn.one', N'kz', N'{count} күннен кейін жабылады'),
+    (N'periods.tile.closesIn.other', N'kz', N'{count} күннен кейін жабылады'),
+    (N'periods.tile.closesIn.few', N'kz', N'{count} күннен кейін жабылады'),
+    (N'periods.tile.closesIn.many', N'kz', N'{count} күннен кейін жабылады'),
+    (N'periods.tile.reopened', N'kz', N'{date} дейін қайта ашылды · түзетулер кешіккен'),
+    (N'periods.tile.grace', N'kz', N'жеңілдік кезеңі {date} дейін · түзетулер кешіккен'),
+    (N'periods.tile.opens', N'kz', N'{date} ашылады'),
+    (N'periods.tile.readOnly', N'kz', N'тек оқу'),
+    (N'periods.tile.now', N'kz', N'қазір'),
+    (N'periods.year.title', N'kz', N'{project} · {year}'),
+    (N'periods.overview.title', N'kz', N'Барлық жобалар · ағымдағы кезең'),
+    (N'periods.overview.hint', N'kz', N'күнтізбесін жоғарыда көру үшін жобаны таңдаңыз'),
+    (N'periods.overview.project', N'kz', N'Жоба'),
+    (N'periods.overview.current', N'kz', N'Ағымдағы кезең'),
+    (N'periods.overview.state', N'kz', N'Күйі'),
+    (N'periods.overview.closes', N'kz', N'Жабылады'),
+    (N'periods.overview.inGrace', N'kz', N'{period} үшін'),
+    (N'periods.overview.stats', N'kz', N'Барлық жобалардың кезеңдері'),
+    (N'periods.overview.stat.open', N'kz', N'ашық'),
+    (N'periods.overview.stat.grace', N'kz', N'жеңілдік кезеңінде'),
+    (N'periods.overview.stat.soon', N'kz', N'≤ 3 күнде жабылады'),
+    (N'periods.overview.noMatch', N'kz', N'Бұл сүзгіге сай жоба жоқ')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:ui33periods ── кінець секції ──
+-- COLL:ui34tpl ── ru/kz UI-34: перелік шаблонів за макетом; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'templates.subtitle', N'ru', N'Шаблон — это структура отчёта: листы, таблицы, колонки, формулы и правила. Документы создаются из опубликованной версии и остаются на ней.'),
+    (N'templates.subtitle', N'kz', N'Үлгі — есептің құрылымы: парақтар, кестелер, бағандар, формулалар мен ережелер. Құжаттар жарияланған нұсқадан жасалады және сол нұсқада қалады.'),
+    (N'templates.stats', N'ru', N'Сводка по шаблонам'),
+    (N'templates.stats', N'kz', N'Үлгілер бойынша жиынтық'),
+    (N'templates.stat.all', N'ru', N'шаблонов'),
+    (N'templates.stat.all', N'kz', N'үлгі'),
+    (N'templates.stat.published', N'ru', N'опубликованных версий'),
+    (N'templates.stat.published', N'kz', N'жарияланған нұсқа'),
+    (N'templates.stat.publishedHint', N'ru', N'Показать шаблоны с опубликованной версией'),
+    (N'templates.stat.publishedHint', N'kz', N'Жарияланған нұсқасы бар үлгілерді көрсету'),
+    (N'templates.stat.drafts', N'ru', N'черновиков в работе'),
+    (N'templates.stat.drafts', N'kz', N'жұмыстағы нобай'),
+    (N'templates.stat.draftsHint', N'ru', N'Показать шаблоны с открытым черновиком'),
+    (N'templates.stat.draftsHint', N'kz', N'Ашық нобайы бар үлгілерді көрсету'),
+    (N'templates.search', N'ru', N'Поиск'),
+    (N'templates.search', N'kz', N'Іздеу'),
+    (N'templates.searchPlaceholder', N'ru', N'Название или код шаблона'),
+    (N'templates.searchPlaceholder', N'kz', N'Үлгі атауы немесе коды'),
+    (N'templates.currentVersion', N'ru', N'Текущая версия'),
+    (N'templates.currentVersion', N'kz', N'Ағымдағы нұсқа'),
+    (N'templates.noCurrentVersion', N'ru', N'текущей версии нет'),
+    (N'templates.noCurrentVersion', N'kz', N'ағымдағы нұсқа жоқ'),
+    (N'templates.notPublished', N'ru', N'Ещё не опубликован'),
+    (N'templates.notPublished', N'kz', N'Әлі жарияланбаған'),
+    (N'templates.draft', N'ru', N'Черновик'),
+    (N'templates.draft', N'kz', N'Нобай'),
+    (N'templates.state', N'ru', N'Состояние'),
+    (N'templates.state', N'kz', N'Күйі'),
+    (N'templates.noMatch', N'ru', N'Нет шаблонов по этим фильтрам'),
+    (N'templates.noMatch', N'kz', N'Сүзгілерге сәйкес үлгілер жоқ'),
+    (N'templates.draftBy', N'ru', N'Редактирует {name}'),
+    (N'templates.draftBy', N'kz', N'{name} өңдеп жатыр'),
+    (N'templates.documents', N'ru', N'Документы'),
+    (N'templates.documents', N'kz', N'Құжаттар'),
+    (N'templates.documentsHint', N'ru', N'Документы в доступных вам проектах, которые используют этот шаблон'),
+    (N'templates.documentsHint', N'kz', N'Сізге көрінетін жобалардағы осы үлгіні пайдаланатын құжаттар'),
+    (N'templates.updated', N'ru', N'Обновлён'),
+    (N'templates.updated', N'kz', N'Жаңартылды'),
+    (N'templates.stat.documents', N'ru', N'документов на них'),
+    (N'templates.stat.documents', N'kz', N'оларды пайдаланатын құжат'),
+    (N'templates.stat.documentsHint', N'ru', N'Показать шаблоны, на которые опираются документы'),
+    (N'templates.stat.documentsHint', N'kz', N'Құжаттар сүйенетін үлгілерді көрсету')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:ui34tpl ── кінець секції ──
+-- COLL:ui38audit ── ru/kz UI-38: журнал змін у формі макета, ім'я кнопки очищення дати; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'audit.documentCell', N'ru', N'Документ · ячейка'),
+    (N'audit.documentCell', N'kz', N'Құжат · ұяшық'),
+    (N'audit.wasBecomes', N'ru', N'Было → стало'),
+    (N'audit.wasBecomes', N'kz', N'Болған → болды'),
+    (N'audit.lateMark', N'ru', N'Запоздалая'),
+    (N'audit.lateMark', N'kz', N'Кешіккен'),
+    (N'audit.lateHint', N'ru', N'Внесена после срока ввода данных'),
+    (N'audit.lateHint', N'kz', N'Деректерді енгізу мерзімінен кейін енгізілген'),
+    (N'audit.newValue', N'ru', N'новое'),
+    (N'audit.newValue', N'kz', N'жаңа'),
+    (N'audit.delta', N'ru', N'Разница'),
+    (N'audit.delta', N'kz', N'Айырма'),
+    (N'audit.originLabel.UserEdit', N'ru', N'Введено пользователем'),
+    (N'audit.originLabel.UserEdit', N'kz', N'Пайдаланушы енгізген'),
+    (N'audit.originLabel.Import', N'ru', N'Импорт из Excel'),
+    (N'audit.originLabel.Import', N'kz', N'Excel-ден импорт'),
+    (N'audit.originLabel.Recalculation', N'ru', N'Пересчёт'),
+    (N'audit.originLabel.Recalculation', N'kz', N'Қайта есептеу'),
+    (N'audit.originLabel.Migration', N'ru', N'Миграция'),
+    (N'audit.originLabel.Migration', N'kz', N'Көшіру'),
+    (N'dates.clear', N'ru', N'Очистить дату'),
+    (N'dates.clear', N'kz', N'Күнді тазалау'),
+    (N'dates.clearNamed', N'ru', N'Очистить: {field}'),
+    (N'dates.clearNamed', N'kz', N'Тазалау: {field}')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:ui38audit ── кінець секції ──
+-- COLL:ui31wizard ── ru/kz UI-31: майстер створення документа; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'wizard.back', N'ru', N'Назад'),
+    (N'wizard.back', N'kz', N'Артқа'),
+    (N'wizard.next', N'ru', N'Далее'),
+    (N'wizard.next', N'kz', N'Келесі'),
+    (N'wizard.review', N'ru', N'Проверка'),
+    (N'wizard.review', N'kz', N'Тексеру'),
+    (N'documents.createApply', N'ru', N'Создать документ'),
+    (N'documents.createApply', N'kz', N'Құжат құру'),
+    (N'documents.createReviewText', N'ru', N'Пока вы не подтвердите, ничего не создаётся. Документ создаётся пустым, как черновик.'),
+    (N'documents.createReviewText', N'kz', N'Сіз растамайынша ештеңе құрылмайды. Құжат бос, жоба ретінде құрылады.'),
+    (N'documents.createProjectHint', N'ru', N'Для какой площадки этот отчёт?'),
+    (N'documents.createProjectHint', N'kz', N'Бұл есеп қай алаңға арналған?'),
+    (N'documents.createTemplateHint', N'ru', N'Версию шаблона определяет проект.'),
+    (N'documents.createTemplateHint', N'kz', N'Үлгі нұсқасын жоба анықтайды.'),
+    (N'documents.createPeriodHint', N'ru', N'Документ откроется в этом периоде. Ещё не открытые периоды не показаны.'),
+    (N'documents.createPeriodHint', N'kz', N'Құжат осы кезеңде ашылады. Әлі ашылмаған кезеңдер көрсетілмейді.'),
+    (N'documents.createNoOpenPeriod', N'ru', N'В этом проекте нет открытого периода. Документ можно создать, но вводить данные можно будет только после того, как администратор периодов откроет период.'),
+    (N'documents.createNoOpenPeriod', N'kz', N'Бұл жобада ашық кезең жоқ. Құжатты құруға болады, бірақ деректерді кезең әкімшісі кезеңді ашқаннан кейін ғана енгізуге болады.'),
+    (N'documents.createClosedPeriod', N'ru', N'Этот период закрыт. Документ будет создан, но изменить его данные можно будет только после повторного открытия периода.'),
+    (N'documents.createClosedPeriod', N'kz', N'Бұл кезең жабық. Құжат құрылады, бірақ оның деректерін кезең қайта ашылғаннан кейін ғана өзгертуге болады.'),
+    (N'documents.createSheetsHint', N'ru', N'Снимите отметку с листов, которые не относятся к этой площадке. По умолчанию включены все.'),
+    (N'documents.createSheetsHint', N'kz', N'Бұл алаңға қатысы жоқ парақтардың белгісін алып тастаңыз. Әдепкіде барлығы қосылған.'),
+    (N'documents.createNoSheets', N'ru', N'Включите хотя бы один лист: документ без листов нельзя заполнить.'),
+    (N'documents.createNoSheets', N'kz', N'Кемінде бір парақты қосыңыз: парақсыз құжатты толтыру мүмкін емес.'),
+    (N'documents.createSheetsCount', N'ru', N'{included} из {total}'),
+    (N'documents.createSheetsCount', N'kz', N'{total} ішінен {included}')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:ui31wizard ── кінець секції ──
+-- COLL:inspector ── ru/kz UI-25: інспектор документа; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'inspector.title', N'ru', N'Инспектор'),
+    (N'inspector.title', N'kz', N'Инспектор'),
+    (N'inspector.close', N'ru', N'Закрыть инспектор'),
+    (N'inspector.close', N'kz', N'Инспекторды жабу'),
+    (N'inspector.tabsLabel', N'ru', N'Разделы инспектора'),
+    (N'inspector.tabsLabel', N'kz', N'Инспектор бөлімдері'),
+    (N'inspector.tabIssues', N'ru', N'Замечания'),
+    (N'inspector.tabIssues', N'kz', N'Ескертулер'),
+    (N'inspector.tabHistory', N'ru', N'История'),
+    (N'inspector.tabHistory', N'kz', N'Тарих'),
+    (N'inspector.tabInfo', N'ru', N'Сведения'),
+    (N'inspector.tabInfo', N'kz', N'Мәліметтер'),
+    (N'inspector.noIssues', N'ru', N'Замечаний нет'),
+    (N'inspector.noIssues', N'kz', N'Ескертулер жоқ'),
+    (N'inspector.issuesCount', N'ru', N'Замечаний: {count}'),
+    (N'inspector.issuesCount', N'kz', N'Ескертулер: {count}'),
+    (N'inspector.issuesTitle', N'ru', N'Ошибок: {errors}, предупреждений: {warnings} — открыть список'),
+    (N'inspector.issuesTitle', N'kz', N'Қателер: {errors}, ескертулер: {warnings} — тізімді ашу'),
+    (N'inspector.historyButton', N'ru', N'История выбранной ячейки'),
+    (N'inspector.historyButton', N'kz', N'Таңдалған ұяшық тарихы'),
+    (N'inspector.notValidatedTitle', N'ru', N'Проверка ещё не запускалась'),
+    (N'inspector.notValidatedTitle', N'kz', N'Тексеру әлі іске қосылмаған'),
+    (N'inspector.notValidatedHint', N'ru', N'Нажмите «Проверить», чтобы проверить документ за этот период.'),
+    (N'inspector.notValidatedHint', N'kz', N'Құжатты осы кезеңге тексеру үшін «Тексеру» түймесін басыңыз.'),
+    (N'inspector.noIssuesTitle', N'ru', N'Замечаний не найдено'),
+    (N'inspector.noIssuesTitle', N'kz', N'Ескертулер табылмады'),
+    (N'inspector.noIssuesHint', N'ru', N'Последняя проверка не выявила в этом периоде ничего, что требует исправления.'),
+    (N'inspector.noIssuesHint', N'kz', N'Соңғы тексеру бұл кезеңде түзетуді қажет ететін ештеңе таппады.'),
+    (N'inspector.noCellTitle', N'ru', N'Ячейка не выбрана'),
+    (N'inspector.noCellTitle', N'kz', N'Ұяшық таңдалмаған'),
+    (N'inspector.noCellHint', N'ru', N'Выберите ячейку в таблице, чтобы увидеть её историю и сведения.'),
+    (N'inspector.noCellHint', N'kz', N'Тарихы мен мәліметтерін көру үшін кестеден ұяшықты таңдаңыз.'),
+    (N'inspector.loading', N'ru', N'Загрузка…'),
+    (N'inspector.loading', N'kz', N'Жүктелуде…'),
+    (N'inspector.noHistoryTitle', N'ru', N'Истории нет'),
+    (N'inspector.noHistoryTitle', N'kz', N'Тарих жоқ'),
+    (N'inspector.noHistoryHint', N'ru', N'За последние 12 месяцев эта ячейка в этом периоде не изменялась.'),
+    (N'inspector.noHistoryHint', N'kz', N'Соңғы 12 айда бұл ұяшық осы кезеңде өзгертілмеген.'),
+    (N'inspector.unknownAuthor', N'ru', N'Пользователь №{id}'),
+    (N'inspector.unknownAuthor', N'kz', N'Пайдаланушы №{id}'),
+    (N'inspector.lateEdit', N'ru', N'Поздняя правка'),
+    (N'inspector.lateEdit', N'kz', N'Кешіккен түзету'),
+    (N'inspector.info.cell', N'ru', N'Ячейка'),
+    (N'inspector.info.cell', N'kz', N'Ұяшық'),
+    (N'inspector.info.row', N'ru', N'Строка'),
+    (N'inspector.info.row', N'kz', N'Жол'),
+    (N'inspector.info.column', N'ru', N'Колонка'),
+    (N'inspector.info.column', N'kz', N'Баған'),
+    (N'inspector.info.type', N'ru', N'Тип'),
+    (N'inspector.info.type', N'kz', N'Түрі'),
+    (N'inspector.info.input', N'ru', N'Ввод'),
+    (N'inspector.info.input', N'kz', N'Енгізу'),
+    (N'inspector.info.inputCalculated', N'ru', N'Рассчитывается на сервере'),
+    (N'inspector.info.inputCalculated', N'kz', N'Серверде есептеледі'),
+    (N'inspector.info.inputReadOnly', N'ru', N'Только чтение'),
+    (N'inspector.info.inputReadOnly', N'kz', N'Тек оқу үшін'),
+    (N'inspector.info.inputManual', N'ru', N'Вручную · вставка · импорт'),
+    (N'inspector.info.inputManual', N'kz', N'Қолмен · қою · импорт'),
+    (N'inspector.info.value', N'ru', N'Сохранённое значение'),
+    (N'inspector.info.value', N'kz', N'Сақталған мән'),
+    (N'inspector.info.table', N'ru', N'Таблица'),
+    (N'inspector.info.table', N'kz', N'Кесте'),
+    (N'inspector.info.tableIssues', N'ru', N'Замечания в этой таблице'),
+    (N'inspector.info.tableIssues', N'kz', N'Осы кестедегі ескертулер'),
+    (N'inspector.info.tableIssuesValue', N'ru', N'Ошибок: {errors}, предупреждений: {warnings}'),
+    (N'inspector.info.tableIssuesValue', N'kz', N'Қателер: {errors}, ескертулер: {warnings}')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:inspector ── кінець секції ──
+-- COLL:ui28jobs ── ru/kz екран задач на шаблоні переліку (UI-28); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'jobs.description', N'ru', N'Экспорт, импорт, пересчёты и ночные проверки выполняются в фоне. Проваленная задача объясняет причину, и её можно перезапустить.'),
+    (N'jobs.description', N'kz', N'Экспорт, импорт, қайта есептеу және түнгі тексерулер фонда орындалады. Сәтсіз тапсырма себебін көрсетеді, оны қайта іске қосуға болады.'),
+    (N'jobs.statsLabel', N'ru', N'Задачи кратко'),
+    (N'jobs.statsLabel', N'kz', N'Тапсырмалар қысқаша'),
+    (N'jobs.statRunning', N'ru', N'выполняются'),
+    (N'jobs.statRunning', N'kz', N'орындалуда'),
+    (N'jobs.statQueued', N'ru', N'в очереди'),
+    (N'jobs.statQueued', N'kz', N'кезекте'),
+    (N'jobs.statFailed', N'ru', N'с ошибкой за 24 ч'),
+    (N'jobs.statFailed', N'kz', N'24 сағатта сәтсіз'),
+    (N'jobs.statLatency', N'ru', N'Средняя задержка запуска за последние 24 часа: {seconds} с'),
+    (N'jobs.statLatency', N'kz', N'Соңғы 24 сағаттағы іске қосудың орташа кідірісі: {seconds} с'),
+    (N'jobs.search', N'ru', N'Поиск'),
+    (N'jobs.search', N'kz', N'Іздеу'),
+    (N'jobs.searchPlaceholder', N'ru', N'Задача, документ или человек'),
+    (N'jobs.searchPlaceholder', N'kz', N'Тапсырма, құжат немесе адам'),
+    (N'jobs.filterType', N'ru', N'Типы'),
+    (N'jobs.filterType', N'kz', N'Түрлері'),
+    (N'jobs.filterState', N'ru', N'Состояния'),
+    (N'jobs.filterState', N'kz', N'Күйлері'),
+    (N'jobs.noMatch', N'ru', N'Нет задач, подходящих под фильтры.'),
+    (N'jobs.noMatch', N'kz', N'Сүзгілерге сәйкес тапсырма жоқ.'),
+    (N'jobs.progress', N'ru', N'Ход выполнения'),
+    (N'jobs.progress', N'kz', N'Орындалу барысы'),
+    (N'jobs.stoppedAt', N'ru', N'остановлена на {percent} %'),
+    (N'jobs.stoppedAt', N'kz', N'{percent} % кезінде тоқтады'),
+    (N'jobs.refresh', N'ru', N'Обновить'),
+    (N'jobs.refresh', N'kz', N'Жаңарту'),
+    (N'jobs.findById', N'ru', N'Найти задачу по идентификатору'),
+    (N'jobs.findById', N'kz', N'Тапсырманы идентификатор бойынша табу'),
+    (N'jobs.whyFailed', N'ru', N'Почему не выполнена'),
+    (N'jobs.whyFailed', N'kz', N'Неге сәтсіз аяқталды'),
+    (N'jobs.attempts', N'ru', N'Попытки'),
+    (N'jobs.attempts', N'kz', N'Әрекеттер')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:ui28jobs ── кінець секції ──
+-- COLL:ui22tree ── ru/kz UI-22: дерево таблиць документа; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'grid.tree.label', N'ru', N'Таблицы листа'),
+    (N'grid.tree.label', N'kz', N'Парақ кестелері'),
+    (N'grid.tree.filter', N'ru', N'Фильтр таблиц'),
+    (N'grid.tree.filter', N'kz', N'Кестелерді сүзу'),
+    (N'grid.tree.errorsOnly', N'ru', N'Только таблицы с ошибками'),
+    (N'grid.tree.errorsOnly', N'kz', N'Тек қателері бар кестелер'),
+    (N'grid.tree.tablesFilled', N'ru', N'Заполнено таблиц: {filled} из {total}'),
+    (N'grid.tree.tablesFilled', N'kz', N'Толтырылған кестелер: {filled} / {total}'),
+    (N'grid.tree.issues', N'ru', N'Замечаний: {count}'),
+    (N'grid.tree.issues', N'kz', N'Ескертпелер: {count}'),
+    (N'grid.tree.nothingFound', N'ru', N'Нет таблиц, подходящих под фильтр.'),
+    (N'grid.tree.nothingFound', N'kz', N'Сүзгіге сәйкес кесте жоқ.'),
+    (N'grid.tree.clearFilter', N'ru', N'Сбросить фильтр'),
+    (N'grid.tree.clearFilter', N'kz', N'Сүзгіні тазарту'),
+    (N'grid.tree.toggle', N'ru', N'Навигатор таблиц'),
+    (N'grid.tree.toggle', N'kz', N'Кестелер навигаторы'),
+    (N'grid.tree.state.unknown', N'ru', N'Состояние ещё не загружено'),
+    (N'grid.tree.state.unknown', N'kz', N'Күйі әлі жүктелмеген'),
+    (N'grid.tree.state.none', N'ru', N'Заполнять нечего'),
+    (N'grid.tree.state.none', N'kz', N'Толтыратын ештеңе жоқ'),
+    (N'grid.tree.state.empty', N'ru', N'Не заполнена'),
+    (N'grid.tree.state.empty', N'kz', N'Толтырылмаған'),
+    (N'grid.tree.state.partial', N'ru', N'Заполнена частично: {filled} из {total} ячеек'),
+    (N'grid.tree.state.partial', N'kz', N'Ішінара толтырылған: {filled} / {total} ұяшық'),
+    (N'grid.tree.state.filled', N'ru', N'Заполнена'),
+    (N'grid.tree.state.filled', N'kz', N'Толтырылған'),
+    (N'grid.tree.state.error', N'ru', N'Ошибок: {count}'),
+    (N'grid.tree.state.error', N'kz', N'Қателер: {count}'),
+    (N'grid.tree.warnings', N'ru', N'Предупреждений: {count}'),
+    (N'grid.tree.warnings', N'kz', N'Ескертулер: {count}')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:ui22tree ── кінець секції ──
+-- COLL:ui37security ── ru/kz UI-37: Security — ролі, порівняння, шкала рівня, смуга грантів; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'security.viewLabel', N'ru', N'Вид'),
+    (N'security.viewLabel', N'kz', N'Көрініс'),
+    (N'security.viewOne', N'ru', N'Одна роль'),
+    (N'security.viewOne', N'kz', N'Бір рөл'),
+    (N'security.viewCompare', N'ru', N'Сравнить роли'),
+    (N'security.viewCompare', N'kz', N'Рөлдерді салыстыру'),
+    (N'security.custom', N'ru', N'пользовательская'),
+    (N'security.custom', N'kz', N'пайдаланушылық'),
+    (N'security.customReadOnly', N'ru', N'Права роли задаются при её создании. Для другого набора прав создайте новую роль.'),
+    (N'security.customReadOnly', N'kz', N'Рөл құқықтары ол құрылған кезде беріледі. Басқа құқықтар жиынтығы үшін жаңа рөл құрыңыз.'),
+    (N'security.builtInReadOnlyTitle', N'ru', N'Встроенная роль — только чтение'),
+    (N'security.builtInReadOnlyTitle', N'kz', N'Кіріктірілген рөл — тек оқу үшін'),
+    (N'security.builtInReadOnlyText', N'ru', N'Встроенные роли поставляются с продуктом и меняются только с его обновлением, поэтому значат одно и то же в каждой установке. Для другого набора прав создайте новую роль или клонируйте эту.'),
+    (N'security.builtInReadOnlyText', N'kz', N'Кіріктірілген рөлдер өніммен бірге келеді және тек өнім жаңартуымен өзгереді, сондықтан әр орнатуда мағынасы бірдей. Басқа құқықтар жиынтығы үшін жаңа рөл құрыңыз немесе осы рөлді көшіріңіз.'),
+    (N'security.cloneAsCustom', N'ru', N'Клонировать как пользовательскую'),
+    (N'security.cloneAsCustom', N'kz', N'Пайдаланушылық рөл ретінде көшіру'),
+    (N'security.roleMore', N'ru', N'Ещё'),
+    (N'security.roleMore', N'kz', N'Тағы'),
+    (N'security.groupSummary', N'ru', N'Выдано {granted} из {total}'),
+    (N'security.groupSummary', N'kz', N'{total} ішінен {granted} берілген'),
+    (N'security.groupDangerous', N'ru', N'опасных: {count}'),
+    (N'security.groupDangerous', N'kz', N'қауіпті: {count}'),
+    (N'security.dangerousMark', N'ru', N'Опасное'),
+    (N'security.dangerousMark', N'kz', N'Қауіпті'),
+    (N'security.granted', N'ru', N'выдано'),
+    (N'security.granted', N'kz', N'берілген'),
+    (N'security.notGranted', N'ru', N'не выдано'),
+    (N'security.notGranted', N'kz', N'берілмеген'),
+    (N'security.domainOther', N'ru', N'Прочее'),
+    (N'security.domainOther', N'kz', N'Басқа'),
+    (N'security.onlyDiff', N'ru', N'Только различия'),
+    (N'security.onlyDiff', N'kz', N'Тек айырмашылықтар'),
+    (N'security.compareHint', N'ru', N'Права — строки, роли — столбцы: читайте строку, чтобы увидеть, кто может выполнить одно действие. Показано прав: {shown} из {total}, ролей: {roles}.'),
+    (N'security.compareHint', N'kz', N'Құқықтар — жолдар, рөлдер — бағандар: бір әрекетті кім орындай алатынын көру үшін жолды оқыңыз. Көрсетілген құқықтар: {shown} / {total}, рөлдер: {roles}.'),
+    (N'security.identicalRoles', N'ru', N'Эти роли одинаковы: они дают ровно те же права.'),
+    (N'security.identicalRoles', N'kz', N'Бұл рөлдер бірдей: олар дәл сол құқықтарды береді.'),
+    (N'security.permissionColumn', N'ru', N'Право'),
+    (N'security.permissionColumn', N'kz', N'Құқық'),
+    (N'security.matrixLabel', N'ru', N'Матрица сравнения ролей'),
+    (N'security.matrixLabel', N'kz', N'Рөлдерді салыстыру матрицасы'),
+    (N'security.subtitle.roles', N'ru', N'Роль — это набор прав. Встроенные роли изменить нельзя. Опасные права отмечены щитом.'),
+    (N'security.subtitle.roles', N'kz', N'Рөл — құқықтар жиынтығы. Кіріктірілген рөлдерді өзгертуге болмайды. Қауіпті құқықтар қалқанмен белгіленген.'),
+    (N'security.subtitle.grants', N'ru', N'К каким проектам, листам, таблицам, столбцам и справочникам у роли есть доступ и на каком уровне. Роль говорит, что человек может делать, грант — где.'),
+    (N'security.subtitle.grants', N'kz', N'Рөлдің қай жобаларға, парақтарға, кестелерге, бағандарға және анықтамалықтарға қандай деңгейде қолжетімділігі бар. Рөл адамның не істей алатынын айтады, грант — қай жерде.'),
+    (N'security.subtitle.users', N'ru', N'Люди и служебные учётные записи: их роли, оповещения и состояние входа.'),
+    (N'security.subtitle.users', N'kz', N'Адамдар мен қызметтік тіркелгілер: олардың рөлдері, хабарландырулары және кіру күйі.'),
+    (N'security.domain.Template', N'ru', N'Шаблоны'),
+    (N'security.domain.Template', N'kz', N'Үлгілер'),
+    (N'security.domain.Registry', N'ru', N'Справочники'),
+    (N'security.domain.Registry', N'kz', N'Анықтамалықтар'),
+    (N'security.domain.Document', N'ru', N'Документы'),
+    (N'security.domain.Document', N'kz', N'Құжаттар'),
+    (N'security.domain.Project', N'ru', N'Проекты'),
+    (N'security.domain.Project', N'kz', N'Жобалар'),
+    (N'security.domain.Period', N'ru', N'Периоды'),
+    (N'security.domain.Period', N'kz', N'Кезеңдер'),
+    (N'security.domain.Calculation', N'ru', N'Расчёты'),
+    (N'security.domain.Calculation', N'kz', N'Есептеулер'),
+    (N'security.domain.Report', N'ru', N'Отчёты'),
+    (N'security.domain.Report', N'kz', N'Есептер'),
+    (N'security.domain.Integration', N'ru', N'Сбор данных'),
+    (N'security.domain.Integration', N'kz', N'Деректер жинау'),
+    (N'security.domain.Uom', N'ru', N'Единицы измерения'),
+    (N'security.domain.Uom', N'kz', N'Өлшем бірліктері'),
+    (N'security.domain.Security', N'ru', N'Безопасность'),
+    (N'security.domain.Security', N'kz', N'Қауіпсіздік'),
+    (N'security.domain.System', N'ru', N'Система'),
+    (N'security.domain.System', N'kz', N'Жүйе'),
+    (N'grants.stats', N'ru', N'Гранты роли'),
+    (N'grants.stats', N'kz', N'Рөл гранттары'),
+    (N'grants.stat.all', N'ru', N'грантов'),
+    (N'grants.stat.all', N'kz', N'грант'),
+    (N'grants.stat.deny', N'ru', N'запретов'),
+    (N'grants.stat.deny', N'kz', N'тыйым'),
+    (N'grants.stat.manage', N'ru', N'уровня Manage'),
+    (N'grants.stat.manage', N'kz', N'Manage деңгейінде'),
+    (N'grants.stat.unresolved', N'ru', N'ресурсов не найдено'),
+    (N'grants.stat.unresolved', N'kz', N'ресурс табылмады'),
+    (N'grants.search', N'ru', N'Поиск'),
+    (N'grants.search', N'kz', N'Іздеу'),
+    (N'grants.searchPlaceholder', N'ru', N'Ресурс, вид или уровень'),
+    (N'grants.searchPlaceholder', N'kz', N'Ресурс, түрі немесе деңгейі'),
+    (N'grants.noMatch', N'ru', N'Нет грантов, подходящих под фильтр.'),
+    (N'grants.noMatch', N'kz', N'Сүзгіге сәйкес грант жоқ.'),
+    (N'grants.levelHint.Read', N'ru', N'Может открывать и выгружать, ничего не меняя.'),
+    (N'grants.levelHint.Read', N'kz', N'Ашып, экспорттай алады, ештеңені өзгертпейді.'),
+    (N'grants.levelHint.Write', N'ru', N'Может вводить и импортировать данные.'),
+    (N'grants.levelHint.Write', N'kz', N'Деректерді енгізіп, импорттай алады.'),
+    (N'grants.levelHint.Submit', N'ru', N'Может вводить данные и отправлять листы на утверждение.'),
+    (N'grants.levelHint.Submit', N'kz', N'Деректерді енгізіп, парақтарды бекітуге жібере алады.'),
+    (N'grants.levelHint.Approve', N'ru', N'Может утверждать, отклонять и возвращать отправленные листы.'),
+    (N'grants.levelHint.Approve', N'kz', N'Жіберілген парақтарды бекітіп, қабылдамай, қайтара алады.'),
+    (N'grants.levelHint.Manage', N'ru', N'Может менять настройки ресурса.'),
+    (N'grants.levelHint.Manage', N'kz', N'Ресурс баптауларын өзгерте алады.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:ui37security ── кінець секції ──
+
+-- COLL:ui36ctor ── ru/kz UI-36: конструктор версії шаблону; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'ctor.structure', N'ru', N'Структура'),
+    (N'ctor.structure', N'kz', N'Құрылым'),
+    (N'ctor.treeLabel', N'ru', N'Листы и таблицы'),
+    (N'ctor.treeLabel', N'kz', N'Парақтар мен кестелер'),
+    (N'ctor.findTable', N'ru', N'Найти таблицу'),
+    (N'ctor.findTable', N'kz', N'Кестені табу'),
+    (N'ctor.toggleTree', N'ru', N'Показать или скрыть структуру'),
+    (N'ctor.toggleTree', N'kz', N'Құрылымды көрсету немесе жасыру'),
+    (N'ctor.versionNode', N'ru', N'Версия {version}'),
+    (N'ctor.versionNode', N'kz', N'{version} нұсқасы'),
+    (N'ctor.versionMeta', N'ru', N'Листов: {sheets} · таблиц: {tables}'),
+    (N'ctor.versionMeta', N'kz', N'Парақтар: {sheets} · кестелер: {tables}'),
+    (N'ctor.sheetMeta', N'ru', N'Лист {no} из {total} · таблиц: {count}'),
+    (N'ctor.sheetMeta', N'kz', N'{total} парақтың {no}-сі · кестелер: {count}'),
+    (N'ctor.tablesCount', N'ru', N'Таблиц: {count}'),
+    (N'ctor.tablesCount', N'kz', N'Кестелер: {count}'),
+    (N'ctor.sheets', N'ru', N'Листы'),
+    (N'ctor.sheets', N'kz', N'Парақтар'),
+    (N'ctor.sheetsHint', N'ru', N'Выберите лист или таблицу, чтобы изменить их'),
+    (N'ctor.sheetsHint', N'kz', N'Өзгерту үшін парақты немесе кестені таңдаңыз'),
+    (N'ctor.sheet', N'ru', N'Лист'),
+    (N'ctor.sheet', N'kz', N'Парақ'),
+    (N'ctor.tables', N'ru', N'Таблицы'),
+    (N'ctor.tables', N'kz', N'Кестелер'),
+    (N'ctor.tablesHint', N'ru', N'В том порядке, в котором их видят операторы'),
+    (N'ctor.tablesHint', N'kz', N'Операторлар көретін ретпен'),
+    (N'ctor.visibility', N'ru', N'В документах'),
+    (N'ctor.visibility', N'kz', N'Құжаттарда'),
+    (N'ctor.visible', N'ru', N'Показан'),
+    (N'ctor.visible', N'kz', N'Көрсетіледі'),
+    (N'ctor.sheetEmpty', N'ru', N'В этом листе нет таблиц. Лист без таблиц нельзя опубликовать: добавьте таблицу или скройте лист.'),
+    (N'ctor.sheetEmpty', N'kz', N'Бұл парақта кесте жоқ. Кестесіз парақты жариялау мүмкін емес: кесте қосыңыз немесе парақты жасырыңыз.'),
+    (N'ctor.no', N'ru', N'№'),
+    (N'ctor.no', N'kz', N'№'),
+    (N'ctor.table', N'ru', N'Таблица'),
+    (N'ctor.table', N'kz', N'Кесте'),
+    (N'ctor.tableProperties', N'ru', N'Свойства таблицы'),
+    (N'ctor.tableProperties', N'kz', N'Кесте қасиеттері'),
+    (N'ctor.tab.columns', N'ru', N'Колонки'),
+    (N'ctor.tab.columns', N'kz', N'Бағандар'),
+    (N'ctor.tab.rows', N'ru', N'Строки'),
+    (N'ctor.tab.rows', N'kz', N'Жолдар'),
+    (N'ctor.tab.formulas', N'ru', N'Формулы'),
+    (N'ctor.tab.formulas', N'kz', N'Формулалар'),
+    (N'ctor.tab.rules', N'ru', N'Правила проверки'),
+    (N'ctor.tab.rules', N'kz', N'Тексеру ережелері'),
+    (N'ctor.tab.preview', N'ru', N'Предпросмотр'),
+    (N'ctor.tab.preview', N'kz', N'Алдын ала қарау'),
+    (N'ctor.columnsHint', N'ru', N'Колонки в том порядке, в котором их видят операторы. «Изменить» меняет названия, тип и единицу; «Оформление» меняет только вид и доступно после публикации.'),
+    (N'ctor.columnsHint', N'kz', N'Бағандар операторлар көретін ретпен. «Өзгерту» атауларды, түрді және бірлікті өзгертеді; «Безендіру» тек сыртқы түрді өзгертеді және жариялаудан кейін де қолжетімді.'),
+    (N'ctor.rowsDynamic', N'ru', N'Строки этой таблицы добавляют операторы при заполнении документа; шаблон их не задаёт.'),
+    (N'ctor.rowsDynamic', N'kz', N'Бұл кестенің жолдарын операторлар құжатты толтыру кезінде қосады; үлгі оларды анықтамайды.'),
+    (N'ctor.formulasHint', N'ru', N'Вычисляемые колонки и строки этой таблицы. Выражения проверяются при сохранении; всё, что не компилируется, блокирует публикацию.'),
+    (N'ctor.formulasHint', N'kz', N'Осы кестенің есептелетін бағандары мен жолдары. Өрнектер сақтау кезінде тексеріледі; компиляцияланбайтын кез келген нәрсе жариялауды бұғаттайды.'),
+    (N'ctor.formulasEmpty', N'ru', N'В этой таблице пока нет формул. Добавьте формулу кнопкой «Формула» у колонки или строки.'),
+    (N'ctor.formulasEmpty', N'kz', N'Бұл кестеде әзірге формула жоқ. Баған немесе жол жанындағы «Формула» батырмасымен қосыңыз.'),
+    (N'ctor.formulaTarget', N'ru', N'Цель'),
+    (N'ctor.formulaTarget', N'kz', N'Мақсат'),
+    (N'ctor.formulaExpression', N'ru', N'Выражение'),
+    (N'ctor.formulaExpression', N'kz', N'Өрнек'),
+    (N'ctor.formulaRow', N'ru', N'Строка'),
+    (N'ctor.formulaRow', N'kz', N'Жол'),
+    (N'ctor.rulesHint', N'ru', N'Правила проверяются, когда операторы сохраняют и отправляют. Ошибки блокируют отправку; предупреждения только информируют.'),
+    (N'ctor.rulesHint', N'kz', N'Ережелер операторлар сақтаған және жіберген кезде тексеріледі. Қателер жіберуді бұғаттайды; ескертулер тек хабарлайды.'),
+    (N'ctor.addRule', N'ru', N'Добавить правило'),
+    (N'ctor.addRule', N'kz', N'Ереже қосу'),
+    (N'ctor.cloneToDraft', N'ru', N'Клонировать в новый черновик'),
+    (N'ctor.cloneToDraft', N'kz', N'Жаңа нобайға көшіру'),
+    (N'ctor.stepper', N'ru', N'Жизненный цикл версии: {state}, этап {no} из {total}'),
+    (N'ctor.stepper', N'kz', N'Нұсқаның өмірлік циклі: {state}, {total} кезеңнің {no}-сі'),
+    (N'ctor.saved', N'ru', N'Сохранено {time}'),
+    (N'ctor.saved', N'kz', N'Сақталды {time}')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:ui36ctor ── кінець секції ──
+-- COLL:ui40board ── ru/kz UI-40: подання Board переліку документів (перемикач Table/Board, стовпці за станом); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'documents.view', N'ru', N'Вид'),
+    (N'documents.view', N'kz', N'Көрініс'),
+    (N'documents.viewTable', N'ru', N'Таблица'),
+    (N'documents.viewTable', N'kz', N'Кесте'),
+    (N'documents.viewBoard', N'ru', N'Доска'),
+    (N'documents.viewBoard', N'kz', N'Тақта'),
+    (N'documents.board.draft', N'ru', N'Черновик'),
+    (N'documents.board.draft', N'kz', N'Жоба'),
+    (N'documents.board.waiting', N'ru', N'Ожидает утверждения'),
+    (N'documents.board.waiting', N'kz', N'Бекітуді күтуде'),
+    (N'documents.board.rework', N'ru', N'Возвращено или отклонено'),
+    (N'documents.board.rework', N'kz', N'Қайтарылған немесе қабылданбаған'),
+    (N'documents.board.approved', N'ru', N'Утверждено'),
+    (N'documents.board.approved', N'kz', N'Бекітілген'),
+    (N'documents.board.noState', N'ru', N'Нет состояния за этот период'),
+    (N'documents.board.noState', N'kz', N'Осы кезеңге күйі жоқ'),
+    (N'documents.board.nothingHere', N'ru', N'Здесь пусто'),
+    (N'documents.board.nothingHere', N'kz', N'Мұнда ештеңе жоқ')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:ui40board ── кінець секції ──
+-- COLL:ui41keys ── ru/kz UI-41: підказка клавіш під таблицею і довідка Keyboard shortcuts; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'grid.keys.hint', N'ru', N'Стрелки — переход · Enter или F2 — правка · Ctrl+V — вставка из Excel · F9 — пересчёт'),
+    (N'grid.keys.hint', N'kz', N'Көрсеткілер — жылжу · Enter не F2 — өңдеу · Ctrl+V — Excel-ден қою · F9 — қайта есептеу'),
+    (N'grid.keys.hintReadOnly', N'ru', N'Стрелки — переход · Ctrl+C — копирование'),
+    (N'grid.keys.hintReadOnly', N'kz', N'Көрсеткілер — жылжу · Ctrl+C — көшіру'),
+    (N'grid.keys.help', N'ru', N'Сочетания клавиш'),
+    (N'grid.keys.help', N'kz', N'Пернетақта тіркесімдері'),
+    (N'grid.keys.move', N'ru', N'Переход между ячейками'),
+    (N'grid.keys.move', N'kz', N'Ұяшықтар арасында жылжу'),
+    (N'grid.keys.edit', N'ru', N'Править ячейку; повторный Enter сохраняет'),
+    (N'grid.keys.edit', N'kz', N'Ұяшықты өңдеу; қайта Enter сақтайды'),
+    (N'grid.keys.tab', N'ru', N'Сохранить и перейти к следующей ячейке'),
+    (N'grid.keys.tab', N'kz', N'Сақтап, келесі ұяшыққа өту'),
+    (N'grid.keys.cancel', N'ru', N'Отменить правку'),
+    (N'grid.keys.cancel', N'kz', N'Өңдеуден бас тарту'),
+    (N'grid.keys.copy', N'ru', N'Копировать выделенные ячейки'),
+    (N'grid.keys.copy', N'kz', N'Белгіленген ұяшықтарды көшіру'),
+    (N'grid.keys.paste', N'ru', N'Вставить из Excel'),
+    (N'grid.keys.paste', N'kz', N'Excel-ден қою'),
+    (N'grid.keys.undo', N'ru', N'Отменить или вернуть последнюю правку'),
+    (N'grid.keys.undo', N'kz', N'Соңғы өзгерісті болдырмау немесе қайтару'),
+    (N'grid.keys.save', N'ru', N'Сохранить сейчас'),
+    (N'grid.keys.save', N'kz', N'Қазір сақтау'),
+    (N'grid.keys.recalc', N'ru', N'Пересчитать этот лист'),
+    (N'grid.keys.recalc', N'kz', N'Осы парақты қайта есептеу'),
+    (N'grid.keys.palette', N'ru', N'Поиск или команда'),
+    (N'grid.keys.palette', N'kz', N'Іздеу немесе пәрмен')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:ui41keys ── кінець секції ──
+-- COLL:ui42narrow ── ru/kz UI-42: документ лише для читання на вузькому екрані (банер docs-narrow-note); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'document.narrow.title', N'ru', N'Только просмотр на узком экране'),
+    (N'document.narrow.title', N'kz', N'Тар экранда тек қарау'),
+    (N'document.narrow.text', N'ru', N'Здесь значения можно просматривать, но не изменять. Чтобы ввести или исправить данные, откройте документ на более широком экране.'),
+    (N'document.narrow.text', N'kz', N'Мұнда мәндерді қарауға болады, бірақ өзгертуге болмайды. Деректерді енгізу немесе түзету үшін құжатты кеңірек экранда ашыңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:ui42narrow ── кінець секції ──
+-- COLL:a11y-pass ── ru/kz: зауваження успішного PATCH; 403 у каскаді гранта; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'grid.patchNoticesTitle', N'ru', N'Сохранено с замечаниями: {count}'),
+    (N'grid.patchNoticesTitle', N'kz', N'Ескертпелермен сақталды: {count}')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:a11y-pass ── кінець секції ──
+-- COLL:ui39health ── ru/kz UI-39: сторінка Health за макетом; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'health.subtitle', N'ru', N'Работает ли ECR прямо сейчас? Каждая часть проверяется автоматически; предупреждение появляется, только когда нужно что-то сделать.'),
+    (N'health.subtitle', N'kz', N'ECR қазір жұмыс істеп тұр ма? Әр бөлік автоматты түрде тексеріледі; ескерту тек бірдеңе істеу қажет болғанда шығады.'),
+    (N'health.checkNow', N'ru', N'Проверить сейчас'),
+    (N'health.checkNow', N'kz', N'Қазір тексеру'),
+    (N'health.checkedNow', N'ru', N'Проверено только что.'),
+    (N'health.checkedNow', N'kz', N'Жаңа ғана тексерілді.'),
+    (N'health.copyDiagnostics', N'ru', N'Копировать диагностику'),
+    (N'health.copyDiagnostics', N'kz', N'Диагностиканы көшіру'),
+    (N'health.diagnosticsCopied', N'ru', N'Диагностика скопирована в буфер обмена. В ней нет паролей и персональных данных.'),
+    (N'health.diagnosticsCopied', N'kz', N'Диагностика алмасу буферіне көшірілді. Онда құпиясөздер мен жеке деректер жоқ.'),
+    (N'health.banner.title', N'ru', N'{check}: требуется внимание'),
+    (N'health.banner.title', N'kz', N'{check}: назар аудару қажет'),
+    (N'health.durationMs', N'ru', N'ответ {ms} мс'),
+    (N'health.durationMs', N'kz', N'жауап {ms} мс'),
+    (N'health.checkedAt', N'ru', N'Проверено'),
+    (N'health.checkedAt', N'kz', N'Тексерілді')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:ui39health ── кінець секції ──
+-- COLL:uidochead ── ru/kz UI-14/15/16: шапка й панель дій документа; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'document.saveState.allSaved', N'ru', N'Все изменения сохранены'),
+    (N'document.saveState.allSaved', N'kz', N'Барлық өзгерістер сақталды'),
+    (N'document.saveState.savedAt', N'ru', N'Сохранено в {time}'),
+    (N'document.saveState.savedAt', N'kz', N'{time} сақталды'),
+    (N'document.saveState.readOnly', N'ru', N'Только чтение'),
+    (N'document.saveState.readOnly', N'kz', N'Тек оқу'),
+    (N'document.saveState.notSaved', N'ru', N'не сохранено'),
+    (N'document.saveState.notSaved', N'kz', N'сақталмады'),
+    (N'document.saveState.show', N'ru', N'Показать'),
+    (N'document.saveState.show', N'kz', N'Көрсету'),
+    (N'document.saveState.unsaved.one', N'ru', N'{count} несохранённое изменение'),
+    (N'document.saveState.unsaved.one', N'kz', N'{count} сақталмаған өзгеріс'),
+    (N'document.saveState.unsaved.few', N'ru', N'{count} несохранённых изменения'),
+    (N'document.saveState.unsaved.few', N'kz', N'{count} сақталмаған өзгеріс'),
+    (N'document.saveState.unsaved.many', N'ru', N'{count} несохранённых изменений'),
+    (N'document.saveState.unsaved.many', N'kz', N'{count} сақталмаған өзгеріс'),
+    (N'document.saveState.unsaved.other', N'ru', N'{count} несохранённого изменения'),
+    (N'document.saveState.unsaved.other', N'kz', N'{count} сақталмаған өзгеріс'),
+    (N'document.sheetStateLabel', N'ru', N'Лист:'),
+    (N'document.sheetStateLabel', N'kz', N'Парақ:'),
+    (N'document.noIssues', N'ru', N'Замечаний нет'),
+    (N'document.noIssues', N'kz', N'Ескертпелер жоқ'),
+    (N'document.issuesCount.one', N'ru', N'{count} замечание'),
+    (N'document.issuesCount.one', N'kz', N'{count} ескертпе'),
+    (N'document.issuesCount.few', N'ru', N'{count} замечания'),
+    (N'document.issuesCount.few', N'kz', N'{count} ескертпе'),
+    (N'document.issuesCount.many', N'ru', N'{count} замечаний'),
+    (N'document.issuesCount.many', N'kz', N'{count} ескертпе'),
+    (N'document.issuesCount.other', N'ru', N'{count} замечания'),
+    (N'document.issuesCount.other', N'kz', N'{count} ескертпе')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:uidochead ── кінець секції ──
+-- COLL:uidocgrid ── ru/kz UI-23/24/26: рядок стану сітки й банер стану аркуша; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'grid.status.size', N'ru', N'Строк: {rows} · столбцов: {columns}'),
+    (N'grid.status.size', N'kz', N'Жолдар: {rows} · бағандар: {columns}'),
+    (N'grid.status.average', N'ru', N'Среднее'),
+    (N'grid.status.average', N'kz', N'Орташа'),
+    (N'grid.status.count', N'ru', N'Количество'),
+    (N'grid.status.count', N'kz', N'Саны'),
+    (N'grid.status.sum', N'ru', N'Сумма'),
+    (N'grid.status.sum', N'kz', N'Сомасы'),
+    (N'document.banner.submitted', N'ru', N'Отправлено на утверждение'),
+    (N'document.banner.submitted', N'kz', N'Бекітуге жіберілді'),
+    (N'document.banner.submittedBy', N'ru', N'Отправлено {date}, {name}'),
+    (N'document.banner.submittedBy', N'kz', N'{date} жіберілді, {name}'),
+    (N'document.banner.submittedDecide', N'ru', N'Ожидает вашего решения: проверьте цифры, затем утвердите или отклоните с указанием причины.'),
+    (N'document.banner.submittedDecide', N'kz', N'Сіздің шешіміңізді күтуде: сандарды тексеріңіз, содан кейін бекітіңіз немесе себебін көрсетіп қабылдамаңыз.'),
+    (N'document.banner.submittedWait', N'ru', N'Ожидает решения утверждающего.'),
+    (N'document.banner.submittedWait', N'kz', N'Бекітушінің шешімін күтуде.'),
+    (N'document.banner.approved', N'ru', N'Утверждено'),
+    (N'document.banner.approved', N'kz', N'Бекітілді'),
+    (N'document.banner.approvedBy', N'ru', N'Утверждено {date}, {name}'),
+    (N'document.banner.approvedBy', N'kz', N'{date} бекітілді, {name}'),
+    (N'document.banner.rejected', N'ru', N'Возвращено на доработку'),
+    (N'document.banner.rejected', N'kz', N'Түзетуге қайтарылды'),
+    (N'document.banner.rejectedBy', N'ru', N'Отклонено {date}, {name}'),
+    (N'document.banner.rejectedBy', N'kz', N'{date} қабылданбады, {name}'),
+    (N'document.banner.rejectedNext', N'ru', N'Исправьте цифры, проверьте лист и отправьте его снова.'),
+    (N'document.banner.rejectedNext', N'kz', N'Сандарды түзетіп, парақты тексеріп, қайта жіберіңіз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:uidocgrid ── кінець секції ──
+-- COLL:uidocscope ── ru/kz P1 прихований аркуш: видалення перевіряє сервер; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'documents.deleteServerChecks', N'ru', N'Сервер проверяет все листы документа, включая недоступные вам, и откажет, если хотя бы один из них не черновик.'),
+    (N'documents.deleteServerChecks', N'kz', N'Сервер құжаттың барлық парақтарын, соның ішінде сізге көрінбейтіндерін де тексереді және кемінде біреуі жоба болмаса, бас тартады.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:uidocscope ── кінець секції ──
+-- COLL:mockb4b ── ru/kz b4b: сторінки 403/404, «← Back»; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'nav.accessDenied.crumb', N'ru', N'Доступ запрещён'),
+    (N'nav.accessDenied.crumb', N'kz', N'Қолжетімділік жоқ'),
+    (N'nav.accessDenied.title', N'ru', N'У вас нет доступа к этой странице'),
+    (N'nav.accessDenied.title', N'kz', N'Бұл бетке қолжетімділігіңіз жоқ'),
+    (N'nav.accessDenied.text', N'ru', N'Ничего не изменено. Попросите системного администратора назначить вам роль с этим правом.'),
+    (N'nav.accessDenied.text', N'kz', N'Ештеңе өзгертілмеді. Жүйе әкімшісінен осы құқығы бар рөлді беруін сұраңыз.'),
+    (N'nav.accessDenied.copy', N'ru', N'Скопировать данные для запроса'),
+    (N'nav.accessDenied.copy', N'kz', N'Сұрау деректерін көшіру'),
+    (N'nav.accessDenied.copied', N'ru', N'Данные скопированы — вставьте их в сообщение'),
+    (N'nav.accessDenied.copied', N'kz', N'Деректер көшірілді — оларды хабарламаңызға қойыңыз'),
+    (N'nav.accessDenied.myAccess', N'ru', N'Мой доступ'),
+    (N'nav.accessDenied.myAccess', N'kz', N'Менің қолжетімділігім'),
+    (N'nav.backToDocuments', N'ru', N'Назад к документам'),
+    (N'nav.backToDocuments', N'kz', N'Құжаттарға оралу'),
+    (N'nav.backToTemplates', N'ru', N'Назад к шаблонам'),
+    (N'nav.backToTemplates', N'kz', N'Үлгілерге оралу'),
+    (N'nav.goToDocuments', N'ru', N'Перейти к документам'),
+    (N'nav.goToDocuments', N'kz', N'Құжаттарға өту'),
+    (N'nav.notFound.didYouMean', N'ru', N'Возможно, вы искали:'),
+    (N'nav.notFound.didYouMean', N'kz', N'Мүмкін, сіз іздеген:'),
+    (N'nav.notFound.search', N'ru', N'Поиск экранов и документов'),
+    (N'nav.notFound.search', N'kz', N'Экрандар мен құжаттарды іздеу'),
+    (N'templates.continueDraft', N'ru', N'Продолжить черновик {version}'),
+    (N'templates.continueDraft', N'kz', N'{version} жобасын жалғастыру')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:mockb4b ── кінець секції ──
+-- COLL:ui35registries ── ru/kz UI-35: перелік довідників зі шторкою; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'registries.list.subtitle', N'ru', N'Справочники, из которых ячейки, формулы и сопоставления берут значения: источники, вещества, топливо, лимиты.'),
+    (N'registries.list.subtitle', N'kz', N'Ұяшықтар, формулалар мен сәйкестендірулер мән алатын анықтамалықтар: көздер, заттар, отын, лимиттер.'),
+    (N'registries.list.stats', N'ru', N'Сводка по справочникам'),
+    (N'registries.list.stats', N'kz', N'Анықтамалықтар бойынша жиынтық'),
+    (N'registries.list.statAll', N'ru', N'справочников'),
+    (N'registries.list.statAll', N'kz', N'анықтамалық'),
+    (N'registries.list.statExternal', N'ru', N'синхронизируются из PI AF'),
+    (N'registries.list.statExternal', N'kz', N'PI AF-тан синхрондалады'),
+    (N'registries.list.registry', N'ru', N'Справочник'),
+    (N'registries.list.registry', N'kz', N'Анықтамалық'),
+    (N'registries.list.traits', N'ru', N'Свойства'),
+    (N'registries.list.traits', N'kz', N'Қасиеттер'),
+    (N'registries.list.source', N'ru', N'Ведущий источник'),
+    (N'registries.list.source', N'kz', N'Негізгі көз'),
+    (N'registries.list.sourceKind.Local', N'ru', N'Ведётся в ECR'),
+    (N'registries.list.sourceKind.Local', N'kz', N'ECR-де жүргізіледі'),
+    (N'registries.list.sourceKind.External', N'ru', N'Синхронизируется из PI AF'),
+    (N'registries.list.sourceKind.External', N'kz', N'PI AF-тан синхрондалады'),
+    (N'registries.list.sourceKind.Hybrid', N'ru', N'PI AF и ECR'),
+    (N'registries.list.sourceKind.Hybrid', N'kz', N'PI AF және ECR'),
+    (N'registries.list.usedIn', N'ru', N'Где используется'),
+    (N'registries.list.usedIn', N'kz', N'Қайда қолданылады'),
+    (N'registries.list.manage', N'ru', N'Записи и сроки действия'),
+    (N'registries.list.manage', N'kz', N'Жазбалар және қолданылу мерзімі'),
+    (N'registries.list.back', N'ru', N'Все справочники'),
+    (N'registries.list.back', N'kz', N'Барлық анықтамалықтар'),
+    (N'registries.list.searchPlaceholder', N'ru', N'Название или код справочника'),
+    (N'registries.list.searchPlaceholder', N'kz', N'Анықтамалық атауы немесе коды'),
+    (N'registries.list.noMatches', N'ru', N'Нет справочников, подходящих под эти фильтры.'),
+    (N'registries.list.noMatches', N'kz', N'Бұл сүзгілерге сәйкес анықтамалық жоқ.'),
+    (N'registries.list.entries', N'ru', N'Записи'),
+    (N'registries.list.entries', N'kz', N'Жазбалар'),
+    (N'registries.list.entriesHint', N'ru', N'Действующие сегодня; закрытые записи хранятся для старых документов.'),
+    (N'registries.list.entriesHint', N'kz', N'Бүгін қолданыстағы; жабылған жазбалар ескі құжаттар үшін сақталады.'),
+    (N'registries.list.usedInHint', N'ru', N'Колонки шаблонов, которые берут значения из этого справочника'),
+    (N'registries.list.usedInHint', N'kz', N'Осы анықтамалықтан мән алатын үлгі бағандары'),
+    (N'registries.list.usedInValue', N'ru', N'колонок: {columns} · шаблонов: {templates}'),
+    (N'registries.list.usedInValue', N'kz', N'бағандар: {columns} · үлгілер: {templates}'),
+    (N'registries.list.updated', N'ru', N'Записи изменены'),
+    (N'registries.list.updated', N'kz', N'Жазбалар өзгертілді'),
+    (N'registries.list.state', N'ru', N'Состояние'),
+    (N'registries.list.state', N'kz', N'Күйі'),
+    (N'registries.list.statEntries', N'ru', N'записей'),
+    (N'registries.list.statEntries', N'kz', N'жазба'),
+    (N'registries.list.statChanged', N'ru', N'изменены в этом месяце'),
+    (N'registries.list.statChanged', N'kz', N'осы айда өзгертілген'),
+    (N'registries.list.statUsedIn', N'ru', N'колонок шаблонов используют'),
+    (N'registries.list.statUsedIn', N'kz', N'үлгі бағаны пайдаланады'),
+    (N'registries.list.definition', N'ru', N'Описание'),
+    (N'registries.list.definition', N'kz', N'Сипаттама'),
+    (N'registries.list.definitionValue', N'ru', N'v{version} опубликована'),
+    (N'registries.list.definitionValue', N'kz', N'v{version} жарияланған'),
+    (N'registries.list.definitionDraft', N'ru', N'v{version} опубликована · есть черновик'),
+    (N'registries.list.definitionDraft', N'kz', N'v{version} жарияланған · жоба бар'),
+    (N'registries.list.draftTitle', N'ru', N'В описании есть неопубликованные изменения'),
+    (N'registries.list.draftTitle', N'kz', N'Сипаттамада жарияланбаған өзгерістер бар'),
+    (N'registries.list.draftText', N'ru', N'Записи работают по опубликованному описанию, пока черновик не опубликован.'),
+    (N'registries.list.draftText', N'kz', N'Жоба жарияланғанша жазбалар жарияланған сипаттама бойынша жұмыс істейді.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:ui35registries ── кінець секції ──
+-- COLL:ui32crumbs ── ru/kz UI-32: крихти у верхній смузі; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'nav.breadcrumb', N'ru', N'Навигационная цепочка'),
+    (N'nav.breadcrumb', N'kz', N'Навигация жолы')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:ui32crumbs ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

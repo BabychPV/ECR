@@ -75,7 +75,7 @@ describe('PeriodPicker: неповний набір лишається в пол
     renderWithMantine(<PeriodPicker value={202512} onChange={onChange} />);
     const input = screen.getByRole('textbox', { name: '⟦documents.period⟧' });
 
-    await user.type(input, '2026', { initialSelectionStart: 0, initialSelectionEnd: 6 });
+    await user.type(input, '2026', { initialSelectionStart: 0, initialSelectionEnd: (input as HTMLInputElement).value.length });
     expect((input as HTMLInputElement).value).toBe('2026');
     expect(input.getAttribute('aria-invalid')).not.toBe('true');
     // Назва попереднього періоду не стоїть у полі з чужим набором.
@@ -93,7 +93,7 @@ describe('PeriodPicker: неповний набір лишається в пол
     renderWithMantine(<PeriodPicker value={202512} onChange={onChange} />);
     const input = screen.getByRole('textbox', { name: '⟦documents.period⟧' });
 
-    await user.type(input, '20', { initialSelectionStart: 0, initialSelectionEnd: 6 });
+    await user.type(input, '20', { initialSelectionStart: 0, initialSelectionEnd: (input as HTMLInputElement).value.length });
     fireEvent.click(screen.getByRole('button', { name: '⟦period.next⟧' }));
 
     expect(onChange.mock.calls).toEqual([[202601]]);
@@ -184,7 +184,7 @@ describe('лічильник запитів при наборі періоду',
       const input = await screen.findByRole('textbox', { name: '⟦documents.period⟧' }, { timeout: SlowEnvTimeout });
       await waitFor(() => expect(seen).toEqual(['202512']));
 
-      await user.type(input, '202608', { initialSelectionStart: 0, initialSelectionEnd: 6 });
+      await user.type(input, '202608', { initialSelectionStart: 0, initialSelectionEnd: (input as HTMLInputElement).value.length });
       await waitFor(() => expect(seen).toEqual(['202512', '202608']));
     },
     SlowEnvTimeout,

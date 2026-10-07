@@ -9,6 +9,9 @@ import { JobsPage } from '@/pages/admin/JobsPage';
  * `X-22`: при 1280 перелік задач був ширший за екран (живцем: таблиця 1114 px
  * у вікні 996), і «Started»/«Watch» стояли за правим краєм. Найширше —
  * повідомлення задачі (ключ експорту на 32 знаки без пробілів).
+ *
+ * ✎ UI-28: повідомлення — другим рядком назви задачі (макет `twoLine`), а
+ * колонки дій немає зовсім.
  */
 
 const Key = '02df27c667a74410b463b142ae6bedbf';
@@ -18,7 +21,7 @@ afterEach(() => {
 });
 
 describe('JobsPage: довге повідомлення не розсуває таблицю', () => {
-  it('повідомлення обрізається з повним текстом у title, дія «Watch» — компактна', async () => {
+  it('повідомлення обрізається з повним текстом у title, кнопок дій у рядку немає', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async () =>
@@ -46,6 +49,11 @@ describe('JobsPage: довге повідомлення не розсуває т
     // ⛔ Мутація «повернути голий `job.message`» — ні обрізання, ні `title`.
     expect(message.classList.contains('ecr-ellipsis')).toBe(true);
     expect(message.getAttribute('title')).toBe(Key);
-    expect(screen.getByRole('button', { name: '⟦jobs.recentWatch⟧' }).getAttribute('data-size')).toBe('compact-xs');
+    // ✎ UI-28: «Watch» і решта дій переїхали в шторку — у рядку лише кнопка
+    // назви задачі, яка шторку й відкриває.
+    const row = message.closest('tr') as HTMLElement;
+    expect(Array.from(row.querySelectorAll('button')).map((node) => node.textContent)).toEqual([
+      '⟦jobs.kind.excelExport⟧',
+    ]);
   });
 });

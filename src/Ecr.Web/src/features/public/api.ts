@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { apiFetch } from '@/api/client';
+import { apiFetch, EcrApiError } from '@/api/client';
 import type { components } from '@/api/schema';
 
 /**
@@ -49,7 +49,7 @@ function fetchPublicBootstrap(): Promise<PublicBootstrap> {
  * дані, а не вміст екрана. Червона смуга «не вдалося завантажити bootstrap»
  * над робочою формою входу лякала б без жодної дії, яку можна вчинити.
  */
-export function usePublicBootstrap(): PublicBootstrap {
+export function usePublicBootstrap(onPasswordChangeRequired?: () => void): PublicBootstrap {
   const [value, setValue] = useState<PublicBootstrap>(SIGN_IN_FALLBACK);
 
   useEffect(() => {
@@ -71,8 +71,12 @@ export function usePublicBootstrap(): PublicBootstrap {
           localSignInEnabled: data.localSignInEnabled !== false,
         });
       })
-      .catch(() => {
-        // Мовчки: див. ⚠ вище.
+      .catch((error: unknown) => {
+        // ⛔ A2-06 п.3: `428` — сеанс ЖИВИЙ, але з разовим паролем (`/login`
+        // відкрито в новій вкладці / F5). Форма входу тут зайва: людину чекає
+        // зміна пароля. Сам запит клієнтом не прибрати (cookie HttpOnly).
+        if (live && error instanceof EcrApiError && error.problem.status === 428) onPasswordChangeRequired?.();
+        // Решта — мовчки: див. ⚠ вище.
       });
 
     return () => {

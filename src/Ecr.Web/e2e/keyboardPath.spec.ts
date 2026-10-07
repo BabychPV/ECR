@@ -146,6 +146,28 @@ test.describe('Прохід оператора без миші (ФВ-14.16)', ()
     const link = page.locator(`a[href^="/documents/${DocumentId}"]`).first();
     await expect(link, 'документа немає в переліку за цей період').toBeVisible({ timeout: 30_000 });
 
+    // ⛔ Видиме посилання — ще не усталений перелік. Набір періоду змінює адресу
+    // (`?periodKey=`), і перелік перезапитується: рядки перемонтовуються вже ПІСЛЯ
+    // того, як старе посилання стало видимим, тож `expectFocusRing` ловив
+    // «Element is not attached to the DOM» (2 з 4 прогонів «Аудиту», 07.10).
+    // Спершу — адреса з набраним періодом, потім той самий DOM-вузол живий два
+    // вікна поспіль (~0.8 с).
+    await expect(page).toHaveURL(new RegExp(`[?&]periodKey=${PeriodKey}(&|$)`), { timeout: 30_000 });
+    let alive = 0;
+    await expect
+      .poll(
+        async () => {
+          const handle = await link.elementHandle({ timeout: 10_000 }).catch(() => null);
+          await page.waitForTimeout(400);
+          const connected = (await handle?.evaluate((element) => element.isConnected).catch(() => false)) === true;
+          await handle?.dispose();
+          alive = connected ? alive + 1 : 0;
+          return alive >= 2;
+        },
+        { message: 'перелік документів не усталився після зміни періоду', timeout: 30_000 },
+      )
+      .toBe(true);
+
     await expectFocusRing(page, link, 'посилання на документ');
     await page.keyboard.press('Enter');
 
@@ -207,7 +229,36 @@ test.describe('Прохід оператора без миші (ФВ-14.16)', ()
     const validate = page.getByRole('button', { name: /Validate|Перевір/i }).first();
     if ((await validate.count()) > 0) {
       await expectFocusRing(page, validate, 'кнопка перевірки');
+      const validated = waitForWrite(page, 'POST', 'validate');
       await page.keyboard.press('Enter');
+
+      // ⛔ UI-25 (макет `runValidate`): перевірка із зауваженнями відкриває
+      // інспектор на вкладці Issues і переносить туди фокус, а на ≥ 1181 px
+      // робоча область стискається на 320 px. Це очікувана поведінка, не
+      // дефект. Але без очікування відповідь приходила ПОСЕРЕД виміру кільця
+      // «Submit» нижче: шапка з'їжджала між знімками («розкладка зрушила на
+      // 679 px»), а кнопка перемонтовувалась («Element is not attached»).
+      // Тож спершу — відповідь, потім усталена шапка: положення «Submit» не
+      // міняється між двома читаннями (інспектор відкривається ефектом уже
+      // ПІСЛЯ відповіді, тож одного лише очікування відповіді мало).
+      expect((await validated).status(), 'сервер не виконав перевірку').toBe(200);
+      const submitButton = page.getByRole('button', { name: /Submit|Подати/i }).first();
+      // ⚠ Три однакові читання поспіль (~0.75 с), а не два: лінивий чанк
+      // інспектора може вантажитися довше за один інтервал.
+      let previous = '';
+      let same = 0;
+      await expect
+        .poll(
+          async () => {
+            await page.waitForTimeout(250);
+            const current = JSON.stringify(await submitButton.boundingBox());
+            same = current === previous ? same + 1 : 0;
+            previous = current;
+            return same >= 3;
+          },
+          { message: 'шапка документа не усталилася після перевірки', timeout: 15_000 },
+        )
+        .toBe(true);
     }
 
     // ── 9. Подання ───────────────────────────────────────────────────────

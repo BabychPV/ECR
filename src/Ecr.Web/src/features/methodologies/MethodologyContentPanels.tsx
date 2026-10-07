@@ -252,7 +252,7 @@ export function MethodologyConstantsPanel({
       <Group justify="space-between">
         <Text fw={600}>{t('methodologies.constants')}</Text>
         {editable && (
-          <Button size="compact-sm" variant="default" onClick={() => setEditing(emptyConstant)}>
+          <Button size="xs" variant="default" onClick={() => setEditing(emptyConstant)}>
             {t('methodologies.addConstant')}
           </Button>
         )}
@@ -315,7 +315,7 @@ export function MethodologyConstantsPanel({
                   <Table.Td>
                     <Group gap="xs" wrap="nowrap" justify="flex-end">
                       <Button
-                        size="compact-xs"
+                        size="xs"
                         variant="subtle"
                         data-constant-usage="trigger"
                         onClick={() => setUsageFor(constant.code)}
@@ -324,7 +324,7 @@ export function MethodologyConstantsPanel({
                       </Button>
                       {editable && (
                         <Button
-                          size="compact-xs"
+                          size="xs"
                           variant="subtle"
                           onClick={() =>
                             setEditing({
@@ -429,7 +429,7 @@ export function MethodologyConstantsPanel({
               />
             )}
 
-            <Suspense fallback={<Skeleton height={36} />}>
+            <Suspense fallback={<Skeleton height="var(--ecr-ctl-height)" />}>
               <DateOnlyInput
                 label={t('methodologies.validFrom')}
                 value={editing.validFrom}
@@ -437,7 +437,7 @@ export function MethodologyConstantsPanel({
               />
             </Suspense>
 
-            <Suspense fallback={<Skeleton height={36} />}>
+            <Suspense fallback={<Skeleton height="var(--ecr-ctl-height)" />}>
               <DateOnlyInput
                 label={t('methodologies.validTo')}
                 description={t('methodologies.validToHint')}
@@ -564,7 +564,7 @@ export function MethodologyRulesPanel({
         <Text fw={600}>{t('methodologies.rules')}</Text>
         {editable && (
           <Button
-            size="compact-sm"
+            size="xs"
             variant="default"
             onClick={() =>
               setEditing({ code: '', matchJson: '{}', priority: 1, isActive: true, isNew: true })
@@ -610,7 +610,7 @@ export function MethodologyRulesPanel({
                   <Table.Td>
                     {editable && (
                       <Button
-                        size="compact-xs"
+                        size="xs"
                         variant="subtle"
                         onClick={() =>
                           setEditing({
@@ -829,7 +829,7 @@ export function MethodologyRequiredInputsPanel({
         <Text fw={600}>{t('methodologies.requiredInputs')}</Text>
         {editable && (
           <Button
-            size="compact-sm"
+            size="xs"
             variant="default"
             onClick={() =>
               setEditing({ columnDefId: 0, severity: 'Block', hint: '', isNew: true })
@@ -896,7 +896,7 @@ export function MethodologyRequiredInputsPanel({
                   <Table.Td>
                     {editable && (
                       <Button
-                        size="compact-xs"
+                        size="xs"
                         variant="subtle"
                         onClick={() =>
                           setEditing({
@@ -1043,7 +1043,7 @@ export function MethodologyOutputsPanel({
         <Text fw={600}>{t('methodologies.outputs')}</Text>
         {editable && (
           <Button
-            size="compact-sm"
+            size="xs"
             variant="default"
             onClick={() => setEditing({ code: '', unitId: null, ordinal: 1, isNew: true })}
           >
@@ -1091,7 +1091,7 @@ export function MethodologyOutputsPanel({
                   <Table.Td>
                     {editable && (
                       <Button
-                        size="compact-xs"
+                        size="xs"
                         variant="subtle"
                         onClick={() =>
                           setEditing({
@@ -1236,7 +1236,7 @@ export function MethodologyTestsPanel({
         <Text fw={600}>{t('methodologies.tests')}</Text>
         {editable && (
           <Button
-            size="compact-sm"
+            size="xs"
             variant="default"
             onClick={() =>
               setEditing({
@@ -1286,7 +1286,7 @@ export function MethodologyTestsPanel({
                   <Table.Td>
                     {editable && (
                       <Button
-                        size="compact-xs"
+                        size="xs"
                         variant="subtle"
                         onClick={() =>
                           setEditing({
@@ -1435,7 +1435,7 @@ export function MethodologyBindingsPanel({
         <Text fw={600}>{t('methodologies.bindings')}</Text>
         {editable && (
           <Button
-            size="compact-sm"
+            size="xs"
             variant="default"
             onClick={() =>
               setEditing({
@@ -1491,7 +1491,7 @@ export function MethodologyBindingsPanel({
                   <Table.Td>
                     {editable && (
                       <Button
-                        size="compact-xs"
+                        size="xs"
                         variant="subtle"
                         onClick={() =>
                           setEditing({

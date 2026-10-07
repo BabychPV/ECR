@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
@@ -179,7 +179,8 @@ describe('TemplateVersionPage: відмова переліку версій ≠ 
     await renderPage({ versionsFail: true, mayPublish: false });
 
     // ⚠ Ознака, що сесія й структура вже приїхали: «Clone version» від статусу
-    // версії не залежить, зате залежить від права `Template.Edit`.
+    // версії не залежить, зате залежить від права `Template.Edit` (b4b: у меню «More»).
+    fireEvent.click(await screen.findByTestId('version-more'));
     await screen.findByText('Clone version');
 
     expect(screen.queryByRole('alert')).toBeNull();

@@ -1,95 +1,125 @@
-import { memo, type JSX } from 'react';
-import { Badge, ScrollArea, Table } from '@mantine/core';
+import { memo, useState, type JSX } from 'react';
+import { Checkbox, Text } from '@mantine/core';
 import type { PermissionCatalogItem, RoleView } from '@/api/types';
 import { PermissionCaption } from '@/features/security/PermissionCaption';
-import { RoleActions } from '@/features/security/RoleActions';
+import { SecurityIcon } from '@/features/security/securityIcons';
+import { groupPermissions, permissionGroupLabel, roleHas } from '@/features/security/permissionGroups';
+import { roleLabel } from '@/features/security/roleLabel';
 import { t } from '@/shared/i18n';
+import './securityRoles.css';
 
 interface RoleMatrixProps {
   roles: RoleView[];
   /** Повний каталог прав, відсортований за кодом; посилання має бути стабільним. */
   permissions: PermissionCatalogItem[];
-  canManage: boolean;
 }
 
 /**
- * Матриця ролей × прав (`SecurityPage`, вкладка «Ролі»).
+ * «Compare roles» — права рядками, ролі колонками (UI-37, макет
+ * `screens-ops.js` `paintMatrix`: «Permissions are rows, roles are columns —
+ * read across to see who can do one thing»).
  *
- * ⛔ `memo` — не прикраса: матриця — найдорожче дерево сторінки (ролі × 41
- * право), і перерендер `SecurityPage`, що не міняє ні ролей, ні каталогу, не
- * має її чіпати (живий дефект 2026-09-24: друк у «New role» — див.
- * `CreateRoleModal.tsx`). Тому сторінка передає `permissions` через
- * `useMemo`, а не новим масивом на кожен рендер.
+ * ✎ UI-37: до цього матриця стояла навпаки (ролі × 41 колонка прав) і була
+ * єдиним поданням вкладки. Тепер це друге подання; дії над роллю переїхали в
+ * шапку обраної ролі (`RoleBrowser`), тож тут лише читання.
+ *
+ * ⛔ `memo` — не прикраса: матриця — найдорожче дерево сторінки, і
+ * перерендер `SecurityPage`, що не міняє ні ролей, ні каталогу, не має її
+ * чіпати (живий дефект 2026-09-24: друк у «New role» — див.
+ * `CreateRoleModal.tsx`).
  *
  * ⚠ Матриця показує **оголошені** права ролей; ефективні права користувача
  * рахує сервер (`/me`).
  */
-export const RoleMatrix = memo(function RoleMatrix({ roles, permissions, canManage }: RoleMatrixProps): JSX.Element {
+export const RoleMatrix = memo(function RoleMatrix({ roles, permissions }: RoleMatrixProps): JSX.Element {
+  const [onlyDiff, setOnlyDiff] = useState(false);
+  const groups = groupPermissions(permissions);
+
+  const differs = (code: string): boolean => {
+    const first = roles[0] === undefined ? false : roleHas(roles[0], code);
+    return roles.some((role) => roleHas(role, code) !== first);
+  };
+
+  const shownGroups = groups
+    .map((group) => ({ ...group, items: onlyDiff ? group.items.filter((item) => differs(item.code)) : group.items }))
+    .filter((group) => group.items.length > 0);
+  const shown = shownGroups.reduce((sum, group) => sum + group.items.length, 0);
+
   return (
-    // ⛔ `ScrollArea` без фіксованої висоти обмежує лише ШИРИНУ: `overflowX`
-    // на самій `<Table>` прокручував усю сторінку разом із навігацією, а
-    // `position: sticky` першої колонки рахує від контейнера прокрутки.
-    <ScrollArea type="auto" offsetScrollbars>
-      <Table striped withTableBorder className="ecr-sticky-head ecr-sticky-first">
-        <Table.Thead>
-          <Table.Tr>
-            <Table.Th>{t('security.role')}</Table.Th>
-            {/* ⛔ Підпис колонки — з каталогу рядків, код лишається другим
-                рядком (`U-11`, `permissionLabel.ts`). */}
-            {permissions.map((permission) => (
-              <Table.Th key={permission.code}>
-                <PermissionCaption code={permission.code} />
-              </Table.Th>
-            ))}
-          </Table.Tr>
-        </Table.Thead>
-        <Table.Tbody>
-          {roles.map((role) => (
-            // ⛔ `X-06`: без `opacity` — прозорість гасила разом із рядком і
-            // кнопки дій (контраст нижче AA); неактивність позначає бейдж.
-            <Table.Tr key={role.id} data-inactive={role.isActive ? undefined : ''}>
-              <Table.Td>
-                {role.code}
-                {/* ⛔ `opacity` невидима читалці — бейдж дає той самий факт
-                    текстом (UX-аудит, знахідка 2/3). */}
-                {!role.isActive && (
-                  <Badge ml="xs" size="xs" color="gray" variant="outline">
-                    {t('security.inactive')}
-                  </Badge>
-                )}
-                {role.isBuiltIn && (
-                  <Badge ml="xs" size="xs" variant="light">
-                    {t('security.builtIn')}
-                  </Badge>
-                )}
+    <>
+      <div className="ecr-sec-viewbar">
+        <Text size="xs" c="dimmed" data-testid="role-matrix-hint">
+          {t('security.compareHint', { shown, total: permissions.length, roles: roles.length })}
+        </Text>
+        <span className="ecr-sec-sp" />
+        <Checkbox
+          label={t('security.onlyDiff')}
+          checked={onlyDiff}
+          onChange={(event) => setOnlyDiff(event.currentTarget.checked)}
+        />
+      </div>
 
-                {/* ⚠ Небезпечні права показуються ОКРЕМО (ФВ-6.12, D-40). */}
-                {role.dangerousPermissions.length > 0 && (
-                  <Badge ml="xs" size="xs" color="statusError" variant="light">
-                    {t('security.dangerous', { count: role.dangerousPermissions.length })}
-                  </Badge>
-                )}
+      {onlyDiff && shown === 0 ? (
+        <Text size="sm" c="dimmed" data-testid="role-matrix-identical">
+          {t('security.identicalRoles')}
+        </Text>
+      ) : (
+        <div className="ecr-sec-matrix-wrap" tabIndex={0} role="region" aria-label={t('security.matrixLabel')}>
+          <table className="ecr-sec-matrix">
+            <thead>
+              <tr>
+                <th className="ecr-sec-pm" scope="col">
+                  {t('security.permissionColumn')}
+                </th>
+                {roles.map((role) => (
+                  <th key={role.id} scope="col" title={role.code} data-role-column={role.code}>
+                    {roleLabel(role)}
+                    {/* ⛔ Неактивну роль видно словом, а не прозорістю (знахідка 2/3). */}
+                    {!role.isActive && <div>{t('security.inactive')}</div>}
+                    {!role.isBuiltIn && <div>{t('security.custom')}</div>}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {shownGroups.map((group) => [
+                <tr key={`g:${group.group}`} className="ecr-sec-dom">
+                  <th colSpan={roles.length + 1} scope="colgroup">
+                    {permissionGroupLabel(group.group)}
+                  </th>
+                </tr>,
+                ...group.items.map((item) => (
+                  <tr key={item.code}>
+                    {/* ⛔ Підпис права — з каталогу рядків, код другим рядком (`U-11`). */}
+                    <th className="ecr-sec-pm" scope="row">
+                      <span className="ecr-sec-tags">
+                        <PermissionCaption code={item.code} />
+                        {item.isDangerous && (
+                          <span className="ecr-sec-danger" title={t('security.dangerousMark')}>
+                            <SecurityIcon name="shieldAlert" />
+                            <span className="ecr-sec-sr">{t('security.dangerousMark')}</span>
+                          </span>
+                        )}
+                      </span>
+                    </th>
+                    {roles.map((role) => {
+                      const has = roleHas(role, item.code);
+                      const cell = has ? (item.isDangerous ? 'd' : 'y') : 'n';
 
-                {/* ⛔ Роль без жодного права інакше виглядала б однаково з
-                    «навмисно вузькою роллю» (UI-аудит, lane 1). */}
-                {role.permissions.length === 0 && role.dangerousPermissions.length === 0 && (
-                  <Badge ml="xs" size="xs" color="statusWarning" variant="outline">
-                    {t('security.noPermissions')}
-                  </Badge>
-                )}
-
-                {/* Клонувати / перейменувати / видалити (`BE-14`). */}
-                {canManage && <RoleActions role={role} />}
-              </Table.Td>
-              {permissions.map((permission) => (
-                <Table.Td key={permission.code}>
-                  {role.permissions.includes(permission.code) ? '✓' : ''}
-                </Table.Td>
-              ))}
-            </Table.Tr>
-          ))}
-        </Table.Tbody>
-      </Table>
-    </ScrollArea>
+                      return (
+                        <td key={role.id} data-cell={cell} title={`${roleLabel(role)} — ${item.code}`}>
+                          {has ? <SecurityIcon name={item.isDangerous ? 'shieldAlert' : 'check'} /> : '·'}
+                          <span className="ecr-sec-sr">{has ? t('security.granted') : t('security.notGranted')}</span>
+                        </td>
+                      );
+                    })}
+                  </tr>
+                )),
+              ])}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </>
   );
 });

@@ -221,7 +221,8 @@ function renderPage(): ReturnType<typeof render> {
 }
 
 async function openSheet(): Promise<void> {
-  fireEvent.click(await screen.findByRole('button', { name: /Sheet \(SHEET\)/ }));
+  // UI-36: дерево конструктора відкриває першу таблицю першого аркуша одразу (макет `ctor-columns`).
+  await screen.findByTestId('ctor-table');
   await screen.findByText('Limit');
 }
 
@@ -281,14 +282,14 @@ describe('TemplateVersionPage — четвертий раунд UX (лінія D
     renderPage();
     await openSheet();
 
-    fireEvent.click(await screen.findByRole('button', { name: '⟦validationRules.title⟧' }));
+    // UI-36: наявні правила — у вкладці «Validation rules» робочої області таблиці.
+    fireEvent.click(await screen.findByRole('tab', { name: /ctor\.tab\.rules⟧/ }));
 
     const remove = await screen.findByRole('button', { name: /validationRules\.deleteNamed/ });
     expect(screen.getByText('POSITIVE')).toBeDefined();
 
-    // ⛔ Поле «ввести код для видалення» прибрано: код-поле лишилося одне — у
-    // формі запису правила вище.
-    expect(await screen.findAllByLabelText(/validationRules\.code⟧/)).toHaveLength(1);
+    // ⛔ Поле «ввести код для видалення» прибрано: поруч із переліком коду вводити ніде.
+    expect(screen.queryAllByLabelText(/validationRules\.code⟧/)).toHaveLength(0);
 
     fireEvent.click(remove);
     expect(await screen.findByText('⟦validationRules.deleteTitle (code=POSITIVE)⟧')).toBeDefined();
@@ -307,7 +308,9 @@ describe('TemplateVersionPage — четвертий раунд UX (лінія D
     fireEvent.change(within(dialog).getByRole('textbox'), { target: { value: 'Quarterly release' } });
     fireEvent.click(within(dialog).getByRole('button', { name: '⟦version.publish⟧' }));
 
-    expect(await screen.findByRole('button', { name: '⟦version.deprecate⟧' })).toBeDefined();
+    // b4b: «Withdraw» — пункт меню «More» шапки (KIT §1.2).
+    fireEvent.click(await screen.findByTestId('version-more'));
+    expect(await screen.findByRole('menuitem', { name: '⟦version.deprecate⟧' })).toBeDefined();
     await waitFor(() => expect(screen.queryByRole('button', { name: '⟦version.publish⟧' })).toBeNull());
   });
 
@@ -316,7 +319,8 @@ describe('TemplateVersionPage — четвертий раунд UX (лінія D
     const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
     renderPage();
 
-    fireEvent.click(await screen.findByRole('button', { name: '⟦periodRules.title⟧' }));
+    fireEvent.click(await screen.findByTestId('version-more'));
+    fireEvent.click(await screen.findByRole('menuitem', { name: '⟦periodRules.title⟧' }));
     await screen.findByRole('button', { name: '⟦periodRules.add⟧' });
 
     const duplicate = errors.mock.calls.some((args) =>

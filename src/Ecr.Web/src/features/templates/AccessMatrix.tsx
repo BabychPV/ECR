@@ -21,8 +21,28 @@ import { t } from '@/shared/i18n';
  * (`SourceWindow`, `Expression`). Такий аркуш позначається прямо — мовчазне
  * «доступно» на місці майбутнього замка гірше за відсутність перегляду.
  */
-export function AccessMatrix({ templateVersionId }: { templateVersionId: number }): JSX.Element {
-  const [opened, setOpened] = useState(false);
+export function AccessMatrix({
+  templateVersionId,
+  opened: controlledOpened,
+  onClose,
+}: {
+  templateVersionId: number;
+  /**
+   * ✎ b4b (макет `screens-templates.js`, KIT §1.2): у шапці конструктора матриця —
+   * пункт меню «More», а не окрема кнопка. Задано `opened` — власної кнопки немає,
+   * діалог відкриває викликач; без нього поведінка та сама, що була.
+   */
+  opened?: boolean;
+  onClose?: () => void;
+}): JSX.Element {
+  const [ownOpened, setOwnOpened] = useState(false);
+  const controlled = controlledOpened !== undefined;
+  const opened = controlled ? controlledOpened : ownOpened;
+  const setOpened = (next: boolean): void => {
+    if (controlled) {
+      if (!next) onClose?.();
+    } else setOwnOpened(next);
+  };
 
   const matrix = useQuery({
     queryKey: queryKeys.templates.accessMatrix(templateVersionId),
@@ -33,9 +53,11 @@ export function AccessMatrix({ templateVersionId }: { templateVersionId: number 
 
   return (
     <>
-      <Button size="xs" variant="default" onClick={() => setOpened(true)}>
-        {t('version.accessMatrix')}
-      </Button>
+      {!controlled && (
+        <Button variant="default" onClick={() => setOpened(true)}>
+          {t('version.accessMatrix')}
+        </Button>
+      )}
 
       <Modal
         opened={opened}

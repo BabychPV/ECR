@@ -76,7 +76,8 @@ public sealed class DocumentDataExporter(
     IRegistryStore registries,
     IMethodologyStore? methodologies = null,
     ICalculationResultStore? results = null,
-    IDocumentHeaderStore? headers = null)
+    IDocumentHeaderStore? headers = null,
+    IFormulaEngine? formulaEngine = null)
 {
     private const string RowKeyHeader = "rowKey";
 
@@ -174,6 +175,7 @@ public sealed class DocumentDataExporter(
                     rowIds.GetValueOrDefault(instanceId) ?? new Dictionary<string, long>(),
                     slices.GetValueOrDefault(instanceId) ?? [],
                     includeFormulas,
+                    hidden,
                     hiddenColumns));
             }
         }
@@ -225,7 +227,7 @@ public sealed class DocumentDataExporter(
             ? value.ToString("F" + s.ToString(CultureInfo.InvariantCulture), CultureInfo.InvariantCulture)
             : value.ToString(CultureInfo.InvariantCulture);
 
-    private static ExportTable Build(
+    private ExportTable Build(
         SheetDef sheet,
         TableDef table,
         TemplateVersionSnapshot snapshot,
@@ -233,6 +235,7 @@ public sealed class DocumentDataExporter(
         IReadOnlyDictionary<string, long> rowIds,
         IReadOnlyList<CellRecord> cells,
         bool includeFormulas,
+        IReadOnlyCollection<int> hiddenTables,
         IReadOnlyCollection<int>? hiddenColumns)
     {
         // ⛔ S6: колонка під забороною — як прихована: ні коду в заголовку, ні
@@ -259,7 +262,7 @@ public sealed class DocumentDataExporter(
             }
         }
 
-        var formulas = includeFormulas ? ColumnFormulas(table, byColumn) : NoFormulas;
+        var formulas = includeFormulas ? ColumnFormulas(table, byColumn, snapshot, hiddenTables, hiddenColumns) : NoFormulas;
 
         return new ExportTable(sheet.Code, table.Code, columns, keys.Select(k => (k, values[k])).ToList(), formulas);
     }
@@ -279,9 +282,16 @@ public sealed class DocumentDataExporter(
     /// формула на колонку», яке вже мовчки робить <c>ExcelExporter</c>, записуючи
     /// формулу лише в перший рядок для не-<c>Row</c> області.
     /// </remarks>
-    private static Dictionary<string, string> ColumnFormulas(
-        TableDef table, Dictionary<int, ColumnDef> byColumn)
+    private Dictionary<string, string> ColumnFormulas(
+        TableDef table, Dictionary<int, ColumnDef> byColumn, TemplateVersionSnapshot snapshot,
+        IReadOnlyCollection<int> hiddenTables, IReadOnlyCollection<int>? hiddenColumns)
     {
+        // ⛔ ФВ-6.6: вираз називає інші колонки, таблиці й аркуші — віддається, лише коли читач бачить
+        // КОЖНЕ з них (ColumnExpressionVisibility, те саме правило, що й ColumnDto.Expression).
+        // Закрито за замовчуванням: розбір не вдався, залежність невідома, рушія нема — формули нема
+        // у файлі (як у колонки без формули). Без жодної межі (завдання до S6 чи читач бачить усе)
+        // приховувати нічого — вираз віддається як є, рушій не потрібен.
+        var restricted = hiddenTables.Count > 0 || hiddenColumns is { Count: > 0 };
         var result = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var group in table.Formulas
                      .Where(f => !f.IsDeleted && f.ColumnDefId is { } id && byColumn.ContainsKey(id))
@@ -291,7 +301,15 @@ public sealed class DocumentDataExporter(
                 .OrderBy(f => f.Scope == FormulaScope.Column ? 0 : 1)
                 .ThenBy(f => f.Id)
                 .First();
-            result[byColumn[group.Key].Code] = chosen.Expression;
+            var expression = restricted
+                ? ColumnExpressionVisibility.Visible(
+                    chosen, table, group.Key, snapshot,
+                    id => !hiddenTables.Contains(id), id => hiddenColumns?.Contains(id) != true, formulaEngine)
+                : chosen.Expression;
+            if (expression is not null)
+            {
+                result[byColumn[group.Key].Code] = expression;
+            }
         }
 
         return result;

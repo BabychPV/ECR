@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type JSX } from 'react';
-import { Button, Group, Select, Switch, Table, Text } from '@mantine/core';
+import { Button, Group, Select, Switch, Table, Text, TextInput } from '@mantine/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { EcrApiError, apiFetchResponse } from '@/api/client';
 import { showApiError, showDone } from '@/shared/ui/notify';
@@ -10,7 +10,10 @@ import { ConfirmModal } from '@/shared/ui/ConfirmModal';
 import { registerUnsavedSource } from '@/shared/ui/unsavedSources';
 import { t } from '@/shared/i18n';
 import { EmptyPath, ResourcePicker, type PickPath } from '@/pages/admin/grants/ResourcePicker';
-import { roleLabel } from '@/pages/admin/grants/roleLabel';
+import { roleLabel } from '@/features/security/roleLabel';
+import { FilterInline, FilterRow } from '@/shared/ui/FilterBar';
+import { StatStrip } from '@/shared/ui/StatStrip';
+import { GrantLevelLadder } from '@/pages/admin/grants/GrantLevelLadder';
 import {
   GrantLevels,
   ResourceKinds,
@@ -106,6 +109,43 @@ function sameGrants(a: readonly ResourceGrantDto[], b: readonly ResourceGrantDto
   return canonical(a) === canonical(b);
 }
 
+/**
+ * Показники смуги над грантами ролі (UI-37, макет `secGrants` `stats`).
+ *
+ * ⚠ Не «direct / to AD groups / inherited», як у макеті: суб'єкт гранта —
+ * роль, набір замінюється цілком (`D15-15`), а успадкованих грантів і грантів
+ * на групи AD у відповіді немає. Узято те, що є в `ResourceGrantDto`.
+ */
+type GrantStat = 'deny' | 'manage' | 'unresolved';
+
+function matchesStat(grant: ResourceGrantDto, stat: string | null): boolean {
+  switch (stat) {
+    case 'deny':
+      return grant.isDeny;
+    case 'manage':
+      return grant.level === 'Manage';
+    case 'unresolved':
+      return grant.resourceName === null;
+    default:
+      return true;
+  }
+}
+
+/** Пошук по рядку гранта: назва ресурсу, вид, рівень (код і підпис), id. */
+function matchesSearch(grant: ResourceGrantDto, query: string): boolean {
+  const needle = query.trim().toLocaleLowerCase();
+  if (needle === '') return true;
+
+  return [
+    grant.resourceName ?? '',
+    grant.resourceKind,
+    resourceKindLabel(grant.resourceKind),
+    grant.level,
+    grantLevelLabel(grant.level),
+    String(grant.resourceId),
+  ].some((part) => part.toLocaleLowerCase().includes(needle));
+}
+
 export function GrantsPanel({ roles }: { roles: RoleView[] }): JSX.Element {
   const [roleId, setRoleId] = useState<number | null>(null);
   const [rows, setRows] = useState<DraftRow[]>([]);
@@ -116,6 +156,11 @@ export function GrantsPanel({ roles }: { roles: RoleView[] }): JSX.Element {
   // точка відліку — вже свіжий набір сервера; людина вирішує сама.
   const [conflict, setConflict] = useState(false);
   const nextKey = useRef(0);
+  // ⚠ Фільтр смуги й пошук лише ХОВАЮТЬ рядки: чернетка й збереження
+  // працюють з усіма. Стан панелі, а не адреса: панель — редактор чернетки,
+  // яка сама не живе в адресі, і фільтр без неї нічого не відновлює.
+  const [stat, setStat] = useState<string | null>(null);
+  const [search, setSearch] = useState<string | null>(null);
   const queryClient = useQueryClient();
   /*
    * ⛔ L9-18: під симуляцією сервер відхиляє будь-який `PUT` (`ECR-SIM-0403`) — гранти лише
@@ -237,9 +282,20 @@ export function GrantsPanel({ roles }: { roles: RoleView[] }): JSX.Element {
     setRows((prev) => prev.map((row) => (row.key === key ? change(row) : row)));
   }
 
+  /*
+   * ⛔ Рядок без обраного ресурсу (`resourceId` 0, щойно доданий) видно
+   * ЗАВЖДИ: інакше «Add grant» під активним пошуком додавав би рядок, якого
+   * людина не бачить, а «Save» лишався б вимкненим без видимої причини.
+   */
+  const visible = (row: DraftRow): boolean =>
+    row.grant.resourceId <= 0 || (matchesStat(row.grant, stat) && matchesSearch(row.grant, search ?? ''));
+  const filtered = stat !== null || (search ?? '') !== '';
+  const shownCount = rows.filter(visible).length;
+  const count = (which: GrantStat): number => rows.filter((row) => matchesStat(row.grant, which)).length;
+
   return (
     <>
-      <Group mb="sm" gap="xs" align="flex-end">
+      <FilterRow mb="sm">
         <Select
           size="xs"
           miw={200}
@@ -253,7 +309,6 @@ export function GrantsPanel({ roles }: { roles: RoleView[] }): JSX.Element {
         {roleId !== null && !readOnly && (
           <>
             <Button
-              size="xs"
               variant="default"
               onClick={() =>
                 setRows((prev) => [
@@ -274,7 +329,6 @@ export function GrantsPanel({ roles }: { roles: RoleView[] }): JSX.Element {
                 чи пусткою), поки в ній нема змін і поки хоч один рядок без
                 обраного ресурсу (`resourceId` 0 — грант «ні на що»). */}
             <Button
-              size="xs"
               loading={save.isPending}
               disabled={grants.isPending || Boolean(grants.error) || !seeded || !dirty || incomplete}
               onClick={() => save.mutate({ roleId, grants: draft, etag: seed?.etag ?? null })}
@@ -283,20 +337,22 @@ export function GrantsPanel({ roles }: { roles: RoleView[] }): JSX.Element {
             </Button>
 
             {dirty && (
-              <Text size="xs" c="dimmed" fs="italic" data-testid="grants-unsaved">
-                {incomplete ? t('grants.pickResourceFirst') : t('grants.unsaved')}
-              </Text>
+              <FilterInline>
+                <Text size="xs" c="dimmed" fs="italic" data-testid="grants-unsaved">
+                  {incomplete ? t('grants.pickResourceFirst') : t('grants.unsaved')}
+                </Text>
+              </FilterInline>
             )}
           </>
         )}
-      </Group>
+      </FilterRow>
 
       {roleId !== null && conflict && (
         <Group mb="xs" gap="xs" data-testid="grants-conflict">
           <Text size="xs" c="statusError" role="alert">
             {t('grants.conflict')}
           </Text>
-          <Button size="compact-xs" variant="default" onClick={discardDraft}>
+          <Button size="xs" variant="default" onClick={discardDraft}>
             {t('grants.discardVerb')}
           </Button>
         </Group>
@@ -309,6 +365,42 @@ export function GrantsPanel({ roles }: { roles: RoleView[] }): JSX.Element {
         <Text size="xs" c="dimmed" mb="xs">
           {t('grants.projectsCatalogHint')}
         </Text>
+      )}
+
+      {/* ✎ UI-37: смуга показників і пошук над грантами (макет `secGrants`:
+          `stats` + `search`). Лише коли є що фільтрувати. */}
+      {roleId !== null && rows.length > 0 && (
+        <div data-testid="grants-filters">
+          <StatStrip
+            label={t('grants.stats')}
+            items={[
+              { id: 'all', label: t('grants.stat.all'), value: rows.length, filter: false },
+              { id: 'deny', label: t('grants.stat.deny'), value: count('deny') },
+              { id: 'manage', label: t('grants.stat.manage'), value: count('manage') },
+              { id: 'unresolved', label: t('grants.stat.unresolved'), value: count('unresolved'), tone: 'warning' },
+            ]}
+            active={stat}
+            onSelect={setStat}
+          />
+          <FilterRow mt="xs" mb="sm">
+          <TextInput
+            size="xs"
+            miw={240}
+            type="search"
+            aria-label={t('grants.search')}
+            placeholder={t('grants.searchPlaceholder')}
+            value={search ?? ''}
+            onChange={(event) => setSearch(event.currentTarget.value)}
+          />
+          {filtered && (
+            <FilterInline>
+              <Text size="xs" c="dimmed" data-testid="grants-shown">
+                {t('common.shownOf', { shown: shownCount, total: rows.length })}
+              </Text>
+            </FilterInline>
+          )}
+          </FilterRow>
+        </div>
       )}
 
       {/*
@@ -330,6 +422,7 @@ export function GrantsPanel({ roles }: { roles: RoleView[] }): JSX.Element {
         onRetry={() => void grants.refetch()}
       >
         {() => (
+        <>
         <Table striped withTableBorder className="ecr-sticky-head">
           <Table.Thead>
             <Table.Tr>
@@ -343,6 +436,9 @@ export function GrantsPanel({ roles }: { roles: RoleView[] }): JSX.Element {
           </Table.Thead>
           <Table.Tbody>
             {rows.map((row, index) => {
+              // ⚠ Індекс — з УСІЄЇ чернетки, не з відфільтрованої: це номер у
+              // `aria-label` поля («Project 1»), і він не має стрибати від пошуку.
+              if (!visible(row)) return null;
               const { grant } = row;
 
               return (
@@ -405,6 +501,7 @@ export function GrantsPanel({ roles }: { roles: RoleView[] }): JSX.Element {
                   )}
                 </Table.Td>
                 <Table.Td>
+                  <Group gap="xs" wrap="nowrap">
                   <Select
                     size="xs"
                     miw={110}
@@ -417,6 +514,9 @@ export function GrantsPanel({ roles }: { roles: RoleView[] }): JSX.Element {
                       replace(row.key, (r) => ({ ...r, grant: { ...r.grant, level: value as never } }))
                     }
                   />
+                  {/* ✎ UI-37: шкала рівня (макет `ladder()`); слово вже в полі. */}
+                  <GrantLevelLadder level={grant.level} deny={grant.isDeny} withLabel={false} />
+                  </Group>
                 </Table.Td>
                 <Table.Td>
                   {/* ⚠ Заборона перекриває будь-який дозвіл будь-якого рівня
@@ -436,7 +536,7 @@ export function GrantsPanel({ roles }: { roles: RoleView[] }): JSX.Element {
                 <Table.Td>
                   {!readOnly && (
                     <Button
-                      size="compact-xs"
+                      size="xs"
                       color="statusError"
                       variant="subtle"
                       onClick={() => setRows((prev) => prev.filter((r) => r.key !== row.key))}
@@ -450,6 +550,12 @@ export function GrantsPanel({ roles }: { roles: RoleView[] }): JSX.Element {
             })}
           </Table.Tbody>
         </Table>
+        {shownCount === 0 && (
+          <Text size="sm" c="dimmed" mt="sm" data-testid="grants-no-match">
+            {t('grants.noMatch')}
+          </Text>
+        )}
+        </>
         )}
       </AsyncBoundary>
 

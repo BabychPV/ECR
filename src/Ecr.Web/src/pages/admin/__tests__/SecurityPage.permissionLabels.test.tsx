@@ -102,7 +102,7 @@ async function renderRoles(): Promise<void> {
   render(
     <MantineProvider theme={withTestDefaults(theme)}>
       <QueryClientProvider client={client}>
-        <MemoryRouter initialEntries={['/admin/security?tab=roles']}>
+        <MemoryRouter initialEntries={['/admin/security?tab=roles&view=compare']}>
           <SecurityPage />
         </MemoryRouter>
       </QueryClientProvider>

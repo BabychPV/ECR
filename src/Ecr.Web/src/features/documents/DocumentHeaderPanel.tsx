@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, type JSX } from 'react';
-import { Button, Checkbox, Group, Select, Stack, TextInput, Title } from '@mantine/core';
+import { Button, Checkbox, Collapse, Group, Select, Stack, Text, TextInput, Title, UnstyledButton } from '@mantine/core';
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch, EcrApiError } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
@@ -219,6 +219,13 @@ export interface DocumentHeaderPanelProps {
    * `IAccessDecisionService` для `PATCH …/cells`.
    */
   readonly canEdit: boolean;
+
+  /**
+   * ✎ UI-16: згорнута секція з підсумком значень у заголовку (KIT §1 п.4,
+   * §6.7 `E.Collapsible`). Сторінка документа вмикає; за замовчуванням —
+   * розгорнута панель, як і раніше.
+   */
+  readonly collapsible?: boolean;
 }
 
 /**
@@ -232,6 +239,7 @@ export interface DocumentHeaderPanelProps {
 export function DocumentHeaderPanel({
   documentId,
   canEdit,
+  collapsible = false,
 }: DocumentHeaderPanelProps): JSX.Element | null {
   const queryClient = useQueryClient();
 
@@ -394,6 +402,8 @@ export function DocumentHeaderPanel({
    * дата, тож «Зберегти» записало б СТАРУ дату поруч із відмовою під полем — збереження вимкнене.
    */
   const [invalidDates, setInvalidDates] = useState<ReadonlySet<string>>(() => new Set());
+  // ✎ UI-16: розгорнуто вручну; примусово — див. `mustStayOpen` нижче.
+  const [opened, setOpened] = useState(false);
   const markInvalidDate = (code: string, invalid: boolean): void =>
     setInvalidDates((current) => {
       if (current.has(code) === invalid) return current;
@@ -518,9 +528,35 @@ export function DocumentHeaderPanel({
     if (header.data !== undefined) adopt(header.data);
   }
 
-  return (
-    <Stack gap="xs" data-testid="document-header-panel">
-      <Title order={4}>{t('document.header.title')}</Title>
+  /*
+   * ✎ UI-16: коли секцію НЕ можна тримати згорнутою — людина мусить бачити
+   * поле: обов'язкове порожнє, недійсна дата, незбережена правка (не
+   * сховати те, що ще не збережено), відмова збереження.
+   */
+  const missingRequired = fields.filter((field) => field.isRequired && isEmptyHeaderValue(draft[field.code]));
+  const mustStayOpen =
+    missingRequired.length > 0 || invalidDates.size > 0 || dirty.length > 0 || (save.error !== undefined && save.error !== null);
+  const expanded = !collapsible || opened || mustStayOpen;
+  const bodyId = `document-header-body-${String(documentId)}`;
+
+  const summary = fields
+    .map((field) => {
+      const shown = headerSummaryValue(
+        field,
+        draft[field.code],
+        field.lookupRegistryDefId === null || field.lookupRegistryDefId === undefined
+          ? EmptyLookupEntries
+          : (lookupEntriesByRegistryId.get(field.lookupRegistryDefId) ?? EmptyLookupEntries),
+        units.data ?? null,
+      );
+
+      return shown === null ? null : `${localized(field.label)} ${shown}`;
+    })
+    .filter((part): part is string => part !== null)
+    .slice(0, 3);
+
+  const body = (
+    <>
 
       {lookupError !== null && <ErrorAlert error={lookupError} onRetry={refetchLookups} />}
       {hasUnitFields && units.error !== null && (
@@ -554,7 +590,6 @@ export function DocumentHeaderPanel({
       {canEdit && (
         <Group gap="xs">
           <Button
-            size="xs"
             disabled={dirty.length === 0 || invalidDates.size > 0}
             loading={save.isPending}
             onClick={() => save.mutate(dirtyPatch)}
@@ -563,7 +598,7 @@ export function DocumentHeaderPanel({
           </Button>
 
           {dirty.length > 0 && (
-            <Button size="xs" variant="default" disabled={save.isPending} onClick={resetDraft}>
+            <Button variant="default" disabled={save.isPending} onClick={resetDraft}>
               {t('common.cancel')}
             </Button>
           )}
@@ -571,8 +606,80 @@ export function DocumentHeaderPanel({
       )}
 
       {save.error !== undefined && save.error !== null && <ErrorAlert error={save.error} />}
+    </>
+  );
+
+  if (!collapsible) {
+    return (
+      <Stack gap="xs" data-testid="document-header-panel">
+        <Title order={4}>{t('document.header.title')}</Title>
+        {body}
+      </Stack>
+    );
+  }
+
+  return (
+    <Stack gap="xs" data-testid="document-header-panel" data-expanded={expanded}>
+      {/* ⚠ Кнопка всередині заголовка (шаблон «акордеон»): читалка чує рівень
+          заголовка й стан «згорнуто/розгорнуто». Під час `mustStayOpen`
+          кнопка не згортає — `aria-disabled` і пояснення в підсумку. */}
+      <Title order={4}>
+        <UnstyledButton
+          aria-expanded={expanded}
+          aria-controls={bodyId}
+          aria-disabled={mustStayOpen || undefined}
+          onClick={() => {
+            if (!mustStayOpen) setOpened((value) => !value);
+          }}
+          data-testid="document-header-toggle"
+          style={{ display: 'inline-flex', alignItems: 'baseline', gap: 'var(--mantine-spacing-xs)', maxWidth: '100%' }}
+        >
+          <span aria-hidden="true" style={{ display: 'inline-block', width: '1em' }}>
+            {expanded ? '▾' : '▸'}
+          </span>
+          <span>{t('document.header.title')}</span>
+          {!expanded && summary.length > 0 && (
+            <Text component="span" size="sm" c="dimmed" fw={400} truncate="end" data-testid="document-header-summary">
+              {`· ${summary.join(' · ')}`}
+            </Text>
+          )}
+        </UnstyledButton>
+      </Title>
+
+      <Collapse in={expanded} id={bodyId}>
+        <Stack gap="xs">{body}</Stack>
+      </Collapse>
     </Stack>
   );
+}
+
+/** Порожнє значення поля шапки: `null`, порожній текст. */
+function isEmptyHeaderValue(value: unknown): boolean {
+  return value === null || value === undefined || (typeof value === 'string' && value.trim().length === 0);
+}
+
+/**
+ * Значення поля для підсумку згорнутої шапки (UI-16): людська назва запису
+ * довідника й код одиниці, а не ідентифікатор; `null` — нічого показувати
+ * (порожнє, прапорець без підпису).
+ */
+function headerSummaryValue(
+  field: DocumentHeaderField,
+  value: unknown,
+  lookupEntries: readonly RegistryEntryDto[],
+  units: readonly UnitRef[] | null,
+): string | null {
+  if (isEmptyHeaderValue(value) || field.dataType === 'Bool') return null;
+
+  const id = typeof value === 'string' ? Number(value) : NaN;
+
+  if (field.dataType === 'Lookup' && field.lookupRegistryDefId !== null && field.lookupRegistryDefId !== undefined) {
+    return Number.isFinite(id) ? lookupCellDisplay(id, lookupEntries) : null;
+  }
+
+  if (field.dataType === 'Unit') return Number.isFinite(id) ? unitCellDisplay(id, units ?? []) : null;
+
+  return typeof value === 'string' || typeof value === 'number' ? String(value) : null;
 }
 
 /** Один рядок панелі: підпис поля й компонент вводу за `dataType`. */

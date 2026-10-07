@@ -1,20 +1,18 @@
 import { Suspense, lazy, useState, type JSX } from 'react';
+import { useMediaQuery } from '@mantine/hooks';
 import {
-  Accordion,
   Alert,
-  Badge,
   Button,
   Divider,
   Group,
   Modal,
   Skeleton,
   Stack,
-  Table,
   Text,
   TextInput,
 } from '@mantine/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { apiFetch } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
 import type {
@@ -51,9 +49,7 @@ import {
 import { deleteColumn, saveColumn } from '@/features/templates/columnApi';
 import { emptyColumnDraft, type ColumnDraft } from '@/features/templates/column';
 import { ExistingColumn } from '@/features/templates/ExistingColumn';
-import { ReorderCell, ReorderableRows } from '@/features/templates/ReorderControls';
 import { reorderColumns, reorderRows } from '@/features/templates/reorderApi';
-import { dataTypeLabel, rowKindLabel, rowModeLabel } from '@/features/templates/enumLabels';
 import { getHeaderFields, saveHeaderField } from '@/features/templates/headerFieldApi';
 import {
   emptyHeaderFieldDraft,
@@ -63,7 +59,7 @@ import {
 import { deleteRow, saveRow } from '@/features/templates/rowApi';
 import { emptyRowDraft, rowDraftOf, type RowDefDto, type RowDraft } from '@/features/templates/row';
 import { saveFormula } from '@/features/templates/formulaApi';
-import { draftOfFormula, emptyFormulaDraft, type FormulaDraft } from '@/features/templates/formula';
+import type { FormulaDraft } from '@/features/templates/formula';
 import {
   deleteValidationRule,
   saveValidationRule,
@@ -73,7 +69,6 @@ import { emptyValidationRuleDraft, type ValidationRuleDraft } from '@/features/t
 import { LocalDraft } from '@/features/templates/LocalDraft';
 import { PublishProblemsAlert, publishProblemsOf } from '@/features/templates/PublishProblems';
 import { VersionDiff } from '@/features/templates/VersionDiff';
-import { LazyTableSlots, estimateTemplateTableHeight } from '@/features/templates/LazyTableSlots';
 import { localized } from '@/shared/i18n/localized';
 import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
@@ -84,6 +79,26 @@ import { ReasonModal } from '@/shared/ui/ReasonModal';
 import { showApiError, showDone } from '@/shared/ui/notify';
 import { t } from '@/shared/i18n';
 import { usePendingLoading } from '@/features/common/usePendingLoading';
+import { ColumnsTable } from '@/features/templates/ctor/ColumnsTable';
+import { RowsTable } from '@/features/templates/ctor/RowsTable';
+import { HeaderFieldsSection } from '@/features/templates/ctor/HeaderFieldsSection';
+import {
+  columnFormulaDraft,
+  locateTable,
+  nodeParam,
+  parseNode,
+  parseTab,
+  rowFormulaDraft,
+  sortedSheets,
+  type CtorNode,
+  type CtorTab,
+  type TemplateTable,
+} from '@/features/templates/ctor/ctorModel';
+import { CtorTree } from '@/features/templates/ctor/CtorTree';
+import { SheetOverview, VersionOverview } from '@/features/templates/ctor/StructureOverviews';
+import { VersionStateLine } from '@/features/templates/ctor/VersionStateLine';
+import { VersionMoreMenu } from '@/features/templates/ctor/VersionMoreMenu';
+import { CtorIcon as Icon } from '@/features/templates/ctor/CtorIcon';
 
 /**
  * Редактори, що відкриваються ЛИШЕ дією — за `import()`.
@@ -157,10 +172,6 @@ const PeriodAccessRuleManager = lazy(async () => ({
   default: (await import('@/features/templates/PeriodAccessRuleEditor')).PeriodAccessRuleManager,
 }));
 
-const ValidationRuleList = lazy(async () => ({
-  default: (await import('@/features/templates/ValidationRuleList')).ValidationRuleList,
-}));
-
 /**
  * Умовне форматування (`ФВ-2.7`) — лінивий чанк, як і решта редакторів
  * вище. Правила читаються й зберігаються на сервері (`If-Match`,
@@ -174,11 +185,6 @@ const TemplateColumnUsage = lazy(async () => ({
   default: (await import('@/features/templates/ColumnUsage')).TemplateColumnUsage,
 }));
 
-/** Попередній перегляд таблиці (`ФВ-2.6`) — лінивий чанк, лише читання. */
-const TablePreview = lazy(async () => ({
-  default: (await import('@/features/templates/TablePreview')).TablePreview,
-}));
-
 /**
  * ⛔ `PresentationEditor` — єдиний із цих редакторів, що НЕ стоїть за
  * `{умова && …}`: він сам носить усередині `<Modal opened={column !== null}>`.
@@ -190,27 +196,20 @@ const TablePreview = lazy(async () => ({
  * нічого (закрита `Modal` і так не рендерить ані рамки), відкрили один раз —
  * далі як раніше.
  */
+/**
+ * UI-36: робоча область таблиці (вкладки Columns / Rows / Formulas / Rules / Preview) —
+ * лінивий чанк. Маршрут уже стоїть біля стелі `D-132` (250 КБ), а `Tabs` і
+ * вкладки потрібні лише після того, як структура прийшла.
+ */
+const TableWorkspace = lazy(async () => ({
+  default: (await import('@/features/templates/ctor/TableWorkspace')).TableWorkspace,
+}));
+
 const PresentationEditor = lazy(async () => ({
   default: (await import('@/features/templates/PresentationEditor')).PresentationEditor,
 }));
 
 /** Стан форми «правка правила доступу за id». */
-type TemplateTable = TemplateStructureDto['sheets'][number]['tables'][number];
-
-/**
- * Назва таблиці в дереві структури — ОДНА на заповнювач і змонтовану
- * таблицю (`LazyTableSlots`): розмітка не стрибає в мить монтування.
- */
-function TableTitle({ table }: { table: TemplateTable }): JSX.Element {
-  return (
-    <>
-      {localized(table.nameL10n) || table.code}{' '}
-      <Text span c="dimmed">
-        ({table.code}) · {rowModeLabel(table.rowMode)}
-      </Text>
-    </>
-  );
-}
 
 /**
  * Що саме чекає підтвердження видалення (R-06/X-01, четвертий раунд UX).
@@ -279,6 +278,64 @@ export function TemplateVersionPage(): JSX.Element {
   const session = useSession();
 
   /*
+   * UI-36: вибраний вузол дерева й вкладка — в адресі (`?node=`, `?tab=`), як у макеті.
+   * ⚠ `replace`: перемикання вузлів не засмічує історію так, що «Назад» веде по
+   * кожній відкритій таблиці, — але посилання на таблицю відкривається на ній.
+   */
+  const [search, setSearch] = useSearchParams();
+  const selectNode = (next: CtorNode): void =>
+    setSearch(
+      (prev) => {
+        const params = new URLSearchParams(prev);
+        params.set('node', nodeParam(next));
+        if (next.kind !== 'table') params.delete('tab');
+
+        return params;
+      },
+      { replace: true },
+    );
+  const selectTab = (next: CtorTab): void =>
+    setSearch(
+      (prev) => {
+        const params = new URLSearchParams(prev);
+        if (next === 'columns') params.delete('tab');
+        else params.set('tab', next);
+
+        return params;
+      },
+      { replace: true },
+    );
+  const tab = parseTab(search.get('tab'));
+
+  // ⚠ На ≤ 900 px дерево — шар поверх робочої області (KIT §4), закритий за замовчуванням.
+  const narrow = useMediaQuery('(max-width: 900px)') ?? false;
+  const [treeOpenWide, setTreeOpenWide] = useState(true);
+  const [treeOpenNarrow, setTreeOpenNarrow] = useState(false);
+  const treeOpen = narrow ? treeOpenNarrow : treeOpenWide;
+  const setTreeOpen = narrow ? setTreeOpenNarrow : setTreeOpenWide;
+  const treeId = `ctor-tree-${String(id)}`;
+  const treeToggle = (
+    <button
+      type="button"
+      className="ecr-icon-btn"
+      aria-controls={treeId}
+      aria-expanded={treeOpen}
+      aria-label={t('ctor.toggleTree')}
+      title={t('ctor.toggleTree')}
+      onClick={() => setTreeOpen(!treeOpen)}
+    >
+      <Icon path="M4 5h16v14H4zM9 5v14" />
+    </button>
+  );
+
+  // «Saved HH:MM» (`VersionStateLine`): час останнього успішного запису в цьому сеансі.
+  const [savedAt, setSavedAt] = useState<Date | null>(null);
+  const saved = (text: string): void => {
+    setSavedAt(new Date());
+    showDone(text);
+  };
+
+  /*
    * ⛔ L9-23: перелік версій живе під ДВОМА ключами — `versionsOf(id)` (ця сторінка, картка,
    * `ExpressionsPage`…) і пакетний `versionsBatch(ids)` переліку `/admin/templates`
    * (`queryKeys.ts`: навмисно не префікс одне одного). Публікація, клон і виведення з обігу
@@ -301,12 +358,6 @@ export function TemplateVersionPage(): JSX.Element {
   // навмисно — див. коментар біля `PresentationEditor` вище.
   const [presentationUsed, setPresentationUsed] = useState(false);
   const [sheetDraft, setSheetDraft] = useState<SheetDraft | null>(null);
-  /**
-   * Розгорнуті аркуші — лише для `LazyTableSlots`: перша таблиця розгорнутого
-   * аркуша монтується без події видимості. `Accordion` лишається
-   * некерованим — стан лише читається з `onChange`.
-   */
-  const [openSheets, setOpenSheets] = useState<string[]>([]);
   const [formulaDraft, setFormulaDraft] = useState<FormulaDraft | null>(null);
 
   // ⚠ Чернетка таблиці несе код аркуша окремо від самого `TableDraft`
@@ -352,15 +403,13 @@ export function TemplateVersionPage(): JSX.Element {
   // ФВ-2.7: таблиця, для якої відкрито умовне форматування.
   const [conditionalFormatTable, setConditionalFormatTable] = useState<TemplateTable | null>(null);
 
-  // ФВ-2.6: таблиця, для якої відкрито попередній перегляд (доступний і без `Template.Edit`).
-  const [previewTable, setPreviewTable] = useState<TemplateTable | null>(null);
-
   // ⛔ Правила доступу до періоду (`ФВ-2.15`) не мають коду — форма
   // створення і форма правки наявного за `id` навмисно окремі, за тією самою
   // причиною, що описана в `PeriodAccessRuleEditor.tsx`. Самі чернетки живуть
   // у діалозі (`LocalDraft`); тут — лише ключі, якими сторінка підставляє
   // нове початкове значення.
   const [periodRulesOpen, setPeriodRulesOpen] = useState(false);
+  const [accessMatrixOpen, setAccessMatrixOpen] = useState(false);
   const [periodCreateKey, setPeriodCreateKey] = useState(0);
   const [manageSeed, setManageSeed] = useState<{ key: number; value: ManageSeed }>(() => ({
     key: 0,
@@ -371,6 +420,9 @@ export function TemplateVersionPage(): JSX.Element {
     queryKey: queryKeys.templates.version(id),
     queryFn: () => apiFetch<TemplateStructureDto>(`/api/v1/template-versions/${id}/structure`),
   });
+
+  const node: CtorNode =
+    structure.data === undefined ? { kind: 'root' } : parseNode(search.get('node'), structure.data);
 
   /**
    * Поля шапки документа версії (рівень усього документа, не таблиці) —
@@ -409,7 +461,7 @@ export function TemplateVersionPage(): JSX.Element {
       ]);
       setPublishing(false);
       setPublishProblems([]);
-      showDone(t('version.published'));
+      saved(t('version.published'));
     },
 
     // ⚠ Публікація падає з переліком проблем структури: показуємо саме його,
@@ -450,7 +502,7 @@ export function TemplateVersionPage(): JSX.Element {
     onSuccess: async (result) => {
       await invalidateVersionLists();
       setCloning(false);
-      showDone(t('version.cloned'));
+      saved(t('version.cloned'));
 
       // Одразу відкриваємо клон: інакше користувач лишається на замороженій
       // версії й шукає нову в переліку.
@@ -482,7 +534,7 @@ export function TemplateVersionPage(): JSX.Element {
     onSuccess: async () => {
       await invalidateVersionLists();
       setDeprecating(false);
-      showDone(t('version.deprecated'));
+      saved(t('version.deprecated'));
     },
     onError: showApiError,
   });
@@ -496,7 +548,7 @@ export function TemplateVersionPage(): JSX.Element {
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.templates.version(id) });
       setSheetDraft(null);
-      showDone(t('sheets.saved'));
+      saved(t('sheets.saved'));
     },
     onError: showApiError,
   });
@@ -507,7 +559,7 @@ export function TemplateVersionPage(): JSX.Element {
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.templates.version(id) });
       setPendingDelete(null);
-      showDone(t('sheets.deleted'));
+      saved(t('sheets.deleted'));
     },
     onError: showApiError,
   });
@@ -524,7 +576,7 @@ export function TemplateVersionPage(): JSX.Element {
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.templates.version(id) });
       setTableDraft(null);
-      showDone(t('tableDef.saved'));
+      saved(t('tableDef.saved'));
     },
     onError: showApiError,
   });
@@ -536,7 +588,7 @@ export function TemplateVersionPage(): JSX.Element {
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.templates.version(id) });
       setPendingDelete(null);
-      showDone(t('tableDef.deleted'));
+      saved(t('tableDef.deleted'));
     },
     onError: showApiError,
   });
@@ -551,7 +603,7 @@ export function TemplateVersionPage(): JSX.Element {
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.templates.version(id) });
       setColumnEdit(null);
-      showDone(t('columns.saved'));
+      saved(t('columns.saved'));
     },
     onError: showApiError,
   });
@@ -571,7 +623,7 @@ export function TemplateVersionPage(): JSX.Element {
       if (revision === null) return;
       await queryClient.invalidateQueries({ queryKey: queryKeys.templates.version(id) });
       const moved = columns[from];
-      showDone(
+      saved(
         t('reorder.moved', {
           name: moved === undefined ? '' : localized(moved.headerL10n) || moved.code,
           position: to + 1,
@@ -593,7 +645,7 @@ export function TemplateVersionPage(): JSX.Element {
       if (revision === null) return;
       await queryClient.invalidateQueries({ queryKey: queryKeys.templates.version(id) });
       const moved = rows[from];
-      showDone(
+      saved(
         t('reorder.moved', {
           name: moved === undefined ? '' : (moved.label ?? moved.rowKey),
           position: to + 1,
@@ -610,7 +662,7 @@ export function TemplateVersionPage(): JSX.Element {
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.templates.version(id) });
       setPendingDelete(null);
-      showDone(t('columns.deleted'));
+      saved(t('columns.deleted'));
     },
     onError: showApiError,
   });
@@ -626,7 +678,7 @@ export function TemplateVersionPage(): JSX.Element {
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.templates.headerFieldsOf(id) });
       setHeaderFieldEdit(null);
-      showDone(t('headerFields.saved'));
+      saved(t('headerFields.saved'));
     },
     onError: showApiError,
   });
@@ -641,7 +693,7 @@ export function TemplateVersionPage(): JSX.Element {
       setSavedRows((prev) => ({ ...prev, [`${String(variables.tableId)}:${result.rowKey}`]: result }));
       await queryClient.invalidateQueries({ queryKey: queryKeys.templates.version(id) });
       setRowEdit(null);
-      showDone(t('rows.saved'));
+      saved(t('rows.saved'));
     },
     onError: showApiError,
   });
@@ -652,7 +704,7 @@ export function TemplateVersionPage(): JSX.Element {
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.templates.version(id) });
       setPendingDelete(null);
-      showDone(t('rows.deleted'));
+      saved(t('rows.deleted'));
     },
     onError: showApiError,
   });
@@ -674,7 +726,7 @@ export function TemplateVersionPage(): JSX.Element {
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.templates.version(id) });
       setFormulaDraft(null);
-      showDone(t('formulas.saved'));
+      saved(t('formulas.saved'));
     },
     onError: showApiError,
   });
@@ -693,7 +745,7 @@ export function TemplateVersionPage(): JSX.Element {
         queryClient.invalidateQueries({ queryKey: validationRulesKey(id, variables.tableId) }),
       ]);
       setValidationRuleTable(null);
-      showDone(t('validationRules.saved'));
+      saved(t('validationRules.saved'));
     },
     onError: showApiError,
   });
@@ -708,7 +760,7 @@ export function TemplateVersionPage(): JSX.Element {
         queryClient.invalidateQueries({ queryKey: validationRulesKey(id, variables.tableId) }),
       ]);
       setPendingDelete(null);
-      showDone(t('validationRules.deleted'));
+      saved(t('validationRules.deleted'));
     },
     onError: showApiError,
   });
@@ -732,7 +784,7 @@ export function TemplateVersionPage(): JSX.Element {
         key: seed.key + 1,
         value: { ruleId: created.id, draft: updatePeriodAccessRuleDraftOf(created) },
       }));
-      showDone(t('periodRules.added'));
+      saved(t('periodRules.added'));
     },
     onError: showApiError,
   });
@@ -742,7 +794,7 @@ export function TemplateVersionPage(): JSX.Element {
     mutationFn: ({ ruleId, draft }: { ruleId: number; draft: UpdatePeriodAccessRuleDraft }) =>
       savePeriodAccessRule(id, ruleId, draft),
     onSuccess: async () => {
-      showDone(t('periodRules.saved'));
+      saved(t('periodRules.saved'));
     },
     onError: showApiError,
   });
@@ -752,7 +804,7 @@ export function TemplateVersionPage(): JSX.Element {
     mutationFn: (ruleId: number) => deletePeriodAccessRule(id, ruleId),
     onSuccess: async () => {
       setManageSeed((seed) => ({ key: seed.key + 1, value: emptyManageSeed(id) }));
-      showDone(t('periodRules.deleted'));
+      saved(t('periodRules.deleted'));
     },
     onError: showApiError,
   });
@@ -767,6 +819,13 @@ export function TemplateVersionPage(): JSX.Element {
   // що вже working на `ExpressionsPage`/`TemplateVersionsPage` — дає статус
   // без потреби розширювати контракт `TemplateStructureDto` заради одного
   // поля.
+  // ⚠ `ФВ-14.26`: спінер видалення в рядку — лише після 100 мс дії, не з першого кадру
+  // (UI-36 переніс ці кнопки в `features/templates/ctor/*`; затримка — тут, де мутації).
+  const deleteTableLoading = usePendingLoading(deleteTableMutation.isPending);
+  const deleteColumnLoading = usePendingLoading(deleteColumnMutation.isPending);
+  const deleteRowLoading = usePendingLoading(deleteRowMutation.isPending);
+  const deleteRuleLoading = usePendingLoading(deleteValidationRuleMutation.isPending);
+
   const templateIdNumber = Number(templateId);
 
   const versionsList = useQuery({
@@ -820,87 +879,67 @@ export function TemplateVersionPage(): JSX.Element {
             : t('version.titleOf', { version: versionSummary.version })
         }
         actions={
+          /* ✎ b4b, макет `screens-templates.js` (шапка версії: Compare · More · Publish)
+              і KIT §1.2: одна головна дія, ≤ 2 другорядні, решта — у меню «More».
+              Було шість кнопок поспіль. Права й умови показу кожної дії — ті самі,
+              що й до переходу в меню (коментарі до кожної — у `VersionMoreItems`). */
           <Group gap="xs">
-            {/* ⚠ Лічильник правок презентаційного шару (кнопка «Appearance»
-                на колонці: підпис, порядок, формат, видимість — `ФВ-7.2`).
-                Раніше тут стояло голе `r0`, і людина не розуміла, що це. */}
-            {structure.data !== undefined && (
-              <Text size="xs" c="dimmed" data-presentation-revision>
-                {t('version.presentationRevision', {
-                  revision: structure.data.presentationRevision,
-                })}
-              </Text>
-            )}
             {/* ⚠ Порівняння версій доступне за правом ПЕРЕГЛЯДУ: питання
                 «що зміниться» законне й для того, хто нічого не править —
                 саме з нього починається рішення про міграцію. */}
             {can(session.data, 'Template.View') && <VersionDiff templateVersionId={id} versions={versionsList.data?.items} />}
 
-            {/* ⛔ Матриця доступу (`ФВ-2.18`) — теж право ПЕРЕГЛЯДУ: питання
-                «які періоди відкриті на цьому аркуші» законне для всіх, і
-                саме воно найчастіше й з'ясовується постфактум, коли форму
-                вже не заповнити. */}
-            {can(session.data, 'Template.View') && <AccessMatrix templateVersionId={id} />}
-
-            {/* ⛔ Правила доступу до періоду (`ФВ-2.15`, W5.4) — кнопка тут
-                же, поруч із матрицею: саме матриця показує НАСЛІДОК цих
-                правил, і питання «чому тут замок» найчастіше веде до «а що
-                за ним налаштовано». */}
-            {canEditSheets && (
-              <Button size="xs" variant="default" onClick={() => setPeriodRulesOpen(true)}>
-                {t('periodRules.title')}
-              </Button>
-            )}
-
-            {/* ⛔ Зв'язки таблиць (`ФВ-2.12`, `ФВ-2.13`) — окрема сторінка, і
-                вхід у неї стоїть саме тут: питання «звідки в цій таблиці
-                числа» ставлять, дивлячись на структуру. Без цього посилання
-                редактор існував би лише за адресою, яку треба знати. */}
-            {can(session.data, 'Template.View') && (
-              <Button
-                size="xs"
-                variant="default"
-                onClick={() =>
-                  void navigate(
-                    `/admin/templates/${templateId ?? ''}/versions/${String(id)}/relations`,
-                  )
-                }
-              >
-                {t('version.relations')}
-              </Button>
-            )}
-
-            {/* ⛔ Клон — єдиний спосіб змінити структуру після публікації
-                (`ФВ-7.1`). Кнопка є завжди, коли є право правити шаблони:
-                клонувати чернетку теж законно. */}
-            {can(session.data, 'Template.Edit') && (
-              <Button size="xs" variant="default" onClick={() => setCloning(true)}>
-                {t('version.clone')}
-              </Button>
-            )}
+            <VersionMoreMenu
+              items={[
+                // ⛔ Матриця доступу (`ФВ-2.18`) — право ПЕРЕГЛЯДУ.
+                can(session.data, 'Template.View')
+                  ? { key: 'matrix', label: t('version.accessMatrix'), onClick: () => setAccessMatrixOpen(true) }
+                  : null,
+                // ⛔ Правила доступу до періоду (`ФВ-2.15`) — поруч із матрицею.
+                canEditSheets
+                  ? { key: 'period-rules', label: t('periodRules.title'), onClick: () => setPeriodRulesOpen(true) }
+                  : null,
+                // ⛔ Зв'язки таблиць (`ФВ-2.12`, `ФВ-2.13`) — окрема сторінка.
+                can(session.data, 'Template.View')
+                  ? {
+                      key: 'relations',
+                      label: t('version.relations'),
+                      onClick: () =>
+                        void navigate(`/admin/templates/${templateId ?? ''}/versions/${String(id)}/relations`),
+                    }
+                  : null,
+                // ⛔ Клон — єдиний спосіб змінити структуру після публікації (`ФВ-7.1`).
+                can(session.data, 'Template.Edit')
+                  ? { key: 'clone', label: t('version.clone'), onClick: () => setCloning(true) }
+                  : null,
+                // ⚠ Вивести з обігу — лише опубліковану версію, право публікації.
+                canWithdraw && can(session.data, 'Template.Publish')
+                  ? { key: 'deprecate', label: t('version.deprecate'), onClick: () => setDeprecating(true), danger: true }
+                  : null,
+              ]}
+            />
 
             {canPublish && can(session.data, 'Template.Publish') && (
-              <Button size="xs" onClick={() => setPublishing(true)}>
+              <Button onClick={() => setPublishing(true)}>
                 {t('version.publish')}
               </Button>
             )}
 
-            {/* ⚠ Право те саме, що на публікацію: вивести з обігу —
-                рішення тієї самої ваги, що й випустити. Показано лише для
-                вже ОПУБЛІКОВАНОЇ версії — сервер (`ECR-TMPL-0409`) відмовляє
-                чернетці й уже виведеній з обігу версії однаково. */}
-            {canWithdraw && can(session.data, 'Template.Publish') && (
-              <Button
-                size="xs"
-                variant="default"
-                color="statusError"
-                onClick={() => setDeprecating(true)}
-              >
-                {t('version.deprecate')}
-              </Button>
+            {can(session.data, 'Template.View') && (
+              <AccessMatrix
+                templateVersionId={id}
+                opened={accessMatrixOpen}
+                onClose={() => setAccessMatrixOpen(false)}
+              />
             )}
           </Group>
         }
+      />
+
+      <VersionStateLine
+        status={versionStatus}
+        presentationRevision={structure.data?.presentationRevision}
+        savedAt={savedAt}
       />
 
       {/*
@@ -939,91 +978,31 @@ export function TemplateVersionPage(): JSX.Element {
         <ErrorAlert error={versionsList.error} onRetry={() => void versionsList.refetch()} />
       )}
 
+      {/* UI-36: банер — з дією «Clone to new draft» прямо в ньому (макет `tv-frozen`), а не
+          лише пояснення, куди йти по кнопку в шапці. */}
       {can(session.data, 'Template.Edit') && structure.data?.isEditable === false && (
-        <Alert color="statusWarning" variant="light" mb="sm">
-          {t('version.structureFrozen')}
+        <Alert color="statusWarning" variant="light" mb="sm" data-testid="ctor-frozen">
+          <Group justify="space-between" wrap="nowrap" gap="sm">
+            <Text size="sm">{t('version.structureFrozen')}</Text>
+            <Button size="xs" variant="default" onClick={() => setCloning(true)}>
+              {t('ctor.cloneToDraft')}
+            </Button>
+          </Group>
         </Alert>
       )}
 
       {/*
-       * ⛔ Поля шапки документа (рівень усього документа, не таблиці) — той
-       * самий draft→publish контракт, що колонки (`W5.2`), тому та сама
-       * заморожена структура (банер вище, `canEditSheets` — той самий прапорець
-       * `structure.data?.isEditable`) забороняє й тут: другого банера немає
-       * навмисно, причина заморозки на сторінці вже одна.
+       * ⚠ Поля шапки документа живуть в огляді версії (корінь дерева). Версія без
+       * аркушів дерева не має — тоді вони стоять тут, над порожнім станом, інакше
+       * до них не було б входу взагалі.
        */}
-      <Group justify="space-between" mb="xs" mt="md">
-        <Text fw={600}>{t('headerFields.title')}</Text>
-        {canEditSheets && (
-          <Button
-            size="xs"
-            variant="default"
-            onClick={() => setHeaderFieldEdit(emptyHeaderFieldDraft(null))}
-          >
-            {t('headerFields.add')}
-          </Button>
-        )}
-      </Group>
-
-      {headerFields.error !== null && (
-        <ErrorAlert error={headerFields.error} onRetry={() => void headerFields.refetch()} />
-      )}
-
-      {headerFields.error === null && headerFields.isPending && (
-        <Skeleton height={80} radius="sm" mb="sm" />
-      )}
-
-      {headerFields.error === null && !headerFields.isPending && (
-        headerFields.data.length === 0 ? (
-          <Text size="sm" c="dimmed" mb="sm">
-            {t('headerFields.empty')}
-          </Text>
-        ) : (
-          <Table striped withTableBorder mb="md">
-            <Table.Thead>
-              <Table.Tr>
-                <Table.Th>{t('headerFields.label')}</Table.Th>
-                <Table.Th>{t('headerFields.dataType')}</Table.Th>
-                <Table.Th />
-              </Table.Tr>
-            </Table.Thead>
-            <Table.Tbody>
-              {[...headerFields.data]
-                .sort((a, b) => a.ordinal - b.ordinal)
-                .map((field) => (
-                  <Table.Tr key={field.id}>
-                    <Table.Td>
-                      {localized(field.labelL10n) || field.code}{' '}
-                      <Text span c="dimmed">
-                        ({field.code})
-                      </Text>
-                    </Table.Td>
-                    <Table.Td>
-                      {dataTypeLabel(field.dataType)}
-                      {field.isRequired && (
-                        <Badge ml="xs" size="xs" variant="light">
-                          {t('headerFields.required')}
-                        </Badge>
-                      )}
-                    </Table.Td>
-                    <Table.Td>
-                      {canEditSheets && (
-                        <Group gap="xs" wrap="nowrap" justify="flex-end">
-                          <Button
-                            size="compact-xs"
-                            variant="subtle"
-                            onClick={() => setHeaderFieldEdit(headerFieldDraftOf(field))}
-                          >
-                            {t('headerFields.edit')}
-                          </Button>
-                        </Group>
-                      )}
-                    </Table.Td>
-                  </Table.Tr>
-                ))}
-            </Table.Tbody>
-          </Table>
-        )
+      {structure.data?.sheets.length === 0 && (
+        <HeaderFieldsSection
+          fields={headerFields}
+          canEdit={canEditSheets}
+          onAdd={() => setHeaderFieldEdit(emptyHeaderFieldDraft(null))}
+          onEdit={(field) => setHeaderFieldEdit(headerFieldDraftOf(field))}
+        />
       )}
 
       {/*
@@ -1049,466 +1028,183 @@ export function TemplateVersionPage(): JSX.Element {
         onRetry={() => void structure.refetch()}
       >
         {(version) => (
-          <>
-            {canEditSheets && (
-              <Group justify="flex-end" mb="xs">
-                <Button
-                  variant="default"
-                  onClick={() => setSheetDraft(emptyDraft(nextOrdinal))}
-                >
-                  {t('sheets.add')}
-                </Button>
-              </Group>
-            )}
+          <div className="ecr-ctor-split">
+            <CtorTree
+              id={treeId}
+              structure={version}
+              version={versionSummary?.version}
+              selected={node}
+              hidden={!treeOpen}
+              onSelect={(next) => {
+                selectNode(next);
+                if (narrow) setTreeOpen(false);
+              }}
+            />
+            <div className="ecr-ctor-main">
+              {node.kind === 'root' && (
+                <VersionOverview
+                  structure={version}
+                  version={versionSummary?.version}
+                  treeToggle={treeToggle}
+                  canEdit={canEditSheets}
+                  onAddSheet={() => setSheetDraft(emptyDraft(nextOrdinal))}
+                  onOpenSheet={(code) => selectNode({ kind: 'sheet', code })}
+                  headerFields={
+                    <HeaderFieldsSection
+                      fields={headerFields}
+                      canEdit={canEditSheets}
+                      onAdd={() => setHeaderFieldEdit(emptyHeaderFieldDraft(null))}
+                      onEdit={(field) => setHeaderFieldEdit(headerFieldDraftOf(field))}
+                    />
+                  }
+                />
+              )}
 
-            <Accordion multiple onChange={setOpenSheets}>
-              {[...version.sheets]
-                .sort((a, b) => a.ordinal - b.ordinal)
-                .map((sheet) => (
-                  <Accordion.Item key={sheet.id} value={sheet.code}>
-                    <Accordion.Control>
-                      {localized(sheet.nameL10n)}{' '}
-                      <Text span c="dimmed">
-                        ({sheet.code})
-                      </Text>
-                      {!sheet.isVisible && (
-                        <Badge ml="xs" size="xs" variant="outline">
-                          {t('version.hidden')}
-                        </Badge>
-                      )}
-                    </Accordion.Control>
-                    <Accordion.Panel>
-                      {canEditSheets && (
-                        <Group gap="xs" mb="sm">
-                          <Button
-                            size="compact-xs"
-                            variant="subtle"
-                            onClick={() => setSheetDraft(draftOf(sheet))}
-                          >
-                            {t('sheets.edit')}
-                          </Button>
-                          <Button
-                            size="compact-xs"
-                            variant="subtle"
-                            color="statusError"
-                            // ⛔ Лише натиснута кнопка: доти `loading` крутився
-                            // на кнопках УСІХ аркушів одночасно.
-                            loading={deleteSheetMutationLoading && deleteSheetMutation.variables === sheet.code}
-                            onClick={() =>
+              {node.kind === 'sheet' &&
+                (() => {
+                  const sheets = sortedSheets(version);
+                  const index = sheets.findIndex((candidate) => candidate.code === node.code);
+                  const sheet = sheets[index];
+                  if (sheet === undefined) return null;
+
+                  return (
+                    <SheetOverview
+                      sheet={sheet}
+                      sheetNo={index + 1}
+                      sheetCount={sheets.length}
+                      treeToggle={treeToggle}
+                      canEdit={canEditSheets}
+                      // ⛔ Лише натиснута кнопка: доти `loading` крутився на кнопках УСІХ аркушів.
+                      deleting={deleteSheetMutationLoading && deleteSheetMutation.variables === sheet.code}
+                      onEdit={() => setSheetDraft(draftOf(sheet))}
+                      onDelete={() =>
+                        setPendingDelete({ kind: 'sheet', code: sheet.code, name: localized(sheet.nameL10n) || sheet.code })
+                      }
+                      onAddTable={() =>
+                        setTableDraft({
+                          sheetCode: sheet.code,
+                          draft: emptyTableDraft(
+                            sheet.tables.length === 0 ? 0 : Math.max(...sheet.tables.map((t2) => t2.ordinal)) + 1,
+                          ),
+                        })
+                      }
+                      onOpenTable={(tableId) => selectNode({ kind: 'table', id: tableId })}
+                    />
+                  );
+                })()}
+
+              {node.kind === 'table' &&
+                (() => {
+                  const located = locateTable(version, node.id);
+                  if (located === undefined) return null;
+                  const { table, sheet } = located;
+                  const nextColumnOrdinal =
+                    table.columns.length === 0 ? 0 : Math.max(...table.columns.map((c) => c.ordinal)) + 1;
+                  const nextRowOrdinal =
+                    table.rows.length === 0 ? 0 : Math.max(...table.rows.map((r) => r.ordinal)) + 1;
+
+                  return (
+                    <Suspense fallback={<Skeleton height={240} radius="sm" m="md" />}>
+                    <TableWorkspace
+                      key={table.id}
+                      templateVersionId={id}
+                      located={located}
+                      tab={tab}
+                      onTab={selectTab}
+                      treeToggle={treeToggle}
+                      canEditStructure={canEditSheets}
+                      deleting={deleteTableLoading && deleteTableMutation.variables?.code === table.code}
+                      deletingRuleCode={
+                        deleteRuleLoading
+                          ? (deleteValidationRuleMutation.variables?.code ?? null)
+                          : null
+                      }
+                      onProperties={() => setTableDraft({ sheetCode: sheet.code, draft: tableDraftOf(table) })}
+                      onConditionalFormat={() => setConditionalFormatTable(table)}
+                      onDelete={() =>
+                        setPendingDelete({
+                          kind: 'table',
+                          sheetCode: sheet.code,
+                          code: table.code,
+                          name: localized(table.nameL10n) || table.code,
+                        })
+                      }
+                      onAddColumn={() =>
+                        setColumnEdit({ tableId: table.id, code: '', draft: emptyColumnDraft(nextColumnOrdinal) })
+                      }
+                      onFormula={(target) =>
+                        setFormulaDraft(
+                          target.kind === 'Column'
+                            ? columnFormulaDraft(table.id, target.column)
+                            : rowFormulaDraft(table.id, target.row),
+                        )
+                      }
+                      onAddRule={() => setValidationRuleTable(table.id)}
+                      onDeleteRule={(code) => setPendingDelete({ kind: 'rule', tableId: table.id, code })}
+                      columns={
+                        <ColumnsTable
+                          table={table}
+                          canEditPresentation={can(session.data, 'Template.Edit')}
+                          canEditStructure={canEditSheets}
+                          reorderPending={reorderColumnsMutation.isPending}
+                          deletingCode={
+                            deleteColumnLoading ? (deleteColumnMutation.variables?.code ?? null) : null
+                          }
+                          onReorder={(from, to) =>
+                            reorderColumnsMutation.mutate({ columns: table.columns, from, to })
+                          }
+                          onUsage={(column) => setColumnUsageFor(column.id)}
+                          onPresentation={(column) => {
+                            setPresentationUsed(true);
+                            setEditing(column);
+                          }}
+                          onEdit={(column) => setColumnEdit({ tableId: table.id, code: column.code, draft: null })}
+                          onDelete={(column) =>
+                            setPendingDelete({
+                              kind: 'column',
+                              tableId: table.id,
+                              code: column.code,
+                              name: localized(column.headerL10n) || column.code,
+                            })
+                          }
+                          onFormula={(column) => setFormulaDraft(columnFormulaDraft(table.id, column))}
+                        />
+                      }
+                      rows={
+                        table.rowMode === 'Dynamic' ? null : (
+                          <RowsTable
+                            table={table}
+                            canEditStructure={canEditSheets}
+                            reorderPending={reorderRowsMutation.isPending}
+                            deletingRowKey={
+                              deleteRowLoading ? (deleteRowMutation.variables?.rowKey ?? null) : null
+                            }
+                            onReorder={(from, to) => reorderRowsMutation.mutate({ rows: table.rows, from, to })}
+                            onAdd={() => setRowEdit({ tableId: table.id, draft: emptyRowDraft(nextRowOrdinal) })}
+                            onEdit={(row) =>
+                              setRowEdit({
+                                tableId: table.id,
+                                draft: rowDraftOf(row, savedRows[`${String(table.id)}:${row.rowKey}`]),
+                              })
+                            }
+                            onDelete={(row) =>
                               setPendingDelete({
-                                kind: 'sheet',
-                                code: sheet.code,
-                                name: localized(sheet.nameL10n) || sheet.code,
+                                kind: 'row',
+                                tableId: table.id,
+                                rowKey: row.rowKey,
+                                name: row.label ?? row.rowKey,
                               })
                             }
-                          >
-                            {t('sheets.delete')}
-                          </Button>
-                        </Group>
-                      )}
-
-                      {canEditSheets && (
-                        <Group justify="flex-end" mb="xs">
-                          <Button
-                            size="compact-xs"
-                            variant="default"
-                            onClick={() =>
-                              setTableDraft({
-                                sheetCode: sheet.code,
-                                draft: emptyTableDraft(
-                                  sheet.tables.length === 0
-                                    ? 0
-                                    : Math.max(...sheet.tables.map((t2) => t2.ordinal)) + 1,
-                                ),
-                              })
-                            }
-                          >
-                            {t('tableDef.add')}
-                          </Button>
-                        </Group>
-                      )}
-
-                      <LazyTableSlots
-                        items={sheet.tables}
-                        active={openSheets.includes(sheet.code)}
-                        nameOf={(table) => localized(table.nameL10n) || table.code}
-                        titleOf={(table) => <TableTitle table={table} />}
-                        heightOf={estimateTemplateTableHeight}
-                        render={(table) => {
-                        const nextColumnOrdinal =
-                          table.columns.length === 0
-                            ? 0
-                            : Math.max(...table.columns.map((c) => c.ordinal)) + 1;
-                        const nextRowOrdinal =
-                          table.rows.length === 0 ? 0 : Math.max(...table.rows.map((r) => r.ordinal)) + 1;
-
-                        return (
-                          <>
-                            <Group justify="space-between" mt="sm">
-                              <Group gap="xs">
-                                <Text fw={600}>
-                                  <TableTitle table={table} />
-                                </Text>
-                                <Button size="compact-xs" variant="subtle" onClick={() => setPreviewTable(table)}>
-                                  {t('tablePreview.open')}
-                                </Button>
-                              </Group>
-                              {canEditSheets && (
-                                <Group gap="xs">
-                                  <Button
-                                    size="compact-xs"
-                                    variant="subtle"
-                                    onClick={() =>
-                                      setTableDraft({
-                                        sheetCode: sheet.code,
-                                        draft: tableDraftOf(table),
-                                      })
-                                    }
-                                  >
-                                    {t('tableDef.edit')}
-                                  </Button>
-                                  <Button
-                                    size="compact-xs"
-                                    variant="subtle"
-                                    color="statusError"
-                                    loading={
-                                      deleteTableMutation.isPending &&
-                                      deleteTableMutation.variables?.code === table.code
-                                    }
-                                    onClick={() =>
-                                      setPendingDelete({
-                                        kind: 'table',
-                                        sheetCode: sheet.code,
-                                        code: table.code,
-                                        name: localized(table.nameL10n) || table.code,
-                                      })
-                                    }
-                                  >
-                                    {t('tableDef.delete')}
-                                  </Button>
-                                  <Button
-                                    size="compact-xs"
-                                    variant="default"
-                                    onClick={() =>
-                                      setColumnEdit({
-                                        tableId: table.id,
-                                        code: '',
-                                        draft: emptyColumnDraft(nextColumnOrdinal),
-                                      })
-                                    }
-                                  >
-                                    {t('columns.add')}
-                                  </Button>
-                                  {/* ⛔ Правило валідації (W5.4, продовження
-                                      `ФВ-2.1` на `ValidationRule`) адресується
-                                      ТАБЛИЦЕЮ — кнопка тому стоїть тут, а не
-                                      на рівні аркуша чи версії. */}
-                                  <Button
-                                    size="compact-xs"
-                                    variant="subtle"
-                                    onClick={() => setValidationRuleTable(table.id)}
-                                  >
-                                    {t('validationRules.title')}
-                                  </Button>
-                                  <Button
-                                    size="compact-xs"
-                                    variant="subtle"
-                                    onClick={() => setConditionalFormatTable(table)}
-                                  >
-                                    {t('conditionalFormat.title')}
-                                  </Button>
-                                </Group>
-                              )}
-                            </Group>
-                            <Table striped withTableBorder mt="xs">
-                              <Table.Thead>
-                                <Table.Tr>
-                                  {can(session.data, 'Template.Edit') && (
-                                    <Table.Th>{t('reorder.column')}</Table.Th>
-                                  )}
-                                  <Table.Th>{t('version.column')}</Table.Th>
-                                  <Table.Th>{t('version.type')}</Table.Th>
-                                  <Table.Th>{t('version.unit')}</Table.Th>
-                                  <Table.Th />
-                                </Table.Tr>
-                              </Table.Thead>
-                              <Table.Tbody>
-                                <ReorderableRows
-                                  items={table.columns}
-                                  enabled={can(session.data, 'Template.Edit') && !reorderColumnsMutation.isPending}
-                                  onMove={(from, to) =>
-                                    reorderColumnsMutation.mutate({ columns: table.columns, from, to })
-                                  }
-                                >
-                                {(column, index, drag) => (
-                                  <Table.Tr key={column.id} {...drag.targetProps(index)}>
-                                    {can(session.data, 'Template.Edit') && (
-                                      <Table.Td>
-                                        <ReorderCell
-                                          index={index}
-                                          count={table.columns.length}
-                                          name={localized(column.headerL10n) || column.code}
-                                          disabled={reorderColumnsMutation.isPending}
-                                          onMove={(from, to) =>
-                                            reorderColumnsMutation.mutate({ columns: table.columns, from, to })
-                                          }
-                                          drag={drag}
-                                        />
-                                      </Table.Td>
-                                    )}
-                                    <Table.Td>
-                                      {localized(column.headerL10n) || column.code}{' '}
-                                      <Text span c="dimmed">
-                                        ({column.code})
-                                      </Text>
-                                      {column.isHidden && (
-                                        <Badge ml="xs" size="xs" variant="outline">
-                                          {t('version.hidden')}
-                                        </Badge>
-                                      )}
-                                    </Table.Td>
-                                    <Table.Td>
-                                      {dataTypeLabel(column.dataType)}
-                                      {column.isReadOnly && (
-                                        <Badge ml="xs" size="xs" variant="light">
-                                          {t('version.readOnly')}
-                                        </Badge>
-                                      )}
-                                    </Table.Td>
-                                    <Table.Td>{column.unitSymbol ?? '—'}</Table.Td>
-                                    <Table.Td>
-                                      <Group gap="xs" wrap="nowrap" justify="flex-end">
-                                        <Button
-                                          size="compact-xs"
-                                          variant="subtle"
-                                          data-column-usage="trigger"
-                                          onClick={() => setColumnUsageFor(column.id)}
-                                        >
-                                          {t('registries.tabUsage')}
-                                        </Button>
-                                        {/* ⚠ Правка тут не потребує нової версії: підпис,
-                                            порядок, формат і видимість — презентаційний
-                                            шар, і його дозволено міняти в опублікованій
-                                            версії (`ФВ-7.2`). */}
-                                        {can(session.data, 'Template.Edit') && (
-                                          <Button
-                                            size="compact-xs"
-                                            variant="subtle"
-                                            onClick={() => {
-                                              setPresentationUsed(true);
-                                              setEditing(column);
-                                            }}
-                                          >
-                                            {t('version.presentation')}
-                                          </Button>
-                                        )}
-                                        {canEditSheets && (
-                                          <>
-                                            <Button
-                                              size="compact-xs"
-                                              variant="subtle"
-                                              onClick={() =>
-                                                setColumnEdit({ tableId: table.id, code: column.code, draft: null })
-                                              }
-                                            >
-                                              {t('columns.edit')}
-                                            </Button>
-                                            <Button
-                                              size="compact-xs"
-                                              variant="subtle"
-                                              color="statusError"
-                                              loading={
-                                                deleteColumnMutation.isPending
-                                                && deleteColumnMutation.variables?.code === column.code
-                                              }
-                                              onClick={() =>
-                                                setPendingDelete({
-                                                  kind: 'column',
-                                                  tableId: table.id,
-                                                  code: column.code,
-                                                  name: localized(column.headerL10n) || column.code,
-                                                })
-                                              }
-                                            >
-                                              {t('columns.delete')}
-                                            </Button>
-                                            <Button
-                                              size="compact-xs"
-                                              variant="subtle"
-                                              onClick={() =>
-                                                setFormulaDraft(
-                                                  // ⛔ Дефект 2026-09-23: раніше тут завжди був
-                                                  // emptyFormulaDraft — повторне відкриття на
-                                                  // колонці зі збереженою формулою показувало
-                                                  // порожній редактор, хоча PUT зберігав вираз
-                                                  // (структура тепер несе його — GET …/structure).
-                                                  column.formulaExpression !== null
-                                                    ? draftOfFormula(table.id, 'Column', String(column.id), {
-                                                        dialect: column.formulaDialect ?? 'Template',
-                                                        expression: column.formulaExpression,
-                                                      })
-                                                    : emptyFormulaDraft(table.id, 'Column', String(column.id)),
-                                                )
-                                              }
-                                            >
-                                              {t('formulas.edit')}
-                                            </Button>
-                                          </>
-                                        )}
-                                      </Group>
-                                    </Table.Td>
-                                  </Table.Tr>
-                                )}
-                                </ReorderableRows>
-                              </Table.Tbody>
-                            </Table>
-
-                            {/* ⚠ Рядки фіксованої таблиці. Динамічна (`RowMode.Dynamic`)
-                                не показує тут нічого й додати рядок не дає:
-                                домен (`TableDef.AddRow`) відхиляє їх шаблоном,
-                                вони з'являються під час роботи, а не тут. */}
-                            {table.rowMode !== 'Dynamic' && (
-                              <>
-                                <Group justify="space-between" mt="sm">
-                                  <Text fw={600} size="sm" c="dimmed">
-                                    {t('rows.title')}
-                                  </Text>
-                                  {canEditSheets && (
-                                    <Button
-                                      size="compact-xs"
-                                      variant="default"
-                                      onClick={() =>
-                                        setRowEdit({ tableId: table.id, draft: emptyRowDraft(nextRowOrdinal) })
-                                      }
-                                    >
-                                      {t('rows.add')}
-                                    </Button>
-                                  )}
-                                </Group>
-
-                                {table.rows.length === 0 ? (
-                                  <Text size="sm" c="dimmed">
-                                    {t('rows.empty')}
-                                  </Text>
-                                ) : (
-                                  <Table striped withTableBorder mt="xs">
-                                    <Table.Thead>
-                                      <Table.Tr>
-                                        {canEditSheets && <Table.Th>{t('reorder.column')}</Table.Th>}
-                                        <Table.Th>{t('rows.label')}</Table.Th>
-                                        <Table.Th>{t('rows.rowKind')}</Table.Th>
-                                        <Table.Th />
-                                      </Table.Tr>
-                                    </Table.Thead>
-                                    <Table.Tbody>
-                                      {/* AN-15: порядок рядків — `RowDef.Ordinal` через
-                                          `PATCH …/presentation` (`reorder.ts`). */}
-                                      <ReorderableRows
-                                        items={table.rows}
-                                        enabled={canEditSheets && !reorderRowsMutation.isPending}
-                                        onMove={(from, to) =>
-                                          reorderRowsMutation.mutate({ rows: table.rows, from, to })
-                                        }
-                                      >
-                                      {(row, index, drag) => (
-                                        <Table.Tr key={row.rowKey} {...drag.targetProps(index)}>
-                                          {canEditSheets && (
-                                            <Table.Td>
-                                              <ReorderCell
-                                                index={index}
-                                                count={table.rows.length}
-                                                name={row.label ?? row.rowKey}
-                                                disabled={reorderRowsMutation.isPending}
-                                                onMove={(from, to) =>
-                                                  reorderRowsMutation.mutate({ rows: table.rows, from, to })
-                                                }
-                                                drag={drag}
-                                              />
-                                            </Table.Td>
-                                          )}
-                                          <Table.Td>
-                                            {row.label ?? row.rowKey}{' '}
-                                            <Text span c="dimmed">
-                                              ({row.rowKey})
-                                            </Text>
-                                          </Table.Td>
-                                          <Table.Td>{rowKindLabel(row.rowKind)}</Table.Td>
-                                          <Table.Td>
-                                            {canEditSheets && (
-                                              <Group gap="xs" wrap="nowrap" justify="flex-end">
-                                                <Button
-                                                  size="compact-xs"
-                                                  variant="subtle"
-                                                  onClick={() =>
-                                                    setRowEdit({
-                                                      tableId: table.id,
-                                                      draft: rowDraftOf(
-                                                        row,
-                                                        savedRows[`${String(table.id)}:${row.rowKey}`],
-                                                      ),
-                                                    })
-                                                  }
-                                                >
-                                                  {t('rows.edit')}
-                                                </Button>
-                                                <Button
-                                                  size="compact-xs"
-                                                  variant="subtle"
-                                                  color="statusError"
-                                                  loading={
-                                                    deleteRowMutation.isPending
-                                                    && deleteRowMutation.variables?.rowKey === row.rowKey
-                                                  }
-                                                  onClick={() =>
-                                                    setPendingDelete({
-                                                      kind: 'row',
-                                                      tableId: table.id,
-                                                      rowKey: row.rowKey,
-                                                      name: row.label ?? row.rowKey,
-                                                    })
-                                                  }
-                                                >
-                                                  {t('rows.delete')}
-                                                </Button>
-                                                <Button
-                                                  size="compact-xs"
-                                                  variant="subtle"
-                                                  onClick={() =>
-                                                    setFormulaDraft(
-                                                      // ⛔ Той самий фікс, що й на колонці вище
-                                                      // (2026-09-23): порожній редактор на
-                                                      // рядку зі збереженою формулою.
-                                                      row.formulaExpression !== null
-                                                        ? draftOfFormula(table.id, 'Row', row.rowKey, {
-                                                            dialect: row.formulaDialect ?? 'Template',
-                                                            expression: row.formulaExpression,
-                                                          })
-                                                        : emptyFormulaDraft(table.id, 'Row', row.rowKey),
-                                                    )
-                                                  }
-                                                >
-                                                  {t('formulas.edit')}
-                                                </Button>
-                                              </Group>
-                                            )}
-                                          </Table.Td>
-                                        </Table.Tr>
-                                      )}
-                                      </ReorderableRows>
-                                    </Table.Tbody>
-                                  </Table>
-                                )}
-                              </>
-                            )}
-                          </>
-                        );
-                        }}
-                      />
-                    </Accordion.Panel>
-                  </Accordion.Item>
-                ))}
-            </Accordion>
-          </>
+                            onFormula={(row) => setFormulaDraft(rowFormulaDraft(table.id, row))}
+                          />
+                        )
+                      }
+                    />
+                    </Suspense>
+                  );
+                })()}
+            </div>
+          </div>
         )}
       </AsyncBoundary>
 
@@ -1740,22 +1436,6 @@ export function TemplateVersionPage(): JSX.Element {
         )}
       </Modal>
 
-      <Modal
-        opened={previewTable !== null}
-        onClose={() => setPreviewTable(null)}
-        title={
-          previewTable === null
-            ? ''
-            : t('tablePreview.title', { name: localized(previewTable.nameL10n) || previewTable.code })
-        }
-        size="100%"
-      >
-        {previewTable !== null && (
-          <Suspense fallback={null}>
-            <TablePreview templateVersionId={id} table={previewTable} />
-          </Suspense>
-        )}
-      </Modal>
 
       {/*
        * ⛔ Правило валідації (W5.4). Форма PUT-за-кодом стоїть поруч із
@@ -1787,13 +1467,12 @@ export function TemplateVersionPage(): JSX.Element {
       <Modal
         opened={validationRuleTable !== null}
         onClose={() => setValidationRuleTable(null)}
-        title={t('validationRules.title')}
+        title={t('ctor.addRule')}
       >
         {validationRuleTable !== null && (
           <Stack gap="md">
-            {/* ⚠ Межа охоплює ЛИШЕ форму, а не весь `Stack`: видалення за кодом
-                нижче — звичайні `TextInput`+`Button` із цього ж файла, і
-                ховати їх на час завантаження чужого чанка немає підстав. */}
+            {/* UI-36: наявні правила (X-15: перелік із видаленням) — у вкладці
+                «Validation rules» робочої області; тут лише форма нового правила. */}
             <LocalDraft initial={emptyValidationRuleDraft()}>
               {(draft, setDraft) => (
                 <Suspense fallback={null}>
@@ -1814,23 +1493,6 @@ export function TemplateVersionPage(): JSX.Element {
               )}
             </LocalDraft>
 
-            <Divider label={t('validationRules.existing')} />
-
-            {/* ⛔ X-15: наявні правила ПЕРЕЛІКОМ із видаленням вибраного, а не
-                текстове поле коду, який треба було пам'ятати. */}
-            <Suspense fallback={null}>
-              <ValidationRuleList
-                templateVersionId={id}
-                tableDefId={validationRuleTable}
-                disabled={!canEditSheets}
-                deletingCode={
-                  deleteValidationRuleMutation.isPending
-                    ? (deleteValidationRuleMutation.variables?.code ?? null)
-                    : null
-                }
-                onDelete={(code) => setPendingDelete({ kind: 'rule', tableId: validationRuleTable, code })}
-              />
-            </Suspense>
           </Stack>
         )}
       </Modal>

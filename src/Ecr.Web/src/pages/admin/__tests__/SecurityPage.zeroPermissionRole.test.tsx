@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { render, waitFor, within } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { QueryClientProvider, QueryClient } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
@@ -129,6 +129,20 @@ function renderRoles() {
   );
 }
 
+
+/**
+ * Рядок ролі в списку зліва (UI-37: вкладка — список ролей і права обраної, а
+ * не таблиця). ⚠ Назва обраної ролі стоїть ще й у заголовку праворуч, тому
+ * пошук за текстом неоднозначний — рядок береться за `data-role-item`.
+ */
+async function roleRow(code: string): Promise<HTMLElement> {
+  return waitFor(() => {
+    const row = document.querySelector<HTMLElement>(`[data-role-item="${code}"]`);
+    expect(row).not.toBeNull();
+    return row as HTMLElement;
+  });
+}
+
 describe('SecurityPage: попередження про роль без жодного права (lane1)', () => {
   it('роль без permissions і dangerousPermissions отримує бейдж «no permissions»', async () => {
     await loadCatalog('en', 'public');
@@ -136,9 +150,9 @@ describe('SecurityPage: попередження про роль без жодн
 
     renderRoles();
 
-    const emptyCell = (await screen.findByText('EmptyRole')).closest('td');
-    const grantingCell = (await screen.findByText('GrantingRole')).closest('td');
-    const dangerousCell = (await screen.findByText('DangerousOnlyRole')).closest('td');
+    const emptyCell = await roleRow('EmptyRole');
+    const grantingCell = await roleRow('GrantingRole');
+    const dangerousCell = await roleRow('DangerousOnlyRole');
     expect(emptyCell).not.toBeNull();
     expect(grantingCell).not.toBeNull();
     expect(dangerousCell).not.toBeNull();

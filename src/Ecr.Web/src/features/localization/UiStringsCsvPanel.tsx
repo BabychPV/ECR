@@ -160,7 +160,7 @@ export function UiStringsCsvPanel(): JSX.Element | null {
             data-testid="ui-strings-csv-language"
           />
 
-          <Button size="xs" variant="default" loading={exporting} onClick={() => void runExport()}>
+          <Button variant="default" loading={exporting} onClick={() => void runExport()}>
             {t('uiStrings.exportCsv')}
           </Button>
 
@@ -195,7 +195,6 @@ export function UiStringsCsvPanel(): JSX.Element | null {
           />
 
           <Button
-            size="xs"
             variant="default"
             loading={previewLoading}
             onClick={() => picker.current?.click()}

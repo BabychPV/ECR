@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { QueryClientProvider, QueryClient } from '@tanstack/react-query';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
@@ -147,6 +147,8 @@ describe('TemplateVersionPage: Publish/Withdraw відповідають ста�
 
     renderPage();
 
+    // b4b: рідкісні дії — у меню «More» шапки (KIT §1.2).
+    fireEvent.click(await screen.findByTestId('version-more'));
     expect(await screen.findByText('Withdraw from use')).not.toBeNull();
     expect(screen.queryByText('Publish')).toBeNull();
   });
@@ -161,6 +163,7 @@ describe('TemplateVersionPage: Publish/Withdraw відповідають ста�
     // Дочекатися стабілізації запитів перш ніж стверджувати відсутність:
     // «Clone version» не залежить від статусу версії, тож її поява доводить,
     // що і `session`, і `versionsList` уже прийшли.
+    fireEvent.click(await screen.findByTestId('version-more'));
     await screen.findByText('Clone version');
     expect(screen.queryByText('Publish')).toBeNull();
     expect(screen.queryByText('Withdraw from use')).toBeNull();

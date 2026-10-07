@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -28,6 +28,7 @@ const SeededStrings: Record<string, string> = {
   'jobs.pick': 'Enter a job id',
   'jobs.pickHint': 'Long operations return a job id; paste it here to follow the progress.',
   'jobs.watch': 'Watch',
+  'jobs.findById': 'Find a job by id',
   'jobs.recentEmpty': 'No jobs yet',
   'jobs.mineOnly': 'Only my jobs',
   'jobs.mineOnlyHint': 'Others need System.ViewHealth.',
@@ -122,13 +123,18 @@ describe('JobsPage: рівно один порожній стан (U-09)', () =>
     ).toEqual(['No jobs yet']);
 
     /*
-     * ⛔ Текст не зник із продукту — він переїхав на поле вводу: «Enter a job
-     * id» тепер плейсхолдер (атрибут, не текстовий вузол), а пояснення —
-     * `description` поля. Тому перевіряється ОБОЄ: заглушки з цим заголовком
-     * немає, а підказка на полі — є.
+     * ⛔ Текст не зник із продукту. ✎ UI-28: поле ідентифікатора переїхало з-над
+     * журналу в діалог «Find a job by id» (макет поля на екрані не має):
+     * «Enter a job id» — його плейсхолдер (атрибут, не текстовий вузол), а
+     * пояснення — `description` поля. Тому перевіряється ОБОЄ: заглушки з цим
+     * заголовком і поля на самому екрані немає, а в діалозі підказка — є.
      */
     expect(screen.queryByRole('heading', { name: 'Enter a job id' })).toBeNull();
-    expect(screen.getByRole('textbox', { name: /Job id/ }).getAttribute('placeholder')).toBe(
+    expect(screen.queryByRole('textbox', { name: /Job id/ })).toBeNull();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Find a job by id' }));
+
+    expect((await screen.findByRole('textbox', { name: /Job id/ })).getAttribute('placeholder')).toBe(
       'Enter a job id',
     );
     expect(
@@ -136,7 +142,7 @@ describe('JobsPage: рівно один порожній стан (U-09)', () =>
     ).toBeDefined();
   });
 
-  it('ідентифікатор в адресі — картка стеження на місці', async () => {
+  it('ідентифікатор в адресі — шторка задачі на місці', async () => {
     mockFetch();
     await loadCatalog('en', 'private');
 
@@ -146,8 +152,16 @@ describe('JobsPage: рівно один порожній стан (U-09)', () =>
     // його як є — картку видно за тим самим рядком, що в адресі.
     await screen.findByText('watched-job-1');
 
-    // Картка — це ДАНІ, а не заглушка: єдиний порожній стан на екрані далі
+    // ✎ UI-28: старе посилання `?id=` відкриває шторку задачі.
+    // Шторка — це ДАНІ, а не заглушка: єдиний порожній стан на екрані далі
     // журнальний, і жодного другого поруч із карткою не з'являється.
-    expect(emptyStateHeadings()).toEqual(['No jobs yet']);
+    //
+    // ⚠ На вузькому екрані (jsdom) шторка модальна, і сторінка під нею для
+    // дерева доступності прихована — тому рахуємо й приховані заголовки.
+    await waitFor(() =>
+      expect(
+        screen.queryAllByRole('heading', { level: 4, hidden: true }).map((node) => node.textContent ?? ''),
+      ).toEqual(['No jobs yet']),
+    );
   });
 });

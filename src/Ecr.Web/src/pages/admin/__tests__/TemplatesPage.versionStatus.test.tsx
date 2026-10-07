@@ -24,7 +24,7 @@ import { TemplatesPage } from '@/pages/admin/TemplatesPage';
  */
 
 const templates = {
-  items: [{ id: 7, code: 'AIR', nameL10n: { values: { en: 'Air emissions' } } }],
+  items: [{ id: 7, code: 'AIR', versionCount: 2, documentCount: 0, isArchived: false }],
   nextCursor: null,
   totalCount: 1,
 };
@@ -108,7 +108,7 @@ afterEach(() => {
 });
 
 describe('TemplatesPage: статус версії — з набору, не кодом сервера', () => {
-  it('кожна версія має власну позначку статусу з розпізнаним станом', async () => {
+  it('стан шаблону — позначка набору з розпізнаним станом (UI-34: одна на рядок, від поточної версії)', async () => {
     respond();
     show();
 
@@ -119,7 +119,7 @@ describe('TemplatesPage: статус версії — з набору, не к�
     // шаблонів, — чекаємо саме на позначку версії, а не лише на код
     // шаблону, інакше твердження нижче могло б піймати проміжний стан
     // «версії ще не завантажилися».
-    await screen.findByText('1.0');
+    await screen.findByText('2.0');
 
     /*
      * ⛔ Головне твердження. `data-status-state` кладе `StatusBadge` — тобто
@@ -131,7 +131,7 @@ describe('TemplatesPage: статус версії — з набору, не к�
       node.getAttribute('data-status-state'),
     );
 
-    expect(marked).toEqual(['Deprecated', 'Published']);
+    expect(marked).toEqual(['Published']);
   });
 
   it('код сервера НЕ потрапляє на екран як видимий текст', async () => {
@@ -139,7 +139,7 @@ describe('TemplatesPage: статус версії — з набору, не к�
     show();
 
     await screen.findByText('AIR');
-    await screen.findByText('1.0');
+    await screen.findByText('2.0');
 
     /*
      * ⚠ Підпис береться з каталогу за ключем `status.version.<стан>`, а без
@@ -154,7 +154,7 @@ describe('TemplatesPage: статус версії — з набору, не к�
     expect(screen.queryAllByText('Published')).toHaveLength(0);
 
     // Дзеркало: підпис усе-таки є, просто він із каталогу.
-    expect(document.body.textContent ?? '').toContain('status.version.Deprecated');
+    expect(document.body.textContent ?? '').toContain('status.version.Published');
   });
 
   it('перехід на версію оголошується ПОСИЛАННЯМ, а не позначкою', async () => {

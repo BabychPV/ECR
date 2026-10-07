@@ -114,6 +114,7 @@ const SlowEnvTimeout = 400_000;
 const DeleteButton = { name: '⟦documents.delete⟧' };
 const ValidateButton = { name: '⟦document.validate⟧' };
 const MoreButton = { name: '⟦document.moreActions⟧' };
+const RecalculateItem = { name: /⟦workflow\.recalculate⟧/ };
 
 describe('DocumentPage: кнопка «Видалити документ-чернетку»', () => {
   afterEach(() => {
@@ -142,8 +143,9 @@ describe('DocumentPage: кнопка «Видалити документ-чер�
       // ⛔ Спершу — що сторінка намальована, інакше «кнопки немає» було б
       // правдою просто тому, що не намальовано нічого.
       await screen.findByRole('button', ValidateButton, { timeout: SlowEnvTimeout });
-      // ⚠ Інших пунктів меню в цього користувача немає, тож немає й самого меню.
-      expect(screen.queryByRole('button', MoreButton)).toBeNull();
+      // ✎ UI-14: «Recalculate» тепер у «More», тож меню є — але без видалення.
+      fireEvent.click(screen.getByRole('button', MoreButton));
+      await screen.findByRole('menuitem', RecalculateItem, { timeout: SlowEnvTimeout });
       expect(screen.queryByRole('menuitem', DeleteButton)).toBeNull();
     },
     SlowEnvTimeout,

@@ -5,6 +5,7 @@ import { apiFetch } from '@/api/client';
 import type { EffectiveAccessContribution, EffectiveAccessView } from '@/api/types';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { t } from '@/shared/i18n';
+import { FilterRow } from '@/shared/ui/FilterBar';
 
 type Kind = 'Registry' | 'Project' | 'Sheet' | 'Table' | 'Column';
 
@@ -75,7 +76,7 @@ export function EffectiveAccessPanel({ userId }: { userId: number }): JSX.Elemen
         {t('effectiveAccess.hintAll')}
       </Text>
 
-      <Group align="flex-end" gap="sm" wrap="wrap">
+      <FilterRow size="sm" gap="sm" wrap="wrap">
         <NativeSelect
           label={t('effectiveAccess.kind')}
           value={kind}
@@ -119,7 +120,7 @@ export function EffectiveAccessPanel({ userId }: { userId: number }): JSX.Elemen
         >
           {t('effectiveAccess.explain')}
         </Button>
-      </Group>
+      </FilterRow>
 
       {asked !== null && (
         <AsyncBoundary<EffectiveAccessView>

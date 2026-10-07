@@ -17,10 +17,9 @@
  *   типізує).
  * - **рольові гарди (`PR #4`)** читають `handle.permission` — те саме поле,
  *   яким сьогодні керується показ пункту в навбарі (`can(me, permission)`).
- * - **навбар (ця картка)** читає `showInNav`, а не тримає власний перелік:
- *   порядок оголошення нижче — це порядок пунктів у навбарі (той самий
- *   інваріант, що діяв і в старому масиві `Items`: порядок масиву = порядок
- *   на екрані).
+ * - **навбар (ця картка)** читає `showInNav`, а не тримає власний перелік.
+ *   ✎ UI-12: порядок і групи пунктів на екрані задає `navGroups` у кінці
+ *   файла (за макетом), а не порядок оголошення.
  *
  * ⛔ `PR #1` свідомо НЕ генерував саме дерево `createBrowserRouter` вкладеним
  * — лишав `router.tsx` пласким списком дітей `AppLayout`, обіцяючи, що форма
@@ -65,7 +64,21 @@ export interface RouteCrumbConfig {
   resolveParam?: string;
 
   /** Який резолвер `breadcrumbResolvers.ts` читає кеш TanStack Query для {@link resolveParam}. */
-  resolveWith?: 'templateName' | 'templateVersionLabel' | 'registryName';
+  resolveWith?: 'templateName' | 'templateVersionLabel' | 'registryName' | 'documentKey';
+
+  /**
+   * UI-32: ще одна крихта ПІСЛЯ власної — з кешу сторінки, не з реєстру
+   * (документ: «Documents › DOC-… › Air emissions», де аркуш — у `?sheet=`).
+   * Поки даних немає й запиту немає, крихти просто нема: вигаданої назви
+   * аркуша (і назви аркуша, якого API не повернув) показувати не можна.
+   */
+  trailWith?: 'documentSheet';
+
+  /**
+   * UI-32: не ставити перед ланцюжком назву групи меню («Work › …»). Макет
+   * (`screen-document.js`, `setCrumbs`) починає крихти документа з «Documents».
+   */
+  omitGroup?: boolean;
 
   /**
    * Явна ціль посилання крихти, якщо вона НЕ збігається з власним `pathname`
@@ -116,7 +129,7 @@ export interface RouteHandle {
    */
   alsoRequires?: readonly string[];
 
-  /** Ключ іконки навбару (`navIcons`, `src/app/navIcons.tsx`) — резолвиться в
+  /** Ключ іконки навбару (`navIcons`, `src/shared/ui/navIcons.tsx`) — резолвиться в
    *  компонент inline SVG на споживачі (`AppLayout.tsx`, `NavLink leftSection`).
    *  Рядковий ключ, не сама іконка чи компонент: реєстр маршрутів і далі не
    *  залежить від форми рендера — заміна бібліотеки рендера не чіпає цей файл. */
@@ -155,6 +168,15 @@ export interface RouteHandle {
    * не монтуючи сторінку (тобто без жодного запиту).
    */
   numericParams?: readonly string[];
+
+  /**
+   * Ключ рядка-пояснення під заголовком сторінки (UI-11, `KIT.md` §6.4
+   * `PageHeader.subtitle`): одним реченням людською мовою, що тут і що з цим
+   * робити. Читає `RouteGuard` і передає `PageHeader` контекстом
+   * (`shared/ui/pageDescription.ts`), тож сторінки самі нічого не передають.
+   * Без поля пояснення немає (`D15-06`: елемент без даних не малюється).
+   */
+  descriptionKey?: string;
 }
 
 /** Один запис дерева маршрутів. */
@@ -175,10 +197,9 @@ export interface RouteEntry {
 /**
  * Реєстр маршрутів.
  *
- * ⚠ Порядок оголошення ключів — порядок пунктів навбару (лише записи з
- * `showInNav: true` туди потрапляють, `AppLayout.tsx` більше не тримає
- * власного порядку). Переставити запис тут — і навбар переставиться теж:
- * це навмисно ОДНА дія, а не дві, які треба пам'ятати синхронізувати.
+ * ⚠ Пункти навбару — записи з `showInNav: true`; їхні групи й порядок на
+ * екрані — `navGroups` нижче (UI-12, за макетом), `AppLayout.tsx` власного
+ * переліку не тримає.
  */
 export const routes = {
   home: {
@@ -187,7 +208,7 @@ export const routes = {
     // ⚠ `skeletonShape: 'table'` (`PR nav-arch #6`) — перший маршрут, який
     // бачить КОЖЕН користувач після входу: перелік документів, форма
     // «заголовок + рядки» найпоказовіша саме тут.
-    handle: { labelKey: 'nav.documents', icon: 'documents', skeletonShape: 'table' },
+    handle: { labelKey: 'nav.documents', icon: 'documents', descriptionKey: 'nav.documents.description', skeletonShape: 'table' },
     showInNav: true,
   },
   changePassword: {
@@ -202,7 +223,7 @@ export const routes = {
     // решта сторінок шаблонів нижче. Тут стояло `Template.Edit`: оператор із правом
     // перегляду бачив картку шаблону й версії, а сам перелік — «Requires Template.Edit».
     // Створення й нова версія на сторінці і так ховаються за `Template.Edit`.
-    handle: { labelKey: 'nav.templates', permission: 'Template.View', icon: 'templates' },
+    handle: { labelKey: 'nav.templates', permission: 'Template.View', icon: 'templates', descriptionKey: 'nav.templates.description' },
     showInNav: true,
   },
   // ⚠ Вузол вкладеності (`PR #2`, `TemplateVersionLayout`): `router.tsx`
@@ -276,7 +297,7 @@ export const routes = {
   adminRegistries: {
     id: 'admin-registries',
     path: '/admin/registries',
-    handle: { labelKey: 'nav.registries', permission: 'Registry.View', icon: 'registries' },
+    handle: { labelKey: 'nav.registries', permission: 'Registry.View', icon: 'registries', descriptionKey: 'nav.registries.description' },
     showInNav: true,
   },
   // ФВ-8.12: дані довідника — табличний редактор (`features/registries/rc812`).
@@ -342,13 +363,19 @@ export const routes = {
   adminMethodologies: {
     id: 'admin-methodologies',
     path: '/admin/methodologies',
-    handle: { labelKey: 'nav.methodologies', permission: 'Calculation.View', icon: 'methodologies' },
+    handle: { labelKey: 'nav.methodologies', permission: 'Calculation.View', icon: 'methodologies', descriptionKey: 'nav.methodologies.description' },
     showInNav: true,
   },
   adminMethodologyVersions: {
     id: 'admin-methodology-versions',
     path: '/admin/methodologies/:id/versions',
-    handle: { labelKey: 'methodologies.versionsTitle', permission: 'Calculation.View', numericParams: ['id'] },
+    handle: {
+      labelKey: 'methodologies.versionsTitle',
+      permission: 'Calculation.View',
+      numericParams: ['id'],
+      // UI-32: «Configure › Methodologies › …» (макет `screens-data.js`).
+      crumb: { ancestorIds: ['admin-methodologies'] },
+    },
   },
   adminExpressions: {
     id: 'admin-expressions',
@@ -368,7 +395,7 @@ export const routes = {
   adminUnits: {
     id: 'admin-units',
     path: '/admin/units',
-    handle: { labelKey: 'nav.units', permission: 'Calculation.View', icon: 'units' },
+    handle: { labelKey: 'nav.units', permission: 'Calculation.View', icon: 'units', descriptionKey: 'nav.units.description' },
     showInNav: true,
   },
   adminSecurity: {
@@ -392,7 +419,7 @@ export const routes = {
     // ⛔ Було `Period.Manage` — права з такою назвою немає в каталозі
     // (`sec.Permission`), той самий факт, що й у старому `AppLayout.tsx`
     // (директива №09 `S-02`) — перенесено без зміни значення.
-    handle: { labelKey: 'nav.periods', permission: 'Period.Configure', icon: 'periods' },
+    handle: { labelKey: 'nav.periods', permission: 'Period.Configure', icon: 'periods', descriptionKey: 'nav.periods.description' },
     showInNav: true,
   },
   adminSources: {
@@ -404,6 +431,7 @@ export const routes = {
     // таблиця сутностей збору (`/api/v1/sources`, лише `Manage`) — відмову.
     handle: {
       labelKey: 'nav.sources',
+      descriptionKey: 'nav.sources.description',
       permission: 'Integration.View',
       alsoPermittedBy: ['Integration.Manage'],
       icon: 'sources',
@@ -413,7 +441,7 @@ export const routes = {
   adminMapping: {
     id: 'admin-mapping',
     path: '/admin/mapping',
-    handle: { labelKey: 'nav.mapping', permission: 'Integration.Manage', icon: 'mapping' },
+    handle: { labelKey: 'nav.mapping', permission: 'Integration.Manage', icon: 'mapping', descriptionKey: 'nav.mapping.description' },
     showInNav: true,
   },
   /**
@@ -430,13 +458,13 @@ export const routes = {
   adminJobs: {
     id: 'admin-jobs',
     path: '/admin/jobs',
-    handle: { labelKey: 'nav.jobs', permission: 'System.ViewHealth', icon: 'jobs' },
+    handle: { labelKey: 'nav.jobs', permission: 'System.ViewHealth', icon: 'jobs', descriptionKey: 'nav.jobs.description' },
     showInNav: true,
   },
   adminSnapshots: {
     id: 'admin-snapshots',
     path: '/admin/snapshots',
-    handle: { labelKey: 'nav.snapshots', permission: 'Report.ViewRegulatory', icon: 'snapshots' },
+    handle: { labelKey: 'nav.snapshots', permission: 'Report.ViewRegulatory', icon: 'snapshots', descriptionKey: 'nav.snapshots.description' },
     showInNav: true,
   },
   /**
@@ -460,7 +488,7 @@ export const routes = {
   adminAudit: {
     id: 'admin-audit',
     path: '/admin/audit',
-    handle: { labelKey: 'nav.audit', permission: 'Security.ViewAudit', icon: 'audit' },
+    handle: { labelKey: 'nav.audit', permission: 'Security.ViewAudit', icon: 'audit', descriptionKey: 'nav.audit.description' },
     showInNav: true,
   },
   // ⛔ Екрана не було, і знахідки нічної перевірки були недосяжні з продукту
@@ -473,13 +501,13 @@ export const routes = {
   adminConsistency: {
     id: 'admin-consistency',
     path: '/admin/consistency',
-    handle: { labelKey: 'nav.consistency', permission: 'System.ViewHealth', icon: 'consistency' },
+    handle: { labelKey: 'nav.consistency', permission: 'System.ViewHealth', icon: 'consistency', descriptionKey: 'nav.consistency.description' },
     showInNav: true,
   },
   adminUiStrings: {
     id: 'admin-ui-strings',
     path: '/admin/ui-strings',
-    handle: { labelKey: 'nav.uiStrings', permission: 'System.ManageLocalization', icon: 'uiStrings' },
+    handle: { labelKey: 'nav.uiStrings', permission: 'System.ManageLocalization', icon: 'uiStrings', descriptionKey: 'nav.uiStrings.description' },
     showInNav: true,
   },
   /**
@@ -509,6 +537,7 @@ export const routes = {
     // тож представницький вибір для цього PR навмисно включає його.
     handle: {
       labelKey: 'nav.health',
+      descriptionKey: 'nav.health.description',
       permission: 'System.ViewHealth',
       icon: 'health',
       skeletonShape: 'dashboard',
@@ -526,7 +555,7 @@ export const routes = {
     // ⚠ `skeletonShape: 'table'` (`PR nav-arch #6`) — представник маршруту
     // БЕЗ права (контраст із `adminSecurity` вище): доступний усім, і саме
     // тому вибірка мала включати хоч один такий маршрут.
-    handle: { labelKey: 'nav.myGroups', icon: 'myGroups', skeletonShape: 'table' },
+    handle: { labelKey: 'nav.myGroups', icon: 'myGroups', descriptionKey: 'nav.myGroups.description', skeletonShape: 'table' },
     showInNav: true,
   },
 
@@ -537,7 +566,13 @@ export const routes = {
     // Резолв динамічного сегмента (`:id` → бізнес-ключ із кешу запиту) —
     // задача breadcrumbs-резолвера (`PR #3`), не цієї картки.
     path: '/documents/:id',
-    handle: { labelKey: 'documents.title', numericParams: ['id'] },
+    // UI-32: «Documents › DOC-… › аркуш» (макет `screen-document.js`): назва — бізнес-ключ
+    // із кешу сторінки, аркуш — з її ж переліку таблиць.
+    handle: {
+      labelKey: 'documents.title',
+      numericParams: ['id'],
+      crumb: { ancestorIds: ['home'], resolveParam: 'id', resolveWith: 'documentKey', trailWith: 'documentSheet', omitGroup: true },
+    },
   },
 } as const satisfies Record<string, RouteEntry>;
 
@@ -546,6 +581,59 @@ export const routeList: RouteEntry[] = Object.values(routes);
 
 /** Пункти навбару — підмножина реєстру з `showInNav: true`, у порядку оголошення. */
 export const navRoutes: RouteEntry[] = routeList.filter((route) => route.showInNav === true);
+
+/** Група бічного меню (UI-12): підпис групи — ключ каталогу, пункти — у порядку показу. */
+export interface NavGroup {
+  readonly id: 'work' | 'configure' | 'access' | 'operate';
+  readonly labelKey: string;
+  readonly routes: readonly RouteEntry[];
+}
+
+/**
+ * Групи бічного меню й порядок пунктів у них (UI-12) — за гібридним макетом
+ * (`docs/design/hybrid/kit.js`, `GROUPS`; `order` екранів у `screens-*.js`):
+ * Work · Configure · Access · Operate.
+ *
+ * ⚠ Пункти, яких у макеті немає (`Reporting campaign`, `Data pipeline`,
+ * `Notifications`), стоять В КІНЦІ своєї групи: порядок пунктів макета
+ * всередині групи лишається дослівним. Кампанія — у Work (робота з
+ * документами періоду), конвеєр — у Configure поруч із мапінгом (те саме
+ * право), сповіщення — в Operate.
+ *
+ * ⛔ Кожен пункт `showInNav: true` — рівно в одній групі
+ * (`routeConfig.test.ts`): пункт поза групами зник би з меню мовчки.
+ */
+export const navGroups: readonly NavGroup[] = [
+  { id: 'work', labelKey: 'nav.group.work', routes: [routes.home, routes.myGroups, routes.adminCampaign] },
+  {
+    id: 'configure',
+    labelKey: 'nav.group.configure',
+    routes: [
+      routes.adminTemplates,
+      routes.adminRegistries,
+      routes.adminMethodologies,
+      routes.adminExpressions,
+      routes.adminUnits,
+      routes.adminSources,
+      routes.adminMapping,
+      routes.adminPipeline,
+    ],
+  },
+  { id: 'access', labelKey: 'nav.group.access', routes: [routes.adminSecurity, routes.adminPeriods] },
+  {
+    id: 'operate',
+    labelKey: 'nav.group.operate',
+    routes: [
+      routes.adminJobs,
+      routes.adminSnapshots,
+      routes.adminAudit,
+      routes.adminConsistency,
+      routes.adminUiStrings,
+      routes.adminHealth,
+      routes.adminNotifications,
+    ],
+  },
+];
 
 /**
  * Шлях запису як дочірній маршрут `createBrowserRouter` (без кореневого `/`).

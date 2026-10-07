@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type JSX } from 'react';
-import { Anchor, Button, Divider, Group, Loader, SegmentedControl } from '@mantine/core';
+import { Anchor, Button, Divider, Group, Loader, SegmentedControl, Text, VisuallyHidden } from '@mantine/core';
+import './exportButton.css';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { apiEnqueue, apiFetch } from '@/api/client';
@@ -18,6 +19,18 @@ interface ExportButtonProps {
   periodKey: number;
   /** Мова книги; береться з профілю. */
   language: string;
+
+  /**
+   * ✎ UI-14: `false` — власної кнопки й перемикача формату немає; експорт
+   * запускають пункти меню «More» (макет: «Export to Excel» у меню) через
+   * `startRef`. Поки збирається файл — компактний «Building…» на місці
+   * кнопки: стеження за задачею й тост із посиланням живуть тут, тому
+   * компонент лишається змонтованим поза меню.
+   */
+  withTrigger?: boolean;
+
+  /** Куди покласти «почати експорт у формат». */
+  startRef?: { current: ((format: ExportFormat) => void) | null };
 }
 
 /**
@@ -27,7 +40,7 @@ interface ExportButtonProps {
  * `err.ECR-REQ-0422.exportFormatUnknown` на будь-яке інше), тому клієнт не
  * дублює цю перевірку — він лише не дає обрати нічого поза цими трьома.
  */
-type ExportFormat = 'xlsx' | 'csv' | 'json';
+export type ExportFormat = 'xlsx' | 'csv' | 'json';
 
 /**
  * Підпис посилання на готовий файл — ЗА ФОРМАТОМ, у якому його будували.
@@ -54,7 +67,7 @@ function exportReadyLabel(format: ExportFormat): string {
  * з каталогу (`t()`), щоб не заводити четвертий літерал в UI поруч із трьома
  * дозволеними значеннями контракту.
  */
-function exportFormatOptions(): { value: ExportFormat; label: string }[] {
+export function exportFormatOptions(): { value: ExportFormat; label: string }[] {
   return [
     { value: 'xlsx', label: t('document.exportFormatXlsx') },
     { value: 'csv', label: t('document.exportFormatCsv') },
@@ -99,7 +112,9 @@ export function ExportButton({
   documentId,
   periodKey,
   language,
-}: ExportButtonProps): JSX.Element {
+  withTrigger = true,
+  startRef,
+}: ExportButtonProps): JSX.Element | null {
   const [jobId, setJobId] = useState<string | null>(null);
 
   // ⚠ Локальний стан, не адреса: вибір формату живе рівно доти, доки відкрита
@@ -217,6 +232,33 @@ export function ExportButton({
     }
   }, [jobId, outcome, job.data?.errorCode, job.data?.message, started.documentId, started.format]);
 
+  const startIn = (target: ExportFormat): void => {
+    if (running) return;
+    setFormat(target);
+    settled.run(() => start.mutateAsync({ documentId, periodKey, format: target }), { readOnly: true });
+  };
+
+  useEffect(() => {
+    if (startRef === undefined) return undefined;
+    startRef.current = startIn;
+
+    return () => {
+      if (startRef.current === startIn) startRef.current = null;
+    };
+  });
+
+  if (!withTrigger) {
+    // ⚠ `role="status"`: збірка йде у фоні, читалка має почути, що вона триває.
+    return running ? (
+      <Group gap="xs" wrap="nowrap" role="status" data-testid="export-running-label" data-export-state="running">
+        <Loader size={12} />
+        <Text size="xs" c="dimmed">
+          {t('document.exportBuilding')}
+        </Text>
+      </Group>
+    ) : null;
+  }
+
   return (
     /*
      * ⛔ `U-15`: експорт — ОДНА одиниця, видимо відокремлена від імпорту.
@@ -236,48 +278,34 @@ export function ExportButton({
       <Divider orientation="vertical" />
 
       {/*
-       * ⛔ `U-25`: кнопка в роботі зберігає ПІДПИС поруч зі спінером і НЕ
-       * змінює ширини. `loading` Mantine ховав підпис, лишаючи сам спінер, а
-       * зміна тексту «Export» → «Building...» міняла ширину — і заголовок
-       * документа перестрибував на окремий рядок. Обидва варіанти підпису
-       * лежать в ОДНІЙ комірці сітки (`gridArea: 1 / 1`), неактивний —
-       * `visibility: hidden`: ширина кнопки = ширина довшого з двох у будь-
-       * якій мові, і між станами вона не змінюється.
+       * ⛔ `U-25`: кнопка в роботі НЕ змінює ширини і не губить підпису.
+       * `loading` Mantine ховав підпис, лишаючи сам спінер, а зміна тексту
+       * «Export» → «Building...» міняла ширину — і заголовок документа
+       * перестрибував на окремий рядок.
+       *
+       * ✎ 2026-10-06 (знімок людини: «кнопка експорту виглядає більшою»):
+       * раніше обидва підписи лежали в одній комірці сітки, тож ширина кнопки
+       * В СПОКОЇ дорівнювала довшому з них — «Building...» (рос.
+       * «Формирование...»), і «Export» стояв посеред порожніх полів, ширший
+       * за сусідів. Тепер видимий підпис ОДИН і той самий в обох станах, а
+       * роботу показує смужка внизу кнопки (`exportButton.css`) і текст
+       * «Building...» для читалки — ширина рівна сусідам і не стрибає.
        */}
       <Button
-        size="xs"
         variant="default"
         disabled={running}
         aria-busy={running}
         data-export-state={running ? 'running' : 'idle'}
+        className="ecr-export-button"
         onClick={() => settled.run(() => start.mutateAsync({ documentId, periodKey, format }), { readOnly: true })}
       >
-        <span style={{ display: 'inline-grid' }}>
-          <span
-            aria-hidden={running}
-            style={{ gridArea: '1 / 1', visibility: running ? 'hidden' : 'visible' }}
-          >
-            {t('document.export')}
-          </span>
-          <span
-            aria-hidden={!running}
-            data-testid="export-running-label"
-            style={{
-              gridArea: '1 / 1',
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 6,
-              visibility: running ? 'visible' : 'hidden',
-            }}
-          >
-            <Loader size={12} />
-            {t('document.exportBuilding')}
-          </span>
-        </span>
+        {t('document.export')}
+        <VisuallyHidden aria-hidden={!running} data-testid="export-running-label">
+          {running ? t('document.exportBuilding') : ''}
+        </VisuallyHidden>
       </Button>
 
       <SegmentedControl
-        size="xs"
         aria-label={t('document.exportFormat')}
         value={format}
         onChange={(value) => setFormat(value as ExportFormat)}

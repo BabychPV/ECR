@@ -75,6 +75,41 @@ public sealed class ReportViewGeneratorFailureTextTests(SqlServerFixture sql)
         Assert.Same(error, entry.Exception);
     }
 
+    /// <summary>
+    /// Усередині HTTP-запиту id кореляції в тексті для /health/ready і в рядку журналу — це id
+    /// middleware (той, що в X-Correlation-Id), а не TraceId поточної Activity. Мутація: повернути
+    /// <c>SafeErrorText.NewCorrelationId()</c> без accessor — у тексті буде TraceId, тест червоний.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Кореляція_запиту_а_не_TraceId_у_тексті_health_і_в_рядку_журналу()
+    {
+        var master = new SqlConnectionStringBuilder(sql.ConnectionString) { InitialCatalog = "master" };
+        await using var db = new EcrDbContext(
+            new DbContextOptionsBuilder<EcrDbContext>().UseSqlServer(master.ConnectionString).Options);
+        var status = new CapturingStatus();
+        var log = new CapturingLog();
+        using var activity = new System.Diagnostics.Activity("report-view-test").Start();
+        var traceId = activity.TraceId.ToString();
+
+        await Assert.ThrowsAsync<SqlException>(
+            () => new ReportViewGenerator(db, status, log, new FixedCorrelation("req-77")).GenerateAsync(
+                1, CancellationToken.None));
+
+        var failure = Assert.Single(status.Failures);
+        Assert.Contains("correlation req-77", failure.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(traceId, failure.Message, StringComparison.Ordinal);
+        var entry = Assert.Single(log.Entries);
+        Assert.Contains("req-77", entry.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain(traceId, entry.Text, StringComparison.Ordinal);
+    }
+
+    private sealed class FixedCorrelation(string id) : ICorrelationIdAccessor
+    {
+        public string? CorrelationId => id;
+    }
+
     private sealed class CapturingLog : Microsoft.Extensions.Logging.ILogger<ReportViewGenerator>
     {
         public List<(string Text, Exception? Exception)> Entries { get; } = [];
