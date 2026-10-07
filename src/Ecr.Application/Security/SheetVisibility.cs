@@ -37,11 +37,18 @@ public static class SheetVisibility
 
         // Звуження аркушами (<c>NarrowedAccess.SheetCodes</c>) саме по собі ховає аркуші поза списком, навіть без жодної
         // заборони: друга роль читача зі scope sheets=[A] відкриває A, а B для нього не існує (R-8).
+        //
+        // ⛔ Так само звуження ПЕРІОДОМ (<c>PeriodFrom/PeriodTo</c>, D-214): документ, у якого жоден період проєкту не
+        // потрапляє в проміжок, для ролі не існує, тож агрегат по всіх аркушах усіх періодів розкрив би його.
         foreach (var scoped in profile.Scoped.Values)
         {
             if (scoped.Denies.Count > 0
                 || HasLowGrant(scoped.Grants)
-                || scoped.Narrowed.Any(l => l.SheetCodes is not null || l.Denies.Count > 0 || HasLowGrant(l.Grants)))
+                || scoped.Narrowed.Any(l => l.SheetCodes is not null
+                                            || l.PeriodFrom is not null
+                                            || l.PeriodTo is not null
+                                            || l.Denies.Count > 0
+                                            || HasLowGrant(l.Grants)))
             {
                 return false;
             }

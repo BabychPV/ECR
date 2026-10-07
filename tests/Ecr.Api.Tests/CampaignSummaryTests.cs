@@ -267,6 +267,85 @@ public sealed class CampaignSummaryTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "R-8")]
+    public async Task Лічильники_null_коли_друга_роль_читача_звужена_лише_періодом()
+    {
+        // ⛔ Той самий витік, що й для кодів аркушів, але звуження лише ПЕРІОДОМ (D-214): глобальне Report.ViewCampaign
+        // + друга роль зі scope periods і Project Read. Без обліку періодів narrowed-шару читач бачив би агрегати
+        // по всіх аркушах усіх періодів. МУТАЦІЙНИЙ ДОКАЗ: прибрати `PeriodFrom/PeriodTo` з SheetVisibility.SeesAllSheets -- червоніє.
+        // Контроль без звуження -- `Огляд_показує_проєкт_на_який_у_користувача_немає_жодного_гранту` (sheetsTotal = 1).
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var chain = await builder.BuildAsync(ct: CancellationToken.None).ConfigureAwait(true);
+
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, GetCampaignSummaryHandler.Permission).ConfigureAwait(true);
+
+        await using (var db = builder.CreateContext())
+        {
+            db.DocumentSheets.Add(new DocumentSheet(chain.DocumentId, chain.SheetDefId));
+            var state = new ApprovalState(chain.DocumentId, chain.SheetDefId, chain.PeriodKey.Value);
+            state.Submit(1, Now);
+            db.ApprovalStates.Add(state);
+
+            var viewerRoleId = await db.RolePermissions
+                .Where(p => p.PermissionCode == GetCampaignSummaryHandler.Permission)
+                .OrderByDescending(p => p.RoleId)
+                .Select(p => p.RoleId)
+                .FirstAsync(CancellationToken.None)
+                .ConfigureAwait(true);
+            var userId = await db.RoleAssignments
+                .Where(a => a.RoleId == viewerRoleId)
+                .Select(a => a.UserId)
+                .FirstAsync(CancellationToken.None)
+                .ConfigureAwait(true);
+
+            var narrowedRole = new Role(
+                Ecr.Domain.ValueObjects.EcrCode.Create($"R{Guid.NewGuid():N}"[..12]),
+                new Ecr.Domain.ValueObjects.LocalizedText(new Dictionary<string, string> { ["en"] = "Narrowed by period" }));
+            db.Roles.Add(narrowedRole);
+            await db.SaveChangesAsync(CancellationToken.None).ConfigureAwait(true);
+
+            db.RolePermissions.Add(new RolePermission(narrowedRole.Id, "Document.View"));
+            db.ResourceGrants.Add(new ResourceGrant(narrowedRole.Id, ResourceKind.Project, chain.ProjectId, GrantLevel.Read));
+            var assignment = new RoleAssignment(narrowedRole.Id, userId, principalSid: null);
+            db.RoleAssignments.Add(assignment);
+            await db.SaveChangesAsync(CancellationToken.None).ConfigureAwait(true);
+
+            var scope = RoleAssignmentScope.Create([chain.ProjectId], null, chain.PeriodKey, chain.PeriodKey).ToJson();
+            await db.Database.ExecuteSqlInterpolatedAsync(
+                    $"UPDATE sec.RoleAssignment SET ScopeJson = {scope} WHERE Id = {assignment.Id}")
+                .ConfigureAwait(true);
+        }
+
+        var response = await GetAsync(client, chain.PeriodKey.Value).ConfigureAwait(true);
+        Assert.True(response.IsSuccessStatusCode, $"{response.StatusCode}: {app.ErrorsText}");
+
+        var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync().ConfigureAwait(true)).RootElement;
+        var row = body.GetProperty("projects").EnumerateArray()
+            .Single(p => p.GetProperty("projectId").GetInt32() == chain.ProjectId);
+        var totals = body.GetProperty("totals");
+
+        foreach (var field in new[] { "sheetsTotal", "notSubmittedSheets", "draft", "submitted", "approved", "rejected", "progress" })
+        {
+            Assert.True(
+                row.GetProperty(field).ValueKind == JsonValueKind.Null,
+                $"row.{field} = {row.GetProperty(field)}: агрегат по всіх аркушах і періодах для ролі, звуженої періодом");
+        }
+
+        foreach (var field in new[] { "draft", "submitted", "approved", "rejected", "done", "overdue", "atRisk", "inProgress" })
+        {
+            Assert.True(
+                totals.GetProperty(field).ValueKind == JsonValueKind.Null,
+                $"totals.{field} = {totals.GetProperty(field)}");
+        }
+
+        // Кількість документів видно й тут (Q15-07): лічильник документів не агрегат по аркушах.
+        Assert.Equal(1, row.GetProperty("documents").GetInt32());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Finding", "BE-22")]
     public async Task Огляд_за_періодом_нуль_дає_422_а_не_порожню_кампанію()
     {
