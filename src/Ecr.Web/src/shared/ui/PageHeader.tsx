@@ -150,6 +150,41 @@ export interface PageHeaderProps {
  * розширення. Порожній `<div>` коштує не нічого: він з'їдає відступ і збиває
  * `justify="space-between"`.
  */
+/**
+ * Перша шапка після завантаження сторінки ще не бачила жодної навігації. Далі це `false`.
+ */
+let coldLoad = true;
+
+/**
+ * Чи людина вже сама поставила фокус, поки шапка (ліниві чанки, дані) доїжджала.
+ *
+ * ⛔ Шапка забирала фокус БЕЗУМОВНО в мить монтування. Але монтується вона не одразу:
+ * чанк маршруту й дані приходять пізніше за перший кадр, і за цей час людина вже
+ * могла поставити курсор у комірку сітки (тоді `focusin` ПОЗА сіткою роззброює
+ * вставку з буфера, `bodyPaste`, — e2e `gridPasteAfterEditor`) або натиснути Enter
+ * на кнопці згортання меню (фокус падав на `h1`, WCAG 2.4.3, e2e `navbarCollapse`).
+ *
+ * Фокус «не людини» — це `body` / `main` / вузол, якого вже немає. Усе інше — вибір
+ * людини, його не відбираємо:
+ *   — у змісті сторінки (`main`) — завжди: перехід між екранами знімає старий зміст
+ *     до ефекту шапки, тож там фокус уже `body`;
+ *   — поза ним (меню) — лише на ПЕРШОМУ монтуванні після завантаження: далі
+ *     фокус на посиланні меню — це і є перехід, заради якого шапка бере фокус.
+ */
+function userAlreadyMovedFocus(heading: HTMLElement | null): boolean {
+  const firstMount = coldLoad;
+  coldLoad = false;
+
+  const active = document.activeElement;
+  if (active === null || active === document.body || active === document.documentElement) return false;
+  if (!active.isConnected || active === heading) return false;
+  if (active.tagName === 'MAIN') return false;
+
+  if (heading?.closest('main')?.contains(active) === true) return true;
+
+  return firstMount;
+}
+
 export function PageHeader({
   title,
   actions,
@@ -187,6 +222,7 @@ export function PageHeader({
     if (focused.current) return;
 
     focused.current = true;
+    if (userAlreadyMovedFocus(heading.current)) return;
     // ⚠ `focusVisible` — див. `keyboardModality` вище (`X-37`).
     if (!keyboardModality) setQuietFocus(true);
     heading.current?.focus({ focusVisible: keyboardModality } as FocusOptions);
