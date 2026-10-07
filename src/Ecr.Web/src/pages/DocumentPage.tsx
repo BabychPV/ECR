@@ -592,6 +592,8 @@ export function DocumentPage(): JSX.Element {
             run: () => validateAction.run(() => validate.mutateAsync(scope), { readOnly: true }),
           }}
           documentItems={[...documentLog.menuItems, businessKeyChange.menuItem, versionMigration.menuItem, deletion.menuItem]}
+          resultsStale={document.resultsStale ?? null}
+          resultsStaleSince={document.resultsStaleSince ?? null}
           status={
             <>
               {/* ✎ UI-15: чип стану аркуша і заповненість одним рядком
