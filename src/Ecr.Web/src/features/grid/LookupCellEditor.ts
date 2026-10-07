@@ -93,11 +93,17 @@ function currentEntryId(value: unknown): number | null {
  * дані в комірці є, і ховати це від користувача означало б показувати
  * порожню комірку, у якій насправді щось лежить.
  */
-export function lookupCellDisplay(value: unknown, entries: readonly RegistryEntryDto[]): string {
+export function lookupCellDisplay(
+  value: unknown,
+  entries: readonly RegistryEntryDto[],
+  unlisted?: ReadonlyMap<number, string>,
+): string {
   const id = currentEntryId(value);
   if (id === null) return '';
 
-  return displayIndexOf(entries).get(id) ?? String(id);
+  // PS-P2: закритий запис немає в переліку на дату — його підпис («назва
+  // (закрито)») добирає `unlistedLookupEntries.ts`; без нього лишається id.
+  return displayIndexOf(entries).get(id) ?? unlisted?.get(id) ?? String(id);
 }
 
 /**

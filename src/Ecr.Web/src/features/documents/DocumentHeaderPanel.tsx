@@ -8,6 +8,7 @@ import type { RegistryDefDto, RegistryEntryDto, UnitRef } from '@/api/types';
 import { coerce } from '@/features/grid/edits';
 import { cellText, sameCellValue, sameDateValue } from '@/features/grid/cellValue';
 import { lookupCellDisplay } from '@/features/grid/LookupCellEditor';
+import { unlistedIdsOf, useUnlistedLookupLabels } from '@/features/grid/unlistedLookupEntries';
 import { unitCellDisplay } from '@/features/grid/UnitCellEditor';
 import { formatDateOnly, parseDateOnly, todayDateOnly } from '@/shared/format';
 import { localized } from '@/shared/i18n/localized';
@@ -501,6 +502,25 @@ export function DocumentHeaderPanel({
     };
   }, [hasDirty]);
 
+  // ✎ PS-P2 (D-PS-6): закритого запису немає в переліку на дату — його назва
+  // добирається окремо («назва (закрито)») замість сирого id. Значення — і
+  // збережене, і чернетка: обране в шапці поле показується однаково.
+  const unlistedRequests = useMemo(
+    () =>
+      lookupRegistryCodes.flatMap(({ id, code }) => {
+        const ids = unlistedIdsOf(
+          seedFields
+            .filter((field) => field.dataType === 'Lookup' && field.lookupRegistryDefId === id)
+            .map((field) => draft[field.code]),
+          lookupEntriesByRegistryId.get(id),
+        );
+
+        return ids.length === 0 ? [] : [{ registryId: id, code, ids }];
+      }),
+    [lookupRegistryCodes, seedFields, draft, lookupEntriesByRegistryId],
+  );
+  const unlistedLabelsByRegistryId = useUnlistedLookupLabels(unlistedRequests);
+
   // ⚠ Поки триває перший запит — нічого: сторінка вже показує кілька
   // одночасних завантажень (`summary`/`tables`/`validation`), і ще один
   // скелет тут додав би шуму без інформації (той самий вибір, що
@@ -548,6 +568,9 @@ export function DocumentHeaderPanel({
           ? EmptyLookupEntries
           : (lookupEntriesByRegistryId.get(field.lookupRegistryDefId) ?? EmptyLookupEntries),
         units.data ?? null,
+        field.lookupRegistryDefId === null || field.lookupRegistryDefId === undefined
+          ? undefined
+          : unlistedLabelsByRegistryId.get(field.lookupRegistryDefId),
       );
 
       return shown === null ? null : `${localized(field.label)} ${shown}`;
@@ -583,6 +606,11 @@ export function DocumentHeaderPanel({
                 : (lookupPendingByRegistryId.get(field.lookupRegistryDefId) ?? registriesList.isPending)
             }
             units={units.data ?? null}
+            unlistedLabels={
+              field.lookupRegistryDefId === null || field.lookupRegistryDefId === undefined
+                ? undefined
+                : unlistedLabelsByRegistryId.get(field.lookupRegistryDefId)
+            }
           />
         ))}
       </Stack>
@@ -668,13 +696,14 @@ function headerSummaryValue(
   value: unknown,
   lookupEntries: readonly RegistryEntryDto[],
   units: readonly UnitRef[] | null,
+  unlisted?: ReadonlyMap<number, string>,
 ): string | null {
   if (isEmptyHeaderValue(value) || field.dataType === 'Bool') return null;
 
   const id = typeof value === 'string' ? Number(value) : NaN;
 
   if (field.dataType === 'Lookup' && field.lookupRegistryDefId !== null && field.lookupRegistryDefId !== undefined) {
-    return Number.isFinite(id) ? lookupCellDisplay(id, lookupEntries) : null;
+    return Number.isFinite(id) ? lookupCellDisplay(id, lookupEntries, unlisted) : null;
   }
 
   if (field.dataType === 'Unit') return Number.isFinite(id) ? unitCellDisplay(id, units ?? []) : null;
@@ -692,6 +721,7 @@ function HeaderFieldInput({
   lookupEntries,
   lookupPending,
   units,
+  unlistedLabels,
 }: {
   field: DocumentHeaderField;
   value: unknown;
@@ -705,6 +735,8 @@ function HeaderFieldInput({
   lookupPending: boolean;
   /** Перелік одиниць для полів `Unit`; `null` — ще не приїхав. */
   units: readonly UnitRef[] | null;
+  /** PS-P2: підписи закритих записів довідника поля («назва (закрито)») — лише для показу обраного. */
+  unlistedLabels?: ReadonlyMap<number, string> | undefined;
 }): JSX.Element {
   const label = `${localized(field.label)}${field.isRequired ? ' *' : ''}`;
 
@@ -797,13 +829,14 @@ function HeaderFieldInput({
     // якого серед завантажених `entries` немає (видалили з довідника,
     // застарілий кеш), — фолбек на сирий ідентифікатор ТЕКСТОМ
     // (`lookupCellDisplay`, той самий фолбек, повторений тут), а не порожнеча
-    // й не падіння. Mantine `Select` показує підпис лише для значення, яке Є
+    // й не падіння. PS-P2: така опція `disabled` — показується як обране, але
+    // для нового вибору недоступна. Mantine `Select` показує підпис лише для значення, яке Є
     // в `data` — тому такий запис і додається синтетичною опцією.
     const known = selectedIdValid && lookupEntries.some((entry) => entry.id === selectedId);
     const options = [
       ...lookupEntries.map((entry) => ({ value: String(entry.id), label: entry.display })),
       ...(selectedIdValid && !known
-        ? [{ value: String(selectedId), label: lookupCellDisplay(selectedId, lookupEntries) }]
+        ? [{ value: String(selectedId), label: lookupCellDisplay(selectedId, lookupEntries, unlistedLabels), disabled: true }]
         : []),
     ];
 
