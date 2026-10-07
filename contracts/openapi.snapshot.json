@@ -668,12 +668,12 @@
         ]
       },
       "CampaignProgress": {
-        "description": "Де проєкт у кампанії відносно строку подання — відповідь на «хто затримує».\nПравило — CampaignProgressRule.",
         "enum": [
           "InProgress",
           "AtRisk",
           "Overdue",
-          "Done"
+          "Done",
+          null
         ]
       },
       "CampaignProjectSummary": {
@@ -682,7 +682,10 @@
           "approved": {
             "description": "Усі аркуші затверджено.",
             "format": "int32",
-            "type": "integer"
+            "type": [
+              "null",
+              "integer"
+            ]
           },
           "documents": {
             "description": "Скільки документів у проєкті. `0` означає «кампанія тут ще не\nпочиналася» — і це окрема відповідь, а не «все в чернетках».",
@@ -692,15 +695,33 @@
           "draft": {
             "description": "Документи, де є аркуш у чернетці (або ще без стану) і жодного відхиленого.",
             "format": "int32",
-            "type": "integer"
+            "type": [
+              "null",
+              "integer"
+            ]
           },
           "nameL10n": {
             "$ref": "#/components/schemas/LocalizedText",
             "description": "Назва мовами каталогу."
           },
+          "notSubmittedSheets": {
+            "description": "Аркушів, ще не поданих (чернетка/без стану/відхилено); `null` — як у SheetsTotal.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
           "progress": {
-            "$ref": "#/components/schemas/CampaignProgress",
-            "description": "Класифікація проєкту в кампанії (CampaignProgressRule)."
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/CampaignProgress",
+                "description": "Класифікація проєкту в кампанії (CampaignProgressRule)."
+              }
+            ]
           },
           "projectCode": {
             "description": "Код проєкту; ним перелік і впорядковано.",
@@ -714,7 +735,18 @@
           "rejected": {
             "description": "Хоч один аркуш відхилено.",
             "format": "int32",
-            "type": "integer"
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "sheetsTotal": {
+            "description": "Аркушів у складі документів проєкту (UI-33, D2); `null` — див. int? CampaignTotals.SheetsTotal.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
           },
           "snapshots": {
             "description": "Скільки ПОТОЧНИХ зрізів звітності побудовано за цей період\n(`rpt.ReportSnapshot.IsCurrent`). Останній етап кампанії: документи\nзатверджено, але доки зрізу немає — регулятор не отримав нічого.",
@@ -732,7 +764,10 @@
           "submitted": {
             "description": "Усі аркуші подано або затверджено, і хоч один ще не затверджено.",
             "format": "int32",
-            "type": "integer"
+            "type": [
+              "null",
+              "integer"
+            ]
           }
         },
         "required": [
@@ -789,12 +824,18 @@
           "approved": {
             "description": "Сума `Approved`.",
             "format": "int32",
-            "type": "integer"
+            "type": [
+              "null",
+              "integer"
+            ]
           },
           "atRisk": {
             "description": "Проєктів у стані CampaignProgress.AtRisk.",
             "format": "int32",
-            "type": "integer"
+            "type": [
+              "null",
+              "integer"
+            ]
           },
           "documents": {
             "description": "Документів у цих проєктах.",
@@ -804,22 +845,42 @@
           "done": {
             "description": "Проєктів у стані CampaignProgress.Done.",
             "format": "int32",
-            "type": "integer"
+            "type": [
+              "null",
+              "integer"
+            ]
           },
           "draft": {
             "description": "Сума `Draft` по всіх проєктах.",
             "format": "int32",
-            "type": "integer"
+            "type": [
+              "null",
+              "integer"
+            ]
           },
           "inProgress": {
             "description": "Проєктів у стані CampaignProgress.InProgress.",
             "format": "int32",
-            "type": "integer"
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "notSubmittedSheets": {
+            "description": "З них — ще не подано (чернетка, без стану чи відхилено); `null` за тих самих умов, що й\nSheetsTotal.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
           },
           "overdue": {
             "description": "Проєктів у стані CampaignProgress.Overdue.",
             "format": "int32",
-            "type": "integer"
+            "type": [
+              "null",
+              "integer"
+            ]
           },
           "projects": {
             "description": "Проєктів періоду; дорівнює `TotalProjects`.",
@@ -829,7 +890,18 @@
           "rejected": {
             "description": "Сума `Rejected`.",
             "format": "int32",
-            "type": "integer"
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "sheetsTotal": {
+            "description": "Аркушів у складі документів усіх проєктів періоду (UI-33, D2); `null` — читач має інструменти, що ховають\nаркуші (явна заборона чи грант рівня `None`), і число розкрило б приховане (R-8, `SheetVisibility`).",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
           },
           "snapshots": {
             "description": "Сума поточних зрізів.",
@@ -839,7 +911,10 @@
           "submitted": {
             "description": "Сума `Submitted`.",
             "format": "int32",
-            "type": "integer"
+            "type": [
+              "null",
+              "integer"
+            ]
           }
         },
         "required": [
@@ -8602,6 +8677,14 @@
           "isCurrent": {
             "description": "Чи є періодом за замовчуванням для UI.",
             "type": "boolean"
+          },
+          "notSubmittedSheets": {
+            "description": "Скільки аркушів проєкту в цьому періоді ще не подано (чернетка, без стану чи відхилено) — UI-33, D1.\n`null` — не запитувано (`withSheetCounts=false`) АБО читач має інструменти, що ховають аркуші, і число\nрозкрило б приховане (R-8, `SheetVisibility`). Лічильника пізніх правок немає навмисно: індексу по\n`aud.CellChange.IsLateEdit` немає.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
           },
           "periodKey": {
             "description": "`Year*100 + Sequence`; він же ключ партиції.",
@@ -29411,6 +29494,7 @@
       "get": {
         "parameters": [
           {
+            "description": "Проєкт.",
             "in": "path",
             "name": "id",
             "required": true,
@@ -29418,6 +29502,14 @@
               "format": "int32",
               "pattern": "^-?(?:0|[1-9]\\d*)$",
               "type": "integer"
+            }
+          },
+          {
+            "description": "Додати до кожного періоду кількість не поданих аркушів (`notSubmittedSheets`, UI-33); без прапорця поле\n`null`. Читачу, що має інструменти приховування аркушів, віддається `null` і з прапорцем.",
+            "in": "query",
+            "name": "withSheetCounts",
+            "schema": {
+              "type": "boolean"
             }
           }
         ],
