@@ -105,6 +105,10 @@ public sealed partial class DenyLeakGuardTests
             (1, "поле шапки, яке пише сам автор запиту; шапка — не Column/Table"),
         ["src/Ecr.Application/Documents/DocumentHeaderHandlers.cs | деталь headerFieldCode | field.Code"] =
             (1, "те саме, що текст"),
+        ["src/Ecr.Application/Documents/DocumentHeaderHandlers.cs | текст | missingCode"] =
+            (1, "D-12: поле шапки, яке пише сам автор запиту (неіснуючий запис довідника); шапка — не Column/Table"),
+        ["src/Ecr.Application/Documents/DocumentHeaderHandlers.cs | деталь headerFieldCode | missingCode"] =
+            (1, "те саме, що текст"),
         ["src/Ecr.Application/Documents/GetTableSliceHandler.cs | текст | code"] =
             (2, "ключ «рядок:колонка» лише для колонок, що пройшли CanReadColumn"),
         ["src/Ecr.Application/Documents/GetTableSliceHandler.cs | текст | column.Code"] =
