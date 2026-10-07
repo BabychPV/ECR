@@ -73,7 +73,8 @@ public sealed class GetCalculationResultsHandler(
         // ⛔ Число методології належить колонці, в яку воно прив'язане (`CalculationBinding`), тож
         // читач бачить його лише тоді, коли бачить цю колонку (як зріз таблиці). Вихід без прив'язки
         // для обмеженого читача невизначений — не показується (закрито за замовчуванням).
-        if (DocumentSheetVisibility.HasRestrictions(profile))
+        var narrowed = DocumentSheetVisibility.HasRestrictions(profile);
+        if (narrowed)
         {
             var scope = await access.ReadScopeAsync(profile, documentId, ct).ConfigureAwait(false);
             if (new Ecr.Domain.ValueObjects.PeriodKey(periodKey).IsValid)
@@ -107,9 +108,15 @@ public sealed class GetCalculationResultsHandler(
         // входи після прогону, що його дав.
         // ⚠ `tableDefIds: null` навмисно: панель показує результати ВСЬОГО
         // документа, тож і свіжість — по всіх таблицях, не по аркушу.
-        var freshness = await methodologies
-            .GetCalculationFreshnessAsync(documentId, periodKey, tableDefIds: null, ct)
-            .ConfigureAwait(false);
+        // ⛔ Н-2 (оракул): свіжість рахується по ВСЬОМУ документу, тож вузький читач (схований аркуш/колонка/
+        // період) дізнавався б із `isStale`/`inputsChangedAt`/`changedRegistries`, що змінено вхід поза його видимістю.
+        // Для нього свіжість не віддається взагалі (як у `staleResultsCount`: null), а не «по видимих таблицях» —
+        // схована колонка у видимій таблиці лишила б той самий витік. Обмеження: вузький читач не бачить застарілості.
+        var freshness = narrowed
+            ? new CalculationFreshness(null, null)
+            : await methodologies
+                .GetCalculationFreshnessAsync(documentId, periodKey, tableDefIds: null, ct)
+                .ConfigureAwait(false);
 
         // ⚠ F-21: номер версії й код методології замість голого ідентифікатора.
         var labels = await methodologies
