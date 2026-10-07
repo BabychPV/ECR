@@ -18,7 +18,7 @@ import { FilterBar } from '@/shared/ui/FilterBar';
 import { ListPage } from '@/shared/ui/ListPage';
 import { ReasonModal } from '@/shared/ui/ReasonModal';
 import type { StatItem, StatStripItems } from '@/shared/ui/StatStrip';
-import { StatusBadge } from '@/shared/ui/StatusBadge';
+import { StatusBadge, badgeLook } from '@/shared/ui/StatusBadge';
 import { Timestamp } from '@/shared/ui/Timestamp';
 import { TwoLine } from '@/shared/ui/TwoLine';
 import { useDebouncedFilter, useFilterCursor } from '@/shared/ui/useDebouncedFilter';
@@ -196,18 +196,7 @@ export function ConsistencyIssuesPage(): JSX.Element {
       key: 'state',
       label: t('consistency.state'),
       sortValue: (issue) => (issue.resolvedAt === null ? 0 : 1),
-      render: (issue) =>
-        issue.resolvedAt === null ? (
-          <Badge size="sm" variant="light" color="statusWarning">
-            {t('consistency.open')}
-          </Badge>
-        ) : (
-          // ⚠ Розв'язане — нейтрально: зелений не вживається для «все гаразд»
-          // (KIT.md §1, «Тони»).
-          <Badge size="sm" variant="default">
-            {t('consistency.resolved')}
-          </Badge>
-        ),
+      render: (issue) => <IssueStateBadge resolved={issue.resolvedAt !== null} />,
     },
   ];
 
@@ -382,4 +371,43 @@ export function severityState(severity: ConsistencyIssue['severity']): 'Info' | 
     default:
       return 'Error';
   }
+}
+
+/**
+ * Стан знахідки: «Open» / «Resolved» — виглядом `StatusBadge` (UI-27): звичайний регістр, вага
+ * 500, тонка рамка, без заливки.
+ *
+ * ⚠ Звірка batch-4 з макетом (п.20): тут стояв помаранчевий капітельний `Badge` («UNRESOLVED»),
+ * обрізаний на 500 px до «UN…». Макет — нейтральний «○ Open»: колір у таблиці лише там, де щось
+ * не так (KIT §1.3), а вагу проблеми вже несе колонка Severity. Різновиду `consistency` у
+ * `StatusBadge` немає (знадобились би нові ключі `status.consistency.*` у сіді), тому підписи —
+ * наявні `consistency.open/resolved`, а тон і токени — з набору (`badgeLook`).
+ */
+function IssueStateBadge({ resolved }: { readonly resolved: boolean }): JSX.Element {
+  const look = badgeLook(resolved ? 'muted' : 'neutral');
+
+  return (
+    <Badge
+      size="sm"
+      variant="transparent"
+      miw="fit-content"
+      radius="xs"
+      c={look.text}
+      bg={look.bg}
+      styles={{
+        root: {
+          height: 20,
+          border: `1px solid ${look.border}`,
+          textTransform: 'none',
+          letterSpacing: 'normal',
+          fontWeight: 500,
+          fontSize: 'var(--mantine-font-size-xs)',
+        },
+      }}
+      style={{ width: 'max-content' }}
+      data-issue-state={resolved ? 'resolved' : 'open'}
+    >
+      {t(resolved ? 'consistency.resolved' : 'consistency.open')}
+    </Badge>
+  );
 }
