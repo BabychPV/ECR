@@ -6058,6 +6058,31 @@
         ],
         "type": "object"
       },
+      "MethodologyCategoryRuleDto": {
+        "description": "Правило категорії константи версії (L-2, `calc.CategoryRule`): вираз «рядок → ключ категорії».",
+        "properties": {
+          "expression": {
+            "description": "Вираз діалекту Methodology (`!ECW_Location`, `if(@Land_TypeFuel = …, 'Diesel', …)`);\n`null` — у версії правила немає, і константи резолвляться без категорії.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "updatedAt": {
+            "description": "Коли правило востаннє змінювали (UTC); `null` — правила немає.",
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "expression",
+          "updatedAt"
+        ],
+        "type": "object"
+      },
       "MethodologyConstantDto": {
         "description": "Константа версії методології (ФВ-16.1, ФВ-16.5).",
         "properties": {
@@ -6263,7 +6288,8 @@
         "enum": [
           "Formula",
           "Constant",
-          "TestCase"
+          "TestCase",
+          "CategoryRule"
         ]
       },
       "MethodologyDraftVersionDto": {
@@ -6618,6 +6644,13 @@
             "description": "`create`, `unchanged` або `conflict`.",
             "type": "string"
           },
+          "categoryRule": {
+            "description": "L-2: що пакет робить із правилом категорії версії — `added` (створюється разом з чернеткою),\n`unchanged` (версія вже є з тим самим правилом), `conflict` (версія є з іншим вмістом);\n`null` — вузла `categoryRule` у пакеті немає.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
           "constants": {
             "description": "Скільки рядків констант (значень).",
             "format": "int32",
@@ -6743,6 +6776,22 @@
           "code",
           "unitId",
           "ordinal"
+        ],
+        "type": "object"
+      },
+      "MethodologyPackageCategoryRuleDto": {
+        "description": "Правило категорії константи версії пакета (L-2).",
+        "properties": {
+          "expression": {
+            "description": "Вираз діалекту Methodology над рядком документа, що дає ключ категорії (текст):\n`!ECW_Category`, `if(@Land_TypeFuel = 'Diesel - Дизель', 'Diesel', …)`.",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "expression"
         ],
         "type": "object"
       },
@@ -6961,6 +7010,17 @@
       "MethodologyPackageVersionDto": {
         "description": "Версія методології пакета.",
         "properties": {
+          "categoryRule": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/MethodologyPackageCategoryRuleDto",
+                "description": "✎ L-2: правило категорії константи версії (`calc.CategoryRule`). Необов'язкове: пакет без вузла\nчитається як і раніше (формат v1 зворотно сумісний). Експортер AF правило сам НЕ виводить — у AF\nкатегорію вибирає C#-клас методології, а не дані, — тож вузол дописує людина чи хмарна лінія."
+              }
+            ]
+          },
           "constants": {
             "description": "Константи зі значеннями.",
             "items": {
@@ -12751,6 +12811,19 @@
           "dataType",
           "isRequired",
           "lookupRegistryDefId"
+        ],
+        "type": "object"
+      },
+      "SaveMethodologyCategoryRuleRequest": {
+        "description": "Правило категорії константи версії (L-2): вираз діалекту Methodology.",
+        "properties": {
+          "expression": {
+            "description": "Вираз, що з рядка документа дає ключ категорії (текст).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "expression"
         ],
         "type": "object"
       },
@@ -25878,6 +25951,290 @@
         "summary": "Видаляє версію-чернетку. Право `Calculation.EditFormula`.",
         "tags": [
           "MethodologyVersions"
+        ]
+      }
+    },
+    "/api/v1/methodologies/{id}/versions/{vid}/category-rule": {
+      "delete": {
+        "parameters": [
+          {
+            "description": "Методологія.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Версія-чернетка.",
+            "in": "path",
+            "name": "vid",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "summary": "Прибирає правило категорії константи версії-чернетки. Право `Calculation.EditRule`.",
+        "tags": [
+          "Methodologies"
+        ]
+      },
+      "get": {
+        "description": "⚠ Правила може не бути — тоді `200` з `expression = null` (версія без категорій),\nа `404` лишається для версії, якої немає.",
+        "parameters": [
+          {
+            "description": "Методологія.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Версія.",
+            "in": "path",
+            "name": "vid",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MethodologyCategoryRuleDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MethodologyCategoryRuleDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/MethodologyCategoryRuleDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Правило категорії константи версії (L-2). Право `Calculation.View`.",
+        "tags": [
+          "Methodologies"
+        ]
+      },
+      "put": {
+        "description": "⛔ Одне правило на версію (B13): вираз над РЯДКОМ документа, що дає текст — ключ категорії\n(`Diesel`, `Loc_BeforeMR_B`). Рушій рахує його раз на рядок, після Row-формул і до\nциклу речовин; рядок, для якого правило не дало ключа, не рахується.",
+        "parameters": [
+          {
+            "description": "Методологія.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Версія-чернетка.",
+            "in": "path",
+            "name": "vid",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveMethodologyCategoryRuleRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveMethodologyCategoryRuleRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveMethodologyCategoryRuleRequest"
+              }
+            }
+          },
+          "description": "Токен скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MethodologyCategoryRuleDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MethodologyCategoryRuleDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/MethodologyCategoryRuleDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Ставить правило категорії константи версії-чернетки. Право `Calculation.EditRule`.",
+        "tags": [
+          "Methodologies"
         ]
       }
     },
