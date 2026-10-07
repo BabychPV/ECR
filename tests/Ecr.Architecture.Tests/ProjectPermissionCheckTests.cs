@@ -116,6 +116,7 @@ public sealed class ProjectPermissionCheckTests
             "Методики, їхні версії, формули, правила й редактор виразів спільні для всіх проєктів — "
             + "перегляд каталогу методик не має проєкту; роль з областю його не дає.",
             [
+                "Ecr.Api.Controllers.MethodologiesController::CategoryRule",
                 "Ecr.Api.Controllers.MethodologiesController::Constants",
                 "Ecr.Api.Controllers.MethodologiesController::Formulas",
                 "Ecr.Api.Controllers.MethodologiesController::Outputs",
@@ -125,6 +126,7 @@ public sealed class ProjectPermissionCheckTests
                 "Ecr.Api.Controllers.MethodologiesController::Tests",
                 "Ecr.Application.Calculations.CompareMethodologyVersionsHandler::HandleAsync",
                 "Ecr.Application.Calculations.ConstantUsageHandler::HandleAsync",
+                "Ecr.Application.Calculations.GetMethodologyCategoryRuleHandler::HandleAsync",
                 "Ecr.Application.Calculations.ListCalculationBindingsHandler::HandleAsync",
                 "Ecr.Application.Calculations.ListMethodologiesHandler::HandleAsync",
                 "Ecr.Application.Calculations.ListMethodologyConstantsHandler::HandleAsync",
