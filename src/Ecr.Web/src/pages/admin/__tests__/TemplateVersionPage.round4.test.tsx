@@ -308,7 +308,9 @@ describe('TemplateVersionPage — четвертий раунд UX (лінія D
     fireEvent.change(within(dialog).getByRole('textbox'), { target: { value: 'Quarterly release' } });
     fireEvent.click(within(dialog).getByRole('button', { name: '⟦version.publish⟧' }));
 
-    expect(await screen.findByRole('button', { name: '⟦version.deprecate⟧' })).toBeDefined();
+    // b4b: «Withdraw» — пункт меню «More» шапки (KIT §1.2).
+    fireEvent.click(await screen.findByTestId('version-more'));
+    expect(await screen.findByRole('menuitem', { name: '⟦version.deprecate⟧' })).toBeDefined();
     await waitFor(() => expect(screen.queryByRole('button', { name: '⟦version.publish⟧' })).toBeNull());
   });
 
@@ -317,7 +319,8 @@ describe('TemplateVersionPage — четвертий раунд UX (лінія D
     const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
     renderPage();
 
-    fireEvent.click(await screen.findByRole('button', { name: '⟦periodRules.title⟧' }));
+    fireEvent.click(await screen.findByTestId('version-more'));
+    fireEvent.click(await screen.findByRole('menuitem', { name: '⟦periodRules.title⟧' }));
     await screen.findByRole('button', { name: '⟦periodRules.add⟧' });
 
     const duplicate = errors.mock.calls.some((args) =>

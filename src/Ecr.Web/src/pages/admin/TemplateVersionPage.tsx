@@ -97,6 +97,7 @@ import {
 import { CtorTree } from '@/features/templates/ctor/CtorTree';
 import { SheetOverview, VersionOverview } from '@/features/templates/ctor/StructureOverviews';
 import { VersionStateLine } from '@/features/templates/ctor/VersionStateLine';
+import { VersionMoreMenu } from '@/features/templates/ctor/VersionMoreMenu';
 import { CtorIcon as Icon } from '@/features/templates/ctor/CtorIcon';
 
 /**
@@ -408,6 +409,7 @@ export function TemplateVersionPage(): JSX.Element {
   // у діалозі (`LocalDraft`); тут — лише ключі, якими сторінка підставляє
   // нове початкове значення.
   const [periodRulesOpen, setPeriodRulesOpen] = useState(false);
+  const [accessMatrixOpen, setAccessMatrixOpen] = useState(false);
   const [periodCreateKey, setPeriodCreateKey] = useState(0);
   const [manageSeed, setManageSeed] = useState<{ key: number; value: ManageSeed }>(() => ({
     key: 0,
@@ -877,53 +879,45 @@ export function TemplateVersionPage(): JSX.Element {
             : t('version.titleOf', { version: versionSummary.version })
         }
         actions={
+          /* ✎ b4b, макет `screens-templates.js` (шапка версії: Compare · More · Publish)
+              і KIT §1.2: одна головна дія, ≤ 2 другорядні, решта — у меню «More».
+              Було шість кнопок поспіль. Права й умови показу кожної дії — ті самі,
+              що й до переходу в меню (коментарі до кожної — у `VersionMoreItems`). */
           <Group gap="xs">
             {/* ⚠ Порівняння версій доступне за правом ПЕРЕГЛЯДУ: питання
                 «що зміниться» законне й для того, хто нічого не править —
                 саме з нього починається рішення про міграцію. */}
             {can(session.data, 'Template.View') && <VersionDiff templateVersionId={id} versions={versionsList.data?.items} />}
 
-            {/* ⛔ Матриця доступу (`ФВ-2.18`) — теж право ПЕРЕГЛЯДУ: питання
-                «які періоди відкриті на цьому аркуші» законне для всіх, і
-                саме воно найчастіше й з'ясовується постфактум, коли форму
-                вже не заповнити. */}
-            {can(session.data, 'Template.View') && <AccessMatrix templateVersionId={id} />}
-
-            {/* ⛔ Правила доступу до періоду (`ФВ-2.15`, W5.4) — кнопка тут
-                же, поруч із матрицею: саме матриця показує НАСЛІДОК цих
-                правил, і питання «чому тут замок» найчастіше веде до «а що
-                за ним налаштовано». */}
-            {canEditSheets && (
-              <Button variant="default" onClick={() => setPeriodRulesOpen(true)}>
-                {t('periodRules.title')}
-              </Button>
-            )}
-
-            {/* ⛔ Зв'язки таблиць (`ФВ-2.12`, `ФВ-2.13`) — окрема сторінка, і
-                вхід у неї стоїть саме тут: питання «звідки в цій таблиці
-                числа» ставлять, дивлячись на структуру. Без цього посилання
-                редактор існував би лише за адресою, яку треба знати. */}
-            {can(session.data, 'Template.View') && (
-              <Button
-                variant="default"
-                onClick={() =>
-                  void navigate(
-                    `/admin/templates/${templateId ?? ''}/versions/${String(id)}/relations`,
-                  )
-                }
-              >
-                {t('version.relations')}
-              </Button>
-            )}
-
-            {/* ⛔ Клон — єдиний спосіб змінити структуру після публікації
-                (`ФВ-7.1`). Кнопка є завжди, коли є право правити шаблони:
-                клонувати чернетку теж законно. */}
-            {can(session.data, 'Template.Edit') && (
-              <Button variant="default" onClick={() => setCloning(true)}>
-                {t('version.clone')}
-              </Button>
-            )}
+            <VersionMoreMenu
+              items={[
+                // ⛔ Матриця доступу (`ФВ-2.18`) — право ПЕРЕГЛЯДУ.
+                can(session.data, 'Template.View')
+                  ? { key: 'matrix', label: t('version.accessMatrix'), onClick: () => setAccessMatrixOpen(true) }
+                  : null,
+                // ⛔ Правила доступу до періоду (`ФВ-2.15`) — поруч із матрицею.
+                canEditSheets
+                  ? { key: 'period-rules', label: t('periodRules.title'), onClick: () => setPeriodRulesOpen(true) }
+                  : null,
+                // ⛔ Зв'язки таблиць (`ФВ-2.12`, `ФВ-2.13`) — окрема сторінка.
+                can(session.data, 'Template.View')
+                  ? {
+                      key: 'relations',
+                      label: t('version.relations'),
+                      onClick: () =>
+                        void navigate(`/admin/templates/${templateId ?? ''}/versions/${String(id)}/relations`),
+                    }
+                  : null,
+                // ⛔ Клон — єдиний спосіб змінити структуру після публікації (`ФВ-7.1`).
+                can(session.data, 'Template.Edit')
+                  ? { key: 'clone', label: t('version.clone'), onClick: () => setCloning(true) }
+                  : null,
+                // ⚠ Вивести з обігу — лише опубліковану версію, право публікації.
+                canWithdraw && can(session.data, 'Template.Publish')
+                  ? { key: 'deprecate', label: t('version.deprecate'), onClick: () => setDeprecating(true), danger: true }
+                  : null,
+              ]}
+            />
 
             {canPublish && can(session.data, 'Template.Publish') && (
               <Button onClick={() => setPublishing(true)}>
@@ -931,18 +925,12 @@ export function TemplateVersionPage(): JSX.Element {
               </Button>
             )}
 
-            {/* ⚠ Право те саме, що на публікацію: вивести з обігу —
-                рішення тієї самої ваги, що й випустити. Показано лише для
-                вже ОПУБЛІКОВАНОЇ версії — сервер (`ECR-TMPL-0409`) відмовляє
-                чернетці й уже виведеній з обігу версії однаково. */}
-            {canWithdraw && can(session.data, 'Template.Publish') && (
-              <Button
-                variant="default"
-                color="statusError"
-                onClick={() => setDeprecating(true)}
-              >
-                {t('version.deprecate')}
-              </Button>
+            {can(session.data, 'Template.View') && (
+              <AccessMatrix
+                templateVersionId={id}
+                opened={accessMatrixOpen}
+                onClose={() => setAccessMatrixOpen(false)}
+              />
             )}
           </Group>
         }

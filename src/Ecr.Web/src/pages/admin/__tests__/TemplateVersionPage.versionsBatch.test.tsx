@@ -137,7 +137,8 @@ describe('TemplateVersionPage: L9-23 — пакетний перелік вер�
   it('після виведення з обігу', async () => {
     const client = await renderPage('Published');
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Withdraw from use' }));
+    fireEvent.click(await screen.findByTestId('version-more'));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Withdraw from use' }));
     const dialog = await screen.findByRole('dialog');
     fireEvent.change(within(dialog).getByRole('textbox'), { target: { value: 'замінено новою' } });
     fireEvent.click(within(dialog).getByRole('button', { name: 'Withdraw from use' }));
@@ -148,7 +149,8 @@ describe('TemplateVersionPage: L9-23 — пакетний перелік вер�
   it('після клону', async () => {
     const client = await renderPage('Published');
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Clone version' }));
+    fireEvent.click(await screen.findByTestId('version-more'));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Clone version' }));
     const dialog = await screen.findByRole('dialog');
     fireEvent.change(within(dialog).getByRole('textbox'), { target: { value: '1.1.0.0' } });
     fireEvent.click(within(dialog).getByRole('button', { name: 'Clone version' }));
