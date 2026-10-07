@@ -73,7 +73,7 @@ export function ForbiddenPage(): JSX.Element {
         {permission !== undefined && <Code data-forbidden-permission="">{permission}</Code>}
         <Code>{ForbiddenErrorCode}</Code>
         {permission !== undefined && (
-          <Button size="compact-sm" variant="subtle" onClick={() => void copyRequest()}>
+          <Button size="xs" variant="subtle" onClick={() => void copyRequest()}>
             {t('nav.accessDenied.copy')}
           </Button>
         )}
