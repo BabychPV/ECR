@@ -266,6 +266,50 @@ export function saveMethodologyRule(
 }
 
 /**
+ * Правило категорії константи версії (L-2, `calc.CategoryRule`): вираз діалекту Methodology над рядком
+ * документа, що дає ключ категорії (`Diesel`, `Loc_BeforeMR_B`). `expression = null` — правила немає.
+ */
+export interface MethodologyCategoryRule {
+  readonly expression: string | null;
+  readonly updatedAt: string | null;
+}
+
+/** Читає правило категорії версії. Право `Calculation.View`. */
+export function methodologyCategoryRule(
+  methodologyId: number,
+  versionId: number,
+): Promise<MethodologyCategoryRule> {
+  return apiFetch<MethodologyCategoryRule>(
+    `/api/v1/methodologies/${String(methodologyId)}/versions/${String(versionId)}/category-rule`,
+  );
+}
+
+/**
+ * Ставить правило категорії версії-чернетки. Право `Calculation.EditRule`.
+ *
+ * ⚠ Одне правило на версію. Порожній, нерозібраний або числовий вираз сервер відхиляє `422`; на
+ * опублікованій версії — `409`. Посилання на константи й формули перевіряє публікація.
+ */
+export function saveMethodologyCategoryRule(
+  methodologyId: number,
+  versionId: number,
+  expression: string,
+): Promise<MethodologyCategoryRule> {
+  return apiFetch<MethodologyCategoryRule>(
+    `/api/v1/methodologies/${String(methodologyId)}/versions/${String(versionId)}/category-rule`,
+    { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ expression }) },
+  );
+}
+
+/** Прибирає правило категорії версії-чернетки (ідемпотентно). Право `Calculation.EditRule`. */
+export function deleteMethodologyCategoryRule(methodologyId: number, versionId: number): Promise<void> {
+  return apiFetch<void>(
+    `/api/v1/methodologies/${String(methodologyId)}/versions/${String(versionId)}/category-rule`,
+    { method: 'DELETE' },
+  );
+}
+
+/**
  * Обов'язкові вхідні колонки версії (директива «обов'язкові вхідні колонки
  * методології», gate перед збереженням клітинки).
  */

@@ -36,6 +36,9 @@ public enum MethodologyDiffItemKind
 
     /// <summary>Тест золотого набору.</summary>
     TestCase = 3,
+
+    /// <summary>Правило категорії константи версії (L-2); код запису — <c>category-rule</c>.</summary>
+    CategoryRule = 4,
 }
 
 /// <summary>Вид зміни.</summary>
