@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
 import type { RegistryDefDto, UnitRef } from '@/api/types';
+import { formatMonthName } from '@/shared/format';
 import { t } from '@/shared/i18n';
 import { localized } from '@/shared/i18n/localized';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
@@ -242,6 +243,17 @@ export function ColumnEditor({
         onChange={(value) => onChange({ ...draft, widthPx: typeof value === 'number' ? value : null })}
       />
 
+      <Select
+        label={t('columns.month')}
+        description={t('columns.monthHint')}
+        placeholder={t('columns.monthNone')}
+        data={MONTHS.map((month) => ({ value: String(month), label: formatMonthName(month) }))}
+        value={draft.monthNumber === null ? null : String(draft.monthNumber)}
+        disabled={disabled}
+        clearable
+        onChange={(value) => onChange({ ...draft, monthNumber: value === null ? null : Number(value) })}
+      />
+
       <TextInput
         label={t('columns.defaultValue')}
         description={t('columns.defaultValueHint')}
@@ -393,6 +405,9 @@ export function ColumnEditor({
   );
 }
 
+/** Місяці для списку «Місяць колонки» (PS-P1C). */
+const MONTHS: readonly number[] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+
 /** Підпис причини, з якої зберегти ще не можна. */
 function blockerLabel(blocker: ColumnBlocker): string {
   switch (blocker) {
@@ -406,6 +421,8 @@ function blockerLabel(blocker: ColumnBlocker): string {
       return t('columns.errScale');
     case 'Width':
       return t('columns.errWidth');
+    case 'Month':
+      return t('columns.errMonth');
 
     /*
      * ⛔ Обидві причини стилю доти падали в `default` і показувалися ГОЛИМ
