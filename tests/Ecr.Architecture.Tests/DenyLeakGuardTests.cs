@@ -102,9 +102,9 @@ public sealed partial class DenyLeakGuardTests
         ["src/Ecr.Application/Documents/DocumentHeaderHandlers.cs | деталь headerFieldCode | change.Code"] =
             (1, "те саме, що текст"),
         ["src/Ecr.Application/Documents/DocumentHeaderHandlers.cs | текст | field.Code"] =
-            (1, "поле шапки, яке пише сам автор запиту; шапка — не Column/Table"),
+            (2, "поле шапки, яке пише сам автор запиту; шапка — не Column/Table; другий — ECR-HDR-4223 (PS-P1D): те саме поле запиту, відмова після перевірки гранта на проєкт"),
         ["src/Ecr.Application/Documents/DocumentHeaderHandlers.cs | деталь headerFieldCode | field.Code"] =
-            (1, "те саме, що текст"),
+            (2, "те саме, що текст"),
         ["src/Ecr.Application/Documents/GetTableSliceHandler.cs | текст | code"] =
             (2, "ключ «рядок:колонка» лише для колонок, що пройшли CanReadColumn"),
         ["src/Ecr.Application/Documents/GetTableSliceHandler.cs | текст | column.Code"] =

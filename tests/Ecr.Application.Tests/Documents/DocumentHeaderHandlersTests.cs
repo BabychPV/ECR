@@ -127,7 +127,8 @@ public sealed class DocumentHeaderHandlersTests
 
     private PatchDocumentHeaderHandler Patch() => new(
         _documents, _metadataCache, _headers, _access, _user,
-        _periods, _documentLock, _workflowFacts, _uow, _audit, _jobs, _clock, Substitute.For<ISheetEditGate>());
+        _periods, _documentLock, _workflowFacts, _uow, _audit, _jobs, _clock, Substitute.For<ISheetEditGate>(),
+        Substitute.For<IRegistryStore>());
 
     /// <summary>Версія, яку клієнт отримав би з <c>GET</c> на цьому стані шапки.</summary>
     private async Task<string> VersionOfAsync(Dictionary<int, DocumentHeaderValueData> values)

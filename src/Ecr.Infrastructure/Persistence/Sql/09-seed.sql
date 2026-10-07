@@ -2150,6 +2150,7 @@ USING (VALUES
     (N'err.ECR-CELL-4223',  N'en', N'Reference to a missing registry entry or unit', 1),
     (N'err.ECR-HDR-0404',   N'en', N'Header field not found', 1),
     (N'err.ECR-HDR-0422',   N'en', N'Invalid header value', 1),
+    (N'err.ECR-HDR-4223',   N'en', N'The chosen registry entry cannot be used in the header', 1),
     (N'err.ECR-SUB-4221',   N'en', N'Submission is blocked', 1),
 
     -- Періоди і проєкти.
@@ -5853,6 +5854,11 @@ USING (VALUES
     (N'err.ECR-CELL-4223.deletedEntry',        N'en', N'The chosen registry entry has been deleted: {cellCount} cell(s).', 1),
     (N'err.ECR-CELL-4223.inactiveEntry',       N'en', N'The chosen registry entry is switched off: {cellCount} cell(s).', 1),
     (N'err.ECR-CELL-4223.entryNotValidOnDate', N'en', N'The chosen registry entry is not valid on {asOf}, the last day of the period: {cellCount} cell(s).', 1),
+    -- PS-P1D (D-11): поле шапки Lookup (Permit) не бере запис, якого пікер не пропонує (`PatchDocumentHeaderHandler.EnsureLookupEntriesUsableAsync`).
+    (N'err.ECR-HDR-4223.foreignRegistry',      N'en', N'The entry chosen for header field "{headerFieldCode}" belongs to a different registry than the field.', 1),
+    (N'err.ECR-HDR-4223.deletedEntry',         N'en', N'The entry chosen for header field "{headerFieldCode}" has been deleted.', 1),
+    (N'err.ECR-HDR-4223.inactiveEntry',        N'en', N'The entry chosen for header field "{headerFieldCode}" is switched off.', 1),
+    (N'err.ECR-HDR-4223.entryNotValidInWindow', N'en', N'The entry chosen for header field "{headerFieldCode}" is not valid on any day of the document period ({windowFrom} to {windowTo}).', 1),
     -- S9: межа частоти зміни пароля — на КОРИСТУВАЧА, не на адресу (`LoginRateLimiting`).
     (N'err.ECR-REQ-0429.tooManyPasswordChanges', N'en', N'Too many password change attempts. Try again in a minute.', 1),
     -- S6: зауваження лише в таблицях/колонках під забороною читача — знеособлено, без числа й адреси
@@ -10325,6 +10331,11 @@ SELECT v.[Key], v.Lang, v.Val
     (N'err.ECR-CELL-4223.deletedEntry', N'ru', N'Выбранная запись справочника удалена; затронуто ячеек: {cellCount}.'),
     (N'err.ECR-CELL-4223.inactiveEntry', N'ru', N'Выбранная запись справочника отключена; затронуто ячеек: {cellCount}.'),
     (N'err.ECR-CELL-4223.entryNotValidOnDate', N'ru', N'Выбранная запись справочника недействительна на {asOf} — последний день периода; затронуто ячеек: {cellCount}.'),
+    (N'err.ECR-HDR-4223', N'ru', N'Выбранную запись справочника нельзя использовать в шапке'),
+    (N'err.ECR-HDR-4223.foreignRegistry', N'ru', N'Запись, выбранная для поля шапки «{headerFieldCode}», относится к другому справочнику, чем поле.'),
+    (N'err.ECR-HDR-4223.deletedEntry', N'ru', N'Запись, выбранная для поля шапки «{headerFieldCode}», удалена.'),
+    (N'err.ECR-HDR-4223.inactiveEntry', N'ru', N'Запись, выбранная для поля шапки «{headerFieldCode}», отключена.'),
+    (N'err.ECR-HDR-4223.entryNotValidInWindow', N'ru', N'Запись, выбранная для поля шапки «{headerFieldCode}», недействительна ни в один день периода документа ({windowFrom} — {windowTo}).'),
     (N'err.ECR-REQ-0429.tooManyPasswordChanges', N'ru', N'Слишком много попыток смены пароля. Повторите попытку через минуту.'),
     (N'err.ECR-SUB-4221.hiddenIssues', N'ru', N'Есть замечания вне вашей области видимости — подача заблокирована. Обратитесь к владельцу проекта.'),
     (N'permission.Report.ViewSnapshot', N'ru', N'Просмотр содержимого срезов регламентированных отчётов'),
@@ -13354,6 +13365,11 @@ SELECT v.[Key], v.Lang, v.Val
     (N'err.ECR-CELL-4223.deletedEntry', N'kz', N'Таңдалған анықтамалық жазбасы жойылған: {cellCount} ұяшық.'),
     (N'err.ECR-CELL-4223.inactiveEntry', N'kz', N'Таңдалған анықтамалық жазбасы өшірілген: {cellCount} ұяшық.'),
     (N'err.ECR-CELL-4223.entryNotValidOnDate', N'kz', N'Таңдалған анықтамалық жазбасы кезеңнің соңғы күні — {asOf} күні жарамсыз: {cellCount} ұяшық.'),
+    (N'err.ECR-HDR-4223', N'kz', N'Таңдалған анықтамалық жазбасын тақырыпта пайдалануға болмайды'),
+    (N'err.ECR-HDR-4223.foreignRegistry', N'kz', N'«{headerFieldCode}» тақырып өрісі үшін таңдалған жазба өрістің анықтамалығынан басқа анықтамалыққа тиесілі.'),
+    (N'err.ECR-HDR-4223.deletedEntry', N'kz', N'«{headerFieldCode}» тақырып өрісі үшін таңдалған жазба жойылған.'),
+    (N'err.ECR-HDR-4223.inactiveEntry', N'kz', N'«{headerFieldCode}» тақырып өрісі үшін таңдалған жазба өшірілген.'),
+    (N'err.ECR-HDR-4223.entryNotValidInWindow', N'kz', N'«{headerFieldCode}» тақырып өрісі үшін таңдалған жазба құжат кезеңінің бірде-бір күнінде жарамды емес ({windowFrom} — {windowTo}).'),
     (N'err.ECR-REQ-0429.tooManyPasswordChanges', N'kz', N'Құпиясөзді өзгерту әрекеттері тым көп. Бір минуттан кейін қайталаңыз.'),
     (N'err.ECR-SUB-4221.hiddenIssues', N'kz', N'Сіздің көру аймағыңыздан тыс ескертпелер бар — тапсыру бұғатталған. Жоба иесіне хабарласыңыз.'),
     (N'permission.Report.ViewSnapshot', N'kz', N'Реттелетін есептер кесінділерінің мазмұнын қарау'),

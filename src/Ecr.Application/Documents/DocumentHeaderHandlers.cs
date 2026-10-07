@@ -167,7 +167,8 @@ public sealed class PatchDocumentHeaderHandler(
     IAuditWriter audit,
     IBackgroundJobScheduler jobs,
     Domain.Abstractions.IClock clock,
-    ISheetEditGate documentGate)
+    ISheetEditGate documentGate,
+    IRegistryStore registries)
 {
     /// <summary>Тип події журналу безпеки.</summary>
     public const string EventType = "DocumentHeaderChanged";
@@ -285,6 +286,7 @@ public sealed class PatchDocumentHeaderHandler(
         }
 
         var codeById = snapshot.HeaderFields.ToDictionary(f => f.Id, f => f.Code);
+        var fieldsById = snapshot.HeaderFields.ToDictionary(f => f.Id);
         var changed = 0;
 
         await uow.ExecuteInTransactionAsync(async innerCt =>
@@ -302,7 +304,7 @@ public sealed class PatchDocumentHeaderHandler(
             await documentGate.EnterHeaderAsync(documentId, exclusive: true, innerCt).ConfigureAwait(false);
 
             changed = await PersistAsync(
-                documentId, project, profile, request.BaseVersion, toSave, codeById, userId, innerCt)
+                documentId, project, profile, request.BaseVersion, toSave, codeById, fieldsById, userId, innerCt)
                 .ConfigureAwait(false);
         }, ct).ConfigureAwait(false);
 
@@ -360,6 +362,7 @@ public sealed class PatchDocumentHeaderHandler(
         string baseVersion,
         Dictionary<int, Domain.ValueObjects.DocumentHeaderValueData> requested,
         Dictionary<int, string> codeById,
+        IReadOnlyDictionary<int, HeaderFieldDef> fieldsById,
         int userId,
         CancellationToken ct)
     {
@@ -407,6 +410,8 @@ public sealed class PatchDocumentHeaderHandler(
             return 0;
         }
 
+        await EnsureLookupEntriesUsableAsync(project, changes, fieldsById, ct).ConfigureAwait(false);
+
         var now = clock.UtcNow;
         await headers.SaveValuesAsync(documentId, changes, ct).ConfigureAwait(false);
         await documents.TouchAsync(documentId, userId, now, ct).ConfigureAwait(false);
@@ -430,6 +435,81 @@ public sealed class PatchDocumentHeaderHandler(
 
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
         return changes.Count;
+    }
+
+    /// <summary>
+    /// PS-P1D (D-11): поле шапки <c>Lookup</c> (наприклад, <c>Permit</c>) не бере запис, якого пікер не
+    /// пропонує: чужий довідник, видалений, вимкнений чи нечинний жодного дня звітного вікна документа.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Дзеркало <c>PatchCellsHandler.CheckLookupStandings</c> (<c>C7</c>), код <c>ECR-HDR-4223</c>.
+    /// Доти шапка перевіряла лише існування запису (D-12), тож дозвіл із закінченим строком лягав у шапку.
+    ///
+    /// ⚠ Дата чинності — не «сьогодні» і не кінець періоду (у шапки періоду немає), а ВІКНО проєкту
+    /// <c>[PeriodStart, PeriodEnd]</c>: запис придатний, якщо чинний бодай один день вікна — той самий
+    /// відрізковий принцип, що в ФВ-5.20 (дозвіл, чинний до 15 червня, червень покриває). «Сьогодні»
+    /// відхиляло б дозвіл, чинний увесь минулий звітний рік, при внесенні шапки документа за цей рік.
+    ///
+    /// ⚠ Перевіряються лише ЗМІНЕНІ поля (<paramref name="changes"/> уже без незмінених): запис, що став
+    /// нечинним ПІСЛЯ вибору, не блокує правку інших полів — повтор того самого не є новим вибором.
+    /// Очищення поля сюди не потрапляє (порожнє значення відхиляє <c>ValidateValue</c> для обов'язкового).
+    /// </remarks>
+    private async Task EnsureLookupEntriesUsableAsync(
+        Domain.Entities.Documents.Project project,
+        Dictionary<int, Domain.ValueObjects.DocumentHeaderValueData> changes,
+        IReadOnlyDictionary<int, HeaderFieldDef> fieldsById,
+        CancellationToken ct)
+    {
+        var lookups = changes
+            .Where(pair => pair.Value.ValueRegistryEntryId is not null && fieldsById.ContainsKey(pair.Key))
+            .Select(pair => (Field: fieldsById[pair.Key], EntryId: pair.Value.ValueRegistryEntryId!.Value))
+            .ToList();
+
+        if (lookups.Count == 0)
+        {
+            return;
+        }
+
+        var standings = (await registries
+                .FindEntryStandingsAsync([.. lookups.Select(l => l.EntryId).Distinct()], ct)
+                .ConfigureAwait(false))
+            .ToDictionary(standing => standing.Id);
+
+        var windowEnd = project.PeriodEnd.AddDays(1);
+
+        foreach (var (field, entryId) in lookups.OrderBy(l => l.Field.Code, StringComparer.Ordinal))
+        {
+            // Немає запису — це вже відхилив D-12 (`ECR-HDR-0422`) до транзакції.
+            if (!standings.TryGetValue(entryId, out var standing))
+            {
+                continue;
+            }
+
+            var messageKey =
+                field.LookupRegistryDefId is { } registryId && standing.RegistryDefId != registryId
+                    ? "err.ECR-HDR-4223.foreignRegistry"
+                : standing.IsDeleted ? "err.ECR-HDR-4223.deletedEntry"
+                : !standing.IsActive ? "err.ECR-HDR-4223.inactiveEntry"
+                : !new Domain.ValueObjects.ValidityWindow(standing.ValidFrom, standing.ValidTo)
+                    .OverlapsSegment(project.PeriodStart, windowEnd) ? "err.ECR-HDR-4223.entryNotValidInWindow"
+                : null;
+
+            if (messageKey is null)
+            {
+                continue;
+            }
+
+            throw new BusinessRuleException(
+                ErrorCodes.HeaderEntryNotUsable,
+                $"Запис довідника {entryId}, обраний для поля шапки «{field.Code}», не можна використати ({messageKey}).",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = messageKey,
+                    ["headerFieldCode"] = field.Code,
+                    ["windowFrom"] = project.PeriodStart.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+                    ["windowTo"] = project.PeriodEnd.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+                });
+        }
     }
 
     /// <summary>
