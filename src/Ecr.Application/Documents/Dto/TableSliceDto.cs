@@ -76,6 +76,10 @@ public sealed record TableSliceDto(
 /// ⚠ <see cref="Style"/> — оформлення, задане автором шаблону (директива
 /// registry-lookup / cell-style, PR B2); <c>null</c> —
 /// <see cref="ColumnDef.StyleId"/> не задано, комірка виглядає як завжди.
+///
+/// ⛔ <see cref="Expression"/> (UI-25, B4) — вираз формули колонки; <c>null</c>, коли формули немає АБО
+/// хоч одне посилання в ній читачеві не видне (інша колонка, таблиця, аркуш під забороною), або вираз не
+/// розібрався. Різницю «немає» / «сховано» клієнтові свідомо не видно.
 /// </remarks>
 public sealed record ColumnDto(
     int Id,
@@ -94,7 +98,8 @@ public sealed record ColumnDto(
     byte? Scale = null,
     bool IsRequiredByMethodology = false,
     CellStyleDto? Style = null,
-    int? WidthPx = null);
+    int? WidthPx = null,
+    string? Expression = null);
 
 /// <summary>
 /// Підмножина <c>StyleDef</c>, потрібна ЖИВІЙ сітці (директива registry-
