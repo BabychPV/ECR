@@ -144,6 +144,19 @@ describe('UI-39: банер з першою причиною', () => {
     expect(document.querySelector('[data-health-section="jobs"]')).not.toBeNull();
     expect(screen.getByRole('heading', { name: 'Background jobs' })).toBeDefined();
   });
+
+  it('секції й «System» — h2 під h1 сторінки, без стрибка рівня (axe heading-order, a11y batch-4)', async () => {
+    ready = reportOf('Healthy', [
+      check('db', 'Healthy', 'Database is available.'),
+      check('jobs', 'Healthy', 'The scheduler is running.'),
+    ]);
+    show();
+
+    await screen.findByText('The scheduler is running.');
+    await waitFor(() => expect(document.querySelector('#health-facts-h')).not.toBeNull());
+    expect(screen.getByRole('heading', { name: 'Background jobs', level: 2 })).toBeDefined();
+    expect(document.querySelector('#health-facts-h')?.tagName).toBe('H2');
+  });
 });
 
 describe('UI-39: «Check now» і «Copy diagnostics»', () => {
