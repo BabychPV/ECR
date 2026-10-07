@@ -404,11 +404,12 @@ public sealed partial class DenyReadTests(SqlServerFixture sql)
     /// Вивантажує документ і повертає ВЕСЬ текст файлу: для zip (xlsx, csv) —
     /// склеєний вміст кожного запису, тобто й прихованого аркуша карти книги.
     /// </summary>
-    private static async Task<string> ExportTextAsync(EcrApiFactory app, HttpClient client, Scenario s, string format)
+    private static async Task<string> ExportTextAsync(
+        EcrApiFactory app, HttpClient client, Scenario s, string format, bool includeFormulas = false)
     {
         var start = await client.PostAsJsonAsync(
             new Uri($"/api/v1/documents/{s.Doc.DocumentId}/export", UriKind.Relative),
-            new { includeFormulas = false, includeStyles = false, language = "en", periodKey = s.Doc.PeriodKey.Value, format })
+            new { includeFormulas, includeStyles = false, language = "en", periodKey = s.Doc.PeriodKey.Value, format })
             .ConfigureAwait(false);
         Assert.True(start.StatusCode == HttpStatusCode.Accepted, $"експорт: {start.StatusCode}: {app.ErrorsText}");
         var jobId = (await start.Content.ReadFromJsonAsync<JsonElement>().ConfigureAwait(false))
