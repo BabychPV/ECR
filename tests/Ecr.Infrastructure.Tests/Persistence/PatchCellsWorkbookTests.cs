@@ -108,8 +108,43 @@ public sealed partial class PatchCellsWorkbookTests(SqlServerFixture sql) : IDis
             .Build();
         var requests = Requests(world, await VersionsAsync(world));
 
-        await AssertRejectedAsync<AccessDeniedException>(
-            world, profile, requests, guilty, "ECR-ACCS-0403", "err.ECR-ACCS-0403.deniedCells");
+        // D-6: заборона на ЧИТАННЯ таблиці робить її для автора неіснуючою - 404, а не 403 deniedCells
+        // (так само відповідає поштучний PATCH і GET зрізу).
+        await AssertRejectedAsync<NotFoundException>(
+            world, profile, requests, guilty, "ECR-DOC-0404", "err.ECR-DOC-0404.tableInstance");
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "D-6")]
+    public async Task Схована_Fixed_таблиця_у_книзі_не_видає_свій_код_і_режим_у_409()
+    {
+        var world = await ArrangeAsync([2, 2]);
+        var guilty = world.Tables[3];
+        var profile = new AccessBuilder { UserId = 1 }
+            .Grant(ResourceKind.Project, world.Doc.ProjectId, GrantLevel.Write)
+            .Deny(ResourceKind.Table, guilty.TableDefId)
+            .Build();
+
+        string? tableCode = null;
+        await QueryAsync($"SELECT Code FROM cfg.TableDef WHERE Id = {guilty.TableDefId}", reader => tableCode = reader.GetString(0));
+        Assert.False(string.IsNullOrEmpty(tableCode));
+
+        // Вигаданий ключ нового рядка в Fixed-таблиці: без видимості це був би 409 `fixedRowMode` з кодом таблиці.
+        var requests = Requests(world, await VersionsAsync(world), newRowsEverywhere: true);
+
+        var error = await Assert.ThrowsAsync<NotFoundException>(() => RunWorkbookAsync(world, profile, requests));
+
+        Assert.Equal("ECR-DOC-0404", error.ErrorCode);
+        Assert.Equal("err.ECR-DOC-0404.tableInstance", error.Details!["messageKey"]);
+        Assert.DoesNotContain(tableCode!, error.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("RowMode", error.Message, StringComparison.Ordinal);
+        Assert.All(
+            error.Details.Where(p => p.Value is string),
+            p => Assert.DoesNotContain(tableCode!, (string)p.Value!, StringComparison.Ordinal));
+        Assert.False(error.Details.ContainsKey("tableCode"));
+        Assert.False(error.Details.ContainsKey("rowMode"));
     }
 
     [Fact]
@@ -357,9 +392,16 @@ public sealed partial class PatchCellsWorkbookTests(SqlServerFixture sql) : IDis
             world, profile, [requests.Single(r => r.TableInstanceId == guilty.InstanceId)]));
         Assert.Equal(alone.ErrorCode, error.ErrorCode);
         Assert.Equal(alone.Message, error.Message);
-        Assert.False(alone.Details!.ContainsKey("tableInstanceId"));
+        // D-6 (свідома зміна очікування): «схована таблиця не існує» (404 `err.ECR-DOC-0404.tableInstance`) сам несе
+        // `tableInstanceId` - це предмет відмови, і книга додає той самий номер. Суть «книга == поштучний» збережена:
+        // тип, код, ключ, речення й решта подробиць збігаються; для всіх інших відмов поштучний номера не має.
+        if (messageKey != "err.ECR-DOC-0404.tableInstance")
+        {
+            Assert.False(alone.Details!.ContainsKey("tableInstanceId"));
+        }
+
         Assert.Equal(
-            alone.Details.Keys.Order(StringComparer.Ordinal),
+            alone.Details!.Keys.Where(k => k != "tableInstanceId").Order(StringComparer.Ordinal),
             error.Details.Keys.Where(k => k != "tableInstanceId").Order(StringComparer.Ordinal));
         foreach (var (key, value) in alone.Details.Where(p => p.Value is string))
         {

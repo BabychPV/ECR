@@ -110,6 +110,21 @@ public sealed partial class PatchCellsHandler
         var profile = await BlamedAsync(ids[0], () => EnsureDocumentReadableAsync(userId, documentId, ct))
             .ConfigureAwait(false);
 
+        // ⛔ D-6: те саме, що в поштучному `LoadContextAsync` — схована від читача таблиця для нього НЕ ІСНУЄ
+        // (404 `ECR-DOC-0404 tableInstance`) ДО будь-якої відмови, що її називає (409 RowMode, період, версії).
+        // Книга й поштучний запис дають однакову відповідь.
+        foreach (var request in requests)
+        {
+            var instance = instances[request.TableInstanceId];
+            await BlamedAsync(request.TableInstanceId, async () =>
+            {
+                await DocumentVisibility.RequireTableVisibleAsync(
+                    access, profile, instance.DocumentId, instance.TableInstanceId, instance.TableDefId,
+                    instance.PeriodKey, ct).ConfigureAwait(false);
+                return true;
+            }).ConfigureAwait(false);
+        }
+
         foreach (var request in requests)
         {
             Blamed(request.TableInstanceId, () => EnsurePeriodMatches(request, instances[request.TableInstanceId]));
