@@ -16443,10 +16443,55 @@
             "description": "Код.",
             "type": "string"
           },
+          "documentCount": {
+            "default": 0,
+            "description": "Документів у проєктах шаблону, які бачить саме цей читач; проєкти без гранта не рахуються.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "draftAuthorDisplayName": {
+            "description": "Відображуване ім'я (не логін) автора найновішої чернетки; `null` — чернетки немає.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "draftCreatedAt": {
+            "description": "Коли чернетку створено, UTC; `null` — чернетки немає.",
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
           "id": {
             "description": "Ідентифікатор.",
             "format": "int32",
             "type": "integer"
+          },
+          "isArchived": {
+            "default": false,
+            "description": "`true` — шаблон архівований (`!IsActive`).",
+            "type": "boolean"
+          },
+          "nameL10n": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LocalizedText",
+                "description": "Назва мовами каталогу."
+              }
+            ]
+          },
+          "updatedAt": {
+            "description": "Остання відома зміна, UTC: найпізніша з створення шаблону, створення/публікації/виведення з\nобігу будь-якої його версії. Окремого журналу правок чернетки в моделі немає.",
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
           },
           "versionCount": {
             "description": "Скільки версій має шаблон.",
@@ -39706,6 +39751,13 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -40250,7 +40302,7 @@
     },
     "/api/v1/templates/{id}/versions": {
       "get": {
-        "description": "⛔ Q-225: раніше — `new CursorRequest()`, завжди дефолтний ліміт 50,\nбез жодного способу передати `cursor` чи `limit` від клієнта. Версія\nшаблону за 50-ту була назавжди недосяжна через цей ендпоінт. Той\nсамий патерн, що вже в Task&lt;IActionResult&gt; TemplatesController.List(int limit, string? cursor, CancellationToken ct) поруч.",
+        "description": "⛔ Q-225: раніше — `new CursorRequest()`, завжди дефолтний ліміт 50,\nбез жодного способу передати `cursor` чи `limit` від клієнта. Версія\nшаблону за 50-ту була назавжди недосяжна через цей ендпоінт. Той\nсамий патерн, що вже в Task&lt;IActionResult&gt; TemplatesController.List(int limit, string? cursor, string? q, CancellationToken ct) поруч.",
         "parameters": [
           {
             "in": "path",

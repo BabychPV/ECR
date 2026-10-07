@@ -15836,6 +15836,7 @@ export interface paths {
                 query?: {
                     limit?: number;
                     cursor?: string;
+                    q?: string;
                 };
                 header?: never;
                 path?: never;
@@ -16250,7 +16251,7 @@ export interface paths {
          * @description ⛔ Q-225: раніше — `new CursorRequest()`, завжди дефолтний ліміт 50,
          *     без жодного способу передати `cursor` чи `limit` від клієнта. Версія
          *     шаблону за 50-ту була назавжди недосяжна через цей ендпоінт. Той
-         *     самий патерн, що вже в Task&lt;IActionResult&gt; TemplatesController.List(int limit, string? cursor, CancellationToken ct) поруч.
+         *     самий патерн, що вже в Task&lt;IActionResult&gt; TemplatesController.List(int limit, string? cursor, string? q, CancellationToken ct) поруч.
          */
         get: {
             parameters: {
@@ -25422,9 +25423,34 @@ export interface components {
             code: string;
             /**
              * Format: int32
+             * @description Документів у проєктах шаблону, які бачить саме цей читач; проєкти без гранта не рахуються.
+             * @default 0
+             */
+            documentCount: number;
+            /** @description Відображуване ім'я (не логін) автора найновішої чернетки; `null` — чернетки немає. */
+            draftAuthorDisplayName?: null | string;
+            /**
+             * Format: date-time
+             * @description Коли чернетку створено, UTC; `null` — чернетки немає.
+             */
+            draftCreatedAt?: null | string;
+            /**
+             * Format: int32
              * @description Ідентифікатор.
              */
             id: number;
+            /**
+             * @description `true` — шаблон архівований (`!IsActive`).
+             * @default false
+             */
+            isArchived: boolean;
+            nameL10n?: null | components["schemas"]["LocalizedText"];
+            /**
+             * Format: date-time
+             * @description Остання відома зміна, UTC: найпізніша з створення шаблону, створення/публікації/виведення з
+             *     обігу будь-якої його версії. Окремого журналу правок чернетки в моделі немає.
+             */
+            updatedAt?: null | string;
             /**
              * Format: int32
              * @description Скільки версій має шаблон.
