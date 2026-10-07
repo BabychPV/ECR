@@ -64,11 +64,18 @@
   background: var(--ecr-warning-soft);
 }
 
+/*
+ * ⚠ `--ecr-muted`, а не `--ecr-faint` макета (`.work-col-empty`): «Nothing
+ * here» — це текст, а `faint` за директивою №15 §1 лише для неконтентного
+ * (поріг 3:1). На тлі сторінки він дав 3.49 (light) і 4.30 (dark) < 4.5
+ * (axe `color-contrast`, прохід a11y batch-4). Вигляд — той самий приглушений
+ * сірий, на крок темніший.
+ */
 .ecr-board-col-empty {
   margin: 0;
   padding: 8px 0;
   font-size: 12px;
-  color: var(--ecr-faint);
+  color: var(--ecr-muted);
 }
 
 .ecr-board-list {
