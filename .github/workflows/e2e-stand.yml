@@ -1,0 +1,180 @@
+# Прогони Playwright на живому стенді (`tools/e2e-stand.ps1`) у CI.
+#
+# ⛔ НЕ обов'язковий гейт: окремий workflow, до семи гейтів (`build`, `test`,
+# `honesty-guard`, `server`, `client`, `a11y (dark)`, `a11y (light)`) не
+# входить, `needs` не має. Мета — зняти з «Аудита» ~46-хвилинний локальний
+# e2e на кандидаті й ганяти його паралельно з рев'ю.
+#
+# ⚠ Запуск лише двома шляхами, щоб не навантажувати чергу раннерів (аудит
+# CI-черги 07.10, 43 queued):
+#   — вручну (`workflow_dispatch`): будь-який `ref` і необов'язковий `grep`;
+#   — PR, у якого head або base — `rc/**` (тижневий `rc/<дата>` → `main`).
+# На `lane/**` і на кожен пуш у `dev/integration` — НЕ запускається.
+#
+# ⚠ Linux, а не Windows — той самий вибір і ті самі параметри, що в `smoke.yml`:
+# SQL Server у контейнері, `-Login` (SQL-автентифікація), `-SmallFiles`
+# (64 МБ замість 14 ГБ), `pwsh`.
+
+name: e2e-stand
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Гілка, тег або SHA, на якому ганяти стенд'
+        required: true
+        default: dev/integration
+      grep:
+        description: 'Фільтр назв прогонів Playwright (--grep); порожнє — увесь набір'
+        required: false
+        default: ''
+  pull_request:
+    branches: [ main, 'rc/**' ]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-stand-${{ github.event_name }}-${{ github.event.pull_request.number || inputs.ref || github.ref }}-${{ inputs.grep || '' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  DOTNET_NOLOGO: 'true'
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: 'true'
+
+jobs:
+  e2e:
+    name: e2e-stand (linux)
+    # PR у `main` з `dev/integration` (і будь-який інший не-rc) — пропуск.
+    if: >-
+      github.event_name != 'pull_request' ||
+      startsWith(github.head_ref, 'rc/') ||
+      startsWith(github.base_ref, 'rc/')
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ inputs.ref || '' }}
+
+      - name: Що проганяється
+        env:
+          GREP: ${{ inputs.grep }}
+        run: |
+          {
+            echo "### e2e-stand"
+            echo "- коміт: \`$(git rev-parse HEAD)\`"
+            echo "- подія: ${{ github.event_name }}"
+            echo "- фільтр: \`${GREP:-увесь набір}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # ⚠ Пароль генерується на кожен прогін і маскується — як у `smoke.yml`.
+      - name: SQL Server у контейнері
+        run: |
+          set -euo pipefail
+          SA="$(openssl rand -hex 16)Aa1!"
+          echo "::add-mask::$SA"
+          echo "ECR_SQL_PASSWORD=$SA" >> "$GITHUB_ENV"
+          docker run -d --name ecr-mssql -e ACCEPT_EULA=Y -e "MSSQL_SA_PASSWORD=$SA" \
+            -p 1433:1433 mcr.microsoft.com/mssql/server:2019-latest
+
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
+        with:
+          global-json-file: global.json
+
+      # Node ≥ 22.12 (vitest@5, Playwright ≥ 20) — як у `client` і `a11y`.
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: src/Ecr.Web/package-lock.json
+
+      # ⚠ Дослівно як у `smoke.yml`.
+      - name: sqlcmd
+        run: |
+          set -euo pipefail
+          curl -fsSL https://packages.microsoft.com/keys/microsoft.asc \
+            | gpg --dearmor --batch --yes -o microsoft-prod.gpg
+          sudo install -o root -g root -m 644 microsoft-prod.gpg /usr/share/keyrings/microsoft-prod.gpg
+          rm microsoft-prod.gpg
+          . /etc/os-release
+          echo "deb [arch=amd64 signed-by=/usr/share/keyrings/microsoft-prod.gpg] https://packages.microsoft.com/ubuntu/${VERSION_ID}/prod ${VERSION_CODENAME} main" \
+            | sudo tee /etc/apt/sources.list.d/mssql-release.list > /dev/null
+          sudo apt-get update \
+            -o Dir::Etc::sourcelist="sources.list.d/mssql-release.list" \
+            -o Dir::Etc::sourceparts="-" \
+            -o APT::Get::List-Cleanup="0"
+          sudo ACCEPT_EULA=Y apt-get install -y mssql-tools18 unixodbc-dev
+          echo "/opt/mssql-tools18/bin" >> "$GITHUB_PATH"
+
+      - name: SQL Server відповідає
+        env:
+          SQLCMDPASSWORD: ${{ env.ECR_SQL_PASSWORD }}
+        run: |
+          for i in $(seq 1 90); do
+            if sqlcmd -S localhost,1433 -U sa -C -b -Q "SELECT 1" > /dev/null 2>&1; then
+              echo "SQL Server готовий за ${i} с."
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::SQL Server не відповів за 90 с. Журнал контейнера:"
+          docker logs ecr-mssql 2>&1 | tail -40
+          exit 1
+
+      - name: dotnet ef
+        run: |
+          dotnet tool install --global dotnet-ef --version 10.0.11
+          echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
+
+      # ⚠ Без restore `dotnet ef migrations script` у `setup-dev-db.ps1` падає з
+      # `NETSDK1004` (див. `smoke.yml`).
+      - name: dotnet restore
+        run: dotnet restore Ecr.sln
+
+      # ⚠ У свіжому чекауті `@playwright/test` не встановлений (CLAUDE.md).
+      - name: npm ci
+        working-directory: src/Ecr.Web
+        run: npm ci
+
+      - name: Браузер Playwright
+        working-directory: src/Ecr.Web
+        run: npx playwright install --with-deps chromium
+
+      # ⚠ Порт 5080 (Vite — 6080): `setup-dev-db.ps1` піднімає застосунок для
+      # сіду на 5099, стенд не має говорити з ним.
+      # ⛔ Пароль іде оточенням (`ECR_SQL_PASSWORD`), не аргументом; `grep` —
+      # теж оточенням, щоб введений текст не потрапляв у командний рядок.
+      - name: Стенд і прогони Playwright (e2e-stand.ps1)
+        env:
+          ECR_SQL_PASSWORD: ${{ env.ECR_SQL_PASSWORD }}
+          E2E_GREP: ${{ inputs.grep }}
+          PLAYWRIGHT_HTML_OPEN: never
+        run: |
+          mkdir -p artifacts
+          pwsh -File tools/e2e-stand.ps1 \
+            -Server 'localhost,1433' -Login sa -Database EcrE2ECi -Port 5080 \
+            -SmallFiles -RequireFreeGb 0 -StartupTimeoutSec 180 \
+            -Reporter 'list,html' -Grep "$E2E_GREP"
+
+      - name: Звіт, трасування, знімки
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: e2e-stand-report
+          path: |
+            src/Ecr.Web/playwright-report/
+            src/Ecr.Web/test-results/
+          retention-days: 14
+          if-no-files-found: ignore
+
+      - name: Журнали застосунку
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: e2e-stand-logs
+          path: |
+            artifacts/e2e.*
+            artifacts/setup-dev-db.api.log*
+          retention-days: 14
+          if-no-files-found: ignore
