@@ -322,6 +322,8 @@ public sealed class MigrateDocumentVersionHandler(
         // шаблону. Якщо методологія, прив'язана до цільової версії, має опубліковану версію з ключами на колонки
         // іншої версії цього шаблону, то після переносу предикат не збігається ніколи (прогін мовчки порожній), а
         // вимога Block блокує збереження назавжди. Блокується лише перенос, не публікація шаблону.
+        // ✎ C1: ключі, чия колонка має відповідник за шляхом у цілі, перекладаються при читанні
+        // (MethodologyKeyLocalizer) і сюди не потрапляють; відмова лишилась для колонок, втрачених у цілі.
         var foreignKeys = await store.ListForeignMethodologyKeysAsync(target.Id, MaxMethodologyKeysListed, ct)
             .ConfigureAwait(false);
         if (foreignKeys.Count > 0)

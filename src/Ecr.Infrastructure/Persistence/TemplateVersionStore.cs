@@ -510,7 +510,10 @@ public sealed partial class TemplateVersionStore(EcrDbContext db) : ITemplateVer
     ///
     /// ⚠ Правила й обов'язкові входи методології (<c>calc.MethodologyRule</c>, <c>MethodologyRequiredInput</c>)
     /// належать ВЕРСІЇ МЕТОДОЛОГІЇ, а не шаблону, і клоном шаблону не чіпаються: вони посилаються на
-    /// <c>ColumnDefId</c> версії-джерела, тож перенос проєкту на клон блокує <c>methodologyKeysNotMapped</c>.
+    /// <c>ColumnDefId</c> версії-джерела. ✎ C1: Id у сховищі навмисно лишаються (опублікована версія методології
+    /// незмінна й діє для ОБОХ версій шаблону), а при читанні перекладаються на колонки версії документа за
+    /// шляхом аркуш/таблиця/колонка (<c>MethodologyKeyLocalizer</c>). Перенос проєкту блокує
+    /// <c>methodologyKeysNotMapped</c> лише для ключів, чия колонка втрачена в цільовій версії.
     /// </remarks>
     private async Task CloneCalculationBindingsAsync(
         TemplateVersion clone, IReadOnlyList<GrantSource> sources, CancellationToken ct)
