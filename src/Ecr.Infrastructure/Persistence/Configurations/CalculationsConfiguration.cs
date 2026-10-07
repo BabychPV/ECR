@@ -414,6 +414,32 @@ public sealed class MethodologyRuleConfiguration : IEntityTypeConfiguration<Meth
 }
 
 /// <summary>
+/// Конфігурація <see cref="MethodologyCategoryRule"/> — правила категорії константи версії
+/// (L-2, B13 схема <c>calc.CategoryRule</c>).
+/// </summary>
+public sealed class MethodologyCategoryRuleConfiguration : IEntityTypeConfiguration<MethodologyCategoryRule>
+{
+    /// <inheritdoc />
+    public void Configure(EntityTypeBuilder<MethodologyCategoryRule> builder)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+
+        builder.ToTable("CategoryRule", "calc");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.Expression).IsRequired();
+        builder.Property(x => x.CreatedAt).HasColumnType("datetime2(3)");
+        builder.Property(x => x.UpdatedAt).HasColumnType("datetime2(3)");
+
+        // ⛔ Одне правило на версію (B13): ТЗ не знає правил по кроках чи групах констант.
+        builder.HasIndex(x => x.MethodologyVersionId)
+               .IsUnique().HasDatabaseName("UQ_CategoryRule_Version");
+
+        builder.HasOne<MethodologyVersion>().WithMany().HasForeignKey(x => x.MethodologyVersionId)
+               .HasConstraintName("FK_CR_Version");
+    }
+}
+
+/// <summary>
 /// Конфігурація <see cref="MethodologyRequiredInput"/> — обов'язкових вхідних
 /// колонок (директива «обов'язкові вхідні колонки методології», gate перед
 /// збереженням).

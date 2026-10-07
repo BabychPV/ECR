@@ -134,6 +134,19 @@ public sealed class MethodologyDraftStore(EcrDbContext db) : IMethodologyDraftSt
             .ConfigureAwait(false);
 
     /// <inheritdoc />
+    public async Task<MethodologyCategoryRule?> FindCategoryRuleAsync(
+        int methodologyVersionId, CancellationToken ct)
+        => await db.MethodologyCategoryRules
+            .FirstOrDefaultAsync(r => r.MethodologyVersionId == methodologyVersionId, ct)
+            .ConfigureAwait(false);
+
+    /// <inheritdoc />
+    public void Add(MethodologyCategoryRule rule) => db.MethodologyCategoryRules.Add(rule);
+
+    /// <inheritdoc />
+    public void Remove(MethodologyCategoryRule rule) => db.MethodologyCategoryRules.Remove(rule);
+
+    /// <inheritdoc />
     public async Task<MethodologyRequiredInput?> FindRequiredInputAsync(
         int methodologyVersionId, int columnDefId, CancellationToken ct)
         => await db.MethodologyRequiredInputs
@@ -347,6 +360,17 @@ public sealed class MethodologyDraftStore(EcrDbContext db) : IMethodologyDraftSt
             clone.SetActive(source.IsActive);
 
             db.MethodologyRules.Add(clone);
+        }
+
+        // ⛔ L-2: правило категорії константи — теж вміст версії. Клон без нього повертав би
+        // 5.1/6.1 до `constantAmbiguous` на новій чернетці: константи з кількома категоріями
+        // без ключа категорії не резолвляться.
+        foreach (var source in await ChildrenAsync(
+                     db.MethodologyCategoryRules.Where(r => r.MethodologyVersionId == sourceVersionId), ct)
+                     .ConfigureAwait(false))
+        {
+            db.MethodologyCategoryRules.Add(
+                new MethodologyCategoryRule(targetVersionId, source.Expression, source.UpdatedAt));
         }
 
         // ⛔ Обов'язкові вхідні колонки — теж ВМІСТ версії (директива

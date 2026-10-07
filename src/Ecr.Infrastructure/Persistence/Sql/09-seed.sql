@@ -7227,8 +7227,11 @@ USING (VALUES
     (N'err.ECR-UOM-0422.fieldMapUnitDimensions', N'en', N'Unit "{from}" cannot be converted to "{to}": they measure different quantities, so the mapping of field "{sourceField}" would never write a value. Choose units of the same dimension.', 1),
     -- COLL:d4efmapunit ── кінець секції ──
     -- COLL:d9tpltitle ── приймальна №8, D-9: власний заголовок 409 на зайнятий код шаблону; ru/kz — порцією COLL:d9tpltitle нижче ──
-    (N'err.ECR-TMPL-0409.templateCodeTaken.title', N'en', N'Template code is already in use', 1)
+    (N'err.ECR-TMPL-0409.templateCodeTaken.title', N'en', N'Template code is already in use', 1),
     -- COLL:d9tpltitle ── кінець секції ──
+    -- CAT:l2 ── L-2: правило категорії константи (calc.CategoryRule); ru/kz — порцією CAT:l2 нижче ──
+    (N'err.ECR-CALC-0422.categoryRuleEmpty', N'en', N'The category rule needs an expression; to have no rule, delete it.', 1)
+    -- CAT:l2 ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -17553,6 +17556,16 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:d9tpltitle ── кінець секції ──
+-- CAT:l2 ── ru/kz L-2: правило категорії константи; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-CALC-0422.categoryRuleEmpty', N'ru', N'Правилу категории нужно выражение; чтобы правила не было, удалите его.'),
+    (N'err.ECR-CALC-0422.categoryRuleEmpty', N'kz', N'Санат ережесіне өрнек қажет; ереже болмауы үшін оны жойыңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- CAT:l2 ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

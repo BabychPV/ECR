@@ -337,6 +337,15 @@ public sealed class MethodologyStore(EcrDbContext db, int constantCap) : IMethod
             .ConfigureAwait(false);
 
     /// <inheritdoc />
+    public async Task<string?> GetCategoryRuleAsync(int methodologyVersionId, CancellationToken ct)
+        => await db.MethodologyCategoryRules
+            .AsNoTracking()
+            .Where(r => r.MethodologyVersionId == methodologyVersionId)
+            .Select(r => r.Expression)
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+
+    /// <inheritdoc />
     public async Task<IReadOnlyList<MethodologyRequiredInput>> GetRequiredInputsAsync(
         int methodologyVersionId, CancellationToken ct)
         => await db.MethodologyRequiredInputs

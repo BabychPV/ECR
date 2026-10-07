@@ -106,6 +106,20 @@ public interface IMethodologyDraftStore
     public Task<MethodologyRule?> FindRuleAsync(
         int methodologyVersionId, string code, CancellationToken ct);
 
+    /// <summary>Правило категорії версії (L-2) — відстежуване; <c>null</c>, якщо його немає.</summary>
+    /// <param name="methodologyVersionId">Версія.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Правило або <c>null</c>: на версію воно одне.</returns>
+    public Task<MethodologyCategoryRule?> FindCategoryRuleAsync(int methodologyVersionId, CancellationToken ct);
+
+    /// <summary>Ставить правило категорії в чергу на вставку; зберігає <c>IUnitOfWork</c>.</summary>
+    /// <param name="rule">Правило, створене <c>MethodologyVersion.SetCategoryRule</c>.</param>
+    public void Add(MethodologyCategoryRule rule);
+
+    /// <summary>Ставить правило категорії в чергу на видалення; зберігає <c>IUnitOfWork</c>.</summary>
+    /// <param name="rule">Правило, дозволене <c>MethodologyVersion.RemoveCategoryRule</c>.</param>
+    public void Remove(MethodologyCategoryRule rule);
+
     /// <summary>Вимога версії за колонкою — відстежувана; <c>null</c>, якщо її немає.</summary>
     /// <param name="methodologyVersionId">Версія.</param>
     /// <param name="columnDefId">Колонка документа.</param>
