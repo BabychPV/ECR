@@ -188,6 +188,46 @@ public sealed class CampaignSummaryHandlerTests
         Assert.Equal(1, summary.Totals.Snapshots);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "R-1")]
+    public async Task Прогрес_і_класи_віддаються_читачу_без_інструментів_що_ховають_аркуші()
+    {
+        Profile(new AccessBuilder { UserId = 7 }.Permission(GetCampaignSummaryHandler.Permission));
+        ReturnBuckets();
+
+        var summary = await Handler().HandleAsync(202601, default);
+
+        Assert.All(summary.Projects, p => Assert.Equal(CampaignProgress.InProgress, p.Progress));
+        Assert.Equal((0, 0, 0, 2), (summary.Totals.Done, summary.Totals.Overdue, summary.Totals.AtRisk, summary.Totals.InProgress));
+    }
+
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "R-1")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Прогрес_і_класи_null_коли_у_читача_є_заборона_чи_None_на_аркуш(bool deny)
+    {
+        // ⛔ МУТАЦІЙНИЙ ДОКАЗ: віддати `progress` / `progressCounts...` без `allSheets ?` у `GetCampaignSummaryHandler` --
+        // червоніє: клас «Done» = «усе затверджено» по ВСІХ аркушах, тож розбиття проєктів на класи розкрило б приховане (R-1).
+        var builder = new AccessBuilder { UserId = 7 }.Permission(GetCampaignSummaryHandler.Permission);
+        Profile(deny ? builder.Deny(ResourceKind.Sheet, 123) : builder.Grant(ResourceKind.Sheet, 123, GrantLevel.None));
+        ReturnBuckets();
+
+        var summary = await Handler().HandleAsync(202601, default);
+
+        Assert.All(summary.Projects, p => Assert.Null(p.Progress));
+        Assert.Null(summary.Totals.Done);
+        Assert.Null(summary.Totals.Overdue);
+        Assert.Null(summary.Totals.AtRisk);
+        Assert.Null(summary.Totals.InProgress);
+
+        // Кількість проєктів і документів не залежить від прихованого (Q15-07).
+        Assert.Equal(2, summary.Totals.Projects);
+        Assert.Equal(2, summary.Totals.Documents);
+    }
+
     private void ReturnBuckets()
         => _store.ListAsync(Arg.Any<int>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
             .Returns(call => new CampaignProjectPage(
