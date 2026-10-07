@@ -408,7 +408,7 @@ public sealed record ColumnDefDto(
     string? LookupFilter,
     int? UnitId,
     int? WidthPx = null,
-    bool IsMonthColumn = false,
+    bool? IsMonthColumn = null,
     byte? MonthNumber = null);
 
 /// <summary>
