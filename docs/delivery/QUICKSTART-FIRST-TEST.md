@@ -145,7 +145,7 @@ Invoke-RestMethod https://ecr.test.local/health/ready        # status: Healthy �
 
 ## 6. Відомі обмеження першого тестування (не дефекти)
 
-Повний перелік — `docs/TESTER-HANDOVER.md` §5 і `docs/release-notes/` (першим читайте `rc-2026-10-25.md`, RC6; далі `rc-2026-10-24.md`, RC5, і `rc-2026-10-23.md`, RC4). Найважливіше:
+Повний перелік — `docs/TESTER-HANDOVER.md` §5 і `docs/release-notes/` (першим читайте `rc-2026-10-26.md`, RC7; далі `rc-2026-10-25.md`, RC6, `rc-2026-10-24.md`, RC5, і `rc-2026-10-23.md`, RC4). Найважливіше:
 
 1. **PI на стенді немає**: джерела PI відключені або порожні; сценарії збору з PI
    (И-2…И-5, И-9, И-10) пропускаються (`TESTER-HANDOVER` §4.2).
