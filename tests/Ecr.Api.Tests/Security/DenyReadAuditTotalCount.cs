@@ -113,4 +113,34 @@ public sealed partial class DenyReadTests
             Assert.Equal(3, JsonDocument.Parse(body).RootElement.GetProperty("totalCount").GetInt32());
         }
     }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "UI-38")]
+    public async Task TotalCount_журналу_лише_на_першій_сторінці_а_за_курсором_null()
+    {
+        // ⛔ МУТАЦІЙНИЙ ДОКАЗ: рахувати `totalCount` і за курсором (без `firstPage` у `GetCellChangesHandler`) -- червоніє.
+        var s = await ArrangeAsync().ConfigureAwait(true);
+        var from = DateTime.UtcNow.AddDays(-1).ToString("O", CultureInfo.InvariantCulture);
+        var to = DateTime.UtcNow.AddDays(1).ToString("O", CultureInfo.InvariantCulture);
+        var journal = $"/api/v1/audit/cells?from={Uri.EscapeDataString(from)}&to={Uri.EscapeDataString(to)}"
+                      + $"&documentId={s.Doc.DocumentId}&limit=1";
+
+        using var app = new EcrApiFactory(sql);
+        using var plain = await SignedInAsync(app, s.Plain).ConfigureAwait(true);
+
+        var (status, body) = await GetAsync(plain, journal).ConfigureAwait(true);
+        Assert.True(status == HttpStatusCode.OK, $"{status}: {body}\n{app.ErrorsText}");
+        var first = JsonDocument.Parse(body).RootElement;
+        Assert.Equal(3, first.GetProperty("totalCount").GetInt32());
+        var cursor = first.GetProperty("nextCursor").GetString();
+        Assert.False(string.IsNullOrEmpty(cursor));
+
+        (status, body) = await GetAsync(plain, journal + "&cursor=" + Uri.EscapeDataString(cursor!)).ConfigureAwait(true);
+        Assert.True(status == HttpStatusCode.OK, $"{status}: {body}\n{app.ErrorsText}");
+        var next = JsonDocument.Parse(body).RootElement;
+        Assert.Equal(JsonValueKind.Null, next.GetProperty("totalCount").ValueKind);
+        Assert.Equal(1, next.GetProperty("items").GetArrayLength());
+    }
 }

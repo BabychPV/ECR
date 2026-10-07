@@ -74,6 +74,9 @@ public sealed class GetCellChangesHandler(
     /// читання (S6, R-11). Сума по прихованих колонках, таблицях і аркушах у число не входить так само, як
     /// їхні рядки не входять у сторінку: інакше різниця між загальним числом і довжиною видимого була б
     /// оракулом «там щось приховано».
+    ///
+    /// ⚠ Лише на ПЕРШІЙ сторінці (<c>Cursor == null</c>): на наступних <c>TotalCount</c> — <c>null</c>, агрегат
+    /// по вікну не рахується повторно. Число не змінюється між сторінками, тож клієнт бере його з першої.
     /// </remarks>
     public async Task<PagedResult<CellChangeView>> HandleAsync(
         CellChangeFilter filter, CursorRequest page, CancellationToken ct)
@@ -82,15 +85,24 @@ public sealed class GetCellChangesHandler(
         ArgumentNullException.ThrowIfNull(page);
 
         filter = Normalize(filter);
+
+        // UI-38 (P3): сума по вікну лічиться ЛИШЕ на першій сторінці (курсора немає); далі `TotalCount` — `null`,
+        // а порт підрахунку не викликається: кожна наступна сторінка не повторює агрегат по всьому вікну.
+        var firstPage = page.Cursor is null;
         var (readable, empty) = await AuthorizeAsync(filter, page, ct).ConfigureAwait(false);
         if (empty)
         {
-            return new PagedResult<CellChangeView>([], null, 0);
+            return new PagedResult<CellChangeView>([], null, firstPage ? 0 : null);
         }
 
         var result = await audit.ReadCellChangesAsync(filter, page, ct).ConfigureAwait(false);
-        var counts = await audit.CountCellChangesByColumnAsync(filter, TodayStart(), ct).ConfigureAwait(false);
-        var total = counts.Where(c => readable is null || readable.CanReadColumn(c.ColumnDefId)).Sum(c => c.Total);
+        int? total = null;
+        if (firstPage)
+        {
+            var counts = await audit.CountCellChangesByColumnAsync(filter, TodayStart(), ct).ConfigureAwait(false);
+            total = (int)Math.Min(
+                counts.Where(c => readable is null || readable.CanReadColumn(c.ColumnDefId)).Sum(c => c.Total), int.MaxValue);
+        }
 
         // ⚠ Журнал документа без колонки (лише `Security.ViewAudit`): рядки заборонених колонок відкидаються
         // ПІСЛЯ читання сторінки, тож сторінка може бути коротшою за ліміт. Курсор лишається правильним: він
@@ -99,7 +111,7 @@ public sealed class GetCellChangesHandler(
             ? result.Items
             : [.. result.Items.Where(c => readable.CanReadColumn(c.ColumnDefId))];
 
-        return result with { Items = visible, TotalCount = (int)Math.Min(total, int.MaxValue) };
+        return result with { Items = visible, TotalCount = total };
     }
 
     /// <summary>Підсумок журналу за вікном (UI-38, C2): ті самі права, вікно й видимість, що й у <see cref="HandleAsync"/>.</summary>
