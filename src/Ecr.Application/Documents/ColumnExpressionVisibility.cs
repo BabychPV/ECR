@@ -20,7 +20,7 @@ namespace Ecr.Application.Documents;
 /// </para>
 /// Заголовки документа й довідники — не ресурси аркушів: їхню видимість це правило не змінює.
 /// </remarks>
-internal static class ColumnExpressionVisibility
+public static class ColumnExpressionVisibility
 {
     /// <summary>Вираз формули колонки або <c>null</c>, коли хоч одне посилання читачеві не видне.</summary>
     /// <param name="formula">Формула колонки; <c>null</c> — формули немає.</param>
@@ -37,6 +37,30 @@ internal static class ColumnExpressionVisibility
         DocumentReadScope readable,
         IFormulaEngine? engine)
     {
+        ArgumentNullException.ThrowIfNull(readable);
+        return Visible(formula, table, columnDefId, snapshot, readable.CanReadTable, readable.CanReadColumn, engine);
+    }
+
+    /// <summary>То саме за межами читання, заданими предикатами (експорт знає лише списки прихованого).</summary>
+    /// <param name="formula">Формула колонки; <c>null</c> — формули немає.</param>
+    /// <param name="table">Таблиця колонки.</param>
+    /// <param name="columnDefId">Колонка, якій належить формула.</param>
+    /// <param name="snapshot">Знімок структури версії.</param>
+    /// <param name="canReadTable">Чи бачить читач таблицю.</param>
+    /// <param name="canReadColumn">Чи бачить читач колонку.</param>
+    /// <param name="engine">Рушій виразів; <c>null</c> — вираз не віддається.</param>
+    public static string? Visible(
+        FormulaDef? formula,
+        TableDef table,
+        int columnDefId,
+        TemplateVersionSnapshot snapshot,
+        Func<int, bool> canReadTable,
+        Func<int, bool> canReadColumn,
+        IFormulaEngine? engine)
+    {
+        ArgumentNullException.ThrowIfNull(canReadTable);
+        ArgumentNullException.ThrowIfNull(canReadColumn);
+
         if (formula is null)
         {
             return null;
@@ -64,7 +88,7 @@ internal static class ColumnExpressionVisibility
 
             foreach (var dependency in extraction.Dependencies)
             {
-                if (!DependencyVisible(dependency, snapshot, readable))
+                if (!DependencyVisible(dependency, snapshot, canReadTable, canReadColumn))
                 {
                     return null;
                 }
@@ -80,14 +104,19 @@ internal static class ColumnExpressionVisibility
         }
     }
 
-    private static bool DependencyVisible(FormulaDependencyRef dependency, TemplateVersionSnapshot snapshot, DocumentReadScope readable)
+    private static bool DependencyVisible(
+        FormulaDependencyRef dependency, TemplateVersionSnapshot snapshot,
+        Func<int, bool> canReadTable, Func<int, bool> canReadColumn)
     {
         switch (dependency.DependsOnKind)
         {
             case DependencyExtractor.KindHeader:
-            case DependencyExtractor.KindRegistry:
                 return true;
 
+            // Ребро довідника без таблиці — довідник названо кодом, не коміркою аркуша. ⚠ Ребро з
+            // TableDefId (форма REGFIELD) називає комірку аркуша: тоді як Cell. Сьогодні таке ребро
+            // доповнює Cell-ребро генеричного обходу; перевірка тут — захист на майбутнє.
+            case DependencyExtractor.KindRegistry:
             case DependencyExtractor.KindCell:
             case DependencyExtractor.KindCrossPeriod:
                 // `!Formula` — ребро без таблиці: посилання на іншу формулу, не на комірку аркуша.
@@ -96,26 +125,29 @@ internal static class ColumnExpressionVisibility
                     return true;
                 }
 
-                if (!readable.CanReadTable(tableId))
+                if (!canReadTable(tableId))
                 {
                     return false;
                 }
 
-                if (dependency.ColumnDefId is { } columnId && !readable.CanReadColumn(columnId))
+                if (dependency.ColumnDefId is { } columnId && !canReadColumn(columnId))
                 {
                     return false;
                 }
 
-                return dependency.FilterJson is null || AllColumnsVisible(snapshot, tableId, readable);
+                // ⚠ FilterJson у ребра довідника — код поля, а не предикат: умову таблиці воно не несе.
+                return dependency.DependsOnKind == DependencyExtractor.KindRegistry
+                       || dependency.FilterJson is null
+                       || AllColumnsVisible(snapshot, tableId, canReadColumn);
 
             default:
                 return false;
         }
     }
 
-    private static bool AllColumnsVisible(TemplateVersionSnapshot snapshot, int tableId, DocumentReadScope readable)
+    private static bool AllColumnsVisible(TemplateVersionSnapshot snapshot, int tableId, Func<int, bool> canReadColumn)
     {
         var table = snapshot.Sheets.SelectMany(s => s.Tables).FirstOrDefault(t => t.Id == tableId);
-        return table is not null && table.Columns.Where(c => !c.IsDeleted).All(c => readable.CanReadColumn(c.Id));
+        return table is not null && table.Columns.Where(c => !c.IsDeleted).All(c => canReadColumn(c.Id));
     }
 }
