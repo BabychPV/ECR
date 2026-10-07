@@ -28,10 +28,13 @@ import { Navigate, Outlet, ScrollRestoration, useLocation, useMatches } from 're
 import { Breadcrumbs, isRouteHandle } from './Breadcrumbs';
 import { NavbarCollapseToggle } from './NavbarCollapseToggle';
 import { NavRouteLink } from './NavRouteLink';
-import { NotFoundPage } from './NotFoundPage';
 import { NavGroupSection } from './NavGroupSection';
 import { routes, type RouteHandle } from './routes';
 import { visibleNavGroups } from './visibleNavGroups';
+
+// ✎ b4b: 404 за макетом — лінивий чанк (рендериться всередині `<Suspense>` нижче),
+// щоб не важчав спільний чанк оболонки кожного маршруту.
+const NotFoundPage = lazy(async () => ({ default: (await import('./NotFoundPage')).NotFoundPage }));
 import { routeTransitionClassName } from './motionTokens';
 import { useRouteTransitionFocus } from './useRouteTransitionFocus';
 import { usePreferenceSync } from '@/features/preferences/usePreferenceSync';
