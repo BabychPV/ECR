@@ -139,7 +139,7 @@ async function signIn(page: Page): Promise<void> {
   await page.getByRole('textbox', { name: /Password|Пароль/i }).fill(Operator.password);
   await page.keyboard.press('Enter');
 
-  await expect(page.getByRole('navigation')).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator('nav:not(.ecr-crumbs)')).toBeVisible({ timeout: 30_000 });
 }
 
 /** Набирає текст у полі Monaco. */

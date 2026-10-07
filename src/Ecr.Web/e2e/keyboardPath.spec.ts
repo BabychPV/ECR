@@ -207,7 +207,36 @@ test.describe('Прохід оператора без миші (ФВ-14.16)', ()
     const validate = page.getByRole('button', { name: /Validate|Перевір/i }).first();
     if ((await validate.count()) > 0) {
       await expectFocusRing(page, validate, 'кнопка перевірки');
+      const validated = waitForWrite(page, 'POST', 'validate');
       await page.keyboard.press('Enter');
+
+      // ⛔ UI-25 (макет `runValidate`): перевірка із зауваженнями відкриває
+      // інспектор на вкладці Issues і переносить туди фокус, а на ≥ 1181 px
+      // робоча область стискається на 320 px. Це очікувана поведінка, не
+      // дефект. Але без очікування відповідь приходила ПОСЕРЕД виміру кільця
+      // «Submit» нижче: шапка з'їжджала між знімками («розкладка зрушила на
+      // 679 px»), а кнопка перемонтовувалась («Element is not attached»).
+      // Тож спершу — відповідь, потім усталена шапка: положення «Submit» не
+      // міняється між двома читаннями (інспектор відкривається ефектом уже
+      // ПІСЛЯ відповіді, тож одного лише очікування відповіді мало).
+      expect((await validated).status(), 'сервер не виконав перевірку').toBe(200);
+      const submitButton = page.getByRole('button', { name: /Submit|Подати/i }).first();
+      // ⚠ Три однакові читання поспіль (~0.75 с), а не два: лінивий чанк
+      // інспектора може вантажитися довше за один інтервал.
+      let previous = '';
+      let same = 0;
+      await expect
+        .poll(
+          async () => {
+            await page.waitForTimeout(250);
+            const current = JSON.stringify(await submitButton.boundingBox());
+            same = current === previous ? same + 1 : 0;
+            previous = current;
+            return same >= 3;
+          },
+          { message: 'шапка документа не усталилася після перевірки', timeout: 15_000 },
+        )
+        .toBe(true);
     }
 
     // ── 9. Подання ───────────────────────────────────────────────────────
