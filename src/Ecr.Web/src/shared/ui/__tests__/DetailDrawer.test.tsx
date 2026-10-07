@@ -163,6 +163,16 @@ describe('DetailDrawer — ≥ 1200 px: сторінка лишається жи
     expect(document.querySelectorAll('.mantine-Drawer-overlay')).toHaveLength(0);
   });
 
+  it('batch-4 P3: немодальна шторка — без aria-modal, роль dialog лишається', async () => {
+    stubViewport(true);
+    render(scene(`/admin/security?panel=${Panel}`, () => {}, () => {}));
+
+    const dialog = screen.getByRole('dialog');
+    await waitFor(() => {
+      expect(dialog.hasAttribute('aria-modal')).toBe(false);
+    });
+  });
+
   it('фокус НЕ викрадено: він лишається там, де був', async () => {
     stubViewport(true);
     render(scene(`/admin/security?panel=${Panel}`, () => {}, () => {}));
@@ -210,6 +220,14 @@ describe('DetailDrawer — вузький екран: це модальний ш
 
     expect(document.querySelector('[data-wide]')?.getAttribute('data-wide')).toBe('false');
     expect(document.querySelectorAll('.mantine-Drawer-overlay')).toHaveLength(1);
+  });
+
+  it('batch-4 P3: модальний шар лишається з aria-modal="true"', async () => {
+    stubViewport(false);
+    render(scene(`/admin/security?panel=${Panel}`, () => {}, () => {}));
+
+    await settle();
+    expect(screen.getByRole('dialog').getAttribute('aria-modal')).toBe('true');
   });
 
   it('фокус переходить УСЕРЕДИНУ шторки (пастка увімкнена)', async () => {
