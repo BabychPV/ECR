@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { RoleView } from '@/api/types';
-import { roleLabel } from '@/pages/admin/grants/roleLabel';
+import { roleLabel } from '@/features/security/roleLabel';
 
 /**
  * Назва ролі з `GET /roles` (`nameL10n`) замість коду.

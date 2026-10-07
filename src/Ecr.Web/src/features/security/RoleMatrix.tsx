@@ -4,7 +4,7 @@ import type { PermissionCatalogItem, RoleView } from '@/api/types';
 import { PermissionCaption } from '@/features/security/PermissionCaption';
 import { SecurityIcon } from '@/features/security/securityIcons';
 import { groupPermissions, permissionGroupLabel, roleHas } from '@/features/security/permissionGroups';
-import { roleLabel } from '@/pages/admin/grants/roleLabel';
+import { roleLabel } from '@/features/security/roleLabel';
 import { t } from '@/shared/i18n';
 import './securityRoles.css';
 
