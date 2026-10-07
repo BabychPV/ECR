@@ -284,6 +284,11 @@ describe('UnitsPage: позначення замість коду (звірка 
     const tonne = within(table).getByRole('button', { name: 't' }).closest('tr');
     expect(tonne?.textContent).toContain('KG*');
 
+    // Сама базова — приглушеним словом, а не капітельним бейджем.
+    const kilogram = within(table).getByRole('button', { name: 'KG*' }).closest('tr');
+    expect(kilogram?.querySelector('[data-unit-base]')).not.toBeNull();
+    expect(kilogram?.querySelector('.mantine-Badge-root')).toBeNull();
+
     fireEvent.change(screen.getByLabelText('Search'), { target: { value: '°' } });
     await waitFor(() => {
       expect(shownCodes(table)).toEqual(['degC']);
