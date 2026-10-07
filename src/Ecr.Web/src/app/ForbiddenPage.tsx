@@ -1,103 +1,92 @@
-import { useEffect, useRef, type JSX } from 'react';
-import { Anchor, Center, Code, Stack, Text, Title } from '@mantine/core';
+import type { JSX } from 'react';
+import { Button, Code, Group, Text } from '@mantine/core';
 import { Link, useLocation } from 'react-router-dom';
+import { permissionLabel } from '@/features/security/permissionLabel';
 import { t } from '@/shared/i18n';
-import { announceRoute } from '@/shared/ui/RouteAnnouncer';
-import { RouteHeadingClass } from '@/shared/theme/routeHeading';
+import { showApiError, showDone } from '@/shared/ui/notify';
+import { ServiceStatePage } from './ServiceStatePage';
 
 /**
- * Стан локації, яким `RouteGuard` передає причину відмови (`UI-09`,
- * L-правило про доступ: окремий маршрут `/403` замість inline-відмови).
+ * Стан локації, яким `RouteGuard` передає причину відмови (`UI-09`).
  *
- * ⚠ `state`, а не query-рядок (`?permission=...`). Той самий інваріант, що
- * вже діє для редиректу на `/login` (`AppLayout.tsx`:
- * `<Navigate to="/login" state={{ from: location.pathname }} />`): право —
- * не значення, яким користувач має ділитися посиланням чи бачити в
- * адресному рядку як параметр, яким нібито можна керувати.
+ * ⚠ `state`, а не query-рядок (`?permission=...`) — той самий інваріант, що й
+ * для редиректу на `/login`: право — не параметр, яким користувач керує з
+ * адресного рядка.
  */
 interface ForbiddenLocationState {
   /** Право, якого бракує (`RouteHandle.permission`). */
   permission?: string;
 }
 
+/** Стабільний код відмови — той самий, що в серверній `ECR-AUTH-0403` (`Q-242`). */
+export const ForbiddenErrorCode = 'ECR-AUTH-0403';
+
 /**
- * Окрема сторінка маршруту `/403` (`UI-09`, L-правило; `router.tsx`).
+ * Окрема сторінка маршруту `/403` (`UI-09`; `router.tsx`), вигляд — за макетом
+ * (b4b; `screens-work.js` `/403`, D15-01): піктограма, заголовок, яке право
+ * потрібне ЛЮДСЬКОЮ назвою, «нічого не змінено, попросіть адміністратора»,
+ * чипи коду права й коду помилки з копіюванням, «See my access» і головна
+ * «Back to Documents».
  *
- * ⛔ До цієї картки `RouteGuard` рендерив цю відмову INLINE, на адресі
- * забороненого маршруту (`AccessDeniedPage` жила прямо в `RouteGuard.tsx`) —
- * директива (A3) залишала вибір «явна сторінка "немає доступу" АБО редирект»
- * відкритим, а `DIRECTIVE-15-FRONTEND.md:193` прямо називала `/403`
- * відсутнім маршрутом (`◐`). Ця картка закриває прогалину: `RouteGuard`
- * тепер робить `<Navigate to="/403" replace state={{ permission }} />`
- * (`RouteGuard.tsx`) замість монтування відмови на місці — той самий підхід,
- * що вже діє для `/login` (`AppLayout.tsx`). Перевага окремого маршруту над
- * inline: одна канонічна адреса помилки, симетрична `/404`
- * (`NotFoundPage.tsx`) — обидві поза `routes.ts` (без права, без пункту
- * навбару), обидві останнім записом `withRenderErrorBoundary` у `router.tsx`.
+ * ⚠ Ролі, що мають право, і хто їх видає, макет показує поіменно — клієнт цього
+ * не знає без `Security.View` (D15-06: елемент без даних не малюється).
  *
- * ⚠ Той самий текст, що й серверна відмова `ECR-AUTH-0403`
- * (`ExceptionHandlingMiddleware.LocalizedDetailAsync`, `Q-242`): каталог уже
- * несе `err.ECR-AUTH-0403` і `err.ECR-AUTH-0403.requiresPermission` трьома
- * мовами (`09-seed.sql`) — ця картка НІЧОГО не додає в каталог рядків.
+ * ⚠ `permission` у `state` може бути відсутнім (закладка, ручний URL) — тоді
+ * лише заголовок, пояснення й дії, без рядка про право.
  *
- * ⚠ `permission` у `state` може бути відсутнім: користувач може перейти на
- * `/403` НАПРЯМУ (закладка, вручну набраний URL, кнопка "назад" після
- * повторної навігації) — `useLocation().state` тоді `null`. Рядок «яке право
- * потрібне» показується лише коли право відоме; сам заголовок відмови — завжди,
- * так само, як `/404` завжди показує заголовок незалежно від того, звідки на
- * нього прийшли.
- *
- * ⚠ Той самий прийом фокуса й `aria-live`, що й раніше в `AccessDeniedPage`
- * (`Q-279`, `PR nav-arch #7`) — навмисно ІНЛАЙН тут, а не через `PageHeader`:
- * розмітка відмови центрована (`Center`/`Stack align="center"`), та сама
- * причина, що й у `NotFoundPage.tsx`.
+ * ⛔ Не тупиковий екран (`ФВ-14.24`): «Back to Documents» і «See my access» —
+ * обидва маршрути без права.
  */
 export function ForbiddenPage(): JSX.Element {
   const location = useLocation();
   const state = location.state as ForbiddenLocationState | null;
   const permission = state?.permission;
 
-  const heading = useRef<HTMLHeadingElement>(null);
-  const focused = useRef(false);
-  const title = t('err.ECR-AUTH-0403');
-
-  useEffect(() => {
-    // ⛔ Рівно ОДИН раз за монтування — той самий інваріант, що й
-    // `NotFoundPage.tsx`/колишній `AccessDeniedPage.tsx`.
-    if (focused.current) return;
-
-    focused.current = true;
-    heading.current?.focus();
-  }, []);
-
-  useEffect(() => {
-    announceRoute(title);
-  }, [title]);
+  async function copyRequest(): Promise<void> {
+    // ⛔ `try`/`catch` — як у `CodeText`: на `http://` поза localhost буфера обміну немає.
+    try {
+      await navigator.clipboard.writeText(
+        `ECR access request · ${permission ?? ''} (${permission === undefined ? '' : permissionLabel(permission)}) · ${ForbiddenErrorCode}`,
+      );
+      showDone(t('nav.accessDenied.copied'));
+    } catch (failure) {
+      showApiError(failure);
+    }
+  }
 
   return (
-    <Center py="xl">
-      {/* ✎ 2026-10-06, вимога людини «текст в одну строку»: заголовок відмови
-          ламався на два рядки — 26px (`order={2}`) у контейнері 420px. Тепер
-          за гібридним макетом (`docs/design/hybrid`, `.work-state` 560px,
-          `.work-state-h` 15px/600): рядок уміщається на будь-якій звичайній
-          ширині, а на вузькому екрані `ta="center"` дає перенос по центру. */}
-      <Stack gap="xs" align="center" maw={560} role="alert">
-        <Title order={2} fz="md" fw={600} ref={heading} tabIndex={-1} ta="center" className={RouteHeadingClass}>
-          {title}
-        </Title>
-
-        {permission !== undefined && (
-          <Text size="sm" c="dimmed" ta="center">
-            {t('err.ECR-AUTH-0403.requiresPermission')} <Code>{permission}</Code>
+    <ServiceStatePage icon="ban" title={t('nav.accessDenied.title')}>
+      {permission !== undefined && (
+        <Text size="sm" c="dimmed" ta="center">
+          {t('err.ECR-AUTH-0403.requiresPermission')}{' '}
+          <Text span fw={600} c="var(--mantine-color-text)">
+            «{permissionLabel(permission)}»
           </Text>
-        )}
+        </Text>
+      )}
 
-        {/* ⛔ Не тупиковий екран (`ФВ-14.24`): посилання назад на домашній
-            маршрут — єдиний доступний хід, який не вимагає жодного права. */}
-        <Anchor component={Link} to="/" size="sm">
-          {t('nav.documents')}
-        </Anchor>
-      </Stack>
-    </Center>
+      <Text size="sm" c="dimmed" ta="center">
+        {t('nav.accessDenied.text')}
+      </Text>
+
+      <Group gap="xs" justify="center">
+        {permission !== undefined && <Code data-forbidden-permission="">{permission}</Code>}
+        <Code>{ForbiddenErrorCode}</Code>
+        {permission !== undefined && (
+          <Button size="compact-sm" variant="subtle" onClick={() => void copyRequest()}>
+            {t('nav.accessDenied.copy')}
+          </Button>
+        )}
+      </Group>
+
+      <Group gap="xs" justify="center" mt="xs">
+        <Button component={Link} to="/my-groups" variant="default">
+          {t('nav.accessDenied.myAccess')}
+        </Button>
+        <Button component={Link} to="/">
+          {`← ${t('nav.backToDocuments')}`}
+        </Button>
+      </Group>
+    </ServiceStatePage>
   );
 }
