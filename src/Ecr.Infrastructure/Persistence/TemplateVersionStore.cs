@@ -561,6 +561,7 @@ public sealed partial class TemplateVersionStore(EcrDbContext db) : ITemplateVer
         await CloneAccessRulesAsync(clone, clonedFrom, grantSources, ct).ConfigureAwait(false);
         await CloneCalculationBindingsAsync(clone, grantSources, ct).ConfigureAwait(false);
         await CloneConditionalFormatsAsync(clone.Id, clonedFrom, ct).ConfigureAwait(false);
+        await CloneSheetGroupRulesAsync(clone.Id, clonedFrom, ct).ConfigureAwait(false);
         SetClonedFrom(clone, clonedFrom);
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
     }
@@ -581,6 +582,24 @@ public sealed partial class TemplateVersionStore(EcrDbContext db) : ITemplateVer
         db.ConditionalFormatRules.AddRange(source.Select(r => new ConditionalFormatRule(
             cloneId, r.ColumnCode, r.Ordinal, r.Operator, r.Value, r.ValueTo,
             r.BackgroundHex, r.ForegroundHex, r.IsBold)));
+    }
+    /// <summary>
+    /// D-13: правила складу документа (<c>cfg.SheetGroupRule</c>) належать версії й посилаються на групи аркушів
+    /// ТЕКСТОМ (<c>SheetGroup</c>/<c>TargetGroup</c> = <c>SheetDef.SheetGroup</c>), без Id аркуша/таблиці/колонки,
+    /// тож ремап не потрібен — рядок копіюється як є. <c>cfg.RegistryRuleDef</c> сюди не належить: це правила
+    /// довідника (<c>RegistryDefId</c>), а довідники не версіонуються.
+    /// </summary>
+    private async Task CloneSheetGroupRulesAsync(int cloneId, int sourceId, CancellationToken ct)
+    {
+        var source = await db.SheetGroupRules
+            .AsNoTracking()
+            .Where(r => r.TemplateVersionId == sourceId)
+            .OrderBy(r => r.Id)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        db.SheetGroupRules.AddRange(source.Select(r => new SheetGroupRule(
+            cloneId, r.SheetGroup, r.RuleKind, r.TargetGroup)));
     }
     /// <inheritdoc />
     /// <remarks>
