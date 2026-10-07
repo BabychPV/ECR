@@ -409,6 +409,8 @@ public sealed partial class EndpointCoverageTests
             "UI-30: екран у командній палітрі — назва пункту меню."),
         new("features/search/DataSearchPalette.tsx", "group.labelKey", 1, "app/routes.ts", NavGroupLabelKeys,
             "UI-30: група меню як підпис екрана в палітрі."),
+        new("app/NotFoundPage.tsx", "route.handle.labelKey", 1, "app/routes.ts", RouteLabelKeys,
+            "404: «Можливо, ви мали на увазі» — назва пункту меню."),
 
         new("features/grid/permissions.ts", "Hints[reason]", 1, "features/grid/permissions.ts",
             [
