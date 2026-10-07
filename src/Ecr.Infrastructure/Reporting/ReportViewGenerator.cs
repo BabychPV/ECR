@@ -49,10 +49,6 @@ public sealed partial class ReportViewGenerator(
             // X-Correlation-Id і в scope логу (CorrelationIdMiddleware), а не TraceId з Activity:
             // інакше текст /health/ready називав би один id, а журнал із заголовком — інший.
             // Поза запитом (старт) accessor дає null — тоді власний id.
-            // ⚠ Усередині HTTP-запиту (публікація версії) беремо ТОЙ САМИЙ id, що в заголовку
-            // X-Correlation-Id і в scope логу (CorrelationIdMiddleware), а не TraceId з Activity:
-            // інакше текст /health/ready називав би один id, а журнал із заголовком — інший.
-            // Поза запитом (старт) accessor дає null — тоді власний id.
             var correlationId = correlation?.CorrelationId ?? SafeErrorText.NewCorrelationId();
             if (logger is not null)
             {
