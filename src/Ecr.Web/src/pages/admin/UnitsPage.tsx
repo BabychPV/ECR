@@ -329,9 +329,11 @@ export function UnitsPage(): JSX.Element {
       sortValue: (unit) => bases.get(unit.dimensionId) ?? null,
       render: (unit) =>
         bases.get(unit.dimensionId) === unit.code ? (
-          <Badge size="xs" variant="light">
+          // ⚠ Макет: приглушене слово («is the base»), а не капітельний бейдж «BASE» (звірка
+          // batch-4 з макетом, п.19): це не стан, а відповідь на питання колонки.
+          <Text span size="sm" c="dimmed" data-unit-base="">
             {t('units.base')}
-          </Badge>
+          </Text>
         ) : (
           baseSymbol(unit.dimensionId)
         ),
