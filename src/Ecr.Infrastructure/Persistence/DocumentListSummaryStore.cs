@@ -6,8 +6,16 @@ using Microsoft.EntityFrameworkCore;
 namespace Ecr.Infrastructure.Persistence;
 
 /// <summary>Реалізація <see cref="IDocumentListSummaryStore"/>: один агрегований запит.</summary>
-public sealed class DocumentListSummaryStore(EcrDbContext db) : IDocumentListSummaryStore
+public sealed class DocumentListSummaryStore(
+    EcrDbContext db, Microsoft.Extensions.Caching.Memory.IMemoryCache? cache = null, Ecr.Domain.Abstractions.IClock? clock = null)
+    : IDocumentListSummaryStore
 {
+    /// <summary>Життя запису лічильників застарілих результатів (без інвалідації: достатньо TTL).</summary>
+    public static readonly TimeSpan StaleCountsTtl = TimeSpan.FromSeconds(45);
+
+    /// <summary>Кеш увімкнено (задано і сховище, і годинник).</summary>
+    public bool CacheEnabled => cache is not null && clock is not null;
+
     /// <inheritdoc />
     /// <remarks>
     /// ⚠ Сирий SQL, а не LINQ: стан документа — агрегат по аркушах, а лічильник
