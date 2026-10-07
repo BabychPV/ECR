@@ -206,6 +206,80 @@ public sealed class PeriodStateJobResilienceTests(SqlServerFixture sql)
         }
     }
 
+    /// <summary>
+    /// SEC (TIER2): у <c>failed[].error</c> зведення — кореляція задачі (та сама, що в scope журналу),
+    /// а не номер, якого в журналі немає. Мутація: прибрати <c>JobCorrelation.Current ??</c> у
+    /// <c>PeriodStateJob</c> (рядок із <c>failed</c>) — червоний.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Directive", "SEC-TIER2")]
+    public async Task Збій_проєкту_в_failed_несе_кореляцію_задачі_без_тексту_винятку()
+    {
+        const string correlation = "feedface0123456789abcdef01234567";
+
+        using (JobCorrelation.Begin(correlation))
+        {
+            var (details, brokenCode) = await RunBrokenProjectAsync();
+
+            Assert.Contains($"\"project\":\"{brokenCode}\"", details, StringComparison.Ordinal);
+            Assert.Contains($"(correlation {correlation})", details, StringComparison.Ordinal);
+            Assert.DoesNotContain("period state", details, StringComparison.Ordinal);
+            Assert.DoesNotContain(FailPeriodSave.Message, details, StringComparison.Ordinal);
+        }
+    }
+
+    /// <summary>Поза задачею (виклик без <c>JobCorrelation</c>) — запасний ідентифікатор «period state &lt;проєкт&gt;».</summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Directive", "SEC-TIER2")]
+    public async Task Збій_проєкту_поза_задачею_у_failed_має_запасний_варіант_із_кодом_проєкту()
+    {
+        Assert.Null(JobCorrelation.Current);
+
+        var (details, brokenCode) = await RunBrokenProjectAsync();
+
+        Assert.Contains($"(correlation period state {brokenCode})", details, StringComparison.Ordinal);
+        Assert.DoesNotContain(FailPeriodSave.Message, details, StringComparison.Ordinal);
+    }
+
+    /// <summary>Прогін задачі станів, де один проєкт «б'ється» на збереженні; повертає DetailsJson його рядка.</summary>
+    private async Task<(string Details, string BrokenCode)> RunBrokenProjectAsync()
+    {
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var broken = await builder.BuildAsync(ct: CancellationToken.None);
+        var baseline = await LastRunIdAsync(builder);
+
+        try
+        {
+            string brokenCode;
+            await using (var seed = builder.CreateContext())
+            {
+                await ArmPeriodAsync(seed, broken, ShortGrace());
+                brokenCode = (await seed.Projects.SingleAsync(p => p.Id == broken.ProjectId)).Code;
+            }
+
+            await using (var db = new EcrDbContext(new DbContextOptionsBuilder<EcrDbContext>()
+                .UseSqlServer(sql.ConnectionString, o => o.MigrationsHistoryTable("__EFMigrationsHistory", "dbo"))
+                .AddInterceptors(new FailPeriodSave(broken.ProjectId))
+                .Options))
+            {
+                Assert.NotNull(await Record.ExceptionAsync(() => RunAsync(db, StateRun, new ListLogger())));
+            }
+
+            var run = Assert.Single(await RunsMentioningAsync(builder, baseline, brokenCode));
+            Assert.Equal("Failed", run.Status);
+            return (run.DetailsJson!, brokenCode);
+        }
+        finally
+        {
+            await RetireAsync(builder, broken);
+            await ForgetRunsAsync(builder, baseline);
+        }
+    }
+
     private static Task RunAsync(EcrDbContext db, DateTime at, ILogger<PeriodStateJob> logger)
         => new PeriodStateJob(
                 db, new PeriodStateCalculator(), new UnitOfWork(db), new TestClock(at),
