@@ -184,12 +184,16 @@ public sealed class HiddenSheetRouteMatrixTests(SqlServerFixture sql)
         Assert.DoesNotContain(s.HiddenName, reply.Body, StringComparison.Ordinal);
     }
 
-    [Fact(Skip = "TODO-R6-DENY-TEMPLATE: продуктове рішення — чи бачить автор документа з Deny на аркуш склад шаблону (майстру створення він потрібен, обов'язкові аркуші й правила груп), див. ANALIZ-RC6-LANES.md")]
+    [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "ФВ-6.14")]
-    public async Task Шаблон_документа_для_читача_з_Deny_на_аркуш_не_називає_схований_аркуш()
+    public async Task Шаблон_документа_для_читача_з_Deny_на_аркуш_лишає_конфігурацію_шаблону_свідомо()
     {
+        // Свідомо (рішення координатора RC6 06–07.10, R-6 варіант 1): код/назва аркуша — конфігурація шаблону;
+        // обмеження RC6, див. реліз-нотатки; змінюється лише разом із рішенням про групи/обов'язкові аркуші.
+        // Фільтр зламав би обов'язкові аркуші й SheetGroupRule у майстрі створення (POST /documents з неповним
+        // складом дав би 422, що саме розкриває аркуш). Дані/стани/лічильники схованого аркуша тут не віддаються.
         var s = await ArrangeAsync("deny").ConfigureAwait(true);
         using var app = new EcrApiFactory(sql);
         using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
@@ -198,8 +202,8 @@ public sealed class HiddenSheetRouteMatrixTests(SqlServerFixture sql)
 
         Assert.True(reply.Status == HttpStatusCode.OK, $"deny: {reply.Status}\n{reply.Body}");
         Assert.Contains(s.VisibleCode, reply.Body, StringComparison.Ordinal);
-        Assert.DoesNotContain(s.HiddenCode, reply.Body, StringComparison.Ordinal);
-        Assert.DoesNotContain(s.HiddenName, reply.Body, StringComparison.Ordinal);
+        Assert.Contains(s.HiddenCode, reply.Body, StringComparison.Ordinal);
+        Assert.Contains(s.HiddenName, reply.Body, StringComparison.Ordinal);
     }
 
     [Fact]
