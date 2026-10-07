@@ -5891,6 +5891,181 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/methodologies/{id}/versions/{vid}/category-rule": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Правило категорії константи версії (L-2). Право `Calculation.View`.
+         * @description ⚠ Правила може не бути — тоді `200` з `expression = null` (версія без категорій),
+         *     а `404` лишається для версії, якої немає.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Методологія. */
+                    id: number;
+                    /** @description Версія. */
+                    vid: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MethodologyCategoryRuleDto"];
+                        "text/json": components["schemas"]["MethodologyCategoryRuleDto"];
+                        "text/plain": components["schemas"]["MethodologyCategoryRuleDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        /**
+         * Ставить правило категорії константи версії-чернетки. Право `Calculation.EditRule`.
+         * @description ⛔ Одне правило на версію (B13): вираз над РЯДКОМ документа, що дає текст — ключ категорії
+         *     (`Diesel`, `Loc_BeforeMR_B`). Рушій рахує його раз на рядок, після Row-формул і до
+         *     циклу речовин; рядок, для якого правило не дало ключа, не рахується.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Методологія. */
+                    id: number;
+                    /** @description Версія-чернетка. */
+                    vid: number;
+                };
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["SaveMethodologyCategoryRuleRequest"];
+                    "application/json": components["schemas"]["SaveMethodologyCategoryRuleRequest"];
+                    "text/json": components["schemas"]["SaveMethodologyCategoryRuleRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MethodologyCategoryRuleDto"];
+                        "text/json": components["schemas"]["MethodologyCategoryRuleDto"];
+                        "text/plain": components["schemas"]["MethodologyCategoryRuleDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        /** Прибирає правило категорії константи версії-чернетки. Право `Calculation.EditRule`. */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Методологія. */
+                    id: number;
+                    /** @description Версія-чернетка. */
+                    vid: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/methodologies/{id}/versions/{vid}/constants": {
         parameters: {
             query?: never;
@@ -20653,6 +20828,17 @@ export interface components {
             /** @description Чи змінилася конвенція. */
             isChanged?: boolean;
         };
+        /** @description Правило категорії константи версії (L-2, `calc.CategoryRule`): вираз «рядок → ключ категорії». */
+        MethodologyCategoryRuleDto: {
+            /** @description Вираз діалекту Methodology (`!ECW_Location`, `if(@Land_TypeFuel = …, 'Diesel', …)`);
+             *     `null` — у версії правила немає, і константи резолвляться без категорії. */
+            expression: null | string;
+            /**
+             * Format: date-time
+             * @description Коли правило востаннє змінювали (UTC); `null` — правила немає.
+             */
+            updatedAt: null | string;
+        };
         /** @description Константа версії методології (ФВ-16.1, ФВ-16.5). */
         MethodologyConstantDto: {
             /** @description Категорія звуження; `null` — спільна. */
@@ -20743,7 +20929,7 @@ export interface components {
          * @description Що саме порівнюється у двох версіях.
          * @enum {unknown}
          */
-        MethodologyDiffItemKind: "Formula" | "Constant" | "TestCase";
+        MethodologyDiffItemKind: "Formula" | "Constant" | "TestCase" | "CategoryRule";
         /** @description Версія методології в **конфігураторі** — на відміну від
          *     MethodologyVersionDto, тут є і чернетки. */
         MethodologyDraftVersionDto: {
@@ -20910,6 +21096,10 @@ export interface components {
         MethodologyImportVersionDto: {
             /** @description `create`, `unchanged` або `conflict`. */
             action: string;
+            /** @description L-2: що пакет робить із правилом категорії версії — `added` (створюється разом з чернеткою),
+             *     `unchanged` (версія вже є з тим самим правилом), `conflict` (версія є з іншим вмістом);
+             *     `null` — вузла `categoryRule` у пакеті немає. */
+            categoryRule?: null | string;
             /**
              * Format: int32
              * @description Скільки рядків констант (значень).
@@ -20975,6 +21165,12 @@ export interface components {
              * @description Одиниця результату; обов'язкова.
              */
             unitId: number;
+        };
+        /** @description Правило категорії константи версії пакета (L-2). */
+        MethodologyPackageCategoryRuleDto: {
+            /** @description Вираз діалекту Methodology над рядком документа, що дає ключ категорії (текст):
+             *     `!ECW_Category`, `if(@Land_TypeFuel = 'Diesel - Дизель', 'Diesel', …)`. */
+            expression: null | string;
         };
         /** @description Константа пакета. */
         MethodologyPackageConstantDto: {
@@ -21045,6 +21241,7 @@ export interface components {
         };
         /** @description Версія методології пакета. */
         MethodologyPackageVersionDto: {
+            categoryRule?: null | components["schemas"]["MethodologyPackageCategoryRuleDto"];
             /** @description Константи зі значеннями. */
             constants: components["schemas"]["MethodologyPackageConstantDto"][];
             /** @description Формули (усі версії формул AF). */
@@ -23752,6 +23949,11 @@ export interface components {
              * @description `null` — нове поле стає останнім за порядком.
              */
             ordinal: null | number;
+        };
+        /** @description Правило категорії константи версії (L-2): вираз діалекту Methodology. */
+        SaveMethodologyCategoryRuleRequest: {
+            /** @description Вираз, що з рядка документа дає ключ категорії (текст). */
+            expression: string;
         };
         /** @description Запит на запис константи версії-чернетки. */
         SaveMethodologyConstantRequest: {
