@@ -7100,7 +7100,6 @@ USING (VALUES
     -- COLL:ui42narrow ── кінець секції ──
     -- COLL:a11y-pass ── зауваження успішного PATCH у гріді; 403 у каскаді гранта (A1-05); ru/kz — порцією COLL:a11y-pass у блоці I18N нижче ──
     (N'grid.patchNoticesTitle', N'en', N'Saved with remarks: {count}', 1),
-    (N'grants.pickerForbidden', N'en', N'No access to templates: picking a sheet, table or column needs the TemplateAdministrator role', 1),
     -- COLL:a11y-pass ── кінець секції ──
     -- COLL:ui39health ── UI-39: сторінка Health за макетом (банер, «Check now», «Copy diagnostics»); ru/kz — порцією COLL:ui39health у блоці I18N нижче ──
     (N'health.subtitle', N'en', N'Is ECR working right now? Each part is checked automatically; a warning appears only when there is something to do.', 1),
@@ -17214,9 +17213,7 @@ INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val
   FROM (VALUES
     (N'grid.patchNoticesTitle', N'ru', N'Сохранено с замечаниями: {count}'),
-    (N'grid.patchNoticesTitle', N'kz', N'Ескертпелермен сақталды: {count}'),
-    (N'grants.pickerForbidden', N'ru', N'Нет доступа к шаблонам: для выбора листа, таблицы или колонки нужна роль TemplateAdministrator'),
-    (N'grants.pickerForbidden', N'kz', N'Үлгілерге қол жеткізу жоқ: парақты, кестені немесе бағанды таңдау үшін TemplateAdministrator рөлі қажет')
+    (N'grid.patchNoticesTitle', N'kz', N'Ескертпелермен сақталды: {count}')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
