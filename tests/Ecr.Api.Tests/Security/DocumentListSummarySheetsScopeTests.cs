@@ -139,7 +139,7 @@ public sealed class DocumentListSummarySheetsScopeTests(SqlServerFixture sql)
     [Trait("Requirement", "ФВ-6.14")]
     public async Task До_затвердження_approver_null_автор_видимий()
     {
-        var s = await ArrangeAsync("none", approved: false).ConfigureAwait(true);
+        var s = await ArrangeAsync("none", "none").ConfigureAwait(true);
         using var app = new EcrApiFactory(sql);
         using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
 
@@ -148,6 +148,53 @@ public sealed class DocumentListSummarySheetsScopeTests(SqlServerFixture sql)
 
         Assert.Equal(s.UserName, one.GetProperty("ownerDisplayName").GetString());
         AssertApproverHidden("GET /documents/{id}", one);
+    }
+
+    /// <summary>Відхилений аркуш: у <c>ApprovedByUserId</c> лежить ТОЙ, ХТО ВІДХИЛИВ, - імені затверджувача немає.</summary>
+    [Theory]
+    [InlineData("rejected")]
+    [InlineData("reopened")]
+    [InlineData("events-reject")]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-6.14")]
+    public async Task Відхилення_і_повернення_в_роботу_не_дають_імені_затверджувача(string approval)
+    {
+        var s = await ArrangeAsync("none", approval).ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
+
+        var one = JsonDocument.Parse(await client.GetStringAsync(
+            new Uri($"/api/v1/documents/{s.DocumentId}?periodKey={s.PeriodKey}", UriKind.Relative)).ConfigureAwait(true)).RootElement;
+        var list = JsonDocument.Parse(await client.GetStringAsync(
+            new Uri($"/api/v1/documents?limit=200&periodKey={s.PeriodKey}", UriKind.Relative)).ConfigureAwait(true)).RootElement;
+        var item = list.GetProperty("items").EnumerateArray().Single(d => d.GetProperty("id").GetInt64() == s.DocumentId);
+
+        AssertApproverHidden("GET /documents/{id}", one);
+        AssertApproverHidden("GET /documents", item);
+    }
+
+    /// <summary>З журналу береться НАЙНОВІША Approve/ApproveStep (за часом), навіть проміжний крок іншого користувача.</summary>
+    [Theory]
+    [InlineData("events")]
+    [InlineData("events-submit-by-other")]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-6.14")]
+    public async Task Ім_я_затверджувача_береться_з_найновішої_події_затвердження(string approval)
+    {
+        var s = await ArrangeAsync("none", approval).ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
+
+        var one = JsonDocument.Parse(await client.GetStringAsync(
+            new Uri($"/api/v1/documents/{s.DocumentId}?periodKey={s.PeriodKey}", UriKind.Relative)).ConfigureAwait(true)).RootElement;
+        var list = JsonDocument.Parse(await client.GetStringAsync(
+            new Uri($"/api/v1/documents?limit=200&periodKey={s.PeriodKey}", UriKind.Relative)).ConfigureAwait(true)).RootElement;
+        var item = list.GetProperty("items").EnumerateArray().Single(d => d.GetProperty("id").GetInt64() == s.DocumentId);
+
+        Assert.Equal(s.OtherName, one.GetProperty("approverDisplayName").GetString());
+        Assert.Equal(s.OtherName, item.GetProperty("approverDisplayName").GetString());
     }
 
     private static void AssertApproverHidden(string endpoint, JsonElement doc)
@@ -162,9 +209,9 @@ public sealed class DocumentListSummarySheetsScopeTests(SqlServerFixture sql)
         Assert.False(shown, $"{endpoint}: ownerDisplayName звуженому читачу — {doc}");
     }
 
-    private sealed record Scenario(long DocumentId, int PeriodKey, string UserName);
+    private sealed record Scenario(long DocumentId, int PeriodKey, string UserName, string? OtherName = null);
 
-    private async Task<Scenario> ArrangeAsync(string how, bool approved = true)
+    private async Task<Scenario> ArrangeAsync(string how, string approval = "approved")
     {
         var b = await new TestDocumentBuilder(sql.ConnectionString).BuildAsync().ConfigureAwait(false);
         var tag = Guid.NewGuid().ToString("N")[..8].ToUpperInvariant();
@@ -215,17 +262,50 @@ public sealed class DocumentListSummarySheetsScopeTests(SqlServerFixture sql)
         {
             var state = new ApprovalState(b.DocumentId, sheetId, b.PeriodKey.Value);
             state.Submit(user.Id, now);
-            if (approved)
+            switch (approval)
             {
-                state.Approve(user.Id, now);
+                case "approved":
+                    state.Approve(user.Id, now);
+                    break;
+                case "rejected":
+                    state.Reject(user.Id, "no", now);
+                    break;
+                case "reopened":
+                    state.Approve(user.Id, now);
+                    state.Reopen(user.Id, "again", now.AddHours(1));
+                    break;
             }
 
             db.ApprovalStates.Add(state);
         }
 
+        // Журнал: «остання Approve/ApproveStep» (Reject/Reopen/Recall імені не дають).
+        string? otherName = null;
+        if (approval.StartsWith("events", StringComparison.Ordinal))
+        {
+            otherName = $"oth{Guid.NewGuid():N}"[..20];
+            var other = new User(otherName, otherName, AuthProvider.Local);
+            other.SetPassword(new PasswordHasher().Hash(Password));
+            db.Users.Add(other);
+            await db.SaveChangesAsync().ConfigureAwait(false);
+
+            var st = new ApprovalState(b.DocumentId, b.SheetDefId, b.PeriodKey.Value);
+            db.ApprovalEvents.Add(ApprovalEvent.For(st, DocumentStatus.Submitted, ApprovalAction.Approve, user.Id, now));
+            db.ApprovalEvents.Add(ApprovalEvent.For(st, DocumentStatus.Submitted, ApprovalAction.ApproveStep, other.Id, now.AddMinutes(5)));
+            if (approval == "events-reject")
+            {
+                db.ApprovalEvents.Add(ApprovalEvent.For(st, DocumentStatus.Submitted, ApprovalAction.Reject, user.Id, now.AddMinutes(10), "no"));
+            }
+
+            if (approval == "events-submit-by-other")
+            {
+                db.ApprovalEvents.Add(ApprovalEvent.For(st, DocumentStatus.Draft, ApprovalAction.Submit, user.Id, now.AddMinutes(10)));
+            }
+        }
+
         await db.SaveChangesAsync().ConfigureAwait(false);
 
-        return new Scenario(b.DocumentId, b.PeriodKey.Value, userName);
+        return new Scenario(b.DocumentId, b.PeriodKey.Value, userName, otherName);
     }
 
     private static async Task<HttpClient> SignedInAsync(EcrApiFactory app, string userName)
