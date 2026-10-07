@@ -10,7 +10,7 @@ import { ConfirmModal } from '@/shared/ui/ConfirmModal';
 import { registerUnsavedSource } from '@/shared/ui/unsavedSources';
 import { t } from '@/shared/i18n';
 import { EmptyPath, ResourcePicker, type PickPath } from '@/pages/admin/grants/ResourcePicker';
-import { roleLabel } from '@/pages/admin/grants/roleLabel';
+import { roleLabel } from '@/features/security/roleLabel';
 import { FilterInline, FilterRow } from '@/shared/ui/FilterBar';
 import { StatStrip } from '@/shared/ui/StatStrip';
 import { GrantLevelLadder } from '@/pages/admin/grants/GrantLevelLadder';

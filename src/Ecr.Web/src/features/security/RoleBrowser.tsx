@@ -10,7 +10,7 @@ import {
   roleHas,
   type PermissionGroup,
 } from '@/features/security/permissionGroups';
-import { roleLabel } from '@/pages/admin/grants/roleLabel';
+import { roleLabel } from '@/features/security/roleLabel';
 import { Banner } from '@/shared/ui/Banner';
 import { useUrlState } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
