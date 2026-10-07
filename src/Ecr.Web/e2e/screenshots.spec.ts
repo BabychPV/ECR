@@ -92,7 +92,8 @@ async function signIn(page: Page, user: string, password: string): Promise<void>
  *   каталогу англійською: стенд працює мовою `en`, інших мов цього ключа в
  *   сіді немає.
  */
-const AccessDenied = /ECR-AUTH-0403|You do not have permission for this action/;
+// ✎ b4b: сторінка `/403` за макетом — заголовок «You don’t have access to this page» і чип коду.
+const AccessDenied = /ECR-AUTH-0403|You do not have permission for this action|You don’t have access to this page/;
 
 async function expectNoAccessDenied(page: Page, where: string): Promise<void> {
   const denied = page.getByRole('alert').filter({ hasText: AccessDenied });
