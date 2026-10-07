@@ -152,9 +152,69 @@ public sealed class JobRestartTargetRightTests
         Assert.IsType<AcceptedResult>(await Controller().Restart(jobId, CancellationToken.None));
     }
 
-    private string Failed(string code, long? documentId = null)
+    // Реальний формат Quartz для цільових задач: `{Тип}~{ціль}~{guid}` (TargetPrefixOf).
+    private const string Guid32 = "0123456789abcdef0123456789abcdef";
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public async Task Quartz_перерахунок_документа_видимий_повторюється_а_невидимий_403()
     {
-        var jobId = $"{code}-0123456789abcdef0123456789abcdef";
+        var jobId = Failed("IRecalculationJob", DocumentId, $"IRecalculationJob~doc{DocumentId}-p202609~{Guid32}");
+        SignedIn("Document.View");
+        _access.CanReadDocumentAsync(Arg.Any<AccessProfile>(), DocumentId, Arg.Any<CancellationToken>())
+            .Returns(EditDecision.Allow());
+
+        Assert.IsType<AcceptedResult>(await Controller().Restart(jobId, CancellationToken.None));
+
+        _access.CanReadDocumentAsync(Arg.Any<AccessProfile>(), DocumentId, Arg.Any<CancellationToken>())
+            .Returns(EditDecision.Deny(EditDenyReason.NoGrant));
+
+        var denied = await Assert.ThrowsAsync<AccessDeniedException>(
+            () => Controller().Restart(jobId, CancellationToken.None));
+        Assert.Equal("err.ECR-AUTH-0403.jobNotYours", denied.Details?["messageKey"]);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public async Task Quartz_каскад_правки_документа_видимий_повторюється()
+    {
+        var jobId = Failed("IFormulaRecalculationJob", DocumentId, $"IFormulaRecalculationJob~d{DocumentId}~{Guid32}");
+        SignedIn("Document.View");
+        _access.CanReadDocumentAsync(Arg.Any<AccessProfile>(), DocumentId, Arg.Any<CancellationToken>())
+            .Returns(EditDecision.Allow());
+
+        Assert.IsType<AcceptedResult>(await Controller().Restart(jobId, CancellationToken.None));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public async Task Quartz_синк_подій_джерела_потребує_Integration_Manage()
+    {
+        var jobId = Failed("ISourceEventSyncJob", null, $"ISourceEventSyncJob~src1~{Guid32}");
+        SignedIn("Integration.View");
+
+        await Assert.ThrowsAsync<AccessDeniedException>(() => Controller().Restart(jobId, CancellationToken.None));
+
+        SignedIn("Integration.Manage");
+        Assert.IsType<AcceptedResult>(await Controller().Restart(jobId, CancellationToken.None));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public async Task Quartz_скан_сиріт_лише_з_ViewHealth()
+    {
+        var jobId = Failed("IOrphanScanJob", null, $"IOrphanScanJob~all~{Guid32}");
+        SignedIn("Period.Reopen");
+
+        await Assert.ThrowsAsync<AccessDeniedException>(() => Controller().Restart(jobId, CancellationToken.None));
+
+        SignedIn("System.ViewHealth");
+        Assert.IsType<AcceptedResult>(await Controller().Restart(jobId, CancellationToken.None));
+    }
+
+    private string Failed(string code, long? documentId = null, string? fullId = null)
+    {
+        var jobId = fullId ?? $"{code}-{Guid32}";
         _jobs.GetStatusAsync(jobId, Arg.Any<CancellationToken>())
             .Returns(new JobStatus(jobId, "Failed", 30, null, "boom", ErrorCode: "ECR-SYS-0500", DocumentId: documentId));
         _jobs.RestartAsync(jobId, Arg.Any<CancellationToken>()).Returns(true);
