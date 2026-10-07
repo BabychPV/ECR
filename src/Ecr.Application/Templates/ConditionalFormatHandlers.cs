@@ -28,7 +28,8 @@ public sealed class SaveConditionalFormatsHandler(
     ITemplateVersionStore store,
     IUnitOfWork uow,
     IAccessDecisionService access,
-    ICurrentUser currentUser)
+    ICurrentUser currentUser,
+    IClock clock)
 {
     /// <summary>Право на редагування структури версії — те саме, що на стиль і колонку.</summary>
     public const string Permission = "Template.Edit";
@@ -68,8 +69,15 @@ public sealed class SaveConditionalFormatsHandler(
                                ["messageKey"] = "err.ECR-REQ-0422.condFormatIfMatch",
                            });
 
+        var userId = currentUser.UserId
+            ?? throw new AccessDeniedException(
+                ErrorCodes.Unauthorized,
+                "Сесія не містить користувача.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.anonymousWrite" });
+
         var version = await store.GetWithStructureAsync(templateVersionId, ct).ConfigureAwait(false);
         version.EnsureStructurallyMutable();
+        version.TouchDraft(userId, clock.UtcNow);
 
         if (requested.Count > MaxRules)
         {

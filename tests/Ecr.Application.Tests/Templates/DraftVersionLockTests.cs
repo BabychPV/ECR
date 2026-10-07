@@ -216,10 +216,10 @@ public sealed class DraftVersionLockTests
                 .HandleAsync(1, _table.Id, "R1", ct),
             "SaveHeaderField" => new SaveHeaderFieldDefHandler(_store, classifier, _metadataCache, _audit, _uow, _clock, _access, _user)
                 .HandleAsync(1, "H1", new SaveHeaderFieldDefCommand(En("H1"), null, CellDataType.String, false, null), ct),
-            "SaveStyle" => new SaveStyleDefHandler(_styles, _store, _uow, _access, _user)
+            "SaveStyle" => new SaveStyleDefHandler(_styles, _store, _uow, _access, _user, _clock)
                 .HandleAsync(1, "ST1", new SaveStyleDefCommand(
                     "Calibri", 11m, false, false, null, null, null, null, null, false, null), ct),
-            "SaveConditionalFormats" => new SaveConditionalFormatsHandler(_rules, _store, _uow, _access, _user)
+            "SaveConditionalFormats" => new SaveConditionalFormatsHandler(_rules, _store, _uow, _access, _user, _clock)
                 .HandleAsync(1, [], ConditionalFormatsVersion.Of([]), ct),
             "DeleteFormula" => new DeleteFormulaDefHandler(_store, classifier, _metadataCache, _audit, _uow, _clock, _access, _user)
                 .HandleAsync(1, _table.Id, FormulaScope.Column,
