@@ -104,6 +104,58 @@ public sealed class MethodologyCategoryRuleApiTests(SqlServerFixture sql)
         Assert.Equal("@Fuel", read.GetProperty("expression").GetString());
     }
 
+    [Theory]
+    [InlineData("Origin", "https://evil.example")]
+    [InlineData("Sec-Fetch-Site", "cross-site")]
+    [InlineData("Sec-Fetch-Site", "same-site")]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task PUT_і_DELETE_з_чужого_сайту_дають_403_і_правило_не_змінюється(string header, string value)
+    {
+        // L1-04: глобальний CsrfOriginMiddleware (Program.cs) закриває й цей ендпоінт - тут це доведено, а не припущено.
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, EditorPermissions).ConfigureAwait(true);
+        var stand = await StandAsync(rule: "@Fuel").ConfigureAwait(true);
+
+        using var put = new HttpRequestMessage(HttpMethod.Put, Url(stand))
+        {
+            Content = JsonContent.Create(new { expression = "@Hacked" }),
+        };
+        put.Headers.Add(header, value);
+        using var putResponse = await client.SendAsync(put).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.Forbidden, putResponse.StatusCode);
+
+        using var delete = new HttpRequestMessage(HttpMethod.Delete, Url(stand));
+        delete.Headers.Add(header, value);
+        using var deleteResponse = await client.SendAsync(delete).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.Forbidden, deleteResponse.StatusCode);
+
+        var read = await ReadAsync(await client.GetAsync(Url(stand)).ConfigureAwait(true)).ConfigureAwait(true);
+        Assert.Equal("@Fuel", read.GetProperty("expression").GetString());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Той_самий_PUT_двічі_ідемпотентний_а_свій_Origin_проходить()
+    {
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, EditorPermissions).ConfigureAwait(true);
+        var stand = await StandAsync().ConfigureAwait(true);
+
+        await ReadAsync(await PutAsync(client, stand, "@Fuel").ConfigureAwait(true)).ConfigureAwait(true);
+        await ReadAsync(await PutAsync(client, stand, "@Fuel").ConfigureAwait(true)).ConfigureAwait(true);
+        Assert.Equal(1, await RuleCountAsync(stand.VersionId).ConfigureAwait(true));
+
+        using var own = new HttpRequestMessage(HttpMethod.Put, Url(stand))
+        {
+            Content = JsonContent.Create(new { expression = "@Fuel" }),
+        };
+        own.Headers.Add("Sec-Fetch-Site", "same-origin");
+        using var ownResponse = await client.SendAsync(own).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.OK, ownResponse.StatusCode);
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage4)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
