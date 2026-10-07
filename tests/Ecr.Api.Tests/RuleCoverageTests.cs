@@ -4,6 +4,7 @@ using System.Text.Json;
 using Ecr.Application.Calculations;
 using Ecr.Domain.Entities.Calculations;
 using Ecr.Domain.Entities.Configuration;
+using Ecr.Domain.Entities.Dictionaries;
 using Ecr.Domain.Entities.Documents;
 using Ecr.Domain.Entities.Security;
 using Ecr.Domain.Enums;
@@ -159,6 +160,56 @@ public sealed class RuleCoverageTests(SqlServerFixture sql)
         var title = problem.GetProperty("title").GetString();
         Assert.Equal("Invalid methodology request", title);
         Assert.DoesNotContain("publish", title, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <remarks>
+    /// L-3: <c>doc.CellValue.ValueRegistryEntryId</c> — <c>int</c>, а читач брав <c>GetInt64</c> →
+    /// <c>InvalidCastException</c> і <c>500</c> для шаблонів, чиї правила ключуються по Lookup-колонках.
+    /// Мутація: повернути <c>reader.GetInt64(o + 2)</c> у <c>RuleCoverageReader</c> → тест червоний.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-13.9")]
+    public async Task Правило_по_Lookup_колонці_дає_покриття_а_не_500()
+    {
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var a = await builder.BuildAsync(columnCount: 1, rowCount: 1).ConfigureAwait(false);
+        var column = a.ColumnDefIds[0];
+
+        await using var db = builder.CreateContext();
+        var registry = new RegistryDef(
+            EcrCode.Create($"L3_{a.TableDefId}"), new LocalizedText(new Dictionary<string, string> { ["en"] = "Substances" }), isTemporal: false);
+        db.RegistryDefs.Add(registry);
+        await db.SaveChangesAsync().ConfigureAwait(false);
+        var entry = new RegistryEntry(
+            registry.Id, EcrCode.Create("CO2"), new LocalizedText(new Dictionary<string, string> { ["en"] = "CO2" }));
+        db.RegistryEntries.Add(entry);
+        await db.SaveChangesAsync().ConfigureAwait(false);
+
+        db.CellValues.Add(new CellValue(
+            new CellAddress(a.PeriodKey, a.RowIds[0], column), a.TableDefId, new CellValueData { ValueRegistryEntryId = entry.Id }));
+
+        var methodology = new Methodology(
+            EcrCode.Create($"RC{Guid.NewGuid():N}"[..20]), new LocalizedText(new Dictionary<string, string> { ["en"] = "rules" }));
+        db.Methodologies.Add(methodology);
+        await db.SaveChangesAsync().ConfigureAwait(false);
+        var version = new MethodologyVersion(methodology.Id, "1.0", CalculationLevel.Configuration, createdByUserId: 1, Now);
+        db.MethodologyVersions.Add(version);
+        await db.SaveChangesAsync().ConfigureAwait(false);
+        db.MethodologyRules.Add(new MethodologyRule(
+            version.Id, EcrCode.Create("CO2_L"), $$"""{"{{column}}":"{{entry.Id}}"}""", 10));
+        db.CalculationBindings.Add(new CalculationBinding(a.TableDefId, column, methodology.Id, "tons", "{}"));
+        await db.SaveChangesAsync().ConfigureAwait(false);
+
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInWithProjectsAsync(app, a.ProjectId).ConfigureAwait(true);
+
+        var body = await CoverageAsync(client, app, new Stand(methodology.Id, version.Id, column, a.ProjectId, a.ProjectId))
+            .ConfigureAwait(true);
+        var combination = Assert.Single(body.GetProperty("combinations").EnumerateArray());
+        Assert.Equal("Covered", combination.GetProperty("state").GetString());
+        Assert.Equal("CO2_L", combination.GetProperty("winnerRuleCode").GetString());
     }
 
     private sealed record Stand(int MethodologyId, int VersionId, int ColumnId, int ProjectA, int ProjectB);
