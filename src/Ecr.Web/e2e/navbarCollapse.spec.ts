@@ -30,7 +30,7 @@ async function signIn(page: Page): Promise<void> {
 }
 
 async function navWidth(page: Page): Promise<number> {
-  const box = await page.locator('nav').first().boundingBox();
+  const box = await page.locator('nav:not(.ecr-crumbs)').boundingBox();
   if (box === null) throw new Error('меню не видно');
   return box.width;
 }
@@ -79,7 +79,7 @@ test.describe('Бічне меню: згортання до іконок', () =>
       expect(wideNav).toBeGreaterThan(200);
 
       // Назва пункту — на фокусі з клавіатури, без миші.
-      const firstItem = page.locator('nav a').first();
+      const firstItem = page.locator('nav:not(.ecr-crumbs) a').first();
       const name = await firstItem.getAttribute('aria-label');
       expect(name, 'згорнутий пункт без доступного імені').toBeTruthy();
       await firstItem.focus();
@@ -115,7 +115,7 @@ test.describe('Бічне меню: згортання до іконок', () =>
       // Мобільна ширина: шухляда за бургером, «лише іконки» не діє.
       await page.setViewportSize({ width: 390, height: 800 });
       await page.getByRole('button', { name: /Menu|Меню|Мәзір/ }).first().click();
-      await expect(page.locator('nav a').first()).toContainText(/\S/);
+      await expect(page.locator('nav:not(.ecr-crumbs) a').first()).toContainText(/\S/);
       await page.setViewportSize({ width: 1280, height: 800 });
     } finally {
       // ⚠ Спершу ширина: на мобільній кнопки згортання не видно (`visibleFrom`),
