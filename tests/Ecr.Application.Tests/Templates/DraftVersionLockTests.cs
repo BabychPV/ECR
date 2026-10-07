@@ -139,6 +139,37 @@ public sealed class DraftVersionLockTests
         Assert.Single(_events, e => e == "lock");
     }
 
+    public static TheoryData<string> TouchingHandlers() =>
+    [
+        "SaveSheet", "DeleteSheet", "SaveTable", "DeleteTable",
+        "SaveColumn", "DeleteColumn", "SaveRow", "DeleteRow",
+        "SaveHeaderField", "DeleteFormula", "DeleteTableRelation",
+    ];
+
+    /// <summary>
+    /// RC7 (UI-34): правка чернетки лишає слід — <c>TemplateVersion.UpdatedAt/UpdatedByUserId</c>,
+    /// з яких рахується <c>draftEditedAt</c> переліку шаблонів.
+    /// </summary>
+    /// <remarks>
+    /// Мутаційний доказ: прибрати <c>version.TouchDraft(...)</c> з будь-якого обробника — червоний
+    /// відповідний рядок теорії. Збереження стилю й умовного форматування не покриті навмисно
+    /// (обробники без годинника й користувача).
+    /// </remarks>
+    [Theory]
+    [MemberData(nameof(TouchingHandlers))]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    public async Task Правка_чернетки_ставить_момент_і_автора_останньої_правки(string handler)
+    {
+        _store.LockVersionForUpdateAsync(1, Arg.Any<CancellationToken>())
+            .Returns(TemplateVersionStatus.Draft);
+        Assert.Null(_draft.UpdatedAt);
+
+        await Run(handler);
+
+        Assert.Equal(Now, _draft.UpdatedAt);
+        Assert.Equal(9, _draft.UpdatedByUserId);
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
     public async Task Виведена_з_обігу_під_блоком_теж_заморожена()

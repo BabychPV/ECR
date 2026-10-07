@@ -84,6 +84,7 @@ public sealed class SaveHeaderFieldDefHandler(
         var version = await store.GetWithStructureAsync(templateVersionId, ct).ConfigureAwait(false);
 
         version.EnsureStructurallyMutable();
+        version.TouchDraft(userId, clock.UtcNow);
 
         var ecrCode = EcrCode.Create(code);
         var label = new LocalizedText(new Dictionary<string, string>(command.LabelL10n, StringComparer.OrdinalIgnoreCase));

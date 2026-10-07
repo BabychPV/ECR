@@ -85,6 +85,7 @@ public sealed class SaveSheetDefHandler(
         // ⛔ ПЕРШИМ ділом і доменом. Усе інше нижче має сенс лише там, де
         // правка взагалі дозволена (ФВ-7.1).
         version.EnsureStructurallyMutable();
+        version.TouchDraft(userId, clock.UtcNow);
 
         var ecrCode = EcrCode.Create(code);
         var name = new LocalizedText(new Dictionary<string, string>(command.NameL10n, StringComparer.OrdinalIgnoreCase));
@@ -284,6 +285,7 @@ public sealed class DeleteSheetDefHandler(
         var version = await store.GetWithStructureAsync(templateVersionId, ct).ConfigureAwait(false);
 
         version.EnsureStructurallyMutable();
+        version.TouchDraft(userId, clock.UtcNow);
 
         var sheet = version.Sheets.FirstOrDefault(s => string.Equals(s.Code, code, StringComparison.Ordinal))
             ?? throw new NotFoundException(

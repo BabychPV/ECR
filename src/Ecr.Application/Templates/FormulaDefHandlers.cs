@@ -120,6 +120,7 @@ public sealed class SaveFormulaDefHandler(
         // ⛔ ПЕРШИМ ділом і доменом — так само, як в усіх обробниках структури
         // чернетки: усе інше нижче має сенс лише там, де правка дозволена.
         version.EnsureStructurallyMutable();
+        version.TouchDraft(userId, clock.UtcNow);
 
         var (table, existing, resolvedId) = FindTarget(version, tableDefId, scope, target);
 
@@ -453,6 +454,7 @@ public sealed class DeleteFormulaDefHandler(
         var version = await store.GetWithStructureAsync(templateVersionId, ct).ConfigureAwait(false);
 
         version.EnsureStructurallyMutable();
+        version.TouchDraft(userId, clock.UtcNow);
 
         var (_, formula, _) = SaveFormulaDefHandler.FindTarget(version, tableDefId, scope, target);
 

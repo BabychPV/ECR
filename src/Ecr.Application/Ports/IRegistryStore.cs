@@ -111,6 +111,15 @@ public interface IRegistryStore
     public Task<IReadOnlySet<int>> ListDefinitionIdsWithDraftAsync(CancellationToken ct);
 
     /// <summary>
+    /// Відображувані імена (не логіни) користувачів за ідентифікаторами; користувача, якого вже
+    /// немає, у словнику немає.
+    /// </summary>
+    /// <param name="userIds">Ідентифікатори.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<IReadOnlyDictionary<int, string>> GetUserDisplayNamesAsync(
+        IReadOnlyCollection<int> userIds, CancellationToken ct);
+
+    /// <summary>
     /// Ставить нове визначення довідника в чергу на вставку; ідентифікатор
     /// з'являється після збереження.
     /// </summary>

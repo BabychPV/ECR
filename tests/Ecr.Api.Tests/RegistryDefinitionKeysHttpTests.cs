@@ -328,6 +328,33 @@ public sealed partial class RegistryDefinitionKeysHttpTests(SqlServerFixture sql
         Assert.NotEqual(current, await RegistryDefinitionHttpExtensions.ReadVersionAsync(client, url));
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Збереження_опису_ставить_оновлено_й_автора_а_перелік_віддає_їх_на_дріт()
+    {
+        // ⛔ Мутація: прибрати `definition.MarkDefinitionUpdated(...)` у застосуванні опису —
+        // `updatedAt` лишається null, обидва assert червоніють.
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app);
+        var before = DateTime.UtcNow.AddMinutes(-1);
+        var registry = await GroupedRegistryAsync(client);
+
+        var list = await client.GetAsync(new Uri("/api/v1/registries", UriKind.Relative));
+        var listBody = await list.Content.ReadAsStringAsync();
+        Assert.True(list.StatusCode == HttpStatusCode.OK, $"{list.StatusCode}: {listBody}\n{app.ErrorsText}");
+
+        var item = JsonDocument.Parse(listBody).RootElement.EnumerateArray()
+            .Single(d => d.GetProperty("id").GetInt32() == registry.Id);
+        Assert.True(item.GetProperty("updatedAt").GetDateTime().ToUniversalTime() > before, listBody);
+        Assert.False(string.IsNullOrWhiteSpace(item.GetProperty("updatedByDisplayName").GetString()), listBody);
+
+        await using var db = new EcrDbContext(Options());
+        var row = await db.RegistryDefs.AsNoTracking().SingleAsync(d => d.Id == registry.Id);
+        Assert.NotNull(row.DefinitionUpdatedAt);
+        Assert.NotNull(row.DefinitionUpdatedByUserId);
+    }
+
     /// <summary>Довідник із ключовим полем NAME і необов'язковим GROUP — через POST і PUT опису.</summary>
     private static async Task<Registry> GroupedRegistryAsync(HttpClient client)
     {

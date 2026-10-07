@@ -234,6 +234,7 @@ public sealed class CreatePeriodAccessRuleHandler(
 
         // ⛔ ПЕРШИМ ділом і доменом — так само, як SaveSheetDefHandler.
         version.EnsureStructurallyMutable();
+        version.TouchDraft(userId, clock.UtcNow);
 
         PeriodAccessRuleMapper.EnsureHasTarget(command.SheetDefId, command.TableDefId);
         PeriodAccessRuleMapper.EnsureBelongs(version, command.SheetDefId, command.TableDefId);
@@ -371,6 +372,7 @@ public sealed class SavePeriodAccessRuleHandler(
         var version = await store.GetWithStructureAsync(templateVersionId, ct).ConfigureAwait(false);
 
         version.EnsureStructurallyMutable();
+        version.TouchDraft(userId, clock.UtcNow);
 
         var rule = await rules.FindAsync(ruleId, ct).ConfigureAwait(false);
 
@@ -480,6 +482,7 @@ public sealed class DeletePeriodAccessRuleHandler(
         var version = await store.GetWithStructureAsync(templateVersionId, ct).ConfigureAwait(false);
 
         version.EnsureStructurallyMutable();
+        version.TouchDraft(userId, clock.UtcNow);
 
         var rule = await rules.FindAsync(ruleId, ct).ConfigureAwait(false);
 

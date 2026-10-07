@@ -84,6 +84,7 @@ public sealed class SaveColumnDefHandler(
         var version = await store.GetWithStructureAsync(templateVersionId, ct).ConfigureAwait(false);
 
         version.EnsureStructurallyMutable();
+        version.TouchDraft(userId, clock.UtcNow);
 
         var table = FindTable(version, tableDefId);
 
@@ -492,6 +493,7 @@ public sealed class DeleteColumnDefHandler(
         var version = await store.GetWithStructureAsync(templateVersionId, ct).ConfigureAwait(false);
 
         version.EnsureStructurallyMutable();
+        version.TouchDraft(userId, clock.UtcNow);
 
         var table = SaveColumnDefHandler.FindTable(version, tableDefId);
 

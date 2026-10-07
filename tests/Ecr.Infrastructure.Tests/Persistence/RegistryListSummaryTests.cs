@@ -6,6 +6,7 @@ using Ecr.Application.Security;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Entities.Dictionaries;
+using Ecr.Domain.Entities.Security;
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
 using Ecr.Infrastructure.Persistence;
@@ -105,6 +106,49 @@ public sealed class RegistryListSummaryTests(SqlServerFixture sql)
         Assert.Null(plain.UsedInTemplates);
         Assert.Null(plain.HasDraft);
         Assert.Null(viewer.Single(d => d.Id == withDraft).HasDraft);
+    }
+
+    /// <summary>
+    /// RC7 (UI-35): «оновлено» опису довідника — момент усім, хто бачить перелік, а ім'я автора
+    /// (відображуване, не логін) лише з <c>Registry.EditDefinition</c>.
+    /// </summary>
+    /// <remarks>
+    /// Мутаційний доказ: віддавати ім'я без перевірки <c>canSeeUsage</c> — червоний «viewer без імені».
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Перелік_віддає_оновлено_а_ім_я_автора_опису_лише_з_правом_опису()
+    {
+        var updated = new DateTime(2031, 1, 2, 3, 4, 5, DateTimeKind.Utc);
+        int registryId;
+
+        await using (var db = sql.CreateContext())
+        {
+            var author = new User($"grace_{_tag}", $"Grace Hopper {_tag}", AuthProvider.Local);
+            author.SetPassword(new Ecr.Infrastructure.Security.PasswordHasher().Hash("Reg-Updated-Probe-2026!"));
+            db.Users.Add(author);
+
+            var registry = new RegistryDef(EcrCode.Create($"RLU_{_tag}"), Text("Updated"), isTemporal: false);
+            db.RegistryDefs.Add(registry);
+            await db.SaveChangesAsync();
+
+            registry.MarkDefinitionUpdated(author.Id, updated);
+            await db.SaveChangesAsync();
+            registryId = registry.Id;
+        }
+
+        var editor = (await ListAsync(new AccessBuilder { UserId = 9 }
+            .Permission("Registry.View").Permission("Registry.EditDefinition"))).Single(d => d.Id == registryId);
+        var viewer = (await ListAsync(new AccessBuilder { UserId = 9 }
+            .Permission("Registry.View"))).Single(d => d.Id == registryId);
+
+        Assert.Equal(updated, editor.UpdatedAt);
+        Assert.Equal($"Grace Hopper {_tag}", editor.UpdatedByDisplayName);
+
+        // ⛔ Ім'я автора без права опису — null; момент лишається (як DataChangedAt).
+        Assert.Equal(updated, viewer.UpdatedAt);
+        Assert.Null(viewer.UpdatedByDisplayName);
     }
 
     private async Task<IReadOnlyList<RegistryDefDto>> ListAsync(AccessBuilder builder)

@@ -644,6 +644,7 @@ public sealed partial class TemplateVersionStore(EcrDbContext db) : ITemplateVer
             .Select(v => new
             {
                 v.Id, v.TemplateId, v.Status, v.CreatedAt, v.CreatedByUserId, v.PublishedAt, v.DeprecatedAt,
+                v.UpdatedAt,
             })
             .ToListAsync(ct)
             .ConfigureAwait(false);
@@ -688,7 +689,10 @@ public sealed partial class TemplateVersionStore(EcrDbContext db) : ITemplateVer
         {
             var own = versions.Where(v => v.TemplateId == t.Id).ToList();
             var updated = own
-                .SelectMany(v => new[] { v.CreatedAt, v.PublishedAt ?? default, v.DeprecatedAt ?? default })
+                .SelectMany(v => new[]
+                {
+                    v.CreatedAt, v.PublishedAt ?? default, v.DeprecatedAt ?? default, v.UpdatedAt ?? default,
+                })
                 .Append(t.CreatedAt)
                 .Max();
 
@@ -703,7 +707,9 @@ public sealed partial class TemplateVersionStore(EcrDbContext db) : ITemplateVer
                 own.Sum(v => documentsByVersion.GetValueOrDefault(v.Id)),
                 updated,
                 draft is null ? null : authors.GetValueOrDefault(draft.CreatedByUserId),
-                draft?.CreatedAt);
+                draft?.CreatedAt,
+                t.ArchivedAt,
+                draft is null ? null : draft.UpdatedAt ?? draft.CreatedAt);
         }).ToList();
 
         return new PagedResult<TemplateSummary>(
