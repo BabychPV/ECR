@@ -34,7 +34,8 @@ public sealed class CreateEntityFieldMapHandler(
     ICurrentUser currentUser,
     IUnitOfWork uow,
     IAuditWriter audit,
-    IClock clock)
+    IClock clock,
+    IUnitCatalog? units = null)
 {
     /// <summary>Право на керування інтеграцією (`02-contracts.md` §9).</summary>
     public const string Permission = "Integration.Manage";
@@ -299,6 +300,11 @@ public sealed class CreateEntityFieldMapHandler(
                     ["id"] = targetUnitId.ToString(CultureInfo.InvariantCulture),
                 });
         }
+
+        // ⛔ D-4: одиниці різної розмірності (MJ -> kg) - відмова зараз, а не мапінг, що мовчить.
+        await FieldMapUnitCompatibility
+            .EnsureAsync(units, command.SourceField, command.SourceUnitId, command.TargetUnitId, command.Aggregation, ct)
+            .ConfigureAwait(false);
 
         map.SetUnits(command.SourceUnitId, command.TargetUnitId);
     }

@@ -7221,8 +7221,11 @@ USING (VALUES
     (N'units.dim.MassPerAmount', N'en', N'Mass per amount of substance', 1),
     -- COLL:ui-rc9 ── кінець секції ──
     -- COLL:d3efmap ── D-3 приймальної №8: другий мапінг тієї ж пари (сутність, поле) — 409, не 500; ru/kz — порцією COLL:d3efmap у блоці I18N нижче ──
-    (N'err.ECR-INT-0409.fieldMapDuplicate', N'en', N'Source entity {sourceEntityId} already has a mapping for field "{sourceField}": edit it instead of creating a second one.', 1)
+    (N'err.ECR-INT-0409.fieldMapDuplicate', N'en', N'Source entity {sourceEntityId} already has a mapping for field "{sourceField}": edit it instead of creating a second one.', 1),
     -- COLL:d3efmap ── кінець секції ──
+    -- COLL:d4efmapunit ── D-4 приймальної №8: мапінг з одиницями різної розмірності відхиляється; ru/kz — порцією COLL:d4efmapunit у блоці I18N нижче ──
+    (N'err.ECR-UOM-0422.fieldMapUnitDimensions', N'en', N'Unit "{from}" cannot be converted to "{to}": they measure different quantities, so the mapping of field "{sourceField}" would never write a value. Choose units of the same dimension.', 1)
+    -- COLL:d4efmapunit ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -17527,6 +17530,16 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:d3efmap ── кінець секції ──
+-- COLL:d4efmapunit ── ru/kz D-4: одиниці мапінгу різної розмірності; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-UOM-0422.fieldMapUnitDimensions', N'ru', N'Единицу «{from}» нельзя преобразовать в «{to}»: они измеряют разные величины, поэтому сопоставление поля «{sourceField}» никогда не запишет значение. Выберите единицы одной размерности.'),
+    (N'err.ECR-UOM-0422.fieldMapUnitDimensions', N'kz', N'«{from}» бірлігін «{to}» бірлігіне түрлендіру мүмкін емес: олар әртүрлі шамаларды өлшейді, сондықтан «{sourceField}» өрісінің сәйкестендіруі ешқашан мән жазбайды. Бір өлшемділіктегі бірліктерді таңдаңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:d4efmapunit ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t
