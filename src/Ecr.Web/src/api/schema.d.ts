@@ -25201,6 +25201,21 @@ export interface components {
              * @description Скільки комірок має заповнити людина.
              */
             inputCells: number;
+            /**
+             * @description Таблиця закрита на введення правилом доступу до періоду (замок у дереві);
+             *     те саме рішення `PeriodAccessRules`, з якого рахується `InputCells`.
+             *     Відрізняє «закрита» від «усі колонки формульні» (там теж `InputCells = 0`).
+             * @default false
+             */
+            isClosed: boolean;
+            /**
+             * Format: int32
+             * @description Рядків у таблиці: більше з рядків бази й рядків шаблону (як і знаменник
+             *     `InputCells`). Лише число для ВИДИМОЇ таблиці — приховані до переліку
+             *     не потрапляють, тож їхні розміри нікуди не витікають.
+             * @default 0
+             */
+            rowCount: number;
             /** @description Код аркуша, якому належить таблиця. */
             sheetCode: string;
             /**
