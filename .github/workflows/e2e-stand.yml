@@ -61,16 +61,18 @@ jobs:
         with:
           ref: ${{ inputs.ref || '' }}
 
-      # ⚠ Скрипт стенда береться з коміту САМОГО workflow (`github.sha`), а не з
-      # перевіряваного `ref`: там може не бути `-RepeatEach` (його ще немає в
-      # `main`), а стенд має бути той самий для всіх серій. Код продукту і спеки —
-      # з `ref`.
-      - name: Скрипт стенда з коміту workflow
-        if: github.event_name == 'workflow_dispatch'
+      # ⚠ Скрипт стенда з коміту САМОГО workflow (`github.sha`) підкладається ЛИШЕ
+      # для серії (repeat > 1), коли в перевіряваному `ref` ще немає `-RepeatEach`.
+      # Інакше стенд — рівно скрипт `ref`: підмінений старіший скрипт губив би
+      # правки стенда (напр. право E2EAdmin для `registriesList.spec`, 403).
+      - name: Скрипт стенда з коміту workflow (лише для серії)
+        if: github.event_name == 'workflow_dispatch' && inputs.repeat != '' && inputs.repeat != '1'
         run: |
           set -euo pipefail
-          git fetch --no-tags --depth=1 origin "$GITHUB_SHA"
-          git checkout "$GITHUB_SHA" -- tools/e2e-stand.ps1
+          if ! grep -q 'RepeatEach' tools/e2e-stand.ps1; then
+            git fetch --no-tags --depth=1 origin "$GITHUB_SHA"
+            git checkout "$GITHUB_SHA" -- tools/e2e-stand.ps1
+          fi
 
       - name: Що проганяється
         env:
@@ -170,10 +172,12 @@ jobs:
           PLAYWRIGHT_HTML_OPEN: never
         run: |
           mkdir -p artifacts
+          extra=()
+          if [ "${E2E_REPEAT:-1}" -gt 1 ]; then extra+=(-RepeatEach "$E2E_REPEAT"); fi
           pwsh -File tools/e2e-stand.ps1 \
             -Server 'localhost,1433' -Login sa -Database EcrE2ECi -Port 5080 \
             -SmallFiles -RequireFreeGb 0 -StartupTimeoutSec 180 \
-            -Reporter 'list,html' -Grep "$E2E_GREP" -RepeatEach "$E2E_REPEAT"
+            -Reporter 'list,html' -Grep "$E2E_GREP" "${extra[@]}"
 
       - name: Звіт, трасування, знімки
         if: always()
