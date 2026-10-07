@@ -131,14 +131,14 @@ public sealed class CompareDocumentVersionsHandler(
                 : throw Invalid("err.ECR-DOC-0422.compareVersion", $"Версія «{to}» — не число і не «current».");
         }
 
-        var older = await LoadAsync(documentId, from, ct).ConfigureAwait(false);
+        var older = await LoadAsync(documentId, from, readable, ct).ConfigureAwait(false);
         var key = new PeriodKey(older.PeriodKey);
 
         IReadOnlyList<SubmissionPayloadCell> newerCells;
         IReadOnlyDictionary<string, SubmissionPayloadHeaderValue> newerHeader;
         if (toId is { } id)
         {
-            var newer = await LoadAsync(documentId, id, ct).ConfigureAwait(false);
+            var newer = await LoadAsync(documentId, id, readable, ct).ConfigureAwait(false);
             if (newer.PeriodKey != older.PeriodKey)
             {
                 // Рядки належать періоду: версії різних періодів не мають спільних рядків.
@@ -330,17 +330,29 @@ public sealed class CompareDocumentVersionsHandler(
             : string.Equals(a, b, StringComparison.Ordinal);
     }
 
-    private async Task<DocumentVersionPayload> LoadAsync(long documentId, long versionId, CancellationToken ct)
-        => await versions.FindAsync(documentId, versionId, ct).ConfigureAwait(false)
-           ?? throw new NotFoundException(
-               "ECR-DOC-0404",
-               $"Версії {versionId} документа {documentId} немає.",
-               new Dictionary<string, object?>(StringComparer.Ordinal)
-               {
-                   ["messageKey"] = "err.ECR-DOC-0404.version",
-                   ["versionId"] = versionId.ToString(CultureInfo.InvariantCulture),
-                   ["documentId"] = documentId.ToString(CultureInfo.InvariantCulture),
-               });
+    /// <remarks>
+    /// ⛔ L1-18 (R-2): версія аркуша, закритого від читача, — той самий 404, що й неіснуюча
+    /// (інакше `from`/`to` був би оракулом існування id). Перевірка — ДО будь-якого читання вмісту.
+    /// </remarks>
+    private async Task<DocumentVersionPayload> LoadAsync(
+        long documentId, long versionId, Security.DocumentReadScope readable, CancellationToken ct)
+    {
+        var found = await versions.FindAsync(documentId, versionId, ct).ConfigureAwait(false);
+        if (found is null || !readable.InPeriod(new PeriodKey(found.PeriodKey)).CanReadSheet(found.SheetDefId))
+        {
+            throw new NotFoundException(
+                "ECR-DOC-0404",
+                $"Версії {versionId} документа {documentId} немає.",
+                new Dictionary<string, object?>(StringComparer.Ordinal)
+                {
+                    ["messageKey"] = "err.ECR-DOC-0404.version",
+                    ["versionId"] = versionId.ToString(CultureInfo.InvariantCulture),
+                    ["documentId"] = documentId.ToString(CultureInfo.InvariantCulture),
+                });
+        }
+
+        return found;
+    }
 
     private static BusinessRuleException Invalid(string messageKey, string message)
         => new("ECR-DOC-0422", message, new Dictionary<string, object?>(StringComparer.Ordinal) { ["messageKey"] = messageKey });
