@@ -293,6 +293,25 @@ describe('огляд кампанії: підсумки з сервера', () =
     expect(await stat('overdue')).toBe('2');
     expect(rowOf('P1').textContent).toContain('\u2014');
   });
+
+  it('R-1: сервер віддав null класам прогресу — замість смуги й переліку «—», а не «ніхто не затримує»', async () => {
+    const base = summaryOf(listed, hidden);
+    mockServer({
+      ...base,
+      projects: base.projects.map((p) => ({ ...p, progress: null })),
+      totals: { ...base.totals, done: null, overdue: null, atRisk: null, inProgress: null },
+    });
+    show(<CampaignOverview periodKey={Period} />);
+
+    expect(await screen.findByTestId('campaign-progress-hidden')).toBeTruthy();
+    expect(document.querySelector('[data-stat="overdue"]')).toBeNull();
+    expect(document.querySelector('[data-stat="done"]')).toBeNull();
+    expect(laggingCodes()).toEqual([]);
+    expect(screen.queryByText('⟦campaign.nobodyLagging⟧')).toBeNull();
+    // Лічильники станів документів не залежать від класів і лишаються.
+    expect(await stat('approved')).toBe('15');
+  });
+
   it('лічильники класів — з totals: прострочені, під загрозою, в роботі, завершені', async () => {
     mockServer(summaryOf(listed, hidden));
     show(<CampaignOverview periodKey={Period} />);

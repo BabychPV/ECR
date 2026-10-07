@@ -18,12 +18,13 @@ const HoldingUp: readonly CampaignProgress[] = ['Overdue', 'AtRisk'];
 
 /** Чи затримує проєкт кампанію — за класом, який назвав сервер. */
 function isHoldingUp(project: CampaignProject): boolean {
-  return HoldingUp.includes(project.progress);
+  // R-1: `null` — клас прихований від читача; не «затримує» і не «ні», а невідомий.
+  return project.progress !== null && HoldingUp.includes(project.progress);
 }
 
 /** Ранг класу для впорядкування переліку: менший — вище. */
-export function holdingUpRank(progress: CampaignProgress): number {
-  const at = HoldingUp.indexOf(progress);
+export function holdingUpRank(progress: CampaignProgress | null): number {
+  const at = progress === null ? -1 : HoldingUp.indexOf(progress);
 
   return at === -1 ? HoldingUp.length : at;
 }
