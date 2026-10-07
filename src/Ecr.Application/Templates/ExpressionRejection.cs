@@ -38,6 +38,7 @@ public static class ExpressionRejection
     /// <param name="expression">Текст виразу.</param>
     /// <param name="dialect">Діалект.</param>
     /// <param name="site">Місце виразу: таблиця, рядок, колонка.</param>
+    /// <param name="maxLength">Довжина колонки, в яку вираз зберігається (A4-03).</param>
     /// <exception cref="BusinessRuleException"><c>ECR-TMPL-0422</c> із ключем першого зауваження.</exception>
     /// <remarks>
     /// ⚠ Типи й одиниці на збереженні НЕ перевіряються — лише синтаксис і
@@ -51,14 +52,15 @@ public static class ExpressionRejection
         TemplateVersion version,
         string expression,
         ExpressionDialect dialect,
-        ExpressionSite site)
+        ExpressionSite site,
+        int maxLength = Ecr.Application.Expressions.ExpressionLengthGuard.MaxLength)
     {
         ArgumentNullException.ThrowIfNull(formulaEngine);
         ArgumentNullException.ThrowIfNull(version);
 
         // ⛔ L7-01: довжина — ДО повної перевірки; обробники збереження формули
         // і правила кличуть цей метод раніше за власну межу колонки.
-        Ecr.Application.Expressions.ExpressionLengthGuard.Require(expression);
+        Ecr.Application.Expressions.ExpressionLengthGuard.Require(expression, maxLength);
 
         var diagnostics = new List<ExpressionDiagnostic>();
         PublishChecks.CheckExpression(
@@ -124,6 +126,13 @@ public static class ExpressionRejection
             .Select(d => new DiagnosticInfo(d.Code, d.Message, d.Position, d.Length, d.MessageKey, d.MessageParams))
             .ToList();
 
-        return new BusinessRuleException(ErrorCodes.TemplateInvalid, message, details);
+        // ✎ RC5: «надто глибока» — це не синтаксична помилка шаблону, а вердикт про
+        // складність виразу: той самий ECR-EXPR-0422, що й у сторожа стека обходів,
+        // з власним ключем і підстановками depth/max. Нового коду не заводиться.
+        var code = keyed?.MessageKey == Ecr.Expressions.Evaluation.ExpressionNesting.MessageKey
+            ? ErrorCodes.ExpressionTooComplex
+            : ErrorCodes.TemplateInvalid;
+
+        return new BusinessRuleException(code, message, details);
     }
 }

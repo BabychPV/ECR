@@ -366,7 +366,18 @@ public sealed class PatchDocumentHeaderHandler(
         var facts = await workflowFacts.LockWorkflowFactsAsync(documentId, ct).ConfigureAwait(false);
         _ = await documentLock.FindForUpdateAsync(documentId, ct).ConfigureAwait(false);
 
-        EnsureEditable(profile, project, Strictest(facts.SheetStates));
+        // ⛔ Причина відмови не називає стан (і наявність) схованого від читача аркуша: найсуворіший
+        // стан рахується по видимих, а схований поданий/погоджений аркуш дає ту саму загальну
+        // «подано» (Submitted), без розрізнення Submitted/Approved.
+        var hidden = await DocumentSheetVisibility
+            .HiddenStatesAsync(access, profile, documentId, facts.SheetStates, ct).ConfigureAwait(false);
+        var strictest = Strictest(facts.SheetStates.Except(hidden));
+        if (strictest == DocumentStatus.Draft && hidden.Any(s => s.Status is DocumentStatus.Submitted or DocumentStatus.Approved))
+        {
+            strictest = DocumentStatus.Submitted;
+        }
+
+        EnsureEditable(profile, project, strictest);
 
         // ⚠ Читання ПІСЛЯ блокування: під RCSI знімок береться на початку
         // оператора, тож цей оператор бачить правку, яка зафіксувалася, поки

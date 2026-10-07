@@ -127,4 +127,28 @@ describe('ImportPanel: округлення до Scale колонки (ФВ-9.16
     expect(within(table).queryByText(/does not fit/)).toBeNull();
     expect(screen.getByRole('button', { name: '⟦import.apply⟧' }).hasAttribute('disabled')).toBe(true);
   });
+
+  it('текст довший за стовпець — відмова текстом каталогу (RC5)', async () => {
+    mockPreview({
+      previewToken: 'tok',
+      changes: [],
+      rejected: [
+        {
+          rowKey: 'R1',
+          columnCode: 'C1',
+          reasonCode: 'ECR-CELL-0422',
+          message: 'The text is longer than 1000 characters: storage cannot hold it.',
+          messageKey: 'err.ECR-CELL-0422.importValueTooLong',
+          tableCode: 'T1',
+        },
+      ],
+      conflicts: [],
+    });
+
+    await openPreview();
+
+    const table = screen.getByRole('table');
+    expect(within(table).getByText('⟦err.ECR-CELL-0422.importValueTooLong⟧')).toBeTruthy();
+    expect(within(table).queryByText(/storage cannot hold/)).toBeNull();
+  });
 });

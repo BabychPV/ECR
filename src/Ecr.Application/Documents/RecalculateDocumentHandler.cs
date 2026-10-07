@@ -124,6 +124,14 @@ public sealed class RecalculateDocumentHandler(
                 });
         }
 
+        // ⛔ Схований від читача аркуш — та сама відмова, що й аркуш поза складом.
+        if (sheetDefId is { } hiddenTarget)
+        {
+            await DocumentVisibility
+                .RequireSheetVisibleAsync(documents, access, profile, documentId, hiddenTarget, periodKey, ct)
+                .ConfigureAwait(false);
+        }
+
         // ⛔ Стан періоду і робочого процесу — ДО черги (ФВ-9.7, ФВ-9.17).
         // Погодження на перерахунок закритого періоду цей маршрут не приймає
         // взагалі: його оформлює перерахунок ПРОЄКТУ

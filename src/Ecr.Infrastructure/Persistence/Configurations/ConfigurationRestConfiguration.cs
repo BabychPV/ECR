@@ -31,7 +31,7 @@ public sealed class FormulaDefConfiguration : IEntityTypeConfiguration<FormulaDe
         builder.HasKey(x => x.Id);
         builder.Property(x => x.Scope).HasConversion<byte>();
         builder.Property(x => x.Dialect).HasConversion<byte>();
-        builder.Property(x => x.Expression).HasMaxLength(2000).IsRequired();
+        builder.Property(x => x.Expression).HasMaxLength(FormulaDef.MaxExpressionLength).IsRequired();
 
         // DEFAULT-и з іменами за 02a-db-schema.md: безіменне обмеження
         // неможливо прибрати скриптом, не з'ясувавши спершу його
@@ -100,7 +100,7 @@ public sealed class ValidationRuleConfiguration : IEntityTypeConfiguration<Valid
         builder.HasKey(x => x.Id);
         builder.Property(x => x.Code).HasMaxLength(64).IsRequired();
         builder.Property(x => x.Severity).HasConversion<byte>();
-        builder.Property(x => x.Expression).HasMaxLength(2000).IsRequired();
+        builder.Property(x => x.Expression).HasMaxLength(ValidationRule.MaxExpressionLength).IsRequired();
 
         // DEFAULT-и з іменами за 02a-db-schema.md: безіменне обмеження
         // неможливо прибрати скриптом, не з'ясувавши спершу його
@@ -344,7 +344,7 @@ public sealed class RegistryRuleDefConfiguration : IEntityTypeConfiguration<Regi
         builder.Property(x => x.Code).HasMaxLength(64).IsRequired();
         builder.Property(x => x.RuleKind).HasConversion<byte>();
         builder.Property(x => x.Severity).HasConversion<byte>();
-        builder.Property(x => x.Expression).HasMaxLength(4000).IsRequired();
+        builder.Property(x => x.Expression).HasMaxLength(RegistryRuleDef.MaxExpressionLength).IsRequired();
         builder.Property(x => x.ParametersJson).HasColumnType("nvarchar(max)");
         builder.LocalizedText(x => x.MessageL10n).HasColumnName("MessageL10n");
         builder.Property(x => x.IsActive).HasDefaultValue(true, "DF_RegRule_Act");

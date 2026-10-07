@@ -1923,6 +1923,7 @@ USING (VALUES
     (N'err.ECR-DOC-0409.deleteHasEventMap',     N'en', N'The document cannot be deleted: a source event mapping writes into it. Remove the mapping first.', 1),
     -- Document.ChangeKey: controlled business key change (FV-3.9).
     (N'err.ECR-DOC-0409.rekeyLocked',           N'en', N'The document key cannot be changed: sheet {sheetDefId} for period {periodKey} is {reason}.', 1),
+    (N'err.ECR-DOC-0409.rekeyLockedHidden',     N'en', N'The document key cannot be changed: the document has submitted or approved sheets.', 1),
     (N'err.ECR-DOC-0409.rekeyDuplicate',        N'en', N'Another document of this project already has the key "{businessKey}".', 1),
     (N'err.ECR-DOC-0409.rekeyStale',            N'en', N'The document key has changed since it was read; it is now "{businessKey}".', 1),
     (N'err.ECR-DOC-0422.rekeyReasonRequired',   N'en', N'A reason is required to change the document key.', 1),
@@ -6716,8 +6717,17 @@ USING (VALUES
     (N'nav.expand', N'en', N'Expand menu', 1),
     -- COLL:navcollapse ── кінець секції ──
     -- COLL:l701depth ── L7-01: заголовок коду ECR-EXPR-0422 (вираз надто глибокий для обходу; подробиця — наявний expr.tooComplex); ru/kz — порцією COLL:l701depth у блоці I18N нижче ──
-    (N'err.ECR-EXPR-0422', N'en', N'Expression too complex', 1)
+    (N'err.ECR-EXPR-0422', N'en', N'Expression too complex', 1),
     -- COLL:l701depth ── кінець секції ──
+    -- COLL:a5len ── RC5: текст довший за стовпець (1000 символів) — людська відмова в комірці й у перегляді імпорту; ru/kz — порцією COLL:a5len у блоці I18N нижче ──
+    (N'validation.column.maxLength', N'en', N'The text in column "{column}" is longer than {maxLength} characters ({actualLength}).', 1),
+    (N'err.ECR-CELL-0422.importValueTooLong', N'en', N'The text is longer than the column allows (1000 characters).', 1),
+    -- COLL:a5len ── кінець секції ──
+    -- COLL:exprbudget ── RC5: видима відмова за межею вкладеності (96) і кроків (20 000) замість мовчазного #BUDGET: публікація/редактор (expr.tooDeep, publish.problem.formulaTooDeep) і експлуатація (validation.rule.budget); ru/kz — порцією COLL:exprbudget у блоці I18N нижче ──
+    (N'expr.tooDeep', N'en', N'The formula is too complex: nesting depth {depth}, allowed {max}. Split it into several calculated columns.', 1),
+    (N'publish.problem.formulaTooDeep', N'en', N'Formula {formula} is too complex: nesting depth {depth}, allowed {max}. Split it into several calculated columns.', 1),
+    (N'validation.rule.budget', N'en', N'Rule ''{rule}'' could not be evaluated: the formula is too large for one calculation (more than 20,000 steps or 96 nesting levels). Split it into several calculated columns.', 1)
+    -- COLL:exprbudget ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -9821,7 +9831,8 @@ SELECT v.[Key], v.Lang, v.Val
     (N'recalcApprovals.stateConfirmed', N'ru', N'Подтверждено: {name}'),
     (N'recalcApprovals.expires', N'ru', N'Действует до'),
     (N'recalcApprovals.confirm', N'ru', N'Подтвердить'),
-    (N'recalcApprovals.confirmedDone', N'ru', N'Согласование пересчёта подтверждено.')
+    (N'recalcApprovals.confirmedDone', N'ru', N'Согласование пересчёта подтверждено.'),
+    (N'err.ECR-DOC-0409.rekeyLockedHidden', N'ru', N'Ключ документа нельзя изменить: в документе есть поданные или утверждённые листы.')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
@@ -12852,7 +12863,8 @@ SELECT v.[Key], v.Lang, v.Val
     (N'recalcApprovals.confirmedDone', N'kz', N'Қайта есептеу келісімі расталды.'),
     -- COLL:calcrun-order ── переклади ──
     (N'jobs.calculationRunSupersededByNewer', N'ru', N'Прогон завершился после более нового прогона {runId} той же области и не заменил его результаты: они свежее.'),
-    (N'jobs.calculationRunSupersededByNewer', N'kz', N'Прогон сол аумақтағы жаңарақ {runId} прогонынан кейін аяқталды және оның нәтижелерін алмастырмады: олар жаңарақ.')
+    (N'jobs.calculationRunSupersededByNewer', N'kz', N'Прогон сол аумақтағы жаңарақ {runId} прогонынан кейін аяқталды және оның нәтижелерін алмастырмады: олар жаңарақ.'),
+    (N'err.ECR-DOC-0409.rekeyLockedHidden', N'kz', N'Құжат кілтін өзгертуге болмайды: құжатта тапсырылған немесе бекітілген парақтар бар.')
     -- COLL:calcrun-order ── кінець секції ──
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
@@ -15907,6 +15919,32 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:l701depth ── кінець секції ──
+-- COLL:a5len ── ru/kz RC5: текст довший за стовпець; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'validation.column.maxLength', N'ru', N'Текст в колонке «{column}» длиннее {maxLength} символов ({actualLength}).'),
+    (N'validation.column.maxLength', N'kz', N'«{column}» бағанындағы мәтін {maxLength} таңбадан ұзын ({actualLength}).'),
+    (N'err.ECR-CELL-0422.importValueTooLong', N'ru', N'Текст длиннее, чем допускает колонка (1000 символов).'),
+    (N'err.ECR-CELL-0422.importValueTooLong', N'kz', N'Мәтін баған рұқсат ететіннен ұзын (1000 таңба).')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:a5len ── кінець секції ──
+-- COLL:exprbudget ── ru/kz RC5: видима відмова за межею вкладеності й кроків; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'expr.tooDeep', N'ru', N'Формула слишком сложная: глубина вложенности {depth}, допустимо {max}. Разбейте её на несколько вычисляемых колонок.'),
+    (N'expr.tooDeep', N'kz', N'Формула тым күрделі: ену тереңдігі {depth}, рұқсат етілгені {max}. Оны бірнеше есептелетін бағанға бөліңіз.'),
+    (N'publish.problem.formulaTooDeep', N'ru', N'Формула {formula} слишком сложная: глубина вложенности {depth}, допустимо {max}. Разбейте её на несколько вычисляемых колонок.'),
+    (N'publish.problem.formulaTooDeep', N'kz', N'{formula} формуласы тым күрделі: ену тереңдігі {depth}, рұқсат етілгені {max}. Оны бірнеше есептелетін бағанға бөліңіз.'),
+    (N'validation.rule.budget', N'ru', N'Правило ''{rule}'' не удалось вычислить: формула слишком велика для одного расчёта (больше 20 000 шагов или 96 уровней вложенности). Разбейте её на несколько вычисляемых колонок.'),
+    (N'validation.rule.budget', N'kz', N'''{rule}'' ережесін есептеу мүмкін болмады: формула бір есептеу үшін тым үлкен (20 000 қадамнан немесе 96 ену деңгейінен артық). Оны бірнеше есептелетін бағанға бөліңіз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:exprbudget ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

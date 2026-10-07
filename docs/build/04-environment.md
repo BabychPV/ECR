@@ -331,3 +331,17 @@ Docker, не поведінка за замовчуванням (команда 
 
 Правило: **якщо задача не названа в `07-checkpoints.md` як така, що працює з
 реальними даними, — не відкривай реальні дані.**
+
+## 9. Закріплення версій у CI (`L10-12`)
+
+- Кожна дія в `.github/workflows/*.yml` — за повним SHA коміту, тег поряд
+  коментарем: `uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0`.
+  Мутабельний тег (`@v4`) не дозволено: власник дії пересуває його, і той
+  самий workflow виконує інший код.
+- Оновлення дії: SHA береться лише з тегу офіційного репозиторію
+  (`git ls-remote --tags https://github.com/actions/<дія>.git`), коментар —
+  точна версія, на яку вказує цей SHA.
+- `dotnet tool install` — завжди з `--version`; `dotnet-ef` — тієї ж версії,
+  що `Microsoft.EntityFrameworkCore.Design` у `Directory.Packages.props`
+  (піднімаєш EF Core — піднімай і рядки в `ci.yml`, `smoke.yml`).
+- Сторож — `CiPipelineTests.Pinning.cs` (`Ecr.Architecture.Tests`).

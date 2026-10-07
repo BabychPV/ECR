@@ -415,9 +415,9 @@ public sealed class SubmitApproveTests
 
     private readonly IAuditWriter _audit = Substitute.For<IAuditWriter>();
 
-    private ApproveSheetHandler Approve() => new(_workflow, _access, Reports(), _uow, _user, _clock, _audit);
+    private ApproveSheetHandler Approve() => new(_workflow, _access, Reports(), _uow, _user, _clock, _audit, _documents);
 
-    private ReopenDocumentHandler Reopen() => new(_workflow, _access, _uow, _user, _clock);
+    private ReopenDocumentHandler Reopen() => new(_workflow, _access, _uow, _user, _clock, _documents);
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
     [Trait("Requirement", "ФВ-3.2")]

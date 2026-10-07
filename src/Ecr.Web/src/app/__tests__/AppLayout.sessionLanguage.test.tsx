@@ -150,6 +150,46 @@ describe('AppLayout: мова сесії після входу (A3)', () => {
     expect(language()).toBe('ru');
   });
 
+  it('A4-01: профіль ru, збережене в налаштуваннях en, вибір на логіні ru → лишається ru і пишеться PUT', async () => {
+    const fetchMock = stubFetch({
+      profileLanguage: 'ru',
+      serverPreferences: [{ key: 'language', value: 'en' }],
+    });
+    setLanguage('ru');
+    markLoginChosenLanguage('ru');
+
+    renderApp();
+    await screen.findByText('Головна');
+    await waitFor(() => expect(requested(fetchMock).some((url) => url.endsWith('/api/v1/me/preferences'))).toBe(true));
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    expect(language()).toBe('ru');
+    expect(
+      fetchMock.mock.calls.some(
+        (call) =>
+          String(call[0]).endsWith('/api/v1/me/preferences/language') &&
+          (call[1] as RequestInit | undefined)?.method === 'PUT' &&
+          String((call[1] as RequestInit).body).includes('ru'),
+      ),
+    ).toBe(true);
+  });
+
+  it('A4-01 контроль: без вибору на логіні діє збережене в налаштуваннях (en), PUT немає', async () => {
+    const fetchMock = stubFetch({
+      profileLanguage: 'ru',
+      serverPreferences: [{ key: 'language', value: 'en' }],
+    });
+    setLanguage('ru');
+
+    renderApp();
+    await screen.findByText('Головна');
+    await waitFor(() => expect(language()).toBe('en'));
+
+    expect(
+      fetchMock.mock.calls.some((call) => (call[1] as RequestInit | undefined)?.method === 'PUT'),
+    ).toBe(false);
+  });
+
   it('контроль: без вибору на логіні — мова профілю (en), запису на сервер немає', async () => {
     const fetchMock = stubFetch({ profileLanguage: 'en' });
 

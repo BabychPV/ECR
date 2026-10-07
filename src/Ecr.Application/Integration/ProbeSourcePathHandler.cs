@@ -95,8 +95,8 @@ public sealed class ProbeSourcePathHandler(
         var source = await ListDataSourcesHandler.FindAsync(store, id, ct).ConfigureAwait(false);
         var (parent, leaf) = SplitPath(trimmed);
 
-        using var bounded = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        bounded.CancelAfter(policy.Timeout);
+        using var deadline = policy.StartDeadline();
+        using var bounded = CancellationTokenSource.CreateLinkedTokenSource(ct, deadline.Token);
 
         try
         {

@@ -70,6 +70,37 @@ public sealed class GetCalculationResultsHandler(
             return [];
         }
 
+        // ⛔ Число методології належить колонці, в яку воно прив'язане (`CalculationBinding`), тож
+        // читач бачить його лише тоді, коли бачить цю колонку (як зріз таблиці). Вихід без прив'язки
+        // для обмеженого читача невизначений — не показується (закрито за замовчуванням).
+        if (DocumentSheetVisibility.HasRestrictions(profile))
+        {
+            var scope = await access.ReadScopeAsync(profile, documentId, ct).ConfigureAwait(false);
+            if (new Ecr.Domain.ValueObjects.PeriodKey(periodKey).IsValid)
+            {
+                scope = scope.InPeriod(new Ecr.Domain.ValueObjects.PeriodKey(periodKey));
+            }
+
+            var bindings = await methodologies.GetColumnResultBindingsAsync(scope.TableIds(), ct).ConfigureAwait(false);
+            rows =
+            [
+                .. rows.Where(r =>
+                {
+                    // ⛔ Рядок результату не знає своєї таблиці, тож вихід, прив'язаний і до видимої, і до схованої
+                    // колонки, віддається лише коли читані ВСІ прив'язки (known limitation: вузький читач не бачить
+                    // такий вихід цілком; точніше відсікання за SourceRowKey -> RowDef — backlog).
+                    var matching = bindings.Where(b =>
+                        string.Equals(b.OutputCode, r.OutputCode, StringComparison.OrdinalIgnoreCase)
+                        && b.VersionIds.Contains(r.MethodologyVersionId)).ToList();
+                    return matching.Count > 0 && matching.All(b => scope.CanReadColumn(b.ColumnDefId));
+                }),
+            ];
+            if (rows.Count == 0)
+            {
+                return [];
+            }
+        }
+
         // ⛔ F-05 (четвертий раунд UX): свіжість. Доти після зміни входів панель
         // показувала старі числа як чинні, і документ подавали з результатами,
         // що вже не відповідали даним. Тепер кожне число каже, чи змінилися

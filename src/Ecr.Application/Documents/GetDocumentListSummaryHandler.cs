@@ -27,8 +27,46 @@ public sealed class GetDocumentListSummaryHandler(
         // ФВ-6.14: лише проєкти, де є і право перегляду.
         var visibleProjects = ListDocumentsHandler.ReadableProjects(profile, ListDocumentsHandler.Permission);
 
-        return await summary
-            .SummarizeAsync(projectId, PeriodKey.Parse(periodKey).Value, visibleProjects, ct)
+        var period = PeriodKey.Parse(periodKey).Value;
+
+        // ⛔ Аркуш, схований від читача, не вносить свій стан у зведення документа: інакше
+        // «Відхилено» невидимого аркуша робить документ відхиленим для того, хто його не бачить.
+        var restrictions = await RestrictionsAsync(profile, projectId, visibleProjects, periodKey, ct)
             .ConfigureAwait(false);
+
+        return await summary
+            .SummarizeAsync(projectId, period, visibleProjects, restrictions, ct)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary><c>null</c> — читач без обмежень (нуль запитів); інакше межі по кожному його проєкту.</summary>
+    private async Task<SummaryRestrictions?> RestrictionsAsync(
+        AccessProfile profile, int? projectId, IReadOnlyCollection<int> visibleProjects, int periodKey,
+        CancellationToken ct)
+    {
+        if (!DocumentSheetVisibility.HasRestrictions(profile))
+        {
+            return null;
+        }
+
+        var projects = visibleProjects.Where(p => projectId is null || p == projectId).ToList();
+        var samples = await summary.SampleDocumentPerProjectAsync(projects, ct).ConfigureAwait(false);
+        var scopes = await DocumentSheetVisibility
+            .ScopesAsync(access, profile, samples.Select(s => (s.Key, s.Value)), periodKey, ct)
+            .ConfigureAwait(false);
+
+        var hidden = new List<(int ProjectId, string SheetCode)>();
+        var narrowed = new List<int>();
+        foreach (var (project, scope) in scopes)
+        {
+            var codes = scope.HiddenSheetCodes();
+            hidden.AddRange(codes.Select(c => (project, c)));
+            if (codes.Count > 0 || scope.HiddenTableIds().Count > 0 || scope.HiddenColumnIds().Count > 0)
+            {
+                narrowed.Add(project);
+            }
+        }
+
+        return new SummaryRestrictions(hidden, narrowed);
     }
 }

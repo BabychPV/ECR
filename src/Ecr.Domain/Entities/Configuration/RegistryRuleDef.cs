@@ -21,6 +21,9 @@ namespace Ecr.Domain.Entities.Configuration;
 /// </remarks>
 public sealed class RegistryRuleDef : Entity<int>
 {
+    /// <summary>Довжина колонки cfg.RegistryRuleDef.Expression — єдине джерело межі (A4-03).</summary>
+    public const int MaxExpressionLength = 4000;
+
     private RegistryRuleDef() { }
 
     /// <summary>Створює правило довідника.</summary>

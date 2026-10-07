@@ -28,6 +28,17 @@ public sealed record SourceCatalogPolicy(TimeSpan Timeout)
 {
     /// <summary>Типова межа, секунд (<c>Integration:CatalogTimeoutSeconds</c>).</summary>
     public const int DefaultTimeoutSeconds = 10;
+
+    /// <summary>Годинник межі; типово — системний.</summary>
+    /// <remarks>
+    /// ⚠ Тести підставляють керований годинник і зсувають його вручну: межа на справжньому таймері під
+    /// навантаженням CI спрацьовувала із запізненням у секунди (пул потоків), і тест «джерело мовчить → 503»
+    /// падав за власним запобіжником, хоча обробник поводився правильно.
+    /// </remarks>
+    public TimeProvider Time { get; init; } = TimeProvider.System;
+
+    /// <summary>Джерело скасування, що спрацює через <see cref="Timeout"/> за годинником <see cref="Time"/>.</summary>
+    public CancellationTokenSource StartDeadline() => new(Timeout, Time);
 }
 
 /// <summary>
@@ -96,8 +107,8 @@ public sealed class BrowseSourceCatalogHandler(
 
     private async Task<List<SourceCatalogItem>> ReadAsync(DataSource source, string? path, CancellationToken ct)
     {
-        using var bounded = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        bounded.CancelAfter(policy.Timeout);
+        using var deadline = policy.StartDeadline();
+        using var bounded = CancellationTokenSource.CreateLinkedTokenSource(ct, deadline.Token);
 
         try
         {

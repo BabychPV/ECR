@@ -112,7 +112,18 @@ public sealed class ChangeDocumentKeyHandler(
                 throw Invalid("Новий ключ збігається з чинним.", "err.ECR-DOC-0422.rekeyKeyInvalid");
             }
 
-            DocumentKeyChange.EnsureChangeable(facts.SheetStates);
+            // ⛔ Відмова не називає код і стан схованого від читача аркуша (власний ключ повідомлення без
+            // sheetDefId/reason); видимий заблокований аркуш відмовляє як і досі.
+            var hidden = await DocumentSheetVisibility
+                .HiddenStatesAsync(access, profile, documentId, facts.SheetStates, innerCt).ConfigureAwait(false);
+            DocumentKeyChange.EnsureChangeable([.. facts.SheetStates.Except(hidden)]);
+            if (hidden.Any(s => s.Status is DocumentStatus.Submitted or DocumentStatus.Approved))
+            {
+                throw new DomainException(
+                    ErrorCodes.DocumentSubmitted,
+                    "Ключ не змінюється: у документі є поданий або погоджений аркуш.",
+                    new Dictionary<string, object?> { ["messageKey"] = "err.ECR-DOC-0409.rekeyLockedHidden" });
+            }
 
             if (await keys.IsKeyTakenAsync(document.ProjectId, key, documentId, innerCt).ConfigureAwait(false))
             {

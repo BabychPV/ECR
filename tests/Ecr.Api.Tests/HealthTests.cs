@@ -282,7 +282,18 @@ public sealed class HealthTests(SqlServerFixture sql)
             .ToList();
 
         Assert.Equal(ExpectedChecks, names);
-        Assert.Equal("Healthy", report.GetProperty("status").GetString());
+
+        // ⚠ Падіння в CI (прогін 37286945514) дало лише «Degraded» без назви перевірки: база спільна для всієї
+        // колекції SqlServer, і жовтою перевірку робить стан, що лишили інші тести. Тому при падінні — хто і чому.
+        var notHealthy = report.GetProperty("checks")
+            .EnumerateArray()
+            .Where(c => c.GetProperty("status").GetString() != "Healthy")
+            .Select(c => $"{c.GetProperty("name").GetString()}: {c.GetProperty("status").GetString()} — "
+                         + (c.TryGetProperty("description", out var d) ? d.ToString() : "(без опису)"))
+            .ToList();
+        Assert.True(
+            report.GetProperty("status").GetString() == "Healthy",
+            $"Звіт готовності не зелений: {string.Join("; ", notHealthy)}");
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
 

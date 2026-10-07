@@ -22,6 +22,10 @@ const cssWithComments = readFileSync(
 // тобто тест падав саме тому, що правило задокументоване.
 const css = cssWithComments.replace(/\/\*[\s\S]*?\*\//g, '');
 
+const routeHeadingRule = new RegExp(
+  `:root \\.${RouteHeadingClass}:focus,\\s*:root \\.${RouteHeadingClass}:focus-visible\\s*\\{\\s*outline:\\s*none;\\s*\\}`,
+);
+
 const routerSource = readFileSync(path.resolve(process.cwd(), 'src/app/router.tsx'), 'utf8');
 
 /**
@@ -98,32 +102,27 @@ describe('Рух (ФВ-14.27, ФВ-14.28)', () => {
 
   it('ФВ-14.19: кільце фокуса не ховається: outline: none без заміни немає', () => {
     // `ФВ-14.19`. Користувач клавіатури без кільця не знає, де він.
+    // ⚠ Єдиний виняток — заголовок маршруту (`tabIndex={-1}`, не зупинка Tab),
+    // він перевіряється окремо нижче; поза ним `outline: none` заборонено.
     expect(css).toContain(':focus-visible');
     expect(css).toContain('outline: 2px solid');
-    expect(css).not.toMatch(/outline:\s*none/);
+    expect(css.replace(routeHeadingRule, '')).not.toMatch(/outline:\s*none/);
   });
 
-  it(`заголовок маршруту має ТИХІШЕ кільце, а не жодного`, () => {
+  it('заголовок маршруту — без видимої рамки (вимога людини 06.10)', () => {
     /*
-     * ⛔ Обидві половини обов'язкові, і друга — головна. Правило заведено
-     * тому, що на всіх восьми наборах знімків зі стенда навколо назви кожного
-     * екрана стояла рамка 2px фірмового кольору — і після переходу мишею
-     * теж, усупереч правилу, записаному в самому `motion.css`. Але прибрати
-     * кільце зовсім означало б, що зрячий користувач клавіатури не бачить,
-     * куди переїхав фокус, і не знає, звідки продовжиться `Tab`.
+     * ✎ 2026-10-06: «треба прибрати рамку, у текст в одну строку». Тихе кільце
+     * 1px `--ecr-faint` на центрованих екранах відмови читалося як прямокутна
+     * рамка навколо тексту. Заголовок не керувальний (`tabIndex={-1}`), тож
+     * WCAG 2.4.7 рамки не вимагає; фокус на ньому лишається (тести нижче).
+     *
+     * ⛔ І `:focus`, і `:focus-visible`: Chromium малює `:focus-visible` і для
+     * програмного фокуса (`X-37`). `:root` — вага над темною схемою.
      */
-    const rule = css.slice(css.indexOf(`.${RouteHeadingClass}:focus-visible`));
-
-    expect(rule).toMatch(/outline:\s*1px solid var\(--ecr-faint\)/);
-    expect(rule).not.toMatch(/outline:\s*none/);
-
-    // ⚠ Темна схема окремо: правило теми вище специфічніше за голий клас, і
-    // без власного рядка колір там повертався б до фірмового.
-    expect(css).toMatch(
-      new RegExp(
-        `\\[data-mantine-color-scheme='dark'\\]\\s*\\.${RouteHeadingClass}:focus-visible`,
-      ),
-    );
+    expect(css).toMatch(routeHeadingRule);
+    // Жодне інше правило не повертає заголовку кільце (колишній рядок темної схеми).
+    const otherRules = css.replace(routeHeadingRule, '');
+    expect(otherRules).not.toContain(`.${RouteHeadingClass}`);
   });
 
   it('клас стоїть на заголовку, який фокусує застосунок — інакше правило нічого не фарбує', () => {

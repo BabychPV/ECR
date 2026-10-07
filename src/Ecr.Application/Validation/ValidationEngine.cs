@@ -226,6 +226,19 @@ public sealed class ValidationEngine(IFormulaEngine formulaEngine)
         // до конфігурації — тобто не той, хто зараз заповнює звіт.
         if (value.IsError || value.Type != ExpressionValueType.Boolean)
         {
+            // ✎ RC5: вичерпаний бюджет (20 000 кроків або глибина 96) — не «нелогічна
+            // відповідь #BUDGET», а формула, завелика для одного обчислення: автор
+            // має розбити її, і текст каже саме це, а не голий код.
+            if (value.IsError && value.ErrorCode == Ecr.Expressions.ExpressionErrors.BudgetExceeded)
+            {
+                messages.Add(Broken(rule, tableDefId, rowKey, columnCode, language, ValidationMessageTemplates.RuleBudget,
+                    new Dictionary<string, string>(StringComparer.Ordinal)
+                    {
+                        ["rule"] = rule.Code.ToString(),
+                    }));
+                return;
+            }
+
             var reason = value.ErrorCode ?? value.Type.ToString();
             messages.Add(Broken(rule, tableDefId, rowKey, columnCode, language, ValidationMessageTemplates.RuleNotLogical,
                 new Dictionary<string, string>(StringComparer.Ordinal)
@@ -309,6 +322,13 @@ public sealed class ValidationEngine(IFormulaEngine formulaEngine)
         {
             key = ValidationMessageTemplates.ColumnPrecision;
             parameters["precision"] = Convert.ToString(column.Precision, System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty;
+        }
+        // RC5: текст довший за стовпець сховища — відмова з довжиною й межею, а не голий код.
+        else if (value.ValueString is { } text && text.Length > ColumnDef.MaxStringLength)
+        {
+            key = ValidationMessageTemplates.ColumnMaxLength;
+            parameters["maxLength"] = ColumnDef.MaxStringLength.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            parameters["actualLength"] = text.Length.ToString(System.Globalization.CultureInfo.InvariantCulture);
         }
         else
         {

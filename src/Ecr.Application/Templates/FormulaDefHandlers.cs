@@ -132,7 +132,8 @@ public sealed class SaveFormulaDefHandler(
             formulaEngine, version, command.Expression, command.Dialect,
             scope == FormulaScope.Column
                 ? new ExpressionSite(table.Id, null, resolvedId)
-                : new ExpressionSite(table.Id, table.Rows.First(r => r.Id == resolvedId).RowKeyValue, null));
+                : new ExpressionSite(table.Id, table.Rows.First(r => r.Id == resolvedId).RowKeyValue, null),
+            FormulaDef.MaxExpressionLength);
 
         var hasDocuments = await store.HasDocumentsAsync(templateVersionId, ct).ConfigureAwait(false);
 

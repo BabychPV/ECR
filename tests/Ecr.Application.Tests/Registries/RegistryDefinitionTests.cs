@@ -216,6 +216,25 @@ public sealed class RegistryDefinitionTests
     }
 
     [Fact]
+    [Trait("Requirement", "A4-03")]
+    public async Task Вираз_правила_довший_за_колонку_422_ще_до_запису()
+    {
+        // A4-03: cfg.RegistryRuleDef.Expression — 4000 символів; довший вираз давав 500 (SQL truncated).
+        var request = Request(rules:
+        [
+            new RegistryRuleSaveDto(
+                null, "TooLong", "Expression", new string('1', 4001), "Error", Text("задовге"), null, true),
+        ]);
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Saves().HandleAsync("PERMIT", request, default, "\"1\""));
+
+        Assert.Equal("err.ECR-REQ-0422.expressionTooLong", error.Details?["messageKey"]);
+        Assert.Equal("4000", error.Details?["max"]);
+        Assert.Equal("4001", error.Details?["length"]);
+        await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
+    }
+    [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
     public async Task Вид_наявного_правила_не_змінюється()
     {

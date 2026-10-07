@@ -270,7 +270,7 @@ public sealed partial class WorkflowTransactionTests(SqlServerFixture sql)
 
         return new ApproveSheetHandler(
             new WorkflowStore(db), Access(), new ReportSnapshotSync(snapshots, documents),
-            new UnitOfWork(db), Approver(), new TestClock(Now), new AuditWriter(db));
+            new UnitOfWork(db), Approver(), new TestClock(Now), new AuditWriter(db), documents);
     }
 
     /// <summary>Дозволяє все і повертає маршрут із ДВОХ кроків.</summary>

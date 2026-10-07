@@ -113,7 +113,7 @@ jobs:
             only: "-Only 'Складання','Тести API (частина 2)'"
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: SQL Server у контейнері
         run: |
@@ -127,7 +127,7 @@ jobs:
           echo "ECR_SQL_PASSWORD=$SA" >> "$GITHUB_ENV"
           docker run -d --name ecr-mssql             -e ACCEPT_EULA=Y -e "MSSQL_SA_PASSWORD=$SA"             -p 1433:1433 mcr.microsoft.com/mssql/server:2019-latest
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
         with:
           global-json-file: global.json
 
@@ -193,7 +193,7 @@ jobs:
       # зламані міграції.
       - name: dotnet ef
         run: |
-          dotnet tool install --global dotnet-ef
+          dotnet tool install --global dotnet-ef --version 10.0.11
           echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
 
       # ⛔ Три гейти — ОДИН виклик спільного скрипта. Кликати
@@ -238,13 +238,13 @@ jobs:
     runs-on: ubuntu-latest
     if: ${{ !(github.event_name == 'pull_request' && github.head_ref == 'dev/integration' && github.event.pull_request.head.repo.full_name == github.repository) }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       # ⚠ .NET тут НЕ ставиться. «Типи клієнта зі знімка» перегенеровує типи
       # з файла `contracts/openapi.snapshot.json`, який лежить у репозиторії, —
       # застосунок для цього не потрібен. Кроки складання і тестів `-Only`
       # відсіює до першої команди, тож `dotnet` не кличеться жодного разу.
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '22'
           cache: npm
@@ -286,9 +286,9 @@ jobs:
     # завдання, а не підняти число ще раз.
     timeout-minutes: 90
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '22'
           cache: npm
@@ -324,9 +324,9 @@ jobs:
     if: ${{ !(github.event_name == 'pull_request' && github.head_ref == 'dev/integration' && github.event.pull_request.head.repo.full_name == github.repository) }}
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
         with:
           global-json-file: global.json
 
@@ -352,13 +352,13 @@ jobs:
     if: ${{ !(github.event_name == 'pull_request' && github.head_ref == 'dev/integration' && github.event.pull_request.head.repo.full_name == github.repository) }}
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
         with:
           global-json-file: global.json
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '22'
           cache: npm
@@ -399,7 +399,7 @@ jobs:
       # MSI» для наступних (оновлення, W3/W3b). 30 днів — вистачає на тижневий
       # цикл мержу.
       - name: Артефакт MSI (ecr-msi)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: ecr-msi
           # .sha256 — еталон для I1 у verify-msi.ps1 (повний режим у msi-install).
@@ -434,10 +434,10 @@ jobs:
       contents: read
       actions: read      # gh api / gh run download — артефакт попередньої MSI
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Поточна MSI (артефакт ecr-msi)
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: ecr-msi
           path: msi-current
@@ -451,7 +451,7 @@ jobs:
 
       - name: Журнали msiexec (/l*v) і deploy -WhatIf
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: msi-install-logs
           path: ${{ runner.temp }}/msi-logs
@@ -483,9 +483,9 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '22'
           cache: npm
@@ -512,7 +512,7 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
 

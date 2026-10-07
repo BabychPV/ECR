@@ -107,6 +107,33 @@ public sealed class RegistryDefinitionDraftTests
         _drafts.DidNotReceive().Add(Arg.Any<RegistryDefinitionDraft>());
     }
 
+    [Theory]
+    [InlineData(4000, false)]
+    [InlineData(4001, true)]
+    [Trait("Requirement", "A4-03")]
+    public async Task Вираз_правила_довший_за_колонку_422_а_рівно_на_межі_зберігається(int length, bool rejected)
+    {
+        // A4-03: cfg.RegistryRuleDef.Expression — 4000; довший вираз давав 500 (SQL truncated) замість 422.
+        var expression = new string('1', length);
+        var request = DraftRequest("Number", rowVersion: null) with
+        {
+            Rules = [new RegistryRuleSaveDto(null, "R1", "Expression", expression, "Error", Text("m"), null, true)],
+        };
+
+        if (!rejected)
+        {
+            await SaveDraft().HandleAsync("PERMIT", request, default, IfMatch1);
+            return;
+        }
+
+        var ex = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => SaveDraft().HandleAsync("PERMIT", request, default, IfMatch1));
+
+        Assert.Equal("err.ECR-REQ-0422.expressionTooLong", ex.Details!["messageKey"]);
+        Assert.Equal("4000", ex.Details["max"]);
+        Assert.Equal("4001", ex.Details["length"]);
+        _drafts.DidNotReceive().Add(Arg.Any<RegistryDefinitionDraft>());
+    }
     [Fact]
     [Trait("Directive", "BE-24")]
     public async Task Публікація_застосовує_чернетку_і_прибирає_її()

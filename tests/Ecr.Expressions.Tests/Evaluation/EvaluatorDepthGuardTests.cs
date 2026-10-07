@@ -73,43 +73,97 @@ public sealed class EvaluatorDepthGuardTests
     [Theory]
     [MemberData(nameof(FlatChains))]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
-    public void Кожен_плаский_ланцюг_відхиляє_надмірну_глибину_значенням(string op)
+    public void Кожен_плаский_ланцюг_рахується_до_тисячі_доданків(string op)
     {
-        // Удесятеро глибше за межу: ніякий «майже вистачило» тут не пройде.
-        var value = Eval(Chain(op, EvaluationBudget.MaxNestingDepth * 10), out _);
+        // ✎ RC5: плаский ланцюг більше НЕ впирається в межу глибини. Раніше сума
+        // зі 97 доданків мовчки давала #BUDGET, хоча кроків вона коштує ~200 із
+        // 20 000. 1000 доданків — стеля колонки nvarchar(2000) (`1+1+…+1` = 1999
+        // символів), тобто найдовший ланцюг, який взагалі можна зберегти.
+        var value = Eval(Chain(op, 1000), out var deepest, out var spent);
 
-        Assert.True(value.IsError, $"{op}: очікували помилку, дістали {value.Type} = {value.Value}.");
-        Assert.Equal(ExpressionErrors.BudgetExceeded, value.ErrorCode);
+        Assert.False(value.IsError, $"{op}: {value.ErrorCode}");
+        Assert.Equal(Expected(op, 1000), value.Value);
+
+        // Глибина стека — не довжина ланцюга: корінь і крайній лівий операнд.
+        Assert.True(deepest <= 3, $"{op}: глибина {deepest} для плаского ланцюга.");
+
+        // Кроки лишаються справжньою мірою розміру: вузол на крок, тобто
+        // 999 бінарних вузлів + 1000 літералів. Межа 20 000 тут далеко.
+        Assert.Equal(1999, spent);
     }
 
     [Theory]
     [MemberData(nameof(FlatChains))]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
-    public void Кожен_плаский_ланцюг_рахується_рівно_до_межі(string op)
+    public void Плаский_ланцюг_відхиляється_межею_КРОКІВ_а_не_глибини(string op)
     {
-        // ⚠ Зворотний бік тієї самої межі, і без нього перший тест нічого не
-        // вартий: «відхиляти все» теж зробив би його зеленим.
-        var value = Eval(Chain(op, EvaluationBudget.MaxNestingDepth), out var deepest);
+        // ⚠ Зворотний бік: «рахувати все» теж не можна. Ланцюг, що коштує понад
+        // 20 000 кроків (тут 25 000 вузлів у коді — парсер такий уже не пустить),
+        // зупиняє бюджет кроків, і значення те саме #BUDGET.
+        var value = EvalTree(FlatTree(op, 25_000), out var deepest, out var spent);
 
-        Assert.False(value.IsError, $"{op}: {value.ErrorCode}");
-        Assert.Equal(Expected(op), value.Value);
-
-        // Глибина названа ЧИСЛОМ: ланцюг із N доданків коштує рівно N спусків
-        // (N−1 вузол лівого гребеня плюс крайній лівий літерал).
-        Assert.Equal(EvaluationBudget.MaxNestingDepth, deepest);
+        Assert.Equal(ExpressionErrors.BudgetExceeded, value.ErrorCode);
+        Assert.Equal(Evaluator.MaxEvaluationSteps, spent);
+        Assert.True(deepest <= 3, $"{op}: глибина {deepest}: ланцюг пішов у рекурсію.");
     }
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
-    public void Межа_проходить_рівно_між_96_і_97_доданками()
+    public void Межа_глибини_проходить_рівно_між_96_і_97_рівнями_справжньої_вкладеності()
     {
         // Число тут навмисно написане цифрами, а не виведене з константи:
         // інакше тест погоджувався б із будь-якою зміною межі замість того,
         // щоб її помітити.
         Assert.Equal(96, EvaluationBudget.MaxNestingDepth);
 
-        Assert.Equal(96m, Eval(Chain("+", 96), out _).AsNumber());
-        Assert.Equal(ExpressionErrors.BudgetExceeded, Eval(Chain("+", 97), out _).ErrorCode);
+        // Праве вкладення `1 + (1 + (1 + …))`: N вузлів + літерал = N + 1 спуск.
+        var fits = EvalTree(RightNested(95), out var deepest, out _);
+        Assert.Equal(96m, fits.AsNumber());
+        Assert.Equal(96, deepest);
+
+        Assert.Equal(ExpressionErrors.BudgetExceeded, EvalTree(RightNested(96), out _, out _).ErrorCode);
+    }
+
+    [Theory]
+    [MemberData(nameof(FlatChains))]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public void Усе_що_пускає_парсер_у_плаский_ланцюг_обчислювач_рахує(string op)
+    {
+        // ✎ RC5, узгодження меж: стеля парсера (`Parser.MaxChainLinks` ланок) і
+        // межа обчислення — різні ресурси, і ланцюг найбільшої довжини, який
+        // пускає розбір, мусить рахуватися, а не мовчки давати #BUDGET.
+        // 1024 ланки = 1025 операндів = 2049 кроків — десята частина бюджету.
+        var terms = Parser.MaxChainLinks + 1;
+        var value = Eval(Chain(op, terms), out var deepest, out var spent);
+
+        Assert.False(value.IsError, $"{op}: {value.ErrorCode}");
+        Assert.Equal(Expected(op, terms), value.Value);
+        Assert.Equal(2 * terms - 1, spent);
+        Assert.True(spent * 8 <= Evaluator.MaxEvaluationSteps, $"{op}: {spent} кроків — запас менший за восьмикратний.");
+        Assert.True(deepest <= 3);
+
+        // Ланка №1025 розбір уже відхиляє: далі за ним межі обчислення не питають.
+        Assert.False(Expr.Parse(Chain(op, terms + 1), ExpressionDialect.Template).IsSuccess);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public void Вкладеність_дужками_і_гілками_IF_рахується_як_глибина_а_ланцюг_ні()
+    {
+        // Парсер пускає лише ~63 рівні, тож тут — те, що він справді приймає.
+        var parenthesised = "1" + Repeat(" + (1", 40) + new string(')', 40);
+        var value = Eval(parenthesised, out var deepest, out _);
+        Assert.Equal(41m, value.AsNumber());
+        Assert.Equal(41, deepest);
+
+        var conditional = Repeat("IF(TRUE, ", 30) + "1" + Repeat(", 0)", 30);
+        value = Eval(conditional, out deepest, out _);
+        Assert.Equal(1m, value.AsNumber());
+        Assert.True(deepest >= 30, $"IF: глибина {deepest}.");
+
+        // Той самий ланцюг у 300 доданків — глибина не росте.
+        Eval(Chain("+", 300), out deepest, out _);
+        Assert.True(deepest <= 3);
     }
 
     [Fact]
@@ -167,9 +221,36 @@ public sealed class EvaluatorDepthGuardTests
         // і в звіт ішло б підроблене число замість видимої відмови. Та сама
         // вимога, що й для вичерпаного бюджету кроків (02b §6.4), і виконана
         // вона тим самим кодом `#BUDGET` — власне, тому код і той самий.
-        var value = Eval($"IFERROR({Chain("+", 500)}, 0)", out _);
+        // ✎ RC5: глибину тепер дає лише справжня вкладеність, тож «надмірна
+        // глибина» — це праве вкладення; і межа кроків, і межа глибини
+        // непіймані.
+        var deep = new FunctionNode(
+            "IFERROR", [RightNested(200), new LiteralNode(0m, ExpressionValueType.Number)]);
+        Assert.Equal(ExpressionErrors.BudgetExceeded, EvalTree(deep, out _, out _).ErrorCode);
 
-        Assert.Equal(ExpressionErrors.BudgetExceeded, value.ErrorCode);
+        var long25k = new FunctionNode(
+            "IFERROR", [FlatTree("+", 25_000), new LiteralNode(0m, ExpressionValueType.Number)]);
+        Assert.Equal(ExpressionErrors.BudgetExceeded, EvalTree(long25k, out _, out _).ErrorCode);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public void Праве_вкладення_у_сто_тисяч_вузлів_відпрацьовує_на_стеку_256_КБ()
+    {
+        // Справжня глибина — те, що тепер лишилося стеку: межа 96 тримає її й на
+        // потоці в чверть стандартного стека.
+        ExpressionValue result = default;
+        var root = RightNested(100_000);
+        var thread = new Thread(
+            () => result = new Evaluator(new FunctionRegistry()).Evaluate(
+                root, new TestEvaluationContext(), ExpressionDialect.Template,
+                new EvaluationBudget(Evaluator.MaxEvaluationSteps)),
+            maxStackSize: 256 * 1024);
+
+        thread.Start();
+        Assert.True(thread.Join(TimeSpan.FromSeconds(30)), "Обчислення не завершилося за 30 с.");
+
+        Assert.Equal(ExpressionErrors.BudgetExceeded, result.ErrorCode);
     }
 
     [Fact]
@@ -252,17 +333,70 @@ public sealed class EvaluatorDepthGuardTests
         _ => "1",
     };
 
-    /// <summary>Значення ланцюга рівно з <see cref="EvaluationBudget.MaxNestingDepth"/> операндів.</summary>
-    private static object Expected(string op) => op switch
+    /// <summary>Значення ланцюга рівно з <paramref name="terms"/> операндів.</summary>
+    private static object Expected(string op, int terms) => op switch
     {
-        "+" => (decimal)EvaluationBudget.MaxNestingDepth,
+        "+" => (decimal)terms,
 
         // Ланцюг лівоасоціативний: 1 − 1 − … − 1 = 1 − (N−1).
-        "-" => 2m - EvaluationBudget.MaxNestingDepth,
+        "-" => 2m - terms,
         "*" or "/" => 1m,
-        "&" => new string('a', EvaluationBudget.MaxNestingDepth),
+        "&" => new string('a', terms),
         _ => true,
     };
+
+    private static BinaryOperator Operator(string op) => op switch
+    {
+        "+" => BinaryOperator.Add,
+        "-" => BinaryOperator.Subtract,
+        "*" => BinaryOperator.Multiply,
+        "/" => BinaryOperator.Divide,
+        "&" => BinaryOperator.Concat,
+        "AND" => BinaryOperator.And,
+        _ => BinaryOperator.Or,
+    };
+
+    private static LiteralNode OperandNode(string op) => op switch
+    {
+        "&" => new LiteralNode("a", ExpressionValueType.Text),
+        "AND" or "OR" => new LiteralNode(true, ExpressionValueType.Boolean),
+        _ => new LiteralNode(1m, ExpressionValueType.Number),
+    };
+
+    /// <summary>Лівий гребінь із <paramref name="terms"/> операндів, побудований у коді.</summary>
+    private static AstNode FlatTree(string op, int terms)
+    {
+        AstNode root = OperandNode(op);
+        for (var i = 1; i < terms; i++)
+        {
+            root = new BinaryNode(Operator(op), root, OperandNode(op));
+        }
+
+        return root;
+    }
+
+    /// <summary>Праве вкладення <c>1 + (1 + (… + 1))</c>: <paramref name="nodes"/> бінарних вузлів.</summary>
+    private static AstNode RightNested(int nodes)
+    {
+        AstNode root = new LiteralNode(1m, ExpressionValueType.Number);
+        for (var i = 0; i < nodes; i++)
+        {
+            root = new BinaryNode(BinaryOperator.Add, new LiteralNode(1m, ExpressionValueType.Number), root);
+        }
+
+        return root;
+    }
+
+    private static ExpressionValue EvalTree(AstNode root, out int deepest, out int spent)
+    {
+        var budget = new EvaluationBudget(Evaluator.MaxEvaluationSteps);
+        var value = new Evaluator(new FunctionRegistry())
+            .Evaluate(root, new TestEvaluationContext(), ExpressionDialect.Template, budget);
+
+        deepest = budget.Deepest;
+        spent = budget.Spent;
+        return value;
+    }
 
     private static string Repeat(string fragment, int times)
         => string.Concat(Enumerable.Repeat(fragment, times));
@@ -270,6 +404,10 @@ public sealed class EvaluatorDepthGuardTests
     /// <summary>Обчислює вираз, віддаючи досягнуту глибину.</summary>
     private static ExpressionValue Eval(
         string expression, out int deepest, ExpressionDialect dialect = ExpressionDialect.Template)
+        => Eval(expression, out deepest, out _, dialect);
+
+    private static ExpressionValue Eval(
+        string expression, out int deepest, out int spent, ExpressionDialect dialect = ExpressionDialect.Template)
     {
         var parsed = Expr.Parse(expression, dialect);
         Assert.True(parsed.IsSuccess, string.Join("; ", parsed.Diagnostics.Select(d => d.Message)));
@@ -279,6 +417,7 @@ public sealed class EvaluatorDepthGuardTests
             .Evaluate(parsed.Expression!.Root, new TestEvaluationContext(), dialect, budget);
 
         deepest = budget.Deepest;
+        spent = budget.Spent;
         return value;
     }
 
@@ -290,7 +429,7 @@ public sealed class EvaluatorDepthGuardTests
     /// переписаний перелік старіє мовчки. Той самий прийом, що й у
     /// <c>ExpressionDepthGuardTests</c>.
     /// </remarks>
-    private static List<(string Text, ExpressionDialect Dialect)> CorpusExpressions()
+    internal static List<(string Text, ExpressionDialect Dialect)> CorpusExpressions()
     {
         var directory = Path.Combine(Root(), "tests", "Ecr.TestKit", "Fixtures");
         var result = new List<(string, ExpressionDialect)>();

@@ -465,6 +465,9 @@ function rejectionText(rejection: ImportRejection): string {
     // ⛔ ФВ-9.16b: після округлення до `Scale` число не вміщується в `Precision`.
     case 'err.ECR-CELL-0422.importPrecision':
       return t('err.ECR-CELL-0422.importPrecision');
+    // RC5: текст довший за стовпець сховища — у перегляді, а не 422 на Apply.
+    case 'err.ECR-CELL-0422.importValueTooLong':
+      return t('err.ECR-CELL-0422.importValueTooLong');
     case 'err.ECR-IMP-0422.importInstanceMissing':
       return t('err.ECR-IMP-0422.importInstanceMissing');
     case 'err.ECR-IMP-0422.importTableMissing':

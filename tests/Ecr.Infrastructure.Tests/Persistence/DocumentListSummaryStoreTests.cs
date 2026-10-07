@@ -29,7 +29,7 @@ public sealed class DocumentListSummaryStoreTests(SqlServerFixture sql)
         await ArrangeAsync(db, foreign, foreign.DocumentId, DocumentStatus.Rejected, errors: 1);
 
         var summary = await new DocumentListSummaryStore(db).SummarizeAsync(
-            projectId: null, mine.PeriodKey.Value, [mine.ProjectId], CancellationToken.None);
+            projectId: null, mine.PeriodKey.Value, [mine.ProjectId], restrictions: null, CancellationToken.None);
 
         // ⛔ Рівно ОДИН: чужий документ у тому самому стані й з тими самими
         // помилками існує, і без межі грантів обидва числа були б 2 (або більше).
@@ -58,7 +58,7 @@ public sealed class DocumentListSummaryStoreTests(SqlServerFixture sql)
         await ArrangeAsync(db, chain, submitted, DocumentStatus.Submitted, errors: 2, earlierErrors: 0);
 
         var summary = await new DocumentListSummaryStore(db).SummarizeAsync(
-            chain.ProjectId, chain.PeriodKey.Value, visibleProjectIds: null, CancellationToken.None);
+            chain.ProjectId, chain.PeriodKey.Value, visibleProjectIds: null, restrictions: null, CancellationToken.None);
 
         Assert.Equal((1, 1, 1, 0, 1),
             (summary.Draft, summary.Submitted, summary.Approved, summary.Rejected, summary.WithIssues));
@@ -121,7 +121,7 @@ public sealed class DocumentListSummaryStoreTests(SqlServerFixture sql)
 
         // 1. Смуга над таблицею.
         var summary = await new DocumentListSummaryStore(db).SummarizeAsync(
-            chain.ProjectId, chain.PeriodKey.Value, visibleProjectIds: null, CancellationToken.None);
+            chain.ProjectId, chain.PeriodKey.Value, visibleProjectIds: null, restrictions: null, CancellationToken.None);
 
         // 2. Рядок переліку — те, що малює колонка «State».
         var page = await store.ListAsync(

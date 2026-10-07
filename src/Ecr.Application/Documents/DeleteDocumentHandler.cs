@@ -77,7 +77,13 @@ public sealed class DeleteDocumentHandler(
         await uow.ExecuteInTransactionAsync(async innerCt =>
         {
             var facts = await deletion.LockWorkflowFactsAsync(documentId, innerCt).ConfigureAwait(false);
-            DraftDocumentDeletion.EnsureDraft(facts.SheetStates, facts.HasWorkflowHistory);
+            // ⛔ Відмова не називає код і стан аркуша, якого читач не бачить: схований непорожній аркуш
+            // зводиться до загальної причини «документ уже проходив погодження» (без sheetDefId/reason).
+            var hidden = await DocumentSheetVisibility
+                .HiddenStatesAsync(access, profile, documentId, facts.SheetStates, innerCt).ConfigureAwait(false);
+            DraftDocumentDeletion.EnsureDraft(
+                [.. facts.SheetStates.Except(hidden)],
+                facts.HasWorkflowHistory || hidden.Any(s => s.Status != DocumentStatus.Draft));
             cells = await deletion.DeleteAsync(documentId, innerCt).ConfigureAwait(false);
         }, ct).ConfigureAwait(false);
 

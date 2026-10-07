@@ -20,6 +20,9 @@ public sealed class SourceCatalogHandlerTests
     private const int Actor = 11;
     private const int SourceId = 3;
 
+    /// <summary>Запобіжник від зависання тесту, а не вимір межі: межу зсуває керований годинник.</summary>
+    private static readonly TimeSpan HangGuard = TimeSpan.FromSeconds(60);
+
     private readonly IDataSourceStore _store = Substitute.For<IDataSourceStore>();
     private readonly ISourceCatalogReader _reader = Substitute.For<ISourceCatalogReader>();
     private readonly IAccessDecisionService _access = Substitute.For<IAccessDecisionService>();
@@ -95,12 +98,22 @@ public sealed class SourceCatalogHandlerTests
         _reader.BrowseAsync(SourceId, null, Arg.Any<CancellationToken>())
             .Returns(call => Hang(call.Arg<CancellationToken>()));
 
-        var handler = new BrowseSourceCatalogHandler(
-            _store, _reader, new SourceCatalogPolicy(TimeSpan.FromMilliseconds(200)), _access, _user);
+        var time = new ManualTimeProvider();
+        var policy = new SourceCatalogPolicy(TimeSpan.FromSeconds(10)) { Time = time };
+        var handler = new BrowseSourceCatalogHandler(_store, _reader, policy, _access, _user);
 
-        // ⚠ WaitAsync: без межі в обробнику тест падає за 5 с, а не висить.
-        var refused = await Assert.ThrowsAsync<BusinessRuleException>(
-            () => handler.HandleAsync(SourceId, null, null, null, null, default).WaitAsync(TimeSpan.FromSeconds(5)));
+        var browsing = handler.HandleAsync(SourceId, null, null, null, null, default);
+
+        // Межа ще не настала — обробник чекає джерело, а не відповідає сам. Годинник керований: жодного
+        // справжнього таймера, тож результат не залежить від навантаження CI.
+        Assert.Equal(1, time.PendingTimers);
+        time.Advance(policy.Timeout - TimeSpan.FromTicks(1));
+        Assert.False(browsing.IsCompleted);
+
+        time.Advance(TimeSpan.FromTicks(1));
+
+        // ⚠ WaitAsync — лише запобіжник: без межі в обробнику тест падає, а не висить.
+        var refused = await Assert.ThrowsAsync<BusinessRuleException>(() => browsing.WaitAsync(HangGuard));
 
         Assert.Equal("ECR-INT-0503", refused.ErrorCode);
         Assert.Equal("err.ECR-INT-0503.catalogTimeout", refused.Details!["messageKey"]);

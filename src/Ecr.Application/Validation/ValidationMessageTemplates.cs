@@ -39,11 +39,17 @@ public static class ValidationMessageTemplates
     /// <summary>Значення не вміщується в точність колонки.</summary>
     public const string ColumnPrecision = "validation.column.precision";
 
+    /// <summary>Текст довший за стовпець сховища (<c>ColumnDef.MaxStringLength</c>).</summary>
+    public const string ColumnMaxLength = "validation.column.maxLength";
+
     /// <summary>Вираз правила не розбирається.</summary>
     public const string RuleParseError = "validation.rule.parseError";
 
     /// <summary>Правило не дало логічної відповіді.</summary>
     public const string RuleNotLogical = "validation.rule.notLogical";
+
+    /// <summary>Правило не обчислилося: формула завелика для одного обчислення (бюджет кроків або глибини).</summary>
+    public const string RuleBudget = "validation.rule.budget";
 
     private static readonly Dictionary<string, (string En, string Ru, string Kz)> Table = new(StringComparer.Ordinal)
     {
@@ -71,6 +77,10 @@ public static class ValidationMessageTemplates
             "The value does not fit the precision of column \"{column}\" ({precision} digits).",
             "Значение не помещается в точность колонки «{column}» ({precision} цифр).",
             "Мән «{column}» бағанының дәлдігіне ({precision} сан) сыймайды."),
+        [ColumnMaxLength] = (
+            "The text in column \"{column}\" is longer than {maxLength} characters ({actualLength}).",
+            "Текст в колонке «{column}» длиннее {maxLength} символов ({actualLength}).",
+            "«{column}» бағанындағы мәтін {maxLength} таңбадан ұзын ({actualLength})."),
         [RuleParseError] = (
             "Rule '{rule}' does not parse: {detail}",
             "Правило '{rule}' не разбирается: {detail}",
@@ -79,6 +89,10 @@ public static class ValidationMessageTemplates
             "Rule '{rule}' did not return a logical answer: {reason}",
             "Правило '{rule}' не дало логического ответа: {reason}",
             "'{rule}' ережесі логикалық жауап бермеді: {reason}"),
+        [RuleBudget] = (
+            "Rule '{rule}' could not be evaluated: the formula is too large for one calculation (more than 20,000 steps or 96 nesting levels). Split it into several calculated columns.",
+            "Правило '{rule}' не удалось вычислить: формула слишком велика для одного расчёта (больше 20 000 шагов или 96 уровней вложенности). Разбейте её на несколько вычисляемых колонок.",
+            "'{rule}' ережесін есептеу мүмкін болмады: формула бір есептеу үшін тым үлкен (20 000 қадамнан немесе 96 ену деңгейінен артық). Оны бірнеше есептелетін бағанға бөліңіз."),
     };
 
     /// <summary>Усі ключі шаблонів (для сторожа збігу з сідом).</summary>

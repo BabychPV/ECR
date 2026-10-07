@@ -76,8 +76,13 @@ export function ForbiddenPage(): JSX.Element {
 
   return (
     <Center py="xl">
-      <Stack gap="xs" align="center" maw={420} role="alert">
-        <Title order={2} ref={heading} tabIndex={-1} className={RouteHeadingClass}>
+      {/* ✎ 2026-10-06, вимога людини «текст в одну строку»: заголовок відмови
+          ламався на два рядки — 26px (`order={2}`) у контейнері 420px. Тепер
+          за гібридним макетом (`docs/design/hybrid`, `.work-state` 560px,
+          `.work-state-h` 15px/600): рядок уміщається на будь-якій звичайній
+          ширині, а на вузькому екрані `ta="center"` дає перенос по центру. */}
+      <Stack gap="xs" align="center" maw={560} role="alert">
+        <Title order={2} fz="md" fw={600} ref={heading} tabIndex={-1} ta="center" className={RouteHeadingClass}>
           {title}
         </Title>
 

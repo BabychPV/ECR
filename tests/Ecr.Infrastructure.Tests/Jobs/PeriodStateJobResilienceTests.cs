@@ -194,7 +194,9 @@ public sealed class PeriodStateJobResilienceTests(SqlServerFixture sql)
 
             var run = Assert.Single(await RunsMentioningAsync(builder, baseline, brokenCode));
             Assert.Equal("Failed", run.Status);
-            Assert.Contains(FailPeriodSave.Message, run.DetailsJson!, StringComparison.Ordinal);
+            // SEC (TIER2): текст винятку в зведення не йде — лише відсилка до журналу.
+            Assert.DoesNotContain(FailPeriodSave.Message, run.DetailsJson!, StringComparison.Ordinal);
+            Assert.Contains("server log", run.DetailsJson!, StringComparison.Ordinal);
         }
         finally
         {

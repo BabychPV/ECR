@@ -100,7 +100,7 @@ public sealed class SubmitRightApiTests(SqlServerFixture sql)
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Decision", "D-285")]
-    public async Task Заборона_на_аркуш_перемагає_Write_з_правом_Submit_403_NoGrant()
+    public async Task Заборона_на_аркуш_перемагає_Write_з_правом_Submit_404_як_неіснуючий()
     {
         var b = await ArrangeAsync().ConfigureAwait(true);
         using var app = new EcrApiFactory(sql);
@@ -108,9 +108,12 @@ public sealed class SubmitRightApiTests(SqlServerFixture sql)
                 app, b, GrantLevel.Write, permissions: [Right], denySheet: true)
             .ConfigureAwait(true);
 
-        var body = await ExpectAsync(app, HttpStatusCode.Forbidden, SubmitAsync(client, b)).ConfigureAwait(true);
+        // R-2: схований аркуш не розкриває свого існування — 404, як для неіснуючого.
+        var body = await ExpectAsync(app, HttpStatusCode.NotFound, SubmitAsync(client, b)).ConfigureAwait(true);
 
-        Assert.Equal("NoGrant", ReasonOf(body));
+        using var json = JsonDocument.Parse(body);
+        Assert.Equal("ECR-DOC-0404", json.RootElement.GetProperty("errorCode").GetString());
+        Assert.Equal("err.ECR-DOC-0404.sheetNotInDocument", json.RootElement.GetProperty("messageKey").GetString());
         Assert.Null(await StatusAsync(b).ConfigureAwait(true));
     }
 

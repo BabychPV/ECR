@@ -195,7 +195,7 @@ public sealed class ApprovalRouteHandlerTests
         access.CurrentApprovalStepAsync(1, 2, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
             .Returns(new ApprovalStepView(StepId: 100, Ordinal: 1, RoleId: 42, NextStepId: 200, TotalSteps: 2));
 
-        await new ApproveSheetHandler(workflow, access, Reports(), uow, _user, clock, audit)
+        await new ApproveSheetHandler(workflow, access, Reports(), uow, _user, clock, audit, Substitute.For<IDocumentStore>())
             .HandleAsync(1, 2, 202603, approved: true, reason: null, CancellationToken.None);
 
         // Аркуш НЕ затверджений…

@@ -1,6 +1,7 @@
 // src/Ecr.Application/Documents/DocumentVisibility.cs
 using System.Globalization;
 using Ecr.Application.Errors;
+using Ecr.Application.Ports;
 using Ecr.Application.Security;
 using Ecr.Domain.Errors;
 
@@ -82,6 +83,59 @@ public static class DocumentVisibility
 
         PermissionCheck.RequireIn(profile, permission, projectId);
     }
+
+    /// <summary>
+    /// Аркуш, якого читач не бачить, для нього НЕ ІСНУЄ: ТА САМА відповідь, що й на аркуш поза складом
+    /// документа (<c>404 sheetNotInDocument</c>), — до будь-якої перевірки стану чи гранта. Інакше
+    /// відмова «аркуш у стані Submitted» чи «рівень Read» розповідала б про аркуш, якого немає
+    /// в читача (оракул стану).
+    /// </summary>
+    /// <param name="documents">Склад документа.</param>
+    /// <param name="access">Служба доступу.</param>
+    /// <param name="profile">Профіль користувача.</param>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="sheetDefId">Аркуш, над яким діють.</param>
+    /// <param name="period">Період дії (межі ролі, звуженої періодами).</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <exception cref="NotFoundException"><c>ECR-DOC-0404</c> — аркуша немає в складі або він схований від читача.</exception>
+    /// <remarks>
+    /// ⚠ Читач без обмежень нижче проєкту не платить нічого: поведінка й кількість запитів — як були
+    /// (<see cref="DocumentSheetVisibility.HasRestrictions"/>).
+    /// </remarks>
+    public static async Task RequireSheetVisibleAsync(
+        IDocumentStore documents, IAccessDecisionService access, AccessProfile profile, long documentId,
+        int sheetDefId, Ecr.Domain.ValueObjects.PeriodKey period, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(documents);
+        ArgumentNullException.ThrowIfNull(access);
+        ArgumentNullException.ThrowIfNull(profile);
+
+        if (!DocumentSheetVisibility.HasRestrictions(profile))
+        {
+            return;
+        }
+
+        if (!await documents.HasSheetAsync(documentId, sheetDefId, ct).ConfigureAwait(false)
+            || !(await access.ReadScopeAsync(profile, documentId, ct).ConfigureAwait(false))
+                .InPeriod(period).CanReadSheet(sheetDefId))
+        {
+            throw SheetNotInDocument(documentId, sheetDefId);
+        }
+    }
+
+    /// <summary>Відповідь «аркуша немає в складі документа» — однакова для відсутнього й схованого.</summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="sheetDefId">Аркуш.</param>
+    public static NotFoundException SheetNotInDocument(long documentId, int sheetDefId)
+        => new(
+            "ECR-DOC-0404",
+            $"Аркуша {sheetDefId} немає в складі документа {documentId}.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-DOC-0404.sheetNotInDocument",
+                ["sheetDefId"] = sheetDefId.ToString(CultureInfo.InvariantCulture),
+                ["documentId"] = documentId.ToString(CultureInfo.InvariantCulture),
+            });
 
     /// <summary>Відповідь «документа немає» — однакова для відсутнього й невидимого.</summary>
     /// <param name="documentId">Документ.</param>

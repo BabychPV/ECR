@@ -38,7 +38,11 @@ internal sealed class CyrillicFailingJob : IBackgroundJob
 
     /// <inheritdoc />
     public Task ExecuteAsync(object? payload, IJobProgress progress, CancellationToken ct)
-        => throw new InvalidOperationException(Reason);
+        // SEC: текст довільного винятку в `/jobs` не йде, тож довга кирилична
+        // причина доїжджає лише з власного винятку продукту; перехідний код —
+        // щоб перший провал, як і раніше, був ретраєм.
+        => throw new Ecr.Application.Errors.BusinessRuleException(
+            Ecr.Domain.Errors.ErrorCodes.SourceUnavailable, Reason);
 }
 
 /// <summary>

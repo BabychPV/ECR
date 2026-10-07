@@ -130,6 +130,12 @@ public sealed class SaveRegistryDefinitionDraftHandler(
         SaveRegistryDefinitionHandler.RequireReason(request.Reason);
         SaveRegistryDefinitionHandler.RequireNoEmptyItems(request.Fields, request.Rules, request.Keys);
 
+        // A4-03: довжина виразу правила — одразу, а не на публікації (колонка 4000).
+        foreach (var rule in request.Rules ?? [])
+        {
+            Ecr.Application.Expressions.ExpressionLengthGuard.Require(rule.Expression, RegistryRuleDef.MaxExpressionLength);
+        }
+
         var definition = await registries.FindDefinitionAsync(code, ct).ConfigureAwait(false)
             ?? throw SaveRegistryDefinitionHandler.RegistryNotFound(code);
 

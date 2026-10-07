@@ -61,7 +61,8 @@ public sealed class NarrowedRoleScopeApiTests(SqlServerFixture sql)
         await ExpectAsync(app, HttpStatusCode.OK, DocumentAsync(client, b)).ConfigureAwait(true);
         Assert.DoesNotContain(b.TableInstanceId, await TableIdsAsync(client, b).ConfigureAwait(true));
         await ExpectAsync(app, HttpStatusCode.NotFound, SliceAsync(client, b)).ConfigureAwait(true);
-        await ExpectAsync(app, HttpStatusCode.Forbidden, SubmitAsync(client, b)).ConfigureAwait(true);
+        // R-2: аркуш поза областю ролі для неї не існує - та сама відмова, що й на неіснуючий (404), а не 403 зі станом.
+        await ExpectAsync(app, HttpStatusCode.NotFound, SubmitAsync(client, b)).ConfigureAwait(true);
     }
 
     [Fact]
@@ -91,7 +92,8 @@ public sealed class NarrowedRoleScopeApiTests(SqlServerFixture sql)
         await ExpectAsync(app, HttpStatusCode.OK, DocumentAsync(client, b)).ConfigureAwait(true);
         Assert.DoesNotContain(b.TableInstanceId, await TableIdsAsync(client, b).ConfigureAwait(true));
         await ExpectAsync(app, HttpStatusCode.NotFound, SliceAsync(client, b)).ConfigureAwait(true);
-        await ExpectAsync(app, HttpStatusCode.Forbidden, SubmitAsync(client, b)).ConfigureAwait(true);
+        // R-2: аркуш поза областю ролі для неї не існує - та сама відмова, що й на неіснуючий (404), а не 403 зі станом.
+        await ExpectAsync(app, HttpStatusCode.NotFound, SubmitAsync(client, b)).ConfigureAwait(true);
     }
 
     /// <summary>
