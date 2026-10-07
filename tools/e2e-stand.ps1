@@ -47,8 +47,26 @@
     Скільки вільного місця вимагати на диску даних; передається в
     `setup-dev-db.ps1`. Не задано — обчислюється за профілем; `0` — без перевірки.
 
+.PARAMETER Login
+    SQL-логін замість інтегрованої автентифікації; передається й у
+    `setup-dev-db.ps1`. Пароль — `-SqlPassword` або змінна `ECR_SQL_PASSWORD`,
+    до `sqlcmd` іде через `SQLCMDPASSWORD`. Потрібен для SQL Server у
+    Linux-контейнері CI (`.github/workflows/e2e-stand.yml`), так само як у
+    `smoke.ps1`. Не задано — `-E` і `Trusted_Connection=True`, як і раніше.
+
+.PARAMETER SmallFiles
+    Передається в `setup-dev-db.ps1`: файли бази 64 МБ замість 14 ГБ. Для CI-раннера.
+
+.PARAMETER StartupTimeoutSec
+    Скільки чекати старту застосунку (тут і в `setup-dev-db.ps1`). Умовчання 60 с.
+
+.PARAMETER Reporter
+    Значення `--reporter` для Playwright (напр. `list,html`); порожнє —
+    репортер із `playwright.config.ts`, як і раніше.
+
 .EXAMPLE
     powershell -File tools/e2e-stand.ps1
+    pwsh -File tools/e2e-stand.ps1 -Server 'localhost,1433' -Login sa -SmallFiles -RequireFreeGb 0
     powershell -File tools/e2e-stand.ps1 -Server localhost -DataPath F:\EcrData
 #>
 [CmdletBinding()]
@@ -63,7 +81,15 @@ param(
     # запуск без параметра поводиться рівно як раніше (умовчання вирішує
     # `setup-dev-db.ps1`, а не дублюється тут і не розходиться з ним).
     [string] $DataPath,
-    [double] $RequireFreeGb = -1
+    [double] $RequireFreeGb = -1,
+
+    # Див. `.PARAMETER Login`/`SmallFiles`/`StartupTimeoutSec`/`Reporter`. Без
+    # них поведінка рівно та сама, що й до їх появи.
+    [string] $Login,
+    [string] $SqlPassword = $env:ECR_SQL_PASSWORD,
+    [switch] $SmallFiles,
+    [int] $StartupTimeoutSec = 60,
+    [string] $Reporter = ''
 )
 
 # ⚠ Масив аргументів, а не сплат: `setup-dev-db.ps1` викликається окремим
@@ -76,6 +102,32 @@ if ($PSBoundParameters.ContainsKey('DataPath')) {
 if ($PSBoundParameters.ContainsKey('RequireFreeGb')) {
     $setupExtra += @('-RequireFreeGb', [string] $RequireFreeGb)
 }
+if ($SmallFiles) { $setupExtra += '-SmallFiles' }
+if ($PSBoundParameters.ContainsKey('StartupTimeoutSec')) {
+    $setupExtra += @('-StartupTimeoutSec', [string] $StartupTimeoutSec)
+}
+
+# ⚠ Автентифікація SQL — рівно як у `smoke.ps1`: інтегрована або SQL-логін.
+# Пароль лише оточенням (`SQLCMDPASSWORD` для `sqlcmd`, `ECR_SQL_PASSWORD` для
+# дочірнього `setup-dev-db.ps1`): аргументи процесу видно всім на агенті.
+if ($Login) {
+    if (-not $SqlPassword) { throw '-Login задано, а пароля немає: передай -SqlPassword або змінну ECR_SQL_PASSWORD.' }
+    $env:SQLCMDPASSWORD = $SqlPassword
+    $env:ECR_SQL_PASSWORD = $SqlPassword
+    $sqlAuth = @('-U', $Login)
+    $setupExtra += @('-Login', $Login)
+}
+else {
+    $sqlAuth = @('-E')
+}
+
+# ⚠ Поза Windows: дочірній скрипт — `pwsh`, `-ExecutionPolicy` лише у Windows,
+# `Start-Process -WindowStyle`, `cmd.exe`, `taskkill`, `npx.cmd` і
+# `Get-NetTCPConnection` там не існують (той самий вибір, що й у `smoke.ps1`).
+$onWindows = $IsWindows -or $PSVersionTable.PSEdition -eq 'Desktop'
+$psExe = if ($onWindows) { 'powershell' } else { 'pwsh' }
+$psPrefix = if ($onWindows) { @('-ExecutionPolicy', 'Bypass') } else { @() }
+$npxExe = if ($onWindows) { 'npx.cmd' } else { 'npx' }
 
 $ErrorActionPreference = 'Stop'
 
@@ -168,7 +220,31 @@ if ($WebPort -eq 0) { $WebPort = $Port + 1000 }
 # (`playwright.config.ts`, коли задано `E2E_WEB_PORT`), тож чужий сервер на
 # цьому порту він і так не підхопить — але впаде аж на кроці прогонів, після
 # хвилин розгортання, і з повідомленням Playwright. Тут — одразу й з PID.
+# ⚠ Поза Windows `Get-NetTCPConnection` немає: там «зайнято» — це вдале
+# з'єднання на localhost (IPv4 або IPv6, Vite слухає те, у що резолвиться
+# `localhost`), без PID власника.
+function Test-WebPortListening {
+    if ($onWindows) {
+        return [bool] (Get-NetTCPConnection -State Listen -LocalPort $WebPort -ErrorAction SilentlyContinue)
+    }
+    foreach ($address in @('127.0.0.1', '::1')) {
+        $tcp = $null
+        try {
+            # ⚠ Конструктор теж усередині try: без IPv6 на агенті він кидає.
+            $tcp = New-Object System.Net.Sockets.TcpClient([System.Net.IPAddress]::Parse($address).AddressFamily)
+            if ($tcp.ConnectAsync($address, $WebPort).Wait(1000) -and $tcp.Connected) { return $true }
+        }
+        catch { }
+        finally { if ($tcp) { $tcp.Dispose() } }
+    }
+    return $false
+}
+
 function Assert-WebPortFree {
+    if (-not $onWindows) {
+        if (Test-WebPortListening) { Fail "порт Vite $WebPort уже зайнятий. Це чужий сервер — не підхоплюю його; задай інший -WebPort." }
+        return
+    }
     $owners = @(Get-NetTCPConnection -State Listen -LocalPort $WebPort -ErrorAction SilentlyContinue |
         Select-Object -ExpandProperty OwningProcess -Unique)
     if ($owners.Count -gt 0) {
@@ -210,9 +286,22 @@ function Invoke-ViteWarmup {
     $warmLog = Join-Path $root 'artifacts/e2e.vite-warmup.log'
     New-Item -ItemType Directory -Force (Split-Path $warmLog) | Out-Null
 
-    $vite = Start-Process -PassThru -WindowStyle Hidden -WorkingDirectory $client cmd.exe `
-        -ArgumentList "/c npm run dev -- --port $WebPort --strictPort" `
-        -RedirectStandardOutput $warmLog -RedirectStandardError "$warmLog.err"
+    $viteArgs = @{
+        PassThru               = $true
+        WorkingDirectory       = $client
+        RedirectStandardOutput = $warmLog
+        RedirectStandardError  = "$warmLog.err"
+    }
+    if ($onWindows) {
+        $viteArgs.WindowStyle = 'Hidden'
+        $viteArgs.FilePath = 'cmd.exe'
+        $viteArgs.ArgumentList = "/c npm run dev -- --port $WebPort --strictPort"
+    }
+    else {
+        $viteArgs.FilePath = 'npm'
+        $viteArgs.ArgumentList = "run dev -- --port $WebPort --strictPort"
+    }
+    $vite = Start-Process @viteArgs
 
     $deadline = (Get-Date).AddSeconds($TimeoutSec)
     try {
@@ -251,16 +340,23 @@ function Invoke-ViteWarmup {
         # Дерево процесів: cmd → npm → node (vite). Лише своє, за PID.
         # ⚠ Q-217: stderr taskkill під 'Stop' став би винятком.
         if (-not $vite.HasExited) {
-            $previousEapKill = $ErrorActionPreference
-            $ErrorActionPreference = 'Continue'
-            try { & taskkill.exe /T /F /PID $vite.Id | Out-Null }
-            finally { $ErrorActionPreference = $previousEapKill }
+            if ($onWindows) {
+                $previousEapKill = $ErrorActionPreference
+                $ErrorActionPreference = 'Continue'
+                try { & taskkill.exe /T /F /PID $vite.Id | Out-Null }
+                finally { $ErrorActionPreference = $previousEapKill }
+            }
+            else {
+                # npm → sh → node (vite): .NET вбиває дерево за PID.
+                $vite.Kill($true)
+                $vite.WaitForExit()
+            }
         }
     }
 
     # Порт має звільнитися до Playwright: `--strictPort` інакше впаде.
     foreach ($i in 1..15) {
-        if (-not (Get-NetTCPConnection -State Listen -LocalPort $WebPort -ErrorAction SilentlyContinue)) { break }
+        if (-not (Test-WebPortListening)) { break }
         Start-Sleep -Seconds 1
     }
 }
@@ -276,7 +372,7 @@ Step 'чиста база і розгортання через sqlcmd'
 $previousEapGuard = $ErrorActionPreference
 $ErrorActionPreference = 'Continue'
 try {
-    $foreign = (& sqlcmd -S $Server -E -C -b -h -1 -W -d master `
+    $foreign = (& sqlcmd -S $Server @sqlAuth -C -b -h -1 -W -d master `
         -Q "SET NOCOUNT ON; DECLARE @r int = 0; IF DB_ID(N'$Database') IS NOT NULL EXEC sp_executesql N'SELECT @r = CASE WHEN EXISTS (SELECT 1 FROM [$Database].sys.extended_properties WHERE class = 0 AND name = N''Ecr_E2E_Temp'') THEN 0 ELSE 1 END', N'@r int OUTPUT', @r OUTPUT; SELECT @r;") `
         | Select-Object -Last 1
 }
@@ -291,7 +387,7 @@ if ("$foreign".Trim() -eq '1') {
 $previousEap = $ErrorActionPreference
 $ErrorActionPreference = 'Continue'
 try {
-    & powershell -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'setup-dev-db.ps1') `
+    & $psExe @psPrefix -File (Join-Path $PSScriptRoot 'setup-dev-db.ps1') `
         -Server $Server -Database $Database -Documents 1 -BootstrapPassword $bootstrapPassword @setupExtra | Out-Null
 }
 finally {
@@ -310,14 +406,19 @@ if ($LASTEXITCODE -ne 0) { Fail 'розгортання не пройшло' }
 $previousEap = $ErrorActionPreference
 $ErrorActionPreference = 'Continue'
 try {
-    & sqlcmd -S $Server -E -C -b -d $Database -Q "EXEC sys.sp_addextendedproperty @name = N'Ecr_E2E_Temp', @value = 1;" | Out-Null
+    & sqlcmd -S $Server @sqlAuth -C -b -d $Database -Q "EXEC sys.sp_addextendedproperty @name = N'Ecr_E2E_Temp', @value = 1;" | Out-Null
 }
 finally {
     $ErrorActionPreference = $previousEap
 }
 if ($LASTEXITCODE -ne 0) { Fail 'не вдалося позначити тимчасову базу' }
 
-$connection = "Server=$Server;Database=$Database;Trusted_Connection=True;TrustServerCertificate=True"
+$connection = if ($Login) {
+    "Server=$Server;Database=$Database;User Id=$Login;Password=$SqlPassword;TrustServerCertificate=True"
+}
+else {
+    "Server=$Server;Database=$Database;Trusted_Connection=True;TrustServerCertificate=True"
+}
 $log = Join-Path $root 'artifacts/e2e.api.log'
 
 $env:ECR_ConnectionStrings__Ecr = $connection
@@ -345,14 +446,21 @@ $env:ECR_Auth__RequireHttps = 'false'
 $env:ECR_Auth__DataProtection__AllowUnprotectedKeys = 'true'
 
 Step 'старт застосунку'
-$api = Start-Process -PassThru -WindowStyle Hidden dotnet `
-    -ArgumentList "run --project `"$(Join-Path $root 'src/Ecr.Api')`" --no-build --no-launch-profile" `
-    -RedirectStandardOutput $log -RedirectStandardError "$log.err"
+$startArgs = @{
+    PassThru               = $true
+    FilePath               = 'dotnet'
+    ArgumentList           = "run --project `"$(Join-Path $root 'src/Ecr.Api')`" --no-build --no-launch-profile"
+    RedirectStandardOutput = $log
+    RedirectStandardError  = "$log.err"
+}
+if ($onWindows) { $startArgs.WindowStyle = 'Hidden' }
+$api = Start-Process @startArgs
 
 try {
     $ready = $false
-    foreach ($i in 1..120) {
+    foreach ($i in 1..($StartupTimeoutSec * 2)) {
         Start-Sleep -Milliseconds 500
+        if ($api.HasExited) { Fail "застосунок завершився з кодом $($api.ExitCode); лог: $log" }
         try {
             $probe = Invoke-WebRequest -Uri "$base/health/live" -UseBasicParsing -TimeoutSec 5
             if ($probe.StatusCode -eq 200) { $ready = $true; break }
@@ -519,8 +627,10 @@ try {
         $previousEap = $ErrorActionPreference
         $ErrorActionPreference = 'Continue'
         try {
-            if ($Grep) { & npx.cmd playwright test --grep $Grep }
-            else { & npx.cmd playwright test }
+            $pwArgs = @('playwright', 'test')
+            if ($Grep) { $pwArgs += @('--grep', $Grep) }
+            if ($Reporter) { $pwArgs += "--reporter=$Reporter" }
+            & $npxExe @pwArgs
         }
         finally {
             $ErrorActionPreference = $previousEap
@@ -536,7 +646,11 @@ try {
     Write-Host 'Прогони в браузері пройдено.' -ForegroundColor Green
 }
 finally {
-    if ($api -and -not $api.HasExited) { $api.Kill(); $api.WaitForExit() }
+    # ⚠ Поза Windows `dotnet run` лишив би дочірній Ecr.Api живим — дерево.
+    if ($api -and -not $api.HasExited) {
+        if ($onWindows) { $api.Kill() } else { $api.Kill($true) }
+        $api.WaitForExit()
+    }
 
     # ⛔ Видаляється ЛИШЕ база з власною позначкою. Без цієї умови скрипт
     # знищував би будь-що, назване в `-Database`, — включно з базою, у якій
@@ -556,7 +670,7 @@ finally {
     $previousEapExists = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
-        $exists = (& sqlcmd -S $Server -E -C -b -h -1 -W -d master `
+        $exists = (& sqlcmd -S $Server @sqlAuth -C -b -h -1 -W -d master `
             -Q "SET NOCOUNT ON; SELECT CASE WHEN DB_ID('$Database') IS NULL THEN 0 ELSE 1 END;" 2>$null) `
             | Select-Object -Last 1
     }
@@ -568,7 +682,7 @@ finally {
         $previousEapMine = $ErrorActionPreference
         $ErrorActionPreference = 'Continue'
         try {
-            $mine = (& sqlcmd -S $Server -E -C -b -h -1 -W -d $Database `
+            $mine = (& sqlcmd -S $Server @sqlAuth -C -b -h -1 -W -d $Database `
                 -Q "SET NOCOUNT ON; SELECT COUNT(*) FROM sys.extended_properties WHERE class = 0 AND name = N'Ecr_E2E_Temp';" 2>$null) `
                 | Select-Object -Last 1
         }
@@ -580,7 +694,7 @@ finally {
             $previousEap = $ErrorActionPreference
             $ErrorActionPreference = 'Continue'
             try {
-                & sqlcmd -S $Server -E -C -b -Q "ALTER DATABASE [$Database] SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE [$Database];" | Out-Null
+                & sqlcmd -S $Server @sqlAuth -C -b -Q "ALTER DATABASE [$Database] SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE [$Database];" | Out-Null
             }
             finally {
                 $ErrorActionPreference = $previousEap
