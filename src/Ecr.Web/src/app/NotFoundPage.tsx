@@ -1,5 +1,5 @@
 import type { JSX } from 'react';
-import { Anchor, Button, Code, Group, Kbd, Text } from '@mantine/core';
+import { Anchor, Button, Code, Group, Text } from '@mantine/core';
 import { Link, useLocation } from 'react-router-dom';
 import type { CurrentUserDto } from '@/api/types';
 import { t } from '@/shared/i18n';
@@ -72,7 +72,12 @@ export function NotFoundPage(): JSX.Element {
       )}
 
       <Group gap="xs" justify="center" mt="xs">
-        <Button variant="default" onClick={openPalette} rightSection={<Kbd size="xs">Ctrl K</Kbd>}>
+        <Button variant="default" onClick={openPalette} rightSection={
+            // ⚠ Не `Kbd`: його стилі відсічені (`mantineCssPrune.ts`) — той самий прийом, що `SearchLauncher`.
+            <Text span size="xs" ff="monospace" aria-hidden="true">
+              Ctrl K
+            </Text>
+          }>
           {t('nav.notFound.search')}
         </Button>
         <Button component={Link} to="/">
