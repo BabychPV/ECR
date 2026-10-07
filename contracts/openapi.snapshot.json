@@ -5845,6 +5845,13 @@
               "null",
               "string"
             ]
+          },
+          "unitIssue": {
+            "description": "Ключ каталогу причини, чому значення порожнє через одиниці (D-4): розмірності різні\n(`err.ECR-UOM-0422.fieldMapUnitDimensions`) або конверсію не виконано\n(`err.ECR-UOM-0422.boundaryConversionFailed`); `null` — одиниці не заважають.",
+            "type": [
+              "null",
+              "string"
+            ]
           }
         },
         "required": [
