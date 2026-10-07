@@ -87,12 +87,8 @@ public sealed class HiddenSheetRouteMatrixTests(SqlServerFixture sql)
         {
             foreach (var (route, _) in Routes)
             {
-                // R-8 (Q15-07): лічильники огляду кампанії для читача з Deny на аркуш: випадок додається після зведення sec-campaign-progress (його тестами покрито).
-                if (how == "deny" && route == "campaign")
-                {
-                    continue;
-                }
-
+                // R-8 (Q15-07): campaign для "deny" повернено після sec-campaign-counters/-progress: лічильники
+                // й Progress для читача з Deny на аркуш на дроті null, тож «до/після» B збігаються.
                 data.Add(how, route);
             }
         }
