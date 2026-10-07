@@ -7218,8 +7218,11 @@ USING (VALUES
     (N'units.dim.MassPerStdVolume', N'en', N'Mass per standard volume', 1),
     (N'units.dim.EnergyPerStdVolume', N'en', N'Energy per standard volume', 1),
     (N'units.dim.EnergyPerMass', N'en', N'Energy per mass', 1),
-    (N'units.dim.MassPerAmount', N'en', N'Mass per amount of substance', 1)
+    (N'units.dim.MassPerAmount', N'en', N'Mass per amount of substance', 1),
     -- COLL:ui-rc9 ── кінець секції ──
+    -- COLL:d3efmap ── D-3 приймальної №8: другий мапінг тієї ж пари (сутність, поле) — 409, не 500; ru/kz — порцією COLL:d3efmap у блоці I18N нижче ──
+    (N'err.ECR-INT-0409.fieldMapDuplicate', N'en', N'Source entity {sourceEntityId} already has a mapping for field "{sourceField}": edit it instead of creating a second one.', 1)
+    -- COLL:d3efmap ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -17514,6 +17517,16 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:ui-rc9 ── кінець секції ──
+-- COLL:d3efmap ── ru/kz D-3: дубль мапінгу пари (сутність, поле); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-INT-0409.fieldMapDuplicate', N'ru', N'Для сущности источника {sourceEntityId} сопоставление поля «{sourceField}» уже есть: измените его, а не создавайте второе.'),
+    (N'err.ECR-INT-0409.fieldMapDuplicate', N'kz', N'{sourceEntityId} көз нысаны үшін «{sourceField}» өрісінің сәйкестендіруі бұрыннан бар: екіншісін жасамай, оны өзгертіңіз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:d3efmap ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

@@ -29,12 +29,16 @@ public sealed class EntityFieldMapsController(
 {
     /// <summary>
     /// Заводить мапінг. Право <c>Integration.Manage</c>.
+    /// Друга пара (сутність, поле) з тим самим полем - <c>409 ECR-INT-0409</c>.
     /// </summary>
     /// <param name="request">Сутність джерела разом із налаштуванням мапінгу.</param>
     /// <param name="ct">Скасування.</param>
     [HttpPost]
     [ProducesResponseType<EntityFieldMapDto>(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     public async Task<IActionResult> Create([FromBody] CreateEntityFieldMapRequest request, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(request);

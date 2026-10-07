@@ -78,6 +78,44 @@ public sealed class EntityFieldMapDuplicateTests(SqlServerFixture sql)
         }
     }
 
+    /// <summary>
+    /// Гонка двох запитів: перевірка обробника пройдена обома, другий запис падає на <c>UQ_EntityFieldMap</c>.
+    /// Сховище перетворює це на ту саму відмову (<c>409</c>), а не на <c>DbUpdateException</c>.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "D-3")]
+    public async Task D3_гонка_порушення_індексу_у_сховищі_дає_ту_саму_відмову_а_не_DbUpdateException()
+    {
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var chain = await builder.BuildAsync(ct: CancellationToken.None).ConfigureAwait(true);
+        var entityId = await SourceEntityAsync().ConfigureAwait(true);
+
+        try
+        {
+            await using var db = NewDb();
+            var store = new CollectionStore(db, new TestClock(new DateTime(2026, 1, 20, 9, 0, 0, DateTimeKind.Utc)));
+            await store.AddFieldMapAsync(
+                EntityFieldMap.ToColumn(entityId, "Race_A", chain.ColumnDefIds[0]), CancellationToken.None)
+                .ConfigureAwait(true);
+
+            await using var racing = NewDb();
+            var racingStore = new CollectionStore(racing, new TestClock(new DateTime(2026, 1, 20, 9, 0, 0, DateTimeKind.Utc)));
+            var ex = await Assert.ThrowsAsync<Ecr.Application.Errors.BusinessRuleException>(
+                () => racingStore.AddFieldMapAsync(
+                    EntityFieldMap.ToColumn(entityId, "Race_A", chain.ColumnDefIds[0]), CancellationToken.None))
+                .ConfigureAwait(true);
+
+            Assert.Equal("ECR-INT-0409", ex.ErrorCode);
+            Assert.Equal(Ecr.Application.Sources.CreateEntityFieldMapHandler.DuplicateKey, ex.Details!["messageKey"]);
+        }
+        finally
+        {
+            await DeactivateAsync(entityId).ConfigureAwait(true);
+        }
+    }
+
     private static Task<HttpResponseMessage> MapAsync(HttpClient client, int entityId, string field, int columnDefId)
         => client.PostAsJsonAsync(
             new Uri("/api/v1/entity-field-maps", UriKind.Relative),

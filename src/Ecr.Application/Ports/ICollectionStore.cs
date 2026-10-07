@@ -107,6 +107,13 @@ public interface ICollectionStore
     public Task<EntityFieldMap> AddFieldMapAsync(EntityFieldMap map, CancellationToken ct);
 
     /// <summary>
+    /// Чи вже є мапінг пари (сутність, поле джерела) - будь-який, і призупинений теж: індекс
+    /// <c>UQ_EntityFieldMap</c> не дивиться на <c>IsActive</c> (D-3 приймальної №8).
+    /// </summary>
+    /// <remarks>Порівняння - колацією бази, як і в індексі: «Flare» і «flare» - та сама пара.</remarks>
+    public Task<bool> FieldMapExistsAsync(int sourceEntityId, string sourceField, CancellationToken ct);
+
+    /// <summary>
     /// Мапінг за ідентифікатором — <b>відстежуваний</b>; <c>null</c>, якщо
     /// його немає (<c>BE-27</c>).
     /// </summary>
