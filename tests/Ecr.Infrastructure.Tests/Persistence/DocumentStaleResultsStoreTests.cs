@@ -312,6 +312,141 @@ public sealed class DocumentStaleResultsStoreTests(SqlServerFixture sql)
         Assert.Equal(2, scoped.StaleResultsCount);
     }
 
+    // ── короткий кеш лічильників (staleResultsCount / staleResultsMineCount) ──────────────────
+
+    /// <summary>Сценарій кешу: два документи застарілі (один - правкою користувача <c>Me</c>), третій свіжий.</summary>
+    private sealed record CacheScenario(TestDocumentBuilder Builder, TestDocument Chain, long Fresh, int Period);
+
+    private const int Me = 61;
+
+    private async Task<CacheScenario> CacheScenarioAsync()
+    {
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var chain = await builder.BuildAsync(ct: CancellationToken.None);
+        var period = chain.PeriodKey.Value;
+        await using var db = builder.CreateContext();
+
+        var byMe = await AddDocumentAsync(db, chain, "SK-ME");
+        var byOther = await AddDocumentAsync(db, chain, "SK-OTHER");
+        var fresh = await AddDocumentAsync(db, chain, "SK-FRESH");
+        var version = await VersionAsync(db);
+        await RunAsync(db, chain, version, Now, [byMe, byOther, fresh]);
+        await EditAsync(byMe, period, chain.ColumnDefIds[1], Now.AddHours(1), user: Me);
+        await EditAsync(byOther, period, chain.ColumnDefIds[1], Now.AddHours(1), user: 62);
+
+        return new CacheScenario(builder, chain, fresh, period);
+    }
+
+    private static Task<Ecr.Application.Documents.Dto.DocumentListSummaryResponse> SummaryAsync(
+        DocumentListSummaryStore store, CacheScenario s, SummaryRestrictions? restrictions, int? user)
+        => store.SummarizeAsync(
+            s.Chain.ProjectId, s.Period, [s.Chain.ProjectId], restrictions, user, CancellationToken.None);
+
+    private static Microsoft.Extensions.Caching.Memory.MemoryCache NewCache()
+        => new(new Microsoft.Extensions.Caching.Memory.MemoryCacheOptions());
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Повторний_виклик_у_межах_TTL_не_ходить_у_БД_за_лічильниками_застарілих()
+    {
+        var s = await CacheScenarioAsync();
+        var counter = new DbCommandCounter();
+        await using var counted = new EcrDbContext(new DbContextOptionsBuilder<EcrDbContext>()
+            .UseSqlServer(sql.ConnectionString).AddInterceptors(counter).Options);
+        using var cache = NewCache();
+        var store = new DocumentListSummaryStore(counted, cache, new TestClock(Now.AddHours(2)));
+
+        var first = await SummaryAsync(store, s, restrictions: null, Me);
+        var afterFirst = counter.Tally.Snapshot().Total;
+        var second = await SummaryAsync(store, s, restrictions: null, Me);
+        var afterSecond = counter.Tally.Snapshot().Total;
+
+        Assert.Equal(2, first.StaleResultsCount);
+        Assert.Equal(1, first.StaleResultsMineCount);
+        Assert.Equal(first, second);
+
+        // Перший виклик: агрегат + два лічильники = 3 запити; другий - лише агрегат (1), лічильники з кешу.
+        Assert.Equal(3, afterFirst);
+        Assert.Equal(1, afterSecond - afterFirst);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Після_TTL_лічильник_оновлюється_без_інвалідації()
+    {
+        var s = await CacheScenarioAsync();
+        await using var db = s.Builder.CreateContext();
+        using var cache = NewCache();
+        var clock = new TestClock(Now.AddHours(2));
+        var store = new DocumentListSummaryStore(db, cache, clock);
+
+        Assert.Equal(2, (await SummaryAsync(store, s, null, Me)).StaleResultsCount);
+
+        // Третій документ застарів ПІСЛЯ першого виклику: у межах TTL лічильник його ще не бачить...
+        await EditAsync(s.Fresh, s.Period, s.Chain.ColumnDefIds[1], Now.AddHours(1), user: Me);
+        clock.Advance(DocumentListSummaryStore.StaleCountsTtl - TimeSpan.FromSeconds(1));
+        var within = await SummaryAsync(store, s, null, Me);
+        Assert.Equal(2, within.StaleResultsCount);
+
+        // ...а після TTL (керований годинник, без sleep) - бачить.
+        clock.Advance(TimeSpan.FromSeconds(2));
+        var after = await SummaryAsync(store, s, null, Me);
+        Assert.Equal(3, after.StaleResultsCount);
+        Assert.Equal(2, after.StaleResultsMineCount);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Різний_scope_читача_не_ділить_запис_а_звужений_не_отримує_теплий_лічильник_незвуженого()
+    {
+        var s = await CacheScenarioAsync();
+        var counter = new DbCommandCounter();
+        await using var counted = new EcrDbContext(new DbContextOptionsBuilder<EcrDbContext>()
+            .UseSqlServer(sql.ConnectionString).AddInterceptors(counter).Options);
+        using var cache = NewCache();
+        var store = new DocumentListSummaryStore(counted, cache, new TestClock(Now.AddHours(2)));
+
+        // Той самий користувач і проєкт: спершу незвужений - кеш теплий (2 / 1).
+        var open = await SummaryAsync(store, s, restrictions: null, Me);
+        Assert.Equal(2, open.StaleResultsCount);
+
+        // ⛔ Звужений (проєкт зі схованим) НЕ отримує числа незвуженого: 0, а не 2.
+        var narrowed = new SummaryRestrictions([(s.Chain.ProjectId, "HID")], [s.Chain.ProjectId]);
+        var closed = await SummaryAsync(store, s, narrowed, Me);
+        Assert.Equal(0, closed.StaleResultsCount);
+        Assert.Equal(0, closed.StaleResultsMineCount);
+
+        // Інший набір схованого аркуша без звуження проєкту - власний запис (промах кешу: агрегат + 2 лічильники).
+        var otherHidden = new SummaryRestrictions([(s.Chain.ProjectId, "OTHER")], []);
+        var before = counter.Tally.Snapshot().Total;
+        var partial = await SummaryAsync(store, s, otherHidden, Me);
+        Assert.Equal(2, partial.StaleResultsCount);
+        Assert.Equal(3, counter.Tally.Snapshot().Total - before);
+
+        // Кожен читає своє й з теплого кешу.
+        Assert.Equal(0, (await SummaryAsync(store, s, narrowed, Me)).StaleResultsCount);
+        Assert.Equal(2, (await SummaryAsync(store, s, null, Me)).StaleResultsCount);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Користувачі_не_ділять_запис_мої_лічильник_свій_у_кожного()
+    {
+        var s = await CacheScenarioAsync();
+        await using var db = s.Builder.CreateContext();
+        using var cache = NewCache();
+        var store = new DocumentListSummaryStore(db, cache, new TestClock(Now.AddHours(2)));
+
+        Assert.Equal(1, (await SummaryAsync(store, s, null, Me)).StaleResultsMineCount);
+        Assert.Equal(0, (await SummaryAsync(store, s, null, 424242)).StaleResultsMineCount);
+        Assert.Equal(1, (await SummaryAsync(store, s, null, 62)).StaleResultsMineCount);
+        Assert.Equal(0, (await SummaryAsync(store, s, null, null)).StaleResultsMineCount);
+    }
+
     // ── допоміжне ────────────────────────────────────────────────────────────────────────
 
     private static async Task<DocumentSummary> CardAsync(EcrDbContext db, TestDocument chain, int period)
