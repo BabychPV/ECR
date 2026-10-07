@@ -18688,11 +18688,14 @@ export interface components {
             /** Format: int32 */
             id: number;
             isHidden: boolean;
+            isMonthColumn?: boolean;
             isReadOnly: boolean;
             isRequired: boolean;
             lookupFilter: null | string;
             /** Format: int32 */
             lookupRegistryDefId: null | number;
+            /** Format: uint8 */
+            monthNumber?: null | number;
             /** Format: int32 */
             ordinal: number;
             /** Format: uint8 */
@@ -23638,6 +23641,8 @@ export interface components {
             };
             /** @description Видимість колонки; презентаційне поле. */
             isHidden: boolean;
+            /** @description Колонка прив'язана до календарного місяця; вимагає `MonthNumber`; без обох полів місяць не змінюється. */
+            isMonthColumn?: null | boolean;
             /** @description Заборона ручного вводу. */
             isReadOnly: boolean;
             /** @description Обов'язковість заповнення. */
@@ -23649,6 +23654,11 @@ export interface components {
              * @description Довідник; лише для колонки типу `Lookup`.
              */
             lookupRegistryDefId: null | number;
+            /**
+             * Format: uint8
+             * @description Місяць 1..12; лише разом з `IsMonthColumn`.
+             */
+            monthNumber?: null | number;
             /**
              * Format: int32
              * @description `null` — нова колонка стає останньою за порядком.

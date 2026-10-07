@@ -1771,6 +1771,9 @@
           "isHidden": {
             "type": "boolean"
           },
+          "isMonthColumn": {
+            "type": "boolean"
+          },
           "isReadOnly": {
             "type": "boolean"
           },
@@ -1785,6 +1788,13 @@
           },
           "lookupRegistryDefId": {
             "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "monthNumber": {
+            "format": "uint8",
             "type": [
               "null",
               "integer"
@@ -12507,6 +12517,13 @@
             "description": "Видимість колонки; презентаційне поле.",
             "type": "boolean"
           },
+          "isMonthColumn": {
+            "description": "Колонка прив'язана до календарного місяця; вимагає `MonthNumber`; без обох полів місяць не змінюється.",
+            "type": [
+              "null",
+              "boolean"
+            ]
+          },
           "isReadOnly": {
             "description": "Заборона ручного вводу.",
             "type": "boolean"
@@ -12525,6 +12542,14 @@
           "lookupRegistryDefId": {
             "description": "Довідник; лише для колонки типу `Lookup`.",
             "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "monthNumber": {
+            "description": "Місяць 1..12; лише разом з `IsMonthColumn`.",
+            "format": "uint8",
             "type": [
               "null",
               "integer"
