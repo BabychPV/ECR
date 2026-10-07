@@ -62,6 +62,8 @@ public sealed class HiddenSheetRouteMatrixTests(SqlServerFixture sql)
         ("list-state-rejected", HiddenActivity.Full),
         ("list-late-true", HiddenActivity.Full),
         ("list-late-false", HiddenActivity.Full),
+        ("list-stale-true", HiddenActivity.Full),
+        ("list-stale-false", HiddenActivity.Full),
         ("card-period", HiddenActivity.Full),
         ("card-noperiod", HiddenActivity.Full),
         ("summary", HiddenActivity.Full),
@@ -307,6 +309,10 @@ public sealed class HiddenSheetRouteMatrixTests(SqlServerFixture sql)
             "list-state-rejected" => $"{list}&periodKey={period}&state=Rejected",
             "list-late-true" => $"{list}&periodKey={period}&hasLateEdits=true",
             "list-late-false" => $"{list}&periodKey={period}&hasLateEdits=false",
+            // resultsStale: фільтр і позначка «результати застаріли» не розкривають правку схованого входу (звужений
+            // читач: проєкт поза фільтром в обох напрямках, значення null); для повної ролі - контроль «B змінює відповідь».
+            "list-stale-true" => $"{list}&periodKey={period}&resultsStale=true",
+            "list-stale-false" => $"{list}&periodKey={period}&resultsStale=false",
             "card-period" => $"/api/v1/documents/{id}?periodKey={period}",
             "card-noperiod" => $"/api/v1/documents/{id}",
             "summary" => $"/api/v1/documents/summary?periodKey={period}&projectId={project}",
