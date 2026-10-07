@@ -139,6 +139,16 @@ public sealed record MethodologyRuleDto(
     bool IsActive);
 
 /// <summary>
+/// Правило категорії константи версії (L-2, <c>calc.CategoryRule</c>): вираз «рядок → ключ категорії».
+/// </summary>
+/// <param name="Expression">
+/// Вираз діалекту Methodology (<c>!ECW_Location</c>, <c>if(@Land_TypeFuel = …, 'Diesel', …)</c>);
+/// <c>null</c> — у версії правила немає, і константи резолвляться без категорії.
+/// </param>
+/// <param name="UpdatedAt">Коли правило востаннє змінювали (UTC); <c>null</c> — правила немає.</param>
+public sealed record MethodologyCategoryRuleDto(string? Expression, DateTime? UpdatedAt);
+
+/// <summary>
 /// Обов'язкова вхідна колонка методології — gate перед збереженням клітинки
 /// (директива «обов'язкові вхідні колонки методології»).
 /// </summary>

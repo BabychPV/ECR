@@ -36,6 +36,9 @@ public sealed class MethodologiesController(
     ConstantUsageHandler constantUsage,
     ListMethodologyRulesHandler listRules,
     SaveMethodologyRuleHandler saveRule,
+    GetMethodologyCategoryRuleHandler getCategoryRule,
+    SaveMethodologyCategoryRuleHandler saveCategoryRule,
+    DeleteMethodologyCategoryRuleHandler deleteCategoryRule,
     ListMethodologyRequiredInputsHandler listRequiredInputs,
     SaveMethodologyRequiredInputHandler saveRequiredInput,
     ListMethodologyOutputsHandler listOutputs,
@@ -320,6 +323,71 @@ public sealed class MethodologiesController(
         return Ok(await saveRule
             .HandleAsync(vid, code, request.MatchJson, request.Priority, request.IsActive, ct)
             .ConfigureAwait(false));
+    }
+
+    /// <summary>
+    /// Правило категорії константи версії (L-2). Право <c>Calculation.View</c>.
+    /// </summary>
+    /// <param name="id">Методологія.</param>
+    /// <param name="vid">Версія.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⚠ Правила може не бути — тоді <c>200</c> з <c>expression = null</c> (версія без категорій),
+    /// а <c>404</c> лишається для версії, якої немає.
+    /// </remarks>
+    [HttpGet("{id:int}/versions/{vid:int}/category-rule")]
+    [ProducesResponseType<MethodologyCategoryRuleDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<MethodologyCategoryRuleDto>> CategoryRule(
+        int id, int vid, CancellationToken ct)
+    {
+        await scope.RequireAsync(id, vid, GetMethodologyCategoryRuleHandler.Permission, ct).ConfigureAwait(false);
+
+        return Ok(await getCategoryRule.HandleAsync(vid, ct).ConfigureAwait(false));
+    }
+
+    /// <summary>
+    /// Ставить правило категорії константи версії-чернетки. Право <c>Calculation.EditRule</c>.
+    /// </summary>
+    /// <param name="id">Методологія.</param>
+    /// <param name="vid">Версія-чернетка.</param>
+    /// <param name="request">Вираз діалекту Methodology, що дає ключ категорії.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⛔ Одне правило на версію (B13): вираз над РЯДКОМ документа, що дає текст — ключ категорії
+    /// (<c>Diesel</c>, <c>Loc_BeforeMR_B</c>). Рушій рахує його раз на рядок, після Row-формул і до
+    /// циклу речовин; рядок, для якого правило не дало ключа, не рахується.
+    /// </remarks>
+    [HttpPut("{id:int}/versions/{vid:int}/category-rule")]
+    [ProducesResponseType<MethodologyCategoryRuleDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<MethodologyCategoryRuleDto>> SaveCategoryRule(
+        int id, int vid, [FromBody] SaveMethodologyCategoryRuleRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        await scope.RequireAsync(id, vid, SaveMethodologyCategoryRuleHandler.Permission, ct).ConfigureAwait(false);
+
+        return Ok(await saveCategoryRule.HandleAsync(vid, request.Expression, ct).ConfigureAwait(false));
+    }
+
+    /// <summary>
+    /// Прибирає правило категорії константи версії-чернетки. Право <c>Calculation.EditRule</c>.
+    /// </summary>
+    /// <param name="id">Методологія.</param>
+    /// <param name="vid">Версія-чернетка.</param>
+    /// <param name="ct">Токен скасування.</param>
+    [HttpDelete("{id:int}/versions/{vid:int}/category-rule")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> DeleteCategoryRule(int id, int vid, CancellationToken ct)
+    {
+        await scope.RequireAsync(id, vid, DeleteMethodologyCategoryRuleHandler.Permission, ct).ConfigureAwait(false);
+        await deleteCategoryRule.HandleAsync(vid, ct).ConfigureAwait(false);
+
+        return NoContent();
     }
 
     /// <summary>
@@ -731,6 +799,10 @@ public sealed record SaveMethodologyConstantRequest(
 /// <param name="Priority">Менше значення — вищий пріоритет; перший збіг виграє (ФВ-13.4).</param>
 /// <param name="IsActive">Вимкнене правило не бере участі ні в зіставленні, ні в матриці покриття.</param>
 public sealed record SaveMethodologyRuleRequest(string MatchJson, int Priority, bool IsActive);
+
+/// <summary>Правило категорії константи версії (L-2): вираз діалекту Methodology.</summary>
+/// <param name="Expression">Вираз, що з рядка документа дає ключ категорії (текст).</param>
+public sealed record SaveMethodologyCategoryRuleRequest(string Expression);
 
 /// <summary>Запит на запис обов'язкової вхідної колонки.</summary>
 /// <param name="Severity">Блокує чи лише попереджає збереження.</param>
