@@ -167,6 +167,46 @@ public sealed class CellHistoryPermissionThenReadScopeTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "UI-38")]
+    public async Task TotalCount_лише_на_першій_сторінці_а_на_наступних_null_і_порт_підрахунку_не_читається()
+    {
+        // ⛔ МУТАЦІЙНИЙ ДОКАЗ: рахувати `CountCellChangesByColumnAsync` завжди (без `firstPage`) у
+        // `GetCellChangesHandler` -- червоніє: на сторінці за курсором число приходить знову й порт читається.
+        Profile(Reader(deny: false).Permission(GetCellChangesHandler.Permission), scopedDocumentViewIn: null);
+        var filter = new CellChangeFilter(From, To, DocumentId: DocumentId);
+
+        var first = await Handler().HandleAsync(filter, new CursorRequest(), CancellationToken.None);
+
+        Assert.Equal(43, first.TotalCount);
+        await _audit.Received(1).CountCellChangesByColumnAsync(Arg.Any<CellChangeFilter>(), Arg.Any<DateTime>(), Arg.Any<CancellationToken>());
+
+        _audit.ClearReceivedCalls();
+        var next = await Handler().HandleAsync(filter, new CursorRequest(Cursor: "abc"), CancellationToken.None);
+
+        Assert.Null(next.TotalCount);
+        Assert.Equal(2, next.Items.Count);
+        await _audit.DidNotReceiveWithAnyArgs().CountCellChangesByColumnAsync(default!, default, default);
+
+        // Підсумок журналу (`/audit/cells/summary`) від курсора не залежить.
+        var summary = await Handler().SummaryAsync(filter, CancellationToken.None);
+        Assert.Equal(43, summary.Total);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "UI-38")]
+    public async Task TotalCount_історії_прихованої_колонки_на_наступній_сторінці_null()
+    {
+        Profile(Reader(deny: true), scopedDocumentViewIn: Project);
+
+        var result = await Handler().HandleAsync(SingleCell(HiddenColumn), new CursorRequest(Cursor: "abc"), CancellationToken.None);
+
+        Assert.Null(result.TotalCount);
+        Assert.Empty(result.Items);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait("Requirement", "ФВ-6.14")]
     public async Task Без_права_в_проєкті_на_прихованій_колонці_403_і_журнал_не_читається()
     {
