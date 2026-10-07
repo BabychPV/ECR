@@ -7253,8 +7253,12 @@ USING (VALUES
     -- COLL:l4norule ── кінець секції ──
     -- COLL:d13bindings ── D-13: перенос проєкту на версію шаблону відмовляє, якщо активна прив'язка методології не має відповідника в цільовій; ru/kz — порцією COLL:d13bindings нижче ──
     (N'err.ECR-SCHM-0422.migrateBindingsNotMapped', N'en', N'The target version has no active binding of a methodology output on the matching column (or the column itself is missing), so after the move that column would stay empty without any error. Clone the version again from the one being moved from (a clone now carries bindings), or switch the binding off deliberately, then move the project.', 1),
-    (N'documents.migrateRefusalBindingsNotMapped', N'en', N'Methodology outputs are bound to columns that have no matching binding in the target version; those columns would be left empty.', 1)
+    (N'documents.migrateRefusalBindingsNotMapped', N'en', N'Methodology outputs are bound to columns that have no matching binding in the target version; those columns would be left empty.', 1),
     -- COLL:d13bindings ── кінець секції ──
+    -- COLL:stale-err ── resultsStale у переліку документів: відмови параметрів; ru/kz — порцією COLL:stale-err нижче ──
+    (N'err.ECR-REQ-0422.resultsStaleNeedsPeriod', N'en', N'Filtering by stale results needs a period: staleness belongs to a period.', 1),
+    (N'err.ECR-REQ-0422.staleBy', N'en', N'staleBy accepts only "me" and only together with resultsStale=true.', 1)
+    -- COLL:stale-err ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -17644,6 +17648,18 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:d13bindings ── кінець секції ──
+-- COLL:stale-err ── ru/kz resultsStale у переліку документів: відмови параметрів; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-REQ-0422.resultsStaleNeedsPeriod', N'ru', N'Для фильтра по устаревшим результатам нужен период: устаревание относится к периоду.'),
+    (N'err.ECR-REQ-0422.resultsStaleNeedsPeriod', N'kz', N'Ескірген нәтижелер бойынша сүзу үшін кезең қажет: ескіру кезеңге қатысты.'),
+    (N'err.ECR-REQ-0422.staleBy', N'ru', N'staleBy принимает только «me» и только вместе с resultsStale=true.'),
+    (N'err.ECR-REQ-0422.staleBy', N'kz', N'staleBy тек «me» мәнін және тек resultsStale=true-мен бірге қабылдайды.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:stale-err ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

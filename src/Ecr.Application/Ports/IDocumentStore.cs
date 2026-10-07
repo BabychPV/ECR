@@ -61,6 +61,13 @@ namespace Ecr.Application.Ports;
 /// <c>null</c> — затвердження ще не було. Це те саме розкриття, що й <c>GET /workflow/history</c>; складу
 /// ролі кроку («хто може») не розкриває. ⛔ Для звуженого читача — <c>null</c> (<c>DocumentSheetVisibility.For</c>), як і автор.
 /// </param>
+/// <param name="ResultsStale">
+/// Чи застаріли результати методологій документа за період: після початку актуального прогону хтось правив
+/// вхідну комірку (або довідник, який читає методологія). ВИВОДИТЬСЯ запитом, не зберігається. Документ без
+/// результатів — <c>false</c>. ⛔ <c>null</c> — період не задано, або читач має обмеження нижче проєкту
+/// (<c>DocumentSheetVisibility.For</c>): «застаріло за видимими входами» не доводить, що застарів видимий вихід.
+/// </param>
+/// <param name="ResultsStaleSince">Відколи застаріло (перша правка входу після прогону, UTC); <c>null</c> — не застаріло чи невідомо.</param>
 public sealed record DocumentSummary(
     long Id,
     int ProjectId,
@@ -77,7 +84,9 @@ public sealed record DocumentSummary(
     IReadOnlyList<DocumentSheetState>? Sheets = null,
     [property: System.Text.Json.Serialization.JsonIgnore] IReadOnlyList<string>? IncludedSheetCodes = null,
     string? OwnerDisplayName = null,
-    string? ApproverDisplayName = null);
+    string? ApproverDisplayName = null,
+    bool? ResultsStale = null,
+    DateTime? ResultsStaleSince = null);
 
 /// <summary>Аркуш складу документа в переліку: код, назва, стан за період.</summary>
 /// <param name="Code">Код аркуша (<c>SheetDef.Code</c>); він же ключ у <c>DocumentSummary.SheetStates</c>.</param>
@@ -114,12 +123,23 @@ public sealed record DocumentSheetState(string Code, LocalizedText NameL10n, str
 /// документа — не по аркушах і таблицях, тож не розкриває прихованого. Метасимволи
 /// <c>LIKE</c> екранує сховище; довжину й порожнечу нормалізує обробник.
 /// </param>
+/// <param name="ResultsStale">
+/// Лише документи зі (<c>true</c>) застарілими або без (<c>false</c>) <see cref="DocumentSummary.ResultsStale"/>
+/// за період; <c>null</c> — без фільтра. Той самий предикат, що дає позначку в рядку. Потребує періоду (без нього
+/// сховище фільтр ігнорує, а обробник відмовляє 422). Документи проєктів з <paramref name="NarrowedProjectIds"/>
+/// виключаються в обох напрямках (не оракул).
+/// </param>
+/// <param name="StaleByUserId">Лише застарілі через правки цього користувача (<c>ChangedByUserId</c>); діє разом із <paramref name="ResultsStale"/>.</param>
+/// <param name="NarrowedProjectIds">Проєкти, де читач не бачить хоч щось (аркуш, таблицю, колонку): їхні документи поза фільтром <paramref name="ResultsStale"/>.</param>
 public readonly record struct DocumentListFilter(
     DocumentStatus? State, int? MineUserId, bool? HasLateEdits = null,
     IReadOnlyCollection<int>? HiddenSheetDefIds = null,
     IReadOnlyCollection<int>? HiddenTableDefIds = null,
     IReadOnlyCollection<int>? HiddenColumnDefIds = null,
-    string? Query = null);
+    string? Query = null,
+    bool? ResultsStale = null,
+    int? StaleByUserId = null,
+    IReadOnlyCollection<int>? NarrowedProjectIds = null);
 
 /// <summary>Порушення правила складу документа.</summary>
 /// <param name="SheetGroup">Група аркушів.</param>
