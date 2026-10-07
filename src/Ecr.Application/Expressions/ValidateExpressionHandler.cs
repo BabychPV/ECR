@@ -65,7 +65,8 @@ public sealed class ValidateExpressionHandler(
 
         // ⛔ L7-01: довжина — ДО розбору, для всіх діалектів (ланцюг на 32 000
         // доданків вичерпував стек обходів дерева і валив процес API).
-        ExpressionLengthGuard.Require(request.Expression);
+        // a4-03b: межа — колонки, куди вираз збережеться (2000 для Template/Report).
+        ExpressionLengthGuard.Require(request.Expression, ExpressionLengthGuard.MaxFor(request.Dialect));
 
         var diagnostics = new List<ExpressionDiagnostic>();
         var skipped = new List<string>();

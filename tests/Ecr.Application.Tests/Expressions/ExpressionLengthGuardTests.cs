@@ -41,14 +41,37 @@ public sealed class ExpressionLengthGuardTests
 
         Assert.Equal(ErrorCodes.RequestInvalid, error.ErrorCode);
         Assert.Equal("err.ECR-REQ-0422.expressionTooLong", error.Details!["messageKey"]);
-        Assert.Equal("4000", error.Details["max"]);
+        Assert.Equal(
+            ExpressionLengthGuard.MaxFor(dialect).ToString(System.Globalization.CultureInfo.InvariantCulture),
+            error.Details["max"]);
         Assert.Equal("63999", error.Details["length"]);
+    }
+
+    [Theory]
+    [InlineData(ExpressionDialect.Template)]
+    [InlineData(ExpressionDialect.Report)]
+    public async Task Вираз_правила_чи_формули_понад_2000_відхиляється_а_2000_проходить(ExpressionDialect dialect)
+    {
+        // a4-03b: колонки cfg.ValidationRule/cfg.FormulaDef вміщують 2000; раніше межа 4000
+        // пропускала 2001–4000, і вираз проходив перевірку, але не зберігався (422).
+        var ok = "100" + string.Concat(Enumerable.Repeat("+100", 499)) + "0";
+        Assert.Equal(2000, ok.Length);
+        var tooLong = ok + "0";
+
+        var accepted = await ValidateAsync(ok, dialect);
+        Assert.Empty(accepted.Diagnostics);
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(() => ValidateAsync(tooLong, dialect));
+        Assert.Equal(ErrorCodes.RequestInvalid, error.ErrorCode);
+        Assert.Equal("err.ECR-REQ-0422.expressionTooLong", error.Details!["messageKey"]);
+        Assert.Equal("2000", error.Details["max"]);
+        Assert.Equal("2001", error.Details["length"]);
     }
 
     [Fact]
     public async Task Вираз_рівно_на_межі_перевіряється_як_звичайно()
     {
-        // 4000 символів — найдовший вираз, що зберігається
+        // 4000 символів — найдовший вираз методології
         // (`MethodologyFormula.MaxExpressionLength`); межа його не відхиляє.
         // ✎ L7-01: ланки по 4 символи (`+100`) — 1000 ланок, у межах
         // `Parser.MaxChainLinks` (1024); вироджений `1+1+…` на 2000 ланок тепер
@@ -56,7 +79,7 @@ public sealed class ExpressionLengthGuardTests
         var text = "100" + string.Concat(Enumerable.Repeat("+100", 999)) + "0";
         Assert.Equal(4000, text.Length);
 
-        var result = await ValidateAsync(text, ExpressionDialect.Template);
+        var result = await ValidateAsync(text, ExpressionDialect.Methodology);
 
         Assert.Empty(result.Diagnostics);
     }
@@ -69,10 +92,11 @@ public sealed class ExpressionLengthGuardTests
         Assert.Equal(4001, text.Length);
 
         var error = await Assert.ThrowsAsync<BusinessRuleException>(
-            () => ValidateAsync(text, ExpressionDialect.Template));
+            () => ValidateAsync(text, ExpressionDialect.Methodology));
 
         Assert.Equal(ErrorCodes.RequestInvalid, error.ErrorCode);
         Assert.Equal("err.ECR-REQ-0422.expressionTooLong", error.Details!["messageKey"]);
+        Assert.Equal("4000", error.Details["max"]);
         Assert.Equal("4001", error.Details["length"]);
     }
 

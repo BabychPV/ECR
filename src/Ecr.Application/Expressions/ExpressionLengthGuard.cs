@@ -25,6 +25,20 @@ public static class ExpressionLengthGuard
     /// <summary>Найбільша довжина виразу в символах.</summary>
     public const int MaxLength = MethodologyFormula.MaxExpressionLength;
 
+    /// <summary>
+    /// Межа для діалекту: ту саму, що й у колонці, де вираз зберігається (a4-03b).
+    /// </summary>
+    /// <remarks>
+    /// <c>Template</c> і <c>Report</c> — правила валідації та формули колонок
+    /// (<c>cfg.ValidationRule</c>, <c>cfg.FormulaDef</c>): 2000. <c>Methodology</c> — 4000.
+    /// Правила довідника (4000) цим ендпоінтом не перевіряються: редактор довідника
+    /// його не кличе, а запит не несе ознаки «правило довідника».
+    /// </remarks>
+    public static int MaxFor(Ecr.Domain.Enums.ExpressionDialect dialect)
+        => dialect == Ecr.Domain.Enums.ExpressionDialect.Methodology
+            ? MaxLength
+            : Ecr.Domain.Entities.Configuration.FormulaDef.MaxExpressionLength;
+
     /// <summary>Відмовляє, якщо вираз довший за <see cref="MaxLength"/>.</summary>
     /// <param name="expression">Текст виразу; <c>null</c> не перевіряється.</param>
     /// <exception cref="BusinessRuleException"><c>ECR-REQ-0422</c>, ключ <c>err.ECR-REQ-0422.expressionTooLong</c>.</exception>
