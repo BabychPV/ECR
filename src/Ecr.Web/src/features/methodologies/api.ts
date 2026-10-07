@@ -7,6 +7,7 @@ import type {
   CalculationResultDto,
   CreateMethodologyRequest,
   CreateMethodologyVersionRequest,
+  MethodologyCategoryRuleDto,
   MethodologyConstantDto,
   MethodologyDraftVersionDto,
   MethodologyFormulaDto,
@@ -18,6 +19,7 @@ import type {
   MethodologyTestCaseDto,
   PublishMethodologyRequest,
   SaveCalculationBindingRequest,
+  SaveMethodologyCategoryRuleRequest,
   SaveMethodologyConstantRequest,
   SaveMethodologyFormulaRequest,
   SaveMethodologyOutputRequest,
@@ -266,20 +268,15 @@ export function saveMethodologyRule(
 }
 
 /**
- * Правило категорії константи версії (L-2, `calc.CategoryRule`): вираз діалекту Methodology над рядком
- * документа, що дає ключ категорії (`Diesel`, `Loc_BeforeMR_B`). `expression = null` — правила немає.
+ * Читає правило категорії константи версії (L-2, `calc.CategoryRule`): вираз діалекту Methodology над
+ * рядком документа, що дає ключ категорії (`Diesel`, `Loc_BeforeMR_B`). `expression = null` — правила
+ * немає. Право `Calculation.View`.
  */
-export interface MethodologyCategoryRule {
-  readonly expression: string | null;
-  readonly updatedAt: string | null;
-}
-
-/** Читає правило категорії версії. Право `Calculation.View`. */
 export function methodologyCategoryRule(
   methodologyId: number,
   versionId: number,
-): Promise<MethodologyCategoryRule> {
-  return apiFetch<MethodologyCategoryRule>(
+): Promise<MethodologyCategoryRuleDto> {
+  return apiFetch<MethodologyCategoryRuleDto>(
     `/api/v1/methodologies/${String(methodologyId)}/versions/${String(versionId)}/category-rule`,
   );
 }
@@ -293,11 +290,11 @@ export function methodologyCategoryRule(
 export function saveMethodologyCategoryRule(
   methodologyId: number,
   versionId: number,
-  expression: string,
-): Promise<MethodologyCategoryRule> {
-  return apiFetch<MethodologyCategoryRule>(
+  body: SaveMethodologyCategoryRuleRequest,
+): Promise<MethodologyCategoryRuleDto> {
+  return apiFetch<MethodologyCategoryRuleDto>(
     `/api/v1/methodologies/${String(methodologyId)}/versions/${String(versionId)}/category-rule`,
-    { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ expression }) },
+    { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) },
   );
 }
 
