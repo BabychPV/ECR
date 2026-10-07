@@ -4,6 +4,7 @@ using System.Text.Json;
 using Ecr.Application.Calculations;
 using Ecr.Domain.Entities.Calculations;
 using Ecr.Domain.Entities.Configuration;
+using Ecr.Domain.Entities.Dictionaries;
 using Ecr.Domain.Entities.Documents;
 using Ecr.Domain.Entities.Security;
 using Ecr.Domain.Enums;
@@ -159,6 +160,67 @@ public sealed class RuleCoverageTests(SqlServerFixture sql)
         var title = problem.GetProperty("title").GetString();
         Assert.Equal("Invalid methodology request", title);
         Assert.DoesNotContain("publish", title, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <remarks>
+    /// L-3 (Land Demo): правила по Lookup-колонці. <c>CellValue.ValueRegistryEntryId</c> у
+    /// базі — <c>int</c>, а читач брав його як <c>GetInt64</c> → <c>InvalidCastException</c> → 500.
+    /// Мутація: повернути <c>reader.GetInt64(o + 2)</c> у <c>RuleCoverageReader</c> → тест червоний.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-13.9")]
+    public async Task Правила_по_Lookup_колонці_дають_покриття_а_не_500()
+    {
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var doc = await builder.BuildAsync(columnCount: 1, rowCount: 2).ConfigureAwait(true);
+        var column = doc.ColumnDefIds[0];
+
+        await using var db = builder.CreateContext();
+        var tag = Guid.NewGuid().ToString("N")[..12];
+        var def = new RegistryDef(
+            EcrCode.Create($"LKP{tag}"),
+            new LocalizedText(new Dictionary<string, string> { ["en"] = "Lookup" }),
+            isTemporal: false);
+        db.RegistryDefs.Add(def);
+        await db.SaveChangesAsync().ConfigureAwait(true);
+
+        var covered = new RegistryEntry(def.Id, EcrCode.Create($"EA{tag}"), new LocalizedText(new Dictionary<string, string> { ["en"] = "A" }));
+        var gap = new RegistryEntry(def.Id, EcrCode.Create($"EB{tag}"), new LocalizedText(new Dictionary<string, string> { ["en"] = "B" }));
+        db.RegistryEntries.Add(covered);
+        db.RegistryEntries.Add(gap);
+        await db.SaveChangesAsync().ConfigureAwait(true);
+
+        db.CellValues.Add(new CellValue(
+            new CellAddress(doc.PeriodKey, doc.RowIds[0], column), doc.TableDefId, new CellValueData { ValueRegistryEntryId = covered.Id }));
+        db.CellValues.Add(new CellValue(
+            new CellAddress(doc.PeriodKey, doc.RowIds[1], column), doc.TableDefId, new CellValueData { ValueRegistryEntryId = gap.Id }));
+
+        var methodology = new Methodology(
+            EcrCode.Create($"RL{Guid.NewGuid():N}"[..20]), new LocalizedText(new Dictionary<string, string> { ["en"] = "lookup rules" }));
+        db.Methodologies.Add(methodology);
+        await db.SaveChangesAsync().ConfigureAwait(true);
+        var version = new MethodologyVersion(methodology.Id, "1.0", CalculationLevel.Configuration, createdByUserId: 1, Now);
+        db.MethodologyVersions.Add(version);
+        await db.SaveChangesAsync().ConfigureAwait(true);
+        db.MethodologyRules.Add(new MethodologyRule(version.Id, EcrCode.Create("LKP_A"), $$"""{"{{column}}":"{{covered.Id}}"}""", 10));
+        db.CalculationBindings.Add(new CalculationBinding(doc.TableDefId, column, methodology.Id, "tons", "{}"));
+        await db.SaveChangesAsync().ConfigureAwait(true);
+
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInWithProjectsAsync(app, doc.ProjectId).ConfigureAwait(true);
+
+        var body = await CoverageAsync(client, app, new Stand(methodology.Id, version.Id, column, doc.ProjectId, doc.ProjectId)).ConfigureAwait(true);
+
+        var states = body.GetProperty("combinations").EnumerateArray()
+            .ToDictionary(
+                c => c.GetProperty("values")[0].GetString()!,
+                c => (State: c.GetProperty("state").GetString(), Rows: c.GetProperty("rows").GetInt64()),
+                StringComparer.Ordinal);
+        Assert.Equal(2, states.Count);
+        Assert.Equal(("Covered", 1L), states[covered.Id.ToString(System.Globalization.CultureInfo.InvariantCulture)]);
+        Assert.Equal(("Gap", 1L), states[gap.Id.ToString(System.Globalization.CultureInfo.InvariantCulture)]);
     }
 
     private sealed record Stand(int MethodologyId, int VersionId, int ColumnId, int ProjectA, int ProjectB);
