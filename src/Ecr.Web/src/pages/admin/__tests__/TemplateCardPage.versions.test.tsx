@@ -153,6 +153,19 @@ async function versionsTable(): Promise<HTMLElement> {
 
 describe('TemplateCardPage: версії шаблону і один «назад» (U-19)', () => {
   it(
+    'заголовок «Versions» — h2 під h1 картки, без стрибка рівня (axe heading-order, a11y batch-4)',
+    async () => {
+      respond(['Template.Edit']);
+      show();
+
+      const section = await versionsTable();
+
+      expect(within(section).getByRole('heading', { level: 2 }).textContent).toBe(t('templates.versions'));
+    },
+    Timeout * 3,
+  );
+
+  it(
     'показує кожну версію посиланням на її структуру, і клік туди переходить',
     async () => {
       respond(['Template.Edit']);
