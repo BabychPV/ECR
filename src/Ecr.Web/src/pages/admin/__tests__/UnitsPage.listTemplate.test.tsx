@@ -268,3 +268,31 @@ describe('UnitsPage на шаблоні переліку (UI-21)', () => {
     expect(screen.queryByRole('button', { name: 'New unit' })).toBeNull();
   });
 });
+
+describe('UnitsPage: позначення замість коду (звірка batch-4 з макетом, п.19)', () => {
+  const withSymbols = units.map((unit) => ({
+    ...unit,
+    // ⚠ Позначення `kg` навмисно відрізняється від коду: так видно, звідки бере текст колонка «Base unit».
+    symbolL10n: { kg: { en: 'KG*' }, t: { en: 't' }, K: { en: 'K' }, degC: { en: '°C' } }[unit.code] ?? null,
+  }));
+
+  it('перша колонка й базова — позначенням мовою інтерфейсу; пошук знаходить за позначенням', async () => {
+    const table = await show([], '/admin/units', withSymbols);
+
+    expect(within(table).getByRole('button', { name: '°C' }).getAttribute('data-unit-open')).toBe('degC');
+    expect(within(table).queryByRole('button', { name: 'degC' })).toBeNull();
+    const tonne = within(table).getByRole('button', { name: 't' }).closest('tr');
+    expect(tonne?.textContent).toContain('KG*');
+
+    fireEvent.change(screen.getByLabelText('Search'), { target: { value: '°' } });
+    await waitFor(() => {
+      expect(shownCodes(table)).toEqual(['degC']);
+    });
+  });
+
+  it('сервер без symbolL10n — код, а не порожній рядок', async () => {
+    const table = await show([], '/admin/units', units.map((unit) => ({ ...unit, symbolL10n: null })));
+
+    expect(within(table).getByRole('button', { name: 'degC' })).toBeTruthy();
+  });
+});

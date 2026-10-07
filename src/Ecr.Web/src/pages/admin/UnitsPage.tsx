@@ -42,6 +42,16 @@ const OffsetStat = 'offset';
 const UnusedStat = 'unused';
 
 /**
+ * Що людина бачить як одиницю: позначення мовою інтерфейсу (`°C`, `m³`), а не код (`degC`, `m3`).
+ *
+ * ⚠ `symbolL10n` у `UnitRef` — з UI-21 (41c0fbd5); старий сервер чи дублер без нього — код, щоб
+ * рядок не лишився порожнім. Макет: колонка «Unit» = `twoLine(symbol, name)`.
+ */
+export function unitSymbol(unit: UnitRef): string {
+  return localized({ values: unit.symbolL10n ?? {} }) || unit.code;
+}
+
+/**
  * Базова одиниця кожної розмірності.
  *
  * ⚠ Спершу — прапорець сервера `isBase` (LS, `UnitRef.isBase`): це він каже,
@@ -196,6 +206,15 @@ export function UnitsPage(): JSX.Element {
   const dependents = unitReferences(remove.error) ?? usage.data;
 
   const bases = baseUnits(all);
+  const byCode = new Map(all.map((unit) => [unit.code, unit]));
+  // Базова одиниця — тим самим позначенням, що й у першій колонці (`°C`, а не `degC`).
+  const baseSymbol = (dimensionId: number): string | null => {
+    const code = bases.get(dimensionId);
+    if (code === undefined) return null;
+
+    const base = byCode.get(code);
+    return base === undefined ? code : unitSymbol(base);
+  };
   const [params] = useSearchParams();
   const [stat, setStat] = useUrlState('stat');
   const setParams = useUrlParamsSetter();
@@ -214,6 +233,7 @@ export function UnitsPage(): JSX.Element {
           (unit) =>
             (query.length === 0 ||
               unit.code.toLowerCase().includes(query) ||
+              unitSymbol(unit).toLowerCase().includes(query) ||
               unit.dimensionCode.toLowerCase().includes(query)) &&
             (dimension === null || unit.dimensionCode === dimension) &&
             (stat !== OffsetStat || !decimalEquals(unit.offsetToBase, '0')) &&
@@ -264,6 +284,7 @@ export function UnitsPage(): JSX.Element {
     {
       key: 'code',
       label: t('units.code'),
+      sortValue: (unit) => unitSymbol(unit),
 
       // ⚠ Код — ще й ПОСИЛАННЯ на шторку: клац по рядку (`onRowClick`) не має
       // клавіатурного шляху, а кнопка в першій клітинці — має (`Tab`, `Enter`).
@@ -282,7 +303,7 @@ export function UnitsPage(): JSX.Element {
                 setPanel(unitPanelId(unit.id));
               }}
             >
-              {unit.code}
+              {unitSymbol(unit)}
             </Anchor>
           }
           secondary={localized({ values: unit.nameL10n ?? {} }) || undefined}
@@ -312,7 +333,7 @@ export function UnitsPage(): JSX.Element {
             {t('units.base')}
           </Badge>
         ) : (
-          bases.get(unit.dimensionId) ?? null
+          baseSymbol(unit.dimensionId)
         ),
     },
     {
