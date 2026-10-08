@@ -246,6 +246,8 @@
 | DB-2 (P1) | **Членство ролей:** `rpt_reader` (лише довіреному акаунту SSRS), роль «бачить усе» для акаунта застосунку | E3; D-265 | S | AN-10 | перелік членів; акаунт застосунку читає все | todo | — |
 | DB-3 (P1) | `GRANT EXECUTE` на `arc.usp_ArchiveYear`/`arc.usp_ArchiveAudit`; вікно для `PerfFixJobsStaleHealth` (≈20 с на 500 тис. рядків, при зупиненому застосунку); `tempdb` (B-2a) | E3, E8; D-243, D-247 | S | AU-3 | процедури викликаються під службовим акаунтом; вікно задокументовано | todo | — |
 | DB-4 (P2) | Запит `SELECT TimeZoneId, COUNT(*) FROM doc.Project GROUP BY TimeZoneId` на кожному контурі — лише попередження | E6; D-217/D-261 | S | — | результат у чек-листі розгортання | todo | — |
+| DB-5 (P3) | Індекс `IX_CellChange_Doc_Period_ChangedAt` на `aud.CellChange` (≈1,0 с -> ≈0,35 с на 2000 док./504 тис. рядків) — рішення замовника/DBA (К10); скрипт-приклад у `docs/build/DBA-PROPOSALS.md` | B3.6, B3.7 | S | — | рішення; індекс застосовано або відхилено | todo | — |
+| DB-6 (P3) | `LOCK_ESCALATION = DISABLE` на `doc.CellValue`/`doc.TableRow` (migrate-version ≈14 хв блокує PATCH в інших проєктах) — рішення DBA; скрипт-приклад у `docs/build/DBA-PROPOSALS.md` | fix-patch-lock-timeout b15f6784 | S | — | рішення DBA; DDL застосовано або відхилено | todo | — |
 | IB-1 (P2) | CSP/звітна CSP; політика паролів (ФВ-6.4 — свідомо не діє, D-104) | E7 | S | — | висновок ІБ | todo | — |
 | IB-2 (P2) | Юридично підтверджений перелік ліцензій (`contracts/license-policy.json`, НФ-8.7.3) — **Q-7** | B1.9; НФ-8.7.3 | S | — | «так» з датою; зняття застереження | todo | — |
 
