@@ -53,7 +53,8 @@ public sealed class SaveHeaderFieldDefHandler(
     IUnitOfWork uow,
     IClock clock,
     IAccessDecisionService access,
-    Common.ICurrentUser currentUser)
+    Common.ICurrentUser currentUser,
+    IRegistryStore? registries = null)
 {
     /// <summary>Право на редагування структури версії (`02-contracts.md` §9).</summary>
     public const string Permission = "Template.Edit";
@@ -124,6 +125,14 @@ public sealed class SaveHeaderFieldDefHandler(
                     ["oldDataType"] = existing.DataType.ToString(),
                     ["newDataType"] = command.DataType.ToString(),
                 });
+        }
+
+        // ✎ RC16-2: неіснуюча ціль - 422 з ключем, а не 500 на FK_HeaderFieldDef_Registry.
+        if (command.DataType == CellDataType.Lookup)
+        {
+            await LookupRegistryGuard
+                .RequireForHeaderFieldAsync(registries, access, userId, command.LookupRegistryDefId, code, ct)
+                .ConfigureAwait(false);
         }
 
         var hasDocuments = await store.HasDocumentsAsync(templateVersionId, ct).ConfigureAwait(false);
