@@ -7304,8 +7304,11 @@ USING (VALUES
     (N'methodologyDiffField.scope', N'en', N'Scope', 1),
     -- COLL:l21scope ── кінець секції ──
     -- COLL:l24l25 ── L2-5: попередження diff публікації, коли попередня версія не обчислилась; ru/kz — порцією COLL:l24l25 нижче ──
-    (N'publish.warning.diffPreviousNotComputed', N'en', N'Previous version {previous} did not calculate on test {test} ({code}), so the diff shows its outputs as new. The verdict on the new version is unchanged.', 1)
+    (N'publish.warning.diffPreviousNotComputed', N'en', N'Previous version {previous} did not calculate on test {test} ({code}), so the diff shows its outputs as new. The verdict on the new version is unchanged.', 1),
     -- COLL:l24l25 ── кінець секції ──
+    -- COLL:rc15misc-rulekey ── RC14B P3-3: ключ предиката правила методології - Id колонки, не код; ru/kz — порцією COLL:rc15misc-rulekey нижче ──
+    (N'err.ECR-CALC-0422.ruleKeyNotColumnId', N'en', N'Key "{key}" in the predicate of rule "{code}" is not a column Id: the predicate is matched by column Id (ColumnDefId), not by column code, so a code never matches any row. Pick the column in the rule form or use its numeric Id.', 1)
+    -- COLL:rc15misc-rulekey ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -17830,6 +17833,16 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:l21scope ── кінець секції ──
+-- COLL:rc15misc-rulekey ── ru/kz: ключ предиката правила методології - Id колонки, не код; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-CALC-0422.ruleKeyNotColumnId', N'ru', N'Ключ «{key}» в условии отбора правила «{code}» не является Id столбца: условие сопоставляется по Id столбца (ColumnDefId), а не по его коду, поэтому с кодом правило не совпадает ни с одной строкой. Выберите столбец в форме правила или укажите его числовой Id.'),
+    (N'err.ECR-CALC-0422.ruleKeyNotColumnId', N'kz', N'«{code}» ережесінің сәйкестік шартындағы «{key}» кілті бағанның Id-і емес: шарт бағанның кодымен емес, Id-імен (ColumnDefId) салыстырылады, сондықтан кодпен ереже бірде-бір жолға сәйкес келмейді. Ереже пішінінде бағанды таңдаңыз немесе оның сандық Id-ін көрсетіңіз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:rc15misc-rulekey ── кінець секції ──
 
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.

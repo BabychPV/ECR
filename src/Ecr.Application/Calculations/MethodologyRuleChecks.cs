@@ -64,6 +64,40 @@ public static class MethodologyRuleChecks
                     ["code"] = code,
                 });
         }
+
+        // ⛔ RC14B P3-3: ключ предиката - Id колонки (`MethodologyRuleMatcher`, `MethodologyKeyLocalizer`).
+        // Код колонки (`{"SRC":"B"}`) приймався і мовчки не збігався ні з чим: правило "не працює" без
+        // жодного сліду. Відмова при збереженні й публікації називає ключ.
+        if (FirstNonColumnIdKey(matchJson) is { } badKey)
+        {
+            throw new BusinessRuleException(
+                "ECR-CALC-0422",
+                $"Ключ «{badKey}» предиката правила «{code}» не є Id колонки: предикат зіставляється за Id "
+                + "колонки (ColumnDefId), а не за її кодом, тому з кодом правило не збігається з жодним рядком.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0422.ruleKeyNotColumnId",
+                    ["code"] = code,
+                    ["key"] = badKey,
+                });
+        }
+    }
+
+    /// <summary>Перший ключ плаского предиката, що не є Id колонки (цифри); <c>null</c> - усі ключі числові.</summary>
+    private static string? FirstNonColumnIdKey(string matchJson)
+    {
+        using var document = JsonDocument.Parse(matchJson);
+
+        foreach (var property in document.RootElement.EnumerateObject())
+        {
+            if (!int.TryParse(
+                    property.Name, NumberStyles.None, CultureInfo.InvariantCulture, out _))
+            {
+                return property.Name;
+            }
+        }
+
+        return null;
     }
 
     /// <summary>

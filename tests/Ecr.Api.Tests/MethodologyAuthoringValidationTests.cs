@@ -172,10 +172,10 @@ public sealed class MethodologyAuthoringValidationTests(SqlServerFixture sql)
         using var client = await SignedInAsync(app).ConfigureAwait(true);
         var stand = await StandAsync().ConfigureAwait(true);
 
-        await OkAsync(await SaveRuleAsync(client, stand, "R_GAS", "{\"KIND\":\"GAS\"}", 10).ConfigureAwait(true))
+        await OkAsync(await SaveRuleAsync(client, stand, "R_GAS", "{\"101\":\"GAS\"}", 10).ConfigureAwait(true))
             .ConfigureAwait(true);
 
-        var response = await SaveRuleAsync(client, stand, "R_LIQ", "{\"KIND\":\"LIQ\"}", 10).ConfigureAwait(true);
+        var response = await SaveRuleAsync(client, stand, "R_LIQ", "{\"101\":\"LIQ\"}", 10).ConfigureAwait(true);
 
         var problem = await ProblemAsync(response, HttpStatusCode.UnprocessableEntity).ConfigureAwait(true);
         Assert.Equal("err.ECR-CALC-0422.rulePriorityDuplicate", problem.GetProperty("messageKey").GetString());
@@ -183,7 +183,7 @@ public sealed class MethodologyAuthoringValidationTests(SqlServerFixture sql)
 
         // Повторне збереження ТОГО САМОГО правила з тим самим пріоритетом —
         // не дублікат самого себе.
-        await OkAsync(await SaveRuleAsync(client, stand, "R_GAS", "{\"KIND\":\"GAS\"}", 10).ConfigureAwait(true))
+        await OkAsync(await SaveRuleAsync(client, stand, "R_GAS", "{\"101\":\"GAS\"}", 10).ConfigureAwait(true))
             .ConfigureAwait(true);
     }
 
@@ -199,7 +199,7 @@ public sealed class MethodologyAuthoringValidationTests(SqlServerFixture sql)
         await OkAsync(await SaveRuleAsync(client, stand, "R_ALL", "{}", 1).ConfigureAwait(true))
             .ConfigureAwait(true);
 
-        var response = await SaveRuleAsync(client, stand, "R_SPEC", "{\"KIND\":\"GAS\"}", 10).ConfigureAwait(true);
+        var response = await SaveRuleAsync(client, stand, "R_SPEC", "{\"101\":\"GAS\"}", 10).ConfigureAwait(true);
 
         var problem = await ProblemAsync(response, HttpStatusCode.UnprocessableEntity).ConfigureAwait(true);
         Assert.Equal("err.ECR-CALC-0422.ruleCatchAllNotLast", problem.GetProperty("messageKey").GetString());
@@ -209,7 +209,7 @@ public sealed class MethodologyAuthoringValidationTests(SqlServerFixture sql)
         // ⚠ Той самий набір у правильному порядку — законний (підказка екрана).
         await OkAsync(await SaveRuleAsync(client, stand, "R_ALL", "{}", 100).ConfigureAwait(true))
             .ConfigureAwait(true);
-        await OkAsync(await SaveRuleAsync(client, stand, "R_SPEC", "{\"KIND\":\"GAS\"}", 10).ConfigureAwait(true))
+        await OkAsync(await SaveRuleAsync(client, stand, "R_SPEC", "{\"101\":\"GAS\"}", 10).ConfigureAwait(true))
             .ConfigureAwait(true);
     }
 
@@ -244,7 +244,7 @@ public sealed class MethodologyAuthoringValidationTests(SqlServerFixture sql)
     {
         using var app = new EcrApiFactory(sql);
         using var client = await SignedInAsync(app).ConfigureAwait(true);
-        var stand = await StandAsync(rules: [("R_A", "{\"K\":\"A\"}", 10), ("R_B", "{\"K\":\"B\"}", 10)])
+        var stand = await StandAsync(rules: [("R_A", "{\"101\":\"A\"}", 10), ("R_B", "{\"101\":\"B\"}", 10)])
             .ConfigureAwait(true);
 
         var problem = await PublishExpecting422Async(client, stand).ConfigureAwait(true);
