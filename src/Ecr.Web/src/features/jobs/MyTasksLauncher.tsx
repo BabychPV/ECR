@@ -1,4 +1,4 @@
-import { lazy, Suspense, useState, type JSX } from 'react';
+import { lazy, Suspense, useRef, useState, type JSX } from 'react';
 import { Badge, Button, Text } from '@mantine/core';
 import { t } from '@/shared/i18n';
 import { useMyTasks } from './useMyTasks';
@@ -49,6 +49,10 @@ export function MyTasksLauncher(): JSX.Element {
   // Шухляда монтується з першим відкриттям і далі лишається (анімація закриття).
   const [requested, setRequested] = useState(false);
 
+  // RC15-E: шухляда монтується вже відкритою (лінивий чанк), і `returnFocus` Mantine не бачить переходу
+  // «закрито → відкрито» - опенера не запам'ятовує, фокус після Esc падав на body (WCAG 2.4.3). Повертаємо самі.
+  const opener = useRef<HTMLButtonElement | null>(null);
+
   const tasks = useMyTasks();
   const active = activeJobCount(tasks.data);
 
@@ -57,6 +61,7 @@ export function MyTasksLauncher(): JSX.Element {
   return (
     <>
       <Button
+        ref={opener}
         variant="default"
         aria-label={label}
         aria-haspopup="dialog"
@@ -98,7 +103,10 @@ export function MyTasksLauncher(): JSX.Element {
         <Suspense fallback={null}>
           <MyTasksDrawer
             opened={opened}
-            onClose={() => setOpened(false)}
+            onClose={() => {
+              setOpened(false);
+              window.setTimeout(() => opener.current?.focus(), 0);
+            }}
             jobs={tasks.data}
             isPending={tasks.isPending}
             error={tasks.error}
