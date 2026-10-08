@@ -2873,6 +2873,14 @@ public sealed partial class PatchCellsHandler(
 
         foreach (var d in deletes)
         {
+            // ⛔ RC16-2: повторне очищення вже порожньої комірки (її немає в сховищі — перше очищення її
+            // видалило) нічого не змінює; без цього журнал мав `UserEdit NULL → NULL`. Явна порожнеча
+            // (`IsEmpty`) — комірка Є, тож її очищення лишається записом.
+            if (!previous.ContainsKey(d))
+            {
+                continue;
+            }
+
             records.Add(new CellChangeRecord(
                 now, d, DocumentId: documentId,
                 RowKey: rowKeyById.GetValueOrDefault(d.TableRowId, string.Empty),

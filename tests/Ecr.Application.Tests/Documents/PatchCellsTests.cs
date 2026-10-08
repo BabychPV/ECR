@@ -1756,6 +1756,44 @@ public sealed class PatchCellsTests
         Assert.Equal("931.926", record.NewValue);
     }
 
+    /// <summary>
+    /// RC16-2: повторне очищення вже порожньої комірки (<c>null</c> → комірки немає) не пише в журнал
+    /// запис <c>UserEdit NULL → NULL</c>; очищення комірки, що мала значення, — пише.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "R-A2")]
+    public async Task Повторне_очищення_порожньої_комірки_не_дає_рядка_журналу()
+    {
+        // Комірки немає (порожній словник сховища за замовчуванням): очищати нічого.
+        await Handler().HandleAsync(
+            Request(new PatchRow("7001001", "0x0A", [new PatchCell("Volume", null)])),
+            CancellationToken.None);
+
+        Assert.Empty(Audited());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "R-A2")]
+    public async Task Очищення_комірки_зі_значенням_дає_рядок_журналу()
+    {
+        _cells.ReadCellsAsync(Arg.Any<IReadOnlyCollection<CellAddress>>(), Arg.Any<CancellationToken>())
+              .Returns(new Dictionary<CellAddress, CellValueData>
+              {
+                  [new CellAddress(new PeriodKey(Period), 1001L, VolumeColumnId)] =
+                      new CellValueData { ValueNumeric = 5m },
+              });
+
+        await Handler().HandleAsync(
+            Request(new PatchRow("7001001", "0x0A", [new PatchCell("Volume", null)])),
+            CancellationToken.None);
+
+        var record = Assert.Single(Audited());
+        Assert.Equal("5", record.OldValue);
+        Assert.Null(record.NewValue);
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     [Trait("Requirement", "R-A2")]
