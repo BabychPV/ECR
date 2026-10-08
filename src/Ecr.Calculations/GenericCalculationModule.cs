@@ -152,6 +152,7 @@ public sealed class GenericCalculationModule(
                 [.. ordered, .. libraries?.Versions.SelectMany(v => v.Formulas) ?? []],
                 period,
                 registries,
+                categoryRule,
                 ct)
             .ConfigureAwait(false);
         await UnitsAsync(ct).ConfigureAwait(false);
@@ -184,9 +185,14 @@ public sealed class GenericCalculationModule(
         IReadOnlyList<MethodologyFormula> formulas,
         Expressions.PeriodContext period,
         RegistrySnapshotCache? cache,
+        string? categoryRule,
         CancellationToken ct)
     {
-        var codes = RegistryCodes(formulas, out var readsEntryFields);
+        // ✎ L2-4: правило категорії константи читає довідники тим самим текстом, що й формули
+        // (`REGFIELD(@Fuel, 'NAME')`): без нього знімок = null і правило давало #REF на кожному рядку.
+        var expressions = formulas.Select(f => f.Expression)
+            .Concat(string.IsNullOrWhiteSpace(categoryRule) ? [] : [categoryRule]);
+        var codes = RegistryCodes(expressions, out var readsEntryFields);
         if ((codes.Count == 0 && !readsEntryFields) || registryStore is null || registryLoader is null)
         {
             return null;
@@ -231,17 +237,17 @@ public sealed class GenericCalculationModule(
     }
 
     /// <summary>Коди довідників, які формули версії називають літералом.</summary>
-    /// <param name="formulas">Формули версії й бібліотек.</param>
+    /// <param name="expressions">Вирази формул версії й бібліотек і правило категорії (L2-4).</param>
     /// <param name="readsEntryFields">Чи є <c>REGFIELD</c> — поле запису, чий довідник
     /// літералом не названо (аргумент <c>@Arg</c> із Lookup-колонки).</param>
-    private HashSet<string> RegistryCodes(IReadOnlyList<MethodologyFormula> formulas, out bool readsEntryFields)
+    private HashSet<string> RegistryCodes(IEnumerable<string> expressions, out bool readsEntryFields)
     {
         var codes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         readsEntryFields = false;
 
-        foreach (var formula in formulas)
+        foreach (var expression in expressions)
         {
-            var parsed = formulaEngine.Parse(formula.Expression, ExpressionDialect.Methodology);
+            var parsed = formulaEngine.Parse(expression, ExpressionDialect.Methodology);
             if (!parsed.IsSuccess || parsed.Expression is null)
             {
                 continue;
