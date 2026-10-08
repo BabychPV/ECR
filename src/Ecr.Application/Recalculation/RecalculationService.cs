@@ -601,19 +601,22 @@ public sealed class RecalculationService(
                 else
                 {
                     relationSink[relationWrite.Record.Address] = relationWrite.Record;
-
-                    // P2-B / D-5: ціль Rollup — нове ДЖЕРЕЛО для формул, що її читають. Нове значення лягає в
-                    // контекст (формули нижче читають його, а не збережене у базі), а комірка — в насіння каскаду.
-                    if (rowKeyByRowIdByInstance.TryGetValue(relationWrite.TargetInstanceId, out var rowKeys)
-                        && rowKeys.TryGetValue(relationWrite.Record.Address.TableRowId, out var targetRowKey))
-                    {
-                        values[new CellKey(0, relationWrite.Record.TableDefId, targetRowKey, relationWrite.Record.Address.ColumnDefId)]
-                            = Ecr.Expressions.Evaluation.CellValueMapping.ToExpressionValue(
-                                relationWrite.Record.Value, Ecr.Expressions.Evaluation.ExpressionValue.Null);
-                    }
-
-                    rollupSeeds.Add(relationWrite.Record.Address);
                 }
+
+                // P2-B / D-5: ціль Rollup — нове ДЖЕРЕЛО для формул, що її читають. Значення Rollup лягає в
+                // контекст (формули нижче читають його, а не збережене у базі), а комірка — в насіння каскаду.
+                // R15b-1: і для Unchanged теж. Власний вираз цілі (валідатор вимагає Formula-колонку) у цьому
+                // самому прогоні міг покласти в контекст своє значення (`[X] * 0` → 0), яке Rollup (= збереженому)
+                // не записує, але формули над ціллю вже порахували від нього; без каскаду вони лишались нульовими.
+                if (rowKeyByRowIdByInstance.TryGetValue(relationWrite.TargetInstanceId, out var rowKeys)
+                    && rowKeys.TryGetValue(relationWrite.Record.Address.TableRowId, out var targetRowKey))
+                {
+                    values[new CellKey(0, relationWrite.Record.TableDefId, targetRowKey, relationWrite.Record.Address.ColumnDefId)]
+                        = Ecr.Expressions.Evaluation.CellValueMapping.ToExpressionValue(
+                            relationWrite.Record.Value, Ecr.Expressions.Evaluation.ExpressionValue.Null);
+                }
+
+                rollupSeeds.Add(relationWrite.Record.Address);
             }
 
             // Каскад: формули над ціллю (і ті, що читають їхні результати) рахуються ПІСЛЯ запису Rollup. Без
