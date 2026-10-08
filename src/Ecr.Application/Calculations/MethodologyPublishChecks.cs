@@ -618,28 +618,63 @@ public static class MethodologyPublishChecks
     /// </remarks>
     private static bool ProducesTextOnly(
         AstNode node, Dictionary<string, MethodologyConstant> byCode)
+        => Classify(node, byCode).TextOnly;
+
+    /// <summary>Чи вираз напевно повертає число.</summary>
+    private static bool ProducesNumber(
+        AstNode node, Dictionary<string, MethodologyConstant> byCode)
+        => Classify(node, byCode).Number;
+
+    /// <summary>
+    /// Обидві ознаки вузла за ОДИН обхід. ⛔ Раніше <c>ProducesTextOnly</c> і
+    /// <c>ProducesNumber</c> викликали одна одну через <c>IsTextPlus</c> двічі на рівень:
+    /// ланцюг `a+a+…` з 1000 доданків давав 2^1000 викликів (зависання гейта test).
+    /// </summary>
+    private static (bool TextOnly, bool Number) Classify(
+        AstNode node, Dictionary<string, MethodologyConstant> byCode)
     {
         // ⛔ L7-01: лівий гребінь ланцюга — рекурсія глибиною в кількість ланок.
         RuntimeHelpers.EnsureSufficientExecutionStack();
 
-        return node switch
+        switch (node)
         {
-            LiteralNode { Type: ExpressionValueType.Text } => true,
-            BinaryNode { Operator: BinaryOperator.Concat } => true,
-            BinaryNode { Operator: BinaryOperator.Add } add => IsTextPlus(add, byCode),
-            SymbolReferenceNode { Kind: SymbolKind.Constant } symbol
-                => byCode.TryGetValue(symbol.Name, out var constant)
-                   && constant.Kind == ConstantKind.Text,
-            ConditionalNode conditional
-                => ProducesTextOnly(conditional.WhenTrue, byCode)
-                   && ProducesTextOnly(conditional.WhenFalse, byCode),
-            FunctionNode { Arguments.Count: 3 } function
-                when string.Equals(function.Name, "if", StringComparison.OrdinalIgnoreCase)
-                => ProducesTextOnly(function.Arguments[1], byCode)
-                   && ProducesTextOnly(function.Arguments[2], byCode),
-            _ => false,
-        };
+            case LiteralNode { Type: ExpressionValueType.Text }:
+                return (true, false);
+            case LiteralNode { Type: ExpressionValueType.Number }:
+                return (false, true);
+            case BinaryNode { Operator: BinaryOperator.Concat }:
+                return (true, Arithmetic.Contains(BinaryOperator.Concat));
+            // ⚠ L2-2: `+` з текстом конкатенує (Parser.InferShape) — це не число.
+            case BinaryNode { Operator: BinaryOperator.Add } add:
+                var isText = IsTextPlus(add, byCode);
+                return (isText, !isText);
+            case BinaryNode binary:
+                return (false, Arithmetic.Contains(binary.Operator));
+            case UnaryNode unary:
+                return (false, unary.Operator != UnaryOperator.Not);
+            case SymbolReferenceNode { Kind: SymbolKind.Constant } symbol:
+                var known = byCode.TryGetValue(symbol.Name, out var constant);
+                return (known && constant!.Kind == ConstantKind.Text,
+                        known && constant!.Kind == ConstantKind.Numeric);
+            case ConditionalNode conditional:
+                return Both(
+                    Classify(conditional.WhenTrue, byCode),
+                    Classify(conditional.WhenFalse, byCode));
+            case FunctionNode { Arguments.Count: 3 } ifFunction
+                when string.Equals(ifFunction.Name, "if", StringComparison.OrdinalIgnoreCase):
+                return Both(
+                    Classify(ifFunction.Arguments[1], byCode),
+                    Classify(ifFunction.Arguments[2], byCode));
+            case FunctionNode function:
+                return (false, !NonNumericFunctions.Contains(function.Name));
+            default:
+                return (false, false);
+        }
     }
+
+    private static (bool TextOnly, bool Number) Both(
+        (bool TextOnly, bool Number) first, (bool TextOnly, bool Number) second)
+        => (first.TextOnly && second.TextOnly, first.Number && second.Number);
 
     /// <summary>
     /// Чи <c>+</c> конкатенує — те саме правило, що в <c>Parser.InferShape</c>:
@@ -656,7 +691,8 @@ public static class MethodologyPublishChecks
 
     private static OperandShape Shape(AstNode node, Dictionary<string, MethodologyConstant> byCode)
     {
-        if (ProducesTextOnly(node, byCode))
+        var (textOnly, number) = Classify(node, byCode);
+        if (textOnly)
         {
             return OperandShape.Text;
         }
@@ -664,7 +700,7 @@ public static class MethodologyPublishChecks
         // Булеві форми (порівняння, логіка, `!`) — не Null-форма, як у Parser.InferShape.
         var isBoolean = node is UnaryNode { Operator: UnaryOperator.Not }
                         || node is BinaryNode { Operator: >= BinaryOperator.Equal and <= BinaryOperator.Or };
-        if (isBoolean || ProducesNumber(node, byCode))
+        if (isBoolean || number)
         {
             return OperandShape.Other;
         }
@@ -677,36 +713,6 @@ public static class MethodologyPublishChecks
         Unknown,
         Text,
         Other,
-    }
-
-    /// <summary>Чи вираз напевно повертає число.</summary>
-    private static bool ProducesNumber(
-        AstNode node, Dictionary<string, MethodologyConstant> byCode)
-    {
-        // ⛔ L7-01: лівий гребінь ланцюга — рекурсія глибиною в кількість ланок.
-        RuntimeHelpers.EnsureSufficientExecutionStack();
-
-        return node switch
-        {
-            LiteralNode { Type: ExpressionValueType.Number } => true,
-            // ⚠ L2-2: `+` з текстом конкатенує (Parser.InferShape) — це не число.
-            BinaryNode { Operator: BinaryOperator.Add } add
-                => !IsTextPlus(add, byCode),
-            BinaryNode binary => Arithmetic.Contains(binary.Operator),
-            UnaryNode unary => unary.Operator != UnaryOperator.Not,
-            SymbolReferenceNode { Kind: SymbolKind.Constant } symbol
-                => byCode.TryGetValue(symbol.Name, out var constant)
-                   && constant.Kind == ConstantKind.Numeric,
-            ConditionalNode conditional
-                => ProducesNumber(conditional.WhenTrue, byCode)
-                   && ProducesNumber(conditional.WhenFalse, byCode),
-            FunctionNode { Arguments.Count: 3 } function
-                when string.Equals(function.Name, "if", StringComparison.OrdinalIgnoreCase)
-                => ProducesNumber(function.Arguments[1], byCode)
-                   && ProducesNumber(function.Arguments[2], byCode),
-            FunctionNode function => !NonNumericFunctions.Contains(function.Name),
-            _ => false,
-        };
     }
 
     /// <summary>Текст переліку проблем для повідомлення про відмову.</summary>
