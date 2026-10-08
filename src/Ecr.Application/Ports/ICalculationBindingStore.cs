@@ -87,6 +87,16 @@ public interface ICalculationBindingStore
         IReadOnlyCollection<int> tableDefIds, CancellationToken ct);
 
     /// <summary>
+    /// Код колонки → код довідника, на який вона вказує (<c>Lookup</c>), у названих таблицях — для
+    /// типізації аргументів <c>@Col</c> у перевірках довідників публікації (RC14, L2-4/P3).
+    /// </summary>
+    /// <param name="tableDefIds">Таблиці прив'язки методології.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Лише однозначні відповіді: код, що веде на різні довідники в різних таблицях, пропущено.</returns>
+    public Task<IReadOnlyDictionary<string, string>> ListLookupRegistryCodesAsync(
+        IReadOnlyCollection<int> tableDefIds, CancellationToken ct);
+
+    /// <summary>
     /// Колонки ВЕРСІЇ шаблону, до яких прив'язаний активний вихід методології —
     /// для публікаційної перевірки «обчислювана колонка має джерело»
     /// (<c>ECR-TMPL-4226</c>).

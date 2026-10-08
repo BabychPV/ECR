@@ -123,15 +123,19 @@ public sealed class PublishMethodologyHandler(
         // що була чинною, і порівнювати стало б нема з чим.
         var previous = methodology.VersionOn(from.AddDays(-1));
         RejectBackdatedStrict(version, previous, from);
+
+        // ⛔ RC14 (L2-4): статичні перевірки формул і довідників (REGFIELD/REGFIND → ECR-TMPL-4222 з
+        // позицією) — ДО золотого прогону. Інакше описка в правилі категорії падала на golden як
+        // `categoryRuleFailed` (#REF), а не названою відмовою з позицією.
+        var warnings = await ApplyEvaluationOrderAsync(methodology, version, from, ct)
+            .ConfigureAwait(false);
+
         var diff = await BuildDiffAsync(methodology, version, previous, testCases, ct).ConfigureAwait(false);
 
         // Зелений тест — не прапорець, а факт: усі випадки золотого набору
         // зійшлися в межах допуску (ФВ-9.12, ФВ-13.7).
         var verdicts = await JudgeAsync(methodology, version, testCases, ct).ConfigureAwait(false);
         var greenTest = GoldenSet.IsGreen(verdicts);
-
-        var warnings = await ApplyEvaluationOrderAsync(methodology, version, from, ct)
-            .ConfigureAwait(false);
 
         // ⛔ Відмова через золотий набір називає КОЖНУ розбіжність поіменно:
         // випадок, вихід, речовину й обидва числа. Домен теж її не пропустить
@@ -352,10 +356,17 @@ public sealed class PublishMethodologyHandler(
         // Одиниці (`RequireCompatibleUnits` нижче) лишаються над формулами: ключ категорії — текст.
         IReadOnlyList<ParsedFormula> registryScope = [.. parsed, .. ruleFormulas];
         var registryShapes = await RegistryShapesAsync(registryScope, ct).ConfigureAwait(false);
-        var formulaRegistries = registryShapes is null ? null : MethodologyRegistryChecks.FormulaRegistries(parsed);
+        // ✎ RC14 (P3): аргумент `@Col` з Lookup-колонки прив'язаної таблиці має відомий довідник -
+        // `REGFIELD(@Col, 'X')` перевіряється (4222) і пише ребро `cfg.RegistryUse`, а не мовчить.
+        var argumentRegistries = registryShapes is null
+            ? null
+            : await ArgumentRegistriesAsync(methodology.Id, ct).ConfigureAwait(false);
+        var formulaRegistries = registryShapes is null
+            ? null
+            : MethodologyRegistryChecks.FormulaRegistries(parsed, argumentRegistries);
         if (registryShapes is not null)
         {
-            MethodologyRegistryChecks.RequireValidReferences(registryScope, registryShapes, warnings);
+            MethodologyRegistryChecks.RequireValidReferences(registryScope, registryShapes, warnings, argumentRegistries);
         }
 
         // ⛔ ФВ-16.6/16.7: т + кг без CONVERT — відмова `ECR-TMPL-4223` до
@@ -405,9 +416,25 @@ public sealed class PublishMethodologyHandler(
             .ReplaceDependenciesAsync(methodology.Id, dependencies, ct)
             .ConfigureAwait(false);
 
-        await ReplaceRegistryUsesAsync(methodologyVersionId, registryScope, registryShapes, ct).ConfigureAwait(false);
+        await ReplaceRegistryUsesAsync(methodologyVersionId, registryScope, registryShapes, ct, argumentRegistries)
+            .ConfigureAwait(false);
 
         return warnings;
+    }
+
+    /// <summary>Код колонки → довідник її <c>Lookup</c>-цілі в таблицях прив'язки методології (порожньо - прив'язок немає).</summary>
+    private async Task<IReadOnlyDictionary<string, string>> ArgumentRegistriesAsync(int methodologyId, CancellationToken ct)
+    {
+        var methodologyBindings = await bindings.ListAsync(methodologyId, ct).ConfigureAwait(false);
+        if (methodologyBindings is null || methodologyBindings.Count == 0)
+        {
+            return new Dictionary<string, string>();
+        }
+
+        var map = await bindings
+            .ListLookupRegistryCodesAsync([.. methodologyBindings.Select(b => b.TableDefId).Distinct()], ct)
+            .ConfigureAwait(false);
+        return map ?? new Dictionary<string, string>();
     }
 
     /// <summary>
@@ -444,7 +471,8 @@ public sealed class PublishMethodologyHandler(
         int methodologyVersionId,
         IReadOnlyList<ParsedFormula> parsed,
         RegistryShapeCatalog? shapes,
-        CancellationToken ct)
+        CancellationToken ct,
+        IReadOnlyDictionary<string, string>? argumentRegistries = null)
     {
         if (registryUses is null)
         {
@@ -458,7 +486,7 @@ public sealed class PublishMethodologyHandler(
 
         var uses = shapes is null
             ? []
-            : MethodologyRegistryChecks.BuildUses(methodologyVersionId, parsed, shapes);
+            : MethodologyRegistryChecks.BuildUses(methodologyVersionId, parsed, shapes, argumentRegistries);
 
         await registryUses.ReplaceMethodologyUsesAsync(methodologyVersionId, uses, ct).ConfigureAwait(false);
     }
