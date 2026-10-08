@@ -175,7 +175,8 @@ public sealed class PublishMethodologyHandler(
         // ⛔ Попередження йдуть тією самою відповіддю, що й diff. Окремий
         // канал (журнал, лист) означав би, що той, хто публікує, їх не
         // побачить — а 186 попереджень у логах не прочитає ніхто.
-        return diff with { Warnings = warnings };
+        // ✎ L2-5: попередження diff (попередня версія не обчислилась) — до попереджень публікації.
+        return diff with { Warnings = [.. diff.Warnings ?? [], .. warnings] };
     }
 
     /// <summary>
@@ -1388,15 +1389,35 @@ public sealed class PublishMethodologyHandler(
         CancellationToken ct)
     {
         var changes = new List<MethodologyResultDelta>();
+        var diffWarnings = new List<string>();
+        UiStringCatalog? strings = null;
 
         if (previous is not null)
         {
             foreach (var testCase in testCases)
             {
+                // Нова версія — першою: її збій валить публікацію, як і раніше.
                 var after = await RunTestAsync(testCase, Descriptor(methodology, version), ct)
                     .ConfigureAwait(false);
-                var before = await RunTestAsync(testCase, Descriptor(methodology, previous), ct)
-                    .ConfigureAwait(false);
+
+                // ✎ L2-5: вхід золотого набору НОВОЇ версії може не годитись попередній (інший набір
+                // констант/категорій, текстове правило проти REGFIELD). Diff — довідкова інформація
+                // (ФВ-9.6), вердикт виносить `JudgeAsync` лише на новій, тож збій попередньої — це
+                // `before` порожній («усі виходи нові») і попередження, а не відмова публікації нової.
+                CalculationOutput before;
+                try
+                {
+                    before = await RunTestAsync(testCase, Descriptor(methodology, previous), ct)
+                        .ConfigureAwait(false);
+                }
+                catch (DomainException ex)
+                {
+                    strings ??= uiCatalog is null
+                        ? null
+                        : await uiCatalog.GetAsync(currentUser.Language, ct).ConfigureAwait(false);
+                    diffWarnings.Add(PreviousNotComputedWarning(strings, testCase.Code, previous.Version, ex.ErrorCode));
+                    before = new CalculationOutput(after.DocumentId, after.SourceRowKey, [], []);
+                }
 
                 // ⚠ HSE301 A3a: diff — про ВИХОДИ (`MethodologyResultDelta.OutputCode`).
                 // Проміжні значення видимих формул у журнал публікації не йдуть: інакше
@@ -1428,7 +1449,27 @@ public sealed class PublishMethodologyHandler(
                 previous?.NumericMode ?? version.NumericMode, version.NumericMode),
             new MethodologyCalendarChange(
                 previous?.CalendarMode ?? version.CalendarMode, version.CalendarMode),
-            changes);
+            changes,
+            diffWarnings);
+    }
+
+    /// <summary>Попередження diff: попередня версія не обчислилась на вході тесту (L2-5).</summary>
+    private static string PreviousNotComputedWarning(UiStringCatalog? strings, string test, string previousVersion, string code)
+    {
+        const string key = "publish.warning.diffPreviousNotComputed";
+        var values = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["test"] = test,
+            ["previous"] = previousVersion,
+            ["code"] = code,
+        };
+
+        return strings is null
+            ? values.Aggregate(
+                "Previous version {previous} did not calculate on test {test} ({code}), so the diff shows its outputs as new. "
+                + "The verdict on the new version is unchanged.",
+                (text, pair) => text.Replace("{" + pair.Key + "}", pair.Value, StringComparison.Ordinal))
+            : Localization.UiStringResolver.Format(Localization.UiStringResolver.Resolve(strings, key), values);
     }
 
     private static MethodologyDescriptor Descriptor(Methodology methodology, MethodologyVersion version)

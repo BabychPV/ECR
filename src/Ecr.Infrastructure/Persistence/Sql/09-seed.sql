@@ -7298,11 +7298,14 @@ USING (VALUES
     (N'document.staleResults.title', N'en', N'Calculation results are out of date', 1),
     (N'document.staleResults.hint', N'en', N'Input data was changed after the last calculation. Recalculate to refresh the results.', 1),
     (N'document.staleResults.hintSince', N'en', N'Input data was changed on {date}, after the last calculation. Recalculate to refresh the results.', 1),
--- COLL:l21scope ── L2-1: область формули (scope) у PUT формули й порівнянні версій; ru/kz — порцією COLL:l21scope нижче ──
-    (N'err.ECR-CALC-0422.formulaScopeInvalid', N'en', N'The scope "{scope}" of formula "{code}" is not valid: use Substance (once per substance) or Row (once per row).', 1),
-    (N'methodologyDiffField.scope', N'en', N'Scope', 1)
-    -- COLL:l21scope ── кінець секції ──
     -- COLL:stale-ui ── кінець секції ──
+    -- COLL:l21scope ── L2-1: область формули (scope) у PUT формули й порівнянні версій; ru/kz — порцією COLL:l21scope нижче ──
+    (N'err.ECR-CALC-0422.formulaScopeInvalid', N'en', N'The scope "{scope}" of formula "{code}" is not valid: use Substance (once per substance) or Row (once per row).', 1),
+    (N'methodologyDiffField.scope', N'en', N'Scope', 1),
+    -- COLL:l21scope ── кінець секції ──
+    -- COLL:l24l25 ── L2-5: попередження diff публікації, коли попередня версія не обчислилась; ru/kz — порцією COLL:l24l25 нижче ──
+    (N'publish.warning.diffPreviousNotComputed', N'en', N'Previous version {previous} did not calculate on test {test} ({code}), so the diff shows its outputs as new. The verdict on the new version is unchanged.', 1)
+    -- COLL:l24l25 ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -17782,6 +17785,16 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:stale-ui ── кінець секції ──
+-- COLL:l24l25 ── ru/kz L2-5: попередження diff публікації, коли попередня версія не обчислилась; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'publish.warning.diffPreviousNotComputed', N'ru', N'Предыдущая версия {previous} не рассчиталась на тесте {test} ({code}), поэтому в diff её выходы показаны как новые. Вердикт по новой версии не изменился.'),
+    (N'publish.warning.diffPreviousNotComputed', N'kz', N'Алдыңғы {previous} нұсқасы {test} тестінде есептелмеді ({code}), сондықтан diff-те оның шығыстары жаңа ретінде көрсетілген. Жаңа нұсқа бойынша үкім өзгермеді.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:l24l25 ── кінець секції ──
 
 -- COLL:l26rowreject ── ru/kz L2-6: правило категорії відмовило рядкам; власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)
