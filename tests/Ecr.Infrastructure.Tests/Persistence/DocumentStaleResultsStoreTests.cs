@@ -400,6 +400,56 @@ public sealed class DocumentStaleResultsStoreTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage6)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "RC15-S-1")]
+    public async Task З_projectId_і_без_нього_ті_самі_дані_дають_те_саме_число_а_розбіжність_лише_в_межах_TTL()
+    {
+        // RC15 S-1 (приймальна: `staleResultsCount` 0 з projectId і 1 без нього). Корінь - не різні предикати:
+        // обидва виклики йдуть одним `StaleResultsQuery`. Розбіжність дає лічильник у короткому кеші
+        // (`StaleCountsTtl`, без інвалідації; ключ містить projectId): виклик з projectId, зроблений ДО правки,
+        // лишається в кеші, а виклик без projectId - інший ключ - рахується заново.
+        var s = await CacheScenarioAsync();
+
+        // 1. Без кешу: ті самі дані - те саме число (вибір по проєкту = вибір по межі грантів з одного проєкту).
+        await using (var plain = s.Builder.CreateContext())
+        {
+            var store = new DocumentListSummaryStore(plain);
+            var withProject = await store.SummarizeAsync(
+                s.Chain.ProjectId, s.Period, [s.Chain.ProjectId], null, Me, CancellationToken.None);
+            var withoutProject = await store.SummarizeAsync(
+                null, s.Period, [s.Chain.ProjectId], null, Me, CancellationToken.None);
+            Assert.Equal(2, withProject.StaleResultsCount);
+            Assert.Equal(withProject.StaleResultsCount, withoutProject.StaleResultsCount);
+            Assert.Equal(withProject.StaleResultsMineCount, withoutProject.StaleResultsMineCount);
+        }
+
+        // 2. З кешем: виклик з projectId тепліє до правки; після правки виклик без projectId бачить нове,
+        // а тепла відповідь з projectId - ще ні (це і було 0 vs 1), аж до кінця TTL.
+        await using var db = s.Builder.CreateContext();
+        using var cache = NewCache();
+        var clock = new TestClock(Now.AddHours(2));
+        var cached = new DocumentListSummaryStore(db, cache, clock);
+
+        Assert.Equal(2, (await cached.SummarizeAsync(
+            s.Chain.ProjectId, s.Period, [s.Chain.ProjectId], null, Me, CancellationToken.None)).StaleResultsCount);
+
+        await EditAsync(s.Fresh, s.Period, s.Chain.ColumnDefIds[1], Now.AddHours(1), user: Me);
+
+        var coldKey = await cached.SummarizeAsync(
+            null, s.Period, [s.Chain.ProjectId], null, Me, CancellationToken.None);
+        var warmKey = await cached.SummarizeAsync(
+            s.Chain.ProjectId, s.Period, [s.Chain.ProjectId], null, Me, CancellationToken.None);
+        Assert.Equal(3, coldKey.StaleResultsCount);
+        Assert.Equal(2, warmKey.StaleResultsCount);
+
+        clock.Advance(DocumentListSummaryStore.StaleCountsTtl + TimeSpan.FromSeconds(1));
+        var after = await cached.SummarizeAsync(
+            s.Chain.ProjectId, s.Period, [s.Chain.ProjectId], null, Me, CancellationToken.None);
+        Assert.Equal(coldKey.StaleResultsCount, after.StaleResultsCount);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
     public async Task Різний_scope_читача_не_ділить_запис_а_звужений_не_отримує_теплий_лічильник_незвуженого()
     {
         var s = await CacheScenarioAsync();
