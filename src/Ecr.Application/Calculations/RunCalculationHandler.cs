@@ -209,7 +209,8 @@ public sealed class RunCalculationHandler(
     /// </remarks>
     /// <exception cref="JobLeaseLostException">Оренду задачі втрачено; нічого не записано.</exception>
     public async Task CompleteAsync(
-        long calculationRunId, ModuleProfile profile, CancellationToken ct, ResultCarryOver? carryOver = null)
+        long calculationRunId, ModuleProfile profile, CancellationToken ct,
+        IReadOnlyCollection<ResultCarryOver>? carryOver = null)
     {
         ArgumentNullException.ThrowIfNull(profile);
 
@@ -241,15 +242,20 @@ public sealed class RunCalculationHandler(
     }
 
     private async Task SwitchAsync(
-        long calculationRunId, ModuleProfile profile, ResultCarryOver? carryOver, CancellationToken ct)
+        long calculationRunId, ModuleProfile profile, IReadOnlyCollection<ResultCarryOver>? carryOver, CancellationToken ct)
     {
         // RC14 (P2-4): прогін області не перераховував інші аркуші — їхні результати переносяться з
         // попереднього актуального прогону ДО перемикання актуальності, у тій самій транзакції.
-        if (carryOver is { MethodologyIds.Count: > 0 })
+        // RC15 (P2-C): так само для пропущених (поданих/затверджених) аркушів перерахунку документа; на кожен
+        // документ прогону — окремий запис (послідовний прогін кількох документів).
+        foreach (var item in carryOver ?? [])
         {
-            await results
-                .CarryOverResultsAsync(calculationRunId, carryOver.DocumentId, carryOver.MethodologyIds, ct)
-                .ConfigureAwait(false);
+            if (item.MethodologyIds.Count > 0)
+            {
+                await results
+                    .CarryOverResultsAsync(calculationRunId, item.DocumentId, item.MethodologyIds, ct)
+                    .ConfigureAwait(false);
+            }
         }
 
         await results
