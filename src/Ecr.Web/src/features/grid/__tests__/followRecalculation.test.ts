@@ -1,7 +1,7 @@
 import { QueryClient } from '@tanstack/react-query';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { queryKeys } from '@/api/queryKeys';
-import { followRecalculation, settleRecalculation } from '../useCellPatch';
+import { RecalculationPollMs, followRecalculation, settleRecalculation } from '../useCellPatch';
 
 /**
  * N-1 (RC15): після правки на одному аркуші зрізи ІНШИХ таблиць документа (Rollup на «Contract») не
@@ -20,7 +20,10 @@ function clientWithSlices(): QueryClient {
 const stale = (client: QueryClient, key: readonly unknown[]): boolean =>
   client.getQueryState(key)?.isInvalidated === true;
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+});
 
 describe('перерахунок скидає зрізи документа', () => {
   it('settleRecalculation: зріз іншого аркуша застарів, інший період - ні; повтор задачі ігнорується', async () => {
@@ -43,5 +46,44 @@ describe('перерахунок скидає зрізи документа', ()
     const client = clientWithSlices();
     followRecalculation(client, 'job#2', 7, 202609);
     await vi.waitFor(() => expect(stale(client, other)).toBe(true));
+  });
+
+  it('серія швидких правок: один слідкувач, одна фінальна інвалідація після останньої задачі', async () => {
+    vi.useFakeTimers();
+    const finished = new Set<string>();
+    const calls: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const id = decodeURIComponent(String(input).split('/').pop() ?? '');
+        calls.push(id);
+        return new Response(JSON.stringify({ state: finished.has(id) ? 'Succeeded' : 'Running' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }),
+    );
+    const client = clientWithSlices();
+    const invalidate = vi.spyOn(client, 'invalidateQueries');
+    for (let i = 1; i <= 5; i += 1) followRecalculation(client, `burst#${i}`, 11, 202609);
+
+    // Усі п'ять задач, крім останньої, завершились - зрізи скидати рано.
+    for (let i = 1; i <= 4; i += 1) finished.add(`burst#${i}`);
+    await vi.advanceTimersByTimeAsync(RecalculationPollMs * 3);
+    expect(invalidate).not.toHaveBeenCalled();
+    // Один слідкувач: за кожен тік - один запит, і лише про останню задачу.
+    // (перший запит іде синхронно зі стартом слідкувача, до решти правок)
+    expect(new Set(calls.slice(1))).toEqual(new Set(['burst#5']));
+    expect(calls.length).toBeLessThanOrEqual(5);
+
+    finished.add('burst#5');
+    await vi.advanceTimersByTimeAsync(RecalculationPollMs * 2);
+    const afterFinish = invalidate.mock.calls.length;
+    expect(afterFinish).toBeGreaterThan(0);
+    const polled = calls.length;
+    await vi.advanceTimersByTimeAsync(RecalculationPollMs * 5);
+    expect(calls.length).toBe(polled); // слідкувач завершився
+    expect(invalidate.mock.calls.length).toBe(afterFinish); // друга інвалідація не з'явилась
+    expect(stale(client, other)).toBe(true);
   });
 });

@@ -219,6 +219,9 @@ export function settleRecalculation(
 /** Скільки разів фоновий слідкувач питає про задачу (2 с * 60 = 2 хв). */
 const FollowMaxPolls = 60;
 
+/** Активні слідкувачі: ключ `документ:період` -> остання задача, за якою він стежить. */
+const activeFollowers = new Map<string, { jobId: string }>();
+
 /**
  * Фонове стеження за перерахунком, поставленим правкою (N-1).
  *
@@ -226,6 +229,10 @@ const FollowMaxPolls = 60;
  * власне стеження зникає разом з нею, а `staleTime` зрізів 5 хв лишає в кеші інших аркушів значення
  * ДО перерахунку (U3=200 замість 180). Слідкувач живе поза компонентом і по завершенні задачі
  * скидає зрізи всього документа за період.
+ *
+ * ⚠ Один слідкувач на документ і період: швидкі підряд правки не плодять цикли опитування, а лише
+ * переводять наявного на НОВУ задачу (старіші перерахунки поглинаються останнім). Інвалідація - одна,
+ * після завершення останньої задачі.
  */
 export function followRecalculation(
   queryClient: QueryClient,
@@ -233,23 +240,43 @@ export function followRecalculation(
   documentId: number,
   periodKey: number,
 ): void {
+  const key = `${documentId}:${periodKey}`;
+  const existing = activeFollowers.get(key);
+  if (existing) {
+    existing.jobId = jobId;
+    return;
+  }
+  const follower = { jobId };
+  activeFollowers.set(key, follower);
   void (async () => {
-    for (let attempt = 0; attempt < FollowMaxPolls; attempt += 1) {
-      try {
+    try {
+      let polledJob = follower.jobId;
+      let attempt = 0;
+      while (attempt < FollowMaxPolls) {
+        if (follower.jobId !== polledJob) {
+          polledJob = follower.jobId;
+          attempt = 0;
+        }
+        attempt += 1;
+        const current = polledJob;
         const job = await queryClient.fetchQuery({
-          queryKey: ['job', jobId],
-          queryFn: () => apiFetch<JobStatus>(`/api/v1/jobs/${encodeURIComponent(jobId)}`),
+          queryKey: ['job', current],
+          queryFn: () => apiFetch<JobStatus>(`/api/v1/jobs/${encodeURIComponent(current)}`),
           staleTime: 0,
           retry: false,
         });
+        // Поки опитували, з'явилась новіша задача: чекаємо на неї, а не скидаємо зрізи передчасно.
+        if (follower.jobId !== current) continue;
         if (pollInterval(job.state) === false) {
-          settleRecalculation(queryClient, jobId, documentId, periodKey);
+          settleRecalculation(queryClient, current, documentId, periodKey);
           return;
         }
-      } catch {
-        return;
+        await new Promise((resolve) => setTimeout(resolve, RecalculationPollMs));
       }
-      await new Promise((resolve) => setTimeout(resolve, RecalculationPollMs));
+    } catch {
+      // Помилка опитування: слідкувач завершується, сітка має власне стеження.
+    } finally {
+      if (activeFollowers.get(key) === follower) activeFollowers.delete(key);
     }
   })();
 }
