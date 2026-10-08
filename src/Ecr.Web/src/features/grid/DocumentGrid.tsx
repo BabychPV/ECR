@@ -48,6 +48,7 @@ import {
   moreConflictsOf,
   useCellPatch,
   useRecalculationStatus,
+  settleRecalculation,
   type PendingEdit,
 } from './useCellPatch';
 import { holdRejectedEdits, registerSliceSaver, scheduleAutosave } from './autosave';
@@ -370,7 +371,10 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
     if (refetchedFor.current === recalculationJobId) return;
 
     refetchedFor.current = recalculationJobId;
-    void slice.refetch();
+    // ⛔ N-1 (RC15): перерахунок міняє й ІНШІ таблиці документа (Rollup-цілі на «Contract», формули над ними),
+    // а `staleTime` зрізів — 5 хв: перемикання вкладки показувало старе з кешу. Тому не лише власний зріз:
+    // усі зрізи документа за період — змонтовані перезапитуються, решта позначається застарілою.
+    settleRecalculation(queryClient, recalculationJobId, documentId, periodKey);
   }, [recalc.outcome, recalculationJobId]);
 
   /**

@@ -18,6 +18,7 @@ import { MoreConflictsExtension } from '@/api/types';
 import { outcomeOf, pollInterval, type JobOutcome } from '@/features/workflow/jobFollow';
 import { formatTime } from '@/shared/format';
 import { applyPatchToSlice } from './sliceApply';
+import { invalidateSlices } from './sliceCache';
 import { hasConfirmed } from './confirmedEdits';
 import { calculationResultsKey } from '@/features/methodologies/calculationResultsKey';
 
@@ -196,6 +197,63 @@ export function refreshStaleness(queryClient: QueryClient, documentId: number, p
   void queryClient.invalidateQueries({ queryKey: calculationResultsKey(documentId, periodKey), exact: true });
 }
 
+/** Задачі перерахунку, після яких зрізи документа вже скинуто (N-1): одна задача - одна інвалідація. */
+const settledJobs = new Set<string>();
+
+/**
+ * N-1 (RC15): скидає зрізи документа за період ПІСЛЯ завершення перерахунку - один раз на задачу.
+ * Повертає `false`, якщо цю задачу вже оброблено (сітка і фоновий слідкувач не дублюють запити).
+ */
+export function settleRecalculation(
+  queryClient: QueryClient,
+  jobId: string,
+  documentId: number,
+  periodKey: number,
+): boolean {
+  if (settledJobs.has(jobId)) return false;
+  settledJobs.add(jobId);
+  void invalidateSlices(queryClient, { documentId, periodKey });
+  return true;
+}
+
+/** Скільки разів фоновий слідкувач питає про задачу (2 с * 60 = 2 хв). */
+const FollowMaxPolls = 60;
+
+/**
+ * Фонове стеження за перерахунком, поставленим правкою (N-1).
+ *
+ * ⛔ Сітка, що поставила задачу, може розмонтуватися (перехід на іншу вкладку - «Contract»), і тоді її
+ * власне стеження зникає разом з нею, а `staleTime` зрізів 5 хв лишає в кеші інших аркушів значення
+ * ДО перерахунку (U3=200 замість 180). Слідкувач живе поза компонентом і по завершенні задачі
+ * скидає зрізи всього документа за період.
+ */
+export function followRecalculation(
+  queryClient: QueryClient,
+  jobId: string,
+  documentId: number,
+  periodKey: number,
+): void {
+  void (async () => {
+    for (let attempt = 0; attempt < FollowMaxPolls; attempt += 1) {
+      try {
+        const job = await queryClient.fetchQuery({
+          queryKey: ['job', jobId],
+          queryFn: () => apiFetch<JobStatus>(`/api/v1/jobs/${encodeURIComponent(jobId)}`),
+          staleTime: 0,
+          retry: false,
+        });
+        if (pollInterval(job.state) === false) {
+          settleRecalculation(queryClient, jobId, documentId, periodKey);
+          return;
+        }
+      } catch {
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, RecalculationPollMs));
+    }
+  })();
+}
+
 /**
  * Видимий стан збереження (`B-35`, `#38`).
  *
@@ -285,6 +343,9 @@ export function useCellPatch(documentId: number): {
         // зараз у зрізі. `?? null` навмисно: поле необов'язкове в контракті,
         // тож `undefined` зі старішого сервера має читатися так само.
         setRecalculationJobId(response.recalculationJobId ?? null);
+        if (response.recalculationJobId) {
+          followRecalculation(queryClient, response.recalculationJobId, documentId, request.periodKey);
+        }
 
         // ⚠ «Збережено» показується ТИМЧАСОВО, а не назавжди: індикатор, який
         // ніколи не гасне, оператор перестає читати за перший же день, і він
