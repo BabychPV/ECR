@@ -116,6 +116,28 @@ public sealed class DocumentDeleteTests(SqlServerFixture sql)
         Assert.True(await db.Documents.AnyAsync(d => d.Id == s.Document.DocumentId).ConfigureAwait(true));
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Неіснуючий_документ_і_повторне_видалення_дають_404_а_не_500()
+    {
+        // RC15 E-1: DELETE ніколи не віддає 500 - ні для Id, якого немає, ні для вже видаленого документа
+        // (відповідь та сама, що й для чужого проєкту: наявність документа не розкривається).
+        var s = await ArrangeAsync(DeleteDocumentHandler.Permission, GrantLevel.Write).ConfigureAwait(true);
+
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
+
+        var missing = await DeleteAsync(client, long.MaxValue - 7).ConfigureAwait(true);
+        Assert.True(missing.StatusCode == HttpStatusCode.NotFound, $"{missing.StatusCode}: {app.ErrorsText}");
+
+        var first = await DeleteAsync(client, s.Document.DocumentId).ConfigureAwait(true);
+        Assert.True(first.StatusCode == HttpStatusCode.NoContent, $"{first.StatusCode}: {app.ErrorsText}");
+
+        var again = await DeleteAsync(client, s.Document.DocumentId).ConfigureAwait(true);
+        Assert.True(again.StatusCode == HttpStatusCode.NotFound, $"{again.StatusCode}: {app.ErrorsText}");
+    }
+
     private static Task<HttpResponseMessage> DeleteAsync(HttpClient client, long documentId)
         => client.DeleteAsync(new Uri(
             $"/api/v1/documents/{documentId.ToString(System.Globalization.CultureInfo.InvariantCulture)}",
