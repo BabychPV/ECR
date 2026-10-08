@@ -614,7 +614,9 @@ export function DocumentHeaderPanel({
       field={field}
       labelText={key === null ? undefined : bilingualLabel(field)}
       value={key !== null && serviceValues[key] !== undefined ? serviceValues[key] : draft[field.code]}
-      disabled={!canEdit || save.isPending || isContractReadOnly(key)}
+      // Службові поля — readOnly без disabled: фокусуються й читаються з клавіатури.
+      readOnly={isContractReadOnly(key) && field.dataType === 'String'}
+      disabled={isContractReadOnly(key) ? field.dataType !== 'String' : !canEdit || save.isPending}
       onChange={(value) => setField(field.code, value)}
       onInvalidDate={(invalid) => markInvalidDate(field.code, invalid)}
       lookupEntries={
@@ -655,7 +657,6 @@ export function DocumentHeaderPanel({
                   label={t(key === 'version' ? 'document.header.contract.version' : 'document.header.contract.fileNumber')}
                   value={serviceValues[key] ?? ''}
                   readOnly
-                  disabled
                   data-header-field={key}
                 />
               ) : (
@@ -770,6 +771,7 @@ function headerSummaryValue(
 function HeaderFieldInput({
   field,
   labelText,
+  readOnly,
   value,
   disabled,
   onChange,
@@ -782,6 +784,8 @@ function HeaderFieldInput({
   field: DocumentHeaderField;
   /** Підпис «EN — RU» секції Contract; без нього — локалізований підпис поля. */
   labelText?: string | undefined;
+  /** Службове поле секції Contract: видно й фокусується, але не редагується. */
+  readOnly?: boolean | undefined;
   value: unknown;
   disabled: boolean;
   onChange: (value: unknown) => void;
@@ -923,6 +927,7 @@ function HeaderFieldInput({
     <TextInput
       label={label}
       disabled={disabled}
+      readOnly={readOnly}
       value={typeof value === 'string' ? value : ''}
       onChange={(event) => onChange(event.currentTarget.value)}
       data-header-field={field.code}

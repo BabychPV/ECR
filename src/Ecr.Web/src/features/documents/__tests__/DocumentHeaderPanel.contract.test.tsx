@@ -114,8 +114,10 @@ describe('DocumentHeaderPanel: секція Contract', () => {
     const area = document.querySelector<HTMLInputElement>('[data-header-field="AREA"]');
 
     expect(fileNumber?.value).toBe('ECR-2026-0007');
-    expect(fileNumber?.disabled).toBe(true);
-    expect(version?.disabled).toBe(true);
+    expect(fileNumber?.readOnly).toBe(true);
+    expect(fileNumber?.disabled).toBe(false);
+    expect(version?.readOnly).toBe(true);
+    expect(version?.disabled).toBe(false);
     expect(area?.disabled).toBe(false);
   });
 
