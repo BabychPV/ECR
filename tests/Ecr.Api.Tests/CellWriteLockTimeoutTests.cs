@@ -6,6 +6,7 @@ using System.Text.Json;
 using Ecr.Domain.Entities.Security;
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
+using Ecr.Infrastructure.Persistence;
 using Ecr.Infrastructure.Security;
 using Ecr.TestKit;
 using Microsoft.EntityFrameworkCore;
@@ -108,7 +109,11 @@ public sealed class CellWriteLockTimeoutTests(SqlServerFixture sql)
         Assert.True(
             blockedResponse.StatusCode == HttpStatusCode.Conflict,
             $"Очікували 409, отримали {blockedResponse.StatusCode}\n{blockedBody}\n{factory.ErrorsText}");
-        Assert.True(elapsed < TimeSpan.FromSeconds(25), $"Відмова прийшла за {elapsed}: LOCK_TIMEOUT не діє.");
+        // 15 с LOCK_TIMEOUT + накладні запиту; 28 с — запас до 30 с CommandTimeout: якби LOCK_TIMEOUT не діяв,
+        // відповідь прийшла б лише на ~30-й секунді (500 через -2).
+        Assert.True(
+            elapsed < TimeSpan.FromSeconds(28),
+            $"Відмова прийшла за {elapsed} (LOCK_TIMEOUT {LockWaitGuard.LockTimeoutMs} мс): LOCK_TIMEOUT не діє.");
 
         var problem = JsonDocument.Parse(blockedBody).RootElement;
         Assert.Equal("ECR-DOC-4091", problem.GetProperty("errorCode").GetString());
