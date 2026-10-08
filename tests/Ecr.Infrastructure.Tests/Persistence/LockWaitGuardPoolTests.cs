@@ -63,7 +63,7 @@ public sealed class LockWaitGuardPoolTests(SqlServerFixture sql)
         Assert.Equal(spidInside, spidAfter);
 
         // (2) Ambient-транзакція: ліміт діє на решту її операторів.
-        Assert.Equal(8000, insideTransaction);
+        Assert.Equal(15000, insideTransaction);
 
         // (1) Після повернення в пул — звичайне -1.
         Assert.Equal(-1, afterPool);
