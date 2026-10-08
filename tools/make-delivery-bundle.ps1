@@ -216,6 +216,9 @@ try {
     foreach ($f in $sqlFiles) { $entries["sql/$($f.Name)"] = $f.FullName }
     foreach ($k in $docs.Keys) { $entries[$docs[$k]] = Join-Path $root $k }
     foreach ($n in $notes) { $entries["docs/release-notes/$($n.Name)"] = $n.FullName }
+    # v12 (локально): скрипти завантаження довідників/шапки Contract (RC15) і їхні дані
+    foreach ($f in @(Get-ChildItem -LiteralPath (Join-Path $root 'tools/land') -Filter '*.ps1' -File)) { $entries["tools/land/$($f.Name)"] = $f.FullName }
+    foreach ($f in @(Get-ChildItem -LiteralPath (Join-Path $root 'docs/delivery/reference-data/land-contract') -File)) { $entries["docs/delivery/reference-data/land-contract/$($f.Name)"] = $f.FullName }
 
     # Ecr.msi.sha256 у наборі завжди описує 'Ecr.msi' — під цим іменем MSI і лежить
     # (deploy-ecr.ps1 -MsiPath .\Ecr.msi, verify-msi.ps1 шукає <MsiPath>.sha256).

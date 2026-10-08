@@ -312,7 +312,12 @@ export function DocumentsPage(): JSX.Element {
           межею кожен клік знімав би її разом із фокусом на час запиту, а
           порожній результат — ховав би кнопку, якою фільтр і знімають.
           ⚠ І в ТОМУ САМОМУ ряду, що й фільтри (рішення людини 2026-10-06). */}
-      <DocumentListFilterBar periodKey={periodKey} filters={filters} projects={projects.data?.items ?? []}>
+      <DocumentListFilterBar
+        periodKey={periodKey}
+        filters={filters}
+        projects={projects.data?.items ?? []}
+        staleOnPage={query.data?.items.filter((d) => d.resultsStale === true).length ?? 0}
+      >
         {/* ✎ `UI-18` (макет `FilterBar`, KIT §3): «Clear filters» з'являється
             сама, щойно є активний фільтр, і скидає все ОДНИМ переходом
             (`filters.reset` — один `setSearchParams`). Без фільтрів кнопки

@@ -20,12 +20,16 @@ import { localized } from '@/shared/i18n/localized';
 /** Одне зауваження в групі. */
 export interface InspectorIssue {
   readonly finding: ValidationFindingDto;
+  /** `false` — рядок без переходу (знахідка рівня документа без адреси, напр. `ECR-SUB-4221`). */
+  readonly navigable: boolean;
   /** Позиція в переліку сервера — стабільний ключ рендеру. */
   readonly index: number;
 }
 
 /** Група = одна таблиця (макет: `group-h` із назвою таблиці й кількістю). */
 export interface InspectorIssueGroup {
+  /** `header` — знахідки шапки документа (`tableDefId` 0); назву групи дає компонент (i18n). */
+  readonly kind: 'table' | 'header';
   readonly tableDefId: number;
   readonly sheetCode: string;
   readonly title: string;
@@ -37,6 +41,17 @@ export interface InspectorIssueCounts {
   readonly all: number;
   readonly errors: number;
   readonly warnings: number;
+}
+
+/** Правило знахідки шапки документа (`tableDefId` 0) — веде до панелі шапки. */
+export const HeaderFindingRule = 'ECR-HDR-0422';
+
+/** Підсумкова відмова подання з прихованими зауваженнями (`tableDefId` 0) — без переходу. */
+const SubmitBlockedRule = 'ECR-SUB-4221';
+
+/** Знахідка шапки документа: адреса — панель шапки, а не клітинка. */
+export function isHeaderFinding(finding: ValidationFindingDto): boolean {
+  return finding.tableDefId === 0 && finding.ruleCode === HeaderFindingRule;
 }
 
 /** Назва таблиці для заголовка групи: номер (код) і локалізована назва. */
@@ -64,21 +79,31 @@ export function groupIssues(
   }
 
   const byTable = new Map<number, InspectorIssue[]>();
+  const headerIssues: InspectorIssue[] = [];
 
   messages.forEach((finding, index) => {
+    // Рівень документа: лише ДВА відомі правила з `tableDefId` 0; будь-яке інше
+    // нульове зауваження, як і раніше, не показується.
+    if (finding.tableDefId === 0) {
+      if (isHeaderFinding(finding)) headerIssues.push({ finding, index, navigable: true });
+      else if (finding.ruleCode === SubmitBlockedRule) headerIssues.push({ finding, index, navigable: false });
+      return;
+    }
+
     // ⛔ Таблиці немає серед видимих — зауваження не існує для цієї людини.
     if (!visible.has(finding.tableDefId)) return;
 
     const list = byTable.get(finding.tableDefId) ?? [];
-    list.push({ finding, index });
+    list.push({ finding, index, navigable: true });
     byTable.set(finding.tableDefId, list);
   });
 
-  return [...byTable.entries()]
+  const tableGroups = [...byTable.entries()]
     .map(([tableDefId, issues]) => {
       const table = visible.get(tableDefId) as DocumentTableDto;
 
       return {
+        kind: 'table' as const,
         tableDefId,
         sheetCode: table.sheetCode,
         title: tableTitleOf(table),
@@ -91,7 +116,22 @@ export function groupIssues(
       };
     })
     .sort((a, b) => a.order[0] - b.order[0] || a.order[1] - b.order[1])
-    .map(({ order: _order, ...group }) => group);
+    .map(({ order: _order, ...group }): InspectorIssueGroup => group);
+
+  if (headerIssues.length === 0) return tableGroups;
+
+  // Група шапки — ПЕРЕД групами таблиць; помилки перед попередженнями, як усюди.
+  const header: InspectorIssueGroup = {
+    kind: 'header',
+    tableDefId: 0,
+    sheetCode: '',
+    title: '',
+    issues: headerIssues.sort(
+      (a, b) => severityRank(a.finding.severity) - severityRank(b.finding.severity) || a.index - b.index,
+    ),
+  };
+
+  return [header, ...tableGroups];
 }
 
 function severityRank(severity: string): number {

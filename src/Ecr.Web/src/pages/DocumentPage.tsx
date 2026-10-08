@@ -1,4 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useState, type JSX } from 'react';
+import { isHeaderFinding } from '@/features/documents/inspector/inspectorModel';
 import { Alert, Badge, Skeleton, Stack, Tabs, Text } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery } from '@tanstack/react-query';
@@ -287,6 +288,7 @@ export function DocumentPage(): JSX.Element {
   );
   // `UI-25`: кожна завершена перевірка — сигнал інспектору відкрити Issues, якщо є що.
   const [validatedSeq, setValidatedSeq] = useState(0);
+  const [headerOpenRequest, setHeaderOpenRequest] = useState(0);
 
   const validate = useMutation({
     mutationFn: (_scope: string) =>
@@ -674,9 +676,11 @@ export function DocumentPage(): JSX.Element {
           documentId={documentId}
           businessKey={document.businessKey}
           templateVersion={document.templateVersion ?? undefined}
+          showRequiredErrors={validatedSeq > 0}
           // ✎ UI-16: згорнута з підсумком; розгортається сама, коли поле
           // потребує уваги (обов'язкове порожнє, недійсна дата, незбережене).
           collapsible
+          openRequest={headerOpenRequest}
           // AN-39/L8-13: сервер править шапку за `EditRules.CanEdit` документа цілком - не в
           // симуляції, не в архівному проєкті, не за поданого/затвердженого аркуша.
           canEdit={
@@ -734,6 +738,11 @@ export function DocumentPage(): JSX.Element {
           messages={shownValidation?.messages ?? null}
           validatedSeq={validatedSeq}
           onSelectFinding={(finding) => {
+            // Знахідка шапки (`tableDefId` 0) веде до панелі шапки, а не в клітинку.
+            if (isHeaderFinding(finding)) {
+              setHeaderOpenRequest((value) => value + 1);
+              return;
+            }
             // ⛔ `ФВ-5.6`: спершу аркуш зауваження, потім запит переходу. Модуль
             // переходу — за `import()`: він живе в чанку сітки, не сторінки
             // (`D-132`), і сітки однаково без нього не з'являться.

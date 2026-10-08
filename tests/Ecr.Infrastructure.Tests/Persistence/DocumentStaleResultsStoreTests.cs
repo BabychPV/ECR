@@ -497,6 +497,154 @@ public sealed class DocumentStaleResultsStoreTests(SqlServerFixture sql)
         Assert.Equal(0, (await SummaryAsync(store, s, null, null)).StaleResultsMineCount);
     }
 
+    // ── інвалідація кешу лічильників епохою (власна правка видна одразу) ─────────────────────
+
+    private EcrDbContext EpochContext(StaleCountsEpoch epoch, DbCommandCounter? counter = null)
+    {
+        var options = new DbContextOptionsBuilder<EcrDbContext>().UseSqlServer(sql.ConnectionString);
+        options.AddInterceptors(epoch);
+        if (counter is not null)
+        {
+            options.AddInterceptors(counter);
+        }
+
+        return new EcrDbContext(options.Options);
+    }
+
+    private static CellChangeRecord EditRecord(CacheScenario s, long documentId)
+        => new(
+            Now.AddHours(1), new CellAddress(s.Chain.PeriodKey, 1, s.Chain.ColumnDefIds[1]), documentId, "R1",
+            "1", "2", Me, "UserEdit", IsLateEdit: false, CorrelationId: null);
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Власна_правка_видна_лічильнику_одразу_після_коміту_без_очікування_TTL()
+    {
+        var s = await CacheScenarioAsync();
+        var epoch = new StaleCountsEpoch();
+        await using var db = EpochContext(epoch);
+        using var cache = NewCache();
+        var store = new DocumentListSummaryStore(db, cache, new TestClock(Now.AddHours(2)), epoch);
+        var audit = new AuditWriter(db, epoch);
+
+        Assert.Equal(2, (await SummaryAsync(store, s, null, Me)).StaleResultsCount);
+
+        await using (var transaction = await db.Database.BeginTransactionAsync())
+        {
+            await audit.WriteCellChangesAsync([EditRecord(s, s.Fresh)], CancellationToken.None);
+
+            // ⛔ До коміту епоха НЕ рухається: читач іншого з'єднання ще не бачить правки, кеш лишається чинним.
+            Assert.Equal(2, (await SummaryAsync(store, s, null, Me)).StaleResultsCount);
+
+            await transaction.CommitAsync();
+        }
+
+        // Після коміту - нове значення БЕЗ жодного просування годинника.
+        var after = await SummaryAsync(store, s, null, Me);
+        Assert.Equal(3, after.StaleResultsCount);
+        Assert.Equal(2, after.StaleResultsMineCount);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Відкат_транзакції_не_скидає_кеш_і_без_правок_у_межах_TTL_це_влучання()
+    {
+        var s = await CacheScenarioAsync();
+        var epoch = new StaleCountsEpoch();
+        var counter = new DbCommandCounter();
+        await using var db = EpochContext(epoch, counter);
+        using var cache = NewCache();
+        var store = new DocumentListSummaryStore(db, cache, new TestClock(Now.AddHours(2)), epoch);
+        var audit = new AuditWriter(db, epoch);
+
+        Assert.Equal(2, (await SummaryAsync(store, s, null, Me)).StaleResultsCount);
+        var epochBefore = epoch.Value;
+
+        await using (var transaction = await db.Database.BeginTransactionAsync())
+        {
+            await audit.WriteCellChangesAsync([EditRecord(s, s.Fresh)], CancellationToken.None);
+            await transaction.RollbackAsync();
+        }
+
+        Assert.Equal(epochBefore, epoch.Value);
+
+        var queriesBefore = counter.Tally.Snapshot().Total;
+        Assert.Equal(2, (await SummaryAsync(store, s, null, Me)).StaleResultsCount);
+
+        // Лише агрегат смуги: лічильники з кешу (було б 3 запити).
+        Assert.Equal(1, counter.Tally.Snapshot().Total - queriesBefore);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Перемикання_актуального_прогону_піднімає_епоху()
+    {
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var chain = await builder.BuildAsync(ct: CancellationToken.None);
+        var epoch = new StaleCountsEpoch();
+        await using var db = EpochContext(epoch);
+
+        var version = await VersionAsync(db);
+        var run = await RunAsync(db, chain, version, Now, [chain.DocumentId]);
+        var before = epoch.Value;
+
+        await new CalculationResultStore(db, new TestClock(Now), epoch)
+            .SwitchCurrentRunAsync(run.Id, "{}", CancellationToken.None);
+
+        Assert.True(epoch.Value > before);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Читачі_що_працюють_під_час_коміту_після_нього_бачать_нове()
+    {
+        var s = await CacheScenarioAsync();
+        var epoch = new StaleCountsEpoch();
+        using var cache = NewCache();
+        var clock = new TestClock(Now.AddHours(2));
+
+        await using var writer = EpochContext(epoch);
+        var audit = new AuditWriter(writer, epoch);
+        using var stop = new CancellationTokenSource();
+
+        // Кеш теплий ДО коміту (без цього тест нічого б не доводив: холодний кеш і так дає свіже).
+        Assert.Equal(2, (await SummaryAsync(new DocumentListSummaryStore(writer, cache, clock, epoch), s, null, Me)).StaleResultsCount);
+
+        // Читачі крутяться без упину (кожен зі своїм контекстом), поки йде коміт: старе значення кладуть лише під старою епохою.
+        var readers = Enumerable.Range(0, 4).Select(_ => Task.Run(async () =>
+        {
+            await using var db = EpochContext(epoch);
+            var store = new DocumentListSummaryStore(db, cache, clock, epoch);
+            while (!stop.IsCancellationRequested)
+            {
+                await SummaryAsync(store, s, null, Me);
+            }
+        })).ToArray();
+
+        await using (var transaction = await writer.Database.BeginTransactionAsync())
+        {
+            await audit.WriteCellChangesAsync([EditRecord(s, s.Fresh)], CancellationToken.None);
+            await transaction.CommitAsync();
+        }
+
+        // Читання, що ПОЧАЛИСЬ після коміту, мусять бачити 3 - незалежно від того, що встигли покласти читачі.
+        var seen = new int[8];
+        await Task.WhenAll(Enumerable.Range(0, 8).Select(async i =>
+        {
+            await using var db = EpochContext(epoch);
+            seen[i] = (await SummaryAsync(new DocumentListSummaryStore(db, cache, clock, epoch), s, null, Me)).StaleResultsCount;
+        }));
+
+        await stop.CancelAsync();
+        await Task.WhenAll(readers);
+
+        Assert.All(seen, count => Assert.Equal(3, count));
+    }
+
     // ── допоміжне ────────────────────────────────────────────────────────────────────────
 
     private static async Task<DocumentSummary> CardAsync(EcrDbContext db, TestDocument chain, int period)

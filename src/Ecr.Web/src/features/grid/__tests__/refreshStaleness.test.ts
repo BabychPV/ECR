@@ -40,4 +40,15 @@ describe('refreshStaleness', () => {
     refreshStaleness(client, 8, 202609);
     expect(invalidated(client, ['document', 7, 202609])).toBe(false);
   });
+
+  // ⛔ Мутаційний доказ: прибери перший `invalidateQueries` у `refreshStaleness` - тест почервоніє.
+  it.each([[{ resultsStale: true }], [undefined]])(
+    'зведення переліку документів інвалідується завжди (картка %j) - чіп «Needs recalculation (N)»',
+    (summary) => {
+      const client = clientWith(summary);
+      client.setQueryData(['documents', 'summary', 202609], { staleResultsCount: 0 });
+      refreshStaleness(client, 7, 202609);
+      expect(invalidated(client, ['documents', 'summary', 202609])).toBe(true);
+    },
+  );
 });

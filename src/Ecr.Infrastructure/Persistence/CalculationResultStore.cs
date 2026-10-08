@@ -12,7 +12,8 @@ namespace Ecr.Infrastructure.Persistence;
 /// A3b) <c>calc.CalculationInput</c>.
 /// У <c>doc.CellValue</c> результати методологій не потрапляють ніколи (D-69).
 /// </remarks>
-public sealed class CalculationResultStore(EcrDbContext db, IClock clock) : ICalculationResultStore
+public sealed class CalculationResultStore(EcrDbContext db, IClock clock, StaleCountsEpoch? staleEpoch = null)
+    : ICalculationResultStore
 {
     /// <summary>
     /// Резервує діапазон ідентифікаторів із <c>calc.CalculationResultSeq</c>
@@ -407,6 +408,9 @@ public sealed class CalculationResultStore(EcrDbContext db, IClock clock) : ICal
             .FirstOrDefaultAsync(r => r.Id == calculationRunId, ct)
             .ConfigureAwait(false)
             ?? throw new InvalidOperationException($"Прогону {calculationRunId} не існує.");
+
+        // Новий актуальний прогін змінює "застарілість результатів" (кеш лічильників скидається після коміту).
+        staleEpoch?.Invalidate(db);
 
         // ⚠ Обидві половини — в одній транзакції (ФВ-9.11; відкриває її
         // `RunCalculationHandler.CompleteAsync`). Між зняттям актуальності зі старого прогону і

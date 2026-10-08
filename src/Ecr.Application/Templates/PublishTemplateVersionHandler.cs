@@ -28,7 +28,8 @@ public sealed partial class PublishTemplateVersionHandler(
     IClock clock,
     IReportViewGenerator reportViews,
     ILogger<PublishTemplateVersionHandler>? logger = null,
-    IReportViewStatus? viewStatus = null)
+    IReportViewStatus? viewStatus = null,
+    IRegistryStore? registries = null)
 {
     /// <summary>Право на публікацію версії шаблону (`02-contracts.md` §9).</summary>
     public const string Permission = "Template.Publish";
@@ -177,6 +178,23 @@ public sealed partial class PublishTemplateVersionHandler(
             .ConfigureAwait(false);
 
         diagnostics = [.. diagnostics, .. PublishChecks.CheckDuplicateColumnBindings(activeBindings)];
+
+        // ✎ RC16-2: ціль Lookup-колонок і Lookup-полів шапки - живий активний довідник.
+        // Без сховища довідників (збирання без нього) перевірка пропускається, як і в `PublishMethodologyHandler`.
+        if (registries is not null)
+        {
+            var usable = new HashSet<int>();
+            foreach (var registryId in PublishChecks.LookupRegistryIds(version))
+            {
+                var definition = await registries.FindDefinitionByIdAsync(registryId, ct).ConfigureAwait(false);
+                if (definition is { IsActive: true })
+                {
+                    usable.Add(registryId);
+                }
+            }
+
+            diagnostics = [.. diagnostics, .. PublishChecks.CheckLookupRegistries(version, usable)];
+        }
 
         // RC14 (Land): конфлікт, де вибір методології робиться правилами, не блокує — лише журнал.
         if (logger is not null)

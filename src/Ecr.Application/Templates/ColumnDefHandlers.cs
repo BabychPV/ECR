@@ -51,7 +51,8 @@ public sealed class SaveColumnDefHandler(
     IClock clock,
     IAccessDecisionService access,
     Common.ICurrentUser currentUser,
-    IUnitCatalog units)
+    IUnitCatalog units,
+    IRegistryStore? registries = null)
 {
     /// <summary>Право на редагування структури версії (`02-contracts.md` §9).</summary>
     public const string Permission = "Template.Edit";
@@ -141,6 +142,17 @@ public sealed class SaveColumnDefHandler(
         }
 
         await RequireKnownUnitAsync(units, command.UnitId, code, ct).ConfigureAwait(false);
+
+        // ✎ RC16-2: ключа на довідник у ColumnDef немає - неіснуючу ціль відсікаємо тут.
+        // Лише при створенні або зміні цілі: перейменування/зсув колонки на довідник, що згодом деактивували чи
+        // заборонили, не блокується (висяче посилання відсіє публікація - `CheckLookupRegistries`).
+        if (command.DataType == CellDataType.Lookup
+            && (existing is null || existing.LookupRegistryDefId != command.LookupRegistryDefId))
+        {
+            await LookupRegistryGuard
+                .RequireForColumnAsync(registries, access, userId, command.LookupRegistryDefId, code, ct)
+                .ConfigureAwait(false);
+        }
 
         var hasDocuments = await store.HasDocumentsAsync(templateVersionId, ct).ConfigureAwait(false);
 

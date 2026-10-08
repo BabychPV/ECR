@@ -123,6 +123,9 @@ const entriesRequests: EntriesRequest[] = [];
 /** Скільки разів панель читала шапку (`GET …/header`). */
 const headerGets = { count: 0 };
 
+/** Права `GET /api/v1/me`; `null` — профіль не віддається (як було до перевірки `Registry.View`). */
+const me = { permissions: null as string[] | null };
+
 function mockServer(
   fields: HeaderField[],
   patchResponse?: { status: number; body?: unknown },
@@ -161,6 +164,13 @@ function mockServer(
               status: response.status,
               headers: { 'Content-Type': 'application/problem+json' },
             });
+      }
+
+      if (url.endsWith('/api/v1/me') && method === 'GET' && me.permissions !== null) {
+        return new Response(JSON.stringify({ permissions: me.permissions }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
       }
 
       // ⚠ Той самий двокроковий резолв, що `DocumentGrid.tsx` для Lookup-
@@ -225,6 +235,7 @@ function show(options: {
 }
 
 afterEach(() => {
+  me.permissions = null;
   vi.unstubAllGlobals();
   vi.mocked(showDone).mockClear();
 });
@@ -464,6 +475,32 @@ describe('DocumentHeaderPanel: збереження', () => {
  * порталі поза деревом форми).
  */
 describe('DocumentHeaderPanel: Lookup-поле — picker за довідником', () => {
+  it('без Registry.View довідники не запитуються, а значення — нейтральний текст без id', async () => {
+    me.permissions = ['Document.View'];
+    const registriesRequests: string[] = [];
+    show({
+      fields: [
+        field({ code: 'UNIT', dataType: 'Lookup', value: 42, lookupRegistryDefId: 7, label: { values: { en: 'Unit' } } }),
+      ],
+      registries: { list: [registryDef({ id: 7, code: 'UNITS' })], entries: { UNITS: [registryEntry({ id: 42, display: 'Кілограм' })] } },
+    });
+    const originalFetch = globalThis.fetch;
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).includes('/api/v1/registries')) registriesRequests.push(String(input));
+      return originalFetch(input, init);
+    }));
+
+    const input = (await screen.findByLabelText('Unit')) as HTMLInputElement;
+    await waitFor(() => expect(input.value).toBe('⟦document.header.lookupNoAccess⟧'));
+
+    // ⛔ Мутаційний доказ: прибери перевірку права - з'являться запити довідників (403 у проді) і назва/id.
+    expect(input.value).not.toContain('42');
+    expect(input.readOnly).toBe(true);
+    expect(input.disabled).toBe(false);
+    expect(entriesRequests).toEqual([]);
+    expect(registriesRequests).toEqual([]);
+  });
+
   it('показує людську назву обраного запису, не сирий ValueRegistryEntryId', async () => {
     show({
       fields: [

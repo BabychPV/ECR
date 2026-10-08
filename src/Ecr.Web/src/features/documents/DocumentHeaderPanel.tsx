@@ -7,6 +7,7 @@ import type { components } from '@/api/schema';
 import type { RegistryDefDto, RegistryEntryDto, UnitRef } from '@/api/types';
 import { coerce } from '@/features/grid/edits';
 import { cellText, sameCellValue, sameDateValue } from '@/features/grid/cellValue';
+import { can, useSession } from '@/shared/session/useSession';
 import { lookupCellDisplay } from '@/features/grid/LookupCellEditor';
 import { unlistedIdsOf, useUnlistedLookupLabels } from '@/features/grid/unlistedLookupEntries';
 import { unitCellDisplay } from '@/features/grid/UnitCellEditor';
@@ -237,6 +238,14 @@ export interface DocumentHeaderPanelProps {
 
   /** ✎ RC15-A: версія шаблону документа — «Version» секції «Contract», лише для читання. */
   readonly templateVersion?: string | undefined;
+
+  /**
+   * ✎ RC16-Z35: людина запустила перевірку документа (Validate) — порожні обов'язкові поля
+   * підсвічуються помилкою одразу, не чекаючи, поки в кожне заглянуть.
+   */
+  readonly showRequiredErrors?: boolean;
+  /** Лічильник запитів «відкрити шапку» (клік по знахідці шапки в Issues): зростання розгортає секцію. */
+  readonly openRequest?: number | undefined;
 }
 
 /**
@@ -253,8 +262,14 @@ export function DocumentHeaderPanel({
   collapsible = false,
   businessKey,
   templateVersion,
+  showRequiredErrors = false,
+  openRequest,
 }: DocumentHeaderPanelProps): JSX.Element | null {
   const queryClient = useQueryClient();
+  // ✎ RC16-Z35: поля, з яких людина вже пішла (blur) — помилка «обов'язкове» з'являється після цього.
+  const [touched, setTouched] = useState<ReadonlySet<string>>(() => new Set());
+  const markTouched = (code: string): void =>
+    setTouched((current) => (current.has(code) ? current : new Set(current).add(code)));
 
   const header = useQuery({
     queryKey: ['document-header', documentId],
@@ -283,10 +298,21 @@ export function DocumentHeaderPanel({
     [header.data],
   );
 
+  // ⛔ Довідники читає лише `Registry.View`: без права перелік і записи дають 403 (тост на кожне відкриття
+  // документа), тож запитів немає взагалі, а значення Lookup показується нейтральним текстом без id.
+  // Профіль ще в дорозі — запитів теж немає; профіль не прочитався — поводження як раніше (дозволено).
+  const session = useSession();
+  const registryAccess: 'pending' | 'yes' | 'no' = session.isPending
+    ? 'pending'
+    : session.data === undefined || can(session.data, 'Registry.View')
+      ? 'yes'
+      : 'no';
+  const lookupDenied = registryAccess === 'no';
+
   const registriesList = useQuery({
     queryKey: queryKeys.registries.list(),
     queryFn: () => apiFetch<RegistryDefDto[]>('/api/v1/registries'),
-    enabled: lookupRegistryDefIds.length > 0,
+    enabled: lookupRegistryDefIds.length > 0 && registryAccess === 'yes',
   });
 
   const lookupRegistryCodes = useMemo(() => {
@@ -374,7 +400,7 @@ export function DocumentHeaderPanel({
    * дорожчий клас помилки — шапку бачить оператор щодня, а не адміністратор).
    */
   const lookupError =
-    lookupRegistryDefIds.length > 0
+    lookupRegistryDefIds.length > 0 && registryAccess === 'yes'
       ? (registriesList.error ?? lookupEntriesQueries.find((query) => query.error !== null)?.error ?? null)
       : null;
 
@@ -417,6 +443,13 @@ export function DocumentHeaderPanel({
   const [invalidDates, setInvalidDates] = useState<ReadonlySet<string>>(() => new Set());
   // ✎ UI-16: розгорнуто вручну; примусово — див. `mustStayOpen` нижче.
   const [opened, setOpened] = useState(false);
+  const lastOpenRequest = useRef(openRequest);
+  useEffect(() => {
+    if (openRequest === lastOpenRequest.current) return;
+    lastOpenRequest.current = openRequest;
+    setOpened(true);
+    document.querySelector('[data-testid="document-header-panel"]')?.scrollIntoView?.({ block: 'nearest' });
+  }, [openRequest]);
   const markInvalidDate = (code: string, invalid: boolean): void =>
     setInvalidDates((current) => {
       if (current.has(code) === invalid) return current;
@@ -583,6 +616,7 @@ export function DocumentHeaderPanel({
         field.lookupRegistryDefId === null || field.lookupRegistryDefId === undefined
           ? undefined
           : unlistedLabelsByRegistryId.get(field.lookupRegistryDefId),
+        lookupDenied,
       );
 
       return shown === null ? null : `${localized(field.label)} ${shown}`;
@@ -619,6 +653,15 @@ export function DocumentHeaderPanel({
       disabled={isContractReadOnly(key) ? field.dataType !== 'String' : !canEdit || save.isPending}
       onChange={(value) => setField(field.code, value)}
       onInvalidDate={(invalid) => markInvalidDate(field.code, invalid)}
+      onBlur={() => markTouched(field.code)}
+      error={
+        field.isRequired &&
+        !isContractReadOnly(key) &&
+        isEmptyHeaderValue(draft[field.code]) &&
+        (showRequiredErrors || touched.has(field.code))
+          ? t('document.header.requiredError')
+          : undefined
+      }
       lookupEntries={
         field.lookupRegistryDefId === null || field.lookupRegistryDefId === undefined
           ? EmptyLookupEntries
@@ -627,8 +670,10 @@ export function DocumentHeaderPanel({
       lookupPending={
         field.lookupRegistryDefId === null || field.lookupRegistryDefId === undefined
           ? false
-          : (lookupPendingByRegistryId.get(field.lookupRegistryDefId) ?? registriesList.isPending)
+          : registryAccess === 'pending' ||
+            (lookupPendingByRegistryId.get(field.lookupRegistryDefId) ?? registriesList.isPending)
       }
+      lookupDenied={lookupDenied}
       units={units.data ?? null}
       unlistedLabels={
         field.lookupRegistryDefId === null || field.lookupRegistryDefId === undefined
@@ -753,8 +798,11 @@ function headerSummaryValue(
   lookupEntries: readonly RegistryEntryDto[],
   units: readonly UnitRef[] | null,
   unlisted?: ReadonlyMap<number, string>,
+  lookupDenied = false,
 ): string | null {
   if (isEmptyHeaderValue(value) || field.dataType === 'Bool') return null;
+
+  if (field.dataType === 'Lookup' && lookupDenied) return t('document.header.lookupNoAccess');
 
   const id = typeof value === 'string' ? Number(value) : NaN;
 
@@ -776,8 +824,11 @@ function HeaderFieldInput({
   disabled,
   onChange,
   onInvalidDate,
+  onBlur,
+  error,
   lookupEntries,
   lookupPending,
+  lookupDenied = false,
   units,
   unlistedLabels,
 }: {
@@ -791,10 +842,16 @@ function HeaderFieldInput({
   onChange: (value: unknown) => void;
   /** A1-02: у полі дати набрано текст, що не є датою (`true`), або його виправили (`false`). */
   onInvalidDate: (invalid: boolean) => void;
+  /** ✎ RC16-Z35: поле втратило фокус. */
+  onBlur?: (() => void) | undefined;
+  /** ✎ RC16-Z35: текст помилки під полем (`aria-invalid` + `aria-describedby` ставить Mantine). */
+  error?: string | undefined;
   /** Записи довідника поля (лише для `dataType === 'Lookup'` із заданим `lookupRegistryDefId`). */
   lookupEntries: readonly RegistryEntryDto[];
   /** Чи довідник ЦЬОГО поля ще завантажується (окремий запит на довідник). */
   lookupPending: boolean;
+  /** Без `Registry.View` назви записів недоступні: значення — нейтральний текст, без id і без запитів. */
+  lookupDenied?: boolean;
   /** Перелік одиниць для полів `Unit`; `null` — ще не приїхав. */
   units: readonly UnitRef[] | null;
   /** PS-P2: підписи закритих записів довідника поля («назва (закрито)») — лише для показу обраного. */
@@ -825,6 +882,9 @@ function HeaderFieldInput({
           value={typeof value === 'string' ? parseDateOnly(value) : null}
           onChange={(next) => onChange(formatDateOnly(next))}
           onInvalidChange={onInvalidDate}
+          // ⛔ Без `onBlur`: перерендер батька на blur скидає набраний нерозібраний текст (A1-02);
+          // порожня обов'язкова дата підсвічується після Validate.
+          error={error}
           data-header-field={field.code}
         />
       </Suspense>
@@ -856,6 +916,8 @@ function HeaderFieldInput({
         data={options}
         value={selectedIdValid ? String(selectedId) : null}
         onChange={(next) => onChange(next ?? '')}
+        onBlur={onBlur}
+        error={error}
         data-header-field={field.code}
       />
     );
@@ -874,6 +936,18 @@ function HeaderFieldInput({
           disabled={disabled}
           value={typeof value === 'string' ? value : ''}
           onChange={(event) => onChange(event.currentTarget.value)}
+          data-header-field={field.code}
+        />
+      );
+    }
+
+    if (lookupDenied) {
+      // readOnly без disabled: фокусується й читається з клавіатури.
+      return (
+        <TextInput
+          label={label}
+          readOnly
+          value={isEmptyHeaderValue(value) ? '' : t('document.header.lookupNoAccess')}
           data-header-field={field.code}
         />
       );
@@ -918,6 +992,16 @@ function HeaderFieldInput({
         // аргумент, що в `LookupCellEditor.render`: `save(null)` на порожній
         // опції), інакше очистити раз обране поле стало б неможливим.
         onChange={(next) => onChange(next ?? '')}
+        onBlur={onBlur}
+        error={error}
+        // ✎ RC16-Z35: довгий пункт (Location) не обрізається мовчки: у списку переноситься, у полі —
+        // повний текст у підказці.
+        title={options.find((option) => option.value === String(selectedId))?.label}
+        renderOption={({ option }) => (
+          <span title={option.label} style={{ whiteSpace: 'normal', overflowWrap: 'anywhere' }}>
+            {option.label}
+          </span>
+        )}
         data-header-field={field.code}
       />
     );
@@ -930,6 +1014,8 @@ function HeaderFieldInput({
       readOnly={readOnly}
       value={typeof value === 'string' ? value : ''}
       onChange={(event) => onChange(event.currentTarget.value)}
+      onBlur={onBlur}
+      error={error}
       data-header-field={field.code}
     />
   );

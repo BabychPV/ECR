@@ -21,6 +21,7 @@ const Strings: Record<string, string> = {
   'methodologies.categoryRuleNoneHint': 'Hint',
   'methodologies.categoryRuleExpression': 'Expression',
   'methodologies.categoryRuleExpressionHint': 'Must return text',
+  'methodologies.categoryRuleErrorHint': "Put text values in single quotes, for example 'Diesel'.",
   'methodologies.categoryRuleUpdatedAt': 'Last changed',
   'methodologies.categoryRuleSaved': 'Saved.',
   'methodologies.categoryRuleDeleted': 'Deleted.',
@@ -53,6 +54,12 @@ function mockApi(initial: string | null): { calls: { method: string; body: unkno
       if (url.includes('/ui-strings/')) return json({ languageCode: 'en', revision: 1, strings: Strings });
 
       if (url.endsWith(Url)) {
+        if (method === 'PUT' && String(init?.body).includes('Diesel_bad')) {
+          return json(
+            { type: 'about:blank', title: 'Unprocessable', status: 422, errorCode: 'ECR-EXPR-0422', detail: 'Bad token' },
+            422,
+          );
+        }
         if (method === 'PUT') {
           const body = JSON.parse(String(init?.body)) as { expression: string };
           calls.push({ method, body });
@@ -138,5 +145,23 @@ describe('MethodologyCategoryRulePanel', () => {
 
     await waitFor(() => expect(calls).toEqual([{ method: 'DELETE', body: null }]));
     await screen.findByText('This version has no category rule');
+  });
+
+  it('помилка збереження показується рядком role=alert у панелі з підказкою про лапки', async () => {
+    mockApi(null);
+    await loadCatalog('en', 'public');
+    await loadCatalog('en', 'private');
+
+    show(true);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Set rule' }));
+    fireEvent.change(await screen.findByLabelText('Expression'), { target: { value: 'Diesel_bad' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toContain("single quotes, for example 'Diesel'");
+
+    fireEvent.change(screen.getByLabelText('Expression'), { target: { value: 'Diesel' } });
+    await waitFor(() => expect(screen.queryByRole('alert')).toBeNull());
   });
 });

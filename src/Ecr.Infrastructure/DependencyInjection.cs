@@ -48,8 +48,14 @@ public static class DependencyInjection
 
         // L1-01: збережений новий штамп скидає його кеш (`SecurityStampCacheInvalidator`).
         services.AddSingleton<SecurityStampCacheInvalidator>();
+
+        // Епоха кешу лічильників "результати застаріли": піднімається після коміту запису комірок і перемикання
+        // актуального прогону (`StaleCountsEpoch`); входить у ключ кешу `DocumentListSummaryStore`.
+        services.AddSingleton<StaleCountsEpoch>();
         services.AddDbContext<EcrDbContext>((sp, options) =>
-            options.AddInterceptors(sp.GetRequiredService<SecurityStampCacheInvalidator>()).UseSqlServer(connectionString, sql =>
+            options.AddInterceptors(
+                sp.GetRequiredService<SecurityStampCacheInvalidator>(),
+                sp.GetRequiredService<StaleCountsEpoch>()).UseSqlServer(connectionString, sql =>
             {
                 sql.MigrationsHistoryTable("__EFMigrationsHistory", "dbo");
                 // ⛔ Саме `Database:`, а не `Sql:` (`S-11`). Префікс у файлі

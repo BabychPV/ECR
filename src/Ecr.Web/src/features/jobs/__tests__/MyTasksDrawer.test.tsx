@@ -252,3 +252,33 @@ describe('«Повторити» і посилання на результат (
     expect(screen.queryByText('Recalculated cells: 0.')).toBeNull();
   });
 });
+
+describe('закриття шухляди (RC15-E)', () => {
+  it('onExited викликається після завершення закриття - сюди лаунчер повертає фокус', async () => {
+    const onExited = vi.fn();
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const tree = (opened: boolean) => (
+      <MantineProvider theme={testTheme}>
+        <QueryClientProvider client={client}>
+          <MemoryRouter>
+            <MyTasksDrawer
+              opened={opened}
+              onClose={() => undefined}
+              onExited={onExited}
+              jobs={[]}
+              isPending={false}
+              error={null}
+              onRetry={() => undefined}
+            />
+          </MemoryRouter>
+        </QueryClientProvider>
+      </MantineProvider>
+    );
+
+    const view = render(tree(true));
+    expect(onExited).not.toHaveBeenCalled();
+
+    view.rerender(tree(false));
+    await waitFor(() => expect(onExited).toHaveBeenCalledTimes(1));
+  });
+});

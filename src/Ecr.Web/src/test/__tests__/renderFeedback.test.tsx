@@ -480,7 +480,11 @@ interface Mounted {
  * (воно зупинялося РАНІШЕ за фіксований бюджет і тим замаскувало #295), —
  * тут немає жодної евристики тиші, лише два фіксовані числа.
  */
-async function settle(scheduledAt: number, queryClient: QueryClient): Promise<void> {
+async function settle(
+  scheduledAt: number,
+  queryClient: QueryClient,
+  ledger: Ledger,
+): Promise<void> {
   await turns(EventLoopTurns);
 
   // ⚠ Одна пауза, а не {@link SettleMs} тактів по одному: такт для найважчого
@@ -536,7 +540,38 @@ async function settle(scheduledAt: number, queryClient: QueryClient): Promise<vo
     }
     await turns(EventLoopTurns);
   }
+
+  // ⛔ 2026-10-08, п'яте джерело `{ tree: 2, route: 2 }` на `/admin/units` (CI
+  // RC #495, прогін 37799054101; локально 10/10 зелено — флейк під
+  // навантаженням). Умова вище бачить лише запити й `data-resizing`: пауза між
+  // ланцюжком відповідей і наступним комітом (мікро/макрозадача, що не
+  // тримає ні запиту, ні атрибута) лишала її хибно «тихою», і запізнілі
+  // коміти падали у вікно {@link foreignCacheEvent}. Тому доосідання вимагає
+  // ще й прямої ознаки: лічильник комітів дерева не рухався на проміжку
+  // {@link QuietMs} реального часу, а умова вище лишилась хибною. Як і решта,
+  // лише ДОДАЄ очікування: стеля комітів, нуль у вікні події кешу й межа
+  // раундів не змінені; нескінченний ланцюжок комітів (#295/#305) тут не
+  // ховається, а падає з поясненням.
+  for (let round = 0; ; round += 1) {
+    if (round >= QuietRoundsLimit) {
+      throw new Error(
+        `Маршрут не затих: коміти дерева не припинились за ${String(QuietRoundsLimit)} вікон по ${String(QuietMs)} мс.`,
+      );
+    }
+    const before = ledger.tree;
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, QuietMs));
+    });
+    if (ledger.tree === before && !stillSettling(queryClient)) {
+      break;
+    }
+  }
 }
+
+/** Вікно без жодного коміту дерева, після якого маршрут вважається осілим. */
+const QuietMs = 100;
+/** Межа вікон {@link QuietMs} (разом 10 с) — далі падіння, а не тихий вимір. */
+const QuietRoundsLimit = 100;
 
 /** Корінь `AppShell` на час його CSS-переходу (`@mantine/core`, `use-resizing.mjs`). */
 const ResizingSelector = '[data-resizing="true"]';
@@ -574,7 +609,7 @@ async function mountRoute(entry: RouteEntry, page: JSX.Element, url: string): Pr
   // таймер `AppShell` заводиться в layout-ефекті, тобто всередині виклику
   // вище, і для `/documents/1` сам цей виклик коштує 200-300 мс. Відлік від
   // початку монтування з'їв би весь запас на найважчому маршруті вибірки.
-  await settle(Date.now(), queryClient);
+  await settle(Date.now(), queryClient, ledger);
 
   return { ledger, queryClient };
 }

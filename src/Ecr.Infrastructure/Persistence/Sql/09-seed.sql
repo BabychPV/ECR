@@ -676,6 +676,13 @@ UPDATE t
     (N'jobs.recalcFannedOut',            N'en', N'Queued document recalculation tasks: {count}.', N'Queued document recalculation tasks: {count}; not calculated yet.'),
     (N'jobs.recalcFannedOut',            N'ru', N'Поставлено в очередь задач пересчёта документов: {count}.', N'Поставлено в очередь задач пересчёта документов: {count}; ещё не пересчитано.'),
     (N'jobs.recalcFannedOut',            N'kz', N'Құжаттарды қайта есептеу тапсырмалары кезекке қойылды: {count}.', N'Құжаттарды қайта есептеу тапсырмалары кезекке қойылды: {count}; әлі есептелген жоқ.'),
+    -- RC16-2: «Reopen the period first» не збігалось із діями — подані аркуші повертаються на правки на аркуші, а не відкриттям періоду.
+    (N'err.ECR-CALC-4221.sheetsSubmitted', N'en', N'Period {period} has submitted sheets: recalculation would change numbers already sent for approval. Reopen the period first.', N'Period {period} has submitted sheets: recalculation would change numbers already sent for approval. Return the submitted sheets for edits first (the sheet''s «Return for edits» action).'),
+    (N'err.ECR-CALC-4221.sheetsSubmitted', N'ru', N'В периоде {period} есть поданные листы: пересчёт изменил бы числа, уже отправленные на согласование. Сначала переоткройте период.', N'В периоде {period} есть поданные листы: пересчёт изменил бы числа, уже отправленные на согласование. Сначала верните поданные листы на правки (действие листа «Переоткрыть для правок»).'),
+    (N'err.ECR-CALC-4221.sheetsSubmitted', N'kz', N'{period} кезеңінде тапсырылған парақтар бар: қайта есептеу келісуге жіберілген сандарды өзгертер еді. Алдымен кезеңді қайта ашыңыз.', N'{period} кезеңінде тапсырылған парақтар бар: қайта есептеу келісуге жіберілген сандарды өзгертер еді. Алдымен тапсырылған парақтарды түзетуге қайтарыңыз (парақтың «Түзету үшін қайта ашу» әрекеті).'),
+    (N'workflow.recalculateAllSubmitted', N'en', N'All sheets of period {period} are submitted or approved: there is nothing to recalculate. Reopen the period first.', N'All sheets of period {period} are submitted or approved: there is nothing to recalculate. Return a sheet for edits first (the sheet''s «Return for edits» action).'),
+    (N'workflow.recalculateAllSubmitted', N'ru', N'Все листы периода {period} поданы или утверждены: пересчитывать нечего. Сначала откройте период заново.', N'Все листы периода {period} поданы или утверждены: пересчитывать нечего. Сначала верните лист на правки (действие листа «Переоткрыть для правок»).'),
+    (N'workflow.recalculateAllSubmitted', N'kz', N'{period} кезеңінің барлық парақтары тапсырылған немесе бекітілген: қайта есептейтін ештеңе жоқ. Алдымен кезеңді қайта ашыңыз.', N'{period} кезеңінің барлық парақтары тапсырылған немесе бекітілген: қайта есептейтін ештеңе жоқ. Алдымен парақты түзетуге қайтарыңыз (парақтың «Түзету үшін қайта ашу» әрекеті).'),
     -- Назва продукту лишається англійською (рішення людини 2026-09-30).
     (N'login.title',                     N'ru', N'Отчётность по экологическому соответствию', N'Environmental Compliance Reporting'),
     (N'login.title',                     N'kz', N'Экологиялық сәйкестік бойынша есептілік', N'Environmental Compliance Reporting'),
@@ -2017,7 +2024,7 @@ USING (VALUES
     (N'err.ECR-CALC-0409.childWrongVersion',    N'en', N'{what} "{code}" belongs to version {ownerVersionId}, not {versionId}: it cannot be edited through this version.', 1),
     -- ECR-CALC-4221 has a neutral title: closed period, submitted sheets, approval without a reason.
     (N'err.ECR-CALC-4221.periodClosed',         N'en', N'Period {period} is closed: closed periods are not recalculated automatically, a separate approval is required.', 1),
-    (N'err.ECR-CALC-4221.sheetsSubmitted',      N'en', N'Period {period} has submitted sheets: recalculation would change numbers already sent for approval. Reopen the period first.', 1),
+    (N'err.ECR-CALC-4221.sheetsSubmitted',      N'en', N'Period {period} has submitted sheets: recalculation would change numbers already sent for approval. Return the submitted sheets for edits first (the sheet''s «Return for edits» action).', 1),
     (N'err.ECR-CALC-4221.approvalReasonRequired', N'en', N'An approval to recalculate a closed period is not accepted without a reason.', 1),
     (N'err.ECR-SYS-0500.contactAdmin',         N'en', N'Internal error. Contact your administrator and quote the correlation ID.', 0),
     -- FR-13.9: rule coverage matrix over real rows.
@@ -2303,6 +2310,7 @@ USING (VALUES
     (N'document.header.lookupHint',      N'en', N'Registry entry ID', 1),
     (N'document.header.lookupLoading',   N'en', N'Directory is loading…', 1),
     (N'document.header.lookupEmpty',     N'en', N'Directory has no entries', 1),
+    (N'document.header.lookupNoAccess',  N'en', N'Selected (name not available)', 1),
     -- Відновлення незбережених правок на екрані документа (ФВ-3.6, D14-12).
     -- ⚠ `partial` називає різницю вголос: у слід вміщається не все, і мовчазне
     -- «відновити N» там, де правок було більше, — та сама тиха втрата.
@@ -3263,6 +3271,7 @@ USING (VALUES
     (N'workflow.rejected',               N'en', N'The sheet has been returned to the author.', 1),
     (N'workflow.reopened',               N'en', N'The sheet is editable again.', 1),
     (N'workflow.recalcQueued',           N'en', N'Recalculation queued as job {job}.', 1),
+    (N'workflow.recalcSkipsSubmitted',   N'en', N'Submitted and approved sheets are skipped.', 1),
 
     -- ⛔ Відгук на «Перерахувати» (директива №09 `W8` п.7). Доти було рівно
     -- одне «поставлено в чергу як {job}» — GUID, який нікуди не ввести, і
@@ -7302,6 +7311,7 @@ USING (VALUES
     (N'methodologies.categoryRuleNoneHint', N'en', N'The rule picks the category (for example Diesel) of each document row, so constants with several categories resolve to one value.', 1),
     (N'methodologies.categoryRuleExpression', N'en', N'Expression', 1),
     (N'methodologies.categoryRuleExpressionHint', N'en', N'Must return text: the category key. You can use @Argument, !RowFormula, CST.Constant, if(...) and in(...).', 1),
+    (N'methodologies.categoryRuleErrorHint', N'en', N'Put text values in single quotes, for example ''Diesel''.', 1),
     (N'methodologies.categoryRuleUpdatedAt', N'en', N'Last changed', 1),
     (N'methodologies.categoryRuleSaved', N'en', N'The category rule has been saved.', 1),
     (N'methodologies.categoryRuleDeleted', N'en', N'The category rule has been deleted.', 1),
@@ -7329,19 +7339,30 @@ USING (VALUES
     (N'jobs.staleDocuments.error', N'en', N'Could not load the documents that need recalculation.', 1),
     -- COLL:stale-mytasks ── кінець секції ──
     -- COLL:rc15c-recalc ── перерахунок вимкнений лише коли подані ВСІ аркуші; ru/kz — порцією COLL:rc15c-recalc нижче ──
-    (N'workflow.recalculateAllSubmitted', N'en', N'All sheets of period {period} are submitted or approved: there is nothing to recalculate. Reopen the period first.', 1),
+    (N'workflow.recalculateAllSubmitted', N'en', N'All sheets of period {period} are submitted or approved: there is nothing to recalculate. Return a sheet for edits first (the sheet''s «Return for edits» action).', 1),
     -- COLL:rc15c-recalc ── кінець секції ──
+    -- COLL:rc16-z5 ── помилка порожнього обов'язкового поля шапки; ru/kz — порцією COLL:rc16-z5 нижче ──
+    (N'document.header.requiredError', N'en', N'This field is required', 1),
+    -- COLL:rc16-z5 ── кінець секції ──
     -- COLL:stale-ui ── кінець секції ──
     -- COLL:l21scope ── L2-1: область формули (scope) у PUT формули й порівнянні версій; ru/kz — порцією COLL:l21scope нижче ──
     (N'err.ECR-CALC-0422.formulaScopeInvalid', N'en', N'The scope "{scope}" of formula "{code}" is not valid: use Substance (once per substance) or Row (once per row).', 1),
     (N'methodologyDiffField.scope', N'en', N'Scope', 1),
     -- COLL:l21scope ── кінець секції ──
+    -- COLL:rc16lookup ── RC16-2: ціль Lookup-колонки/поля шапки - живий активний довідник (збереження і публікація); ru/kz - порцією COLL:rc16lookup нижче ──
+    (N'err.ECR-TMPL-0422.lookupRegistryUnknown', N'en', N'Column "{columnCode}": registry {registryDefId} does not exist or is not active.', 1),
+    (N'err.ECR-TMPL-0422.headerFieldLookupRegistryUnknown', N'en', N'Header field "{headerFieldCode}": registry {registryDefId} does not exist or is not active.', 1),
+    -- COLL:rc16lookup ── кінець секції ──
     -- COLL:l24l25 ── L2-5: попередження diff публікації, коли попередня версія не обчислилась; ru/kz — порцією COLL:l24l25 нижче ──
     (N'publish.warning.diffPreviousNotComputed', N'en', N'Previous version {previous} did not calculate on test {test} ({code}), so the diff shows its outputs as new. The verdict on the new version is unchanged.', 1),
     -- COLL:l24l25 ── кінець секції ──
     -- COLL:rc15misc-rulekey ── RC14B P3-3: ключ предиката правила методології - Id колонки, не код; ru/kz — порцією COLL:rc15misc-rulekey нижче ──
-    (N'err.ECR-CALC-0422.ruleKeyNotColumnId', N'en', N'Key "{key}" in the predicate of rule "{code}" is not a column Id: the predicate is matched by column Id (ColumnDefId), not by column code, so a code never matches any row. Pick the column in the rule form or use its numeric Id.', 1)
+    (N'err.ECR-CALC-0422.ruleKeyNotColumnId', N'en', N'Key "{key}" in the predicate of rule "{code}" is not a column Id: the predicate is matched by column Id (ColumnDefId), not by column code, so a code never matches any row. Pick the column in the rule form or use its numeric Id.', 1),
     -- COLL:rc15misc-rulekey ── кінець секції ──
+    -- COLL:rc16rule ── RC16-2: правило категорії перевіряє посилання вже при збереженні; ru/kz — порцією COLL:rc16rule нижче ──
+    (N'err.ECR-CALC-0422.categoryRuleUnknownConstant', N'en', N'The category rule references constant CST.{code}, which this version does not define.', 1),
+    (N'err.ECR-CALC-0422.categoryRuleBadFormula', N'en', N'The category rule references !{formula}: it can only read Row formulas of the version (it runs once per row, before the substance loop).', 1)
+    -- COLL:rc16rule ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -7897,7 +7918,7 @@ SELECT v.[Key], v.Lang, v.Val
     (N'err.ECR-CALC-0409.formulaWrongVersion', N'ru', N'Формула «{formulaCode}» принадлежит версии {ownerVersionId}, а не {versionId}: её нельзя редактировать через эту версию.'),
     (N'err.ECR-CALC-0409.childWrongVersion', N'ru', N'{what} «{code}» принадлежит версии {ownerVersionId}, а не {versionId}: этот элемент нельзя редактировать через эту версию.'),
     (N'err.ECR-CALC-4221.periodClosed', N'ru', N'Период {period} закрыт: закрытые периоды не пересчитываются автоматически, требуется отдельное утверждение.'),
-    (N'err.ECR-CALC-4221.sheetsSubmitted', N'ru', N'В периоде {period} есть поданные листы: пересчёт изменил бы числа, уже отправленные на согласование. Сначала переоткройте период.'),
+    (N'err.ECR-CALC-4221.sheetsSubmitted', N'ru', N'В периоде {period} есть поданные листы: пересчёт изменил бы числа, уже отправленные на согласование. Сначала верните поданные листы на правки (действие листа «Переоткрыть для правок»).'),
     (N'err.ECR-CALC-4221.approvalReasonRequired', N'ru', N'Согласование пересчёта закрытого периода не принимается без причины.'),
     (N'err.ECR-SYS-0500.contactAdmin', N'ru', N'Внутренняя ошибка. Обратитесь к администратору и сообщите идентификатор корреляции.'),
     (N'err.ECR-CALC-0422.coverageWindow', N'ru', N'Окно периодов пусто: periodFrom {periodFrom} позже periodTo {periodTo}.'),
@@ -10932,7 +10953,7 @@ SELECT v.[Key], v.Lang, v.Val
     (N'err.ECR-CALC-0409.formulaWrongVersion', N'kz', N'«{formulaCode}» формуласы {versionId} нұсқасына емес, {ownerVersionId} нұсқасына тиесілі: оны осы нұсқа арқылы өңдеуге болмайды.'),
     (N'err.ECR-CALC-0409.childWrongVersion', N'kz', N'{what} «{code}» {versionId} нұсқасына емес, {ownerVersionId} нұсқасына тиесілі: оны осы нұсқа арқылы өңдеуге болмайды.'),
     (N'err.ECR-CALC-4221.periodClosed', N'kz', N'{period} кезеңі жабық: жабық кезеңдер автоматты түрде қайта есептелмейді, жеке бекіту қажет.'),
-    (N'err.ECR-CALC-4221.sheetsSubmitted', N'kz', N'{period} кезеңінде тапсырылған парақтар бар: қайта есептеу келісуге жіберілген сандарды өзгертер еді. Алдымен кезеңді қайта ашыңыз.'),
+    (N'err.ECR-CALC-4221.sheetsSubmitted', N'kz', N'{period} кезеңінде тапсырылған парақтар бар: қайта есептеу келісуге жіберілген сандарды өзгертер еді. Алдымен тапсырылған парақтарды түзетуге қайтарыңыз (парақтың «Түзету үшін қайта ашу» әрекеті).'),
     (N'err.ECR-CALC-4221.approvalReasonRequired', N'kz', N'Жабық кезеңді қайта есептеу келісімі себепсіз қабылданбайды.'),
     (N'err.ECR-SYS-0500.contactAdmin', N'kz', N'Ішкі қате. Әкімшіге хабарласып, корреляция идентификаторын айтыңыз.'),
     (N'err.ECR-CALC-0422.coverageWindow', N'kz', N'Кезеңдер терезесі бос: periodFrom {periodFrom} мәні periodTo {periodTo} мәнінен кейін.'),
@@ -17830,7 +17851,9 @@ SELECT v.[Key], v.Lang, v.Val
     (N'methodologies.categoryRuleExpression', N'ru', N'Выражение'),
     (N'methodologies.categoryRuleExpression', N'kz', N'Өрнек'),
     (N'methodologies.categoryRuleExpressionHint', N'ru', N'Должно возвращать текст: ключ категории. Доступны @Аргумент, !RowФормула, CST.Константа, if(...) и in(...).'),
+    (N'methodologies.categoryRuleErrorHint', N'ru', N'Текстовые значения пишите в одинарных кавычках, например ''Diesel''.'),
     (N'methodologies.categoryRuleExpressionHint', N'kz', N'Мәтін қайтаруы тиіс: санат кілті. @Аргумент, !RowФормула, CST.Тұрақты, if(...) және in(...) қолдануға болады.'),
+    (N'methodologies.categoryRuleErrorHint', N'kz', N'Мәтін мәндерін жалғыз тырнақшаға алыңыз, мысалы ''Diesel''.'),
     (N'methodologies.categoryRuleUpdatedAt', N'ru', N'Последнее изменение'),
     (N'methodologies.categoryRuleUpdatedAt', N'kz', N'Соңғы өзгеріс'),
     (N'methodologies.categoryRuleSaved', N'ru', N'Правило категории сохранено.'),
@@ -17949,16 +17972,63 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:stale-mytasks ── кінець секції ──
+-- COLL:rc16lookup ── ru/kz: ціль Lookup-колонки/поля шапки - живий активний довідник; власна порція
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-TMPL-0422.lookupRegistryUnknown', N'ru', N'Столбец «{columnCode}»: справочника {registryDefId} не существует или он неактивен.'),
+    (N'err.ECR-TMPL-0422.lookupRegistryUnknown', N'kz', N'«{columnCode}» бағаны: {registryDefId} анықтамалығы жоқ немесе ол белсенді емес.'),
+    (N'err.ECR-TMPL-0422.headerFieldLookupRegistryUnknown', N'ru', N'Поле шапки «{headerFieldCode}»: справочника {registryDefId} не существует или он неактивен.'),
+    (N'err.ECR-TMPL-0422.headerFieldLookupRegistryUnknown', N'kz', N'«{headerFieldCode}» тақырып өрісі: {registryDefId} анықтамалығы жоқ немесе ол белсенді емес.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:rc16lookup ── кінець секції ──
 -- COLL:rc15c-recalc ── ru/kz: перерахунок вимкнений лише коли подані ВСІ аркуші; власна порція
 INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val
   FROM (VALUES
-    (N'workflow.recalculateAllSubmitted', N'ru', N'Все листы периода {period} поданы или утверждены: пересчитывать нечего. Сначала откройте период заново.'),
-    (N'workflow.recalculateAllSubmitted', N'kz', N'{period} кезеңінің барлық парақтары тапсырылған немесе бекітілген: қайта есептейтін ештеңе жоқ. Алдымен кезеңді қайта ашыңыз.')
+    (N'workflow.recalculateAllSubmitted', N'ru', N'Все листы периода {period} поданы или утверждены: пересчитывать нечего. Сначала верните лист на правки (действие листа «Переоткрыть для правок»).'),
+    (N'workflow.recalculateAllSubmitted', N'kz', N'{period} кезеңінің барлық парақтары тапсырылған немесе бекітілген: қайта есептейтін ештеңе жоқ. Алдымен парақты түзетуге қайтарыңыз (парақтың «Түзету үшін қайта ашу» әрекеті).')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
 -- COLL:rc15c-recalc ── кінець секції ──
+-- COLL:rc16-z5 ── ru/kz: помилка порожнього обов'язкового поля шапки; власна порція
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'document.header.requiredError', N'ru', N'Обязательное поле'),
+    (N'document.header.requiredError', N'kz', N'Міндетті өріс')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:rc16-z5 ── кінець секції ──
+-- COLL:rc16-p3 ── ru/kz: Lookup шапки без Registry.View і тост перерахунку; власна порція (попередні порції заповнені до межі 500)
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'document.header.lookupNoAccess', N'ru', N'Выбрано (название недоступно)'),
+    (N'workflow.recalcSkipsSubmitted', N'ru', N'Поданные и утверждённые листы пропускаются.'),
+    (N'document.header.lookupNoAccess', N'kz', N'Таңдалған (атауы қолжетімсіз)'),
+    (N'workflow.recalcSkipsSubmitted', N'kz', N'Тапсырылған және бекітілген парақтар өткізіліп жіберіледі.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:rc16-p3 ── кінець секції ──
+
+-- COLL:rc16rule ── ru/kz: відмова збереження правила категорії з невідомою константою чи не-Row формулою; власна порція
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-CALC-0422.categoryRuleUnknownConstant', N'ru', N'Правило категории ссылается на константу CST.{code}, которой в этой версии нет.'),
+    (N'err.ECR-CALC-0422.categoryRuleUnknownConstant', N'kz', N'Санат ережесі осы нұсқада жоқ CST.{code} тұрақтысына сілтейді.'),
+    (N'err.ECR-CALC-0422.categoryRuleBadFormula', N'ru', N'Правило категории ссылается на !{formula}: оно видит только Row-формулы версии (считается один раз на строку, до цикла веществ).'),
+    (N'err.ECR-CALC-0422.categoryRuleBadFormula', N'kz', N'Санат ережесі !{formula} формуласына сілтейді: ол нұсқаның тек Row-формулаларын көреді (жолға бір рет, заттар циклінен бұрын есептеледі).')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:rc16rule ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

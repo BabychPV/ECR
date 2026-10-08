@@ -205,4 +205,23 @@ describe('SheetActions: перерахунок належить своєму п�
     // використано в підписах діалогів.
     expect(shown[1]).toContain('202401');
   });
+
+  it('завершення перерахунку інвалідує зведення переліку - чіп «Needs recalculation (N)»', async () => {
+    mockFetch();
+    const { invalidated } = show();
+
+    fireEvent.click(await screen.findByRole('button', { name: /recalculate/i }));
+    await waitFor(() => expect(enqueued).toEqual([202401]));
+    invalidated.length = 0;
+
+    jobState = 'Succeeded';
+
+    await waitFor(() => expect(shown.some((message) => message.includes('recalcDone'))).toBe(true), {
+      timeout: 10_000,
+    });
+
+    // ⛔ Мутаційний доказ: прибери `invalidateQueries(['documents', 'summary'])` у `SheetActions.tsx` -
+    // чіп у переліку лишився б зі старим числом до закінчення TTL.
+    expect(invalidated).toContainEqual(['documents', 'summary']);
+  });
 });

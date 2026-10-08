@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { DocumentHeaderPanel } from '@/features/documents/DocumentHeaderPanel';
@@ -54,7 +54,7 @@ const Registries = [
   },
 ];
 
-function show(fields: Field[] = Fields, templateVersion?: string): void {
+function show(fields: Field[] = Fields, templateVersion?: string, showRequiredErrors = false): void {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL) => {
@@ -73,7 +73,9 @@ function show(fields: Field[] = Fields, templateVersion?: string): void {
   render(
     <MantineProvider theme={testTheme}>
       <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
-        <DocumentHeaderPanel documentId={DocumentId} canEdit businessKey="ECR-2026-0007" templateVersion={templateVersion} />
+        <DocumentHeaderPanel documentId={DocumentId} canEdit businessKey="ECR-2026-0007" templateVersion={templateVersion}
+          showRequiredErrors={showRequiredErrors}
+        />
       </QueryClientProvider>
     </MantineProvider>,
   );
@@ -146,5 +148,73 @@ describe('DocumentHeaderPanel: секція Contract', () => {
 
     expect(order).toEqual(['OnOffshore', 'FilledBy', 'TypeOfActivity', 'fileNumber', 'Permit', 'version']);
     expect(document.querySelector<HTMLInputElement>('[data-header-field="version"]')?.value).toBe('1.0.1.0');
+  });
+});
+
+describe('RC16-Z35: Location і Permit', () => {
+  const Required = [
+    field('Permit', 'Permit Number', 'Номер разрешения', { isRequired: true }),
+    field('Location', 'Location', 'Местоположение', { dataType: 'Lookup', lookupRegistryDefId: 7, value: 1 }),
+  ];
+
+  it('Permit: порожнє обов\'язкове поле без помилки до blur, після blur — aria-invalid і текст', async () => {
+    show(Required);
+
+    const input = await waitFor(() => {
+      const node = document.querySelector<HTMLInputElement>('[data-header-field="Permit"]');
+      expect(node).not.toBeNull();
+      return node!;
+    });
+
+    expect(input.getAttribute('aria-invalid')).not.toBe('true');
+    expect(screen.queryByText('⟦document.header.requiredError⟧')).toBeNull();
+
+    fireEvent.blur(input);
+
+    await waitFor(() => expect(input.getAttribute('aria-invalid')).toBe('true'));
+    expect(screen.getByText('⟦document.header.requiredError⟧')).toBeTruthy();
+  });
+
+  it('Permit: після Validate помилка видна без blur; заповнене поле помилки не має', async () => {
+    show([...Required.slice(0, 1), field('Other', 'Other', 'Другое', { isRequired: true, value: 'x' })], undefined, true);
+
+    const permit = await waitFor(() => {
+      const node = document.querySelector<HTMLInputElement>('[data-header-field="Permit"]');
+      expect(node).not.toBeNull();
+      return node!;
+    });
+
+    expect(permit.getAttribute('aria-invalid')).toBe('true');
+    expect(document.querySelector('[data-header-field="Other"]')?.getAttribute('aria-invalid')).not.toBe('true');
+  });
+
+  it('Location: довгий пункт має повний текст у title поля', async () => {
+    const long = 'Дуже довга назва місцезнаходження '.repeat(4).trim();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input).split('?')[0] ?? '';
+        const json = (body: unknown): Response =>
+          new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
+        if (url.endsWith(`/api/v1/documents/${String(DocumentId)}/header`)) return json({ fields: Required, version: 'V1' });
+        if (url.endsWith('/api/v1/registries')) return json(Registries);
+        if (url.endsWith('/api/v1/registries/CONTRACTORS/entries')) {
+          return json([{ id: 1, display: long, isClosed: false }]);
+        }
+        throw new Error(`неочікуваний запит: ${url}`);
+      }),
+    );
+
+    render(
+      <MantineProvider theme={testTheme}>
+        <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+          <DocumentHeaderPanel documentId={DocumentId} canEdit />
+        </QueryClientProvider>
+      </MantineProvider>,
+    );
+
+    await waitFor(() => {
+      expect(document.querySelector<HTMLInputElement>('[data-header-field="Location"]')?.title).toBe(long);
+    });
   });
 });

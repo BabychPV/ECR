@@ -38,7 +38,16 @@
     Залишити чернетку без публікації.
 
 .PARAMETER MigrateDocumentId
-    Документи, які перенести на нову версію (Safe) після публікації.
+    Документи, які перенести на нову версію (Safe) після публікації. Міграція виконується і тоді,
+    коли шапка вже відповідає маніфесту (змін немає): ціль — остання опублікована версія шаблону.
+
+.PARAMETER Async
+    Просити сервер виконати застосування міграції фоновою задачею (`async: true` → 202 + jobId).
+    За замовчуванням вимкнено: старіші сервери поля не знають. Відповідь 202 обробляється завжди,
+    незалежно від цього прапора (опитування GET /jobs/{jobId}).
+
+.PARAMETER MigrateTimeoutMinutes
+    Скільки чекати завершення фонової міграції (за замовчуванням 60 хв).
 
 .EXAMPLE
     .\Apply-ContractHeader.ps1 -TemplateCode Land -DryRun
@@ -55,6 +64,8 @@ param(
     [string]$NewVersion,
     [switch]$NoPublish,
     [int[]]$MigrateDocumentId,
+    [switch]$Async,
+    [int]$MigrateTimeoutMinutes = 60,
     [switch]$DryRun
 )
 
@@ -144,12 +155,56 @@ foreach ($d in $desired) {
     if ($curLookup -ne $d.Lookup -or [bool]$c.isRequired -ne $d.Required -or [int]$c.ordinal -ne $d.Ordinal) { $todo += $d }
 }
 
-if ($todo.Count -eq 0) {
+# --- міграція документів (функція; викликається і коли змін шапки немає) ---------------------
+function Invoke-DocumentMigration {
+    param([int]$TargetVersionId)
+    foreach ($docId in @($MigrateDocumentId)) {
+        if (-not $docId) { continue }
+        $path = "/api/v1/documents/$docId/migrate-version"
+        # dry-run завжди синхронний.
+        $preview = Invoke-Ecr -Method POST -Path $path -Body @{ targetVersionId = $TargetVersionId; mode = 'Safe'; dryRun = $true }
+        Assert-EcrOk $preview "migrate-version dry-run (документ $docId)"
+        if (-not $preview.Json.canApply) {
+            Write-Warning "Документ ${docId}: міграція заблокована (refusals: $(@($preview.Json.refusals).Count)); не застосовано."
+            continue
+        }
+        if ($dry) {
+            Write-Host "[dry-run] документ ${docId}: міграцію на версію $TargetVersionId можна застосувати (canApply). Нічого не записано."
+            continue
+        }
+        $body = @{ targetVersionId = $TargetVersionId; mode = 'Safe'; dryRun = $false }
+        if ($Async) { $body.async = $true }
+        $apply = Invoke-Ecr -Method POST -Path $path -Body $body
+        Assert-EcrOk $apply "migrate-version (документ $docId)" -Allowed @(200, 202)
+        if ($apply.Status -eq 202) {
+            Write-Host "Документ ${docId}: міграція прийнята у фон (задача $($apply.Json.jobId)); чекаємо завершення."
+            $job = Wait-EcrJob -JobId ([string]$apply.Json.jobId) -TimeoutMinutes $MigrateTimeoutMinutes
+            Write-Host "Документ ${docId}: міграцію завершено ($($job.state)). $($job.message)"
+        }
+        else {
+            Write-Host "Документ ${docId}: перенесено значень $($apply.Json.transferredValues), втрачено $($apply.Json.lostValues)."
+        }
+    }
+}
+
+$hasMigration = @($MigrateDocumentId | Where-Object { $_ }).Count -gt 0
+
+if ($todo.Count -eq 0 -and $null -eq $draft) {
     Write-Host "Версія $($baseVersion.version) (id $($baseVersion.id)) уже відповідає маніфесту: 0 змін."
+    if ($hasMigration) {
+        # Шапка вже на потрібній (опублікованій) версії: міграція документів усе одно виконується.
+        Invoke-DocumentMigration -TargetVersionId ([int]$baseVersion.id)
+    }
     return
 }
 
-Write-Host ("До зміни ({0}): {1}" -f $todo.Count, (($todo | ForEach-Object { $_.Code }) -join ', '))
+if ($todo.Count -eq 0) {
+    # Чернетка вже містить усі поля (напр. попередній запуск не дійшов до публікації): лишилось опублікувати.
+    Write-Host "Чернетка $($draft.version) (id $($draft.id)) уже містить усі поля: 0 змін, лишилась публікація."
+}
+else {
+    Write-Host ("До зміни ({0}): {1}" -f $todo.Count, (($todo | ForEach-Object { $_.Code }) -join ', '))
+}
 if ($dry) {
     $how = if ($null -ne $draft) { "у чернетці $($draft.version)" } else { "у клоні версії $($source.version)" }
     Write-Host "[dry-run] було б застосовано $how, публікація: $(-not $NoPublish.IsPresent). Нічого не записано."
@@ -167,6 +222,7 @@ else {
         $NewVersion = $parts -join '.'
     }
     $cl = Invoke-Ecr -Method POST -Path "/api/v1/template-versions/$($source.id)/clone" -Body @{ newVersion = $NewVersion }
+    if (Test-EcrTemplateUnsuitable $cl) { Stop-EcrTemplateUnsuitable -TemplateCode $TemplateCode }
     Assert-EcrOk $cl "clone $($source.id) -> $NewVersion"
     $targetId = [int]$cl.Json.versionId
     Write-Host "Клон: версія $NewVersion (id $targetId)."
@@ -192,19 +248,11 @@ foreach ($d in $todo) {
 if ($NoPublish) { Write-Host 'Чернетку залишено без публікації (-NoPublish).'; return }
 
 $pub = Invoke-Ecr -Method POST -Path "/api/v1/template-versions/$targetId/publish" -Body @{ reason = 'Land: шапка вкладки 2. Contract (RC15)' }
+if (Test-EcrTemplateUnsuitable $pub) {
+    Stop-EcrTemplateUnsuitable -TemplateCode $TemplateCode -Detail "Чернетка (версія id $targetId) лишилась непублікованою. "
+}
 Assert-EcrOk $pub "publish $targetId"
 Write-Host "Опубліковано версію id $targetId."
 
 # --- міграція документів -----------------------------------------------------------------
-foreach ($docId in @($MigrateDocumentId)) {
-    if (-not $docId) { continue }
-    $migrationDryRun = Invoke-Ecr -Method POST -Path "/api/v1/documents/$docId/migrate-version" -Body @{ targetVersionId = $targetId; mode = 'Safe'; dryRun = $true }
-    Assert-EcrOk $migrationDryRun "migrate-version dry-run (документ $docId)"
-    if (-not $migrationDryRun.Json.canApply) {
-        Write-Warning "Документ ${docId}: міграція заблокована (refusals: $(@($migrationDryRun.Json.refusals).Count)); не застосовано."
-        continue
-    }
-    $apply = Invoke-Ecr -Method POST -Path "/api/v1/documents/$docId/migrate-version" -Body @{ targetVersionId = $targetId; mode = 'Safe'; dryRun = $false }
-    Assert-EcrOk $apply "migrate-version (документ $docId)"
-    Write-Host "Документ ${docId}: перенесено значень $($apply.Json.transferredValues), втрачено $($apply.Json.lostValues)."
-}
+Invoke-DocumentMigration -TargetVersionId $targetId
