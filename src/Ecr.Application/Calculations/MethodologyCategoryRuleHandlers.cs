@@ -50,15 +50,18 @@ public sealed class GetMethodologyCategoryRuleHandler(
 /// </summary>
 /// <remarks>
 /// ⛔ Вираз перевіряється ДО запису: не розбирається — <c>categoryRuleInvalid</c>, дає число —
-/// <c>categoryRuleNotText</c>. Посилання на константи й формули версії перевіряє ПУБЛІКАЦІЯ
-/// (<c>MethodologyCategoryRuleChecks</c>): чернетка може заводитись у довільному порядку, і вимагати
-/// тут уже готових формул означало б змусити методолога писати правило останнім.
+/// <c>categoryRuleNotText</c>. ✎ RC16-2: посилання на константи (<c>CST.</c>), Row-формули (<c>!</c>) і
+/// <c>@</c>-аргументи (проти колонок прив'язаних таблиць) теж перевіряються при збереженні тією ж логікою, що й
+/// при публікації (<c>MethodologyCategoryRuleChecks</c>): описка не доживає до публікації. Наслідок: формули й
+/// константи, на які посилається правило, мають бути заведені ДО правила.
 ///
 /// ⚠ Право те саме, що й на правила відбору рядків (<c>Calculation.EditRule</c>): це теж частина
 /// того, ЩО і з чим рахується рядок, і окремої ролі під неї немає.
 /// </remarks>
 public sealed class SaveMethodologyCategoryRuleHandler(
     IMethodologyDraftStore drafts,
+    IMethodologyStore methodologies,
+    ICalculationBindingStore bindings,
     IFormulaEngine formulaEngine,
     IUnitOfWork uow,
     IAccessDecisionService access,
@@ -87,6 +90,7 @@ public sealed class SaveMethodologyCategoryRuleHandler(
             ?? throw VersionNotFound(methodologyVersionId);
 
         RequireUsable(expression);
+        await RequireReferencesAsync(version, expression, ct).ConfigureAwait(false);
 
         var existing = await drafts.FindCategoryRuleAsync(methodologyVersionId, ct).ConfigureAwait(false);
         var rule = version.SetCategoryRule(existing, expression, clock.UtcNow);
@@ -119,6 +123,56 @@ public sealed class SaveMethodologyCategoryRuleHandler(
                 ["messageKey"] = "err.ECR-CALC-0404.version",
                 ["methodologyVersionId"] = methodologyVersionId.ToString(CultureInfo.InvariantCulture),
             });
+
+    /// <summary>
+    /// RC16-2: посилання правила перевіряються вже при збереженні — тією самою логікою, що й при публікації
+    /// (<see cref="MethodologyCategoryRuleChecks"/> для <c>CST.</c> і <c>!Row</c>, <c>CheckArgumentTableColumns</c>
+    /// для <c>@</c>-аргументів проти колонок прив'язаних таблиць). Без прив'язок аргументи перевіряти нема з чим —
+    /// як і при публікації.
+    /// </summary>
+    private async Task RequireReferencesAsync(MethodologyVersion version, string expression, CancellationToken ct)
+    {
+        var formulas = await methodologies.GetFormulasAsync(version.Id, ct).ConfigureAwait(false);
+        var constants = await methodologies.GetConstantsAsync(version.Id, ct).ConfigureAwait(false);
+
+        var outcome = MethodologyCategoryRuleChecks.Check(expression, formulaEngine, formulas, [], constants, null, null);
+
+        var problem = outcome.Problems.FirstOrDefault(p => p.MessageKey is
+            "publish.problem.categoryRuleUnknownConstant" or "publish.problem.categoryRuleBadFormula");
+        if (problem is not null)
+        {
+            var extensions = new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["messageKey"] = problem.MessageKey == "publish.problem.categoryRuleUnknownConstant"
+                    ? "err.ECR-CALC-0422.categoryRuleUnknownConstant"
+                    : "err.ECR-CALC-0422.categoryRuleBadFormula",
+                ["count"] = outcome.Problems.Count.ToString(CultureInfo.InvariantCulture),
+            };
+            foreach (var (name, value) in problem.Args)
+            {
+                extensions[name] = value;
+            }
+
+            throw new BusinessRuleException("ECR-CALC-0422", problem.Text, extensions);
+        }
+
+        if (outcome.Rule is null)
+        {
+            return;
+        }
+
+        var methodologyBindings = await bindings.ListAsync(version.MethodologyId, ct).ConfigureAwait(false);
+        if (methodologyBindings.Count == 0)
+        {
+            return;
+        }
+
+        var columnCodesByTable = await bindings
+            .ListColumnCodesAsync([.. methodologyBindings.Select(b => b.TableDefId).Distinct()], ct)
+            .ConfigureAwait(false);
+
+        MethodologyPublishChecks.CheckArgumentTableColumns([outcome.Rule], columnCodesByTable);
+    }
 
     /// <summary>Вираз мусить розбиратись діалектом Methodology і не повертати число.</summary>
     private void RequireUsable(string expression)
