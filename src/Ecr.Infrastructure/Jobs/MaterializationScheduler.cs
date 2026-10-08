@@ -19,7 +19,8 @@ namespace Ecr.Infrastructure.Jobs;
 /// закриває.
 /// </para>
 /// </remarks>
-public sealed class MaterializationScheduler(EcrDbContext db, IBackgroundJobScheduler jobs) : IMaterializationScheduler
+public sealed class MaterializationScheduler(
+    EcrDbContext db, IBackgroundJobScheduler jobs, IRowStore? rowStore = null) : IMaterializationScheduler
 {
     /// <inheritdoc />
     public bool EnlistsInCallerTransaction => jobs.EnlistsInCallerTransaction;
@@ -44,6 +45,8 @@ public sealed class MaterializationScheduler(EcrDbContext db, IBackgroundJobSche
             throw new InvalidOperationException(
                 "Матеріалізацію з переходу періоду ставлять лише після коміту переходу: транзакція ще відкрита.");
         }
+
+        _ = rowStore; // заглушка червоного тесту: RC14B P3-2
 
         var targets = await MaterializationTargets
             .FindAsync(db, sourceEntityId: null, projectId, periodKeys, null, null, int.MaxValue, ct)
