@@ -25,21 +25,29 @@ namespace Ecr.Infrastructure.Persistence;
 /// скидання — ще одне звернення на кожен запис (бюджет звернень стережуть
 /// <c>PatchCellsWorkbookTests</c> і <c>CellStoreBatchEquivalenceTests</c>), а пул сам скидає сеанс
 /// (<c>sp_reset_connection</c>) при поверненні з'єднання. Решта операторів тієї ж транзакції
-/// (аудит, «дотик» документа) отримує той самий ліміт 8 с — для запиту користувача це прийнятно.
+/// (аудит, «дотик» документа) отримує той самий ліміт 15 с — для запиту користувача це прийнятно.
 ///
 /// ⚠ 409 без <c>Retry-After</c>: проміжне ПЗ помилок такого заголовка для 409 не виставляє,
 /// а клієнт повторює за повідомленням каталогу.
 /// </remarks>
-internal static class LockWaitGuard
+public static class LockWaitGuard
 {
-    /// <summary>Скільки запис комірок чекає блокування, мс. Менше за 30 с <c>CommandTimeout</c>.</summary>
-    internal const int LockTimeoutMs = 8_000;
+    /// <summary>
+    /// Скільки запис комірок чекає блокування, мс. 15 с: ліміт діє на ВСІ оператори ambient-транзакції
+    /// (аудит, «дотик»), тож 8 с давали б хибні 409 при нормальних конкурентних PATCH одного проєкту
+    /// під піком; і лишається запас до 30 с <c>CommandTimeout</c>.
+    /// </summary>
+    public const int LockTimeoutMs = 15_000;
 
     /// <summary>Ключ каталогу відмови «блокування не дочекалися».</summary>
-    internal const string MessageKey = "err.ECR-DOC-4091.lockTimeout";
+    public const string MessageKey = "err.ECR-DOC-4091.lockTimeout";
 
-    /// <summary>1222 — «Lock request time out period exceeded»; -2 — таймаут команди клієнта.</summary>
-    internal static bool IsLockWaitTimeout(SqlException ex) => ex.Number is 1222 or -2;
+    /// <summary>
+    /// Лише 1222 — «Lock request time out period exceeded» (спрацював <c>SET LOCK_TIMEOUT</c>).
+    /// ⛔ НЕ -2: це клієнтський Execution Timeout будь-якого повільного запиту, не обов'язково через
+    /// блокування; ховати його під 409 означало б маскувати справжні повільні запити.
+    /// </summary>
+    public static bool IsLockWaitTimeout(SqlException ex) => ex.Number == 1222;
 
     /// <summary>Виконує <paramref name="body"/> з обмеженим очікуванням блокувань.</summary>
     /// <param name="connection">Відкрите з'єднання.</param>
@@ -47,7 +55,7 @@ internal static class LockWaitGuard
     /// <param name="body">Записові оператори.</param>
     /// <param name="ct">Скасування.</param>
     /// <exception cref="ConcurrencyConflictException"><c>409 ECR-DOC-4091</c>, <c>lockTimeout</c>.</exception>
-    internal static async Task RunAsync(
+    public static async Task RunAsync(
         SqlConnection connection, SqlTransaction transaction, Func<Task> body, CancellationToken ct)
     {
         await SetAsync(connection, transaction, LockTimeoutMs, ct).ConfigureAwait(false);
