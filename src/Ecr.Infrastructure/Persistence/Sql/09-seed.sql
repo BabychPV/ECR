@@ -8086,7 +8086,6 @@ SELECT v.[Key], v.Lang, v.Val
     (N'document.header.lookupHint', N'ru', N'Идентификатор записи справочника'),
     (N'document.header.lookupLoading', N'ru', N'Справочник загружается…'),
     (N'document.header.lookupEmpty', N'ru', N'В справочнике нет записей'),
-    (N'document.header.lookupNoAccess', N'ru', N'Выбрано (название недоступно)'),
     (N'document.restoreEdits.title', N'ru', N'Несохранённые изменения остались в этом браузере'),
     (N'document.restoreEdits.text', N'ru', N'Изменений, не дошедших до сервера: {count}. Восстановите их в листе или отбросьте.'),
     (N'document.restoreEdits.partial', N'ru', N'Удалось сохранить лишь {count} из {total} изменений; остальные придётся ввести заново.'),
@@ -8854,7 +8853,6 @@ SELECT v.[Key], v.Lang, v.Val
     (N'workflow.rejected', N'ru', N'Лист возвращён автору.'),
     (N'workflow.reopened', N'ru', N'Лист снова доступен для редактирования.'),
     (N'workflow.recalcQueued', N'ru', N'Пересчёт поставлен в очередь как задача {job}.'),
-    (N'workflow.recalcSkipsSubmitted', N'ru', N'Поданные и утверждённые листы пропускаются.'),
     (N'workflow.recalcRunning', N'ru', N'Пересчёт…'),
     (N'workflow.recalcDone', N'ru', N'Пересчёт завершён: показатели актуальны.'),
     (N'workflow.recalcFailed', N'ru', N'Пересчёт не удался. Причину см. в разделе «Задачи».'),
@@ -11123,7 +11121,6 @@ SELECT v.[Key], v.Lang, v.Val
     (N'document.header.lookupHint', N'kz', N'Анықтамалық жазбасының идентификаторы'),
     (N'document.header.lookupLoading', N'kz', N'Анықтамалық жүктелуде…'),
     (N'document.header.lookupEmpty', N'kz', N'Анықтамалықта жазбалар жоқ'),
-    (N'document.header.lookupNoAccess', N'kz', N'Таңдалған (атауы қолжетімсіз)'),
     (N'document.restoreEdits.title', N'kz', N'Сақталмаған өзгерістер осы браузерде қалды'),
     (N'document.restoreEdits.text', N'kz', N'{count} өзгеріс серверге жетпеді. Оларды параққа қалпына келтіріңіз немесе тастаңыз.'),
     (N'document.restoreEdits.partial', N'kz', N'Барлық {total} өзгерістің ішінен тек {count} сақталды; қалғандарын қайта енгізу қажет.'),
@@ -11891,7 +11888,6 @@ SELECT v.[Key], v.Lang, v.Val
     (N'workflow.rejected', N'kz', N'Парақ авторға қайтарылды.'),
     (N'workflow.reopened', N'kz', N'Парақты қайтадан өңдеуге болады.'),
     (N'workflow.recalcQueued', N'kz', N'Қайта есептеу {job} тапсырмасы ретінде кезекке қойылды.'),
-    (N'workflow.recalcSkipsSubmitted', N'kz', N'Тапсырылған және бекітілген парақтар өткізіліп жіберіледі.'),
     (N'workflow.recalcRunning', N'kz', N'Қайта есептелуде…'),
     (N'workflow.recalcDone', N'kz', N'Қайта есептеу аяқталды: көрсеткіштер өзекті.'),
     (N'workflow.recalcFailed', N'kz', N'Қайта есептеу сәтсіз аяқталды. Себебін «Тапсырмалар» бөлімінен қараңыз.'),
@@ -17978,6 +17974,18 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:rc16-z5 ── кінець секції ──
+-- COLL:rc16-p3 ── ru/kz: Lookup шапки без Registry.View і тост перерахунку; власна порція (попередні порції заповнені до межі 500)
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'document.header.lookupNoAccess', N'ru', N'Выбрано (название недоступно)'),
+    (N'workflow.recalcSkipsSubmitted', N'ru', N'Поданные и утверждённые листы пропускаются.'),
+    (N'document.header.lookupNoAccess', N'kz', N'Таңдалған (атауы қолжетімсіз)'),
+    (N'workflow.recalcSkipsSubmitted', N'kz', N'Тапсырылған және бекітілген парақтар өткізіліп жіберіледі.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:rc16-p3 ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t
