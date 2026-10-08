@@ -25,13 +25,16 @@ vi.mock('@/features/jobs/MyTasksDrawer', () => {
   return {
     MyTasksDrawer: ({
       opened,
+      onClose,
       jobs,
     }: {
       opened: boolean;
+      onClose: () => void;
       jobs: readonly { jobId: string }[] | undefined;
     }): JSX.Element | null =>
       opened ? (
         <div role="dialog" aria-label="my-tasks-stub">
+          <button type="button" data-stub-close onClick={onClose} />
           {(jobs ?? []).map((job) => (
             <span key={job.jobId} data-stub-job={job.jobId} />
           ))}
@@ -190,5 +193,24 @@ describe('кнопка «My tasks» у шапці', () => {
     // У шухляду доїхали рівно власні задачі — чужої серед них немає.
     await waitFor(() => expect(document.querySelectorAll('[data-stub-job]')).toHaveLength(2));
     expect(document.querySelector('[data-stub-job="IExcelImportJob#alien"]')).toBeNull();
+  });
+});
+
+describe('фокус після закриття шухляди (RC15-E, WCAG 2.4.3)', () => {
+  it('закриття повертає фокус на кнопку «My tasks» (лінивий чанк монтується вже відкритим)', async () => {
+    mockFetch();
+    mount();
+
+    const button = await screen.findByRole('button', { name: '⟦jobs.myTasks⟧' });
+    fireEvent.click(button);
+    const dialog = await screen.findByRole('dialog');
+
+    // Фокус пішов у шухляду: інакше перевірка нижче вакуумна.
+    (dialog.querySelector('[data-stub-close]') as HTMLElement).focus();
+    expect(document.activeElement).not.toBe(button);
+
+    fireEvent.click(dialog.querySelector('[data-stub-close]') as HTMLElement);
+
+    await waitFor(() => expect(document.activeElement).toBe(button));
   });
 });
