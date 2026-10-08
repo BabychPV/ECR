@@ -7277,7 +7277,7 @@ USING (VALUES
     (N'publish.problem.categoryRuleUnknownConstant', N'en', N'The category rule references constant CST.{code}, which this version does not define.', 1),
     (N'publish.problem.categoryRuleBadFormula', N'en', N'The category rule references !{formula}: it can only read Row formulas of the version (it runs once per row, before the substance loop).', 1),
     (N'publish.warning.categoryRuleMissing', N'en', N'{count} constant(s) have more than one category ({constants}), but the version has no category rule: each of them is ambiguous at calculation time.', 1),
-    (N'publish.warning.categoryRuleRowConstant', N'en', N'Row formula {formula} reads constant {constant}, which has several categories. The Row phase runs before the category rule, so the constant is ambiguous there: make the formula a substance formula.', 1)
+    (N'publish.warning.categoryRuleRowConstant', N'en', N'Row formula {formula} reads constant {constant}, which has several categories. The Row phase runs before the category rule, so the constant is ambiguous there: make the formula a substance formula.', 1),
     -- CAT:l2 ── кінець секції ──
     -- COLL:stale-err ── resultsStale у переліку документів: відмови параметрів; ru/kz — порцією COLL:stale-err нижче ──
     (N'err.ECR-REQ-0422.resultsStaleNeedsPeriod', N'en', N'Filtering by stale results needs a period: staleness belongs to a period.', 1),
