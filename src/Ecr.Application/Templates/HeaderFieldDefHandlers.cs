@@ -128,7 +128,9 @@ public sealed class SaveHeaderFieldDefHandler(
         }
 
         // ✎ RC16-2: неіснуюча ціль - 422 з ключем, а не 500 на FK_HeaderFieldDef_Registry.
-        if (command.DataType == CellDataType.Lookup)
+        // Лише при створенні або зміні цілі (див. `SaveColumnDefHandler`): публікація відсіє висяче посилання.
+        if (command.DataType == CellDataType.Lookup
+            && (existing is null || existing.LookupRegistryDefId != command.LookupRegistryDefId))
         {
             await LookupRegistryGuard
                 .RequireForHeaderFieldAsync(registries, access, userId, command.LookupRegistryDefId, code, ct)

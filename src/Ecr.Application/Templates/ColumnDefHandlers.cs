@@ -144,7 +144,10 @@ public sealed class SaveColumnDefHandler(
         await RequireKnownUnitAsync(units, command.UnitId, code, ct).ConfigureAwait(false);
 
         // ✎ RC16-2: ключа на довідник у ColumnDef немає - неіснуючу ціль відсікаємо тут.
-        if (command.DataType == CellDataType.Lookup)
+        // Лише при створенні або зміні цілі: перейменування/зсув колонки на довідник, що згодом деактивували чи
+        // заборонили, не блокується (висяче посилання відсіє публікація - `CheckLookupRegistries`).
+        if (command.DataType == CellDataType.Lookup
+            && (existing is null || existing.LookupRegistryDefId != command.LookupRegistryDefId))
         {
             await LookupRegistryGuard
                 .RequireForColumnAsync(registries, access, userId, command.LookupRegistryDefId, code, ct)
