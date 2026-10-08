@@ -518,6 +518,88 @@ public static class PublishChecks
         return diagnostics;
     }
 
+    /// <summary>Довідники, на які вказують живі <c>Lookup</c>-колонки й <c>Lookup</c>-поля шапки версії.</summary>
+    /// <param name="version">Версія зі структурою.</param>
+    /// <returns>Різні <c>Id</c> довідників.</returns>
+    public static IReadOnlyCollection<int> LookupRegistryIds(TemplateVersion version)
+    {
+        ArgumentNullException.ThrowIfNull(version);
+
+        var ids = LiveTables(version.Sheets)
+            .SelectMany(t => t.Columns)
+            .Where(c => !c.IsDeleted && c.DataType == CellDataType.Lookup && c.LookupRegistryDefId is not null)
+            .Select(c => c.LookupRegistryDefId!.Value)
+            .Concat(version.HeaderFields
+                .Where(f => !f.IsDeleted && f.DataType == CellDataType.Lookup && f.LookupRegistryDefId is not null)
+                .Select(f => f.LookupRegistryDefId!.Value));
+
+        return [.. ids.Distinct()];
+    }
+
+    /// <summary>
+    /// RC16-2: <c>Lookup</c>-колонка чи поле шапки вказує на довідник, якого немає або який неактивний
+    /// (<c>ECR-TMPL-0422</c>, <c>lookupRegistryUnknown</c> / <c>headerFieldLookupRegistryUnknown</c>).
+    /// </summary>
+    /// <param name="version">Версія зі структурою.</param>
+    /// <param name="usableRegistryIds">Довідники, що існують і активні (з тих, на які посилається версія).</param>
+    /// <remarks>
+    /// ⛔ У <c>cfg.ColumnDef</c> зовнішнього ключа на довідник немає, тож без цієї перевірки версія з висячою ціллю
+    /// публікувалась, а випадний список колонки лишався порожнім у кожному документі. Названо колонку/поле й
+    /// <c>Id</c> довідника (без інших відомостей про нього).
+    /// </remarks>
+    /// <returns>Зауваження публікації; порожньо - усе гаразд.</returns>
+    public static IReadOnlyList<ExpressionDiagnostic> CheckLookupRegistries(
+        TemplateVersion version, IReadOnlySet<int> usableRegistryIds)
+    {
+        ArgumentNullException.ThrowIfNull(version);
+        ArgumentNullException.ThrowIfNull(usableRegistryIds);
+
+        var diagnostics = new List<ExpressionDiagnostic>();
+
+        foreach (var table in LiveTables(version.Sheets))
+        {
+            foreach (var column in table.Columns.Where(c =>
+                !c.IsDeleted && c.DataType == CellDataType.Lookup
+                && c.LookupRegistryDefId is { } id && !usableRegistryIds.Contains(id)))
+            {
+                var registryId = column.LookupRegistryDefId!.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+                diagnostics.Add(new ExpressionDiagnostic(
+                    "ECR-TMPL-0422",
+                    $"Колонка {table.Code}.{column.Code}: довідника {registryId} немає або він неактивний.",
+                    0,
+                    1,
+                    "err.ECR-TMPL-0422.lookupRegistryUnknown",
+                    new Dictionary<string, string>
+                    {
+                        ["columnCode"] = $"{table.Code}.{column.Code}",
+                        ["registryDefId"] = registryId,
+                    }));
+            }
+        }
+
+        foreach (var field in version.HeaderFields.Where(f =>
+            !f.IsDeleted && f.DataType == CellDataType.Lookup
+            && f.LookupRegistryDefId is { } id && !usableRegistryIds.Contains(id)))
+        {
+            var registryId = field.LookupRegistryDefId!.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+            diagnostics.Add(new ExpressionDiagnostic(
+                "ECR-TMPL-0422",
+                $"Поле шапки {field.Code}: довідника {registryId} немає або він неактивний.",
+                0,
+                1,
+                "err.ECR-TMPL-0422.headerFieldLookupRegistryUnknown",
+                new Dictionary<string, string>
+                {
+                    ["headerFieldCode"] = field.Code,
+                    ["registryDefId"] = registryId,
+                }));
+        }
+
+        return diagnostics;
+    }
+
     /// <summary>
     /// Активна прив'язка до методології без опублікованої версії (<c>ECR-CALC-0422</c>,
     /// <c>bindingMethodologyNotPublished</c>) — одне зауваження на методологію.
