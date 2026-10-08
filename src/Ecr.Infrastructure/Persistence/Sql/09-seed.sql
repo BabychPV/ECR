@@ -676,6 +676,13 @@ UPDATE t
     (N'jobs.recalcFannedOut',            N'en', N'Queued document recalculation tasks: {count}.', N'Queued document recalculation tasks: {count}; not calculated yet.'),
     (N'jobs.recalcFannedOut',            N'ru', N'Поставлено в очередь задач пересчёта документов: {count}.', N'Поставлено в очередь задач пересчёта документов: {count}; ещё не пересчитано.'),
     (N'jobs.recalcFannedOut',            N'kz', N'Құжаттарды қайта есептеу тапсырмалары кезекке қойылды: {count}.', N'Құжаттарды қайта есептеу тапсырмалары кезекке қойылды: {count}; әлі есептелген жоқ.'),
+    -- RC16-2: «Reopen the period first» не збігалось із діями — подані аркуші повертаються на правки на аркуші, а не відкриттям періоду.
+    (N'err.ECR-CALC-4221.sheetsSubmitted', N'en', N'Period {period} has submitted sheets: recalculation would change numbers already sent for approval. Reopen the period first.', N'Period {period} has submitted sheets: recalculation would change numbers already sent for approval. Return the submitted sheets for edits first (the sheet''s «Return for edits» action).'),
+    (N'err.ECR-CALC-4221.sheetsSubmitted', N'ru', N'В периоде {period} есть поданные листы: пересчёт изменил бы числа, уже отправленные на согласование. Сначала переоткройте период.', N'В периоде {period} есть поданные листы: пересчёт изменил бы числа, уже отправленные на согласование. Сначала верните поданные листы на правки (действие листа «Переоткрыть для правок»).'),
+    (N'err.ECR-CALC-4221.sheetsSubmitted', N'kz', N'{period} кезеңінде тапсырылған парақтар бар: қайта есептеу келісуге жіберілген сандарды өзгертер еді. Алдымен кезеңді қайта ашыңыз.', N'{period} кезеңінде тапсырылған парақтар бар: қайта есептеу келісуге жіберілген сандарды өзгертер еді. Алдымен тапсырылған парақтарды түзетуге қайтарыңыз (парақтың «Түзету үшін қайта ашу» әрекеті).'),
+    (N'workflow.recalculateAllSubmitted', N'en', N'All sheets of period {period} are submitted or approved: there is nothing to recalculate. Reopen the period first.', N'All sheets of period {period} are submitted or approved: there is nothing to recalculate. Return a sheet for edits first (the sheet''s «Return for edits» action).'),
+    (N'workflow.recalculateAllSubmitted', N'ru', N'Все листы периода {period} поданы или утверждены: пересчитывать нечего. Сначала откройте период заново.', N'Все листы периода {period} поданы или утверждены: пересчитывать нечего. Сначала верните лист на правки (действие листа «Переоткрыть для правок»).'),
+    (N'workflow.recalculateAllSubmitted', N'kz', N'{period} кезеңінің барлық парақтары тапсырылған немесе бекітілген: қайта есептейтін ештеңе жоқ. Алдымен кезеңді қайта ашыңыз.', N'{period} кезеңінің барлық парақтары тапсырылған немесе бекітілген: қайта есептейтін ештеңе жоқ. Алдымен парақты түзетуге қайтарыңыз (парақтың «Түзету үшін қайта ашу» әрекеті).'),
     -- Назва продукту лишається англійською (рішення людини 2026-09-30).
     (N'login.title',                     N'ru', N'Отчётность по экологическому соответствию', N'Environmental Compliance Reporting'),
     (N'login.title',                     N'kz', N'Экологиялық сәйкестік бойынша есептілік', N'Environmental Compliance Reporting'),
@@ -2017,7 +2024,7 @@ USING (VALUES
     (N'err.ECR-CALC-0409.childWrongVersion',    N'en', N'{what} "{code}" belongs to version {ownerVersionId}, not {versionId}: it cannot be edited through this version.', 1),
     -- ECR-CALC-4221 has a neutral title: closed period, submitted sheets, approval without a reason.
     (N'err.ECR-CALC-4221.periodClosed',         N'en', N'Period {period} is closed: closed periods are not recalculated automatically, a separate approval is required.', 1),
-    (N'err.ECR-CALC-4221.sheetsSubmitted',      N'en', N'Period {period} has submitted sheets: recalculation would change numbers already sent for approval. Reopen the period first.', 1),
+    (N'err.ECR-CALC-4221.sheetsSubmitted',      N'en', N'Period {period} has submitted sheets: recalculation would change numbers already sent for approval. Return the submitted sheets for edits first (the sheet''s «Return for edits» action).', 1),
     (N'err.ECR-CALC-4221.approvalReasonRequired', N'en', N'An approval to recalculate a closed period is not accepted without a reason.', 1),
     (N'err.ECR-SYS-0500.contactAdmin',         N'en', N'Internal error. Contact your administrator and quote the correlation ID.', 0),
     -- FR-13.9: rule coverage matrix over real rows.
@@ -7329,7 +7336,7 @@ USING (VALUES
     (N'jobs.staleDocuments.error', N'en', N'Could not load the documents that need recalculation.', 1),
     -- COLL:stale-mytasks ── кінець секції ──
     -- COLL:rc15c-recalc ── перерахунок вимкнений лише коли подані ВСІ аркуші; ru/kz — порцією COLL:rc15c-recalc нижче ──
-    (N'workflow.recalculateAllSubmitted', N'en', N'All sheets of period {period} are submitted or approved: there is nothing to recalculate. Reopen the period first.', 1),
+    (N'workflow.recalculateAllSubmitted', N'en', N'All sheets of period {period} are submitted or approved: there is nothing to recalculate. Return a sheet for edits first (the sheet''s «Return for edits» action).', 1),
     -- COLL:rc15c-recalc ── кінець секції ──
     -- COLL:stale-ui ── кінець секції ──
     -- COLL:l21scope ── L2-1: область формули (scope) у PUT формули й порівнянні версій; ru/kz — порцією COLL:l21scope нижче ──
@@ -7894,7 +7901,7 @@ SELECT v.[Key], v.Lang, v.Val
     (N'err.ECR-CALC-0409.formulaWrongVersion', N'ru', N'Формула «{formulaCode}» принадлежит версии {ownerVersionId}, а не {versionId}: её нельзя редактировать через эту версию.'),
     (N'err.ECR-CALC-0409.childWrongVersion', N'ru', N'{what} «{code}» принадлежит версии {ownerVersionId}, а не {versionId}: этот элемент нельзя редактировать через эту версию.'),
     (N'err.ECR-CALC-4221.periodClosed', N'ru', N'Период {period} закрыт: закрытые периоды не пересчитываются автоматически, требуется отдельное утверждение.'),
-    (N'err.ECR-CALC-4221.sheetsSubmitted', N'ru', N'В периоде {period} есть поданные листы: пересчёт изменил бы числа, уже отправленные на согласование. Сначала переоткройте период.'),
+    (N'err.ECR-CALC-4221.sheetsSubmitted', N'ru', N'В периоде {period} есть поданные листы: пересчёт изменил бы числа, уже отправленные на согласование. Сначала верните поданные листы на правки (действие листа «Переоткрыть для правок»).'),
     (N'err.ECR-CALC-4221.approvalReasonRequired', N'ru', N'Согласование пересчёта закрытого периода не принимается без причины.'),
     (N'err.ECR-SYS-0500.contactAdmin', N'ru', N'Внутренняя ошибка. Обратитесь к администратору и сообщите идентификатор корреляции.'),
     (N'err.ECR-CALC-0422.coverageWindow', N'ru', N'Окно периодов пусто: periodFrom {periodFrom} позже periodTo {periodTo}.'),
@@ -10929,7 +10936,7 @@ SELECT v.[Key], v.Lang, v.Val
     (N'err.ECR-CALC-0409.formulaWrongVersion', N'kz', N'«{formulaCode}» формуласы {versionId} нұсқасына емес, {ownerVersionId} нұсқасына тиесілі: оны осы нұсқа арқылы өңдеуге болмайды.'),
     (N'err.ECR-CALC-0409.childWrongVersion', N'kz', N'{what} «{code}» {versionId} нұсқасына емес, {ownerVersionId} нұсқасына тиесілі: оны осы нұсқа арқылы өңдеуге болмайды.'),
     (N'err.ECR-CALC-4221.periodClosed', N'kz', N'{period} кезеңі жабық: жабық кезеңдер автоматты түрде қайта есептелмейді, жеке бекіту қажет.'),
-    (N'err.ECR-CALC-4221.sheetsSubmitted', N'kz', N'{period} кезеңінде тапсырылған парақтар бар: қайта есептеу келісуге жіберілген сандарды өзгертер еді. Алдымен кезеңді қайта ашыңыз.'),
+    (N'err.ECR-CALC-4221.sheetsSubmitted', N'kz', N'{period} кезеңінде тапсырылған парақтар бар: қайта есептеу келісуге жіберілген сандарды өзгертер еді. Алдымен тапсырылған парақтарды түзетуге қайтарыңыз (парақтың «Түзету үшін қайта ашу» әрекеті).'),
     (N'err.ECR-CALC-4221.approvalReasonRequired', N'kz', N'Жабық кезеңді қайта есептеу келісімі себепсіз қабылданбайды.'),
     (N'err.ECR-SYS-0500.contactAdmin', N'kz', N'Ішкі қате. Әкімшіге хабарласып, корреляция идентификаторын айтыңыз.'),
     (N'err.ECR-CALC-0422.coverageWindow', N'kz', N'Кезеңдер терезесі бос: periodFrom {periodFrom} мәні periodTo {periodTo} мәнінен кейін.'),
@@ -17940,8 +17947,8 @@ GO
 INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val
   FROM (VALUES
-    (N'workflow.recalculateAllSubmitted', N'ru', N'Все листы периода {period} поданы или утверждены: пересчитывать нечего. Сначала откройте период заново.'),
-    (N'workflow.recalculateAllSubmitted', N'kz', N'{period} кезеңінің барлық парақтары тапсырылған немесе бекітілген: қайта есептейтін ештеңе жоқ. Алдымен кезеңді қайта ашыңыз.')
+    (N'workflow.recalculateAllSubmitted', N'ru', N'Все листы периода {period} поданы или утверждены: пересчитывать нечего. Сначала верните лист на правки (действие листа «Переоткрыть для правок»).'),
+    (N'workflow.recalculateAllSubmitted', N'kz', N'{period} кезеңінің барлық парақтары тапсырылған немесе бекітілген: қайта есептейтін ештеңе жоқ. Алдымен парақты түзетуге қайтарыңыз (парақтың «Түзету үшін қайта ашу» әрекеті).')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
