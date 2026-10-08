@@ -77,6 +77,11 @@ public sealed class GetRegistryImpactHandler(
             .ListImpactedAsync(definition.Id, projects, IRegistryImpactStore.MaxRows, ct)
             .ConfigureAwait(false);
 
+        // ⛔ Читачу зі схованим аркушем/таблицею/колонкою/періодом перелік не розкриває документ і код методології
+        // (виводяться з результатів усього документа). `Truncated` - за сирою вибіркою: вона лише каже «більше за стелю».
+        var truncated = rows.Count >= IRegistryImpactStore.MaxRows;
+        rows = await RegistryImpactVisibility.ForReaderAsync(access, profile, rows, ct).ConfigureAwait(false);
+
         // ⚠ Групування по «документ × період»: документ, зачеплений двома методологіями, — один
         // рядок із двома «via». Порядок першої появи зберігає впорядкування сховища.
         var byKey = new Dictionary<(long, int), (RegistryImpactRow Row, List<string> Via)>();
@@ -123,6 +128,6 @@ public sealed class GetRegistryImpactHandler(
         return new RegistryImpactResponse(
             items.Count > RegistryImpactResponse.PageSize ? items.GetRange(0, RegistryImpactResponse.PageSize) : items,
             items.Count,
-            Truncated: rows.Count >= IRegistryImpactStore.MaxRows);
+            Truncated: truncated);
     }
 }

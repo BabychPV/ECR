@@ -98,6 +98,10 @@ public sealed class RecalculateImpactedHandler(
             .ListImpactedAsync(definition.Id, visible, IRegistryImpactStore.MaxRows, ct)
             .ConfigureAwait(false);
 
+        // ⛔ Документ зі схованим для читача аркушем/колонкою/періодом поза набором (як у `GET …/impact`): інакше
+        // 202 проти 422 розкривав би, що методологія зі схованим виходом порахована і довідник змінено після неї.
+        rows = await RegistryImpactVisibility.ForReaderAsync(access, profile, rows, ct).ConfigureAwait(false);
+
         var projectOf = new Dictionary<long, int>();
         foreach (var row in rows.Where(r => profile.SeesDocumentsOf(r.ProjectId)))
         {
