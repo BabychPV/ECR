@@ -3248,6 +3248,12 @@ export interface paths {
          *     зникло б або змінило тлумачення бодай одне введене значення,
          *     `Presentation` — на будь-яку структурну різницю версій
          *     (`422 ECR-SCHM-0422`). Подані чи затверджені аркуші — `409 ECR-DOC-0409`.
+         *     Перенос великого проєкту (мільйони значень) триває десятки хвилин, що довше за таймаути проксі й
+         *     браузера. З `async = true` (не сухий прогін) він іде фоновою задачею: `202` з `jobId`,
+         *     прогрес і підсумок — `GET /jobs/{jobId}`; перевірки прав і цілі — ті самі й одразу (`404`, `403`,
+         *     `409`, `422`), відмови за даними (`ECR-SCHM-0422`) задача повертає станом `Failed` з кодом.
+         *     Повторний запит того самого автора, поки перенос проєкту йде, повертає той самий `jobId`; чужий —
+         *     `409 ECR-JOB-0409`. Сухий прогін завжди синхронний.
          */
         post: {
             parameters: {
@@ -3275,6 +3281,17 @@ export interface paths {
                         "application/json": components["schemas"]["DocumentVersionMigrationDto"];
                         "text/json": components["schemas"]["DocumentVersionMigrationDto"];
                         "text/plain": components["schemas"]["DocumentVersionMigrationDto"];
+                    };
+                };
+                /** @description Accepted */
+                202: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MigrationAcceptedResponse"];
+                        "text/json": components["schemas"]["MigrationAcceptedResponse"];
+                        "text/plain": components["schemas"]["MigrationAcceptedResponse"];
                     };
                 };
                 /** @description Not Found */
@@ -21513,7 +21530,14 @@ export interface components {
         };
         /** @description Запит на перенос документа на нову версію шаблону (ФВ-7.5). */
         MigrateDocumentVersionRequest: {
-            /** @description `true` — лише звіт, без змін. */
+            /**
+             * @description `true` — перенос (не сухий прогін) іде ФОНОВОЮ задачею: відповідь `202` з `jobId`, стан —
+             *     `GET /jobs/{jobId}`. Типово `false` — як і раніше, синхронно з `200` і звітом
+             *     (зворотна сумісність зовнішніх викликачів; веб-клієнт передає `true`).
+             * @default false
+             */
+            async: boolean;
+            /** @description `true` — лише звіт, без змін (завжди синхронно: швидкий). */
             dryRun: boolean;
             mode: null | components["schemas"]["VersionMigrationMode"];
             /**
@@ -21521,6 +21545,16 @@ export interface components {
              * @description Опублікована версія того самого шаблону.
              */
             targetVersionId: number;
+        };
+        /** @description Прийнятий у чергу перенос проєкту на нову версію шаблону (D-2 RC15B). */
+        MigrationAcceptedResponse: {
+            /**
+             * Format: int64
+             * @description Документ, з якого відкрили перенос (переноситься весь його проєкт).
+             */
+            documentId: number;
+            /** @description Задача: `GET /jobs/{jobId}` дає прогрес і підсумок. */
+            jobId: string;
         };
         /**
          * @description Транспорт каналу сповіщень. Числа зберігаються в базі — не перенумеровувати.

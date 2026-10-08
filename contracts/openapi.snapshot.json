@@ -7539,8 +7539,13 @@
       "MigrateDocumentVersionRequest": {
         "description": "Запит на перенос документа на нову версію шаблону (ФВ-7.5).",
         "properties": {
+          "async": {
+            "default": false,
+            "description": "`true` — перенос (не сухий прогін) іде ФОНОВОЮ задачею: відповідь `202` з `jobId`, стан —\n`GET /jobs/{jobId}`. Типово `false` — як і раніше, синхронно з `200` і звітом\n(зворотна сумісність зовнішніх викликачів; веб-клієнт передає `true`).",
+            "type": "boolean"
+          },
           "dryRun": {
-            "description": "`true` — лише звіт, без змін.",
+            "description": "`true` — лише звіт, без змін (завжди синхронно: швидкий).",
             "type": "boolean"
           },
           "mode": {
@@ -7564,6 +7569,25 @@
           "targetVersionId",
           "mode",
           "dryRun"
+        ],
+        "type": "object"
+      },
+      "MigrationAcceptedResponse": {
+        "description": "Прийнятий у чергу перенос проєкту на нову версію шаблону (D-2 RC15B).",
+        "properties": {
+          "documentId": {
+            "description": "Документ, з якого відкрили перенос (переноситься весь його проєкт).",
+            "format": "int64",
+            "type": "integer"
+          },
+          "jobId": {
+            "description": "Задача: `GET /jobs/{jobId}` дає прогрес і підсумок.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "jobId",
+          "documentId"
         ],
         "type": "object"
       },
@@ -22773,7 +22797,7 @@
         ]
       },
       "post": {
-        "description": "⚠ Версія шаблону живе на проєкті, тож переносяться всі документи проєкту\nразом — звіт каже скільки (`documentCount`). `dryRun = true`\nлише рахує наслідки й нічого не змінює. Режим `Safe` відмовляє, якщо\nзникло б або змінило тлумачення бодай одне введене значення,\n`Presentation` — на будь-яку структурну різницю версій\n(`422 ECR-SCHM-0422`). Подані чи затверджені аркуші — `409 ECR-DOC-0409`.",
+        "description": "⚠ Версія шаблону живе на проєкті, тож переносяться всі документи проєкту\nразом — звіт каже скільки (`documentCount`). `dryRun = true`\nлише рахує наслідки й нічого не змінює. Режим `Safe` відмовляє, якщо\nзникло б або змінило тлумачення бодай одне введене значення,\n`Presentation` — на будь-яку структурну різницю версій\n(`422 ECR-SCHM-0422`). Подані чи затверджені аркуші — `409 ECR-DOC-0409`.\nПеренос великого проєкту (мільйони значень) триває десятки хвилин, що довше за таймаути проксі й\nбраузера. З `async = true` (не сухий прогін) він іде фоновою задачею: `202` з `jobId`,\nпрогрес і підсумок — `GET /jobs/{jobId}`; перевірки прав і цілі — ті самі й одразу (`404`, `403`,\n`409`, `422`), відмови за даними (`ECR-SCHM-0422`) задача повертає станом `Failed` з кодом.\nПовторний запит того самого автора, поки перенос проєкту йде, повертає той самий `jobId`; чужий —\n`409 ECR-JOB-0409`. Сухий прогін завжди синхронний.",
         "parameters": [
           {
             "in": "path",
@@ -22826,6 +22850,26 @@
               }
             },
             "description": "OK"
+          },
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MigrationAcceptedResponse"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MigrationAcceptedResponse"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/MigrationAcceptedResponse"
+                }
+              }
+            },
+            "description": "Accepted"
           },
           "404": {
             "content": {
