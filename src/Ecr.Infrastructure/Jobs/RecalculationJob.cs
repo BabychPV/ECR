@@ -160,6 +160,7 @@ public sealed partial class RecalculationJob(
 
         // L-4: рядки, яким не підійшло жодне правило; назовні — лише кількість і номери.
         var unmatchedRows = new List<UnmatchedRow>();
+        var rejectedRows = new List<RejectedRow>();
 
         Domain.Entities.Calculations.CalculationRun NewRun(int? periodKey)
             => new(
@@ -385,6 +386,7 @@ public sealed partial class RecalculationJob(
 
                     runProfile.Merge(profile);
                     unmatchedRows.AddRange(profile.UnmatchedRows);
+                    rejectedRows.AddRange(profile.RejectedRows);
                 }
             }
 
@@ -414,6 +416,15 @@ public sealed partial class RecalculationJob(
             {
                 await progress
                     .ReportAsync(100, JobProgressMessageCodec.Encode(NoMatchingRuleEnvelope(unmatchedRows)), ct)
+                    .ConfigureAwait(false);
+            }
+
+            // L2-6: правило категорії не дало ключа окремим рядкам - відхилено лише їх, документ
+            // порахований; номери рядків (без значень і назв колонок) у повідомленні задачі.
+            if (rejectedRows.Count > 0)
+            {
+                await progress
+                    .ReportAsync(100, JobProgressMessageCodec.Encode(CategoryRuleRejectedEnvelope(rejectedRows)), ct)
                     .ConfigureAwait(false);
             }
         }
@@ -942,6 +953,26 @@ public sealed partial class RecalculationJob(
             {
                 ["count"] = unmatched.Count.ToString(CultureInfo.InvariantCulture),
                 ["rows"] = unmatched.Count > NoMatchingRuleRowsShown ? shown + ", …" : shown,
+            });
+    }
+
+    /// <summary>
+    /// Конверт «правило категорії відхилило рядки» (<c>jobs.recalcCategoryRuleRejected</c>, L2-6):
+    /// кількість і перші номери. Ключів рядків, тексту правила й значень комірок тут немає навмисно.
+    /// </summary>
+    /// <param name="rejected">Відхилені рядки за весь прогін.</param>
+    private static JobProgressMessageEnvelope CategoryRuleRejectedEnvelope(List<RejectedRow> rejected)
+    {
+        var shown = string.Join(
+            ", ",
+            rejected.Take(NoMatchingRuleRowsShown).Select(r => r.RowNumber.ToString(CultureInfo.InvariantCulture)));
+
+        return new JobProgressMessageEnvelope(
+            "jobs.recalcCategoryRuleRejected",
+            new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["count"] = rejected.Count.ToString(CultureInfo.InvariantCulture),
+                ["rows"] = rejected.Count > NoMatchingRuleRowsShown ? shown + ", …" : shown,
             });
     }
 

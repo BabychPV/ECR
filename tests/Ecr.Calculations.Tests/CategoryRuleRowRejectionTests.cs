@@ -42,6 +42,9 @@ public sealed class CategoryRuleRowRejectionTests
         // Рядки 1 і 3 пораховані, прогін не впав.
         Assert.Equal(2, profile.Stats.Single().Rows);
         Assert.Empty(profile.UnmatchedRows);
+
+        // Рядок 2 відхилено з номером і публічним ключем; значень комірок у діагностиці немає.
+        Assert.Equal([new RejectedRow(TableInstance, 2, "R001")], profile.RejectedRows);
     }
 
     [Fact]
@@ -51,6 +54,19 @@ public sealed class CategoryRuleRowRejectionTests
         var profile = await RunAsync(["Gas", "Diesel", "Coal"]);
 
         Assert.Equal(3, profile.Stats.Single().Rows);
+        Assert.Empty(profile.RejectedRows);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public async Task Кілька_відхилених_рядків_ідуть_за_порядком_номерів()
+    {
+        var profile = await RunAsync(["", "Diesel", ""]);
+
+        Assert.Equal(1, profile.Stats.Single().Rows);
+        Assert.Equal(
+            [new RejectedRow(TableInstance, 1, "R000"), new RejectedRow(TableInstance, 3, "R002")],
+            profile.RejectedRows);
     }
 
     private static async Task<ModuleProfile> RunAsync(string[] fuelByRow)

@@ -156,6 +156,9 @@ public sealed class CalculationOrchestrator(
         // L-4: хто що закрив — для діагностики «No matching rule … row N».
         var rowMatches = new ConcurrentBag<RowMatchSummary>();
 
+        // L2-6: рядки, відхилені правилом категорії (відмова рядка, а не документа).
+        var rejected = new ConcurrentBag<RejectedRow>();
+
         foreach (var batch in batches)
         {
             // 3. ⚠ Усередині пакета — ПАРАЛЕЛЬНО. Послідовний прогін у 10
@@ -193,7 +196,7 @@ public sealed class CalculationOrchestrator(
                         var stat = await ExecuteAsync(
                             scopedResolver, scopedModules, scopedInputBuilder, scopedOutputWriter,
                             calculationRunId, documentId, periodKey, binding, registries,
-                            _limits.MaxInputCellsPerBinding, rowMatches, token).ConfigureAwait(false);
+                            _limits.MaxInputCellsPerBinding, rowMatches, rejected, token).ConfigureAwait(false);
 
                         measured.Add(stat);
                     }
@@ -220,8 +223,22 @@ public sealed class CalculationOrchestrator(
         }
 
         profile.RecordUnmatched(UnmatchedRowsOf(rowMatches));
+        profile.RecordRejected(rejected.OrderBy(r => r.TableInstanceId).ThenBy(r => r.RowNumber));
 
         return profile;
+    }
+
+    private static int IndexOfKey(IReadOnlyList<string> keys, string key)
+    {
+        for (var i = 0; i < keys.Count; i++)
+        {
+            if (string.Equals(keys[i], key, StringComparison.Ordinal))
+            {
+                return i;
+            }
+        }
+
+        return -1;
     }
 
     /// <summary>Підсумок зіставлення рядків таблиці з правилами однієї прив'язки.</summary>
@@ -282,6 +299,7 @@ public sealed class CalculationOrchestrator(
         RegistrySnapshotCache registries,
         int maxInputCells,
         ConcurrentBag<RowMatchSummary> rowMatches,
+        ConcurrentBag<RejectedRow> rejected,
         CancellationToken ct)
     {
         var module = scopedModules.FirstOrDefault(m => m.CanHandle(binding.Descriptor));
@@ -378,7 +396,25 @@ public sealed class CalculationOrchestrator(
             {
                 // 6. Проміжні значення живуть у пам'яті воркера: модуль нічого
                 //    не пише і не читає з бази між рядками.
-                outputs.Add(await module.ExecuteAsync(prepared, input, ct).ConfigureAwait(false));
+                try
+                {
+                    outputs.Add(await module.ExecuteAsync(prepared, input, ct).ConfigureAwait(false));
+                }
+                catch (Domain.Abstractions.DomainException error)
+                    when (GenericCalculationModule.IsCategoryRuleRowFailure(error))
+                {
+                    // L2-6: правило категорії не дало ключа ЦЬОМУ рядку — відхиляється лише він
+                    // (дизайн §5); решта рядків прив'язки рахується. Слід — номер рядка; тексту
+                    // правила, значень комірок і назв колонок у діагностику не несемо.
+                    var rowKey = input.SourceRowKey ?? string.Empty;
+                    var position = outcome.AllRowKeys is { } all ? IndexOfKey(all, rowKey) : -1;
+                    if (position < 0)
+                    {
+                        position = Math.Max(0, IndexOfKey(rowKeys, rowKey));
+                    }
+
+                    rejected.Add(new RejectedRow(binding.TableInstanceId, position + 1, rowKey));
+                }
             }
         }
 
@@ -388,7 +424,8 @@ public sealed class CalculationOrchestrator(
             .WriteAsync(calculationRunId, outputs, binding.Descriptor.TraceLevel, ct)
             .ConfigureAwait(false);
 
-        return (module.Code, stopwatch.Elapsed, inputs.Count);
+        // Відхилені правилом категорії рядки в обсяг не входять (L2-6).
+        return (module.Code, stopwatch.Elapsed, outputs.Count);
     }
 
     /// <summary>Останній день періоду — дата, на яку резолвиться версія.</summary>
