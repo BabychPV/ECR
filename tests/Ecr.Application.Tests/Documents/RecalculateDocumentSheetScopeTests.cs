@@ -58,14 +58,28 @@ public sealed class RecalculateDocumentSheetScopeTests
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait("Requirement", "ФВ-9.17")]
-    public async Task Перерахунок_усього_документа_з_поданим_аркушем_відхиляється_як_раніше()
+    public async Task Перерахунок_усього_документа_з_одним_поданим_аркушем_ставиться_в_чергу_а_не_відхиляється()
     {
+        // RC15 (P2-A): подані/затверджені аркуші задача ПРОПУСКАЄ, а не відмовляє цілому запиту; відмова
+        // «усі аркуші подані» (немає що рахувати) — у задачі, яка знає склад аркушів періоду.
         var fixture = Arrange(submittedSheet: 3, hiddenSheet: null);
+
+        var jobId = await fixture.Handler.HandleAsync(Document, new PeriodKey(Period), sheetDefId: null, CancellationToken.None);
+
+        Assert.Equal("job-1", jobId);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-9.7")]
+    public async Task Перерахунок_усього_документа_у_закритому_періоді_відхиляється_як_раніше()
+    {
+        var fixture = Arrange(submittedSheet: 3, hiddenSheet: null, periodState: PeriodState.Closed);
 
         var error = await Assert.ThrowsAsync<BusinessRuleException>(
             () => fixture.Handler.HandleAsync(Document, new PeriodKey(Period), sheetDefId: null, CancellationToken.None));
 
-        Assert.Equal("err.ECR-CALC-4221.sheetsSubmitted", error.Details?["messageKey"]);
+        Assert.Equal("err.ECR-CALC-4221.periodClosed", error.Details?["messageKey"]);
     }
 
     [Fact]
