@@ -26,6 +26,7 @@ import { withKnownVersions } from './edits';
 import { rejectionMarksOf } from './saveErrors';
 import {
   applyPatchLocally,
+  refreshStaleness,
   buildRequest,
   patchCells,
   sendPatchBeacon,
@@ -394,6 +395,7 @@ async function saveOrphanSlice(
     const response = await patchCells(documentId, request);
 
     applyPatchLocally(queryClient, request, response);
+    refreshStaleness(queryClient, documentId, request.periodKey);
     discardPendingRows(
       slice.tableInstanceId,
       slice.periodKey,

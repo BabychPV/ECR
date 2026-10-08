@@ -200,7 +200,7 @@ public sealed class IntegrationCellPatcher(
 
                 return new IntegrationWriteResult(plan.Applied, plan.Kept, plan.AwaitingConfirmation, Rejected: rejected);
             }
-            catch (EcrException ex) when (IsRowRace(ex) || (rowsOf is not null && IsCreatedMeanwhile(ex)))
+            catch (EcrException ex) when (IsRowRace(ex) || IsCreatedMeanwhile(ex))
             {
                 // ⚠ Відкинутий батч міг лишити в трекері контексту зміни, яких
                 // у базі вже немає (транзакцію запису відкочено), — наступна
@@ -230,8 +230,9 @@ public sealed class IntegrationCellPatcher(
     /// <c>ECR-ROW-0409</c> <c>rowKeyExists</c> (однина — один новий рядок у батчі).
     /// </summary>
     /// <remarks>
-    /// ⚠ Лише для рядків: для комірок збору повтор на цю відмову не вмикався
-    /// ніколи, і метод комірок поводиться як до A5a.
+    /// ⛔ RC15: і для комірок збору. Раніше повтор тут був лише для рядків подій; дві задачі матеріалізації,
+    /// що одночасно створюють той самий динамічний рядок (`SRC_GEN1`), програвша падала винятком без запису.
+    /// Повтор безпечний: <c>PlanAsync</c> перечитує рядки і пише в НАЯВНИЙ (версія), а не створює.
     /// </remarks>
     private static bool IsCreatedMeanwhile(EcrException ex)
         => string.Equals(ex.ErrorCode, ErrorCodes.RowDuplicate, StringComparison.Ordinal)

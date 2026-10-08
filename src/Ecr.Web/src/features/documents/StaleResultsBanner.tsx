@@ -2,6 +2,7 @@ import type { JSX } from 'react';
 import { Alert, Button, Group, Text } from '@mantine/core';
 import { formatDateTime } from '@/shared/format/datetime';
 import { t } from '@/shared/i18n';
+import { DisabledReason } from '@/features/common/DisabledReason';
 
 interface StaleResultsBannerProps {
   /** Відколи застаріло (перша правка входу після прогону); `null` — сервер не називає. */
@@ -10,7 +11,12 @@ interface StaleResultsBannerProps {
    * Дія «Перерахувати» — та сама, що в «More» і F9 (`useSheetActions`); `null` — ролі її не дано
    * (немає права чи гранта): тоді банер лише повідомляє.
    */
-  readonly recalculate: { readonly loading: boolean; readonly running: boolean; readonly run: () => void } | null;
+  readonly recalculate: {
+    readonly loading: boolean;
+    readonly running: boolean;
+    readonly blockedReason?: string | null;
+    readonly run: () => void;
+  } | null;
 }
 
 /**
@@ -39,16 +45,18 @@ export function StaleResultsBanner({ since, recalculate }: StaleResultsBannerPro
             : t('document.staleResults.hintSince', { date: formatDateTime(since) })}
         </Text>
         {recalculate !== null && (
-          <Button
-            variant="default"
-            size="xs"
-            loading={recalculate.loading}
-            disabled={recalculate.running}
-            onClick={recalculate.run}
-            data-testid="document-stale-results-recalculate"
-          >
-            {recalculate.running ? t('workflow.recalcRunning') : t('workflow.recalculate')}
-          </Button>
+          <DisabledReason reason={recalculate.blockedReason ?? null}>
+            <Button
+              variant="default"
+              size="xs"
+              loading={recalculate.loading}
+              disabled={recalculate.running}
+              onClick={recalculate.run}
+              data-testid="document-stale-results-recalculate"
+            >
+              {recalculate.running ? t('workflow.recalcRunning') : t('workflow.recalculate')}
+            </Button>
+          </DisabledReason>
         )}
       </Group>
     </Alert>

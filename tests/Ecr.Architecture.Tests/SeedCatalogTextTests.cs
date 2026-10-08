@@ -50,7 +50,12 @@ public sealed partial class SeedCatalogTextTests
     /// тут поіменно і з причиною, а не послаблює регулярку. Перевірка йде в
     /// ДВА боки — ключ, який кирилицю втратив, зобов'язаний звідси зникнути.
     /// </remarks>
-    private static readonly string[] CyrillicByDesign = [];
+    // Двомовний підпис «EN — RU» як в Excel-формі Contract (RC15-A): кирилиця тут навмисна.
+    private static readonly string[] CyrillicByDesign =
+    [
+        "document.header.contract.fileNumber",
+        "document.header.contract.version",
+    ];
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]

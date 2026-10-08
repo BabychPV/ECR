@@ -1,10 +1,11 @@
 import type { JSX, ReactNode } from 'react';
-import { NativeSelect, Switch, Text, TextInput } from '@mantine/core';
+import { Chip, NativeSelect, Switch, Text, TextInput } from '@mantine/core';
 import { FilterInline, FilterRow, readerOnlyDescription } from '@/shared/ui/FilterBar';
 import { t } from '@/shared/i18n';
 import { statusKey } from '@/shared/ui/StatusBadge';
 import { useFieldDraft } from '@/shared/ui/useFieldDraft';
 import type { DocumentStateFilter } from './api';
+import { useDocumentListSummary } from './api';
 import { DocumentStateFilters, parseStateFilter, type DocumentListFilters } from './documentListFilters';
 
 interface DocumentListFilterBarProps {
@@ -50,6 +51,8 @@ export function DocumentListFilterBar({
   children,
 }: DocumentListFilterBarProps): JSX.Element {
   const noPeriod = periodKey === null;
+  // Той самий запит, що в смузі лічильників (`DocumentListSummaryStrip`): один ключ — один мережевий виклик.
+  const staleCount = useDocumentListSummary(periodKey).data?.staleResultsCount;
   // ⛔ Поле показує ВЛАСНЕ значення, а не адресу (`useFieldDraft`), як і `FilterBar`: кероване адресою
   // воно губило літери, бо адреса оновлюється переходом і запізнюється.
   const search = useFieldDraft(filters.q);
@@ -153,6 +156,28 @@ export function DocumentListFilterBar({
               filters.setHasLateEdits(event.currentTarget.checked);
             }}
           />
+        </FilterInline>
+
+        {/*
+         * ✎ RC14-D: чіп «Needs recalculation (N)» — `resultsStale=true`. Лічильник — `staleResultsCount` зі
+         * зведення (сервер вже виключив проєкти зі звуженим доступом читача). Без періоду вимкнений: застарілість
+         * належить періоду (`ECR-REQ-0422.resultsStaleNeedsPeriod`); активний чіп лишається, поки фільтр у
+         * адресі, щоб його було чим зняти.
+         */}
+        <FilterInline>
+          <Chip
+            size="xs"
+            checked={filters.resultsStale}
+            disabled={noPeriod}
+            onChange={(checked) => {
+              filters.setResultsStale(checked);
+            }}
+            data-stale-filter=""
+          >
+            {staleCount === undefined
+              ? t('documents.filterStaleNoCount')
+              : t('documents.filterStale', { count: staleCount })}
+          </Chip>
         </FilterInline>
 
         {children}

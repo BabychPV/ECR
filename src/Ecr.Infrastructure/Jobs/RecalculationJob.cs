@@ -69,6 +69,16 @@ public sealed partial class RecalculationJob(
         Message = "RecalculationJob: перерахунок обірвано винятком; кореляція {CorrelationId}.")]
     private static partial void LogRecalculationFailed(ILogger logger, string correlationId, Exception exception);
 
+    [LoggerMessage(
+        Level = LogLevel.Information,
+        Message = "RecalculationJob: документ {DocumentId}: пропущено подані/затверджені аркуші (пар аркуш×період: {Count}).")]
+    private static partial void LogSkippedSheets(ILogger logger, long documentId, int count);
+
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "RecalculationJob: документ {DocumentId}: через спільну методологію перераховано прив'язок поза областю/пропущених аркушів: {Count}.")]
+    private static partial void LogRecomputedOutsideScope(ILogger logger, long documentId, int count);
+
     /// <summary>Стеля прив'язок на прогін: методологій у системі — десятки.</summary>
     private const int MaxBindings = 5_000;
 
@@ -159,7 +169,7 @@ public sealed partial class RecalculationJob(
         Domain.Entities.Calculations.CalculationRun? yearRun = null;
 
         // RC14 (P2-4): що переносити в прогін періоду (лише для прогону області аркуша).
-        var carryOvers = new Dictionary<int, ResultCarryOver>();
+        var carryOvers = new Dictionary<int, List<ResultCarryOver>>();
 
         // L-4: рядки, яким не підійшло жодне правило; назовні — лише кількість і номери.
         var unmatchedRows = new List<UnmatchedRow>();
@@ -287,7 +297,24 @@ public sealed partial class RecalculationJob(
                         ct)
                     .ConfigureAwait(false);
 
-                var bindingsByPeriod = await BindingsAsync(docRequest, periods, ct).ConfigureAwait(false);
+                // ⛔ RC15 (P2-A): перерахунок УСЬОГО документа пропускає подані/затверджені аркуші: ні їхні комірки
+                // (їх не пише `RecalculationService`), ні результати методологій (прив'язки пропускаються нижче;
+                // результати переносяться з попереднього прогону) не змінюються.
+                var skippedSheets = docRequest.SheetDefId is null
+                    ? await SubmittedSheetsAsync(docRequest, request.PeriodKey, ct).ConfigureAwait(false)
+                    : new Dictionary<int, HashSet<int>>();
+                var skippedPairs = skippedSheets.Where(pair => periods.Contains(pair.Key)).Sum(pair => pair.Value.Count);
+                if (logger is not null && skippedPairs > 0)
+                {
+                    LogSkippedSheets(logger, documentId, skippedPairs);
+                }
+
+                var bindingPlan = await BindingsAsync(docRequest, periods, skippedSheets, ct).ConfigureAwait(false);
+                var bindingsByPeriod = bindingPlan.Bindings;
+                if (logger is not null && bindingPlan.RecomputedOnInactive > 0)
+                {
+                    LogRecomputedOutsideScope(logger, documentId, bindingPlan.RecomputedOnInactive);
+                }
 
                 // ⛔ КРОК 2 — методології, і лише тепер: їхні входи щойно
                 // стали актуальними.
@@ -357,10 +384,11 @@ public sealed partial class RecalculationJob(
                     ? (IReadOnlyList<int>)[namedPeriod]
                     : periods;
 
-                // ⛔ RC14 (приймальна №10, P2-4): прогін області аркуша стає актуальним для ВСЬОГО документа й
-                // періоду, тож результати методологій ІНШИХ аркушів переносяться в нього з попереднього
-                // актуального прогону (`CompleteAsync` → `CarryOverResultsAsync`), а не зникають.
-                var carryMethodologies = await OutOfScopeMethodologyIdsAsync(docRequest, ct).ConfigureAwait(false);
+                // ⛔ RC14 (приймальна №10, P2-4) + RC15 (P2-C): прогін області аркуша чи документа з пропущеними
+                // аркушами стає актуальним для ВСЬОГО документа й періоду, тож результати методологій, яких він
+                // не рахував (прив'язані лише до таблиць інших/пропущених аркушів), переносяться в нього з
+                // попереднього актуального прогону (`CompleteAsync` → `CarryOverResultsAsync`), а не зникають.
+                // Перелік складає `BindingsAsync` за періодами.
 
                 for (var p = 0; p < methodologyPeriods.Count; p++)
                 {
@@ -376,9 +404,14 @@ public sealed partial class RecalculationJob(
 
                     var (run, runProfile) = await RunForAsync(period).ConfigureAwait(false);
 
-                    if (carryMethodologies.Count > 0)
+                    if (bindingPlan.CarryOver.TryGetValue(period, out var carryMethodologies))
                     {
-                        carryOvers[period] = new ResultCarryOver(documentId, carryMethodologies);
+                        if (!carryOvers.TryGetValue(period, out var periodCarry))
+                        {
+                            carryOvers[period] = periodCarry = [];
+                        }
+
+                        periodCarry.Add(new ResultCarryOver(documentId, carryMethodologies));
                     }
 
                     var profile = await orchestrator
@@ -420,8 +453,7 @@ public sealed partial class RecalculationJob(
             // актуальності однією транзакцією (ФВ-9.11) — на кожен період.
             foreach (var (period, (run, profile)) in periodRuns)
             {
-                await runs.CompleteAsync(run.Id, profile, ct, carryOvers.GetValueOrDefault(period)).ConfigureAwait(false);
-            }
+                await runs.CompleteAsync(run.Id, profile, ct, carryOvers.GetValueOrDefault(period)).ConfigureAwait(false);            }
 
             // L-4: «No matching rule … row N». Не помилка й не відмова - решта рядків уже
             // пораховано; це слід у повідомленні задачі, щоб рядок без правила не зник мовчки.
@@ -710,51 +742,10 @@ public sealed partial class RecalculationJob(
                         && i.DocumentId == documentId);
     }
 
-    /// <summary>
-    /// Методології, чиї результати прогін ОБЛАСТІ аркуша мусить зберегти (RC14, P2-4): прив'язані до таблиць
-    /// ІНШИХ аркушів і не прив'язані до таблиць аркуша області.
-    /// </summary>
-    /// <param name="request">Завдання; без <c>SheetDefId</c> — порожньо (повний прогін, переносити нічого).</param>
-    /// <param name="ct">Токен скасування.</param>
-    /// <remarks>
-    /// ⚠ Методологія, прив'язана і всередині, і поза областю, не переноситься: прогін області її
-    /// перераховує, а відокремити результати «чужих» рядків від «своїх» без ключа таблиці в результаті
-    /// неможливо (відомий компроміс; повний перерахунок документа їх вирівнює).
-    /// </remarks>
-    private async Task<IReadOnlyCollection<int>> OutOfScopeMethodologyIdsAsync(
-        RecalculationRequest request, CancellationToken ct)
-    {
-        if (request.SheetDefId is not { } scopeSheetId)
-        {
-            return [];
-        }
-
-        var inScope = await db.CalculationBindings
-            .AsNoTracking()
-            .Where(b => b.IsActive
-                        && db.TableDefs.Any(td => td.Id == b.TableDefId && td.SheetDefId == scopeSheetId))
-            .Select(b => b.MethodologyId)
-            .Distinct()
-            .ToListAsync(ct)
-            .ConfigureAwait(false);
-
-        var outside = await db.CalculationBindings
-            .AsNoTracking()
-            .Where(b => b.IsActive
-                        && db.TableDefs.Any(td => td.Id == b.TableDefId && td.SheetDefId != scopeSheetId))
-            .Select(b => b.MethodologyId)
-            .Distinct()
-            .OrderBy(id => id)
-            .Take(MaxBindings)
-            .ToListAsync(ct)
-            .ConfigureAwait(false);
-
-        return [.. outside.Except(inScope)];
-    }
-
     /// <summary>Прив'язки методологій до таблиць документа, РОЗКЛАДЕНІ ЗА ПЕРІОДАМИ.</summary>
     /// <param name="request">Завдання перерахунку.</param>
     /// <param name="periods">Періоди в скоупі запису, за зростанням.</param>
+    /// <param name="skippedSheets">Пропущені (подані/затверджені) аркуші за періодами; їхні таблиці не рахуються.</param>
     /// <param name="ct">Токен скасування.</param>
     /// <returns>Прив'язки за ключем періоду; періоду без прив'язок у мапі немає.</returns>
     /// <remarks>
@@ -771,8 +762,9 @@ public sealed partial class RecalculationJob(
     /// періоду, тож «період прив'язки» — не метадані, а частина самого
     /// розрахунку.
     /// </remarks>
-    private async Task<IReadOnlyDictionary<int, IReadOnlyList<CalculationBindingRef>>> BindingsAsync(
-        RecalculationRequest request, IReadOnlyList<int> periods, CancellationToken ct)
+    private async Task<BindingPlan> BindingsAsync(
+        RecalculationRequest request, IReadOnlyList<int> periods,
+        Dictionary<int, HashSet<int>> skippedSheets, CancellationToken ct)
     {
         // ⚠ Q-331: методологія прив'язана до `TableDefId`, тобто до конкретної
         // таблиці — і, транзитивно, до аркуша, якому та таблиця належить
@@ -794,28 +786,22 @@ public sealed partial class RecalculationJob(
         // окремі параметри): фактичний план на EcrPerfI2, док 326 — 12 seek'ів, 40 читань.
         // Додатковий `IN (SELECT PeriodKey FROM doc.Period)` дав би 24 seek'и / 64 читання,
         // тобто гірше, — тому не доданий.
-        var instancesQuery = db.TableInstances
+        var instances = await db.TableInstances
             .AsNoTracking()
             .Where(i => i.DocumentId == request.DocumentId
-                        && scopeKeys.Contains(i.PeriodKeyValue));
-
-        if (request.SheetDefId is { } bindingSheetId)
-        {
-            instancesQuery = instancesQuery.Where(i =>
-                db.TableDefs.Any(td => td.Id == i.TableDefId && td.SheetDefId == bindingSheetId));
-        }
-
-        var instances = await instancesQuery
+                        && scopeKeys.Contains(i.PeriodKeyValue))
             .OrderBy(i => i.PeriodKeyValue)
             .ThenBy(i => i.Id)
             .Take(MaxBindings)
-            .Select(i => new InstanceRow(i.Id, i.TableDefId, i.PeriodKeyValue))
+            .Select(i => new InstanceRow(
+                i.Id, i.TableDefId, i.PeriodKeyValue,
+                db.TableDefs.Where(td => td.Id == i.TableDefId).Select(td => td.SheetDefId).FirstOrDefault()))
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
         if (instances.Count == 0)
         {
-            return ReadOnlyDictionary<int, IReadOnlyList<CalculationBindingRef>>.Empty;
+            return BindingPlan.Empty;
         }
 
         var tableDefIds = instances.Select(i => i.TableDefId).Distinct().ToList();
@@ -829,13 +815,55 @@ public sealed partial class RecalculationJob(
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
+        // ⛔ RC15 (P2-A/P2-C): які таблиці прогін ПЕРЕРАХОВУЄ («активні») — а які ні:
+        //  - область аркуша: лише таблиці цього аркуша;
+        //  - весь документ: усі, КРІМ пропущених (поданих/затверджених) аркушів періоду.
+        // Методологія, чия прив'язка є хоч в одній активній таблиці періоду, рахується ЦІЛКОМ (усі її
+        // прив'язки в періоді): результат лягає за методологією й рядком, а не за таблицею, тож відокремити
+        // рядки «чужого» аркуша від «своїх» неможливо, і перенесення старих рядків разом із новими подвоїло б
+        // їх. Методології, що прив'язані ЛИШЕ до неактивних таблиць, прогін не рахує — їхні результати
+        // переносяться (`ResultCarryOver`) з попереднього актуального прогону.
+        bool IsActive(InstanceRow row)
+            => request.SheetDefId is { } scope
+                ? row.SheetDefId == scope
+                : !(skippedSheets.TryGetValue(row.PeriodKeyValue, out var skipped) && skipped.Contains(row.SheetDefId));
+
+        var methodologiesByTable = bindings
+            .GroupBy(b => b.TableDefId)
+            .ToDictionary(g => g.Key, g => g.Select(b => b.MethodologyId).Distinct().ToList());
+
+        var touchedByPeriod = instances
+            .Where(IsActive)
+            .GroupBy(i => i.PeriodKeyValue)
+            .ToDictionary(
+                g => g.Key,
+                g => g.SelectMany(i => methodologiesByTable.GetValueOrDefault(i.TableDefId) ?? []).ToHashSet());
+
+        var carryByPeriod = new Dictionary<int, IReadOnlyCollection<int>>();
+        foreach (var group in instances.GroupBy(i => i.PeriodKeyValue))
+        {
+            var touched = touchedByPeriod.GetValueOrDefault(group.Key) ?? [];
+            var carry = group
+                .SelectMany(i => methodologiesByTable.GetValueOrDefault(i.TableDefId) ?? [])
+                .Where(id => !touched.Contains(id))
+                .Distinct()
+                .Order()
+                .ToList();
+            if (carry.Count > 0)
+            {
+                carryByPeriod[group.Key] = carry;
+            }
+        }
+
         // ⚠ `Distinct` — усередині групи періоду, а не над плоским набором:
         // однакова пара (екземпляр, методологія) неможлива в двох періодах,
         // бо екземпляр належить рівно одному періоду, але робити `Distinct`
         // після групування чесніше — воно тоді означає рівно те, що написано.
-        return instances
+        var recomputedOnSubmitted = 0;
+        var byPeriod = instances
             .SelectMany(i => bindings
-                .Where(b => b.TableDefId == i.TableDefId)
+                .Where(b => b.TableDefId == i.TableDefId
+                            && (touchedByPeriod.GetValueOrDefault(i.PeriodKeyValue)?.Contains(b.MethodologyId) ?? false))
                 .Select(b => new PeriodBindingRow(
                     i.PeriodKeyValue, new CalculationBindingRef(i.Id, b.MethodologyId))))
             .GroupBy(row => row.PeriodKeyValue)
@@ -843,6 +871,34 @@ public sealed partial class RecalculationJob(
                 group => group.Key,
                 group => (IReadOnlyList<CalculationBindingRef>)
                     [.. group.Select(row => row.Binding).Distinct()]);
+
+        // Чесне попередження: спільна методологія перерахована й на ПОДАНОМУ аркуші (рахунок — лише для журналу).
+        foreach (var i in instances.Where(i => !IsActive(i)))
+        {
+            recomputedOnSubmitted += byPeriod.TryGetValue(i.PeriodKeyValue, out var list)
+                ? list.Count(b => b.TableInstanceId == i.Id)
+                : 0;
+        }
+
+        return new BindingPlan(byPeriod, carryByPeriod, recomputedOnSubmitted);
+    }
+
+    /// <summary>Прив'язки методологій за періодами, що переносити з попереднього прогону, і лічильник для журналу.</summary>
+    /// <param name="Bindings">Прив'язки, які рахує прогін, за ключем періоду.</param>
+    /// <param name="CarryOver">Методології, чиї результати переносяться з попереднього актуального прогону, за періодом.</param>
+    /// <param name="RecomputedOnInactive">
+    /// Скільки прив'язок неактивних (поза областю/пропущених) таблиць перераховано через спільну методологію.
+    /// </param>
+    private sealed record BindingPlan(
+        IReadOnlyDictionary<int, IReadOnlyList<CalculationBindingRef>> Bindings,
+        IReadOnlyDictionary<int, IReadOnlyCollection<int>> CarryOver,
+        int RecomputedOnInactive)
+    {
+        /// <summary>Порожній план: нічого не рахується й не переноситься.</summary>
+        public static readonly BindingPlan Empty = new(
+            ReadOnlyDictionary<int, IReadOnlyList<CalculationBindingRef>>.Empty,
+            ReadOnlyDictionary<int, IReadOnlyCollection<int>>.Empty,
+            0);
     }
 
     /// <summary>
@@ -895,19 +951,35 @@ public sealed partial class RecalculationJob(
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
-        var submitted = await db.ApprovalStates
-            .AsNoTracking()
-            .Where(s => s.DocumentId == request.DocumentId
-                        && (request.PeriodKey == null || s.PeriodKey == request.PeriodKey)
-                        && (request.SheetDefId == null || s.SheetDefId == request.SheetDefId)
-                        && (s.Status == Domain.Enums.DocumentStatus.Submitted
-                            || s.Status == Domain.Enums.DocumentStatus.Approved))
-            .Select(s => s.PeriodKey)
-            .Distinct()
-            .ToListAsync(ct)
-            .ConfigureAwait(false);
+        // ⛔ RC15 (P2-A): для області аркуша (`SheetDefId`) період відхиляється, коли поданий САМ цей аркуш; для
+        // УСЬОГО документа — лише коли подані/затверджені ВСІ аркуші, що мають таблиці в періоді (рахувати
+        // нічого). Частково подані періоди лишаються в скоупі: подані аркуші пропускає `SubmittedSheetsAsync`.
+        var submittedBySheet = await SubmittedSheetsAsync(request, request.PeriodKey, ct).ConfigureAwait(false);
+        HashSet<int> submittedKeys;
 
-        var submittedKeys = submitted.ToHashSet();
+        if (request.SheetDefId is not null)
+        {
+            submittedKeys = [.. submittedBySheet.Where(pair => pair.Value.Contains(request.SheetDefId.Value)).Select(pair => pair.Key)];
+        }
+        else
+        {
+            var submittedPeriods = submittedBySheet.Keys.ToList();
+            var instanceSheets = submittedPeriods.Count == 0
+                ? []
+                : await db.TableInstances
+                    .AsNoTracking()
+                    .Where(i => i.DocumentId == request.DocumentId && submittedPeriods.Contains(i.PeriodKeyValue))
+                    .Join(db.TableDefs, i => i.TableDefId, td => td.Id, (i, td) => new { i.PeriodKeyValue, td.SheetDefId })
+                    .Distinct()
+                    .ToListAsync(ct)
+                    .ConfigureAwait(false);
+
+            submittedKeys = [.. submittedPeriods.Where(period =>
+            {
+                var sheets = instanceSheets.Where(x => x.PeriodKeyValue == period).Select(x => x.SheetDefId).ToList();
+                return sheets.Count > 0 && sheets.All(submittedBySheet[period].Contains);
+            })];
+        }
         var approved = request.ApprovedBy is not null;
         var refused = new HashSet<int>();
 
@@ -935,6 +1007,29 @@ public sealed partial class RecalculationJob(
         // `ECR-PRD-0404`), і підміняти його чужим кодом означало б сховати
         // справжню причину за правдоподібною.
         return refused;
+    }
+
+    /// <summary>Подані/затверджені аркуші документа за періодами (ФВ-9.17).</summary>
+    /// <param name="request">Завдання.</param>
+    /// <param name="periodKey">Період; <c>null</c> — усі.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Ключ періоду → аркуші, що там подані або затверджені.</returns>
+    private async Task<Dictionary<int, HashSet<int>>> SubmittedSheetsAsync(
+        RecalculationRequest request, int? periodKey, CancellationToken ct)
+    {
+        var rows = await db.ApprovalStates
+            .AsNoTracking()
+            .Where(s => s.DocumentId == request.DocumentId
+                        && (periodKey == null || s.PeriodKey == periodKey)
+                        && (s.Status == Domain.Enums.DocumentStatus.Submitted
+                            || s.Status == Domain.Enums.DocumentStatus.Approved))
+            .Select(s => new { s.PeriodKey, s.SheetDefId })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        return rows
+            .GroupBy(row => row.PeriodKey)
+            .ToDictionary(group => group.Key, group => group.Select(row => row.SheetDefId).ToHashSet());
     }
 
     /// <summary>Ресурс <c>sp_getapplock</c> для перерахунку документа.</summary>
@@ -1061,7 +1156,8 @@ public sealed partial class RecalculationJob(
     /// <param name="Id">Ідентифікатор екземпляра.</param>
     /// <param name="TableDefId">Опис таблиці.</param>
     /// <param name="PeriodKeyValue">Період екземпляра.</param>
-    private sealed record InstanceRow(long Id, int TableDefId, int PeriodKeyValue);
+    /// <param name="SheetDefId">Аркуш, якому належить таблиця екземпляра.</param>
+    private sealed record InstanceRow(long Id, int TableDefId, int PeriodKeyValue, int SheetDefId);
 
     /// <summary>Прив'язка методології до опису таблиці.</summary>
     private sealed record BindingRow(int TableDefId, int MethodologyId);

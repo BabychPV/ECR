@@ -32,7 +32,10 @@ public sealed class RelationRollupRecalculationTests(SqlServerFixture sql)
     private const int StringCol = 0;
     private const int DecimalCol = 1;
     private const int FormulaCol = 4;
+    private const int TotalCol = 3;
     private const int ColumnFormulaId = 930_001;
+    private const int TargetFormulaId = 930_002;
+    private const int TargetOwnFormulaId = 930_003;
 
     private sealed record Pair(TestDocument Source, TestDocument Target);
 
@@ -113,6 +116,147 @@ public sealed class RelationRollupRecalculationTests(SqlServerFixture sql)
         await versionsSpy.DidNotReceive().ListTableRelationsAsync(Arg.Any<int>(), Arg.Any<CancellationToken>());
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-2.12")]
+    public async Task Формула_над_ціллю_Rollup_перераховується_у_повному_прогоні_після_запису_цілі()
+    {
+        var pair = await ArrangeAsync();
+
+        await using (var db = CreateContext([]))
+        {
+            await Build(db, pair, flag: true, withRollup: true, withHook: true, withColumnFormula: false, withTargetFormula: true)
+                .RecalculateAllAsync(pair.Target.DocumentId, pair.Target.PeriodKey, CancellationToken.None);
+        }
+
+        // Ціль стала 5 + 10; CTOT = CFRM * 2 мусить прочитати НОВУ ціль, а не порожню/стару.
+        Assert.Equal(15m, await NumericAsync(pair.Target, pair.Target.RowIds[0], FormulaCol));
+        Assert.Equal(30m, await NumericAsync(pair.Target, pair.Target.RowIds[0], TotalCol));
+
+        // Джерело змінилось — і ціль, і формула над нею слідують за ним.
+        await ExecuteAsync(
+            $"UPDATE doc.CellValue SET ValueNumeric = 7 WHERE TableRowId = {pair.Source.RowIds[0]} " +
+            $"AND ColumnDefId = {pair.Source.ColumnDefIds[DecimalCol]}");
+
+        await using (var db = CreateContext([]))
+        {
+            await Build(db, pair, flag: true, withRollup: true, withHook: true, withColumnFormula: false, withTargetFormula: true)
+                .RecalculateAllAsync(pair.Target.DocumentId, pair.Target.PeriodKey, CancellationToken.None);
+        }
+
+        Assert.Equal(17m, await NumericAsync(pair.Target, pair.Target.RowIds[0], FormulaCol));
+        Assert.Equal(34m, await NumericAsync(pair.Target, pair.Target.RowIds[0], TotalCol));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-2.12")]
+    public async Task Формула_над_ціллю_Rollup_перераховується_після_правки_джерела_інкрементним_прогоном()
+    {
+        var pair = await ArrangeAsync();
+
+        // Правка комірки джерела (як PatchCells): значення вже в базі, брудне насіння — ця комірка.
+        await ExecuteAsync(
+            $"UPDATE doc.CellValue SET ValueNumeric = 7 WHERE TableRowId = {pair.Source.RowIds[0]} " +
+            $"AND ColumnDefId = {pair.Source.ColumnDefIds[DecimalCol]}");
+        var dirty = new DirtySet();
+        dirty.Add(new CellAddress(pair.Source.PeriodKey, pair.Source.RowIds[0], pair.Source.ColumnDefIds[DecimalCol]));
+
+        await using (var db = CreateContext([]))
+        {
+            await Build(db, pair, flag: true, withRollup: true, withHook: true, withColumnFormula: false, withTargetFormula: true)
+                .RecalculateAsync(pair.Source.TableInstanceId, dirty, CancellationToken.None);
+        }
+
+        Assert.Equal(17m, await NumericAsync(pair.Target, pair.Target.RowIds[0], FormulaCol));
+        Assert.Equal(34m, await NumericAsync(pair.Target, pair.Target.RowIds[0], TotalCol));
+    }
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-2.12")]
+    public async Task Формула_над_ціллю_Rollup_із_власним_виразом_цілі_перераховується_у_повному_прогоні_R15b1()
+    {
+        var pair = await ArrangeAsync();
+
+        // Повний прогін двічі: перший пише ціль 15 у порожню комірку (значення змінилось), другий бачить, що
+        // Rollup збігається зі збереженим, а власний вираз цілі `[CDEC] * 0` щойно дав 0 — формула над ціллю
+        // мусить прочитати Rollup (15), а не 0 виразу.
+        for (var pass = 0; pass < 3; pass++)
+        {
+            await using var db = CreateContext([]);
+            await Build(db, pair, flag: true, withRollup: true, withHook: true, withColumnFormula: false,
+                    withTargetFormula: true, targetOwnExpression: "[CDEC] * 0")
+                .RecalculateAllAsync(pair.Target.DocumentId, pair.Target.PeriodKey, CancellationToken.None);
+
+            Assert.Equal(15m, await NumericAsync(pair.Target, pair.Target.RowIds[0], FormulaCol));
+            Assert.Equal(30m, await NumericAsync(pair.Target, pair.Target.RowIds[0], TotalCol));
+        }
+
+        // Джерело змінилось — повний прогін слідує.
+        await ExecuteAsync(
+            $"UPDATE doc.CellValue SET ValueNumeric = 7 WHERE TableRowId = {pair.Source.RowIds[0]} " +
+            $"AND ColumnDefId = {pair.Source.ColumnDefIds[DecimalCol]}");
+        await using (var db = CreateContext([]))
+        {
+            await Build(db, pair, flag: true, withRollup: true, withHook: true, withColumnFormula: false,
+                    withTargetFormula: true, targetOwnExpression: "[CDEC] * 0")
+                .RecalculateAllAsync(pair.Target.DocumentId, pair.Target.PeriodKey, CancellationToken.None);
+        }
+
+        Assert.Equal(17m, await NumericAsync(pair.Target, pair.Target.RowIds[0], FormulaCol));
+        Assert.Equal(34m, await NumericAsync(pair.Target, pair.Target.RowIds[0], TotalCol));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-2.12")]
+    public async Task Ціль_Rollup_із_виразом_CDEC_на_1_повний_та_інкрементний_прогони_дають_однакові_числа_R15b1()
+    {
+        var pair = await ArrangeAsync();
+
+        // Повний: проміжний CFRM = CDEC = 4, Rollup = 15 → CTOT мусить бути 30, а не 8.
+        for (var pass = 0; pass < 2; pass++)
+        {
+            await using var db = CreateContext([]);
+            await Build(db, pair, flag: true, withRollup: true, withHook: true, withColumnFormula: false,
+                    withTargetFormula: true, targetOwnExpression: "[CDEC] * 1")
+                .RecalculateAllAsync(pair.Target.DocumentId, pair.Target.PeriodKey, CancellationToken.None);
+
+            Assert.Equal(15m, await NumericAsync(pair.Target, pair.Target.RowIds[0], FormulaCol));
+            Assert.Equal(30m, await NumericAsync(pair.Target, pair.Target.RowIds[0], TotalCol));
+        }
+
+        // Інкрементний після правки джерела (VAL 5 → 7): 17 / 34, потім повний — ті самі числа.
+        await ExecuteAsync(
+            $"UPDATE doc.CellValue SET ValueNumeric = 7 WHERE TableRowId = {pair.Source.RowIds[0]} " +
+            $"AND ColumnDefId = {pair.Source.ColumnDefIds[DecimalCol]}");
+        var dirty = new DirtySet();
+        dirty.Add(new CellAddress(pair.Source.PeriodKey, pair.Source.RowIds[0], pair.Source.ColumnDefIds[DecimalCol]));
+        await using (var db = CreateContext([]))
+        {
+            await Build(db, pair, flag: true, withRollup: true, withHook: true, withColumnFormula: false,
+                    withTargetFormula: true, targetOwnExpression: "[CDEC] * 1")
+                .RecalculateAsync(pair.Source.TableInstanceId, dirty, CancellationToken.None);
+        }
+
+        Assert.Equal(17m, await NumericAsync(pair.Target, pair.Target.RowIds[0], FormulaCol));
+        Assert.Equal(34m, await NumericAsync(pair.Target, pair.Target.RowIds[0], TotalCol));
+
+        await using (var db = CreateContext([]))
+        {
+            await Build(db, pair, flag: true, withRollup: true, withHook: true, withColumnFormula: false,
+                    withTargetFormula: true, targetOwnExpression: "[CDEC] * 1")
+                .RecalculateAllAsync(pair.Target.DocumentId, pair.Target.PeriodKey, CancellationToken.None);
+        }
+
+        Assert.Equal(17m, await NumericAsync(pair.Target, pair.Target.RowIds[0], FormulaCol));
+        Assert.Equal(34m, await NumericAsync(pair.Target, pair.Target.RowIds[0], TotalCol));
+    }
+
     private async Task<Pair> ArrangeAsync()
     {
         var source = await new TestDocumentBuilder(sql.ConnectionString)
@@ -139,7 +283,8 @@ public sealed class RelationRollupRecalculationTests(SqlServerFixture sql)
 
     private static RecalculationService Build(
         EcrDbContext db, Pair pair, bool flag, bool withRollup, bool withHook, bool withColumnFormula,
-        ITemplateVersionStore? versionsOverride = null)
+        ITemplateVersionStore? versionsOverride = null, bool withTargetFormula = false,
+        string? targetOwnExpression = null)
     {
         var target = pair.Target;
         var bulk = new BulkCellLoader(db.Database.GetConnectionString()!, 1000);
@@ -152,7 +297,21 @@ public sealed class RelationRollupRecalculationTests(SqlServerFixture sql)
                .Returns((PeriodState?)PeriodState.Open);
 
         var versions = versionsOverride ?? Substitute.For<ITemplateVersionStore>();
-        versions.ListFormulaDependenciesAsync(target.TemplateVersionId, Arg.Any<CancellationToken>()).Returns([]);
+        // Формула над ціллю Rollup (CTOT = CFRM * 2) має в графі ребро на колонку цілі, як після справжньої публікації.
+        var edgeList = new List<FormulaDependency>();
+        if (withTargetFormula)
+        {
+            edgeList.Add(FormulaDependency.ForFormula(TargetFormulaId, 0, target.TableDefId, null, target.ColumnDefIds[FormulaCol], null, null, 0));
+        }
+
+        // R15b-1: власний вираз цілі читає CDEC (як `[LIMIT] * 0` у шаблоні) — ребро ставить його ПЕРЕД формулою над ціллю.
+        if (targetOwnExpression is not null)
+        {
+            edgeList.Add(FormulaDependency.ForFormula(TargetOwnFormulaId, 0, target.TableDefId, null, target.ColumnDefIds[DecimalCol], null, null, 0));
+        }
+
+        IReadOnlyList<FormulaDependency> edges = edgeList;
+        versions.ListFormulaDependenciesAsync(target.TemplateVersionId, Arg.Any<CancellationToken>()).Returns(edges);
 
         if (withRollup)
         {
@@ -189,6 +348,9 @@ public sealed class RelationRollupRecalculationTests(SqlServerFixture sql)
 
                 return (IReadOnlyList<TableInstanceRef>)both;
             });
+        rows.ResolveTableInstanceAsync(Arg.Any<long>(), Arg.Any<CancellationToken>())
+            .Returns(async call => (await real.ResolveTableInstanceAsync(call.ArgAt<long>(0), CancellationToken.None))
+                with { DocumentId = target.DocumentId, TemplateVersionId = target.TemplateVersionId });
         rows.GetRowIdsBatchAsync(Arg.Any<IReadOnlyList<long>>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
             .Returns(call => real.GetRowIdsBatchAsync(
                 call.ArgAt<IReadOnlyList<long>>(0), call.ArgAt<PeriodKey>(1), CancellationToken.None));
@@ -197,12 +359,13 @@ public sealed class RelationRollupRecalculationTests(SqlServerFixture sql)
         IRelationRecalculator? hook = withHook ? new RelationRecalculator(versions, cells) : null;
 
         return new RecalculationService(
-            cells, rows, periods, Metadata(pair, flag, withColumnFormula), versions,
+            cells, rows, periods, Metadata(pair, flag, withColumnFormula, withTargetFormula, targetOwnExpression), versions,
             new RealFormulaEngine(), units, Substitute.For<IRegistryStore>(), headers,
             new AuditWriter(db), clock, new UnitOfWork(db), new SheetEditGate(db), hook);
     }
 
-    private static IMetadataCache Metadata(Pair pair, bool flag, bool withColumnFormula)
+    private static IMetadataCache Metadata(
+        Pair pair, bool flag, bool withColumnFormula, bool withTargetFormula = false, string? targetOwnExpression = null)
     {
         var target = pair.Target;
         var sheet = new SheetDef(target.TemplateVersionId, EcrCode.Create(target.SheetCode), Name("Sheet"), 1);
@@ -218,7 +381,7 @@ public sealed class RelationRollupRecalculationTests(SqlServerFixture sql)
             foreach (var (index, code, type) in new[]
                      {
                          (StringCol, "CSTR", CellDataType.String), (DecimalCol, "CDEC", CellDataType.Decimal),
-                         (FormulaCol, "CFRM", CellDataType.Formula),
+                         (TotalCol, "CTOT", CellDataType.Decimal), (FormulaCol, "CFRM", CellDataType.Formula),
                      })
             {
                 var def = new ColumnDef(doc.TableDefId, EcrCode.Create(code), Name(code), index + 1, type);
@@ -234,6 +397,25 @@ public sealed class RelationRollupRecalculationTests(SqlServerFixture sql)
                 formula.AssignColumn(doc.ColumnDefIds[FormulaCol]);
                 formula.SetEvaluationOrder(1);
                 table.AddFormula(formula);
+            }
+
+            // R15b-1: ціль Rollup має ВЛАСНИЙ вираз (валідатор вимагає Formula-колонку), напр. `[CDEC] * 0`.
+            if (targetOwnExpression is not null && doc == pair.Target)
+            {
+                var own = new FormulaDef(table.Id, FormulaScope.Column, targetOwnExpression, ExpressionDialect.Template);
+                SetId(own, TargetOwnFormulaId);
+                own.AssignColumn(doc.ColumnDefIds[FormulaCol]);
+                own.SetEvaluationOrder(1);
+                table.AddFormula(own);
+            }
+
+            if (withTargetFormula && doc == pair.Target)
+            {
+                var overTarget = new FormulaDef(table.Id, FormulaScope.Column, "[CFRM] * 2", ExpressionDialect.Template);
+                SetId(overTarget, TargetFormulaId);
+                overTarget.AssignColumn(doc.ColumnDefIds[TotalCol]);
+                overTarget.SetEvaluationOrder(2);
+                table.AddFormula(overTarget);
             }
 
             sheet.AddTable(table);

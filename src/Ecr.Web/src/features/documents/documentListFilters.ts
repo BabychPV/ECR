@@ -36,6 +36,14 @@ export interface DocumentListFilters {
   readonly hasLateEdits: boolean;
 
   /**
+   * Лише документи зі застарілими результатами методологій («Needs recalculation»).
+   *
+   * ⛔ Як і `state`, `false` без періоду, хоч би що стояло в адресі: застарілість належить періоду, і сервер
+   * відповів би `422`.
+   */
+  readonly resultsStale: boolean;
+
+  /**
    * Пошук за ключем чи назвою документа (`q`, `UI-18`). Порожній рядок — без пошуку.
    *
    * ⚠ Сире значення з адреси (поле показує його одразу); у запит воно йде через
@@ -52,6 +60,7 @@ export interface DocumentListFilters {
   readonly setState: (state: DocumentStateFilter | null) => void;
   readonly setMine: (mine: boolean) => void;
   readonly setHasLateEdits: (hasLateEdits: boolean) => void;
+  readonly setResultsStale: (resultsStale: boolean) => void;
   readonly setQ: (q: string) => void;
   readonly setProjectId: (projectId: number | null) => void;
 
@@ -70,6 +79,7 @@ export function useDocumentListFilters(periodKey: number | null): DocumentListFi
   const [rawState] = useUrlState('state');
   const [rawMine] = useUrlState('mine');
   const [rawHasLateEdits] = useUrlState('hasLateEdits');
+  const [rawResultsStale] = useUrlState('resultsStale');
   const [rawQ] = useUrlState('q');
   const [rawProjectId] = useUrlState('projectId');
   const setParams = useUrlParamsSetter();
@@ -77,6 +87,7 @@ export function useDocumentListFilters(periodKey: number | null): DocumentListFi
   const state = periodKey === null ? null : parseStateFilter(rawState);
   const mine = rawMine === 'true';
   const hasLateEdits = rawHasLateEdits === 'true';
+  const resultsStale = periodKey !== null && rawResultsStale === 'true';
   const q = rawQ ?? '';
   const parsedProject = rawProjectId === null ? Number.NaN : Number(rawProjectId);
   const projectId = Number.isInteger(parsedProject) && parsedProject > 0 ? parsedProject : null;
@@ -102,6 +113,13 @@ export function useDocumentListFilters(periodKey: number | null): DocumentListFi
     [setParams],
   );
 
+  const setResultsStale = useCallback(
+    (next: boolean) => {
+      setParams({ resultsStale: next ? 'true' : null, cursor: null });
+    },
+    [setParams],
+  );
+
   const setQ = useCallback(
     (next: string) => {
       setParams({ q: next === '' ? null : next, cursor: null });
@@ -117,19 +135,21 @@ export function useDocumentListFilters(periodKey: number | null): DocumentListFi
   );
 
   const reset = useCallback(() => {
-    setParams({ state: null, mine: null, hasLateEdits: null, q: null, projectId: null, cursor: null });
+    setParams({ state: null, mine: null, hasLateEdits: null, resultsStale: null, q: null, projectId: null, cursor: null });
   }, [setParams]);
 
   return {
     state,
     mine,
     hasLateEdits,
+    resultsStale,
     q,
     projectId,
-    active: state !== null || mine || hasLateEdits || q.trim() !== '' || projectId !== null,
+    active: state !== null || mine || hasLateEdits || resultsStale || q.trim() !== '' || projectId !== null,
     setState,
     setMine,
     setHasLateEdits,
+    setResultsStale,
     setQ,
     setProjectId,
     reset,

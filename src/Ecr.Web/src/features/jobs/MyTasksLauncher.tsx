@@ -27,6 +27,12 @@ const MyTasksDrawer = lazy(async () => ({
 }));
 
 /** Прогрів чанка за наміром (наведення/фокус); відмова — не привід падати. */
+
+// Блок «Потребують перерахунку» - окремий чанк: його запити й код потрібні лише відкритій шухляді.
+const StaleDocumentsSection = lazy(async () => ({
+  default: (await import('./StaleDocumentsSection')).StaleDocumentsSection,
+}));
+
 function prefetchDrawer(): void {
   loadDrawer().catch(() => undefined);
 }
@@ -97,6 +103,11 @@ export function MyTasksLauncher(): JSX.Element {
             isPending={tasks.isPending}
             error={tasks.error}
             onRetry={() => void tasks.refetch()}
+            staleSection={
+              <Suspense fallback={null}>
+                <StaleDocumentsSection opened={opened} />
+              </Suspense>
+            }
           />
         </Suspense>
       )}

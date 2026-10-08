@@ -6923,6 +6923,11 @@ USING (VALUES
     (N'dates.clear', N'en', N'Clear the date', 1),
     (N'dates.clearNamed', N'en', N'Clear {field}', 1),
     -- COLL:ui38audit ── кінець секції ──
+    -- RC15-A:contract ── секція «Contract» шапки документа (en); ru/kz — порцією RC15-A:contract у блоці I18N нижче ──
+    (N'document.header.contract.title', N'en', N'Contract', 1),
+    (N'document.header.contract.fileNumber', N'en', N'File Number — Номер файла', 1),
+    (N'document.header.contract.version', N'en', N'Version — Версия', 1),
+    -- RC15-A:contract ── кінець секції ──
     -- COLL:ui31wizard ── UI-31: майстер створення документа (кроки, підсумок, підписи Back/Next/Review); ru/kz — порцією COLL:ui31wizard у блоці I18N нижче ──
     (N'wizard.back', N'en', N'Back', 1),
     (N'wizard.next', N'en', N'Next', 1),
@@ -7287,6 +7292,20 @@ USING (VALUES
     (N'publish.warning.categoryRuleMissing', N'en', N'{count} constant(s) have more than one category ({constants}), but the version has no category rule: each of them is ambiguous at calculation time.', 1),
     (N'publish.warning.categoryRuleRowConstant', N'en', N'Row formula {formula} reads constant {constant}, which has several categories. The Row phase runs before the category rule, so the constant is ambiguous there: make the formula a substance formula.', 1),
     -- CAT:l2 ── кінець секції ──
+    -- CAT:l2ui ── RC14-F: панель правила категорії в конфігураторі; ru/kz — порцією CAT:l2ui нижче ──
+    (N'methodologies.categoryRule', N'en', N'Category rule', 1),
+    (N'methodologies.categoryRuleSet', N'en', N'Set rule', 1),
+    (N'methodologies.categoryRuleEdit', N'en', N'Edit rule', 1),
+    (N'methodologies.categoryRuleDelete', N'en', N'Delete rule', 1),
+    (N'methodologies.categoryRuleDeleteHint', N'en', N'Without the rule, constants that have several categories become ambiguous and rows are refused at calculation time. Delete the rule?', 1),
+    (N'methodologies.categoryRuleNone', N'en', N'This version has no category rule', 1),
+    (N'methodologies.categoryRuleNoneHint', N'en', N'The rule picks the category (for example Diesel) of each document row, so constants with several categories resolve to one value.', 1),
+    (N'methodologies.categoryRuleExpression', N'en', N'Expression', 1),
+    (N'methodologies.categoryRuleExpressionHint', N'en', N'Must return text: the category key. You can use @Argument, !RowFormula, CST.Constant, if(...) and in(...).', 1),
+    (N'methodologies.categoryRuleUpdatedAt', N'en', N'Last changed', 1),
+    (N'methodologies.categoryRuleSaved', N'en', N'The category rule has been saved.', 1),
+    (N'methodologies.categoryRuleDeleted', N'en', N'The category rule has been deleted.', 1),
+    -- CAT:l2ui ── кінець секції ──
     -- COLL:stale-err ── resultsStale у переліку документів: відмови параметрів; ru/kz — порцією COLL:stale-err нижче ──
     (N'err.ECR-REQ-0422.resultsStaleNeedsPeriod', N'en', N'Filtering by stale results needs a period: staleness belongs to a period.', 1),
     (N'err.ECR-REQ-0422.staleBy', N'en', N'staleBy accepts only "me" and only together with resultsStale=true.', 1),
@@ -7298,14 +7317,31 @@ USING (VALUES
     (N'document.staleResults.title', N'en', N'Calculation results are out of date', 1),
     (N'document.staleResults.hint', N'en', N'Input data was changed after the last calculation. Recalculate to refresh the results.', 1),
     (N'document.staleResults.hintSince', N'en', N'Input data was changed on {date}, after the last calculation. Recalculate to refresh the results.', 1),
+    (N'documents.filterStale', N'en', N'Needs recalculation ({count})', 1),
+    (N'documents.filterStaleNoCount', N'en', N'Needs recalculation', 1),
+    (N'nav.documents.staleCount', N'en', N'{count} need recalculation', 1),
+    -- COLL:stale-mytasks ── блок «Needs recalculation» у My tasks і нагадування при виході з документа; ru/kz — порцією COLL:stale-mytasks нижче ──
+    (N'document.staleResults.leaveReminder', N'en', N'Document #{id} still has out-of-date results. Recalculate it, or find it later in My tasks under "Needs recalculation".', 1),
+    (N'jobs.staleDocuments.title', N'en', N'Needs recalculation', 1),
+    (N'jobs.staleDocuments.hint', N'en', N'Input data in these documents changed after the last calculation. Open a document and press Recalculate.', 1),
+    (N'jobs.staleDocuments.since', N'en', N'Changed {date}', 1),
+    (N'jobs.staleDocuments.open', N'en', N'Open', 1),
+    (N'jobs.staleDocuments.error', N'en', N'Could not load the documents that need recalculation.', 1),
+    -- COLL:stale-mytasks ── кінець секції ──
+    -- COLL:rc15c-recalc ── перерахунок вимкнений лише коли подані ВСІ аркуші; ru/kz — порцією COLL:rc15c-recalc нижче ──
+    (N'workflow.recalculateAllSubmitted', N'en', N'All sheets of period {period} are submitted or approved: there is nothing to recalculate. Reopen the period first.', 1),
+    -- COLL:rc15c-recalc ── кінець секції ──
     -- COLL:stale-ui ── кінець секції ──
     -- COLL:l21scope ── L2-1: область формули (scope) у PUT формули й порівнянні версій; ru/kz — порцією COLL:l21scope нижче ──
     (N'err.ECR-CALC-0422.formulaScopeInvalid', N'en', N'The scope "{scope}" of formula "{code}" is not valid: use Substance (once per substance) or Row (once per row).', 1),
     (N'methodologyDiffField.scope', N'en', N'Scope', 1),
     -- COLL:l21scope ── кінець секції ──
     -- COLL:l24l25 ── L2-5: попередження diff публікації, коли попередня версія не обчислилась; ru/kz — порцією COLL:l24l25 нижче ──
-    (N'publish.warning.diffPreviousNotComputed', N'en', N'Previous version {previous} did not calculate on test {test} ({code}), so the diff shows its outputs as new. The verdict on the new version is unchanged.', 1)
+    (N'publish.warning.diffPreviousNotComputed', N'en', N'Previous version {previous} did not calculate on test {test} ({code}), so the diff shows its outputs as new. The verdict on the new version is unchanged.', 1),
     -- COLL:l24l25 ── кінець секції ──
+    -- COLL:rc15misc-rulekey ── RC14B P3-3: ключ предиката правила методології - Id колонки, не код; ru/kz — порцією COLL:rc15misc-rulekey нижче ──
+    (N'err.ECR-CALC-0422.ruleKeyNotColumnId', N'en', N'Key "{key}" in the predicate of rule "{code}" is not a column Id: the predicate is matched by column Id (ColumnDefId), not by column code, so a code never matches any row. Pick the column in the rule form or use its numeric Id.', 1)
+    -- COLL:rc15misc-rulekey ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -16912,6 +16948,20 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:ui38audit ── кінець секції ──
+-- RC15-A:contract ── ru/kz: секція «Contract» шапки документа; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'document.header.contract.title', N'ru', N'Контракт'),
+    (N'document.header.contract.title', N'kz', N'Келісімшарт'),
+    (N'document.header.contract.fileNumber', N'ru', N'File Number — Номер файла'),
+    (N'document.header.contract.fileNumber', N'kz', N'File Number — Файл нөмірі'),
+    (N'document.header.contract.version', N'ru', N'Version — Версия'),
+    (N'document.header.contract.version', N'kz', N'Version — Нұсқа')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- RC15-A:contract ── кінець секції ──
 -- COLL:ui31wizard ── ru/kz UI-31: майстер створення документа; власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val
@@ -17759,6 +17809,38 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- CAT:l2 ── кінець секції ──
+-- CAT:l2ui ── ru/kz RC14-F: панель правила категорії; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'methodologies.categoryRule', N'ru', N'Правило категории'),
+    (N'methodologies.categoryRule', N'kz', N'Санат ережесі'),
+    (N'methodologies.categoryRuleSet', N'ru', N'Задать правило'),
+    (N'methodologies.categoryRuleSet', N'kz', N'Ереже орнату'),
+    (N'methodologies.categoryRuleEdit', N'ru', N'Изменить правило'),
+    (N'methodologies.categoryRuleEdit', N'kz', N'Ережені өзгерту'),
+    (N'methodologies.categoryRuleDelete', N'ru', N'Удалить правило'),
+    (N'methodologies.categoryRuleDelete', N'kz', N'Ережені жою'),
+    (N'methodologies.categoryRuleDeleteHint', N'ru', N'Без правила константы с несколькими категориями становятся неоднозначными, и строки отклоняются при расчёте. Удалить правило?'),
+    (N'methodologies.categoryRuleDeleteHint', N'kz', N'Ережесіз бірнеше санаты бар тұрақтылар түсініксіз болады да, есептеу кезінде жолдар қабылданбайды. Ережені жою керек пе?'),
+    (N'methodologies.categoryRuleNone', N'ru', N'У этой версии нет правила категории'),
+    (N'methodologies.categoryRuleNone', N'kz', N'Бұл нұсқада санат ережесі жоқ'),
+    (N'methodologies.categoryRuleNoneHint', N'ru', N'Правило выбирает категорию (например, Diesel) каждой строки документа, и константы с несколькими категориями получают одно значение.'),
+    (N'methodologies.categoryRuleNoneHint', N'kz', N'Ереже құжаттың әр жолының санатын (мысалы, Diesel) таңдайды, сондықтан бірнеше санаты бар тұрақтылар бір мәнге шешіледі.'),
+    (N'methodologies.categoryRuleExpression', N'ru', N'Выражение'),
+    (N'methodologies.categoryRuleExpression', N'kz', N'Өрнек'),
+    (N'methodologies.categoryRuleExpressionHint', N'ru', N'Должно возвращать текст: ключ категории. Доступны @Аргумент, !RowФормула, CST.Константа, if(...) и in(...).'),
+    (N'methodologies.categoryRuleExpressionHint', N'kz', N'Мәтін қайтаруы тиіс: санат кілті. @Аргумент, !RowФормула, CST.Тұрақты, if(...) және in(...) қолдануға болады.'),
+    (N'methodologies.categoryRuleUpdatedAt', N'ru', N'Последнее изменение'),
+    (N'methodologies.categoryRuleUpdatedAt', N'kz', N'Соңғы өзгеріс'),
+    (N'methodologies.categoryRuleSaved', N'ru', N'Правило категории сохранено.'),
+    (N'methodologies.categoryRuleSaved', N'kz', N'Санат ережесі сақталды.'),
+    (N'methodologies.categoryRuleDeleted', N'ru', N'Правило категории удалено.'),
+    (N'methodologies.categoryRuleDeleted', N'kz', N'Санат ережесі жойылды.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- CAT:l2ui ── кінець секції ──
 -- COLL:stale-err ── ru/kz resultsStale у переліку документів: відмови параметрів; власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val
@@ -17780,7 +17862,13 @@ SELECT v.[Key], v.Lang, v.Val
     (N'document.staleResults.hint', N'ru', N'Входные данные изменены после последнего расчёта. Пересчитайте, чтобы обновить результаты.'),
     (N'document.staleResults.hint', N'kz', N'Кіріс деректер соңғы есептеуден кейін өзгерген. Нәтижелерді жаңарту үшін қайта есептеңіз.'),
     (N'document.staleResults.hintSince', N'ru', N'Входные данные изменены {date}, после последнего расчёта. Пересчитайте, чтобы обновить результаты.'),
-    (N'document.staleResults.hintSince', N'kz', N'Кіріс деректер {date} күні, соңғы есептеуден кейін өзгерген. Нәтижелерді жаңарту үшін қайта есептеңіз.')
+    (N'document.staleResults.hintSince', N'kz', N'Кіріс деректер {date} күні, соңғы есептеуден кейін өзгерген. Нәтижелерді жаңарту үшін қайта есептеңіз.'),
+    (N'documents.filterStale', N'ru', N'Требуют пересчёта ({count})'),
+    (N'documents.filterStale', N'kz', N'Қайта есептеуді қажет етеді ({count})'),
+    (N'documents.filterStaleNoCount', N'ru', N'Требуют пересчёта'),
+    (N'documents.filterStaleNoCount', N'kz', N'Қайта есептеуді қажет етеді'),
+    (N'nav.documents.staleCount', N'ru', N'{count} требуют пересчёта'),
+    (N'nav.documents.staleCount', N'kz', N'{count} қайта есептеуді қажет етеді')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
@@ -17830,7 +17918,47 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:l21scope ── кінець секції ──
+-- COLL:rc15misc-rulekey ── ru/kz: ключ предиката правила методології - Id колонки, не код; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-CALC-0422.ruleKeyNotColumnId', N'ru', N'Ключ «{key}» в условии отбора правила «{code}» не является Id столбца: условие сопоставляется по Id столбца (ColumnDefId), а не по его коду, поэтому с кодом правило не совпадает ни с одной строкой. Выберите столбец в форме правила или укажите его числовой Id.'),
+    (N'err.ECR-CALC-0422.ruleKeyNotColumnId', N'kz', N'«{code}» ережесінің сәйкестік шартындағы «{key}» кілті бағанның Id-і емес: шарт бағанның кодымен емес, Id-імен (ColumnDefId) салыстырылады, сондықтан кодпен ереже бірде-бір жолға сәйкес келмейді. Ереже пішінінде бағанды таңдаңыз немесе оның сандық Id-ін көрсетіңіз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:rc15misc-rulekey ── кінець секції ──
 
+-- COLL:stale-mytasks ── ru/kz блока «Потребують перерахунку» у My tasks; власна порція
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'document.staleResults.leaveReminder', N'ru', N'В документе №{id} результаты расчёта всё ещё устарели. Пересчитайте его или найдите позже в «Моих задачах» в блоке «Требуют пересчёта».'),
+    (N'document.staleResults.leaveReminder', N'kz', N'№{id} құжатында есептеу нәтижелері әлі де ескірген. Оны қайта есептеңіз немесе кейін «Менің тапсырмаларым» ішіндегі «Қайта есептеуді қажет етеді» блогынан табыңыз.'),
+    (N'jobs.staleDocuments.title', N'ru', N'Требуют пересчёта'),
+    (N'jobs.staleDocuments.title', N'kz', N'Қайта есептеуді қажет етеді'),
+    (N'jobs.staleDocuments.hint', N'ru', N'Входные данные этих документов изменены после последнего расчёта. Откройте документ и нажмите «Пересчитать».'),
+    (N'jobs.staleDocuments.hint', N'kz', N'Бұл құжаттардың кіріс деректері соңғы есептеуден кейін өзгерген. Құжатты ашып, «Қайта есептеу» түймесін басыңыз.'),
+    (N'jobs.staleDocuments.since', N'ru', N'Изменено {date}'),
+    (N'jobs.staleDocuments.since', N'kz', N'Өзгертілген күні: {date}'),
+    (N'jobs.staleDocuments.open', N'ru', N'Открыть'),
+    (N'jobs.staleDocuments.open', N'kz', N'Ашу'),
+    (N'jobs.staleDocuments.error', N'ru', N'Не удалось загрузить документы, требующие пересчёта.'),
+    (N'jobs.staleDocuments.error', N'kz', N'Қайта есептеуді қажет ететін құжаттарды жүктеу мүмкін болмады.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:stale-mytasks ── кінець секції ──
+-- COLL:rc15c-recalc ── ru/kz: перерахунок вимкнений лише коли подані ВСІ аркуші; власна порція
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'workflow.recalculateAllSubmitted', N'ru', N'Все листы периода {period} поданы или утверждены: пересчитывать нечего. Сначала откройте период заново.'),
+    (N'workflow.recalculateAllSubmitted', N'kz', N'{period} кезеңінің барлық парақтары тапсырылған немесе бекітілген: қайта есептейтін ештеңе жоқ. Алдымен кезеңді қайта ашыңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:rc15c-recalc ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

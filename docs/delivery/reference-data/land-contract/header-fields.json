@@ -1,0 +1,18 @@
+{
+  "$comment": "Маніфест шапки вкладки «2. Contract» у порядку Excel. kind: Lookup | String | Service. Service (FileNumber, Version) — не HeaderFieldDef: read-only з Document.BusinessKey і версії шаблону.",
+  "fields": [
+    { "position": 1, "key": "Area", "kind": "Lookup", "registry": "LAND_AREA", "csv": "area.csv" },
+    { "position": 2, "key": "Contractor", "kind": "Lookup", "registry": "LAND_CONTRACTOR", "csv": "contractor.csv" },
+    { "position": 3, "key": "Region", "kind": "Lookup", "registry": "LAND_REGION", "csv": "region.csv" },
+    { "position": 4, "key": "Location", "kind": "Lookup", "registry": "LAND_LOCATION", "csv": "location.csv" },
+    { "position": 5, "key": "OnOffshore", "kind": "Lookup", "registry": "LAND_ONOFFSHORE", "csv": "onoffshore.csv" },
+    { "position": 6, "key": "FilledBy", "kind": "String" },
+    { "position": 7, "key": "ContractHolder", "kind": "String" },
+    { "position": 8, "key": "ContractNumber", "kind": "String" },
+    { "position": 9, "key": "TypeOfActivity", "kind": "Lookup", "registry": "LAND_ACTIVITY", "csv": "activity.csv" },
+    { "position": 10, "key": "ProcessedOn", "kind": "String" },
+    { "position": 11, "key": "FileNumber", "kind": "Service" },
+    { "position": 12, "key": "Permit", "kind": "Lookup", "registry": "LAND_PERMIT", "csv": "permit.csv", "isRequired": true },
+    { "position": 13, "key": "Version", "kind": "Service" }
+  ]
+}

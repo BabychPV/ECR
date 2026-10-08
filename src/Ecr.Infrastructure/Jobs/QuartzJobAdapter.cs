@@ -249,6 +249,12 @@ public sealed partial class QuartzJobAdapter(
         }
         catch (Exception ex)
         {
+            // ⛔ RC15 (RACE-FIRST-COLLECT): сховище прогресу ділить із задачею ОДИН контекст. Збій задачі
+            // лишає в трекері додані, але не збережені сутності (напр. рядок, що програв UQ_TableRow_Key), і
+            // запис `Failed` падав на тому самому дублікаті - задача лишалась `Running` назавжди. Після збою
+            // незбережені зміни задачі не потрібні нікому: скидаємо трекер до запису статусу.
+            provider.GetService<EcrDbContext>()?.ChangeTracker.Clear();
+
             var attempt = CurrentAttempt(context);
 
             if (JobRetryPolicy.ShouldRetry(attempt, ex))

@@ -90,6 +90,15 @@ export function showApiError(error: unknown): void {
   });
 }
 
+/** Показує попередження (дія не виконана з відомої причини, не помилка запиту). */
+export function showWarning(message: string): void {
+  notifications.show({
+    color: 'statusWarning',
+    message,
+    closeButtonProps: notificationCloseButtonProps,
+  });
+}
+
 /** Показує підтвердження успішної дії. */
 export function showDone(message: string): void {
   notifications.show({

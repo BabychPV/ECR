@@ -67,6 +67,18 @@ describe('listDocuments', () => {
     expect(sent).toEqual(['/api/v1/documents?limit=50&hasLateEdits=true']);
   });
 
+  it('resultsStale=true іде в адресу разом з periodKey; вимкнений — параметра немає', async () => {
+    mockServer([]);
+
+    await listDocuments({ periodKey: 202601, resultsStale: true });
+    await listDocuments({ periodKey: 202601, resultsStale: false });
+
+    expect(sent).toEqual([
+      '/api/v1/documents?limit=50&periodKey=202601&resultsStale=true',
+      '/api/v1/documents?limit=50&periodKey=202601',
+    ]);
+  });
+
   it('hasLateEdits вимкнений — параметр не передається (не hasLateEdits=false)', async () => {
     mockServer([]);
 

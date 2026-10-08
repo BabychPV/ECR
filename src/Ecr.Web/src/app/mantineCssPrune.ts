@@ -41,7 +41,6 @@ export const UnusedMantineComponents: readonly string[] = [
   'Avatar',
   'BackgroundImage',
   'Blockquote',
-  'Chip',
   'Container',
   'Dialog',
   'Flex',

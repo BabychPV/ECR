@@ -615,7 +615,8 @@ export function DocumentPage(): JSX.Element {
                 onShowIssues={() => undefined}
               />
               <DocumentSaveState readOnly={readOnly} />
-              {calculationsStale && (
+              {/* RC15-C: банер «результати застаріли» під рядком уже каже те саме - бейдж за нього не дублюється. */}
+              {calculationsStale && document.resultsStale !== true && (
                 <Badge color="statusWarning" variant="light" role="status" data-testid="document-methodology-stale">
                   {t('documents.methodologyResultsStale')}
                 </Badge>
@@ -671,6 +672,8 @@ export function DocumentPage(): JSX.Element {
       <Suspense fallback={null}>
         <DocumentHeaderPanel
           documentId={documentId}
+          businessKey={document.businessKey}
+          templateVersion={document.templateVersion ?? undefined}
           // ✎ UI-16: згорнута з підсумком; розгортається сама, коли поле
           // потребує уваги (обов'язкове порожнє, недійсна дата, незбережене).
           collapsible

@@ -1,4 +1,4 @@
-import type { JSX } from 'react';
+import type { JSX, ReactNode } from 'react';
 import { Card, Drawer, Group, Progress, Stack, Text } from '@mantine/core';
 import { useQueryClient } from '@tanstack/react-query';
 import type { JobSummary } from '@/api/types';
@@ -63,6 +63,9 @@ export interface MyTasksDrawerProps {
   readonly isPending: boolean;
   readonly error: unknown;
   readonly onRetry: () => void;
+
+  /** Блок «Потребують перерахунку» над переліком задач (`StaleDocumentsSection`); окремий слот, щоб шухляда не знала про його запити. */
+  readonly staleSection?: ReactNode;
 }
 
 export function MyTasksDrawer({
@@ -72,6 +75,7 @@ export function MyTasksDrawer({
   isPending,
   error,
   onRetry,
+  staleSection,
 }: MyTasksDrawerProps): JSX.Element {
   return (
     <Drawer
@@ -84,6 +88,7 @@ export function MyTasksDrawer({
       title={<Text fw={600}>{t('jobs.myTasks')}</Text>}
       data-my-tasks=""
     >
+      {staleSection}
       {/*
        * ⛔ `emptyHint` обов'язковий (`L10`): «порожньо» без пояснення читається
        * як збій. Тут порожнеча має конкретну й нетривіальну причину — задач

@@ -153,10 +153,32 @@ public sealed class RecalculateDocumentHandler(
             // ФВ-9.17 про зріз аркуша), а без цього чернетка поруч із затвердженим аркушем не могла ні
             // перерахуватися, ні бути поданою («Recalculate before submitting» — глухий кут). Перерахунок
             // усього документа (`sheetDefId = null`) і закритий період — як і раніше.
-            var submitted = sheets.Any(s =>
-                (sheetDefId is null || s.SheetDefId == sheetDefId)
+            //
+            // ⛔ RC15 (P2-A): перерахунок УСЬОГО документа (`sheetDefId = null`) подані/затверджені аркуші
+            // ПРОПУСКАЄ (задача рахує лише чернеткові/відкриті й не чіпає ні їхніх комірок, ні результатів), а
+            // не відхиляє цілий запит; відмова (той самий 4221) — коли подані/затверджені ВСІ аркуші складу
+            // документа (рахувати нічого). Стан має лише аркуш, який хоч раз подавали, тож склад — з порту.
+            // Задача (`RecalculationJob.RefusedPeriodsAsync`) перевіряє те саме ще раз на своєму шляху запису.
+            bool IsSubmitted(int sheetId) => sheets.Any(s =>
+                s.SheetDefId == sheetId
                 && s.Status is Domain.Enums.DocumentStatus.Submitted
                             or Domain.Enums.DocumentStatus.Approved);
+
+            bool submitted;
+            if (sheetDefId is { } scopeSheetId)
+            {
+                submitted = IsSubmitted(scopeSheetId);
+            }
+            else
+            {
+                var included = await documents.GetIncludedSheetIdsAsync(documentId, ct).ConfigureAwait(false);
+
+                // ⚠ Склад невідомий (рядків `doc.DocumentSheet` немає) — поводимось як раніше: будь-який
+                // поданий аркуш відхиляє, а не пропускається (консервативно; задача перевірить за екземплярами).
+                submitted = included is { Count: > 0 }
+                    ? included.All(IsSubmitted)
+                    : sheets.Any(s => IsSubmitted(s.SheetDefId));
+            }
 
             var denial = Calculations.RecalculationWritePolicy.Check(
                 periodState, submitted, hasClosedPeriodApproval: false);
