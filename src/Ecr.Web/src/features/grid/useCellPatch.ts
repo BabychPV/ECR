@@ -19,6 +19,7 @@ import { outcomeOf, pollInterval, type JobOutcome } from '@/features/workflow/jo
 import { formatTime } from '@/shared/format';
 import { applyPatchToSlice } from './sliceApply';
 import { hasConfirmed } from './confirmedEdits';
+import { calculationResultsKey } from '@/features/methodologies/calculationResultsKey';
 
 /** Накопичена зміна однієї комірки. */
 export interface PendingEdit {
@@ -174,6 +175,25 @@ export function applyPatchLocally(
 }
 
 /**
+ * RC15-C: після збереження правки картка документа перечитується, коли банер «результати застаріли»
+ * ще НЕ показано (`resultsStale === false`): сервер виводить ознаку з часу правки входу, і без цього банер
+ * з'являвся лише після перезавантаження сторінки.
+ *
+ * ⛔ Лише перехід `false` → `true`, а не кожне збереження: `resultsStale === true` уже показано, `null`
+ * (читач із звуженим доступом) і відсутня картка — «не знаємо», запит не потрібен. Так автозбереження не
+ * платить додатковим `GET` картки щоразу (`CL-01`). Числа методологій (бейдж у шапці, один ключ із панеллю)
+ * перечитуються разом із карткою, щоб бейдж і банер не розходилися.
+ */
+export function refreshStaleness(queryClient: QueryClient, documentId: number, periodKey: number): void {
+  const summaryKey = ['document', documentId, periodKey] as const;
+  const summary = queryClient.getQueryData<{ resultsStale?: boolean | null }>(summaryKey);
+  if (summary === undefined || summary.resultsStale !== false) return;
+
+  void queryClient.invalidateQueries({ queryKey: summaryKey, exact: true });
+  void queryClient.invalidateQueries({ queryKey: calculationResultsKey(documentId, periodKey), exact: true });
+}
+
+/**
  * Видимий стан збереження (`B-35`, `#38`).
  *
  * ⛔ Оператор має бачити, чи дійшла його правка до сервера, а не здогадуватися
@@ -254,6 +274,7 @@ export function useCellPatch(documentId: number): {
         versions.current = { ...versions.current, ...response.rowVersions };
 
         applyPatchLocally(queryClient, request, response);
+        refreshStaleness(queryClient, documentId, request.periodKey);
 
         // ⚠ `BE-05`: `null` у відповіді означає «перерахунку не поставлено»
         // (гілка відкладання `DAT-05`) — і тоді стеження ЗНІМАЄТЬСЯ, а не
