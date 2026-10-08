@@ -68,6 +68,10 @@ namespace Ecr.Application.Ports;
 /// (<c>DocumentSheetVisibility.For</c>): «застаріло за видимими входами» не доводить, що застарів видимий вихід.
 /// </param>
 /// <param name="ResultsStaleSince">Відколи застаріло (перша правка входу після прогону, UTC); <c>null</c> — не застаріло чи невідомо.</param>
+/// <param name="TemplateVersion">
+/// RC15: версія шаблону проєкту документа (<c>TemplateVersion.Version</c>, рядок). Адитивне поле; метадані шаблону не секрет,
+/// тож звуження читача його не знімає. Заповнює лише шлях картки (<c>FindAsync</c>); перелік віддає <c>null</c>.
+/// </param>
 public sealed record DocumentSummary(
     long Id,
     int ProjectId,
@@ -86,7 +90,8 @@ public sealed record DocumentSummary(
     string? OwnerDisplayName = null,
     string? ApproverDisplayName = null,
     bool? ResultsStale = null,
-    DateTime? ResultsStaleSince = null);
+    DateTime? ResultsStaleSince = null,
+    string? TemplateVersion = null);
 
 /// <summary>Аркуш складу документа в переліку: код, назва, стан за період.</summary>
 /// <param name="Code">Код аркуша (<c>SheetDef.Code</c>); він же ключ у <c>DocumentSummary.SheetStates</c>.</param>

@@ -71,6 +71,10 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
                 // D-12: картка читає «коли й ким змінено» так само, як перелік (`ListAsync`); раніше ці поля тут
                 // не вибирались, і картка віддавала `null` усім. Звуженому читачеві їх знімає R-7 (`DocumentSheetVisibility.For`).
                 d.ModifiedAt,
+                // RC15: версія шаблону проєкту - у тому самому запиті (без додаткового роундтрипу).
+                TemplateVersion = db.Projects.Where(p => p.Id == d.ProjectId)
+                    .Join(db.TemplateVersions, p => p.TemplateVersionId, v => v.Id, (p, v) => v.Version)
+                    .FirstOrDefault(),
                 ModifiedBy = db.Users.Where(u => u.Id == d.ModifiedByUserId).Select(u => u.DisplayName).FirstOrDefault(),
                 Owner = db.Users.Where(u => u.Id == d.CreatedByUserId).Select(u => u.DisplayName).FirstOrDefault(),
                 // К6: «хто затвердив» - у тому самому запиті (без додаткового роундтрипу).
@@ -119,7 +123,8 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
             OwnerDisplayName: document.Owner,
             ApproverDisplayName: document.Approver,
             ResultsStale: stale is null ? null : stale.ContainsKey(documentId),
-            ResultsStaleSince: stale?.GetValueOrDefault(documentId));
+            ResultsStaleSince: stale?.GetValueOrDefault(documentId),
+            TemplateVersion: document.TemplateVersion);
     }
 
 
