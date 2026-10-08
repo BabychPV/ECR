@@ -5,6 +5,7 @@ import type { MethodologyCategoryRuleDto } from '@/api/types';
 import { queryKeys } from '@/api/queryKeys';
 import { t } from '@/shared/i18n';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
+import { problemText } from '@/shared/ui/problemText';
 import { Timestamp } from '@/shared/ui/Timestamp';
 import { showApiError, showDone } from '@/shared/ui/notify';
 import { usePendingLoading } from '@/features/common/usePendingLoading';
@@ -26,8 +27,9 @@ interface Props {
  * категоріями неоднозначні (`constantAmbiguous`) — тому порожній стан каже це прямо.
  *
  * ⚠ Власний `import()`-чанк: сторінка методологій стоїть біля бюджету (`D-132`).
- * ⚠ Порожній/числовий/нерозібраний вираз відхиляє сервер (`422`) — текст відмови показує
- * `showApiError` за `messageKey`; тут його не дублюємо.
+ * ⚠ Порожній/числовий/нерозібраний вираз відхиляє сервер (`422`). Причину показуємо і тостом
+ * (`showApiError`), і рядком `role=alert` під полем (Z-4): тост зникає, а правку виразу це не заважає —
+ * плюс підказка про лапки (текстові значення — в одинарних лапках).
  */
 export function MethodologyCategoryRulePanel({ methodologyId, versionId, editable }: Props): JSX.Element {
   const queryClient = useQueryClient();
@@ -105,10 +107,20 @@ export function MethodologyCategoryRulePanel({ methodologyId, versionId, editabl
                 autosize
                 minRows={3}
                 styles={{ input: { fontFamily: 'monospace' } }}
-                onChange={(event) => setDraft(event.currentTarget.value)}
+                onChange={(event) => {
+                  setDraft(event.currentTarget.value);
+                  if (save.isError) save.reset();
+                }}
               />
+              {save.isError && <CategoryRuleError error={save.error} />}
               <Group justify="flex-end">
-                <Button variant="default" onClick={() => setDraft(null)}>
+                <Button
+                  variant="default"
+                  onClick={() => {
+                    setDraft(null);
+                    save.reset();
+                  }}
+                >
                   {t('common.cancel')}
                 </Button>
                 <Button
@@ -151,5 +163,21 @@ export function MethodologyCategoryRulePanel({ methodologyId, versionId, editabl
         </Stack>
       </Modal>
     </>
+  );
+}
+
+/** Рядок помилки збереження правила: причина (як у тості) і підказка про лапки. */
+function CategoryRuleError({ error }: { readonly error: unknown }): JSX.Element {
+  const shown = problemText(error);
+
+  return (
+    <Stack gap="xs" role="alert">
+      <Text size="sm" c="statusError">
+        {shown.detail ?? shown.title}
+      </Text>
+      <Text size="xs" c="dimmed">
+        {t('methodologies.categoryRuleErrorHint')}
+      </Text>
+    </Stack>
   );
 }
