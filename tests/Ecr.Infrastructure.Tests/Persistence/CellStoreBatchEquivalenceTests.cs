@@ -263,9 +263,9 @@ public sealed class CellStoreBatchEquivalenceTests(SqlServerFixture sql)
 
         Assert.True(three == twelve, $"ApplyBatchAsync: 3 → {three}; 12 → {twelve}; поштучно 12 → {sequential}");
 
-        // Захоплення, видалення, MERGE, «дотик» — по одному.
-        Assert.Equal(4, twelve);
-        Assert.Equal(4 * 12, sequential);
+        // Захоплення, видалення, MERGE, «дотик» — по одному; плюс SET LOCK_TIMEOUT (N-3, LockWaitGuard).
+        Assert.Equal(5, twelve);
+        Assert.Equal(5 * 12, sequential);
     }
 
     private RowStore Rows(EcrDbContext db)

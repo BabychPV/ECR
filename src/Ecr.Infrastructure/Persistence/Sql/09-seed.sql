@@ -7361,8 +7361,11 @@ USING (VALUES
     -- COLL:rc15misc-rulekey ── кінець секції ──
     -- COLL:rc16rule ── RC16-2: правило категорії перевіряє посилання вже при збереженні; ru/kz — порцією COLL:rc16rule нижче ──
     (N'err.ECR-CALC-0422.categoryRuleUnknownConstant', N'en', N'The category rule references constant CST.{code}, which this version does not define.', 1),
-    (N'err.ECR-CALC-0422.categoryRuleBadFormula', N'en', N'The category rule references !{formula}: it can only read Row formulas of the version (it runs once per row, before the substance loop).', 1)
+    (N'err.ECR-CALC-0422.categoryRuleBadFormula', N'en', N'The category rule references !{formula}: it can only read Row formulas of the version (it runs once per row, before the substance loop).', 1),
     -- COLL:rc16rule ── кінець секції ──
+    -- COLL:rc15lock ── N-3: PATCH комірки не дочекався блокування (LockWaitGuard); ru/kz — порцією COLL:rc15lock нижче ──
+    (N'err.ECR-DOC-4091.lockTimeout', N'en', N'The data is busy with a long operation (for example, moving another document to a new template version). Nothing was saved; try again in a moment.', 1)
+    -- COLL:rc15lock ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -18029,6 +18032,17 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:rc16rule ── кінець секції ──
+
+-- COLL:rc15lock ── ru/kz N-3: PATCH комірки не дочекався блокування; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-DOC-4091.lockTimeout', N'ru', N'Данные заняты долгой операцией (например, переносом другого документа на новую версию шаблона). Ничего не сохранено; повторите попытку через мгновение.'),
+    (N'err.ECR-DOC-4091.lockTimeout', N'kz', N'Деректер ұзақ операциямен (мысалы, басқа құжатты үлгінің жаңа нұсқасына ауыстырумен) бос емес. Ештеңе сақталмады; сәлден кейін қайталап көріңіз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:rc15lock ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t
