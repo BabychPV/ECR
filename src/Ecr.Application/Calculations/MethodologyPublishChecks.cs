@@ -626,6 +626,7 @@ public static class MethodologyPublishChecks
         {
             LiteralNode { Type: ExpressionValueType.Text } => true,
             BinaryNode { Operator: BinaryOperator.Concat } => true,
+            BinaryNode { Operator: BinaryOperator.Add } add => IsTextPlus(add, byCode),
             SymbolReferenceNode { Kind: SymbolKind.Constant } symbol
                 => byCode.TryGetValue(symbol.Name, out var constant)
                    && constant.Kind == ConstantKind.Text,
@@ -640,6 +641,44 @@ public static class MethodologyPublishChecks
         };
     }
 
+    /// <summary>
+    /// Чи <c>+</c> конкатенує — те саме правило, що в <c>Parser.InferShape</c>:
+    /// хоча б один операнд Text, другий Text або Null-форма (невідомий до виконання:
+    /// поле, не-числова функція, NULL). Обидві Null-форми й усе без тексту — число.
+    /// </summary>
+    private static bool IsTextPlus(BinaryNode add, Dictionary<string, MethodologyConstant> byCode)
+    {
+        var left = Shape(add.Left, byCode);
+        var right = Shape(add.Right, byCode);
+        return (left == OperandShape.Text && right is OperandShape.Text or OperandShape.Unknown)
+               || (right == OperandShape.Text && left == OperandShape.Unknown);
+    }
+
+    private static OperandShape Shape(AstNode node, Dictionary<string, MethodologyConstant> byCode)
+    {
+        if (ProducesTextOnly(node, byCode))
+        {
+            return OperandShape.Text;
+        }
+
+        // Булеві форми (порівняння, логіка, `!`) — не Null-форма, як у Parser.InferShape.
+        var isBoolean = node is UnaryNode { Operator: UnaryOperator.Not }
+                        || node is BinaryNode { Operator: >= BinaryOperator.Equal and <= BinaryOperator.Or };
+        if (isBoolean || ProducesNumber(node, byCode))
+        {
+            return OperandShape.Other;
+        }
+
+        return OperandShape.Unknown;
+    }
+
+    private enum OperandShape
+    {
+        Unknown,
+        Text,
+        Other,
+    }
+
     /// <summary>Чи вираз напевно повертає число.</summary>
     private static bool ProducesNumber(
         AstNode node, Dictionary<string, MethodologyConstant> byCode)
@@ -650,6 +689,9 @@ public static class MethodologyPublishChecks
         return node switch
         {
             LiteralNode { Type: ExpressionValueType.Number } => true,
+            // ⚠ L2-2: `+` з текстом конкатенує (Parser.InferShape) — це не число.
+            BinaryNode { Operator: BinaryOperator.Add } add
+                => !IsTextPlus(add, byCode),
             BinaryNode binary => Arithmetic.Contains(binary.Operator),
             UnaryNode unary => unary.Operator != UnaryOperator.Not,
             SymbolReferenceNode { Kind: SymbolKind.Constant } symbol
