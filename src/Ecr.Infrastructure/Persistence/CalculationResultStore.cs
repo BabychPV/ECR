@@ -495,6 +495,87 @@ public sealed class CalculationResultStore(EcrDbContext db, IClock clock) : ICal
         run.MakeCurrent();
     }
 
+    /// <inheritdoc />
+    public async Task<int> CarryOverResultsAsync(
+        long calculationRunId, long documentId, IReadOnlyCollection<int> methodologyIds, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(methodologyIds);
+        if (methodologyIds.Count == 0)
+        {
+            return 0;
+        }
+
+        var run = await db.CalculationRuns
+            .AsNoTracking()
+            .FirstOrDefaultAsync(r => r.Id == calculationRunId, ct)
+            .ConfigureAwait(false)
+            ?? throw new InvalidOperationException($"Прогону {calculationRunId} не існує.");
+
+        var periodKey = run.PeriodKey ?? 0;
+        var methodologies = methodologyIds.ToList();
+
+        var versionIds = await db.MethodologyVersions
+            .AsNoTracking()
+            .Where(v => methodologies.Contains(v.MethodologyId))
+            .Select(v => v.Id)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+        if (versionIds.Count == 0)
+        {
+            return 0;
+        }
+
+        // ⚠ Та сама вибірка «що зараз актуальне», що й у ReadCurrentAsync (перевага документного прогону
+        // над проєктним); сам новий прогін ще не актуальний, тож у вибірку не потрапляє.
+        var hasDedicatedCurrent = await db.CalculationRuns
+            .AsNoTracking()
+            .AnyAsync(
+                r => r.DocumentId == documentId
+                     && r.PeriodKey == periodKey
+                     && r.Status == CalculationRun.CurrentStatus
+                     && r.Id != calculationRunId,
+                ct)
+            .ConfigureAwait(false);
+
+        var source = await db.CalculationResults
+            .AsNoTracking()
+            .Where(r => r.DocumentId == documentId
+                        && r.PeriodKey == periodKey
+                        && r.CalculationRunId != calculationRunId
+                        && versionIds.Contains(r.MethodologyVersionId)
+                        && db.CalculationRuns.Any(
+                            current => current.Id == r.CalculationRunId
+                                       && current.Status == CalculationRun.CurrentStatus
+                                       && (current.DocumentId == documentId
+                                           || (!hasDedicatedCurrent && current.DocumentId == null))))
+            .OrderBy(r => r.Id)
+            .Take(MaxResults)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+        if (source.Count == 0)
+        {
+            return 0;
+        }
+
+        var nextId = await ReserveResultIdRangeAsync(source.Count, ct).ConfigureAwait(false);
+
+        foreach (var row in source)
+        {
+            var copy = new CalculationResult(
+                calculationRunId, row.MethodologyVersionId, periodKey, row.DocumentId, row.SourceRowKey,
+                row.OutputCode, row.Value, row.UnitId, row.Kind);
+
+            typeof(Domain.Abstractions.Entity<long>)
+                .GetProperty(nameof(Domain.Abstractions.Entity<long>.Id))!
+                .SetValue(copy, nextId++);
+
+            copy.SetSubstance(row.SubstanceEntryId);
+            db.CalculationResults.Add(copy);
+        }
+
+        return source.Count;
+    }
+
     /// <summary>Ключ каталогу причини: прогін не став актуальним, бо новіший уже актуальний.</summary>
     public const string SupersededByNewerKey = "jobs.calculationRunSupersededByNewer";
 

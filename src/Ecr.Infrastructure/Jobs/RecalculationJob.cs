@@ -158,6 +158,9 @@ public sealed partial class RecalculationJob(
         var periodRuns = new SortedDictionary<int, (Domain.Entities.Calculations.CalculationRun Run, ModuleProfile Profile)>();
         Domain.Entities.Calculations.CalculationRun? yearRun = null;
 
+        // RC14 (P2-4): що переносити в прогін періоду (лише для прогону області аркуша).
+        var carryOvers = new Dictionary<int, ResultCarryOver>();
+
         // L-4: рядки, яким не підійшло жодне правило; назовні — лише кількість і номери.
         var unmatchedRows = new List<UnmatchedRow>();
 
@@ -353,6 +356,11 @@ public sealed partial class RecalculationJob(
                     ? (IReadOnlyList<int>)[namedPeriod]
                     : periods;
 
+                // ⛔ RC14 (приймальна №10, P2-4): прогін області аркуша стає актуальним для ВСЬОГО документа й
+                // періоду, тож результати методологій ІНШИХ аркушів переносяться в нього з попереднього
+                // актуального прогону (`CompleteAsync` → `CarryOverResultsAsync`), а не зникають.
+                var carryMethodologies = await OutOfScopeMethodologyIdsAsync(docRequest, ct).ConfigureAwait(false);
+
                 for (var p = 0; p < methodologyPeriods.Count; p++)
                 {
                     var period = methodologyPeriods[p];
@@ -366,6 +374,11 @@ public sealed partial class RecalculationJob(
                         formulaCeiling + ((ceiling - formulaCeiling) * (p + 1) / methodologyPeriods.Count);
 
                     var (run, runProfile) = await RunForAsync(period).ConfigureAwait(false);
+
+                    if (carryMethodologies.Count > 0)
+                    {
+                        carryOvers[period] = new ResultCarryOver(documentId, carryMethodologies);
+                    }
 
                     var profile = await orchestrator
                         .RunAsync(
@@ -403,9 +416,9 @@ public sealed partial class RecalculationJob(
 
             // Завершення — прикладний сценарій: профіль і перемикання
             // актуальності однією транзакцією (ФВ-9.11) — на кожен період.
-            foreach (var (run, profile) in periodRuns.Values)
+            foreach (var (period, (run, profile)) in periodRuns)
             {
-                await runs.CompleteAsync(run.Id, profile, ct).ConfigureAwait(false);
+                await runs.CompleteAsync(run.Id, profile, ct, carryOvers.GetValueOrDefault(period)).ConfigureAwait(false);
             }
 
             // L-4: «No matching rule … row N». Не помилка й не відмова - решта рядків уже
@@ -686,6 +699,48 @@ public sealed partial class RecalculationJob(
                         && i.DocumentId == documentId);
     }
 
+    /// <summary>
+    /// Методології, чиї результати прогін ОБЛАСТІ аркуша мусить зберегти (RC14, P2-4): прив'язані до таблиць
+    /// ІНШИХ аркушів і не прив'язані до таблиць аркуша області.
+    /// </summary>
+    /// <param name="request">Завдання; без <c>SheetDefId</c> — порожньо (повний прогін, переносити нічого).</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⚠ Методологія, прив'язана і всередині, і поза областю, не переноситься: прогін області її
+    /// перераховує, а відокремити результати «чужих» рядків від «своїх» без ключа таблиці в результаті
+    /// неможливо (відомий компроміс; повний перерахунок документа їх вирівнює).
+    /// </remarks>
+    private async Task<IReadOnlyCollection<int>> OutOfScopeMethodologyIdsAsync(
+        RecalculationRequest request, CancellationToken ct)
+    {
+        if (request.SheetDefId is not { } scopeSheetId)
+        {
+            return [];
+        }
+
+        var inScope = await db.CalculationBindings
+            .AsNoTracking()
+            .Where(b => b.IsActive
+                        && db.TableDefs.Any(td => td.Id == b.TableDefId && td.SheetDefId == scopeSheetId))
+            .Select(b => b.MethodologyId)
+            .Distinct()
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var outside = await db.CalculationBindings
+            .AsNoTracking()
+            .Where(b => b.IsActive
+                        && db.TableDefs.Any(td => td.Id == b.TableDefId && td.SheetDefId != scopeSheetId))
+            .Select(b => b.MethodologyId)
+            .Distinct()
+            .OrderBy(id => id)
+            .Take(MaxBindings)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        return [.. outside.Except(inScope)];
+    }
+
     /// <summary>Прив'язки методологій до таблиць документа, РОЗКЛАДЕНІ ЗА ПЕРІОДАМИ.</summary>
     /// <param name="request">Завдання перерахунку.</param>
     /// <param name="periods">Періоди в скоупі запису, за зростанням.</param>
@@ -833,6 +888,7 @@ public sealed partial class RecalculationJob(
             .AsNoTracking()
             .Where(s => s.DocumentId == request.DocumentId
                         && (request.PeriodKey == null || s.PeriodKey == request.PeriodKey)
+                        && (request.SheetDefId == null || s.SheetDefId == request.SheetDefId)
                         && (s.Status == Domain.Enums.DocumentStatus.Submitted
                             || s.Status == Domain.Enums.DocumentStatus.Approved))
             .Select(s => s.PeriodKey)

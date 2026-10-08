@@ -183,6 +183,10 @@ public sealed class RunCalculationHandler(
     /// <param name="calculationRunId">Прогін.</param>
     /// <param name="profile">Профіль по модулях.</param>
     /// <param name="ct">Токен скасування.</param>
+    /// <param name="carryOver">
+    /// RC14 (P2-4): прогін області аркуша — результати методологій інших аркушів, які переносяться з
+    /// попереднього актуального прогону; <c>null</c> — прогін повний.
+    /// </param>
     /// <remarks>
     /// ⚠ Обидві дії — ОДНИМ викликом сховища і однією транзакцією (ФВ-9.11).
     /// Між зняттям актуальності зі старого прогону і встановленням новому
@@ -204,7 +208,8 @@ public sealed class RunCalculationHandler(
     /// </para>
     /// </remarks>
     /// <exception cref="JobLeaseLostException">Оренду задачі втрачено; нічого не записано.</exception>
-    public async Task CompleteAsync(long calculationRunId, ModuleProfile profile, CancellationToken ct)
+    public async Task CompleteAsync(
+        long calculationRunId, ModuleProfile profile, CancellationToken ct, ResultCarryOver? carryOver = null)
     {
         ArgumentNullException.ThrowIfNull(profile);
 
@@ -216,7 +221,7 @@ public sealed class RunCalculationHandler(
             // Без спільної транзакції між двома кроками був би коміт, після якого
             // актуальних прогонів нуль (ФВ-9.11).
             await uow.ExecuteInTransactionAsync(
-                    token => SwitchAsync(calculationRunId, profile, token), ct)
+                    token => SwitchAsync(calculationRunId, profile, carryOver, token), ct)
                 .ConfigureAwait(false);
             return;
         }
@@ -229,14 +234,24 @@ public sealed class RunCalculationHandler(
                         throw new JobLeaseLostException(claim.JobId);
                     }
 
-                    await SwitchAsync(calculationRunId, profile, token).ConfigureAwait(false);
+                    await SwitchAsync(calculationRunId, profile, carryOver, token).ConfigureAwait(false);
                 },
                 ct)
             .ConfigureAwait(false);
     }
 
-    private async Task SwitchAsync(long calculationRunId, ModuleProfile profile, CancellationToken ct)
+    private async Task SwitchAsync(
+        long calculationRunId, ModuleProfile profile, ResultCarryOver? carryOver, CancellationToken ct)
     {
+        // RC14 (P2-4): прогін області не перераховував інші аркуші — їхні результати переносяться з
+        // попереднього актуального прогону ДО перемикання актуальності, у тій самій транзакції.
+        if (carryOver is { MethodologyIds.Count: > 0 })
+        {
+            await results
+                .CarryOverResultsAsync(calculationRunId, carryOver.DocumentId, carryOver.MethodologyIds, ct)
+                .ConfigureAwait(false);
+        }
+
         await results
             .SwitchCurrentRunAsync(calculationRunId, profile.ToJson(), ct)
             .ConfigureAwait(false);
