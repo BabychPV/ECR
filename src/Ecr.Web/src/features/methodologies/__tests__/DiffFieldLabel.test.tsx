@@ -16,6 +16,7 @@ const Fields = [
   'resultType',
   'outputUnitId',
   'argumentsCsv',
+  'scope',
   'kind',
   'value',
   'textValue',

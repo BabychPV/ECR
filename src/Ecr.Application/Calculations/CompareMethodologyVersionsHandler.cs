@@ -69,7 +69,8 @@ public sealed class CompareMethodologyVersionsHandler(
                 (MethodologyDiffFields.Expression, a.Expression != b.Expression),
                 (MethodologyDiffFields.ResultType, a.ResultType != b.ResultType),
                 (MethodologyDiffFields.OutputUnitId, a.OutputUnitId != b.OutputUnitId),
-                (MethodologyDiffFields.ArgumentsCsv, a.ArgumentsCsv != b.ArgumentsCsv)));
+                (MethodologyDiffFields.ArgumentsCsv, a.ArgumentsCsv != b.ArgumentsCsv),
+                (MethodologyDiffFields.Scope, a.Scope != b.Scope)));
 
         Diff(items, MethodologyDiffItemKind.Constant, before.Constants, after.Constants,
             c => string.Create(

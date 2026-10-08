@@ -64,6 +64,13 @@ public sealed record MethodologyPackageCategoryRuleDto(string? Expression);
 /// <param name="ResultType">
 /// Тип результату, який вивів експортер із тексту: <c>Text</c> або <c>Number</c>; порожній — <c>Number</c>.
 /// </param>
+/// <param name="Scope">
+/// Область формули (L2-1): <c>Row</c> (раз на рядок, до циклу речовин) або <c>Substance</c> (на кожну речовину);
+/// без регістру. Порожнє або відсутнє - <c>Substance</c>, як до появи поля. Інше значення - блокер
+/// <c>invalidFormulaScope</c>. ⚠ Експортер AF мусить виставити <c>Row</c> для формул, на які посилається
+/// правило категорії (<c>!Name</c>) - разом із їхніми <c>!</c>-залежностями: Row-формула не може посилатись
+/// на формулу речовини.
+/// </param>
 public sealed record MethodologyPackageFormulaDto(
     string Name,
     string Version,
@@ -73,7 +80,8 @@ public sealed record MethodologyPackageFormulaDto(
     string? EndDate,
     bool IsAvailable,
     string? Report,
-    string? ResultType = null);
+    string? ResultType = null,
+    string? Scope = null);
 
 /// <summary>Константа пакета.</summary>
 /// <param name="Name">Ім'я — те, що стоїть після <c>CST.</c>.</param>

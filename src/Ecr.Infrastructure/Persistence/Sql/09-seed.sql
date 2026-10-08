@@ -7297,7 +7297,11 @@ USING (VALUES
     -- COLL:stale-ui ── банер "результати застаріли" у картці документа; ru/kz — порцією COLL:stale-ui нижче ──
     (N'document.staleResults.title', N'en', N'Calculation results are out of date', 1),
     (N'document.staleResults.hint', N'en', N'Input data was changed after the last calculation. Recalculate to refresh the results.', 1),
-    (N'document.staleResults.hintSince', N'en', N'Input data was changed on {date}, after the last calculation. Recalculate to refresh the results.', 1)
+    (N'document.staleResults.hintSince', N'en', N'Input data was changed on {date}, after the last calculation. Recalculate to refresh the results.', 1),
+-- COLL:l21scope ── L2-1: область формули (scope) у PUT формули й порівнянні версій; ru/kz — порцією COLL:l21scope нижче ──
+    (N'err.ECR-CALC-0422.formulaScopeInvalid', N'en', N'The scope "{scope}" of formula "{code}" is not valid: use Substance (once per substance) or Row (once per row).', 1),
+    (N'methodologyDiffField.scope', N'en', N'Scope', 1)
+    -- COLL:l21scope ── кінець секції ──
     -- COLL:stale-ui ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
@@ -17778,6 +17782,7 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:stale-ui ── кінець секції ──
+
 -- COLL:l26rowreject ── ru/kz L2-6: правило категорії відмовило рядкам; власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val
@@ -17799,6 +17804,20 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:bind2 ── кінець секції ──
+
+-- COLL:l21scope ── ru/kz: область формули (scope) у PUT формули й порівнянні версій; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-CALC-0422.formulaScopeInvalid', N'ru', N'Область «{scope}» формулы «{code}» недопустима: допустимы Substance (на каждое вещество) и Row (один раз на строку).'),
+    (N'err.ECR-CALC-0422.formulaScopeInvalid', N'kz', N'«{code}» формуласының «{scope}» аймағы жарамсыз: Substance (әр зат үшін) немесе Row (әр жол үшін бір рет) қолданылады.'),
+    (N'methodologyDiffField.scope', N'ru', N'Область'),
+    (N'methodologyDiffField.scope', N'kz', N'Қолдану аймағы')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:l21scope ── кінець секції ──
+
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t
