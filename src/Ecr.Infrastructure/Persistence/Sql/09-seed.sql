@@ -7309,6 +7309,9 @@ USING (VALUES
     (N'jobs.staleDocuments.open', N'en', N'Open', 1),
     (N'jobs.staleDocuments.error', N'en', N'Could not load the documents that need recalculation.', 1)
     -- COLL:stale-mytasks ── кінець секції ──
+    -- COLL:rc15c-recalc ── перерахунок вимкнений лише коли подані ВСІ аркуші; ru/kz — порцією COLL:rc15c-recalc нижче ──
+    (N'workflow.recalculateAllSubmitted', N'en', N'All sheets of period {period} are submitted or approved: there is nothing to recalculate. Reopen the period first.', 1),
+    -- COLL:rc15c-recalc ── кінець секції ──
     -- COLL:stale-ui ── кінець секції ──
     -- COLL:l21scope ── L2-1: область формули (scope) у PUT формули й порівнянні версій; ru/kz — порцією COLL:l21scope нижче ──
     (N'err.ECR-CALC-0422.formulaScopeInvalid', N'en', N'The scope "{scope}" of formula "{code}" is not valid: use Substance (once per substance) or Row (once per row).', 1),
@@ -17868,6 +17871,16 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:stale-mytasks ── кінець секції ──
+-- COLL:rc15c-recalc ── ru/kz: перерахунок вимкнений лише коли подані ВСІ аркуші; власна порція
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'workflow.recalculateAllSubmitted', N'ru', N'Все листы периода {period} поданы или утверждены: пересчитывать нечего. Сначала откройте период заново.'),
+    (N'workflow.recalculateAllSubmitted', N'kz', N'{period} кезеңінің барлық парақтары тапсырылған немесе бекітілген: қайта есептейтін ештеңе жоқ. Алдымен кезеңді қайта ашыңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:rc15c-recalc ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

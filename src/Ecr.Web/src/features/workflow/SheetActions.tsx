@@ -12,7 +12,7 @@ import type {
   ReopenDocumentRequest,
   SheetWorkflowRequest,
 } from '@/api/types';
-import { hasLockedSheet, locksDataActions, type DocumentLock } from '@/features/documents/documentLock';
+import { allSheetsLocked, locksDataActions, type DocumentLock } from '@/features/documents/documentLock';
 import { invalidateSlices } from '@/features/grid/sliceCache';
 import { JobFailure } from '@/features/jobs/JobFacts';
 import { can, useSession, type MeDto } from '@/shared/session/useSession';
@@ -756,8 +756,10 @@ export function useSheetActions({
   // ✎ RC14-B: поданий/затверджений СУСІДНІЙ аркуш не ховає кнопку чернеткового, а вимикає її з
   // причиною (`DisabledReason`) - раніше «Перерахувати» (і F9) мовчки зникала.
   const canRecalculate = !dataLocked && !narrow && can(me, 'Document.View');
-  const recalcBlockedReason = hasLockedSheet(summary?.sheetStates)
-    ? t('err.ECR-CALC-4221.sheetsSubmitted', { period: formatPeriodKey(periodKey) || String(periodKey) })
+  // ✎ RC15-C: сервер пропускає подані/затверджені аркуші й перераховує решту; відмова (4221) - лише коли
+  // подані ВСІ, тож тільки тоді кнопка вимкнена.
+  const recalcBlockedReason = allSheetsLocked(summary?.sheetStates)
+    ? t('workflow.recalculateAllSubmitted', { period: formatPeriodKey(periodKey) || String(periodKey) })
     : null;
   const recalcBusy = recalculate.isPending || recalcRunning || settled.settling;
 

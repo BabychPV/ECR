@@ -54,3 +54,12 @@ export function locksDataActions(lock: DocumentLock | null): boolean {
 export function hasLockedSheet(sheetStates: Readonly<Record<string, string>> | undefined): boolean {
   return Object.values(sheetStates ?? {}).some((state) => state === 'Submitted' || state === 'Approved');
 }
+
+/**
+ * RC15-C: чи подані/затверджені ВСІ аркуші документа - лише тоді сервер відмовляє в перерахунку (`422 4221`);
+ * частково подані аркуші він пропускає й перераховує решту.
+ */
+export function allSheetsLocked(sheetStates: Readonly<Record<string, string>> | undefined): boolean {
+  const states = Object.values(sheetStates ?? {});
+  return states.length > 0 && states.every((state) => state === 'Submitted' || state === 'Approved');
+}

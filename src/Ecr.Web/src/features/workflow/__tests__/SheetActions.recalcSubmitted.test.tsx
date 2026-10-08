@@ -8,8 +8,8 @@ import { SheetActions } from '../SheetActions';
 import { testTheme } from '@/test/render';
 
 /**
- * AN-39 / L8-12 + RC14-B: коли в періоді є поданий аркуш, сервер (`RecalculateDocumentHandler`:
- * хоч один аркуш Submitted/Approved) відмовляє, тож «Recalculate» вимкнена з ПРИЧИНОЮ, а не зникає.
+ * RC15 P2-A: сервер пропускає подані/затверджені аркуші й відмовляє (4221) лише коли подані ВСІ,
+ * тож «Recalculate» вимкнена з ПРИЧИНОЮ тільки тоді; при частково поданому документі вона активна.
  */
 function summary(sheetStates: Record<string, string>): DocumentSummary {
   return {
@@ -62,9 +62,20 @@ describe('SheetActions: Recalculate і поданий аркуш (L8-12)', () =>
   });
 
   it.each(['Submitted', 'Approved'])(
-    'інший аркуш %s - кнопка лишається, але aria-disabled, причина в описі, клік не шле запит',
+    'інший аркуш %s, але є чернетка - кнопка активна (сервер пропускає поданий аркуш)',
     async (state) => {
       render1({ S1: 'Draft', S2: state });
+
+      const button = await screen.findByRole('button', { name: /recalculate/i });
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(button.getAttribute('aria-disabled')).not.toBe('true');
+    },
+  );
+
+  it.each(['Submitted', 'Approved'])(
+    'усі аркуші %s - кнопка aria-disabled, причина в описі, клік і F9 не шлють запит',
+    async (state) => {
+      render1({ S1: state, S2: state });
 
       const button = await screen.findByRole('button', { name: /recalculate/i });
       await waitFor(() => expect(button.getAttribute('aria-disabled')).toBe('true'));
