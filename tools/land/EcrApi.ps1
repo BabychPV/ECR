@@ -7,6 +7,7 @@ Set-StrictMode -Version 2.0
 
 $script:EcrBase = $null
 $script:EcrSession = $null
+$script:EcrClient = $null
 
 function ConvertTo-PlainText {
     param([Parameter(Mandatory)][securestring]$Secure)
@@ -14,10 +15,45 @@ function ConvertTo-PlainText {
     return $cred.Password
 }
 
+function Get-LoopbackFlag {
+    <#
+    .SYNOPSIS
+        $true, якщо адреса веде на цю ж машину (localhost, 127.0.0.1, ::1).
+    #>
+    param([Parameter(Mandatory)][string]$Url)
+    $u = $null
+    if (-not [System.Uri]::TryCreate($Url, [System.UriKind]::Absolute, [ref]$u)) { return $false }
+    return [bool]$u.IsLoopback
+}
+
+function Enable-LoopbackHttpCookies {
+    <#
+    .SYNOPSIS
+        Сесійний cookie API має прапор Secure, а Invoke-WebRequest (особливо Windows PowerShell 5.1)
+        не надсилає Secure-cookie по http://, тож усі виклики після входу дають 401. Для ЛОКАЛЬНОЇ
+        адреси копіюємо cookie сесії без Secure. Для не-loopback http нічого не робимо (див. Connect-Ecr).
+    #>
+    $u = [System.Uri]$script:EcrBase
+    if ($u.Scheme -ne 'http' -or -not $u.IsLoopback) { return }
+    # GetCookies за https-адресою того ж хоста повертає і Secure-cookie (порт у домені не враховується).
+    $hostName = $u.Host.Trim('[', ']')
+    if ($u.HostNameType -eq [System.UriHostNameType]::IPv6) { $hostName = '[' + $hostName + ']' }
+    $secureUri = [System.Uri]('https://' + $hostName + '/')
+    foreach ($c in @($script:EcrSession.Cookies.GetCookies($secureUri))) {
+        if (-not $c.Secure) { continue }
+        $copy = New-Object System.Net.Cookie($c.Name, $c.Value, $c.Path, $c.Domain)
+        $copy.HttpOnly = $c.HttpOnly
+        $copy.Secure = $false
+        if ($c.Expires -ne [datetime]::MinValue) { $copy.Expires = $c.Expires }
+        $script:EcrSession.Cookies.Add($copy)
+    }
+}
+
 function Connect-Ecr {
     <#
     .SYNOPSIS
         Локальний вхід (POST /api/v1/login/local); сесія тримається в cookie-jar.
+        По http:// дозволено лише loopback-адреси (localhost, 127.0.0.1, ::1).
     #>
     param(
         [Parameter(Mandatory)][string]$BaseUrl,
@@ -34,14 +70,25 @@ function Connect-Ecr {
         throw 'Не задано обліковий запис: передайте -User/-Password або змінні середовища ECR_USER/ECR_PASSWORD.'
     }
 
+    $baseUri = $null
+    if (-not [System.Uri]::TryCreate($BaseUrl, [System.UriKind]::Absolute, [ref]$baseUri)) {
+        throw "Некоректна адреса API: $BaseUrl"
+    }
+    if ($baseUri.Scheme -eq 'http' -and -not (Get-LoopbackFlag $BaseUrl)) {
+        # Пароль і cookie сесії по відкритому http не передаємо.
+        throw "Адреса $BaseUrl — http не на локальній машині: використовуйте https (http дозволено лише для localhost, 127.0.0.1, ::1)."
+    }
+
     $script:EcrBase = $BaseUrl.TrimEnd('/')
     $script:EcrSession = New-Object Microsoft.PowerShell.Commands.WebRequestSession
+    $script:EcrClient = $null
 
     $r = Invoke-Ecr -Method POST -Path '/api/v1/login/local' -Body @{ userName = $User; password = $plain }
     if ($r.Status -ne 200) {
         # Тіло відповіді не друкуємо повністю: у ньому немає пароля, але й корисного — лише код помилки.
         throw "Вхід не вдався: HTTP $($r.Status) $(Get-EcrErrorCode $r)."
     }
+    Enable-LoopbackHttpCookies
 }
 
 function Invoke-Ecr {
@@ -57,41 +104,36 @@ function Invoke-Ecr {
         [hashtable]$Headers = @{}
     )
 
-    $p = @{
-        Uri             = $script:EcrBase + $Path
-        Method          = $Method
-        WebSession      = $script:EcrSession
-        UseBasicParsing = $true
-        Headers         = $Headers
-        ErrorAction     = 'Stop'
+    # HttpClient, а не Invoke-WebRequest: у Windows PowerShell 5.1 (HttpWebRequest) відповідь 422 problem+json
+    # від API (publish шаблону) дає «The connection was closed unexpectedly» без коду і тіла, тож
+    # діагностику ECR-TMPL-4228 було б не прочитати. HttpClient однаково працює в 5.1 і 7.
+    if ($null -eq $script:EcrClient) {
+        Add-Type -AssemblyName System.Net.Http
+        $handler = New-Object System.Net.Http.HttpClientHandler
+        $handler.CookieContainer = $script:EcrSession.Cookies
+        $script:EcrClient = New-Object System.Net.Http.HttpClient($handler)
+        $script:EcrClient.Timeout = [TimeSpan]::FromMinutes(30)
     }
+
+    $req = New-Object System.Net.Http.HttpRequestMessage([System.Net.Http.HttpMethod]::new($Method), ($script:EcrBase + $Path))
+    foreach ($k in $Headers.Keys) { [void]$req.Headers.TryAddWithoutValidation([string]$k, [string]$Headers[$k]) }
     if ($null -ne $Body) {
-        # Тіло — байти UTF-8: рядок у PS 5.1 без charset кодується як ISO-8859-1 і ламає кирилицю.
-        $p.Body = [System.Text.Encoding]::UTF8.GetBytes(($Body | ConvertTo-Json -Depth 12 -Compress))
-        $p.ContentType = 'application/json; charset=utf-8'
+        # Тіло — UTF-8 явно: кирилиця в підписах полів.
+        $json0 = $Body | ConvertTo-Json -Depth 12 -Compress
+        $req.Content = New-Object System.Net.Http.StringContent($json0, [System.Text.Encoding]::UTF8, 'application/json')
     }
 
     $status = 0
     $text = ''
-    $hdrs = $null
+    $hdrs = @{}
+    $resp = $script:EcrClient.SendAsync($req).GetAwaiter().GetResult()
     try {
-        $resp = Invoke-WebRequest @p
         $status = [int]$resp.StatusCode
-        $text = [string]$resp.Content
-        $hdrs = $resp.Headers
+        $text = [string]$resp.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+        foreach ($h in $resp.Headers) { $hdrs[$h.Key] = ($h.Value -join ', ') }
+        foreach ($h in $resp.Content.Headers) { $hdrs[$h.Key] = ($h.Value -join ', ') }
     }
-    catch {
-        $errResp = $null
-        if ($_.Exception.PSObject.Properties.Match('Response').Count -gt 0) { $errResp = $_.Exception.Response }
-        if ($null -eq $errResp) { throw }
-        $status = [int]$errResp.StatusCode
-        if ($_.ErrorDetails -and $_.ErrorDetails.Message) { $text = $_.ErrorDetails.Message }
-        elseif ($errResp.PSObject.Methods.Match('GetResponseStream').Count -gt 0) {
-            $reader = New-Object System.IO.StreamReader($errResp.GetResponseStream(), [System.Text.Encoding]::UTF8)
-            try { $text = $reader.ReadToEnd() } finally { $reader.Dispose() }
-        }
-        $hdrs = $errResp.Headers
-    }
+    finally { $resp.Dispose(); $req.Dispose() }
 
     $json = $null
     if (-not [string]::IsNullOrWhiteSpace($text)) {
@@ -116,6 +158,64 @@ function Assert-EcrOk {
     )
     if ($Allowed -notcontains $Response.Status) {
         throw "${What}: HTTP $($Response.Status) $(Get-EcrErrorCode $Response)"
+    }
+}
+
+function Test-EcrTemplateUnsuitable {
+    <#
+    .SYNOPSIS
+        $true, якщо відповідь — відмова ECR-TMPL-4228 (фіксована таблиця без рядків): шаблон не Land.
+    #>
+    param([Parameter(Mandatory)]$Response)
+    if ($Response.Status -lt 400 -or $Response.Status -ge 500) { return $false }
+    if ((Get-EcrErrorCode $Response) -eq 'ECR-TMPL-4228') { return $true }
+    return ([string]$Response.Text).Contains('ECR-TMPL-4228')
+}
+
+function Stop-EcrTemplateUnsuitable {
+    <#
+    .SYNOPSIS
+        Зрозуміла діагностика замість голого «HTTP 422 ECR-TMPL-4228»: що не так, які шаблони є.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$TemplateCode,
+        [string]$Detail = ''
+    )
+    $codes = ''
+    $t = Invoke-Ecr -Method GET -Path '/api/v1/templates?limit=50'
+    if ($t.Status -eq 200 -and $null -ne $t.Json) {
+        $codes = (@($t.Json.items) | ForEach-Object { [string]$_.code }) -join ', '
+    }
+    if ([string]::IsNullOrEmpty($codes)) { $codes = '(не вдалося отримати GET /templates)' }
+    throw ("Шаблон '$TemplateCode' не підходить: фіксовані таблиці без рядків (ECR-TMPL-4228). $Detail" +
+        "Запускайте на шаблоні Land (імпорт Land: tools/Ecr.MethodologyImport, див. tools/land/README.md). " +
+        "Доступні шаблони: $codes.")
+}
+
+function Wait-EcrJob {
+    <#
+    .SYNOPSIS
+        Опитує GET /api/v1/jobs/{id} до завершення. Повертає JobStatus; кидає виняток при Failed/таймауті.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$JobId,
+        [int]$TimeoutMinutes = 60,
+        [int]$PollSeconds = 3
+    )
+    $deadline = (Get-Date).AddMinutes($TimeoutMinutes)
+    $lastLine = ''
+    while ($true) {
+        $r = Invoke-Ecr -Method GET -Path ('/api/v1/jobs/' + [uri]::EscapeDataString($JobId))
+        Assert-EcrOk $r "GET jobs/$JobId"
+        $s = $r.Json
+        $line = "  задача ${JobId}: $($s.state) $($s.percent)% $($s.message)"
+        if ($line -ne $lastLine) { Write-Host $line; $lastLine = $line }
+        if ($s.state -in @('Failed', 'Cancelled', 'Dead', 'Unavailable')) {
+            throw "Задача ${JobId} завершилась зі станом $($s.state): $($s.errorCode) $($s.error)"
+        }
+        if ($s.state -eq 'Succeeded' -or $s.state -eq 'SucceededWithErrors') { return $s }
+        if ((Get-Date) -gt $deadline) { throw "Задача ${JobId}: таймаут $TimeoutMinutes хв (стан $($s.state), $($s.percent)%)." }
+        Start-Sleep -Seconds $PollSeconds
     }
 }
 
