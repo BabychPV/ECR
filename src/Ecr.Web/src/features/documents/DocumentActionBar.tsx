@@ -124,6 +124,8 @@ export function DocumentActionBar({
       <Menu.Item
         key="recalculate"
         disabled={actions.recalculate.loading}
+        // RC14-B: поданий сусідній аркуш - пункт лишається, `aria-disabled` + причина замість підказки.
+        {...(actions.recalculate.blockedReason !== null ? { 'data-disabled': true, 'aria-disabled': true } : {})}
         onClick={actions.recalculate.run}
         // `UI-41` (пачка batch-3): F9 — та сама дія; клавішу видно й чути і в меню «More».
         aria-keyshortcuts="F9"
@@ -137,7 +139,7 @@ export function DocumentActionBar({
               : t('workflow.recalculate')}
         </Text>
         <Text size="xs" c="dimmed" maw={280}>
-          {t('workflow.recalculateHint')}
+          {actions.recalculate.blockedReason ?? t('workflow.recalculateHint')}
         </Text>
       </Menu.Item>
     ) : null,

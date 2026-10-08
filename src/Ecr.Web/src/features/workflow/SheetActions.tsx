@@ -18,7 +18,7 @@ import { JobFailure } from '@/features/jobs/JobFacts';
 import { can, useSession, type MeDto } from '@/shared/session/useSession';
 import { LazyConfirmModal, LazyReasonModal } from './lazyDialogs';
 import { Hint } from '@/shared/ui/Hint';
-import { showApiError, showDone } from '@/shared/ui/notify';
+import { showApiError, showDone, showWarning } from '@/shared/ui/notify';
 import { useRecallAvailability, type RecallSheetRequest } from './api';
 import { outcomeOf, pollInterval } from './jobFollow';
 import { useSettledAction } from '@/features/grid/settleEdits';
@@ -27,6 +27,8 @@ import { useNarrowScreen } from '@/shared/narrowScreen';
 import { humanizeJobId } from './jobLabel';
 import { isAllowed, type WorkflowAction } from './transitions';
 import { t } from '@/shared/i18n';
+import { formatPeriodKey } from '@/shared/format';
+import { DisabledReason } from '@/features/common/DisabledReason';
 
 /**
  * Відмова дії над аркушем — з назвою аркуша (A2-08), окремим чанком.
@@ -229,18 +231,7 @@ export function SheetActions(props: SheetActionsProps): JSX.Element {
       {recalculate !== null && (
         // ⚠ `Hint`, а не `Tooltip`: кнопка фокусується, але `Tooltip` не
         // давав `aria-describedby`, тож читач не чув нюансу про сусідні аркуші.
-        <Hint label={t('workflow.recalculateHint')}>
-          <Button
-            variant="default"
-            loading={recalculate.loading}
-            onClick={recalculate.run}
-            // `UI-41`: читалка називає клавішу; на кнопці — видимий `F9`, як `kbd` у макеті.
-            aria-keyshortcuts="F9"
-            rightSection={<RecalculateKbd />}
-          >
-            {recalculate.running ? t('workflow.recalcRunning') : t('workflow.recalculate')}
-          </Button>
-        </Hint>
+        <RecalculateButton recalculate={recalculate} />
       )}
 
       {submit !== null && (
@@ -291,6 +282,32 @@ export function SheetActions(props: SheetActionsProps): JSX.Element {
   );
 }
 
+/** RC14-B: поданий сусідній аркуш - кнопка лишається, але `aria-disabled` + причина замість підказки. */
+function RecalculateButton({
+  recalculate,
+}: {
+  readonly recalculate: NonNullable<SheetActionsModel['recalculate']>;
+}): JSX.Element {
+  const button = (
+    <Button
+      variant="default"
+      loading={recalculate.loading}
+      onClick={recalculate.run}
+      // `UI-41`: читалка називає клавішу; на кнопці — видимий `F9`, як `kbd` у макеті.
+      aria-keyshortcuts="F9"
+      rightSection={<RecalculateKbd />}
+    >
+      {recalculate.running ? t('workflow.recalcRunning') : t('workflow.recalculate')}
+    </Button>
+  );
+
+  return recalculate.blockedReason !== null ? (
+    <DisabledReason reason={recalculate.blockedReason}>{button}</DisabledReason>
+  ) : (
+    <Hint label={t('workflow.recalculateHint')}>{button}</Hint>
+  );
+}
+
 /** `UI-41`: видима клавіша `F9` біля «Recalculate» — як `kbd` у макеті (`screen-document.js`). */
 export function RecalculateKbd(): JSX.Element {
   return (
@@ -317,7 +334,8 @@ export interface RunnableSheetAction {
  * розмонтовує вміст, щойно закривається.
  */
 export interface SheetActionsModel {
-  readonly recalculate: (RunnableSheetAction & { readonly running: boolean }) | null;
+  /** `blockedReason` - чому перерахунок зараз неможливий (поданий сусідній аркуш); `null` - можна. */
+  readonly recalculate: (RunnableSheetAction & { readonly running: boolean; readonly blockedReason: string | null }) | null;
   readonly submit: RunnableSheetAction | null;
   readonly approve: { readonly loading: boolean; readonly ask: () => void } | null;
   readonly reject: { readonly ask: () => void } | null;
@@ -735,7 +753,12 @@ export function useSheetActions({
   // періоду поданий чи затверджений, - кнопки, яка гарантовано дасть відмову, немає.
   // ✎ `UI-42`: на вузькому екрані документ лише для читання — перерахунок, що переписує
   // обчислені комірки, теж ні (макет: `Recalculate` вимкнений, коли `readOnlyReason()`).
-  const canRecalculate = !dataLocked && !narrow && !hasLockedSheet(summary?.sheetStates) && can(me, 'Document.View');
+  // ✎ RC14-B: поданий/затверджений СУСІДНІЙ аркуш не ховає кнопку чернеткового, а вимикає її з
+  // причиною (`DisabledReason`) - раніше «Перерахувати» (і F9) мовчки зникала.
+  const canRecalculate = !dataLocked && !narrow && can(me, 'Document.View');
+  const recalcBlockedReason = hasLockedSheet(summary?.sheetStates)
+    ? t('err.ECR-CALC-4221.sheetsSubmitted', { period: formatPeriodKey(periodKey) || String(periodKey) })
+    : null;
   const recalcBusy = recalculate.isPending || recalcRunning || settled.settling;
 
   /*
@@ -751,7 +774,11 @@ export function useSheetActions({
    */
   const f9 = useRef<(() => void) | null>(null);
   useEffect(() => {
-    f9.current = canRecalculate && !recalcBusy ? () => void settled.run(() => recalculate.mutateAsync()) : null;
+    f9.current = !canRecalculate || recalcBusy
+      ? null
+      : recalcBlockedReason !== null
+        ? () => showWarning(recalcBlockedReason)
+        : () => void settled.run(() => recalculate.mutateAsync());
   });
   useEffect(() => {
     const onKey = (event: KeyboardEvent): void => {
@@ -849,8 +876,10 @@ export function useSheetActions({
       ? {
           loading: recalculateLoading || recalcRunning || settled.settling,
           running: recalcRunning,
+          blockedReason: recalcBlockedReason,
           // AN-28/L8-01: спершу зберегти набране; відмова збереження - дії немає.
-          run: () => settled.run(() => recalculate.mutateAsync()),
+          run: () =>
+            recalcBlockedReason !== null ? showWarning(recalcBlockedReason) : settled.run(() => recalculate.mutateAsync()),
         }
       : null,
     submit: canSubmit

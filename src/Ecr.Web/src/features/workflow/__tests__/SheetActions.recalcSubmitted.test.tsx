@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { DocumentSummary } from '@/api/types';
@@ -7,8 +8,8 @@ import { SheetActions } from '../SheetActions';
 import { testTheme } from '@/test/render';
 
 /**
- * AN-39 / L8-12: «Recalculate» видно, коли в періоді є поданий аркуш, хоча сервер
- * (`RecalculateDocumentHandler`: хоч один аркуш Submitted/Approved) на нього відмовляє.
+ * AN-39 / L8-12 + RC14-B: коли в періоді є поданий аркуш, сервер (`RecalculateDocumentHandler`:
+ * хоч один аркуш Submitted/Approved) відмовляє, тож «Recalculate» вимкнена з ПРИЧИНОЮ, а не зникає.
  */
 function summary(sheetStates: Record<string, string>): DocumentSummary {
   return {
@@ -60,12 +61,22 @@ describe('SheetActions: Recalculate і поданий аркуш (L8-12)', () =>
     expect(await screen.findByRole('button', { name: /recalculate/i })).toBeTruthy();
   });
 
-  it.each(['Submitted', 'Approved'])('інший аркуш %s - кнопки немає', async (state) => {
-    render1({ S1: 'Draft', S2: state });
+  it.each(['Submitted', 'Approved'])(
+    'інший аркуш %s - кнопка лишається, але aria-disabled, причина в описі, клік не шле запит',
+    async (state) => {
+      render1({ S1: 'Draft', S2: state });
 
-    await waitFor(() => expect(vi.mocked(fetch)).toHaveBeenCalled());
-    await new Promise((resolve) => setTimeout(resolve, 150));
+      const button = await screen.findByRole('button', { name: /recalculate/i });
+      await waitFor(() => expect(button.getAttribute('aria-disabled')).toBe('true'));
+      expect(button.getAttribute('aria-describedby')).toBeTruthy();
 
-    expect(screen.queryByRole('button', { name: /recalculate/i })).toBeNull();
-  });
+      const calls = vi.mocked(fetch).mock.calls.length;
+      await userEvent.setup().click(button);
+      await userEvent.setup().keyboard('{F9}');
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      expect(vi.mocked(fetch).mock.calls.filter((c) => String(c[0]).includes('/recalculate'))).toHaveLength(0);
+      expect(vi.mocked(fetch).mock.calls.length).toBe(calls);
+    },
+  );
 });
