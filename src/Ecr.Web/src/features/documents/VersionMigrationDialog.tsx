@@ -1,14 +1,17 @@
-import { useEffect, useState, type JSX } from 'react';
+import { useEffect, useRef, useState, type JSX } from 'react';
 import { useReturnFocusOnUnmount } from '@/shared/a11y/focus';
-import { Alert, Button, Group, Modal, SegmentedControl, Select, Stack, Table, Text } from '@mantine/core';
+import { Alert, Button, Group, Modal, Progress, SegmentedControl, Select, Stack, Table, Text } from '@mantine/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { showDone } from '@/shared/ui/notify';
 import { t } from '@/shared/i18n';
 import { useSettledAction } from '@/features/grid/settleEdits';
+import { isActiveJob } from '@/features/jobs/myTasks';
+import { useJobStatus } from '@/features/jobs/useJobStatus';
 import {
   getVersionMigrationTargets,
   migrateDocumentVersion,
+  startMigrateDocumentVersion,
   type VersionMigrationMode,
   type VersionMigrationReport,
 } from './versionMigrationApi';
@@ -111,31 +114,47 @@ export function VersionMigrationDialog({ documentId, onClose }: VersionMigration
     onSuccess: (done) => setReportState(done),
   });
 
+  // D-2 RC15B: перенос іде ФОНОВОЮ задачею - POST дає `jobId`, стан і прогрес опитує `useJobStatus`.
+  const [jobId, setJobId] = useState<string | null>(null);
   const apply = useMutation({
     meta: { handled: true },
-    mutationFn: () =>
-      migrateDocumentVersion({ documentId, targetVersionId: Number(targetId), mode, dryRun: false }),
-    onSuccess: async (result) => {
-      // ⚠ Змінилась структура ВСІХ документів проєкту: аркуші, таблиці,
-      // колонки. Вузька інвалідація тут лише ризикувала б лишити засталу сітку.
-      await queryClient.invalidateQueries();
-      showDone(t('documents.migrateDone', { version: result.toVersion, count: result.documentCount }));
-      onClose();
-    },
+    mutationFn: () => startMigrateDocumentVersion({ documentId, targetVersionId: Number(targetId), mode }),
+    onSuccess: (accepted) => setJobId(accepted.jobId),
   });
+
+  const job = useJobStatus(jobId);
+  const jobState = job.data?.state ?? null;
+  // Задача поставлена, але стан ще не приїхав, - теж "йде": кнопка не повинна блимнути активною.
+  const jobRunning = jobId !== null && job.error === null && (jobState === null || isActiveJob(jobState));
+  const jobFailed = jobState === 'Failed' || jobState === 'Cancelled';
+  const jobMessage = job.data?.message ?? null;
+  const finished = useRef(false);
+
+  useEffect(() => {
+    if (jobState !== 'Succeeded' || finished.current) return;
+    finished.current = true;
+
+    // ⚠ Змінилась структура ВСІХ документів проєкту: аркуші, таблиці,
+    // колонки. Вузька інвалідація тут лише ризикувала б лишити засталу сітку.
+    void queryClient.invalidateQueries().then(() => {
+      showDone(jobMessage ?? t('documents.migrateVersionTitle'));
+      onClose();
+    });
+  }, [jobState, jobMessage, queryClient, onClose]);
 
   const { reset: resetApply } = apply;
 
-  // Будь-яка зміна вибору знецінює звіт — див. коментар до компонента.
+  // Будь-яка зміна вибору знецінює звіт - див. коментар до компонента.
   useEffect(() => {
     setReportState(null);
+    setJobId(null);
     resetApply();
   }, [targetId, mode, resetApply]);
 
   const options = (targets.data?.targets ?? []).map((v) => ({ value: String(v.id), label: v.version }));
   // AN-28 P2-2: зайнятість і на час збереження набраного перед Apply.
   const settled = useSettledAction(apply.isPending);
-  const busy = dryRun.isPending || apply.isPending || settled.settling;
+  const busy = dryRun.isPending || apply.isPending || settled.settling || jobRunning;
 
   return (
     <Modal opened onClose={onClose} title={t('documents.migrateVersionTitle')} size="lg">
@@ -184,6 +203,26 @@ export function VersionMigrationDialog({ documentId, onClose }: VersionMigration
 
         {apply.error !== null && <ErrorAlert error={apply.error} />}
 
+        {job.error !== null && <ErrorAlert error={job.error} />}
+
+        {jobRunning && (
+          <Stack gap="xs" data-migrate-progress="">
+            <Progress value={job.data?.percent ?? 0} aria-label={t('documents.migrateVersionTitle')} />
+            <Text size="sm">{t('documents.migrateRunning', { percent: job.data?.percent ?? 0 })}</Text>
+            {jobMessage !== null && (
+              <Text size="xs" c="dimmed">
+                {jobMessage}
+              </Text>
+            )}
+          </Stack>
+        )}
+
+        {jobFailed && (
+          <Alert color="statusError" data-migrate-job-failed="">
+            {t('documents.migrateJobFailed', { reason: job.data?.error ?? '' })}
+          </Alert>
+        )}
+
         <Group justify="flex-end" mt="xs">
           <Button variant="default" onClick={onClose}>
             {t('common.cancel')}
@@ -199,7 +238,7 @@ export function VersionMigrationDialog({ documentId, onClose }: VersionMigration
           </Button>
           <Button
             disabled={report === null || !report.canApply || busy}
-            loading={apply.isPending || settled.settling}
+            loading={apply.isPending || settled.settling || jobRunning}
             onClick={() => settled.run(() => apply.mutateAsync())}
             data-testid="migrate-apply"
           >
