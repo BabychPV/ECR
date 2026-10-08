@@ -111,7 +111,24 @@ public sealed class RecalculateDocumentSheetScopeTests
             .EnqueueExclusiveAsync<IRecalculationJob>(default!, default, default);
     }
 
-    private static Fixture Arrange(int? submittedSheet, int? hiddenSheet, PeriodState periodState = PeriodState.Open)
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-9.17")]
+    public async Task Перерахунок_усього_документа_де_подані_усі_аркуші_відхиляється_швидко()
+    {
+        var fixture = Arrange(submittedSheet: 3, hiddenSheet: null, alsoSubmittedSheet: 1);
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => fixture.Handler.HandleAsync(Document, new PeriodKey(Period), sheetDefId: null, CancellationToken.None));
+
+        Assert.Equal("ECR-CALC-4221", error.ErrorCode);
+        Assert.Equal("err.ECR-CALC-4221.sheetsSubmitted", error.Details?["messageKey"]);
+        await fixture.Jobs.DidNotReceiveWithAnyArgs()
+            .EnqueueCoalescedAsync<IRecalculationJob>(default!, default, default);
+    }
+
+    private static Fixture Arrange(
+        int? submittedSheet, int? hiddenSheet, PeriodState periodState = PeriodState.Open, int? alsoSubmittedSheet = null)
     {
         var builder = new AccessBuilder { UserId = 9 }
             .Permission(RecalculateDocumentHandler.Permission)
@@ -136,6 +153,8 @@ public sealed class RecalculateDocumentSheetScopeTests
 
         var documents = Substitute.For<IDocumentStore>();
         documents.HasSheetAsync(Document, Arg.Any<int>(), Arg.Any<CancellationToken>()).Returns(true);
+        documents.GetIncludedSheetIdsAsync(Document, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<int>>([1, 3]));
 
         var periods = Substitute.For<IPeriodStore>();
         periods.FindPeriodStateAsync(Document, Period, Arg.Any<CancellationToken>()).Returns((PeriodState?)periodState);
@@ -144,6 +163,13 @@ public sealed class RecalculateDocumentSheetScopeTests
         if (submittedSheet is { } submitted)
         {
             var state = new ApprovalState(Document, submitted, Period);
+            state.Submit(userId: 5, DateTime.UtcNow);
+            states.Add(state);
+        }
+
+        if (alsoSubmittedSheet is { } also)
+        {
+            var state = new ApprovalState(Document, also, Period);
             state.Submit(userId: 5, DateTime.UtcNow);
             states.Add(state);
         }

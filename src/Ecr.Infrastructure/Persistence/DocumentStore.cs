@@ -560,6 +560,16 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
             .ConfigureAwait(false);
 
     /// <inheritdoc />
+    public async Task<IReadOnlyList<int>> GetIncludedSheetIdsAsync(long documentId, CancellationToken ct)
+        => await db.DocumentSheets
+            .AsNoTracking()
+            .Where(s => s.DocumentId == documentId && s.IsIncluded)
+            .Select(s => s.SheetDefId)
+            .OrderBy(id => id)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+    /// <inheritdoc />
     public async Task<int?> FindProjectIdAsync(long documentId, CancellationToken ct)
         => await db.Documents
             .AsNoTracking()
