@@ -44,6 +44,24 @@ public sealed class PublishBindingRuleSelectedConflictApiTests(SqlServerFixture 
             $"{(int)response.StatusCode}: {await response.Content.ReadAsStringAsync()}\n{app.ErrorsText}");
     }
 
+    [Theory]
+    [InlineData(true, true)]
+    [InlineData(true, false)]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Лише_MethodologyRule_без_правил_категорії_публікується(bool first, bool second)
+    {
+        var versionId = await ArrangeAsync(ruleBased: [first, second]);
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app);
+
+        using var response = await PublishAsync(client, versionId);
+
+        Assert.True(
+            response.IsSuccessStatusCode,
+            $"{(int)response.StatusCode}: {await response.Content.ReadAsStringAsync()}\n{app.ErrorsText}");
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
@@ -120,7 +138,7 @@ public sealed class PublishBindingRuleSelectedConflictApiTests(SqlServerFixture 
 
             if (ruleBased[i] is true)
             {
-                mv.AddRule(EcrCode.Create("all"), "{}", 100);
+                db.MethodologyRules.Add(mv.AddRule(EcrCode.Create("all"), "{}", 100));
             }
             else if (ruleBased[i] is "category")
             {
