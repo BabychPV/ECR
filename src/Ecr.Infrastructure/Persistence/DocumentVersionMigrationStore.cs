@@ -7,7 +7,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Ecr.Infrastructure.Persistence;
 
-/// <summary>Перенос документів проєкту на нову версію шаблону (ФВ-7.5) — набором, одним пакетом SQL.</summary>
+/// <summary>Перенос документів проєкту на нову версію шаблону (ФВ-7.5) — набором, пачками SQL в одній транзакції.</summary>
 /// <remarks>
 /// ⚠ Версія живе на ПРОЄКТІ (<c>Project.TemplateVersionId</c>), і кожен шлях
 /// читання бере її звідти. Тому переносяться всі документи проєкту разом із
@@ -59,6 +59,9 @@ public sealed class DocumentVersionMigrationStore(EcrDbContext db) : IDocumentVe
     /// <inheritdoc />
     public async Task<VersionMigrationScope> ReadScopeAsync(int projectId, CancellationToken ct)
     {
+        // N-3: підрахунок по всіх значеннях проєкту (сотні тисяч) теж довший за глобальний таймаут.
+        using var timeout = ExtendTimeout();
+
         var documentIds = await ListDocumentIdsAsync(projectId, ct).ConfigureAwait(false);
 
         var cells = await db.Database
@@ -111,19 +114,113 @@ public sealed class DocumentVersionMigrationStore(EcrDbContext db) : IDocumentVe
         _ = db.Database.CurrentTransaction
             ?? throw new InvalidOperationException("ApplyAsync викликано поза транзакцією: перенос мусить бути атомарним.");
 
-        var parameters = new object[]
-        {
-            new SqlParameter("@projectId", projectId),
-            new SqlParameter("@targetVersionId", targetVersionId),
-            Json("@sheets", plan.Sheets.Select(p => new { o = p.Key, n = p.Value })),
-            Json("@tables", plan.Tables.Select(p => new { o = p.Key, n = p.Value })),
-            Json("@columns", plan.Columns.Select(c => new { o = c.SourceColumnDefId, n = c.TargetColumnDefId, t = c.TargetTableDefId })),
-            Json("@rows", plan.Rows.Select(p => new { o = p.Key, n = p.Value })),
-            Json("@headers", plan.HeaderFields.Select(p => new { o = p.Key, n = p.Value })),
-            Json("@newRows", plan.NewRows.Select(r => new { t = r.TargetTableDefId, d = r.TargetRowDefId, k = r.RowKey, s = r.Ordinal })),
-        };
+        using var timeout = ExtendTimeout();
 
-        await db.Database.ExecuteSqlRawAsync(ApplySql, parameters, ct).ConfigureAwait(false);
+        // Один момент зміни на весь перенос (раніше — SYSUTCDATETIME() у єдиному пакеті).
+        var now = await db.Database
+            .SqlQuery<DateTime>($"SELECT CAST(SYSUTCDATETIME() AS datetime2(3)) AS Value")
+            .SingleAsync(ct)
+            .ConfigureAwait(false);
+
+        var sheets = JsonSerializer.Serialize(plan.Sheets.Select(p => new { o = p.Key, n = p.Value }));
+        var tables = JsonSerializer.Serialize(plan.Tables.Select(p => new { o = p.Key, n = p.Value }));
+        var columns = JsonSerializer.Serialize(plan.Columns.Select(c => new { o = c.SourceColumnDefId, n = c.TargetColumnDefId, t = c.TargetTableDefId }));
+        var rows = JsonSerializer.Serialize(plan.Rows.Select(p => new { o = p.Key, n = p.Value }));
+        var headers = JsonSerializer.Serialize(plan.HeaderFields.Select(p => new { o = p.Key, n = p.Value }));
+        var newRows = JsonSerializer.Serialize(plan.NewRows.Select(r => new { t = r.TargetTableDefId, d = r.TargetRowDefId, k = r.RowKey, s = r.Ordinal }));
+
+        // ⚠ Параметри — свіжі на кожну команду: SqlParameter належить одній колекції. Мапи, документи й
+        // екземпляри щоразу збираються заново з цих параметрів (прелюдія) — стан між командами НЕ тримається:
+        // #-таблиці були б DDL (сторож `ForbiddenApiTests`), а таблиці-змінні живуть лише в межах пакета.
+        SqlParameter[] Parameters(SqlParameter? changedOutput = null)
+        {
+            List<SqlParameter> list =
+            [
+                new("@projectId", projectId),
+                new("@targetVersionId", targetVersionId),
+                new("@batch", BatchRows),
+                new("@now", System.Data.SqlDbType.DateTime2) { Scale = 3, Value = now },
+                new("@sheets", System.Data.SqlDbType.NVarChar, -1) { Value = sheets },
+                new("@tables", System.Data.SqlDbType.NVarChar, -1) { Value = tables },
+                new("@columns", System.Data.SqlDbType.NVarChar, -1) { Value = columns },
+                new("@rows", System.Data.SqlDbType.NVarChar, -1) { Value = rows },
+                new("@headers", System.Data.SqlDbType.NVarChar, -1) { Value = headers },
+                new("@newRows", System.Data.SqlDbType.NVarChar, -1) { Value = newRows },
+            ];
+            if (changedOutput is not null)
+            {
+                list.Add(changedOutput);
+            }
+
+            return [.. list];
+        }
+
+        async Task SingleAsync(string sql)
+            => await db.Database.ExecuteSqlRawAsync(SingleCommand(sql), Parameters(), ct).ConfigureAwait(false);
+
+        async Task BatchesAsync(string sql)
+        {
+            var command = BatchCommand(sql);
+            int changed;
+            do
+            {
+                ct.ThrowIfCancellationRequested();
+                var output = new SqlParameter("@changed", System.Data.SqlDbType.Int) { Direction = System.Data.ParameterDirection.Output };
+                await db.Database.ExecuteSqlRawAsync(command, Parameters(output), ct).ConfigureAwait(false);
+                changed = output.Value is int value ? value : 0;
+            }
+            while (changed >= BatchRows);
+        }
+
+        foreach (var sql in CellAndRowBatches)
+        {
+            await BatchesAsync(sql).ConfigureAwait(false);
+        }
+
+        await SingleAsync(InstancesSql).ConfigureAwait(false);
+
+        // Без нових рядків у плані команду не посилаємо зовсім.
+        if (plan.NewRows.Count > 0)
+        {
+            await BatchesAsync(NewRowsBatchSql).ConfigureAwait(false);
+        }
+
+        await SingleAsync(HeaderSql).ConfigureAwait(false);
+
+        foreach (var sql in IndexBatches)
+        {
+            await BatchesAsync(sql).ConfigureAwait(false);
+        }
+
+        await SingleAsync(WorkflowSql).ConfigureAwait(false);
+        await BatchesAsync(ValidationBatchSql).ConfigureAwait(false);
+        await SingleAsync(FinishSql).ConfigureAwait(false);
+    }
+
+    // Складають команду зі СТАТИЧНИХ текстів цього класу (прелюдія + оператор) — не з вводу користувача.
+    private static string SingleCommand(string body) => Prelude + body;
+
+    /// <summary>
+    /// Пачкова команда: оператор, перед його <c>;</c> — <c>OPTION (RECOMPILE)</c> (табличні змінні мають відомий
+    /// розмір лише після перекомпіляції, інакше план бере їх за 1 рядок), далі <c>@changed = @@ROWCOUNT</c>.
+    /// </summary>
+    private static string BatchCommand(string body)
+        => Prelude + body.TrimEnd().TrimEnd(';') + " OPTION (RECOMPILE);\nSET @changed = @@ROWCOUNT;";
+
+    /// <summary>
+    /// Подовжує <c>CommandTimeout</c> контексту на час операції переносу й повертає його, коли її завершено.
+    /// Глобальний таймаут застосунку (<c>Database:CommandTimeoutSeconds</c>) не змінюється.
+    /// </summary>
+    private ExtendedTimeout ExtendTimeout()
+    {
+        var previous = db.Database.GetCommandTimeout();
+        db.Database.SetCommandTimeout(ApplyCommandTimeoutSeconds);
+        return new ExtendedTimeout(db, previous);
+    }
+
+    private sealed class ExtendedTimeout(EcrDbContext db, int? previous) : IDisposable
+    {
+        public void Dispose() => db.Database.SetCommandTimeout(previous);
     }
 
     /// <inheritdoc />
@@ -343,30 +440,32 @@ public sealed class DocumentVersionMigrationStore(EcrDbContext db) : IDocumentVe
             : new GrantedUsers(ids, Overflow: false);
     }
 
-    private static SqlParameter Json(string name, IEnumerable<object> rows)
-        => new(name, System.Data.SqlDbType.NVarChar, -1) { Value = JsonSerializer.Serialize(rows) };
-
     /// <summary>Рядок підрахунку значень комірок.</summary>
     private sealed record CellUsageRow(int ColumnDefId, int? RowDefId, long Values);
 
     /// <summary>Рядок підрахунку значень шапки.</summary>
     private sealed record HeaderUsageRow(int HeaderFieldDefId, long Values);
 
-    /// <summary>Сам перенос.</summary>
-    /// <remarks>
-    /// Порядок — від листків до коренів, бо ключі складені:
-    /// <c>FK_CellValue_Column</c> — пара <c>(TableDefId, ColumnDefId)</c>, тож
-    /// комірка міняє обидва поля одним оператором. Те, чому в новій версії
-    /// немає місця, прибирається: план уже гарантував, що там немає жодного
-    /// введеного значення (режим <c>Safe</c> інакше відмовляє), тобто зникають
-    /// лише порожні комірки й порожні рядки, екземпляри таблиць і склад аркушів.
-    ///
-    /// ⚠ Історія лишається на тих описах, де її записали: <c>calc.SubmissionSnapshot</c>
-    /// — зріз ПОДАННЯ, який і має посилатися на версію, за якою подавали;
-    /// <c>aud.*</c> — незмінний журнал.
-    /// </remarks>
-    private const string ApplySql = """
-        SET NOCOUNT ON;
+    // Сам перенос. Порядок — від листків до коренів, бо ключі складені: FK_CellValue_Column — пара
+    // (TableDefId, ColumnDefId), тож комірка міняє обидва поля одним оператором. Те, чому в новій версії
+    // немає місця, прибирається: план уже гарантував, що там немає жодного введеного значення (режим Safe
+    // інакше відмовляє), тобто зникають лише порожні комірки й порожні рядки, екземпляри таблиць і склад аркушів.
+    // ⚠ Історія лишається на тих описах, де її записали: calc.SubmissionSnapshot — зріз ПОДАННЯ, який і має
+    // посилатися на версію, за якою подавали; aud.* — незмінний журнал.
+    //
+    // ── Команди переносу (N-3) ──────────────────────────────────────────────────────────────────────
+    // Раніше весь перенос був ОДНИМ пакетом SQL під глобальним CommandTimeout (60 с): проєкт із ~138 тис.
+    // значень (Land RC11) не вкладався і давав 500. Тепер це послідовність команд В ОДНІЙ транзакції
+    // (атомарність та сама: збій у будь-якій — відкат усього), великі оператори йдуть пачками по BatchRows,
+    // і кожна команда має власний таймаут ApplyCommandTimeoutSeconds. Пачка завжди прибирає свої рядки з
+    // власного предиката (змінена колонка/опис більше не збігається, видалене зникло), тож цикл «доки пачка
+    // повна» скінченний.
+
+    /// <summary>
+    /// Прелюдія кожної команди: мапи, документи, періоди й екземпляри таблиць проєкту — у табличних змінних,
+    /// з параметрів. Стану між командами немає (#-таблиці були б DDL, який сторож не пускає).
+    /// </summary>
+    private const string Prelude = """
         SET XACT_ABORT ON;
 
         DECLARE @docs TABLE (Id bigint PRIMARY KEY);
@@ -398,56 +497,86 @@ public sealed class DocumentVersionMigrationStore(EcrDbContext db) : IDocumentVe
         JOIN   @periods p ON p.PeriodKey = ti.PeriodKey
         JOIN   @docs d    ON d.Id = ti.DocumentId;
 
-        DECLARE @now datetime2(3) = SYSUTCDATETIME();
+        """;
 
-        -- 1. Комірки: у колонку-відповідник, разом із таблицею (складений FK).
-        UPDATE cv
+    /// <summary>
+    /// Пачкові оператори в порядку виконання (порядок — від листків до коренів, як і був у єдиному пакеті).
+    /// Кожен — РІВНО один оператор з <c>TOP (@batch)</c>; після нього виконавець бере <c>@@ROWCOUNT</c> в
+    /// <c>@changed</c>, і пачка, що змінила менше за <see cref="BatchRows"/>, була останньою.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Предикат кожного оператора мусить виключати вже зроблене, інакше цикл не скінчиться:
+    /// перенесена комірка/рядок/значення індексу має колонку-відповідник (<c>m.o &lt;&gt; m.n</c> — відповідник
+    /// завжди з ІНШОЇ версії), знятий рядок — <c>ModifiedAt = @now</c>, видалене зникло.
+    /// </remarks>
+    private static readonly string[] CellAndRowBatches =
+    [
+        // 1. Комірки: у колонку-відповідник, разом із таблицею (складений FK).
+        """
+        UPDATE TOP (@batch) cv
         SET    cv.ColumnDefId = m.n, cv.TableDefId = m.t
         FROM   doc.CellValue cv
-        JOIN   doc.TableRow r ON r.PeriodKey = cv.PeriodKey AND r.Id = cv.TableRowId
-        JOIN   @instances i   ON i.PeriodKey = r.PeriodKey AND i.Id = r.TableInstanceId
-        JOIN   @columnMap m   ON m.o = cv.ColumnDefId
-        WHERE  cv.PeriodKey IN (SELECT PeriodKey FROM @periods);
+        JOIN   doc.TableRow r      ON r.PeriodKey = cv.PeriodKey AND r.Id = cv.TableRowId
+        JOIN   @instances i    ON i.PeriodKey = r.PeriodKey AND i.Id = r.TableInstanceId
+        JOIN   @columnMap m    ON m.o = cv.ColumnDefId
+        WHERE  cv.PeriodKey IN (SELECT PeriodKey FROM @periods)
+          AND  m.o <> m.n;
+        """,
 
-        -- Порожні комірки колонок, яких нова версія не має.
-        DELETE cv
+        // Порожні комірки колонок, яких нова версія не має.
+        """
+        DELETE TOP (@batch) cv
         FROM   doc.CellValue cv
-        JOIN   doc.TableRow r ON r.PeriodKey = cv.PeriodKey AND r.Id = cv.TableRowId
-        JOIN   @instances i   ON i.PeriodKey = r.PeriodKey AND i.Id = r.TableInstanceId
+        JOIN   doc.TableRow r      ON r.PeriodKey = cv.PeriodKey AND r.Id = cv.TableRowId
+        JOIN   @instances i    ON i.PeriodKey = r.PeriodKey AND i.Id = r.TableInstanceId
         WHERE  cv.PeriodKey IN (SELECT PeriodKey FROM @periods)
           AND  NOT EXISTS (SELECT 1 FROM @columnMap m WHERE m.n = cv.ColumnDefId);
+        """,
 
-        -- 2. Рядки: описи рядків — за ключем; рядки без місця в новій версії знімаються.
-        UPDATE r
+        // 2. Рядки: описи рядків — за ключем; рядки без місця в новій версії знімаються.
+        """
+        UPDATE TOP (@batch) r
         SET    r.RowDefId = m.n
         FROM   doc.TableRow r
-        JOIN   @instances i ON i.PeriodKey = r.PeriodKey AND i.Id = r.TableInstanceId
-        JOIN   @rowMap m    ON m.o = r.RowDefId
-        WHERE  r.PeriodKey IN (SELECT PeriodKey FROM @periods);
+        JOIN   @instances i    ON i.PeriodKey = r.PeriodKey AND i.Id = r.TableInstanceId
+        JOIN   @rowMap m       ON m.o = r.RowDefId
+        WHERE  r.PeriodKey IN (SELECT PeriodKey FROM @periods)
+          AND  m.o <> m.n;
+        """,
 
-        UPDATE r
+        """
+        UPDATE TOP (@batch) r
         SET    r.IsDeleted = 1, r.ModifiedAt = @now
         FROM   doc.TableRow r
-        JOIN   @instances i ON i.PeriodKey = r.PeriodKey AND i.Id = r.TableInstanceId
+        JOIN   @instances i    ON i.PeriodKey = r.PeriodKey AND i.Id = r.TableInstanceId
         WHERE  r.PeriodKey IN (SELECT PeriodKey FROM @periods)
           AND  r.RowDefId IS NOT NULL
+          AND  r.ModifiedAt <> @now
           AND  NOT EXISTS (SELECT 1 FROM @rowMap m WHERE m.n = r.RowDefId)
           AND  EXISTS (SELECT 1 FROM @tableMap t WHERE t.o = i.TableDefId);
+        """,
 
-        -- 3. Екземпляри таблиць, яких нова версія не має: порожні — прибираються повністю.
-        DELETE cv
+        // 3. Екземпляри таблиць, яких нова версія не має: порожні — прибираються повністю.
+        """
+        DELETE TOP (@batch) cv
         FROM   doc.CellValue cv
-        JOIN   doc.TableRow r ON r.PeriodKey = cv.PeriodKey AND r.Id = cv.TableRowId
-        JOIN   @instances i   ON i.PeriodKey = r.PeriodKey AND i.Id = r.TableInstanceId
+        JOIN   doc.TableRow r      ON r.PeriodKey = cv.PeriodKey AND r.Id = cv.TableRowId
+        JOIN   @instances i    ON i.PeriodKey = r.PeriodKey AND i.Id = r.TableInstanceId
         WHERE  cv.PeriodKey IN (SELECT PeriodKey FROM @periods)
           AND  NOT EXISTS (SELECT 1 FROM @tableMap t WHERE t.o = i.TableDefId);
+        """,
 
-        DELETE r
+        """
+        DELETE TOP (@batch) r
         FROM   doc.TableRow r
-        JOIN   @instances i ON i.PeriodKey = r.PeriodKey AND i.Id = r.TableInstanceId
+        JOIN   @instances i    ON i.PeriodKey = r.PeriodKey AND i.Id = r.TableInstanceId
         WHERE  r.PeriodKey IN (SELECT PeriodKey FROM @periods)
           AND  NOT EXISTS (SELECT 1 FROM @tableMap t WHERE t.o = i.TableDefId);
+        """,
+    ];
 
+    /// <summary>Екземпляри таблиць (їх мало: документи × таблиці × періоди) — одним оператором.</summary>
+    private const string InstancesSql = """
         DELETE ti
         FROM   doc.TableInstance ti
         JOIN   @instances i ON i.PeriodKey = ti.PeriodKey AND i.Id = ti.Id
@@ -460,18 +589,29 @@ public sealed class DocumentVersionMigrationStore(EcrDbContext db) : IDocumentVe
         JOIN   @instances i ON i.PeriodKey = ti.PeriodKey AND i.Id = ti.Id
         JOIN   @tableMap m  ON m.o = ti.TableDefId
         WHERE  ti.PeriodKey IN (SELECT PeriodKey FROM @periods);
+        """;
 
-        -- 4. Рядки фіксованих таблиць, яких стара версія не мала: у кожен наявний екземпляр.
+    /// <summary>
+    /// 4. Рядки фіксованих таблиць, яких стара версія не мала: у кожен наявний екземпляр.
+    /// ⚠ <c>NEXT VALUE FOR</c> не сумісний з <c>TOP</c> в одному <c>SELECT</c>, тому <c>TOP</c> — у похідній таблиці.
+    /// Вставлений рядок виключається <c>NOT EXISTS</c> за <c>RowKey</c>, тож цикл скінченний.
+    /// </summary>
+    private const string NewRowsBatchSql = """
         INSERT doc.TableRow (PeriodKey, Id, TableInstanceId, RowKey, RowDefId, Ordinal, IsDeleted, IsOrphaned, ModifiedAt)
-        SELECT ti.PeriodKey, NEXT VALUE FOR doc.TableRowSeq, ti.Id, nr.k, nr.d, nr.s, 0, 0, @now
-        FROM   doc.TableInstance ti
-        JOIN   @instances i ON i.PeriodKey = ti.PeriodKey AND i.Id = ti.Id
-        JOIN   OPENJSON(@newRows) WITH (t int, d int, k nvarchar(100), s int) nr ON nr.t = ti.TableDefId
-        WHERE  ti.PeriodKey IN (SELECT PeriodKey FROM @periods)
-          AND  NOT EXISTS (SELECT 1 FROM doc.TableRow x
-                           WHERE x.PeriodKey = ti.PeriodKey AND x.TableInstanceId = ti.Id AND x.RowKey = nr.k);
+        SELECT x.PeriodKey, NEXT VALUE FOR doc.TableRowSeq, x.Id, x.k, x.d, x.s, 0, 0, @now
+        FROM (
+            SELECT TOP (@batch) ti.PeriodKey, ti.Id, nr.k, nr.d, nr.s
+            FROM   doc.TableInstance ti
+            JOIN   @instances i ON i.PeriodKey = ti.PeriodKey AND i.Id = ti.Id
+            JOIN   OPENJSON(@newRows) WITH (t int, d int, k nvarchar(100), s int) nr ON nr.t = ti.TableDefId
+            WHERE  ti.PeriodKey IN (SELECT PeriodKey FROM @periods)
+              AND  NOT EXISTS (SELECT 1 FROM doc.TableRow y
+                               WHERE y.PeriodKey = ti.PeriodKey AND y.TableInstanceId = ti.Id AND y.RowKey = nr.k)
+        ) x;
+        """;
 
-        -- 5. Шапка й похідний індекс пошуку.
+    /// <summary>5. Шапка.</summary>
+    private const string HeaderSql = """
         DELETE h
         FROM   doc.DocumentHeaderValue h
         JOIN   @docs d ON d.Id = h.DocumentId
@@ -482,19 +622,30 @@ public sealed class DocumentVersionMigrationStore(EcrDbContext db) : IDocumentVe
         FROM   doc.DocumentHeaderValue h
         JOIN   @docs d      ON d.Id = h.DocumentId
         JOIN   @headerMap m ON m.o = h.HeaderFieldDefId;
+        """;
 
-        DELETE x
+    /// <summary>5. Похідний індекс пошуку (за кількістю — як комірки) — пачками.</summary>
+    private static readonly string[] IndexBatches =
+    [
+        """
+        DELETE TOP (@batch) x
         FROM   doc.DocumentIndexValue x
         JOIN   @docs d ON d.Id = x.DocumentId
         WHERE  NOT EXISTS (SELECT 1 FROM @columnMap m WHERE m.o = x.ColumnDefId);
+        """,
 
-        UPDATE x
+        """
+        UPDATE TOP (@batch) x
         SET    x.ColumnDefId = m.n
         FROM   doc.DocumentIndexValue x
         JOIN   @docs d      ON d.Id = x.DocumentId
-        JOIN   @columnMap m ON m.o = x.ColumnDefId;
+        JOIN   @columnMap m ON m.o = x.ColumnDefId
+        WHERE  m.o <> m.n;
+        """,
+    ];
 
-        -- 6. Склад документа і робочий процес: аркуш той самий, змінився лише його опис.
+    /// <summary>6. Склад документа і робочий процес: аркуш той самий, змінився лише його опис.</summary>
+    private const string WorkflowSql = """
         DELETE a
         FROM   wf.ApprovalState a
         JOIN   @docs d ON d.Id = a.DocumentId
@@ -522,12 +673,17 @@ public sealed class DocumentVersionMigrationStore(EcrDbContext db) : IDocumentVe
         FROM   doc.DocumentSheet s
         JOIN   @docs d     ON d.Id = s.DocumentId
         JOIN   @sheetMap m ON m.o = s.SheetDefId;
+        """;
 
-        -- Результати валідації описували стару структуру: їх перераховують заново.
-        DELETE v
+    /// <summary>Результати валідації описували стару структуру: їх перераховують заново (їх багато — пачками).</summary>
+    private const string ValidationBatchSql = """
+        DELETE TOP (@batch) v
         FROM   wf.ValidationResult v
         JOIN   @docs d ON d.Id = v.DocumentId;
+        """;
 
+    /// <summary>6a. Гранти, версія проєкту, прибирання #-таблиць.</summary>
+    private const string FinishSql = """
         -- 6a. Гранти ролей на аркуш/таблицю/колонку (sec.ResourceGrant): Id цих
         -- ресурсів свої в кожної версії, а грант не має ProjectId і діє на всіх,
         -- хто сидить на старій версії. Тому КОПІЮЄМО на нові Id за кодом (не
