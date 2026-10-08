@@ -2303,6 +2303,7 @@ USING (VALUES
     (N'document.header.lookupHint',      N'en', N'Registry entry ID', 1),
     (N'document.header.lookupLoading',   N'en', N'Directory is loading…', 1),
     (N'document.header.lookupEmpty',     N'en', N'Directory has no entries', 1),
+    (N'document.header.lookupNoAccess',  N'en', N'Selected (name not available)', 1),
     -- Відновлення незбережених правок на екрані документа (ФВ-3.6, D14-12).
     -- ⚠ `partial` називає різницю вголос: у слід вміщається не все, і мовчазне
     -- «відновити N» там, де правок було більше, — та сама тиха втрата.
@@ -3263,6 +3264,7 @@ USING (VALUES
     (N'workflow.rejected',               N'en', N'The sheet has been returned to the author.', 1),
     (N'workflow.reopened',               N'en', N'The sheet is editable again.', 1),
     (N'workflow.recalcQueued',           N'en', N'Recalculation queued as job {job}.', 1),
+    (N'workflow.recalcSkipsSubmitted',   N'en', N'Submitted and approved sheets are skipped.', 1),
 
     -- ⛔ Відгук на «Перерахувати» (директива №09 `W8` п.7). Доти було рівно
     -- одне «поставлено в чергу як {job}» — GUID, який нікуди не ввести, і
@@ -8081,6 +8083,7 @@ SELECT v.[Key], v.Lang, v.Val
     (N'document.header.lookupHint', N'ru', N'Идентификатор записи справочника'),
     (N'document.header.lookupLoading', N'ru', N'Справочник загружается…'),
     (N'document.header.lookupEmpty', N'ru', N'В справочнике нет записей'),
+    (N'document.header.lookupNoAccess', N'ru', N'Выбрано (название недоступно)'),
     (N'document.restoreEdits.title', N'ru', N'Несохранённые изменения остались в этом браузере'),
     (N'document.restoreEdits.text', N'ru', N'Изменений, не дошедших до сервера: {count}. Восстановите их в листе или отбросьте.'),
     (N'document.restoreEdits.partial', N'ru', N'Удалось сохранить лишь {count} из {total} изменений; остальные придётся ввести заново.'),
@@ -8848,6 +8851,7 @@ SELECT v.[Key], v.Lang, v.Val
     (N'workflow.rejected', N'ru', N'Лист возвращён автору.'),
     (N'workflow.reopened', N'ru', N'Лист снова доступен для редактирования.'),
     (N'workflow.recalcQueued', N'ru', N'Пересчёт поставлен в очередь как задача {job}.'),
+    (N'workflow.recalcSkipsSubmitted', N'ru', N'Поданные и утверждённые листы пропускаются.'),
     (N'workflow.recalcRunning', N'ru', N'Пересчёт…'),
     (N'workflow.recalcDone', N'ru', N'Пересчёт завершён: показатели актуальны.'),
     (N'workflow.recalcFailed', N'ru', N'Пересчёт не удался. Причину см. в разделе «Задачи».'),
@@ -11116,6 +11120,7 @@ SELECT v.[Key], v.Lang, v.Val
     (N'document.header.lookupHint', N'kz', N'Анықтамалық жазбасының идентификаторы'),
     (N'document.header.lookupLoading', N'kz', N'Анықтамалық жүктелуде…'),
     (N'document.header.lookupEmpty', N'kz', N'Анықтамалықта жазбалар жоқ'),
+    (N'document.header.lookupNoAccess', N'kz', N'Таңдалған (атауы қолжетімсіз)'),
     (N'document.restoreEdits.title', N'kz', N'Сақталмаған өзгерістер осы браузерде қалды'),
     (N'document.restoreEdits.text', N'kz', N'{count} өзгеріс серверге жетпеді. Оларды параққа қалпына келтіріңіз немесе тастаңыз.'),
     (N'document.restoreEdits.partial', N'kz', N'Барлық {total} өзгерістің ішінен тек {count} сақталды; қалғандарын қайта енгізу қажет.'),
@@ -11883,6 +11888,7 @@ SELECT v.[Key], v.Lang, v.Val
     (N'workflow.rejected', N'kz', N'Парақ авторға қайтарылды.'),
     (N'workflow.reopened', N'kz', N'Парақты қайтадан өңдеуге болады.'),
     (N'workflow.recalcQueued', N'kz', N'Қайта есептеу {job} тапсырмасы ретінде кезекке қойылды.'),
+    (N'workflow.recalcSkipsSubmitted', N'kz', N'Тапсырылған және бекітілген парақтар өткізіліп жіберіледі.'),
     (N'workflow.recalcRunning', N'kz', N'Қайта есептелуде…'),
     (N'workflow.recalcDone', N'kz', N'Қайта есептеу аяқталды: көрсеткіштер өзекті.'),
     (N'workflow.recalcFailed', N'kz', N'Қайта есептеу сәтсіз аяқталды. Себебін «Тапсырмалар» бөлімінен қараңыз.'),
