@@ -227,7 +227,11 @@ public sealed class CalculationBindingStore(EcrDbContext db) : ICalculationBindi
                     on binding.MethodologyId equals methodology.Id
                 orderby binding.Id
                 select new ActiveColumnBinding(
-                    column.Id, table.Code, column.Code, methodology.Code, binding.OutputCode, binding.MatchJson))
+                    column.Id, table.Code, column.Code, methodology.Code, binding.OutputCode, binding.MatchJson,
+                    db.MethodologyVersions.Any(v => v.MethodologyId == binding.MethodologyId
+                                                    && v.Status == TemplateVersionStatus.Published
+                                                    && (db.MethodologyRules.Any(r => r.MethodologyVersionId == v.Id && r.IsActive)
+                                                        || db.MethodologyCategoryRules.Any(r => r.MethodologyVersionId == v.Id)))))
             .Take(MaxBindings)
             .ToListAsync(ct)
             .ConfigureAwait(false);

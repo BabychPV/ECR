@@ -178,6 +178,15 @@ public sealed partial class PublishTemplateVersionHandler(
 
         diagnostics = [.. diagnostics, .. PublishChecks.CheckDuplicateColumnBindings(activeBindings)];
 
+        // RC14 (Land): конфлікт, де вибір методології робиться правилами, не блокує — лише журнал.
+        if (logger is not null)
+        {
+            foreach (var conflict in PublishChecks.FindRuleSelectedColumnConflicts(activeBindings))
+            {
+                LogRuleSelectedBindingConflict(logger, templateVersionId, conflict);
+            }
+        }
+
         if (diagnostics.Count > 0)
         {
             // Усі проблеми одразу, а не перша: інакше користувач публікував би
@@ -260,6 +269,12 @@ public sealed partial class PublishTemplateVersionHandler(
         Message = "Публікація версії {TemplateVersionId} збережена, але вʼюхи rpt.v_* не створено (код {Code}): {Reason}. "
             + "SSRS не бачить цієї версії, доки причину не усунуто; повтор — старт застосунку чи EXEC rpt.usp_GenerateTemplateViews.")]
     private static partial void LogViewsFailed(ILogger logger, int templateVersionId, int? code, string reason);
+
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "Версія шаблону {TemplateVersionId}: кілька активних прив'язок на одну колонку з однаковим предикатом "
+            + "({Conflict}); вибір методології робиться правилами (MethodologyRule/CategoryRule) — публікацію не заблоковано.")]
+    private static partial void LogRuleSelectedBindingConflict(ILogger logger, int templateVersionId, string conflict);
 
     /// <summary>
     /// Виводить версію з обігу — відкат без видалення (<c>ФВ-7.8</c>).

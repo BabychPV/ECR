@@ -575,6 +575,13 @@ public static class PublishChecks
     /// <remarks>
     /// Різні предикати на одній колонці законні (звужують різні рядки) і не чіпаються; зріз
     /// на них детермінований (найбільший <c>Id</c>). Охоплює спадок до появи перевірки на запису.
+    ///
+    /// ⛔ RC14, приймальна Land: блокується ЛИШЕ коли жодна з конфліктуючих методологій не має
+    /// правил вибору (<c>MethodologyRule</c> / <c>MethodologyCategoryRule</c> в її опублікованій
+    /// версії, <see cref="ActiveColumnBinding.HasSelectionRules"/>). У Land усі методології аркуша
+    /// прив'язані до тих самих колонок з предикатом <c>{}</c>, а ВИБІР методології для рядка робить
+    /// рушій за правилами — це законна конфігурація; для неї див.
+    /// <see cref="FindRuleSelectedColumnConflicts"/> (попередження в журнал, не відмова).
     /// </remarks>
     public static IReadOnlyList<ExpressionDiagnostic> CheckDuplicateColumnBindings(
         IReadOnlyList<ActiveColumnBinding> active)
@@ -582,20 +589,14 @@ public static class PublishChecks
         ArgumentNullException.ThrowIfNull(active);
 
         var result = new List<ExpressionDiagnostic>();
-        foreach (var group in active.GroupBy(b => b.ColumnDefId).OrderBy(g => g.Key))
+        foreach (var (dup, cluster, ruleSelected) in ConflictClusters(active))
         {
-            var list = group.ToList();
-            var dup = list.FirstOrDefault(a => list.Any(b =>
-                !ReferenceEquals(a, b) && BindingPredicate.AreEquivalent(a.MatchJson, b.MatchJson)));
-            if (dup is null)
+            if (ruleSelected)
             {
                 continue;
             }
 
-            var sample = string.Join(
-                ", ",
-                list.Where(b => BindingPredicate.AreEquivalent(dup.MatchJson, b.MatchJson))
-                    .Take(5).Select(b => $"{b.MethodologyCode}.{b.OutputCode}"));
+            var sample = ClusterSample(cluster);
 
             result.Add(new ExpressionDiagnostic(
                 "ECR-TMPL-0422",
@@ -612,6 +613,59 @@ public static class PublishChecks
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// Конфлікти прив'язок, які НЕ блокують публікацію, бо вибір методології для рядка робиться
+    /// правилами (<c>MethodologyRule</c>/<c>MethodologyCategoryRule</c>) — для попередження в журнал.
+    /// </summary>
+    /// <param name="active">Активні прив'язки колонок цієї версії.</param>
+    /// <returns>Рядки «Таблиця.Колонка: методологія.вихід, …»; порожньо — таких немає.</returns>
+    /// <remarks>
+    /// Правило: група прив'язок однієї колонки з еквівалентним предикатом блокує публікацію, коли
+    /// жодна з її методологій не має правил; якщо хоч одна має — лише попередження.
+    /// </remarks>
+    public static IReadOnlyList<string> FindRuleSelectedColumnConflicts(
+        IReadOnlyList<ActiveColumnBinding> active)
+    {
+        ArgumentNullException.ThrowIfNull(active);
+
+        return [.. ConflictClusters(active)
+            .Where(c => c.RuleSelected)
+            .Select(c => $"{c.First.TableCode}.{c.First.ColumnCode}: {ClusterSample(c.Cluster)}")];
+    }
+
+    private static string ClusterSample(List<ActiveColumnBinding> cluster)
+        => string.Join(", ", cluster.Take(5).Select(b => $"{b.MethodologyCode}.{b.OutputCode}"));
+
+    /// <summary>Кластери прив'язок однієї колонки з еквівалентним предикатом (розміром ≥ 2).</summary>
+    private static IEnumerable<(ActiveColumnBinding First, List<ActiveColumnBinding> Cluster, bool RuleSelected)>
+        ConflictClusters(IReadOnlyList<ActiveColumnBinding> active)
+    {
+        foreach (var group in active.GroupBy(b => b.ColumnDefId).OrderBy(g => g.Key))
+        {
+            var list = group.ToList();
+            var seen = new HashSet<ActiveColumnBinding>(ReferenceEqualityComparer.Instance);
+            foreach (var first in list)
+            {
+                if (seen.Contains(first))
+                {
+                    continue;
+                }
+
+                var cluster = list.Where(b => ReferenceEquals(b, first)
+                    || BindingPredicate.AreEquivalent(first.MatchJson, b.MatchJson)).ToList();
+                foreach (var member in cluster)
+                {
+                    seen.Add(member);
+                }
+
+                if (cluster.Count > 1)
+                {
+                    yield return (first, cluster, cluster.Any(b => b.HasSelectionRules));
+                }
+            }
+        }
     }
 
     /// <summary>

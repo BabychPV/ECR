@@ -218,8 +218,13 @@ public sealed record UnpublishedMethodologyBinding(
 /// <param name="MethodologyCode">Код методології.</param>
 /// <param name="OutputCode">Вихід.</param>
 /// <param name="MatchJson">Предикат рядків.</param>
+/// <param name="HasSelectionRules">
+/// Опублікована версія методології має активні <c>MethodologyRule</c> або <c>MethodologyCategoryRule</c>:
+/// вибір методології для рядка робиться правилами (RC14, Land).
+/// </param>
 public sealed record ActiveColumnBinding(
-    int ColumnDefId, string TableCode, string ColumnCode, string MethodologyCode, string OutputCode, string MatchJson);
+    int ColumnDefId, string TableCode, string ColumnCode, string MethodologyCode, string OutputCode, string MatchJson,
+    bool HasSelectionRules = false);
 
 /// <summary>Таблиця прив'язки так, як її називає конфігуратор.</summary>
 /// <param name="Code">Код таблиці.</param>

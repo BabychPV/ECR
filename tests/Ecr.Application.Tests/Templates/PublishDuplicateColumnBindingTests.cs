@@ -29,6 +29,40 @@ public sealed class PublishDuplicateColumnBindingTests
         Assert.Equal("err.ECR-TMPL-0422.bindingColumnConflict", one.MessageKey);
     }
 
+    /// <remarks>
+    /// RC14 (Land): методології з правилами вибору на тій самій колонці не блокують публікацію,
+    /// а потрапляють у попередження. Мутація: ігнорувати <c>HasSelectionRules</c> — тест червоніє.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    public void Методології_з_правилами_вибору_не_блокують_а_дають_попередження()
+    {
+        ActiveColumnBinding[] land =
+        [
+            new(10, "T1", "EMISSION", "M51", "EMISSION", "{}", true),
+            new(10, "T1", "EMISSION", "M52", "EMISSION", "{}", true),
+            new(10, "T1", "EMISSION", "M77", "EMISSION", "{}", false),
+        ];
+
+        Assert.Empty(PublishChecks.CheckDuplicateColumnBindings(land));
+        var warning = Assert.Single(PublishChecks.FindRuleSelectedColumnConflicts(land));
+        Assert.Contains("T1.EMISSION", warning, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    public void Без_жодних_правил_вибору_блокує_і_попередження_немає()
+    {
+        ActiveColumnBinding[] plain =
+        [
+            new(10, "T1", "EMISSION", "M1", "EMISSION", "{}"),
+            new(10, "T1", "EMISSION", "M2", "EMISSION", "{}"),
+        ];
+
+        Assert.Single(PublishChecks.CheckDuplicateColumnBindings(plain));
+        Assert.Empty(PublishChecks.FindRuleSelectedColumnConflicts(plain));
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage4)]
     public void Різні_предикати_на_одній_колонці_законні()
