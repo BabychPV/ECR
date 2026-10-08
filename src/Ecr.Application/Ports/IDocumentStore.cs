@@ -249,6 +249,17 @@ public interface IDocumentStore
     /// </remarks>
     public Task<bool> HasSheetAsync(long documentId, int sheetDefId, CancellationToken ct);
 
+    /// <summary>Усі аркуші, що входять у склад документа (RC15, P2-A).</summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Ідентифікатори аркушів складу; порожньо — документа немає або складу немає.</returns>
+    /// <remarks>
+    /// ⚠ Склад (`doc.DocumentSheet`), а не `wf.ApprovalState`: аркуш, якого ще ніколи не подавали, рядка стану
+    /// не має, тож «усі аркуші подані» за самими станами не визначити. Видимості читача тут немає — повертається
+    /// рішення про склад для внутрішньої перевірки, а не перелік для показу.
+    /// </remarks>
+    public Task<IReadOnlyList<int>> GetIncludedSheetIdsAsync(long documentId, CancellationToken ct);
+
     /// <summary>Проєкт документа; <c>null</c> — документа немає.</summary>
     /// <param name="documentId">Документ.</param>
     /// <param name="ct">Токен скасування.</param>
