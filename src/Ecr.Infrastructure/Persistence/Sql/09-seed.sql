@@ -7415,8 +7415,11 @@ USING (VALUES
     (N'err.ECR-CALC-0409.recalcStateChanged', N'en', N'While document {documentId} was being recalculated, a sheet was submitted or period {periodKey} was closed. The new results were not applied and the previous ones stay current; the recalculation repeats with the new state.', 1),
     -- COLL:an105-recalc-state ── кінець секції ──
     -- COLL:an105-results-ceiling ── AN-105 / D2-05: актуальних результатів документа за період більше за стелю читання; ru/kz — порцією COLL:an105-results-ceiling нижче ──
-    (N'err.ECR-CALC-0422.resultsTooLarge', N'en', N'Document {documentId} has more than {max} calculation results for period {periodKey}. They are not shown partly, because a partial list would give wrong totals: check the methodology bindings (a binding on the wrong table multiplies rows).', 1)
+    (N'err.ECR-CALC-0422.resultsTooLarge', N'en', N'Document {documentId} has more than {max} calculation results for period {periodKey}. They are not shown partly, because a partial list would give wrong totals: check the methodology bindings (a binding on the wrong table multiplies rows).', 1),
     -- COLL:an105-results-ceiling ── кінець секції ──
+    -- COLL:rc15lock ── N-3: PATCH комірки не дочекався блокування (LockWaitGuard); ru/kz — порцією COLL:rc15lock нижче ──
+    (N'err.ECR-DOC-4091.lockTimeout', N'en', N'The data is busy with a long operation (for example, moving another document to a new template version). Nothing was saved; try again in a moment.', 1)
+    -- COLL:rc15lock ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -18261,6 +18264,17 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:an105-results-ceiling ── кінець секції ──
+
+-- COLL:rc15lock ── ru/kz N-3: PATCH комірки не дочекався блокування; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-DOC-4091.lockTimeout', N'ru', N'Данные заняты долгой операцией (например, переносом другого документа на новую версию шаблона). Ничего не сохранено; повторите попытку через мгновение.'),
+    (N'err.ECR-DOC-4091.lockTimeout', N'kz', N'Деректер ұзақ операциямен (мысалы, басқа құжатты үлгінің жаңа нұсқасына ауыстырумен) бос емес. Ештеңе сақталмады; сәлден кейін қайталап көріңіз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:rc15lock ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t
