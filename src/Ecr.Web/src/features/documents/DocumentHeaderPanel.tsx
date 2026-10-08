@@ -237,6 +237,12 @@ export interface DocumentHeaderPanelProps {
 
   /** ✎ RC15-A: версія шаблону документа — «Version» секції «Contract», лише для читання. */
   readonly templateVersion?: string | undefined;
+
+  /**
+   * ✎ RC16-Z35: людина запустила перевірку документа (Validate) — порожні обов'язкові поля
+   * підсвічуються помилкою одразу, не чекаючи, поки в кожне заглянуть.
+   */
+  readonly showRequiredErrors?: boolean;
 }
 
 /**
@@ -253,8 +259,13 @@ export function DocumentHeaderPanel({
   collapsible = false,
   businessKey,
   templateVersion,
+  showRequiredErrors = false,
 }: DocumentHeaderPanelProps): JSX.Element | null {
   const queryClient = useQueryClient();
+  // ✎ RC16-Z35: поля, з яких людина вже пішла (blur) — помилка «обов'язкове» з'являється після цього.
+  const [touched, setTouched] = useState<ReadonlySet<string>>(() => new Set());
+  const markTouched = (code: string): void =>
+    setTouched((current) => (current.has(code) ? current : new Set(current).add(code)));
 
   const header = useQuery({
     queryKey: ['document-header', documentId],
@@ -619,6 +630,15 @@ export function DocumentHeaderPanel({
       disabled={isContractReadOnly(key) ? field.dataType !== 'String' : !canEdit || save.isPending}
       onChange={(value) => setField(field.code, value)}
       onInvalidDate={(invalid) => markInvalidDate(field.code, invalid)}
+      onBlur={() => markTouched(field.code)}
+      error={
+        field.isRequired &&
+        !isContractReadOnly(key) &&
+        isEmptyHeaderValue(draft[field.code]) &&
+        (showRequiredErrors || touched.has(field.code))
+          ? t('document.header.requiredError')
+          : undefined
+      }
       lookupEntries={
         field.lookupRegistryDefId === null || field.lookupRegistryDefId === undefined
           ? EmptyLookupEntries
@@ -776,6 +796,8 @@ function HeaderFieldInput({
   disabled,
   onChange,
   onInvalidDate,
+  onBlur,
+  error,
   lookupEntries,
   lookupPending,
   units,
@@ -791,6 +813,10 @@ function HeaderFieldInput({
   onChange: (value: unknown) => void;
   /** A1-02: у полі дати набрано текст, що не є датою (`true`), або його виправили (`false`). */
   onInvalidDate: (invalid: boolean) => void;
+  /** ✎ RC16-Z35: поле втратило фокус. */
+  onBlur?: (() => void) | undefined;
+  /** ✎ RC16-Z35: текст помилки під полем (`aria-invalid` + `aria-describedby` ставить Mantine). */
+  error?: string | undefined;
   /** Записи довідника поля (лише для `dataType === 'Lookup'` із заданим `lookupRegistryDefId`). */
   lookupEntries: readonly RegistryEntryDto[];
   /** Чи довідник ЦЬОГО поля ще завантажується (окремий запит на довідник). */
@@ -825,6 +851,9 @@ function HeaderFieldInput({
           value={typeof value === 'string' ? parseDateOnly(value) : null}
           onChange={(next) => onChange(formatDateOnly(next))}
           onInvalidChange={onInvalidDate}
+          // ⛔ Без `onBlur`: перерендер батька на blur скидає набраний нерозібраний текст (A1-02);
+          // порожня обов'язкова дата підсвічується після Validate.
+          error={error}
           data-header-field={field.code}
         />
       </Suspense>
@@ -856,6 +885,8 @@ function HeaderFieldInput({
         data={options}
         value={selectedIdValid ? String(selectedId) : null}
         onChange={(next) => onChange(next ?? '')}
+        onBlur={onBlur}
+        error={error}
         data-header-field={field.code}
       />
     );
@@ -918,6 +949,16 @@ function HeaderFieldInput({
         // аргумент, що в `LookupCellEditor.render`: `save(null)` на порожній
         // опції), інакше очистити раз обране поле стало б неможливим.
         onChange={(next) => onChange(next ?? '')}
+        onBlur={onBlur}
+        error={error}
+        // ✎ RC16-Z35: довгий пункт (Location) не обрізається мовчки: у списку переноситься, у полі —
+        // повний текст у підказці.
+        title={options.find((option) => option.value === String(selectedId))?.label}
+        renderOption={({ option }) => (
+          <span title={option.label} style={{ whiteSpace: 'normal', overflowWrap: 'anywhere' }}>
+            {option.label}
+          </span>
+        )}
         data-header-field={field.code}
       />
     );
@@ -930,6 +971,8 @@ function HeaderFieldInput({
       readOnly={readOnly}
       value={typeof value === 'string' ? value : ''}
       onChange={(event) => onChange(event.currentTarget.value)}
+      onBlur={onBlur}
+      error={error}
       data-header-field={field.code}
     />
   );

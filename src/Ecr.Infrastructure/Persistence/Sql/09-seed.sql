@@ -7331,6 +7331,9 @@ USING (VALUES
     -- COLL:rc15c-recalc ── перерахунок вимкнений лише коли подані ВСІ аркуші; ru/kz — порцією COLL:rc15c-recalc нижче ──
     (N'workflow.recalculateAllSubmitted', N'en', N'All sheets of period {period} are submitted or approved: there is nothing to recalculate. Reopen the period first.', 1),
     -- COLL:rc15c-recalc ── кінець секції ──
+    -- COLL:rc16-z5 ── помилка порожнього обов'язкового поля шапки; ru/kz — порцією COLL:rc16-z5 нижче ──
+    (N'document.header.requiredError', N'en', N'This field is required', 1),
+    -- COLL:rc16-z5 ── кінець секції ──
     -- COLL:stale-ui ── кінець секції ──
     -- COLL:l21scope ── L2-1: область формули (scope) у PUT формули й порівнянні версій; ru/kz — порцією COLL:l21scope нижче ──
     (N'err.ECR-CALC-0422.formulaScopeInvalid', N'en', N'The scope "{scope}" of formula "{code}" is not valid: use Substance (once per substance) or Row (once per row).', 1),
@@ -17959,6 +17962,16 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:rc15c-recalc ── кінець секції ──
+-- COLL:rc16-z5 ── ru/kz: помилка порожнього обов'язкового поля шапки; власна порція
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'document.header.requiredError', N'ru', N'Обязательное поле'),
+    (N'document.header.requiredError', N'kz', N'Міндетті өріс')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:rc16-z5 ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t
