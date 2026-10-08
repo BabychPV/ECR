@@ -83,6 +83,33 @@ public sealed class CalculatedCellOverlayTests
         Assert.Null(Emission(cells, 2));
     }
 
+    /// <remarks>
+    /// P2-1: дві активні прив'язки на ОДНУ колонку давали дві комірки з тією самою адресою, і
+    /// <c>GetTableSliceHandler</c> падав на <c>ToDictionary</c> (500). Мутація: прибрати <c>filled</c> —
+    /// у (рядок, колонка) знову дві комірки.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public async Task Дві_прив_язки_на_одну_колонку_дають_одну_комірку_від_найбільшого_Id()
+    {
+        _methodologies.GetColumnResultBindingsAsync(Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<CancellationToken>())
+            .Returns(
+            [
+                new ColumnResultBinding(TableDefId, EmissionColumnId, MethodologyId, "EMISSION", "{}", [5]),
+                new ColumnResultBinding(TableDefId, EmissionColumnId, 3, "GSEC", "{}", [7]),
+            ]);
+        Results(new CalculationResultRow(5, "R1", "EMISSION", 20m, 8, null),
+                new CalculationResultRow(7, "R1", "GSEC", 4m, 8, null),
+                new CalculationResultRow(5, "R2", "EMISSION", 12.5m, 8, null));
+
+        var cells = await ApplyAsync([]);
+
+        // Один рядок — одна комірка колонки; ключ словника зрізу не дублюється.
+        Assert.Equal(cells.Count, cells.Select(c => (c.Address.TableRowId, c.Address.ColumnDefId)).Distinct().Count());
+        Assert.Equal(4m, Emission(cells, 1));       // R1: пізніша (GSEC) виграє, не сума 24
+        Assert.Equal(12.5m, Emission(cells, 2));    // R2: пізніша числа не має — діє рання
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     public async Task Таблиця_без_колонки_Calculated_не_робить_жодного_запиту()
