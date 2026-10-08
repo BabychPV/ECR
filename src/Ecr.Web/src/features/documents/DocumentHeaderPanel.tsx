@@ -244,6 +244,8 @@ export interface DocumentHeaderPanelProps {
    * підсвічуються помилкою одразу, не чекаючи, поки в кожне заглянуть.
    */
   readonly showRequiredErrors?: boolean;
+  /** Лічильник запитів «відкрити шапку» (клік по знахідці шапки в Issues): зростання розгортає секцію. */
+  readonly openRequest?: number | undefined;
 }
 
 /**
@@ -261,6 +263,7 @@ export function DocumentHeaderPanel({
   businessKey,
   templateVersion,
   showRequiredErrors = false,
+  openRequest,
 }: DocumentHeaderPanelProps): JSX.Element | null {
   const queryClient = useQueryClient();
   // ✎ RC16-Z35: поля, з яких людина вже пішла (blur) — помилка «обов'язкове» з'являється після цього.
@@ -440,6 +443,13 @@ export function DocumentHeaderPanel({
   const [invalidDates, setInvalidDates] = useState<ReadonlySet<string>>(() => new Set());
   // ✎ UI-16: розгорнуто вручну; примусово — див. `mustStayOpen` нижче.
   const [opened, setOpened] = useState(false);
+  const lastOpenRequest = useRef(openRequest);
+  useEffect(() => {
+    if (openRequest === lastOpenRequest.current) return;
+    lastOpenRequest.current = openRequest;
+    setOpened(true);
+    document.querySelector('[data-testid="document-header-panel"]')?.scrollIntoView?.({ block: 'nearest' });
+  }, [openRequest]);
   const markInvalidDate = (code: string, invalid: boolean): void =>
     setInvalidDates((current) => {
       if (current.has(code) === invalid) return current;
