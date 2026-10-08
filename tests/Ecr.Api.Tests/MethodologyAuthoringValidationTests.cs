@@ -141,6 +141,9 @@ public sealed class MethodologyAuthoringValidationTests(SqlServerFixture sql)
     [InlineData("[1,2]", "err.ECR-CALC-0422.ruleMatchInvalid")]
     [InlineData("{\"KIND\":{\"a\":1}}", "err.ECR-CALC-0422.ruleMatchInvalid")]
     [InlineData("", "err.ECR-CALC-0422.ruleNoPredicate")]
+    // ⛔ RC14B P3-3: ключ предиката - Id колонки; код колонки приймався і мовчки не збігався ні з чим.
+    [InlineData("{\"Land_Status\":\"X\"}", "err.ECR-CALC-0422.ruleKeyNotColumnId")]
+    [InlineData("{\"101\":\"X\",\"SRC\":\"B\"}", "err.ECR-CALC-0422.ruleKeyNotColumnId")]
     [Trait(TestCategories.Stage, TestCategories.Stage4)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     public async Task Правило_з_битим_предикатом_не_зберігається(string matchJson, string messageKey)
