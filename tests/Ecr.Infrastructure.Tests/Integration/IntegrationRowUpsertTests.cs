@@ -244,6 +244,62 @@ public sealed class IntegrationRowUpsertTests(SqlServerFixture sql)
         Assert.Equal("V8", cells[stand.Text].Text);
     }
 
+    /// <summary>
+    /// RC15 (звіт RACE-FIRST-COLLECT): шлях ЗБОРУ (<c>ApplyIntegrationAsync</c>, не рядки подій). Дві задачі
+    /// матеріалізації створюють той самий динамічний рядок; програвша отримує <c>ECR-ROW-0409</c>
+    /// <c>rowKeyExists</c>. Повтор доти вмикався лише для рядків подій - і збір падав без запису.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ МУТАЦІЙНИЙ ДОКАЗ: повернути <c>rowsOf is not null &amp;&amp;</c> в умові повтору
+    /// <c>IntegrationCellPatcher.WriteAsync</c> → виняток <c>ECR-ROW-0409</c>.
+    /// </remarks>
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "RC15-race-first-collect")]
+    [InlineData(1)]
+    [InlineData(2)]
+    public async Task Гонка_створення_динамічного_рядка_у_шляху_збору_повторюється_і_пише_у_наявний(int afterRead)
+    {
+        var stand = await ArrangeAsync();
+        const string Key = "SRC_GEN1";
+        var hook = new RowStoreHook();
+        IntegrationWriteResult result;
+
+        try
+        {
+            await using var provider = BuildProvider(hook);
+            hook.AfterRead = async () =>
+            {
+                if (hook.Reads == afterRead)
+                {
+                    hook.AfterRead = null;
+
+                    // «Інша задача матеріалізації» створила рядок і записала свою колонку.
+                    await HumanWriteAsync(provider, stand, Key, new PatchCell(stand.NumberCode, 42m));
+                }
+            };
+
+            await using var scope = provider.CreateAsyncScope();
+            using var author = await scope.ServiceProvider.GetRequiredService<IntegrationActor>().EnterAsync(CancellationToken.None);
+            result = await scope.ServiceProvider.GetRequiredService<ICellPatcher>().ApplyIntegrationAsync(
+                stand.Chain.DocumentId,
+                stand.Chain.TableInstanceId,
+                stand.Chain.PeriodKey,
+                [new IntegrationCellValue(Key, stand.Number, 7m)],
+                CancellationToken.None);
+        }
+        finally
+        {
+            await RevokeAsync(stand.RoleId);
+        }
+
+        Assert.Null(result.WriteConflicts);
+        Assert.Equal($"{Key}:{stand.NumberCode}", Assert.Single(result.KeptManual));
+        Assert.Equal(1, await RowCountAsync(stand, Key));
+        Assert.Equal(42m, (await CellsAsync(stand, Key))[stand.Number].Numeric);
+    }
+
     [Theory]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait("Directive", "HSE301-A5a")]
