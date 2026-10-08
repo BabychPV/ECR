@@ -185,6 +185,9 @@ export function applyPatchLocally(
  * перечитуються разом із карткою, щоб бейдж і банер не розходилися.
  */
 export function refreshStaleness(queryClient: QueryClient, documentId: number, periodKey: number): void {
+  // Правка входу змінює «Needs recalculation (N)» у переліку документів: зведення читається заново.
+  void queryClient.invalidateQueries({ queryKey: ['documents', 'summary'] });
+
   const summaryKey = ['document', documentId, periodKey] as const;
   const summary = queryClient.getQueryData<{ resultsStale?: boolean | null }>(summaryKey);
   if (summary === undefined || summary.resultsStale !== false) return;

@@ -7,6 +7,7 @@ import type { components } from '@/api/schema';
 import type { RegistryDefDto, RegistryEntryDto, UnitRef } from '@/api/types';
 import { coerce } from '@/features/grid/edits';
 import { cellText, sameCellValue, sameDateValue } from '@/features/grid/cellValue';
+import { can, useSession } from '@/shared/session/useSession';
 import { lookupCellDisplay } from '@/features/grid/LookupCellEditor';
 import { unlistedIdsOf, useUnlistedLookupLabels } from '@/features/grid/unlistedLookupEntries';
 import { unitCellDisplay } from '@/features/grid/UnitCellEditor';
@@ -294,10 +295,21 @@ export function DocumentHeaderPanel({
     [header.data],
   );
 
+  // ⛔ Довідники читає лише `Registry.View`: без права перелік і записи дають 403 (тост на кожне відкриття
+  // документа), тож запитів немає взагалі, а значення Lookup показується нейтральним текстом без id.
+  // Профіль ще в дорозі — запитів теж немає; профіль не прочитався — поводження як раніше (дозволено).
+  const session = useSession();
+  const registryAccess: 'pending' | 'yes' | 'no' = session.isPending
+    ? 'pending'
+    : session.data === undefined || can(session.data, 'Registry.View')
+      ? 'yes'
+      : 'no';
+  const lookupDenied = registryAccess === 'no';
+
   const registriesList = useQuery({
     queryKey: queryKeys.registries.list(),
     queryFn: () => apiFetch<RegistryDefDto[]>('/api/v1/registries'),
-    enabled: lookupRegistryDefIds.length > 0,
+    enabled: lookupRegistryDefIds.length > 0 && registryAccess === 'yes',
   });
 
   const lookupRegistryCodes = useMemo(() => {
@@ -385,7 +397,7 @@ export function DocumentHeaderPanel({
    * дорожчий клас помилки — шапку бачить оператор щодня, а не адміністратор).
    */
   const lookupError =
-    lookupRegistryDefIds.length > 0
+    lookupRegistryDefIds.length > 0 && registryAccess === 'yes'
       ? (registriesList.error ?? lookupEntriesQueries.find((query) => query.error !== null)?.error ?? null)
       : null;
 
@@ -594,6 +606,7 @@ export function DocumentHeaderPanel({
         field.lookupRegistryDefId === null || field.lookupRegistryDefId === undefined
           ? undefined
           : unlistedLabelsByRegistryId.get(field.lookupRegistryDefId),
+        lookupDenied,
       );
 
       return shown === null ? null : `${localized(field.label)} ${shown}`;
@@ -647,8 +660,10 @@ export function DocumentHeaderPanel({
       lookupPending={
         field.lookupRegistryDefId === null || field.lookupRegistryDefId === undefined
           ? false
-          : (lookupPendingByRegistryId.get(field.lookupRegistryDefId) ?? registriesList.isPending)
+          : registryAccess === 'pending' ||
+            (lookupPendingByRegistryId.get(field.lookupRegistryDefId) ?? registriesList.isPending)
       }
+      lookupDenied={lookupDenied}
       units={units.data ?? null}
       unlistedLabels={
         field.lookupRegistryDefId === null || field.lookupRegistryDefId === undefined
@@ -773,8 +788,11 @@ function headerSummaryValue(
   lookupEntries: readonly RegistryEntryDto[],
   units: readonly UnitRef[] | null,
   unlisted?: ReadonlyMap<number, string>,
+  lookupDenied = false,
 ): string | null {
   if (isEmptyHeaderValue(value) || field.dataType === 'Bool') return null;
+
+  if (field.dataType === 'Lookup' && lookupDenied) return t('document.header.lookupNoAccess');
 
   const id = typeof value === 'string' ? Number(value) : NaN;
 
@@ -800,6 +818,7 @@ function HeaderFieldInput({
   error,
   lookupEntries,
   lookupPending,
+  lookupDenied = false,
   units,
   unlistedLabels,
 }: {
@@ -821,6 +840,8 @@ function HeaderFieldInput({
   lookupEntries: readonly RegistryEntryDto[];
   /** Чи довідник ЦЬОГО поля ще завантажується (окремий запит на довідник). */
   lookupPending: boolean;
+  /** Без `Registry.View` назви записів недоступні: значення — нейтральний текст, без id і без запитів. */
+  lookupDenied?: boolean;
   /** Перелік одиниць для полів `Unit`; `null` — ще не приїхав. */
   units: readonly UnitRef[] | null;
   /** PS-P2: підписи закритих записів довідника поля («назва (закрито)») — лише для показу обраного. */
@@ -905,6 +926,18 @@ function HeaderFieldInput({
           disabled={disabled}
           value={typeof value === 'string' ? value : ''}
           onChange={(event) => onChange(event.currentTarget.value)}
+          data-header-field={field.code}
+        />
+      );
+    }
+
+    if (lookupDenied) {
+      // readOnly без disabled: фокусується й читається з клавіатури.
+      return (
+        <TextInput
+          label={label}
+          readOnly
+          value={isEmptyHeaderValue(value) ? '' : t('document.header.lookupNoAccess')}
           data-header-field={field.code}
         />
       );

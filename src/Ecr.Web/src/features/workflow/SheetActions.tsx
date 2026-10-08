@@ -532,7 +532,7 @@ export function useSheetActions({
       // ⛔ Аудит-пас 8, lane6, п.8: людський вигляд у ТОСТІ, `jobId` у стані
       // (`setRecalcJobId`) — і, отже, в запиті опитування нижче — не
       // змінюється.
-      showDone(t('workflow.recalcQueued', { job: humanizeJobId(job.jobId) }));
+      showDone(`${t('workflow.recalcQueued', { job: humanizeJobId(job.jobId) })} ${t('workflow.recalcSkipsSubmitted')}`);
     },
     onError: (error) => showSheetError(error, sheetName),
   });
@@ -639,6 +639,9 @@ export function useSheetActions({
       void queryClient.invalidateQueries({
         queryKey: ['document', recalc.documentId, recalc.periodKey],
       });
+
+      // Чіп «Needs recalculation (N)» у переліку документів читає зведення періоду.
+      void queryClient.invalidateQueries({ queryKey: ['documents', 'summary'] });
 
       return;
     }

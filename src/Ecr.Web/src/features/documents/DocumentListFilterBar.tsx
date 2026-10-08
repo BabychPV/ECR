@@ -23,6 +23,13 @@ interface DocumentListFilterBarProps {
    * кількість — в один рядок», а не число над підписом окремою смугою.
    */
   readonly children?: ReactNode;
+
+  /**
+   * Скільки рядків ПОТОЧНОЇ сторінки переліку вже позначені застарілими. Лічильник зведення живе в серверному
+   * кеші (TTL 45 с, без інвалідації) і може відставати від позначок у рядках: чіп «(0)» поруч зі застарілим
+   * документом суперечить сам собі. Рядки точні, тому вони — нижня межа числа в чіпі.
+   */
+  readonly staleOnPage?: number | undefined;
 }
 
 /**
@@ -49,10 +56,12 @@ export function DocumentListFilterBar({
   filters,
   projects = [],
   children,
+  staleOnPage = 0,
 }: DocumentListFilterBarProps): JSX.Element {
   const noPeriod = periodKey === null;
   // Той самий запит, що в смузі лічильників (`DocumentListSummaryStrip`): один ключ — один мережевий виклик.
-  const staleCount = useDocumentListSummary(periodKey).data?.staleResultsCount;
+  const summaryStale = useDocumentListSummary(periodKey).data?.staleResultsCount;
+  const staleCount = summaryStale === undefined ? undefined : Math.max(summaryStale, staleOnPage);
   // ⛔ Поле показує ВЛАСНЕ значення, а не адресу (`useFieldDraft`), як і `FilterBar`: кероване адресою
   // воно губило літери, бо адреса оновлюється переходом і запізнюється.
   const search = useFieldDraft(filters.q);
