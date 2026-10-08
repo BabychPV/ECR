@@ -77,3 +77,14 @@ export function myTaskMessage(job: JobSummary): string | null {
 
   return message === '' ? null : message;
 }
+
+/**
+ * Адреса документа ЗА ПЕРІОД, у якому результати застаріли.
+ *
+ * ⛔ `periodKey` обов'язковий: застарілість належить періоду, а сторінка документа без нього відкриється на
+ * поточному (`useProjectCurrentPeriodDefault`) - людина не побачить банера «Перерахувати».
+ * Літерал, а не `generatePath`: `features` не імпортують `app` (як `myTaskDocumentHref`).
+ */
+export function staleDocumentHref(documentId: number, periodKey: number): string {
+  return `/documents/${String(documentId)}?periodKey=${String(periodKey)}`;
+}

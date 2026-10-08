@@ -7301,6 +7301,14 @@ USING (VALUES
     (N'documents.filterStale', N'en', N'Needs recalculation ({count})', 1),
     (N'documents.filterStaleNoCount', N'en', N'Needs recalculation', 1),
     (N'nav.documents.staleCount', N'en', N'{count} need recalculation', 1),
+    -- COLL:stale-mytasks ── блок «Needs recalculation» у My tasks і нагадування при виході з документа; ru/kz — порцією COLL:stale-mytasks нижче ──
+    (N'document.staleResults.leaveReminder', N'en', N'Document #{id} still has out-of-date results. Recalculate it, or find it later in My tasks under "Needs recalculation".', 1),
+    (N'jobs.staleDocuments.title', N'en', N'Needs recalculation', 1),
+    (N'jobs.staleDocuments.hint', N'en', N'Input data in these documents changed after the last calculation. Open a document and press Recalculate.', 1),
+    (N'jobs.staleDocuments.since', N'en', N'Changed {date}', 1),
+    (N'jobs.staleDocuments.open', N'en', N'Open', 1),
+    (N'jobs.staleDocuments.error', N'en', N'Could not load the documents that need recalculation.', 1)
+    -- COLL:stale-mytasks ── кінець секції ──
     -- COLL:stale-ui ── кінець секції ──
     -- COLL:l21scope ── L2-1: область формули (scope) у PUT формули й порівнянні версій; ru/kz — порцією COLL:l21scope нижче ──
     (N'err.ECR-CALC-0422.formulaScopeInvalid', N'en', N'The scope "{scope}" of formula "{code}" is not valid: use Substance (once per substance) or Row (once per row).', 1),
@@ -17840,6 +17848,26 @@ OPTION (RECOMPILE);
 GO
 -- COLL:l21scope ── кінець секції ──
 
+-- COLL:stale-mytasks ── ru/kz блока «Потребують перерахунку» у My tasks; власна порція
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'document.staleResults.leaveReminder', N'ru', N'В документе №{id} результаты расчёта всё ещё устарели. Пересчитайте его или найдите позже в «Моих задачах» в блоке «Требуют пересчёта».'),
+    (N'document.staleResults.leaveReminder', N'kz', N'№{id} құжатында есептеу нәтижелері әлі де ескірген. Оны қайта есептеңіз немесе кейін «Менің тапсырмаларым» ішіндегі «Қайта есептеуді қажет етеді» блогынан табыңыз.'),
+    (N'jobs.staleDocuments.title', N'ru', N'Требуют пересчёта'),
+    (N'jobs.staleDocuments.title', N'kz', N'Қайта есептеуді қажет етеді'),
+    (N'jobs.staleDocuments.hint', N'ru', N'Входные данные этих документов изменены после последнего расчёта. Откройте документ и нажмите «Пересчитать».'),
+    (N'jobs.staleDocuments.hint', N'kz', N'Бұл құжаттардың кіріс деректері соңғы есептеуден кейін өзгерген. Құжатты ашып, «Қайта есептеу» түймесін басыңыз.'),
+    (N'jobs.staleDocuments.since', N'ru', N'Изменено {date}'),
+    (N'jobs.staleDocuments.since', N'kz', N'Өзгертілген күні: {date}'),
+    (N'jobs.staleDocuments.open', N'ru', N'Открыть'),
+    (N'jobs.staleDocuments.open', N'kz', N'Ашу'),
+    (N'jobs.staleDocuments.error', N'ru', N'Не удалось загрузить документы, требующие пересчёта.'),
+    (N'jobs.staleDocuments.error', N'kz', N'Қайта есептеуді қажет ететін құжаттарды жүктеу мүмкін болмады.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:stale-mytasks ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t
