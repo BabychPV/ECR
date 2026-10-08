@@ -305,21 +305,28 @@ function IssuesTab({
   return (
     <div data-inspector-issues-list="">
       {groups.map((group) => (
-        <section key={group.tableDefId} aria-label={group.title} data-inspector-group={group.tableDefId}>
+        <section
+          key={group.kind === 'header' ? 'header' : group.tableDefId}
+          aria-label={group.kind === 'header' ? t('document.header.title') : group.title}
+          data-inspector-group={group.kind === 'header' ? 'header' : group.tableDefId}
+        >
           <h3 className="ecr-insp-group">
-            <span>{group.title}</span>
+            <span>{group.kind === 'header' ? t('document.header.title') : group.title}</span>
             <span>{group.issues.length}</span>
           </h3>
           {/* ⚠ Кожне зауваження тут — з видимої таблиці (`groupIssues`), тож
               кожне веде в клітинку: кнопка, а не рядок, — фокус із клавіатури. */}
-          {group.issues.map(({ finding, index }) => (
-              <button
+          {group.issues.map(({ finding, index, navigable }) => {
+            const Row = navigable ? 'button' : 'div';
+
+            return (
+              <Row
                 key={index}
-                type="button"
+                {...(navigable
+                  ? { type: 'button' as const, title: t('document.validationGoTo'), onClick: () => onSelect(finding) }
+                  : {})}
                 className="ecr-insp-issue"
                 data-severity={finding.severity}
-                title={t('document.validationGoTo')}
-                onClick={() => onSelect(finding)}
               >
                 <span className="ecr-insp-sev">
                   <Glyph
@@ -337,8 +344,9 @@ function IssuesTab({
                   <span title={finding.ruleCode}>{finding.displayCode ?? ruleLabel(finding.ruleCode)}</span>
                   <StatusBadge kind="severity" state={finding.severity} quiet />
                 </span>
-              </button>
-          ))}
+              </Row>
+            );
+          })}
         </section>
       ))}
     </div>

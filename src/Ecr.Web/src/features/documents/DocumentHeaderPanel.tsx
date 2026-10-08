@@ -237,6 +237,9 @@ export interface DocumentHeaderPanelProps {
 
   /** ✎ RC15-A: версія шаблону документа — «Version» секції «Contract», лише для читання. */
   readonly templateVersion?: string | undefined;
+
+  /** Лічильник запитів «відкрити шапку» (клік по знахідці шапки в Issues): зростання розгортає секцію. */
+  readonly openRequest?: number | undefined;
 }
 
 /**
@@ -253,6 +256,7 @@ export function DocumentHeaderPanel({
   collapsible = false,
   businessKey,
   templateVersion,
+  openRequest,
 }: DocumentHeaderPanelProps): JSX.Element | null {
   const queryClient = useQueryClient();
 
@@ -417,6 +421,13 @@ export function DocumentHeaderPanel({
   const [invalidDates, setInvalidDates] = useState<ReadonlySet<string>>(() => new Set());
   // ✎ UI-16: розгорнуто вручну; примусово — див. `mustStayOpen` нижче.
   const [opened, setOpened] = useState(false);
+  const lastOpenRequest = useRef(openRequest);
+  useEffect(() => {
+    if (openRequest === lastOpenRequest.current) return;
+    lastOpenRequest.current = openRequest;
+    setOpened(true);
+    document.querySelector('[data-testid="document-header-panel"]')?.scrollIntoView?.({ block: 'nearest' });
+  }, [openRequest]);
   const markInvalidDate = (code: string, invalid: boolean): void =>
     setInvalidDates((current) => {
       if (current.has(code) === invalid) return current;
