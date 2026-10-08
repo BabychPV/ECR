@@ -16,7 +16,8 @@ public sealed record PackageFormula(
     string EndDate,
     bool IsAvailable,
     string Report,
-    string ResultType = "Number");
+    string ResultType = "Number",
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Scope = null);
 
 public sealed record PackageConstantValue(
     string Category,
@@ -34,7 +35,11 @@ public sealed record PackageConstant(
 public sealed record PackageVersion(
     string Version,
     IReadOnlyList<PackageFormula> Formulas,
-    IReadOnlyList<PackageConstant> Constants);
+    IReadOnlyList<PackageConstant> Constants,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] PackageCategoryRule? CategoryRule = null);
+
+/// <summary>Правило категорії версії (вираз діалекту Methodology); у пакеті — вузол <c>categoryRule</c>.</summary>
+public sealed record PackageCategoryRule(string Expression);
 
 public sealed record PackageMethodology(string Name, IReadOnlyList<PackageVersion> Versions);
 
@@ -62,6 +67,14 @@ public sealed record MethodologyPackage(
         Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) },
     };
 
+    /// <summary>Row-формули Land: категорію рядка задають три формули; автовизначення за замиканням правила немає.</summary>
+    public const string RowScope = "Row";
+
+    public const string CategoryRuleFormula = "ECW_Location";
+
+    private static readonly HashSet<string> RowScopeFormulas =
+        new(["ECW_Location", "ECW_RepairStatus", "ECW_Category"], StringComparer.Ordinal);
+
     public static MethodologyPackage From(MethodologyModel model, AnalysisReport report, string library)
     {
         ArgumentNullException.ThrowIfNull(model);
@@ -84,7 +97,8 @@ public sealed record MethodologyPackage(
                             .OrderBy(f => f.Name, StringComparer.Ordinal).ThenBy(f => f.Version, StringComparer.Ordinal)
                             .Select(f => new PackageFormula(
                                 f.Name, f.Version, f.Arguments, f.Text, f.StartDate, f.EndDate, f.Available, f.Report,
-                                shapes[f.Key].Kind == FormulaResultKind.Text ? "Text" : "Number"))
+                                shapes[f.Key].Kind == FormulaResultKind.Text ? "Text" : "Number",
+                                RowScopeFormulas.Contains(f.Name) ? RowScope : null))
                             .ToList(),
                         constants[(g.Key, v)]
                             .GroupBy(c => c.Name, StringComparer.Ordinal)
@@ -97,7 +111,10 @@ public sealed record MethodologyPackage(
                                     .OrderBy(c => c.Category, StringComparer.Ordinal).ThenBy(c => c.Version, StringComparer.Ordinal)
                                     .Select(c => new PackageConstantValue(c.Category, c.Version, c.Value, c.StartDate, c.EndDate))
                                     .ToList()))
-                            .ToList()))
+                            .ToList(),
+                        formulas[(g.Key, v)].Any(f => f.Available && f.Name == CategoryRuleFormula)
+                            ? new PackageCategoryRule("!" + CategoryRuleFormula)
+                            : null))
                     .ToList()))
             .ToList();
 

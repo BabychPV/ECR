@@ -63,4 +63,37 @@ public sealed class PackageExportTests
 
         Assert.Contains(package.Blockers, b => b.StartsWith("UNRESOLVED_REFERENCES", StringComparison.Ordinal));
     }
+
+    [Fact]
+    public void Категорійні_формули_Land_мають_scope_Row_і_версія_отримує_categoryRule()
+    {
+        var xml = new AfXmlBuilder()
+            .Formula("ECW_C05_01", "V1", "ECW_RepairStatus", "", "'Repair'")
+            .Formula("ECW_C05_01", "V1", "ECW_Category", "", "'Cat1'")
+            .Formula("ECW_C05_01", "V1", "ECW_Location", "!ECW_RepairStatus;!ECW_Category", "!ECW_RepairStatus + '_' + !ECW_Category")
+            .Formula("ECW_C05_01", "V1", "Other", "", "1")
+            .Formula("Plain", "V1", "ECW_Other", "", "2")
+            .Build();
+
+        var package = Package(xml);
+
+        var land = package.Methodologies.Single(m => m.Name == "ECW_C05_01").Versions.Single();
+        Assert.All(land.Formulas.Where(f => f.Name.StartsWith("ECW_", StringComparison.Ordinal)),
+            f => Assert.Equal("Row", f.Scope));
+        Assert.Null(land.Formulas.Single(f => f.Name == "Other").Scope);
+        Assert.Equal("!ECW_Location", land.CategoryRule?.Expression);
+
+        var plain = package.Methodologies.Single(m => m.Name == "Plain").Versions.Single();
+        Assert.Null(plain.CategoryRule);
+        Assert.Null(plain.Formulas.Single().Scope);
+
+        using var doc = JsonDocument.Parse(package.ToJson());
+        var versions = doc.RootElement.GetProperty("methodologies").EnumerateArray()
+            .Single(m => m.GetProperty("name").GetString() == "ECW_C05_01").GetProperty("versions")[0];
+        Assert.Equal("!ECW_Location", versions.GetProperty("categoryRule").GetProperty("expression").GetString());
+        var plainJson = doc.RootElement.GetProperty("methodologies").EnumerateArray()
+            .Single(m => m.GetProperty("name").GetString() == "Plain").GetProperty("versions")[0];
+        Assert.False(plainJson.TryGetProperty("categoryRule", out _));
+        Assert.False(plainJson.GetProperty("formulas")[0].TryGetProperty("scope", out _));
+    }
 }
