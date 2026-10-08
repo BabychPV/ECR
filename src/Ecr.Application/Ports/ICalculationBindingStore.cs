@@ -178,6 +178,16 @@ public interface ICalculationBindingStore
     /// </remarks>
     public Task<IReadOnlyList<int>> ListLookupRegistryIdsAsync(int methodologyId, CancellationToken ct);
 
+    /// <summary>Усі активні прив'язки колонок ВЕРСІЇ шаблону (P2-1): для перевірки дубля при публікації.</summary>
+    /// <remarks>
+    /// Перевірка лише на публікації, не на PUT: заміна джерела робиться двома PUT («прив'язати нове →
+    /// відв'язати старе», D-215), і між ними дубль законний.
+    /// </remarks>
+    /// <param name="templateVersionId">Версія, що публікується.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Прив'язки за зростанням <c>Id</c>; видалені колонки не рахуються.</returns>
+    public Task<IReadOnlyList<ActiveColumnBinding>> ListActiveBindingsAsync(int templateVersionId, CancellationToken ct);
+
     /// <summary>Ставить прив'язку в чергу на вставку; зберігає <c>IUnitOfWork</c>.</summary>
     /// <param name="binding">Нова прив'язка.</param>
     public void Add(CalculationBinding binding);
@@ -200,6 +210,16 @@ public sealed record BoundColumnRef(int TableDefId, string Code, Ecr.Domain.Enum
 /// <param name="OutputCode">Прив'язаний вихід.</param>
 public sealed record UnpublishedMethodologyBinding(
     int MethodologyId, string MethodologyCode, string TableCode, string ColumnCode, string OutputCode);
+
+/// <summary>Активна прив'язка колонки версії шаблону — для перевірки дубля на публікації.</summary>
+/// <param name="ColumnDefId">Колонка-приймач.</param>
+/// <param name="TableCode">Код таблиці.</param>
+/// <param name="ColumnCode">Код колонки.</param>
+/// <param name="MethodologyCode">Код методології.</param>
+/// <param name="OutputCode">Вихід.</param>
+/// <param name="MatchJson">Предикат рядків.</param>
+public sealed record ActiveColumnBinding(
+    int ColumnDefId, string TableCode, string ColumnCode, string MethodologyCode, string OutputCode, string MatchJson);
 
 /// <summary>Таблиця прив'язки так, як її називає конфігуратор.</summary>
 /// <param name="Code">Код таблиці.</param>

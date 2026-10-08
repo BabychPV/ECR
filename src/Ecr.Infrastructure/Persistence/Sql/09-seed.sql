@@ -5618,6 +5618,7 @@ USING (VALUES
     (N'err.ECR-CALC-0422.bindingUnknownOutput', N'en', N'No version of this methodology declares output {outputCode}: nothing would ever be calculated for this binding.', 1),
     -- COLL:drb2 ── D-R2: прив'язка до методології без опублікованої версії; ru/kz — порцією COLL:drb2 нижче ──
     (N'err.ECR-CALC-0422.bindingMethodologyNotPublished', N'en', N'Methodology {methodologyCode} has no published version, but it is actively bound to {bindingCount} column(s) of this template version: {bindings}. Recalculation of documents would be rejected as a whole. Publish the methodology or deactivate these bindings.', 1),
+    (N'err.ECR-TMPL-0422.bindingColumnConflict', N'en', N'Column {columnCode} has several active output bindings with the same row predicate ({outputCode}): each row would have two claimants. Narrow the predicate or deactivate one of the bindings.', 1),
     -- COLL:drb2 ── кінець секції ──
     (N'err.ECR-CALC-0422.noPublishedVersion', N'en', N'Methodology {methodologyId} is bound to a table but has no published version to calculate with.', 1),
     (N'err.ECR-CALC-0422.goldenTestNoPeriod', N'en', N'Golden test {test} has no period: set a document and an existing period in its input (periodKey is year × 100 + number, e.g. 202601).', 1),
@@ -17774,6 +17775,17 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:stale-ui ── кінець секції ──
+
+-- COLL:bind2 ── ru/kz P2-1: дві активні прив'язки з однаковим предикатом на одну колонку; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-TMPL-0422.bindingColumnConflict', N'ru', N'У столбца {columnCode} несколько активных привязок выходов с одним и тем же условием строк ({outputCode}): на каждую строку претендовали бы две привязки. Сузьте условие или отключите одну из привязок.'),
+    (N'err.ECR-TMPL-0422.bindingColumnConflict', N'kz', N'{columnCode} бағанында жол шарты бірдей бірнеше белсенді шығыс байланыстыруы бар ({outputCode}): әр жолға екі байланыстыру таласар еді. Шартты тарылтыңыз немесе байланыстырулардың бірін өшіріңіз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:bind2 ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

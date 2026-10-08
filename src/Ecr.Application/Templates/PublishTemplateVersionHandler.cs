@@ -171,6 +171,13 @@ public sealed partial class PublishTemplateVersionHandler(
 
         diagnostics = [.. diagnostics, .. PublishChecks.CheckBindingMethodologiesPublished(unpublishedBindings)];
 
+        // ⛔ P2-1: дві активні прив'язки з однаковим предикатом на одній колонці.
+        var activeBindings = await calculationBindings
+            .ListActiveBindingsAsync(templateVersionId, ct)
+            .ConfigureAwait(false);
+
+        diagnostics = [.. diagnostics, .. PublishChecks.CheckDuplicateColumnBindings(activeBindings)];
+
         if (diagnostics.Count > 0)
         {
             // Усі проблеми одразу, а не перша: інакше користувач публікував би

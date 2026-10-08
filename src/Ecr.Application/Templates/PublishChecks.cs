@@ -1,3 +1,4 @@
+using Ecr.Application.Calculations;
 using Ecr.Application.Ports;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Enums;
@@ -564,6 +565,53 @@ public static class PublishChecks
                         ["bindings"] = sample,
                     });
             })];
+    }
+
+    /// <summary>
+    /// Дві активні прив'язки на одну колонку з однаковим предикатом (<c>ECR-TMPL-0422</c>,
+    /// <c>bindingColumnConflict</c>) — одне зауваження на колонку (P2-1).
+    /// </summary>
+    /// <param name="active">Активні прив'язки колонок цієї версії.</param>
+    /// <remarks>
+    /// Різні предикати на одній колонці законні (звужують різні рядки) і не чіпаються; зріз
+    /// на них детермінований (найбільший <c>Id</c>). Охоплює спадок до появи перевірки на запису.
+    /// </remarks>
+    public static IReadOnlyList<ExpressionDiagnostic> CheckDuplicateColumnBindings(
+        IReadOnlyList<ActiveColumnBinding> active)
+    {
+        ArgumentNullException.ThrowIfNull(active);
+
+        var result = new List<ExpressionDiagnostic>();
+        foreach (var group in active.GroupBy(b => b.ColumnDefId).OrderBy(g => g.Key))
+        {
+            var list = group.ToList();
+            var dup = list.FirstOrDefault(a => list.Any(b =>
+                !ReferenceEquals(a, b) && BindingPredicate.AreEquivalent(a.MatchJson, b.MatchJson)));
+            if (dup is null)
+            {
+                continue;
+            }
+
+            var sample = string.Join(
+                ", ",
+                list.Where(b => BindingPredicate.AreEquivalent(dup.MatchJson, b.MatchJson))
+                    .Take(5).Select(b => $"{b.MethodologyCode}.{b.OutputCode}"));
+
+            result.Add(new ExpressionDiagnostic(
+                "ECR-TMPL-0422",
+                $"Колонка {dup.TableCode}.{dup.ColumnCode} має кілька активних прив'язок з однаковим предикатом: "
+                + $"{sample}. Звузьте предикат або вимкніть зайві.",
+                0,
+                1,
+                "err.ECR-TMPL-0422.bindingColumnConflict",
+                new Dictionary<string, string>
+                {
+                    ["columnCode"] = $"{dup.TableCode}.{dup.ColumnCode}",
+                    ["outputCode"] = sample,
+                }));
+        }
+
+        return result;
     }
 
     /// <summary>

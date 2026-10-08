@@ -210,5 +210,28 @@ public sealed class CalculationBindingStore(EcrDbContext db) : ICalculationBindi
             .ConfigureAwait(false);
 
     /// <inheritdoc />
+    public async Task<IReadOnlyList<ActiveColumnBinding>> ListActiveBindingsAsync(
+        int templateVersionId, CancellationToken ct)
+        => await (
+                from binding in db.CalculationBindings.AsNoTracking()
+                where binding.IsActive
+                join column in db.ColumnDefs.AsNoTracking()
+                    on binding.ColumnDefId equals column.Id
+                where !column.IsDeleted
+                join table in db.TableDefs.AsNoTracking()
+                    on column.TableDefId equals table.Id
+                join sheet in db.SheetDefs.AsNoTracking()
+                    on table.SheetDefId equals sheet.Id
+                where sheet.TemplateVersionId == templateVersionId
+                join methodology in db.Methodologies.AsNoTracking()
+                    on binding.MethodologyId equals methodology.Id
+                orderby binding.Id
+                select new ActiveColumnBinding(
+                    column.Id, table.Code, column.Code, methodology.Code, binding.OutputCode, binding.MatchJson))
+            .Take(MaxBindings)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+    /// <inheritdoc />
     public void Add(CalculationBinding binding) => db.CalculationBindings.Add(binding);
 }
