@@ -107,7 +107,13 @@ public sealed class DocumentVersionMigrationStore(EcrDbContext db) : IDocumentVe
     }
 
     /// <inheritdoc />
-    public async Task ApplyAsync(int projectId, int targetVersionId, VersionMigrationPlan plan, CancellationToken ct)
+    public Task ApplyAsync(int projectId, int targetVersionId, VersionMigrationPlan plan, CancellationToken ct)
+        => ApplyAsync(projectId, targetVersionId, plan, onStep: null, ct);
+
+    /// <inheritdoc />
+    public async Task ApplyAsync(
+        int projectId, int targetVersionId, VersionMigrationPlan plan, VersionMigrationStepReporter? onStep,
+        CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(plan);
 
@@ -155,12 +161,32 @@ public sealed class DocumentVersionMigrationStore(EcrDbContext db) : IDocumentVe
             return [.. list];
         }
 
-        async Task SingleAsync(string sql)
-            => await db.Database.ExecuteSqlRawAsync(SingleCommand(sql), Parameters(), ct).ConfigureAwait(false);
+        // Кроків усього (для прогресу): пачкові й одиничні команди; крок «нові рядки» — лише коли вони є в плані.
+        var hasNewRows = plan.NewRows.Count > 0;
+        var steps = CellAndRowBatches.Length + 1 + (hasNewRows ? 1 : 0) + 1 + IndexBatches.Length + 1 + 1 + 1;
+        var stepsDone = 0;
 
-        async Task BatchesAsync(string sql)
+        // ⚠ Прогін — ПОЗА ЦІЄЮ транзакцією на рівні приймача (задача пише його окремим з'єднанням): інакше
+        // клієнт не побачив би жодного кроку до коміту. Тут лише викликається.
+        async Task ReportAsync(string stage, long changedRows)
+        {
+            if (onStep is not null)
+            {
+                await onStep(stage, stepsDone, steps, changedRows, ct).ConfigureAwait(false);
+            }
+        }
+
+        async Task SingleAsync(string stage, string sql)
+        {
+            await db.Database.ExecuteSqlRawAsync(SingleCommand(sql), Parameters(), ct).ConfigureAwait(false);
+            stepsDone++;
+            await ReportAsync(stage, 0).ConfigureAwait(false);
+        }
+
+        async Task BatchesAsync(string stage, string sql)
         {
             var command = BatchCommand(sql);
+            long total = 0;
             int changed;
             do
             {
@@ -168,33 +194,41 @@ public sealed class DocumentVersionMigrationStore(EcrDbContext db) : IDocumentVe
                 var output = new SqlParameter("@changed", System.Data.SqlDbType.Int) { Direction = System.Data.ParameterDirection.Output };
                 await db.Database.ExecuteSqlRawAsync(command, Parameters(output), ct).ConfigureAwait(false);
                 changed = output.Value is int value ? value : 0;
+                total += changed;
+                if (changed >= BatchRows)
+                {
+                    await ReportAsync(stage, total).ConfigureAwait(false);
+                }
             }
             while (changed >= BatchRows);
+
+            stepsDone++;
+            await ReportAsync(stage, 0).ConfigureAwait(false);
         }
 
         foreach (var sql in CellAndRowBatches)
         {
-            await BatchesAsync(sql).ConfigureAwait(false);
+            await BatchesAsync(VersionMigrationStages.Cells, sql).ConfigureAwait(false);
         }
 
-        await SingleAsync(InstancesSql).ConfigureAwait(false);
+        await SingleAsync(VersionMigrationStages.Instances, InstancesSql).ConfigureAwait(false);
 
         // Без нових рядків у плані команду не посилаємо зовсім.
-        if (plan.NewRows.Count > 0)
+        if (hasNewRows)
         {
-            await BatchesAsync(NewRowsBatchSql).ConfigureAwait(false);
+            await BatchesAsync(VersionMigrationStages.NewRows, NewRowsBatchSql).ConfigureAwait(false);
         }
 
-        await SingleAsync(HeaderSql).ConfigureAwait(false);
+        await SingleAsync(VersionMigrationStages.Header, HeaderSql).ConfigureAwait(false);
 
         foreach (var sql in IndexBatches)
         {
-            await BatchesAsync(sql).ConfigureAwait(false);
+            await BatchesAsync(VersionMigrationStages.Index, sql).ConfigureAwait(false);
         }
 
-        await SingleAsync(WorkflowSql).ConfigureAwait(false);
-        await BatchesAsync(ValidationBatchSql).ConfigureAwait(false);
-        await SingleAsync(FinishSql).ConfigureAwait(false);
+        await SingleAsync(VersionMigrationStages.Workflow, WorkflowSql).ConfigureAwait(false);
+        await BatchesAsync(VersionMigrationStages.Validation, ValidationBatchSql).ConfigureAwait(false);
+        await SingleAsync(VersionMigrationStages.Finish, FinishSql).ConfigureAwait(false);
     }
 
     // Складають команду зі СТАТИЧНИХ текстів цього класу (прелюдія + оператор) — не з вводу користувача.

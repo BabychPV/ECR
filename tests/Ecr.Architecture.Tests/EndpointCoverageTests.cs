@@ -427,6 +427,7 @@ public sealed partial class EndpointCoverageTests
                 "jobs.kind.excelImport", "jobs.kind.materializeCollectedData", "jobs.kind.reportSnapshot",
                 "jobs.kind.collection", "jobs.kind.sourceEventSync", "jobs.kind.rowWindowFetch",
                 "jobs.kind.consistencyCheck", "jobs.kind.orphanScan", "jobs.kind.registryImpactRecalculation",
+                "jobs.kind.migrateDocumentVersion",
             ],
             "Назва типу фонової задачі (KindKeys)."),
 

@@ -356,22 +356,35 @@ public sealed class DocumentsController(
     /// зникло б або змінило тлумачення бодай одне введене значення,
     /// <c>Presentation</c> — на будь-яку структурну різницю версій
     /// (<c>422 ECR-SCHM-0422</c>). Подані чи затверджені аркуші — <c>409 ECR-DOC-0409</c>.
+    /// Перенос великого проєкту (мільйони значень) триває десятки хвилин, що довше за таймаути проксі й
+    /// браузера. З <c>async = true</c> (не сухий прогін) він іде фоновою задачею: <c>202</c> з <c>jobId</c>,
+    /// прогрес і підсумок — <c>GET /jobs/{jobId}</c>; перевірки прав і цілі — ті самі й одразу (<c>404</c>, <c>403</c>,
+    /// <c>409</c>, <c>422</c>), відмови за даними (<c>ECR-SCHM-0422</c>) задача повертає станом <c>Failed</c> з кодом.
+    /// Повторний запит того самого автора, поки перенос проєкту йде, повертає той самий <c>jobId</c>; чужий —
+    /// <c>409 ECR-JOB-0409</c>. Сухий прогін завжди синхронний.
     /// </remarks>
     [HttpPost("{id:long}/migrate-version")]
     [ProducesResponseType<Application.Documents.VersionMigration.DocumentVersionMigrationDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType<Contracts.MigrationAcceptedResponse>(StatusCodes.Status202Accepted)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
-    public async Task<ActionResult<Application.Documents.VersionMigration.DocumentVersionMigrationDto>> MigrateVersion(
+    public async Task<IActionResult> MigrateVersion(
         long id, [FromBody] MigrateDocumentVersionRequest request, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(request);
 
+        var mode = request.Mode ?? Application.Documents.VersionMigration.VersionMigrationMode.Safe;
+
+        if (request.Async && !request.DryRun)
+        {
+            var jobId = await migrateVersion.EnqueueAsync(id, request.TargetVersionId, mode, ct).ConfigureAwait(false);
+
+            return Accepted(new Contracts.MigrationAcceptedResponse(jobId, id));
+        }
+
         return Ok(await migrateVersion
-            .HandleAsync(
-                id, request.TargetVersionId,
-                request.Mode ?? Application.Documents.VersionMigration.VersionMigrationMode.Safe,
-                request.DryRun, ct)
+            .HandleAsync(id, request.TargetVersionId, mode, request.DryRun, ct)
             .ConfigureAwait(false));
     }
 
@@ -666,11 +679,17 @@ public sealed record ChangeDocumentKeyRequest(string? BusinessKey, string? Expec
 /// <summary>Запит на перенос документа на нову версію шаблону (ФВ-7.5).</summary>
 /// <param name="TargetVersionId">Опублікована версія того самого шаблону.</param>
 /// <param name="Mode">Режим; без нього — <c>Safe</c>.</param>
-/// <param name="DryRun"><c>true</c> — лише звіт, без змін.</param>
+/// <param name="DryRun"><c>true</c> — лише звіт, без змін (завжди синхронно: швидкий).</param>
+/// <param name="Async">
+/// <c>true</c> — перенос (не сухий прогін) іде ФОНОВОЮ задачею: відповідь <c>202</c> з <c>jobId</c>, стан —
+/// <c>GET /jobs/{jobId}</c>. Типово <c>false</c> — як і раніше, синхронно з <c>200</c> і звітом
+/// (зворотна сумісність зовнішніх викликачів; веб-клієнт передає <c>true</c>).
+/// </param>
 public sealed record MigrateDocumentVersionRequest(
     int TargetVersionId,
     Application.Documents.VersionMigration.VersionMigrationMode? Mode,
-    bool DryRun);
+    bool DryRun,
+    bool Async = false);
 
 /// <summary>Запит на експорт.</summary>
 /// <param name="IncludeFormulas">

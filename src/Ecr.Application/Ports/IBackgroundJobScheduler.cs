@@ -481,6 +481,17 @@ public interface IExcelExportJob : IBackgroundJob;
 public interface IExcelImportJob : IBackgroundJob;
 
 /// <summary>
+/// Маркер задачі переносу проєкту на нову версію шаблону у фоні (ФВ-7.5, D-2 RC15B).
+/// </summary>
+/// <remarks>
+/// ⚠ Той самий прийом, що й <see cref="IExcelImportJob"/>: use-case називає задачу,
+/// не знаючи, що її реалізація живе в <c>Ecr.Infrastructure</c>. Перенос великого
+/// проєкту (мільйони значень) іде десятки хвилин — синхронний HTTP-запит такої
+/// тривалості обривається проксі й браузером, а виконання лишається неочевидним.
+/// </remarks>
+public interface IMigrateDocumentVersionJob : IBackgroundJob;
+
+/// <summary>
 /// Маркер задачі перенесення зібраних точок у комірки (<c>D-118</c>).
 /// </summary>
 /// <remarks>
