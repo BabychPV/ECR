@@ -210,6 +210,7 @@ public sealed class ImportMethodologyPackageHandler(
                 {
                     var formula = draft.AddFormula(EcrCode.Create(f.Code), f.Expression, f.ResultType, null);
                     formula.SetArguments(f.ArgumentsCsv);
+                    formula.SetScope(f.Scope);
                     drafts.Add(formula);
                 }
 
@@ -304,7 +305,7 @@ public sealed class ImportMethodologyPackageHandler(
         var categoryRule = await methodologies.GetCategoryRuleAsync(versionId, ct).ConfigureAwait(false);
 
         return new ImportVersionContent(
-            [.. formulas.Select(f => new ImportFormulaContent(f.Code, f.Expression, f.ArgumentsCsv, f.ResultType))],
+            [.. formulas.Select(f => new ImportFormulaContent(f.Code, f.Expression, f.ArgumentsCsv, f.ResultType, f.Scope))],
             [.. constants.Select(c => new ImportConstantContent(
                 c.Code, c.Kind, c.Value, c.TextValue, c.UnitId, c.Category, c.ValidFrom, c.ValidTo, c.Source))],
             imports,

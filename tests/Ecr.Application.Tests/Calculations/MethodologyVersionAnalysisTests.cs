@@ -3,6 +3,7 @@ using Ecr.Application.Calculations;
 using Ecr.Application.Calculations.Dto;
 using Ecr.Domain.Entities.Calculations;
 using Ecr.Domain.Entities.Configuration;
+using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
 using Ecr.TestKit;
 using Xunit;
@@ -94,6 +95,21 @@ public sealed class MethodologyVersionAnalysisTests
         Assert.Equal(["expression"], item.ChangedFields);
         Assert.Equal("@Fuel * CST.k", item.Before);
         Assert.Equal("@Fuel * CST.k * 2", item.After);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    public void Різниця_бачить_зміну_області_формули_Substance_на_Row()
+    {
+        var rowFormula = Formula("ECW_Location", "'a'");
+        rowFormula.SetScope(MethodologyFormulaScope.Row);
+        var before = Content([Formula("ECW_Location", "'a'")], [], []);
+        var after = Content([rowFormula], [], []);
+
+        var item = Assert.Single(CompareMethodologyVersionsHandler.Compare(before, after));
+
+        Assert.Equal(MethodologyDiffChange.Changed, item.Change);
+        Assert.Equal(["scope"], item.ChangedFields);
     }
 
     [Fact]

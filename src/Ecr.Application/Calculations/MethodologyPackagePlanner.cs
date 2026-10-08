@@ -14,8 +14,13 @@ namespace Ecr.Application.Calculations;
 /// <param name="Expression">Вираз.</param>
 /// <param name="ArgumentsCsv">Оголошені аргументи як є.</param>
 /// <param name="ResultType">Тип результату; пакет без позначки — <see cref="FormulaResultType.Number"/>.</param>
+/// <param name="Scope">Область формули (L2-1); пакет без позначки — <see cref="MethodologyFormulaScope.Substance"/>.</param>
 public sealed record ImportFormulaContent(
-    string Code, string Expression, string? ArgumentsCsv, FormulaResultType ResultType = FormulaResultType.Number);
+    string Code,
+    string Expression,
+    string? ArgumentsCsv,
+    FormulaResultType ResultType = FormulaResultType.Number,
+    MethodologyFormulaScope Scope = MethodologyFormulaScope.Substance);
 
 /// <summary>Рядок константи версії так, як його порівнює імпорт.</summary>
 /// <param name="Code">Код.</param>
@@ -68,7 +73,8 @@ public sealed record ImportVersionContent(
         => [
             .. content.Formulas
                 .Select(f => string.Join(
-                    '\u001f', "F", f.Code.ToUpperInvariant(), f.Expression, f.ArgumentsCsv ?? "\0", ((byte)f.ResultType).ToString(CultureInfo.InvariantCulture)))
+                    '\u001f', "F", f.Code.ToUpperInvariant(), f.Expression, f.ArgumentsCsv ?? "\0", ((byte)f.ResultType).ToString(CultureInfo.InvariantCulture),
+                    ((byte)f.Scope).ToString(CultureInfo.InvariantCulture)))
                 .Order(StringComparer.Ordinal),
             .. content.Constants
                 .Select(c => string.Join(
@@ -297,6 +303,12 @@ public static class MethodologyPackagePlanner
                         blockers.Add(new("formulaTooLong", m.Name, v.Version, f.Name,
                             $"Вираз довший за {MethodologyFormula.MaxExpressionLength} символів."));
                     }
+
+                    if (!TryParseScope(f.Scope, out _))
+                    {
+                        blockers.Add(new("invalidFormulaScope", m.Name, v.Version, f.Name,
+                            $"Область формули «{f.Scope}» невідома: допустимі Substance та Row."));
+                    }
                 }
 
                 foreach (var c in v.Constants ?? [])
@@ -457,7 +469,8 @@ public static class MethodologyPackagePlanner
                         f.Name.Trim(), f.Text ?? string.Empty, f.Arguments,
                         string.Equals(f.ResultType?.Trim(), "Text", StringComparison.OrdinalIgnoreCase)
                             ? FormulaResultType.Text
-                            : FormulaResultType.Number))],
+                            : FormulaResultType.Number,
+                        TryParseScope(f.Scope, out var scope) ? scope : MethodologyFormulaScope.Substance))],
                     constants,
                     [.. imports],
                     v.CategoryRule?.Expression?.Trim());
@@ -504,7 +517,29 @@ public static class MethodologyPackagePlanner
         return new MethodologyImportPlan(planned, blockers, conflicts, warnings);
     }
 
-    /// <summary>Вузол <c>categoryRule</c> версії пакета: непорожній, не задовгий, розбирається, не число (L-2).</summary>
+    /// <summary>Область формули з рядка пакета (L2-1): порожнє - <c>Substance</c>, імена - без регістру.</summary>
+    /// <param name="text">Рядок пакета; <c>null</c> або порожній - область не задано.</param>
+    /// <param name="scope">Область.</param>
+    /// <returns><c>false</c> - значення невідоме.</returns>
+    /// <remarks>
+    /// ⚠ Лише ІМ'Я переліку: <see cref="Enum.TryParse{TEnum}(string?, bool, out TEnum)"/> приймає й число
+    /// («1», «77»), а пакет — формат обміну, де число замість імені є помилкою експортера.
+    /// </remarks>
+    private static bool TryParseScope(string? text, out MethodologyFormulaScope scope)
+    {
+        scope = MethodologyFormulaScope.Substance;
+        var trimmed = text?.Trim();
+        if (string.IsNullOrEmpty(trimmed))
+        {
+            return true;
+        }
+
+        return char.IsLetter(trimmed[0])
+            && Enum.TryParse(trimmed, ignoreCase: true, out scope)
+            && Enum.IsDefined(scope);
+    }
+
+    /// <summary>Вузол <c>categoryRule</c> версії пакета:непорожній, не задовгий, розбирається, не число (L-2).</summary>
     /// <param name="rule">Вузол пакета; <c>null</c> — правила в пакеті немає.</param>
     /// <param name="methodology">Методологія для рядка звіту.</param>
     /// <param name="version">Версія для рядка звіту.</param>

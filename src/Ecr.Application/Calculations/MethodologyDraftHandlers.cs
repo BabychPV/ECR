@@ -252,7 +252,7 @@ public sealed class ListMethodologyFormulasHandler(
 
         return [.. formulas.Select(f => new MethodologyFormulaDto(
             f.Id, f.Code, f.Expression, f.ResultType, f.OutputUnitId, f.EvaluationOrder,
-            f.ArgumentsCsv))];
+            f.ArgumentsCsv, f.Scope))];
     }
 }
 
@@ -291,6 +291,10 @@ public sealed class SaveMethodologyFormulaHandler(
     /// Оголошений список аргументів (<c>;</c>-розділений); <c>null</c> — списку
     /// немає.
     /// </param>
+    /// <param name="scope">
+    /// Область (L2-1): <c>Row</c> - раз на рядок (її бачить правило категорії), <c>Substance</c> - на кожну
+    /// речовину; <c>null</c> - не змінювати (нова формула - <c>Substance</c>).
+    /// </param>
     /// <param name="ct">Токен скасування.</param>
     /// <returns>Записану формулу.</returns>
     /// <exception cref="NotFoundException">Версії немає.</exception>
@@ -315,11 +319,26 @@ public sealed class SaveMethodologyFormulaHandler(
         FormulaResultType resultType,
         int? outputUnitId,
         string? argumentsCsv,
+        MethodologyFormulaScope? scope,
         CancellationToken ct)
     {
         await PermissionCheck.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
 
         var formulaCode = EcrCode.Create(code);
+
+        // L2-1: значення поза переліком (JSON-число, якого немає) - 422 з ключем каталогу, а не 500 з домену.
+        if (scope is { } requested && !Enum.IsDefined(requested))
+        {
+            throw new BusinessRuleException(
+                "ECR-CALC-0422",
+                $"Область формули «{formulaCode.Value}» невідома: {(byte)requested}. Допустимі: Substance, Row.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0422.formulaScopeInvalid",
+                    ["code"] = formulaCode.Value,
+                    ["scope"] = ((byte)requested).ToString(CultureInfo.InvariantCulture),
+                });
+        }
 
         var version = await drafts.FindVersionAsync(methodologyVersionId, ct).ConfigureAwait(false)
             ?? throw new NotFoundException(
@@ -358,6 +377,12 @@ public sealed class SaveMethodologyFormulaHandler(
         // тримає інваріанти, полем, що інваріантів не має.
         formula.SetArguments(argumentsCsv);
 
+        // L2-1: `null` - «не змінювати» (нова формула лишається Substance, наявна зберігає область).
+        if (scope is { } chosen)
+        {
+            formula.SetScope(chosen);
+        }
+
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
 
         return new MethodologyFormulaDto(
@@ -367,7 +392,8 @@ public sealed class SaveMethodologyFormulaHandler(
             formula.ResultType,
             formula.OutputUnitId,
             formula.EvaluationOrder,
-            formula.ArgumentsCsv);
+            formula.ArgumentsCsv,
+            formula.Scope);
     }
 }
 

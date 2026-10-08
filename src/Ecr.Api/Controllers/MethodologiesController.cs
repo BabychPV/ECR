@@ -192,7 +192,7 @@ public sealed class MethodologiesController(
         return Ok(await saveFormula
             .HandleAsync(
                 vid, code, request.Expression, request.ResultType, request.OutputUnitId,
-                request.ArgumentsCsv, ct)
+                request.ArgumentsCsv, request.Scope, ct)
             .ConfigureAwait(false));
     }
 
@@ -741,8 +741,17 @@ public sealed record CreateMethodologyVersionRequest(
 /// ⚠ <c>null</c> і порожній рядок — різні стани: перший глушить звірку
 /// (<c>ECR-CALC-0432</c>), другий оголошує «нуль аргументів».
 /// </param>
+/// <param name="Scope">
+/// Область формули (L2-1): <c>Row</c> - раз на рядок, до циклу речовин (саме такі формули бачить правило
+/// категорії, <c>!Name</c>); <c>Substance</c> - на кожну речовину. ⚠ Необов'язкове: пропуск = «не змінювати»
+/// (нова формула лишається <c>Substance</c>, наявна зберігає область). Значення поза переліком - 422.
+/// </param>
 public sealed record SaveMethodologyFormulaRequest(
-    string Expression, FormulaResultType ResultType, int? OutputUnitId, string? ArgumentsCsv);
+    string Expression,
+    FormulaResultType ResultType,
+    int? OutputUnitId,
+    string? ArgumentsCsv,
+    MethodologyFormulaScope? Scope = null);
 
 /// <summary>Запит на заведення методології-контейнера.</summary>
 /// <param name="Code">
