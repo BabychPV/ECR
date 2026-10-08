@@ -136,20 +136,45 @@ internal static class MaterializationTargets
             query = query.Where(x => x.PeriodStart <= startTo);
         }
 
-        var missing = await query
-            .Select(x => new { x.DocumentId, x.PeriodKeyValue })
-            .Distinct()
-            .OrderBy(x => x.PeriodKeyValue)
-            .ThenBy(x => x.DocumentId)
-            .Take(limit)
-            .ToListAsync(ct)
-            .ConfigureAwait(false);
-
-        foreach (var pair in missing)
+        // ⛔ Вердикт Land (RC15, P2): два паралельні перші збори в один свіжий документ. Програвший гонку
+        // `UQ_TableInstance` у `RowStore.EnsureTableInstancesAsync` ковтає конфлікт і повертає 0 - це
+        // правильно (переможець створив усе), але задача мусить у цьому ПЕРЕКОНАТИСЬ, а не припускати:
+        // перечитуємо відсутні пари після заведення (до 3 кіл), і якщо екземпляра досі немає - кидаємо
+        // виняток (задача Failed/Retry), а не завершуємося «Succeeded» з порожнім результатом.
+        for (var attempt = 0; attempt < 3; attempt++)
         {
-            await rowStore
-                .EnsureTableInstancesAsync(pair.DocumentId, Domain.ValueObjects.PeriodKey.Parse(pair.PeriodKeyValue), ct)
+            var missing = await query
+                .Select(x => new { x.DocumentId, x.PeriodKeyValue })
+                .Distinct()
+                .OrderBy(x => x.PeriodKeyValue)
+                .ThenBy(x => x.DocumentId)
+                .Take(limit)
+                .ToListAsync(ct)
                 .ConfigureAwait(false);
+
+            if (missing.Count == 0)
+            {
+                return;
+            }
+
+            if (attempt == 2)
+            {
+                throw new InvalidOperationException(
+                    "Екземпляри таблиць не заведено: "
+                    + string.Join(
+                        ", ",
+                        missing.Take(5).Select(m =>
+                            $"документ {m.DocumentId.ToString(CultureInfo.InvariantCulture)}, "
+                            + $"період {m.PeriodKeyValue.ToString(CultureInfo.InvariantCulture)}"))
+                    + ". Матеріалізація не може бути успішною без них.");
+            }
+
+            foreach (var pair in missing)
+            {
+                await rowStore
+                    .EnsureTableInstancesAsync(pair.DocumentId, Domain.ValueObjects.PeriodKey.Parse(pair.PeriodKeyValue), ct)
+                    .ConfigureAwait(false);
+            }
         }
     }
 
