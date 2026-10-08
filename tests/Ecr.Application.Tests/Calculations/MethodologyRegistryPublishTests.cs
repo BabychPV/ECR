@@ -386,6 +386,56 @@ public sealed class MethodologyRegistryPublishTests
         Assert.Empty(_uses.Uses);
     }
 
+    /// <summary>
+    /// L2-4: довідник, який читає ЛИШЕ правило категорії константи, фіксується ребром
+    /// <c>cfg.RegistryUse</c> (код джерела — <c>CategoryRule</c>), як і для формули: інакше зміна
+    /// довідника не позначала б результати версії застарілими (RT-19/RT-25).
+    /// </summary>
+    /// <remarks>
+    /// Мутаційний доказ: не додавати правило в перелік для <c>ReplaceRegistryUsesAsync</c> —
+    /// червоний цей тест.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "ФВ-9.18")]
+    public async Task Довідник_лише_у_правилі_категорії_дає_ребро_використання()
+    {
+        _uses.Seed(RegistryUse.ForMethodologyFormula(VersionId, "OLD", Stream, "NAME"));
+        Formulas([Formula(1, "M", "CST.A * 2")]);
+        _store.GetCategoryRuleAsync(VersionId, Arg.Any<CancellationToken>())
+              .Returns("REGFIELD(REGFIND('STREAM_CASE', @Stream, @HmbCase), 'CASE_NAME')");
+
+        await Publish();
+
+        Assert.True(_version.IsPublished);
+        var mine = _uses.Uses
+            .Where(u => u.SourceId == VersionId)
+            .Select(u => $"{u.FormulaCode}:{u.RegistryDefId}:{u.FieldPath}")
+            .Order(StringComparer.Ordinal)
+            .ToList();
+        Assert.Equal(
+            new[] { $"{MethodologyCategoryRuleChecks.RuleCode}:{StreamCase}:", $"{MethodologyCategoryRuleChecks.RuleCode}:{StreamCase}:CASE_NAME" },
+            mine);
+    }
+
+    /// <summary>L2-4: описка в полі <c>REGFIELD</c> у правилі категорії ловиться публікацією, а не рядком розрахунку.</summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "ФВ-9.18")]
+    public async Task Описка_в_полі_REGFIELD_правила_категорії_422_з_позицією()
+    {
+        Formulas([Formula(1, "M", "CST.A * 2")]);
+        const string rule = "REGFIELD(REGFIND('STREAM_CASE', @Stream, @HmbCase), 'NO_SUCH')";
+        _store.GetCategoryRuleAsync(VersionId, Arg.Any<CancellationToken>()).Returns(rule);
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(Publish);
+
+        Assert.Equal("ECR-TMPL-4222", error.ErrorCode);
+        Assert.Equal("expr.registryFieldUnknown", error.Details!["messageKey"]);
+        Assert.Equal(MethodologyCategoryRuleChecks.RuleCode, error.Details["formula"]);
+        Assert.False(_version.IsPublished);
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
 
     private Task<MethodologyPublicationDiff> Publish()
