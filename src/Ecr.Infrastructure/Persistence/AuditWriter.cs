@@ -22,7 +22,7 @@ namespace Ecr.Infrastructure.Persistence;
 /// ⚠ Файла немає в дереві `05-skeleton.md` §1 (`Q-050`); таблиці `aud.*`
 /// створює `11-audit-tables.sql` (`Q-049`).
 /// </remarks>
-public sealed class AuditWriter(EcrDbContext db) : IAuditWriter
+public sealed class AuditWriter(EcrDbContext db, StaleCountsEpoch? staleEpoch = null) : IAuditWriter
 {
     /// <summary>Масштаб усіх стовпців <c>ChangedAt</c> — <c>datetime2(3)</c>.</summary>
     /// <remarks>
@@ -179,6 +179,10 @@ public sealed class AuditWriter(EcrDbContext db) : IAuditWriter
             """;
 
         await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+
+        // Правка комірки змінює "застарілість результатів": кеш лічильників скидається ПІСЛЯ коміту транзакції
+        // (поза транзакцією - одразу), O(1), без звернень до БД.
+        staleEpoch?.Invalidate(db);
     }
 
     /// <summary>Перекладає журнал у рядки табличного параметра.</summary>

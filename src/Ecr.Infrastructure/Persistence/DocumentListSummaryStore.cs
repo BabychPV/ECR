@@ -8,10 +8,11 @@ namespace Ecr.Infrastructure.Persistence;
 
 /// <summary>Реалізація <see cref="IDocumentListSummaryStore"/>: один агрегований запит.</summary>
 public sealed class DocumentListSummaryStore(
-    EcrDbContext db, Microsoft.Extensions.Caching.Memory.IMemoryCache? cache = null, Ecr.Domain.Abstractions.IClock? clock = null)
+    EcrDbContext db, Microsoft.Extensions.Caching.Memory.IMemoryCache? cache = null, Ecr.Domain.Abstractions.IClock? clock = null,
+    StaleCountsEpoch? epoch = null)
     : IDocumentListSummaryStore
 {
-    /// <summary>Життя запису лічильників застарілих результатів (без інвалідації: достатньо TTL).</summary>
+    /// <summary>Життя запису лічильників застарілих результатів (страховка до епохи й для інших вузлів API).</summary>
     public static readonly TimeSpan StaleCountsTtl = TimeSpan.FromSeconds(45);
 
     /// <inheritdoc />
@@ -108,8 +109,10 @@ public sealed class DocumentListSummaryStore(
     /// </summary>
     /// <remarks>
     /// ⛔ Кешуються ЛИШЕ ці два числа (найдорожчий запит смуги: ~1 с на 500 тис. рядків аудиту); позначка в рядку
-    /// сторінки кешу не має. Без інвалідації: правка входу доїде до лічильника за ≤ TTL - це свідомо (число
-    /// орієнтовне, а позначка в рядку й фільтр точні).
+    /// сторінки кешу не має. Інвалідація - ЕПОХОЮ (<see cref="StaleCountsEpoch"/>) у ключі: запис комірок
+    /// (<c>AuditWriter.WriteCellChangesAsync</c>) і перемикання актуального прогону
+    /// (<c>CalculationResultStore.SwitchCurrentRunAsync</c>) піднімають її ПІСЛЯ коміту, тож власна правка
+    /// видна лічильнику одразу. ⚠ Епоха живе в процесі: інший вузол API побачить зміну за ≤ TTL.
     ///
     /// ⛔ Безпека ключа: користувач + проєкт + період + ЕФЕКТИВНИЙ scope читача (межа грантів, пари «проєкт-схований
     /// аркуш», проєкти зі звуженням) → SHA-256. Різні scope не діляться записом: звужений читач не отримає лічильник
@@ -125,7 +128,7 @@ public sealed class DocumentListSummaryStore(
         string? key = null;
         if (cache is not null && clock is not null)
         {
-            key = StaleCountsKey(projectId, periodKey, scope, restrictions, narrowed, currentUserId);
+            key = StaleCountsKey(projectId, periodKey, scope, restrictions, narrowed, currentUserId, epoch?.Value ?? 0);
             if (cache.TryGetValue(key, out StaleCounts? hit) && hit is not null && hit.ExpiresAt > clock.UtcNow)
             {
                 return (hit.All, hit.Mine);
@@ -155,7 +158,8 @@ public sealed class DocumentListSummaryStore(
     }
 
     private static string StaleCountsKey(
-        int? projectId, int periodKey, int[]? scope, SummaryRestrictions? restrictions, int[] narrowed, int? userId)
+        int? projectId, int periodKey, int[]? scope, SummaryRestrictions? restrictions, int[] narrowed, int? userId,
+        long epochValue)
     {
         var hidden = (restrictions?.HiddenSheets ?? [])
             .Select(h => $"{h.ProjectId}:{h.SheetCode}")
@@ -166,7 +170,8 @@ public sealed class DocumentListSummaryStore(
             $"v={(scope is null ? "*" : string.Join(',', scope.Order()))}",
             $"r={(restrictions is null ? 0 : 1)}",
             $"h={string.Join(',', hidden)}",
-            $"n={string.Join(',', narrowed.Order())}");
+            $"n={string.Join(',', narrowed.Order())}",
+            $"e={epochValue}");
 
         return "doc-stale-counts:" + Convert.ToHexString(
             System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(canonical)));
