@@ -63,7 +63,7 @@ async function openAndPickTarget(): Promise<void> {
   render(
     <MantineProvider theme={testTheme}>
       <QueryClientProvider client={createQueryClient()}>
-        <VersionMigrationDialog documentId={42} onClose={() => undefined} />
+        <VersionMigrationDialog documentId={42} onClose={() => undefined} jobId={null} onJobChange={() => undefined} />
       </QueryClientProvider>
     </MantineProvider>,
   );
