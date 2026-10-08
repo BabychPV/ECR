@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { generatePath } from 'react-router-dom';
 import { routes } from '@/app/routes';
 import { myTaskDocumentHref } from '@/features/jobs/MyTasksDrawer';
+import { staleDocumentHref } from '@/features/jobs/myTasks';
 
 /**
  * Посилання на документ із шухляди веде туди ж, куди реєстр маршрутів.
@@ -22,5 +23,13 @@ describe('адреса документа в шухляді «My tasks»', () =>
     expect(myTaskDocumentHref(42)).toBe(
       generatePath(routes.documentDetail.path, { id: '42' }),
     );
+  });
+});
+
+describe('адреса документа за період у блоці «Потребують перерахунку»', () => {
+  it('веде на маршрут документа і несе periodKey (інакше банер «Перерахувати» не видно)', () => {
+    const href = staleDocumentHref(42, 202610);
+
+    expect(href).toBe(`${generatePath(routes.documentDetail.path, { id: '42' })}?periodKey=202610`);
   });
 });

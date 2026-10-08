@@ -123,6 +123,10 @@ interface DocumentListParams {
   q?: string;
   /** Лише документи цього проєкту. */
   projectId?: number | null;
+  /** Лише документи зі застарілими результатами методологій; ⚠ сервер вимагає `periodKey`. */
+  resultsStale?: boolean;
+  /** `'me'` - застарілість через правки поточного користувача; ⚠ лише разом із `resultsStale`. */
+  staleBy?: 'me';
 }
 
 /**
@@ -141,6 +145,8 @@ export function listDocuments(params: DocumentListParams): Promise<DocumentListP
   if (params.hasLateEdits) query.set('hasLateEdits', 'true');
   if (params.q) query.set('q', params.q);
   if (params.projectId) query.set('projectId', String(params.projectId));
+  if (params.resultsStale) query.set('resultsStale', 'true');
+  if (params.staleBy) query.set('staleBy', params.staleBy);
 
   return apiFetch<DocumentListPage>(`/api/v1/documents?${query.toString()}`);
 }

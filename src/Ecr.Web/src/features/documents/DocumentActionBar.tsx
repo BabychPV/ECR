@@ -6,6 +6,7 @@ import type { DocumentLock } from './documentLock';
 import { DocumentSheetBanner } from './DocumentSheetBanner';
 import { DocumentToolbar } from './DocumentToolbar';
 import { StaleResultsBanner } from './StaleResultsBanner';
+import { useStaleResultsReminder } from './useStaleResultsReminder';
 import { t } from '@/shared/i18n';
 
 // ⚠ `import()` — той самий чанк, що й раніше в `DocumentPage` (`D-132`): імпорт
@@ -76,6 +77,7 @@ export function DocumentActionBar({
   resultsStaleSince,
 }: DocumentActionBarProps): JSX.Element {
   const actions = useSheetActions({ documentId, sheetDefId, sheetName, periodKey, state, lock });
+  useStaleResultsReminder(documentId, resultsStale === true, actions.recalculate !== null);
   const openImport = useRef<((returnTo?: HTMLElement | null) => void) | null>(null);
   const startExport = useRef<((format: ExportFormat) => void) | null>(null);
 
