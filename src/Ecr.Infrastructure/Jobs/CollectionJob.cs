@@ -31,7 +31,8 @@ public sealed class CollectionJob(
     IClock clock,
     INotificationOutbox outbox,
     Integration.OutboxDispatcher dispatcher,
-    IRegistrySyncJob registrySync) : ICollectionJob
+    IRegistrySyncJob registrySync,
+    IRowStore? rowStore = null) : ICollectionJob
 {
     /// <summary>Код задачі в черзі.</summary>
     public static string Code => "collection";
@@ -302,14 +303,26 @@ public sealed class CollectionJob(
         // відкриття, а за вимкненого розкладу не спрацювала б узагалі. Тут
         // лишається постановка за перетином вікна — для точок, зібраних уже
         // під час `Open`.
+        //
+        // ⛔ RC14B P3-2: екземпляри таблиць свіжого документа ще не існують (створюються ліниво
+        // першим читанням) - спершу заводимо їх, інакше добір нижче не знайде адресата, і перший
+        // збір одразу після створення документа нічого не запише.
+        var periodEndNotBefore = DateOnly.FromDateTime(from).AddDays(-1);
+        var periodStartNotAfter = DateOnly.FromDateTime(to).AddDays(1);
+        await MaterializationTargets
+            .EnsureInstancesAsync(
+                db, rowStore, sourceEntityId, projectId: null, periodKeys: null,
+                periodEndNotBefore, periodStartNotAfter, MaxMaterializationTargets, ct)
+            .ConfigureAwait(false);
+
         var targets = (await MaterializationTargets
                 .FindAsync(
                     db,
                     sourceEntityId,
                     projectId: null,
                     periodKeys: null,
-                    periodEndNotBefore: DateOnly.FromDateTime(from).AddDays(-1),
-                    periodStartNotAfter: DateOnly.FromDateTime(to).AddDays(1),
+                    periodEndNotBefore,
+                    periodStartNotAfter,
                     MaxMaterializationTargets,
                     ct)
                 .ConfigureAwait(false))

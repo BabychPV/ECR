@@ -53,6 +53,106 @@ internal sealed record MaterializationTarget(
 /// </remarks>
 internal static class MaterializationTargets
 {
+    /// <summary>
+    /// Заводить екземпляри таблиць документів, у які мапінг сутності пише, але яких ще немає.
+    /// </summary>
+    /// <param name="db">Контекст.</param>
+    /// <param name="rowStore">Сховище рядків; <c>null</c> - нічого не робимо.</param>
+    /// <param name="sourceEntityId">Лише ця сутність джерела.</param>
+    /// <param name="projectId">Лише цей проєкт.</param>
+    /// <param name="periodKeys">Лише ці періоди (разом із <paramref name="projectId"/>).</param>
+    /// <param name="periodEndNotBefore">Грубий фільтр: період кінчається не раніше цієї дати.</param>
+    /// <param name="periodStartNotAfter">Грубий фільтр: період починається не пізніше цієї дати.</param>
+    /// <param name="limit">Стеля пар «документ + період» за один виклик.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⛔ RC14B P3-2: екземпляри (<c>doc.TableInstance</c>) створюються ліниво - першим читанням таблиць
+    /// документа, а <see cref="FindAsync"/> добирає адресатів лише за ІСНУЮЧИМИ екземплярами. Перший збір
+    /// одразу після створення документа не мав кого писати; значення з'являлися лише після другого збору.
+    /// Тут екземпляри заводяться тим самим <c>EnsureTableInstancesAsync</c>, що й при відкритті документа,
+    /// - лише для відкритих періодів (<c>Open</c>/<c>Grace</c>: у <c>Scheduled</c> і <c>Closed</c>
+    /// матеріалізація нічого не пише) і лише для аркушів, які документ містить.
+    /// </remarks>
+    public static async Task EnsureInstancesAsync(
+        EcrDbContext db,
+        IRowStore? rowStore,
+        int? sourceEntityId,
+        int? projectId,
+        IReadOnlyCollection<int>? periodKeys,
+        DateOnly? periodEndNotBefore,
+        DateOnly? periodStartNotAfter,
+        int limit,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+
+        if (rowStore is null)
+        {
+            return;
+        }
+
+        var query =
+            from m in db.EntityFieldMaps.AsNoTracking()
+            from c in db.ColumnDefs.AsNoTracking()
+            where m.IsActive
+                  && m.TargetRowKey != null
+                  && m.TargetColumnDefId != null
+                  && c.Id == m.TargetColumnDefId
+            join td in db.TableDefs.AsNoTracking() on c.TableDefId equals td.Id
+            join s in db.DocumentSheets.AsNoTracking() on td.SheetDefId equals s.SheetDefId
+            join d in db.Documents.AsNoTracking() on s.DocumentId equals d.Id
+            join p in db.Periods.AsNoTracking() on d.ProjectId equals p.ProjectId
+            where !td.IsDeleted
+                  && s.IsIncluded
+                  && (p.State == Domain.Enums.PeriodState.Open || p.State == Domain.Enums.PeriodState.Grace)
+                  && !db.TableInstances.Any(t => t.DocumentId == d.Id
+                                                 && t.TableDefId == td.Id
+                                                 && t.PeriodKeyValue == p.PeriodKeyValue)
+            select new { m.SourceEntityId, DocumentId = d.Id, d.ProjectId, p.PeriodKeyValue, p.PeriodStart, p.PeriodEnd };
+
+        if (sourceEntityId is { } entity)
+        {
+            query = query.Where(x => x.SourceEntityId == entity);
+        }
+
+        if (projectId is { } projectFilter)
+        {
+            query = query.Where(x => x.ProjectId == projectFilter);
+        }
+
+        if (periodKeys is not null)
+        {
+            var keys = periodKeys.ToList();
+            query = query.Where(x => keys.Contains(x.PeriodKeyValue));
+        }
+
+        if (periodEndNotBefore is { } endFrom)
+        {
+            query = query.Where(x => x.PeriodEnd >= endFrom);
+        }
+
+        if (periodStartNotAfter is { } startTo)
+        {
+            query = query.Where(x => x.PeriodStart <= startTo);
+        }
+
+        var missing = await query
+            .Select(x => new { x.DocumentId, x.PeriodKeyValue })
+            .Distinct()
+            .OrderBy(x => x.PeriodKeyValue)
+            .ThenBy(x => x.DocumentId)
+            .Take(limit)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        foreach (var pair in missing)
+        {
+            await rowStore
+                .EnsureTableInstancesAsync(pair.DocumentId, Domain.ValueObjects.PeriodKey.Parse(pair.PeriodKeyValue), ct)
+                .ConfigureAwait(false);
+        }
+    }
+
     /// <summary>Адресати, звужені заданими фільтрами; незадані фільтри не звужують.</summary>
     /// <param name="db">Контекст.</param>
     /// <param name="sourceEntityId">Лише ця сутність джерела.</param>

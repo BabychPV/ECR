@@ -22,6 +22,9 @@ namespace Ecr.Infrastructure.Jobs;
 public sealed class MaterializationScheduler(
     EcrDbContext db, IBackgroundJobScheduler jobs, IRowStore? rowStore = null) : IMaterializationScheduler
 {
+    /// <summary>Стеля пар «документ + період» для заведення екземплярів за один перехід.</summary>
+    private const int MaxEnsured = 1000;
+
     /// <inheritdoc />
     public bool EnlistsInCallerTransaction => jobs.EnlistsInCallerTransaction;
 
@@ -46,7 +49,11 @@ public sealed class MaterializationScheduler(
                 "Матеріалізацію з переходу періоду ставлять лише після коміту переходу: транзакція ще відкрита.");
         }
 
-        _ = rowStore; // заглушка червоного тесту: RC14B P3-2
+        // ⛔ RC14B P3-2: екземпляри свіжого документа ще не створені (ліниві) - заводимо, інакше
+        // добір нижче не знайде адресата.
+        await MaterializationTargets
+            .EnsureInstancesAsync(db, rowStore, sourceEntityId: null, projectId, periodKeys, null, null, MaxEnsured, ct)
+            .ConfigureAwait(false);
 
         var targets = await MaterializationTargets
             .FindAsync(db, sourceEntityId: null, projectId, periodKeys, null, null, int.MaxValue, ct)
