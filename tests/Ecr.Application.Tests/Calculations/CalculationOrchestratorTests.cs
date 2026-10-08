@@ -78,6 +78,25 @@ public sealed class CalculationOrchestratorTests
             new Dictionary<string, GrantLevel> { [$"{ResourceKind.Project}:{Project}"] = GrantLevel.Manage }));
     }
 
+    /// <remarks>
+    /// P2-1: одна методологія, прив'язана до двох колонок/таблиць, дає два вузли з одним ключем;
+    /// `ToDictionary` падав «same key already added». Мутація: повернути `ToDictionary` без групування.
+    /// </remarks>
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    public void Одна_версія_методології_у_двох_вузлах_дає_один_елемент_пакета()
+    {
+        var batches = CalculationPlan.Build(
+        [
+            new CalculationNode(10, []),
+            new CalculationNode(10, []),
+            new CalculationNode(11, [10]),
+        ]);
+
+        Assert.Equal(2, batches.Count);
+        Assert.Equal([10], batches[0].MethodologyVersionIds);
+        Assert.Equal([11], batches[1].MethodologyVersionIds);
+    }
+
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
     public void Незалежні_гілки_графа_рахуються_паралельно()
     {

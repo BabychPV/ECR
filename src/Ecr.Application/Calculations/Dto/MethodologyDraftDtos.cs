@@ -61,6 +61,10 @@ public sealed record MethodologyDraftVersionDto(
 /// глушить звірку пастки 2 (<c>ECR-CALC-0432</c>), а порожній оголошує «нуль
 /// аргументів», і тоді будь-який токен у виразі є порушенням.
 /// </param>
+/// <param name="Scope">
+/// Область формули (L2-1): <c>Substance</c> — на кожну речовину (типове), <c>Row</c> — раз на рядок,
+/// до циклу речовин; саме Row-формули бачить правило категорії (<c>!Name</c>).
+/// </param>
 public sealed record MethodologyFormulaDto(
     int Id,
     string Code,
@@ -68,7 +72,8 @@ public sealed record MethodologyFormulaDto(
     FormulaResultType ResultType,
     int? OutputUnitId,
     int EvaluationOrder,
-    string? ArgumentsCsv);
+    string? ArgumentsCsv,
+    MethodologyFormulaScope Scope);
 
 /// <summary>
 /// Методологія-контейнер, як її бачить конфігуратор — <b>без</b> версій.

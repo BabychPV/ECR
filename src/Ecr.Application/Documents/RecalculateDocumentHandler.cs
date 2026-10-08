@@ -148,9 +148,15 @@ public sealed class RecalculateDocumentHandler(
                 .GetSheetsAsync(documentId, periodKey, ct)
                 .ConfigureAwait(false);
 
+            // ⛔ RC14 (приймальна №10, P2-3): область ОДНОГО аркуша відхиляється лише коли ПОДАНИЙ САМ цей
+            // аркуш. Подані СУСІДНІ аркуші перерахунок області не чіпає (цілі запису — таблиці цього аркуша,
+            // ФВ-9.17 про зріз аркуша), а без цього чернетка поруч із затвердженим аркушем не могла ні
+            // перерахуватися, ні бути поданою («Recalculate before submitting» — глухий кут). Перерахунок
+            // усього документа (`sheetDefId = null`) і закритий період — як і раніше.
             var submitted = sheets.Any(s =>
-                s.Status is Domain.Enums.DocumentStatus.Submitted
-                         or Domain.Enums.DocumentStatus.Approved);
+                (sheetDefId is null || s.SheetDefId == sheetDefId)
+                && s.Status is Domain.Enums.DocumentStatus.Submitted
+                            or Domain.Enums.DocumentStatus.Approved);
 
             var denial = Calculations.RecalculationWritePolicy.Check(
                 periodState, submitted, hasClosedPeriodApproval: false);

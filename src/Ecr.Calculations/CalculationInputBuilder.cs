@@ -52,12 +52,6 @@ public sealed class CalculationInputBuilder(ICellStore cellStore, IMetadataCache
 
         var inputs = new List<CalculationInput>(rowKeys.Count);
 
-        // ⛔ `Lookup` → `EntryRef` лише у версіях `Strict` (RT-23a, `D-161`). Чинна
-        // система id запису довідника в формулу не передавала, і `Legacy` мусить
-        // лишатися побітно такою, як до кроку: там аргумент `Lookup`-колонки — той
-        // самий порожній `ValueNumeric`/`ValueString`, що й раніше.
-        var entryRefs = methodology.NumericMode == Domain.Enums.NumericMode.Strict;
-
         foreach (var rowKey in rowKeys)
         {
             if (!rowIds.TryGetValue(rowKey, out var rowId))
@@ -81,7 +75,12 @@ public sealed class CalculationInputBuilder(ICellStore cellStore, IMetadataCache
 
                         // Id запису з `Lookup`-комірки — `EntryRef` для `REGFIND`,
                         // `REGFIELD`, `ROW.X = @Arg` (§5.3). Інша комірка його не має.
-                        entryRefs ? c.Value.ValueRegistryEntryId : null))
+                        //
+                        // ✎ L2-3: id віддається ЗАВЖДИ. Чи бачить його ФОРМУЛА, вирішує
+                        // `GenericCalculationModule.ToValue` за режимом: у `Legacy` формули
+                        // лишаються побітно такими, як до RT-23a (D-161), а ПРАВИЛО
+                        // категорії бачить id в обох режимах (розширення D-161).
+                        c.Value.ValueRegistryEntryId))
                     .ToList()
                 : [];
 

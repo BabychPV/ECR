@@ -92,6 +92,7 @@ public static class MethodologyRegistryChecks
     /// <c>!CASE</c> в іншій формулі був <c>EntryRef</c> цього довідника (§5.3).
     /// </summary>
     /// <param name="formulas">Розібрані формули версії.</param>
+    /// <param name="argumentRegistries">Код Lookup-колонки → код довідника для аргументів <c>@Col</c> (RC14); <c>null</c> — невідомо.</param>
     /// <returns>Код формули → код довідника; формули, що дають не запис, відсутні.</returns>
     /// <remarks>
     /// ⚠ Лише форми, де відповідь однозначна: корінь — <c>REGFIND</c>/<c>REGONE</c> з
@@ -99,11 +100,19 @@ public static class MethodologyRegistryChecks
     /// записами різних довідників) лишається «невідомо», тобто не перевіряється, а не
     /// вважається помилкою: здогад тут дав би хибну відмову публікації.
     /// </remarks>
-    public static IReadOnlyDictionary<string, string> FormulaRegistries(IReadOnlyList<ParsedFormula> formulas)
+    public static IReadOnlyDictionary<string, string> FormulaRegistries(
+        IReadOnlyList<ParsedFormula> formulas, IReadOnlyDictionary<string, string>? argumentRegistries = null)
     {
         ArgumentNullException.ThrowIfNull(formulas);
 
+        // ✎ RC14: аргументи `@Col` з Lookup-колонок — у тому ж словнику під ключем `@ім'я` (код формули
+        // не може починатися з `@`), тож `REGFIELD(@Lookup, 'X')` перевіряється й пише ребро RegistryUse.
         var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (name, registry) in argumentRegistries ?? new Dictionary<string, string>())
+        {
+            result["@" + name] = registry;
+        }
+
         var roots = formulas
             .Where(f => f.Root is not null)
             .GroupBy(f => f.Code, StringComparer.OrdinalIgnoreCase)
@@ -129,6 +138,8 @@ public static class MethodologyRegistryChecks
                         => ReferenceResolver.RegistryCodeLiteral(call.Arguments[0]),
                     SymbolReferenceNode { Kind: SymbolKind.Formula } other
                         => result.GetValueOrDefault(other.Name),
+                    SymbolReferenceNode { Kind: SymbolKind.Argument } arg
+                        => result.GetValueOrDefault("@" + arg.Name),
                     _ => null,
                 };
 
@@ -150,6 +161,7 @@ public static class MethodologyRegistryChecks
     /// <param name="formulas">Розібрані формули версії.</param>
     /// <param name="shapes">Форми довідників.</param>
     /// <param name="warnings">Куди складати попередження 21а; <c>null</c> — нікуди.</param>
+    /// <param name="argumentRegistries">Код Lookup-колонки → код довідника для аргументів <c>@Col</c> (RC14); <c>null</c> — невідомо.</param>
     /// <exception cref="BusinessRuleException">
     /// Код першої знахідки: <c>ECR-TMPL-4222</c> (15, 16, 19) або <c>ECR-TMPL-0422</c> (17),
     /// обидва — 422. <c>messageKey</c> і підстановки — першої знахідки, <c>formula</c>,
@@ -162,12 +174,13 @@ public static class MethodologyRegistryChecks
     public static void RequireValidReferences(
         IReadOnlyList<ParsedFormula> formulas,
         IRegistryShapeSource shapes,
-        ICollection<string>? warnings = null)
+        ICollection<string>? warnings = null,
+        IReadOnlyDictionary<string, string>? argumentRegistries = null)
     {
         ArgumentNullException.ThrowIfNull(formulas);
         ArgumentNullException.ThrowIfNull(shapes);
 
-        var context = new TypeContext(shapes, FormulaRegistries(formulas));
+        var context = new TypeContext(shapes, FormulaRegistries(formulas, argumentRegistries));
         var checker = new TypeChecker();
         var found = new List<(string Formula, ExpressionDiagnostic Diagnostic)>();
 
@@ -237,6 +250,7 @@ public static class MethodologyRegistryChecks
     /// Що читає кожна формула версії: пари «довідник, шлях поля» (§5.8) без повторів.
     /// </summary>
     /// <param name="formulas">Розібрані формули версії.</param>
+    /// <param name="argumentRegistries">Код Lookup-колонки → код довідника для аргументів <c>@Col</c> (RC14); <c>null</c> — невідомо.</param>
     /// <returns>
     /// Трійки «формула, довідник, шлях»; шлях <c>null</c> — довідник цілком (<c>REGFIND</c>,
     /// <c>REGONE</c>, агрегат), <c>COMPONENT.MW</c> — поле <c>ROW.COMPONENT.MW</c> довідника
@@ -247,11 +261,11 @@ public static class MethodologyRegistryChecks
     /// «Де використано» читає обидва види однаково.
     /// </remarks>
     public static IReadOnlyList<(string Formula, string Registry, string? FieldPath)> Uses(
-        IReadOnlyList<ParsedFormula> formulas)
+        IReadOnlyList<ParsedFormula> formulas, IReadOnlyDictionary<string, string>? argumentRegistries = null)
     {
         ArgumentNullException.ThrowIfNull(formulas);
 
-        var entries = FormulaRegistries(formulas);
+        var entries = FormulaRegistries(formulas, argumentRegistries);
         var uses = new List<(string Formula, string Registry, string? FieldPath)>();
 
         foreach (var formula in formulas.Where(f => f.Root is not null))
@@ -324,16 +338,20 @@ public static class MethodologyRegistryChecks
     /// <param name="methodologyVersionId">Версія методології.</param>
     /// <param name="formulas">Розібрані формули версії.</param>
     /// <param name="shapes">Каталог форм — id довідників за кодом.</param>
+    /// <param name="argumentRegistries">Код Lookup-колонки → код довідника для аргументів <c>@Col</c> (RC14); <c>null</c> — невідомо.</param>
     /// <returns>Ребра; довідник без id (такого немає) ребра не дає — ключа на нього не буде.</returns>
     public static IReadOnlyList<RegistryUse> BuildUses(
-        int methodologyVersionId, IReadOnlyList<ParsedFormula> formulas, RegistryShapeCatalog shapes)
+        int methodologyVersionId,
+        IReadOnlyList<ParsedFormula> formulas,
+        RegistryShapeCatalog shapes,
+        IReadOnlyDictionary<string, string>? argumentRegistries = null)
     {
         ArgumentNullException.ThrowIfNull(formulas);
         ArgumentNullException.ThrowIfNull(shapes);
 
         return
         [
-            .. Uses(formulas)
+            .. Uses(formulas, argumentRegistries)
                 .Select(u => (u.Formula, Id: shapes.IdOf(u.Registry), u.FieldPath))
                 .Where(u => u.Id is > 0)
                 .Select(u => RegistryUse.ForMethodologyFormula(methodologyVersionId, u.Formula, u.Id!.Value, u.FieldPath)),
@@ -369,6 +387,7 @@ public static class MethodologyRegistryChecks
         => node switch
         {
             SymbolReferenceNode { Kind: SymbolKind.Formula } formula => entries.GetValueOrDefault(formula.Name),
+            SymbolReferenceNode { Kind: SymbolKind.Argument } arg => entries.GetValueOrDefault("@" + arg.Name),
             FunctionNode { Arguments.Count: > 0 } call when call.Name is RegistryForms.Find or RegistryForms.One
                 => ReferenceResolver.RegistryCodeLiteral(call.Arguments[0]),
             _ => null,
@@ -418,6 +437,8 @@ public static class MethodologyRegistryChecks
         public IRegistryShapeSource? Registries => shapes;
 
         public string? GetFormulaRegistry(string code) => entries.GetValueOrDefault(code);
+
+        public string? GetArgumentRegistry(string name) => entries.GetValueOrDefault("@" + name);
 
         public ExpressionValueType GetReferenceType(CellReferenceNode reference) => ExpressionValueType.Null;
 

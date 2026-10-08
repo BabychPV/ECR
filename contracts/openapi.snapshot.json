@@ -6475,6 +6475,10 @@
           "resultType": {
             "$ref": "#/components/schemas/FormulaResultType",
             "description": "Число чи текст."
+          },
+          "scope": {
+            "$ref": "#/components/schemas/MethodologyFormulaScope",
+            "description": "Область формули (L2-1): `Substance` — на кожну речовину (типове), `Row` — раз на рядок,\nдо циклу речовин; саме Row-формули бачить правило категорії (`!Name`)."
           }
         },
         "required": [
@@ -6484,9 +6488,17 @@
           "resultType",
           "outputUnitId",
           "evaluationOrder",
-          "argumentsCsv"
+          "argumentsCsv",
+          "scope"
         ],
         "type": "object"
+      },
+      "MethodologyFormulaScope": {
+        "description": "Область формули методології (`D-176`, V-7 FEATURE-HSE301-VIEW §6.1).",
+        "enum": [
+          "Substance",
+          "Row"
+        ]
       },
       "MethodologyImportIssueDto": {
         "description": "Рядок звіту: блокер, конфлікт або попередження.",
@@ -6997,6 +7009,13 @@
           },
           "resultType": {
             "description": "Тип результату, який вивів експортер із тексту: `Text` або `Number`; порожній — `Number`.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "scope": {
+            "description": "Область формули (L2-1): `Row` (раз на рядок, до циклу речовин) або `Substance` (на кожну речовину);\nбез регістру. Порожнє або відсутнє - `Substance`, як до появи поля. Інше значення - блокер\n`invalidFormulaScope`. ⚠ Експортер AF мусить виставити `Row` для формул, на які посилається\nправило категорії (`!Name`) - разом із їхніми `!`-залежностями: Row-формула не може посилатись\nна формулу речовини.",
             "type": [
               "null",
               "string"
@@ -12996,6 +13015,17 @@
           "resultType": {
             "$ref": "#/components/schemas/FormulaResultType",
             "description": "Що формула повертає: число чи текст. Оголошується явно — у корпусі формула\nповертає `'Сверхнорматив'` як ЗНАЧЕННЯ, і без типу воно пішло б у\nчислову колонку результату."
+          },
+          "scope": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/MethodologyFormulaScope",
+                "description": "Область формули (L2-1): `Row` - раз на рядок, до циклу речовин (саме такі формули бачить правило\nкатегорії, `!Name`); `Substance` - на кожну речовину. ⚠ Необов'язкове: пропуск = «не змінювати»\n(нова формула лишається `Substance`, наявна зберігає область). Значення поза переліком - 422."
+              }
+            ]
           }
         },
         "required": [

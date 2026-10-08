@@ -36,7 +36,7 @@ public sealed class MethodologyDiffFieldsTests
         Assert.Equal(
             [
                 "argumentsCsv", "expectedJson", "expression", "inputJson", "kind", "outputUnitId",
-                "resultType", "source", "textValue", "tolerance", "unitId", "validTo", "value",
+                "resultType", "scope", "source", "textValue", "tolerance", "unitId", "validTo", "value",
             ],
             MethodologyDiffFields.All.Order(StringComparer.Ordinal));
     }

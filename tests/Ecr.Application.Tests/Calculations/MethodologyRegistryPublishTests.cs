@@ -14,6 +14,7 @@ using Ecr.Expressions.Graph;
 using Ecr.Expressions.Parsing;
 using Ecr.TestKit;
 using NSubstitute;
+using NSubstitute.ExceptionExtensions;
 using Xunit;
 
 namespace Ecr.Application.Tests.Calculations;
@@ -384,6 +385,131 @@ public sealed class MethodologyRegistryPublishTests
         await Publish();
 
         Assert.Empty(_uses.Uses);
+    }
+
+    /// <summary>
+    /// L2-4: довідник, який читає ЛИШЕ правило категорії константи, фіксується ребром
+    /// <c>cfg.RegistryUse</c> (код джерела — <c>CategoryRule</c>), як і для формули: інакше зміна
+    /// довідника не позначала б результати версії застарілими (RT-19/RT-25).
+    /// </summary>
+    /// <remarks>
+    /// Мутаційний доказ: не додавати правило в перелік для <c>ReplaceRegistryUsesAsync</c> —
+    /// червоний цей тест.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "ФВ-9.18")]
+    public async Task Довідник_лише_у_правилі_категорії_дає_ребро_використання()
+    {
+        _uses.Seed(RegistryUse.ForMethodologyFormula(VersionId, "OLD", Stream, "NAME"));
+        Formulas([Formula(1, "M", "CST.A * 2")]);
+        _store.GetCategoryRuleAsync(VersionId, Arg.Any<CancellationToken>())
+              .Returns("REGFIELD(REGFIND('STREAM_CASE', @Stream, @HmbCase), 'CASE_NAME')");
+
+        await Publish();
+
+        Assert.True(_version.IsPublished);
+        var mine = _uses.Uses
+            .Where(u => u.SourceId == VersionId)
+            .Select(u => $"{u.FormulaCode}:{u.RegistryDefId}:{u.FieldPath}")
+            .Order(StringComparer.Ordinal)
+            .ToList();
+        Assert.Equal(
+            new[] { $"{MethodologyCategoryRuleChecks.RuleCode}:{StreamCase}:", $"{MethodologyCategoryRuleChecks.RuleCode}:{StreamCase}:CASE_NAME" },
+            mine);
+    }
+
+    /// <summary>L2-4: описка в полі <c>REGFIELD</c> у правилі категорії ловиться публікацією, а не рядком розрахунку.</summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "ФВ-9.18")]
+    public async Task Описка_в_полі_REGFIELD_правила_категорії_422_з_позицією()
+    {
+        Formulas([Formula(1, "M", "CST.A * 2")]);
+        const string rule = "REGFIELD(REGFIND('STREAM_CASE', @Stream, @HmbCase), 'NO_SUCH')";
+        _store.GetCategoryRuleAsync(VersionId, Arg.Any<CancellationToken>()).Returns(rule);
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(Publish);
+
+        Assert.Equal("ECR-TMPL-4222", error.ErrorCode);
+        Assert.Equal("expr.registryFieldUnknown", error.Details!["messageKey"]);
+        Assert.Equal(MethodologyCategoryRuleChecks.RuleCode, error.Details["formula"]);
+        Assert.False(_version.IsPublished);
+    }
+
+    /// <summary>
+    /// RC14 (L2-4): коли золотий прогін теж падає на тій самій описці (правило категорії дає
+    /// <c>categoryRuleFailed</c>/#REF), користувач бачить названу відмову 4222 з позицією, а не
+    /// відмову прогону — статичні перевірки довідників йдуть ДО golden.
+    /// Мутація: повернути <c>ApplyEvaluationOrderAsync</c> після <c>JudgeAsync</c> — тест червоніє.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "ФВ-9.18")]
+    public async Task Описка_REGFIELD_у_правилі_категорії_4222_навіть_коли_golden_падає_на_ній()
+    {
+        Formulas([Formula(1, "M", "CST.A * 2")]);
+        _store.GetCategoryRuleAsync(VersionId, Arg.Any<CancellationToken>())
+              .Returns("REGFIELD(REGFIND('STREAM_CASE', @Stream, @HmbCase), 'NO_SUCH')");
+        _module.ExecuteAsync(Arg.Any<CalculationInput>(), Arg.Any<CancellationToken>())
+               .ThrowsAsync(new BusinessRuleException(
+                   "ECR-CALC-0422",
+                   "categoryRuleFailed #REF",
+                   new Dictionary<string, object?> { ["messageKey"] = "err.ECR-CALC-0422.categoryRuleFailed" }));
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(Publish);
+
+        Assert.Equal("ECR-TMPL-4222", error.ErrorCode);
+        Assert.False(_version.IsPublished);
+    }
+
+    /// <summary>
+    /// RC14 (P3, форма Land): довідник приходить з <c>Lookup</c>-колонки прив'язаної таблиці
+    /// (<c>REGFIELD(@Stream, …)</c> БЕЗ <c>REGFIND</c>). Описка в полі - 4222; правильне поле - публікація
+    /// і ребро <c>cfg.RegistryUse</c>. Мутація: не передавати <c>argumentRegistries</c> - обидва тести червоніють.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "ФВ-9.18")]
+    public async Task Описка_REGFIELD_від_Lookup_аргументу_без_REGFIND_422_4222()
+    {
+        LookupArgument();
+        _store.GetCategoryRuleAsync(VersionId, Arg.Any<CancellationToken>()).Returns("REGFIELD(@Stream, 'NAMEX')");
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(Publish);
+
+        Assert.Equal("ECR-TMPL-4222", error.ErrorCode);
+        Assert.Equal("expr.registryFieldUnknown", error.Details!["messageKey"]);
+        Assert.False(_version.IsPublished);
+    }
+
+    /// <summary>RC14 (P3): коректне поле від Lookup-аргументу публікується й пише ребро використання довідника.</summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "ФВ-9.18")]
+    public async Task REGFIELD_від_Lookup_аргументу_публікується_і_пише_ребро()
+    {
+        LookupArgument();
+        _store.GetCategoryRuleAsync(VersionId, Arg.Any<CancellationToken>()).Returns("REGFIELD(@Stream, 'NAME')");
+
+        await Publish();
+
+        Assert.True(_version.IsPublished);
+        Assert.Contains(
+            _uses.Uses.Where(u => u.SourceId == VersionId),
+            u => u.RegistryDefId == Stream && u.FieldPath == "NAME");
+    }
+
+    private void LookupArgument()
+    {
+        Formulas([Formula(1, "M", "CST.A * 2")]);
+        const int tableId = 5;
+        _bindings.ListAsync(Arg.Any<int>(), Arg.Any<CancellationToken>())
+                 .Returns(new List<CalculationBinding> { new(tableId, 50, OwnerId, "OUT", "{}") });
+        _bindings.ListColumnCodesAsync(Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<CancellationToken>())
+                 .Returns(new Dictionary<int, IReadOnlyList<string>> { [tableId] = ["Stream"] });
+        _bindings.ListLookupRegistryCodesAsync(Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<CancellationToken>())
+                 .Returns(new Dictionary<string, string> { ["Stream"] = "STREAM" });
     }
 
     // ─────────────────────────────────────────────────────────────────────────

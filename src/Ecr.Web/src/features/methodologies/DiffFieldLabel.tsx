@@ -27,6 +27,8 @@ export function DiffFieldLabel({ field }: { field: string }): JSX.Element {
       return <>{t('methodologyDiffField.outputUnitId')}</>;
     case 'argumentsCsv':
       return <>{t('methodologyDiffField.argumentsCsv')}</>;
+    case 'scope':
+      return <>{t('methodologyDiffField.scope')}</>;
     case 'kind':
       return <>{t('methodologyDiffField.kind')}</>;
     case 'value':

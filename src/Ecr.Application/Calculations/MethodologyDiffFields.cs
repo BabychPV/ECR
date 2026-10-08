@@ -26,6 +26,9 @@ public static class MethodologyDiffFields
     /// <summary>Формула: перелік аргументів.</summary>
     public const string ArgumentsCsv = "argumentsCsv";
 
+    /// <summary>Формула: область (на речовину чи на рядок, L2-1).</summary>
+    public const string Scope = "scope";
+
     /// <summary>Константа: вид (число чи текст).</summary>
     public const string Kind = "kind";
 

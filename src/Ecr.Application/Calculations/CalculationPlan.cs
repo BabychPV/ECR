@@ -31,9 +31,17 @@ public static class CalculationPlan
     {
         ArgumentNullException.ThrowIfNull(nodes);
 
-        var pending = nodes.ToDictionary(
-            n => n.MethodologyVersionId,
-            n => new HashSet<int>(n.DependsOn.Where(d => nodes.Any(x => x.MethodologyVersionId == d))));
+        // ⛔ P2-1: одна версія методології, прив'язана до кількох колонок/таблиць документа,
+        // приходить кількома вузлами з тим самим ключем — `ToDictionary` падав («same key already
+        // added»), задача робила 4 спроби, а результатів не було. Вузли однієї версії зливаються
+        // (залежності — об'єднанням): версія в розкладі одна, а всі її прив'язки виконує викликач.
+        var pending = nodes
+            .GroupBy(n => n.MethodologyVersionId)
+            .ToDictionary(
+                g => g.Key,
+                g => new HashSet<int>(g
+                    .SelectMany(n => n.DependsOn)
+                    .Where(d => nodes.Any(x => x.MethodologyVersionId == d))));
 
         var batches = new List<CalculationBatch>();
         var done = new HashSet<int>();
@@ -110,6 +118,7 @@ public sealed class ModuleProfile
 {
     private readonly Dictionary<string, ModuleStat> _stats = new(StringComparer.Ordinal);
     private readonly List<UnmatchedRow> _unmatched = [];
+    private readonly List<RejectedRow> _rejected = [];
 
     /// <summary>Записує виконання одного модуля.</summary>
     /// <param name="moduleCode">Код модуля.</param>
@@ -144,6 +153,7 @@ public sealed class ModuleProfile
         ArgumentNullException.ThrowIfNull(other);
 
         _unmatched.AddRange(other._unmatched);
+        _rejected.AddRange(other._rejected);
 
         foreach (var stat in other._stats.Values)
         {
@@ -179,6 +189,18 @@ public sealed class ModuleProfile
         _unmatched.AddRange(rows);
     }
 
+    /// <summary>Рядки, яким правило категорії версії не дало ключа категорії (L2-6).</summary>
+    public IReadOnlyList<RejectedRow> RejectedRows => _rejected;
+
+    /// <summary>Записує рядки, відхилені правилом категорії.</summary>
+    /// <param name="rows">Відхилені рядки.</param>
+    public void RecordRejected(IEnumerable<RejectedRow> rows)
+    {
+        ArgumentNullException.ThrowIfNull(rows);
+
+        _rejected.AddRange(rows);
+    }
+
     /// <summary>Профіль як JSON для <c>ModulesProfileJson</c>.</summary>
     /// <remarks>
     /// Порядок від найповільнішого навмисно: файл читає людина, і перший рядок
@@ -206,3 +228,12 @@ public sealed record ModuleStat(string Code, TimeSpan Elapsed, int Rows, int Cal
 /// <param name="RowNumber">Номер рядка, з 1, у порядку створення (за <c>TableRow.Id</c>).</param>
 /// <param name="RowKey">Публічний ключ рядка.</param>
 public sealed record UnmatchedRow(long TableInstanceId, int RowNumber, string RowKey);
+
+/// <summary>
+/// Рядок, відхилений правилом категорії (L2-6): ключ категорії не отримано (порожній, помилка обчислення,
+/// не текст). Рядок не рахується; решта рядків прив'язки рахується як звичайно.
+/// </summary>
+/// <param name="TableInstanceId">Екземпляр таблиці.</param>
+/// <param name="RowNumber">Номер рядка, з 1, у порядку створення (за <c>TableRow.Id</c>).</param>
+/// <param name="RowKey">Публічний ключ рядка. Значень комірок і назв колонок тут немає навмисно.</param>
+public sealed record RejectedRow(long TableInstanceId, int RowNumber, string RowKey);

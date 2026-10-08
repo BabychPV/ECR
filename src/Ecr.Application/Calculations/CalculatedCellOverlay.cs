@@ -112,9 +112,22 @@ public sealed class CalculatedCellOverlay(IMethodologyStore methodologies, ICalc
             {
                 var rowCells = cellsByRow.GetValueOrDefault(rowId) ?? [];
                 IReadOnlyDictionary<string, string?>? matchValues = null;
+                var filled = new HashSet<int>();
 
-                foreach (var binding in tableBindings)
+                // ⛔ P2-1: дві активні прив'язки на ОДНУ колонку (конфігураційна помилка
+                // або законні взаємовиключні предикати) давали дві комірки з тією самою
+                // адресою, і зріз падав на `ToDictionary` (500). Правило вибору, одне на
+                // всі шляхи: комірку колонки дає прив'язка з НАЙБІЛЬШИМ `Id`, яка в цьому
+                // рядку має число й збігається з предикатом (список прийшов за зростанням
+                // `Id`, тож іде з кінця). Інші — не сумуються: сума різних виходів
+                // у одній комірці була б вигаданим числом.
+                foreach (var binding in Enumerable.Reverse(tableBindings))
                 {
+                    if (filled.Contains(binding.ColumnDefId))
+                    {
+                        continue;
+                    }
+
                     var values = byRow[(rowKey, binding.OutputCode.ToUpperInvariant())]
                         .Where(r => binding.VersionIds.Contains(r.MethodologyVersionId))
                         .ToList();
@@ -137,6 +150,7 @@ public sealed class CalculatedCellOverlay(IMethodologyStore methodologies, ICalc
                         }
                     }
 
+                    filled.Add(binding.ColumnDefId);
                     overlaid.Add(new CellRecord(
                         new CellAddress(key, rowId, binding.ColumnDefId),
                         table.TableDefId,

@@ -131,6 +131,37 @@ public sealed class MethodologyPublishChecksTests
         Assert.Contains(problems, p => p.Text.Contains("повертає число", StringComparison.Ordinal));
     }
 
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [InlineData("!ECW_RepairStatus + '_' + !ECW_Category")]
+    [InlineData("!ECW_RepairStatus + '_'")]
+    [InlineData("'x' + !ECW_Category")]
+    [InlineData("'a' + 'b'")]
+    public void L2_2_Плюс_що_конкатенує_текст_не_є_числом_для_текстової_формули(string expression)
+    {
+        // Регресія RC12: ECW_Location = !ECW_RepairStatus + '_' + !ECW_Category
+        // (результат Text) блокував публікацію як «повертає число».
+        var problems = Check([Formula("ECW_Location", expression, FormulaResultType.Text)], [], []);
+
+        Assert.DoesNotContain(problems, p => p.MessageKey == "publish.problem.textReturnsNumber");
+    }
+
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [InlineData("!A + !B")]
+    [InlineData("!A + 1")]
+    [InlineData("1 + 2")]
+    [InlineData("!A * 2")]
+    public void L2_2_Плюс_без_тексту_лишається_числом_для_текстової_формули(string expression)
+    {
+        // Контроль: справжня числова формула, оголошена текстовою, відхиляється й далі.
+        // `!A + !B` (обидві Null-форми) як і було: Number за формою, але ProducesNumber
+        // для нього — Add без тексту → число (відхиляється, як до виправлення).
+        var problems = Check([Formula("F", expression, FormulaResultType.Text)], [], []);
+
+        Assert.Contains(problems, p => p.MessageKey == "publish.problem.textReturnsNumber");
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
     public void Текстова_формула_оголошена_виходом_методології_відхиляється()

@@ -65,13 +65,37 @@ public sealed class RecalculationJobNoMatchingRuleTests(SqlServerFixture sql)
             r => r.Message?.Contains("jobs.recalcNoMatchingRule", StringComparison.Ordinal) == true);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-13.9")]
+    public async Task L2_6_Рядки_відхилені_правилом_категорії_потрапляють_у_повідомлення_без_ключів()
+    {
+        var (builder, document) = await ArrangeAsync();
+        var progress = new RecordingProgress();
+
+        await RunAsync(
+            builder, document, progress, [], [new RejectedRow(500, 2, "R001"), new RejectedRow(500, 3, "R002")]);
+
+        var (_, message) = progress.Reports.Last(
+            r => r.Message?.Contains("jobs.recalcCategoryRuleRejected", StringComparison.Ordinal) == true);
+        Assert.True(JobProgressMessageCodec.TryDecode(message, out var envelope));
+        Assert.Equal("2", envelope.Params!["count"]);
+        Assert.Equal("2, 3", envelope.Params["rows"]);
+        Assert.DoesNotContain("R001", message, StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            progress.Reports,
+            r => r.Message?.Contains("jobs.recalcNoMatchingRule", StringComparison.Ordinal) == true);
+    }
+
     private static async Task RunAsync(
-        TestDocumentBuilder builder, TestDocument document, RecordingProgress progress, IReadOnlyList<UnmatchedRow> unmatched)
+        TestDocumentBuilder builder, TestDocument document, RecordingProgress progress, IReadOnlyList<UnmatchedRow> unmatched,
+        IReadOnlyList<RejectedRow>? rejected = null)
     {
         var clock = new TestClock(new DateTime(2026, 9, 30, 8, 0, 0, DateTimeKind.Utc));
         await using var db = builder.CreateContext();
         var job = new RecalculationJob(
-            db, new UnmatchedRunner(unmatched), RunHandler(), FormulaService(), clock, jobs: null, budget: null);
+            db, new UnmatchedRunner(unmatched, rejected ?? []), RunHandler(), FormulaService(), clock, jobs: null, budget: null);
 
         await job.ExecuteAsync(
             new RecalculationRequest(document.ProjectId, document.DocumentId, document.PeriodKey.Value, TriggeredByUserId: null),
@@ -134,7 +158,8 @@ public sealed class RecalculationJobNoMatchingRuleTests(SqlServerFixture sql)
             Substitute.For<IAuditWriter>());
 
     /// <summary>Оркестратор, що повертає профіль із заданими рядками без правила.</summary>
-    private sealed class UnmatchedRunner(IReadOnlyList<UnmatchedRow> unmatched) : ICalculationRunner
+    private sealed class UnmatchedRunner(IReadOnlyList<UnmatchedRow> unmatched, IReadOnlyList<RejectedRow> rejected)
+        : ICalculationRunner
     {
         public Task<ModuleProfile> RunAsync(
             long calculationRunId, long documentId, PeriodKey periodKey,
@@ -142,6 +167,7 @@ public sealed class RecalculationJobNoMatchingRuleTests(SqlServerFixture sql)
         {
             var profile = new ModuleProfile();
             profile.RecordUnmatched(unmatched);
+            profile.RecordRejected(rejected);
 
             return Task.FromResult(profile);
         }

@@ -82,6 +82,30 @@ public sealed class CalculationBindingStore(EcrDbContext db) : ICalculationBindi
     }
 
     /// <inheritdoc />
+    public async Task<IReadOnlyDictionary<string, string>> ListLookupRegistryCodesAsync(
+        IReadOnlyCollection<int> tableDefIds, CancellationToken ct)
+    {
+        if (tableDefIds.Count == 0)
+        {
+            return new Dictionary<string, string>();
+        }
+
+        var rows = await (
+                from column in db.ColumnDefs.AsNoTracking()
+                where tableDefIds.Contains(column.TableDefId) && !column.IsDeleted && column.LookupRegistryDefId != null
+                join registry in db.RegistryDefs.AsNoTracking() on column.LookupRegistryDefId equals registry.Id
+                select new { ColumnCode = column.Code, RegistryCode = registry.Code })
+            .Take(MaxBindings)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        return rows
+            .GroupBy(r => r.ColumnCode, StringComparer.OrdinalIgnoreCase)
+            .Where(g => g.Select(r => r.RegistryCode).Distinct(StringComparer.OrdinalIgnoreCase).Count() == 1)
+            .ToDictionary(g => g.Key, g => g.First().RegistryCode, StringComparer.OrdinalIgnoreCase);
+    }
+
+    /// <inheritdoc />
     public async Task<IReadOnlyDictionary<int, IReadOnlyList<string>>> ListColumnCodesAsync(
         IReadOnlyCollection<int> tableDefIds, CancellationToken ct)
     {
@@ -206,6 +230,33 @@ public sealed class CalculationBindingStore(EcrDbContext db) : ICalculationBindi
                 select column.LookupRegistryDefId!.Value)
             .Distinct()
             .OrderBy(id => id)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<ActiveColumnBinding>> ListActiveBindingsAsync(
+        int templateVersionId, CancellationToken ct)
+        => await (
+                from binding in db.CalculationBindings.AsNoTracking()
+                where binding.IsActive
+                join column in db.ColumnDefs.AsNoTracking()
+                    on binding.ColumnDefId equals column.Id
+                where !column.IsDeleted
+                join table in db.TableDefs.AsNoTracking()
+                    on column.TableDefId equals table.Id
+                join sheet in db.SheetDefs.AsNoTracking()
+                    on table.SheetDefId equals sheet.Id
+                where sheet.TemplateVersionId == templateVersionId
+                join methodology in db.Methodologies.AsNoTracking()
+                    on binding.MethodologyId equals methodology.Id
+                orderby binding.Id
+                select new ActiveColumnBinding(
+                    column.Id, table.Code, column.Code, methodology.Code, binding.OutputCode, binding.MatchJson,
+                    db.MethodologyVersions.Any(v => v.MethodologyId == binding.MethodologyId
+                                                    && v.Status == TemplateVersionStatus.Published
+                                                    && (db.MethodologyRules.Any(r => r.MethodologyVersionId == v.Id && r.IsActive)
+                                                        || db.MethodologyCategoryRules.Any(r => r.MethodologyVersionId == v.Id)))))
+            .Take(MaxBindings)
             .ToListAsync(ct)
             .ConfigureAwait(false);
 

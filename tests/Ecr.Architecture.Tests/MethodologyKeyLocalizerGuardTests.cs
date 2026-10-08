@@ -25,6 +25,8 @@ public sealed class MethodologyKeyLocalizerGuardTests
     {
         ["src/Ecr.Application/Calculations/PublishMethodologyHandler.cs"] =
             "перевірки публікації: структура предикатів і перетин правил між собою, комірки документів не читаються",
+        ["src/Ecr.Infrastructure/Persistence/CalculationBindingStore.cs"] =
+            "лише ЧИ Є активні правила в опублікованій версії (перевірка конфлікту прив'язок на публікації шаблону); умови не читаються",
         ["src/Ecr.Infrastructure/Persistence/MethodologyDraftStore.cs"] =
             "редагування й клон ЧЕРНЕТКИ методології: ключі лишаються як у джерелі (Id у сховищі - навмисно)",
         ["src/Ecr.Infrastructure/Persistence/MethodologyVersionDeletionStore.cs"] =

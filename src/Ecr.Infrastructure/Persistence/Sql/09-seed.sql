@@ -5618,6 +5618,7 @@ USING (VALUES
     (N'err.ECR-CALC-0422.bindingUnknownOutput', N'en', N'No version of this methodology declares output {outputCode}: nothing would ever be calculated for this binding.', 1),
     -- COLL:drb2 ── D-R2: прив'язка до методології без опублікованої версії; ru/kz — порцією COLL:drb2 нижче ──
     (N'err.ECR-CALC-0422.bindingMethodologyNotPublished', N'en', N'Methodology {methodologyCode} has no published version, but it is actively bound to {bindingCount} column(s) of this template version: {bindings}. Recalculation of documents would be rejected as a whole. Publish the methodology or deactivate these bindings.', 1),
+    (N'err.ECR-TMPL-0422.bindingColumnConflict', N'en', N'Column {columnCode} has several active output bindings with the same row predicate ({outputCode}): each row would have two claimants. Narrow the predicate or deactivate one of the bindings.', 1),
     -- COLL:drb2 ── кінець секції ──
     (N'err.ECR-CALC-0422.noPublishedVersion', N'en', N'Methodology {methodologyId} is bound to a table but has no published version to calculate with.', 1),
     (N'err.ECR-CALC-0422.goldenTestNoPeriod', N'en', N'Golden test {test} has no period: set a document and an existing period in its input (periodKey is year × 100 + number, e.g. 202601).', 1),
@@ -7290,11 +7291,21 @@ USING (VALUES
     (N'err.ECR-REQ-0422.resultsStaleNeedsPeriod', N'en', N'Filtering by stale results needs a period: staleness belongs to a period.', 1),
     (N'err.ECR-REQ-0422.staleBy', N'en', N'staleBy accepts only "me" and only together with resultsStale=true.', 1),
     -- COLL:stale-err ── кінець секції ──
+    -- COLL:l26rowreject ── L2-6: помилка правила категорії відмовляє лише своєму рядку; ru/kz — порцією COLL:l26rowreject нижче ──
+    (N'jobs.recalcCategoryRuleRejected', N'en', N'The category rule rejected {count} row(s) (rows: {rows}): it gave no category key for them. These rows were not calculated; the other rows were.', 1),
+    -- COLL:l26rowreject ── кінець секції ──
     -- COLL:stale-ui ── банер "результати застаріли" у картці документа; ru/kz — порцією COLL:stale-ui нижче ──
     (N'document.staleResults.title', N'en', N'Calculation results are out of date', 1),
     (N'document.staleResults.hint', N'en', N'Input data was changed after the last calculation. Recalculate to refresh the results.', 1),
-    (N'document.staleResults.hintSince', N'en', N'Input data was changed on {date}, after the last calculation. Recalculate to refresh the results.', 1)
+    (N'document.staleResults.hintSince', N'en', N'Input data was changed on {date}, after the last calculation. Recalculate to refresh the results.', 1),
     -- COLL:stale-ui ── кінець секції ──
+    -- COLL:l21scope ── L2-1: область формули (scope) у PUT формули й порівнянні версій; ru/kz — порцією COLL:l21scope нижче ──
+    (N'err.ECR-CALC-0422.formulaScopeInvalid', N'en', N'The scope "{scope}" of formula "{code}" is not valid: use Substance (once per substance) or Row (once per row).', 1),
+    (N'methodologyDiffField.scope', N'en', N'Scope', 1),
+    -- COLL:l21scope ── кінець секції ──
+    -- COLL:l24l25 ── L2-5: попередження diff публікації, коли попередня версія не обчислилась; ru/kz — порцією COLL:l24l25 нижче ──
+    (N'publish.warning.diffPreviousNotComputed', N'en', N'Previous version {previous} did not calculate on test {test} ({code}), so the diff shows its outputs as new. The verdict on the new version is unchanged.', 1)
+    -- COLL:l24l25 ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -17774,6 +17785,52 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:stale-ui ── кінець секції ──
+-- COLL:l24l25 ── ru/kz L2-5: попередження diff публікації, коли попередня версія не обчислилась; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'publish.warning.diffPreviousNotComputed', N'ru', N'Предыдущая версия {previous} не рассчиталась на тесте {test} ({code}), поэтому в diff её выходы показаны как новые. Вердикт по новой версии не изменился.'),
+    (N'publish.warning.diffPreviousNotComputed', N'kz', N'Алдыңғы {previous} нұсқасы {test} тестінде есептелмеді ({code}), сондықтан diff-те оның шығыстары жаңа ретінде көрсетілген. Жаңа нұсқа бойынша үкім өзгермеді.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:l24l25 ── кінець секції ──
+
+-- COLL:l26rowreject ── ru/kz L2-6: правило категорії відмовило рядкам; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'jobs.recalcCategoryRuleRejected', N'ru', N'Правило категории отклонило строки: {count} (номера: {rows}): ключ категории для них не получен. Эти строки не рассчитаны, остальные рассчитаны.'),
+    (N'jobs.recalcCategoryRuleRejected', N'kz', N'Санат ережесі {count} жолды қабылдамады (нөмірлері: {rows}): олар үшін санат кілті алынбады. Бұл жолдар есептелмеді, қалғандары есептелді.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:l26rowreject ── кінець секції ──
+
+-- COLL:bind2 ── ru/kz P2-1: дві активні прив'язки з однаковим предикатом на одну колонку; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-TMPL-0422.bindingColumnConflict', N'ru', N'У столбца {columnCode} несколько активных привязок выходов с одним и тем же условием строк ({outputCode}): на каждую строку претендовали бы две привязки. Сузьте условие или отключите одну из привязок.'),
+    (N'err.ECR-TMPL-0422.bindingColumnConflict', N'kz', N'{columnCode} бағанында жол шарты бірдей бірнеше белсенді шығыс байланыстыруы бар ({outputCode}): әр жолға екі байланыстыру таласар еді. Шартты тарылтыңыз немесе байланыстырулардың бірін өшіріңіз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:bind2 ── кінець секції ──
+
+-- COLL:l21scope ── ru/kz: область формули (scope) у PUT формули й порівнянні версій; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-CALC-0422.formulaScopeInvalid', N'ru', N'Область «{scope}» формулы «{code}» недопустима: допустимы Substance (на каждое вещество) и Row (один раз на строку).'),
+    (N'err.ECR-CALC-0422.formulaScopeInvalid', N'kz', N'«{code}» формуласының «{scope}» аймағы жарамсыз: Substance (әр зат үшін) немесе Row (әр жол үшін бір рет) қолданылады.'),
+    (N'methodologyDiffField.scope', N'ru', N'Область'),
+    (N'methodologyDiffField.scope', N'kz', N'Қолдану аймағы')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:l21scope ── кінець секції ──
+
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t
