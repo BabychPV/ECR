@@ -193,6 +193,33 @@ public sealed class CategoryRulePublishTests
         Assert.True(_version.IsPublished);
     }
 
+    /// <summary>
+    /// Формула 5.1 <c>!ECW_RepairStatus + '_' + !ECW_Category</c> (простий і обидва захищені варіанти)
+    /// публікується: груба оцінка типу дає Text, <c>categoryRuleNotText</c> не виникає.
+    /// </summary>
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [InlineData("!ECW_RepairStatus + '_' + !ECW_Category")]
+    [InlineData("if(!ECW_RepairStatus = NULL, '', !ECW_RepairStatus) + '_' + if(!ECW_Category = NULL, '', !ECW_Category)")]
+    [InlineData("if(!ECW_RepairStatus = NULL or !ECW_RepairStatus = '', 'NA', !ECW_RepairStatus) + '_' "
+                + "+ if(!ECW_Category = NULL or !ECW_Category = '', 'NA', !ECW_Category)")]
+    public async Task Правило_5_1_з_плюсом_на_текстах_публікується(string rule)
+    {
+        Setup(
+            rule,
+            Sixteen(),
+            formulas:
+            [
+                Formula(1, "ECW_RepairStatus", "'Repair'", MethodologyFormulaScope.Row, text: true),
+                Formula(2, "ECW_Category", "'Cat1'", MethodologyFormulaScope.Row, text: true),
+                Formula(3, "T", "CST.EF * 5", MethodologyFormulaScope.Substance),
+            ]);
+
+        await Publish();
+
+        Assert.True(_version.IsPublished);
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
 
     private void Setup(string? rule, List<MethodologyConstant> constants, List<MethodologyFormula> formulas)
