@@ -204,7 +204,7 @@ public sealed class CalculationOrchestrator(
                 profile.Record(module, elapsed, rowCount);
             }
 
-            done += batch.MethodologyVersionIds.Count;
+            done += batch.MethodologyVersionIds.Sum(id => byVersion[id].Count());
 
             await progress
                 .ReportKeyAsync(

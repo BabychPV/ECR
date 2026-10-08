@@ -31,9 +31,17 @@ public static class CalculationPlan
     {
         ArgumentNullException.ThrowIfNull(nodes);
 
-        var pending = nodes.ToDictionary(
-            n => n.MethodologyVersionId,
-            n => new HashSet<int>(n.DependsOn.Where(d => nodes.Any(x => x.MethodologyVersionId == d))));
+        // ⛔ P2-1: одна версія методології, прив'язана до кількох колонок/таблиць документа,
+        // приходить кількома вузлами з тим самим ключем — `ToDictionary` падав («same key already
+        // added»), задача робила 4 спроби, а результатів не було. Вузли однієї версії зливаються
+        // (залежності — об'єднанням): версія в розкладі одна, а всі її прив'язки виконує викликач.
+        var pending = nodes
+            .GroupBy(n => n.MethodologyVersionId)
+            .ToDictionary(
+                g => g.Key,
+                g => new HashSet<int>(g
+                    .SelectMany(n => n.DependsOn)
+                    .Where(d => nodes.Any(x => x.MethodologyVersionId == d))));
 
         var batches = new List<CalculationBatch>();
         var done = new HashSet<int>();
