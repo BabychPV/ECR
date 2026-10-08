@@ -1043,6 +1043,22 @@ public sealed class GenericCalculationModule(
     }
 
     /// <summary>
+    /// Чи це відмова правила категорії для РЯДКА (<c>ECR-CALC-0422 categoryRuleFailed</c>): оркестратор
+    /// відхиляє лише цей рядок, а не весь документ (L2-6). Модуль і далі кидає виняток — публікація й
+    /// симуляція показують його як є.
+    /// </summary>
+    /// <param name="error">Виняток модуля.</param>
+    internal static bool IsCategoryRuleRowFailure(Ecr.Domain.Abstractions.DomainException error)
+    {
+        ArgumentNullException.ThrowIfNull(error);
+
+        return error.ErrorCode == "ECR-CALC-0422"
+            && error.Details is { } details
+            && details.TryGetValue("messageKey", out var key)
+            && key as string == "err.ECR-CALC-0422.categoryRuleFailed";
+    }
+
+    /// <summary>
     /// Обчислює правило категорії в Row-контексті рядка й повертає ключ (L-2).
     /// </summary>
     /// <param name="rule">Розібране правило версії.</param>
