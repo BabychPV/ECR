@@ -7307,7 +7307,7 @@ USING (VALUES
     (N'jobs.staleDocuments.hint', N'en', N'Input data in these documents changed after the last calculation. Open a document and press Recalculate.', 1),
     (N'jobs.staleDocuments.since', N'en', N'Changed {date}', 1),
     (N'jobs.staleDocuments.open', N'en', N'Open', 1),
-    (N'jobs.staleDocuments.error', N'en', N'Could not load the documents that need recalculation.', 1)
+    (N'jobs.staleDocuments.error', N'en', N'Could not load the documents that need recalculation.', 1),
     -- COLL:stale-mytasks ── кінець секції ──
     -- COLL:rc15c-recalc ── перерахунок вимкнений лише коли подані ВСІ аркуші; ru/kz — порцією COLL:rc15c-recalc нижче ──
     (N'workflow.recalculateAllSubmitted', N'en', N'All sheets of period {period} are submitted or approved: there is nothing to recalculate. Reopen the period first.', 1),
