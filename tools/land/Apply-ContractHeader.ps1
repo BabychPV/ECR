@@ -198,10 +198,10 @@ Write-Host "Опубліковано версію id $targetId."
 # --- міграція документів -----------------------------------------------------------------
 foreach ($docId in @($MigrateDocumentId)) {
     if (-not $docId) { continue }
-    $dryRun = Invoke-Ecr -Method POST -Path "/api/v1/documents/$docId/migrate-version" -Body @{ targetVersionId = $targetId; mode = 'Safe'; dryRun = $true }
-    Assert-EcrOk $dryRun "migrate-version dry-run (документ $docId)"
-    if (-not $dryRun.Json.canApply) {
-        Write-Warning "Документ ${docId}: міграція заблокована (refusals: $(@($dryRun.Json.refusals).Count)); не застосовано."
+    $migrationDryRun = Invoke-Ecr -Method POST -Path "/api/v1/documents/$docId/migrate-version" -Body @{ targetVersionId = $targetId; mode = 'Safe'; dryRun = $true }
+    Assert-EcrOk $migrationDryRun "migrate-version dry-run (документ $docId)"
+    if (-not $migrationDryRun.Json.canApply) {
+        Write-Warning "Документ ${docId}: міграція заблокована (refusals: $(@($migrationDryRun.Json.refusals).Count)); не застосовано."
         continue
     }
     $apply = Invoke-Ecr -Method POST -Path "/api/v1/documents/$docId/migrate-version" -Body @{ targetVersionId = $targetId; mode = 'Safe'; dryRun = $false }
