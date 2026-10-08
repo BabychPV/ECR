@@ -54,15 +54,17 @@ test.describe('застарілі результати: перелік, My tasks
     const mark = page.locator('[data-results-stale="true"]').first();
     await expect(mark).toBeVisible({ timeout: 60_000 });
 
+    // Сам input чіпа Mantine схований поза в'юпортом: клік іде по його підпису.
     const chip = page.getByRole('checkbox', { name: /\(1\)/ });
-    await expect(chip).toBeAttached();
+    const chipLabel = page.locator('label.mantine-Chip-label').filter({ hasText: /\(1\)/ });
+    await expect(chipLabel).toBeVisible();
     await expect(chip).not.toBeChecked();
 
     // Дія: чіп вмикає фільтр на сервері (resultsStale=true у запиті).
     const filtered = page.waitForRequest(
       (request) => request.url().includes('/api/v1/documents?') && request.url().includes('resultsStale=true'),
     );
-    await chip.check({ force: true });
+    await chipLabel.click();
     await filtered;
 
     // Кінець: фільтр у силі, позначений документ лишається в переліку.
@@ -84,7 +86,8 @@ test.describe('застарілі результати: перелік, My tasks
     await expect(drawer).toBeVisible({ timeout: 15_000 });
     const section = drawer.getByTestId('my-tasks-stale');
     await expect(section).toBeVisible({ timeout: 30_000 });
-    await expect(section.locator(`[data-stale-document="${DocumentId}"]`)).toBeVisible();
+    // Документ стенда може потрапити в кілька відкритих періодів - карток кілька, перевіряється наявність.
+    await expect(section.locator(`[data-stale-document="${DocumentId}"]`).first()).toBeVisible();
 
     // Закриття: Esc ховає шухляду й повертає фокус на кнопку.
     await page.keyboard.press('Escape');
@@ -98,6 +101,7 @@ test.describe('застарілі результати: перелік, My tasks
     await again
       .getByTestId('my-tasks-stale')
       .locator(`[data-stale-document="${DocumentId}"]`)
+      .first()
       .getByRole('link')
       .click();
     await expect(page).toHaveURL(new RegExp(`/documents/${DocumentId}\\?.*periodKey=${PeriodKey}`));
@@ -109,12 +113,15 @@ test.describe('застарілі результати: перелік, My tasks
     const state = { stale: false };
     let recalcPosts = 0;
     await mockDocumentCard(page, state);
-    // Правка комірки доходить до справжнього сервера; після успіху «сервер» вважає результати застарілими.
-    await page.route(`**/api/v1/documents/${DocumentId}/cells`, async (route) => {
-      if (route.request().method() !== 'PATCH') return route.fallback();
-      const response = await route.fetch();
-      if (response.ok()) state.stale = true;
-      return route.fulfill({ response });
+    // Правка комірки доходить до справжнього сервера НЕ перехопленою; після успіху «сервер» вважає результати застарілими.
+    page.on('response', (response) => {
+      if (
+        response.request().method() === 'PATCH' &&
+        response.url().includes(`/documents/${DocumentId}/cells`) &&
+        response.ok()
+      ) {
+        state.stale = true;
+      }
     });
     await page.route(`**/api/v1/documents/${DocumentId}/recalculate`, (route) => {
       recalcPosts += 1;
@@ -150,7 +157,8 @@ test.describe('застарілі результати: перелік, My tasks
     );
     await page.keyboard.press('Enter');
     await expect(page.locator('.edit-input-wrapper')).toHaveCount(0);
-    expect((await patched).ok()).toBe(true);
+    const patchResponse = await patched;
+    expect(patchResponse.ok(), `PATCH cells: ${String(patchResponse.status())} ${await patchResponse.text()}`).toBe(true);
 
     // Кінець 1: банер з'явився сам, сторінка не перезавантажувалась.
     await expect(banner).toBeVisible({ timeout: 20_000 });
