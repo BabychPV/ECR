@@ -1,0 +1,11 @@
+code,NAME,display_en,display_ru,ordinal
+ACT_001,Operation - Эксплуатация,Operation,Эксплуатация,1
+ACT_002,Construction - Строительство,Construction,Строительство,2
+ACT_003,Dredging works - Дноуглубительные работы,Dredging works,Дноуглубительные работы,3
+ACT_004,Modification/upgrade and purpose changing - Модификации/модернизация и изменение целевого назначения,Modification/upgrade and purpose changing,Модификации/модернизация и изменение целевого назначения,4
+ACT_005,Planned preventive repairs - Планово-предупредительный ремонт,Planned preventive repairs,Планово-предупредительный ремонт,5
+ACT_006,RGI Modules and Manifold Servce repair work - Ремонт модулей и манифольда,RGI Modules and Manifold Servce repair work,Ремонт модулей и манифольда,6
+ACT_007,Storage and prevention of Oil Spill Response Equipment - Хранение и профилактика оборудования для ликвидации разливов нефти,Storage and prevention of Oil Spill Response Equipment,Хранение и профилактика оборудования для ликвидации разливов нефти,7
+ACT_008,Support services - Вспомогательные работы,Support services,Вспомогательные работы,8
+ACT_009,Watering green spaces - Полив зеленых насаждений,Watering green spaces,Полив зеленых насаждений,9
+ACT_010,Well services and intervention - Сервисное обслуживание скважин и внутрискважинные работы,Well services and intervention,Сервисное обслуживание скважин и внутрискважинные работы,10
