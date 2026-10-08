@@ -13,6 +13,7 @@ import { documentState, hasSheetStates, sheetLabels } from '@/features/documents
 import { parseDocumentsView } from '@/features/documents/documentsBoardModel';
 import '@/features/documents/documentsList.css';
 import { LateEditsMark } from '@/features/documents/LateEditsMark';
+import { StaleResultsMark } from '@/features/documents/StaleResultsMark';
 import { newestOpenPeriodKey } from '@/features/documents/newDocumentPeriod';
 import { formatNumber } from '@/shared/format';
 import { can, useSession } from '@/shared/session/useSession';
@@ -110,7 +111,7 @@ export function DocumentsPage(): JSX.Element {
   const appliedQ = useDebouncedFilter(filters.q.trim());
 
   const query = useQuery({
-    queryKey: ['documents', periodKey, cursor, filters.state, filters.mine, filters.hasLateEdits, appliedQ, filters.projectId],
+    queryKey: ['documents', periodKey, cursor, filters.state, filters.mine, filters.hasLateEdits, filters.resultsStale, appliedQ, filters.projectId],
     queryFn: () =>
       listDocuments({
         periodKey,
@@ -118,6 +119,7 @@ export function DocumentsPage(): JSX.Element {
         state: filters.state,
         mine: filters.mine,
         hasLateEdits: filters.hasLateEdits,
+        resultsStale: filters.resultsStale,
         q: appliedQ,
         projectId: filters.projectId,
       }),
@@ -491,12 +493,14 @@ export function DocumentsPage(): JSX.Element {
                               {typeof document.modifiedByDisplayName === 'string' && (
                                 <Text size="sm">{document.modifiedByDisplayName}</Text>
                               )}
-                              <Group gap="xs" wrap="nowrap">
+                              <Group gap="xs" wrap="wrap">
                                 <Text size="xs" c="dimmed">
                                   <Timestamp value={document.modifiedAt} />
                                 </Text>
                                 {/* `BE-09b`: пізні правки за період (без періоду — за будь-який). */}
                                 {document.hasLateEdits && <LateEditsMark />}
+                                {/* RC14-D: результати методологій застаріли (лише `true`; `null` — доступ звужено). */}
+                                {document.resultsStale === true && <StaleResultsMark since={document.resultsStaleSince} />}
                               </Group>
                             </Box>
                           </Table.Td>

@@ -22,6 +22,14 @@ const base = { createdAt: '2026-01-01T00:00:00Z', projectId: 1, sheetCount: 1, s
 
 const Late = { ...base, id: 1, businessKey: 'LATE-0001', hasLateEdits: true };
 const OnTime = { ...base, id: 2, businessKey: 'ONTIME-0002', hasLateEdits: false };
+const Stale = {
+  ...base,
+  id: 3,
+  businessKey: 'STALE-0003',
+  hasLateEdits: false,
+  resultsStale: true,
+  resultsStaleSince: '2026-01-05T10:00:00Z',
+};
 
 const json = (body: unknown, status = 200): Response =>
   new Response(JSON.stringify(body), {
@@ -51,13 +59,13 @@ function mockFetch(reply: ListReply): void {
       const url = String(input);
 
       if (url.includes('/api/v1/documents/summary')) {
-        return json({ draft: 1, submitted: 1, approved: 1, rejected: 0, withIssues: 0 });
+        return json({ draft: 1, submitted: 1, approved: 1, rejected: 0, withIssues: 0, staleResultsCount: 7, staleResultsMineCount: 2 });
       }
 
       if (url.includes('/api/v1/documents')) {
         listed.push(url);
         if (reply === 'forbidden') return json(Forbidden, 403);
-        return json({ items: reply === 'rows' ? [Late, OnTime] : [], nextCursor: null, totalCount: null });
+        return json({ items: reply === 'rows' ? [Late, OnTime, Stale] : [], nextCursor: null, totalCount: null });
       }
 
       if (url.includes('/api/v1/projects')) {
@@ -381,6 +389,40 @@ describe('DocumentsPage: пошук і фільтр проєкту (UI RC9, ма
       expect(lastListed().has('q')).toBe(false);
       expect(lastListed().has('projectId')).toBe(false);
       expect(screen.queryByRole('combobox', { name: '⟦documents.project⟧' })).toBeNull();
+    },
+    Slow,
+  );
+  it(
+    'застарілі результати: бейдж лише в рядку з resultsStale=true; чіп з лічильником ставить resultsStale=true в запит',
+    async () => {
+      mockFetch('rows');
+      show('/?periodKey=202601');
+
+      await screen.findByRole('table', {}, { timeout: Find });
+      expect(document.querySelectorAll('[data-results-stale]')).toHaveLength(1);
+      expect(lastListed().has('resultsStale')).toBe(false);
+
+      const chip = await screen.findByRole('checkbox', { name: /documents.filterStale/ }, { timeout: Find });
+      expect((chip as HTMLInputElement).disabled).toBe(false);
+
+      fireEvent.click(chip);
+
+      await waitFor(() => expect(lastListed().get('resultsStale')).toBe('true'), { timeout: Find });
+      expect(new URLSearchParams(search).get('resultsStale')).toBe('true');
+    },
+    Slow,
+  );
+
+  it(
+    'застарілі результати: без періоду чіп вимкнений, а resultsStale з адреси в запит не йде (422 на сервері)',
+    async () => {
+      mockFetch('rows');
+      show('/?resultsStale=true');
+
+      await screen.findByRole('table', {}, { timeout: Find });
+      const chip = await screen.findByRole('checkbox', { name: /documents.filterStaleNoCount/ }, { timeout: Find });
+      expect((chip as HTMLInputElement).disabled).toBe(true);
+      expect(lastListed().has('resultsStale')).toBe(false);
     },
     Slow,
   );
