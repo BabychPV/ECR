@@ -114,9 +114,28 @@ public sealed class RecalculationJobSheetScopeResultsTests(SqlServerFixture sql)
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "ФВ-9.17")]
-    public async Task Область_самого_поданого_аркуша_і_весь_документ_із_поданим_аркушем_відхиляються_як_раніше()
+    public async Task Область_поданого_аркуша_відхиляється_а_документ_із_одним_поданим_аркушем_ні()
     {
         var arranged = await ArrangeAsync(submitSecondSheet: true);
+
+        // RC15 (P2-A): сам поданий аркуш — як раніше…
+        var scopeThrown = await Record.ExceptionAsync(() =>
+            RunJobAsync(arranged, SheetRequest(arranged, arranged.SecondSheetId), label: 2_000m));
+        Assert.Equal("ECR-CALC-4221", Assert.IsType<BusinessRuleException>(scopeThrown).ErrorCode);
+
+        // …а перерахунок УСЬОГО документа пропускає поданий аркуш і рахує чернетковий (до фіксу: 4221 на ціле).
+        await RunJobAsync(arranged, SheetRequest(arranged, sheetDefId: null), label: 3_000m);
+
+        Assert.Contains("A|3001", await ShapeAsync(arranged));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-9.17")]
+    public async Task Документ_де_подані_УСІ_аркуші_відхиляється_і_нічого_не_записує()
+    {
+        var arranged = await ArrangeAsync(submitSecondSheet: true, submitFirstSheet: true);
 
         foreach (var sheetDefId in new int?[] { arranged.SecondSheetId, null })
         {
@@ -152,7 +171,8 @@ public sealed class RecalculationJobSheetScopeResultsTests(SqlServerFixture sql)
             .Order(StringComparer.Ordinal)];
     }
 
-    private async Task<Arranged> ArrangeAsync(bool submitSecondSheet)
+    private async Task<Arranged> ArrangeAsync(
+        bool submitSecondSheet, bool submitFirstSheet = false, bool sharedMethodology = false)
     {
         var builder = new TestDocumentBuilder(sql.ConnectionString);
         var document = await builder.BuildAsync();
@@ -206,22 +226,38 @@ public sealed class RecalculationJobSheetScopeResultsTests(SqlServerFixture sql)
             versions[methodology.Id] = (version.Id, output);
         }
 
+        if (sharedMethodology)
+        {
+            // Методологія A прив'язана ще й до таблиці ДРУГОГО аркуша (спільна для обох аркушів).
+            var sharedMethodologyId = versions.Keys.First();
+            db.CalculationBindings.Add(new CalculationBinding(
+                table2.Id, column2.Id, sharedMethodologyId, versions[sharedMethodologyId].Output, "{}"));
+            await db.SaveChangesAsync();
+        }
+
         var unitId = await db.Units.AsNoTracking().OrderBy(u => u.Id).Select(u => u.Id).FirstAsync();
 
-        var arranged = new Arranged(builder, document, sheet2.Id, versions, unitId);
+        var arranged = new Arranged(builder, document, sheet2.Id, versions, unitId, sharedMethodology);
         if (submitSecondSheet)
         {
             await SubmitSecondSheetAsync(arranged);
         }
 
+        if (submitFirstSheet)
+        {
+            await SubmitSheetAsync(arranged, arranged.Document.SheetDefId);
+        }
+
         return arranged;
     }
 
-    private static async Task SubmitSecondSheetAsync(Arranged arranged)
+    private static Task SubmitSecondSheetAsync(Arranged arranged) => SubmitSheetAsync(arranged, arranged.SecondSheetId);
+
+    private static async Task SubmitSheetAsync(Arranged arranged, int sheetDefId)
     {
         await using var db = arranged.Builder.CreateContext();
         var state = new ApprovalState(
-            arranged.Document.DocumentId, arranged.SecondSheetId, arranged.Document.PeriodKey.Value);
+            arranged.Document.DocumentId, sheetDefId, arranged.Document.PeriodKey.Value);
         state.Submit(userId: 5, Now);
         db.ApprovalStates.Add(state);
         await db.SaveChangesAsync();
@@ -291,7 +327,8 @@ public sealed class RecalculationJobSheetScopeResultsTests(SqlServerFixture sql)
         TestDocument Document,
         int SecondSheetId,
         Dictionary<int, (int VersionId, string Output)> Versions,
-        int UnitId);
+        int UnitId,
+        bool SharedMethodology = false);
 
     /// <summary>
     /// Фейк оркестратора: на кожну прив'язку пише ОДИН вихід її методології (<c>tonsA</c>/<c>tonsB</c>)
@@ -312,11 +349,12 @@ public sealed class RecalculationJobSheetScopeResultsTests(SqlServerFixture sql)
             var store = new CalculationResultStore(db, new TestClock(Now));
 
             var outputs = bindings
-                .DistinctBy(b => b.MethodologyId)
+                .DistinctBy(b => arranged.SharedMethodology ? (b.MethodologyId, b.TableInstanceId) : (b.MethodologyId, 0L))
                 .Select(b =>
                 {
                     var (versionId, output) = arranged.Versions[b.MethodologyId];
-                    return new CalculationOutput(documentId, "R-1",
+                    var rowKey = arranged.SharedMethodology ? $"I{b.TableInstanceId}" : "R-1";
+                    return new CalculationOutput(documentId, rowKey,
                     [
                         new CalculationOutputValue(versionId, null, output, label + periodKey.Sequence, arranged.UnitId),
                     ], []);
