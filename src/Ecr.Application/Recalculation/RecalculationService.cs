@@ -904,8 +904,29 @@ public sealed class RecalculationService(
             // ⛔ Помилка обчислення НЕ записується як значення. `#REF` у
             // комірці — це не число, і покласти його в `ValueNumeric`
             // означало б або нуль, або текст у числовій колонці.
-            if (result.Value.IsError || result.Value.IsNull)
+            if (result.Value.IsError)
             {
+                continue;
+            }
+
+            // ⛔ ПРИЙМАЛЬНА RC14 P2-D: `Null` (вхід стерто: `NULL * x = Null`) раніше
+            // теж пропускався — і обчислене значення, що лежало в комірці,
+            // лишалося жити (EMIS 75 після очищення FUEL). Тепер раніше
+            // ОБЧИСЛЕНА (`IsCalculated`) комірка очищається явною порожнечею;
+            // уведене людиною (`IsCalculated = false`) не чіпається, а вже
+            // порожня обчислена не пишеться повторно (DAT-02).
+            if (result.Value.IsNull)
+            {
+                var nullKey = new CellKey(0, table.Id, rowKey, columnDefId);
+                if (stored.GetValueOrDefault(nullKey) is { IsCalculated: true, IsEmpty: false })
+                {
+                    values[nullKey] = result.Value;
+                    upserts[new CellAddress(periodKey, rowId, columnDefId)] = new CellRecord(
+                        new CellAddress(periodKey, rowId, columnDefId),
+                        table.Id,
+                        new CellValueData { IsEmpty = true, IsCalculated = true });
+                }
+
                 continue;
             }
 
