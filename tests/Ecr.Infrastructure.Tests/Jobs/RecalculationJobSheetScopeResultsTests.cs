@@ -151,6 +151,78 @@ public sealed class RecalculationJobSheetScopeResultsTests(SqlServerFixture sql)
         Assert.Empty(await ShapeAsync(arranged));
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-9.17")]
+    public async Task Перерахунок_документа_лишає_результати_затвердженого_аркуша_і_оновлює_чернетковий()
+    {
+        var arranged = await ArrangeAsync(submitSecondSheet: false);
+        await RunJobAsync(arranged, SheetRequest(arranged, sheetDefId: null), label: 1_000m);
+        Assert.Equal(["A|1001", "B|1001"], await ShapeAsync(arranged));
+
+        await SubmitSecondSheetAsync(arranged);
+        await RunJobAsync(arranged, SheetRequest(arranged, sheetDefId: null), label: 2_000m);
+
+        // RC15 (P2-C): B пропущено і ПЕРЕНЕСЕНО з попереднього прогону, а не загублено; A оновлено.
+        Assert.Equal(["A|2001", "B|1001"], await ShapeAsync(arranged));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-9.17")]
+    public async Task Повторні_перерахунки_документа_не_множать_результати_затвердженого_аркуша()
+    {
+        var arranged = await ArrangeAsync(submitSecondSheet: false);
+        await RunJobAsync(arranged, SheetRequest(arranged, sheetDefId: null), label: 1_000m);
+        await SubmitSecondSheetAsync(arranged);
+
+        await RunJobAsync(arranged, SheetRequest(arranged, sheetDefId: null), label: 2_000m);
+        await RunJobAsync(arranged, SheetRequest(arranged, sheetDefId: null), label: 3_000m);
+
+        Assert.Equal(["A|3001", "B|1001"], await ShapeAsync(arranged));
+
+        await using var db = arranged.Builder.CreateContext();
+        Assert.Equal(1, await db.CalculationRuns.AsNoTracking().CountAsync(r =>
+            r.DocumentId == arranged.Document.DocumentId
+            && r.PeriodKey == arranged.Document.PeriodKey.Value
+            && r.Status == CalculationRun.CurrentStatus));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-9.17")]
+    public async Task Методологія_на_двох_аркушах_область_не_губить_результати_другого_аркуша()
+    {
+        var arranged = await ArrangeAsync(submitSecondSheet: false, sharedMethodology: true);
+        await RunJobAsync(arranged, SheetRequest(arranged, sheetDefId: null), label: 1_000m);
+        Assert.Equal(["A|1001", "A|1001", "B|1001"], await ShapeAsync(arranged));
+
+        await SubmitSecondSheetAsync(arranged);
+        await RunJobAsync(arranged, SheetRequest(arranged, arranged.Document.SheetDefId), label: 2_000m);
+
+        // Було (RC14, P2-C приймальної): лишався лише A|2001 для першого аркуша - рядок A другого аркуша зникав.
+        Assert.Equal(["A|2001", "A|2001", "B|1001"], await ShapeAsync(arranged));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-9.17")]
+    public async Task Методологія_на_двох_аркушах_документ_із_затвердженим_другим_не_губить_його_результати()
+    {
+        var arranged = await ArrangeAsync(submitSecondSheet: false, sharedMethodology: true);
+        await RunJobAsync(arranged, SheetRequest(arranged, sheetDefId: null), label: 1_000m);
+
+        await SubmitSecondSheetAsync(arranged);
+        await RunJobAsync(arranged, SheetRequest(arranged, sheetDefId: null), label: 2_000m);
+        await RunJobAsync(arranged, SheetRequest(arranged, sheetDefId: null), label: 3_000m);
+
+        Assert.Equal(["A|3001", "A|3001", "B|1001"], await ShapeAsync(arranged));
+    }
+
     private static RecalculationRequest SheetRequest(Arranged arranged, int? sheetDefId)
         => new(
             ProjectId: arranged.Document.ProjectId,
