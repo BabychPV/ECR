@@ -256,10 +256,12 @@ public sealed class Hse301GoldenTests(Xunit.Abstractions.ITestOutputHelper log)
             TableInstance, ["R1"], new PeriodKey(Period), Descriptor(NumericMode.Legacy, VersionId, MethodologyId),
             CancellationToken.None));
 
-        // До кроку `CalculationInputBuilder` будував рівно такий список.
+        // До кроку `CalculationInputBuilder` будував рівно такий список. ✎ L2-3 (розширення D-161): id запису
+        // `Lookup` тепер їде в ОБОХ режимах — його потребує правило категорії; формули `Legacy` його не бачать
+        // (`GenericCalculationModule.ToValue`, див. CategoryRuleLookupEntryIdTests), тож числа формул побітно ті самі.
         CalculationArgument[] before =
         [
-            new("Stream", null, null, null),
+            new("Stream", null, null, null, Stream1D2),
             new("HmbCase", null, "370 Winter", null),
             new("Volume", 269.258m, null, null),
             new("Duration", 930m, null, null),

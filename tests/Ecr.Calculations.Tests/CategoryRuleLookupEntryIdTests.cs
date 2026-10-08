@@ -96,8 +96,8 @@ public sealed class CategoryRuleLookupEntryIdTests
         store.GetOutputsAsync(Version, Arg.Any<CancellationToken>())
              .Returns([output]);
 
-        // Правило порівнює id запису довідника з числом: у Legacy раніше @Fuel = Null -> '' -> categoryRuleFailed.
-        store.GetCategoryRuleAsync(Version, Arg.Any<CancellationToken>()).Returns(withRule ? "IF(@Fuel = 5, 'Diesel', '')" : null);
+        // Правило порівнює id запису довідника з числом: у Legacy раніше @Fuel = Null -> гілка ' ' (порожній ключ після Trim) -> categoryRuleFailed.
+        store.GetCategoryRuleAsync(Version, Arg.Any<CancellationToken>()).Returns(withRule ? "if(@Fuel = 5, 'Diesel', ' ')" : null);
 
         periods.FindPeriodBoundsAsync(DocumentId, Period, Arg.Any<CancellationToken>())
                .Returns(new PeriodBounds(new DateOnly(2026, 1, 1), new DateOnly(2026, 1, 31)));
