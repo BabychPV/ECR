@@ -1,8 +1,10 @@
 import { afterEach, describe, expect, it, vi, beforeAll } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { DocumentHeaderPanel } from '@/features/documents/DocumentHeaderPanel';
+import { EcrApiError } from '@/api/client';
+import { headerIssueOf, useHeaderIssue } from '@/features/documents/headerIssue';
 import { showDone } from '@/shared/ui/notify';
 import { flushUnsaved, hasUnsavedChanges, unsavedCount } from '@/shared/ui/unsavedSources';
 import { testTheme } from '@/test/render';
@@ -334,6 +336,47 @@ describe('DocumentHeaderPanel: ECR-HDR-0422 — конкретне повідо�
 
     const alert = await screen.findByRole('alert');
     expect(alert.textContent).not.toContain('raw developer message');
+  });
+});
+
+describe('DocumentHeaderPanel: RC14-A — відмова поля шапки в Issues і підсвітка поля', () => {
+  const rejected = (code: string): { status: number; body: unknown } => ({
+    status: 422,
+    body: {
+      title: 'Unprocessable Entity',
+      status: 422,
+      errorCode: code,
+      correlationId: 'cid-rc14a',
+      detail: 'Запис довідника «P-1» не діє у вікні проєкту.',
+      messageKey: `err.${code}.entryNotValidInWindow`,
+      headerFieldCode: 'QTY',
+    },
+  });
+
+  it('ECR-HDR-4223: поле позначене помилкою, зауваження опубліковане для Issues; правка поля знімає обидва', async () => {
+    show({ fields: [field({ code: 'QTY', dataType: 'Int', value: 5 })], patchResponse: rejected('ECR-HDR-4223') });
+
+    const input = await screen.findByLabelText('Label');
+    fireEvent.change(input, { target: { value: '6' } });
+    fireEvent.click(await screen.findByRole('button', { name: '⟦common.save⟧' }));
+
+    await waitFor(() => expect(input.getAttribute('aria-invalid')).toBe('true'));
+    // ⛔ Мутаційний доказ: не передавати `errorText` у `HeaderFieldInput` — поле не підсвітиться.
+    expect(screen.getAllByText('Запис довідника «P-1» не діє у вікні проєкту.').length).toBeGreaterThan(0);
+
+    const probe = renderHook(() => useHeaderIssue(DocumentId));
+    expect(probe.result.current?.fieldCode).toBe('QTY');
+    expect(probe.result.current?.errorCode).toBe('ECR-HDR-4223');
+
+    fireEvent.change(input, { target: { value: '7' } });
+    await waitFor(() => expect(input.getAttribute('aria-invalid')).not.toBe('true'));
+    expect(probe.result.current).toBeNull();
+  });
+
+  it('відмова не про значення поля (409) не створює зауваження шапки', () => {
+    expect(
+      headerIssueOf(DocumentId, new EcrApiError({ title: 'x', status: 409, errorCode: 'ECR-CELL-0409', correlationId: 'c' })),
+    ).toBeNull();
   });
 });
 

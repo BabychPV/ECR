@@ -11,6 +11,7 @@ import { StatusBadge } from '@/shared/ui/StatusBadge';
 import { Timestamp } from '@/shared/ui/Timestamp';
 import { useUrlState } from '@/shared/ui/useUrlState';
 import { ruleLabel } from '@/features/documents/ruleLabel';
+import { focusHeaderField, headerIssueText, useHeaderIssue, type HeaderIssue } from '@/features/documents/headerIssue';
 import { useInspectedCell, type InspectedCell } from './inspectedCell';
 import {
   addressChip,
@@ -86,7 +87,17 @@ export function DocumentInspector({
   const focusTabOnOpen = useRef(false);
 
   const groups = useMemo(() => (messages === null ? null : groupIssues(messages, tables)), [messages, tables]);
-  const counts = groups === null ? null : countIssues(groups);
+  // RC14-A: відмова збереження шапки — окреме зауваження (помилка) поверх зауважень перевірки.
+  const headerIssue = useHeaderIssue(documentId);
+  const tableCounts = groups === null ? null : countIssues(groups);
+  const counts =
+    headerIssue === null
+      ? tableCounts
+      : {
+          all: (tableCounts?.all ?? 0) + 1,
+          errors: (tableCounts?.errors ?? 0) + 1,
+          warnings: tableCounts?.warnings ?? 0,
+        };
 
   const open = (next: InspectorTab): void => {
     const active = document.activeElement;
@@ -134,6 +145,14 @@ export function DocumentInspector({
     lastSeq.current = validatedSeq;
     if (counts !== null && counts.all > 0 && tab !== 'issues') open('issues');
   }, [validatedSeq, counts?.all]);
+
+  // Нова відмова шапки відкриває Issues, як свіжа перевірка із зауваженнями.
+  const lastHeaderIssue = useRef<HeaderIssue | null>(null);
+  useEffect(() => {
+    const previous = lastHeaderIssue.current;
+    lastHeaderIssue.current = headerIssue;
+    if (headerIssue !== null && headerIssue !== previous && tab !== 'issues') open('issues');
+  }, [headerIssue]);
 
   const onKeyDown = (event: KeyboardEvent<HTMLElement>): void => {
     if (event.key === 'Escape') {
@@ -203,6 +222,11 @@ export function DocumentInspector({
             <Tabs.Panel value="issues" className="ecr-insp-body">
               <IssuesTab
                 groups={groups}
+                headerIssue={headerIssue}
+                onSelectHeader={(issue) => {
+                  if (issue.fieldCode !== null) focusHeaderField(issue.fieldCode);
+                  if (window.matchMedia?.(NarrowQuery).matches === true) close(false);
+                }}
                 onSelect={(finding) => {
                   onSelectFinding(finding);
                   if (window.matchMedia?.(NarrowQuery).matches === true) close(false);
@@ -289,22 +313,52 @@ function InspectorTriggers({
 
 function IssuesTab({
   groups,
+  headerIssue,
+  onSelectHeader,
   onSelect,
 }: {
   groups: readonly InspectorIssueGroup[] | null;
+  headerIssue: HeaderIssue | null;
+  onSelectHeader: (issue: HeaderIssue) => void;
   onSelect: (finding: ValidationFindingDto) => void;
 }): JSX.Element {
-  if (groups === null) {
+  if (groups === null && headerIssue === null) {
     return <Empty title={t('inspector.notValidatedTitle')} hint={t('inspector.notValidatedHint')} />;
   }
 
-  if (groups.length === 0) {
+  if ((groups ?? []).length === 0 && headerIssue === null) {
     return <Empty title={t('inspector.noIssuesTitle')} hint={t('inspector.noIssuesHint')} />;
   }
 
   return (
     <div data-inspector-issues-list="">
-      {groups.map((group) => (
+      {headerIssue !== null && (
+        <section aria-label={t('document.header.title')} data-inspector-group="header">
+          <h3 className="ecr-insp-group">
+            <span>{t('document.header.title')}</span>
+            <span>1</span>
+          </h3>
+          <button
+            type="button"
+            className="ecr-insp-issue"
+            data-severity="Error"
+            data-inspector-header-issue={headerIssue.fieldCode ?? ''}
+            title={t('document.validationGoTo')}
+            onClick={() => onSelectHeader(headerIssue)}
+          >
+            <span className="ecr-insp-sev">
+              <Glyph size={16} d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 7.5v5.5M12 16v.5" />
+            </span>
+            <span>{headerIssueText(headerIssue)}</span>
+            <span className="ecr-insp-where">
+              <span className="ecr-insp-chip">{headerIssue.fieldCode ?? '—'}</span>
+              <span>{headerIssue.errorCode}</span>
+              <StatusBadge kind="severity" state="Error" quiet />
+            </span>
+          </button>
+        </section>
+      )}
+      {(groups ?? []).map((group) => (
         <section key={group.tableDefId} aria-label={group.title} data-inspector-group={group.tableDefId}>
           <h3 className="ecr-insp-group">
             <span>{group.title}</span>

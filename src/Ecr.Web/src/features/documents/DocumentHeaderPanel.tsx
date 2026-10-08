@@ -1,4 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, type JSX } from 'react';
+import { clearHeaderIssue, headerIssueOf, headerIssueText, setHeaderIssue, useHeaderIssue } from './headerIssue';
 import { Button, Checkbox, Collapse, Group, Select, Stack, Text, TextInput, Title, UnstyledButton } from '@mantine/core';
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch, EcrApiError } from '@/api/client';
@@ -462,6 +463,17 @@ export function DocumentHeaderPanel({
     },
   });
 
+  // RC14-A: відмова значення шапки — ще й у вкладці Issues інспектора; поле підсвічується нижче.
+  const headerIssue = useHeaderIssue(documentId);
+  useEffect(() => {
+    if (save.error === null || save.error === undefined) {
+      clearHeaderIssue(documentId);
+      return;
+    }
+    setHeaderIssue(headerIssueOf(documentId, save.error));
+  }, [documentId, save.error]);
+  useEffect(() => () => clearHeaderIssue(documentId), [documentId]);
+
   const dirtyPatch = dirty.map((field) => patchFieldOf(field, effectiveValueOf(field, draft[field.code])));
 
   // ⚠ Знімок для `UnsavedGuard`: він читає стан у момент виклику (перехід,
@@ -539,6 +551,8 @@ export function DocumentHeaderPanel({
   if (fields.length === 0) return null;
 
   function setField(code: string, value: unknown): void {
+    // RC14-A: поле виправляють — відмова про нього застаріла.
+    if (headerIssue?.fieldCode === code) save.reset();
     setDraft((current) => ({ ...current, [code]: value }));
   }
 
@@ -546,6 +560,7 @@ export function DocumentHeaderPanel({
     // ⚠ Скасування — до ОСТАННЬОЇ відомої відповіді сервера, не до старої
     // точки відліку: чужі правки, що приїхали перезапитом, стають видимими.
     if (header.data !== undefined) adopt(header.data);
+    save.reset();
   }
 
   /*
@@ -593,6 +608,7 @@ export function DocumentHeaderPanel({
             field={field}
             value={draft[field.code]}
             disabled={!canEdit || save.isPending}
+            errorText={headerIssue?.fieldCode === field.code ? headerIssueText(headerIssue) : undefined}
             onChange={(value) => setField(field.code, value)}
             onInvalidDate={(invalid) => markInvalidDate(field.code, invalid)}
             lookupEntries={
@@ -716,6 +732,7 @@ function HeaderFieldInput({
   field,
   value,
   disabled,
+  errorText,
   onChange,
   onInvalidDate,
   lookupEntries,
@@ -726,6 +743,8 @@ function HeaderFieldInput({
   field: DocumentHeaderField;
   value: unknown;
   disabled: boolean;
+  /** RC14-A: відмова сервера про значення цього поля — підсвітка й текст під полем. */
+  errorText?: string | undefined;
   onChange: (value: unknown) => void;
   /** A1-02: у полі дати набрано текст, що не є датою (`true`), або його виправили (`false`). */
   onInvalidDate: (invalid: boolean) => void;
@@ -744,6 +763,7 @@ function HeaderFieldInput({
     return (
       <Checkbox
         label={label}
+        error={errorText}
         disabled={disabled}
         checked={value === true}
         indeterminate={value !== true && value !== false}
@@ -758,6 +778,7 @@ function HeaderFieldInput({
       <Suspense fallback={null}>
         <DateInput
           label={label}
+          error={errorText}
           clearable
           disabled={disabled}
           value={typeof value === 'string' ? parseDateOnly(value) : null}
@@ -787,6 +808,7 @@ function HeaderFieldInput({
     return (
       <Select
         label={label}
+        error={errorText}
         disabled={disabled || units === null}
         searchable
         clearable
@@ -808,6 +830,7 @@ function HeaderFieldInput({
       return (
         <TextInput
           label={label}
+          error={errorText}
           description={t('document.header.lookupHint')}
           disabled={disabled}
           value={typeof value === 'string' ? value : ''}
@@ -843,6 +866,7 @@ function HeaderFieldInput({
     return (
       <Select
         label={label}
+        error={errorText}
         disabled={disabled || lookupPending}
         searchable
         clearable
@@ -864,6 +888,7 @@ function HeaderFieldInput({
   return (
     <TextInput
       label={label}
+      error={errorText}
       disabled={disabled}
       value={typeof value === 'string' ? value : ''}
       onChange={(event) => onChange(event.currentTarget.value)}

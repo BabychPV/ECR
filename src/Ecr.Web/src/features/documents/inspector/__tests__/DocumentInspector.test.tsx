@@ -6,6 +6,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import type { DocumentTableDto, ValidationFindingDto } from '@/api/types';
 import { testTheme } from '@/test/render';
+import { clearHeaderIssue, setHeaderIssue } from '@/features/documents/headerIssue';
 import { DocumentInspector } from '../DocumentInspector';
 import { clearInspectedCell, publishInspectedCell, type InspectedCell } from '../inspectedCell';
 
@@ -281,5 +282,44 @@ describe('Scope: роль бачить один аркуш', () => {
     // ⛔ errorCount/warningCount = null → «—», а не 0; лічильники прихованої таблиці (7/3) не протікають.
     expect(await screen.findByText('⟦inspector.info.tableIssuesValue (errors=—, warnings=—)⟧')).toBeTruthy();
     expect(screen.getByRole('complementary').textContent).not.toMatch(/errors=7|warnings=3/);
+  });
+});
+
+describe('DocumentInspector: RC14-A — відмова поля шапки', () => {
+  afterEach(() => clearHeaderIssue(1));
+
+  it('відкриває Issues, показує групу «Шапка» і веде фокус у поле шапки', async () => {
+    const field = document.createElement('input');
+    field.setAttribute('data-header-field', 'QTY');
+    document.body.appendChild(field);
+
+    render(<Harness messages={null} />);
+    expect(screen.queryByRole('complementary')).toBeNull();
+
+    act(() => {
+      setHeaderIssue({
+        documentId: 1,
+        fieldCode: 'QTY',
+        title: 'Header value rejected',
+        detail: 'Entry is not valid in the project window.',
+        errorCode: 'ECR-HDR-4223',
+      });
+    });
+
+    const aside = await screen.findByRole('complementary');
+    const item = within(aside).getByText('Entry is not valid in the project window.');
+    // ⛔ Мутаційний доказ: прибрати `focusHeaderField` з `onSelectHeader` — фокус не перейде.
+    fireEvent.click(item);
+    expect(document.activeElement).toBe(field);
+    field.remove();
+  });
+
+  it('зауваження чужого документа не показується', () => {
+    render(<Harness messages={null} />);
+    act(() => {
+      setHeaderIssue({ documentId: 2, fieldCode: 'QTY', title: 't', detail: null, errorCode: 'ECR-HDR-0422' });
+    });
+    expect(screen.queryByRole('complementary')).toBeNull();
+    act(() => setHeaderIssue(null));
   });
 });
