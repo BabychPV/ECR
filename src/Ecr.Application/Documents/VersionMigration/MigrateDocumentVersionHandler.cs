@@ -105,7 +105,11 @@ public sealed class MigrateDocumentVersionHandler(
     /// Скільки активна (<c>Queued</c>/<c>Running</c>) задача переносу може не оновлюватися, щоб ще вважатися
     /// живою: залишок від краху процесу не мусить назавжди блокувати новий перенос проєкту.
     /// </summary>
-    public static readonly TimeSpan ActiveJobStaleAfter = TimeSpan.FromHours(2);
+    /// <remarks>
+    /// 15 хв: задача оновлює рядок стану на кожній стадії/пачці (≥ раз на секунду), а найдовша одинична
+    /// команда обмежена 300 с (<c>CommandTimeout</c>); оренда черги подовжується кожні 30 с.
+    /// </remarks>
+    public static readonly TimeSpan ActiveJobStaleAfter = TimeSpan.FromMinutes(15);
 
     /// <summary>Скільки останніх активних задач переглядає пошук уже поставленого переносу проєкту.</summary>
     private const int ActiveJobScanLimit = 200;
@@ -166,7 +170,7 @@ public sealed class MigrateDocumentVersionHandler(
     public async Task<DocumentVersionMigrationDto> HandleAsync(
         long documentId, int targetVersionId, VersionMigrationMode mode, bool dryRun, CancellationToken ct)
     {
-        var request = await ResolveAsync(documentId, targetVersionId, ct).ConfigureAwait(false);
+        var request = await ResolveAsync(documentId, targetVersionId, tolerateSame: false, ct).ConfigureAwait(false);
 
         if (dryRun)
         {
@@ -176,7 +180,8 @@ public sealed class MigrateDocumentVersionHandler(
             return dto;
         }
 
-        return await ApplyAsync(request, documentId, mode, onProgress: null, ct).ConfigureAwait(false);
+        // Синхронний шлях без приймача прогресу завжди дає звіт (збіг версій там — виняток, не "вже перенесено").
+        return (await ApplyAsync(request, documentId, mode, onProgress: null, ct).ConfigureAwait(false))!;
     }
 
     /// <summary>
@@ -209,13 +214,37 @@ public sealed class MigrateDocumentVersionHandler(
     public async Task<string> EnqueueAsync(
         long documentId, int targetVersionId, VersionMigrationMode mode, CancellationToken ct)
     {
-        var request = await ResolveAsync(documentId, targetVersionId, ct).ConfigureAwait(false);
+        var request = await ResolveAsync(documentId, targetVersionId, tolerateSame: false, ct).ConfigureAwait(false);
 
         if (request.Archived)
         {
             throw ArchivedProject();
         }
 
+        // ⛔ Пошук активної задачі та постановка мусять іти ПІД одним замком проєкту. Без нього два запити
+        // (дві вкладки, дві людини) обидва не бачать активної задачі й обидва ставлять: коалесценція
+        // планувальника Quartz між двома одночасними викликами НЕ атомарна (виміряно тестом гонки: два
+        // різні `jobId`), тож друга людина діставала б зайву задачу, яка потім падала "вже перенесено".
+        // Замок процесний: Quartz-режим однопроцесний за побудовою, а черга в базі між процесами
+        // коалесціює атомарно на рівні SQL - там цей замок лише зменшує зайві постановки.
+        var gate = ProjectGates.GetOrAdd(request.ProjectId, static _ => new SemaphoreSlim(1, 1));
+        await gate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            return await EnqueueLockedAsync(request, documentId, targetVersionId, mode, ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
+    /// <summary>Замки постановки переносу за проєктом (записів небагато: по одному на проєкт, де переносили).</summary>
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<int, SemaphoreSlim> ProjectGates = new();
+
+    private async Task<string> EnqueueLockedAsync(
+        Resolved request, long documentId, int targetVersionId, VersionMigrationMode mode, CancellationToken ct)
+    {
         var documentIds = (await store.ListDocumentIdsAsync(request.ProjectId, ct).ConfigureAwait(false)).ToHashSet();
         var active = await FindActiveJobAsync(documentIds, ct).ConfigureAwait(false);
         if (active is not null)
@@ -225,14 +254,7 @@ public sealed class MigrateDocumentVersionHandler(
                 return active.JobId;
             }
 
-            throw new BusinessRuleException(
-                ErrorCodes.JobStateConflict,
-                $"Перенос проєкту {request.ProjectId} уже виконується за вказівкою іншого користувача.",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = "err.ECR-JOB-0409.migrationInProgress",
-                    ["projectId"] = request.ProjectId.ToString(CultureInfo.InvariantCulture),
-                });
+            throw MigrationInProgress(request.ProjectId);
         }
 
         // ⛔ Автор — у завданні: задача виконується поза HTTP-запитом і без нього бачила б анонімного
@@ -244,14 +266,35 @@ public sealed class MigrateDocumentVersionHandler(
             [.. currentUser.GroupSids],
             currentUser.CorrelationId);
 
-        return await jobs
+        var jobId = await jobs
             .EnqueueCoalescedAsync<IMigrateDocumentVersionJob>(
                 TargetOf(request.ProjectId),
                 new MigrateDocumentVersionTask(documentId, targetVersionId, mode.ToString(), actor),
                 ct,
                 currentUser.UserId)
             .ConfigureAwait(false);
+
+        // ⛔ Друга лінія захисту (інший процес, "сліпий" пошук активних): коалесценція за ключем проєкту
+        // (`migrate-project{id}`) віддає `jobId` ПЕРШОЇ постановки. Повернений `jobId` віддається лише якщо
+        // задачу поставила ця сама людина; чужий не витікає - 409.
+        var owner = await jobs.GetCreatedByUserIdAsync(jobId, ct).ConfigureAwait(false);
+        if (owner is { } ownerId && ownerId != request.Profile.UserId)
+        {
+            throw MigrationInProgress(request.ProjectId);
+        }
+
+        return jobId;
     }
+
+    private static BusinessRuleException MigrationInProgress(int projectId)
+        => new(
+            ErrorCodes.JobStateConflict,
+            $"Перенос проєкту {projectId} уже виконується за вказівкою іншого користувача.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-JOB-0409.migrationInProgress",
+                ["projectId"] = projectId.ToString(CultureInfo.InvariantCulture),
+            });
 
     /// <summary>Ціль задачі переносу: проєкт (переноситься весь).</summary>
     /// <param name="projectId">Проєкт.</param>
@@ -274,16 +317,37 @@ public sealed class MigrateDocumentVersionHandler(
     /// синхронного шляху (<c>ECR-SCHM-0422</c>, <c>ECR-DOC-0409</c>): задача стає <c>Failed</c> з його кодом,
     /// а документи лишаються на старій версії (атомарність — одна транзакція).
     /// </remarks>
-    public async Task<DocumentVersionMigrationDto> RunQueuedAsync(
+    public async Task<VersionMigrationRunResult> RunQueuedAsync(
         long documentId, int targetVersionId, VersionMigrationMode mode,
         VersionMigrationProgressReporter onProgress, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(onProgress);
 
         await onProgress(StartedPercent, "jobs.migrateStarted", null, ct).ConfigureAwait(false);
-        var request = await ResolveAsync(documentId, targetVersionId, ct).ConfigureAwait(false);
 
-        return await ApplyAsync(request, documentId, mode, onProgress, ct).ConfigureAwait(false);
+        // ⛔ Перевірка прав ТУТ обов'язкова і не дублює ту, що в постановці: між постановкою і стартом
+        // задачі право/видимість/грант Manage автора могли відкликати, а задача не має писати від імені
+        // людини, яка вже не має права (мутаційний доказ — тест "Право_відкликане_до_старту_задачі…").
+        // ⚠ Збіг версій у задачі - не помилка: постановка двох однакових переносів (друга пішла позаду
+        // виконуваної в черзі в базі) дає зелену задачу "вже перенесено", а не зайву червону.
+        var request = await ResolveAsync(documentId, targetVersionId, tolerateSame: true, ct).ConfigureAwait(false);
+        if (request.SourceVersionId == request.Target.Id)
+        {
+            return await AlreadyMigratedAsync(request, ct).ConfigureAwait(false);
+        }
+
+        var dto = await ApplyAsync(request, documentId, mode, onProgress, ct).ConfigureAwait(false);
+
+        return dto is null
+            ? await AlreadyMigratedAsync(request, ct).ConfigureAwait(false)
+            : new VersionMigrationRunResult(dto.ToVersion, dto.DocumentCount, dto.TransferredValues, AlreadyMigrated: false);
+    }
+
+    private async Task<VersionMigrationRunResult> AlreadyMigratedAsync(Resolved request, CancellationToken ct)
+    {
+        var documents = await store.ListDocumentIdsAsync(request.ProjectId, ct).ConfigureAwait(false);
+
+        return new VersionMigrationRunResult(request.Target.Version, documents.Count, 0, AlreadyMigrated: true);
     }
 
     private const int StartedPercent = 3;
@@ -295,7 +359,7 @@ public sealed class MigrateDocumentVersionHandler(
     private sealed record Resolved(
         AccessProfile Profile, int ProjectId, int SourceVersionId, TemplateVersion Target, bool Archived);
 
-    private async Task<Resolved> ResolveAsync(long documentId, int targetVersionId, CancellationToken ct)
+    private async Task<Resolved> ResolveAsync(long documentId, int targetVersionId, bool tolerateSame, CancellationToken ct)
     {
         var profile = await PermissionCheck.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
         await DocumentVisibility.RequireVisibleAsync(access, profile, documentId, ct).ConfigureAwait(false);
@@ -306,7 +370,7 @@ public sealed class MigrateDocumentVersionHandler(
                       ?? throw DocumentVisibility.NotFound(documentId);
         RequireProjectManage(profile, projectId);
 
-        var target = await RequireTargetAsync(project.TemplateVersionId, targetVersionId, ct).ConfigureAwait(false);
+        var target = await RequireTargetAsync(project.TemplateVersionId, targetVersionId, tolerateSame, ct).ConfigureAwait(false);
         var archived = project.Status == ProjectStatus.Archived || project.IsArchiving;
 
         return new Resolved(profile, projectId, project.TemplateVersionId, target, archived);
@@ -365,7 +429,8 @@ public sealed class MigrateDocumentVersionHandler(
         _ => "jobs.migrateCells",
     };
 
-    private async Task<DocumentVersionMigrationDto> ApplyAsync(
+    /// <returns>Звіт; <c>null</c> — лише для фонової задачі: проєкт під блоком уже на цільовій версії.</returns>
+    private async Task<DocumentVersionMigrationDto?> ApplyAsync(
         Resolved request, long documentId, VersionMigrationMode mode,
         VersionMigrationProgressReporter? onProgress, CancellationToken ct)
     {
@@ -386,6 +451,12 @@ public sealed class MigrateDocumentVersionHandler(
                           ?? throw DocumentVisibility.NotFound(documentId);
             if (current == target.Id)
             {
+                // Фонова задача: інший перенос на ту саму ціль встиг раніше - це не помилка (див. RunQueuedAsync).
+                if (onProgress is not null)
+                {
+                    return;
+                }
+
                 throw SameVersion(target.Id);
             }
 
@@ -580,7 +651,8 @@ public sealed class MigrateDocumentVersionHandler(
         return (dto, plan, foreignKeys);
     }
 
-    private async Task<TemplateVersion> RequireTargetAsync(int sourceVersionId, int targetVersionId, CancellationToken ct)
+    private async Task<TemplateVersion> RequireTargetAsync(
+        int sourceVersionId, int targetVersionId, bool tolerateSame, CancellationToken ct)
     {
         var target = await versions.FindAsync(targetVersionId, ct).ConfigureAwait(false)
             ?? throw new NotFoundException(
@@ -594,7 +666,7 @@ public sealed class MigrateDocumentVersionHandler(
 
         if (target.Id == sourceVersionId)
         {
-            throw SameVersion(target.Id);
+            return tolerateSame ? target : throw SameVersion(target.Id);
         }
 
         var sourceTemplate = await templates.FindTemplateOfVersionAsync(sourceVersionId, ct).ConfigureAwait(false);

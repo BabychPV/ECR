@@ -12,6 +12,13 @@ namespace Ecr.Application.Documents.VersionMigration;
 /// </param>
 public sealed record MigrateDocumentVersionTask(long DocumentId, int TargetVersionId, string Mode, JobActor? Actor = null);
 
+/// <summary>Підсумок фонового переносу.</summary>
+/// <param name="ToVersion">Цільова версія.</param>
+/// <param name="DocumentCount">Скільки документів проєкту.</param>
+/// <param name="TransferredValues">Скільки значень перенесено (0, якщо вже було перенесено).</param>
+/// <param name="AlreadyMigrated">Проєкт уже стояв на цільовій версії: задача нічого не змінила.</param>
+public sealed record VersionMigrationRunResult(string ToVersion, int DocumentCount, long TransferredValues, bool AlreadyMigrated);
+
 /// <summary>Стадії переносу, які сховище називає приймачу прогресу.</summary>
 public static class VersionMigrationStages
 {
