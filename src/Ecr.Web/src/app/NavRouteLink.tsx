@@ -1,10 +1,13 @@
 import type { JSX } from 'react';
-import { NavLink } from '@mantine/core';
+import { Badge, NavLink } from '@mantine/core';
 import { LazyHint } from './LazyHint';
 import { Link } from 'react-router-dom';
 import { NavIcon } from '@/shared/ui/navIcons';
 import type { RouteEntry } from './routes';
 import { useRoutePrefetch } from './useRoutePrefetch';
+import { useStaleResultsNavCount } from './useStaleResultsNavCount';
+import { formatNumber } from '@/shared/format';
+import { t } from '@/shared/i18n';
 
 /**
  * Один пункт навбару (`PR nav-arch #5`) — окремий компонент, не інлайн
@@ -49,15 +52,24 @@ export function NavRouteLink({
   collapsed?: boolean;
 }): JSX.Element {
   const prefetch = useRoutePrefetch(route.id);
+  const staleCount = useStaleResultsNavCount(route.id === 'home');
+  const staleLabel = staleCount > 0 ? t('nav.documents.staleCount', { count: staleCount }) : null;
 
   const link = (
     <NavLink
       component={Link}
       to={route.path}
       label={collapsed ? undefined : label}
-      aria-label={collapsed ? label : undefined}
+      aria-label={collapsed ? (staleLabel === null ? label : `${label}: ${staleLabel}`) : undefined}
       leftSection={<NavIcon name={route.handle.icon} />}
       active={active}
+      rightSection={
+        staleLabel === null || collapsed ? undefined : (
+          <Badge size="xs" circle color="statusWarning" title={staleLabel} aria-label={staleLabel} data-nav-stale-count={staleCount}>
+            {formatNumber(staleCount)}
+          </Badge>
+        )
+      }
       styles={collapsed ? IconOnlyNavLinkStyles : {}}
       onMouseEnter={prefetch.onMouseEnter}
       onMouseLeave={prefetch.onMouseLeave}

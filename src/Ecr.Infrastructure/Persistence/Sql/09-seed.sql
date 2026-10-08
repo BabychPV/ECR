@@ -7298,6 +7298,9 @@ USING (VALUES
     (N'document.staleResults.title', N'en', N'Calculation results are out of date', 1),
     (N'document.staleResults.hint', N'en', N'Input data was changed after the last calculation. Recalculate to refresh the results.', 1),
     (N'document.staleResults.hintSince', N'en', N'Input data was changed on {date}, after the last calculation. Recalculate to refresh the results.', 1),
+    (N'documents.filterStale', N'en', N'Needs recalculation ({count})', 1),
+    (N'documents.filterStaleNoCount', N'en', N'Needs recalculation', 1),
+    (N'nav.documents.staleCount', N'en', N'{count} need recalculation', 1),
     -- COLL:stale-ui ── кінець секції ──
     -- COLL:l21scope ── L2-1: область формули (scope) у PUT формули й порівнянні версій; ru/kz — порцією COLL:l21scope нижче ──
     (N'err.ECR-CALC-0422.formulaScopeInvalid', N'en', N'The scope "{scope}" of formula "{code}" is not valid: use Substance (once per substance) or Row (once per row).', 1),
@@ -17780,7 +17783,13 @@ SELECT v.[Key], v.Lang, v.Val
     (N'document.staleResults.hint', N'ru', N'Входные данные изменены после последнего расчёта. Пересчитайте, чтобы обновить результаты.'),
     (N'document.staleResults.hint', N'kz', N'Кіріс деректер соңғы есептеуден кейін өзгерген. Нәтижелерді жаңарту үшін қайта есептеңіз.'),
     (N'document.staleResults.hintSince', N'ru', N'Входные данные изменены {date}, после последнего расчёта. Пересчитайте, чтобы обновить результаты.'),
-    (N'document.staleResults.hintSince', N'kz', N'Кіріс деректер {date} күні, соңғы есептеуден кейін өзгерген. Нәтижелерді жаңарту үшін қайта есептеңіз.')
+    (N'document.staleResults.hintSince', N'kz', N'Кіріс деректер {date} күні, соңғы есептеуден кейін өзгерген. Нәтижелерді жаңарту үшін қайта есептеңіз.'),
+    (N'documents.filterStale', N'ru', N'Требуют пересчёта ({count})'),
+    (N'documents.filterStale', N'kz', N'Қайта есептеуді қажет етеді ({count})'),
+    (N'documents.filterStaleNoCount', N'ru', N'Требуют пересчёта'),
+    (N'documents.filterStaleNoCount', N'kz', N'Қайта есептеуді қажет етеді'),
+    (N'nav.documents.staleCount', N'ru', N'{count} требуют пересчёта'),
+    (N'nav.documents.staleCount', N'kz', N'{count} қайта есептеуді қажет етеді')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO

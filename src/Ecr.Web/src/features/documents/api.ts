@@ -119,6 +119,13 @@ interface DocumentListParams {
    * (`BE-09b`): не робити його залежним від обраного періоду.
    */
   hasLateEdits?: boolean;
+  /**
+   * Лише документи зі застарілими результатами методологій (`resultsStale=true`).
+   *
+   * ⛔ Лише разом із `periodKey`: застарілість належить періоду, без нього сервер відповість `422`
+   * (`ECR-REQ-0422.resultsStaleNeedsPeriod`).
+   */
+  resultsStale?: boolean;
   /** Підрядок ключа чи назви документа (`UI-18`); порожній — без пошуку. */
   q?: string;
   /** Лише документи цього проєкту. */
@@ -139,6 +146,7 @@ export function listDocuments(params: DocumentListParams): Promise<DocumentListP
   if (params.state) query.set('state', params.state);
   if (params.mine) query.set('mine', 'true');
   if (params.hasLateEdits) query.set('hasLateEdits', 'true');
+  if (params.resultsStale) query.set('resultsStale', 'true');
   if (params.q) query.set('q', params.q);
   if (params.projectId) query.set('projectId', String(params.projectId));
 

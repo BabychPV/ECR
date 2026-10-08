@@ -11,6 +11,7 @@ import { EyeIcon, IssueCount } from './DocumentListMarks';
 import { documentState, hasSheetStates, sheetLabels } from './documentSheets';
 import { boardColumns, type BoardColumnId } from './documentsBoardModel';
 import { LateEditsMark } from './LateEditsMark';
+import { StaleResultsMark } from './StaleResultsMark';
 import './documentsBoard.css';
 
 interface DocumentsBoardProps {
@@ -124,6 +125,7 @@ export function DocumentsBoard({ documents, documentHref, projectCode, onQuickLo
                           <StatusBadge kind="sheet" state={state} quiet />
                         )}
                         {document.hasLateEdits && <LateEditsMark />}
+                        {document.resultsStale === true && <StaleResultsMark since={document.resultsStaleSince} />}
                         {errors === null || errors === undefined ? (
                           <span className="ecr-board-noissues" title={t('documents.issues')}>
                             —
