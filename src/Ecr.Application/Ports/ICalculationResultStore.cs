@@ -83,6 +83,26 @@ public interface ICalculationResultStore
         long calculationRunId, string modulesProfileJson, CancellationToken ct);
 
     /// <summary>
+    /// Переносить у прогін <paramref name="calculationRunId"/> результати методологій, яких цей прогін
+    /// НЕ перераховував (RC14, приймальна №10, P2-4): прогін області одного аркуша стає актуальним для
+    /// ВСЬОГО документа й періоду, тож без переносу результати інших аркушів зникли б із
+    /// <see cref="ReadCurrentAsync"/>.
+    /// </summary>
+    /// <param name="calculationRunId">Новий прогін (ще не актуальний).</param>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="methodologyIds">Методології (не версії), чиї результати переносяться.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Скільки результатів перенесено.</returns>
+    /// <remarks>
+    /// ⚠ Джерело — ті самі рядки, що віддасть <see cref="ReadCurrentAsync"/> ДО перемикання актуальності,
+    /// тож викликати треба до <see cref="SwitchCurrentRunAsync"/> у тій самій транзакції. Рядки лише
+    /// додаються в контекст — зберігає викликач. Трейс (кроки, входи) не переноситься: він лишається за
+    /// прогоном, що його порахував.
+    /// </remarks>
+    public Task<int> CarryOverResultsAsync(
+        long calculationRunId, long documentId, IReadOnlyCollection<int> methodologyIds, CancellationToken ct);
+
+    /// <summary>
     /// Числа <b>актуального</b> прогону для документа й періоду.
     /// </summary>
     /// <param name="documentId">Документ.</param>
@@ -107,6 +127,11 @@ public interface ICalculationResultStore
     public Task<IReadOnlyList<CalculationResultRow>> ReadCurrentAsync(
         long documentId, int periodKey, CancellationToken ct);
 }
+
+/// <summary>Які результати попереднього актуального прогону перенести в новий (RC14, P2-4).</summary>
+/// <param name="DocumentId">Документ прогону.</param>
+/// <param name="MethodologyIds">Методології, яких прогін області не перераховував.</param>
+public sealed record ResultCarryOver(long DocumentId, IReadOnlyCollection<int> MethodologyIds);
 
 /// <summary>Один рядок актуального результату розрахунку.</summary>
 /// <param name="MethodologyVersionId">Версія, що дала число: без неї його неможливо пояснити.</param>
