@@ -1,4 +1,4 @@
-﻿using Ecr.Application.Ports;
+using Ecr.Application.Ports;
 using Ecr.Domain.Entities.Calculations;
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
@@ -347,8 +347,9 @@ public sealed class GenericCalculationModule(
         var outputs = binding.Outputs;
         var period = binding.Period;
 
+        // ⛔ D-161: формули `Legacy` не бачать `EntryRef` (побітно як до RT-23a); `Strict` — бачать.
         var arguments = input.Arguments.ToDictionary(
-            a => a.ArgumentCode, ToValue, StringComparer.OrdinalIgnoreCase);
+            a => a.ArgumentCode, a => ToValue(a, numeric.Mode == NumericMode.Strict), StringComparer.OrdinalIgnoreCase);
 
         var values = new List<CalculationOutputValue>();
         var units = await UnitsAsync(ct).ConfigureAwait(false);
@@ -389,12 +390,13 @@ public sealed class GenericCalculationModule(
         // у Row-контексті, теж без категорії.
         var categoryRule = binding.CategoryRule is { } ruleText ? ParseCategoryRule(ruleText) : null;
         var rowConstantUnits = new Dictionary<string, int?>(StringComparer.OrdinalIgnoreCase);
+        var rowConstants = ResolveConstants(
+            version.MethodologyVersionId, rowFormulas, substanceEntryId: null, period, binding.Constants, rowConstantUnits,
+            category: null, extraCodes: categoryRule?.ConstantCodes);
         var rowContext = new MethodologyEvaluationContext(
             period,
             arguments,
-            ResolveConstants(
-                version.MethodologyVersionId, rowFormulas, substanceEntryId: null, period, binding.Constants, rowConstantUnits,
-                category: null, extraCodes: categoryRule?.ConstantCodes),
+            rowConstants,
             units,
             binding.Registries,
             library is null ? null : name => library.Resolve(name, rowPhase: true));
@@ -410,9 +412,30 @@ public sealed class GenericCalculationModule(
         // ✎ L-2 (B13 §4.1, крок 3): категорія константи — раз на рядок, ПІСЛЯ Row-формул (правило бачить
         // `@`, `!Row` і `CST.` без категорії) і ДО циклу речовин. Усе, що рахується далі, резолвить
         // константи з цим ключем. Версія без правила дає `null` — побітно як до L-2.
+        // ✎ L2-3 (розширення D-161): ПРАВИЛО категорії бачить id запису довідника (`EntryRef`) для `Lookup`-аргументів
+        // у ОБОХ режимах; формули `Legacy` лишаються без нього. Окремий контекст — ті самі константи й `!Row`-результати,
+        // але аргументи з `EntryRef`. У `Strict` аргументи вже ті самі — контекст не дублюємо.
+        var ruleContext = rowContext;
+        if (categoryRule is not null && numeric.Mode != NumericMode.Strict)
+        {
+            var ruleArguments = input.Arguments.ToDictionary(
+                a => a.ArgumentCode, a => ToValue(a, entryRef: true), StringComparer.OrdinalIgnoreCase);
+            ruleContext = new MethodologyEvaluationContext(
+                period,
+                ruleArguments,
+                rowConstants,
+                units,
+                binding.Registries,
+                library is null ? null : name => library.Resolve(name, rowPhase: true));
+            foreach (var formula in rowFormulas)
+            {
+                ruleContext.SetFormulaResult(formula.Code, rowContext.GetFormulaResult(formula.Code));
+            }
+        }
+
         var categoryKey = categoryRule is null
             ? null
-            : EvaluateCategoryRule(categoryRule, rowContext, numeric, trace);
+            : EvaluateCategoryRule(categoryRule, ruleContext, numeric, trace);
 
         library?.SetCategory(categoryKey);
 
@@ -1289,14 +1312,19 @@ public sealed class GenericCalculationModule(
     }
 
     /// <summary>Аргумент розрахунку як значення виразу.</summary>
+    /// <param name="argument">Аргумент рядка.</param>
+    /// <param name="entryRef">
+    /// Віддавати <c>EntryRef</c>: <c>true</c> — формули <c>Strict</c> і правило категорії будь-якого режиму;
+    /// <c>false</c> — формули <c>Legacy</c> (побітно як до RT-23a).
+    /// </param>
     /// <remarks>
     /// ✎ RT-23a: <c>EntryRef</c> (<see cref="CalculationArgument.EntryId"/>) у рантаймі —
     /// число, id запису (§5.3), той самий вибір, що вже діє для <c>Lookup</c>-комірок у
-    /// шаблонах. Його заповнює лише <see cref="CalculationInputBuilder"/> і лише для
-    /// <c>Strict</c> (<c>D-161</c>), тож для <c>Legacy</c> гілка недосяжна.
+    /// шаблонах. ✎ L2-3: <see cref="CalculationInputBuilder"/> заповнює його завжди, а тут
+    /// його ігнорують формули <c>Legacy</c> (<c>D-161</c>); правило категорії читає id в обох режимах.
     /// </remarks>
-    private static ExpressionValue ToValue(CalculationArgument argument)
-        => argument.EntryId is { } entryId
+    private static ExpressionValue ToValue(CalculationArgument argument, bool entryRef)
+        => entryRef && argument.EntryId is { } entryId
             ? ExpressionValue.Number(entryId)
             : argument.Value is { } number
                 ? ExpressionValue.Number(number)
