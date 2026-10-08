@@ -6926,6 +6926,7 @@ USING (VALUES
     -- RC15-A:contract ── секція «Contract» шапки документа (en); ru/kz — порцією RC15-A:contract у блоці I18N нижче ──
     (N'document.header.contract.title', N'en', N'Contract', 1),
     (N'document.header.contract.fileNumber', N'en', N'File Number — Номер файла', 1),
+    (N'document.header.contract.version', N'en', N'Version — Версия', 1),
     -- RC15-A:contract ── кінець секції ──
     -- COLL:ui31wizard ── UI-31: майстер створення документа (кроки, підсумок, підписи Back/Next/Review); ru/kz — порцією COLL:ui31wizard у блоці I18N нижче ──
     (N'wizard.back', N'en', N'Back', 1),
@@ -16951,7 +16952,9 @@ SELECT v.[Key], v.Lang, v.Val
     (N'document.header.contract.title', N'ru', N'Контракт'),
     (N'document.header.contract.title', N'kz', N'Келісімшарт'),
     (N'document.header.contract.fileNumber', N'ru', N'File Number — Номер файла'),
-    (N'document.header.contract.fileNumber', N'kz', N'File Number — Файл нөмірі')
+    (N'document.header.contract.fileNumber', N'kz', N'File Number — Файл нөмірі'),
+    (N'document.header.contract.version', N'ru', N'Version — Версия'),
+    (N'document.header.contract.version', N'kz', N'Version — Нұсқа')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO

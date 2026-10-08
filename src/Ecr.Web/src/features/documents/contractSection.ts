@@ -16,7 +16,7 @@ export const ContractOrder = [
   { key: 'contractor', names: ['contractor'] },
   { key: 'region', names: ['region'] },
   { key: 'location', names: ['location', 'facility', 'locationfacility'] },
-  { key: 'onshoreOffshore', names: ['onshoreoffshore', 'onshore', 'offshore'] },
+  { key: 'onshoreOffshore', names: ['onoffshore', 'onshoreoffshore', 'onshore', 'offshore'] },
   { key: 'filledInBy', names: ['filledinby', 'filledby'] },
   { key: 'contractHolder', names: ['contractholder'] },
   { key: 'contractNumber', names: ['contractnumber', 'contractno'] },

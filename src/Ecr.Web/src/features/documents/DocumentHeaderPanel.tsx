@@ -234,6 +234,9 @@ export interface DocumentHeaderPanelProps {
    * лише для читання; без нього рядка File Number у секції немає.
    */
   readonly businessKey?: string;
+
+  /** ✎ RC15-A: версія шаблону документа — «Version» секції «Contract», лише для читання. */
+  readonly templateVersion?: string | undefined;
 }
 
 /**
@@ -249,6 +252,7 @@ export function DocumentHeaderPanel({
   canEdit,
   collapsible = false,
   businessKey,
+  templateVersion,
 }: DocumentHeaderPanelProps): JSX.Element | null {
   const queryClient = useQueryClient();
 
@@ -588,22 +592,28 @@ export function DocumentHeaderPanel({
 
   const { contract: contractFields, other } = splitContractFields(fields);
 
-  // File Number (BusinessKey) — не поле шапки: вставляється на своє місце за порядком Excel.
+  // File Number (BusinessKey) і Version (версія шаблону) — службові, не HeaderFieldDef: значення
+  // приходять з документа, рядок вставляється на своє місце за порядком Excel.
+  const serviceValues: Partial<Record<ContractKey, string | undefined>> = {
+    fileNumber: businessKey,
+    version: templateVersion,
+  };
   const contract: readonly (readonly [ContractKey, DocumentHeaderField | null])[] =
     contractFields.length === 0
       ? []
-      : contractFields.some(([key]) => key === 'fileNumber') || businessKey === undefined
-        ? contractFields
-        : [...contractFields, ['fileNumber', null] as const].sort(
-            (a, b) => contractRank(a[0]) - contractRank(b[0]),
-          );
+      : [
+          ...contractFields,
+          ...(['fileNumber', 'version'] as const)
+            .filter((key) => serviceValues[key] !== undefined && !contractFields.some(([k]) => k === key))
+            .map((key) => [key, null] as const),
+        ].sort((a, b) => contractRank(a[0]) - contractRank(b[0]));
 
   const renderField = (field: DocumentHeaderField, key: ContractKey | null): JSX.Element => (
     <HeaderFieldInput
       key={field.code}
       field={field}
       labelText={key === null ? undefined : bilingualLabel(field)}
-      value={key === 'fileNumber' && businessKey !== undefined ? businessKey : draft[field.code]}
+      value={key !== null && serviceValues[key] !== undefined ? serviceValues[key] : draft[field.code]}
       disabled={!canEdit || save.isPending || isContractReadOnly(key)}
       onChange={(value) => setField(field.code, value)}
       onInvalidDate={(invalid) => markInvalidDate(field.code, invalid)}
@@ -639,16 +649,16 @@ export function DocumentHeaderPanel({
           <Title order={5}>{t('document.header.contract.title')}</Title>
           <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="xs">
             {contract.map(([key, field]) =>
-              key === 'fileNumber' && field === null ? (
+              field === null ? (
                 <TextInput
-                  key="fileNumber"
-                  label={t('document.header.contract.fileNumber')}
-                  value={businessKey ?? ''}
+                  key={key}
+                  label={t(key === 'version' ? 'document.header.contract.version' : 'document.header.contract.fileNumber')}
+                  value={serviceValues[key] ?? ''}
                   readOnly
                   disabled
-                  data-header-field="fileNumber"
+                  data-header-field={key}
                 />
-              ) : field === null ? null : (
+              ) : (
                 renderField(field, key)
               ),
             )}

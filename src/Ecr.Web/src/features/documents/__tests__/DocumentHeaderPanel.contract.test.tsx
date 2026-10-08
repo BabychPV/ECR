@@ -54,7 +54,7 @@ const Registries = [
   },
 ];
 
-function show(): void {
+function show(fields: Field[] = Fields, templateVersion?: string): void {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL) => {
@@ -62,7 +62,7 @@ function show(): void {
       const json = (body: unknown): Response =>
         new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
 
-      if (url.endsWith(`/api/v1/documents/${String(DocumentId)}/header`)) return json({ fields: Fields, version: 'V1' });
+      if (url.endsWith(`/api/v1/documents/${String(DocumentId)}/header`)) return json({ fields, version: 'V1' });
       if (url.endsWith('/api/v1/registries')) return json(Registries);
       // Запис 501 закритий: серед чинних його немає — підпис має бути назвою, не id.
       if (url.endsWith('/api/v1/registries/CONTRACTORS/entries')) return json([]);
@@ -73,7 +73,7 @@ function show(): void {
   render(
     <MantineProvider theme={testTheme}>
       <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
-        <DocumentHeaderPanel documentId={DocumentId} canEdit businessKey="ECR-2026-0007" />
+        <DocumentHeaderPanel documentId={DocumentId} canEdit businessKey="ECR-2026-0007" templateVersion={templateVersion} />
       </QueryClientProvider>
     </MantineProvider>,
   );
@@ -126,5 +126,23 @@ describe('DocumentHeaderPanel: секція Contract', () => {
       const contractor = document.querySelector<HTMLInputElement>('[data-header-field="CONTRACTOR"]');
       expect(contractor?.value).not.toBe('501');
     });
+  });
+
+  it('кодові назви з маніфесту Land (OnOffshore, FilledBy…) стають на місця; Version береться з версії шаблону', async () => {
+    show(
+      [
+        field('Permit', 'Permit Number', 'Номер разрешения'),
+        field('OnOffshore', 'Onshore/Offshore', 'На суше/На море'),
+        field('FilledBy', 'Filled in by', 'Кем заполнено'),
+        field('TypeOfActivity', 'Type of Activity', 'Вид деятельности'),
+      ],
+      '1.0.1.0',
+    );
+
+    const section = await screen.findByTestId('document-header-contract');
+    const order = [...section.querySelectorAll('[data-header-field]')].map((node) => node.getAttribute('data-header-field'));
+
+    expect(order).toEqual(['OnOffshore', 'FilledBy', 'TypeOfActivity', 'fileNumber', 'Permit', 'version']);
+    expect(document.querySelector<HTMLInputElement>('[data-header-field="version"]')?.value).toBe('1.0.1.0');
   });
 });
