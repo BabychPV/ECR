@@ -100,6 +100,43 @@ public sealed class CascadeRecalculationTests
         Assert.DoesNotContain(_cells.ReceivedCalls(), c => c.GetMethodInfo().Name == nameof(ICellStore.ApplyBatchAsync));
     }
 
+    /// <summary>
+    /// ПРИЙМАЛЬНА RC14 P2-D: стирання вхідної комірки лишало стару похідну (EMIS 75 після очистки FUEL).
+    /// Формула з Null-результатом не записувалась, тож попереднє обчислене значення жило далі.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public async Task Стирання_входу_очищає_раніше_обчислену_похідну()
+    {
+        Arrange(jan: 0m, feb: 5m, janCleared: true, calculatedTotal: 15m);
+
+        var written = await Service().RecalculateAsync(TableInstance, Dirty(_janId), CancellationToken.None);
+
+        Assert.Equal(1, written);
+        var upsert = Assert.Single(Applied());
+        Assert.Equal(_totalId, upsert.Address.ColumnDefId);
+        Assert.True(upsert.Value.IsEmpty);
+        Assert.True(upsert.Value.IsCalculated);
+        Assert.True(upsert.Value.IsWellFormed());
+    }
+
+    /// <summary>Уже очищена обчислена комірка повторно не пишеться (ідемпотентність, DAT-02).</summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public async Task Стирання_входу_не_пише_вже_очищену_похідну_повторно()
+    {
+        Arrange(jan: 0m, feb: 5m, janCleared: true);
+        // у базі вже очищена обчислена комірка
+        var slice = (List<CellRecord>)(await _cells.ReadSliceAsync(TableInstance, CancellationToken.None));
+        slice.Add(new CellRecord(
+            new CellAddress(Period, 1001, _totalId), _table.Id,
+            new CellValueData { IsEmpty = true, IsCalculated = true }));
+
+        var written = await Service().RecalculateAsync(TableInstance, Dirty(_janId), CancellationToken.None);
+
+        Assert.Equal(0, written);
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
     [Trait("Requirement", "D-70")]
@@ -633,7 +670,11 @@ public sealed class CascadeRecalculationTests
     /// має тип <c>Decimal</c>, тож ручний ввід у неї дозволений — саме на
     /// цьому й тримається сценарій тихої втрати.
     /// </param>
-    private void Arrange(decimal jan, decimal feb, bool withDependencies = true, decimal? operatorTotal = null)
+    /// <param name="janCleared"><c>true</c> — січень стерто (явна порожнеча).</param>
+    /// <param name="calculatedTotal">Раніше обчислений формулою підсумок, що лежить у базі.</param>
+    private void Arrange(
+        decimal jan, decimal feb, bool withDependencies = true, decimal? operatorTotal = null,
+        bool janCleared = false, decimal? calculatedTotal = null)
     {
         var builder = new TemplateBuilder { TemplateVersionId = Version };
         var sheet = builder.Sheet("Water");
@@ -684,9 +725,19 @@ public sealed class CascadeRecalculationTests
         // інакше «затирання» не відрізнялося б від запису в порожню комірку.
         var slice = new List<CellRecord>
         {
-            new(new CellAddress(Period, 1001, _janId), _table.Id, new CellValueData { ValueNumeric = jan }),
+            new(
+                new CellAddress(Period, 1001, _janId), _table.Id,
+                janCleared ? CellValueData.Empty : new CellValueData { ValueNumeric = jan }),
             new(new CellAddress(Period, 1001, _febId), _table.Id, new CellValueData { ValueNumeric = feb }),
         };
+
+        if (calculatedTotal is { } previousTotal)
+        {
+            // Обчислене формулою раніше значення підсумку (IsCalculated), яке лишилось у базі.
+            slice.Add(new CellRecord(
+                new CellAddress(Period, 1001, _totalId), _table.Id,
+                new CellValueData { ValueNumeric = previousTotal, IsCalculated = true }));
+        }
 
         if (operatorTotal is { } entered)
         {
