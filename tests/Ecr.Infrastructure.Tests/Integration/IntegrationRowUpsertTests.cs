@@ -300,6 +300,75 @@ public sealed class IntegrationRowUpsertTests(SqlServerFixture sql)
         Assert.Equal(42m, (await CellsAsync(stand, Key))[stand.Number].Numeric);
     }
 
+    /// <summary>
+    /// RC15: ДВА справжніх паралельних писарі шляху збору у динамічну таблицю без рядка <c>SRC_GEN1</c>.
+    /// Бар'єр стоїть ПЕРЕД вставкою нового рядка: обидва вже спланували «рядка немає» і обидва йдуть його
+    /// створювати - вставки змагаються гарантовано (без sleep), одна програє на <c>UQ_TableRow_Key</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ МУТАЦІЙНИЙ ДОКАЗ: повернути <c>rowsOf is not null &amp;&amp;</c> в умові повтору
+    /// <c>IntegrationCellPatcher.WriteAsync</c> → програвший писар кидає <c>ECR-ROW-0409</c> (rowKeyExists).
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "RC15-race-first-collect")]
+    public async Task Два_паралельні_писарі_збору_створюють_той_самий_динамічний_рядок_обидва_значення_записані()
+    {
+        var stand = await ArrangeAsync();
+        const string Key = "SRC_GEN1";
+
+        // Друга числова колонка: Hours і Fuel - різні колонки одного рядка.
+        await ExecuteAsync($"UPDATE cfg.ColumnDef SET DataType = {(int)CellDataType.Decimal} WHERE Id = {stand.Text};");
+
+        var arrived = 0;
+        var open = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Task Gate()
+        {
+            if (Interlocked.Increment(ref arrived) >= 2)
+            {
+                open.TrySetResult();
+            }
+
+            return open.Task.WaitAsync(TimeSpan.FromSeconds(30));
+        }
+
+        var hookA = new RowStoreHook { BeforeCreate = Gate };
+        var hookB = new RowStoreHook { BeforeCreate = Gate };
+
+        async Task<IntegrationWriteResult> WriteAsync(RowStoreHook hook, int column, decimal value)
+        {
+            await using var provider = BuildProvider(hook);
+            await using var scope = provider.CreateAsyncScope();
+            using var author = await scope.ServiceProvider.GetRequiredService<IntegrationActor>().EnterAsync(CancellationToken.None);
+            return await scope.ServiceProvider.GetRequiredService<ICellPatcher>().ApplyIntegrationAsync(
+                stand.Chain.DocumentId,
+                stand.Chain.TableInstanceId,
+                stand.Chain.PeriodKey,
+                [new IntegrationCellValue(Key, column, value)],
+                CancellationToken.None);
+        }
+
+        IntegrationWriteResult[] results;
+        try
+        {
+            results = await Task.WhenAll(
+                Task.Run(() => WriteAsync(hookA, stand.Number, 7m)),
+                Task.Run(() => WriteAsync(hookB, stand.Text, 5m)));
+        }
+        finally
+        {
+            await RevokeAsync(stand.RoleId);
+        }
+
+        Assert.All(results, r => Assert.Equal(1, r.Applied));
+        Assert.Equal(1, await RowCountAsync(stand, Key));
+
+        var cells = await CellsAsync(stand, Key);
+        Assert.Equal(7m, cells[stand.Number].Numeric);
+        Assert.Equal(5m, cells[stand.Text].Numeric);
+    }
+
     [Theory]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait("Directive", "HSE301-A5a")]
@@ -595,6 +664,9 @@ public sealed class IntegrationRowUpsertTests(SqlServerFixture sql)
 
         private bool _inside;
 
+        /// <summary>Бар'єр ПЕРЕД вставкою нових рядків (змагання двох писарів); <c>null</c> - прозоро.</summary>
+        public Func<Task>? BeforeCreate { get; set; }
+
         /// <summary>Дія після кожного читання рядків; <c>null</c> — прозоро.</summary>
         public Func<Task>? AfterRead { get; set; }
 
@@ -667,13 +739,27 @@ public sealed class IntegrationRowUpsertTests(SqlServerFixture sql)
         public Task<long> CreateRowAsync(long tableInstanceId, PeriodKey periodKey, RowKey rowKey, int ordinal, CancellationToken ct)
             => inner.CreateRowAsync(tableInstanceId, periodKey, rowKey, ordinal, ct);
 
-        public Task<IReadOnlyList<long>> CreateRowsAsync(
+        public async Task<IReadOnlyList<long>> CreateRowsAsync(
             long tableInstanceId, PeriodKey periodKey, IReadOnlyList<RowKey> rowKeys, int ordinal, CancellationToken ct)
-            => inner.CreateRowsAsync(tableInstanceId, periodKey, rowKeys, ordinal, ct);
+        {
+            if (hook.BeforeCreate is { } gate)
+            {
+                await gate().ConfigureAwait(false);
+            }
 
-        public Task<IReadOnlyList<IReadOnlyList<long>>> CreateRowsBatchAsync(
+            return await inner.CreateRowsAsync(tableInstanceId, periodKey, rowKeys, ordinal, ct).ConfigureAwait(false);
+        }
+
+        public async Task<IReadOnlyList<IReadOnlyList<long>>> CreateRowsBatchAsync(
             IReadOnlyList<RowCreationBatch> batches, CancellationToken ct)
-            => inner.CreateRowsBatchAsync(batches, ct);
+        {
+            if (hook.BeforeCreate is { } gate)
+            {
+                await gate().ConfigureAwait(false);
+            }
+
+            return await inner.CreateRowsBatchAsync(batches, ct).ConfigureAwait(false);
+        }
 
         public Task TouchRowsAsync(IReadOnlyList<long> rowIds, PeriodKey periodKey, DateTime utcNow, CancellationToken ct)
             => inner.TouchRowsAsync(rowIds, periodKey, utcNow, ct);
