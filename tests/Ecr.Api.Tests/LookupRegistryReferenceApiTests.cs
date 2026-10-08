@@ -330,19 +330,98 @@ public sealed class LookupRegistryReferenceApiTests(SqlServerFixture sql)
         Assert.Equal("err.ECR-TMPL-0422.headerFieldLookupRegistryUnknown", created.GetProperty("messageKey").GetString());
     }
 
+    // ── R16-1 (RC17): Lookup без довідника - 422 з ключем, а не 500 на CK_*_Lookup ─────────────
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Нова_колонка_Lookup_без_довідника_422_з_ключем_а_не_500()
+    {
+        var draft = await ArrangeAsync();
+        using var app = new EcrApiFactory(sql);
+        using var client = await SystemHealthControllerTests.SignedInAsync(sql, app, "Template.View", "Template.Edit");
+
+        var problem = await RejectedAsync(await PutColumnAsync(client, draft, "LK_NULL", null));
+
+        Assert.Equal("err.ECR-TMPL-0422.lookupRegistryRequired", problem.GetProperty("messageKey").GetString());
+        Assert.Contains("LK_NULL", problem.ToString(), StringComparison.Ordinal);
+
+        await using var db = Context();
+        Assert.False(await db.ColumnDefs.AnyAsync(c => c.TableDefId == draft.TableId && c.Code == "LK_NULL"));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Нове_поле_шапки_Lookup_без_довідника_422_з_ключем_а_не_500()
+    {
+        var draft = await ArrangeAsync();
+        using var app = new EcrApiFactory(sql);
+        using var client = await SystemHealthControllerTests.SignedInAsync(sql, app, "Template.View", "Template.Edit");
+
+        var problem = await RejectedAsync(await PutHeaderFieldAsync(client, draft, "HF_NULL", null));
+
+        Assert.Equal("err.ECR-TMPL-0422.headerFieldLookupRegistryRequired", problem.GetProperty("messageKey").GetString());
+        Assert.Contains("HF_NULL", problem.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Правка_Lookup_без_довідника_у_тілі_не_стирає_наявну_ціль()
+    {
+        // «Не прислано = не чіпати» (ApplyOptionalFields): PUT без lookupRegistryDefId лишає прив'язку - це не 422.
+        var draft = await ArrangeAsync();
+        await AddLookupColumnAsync(draft, "LK_KEEP", draft.RegistryId);
+        await AddLookupHeaderFieldAsync(draft, "HF_KEEP");
+        using var app = new EcrApiFactory(sql);
+        using var client = await SystemHealthControllerTests.SignedInAsync(sql, app, "Template.View", "Template.Edit");
+
+        var column = await PutColumnAsync(client, draft, "LK_KEEP", null, label: "Renamed");
+        var field = await PutHeaderFieldAsync(client, draft, "HF_KEEP", null, label: "Renamed");
+
+        Assert.True(column.IsSuccessStatusCode, await column.Content.ReadAsStringAsync());
+        Assert.True(field.IsSuccessStatusCode, await field.Content.ReadAsStringAsync());
+        await using var db = Context();
+        Assert.Equal(
+            draft.RegistryId,
+            await db.ColumnDefs.Where(c => c.TableDefId == draft.TableId && c.Code == "LK_KEEP")
+                .Select(c => c.LookupRegistryDefId).SingleAsync());
+        Assert.Equal(
+            draft.RegistryId,
+            await db.HeaderFieldDefs.Where(f => f.TemplateVersionId == draft.VersionId && f.Code == "HF_KEEP")
+                .Select(f => f.LookupRegistryDefId).SingleAsync());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Довідник_у_колонці_не_Lookup_422_lookupRequiresLookupType()
+    {
+        // Зворотний бік: lookupRegistryDefId задано, а тип не Lookup - домен відмовляє (SetLookup), а не ігнорує і не 500.
+        var draft = await ArrangeAsync();
+        using var app = new EcrApiFactory(sql);
+        using var client = await SystemHealthControllerTests.SignedInAsync(sql, app, "Template.View", "Template.Edit");
+
+        var problem = await RejectedAsync(
+            await PutColumnAsync(client, draft, "LK_TYPE", draft.RegistryId, dataType: "Decimal"));
+
+        Assert.Equal("err.ECR-TMPL-0422.lookupRequiresLookupType", problem.GetProperty("messageKey").GetString());
+    }
+
     // ── Опора ─────────────────────────────────────────────────────────────
 
     private static Task<HttpResponseMessage> PutHeaderFieldAsync(
-        HttpClient client, Draft draft, string code, int registryId, string? label = null)
+        HttpClient client, Draft draft, string code, int? registryId, string? label = null, string dataType = "Lookup")
         => client.PutAsJsonAsync(
             new Uri($"/api/v1/template-versions/{draft.VersionId}/header-fields/{code}", UriKind.Relative),
             new
             {
                 labelL10n = new Dictionary<string, string> { ["en"] = label ?? code },
                 ordinal = (int?)null,
-                dataType = "Lookup",
+                dataType,
                 isRequired = false,
-                lookupRegistryDefId = (int?)registryId,
+                lookupRegistryDefId = registryId,
             });
 
     /// <summary>Тіло відповіді без мінливого (instance, correlationId) і з id довідника, зведеним до заглушки.</summary>
@@ -450,18 +529,19 @@ public sealed class LookupRegistryReferenceApiTests(SqlServerFixture sql)
             new { reason = "RC16-2" });
 
     private static Task<HttpResponseMessage> PutColumnAsync(
-        HttpClient client, Draft draft, string code, int registryId, string? label = null, int? ordinal = null)
+        HttpClient client, Draft draft, string code, int? registryId, string? label = null, int? ordinal = null,
+        string dataType = "Lookup")
         => client.PutAsJsonAsync(
             new Uri($"/api/v1/template-versions/{draft.VersionId}/tables/{draft.TableId}/columns/{code}", UriKind.Relative),
             new
             {
                 headerL10n = new Dictionary<string, string> { ["en"] = label ?? code },
                 ordinal,
-                dataType = "Lookup",
+                dataType,
                 isRequired = false, isReadOnly = false, isHidden = false,
                 precision = (byte?)null, scale = (byte?)null,
                 defaultValue = (string?)null, displayFormat = (string?)null, styleId = (int?)null,
-                lookupRegistryDefId = (int?)registryId, lookupFilter = (string?)null,
+                lookupRegistryDefId = registryId, lookupFilter = (string?)null,
                 unitId = (int?)null,
             });
 
