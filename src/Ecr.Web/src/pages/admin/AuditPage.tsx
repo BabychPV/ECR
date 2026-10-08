@@ -1,6 +1,7 @@
 import { lazy, Suspense, useRef, type JSX } from 'react';
 import {
   Badge,
+  Box,
   Button,
   Checkbox,
   NumberInput,
@@ -354,7 +355,11 @@ export function AuditPage(): JSX.Element {
         {(page) => (
           <>
             {/* ⛔ `memo`-таблиця (`R-18`), форма макета `UI-38` — див. `CellChangesTable`. */}
-            <CellChangesTable items={page.items} />
+            {/* ⚠ Висота списку обмежена (~500px), прокручується сам список, а не сторінка: інакше «Load more»
+                лишається за сотнями рядків, а закріплена шапка (`ecr-sticky-head`) не має контейнера прокрутки. */}
+            <Box mah={500} style={{ overflow: 'auto' }} data-audit-scroll="" tabIndex={0} role="region" aria-label={t('audit.title')}>
+              <CellChangesTable items={page.items} />
+            </Box>
 
             {/* ⚠ Курсорна пагінація: журнал за рік — мільйони рядків, і
                 `OFFSET` на сторінці 200 сканував би все, що до неї. */}

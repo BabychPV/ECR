@@ -45,6 +45,7 @@ function mockFetch(
   permissions: string[],
   staleSequence: boolean[],
   recalcRefusal = false,
+  resultsStale = false,
 ): { posts: () => number } {
   let calcReads = 0;
   let posts = 0;
@@ -127,6 +128,7 @@ function mockFetch(
           projectId: 1,
           sheetCount: 1,
           sheetStates: { GEN: 'Draft' },
+          ...(resultsStale ? { resultsStale: true, resultsStaleSince: '2026-01-02T00:00:00Z' } : {}),
         });
       }
 
@@ -141,8 +143,9 @@ function show(
   permissions: string[],
   staleSequence: boolean[],
   recalcRefusal = false,
+  resultsStale = false,
 ): { posts: () => number } {
-  const probe = mockFetch(permissions, staleSequence, recalcRefusal);
+  const probe = mockFetch(permissions, staleSequence, recalcRefusal, resultsStale);
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
   render(
@@ -180,6 +183,21 @@ describe('DocumentPage: застарілі числа методологій', (
 
       fireEvent.click(screen.getByRole('button', MoreButton));
       expect(await screen.findByRole('menuitem', { name: /⟦workflow\.recalculateCalculations⟧/ })).toBeDefined();
+    },
+    Slow,
+  );
+
+  it(
+    'є банер «результати застарілі» — бейдж не дублює його (банер лишається)',
+    async () => {
+      show(['Document.View', 'Calculation.View'], [true], false, true);
+
+      await screen.findByTestId('document-stale-results', undefined, { timeout: Slow });
+      await waitFor(() => {
+        expect(vi.mocked(fetch).mock.calls.some(([u]) => String(u).includes('/calculation-results'))).toBe(true);
+      });
+      // ⛔ Мутаційний доказ: прибери `resultsStale !== true` біля бейджа — тут червоне.
+      expect(screen.queryByTestId(BadgeId)).toBeNull();
     },
     Slow,
   );

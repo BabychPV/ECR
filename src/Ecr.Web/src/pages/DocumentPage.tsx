@@ -615,7 +615,8 @@ export function DocumentPage(): JSX.Element {
                 onShowIssues={() => undefined}
               />
               <DocumentSaveState readOnly={readOnly} />
-              {calculationsStale && (
+              {/* ⚠ Банер «результати застарілі» (`StaleResultsBanner`) уже каже те саме з кнопкою — значок лише дублював би. */}
+              {calculationsStale && document.resultsStale !== true && (
                 <Badge color="statusWarning" variant="light" role="status" data-testid="document-methodology-stale">
                   {t('documents.methodologyResultsStale')}
                 </Badge>

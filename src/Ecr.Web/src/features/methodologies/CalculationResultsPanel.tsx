@@ -152,9 +152,11 @@ export function CalculationResultsPanel({
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
-                {list.map((result) => (
+                {list.map((result, index) => (
+                  // ⚠ Без номера два результати одного рядка й виходу з `substanceEntryId = null`
+                  // давали дубль ключа `K1:EMISSION:null`.
                   <Table.Tr
-                    key={`${String(result.sourceRowKey)}:${result.outputCode}:${String(result.substanceEntryId)}`}
+                    key={`${String(result.sourceRowKey)}:${result.outputCode}:${String(result.substanceEntryId)}:${String(index)}`}
                   >
                     <Table.Td>{result.sourceRowKey ?? '—'}</Table.Td>
                     <Table.Td>{result.outputCode}</Table.Td>

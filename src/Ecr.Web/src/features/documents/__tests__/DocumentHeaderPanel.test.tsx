@@ -368,6 +368,21 @@ describe('DocumentHeaderPanel: збереження', () => {
     expect(showDone).toHaveBeenCalled();
   });
 
+  it('після збереження шапки зведення документа й перелік документів перечитуються', async () => {
+    const client = show({ fields: [field({ code: 'A', dataType: 'String', value: 'стара' })] });
+    const invalidated = vi.spyOn(client, 'invalidateQueries');
+
+    fireEvent.change(await screen.findByLabelText('Label'), { target: { value: 'нова' } });
+    fireEvent.click(await screen.findByRole('button', { name: '⟦common.save⟧' }));
+
+    // ⛔ Мутаційний доказ: прибери два `invalidateQueries` у `onSuccess` панелі — тут червоне.
+    await waitFor(() => {
+      const keys = invalidated.mock.calls.map(([filter]) => JSON.stringify(filter?.queryKey));
+      expect(keys).toContain(JSON.stringify(['document', DocumentId]));
+      expect(keys).toContain(JSON.stringify(['documents']));
+    });
+  });
+
   it('409 ECR-DOC-0409: показує причину і перечитує шапку — чернетка стає значенням сервера', async () => {
     show({
       fields: [field({ code: 'A', dataType: 'String', value: 'стара' })],

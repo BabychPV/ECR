@@ -120,4 +120,15 @@ describe('CalculationResultsPanel: четвертий раунд UX', () => {
     await screen.findByText('20');
     expect(document.querySelector('[data-results-stale]')).toBeNull();
   });
+
+  /** Мутація: прибрати номер з ключа рядка — React пише «same key» у консоль. */
+  it('два результати одного рядка й виходу без речовини — ключі рядків унікальні (K1:EMISSION:null)', async () => {
+    mockServer(() => [row('1'), row('2')]);
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    show();
+
+    await screen.findByText('2');
+    expect(errors.mock.calls.some((call) => String(call[0]).includes('same key'))).toBe(false);
+    errors.mockRestore();
+  });
 });

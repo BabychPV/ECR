@@ -448,6 +448,11 @@ export function DocumentHeaderPanel({
       patchDocumentHeader(documentId, fields, seed?.dto.version ?? header.data?.version ?? ''),
     onSuccess: (result) => {
       queryClient.setQueryData(['document-header', documentId], result);
+      // ⚠ Шапка живе не лише в цій панелі: назва/ключ документа в заголовку сторінки й у переліку
+      // читаються з зведення та переліку. Явне збереження — рідка дія, тож перезапит дешевий
+      // (на відміну від автозбереження комірок, де `CL-01` свідомо тримає кеш без перезапитів).
+      void queryClient.invalidateQueries({ queryKey: ['document', documentId] });
+      void queryClient.invalidateQueries({ queryKey: ['documents'] });
       adopt(result);
       showDone(t('document.header.saved'));
     },

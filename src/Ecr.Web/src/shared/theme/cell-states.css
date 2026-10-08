@@ -57,6 +57,7 @@
 :root[data-mantine-color-scheme='dark'] {
   --ecr-grid-surface: #242424;
   --ecr-grid-text: #c9c9c9;
+  --ecr-grid-line: #4f4f4f;
 
   --ecr-cell-dirty-bg: #3a3320;
   --ecr-cell-dirty-line: #ffd24d;
@@ -343,6 +344,16 @@
  */
 :root revo-grid[theme] revogr-data .rgCell {
   color: var(--ecr-grid-text);
+}
+
+/*
+ * ⛔ Межі комірок у темній темі майже зливалися із заливкою (`#242424`): пакет малює їх світлою
+ * сірою, розрахованою на білий фон. Токен `--ecr-grid-line` заданий лише для темної схеми
+ * (≈ 2:1 до поверхні сітки); у світлій змінної немає, і правило нічого не змінює.
+ */
+:root[data-mantine-color-scheme='dark'] revo-grid[theme] revogr-data .rgCell {
+  border-right-color: var(--ecr-grid-line);
+  border-bottom-color: var(--ecr-grid-line);
 }
 
 /*
