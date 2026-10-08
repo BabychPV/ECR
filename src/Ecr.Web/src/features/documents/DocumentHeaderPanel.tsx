@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, type JSX } from 'react';
-import { Button, Checkbox, Collapse, Group, Select, Stack, Text, TextInput, Title, UnstyledButton } from '@mantine/core';
+import { Button, Checkbox, Collapse, Group, Select, SimpleGrid, Stack, Text, TextInput, Title, UnstyledButton } from '@mantine/core';
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch, EcrApiError } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
@@ -16,6 +16,7 @@ import { t } from '@/shared/i18n';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { showDone } from '@/shared/ui/notify';
 import { registerUnsavedSource } from '@/shared/ui/unsavedSources';
+import { bilingualLabel, ContractOrder, isContractReadOnly, splitContractFields, type ContractKey } from './contractSection';
 
 /**
  * Шапка документа: поля версії шаблону разом із поточними значеннями
@@ -227,6 +228,12 @@ export interface DocumentHeaderPanelProps {
    * розгорнута панель, як і раніше.
    */
   readonly collapsible?: boolean;
+
+  /**
+   * ✎ RC15-A: BusinessKey документа — «File Number» секції «Contract». Не поле шапки,
+   * лише для читання; без нього рядка File Number у секції немає.
+   */
+  readonly businessKey?: string;
 }
 
 /**
@@ -241,6 +248,7 @@ export function DocumentHeaderPanel({
   documentId,
   canEdit,
   collapsible = false,
+  businessKey,
 }: DocumentHeaderPanelProps): JSX.Element | null {
   const queryClient = useQueryClient();
 
@@ -578,6 +586,46 @@ export function DocumentHeaderPanel({
     .filter((part): part is string => part !== null)
     .slice(0, 3);
 
+  const { contract: contractFields, other } = splitContractFields(fields);
+
+  // File Number (BusinessKey) — не поле шапки: вставляється на своє місце за порядком Excel.
+  const contract: readonly (readonly [ContractKey, DocumentHeaderField | null])[] =
+    contractFields.length === 0
+      ? []
+      : contractFields.some(([key]) => key === 'fileNumber') || businessKey === undefined
+        ? contractFields
+        : [...contractFields, ['fileNumber', null] as const].sort(
+            (a, b) => contractRank(a[0]) - contractRank(b[0]),
+          );
+
+  const renderField = (field: DocumentHeaderField, key: ContractKey | null): JSX.Element => (
+    <HeaderFieldInput
+      key={field.code}
+      field={field}
+      labelText={key === null ? undefined : bilingualLabel(field)}
+      value={key === 'fileNumber' && businessKey !== undefined ? businessKey : draft[field.code]}
+      disabled={!canEdit || save.isPending || isContractReadOnly(key)}
+      onChange={(value) => setField(field.code, value)}
+      onInvalidDate={(invalid) => markInvalidDate(field.code, invalid)}
+      lookupEntries={
+        field.lookupRegistryDefId === null || field.lookupRegistryDefId === undefined
+          ? EmptyLookupEntries
+          : (lookupEntriesByRegistryId.get(field.lookupRegistryDefId) ?? EmptyLookupEntries)
+      }
+      lookupPending={
+        field.lookupRegistryDefId === null || field.lookupRegistryDefId === undefined
+          ? false
+          : (lookupPendingByRegistryId.get(field.lookupRegistryDefId) ?? registriesList.isPending)
+      }
+      units={units.data ?? null}
+      unlistedLabels={
+        field.lookupRegistryDefId === null || field.lookupRegistryDefId === undefined
+          ? undefined
+          : unlistedLabelsByRegistryId.get(field.lookupRegistryDefId)
+      }
+    />
+  );
+
   const body = (
     <>
 
@@ -586,34 +634,29 @@ export function DocumentHeaderPanel({
         <ErrorAlert error={units.error} onRetry={() => void units.refetch()} />
       )}
 
-      <Stack gap="xs">
-        {fields.map((field) => (
-          <HeaderFieldInput
-            key={field.code}
-            field={field}
-            value={draft[field.code]}
-            disabled={!canEdit || save.isPending}
-            onChange={(value) => setField(field.code, value)}
-            onInvalidDate={(invalid) => markInvalidDate(field.code, invalid)}
-            lookupEntries={
-              field.lookupRegistryDefId === null || field.lookupRegistryDefId === undefined
-                ? EmptyLookupEntries
-                : (lookupEntriesByRegistryId.get(field.lookupRegistryDefId) ?? EmptyLookupEntries)
-            }
-            lookupPending={
-              field.lookupRegistryDefId === null || field.lookupRegistryDefId === undefined
-                ? false
-                : (lookupPendingByRegistryId.get(field.lookupRegistryDefId) ?? registriesList.isPending)
-            }
-            units={units.data ?? null}
-            unlistedLabels={
-              field.lookupRegistryDefId === null || field.lookupRegistryDefId === undefined
-                ? undefined
-                : unlistedLabelsByRegistryId.get(field.lookupRegistryDefId)
-            }
-          />
-        ))}
-      </Stack>
+      {contract.length > 0 && (
+        <Stack gap="xs" data-testid="document-header-contract">
+          <Title order={5}>{t('document.header.contract.title')}</Title>
+          <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="xs">
+            {contract.map(([key, field]) =>
+              key === 'fileNumber' && field === null ? (
+                <TextInput
+                  key="fileNumber"
+                  label={t('document.header.contract.fileNumber')}
+                  value={businessKey ?? ''}
+                  readOnly
+                  disabled
+                  data-header-field="fileNumber"
+                />
+              ) : field === null ? null : (
+                renderField(field, key)
+              ),
+            )}
+          </SimpleGrid>
+        </Stack>
+      )}
+
+      {other.length > 0 && <Stack gap="xs">{other.map((field) => renderField(field, null))}</Stack>}
 
       {canEdit && (
         <Group gap="xs">
@@ -681,6 +724,8 @@ export function DocumentHeaderPanel({
   );
 }
 
+const contractRank = (key: ContractKey): number => ContractOrder.findIndex((entry) => entry.key === key);
+
 /** Порожнє значення поля шапки: `null`, порожній текст. */
 function isEmptyHeaderValue(value: unknown): boolean {
   return value === null || value === undefined || (typeof value === 'string' && value.trim().length === 0);
@@ -714,6 +759,7 @@ function headerSummaryValue(
 /** Один рядок панелі: підпис поля й компонент вводу за `dataType`. */
 function HeaderFieldInput({
   field,
+  labelText,
   value,
   disabled,
   onChange,
@@ -724,6 +770,8 @@ function HeaderFieldInput({
   unlistedLabels,
 }: {
   field: DocumentHeaderField;
+  /** Підпис «EN — RU» секції Contract; без нього — локалізований підпис поля. */
+  labelText?: string | undefined;
   value: unknown;
   disabled: boolean;
   onChange: (value: unknown) => void;
@@ -738,7 +786,7 @@ function HeaderFieldInput({
   /** PS-P2: підписи закритих записів довідника поля («назва (закрито)») — лише для показу обраного. */
   unlistedLabels?: ReadonlyMap<number, string> | undefined;
 }): JSX.Element {
-  const label = `${localized(field.label)}${field.isRequired ? ' *' : ''}`;
+  const label = `${labelText ?? localized(field.label)}${field.isRequired ? ' *' : ''}`;
 
   if (field.dataType === 'Bool') {
     return (
