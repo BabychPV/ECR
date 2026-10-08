@@ -43,9 +43,10 @@ public sealed class MethodologyCategoryRuleApiTests(SqlServerFixture sql)
         var empty = await ReadAsync(await client.GetAsync(Url(stand)).ConfigureAwait(true)).ConfigureAwait(true);
         Assert.Equal(JsonValueKind.Null, empty.GetProperty("expression").ValueKind);
 
-        var saved = await ReadAsync(await PutAsync(client, stand, "!ECW_Category").ConfigureAwait(true))
+        // RC16-2: посилання на формули/константи перевіряються при збереженні, тож тут - текстовий літерал.
+        var saved = await ReadAsync(await PutAsync(client, stand, "'Diesel'").ConfigureAwait(true))
             .ConfigureAwait(true);
-        Assert.Equal("!ECW_Category", saved.GetProperty("expression").GetString());
+        Assert.Equal("'Diesel'", saved.GetProperty("expression").GetString());
         Assert.True(saved.GetProperty("updatedAt").GetDateTime() > DateTime.UtcNow.AddMinutes(-5));
 
         // Друге збереження переписує, а не дублює (UQ_CategoryRule_Version).
