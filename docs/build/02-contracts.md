@@ -3438,6 +3438,16 @@ public interface IValidationResultStore
 з іншого шаблону чи та сама — `422 ECR-TMPL-0422`. Подія — `aud.SecurityEvent`
 (`DocumentVersionMigrated`). Сигнатури — у `src/Ecr.Application/Ports/IDocumentVersionMigrationStore.cs`.
 
+#### `IColumnPathMapper`
+
+Переклад `ColumnDefId` однієї версії шаблону в Id тієї самої колонки іншої версії за шляхом «код аркуша → код
+таблиці → код колонки» (C1). Правила (`MethodologyRule.MatchJson`) й обов'язкові входи
+(`MethodologyRequiredInput.ColumnDefId`) опублікованої версії методології ключуються Id колонок версії шаблону, у якій їх
+писали, а сама версія незмінна й діє для всіх версій шаблону, тож Id у сховищі лишаються, а при читанні
+`MethodologyKeyLocalizer` перекладає їх на колонки версії документа (прогін, gate запису `ECR-CALC-0437`, зріз,
+матриця покриття, «де використовується»). Колонка без відповідника не мовчить: правило не збігається, вхід дає
+попередження. Міграцій і змін HTTP-контракту немає. Сигнатури — у `src/Ecr.Application/Ports/IColumnPathMapper.cs`.
+
 #### `IAccessProfileInvalidator`
 
 Скидання кешу профілів доступу ПРОЦЕСУ без зміни `SecurityStamp`: `InvalidateUser` видаляє
@@ -3700,6 +3710,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `err.ECR-SCHM-0422.migrateDataLoss` | 422 | перенос версії в режимі `Safe` втратив би дані |
 | `err.ECR-SCHM-0422.migrateGrantsNotMapped` | 422 | на аркуші/таблиці/колонці, якої в новій версії за кодом нема, стоїть будь-який грант: заборона або звужувальний дозвіл (`refusals` має `grantsNotMapped`); звіт сухого прогону й `details` несуть необов'язкове `blockedGrantCount` — лише кількість таких грантів (без переліку ресурсів/ролей; відсутнє, коли блокування немає) |
 | `err.ECR-SCHM-0422.migrateBindingsNotMapped` | 422 | D-13: активна прив'язка виходу методології (`cfg.CalculationBinding`) до колонки вихідної версії не має відповідника в цільовій — колонки там немає або на ній нема активної прив'язки тієї ж методології й виходу (`refusals` має `bindingsNotMapped`); клон версії шаблону тепер копіює прив'язки сам |
+| `err.ECR-SCHM-0422.migrateMethodologyKeysNotMapped` | 422 | D1: методологія, прив'язана до цільової версії, має опубліковану версію, чиї правила (`MatchJson`) або обов'язкові входи посилаються на колонки ІНШОЇ версії того самого шаблону (`refusals` має `methodologyKeysNotMapped`); 422 несе `details.methodologyKeys` — до 20 підписів «методологія версія правило\|вхід: аркуш.таблиця.колонка»; сухий прогін дає лише `canApply=false`; публікацію шаблону не блокує |
 | `err.ECR-SCHM-0422.migrateStructural` | 422 | перенос версії в режимі `Presentation` відхилено через структурну зміну |
 | `err.ECR-TMPL-0422.migrateOtherTemplate` | 422 | цільова версія належить іншому шаблону |
 | `err.ECR-TMPL-0422.migrateSameVersion` | 422 | цільова версія збігається з поточною |
@@ -3928,6 +3939,9 @@ public sealed class NotFoundException(string errorCode, string message)
 | `GET` | `/api/v1/methodologies/{id}/versions/{vid}/constants/{code}/usage` | `Calculation.View` | 7 |
 | `GET` | `/api/v1/methodologies/{id}/versions/{vid}/rules` | `Calculation.View` | 7 |
 | `PUT` | `/api/v1/methodologies/{id}/versions/{vid}/rules/{code}` | `Calculation.EditRule` | 7 |
+| `GET` | `/api/v1/methodologies/{id}/versions/{vid}/category-rule` | `Calculation.View` | 7 |
+| `PUT` | `/api/v1/methodologies/{id}/versions/{vid}/category-rule` | `Calculation.EditRule` | 7 |
+| `DELETE` | `/api/v1/methodologies/{id}/versions/{vid}/category-rule` | `Calculation.EditRule` | 7 |
 | `GET` | `/api/v1/methodologies/{id}/versions/{vid}/required-inputs` | `Calculation.View` | 7 |
 | `PUT` | `/api/v1/methodologies/{id}/versions/{vid}/required-inputs/{columnDefId}` | `Calculation.ManageRequiredInputs` | 7 |
 | `GET` | `/api/v1/methodologies/{id}/versions/{vid}/outputs` | `Calculation.View` | 7 |

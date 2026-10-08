@@ -5587,6 +5587,7 @@ USING (VALUES
     (N'grid.listMore', N'en', N'{count} more: type to narrow the list', 1),
     (N'grid.listClear', N'en', N'(clear the cell)', 1),
     (N'grid.lookupEditorLabel', N'en', N'Choose a registry entry', 1),
+    (N'grid.lookupClosedEntry', N'en', N'{name} (closed)', 1),
     (N'grid.boolEditorLabel', N'en', N'Choose yes or no', 1),
     (N'grid.unitEditorLabel', N'en', N'Choose a unit', 1),
     (N'grid.dateEditorLabel', N'en', N'Choose a date', 1),
@@ -7253,8 +7254,40 @@ USING (VALUES
     -- COLL:l4norule ── кінець секції ──
     -- COLL:d13bindings ── D-13: перенос проєкту на версію шаблону відмовляє, якщо активна прив'язка методології не має відповідника в цільовій; ru/kz — порцією COLL:d13bindings нижче ──
     (N'err.ECR-SCHM-0422.migrateBindingsNotMapped', N'en', N'The target version has no active binding of a methodology output on the matching column (or the column itself is missing), so after the move that column would stay empty without any error. Clone the version again from the one being moved from (a clone now carries bindings), or switch the binding off deliberately, then move the project.', 1),
-    (N'documents.migrateRefusalBindingsNotMapped', N'en', N'Methodology outputs are bound to columns that have no matching binding in the target version; those columns would be left empty.', 1)
+    (N'documents.migrateRefusalBindingsNotMapped', N'en', N'Methodology outputs are bound to columns that have no matching binding in the target version; those columns would be left empty.', 1),
     -- COLL:d13bindings ── кінець секції ──
+    -- COLL:b-stale-badge ── лінія B: бейдж «Результати методологій застарілі» і пункт «Recalculate calculations» у More; ru/kz — порцією COLL:b-stale-badge нижче ──
+    (N'documents.methodologyResultsStale', N'en', N'Methodology results are out of date', 1),
+    (N'workflow.recalculateCalculations', N'en', N'Recalculate calculations', 1),
+    -- COLL:b-stale-badge ── кінець секції ──
+    -- COLL:dps-required-header ── D-PS: подання з порожнім обов'язковим полем шапки (SubmitSheetHandler); ru/kz — порцією COLL:dps-required-header у блоці I18N нижче ──
+    (N'err.ECR-HDR-0422.requiredAtSubmit', N'en', N'The sheet cannot be submitted: required header field(s) are empty: {headerFieldCodes}. Fill them in the document header and submit again.', 1),
+    -- COLL:dps-required-header ── кінець секції ──
+    -- COLL:mkeys ── D1: перенос проєкту відмовляє, коли правила/обов'язкові входи методології посилаються на колонки іншої версії шаблону; ru/kz — порцією COLL:mkeys нижче ──
+    (N'err.ECR-SCHM-0422.migrateMethodologyKeysNotMapped', N'en', N'A methodology bound to the target version has a published version whose rules or required inputs refer to columns of another version of this template (see methodologyKeys). After the move those rules would match no rows, so nothing would be calculated, and a blocking required input could never be satisfied. Publish a methodology version whose rules and required inputs point to the target version''s columns, then move the project.', 1),
+    (N'documents.migrateRefusalMethodologyKeysNotMapped', N'en', N'Methodology rules or required inputs refer to columns of another template version; after the move they would match nothing.', 1),
+    -- COLL:mkeys ── кінець секції ──
+    -- CAT:l2 ── L-2: правило категорії константи (calc.CategoryRule); ru/kz — порцією CAT:l2 нижче ──
+    (N'err.ECR-CALC-0422.categoryRuleEmpty', N'en', N'The category rule needs an expression; to have no rule, delete it.', 1),
+    (N'err.ECR-CALC-0422.categoryRuleFailed', N'en', N'The category rule "{expression}" gave no category for this row: {reason}. The row is not calculated.', 1),
+    (N'err.ECR-CALC-0422.categoryRuleInvalid', N'en', N'The category rule expression is invalid: {reason}.', 1),
+    (N'err.ECR-CALC-0422.categoryRuleNotText', N'en', N'The category rule must return text (the category key, for example "Diesel"), not a number.', 1),
+    (N'publish.problem.categoryRuleInvalid', N'en', N'The category rule does not parse: {reason}', 1),
+    (N'publish.problem.categoryRuleNotText', N'en', N'The category rule returns {type}, but the category key must be text (for example "Diesel").', 1),
+    (N'publish.problem.categoryRuleUnknownConstant', N'en', N'The category rule references constant CST.{code}, which this version does not define.', 1),
+    (N'publish.problem.categoryRuleBadFormula', N'en', N'The category rule references !{formula}: it can only read Row formulas of the version (it runs once per row, before the substance loop).', 1),
+    (N'publish.warning.categoryRuleMissing', N'en', N'{count} constant(s) have more than one category ({constants}), but the version has no category rule: each of them is ambiguous at calculation time.', 1),
+    (N'publish.warning.categoryRuleRowConstant', N'en', N'Row formula {formula} reads constant {constant}, which has several categories. The Row phase runs before the category rule, so the constant is ambiguous there: make the formula a substance formula.', 1),
+    -- CAT:l2 ── кінець секції ──
+    -- COLL:stale-err ── resultsStale у переліку документів: відмови параметрів; ru/kz — порцією COLL:stale-err нижче ──
+    (N'err.ECR-REQ-0422.resultsStaleNeedsPeriod', N'en', N'Filtering by stale results needs a period: staleness belongs to a period.', 1),
+    (N'err.ECR-REQ-0422.staleBy', N'en', N'staleBy accepts only "me" and only together with resultsStale=true.', 1),
+    -- COLL:stale-err ── кінець секції ──
+    -- COLL:stale-ui ── банер "результати застаріли" у картці документа; ru/kz — порцією COLL:stale-ui нижче ──
+    (N'document.staleResults.title', N'en', N'Calculation results are out of date', 1),
+    (N'document.staleResults.hint', N'en', N'Input data was changed after the last calculation. Recalculate to refresh the results.', 1),
+    (N'document.staleResults.hintSince', N'en', N'Input data was changed on {date}, after the last calculation. Recalculate to refresh the results.', 1)
+    -- COLL:stale-ui ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -10201,6 +10234,7 @@ SELECT v.[Key], v.Lang, v.Val
     (N'grid.listMore', N'ru', N'Ещё {count}: введите текст, чтобы сузить список'),
     (N'grid.listClear', N'ru', N'(очистить ячейку)'),
     (N'grid.lookupEditorLabel', N'ru', N'Выберите запись справочника'),
+    (N'grid.lookupClosedEntry', N'ru', N'{name} (закрыто)'),
     (N'grid.boolEditorLabel', N'ru', N'Выберите «да» или «нет»'),
     (N'grid.unitEditorLabel', N'ru', N'Выберите единицу измерения'),
     (N'grid.dateEditorLabel', N'ru', N'Выберите дату'),
@@ -13235,6 +13269,7 @@ SELECT v.[Key], v.Lang, v.Val
     (N'grid.listMore', N'kz', N'Тағы {count}: тізімді тарылту үшін теріңіз'),
     (N'grid.listClear', N'kz', N'(ұяшықты тазарту)'),
     (N'grid.lookupEditorLabel', N'kz', N'Анықтамалық жазбасын таңдаңыз'),
+    (N'grid.lookupClosedEntry', N'kz', N'{name} (жабылған)'),
     (N'grid.boolEditorLabel', N'kz', N'«Иә» немесе «жоқ» таңдаңыз'),
     (N'grid.unitEditorLabel', N'kz', N'Өлшем бірлігін таңдаңыз'),
     (N'grid.dateEditorLabel', N'kz', N'Күнді таңдаңыз'),
@@ -17644,6 +17679,94 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:d13bindings ── кінець секції ──
+-- COLL:b-stale-badge ── ru/kz лінії B: бейдж застарілих результатів методологій; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'documents.methodologyResultsStale', N'ru', N'Результаты методологий устарели'),
+    (N'documents.methodologyResultsStale', N'kz', N'Әдістемелер нәтижелері ескірген'),
+    (N'workflow.recalculateCalculations', N'ru', N'Пересчитать расчёты'),
+    (N'workflow.recalculateCalculations', N'kz', N'Есептеулерді қайта есептеу')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:b-stale-badge ── кінець секції ──
+-- COLL:dps-required-header ── ru/kz D-PS: порожнє обов'язкове поле шапки блокує подання; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-HDR-0422.requiredAtSubmit', N'ru', N'Лист нельзя подать: обязательные поля шапки не заполнены: {headerFieldCodes}. Заполните их в шапке документа и подайте снова.'),
+    (N'err.ECR-HDR-0422.requiredAtSubmit', N'kz', N'Парақты тапсыруға болмайды: тақырып бөлігінің міндетті өрістері толтырылмаған: {headerFieldCodes}. Оларды құжаттың тақырып бөлігінде толтырып, қайта тапсырыңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:dps-required-header ── кінець секції ──
+-- COLL:mkeys ── ru/kz D1: відмова переносу, коли правила/обов'язкові входи методології посилаються на колонки іншої версії шаблону; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-SCHM-0422.migrateMethodologyKeysNotMapped', N'ru', N'У методологии, привязанной к целевой версии, есть опубликованная версия, правила или обязательные входы которой ссылаются на колонки другой версии этого шаблона (см. methodologyKeys). После переноса эти правила не совпали бы ни с одной строкой — ничего не считалось бы, а блокирующий обязательный вход нельзя было бы удовлетворить. Опубликуйте версию методологии, правила и обязательные входы которой указывают на колонки целевой версии, затем переносите проект.'),
+    (N'err.ECR-SCHM-0422.migrateMethodologyKeysNotMapped', N'kz', N'Мақсатты нұсқаға байланған әдістеменің жарияланған нұсқасы бар, оның ережелері немесе міндетті кірістері осы үлгінің басқа нұсқасының бағандарына сілтейді (methodologyKeys қараңыз). Көшіруден кейін бұл ережелер бірде-бір жолға сәйкес келмес еді — ештеңе есептелмес еді, ал бұғаттаушы міндетті кірісті қанағаттандыру мүмкін болмас еді. Ережелері мен міндетті кірістері мақсатты нұсқаның бағандарын көрсететін әдістеме нұсқасын жариялаңыз, содан кейін жобаны көшіріңіз.'),
+    (N'documents.migrateRefusalMethodologyKeysNotMapped', N'ru', N'Правила или обязательные входы методологии ссылаются на колонки другой версии шаблона; после переноса они ничему не соответствовали бы.'),
+    (N'documents.migrateRefusalMethodologyKeysNotMapped', N'kz', N'Әдістеме ережелері немесе міндетті кірістері үлгінің басқа нұсқасының бағандарына сілтейді; көшіруден кейін олар ешнәрсеге сәйкес келмес еді.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:mkeys ── кінець секції ──
+-- CAT:l2 ── ru/kz L-2: правило категорії константи; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-CALC-0422.categoryRuleEmpty', N'ru', N'Правилу категории нужно выражение; чтобы правила не было, удалите его.'),
+    (N'err.ECR-CALC-0422.categoryRuleEmpty', N'kz', N'Санат ережесіне өрнек қажет; ереже болмауы үшін оны жойыңыз.'),
+    (N'err.ECR-CALC-0422.categoryRuleFailed', N'ru', N'Правило категории «{expression}» не дало категорию для этой строки: {reason}. Строка не рассчитана.'),
+    (N'err.ECR-CALC-0422.categoryRuleFailed', N'kz', N'«{expression}» санат ережесі осы жол үшін санат бермеді: {reason}. Жол есептелмеді.'),
+    (N'err.ECR-CALC-0422.categoryRuleInvalid', N'ru', N'Выражение правила категории недопустимо: {reason}.'),
+    (N'err.ECR-CALC-0422.categoryRuleInvalid', N'kz', N'Санат ережесінің өрнегі жарамсыз: {reason}.'),
+    (N'err.ECR-CALC-0422.categoryRuleNotText', N'ru', N'Правило категории должно возвращать текст (ключ категории, например "Diesel"), а не число.'),
+    (N'err.ECR-CALC-0422.categoryRuleNotText', N'kz', N'Санат ережесі мәтін (санат кілті, мысалы "Diesel") қайтаруы тиіс, сан емес.'),
+    (N'publish.problem.categoryRuleInvalid', N'ru', N'Правило категории не разбирается: {reason}'),
+    (N'publish.problem.categoryRuleInvalid', N'kz', N'Санат ережесі талданбайды: {reason}'),
+    (N'publish.problem.categoryRuleNotText', N'ru', N'Правило категории возвращает {type}, а ключ категории должен быть текстом (например "Diesel").'),
+    (N'publish.problem.categoryRuleNotText', N'kz', N'Санат ережесі {type} қайтарады, ал санат кілті мәтін болуы тиіс (мысалы "Diesel").'),
+    (N'publish.problem.categoryRuleUnknownConstant', N'ru', N'Правило категории ссылается на константу CST.{code}, которой в этой версии нет.'),
+    (N'publish.problem.categoryRuleUnknownConstant', N'kz', N'Санат ережесі осы нұсқада жоқ CST.{code} тұрақтысына сілтейді.'),
+    (N'publish.problem.categoryRuleBadFormula', N'ru', N'Правило категории ссылается на !{formula}: оно видит только Row-формулы версии (считается один раз на строку, до цикла веществ).'),
+    (N'publish.problem.categoryRuleBadFormula', N'kz', N'Санат ережесі !{formula} формуласына сілтейді: ол нұсқаның тек Row-формулаларын көреді (жолға бір рет, заттар циклінен бұрын есептеледі).'),
+    (N'publish.warning.categoryRuleMissing', N'ru', N'Констант с несколькими категориями: {count} ({constants}), но у версии нет правила категории: каждая из них неоднозначна при расчёте.'),
+    (N'publish.warning.categoryRuleMissing', N'kz', N'Бірнеше санаты бар тұрақтылар: {count} ({constants}), бірақ нұсқада санат ережесі жоқ: олардың әрқайсысы есептеу кезінде екіұшты.'),
+    (N'publish.warning.categoryRuleRowConstant', N'ru', N'Row-формула {formula} читает константу {constant} с несколькими категориями. Row-фаза идёт до правила категории, поэтому константа там неоднозначна: сделайте формулу формулой вещества.'),
+    (N'publish.warning.categoryRuleRowConstant', N'kz', N'{formula} Row-формуласы бірнеше санаты бар {constant} тұрақтысын оқиды. Row-фаза санат ережесінен бұрын орындалады, сондықтан тұрақты онда екіұшты: формуланы зат формуласына айналдырыңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- CAT:l2 ── кінець секції ──
+-- COLL:stale-err ── ru/kz resultsStale у переліку документів: відмови параметрів; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-REQ-0422.resultsStaleNeedsPeriod', N'ru', N'Для фильтра по устаревшим результатам нужен период: устаревание относится к периоду.'),
+    (N'err.ECR-REQ-0422.resultsStaleNeedsPeriod', N'kz', N'Ескірген нәтижелер бойынша сүзу үшін кезең қажет: ескіру кезеңге қатысты.'),
+    (N'err.ECR-REQ-0422.staleBy', N'ru', N'staleBy принимает только «me» и только вместе с resultsStale=true.'),
+    (N'err.ECR-REQ-0422.staleBy', N'kz', N'staleBy тек «me» мәнін және тек resultsStale=true-мен бірге қабылдайды.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:stale-err ── кінець секції ──
+-- COLL:stale-ui ── ru/kz банера "результати застаріли" у картці документа; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'document.staleResults.title', N'ru', N'Результаты расчёта устарели'),
+    (N'document.staleResults.title', N'kz', N'Есептеу нәтижелері ескірген'),
+    (N'document.staleResults.hint', N'ru', N'Входные данные изменены после последнего расчёта. Пересчитайте, чтобы обновить результаты.'),
+    (N'document.staleResults.hint', N'kz', N'Кіріс деректер соңғы есептеуден кейін өзгерген. Нәтижелерді жаңарту үшін қайта есептеңіз.'),
+    (N'document.staleResults.hintSince', N'ru', N'Входные данные изменены {date}, после последнего расчёта. Пересчитайте, чтобы обновить результаты.'),
+    (N'document.staleResults.hintSince', N'kz', N'Кіріс деректер {date} күні, соңғы есептеуден кейін өзгерген. Нәтижелерді жаңарту үшін қайта есептеңіз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:stale-ui ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

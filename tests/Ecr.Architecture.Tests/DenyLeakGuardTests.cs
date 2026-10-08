@@ -59,6 +59,7 @@ public sealed partial class DenyLeakGuardTests
         ["src/Ecr.Application/Validation/ValidationMessage.cs"] = "визначення запису",
         ["src/Ecr.Application/Validation/ValidationEngine.cs"] = "виробник: правила таблиці",
         ["src/Ecr.Application/Validation/TableValidation.cs"] = "виробник: структура й обов'язковість",
+        ["src/Ecr.Application/Validation/RequiredHeaderCheck.cs"] = "виробник: порожні обов'язкові поля шапки (D-PS); лише коди, без значень",
         ["src/Ecr.Application/Validation/RelationCheckRunner.cs"] = "виробник: зв'язки Check (джерело — правило 1)",
         ["src/Ecr.Application/Calculations/CheckEvaluator.cs"] = "виробник: текст звірки, SourceTableDefId",
         ["src/Ecr.Application/Validation/ValidationMessageTemplates.cs"] =
@@ -109,6 +110,10 @@ public sealed partial class DenyLeakGuardTests
             (1, "D-12: поле шапки, яке пише сам автор запиту (неіснуючий запис довідника); шапка — не Column/Table"),
         ["src/Ecr.Application/Documents/DocumentHeaderHandlers.cs | деталь headerFieldCode | missingCode"] =
             (1, "те саме, що текст"),
+        ["src/Ecr.Application/Workflow/SubmitSheetHandler.cs | деталь fields | emptyCodes"] =
+            (1, "D-PS: коди порожніх обов'язкових полів ШАПКИ (не Column/Table, видимості у шапки немає); значень немає"),
+        ["src/Ecr.Application/Workflow/SubmitSheetHandler.cs | текст | emptyCodes.Count"] =
+            (1, "D-PS: число порожніх обов'язкових полів шапки, не колонка і не значення"),
         ["src/Ecr.Application/Documents/GetTableSliceHandler.cs | текст | code"] =
             (2, "ключ «рядок:колонка» лише для колонок, що пройшли CanReadColumn"),
         ["src/Ecr.Application/Documents/GetTableSliceHandler.cs | текст | column.Code"] =

@@ -69,6 +69,12 @@ public sealed class CreateRowHandler(
                 });
         }
 
+        // ⛔ D-6: схована таблиця для читача НЕ ІСНУЄ — 404 ДО відмови «RowMode = Fixed», що називала її код.
+        await DocumentVisibility
+            .RequireTableVisibleAsync(
+                access, profile, documentId, instance.TableInstanceId, instance.TableDefId, instance.PeriodKey, ct)
+            .ConfigureAwait(false);
+
         var snapshot = await metadata.GetAsync(instance.TemplateVersionId, ct).ConfigureAwait(false);
 
         var table = snapshot.Sheets

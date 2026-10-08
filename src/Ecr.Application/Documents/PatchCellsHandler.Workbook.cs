@@ -110,6 +110,21 @@ public sealed partial class PatchCellsHandler
         var profile = await BlamedAsync(ids[0], () => EnsureDocumentReadableAsync(userId, documentId, ct))
             .ConfigureAwait(false);
 
+        // ⛔ D-6: те саме, що в поштучному `LoadContextAsync` — схована від читача таблиця для нього НЕ ІСНУЄ
+        // (404 `ECR-DOC-0404 tableInstance`) ДО будь-якої відмови, що її називає (409 RowMode, період, версії).
+        // Книга й поштучний запис дають однакову відповідь.
+        foreach (var request in requests)
+        {
+            var instance = instances[request.TableInstanceId];
+            await BlamedAsync(request.TableInstanceId, async () =>
+            {
+                await DocumentVisibility.RequireTableVisibleAsync(
+                    access, profile, instance.DocumentId, instance.TableInstanceId, instance.TableDefId,
+                    instance.PeriodKey, ct).ConfigureAwait(false);
+                return true;
+            }).ConfigureAwait(false);
+        }
+
         foreach (var request in requests)
         {
             Blamed(request.TableInstanceId, () => EnsurePeriodMatches(request, instances[request.TableInstanceId]));
@@ -341,7 +356,8 @@ public sealed partial class PatchCellsHandler
             return;
         }
 
-        var resolved = new Dictionary<int, ApplicableMethodology?>();
+        // C1: ключ — (методологія, версія шаблону): локалізація ключів залежить від версії шаблону екземпляра.
+        var resolved = new Dictionary<(int MethodologyId, int TemplateVersionId), ApplicableMethodology?>();
         foreach (var item in touched)
         {
             var methodologyIds = bindings
@@ -352,10 +368,12 @@ public sealed partial class PatchCellsHandler
 
             foreach (var methodologyId in methodologyIds)
             {
-                if (!resolved.TryGetValue(methodologyId, out var applied))
+                var templateVersionId = item.Context.Instance.TemplateVersionId;
+                if (!resolved.TryGetValue((methodologyId, templateVersionId), out var applied))
                 {
-                    applied = await ResolveApplicableAsync(methodologyId, periodBounds.PeriodEnd, ct).ConfigureAwait(false);
-                    resolved[methodologyId] = applied;
+                    applied = await ResolveApplicableAsync(
+                        methodologyId, periodBounds.PeriodEnd, templateVersionId, ct).ConfigureAwait(false);
+                    resolved[(methodologyId, templateVersionId)] = applied;
                 }
 
                 if (applied is not null)

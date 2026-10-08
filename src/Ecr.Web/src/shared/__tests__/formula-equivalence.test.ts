@@ -60,6 +60,21 @@ describe('Еквівалентність клієнт/сервер', () => {
     expect(evaluate('ROUND(-2.5, 0)')).toBe(-3);
   });
 
+  it('+ на двох текстах конкатенує, як на сервері (AF `!A + "_" + !B`)', () => {
+    expect(evaluate("'a' + 'b'")).toBe('ab');
+    expect(evaluate("'A' + '_' + 'B'")).toBe('A_B');
+    // Не числовий розбір: '1' + '2' — це '12', а не 3.
+    expect(evaluate("'1' + '2'")).toBe('12');
+    expect(evaluate("'5' + '3'")).toBe('53');
+  });
+
+  it('+ з порожнечею поширює її, а текст+не-текст — #VALUE', () => {
+    expect(evaluate("NULL + 'a'")).toBeNull();
+    expect(evaluate("'a' + '_' + NULL")).toBeNull();
+    expect(format(evaluate("'a' + 1"))).toBe('#VALUE');
+    expect(format(evaluate("'5' + 1"))).toBe('#VALUE');
+  });
+
   it('ділення на порожнечу — помилка, а не порожнеча', () => {
     const result = evaluate('1 / NULL');
 

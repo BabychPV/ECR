@@ -2,12 +2,18 @@ using System.Text.Json;
 using Ecr.Application.Documents.Dto;
 using Ecr.Application.Ports;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 
 namespace Ecr.Infrastructure.Persistence;
 
 /// <summary>Реалізація <see cref="IDocumentListSummaryStore"/>: один агрегований запит.</summary>
-public sealed class DocumentListSummaryStore(EcrDbContext db) : IDocumentListSummaryStore
+public sealed class DocumentListSummaryStore(
+    EcrDbContext db, Microsoft.Extensions.Caching.Memory.IMemoryCache? cache = null, Ecr.Domain.Abstractions.IClock? clock = null)
+    : IDocumentListSummaryStore
 {
+    /// <summary>Життя запису лічильників застарілих результатів (без інвалідації: достатньо TTL).</summary>
+    public static readonly TimeSpan StaleCountsTtl = TimeSpan.FromSeconds(45);
+
     /// <inheritdoc />
     /// <remarks>
     /// ⚠ Сирий SQL, а не LINQ: стан документа — агрегат по аркушах, а лічильник
@@ -23,7 +29,7 @@ public sealed class DocumentListSummaryStore(EcrDbContext db) : IDocumentListSum
     /// </remarks>
     public async Task<DocumentListSummaryResponse> SummarizeAsync(
         int? projectId, int periodKey, IReadOnlyCollection<int>? visibleProjectIds,
-        SummaryRestrictions? restrictions, CancellationToken ct)
+        SummaryRestrictions? restrictions, int? currentUserId, CancellationToken ct)
     {
         // ⛔ Схований від читача аркуш не вносить стан (LEFT JOIN нижче його не бачить), а документ
         // проєкту зі звуженням не потрапляє у «З зауваженнями»: збережений підсумок перевірки —
@@ -83,9 +89,87 @@ public sealed class DocumentListSummaryStore(EcrDbContext db) : IDocumentListSum
             .SingleAsync(ct)
             .ConfigureAwait(false);
 
+        // Застарілі результати - ОКРЕМИЙ запит (великий агрегат вище не чіпаємо): той самий предикат, що дає
+        // позначку й фільтр у переліку (`StaleResultsQuery`), по тих самих документах, які читач бачить.
+        // ⛔ Проєкти зі звуженням не рахуються - як `WithIssues`.
+        var (staleCount, staleMine) = await StaleCountsAsync(
+            projectId, periodKey, allowed?.ToArray(), restrictions, currentUserId, ct).ConfigureAwait(false);
+
         return new DocumentListSummaryResponse(
             row.Draft, row.Submitted, row.Approved, row.Rejected, row.WithIssues,
-            row.SheetsApproved, row.SheetsTotal);
+            row.SheetsApproved, row.SheetsTotal, staleCount, staleMine);
+    }
+
+    /// <summary>Лічильники, що лежать у кеші: лише числа, жодних ідентифікаторів документів.</summary>
+    private sealed record StaleCounts(int All, int Mine, DateTime ExpiresAt);
+
+    /// <summary>
+    /// <c>staleResultsCount</c> / <c>staleResultsMineCount</c> з коротким кешем (<see cref="StaleCountsTtl"/>).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Кешуються ЛИШЕ ці два числа (найдорожчий запит смуги: ~1 с на 500 тис. рядків аудиту); позначка в рядку
+    /// сторінки кешу не має. Без інвалідації: правка входу доїде до лічильника за ≤ TTL - це свідомо (число
+    /// орієнтовне, а позначка в рядку й фільтр точні).
+    ///
+    /// ⛔ Безпека ключа: користувач + проєкт + період + ЕФЕКТИВНИЙ scope читача (межа грантів, пари «проєкт-схований
+    /// аркуш», проєкти зі звуженням) → SHA-256. Різні scope не діляться записом: звужений читач не отримає лічильник
+    /// незвуженого (він і так рахується без звужених проєктів), а його значення не потрапить до незвуженого.
+    /// Час життя міряє <c>IClock</c> (у тестах керований), а не годинник кешу. Кеш не задано - рахуємо щоразу.
+    /// </remarks>
+    private async Task<(int All, int Mine)> StaleCountsAsync(
+        int? projectId, int periodKey, int[]? scope, SummaryRestrictions? restrictions, int? currentUserId,
+        CancellationToken ct)
+    {
+        var narrowed = restrictions?.NarrowedProjects.ToArray() ?? [];
+
+        string? key = null;
+        if (cache is not null && clock is not null)
+        {
+            key = StaleCountsKey(projectId, periodKey, scope, restrictions, narrowed, currentUserId);
+            if (cache.TryGetValue(key, out StaleCounts? hit) && hit is not null && hit.ExpiresAt > clock.UtcNow)
+            {
+                return (hit.All, hit.Mine);
+            }
+        }
+
+        var visible = db.Documents
+            .AsNoTracking()
+            .Where(d => (scope == null || scope.Contains(d.ProjectId)) && !narrowed.Contains(d.ProjectId));
+
+        var stale = StaleResultsQuery.Documents(db, periodKey).Select(r => r.DocumentId);
+        var all = await visible.CountAsync(d => stale.Contains(d.Id), ct).ConfigureAwait(false);
+
+        var mine = 0;
+        if (currentUserId is { } me && all > 0)
+        {
+            var mineIds = StaleResultsQuery.Documents(db, periodKey, me).Select(r => r.DocumentId);
+            mine = await visible.CountAsync(d => mineIds.Contains(d.Id), ct).ConfigureAwait(false);
+        }
+
+        if (key is not null && cache is not null && clock is not null)
+        {
+            cache.Set(key, new StaleCounts(all, mine, clock.UtcNow + StaleCountsTtl), StaleCountsTtl);
+        }
+
+        return (all, mine);
+    }
+
+    private static string StaleCountsKey(
+        int? projectId, int periodKey, int[]? scope, SummaryRestrictions? restrictions, int[] narrowed, int? userId)
+    {
+        var hidden = (restrictions?.HiddenSheets ?? [])
+            .Select(h => $"{h.ProjectId}:{h.SheetCode}")
+            .Order(StringComparer.Ordinal);
+        var canonical = string.Join(
+            '|',
+            $"u={userId}", $"p={projectId}", $"k={periodKey}",
+            $"v={(scope is null ? "*" : string.Join(',', scope.Order()))}",
+            $"r={(restrictions is null ? 0 : 1)}",
+            $"h={string.Join(',', hidden)}",
+            $"n={string.Join(',', narrowed.Order())}");
+
+        return "doc-stale-counts:" + Convert.ToHexString(
+            System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(canonical)));
     }
 
     /// <inheritdoc />

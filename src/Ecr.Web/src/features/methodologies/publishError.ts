@@ -31,6 +31,12 @@ export const PublishProblemKeys = [
   'publish.problem.rowScopeReferencesLibrarySubstance',
   // RC5: формула глибша за межу обчислення (96 рівнів) — відмова з поясненням замість #BUDGET.
   'publish.problem.formulaTooDeep',
+  // L-2: правило категорії константи (`calc.CategoryRule`) — вираз не розбирається, посилається на
+  // відсутнє, повертає не текст.
+  'publish.problem.categoryRuleInvalid',
+  'publish.problem.categoryRuleNotText',
+  'publish.problem.categoryRuleUnknownConstant',
+  'publish.problem.categoryRuleBadFormula',
 ] as const;
 
 type PublishProblemKey = (typeof PublishProblemKeys)[number];

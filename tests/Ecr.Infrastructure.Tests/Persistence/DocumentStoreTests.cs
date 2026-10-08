@@ -71,11 +71,13 @@ public sealed class DocumentStoreTests(SqlServerFixture sql)
         Assert.All(page.Items, d => Assert.False(d.SheetStates.ContainsKey(numericKey)));
 
         // ⛔ Q-167: сторінка з ДВОМА документами — а запитів у базу рівно
-        // ЧОТИРИ (перелік документів + стан погодження ВСІЄЇ сторінки + лічильники
+        // П'ЯТЬ (перелік документів + стан погодження ВСІЄЇ сторінки + лічильники
         // останньої перевірки ВСІЄЇ сторінки, `BE-09` + пізні правки ВСІЄЇ
-        // сторінки, `BE-09b`), а не по запиту на кожен документ окремо: число не
-        // залежить від розміру сторінки.
-        Assert.Equal(4, executed.Count);
+        // сторінки, `BE-09b` + застарілість результатів ВСІЄЇ сторінки, `resultsStale`),
+        // а не по запиту на кожен документ окремо: число не залежить від розміру
+        // сторінки. П'ятий запит - лише для сторінки З ПЕРІОДОМ (без періоду
+        // застарілість не визначена, запиту немає).
+        Assert.Equal(5, executed.Count);
     }
 
     [Fact]
@@ -154,8 +156,9 @@ public sealed class DocumentStoreTests(SqlServerFixture sql)
         Assert.All(second.Sheets!, s => Assert.Equal("Draft", s.State));
 
         // ⛔ Q-167: назви приїхали тим самим пакетним запитом станів — запитів
-        // на сторінку ЧОТИРИ, як і без назв, а не +1 на документ чи на сторінку.
-        Assert.Equal(4, executed.Count);
+        // на сторінку П'ЯТЬ (з застарілістю результатів, `resultsStale`), як і без назв, а не +1 на
+        // документ чи на сторінку.
+        Assert.Equal(5, executed.Count);
 
         // Картка документа (`GET /documents/{id}`) віддає те саме поле тим самим запитом.
         var card = await store.FindAsync(doc1.DocumentId, new PeriodKeyFilter(doc1.PeriodKey.Value), CancellationToken.None);

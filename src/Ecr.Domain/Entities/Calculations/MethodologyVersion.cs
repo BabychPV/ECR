@@ -457,6 +457,52 @@ public sealed class MethodologyVersion : Entity<int>
     }
 
     /// <summary>
+    /// Ставить правило категорії константи цієї версії (L-2): створює його або переписує наявне.
+    /// Лише для чернетки.
+    /// </summary>
+    /// <param name="existing">Наявне правило версії; <c>null</c> — правила ще немає.</param>
+    /// <param name="expression">Вираз діалекту Methodology, що дає ключ категорії.</param>
+    /// <param name="utcNow">Момент правки з <c>IClock.UtcNow</c>.</param>
+    /// <returns>Правило — нове (треба додати до сховища) або наявне, переписане.</returns>
+    /// <exception cref="DomainException">
+    /// <c>ECR-CALC-0409</c> — версія не чернетка або правило чуже; <c>ECR-CALC-0422</c> — порожній вираз.
+    /// </exception>
+    /// <remarks>
+    /// ⛔ Вхід лише через версію, як і для решти складу: правило не знає, опублікована його версія чи
+    /// ні, а зміна ключа категорії в опублікованій версії тихо змінила б, яку константу бере кожен
+    /// рядок, — без diff-у й сліду.
+    /// </remarks>
+    public MethodologyCategoryRule SetCategoryRule(
+        MethodologyCategoryRule? existing, string expression, DateTime utcNow)
+    {
+        RequireDraft("правило категорії");
+
+        if (existing is null)
+        {
+            return new MethodologyCategoryRule(Id, expression, utcNow);
+        }
+
+        RequireOwn(existing.MethodologyVersionId, "Правило категорії", "category-rule");
+        existing.Update(expression, utcNow);
+
+        return existing;
+    }
+
+    /// <summary>Дозволяє прибрати правило категорії цієї версії. Лише для чернетки.</summary>
+    /// <param name="rule">Правило, яке вже належить цій версії.</param>
+    /// <exception cref="DomainException">
+    /// <c>ECR-CALC-0409</c> — версія не чернетка або правило чуже.
+    /// </exception>
+    /// <remarks>Як <see cref="RemoveFormula"/>: сутність лише дозволяє, видаляє сховище.</remarks>
+    public void RemoveCategoryRule(MethodologyCategoryRule rule)
+    {
+        ArgumentNullException.ThrowIfNull(rule);
+
+        RequireDraft("правило категорії");
+        RequireOwn(rule.MethodologyVersionId, "Правило категорії", "category-rule");
+    }
+
+    /// <summary>
     /// Оголошує обов'язкову вхідну колонку методології. Лише для чернетки
     /// (директива «обов'язкові вхідні колонки методології»).
     /// </summary>

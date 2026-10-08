@@ -108,6 +108,7 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
         var sheets = await StatesAsync(documentId, period, ct).ConfigureAwait(false);
         var late = await LateEditsBatchAsync([documentId], period, ct).ConfigureAwait(false);
         var included = await IncludedCodesBatchAsync([documentId], period, ct).ConfigureAwait(false);
+        var stale = await StaleResultsBatchAsync([documentId], period, ct).ConfigureAwait(false);
 
         return new DocumentSummary(
             document.Id, document.ProjectId, document.BusinessKey, document.CreatedAt, sheetCount,
@@ -116,7 +117,9 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
             HasLateEdits: late.Contains(documentId),
             Sheets: sheets, IncludedSheetCodes: included.GetValueOrDefault(documentId),
             OwnerDisplayName: document.Owner,
-            ApproverDisplayName: document.Approver);
+            ApproverDisplayName: document.Approver,
+            ResultsStale: stale is null ? null : stale.ContainsKey(documentId),
+            ResultsStaleSince: stale?.GetValueOrDefault(documentId));
     }
 
 
@@ -193,6 +196,19 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
                 : documents.Where(d => !lateIds.Contains(d.Id));
         }
 
+        // resultsStale: той самий предикат, що дає позначку в рядку (`StaleResultsQuery`), - підзапитом ДО `Take`.
+        // ⛔ Проєкти зі звуженням виключаються в обох напрямках (`false` теж): інакше «не застарілі» = решта,
+        // тобто те саме знання навиворіт. Без періоду фільтр не діє (застарілість належить періоду).
+        if (filter.ResultsStale is { } wantStale && period.Value is { } staleBy)
+        {
+            var narrowed = filter.NarrowedProjectIds?.ToArray() ?? [];
+            var staleIds = StaleResultsQuery.Documents(db, staleBy, filter.StaleByUserId).Select(r => r.DocumentId);
+            documents = documents.Where(d => !narrowed.Contains(d.ProjectId));
+            documents = wantStale
+                ? documents.Where(d => staleIds.Contains(d.Id))
+                : documents.Where(d => !staleIds.Contains(d.Id));
+        }
+
         // UI-18: пошук — теж у ЗАПИТІ до `Take`, ПОРУЧ із межею проєктів вище (а не
         // постфільтр: той дав би хибні `NextCursor`/`TotalCount`). Лише поля самого
         // документа — аркуші й таблиці не чіпаються, тож приховане не підтверджується.
@@ -255,6 +271,9 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
 
         var includedByDocument = await IncludedCodesBatchAsync([.. page1.Select(d => d.Id)], period, ct).ConfigureAwait(false);
 
+        // І застарілість результатів - теж ОДИН запит на сторінку.
+        var staleByDocument = await StaleResultsBatchAsync([.. page1.Select(d => d.Id)], period, ct).ConfigureAwait(false);
+
         var items = new List<DocumentSummary>(page1.Count);
         foreach (var d in page1)
         {
@@ -269,7 +288,9 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
                 d.Id, d.ProjectId, d.BusinessKey, d.CreatedAt, d.SheetCount, ToStateMap(sheets), d.NameL10n,
                 d.ModifiedAt, d.ModifiedByDisplayName, findings?.ErrorCount, findings?.WarningCount,
                 late.Contains(d.Id), sheets, includedByDocument.GetValueOrDefault(d.Id), d.OwnerDisplayName,
-                d.ApproverDisplayName));
+                d.ApproverDisplayName,
+                staleByDocument is null ? null : staleByDocument.ContainsKey(d.Id),
+                staleByDocument?.GetValueOrDefault(d.Id)));
         }
 
         return new PagedResult<DocumentSummary>(
@@ -958,6 +979,38 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
             .ConfigureAwait(false);
 
         return [.. late];
+    }
+
+    /// <summary>
+    /// Документи сторінки із застарілими результатами (значення - відколи) - одним запитом;
+    /// <c>null</c> - періоду немає, застарілість не визначена.
+    /// </summary>
+    private async Task<Dictionary<long, DateTime?>?> StaleResultsBatchAsync(
+        IReadOnlyList<long> documentIds, PeriodKeyFilter period, CancellationToken ct)
+    {
+        if (period.Value is not { } periodKey)
+        {
+            return null;
+        }
+
+        if (documentIds.Count == 0)
+        {
+            return [];
+        }
+
+        var ids = documentIds.ToArray();
+
+        var rows = await StaleResultsQuery.Documents(db, periodKey)
+            .Where(r => ids.Contains(r.DocumentId))
+            .OrderBy(r => r.DocumentId)
+            .Take(documentIds.Count)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        // Kind::Unspecified з datetime2 - у JSON без `Z` читався б як локальний час; журнал пише UTC.
+        return rows.ToDictionary(
+            r => r.DocumentId,
+            r => r.Since is { } since ? (DateTime?)DateTime.SpecifyKind(since, DateTimeKind.Utc) : null);
     }
 
     /// <summary>Лічильники останньої перевірки одного документа.</summary>

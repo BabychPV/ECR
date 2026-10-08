@@ -207,6 +207,17 @@ public sealed class TypeChecker(Func<string, FunctionSignature?>? signatures = n
                     return Typed.Of(ExpressionValueType.Number);
                 }
 
+                // Text + Text → Text (конкатенація); Text + не-Text відхиляється нижче, як і раніше.
+                // Text + Null-форма (поле `!X` без відомого типу, NULL) — теж Text: Null поширюється
+                // у виконанні, а `!A + '_' + !B` не мусить бути помилкою публікації.
+                if (node.Operator == BinaryOperator.Add
+                    && ((Is(left.Type, ExpressionValueType.Text)
+                         && (Is(right.Type, ExpressionValueType.Text) || IsNull(right)))
+                        || (IsNull(left) && Is(right.Type, ExpressionValueType.Text))))
+                {
+                    return Typed.Of(ExpressionValueType.Text);
+                }
+
                 if (Is(left.Type, ExpressionValueType.Date) && Is(right.Type, ExpressionValueType.Date))
                 {
                     // Date − Date → Number (днів); Date + Date не має сенсу.

@@ -28,6 +28,7 @@ import { cellStateClass, cellStateOf, type LocalCellFlags } from './cellState';
 import { isMissingColumns, isSliceEmpty } from './emptiness';
 import { columnWidth, widthsFromEvent } from './columnWidths';
 import { createLookupCellEditor, lookupCellDisplay, lookupIdOfText } from './LookupCellEditor';
+import { unlistedIdsOf, useUnlistedLookupLabels } from './unlistedLookupEntries';
 import { boolCellDisplay, createBoolCellEditor } from './BoolCellEditor';
 import { createUnitCellEditor, unitCellDisplay, unitIdOfCode } from './UnitCellEditor';
 import { createDateCellEditor } from './DateCellEditor';
@@ -962,6 +963,28 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
     return map;
   }, [lookupRegistryCodes, lookupEntriesQueries.data]);
 
+  // ✎ PS-P2 (D-PS-6): id закритих записів, яких немає в переліку на дату, —
+  // їхня назва добирається окремо, замість сирого id в комірці.
+  const unlistedRequests = useMemo(() => {
+    if (data === undefined) return [];
+
+    return lookupRegistryCodes.flatMap(({ id, code }) => {
+      const columnCodes = data.columns
+        .filter((column) => column.dataType === 'Lookup' && column.lookupRegistryDefId === id)
+        .map((column) => column.code);
+      if (columnCodes.length === 0) return [];
+
+      const ids = unlistedIdsOf(
+        data.rows.flatMap((row) => columnCodes.map((columnCode) => row.cells[columnCode])),
+        lookupEntriesByRegistryId.get(id),
+      );
+
+      return ids.length === 0 ? [] : [{ registryId: id, code, ids }];
+    });
+  }, [data, lookupRegistryCodes, lookupEntriesByRegistryId]);
+
+  const unlistedLabelsByRegistryId = useUnlistedLookupLabels(unlistedRequests);
+
   /*
    * ⚠ `X-13`: довідники, що ЩЕ ЇДУТЬ. Редактор такої колонки показує
    * «завантаження», а не порожній перелік: порожній список оператор читає як
@@ -1054,6 +1077,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
             units.data ?? null,
             navigatedCell,
             outOfWindow,
+            unlistedLabelsByRegistryId,
           ),
     [
       data,
@@ -1068,6 +1092,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
       units.data,
       navigatedCell,
       outOfWindow,
+      unlistedLabelsByRegistryId,
     ],
   );
 
@@ -2412,6 +2437,10 @@ export function gridColumns(
 
   // ⛔ `ФВ-2.16`, `D-239`: комірки, записані за `Warn` поза вікном доступу.
   outOfWindow: ReadonlySet<string> = new Set(),
+
+  // ✎ PS-P2: підписи закритих записів довідників (`registryId → id → підпис`);
+  // лише для показу — у переліку вибору їх немає.
+  unlistedLabelsByRegistryId: ReadonlyMap<number, ReadonlyMap<number, string>> = new Map(),
 ): ColumnRegular[] {
   // ⚠ Тип оголошений ЯВНО, а не виведений із `map`. Без нього лямбди
   // всередині (`readonly`, `cellProperties`, `cellTemplate`) втрачають
@@ -2525,7 +2554,13 @@ export function gridColumns(
         : {
             editor: createLookupCellEditor(lookupEditorEntries),
             cellTemplate: (_h, props: { value?: unknown }) =>
-              lookupCellDisplay(props.value, lookupEntries),
+              lookupCellDisplay(
+                props.value,
+                lookupEntries,
+                column.lookupRegistryDefId === null
+                  ? undefined
+                  : unlistedLabelsByRegistryId.get(column.lookupRegistryDefId),
+              ),
           }),
 
       /*

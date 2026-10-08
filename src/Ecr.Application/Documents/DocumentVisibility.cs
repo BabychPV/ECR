@@ -123,6 +123,50 @@ public static class DocumentVisibility
         }
     }
 
+    /// <summary>
+    /// Таблиця, якої читач не бачить (Deny на таблицю чи її аркуш), для нього НЕ ІСНУЄ: ТА САМА відповідь,
+    /// що й на читання зрізу (<c>404 ECR-DOC-0404 tableInstance</c>), — до будь-якої відмови про режим
+    /// рядків, версії чи ключі. Інакше 409 «Table "X" has RowMode = Fixed…» називав би схований ресурс (D-6).
+    /// </summary>
+    /// <param name="access">Служба доступу.</param>
+    /// <param name="profile">Профіль користувача.</param>
+    /// <param name="documentId">Документ екземпляра.</param>
+    /// <param name="tableInstanceId">Екземпляр таблиці.</param>
+    /// <param name="tableDefId">Таблиця в структурі версії.</param>
+    /// <param name="periodKey">Період екземпляра.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <exception cref="NotFoundException"><c>ECR-DOC-0404</c> — таблиця схована від читача.</exception>
+    /// <remarks>
+    /// ⚠ Читач без обмежень нижче проєкту не платить нічого (<see cref="DocumentSheetVisibility.HasRestrictions"/>).
+    /// </remarks>
+    public static async Task RequireTableVisibleAsync(
+        IAccessDecisionService access, AccessProfile profile, long documentId, long tableInstanceId,
+        int tableDefId, int periodKey, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(access);
+        ArgumentNullException.ThrowIfNull(profile);
+
+        if (!DocumentSheetVisibility.HasRestrictions(profile))
+        {
+            return;
+        }
+
+        var scope = await access.ReadScopeAsync(profile, documentId, ct).ConfigureAwait(false);
+        var key = new Ecr.Domain.ValueObjects.PeriodKey(periodKey);
+
+        if (!(key.IsValid ? scope.InPeriod(key) : scope).CanReadTable(tableDefId))
+        {
+            throw new NotFoundException(
+                "ECR-DOC-0404",
+                $"Екземпляра таблиці {tableInstanceId} не знайдено.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-DOC-0404.tableInstance",
+                    ["tableInstanceId"] = tableInstanceId.ToString(CultureInfo.InvariantCulture),
+                });
+        }
+    }
+
     /// <summary>Відповідь «аркуша немає в складі документа» — однакова для відсутнього й схованого.</summary>
     /// <param name="documentId">Документ.</param>
     /// <param name="sheetDefId">Аркуш.</param>

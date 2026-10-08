@@ -123,7 +123,25 @@ public static class DocumentSheetVisibility
             HiddenSheetDefIds = [.. scopes.Values.SelectMany(s => s.HiddenSheetIds()).Distinct().Order()],
             HiddenTableDefIds = [.. scopes.Values.SelectMany(s => s.HiddenTableIds()).Distinct().Order()],
             HiddenColumnDefIds = [.. scopes.Values.SelectMany(s => s.HiddenColumnIds()).Distinct().Order()],
+
+            // ⛔ Фільтр resultsStale не бачить проєктів зі звуженням (та сама межа, що й у зведенні): список
+            // потрібен лише йому, тож решту запитів фільтр не обтяжує і не змінює.
+            NarrowedProjectIds = filter.ResultsStale is null
+                ? filter.NarrowedProjectIds
+                : [.. scopes.Where(s => IsProjectNarrowed(s.Value)).Select(s => s.Key).Order()],
         };
+    }
+
+    /// <summary>
+    /// Чи читач не бачить у проєкті хоч щось (аркуш, таблицю чи колонку) — тоді «результати застаріли» не
+    /// віддається ні в рядку, ні у фільтрі, ні в лічильнику (оракул про схований вхід).
+    /// </summary>
+    /// <param name="scope">Межі читання проєкту.</param>
+    public static bool IsProjectNarrowed(DocumentReadScope scope)
+    {
+        ArgumentNullException.ThrowIfNull(scope);
+
+        return scope.HiddenSheetCodes().Count > 0 || scope.HiddenTableIds().Count > 0 || scope.HiddenColumnIds().Count > 0;
     }
 
     /// <summary>Межі читача як фільтр «що схованo» для одного документа (позначка пізніх правок картки).</summary>
@@ -204,6 +222,11 @@ public static class DocumentSheetVisibility
             ModifiedByDisplayName = narrowed ? null : document.ModifiedByDisplayName,
             OwnerDisplayName = narrowed ? null : document.OwnerDisplayName,
             ApproverDisplayName = narrowed ? null : document.ApproverDisplayName,
+
+            // ⛔ Застарілість рахується по ВСІХ входах документа, а видимий вихід може від схованого не залежати:
+            // для читача зі звуженням у проєкті - null (і поза фільтром/лічильником), а не здогад «за видимим».
+            ResultsStale = narrowed || IsProjectNarrowed(scope) ? null : document.ResultsStale,
+            ResultsStaleSince = narrowed || IsProjectNarrowed(scope) ? null : document.ResultsStaleSince,
         };
     }
 

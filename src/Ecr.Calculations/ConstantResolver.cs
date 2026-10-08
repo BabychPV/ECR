@@ -128,10 +128,17 @@ public sealed class ConstantResolver(IConstantStore constants)
         //    несуть категорію-мітку («default») навіть там, де вона одна.
         //    Задана категорія — так само без «тоді будь-яка»: константа
         //    категорії «K1» до «K2» не застосовується (аудит A1).
+        //
+        // ✎ L-2 (`calc.CategoryRule`): категорію рядка тепер задає правило версії. AF
+        //    зберігає спільні константи методології не `null`, а буквально
+        //    `Category = "Common"` (k1…k5 вибору категорії, межі), тож за заданої
+        //    категорії кандидатами «без звуження» є і вони. Точний збіг виграє; заповнювачів
+        //    для категорій, яких у AF немає, не створюється — немає значення = `#REF`.
         var byCategory = category is null
             ? bySubstance
             : Narrow(bySubstance, c => string.Equals(c.Category, category, StringComparison.Ordinal))
-              ?? Narrow(bySubstance, c => c.Category is null);
+              ?? Narrow(bySubstance, c => c.Category is null
+                  || string.Equals(c.Category, MethodologyConstant.CommonCategory, StringComparison.Ordinal));
 
         if (byCategory is null)
         {
@@ -143,15 +150,23 @@ public sealed class ConstantResolver(IConstantStore constants)
         //    від порядку рядків у таблиці — і змінюється від переіндексації.
         if (byCategory.Count > 1)
         {
+            // Категорії-кандидати: без них «16 кандидатів» не каже, ЩО саме не
+            // вибрано (Land Demo RC9, L-2: константи AF 5.1/5.2/6.1 мають
+            // категорії, а рушій категорію не передає).
+            var categories = string.Join(
+                ", ",
+                byCategory.Select(c => c.Category ?? "—").Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal));
+
             throw new DomainException(
                 "ECR-CALC-0422",
                 $"Константа «{code}» версії {methodologyVersionId} має {byCategory.Count} кандидатів "
-                + $"на {onDate:yyyy-MM-dd}: вибір неоднозначний.",
+                + $"на {onDate:yyyy-MM-dd}: вибір неоднозначний (категорії: {categories}).",
                 new Dictionary<string, object?>
                 {
                     ["messageKey"] = "err.ECR-CALC-0422.constantAmbiguous",
                     ["code"] = code,
                     ["count"] = byCategory.Count,
+                    ["categories"] = categories,
                     ["date"] = onDate.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture),
                 });
         }

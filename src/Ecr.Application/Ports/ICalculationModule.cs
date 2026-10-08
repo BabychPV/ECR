@@ -142,6 +142,10 @@ public interface ICalculationModule
 /// з версіями бібліотек, чинними на бізнес-дату прив'язки; <c>null</c> — версія за межу
 /// своїх формул не посилається.
 /// </param>
+/// <param name="CategoryRule">
+/// ✎ L-2 (<c>calc.CategoryRule</c>): вираз, що з рядка дає ключ категорії констант; <c>null</c> —
+/// правила немає, і константи резолвляться без категорії, як до L-2. Читається раз на прив'язку.
+/// </param>
 public sealed record CalculationBindingContext(
     MethodologyDescriptor Methodology,
     long DocumentId,
@@ -153,7 +157,8 @@ public sealed record CalculationBindingContext(
     IReadOnlyDictionary<string, byte?> OutputScales,
     IReadOnlyDictionary<string, IReadOnlyList<MethodologyConstant>> Constants,
     Ecr.Expressions.Evaluation.IRegistrySnapshot? Registries = null,
-    CalculationLibraries? Libraries = null);
+    CalculationLibraries? Libraries = null,
+    string? CategoryRule = null);
 
 /// <summary>
 /// Замикання бібліотечних формул версії (HSE301 L): що з імпортованих методологій

@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Ecr.Application.Errors;
 using Ecr.Application.Ports;
+using Microsoft.Extensions.DependencyInjection;
 using Quartz;
 using Quartz.Impl.Matchers;
 
@@ -23,13 +24,21 @@ namespace Ecr.Infrastructure.Jobs;
 ///
 /// Тому без фабрики методи черги відмовляють зрозуміло — <c>ECR-SYS-0503</c>, —
 /// а все, що черги не потребує, працює.
+/// <para>
+/// ⛔ <paramref name="scopes"/> (N-5) — КОРЕНЕВА фабрика scope. Планувальник у застосунку
+/// scoped (прогрес живе на <c>DbContext</c> запиту), а відкладена перепостановка після
+/// злиття спрацьовує, коли запит давно завершився і його scope знищено. Тому замикання
+/// перепостановки бере СВІЙ scope, а не тримає планувальник запиту. Без фабрики (юніт-тести,
+/// ручна збірка) — стара поведінка: замикання тримає цей екземпляр.
+/// </para>
 /// </remarks>
 public sealed partial class QuartzJobScheduler(
     ISchedulerFactory? schedulerFactory = null,
     IJobProgressStore? progress = null,
     Ecr.Domain.Abstractions.IClock? clock = null,
     ICorrelationIdAccessor? correlation = null,
-    Microsoft.Extensions.Logging.ILogger<QuartzJobScheduler>? logger = null) : IBackgroundJobScheduler
+    Microsoft.Extensions.Logging.ILogger<QuartzJobScheduler>? logger = null,
+    IServiceScopeFactory? scopes = null) : IBackgroundJobScheduler
 {
     private const string UnavailableCode = "ECR-SYS-0503";
 
@@ -444,11 +453,22 @@ public sealed partial class QuartzJobScheduler(
         Task<string> Requeue(string finished, CancellationToken token)
             => CoalesceAsync<TJob>(instance, prefix, payload, createdByUserId, finished, token);
 
+        // ⛔ N-5: замикання, що тримає 	his, пережило б scope запиту (див. <paramref name="scopes"/>).
+        async Task<string> RequeueInOwnScope(string finished, CancellationToken token)
+        {
+            using var scope = scopes!.CreateScope();
+            return await scope.ServiceProvider.GetRequiredService<QuartzJobScheduler>()
+                .CoalesceAsync<TJob>(instance, prefix, payload, createdByUserId, finished, token)
+                .ConfigureAwait(false);
+        }
+
+        Func<string, CancellationToken, Task<string>> requeue = scopes is null ? Requeue : RequeueInOwnScope;
+
         // ⚠ Слухач бачить лише задачі, що стартували ПІСЛЯ його реєстрації (а реєструється
         // він на кожній постановці). «Не жива» при виконуваній — стартувала раніше: беремо
         // під нагляд, якщо вона ще виконується; інакше вона вже завершилась, і позначку
         // ніхто б не зняв — ставимо самі.
-        if (listener.MarkDirty(running, Requeue, adoptRunning: false))
+        if (listener.MarkDirty(running, requeue, adoptRunning: false))
         {
             return running;
         }
@@ -456,7 +476,7 @@ public sealed partial class QuartzJobScheduler(
         var stillExecuting = (await instance.GetCurrentlyExecutingJobs(ct).ConfigureAwait(false))
             .Any(c => string.Equals(c.JobDetail.Key.Name, running, StringComparison.Ordinal));
 
-        return stillExecuting && listener.MarkDirty(running, Requeue, adoptRunning: true)
+        return stillExecuting && listener.MarkDirty(running, requeue, adoptRunning: true)
             ? running
             : await CoalesceAsync<TJob>(instance, prefix, payload, createdByUserId, running, ct).ConfigureAwait(false);
     }
@@ -575,7 +595,7 @@ public sealed partial class QuartzJobScheduler(
 
                 if (requeue is not null)
                 {
-                    await requeue(jobId, CancellationToken.None).ConfigureAwait(false);
+                    await RequeueWithRetryAsync(jobId, requeue, log, cancellationToken).ConfigureAwait(false);
                 }
             }
 #pragma warning disable CA1031 // ⛔ Виняток зі слухача Quartz зриває закриття триґера задачі.
@@ -596,6 +616,49 @@ public sealed partial class QuartzJobScheduler(
             }
         }
     }
+
+    /// <summary>Скільки разів пробуємо перепостановку, перш ніж визнати зміну непорахованою.</summary>
+    private const int RequeueAttempts = 3;
+
+    /// <summary>Пауза після першого збою; після другого — подвійна.</summary>
+    private static readonly TimeSpan RequeueRetryDelay = TimeSpan.FromMilliseconds(100);
+
+    /// <summary>Виконує перепостановку; транзієнтний збій (база, мережа) повторюється обмежено.</summary>
+    /// <remarks>
+    /// ⚠ Рішення N-5: позначка з <c>dirty</c> уже знята, тож без повтору один збій губив би зміну
+    /// назавжди. Повтор тут же (а не повернення позначки), бо після завершення задачі ніщо
+    /// інше цю ціль не розбудить. Остання спроба кидає виняток — його логує <see cref="CoalescedRequeueListener"/>.
+    /// Пауза коротка: слухач тримає потік Quartz, 100 мс + 200 мс у найгіршому разі.
+    /// </remarks>
+    private static async Task RequeueWithRetryAsync(
+        string jobId, Func<string, CancellationToken, Task<string>> requeue,
+        Microsoft.Extensions.Logging.ILogger? log, CancellationToken ct)
+    {
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                await requeue(jobId, CancellationToken.None).ConfigureAwait(false);
+                return;
+            }
+#pragma warning disable CA1031 // Повторюємо будь-який збій постановки, остання спроба кидає далі.
+            catch (Exception ex) when (attempt < RequeueAttempts)
+#pragma warning restore CA1031
+            {
+                if (log is not null)
+                {
+                    LogCoalescedRequeueRetry(log, jobId, attempt, ex);
+                }
+
+                await Task.Delay(RequeueRetryDelay * attempt, ct).ConfigureAwait(false);
+            }
+        }
+    }
+
+    [Microsoft.Extensions.Logging.LoggerMessage(
+        Level = Microsoft.Extensions.Logging.LogLevel.Warning,
+        Message = "Перепостановка після злиття для задачі {JobId} не вдалася (спроба {Attempt}), повторюю.")]
+    private static partial void LogCoalescedRequeueRetry(Microsoft.Extensions.Logging.ILogger logger, string jobId, int attempt, Exception ex);
 
     [Microsoft.Extensions.Logging.LoggerMessage(
         Level = Microsoft.Extensions.Logging.LogLevel.Error,

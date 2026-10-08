@@ -80,6 +80,9 @@ public sealed class SubmitSheetHandler(
     /// </summary>
     public const string SubmitInsufficientLevelReasonKey = "deny.InsufficientGrantLevel.Submit";
 
+    /// <summary>Ключ каталогу відмови «обов'язкове поле шапки порожнє» (D-PS, <c>ECR-HDR-0422</c>).</summary>
+    public const string RequiredHeaderMessageKey = Validation.RequiredHeaderCheck.MessageKey;
+
     /// <summary>Тип події аудиту: подавач підтвердив попередження валідації (ФВ-5.19).</summary>
     public const string WarningsAcknowledgedEventType = "SheetSubmitWarningsAcknowledged";
 
@@ -431,6 +434,33 @@ public sealed class SubmitSheetHandler(
         var headerFieldCodes = snapshot.HeaderFields
             .Where(f => !f.IsDeleted)
             .ToDictionary(f => f.Id, f => f.Code);
+
+        // ⛔ D-PS (DESIGN-permit-header, «Прогалина 1»): обов'язковість шапки
+        // (`HeaderFieldDef.IsRequired`) перевірялась ЛИШЕ при PATCH шапки. Поле,
+        // якого ніхто не торкався, запису не має, тож порожня обов'язкова шапка
+        // спокійно проходила подання. Відмова називає лише КОДИ порожніх полів —
+        // жодного значення; видимості поля шапки (на відміну від колонки) немає.
+        // ⚠ Значення читаються лише коли в шаблоні є обов'язкове поле: типова
+        // версія їх не має, і зайвого запиту під блокуванням подання немає.
+        // Правило спільне з «Перевірити» (`RequiredHeaderCheck`, R-B3).
+        var requiredHeaderFields = Validation.RequiredHeaderCheck.RequiredFields(snapshot.HeaderFields);
+        if (requiredHeaderFields.Count > 0)
+        {
+            var rawHeader = await headers.GetValuesAsync(documentId, ct).ConfigureAwait(false);
+            var emptyCodes = Validation.RequiredHeaderCheck.EmptyCodes(requiredHeaderFields, rawHeader);
+            if (emptyCodes.Count > 0)
+            {
+                throw new BusinessRuleException(
+                    ErrorCodes.HeaderValueInvalid,
+                    $"Подання неможливе: порожніх обов'язкових полів шапки — {emptyCodes.Count}.",
+                    new Dictionary<string, object?>
+                    {
+                        ["messageKey"] = RequiredHeaderMessageKey,
+                        ["headerFieldCodes"] = string.Join(", ", emptyCodes),
+                        ["fields"] = emptyCodes,
+                    });
+            }
+        }
 
         var blocking = new List<Validation.ValidationMessage>();
 

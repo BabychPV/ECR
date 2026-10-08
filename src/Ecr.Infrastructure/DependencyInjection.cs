@@ -1,4 +1,4 @@
-﻿using Ecr.Application.Ports;
+using Ecr.Application.Ports;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Infrastructure.Caching;
@@ -117,6 +117,7 @@ public static class DependencyInjection
         services.AddScoped<IRecalculationApprovalStore, RecalculationApprovalStore>();
         services.AddScoped<IMethodologyStore, MethodologyStore>();
         services.AddScoped<IRuleCoverageReader, RuleCoverageReader>();
+        services.AddScoped<IColumnPathMapper, ColumnPathMapper>();
         services.AddScoped<IMethodologyDraftStore, MethodologyDraftStore>();
         services.AddScoped<IMethodologyVersionDeletionStore, MethodologyVersionDeletionStore>();
         services.AddScoped<IConstantStore, ConstantStore>();
@@ -278,7 +279,9 @@ public static class DependencyInjection
             sp.GetService<IJobProgressStore>(),
             sp.GetService<IClock>(),
             sp.GetService<ICorrelationIdAccessor>(),
-            sp.GetService<Microsoft.Extensions.Logging.ILogger<Jobs.QuartzJobScheduler>>()));
+            sp.GetService<Microsoft.Extensions.Logging.ILogger<Jobs.QuartzJobScheduler>>(),
+            // N-5: коренева фабрика - відкладена перепостановка бере власний scope.
+            sp.GetService<IServiceScopeFactory>()));
 
         // MI-02 (F1c): черга в базі. Порти реєструються завжди (fencing читає оренду
         // й у режимі Quartz — там вона null); виконавець і адаптер — лише за

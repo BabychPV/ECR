@@ -497,9 +497,23 @@ public sealed partial class TemplateVersionStore(EcrDbContext db) : ITemplateVer
     /// аркуш/таблиця/колонка — тією самою ідентичністю, що й гранти.
     /// </summary>
     /// <remarks>
-    /// ⚠ Предикат (<c>MatchJson</c>) — плаский об'єкт «код колонки → значення», ідентифікаторів не
-    /// містить, тож лишається як є. Правила методології (<c>calc.MethodologyRule</c>) належать ВЕРСІЇ
-    /// МЕТОДОЛОГІЇ, а не шаблону, і клоном шаблону не чіпаються.
+    /// ⛔ Предикат (<c>MatchJson</c>) — плаский об'єкт, ключі якого — <c>ColumnDefId</c> рядком
+    /// (<c>CalculatedCellOverlay</c> зіставляє їх через <c>MethodologyRuleMatcher</c> із колонками документа
+    /// ТІЄЇ версії, на якій він живе). Тож ключі вихідної версії на клоні не збігалися б ніколи, і накладений
+    /// результат мовчки зникав би. Тому числові ключі перемапляються на Id колонок клону (за кодами, тією самою
+    /// <c>map</c>). Нечислові ключі й не-об'єкти лишаються як є: зіставлення з ними й так нічого не дає, а
+    /// змінювати їх немає підстав.
+    ///
+    /// ⛔ Fail-closed: якщо числовий ключ не має відповідника в клоні, прибрати предикат НЕ можна — це
+    /// розширило б прив'язку на всі рядки (змінило б семантику). Така прив'язка НЕ копіюється; її відсутність
+    /// на клоні виявляє наявна перевірка <c>bindingsNotMapped</c> при переносі проєкту (D-13).
+    ///
+    /// ⚠ Правила й обов'язкові входи методології (<c>calc.MethodologyRule</c>, <c>MethodologyRequiredInput</c>)
+    /// належать ВЕРСІЇ МЕТОДОЛОГІЇ, а не шаблону, і клоном шаблону не чіпаються: вони посилаються на
+    /// <c>ColumnDefId</c> версії-джерела. ✎ C1: Id у сховищі навмисно лишаються (опублікована версія методології
+    /// незмінна й діє для ОБОХ версій шаблону), а при читанні перекладаються на колонки версії документа за
+    /// шляхом аркуш/таблиця/колонка (<c>MethodologyKeyLocalizer</c>). Перенос проєкту блокує
+    /// <c>methodologyKeysNotMapped</c> лише для ключів, чия колонка втрачена в цільовій версії.
     /// </remarks>
     private async Task CloneCalculationBindingsAsync(
         TemplateVersion clone, IReadOnlyList<GrantSource> sources, CancellationToken ct)
@@ -530,6 +544,7 @@ public sealed partial class TemplateVersionStore(EcrDbContext db) : ITemplateVer
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
+        var columnMap = map.ToDictionary(p => p.Key, p => p.Value.ColumnId);
         foreach (var b in bindings)
         {
             if (!map.TryGetValue(b.ColumnDefId, out var target))
@@ -537,14 +552,65 @@ public sealed partial class TemplateVersionStore(EcrDbContext db) : ITemplateVer
                 continue;
             }
 
-            var copy = new CalculationBinding(target.TableId, target.ColumnId, b.MethodologyId, b.OutputCode, b.MatchJson);
+            var match = RemapMatchJson(b.MatchJson, columnMap);
+            if (match is null)
+            {
+                continue;
+            }
+
+            var copy = new CalculationBinding(target.TableId, target.ColumnId, b.MethodologyId, b.OutputCode, match);
             if (!b.IsActive)
             {
-                copy.Update(b.MatchJson, isActive: false);
+                copy.Update(match, isActive: false);
             }
 
             db.CalculationBindings.Add(copy);
         }
+    }
+
+    /// <summary>
+    /// Переписує числові ключі предиката (<c>ColumnDefId</c> вихідної версії) на Id колонок клону.
+    /// <c>null</c> — числовий ключ без відповідника: предикат переписати не можна, прив'язку не копіюємо.
+    /// </summary>
+    /// <param name="matchJson">Предикат прив'язки.</param>
+    /// <param name="columnMap">Колонка вихідної версії → колонка клону.</param>
+    public static string? RemapMatchJson(string matchJson, IReadOnlyDictionary<int, int> columnMap)
+    {
+        System.Text.Json.Nodes.JsonObject? source;
+        try
+        {
+            source = System.Text.Json.Nodes.JsonNode.Parse(matchJson) as System.Text.Json.Nodes.JsonObject;
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return matchJson;
+        }
+
+        if (source is null
+            || !source.Any(p => int.TryParse(
+                p.Key, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out _)))
+        {
+            return matchJson;
+        }
+
+        var result = new System.Text.Json.Nodes.JsonObject();
+        foreach (var (key, value) in source)
+        {
+            var newKey = key;
+            if (int.TryParse(key, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var id))
+            {
+                if (!columnMap.TryGetValue(id, out var cloneId))
+                {
+                    return null;
+                }
+
+                newKey = cloneId.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            }
+
+            result[newKey] = value?.DeepClone();
+        }
+
+        return result.ToJsonString();
     }
 
     private async Task SaveCloneAsync(
@@ -555,14 +621,53 @@ public sealed partial class TemplateVersionStore(EcrDbContext db) : ITemplateVer
         db.TemplateVersions.Add(clone);
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
 
+        // D3: стилі належать ВЕРСІЇ (cfg.StyleDef.TemplateVersionId, UQ_StyleDef) — клонуються за кодом, а
+        // посилання колонок/рядків/шапки таблиці перев'язуються на нові Id (спершу стилі потрібні в базі).
+        var styleIds = await CloneStylesAsync(clone.Id, clonedFrom, ct).ConfigureAwait(false);
+        TemplateVersionCloner.RelinkStyles(links, styleIds);
+
         db.FormulaDefs.AddRange(TemplateVersionCloner.Relink(links));
         CloneTableRelations(clone, relationTemplates);
         await CloneResourceGrantsAsync(clone, grantSources, ct).ConfigureAwait(false);
         await CloneAccessRulesAsync(clone, clonedFrom, grantSources, ct).ConfigureAwait(false);
         await CloneCalculationBindingsAsync(clone, grantSources, ct).ConfigureAwait(false);
         await CloneConditionalFormatsAsync(clone.Id, clonedFrom, ct).ConfigureAwait(false);
+        await CloneSheetGroupRulesAsync(clone.Id, clonedFrom, ct).ConfigureAwait(false);
         SetClonedFrom(clone, clonedFrom);
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// D3: копіює <c>cfg.StyleDef</c> версії-джерела у клон (той самий <c>Code</c>, повний вигляд) і зберігає їх,
+    /// щоб отримати нові Id. Повертає мапу «Id стилю джерела → Id стилю клону».
+    /// </summary>
+    private async Task<IReadOnlyDictionary<int, int>> CloneStylesAsync(int cloneId, int sourceId, CancellationToken ct)
+    {
+        var sources = await db.StyleDefs
+            .AsNoTracking()
+            .Where(s => s.TemplateVersionId == sourceId)
+            .OrderBy(s => s.Id)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var copies = new List<(int SourceId, StyleDef Copy)>(sources.Count);
+        foreach (var s in sources)
+        {
+            var copy = new StyleDef(cloneId, Domain.ValueObjects.EcrCode.Create(s.Code));
+            copy.SetAppearance(
+                s.FontName, s.FontSize, s.IsBold, s.IsItalic, s.ForegroundArgb, s.BackgroundArgb,
+                s.BorderJson, s.HorizontalAlign, s.VerticalAlign, s.WrapText, s.NumberFormat);
+            db.StyleDefs.Add(copy);
+            copies.Add((s.Id, copy));
+        }
+
+        if (copies.Count == 0)
+        {
+            return new Dictionary<int, int>();
+        }
+
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
+        return copies.ToDictionary(c => c.SourceId, c => c.Copy.Id);
     }
 
     /// <summary>
@@ -581,6 +686,24 @@ public sealed partial class TemplateVersionStore(EcrDbContext db) : ITemplateVer
         db.ConditionalFormatRules.AddRange(source.Select(r => new ConditionalFormatRule(
             cloneId, r.ColumnCode, r.Ordinal, r.Operator, r.Value, r.ValueTo,
             r.BackgroundHex, r.ForegroundHex, r.IsBold)));
+    }
+    /// <summary>
+    /// D-13: правила складу документа (<c>cfg.SheetGroupRule</c>) належать версії й посилаються на групи аркушів
+    /// ТЕКСТОМ (<c>SheetGroup</c>/<c>TargetGroup</c> = <c>SheetDef.SheetGroup</c>), без Id аркуша/таблиці/колонки,
+    /// тож ремап не потрібен — рядок копіюється як є. <c>cfg.RegistryRuleDef</c> сюди не належить: це правила
+    /// довідника (<c>RegistryDefId</c>), а довідники не версіонуються.
+    /// </summary>
+    private async Task CloneSheetGroupRulesAsync(int cloneId, int sourceId, CancellationToken ct)
+    {
+        var source = await db.SheetGroupRules
+            .AsNoTracking()
+            .Where(r => r.TemplateVersionId == sourceId)
+            .OrderBy(r => r.Id)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        db.SheetGroupRules.AddRange(source.Select(r => new SheetGroupRule(
+            cloneId, r.SheetGroup, r.RuleKind, r.TargetGroup)));
     }
     /// <inheritdoc />
     /// <remarks>

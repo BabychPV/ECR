@@ -476,6 +476,16 @@ public sealed class Evaluator(
             return ExpressionValue.Null;
         }
 
+        // `+` на двох ТЕКСТАХ конкатенує (AF-формули на кшталт `!A + '_' + !B`). Null сюди не
+        // доходить — він поширюється вище, як у решти арифметики (на відміну від `&`).
+        // Текст + не-текст лишається #VALUE.
+        if (op == BinaryOperator.Add
+            && left.Type == ExpressionValueType.Text
+            && right.Type == ExpressionValueType.Text)
+        {
+            return ExpressionValue.Text(AsText(left) + AsText(right));
+        }
+
         return op switch
         {
             BinaryOperator.Add => Arithmetic(left, right, op),

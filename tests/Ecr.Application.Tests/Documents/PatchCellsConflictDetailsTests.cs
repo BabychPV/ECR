@@ -80,6 +80,10 @@ public sealed class PatchCellsConflictDetailsTests
         _access.CanReadDocumentAsync(Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<CancellationToken>())
             .Returns(EditDecision.Allow());
 
+        // D-6: видимість таблиці питається про профіль (у бойовому коді він не буває `null`).
+        _access.BuildProfileAsync(Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(new AccessBuilder().Build());
+
         // S6: межі читання — «бачить усе», крім тесту про приховану колонку.
         _access.ReadScopeAsync(Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<CancellationToken>())
             .Returns(async _ => ReadScopes.Everything(await _metadata.GetAsync(2, CancellationToken.None)));

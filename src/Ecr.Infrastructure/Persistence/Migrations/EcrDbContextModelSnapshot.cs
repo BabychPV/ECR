@@ -278,6 +278,36 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                     b.ToTable("Methodology", "calc");
                 });
 
+            modelBuilder.Entity("Ecr.Domain.Entities.Calculations.MethodologyCategoryRule", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<string>("Expression")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int>("MethodologyVersionId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime2(3)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MethodologyVersionId")
+                        .IsUnique()
+                        .HasDatabaseName("UQ_CategoryRule_Version");
+
+                    b.ToTable("CategoryRule", "calc");
+                });
+
             modelBuilder.Entity("Ecr.Domain.Entities.Calculations.MethodologyConstant", b =>
                 {
                     b.Property<int>("Id")
@@ -5499,6 +5529,16 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("FK_CStep_Run");
+                });
+
+            modelBuilder.Entity("Ecr.Domain.Entities.Calculations.MethodologyCategoryRule", b =>
+                {
+                    b.HasOne("Ecr.Domain.Entities.Calculations.MethodologyVersion", null)
+                        .WithMany()
+                        .HasForeignKey("MethodologyVersionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_CR_Version");
                 });
 
             modelBuilder.Entity("Ecr.Domain.Entities.Calculations.MethodologyConstant", b =>

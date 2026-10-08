@@ -255,7 +255,7 @@ class Parser {
 
       this.advance();
       const right = this.parseMultiplicative();
-      left = arithmetic(operator, left, right);
+      left = operator === '+' ? add(left, right) : arithmetic(operator, left, right);
     }
   }
 
@@ -417,6 +417,24 @@ function numeric(value: FormulaValue): number | null | FormulaError {
   const parsed = Number(value);
 
   return Number.isFinite(parsed) ? parsed : Value;
+}
+
+/**
+ * Бінарний `+`, як `Evaluator.ApplyBinary` на сервері: помилка → `NULL`
+ * поглинає → текст + текст конкатенує (БЕЗ числового розбору: `'5' + '3'` =
+ * `53`, AF `!A + '_' + !B`) → текст + не-текст це `#VALUE` → решта арифметика.
+ * Статичного типу на клієнті немає (парсер-обчислювач без AST), тож
+ * узгоджувати нічого, окрім цього правила.
+ */
+function add(left: FormulaValue, right: FormulaValue): FormulaValue {
+  if (isError(left)) return left;
+  if (isError(right)) return right;
+  if (left === null || right === null) return null;
+
+  if (typeof left === 'string' && typeof right === 'string') return left + right;
+  if (typeof left === 'string' || typeof right === 'string') return Value;
+
+  return arithmetic('+', left, right);
 }
 
 /**

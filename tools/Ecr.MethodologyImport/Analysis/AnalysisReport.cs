@@ -88,7 +88,10 @@ public sealed record AnalysisReport(
     IReadOnlyList<ReferenceCycle> Cycles,
     ReaderSummary Reader,
     IReadOnlyList<string> Blockers,
-    IReadOnlyList<NormalizationApplied>? Normalizations = null)
+    IReadOnlyList<NormalizationApplied>? Normalizations = null,
+    FormulaTypeSummary? FormulaTypes = null,
+    UnitSummary? Units = null,
+    IReadOnlyList<ColumnNeed>? ColumnNeeds = null)
 {
     public bool HasBlockers => Blockers.Count > 0;
 }
