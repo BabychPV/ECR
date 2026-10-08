@@ -141,4 +141,40 @@ public sealed partial class DocumentVersionMigrationTests
             .Content.ReadAsStringAsync().ConfigureAwait(true)).RootElement;
         Assert.True(dry.GetProperty("canApply").GetBoolean(), dry.ToString());
     }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "C1")]
+    public async Task Методологія_з_двома_опублікованими_версіями_ключі_v1_і_v2_перенос_не_блокує()
+    {
+        var s = await ArrangeAsync(Target.OnlyLabels).ConfigureAwait(true);
+        var methodologyId = await AddBindingAsync(s.TargetTableDefId, s.TargetColumns["C2"]).ConfigureAwait(true);
+
+        await using var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext();
+        var old = new MethodologyVersion(
+            methodologyId, "1.0", CalculationLevel.Configuration, createdByUserId: s.UserId,
+            new DateTime(2026, 3, 1, 9, 0, 0, DateTimeKind.Utc));
+        var next = new MethodologyVersion(
+            methodologyId, "2.0", CalculationLevel.Configuration, createdByUserId: s.UserId,
+            new DateTime(2026, 3, 1, 9, 0, 0, DateTimeKind.Utc));
+        db.MethodologyVersions.AddRange(old, next);
+        await db.SaveChangesAsync().ConfigureAwait(true);
+        db.MethodologyRules.Add(new MethodologyRule(old.Id, EcrCode.Create("R_OLD"), $$"""{"{{s.Doc.ColumnDefIds[1]}}":"X"}""", 10));
+        db.MethodologyRequiredInputs.Add(new MethodologyRequiredInput(old.Id, s.Doc.ColumnDefIds[1], RequiredInputSeverity.Block, hint: null));
+        db.MethodologyRules.Add(new MethodologyRule(next.Id, EcrCode.Create("R_NEW"), $$"""{"{{s.TargetColumns["C2"]}}":"X"}""", 10));
+        db.MethodologyRequiredInputs.Add(new MethodologyRequiredInput(next.Id, s.TargetColumns["C2"], RequiredInputSeverity.Block, hint: null));
+        await db.SaveChangesAsync().ConfigureAwait(true);
+        old.Publish(s.UserId + 1, "тест", new DateOnly(2026, 1, 1), testsPassed: true, new DateTime(2026, 3, 2, 9, 0, 0, DateTimeKind.Utc));
+        await db.SaveChangesAsync().ConfigureAwait(true);
+        next.Publish(s.UserId + 1, "тест", new DateOnly(2026, 6, 1), testsPassed: true, new DateTime(2026, 3, 3, 9, 0, 0, DateTimeKind.Utc));
+        await db.SaveChangesAsync().ConfigureAwait(true);
+
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
+        var dry = JsonDocument.Parse(await (await PostAsync(client, s, "Safe", dryRun: true).ConfigureAwait(true))
+            .Content.ReadAsStringAsync().ConfigureAwait(true)).RootElement;
+        Assert.True(dry.GetProperty("canApply").GetBoolean(), dry.ToString());
+        Assert.DoesNotContain("methodologyKeysNotMapped", dry.GetProperty("refusals").EnumerateArray().Select(r => r.GetString()));
+    }
 }
