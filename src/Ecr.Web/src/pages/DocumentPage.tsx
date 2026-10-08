@@ -673,6 +673,7 @@ export function DocumentPage(): JSX.Element {
         <DocumentHeaderPanel
           documentId={documentId}
           businessKey={document.businessKey}
+          templateVersion={document.templateVersion ?? undefined}
           // ✎ UI-16: згорнута з підсумком; розгортається сама, коли поле
           // потребує уваги (обов'язкове порожнє, недійсна дата, незбережене).
           collapsible
