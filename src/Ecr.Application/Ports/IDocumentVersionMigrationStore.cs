@@ -99,4 +99,21 @@ public interface IDocumentVersionMigrationStore
     /// <see cref="LockProjectVersionAsync"/>.
     /// </summary>
     public Task ApplyAsync(int projectId, int targetVersionId, VersionMigrationPlan plan, CancellationToken ct);
+
+    /// <summary>
+    /// Те саме, що <see cref="ApplyAsync(int, int, VersionMigrationPlan, CancellationToken)"/>, і після кожної
+    /// команди (пачки) повідомляє про стадію й кількість змінених рядків.
+    /// </summary>
+    /// <param name="projectId">Проєкт.</param>
+    /// <param name="targetVersionId">Цільова версія.</param>
+    /// <param name="plan">План переносу.</param>
+    /// <param name="onStep">Приймач прогресу; <c>null</c> — без прогресу.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⚠ Типова реалізація прогрес ігнорує (обгортки у тестах, що знають лише чотириаргументний виклик):
+    /// фонова задача тоді просто не бачить кроків усередині транзакції.
+    /// </remarks>
+    public Task ApplyAsync(
+        int projectId, int targetVersionId, VersionMigrationPlan plan, VersionMigrationStepReporter? onStep, CancellationToken ct)
+        => ApplyAsync(projectId, targetVersionId, plan, ct);
 }
