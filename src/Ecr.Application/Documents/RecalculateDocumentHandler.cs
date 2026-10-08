@@ -153,10 +153,18 @@ public sealed class RecalculateDocumentHandler(
             // ФВ-9.17 про зріз аркуша), а без цього чернетка поруч із затвердженим аркушем не могла ні
             // перерахуватися, ні бути поданою («Recalculate before submitting» — глухий кут). Перерахунок
             // усього документа (`sheetDefId = null`) і закритий період — як і раніше.
-            var submitted = sheets.Any(s =>
-                (sheetDefId is null || s.SheetDefId == sheetDefId)
-                && s.Status is Domain.Enums.DocumentStatus.Submitted
-                            or Domain.Enums.DocumentStatus.Approved);
+            //
+            // ⛔ RC15 (P2-A): перерахунок УСЬОГО документа (`sheetDefId = null`) подані/затверджені аркуші
+            // ПРОПУСКАЄ (задача рахує лише чернеткові/відкриті й не чіпає ні їхніх комірок, ні результатів), а
+            // не відхиляє цілий запит. Відмова «усі аркуші періоду подані — рахувати нічого» живе в
+            // `RecalculationJob.RefusedPeriodsAsync`: лише вона знає повний склад аркушів періоду (стан є тільки
+            // в тих, що хоч раз подавалися). Тут лишається швидка відмова для закритого періоду й для області
+            // самого поданого аркуша.
+            var submitted = sheetDefId is not null
+                && sheets.Any(s =>
+                    s.SheetDefId == sheetDefId
+                    && s.Status is Domain.Enums.DocumentStatus.Submitted
+                                or Domain.Enums.DocumentStatus.Approved);
 
             var denial = Calculations.RecalculationWritePolicy.Check(
                 periodState, submitted, hasClosedPeriodApproval: false);
