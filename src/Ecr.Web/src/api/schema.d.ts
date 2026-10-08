@@ -21038,7 +21038,15 @@ export interface components {
             outputUnitId: null | number;
             /** @description Число чи текст. */
             resultType: components["schemas"]["FormulaResultType"];
+            /** @description Область формули (L2-1): `Substance` — на кожну речовину (типове), `Row` — раз на рядок,
+             *     до циклу речовин; саме Row-формули бачить правило категорії (`!Name`). */
+            scope: components["schemas"]["MethodologyFormulaScope"];
         };
+        /**
+         * @description Область формули методології (`D-176`, V-7 FEATURE-HSE301-VIEW §6.1).
+         * @enum {unknown}
+         */
+        MethodologyFormulaScope: "Substance" | "Row";
         /** @description Рядок звіту: блокер, конфлікт або попередження. */
         MethodologyImportIssueDto: {
             /** @description Посилання, значення або пояснення. */
@@ -21256,6 +21264,12 @@ export interface components {
             report: null | string;
             /** @description Тип результату, який вивів експортер із тексту: `Text` або `Number`; порожній — `Number`. */
             resultType?: null | string;
+            /** @description Область формули (L2-1): `Row` (раз на рядок, до циклу речовин) або `Substance` (на кожну речовину);
+             *     без регістру. Порожнє або відсутнє - `Substance`, як до появи поля. Інше значення - блокер
+             *     `invalidFormulaScope`. ⚠ Експортер AF мусить виставити `Row` для формул, на які посилається
+             *     правило категорії (`!Name`) - разом із їхніми `!`-залежностями: Row-формула не може посилатись
+             *     на формулу речовини. */
+            scope?: null | string;
             /** @description Початок дії (рядок AF). */
             startDate: null | string;
             /** @description Вираз. */
@@ -24054,6 +24068,7 @@ export interface components {
              *     повертає `'Сверхнорматив'` як ЗНАЧЕННЯ, і без типу воно пішло б у
              *     числову колонку результату. */
             resultType: components["schemas"]["FormulaResultType"];
+            scope?: null | components["schemas"]["MethodologyFormulaScope"];
         };
         /** @description Запит на оголошення виходу версії. */
         SaveMethodologyOutputRequest: {
