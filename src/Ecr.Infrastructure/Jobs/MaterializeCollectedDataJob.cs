@@ -359,11 +359,13 @@ public sealed class MaterializeCollectedDataJob(
                 continue;
             }
 
-            // Згортки точок — рівно ті самі числа, що й до F3: лише точки з
-            // числом, без урахування якості (`PeriodFold`, згортки точок).
+            // ⛔ HSE301 §4.6 (поведінку змінено свідомо): згортки точок беруть лише
+            // точки з числом, а точка якості ≠ Good (`IsGood = false`) у згортку не
+            // входить — `PeriodFold` відкидає її й веде інтервал у Gaps. Раніше
+            // якість не враховувалась, і Bad-точка 9999 потрапила в Fuel=10016.5.
             var points = inside
                 .Where(p => p.Value is not null)
-                .Select(p => new TimedPoint(p.Timestamp, p.Value!.Value))
+                .Select(p => new TimedPoint(p.Timestamp, p.Value!.Value, p.IsGoodQuality()))
                 .ToList();
 
             // ⛔ HSE301 §4.1: значення на межах періоду інтерполюються з останньої
@@ -497,11 +499,11 @@ public sealed class MaterializeCollectedDataJob(
         /// тлумачення, що й у вікна рядка (HSE301 §4.6).
         /// </summary>
         public TimedPoint ToTimed()
-            => new(
-                Timestamp,
-                Value ?? 0m,
-                Value is not null
-                && (Quality is null || string.Equals(Quality, WindowFold.GoodQuality, StringComparison.OrdinalIgnoreCase)));
+            => new(Timestamp, Value ?? 0m, Value is not null && IsGoodQuality());
+
+        /// <summary>Якість придатна: <c>Good</c> або не вказана (джерело без якості).</summary>
+        public bool IsGoodQuality()
+            => Quality is null || string.Equals(Quality, WindowFold.GoodQuality, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>Результат згортки періоду.</summary>

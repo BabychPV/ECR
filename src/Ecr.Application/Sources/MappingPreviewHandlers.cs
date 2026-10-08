@@ -199,17 +199,16 @@ public sealed class PreviewMappingHandler(
                     continue;
                 }
 
+                // ⛔ Та сама якість, що в матеріалізації (§4.6): Bad-точка у згортку не йде.
+                var goodQuality = point.Quality is null
+                    || string.Equals(point.Quality, WindowFold.GoodQuality, StringComparison.OrdinalIgnoreCase);
+
                 if (point.ValueNumeric is { } value)
                 {
-                    numeric.Add(new TimedPoint(point.Timestamp, value));
+                    numeric.Add(new TimedPoint(point.Timestamp, value, goodQuality));
                 }
 
-                timed.Add(new TimedPoint(
-                    point.Timestamp,
-                    point.ValueNumeric ?? 0m,
-                    point.ValueNumeric is not null
-                    && (point.Quality is null
-                        || string.Equals(point.Quality, WindowFold.GoodQuality, StringComparison.OrdinalIgnoreCase))));
+                timed.Add(new TimedPoint(point.Timestamp, point.ValueNumeric ?? 0m, point.ValueNumeric is not null && goodQuality));
             }
 
             var kind = Parse(map.Aggregation);

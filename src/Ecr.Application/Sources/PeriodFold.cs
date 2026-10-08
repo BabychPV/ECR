@@ -1,4 +1,5 @@
 // src/Ecr.Application/Sources/PeriodFold.cs
+using Ecr.Application.Ports;
 using Ecr.Domain.Entities.External;
 
 namespace Ecr.Application.Sources;
@@ -117,8 +118,10 @@ public static class PeriodFold
     /// <para>
     /// Згортки точок (<see cref="AggregationKind.Sum"/> … <see cref="AggregationKind.First"/>)
     /// беруть точки <c>fromUtc ≤ t &lt; toUtc</c> і згортаються тим самим
-    /// <see cref="Fold(AggregationKind, IReadOnlyList{decimal})"/> — без
-    /// урахування якості, як і досі; частка покриття для них не визначена.
+    /// <see cref="Fold(AggregationKind, IReadOnlyList{decimal})"/>. Точки з
+    /// <see cref="TimedPoint.IsGood"/> = <c>false</c> відкидаються (§4.6), їхні
+    /// інтервали — у <see cref="TimeFoldResult.Gaps"/>, покриття — у
+    /// <see cref="TimeFoldResult.PercentGood"/>; без відхилених воно <c>null</c>.
     /// </para>
     /// </remarks>
     public static TimeFoldResult Fold(
@@ -184,16 +187,45 @@ public static class PeriodFold
             case AggregationKind.Max:
             case AggregationKind.First:
             case AggregationKind.Last:
+                // ⛔ HSE301 §4.6: точка з IsGood = false не бере участі в згортці, а її
+                // інтервал (до наступної точки чи кінця вікна) іде в Gaps — так само,
+                // як відрізок часової згортки (`Integrate`). Покриття лічимо лише коли
+                // щось відхилено: без відхилень воно, як і раніше, не визначене.
                 var inside = new List<decimal>();
-                foreach (var point in ordered)
+                var gaps = new List<TimeInterval>();
+                for (var i = 0; i < ordered.Count; i++)
                 {
-                    if (point.Timestamp >= fromUtc && point.Timestamp < toUtc)
+                    var point = ordered[i];
+                    if (point.Timestamp < fromUtc || point.Timestamp >= toUtc)
+                    {
+                        continue;
+                    }
+
+                    if (point.IsGood)
                     {
                         inside.Add(point.Value);
+                        continue;
                     }
+
+                    var gapEnd = i + 1 < ordered.Count && ordered[i + 1].Timestamp < toUtc
+                        ? ordered[i + 1].Timestamp
+                        : toUtc;
+                    gaps.Add(new TimeInterval(point.Timestamp, gapEnd));
                 }
 
-                return new TimeFoldResult(inside.Count == 0 ? null : Fold(kind, inside), null);
+                decimal? coverage = null;
+                if (gaps.Count > 0)
+                {
+                    var lost = 0m;
+                    foreach (var gapInterval in gaps)
+                    {
+                        lost += Seconds(gapInterval.ToUtc - gapInterval.FromUtc);
+                    }
+
+                    coverage = (Seconds(toUtc - fromUtc) - lost) * 100m / Seconds(toUtc - fromUtc);
+                }
+
+                return new TimeFoldResult(inside.Count == 0 ? null : Fold(kind, inside), coverage, gaps);
 
             default:
                 throw new ArgumentOutOfRangeException(
@@ -298,4 +330,8 @@ public readonly record struct TimedPoint(DateTime Timestamp, decimal Value, bool
 /// Частка вікна, покрита даними, у відсотках (0–100); <c>null</c> — для
 /// згорток точок, де покриття не визначене.
 /// </param>
-public sealed record TimeFoldResult(decimal? Value, decimal? PercentGood);
+/// <param name="Gaps">
+/// Інтервали відхилених точок (<c>IsGood = false</c>) для згорток точок; для
+/// згорток за часом прогалини рахує викликач (<c>WindowFold</c>), тут <c>null</c>.
+/// </param>
+public sealed record TimeFoldResult(decimal? Value, decimal? PercentGood, IReadOnlyList<TimeInterval>? Gaps = null);

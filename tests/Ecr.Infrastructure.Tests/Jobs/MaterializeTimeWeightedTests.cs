@@ -131,6 +131,39 @@ public sealed class MaterializeTimeWeightedTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "HSE301 §4.6")]
+    public async Task Bad_точка_9999_не_входить_у_жодну_згортку_точок_а_Quality_null_це_Good()
+    {
+        // ⛔ Поведінку змінено свідомо за §4.6: раніше якість ігнорувалась і Bad 9999
+        // потрапляла в Fuel. Ряд на кожному полі: 1, 2, 9999(Bad), 3; ще одна 4 без якості (null → Good).
+        Point[] Series(string? lastQuality) =>
+        [
+            new(MidJanuary, 1m),
+            new(MidJanuary.AddHours(1), 2m),
+            new(MidJanuary.AddHours(2), 9999m, "Bad"),
+            new(MidJanuary.AddHours(3), 3m),
+            new(MidJanuary.AddHours(4), 4m, lastQuality),
+        ];
+
+        var stand = await ArrangeAsync(
+            new Field("SUM", AggregationKind.Sum, null, null, Series(null)),
+            new Field("AVG", AggregationKind.Avg, null, null, Series(null)),
+            new Field("MIN", AggregationKind.Min, null, null, Series(null)),
+            new Field("MAX", AggregationKind.Max, null, null, Series(null)),
+            new Field("LAST", AggregationKind.Last, null, null, Series(null)));
+
+        await RunAsync(stand);
+
+        Assert.Equal(10m, Assert.IsType<decimal>(await CellAsync(stand, stand.Columns[0])));
+        Assert.Equal(2.5m, Assert.IsType<decimal>(await CellAsync(stand, stand.Columns[1])));
+        Assert.Equal(1m, Assert.IsType<decimal>(await CellAsync(stand, stand.Columns[2])));
+        Assert.Equal(4m, Assert.IsType<decimal>(await CellAsync(stand, stand.Columns[3])));
+        Assert.Equal(4m, Assert.IsType<decimal>(await CellAsync(stand, stand.Columns[4])));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "ФВ-16.10")]
     public async Task Несумісні_одиниці_Sm3_в_m3_не_пишуть_тихого_числа_а_решта_полів_записана()
     {
@@ -155,7 +188,7 @@ public sealed class MaterializeTimeWeightedTests(SqlServerFixture sql)
         string Name, AggregationKind Kind, string? SourceUnit, string? TargetUnit, IReadOnlyList<Point> Points);
 
     /// <summary>Точка поля.</summary>
-    private sealed record Point(DateTime At, decimal Value);
+    private sealed record Point(DateTime At, decimal Value, string? Quality = "Good");
 
     /// <summary>Усе, що заведено для одного прогону.</summary>
     private sealed record Stand(TestDocument Chain, int EntityId, string RowKey, IReadOnlyList<int> Columns);
@@ -207,7 +240,7 @@ public sealed class MaterializeTimeWeightedTests(SqlServerFixture sql)
             map.SetUnits(await UnitIdAsync(db, field.SourceUnit), await UnitIdAsync(db, field.TargetUnit));
             db.EntityFieldMaps.Add(map);
 
-            points.AddRange(field.Points.Select(p => new SourceDataPoint(path, p.At, p.Value, null, null, "Good")));
+            points.AddRange(field.Points.Select(p => new SourceDataPoint(path, p.At, p.Value, null, null, p.Quality)));
         }
 
         await db.SaveChangesAsync(CancellationToken.None);
