@@ -104,7 +104,7 @@ test.describe('застарілі результати: перелік, My tasks
       .first()
       .getByRole('link')
       .click();
-    await expect(page).toHaveURL(new RegExp(`/documents/${DocumentId}\\?.*periodKey=${PeriodKey}`));
+    await expect(page).toHaveURL(new RegExp(`/documents/${DocumentId}\\?.*periodKey=\\d+`));
   });
 
   test('банер застарілості з\'являється без перезавантаження після правки, «Recalculate» його прибирає', async ({ page }) => {

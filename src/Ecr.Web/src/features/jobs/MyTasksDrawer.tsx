@@ -51,6 +51,9 @@ export interface MyTasksDrawerProps {
   readonly opened: boolean;
   readonly onClose: () => void;
 
+  /** Анімацію закриття завершено, фокус-пастка знята (RC15-E: сюди повертається фокус на кнопку-відкривач). */
+  readonly onExited?: () => void;
+
   /**
    * Власні задачі В ТОМУ ПОРЯДКУ, у якому їх віддав сервер.
    *
@@ -71,6 +74,7 @@ export interface MyTasksDrawerProps {
 export function MyTasksDrawer({
   opened,
   onClose,
+  onExited,
   jobs,
   isPending,
   error,
@@ -81,6 +85,7 @@ export function MyTasksDrawer({
     <Drawer
       opened={opened}
       onClose={onClose}
+      {...(onExited === undefined ? {} : { onExitTransitionEnd: onExited })}
       position="right"
       size="md"
       returnFocus
