@@ -346,11 +346,15 @@ public sealed class PublishMethodologyHandler(
         // чи ключі — відмова 422 з позицією, а не `#REF` на кожному рядку нічного прогону.
         // Після `RejectExtensionFunctions`: у `Legacy` функції довідників відхилено раніше
         // (`ECR-CALC-0433`, перевірка 21) — судити їхні поля там нема сенсу.
-        var registryShapes = await RegistryShapesAsync(parsed, ct).ConfigureAwait(false);
+        // ✎ L2-4: правило категорії читає довідники тим самим текстом, що й формули (`REGFIELD(@Fuel, 'NAME')`),
+        // тож його перевіряють і фіксують у `cfg.RegistryUse` разом із ними (код джерела — `CategoryRule`).
+        // Одиниці (`RequireCompatibleUnits` нижче) лишаються над формулами: ключ категорії — текст.
+        IReadOnlyList<ParsedFormula> registryScope = [.. parsed, .. ruleFormulas];
+        var registryShapes = await RegistryShapesAsync(registryScope, ct).ConfigureAwait(false);
         var formulaRegistries = registryShapes is null ? null : MethodologyRegistryChecks.FormulaRegistries(parsed);
         if (registryShapes is not null)
         {
-            MethodologyRegistryChecks.RequireValidReferences(parsed, registryShapes, warnings);
+            MethodologyRegistryChecks.RequireValidReferences(registryScope, registryShapes, warnings);
         }
 
         // ⛔ ФВ-16.6/16.7: т + кг без CONVERT — відмова `ECR-TMPL-4223` до
@@ -400,7 +404,7 @@ public sealed class PublishMethodologyHandler(
             .ReplaceDependenciesAsync(methodology.Id, dependencies, ct)
             .ConfigureAwait(false);
 
-        await ReplaceRegistryUsesAsync(methodologyVersionId, parsed, registryShapes, ct).ConfigureAwait(false);
+        await ReplaceRegistryUsesAsync(methodologyVersionId, registryScope, registryShapes, ct).ConfigureAwait(false);
 
         return warnings;
     }
