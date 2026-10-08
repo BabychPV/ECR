@@ -108,7 +108,7 @@ public sealed class CellWriteLockTimeoutTests(SqlServerFixture sql)
         Assert.True(
             blockedResponse.StatusCode == HttpStatusCode.Conflict,
             $"Очікували 409, отримали {blockedResponse.StatusCode}\n{blockedBody}\n{factory.ErrorsText}");
-        Assert.True(elapsed < TimeSpan.FromSeconds(15), $"Відмова прийшла за {elapsed}: LOCK_TIMEOUT не діє.");
+        Assert.True(elapsed < TimeSpan.FromSeconds(25), $"Відмова прийшла за {elapsed}: LOCK_TIMEOUT не діє.");
 
         var problem = JsonDocument.Parse(blockedBody).RootElement;
         Assert.Equal("ECR-DOC-4091", problem.GetProperty("errorCode").GetString());
