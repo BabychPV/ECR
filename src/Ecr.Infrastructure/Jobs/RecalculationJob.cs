@@ -69,6 +69,11 @@ public sealed partial class RecalculationJob(
         Message = "RecalculationJob: перерахунок обірвано винятком; кореляція {CorrelationId}.")]
     private static partial void LogRecalculationFailed(ILogger logger, string correlationId, Exception exception);
 
+    [LoggerMessage(
+        Level = LogLevel.Information,
+        Message = "RecalculationJob: документ {DocumentId}: пропущено подані/затверджені аркуші (пар аркуш×період: {Count}).")]
+    private static partial void LogSkippedSheets(ILogger logger, long documentId, int count);
+
     /// <summary>Стеля прив'язок на прогін: методологій у системі — десятки.</summary>
     private const int MaxBindings = 5_000;
 
@@ -286,7 +291,19 @@ public sealed partial class RecalculationJob(
                         ct)
                     .ConfigureAwait(false);
 
-                var bindingsByPeriod = await BindingsAsync(docRequest, periods, ct).ConfigureAwait(false);
+                // ⛔ RC15 (P2-A): перерахунок УСЬОГО документа пропускає подані/затверджені аркуші: ні їхні комірки
+                // (їх не пише `RecalculationService`), ні результати методологій (прив'язки пропускаються нижче;
+                // результати переносяться з попереднього прогону) не змінюються.
+                var skippedSheets = docRequest.SheetDefId is null
+                    ? await SubmittedSheetsAsync(docRequest, request.PeriodKey, ct).ConfigureAwait(false)
+                    : new Dictionary<int, HashSet<int>>();
+                var skippedPairs = skippedSheets.Where(pair => periods.Contains(pair.Key)).Sum(pair => pair.Value.Count);
+                if (logger is not null && skippedPairs > 0)
+                {
+                    LogSkippedSheets(logger, documentId, skippedPairs);
+                }
+
+                var bindingsByPeriod = await BindingsAsync(docRequest, periods, skippedSheets, ct).ConfigureAwait(false);
 
                 // ⛔ КРОК 2 — методології, і лише тепер: їхні входи щойно
                 // стали актуальними.
@@ -744,6 +761,7 @@ public sealed partial class RecalculationJob(
     /// <summary>Прив'язки методологій до таблиць документа, РОЗКЛАДЕНІ ЗА ПЕРІОДАМИ.</summary>
     /// <param name="request">Завдання перерахунку.</param>
     /// <param name="periods">Періоди в скоупі запису, за зростанням.</param>
+    /// <param name="skippedSheets">Пропущені (подані/затверджені) аркуші за періодами; їхні таблиці не рахуються.</param>
     /// <param name="ct">Токен скасування.</param>
     /// <returns>Прив'язки за ключем періоду; періоду без прив'язок у мапі немає.</returns>
     /// <remarks>
@@ -761,7 +779,8 @@ public sealed partial class RecalculationJob(
     /// розрахунку.
     /// </remarks>
     private async Task<IReadOnlyDictionary<int, IReadOnlyList<CalculationBindingRef>>> BindingsAsync(
-        RecalculationRequest request, IReadOnlyList<int> periods, CancellationToken ct)
+        RecalculationRequest request, IReadOnlyList<int> periods,
+        Dictionary<int, HashSet<int>> skippedSheets, CancellationToken ct)
     {
         // ⚠ Q-331: методологія прив'язана до `TableDefId`, тобто до конкретної
         // таблиці — і, транзитивно, до аркуша, якому та таблиця належить
@@ -798,9 +817,21 @@ public sealed partial class RecalculationJob(
             .OrderBy(i => i.PeriodKeyValue)
             .ThenBy(i => i.Id)
             .Take(MaxBindings)
-            .Select(i => new InstanceRow(i.Id, i.TableDefId, i.PeriodKeyValue))
+            .Select(i => new InstanceRow(
+                i.Id, i.TableDefId, i.PeriodKeyValue,
+                db.TableDefs.Where(td => td.Id == i.TableDefId).Select(td => td.SheetDefId).FirstOrDefault()))
             .ToListAsync(ct)
             .ConfigureAwait(false);
+
+        // ⛔ RC15 (P2-A): таблиці пропущених (поданих/затверджених) аркушів у прогін методологій не йдуть.
+        if (skippedSheets.Count > 0)
+        {
+            instances =
+            [
+                .. instances.Where(i =>
+                    !(skippedSheets.TryGetValue(i.PeriodKeyValue, out var skipped) && skipped.Contains(i.SheetDefId))),
+            ];
+        }
 
         if (instances.Count == 0)
         {
@@ -884,19 +915,35 @@ public sealed partial class RecalculationJob(
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
-        var submitted = await db.ApprovalStates
-            .AsNoTracking()
-            .Where(s => s.DocumentId == request.DocumentId
-                        && (request.PeriodKey == null || s.PeriodKey == request.PeriodKey)
-                        && (request.SheetDefId == null || s.SheetDefId == request.SheetDefId)
-                        && (s.Status == Domain.Enums.DocumentStatus.Submitted
-                            || s.Status == Domain.Enums.DocumentStatus.Approved))
-            .Select(s => s.PeriodKey)
-            .Distinct()
-            .ToListAsync(ct)
-            .ConfigureAwait(false);
+        // ⛔ RC15 (P2-A): для області аркуша (`SheetDefId`) період відхиляється, коли поданий САМ цей аркуш; для
+        // УСЬОГО документа — лише коли подані/затверджені ВСІ аркуші, що мають таблиці в періоді (рахувати
+        // нічого). Частково подані періоди лишаються в скоупі: подані аркуші пропускає `SubmittedSheetsAsync`.
+        var submittedBySheet = await SubmittedSheetsAsync(request, request.PeriodKey, ct).ConfigureAwait(false);
+        HashSet<int> submittedKeys;
 
-        var submittedKeys = submitted.ToHashSet();
+        if (request.SheetDefId is not null)
+        {
+            submittedKeys = [.. submittedBySheet.Where(pair => pair.Value.Contains(request.SheetDefId.Value)).Select(pair => pair.Key)];
+        }
+        else
+        {
+            var submittedPeriods = submittedBySheet.Keys.ToList();
+            var instanceSheets = submittedPeriods.Count == 0
+                ? []
+                : await db.TableInstances
+                    .AsNoTracking()
+                    .Where(i => i.DocumentId == request.DocumentId && submittedPeriods.Contains(i.PeriodKeyValue))
+                    .Join(db.TableDefs, i => i.TableDefId, td => td.Id, (i, td) => new { i.PeriodKeyValue, td.SheetDefId })
+                    .Distinct()
+                    .ToListAsync(ct)
+                    .ConfigureAwait(false);
+
+            submittedKeys = [.. submittedPeriods.Where(period =>
+            {
+                var sheets = instanceSheets.Where(x => x.PeriodKeyValue == period).Select(x => x.SheetDefId).ToList();
+                return sheets.Count > 0 && sheets.All(submittedBySheet[period].Contains);
+            })];
+        }
         var approved = request.ApprovedBy is not null;
         var refused = new HashSet<int>();
 
@@ -924,6 +971,29 @@ public sealed partial class RecalculationJob(
         // `ECR-PRD-0404`), і підміняти його чужим кодом означало б сховати
         // справжню причину за правдоподібною.
         return refused;
+    }
+
+    /// <summary>Подані/затверджені аркуші документа за періодами (ФВ-9.17).</summary>
+    /// <param name="request">Завдання.</param>
+    /// <param name="periodKey">Період; <c>null</c> — усі.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Ключ періоду → аркуші, що там подані або затверджені.</returns>
+    private async Task<Dictionary<int, HashSet<int>>> SubmittedSheetsAsync(
+        RecalculationRequest request, int? periodKey, CancellationToken ct)
+    {
+        var rows = await db.ApprovalStates
+            .AsNoTracking()
+            .Where(s => s.DocumentId == request.DocumentId
+                        && (periodKey == null || s.PeriodKey == periodKey)
+                        && (s.Status == Domain.Enums.DocumentStatus.Submitted
+                            || s.Status == Domain.Enums.DocumentStatus.Approved))
+            .Select(s => new { s.PeriodKey, s.SheetDefId })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        return rows
+            .GroupBy(row => row.PeriodKey)
+            .ToDictionary(group => group.Key, group => group.Select(row => row.SheetDefId).ToHashSet());
     }
 
     /// <summary>Ресурс <c>sp_getapplock</c> для перерахунку документа.</summary>
@@ -1030,7 +1100,8 @@ public sealed partial class RecalculationJob(
     /// <param name="Id">Ідентифікатор екземпляра.</param>
     /// <param name="TableDefId">Опис таблиці.</param>
     /// <param name="PeriodKeyValue">Період екземпляра.</param>
-    private sealed record InstanceRow(long Id, int TableDefId, int PeriodKeyValue);
+    /// <param name="SheetDefId">Аркуш, якому належить таблиця екземпляра.</param>
+    private sealed record InstanceRow(long Id, int TableDefId, int PeriodKeyValue, int SheetDefId);
 
     /// <summary>Прив'язка методології до опису таблиці.</summary>
     private sealed record BindingRow(int TableDefId, int MethodologyId);
