@@ -24,6 +24,7 @@ const KindKeys: Record<string, string> = {
   IFormulaRecalculationJob: 'jobs.kind.formulaRecalculation',
   IExcelExportJob: 'jobs.kind.excelExport',
   IExcelImportJob: 'jobs.kind.excelImport',
+  IMigrateDocumentVersionJob: 'jobs.kind.migrateDocumentVersion',
   IMaterializeCollectedDataJob: 'jobs.kind.materializeCollectedData',
   IReportSnapshotJob: 'jobs.kind.reportSnapshot',
   ICollectionJob: 'jobs.kind.collection',

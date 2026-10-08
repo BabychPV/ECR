@@ -463,6 +463,7 @@ public static class DependencyInjection
 
         services.AddScoped<IExcelExportJob, Jobs.ExcelExportJob>();
         services.AddScoped<IExcelImportJob, Jobs.ExcelImportJob>();
+        services.AddScoped<IMigrateDocumentVersionJob, Jobs.MigrateDocumentVersionJob>();
 
         // Сховища Етапу 5.
         services.AddScoped<IJobProgressStore, JobProgressStore>();
