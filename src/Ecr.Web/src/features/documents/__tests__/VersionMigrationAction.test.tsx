@@ -74,13 +74,30 @@ function report(overrides: Partial<VersionMigrationReport>): VersionMigrationRep
 
 interface Sent {
   readonly method: string;
-  readonly body: { targetVersionId: number; mode: string; dryRun: boolean } | undefined;
+  readonly body: { targetVersionId: number; mode: string; dryRun: boolean; async?: boolean } | undefined;
 }
 
 const sent: Sent[] = [];
 
+/** Що `GET /jobs/{id}` віддає по черзі (останній елемент повторюється); D-2 RC15B. */
+let jobStates: unknown[] = [];
+let jobRequests = 0;
+
+function jobStatus(overrides: Record<string, unknown>): unknown {
+  return {
+    jobId: 'IMigrateDocumentVersionJob-abc',
+    state: 'Succeeded',
+    percent: 100,
+    message: 'Migrated to version 2.0: documents 3, values moved 10',
+    error: null,
+    ...overrides,
+  };
+}
+
 function mockServer(permissions: string[], dryRunReport: VersionMigrationReport, grant = 'Manage'): void {
   sent.length = 0;
+  jobRequests = 0;
+  jobStates = [jobStatus({})];
 
   vi.stubGlobal(
     'fetch',
@@ -106,7 +123,19 @@ function mockServer(permissions: string[], dryRunReport: VersionMigrationReport,
       if (url.includes('/migrate-version') && method === 'POST') {
         const body = JSON.parse(String(init?.body)) as Sent['body'];
         sent.push({ method, body });
-        return json(body?.dryRun === true ? dryRunReport : { ...dryRunReport, dryRun: false, applied: true });
+        if (body?.dryRun === true) return json(dryRunReport);
+
+        // Перенос (не сухий прогін) іде фоном: 202 з `jobId`, а не звіт.
+        return new Response(JSON.stringify({ jobId: 'IMigrateDocumentVersionJob-abc', documentId: DocumentId }), {
+          status: 202,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
+      if (url.includes('/api/v1/jobs/')) {
+        const state = jobStates[Math.min(jobRequests, jobStates.length - 1)];
+        jobRequests += 1;
+        return json(state);
       }
 
       throw new Error(`неочікуваний запит у тесті: ${method} ${url}`);
@@ -194,14 +223,64 @@ describe('useVersionMigrationAction', () => {
     // Перемикач режиму і таблиця змін мають доступні назви (WCAG 1.3.1 / 4.1.2).
     expect(screen.getByRole('radiogroup', { name: '⟦documents.migrateVersionTitle⟧' })).toBeDefined();
     expect(screen.getByRole('table', { name: '⟦documents.migrateVersionTitle⟧' })).toBeDefined();
-    expect(sent).toEqual([{ method: 'POST', body: { targetVersionId: 2, mode: 'Safe', dryRun: true } }]);
+    expect(sent).toEqual([{ method: 'POST', body: { targetVersionId: 2, mode: 'Safe', dryRun: true, async: false } }]);
 
     await waitFor(() => expect((apply as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(apply);
 
     await waitFor(() => expect(sent).toHaveLength(2));
-    expect(sent[1]).toEqual({ method: 'POST', body: { targetVersionId: 2, mode: 'Safe', dryRun: false } });
+    // D-2: перенос ставиться у ФОН (async), а підсумок приходить повідомленням задачі.
+    expect(sent[1]).toEqual({ method: 'POST', body: { targetVersionId: 2, mode: 'Safe', dryRun: false, async: true } });
     await waitFor(() => expect(vi.mocked(showDone)).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(showDone)).toHaveBeenCalledWith('Migrated to version 2.0: documents 3, values moved 10');
+  });
+
+  it('D-2: поки задача йде, показано прогрес, кнопки вимкнено; після Succeeded - тост і закриття', async () => {
+    show(['Template.Edit'], report({}));
+    jobStates = [jobStatus({ state: 'Running', percent: 41, message: 'Moving cell values' }), jobStatus({})];
+    await openAndPickTarget();
+
+    fireEvent.click(screen.getByTestId('migrate-dry-run'));
+    await screen.findByText('⟦documents.migrateCanApply⟧');
+    await waitFor(() => expect((screen.getByTestId('migrate-apply') as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(screen.getByTestId('migrate-apply'));
+
+    // Спершу задача "йде", хоч стан ще не приїхав; потім - 41 % і повідомлення стадії.
+    const progress = await waitFor(() => {
+      const el = document.querySelector('[data-migrate-progress]');
+      expect(el).not.toBeNull();
+      expect((el as HTMLElement).textContent).toContain('Moving cell values');
+      return el as HTMLElement;
+    });
+    expect(progress.textContent).toContain('documents.migrateRunning');
+    expect(progress.textContent).toContain('percent=41');
+    expect((screen.getByTestId('migrate-apply') as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByTestId('migrate-dry-run') as HTMLButtonElement).disabled).toBe(true);
+    expect(vi.mocked(showDone)).not.toHaveBeenCalled();
+
+    // Опитування триває до завершення: наступне читання дає Succeeded.
+    await waitFor(() => expect(vi.mocked(showDone)).toHaveBeenCalledTimes(1), { timeout: 5000 });
+    expect(jobRequests).toBeGreaterThanOrEqual(2);
+  });
+
+  it('D-2: задача Failed - причина в діалозі, тосту немає, перенос можна повторити', async () => {
+    show(['Template.Edit'], report({}));
+    jobStates = [jobStatus({ state: 'Failed', percent: 15, error: 'Mode Safe does not carry these changes', message: null })];
+    await openAndPickTarget();
+
+    fireEvent.click(screen.getByTestId('migrate-dry-run'));
+    await screen.findByText('⟦documents.migrateCanApply⟧');
+    await waitFor(() => expect((screen.getByTestId('migrate-apply') as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(screen.getByTestId('migrate-apply'));
+
+    const failed = await waitFor(() => {
+      const el = document.querySelector('[data-migrate-job-failed]');
+      expect(el).not.toBeNull();
+      return el as HTMLElement;
+    });
+    expect(failed.textContent).toContain('documents.migrateJobFailed');
+    expect(vi.mocked(showDone)).not.toHaveBeenCalled();
+    await waitFor(() => expect((screen.getByTestId('migrate-apply') as HTMLButtonElement).disabled).toBe(false));
   });
 
   it('звіт «не можна» показує причину, і перенос лишається вимкненим', async () => {
