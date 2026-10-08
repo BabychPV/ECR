@@ -511,64 +511,71 @@ public sealed class RecalculationService(
         // його читають залежні формули, тож база й каскад не розходяться.
         var byInstance = new Dictionary<long, Dictionary<CellAddress, CellRecord>>();
 
-        foreach (var formulaId in targets)
+        void EvaluateTargets(IEnumerable<int> ids, bool narrowRows)
         {
-            // ⛔ Аудит L2-03 (AN-38): процесорна фаза — між формулами — перевіряє
-            // токен. Без цього межа `MaxDuration` і запит скасування лише
-            // «просили» зупинитися: задача рахувала далі, тримала оренду й писала
-            // результат скасованого перерахунку.
-            ct.ThrowIfCancellationRequested();
-
-            if (!formulas.TryGetValue(formulaId, out var owner))
+            foreach (var formulaId in ids)
             {
-                continue;
+                // ⛔ Аудит L2-03 (AN-38): процесорна фаза — між формулами — перевіряє
+                // токен. Без цього межа `MaxDuration` і запит скасування лише
+                // «просили» зупинитися: задача рахувала далі, тримала оренду й писала
+                // результат скасованого перерахунку.
+                ct.ThrowIfCancellationRequested();
+
+                if (!formulas.TryGetValue(formulaId, out var owner))
+                {
+                    continue;
+                }
+
+                if (!instanceByTable.TryGetValue(owner.Table.Id, out var target)
+                    || !rowIdsByTable.TryGetValue(owner.Table.Id, out var rows))
+                {
+                    // Таблиці формули немає в цьому документі за цей період —
+                    // рахувати нема куди. Це нормально: шаблон описує таблиці,
+                    // яких конкретний документ може не містити (`ФВ-3.2`).
+                    continue;
+                }
+
+                if (!parsed.TryGetValue(formulaId, out var expression))
+                {
+                    continue;
+                }
+
+                if (!byInstance.TryGetValue(target, out var sink))
+                {
+                    byInstance[target] = sink = [];
+                }
+
+                // ⛔ `CAL-03`, і саме тут проходить межа безпеки. Рядкове звуження
+                // застосовується лише тоді, коли в цю таблицю в ЦЬОМУ прогоні
+                // не пише жодна НЕлокальна ціль. Тоді й тільки тоді твердження
+                // «усе, що може змінитися в таблиці, лежить у брудних рядках»
+                // доводиться індукцією: базу дає насіння (брудні комірки), крок —
+                // рядково-локальна формула, яка читає лише свій рядок і пише лише
+                // в нього. Варіант із накопиченням «рядків, куди вже записали»
+                // виглядав би розумнішим, але спирався б на порядок обчислення
+                // цілей, а він тут не єдиний: відкладені rollup дописуються в
+                // кінець списку ОКРЕМО відсортованою пачкою (`targets` вище).
+                var rowFilter = narrowRows
+                                && dirtyRows is not null
+                                && rowLocal.Contains(formulaId)
+                                && !tablesWithNonLocalTarget.Contains(owner.Table.Id)
+                    ? dirtyRows
+                    : null;
+
+                Evaluate(
+                    owner.Table, owner.Formula, expression, rows, rowFilter,
+                    periodKey, context, values, stored, sink);
             }
-
-            if (!instanceByTable.TryGetValue(owner.Table.Id, out var target)
-                || !rowIdsByTable.TryGetValue(owner.Table.Id, out var rows))
-            {
-                // Таблиці формули немає в цьому документі за цей період —
-                // рахувати нема куди. Це нормально: шаблон описує таблиці,
-                // яких конкретний документ може не містити (`ФВ-3.2`).
-                continue;
-            }
-
-            if (!parsed.TryGetValue(formulaId, out var expression))
-            {
-                continue;
-            }
-
-            if (!byInstance.TryGetValue(target, out var sink))
-            {
-                byInstance[target] = sink = [];
-            }
-
-            // ⛔ `CAL-03`, і саме тут проходить межа безпеки. Рядкове звуження
-            // застосовується лише тоді, коли в цю таблицю в ЦЬОМУ прогоні
-            // не пише жодна НЕлокальна ціль. Тоді й тільки тоді твердження
-            // «усе, що може змінитися в таблиці, лежить у брудних рядках»
-            // доводиться індукцією: базу дає насіння (брудні комірки), крок —
-            // рядково-локальна формула, яка читає лише свій рядок і пише лише
-            // в нього. Варіант із накопиченням «рядків, куди вже записали»
-            // виглядав би розумнішим, але спирався б на порядок обчислення
-            // цілей, а він тут не єдиний: відкладені rollup дописуються в
-            // кінець списку ОКРЕМО відсортованою пачкою (`targets` вище).
-            var rowFilter = dirtyRows is not null
-                            && rowLocal.Contains(formulaId)
-                            && !tablesWithNonLocalTarget.Contains(owner.Table.Id)
-                ? dirtyRows
-                : null;
-
-            Evaluate(
-                owner.Table, owner.Formula, expression, rows, rowFilter,
-                periodKey, context, values, stored, sink);
         }
+
+        EvaluateTargets(targets, narrowRows: true);
 
         // D-230: Rollup — ПІСЛЯ формул документа (значення джерела вже перераховані) і тим самим шляхом
         // запису: записи йдуть у `byInstance`, далі той самий `WriteBatchAsync`/аудит/гейти аркушів.
         // Уся логіка — в `IRelationRecalculator`; без активного Rollup/Check тут нічого не читається.
         if (relationsActive)
         {
+            var rollupSeeds = new DirtySet();
             var pending = byInstance.Values
                 .SelectMany(cells => cells.Values)
                 .ToDictionary(record => record.Address);
@@ -594,6 +601,82 @@ public sealed class RecalculationService(
                 else
                 {
                     relationSink[relationWrite.Record.Address] = relationWrite.Record;
+
+                    // P2-B / D-5: ціль Rollup — нове ДЖЕРЕЛО для формул, що її читають. Нове значення лягає в
+                    // контекст (формули нижче читають його, а не збережене у базі), а комірка — в насіння каскаду.
+                    if (rowKeyByRowIdByInstance.TryGetValue(relationWrite.TargetInstanceId, out var rowKeys)
+                        && rowKeys.TryGetValue(relationWrite.Record.Address.TableRowId, out var targetRowKey))
+                    {
+                        values[new CellKey(0, relationWrite.Record.TableDefId, targetRowKey, relationWrite.Record.Address.ColumnDefId)]
+                            = Ecr.Expressions.Evaluation.CellValueMapping.ToExpressionValue(
+                                relationWrite.Record.Value, Ecr.Expressions.Evaluation.ExpressionValue.Null);
+                    }
+
+                    rollupSeeds.Add(relationWrite.Record.Address);
+                }
+            }
+
+            // Каскад: формули над ціллю (і ті, що читають їхні результати) рахуються ПІСЛЯ запису Rollup. Без
+            // цього вони читали б стару/порожню ціль: Rollup іде після циклу формул, а ціль не є насінням
+            // правки. Ланцюжки Rollup → формула → Rollup, як і раніше, не підтримуються (один прохід).
+            if (!rollupSeeds.IsEmpty)
+            {
+                var cascade = Plan(rollupSeeds, plan);
+                var deferredCascade = TakeDeferredRollups(plan);
+                var cascadeIds = cascade.Concat(deferredCascade).Distinct().ToList();
+                cascadeIds.Sort((a, b) => plan.EvaluationOrder(a).CompareTo(plan.EvaluationOrder(b)));
+
+                var cascadeUnknown = new List<int>();
+                var cascadeTargets = new List<int>();
+                foreach (var formulaId in cascadeIds)
+                {
+                    if (!formulas.TryGetValue(formulaId, out var owner))
+                    {
+                        continue;
+                    }
+
+                    if (!parsed.TryGetValue(formulaId, out var expression))
+                    {
+                        var result = formulaEngine.Parse(owner.Formula.Expression, owner.Formula.Dialect);
+                        if (result.Expression is null)
+                        {
+                            continue;
+                        }
+
+                        parsed[formulaId] = expression = result.Expression;
+                    }
+
+                    if (!knownReads.Contains(formulaId) && RecalculationReadScope.MentionsCells(expression.Root))
+                    {
+                        cascadeUnknown.Add(formulaId);
+                    }
+
+                    cascadeTargets.Add(formulaId);
+                }
+
+                if (cascadeTargets.Count > 0)
+                {
+                    // Входи каскадних формул могли не потрапити в замикання читання першого проходу (воно
+                    // будувалось від цілей, а не від цілі Rollup): докладаємо відсутнє, не чіпаючи вже порахованого.
+                    var extraScope = RecalculationReadScope.Compute(
+                        dependencies,
+                        cascadeTargets,
+                        formulas.ToDictionary(pair => pair.Key, pair => pair.Value.Table.Id),
+                        cascadeUnknown);
+                    var (extraValues, extraStored) = await LoadValuesAsync(
+                        instance, extraScope, (instances, rowIdsBatch), ct).ConfigureAwait(false);
+                    foreach (var (key, value) in extraValues)
+                    {
+                        values.TryAdd(key, value);
+                    }
+
+                    foreach (var (key, value) in extraStored)
+                    {
+                        stored.TryAdd(key, value);
+                    }
+
+                    // Рядкове звуження вимкнено: брудні рядки першого проходу не описують рядки цілі Rollup.
+                    EvaluateTargets(cascadeTargets, narrowRows: false);
                 }
             }
         }
