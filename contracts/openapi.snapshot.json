@@ -3932,6 +3932,13 @@
               "array"
             ]
           },
+          "templateVersion": {
+            "description": "RC15: версія шаблону проєкту документа (`TemplateVersion.Version`, рядок). Адитивне поле; метадані шаблону не секрет,\nтож звуження читача його не знімає. Заповнює лише шлях картки (`FindAsync`); перелік віддає `null`.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
           "warningCount": {
             "description": "Попередження звідти ж; `null` — за тим самим правилом.",
             "format": "int32",

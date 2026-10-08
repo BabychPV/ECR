@@ -19880,6 +19880,9 @@ export interface components {
              *     SheetStates лишається як був. `null` — шлях читання
              *     його не несе (сховище заповнює завжди; як і стан — порожньо без періоду). */
             sheets?: null | components["schemas"]["DocumentSheetState"][];
+            /** @description RC15: версія шаблону проєкту документа (`TemplateVersion.Version`, рядок). Адитивне поле; метадані шаблону не секрет,
+             *     тож звуження читача його не знімає. Заповнює лише шлях картки (`FindAsync`); перелік віддає `null`. */
+            templateVersion?: null | string;
             /**
              * Format: int32
              * @description Попередження звідти ж; `null` — за тим самим правилом.
