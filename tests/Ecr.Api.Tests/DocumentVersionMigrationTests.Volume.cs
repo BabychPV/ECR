@@ -70,6 +70,11 @@ public sealed partial class DocumentVersionMigrationTests
         {
             var store = new DocumentVersionMigrationStore(db);
             await using var tx = await db.Database.BeginTransactionAsync().ConfigureAwait(true);
+            var scopeWatch = System.Diagnostics.Stopwatch.StartNew();
+            var scope = await store.ReadScopeAsync(s.Doc.ProjectId, CancellationToken.None).ConfigureAwait(true);
+            scopeWatch.Stop();
+            Assert.Equal(expectedValues, scope.Cells.Sum(c => c.Values));   // лише непорожні: порожня C3 з ArrangeAsync не рахується
+            Console.WriteLine(FormattableString.Invariant($"N3-VOLUME readScopeMs={scopeWatch.ElapsedMilliseconds}"));
             recorder.Clear();
             var watch = System.Diagnostics.Stopwatch.StartNew();
             await store.ApplyAsync(s.Doc.ProjectId, s.TargetVersionId, plan, CancellationToken.None).ConfigureAwait(true);
@@ -85,10 +90,8 @@ public sealed partial class DocumentVersionMigrationTests
         }
 
         // ⛔ Предмет тесту 1: кожна команда переносу має явний подовжений таймаут, а не глобальні 60 с.
-        var apply = recorder.Commands.Where(c => c.Text.Contains("doc.CellValue", StringComparison.Ordinal)
-                                                 || c.Text.Contains("doc.TableRow", StringComparison.Ordinal)).ToList();
-        Assert.NotEmpty(apply);
-        Assert.All(apply, c => Assert.Equal(DocumentVersionMigrationStore.ApplyCommandTimeoutSeconds, c.TimeoutSeconds));
+        Assert.NotEmpty(recorder.Commands);
+        Assert.All(recorder.Commands, c => Assert.Equal(DocumentVersionMigrationStore.ApplyCommandTimeoutSeconds, c.TimeoutSeconds));
         Assert.True(DocumentVersionMigrationStore.ApplyCommandTimeoutSeconds > GlobalCommandTimeoutSeconds);
 
         // ⛔ Предмет тесту 2: UPDATE комірок іде пачками. Стільки значень одним оператором — це і був дефект.
