@@ -144,6 +144,9 @@ const methodologies = {
   /** Правила відбору рядків (`ФВ-13.3`). */
   rules: (versionId: number) => ['methodologies', 'rules', versionId] as const,
 
+  /** Правило категорії константи версії (L-2, `calc.CategoryRule`). */
+  categoryRule: (versionId: number) => ['methodologies', 'categoryRule', versionId] as const,
+
   /** Обов'язкові вхідні колонки версії (директива «обов'язкові вхідні колонки методології»). */
   requiredInputs: (versionId: number) => ['methodologies', 'requiredInputs', versionId] as const,
 

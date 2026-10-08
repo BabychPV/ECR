@@ -120,6 +120,12 @@ const MethodologyRuleCoveragePanel = lazy(async () => {
  * функціональність, власний `import()`, жодних спільних станів чи чернеток
  * панелей змісту не читає.
  */
+const MethodologyCategoryRulePanel = lazy(async () => {
+  const loaded = await import('@/features/methodologies/CategoryRulePanel');
+
+  return { default: loaded.MethodologyCategoryRulePanel };
+});
+
 const MethodologyCoveragePanel = lazy(async () => {
   const loaded = await import('@/features/methodologies/MethodologyCoveragePanel');
 
@@ -230,6 +236,8 @@ export function MethodologyVersionsPage(): JSX.Element {
   // веде користувача у відмову — `ECR-CALC-0409` або `403`.
   const editable = mayEditContent(selected, mayEdit);
   const requiredInputsEditable = mayEditContent(selected, mayManageRequiredInputs);
+  // PUT/DELETE category-rule сервер дозволяє лише з `Calculation.EditRule`.
+  const categoryRuleEditable = mayEditContent(selected, can(session.data, 'Calculation.EditRule'));
 
   const formulas = useQuery({
     queryKey: queryKeys.methodologies.formulas(selected?.id),
@@ -619,6 +627,15 @@ export function MethodologyVersionsPage(): JSX.Element {
             methodologyId={methodologyId}
             versionId={selected.id}
             editable={editable}
+          />
+
+          {/* L-2 / RC14-F: правило категорії константи — одне на версію; право
+              редагувати те саме, що й для правил відбору (`Calculation.EditRule`),
+              а чернетка — умова `editable`. */}
+          <MethodologyCategoryRulePanel
+            methodologyId={methodologyId}
+            versionId={selected.id}
+            editable={categoryRuleEditable}
           />
 
           <MethodologyRulesPanel
