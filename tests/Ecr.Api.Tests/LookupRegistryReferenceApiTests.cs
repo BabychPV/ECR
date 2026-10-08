@@ -192,20 +192,271 @@ public sealed class LookupRegistryReferenceApiTests(SqlServerFixture sql)
             $"{(int)response.StatusCode}: {await response.Content.ReadAsStringAsync()}");
     }
 
+    // ── Нерозкриття: заборонений довідник відповідає ТАК САМО, як неіснуючий ──────────
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Колонка_на_заборонений_довідник_відповідає_так_само_як_на_неіснуючий()
+    {
+        var draft = await ArrangeAsync();
+        using var app = new EcrApiFactory(sql);
+        var (client, userId) = await SignedInWithIdAsync(app);
+        await DenyRegistryAsync(userId, draft.RegistryId);
+
+        var denied = await NormalizedAsync(await PutColumnAsync(client, draft, "LK_SAME", draft.RegistryId), draft.RegistryId);
+        var missing = await NormalizedAsync(await PutColumnAsync(client, draft, "LK_SAME", MissingRegistryId), MissingRegistryId);
+
+        Assert.StartsWith("422 ", denied, StringComparison.Ordinal);
+        Assert.Equal(missing, denied);
+        client.Dispose();
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Поле_шапки_на_заборонений_довідник_відповідає_так_само_як_на_неіснуючий()
+    {
+        var draft = await ArrangeAsync();
+        using var app = new EcrApiFactory(sql);
+        var (client, userId) = await SignedInWithIdAsync(app);
+        await DenyRegistryAsync(userId, draft.RegistryId);
+
+        var denied = await NormalizedAsync(await PutHeaderFieldAsync(client, draft, "HF_SAME", draft.RegistryId), draft.RegistryId);
+        var missing = await NormalizedAsync(await PutHeaderFieldAsync(client, draft, "HF_SAME", MissingRegistryId), MissingRegistryId);
+
+        Assert.StartsWith("422 ", denied, StringComparison.Ordinal);
+        Assert.Equal(missing, denied);
+        client.Dispose();
+    }
+
+    // ── Правка без зміни довідника не перевіряє ціль заново ──────────────────────────
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Перейменування_колонки_без_зміни_довідника_проходить_коли_довідник_деактивовано()
+    {
+        var draft = await ArrangeAsync();
+        await AddLookupColumnAsync(draft, "LK_REN", draft.RegistryId);
+        await DeactivateAsync(draft.RegistryId);
+        using var app = new EcrApiFactory(sql);
+        using var client = await SystemHealthControllerTests.SignedInAsync(sql, app, "Template.View", "Template.Edit");
+
+        var response = await PutColumnAsync(client, draft, "LK_REN", draft.RegistryId, label: "Renamed", ordinal: 7);
+
+        Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Перейменування_колонки_без_зміни_довідника_проходить_коли_довідник_заборонено_автору()
+    {
+        var draft = await ArrangeAsync();
+        await AddLookupColumnAsync(draft, "LK_DEN", draft.RegistryId);
+        using var app = new EcrApiFactory(sql);
+        var (client, userId) = await SignedInWithIdAsync(app);
+        await DenyRegistryAsync(userId, draft.RegistryId);
+
+        var response = await PutColumnAsync(client, draft, "LK_DEN", draft.RegistryId, label: "Renamed");
+
+        Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
+        client.Dispose();
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Зміна_довідника_наявної_колонки_на_неіснуючий_422()
+    {
+        var draft = await ArrangeAsync();
+        await AddLookupColumnAsync(draft, "LK_RETARGET", draft.RegistryId);
+        using var app = new EcrApiFactory(sql);
+        using var client = await SystemHealthControllerTests.SignedInAsync(sql, app, "Template.View", "Template.Edit");
+
+        var problem = await RejectedAsync(await PutColumnAsync(client, draft, "LK_RETARGET", MissingRegistryId));
+
+        Assert.Equal("err.ECR-TMPL-0422.lookupRegistryUnknown", problem.GetProperty("messageKey").GetString());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Перейменування_поля_шапки_без_зміни_довідника_проходить_коли_довідник_деактивовано()
+    {
+        var draft = await ArrangeAsync();
+        await AddLookupHeaderFieldAsync(draft, "HF_REN");
+        await DeactivateAsync(draft.RegistryId);
+        using var app = new EcrApiFactory(sql);
+        using var client = await SystemHealthControllerTests.SignedInAsync(sql, app, "Template.View", "Template.Edit");
+
+        var response = await PutHeaderFieldAsync(client, draft, "HF_REN", draft.RegistryId, label: "Renamed");
+
+        Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Перейменування_поля_шапки_без_зміни_довідника_проходить_коли_довідник_заборонено_автору()
+    {
+        var draft = await ArrangeAsync();
+        await AddLookupHeaderFieldAsync(draft, "HF_DEN");
+        using var app = new EcrApiFactory(sql);
+        var (client, userId) = await SignedInWithIdAsync(app);
+        await DenyRegistryAsync(userId, draft.RegistryId);
+
+        var response = await PutHeaderFieldAsync(client, draft, "HF_DEN", draft.RegistryId, label: "Renamed");
+
+        Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
+        client.Dispose();
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Зміна_довідника_наявного_поля_шапки_на_неіснуючий_422_а_нове_поле_теж()
+    {
+        var draft = await ArrangeAsync();
+        await AddLookupHeaderFieldAsync(draft, "HF_RETARGET");
+        using var app = new EcrApiFactory(sql);
+        using var client = await SystemHealthControllerTests.SignedInAsync(sql, app, "Template.View", "Template.Edit");
+
+        var retarget = await RejectedAsync(await PutHeaderFieldAsync(client, draft, "HF_RETARGET", MissingRegistryId));
+        Assert.Equal("err.ECR-TMPL-0422.headerFieldLookupRegistryUnknown", retarget.GetProperty("messageKey").GetString());
+
+        var created = await RejectedAsync(await PutHeaderFieldAsync(client, draft, "HF_NEW", MissingRegistryId));
+        Assert.Equal("err.ECR-TMPL-0422.headerFieldLookupRegistryUnknown", created.GetProperty("messageKey").GetString());
+    }
+
     // ── Опора ─────────────────────────────────────────────────────────────
+
+    private static Task<HttpResponseMessage> PutHeaderFieldAsync(
+        HttpClient client, Draft draft, string code, int registryId, string? label = null)
+        => client.PutAsJsonAsync(
+            new Uri($"/api/v1/template-versions/{draft.VersionId}/header-fields/{code}", UriKind.Relative),
+            new
+            {
+                labelL10n = new Dictionary<string, string> { ["en"] = label ?? code },
+                ordinal = (int?)null,
+                dataType = "Lookup",
+                isRequired = false,
+                lookupRegistryDefId = (int?)registryId,
+            });
+
+    /// <summary>Тіло відповіді без мінливого (instance, correlationId) і з id довідника, зведеним до заглушки.</summary>
+    private static async Task<string> NormalizedAsync(HttpResponseMessage response, int registryId)
+    {
+        using (response)
+        {
+            var body = await response.Content.ReadAsStringAsync();
+            var node = System.Text.Json.Nodes.JsonNode.Parse(body)!.AsObject();
+            node.Remove("instance");
+            node.Remove("correlationId");
+            node.Remove("traceId");
+            if (node.ContainsKey("registryDefId"))
+            {
+                node["registryDefId"] = "<id>";
+            }
+
+            var id = System.Text.RegularExpressions.Regex.Escape(registryId.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            if (node["detail"] is { } detail)
+            {
+                node["detail"] = System.Text.RegularExpressions.Regex.Replace(detail.ToString(), $@"(?<!\d){id}(?!\d)", "<id>");
+            }
+
+            return $"{(int)response.StatusCode} {node.ToJsonString()}";
+        }
+    }
+
+    private async Task<(HttpClient Client, int UserId)> SignedInWithIdAsync(EcrApiFactory app)
+    {
+        const string password = "Api-Lookup-Registry-2026!";
+        var name = $"lkreg_{Guid.NewGuid():N}"[..20];
+        int userId;
+
+        await using (var db = Context())
+        {
+            var user = new Ecr.Domain.Entities.Security.User(name, name, AuthProvider.Local);
+            user.SetPassword(new Ecr.Infrastructure.Security.PasswordHasher().Hash(password));
+            db.Users.Add(user);
+            await db.SaveChangesAsync();
+            userId = user.Id;
+
+            var role = new Ecr.Domain.Entities.Security.Role(EcrCode.Create($"R{Guid.NewGuid():N}"[..12]), Name("lookup guard"));
+            db.Roles.Add(role);
+            await db.SaveChangesAsync();
+
+            foreach (var permission in new[] { "Template.View", "Template.Edit" })
+            {
+                db.RolePermissions.Add(new Ecr.Domain.Entities.Security.RolePermission(role.Id, permission));
+            }
+
+            db.RoleAssignments.Add(new Ecr.Domain.Entities.Security.RoleAssignment(role.Id, userId, principalSid: null));
+            await db.SaveChangesAsync();
+        }
+
+        var client = app.CreateClient();
+        var login = await client.PostAsJsonAsync(
+            new Uri("/api/v1/login/local", UriKind.Relative), new { userName = name, password });
+        Assert.True(login.IsSuccessStatusCode, $"{login.StatusCode}: {app.ErrorsText}");
+
+        return (client, userId);
+    }
+
+    private async Task DenyRegistryAsync(int userId, int registryId)
+    {
+        // Заборона вішається на РОЛЬ (grantee - роль), роль призначається автору.
+        await using var db = Context();
+        var denier = new Ecr.Domain.Entities.Security.Role(EcrCode.Create($"D{Guid.NewGuid():N}"[..12]), Name("registry deny"));
+        db.Roles.Add(denier);
+        await db.SaveChangesAsync();
+
+        db.ResourceGrants.Add(new Ecr.Domain.Entities.Security.ResourceGrant(
+            denier.Id, ResourceKind.Registry, registryId, GrantLevel.Read, isDeny: true));
+        db.RoleAssignments.Add(new Ecr.Domain.Entities.Security.RoleAssignment(denier.Id, userId, principalSid: null));
+        await db.SaveChangesAsync();
+    }
+
+    private async Task DeactivateAsync(int registryId)
+    {
+        await using var db = Context();
+        await db.RegistryDefs.Where(r => r.Id == registryId)
+            .ExecuteUpdateAsync(s => s.SetProperty(r => r.IsActive, false));
+    }
+
+    private async Task AddLookupColumnAsync(Draft draft, string code, int registryId)
+    {
+        await using var db = Context();
+        var column = new ColumnDef(draft.TableId, EcrCode.Create(code), Name(code), 5, CellDataType.Lookup);
+        column.SetLookup(registryId, null);
+        db.ColumnDefs.Add(column);
+        await db.SaveChangesAsync();
+    }
+
+    private async Task AddLookupHeaderFieldAsync(Draft draft, string code)
+    {
+        await using var db = Context();
+        var field = new HeaderFieldDef(draft.VersionId, EcrCode.Create(code), Name(code), 1, CellDataType.Lookup);
+        field.SetLookup(draft.RegistryId);
+        db.HeaderFieldDefs.Add(field);
+        await db.SaveChangesAsync();
+    }
 
     private static Task<HttpResponseMessage> PublishAsync(HttpClient client, Draft draft)
         => client.PostAsJsonAsync(
             new Uri($"/api/v1/template-versions/{draft.VersionId}/publish", UriKind.Relative),
             new { reason = "RC16-2" });
 
-    private static Task<HttpResponseMessage> PutColumnAsync(HttpClient client, Draft draft, string code, int registryId)
+    private static Task<HttpResponseMessage> PutColumnAsync(
+        HttpClient client, Draft draft, string code, int registryId, string? label = null, int? ordinal = null)
         => client.PutAsJsonAsync(
             new Uri($"/api/v1/template-versions/{draft.VersionId}/tables/{draft.TableId}/columns/{code}", UriKind.Relative),
             new
             {
-                headerL10n = new Dictionary<string, string> { ["en"] = code },
-                ordinal = (int?)null,
+                headerL10n = new Dictionary<string, string> { ["en"] = label ?? code },
+                ordinal,
                 dataType = "Lookup",
                 isRequired = false, isReadOnly = false, isHidden = false,
                 precision = (byte?)null, scale = (byte?)null,
