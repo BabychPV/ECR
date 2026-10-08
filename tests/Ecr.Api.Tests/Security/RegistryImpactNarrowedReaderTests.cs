@@ -67,6 +67,25 @@ public sealed class RegistryImpactNarrowedReaderTests(SqlServerFixture sql)
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "ФВ-6.14")]
+    public async Task Перерахунок_зачеплених_для_читача_з_Deny_на_аркуш_відмовляє_422_як_для_незачепленого()
+    {
+        var s = await ArrangeAsync("deny");
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, s.UserName);
+
+        using var reply = await client.PostAsJsonAsync(
+            new Uri($"/api/v1/registries/{s.RegistryCode}/recalculate-impacted", UriKind.Relative),
+            new { documentIds = new[] { s.DocumentId }, reason = "перевірка межі читання" });
+        var body = await reply.Content.ReadAsStringAsync();
+
+        Assert.True(reply.StatusCode == HttpStatusCode.UnprocessableEntity, $"{reply.StatusCode}\n{body}");
+        Assert.Contains("ECR-REG-0422", body, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-6.14")]
     public async Task Вплив_довідника_для_ролі_без_обмежень_називає_документ_і_методологію_контроль_сценарію()
     {
         var s = await ArrangeAsync("none");
@@ -134,7 +153,7 @@ public sealed class RegistryImpactNarrowedReaderTests(SqlServerFixture sql)
         db.Roles.Add(role);
         await db.SaveChangesAsync();
 
-        foreach (var permission in new[] { "Document.View", "Calculation.View", "Registry.View" })
+        foreach (var permission in new[] { "Document.View", "Calculation.View", "Calculation.Recalculate", "Registry.View" })
         {
             db.RolePermissions.Add(new RolePermission(role.Id, permission));
         }
