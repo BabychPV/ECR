@@ -49,8 +49,10 @@ public sealed class ExcelImportApplyWorkbookTests(SqlServerFixture sql) : IDispo
     /// залежить — рівність 3 = 12 перевіряється окремо вище.
     /// 21 — L6-02: блокування структури документа з версією шаблону одним
     /// пакетом, першою дією транзакції книги (книжковий шлях його не повторює).
+    /// 22 — N-3: <c>SET LOCK_TIMEOUT</c> у <c>LockWaitGuard</c> (+1 на пакет, від кількості
+    /// таблиць не залежить).
     /// </summary>
-    private const long ApplyExecutions = 21;
+    private const long ApplyExecutions = 22;
 
     private static readonly DateTime Now = new(2026, 10, 15, 10, 0, 0, DateTimeKind.Utc);
 
