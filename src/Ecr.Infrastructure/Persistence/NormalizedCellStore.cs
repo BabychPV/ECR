@@ -547,10 +547,22 @@ public sealed class NormalizedCellStore(EcrDbContext db, ArchiveAwareCellReader?
         if (ambient is not null)
         {
             var joined = (SqlTransaction)ambient.GetDbTransaction();
-            await ClaimRowsAsync(connection, joined, sets, versions, ct).ConfigureAwait(false);
-            await DeleteAsync(connection, joined, deletes, ct).ConfigureAwait(false);
-            LastUpsertRowsAffected = await UpsertAsync(connection, joined, upserts, ct).ConfigureAwait(false);
-            await TouchRowsAsync(connection, joined, sets, versions, ct).ConfigureAwait(false);
+            // ⚠ Лише ambient-гілка (запис користувача: PATCH, імпорт): коротке очікування блокувань і
+            // 409 ECR-DOC-4091 замість 500 (TIER2 N-3, `LockWaitGuard`). Власна транзакція нижче —
+            // фонові перерахунки, їм чекати довше нормально.
+            var upsertRows = 0;
+            await LockWaitGuard.RunAsync(
+                connection,
+                joined,
+                async () =>
+                {
+                    await ClaimRowsAsync(connection, joined, sets, versions, ct).ConfigureAwait(false);
+                    await DeleteAsync(connection, joined, deletes, ct).ConfigureAwait(false);
+                    upsertRows = await UpsertAsync(connection, joined, upserts, ct).ConfigureAwait(false);
+                    await TouchRowsAsync(connection, joined, sets, versions, ct).ConfigureAwait(false);
+                },
+                ct).ConfigureAwait(false);
+            LastUpsertRowsAffected = upsertRows;
             return Result(versions);
         }
 
