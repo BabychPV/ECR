@@ -160,7 +160,7 @@ function Harness(): JSX.Element {
   );
 }
 
-function show(permissions: string[], dryRunReport: VersionMigrationReport, grant = 'Manage'): void {
+function show(permissions: string[], dryRunReport: VersionMigrationReport, grant = 'Manage'): QueryClient {
   mockServer(permissions, dryRunReport, grant);
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
@@ -171,6 +171,8 @@ function show(permissions: string[], dryRunReport: VersionMigrationReport, grant
       </QueryClientProvider>
     </MantineProvider>,
   );
+
+  return client;
 }
 
 async function openAndPickTarget(): Promise<void> {
@@ -261,6 +263,30 @@ describe('useVersionMigrationAction', () => {
     // Опитування триває до завершення: наступне читання дає Succeeded.
     await waitFor(() => expect(vi.mocked(showDone)).toHaveBeenCalledTimes(1), { timeout: 5000 });
     expect(jobRequests).toBeGreaterThanOrEqual(2);
+  });
+
+  it('D-2: закриття діалогу не губить завершення - кеші скинуто і тост показано вже ПІСЛЯ закриття', async () => {
+    const client = show(['Template.Edit'], report({}));
+    const invalidate = vi.spyOn(client, 'invalidateQueries');
+    jobStates = [jobStatus({ state: 'Running', percent: 41, message: 'Moving cell values' }), jobStatus({})];
+    await openAndPickTarget();
+
+    fireEvent.click(screen.getByTestId('migrate-dry-run'));
+    await screen.findByText('⟦documents.migrateCanApply⟧');
+    await waitFor(() => expect((screen.getByTestId('migrate-apply') as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(screen.getByTestId('migrate-apply'));
+    await waitFor(() => expect(document.querySelector('[data-migrate-progress]')).not.toBeNull());
+
+    // Людина закриває діалог, поки перенос ще йде.
+    fireEvent.click(screen.getByText('⟦common.cancel⟧'));
+    await waitFor(() => expect(screen.queryByTestId('migrate-apply')).toBeNull());
+    expect(vi.mocked(showDone)).not.toHaveBeenCalled();
+    invalidate.mockClear();
+
+    // ⛔ Предмет тесту: завершення відбувається без діалогу (інакше сітки лишились би на старій структурі).
+    await waitFor(() => expect(vi.mocked(showDone)).toHaveBeenCalledTimes(1), { timeout: 5000 });
+    expect(vi.mocked(showDone)).toHaveBeenCalledWith('Migrated to version 2.0: documents 3, values moved 10');
+    expect(invalidate).toHaveBeenCalled();
   });
 
   it('D-2: задача Failed - причина в діалозі, тосту немає, перенос можна повторити', async () => {
