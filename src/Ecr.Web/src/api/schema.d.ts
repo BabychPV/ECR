@@ -20612,6 +20612,13 @@ export interface components {
             resultUrl?: null | string;
             /** @description Стан. */
             state: string;
+            /**
+             * Format: int32
+             * @description Скільки комірок записав `Succeeded` перерахунок формул після правки (`0` — нічого,
+             *     клієнт не перечитує зрізи); `null` — інша задача, ще не завершена або число невідоме
+             *     (AN-108 / P2-02, `FormulaRecalcOutcome`). Заповнює `GetJobStatusHandler`.
+             */
+            writtenCount?: null | number;
         };
         /** @description Задача в переліку черги — легша за JobStatus. */
         JobSummary: {
