@@ -9,8 +9,10 @@
     LAND_* (спершу їх завантажує Import-ContractDictionaries.ps1).
 
     Порядок (план RC15, L3):
-      1. знайти шаблон за кодом; взяти чернетку версії, якщо вона є, інакше клонувати
-         останню ОПУБЛІКОВАНУ (або -SourceVersionId): POST /template-versions/{id}/clone;
+      1. знайти шаблон за кодом. Якщо чернетка вже є — зупинитись із поясненням (вона може
+         містити чужі незавершені правки, які скрипт опублікував би разом зі своїми); продовжити
+         з нею можна лише явним -UseExistingDraft. Без чернетки — клонувати останню
+         ОПУБЛІКОВАНУ (або -SourceVersionId): POST /template-versions/{id}/clone;
       2. PUT /template-versions/{id}/header-fields/{code} лише для полів, що відсутні або
          відрізняються (тип, довідник, обов'язковість, порядок); підписи наявних полів
          зберігаються;
@@ -29,7 +31,16 @@
     Код шаблону (напр. Land).
 
 .PARAMETER SourceVersionId
-    Опублікована версія-основа (за замовчуванням остання опублікована).
+    Опублікована версія-основа (за замовчуванням остання опублікована). Разом із наявною
+    чернеткою — помилка (чернетка ігнорувала б це значення). Міграція документів завжди йде лише
+    на останню опубліковану версію: якщо -SourceVersionId старіший за неї і змін немає, скрипт
+    зупиняється, а не переносить документи на стару версію.
+
+.PARAMETER UseExistingDraft
+    Дозволити продовжити з наявною чернеткою шаблону (довнести поля й опублікувати її). Без цього
+    прапора наявна чернетка — зупинка: скрипт не публікує чужі незавершені правки. Подивитися чернетку
+    можна в адмініструванні шаблону; або опублікувати/видалити її вручну, або передати -UseExistingDraft.
+    Несумісний з -SourceVersionId.
 
 .PARAMETER NewVersion
     Номер нової версії (за замовчуванням: основа з +1 до третього сегмента, 1.0.0.0 -> 1.0.1.0).
@@ -62,6 +73,7 @@ param(
     [string]$DataDir,
     [int]$SourceVersionId,
     [string]$NewVersion,
+    [switch]$UseExistingDraft,
     [switch]$NoPublish,
     [int[]]$MigrateDocumentId,
     [switch]$Async,
@@ -108,10 +120,28 @@ $v = Invoke-Ecr -Method GET -Path "/api/v1/templates/$($tpl.id)/versions?limit=1
 Assert-EcrOk $v 'GET template versions'
 $versions = @($v.Json.items)
 $draft = $versions | Where-Object { $_.status -eq 'Draft' } | Sort-Object id -Descending | Select-Object -First 1
+$latest = $versions | Where-Object { $_.status -eq 'Published' } | Sort-Object id -Descending | Select-Object -First 1
 $source = $null
 if ($SourceVersionId) { $source = $versions | Where-Object { $_.id -eq $SourceVersionId } | Select-Object -First 1 }
-else { $source = $versions | Where-Object { $_.status -eq 'Published' } | Sort-Object id -Descending | Select-Object -First 1 }
+else { $source = $latest }
+
+# N5-03: чернетку не беремо мовчки. Вона може містити чужі незавершені правки, і скрипт опублікував би їх
+# разом зі своїми (опублікована версія незмінна). Продовжити з нею можна лише явним -UseExistingDraft.
+if ($null -ne $draft -and $SourceVersionId) {
+    throw ("Шаблон «$TemplateCode» уже має чернетку $($draft.version) (id $($draft.id)): -SourceVersionId $SourceVersionId " +
+        'було б проігноровано (клон не створюється, правки йдуть у чернетку). Приберіть -SourceVersionId або спершу ' +
+        'опублікуйте чи видаліть чернетку вручну.')
+}
+if ($null -ne $draft -and -not $UseExistingDraft) {
+    throw ("Шаблон «$TemplateCode» уже має чернетку $($draft.version) (id $($draft.id)). Вона може містити чужі незавершені " +
+        'правки, і скрипт опублікував би їх разом зі своїми. Перегляньте чернетку в адмініструванні шаблону, опублікуйте ' +
+        'чи видаліть її вручну або запустіть із -UseExistingDraft, якщо продовжити саме з нею — свідоме рішення.')
+}
+if ($SourceVersionId -and $null -eq $source) { throw "Версії $SourceVersionId у шаблоні «$TemplateCode» немає." }
 if ($null -eq $draft -and $null -eq $source) { throw 'Немає ні чернетки, ні опублікованої версії для основи.' }
+if ($null -ne $draft -and -not [string]::IsNullOrWhiteSpace($NewVersion)) {
+    Write-Warning "-NewVersion $NewVersion ігнорується: роботу продовжено в наявній чернетці $($draft.version) (id $($draft.id))."
+}
 
 # База порівняння: чернетка, якщо є; інакше основа.
 $baseVersion = if ($null -ne $draft) { $draft } else { $source }
@@ -192,8 +222,15 @@ $hasMigration = @($MigrateDocumentId | Where-Object { $_ }).Count -gt 0
 if ($todo.Count -eq 0 -and $null -eq $draft) {
     Write-Host "Версія $($baseVersion.version) (id $($baseVersion.id)) уже відповідає маніфесту: 0 змін."
     if ($hasMigration) {
+        # N5-03: документи переносимо лише на ОСТАННЮ опубліковану версію. Старіша -SourceVersionId без змін
+        # давала б міграцію «назад» на версію, що вже не актуальна.
+        if ($null -eq $latest -or [int]$baseVersion.id -ne [int]$latest.id) {
+            throw ("Міграцію документів скасовано: версія $($baseVersion.version) (id $($baseVersion.id)) не остання опублікована " +
+                "(остання: id $(if ($null -ne $latest) { $latest.id } else { '—' })). Документи переносяться лише на останню опубліковану " +
+                'версію: приберіть -SourceVersionId або вкажіть id останньої.')
+        }
         # Шапка вже на потрібній (опублікованій) версії: міграція документів усе одно виконується.
-        Invoke-DocumentMigration -TargetVersionId ([int]$baseVersion.id)
+        Invoke-DocumentMigration -TargetVersionId ([int]$latest.id)
     }
     return
 }
