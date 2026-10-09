@@ -8522,7 +8522,7 @@
             "additionalProperties": {
               "type": "string"
             },
-            "description": "Нові версії зачеплених рядків: `RowKey` → hex.",
+            "description": "Нові версії зачеплених рядків: `RowKey` → `rowversion` у Base64 (`Convert.ToBase64String`),\nне hex. Base64 розрізняє регістр: клієнт повертає значення в `baseVersion` дослівно, а сервер порівнює\nйого `Ordinal` — переписане в нижній чи верхній регістр, воно дало б хибний конфлікт `409`.",
             "type": "object"
           },
           "validation": {
