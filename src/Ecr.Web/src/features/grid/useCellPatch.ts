@@ -225,8 +225,42 @@ export function settleRecalculation(
 /** Скільки разів фоновий слідкувач питає про задачу (2 с * 60 = 2 хв). */
 const FollowMaxPolls = 60;
 
+/**
+ * Загальна стеля життя слідкувача від першої задачі (AN-108 / P2-03): `attempt` скидається на кожну нову задачу,
+ * тож за безперервного введення стеля спроб сама по собі не спрацьовувала ніколи.
+ */
+const FollowMaxMs = 10 * 60_000;
+
 /** Активні слідкувачі: ключ `документ:період` -> остання задача, за якою він стежить. */
 const activeFollowers = new Map<string, { jobId: string }>();
+
+/**
+ * Чи стежить за задачею фоновий слідкувач (AN-108 / P2-03). Тоді сітка лише ЧИТАЄ кеш `['job', id]`, який
+ * наповнює слідкувач, а не опитує той самий стан другим незалежним таймером.
+ */
+export function isFollowedJob(jobId: string): boolean {
+  for (const follower of activeFollowers.values()) {
+    if (follower.jobId === jobId) return true;
+  }
+  return false;
+}
+
+/** Чи прихована вкладка. */
+function isHidden(): boolean {
+  return typeof document !== 'undefined' && document.visibilityState === 'hidden';
+}
+
+/** Чекає, доки вкладка знову стане видимою (AN-108 / P2-03): прихована вкладка не опитує сервер. */
+function untilVisible(): Promise<void> {
+  return new Promise((resolve) => {
+    const onChange = (): void => {
+      if (document.visibilityState === 'hidden') return;
+      document.removeEventListener('visibilitychange', onChange);
+      resolve();
+    };
+    document.addEventListener('visibilitychange', onChange);
+  });
+}
 
 /**
  * Фонове стеження за перерахунком, поставленим правкою (N-1).
@@ -255,10 +289,14 @@ export function followRecalculation(
   const follower = { jobId };
   activeFollowers.set(key, follower);
   void (async () => {
+    let polledJob = follower.jobId;
+    let settled = false;
     try {
-      let polledJob = follower.jobId;
+      const startedAt = Date.now();
       let attempt = 0;
-      while (attempt < FollowMaxPolls) {
+      while (attempt < FollowMaxPolls && Date.now() - startedAt < FollowMaxMs) {
+        // ⚠ Лише коли прихована: інакше перший запит іде синхронно зі стартом слідкувача, як і раніше.
+        if (isHidden()) await untilVisible();
         if (follower.jobId !== polledJob) {
           polledJob = follower.jobId;
           attempt = 0;
@@ -274,15 +312,19 @@ export function followRecalculation(
         // Поки опитували, з'явилась новіша задача: чекаємо на неї, а не скидаємо зрізи передчасно.
         if (follower.jobId !== current) continue;
         if (pollInterval(job.state) === false) {
+          settled = true;
           settleRecalculation(queryClient, current, documentId, periodKey);
           return;
         }
         await new Promise((resolve) => setTimeout(resolve, RecalculationPollMs));
       }
     } catch {
-      // Помилка опитування: слідкувач завершується, сітка має власне стеження.
+      // Помилка опитування: слідкувач завершується, сітка (якщо змонтована) підхоплює стеження — див. `finally`.
     } finally {
       if (activeFollowers.get(key) === follower) activeFollowers.delete(key);
+      // ⚠ AN-108 / P2-03: поки слідкувач жив, змонтована сітка свого таймера не тримала (`isFollowedJob`). Пішов,
+      // не дочекавшись кінця, — один перезапит змусить спостерігача сітки перерахувати інтервал і стежити самому.
+      if (!settled) void queryClient.invalidateQueries({ queryKey: ['job', polledJob], exact: true });
     }
   })();
 }
@@ -515,8 +557,13 @@ export function useRecalculationStatus(jobId: string | null): RecalculationStatu
     // і сервер чесно відповідає 404. Саме на цьому падав крок 17 `smoke.ps1`.
     queryFn: () => apiFetch<JobStatus>(`/api/v1/jobs/${encodeURIComponent(active ?? '')}`),
     enabled: active !== null,
+    // ⛔ AN-108 / P2-03: за задачею, яку веде фоновий слідкувач (`followRecalculation`), сітка НЕ тримає
+    // другого таймера на той самий ключ — лише читає кеш, який той наповнює. Інтервал перераховується на
+    // кожне оновлення запиту, тож коли слідкувач піде без кінцевого стану, сітка підхопить опитування сама.
     refetchInterval: (query) =>
-      pollInterval(query.state.data?.state) === false ? false : RecalculationPollMs,
+      pollInterval(query.state.data?.state) === false || (active !== null && isFollowedJob(active))
+        ? false
+        : RecalculationPollMs,
     retry: false,
   });
 

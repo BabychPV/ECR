@@ -3,7 +3,7 @@ import { renderHook, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 import { queryKeys } from '@/api/queryKeys';
-import { RecalculationPollMs, useRecalculationStatus } from '../useCellPatch';
+import { RecalculationPollMs, followRecalculation, useRecalculationStatus } from '../useCellPatch';
 import { formatTime } from '@/shared/format';
 
 /**
@@ -251,3 +251,21 @@ function harness(): { client: QueryClient; wrapper: ({ children }: { children: R
     ),
   };
 }
+
+describe('AN-108 / P2-03: один цикл опитування на задачу', () => {
+  // ⛔ Мутаційний доказ: прибери `isFollowedJob` з `refetchInterval` — сітка й слідкувач питатимуть парою (~10).
+  it('змонтована сітка + фоновий слідкувач на ту саму задачу: за 10 с не більше ~6 запитів стану', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const { client, wrapper } = harness();
+
+    followRecalculation(client, 'IFormulaRecalculationJob#77', 31, 202609);
+    renderHook(() => useRecalculationStatus('IFormulaRecalculationJob#77'), { wrapper });
+
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    expect(jobCalls().length).toBeLessThanOrEqual(7);
+    expect(jobCalls().length).toBeGreaterThanOrEqual(4);
+
+    client.clear();
+  });
+});
