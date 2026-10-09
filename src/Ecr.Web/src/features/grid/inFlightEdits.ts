@@ -64,6 +64,20 @@ export function beginInFlight(
   };
 }
 
+/**
+ * Правка комірки, чий `PATCH` зараз у дорозі; `undefined` — нічого не летить.
+ *
+ * ⛔ `G1-02`: «повернення до збереженого», поки летить інше значення тієї самої
+ * комірки, — не скасування, а НОВА правка: сервер от-от прийме те, що летить.
+ */
+export function inFlightEdit(
+  tableInstanceId: number,
+  periodKey: number,
+  cell: Pick<PendingEdit, 'rowKey' | 'columnCode'>,
+): PendingEdit | undefined {
+  return bySlice.get(keyOfSlice(tableInstanceId, periodKey))?.get(cellKey(cell));
+}
+
 /** Рядки зрізу, для яких зараз летить запит. */
 export function inFlightRowKeys(tableInstanceId: number, periodKey: number): ReadonlySet<string> {
   const cells = bySlice.get(keyOfSlice(tableInstanceId, periodKey));

@@ -21,7 +21,7 @@ import { cellFormatOf, withCellFormat } from './conditionalAppearance';
 import { cellDisplay, cellText, editorValueOf, isNumericColumn } from './cellValue';
 import { planPaste, type PasteRejection } from './clipboard';
 import { parseClipboard, toClipboard } from './tsvClipboard';
-import { captureEdit, coerce, revertsToSaved, valueOf, withKnownVersions } from './edits';
+import { captureEdit, captureOverInFlight, coerce, revertsToSaved, valueOf, withKnownVersions } from './edits';
 import { captureRange, isRangeEdit, type RangeEditDetail } from './rangeEdit';
 import { ConflictPanel, hasCurrentVersion, type OpenConflict } from './ConflictPanel';
 import { cellStateClass, cellStateOf, type LocalCellFlags } from './cellState';
@@ -59,7 +59,7 @@ import {
   scheduleAutosave,
   useBusyRetryWaiting,
 } from './autosave';
-import { beginInFlight, deferUntilInFlightSettles, splitByInFlight } from './inFlightEdits';
+import { beginInFlight, deferUntilInFlightSettles, inFlightEdit, splitByInFlight } from './inFlightEdits';
 import { GridAriaPlugin } from './gridAria';
 import { mergePatchNotices, PatchNoticesAlert, type PatchNotice } from './patchNotices';
 // ⚠ Ключ комірки СХОВИЩА під власним іменем: у цьому файлі вже є `cellKey`
@@ -1393,7 +1393,11 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
     (signal: { columnCode: string; rowKey: string; raw: string; untouched?: boolean }) => {
       if (data === undefined) return null;
 
-      const captured = captureEdit(data, signal);
+      // ⛔ `G1-02`: повернення до збереженого, поки летить інше значення комірки, —
+      // нова правка, а не скасування (`captureOverInFlight`).
+      const captured =
+        captureEdit(data, signal) ??
+        captureOverInFlight(data, signal, inFlightEdit(tableInstanceId, periodKey, signal));
       if (captured === null) {
         // ⛔ `V-01`: повернення збереженого значення в комірку з незбереженою
         // (зокрема відхиленою) правкою — це скасування правки, а не «нічого».
@@ -1444,7 +1448,17 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
     (detail: RangeEditDetail, confirmed = false) => {
       if (data === undefined) return;
 
-      const { captured, reverted } = captureRange(data, detail, rowKeyOf);
+      const range = captureRange(data, detail, rowKeyOf);
+
+      // ⛔ `G1-02`: як і в ручного введення — повернення до збереженого, поки
+      // летить інше значення комірки, їде слідом, а не знімає правку.
+      const captured = [...range.captured];
+      const reverted: typeof range.reverted = [];
+      for (const signal of range.reverted) {
+        const over = captureOverInFlight(data, signal, inFlightEdit(tableInstanceId, periodKey, signal));
+        if (over === null) reverted.push(signal);
+        else captured.push(over);
+      }
 
       if (confirmed) {
         // ⛔ Підтверджене протягування (`ФВ-2.16`) сітка НЕ намалювала:

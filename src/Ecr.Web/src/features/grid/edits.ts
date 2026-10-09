@@ -144,6 +144,53 @@ export function revertsToSaved(
 }
 
 /**
+ * Повернення до збереженого значення, поки ІНШЕ значення тієї самої комірки
+ * летить на сервер (`G1-02`).
+ *
+ * ⛔ `captureEdit` порівнює введене з КЕШЕМ, а кеш до відповіді ще тримає
+ * збережене: «10 → 20 (полетіло) → 10» виглядало як «без змін», `V-01`
+ * знімав правку зі сховища, а відповідь клала в кеш 20 — на сервері лишалось
+ * значення, яке людина щойно явно виправила. Тут таке введення стає звичайною
+ * правкою поверх того, що летить: `before` — значення в дорозі (саме воно буде в
+ * кеші, коли правка поїде; `splitByInFlight` відкладе її до відповіді), версія —
+ * поточна, її однаково підставить `withKnownVersions`.
+ *
+ * @returns `null`, якщо нічого не летить, введене НЕ повертає збережене або
+ * дорівнює тому, що летить, — тоді діє звичайне правило `V-01`.
+ */
+export function captureOverInFlight(
+  slice: TableSliceDto,
+  signal: EditSignal,
+  flying: PendingEdit | undefined,
+  rows: ReadonlyMap<string, RowDto> = rowIndexOf(slice),
+): CapturedEdit | null {
+  if (flying === undefined || signal.untouched === true) return null;
+  if (!revertsToSaved(slice, signal, rows)) return null;
+
+  const column = columnIndexOf(slice).get(signal.columnCode);
+  const row = rows.get(signal.rowKey);
+  if (column === undefined || row === undefined) return null;
+
+  const after = coerce(signal.raw, column.dataType);
+  const inFlight = flying.isEmpty ? null : flying.value;
+  const same = column.dataType === 'Date' ? sameDateValue(after, inFlight) : sameCellValue(after, inFlight);
+  if (same) return null;
+
+  return {
+    pending: {
+      rowKey: signal.rowKey,
+      columnCode: signal.columnCode,
+      value: after,
+      isEmpty: false,
+      baseVersion: row.rowVersion,
+      before: inFlight,
+    },
+    step: { rowKey: signal.rowKey, columnCode: signal.columnCode, before: inFlight, after },
+    columnHeader: column.header,
+  };
+}
+
+/**
  * Правки з ОСТАННЬОЮ відомою версією рядка — у мить надсилання, а не введення
  * (`B-09`).
  *
