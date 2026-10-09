@@ -314,11 +314,13 @@ public sealed class ExpressionDepthGuardTests
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
     public void Ланцюг_у_дужках_операндом_іншого_ланцюга_додає_свою_глибину()
     {
-        // Кожен ланцюг коротший за межу, але внутрішній — операнд останньої ланки
-        // зовнішнього: глибина дерева — їхня сума, і межа «на ланцюг» її не тримала б.
+        // Кожен ланцюг коротший за межу, але внутрішній — правий операнд ПЕРШОЇ ланки
+        // зовнішнього: усі наступні ланки лежать над ним, і висота дерева — їхня сума
+        // (514 + 513), а межа «на ланцюг» її не тримала б. (Правий операнд ОСТАННЬОЇ ланки
+        // глибини не додає: `a+b+(c+d)` має висоту max, а не суму; див. ParserChainDepthTests.)
         var chain = "1" + Repeat("+1", (Parser.MaxChainLinks / 2) + 1);
 
-        var result = Expr.Parse(chain + "+(" + chain + ")");
+        var result = Expr.Parse("1+(" + chain + ")" + Repeat("+1", (Parser.MaxChainLinks / 2) + 1));
 
         Assert.Contains(result.Diagnostics, d => d.MessageKey == "expr.chainTooLong");
     }

@@ -95,10 +95,18 @@ public sealed class Parser
     public const int MaxRecursionDepth = 192;
 
     /// <summary>
-    /// Скільки ланок ланцюгів бінарних операторів дозволено на одному шляху від
-    /// кореня дерева виразу.
+    /// Найбільше ланок ланцюгів бінарних операторів на одному шляху від кореня
+    /// дерева виразу до листка — тобто ВИСОТА дерева в ланках.
     /// </summary>
     /// <remarks>
+    /// <para>
+    /// ✎ L7-01 (аудит 2026-10-09, AN-72): межа міряє справжню висоту піддерева
+    /// (<c>1 + max(висота лівого, висота правого)</c>), а не «ланки, відкриті на
+    /// шляху розбору»: той лічильник скидався при виході з вкладеного виразу, і
+    /// ланцюг у дужках, що стоїть ЛІВИМ операндом іншого ланцюга (чи раннім
+    /// правим), знову діставав повні 1024 ланки — на кожному рівні дужок.
+    /// </para>
+    /// <para>
     /// ⚠ Межа згори — стек потоку для рекурсивних обходів дерева після розбору
     /// (L7-01). Ланцюг — лівий гребінь, тож глибина дерева дорівнює числу ланок.
     /// Найважчі обходи (<c>RegistryRuleContext.BindNode</c>,
@@ -108,6 +116,7 @@ public sealed class Parser
     /// збереження (у розрахунку, у фоновій задачі). За 1024 — ~0,6 МБ плюс запас
     /// сторожа 128 КБ: вміщається в 1 МБ разом із кадрами хоста
     /// (<c>ExpressionTraversalStackTests</c> міряє це на потоці 768 КБ).
+    /// </para>
     /// <para>
     /// ⚠ Межа знизу — справжні формули: найглибша формула корпусу має 9 рівнів, а
     /// 4000 символів (<c>MethodologyFormula.MaxExpressionLength</c>) з посиланнями
@@ -369,7 +378,9 @@ public sealed class Parser
         var whenTrue = ParseExpression(s);
         s.Expect(TokenType.Colon, "expr.expectedColonInTernary", "Expected \":\" in the ternary operator.");
         var whenFalse = ParseExpression(s);
-        return new ConditionalNode(condition, whenTrue, whenFalse) { Position = condition.Position };
+        var conditional = new ConditionalNode(condition, whenTrue, whenFalse) { Position = condition.Position };
+        s.Inherit(conditional, condition, whenTrue, whenFalse);
+        return conditional;
     }
 
     private static AstNode ParseOr(State s)
@@ -377,9 +388,8 @@ public sealed class Parser
         var left = ParseAnd(s);
         while (s.Match(TokenType.Or))
         {
-            s.CountChainLink();
             var right = ParseAnd(s);
-            left = new BinaryNode(BinaryOperator.Or, left, right) { Position = left.Position };
+            left = s.Link(new BinaryNode(BinaryOperator.Or, left, right) { Position = left.Position }, left, right);
         }
 
         return left;
@@ -390,9 +400,8 @@ public sealed class Parser
         var left = ParseNot(s);
         while (s.Match(TokenType.And))
         {
-            s.CountChainLink();
             var right = ParseNot(s);
-            left = new BinaryNode(BinaryOperator.And, left, right) { Position = left.Position };
+            left = s.Link(new BinaryNode(BinaryOperator.And, left, right) { Position = left.Position }, left, right);
         }
 
         return left;
@@ -421,7 +430,8 @@ public sealed class Parser
         {
             var position = s.Current.Position;
             s.Advance();
-            node = new UnaryNode(UnaryOperator.Not, ParseNot(s)) { Position = position };
+            var operand = ParseNot(s);
+            node = s.Inherit(new UnaryNode(UnaryOperator.Not, operand) { Position = position }, operand);
         }
         else
         {
@@ -453,7 +463,7 @@ public sealed class Parser
 
         s.Advance();
         var right = ParseConcat(s);
-        return new BinaryNode(op.Value, left, right) { Position = left.Position };
+        return s.Inherit(new BinaryNode(op.Value, left, right) { Position = left.Position }, left, right);
     }
 
     private static AstNode ParseConcat(State s)
@@ -476,9 +486,9 @@ public sealed class Parser
             }
 
             s.Advance();
-            s.CountChainLink();
             var right = ParseAdditive(s);
-            left = new BinaryNode(BinaryOperator.Concat, left, right) { Position = left.Position };
+            left = s.Link(
+                new BinaryNode(BinaryOperator.Concat, left, right) { Position = left.Position }, left, right);
         }
 
         return left;
@@ -501,10 +511,9 @@ public sealed class Parser
                 return left;
             }
 
-            s.CountChainLink();
             s.Advance();
             var right = ParseMultiplicative(s);
-            left = new BinaryNode(op.Value, left, right) { Position = left.Position };
+            left = s.Link(new BinaryNode(op.Value, left, right) { Position = left.Position }, left, right);
         }
     }
 
@@ -526,10 +535,9 @@ public sealed class Parser
                 return left;
             }
 
-            s.CountChainLink();
             s.Advance();
             var right = ParseUnary(s);
-            left = new BinaryNode(op.Value, left, right) { Position = left.Position };
+            left = s.Link(new BinaryNode(op.Value, left, right) { Position = left.Position }, left, right);
         }
     }
 
@@ -555,7 +563,8 @@ public sealed class Parser
             var position = s.Current.Position;
             var op = s.Current.Type == TokenType.Minus ? UnaryOperator.Negate : UnaryOperator.Plus;
             s.Advance();
-            node = new UnaryNode(op, ParseUnary(s)) { Position = position };
+            var operand = ParseUnary(s);
+            node = s.Inherit(new UnaryNode(op, operand) { Position = position }, operand);
         }
         else
         {
@@ -617,7 +626,7 @@ public sealed class Parser
         s.Advance();
 
         var right = ParseUnary(s);
-        return new BinaryNode(BinaryOperator.Power, left, right) { Position = left.Position };
+        return s.Inherit(new BinaryNode(BinaryOperator.Power, left, right) { Position = left.Position }, left, right);
     }
 
     private static AstNode ParsePrimary(State s)
@@ -951,7 +960,9 @@ public sealed class Parser
         // (`CAL-05`) і звідти — до всіх наступних прогонів. `List` під
         // `IReadOnlyList` означав би, що будь-який споживач може дописати
         // аргумент у ЧУЖИЙ вираз.
-        return new FunctionNode(name, Frozen(args)) { Position = token.Position };
+        var call = new FunctionNode(name, Frozen(args)) { Position = token.Position };
+        s.SetHeight(call, args.Count == 0 ? 0 : args.Max(a => s.HeightOf(a)));
+        return call;
     }
 
     /// <summary>
@@ -1169,10 +1180,14 @@ public sealed class Parser
             sheetCode = segments[0].Text;
         }
 
-        return new CellReferenceNode(sheetCode, tableCode, row, column.Text!, periodOffset)
+        var cell = new CellReferenceNode(sheetCode, tableCode, row, column.Text!, periodOffset)
         {
             Position = position,
         };
+
+        // Предикат `[WHERE …]` — теж піддерево, яким ідуть обходи: його висота — висота посилання.
+        s.SetHeight(cell, segments.Max(x => x.Predicate is { } predicate ? s.HeightOf(predicate) : 0));
+        return cell;
     }
 
     private static RowSelector ToRowSelector(Segment segment)
@@ -1320,8 +1335,13 @@ public sealed class Parser
     {
         private int _index;
         private int _depth;
-        private int _chainLinks;
-        private readonly int[] _chainLinksAtEntry = new int[MaxRecursionDepth + 1];
+
+        /// <summary>Висота піддерев у ланках; вузол, якого тут немає, має висоту 0 (лист).</summary>
+        /// <remarks>
+        /// ⚠ Ключ — ПОСИЛАННЯ на вузол: вузли — records зі структурною рівністю, а два однакові
+        /// піддерева (<c>1+1</c> двічі) мають різні місця в дереві.
+        /// </remarks>
+        private Dictionary<AstNode, int>? _heights;
 
         public ExpressionDialect Dialect => dialect;
 
@@ -1360,7 +1380,6 @@ public sealed class Parser
         {
             if (++_depth <= MaxRecursionDepth)
             {
-                _chainLinksAtEntry[_depth] = _chainLinks;
                 return;
             }
 
@@ -1377,9 +1396,43 @@ public sealed class Parser
             throw new ParseAbort();
         }
 
+        /// <summary>Висота піддерева в ланках ланцюгів; лист і вузол без ланок — 0.</summary>
+        /// <param name="node">Вузол, щойно розібраний.</param>
+        /// <returns>Скільки ланок на найдовшому шляху вниз від вузла.</returns>
+        public int HeightOf(AstNode node)
+            => _heights is not null && _heights.TryGetValue(node, out var height) ? height : 0;
+
+        /// <summary>Запам'ятовує висоту вузла (0 не записується — це значення за замовчуванням).</summary>
+        /// <param name="node">Вузол.</param>
+        /// <param name="height">Висота в ланках.</param>
+        public void SetHeight(AstNode node, int height)
+        {
+            if (height > 0)
+            {
+                (_heights ??= new Dictionary<AstNode, int>(ReferenceEqualityComparer.Instance))[node] = height;
+            }
+        }
+
+        /// <summary>Вузол, що ланкою НЕ є (унарний, умовний, порівняння, степінь): висота — найбільша з дітей.</summary>
+        /// <typeparam name="T">Тип вузла.</typeparam>
+        /// <param name="node">Новий вузол.</param>
+        /// <param name="children">Його піддерева.</param>
+        /// <returns><paramref name="node"/>.</returns>
+        public T Inherit<T>(T node, params AstNode[] children)
+            where T : AstNode
+        {
+            SetHeight(node, children.Length == 0 ? 0 : children.Max(c => HeightOf(c)));
+            return node;
+        }
+
         /// <summary>
-        /// Рахує ще одну ланку ланцюга бінарних операторів; вичерпаний бюджет — відмова.
+        /// Ще одна ланка ланцюга бінарних операторів: висота = 1 + висота вищого з операндів;
+        /// вичерпаний бюджет — відмова.
         /// </summary>
+        /// <param name="node">Новий вузол ланки.</param>
+        /// <param name="left">Лівий операнд.</param>
+        /// <param name="right">Правий операнд.</param>
+        /// <returns><paramref name="node"/>.</returns>
         /// <remarks>
         /// ⛔ L7-01 (аудит 2026-10-03): ланцюг <c>1+1+…+1</c> розбирається ЦИКЛОМ,
         /// тож <see cref="EnterNesting"/> його не бачить, а дерево виходить лівим
@@ -1388,28 +1441,36 @@ public sealed class Parser
         /// (<c>PredicateValidator</c>, <c>TypeChecker</c>, …) вичерпували стек —
         /// <c>StackOverflowException</c> і смерть процесу API.
         ///
-        /// ⚠ Лічильник рахує ланки ВІДКРИТИХ ланцюгів на поточному шляху розбору,
-        /// а не кожного ланцюга окремо і не всього виразу: ланцюг у дужках, що
-        /// стоїть операндом іншого ланцюга, додає свою глибину до глибини
-        /// зовнішнього (межа «на ланцюг» це пропустила б), а сусідні аргументи
-        /// функції лежать на різних шляхах і не додають (межа «на вираз»
-        /// відхиляла б широкі, але мілкі вирази). Повернення до значення на
-        /// вході — у <see cref="LeaveNesting"/>. Отже глибина дерева не більша
-        /// за <see cref="MaxChainLinks"/> плюс <see cref="MaxRecursionDepth"/>.
+        /// ⛔ L7-01 (аудит 2026-10-09, AN-72): лічильник «ланок на шляху розбору»
+        /// скидався при виході з вкладеного виразу (<see cref="LeaveNesting"/>),
+        /// тож дужки лівим операндом ланцюга (<c>((…1+1…)+1+1…)+1…</c>) додавали
+        /// глибини, а не губили її: 63 рівні дужок × 1024 ланки давали гребінь
+        /// ~64 тисячі зі 130 КБ тексту. Тепер межа — висота дерева, яку нічим
+        /// скинути не можна: вона обчислюється з дітей вузла, а не зі шляху розбору.
+        /// Сусідні аргументи <c>SUM(a+b, c+d, …)</c> лежать на різних шляхах і
+        /// глибини не складають (висота — максимум, а не сума).
+        ///
+        /// ⚠ Решта вузлів (унарні, умовні, виклики, предикати) ланками не є: їхня
+        /// глибина обмежена <see cref="MaxRecursionDepth"/>, а тут вони лише
+        /// передають висоту дітей нагору (<see cref="Inherit{T}"/>). Отже глибина
+        /// дерева не більша за <see cref="MaxChainLinks"/> плюс вкладені вузли
+        /// (до <see cref="MaxRecursionDepth"/>).
         /// </remarks>
-        public void CountChainLink()
+        public AstNode Link(AstNode node, AstNode left, AstNode right)
         {
-            if (++_chainLinks <= MaxChainLinks)
+            var height = Math.Max(HeightOf(left), HeightOf(right)) + 1;
+            if (height > MaxChainLinks)
             {
-                return;
+                Error(
+                    "expr.chainTooLong",
+                    Param("max", MaxChainLinks.ToString(CultureInfo.InvariantCulture)),
+                    $"The expression has more than {MaxChainLinks} operators chained together.");
+
+                throw new ParseAbort();
             }
 
-            Error(
-                "expr.chainTooLong",
-                Param("max", MaxChainLinks.ToString(CultureInfo.InvariantCulture)),
-                $"The expression has more than {MaxChainLinks} operators chained together.");
-
-            throw new ParseAbort();
+            SetHeight(node, height);
+            return node;
         }
 
         /// <summary>Повертається на рівень вище після успішного розбору вкладеного виразу.</summary>
@@ -1419,16 +1480,7 @@ public sealed class Parser
         /// вживається взагалі (розбір завершено). <c>try/finally</c> на кожному
         /// рівні рекурсії коштував би більше, ніж дає.
         /// </remarks>
-        /// <remarks>
-        /// ⚠ Тут же лічильник ланок повертається до значення на вході (L7-01):
-        /// ланки сусідніх аргументів <c>SUM(a+b, c+d, …)</c> лежать на РІЗНИХ
-        /// шляхах дерева і глибини не складають — див. <see cref="CountChainLink"/>.
-        /// </remarks>
-        public void LeaveNesting()
-        {
-            _chainLinks = _chainLinksAtEntry[_depth];
-            _depth--;
-        }
+        public void LeaveNesting() => _depth--;
 
         /// <summary>
         /// Синтаксичні відмінності діалекту і режиму розбору: значення <c>^</c>,
