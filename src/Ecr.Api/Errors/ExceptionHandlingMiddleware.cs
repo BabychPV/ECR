@@ -41,6 +41,10 @@ public sealed partial class ExceptionHandlingMiddleware(
         Message = "Відповідь уже почалася, ProblemDetails не надіслано; з'єднання обірвано. CorrelationId={CorrelationId}")]
     private partial void LogTooLate(string correlationId);
 
+    [LoggerMessage(Level = LogLevel.Information,
+        Message = "Клієнт розірвав з'єднання під час запиту; виняток після обриву не є збоєм сервера. CorrelationId={CorrelationId}")]
+    private partial void LogClientGone(Exception exception, string correlationId);
+
     /// <summary>Обробляє запит.</summary>
     public async Task InvokeAsync(HttpContext context)
     {
@@ -50,13 +54,29 @@ public sealed partial class ExceptionHandlingMiddleware(
         {
             await next(context).ConfigureAwait(false);
         }
-        catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested)
+        catch (Exception ex) when (context.RequestAborted.IsCancellationRequested && ex is not AccessDeniedException)
         {
             // Клієнт відвалився. Тіла відповіді ніхто не прочитає, а новий код
             // помилки заради цього заводити не можна: кожен код каталогу
             // звіряється з `02-contracts.md` §7 в обидва боки, і код, якого
             // ніхто не побачить, лишився б там назавжди як мертвий рядок.
-            context.Response.StatusCode = StatusCodes.Status499ClientClosedRequest;
+            //
+            // ⛔ R5-E1/E1-03: фільтр — на ОБІРВАНИЙ ЗАПИТ, а не на тип винятку. SqlClient на скасуванні
+            // кидає `SqlException` «Operation cancelled by user», а не OCE (те саме визнають
+            // `JobWorker`, `SqlDistributedLock`) — і обрив клієнта посеред SQL ішов у 500 з Error.
+            // Не-OCE лишає слід (Information зі стеком), але не як «необроблена помилка».
+            // Відмова в доступі йде звичайним шляхом: слід у журналі безпеки (ФВ-5.24) не залежить від клієнта.
+            if (ex is not OperationCanceledException)
+            {
+                var correlationId = CorrelationIdOf(context);
+                LogClientGone(ex, correlationId);
+            }
+
+            // ⛔ Після старту відповіді сеттер `StatusCode` у Kestrel кидає `InvalidOperationException`.
+            if (!context.Response.HasStarted)
+            {
+                context.Response.StatusCode = StatusCodes.Status499ClientClosedRequest;
+            }
         }
         catch (Exception ex)
         {
@@ -64,11 +84,14 @@ public sealed partial class ExceptionHandlingMiddleware(
         }
     }
 
-    private async Task WriteAsync(HttpContext context, Exception exception)
-    {
-        var correlationId = context.Items.TryGetValue(CorrelationIdMiddleware.ItemKey, out var raw)
+    private static string CorrelationIdOf(HttpContext context)
+        => context.Items.TryGetValue(CorrelationIdMiddleware.ItemKey, out var raw)
             ? raw as string ?? string.Empty
             : string.Empty;
+
+    private async Task WriteAsync(HttpContext context, Exception exception)
+    {
+        var correlationId = CorrelationIdOf(context);
 
         var (status, code, message, details) = Map(exception);
 
@@ -100,6 +123,7 @@ public sealed partial class ExceptionHandlingMiddleware(
         {
             // Відповідь уже пішла — переписати її неможливо. Мовчки це
             // проковтнути гірше, ніж лишити слід у журналі.
+            //
             // ⛔ R5-E1/E1-02: і завершувати конвеєр нормально НЕ можна: Kestrel тоді чесно закриває
             // chunked-тіло, і потоковий CSV (`AuditController.ExportStructure`) доходить ОБРІЗАНИМ,
             // але зі статусом 200 — клієнт приймає неповний експорт за цілий. `Abort` рве з'єднання
