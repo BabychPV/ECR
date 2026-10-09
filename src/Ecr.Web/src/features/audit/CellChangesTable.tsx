@@ -96,6 +96,9 @@ function columnText(change: CellChange): string {
 const OriginIcons: Readonly<Record<string, string>> = {
   UserEdit: 'M4 20l4-1L19 8l-3-3L5 16z',
   Import: 'M12 16V4M7 9l5-5 5 5M4 20h16',
+  // ✎ AN-114: імпорт, що свідомо перезаписав пізнішу чужу правку, — та сама
+  // стрілка імпорту, назва з каталогу каже решту.
+  ImportOverwrite: 'M12 16V4M7 9l5-5 5 5M4 20h16',
   Recalculation: 'M18 7V5H6l7 7-7 7h12v-2',
   Migration:
     'M4 6c0-1.7 3.6-3 8-3s8 1.3 8 3-3.6 3-8 3-8-1.3-8-3zM4 6v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3',

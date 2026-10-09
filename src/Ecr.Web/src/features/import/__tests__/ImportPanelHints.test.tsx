@@ -70,6 +70,7 @@ const oneChange: ImportPreview = {
   changes: [{ rowKey: 'R1', columnCode: 'IN', oldValue: 1, newValue: 2, tableCode: 'T1' }],
   rejected: [],
   conflicts: [],
+  overwritable: [],
 };
 
 afterEach(() => {
@@ -95,6 +96,7 @@ describe('ImportPanel: відмови перегляду (P3)', () => {
         },
       ],
       conflicts: [],
+      overwritable: [],
     });
 
     await openPreview();
@@ -131,6 +133,7 @@ describe('ImportPanel: відмови перегляду (P3)', () => {
         },
       ],
       conflicts: [],
+      overwritable: [],
     });
 
     await openPreview();
@@ -158,14 +161,18 @@ describe('ImportPanel: відмови перегляду (P3)', () => {
         },
       ],
       conflicts: [],
+      overwritable: [],
     });
 
     await openPreview();
 
-    const table = screen.getByRole('table');
-    // ⛔ Мутація: прибрати гілку `importRowChangedSinceExport` у `rejectionText` —
-    // тут буде загальне `⟦import.rejectedCell⟧`.
-    expect(within(table).getByText('⟦err.ECR-CELL-0409.importRowChangedSinceExport⟧')).toBeTruthy();
+    // ✎ AN-114: конфлікт «змінено після експорту» — окремим розділом із
+    // поясненням і вибором, а не рядком переліку відмов.
+    // ⛔ Мутація: прибрати `isRowConflict` — рядок повернеться в загальні відмови.
+    expect(screen.getByText('⟦import.overwriteTitle⟧')).toBeTruthy();
+    expect(screen.getByText('⟦import.overwriteHint⟧')).toBeTruthy();
+    expect(screen.queryByText('⟦err.ECR-CELL-0409.importRowChangedSinceExport⟧')).toBeNull();
+    expect(within(screen.getByRole('table', { name: 'T1 · R1' })).getByRole('cell', { name: 'A3' })).toBeTruthy();
   });
 
   it('відмова цілої таблиці без адреси — прочерк, а не порожня комірка', async () => {
@@ -184,6 +191,7 @@ describe('ImportPanel: відмови перегляду (P3)', () => {
         },
       ],
       conflicts: [],
+      overwritable: [],
     });
 
     await openPreview();

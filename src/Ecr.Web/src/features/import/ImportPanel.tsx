@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState, type JSX } from 'react';
-import { Alert, Badge, Button, Group, Modal, Stack, Table, Text } from '@mantine/core';
+import { Alert, Badge, Button, Checkbox, Group, Modal, Stack, Table, Text } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import type {
   ImportApplyRequest,
   ImportChange,
+  ImportOverwriteRow,
   ImportPreview,
   ImportRejection,
   JobAcceptedResponse,
@@ -65,7 +66,18 @@ export function ImportPanel({
 }: ImportPanelProps): JSX.Element {
   const queryClient = useQueryClient();
   const picker = useRef<HTMLInputElement>(null);
-  const [preview, setPreview] = useState<ImportPreview | null>(null);
+  const [preview, setPreviewState] = useState<ImportPreview | null>(null);
+
+  // ✎ AN-114 (D-338): рішення людини про рядки, змінені кимось після експорту
+  // книги, — ключі рядків «перезаписати» і згода застосувати решту без
+  // непозначених. Належать ОДНОМУ перегляду: новий перегляд починає з нуля.
+  const [overwrite, setOverwrite] = useState<ReadonlySet<string>>(() => new Set());
+  const [skipRest, setSkipRest] = useState(false);
+  const setPreview = (next: ImportPreview | null): void => {
+    setPreviewState(next);
+    setOverwrite(new Set());
+    setSkipRest(false);
+  };
 
   // ⛔ T3-05: після Esc у діалозі перегляду фокус падав на `BODY`. Діалог відкривається після ВИБОРУ
   // файлу системним вікном, коли Mantine запам'ятовує вже не кнопку, а `body`. Відкривач фіксується
@@ -100,10 +112,10 @@ export function ImportPanel({
   });
 
   const apply = useMutation({
-    mutationFn: (previewToken: string) =>
+    mutationFn: (request: ImportApplyRequest) =>
       apiFetch<PatchCellsResponse | JobAcceptedResponse>(`/api/v1/documents/${documentId}/import/apply`, {
         method: 'POST',
-        body: JSON.stringify({ previewToken } satisfies ImportApplyRequest),
+        body: JSON.stringify(request),
       }),
     onSuccess: async (result) => {
       // ⛔ F-01: понад поріг (`LargeImportThreshold`, 2000 комірок) сервер
@@ -184,8 +196,31 @@ export function ImportPanel({
     };
   });
 
-  const blocked = (preview?.conflicts.length ?? 0) > 0 || (preview?.rejected.length ?? 0) > 0;
+  // ✎ AN-114 (D-338): відмова «рядок змінено після експорту» — не вада файлу, а
+  // рішення людини: перезаписати чуже своїм або лишити чуже. Такі рядки — окремим
+  // розділом і Apply не блокують, щойно кожен вирішено (позначено або свідомо
+  // лишено згодою «застосувати решту»). Сервер застосовує лише план перегляду:
+  // конфліктні рядки без позначки в нього не входять, решта — так.
+  const rejected = preview?.rejected.filter((r) => !isRowConflict(r)) ?? [];
+  const conflictRows = preview === null ? [] : rowConflicts(preview);
+  const unresolved = conflictRows.filter((row) => !overwrite.has(row.key)).length;
+  const overwriteRows: ImportOverwriteRow[] = conflictRows
+    .filter((row) => overwrite.has(row.key))
+    .map((row) => ({ tableCode: row.tableCode, rowKey: row.rowKey }));
+
+  const blocked = (preview?.conflicts.length ?? 0) > 0 || rejected.length > 0;
+  const undecided = unresolved > 0 && !skipRest;
+  const nothingToApply = (preview?.changes.length ?? 0) === 0 && overwriteRows.length === 0;
   const rounded = preview?.changes.filter(isRounded) ?? [];
+
+  const toggleOverwrite = (key: string, checked: boolean): void => {
+    setOverwrite((current) => {
+      const next = new Set(current);
+      if (checked) next.add(key);
+      else next.delete(key);
+      return next;
+    });
+  };
 
   return (
     <>
@@ -232,10 +267,13 @@ export function ImportPanel({
                   {t('import.conflicts', { count: preview.conflicts.length })}
                 </Badge>
               )}
-              {preview.rejected.length > 0 && (
-                <Badge color="statusError">
-                  {t('import.rejected', { count: preview.rejected.length })}
+              {conflictRows.length > 0 && (
+                <Badge color="statusWarning" variant="light">
+                  {t('import.overwriteRows', { count: conflictRows.length })}
                 </Badge>
+              )}
+              {rejected.length > 0 && (
+                <Badge color="statusError">{t('import.rejected', { count: rejected.length })}</Badge>
               )}
               {rounded.length > 0 && (
                 <Badge color="statusWarning" variant="light">
@@ -253,8 +291,54 @@ export function ImportPanel({
               </Alert>
             )}
 
-            {preview.changes.length === 0 && !blocked && (
+            {preview.changes.length === 0 && !blocked && conflictRows.length === 0 && (
               <Text size="sm">{t('import.noChanges')}</Text>
+            )}
+
+            {conflictRows.length > 0 && (
+              <Alert color="statusWarning" title={t('import.overwriteTitle')}>
+                <Stack gap="sm">
+                  <Text size="sm">{t('import.overwriteHint')}</Text>
+                  {conflictRows.map((row) => (
+                    <Stack key={row.key} gap="xs" data-testid="import-conflict-row">
+                      <Checkbox
+                        checked={overwrite.has(row.key)}
+                        onChange={(event) => toggleOverwrite(row.key, event.currentTarget.checked)}
+                        label={`${t('import.overwriteRow')} — ${row.table} · ${row.rowKey}`}
+                      />
+                      <Table withTableBorder aria-label={`${row.table} · ${row.rowKey}`}>
+                        <Table.Thead>
+                          <Table.Tr>
+                            <Table.Th>{t('import.column')}</Table.Th>
+                            <Table.Th>{t('import.excelCell')}</Table.Th>
+                            <Table.Th>{t('import.theirs')}</Table.Th>
+                            <Table.Th>{t('import.mine')}</Table.Th>
+                          </Table.Tr>
+                        </Table.Thead>
+                        <Table.Tbody>
+                          {row.cells.map((cell) => (
+                            <Table.Tr key={cell.columnCode}>
+                              <Table.Td>{cell.columnCode}</Table.Td>
+                              <Table.Td>{show(cell.excelCell)}</Table.Td>
+                              <Table.Td>{show(cell.theirs)}</Table.Td>
+                              <Table.Td>{show(cell.mine)}</Table.Td>
+                            </Table.Tr>
+                          ))}
+                        </Table.Tbody>
+                      </Table>
+                    </Stack>
+                  ))}
+                  {unresolved > 0 && (
+                    // ⚠ Непозначений рядок — не «забули», а «лишити чуже»: це
+                    // теж рішення, і людина приймає його явно, а не мовчанням.
+                    <Checkbox
+                      checked={skipRest}
+                      onChange={(event) => setSkipRest(event.currentTarget.checked)}
+                      label={t('import.overwriteSkip')}
+                    />
+                  )}
+                </Stack>
+              </Alert>
             )}
 
             {rounded.length > 0 && (
@@ -326,7 +410,7 @@ export function ImportPanel({
               </Table>
             )}
 
-            {preview.rejected.length > 0 && (
+            {rejected.length > 0 && (
               <Table striped withTableBorder>
                 <Table.Thead>
                   <Table.Tr>
@@ -338,7 +422,7 @@ export function ImportPanel({
                   </Table.Tr>
                 </Table.Thead>
                 <Table.Tbody>
-                  {preview.rejected.map((rejection) => (
+                  {rejected.map((rejection) => (
                     <Table.Tr
                       key={`${rejection.tableCode ?? ''}:${rejection.excelCell ?? rejection.rowKey}:${rejection.columnCode}`}
                     >
@@ -371,9 +455,17 @@ export function ImportPanel({
                 {t('common.cancel')}
               </Button>
               <Button
-                disabled={blocked || preview.changes.length === 0}
+                disabled={blocked || undecided || nothingToApply}
                 loading={applyPhase !== 'none' || settled.settling}
-                onClick={() => settled.run(() => apply.mutateAsync(preview.previewToken))}
+                onClick={() =>
+                  settled.run(() =>
+                    apply.mutateAsync(
+                      overwriteRows.length > 0
+                        ? { previewToken: preview.previewToken, overwriteRows }
+                        : { previewToken: preview.previewToken },
+                    ),
+                  )
+                }
               >
                 {t('import.apply')}
               </Button>
@@ -383,6 +475,67 @@ export function ImportPanel({
       </Modal>
     </>
   );
+}
+
+/** Ключ відмови «рядок змінено після експорту» (D1-02, AN-103). */
+const RowChangedSinceExport = 'err.ECR-CELL-0409.importRowChangedSinceExport';
+
+/** Чи відмова — конфлікт «рядок змінено після експорту», який людина може перезаписати. */
+function isRowConflict(rejection: ImportRejection): boolean {
+  return rejection.messageKey === RowChangedSinceExport;
+}
+
+/** Комірка конфліктного рядка: чинне (чуже) значення і значення з книги. */
+interface ConflictCell {
+  readonly columnCode: string;
+  readonly excelCell: string | null | undefined;
+  readonly theirs: unknown;
+  readonly mine: unknown;
+}
+
+/** Рядок, змінений кимось після експорту книги, з його комірками (AN-114). */
+interface RowConflict {
+  readonly key: string;
+  readonly tableCode: string;
+  readonly rowKey: string;
+  readonly table: string;
+  readonly cells: ConflictCell[];
+}
+
+/**
+ * Конфліктні рядки перегляду: відмови «змінено після експорту», згруповані за
+ * таблицею й рядком, зі значеннями з `overwritable` (чинне чуже — `oldValue`,
+ * з книги — `newValue`).
+ *
+ * ⚠ Рядок, а не комірка: конфлікт визначає версія рядка, і сервер перезаписує
+ * рядок цілком (`ImportApplyRequest.overwriteRows`).
+ */
+function rowConflicts(preview: ImportPreview): RowConflict[] {
+  const values = new Map<string, ImportChange>();
+  for (const change of preview.overwritable) values.set(keyOf(change), change);
+
+  const rows = new Map<string, RowConflict>();
+  for (const rejection of preview.rejected) {
+    if (!isRowConflict(rejection)) continue;
+
+    const tableCode = rejection.tableCode ?? '';
+    const key = `${tableCode}:${rejection.rowKey}`;
+    let row = rows.get(key);
+    if (row === undefined) {
+      row = { key, tableCode, rowKey: rejection.rowKey, table: tableOf(rejection), cells: [] };
+      rows.set(key, row);
+    }
+
+    const value = values.get(`${tableCode}:${rejection.rowKey}:${rejection.columnCode}`);
+    row.cells.push({
+      columnCode: rejection.columnCode,
+      excelCell: rejection.excelCell,
+      theirs: value?.oldValue,
+      mine: value?.newValue,
+    });
+  }
+
+  return [...rows.values()];
 }
 
 /** Ключ рядка зміни: таблиця + рядок + колонка (`R1`/`C1` однакові в різних таблицях). */

@@ -11,7 +11,7 @@ import type { CellChangePage } from '@/api/types';
  */
 
 /** Походження зміни — ті самі чотири значення, що пише `aud.CellChange.Origin`. */
-export const cellChangeOrigins = ['UserEdit', 'Import', 'Recalculation', 'Migration'] as const;
+export const cellChangeOrigins = ['UserEdit', 'Import', 'ImportOverwrite', 'Recalculation', 'Migration'] as const;
 
 /** Календарна дата без години — рівно те, що віддає `<input type="date">`. */
 const DateOnly = /^(\d{4})-(\d{2})-(\d{2})$/;
