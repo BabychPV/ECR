@@ -247,7 +247,7 @@ describe('PeriodsOverview: «closes in N days» і рядок плитки', () 
       policy: { ...policy, openOffsetDays: 5 },
     } as unknown as PeriodCalendarDto;
     // startsAt уже = ComputedOpenAt (PeriodStart + 5 діб): 6 жовтня, а не 11-го.
-    const scheduled = { ...base, state: 'Scheduled', startsAt: '2026-10-06T00:00:00Z' };
+    const scheduled = { ...base, state: 'Scheduled' as const, startsAt: '2026-10-06T00:00:00Z' };
 
     expect(periodNote(scheduled, offsetCalendar, siteDate, now)).toBe('opens 2026-10-06');
   });
