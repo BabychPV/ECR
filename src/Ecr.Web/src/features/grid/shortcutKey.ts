@@ -5,11 +5,14 @@
  * при CapsLock і Ctrl+Shift+Z — велика літера, тож undo/redo/save не спрацьовували,
  * а Ctrl+S віддавався браузеру («зберегти сторінку»). Фізична клавіша — `event.code`.
  *
+ * ⛔ N3-11: але `code` — ФІЗИЧНА клавіша, а не літера: на QWERTZ Ctrl+Z (літера «z») лежить на `KeyY`, а
+ * на AZERTY «z» — на `KeyW`. Тому ПЕРШОЮ йде латинська `key` (вона й є літерою ярлика на цій розкладці), а
+ * `code` — запасний варіант лише коли `key` не латинська (кирилиця, іврит…) чи порожня.
+ *
  * ⚠ Ctrl+Alt (AltGr на Windows, T4-07) — це друкований символ, а не ярлик:
  * `AltGr+Z` на польській розкладці дає «ż» і не має скасовувати правку.
  *
- * ⚠ Порожній `code` (синтетичні події, старі агенти) — відкат до `key` без
- * урахування регістру.
+ * ⚠ Порожній `code` (синтетичні події, старі агенти) — `key` без урахування регістру.
  */
 export type GridShortcut = 'save' | 'undo' | 'redo';
 
@@ -21,8 +24,18 @@ export function gridShortcut(event: {
 }): GridShortcut | null {
   if (event.altKey) return null;
 
-  const letter =
-    event.code === 'KeyS' ? 's' : event.code === 'KeyZ' ? 'z' : event.code === 'KeyY' ? 'y' : event.code === '' ? event.key.toLowerCase() : '';
+  const key = event.key.toLowerCase();
+  const letter = /^[a-z]$/.test(key)
+    ? key
+    : event.code === 'KeyS'
+      ? 's'
+      : event.code === 'KeyZ'
+        ? 'z'
+        : event.code === 'KeyY'
+          ? 'y'
+          : event.code === ''
+            ? key
+            : '';
 
   if (letter === 's') return 'save';
   if (letter === 'z') return event.shiftKey ? 'redo' : 'undo';
