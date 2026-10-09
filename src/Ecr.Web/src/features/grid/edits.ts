@@ -194,6 +194,52 @@ export function captureOverInFlight(
 }
 
 /**
+ * Крок історії з «було» = те, що людина БАЧИЛА (`X2-01`).
+ *
+ * ⛔ `captureEdit` бере `before` з КЕШУ зрізу, а над кешем може стояти
+ * незбережена (або ще не підтверджена сервером) правка тієї самої комірки:
+ * «10 → 20 → 25» до відповіді давало крок `{10→25}`. Undo тоді писав 10, якого
+ * на екрані не було, а наступний Undo (`{10→20}`) бачив 10 замість 20 і хибно
+ * казав «змінено після кроку» (`grid.undoChangedSince`). Те саме правило, що
+ * `G1-05` уже застосував для вставки: незбережене поверх кешу.
+ *
+ * Повертає `null`, якщо крок нічого не змінює на екрані (повторно введено те
+ * саме незбережене значення) — такий крок лише з'їв би глибину історії.
+ */
+export function asShownStep(
+  slice: TableSliceDto,
+  step: CellEdit,
+  held: PendingEdit | undefined,
+): CellEdit | null {
+  if (held === undefined) return step;
+
+  const before = held.isEmpty ? null : held.value;
+  const dataType = columnIndexOf(slice).get(step.columnCode)?.dataType;
+  if (sameColumnValue(dataType, before, step.after)) return null;
+
+  return { ...step, before };
+}
+
+/**
+ * Крок історії для повернення комірки до збереженого значення (`V-01`, `X2-01`).
+ *
+ * ⛔ Доти `V-01` лише знімав незбережену правку і кроку НЕ писав: «10 → 20 → 10»
+ * лишав в історії `{10→20}`, і Ctrl+Z бачив на екрані 10 замість очікуваного 20
+ * — хибне «змінено після кроку». Тепер повернення — звичайний крок
+ * `{показане → збережене}`, і Undo повертає те, що людина бачила перед ним.
+ */
+export function revertStep(
+  slice: TableSliceDto,
+  signal: EditSignal,
+  held: PendingEdit | undefined,
+): CellEdit | null {
+  if (held === undefined) return null;
+
+  const after = valueOf(slice, signal.rowKey, signal.columnCode);
+
+  return asShownStep(slice, { rowKey: signal.rowKey, columnCode: signal.columnCode, before: after, after }, held);
+}
+/**
  * Правки з ОСТАННЬОЮ відомою версією рядка — у мить надсилання, а не введення
  * (`B-09`).
  *

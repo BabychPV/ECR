@@ -22,7 +22,16 @@ import { cellDisplay, cellText, editorValueOf, isNumericColumn, sameColumnValue 
 import { columnIndexOf, rowIndexOf } from './rowIndex';
 import { planPaste, type PasteRejection } from './clipboard';
 import { parseClipboard, toClipboard } from './tsvClipboard';
-import { captureEdit, captureOverInFlight, coerce, revertsToSaved, valueOf, withKnownVersions } from './edits';
+import {
+  asShownStep,
+  captureEdit,
+  captureOverInFlight,
+  coerce,
+  revertStep,
+  revertsToSaved,
+  valueOf,
+  withKnownVersions,
+} from './edits';
 import { captureRange, isRangeEdit, type RangeEditDetail } from './rangeEdit';
 import { ConflictPanel, hasCurrentVersion, type OpenConflict } from './ConflictPanel';
 import { cellStateClass, cellStateOf, type LocalCellFlags } from './cellState';
@@ -1430,25 +1439,44 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
       const captured =
         captureEdit(data, signal) ??
         captureOverInFlight(data, signal, inFlightEdit(tableInstanceId, periodKey, signal));
+      // ⚠ `X2-01`: незбережене значення комірки — те, що людина зараз бачить.
+      const held = pendingSlice(tableInstanceId, periodKey).get(pendingCellKey(signal));
       if (captured === null) {
         // ⛔ `V-01`: повернення збереженого значення в комірку з незбереженою
         // (зокрема відхиленою) правкою — це скасування правки, а не «нічого».
-        if (
-          pendingSlice(tableInstanceId, periodKey).has(pendingCellKey(signal)) &&
-          revertsToSaved(data, signal)
-        ) {
+        // ⛔ `X2-01`: і це КРОК історії `{показане → збережене}` — без нього
+        // Ctrl+Z попереднього кроку бачив збережене замість свого `after` і
+        // хибно казав «змінено після кроку».
+        if (held !== undefined && revertsToSaved(data, signal)) {
+          const step = revertStep(data, signal, held);
+          if (step !== null) {
+            history.current.push({
+              label: t('grid.edit', {
+                column: columnIndexOf(data).get(signal.columnCode)?.header ?? signal.columnCode,
+              }),
+              edits: [step],
+            });
+            touchHistory();
+          }
+
           discardPendingEdit(tableInstanceId, periodKey, signal);
         }
 
         return null;
       }
 
-      history.current.push({
-        label: t('grid.edit', { column: captured.columnHeader }),
-        edits: [captured.step],
-      });
+      // ⛔ `X2-01`: «було» кроку — показане (незбережене поверх кешу), як у
+      // вставки (`G1-05`); `captureEdit` бачить лише кеш. Повторне введення того
+      // самого незбереженого значення кроку не пише.
+      const step = asShownStep(data, captured.step, held);
+      if (step !== null) {
+        history.current.push({
+          label: t('grid.edit', { column: captured.columnHeader }),
+          edits: [step],
+        });
 
-      touchHistory();
+        touchHistory();
+      }
 
       // ⚠ `D14-12`: правка потрапляє у сховище ДОКУМЕНТА одразу, ще до
       // будь-якого надсилання. Саме тому вона переживає і розмонтування
@@ -1514,22 +1542,43 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
 
       // ⛔ `V-01`: повернення до збереженого значення в комірці з незбереженою
       // правкою — скасування цієї правки, як і в ручного введення.
+      // ⛔ `X2-01`: кроки історії будуються ДО зняття правок і `saveThroughStore`:
+      // «було» — показане (незбережене поверх кешу), як у вставки (`G1-05`), а
+      // повернення до збереженого — теж крок `{показане → збережене}`.
       const slice = pendingSlice(tableInstanceId, periodKey);
+      const columns = columnIndexOf(data);
+      const steps: CellEdit[] = [];
+      const stepHeaders: string[] = [];
+      for (const edit of captured) {
+        const step = asShownStep(data, edit.step, slice.get(pendingCellKey(edit.step)));
+        if (step === null) continue;
+        steps.push(step);
+        stepHeaders.push(edit.columnHeader);
+      }
+      for (const signal of reverted) {
+        const step = revertStep(data, signal, slice.get(pendingCellKey(signal)));
+        if (step === null) continue;
+        steps.push(step);
+        stepHeaders.push(columns.get(signal.columnCode)?.header ?? signal.columnCode);
+      }
+
       for (const signal of reverted) {
         if (slice.has(pendingCellKey(signal))) discardPendingEdit(tableInstanceId, periodKey, signal);
       }
 
+      if (steps.length > 0) {
+        // ⚠ Окремого ключа каталогу для протягування немає — підпис кроку
+        // `grid.edit` з переліком колонок (новий ключ = рядок сіду).
+        history.current.push({
+          label: t('grid.edit', { column: [...new Set(stepHeaders)].join(', ') }),
+          edits: steps,
+        });
+
+        touchHistory();
+      }
+
       if (captured.length === 0) return;
 
-      // ⚠ Окремого ключа каталогу для протягування немає — підпис кроку
-      // `grid.edit` з переліком колонок (новий ключ = рядок сіду).
-      const headers = [...new Set(captured.map((edit) => edit.columnHeader))].join(', ');
-      history.current.push({
-        label: t('grid.edit', { column: headers }),
-        edits: captured.map((edit) => edit.step),
-      });
-
-      touchHistory();
       saveThroughStore(captured.map((edit) => edit.pending));
     },
     [data, saveThroughStore, touchHistory, tableInstanceId, periodKey],
