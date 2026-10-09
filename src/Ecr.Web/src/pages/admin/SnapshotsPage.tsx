@@ -497,6 +497,9 @@ export function SnapshotsPage(): JSX.Element {
                     <VerifyCell
                       result={verified[snapshot.id]}
                       loading={verifyLoading && verify.variables === snapshot.id}
+                      // L9-37: перевірка іншого рядка в польоті — ця кнопка вимкнена (власний рядок лишається
+                      // активним зі спінером, щоб фокус не губився).
+                      disabled={verify.isPending && verify.variables !== snapshot.id}
                       onVerify={() => {
                         // ⛔ L9-37: спінер (`usePendingLoading`) — лише після 100 мс;
                         // до того подвійний клік/Enter слав дві перевірки.
@@ -729,6 +732,7 @@ function ParameterField(props: {
 function VerifyCell(props: {
   result: SnapshotVerifyResponse | undefined;
   loading: boolean;
+  disabled: boolean;
   onVerify: () => void;
 }): JSX.Element {
   const { result } = props;
@@ -736,7 +740,13 @@ function VerifyCell(props: {
   return (
     <>
       <Group gap="xs" wrap="nowrap">
-        <Button size="xs" variant="default" loading={props.loading} onClick={props.onVerify}>
+        <Button
+          size="xs"
+          variant="default"
+          loading={props.loading}
+          disabled={props.disabled}
+          onClick={props.onVerify}
+        >
           {t('snapshots.verify')}
         </Button>
         {result !== undefined && (

@@ -39,11 +39,11 @@ const json = (body: unknown): Response =>
     headers: { 'Content-Type': 'application/json' },
   });
 
-function mockFetch(verifyResult: unknown, holdVerify = false): ReturnType<typeof vi.fn> {
+function mockFetch(verifyResult: unknown, holdVerify = false, rows: unknown[] = [snapshot]): ReturnType<typeof vi.fn> {
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
 
-    if (url.endsWith('/api/v1/reports/snapshots/7/verify') && init?.method === 'POST') {
+    if (/\/api\/v1\/reports\/snapshots\/\d+\/verify$/.test(url) && init?.method === 'POST') {
       if (holdVerify) return new Promise<Response>(() => {});
       return json(verifyResult);
     }
@@ -52,7 +52,7 @@ function mockFetch(verifyResult: unknown, holdVerify = false): ReturnType<typeof
       return json({ languageCode: 'en', revision: 1, strings: Strings });
     }
 
-    if (url.includes('/api/v1/reports/snapshots')) return json([snapshot]);
+    if (url.includes('/api/v1/reports/snapshots')) return json(rows);
     if (url.includes('/api/v1/reports')) return json([]);
 
     if (url.includes('/api/v1/projects')) {
@@ -173,6 +173,23 @@ describe('SnapshotsPage: перевірка незмінності зрізу (B
       // ⛔ Мутація «прибрати `if (verify.isPending) return;`» — два POST, червоний.
       const verifyCalls = fetchMock.mock.calls.filter(([url]) => String(url).endsWith('/7/verify'));
       expect(verifyCalls).toHaveLength(1);
+    },
+    SlowEnvTimeout,
+  );
+
+  it(
+    'L9-37: поки одна перевірка в польоті, «Verify» інших рядків вимкнений',
+    async () => {
+      mockFetch(null, true, [snapshot, { ...snapshot, id: 8, contentHash: 'BBBB' }]);
+      await show();
+
+      await screen.findAllByRole('button', { name: 'Verify' }, { timeout: SlowEnvTimeout });
+      const [first, second] = screen.getAllByRole('button', { name: 'Verify' }) as HTMLButtonElement[];
+      expect(second?.disabled).toBe(false);
+
+      fireEvent.click(first as HTMLButtonElement);
+
+      await vi.waitFor(() => expect(second?.disabled).toBe(true));
     },
     SlowEnvTimeout,
   );
