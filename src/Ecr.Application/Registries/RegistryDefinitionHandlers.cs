@@ -445,7 +445,13 @@ public sealed class SaveRegistryDefinitionHandler(
         }
     }
 
-    private static ConcurrencyConflictException DefinitionChanged(RegistryDef definition)
+    /// <summary><c>409 ECR-REG-0409 definitionChanged</c>: опис змінили після того, як його прочитали.</summary>
+    /// <remarks>
+    /// <c>internal</c>, бо цю саму відмову дає й запис даних (<c>RegistryEntryWriter</c>, D1-05), коли опис
+    /// (ключі, поля) змінився між читанням і транзакцією запису.
+    /// </remarks>
+    /// <param name="definition">Довідник у тій версії, з якою почали.</param>
+    internal static ConcurrencyConflictException DefinitionChanged(RegistryDef definition)
         => new(
             "ECR-REG-0409",
             $"Опис довідника «{definition.Code}» змінили після того, як його прочитали.",

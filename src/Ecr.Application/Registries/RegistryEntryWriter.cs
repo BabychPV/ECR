@@ -719,21 +719,42 @@ public sealed class RegistryEntryWriter(
     {
         definition.BumpDataRevision();
 
-        // ⛔ RT-10a: складений ключ (ФВ-8.15) перераховується й перевіряється ПІСЛЯ
-        // ApplyValuesAsync і зберігається в тій самій транзакції.
-        if (keys is null)
+        await uow.ExecuteInTransactionAsync(async innerCt =>
         {
-            await uow.SaveChangesAsync(ct).ConfigureAwait(false);
-        }
-        else
-        {
-            await keys.SaveAsync(definition, entry, ct).ConfigureAwait(false);
-        }
+            // ⛔ D1-05: опис — під блокуванням і тієї самої версії, з якою почали (див. SaveBatchAsync).
+            await RequireDefinitionUnchangedAsync(definition, innerCt).ConfigureAwait(false);
+
+            // ⛔ RT-10a: складений ключ (ФВ-8.15) перераховується й перевіряється ПІСЛЯ
+            // ApplyValuesAsync і зберігається в тій самій транзакції.
+            if (keys is null)
+            {
+                await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+            }
+            else
+            {
+                await keys.SaveAsync(definition, entry, innerCt).ConfigureAwait(false);
+            }
+        }, ct).ConfigureAwait(false);
 
         if (changes.Count > 0)
         {
             await audit.WriteSecurityEventAsync(ValueChangedEvent(definition, entry, changes, userId), ct)
                 .ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Бере блокування рядка опису до кінця транзакції й вимагає, щоб опис був тієї самої версії, з якою
+    /// почали готувати запис (D1-05).
+    /// </summary>
+    /// <param name="definition">Опис, прочитаний на початку запису.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <exception cref="ConcurrencyConflictException"><c>ECR-REG-0409 definitionChanged</c>.</exception>
+    private async Task RequireDefinitionUnchangedAsync(RegistryDef definition, CancellationToken ct)
+    {
+        if (await registries.LockDefinitionIsStaleAsync(definition.Id, definition.DefinitionVersion, ct).ConfigureAwait(false))
+        {
+            throw SaveRegistryDefinitionHandler.DefinitionChanged(definition);
         }
     }
 
@@ -776,6 +797,19 @@ public sealed class RegistryEntryWriter(
 
         await uow.ExecuteInTransactionAsync(async innerCt =>
         {
+            // ⛔ D1-05: ПЕРШИМ кроком — блокування рядка опису й звірка його версії. Ключі (`keyDefs`) і
+            // поля прочитано ДО транзакції без блокування; адміністратор, що паралельно ввімкнув ключ,
+            // публікує його рядки (`PublishKeysAsync`) лише для закомічених записів, тож записи цього
+            // пакета комітилися б БЕЗ рядків нового ключа — дублі під унікальним ключем. Під
+            // `UPDLOCK, HOLDLOCK` збереження опису і цей запис серіалізуються, а змінена версія — `409
+            // definitionChanged`, а не тихий запис за старим описом. Записи в той самий довідник і
+            // так серіалізуються на `UPDATE … DataRevision`, тож нової конкуренції немає. `dryRun`
+            // (`bumpRevision = false`) блокування не бере (L5-13).
+            if (bumpRevision)
+            {
+                await RequireDefinitionUnchangedAsync(definition, innerCt).ConfigureAwait(false);
+            }
+
             // ⛔ RT-10b: ключі — тим самим сервісом, що й для одного запису, у тій самій транзакції,
             // що й записи. Ключ, який тримає запис поза пакетом, — 409 на весь пакет.
             if (keys is not null && keyed.Count > 0)

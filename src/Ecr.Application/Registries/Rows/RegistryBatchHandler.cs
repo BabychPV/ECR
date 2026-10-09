@@ -106,6 +106,15 @@ public sealed partial class RegistryBatchHandler(
                     // жива перевірка сітки не має гальмувати справжній запис.
                     if (!dryRun)
                     {
+                        // ⚠ Порядок блокувань: СПЕРШУ рядок опису, потім записи — так само, як у
+                        // `RegistryEntryWriter.SaveBatchAsync` (D1-05) і в інших писачів. Зворотний порядок
+                        // (записи → опис) проти CSV/синку (опис → записи) дав би взаємоблокування.
+                        if (await registries.LockDefinitionIsStaleAsync(definition.Id, definition.DefinitionVersion, token)
+                                .ConfigureAwait(false))
+                        {
+                            throw SaveRegistryDefinitionHandler.DefinitionChanged(definition);
+                        }
+
                         var touched = states
                             .Where(s => s.Entry is not null)
                             .Select(s => s.Entry!.Id)
