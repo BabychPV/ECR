@@ -19,6 +19,9 @@ public sealed partial class ErrorTitleOverrideKeysTests
     [
         "err.ECR-TMPL-0409.relationCodeTaken.title",
         "err.ECR-TMPL-0409.templateCodeTaken.title",
+        // R5-E1 / E1-04: загальний err.ECR-SYS-0503 — «Система виконує архівацію»; для тимчасового
+        // збою БД (503 з Retry-After) потрібен власний заголовок, тож перекриття задумане.
+        "err.ECR-SYS-0503.databaseBusy.title",
     ];
 
     [Fact]
