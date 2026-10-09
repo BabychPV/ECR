@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useState, type JSX } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type JSX } from 'react';
 import { isHeaderFinding } from '@/features/documents/inspector/inspectorModel';
 import { Alert, Badge, Skeleton, Stack, Tabs, Text } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
@@ -29,6 +29,7 @@ import { DocumentLockBanner } from '@/features/documents/DocumentLockBanner';
 import { documentLockOf, hasLockedSheet, locksDataActions } from '@/features/documents/documentLock';
 import { DocumentProgress } from '@/features/documents/DocumentProgress';
 import { useDocumentPending } from '@/features/grid/autosave';
+import type { HeldEdit } from '@/features/grid/pendingStore';
 import { isEditable } from '@/features/workflow/SheetActions';
 import { useCalculationsStale } from '@/features/methodologies/staleCalculations';
 import { can, useSession } from '@/shared/session/useSession';
@@ -388,26 +389,52 @@ export function DocumentPage(): JSX.Element {
 
   // AN-28 P2-1: дія заблокована утриманою (відхиленою) коміркою - показати її:
   // аркуш, прокрутка, фокус і підсвітка - тим самим шляхом, що й зауваження (`ФВ-5.6`).
+  //
+  // ⛔ N3-06: утримана правка ІНШОГО періоду раніше мовчки ігнорувалась - дія блокована, а
+  // показати причину нікуди. Тепер період перемикається, а сама комірка показується, щойно
+  // таблиці цього періоду прочитано (`heldToReveal`): `tables.data` до того - чужого періоду.
+  const heldToReveal = useRef<HeldEdit | null>(null);
+
+  const revealHeld = useCallback(
+    (held: HeldEdit): void => {
+      const target = tables.data?.find((table) => table.tableInstanceId === held.tableInstanceId);
+      if (target === undefined) return;
+
+      if (target.sheetCode !== activeCode) setSheet(target.sheetCode);
+      void import('@/features/grid/cellNavigation').then((module) =>
+        module.requestCellNavigation({
+          tableDefId: target.tableDefId,
+          tableInstanceId: target.tableInstanceId,
+          rowKey: held.edit.rowKey,
+          columnCode: held.edit.columnCode,
+        }),
+      );
+    },
+    [tables.data, activeCode, setSheet],
+  );
+
   useEffect(
     () =>
       registerHeldEditRevealer((held) => {
-        if (held.periodKey !== periodKey) return;
+        if (held.periodKey !== periodKey) {
+          heldToReveal.current = held;
+          setPeriodKey(held.periodKey);
 
-        const target = tables.data?.find((table) => table.tableInstanceId === held.tableInstanceId);
-        if (target === undefined) return;
+          return;
+        }
 
-        if (target.sheetCode !== activeCode) setSheet(target.sheetCode);
-        void import('@/features/grid/cellNavigation').then((module) =>
-          module.requestCellNavigation({
-            tableDefId: target.tableDefId,
-            tableInstanceId: target.tableInstanceId,
-            rowKey: held.edit.rowKey,
-            columnCode: held.edit.columnCode,
-          }),
-        );
+        revealHeld(held);
       }),
-    [periodKey, tables.data, activeCode, setSheet],
+    [periodKey, setPeriodKey, revealHeld],
   );
+
+  useEffect(() => {
+    const held = heldToReveal.current;
+    if (held === null || held.periodKey !== periodKey || tables.data === undefined) return;
+
+    heldToReveal.current = null;
+    revealHeld(held);
+  }, [periodKey, tables.data, revealHeld]);
 
   // ⚠ Стан береться з `SheetStates` документа за КОДОМ аркуша: скалярного
   // статусу документа не існує (D-93) — аркуші за один період бувають у
