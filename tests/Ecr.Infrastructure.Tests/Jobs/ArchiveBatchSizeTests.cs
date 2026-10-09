@@ -78,6 +78,125 @@ public sealed class ArchiveBatchSizeTests(SqlServerFixture sql)
         Assert.Equal(cells, await CountAsync("doc.CellValue"));
     }
 
+    /// <summary>
+    /// `@BatchSize` у `arc.usp_RestoreYear`: повернення йде пакетами, кожен — окрема
+    /// транзакція (аудит 09.10c, U1-03).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Доказ «окремих транзакцій» — збій на ОСТАННІЙ комірці: пакети до неї
+    /// лишаються в doc.*. Однією транзакцією на рік (як було) відкотилося б усе,
+    /// а журнал і ескалація замків росли б разом із роком.
+    /// Мутація: обгорнути крок 1 у `BEGIN TRAN … COMMIT` — після збою 0 комірок,
+    /// тест червоний; `ColumnDefId &lt;= @hiCol` → `&lt;` — звірка 50011 на повторі.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Audit", "U1-03")]
+    public async Task Розархівація_пакетами_комітить_пакети_окремо_і_повтор_доводить_без_дублів()
+    {
+        var doc = await new TestDocumentBuilder(sql.ConnectionString)
+            .BuildAsync(periodKey: Period, columnCount: 3, rowCount: 5, ct: CancellationToken.None);
+
+        var value = 2.0000000000000003m;
+        foreach (var row in doc.RowIds)
+        {
+            foreach (var column in doc.ColumnDefIds.Skip(1))
+            {
+                await ExecuteAsync($"""
+                    INSERT INTO doc.CellValue
+                        (PeriodKey, TableRowId, ColumnDefId, TableDefId, ValueNumeric, IsCalculated, IsEmpty)
+                    VALUES ({Period}, {row}, {column}, {doc.TableDefId},
+                            {value.ToString(CultureInfo.InvariantCulture)}, 0, 0);
+                    """);
+                value += 1m;
+            }
+        }
+
+        await ExecuteAsync($"""
+            UPDATE doc.Project SET Status = 4, ClosedAt = '2020-01-01'
+             WHERE Id IN (SELECT DISTINCT ProjectId FROM doc.Period WHERE PeriodKey = {Period});
+            """);
+
+        var cells = await CountAsync("doc.CellValue");
+        var rows = await CountAsync("doc.TableRow");
+        var instances = await CountAsync("doc.TableInstance");
+        var sum = await ScalarAsync<decimal>($"SELECT SUM(ValueNumeric) FROM doc.CellValue WHERE PeriodKey = {Period}");
+        Assert.True(cells >= 10 && rows >= 5, $"фікстура замала: комірок {cells}, рядків {rows}");
+
+        await ExecuteAsync(
+            $"EXEC arc.usp_ArchiveYear @ProjectId = {doc.ProjectId}, "
+            + $"@FromPeriodKey = {Period}, @ToPeriodKey = {Period};");
+        Assert.Equal(cells, await CountAsync("arc.CellValue"));
+
+        // Остання за ключем комірка періоду — комірка нашого документа: його рядки
+        // створено останніми, тож їхні Id найбільші.
+        var lastRow = doc.RowIds.Max();
+        var lastColumn = doc.ColumnDefIds.Skip(1).Max();
+        await ExecuteAsync($"""
+            CREATE TRIGGER doc.TR_RestoreBatchFailTest ON doc.CellValue AFTER INSERT AS
+            BEGIN
+                SET NOCOUNT ON;
+                IF EXISTS (SELECT 1 FROM inserted
+                            WHERE PeriodKey = {Period} AND TableRowId = {lastRow} AND ColumnDefId = {lastColumn})
+                    THROW 50999, N'Штучний збій на останньому пакеті (тест).', 1;
+            END
+            """);
+
+        try
+        {
+            await Assert.ThrowsAsync<SqlException>(() => ExecuteAsync(
+                $"EXEC arc.usp_RestoreYear @ProjectId = {doc.ProjectId}, "
+                + $"@FromPeriodKey = {Period}, @ToPeriodKey = {Period}, @BatchSize = 3;"));
+        }
+        finally
+        {
+            await ExecuteAsync("DROP TRIGGER doc.TR_RestoreBatchFailTest;");
+        }
+
+        // ⛔ Пакети до збою закомічені — копія не одна транзакція на рік.
+        var partial = await CountAsync("doc.CellValue");
+        Assert.InRange(partial, 1, cells - 1);
+
+        // Архів цілий: до повної звірки його не чіпають.
+        Assert.Equal(cells, await CountAsync("arc.CellValue"));
+        Assert.Equal(rows, await CountAsync("arc.TableRow"));
+        Assert.Equal(instances, await CountAsync("arc.TableInstance"));
+
+        // Повтор доводить повернення: без PK-конфлікту, без дублів, архів прибрано.
+        await ExecuteAsync(
+            $"EXEC arc.usp_RestoreYear @ProjectId = {doc.ProjectId}, "
+            + $"@FromPeriodKey = {Period}, @ToPeriodKey = {Period}, @BatchSize = 3;");
+
+        Assert.Equal(cells, await CountAsync("doc.CellValue"));
+        Assert.Equal(rows, await CountAsync("doc.TableRow"));
+        Assert.Equal(instances, await CountAsync("doc.TableInstance"));
+        Assert.Equal(sum, await ScalarAsync<decimal>($"SELECT SUM(ValueNumeric) FROM doc.CellValue WHERE PeriodKey = {Period}"));
+        Assert.Equal(cells, await ScalarAsync<int>(
+            $"SELECT COUNT(*) FROM (SELECT DISTINCT TableRowId, ColumnDefId FROM doc.CellValue WHERE PeriodKey = {Period}) AS d"));
+        Assert.Equal(0, await CountAsync("arc.CellValue"));
+        Assert.Equal(0, await CountAsync("arc.TableRow"));
+        Assert.Equal(0, await CountAsync("arc.TableInstance"));
+    }
+
+    [Theory]
+    [InlineData("0")]
+    [InlineData("NULL")]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Audit", "U1-03")]
+    public async Task Непозитивний_пакет_розархівації_відхиляється_до_будь_якої_зміни(string batchSize)
+    {
+        var runsBefore = await ScalarAsync<int>("SELECT COUNT(*) FROM itg.ArchiveRun");
+
+        var error = await Assert.ThrowsAsync<SqlException>(() => ExecuteAsync(
+            $"EXEC arc.usp_RestoreYear @ProjectId = 1, @FromPeriodKey = {Period}, "
+            + $"@ToPeriodKey = {Period}, @BatchSize = {batchSize};"));
+
+        Assert.Equal(50015, error.Number);
+        Assert.Equal(runsBefore, await ScalarAsync<int>("SELECT COUNT(*) FROM itg.ArchiveRun"));
+    }
+
     [Theory]
     [InlineData("0")]
     [InlineData("NULL")]

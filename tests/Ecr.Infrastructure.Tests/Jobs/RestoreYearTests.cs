@@ -22,8 +22,13 @@ public sealed class RestoreYearTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
-    public async Task Збій_посередині_розархівації_не_лишає_рік_відновленим_частково_і_повтор_проходить()
+    public async Task Збій_посередині_розархівації_зберігає_архів_і_повтор_проходить()
     {
+        // ⚠ U1-03 (аудит 09.10c): копія тепер пакетами, кожен пакет — окрема
+        // транзакція, тож після збою на комірках екземпляри й рядки, вставлені
+        // ДО нього, лишаються в doc.*. Гарантія змістилася з «нічого не
+        // повернуто» на «архів цілий, журнал Failed, читач іде в архів, повтор
+        // доводить повернення без PK-конфлікту».
         const int period = 202705;
         var doc = await DocumentAsync(period);
         await CellAsync(doc, 0, 1, 77m);
@@ -56,14 +61,13 @@ public sealed class RestoreYearTests(SqlServerFixture sql)
             await ExecuteAsync("DROP TRIGGER doc.TR_RestoreFailTest;");
         }
 
-        // ⛔ Нічого не відновлено частково: ані екземплярів, ані рядків без
-        // своїх комірок у гарячій схемі. Без транзакції тут лишалися
-        // закомічені TableInstance/TableRow, і повтор падав на PK.
-        Assert.Equal(0, await CountAsync("doc.TableInstance", period));
-        Assert.Equal(0, await CountAsync("doc.TableRow", period));
+        // Комірок у гарячій схемі немає: пакет, на якому стався збій, відкотився.
+        // Екземпляри й рядки — не більше, ніж в архіві (залишок попередніх пакетів).
         Assert.Equal(0, await CountAsync("doc.CellValue", period));
+        Assert.True(await CountAsync("doc.TableInstance", period) <= archivedInstances);
+        Assert.True(await CountAsync("doc.TableRow", period) <= archivedRows);
 
-        // Архів — на місці, до рядка.
+        // ⛔ Архів — на місці, до рядка: до повної звірки його не чіпають.
         Assert.Equal(archivedInstances, await CountAsync("arc.TableInstance", period));
         Assert.Equal(archivedRows, await CountAsync("arc.TableRow", period));
         Assert.Equal(archivedCells, await CountAsync("arc.CellValue", period));
@@ -81,6 +85,9 @@ public sealed class RestoreYearTests(SqlServerFixture sql)
         await RestoreAsync(doc.ProjectId, period, period);
 
         Assert.Equal(archivedCells, await CountAsync("doc.CellValue", period));
+        Assert.Equal(archivedRows, await CountAsync("doc.TableRow", period));
+        Assert.Equal(archivedInstances, await CountAsync("doc.TableInstance", period));
+        Assert.Equal(0, await CountAsync("arc.CellValue", period));
         Assert.Equal(77m, await ValueAsync(doc, 0, 1));
         Assert.Equal(88m, await ValueAsync(doc, 1, 2));
 
