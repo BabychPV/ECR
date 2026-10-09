@@ -15,6 +15,7 @@ import type {
 import { denyText } from '@/features/grid/permissions';
 import { useOpenerFocusReturn } from '@/features/projects/useOpenerFocusReturn';
 import { invalidateSlices } from '@/features/grid/sliceCache';
+import { followImportJob } from './followImportJob';
 import { calculationResults } from '@/features/methodologies/api';
 import { RecalculateHintId, calculationResultsKey } from '@/features/methodologies/calculationResultsKey';
 import { notificationCloseButtonProps, showApiError, showDone } from '@/shared/ui/notify';
@@ -126,6 +127,12 @@ export function ImportPanel({
         setPreview(null);
         await queryClient.invalidateQueries({ queryKey: ['jobs'] });
         showDone(t('import.queued'));
+
+        // ⛔ `G1-07`: коли задача завершиться, зрізи документа перечитуються —
+        // інакше сітка показувала б дані ДО імпорту, а правки імпортованих
+        // рядків діставали б `409` на власній зміні. Стеження живе поза
+        // компонентом: панель може розмонтуватися раніше, ніж задача скінчиться.
+        void followImportJob(queryClient, result.jobId, documentId, periodKey);
         return;
       }
 
