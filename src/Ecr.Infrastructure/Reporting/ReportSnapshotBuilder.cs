@@ -104,6 +104,17 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock, IMemory
         var builtAt = clock.UtcNow;
         var calculationRunId = await CurrentRunAsync(projectId, periodKey, ct).ConfigureAwait(false);
 
+        // ⛔ R6-X7 / X7-03: поданий (заморожений) поточний зріз не витісняється, доки
+        // його дані не повернуто в роботу. Перевірка тут — лише щоб не читати джерело
+        // задарма; вирішальна — повторна, під замком слоту (нижче).
+        var frozenBefore = await FrozenCurrentIdsAsync(version.ReportDefId, projectId, periodKey, ct)
+            .ConfigureAwait(false);
+        if (await FreshFrozenAsync(frozenBefore, projectId, periodKey, dataStatus: null, ct).ConfigureAwait(false)
+            is { } frozenEarly)
+        {
+            throw FrozenRefusal(frozenEarly, projectId, periodKey);
+        }
+
         var cells = await AggregateAsync(layout, rowRules, parameters.Values, projectId, periodKey, ct)
             .ConfigureAwait(false);
 
@@ -161,12 +172,31 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock, IMemory
         // оновлює лише старий зріз, а новий стає поточним із застарілим
         // статусом, більше немає. `UPDLOCK` на рядку зрізу (W1-01) цього не
         // закривав: нового зрізу серед заблокованих ще не було.
+        long? refusedBy = null;
         await new UnitOfWork(db, clock).ExecuteInTransactionAsync(
             async innerCt =>
             {
+                refusedBy = null;
                 await LockSlotAsync(projectId, periodKey?.Value, innerCt).ConfigureAwait(false);
 
                 var status = await StatusOfDataAsync(projectId, periodKey, innerCt).ConfigureAwait(false);
+
+                // ⛔ R6-X7 / X7-03: повторна перевірка «поточний зріз ключа поданий» —
+                // під замком слоту, який бере й робочий процес перед заморожуванням
+                // (`ReportSnapshotSync`). Побудова, що почалася до подання останнього
+                // аркуша, тут уже бачить заморожений зріз і відмовляє, а не знімає з
+                // нього поточність. Новий зріз при відмові ВИДАЛЯЄТЬСЯ разом із рядками
+                // (вони збережені вище, поза замком): інакше лишився б непоточний
+                // «зріз-сирота», якого ніхто не просив.
+                var frozen = await FrozenCurrentIdsAsync(version.ReportDefId, projectId, periodKey, innerCt)
+                    .ConfigureAwait(false);
+                if (await FreshFrozenAsync(frozen, projectId, periodKey, status, innerCt).ConfigureAwait(false)
+                    is { } frozenNow)
+                {
+                    await DiscardAsync(snapshot.Id, innerCt).ConfigureAwait(false);
+                    refusedBy = frozenNow;
+                    return;
+                }
 
                 // ⛔ R6-X7 / X7-01: зріз, застарілий уже від народження (прогін перемкнувся,
                 // поки читалося джерело, X7-04), статусу даних не успадковує — те саме
@@ -186,8 +216,109 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock, IMemory
             },
             ct).ConfigureAwait(false);
 
+        if (refusedBy is { } refused)
+        {
+            // Видалене в базі не має лишатися в трекері: той самий контекст може
+            // зберігати далі, і EF спробував би оновити рядки, яких уже немає.
+            foreach (var entry in db.ChangeTracker.Entries<ReportRow>()
+                         .Where(e => e.Entity.SnapshotId == snapshot.Id)
+                         .ToList())
+            {
+                entry.State = EntityState.Detached;
+            }
+
+            db.Entry(snapshot).State = EntityState.Detached;
+            throw FrozenRefusal(refused, projectId, periodKey);
+        }
+
         return snapshot.Id;
     }
+
+    /// <summary>
+    /// Поточні ПОДАНІ зрізи опису звіту за проєкт і період.
+    /// </summary>
+    private Task<List<long>> FrozenCurrentIdsAsync(
+        int reportDefId, int projectId, PeriodKey? periodKey, CancellationToken ct)
+    {
+        int? key = periodKey?.Value;
+
+        return db.ReportSnapshots
+            .AsNoTracking()
+            .Where(s => s.IsCurrent
+                        && s.Status == SnapshotStatus.Submitted
+                        && s.ProjectId == projectId
+                        && s.PeriodKey == key
+                        && db.ReportVersions.Any(v => v.Id == s.ReportVersionId && v.ReportDefId == reportDefId))
+            .OrderBy(s => s.Id)
+            .Select(s => s.Id)
+            .Take(MaxCurrentSnapshots)
+            .ToListAsync(ct);
+    }
+
+    /// <summary>
+    /// Поданий поточний зріз, який нова побудова не має права витіснити; <c>null</c> — такого немає.
+    /// </summary>
+    /// <param name="frozenIds">Поточні подані зрізи ключа.</param>
+    /// <param name="projectId">Проєкт.</param>
+    /// <param name="periodKey">Період.</param>
+    /// <param name="dataStatus">Статус даних, якщо вже пораховано; <c>null</c> — порахувати.</param>
+    /// <param name="ct">Скасування.</param>
+    /// <remarks>
+    /// ⛔ R6-X7 / X7-03. Поданий зріз — доказ того, що бачив регулятор (ФВ-9.17), і
+    /// <c>rpt.v_*</c> віддає саме поточний. Нова побудова з іншими параметрами чи за
+    /// іншою версією опису (X7-02) підмінила б у вʼюсі подані числа іншими з тією
+    /// самою позначкою «Submitted» (новий зріз за поданим періодом народжується
+    /// <c>Submitted</c> зі стану даних). Із тими самими параметрами числа збіглися б
+    /// (після подання перерахунок заборонено), тож відмова нічого законного не відбирає.
+    /// <para>
+    /// ⚠ Дозволено, коли (а) дані повернуто в роботу (<c>Reopen</c>/відкликання → статус
+    /// даних <c>Draft</c>) — повторне подання дає НОВИЙ зріз; (б) поданий зріз
+    /// застарілий (ФВ-10.5: після повернення в роботу був перерахунок) — його числа вже
+    /// не ті, що в системі, і нова побудова — саме те, що потрібно.
+    /// </para>
+    /// </remarks>
+    private async Task<long?> FreshFrozenAsync(
+        List<long> frozenIds, int projectId, PeriodKey? periodKey, SnapshotStatus? dataStatus, CancellationToken ct)
+    {
+        if (frozenIds.Count == 0)
+        {
+            return null;
+        }
+
+        var stale = await ReportSnapshotStaleness.StaleSnapshotIds(db)
+            .Where(id => frozenIds.Contains(id))
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var fresh = frozenIds.Except(stale).ToList();
+        if (fresh.Count == 0)
+        {
+            return null;
+        }
+
+        var status = dataStatus ?? await StatusOfDataAsync(projectId, periodKey, ct).ConfigureAwait(false);
+        return status == SnapshotStatus.Draft ? null : fresh[0];
+    }
+
+    /// <summary>Видаляє щойно записаний (ще не поточний) зріз разом із рядками.</summary>
+    /// <remarks>⚠ Рядки ПЕРШИМИ: <c>FK_RepRow_Snap</c> не каскадний (як у <c>ReportRetentionJob</c>).</remarks>
+    private async Task DiscardAsync(long snapshotId, CancellationToken ct)
+    {
+        await db.ReportRows.Where(r => r.SnapshotId == snapshotId).ExecuteDeleteAsync(ct).ConfigureAwait(false);
+        await db.ReportSnapshots.Where(s => s.Id == snapshotId && !s.IsCurrent).ExecuteDeleteAsync(ct).ConfigureAwait(false);
+    }
+
+    /// <summary>Відмова побудови: поточний зріз ключа поданий (ФВ-9.17).</summary>
+    /// <remarks>
+    /// ⚠ <see cref="InvalidOperationException"/>, як решта відмов будівника: побудова
+    /// йде у фоновій задачі, і відмова — це стан <c>Failed</c> із цим текстом.
+    /// </remarks>
+    private static InvalidOperationException FrozenRefusal(long frozenId, int projectId, PeriodKey? periodKey)
+        => new(
+            $"Зріз {frozenId.ToString(CultureInfo.InvariantCulture)} проєкту "
+            + $"{projectId.ToString(CultureInfo.InvariantCulture)} за період "
+            + $"{periodKey?.Value.ToString(CultureInfo.InvariantCulture) ?? "рік"} поданий: нова побудова — лише "
+            + "після повернення даних у роботу (Reopen), ФВ-9.17. Поданий зріз лишається поточним.");
 
     /// <inheritdoc />
     /// <remarks>
