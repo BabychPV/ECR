@@ -976,12 +976,14 @@ public sealed partial class RecalculationJob(
     private async Task GuardCompletionAsync(
         int projectId, int period, IReadOnlyList<SheetGuard> guards, bool approved, CancellationToken ct)
     {
-        var state = await db.Periods
-            .AsNoTracking()
-            .Where(p => p.ProjectId == projectId && p.PeriodKeyValue == period)
+        // ⛔ X6-01: стан — ЕФЕКТИВНИЙ (F-08), а не збережений: прогін, що завершується між
+        // `ComputedCloseAt` і найближчою годинною задачею станів, інакше перемикав актуальність
+        // у вже закритому періоді без погодження S1.
+        var state = (await EffectiveStatesAsync(
+                    db.Periods.Where(p => p.ProjectId == projectId && p.PeriodKeyValue == period), ct)
+                .ConfigureAwait(false))
             .Select(p => (Domain.Enums.PeriodState?)p.State)
-            .FirstOrDefaultAsync(ct)
-            .ConfigureAwait(false);
+            .FirstOrDefault();
 
         if (state is { } current
             && RecalculationWritePolicy.Check(current, false, approved) != RecalculationWriteDenial.None)
@@ -1068,12 +1070,13 @@ public sealed partial class RecalculationJob(
     private async Task<IReadOnlySet<int>> RefusedPeriodsAsync(
         RecalculationRequest request, CancellationToken ct)
     {
-        var states = await db.Periods
-            .AsNoTracking()
-            .Where(p => db.Documents.Any(d => d.Id == request.DocumentId && d.ProjectId == p.ProjectId)
-                        && (request.PeriodKey == null || p.PeriodKeyValue == request.PeriodKey))
-            .Select(p => new PeriodStateRow(p.PeriodKeyValue, p.State))
-            .ToListAsync(ct)
+        // ⛔ X6-01: ефективний стан (F-08) — те саме правило, що й у `GuardCompletionAsync`
+        // і в рішенні про запис; інакше прогін, допущений тут за збереженим `Grace`, падав би
+        // на перемиканні за ефективним `Closed` і повторювався до годинної задачі станів.
+        var states = await EffectiveStatesAsync(
+                db.Periods.Where(p => db.Documents.Any(d => d.Id == request.DocumentId && d.ProjectId == p.ProjectId)
+                                      && (request.PeriodKey == null || p.PeriodKeyValue == request.PeriodKey)),
+                ct)
             .ConfigureAwait(false);
 
         // ⛔ RC15 (P2-A): для області аркуша (`SheetDefId`) період відхиляється, коли поданий САМ цей аркуш; для
@@ -1337,6 +1340,41 @@ public sealed partial class RecalculationJob(
 
     /// <summary>Стан одного періоду — для гейту запису.</summary>
     private sealed record PeriodStateRow(int PeriodKeyValue, Domain.Enums.PeriodState State);
+
+    /// <summary>Правило ефективного стану — те саме, що в рішенні про запис (F-08).</summary>
+    private static readonly Domain.Services.PeriodStateCalculator PeriodStates = new();
+
+    /// <summary>
+    /// X6-01: ЕФЕКТИВНИЙ стан періодів на <c>clock.UtcNow</c> — тим самим правилом, що й
+    /// <c>AccessDecisionService</c> (F-08) і <c>IPeriodStore.FindPeriodStateAsync</c>.
+    /// </summary>
+    /// <param name="source">Періоди, стан яких потрібен.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⚠ Лише для АКТИВНОГО проєкту (`A7-25`): періоди чернетки за датами не просуваються.
+    /// Ефективний стан — лише вперед від збереженого, тож закритого він не відкриває.
+    /// </remarks>
+    private async Task<List<PeriodStateRow>> EffectiveStatesAsync(
+        IQueryable<Domain.Entities.Documents.Period> source, CancellationToken ct)
+    {
+        var rows = await (
+                from p in source.AsNoTracking()
+                join project in db.Projects.AsNoTracking() on p.ProjectId equals project.Id
+                select new { Period = p, project.Status, project.PeriodEnd, project.YearGraceOffsetDays, project.TimeZoneId })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var now = clock.UtcNow;
+        return [.. rows.Select(r => new PeriodStateRow(
+            r.Period.PeriodKeyValue,
+            r.Status == Domain.Enums.ProjectStatus.Active
+                ? PeriodStates.Effective(
+                    r.Period,
+                    now,
+                    Domain.Services.YearGraceWindow.For(
+                        r.PeriodEnd, r.YearGraceOffsetDays, SiteTimeZone.Create(r.TimeZoneId).ToTimeZoneInfo()))
+                : r.Period.State))];
+    }
 
     /// <summary>Прогрес однієї фази: шкала зсунута й стиснута, повідомлення назване.</summary>
     /// <param name="inner">Канал прогресу задачі.</param>
