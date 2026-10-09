@@ -112,7 +112,7 @@ public sealed class DocumentListSummaryStore(
     /// сторінки кешу не має. Інвалідація - ЕПОХОЮ (<see cref="StaleCountsEpoch"/>) у ключі: запис комірок
     /// (<c>AuditWriter.WriteCellChangesAsync</c>) і перемикання актуального прогону
     /// (<c>CalculationResultStore.SwitchCurrentRunAsync</c>) піднімають її ПІСЛЯ коміту, тож власна правка
-    /// видна лічильнику одразу. ⚠ Епоха живе в процесі: інший вузол API побачить зміну за ≤ TTL.
+    /// видна лічильнику одразу. ⛔ Епоха — ПО ПЕРІОДУ (AN-108 / P2-01): правка в іншому періоді запис не скидає. ⚠ Епоха живе в процесі: інший вузол API побачить зміну за ≤ TTL.
     ///
     /// ⛔ Безпека ключа: користувач + проєкт + період + ЕФЕКТИВНИЙ scope читача (межа грантів, пари «проєкт-схований
     /// аркуш», проєкти зі звуженням) → SHA-256. Різні scope не діляться записом: звужений читач не отримає лічильник
@@ -128,7 +128,7 @@ public sealed class DocumentListSummaryStore(
         string? key = null;
         if (cache is not null && clock is not null)
         {
-            key = StaleCountsKey(projectId, periodKey, scope, restrictions, narrowed, currentUserId, epoch?.Value ?? 0);
+            key = StaleCountsKey(projectId, periodKey, scope, restrictions, narrowed, currentUserId, epoch?.ValueFor(periodKey) ?? 0);
             if (cache.TryGetValue(key, out StaleCounts? hit) && hit is not null && hit.ExpiresAt > clock.UtcNow)
             {
                 return (hit.All, hit.Mine);
