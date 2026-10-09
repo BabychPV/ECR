@@ -7386,6 +7386,9 @@ USING (VALUES
     -- COLL:an72-rule-concurrent ── AN-72 / N2-05: два одночасні перші PUT category-rule (UQ_CategoryRule_Version) -> 409; ru/kz — порцією COLL:an72-rule-concurrent нижче ──
     (N'err.ECR-CALC-0409.categoryRuleConcurrent', N'en', N'Someone else has just created the category rule of this version. Reload the version and save the rule again.', 1),
     -- COLL:an72-rule-concurrent ── кінець секції ──
+    -- COLL:an107-import-busy ── AN-107 / P1-04 = S1-02: перегляд імпорту книги — межа одночасних розборів вичерпана (ImportPreviewRateLimitPolicy); ru/kz — порцією COLL:an107-import-busy нижче ──
+    (N'err.ECR-REQ-0429.importBusy', N'en', N'The server is busy reading other imported workbooks. Try again in a minute.', 1),
+    -- COLL:an107-import-busy ── кінець секції ──
     -- COLL:an80-carryover ── AN-80 / N2-04: перенос результатів поданих аркушів більший за стелю; ru/kz — порцією COLL:an80-carryover нижче ──
     (N'err.ECR-CALC-0422.carryOverTooLarge', N'en', N'Carrying over the results of the submitted sheets of document {documentId} for period {periodKey} would copy {count} rows, more than the limit of {max}. The run was not applied and the previous results stay current: narrow the binding to the right table.', 1),
     -- COLL:an80-carryover ── кінець секції ──
@@ -18196,6 +18199,17 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:an104-header-conflict ── кінець секції ──
+
+-- COLL:an107-import-busy ── ru/kz: AN-107 / P1-04 = S1-02: межа одночасних переглядів імпорту книги вичерпана; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-REQ-0429.importBusy', N'ru', N'Сервер занят чтением других импортируемых книг. Повторите попытку через минуту.'),
+    (N'err.ECR-REQ-0429.importBusy', N'kz', N'Сервер басқа импортталатын кітаптарды оқумен бос емес. Бір минуттан кейін қайталаңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:an107-import-busy ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

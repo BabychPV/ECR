@@ -557,6 +557,9 @@ public sealed class DocumentsController(
     /// <remarks>Імпорт **завжди** через перегляд diff (ФВ-4.3): застосування — окремим викликом.</remarks>
     [HttpPost("{id:long}/import/preview")]
     [RequestSizeLimit(MaxImportBodyBytes)]
+    // ⛔ P1-04 = S1-02: розбір книги — повна модель ClosedXML у пам'яті процесу; одночасних
+    // розборів не більше за межу політики, понад чергу — 429 (див. ImportPreviewRateLimitPolicy).
+    [Microsoft.AspNetCore.RateLimiting.EnableRateLimiting(Ecr.Api.Security.ImportPreviewRateLimitPolicy.PolicyName)]
     [ProducesResponseType<Ecr.Application.Ports.ImportPreview>(StatusCodes.Status200OK)]
     public async Task<IActionResult> ImportPreview(long id, IFormFile file, CancellationToken ct)
     {
