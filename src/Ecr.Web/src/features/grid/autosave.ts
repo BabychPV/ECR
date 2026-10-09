@@ -318,6 +318,83 @@ export function useBusyRetryWaiting(): boolean {
 }
 
 /**
+ * Зрізи, чиє ОСТАННЄ збереження не дійшло: мережа, `5xx`, відмова без позначок
+ * (`G1-03`).
+ *
+ * ⛔ Доти питання браузера «Покинути сторінку?» з'являлось лише за утриманих
+ * правок або запиту в дорозі. Після мережевої/`5xx` відмови правки лишались
+ * «придатними до надсилання», і закриття вкладки покладалося на маячок — до того
+ * самого недоступного сервера, мовчки. Тепер такий зріз — привід спитати.
+ */
+const failedSlices = new Set<string>();
+const failedListeners = new Set<() => void>();
+
+function notifyFailed(): void {
+  for (const listener of failedListeners) listener();
+}
+
+/** Збереження зрізу дійшло: знімає позначку `G1-03`. */
+export function noteSaveSucceeded(tableInstanceId: number, periodKey: number): void {
+  if (failedSlices.delete(keyOfSlice(tableInstanceId, periodKey))) notifyFailed();
+}
+
+function noteSaveFailed(tableInstanceId: number, periodKey: number): void {
+  const key = keyOfSlice(tableInstanceId, periodKey);
+  if (failedSlices.has(key)) return;
+
+  failedSlices.add(key);
+  notifyFailed();
+}
+
+/** Чи останнє збереження зрізу не дійшло (мережа, `5xx`) — для «Retry save» (`G1-04`). */
+export function hasFailedSave(tableInstanceId: number, periodKey: number): boolean {
+  return failedSlices.has(keyOfSlice(tableInstanceId, periodKey));
+}
+
+/** Те саме, що `hasFailedSave`, — як стан React. */
+export function useFailedSave(tableInstanceId: number, periodKey: number): boolean {
+  const read = (): boolean => hasFailedSave(tableInstanceId, periodKey);
+
+  return useSyncExternalStore(subscribeFailed, read, read);
+}
+
+function subscribeFailed(listener: () => void): () => void {
+  failedListeners.add(listener);
+
+  return () => {
+    failedListeners.delete(listener);
+  };
+}
+
+/** Чи є зріз із невдалим останнім збереженням, у якому ще лежать правки до надсилання. */
+function hasFailedSendable(): boolean {
+  for (const key of failedSlices) {
+    const [tableInstanceId, periodKey] = key.split(':').map(Number) as [number, number];
+    if (sendableEdits(tableInstanceId, periodKey).length > 0) return true;
+  }
+
+  return false;
+}
+
+/** Скидання позначок `G1-03` разом зі сховищем правок (вихід із документа, тести). */
+export function resetFailedSaves(): void {
+  if (failedSlices.size === 0) return;
+
+  failedSlices.clear();
+  notifyFailed();
+}
+
+/**
+ * Скільки байтів тіл може везти маячок закриття вкладки (`G1-03`).
+ *
+ * ⛔ Специфікація Fetch обмежує суму тіл `keepalive`-запитів документа 64 КиБ;
+ * більший запит одразу падає мережевою помилкою, яку маячок ковтає. Тобто
+ * вставка на пару тисяч комірок, що чекала повтору, мовчки не доїжджала. Межа
+ * — із запасом на заголовки й округлення; більше — рідне питання браузера.
+ */
+export const BeaconBudgetBytes = 60 * 1024;
+
+/**
  * Тримає відхилені правки пакета й довозить решту (`V-01`).
  *
  * ⛔ Спільне для обох зберігачів — сітки й безхазяйного зрізу: розійдись вони,
@@ -345,10 +422,21 @@ export function holdRejectedEdits(
     return false;
   }
 
+  // ⛔ `G1-03`: відмова, яка нічого не утримала (мережа, `5xx`, `4xx` без
+  // позначок), лишає правки «придатними до надсилання» — і закриття вкладки має
+  // про них спитати, а не довіряти маячку.
   const marks = rejectionMarksOf(error, attempted);
-  if (marks.length === 0) return false;
+  if (marks.length === 0) {
+    noteSaveFailed(tableInstanceId, periodKey);
 
-  if (markPendingRejected(tableInstanceId, periodKey, marks) === 0) return false;
+    return false;
+  }
+
+  if (markPendingRejected(tableInstanceId, periodKey, marks) === 0) {
+    noteSaveFailed(tableInstanceId, periodKey);
+
+    return false;
+  }
 
   const sent = new Set(attempted.map((edit) => cellKey(edit)));
   const innocent = sendableEdits(tableInstanceId, periodKey).some((edit) => sent.has(cellKey(edit)));
@@ -497,6 +585,7 @@ async function saveOrphanSlice(
       edits.map((edit) => edit.rowKey),
       sent,
     );
+    noteSaveSucceeded(slice.tableInstanceId, slice.periodKey);
     clearBusyRetry();
   } catch (error) {
     holdRejectedEdits(slice.tableInstanceId, slice.periodKey, error, edits);
@@ -541,6 +630,7 @@ export function useDocumentPending(documentId: number, ownerUserId?: number): vo
     return () => {
       cancelAutosave();
       clearBusyRetry();
+      resetFailedSaves();
       resetPending();
       // ⚠ Разом зі сховищем правок — і підтвердження до них (`ФВ-2.16`).
       resetConfirmed();
@@ -586,7 +676,21 @@ export function useDocumentPending(documentId: number, ownerUserId?: number): vo
         // її ще не підняла, і `409` на маячок («все або нічого») забрав би з собою
         // новіші правки, мовчки (`lostEdits` пишеться лише на `401`). Тож — рідне
         // питання браузера; «Залишитися» — звичайне збереження після відповіді.
-        if (held || hasInFlight()) {
+        //
+        // ⛔ `G1-03`: так само, коли маячок НЕ доїде: «дані зайняті» (повтор
+        // чекає), останнє збереження впало мережею чи `5xx` (маячок пішов би
+        // до того самого недоступного сервера), або пакет більший за ліміт
+        // `keepalive` (64 КиБ — запит падає одразу, мовчки).
+        const requests = sendable.map((slice) =>
+          buildRequest(
+            slice.tableInstanceId,
+            slice.periodKey,
+            withKnownVersions(slice.edits, cachedSlice(queryClient, slice.tableInstanceId, slice.periodKey)),
+          ),
+        );
+        const tooBig = beaconBytes(requests) > BeaconBudgetBytes;
+
+        if (held || hasInFlight() || isBusyRetryWaiting() || hasFailedSendable() || tooBig) {
           setTimeout(() => {
             flushAutosave();
           }, 0);
@@ -594,24 +698,19 @@ export function useDocumentPending(documentId: number, ownerUserId?: number): vo
           return true;
         }
 
-        for (const slice of sendable) {
-          sendPatchBeacon(
-            documentId,
-            buildRequest(
-              slice.tableInstanceId,
-              slice.periodKey,
-              withKnownVersions(
-                slice.edits,
-                cachedSlice(queryClient, slice.tableInstanceId, slice.periodKey),
-              ),
-            ),
-          );
-        }
+        for (const request of requests) sendPatchBeacon(documentId, request);
 
         return false;
       }),
     [documentId, queryClient],
   );
+}
+
+/** Сума тіл маячка в байтах UTF-8 — так, як їх рахує ліміт `keepalive`. */
+function beaconBytes(requests: readonly unknown[]): number {
+  const encoder = new TextEncoder();
+
+  return requests.reduce<number>((sum, request) => sum + encoder.encode(JSON.stringify(request)).length, 0);
 }
 
 /** Зріз із кешу — без запиту; `undefined`, якщо його ще не читали. */

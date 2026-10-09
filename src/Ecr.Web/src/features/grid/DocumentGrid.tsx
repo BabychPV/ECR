@@ -55,6 +55,7 @@ import {
 import {
   clearBusyRetry,
   holdRejectedEdits,
+  noteSaveSucceeded,
   registerSliceSaver,
   scheduleAutosave,
   useBusyRetryWaiting,
@@ -581,6 +582,8 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         // сітки. `sent` тут обов'язковий — без нього зникла б і правка, яку
         // оператор зробив у ту саму комірку, доки цей патч був у дорозі.
         discardPendingRows(tableInstanceId, periodKey, touchedRowKeys, sent);
+        // ⚠ `G1-03`: збереження зрізу дійшло — закриття вкладки знову довіряє маячку.
+        noteSaveSucceeded(tableInstanceId, periodKey);
 
         // ⚠ Той самий стан, що й `pending`: наступний зріз уже несе справжнє
         // значення, і локальна підстава більше не потрібна нікому — але так
