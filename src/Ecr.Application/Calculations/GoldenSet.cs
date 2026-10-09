@@ -1,4 +1,5 @@
 using System.Globalization;
+using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 
 namespace Ecr.Application.Calculations;
@@ -51,10 +52,11 @@ public static class GoldenSet
     /// <param name="testCase">Тест: входи, очікувані числа й допуск.</param>
     /// <param name="output">Те, що видав рушій.</param>
     /// <returns>Вердикт із переліком розбіжностей.</returns>
-    /// <exception cref="InvalidOperationException">
-    /// Ключ очікування називає речовину, яка не є цілим числом. Мовчки звести
-    /// такий ключ до «виходу без речовини» означало б перевіряти не те, що
-    /// оголошено, — і зелений набір знову нічого б не доводив.
+    /// <exception cref="BusinessRuleException">
+    /// <c>ECR-CALC-0422</c> (<c>err.ECR-CALC-0422.testCaseJsonInvalid</c>, поле <c>expectedJson</c>): ключ
+    /// очікування називає речовину, яка не є цілим числом. Мовчки звести такий ключ до «виходу без речовини»
+    /// означало б перевіряти не те, що оголошено, — і зелений набір знову нічого б не доводив. Це 422 із
+    /// ключем каталогу, а не 500 (L7-10): так відмовляє й збереження тесту.
     /// </exception>
     /// <remarks>
     /// ⚠ Форма проходу — НЕ «запит на кожне очікування». Результати
@@ -187,11 +189,13 @@ public static class GoldenSet
         // очікування для однієї речовини мовчки поширилося б на всі — або, що
         // гірше, на жодну. Збереження тесту відхиляє такий ключ раніше (L7-10),
         // тож сюди доходить лише старий запис.
+        //
+        // ⚠ Кидаємо ТУ САМУ відмову, що й збереження (`ECR-CALC-0422`, 422, ключ каталогу
+        // `testCaseJsonInvalid`, `reason = "$.<ключ>"`), а не InvalidOperationException: на публікації й
+        // симуляції той давав 500 без пояснення, що саме виправити в тесті.
         if (!TryParseKey(declaration, out var code, out var substance))
         {
-            throw new InvalidOperationException(
-                $"Тест «{testCode}»: ключ очікування «{declaration}» не читається. "
-                + $"Очікується «код_виходу» або «код_виходу{SubstanceSeparator}ідентифікатор_речовини».");
+            throw TestCaseJson.ExpectedKeyRefusal(testCode, declaration);
         }
 
         return (code, substance);

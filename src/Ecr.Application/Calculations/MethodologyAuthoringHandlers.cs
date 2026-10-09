@@ -1608,10 +1608,20 @@ internal static class TestCaseJson
         {
             if (!GoldenSet.TryParseKey(key, out _, out _))
             {
-                throw Refusal(testCode, field, "$." + key);
+                throw ExpectedKeyRefusal(testCode, key);
             }
         }
     }
+
+    /// <summary>
+    /// Відмова для ключа очікування, що не читається (<c>$.&lt;ключ&gt;</c>): одна й та сама при збереженні тесту і
+    /// при публікації/симуляції зі старим зіпсованим записом (аудит L7-10: там був InvalidOperationException → 500).
+    /// </summary>
+    /// <param name="testCode">Код тесту.</param>
+    /// <param name="declaration">Ключ очікування як записано в <c>expectedJson</c>.</param>
+    /// <returns><c>ECR-CALC-0422</c>, ключ каталогу <c>err.ECR-CALC-0422.testCaseJsonInvalid</c>.</returns>
+    public static BusinessRuleException ExpectedKeyRefusal(string testCode, string declaration)
+        => Refusal(testCode, "expectedJson", "$." + declaration);
 
     private static T Parse<T>(string testCode, string field, string json)
         where T : class
