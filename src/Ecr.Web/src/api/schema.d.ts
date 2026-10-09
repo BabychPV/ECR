@@ -18600,13 +18600,16 @@ export interface components {
              */
             theirChangedAt: null | string;
             /** @description Походження останньої зміни: `UserEdit`, `Import`,
-             *     `Recalculation`, `Migration`; `null` — невідоме. Потрібне
+             *     `ImportOverwrite`, `Recalculation`, `Migration`;
+             *     `null` — невідоме. Потрібне
              *     поруч із `system`: «це зробила не людина» без відповіді «а що саме»
              *     лишає користувача з тим самим питанням. */
             theirOrigin: null | string;
-            /** @description Відображуване ім'я автора останньої зміни; `system` — зміна не людини
-             *     (перерахунок, імпорт, міграція); `null` — автор невідомий. Ніколи не
-             *     логін і не SID (R-A2, D-86). */
+            /** @description Відображуване ім'я автора останньої зміни. Правка в сітці (`UserEdit`)
+             *     та імпорт книги Excel (`Import`, `ImportOverwrite`) — ім'я людини,
+             *     яка їх зробила; `system` — зміна не людини (перерахунок, інтеграція,
+             *     міграція); `null` — автор невідомий. Ніколи не логін і не SID
+             *     (R-A2, D-86). */
             theirUser: null | string;
             /** @description Чинне значення комірки — те, що лежить у сховищі зараз; `null` —
              *     комірки немає або назвати її неможливо. */
