@@ -22,6 +22,20 @@ public interface IReportSnapshotBuilder
     /// <summary>Перераховує статус зрізу після зміни стану затвердження аркушів.</summary>
     public Task<SnapshotStatus> RefreshStatusAsync(long snapshotId, CancellationToken ct);
 
+    /// <summary>
+    /// Бере замок «слоту» зрізів (проєкт × період) до кінця поточної транзакції.
+    /// </summary>
+    /// <param name="projectId">Проєкт.</param>
+    /// <param name="periodKey">Період; <c>null</c> — річний зріз.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⛔ R6-X1 / X1-01: той самий замок бере побудова перед тим, як порахувати
+    /// статус нового зрізу й зробити його поточним. Робочий процес бере його
+    /// ДО пошуку поточних зрізів — інакше перехід, що закомітився посеред
+    /// побудови, оновлював лише старий зріз. Потребує відкритої транзакції.
+    /// </remarks>
+    public Task LockSlotAsync(int projectId, int? periodKey, CancellationToken ct);
+
     /// <summary>Перелік побудованих зрізів.</summary>
     /// <param name="projectId">Проєкт; <c>null</c> — усі.</param>
     /// <param name="periodKey">Період; <c>null</c> — усі.</param>

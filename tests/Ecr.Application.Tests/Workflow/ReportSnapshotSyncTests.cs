@@ -69,6 +69,38 @@ public sealed class ReportSnapshotSyncTests
         await _snapshots.Received(1).MarkSubmittedAsync(SnapshotId, UserId, Arg.Any<CancellationToken>());
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Finding", "X1-01")]
+    [Trait("Requirement", "D-65")]
+    public async Task Замок_слоту_береться_ДО_пошуку_поточних_зрізів(bool submit)
+    {
+        // ⛔ R6-X1 / X1-01: побудова зрізу рахує статус і робить новий зріз поточним
+        // під замком слоту (проєкт × період). Якщо перехід шукає поточні зрізи ДО
+        // замка, він бачить лише СТАРИЙ зріз, а новий стає поточним зі статусом до
+        // переходу. Без фіксу `LockSlotAsync` не кликав ніхто.
+        _snapshots.RefreshStatusAsync(SnapshotId, Arg.Any<CancellationToken>())
+            .Returns(SnapshotStatus.Draft);
+
+        if (submit)
+        {
+            await Sync().MarkSubmittedAsync(Document, new PeriodKey(Period), UserId, CancellationToken.None);
+        }
+        else
+        {
+            await Sync().RefreshAsync(Document, new PeriodKey(Period), CancellationToken.None);
+        }
+
+        Received.InOrder(() =>
+        {
+            _snapshots.LockSlotAsync(Project, Period, Arg.Any<CancellationToken>());
+            _snapshots.ListAsync(Project, Period, null, Arg.Any<CancellationToken>());
+            _snapshots.RefreshStatusAsync(SnapshotId, Arg.Any<CancellationToken>());
+        });
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
     [Trait("Finding", "H-23b")]

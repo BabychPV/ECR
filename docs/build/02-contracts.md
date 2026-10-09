@@ -2914,12 +2914,13 @@ public interface IReportSnapshotBuilder
     public Task<long> BuildAsync(int reportVersionId, int projectId, PeriodKey? periodKey,
     public Task MarkSubmittedAsync(long snapshotId, int userId, CancellationToken ct);
     public Task<SnapshotStatus> RefreshStatusAsync(long snapshotId, CancellationToken ct);
+    public Task LockSlotAsync(int projectId, int? periodKey, CancellationToken ct);
     public Task<IReadOnlyList<ReportSnapshotSummary>> ListAsync(
     public Task<int> CountRowsAsync(long snapshotId, int atMost, CancellationToken ct);
 }
 ```
 
-AN-120: побудова відмовляє `ECR-RPT-0422` (`err.ECR-RPT-0422.snapshotTooLarge`), якщо рядків зрізу ПІСЛЯ правил відбору (`R5`) більше за стелю, — а не обрізає джерело мовчки; попередній зріз лишається чинним. `CountRowsAsync` — підрахунок рядків зі стелею: вивантаження книги відмовляє 422 до читання вмісту.
+AN-120: побудова відмовляє `ECR-RPT-0422` (`err.ECR-RPT-0422.snapshotTooLarge`), якщо рядків зрізу ПІСЛЯ правил відбору (`R5`) більше за стелю, — а не обрізає джерело мовчки; попередній зріз лишається чинним. X1-01: `LockSlotAsync` — транзакційний `sp_getapplock` на проєкт × період; побудова рахує статус і перемикає `IsCurrent` під ним, робочий процес бере його до пошуку поточних зрізів (`ReportSnapshotSync`). `CountRowsAsync` — підрахунок рядків зі стелею: вивантаження книги відмовляє 422 до читання вмісту.
 
 #### `IReportViewGenerator`
 

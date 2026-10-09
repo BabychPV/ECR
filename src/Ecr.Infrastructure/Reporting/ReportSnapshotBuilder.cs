@@ -99,10 +99,15 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock, IMemory
         // ⚠ Статус УСПАДКОВУЄТЬСЯ від даних (D-65). Окреме поле «статус звіту»
         // стало б другим джерелом істини і рано чи пізно показало б регулятору
         // Approved на чернетці.
-        var status = await StatusOfDataAsync(projectId, periodKey, ct).ConfigureAwait(false);
-
+        //
+        // ⛔ R6-X1 / X1-01: тут лише заглушка `Draft`. Справжній статус
+        // рахується НАПРИКІНЦІ, під замком слоту і безпосередньо перед
+        // перемиканням `IsCurrent` (див. нижче). Порахований тут, він
+        // застарівав на весь час запису рядків: перехід, що закомітився в цьому
+        // вікні, оновлював лише СТАРИЙ поточний зріз, а новий ставав поточним
+        // зі статусом до переходу.
         var snapshot = new ReportSnapshot(
-            reportVersionId, projectId, periodKey?.Value, status, clock.UtcNow, builtByUserId: null);
+            reportVersionId, projectId, periodKey?.Value, SnapshotStatus.Draft, clock.UtcNow, builtByUserId: null);
 
         db.ReportSnapshots.Add(snapshot);
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
@@ -131,11 +136,89 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock, IMemory
         // зберігається одразу, а не визначається потім перерахунком.
         snapshot.RecordHashFormat(VerifyReportSnapshotHandler.FormatCurrent);
 
-        await SwitchCurrentAsync(snapshot, ct).ConfigureAwait(false);
+        // ⚠ Рядки — окремим збереженням, ПОЗА замком слоту: запис до
+        // 200 000 рядків триває секунди, і тримати весь цей час робочий процес
+        // проєкту за період означало б відмови «зайнято» на поданні. Зріз ще
+        // не поточний, тож регуляторна вʼюха його не бачить.
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
+
+        // ⛔ R6-X1 / X1-01: статус і перемикання — ОДНІЄЮ короткою транзакцією
+        // під тим самим замком слоту, який бере робочий процес перед пошуком
+        // поточних зрізів (`ReportSnapshotSync`). Перехід або закомітився
+        // раніше — і тоді запит статусу його бачить, — або чекає замка і вже
+        // знаходить НОВИЙ зріз поточним. Третього варіанта, у якому перехід
+        // оновлює лише старий зріз, а новий стає поточним із застарілим
+        // статусом, більше немає. `UPDLOCK` на рядку зрізу (W1-01) цього не
+        // закривав: нового зрізу серед заблокованих ще не було.
+        await new UnitOfWork(db, clock).ExecuteInTransactionAsync(
+            async innerCt =>
+            {
+                await LockSlotAsync(projectId, periodKey?.Value, innerCt).ConfigureAwait(false);
+
+                var status = await StatusOfDataAsync(projectId, periodKey, innerCt).ConfigureAwait(false);
+                snapshot.RefreshStatus(status);
+
+                await SwitchCurrentAsync(snapshot, innerCt).ConfigureAwait(false);
+                await db.SaveChangesAsync(innerCt).ConfigureAwait(false);
+            },
+            ct).ConfigureAwait(false);
 
         return snapshot.Id;
     }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⚠ Замок — на проєкт × період, без версії звіту: робочий процес
+    /// проводить перехід у зрізи ВСІХ версій одним викликом. Річний зріз
+    /// (<paramref name="periodKey"/> <c>null</c>) має власний ресурс.
+    /// <para>
+    /// ⚠ Власник — транзакція: замок знімає коміт або відкат, забутого
+    /// <c>sp_releaseapplock</c> бути не може. Поза транзакцією
+    /// <c>sp_getapplock</c> відмовляє, тож викликач мусить її відкрити.
+    /// </para>
+    /// </remarks>
+    public async Task LockSlotAsync(int projectId, int? periodKey, CancellationToken ct)
+    {
+        var resource = string.Create(
+            CultureInfo.InvariantCulture,
+            $"ecr.rpt-slot.{projectId}.{(periodKey is { } key ? key.ToString(CultureInfo.InvariantCulture) : "year")}");
+
+        var result = new Microsoft.Data.SqlClient.SqlParameter("@rc", System.Data.SqlDbType.Int)
+        {
+            Direction = System.Data.ParameterDirection.Output,
+        };
+
+        await db.Database.ExecuteSqlRawAsync(
+            "EXEC @rc = sp_getapplock @Resource = @res, @LockMode = N'Exclusive', "
+            + "@LockOwner = N'Transaction', @LockTimeout = @timeout;",
+            [
+                result,
+                new Microsoft.Data.SqlClient.SqlParameter("@res", resource),
+                new Microsoft.Data.SqlClient.SqlParameter("@timeout", SlotLockTimeoutMs),
+            ],
+            ct).ConfigureAwait(false);
+
+        // ⚠ Не дочекалися — та сама відмова 409, що й на вичерпаному
+        // очікуванні блокування рядка: дія не виконана, її можна повторити.
+        if (result.Value is not int rc || rc < 0)
+        {
+            throw new ConcurrencyConflictException(
+                ErrorCodes.SheetBusy,
+                "Зрізи звітності за цей період саме перебудовуються. Нічого не збережено; повторіть дію за мить.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = LockWaitGuard.MessageKey,
+                });
+        }
+    }
+
+    /// <summary>Скільки чекати замка слоту зрізів, мс.</summary>
+    /// <remarks>
+    /// Обидві сторони тримають замок коротко: побудова — на запит статусу й
+    /// перемикання, робочий процес — на перерахунок статусу зрізів. Пів хвилини —
+    /// із запасом на навантажений день дедлайну.
+    /// </remarks>
+    private const int SlotLockTimeoutMs = 30_000;
 
     /// <inheritdoc />
     public async Task MarkSubmittedAsync(long snapshotId, int userId, CancellationToken ct)
