@@ -139,7 +139,7 @@ describe('CollectionScheduleTab: L9-30 — лічильник розкладів
     expect(sourcesInvalidated(client)).toBe(false);
   }, 60_000);
 
-  it('відмова видалення НЕ 409 (рядка вже немає, 404) скидає кеш з'єднань — лічильник змінився', async () => {
+  it('відмова видалення НЕ 409 (рядка вже немає, 404) скидає кеш з’єднань — лічильник змінився', async () => {
     stub([schedule()], 404);
     const client = await show();
 
@@ -151,7 +151,7 @@ describe('CollectionScheduleTab: L9-30 — лічильник розкладів
     await waitFor(() => expect(sourcesInvalidated(client)).toBe(true));
   }, 60_000);
 
-  it('конфлікт 409 кеш з'єднань не чіпає', async () => {
+  it('конфлікт 409 кеш з’єднань не чіпає', async () => {
     stub([schedule()], 409);
     const client = await show();
 
