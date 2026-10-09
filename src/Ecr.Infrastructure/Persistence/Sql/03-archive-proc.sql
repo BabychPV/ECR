@@ -233,10 +233,83 @@ BEGIN
         RETURN;
     END;
 
+    ------------------------------------------------------------------------
+    -- ⛔ U1-01 (аудит 09.10c). Очищення цілі нижче — на ВЕСЬ діапазон, і
+    --    безпечне воно лише тоді, коли КОЖЕН рядок `arc.*` діапазону ще має
+    --    свій оригінал у `doc.*`: тобто це копія незавершеного попереднього
+    --    прогону, яку повтор відтворить з джерела.
+    --
+    --    Рядок архіву БЕЗ оригіналу — це вже перенесені дані, джерело яких
+    --    звільнив `TRUNCATE` попереднього успішного прогону. Так буває, коли
+    --    діапазони перекриваються: річний проєкт (202601..202601) архівували
+    --    раніше за місячний (202601..202612) у тій самій партиції, або DBA
+    --    архівував пів року, а потім рік. Коротке замикання вище цього не
+    --    бачить (джерело порожнє не на всьому діапазоні), `DELETE` стирав
+    --    архів 202601 без копії, звірка давала 0 = 0, прогін — `Completed`.
+    --
+    -- ⚠ Перевірка — по КЛЮЧАХ, а не «період порожній у doc.*»: у звільнену
+    --    партицію могли лягти нові документи іншого проєкту, і тоді період у
+    --    `doc.*` непорожній, а старий архів у ньому все одно без оригіналу.
+    --
+    -- ⚠ Відмова — ДО будь-якого `DELETE`; `THROW` усередині `TRY` дає
+    --    `Failed` у журналі й знімає `IsArchiving` через наявний `CATCH`.
+    --    Ціна — анти-з'єднання по архіву діапазону, але лише на гілці, де
+    --    `arc.*` діапазону непорожній (повтор або перекриття), не в звичайному
+    --    прогоні.
+    ------------------------------------------------------------------------
+    IF EXISTS (SELECT 1 FROM arc.TableInstance
+                WHERE PeriodKey BETWEEN @FromPeriodKey AND @ToPeriodKey)
+       OR EXISTS (SELECT 1 FROM arc.TableRow
+                   WHERE PeriodKey BETWEEN @FromPeriodKey AND @ToPeriodKey)
+       OR EXISTS (SELECT 1 FROM arc.CellValue
+                   WHERE PeriodKey BETWEEN @FromPeriodKey AND @ToPeriodKey)
+    BEGIN
+        DECLARE @archivedOnly nvarchar(400) = STUFF((
+            SELECT N', ' + CAST(x.PeriodKey AS nvarchar(10))
+            FROM (SELECT a.PeriodKey
+                    FROM arc.CellValue AS a
+                   WHERE a.PeriodKey BETWEEN @FromPeriodKey AND @ToPeriodKey
+                     AND NOT EXISTS (SELECT 1 FROM doc.CellValue AS d
+                                      WHERE d.PeriodKey = a.PeriodKey
+                                        AND d.TableRowId = a.TableRowId
+                                        AND d.ColumnDefId = a.ColumnDefId)
+                  UNION
+                  SELECT a.PeriodKey
+                    FROM arc.TableRow AS a
+                   WHERE a.PeriodKey BETWEEN @FromPeriodKey AND @ToPeriodKey
+                     AND NOT EXISTS (SELECT 1 FROM doc.TableRow AS d
+                                      WHERE d.PeriodKey = a.PeriodKey AND d.Id = a.Id)
+                  UNION
+                  SELECT a.PeriodKey
+                    FROM arc.TableInstance AS a
+                   WHERE a.PeriodKey BETWEEN @FromPeriodKey AND @ToPeriodKey
+                     AND NOT EXISTS (SELECT 1 FROM doc.TableInstance AS d
+                                      WHERE d.PeriodKey = a.PeriodKey AND d.Id = a.Id)) AS x
+            ORDER BY x.PeriodKey
+            FOR XML PATH(''), TYPE).value('.', 'nvarchar(400)'), 1, 2, N'');
+
+        IF @archivedOnly IS NOT NULL
+        BEGIN
+            DECLARE @overlapMsg nvarchar(800) =
+                N'Діапазон ' + CAST(@FromPeriodKey AS nvarchar(10)) + N'..' +
+                CAST(@ToPeriodKey AS nvarchar(10)) +
+                N' перекриває вже заархівовані дані без оригіналу в гарячій схемі (періоди: ' +
+                @archivedOnly +
+                N'). Архів не змінено. Звузьте діапазон до незаархівованих періодів ' +
+                N'або спершу поверніть ці періоди (arc.usp_RestoreYear).';
+
+            THROW 50016, @overlapMsg, 1;
+        END;
+    END;
+
     -- ⚠ Тут саме DELETE, а не TRUNCATE WITH (PARTITIONS): `arc.*` лежить на
     -- окремій файловій групі колонстором і НЕ партиційована (`02a` §arc,
     -- `D-23`). Партиційний TRUNCATE на ній падає, а TRUNCATE цілої таблиці
     -- знищив би інші роки.
+    --
+    -- ⚠ Сюди доходить лише архів, КОЖЕН рядок якого має оригінал у `doc.*`
+    -- (U1-01 вище), тож `DELETE` на весь діапазон прибирає тільки копії
+    -- незавершеного прогону.
     --
     -- ⚠ Виконується лише коли є що прибирати: у звичайному прогоні це
     -- перевірка існування, а не сканування. Ціна платиться лише на повторі
