@@ -182,6 +182,30 @@ IF OBJECT_ID(N'calc.CalculationResult', N'U') IS NOT NULL
         ON ps_ByPeriodKey (PeriodKey);
 GO
 
+-- ── R5-Q1-02: результати АКТУАЛЬНОГО прогону документа (ReadCurrentAsync, перенос) ──
+--
+-- `CalculationResultStore.ReadCurrentAsync` (кожен GET зрізу з колонкою `Calculated`,
+-- панель результатів, експорт) бере результати документа за період лише з актуальних
+-- прогонів. `IX_CalculationResult_Lookup` не містить `CalculationRunId`, а результати
+-- `Superseded`-прогонів не видаляються (ЗБР-1, «нічого не затирається»), тож відбір за
+-- прогоном коштував key lookup на кожен результат КОЖНОГО минулого прогону — вартість
+-- росла лінійно з кількістю перерахунків. Із цим індексом — seek до прогону; INCLUDE
+-- покриває проєкцію `ReadCurrentAsync`, вартість не залежить від історії.
+--
+-- ⚠ Тут, а не в EF, з тієї ж причини, що й `IX_CalculationResult_Version` (`ps_ByPeriodKey`).
+-- ⚠ `Value` в INCLUDE: міграція, що змінює тип `calc.CalculationResult.Value`, мусить зняти
+-- й поставити назад і цей індекс (помилка 5074), як уже робить з `IX_CalculationResult_Lookup`.
+-- На заповненій базі — офлайн-побудова (Standard без ONLINE), у `-Upgrade` це вікно обслуговування.
+IF OBJECT_ID(N'calc.CalculationResult', N'U') IS NOT NULL
+   AND NOT EXISTS (SELECT 1 FROM sys.indexes
+                   WHERE object_id = OBJECT_ID(N'calc.CalculationResult')
+                     AND name = N'IX_CalculationResult_DocRun')
+    CREATE NONCLUSTERED INDEX IX_CalculationResult_DocRun
+        ON calc.CalculationResult (PeriodKey, DocumentId, CalculationRunId)
+        INCLUDE (MethodologyVersionId, OutputCode, SourceRowKey, Value, UnitId, SubstanceEntryId)
+        ON ps_ByPeriodKey (PeriodKey);
+GO
+
 -- ── Повернення довіри зовнішнім ключам ───────────────────────────────────
 --
 -- ⛔ Перебудова кластерного індексу через `DROP_EXISTING` знімає з зовнішніх
