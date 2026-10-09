@@ -37,7 +37,8 @@
     ⚠ Без -ServiceAccount служби реєструються під LocalSystem, але НЕ
     стартують (EcrServiceAutoStart/EcrWorkerAutoStart умовні на
     SERVICE_ACCOUNT) і мають тип запуску Manual (L10-03) — саме так і в CI,
-    де SQL для старту служб немає.
+    де SQL для старту служб немає. З -ServiceAccount служби теж не стартують:
+    START_SERVICES скрипт не передає (R5-U1/U1-01).
 #>
 [CmdletBinding()]
 param(
@@ -288,13 +289,29 @@ Test-Case 'S3. Служба EcrWorker умовна, --supervisor, бінарни
     if ($comp[0][2] -ne $exe[0][0]) { throw "KeyPath компонента '$($comp[0][2])' — не Ecr.Worker.exe ('$($exe[0][0])')" }
 }
 
-Test-Case 'S4. Старт EcrWorker — лише за WORKER_ENABLED=1 і SERVICE_ACCOUNT' {
+Test-Case 'S4. Старт EcrWorker — лише за WORKER_ENABLED=1, SERVICE_ACCOUNT і START_SERVICES=1' {
     # Event: 0x1 = Start при установці.
     $ctl = Get-MsiRows "SELECT ``Component_``, ``Event`` FROM ``ServiceControl`` WHERE ``Name`` = 'EcrWorker'" 2
     $starts = @($ctl | Where-Object { ([int] $_[1] -band 0x1) -ne 0 })
     if ($starts.Count -ne 1) { throw "ServiceControl зі стартом EcrWorker: $($starts.Count)" }
     $cond = (Get-MsiRows "SELECT ``Condition`` FROM ``Component`` WHERE ``Component`` = '$($starts[0][0])'" 1)[0][0]
-    if ($cond -notmatch 'WORKER_ENABLED' -or $cond -notmatch 'SERVICE_ACCOUNT') { throw "умова старту '$cond'" }
+    if ($cond -notmatch 'WORKER_ENABLED' -or $cond -notmatch 'SERVICE_ACCOUNT' -or $cond -notmatch 'START_SERVICES\s*=\s*"1"') { throw "умова старту '$cond'" }
+}
+
+# ⛔ R5-U1/U1-01: служба, стартована всередині msiexec без Environment (рядок
+# підключення й відбиток DP пише deploy-ecr.ps1 лише ПІСЛЯ msiexec), падає →
+# Error 1920 → відкат установки. Кожен рядок ServiceControl зі стартом — лише
+# в компоненті з умовою START_SERVICES = "1".
+Test-Case 'S4a. Старт будь-якої служби під час msiexec — лише за START_SERVICES=1 (U1-01)' {
+    $ctl = Get-MsiRows 'SELECT `Component_`, `Event`, `Name` FROM `ServiceControl`' 3
+    $starts = @($ctl | Where-Object { ([int] $_[1] -band 0x1) -ne 0 })
+    if ($starts.Count -lt 2) { throw "ServiceControl зі стартом: $($starts.Count), очікували EcrApi і EcrWorker" }
+    foreach ($row in $starts) {
+        $cond = (Get-MsiRows "SELECT ``Condition`` FROM ``Component`` WHERE ``Component`` = '$($row[0])'" 1)[0][0]
+        if ($cond -notmatch 'START_SERVICES\s*=\s*"1"') { throw "старт $($row[2]) у компоненті з умовою '$cond' — без START_SERVICES" }
+    }
+    $secure = Get-MsiRows "SELECT ``Value`` FROM ``Property`` WHERE ``Property`` = 'SecureCustomProperties'" 1
+    if (($secure[0][0] -split ';') -notcontains 'START_SERVICES') { throw 'START_SERVICES не в SecureCustomProperties' }
 }
 
 Test-Case 'S5. EcrApi — безумовна, як і раніше' {
@@ -382,10 +399,9 @@ Test-Case '1. Чиста установка' {
     if ($w.PathName -notmatch 'Ecr\.Worker\.exe"?\s+--supervisor') { throw "PathName = $($w.PathName)" }
     $api = Get-CimInstance Win32_Service -Filter "Name='EcrApi'"
     if ($w.StartName -ne $api.StartName) { throw "обліковий запис EcrWorker '$($w.StartName)' ≠ EcrApi '$($api.StartName)'" }
-    # Без облікового запису служби не стартують (§1.4) — і воркер теж.
-    if (-not $ServiceAccount) {
-        foreach ($s in $api, $w) { if ($s.State -ne 'Stopped') { throw "$($s.Name) у стані $($s.State) без SERVICE_ACCOUNT, очікували Stopped" } }
-    }
+    # Без START_SERVICES=1 служби під час msiexec не стартують — ні без облікового запису (§1.4),
+    # ні з ним (R5-U1/U1-01: старт — крок 6 deploy-ecr.ps1, після запису Environment).
+    foreach ($s in $api, $w) { if ($s.State -ne 'Stopped') { throw "$($s.Name) у стані $($s.State) після msiexec без START_SERVICES, очікували Stopped" } }
     $exe = ($w.PathName -replace '^"([^"]+)".*$', '$1')
     if (-not (Test-Path $exe)) { throw "бінарника служби немає на диску: $exe" }
     Assert-EcrFoldersProtected

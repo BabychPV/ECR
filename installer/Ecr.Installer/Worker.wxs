@@ -91,9 +91,11 @@
         SERVICE_ACCOUNT = служба зареєстрована, але не запущена й Manual — та сама
         документована поведінка, що в EcrApi (10-installer.md §1.4, L10-03).
         ⚠ Явний GUID: компонент без File (WIX0230).
+        ⛔ R5-U1/U1-01: і лише за START_SERVICES=1 — без Environment (рядок
+        підключення) старт усередині msiexec дає Error 1920 і відкат установки.
       -->
       <Component Id="EcrWorkerAutoStart" Guid="e5a0c7d3-1f94-4b2e-8d6a-47c9b3f10e82"
-                 Condition="WORKER_ENABLED = &quot;1&quot; AND SERVICE_ACCOUNT" Transitive="yes">
+                 Condition="WORKER_ENABLED = &quot;1&quot; AND SERVICE_ACCOUNT AND START_SERVICES = &quot;1&quot;" Transitive="yes">
         <ServiceControl Id="EcrWorkerServiceStart" Name="EcrWorker" Start="install" Wait="yes" />
       </Component>
 

@@ -572,6 +572,7 @@ msiexec /i Ecr.msi /qn /l*v install.log SERVICE_ACCOUNT=DOMAIN\ecr-svc$ APP_PORT
 | `APP_PORT` | ні | `5000` | порт Kestrel і правила брандмауера |
 | `INSTALLFOLDER` | ні | `C:\Program Files\ECR\Api` | |
 | `WORKER_ENABLED` | ні | `0` \| `1` | служба `EcrWorker` (§1.6). Типово `1` — встановлюється (з I2-2). **Не запам'ятовується**: `0` передавати на кожній установці й оновленні |
+| `START_SERVICES` | ні | `1` | ✎ R5-U1/U1-01: стартувати служби **під час** `msiexec` (лише разом із `SERVICE_ACCOUNT`). Типово — **не стартувати**: рядок підключення й відбиток DP живуть в `Environment` служби, якого на свіжому сервері ще немає, а `MajorUpgrade` його стирає; служба без них падає до звіту SCM → `Error 1920` → відкат усієї установки. `deploy-ecr.ps1` властивість не передає й стартує служби сам на кроці 6, після запису `Environment`. Ставити `1` лише тоді, коли `Environment` служб уже заповнено |
 
 Рядок підключення й пароль bootstrap-адміністратора — **не властивості MSI**
 (`SQL_CONNECTION` було прибрано, Q-214: заявлена, але ніким не читана
@@ -613,7 +614,7 @@ msiexec /x {ProductCode} /qn
 
 | # | Сценарій | Команда | Очікуваний результат |
 |---:|---|---|---|
-| 1 | Чиста установка | `/i /qn SERVICE_ACCOUNT=...` | файли на місці; служба `EcrApi` існує, `Running`, `Delayed Auto`; правило брандмауера є |
+| 1 | Чиста установка | `/i /qn SERVICE_ACCOUNT=...` | файли на місці; служба `EcrApi` існує, `Delayed Auto`, ✎ R5-U1/U1-01: **`Stopped`** (без `START_SERVICES=1` MSI не стартує — `Environment` ще порожній; старт — `deploy-ecr.ps1`, крок 6); правило брандмауера є |
 | 2 | Установка без облікового запису | `/i /qn` | служба **зареєстрована, але не запущена**; помилки немає (§1.4) — **підтверджено реальним прогоном** (`Q-212`): до фіксу падало з `Error 1920` (служба намагалась стартувати під `LocalSystem` і не діставала до SQL), після фіксу — чисто |
 | 3 | Установка без прав адміністратора | `/i` не з-під адміністратора | зупинка на `Launch` із зрозумілим текстом, **жодних змін у системі** |
 | 4 | Оновлення `1.0.0 → 1.1.0` | `/i` нового MSI | служба зупинена, файли замінені, служба піднята; **конфіг не змінився**; одна запис в «Програмах» |
@@ -628,8 +629,8 @@ msiexec /x {ProductCode} /qn
 | 13 | Установка на Windows Server 2012 (не R2) | `/i` | зупинка на `Launch`, зрозумілий текст |
 | 14 | Перезавантаження сервера | `Restart-Computer` | служба піднялася сама, після SQL Server (відкладений старт) |
 | 15 | Пароль не в лозі | `/i /l*v log.txt SERVICE_PASSWORD=...` | `Select-String` по логу **не знаходить** пароля |
-| W0 | Установка без `WORKER_ENABLED` | `/i /qn SERVICE_ACCOUNT=...` | ✎ I2-2: `EcrWorker` **є** (типове `1`), `ImagePath` `…\Ecr.Worker.exe" --supervisor`, обліковий запис = `EcrApi`, `Running` |
-| W1 | Вимкнути воркер тим самим MSI | `/i /qn REINSTALL=ALL REINSTALLMODE=vomus WORKER_ENABLED=0 SERVICE_ACCOUNT=...` | `EcrWorker` знято; `EcrApi` на місці й працює |
+| W0 | Установка без `WORKER_ENABLED` | `/i /qn SERVICE_ACCOUNT=...` | ✎ I2-2: `EcrWorker` **є** (типове `1`), `ImagePath` `…\Ecr.Worker.exe" --supervisor`, обліковий запис = `EcrApi`, `Stopped` до `deploy-ecr.ps1` (U1-01) |
+| W1 | Вимкнути воркер тим самим MSI | `/i /qn REINSTALL=ALL REINSTALLMODE=vomus WORKER_ENABLED=0 SERVICE_ACCOUNT=...` | `EcrWorker` знято; `EcrApi` на місці (стартувати — `Start-Service EcrApi`: без `START_SERVICES=1` MSI служб не стартує, U1-01) |
 | W2 | Увімкнути назад тим самим MSI | те саме з `WORKER_ENABLED=1` | `EcrWorker` зареєстровано |
 | W3 | Оновлення БЕЗ `WORKER_ENABLED` | `/i` нового MSI (попередня версія — будь-яка, зокрема без воркера) | ✎ I2-2: `EcrWorker` **є** — до I2-2 тут його знімало; ⛔ `Environment` служби **НЕ переживає** `MajorUpgrade` (✎ 2026-09-30, перевірено джобом `msi-install (windows)`, D3: тестовий маркер у `Environment` `EcrApi` зник, run 36676739674) — після оновлення **обов'язково** повторити `deploy-ecr.ps1` (він пише `Environment` кроками 4–5 щоразу): без цього Api лишається на типовому Quartz/`InProcess` без рядка підключення, а `EcrWorker` стоїть без роботи (безпечно, але режим D-216 не діє) |
 | W4 | Оновлення з `WORKER_ENABLED=0` | `/i` нового MSI | `EcrWorker` знято; `deploy-ecr.ps1 -DisableWorker` попереджає заздалегідь і перемикає Api на `InProcess` |

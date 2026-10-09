@@ -102,6 +102,41 @@ public sealed class InstallerSecurityTests
         Assert.Equal("no", (string?)customAction.Attribute("Impersonate"));
     }
 
+    /// <remarks>
+    /// R5-U1/U1-01: служба, стартована всередині <c>msiexec</c>, ще не має Environment (рядок
+    /// підключення й відбиток DP <c>deploy-ecr.ps1</c> пише ПІСЛЯ MSI) — падає до звіту SCM →
+    /// <c>Error 1920</c> → відкат установки. Старт під час MSI — лише за явним <c>START_SERVICES=1</c>,
+    /// який скрипт розгортання не передає. Мутація (CI, локально не запускалась): прибрати
+    /// <c>START_SERVICES</c> з умови будь-якого компонента зі стартом → тест червоний.
+    /// </remarks>
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    [InlineData("Service.wxs")]
+    [InlineData("Worker.wxs")]
+    public void MSI_стартує_службу_лише_за_явним_START_SERVICES(string fileName)
+    {
+        var starts = Load(fileName).Descendants(Wix + "ServiceControl")
+            .Where(c => (string?)c.Attribute("Start") is "install" or "both")
+            .ToList();
+        Assert.NotEmpty(starts);
+        foreach (var start in starts)
+        {
+            var component = start.Ancestors(Wix + "Component").First();
+            var condition = (string?)component.Attribute("Condition") ?? string.Empty;
+            Assert.Contains("START_SERVICES = \"1\"", condition, StringComparison.Ordinal);
+            Assert.Contains("SERVICE_ACCOUNT", condition, StringComparison.Ordinal);
+        }
+
+        var property = Load("Package.wxs").Descendants(Wix + "Property")
+            .Single(p => (string?)p.Attribute("Id") == "START_SERVICES");
+        Assert.Equal("yes", (string?)property.Attribute("Secure"));
+        Assert.Null(property.Attribute("Value"));   // типово — не стартувати
+
+        var deploy = File.ReadAllLines(Path.Combine(SourceTree.Root, "tools", "deploy-ecr.ps1"));
+        Assert.DoesNotContain(deploy, line => !line.TrimStart().StartsWith('#') && line.Contains("START_SERVICES", StringComparison.Ordinal));
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     [Trait(TestCategories.Category, TestCategories.Architecture)]

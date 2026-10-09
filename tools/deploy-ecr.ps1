@@ -1695,6 +1695,9 @@ if (-not $MsiPath) {
     }
 }
 
+# ⛔ R5-U1/U1-01: START_SERVICES НЕ передається НІКОЛИ — MSI служб не стартує,
+# бо їх Environment (рядок підключення, відбиток DP) з'являється лише на кроці 4;
+# старт усередині msiexec = Error 1920 = відкат установки. Старт — крок 6.
 $msiArgs       = @('/i', "`"$MsiPath`"", '/qn', '/l*v', 'ecr-install.log')
 $msiArgsShown  = $msiArgs.Clone()
 if ($ServiceAccount) {
@@ -1938,10 +1941,13 @@ if (-not $ServiceAccount) {
     }
 }
 else {
-    # ⛔ БЕЗУМОВНИЙ перезапуск, не "старт, якщо не Running": MSI (Q-212)
-    # стартує службу ПІД ЧАС msiexec, ДО того, як цей скрипт встиг записати
-    # секрети кроком 4 — щойно записане оточення побачить лише СВІЖИЙ запуск
-    # процесу, не вже працюючий.
+    # ⛔ R5-U1/U1-01: MSI служб НЕ стартує (START_SERVICES крок 3 не передає):
+    # стартована всередині msiexec служба без Environment (рядок підключення,
+    # відбиток DP — їх крок 4 пише ПІСЛЯ msiexec) падала до звіту SCM →
+    # Error 1920 → відкат усієї установки. Старт — тут, після кроків 4–5.
+    # Restart-Service, а не «старт, якщо не Running»: на випадок, коли служба
+    # все ж працює (ручний REINSTALL зі START_SERVICES=1 перед цим скриптом),
+    # щойно записане оточення побачить лише СВІЖИЙ процес.
     $svc = Get-Service -Name EcrApi -ErrorAction SilentlyContinue
     if ($svc -and $PSCmdlet.ShouldProcess('EcrApi', 'Restart-Service')) {
         Restart-Service -Name EcrApi -Force
@@ -1950,8 +1956,8 @@ else {
         Start-Service -Name EcrApi
     }
 
-    # Воркер — з тієї ж причини безумовний перезапуск: MSI міг підняти його
-    # до того, як крок 4 записав рядок підключення.
+    # Воркер — з тієї ж причини безумовний перезапуск (MSI його не стартує, U1-01;
+    # Restart-Service зупиненої служби просто стартує її).
     if ($workerEnabled -and $PSCmdlet.ShouldProcess('EcrWorker', 'Restart-Service')) {
         $worker = Get-Service -Name EcrWorker -ErrorAction SilentlyContinue
         if (-not $worker) { throw 'Служби EcrWorker немає після msiexec з WORKER_ENABLED=1 — див. ecr-install.log.' }

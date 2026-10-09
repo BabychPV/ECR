@@ -1601,10 +1601,14 @@ Restart-Service EcrApi
 
 ```powershell
 msiexec /i Ecr.msi /qn /l*v worker-off.log REINSTALL=ALL REINSTALLMODE=vomus WORKER_ENABLED=0 SERVICE_ACCOUNT=DOMAIN\ecr-svc$
+Start-Service EcrApi
 ```
 
 ⚠ `SERVICE_ACCOUNT` — той самий, що при установці: властивості MSI не
 запам'ятовуються, і REINSTALL без нього перереєструє службу під `LocalSystem`.
+
+⚠ R5-U1/U1-01: MSI служб не стартує (без `START_SERVICES=1`), тож `EcrApi`,
+зупинену переустановкою, стартуйте самі — `Start-Service EcrApi` вище.
 
 ### 10.2. Увімкнути назад
 

@@ -269,6 +269,7 @@ msiexec /i Ecr.msi /qn /l*v install.log SERVICE_ACCOUNT=DOMAIN\ecr-svc$ APP_PORT
 | Властивість | Обов'язкова | Значення | Примітка |
 |---|---|---|---|
 | `SERVICE_ACCOUNT` | ні | `DOMAIN\ecr-svc$` | порожньо — служба зареєстрована, але не запущена |
+| `START_SERVICES` | ні | `1` | стартувати службу під час `msiexec`; типово — ні (U1-01): без `Environment`, який пише `deploy-ecr.ps1`, служба падає → `Error 1920` → відкат |
 | `SERVICE_PASSWORD` | лише не-gMSA | пароль | не потрапляє в лог MSI |
 | `APP_PORT` | ні | `5000` | порт Kestrel і правила брандмауера |
 | `INSTALLFOLDER` | ні | `C:\Program Files\ECR\Api` | |
