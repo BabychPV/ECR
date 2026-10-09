@@ -188,7 +188,7 @@ public sealed class CalculationResultStore(EcrDbContext db, IClock clock, StaleC
         List<(CalculationOutput Output, CalculationTraceStep Step)> steps,
         CancellationToken ct)
     {
-        var nextId = await ReserveStepIdRangeAsync(steps.Count, ct).ConfigureAwait(false);
+        var nextId = await ReserveStepIdRangeAsync(periodKey, steps.Count, ct).ConfigureAwait(false);
         var results = PendingResults(calculationRunId);
 
         foreach (var (output, step) in steps)
@@ -750,13 +750,26 @@ public sealed class CalculationResultStore(EcrDbContext db, IClock clock, StaleC
     /// до MAX спалюються одним резервуванням — один раз на базу, далі
     /// послідовність завжди попереду.
     /// </para>
+    /// <para>
+    /// ⛔ D2-06: MAX — лише в партиції ПЕРІОДУ запису (<c>WHERE PeriodKey = @p</c>). Доти
+    /// <c>MAX(Id)</c> ішов по всій <c>calc.CalculationStep</c>: <c>Id</c> не провідна колонка
+    /// жодного індексу (<c>PK (PeriodKey, Id)</c>, таблиця партиціонована за <c>PeriodKey</c>), тож
+    /// кожен запис трейсу (прив'язка × документ × період, з кожної гілки оркестратора) сканував
+    /// усі партиції. Звуження коректне, бо унікальність потрібна лише в межах ключа
+    /// <c>(PeriodKey, Id)</c>: старий Id іншого періоду з нашим не зіткнеться. Тепер це один
+    /// seek у кінець діапазону PK. Міграції немає.
+    /// </para>
     /// </remarks>
-    private async Task<long> ReserveStepIdRangeAsync(int count, CancellationToken ct)
+    /// <param name="periodKey">Період (партиція), у яку пишуться кроки.</param>
+    /// <param name="count">Скільки Id потрібно.</param>
+    /// <param name="ct">Токен скасування.</param>
+    private async Task<long> ReserveStepIdRangeAsync(int periodKey, int count, CancellationToken ct)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(count);
 
         var legacyMax = await db.CalculationSteps
             .AsNoTracking()
+            .Where(s => s.PeriodKey == periodKey)
             .Select(s => (long?)s.Id)
             .MaxAsync(ct)
             .ConfigureAwait(false) ?? 0;
