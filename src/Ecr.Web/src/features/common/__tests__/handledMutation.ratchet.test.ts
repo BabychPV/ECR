@@ -62,7 +62,7 @@ function unhandledShown(text: string): string[] {
     if (/\bonError\b|\bhandled\b/.test(optionsAt(code, match))) continue;
 
     const name = match[1] ?? '';
-    if (new RegExp(`\b${name}\.(error|isError)\b`).test(code)) found.push(name);
+    if (new RegExp(String.raw`\b${name}\.(error|isError)\b`).test(code)) found.push(name);
   }
 
   return found;
@@ -89,9 +89,9 @@ function consumersShowing(text: string, hook: string): string[] {
   const code = codeOf(text);
   const shown: string[] = [];
 
-  for (const match of code.matchAll(new RegExp(`const\s+(\w+)\s*=\s*${hook}\(`, 'g'))) {
+  for (const match of code.matchAll(new RegExp(String.raw`const\s+(\w+)\s*=\s*${hook}\(`, 'g'))) {
     const name = match[1] ?? '';
-    if (new RegExp(`\b${name}\.(error|isError)\b`).test(code)) shown.push(name);
+    if (new RegExp(String.raw`\b${name}\.(error|isError)\b`).test(code)) shown.push(name);
   }
 
   return shown;
