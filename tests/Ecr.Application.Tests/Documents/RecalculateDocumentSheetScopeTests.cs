@@ -127,6 +127,50 @@ public sealed class RecalculateDocumentSheetScopeTests
             .EnqueueCoalescedAsync<IRecalculationJob>(default!, default, default);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-6.14")]
+    public async Task Recalculate_whole_document_with_denied_sheet_is_refused_without_state_oracle()
+    {
+        // N1-06: перерахунок усього документа пише в таблиці схованого аркуша, а 202/4221 розкривали б його
+        // стан. Однакова 403 — і коли схований аркуш у чернетці (раніше 202), і коли подані ВСІ аркуші
+        // (раніше 4221 sheetsSubmitted); нічого не ставиться в чергу.
+        var draft = Arrange(submittedSheet: null, hiddenSheet: 1);
+        var submitted = Arrange(submittedSheet: 1, hiddenSheet: 1, alsoSubmittedSheet: 3);
+
+        var inDraft = await Assert.ThrowsAsync<AccessDeniedException>(
+            () => draft.Handler.HandleAsync(Document, new PeriodKey(Period), sheetDefId: null, CancellationToken.None));
+        var inSubmitted = await Assert.ThrowsAsync<AccessDeniedException>(
+            () => submitted.Handler.HandleAsync(Document, new PeriodKey(Period), sheetDefId: null, CancellationToken.None));
+
+        Assert.Equal("ECR-AUTH-0403", inDraft.ErrorCode);
+        Assert.Equal("err.ECR-AUTH-0403.recalcNeedsFullRead", inDraft.Details?["messageKey"]);
+        Assert.Equal(inDraft.ErrorCode, inSubmitted.ErrorCode);
+        Assert.Equal(inDraft.Details?["messageKey"], inSubmitted.Details?["messageKey"]);
+        Assert.Equal(inDraft.Message, inSubmitted.Message);
+
+        foreach (var fixture in new[] { draft, submitted })
+        {
+            await fixture.Jobs.DidNotReceiveWithAnyArgs()
+                .EnqueueCoalescedAsync<IRecalculationJob>(default!, default, default);
+            await fixture.Jobs.DidNotReceiveWithAnyArgs()
+                .EnqueueExclusiveAsync<IRecalculationJob>(default!, default, default);
+        }
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-6.14")]
+    public async Task Перерахунок_усього_документа_без_схованих_аркушів_не_зачіпається_перевіркою_читання()
+    {
+        // Контроль: читач без заборон на аркуші склад документа перераховує як і раніше.
+        var fixture = Arrange(submittedSheet: null, hiddenSheet: null);
+
+        var jobId = await fixture.Handler.HandleAsync(Document, new PeriodKey(Period), sheetDefId: null, CancellationToken.None);
+
+        Assert.Equal("job-1", jobId);
+    }
+
     private static Fixture Arrange(
         int? submittedSheet, int? hiddenSheet, PeriodState periodState = PeriodState.Open, int? alsoSubmittedSheet = null)
     {

@@ -132,6 +132,40 @@ public sealed class RecalculateDocumentHandler(
                 .ConfigureAwait(false);
         }
 
+        // ⛔ N1-06: перерахунок УСЬОГО документа (`sheetDefId = null`) пише і в таблиці схованого від
+        // читача аркуша, а відповідь (202/4221) за станом цього аркуша розкривала б його стан. Роль,
+        // що не бачить хоч одного аркуша складу, цілий документ не перераховує: та сама відмова
+        // («потрібне повне читання») і ДО перевірки стану, тож у Draft і в Submitted вона однакова.
+        // Область одного аркуша (вище) відсікається `RequireSheetVisibleAsync`.
+        IReadOnlyList<int>? included = null;
+        if (sheetDefId is null)
+        {
+            included = await documents.GetIncludedSheetIdsAsync(documentId, ct).ConfigureAwait(false);
+
+            if (DocumentSheetVisibility.HasRestrictions(profile))
+            {
+                var scope = (await access.ReadScopeAsync(profile, documentId, ct).ConfigureAwait(false))
+                    .InPeriod(periodKey);
+
+                // ⚠ Склад невідомий (рядків `doc.DocumentSheet` немає) — задача рахує всі таблиці документа,
+                // тож консервативно: заборона на будь-який аркуш структури відмовляє.
+                var hasHidden = included is { Count: > 0 }
+                    ? included.Any(id => !scope.CanReadSheet(id))
+                    : scope.HiddenSheetIds().Count > 0;
+
+                if (hasHidden)
+                {
+                    throw new Errors.AccessDeniedException(
+                        "ECR-AUTH-0403",
+                        $"Перерахунок усього документа потребує читання всіх його аркушів: {Permission}.",
+                        new Dictionary<string, object?>
+                        {
+                            ["messageKey"] = "err.ECR-AUTH-0403.recalcNeedsFullRead",
+                        });
+                }
+            }
+        }
+
         // ⛔ Стан періоду і робочого процесу — ДО черги (ФВ-9.7, ФВ-9.17).
         // Погодження на перерахунок закритого періоду цей маршрут не приймає
         // взагалі: його оформлює перерахунок ПРОЄКТУ
@@ -171,8 +205,6 @@ public sealed class RecalculateDocumentHandler(
             }
             else
             {
-                var included = await documents.GetIncludedSheetIdsAsync(documentId, ct).ConfigureAwait(false);
-
                 // ⚠ Склад невідомий (рядків `doc.DocumentSheet` немає) — поводимось як раніше: будь-який
                 // поданий аркуш відхиляє, а не пропускається (консервативно; задача перевірить за екземплярами).
                 submitted = included is { Count: > 0 }
