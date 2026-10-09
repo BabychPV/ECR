@@ -1,4 +1,4 @@
-﻿import type { JSX, ReactNode } from 'react';
+﻿import { useState, type JSX, type ReactNode } from 'react';
 import { Box, Button, Card, Group, Stack, Text, Title } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
@@ -175,9 +175,22 @@ export function HealthPage(): JSX.Element {
     queryFn: () => apiFetch<SystemFacts>('/api/v1/health/facts'),
   });
 
+  // N4-07: `refetch()` не кидає — відмову несе `isError` результату; тост «перевірено» лише коли ВСІ три
+  // запити вдалися, а повторне натискання, поки перевірка триває, нічого не запускає.
+  const [checking, setChecking] = useState(false);
   const checkNow = async (): Promise<void> => {
-    await Promise.all([ready.refetch(), db.refetch(), facts.refetch()]);
-    showDone(t('health.checkedNow'));
+    if (checking) return;
+    setChecking(true);
+
+    try {
+      const results = await Promise.all([ready.refetch(), db.refetch(), facts.refetch()]);
+      const failed = results.find((result) => result.isError);
+
+      if (failed === undefined) showDone(t('health.checkedNow'));
+      else showApiError(failed.error);
+    } finally {
+      setChecking(false);
+    }
   };
 
   const report = ready.data?.report;
@@ -196,7 +209,7 @@ export function HealthPage(): JSX.Element {
            розбіжних копій такого рішення (перелік — у шапці
            `StatusBadge.tsx`). */
         badge={report === undefined ? null : <StatusBadge kind="health" state={report.status} />}
-        primary={{ label: t('health.checkNow'), onClick: () => void checkNow() }}
+        primary={{ label: t('health.checkNow'), onClick: () => void checkNow(), disabled: checking }}
         secondary={[
           {
             label: t('health.copyDiagnostics'),
