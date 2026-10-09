@@ -282,6 +282,15 @@
     вторинній репліці AG). Відповідальність за копію — на тому, хто
     запускає: відкат (runbook §9) без неї неможливий.
 
+.PARAMETER SkipOtherNodesCheck
+    ⛔ R5-U1/U1-02: без цього прапорця крок 2 (до зупинки служб і до першого
+    sqlcmd зі зміною схеми) відмовляє, якщо до -Database під'єднано застосунок
+    (SqlClient або Application Name ECR*) з ІНШОГО хоста: за D-32 (≥2 вузли)
+    скрипт зупиняє служби лише на цій машині, і старий код решти вузлів писав
+    би в нову схему. Прапорець — лише коли такі сеанси точно не ECR (інша
+    програма на SqlClient); відповідальність за зупинку всіх вузлів — на тому,
+    хто запускає. Нічого не дає з -SkipSchema (крок 2 тоді не виконується).
+
 .PARAMETER BackupMaxAgeHours
     Найстаріша прийнятна повна чи диференційна копія -Database за
     msdb.dbo.backupset, у годинах (типово 24). Перевіряється лише при
@@ -392,6 +401,7 @@ param(
     [ValidatePattern('^\d+\.\d+\.\d+$')] [string] $Version,
     [switch] $SkipSchema,
     [switch] $SkipBackupCheck,
+    [switch] $SkipOtherNodesCheck,
     [ValidateRange(1, 720)] [int] $BackupMaxAgeHours = 24,
     [switch] $FirstDeployment,
     [switch] $CreateDatabaseIfMissing,
@@ -1024,6 +1034,26 @@ function Stop-EcrServicesForSchema {
     return $stopped.ToArray()
 }
 
+# ⛔ R5-U1/U1-02 (аудит 2026-10-09): Stop-EcrServicesForSchema зупиняє служби лише
+# ЦІЄЇ машини. За D-32 (≥2 вузли) EcrApi/EcrWorker інших вузлів працювали б далі
+# старою версією на новій схемі (DROP TYPE TVP, ROLLBACK IMMEDIATE, задачі черги
+# нового формату). Тому до зупинки й до першого sqlcmd зі зміною — запит до
+# sys.dm_exec_sessions: сеанси застосунку (SqlClient / Application Name ECR*) з
+# ІНШИХ хостів до -Database. Чиста функція: рядки запиту → текст відмови або $null.
+# Повертає відмову ДО зупинки локальних служб — простою від відмови немає.
+function Get-ForeignEcrSessionProblem {
+    param(
+        [AllowNull()] [AllowEmptyCollection()] [string[]] $Rows,
+        [Parameter(Mandatory)] [string] $Database
+    )
+
+    $hosts = @(@($Rows) | Where-Object { $_ -and $_.Trim() } | ForEach-Object { $_.Trim() } | Sort-Object -Unique)
+    if (-not $hosts.Count) { return $null }
+    return ("До бази $Database під'єднано застосунок з інших вузлів: $($hosts -join ', '). Схему НЕ змінено й служби " +
+        "не зупинено. Зупиніть EcrWorker і EcrApi на КОЖНОМУ вузлі (D-32, runbook §8), запустіть скрипт знову, а решту " +
+        "вузлів оновлюйте потім з -SkipSchema. Якщо це не ECR (інша програма на SqlClient) — -SkipOtherNodesCheck.")
+}
+
 # ⛔ Чиста функція: чи потрібен .NET SDK цьому запуску. Його кличуть у двох місцях —
 # `build-msi.ps1` (коли -MsiPath не задано) і `dotnet ef migrations script` (крок 2,
 # коли схема не з пакета й немає -SkipSchema). Більше ніде: пакований запуск із
@@ -1620,6 +1650,27 @@ END
             '10-triggers.sql', '06-rcsi.sql'
         ))
         if ($FirstDeployment) { $scripts.Add('14-agent-jobs.sql') }
+
+        # ⛔ R5-U1/U1-02: інші вузли (D-32) — до зупинки локальних служб, лише читання.
+        if ($SkipOtherNodesCheck) {
+            Write-Host ("  ⚠ Сеанси інших вузлів не перевіряю (-SkipOtherNodesCheck): EcrWorker і EcrApi на КОЖНОМУ " +
+                "вузлі мають бути зупинені — за це відповідає той, хто запускає.") -ForegroundColor Yellow
+        }
+        else {
+            $foreignRows = Invoke-DeployQuery -TargetDb 'master' -Query (
+                "SET NOCOUNT ON; SELECT DISTINCT ISNULL(s.host_name, N'?') FROM sys.dm_exec_sessions AS s " +
+                "WHERE s.database_id = DB_ID(N'$($Database.Replace("'", "''"))') AND s.is_user_process = 1 " +
+                "AND s.session_id <> @@SPID AND ISNULL(s.host_name, N'') <> HOST_NAME() " +
+                "AND (s.program_name LIKE N'%SqlClient Data Provider%' OR s.program_name LIKE N'ECR%');")
+            if ($null -eq $foreignRows) {
+                Write-Host "  Сеанси застосунку з інших вузлів буде перевірено запитом до sys.dm_exec_sessions (-WhatIf: не виконується)." -ForegroundColor DarkGray
+            }
+            else {
+                $foreignProblem = Get-ForeignEcrSessionProblem -Rows $foreignRows -Database $Database
+                if ($foreignProblem) { throw $foreignProblem }
+                Write-Host "  Сеансів застосунку з інших вузлів до $Database немає." -ForegroundColor Green
+            }
+        }
 
         # ⛔ S2-04: служби зупинено ДО першого sqlcmd зі зміною схеми; піднімає їх крок 6.
         $stoppedForSchema = @(Stop-EcrServicesForSchema)
