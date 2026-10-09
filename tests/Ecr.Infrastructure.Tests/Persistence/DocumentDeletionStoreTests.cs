@@ -55,6 +55,54 @@ public sealed class DocumentDeletionStoreTests(SqlServerFixture sql)
         Assert.True(await check.TableRows.AnyAsync(r => r.TableInstanceId == doc.TableInstanceId));
     }
 
+    /// <remarks>
+    /// L10-06 (аудит 2026-10-09): під RCSI голе читання не бачить мапи, яку паралельна транзакція вже вставила, але ще не
+    /// закомітила, — видалення проходило перевірку й падало на FK_SEM_Document (547 → 500). Блокуюче читання має ЧЕКАТИ ту
+    /// вставку й дати 409. Мутація (CI): повернути <c>AnyAsync</c> без UPDLOCK/HOLDLOCK → видалення не блокується (перша
+    /// перевірка червона) або падає SqlException 547 замість DomainException.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Мапа_що_ще_не_закомічена_під_час_видалення_дає_409_а_не_FK_547()
+    {
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var doc = await builder.BuildAsync(columnCount: 1, rowCount: 1);
+        var entityId = await NewSourceEntityAsync(builder, "SEMR");
+
+        // «Паралельний» користувач: мапа вставлена, транзакція ще відкрита.
+        await using var pending = new SqlConnection(sql.ConnectionString);
+        await pending.OpenAsync();
+        await using var transaction = (SqlTransaction)await pending.BeginTransactionAsync();
+        await using (var insert = pending.CreateCommand())
+        {
+            insert.Transaction = transaction;
+            insert.CommandText =
+                "INSERT INTO ext.SourceEventMap (SourceEntityId, DocumentId, TableDefId, VolumeMode, IsActive) VALUES (@entity, @document, @table, 0, 1)";
+            insert.Parameters.AddWithValue("@entity", entityId);
+            insert.Parameters.AddWithValue("@document", doc.DocumentId);
+            insert.Parameters.AddWithValue("@table", doc.TableDefId);
+            await insert.ExecuteNonQueryAsync();
+        }
+
+        await using var db = builder.CreateContext();
+        var deletion = Task.Run(() => new DocumentDeletionStore(db).DeleteAsync(doc.DocumentId, CancellationToken.None));
+
+        // Видалення чекає на незавершену вставку, а не проходить повз неї.
+        await Task.Delay(TimeSpan.FromSeconds(3));
+        Assert.False(deletion.IsCompleted, "видалення пройшло повз незавершену вставку мапи — перевірка не блокує");
+
+        await transaction.CommitAsync();
+
+        var thrown = await Assert.ThrowsAsync<DomainException>(() => deletion);
+        Assert.Equal("ECR-DOC-0409", thrown.ErrorCode);
+        Assert.Equal("err.ECR-DOC-0409.deleteHasEventMap", thrown.Details!["messageKey"]);
+
+        await using var check = builder.CreateContext();
+        Assert.True(await check.Documents.AnyAsync(d => d.Id == doc.DocumentId));
+        Assert.True(await check.TableRows.AnyAsync(r => r.TableInstanceId == doc.TableInstanceId));
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage6)]
     [Trait(TestCategories.Category, TestCategories.Integration)]

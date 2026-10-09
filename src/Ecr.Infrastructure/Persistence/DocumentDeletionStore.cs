@@ -44,7 +44,23 @@ public sealed class DocumentDeletionStore(EcrDbContext db) : IDocumentDeletionSt
         // видалення падало на FK 547 уже посеред транзакції — і людина бачила
         // 500. Мапу мовчки не видаляємо (це чужа налаштована робота, не дані
         // документа): відмова 409 з причиною, документ лишається цілим.
-        if (await db.SourceEventMaps.AnyAsync(m => m.DocumentId == documentId, ct).ConfigureAwait(false))
+        //
+        // ⛔ L10-06 (аудит 2026-10-09): перевірка — З БЛОКУВАННЯМ (UPDLOCK, HOLDLOCK), а не
+        // голий `AnyAsync`. Під RCSI (06-rcsi.sql) звичайне читання бачить лише ЗАКОМІЧЕНІ рядки:
+        // мапа, яку паралельна транзакція вже вставила, але ще не завершила, лишалась невидимою,
+        // і видалення падало на FK_SEM_Document (547 → 500) посеред транзакції. Блокуюче читання
+        // чекає завершення тієї вставки і бачить її (→ 409), а діапазонне блокування не пускає
+        // нову мапу, доки транзакція видалення не завершиться (той самий прийом, що в
+        // LockWorkflowFactsAsync). ⚠ Індексу з провідним `DocumentId` у ext.SourceEventMap немає
+        // (лише UQ_SourceEventMap), тож діапазон — увесь скан таблиці конфігурації мапінгів; вона
+        // мала, а видалення чернетки — рідка дія, тож ціна — коротка пауза створення мап.
+        var hasEventMap = await db.SourceEventMaps
+            .FromSql($"SELECT * FROM ext.SourceEventMap WITH (UPDLOCK, HOLDLOCK) WHERE DocumentId = {documentId}")
+            .AsNoTracking()
+            .AnyAsync(ct)
+            .ConfigureAwait(false);
+
+        if (hasEventMap)
         {
             throw new DomainException(
                 ErrorCodes.DocumentSubmitted,
