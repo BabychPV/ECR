@@ -221,6 +221,29 @@ public sealed partial class CiPipelineTests
         Assert.Contains("exit 1", job, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData("smoke.yml")]
+    [InlineData("e2e-stand.yml")]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Smoke_і_e2e_запускаються_на_релізному_PR_у_main(string file)
+    {
+        // ⛔ X8-02 (R6): smoke і e2e-stand — єдині автоматичні проходи шляху користувача на
+        // живому процесі. Обов'язковими для `main` їх робить людина (ruleset); передумова —
+        // щоб на PR `rc/<дата>` → `main` вони ВЗАГАЛІ стартували. Тригер, що загубився при
+        // правці, лишив би обов'язкову перевірку в стані «expected» назавжди або, без
+        // ruleset, — тихо прибрав би єдиний наскрізний прогін релізу.
+        var workflow = File.ReadAllText(Path.Combine(Root(), ".github", "workflows", file))
+            .Replace("\r\n", "\n", StringComparison.Ordinal);
+
+        Assert.Matches(@"(?m)^  pull_request:\s*\n\s+branches:\s*\[[^\]]*\bmain\b", workflow);
+
+        if (file == "e2e-stand.yml")
+        {
+            Assert.Contains("startsWith(github.head_ref, 'rc/')", workflow, StringComparison.Ordinal);
+        }
+    }
+
     /// <summary>Завдання <c>ci.yml</c>, що йдуть на Windows-раннері.</summary>
     private static List<string> WindowsJobs(string workflow)
     {
