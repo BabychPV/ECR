@@ -98,6 +98,11 @@ public interface ICalculationResultStore
     /// тож викликати треба до <see cref="SwitchCurrentRunAsync"/> у тій самій транзакції. Рядки лише
     /// додаються в контекст — зберігає викликач. Трейс (кроки, входи) не переноситься: він лишається за
     /// прогоном, що його порахував.
+    /// <para>
+    /// ⛔ N2-04: понад стелю реалізації — <c>BusinessRuleException</c> <c>ECR-CALC-0422</c>
+    /// <c>err.ECR-CALC-0422.carryOverTooLarge</c>, а не мовчазне обрізання: прогін стає <c>Failed</c>, попередній
+    /// лишається актуальним.
+    /// </para>
     /// </remarks>
     public Task<int> CarryOverResultsAsync(
         long calculationRunId, long documentId, IReadOnlyCollection<int> methodologyIds, CancellationToken ct);

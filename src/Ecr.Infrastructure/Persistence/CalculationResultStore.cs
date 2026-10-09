@@ -1,3 +1,4 @@
+using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.Calculations;
@@ -541,7 +542,7 @@ public sealed class CalculationResultStore(EcrDbContext db, IClock clock, StaleC
                 ct)
             .ConfigureAwait(false);
 
-        var source = await db.CalculationResults
+        var sourceQuery = db.CalculationResults
             .AsNoTracking()
             .Where(r => r.DocumentId == documentId
                         && r.PeriodKey == periodKey
@@ -551,9 +552,30 @@ public sealed class CalculationResultStore(EcrDbContext db, IClock clock, StaleC
                             current => current.Id == r.CalculationRunId
                                        && current.Status == CalculationRun.CurrentStatus
                                        && (current.DocumentId == documentId
-                                           || (!hasDedicatedCurrent && current.DocumentId == null))))
+                                           || (!hasDedicatedCurrent && current.DocumentId == null))));
+
+        // ⛔ N2-04: понад стелю — відмова, а не мовчазне обрізання. Раніше `Take(MaxResults)` губив хвіст:
+        // прогін ставав актуальним, а частина чисел перенесених аркушів зникала з читання без жодної ознаки.
+        // Відмова валить прогін (`Failed`, текст власного винятку лягає в `ErrorMessage`), а попередній
+        // прогін лишається актуальним: перемикання (`SwitchCurrentRunAsync`) іде після переносу.
+        var total = await sourceQuery.CountAsync(ct).ConfigureAwait(false);
+        if (total > CarryOverMaxResults)
+        {
+            throw new BusinessRuleException(
+                "ECR-CALC-0422",
+                $"Перенос результатів документа {documentId} за період {periodKey} перевищує стелю: {total} рядків, дозволено {CarryOverMaxResults}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0422.carryOverTooLarge",
+                    ["documentId"] = documentId,
+                    ["periodKey"] = periodKey,
+                    ["count"] = total,
+                    ["max"] = CarryOverMaxResults,
+                });
+        }
+
+        var source = await sourceQuery
             .OrderBy(r => r.Id)
-            .Take(MaxResults)
             .ToListAsync(ct)
             .ConfigureAwait(false);
         if (source.Count == 0)
@@ -579,6 +601,10 @@ public sealed class CalculationResultStore(EcrDbContext db, IClock clock, StaleC
 
         return source.Count;
     }
+
+    /// <summary>Стеля результатів, що переносяться (<c>CarryOver</c>), на один документ і період; понад неї — відмова.</summary>
+    /// <remarks>Рядків стільки, скільки виходів × речовин × рядків таблиці; десятки тисяч — ознака хибної прив'язки.</remarks>
+    public const int CarryOverMaxResults = 50_000;
 
     /// <summary>Ключ каталогу причини: прогін не став актуальним, бо новіший уже актуальний.</summary>
     public const string SupersededByNewerKey = "jobs.calculationRunSupersededByNewer";
