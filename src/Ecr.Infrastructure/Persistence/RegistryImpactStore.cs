@@ -26,6 +26,11 @@ public sealed class RegistryImpactStore(EcrDbContext db) : IRegistryImpactStore
     /// Доти перелік показував кожен документ, що колись читав довідник, і перерахований документ
     /// лишався в ньому назавжди. Довідник без жодної правки (<c>DataChangedAt = null</c>) не зачепив нічого.
     /// </para>
+    /// <para>
+    /// ⛔ N2-03: «почався» міряється від <c>COALESCE(InputsAsOfUtc, StartedAt)</c> — прогін, що переніс результати
+    /// старішого прогону, лишає їх на довіднику того прогону. Інакше банер свідчив би «застаріло», а документа
+    /// в переліку для перерахунку не було б.
+    /// </para>
     /// </remarks>
     public async Task<IReadOnlyList<RegistryImpactRow>> ListImpactedAsync(
         int registryDefId, IReadOnlyCollection<int>? projectIds, int take, CancellationToken ct)
@@ -55,7 +60,8 @@ public sealed class RegistryImpactStore(EcrDbContext db) : IRegistryImpactStore
             join result in db.CalculationResults.AsNoTracking()
                 on use.SourceId equals result.MethodologyVersionId
             join run in db.CalculationRuns.AsNoTracking() on result.CalculationRunId equals run.Id
-            where run.Status == CalculationRun.CurrentStatus && run.StartedAt < changedAt
+            where run.Status == CalculationRun.CurrentStatus
+                  && (run.InputsAsOfUtc ?? run.StartedAt) < changedAt
             join document in Visible(projectIds) on result.DocumentId equals document.Id
             join period in db.Periods.AsNoTracking()
                 on new { document.ProjectId, result.PeriodKey }

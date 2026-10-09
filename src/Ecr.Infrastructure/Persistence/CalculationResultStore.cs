@@ -510,8 +510,10 @@ public sealed class CalculationResultStore(EcrDbContext db, IClock clock, StaleC
             return 0;
         }
 
+        // ⚠ ВІДСТЕЖУВАНИЙ запит: нижче прогону знижується `InputsAsOfUtc` (N2-03), а зберігає викликач одним
+        // `SaveChanges` разом із рядками переносу й перемиканням актуальності (`SwitchCurrentRunAsync` читає
+        // той самий відстежуваний екземпляр).
         var run = await db.CalculationRuns
-            .AsNoTracking()
             .FirstOrDefaultAsync(r => r.Id == calculationRunId, ct)
             .ConfigureAwait(false)
             ?? throw new InvalidOperationException($"Прогону {calculationRunId} не існує.");
@@ -581,6 +583,22 @@ public sealed class CalculationResultStore(EcrDbContext db, IClock clock, StaleC
         if (source.Count == 0)
         {
             return 0;
+        }
+
+        // ⛔ N2-03 / stale-for-B (D-324): перенесені числа лишаються на даних прогону-джерела, тож момент входів
+        // нового прогону не може бути пізнішим за момент входів джерела — інакше правка довідника між ними
+        // гасила б позначку застарілості. Береться `COALESCE(InputsAsOfUtc, StartedAt)` саме ДЖЕРЕЛА (а не лише
+        // його StartedAt): ланцюжок переносів A → B → C не губить найдавніший момент.
+        var sourceRunIds = source.Select(r => r.CalculationRunId).Distinct().ToList();
+        var sourceRuns = await db.CalculationRuns
+            .AsNoTracking()
+            .Where(r => sourceRunIds.Contains(r.Id))
+            .Select(r => new { r.StartedAt, r.InputsAsOfUtc })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+        foreach (var sourceRun in sourceRuns)
+        {
+            run.LimitInputsAsOf(sourceRun.InputsAsOfUtc ?? sourceRun.StartedAt);
         }
 
         var nextId = await ReserveResultIdRangeAsync(source.Count, ct).ConfigureAwait(false);

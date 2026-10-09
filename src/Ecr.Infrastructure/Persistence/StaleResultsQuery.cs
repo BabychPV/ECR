@@ -22,6 +22,12 @@ public sealed record StaleDocumentRow(long DocumentId, DateTime? Since);
 /// <c>aud.CellChange</c> є правка комірки цього документа за період ПІСЛЯ початку прогону, крім
 /// <c>Recalculation</c> (формули шаблону пишуть свої комірки всередині прогону).
 ///
+/// ⛔ N2-03 / stale-for-B (D-324): правка ДОВІДНИКА міряється від <c>COALESCE(InputsAsOfUtc, StartedAt)</c> прогону, а не від
+/// його старту: прогін, що переніс (<c>CarryOver</c>) результати з попереднього, лишає ці числа на довіднику старого прогону,
+/// і правка між двома прогонами не мусить гаснути. Правки КОМІРОК лишаються від <c>StartedAt</c> навмисно: перенесені
+/// аркуші подані й не редагуються, а власні аркуші прогін щойно перерахував — від давнішого моменту вони б лишалися
+/// «застарілими» після кожного перерахунку області.
+///
 /// ⚠ Правка довідника, який читає методологія (RT-25), теж рахується — але НЕ при фільтрі за автором
 /// (<c>byUserId</c>): довідник змінила не людина з <c>aud.CellChange</c>.
 ///
@@ -68,7 +74,7 @@ internal static class StaleResultsQuery
                        SELECT rd.DataChangedAt AS At
                          FROM cfg.RegistryDef AS rd
                         WHERE {hasBy} = 0
-                          AND rd.DataChangedAt > r.StartedAt
+                          AND rd.DataChangedAt > COALESCE(r.InputsAsOfUtc, r.StartedAt)
                           AND EXISTS (SELECT 1
                                         FROM cfg.RegistryUse AS u
                                         JOIN calc.CalculationResult AS cr2 ON cr2.MethodologyVersionId = u.SourceId

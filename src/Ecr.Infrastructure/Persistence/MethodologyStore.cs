@@ -472,6 +472,7 @@ public sealed class MethodologyStore(EcrDbContext db, int constantCap) : IMethod
             .SqlQuery<FreshnessRow>($"""
                 SELECT TOP (1)
                        r.Id AS RunId, r.StartedAt AS StartedAt,
+                       COALESCE(r.InputsAsOfUtc, r.StartedAt) AS InputsAsOf,
                        r.FinishedAt AS CalculatedAt,
                        (SELECT MAX(c.ChangedAt)
                           FROM aud.CellChange AS c
@@ -507,6 +508,7 @@ public sealed class MethodologyStore(EcrDbContext db, int constantCap) : IMethod
         var row = rows[0] with
         {
             StartedAt = DateTime.SpecifyKind(rows[0].StartedAt, DateTimeKind.Utc),
+            InputsAsOf = DateTime.SpecifyKind(rows[0].InputsAsOf, DateTimeKind.Utc),
             CalculatedAt = Utc(rows[0].CalculatedAt),
             InputsChangedAt = Utc(rows[0].InputsChangedAt),
         };
@@ -524,7 +526,7 @@ public sealed class MethodologyStore(EcrDbContext db, int constantCap) : IMethod
                 .SqlQuery<RegistryChangeRow>($"""
                     SELECT TOP (50) rd.Code AS Code, rd.DataChangedAt AS ChangedAt
                       FROM cfg.RegistryDef AS rd
-                     WHERE rd.DataChangedAt > {row.StartedAt}
+                     WHERE rd.DataChangedAt > {row.InputsAsOf}
                        AND EXISTS (SELECT 1
                                      FROM cfg.RegistryUse AS u
                                      JOIN calc.CalculationResult AS cr ON cr.MethodologyVersionId = u.SourceId
@@ -606,7 +608,13 @@ public sealed class MethodologyStore(EcrDbContext db, int constantCap) : IMethod
         => value is { } v ? DateTime.SpecifyKind(v, DateTimeKind.Utc) : null;
 
     /// <summary>Рядок запиту свіжості.</summary>
-    public sealed record FreshnessRow(long RunId, DateTime StartedAt, DateTime? CalculatedAt, DateTime? InputsChangedAt);
+    /// <remarks>
+    /// <c>InputsAsOf</c> — <c>COALESCE(InputsAsOfUtc, StartedAt)</c>: момент, відколи довідник вважається зміненим
+    /// (N2-03; прогін із перенесеними результатами мірить від давнішого моменту, ніж власний старт). Правки комірок
+    /// (<c>InputsChangedAt</c>) лишаються від <c>StartedAt</c>: власні аркуші прогін щойно перерахував.
+    /// </remarks>
+    public sealed record FreshnessRow(
+        long RunId, DateTime StartedAt, DateTime InputsAsOf, DateTime? CalculatedAt, DateTime? InputsChangedAt);
 
     /// <summary>Довідник, змінений після прогону (RT-25).</summary>
     public sealed record RegistryChangeRow(string Code, DateTime ChangedAt);

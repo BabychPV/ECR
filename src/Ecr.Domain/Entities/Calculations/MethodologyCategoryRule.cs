@@ -76,8 +76,8 @@ public sealed class MethodologyCategoryRule : Entity<int>
 
         var trimmed = expression.Trim();
 
-        // ⛔ L7-01 (AN-72): колонка calc.CategoryRule.Expression довжини не обмежує (HasMaxLength потребує
-        // міграції), тож межу тримає сутність: довший за формулу вираз не зберігається й не розбирається.
+        // ⛔ L7-01 (AN-72): довший за формулу вираз не зберігається й не розбирається. Колонку
+        // calc.CategoryRule.Expression обмежує і міграція AN80 (HasMaxLength = ця сама межа).
         if (trimmed.Length > MethodologyFormula.MaxExpressionLength)
         {
             throw new DomainException(
