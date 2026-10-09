@@ -7412,8 +7412,11 @@ USING (VALUES
     (N'coverageEvents.noData', N'en', N'Field {field} (mapping {mapId}): there are no usable points for the ended period. The cell was not updated and may still hold the value of an earlier run.', 1),
     -- COLL:an105-coverage ── кінець секції ──
     -- COLL:an105-recalc-state ── AN-105 / D2-03: стан аркуша чи періоду змінився під час перерахунку; ru/kz — порцією COLL:an105-recalc-state нижче ──
-    (N'err.ECR-CALC-0409.recalcStateChanged', N'en', N'While document {documentId} was being recalculated, a sheet was submitted or period {periodKey} was closed. The new results were not applied and the previous ones stay current; the recalculation repeats with the new state.', 1)
+    (N'err.ECR-CALC-0409.recalcStateChanged', N'en', N'While document {documentId} was being recalculated, a sheet was submitted or period {periodKey} was closed. The new results were not applied and the previous ones stay current; the recalculation repeats with the new state.', 1),
     -- COLL:an105-recalc-state ── кінець секції ──
+    -- COLL:an105-results-ceiling ── AN-105 / D2-05: актуальних результатів документа за період більше за стелю читання; ru/kz — порцією COLL:an105-results-ceiling нижче ──
+    (N'err.ECR-CALC-0422.resultsTooLarge', N'en', N'Document {documentId} has more than {max} calculation results for period {periodKey}. They are not shown partly, because a partial list would give wrong totals: check the methodology bindings (a binding on the wrong table multiplies rows).', 1)
+    -- COLL:an105-results-ceiling ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -18247,6 +18250,17 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:an105-recalc-state ── кінець секції ──
+
+-- COLL:an105-results-ceiling ── ru/kz: AN-105 / D2-05: актуальних результатів документа за період більше за стелю читання; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-CALC-0422.resultsTooLarge', N'ru', N'У документа {documentId} за период {periodKey} больше {max} результатов расчёта. Частично они не показываются, потому что неполный список дал бы неверные суммы: проверьте привязки методологий (привязка не к той таблице размножает строки).'),
+    (N'err.ECR-CALC-0422.resultsTooLarge', N'kz', N'{documentId} құжатында {periodKey} кезеңі үшін {max}-тан астам есептеу нәтижесі бар. Олар ішінара көрсетілмейді, өйткені толық емес тізім қате қосындылар берер еді: әдістемелердің байланыстыруларын тексеріңіз (басқа кестеге байланыстыру жолдарды көбейтеді).')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:an105-results-ceiling ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

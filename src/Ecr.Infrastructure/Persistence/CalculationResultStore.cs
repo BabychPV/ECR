@@ -627,12 +627,12 @@ public sealed class CalculationResultStore(EcrDbContext db, IClock clock, StaleC
     /// <summary>Ключ каталогу причини: прогін не став актуальним, бо новіший уже актуальний.</summary>
     public const string SupersededByNewerKey = "jobs.calculationRunSupersededByNewer";
 
-    /// <summary>Стеля вибірки результатів на один документ і період.</summary>
+    /// <summary>Стеля вибірки результатів на один документ і період; понад неї — відмова (D2-05).</summary>
     /// <remarks>
     /// Рядків стільки, скільки виходів × речовин × рядків таблиці; десятки
     /// тисяч — уже ознака того, що прив'язку поставили на не ту таблицю.
     /// </remarks>
-    private const int MaxResults = 50_000;
+    public const int MaxResults = 50_000;
 
     /// <inheritdoc />
     /// <remarks>
@@ -659,7 +659,16 @@ public sealed class CalculationResultStore(EcrDbContext db, IClock clock, StaleC
     /// документа є ВЛАСНИЙ актуальний прогін, читаємо ЛИШЕ з нього; інакше —
     /// з актуального прогону всього проєкту, як і раніше (документ, що ще
     /// ніколи не мав власного прогону, — типовий і сьогоднішній випадок).
+    ///
+    /// ⛔ D2-05: понад <see cref="MaxResults"/> — ВІДМОВА (<c>ECR-CALC-0422</c>
+    /// <c>resultsTooLarge</c>), а не мовчазне обрізання. Доти <c>Take(MaxResults)</c>
+    /// віддавав перші 50 000 за <c>SourceRowKey</c>: хвіст рядків зникав із сітки
+    /// (<c>CalculatedCellOverlay</c>), експорту Excel і сторінки результатів, а суми
+    /// за кодом виходу ставали заниженими — без жодної ознаки. Симетрично до
+    /// переносу (N2-04, <see cref="CarryOverMaxResults"/>). <c>Take(MaxResults + 1)</c> —
+    /// найдешевший спосіб знати, що рядків БІЛЬШЕ за стелю, а не рівно стільки.
     /// </remarks>
+    /// <exception cref="BusinessRuleException">Результатів документа за період більше за <see cref="MaxResults"/>.</exception>
     public async Task<IReadOnlyList<CalculationResultRow>> ReadCurrentAsync(
         long documentId, int periodKey, CancellationToken ct)
     {
@@ -683,7 +692,7 @@ public sealed class CalculationResultStore(EcrDbContext db, IClock clock, StaleC
                                        || (!hasDedicatedCurrent && run.DocumentId == null))))
             .OrderBy(r => r.SourceRowKey)
             .ThenBy(r => r.OutputCode)
-            .Take(MaxResults)
+            .Take(MaxResults + 1)
             .Select(r => new
             {
                 r.MethodologyVersionId,
@@ -695,6 +704,20 @@ public sealed class CalculationResultStore(EcrDbContext db, IClock clock, StaleC
             })
             .ToListAsync(ct)
             .ConfigureAwait(false);
+
+        if (rows.Count > MaxResults)
+        {
+            throw new BusinessRuleException(
+                "ECR-CALC-0422",
+                $"Результатів документа {documentId} за період {periodKey} більше за {MaxResults}: показати їх частково означало б показати хибні суми.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0422.resultsTooLarge",
+                    ["documentId"] = documentId,
+                    ["periodKey"] = periodKey,
+                    ["max"] = MaxResults,
+                });
+        }
 
         return rows.ConvertAll(r => new CalculationResultRow(
             r.MethodologyVersionId, r.SourceRowKey, r.OutputCode, r.Value, r.UnitId, r.SubstanceEntryId));

@@ -66,6 +66,32 @@ public sealed class CalculationResultCarryOverTests(SqlServerFixture sql)
     }
 
     /// <remarks>
+    /// AN-105 / D2-05: читання актуальних результатів понад стелю — відмова, а не перші
+    /// <see cref="CalculationResultStore.MaxResults"/> рядків. МУТАЦІЙНИЙ ДОКАЗ: повернути
+    /// <c>Take(MaxResults)</c> без перевірки → винятку немає, повертається 50 000 рядків, червоний.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "D2-05")]
+    public async Task ReadCurrent_понад_стелю_відмовляє_а_не_обрізає()
+    {
+        var f = await ArrangeAsync(seedResult: false);
+        await using var db = f.Builder.CreateContext();
+
+        // Актуальний прогін-джерело з рядками понад стелю — одним set-based INSERT.
+        await InsertResultsAsync(db, f, f.SourceRunId, CalculationResultStore.MaxResults + 1);
+
+        var store = new CalculationResultStore(db, new TestClock(T3));
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => store.ReadCurrentAsync(f.Document.DocumentId, f.Document.PeriodKey.Value, CancellationToken.None));
+
+        Assert.Equal("ECR-CALC-0422", error.ErrorCode);
+        Assert.Equal("err.ECR-CALC-0422.resultsTooLarge", error.Details!["messageKey"]);
+        Assert.Equal(CalculationResultStore.MaxResults, error.Details["max"]);
+    }
+
+    /// <remarks>
     /// N2-03 / stale-for-B (D-324): правка довідника T2 між прогоном-джерелом (T1) і новим прогоном (T3), що ПЕРЕНІС
     /// результати джерела. Числа лишилися на довіднику T1, тож позначка застарілості не гасне — ні в панелі
     /// результатів (<c>MethodologyStore</c>), ні в переліку (<c>StaleResultsQuery</c>). Контроль: прогін, що
