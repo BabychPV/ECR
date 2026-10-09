@@ -146,9 +146,21 @@ export function applyPatchLocally(
   request: PatchCellsRequest,
   response: PatchCellsResponse,
 ): void {
-  queryClient.setQueryData<TableSliceDto>(
-    queryKeys.slices.one(request.tableInstanceId, request.periodKey),
-    (slice) => (slice === undefined ? slice : applyPatchToSlice(slice, request, response)),
+  const key = queryKeys.slices.one(request.tableInstanceId, request.periodKey);
+
+  // ⛔ `G1-01`: `GET` зрізу, що почався ДО коміту цього `PATCH` (перезапит після
+  // перерахунку, `addRow`, «Keep mine»), `setQueryData` НЕ скасовує: його
+  // відповідь, прочитана зі старої БД, перезаписала б кеш старими значеннями й
+  // СТАРИМИ версіями рядків — значення «зникає» з екрана, а наступна власна
+  // правка рядка дістає `409`. Тому, якщо зріз саме читається, після
+  // локального застосування читання ПЕРЕЗАПУСКАЄТЬСЯ: `refetchType: 'all'`
+  // скасовує запит у дорозі (`cancelRefetch`, тихо — без стану помилки) і
+  // ставить новий, що читає вже після коміту. Зайвий `GET` — лише тоді, коли
+  // вікна справді перекрилися; у звичайному разі `CL-01` лишається без запиту.
+  const racing = queryClient.getQueryState(key)?.fetchStatus === 'fetching';
+
+  queryClient.setQueryData<TableSliceDto>(key, (slice) =>
+    slice === undefined ? slice : applyPatchToSlice(slice, request, response),
   );
 
   // ⚠ І зріз позначається застарілим — БЕЗ запиту (`refetchType: 'none'`).
@@ -161,8 +173,8 @@ export function applyPatchLocally(
   // ⛔ Саме ПІСЛЯ `setQueryData`: успішний запис у кеш скидає позначку
   // `isInvalidated`, тож зворотний порядок нічого б не позначив.
   void queryClient.invalidateQueries({
-    queryKey: queryKeys.slices.one(request.tableInstanceId, request.periodKey),
-    refetchType: 'none',
+    queryKey: key,
+    refetchType: racing ? 'all' : 'none',
   });
 
   // ⛔ `ФВ-2.16`: значок «поза вікном» — за `import()`, не статично (`D-132`,
