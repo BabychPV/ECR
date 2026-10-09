@@ -11,6 +11,7 @@ import {
   restoreTemplate,
 } from '@/features/templates/templateApi';
 import { templateCardKey, useTemplateCard } from '@/features/templates/templateCardQuery';
+import { toTemplateListRow } from '@/features/templates/templateListModel';
 import { TemplateVersionsSection, useTemplateVersions } from '@/features/templates/TemplateVersionsSection';
 import { StatusBadge } from '@/shared/ui/StatusBadge';
 import { localized } from '@/shared/i18n/localized';
@@ -181,16 +182,16 @@ export function TemplateCardPage(): JSX.Element {
   const versions = useTemplateVersions(templateId);
   const versionItems = versions.data?.items;
   const draftVersion = versionItems?.find((version) => version.status === 'Draft');
+  // N4-04: стан — з тієї самої моделі, що й картка переліку (`toTemplateListRow`): архів → `Archived` (словник
+  // `project`), інакше Published → Draft → Deprecated. Раніше архів показувався як «Deprecated» (версійний),
+  // а шаблон лише із застарілими версіями не мав бейджа взагалі.
   const templateState =
     data === undefined || versionItems === undefined
       ? undefined
-      : !data.isActive
-        ? 'Deprecated'
-        : versionItems.some((version) => version.status === 'Published')
-          ? 'Published'
-          : draftVersion !== undefined
-            ? 'Draft'
-            : undefined;
+      : toTemplateListRow(
+          { id: data.id, code: data.code, versionCount: versionItems.length, documentCount: 0, isArchived: !data.isActive },
+          versionItems,
+        ).state;
 
   const showActions = data !== undefined && editable;
 
@@ -241,7 +242,13 @@ export function TemplateCardPage(): JSX.Element {
         title={heading}
         meta={data !== undefined && !data.isActive ? t('templates.archivedHint') : undefined}
         back={{ label: t('nav.backToTemplates'), href: '/admin/templates' }}
-        badge={templateState === undefined ? undefined : <StatusBadge kind="version" state={templateState} />}
+        badge={
+          templateState === undefined || templateState === null ? undefined : templateState === 'Archived' ? (
+            <StatusBadge kind="project" state="Archived" />
+          ) : (
+            <StatusBadge kind="version" state={templateState} />
+          )
+        }
         primary={primary}
         more={more}
       />
