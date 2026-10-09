@@ -343,6 +343,37 @@ public sealed class ImportDiffBuilder
                     continue;
                 }
 
+                // ⛔ D1-02 (HU-13 Q1, варіант A). Рядок, змінений у базі ПІСЛЯ
+                // експорту книги (версія в карті ≠ поточній), — конфлікт, а не
+                // зміна. Доти різниця рахувалась «книга проти поточного», і
+                // число, яке людина в книзі не чіпала, мовчки повертало чужу
+                // пізнішу правку (журнал ще й записував її як `Import` цієї
+                // людини). Версії перегляду (`versions`) стережуть лише вікно
+                // «перегляд → застосування», тож без версії ЕКСПОРТУ це не ловилося.
+                //
+                // ⚠ Тут, останньою перевіркою перед зміною: конфліктом стає лише
+                // те, що інакше було б записано. Комірка, яка й так збігається з
+                // поточною, відмовою, правами чи типом — показується як була.
+                //
+                // ⚠ Книга без версії (вивантажена до цієї правки) — колишня
+                // поведінка. Підроблена версія дає рівно те саме, тож вона не
+                // обхід прав: ця перевірка стереже чесну людину від чужої правки,
+                // а не систему від людини.
+                //
+                // ✎ Явного «перезаписати» поки немає: для нього потрібне поле в
+                // контракті перегляду/застосування (хвіст AN-103).
+                if (row.Version is { } exported
+                    && versions.TryGetValue(row.RowKey, out var now)
+                    && !string.Equals(exported, now, StringComparison.Ordinal))
+                {
+                    rejected.Add(new ImportRejection(
+                        row.RowKey, column.Code, "ECR-CELL-0409",
+                        "The row was changed after the workbook was exported: the value from the file is not applied.",
+                        table.Code, table.NameL10n, ImportMessageKeys.RowChangedSinceExport, excelCell));
+
+                    continue;
+                }
+
                 // ⛔ L6-01 (аудит 2026-10-03, DAT-05 «усе або нічого»). Доти тут
                 // стояв `break` ЛИШЕ внутрішнього циклу на 5000-й зміні: решта
                 // книги мовчки відкидалася, план для Apply містив перші 5000, а
@@ -735,6 +766,12 @@ public static class ImportMessageKeys
     /// експорту — книга застаріла (P3).
     /// </summary>
     public const string CalculatedStale = "err.ECR-CELL-4221.importCalculatedStale";
+
+    /// <summary>
+    /// Рядок змінено в базі після експорту книги, і людина в книзі задала в
+    /// ньому інше значення — конфлікт, а не перезапис чужої правки (D1-02).
+    /// </summary>
+    public const string RowChangedSinceExport = "err.ECR-CELL-0409.importRowChangedSinceExport";
 
     /// <summary>Рядка з ключем із файлу в документі немає.</summary>
     public const string NoRow = "err.ECR-ROW-0404.importNoRow";

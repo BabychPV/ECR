@@ -50,6 +50,10 @@ public sealed class ExcelExporter(
     private static readonly IReadOnlyDictionary<string, long> NoRows =
         new Dictionary<string, long>(StringComparer.Ordinal);
 
+    /// <summary>Порожній перелік версій рядків — для таблиці без рядків (D1-02).</summary>
+    private static readonly IReadOnlyDictionary<string, string> NoVersions =
+        new Dictionary<string, string>(StringComparer.Ordinal);
+
     /// <summary>Порожній зріз — для таблиці, у якої немає непорожніх комірок.</summary>
     private static readonly IReadOnlyList<CellRecord> NoCells = [];
 
@@ -126,6 +130,19 @@ public sealed class ExcelExporter(
             .GetRowIdsBatchAsync(instanceIds, periodKey, ct)
             .ConfigureAwait(false);
 
+        // ⛔ D1-02 (HU-13 Q1, варіант A). Версії рядків — у карту книги, щоб
+        // імпорт відрізнив «людина змінила в книзі» від «хтось змінив у базі
+        // після експорту». Без них старі значення книги мовчки поверталися
+        // поверх чужих пізніших правок.
+        //
+        // ⚠ Версії читаються ДО значень. Запис між двома читаннями тоді дає
+        // версію СТАРШУ за вивантажені значення, і імпорт побачить зайвий
+        // конфлікт (безпечний бік). Зворотний порядок давав би версію, новішу
+        // за значення в книзі, — і саме ту мовчазну втрату, яку це закриває.
+        var versionsBatch = await rowStore
+            .GetRowVersionsBatchAsync(instanceIds, periodKey, ct)
+            .ConfigureAwait(false);
+
         var slicesBatch = await cellStore
             .ReadSlicesAsync(instanceIds, periodKey, ct)
             .ConfigureAwait(false);
@@ -180,6 +197,7 @@ public sealed class ExcelExporter(
                 var block = WriteTable(
                     worksheet, name, table, instance, snapshot, styleMap, lookups, styleSource, options, row,
                     rowIdsBatch.GetValueOrDefault(instance.TableInstanceId, NoRows),
+                    versionsBatch.GetValueOrDefault(instance.TableInstanceId, NoVersions),
                     slicesBatch.GetValueOrDefault(instance.TableInstanceId, NoCells),
                     formatRules,
                     contentLength);
@@ -426,6 +444,7 @@ public sealed class ExcelExporter(
         ExcelExportOptions options,
         int startRow,
         IReadOnlyDictionary<string, long> rowIds,
+        IReadOnlyDictionary<string, string> rowVersions,
         IReadOnlyList<CellRecord> cells,
         IReadOnlyDictionary<string, IReadOnlyList<ConditionalFormatRule>> formatRules,
         List<int> contentLength)
@@ -500,7 +519,7 @@ public sealed class ExcelExporter(
         for (var r = 0; r < keys.Count; r++)
         {
             var number = headerRow + 1 + r;
-            rowRefs.Add(new ExcelRowRef(keys[r], number));
+            rowRefs.Add(new ExcelRowRef(keys[r], number) { Version = rowVersions.GetValueOrDefault(keys[r]) });
             rowNumbers[keys[r]] = number;
         }
 

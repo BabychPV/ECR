@@ -142,6 +142,32 @@ describe('ImportPanel: відмови перегляду (P3)', () => {
     expect(within(table).getByText('⟦err.ECR-CELL-4221.importCalculated⟧')).toBeTruthy();
   });
 
+  it('D1-02: рядок, змінений після експорту, — власний текст конфлікту', async () => {
+    mockServer({
+      previewToken: 'tok',
+      changes: [],
+      rejected: [
+        {
+          rowKey: 'R1',
+          columnCode: 'A',
+          reasonCode: 'ECR-CELL-0409',
+          message: 'diag',
+          messageKey: 'err.ECR-CELL-0409.importRowChangedSinceExport',
+          tableCode: 'T1',
+          excelCell: 'A3',
+        },
+      ],
+      conflicts: [],
+    });
+
+    await openPreview();
+
+    const table = screen.getByRole('table');
+    // ⛔ Мутація: прибрати гілку `importRowChangedSinceExport` у `rejectionText` —
+    // тут буде загальне `⟦import.rejectedCell⟧`.
+    expect(within(table).getByText('⟦err.ECR-CELL-0409.importRowChangedSinceExport⟧')).toBeTruthy();
+  });
+
   it('відмова цілої таблиці без адреси — прочерк, а не порожня комірка', async () => {
     mockServer({
       previewToken: 'tok',

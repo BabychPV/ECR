@@ -83,9 +83,21 @@ public sealed record ExcelColumnRef(
 /// (<see cref="CalculatedCellFingerprint"/>); <c>null</c> — у блоці немає
 /// обчислюваних колонок або книгу вивантажено до появи поля.
 /// </param>
+/// <param name="Version">
+/// ⛔ D1-02 (HU-13 Q1, варіант A). Версія рядка (<c>rowversion</c> у Base64,
+/// як у <c>IRowStore.GetRowVersionsBatchAsync</c>) на момент ЕКСПОРТУ.
+/// Перегляд імпорту звіряє її з поточною: рядок, змінений після експорту
+/// кимось іншим, не перезаписується значенням зі старої книги мовчки, а
+/// стає відмовою-конфліктом (<see cref="ImportMessageKeys.RowChangedSinceExport"/>).
+/// <c>null</c> — книгу вивантажено до появи поля (або рядок без версії):
+/// тоді поведінка колишня, «книга проти поточного».
+/// </param>
 public sealed record ExcelRowRef(
     string RowKey,
     int Number,
     [property: System.Text.Json.Serialization.JsonIgnore(
         Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
-    string? Calc = null);
+    string? Calc = null,
+    [property: System.Text.Json.Serialization.JsonIgnore(
+        Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    string? Version = null);

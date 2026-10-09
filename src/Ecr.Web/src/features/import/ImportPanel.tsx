@@ -485,6 +485,9 @@ function rejectionText(rejection: ImportRejection): string {
     // ⚠ P3: комірку не змінювали — її перерахувала система після експорту.
     case 'err.ECR-CELL-4221.importCalculatedStale':
       return t('err.ECR-CELL-4221.importCalculatedStale');
+    // ⛔ D1-02: рядок змінено в базі після експорту книги — конфлікт, а не перезапис.
+    case 'err.ECR-CELL-0409.importRowChangedSinceExport':
+      return t('err.ECR-CELL-0409.importRowChangedSinceExport');
     case 'err.ECR-ROW-0404.importNoRow':
       return t('err.ECR-ROW-0404.importNoRow');
     case 'err.ECR-ROW-0404.importOutsideRows':
