@@ -19,7 +19,7 @@ namespace Ecr.Architecture.Tests;
 /// </remarks>
 public sealed class NoDisabledTestsTests
 {
-    // [Fact(  /  [Theory(  /  [SqlServerFact(  — початок списку аргументів тестового атрибута.
+    // Початок списку аргументів тестового атрибута: Fact(, Theory(, SqlServerFact( — з дужкою «[» попереду.
     private static readonly Regex TestAttributeStart =
         new("\\[\\s*(?:[A-Za-z_][\\w.]*\\.)?\\w*(?:Fact|Theory)\\w*\\s*\\(", RegexOptions.CultureInvariant);
 
