@@ -217,6 +217,10 @@ public sealed class ApplyImportHandler(
     /// <summary>Застосовує diff — синхронно або, для великого, у черзі.</summary>
     /// <param name="documentId">Документ.</param>
     /// <param name="previewToken">Токен раніше побудованого diff.</param>
+    /// <param name="overwriteRows">
+    /// ✎ AN-114 (D-338): рядки, які людина свідомо перезаписує поверх чужих правок,
+    /// зроблених після експорту; <c>null</c> — поведінка AN-103.
+    /// </param>
     /// <param name="ct">Скасування.</param>
     /// <remarks>
     /// ⛔ Q-178, той самий патерн, що й <see cref="PreviewImportHandler"/>
@@ -230,7 +234,7 @@ public sealed class ApplyImportHandler(
     /// </para>
     /// </remarks>
     public async Task<ImportApplyResult> HandleAsync(
-        long documentId, string previewToken, CancellationToken ct)
+        long documentId, string previewToken, IReadOnlyList<ImportOverwriteRow>? overwriteRows, CancellationToken ct)
     {
         var profile = await Security.PermissionCheck
             .RequireInAnyProjectAsync(access, currentUser, Permission, ct)
@@ -239,7 +243,8 @@ public sealed class ApplyImportHandler(
         // ⛔ B-08: невидимий документ — 404, як неіснуючий (`DocumentVisibility`).
         await DocumentVisibility.RequireVisibleAsync(access, profile, documentId, Permission, ct).ConfigureAwait(false);
 
-        var pendingCount = await importer.CountPendingChangesAsync(documentId, previewToken, ct).ConfigureAwait(false);
+        var pendingCount = await importer
+            .CountPendingChangesAsync(documentId, previewToken, overwriteRows, ct).ConfigureAwait(false);
 
         if (pendingCount > LargeImportThreshold)
         {
@@ -255,16 +260,23 @@ public sealed class ApplyImportHandler(
 
             var jobId = await jobs
                 .EnqueueAsync<IExcelImportJob>(
-                    new ExcelImportTask(documentId, previewToken, actor), ct, currentUser.UserId)
+                    new ExcelImportTask(documentId, previewToken, actor, overwriteRows), ct, currentUser.UserId)
                 .ConfigureAwait(false);
 
             return ImportApplyResult.Queued(jobId);
         }
 
-        var applied = await importer.ApplyAsync(documentId, previewToken, ct).ConfigureAwait(false);
+        var applied = await importer.ApplyAsync(documentId, previewToken, overwriteRows, ct).ConfigureAwait(false);
 
         return ImportApplyResult.Applied(applied);
     }
+
+    /// <summary>Застосовує diff без перезапису конфліктних рядків (AN-103).</summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="previewToken">Токен раніше побудованого diff.</param>
+    /// <param name="ct">Скасування.</param>
+    public Task<ImportApplyResult> HandleAsync(long documentId, string previewToken, CancellationToken ct)
+        => HandleAsync(documentId, previewToken, null, ct);
 }
 
 /// <summary>Результат застосування імпорту: синхронно ГОТОВО, або в ЧЕРЗІ.</summary>
@@ -302,4 +314,9 @@ public sealed record ImportApplyResult
 /// завданні, поставленому до цієї правки, і таке завдання відмовляє
 /// <c>ECR-AUTH-0401</c>, як і досі.
 /// </param>
-public sealed record ExcelImportTask(long DocumentId, string PreviewToken, JobActor? Actor = null);
+/// <param name="OverwriteRows">
+/// ✎ AN-114: рядки, свідомо перезаписані поверх чужих правок; <c>null</c> — немає
+/// (і в завданні, поставленому до цієї правки).
+/// </param>
+public sealed record ExcelImportTask(
+    long DocumentId, string PreviewToken, JobActor? Actor = null, IReadOnlyList<ImportOverwriteRow>? OverwriteRows = null);

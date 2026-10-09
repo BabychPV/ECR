@@ -21,7 +21,7 @@ namespace Ecr.Application.Tests.Documents;
 /// десятки секунд утримання з'єднання й потоку. Тест
 /// <see cref="Великий_diff_не_блокує_запит_довше_за_поріг_часу"/> ловить
 /// САМЕ ЦЕ — прибери перевірку порогу (`pendingCount > LargeImportThreshold`)
-/// у <see cref="ApplyImportHandler.HandleAsync"/>, і він почервоніє, бо
+/// у <c>ApplyImportHandler.HandleAsync</c>, і він почервоніє, бо
 /// виклик почне чекати на <c>ApplyAsync</c>, що ніколи не завершується
 /// (AN-111: ворота замість стінного часу).
 /// </remarks>
@@ -52,11 +52,11 @@ public sealed class ApplyImportThresholdTests
     [Trait("Requirement", "ФВ-4.5")]
     public async Task Малий_diff_застосовується_синхронно()
     {
-        _importer.CountPendingChangesAsync(DocumentId, Token,Arg.Any<CancellationToken>())
+        _importer.CountPendingChangesAsync(DocumentId, Token, Arg.Any<IReadOnlyList<ImportOverwriteRow>?>(), Arg.Any<CancellationToken>())
             .Returns(ApplyImportHandler.LargeImportThreshold);
 
         var response = new PatchCellsResponse(3, new Dictionary<string, string>(), []);
-        _importer.ApplyAsync(DocumentId, Token, Arg.Any<CancellationToken>()).Returns(response);
+        _importer.ApplyAsync(DocumentId, Token, Arg.Any<IReadOnlyList<ImportOverwriteRow>?>(), Arg.Any<CancellationToken>()).Returns(response);
 
         var result = await Handler().HandleAsync(DocumentId, Token, CancellationToken.None);
 
@@ -72,7 +72,7 @@ public sealed class ApplyImportThresholdTests
     [Trait("Requirement", "ФВ-4.5")]
     public async Task Великий_diff_іде_в_чергу_а_не_застосовується_синхронно()
     {
-        _importer.CountPendingChangesAsync(DocumentId, Token,Arg.Any<CancellationToken>())
+        _importer.CountPendingChangesAsync(DocumentId, Token, Arg.Any<IReadOnlyList<ImportOverwriteRow>?>(), Arg.Any<CancellationToken>())
             .Returns(ApplyImportHandler.LargeImportThreshold + 1);
 
         _jobs.EnqueueAsync<IExcelImportJob>(
@@ -83,7 +83,7 @@ public sealed class ApplyImportThresholdTests
 
         Assert.Equal("job-large-1", result.JobId);
         Assert.Null(result.Response);
-        await _importer.DidNotReceiveWithAnyArgs().ApplyAsync(default, default!, default);
+        await _importer.DidNotReceiveWithAnyArgs().ApplyAsync(default, default!, default, default);
     }
 
     [Fact]
@@ -91,14 +91,14 @@ public sealed class ApplyImportThresholdTests
     [Trait("Finding", "L1-20")]
     public async Task Перегляд_іншого_документа_відмовляє_до_черги_і_нічого_не_ставить()
     {
-        _importer.CountPendingChangesAsync(DocumentId, Token, Arg.Any<CancellationToken>())
+        _importer.CountPendingChangesAsync(DocumentId, Token, Arg.Any<IReadOnlyList<ImportOverwriteRow>?>(), Arg.Any<CancellationToken>())
             .Returns<int>(_ => throw new BusinessRuleException("ECR-IMP-0422", "Перегляд належить іншому документу."));
 
         await Assert.ThrowsAsync<BusinessRuleException>(
             () => Handler().HandleAsync(DocumentId, Token, CancellationToken.None));
 
         await _jobs.DidNotReceiveWithAnyArgs().EnqueueAsync<IExcelImportJob>(default, default, default);
-        await _importer.DidNotReceiveWithAnyArgs().ApplyAsync(default, default!, default);
+        await _importer.DidNotReceiveWithAnyArgs().ApplyAsync(default, default!, default, default);
     }
 
     [Fact]
@@ -118,10 +118,10 @@ public sealed class ApplyImportThresholdTests
         var gate = new TaskCompletionSource<PatchCellsResponse>(
             TaskCreationOptions.RunContinuationsAsynchronously);
 
-        _importer.CountPendingChangesAsync(DocumentId, Token,Arg.Any<CancellationToken>())
+        _importer.CountPendingChangesAsync(DocumentId, Token, Arg.Any<IReadOnlyList<ImportOverwriteRow>?>(), Arg.Any<CancellationToken>())
             .Returns(ApplyImportHandler.LargeImportThreshold + 1);
 
-        _importer.ApplyAsync(DocumentId, Token, Arg.Any<CancellationToken>())
+        _importer.ApplyAsync(DocumentId, Token, Arg.Any<IReadOnlyList<ImportOverwriteRow>?>(), Arg.Any<CancellationToken>())
             .Returns(_ => gate.Task);
 
         _jobs.EnqueueAsync<IExcelImportJob>(Arg.Any<ExcelImportTask>(), Arg.Any<CancellationToken>(), 9)
@@ -138,13 +138,47 @@ public sealed class ApplyImportThresholdTests
             var result = await call;
             Assert.Equal("job-large-2", result.JobId);
             Assert.Null(result.Response);
-            await _importer.DidNotReceiveWithAnyArgs().ApplyAsync(default, default!, default);
+            await _importer.DidNotReceiveWithAnyArgs().ApplyAsync(default, default!, default, default);
         }
         finally
         {
             // Відпускаємо ворота, щоб мутант (синхронне застосування) не
             // лишив висячу задачу після червоного тесту.
             gate.TrySetResult(new PatchCellsResponse(0, new Dictionary<string, string>(), []));
+        }
+    }
+
+    /// <summary>
+    /// AN-114 (D-338): позначені «перезаписати» рядки доходять і до синхронного
+    /// застосування, і до завдання черги — а поріг рахує їх разом зі змінами.
+    /// </summary>
+    /// <remarks>⛔ Мутація: не передати <c>overwriteRows</c> у <c>ExcelImportTask</c> — фонова задача мовчки застосує без перезапису.</remarks>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Decision", "D-338")]
+    public async Task AN114_рядки_перезапису_доходять_до_застосування_і_до_черги(bool large)
+    {
+        IReadOnlyList<ImportOverwriteRow> rows = [new ImportOverwriteRow("T1", "R1")];
+        _importer.CountPendingChangesAsync(DocumentId, Token, rows, Arg.Any<CancellationToken>())
+            .Returns(large ? ApplyImportHandler.LargeImportThreshold + 1 : 1);
+        _importer.ApplyAsync(DocumentId, Token, rows, Arg.Any<CancellationToken>())
+            .Returns(new PatchCellsResponse(1, new Dictionary<string, string>(), []));
+        _jobs.EnqueueAsync<IExcelImportJob>(Arg.Any<ExcelImportTask>(), Arg.Any<CancellationToken>(), 9)
+            .Returns("job-overwrite");
+
+        var result = await Handler().HandleAsync(DocumentId, Token, rows, CancellationToken.None);
+
+        if (large)
+        {
+            Assert.Equal("job-overwrite", result.JobId);
+            await _jobs.Received(1).EnqueueAsync<IExcelImportJob>(
+                Arg.Is<ExcelImportTask>(t => t.OverwriteRows == rows), Arg.Any<CancellationToken>(), 9);
+        }
+        else
+        {
+            Assert.Equal(1, result.Response!.AppliedCells);
         }
     }
 }

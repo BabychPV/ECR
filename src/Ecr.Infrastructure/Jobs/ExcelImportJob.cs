@@ -59,7 +59,8 @@ public sealed class ExcelImportJob(
 
         await progress.ReportKeyAsync(10, "jobs.importApplyingDiff", ct).ConfigureAwait(false);
 
-        var result = await importer.ApplyAsync(task.DocumentId, task.PreviewToken, ct).ConfigureAwait(false);
+        var result = await importer
+            .ApplyAsync(task.DocumentId, task.PreviewToken, task.OverwriteRows, ct).ConfigureAwait(false);
 
         // ⚠ Клієнт не забирає окремий файл (на відміну від експорту) — сам
         // результат застосування невеликий, і повідомлення прогресу досить,

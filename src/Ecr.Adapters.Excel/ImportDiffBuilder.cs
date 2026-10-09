@@ -99,6 +99,7 @@ public sealed class ImportDiffBuilder
 
         var changes = new List<ImportChange>();
         var rejected = new List<ImportRejection>();
+        var overwritable = new List<ImportChange>();
 
         foreach (var row in block.Rows)
         {
@@ -360,8 +361,13 @@ public sealed class ImportDiffBuilder
                 // обхід прав: ця перевірка стереже чесну людину від чужої правки,
                 // а не систему від людини.
                 //
-                // ✎ Явного «перезаписати» поки немає: для нього потрібне поле в
-                // контракті перегляду/застосування (хвіст AN-103).
+                // ✎ AN-114 (D-338, «+ прапорець перезаписати»). Зміна, яку
+                // конфлікт не пустив, лягає ще й у `overwritable` — окремий
+                // перелік плану, НЕ в `changes`. Застосування бере її лише для
+                // рядка, який людина явно назвала (`ImportApplyRequest.OverwriteRows`).
+                // ⛔ Саме тут, ПІСЛЯ прав, типу й меж: у перелік потрапляє лише
+                // те, що пройшло всі інші перевірки, тож прапорець перезапису
+                // не обходить жодної іншої відмови — їх у переліку просто немає.
                 if (row.Version is { } exported
                     && versions.TryGetValue(row.RowKey, out var now)
                     && !string.Equals(exported, now, StringComparison.Ordinal))
@@ -370,6 +376,10 @@ public sealed class ImportDiffBuilder
                         row.RowKey, column.Code, "ECR-CELL-0409",
                         "The row was changed after the workbook was exported: the value from the file is not applied.",
                         table.Code, table.NameL10n, ImportMessageKeys.RowChangedSinceExport, excelCell));
+
+                    overwritable.Add(new ImportChange(
+                        row.RowKey, column.Code, Display(existing, definition), incoming, table.Code, table.NameL10n,
+                        roundedFrom));
 
                     continue;
                 }
@@ -390,7 +400,7 @@ public sealed class ImportDiffBuilder
             }
         }
 
-        return new TableDiff(block.TableInstanceId, periodKey, changes, rejected, versions);
+        return new TableDiff(block.TableInstanceId, periodKey, changes, rejected, versions, overwritable);
     }
 
     /// <summary>
@@ -741,12 +751,20 @@ public sealed class ImportDiffBuilder
 /// Версії рядків на момент перегляду — ними перевіряється, чи не змінив
 /// хтось дані між переглядом і застосуванням.
 /// </param>
+/// <param name="Overwritable">
+/// ✎ AN-114 (D-338). Зміни, які не потрапили в <paramref name="Changes"/> лише
+/// через конфлікт «рядок змінено після експорту» (<see cref="ImportMessageKeys.RowChangedSinceExport"/>):
+/// усі інші перевірки вони пройшли. Застосовуються тільки для рядків, які
+/// людина явно позначила «перезаписати»; без позначки — як у AN-103, ніяк.
+/// <c>null</c> — план, збережений до цієї правки.
+/// </param>
 public sealed record TableDiff(
     long TableInstanceId,
     int PeriodKey,
     IReadOnlyList<ImportChange> Changes,
     IReadOnlyList<ImportRejection> Rejected,
-    IReadOnlyDictionary<string, string> RowVersions);
+    IReadOnlyDictionary<string, string> RowVersions,
+    IReadOnlyList<ImportChange>? Overwritable = null);
 
 /// <summary>
 /// Ключі текстів відмов прев'ю імпорту в каталозі (D-95, `V-10`).

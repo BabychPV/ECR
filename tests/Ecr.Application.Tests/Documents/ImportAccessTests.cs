@@ -57,7 +57,7 @@ public sealed class ImportAccessTests
         _access.CanReadDocumentAsync(Arg.Any<AccessProfile>(), DocumentId, Arg.Any<CancellationToken>())
             .Returns(EditDecision.Allow());
 
-        var preview = new ImportPreview("token-1", [], [], []);
+        var preview = new ImportPreview("token-1", [], [], [], []);
         _importer.PreviewAsync(DocumentId, Arg.Any<Stream>(), Arg.Any<CancellationToken>())
             .Returns(preview);
 
@@ -80,6 +80,6 @@ public sealed class ImportAccessTests
                 .HandleAsync(DocumentId, "token-1", CancellationToken.None));
 
         Assert.Equal("ECR-DOC-0404", denied.ErrorCode);
-        await _importer.DidNotReceiveWithAnyArgs().ApplyAsync(0, null!, CancellationToken.None);
+        await _importer.DidNotReceiveWithAnyArgs().ApplyAsync(0, null!, null, CancellationToken.None);
     }
 }
