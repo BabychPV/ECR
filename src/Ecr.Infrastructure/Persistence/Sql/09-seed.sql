@@ -7409,8 +7409,11 @@ USING (VALUES
     (N'status.coverage.PartialCoverage', N'en', N'Partial coverage', 1),
     (N'status.coverage.SkippedNoData', N'en', N'No data for the period', 1),
     (N'coverageEvents.partialCoverage', N'en', N'Field {field} (mapping {mapId}): the source covered only {percentGood}% of the period (threshold {min}%). The value was written, but it is incomplete: gaps and bad-quality points are not counted. Check the source before relying on the number.', 1),
-    (N'coverageEvents.noData', N'en', N'Field {field} (mapping {mapId}): there are no usable points for the ended period. The cell was not updated and may still hold the value of an earlier run.', 1)
+    (N'coverageEvents.noData', N'en', N'Field {field} (mapping {mapId}): there are no usable points for the ended period. The cell was not updated and may still hold the value of an earlier run.', 1),
     -- COLL:an105-coverage ── кінець секції ──
+    -- COLL:an105-recalc-state ── AN-105 / D2-03: стан аркуша чи періоду змінився під час перерахунку; ru/kz — порцією COLL:an105-recalc-state нижче ──
+    (N'err.ECR-CALC-0409.recalcStateChanged', N'en', N'While document {documentId} was being recalculated, a sheet was submitted or period {periodKey} was closed. The new results were not applied and the previous ones stay current; the recalculation repeats with the new state.', 1)
+    -- COLL:an105-recalc-state ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -18233,6 +18236,17 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:an105-coverage ── кінець секції ──
+
+-- COLL:an105-recalc-state ── ru/kz: AN-105 / D2-03: стан аркуша чи періоду змінився під час перерахунку; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-CALC-0409.recalcStateChanged', N'ru', N'Пока документ {documentId} пересчитывался, лист был подан или период {periodKey} закрыт. Новые результаты не применены, актуальными остаются прежние; пересчёт повторится с новым состоянием.'),
+    (N'err.ECR-CALC-0409.recalcStateChanged', N'kz', N'{documentId} құжаты қайта есептеліп жатқанда парақ тапсырылды немесе {periodKey} кезеңі жабылды. Жаңа нәтижелер қолданылмады, алдыңғылары өзекті болып қалады; қайта есептеу жаңа күймен қайталанады.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:an105-recalc-state ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

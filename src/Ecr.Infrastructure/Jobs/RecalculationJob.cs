@@ -62,7 +62,8 @@ public sealed partial class RecalculationJob(
     Domain.Abstractions.IClock clock,
     IBackgroundJobScheduler? jobs = null,
     RecalculationBudgetMonitor? budget = null,
-    ILogger<RecalculationJob>? logger = null) : IRecalculationJob
+    ILogger<RecalculationJob>? logger = null,
+    ISheetEditGate? sheetGate = null) : IRecalculationJob
 {
     [LoggerMessage(
         Level = LogLevel.Error,
@@ -170,6 +171,10 @@ public sealed partial class RecalculationJob(
 
         // RC14 (P2-4): що переносити в прогін періоду (лише для прогону області аркуша).
         var carryOvers = new Dictionary<int, List<ResultCarryOver>>();
+
+        // D2-03: що перевірити перед перемиканням актуальності кожного періоду — аркуші, які прогін
+        // ПЕРЕРАХУВАВ методологіями (за документами), і чи період ще дозволяє запис.
+        var completionGuards = new Dictionary<int, List<SheetGuard>>();
 
         // L-4: рядки, яким не підійшло жодне правило; назовні — лише кількість і номери.
         var unmatchedRows = new List<UnmatchedRow>();
@@ -404,6 +409,14 @@ public sealed partial class RecalculationJob(
 
                     var (run, runProfile) = await RunForAsync(period).ConfigureAwait(false);
 
+                    if (!completionGuards.TryGetValue(period, out var periodGuards))
+                    {
+                        completionGuards[period] = periodGuards = [];
+                    }
+
+                    periodGuards.Add(new SheetGuard(
+                        documentId, bindingPlan.ActiveSheets.GetValueOrDefault(period) ?? []));
+
                     if (bindingPlan.CarryOver.TryGetValue(period, out var carryMethodologies))
                     {
                         if (!carryOvers.TryGetValue(period, out var periodCarry))
@@ -451,9 +464,21 @@ public sealed partial class RecalculationJob(
 
             // Завершення — прикладний сценарій: профіль і перемикання
             // актуальності однією транзакцією (ФВ-9.11) — на кожен період.
+            //
+            // ⛔ D2-03: стан аркушів і періоду ПЕРЕЧИТУЄТЬСЯ в транзакції перемикання. Рішення
+            // «що рахувати» (`SubmittedSheetsAsync`, `RefusedPeriodsAsync`) ухвалено на старті
+            // документа, а методологічна фаза триває хвилини: подання аркуша чи закриття
+            // періоду в цьому вікні інакше мовчки підмінило б числа поданого/затвердженого
+            // аркуша (живе посилання, `SubmitSheetHandler`) або записало б у закритий період.
             foreach (var (period, (run, profile)) in periodRuns)
             {
-                await runs.CompleteAsync(run.Id, profile, ct, carryOvers.GetValueOrDefault(period)).ConfigureAwait(false);            }
+                var guards = completionGuards.GetValueOrDefault(period) ?? [];
+                await runs
+                    .CompleteAsync(
+                        run.Id, profile, ct, carryOvers.GetValueOrDefault(period),
+                        token => GuardCompletionAsync(projectId, period, guards, request.ApprovedBy is not null, token))
+                    .ConfigureAwait(false);
+            }
 
             // L-4: «No matching rule … row N». Не помилка й не відмова - решта рядків уже
             // пораховано; це слід у повідомленні задачі, щоб рядок без правила не зник мовчки.
@@ -880,7 +905,17 @@ public sealed partial class RecalculationJob(
                 : 0;
         }
 
-        return new BindingPlan(byPeriod, carryByPeriod, recomputedOnSubmitted);
+        // D2-03: аркуші, чиї таблиці прогін перерахував методологіями, — їх перевіряє `GuardCompletionAsync`.
+        var activeSheets = instances
+            .Where(i => IsActive(i)
+                        && byPeriod.TryGetValue(i.PeriodKeyValue, out var periodBindings)
+                        && periodBindings.Any(b => b.TableInstanceId == i.Id))
+            .GroupBy(i => i.PeriodKeyValue)
+            .ToDictionary(
+                g => g.Key,
+                g => (IReadOnlyList<int>)[.. g.Select(i => i.SheetDefId).Distinct().Order()]);
+
+        return new BindingPlan(byPeriod, carryByPeriod, recomputedOnSubmitted, activeSheets);
     }
 
     /// <summary>Прив'язки методологій за періодами, що переносити з попереднього прогону, і лічильник для журналу.</summary>
@@ -889,17 +924,106 @@ public sealed partial class RecalculationJob(
     /// <param name="RecomputedOnInactive">
     /// Скільки прив'язок неактивних (поза областю/пропущених) таблиць перераховано через спільну методологію.
     /// </param>
+    /// <param name="ActiveSheets">
+    /// D2-03: аркуші, чиї таблиці прогін перераховує методологіями, за періодом (за зростанням Id).
+    /// </param>
     private sealed record BindingPlan(
         IReadOnlyDictionary<int, IReadOnlyList<CalculationBindingRef>> Bindings,
         IReadOnlyDictionary<int, IReadOnlyCollection<int>> CarryOver,
-        int RecomputedOnInactive)
+        int RecomputedOnInactive,
+        IReadOnlyDictionary<int, IReadOnlyList<int>> ActiveSheets)
     {
         /// <summary>Порожній план: нічого не рахується й не переноситься.</summary>
         public static readonly BindingPlan Empty = new(
             ReadOnlyDictionary<int, IReadOnlyList<CalculationBindingRef>>.Empty,
             ReadOnlyDictionary<int, IReadOnlyCollection<int>>.Empty,
-            0);
+            0,
+            ReadOnlyDictionary<int, IReadOnlyList<int>>.Empty);
     }
+
+    /// <summary>Аркуші документа, які прогін періоду перерахував методологіями (D2-03).</summary>
+    /// <param name="DocumentId">Документ.</param>
+    /// <param name="Sheets">Аркуші за зростанням Id — у цьому порядку беруться блокування.</param>
+    private sealed record SheetGuard(long DocumentId, IReadOnlyList<int> Sheets);
+
+    /// <summary>
+    /// D2-03: перевірка перед перемиканням актуальності прогону періоду — у ТІЙ САМІЙ
+    /// транзакції (<see cref="RunCalculationHandler.CompleteAsync"/>, <c>beforeSwitch</c>).
+    /// </summary>
+    /// <param name="projectId">Проєкт.</param>
+    /// <param name="period">Період прогону.</param>
+    /// <param name="guards">Перераховані аркуші за документами.</param>
+    /// <param name="approved">Завдання несе погодження S1 (ФВ-9.7).</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <exception cref="ConcurrencyConflictException">
+    /// <c>ECR-CALC-0409</c> <c>recalcStateChanged</c>: аркуш подано/затверджено або період
+    /// закрито під час прогону. Відмова відкочує перемикання; прогін стає <c>Failed</c>,
+    /// попередній лишається актуальним, а повтор задачі (<c>JobRetryPolicy</c> повторює
+    /// конфлікт стану) планує вже з новим станом — поданий аркуш пропустить і перенесе.
+    /// </exception>
+    /// <remarks>
+    /// ⛔ Аркуш — через спільне блокування <see cref="ISheetEditGate.EnterEditAsync"/>, яке
+    /// подання бере винятково: подання, що йшло паралельно, до цього моменту вже
+    /// зафіксоване (і ми його бачимо) або чекатиме нашого коміту (і тоді перевірить
+    /// <c>IsStale</c> уже за новим прогоном). Блокування — за зростанням (документ, аркуш),
+    /// як у <c>RecalculationService.EnterSheetsAsync</c>. Без воріт (пряме конструювання в
+    /// тестах) — той самий стан читається без блокування.
+    /// <para>
+    /// ⚠ Період, рядка якого немає, не відмовляє — як у <see cref="RefusedPeriodsAsync"/>.
+    /// </para>
+    /// </remarks>
+    private async Task GuardCompletionAsync(
+        int projectId, int period, IReadOnlyList<SheetGuard> guards, bool approved, CancellationToken ct)
+    {
+        var state = await db.Periods
+            .AsNoTracking()
+            .Where(p => p.ProjectId == projectId && p.PeriodKeyValue == period)
+            .Select(p => (Domain.Enums.PeriodState?)p.State)
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+
+        if (state is { } current
+            && RecalculationWritePolicy.Check(current, false, approved) != RecalculationWriteDenial.None)
+        {
+            throw StateChanged(guards.Count > 0 ? guards[0].DocumentId : 0, period, sheetDefId: null);
+        }
+
+        foreach (var guard in guards.OrderBy(g => g.DocumentId))
+        {
+            foreach (var sheetDefId in guard.Sheets)
+            {
+                var status = sheetGate is not null
+                    ? await sheetGate
+                        .EnterEditAsync(guard.DocumentId, sheetDefId, new PeriodKey(period), ct)
+                        .ConfigureAwait(false)
+                    : await db.ApprovalStates
+                        .AsNoTracking()
+                        .Where(a => a.DocumentId == guard.DocumentId && a.SheetDefId == sheetDefId && a.PeriodKey == period)
+                        .Select(a => (Domain.Enums.DocumentStatus?)a.Status)
+                        .FirstOrDefaultAsync(ct)
+                        .ConfigureAwait(false) ?? Domain.Enums.DocumentStatus.Draft;
+
+                if (status is Domain.Enums.DocumentStatus.Submitted or Domain.Enums.DocumentStatus.Approved)
+                {
+                    throw StateChanged(guard.DocumentId, period, sheetDefId);
+                }
+            }
+        }
+    }
+
+    /// <summary>Відмова D2-03: стан аркуша чи періоду змінився під час перерахунку.</summary>
+    private static ConcurrencyConflictException StateChanged(long documentId, int period, int? sheetDefId)
+        => new(
+            "ECR-CALC-0409",
+            $"Стан аркуша чи періоду {period.ToString(CultureInfo.InvariantCulture)} документа "
+            + $"{documentId.ToString(CultureInfo.InvariantCulture)} змінився під час перерахунку: результати не застосовано.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-CALC-0409.recalcStateChanged",
+                ["documentId"] = documentId,
+                ["periodKey"] = period,
+                ["sheetDefId"] = sheetDefId,
+            });
 
     /// <summary>
     /// Періоди документа, у які цей прогін писати НЕ МАЄ ПРАВА (ФВ-9.7, ФВ-9.17).

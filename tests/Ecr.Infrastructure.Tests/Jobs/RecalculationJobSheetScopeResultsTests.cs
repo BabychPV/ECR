@@ -223,6 +223,82 @@ public sealed class RecalculationJobSheetScopeResultsTests(SqlServerFixture sql)
         Assert.Equal(["A|3001", "A|3001", "B|1001"], await ShapeAsync(arranged));
     }
 
+    /// <summary>
+    /// AN-105 / D2-03: аркуш ПОДАНО, поки задача рахувала методології (після рішення «що рахувати»
+    /// і до перемикання актуальності). Прогін не стає актуальним, числа поданого аркуша — від R1.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ МУТАЦІЙНИЙ ДОКАЗ: прибрати <c>beforeSwitch</c> у виклику <c>CompleteAsync</c> задачі →
+    /// винятку немає, а поданий аркуш показує <c>B|2001</c>, червоний. Детерміновано: подання
+    /// виконує фейк оркестратора між фазою методологій і завершенням, без таймінгу.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "D2-03")]
+    public async Task Подання_під_час_методологічної_фази_не_змінює_результатів_поданого_аркуша()
+    {
+        var arranged = await ArrangeAsync(submitSecondSheet: false);
+        await RunJobAsync(arranged, SheetRequest(arranged, sheetDefId: null), label: 1_000m);
+        Assert.Equal(["A|1001", "B|1001"], await ShapeAsync(arranged));
+
+        var thrown = await Record.ExceptionAsync(() => RunJobAsync(
+            arranged, SheetRequest(arranged, sheetDefId: null), label: 2_000m,
+            during: () => SubmitSecondSheetAsync(arranged)));
+
+        var error = Assert.IsType<ConcurrencyConflictException>(thrown);
+        Assert.Equal("ECR-CALC-0409", error.ErrorCode);
+        Assert.Equal("err.ECR-CALC-0409.recalcStateChanged", error.Details?["messageKey"]);
+        Assert.Equal(arranged.SecondSheetId, error.Details?["sheetDefId"]);
+
+        // Попередній прогін лишився актуальним: подавець бачить і підписав саме ці числа.
+        Assert.Equal(["A|1001", "B|1001"], await ShapeAsync(arranged));
+
+        // Повтор задачі (конфлікт стану ретраїться) планує вже з новим станом: поданий B переноситься.
+        await RunJobAsync(arranged, SheetRequest(arranged, sheetDefId: null), label: 3_000m);
+        Assert.Equal(["A|3001", "B|1001"], await ShapeAsync(arranged));
+    }
+
+    /// <summary>
+    /// AN-105 / D2-03: період ЗАКРИТО (задача станів) під час методологічної фази —
+    /// прогін без погодження S1 у закритий період актуальним не стає.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "D2-03")]
+    public async Task Закриття_періоду_під_час_методологічної_фази_не_перемикає_актуальність()
+    {
+        var arranged = await ArrangeAsync(submitSecondSheet: false);
+        await RunJobAsync(arranged, SheetRequest(arranged, sheetDefId: null), label: 1_000m);
+
+        var thrown = await Record.ExceptionAsync(() => RunJobAsync(
+            arranged, SheetRequest(arranged, sheetDefId: null), label: 2_000m,
+            during: () => ClosePeriodAsync(arranged)));
+
+        // ⛔ МУТАЦІЙНИЙ ДОКАЗ: прибрати перевірку `RecalculationWritePolicy.Check` у
+        // `GuardCompletionAsync` → винятку немає, `A|2001` у закритому періоді, червоний.
+        var error = Assert.IsType<ConcurrencyConflictException>(thrown);
+        Assert.Equal("ECR-CALC-0409", error.ErrorCode);
+        Assert.Null(error.Details?["sheetDefId"]);
+        Assert.Equal(["A|1001", "B|1001"], await ShapeAsync(arranged));
+
+        await using var db = arranged.Builder.CreateContext();
+        Assert.Equal(1, await db.CalculationRuns.AsNoTracking().CountAsync(r =>
+            r.DocumentId == arranged.Document.DocumentId
+            && r.PeriodKey == arranged.Document.PeriodKey.Value
+            && r.Status == "Failed"));
+    }
+
+    private static async Task ClosePeriodAsync(Arranged arranged)
+    {
+        await using var db = arranged.Builder.CreateContext();
+        var period = await db.Periods.SingleAsync(
+            p => p.ProjectId == arranged.Document.ProjectId && p.PeriodKeyValue == arranged.Document.PeriodKey.Value);
+        period.AdvanceTo(PeriodState.Closed, Now);
+        await db.SaveChangesAsync();
+    }
+
     private static RecalculationRequest SheetRequest(Arranged arranged, int? sheetDefId)
         => new(
             ProjectId: arranged.Document.ProjectId,
@@ -338,14 +414,15 @@ public sealed class RecalculationJobSheetScopeResultsTests(SqlServerFixture sql)
     private static LocalizedText Name(string value)
         => new(new Dictionary<string, string> { ["en"] = value });
 
-    private static async Task RunJobAsync(Arranged arranged, RecalculationRequest request, decimal label)
+    private static async Task RunJobAsync(
+        Arranged arranged, RecalculationRequest request, decimal label, Func<Task>? during = null)
     {
         await using var db = arranged.Builder.CreateContext();
         var clock = new TestClock(Now);
 
         var job = new RecalculationJob(
             db,
-            new WritingRunner(arranged, label),
+            new WritingRunner(arranged, label, during),
             RunHandler(db, clock),
             FormulaService(),
             clock);
@@ -406,8 +483,15 @@ public sealed class RecalculationJobSheetScopeResultsTests(SqlServerFixture sql)
     /// Фейк оркестратора: на кожну прив'язку пише ОДИН вихід її методології (<c>tonsA</c>/<c>tonsB</c>)
     /// зі штампом прогону через справжнє сховище, власним контекстом.
     /// </summary>
-    private sealed class WritingRunner(Arranged arranged, decimal label) : ICalculationRunner
+    /// <param name="arranged">Стенд.</param>
+    /// <param name="label">Штамп прогону в значеннях.</param>
+    /// <param name="during">
+    /// D2-03: дія іншого «користувача» між фазою методологій і завершенням (один раз).
+    /// </param>
+    private sealed class WritingRunner(Arranged arranged, decimal label, Func<Task>? during = null) : ICalculationRunner
     {
+        private Func<Task>? _during = during;
+
         public async Task<ModuleProfile> RunAsync(
             long calculationRunId, long documentId, PeriodKey periodKey,
             IReadOnlyList<CalculationBindingRef> bindings, IJobProgress progress, CancellationToken ct)
@@ -435,6 +519,11 @@ public sealed class RecalculationJobSheetScopeResultsTests(SqlServerFixture sql)
 
             await store.WriteResultsAsync(calculationRunId, outputs, ct);
             await db.SaveChangesAsync(ct);
+
+            if (Interlocked.Exchange(ref _during, null) is { } action)
+            {
+                await action();
+            }
 
             return new ModuleProfile();
         }
