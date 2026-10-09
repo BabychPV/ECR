@@ -258,6 +258,41 @@ public sealed partial class WorkflowTransactionTests
         Assert.Equal(DocumentStatus.Submitted, await StatusAsync(world.World).ConfigureAwait(true));
     }
 
+    // ─────────────────────────── W1-05 ───────────────────────────
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-5.17")]
+    public async Task W1_05_Роль_кроку_перевіряється_всередині_транзакції()
+    {
+        // Імітація гонки: до транзакції погоджувач проходить роль кроку N, а поки він
+        // дійшов до транзакції, інший погоджувач закомітив крок N — і всередині вже
+        // поточний крок N+1, ролі якого в цього погоджувача немає. Без фіксу рішення
+        // приймалося лише ДО транзакції, і він підписував крок N+1.
+        var world = await ArrangeSnapshotAsync(DocumentStatus.Submitted, other: null).ConfigureAwait(true);
+
+        await using var db = CreateContext();
+
+        var access = AccessAt(step: null);
+        access.CanApproveAsync(
+                  Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<int>(), Arg.Any<PeriodKey>(),
+                  Arg.Any<CancellationToken>())
+              .Returns(_ => db.Database.CurrentTransaction is null
+                  ? EditDecision.Allow()
+                  : EditDecision.Deny(EditDenyReason.NoGrant));
+
+        await Assert.ThrowsAsync<AccessDeniedException>(
+            () => ApproveWith(world.World, db, access, NoSnapshots())
+                .HandleAsync(
+                    world.World.DocumentId, world.World.SheetDefId, PeriodKeyValue, approved: true, reason: null,
+                    CancellationToken.None))
+            .ConfigureAwait(true);
+
+        Assert.Equal(DocumentStatus.Submitted, await StatusAsync(world.World).ConfigureAwait(true));
+        Assert.Empty(await EventsAsync(world.World).ConfigureAwait(true));
+    }
+
     // ────────────────────────────── збірка ────────────────────────────
 
     private static ReportSnapshotBuilder Builder(EcrDbContext db, IMemoryCache cache)
