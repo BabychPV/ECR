@@ -466,8 +466,22 @@ export function useDocumentPending(documentId: number, ownerUserId?: number): vo
         const sendable = pendingSlices({ sendableOnly: true });
 
         // AN-39/L8-08: відхилені (утримані) правки надіслати неможливо - про них
-        // питаємо; решта їде маячком, як і раніше.
+        // питаємо рідним питанням браузера.
         const held = pendingCount() > sendable.reduce((sum, slice) => sum + slice.edits.length, 0);
+
+        // ⛔ L8-08 (PARTIAL): за наявності утриманих правок маячок НЕ шлемо. Питання
+        // «Покинути сторінку?» з'являється вже ПІСЛЯ обробника; якщо людина натисне
+        // «Залишитися», правильні правки, що поїхали маячком, лишилися б у сховищі зі старим
+        // `baseVersion` і 409 прийшов би на власні правки. Тому: звичайне збереження
+        // ПІСЛЯ обробника (`setTimeout 0`) — воно оновить версії; обрала «Піти» — вкладка
+        // закриється, а питання людина вже бачила.
+        if (held) {
+          setTimeout(() => {
+            flushAutosave();
+          }, 0);
+
+          return true;
+        }
 
         for (const slice of sendable) {
           sendPatchBeacon(
@@ -483,7 +497,7 @@ export function useDocumentPending(documentId: number, ownerUserId?: number): vo
           );
         }
 
-        return held;
+        return false;
       }),
     [documentId, queryClient],
   );

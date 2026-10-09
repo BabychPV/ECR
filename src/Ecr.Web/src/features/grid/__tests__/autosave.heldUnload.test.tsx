@@ -2,7 +2,7 @@ import type { JSX, ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { renderHook } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { cancelAutosave, registerUnloadFlush, useDocumentPending } from '../autosave';
+import { cancelAutosave, registerSliceSaver, registerUnloadFlush, useDocumentPending } from '../autosave';
 import { markPendingRejected, putPendingEdit, resetPending } from '../pendingStore';
 import type { PendingEdit } from '../useCellPatch';
 
@@ -38,9 +38,13 @@ describe('L8-08: beforeunload і утримані правки', () => {
     expect(event.defaultPrevented).toBe(true);
   });
 
-  it('утримана правка в сховищі: закриття вкладки питає; правильна правка іде маячком', () => {
-    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(new Response('{}'))));
+  it('утримана правка в сховищі: закриття вкладки питає; маячка немає, правильні правки зберігає звичайний шлях після обробника', () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn(() => Promise.resolve(new Response('{}')));
+    vi.stubGlobal('fetch', fetchMock);
     renderHook(() => useDocumentPending(1), { wrapper });
+    const saved: unknown[] = [];
+    const off = registerSliceSaver(4, 202609, (edits) => saved.push(...edits));
 
     putPendingEdit(4, 202609, edit);
     putPendingEdit(4, 202609, other);
@@ -50,10 +54,21 @@ describe('L8-08: beforeunload і утримані правки', () => {
     window.dispatchEvent(event);
 
     expect(event.defaultPrevented).toBe(true);
+    // ⛔ L8-08: «Залишитися» не має лишити правки зі старим baseVersion після маячка.
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(saved).toHaveLength(0);
+
+    vi.runAllTimers();
+
+    expect(saved).toEqual([other]);
+    expect(fetchMock).not.toHaveBeenCalled();
+    off();
+    vi.useRealTimers();
   });
 
   it('лише правильні правки: діалогу немає (поведінка D-134 збережена)', () => {
-    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(new Response('{}'))));
+    const fetchMock = vi.fn(() => Promise.resolve(new Response('{}')));
+    vi.stubGlobal('fetch', fetchMock);
     renderHook(() => useDocumentPending(1), { wrapper });
 
     putPendingEdit(4, 202609, other);
@@ -62,6 +77,7 @@ describe('L8-08: beforeunload і утримані правки', () => {
     window.dispatchEvent(event);
 
     expect(event.defaultPrevented).toBe(false);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it('жодних правок: діалогу немає й нічого не надсилається', () => {
