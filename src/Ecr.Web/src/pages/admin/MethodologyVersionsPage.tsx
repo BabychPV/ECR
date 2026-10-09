@@ -632,7 +632,9 @@ export function MethodologyVersionsPage(): JSX.Element {
           {/* L-2 / RC14-F: правило категорії константи — одне на версію; право
               редагувати те саме, що й для правил відбору (`Calculation.EditRule`),
               а чернетка — умова `editable`. */}
+          {/* N4-02: `key` — чернетка виразу не переходить на іншу версію (там вона писала б у чужу). */}
           <MethodologyCategoryRulePanel
+            key={selected.id}
             methodologyId={methodologyId}
             versionId={selected.id}
             editable={categoryRuleEditable}

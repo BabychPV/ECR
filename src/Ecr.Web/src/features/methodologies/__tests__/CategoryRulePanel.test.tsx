@@ -164,4 +164,29 @@ describe('MethodologyCategoryRulePanel', () => {
     fireEvent.change(screen.getByLabelText('Expression'), { target: { value: 'Diesel' } });
     await waitFor(() => expect(screen.queryByRole('alert')).toBeNull());
   });
+
+  it('N4-02: відкрита чернетка зникає, коли редагування стало недоступним (editable → false)', async () => {
+    mockApi('!ECW_Category');
+    await loadCatalog('en', 'public');
+    await loadCatalog('en', 'private');
+
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const tree = (editable: boolean) => (
+      <MantineProvider theme={testTheme}>
+        <QueryClientProvider client={client}>
+          <MethodologyCategoryRulePanel methodologyId={1} versionId={10} editable={editable} />
+        </QueryClientProvider>
+      </MantineProvider>
+    );
+    const view = render(tree(true));
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit rule' }));
+    await screen.findByLabelText('Expression');
+
+    view.rerender(tree(false));
+
+    expect(screen.queryByLabelText('Expression')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Save' })).toBeNull();
+    await screen.findByText('!ECW_Category');
+  });
 });

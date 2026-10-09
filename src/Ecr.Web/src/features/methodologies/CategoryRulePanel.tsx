@@ -69,6 +69,10 @@ export function MethodologyCategoryRulePanel({ methodologyId, versionId, editabl
 
   const current = rule.data?.expression ?? null;
 
+  // N4-02: чернетка живе лише поки правка дозволена. Якщо `editable` згас (інша версія не-чернетка, право
+  // знято), відкрита форма не лишається з активною «Save» — показується збережене правило.
+  const drafting = editable && draft !== null;
+
   return (
     <>
       <Group justify="space-between">
@@ -91,14 +95,14 @@ export function MethodologyCategoryRulePanel({ methodologyId, versionId, editabl
         isPending={rule.isPending}
         error={rule.error}
         data={rule.data}
-        isEmpty={(dto) => dto.expression === null && draft === null}
+        isEmpty={(dto) => dto.expression === null && !drafting}
         emptyTitle={t('methodologies.categoryRuleNone')}
         emptyHint={t('methodologies.categoryRuleNoneHint')}
         skeleton="table"
         onRetry={() => void rule.refetch()}
       >
         {(dto) =>
-          draft !== null ? (
+          drafting ? (
             <Stack gap="xs">
               <Textarea
                 label={t('methodologies.categoryRuleExpression')}
@@ -126,7 +130,11 @@ export function MethodologyCategoryRulePanel({ methodologyId, versionId, editabl
                 <Button
                   loading={saveLoading}
                   disabled={draft.trim() === ''}
-                  onClick={() => save.mutate(draft.trim())}
+                  onClick={() => {
+                    // Mantine не блокує кнопку, доки не спрацював поріг `loading` (usePendingLoading).
+                    if (save.isPending) return;
+                    save.mutate(draft.trim());
+                  }}
                 >
                   {t('common.save')}
                 </Button>
@@ -146,7 +154,7 @@ export function MethodologyCategoryRulePanel({ methodologyId, versionId, editabl
       </AsyncBoundary>
 
       <Modal
-        opened={confirmingDelete}
+        opened={editable && confirmingDelete}
         onClose={() => setConfirmingDelete(false)}
         title={t('methodologies.categoryRuleDelete')}
       >
@@ -156,7 +164,14 @@ export function MethodologyCategoryRulePanel({ methodologyId, versionId, editabl
             <Button variant="default" onClick={() => setConfirmingDelete(false)}>
               {t('common.cancel')}
             </Button>
-            <Button color="statusError" loading={removeLoading} onClick={() => remove.mutate()}>
+            <Button
+              color="statusError"
+              loading={removeLoading}
+              onClick={() => {
+                if (remove.isPending) return;
+                remove.mutate();
+              }}
+            >
               {t('common.delete')}
             </Button>
           </Group>
