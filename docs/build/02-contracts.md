@@ -2195,8 +2195,10 @@ public interface ICellPatcher
 public interface ICollectionRunner
 {
     public interface ICollectionRunner
-    public Task RunAsync(
+    public Task<CollectionRunSummary> RunAsync(
 }
+
+public sealed record CollectionRunSummary(DateTime ReadFromUtc, int PointsWritten);
 ```
 
 #### `ISourceEventSyncJob`

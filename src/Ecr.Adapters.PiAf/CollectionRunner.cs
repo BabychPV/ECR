@@ -110,7 +110,7 @@ public sealed partial class CollectionRunner(
     private const string AuthenticationRefused = "ECR-INT-0502";
 
     /// <inheritdoc />
-    public async Task RunAsync(
+    public async Task<CollectionRunSummary> RunAsync(
         int sourceEntityId, DateTime fromUtc, DateTime toUtc, IJobProgress progress, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(progress);
@@ -152,6 +152,9 @@ public sealed partial class CollectionRunner(
 
         var covered = new List<TimeInterval>();
         var retrieved = 0;
+
+        // Найраніша мітка записаної точки (аудит I1-01): від неї задача ставить матеріалізацію.
+        DateTime? earliestWritten = null;
         string? failureCode = null;
 
         // ⚠ U12: причина — конверт (ключ + параметри, `Q-326`), а не готове
@@ -254,6 +257,11 @@ public sealed partial class CollectionRunner(
                     runId, sourceEntityId, Fresh(result.Points, state.Carried), maps, units, pausedPaths, ct)
                 .ConfigureAwait(false);
             retrieved += saved.Written;
+
+            if (saved.Earliest is { } earliest && (earliestWritten is null || earliest < earliestWritten))
+            {
+                earliestWritten = earliest;
+            }
             state.Pages++;
 
             if (saved.UnitChange is { } change)
@@ -639,6 +647,14 @@ public sealed partial class CollectionRunner(
                 Params(("points", Number(retrieved))),
                 ct)
             .ConfigureAwait(false);
+
+        // ⛔ Аудит I1-01: від найранішої ЗАПИСАНОЇ точки, а не лише покритого інтервалу. Точки
+        // пишуться й за непокритий хвіст (сторінки до обриву, атрибути, що встигли), тож у комірки
+        // треба перенести все, що змінилося. Не від початку прогалини: прогалина, за яку джерело
+        // нічого не дало, щопрогону ставила б матеріалізацію (і SkippedPeriodClosed) закритому місяцю.
+        return new CollectionRunSummary(
+            earliestWritten is { } changed && changed < fromUtc ? changed : fromUtc,
+            retrieved);
     }
 
     /// <summary>Конверт причини (<c>Q-326</c>): ключ каталогу й параметри підстановки.</summary>
@@ -1011,7 +1027,7 @@ public sealed partial class CollectionRunner(
     {
         if (points.Count == 0)
         {
-            return new SaveOutcome(0, null);
+            return new SaveOutcome(0, null, null);
         }
 
         JobProgressMessageEnvelope? unitChange = null;
@@ -1051,7 +1067,8 @@ public sealed partial class CollectionRunner(
             ? 0
             : await store.UpsertRawPointsAsync(runId, sourceEntityId, accepted, ct).ConfigureAwait(false);
 
-        return new SaveOutcome(written, unitChange);
+        // Мітка — з того, що пішло в сховище; без записаного матеріалізувати нема чого.
+        return new SaveOutcome(written, unitChange, written > 0 ? accepted.Min(p => p.Timestamp) : null);
     }
 
     /// <summary>
@@ -1114,7 +1131,8 @@ public sealed partial class CollectionRunner(
     /// <summary>Підсумок збереження батча.</summary>
     /// <param name="Written">Скільки точок записано.</param>
     /// <param name="UnitChange">Причина-конверт про зміну одиниці; <c>null</c> — не було.</param>
-    private sealed record SaveOutcome(int Written, JobProgressMessageEnvelope? UnitChange);
+    /// <param name="Earliest">Найраніша мітка записаних точок; <c>null</c> — нічого не записано.</param>
+    private sealed record SaveOutcome(int Written, JobProgressMessageEnvelope? UnitChange, DateTime? Earliest);
 
     /// <summary>Атрибути, які читаємо для сутності.</summary>
     /// <remarks>

@@ -75,6 +75,46 @@ public sealed class CollectionRunnerTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "I1-01")]
+    public async Task RunAsync_повертає_мітку_найранішої_точки_яку_дописало_наздоганяння()
+    {
+        // Покриття порожнє: прогалина [from − 45 діб, from) читається разом із запитаним діапазоном.
+        var from = Now.AddDays(-1);
+        var late = from.AddDays(-10);
+        var world = new World();
+        world.Source.ReadAsync(Arg.Any<CollectionRequest>(), Arg.Any<CancellationToken>())
+            .Returns(call => call.ArgAt<CollectionRequest>(0).FromUtc < from
+                ? new CollectionResult([new SourceDataPoint("tag", late, 3m, null, "kg", "Good")], [], null)
+                : new CollectionResult([new SourceDataPoint("tag", Now.AddHours(-2), 10m, null, "kg", "Good")], [], null));
+
+        // ⛔ МУТАЦІЙНИЙ ДОКАЗ: повертати `fromUtc` замість мітки найранішої записаної точки —
+        // задача матеріалізації не дізнається, що змінився минулий місяць.
+        var summary = await world.Runner.RunAsync(SourceEntityId, from, Now, world.Progress, CancellationToken.None);
+
+        Assert.Equal((late, 2), (summary.ReadFromUtc, summary.PointsWritten));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "I1-01")]
+    public async Task RunAsync_без_давніших_точок_повертає_запитаний_початок()
+    {
+        // Прогалина, за яку джерело нічого не дало, не розширює матеріалізацію: інакше закритий
+        // місяць щопрогону отримував би задачу (і SkippedPeriodClosed) без жодної нової точки.
+        var from = Now.AddDays(-1);
+        var world = new World();
+        world.Source.ReadAsync(Arg.Any<CollectionRequest>(), Arg.Any<CancellationToken>())
+            .Returns(call => call.ArgAt<CollectionRequest>(0).FromUtc < from
+                ? new CollectionResult([], [], null)
+                : new CollectionResult([new SourceDataPoint("tag", Now.AddHours(-2), 10m, null, "kg", "Good")], [], null));
+
+        var summary = await world.Runner.RunAsync(SourceEntityId, from, Now, world.Progress, CancellationToken.None);
+
+        Assert.Equal(from, summary.ReadFromUtc);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait("Requirement", "ФВ-16.9")]
     [Trait("Requirement", "ФВ-12.9")]
     public async Task Зміна_UOM_атрибута_ставить_на_паузу_лише_його_мапінг_а_решта_збирається()

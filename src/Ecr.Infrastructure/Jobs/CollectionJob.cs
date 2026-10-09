@@ -163,13 +163,14 @@ public sealed class CollectionJob(
                 ct)
             .ConfigureAwait(false);
 
+        CollectionRunSummary? summary;
         try
         {
             // ⚠ Ідемпотентність забезпечує збирач: повторний запуск того самого
             // діапазону не дублює даних. Тому задача НЕ перевіряє «а чи вже
             // збирали» — така перевірка була б другим місцем, де живе те саме
             // правило, і розійшлася б із першим.
-            await runner
+            summary = await runner
                 .RunAsync(request.SourceEntityId, from, to, progress, ct)
                 .ConfigureAwait(false);
         }
@@ -193,7 +194,12 @@ public sealed class CollectionJob(
             await SaveRunAsync(db, schedule, now, to, ct).ConfigureAwait(false);
         }
 
-        await EnqueueMaterializationAsync(request.SourceEntityId, from, to, ct).ConfigureAwait(false);
+        // ⛔ Аудит I1-01: наздоганяння читає прогалини до 45 діб ДО `from` — їхні точки мусять дійти
+        // й до комірок минулого періоду. Раніше матеріалізація ставилася лише на [from, to], і
+        // місяць у Grace, чиї дані дочитали пізніше, лишався із заниженим числом: Grace→Closed
+        // матеріалізації не ставить, а повторного збору за той діапазон ніхто не запускає.
+        var materializeFrom = summary?.ReadFromUtc is { } readFrom && readFrom < from ? readFrom : from;
+        await EnqueueMaterializationAsync(request.SourceEntityId, materializeFrom, to, ct).ConfigureAwait(false);
 
         if (hasEventMap)
         {
