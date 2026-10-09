@@ -220,7 +220,7 @@ public sealed class SqlQueryDateTimeKindTests
     /// <summary>Імена <see cref="DateTime"/>-властивостей типу рядка, крім календарних дат; порожньо — типу немає або моментів у ньому немає.</summary>
     private static List<string> DateTimeProperties(
         string typeName, SourceFile local, IReadOnlyList<SourceFile> all,
-        IReadOnlyDictionary<string, List<(int Line, string Text)>> codeByFile)
+        Dictionary<string, List<(int Line, string Text)>> codeByFile)
     {
         var simple = typeName[(typeName.LastIndexOf('.') + 1)..];
         var declaration = new Regex(@"\b(?:record|class|struct)\s+(?:struct\s+|class\s+)?" + Regex.Escape(simple) + @"\b");
