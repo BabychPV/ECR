@@ -258,6 +258,26 @@
     DBA вже накотив схему окремо (крок 2 повністю пропускається, sqlcmd
     не викликається жодного разу).
 
+    ⛔ S2-04 (аудит 2026-10-09b, HU-13 Q3): без -SkipSchema крок 2 спершу
+    вимагає свіжу копію бази (-BackupMaxAgeHours), а перед першим sqlcmd зі
+    зміною схеми ЗУПИНЯЄ EcrWorker і EcrApi (Stop-Service з очікуванням):
+    стара версія не пише в нову схему (DROP TYPE у 15-cell-tvp.sql,
+    передперевірки EF-міграцій, ROLLBACK IMMEDIATE у 06-rcsi.sql). Служби
+    знову піднімає крок 6.
+
+.PARAMETER SkipBackupCheck
+    Не перевіряти свіжу копію бази перед кроком 2 (автоматизація; копію
+    зроблено засобом, що не пише в msdb цього інстансу, — наприклад, на
+    вторинній репліці AG). Відповідальність за копію — на тому, хто
+    запускає: відкат (runbook §9) без неї неможливий.
+
+.PARAMETER BackupMaxAgeHours
+    Найстаріша прийнятна повна чи диференційна копія -Database за
+    msdb.dbo.backupset, у годинах (типово 24). Перевіряється лише при
+    оновленні схеми: не з -SkipSchema, не з -FirstDeployment (порожня база),
+    не з -SkipBackupCheck. Дані, введені після копії, відкат втратить —
+    найкраще зробити COPY_ONLY-копію безпосередньо перед запуском.
+
 .PARAMETER FirstDeployment
     Перше розгортання на цій базі — тоді й лише тоді виконується
     14-agent-jobs.sql (завдання SQL Agent у msdb, `D-66`, одноразово).
@@ -359,6 +379,8 @@ param(
     [string] $MsiPath,
     [ValidatePattern('^\d+\.\d+\.\d+$')] [string] $Version,
     [switch] $SkipSchema,
+    [switch] $SkipBackupCheck,
+    [ValidateRange(1, 720)] [int] $BackupMaxAgeHours = 24,
     [switch] $FirstDeployment,
     [switch] $CreateDatabaseIfMissing,
     [ValidateRange(10, 3600)] [int] $ReadyTimeoutSeconds = 180,
@@ -919,6 +941,64 @@ function Resolve-JobExecutionConfig {
     return [pscustomobject]@{ Set = $set; Remove = [string[]] $remove; Warnings = [string[]] $warnings }
 }
 
+# ⛔ S2-04 (аудит 2026-10-09b, HU-13 Q3): відкат (runbook §9) спирається на копію
+# бази, зроблену перед оновленням, — тож без неї схему не змінюємо. Чиста функція:
+# $AgeMinutes — відповідь запиту до msdb.dbo.backupset (хвилини від останньої
+# повної/диференційної копії або 'none'). $null — копія свіжа; інакше — причина
+# відмови (з підказкою -SkipBackupCheck для автоматизації).
+function Get-SchemaBackupProblem {
+    param(
+        [string] $AgeMinutes,
+        [Parameter(Mandatory)] [int] $MaxAgeHours,
+        [Parameter(Mandatory)] [string] $Database
+    )
+
+    $hint = ("Зробіть копію (BACKUP DATABASE [$Database] TO DISK = N'<шлях>' WITH COPY_ONLY, CHECKSUM; runbook §6.2) " +
+        "і запустіть знову; якщо копію зроблено інакше (msdb іншого вузла, VSS-засіб без запису в msdb) — -SkipBackupCheck.")
+    $raw = "$AgeMinutes".Trim()
+    if (-not $raw -or $raw -eq 'none') {
+        return "Копії бази $Database (повної чи диференційної) у msdb.dbo.backupset немає: відкат оновлення (runbook §9) був би неможливим. $hint"
+    }
+    $minutes = 0
+    if (-not [int]::TryParse($raw, [ref] $minutes)) {
+        return "Неочікувана відповідь на запит про копію бази ${Database}: '$raw'. $hint"
+    }
+    if ($minutes -gt $MaxAgeHours * 60) {
+        return ("Остання копія бази $Database зроблена $([math]::Round($minutes / 60.0, 1)) год тому — старша за " +
+            "-BackupMaxAgeHours ${MaxAgeHours}: відкат втратив би все введене після неї. $hint")
+    }
+    return $null
+}
+
+# ⛔ S2-04: схема змінюється лише без живого застосунку — стара версія не пише в
+# нову схему (DROP TYPE у 15-cell-tvp.sql, передперевірки EF-міграцій між
+# перевіркою й ALTER, ROLLBACK IMMEDIATE у 06-rcsi.sql). Спершу EcrWorker (бере
+# задачі черги), потім EcrApi. Stop-Service -NoWait + WaitForStatus з межею, а не
+# безмежне очікування Stop-Service: служба, що не зупинилась, — відмова ДО першого
+# sqlcmd зі зміною. Повертає імена зупинених служб (крок 6 піднімає їх знову).
+function Stop-EcrServicesForSchema {
+    [CmdletBinding(SupportsShouldProcess)]
+    param([ValidateRange(1, 3600)] [int] $TimeoutSeconds = 120)
+
+    $stopped = [System.Collections.Generic.List[string]]::new()
+    foreach ($name in 'EcrWorker', 'EcrApi') {
+        $svc = Get-Service -Name $name -ErrorAction SilentlyContinue
+        if (-not $svc -or "$($svc.Status)" -eq 'Stopped') { continue }
+        if (-not $PSCmdlet.ShouldProcess($name, 'Stop-Service before schema change')) { continue }
+
+        Stop-Service -Name $name -Force -NoWait
+        try {
+            $svc.WaitForStatus('Stopped', [TimeSpan]::FromSeconds($TimeoutSeconds))
+        }
+        catch {
+            throw ("Служба $name не зупинилась за $TimeoutSeconds с — схему НЕ змінено. Зупиніть її вручну " +
+                "(Stop-Service $name) і запустіть скрипт знову. $($_.Exception.Message)")
+        }
+        $stopped.Add($name)
+    }
+    return $stopped.ToArray()
+}
+
 # ⛔ Чиста функція: чи потрібен .NET SDK цьому запуску. Його кличуть у двох місцях —
 # `build-msi.ps1` (коли -MsiPath не задано) і `dotnet ef migrations script` (крок 2,
 # коли схема не з пакета й немає -SkipSchema). Більше ніде: пакований запуск із
@@ -1391,6 +1471,7 @@ function Invoke-DeployQuery {
 }
 
 $detectedEdition = $null
+$stoppedForSchema = @()   # S2-04: служби, зупинені кроком 2 (крок 6 піднімає їх знову)
 
 try {
     # ⛔ Q-232: пароль виставляється ПЕРЕД першим-ліпшим викликом sqlcmd,
@@ -1456,6 +1537,29 @@ END
     else {
         Write-Step "Крок 2/7: схема ($Database на $SqlInstance)"
 
+        # ⛔ S2-04 (HU-13 Q3): свіжа копія — ДО зупинки служб (немає копії — немає й простою).
+        if ($FirstDeployment) {
+            Write-Host "  Копію бази не перевіряю: -FirstDeployment (порожня база)." -ForegroundColor DarkGray
+        }
+        elseif ($SkipBackupCheck) {
+            Write-Host ("  ⚠ Копію бази не перевіряю (-SkipBackupCheck): відкат (runbook §9) можливий лише з копії, " +
+                "зробленої перед оновленням, — за неї відповідає той, хто запускає.") -ForegroundColor Yellow
+        }
+        else {
+            $backupRows = Invoke-DeployQuery -TargetDb 'master' -Query (
+                "SET NOCOUNT ON; SELECT ISNULL(CAST(DATEDIFF(MINUTE, MAX(backup_finish_date), GETDATE()) AS nvarchar(20)), N'none') " +
+                "FROM msdb.dbo.backupset WHERE database_name = N'$($Database.Replace("'", "''"))' AND type IN ('D', 'I');")
+            if ($null -eq $backupRows) {
+                Write-Host "  Свіжість копії бази буде перевірено запитом до msdb.dbo.backupset (-WhatIf: не виконується)." -ForegroundColor DarkGray
+            }
+            else {
+                $backupProblem = Get-SchemaBackupProblem -AgeMinutes ([string] (@($backupRows) | Select-Object -First 1)) `
+                    -MaxAgeHours $BackupMaxAgeHours -Database $Database
+                if ($backupProblem) { throw $backupProblem }
+                Write-Host "  Копія бази ${Database}: не старша за $BackupMaxAgeHours год (msdb.dbo.backupset)." -ForegroundColor Green
+            }
+        }
+
         if ($isPackagedSchema) {
             Write-Host "  migration.sql уже в пакеті — dotnet ef не викликається (немає SDK на чистому сервері)." -ForegroundColor DarkGray
         }
@@ -1483,6 +1587,13 @@ END
             '10-triggers.sql', '06-rcsi.sql'
         ))
         if ($FirstDeployment) { $scripts.Add('14-agent-jobs.sql') }
+
+        # ⛔ S2-04: служби зупинено ДО першого sqlcmd зі зміною схеми; піднімає їх крок 6.
+        $stoppedForSchema = @(Stop-EcrServicesForSchema)
+        if ($stoppedForSchema.Count) {
+            Write-Host ("  Зупинено перед зміною схеми: $($stoppedForSchema -join ', ') — крок 6 запустить знову; " +
+                "якщо розгортання впаде раніше, служби лишаться зупиненими.") -ForegroundColor Yellow
+        }
 
         foreach ($name in $scripts) {
             if ($name -eq '<migration>') {
@@ -1768,6 +1879,10 @@ Write-Step "Крок 6/7: старт служби"
 
 if (-not $ServiceAccount) {
     Write-Host "SERVICE_ACCOUNT не задано — служба зареєстрована з типом запуску Manual і не стартує (навмисно, docs/build/10-installer.md §1.4, L10-03)." -ForegroundColor Yellow
+    if ($stoppedForSchema.Count) {
+        Write-Host ("  ⚠ Крок 2 зупинив $($stoppedForSchema -join ', ') перед зміною схеми — без -ServiceAccount скрипт " +
+            "їх не запускає: Start-Service вручну.") -ForegroundColor Yellow
+    }
     if ($workerEnabled) {
         Write-Host ("  ⚠ EcrWorker теж не стартує, а EcrApi вже налаштовано на Executor = Worker: запускай ОБИДВІ служби, " +
             "інакше перерахунок стоятиме в черзі (перевірка worker на /health/ready — Degraded).") -ForegroundColor Yellow
