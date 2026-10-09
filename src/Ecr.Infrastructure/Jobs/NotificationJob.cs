@@ -586,24 +586,49 @@ public sealed class NotificationJob(
     /// <summary>Налаштування серіалізації зведення; спільні на всі виклики.</summary>
     private static readonly JsonSerializerOptions Options = new(JsonSerializerDefaults.Web);
 
+    /// <summary>
+    /// Найдовше вікно, яке наздоганяє прогін після серії власних збоїв (J1-02).
+    /// </summary>
+    /// <remarks>
+    /// Тиждень: після довгого простою зведення не тягне в один лист увесь журнал, а
+    /// збої старші за тиждень уже видно на екранах обслуговування.
+    /// </remarks>
+    public static TimeSpan MaxCatchUp => TimeSpan.FromDays(7);
+
     /// <summary>Від якого моменту брати збої.</summary>
     /// <remarks>
     /// ⚠ Межа — початок ПОПЕРЕДНЬОГО прогону цієї задачі, а не «останні N
     /// годин». Розклад можуть змінити, задачу — перезапустити руками, і фіксоване
     /// вікно тоді або пропустило б збої, або показало б їх удруге.
+    ///
+    /// ⛔ J1-02: лише ЗАВЕРШЕНОГО і не <c>Failed</c> прогону. Прогін комітиться ДО роботи,
+    /// тож той, що впав (дедлок, таймаут скану, обрив з'єднання) до коміту листа, лишав
+    /// своє <c>StartedAt</c> межею для наступного — і збої його вікна не потрапляли ні
+    /// в лист, ні в канали, а про сам збій зведення мовчить (<c>JobCode != Code</c>).
+    /// Тепер наступний прогін бере вікно невдалого на себе. Ціна — можливий дубль, якщо
+    /// прогін упав ПІСЛЯ коміту листа (at-least-once), але не тиша. Те саме для
+    /// <c>Running</c>, що загинув разом із процесом (<c>FinishedAt</c> порожній).
     /// </remarks>
     private async Task<DateTime> SinceAsync(DateTime now, CancellationToken ct)
     {
         var previous = await db.MaintenanceRuns
             .AsNoTracking()
-            .Where(r => r.JobCode == Code)
+            .Where(r => r.JobCode == Code
+                        && r.FinishedAt != null
+                        && r.Status != MaintenanceRunFailure.FailedStatus)
             .OrderByDescending(r => r.StartedAt)
             .Take(1)
             .Select(r => (DateTime?)r.StartedAt)
             .FirstOrDefaultAsync(ct)
             .ConfigureAwait(false);
 
-        return previous ?? now - FirstRunLookback;
+        if (previous is null)
+        {
+            return now - FirstRunLookback;
+        }
+
+        var floor = now - MaxCatchUp;
+        return previous.Value < floor ? floor : previous.Value;
     }
 
     /// <summary>Зведення за період.</summary>

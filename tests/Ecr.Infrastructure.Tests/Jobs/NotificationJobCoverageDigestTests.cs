@@ -443,7 +443,10 @@ public sealed class NotificationJobCoverageDigestTests(SqlServerFixture sql)
         entity.Deactivate();
         db.SourceEntities.Add(entity);
 
-        db.MaintenanceRuns.Add(new MaintenanceRun(NotificationJob.Code, now.AddHours(-1)));
+        // ⚠ Завершений успішно: вікно бере лише завершений не-Failed прогін (J1-02).
+        var previousRun = new MaintenanceRun(NotificationJob.Code, now.AddHours(-1));
+        previousRun.Complete("Succeeded", null, now.AddHours(-1));
+        db.MaintenanceRuns.Add(previousRun);
         await db.SaveChangesAsync(CancellationToken.None);
 
         return new World(entity.Id, entityCode);
