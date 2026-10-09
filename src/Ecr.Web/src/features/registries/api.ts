@@ -4,6 +4,16 @@ import { queryKeys } from '@/api/queryKeys';
 import type { components } from '@/api/schema';
 import type { CreateRegistryDto, RegistryDefDto, RegistryEntryImportReport } from '@/api/types';
 
+/**
+ * Скільки записи Lookup-довідника на екрані документа вважаються свіжими: повернення у вкладку раніше не
+ * перекачує довідник (до 50 тис. записів), пізніше — один рефетч на фокус.
+ *
+ * ⛔ AN-108 / P2-04: одна стала для ВСІХ спостерігачів ключа `queryKeys.registries.entries(code)` на сторінці
+ * документа (сітка, шапка). TanStack Query рахує свіжість для кожного спостерігача окремо, і фокус-рефетч
+ * спрацьовує, якщо застарів хоч один: шапка з дефолтом 30 с зводила 5 хв сітки нанівець.
+ */
+export const LookupEntriesStaleTimeMs = 5 * 60_000;
+
 /** «Де використовується» — єдина форма `GET /…/usage` (директива №15). */
 export type UsageResponse = components['schemas']['UsageResponse'];
 

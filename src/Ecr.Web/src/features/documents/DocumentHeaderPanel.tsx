@@ -31,6 +31,7 @@ import { t } from '@/shared/i18n';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { showDone } from '@/shared/ui/notify';
 import { registerUnsavedSource } from '@/shared/ui/unsavedSources';
+import { LookupEntriesStaleTimeMs } from '@/features/registries/api';
 import {
   bilingualLabel,
   ContractOrder,
@@ -446,6 +447,9 @@ export function DocumentHeaderPanel({
           apiFetch<RegistryEntryDto[]>(
             asOf === null ? baseUrl : `${baseUrl}?asOf=${asOf}`,
           ),
+        // ⛔ AN-108 / P2-04: та сама свіжість, що в сітці (один ключ для нетемпорального довідника). Дефолт 30 с
+        // цього спостерігача перекачував довідник (до 50 тис. записів) на кожне повернення у вкладку.
+        staleTime: LookupEntriesStaleTimeMs,
       };
     }),
   });

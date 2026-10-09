@@ -6,6 +6,7 @@ import { DocumentHeaderPanel } from '@/features/documents/DocumentHeaderPanel';
 import { showDone } from '@/shared/ui/notify';
 import { flushUnsaved, hasUnsavedChanges, unsavedCount } from '@/shared/ui/unsavedSources';
 import { testTheme } from '@/test/render';
+import { LookupEntriesStaleTimeMs } from '@/features/registries/api';
 
 /**
  * Панель шапки документа: `GET/PATCH /api/v1/documents/{id}/header`.
@@ -503,6 +504,35 @@ describe('DocumentHeaderPanel: Lookup-поле — picker за довідник�
     expect(input.disabled).toBe(false);
     expect(entriesRequests).toEqual([]);
     expect(registriesRequests).toEqual([]);
+  });
+
+  // ⛔ AN-108 / P2-04. Мутаційний доказ: прибери `staleTime` з `useQueries` шапки — спостерігач отримає дефолт
+  // 30 с, і фокус-рефетч знову перекачуватиме довідник (до 50 тис. записів) на кожне повернення у вкладку.
+  it('спостерігач записів довідника має ту саму 5-хвилинну свіжість, що й сітка', async () => {
+    const client = show({
+      fields: [
+        field({
+          code: 'UNIT',
+          dataType: 'Lookup',
+          value: 42,
+          lookupRegistryDefId: 7,
+          label: { values: { en: 'Unit' } },
+        }),
+      ],
+      registries: {
+        list: [registryDef({ id: 7, code: 'UNITS' })],
+        entries: { UNITS: [registryEntry({ id: 42, display: 'Кілограм' })] },
+      },
+    });
+
+    await waitFor(() => expect(entriesRequests).toHaveLength(1));
+
+    const queries = client.getQueryCache().findAll({ queryKey: ['registries', 'entries', 'UNITS'] });
+    const observers = queries.flatMap((query) => query.observers);
+    expect(observers.length).toBeGreaterThan(0);
+    for (const observer of observers) {
+      expect(observer.options.staleTime).toBe(LookupEntriesStaleTimeMs);
+    }
   });
 
   it('показує людську назву обраного запису, не сирий ValueRegistryEntryId', async () => {
