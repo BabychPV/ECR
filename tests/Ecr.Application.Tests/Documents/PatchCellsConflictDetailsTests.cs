@@ -312,6 +312,47 @@ public sealed class PatchCellsConflictDetailsTests
         Assert.Equal(TheirMoment, details.TheirChangedAt);
     }
 
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "AN-115")]
+    [InlineData("Import")]
+    [InlineData("ImportOverwrite")]
+    public async Task Імпорт_книги_підписано_іменем_того_хто_імпортував(string origin)
+    {
+        StoredValue(new CellValueData { ValueNumeric = 12.40m });
+
+        // ⛔ AN-115: число з книги Excel ввела й застосувала людина — і саме її
+        // ім'я, а не «system», має стояти в діалозі конфлікту.
+        LastChange(new LastCellChange(TheirMoment, ChangedByUserId: 77, "A. Serikbayev", origin));
+
+        var conflict = await Assert.ThrowsAsync<ConcurrencyConflictException>(
+            () => Handler().HandleAsync(StaleRequest(new PatchCell("Volume", 9m)), CancellationToken.None));
+
+        var details = Assert.Single(ConflictsOf(conflict));
+
+        Assert.Equal("A. Serikbayev", details.TheirUser);
+        Assert.Equal(origin, details.TheirOrigin);
+    }
+
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "AN-115")]
+    [InlineData("UserEdit", true)]
+    [InlineData("Import", true)]
+    [InlineData("ImportOverwrite", true)]
+    [InlineData("Recalculation", false)]
+    [InlineData("Integration", false)]
+    [InlineData("Migration", false)]
+    [InlineData(null, false)]
+    public void Людські_походження_збігаються_з_переліком_сторожів(string? origin, bool human)
+    {
+        Assert.Equal(human, CellChangeOrigins.IsHuman(origin));
+
+        // ⚠ Той самий перелік, що SQL-сторожі інтеграції: розбіжність означала б,
+        // що екран і сторож по-різному відповідають на «людина чи система».
+        Assert.Equal(human, origin is not null && CellChangeOrigins.HumanOriginsSql.Contains($"N'{origin}'", StringComparison.Ordinal));
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
     [Trait("Requirement", "BE-06")]
