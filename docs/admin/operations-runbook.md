@@ -74,6 +74,14 @@ Api й воркер на **одному** хості — різні ролі й 
 3. Змінні оточення з префіксом `ECR_`, `:` → `__`. Вони лежать у
    `HKLM:\SYSTEM\CurrentControlSet\Services\EcrApi\Environment`.
 
+✎ R5-U1/U1-07: служба **`EcrWorker`** (і її дочірні процеси перерахунку) читає той самий файл
+майданчика (п. 2), тож `Database:*` і `Calculations:*` звідти діють і на перерахунок. Порядок у
+воркері: `worker.settings.json` поруч з `Ecr.Worker.exe` (перезаписується при оновленні) → файл
+майданчика → `ECR_` з `Services\EcrWorker\Environment`. Файли Api (`appsettings*.json` поруч з exe)
+воркер, як і раніше, не читає. Файл майданчика воркер читає **лише на старті**: після правки —
+`Restart-Service EcrWorker`. Недійсне значення `Database:*`/`Calculations:*` зупиняє службу з ім'ям
+ключа (код виходу 3), як і Api (U19).
+
 ⛔ **Секрети (рядок підключення, паролі, `Secrets:*`) задаються лише змінними
 оточення служби**, ніколи у файлі.
 
@@ -333,9 +341,9 @@ OpenTelemetry Collector). За замовчуванням **вимкнено**: 
 `ecr.access.profile.build` у цьому режимі емітяться **ним**, а не Api.
 Він експортує їх сам, тим самим Meter `Ecr` і з тими самими ключами `Telemetry:*`
 (`Enabled`, `OtlpEndpoint`, `OtlpProtocol`, `ExportIntervalSeconds`), але читає їх
-**не з `appsettings.json` Api**, а з `worker.settings.json` поруч з `Ecr.Worker.exe`
-або зі змінних оточення служби наглядача `ECR_Telemetry__*` (дочірній їх
-успадковує). Тож для режиму Worker експорт вмикають там теж; у колекторі ці метрики
+**не з `appsettings.json` Api**, а з `worker.settings.json` поруч з `Ecr.Worker.exe`,
+файла майданчика `%ProgramData%\ECR\config\appsettings.Production.json` (✎ U1-07) або зі змінних
+оточення служби наглядача `ECR_Telemetry__*` (дочірній їх успадковує). Тож для режиму Worker експорт вмикають там теж; у колекторі ці метрики
 мають `service.name` = `ecr-worker`. `deploy-ecr.ps1 -TelemetryOtlpEndpoint http://collector:4317`
 (необов'язково `-TelemetryOtlpProtocol Grpc|HttpProtobuf`) пише ці змінні одразу в `Environment`
 `EcrApi` і `EcrWorker`; без параметра телеметрію не чіпає. Типовий інтервал дочірнього — 15 с, а перед

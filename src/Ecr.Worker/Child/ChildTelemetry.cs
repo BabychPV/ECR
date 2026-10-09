@@ -22,7 +22,8 @@ namespace Ecr.Worker.Child;
 /// MeterProvider у дочірньому вони не доходили нікуди — а в Api їх не було, бо задача там не
 /// виконувалась.
 ///
-/// ⚠ Конфігурація — <c>worker.settings.json</c> поруч з exe або <c>ECR_Telemetry__*</c>
+/// ⚠ Конфігурація — <c>worker.settings.json</c> поруч з exe, файл майданчика
+/// <c>%ProgramData%\ECR\config\appsettings.Production.json</c> (R5-U1/U1-07) або <c>ECR_Telemetry__*</c>
 /// оточення служби (дочірній успадковує оточення наглядача); <c>appsettings.json</c> Api дочірній
 /// НЕ читає. Вимкнено (<c>Telemetry:Enabled</c> не <c>true</c>) — нуль реєстрацій.
 ///

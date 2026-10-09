@@ -160,7 +160,8 @@ public sealed class ChildCompositionTests
                 Path.Combine(root, "appsettings.Production.json"),
                 """{ "Telemetry": { "ApiOnly": "1" } }""");
 
-            var builder = WorkerProgram.CreateBuilder(stub: null, contentRoot: root);
+            // U1-07: корінь %ProgramData% — та сама тимчасова тека (файлу майданчика в ній немає), а не машинний.
+            var builder = WorkerProgram.CreateBuilder(stub: null, contentRoot: root, commonApplicationData: root);
 
             Assert.NotEqual("Quartz", builder.Configuration[DbBackgroundJobScheduler.ModeKey]);
             Assert.Null(builder.Configuration["Calculations:ApiOnly"]);

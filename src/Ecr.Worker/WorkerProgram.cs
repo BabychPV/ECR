@@ -17,7 +17,7 @@ internal static partial class WorkerProgram
     /// <summary>Невідомий режим чи аргумент.</summary>
     public const int ExitUsage = 2;
 
-    /// <summary>Недійсна конфігурація <c>Jobs:Workers:*</c>.</summary>
+    /// <summary>Недійсна конфігурація <c>Jobs:Workers:*</c> або ключів дочірнього (<see cref="WorkerConfigurationValidation"/>).</summary>
     public const int ExitInvalidConfiguration = 3;
 
     /// <summary>Наглядач поза Windows.</summary>
@@ -71,7 +71,11 @@ internal static partial class WorkerProgram
         var builder = CreateBuilder(stub: null);
         builder.Services.AddWindowsService(o => o.ServiceName = ServiceName);
 
-        var problems = WorkerPoolOptions.TryLoad(builder.Configuration, out var options);
+        // ⛔ R5-U1/U1-07: і ключі, які читає дочірній (Database:*, Calculations:*), — служба не стартує з
+        // недійсним значенням, як і Api (U19), а не дає дітям мовчки взяти дефолт.
+        var problems = WorkerPoolOptions.TryLoad(builder.Configuration, out var options)
+            .Concat(WorkerConfigurationValidation.Validate(builder.Configuration))
+            .ToList();
         if (problems.Count == 0)
         {
             builder.Services.AddSingleton(options);
@@ -88,7 +92,7 @@ internal static partial class WorkerProgram
 
         if (problems.Count > 0)
         {
-            var message = "Недійсна конфігурація пулу воркерів — служба не стартує:"
+            var message = "Недійсна конфігурація воркера — служба не стартує:"
                 + Environment.NewLine + string.Join(Environment.NewLine, problems.Select(p => "  " + p));
             LogFatal(logger, message);
             await Console.Error.WriteLineAsync(message).ConfigureAwait(false);
@@ -124,7 +128,9 @@ internal static partial class WorkerProgram
         builder.ConfigureContainer(new DefaultServiceProviderFactory(
             new ServiceProviderOptions { ValidateScopes = true, ValidateOnBuild = false }));
 
-        var problems = WorkerPoolOptions.TryLoad(builder.Configuration, out var pool);
+        var problems = WorkerPoolOptions.TryLoad(builder.Configuration, out var pool)
+            .Concat(WorkerConfigurationValidation.Validate(builder.Configuration))
+            .ToList();
         if (problems.Count > 0)
         {
             await Console.Error.WriteLineAsync(string.Join(Environment.NewLine, problems)).ConfigureAwait(false);
@@ -157,17 +163,30 @@ internal static partial class WorkerProgram
         return Environment.ExitCode;
     }
 
-    /// <summary>Хост воркера: тека exe як корінь, <see cref="SettingsFile"/> і <c>ECR_</c> поверх.</summary>
+    /// <summary>
+    /// Хост воркера: тека exe як корінь, <see cref="SettingsFile"/>, файл майданчика
+    /// (<see cref="SiteSettingsPath"/>) і <c>ECR_</c> поверх.
+    /// </summary>
     /// <param name="stub">Заглушка дочірнього для тестів наглядача.</param>
     /// <param name="contentRoot">Корінь вмісту; <c>null</c> — тека exe.</param>
+    /// <param name="commonApplicationData">Корінь <c>%ProgramData%</c>; <c>null</c> — системний (тести дають тимчасову теку).</param>
     /// <remarks>
     /// ⛔ L2-12: exe лежить у теці Api (<c>Worker.wxs</c>: INSTALLFOLDER), а типові джерела
     /// <c>HostApplicationBuilder</c> підхоплюють звідти <c>appsettings.json</c> і
     /// <c>appsettings.{Environment}.json</c> Api — з <c>Jobs:Queue:Mode = Quartz</c>, телеметрією й
     /// <c>Calculations:*</c> Api. Їх прибрано: решта типових джерел (змінні оточення, логування)
     /// лишається, конфігурація воркера — лише його файл і <c>ECR_</c>.
+    /// ⛔ R5-U1/U1-07 (аудит 2026-10-09): і файл майданчика — той самий
+    /// <c>%ProgramData%\ECR\config\appsettings.Production.json</c>, що читає Api (runbook §2: «налаштування
+    /// майданчика редагуйте тут»). Без нього <c>Database:*</c> і <c>Calculations:*</c>, задані там, діяли
+    /// лише на Api, а перерахунок (з I2-2 — у дочірньому воркері) лишався на дефолтах. Порядок: файл
+    /// воркера (у теці програми, переписується MSI) &lt; файл майданчика &lt; <c>ECR_</c>. Режим черги з
+    /// файлу майданчика дочірньому не шкодить: його складання прибирає планувальники й лейни Api.
+    /// Без перечитування на льоту (<c>reloadOnChange: false</c>): перевірка старту
+    /// (<see cref="WorkerConfigurationValidation"/>) інакше не бачила б нового значення.
     /// </remarks>
-    internal static HostApplicationBuilder CreateBuilder(ChildStubOptions? stub, string? contentRoot = null)
+    internal static HostApplicationBuilder CreateBuilder(
+        ChildStubOptions? stub, string? contentRoot = null, string? commonApplicationData = null)
     {
         var builder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings
         {
@@ -182,6 +201,10 @@ internal static partial class WorkerProgram
         }
 
         builder.Configuration.AddJsonFile(SettingsFile, optional: true, reloadOnChange: false);
+        builder.Configuration.AddJsonFile(
+            SiteSettingsPath(commonApplicationData ?? Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData)),
+            optional: true,
+            reloadOnChange: false);
         builder.Configuration.AddEnvironmentVariables(prefix: "ECR_");
         if (stub is not null)
         {
@@ -192,6 +215,11 @@ internal static partial class WorkerProgram
 
         return builder;
     }
+
+    /// <summary>Файл майданчика — той самий шлях, що <c>ProgramDataConfiguration.AddProgramDataConfig</c> в Api.</summary>
+    /// <param name="commonApplicationData">Корінь <c>%ProgramData%</c>.</param>
+    internal static string SiteSettingsPath(string commonApplicationData)
+        => Path.Combine(commonApplicationData, "ECR", "config", "appsettings.Production.json");
 
     /// <summary>Цей самий exe у ролі <c>--child</c> (через <c>dotnet</c> — з шляхом до dll).</summary>
     private static ChildCommand SelfAsChild(IReadOnlyList<string> extra)
