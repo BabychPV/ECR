@@ -991,7 +991,8 @@ public sealed partial class SourceEventSyncJob(
     }
 
     /// <summary>
-    /// Гарди видалення ще раз — під блокуванням аркуша і рядка, у транзакції видалення (L3-04).
+    /// Гарди видалення ще раз — під блокуванням аркуша, рядка і періоду, у транзакції видалення (L3-04):
+    /// стан періоду, стан аркуша, правка людини.
     /// </summary>
     /// <returns>Подія покриття, якщо рядок видаляти вже не можна; <c>null</c> — можна.</returns>
     /// <remarks>
@@ -1015,6 +1016,15 @@ public sealed partial class SourceEventSyncJob(
             SELECT COUNT(*) FROM doc.TableRow WITH (UPDLOCK, HOLDLOCK)
              WHERE PeriodKey = @period AND TableInstanceId = @instance AND RowKey = @rowKey;
 
+            -- ⛔ L3-04: стан ПЕРІОДУ — теж під блокуванням у цій транзакції (HOLDLOCK тримає рядок doc.Period до
+            -- коміту: PeriodStateJob/Reopen з UPDLOCK дочекаються видалення, а закриття, що вже закомітилось
+            -- після рішення, видно цьому оператору — RCSI бере знімок на початку оператора).
+            SELECT TOP (1) p.State
+              FROM doc.Period AS p WITH (HOLDLOCK)
+              JOIN doc.Document AS d ON d.ProjectId = p.ProjectId
+             WHERE d.Id = @document AND p.PeriodKey = @period
+               AND p.State NOT IN (@open, @grace);
+
             SELECT TOP (1) Status FROM wf.ApprovalState
              WHERE @sheet IS NOT NULL AND DocumentId = @document AND SheetDefId = @sheet AND PeriodKey = @period
                AND Status IN (@submitted, @approved);
@@ -1033,11 +1043,24 @@ public sealed partial class SourceEventSyncJob(
         command.Parameters.AddWithValue("@rowKey", state.RowKey!);
         command.Parameters.AddWithValue("@document", map.DocumentId);
         command.Parameters.Add("@sheet", System.Data.SqlDbType.Int).Value = (object?)sheetDefId ?? DBNull.Value;
+        command.Parameters.Add("@open", System.Data.SqlDbType.TinyInt).Value = (byte)PeriodState.Open;
+        command.Parameters.Add("@grace", System.Data.SqlDbType.TinyInt).Value = (byte)PeriodState.Grace;
         command.Parameters.Add("@submitted", System.Data.SqlDbType.TinyInt).Value = (byte)DocumentStatus.Submitted;
         command.Parameters.Add("@approved", System.Data.SqlDbType.TinyInt).Value = (byte)DocumentStatus.Approved;
 
         await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
         await reader.ReadAsync(ct).ConfigureAwait(false);
+        await reader.NextResultAsync(ct).ConfigureAwait(false);
+
+        if (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            return new CoverageEvent(
+                map.SourceEntityId,
+                new PeriodKey(periodKey),
+                CollectionCoverage.SkippedPeriodClosed,
+                CoverageDetails.PeriodNotOpen((PeriodState)reader.GetByte(0)));
+        }
+
         await reader.NextResultAsync(ct).ConfigureAwait(false);
 
         if (await reader.ReadAsync(ct).ConfigureAwait(false))

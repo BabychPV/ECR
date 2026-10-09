@@ -824,6 +824,40 @@ public sealed class SourceEventSyncJobTests(SqlServerFixture sql)
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Directive", "HSE301-EFSYNC")]
+    [Trait("Finding", "L3-04")]
+    public async Task ЗакриттяПеріодуМіжРішеннямІВидаленням_РядокЛишається()
+    {
+        // ⛔ L3-04: стан періоду брався зі знімка на початку SyncMapAsync, а RecheckRemovalAsync його не
+        // перечитував. Закриття періоду між рішенням і видаленням (перехоплювач на останньому запиті рішення)
+        // інакше стирало б рядок закритого періоду. Мутація: прибрати гард `doc.Period` у RecheckRemovalAsync.
+        await using var stand = await ArrangeAsync();
+        var source = new FakeEventSource(Ev("E1", Start, End), Ev("E2", Start.AddHours(1), End.AddHours(1)));
+        await RunAsync(stand, source);
+
+        source.Result = new SourceEventResult([Ev("E2", Start.AddHours(1), End.AddHours(1))], false, null);
+        await RunAsync(stand, source, afterRemovalDecision: async () =>
+        {
+            await using var db = sql.CreateContext();
+            var period = await db.Periods.SingleAsync(p => p.ProjectId == stand.ProjectId && p.PeriodKeyValue == 202601);
+            period.AdvanceTo(PeriodState.Closed, Now);
+            await db.SaveChangesAsync();
+        });
+
+        Assert.Equal(["EF-E1", "EF-E2"], (await RowsAsync(stand)).Select(r => r.RowKey).Order(StringComparer.Ordinal));
+        Assert.Equal(0, await JournalCountAsync(stand));
+        Assert.Equal(
+            1,
+            Convert.ToInt32(
+                await ScalarAsync(
+                    $"SELECT COUNT(*) FROM itg.CollectionCoverage WHERE SourceEntityId = {stand.EntityId} "
+                    + "AND Status = N'SkippedPeriodClosed'"),
+                CultureInfo.InvariantCulture));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Directive", "HSE301-EFSYNC")]
     public async Task ПравкаЛюдиниМіжРішеннямІВидаленням_РядокЛишається()
     {
         // ⛔ L3-04 / D-118: правка людини між ManualRowKeysAsync і DELETE інакше стиралася разом із
