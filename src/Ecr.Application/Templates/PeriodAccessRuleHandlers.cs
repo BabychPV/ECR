@@ -105,11 +105,21 @@ public static class PeriodAccessRuleMapper
         }
     }
 
-    /// <summary>Перевіряє, що аркуш і таблиця (якщо задані) належать цій версії.</summary>
-    /// <exception cref="BusinessRuleException">Аркуш або таблиця чужі версії.</exception>
+    /// <summary>
+    /// Перевіряє, що аркуш і таблиця (якщо задані) належать цій версії, таблиця лежить на обраному аркуші, а
+    /// колонка-джерело <c>SourceWindow</c> — жива Lookup-колонка цієї версії в межах цілі правила.
+    /// </summary>
+    /// <param name="version">Версія з завантаженою структурою.</param>
+    /// <param name="sheetDefId">Аркуш правила.</param>
+    /// <param name="tableDefId">Таблиця правила.</param>
+    /// <param name="sourceColumnDefId">Колонка-джерело вікна (<c>SourceWindow</c>); <c>null</c> — не перевіряється.</param>
+    /// <exception cref="BusinessRuleException">Аркуш, таблиця чи колонка-джерело не належать цілі правила.</exception>
     public static void EnsureBelongs(
-        Domain.Entities.Configuration.TemplateVersion version, int? sheetDefId, int? tableDefId)
+        Domain.Entities.Configuration.TemplateVersion version, int? sheetDefId, int? tableDefId,
+        int? sourceColumnDefId = null)
     {
+        ArgumentNullException.ThrowIfNull(version);
+
         if (sheetDefId is { } sheet && version.Sheets.All(s => s.Id != sheet))
         {
             throw new BusinessRuleException(
@@ -136,6 +146,51 @@ public static class PeriodAccessRuleMapper
                     ["tableDefId"] = table.ToString(System.Globalization.CultureInfo.InvariantCulture),
                     ["versionId"] = version.Id.ToString(System.Globalization.CultureInfo.InvariantCulture),
                 });
+        }
+
+        // ⛔ A1-02 (аудит 09.10c): аркуш і таблиця перевірялися кожен окремо. Пара «аркуш A + таблиця з аркуша B»
+        // зберігалася з 200, а `PeriodAccessRules.Targets` вимагає збігу обох — правило не накривало жодної
+        // комірки, тобто виглядало налаштованим і не діяло ніде.
+        if (sheetDefId is { } s && tableDefId is { } t
+            && !version.Sheets.Single(x => x.Id == s).Tables.Any(x => x.Id == t))
+        {
+            throw new BusinessRuleException(
+                ErrorCodes.TemplateInvalid,
+                $"Таблиця {t} не лежить на аркуші {s}: правило з такою парою не накрило б жодної комірки.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-TMPL-0422.tableNotInSheet",
+                    ["tableDefId"] = t.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    ["sheetDefId"] = s.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
+        }
+
+        // ⛔ A1-02: колонка-джерело SourceWindow не звірялася ні з версією, ні з ціллю правила, ні з типом. Колонка
+        // іншої таблиці чи версії (FK перевіряє лише існування) або не-Lookup не дає значень у рядках зрізу →
+        // `SourceWindow` повертає `Allowed`, тобто замок, що не замикає (fail-open). Тепер — лише жива
+        // Lookup-колонка ЦІЄЇ версії в таблицях цілі правила (обраної таблиці або таблиць обраного аркуша).
+        if (sourceColumnDefId is { } c)
+        {
+            var column = version.Sheets
+                .Where(x => sheetDefId is null || x.Id == sheetDefId)
+                .SelectMany(x => x.Tables)
+                .Where(x => tableDefId is null || x.Id == tableDefId)
+                .SelectMany(x => x.Columns)
+                .FirstOrDefault(x => x.Id == c && !x.IsDeleted);
+
+            if (column is not { DataType: CellDataType.Lookup })
+            {
+                throw new BusinessRuleException(
+                    ErrorCodes.TemplateInvalid,
+                    $"Колонка-джерело {c} — не жива Lookup-колонка таблиці правила у версії {version.Id}: " +
+                    "правило не знайшло б вікна й не блокувало б нічого.",
+                    new Dictionary<string, object?>
+                    {
+                        ["messageKey"] = "err.ECR-TMPL-0422.sourceColumnNotInRuleTarget",
+                        ["sourceColumnDefId"] = c.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                        ["versionId"] = version.Id.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    });
+            }
         }
     }
 
@@ -237,7 +292,10 @@ public sealed class CreatePeriodAccessRuleHandler(
         version.TouchDraft(userId, clock.UtcNow);
 
         PeriodAccessRuleMapper.EnsureHasTarget(command.SheetDefId, command.TableDefId);
-        PeriodAccessRuleMapper.EnsureBelongs(version, command.SheetDefId, command.TableDefId);
+        // ⛔ A1-02: колонка-джерело — лише для SourceWindow (для інших видів `Build` її не бере).
+        PeriodAccessRuleMapper.EnsureBelongs(
+            version, command.SheetDefId, command.TableDefId,
+            command.RuleKind == PeriodAccessRuleKind.SourceWindow ? command.SourceColumnDefId : null);
 
         var rule = PeriodAccessRuleMapper.Build(templateVersionId, command);
 
@@ -394,7 +452,9 @@ public sealed class SavePeriodAccessRuleHandler(
         }
 
         PeriodAccessRuleMapper.EnsureHasTarget(command.SheetDefId, command.TableDefId);
-        PeriodAccessRuleMapper.EnsureBelongs(version, command.SheetDefId, command.TableDefId);
+        // ⛔ A1-02: команда зміни колонку-джерело не несе, а аркуш/таблицю міняє — звіряється колонка правила
+        // з НОВОЮ ціллю.
+        PeriodAccessRuleMapper.EnsureBelongs(version, command.SheetDefId, command.TableDefId, rule.SourceColumnDefId);
 
         var oldJson = PeriodAccessRuleMapper.Describe(rule);
 

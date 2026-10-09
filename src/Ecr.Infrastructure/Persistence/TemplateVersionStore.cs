@@ -471,13 +471,25 @@ public sealed partial class TemplateVersionStore(EcrDbContext db) : ITemplateVer
         foreach (var rule in rules)
         {
             // Посилання, яке не вдалося перемапити, не лишається на джерело: правило з чужим
-            // ключем діяло б на іншу версію. Таке правило пропускається (клон ідентичний джерелу,
-            // тож випадок неможливий; fail-closed не ширшає доступ).
+            // ключем діяло б на іншу версію.
+            // ⛔ A1-02 (аудит 09.10c): і мовчки ВИКИДАТИ таке правило теж не можна. «Випадок неможливий» —
+            // неправда: до A1-02 API приймало колонку-джерело SourceWindow іншої версії. Клон без правила
+            // виглядав би повним, а обмеження періоду зникло б непомітно. Відмова з ключем і id правила —
+            // адміністратор бачить, яке правило джерела зіпсоване; транзакція клону відкочується.
             if (rule.SheetDefId is { } s && !map.ContainsKey((ResourceKind.Sheet, s))
                 || rule.TableDefId is { } t && !map.ContainsKey((ResourceKind.Table, t))
                 || rule.SourceColumnDefId is { } c && !map.ContainsKey((ResourceKind.Column, c)))
             {
-                continue;
+                throw new BusinessRuleException(
+                    Domain.Errors.ErrorCodes.TemplateInvalid,
+                    $"Правило доступу до періоду {rule.Id} версії {sourceVersionId} посилається на аркуш, таблицю " +
+                    "чи колонку поза цією версією: клон не може його перенести, а мовчки загубити — не має права.",
+                    new Dictionary<string, object?>
+                    {
+                        ["messageKey"] = "err.ECR-TMPL-0422.cloneAccessRuleForeignRef",
+                        ["ruleId"] = rule.Id.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                        ["versionId"] = sourceVersionId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    });
             }
 
             db.PeriodAccessRules.Add(rule.CopyForClone(

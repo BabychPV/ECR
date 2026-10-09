@@ -1,4 +1,5 @@
 // tests/Ecr.Infrastructure.Tests/Persistence/TemplateVersionClonePeriodAccessTests.cs
+using Ecr.Application.Errors;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Enums;
 using Ecr.Infrastructure.Persistence;
@@ -88,5 +89,57 @@ public sealed class TemplateVersionClonePeriodAccessTests(SqlServerFixture sql)
 
         // Джерело не зачеплене.
         Assert.Equal(3, await read.PeriodAccessRules.CountAsync(r => r.TemplateVersionId == doc.TemplateVersionId, ct));
+    }
+    /// <summary>
+    /// ⛔ A1-02 (аудит 09.10c): правило SourceWindow з колонкою-джерелом ІНШОЇ версії (до A1-02 API таке
+    /// приймало) клон мовчки викидав — «випадок неможливий». Тепер клон відмовляє з ключем і id правила, і
+    /// транзакція відкочується: чернетки-клону без обмеження періоду не з'являється.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "A1-02")]
+    public async Task Клон_не_губить_мовчки_правило_з_колонкою_чужої_версії()
+    {
+        var ct = CancellationToken.None;
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var doc = await builder.BuildAsync(columnCount: 2, ct: ct);
+        var foreign = await new TestDocumentBuilder(sql.ConnectionString).BuildAsync(columnCount: 1, ct: ct);
+        var tag = Guid.NewGuid().ToString("N")[..8].ToUpperInvariant();
+
+        int ruleId;
+        int templateId;
+        await using (var setup = builder.CreateContext())
+        {
+            var rule = PeriodAccessRuleDef.ForSourceWindow(
+                    doc.TemplateVersionId, foreign.ColumnDefIds[0], OutOfWindowBehavior.ReadOnly)
+                .ForTable(doc.TableDefId);
+            setup.PeriodAccessRules.Add(rule);
+            await setup.SaveChangesAsync(ct);
+            ruleId = rule.Id;
+            templateId = await setup.TemplateVersions.AsNoTracking()
+                .Where(v => v.Id == doc.TemplateVersionId).Select(v => v.TemplateId).SingleAsync(ct);
+        }
+
+        var versionsBefore = await CountVersionsAsync(builder, templateId, ct);
+
+        await using (var db = builder.CreateContext())
+        {
+            var error = await Assert.ThrowsAsync<BusinessRuleException>(() => new TemplateVersionStore(db).CloneAsync(
+                doc.TemplateVersionId, $"8.{tag[..4].GetHashCode() & 0xFFF}.0.1", 1,
+                new DateTime(2026, 10, 9, 0, 0, 0, DateTimeKind.Utc), ct));
+
+            Assert.Equal("err.ECR-TMPL-0422.cloneAccessRuleForeignRef", error.Details?["messageKey"]);
+            Assert.Equal(
+                ruleId.ToString(System.Globalization.CultureInfo.InvariantCulture), error.Details?["ruleId"]);
+        }
+
+        Assert.Equal(versionsBefore, await CountVersionsAsync(builder, templateId, ct));
+    }
+
+    private static async Task<int> CountVersionsAsync(TestDocumentBuilder builder, int templateId, CancellationToken ct)
+    {
+        await using var db = builder.CreateContext();
+        return await db.TemplateVersions.CountAsync(v => v.TemplateId == templateId, ct);
     }
 }
