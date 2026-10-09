@@ -21,6 +21,15 @@ namespace Ecr.Infrastructure.Persistence;
 /// ховав би під 409 чужі таймаути (звіти, пошук), які дефектом і є. Тут перехоплюється лише
 /// запис комірок.
 ///
+/// ⛔ AN-106 (P1-01, аудит 2026-10-09b). Ліміт сеансу діє й на оператори ПІСЛЯ охоронця (аудит
+/// <c>aud.CellChange</c>, «дотик» документа, <c>SaveChanges</c>): їхній 1222 доти виходив сирим
+/// <c>SqlException</c> → 500. Тепер <c>UnitOfWork.ExecuteInTransactionAsync</c> перекладає 1222 з
+/// будь-якого оператора транзакції в ту саму відмову (<see cref="FindLockWaitTimeout"/>,
+/// <see cref="Busy"/>). Це не ширше за задум: 1222 буває ЛИШЕ після <c>SET LOCK_TIMEOUT</c>,
+/// а його виставляє тільки запис комірок. Ліміт виставляється ДО створення нових рядків
+/// (<see cref="LimitAsync"/>, <c>ICellStore.LimitLockWaitAsync</c>), щоб і вставка в
+/// <c>doc.TableRow</c> не чекала весь <c>CommandTimeout</c>.
+///
 /// ⚠ <c>SET LOCK_TIMEOUT</c> — налаштування СЕАНСУ, і назад його НЕ скидають навмисно: окреме
 /// скидання — ще одне звернення на кожен запис (бюджет звернень стережуть
 /// <c>PatchCellsWorkbookTests</c> і <c>CellStoreBatchEquivalenceTests</c>), а пул сам скидає сеанс
@@ -55,26 +64,81 @@ public static class LockWaitGuard
     /// <param name="body">Записові оператори.</param>
     /// <param name="ct">Скасування.</param>
     /// <exception cref="ConcurrencyConflictException"><c>409 ECR-DOC-4091</c>, <c>lockTimeout</c>.</exception>
-    public static async Task RunAsync(
+    public static Task RunAsync(
         SqlConnection connection, SqlTransaction transaction, Func<Task> body, CancellationToken ct)
+        => RunAsync(connection, transaction, limitAlreadySet: false, body, ct);
+
+    /// <summary>
+    /// Те саме, але без другого <c>SET</c>, якщо ліміт у цій транзакції вже виставлено
+    /// (<see cref="LimitAsync"/> на початку транзакції запису — AN-106).
+    /// </summary>
+    /// <param name="connection">Відкрите з'єднання.</param>
+    /// <param name="transaction">Транзакція, на якій виконуються оператори.</param>
+    /// <param name="limitAlreadySet"><c>true</c> — <c>SET LOCK_TIMEOUT</c> у цій транзакції вже був.</param>
+    /// <param name="body">Записові оператори.</param>
+    /// <param name="ct">Скасування.</param>
+    /// <exception cref="ConcurrencyConflictException"><c>409 ECR-DOC-4091</c>, <c>lockTimeout</c>.</exception>
+    public static async Task RunAsync(
+        SqlConnection connection, SqlTransaction transaction, bool limitAlreadySet, Func<Task> body, CancellationToken ct)
     {
-        await SetAsync(connection, transaction, LockTimeoutMs, ct).ConfigureAwait(false);
+        ArgumentNullException.ThrowIfNull(body);
+        if (!limitAlreadySet)
+        {
+            await LimitAsync(connection, transaction, ct).ConfigureAwait(false);
+        }
+
         try
         {
             await body().ConfigureAwait(false);
         }
         catch (SqlException ex) when (IsLockWaitTimeout(ex))
         {
-            throw new ConcurrencyConflictException(
-                ErrorCodes.SheetBusy,
-                "Записати комірки не вдалося: дані зайняті довгою операцією (наприклад, переносом версії "
-                + "іншого документа). Нічого не збережено; повторіть дію за мить.",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = MessageKey,
-                    ["sqlError"] = ex.Number.ToString(CultureInfo.InvariantCulture),
-                });
+            throw Busy(ex);
         }
+    }
+
+    /// <summary>Виставляє ліміт очікування блокувань на сеанс транзакції запису.</summary>
+    /// <param name="connection">Відкрите з'єднання.</param>
+    /// <param name="transaction">Транзакція запису.</param>
+    /// <param name="ct">Скасування.</param>
+    public static Task LimitAsync(SqlConnection connection, SqlTransaction transaction, CancellationToken ct)
+        => SetAsync(connection, transaction, LockTimeoutMs, ct);
+
+    /// <summary>
+    /// <c>SqlException 1222</c> будь-де в ланцюжку винятку (EF загортає його в
+    /// <c>DbUpdateException</c>, стратегія повторів — у <c>RetryLimitExceededException</c>);
+    /// <c>null</c> — не вичерпане очікування блокування.
+    /// </summary>
+    /// <param name="exception">Виняток.</param>
+    /// <returns>Знайдений <see cref="SqlException"/> або <c>null</c>.</returns>
+    public static SqlException? FindLockWaitTimeout(Exception? exception)
+    {
+        for (var current = exception; current is not null; current = current.InnerException)
+        {
+            if (current is SqlException sql && IsLockWaitTimeout(sql))
+            {
+                return sql;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>Відмова <c>409 ECR-DOC-4091</c> з ключем <see cref="MessageKey"/>.</summary>
+    /// <param name="ex">Спійманий <c>SqlException 1222</c>.</param>
+    /// <returns>Виняток для кидка.</returns>
+    public static ConcurrencyConflictException Busy(SqlException ex)
+    {
+        ArgumentNullException.ThrowIfNull(ex);
+        return new ConcurrencyConflictException(
+            ErrorCodes.SheetBusy,
+            "Записати комірки не вдалося: дані зайняті довгою операцією (наприклад, переносом версії "
+            + "іншого документа). Нічого не збережено; повторіть дію за мить.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = MessageKey,
+                ["sqlError"] = ex.Number.ToString(CultureInfo.InvariantCulture),
+            });
     }
 
     private static async Task SetAsync(SqlConnection connection, SqlTransaction transaction, int ms, CancellationToken ct)
