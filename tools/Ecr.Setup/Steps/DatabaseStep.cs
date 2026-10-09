@@ -21,6 +21,11 @@ internal sealed class DatabaseStep : IWizardStep
     private CheckBox? _skipSchemaCheckBox;
     private CheckBox? _trustCertificateCheckBox;
     private Label? _trustCertificateWarning;
+    private GroupBox? _backupGroup;
+    private Label? _backupStatus;
+    private CheckBox? _backupAcceptCheckBox;
+    private Label? _backupAcceptWarning;
+    private BackupCheckResult? _backup;
 
     public DatabaseStep(WizardState state)
     {
@@ -50,6 +55,9 @@ internal sealed class DatabaseStep : IWizardStep
         };
         root.Controls.Add(_skipSchemaCheckBox);
 
+        root.Controls.Add(BuildBackupGroup());
+        _skipSchemaCheckBox.CheckedChanged += (_, _) => UpdateBackupVisibility();
+
         return root;
     }
 
@@ -64,6 +72,8 @@ internal sealed class DatabaseStep : IWizardStep
         {
             _skipSchemaCheckBox.Checked = false;
         }
+
+        UpdateBackupVisibility();
     }
 
     public bool Validate(out string error)
@@ -127,7 +137,46 @@ internal sealed class DatabaseStep : IWizardStep
             return false;
         }
 
-        return true;
+        return ValidateBackup(out error);
+    }
+
+    /// <summary>
+    /// ⛔ AN-117 (S2-04): оновлення, що змінює схему, — лише зі свіжою копією бази (той самий запит до
+    /// msdb.dbo.backupset, що в deploy-ecr.ps1) АБО з явною позначкою «копію зроблено поза SQL Server / я
+    /// приймаю ризик», яка й дає скрипту -SkipBackupCheck. Без цього кроку майстер доходив до «Install» і
+    /// зупинявся на кроці 2/7 скрипта без способу визнати копію, зроблену VSS чи на вторинній репліці.
+    /// </summary>
+    private bool ValidateBackup(out string error)
+    {
+        error = string.Empty;
+        _backup = null;
+
+        if (_state.Mode != WizardMode.Update || _skipSchemaCheckBox!.Checked)
+        {
+            return true;
+        }
+
+        _backup = SqlPreflight.CheckBackup(
+            _instanceBox!.Text.Trim(), _databaseBox!.Text.Trim(),
+            _windowsAuthOption!.Checked, _loginBox!.Text.Trim(), _sqlPasswordBox!.Text,
+            _trustCertificateCheckBox!.Checked);
+
+        var fresh = _backup.Freshness == BackupFreshness.Fresh;
+        _backupStatus!.Text = _backup.Detail;
+        _backupStatus.ForeColor = fresh ? Color.DarkGreen : Color.DarkRed;
+
+        if (fresh || _backupAcceptCheckBox!.Checked)
+        {
+            return true;
+        }
+
+        error = _backup.Detail + Environment.NewLine + Environment.NewLine
+            + $"The update changes the database schema; rollback (runbook 9) needs a backup made right before it "
+            + $"(not older than {SchemaBackupRules.MaxAgeHours} h). Make one, for example:" + Environment.NewLine
+            + $"BACKUP DATABASE [{_databaseBox.Text.Trim()}] TO DISK = N'<path>' WITH COPY_ONLY, CHECKSUM" + Environment.NewLine
+            + "and press Next again, or - if the backup was made outside SQL Server (VSS tool, another AG node) - tick "
+            + "\"" + _backupAcceptCheckBox.Text + "\".";
+        return false;
     }
 
     public void Apply(WizardState state)
@@ -139,6 +188,90 @@ internal sealed class DatabaseStep : IWizardStep
         state.SqlLoginPassword = state.SqlAuthIsWindows ? null : ToSecure(_sqlPasswordBox!.Text);
         state.SkipSchema = state.Mode == WizardMode.Update && _skipSchemaCheckBox!.Checked;
         state.TrustSqlServerCertificate = _trustCertificateCheckBox!.Checked;
+
+        // AN-117: позначка діє лише там, де скрипт і перевіряв би копію (оновлення зі зміною схеми).
+        var backupRequired = state.Mode == WizardMode.Update && !state.SkipSchema;
+        state.Backup = backupRequired ? _backup : null;
+        state.BackupRiskAccepted = backupRequired && _backupAcceptCheckBox!.Checked;
+    }
+
+    /// <summary>
+    /// ⛔ AN-117 (S2-04): крок «копію бази зроблено» — лише в оновленні, що змінює схему. Позначка типово знята;
+    /// поставлена — червоне попередження тут і червоний рядок «Database backup» на кроці Review.
+    /// </summary>
+    private GroupBox BuildBackupGroup()
+    {
+        _backupGroup = new GroupBox
+        {
+            Text = "Database backup (update)",
+            Dock = DockStyle.Top,
+            AutoSize = true,
+            Padding = new Padding(8),
+            Margin = new Padding(0, 12, 0, 0),
+        };
+
+        var layout = new TableLayoutPanel { Dock = DockStyle.Top, ColumnCount = 1, AutoSize = true };
+
+        layout.Controls.Add(new Label
+        {
+            Text = "Before changing the schema the update requires a full or differential backup of the database "
+                + $"not older than {SchemaBackupRules.MaxAgeHours} h in msdb.dbo.backupset; the ECR services are stopped "
+                + "for the schema change. The backup history is checked when you press Next.",
+            AutoSize = true,
+            MaximumSize = new Size(520, 0),
+            Margin = new Padding(0, 4, 6, 0),
+        });
+
+        _backupStatus = new Label
+        {
+            Text = "Not checked yet.",
+            AutoSize = true,
+            MaximumSize = new Size(520, 0),
+            Margin = new Padding(0, 6, 6, 0),
+        };
+        layout.Controls.Add(_backupStatus);
+
+        _backupAcceptCheckBox = new CheckBox
+        {
+            Text = "A backup was made outside SQL Server / I accept the risk",
+            AutoSize = true,
+            Checked = _state.BackupRiskAccepted,
+            Margin = new Padding(0, 8, 6, 0),
+        };
+        _backupAcceptWarning = new Label
+        {
+            Text = "Warning: deploy-ecr.ps1 will run with -SkipBackupCheck and will NOT verify the backup. "
+                + "If there is no backup made right before the update, a failed update cannot be rolled back "
+                + "(runbook 9) without losing data.",
+            AutoSize = true,
+            MaximumSize = new Size(520, 0),
+            ForeColor = Color.DarkRed,
+            Visible = _state.BackupRiskAccepted,
+            Margin = new Padding(24, 4, 6, 0),
+        };
+        _backupAcceptCheckBox.CheckedChanged +=
+            (_, _) => _backupAcceptWarning.Visible = _backupAcceptCheckBox.Checked;
+
+        layout.Controls.Add(_backupAcceptCheckBox);
+        layout.Controls.Add(_backupAcceptWarning);
+
+        _backupGroup.Controls.Add(layout);
+        return _backupGroup;
+    }
+
+    private void UpdateBackupVisibility()
+    {
+        if (_backupGroup is null || _skipSchemaCheckBox is null)
+        {
+            return;
+        }
+
+        var required = _state.Mode == WizardMode.Update && !_skipSchemaCheckBox.Checked;
+        _backupGroup.Visible = required;
+        if (!required)
+        {
+            _backupAcceptCheckBox!.Checked = false;
+        }
     }
 
     /// <summary>

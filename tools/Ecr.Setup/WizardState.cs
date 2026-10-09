@@ -71,6 +71,18 @@ internal sealed class WizardState
     // -C: з Encrypt=Mandatory сервер має пред'явити сертифікат, якому довіряє ця машина.
     public bool TrustSqlServerCertificate { get; set; }
 
+    // ⛔ AN-117 (S2-04): копія бази перед оновленням схеми. `Backup` — що показала перевірка
+    // msdb.dbo.backupset на кроці бази (null — не перевірялась); `BackupRiskAccepted` — явна позначка
+    // «копію зроблено поза SQL Server / я приймаю ризик». Лише вона дає deploy-ecr.ps1 -SkipBackupCheck.
+    public BackupCheckResult? Backup { get; set; }
+
+    public bool BackupRiskAccepted { get; set; }
+
+    /// <summary>
+    /// Чи передати <c>-SkipBackupCheck</c>: лише оновлення, що змінює схему, і лише за явною позначкою людини.
+    /// </summary>
+    public bool SkipBackupCheck => Mode == WizardMode.Update && !SkipSchema && BackupRiskAccepted;
+
     // Крок 4 — пароль адміністратора (лише для FirstDeployment).
     public SecureString? BootstrapPassword { get; set; }
 

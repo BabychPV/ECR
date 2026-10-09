@@ -286,6 +286,13 @@ Import-Certificate -FilePath .\ecr-release-signing.cer -CertStoreLocation Cert:\
    (`TrustServerCertificate=False` у рядку служби, `sqlcmd` без `-C`). Увімкнути —
    лише для самопідписаного сертифіката на стенді; майстер показує попередження тут
    і червоний рядок «SQL Server certificate» на екрані Review.
+   ✎ 2026-10-09 (AN-117, S2-04): у режимі «Update» (без «Schema already applied separately»)
+   на «Next» майстер тим самим запитом, що й `deploy-ecr.ps1`, читає `msdb.dbo.backupset`:
+   повна чи диференційна копія не старша за 24 год — далі; інакше зупиняє з підказкою
+   `BACKUP DATABASE … WITH COPY_ONLY, CHECKSUM`. Копію, зроблену поза SQL Server (VSS-засіб,
+   інший вузол AG), визнає лише явна позначка **«A backup was made outside SQL Server / I accept
+   the risk»** — тоді й лише тоді майстер передає `-SkipBackupCheck`, а на екрані Review рядок
+   «Database backup» червоний.
 6. **Administrator Password** — лише в режимі «First deployment»;
    у режимі «Update» цей екран пропускається сам.
 7. **Review** — підсумок усього вище, **без жодного значення пароля**
