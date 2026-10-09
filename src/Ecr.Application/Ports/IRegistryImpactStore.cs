@@ -42,6 +42,23 @@ public interface IRegistryImpactStore
     /// </remarks>
     public Task<IReadOnlyList<RegistryImpactRow>> ListImpactedAsync(
         int registryDefId, IReadOnlyCollection<int>? projectIds, int take, CancellationToken ct);
+
+    /// <summary>
+    /// Ті самі рядки, що <see cref="ListImpactedAsync"/>, але лише для НАЗВАНИХ документів і без
+    /// стелі <see cref="MaxRows"/> (D2-04).
+    /// </summary>
+    /// <param name="registryDefId">Довідник.</param>
+    /// <param name="documentIds">Документи, вже перевірені правами людини при постановці.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Рядки, впорядковані за документом і періодом; один рядок на методологію.</returns>
+    /// <remarks>
+    /// ⛔ Для задачі в черзі, що звіряє набір обробника з поточним станом. Перечитувати весь
+    /// довідник по всіх проєктах зі стелею 1000 означало губити вибраний документ, якщо перша
+    /// тисяча рядків (за <c>DocumentId</c>) належала іншим документам: задача рахувала його «зниклим».
+    /// Межа тут — розмір набору, який обробник уже обмежив.
+    /// </remarks>
+    public Task<IReadOnlyList<RegistryImpactRow>> ListImpactedForDocumentsAsync(
+        int registryDefId, IReadOnlyCollection<long> documentIds, CancellationToken ct);
 }
 
 /// <summary>Один зачеплений документ у періоді, через одну методологію.</summary>

@@ -45,9 +45,14 @@ public sealed partial class RegistryImpactRecalculationJob(
 
         await progress.ReportKeyAsync(10, "jobs.registryImpactReading", ct).ConfigureAwait(false);
 
-        // Усі проєкти: набір уже перевірено правами людини в обробнику, задача лише звіряє його зі станом.
+        // Набір уже перевірено правами людини в обробнику, задача лише звіряє його зі станом.
+        //
+        // ⛔ D2-04: звіряються саме ВИБРАНІ документи, а не перша тисяча рядків довідника по всіх
+        // проєктах. Доти документ із більшим Id (пізніший проєкт) за спільним довідником не потрапляв у
+        // `MaxRows` глобального переліку, рахувався «зниклим» (`gone`), і задача завершувалась
+        // `Succeeded` з `queued = 0` — результати лишались на старому довіднику.
         var rows = await impact
-            .ListImpactedAsync(request.RegistryDefId, projectIds: null, IRegistryImpactStore.MaxRows, ct)
+            .ListImpactedForDocumentsAsync(request.RegistryDefId, [.. wanted], ct)
             .ConfigureAwait(false);
 
         // Документ × період: одна методологія — один рядок, а перерахунок від неї не залежить.

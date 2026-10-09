@@ -32,7 +32,7 @@ public sealed class RegistryImpactStore(EcrDbContext db) : IRegistryImpactStore
     /// в переліку для перерахунку не було б.
     /// </para>
     /// </remarks>
-    public async Task<IReadOnlyList<RegistryImpactRow>> ListImpactedAsync(
+    public Task<IReadOnlyList<RegistryImpactRow>> ListImpactedAsync(
         int registryDefId, IReadOnlyCollection<int>? projectIds, int take, CancellationToken ct)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(take);
@@ -40,9 +40,41 @@ public sealed class RegistryImpactStore(EcrDbContext db) : IRegistryImpactStore
 
         if (projectIds is { Count: 0 })
         {
-            return [];
+            return Task.FromResult<IReadOnlyList<RegistryImpactRow>>([]);
         }
 
+        return QueryAsync(registryDefId, Visible(projectIds), limit, ct);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⛔ D2-04: той самий запит (<see cref="QueryAsync"/>), що й перелік, лише звужений до
+    /// названих документів у SQL і без <c>TOP</c>: вибраний документ не випадає через те, що перша
+    /// тисяча рядків довідника належить іншим документам.
+    /// </remarks>
+    public Task<IReadOnlyList<RegistryImpactRow>> ListImpactedForDocumentsAsync(
+        int registryDefId, IReadOnlyCollection<long> documentIds, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(documentIds);
+
+        if (documentIds.Count == 0)
+        {
+            return Task.FromResult<IReadOnlyList<RegistryImpactRow>>([]);
+        }
+
+        var ids = documentIds.Distinct().ToList();
+        return QueryAsync(
+            registryDefId, db.Documents.AsNoTracking().Where(d => ids.Contains(d.Id)), limit: null, ct);
+    }
+
+    /// <summary>Спільне тіло обох вибірок: документи — з <paramref name="documents"/>.</summary>
+    /// <param name="registryDefId">Довідник.</param>
+    /// <param name="documents">Документи, серед яких шукати.</param>
+    /// <param name="limit">Стеля рядків; <c>null</c> — без стелі (межа — сам <paramref name="documents"/>).</param>
+    /// <param name="ct">Токен скасування.</param>
+    private async Task<IReadOnlyList<RegistryImpactRow>> QueryAsync(
+        int registryDefId, IQueryable<Ecr.Domain.Entities.Documents.Document> documents, int? limit, CancellationToken ct)
+    {
         var changedAt = await db.RegistryDefs.AsNoTracking()
             .Where(r => r.Id == registryDefId)
             .Select(r => r.DataChangedAt)
@@ -62,7 +94,7 @@ public sealed class RegistryImpactStore(EcrDbContext db) : IRegistryImpactStore
             join run in db.CalculationRuns.AsNoTracking() on result.CalculationRunId equals run.Id
             where run.Status == CalculationRun.CurrentStatus
                   && (run.InputsAsOfUtc ?? run.StartedAt) < changedAt
-            join document in Visible(projectIds) on result.DocumentId equals document.Id
+            join document in documents on result.DocumentId equals document.Id
             join period in db.Periods.AsNoTracking()
                 on new { document.ProjectId, result.PeriodKey }
                 equals new { period.ProjectId, PeriodKey = period.PeriodKeyValue }
@@ -79,10 +111,11 @@ public sealed class RegistryImpactStore(EcrDbContext db) : IRegistryImpactStore
                 MethodologyCode = methodology.Code,
             };
 
-        var rows = await query
+        var ordered = query
             .Distinct()
-            .OrderBy(r => r.Id).ThenBy(r => r.PeriodKey).ThenBy(r => r.MethodologyCode)
-            .Take(limit)
+            .OrderBy(r => r.Id).ThenBy(r => r.PeriodKey).ThenBy(r => r.MethodologyCode);
+
+        var rows = await (limit is { } top ? ordered.Take(top) : ordered)
             .ToListAsync(ct)
             .ConfigureAwait(false);
 

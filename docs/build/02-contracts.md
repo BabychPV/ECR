@@ -2867,7 +2867,11 @@ public interface IRegistryUseStore
 public interface IRegistryImpactStore
 {
     public Task<IReadOnlyList<RegistryImpactRow>> ListImpactedAsync(
-        int registryDefId, int take, CancellationToken ct);
+        int registryDefId, IReadOnlyCollection<int>? projectIds, int take, CancellationToken ct);
+
+    // D2-04: для задачі в черзі — лише названі документи, без стелі MaxRows.
+    public Task<IReadOnlyList<RegistryImpactRow>> ListImpactedForDocumentsAsync(
+        int registryDefId, IReadOnlyCollection<long> documentIds, CancellationToken ct);
 }
 ```
 
