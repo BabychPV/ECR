@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { QueryClientProvider, QueryClient } from '@tanstack/react-query';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { Link, MemoryRouter, Route, Routes } from 'react-router-dom';
 import { theme } from '@/shared/theme/theme';
 import { loadCatalog } from '@/shared/i18n';
 import { TemplateVersionPage } from '@/pages/admin/TemplateVersionPage';
@@ -178,6 +178,39 @@ describe('TemplateVersionPage: відмова публікації показу�
 
     await waitFor(() => {
       expect(screen.queryByText(/at position 0/)).toBeNull();
+    });
+  });
+
+  it('N4: перехід на іншу версію (key={versionId}) не переносить проблеми публікації попередньої', async () => {
+    stubFetch();
+    await loadCatalog('en', 'public');
+    await loadCatalog('en', 'private');
+
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+
+    render(
+      <MantineProvider theme={theme}>
+        <QueryClientProvider client={client}>
+          <MemoryRouter initialEntries={['/admin/templates/1/versions/1']}>
+            <Link to="/admin/templates/1/versions/2">other version</Link>
+            <Routes>
+              <Route path="/admin/templates/:id/versions/:versionId" element={<TemplateVersionPage />} />
+            </Routes>
+          </MemoryRouter>
+        </QueryClientProvider>
+      </MantineProvider>,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Publish' }));
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.change(within(dialog).getByLabelText('Reason'), { target: { value: 'Release' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Publish' }));
+    await screen.findByText('The version was not published. Problems to fix: 2');
+
+    fireEvent.click(screen.getByRole('link', { name: 'other version' }));
+
+    await waitFor(() => {
+      expect(screen.queryByText(/Problems to fix/)).toBeNull();
     });
   });
 });

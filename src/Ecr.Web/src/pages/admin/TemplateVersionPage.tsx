@@ -271,6 +271,15 @@ function emptyManageSeed(templateVersionId: number): ManageSeed {
  * тепер стосується лише переліку аркушів і таблиць нижче.
  */
 export function TemplateVersionPage(): JSX.Element {
+  const { versionId } = useParams();
+
+  // ⚠ `key={versionId}`: перехід на іншу версію (клон, посилання, «Назад») — це ІНША сторінка, а не та сама з новим
+  // `id`. Без ключа локальний стан (проблеми публікації `publishProblems`, відкриті діалоги, чернетки,
+  // `manageSeed`) переживав перехід і показував відмову ПОПЕРЕДНЬОЇ версії над наступною.
+  return <TemplateVersionEditor key={versionId} />;
+}
+
+function TemplateVersionEditor(): JSX.Element {
   const { id: templateId, versionId } = useParams();
   const id = Number(versionId);
   const queryClient = useQueryClient();
