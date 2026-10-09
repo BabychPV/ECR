@@ -7431,6 +7431,9 @@ USING (VALUES
     -- COLL:an105-results-ceiling ── AN-105 / D2-05: актуальних результатів документа за період більше за стелю читання; ru/kz — порцією COLL:an105-results-ceiling нижче ──
     (N'err.ECR-CALC-0422.resultsTooLarge', N'en', N'Document {documentId} has more than {max} calculation results for period {periodKey}. They are not shown partly, because a partial list would give wrong totals: check the methodology bindings (a binding on the wrong table multiplies rows).', 1),
     -- COLL:an105-results-ceiling ── кінець секції ──
+    -- COLL:an120-snapshot-ceiling ── AN-120 / L1-01: рядків зрізу (після правил відбору) більше за стелю — відмова, а не обрізання; ru/kz — порцією COLL:an120-snapshot-ceiling нижче ──
+    (N'err.ECR-RPT-0422.snapshotTooLarge', N'en', N'The snapshot of project {projectId} for period {periodKey} has more than {limit} rows after the selection rules. It was not built, because a partial snapshot would look complete; the previous snapshot stays current. Narrow the report with its selection rules or build it per period.', 1),
+    -- COLL:an120-snapshot-ceiling ── кінець секції ──
     -- COLL:rc15lock ── N-3: PATCH комірки не дочекався блокування (LockWaitGuard); ru/kz — порцією COLL:rc15lock нижче ──
     (N'err.ECR-DOC-4091.lockTimeout', N'en', N'The data is busy with a long operation (for example, moving another document to a new template version). Nothing was saved; try again in a moment.', 1)
     -- COLL:rc15lock ── кінець секції ──
@@ -18320,6 +18323,17 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:an105-results-ceiling ── кінець секції ──
+
+-- COLL:an120-snapshot-ceiling ── ru/kz: AN-120 / L1-01: рядків зрізу (після правил відбору) більше за стелю; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-RPT-0422.snapshotTooLarge', N'ru', N'В срезе проекта {projectId} за период {periodKey} после правил отбора больше {limit} строк. Срез не построен, потому что неполный срез выглядел бы полным; предыдущий срез остаётся действующим. Сузьте отчёт правилами отбора или стройте его по периодам.'),
+    (N'err.ECR-RPT-0422.snapshotTooLarge', N'kz', N'{projectId} жобасының {periodKey} кезеңіндегі кесіндісінде іріктеу ережелерінен кейін {limit} жолдан көп. Кесінді құрылмады, өйткені толық емес кесінді толық болып көрінер еді; алдыңғы кесінді күшінде қалады. Есепті іріктеу ережелерімен тарылтыңыз немесе оны кезең бойынша құрыңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:an120-snapshot-ceiling ── кінець секції ──
 
 -- COLL:rc15lock ── ru/kz N-3: PATCH комірки не дочекався блокування; власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)

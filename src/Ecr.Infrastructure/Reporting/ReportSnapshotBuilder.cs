@@ -3,11 +3,13 @@ using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Application.Reporting;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.Reporting;
 using Ecr.Domain.Enums;
+using Ecr.Domain.Errors;
 using Ecr.Domain.ValueObjects;
 using Ecr.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -41,8 +43,23 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock, IMemory
     /// Річний звіт великого проєкту — десятки тисяч рядків. Межа існує не
     /// тому, що більше не буває, а тому, що без неї помилка в правилах відбору
     /// виглядала б як повільність, а не як помилка.
+    /// <para>
+    /// ⛔ AN-120 / L1-01: стеля — на ВИХОДІ правил відбору (<c>R5</c>), а не на
+    /// джерелі, і перевищення — ВІДМОВА (<c>ECR-RPT-0422</c>), а не обрізання.
+    /// Раніше джерело мовчки зрізалося <c>Take(MaxRows)</c> до правил: зріз
+    /// отримував <c>Complete</c>, суму й <c>IsCurrent</c> на неповних даних, а
+    /// звірка «збігалася», бо рахувала ті самі збережені рядки.
+    /// </para>
     /// </remarks>
     private const int MaxRows = 200_000;
+
+    /// <summary>Стеля рядків зрізу для ЦЬОГО будівника; за замовчуванням — <see cref="MaxRows"/>.</summary>
+    /// <remarks>
+    /// Окремою властивістю лише заради тестів (прийом <c>PointCeilingPerField</c>):
+    /// довести «відмова, а не обрізання» на 200 001 рядку означало б годину
+    /// наповнення бази. Контейнер її не задає.
+    /// </remarks>
+    public int RowCeiling { get; init; } = MaxRows;
 
     /// <inheritdoc />
     public async Task<long> BuildAsync(
@@ -633,6 +650,9 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock, IMemory
     /// <summary>Збережена сума зрізу.</summary>
     private sealed record StoredHash(long Id, byte[]? Hash);
 
+    /// <summary>Стеля переліку РІЗНИХ статусів аркушів: значень <see cref="DocumentStatus"/> менше.</summary>
+    private const int MaxStatuses = 32;
+
     /// <summary>Стеля переліку зрізів.</summary>
     private const int MaxSnapshots = 500;
 
@@ -654,10 +674,17 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock, IMemory
                 on state.DocumentId equals document.Id
             where document.ProjectId == projectId
                   && (periodKey == null || state.PeriodKey == periodKey.Value.Value)
-            orderby state.Id
             select state.Status;
 
-        var statuses = await query.Take(MaxRows).ToListAsync(ct).ConfigureAwait(false);
+        // ⛔ AN-120 / L1-01: які статуси є — агрегатом у SQL, а не першими
+        // `MaxRows` станами за `Id`. Підмножина могла не містити саме того
+        // чернеткового аркуша, через який зріз не `Approved`. Різних статусів
+        // лише кілька, тож `Take` тут — межа переліку значень enum, а не даних.
+        var statuses = await query
+            .Distinct()
+            .Take(MaxStatuses)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
 
         // Аркушів немає — зріз чернетковий. «Нічого не подано» і «все
         // затверджено» не можна плутати: перше означає порожній звіт.
@@ -743,15 +770,15 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock, IMemory
                 result.Value, result.SubstanceEntryId,
                 result.PeriodKey, result.UnitId, unit.Code, result.MethodologyVersionId, project.Code);
 
-        var results = await query
-            .Take(MaxRows)
-            .ToListAsync(ct)
-            .ConfigureAwait(false);
-
-        var rows = new List<CellValue>(results.Count * layout.Count);
+        // ⛔ AN-120 / L1-01: джерело читається ПОВНІСТЮ, потоком, без `Take`.
+        // Правила відбору (`R5`) бачать кожен рядок джерела, а стеля стоїть на
+        // їхньому ВИХОДІ: звіт, якому з 600 000 результатів потрібні 3 000,
+        // будується, а не втрачає документи з більшими `Id`. Потік, а не
+        // `ToListAsync`: у пам'яті лише рядки, що пройшли правила.
+        var rows = new List<CellValue>();
         var rowNo = 0;
 
-        foreach (var result in results)
+        await foreach (var result in query.AsAsyncEnumerable().WithCancellation(ct).ConfigureAwait(false))
         {
             // Без правил (схема 1) рядок читається прямо з джерела, як до R5.
             var ruled = rowRules.IsEmpty
@@ -764,7 +791,13 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock, IMemory
                 continue;
             }
 
-            rowNo++;
+            // ⛔ Понад стелю — відмова ДО створення зрізу: задача стає Failed,
+            // попередній зріз лишається поточним (`SwitchCurrentAsync` не
+            // викликався), і неповна форма з чинною сумою не з'являється.
+            if (++rowNo > RowCeiling)
+            {
+                throw TooLarge(projectId, periodKey, RowCeiling);
+            }
 
             // ⛔ Лише описані колонки і в порядку опису (D-52a): за цим порядком
             // рахується сума, і за ним її перераховує `VerifyAsync`.
@@ -780,6 +813,20 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock, IMemory
 
         return rows;
     }
+
+    /// <summary>Відмова побудови: рядків зрізу (після правил) більше за стелю.</summary>
+    private static BusinessRuleException TooLarge(int projectId, PeriodKey? periodKey, int limit)
+        => new(
+            ErrorCodes.ReportInvalid,
+            $"Зріз проєкту {projectId} за період {periodKey?.Value.ToString(CultureInfo.InvariantCulture) ?? "рік"} "
+            + $"має понад {limit} рядків: побудову відмовлено, попередній зріз лишається чинним.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-RPT-0422.snapshotTooLarge",
+                ["projectId"] = projectId.ToString(CultureInfo.InvariantCulture),
+                ["periodKey"] = periodKey?.Value.ToString(CultureInfo.InvariantCulture),
+                ["limit"] = limit.ToString(CultureInfo.InvariantCulture),
+            });
 
     /// <summary>Значення комірки до появи зрізу: ідентифікатор зрізу додається після правил.</summary>
     private readonly record struct CellValue(int RowNo, string Code, string? Text, decimal? Number);
