@@ -89,10 +89,12 @@ export function DocumentInspector({
   const groups = useMemo(() => (messages === null ? null : groupIssues(messages, tables)), [messages, tables]);
   const counts = groups === null ? null : countIssues(groups);
 
-  const open = (next: InspectorTab): void => {
+  // ⛔ N3-09: `takeFocus` - лише для відкриття ЛЮДИНОЮ (кнопка). Автовідкриття після перевірки приходить
+  // асинхронно (збереження набраного до 3 с + запит) і не має красти фокус із редактора комірки.
+  const open = (next: InspectorTab, takeFocus = true): void => {
     const active = document.activeElement;
     if (active instanceof HTMLElement && aside.current?.contains(active) !== true) opener.current = active;
-    focusTabOnOpen.current = true;
+    focusTabOnOpen.current = takeFocus;
     setPanel(next);
   };
 
@@ -133,7 +135,7 @@ export function DocumentInspector({
   useEffect(() => {
     if (validatedSeq === lastSeq.current) return;
     lastSeq.current = validatedSeq;
-    if (counts !== null && counts.all > 0 && tab !== 'issues') open('issues');
+    if (counts !== null && counts.all > 0 && tab !== 'issues') open('issues', false);
   }, [validatedSeq, counts?.all]);
 
   const onKeyDown = (event: KeyboardEvent<HTMLElement>): void => {

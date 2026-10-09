@@ -229,6 +229,17 @@ describe('інспектор документа (UI-25)', () => {
     expect(location).toBe('?panel=issues');
   });
 
+  it('N3-09: автовідкриття після перевірки не забирає фокус у того, хто працює (редактор комірки)', async () => {
+    const { rerender } = render(<Harness seq={0} />);
+    const working = screen.getByRole('button', { name: 'Validate' });
+    working.focus();
+
+    rerender(<Harness seq={1} />);
+    await screen.findByRole('complementary');
+
+    expect(document.activeElement).toBe(working);
+  });
+
   it('не перевіряли — кнопка без числа і вкладка каже «не перевіряли», а не «немає зауважень»', async () => {
     render(<Harness entry="/documents/1?panel=issues" messages={null} />);
 
