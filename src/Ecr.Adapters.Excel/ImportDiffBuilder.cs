@@ -103,6 +103,13 @@ public sealed class ImportDiffBuilder
 
         foreach (var row in block.Rows)
         {
+            // ⛔ D1-02: рядок змінено в базі ПІСЛЯ експорту книги (версія в карті ≠
+            // поточній). Книга без версії (вивантажена до D1-02) — `false`,
+            // колишня поведінка, а перегляд попереджає (AN-118, R1-02).
+            var changedSinceExport = row.Version is { } exported
+                                      && versions.TryGetValue(row.RowKey, out var now)
+                                      && !string.Equals(exported, now, StringComparison.Ordinal);
+
             foreach (var column in block.Columns)
             {
                 if (!columnsById.TryGetValue(column.ColumnDefId, out var definition))
@@ -203,6 +210,21 @@ public sealed class ImportDiffBuilder
                         stale ? ImportMessageKeys.CalculatedStale : ImportMessageKeys.Calculated,
                         excelCell));
 
+                    continue;
+                }
+
+                // ⛔ AN-118 (R1-01, HU-14 Q2 — «лише змінені комірки»). У рядку,
+                // зміненому після експорту, комірка, що збігається з відбитком
+                // ЕКСПОРТУ, — не правка людини: це значення, яке лишилося в книзі
+                // з вивантаження. Різниця «книга ≠ поточне» в ній — чужа пізніша
+                // правка (інша людина, інтеграція), і її не можна ні повернути
+                // перезаписом рядка (AN-114), ні закріпити як людську
+                // (`ImportOverwrite` у `HumanOriginsSql` → `KeepManual`). Тож —
+                // ані зміни, ані конфлікту, ані відмови: чуже значення лишається.
+                // ⚠ Без відбитка (книга до AN-118) `Unchanged` дає `false`, і
+                // комірка йде далі колишнім шляхом — конфліктом рядка.
+                if (changedSinceExport && EnteredCellFingerprint.Unchanged(row, block.Columns, column, cell))
+                {
                     continue;
                 }
 
@@ -368,9 +390,10 @@ public sealed class ImportDiffBuilder
                 // ⛔ Саме тут, ПІСЛЯ прав, типу й меж: у перелік потрапляє лише
                 // те, що пройшло всі інші перевірки, тож прапорець перезапису
                 // не обходить жодної іншої відмови — їх у переліку просто немає.
-                if (row.Version is { } exported
-                    && versions.TryGetValue(row.RowKey, out var now)
-                    && !string.Equals(exported, now, StringComparison.Ordinal))
+                // ⛔ AN-118: і лише комірки, які людина в книзі ЗМІНИЛА відносно
+                // експорту, — незмінені відсіяні вище (`EnteredCellFingerprint`),
+                // тож перезапис рядка пише тільки її правки.
+                if (changedSinceExport)
                 {
                     rejected.Add(new ImportRejection(
                         row.RowKey, column.Code, "ECR-CELL-0409",

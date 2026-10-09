@@ -36,6 +36,15 @@ namespace Ecr.Adapters.Tests.Excel;
 /// червоний (у перегляді «9 → 8» замість конфлікту); не писати <c>Version</c> в
 /// <c>ExcelExporter.WriteTable</c> — так само.
 /// </para>
+/// <para>
+/// ✎ AN-118 (R1-01, HU-14 Q2 — «лише змінені комірки»): конфліктом рядка стає
+/// лише комірка, яку людина в книзі змінила відносно ЕКСПОРТУ
+/// (<see cref="EnteredCellFingerprint"/>); незмінена комірка з чужим новішим
+/// значенням — ні зміна, ні конфлікт. Мутація: не писати <c>Cells</c> у
+/// <c>ExcelExporter.Fingerprinted</c> або прибрати перевірку
+/// <c>EnteredCellFingerprint.Unchanged</c> у <c>ImportDiffBuilder.Build</c> —
+/// червоніють <c>AN118_*</c> і перший тест.
+/// </para>
 /// </remarks>
 public sealed class ExcelImportRowVersionConflictTests
 {
@@ -45,6 +54,7 @@ public sealed class ExcelImportRowVersionConflictTests
     private const long InstanceId = 729;
     private const int TableId = 1;
     private const int InputColumnId = 11;
+    private const int SecondColumnId = 12;
 
     private static readonly PeriodKey Period = new(PeriodKeyValue);
 
@@ -77,7 +87,7 @@ public sealed class ExcelImportRowVersionConflictTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
-    public async Task Чужа_правка_рядка_після_експорту_дає_конфлікт_а_не_повернення_старого_значення()
+    public async Task Чужа_правка_рядка_після_експорту_не_повертається_старим_значенням_з_книги()
     {
         // 1. Експорт: R1.A = 8.
         using var workbook = await ExportAsync();
@@ -89,13 +99,11 @@ public sealed class ExcelImportRowVersionConflictTests
         var preview = await ImportAsync(workbook);
 
         // ⛔ До D1-02: зміна «9 → 8» — і Apply мовчки повертав старе число.
+        // ⛔ AN-118: і не конфлікт — 8 у книзі лишилось з експорту, це не правка
+        // людини, тож «перезаписати» її було б поверненням чужого числа.
         Assert.Empty(preview.Changes);
-        var conflict = Assert.Single(preview.Rejected);
-        Assert.Equal("R1", conflict.RowKey);
-        Assert.Equal("A", conflict.ColumnCode);
-        Assert.Equal("ECR-CELL-0409", conflict.ReasonCode);
-        Assert.Equal(ImportMessageKeys.RowChangedSinceExport, conflict.MessageKey);
-        Assert.Equal("A3", conflict.ExcelCell);
+        Assert.Empty(preview.Rejected);
+        Assert.Empty(preview.Overwritable);
 
         // Рядок не змінюється: у плані застосування для R1 нічого немає.
         Assert.DoesNotContain("R1", PlannedRowKeys());
@@ -114,7 +122,9 @@ public sealed class ExcelImportRowVersionConflictTests
         var change = Assert.Single(preview.Changes);
         Assert.Equal("R2", change.RowKey);
         Assert.Equal(6m, change.NewValue);
-        Assert.Equal("R1", Assert.Single(preview.Rejected).RowKey);
+
+        // ✎ AN-118: R1.A у книзі не чіпали — ні відмови, ні конфлікту.
+        Assert.Empty(preview.Rejected);
         Assert.Equal(["R2"], PlannedRowKeys());
     }
 
@@ -131,7 +141,12 @@ public sealed class ExcelImportRowVersionConflictTests
         var preview = await ImportAsync(workbook);
 
         Assert.Empty(preview.Changes);
-        Assert.Equal(ImportMessageKeys.RowChangedSinceExport, Assert.Single(preview.Rejected).MessageKey);
+        var conflict = Assert.Single(preview.Rejected);
+        Assert.Equal("R1", conflict.RowKey);
+        Assert.Equal("A", conflict.ColumnCode);
+        Assert.Equal("ECR-CELL-0409", conflict.ReasonCode);
+        Assert.Equal(ImportMessageKeys.RowChangedSinceExport, conflict.MessageKey);
+        Assert.Equal("A3", conflict.ExcelCell);
     }
 
     [Fact]
@@ -164,6 +179,61 @@ public sealed class ExcelImportRowVersionConflictTests
         var change = Assert.Single(preview.Changes);
         Assert.Equal("R1", change.RowKey);
         Assert.Equal(8m, change.NewValue);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Decision", "D-338")]
+    public async Task AN118_перезапис_рядка_пише_лише_комірку_яку_людина_змінила_в_книзі()
+    {
+        // 1. Експорт: R1.A = 8 (інтеграційна), R1.B = 1.
+        State(r1: 8m, r1Version: "AAAAAAAAB9E=", r2: 5m, r2Version: "AAAAAAAAB9I=", r1b: 1m);
+        using var workbook = await ExportAsync();
+
+        // 2. Інтеграція пише R1.A = 9 — версія рядка змінилась.
+        State(r1: 9m, r1Version: "AAAAAAAAC/8=", r2: 5m, r2Version: "AAAAAAAAB9I=", r1b: 1m);
+
+        // 3. Людина в книзі міняє лише R1.B на 12; R1.A лишається 8 — як на експорті.
+        workbook.Worksheet("Sheet").Cell(3, 2).Value = 12;
+
+        var preview = await ImportAsync(workbook);
+
+        // ⛔ R1-01: до AN-118 у перезаписуване йшла й R1.A (9 → 8), підписана як «mine».
+        Assert.Empty(preview.Changes);
+        var overwritable = Assert.Single(preview.Overwritable);
+        Assert.Equal("R1", overwritable.RowKey);
+        Assert.Equal("B", overwritable.ColumnCode);
+        Assert.Equal(1m, overwritable.OldValue);
+        Assert.Equal(12m, overwritable.NewValue);
+        var conflict = Assert.Single(preview.Rejected);
+        Assert.Equal("B", conflict.ColumnCode);
+        Assert.Equal(ImportMessageKeys.RowChangedSinceExport, conflict.MessageKey);
+
+        // ⛔ Згода на рядок R1 пише ЛИШЕ B: A (а з нею `ImportOverwrite` у журналі,
+        // тобто «людська» комірка для `KeepManual`) у план не потрапляє.
+        var (plan, overwritten) = ExcelImporter.Effective(SavedPlan(), [new ImportOverwriteRow("T1", "R1")]);
+        var change = Assert.Single(plan.Tables.SelectMany(t => t.Changes));
+        Assert.Equal("B", change.ColumnCode);
+        Assert.Equal("R1", Assert.Single(overwritten![InstanceId]));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public async Task AN118_книга_без_відбитків_комірок_лишає_конфлікт_рядка()
+    {
+        // ⚠ Сумісність: книга, вивантажена між D1-02 і AN-118, має версії, але не
+        // відбитки. Відрізнити незмінену комірку не можна — колишня поведінка
+        // (обидві комірки конфліктом, без мовчазного застосування).
+        State(r1: 8m, r1Version: "AAAAAAAAB9E=", r2: 5m, r2Version: "AAAAAAAAB9I=", r1b: 1m);
+        using var workbook = await ExportAsync();
+        StripCellFingerprints(workbook);
+        State(r1: 9m, r1Version: "AAAAAAAAC/8=", r2: 5m, r2Version: "AAAAAAAAB9I=", r1b: 1m);
+        workbook.Worksheet("Sheet").Cell(3, 2).Value = 12;
+
+        var preview = await ImportAsync(workbook);
+
+        Assert.Empty(preview.Changes);
+        Assert.Equal(["A", "B"], preview.Overwritable.Select(c => c.ColumnCode).Order(StringComparer.Ordinal));
     }
 
     [Fact]
@@ -250,8 +320,8 @@ public sealed class ExcelImportRowVersionConflictTests
         return JsonSerializer.Deserialize<ImportPlan>(_savedPlan, PlanOptions)!;
     }
 
-    /// <summary>Поточний стан сховища: значення <c>A</c> і версії рядків.</summary>
-    private void State(decimal r1, string r1Version, decimal r2, string r2Version)
+    /// <summary>Поточний стан сховища: значення <c>A</c> (і <c>R1.B</c>, AN-118) та версії рядків.</summary>
+    private void State(decimal r1, string r1Version, decimal r2, string r2Version, decimal? r1b = null)
     {
         _rows.GetRowVersionsBatchAsync(Arg.Any<IReadOnlyList<long>>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
             .Returns(new Dictionary<long, IReadOnlyDictionary<string, string>>
@@ -270,6 +340,9 @@ public sealed class ExcelImportRowVersionConflictTests
                 [
                     new CellRecord(new CellAddress(Period, 1001, InputColumnId), TableId, new CellValueData { ValueNumeric = r1 }),
                     new CellRecord(new CellAddress(Period, 1002, InputColumnId), TableId, new CellValueData { ValueNumeric = r2 }),
+                    .. r1b is { } b
+                        ? [new CellRecord(new CellAddress(Period, 1001, SecondColumnId), TableId, new CellValueData { ValueNumeric = b })]
+                        : Array.Empty<CellRecord>(),
                 ],
             });
     }
@@ -289,11 +362,16 @@ public sealed class ExcelImportRowVersionConflictTests
         ];
     }
 
-    private static void StripVersions(XLWorkbook workbook)
+    private static void StripVersions(XLWorkbook workbook) => StripMapField(workbook, "version");
+
+    /// <summary>Книга, вивантажена до AN-118: без відбитків введених комірок.</summary>
+    private static void StripCellFingerprints(XLWorkbook workbook) => StripMapField(workbook, "cells");
+
+    private static void StripMapField(XLWorkbook workbook, string field)
     {
         var map = workbook.Worksheet(ExcelWorkbookMap.SheetName);
         var json = string.Concat(map.CellsUsed().OrderBy(c => c.Address.RowNumber).Select(c => c.GetString()));
-        var stripped = Regex.Replace(json, ",\"version\":\"[^\"]*\"", string.Empty);
+        var stripped = Regex.Replace(json, ",\"" + field + "\":\"[^\"]*\"", string.Empty);
         Assert.NotEqual(json, stripped);
         map.Clear();
         for (var offset = 0; offset < stripped.Length; offset += ExcelWorkbookMap.ChunkSize)
@@ -377,11 +455,17 @@ public sealed class ExcelImportRowVersionConflictTests
         var input = new ColumnDef(TableId, EcrCode.Create("A"), Text("A"), 1, CellDataType.Decimal);
         SetId(input, InputColumnId);
         table.AddColumn(input);
+
+        // ✎ AN-118: друга введена колонка — щоб рядок мав комірку, яку людина
+        // змінила, поруч із тією, яку змінив хтось інший.
+        var second = new ColumnDef(TableId, EcrCode.Create("B"), Text("B"), 2, CellDataType.Decimal);
+        SetId(second, SecondColumnId);
+        table.AddColumn(second);
         sheet.AddTable(table);
 
         return new TemplateVersionSnapshot(
             TemplateVersionId, 1, [sheet],
-            new Dictionary<int, ColumnDef> { [InputColumnId] = input },
+            new Dictionary<int, ColumnDef> { [InputColumnId] = input, [SecondColumnId] = second },
             new Dictionary<(int, string), RowDef>());
     }
 

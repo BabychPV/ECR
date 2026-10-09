@@ -92,6 +92,15 @@ public sealed record ExcelColumnRef(
 /// <c>null</c> — книгу вивантажено до появи поля (або рядок без версії):
 /// тоді поведінка колишня, «книга проти поточного».
 /// </param>
+/// <param name="Cells">
+/// ⛔ AN-118 (R1-01, HU-14 Q2). Відбитки ВВЕДЕНИХ комірок рядка на момент
+/// експорту (<see cref="EnteredCellFingerprint"/>). У рядку з конфліктом
+/// версії перезаписати можна лише комірку, яку людина в книзі змінила; та, що
+/// збігається з відбитком, — не її правка, і чуже новіше значення в ній
+/// лишається. <c>null</c> — у блоці немає введених колонок або книгу
+/// вивантажено до появи поля: тоді конфліктом стає кожна комірка «книга ≠
+/// поточне».
+/// </param>
 public sealed record ExcelRowRef(
     string RowKey,
     int Number,
@@ -100,4 +109,7 @@ public sealed record ExcelRowRef(
     string? Calc = null,
     [property: System.Text.Json.Serialization.JsonIgnore(
         Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
-    string? Version = null);
+    string? Version = null,
+    [property: System.Text.Json.Serialization.JsonIgnore(
+        Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    string? Cells = null);

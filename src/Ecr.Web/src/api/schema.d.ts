@@ -20547,7 +20547,10 @@ export interface components {
              *     (у Rejected вони ж — відмовою
              *     `err.ECR-CELL-0409.importRowChangedSinceExport`): `OldValue` — чинне
              *     (чуже) значення, `NewValue` — значення з книги. Застосовуються лише для
-             *     рядків, названих у `ImportApplyRequest.OverwriteRows`. */
+             *     рядків, названих у `ImportApplyRequest.OverwriteRows`. ⛔ AN-118: лише
+             *     комірки, які людина в книзі змінила відносно експорту; ті, що лишились як
+             *     були при вивантаженні, сюди не потрапляють — чуже новіше значення в них
+             *     лишається. */
             overwritable: components["schemas"]["ImportChange"][];
             /** @description Токен для застосування; діє обмежений час. */
             previewToken: string;

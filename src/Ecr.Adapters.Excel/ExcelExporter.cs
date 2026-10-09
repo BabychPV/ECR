@@ -986,17 +986,36 @@ public sealed class ExcelExporter(
         sheet.Hide();
     }
 
-    /// <summary>Блоки карти з відбитками обчислюваних комірок кожного рядка.</summary>
+    /// <summary>Блоки карти з відбитками комірок кожного рядка: обчислюваних (P3) і введених (AN-118).</summary>
+    /// <remarks>
+    /// ⛔ AN-118 (R1-01): відбиток введених комірок — те, що стояло в книзі на
+    /// ЕКСПОРТІ; без нього перегляд не відрізнить правку людини від значення,
+    /// яке лишилося з експорту, у рядку, зміненому після вивантаження.
+    /// ⚠ Рахується з аркуша вже ПІСЛЯ запису значень — тим самим правилом
+    /// (<see cref="CalculatedCellFingerprint.Of"/>), яким імпорт читатиме книгу.
+    /// </remarks>
     private static List<ExcelTableBlock> Fingerprinted(XLWorkbook workbook, IReadOnlyList<ExcelTableBlock> blocks)
-        => [.. blocks.Select(block => block.Columns.Any(c => c.IsCalculated)
-            ? block with
+        => [.. blocks.Select(block =>
+        {
+            var hasCalculated = block.Columns.Any(c => c.IsCalculated);
+            var hasEntered = block.Columns.Any(c => !c.IsCalculated);
+
+            if (!hasCalculated && !hasEntered)
+            {
+                return block;
+            }
+
+            var worksheet = workbook.Worksheet(block.SheetName);
+
+            return block with
             {
                 Rows = [.. block.Rows.Select(row => row with
                 {
-                    Calc = CalculatedCellFingerprint.OfRow(workbook.Worksheet(block.SheetName), block.Columns, row.Number),
+                    Calc = hasCalculated ? CalculatedCellFingerprint.OfRow(worksheet, block.Columns, row.Number) : null,
+                    Cells = hasEntered ? EnteredCellFingerprint.OfRow(worksheet, block.Columns, row.Number) : null,
                 })],
-            }
-            : block)];
+            };
+        })];
 
     /// <summary>Чи рахує комірки цієї колонки система.</summary>
     private static bool IsCalculated(ColumnDef column)

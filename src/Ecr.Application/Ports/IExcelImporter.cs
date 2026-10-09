@@ -70,7 +70,10 @@ public sealed record ImportOverwriteRow(string TableCode, string RowKey);
 /// (у <paramref name="Rejected"/> вони ж — відмовою
 /// <c>err.ECR-CELL-0409.importRowChangedSinceExport</c>): <c>OldValue</c> — чинне
 /// (чуже) значення, <c>NewValue</c> — значення з книги. Застосовуються лише для
-/// рядків, названих у <c>ImportApplyRequest.OverwriteRows</c>.
+/// рядків, названих у <c>ImportApplyRequest.OverwriteRows</c>. ⛔ AN-118: лише
+/// комірки, які людина в книзі змінила відносно експорту; ті, що лишились як
+/// були при вивантаженні, сюди не потрапляють — чуже новіше значення в них
+/// лишається.
 /// </param>
 public sealed record ImportPreview(
     string PreviewToken,

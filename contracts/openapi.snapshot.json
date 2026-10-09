@@ -5397,7 +5397,7 @@
             "type": "array"
           },
           "overwritable": {
-            "description": "✎ AN-114 (D-338). Комірки рядків, змінених кимось після експорту книги\n(у Rejected вони ж — відмовою\n`err.ECR-CELL-0409.importRowChangedSinceExport`): `OldValue` — чинне\n(чуже) значення, `NewValue` — значення з книги. Застосовуються лише для\nрядків, названих у `ImportApplyRequest.OverwriteRows`.",
+            "description": "✎ AN-114 (D-338). Комірки рядків, змінених кимось після експорту книги\n(у Rejected вони ж — відмовою\n`err.ECR-CELL-0409.importRowChangedSinceExport`): `OldValue` — чинне\n(чуже) значення, `NewValue` — значення з книги. Застосовуються лише для\nрядків, названих у `ImportApplyRequest.OverwriteRows`. ⛔ AN-118: лише\nкомірки, які людина в книзі змінила відносно експорту; ті, що лишились як\nбули при вивантаженні, сюди не потрапляють — чуже новіше значення в них\nлишається.",
             "items": {
               "$ref": "#/components/schemas/ImportChange"
             },

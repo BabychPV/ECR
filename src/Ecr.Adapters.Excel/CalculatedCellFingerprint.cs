@@ -112,14 +112,27 @@ public static class CalculatedCellFingerprint
     {
         ArgumentNullException.ThrowIfNull(cell);
 
+        return Hash(Canonical(cell));
+    }
+
+    /// <summary>
+    /// Канонічний текст комірки, з якого рахуються відбитки — і обчислюваних
+    /// комірок (тут), і введених (<see cref="EnteredCellFingerprint"/>, AN-118).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Одне правило на обидва відбитки: «що вважати тим самим вмістом
+    /// комірки» не має розходитися між ними.
+    /// </remarks>
+    internal static string Canonical(IXLCell cell)
+    {
         if (cell.HasFormula)
         {
-            return Hash("f:");
+            return "f:";
         }
 
         var value = cell.Value;
 
-        var text = value.Type switch
+        return value.Type switch
         {
             XLDataType.Blank => "b:",
             XLDataType.Number => "n:" + value.GetNumber().ToString("R", CultureInfo.InvariantCulture),
@@ -129,8 +142,6 @@ public static class CalculatedCellFingerprint
             XLDataType.Text => TextOrBlank(value.GetText()),
             _ => "x:" + value.ToString(CultureInfo.InvariantCulture),
         };
-
-        return Hash(text);
     }
 
     /// <summary>
