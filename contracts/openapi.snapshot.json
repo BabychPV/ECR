@@ -5569,6 +5569,14 @@
           "state": {
             "description": "Стан.",
             "type": "string"
+          },
+          "writtenCount": {
+            "description": "Скільки комірок записав `Succeeded` перерахунок формул після правки (`0` — нічого,\nклієнт не перечитує зрізи); `null` — інша задача, ще не завершена або число невідоме\n(AN-108 / P2-02, `FormulaRecalcOutcome`). Заповнює `GetJobStatusHandler`.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
           }
         },
         "required": [
