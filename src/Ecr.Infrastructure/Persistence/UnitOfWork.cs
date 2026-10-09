@@ -28,6 +28,16 @@ public sealed class UnitOfWork(
     // зареєстрований `IClock`.
     private readonly IClock _clock = clock ?? new SystemClock();
 
+    /// <summary>
+    /// Довідники, чия ревізія даних зросла в поточній (ще не закомічені) транзакції — за контекстом,
+    /// а не за екземпляром одиниці роботи: кілька <see cref="UnitOfWork"/> над одним контекстом (тести,
+    /// служба ключів) пишуть в одну транзакцію, і переставити мітку має той, хто її комітить (D1-03).
+    /// </summary>
+    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<EcrDbContext, HashSet<int>>
+        RegistryChangesInTransaction = new();
+
+    private HashSet<int> ChangedRegistries => RegistryChangesInTransaction.GetValue(db, _ => []);
+
     /// <inheritdoc />
     public async Task<int> SaveChangesAsync(CancellationToken ct)
     {
@@ -52,6 +62,12 @@ public sealed class UnitOfWork(
                 {
                     await ApplyRegistryRevisionBumpsAsync(bumps, token).ConfigureAwait(false);
                     saved = await db.SaveChangesAsync(token).ConfigureAwait(false);
+
+                    // D1-03: мітку `DataChangedAt` буде переставлено перед КОМІТОМ транзакції.
+                    foreach (var bump in bumps)
+                    {
+                        ChangedRegistries.Add(bump.Id);
+                    }
                 },
                 ct).ConfigureAwait(false);
             return saved;
@@ -140,6 +156,58 @@ public sealed class UnitOfWork(
                 now ??= _clock.UtcNow;
                 entry.Entity.MarkDataChanged(now.Value);
             }
+        }
+    }
+
+    /// <summary>
+    /// Переставляє <see cref="RegistryDef.DataChangedAt"/> довідникам, зміненим у цій транзакції, на
+    /// момент безпосередньо ПЕРЕД комітом (D1-03).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Мітка, поставлена в <c>SaveChangesAsync</c>, — момент ПОЧАТКУ запису, а транзакція пакета чи
+    /// CSV триває після неї ще секунди (правила довідника, перерахунок сиріт, синк). Прогін розрахунку,
+    /// що стартував у цьому вікні, читає знімок без незакомічених рядків — тобто рахує на СТАРОМУ
+    /// довіднику, — а умова «застаріло» (`DataChangedAt &gt; StartedAt` у <c>StaleResultsQuery</c>,
+    /// <c>RegistryImpactStore</c>, <c>MethodologyStore</c>) гасилася, бо мітка була РАНІША за старт.
+    /// Мітка перед комітом пізніша за старт будь-якого прогону, який міг не побачити цих рядків, тож
+    /// такий результат тепер позначається застарілим. Рядок <c>cfg.RegistryDef</c> уже під X-блокуванням
+    /// цієї транзакції (<c>UPDATE … DataRevision</c>), тож новий <c>UPDATE</c> нікого не чекає.
+    /// <para>
+    /// ⚠ Залишкове вікно — мілісекунди між цим оператором і самим комітом плюс розбіжність годинників
+    /// машин API і Worker (NTP). Повна відтворюваність <c>replay</c> того самого <c>AS OF</c> цим не
+    /// гарантується: прогін, що не побачив правки, тепер ПОЗНАЧЕНИЙ застарілим, а не виправлений.
+    /// </para>
+    /// </remarks>
+    /// <param name="ct">Токен скасування.</param>
+    private async Task RestampRegistryDataChangesAsync(CancellationToken ct)
+    {
+        var changed = ChangedRegistries;
+        if (changed.Count == 0)
+        {
+            return;
+        }
+
+        var ids = changed.Order().ToList();
+        changed.Clear();
+
+        var now = _clock.UtcNow;
+        await db.RegistryDefs
+            .Where(d => ids.Contains(d.Id))
+            .ExecuteUpdateAsync(s => s.SetProperty(d => d.DataChangedAt, (DateTime?)now), ct)
+            .ConfigureAwait(false);
+
+        // Відстежувані екземпляри — у той самий стан, що й рядок у базі, без позначки «змінено».
+        foreach (var entry in db.ChangeTracker.Entries<RegistryDef>())
+        {
+            if (!ids.Contains(entry.Entity.Id))
+            {
+                continue;
+            }
+
+            var property = entry.Property(d => d.DataChangedAt);
+            property.CurrentValue = now;
+            property.OriginalValue = now;
+            property.IsModified = false;
         }
     }
 
@@ -442,7 +510,8 @@ public sealed class UnitOfWork(
         var transaction = await strategy
             .ExecuteAsync(() => db.Database.BeginTransactionAsync(ct))
             .ConfigureAwait(false);
-        return new TransactionScope(transaction);
+        ChangedRegistries.Clear();
+        return new TransactionScope(transaction, RestampRegistryDataChangesAsync);
     }
 
     /// <inheritdoc />
@@ -504,9 +573,15 @@ public sealed class UnitOfWork(
                 }
 
                 await using var transaction = await db.Database.BeginTransactionAsync(ct).ConfigureAwait(false);
+
+                // Повтор стратегії починає транзакцію з нуля: довідники першої спроби вже відкочено.
+                ChangedRegistries.Clear();
                 await TranslatingLockWaitAsync(async () =>
                 {
                     await operation(ct).ConfigureAwait(false);
+
+                    // ⛔ D1-03: мітка `DataChangedAt` — перед самим комітом, а не на початку запису.
+                    await RestampRegistryDataChangesAsync(ct).ConfigureAwait(false);
                     await transaction.CommitAsync(ct).ConfigureAwait(false);
                 }).ConfigureAwait(false);
             }).ConfigureAwait(false);
@@ -552,12 +627,15 @@ public sealed class UnitOfWork(
     /// під RCSI забута транзакція тримає версії рядків у tempdb і псує життя
     /// всій базі, а не тільки своєму запиту.
     /// </remarks>
-    private sealed class TransactionScope(IDbContextTransaction transaction) : IAsyncDisposable, IEcrTransaction
+    private sealed class TransactionScope(
+        IDbContextTransaction transaction, Func<CancellationToken, Task> beforeCommit) : IAsyncDisposable, IEcrTransaction
     {
         private bool _committed;
 
         public async Task CommitAsync(CancellationToken ct)
         {
+            // D1-03: мітка `DataChangedAt` змінених довідників — перед самим комітом.
+            await beforeCommit(ct).ConfigureAwait(false);
             await transaction.CommitAsync(ct).ConfigureAwait(false);
             _committed = true;
         }
