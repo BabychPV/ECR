@@ -255,7 +255,12 @@ public sealed class UpsertRegistryEntryHandler(
         // ⛔ S18: запис іншого довідника — та сама `404 registryEntry`, що й неіснуючий. Доти тут
         // була `422 entryWrongRegistry` з `ownerRegistryDefId`: перебором Id вона розкривала, які
         // записи є і в якому довіднику — зокрема в схованому забороною.
-        if (entry is null || entry.RegistryDefId != definition.Id)
+        //
+        // ⛔ L5-15 (аудит 2026-10-09): логічно видалений запис — теж `404 registryEntry`. `FindEntryAsync`
+        // видалених не фільтрує, і ручна правка за Id писала значення, назву й ревізію в запис, якого вже
+        // немає в переліках: «воскресити» його не можна, а мовчки змінити — можна. Так само, як у батька
+        // нижче, у GET запису, пакеті й зовнішніх ключах.
+        if (entry is null || entry.IsDeleted || entry.RegistryDefId != definition.Id)
         {
             throw RegistryAccess.EntryNotFound(id, definition.Code);
         }

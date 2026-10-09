@@ -66,7 +66,10 @@ public sealed class SetEntryValidityHandler(
 
         var definition = await lookup.RequireAsync(ct).ConfigureAwait(false);
         var entry = await registries.FindEntryAsync(registryEntryId, ct).ConfigureAwait(false);
-        if (entry is null || entry.RegistryDefId != definition.Id)
+
+        // ⛔ L5-15: видалений запис — та сама `404`, що й неіснуючий (`FindEntryAsync` видалених не фільтрує):
+        // інакше вікно чинності видаленого запису змінювалось би з перерахунком IsOrphaned і ревізією довідника.
+        if (entry is null || entry.IsDeleted || entry.RegistryDefId != definition.Id)
         {
             throw RegistryAccess.EntryNotFound(registryEntryId, registryCode);
         }
