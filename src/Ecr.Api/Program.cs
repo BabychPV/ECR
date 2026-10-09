@@ -283,9 +283,12 @@ app.UseResponseCompression();
  *
  * Тому дві різні політики:
  *   `/assets/*` — ім'я містить хеш вмісту, отже файл незмінний назавжди;
- *   `index.html` (зокрема з фолбека нижче) — `no-cache`, бо саме він знає,
+ *   `index.html` (зокрема з фолбека нижче) — `no-store`, бо саме він знає,
  *   які хеші чинні СЬОГОДНІ. Закешований `index.html` і був би тією вкладкою,
  *   що вічно просить старий чанк.
+ *   ⛔ AN-108 / S2-03: `no-store`, а не `no-cache` — сторінка з даними
+ *   попереднього користувача не відновлюється з bfcache після виходу на
+ *   спільному ПК (вимогу «не тримати старий index.html» `no-store` теж виконує).
  *
  * ⚠ Клієнтська половина (`vite:preloadError` → «встановлено нову версію») —
  * окремо, у `src/Ecr.Web`: сервер не може знати, що в чужій вкладці відкрито.
@@ -303,7 +306,7 @@ var staticFileOptions = new StaticFileOptions
         context.Context.Response.Headers[HeaderNames.CacheControl] =
             path.StartsWith("/assets/", StringComparison.OrdinalIgnoreCase)
                 ? "public, max-age=31536000, immutable"
-                : "no-cache";
+                : "no-store";
     },
 };
 
