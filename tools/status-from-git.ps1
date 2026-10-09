@@ -13,7 +13,9 @@
 
       випущено   — є коміт із ID, досяжний з -Release (типово origin/main);
       зведено    — коміти з ID є лише в -Integration поза -Release
-                   (типово origin/dev/integration, тобто `main..dev/integration`);
+                   (типово origin/dev/integration): `git log --cherry-pick --right-only
+                   --no-merges <Release>...<Integration>`, тож коміт, перенесений у
+                   -Release cherry-pick'ом (інший хеш, той самий патч), «хвостом» не рахується;
       —          — комітів із ID немає в жодній гілці.
 
     «випущено (+N зведено)» — задача вже в main, а в dev/integration після
@@ -216,11 +218,12 @@ function Read-Queue([string] $path) {
 # ---- git ------------------------------------------------------------------
 
 # ID → список комітів (новіші першими, як у git log).
-function Read-Commits([string] $range) {
+# $extra — додаткові прапорці git log перед діапазоном (напр. --cherry-pick --right-only).
+function Read-Commits([string] $range, [string[]] $extra = @()) {
     $index = @{}
     # %x1e — перед комітом, %x1f — між полями: у тілі комітів їх не буває.
     # Після останнього поля --name-only дописує змінені файли.
-    $raw = (Invoke-Git @('log', '--no-merges', '--name-only', '--format=%x1e%h%x1f%cs%x1f%s%x1f%b%x1f', $range)) -join "`n"
+    $raw = (Invoke-Git (@('log', '--no-merges') + $extra + @('--name-only', '--format=%x1e%h%x1f%cs%x1f%s%x1f%b%x1f', $range))) -join "`n"
     foreach ($record in $raw.Split([char]0x1e)) {
         $fields = $record.Split([char]0x1f)
         if ($fields.Count -lt 5) { continue }
@@ -295,7 +298,9 @@ try {
 
     $queueData = Read-Queue $queuePath
     $released = Read-Commits $releaseTip
-    $integrated = Read-Commits "$releaseTip..$integrationTip"
+    # N5-08: симетрична різниця + --cherry-pick --right-only. Коміт із dev/integration, що потрапив у main
+    # cherry-pick'ом (інший хеш, той самий патч), не лишається «хвостом» і не дає хибного «+N зведено».
+    $integrated = Read-Commits "$releaseTip...$integrationTip" @('--cherry-pick', '--right-only')
 
     # ⚠ Без [IO.Path]::GetRelativePath: його немає в .NET Framework (Windows PowerShell 5.1).
     $relQueue = $queuePath

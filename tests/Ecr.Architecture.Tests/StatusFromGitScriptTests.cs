@@ -18,7 +18,8 @@ namespace Ecr.Architecture.Tests;
 /// прибрати праву межу ID → <c>AN-6</c> «зведено» (з <c>AN-6б</c>); прибрати ліву межу →
 /// <c>AN-3</c> «зведено» (з <c>WLAN-3</c>); прибрати пропуск облікових
 /// комітів → <c>AN-3</c> «випущено»; прибрати запасний пошук за хешем → <c>AN-5</c>/<c>AN-7</c>
-/// «—». Кожна червонить тест.
+/// «—». Кожна червонить тест. N5-08: прибрати <c>--cherry-pick --right-only</c> (діапазон назад у
+/// <c>main..dev</c>) → <c>AN-11</c> «випущено (+1 зведено)» (мутація — CI, локально не запускалась).
 /// Відмови (git недоступний, немає гілки, <c>-OutFile</c> у репозиторії) — код 1 і порожній
 /// stdout: звіт, що виглядає справжнім, на неповних даних гірший за жоден. Мутації: прибрати
 /// перевірку <c>-OutFile</c> → файл з'являється в репозиторії; замінити відмову про гілку на
@@ -40,6 +41,7 @@ public sealed class StatusFromGitScriptTests
     [InlineData("AN-7", "випущено (за хешем із черги)")]
     [InlineData("AN-10", "—")]
     [InlineData("AN-10b", "зведено")]
+    [InlineData("AN-11", "випущено")]
     public void Статус_задачі_береться_з_комітів(string id, string expected) =>
         Assert.Equal(expected, Status(Result.Value.Tasks, id));
 
@@ -121,6 +123,12 @@ public sealed class StatusFromGitScriptTests
             // Межі ID — без букв будь-якої абетки: ні WLAN-3, ні AN-6б (кирилична «б») не є AN-3/AN-6.
             Commit(repo, "b.txt", "[CODE] WLAN-3 і AN-6б");
             Commit(repo, "a.txt", "[FIX] AN-1: хвіст після випуску");
+            // N5-08: коміт зведення, перенесений у main cherry-pick'ом (інший хеш, той самий патч), «хвостом» не є:
+            // AN-11 — просто «випущено», без «(+1 зведено)». Без `--cherry-pick --right-only` це «випущено (+1 зведено)».
+            Commit(repo, "e.txt", "[FIX] AN-11: перенесено в main cherry-pick'ом");
+            Git(repo, "checkout", "-q", "main");
+            Git(repo, "cherry-pick", "dev");
+            Git(repo, "checkout", "-q", "dev");
             Git(repo, "checkout", "-q", "-b", "side");
             Commit(repo, "c.txt", "[CODE] робота без ID");
             var integratedUntagged = Git(repo, "rev-parse", "--short=8", "HEAD");
@@ -145,6 +153,7 @@ public sealed class StatusFromGitScriptTests
                 $"| AN-7 | сьома | done | `{releasedUntagged}` |",
                 "| AN-10 | десята | todo | — |",
                 "| AN-10b | десята-б | todo | — |",
+                "| AN-11 | одинадцята (cherry-pick у main) | todo | — |",
                 ""), new UTF8Encoding(false));
             var before = File.ReadAllBytes(queue);
             var output = Path.Combine(dir, "out", "status.md");
