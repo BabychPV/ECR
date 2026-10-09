@@ -238,6 +238,19 @@ public sealed partial class LoginHandler(
 
         if (user is null)
         {
+            // ⛔ X5-01: ім'я з квитка вже зайняте записом з ІНШИМ SID — друкарська помилка в
+            // SID, набраному в `POST /users`, або локальний запис з тим самим ім'ям. Раніше
+            // `CreateDomain` падав на `UQ_User_Name`: 500, а невдала спроба відкочувалась разом
+            // зі збоєм — на екрані безпеки слідів не було. Тепер 409 з причиною, спроба в журналі
+            // входів, а Warning каже адміністраторові, який запис виправити і на який SID
+            // (`PUT /users/{id}/windows-sid`, поки запис ще не входив).
+            if (await users.FindByUserNameAsync(userName, ct).ConfigureAwait(false) is { } taken)
+            {
+                await FailAsync(userName, "SidMismatch", ipAddress, now, ct).ConfigureAwait(false);
+                LogSidMismatch(logger, userName, taken.Id, sid);
+                throw SidMismatch(userName, sid);
+            }
+
             user = User.CreateDomain(userName, displayName, sid, now);
             users.Add(user);
         }
@@ -364,6 +377,33 @@ public sealed partial class LoginHandler(
                   + "SID у квитку: {SidCount} ({Sids}). Особистих призначень: {PersonalRoles}.")]
     private static partial void LogNoGroupMatch(
         ILogger logger, string userName, int sidCount, string sids, int personalRoles);
+
+    /// <summary>Рядок журналу про Windows-вхід, чиє ім'я зайняте записом з іншим SID (X5-01).</summary>
+    /// <param name="logger">Журнал.</param>
+    /// <param name="userName">Ім'я входу з квитка.</param>
+    /// <param name="userId">Запис, що тримає ім'я.</param>
+    /// <param name="sid">SID із квитка — на нього запис і треба виправити.</param>
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "Windows-вхід {UserName} відхилено: ім'я зайняте записом #{UserId} з іншим SID. "
+                  + "SID у квитку: {Sid}. Виправлення — PUT /api/v1/users/<id запису>/windows-sid, поки запис не входив.")]
+    private static partial void LogSidMismatch(ILogger logger, string userName, int userId, string sid);
+
+    /// <summary>Відмова Windows-входу: ім'я входу прив'язане до іншого SID (X5-01).</summary>
+    /// <remarks>
+    /// ⚠ SID у подробиці — власний SID того, хто входить (його вже автентифікував домен):
+    /// людині є що передати адміністраторові. Ключ — у ПУБЛІЧНІЙ області, як
+    /// <c>invalidCredentials</c>: це екран входу.
+    /// </remarks>
+    private static BusinessRuleException SidMismatch(string userName, string sid)
+        => new(
+            "ECR-USR-0409", $"Обліковий запис «{userName}» прив'язаний до іншого SID; зверніться до адміністратора.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-USR-0409.windowsSidMismatch",
+                ["userName"] = userName,
+                ["sid"] = sid,
+            });
 
     /// <summary>Записує невдалу спробу і зберігає зміни.</summary>
     private async Task FailAsync(

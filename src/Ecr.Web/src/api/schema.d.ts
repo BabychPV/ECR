@@ -17861,6 +17861,84 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/users/{id}/windows-sid": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Виправляє SID доменного запису, який ще не входив. Право `Security.ManageUsers` (X5-01).
+         * @description Не SID — `422 ECR-USR-0422`; SID має інший запис — `409 ECR-USR-0409`; запис уже входив — `409 ECR-SEC-0409`.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["CorrectWindowsSidRequest"];
+                    "application/json": components["schemas"]["CorrectWindowsSidRequest"];
+                    "text/json": components["schemas"]["CorrectWindowsSidRequest"];
+                };
+            };
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/health/db": {
         parameters: {
             query?: never;
@@ -19118,6 +19196,11 @@ export interface components {
              * @description Значення у цільовій одиниці.
              */
             value: string;
+        };
+        /** @description Виправлення SID доменного запису, який ще не входив (X5-01). */
+        CorrectWindowsSidRequest: {
+            /** @description Правильний SID облікового запису в домені (`S-1-…`). */
+            sid: string;
         };
         /** @description Подія журналу покриття: інтервал зібрано, але в комірки він не ліг. */
         CoverageEventView: {

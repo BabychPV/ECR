@@ -312,6 +312,51 @@ public sealed class User : Entity<int>
         LastSignInAt = utcNow;
     }
 
+    /// <summary>
+    /// Виправляє SID доменного запису, якого ще ніхто не підтвердив входом (X5-01).
+    /// </summary>
+    /// <param name="windowsSid">Канонічний SID (форму перевіряє викликач).</param>
+    /// <exception cref="Abstractions.DomainException">
+    /// Не доменний запис — 422 <c>ECR-USR-0422</c>; запис уже входив — 409 <c>ECR-SEC-0409</c>.
+    /// </exception>
+    /// <remarks>
+    /// ⛔ Лише до першого входу. Після нього SID підтверджено каталогом, і заміна SID
+    /// означала б передати чужі ролі й історію іншій людині, а не виправити друкарську
+    /// помилку. Штамп крутиться: сесій у такого запису ще немає, але правило «зміна
+    /// зіставлення = нові сесії» одне для всіх змін облікового запису.
+    /// </remarks>
+    public void CorrectUnconfirmedWindowsSid(string windowsSid)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(windowsSid);
+
+        if (Provider != AuthProvider.Windows)
+        {
+            throw new Abstractions.DomainException(
+                ErrorCodes.UserInvalid,
+                $"«{UserName}» — не доменний запис: SID у нього немає.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-USR-0422.windowsSidNotDomain",
+                    ["userName"] = UserName,
+                });
+        }
+
+        if (LastSignInAt is not null)
+        {
+            throw new Abstractions.DomainException(
+                ErrorCodes.SecurityConflict,
+                $"«{UserName}» уже входив: його SID підтверджено каталогом і не виправляється.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-SEC-0409.windowsSidConfirmed",
+                    ["userName"] = UserName,
+                });
+        }
+
+        WindowsSid = windowsSid;
+        RefreshSecurityStamp();
+    }
+
     /// <summary>Вимикає bootstrap-запис. **Не видаляє**: він потрібен в аудиті.</summary>
     public void DisableAsBootstrap()
     {

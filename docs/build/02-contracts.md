@@ -3611,9 +3611,9 @@ public sealed class NotFoundException(string errorCode, string message)
 | `ECR-AUTH-0429` | 429 | вичерпано хвилинну межу спроб входу з АДРЕСИ (`S-10`); у відповіді `Retry-After`. Обліковка при цьому не заблокована — це `ECR-AUTH-0423`, інший суб'єкт і інша дія користувача |
 | `ECR-ACCS-0403` | 403 | відмова `IAccessDecisionService`; у `Extensions2.reason` — `EditDenyReason` |
 | `ECR-SEC-0404` | 404 | користувача або ролі не існує (або роль вимкнена) |
-| `ECR-SEC-0409` | 409 | конфлікт зі станом безпеки: роль із таким кодом уже існує (`UQ_Role`), роль вбудована чи зайнята; дія над власним записом або над останнім адміністратором (BE-12) |
-| `ECR-USR-0422` | 422 | дані облікового запису не проходять перевірку: алерти без пошти, доменний запис без SID, локальний без разового пароля |
-| `ECR-USR-0409` | 409 | обліковий запис із таким іменем уже існує |
+| `ECR-SEC-0409` | 409 | конфлікт зі станом безпеки: роль із таким кодом уже існує (`UQ_Role`), роль вбудована чи зайнята; дія над власним записом або над останнім адміністратором (BE-12); виправлення SID доменного запису, який уже входив (`windowsSidConfirmed`, X5-01) |
+| `ECR-USR-0422` | 422 | дані облікового запису не проходять перевірку: алерти без пошти, доменний запис без SID або з SID не у формі `S-1-…` (`windowsSidMalformed`, X5-01), локальний без разового пароля |
+| `ECR-USR-0409` | 409 | обліковий запис із таким іменем уже існує; SID уже прив'язаний до іншого запису (`windowsSidTaken`); Windows-вхід, чиє ім'я зайняте записом з іншим SID (`windowsSidMismatch`, X5-01: раніше 500 на `UQ_User_Name`) |
 | `ECR-TMPL-0404` | 404 | шаблон або версія не знайдені |
 | `ECR-TMPL-0409` | 409 | спроба структурної зміни в опублікованій версії (ФВ-7.1), **або** правила умовного форматування версії змінили між читанням і записом — `If-Match` не збігся з `ETag` набору (`condFormatChanged`, актуальна версія в `details.version`; `PUT …/conditional-formats`, ФВ-2.7) |
 | `ECR-TMPL-0422` | 422 | публікація не проходить валідацію цілісності |
@@ -3941,6 +3941,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `POST` | `/api/v1/users/{id}/reset-password` | `Security.ManageUsers` | 3 |
 | `POST` | `/api/v1/users/{id}/lock` | `Security.ManageUsers` | 3 |
 | `POST` | `/api/v1/users/{id}/unlock` | `Security.ManageUsers` | 3 |
+| `PUT` | `/api/v1/users/{id}/windows-sid` | `Security.ManageUsers` | 3 |
 | `GET` | `/api/v1/units` | — | 4 |
 | `POST` | `/api/v1/units` | `Uom.EditCatalog` | 4 |
 | `POST` | `/api/v1/units/convert` | — | 4 |

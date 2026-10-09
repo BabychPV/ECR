@@ -2381,6 +2381,19 @@
         ],
         "type": "object"
       },
+      "CorrectWindowsSidRequest": {
+        "description": "Виправлення SID доменного запису, який ще не входив (X5-01).",
+        "properties": {
+          "sid": {
+            "description": "Правильний SID облікового запису в домені (`S-1-…`).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sid"
+        ],
+        "type": "object"
+      },
       "CoverageEventView": {
         "description": "Подія журналу покриття: інтервал зібрано, але в комірки він не ліг.",
         "properties": {
@@ -42760,6 +42773,112 @@
           }
         },
         "summary": "Знімає блокування — адміністративне чи після невдалих спроб. Право `Security.ManageUsers` (BE-12).",
+        "tags": [
+          "Security"
+        ]
+      }
+    },
+    "/api/v1/users/{id}/windows-sid": {
+      "put": {
+        "description": "Не SID — `422 ECR-USR-0422`; SID має інший запис — `409 ECR-USR-0409`; запис уже входив — `409 ECR-SEC-0409`.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/CorrectWindowsSidRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CorrectWindowsSidRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CorrectWindowsSidRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Виправляє SID доменного запису, який ще не входив. Право `Security.ManageUsers` (X5-01).",
         "tags": [
           "Security"
         ]
