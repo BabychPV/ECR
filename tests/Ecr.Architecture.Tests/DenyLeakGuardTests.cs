@@ -136,6 +136,8 @@ public sealed partial class DenyLeakGuardTests
             (2, "⚠ ВІДОМИЙ ВИТІК: EnforceRowCreationRules іде ДО EnsureAccessAsync (fixedRowMode, dynamicRowLimit)"),
         ["src/Ecr.Application/Documents/PatchCellsHandler.cs | деталь tableCode | table.Code"] =
             (2, "⚠ ВІДОМИЙ ВИТІК: те саме, що текст"),
+        ["src/Ecr.Application/Documents/RecalculateDocumentHandler.cs | текст | periodKey.Value"] =
+            (1, "TargetOf: ключ злиття черги з Id документа й періоду з самого запиту; ні колонки, ні значення, не потрапляє у відповідь"),
     };
 
     [Fact]
