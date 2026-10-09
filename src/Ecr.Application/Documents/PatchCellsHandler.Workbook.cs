@@ -594,6 +594,27 @@ public sealed partial class PatchCellsHandler
                     x.Id.ToString(CultureInfo.InvariantCulture),
                     error.Details!.GetValueOrDefault("tableInstanceId") as string,
                     StringComparison.Ordinal));
+
+            // ⛔ AN-106 (хвіст D1-01 / AN-104): та сама повна відмова, що й у поштучного
+            // (`PersistChangesAsync`) — справжня колонка, `currentVersion`, «ваше / чинне», автор,
+            // а не `*` з порожньою версією («рядка більше немає»).
+            // ⚠ На відміну від поштучного, транзакція книги ще ВІДКРИТА (її відкочує викликач), а
+            // захоплення вже підняло версії НЕзастарілих рядків цієї ж транзакції. Тому чинна версія
+            // береться лише для застарілих рядків (їх ця транзакція не чіпала — читання під RCSI бачить
+            // закомічене чуже), решта лишається прочитаною на вході: інакше власні захоплення
+            // виглядали б чужими конфліктами.
+            var fresh = await rowStore.GetRowsAsync(guilty.Id, period, ct).ConfigureAwait(false);
+            try
+            {
+                await EnsureNoVersionConflictsAsync(WithFreshVersionsOf(guilty.Context, fresh, staleRowIds), ct)
+                    .ConfigureAwait(false);
+            }
+            catch (ConcurrencyConflictException conflict)
+            {
+                throw Blame(conflict, guilty.Id)!;
+            }
+
+            // Запасний: версії знову збіглися — лишається адресна відмова сховища.
             throw Blame(StaleRowsConflict(guilty.Planned, staleRowIds), guilty.Id)!;
         }
         catch (EcrException error) when (active.Count == 1 && Blame(error, active[0].Id) is { } named)
@@ -627,6 +648,40 @@ public sealed partial class PatchCellsHandler
     /// <c>tableInstanceId</c> рядком; тип винятку (а з ним HTTP-статус), код і
     /// <c>messageKey</c> не змінюються.
     /// </remarks>
+    /// <summary>
+    /// Контекст, у якому версії ЗАСТАРІЛИХ рядків (<paramref name="staleRowIds"/>) — чинні з
+    /// <paramref name="fresh"/>, а решта — прочитані на вході (AN-106).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Застарілого рядка, якого вже немає, у версіях немає й тут — <see cref="EnsureNoVersionConflictsAsync"/>
+    /// назве його <c>*</c> з порожньою версією, як і має бути для справді видаленого рядка.
+    /// </remarks>
+    private static RequestContext WithFreshVersionsOf(
+        RequestContext context, IReadOnlyList<RowState> fresh, IReadOnlyList<long> staleRowIds)
+    {
+        var stale = staleRowIds.ToHashSet();
+        var versions = new Dictionary<string, string>(context.Versions, StringComparer.Ordinal);
+        foreach (var (rowKey, rowId) in context.RowIds)
+        {
+            if (stale.Contains(rowId))
+            {
+                versions.Remove(rowKey);
+            }
+        }
+
+        foreach (var row in fresh)
+        {
+            if (stale.Contains(row.Id))
+            {
+                versions[row.RowKey] = row.RowVersion;
+            }
+        }
+
+        // ⚠ Через інтерфейс: властивість `Versions` — `IReadOnlyDictionary` (CA1859 інакше просить конкретний тип).
+        IReadOnlyDictionary<string, string> merged = versions;
+        return context with { Versions = merged };
+    }
+
     private static EcrException? Blame(EcrException error, long tableInstanceId)
     {
         var details = new Dictionary<string, object?>(StringComparer.Ordinal);

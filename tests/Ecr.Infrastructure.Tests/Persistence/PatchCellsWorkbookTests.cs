@@ -183,6 +183,15 @@ public sealed partial class PatchCellsWorkbookTests(SqlServerFixture sql) : IDis
         var conflict = Assert.Single((IEnumerable<CellConflictDto>)error.Details["conflicts"]!);
         Assert.Equal(guilty.RowKeys[0], conflict.RowKey);
 
+        // ⛔ AN-106 (хвіст D1-01): та сама повна відмова, що й у поштучного — справжня колонка й
+        // ЧИННА версія, а не `*` з порожньою («рядка більше немає»). Єдиний конфлікт вище водночас
+        // тримає й другий бік: рядки, які ця ж транзакція встигла захопити (підняти їм версію), чужими
+        // конфліктами не названі.
+        Assert.Equal(guilty.ColumnCodes[^1], conflict.ColumnCode);
+        var current = (await VersionsAsync(world))[guilty.InstanceId][guilty.RowKeys[0]];
+        Assert.False(string.IsNullOrEmpty(current));
+        Assert.Equal(current, conflict.CurrentVersion);
+
         await AssertNothingWrittenAsync(world, before, bumpedRowKey: guilty.RowKeys[0]);
     }
 
