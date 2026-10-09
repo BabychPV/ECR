@@ -12,6 +12,7 @@ import {
 import { useNavigate } from 'react-router-dom';
 import { useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { apiFetch, beginSignOut, LOGOUT_PATH } from '@/api/client';
+import { announceSessionChange } from '@/shared/session/sessionChannel';
 import { t } from '@/shared/i18n';
 import { applyDensity, setDensity, useDensity, type Density } from '@/shared/theme/preferences';
 import { LanguageSwitcher } from '@/shared/ui/LanguageSwitcher';
@@ -152,7 +153,8 @@ export function UserMenu({
  * ⛔ AN-108 / S2-03: кеш запитів очищається ЯВНО, а перехід — `replace`, не
  * `assign`: сторінка з даними користувача не лишається в історії під «Назад»
  * на формі входу (і в bfcache — разом із `no-store` оболонки й `pageshow` у
- * `main.tsx`).
+ * `main.tsx`). S2-05: інші вкладки дізнаються про вихід одразу
+ * (`announceSessionChange`), а не з першого `401`.
  */
 async function signOut(queryClient: QueryClient): Promise<void> {
   beginSignOut();
@@ -161,6 +163,7 @@ async function signOut(queryClient: QueryClient): Promise<void> {
     await apiFetch<void>(LOGOUT_PATH, { method: 'POST' });
   } finally {
     queryClient.clear();
+    announceSessionChange();
     window.location.replace('/login');
   }
 }

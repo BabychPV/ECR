@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
-import { EcrApiError, apiFetch } from '@/api/client';
+import { EcrApiError, apiFetch, isSessionClosed } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
 import type {
   CellConflictDto,
@@ -680,6 +680,11 @@ export function sendPatchBeacon(documentId: number, request: PatchCellsRequest):
   const swallow = (): void => {
     // Навмисно порожньо — причина в коментарі до функції.
   };
+
+  // ⛔ AN-108 / S2-05: сеанс вкладки закрито (вихід або інший користувач у сусідній вкладці) — cookie вже не
+  // власника цих правок. Маячок не обходить `apiFetch`, тож перевірка тут власна; правки лишились у сліді
+  // `lostEdits` під їхнім власником.
+  if (isSessionClosed()) return;
 
   try {
     fetch(`/api/v1/documents/${documentId}/cells`, {
