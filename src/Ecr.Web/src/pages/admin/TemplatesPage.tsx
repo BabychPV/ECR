@@ -15,7 +15,7 @@ import {
   documentCount,
   draftCount,
   filterTemplateRows,
-  publishedVersionCount,
+  publishedCount,
   toTemplateListRow,
   type TemplateListRow,
 } from '@/features/templates/templateListModel';
@@ -331,7 +331,7 @@ export function TemplatesPage(): JSX.Element {
             {
               id: 'published',
               label: t('templates.stat.published'),
-              value: publishedVersionCount(rows),
+              value: publishedCount(rows),
               hint: t('templates.stat.publishedHint'),
             },
             {
