@@ -20496,6 +20496,13 @@ export interface components {
         IFormFile: string;
         /** @description Запит на застосування імпорту. */
         ImportApplyRequest: {
+            /** @description ✎ AN-114 (D-338). Рядки, для яких людина свідомо перезаписує чужі правки,
+             *     зроблені після експорту книги (конфлікти перегляду
+             *     `err.ECR-CELL-0409.importRowChangedSinceExport`, їхні значення —
+             *     `ImportPreview.overwritable`). Відсутнє/порожнє — конфліктні рядки не
+             *     застосовуються, решта — так (AN-103). Рядок, що не був таким конфліктом, —
+             *     422 `ECR-IMP-0422` (`overwriteNotConflict`). */
+            overwriteRows?: null | components["schemas"]["ImportOverwriteRow"][];
             /** @description Токен раніше побудованого diff. */
             previewToken: string;
         };
@@ -20519,12 +20526,26 @@ export interface components {
             tableCode?: null | string;
             tableNameL10n?: null | components["schemas"]["LocalizedText"];
         };
+        /** @description Рядок книги, для якого людина свідомо перезаписує чужу правку, зроблену
+         *     після експорту (AN-114, D-338). */
+        ImportOverwriteRow: {
+            /** @description Рядок (як `rowKey` відмови-конфлікту перегляду). */
+            rowKey: string;
+            /** @description Таблиця (як `tableCode` відмови-конфлікту перегляду). */
+            tableCode: string;
+        };
         /** @description Результат попереднього перегляду імпорту. */
         ImportPreview: {
             /** @description Комірки, які зміняться. */
             changes: components["schemas"]["ImportChange"][];
             /** @description Комірки, змінені іншим користувачем після відкриття. */
             conflicts: components["schemas"]["CellConflictDto"][];
+            /** @description ✎ AN-114 (D-338). Комірки рядків, змінених кимось після експорту книги
+             *     (у Rejected вони ж — відмовою
+             *     `err.ECR-CELL-0409.importRowChangedSinceExport`): `OldValue` — чинне
+             *     (чуже) значення, `NewValue` — значення з книги. Застосовуються лише для
+             *     рядків, названих у `ImportApplyRequest.OverwriteRows`. */
+            overwritable: components["schemas"]["ImportChange"][];
             /** @description Токен для застосування; діє обмежений час. */
             previewToken: string;
             /** @description Комірки, які буде відхилено, із причиною. */
