@@ -7417,6 +7417,10 @@ USING (VALUES
     -- COLL:an105-results-ceiling ── AN-105 / D2-05: актуальних результатів документа за період більше за стелю читання; ru/kz — порцією COLL:an105-results-ceiling нижче ──
     (N'err.ECR-CALC-0422.resultsTooLarge', N'en', N'Document {documentId} has more than {max} calculation results for period {periodKey}. They are not shown partly, because a partial list would give wrong totals: check the methodology bindings (a binding on the wrong table multiplies rows).', 1)
     -- COLL:an105-results-ceiling ── кінець секції ──
+    -- COLL:an108c-session-user ── AN-108 / S2-05: вкладка вважає себе іншим користувачем, ніж власник cookie (X-Ecr-User) -> 409; ru/kz — порцією COLL:an108c-session-user нижче ──
+    ,(N'err.ECR-AUTH-0409', N'en', N'You are signed in as someone else', 1),
+    (N'err.ECR-AUTH-0409.sessionUserChanged', N'en', N'Another user has signed in to this browser in a different tab. This tab''s changes were not saved under their name. Reload the page and sign in again.', 1)
+    -- COLL:an108c-session-user ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -18261,6 +18265,19 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:an105-results-ceiling ── кінець секції ──
+
+-- COLL:an108c-session-user ── ru/kz: AN-108 / S2-05: вкладка вважає себе іншим користувачем, ніж власник cookie; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-AUTH-0409', N'ru', N'Вы вошли как другой пользователь'),
+    (N'err.ECR-AUTH-0409', N'kz', N'Сіз басқа пайдаланушы ретінде кірдіңіз'),
+    (N'err.ECR-AUTH-0409.sessionUserChanged', N'ru', N'В другой вкладке этого браузера вошёл другой пользователь. Изменения этой вкладки не сохранены от его имени. Перезагрузите страницу и войдите снова.'),
+    (N'err.ECR-AUTH-0409.sessionUserChanged', N'kz', N'Осы браузердің басқа қойындысында басқа пайдаланушы кірді. Бұл қойындының өзгерістері оның атынан сақталмады. Бетті қайта жүктеп, қайта кіріңіз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:an108c-session-user ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

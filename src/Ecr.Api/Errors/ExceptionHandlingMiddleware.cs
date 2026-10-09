@@ -590,6 +590,12 @@ public sealed partial class ExceptionHandlingMiddleware(
         BusinessRuleException e when e.ErrorCode == ErrorCodes.JobStateConflict =>
             (StatusCodes.Status409Conflict, e.ErrorCode, e.Message, e.Details),
 
+        // ⛔ AN-108 / S2-05: вкладка вважає себе іншим користувачем, ніж власник cookie
+        // (`SessionUserMiddleware`) — сеанс змінився під нею, конфлікт стану, а не брак права.
+        // ⚠ Правило суфікса нижче цей код теж ловить (`-0409`); арм — явна назва, не єдина опора.
+        BusinessRuleException e when e.ErrorCode == ErrorCodes.SessionUserMismatch =>
+            (StatusCodes.Status409Conflict, e.ErrorCode, e.Message, e.Details),
+
         // ⛔ Те саме правило суфікса, що й для `DomainException` нижче: без нього
         // `ECR-UOM-4091`, `ECR-USR-0409`, `ECR-CALC-0409`, `ECR-TMPL-0409` і
         // `ECR-PRD-0409` з обробників їхали як 422, хоча §7 каже 409.
