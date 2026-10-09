@@ -112,19 +112,9 @@ public sealed class ReopenDocumentHandler(
         {
             // ⚠ Період береться з UPDLOCK ДО будь-яких змін (ФВ-1.10a) — тепер
             // блокування справді тримається до кінця транзакції.
-            var period = await workflow.LockPeriodAsync(documentId, key, innerCt).ConfigureAwait(false);
-            if (period.State == PeriodState.Closed)
-            {
-                throw new BusinessRuleException(
-                    "ECR-PRD-4223",
-                    $"Період {periodKey} закрито: спершу відкрийте період, потім аркуш.",
-                    new Dictionary<string, object?>
-                    {
-                        ["messageKey"] = "err.ECR-PRD-4223.reopenPeriodFirst",
-                        ["periodKey"] = periodKey.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                        ["periodState"] = period.State.ToString(),
-                    });
-            }
+            // ⛔ R5-W1 / W1-04: ЕФЕКТИВНИЙ стан періоду, а не збережений (F-08).
+            await ClosedPeriodGuard.RequireNotClosedAsync(workflow, documentId, key, clock.UtcNow, innerCt)
+                .ConfigureAwait(false);
 
             var state = await workflow
                 .GetOrCreateAsync(documentId, sheetDefId, key, innerCt)

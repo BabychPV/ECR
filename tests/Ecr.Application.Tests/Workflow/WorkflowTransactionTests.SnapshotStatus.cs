@@ -38,6 +38,9 @@ namespace Ecr.Application.Tests.Workflow;
 /// </remarks>
 public sealed partial class WorkflowTransactionTests
 {
+    /// <summary>Момент, коли січневий період проєкту ЕФЕКТИВНО закритий за будь-якою політикою.</summary>
+    private static readonly DateTime LongAfterClose = new(2030, 1, 15, 6, 0, 0, DateTimeKind.Utc);
+
     // ─────────────────────────── W1-01 ───────────────────────────
 
     [Fact]
@@ -208,6 +211,51 @@ public sealed partial class WorkflowTransactionTests
 
         Assert.Equal(DocumentStatus.Draft, await StatusAsync(world.World).ConfigureAwait(true));
         Assert.Equal(SnapshotStatus.Draft, (await ReportSnapshotAsync(world.SnapshotId).ConfigureAwait(true)).Status);
+    }
+
+    // ─────────────────────────── W1-04 ───────────────────────────
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "D-67")]
+    public async Task W1_04_Reopen_у_ефективно_закритому_періоді_відхиляється()
+    {
+        // Збережений стан — `Open` (задача станів ще не пройшла), але межі давно минули:
+        // рішення про запис уже бачить `Closed`. Без фіксу Reopen звірявся зі збереженим
+        // і повертав затверджений аркуш у `Draft`, де його вже не можна ні правити, ні подати.
+        var world = await ArrangeSnapshotAsync(DocumentStatus.Approved, other: null, activeProject: true)
+            .ConfigureAwait(true);
+
+        await using var db = CreateContext();
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => ReopenWith(world.World, db, NoSnapshots(), LongAfterClose)
+                .HandleAsync(world.World.DocumentId, world.World.SheetDefId, PeriodKeyValue, "уточнення", CancellationToken.None))
+            .ConfigureAwait(true);
+
+        Assert.Equal("ECR-PRD-4223", error.ErrorCode);
+        Assert.Equal(DocumentStatus.Approved, await StatusAsync(world.World).ConfigureAwait(true));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "D-67")]
+    public async Task W1_04_Recall_у_ефективно_закритому_періоді_відхиляється()
+    {
+        var world = await ArrangeSnapshotAsync(DocumentStatus.Submitted, other: null, activeProject: true)
+            .ConfigureAwait(true);
+
+        await using var db = CreateContext();
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Recall(world.World, db, UserId, GrantLevel.Submit, at: LongAfterClose)
+                .HandleAsync(world.World.DocumentId, world.World.SheetDefId, PeriodKeyValue, "уточнення", CancellationToken.None))
+            .ConfigureAwait(true);
+
+        Assert.Equal("ECR-PRD-4223", error.ErrorCode);
+        Assert.Equal(DocumentStatus.Submitted, await StatusAsync(world.World).ConfigureAwait(true));
     }
 
     // ────────────────────────────── збірка ────────────────────────────
