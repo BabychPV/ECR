@@ -78,6 +78,31 @@ public sealed class SaveMethodologyCategoryRuleHandlerTests
         _ = _uow.DidNotReceiveWithAnyArgs().SaveChangesAsync(default);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    public async Task Правило_глибше_96_відхиляється_422_при_збереженні()
+    {
+        // ⛔ N2-01 (AN-72): таке правило проходило і збереження, і публікацію, а в роботі давало #BUDGET.
+        var engine = new RealFormulaEngine();
+        _formulas.Parse(Arg.Any<string>(), Arg.Any<ExpressionDialect>())
+                 .Returns(call => engine.Parse(call.ArgAt<string>(0), call.ArgAt<ExpressionDialect>(1)));
+        _methodologies.GetFormulasAsync(VersionId, Arg.Any<CancellationToken>())
+                      .Returns(new List<MethodologyFormula>());
+        _methodologies.GetConstantsAsync(VersionId, Arg.Any<CancellationToken>())
+                      .Returns(new List<MethodologyConstant>());
+        var deep = string.Concat(Enumerable.Repeat("- ", 100)) + "'a'";
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Handler().HandleAsync(VersionId, deep, CancellationToken.None));
+
+        Assert.Equal("ECR-CALC-0422", error.ErrorCode);
+        Assert.Equal("publish.problem.formulaTooDeep", error.Details!["messageKey"]);
+        Assert.Equal("101", error.Details["depth"]);
+        Assert.Equal("96", error.Details["max"]);
+        Assert.Equal("CategoryRule", error.Details["formula"]);
+        _drafts.DidNotReceiveWithAnyArgs().Add(Arg.Any<MethodologyCategoryRule>());
+    }
+
     private SaveMethodologyCategoryRuleHandler Handler()
         => new(_drafts, _methodologies, _bindings, _formulas, _uow, _access, _user, _clock);
 }
