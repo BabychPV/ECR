@@ -159,3 +159,81 @@ describe('AN-108 / P2-03: слідкувач не опитує даремно', 
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ['job', 'gone#1'], exact: true });
   });
 });
+
+/** Сервер, що відповідає «виконано» з указаним `writtenCount` і рахує запити зрізів. */
+function stubSucceeded(writtenCount: number | null): string[] {
+  const slices: string[] = [];
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/tables/')) slices.push(url);
+      return new Response(JSON.stringify({ state: 'Succeeded', effectiveState: null, writtenCount }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }),
+  );
+  return slices;
+}
+
+describe('AN-108 / P2-02: перерахунок, що нічого не записав, зрізів не чіпає', () => {
+  // ⛔ Мутаційний доказ: прибери гілку `nothingWritten` у `settleRecalculation` — зріз стане застарілим.
+  it('settleRecalculation з writtenCount = 0 — зрізи не застарівають; з null чи > 0 — застарівають', async () => {
+    const zero = clientWithSlices();
+    const invalidate = vi.spyOn(zero, 'invalidateQueries');
+    expect(settleRecalculation(zero, 'none#1', 31, 202609, 0)).toBe(true);
+    expect(invalidate).not.toHaveBeenCalled();
+    expect(stale(zero, other)).toBe(false);
+    expect(settleRecalculation(zero, 'none#1', 31, 202609, 0)).toBe(false);
+
+    const unknown = clientWithSlices();
+    expect(settleRecalculation(unknown, 'unknown#1', 31, 202609, null)).toBe(true);
+    await vi.waitFor(() => expect(stale(unknown, other)).toBe(true));
+
+    const some = clientWithSlices();
+    expect(settleRecalculation(some, 'some#1', 31, 202609, 4)).toBe(true);
+    await vi.waitFor(() => expect(stale(some, other)).toBe(true));
+  });
+
+  it('слідкувач: задача завершилась з writtenCount = 0 — нуль запитів зрізів, зріз не застарів', async () => {
+    vi.useFakeTimers();
+    const slices = stubSucceeded(0);
+    const client = clientWithSlices();
+    const invalidate = vi.spyOn(client, 'invalidateQueries');
+
+    followRecalculation(client, 'zero#1', 32, 202609);
+    await vi.advanceTimersByTimeAsync(RecalculationPollMs * 2);
+
+    expect(isFollowedJob('zero#1')).toBe(false);
+    expect(slices).toHaveLength(0);
+    expect(invalidate).not.toHaveBeenCalled();
+    expect(stale(client, other)).toBe(false);
+  });
+
+  it('слідкувач перейшов зі старішої задачі на нову, що нічого не записала, — зрізи все одно перечитуються', async () => {
+    vi.useFakeTimers();
+    const finished = new Set<string>();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const id = decodeURIComponent(String(input).split('/').pop() ?? '');
+        const done = finished.has(id);
+        return new Response(
+          JSON.stringify({ state: done ? 'Succeeded' : 'Running', writtenCount: done ? 0 : null }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      }),
+    );
+    const client = clientWithSlices();
+
+    // Перша задача (могла записати) лишилась без кінцевого стану: слідкувач перейшов на другу.
+    followRecalculation(client, 'older#1', 33, 202609);
+    followRecalculation(client, 'newer#2', 33, 202609);
+    finished.add('newer#2');
+    await vi.advanceTimersByTimeAsync(RecalculationPollMs * 3);
+
+    expect(isFollowedJob('newer#2')).toBe(false);
+    expect(stale(client, other)).toBe(true);
+  });
+});

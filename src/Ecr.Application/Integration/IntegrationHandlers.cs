@@ -259,6 +259,8 @@ public sealed class GetJobStatusHandler(
             FanOut = fanOut,
             EffectiveState = fanOut?.EffectiveStateOf(status.State)
                              ?? JobCompletionWarning.EffectiveStateOf(status.State, status.Message),
+            // ⚠ AN-108 / P2-02: з СИРОГО конверта — `Message` вище вже перекладений, `written` із нього не дістати.
+            WrittenCount = FormulaRecalcOutcome.WrittenCountOf(status.State, status.Message),
         };
     }
 }

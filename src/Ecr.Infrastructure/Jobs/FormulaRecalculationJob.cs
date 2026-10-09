@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.Json;
+using Ecr.Application.Integration;
 using Ecr.Application.Ports;
 using Ecr.Application.Recalculation;
 using Ecr.Domain.ValueObjects;
@@ -49,7 +50,7 @@ public sealed class FormulaRecalculationJob(RecalculationService recalculation, 
         // перетворив би кожну правку на прогін по всьому документу.
         if (dirty.IsEmpty)
         {
-            await progress.ReportKeyAsync(100, "jobs.formulaRecalcNone", ct).ConfigureAwait(false);
+            await progress.ReportKeyAsync(100, FormulaRecalcOutcome.NoneKey, ct).ConfigureAwait(false);
 
             return;
         }
@@ -78,10 +79,10 @@ public sealed class FormulaRecalculationJob(RecalculationService recalculation, 
         await progress
             .ReportKeyAsync(
                 100,
-                "jobs.formulaRecalcDone",
+                FormulaRecalcOutcome.DoneKey,
                 new Dictionary<string, string>(StringComparer.Ordinal)
                 {
-                    ["written"] = written.ToString(CultureInfo.InvariantCulture),
+                    [FormulaRecalcOutcome.WrittenParam] = written.ToString(CultureInfo.InvariantCulture),
                 },
                 ct)
             .ConfigureAwait(false);
