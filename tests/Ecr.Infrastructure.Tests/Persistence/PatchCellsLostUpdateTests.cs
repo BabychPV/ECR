@@ -182,6 +182,12 @@ public sealed class PatchCellsLostUpdateTests(SqlServerFixture sql)
         access.BuildProfileAsync(1, Arg.Any<CancellationToken>()).Returns(profile);
         access.CanReadDocumentAsync(Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<CancellationToken>())
             .Returns(EditDecision.Allow());
+        // ⚠ AN-104 / D1-01: відмова сховища тепер дочитує подробиці конфлікту,
+        // а `DescribeConflictsAsync` питає межі читання (S6). Без явної заглушки
+        // NSubstitute віддає null-скоуп і замість 409 летить NRE — уже ПІСЛЯ
+        // відкату, тож дані цілі, але тест бачив би не той виняток.
+        access.ReadScopeAsync(Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<CancellationToken>())
+            .Returns(ReadScopes.Everything(snapshot));
         // ⛔ Рішення на КОЖНУ пару (рядок, колонка) зрізу — саме так поводиться
         // справжній `AccessDecisionService.CanEditSliceAsync` (`:280-295`:
         // подвійний цикл по рядках і колонках, без пропусків). Тут стояв
