@@ -75,12 +75,20 @@ public sealed record ImportOverwriteRow(string TableCode, string RowKey);
 /// були при вивантаженні, сюди не потрапляють — чуже новіше значення в них
 /// лишається.
 /// </param>
+/// <param name="Warnings">
+/// ✎ AN-118 (R1-02). Ключі попереджень про книгу загалом (каталог D-95), які
+/// не забороняють застосування, але людина має їх бачити до нього:
+/// <c>import.outdatedWorkbook</c> — книгу вивантажено до того, як карта почала
+/// нести версії рядків і відбитки комірок, тож значення, яких у ній не
+/// чіпали, можуть повернути новіші чужі. <c>null</c> — попереджень немає.
+/// </param>
 public sealed record ImportPreview(
     string PreviewToken,
     IReadOnlyList<ImportChange> Changes,
     IReadOnlyList<ImportRejection> Rejected,
     IReadOnlyList<CellConflictDto> Conflicts,
-    IReadOnlyList<ImportChange> Overwritable);
+    IReadOnlyList<ImportChange> Overwritable,
+    IReadOnlyList<string>? Warnings = null);
 
 /// <summary>Зміна, яку принесе імпорт.</summary>
 /// <param name="RowKey">Рядок.</param>

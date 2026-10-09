@@ -248,3 +248,24 @@ describe('ImportPanel: підказка «Recalculate» після застос�
     expect(show.mock.calls.some(([data]) => data.color === 'statusError')).toBe(false);
   });
 });
+
+describe('ImportPanel: попередження про книгу (AN-118, R1-02)', () => {
+  it('книга без версій рядків і відбитків — попередження каталогу, застосування доступне', async () => {
+    mockServer({ ...oneChange, warnings: ['import.outdatedWorkbook'] });
+
+    await openPreview();
+
+    // ⛔ Мутація: прибрати блок `preview.warnings` з діалогу — обидва тексти зникнуть.
+    expect(screen.getByText('⟦import.warningsTitle⟧')).toBeTruthy();
+    expect(screen.getByText('⟦import.outdatedWorkbook⟧')).toBeTruthy();
+    expect(screen.getByRole('button', { name: '⟦import.apply⟧' }).hasAttribute('disabled')).toBe(false);
+  });
+
+  it('без попереджень — блоку немає', async () => {
+    mockServer(oneChange);
+
+    await openPreview();
+
+    expect(screen.queryByText('⟦import.warningsTitle⟧')).toBeNull();
+  });
+});

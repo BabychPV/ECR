@@ -307,7 +307,33 @@ public sealed class ExcelImporter(
         // Конфліктів на етапі перегляду ще немає: вони з'являються, якщо між
         // переглядом і застосуванням хтось правив ті самі рядки. Показувати їх
         // наперед означало б вигадати їх.
-        return new ImportPreview(token, changes, rejected, [], overwritable);
+        return new ImportPreview(
+            token, changes, rejected, [], overwritable, OutdatedWorkbook(map) ? [ImportMessageKeys.OutdatedWorkbook] : null);
+    }
+
+    /// <summary>
+    /// Чи вивантажено книгу до того, як карта почала нести версії рядків (D1-02)
+    /// і відбитки введених комірок (AN-118).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ AN-118 (R1-02). Без версії рядок, змінений після експорту, не стає
+    /// конфліктом, а без відбитка незмінена комірка конфліктного рядка не
+    /// відрізняється від правки: застаріле значення з такої книги повертає
+    /// новіше чуже і, бувши записане імпортом, стає «людським» (`HumanOriginsSql`)
+    /// — інтеграція його більше не виправить. Відмовляти таку книгу не можна:
+    /// у ній бувають тижні офлайн-правок (D-41), і відмова змусила б людину
+    /// вводити їх наново. Тож — попередження в перегляді: людина бачить перелік
+    /// змін і може вивантажити книгу заново.
+    /// ⚠ Блок без введених колонок відбитка не має й не потребує; рядок без
+    /// версії в новій книзі не буває (експорт бере версії тим самим пакетом, що й рядки).
+    /// </remarks>
+    public static bool OutdatedWorkbook(ExcelWorkbookMap map)
+    {
+        ArgumentNullException.ThrowIfNull(map);
+
+        return map.Tables.Any(block =>
+            block.Columns.Any(c => !c.IsCalculated)
+            && block.Rows.Any(row => row.Version is null || row.Cells is null));
     }
 
     /// <summary>Скільки комірок змінить diff без перезапису конфліктних рядків (AN-103).</summary>

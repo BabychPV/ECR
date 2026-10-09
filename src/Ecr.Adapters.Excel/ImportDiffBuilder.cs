@@ -799,6 +799,14 @@ public sealed record TableDiff(
 /// </remarks>
 public static class ImportMessageKeys
 {
+    /// <summary>
+    /// ⛔ AN-118 (R1-02). Попередження перегляду (<c>ImportPreview.Warnings</c>):
+    /// книгу вивантажено до того, як карта почала нести версії рядків і відбитки
+    /// введених комірок. Значення, яких людина в книзі не чіпала, перегляд не
+    /// відрізняє від її правок, тож вони можуть повернути новіші чужі.
+    /// </summary>
+    public const string OutdatedWorkbook = "import.outdatedWorkbook";
+
     /// <summary>Комірку рахує система, і користувач змінив її значення.</summary>
     public const string Calculated = "err.ECR-CELL-4221.importCalculated";
 

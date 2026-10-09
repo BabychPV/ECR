@@ -99,7 +99,7 @@ public sealed record ExcelColumnRef(
 /// збігається з відбитком, — не її правка, і чуже новіше значення в ній
 /// лишається. <c>null</c> — у блоці немає введених колонок або книгу
 /// вивантажено до появи поля: тоді конфліктом стає кожна комірка «книга ≠
-/// поточне».
+/// поточне», а перегляд попереджає (<see cref="ImportMessageKeys.OutdatedWorkbook"/>).
 /// </param>
 public sealed record ExcelRowRef(
     string RowKey,

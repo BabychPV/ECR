@@ -298,6 +298,21 @@ export function ImportPanel({
               </Alert>
             )}
 
+            {(preview.warnings ?? []).length > 0 && (
+              // ✎ AN-118 (R1-02): попередження про книгу загалом — не відмова,
+              // застосування лишається доступним; текст за ключем із каталогу
+              // (`import.outdatedWorkbook` — книга без версій рядків і відбитків).
+              <Alert color="statusWarning" title={t('import.warningsTitle')}>
+                <Stack gap="xs">
+                  {(preview.warnings ?? []).map((key) => (
+                    <Text key={key} size="sm">
+                      {t(key)}
+                    </Text>
+                  ))}
+                </Stack>
+              </Alert>
+            )}
+
             {preview.changes.length === 0 && !blocked && conflictRows.length === 0 && (
               <Text size="sm">{t('import.noChanges')}</Text>
             )}

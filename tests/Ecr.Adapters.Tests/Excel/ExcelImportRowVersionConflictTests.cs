@@ -104,6 +104,7 @@ public sealed class ExcelImportRowVersionConflictTests
         Assert.Empty(preview.Changes);
         Assert.Empty(preview.Rejected);
         Assert.Empty(preview.Overwritable);
+        Assert.Null(preview.Warnings);
 
         // Рядок не змінюється: у плані застосування для R1 нічого немає.
         Assert.DoesNotContain("R1", PlannedRowKeys());
@@ -162,6 +163,9 @@ public sealed class ExcelImportRowVersionConflictTests
         var change = Assert.Single(preview.Changes);
         Assert.Equal("R1", change.RowKey);
         Assert.Equal(10m, change.NewValue);
+
+        // ✎ AN-118: нова книга несе версії й відбитки — попереджень немає.
+        Assert.Null(preview.Warnings);
     }
 
     [Fact]
@@ -179,6 +183,11 @@ public sealed class ExcelImportRowVersionConflictTests
         var change = Assert.Single(preview.Changes);
         Assert.Equal("R1", change.RowKey);
         Assert.Equal(8m, change.NewValue);
+
+        // ⛔ AN-118 (R1-02): відрізнити незмінене від правки така книга не дає —
+        // перегляд попереджає, а не мовчить. Мутація: не повертати `Warnings`
+        // з `ExcelImporter.PreviewAsync` — червоний.
+        Assert.Equal([ImportMessageKeys.OutdatedWorkbook], preview.Warnings ?? []);
     }
 
     [Fact]
@@ -219,11 +228,11 @@ public sealed class ExcelImportRowVersionConflictTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
-    public async Task AN118_книга_без_відбитків_комірок_лишає_конфлікт_рядка()
+    public async Task AN118_книга_без_відбитків_комірок_лишає_конфлікт_рядка_і_попереджає()
     {
         // ⚠ Сумісність: книга, вивантажена між D1-02 і AN-118, має версії, але не
         // відбитки. Відрізнити незмінену комірку не можна — колишня поведінка
-        // (обидві комірки конфліктом, без мовчазного застосування).
+        // (обидві комірки конфліктом, без мовчазного застосування) і попередження.
         State(r1: 8m, r1Version: "AAAAAAAAB9E=", r2: 5m, r2Version: "AAAAAAAAB9I=", r1b: 1m);
         using var workbook = await ExportAsync();
         StripCellFingerprints(workbook);
@@ -234,6 +243,7 @@ public sealed class ExcelImportRowVersionConflictTests
 
         Assert.Empty(preview.Changes);
         Assert.Equal(["A", "B"], preview.Overwritable.Select(c => c.ColumnCode).Order(StringComparer.Ordinal));
+        Assert.Equal([ImportMessageKeys.OutdatedWorkbook], preview.Warnings ?? []);
     }
 
     [Fact]
