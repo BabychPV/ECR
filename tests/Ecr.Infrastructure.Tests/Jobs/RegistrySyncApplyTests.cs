@@ -673,6 +673,66 @@ public sealed class RegistrySyncApplyTests(SqlServerFixture sql)
         }
     }
 
+    /// <summary>
+    /// L4-08 (аудит 2026-10-09, AN-76): ручна прив'язка GUID елемента, що закомітилась між знімком синку й
+    /// збереженням пакета, — відмова РЯДКА створення, а не падіння прогону.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Що було. <c>UnitOfWork.TryMapDuplicateKey</c> не знав <c>UQ_RegistryExternalKey</c>: програш
+    /// давав сирий <c>DbUpdateException</c>, який не входить в <c>IsBatchFailure</c>, і падав увесь прогін.
+    /// ⚠ Гонку вклинює декоратор одиниці роботи: перед збереженням, що несе ключ елемента, ІНШЕ з'єднання
+    /// прив'язує той самий GUID до запису чужого довідника (його синк не торкається — без взаємних блокувань).
+    /// Мутація: прибрати гілку <c>UQ_RegistryExternalKey</c> у <c>UnitOfWork.TryMapDuplicateKey</c> — прогін
+    /// падає з <c>DbUpdateException</c>.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "L4-08")]
+    public async Task Ручна_прив_язка_GUID_під_час_синку_дає_відмову_рядка_а_не_падіння_прогону()
+    {
+        var stand = await ArrangeAsync(RegistrySourceKind.External, e1Author: Author.Svc);
+        var g9 = stand.Children.Single(c => c.Code == "Stack9").ExternalId!;
+        var foreign = await ArrangeForeignAsync(stand, Guid.NewGuid().ToString("D"));
+        var race = new ExternalKeyRace(g9, () => BindManuallyAsync(stand.DataSourceId, foreign.EntryId, g9));
+        await using var provider = BuildProvider(externalKeyRace: race);
+
+        try
+        {
+            // ⛔ Предмет: прогін не падає.
+            await RunAsync(provider, stand);
+
+            Assert.True(race.Fired, "Гонку не відтворено: збереження з ключем елемента не дійшло до декоратора.");
+
+            // Елемент лишився за ручною прив'язкою; запису в довіднику синку для нього не створено.
+            await using var db = Context();
+            Assert.Equal(
+                [foreign.EntryId],
+                await db.RegistryExternalKeys.AsNoTracking()
+                    .Where(k => k.DataSourceId == stand.DataSourceId && k.ExternalId == g9)
+                    .Select(k => k.RegistryEntryId)
+                    .ToListAsync());
+            Assert.False(await db.RegistryEntries.AnyAsync(e => e.RegistryDefId == stand.RegistryId && e.Id > stand.E2));
+
+            // Решта прогону застосована: оновлення E1 і E2 пішли поштучним повтором.
+            var values = await CapValuesAsync(stand);
+            Assert.Equal(V(12.5m, stand.SvcId), values[stand.E1]);
+            Assert.Equal(V(30m, stand.SvcId), values[stand.E2]);
+        }
+        finally
+        {
+            await DeactivateAsync(stand);
+        }
+    }
+
+    /// <summary>Ручна прив'язка GUID до запису — ІНШИМ з'єднанням, як це зробив би адміністратор.</summary>
+    private async Task BindManuallyAsync(int dataSourceId, long entryId, string externalId)
+    {
+        await using var db = Context();
+        db.RegistryExternalKeys.Add(new RegistryExternalKey(entryId, dataSourceId, externalId));
+        await db.SaveChangesAsync();
+    }
+
     /// <summary>По одній відмові writer'а на E1 і E2 — з очікуваною ознакою причини.</summary>
     private static void AssertRejected(IReadOnlyList<CollectionCoverage> events, Stand stand, string reason)
     {
@@ -923,7 +983,11 @@ public sealed class RegistrySyncApplyTests(SqlServerFixture sql)
     /// Гонка за ключем (RT-14): сховище ключів — справжнє; перше пакетне блокування замінено вставкою
     /// іншого з'єднання, а перша перевірка хеша гонки відповідає «вільно» (<see cref="RacingKeyStore"/>).
     /// </param>
-    private ServiceProvider BuildProvider(KeyRace? race = null)
+    /// <param name="externalKeyRace">
+    /// Ручна прив'язка GUID елемента (L4-08): одиницю роботи замінено декоратором, що перед збереженням
+    /// із цим ключем віддає хід іншому з'єднанню (<see cref="RacingUnitOfWork"/>).
+    /// </param>
+    private ServiceProvider BuildProvider(KeyRace? race = null, ExternalKeyRace? externalKeyRace = null)
     {
         var configuration = Substitute.For<IConfiguration>();
         configuration[Arg.Any<string>()].Returns((string?)null);
@@ -948,6 +1012,12 @@ public sealed class RegistrySyncApplyTests(SqlServerFixture sql)
         if (race is not null)
         {
             services.AddScoped<IRegistryKeyStore>(sp => new RacingKeyStore(new RegistryKeyStore(sp.GetRequiredService<EcrDbContext>()), race));
+        }
+
+        if (externalKeyRace is not null)
+        {
+            services.AddScoped<IUnitOfWork>(sp => new RacingUnitOfWork(
+                ActivatorUtilities.CreateInstance<UnitOfWork>(sp), sp.GetRequiredService<EcrDbContext>(), externalKeyRace));
         }
 
         return services.BuildServiceProvider();
@@ -1077,6 +1147,45 @@ public sealed class RegistrySyncApplyTests(SqlServerFixture sql)
         DateOnly? E2To,
         decimal Source1,
         decimal Source2);
+
+    /// <summary>Одна ручна прив'язка на весь прогін (спільна для всіх DI-scope спроб запису).</summary>
+    private sealed class ExternalKeyRace(string externalId, Func<Task> competitor)
+    {
+        public string ExternalId { get; } = externalId;
+
+        public bool Fired { get; private set; }
+
+        public async Task FireAsync()
+        {
+            Fired = true;
+            await competitor();
+        }
+    }
+
+    /// <summary>
+    /// Справжня одиниця роботи, що перед ПЕРШИМ збереженням із доданим зовнішнім ключем елемента
+    /// віддає хід «ручній прив'язці» (<see cref="ExternalKeyRace"/>).
+    /// </summary>
+    private sealed class RacingUnitOfWork(IUnitOfWork inner, EcrDbContext db, ExternalKeyRace race) : IUnitOfWork
+    {
+        public async Task<int> SaveChangesAsync(CancellationToken ct)
+        {
+            if (!race.Fired
+                && db.ChangeTracker.Entries<RegistryExternalKey>()
+                    .Any(e => e.State == EntityState.Added
+                              && string.Equals(e.Entity.ExternalId, race.ExternalId, StringComparison.Ordinal)))
+            {
+                await race.FireAsync();
+            }
+
+            return await inner.SaveChangesAsync(ct);
+        }
+
+        public Task<IAsyncDisposable> BeginTransactionAsync(CancellationToken ct) => inner.BeginTransactionAsync(ct);
+
+        public Task ExecuteInTransactionAsync(Func<CancellationToken, Task> operation, CancellationToken ct)
+            => inner.ExecuteInTransactionAsync(operation, ct);
+    }
 
     /// <summary>Одна гонка за ключем на весь прогін (спільна для всіх DI-scope спроб запису).</summary>
     private sealed class KeyRace(byte[] hash, Func<Task> competitor)

@@ -250,6 +250,33 @@ public sealed class UnitOfWork(
     /// </remarks>
     private static EcrException? TryMapDuplicateKey(DbUpdateException ex)
     {
+        // ⛔ L4-08. Зовнішній ключ запису довідника вибирається за ІНДЕКСОМ, який порушено, а не за
+        // першою доданою сутністю: пакет синку несе запис, його ключі й значення разом, і `ex.Entries`
+        // перелічує їх усіх — арм `RegistryEntry` нижче перехопив би чужу відмову й назвав її гонкою
+        // за кодом запису. Ключ — той самий, що в `RegistryExternalKeyStore.AddAsync`
+        // (ручна прив'язка): паралельна прив'язка того самого GUID джерела між знімком синку й
+        // збереженням давала сирий `DbUpdateException`, який не входить в `IsBatchFailure`, і падав
+        // увесь прогін.
+        //
+        // ⚠ `BusinessRuleException`, а не `ConcurrencyConflictException`: так само, як у ручної
+        // прив'язки, — синк розрізняє відмову рядка (`IsBatchFailure`) за обома, а клієнт ручної
+        // прив'язки бачить один і той самий код `ECR-REG-0409` незалежно від того, хто програв.
+        if (SqlConflict.ViolatesIndex(ex, "UQ_RegistryExternalKey")
+            && ex.Entries.FirstOrDefault(e =>
+                e.State is EntityState.Added or EntityState.Modified
+                && e.Entity is Domain.Entities.Dictionaries.RegistryExternalKey)
+                is { Entity: Domain.Entities.Dictionaries.RegistryExternalKey externalKey })
+        {
+            return new BusinessRuleException(
+                ErrorCodes.RegistryEntryInUse,
+                $"Ідентифікатор «{externalKey.ExternalId}» щойно прив'язав інший запит.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-REG-0409.externalKeyTakenConcurrently",
+                    ["externalId"] = externalKey.ExternalId,
+                });
+        }
+
         foreach (var entry in ex.Entries)
         {
             switch (entry.Entity)
