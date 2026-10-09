@@ -22,7 +22,7 @@ import { StatusBadge, badgeLook } from '@/shared/ui/StatusBadge';
 import { Timestamp } from '@/shared/ui/Timestamp';
 import { TwoLine } from '@/shared/ui/TwoLine';
 import { useDebouncedFilter, useFilterCursor } from '@/shared/ui/useDebouncedFilter';
-import { useUrlState } from '@/shared/ui/useUrlState';
+import { useUrlParamsSetter, useUrlState } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
 
 /** Шторка знахідки — лінивим чанком: закрита за замовчуванням (`L2`). */
@@ -68,6 +68,7 @@ export function ConsistencyIssuesPage(): JSX.Element {
   const [ruleCode] = useUrlState('ruleCode');
   const [showResolved, setShowResolved] = useUrlState('showResolved');
   const [severity, setSeverity] = useUrlState('severity');
+  const setParams = useUrlParamsSetter();
   const [panel, setPanel] = useDetailPanel();
 
   const openOnly = showResolved !== '1';
@@ -132,6 +133,7 @@ export function ConsistencyIssuesPage(): JSX.Element {
 
   const severityFilter = severityCode === undefined ? null : severity;
   const shown = items;
+  const filtered = severityFilter !== null || appliedRule.length > 0 || !openOnly;
 
   const openIssue = items?.find((issue) => issuePanelId(issue.id) === panel);
 
@@ -252,9 +254,11 @@ export function ConsistencyIssuesPage(): JSX.Element {
             onRetry={() => void issues.refetch()}
             emptyTitle={t('consistency.empty')}
             emptyHint={t('consistency.emptyHint')}
-            filtered={severityFilter !== null || appliedRule.length > 0 || !openOnly}
+            filtered={filtered}
             noMatchTitle={t('consistency.noMatch')}
-            onClearFilters={severityFilter === null ? undefined : () => setSeverity(null)}
+            // N4: скидаються ВСІ три фільтри, що роблять перелік порожнім (вага, код правила, «лише нерозв'язані»), а не
+            // лише вага: кнопка при `?ruleCode=…` раніше не з'являлась, а при вазі лишала решту.
+            onClearFilters={filtered ? () => setParams({ severity: null, ruleCode: null, showResolved: null }) : undefined}
             clearFiltersLabel={t('filters.clear')}
             onRowClick={(issue) => setPanel(issuePanelId(issue.id))}
             selectedKey={openIssue === undefined ? undefined : String(openIssue.id)}
