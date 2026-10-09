@@ -67,6 +67,7 @@ describe('ImportPanel: округлення до Scale колонки (ФВ-9.16
       ],
       rejected: [],
       conflicts: [],
+      overwritable: [],
     });
 
     await openPreview();
@@ -95,6 +96,7 @@ describe('ImportPanel: округлення до Scale колонки (ФВ-9.16
       changes: [{ rowKey: 'R1', columnCode: 'C1', oldValue: null, newValue: 5, tableCode: 'T1' }],
       rejected: [],
       conflicts: [],
+      overwritable: [],
     });
 
     await openPreview();
@@ -118,6 +120,7 @@ describe('ImportPanel: округлення до Scale колонки (ФВ-9.16
         },
       ],
       conflicts: [],
+      overwritable: [],
     });
 
     await openPreview();
@@ -143,6 +146,7 @@ describe('ImportPanel: округлення до Scale колонки (ФВ-9.16
         },
       ],
       conflicts: [],
+      overwritable: [],
     });
 
     await openPreview();
