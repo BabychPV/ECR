@@ -520,6 +520,9 @@ export type ImportChange = Schemas['ImportChange'];
 /** Відхилений рядок імпорту з причиною. */
 export type ImportRejection = Schemas['ImportRejection'];
 
+/** Рядок, змінений після експорту, який людина свідомо перезаписує (AN-114, D-338). */
+export type ImportOverwriteRow = Schemas['ImportOverwriteRow'];
+
 /** Початок сеансу перегляду чужими правами (`ФВ-6.16`). */
 export type StartSimulationRequest = Schemas['StartSimulationRequest'];
 

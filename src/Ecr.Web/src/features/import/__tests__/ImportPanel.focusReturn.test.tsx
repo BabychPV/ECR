@@ -12,7 +12,7 @@ import { testTheme } from '@/test/render';
  * його не отримувала). Системне вікно вибору файлу забирає фокус, тож у мить відкриття діалогу
  * Mantine запам'ятовував уже `body`.
  */
-const Preview: ImportPreview = { previewToken: 'tok', changes: [], rejected: [], conflicts: [] };
+const Preview: ImportPreview = { previewToken: 'tok', changes: [], rejected: [], conflicts: [], overwritable: [] };
 
 afterEach(() => {
   vi.unstubAllGlobals();
