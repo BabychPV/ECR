@@ -244,6 +244,16 @@ public sealed partial class OutboxDispatcher(
             {
                 throw;
             }
+            catch (Application.Notifications.NotificationPartiallyDeliveredException partial)
+            {
+                // ⛔ J1-03: лист уже пішов решті адресатів — повтор розіслав би його їм удруге
+                // (до MaxAttempts копій). Подія `Sent`, відхилені адреси — у тексті помилки.
+                item.MarkPartiallySent(
+                    clock.UtcNow,
+                    "Доставлено частково: поштовий сервер відхилив адреси — "
+                    + string.Join(", ", partial.Rejected) + ".");
+                sent++;
+            }
             catch (Exception error)
             {
                 // ⛔ Текст без стека (ФВ-6.11): він видимий в інтерфейсі

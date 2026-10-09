@@ -122,7 +122,45 @@ public sealed class SmtpNotificationSender(
 
         // ⚠ `SendMailAsync` із токеном: без нього зупинка застосунку чекала б
         // на таймаут SMTP.
-        await client.SendMailAsync(message, ct).ConfigureAwait(false);
+        try
+        {
+            await client.SendMailAsync(message, ct).ConfigureAwait(false);
+        }
+        catch (SmtpFailedRecipientException failure)
+        {
+            // ⛔ J1-03: частину адресатів сервер відхилив на RCPT, але DATA пішла решті —
+            // `SmtpClient` кидає ПІСЛЯ відправки. Звичайний збій тут означав би повтор усім
+            // (до MaxAttempts копій тим, хто лист уже отримав). Відмова ВСІМ — як і була.
+            if (AsPartialDelivery(failure, message.To.Count) is { } partial)
+            {
+                throw partial;
+            }
+
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Чи відмова адресатів — ЧАСТКОВА доставка (сервер прийняв лист хоча б для одного).
+    /// </summary>
+    /// <param name="failure">Відмова <see cref="SmtpClient"/>.</param>
+    /// <param name="recipientCount">Скільки адресатів мав лист.</param>
+    /// <returns>Виняток часткової доставки; <c>null</c> — відхилено всіх (лист не пішов).</returns>
+    /// <remarks>
+    /// ⚠ <see cref="SmtpClient"/> кидає ДО DATA лише тоді, коли відхилено ВСІХ адресатів; інакше —
+    /// після відправки: <see cref="SmtpFailedRecipientException"/> для однієї відхиленої адреси,
+    /// <see cref="SmtpFailedRecipientsException"/> для кількох.
+    /// </remarks>
+    internal static NotificationPartiallyDeliveredException? AsPartialDelivery(
+        SmtpFailedRecipientException failure, int recipientCount)
+    {
+        ArgumentNullException.ThrowIfNull(failure);
+
+        string[] rejected = failure is SmtpFailedRecipientsException { InnerExceptions.Length: > 0 } many
+            ? [.. many.InnerExceptions.Select(e => e.FailedRecipient ?? "?")]
+            : [failure.FailedRecipient ?? "?"];
+
+        return rejected.Length < recipientCount ? new NotificationPartiallyDeliveredException(rejected) : null;
     }
 
     /// <summary>

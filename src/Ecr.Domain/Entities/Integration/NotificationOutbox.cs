@@ -94,6 +94,24 @@ public sealed class NotificationOutboxItem : Entity<long>
     }
 
     /// <summary>
+    /// Фіксує відправку, яку поштовий сервер прийняв лише для частини адресатів (J1-03).
+    /// </summary>
+    /// <param name="utcNow">Момент відправки.</param>
+    /// <param name="note">Хто не отримав; без стека. Обрізається до місця в колонці.</param>
+    /// <remarks>
+    /// ⛔ <c>Sent</c>, а не повтор: лист уже в скриньках решти, і повтор розіслав би його їм удруге.
+    /// Відхилені адреси лишаються в <see cref="Error"/> — інакше про них не дізнався б ніхто.
+    /// </remarks>
+    public void MarkPartiallySent(DateTime utcNow, string note)
+    {
+        MarkSent(utcNow);
+        Error = note is { Length: > ErrorMaxLength } ? note[..ErrorMaxLength] : note;
+    }
+
+    /// <summary>Довжина колонки <see cref="Error"/>.</summary>
+    public const int ErrorMaxLength = 1000;
+
+    /// <summary>
     /// Фіксує невдалу спробу.
     /// </summary>
     /// <param name="error">Причина; без стека.</param>
