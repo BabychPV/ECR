@@ -503,7 +503,13 @@ public sealed class MethodologyStore(EcrDbContext db, int constantCap) : IMethod
             return new CalculationFreshness(null, null);
         }
 
-        var row = rows[0];
+        // ⛔ L3-01: `SqlQuery<…>` віддає `datetime2` з `Kind = Unspecified`; без `SpecifyKind` момент пішов би в JSON без «Z».
+        var row = rows[0] with
+        {
+            StartedAt = DateTime.SpecifyKind(rows[0].StartedAt, DateTimeKind.Utc),
+            CalculatedAt = Utc(rows[0].CalculatedAt),
+            InputsChangedAt = Utc(rows[0].InputsChangedAt),
+        };
 
         // RT-25 (ФВ-9.19): правка ДОВІДНИКА, який читає методологія цього документа, теж робить
         // число застарілим. Лише для вікна «увесь документ» (панель результатів): фільтр таблиць —
@@ -531,6 +537,8 @@ public sealed class MethodologyStore(EcrDbContext db, int constantCap) : IMethod
                     """)
                 .ToListAsync(ct)
                 .ConfigureAwait(false);
+
+        changed = [.. changed.Select(c => c with { ChangedAt = DateTime.SpecifyKind(c.ChangedAt, DateTimeKind.Utc) })];
 
         var inputsChangedAt = changed.Count == 0
             ? row.InputsChangedAt
@@ -573,7 +581,9 @@ public sealed class MethodologyStore(EcrDbContext db, int constantCap) : IMethod
     /// </remarks>
     public async Task<IReadOnlyList<MethodologyPublicationEntry>> ListPublicationsAsync(
         int methodologyId, CancellationToken ct)
-        => await db.Database
+    {
+        // ⛔ L3-01: `SqlQuery<…>` віддає `datetime2` з `Kind = Unspecified`; `SpecifyKind` — до JSON, інакше без «Z».
+        var entries = await db.Database
             .SqlQuery<MethodologyPublicationEntry>($"""
                 SELECT TOP (500)
                        e.Id, e.ChangedAt, v.Id AS MethodologyVersionId, v.Version, e.ChangeReason,
@@ -588,6 +598,12 @@ public sealed class MethodologyStore(EcrDbContext db, int constantCap) : IMethod
                 """)
             .ToListAsync(ct)
             .ConfigureAwait(false);
+
+        return [.. entries.Select(e => e with { ChangedAt = DateTime.SpecifyKind(e.ChangedAt, DateTimeKind.Utc) })];
+    }
+
+    private static DateTime? Utc(DateTime? value)
+        => value is { } v ? DateTime.SpecifyKind(v, DateTimeKind.Utc) : null;
 
     /// <summary>Рядок запиту свіжості.</summary>
     public sealed record FreshnessRow(long RunId, DateTime StartedAt, DateTime? CalculatedAt, DateTime? InputsChangedAt);

@@ -4,7 +4,11 @@ namespace Ecr.Infrastructure.Persistence;
 
 /// <summary>Документ із застарілими результатами методологій і момент, відколи вони застарілі.</summary>
 /// <param name="DocumentId">Документ.</param>
-/// <param name="Since">Найраніша зміна входів після початку актуального прогону (UTC, без <c>Kind</c>).</param>
+/// <param name="Since">
+/// Найраніша зміна входів після початку актуального прогону (UTC, без <c>Kind</c>: <c>SqlQuery</c> віддає
+/// <c>Unspecified</c>, а результат тут лишається <c>IQueryable</c>). L3-01: <c>Kind = Utc</c> ставить споживач,
+/// що матеріалізує значення (<c>DocumentStore.StaleResultsBatchAsync</c>); сторож — <c>SqlQueryDateTimeKindTests</c>.
+/// </param>
 public sealed record StaleDocumentRow(long DocumentId, DateTime? Since);
 
 /// <summary>
