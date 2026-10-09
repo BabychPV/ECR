@@ -329,6 +329,11 @@ public interface IJobProgress
 /// Похідний стан для оператора: <c>FannedOut</c> / <c>Succeeded</c> /
 /// <c>SucceededWithErrors</c>; <c>null</c> — як <see cref="State"/>.
 /// </param>
+/// <param name="WrittenCount">
+/// Скільки комірок записав <c>Succeeded</c> перерахунок формул після правки (<c>0</c> — нічого,
+/// клієнт не перечитує зрізи); <c>null</c> — інша задача, ще не завершена або число невідоме
+/// (AN-108 / P2-02, <c>FormulaRecalcOutcome</c>). Заповнює <c>GetJobStatusHandler</c>.
+/// </param>
 public sealed record JobStatus(
     string JobId,
     string State,
@@ -344,7 +349,8 @@ public sealed record JobStatus(
     string? ResultUrl = null,
     int? CreatedByUserId = null,
     FanOutStatus? FanOut = null,
-    string? EffectiveState = null);
+    string? EffectiveState = null,
+    int? WrittenCount = null);
 
 /// <summary>Ідентифікатор поточної задачі; його несе канал прогресу воркера.</summary>
 /// <remarks>Потрібен задачі, що розкладає роботу на дочірні, щоб позначити їх своїм <c>JobId</c>.</remarks>
