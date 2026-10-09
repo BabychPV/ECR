@@ -1349,6 +1349,12 @@ public sealed partial class RecalculationJob(
     /// <summary>Стан одного періоду — для гейту запису.</summary>
     private sealed record PeriodStateRow(int PeriodKeyValue, Domain.Enums.PeriodState State);
 
+    /// <summary>
+    /// Стеля вибірки періодів для гейту стану: проєкт — один рік, тобто щонайбільше 12 періодів
+    /// (D-108), як і <c>PeriodStore.MaxPeriods</c>; межа — правило 6 <c>LayerRulesTests</c>.
+    /// </summary>
+    private const int MaxPeriods = 64;
+
     /// <summary>Правило ефективного стану — те саме, що в рішенні про запис (F-08).</summary>
     private static readonly Domain.Services.PeriodStateCalculator PeriodStates = new();
 
@@ -1368,7 +1374,9 @@ public sealed partial class RecalculationJob(
         var rows = await (
                 from p in source.AsNoTracking()
                 join project in db.Projects.AsNoTracking() on p.ProjectId equals project.Id
+                orderby p.PeriodKeyValue
                 select new { Period = p, project.Status, project.PeriodEnd, project.YearGraceOffsetDays, project.TimeZoneId })
+            .Take(MaxPeriods)
             .ToListAsync(ct)
             .ConfigureAwait(false);
 

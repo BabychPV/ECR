@@ -250,7 +250,7 @@ public sealed class SchemaValidator(
         return schema > build
             ? Incompatible(
                 $"Схему бази накочено пакетом {schema}, а ця збірка — {build}: старий код на новішій схемі " +
-                $"(Sql/*.sql поза міграціями EF). Старт зупинено — оновіть цей вузол пакетом {schema} " +
+                $"(скрипти каталогу Sql поза міграціями EF). Старт зупинено — оновіть цей вузол пакетом {schema} " +
                 "(deploy-ecr.ps1 -SkipSchema, runbook §8).").Message
             : null;
     }

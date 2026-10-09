@@ -195,7 +195,6 @@ public sealed class ReportSnapshotCurrencyTests(SqlServerFixture sql)
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "ФВ-9.17")]
-    [Trait("Requirement", "ФВ-10.5")]
     public async Task Застарілий_поданий_зріз_перебудовується()
     {
         var chain = new TestDocumentBuilder(sql.ConnectionString);

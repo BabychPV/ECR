@@ -152,7 +152,6 @@ public sealed partial class WorkflowTransactionTests
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "ФВ-9.17")]
-    [Trait("Requirement", "ФВ-10.5")]
     public async Task X7_01_Подання_останнього_аркуша_не_морозить_застарілий_зріз()
     {
         // Без фіксу: зріз побудовано ДО актуального прогону (застарілий), подання
@@ -180,7 +179,6 @@ public sealed partial class WorkflowTransactionTests
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "D-65")]
-    [Trait("Requirement", "ФВ-10.5")]
     public async Task X7_01_Затвердження_не_дає_застарілому_зрізу_Approved()
     {
         // Без фіксу: застарілий зріз отримував `Approved` і йшов у `rpt.v_*` зі старими числами.

@@ -40,7 +40,7 @@ public sealed class ReportSnapshotBuildMomentTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
-    [Trait("Requirement", "ФВ-10.5")]
+    [Trait("Requirement", "D-65")]
     public async Task Прогін_що_перемкнувся_під_час_агрегації_старить_зріз()
     {
         var chain = new TestDocumentBuilder(sql.ConnectionString);
@@ -89,7 +89,6 @@ public sealed class ReportSnapshotBuildMomentTests(SqlServerFixture sql)
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "ФВ-9.17")]
-    [Trait("Requirement", "ФВ-10.5")]
     public async Task Застарілий_від_народження_зріз_за_поданим_періодом_не_народжується_поданим()
     {
         var chain = new TestDocumentBuilder(sql.ConnectionString);
