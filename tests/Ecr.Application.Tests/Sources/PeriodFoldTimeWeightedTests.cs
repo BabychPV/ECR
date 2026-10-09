@@ -201,7 +201,53 @@ public sealed class PeriodFoldTimeWeightedTests
 
         Assert.Equal((decimal)expected, result.Value);
         Assert.Equal(PeriodFold.Fold(kind, [4m, 10m, -2m]), result.Value);
-        Assert.Null(result.PercentGood);
+
+        // C1-04: усі точки вікна придатні — частка 100, не «не визначено».
+        Assert.Equal(100m, result.PercentGood);
+    }
+
+    [Theory]
+    [InlineData(AggregationKind.Sum, 12.0)]
+    [InlineData(AggregationKind.Avg, 6.0)]
+    [InlineData(AggregationKind.Min, 5.0)]
+    [InlineData(AggregationKind.Max, 7.0)]
+    [InlineData(AggregationKind.First, 5.0)]
+    [InlineData(AggregationKind.Last, 7.0)]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "C1-04")]
+    public void Згортки_точок_відсіюють_непридатні_точки_й_повертають_частку_придатних(
+        AggregationKind kind, double expected)
+    {
+        // HSE301 §4.6: сумнівний пік 9999 (перша точка вікна) і поганий нуль
+        // (остання) у згортку не входять — ні в Max/First, ні в Min/Avg/Last.
+        TimedPoint[] series =
+        [
+            P(0, 9999m, isGood: false), P(5, 5m), P(10, 7m), P(15, 0m, isGood: false),
+        ];
+
+        // ⛔ МУТАЦІЙНИЙ ДОКАЗ: прибрати перевірку `point.IsGood` у PeriodFold →
+        // Max = 9999, Min = 0, First = 9999, Last = 0, червоний.
+        var result = PeriodFold.Fold(kind, series, At(0), At(20), isStep: false);
+
+        Assert.Equal((decimal)expected, result.Value);
+        Assert.Equal(50m, result.PercentGood);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "C1-04")]
+    public void Згортка_точок_лише_з_непридатних_точок_дає_null_і_частку_0_а_без_точок_у_вікні_null()
+    {
+        var bad = PeriodFold.Fold(
+            AggregationKind.Max, [P(0, 9999m, isGood: false), P(5, 1m, isGood: false)], At(0), At(20), isStep: false);
+
+        Assert.Null(bad.Value);
+        Assert.Equal(0m, bad.PercentGood);
+
+        var empty = PeriodFold.Fold(AggregationKind.Max, [P(-5, 1m), P(25, 2m)], At(0), At(20), isStep: false);
+
+        Assert.Null(empty.Value);
+        Assert.Null(empty.PercentGood);
     }
 
     [Theory]

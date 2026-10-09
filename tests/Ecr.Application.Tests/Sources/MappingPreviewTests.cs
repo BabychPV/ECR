@@ -73,6 +73,29 @@ public sealed class MappingPreviewTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "C1-04")]
+    public void Перегляд_згортки_точок_не_бере_непридатну_точку_як_і_перенесення()
+    {
+        // HSE301 §4.6: сумнівний пік 9999 не входить у Max ні в перенесенні, ні
+        // в перегляді — інакше перегляд показав би число, якого комірка не отримає.
+        var data = Data(
+            maps: [Map(1, "Flare_01_CO", rowKey: "Flare_01", aggregation: "Max")],
+            points:
+            [
+                Point("Flare_01_CO", From.AddHours(1), 5m),
+                new RawPointRef("Flare_01_CO", From.AddHours(2), 9999m, null, "Questionable"),
+                Point("Flare_01_CO", From.AddHours(3), 7m),
+            ]);
+
+        // ⛔ МУТАЦІЙНИЙ ДОКАЗ: повернути `new TimedPoint(point.Timestamp, value)`
+        // (без якості) у серію `numeric` → 9999, червоний.
+        var field = Assert.Single(PreviewMappingHandler.Compose(data, From, To).Fields);
+
+        Assert.Equal(7m, field.FoldedValue);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
     public void Поле_джерела_яке_не_лягає_нікуди_названо_окремо()
     {
         // ⛔ Перший розрив. Тег збирається, точки лежать у базі — і жоден

@@ -379,7 +379,8 @@ public sealed class MaterializeCollectedDataJob(
 
             // ⚠ Згортка за часом бачить і точки без числа (погана якість, текст):
             // вони роблять прогалиною відрізки, що на них спираються. Згортки
-            // точок їх не бачать — як і до F3, тож і стеля для них та сама.
+            // точок бачать лише точки з числом (непридатні за якістю відсіює
+            // `PeriodFold`), тож і стеля для них та сама.
             var needsTime = fieldMaps.Any(m => IsTimeFold(m.Aggregation));
 
             // ⚠ `Take(ceiling + 1)`: зайва точка — єдиний дешевий спосіб знати,
@@ -403,11 +404,12 @@ public sealed class MaterializeCollectedDataJob(
                 continue;
             }
 
-            // Згортки точок — рівно ті самі числа, що й до F3: лише точки з
-            // числом, без урахування якості (`PeriodFold`, згортки точок).
+            // Згортки точок — лише точки з числом. Якість несе `IsGood`, і
+            // `PeriodFold` відсіює непридатні (HSE301 §4.6, C1-04) так само, як
+            // вікно рядка (`WindowFold`); частка відсіяних — у `PartialCoverage`.
             var points = inside
                 .Where(p => p.Value is not null)
-                .Select(p => new TimedPoint(p.Timestamp, p.Value!.Value))
+                .Select(p => p.ToTimed())
                 .ToList();
 
             // ⛔ HSE301 §4.1: значення на межах періоду інтерполюються з останньої
@@ -447,8 +449,8 @@ public sealed class MaterializeCollectedDataJob(
                 var folded = PeriodFold.Fold(kind, series, period.StartUtc, period.EndUtc, map.IsStep, maxGap: null);
                 if (folded.Value is not { } value)
                 {
-                    // `covered == 0` для згортки за часом / жодної точки всередині
-                    // для згортки точок: комірку НЕ чіпаємо (див. подію).
+                    // `covered == 0` для згортки за часом / жодної придатної точки
+                    // всередині для згортки точок: комірку НЕ чіпаємо (див. подію).
                     if (ended)
                     {
                         noData.Add(new NoDataField(field, map.Id));
@@ -460,6 +462,8 @@ public sealed class MaterializeCollectedDataJob(
                 // ⛔ D2-02: число ЗАПИСУЄТЬСЯ (HU-13 Q2, варіант A), але з подією
                 // `PartialCoverage` і часткою покриття — інтеграл лише покритих
                 // відрізків менший за справжній об'єм, і це має бути видно.
+                // Для згорток точок частка — придатні серед точок періоду
+                // (C1-04): відсіяні Bad/Questionable не зникають мовчки.
                 if (ended && folded.PercentGood is { } good && good < MinPercentGood)
                 {
                     partial.Add(new PartialField(field, map.Id, good));

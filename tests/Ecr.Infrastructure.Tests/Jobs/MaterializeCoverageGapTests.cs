@@ -144,6 +144,74 @@ public sealed class MaterializeCoverageGapTests(SqlServerFixture sql)
         Assert.Equal(stand.Field, envelope.Params!["field"]);
     }
 
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "C1-04")]
+    [InlineData(AggregationKind.Max, 5, 9999, "Questionable", 7, 7)]
+    [InlineData(AggregationKind.Avg, 10, 0, "Bad", 20, 15)]
+    public async Task Згортка_точок_місяця_не_бере_непридатну_точку_і_дає_PartialCoverage(
+        AggregationKind kind, int first, int unfit, string quality, int last, int expected)
+    {
+        var (db, chain, stand) = await ArrangeAsync(kind);
+        await using var _ = db;
+
+        // HSE301 §4.6: сумнівний пік (заклинений датчик) не стає `Max` місяця,
+        // поганий нуль не занижує `Avg` — як у вікні рядка (`WindowFold`).
+        await PointsAsync(db, stand.SourceEntityId,
+        [
+            (stand.Field, JanStartUtc.AddDays(1), (decimal)first, "Good"),
+            (stand.Field, JanStartUtc.AddDays(2), (decimal)unfit, quality),
+            (stand.Field, JanStartUtc.AddDays(3), (decimal)last, "Good"),
+        ]);
+
+        var patcher = RecordingPatcher();
+        var coverage = Substitute.For<ICoverageJournal>();
+
+        await RunAsync(db, chain, stand, patcher, coverage, AfterJanuary);
+
+        // ⛔ МУТАЦІЙНИЙ ДОКАЗ: повернути `new TimedPoint(p.Timestamp, p.Value!.Value)`
+        // (без якості) у `AggregateAsync` → Max = 9999 / Avg = 10, червоний.
+        Assert.Equal((decimal)expected, Assert.Single(Written(patcher)).Value);
+
+        // Відсіяна точка не зникає мовчки: 2 з 3 придатні — 66.66 % < 95 %.
+        var partial = Assert.Single(Events(coverage));
+        Assert.Equal(CollectionCoverage.PartialCoverage, partial.Status);
+        Assert.True(JobProgressMessageCodec.TryDecode(partial.Details, out var envelope));
+        Assert.Equal(CoverageDetails.PartialCoverageKey, envelope.Key);
+        Assert.Equal(stand.Field, envelope.Params!["field"]);
+        Assert.Equal("66.66", envelope.Params["percentGood"]);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "C1-04")]
+    public async Task Лише_непридатні_точки_після_кінця_періоду_дають_SkippedNoData_для_згортки_точок()
+    {
+        var (db, chain, stand) = await ArrangeAsync(AggregationKind.Sum);
+        await using var _ = db;
+
+        await PointsAsync(db, stand.SourceEntityId,
+        [
+            (stand.Field, JanStartUtc.AddDays(1), 0m, "Bad"),
+            (stand.Field, JanStartUtc.AddDays(2), 9999m, "Questionable"),
+        ]);
+
+        var patcher = RecordingPatcher();
+        var coverage = Substitute.For<ICoverageJournal>();
+
+        await RunAsync(db, chain, stand, patcher, coverage, AfterJanuary);
+
+        // ⛔ МУТАЦІЙНИЙ ДОКАЗ: без фільтра якості Sum = 9999 записався б як число місяця.
+        Assert.Empty(Written(patcher));
+
+        var noData = Assert.Single(Events(coverage));
+        Assert.Equal(CollectionCoverage.SkippedNoData, noData.Status);
+        Assert.True(JobProgressMessageCodec.TryDecode(noData.Details, out var envelope));
+        Assert.Equal(CoverageDetails.NoDataKey, envelope.Key);
+    }
+
     private static DateTime LocalMidnightUtc(DateTime local)
         => TimeZoneInfo.ConvertTimeToUtc(
             DateTime.SpecifyKind(local, DateTimeKind.Unspecified),
