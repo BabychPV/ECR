@@ -59,6 +59,7 @@ import {
   registerSliceSaver,
   scheduleAutosave,
   useBusyRetryWaiting,
+  useFailedSave,
 } from './autosave';
 import { beginInFlight, deferUntilInFlightSettles, inFlightEdit, splitByInFlight } from './inFlightEdits';
 import { GridAriaPlugin } from './gridAria';
@@ -780,6 +781,10 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
   // Це не відмова: правки не утримано, автозбереження повторить їх саме, тож
   // червона позначка й «Retry save» в цей час лише лякали б і кликали до ручної роботи.
   const busyWaiting = useBusyRetryWaiting();
+  // ⚠ `G1-04`: останнє збереження ЦЬОГО зрізу не дійшло (мережа, `5xx`) —
+  // знання документа, а не сітки: сітка, змонтована наново після повернення на
+  // аркуш, має `saveStatus` `idle`, і без цього «Retry save» не з'являвся.
+  const failedSave = useFailedSave(tableInstanceId, periodKey);
 
   // ⚠ `ФВ-2.16`: комірки, які сервер записав за `Warn` поза вікном доступу
   // (`PatchCellsResponse.outOfWindow`, `outOfWindowMarks.ts`), і ті, що сервер
@@ -1157,19 +1162,32 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
   // успішний патч іншої комірки перебудовував рядки зі зрізу, і в комірці з
   // червоним кутом показувалось старе збережене число замість `abc`, яке сервер
   // відхилив, — тобто маркер пояснював значення, якого на екрані немає.
-  // ⚠ Лише відхилені, не всі незбережені: відмови змінюються рідко, а
-  // перебудова рядків на кожну правку коштувала б 500×60 комірок.
+  //
+  // ⛔ `G1-04`: і ВСІ незбережені значення сховища, а не лише відхилені. Доти
+  // тут стояло «лише відхилені — перебудова на кожну правку дорога», і екран
+  // показував не те, що буде збережено: `source` замінює модель RevoGrid
+  // цілком на кожну зміну `data`, тож після відповіді на збереження сусіднього
+  // рядка чи перерахунку в комірці з позначкою «незбережено» стояло старе
+  // число; вставка й Undo (у модель сітки вони не пишуть) були невидимі до
+  // успіху, а після «зайнято»/мережі — взагалі; після повернення на аркуш
+  // незбережене зникало з екрана. Людина бачила старе й вводила/вставляла
+  // вдруге. Ціна — та сама, що вже платять `flags`/`columns`/`totals`: усі
+  // вони й так перебудовуються на кожну зміну `pending`.
   const shownOverrides = useMemo(() => {
-    if (rejections.size === 0) return overrides;
+    if (rejections.size === 0 && pending.size === 0) return overrides;
 
     const merged = new Map(overrides);
+    for (const edit of pending.values()) {
+      const key = cellKey(edit.rowKey, edit.columnCode);
+      if (!merged.has(key)) merged.set(key, edit.isEmpty || edit.value === null ? '' : edit.value);
+    }
     for (const rejection of rejections.values()) {
       const key = cellKey(rejection.edit.rowKey, rejection.edit.columnCode);
       if (!merged.has(key)) merged.set(key, rejection.edit.value);
     }
 
     return merged;
-  }, [overrides, rejections]);
+  }, [overrides, rejections, pending]);
 
   const rows = useMemo(
     () => (data === undefined ? [] : gridRows(data, shownOverrides)),
@@ -2141,7 +2159,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
          * ⚠ `V-01`: і тоді, коли останній пакет пройшов, а відхилені комірки
          * лишились: автозбереження їх більше не везе, тож повтор — лише руками.
          */}
-        {((saveStatus === 'error' && !busyWaiting) || rejections.size > 0) && pending.size > 0 && (
+        {(((saveStatus === 'error' || failedSave) && !busyWaiting) || rejections.size > 0) && pending.size > 0 && (
           <Button
             loading={saveLoading}
             onClick={() => {
@@ -2193,7 +2211,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
          * єдиний постійний слід відмови (банер може бути прокручений), а з
          * ним і `role="alert"`, на якому стоїть `DocumentGrid.a11y-status`.
          */}
-        {((saveStatus === 'error' && !busyWaiting) || rejections.size > 0) && (
+        {(((saveStatus === 'error' || (failedSave && pending.size > 0)) && !busyWaiting) || rejections.size > 0) && (
           <Badge color="statusError" variant="light" role="alert" data-save-status="error">
             {t('grid.saveFailedMark')}
           </Badge>
