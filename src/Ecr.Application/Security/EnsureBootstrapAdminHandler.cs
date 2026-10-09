@@ -41,7 +41,7 @@ public sealed class EnsureBootstrapAdminHandler(
 
         var existing = await users.FindBootstrapAdminAsync(ct).ConfigureAwait(false);
         var hasDomainAdmin = await users
-            .HasActiveDomainAdminAsync(BootstrapAdmin.AdminPermission, ct).ConfigureAwait(false);
+            .HasActiveDomainAdminAsync(BootstrapAdmin.AdminPermission, clock.UtcNow, ct).ConfigureAwait(false);
 
         LastOutcome = BootstrapAdmin.Decide(
             !string.IsNullOrWhiteSpace(bootstrapPassword), existing, hasDomainAdmin);

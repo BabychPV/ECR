@@ -36,8 +36,22 @@ public sealed record LoginResult(
 /// і однакова не лише за текстом, а й за часом: інакше ендпоінт стає засобом
 /// перебору імен, а перебір імен — половина роботи зловмисника.
 /// </remarks>
+/// <param name="users">Сховище облікових записів.</param>
+/// <param name="hasher">Хешер паролів.</param>
+/// <param name="uow">Одиниця роботи.</param>
+/// <param name="clock">Годинник.</param>
+/// <param name="logger">Журнал.</param>
+/// <param name="disableBootstrap">
+/// Вимкнення bootstrap після Windows-входу доменного адміністратора (S1-01).
+/// У продукті його завжди дає DI; <c>null</c> — лише в тестах, яким цей крок не потрібен.
+/// </param>
 public sealed partial class LoginHandler(
-    IUserStore users, IPasswordHasher hasher, IUnitOfWork uow, IClock clock, ILogger<LoginHandler> logger)
+    IUserStore users,
+    IPasswordHasher hasher,
+    IUnitOfWork uow,
+    IClock clock,
+    ILogger<LoginHandler> logger,
+    DisableBootstrapAdminHandler? disableBootstrap = null)
 {
     /// <summary>
     /// Хеш, об який «перевіряється» пароль неіснуючого користувача.
@@ -248,6 +262,16 @@ public sealed partial class LoginHandler(
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
 
         var assigned = await MatchGroupsAsync(user.Id, userName, groupSids, now, ct).ConfigureAwait(false);
+
+        // ⛔ S1-01 (аудит 5): доменний адміністратор рахується лише після
+        // СВОГО входу — до того його SID ніщо не підтверджує, і запис із
+        // друкарською помилкою вимикав bootstrap, лишаючи систему без
+        // адміністратора. Тож вимикає bootstrap саме цей вхід (D-97: «щойно
+        // з'явився») — після коміту `LastSignInAt` вище, інакше запит його не бачить.
+        if (disableBootstrap is not null)
+        {
+            await disableBootstrap.HandleAsync(user.Id, ct).ConfigureAwait(false);
+        }
 
         return new LoginResult(
             user.Id, user.UserName, user.DisplayName, user.SecurityStamp, MustChangePassword: false, assigned);

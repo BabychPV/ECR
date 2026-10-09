@@ -16,11 +16,23 @@ public sealed class DisableBootstrapAdminHandler(
     /// <param name="ct">Токен скасування.</param>
     /// <returns><c>true</c> — запис справді вимкнено цим викликом.</returns>
     /// <remarks>
-    /// Викликається після кожного призначення ролі, а не за розкладом: вікно
-    /// між появою доменного адміністратора і вимкненням має бути якомога
-    /// коротшим.
+    /// Викликається після кожного призначення ролі і після кожного Windows-входу,
+    /// а не за розкладом: вікно між появою доменного адміністратора і
+    /// вимкненням має бути якомога коротшим.
     /// </remarks>
-    public async Task<bool> HandleAsync(CancellationToken ct)
+    public Task<bool> HandleAsync(CancellationToken ct) => HandleAsync(actorUserId: null, ct);
+
+    /// <summary>Те саме, з явним автором події (Windows-вхід: поточного користувача ще немає).</summary>
+    /// <param name="actorUserId">Хто спричинив вимкнення; <c>null</c> — поточний користувач.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns><c>true</c> — запис справді вимкнено цим викликом.</returns>
+    /// <remarks>
+    /// ⛔ S1-01 (аудит 5): адміністратором рахується лише доменний запис, що вже
+    /// входив (`IUserStore.HasActiveDomainAdminAsync`). Тож призначення ролі
+    /// записові, який ще не входив, bootstrap НЕ вимикає — його вимикає перший
+    /// Windows-вхід такого адміністратора (`AuthController.LoginWindows`).
+    /// </remarks>
+    public async Task<bool> HandleAsync(int? actorUserId, CancellationToken ct)
     {
         var bootstrap = await users.FindBootstrapAdminAsync(ct).ConfigureAwait(false);
         if (bootstrap is not { IsActive: true })
@@ -32,8 +44,9 @@ public sealed class DisableBootstrapAdminHandler(
         // користувачами. «Просто є доменний користувач» означало б, що перший
         // рядовий співробітник вимикає адміністратора, і налаштовувати систему
         // стає нікому.
+        var now = clock.UtcNow;
         var hasDomainAdmin = await users
-            .HasActiveDomainAdminAsync(BootstrapAdmin.AdminPermission, ct).ConfigureAwait(false);
+            .HasActiveDomainAdminAsync(BootstrapAdmin.AdminPermission, now, ct).ConfigureAwait(false);
         if (!hasDomainAdmin)
         {
             return false;
@@ -41,7 +54,6 @@ public sealed class DisableBootstrapAdminHandler(
 
         bootstrap.DisableAsBootstrap();
 
-        var now = clock.UtcNow;
         await audit.WriteSecurityEventAsync(
             new SecurityEventRecord(
                 now,
@@ -52,7 +64,7 @@ public sealed class DisableBootstrapAdminHandler(
                 // ⛔ Ні пароля, ні хеша, ні штампа: подія фіксує ФАКТ, а не стан
                 // облікового запису.
                 DetailsJson: null,
-                ChangedByUserId: currentUser.UserId ?? bootstrap.Id,
+                ChangedByUserId: actorUserId ?? currentUser.UserId ?? bootstrap.Id,
                 CorrelationId: currentUser.CorrelationId),
             ct).ConfigureAwait(false);
 
