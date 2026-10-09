@@ -527,6 +527,10 @@ public sealed partial class PatchCellsHandler
             Blamed(item.Id, () => CheckSheetStatus(statuses[item.Context.Table.SheetDefId], item.Planned));
         }
 
+        // ⛔ AN-106 (P1-01): ліміт очікування блокувань — до стелі й вставки нових рядків, як у
+        // поштучного (`PersistCoreAsync`); `ApplyBatchAsync` нижче його вже не повторює.
+        await cellStore.LimitLockWaitAsync(ct).ConfigureAwait(false);
+
         var ceiling = active.Where(x => CreatesRowsUnderCeiling(x.Context)).ToList();
         if (ceiling.Count > 0)
         {

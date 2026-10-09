@@ -35,7 +35,31 @@ public sealed class CellWriteLockTimeoutTests(SqlServerFixture sql)
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "ФВ-9.4")]
-    public async Task Правка_комірки_під_чужим_блокуванням_таблиці_дає_швидку_409_а_після_звільнення_проходить()
+    public Task Правка_комірки_під_чужим_блокуванням_таблиці_дає_швидку_409_а_після_звільнення_проходить()
+        => AssertFastConflictThenSuccessAsync("doc.CellValue");
+
+    /// <summary>
+    /// AN-106 (P1-01): блокування на таблиці, яку PATCH пише ДО охоронця (нові рядки,
+    /// <c>doc.TableRow</c>) чи ПІСЛЯ нього (аудит <c>aud.CellChange</c>), — та сама швидка 409.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Мутації: прибрати <c>LimitLockWaitAsync</c> у <c>PersistCoreAsync</c> → <c>doc.TableRow</c>
+    /// чекає весь <c>CommandTimeout</c> і дає 500; прибрати переклад 1222 у
+    /// <c>UnitOfWork.ExecuteInTransactionAsync</c> → <c>aud.CellChange</c> дає 500 (сирий
+    /// <c>SqlException 1222</c>).
+    /// </remarks>
+    /// <param name="lockedTable">Таблиця під чужим <c>TABLOCKX</c>.</param>
+    /// <returns>Завдання.</returns>
+    [Theory]
+    [InlineData("aud.CellChange")]
+    [InlineData("doc.TableRow")]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "P1-01")]
+    public Task Правка_комірки_під_чужим_блокуванням_аудиту_чи_рядків_дає_швидку_409_а_не_500(string lockedTable)
+        => AssertFastConflictThenSuccessAsync(lockedTable);
+
+    private async Task AssertFastConflictThenSuccessAsync(string lockedTable)
     {
         var scenario = await ArrangeAsync().ConfigureAwait(true);
 
@@ -81,6 +105,9 @@ public sealed class CellWriteLockTimeoutTests(SqlServerFixture sql)
             return (response, await response.Content.ReadAsStringAsync().ConfigureAwait(true));
         }
 
+        // Ім'я таблиці — константа тесту ([InlineData]), не ввід.
+        var lockSql = "DECLARE @n int = (SELECT COUNT(*) FROM " + lockedTable + " WITH (TABLOCKX, HOLDLOCK));";
+
         HttpResponseMessage blockedResponse;
         string blockedBody;
         TimeSpan elapsed;
@@ -92,7 +119,7 @@ public sealed class CellWriteLockTimeoutTests(SqlServerFixture sql)
             {
                 // Блокування взяте, коли команда повернулась: далі PATCH гарантовано впирається в нього.
                 await holder.Database
-                    .ExecuteSqlRawAsync("DECLARE @n int = (SELECT COUNT(*) FROM doc.CellValue WITH (TABLOCKX, HOLDLOCK));")
+                    .ExecuteSqlRawAsync(lockSql)
                     .ConfigureAwait(true);
 
                 var clock = Stopwatch.StartNew();
