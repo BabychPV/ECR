@@ -1,11 +1,14 @@
 // tests/Ecr.Api.Tests/Security/ImportPreviewConcurrencyTests.cs
 
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using Ecr.Api.Controllers;
 using Ecr.Api.Options;
 using Ecr.Api.Security;
+using Ecr.Application.Errors;
 using Ecr.TestKit;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Configuration;
 using Xunit;
@@ -17,31 +20,34 @@ namespace Ecr.Api.Tests.Security;
 /// тож одночасних розборів не більше за межу, понад чергу — відмова 429.
 /// </summary>
 /// <remarks>
-/// ⚠ Без бази й без годинника: обмежувач одночасності береться з політики напряму, а
-/// «зайнятість» тримає незвільнена оренда — результат детермінований.
+/// ⛔ AN-123 (R1-04 = R2-02, AUDIT-2026-10-09c): місце береться в ДІЇ, після прив'язки
+/// <c>IFormFile</c> (<see cref="ImportPreviewGate"/>), а не в <c>RateLimitingMiddleware</c>
+/// до неї — повільне вивантаження більше не займає місця розбору.
+///
+/// ⚠ Без бази й без годинника: «зайнятість» тримає незвільнена оренда — результат
+/// детермінований.
 /// </remarks>
 public sealed class ImportPreviewConcurrencyTests
 {
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
-    public async Task Третій_одночасний_перегляд_отримує_відмову_а_другий_чекає_першого()
+    public async Task Третій_одночасний_розбір_отримує_429_а_другий_чекає_першого()
     {
-        var policy = new ImportPreviewRateLimitPolicy(Config(
+        using var gate = new ImportPreviewGate(Config(
             (ImportPreviewRateLimitPolicy.PermitKey, "1"),
             (ImportPreviewRateLimitPolicy.QueueLimitKey, "1")));
-        var partition = policy.GetPartition(new DefaultHttpContext());
-        using var limiter = partition.Factory(partition.PartitionKey);
 
-        var first = await limiter.AcquireAsync();
+        var first = await gate.EnterAsync(CancellationToken.None);
         Assert.True(first.IsAcquired);
 
         // Другий стає в чергу: розбір першого ще триває.
-        var second = limiter.AcquireAsync().AsTask();
+        var second = gate.EnterAsync(CancellationToken.None);
         Assert.False(second.IsCompleted);
 
         // Третій — понад чергу: відмова одразу, а не очікування.
-        using var third = await limiter.AcquireAsync();
-        Assert.False(third.IsAcquired);
+        var refusal = await Assert.ThrowsAsync<BusinessRuleException>(() => gate.EnterAsync(CancellationToken.None));
+        Assert.Equal("ECR-REQ-0429", refusal.ErrorCode);
+        Assert.Equal("err.ECR-REQ-0429.importBusy", refusal.Details?["messageKey"]);
 
         // Перший закінчив — другий отримує дозвіл.
         first.Dispose();
@@ -51,49 +57,47 @@ public sealed class ImportPreviewConcurrencyTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
-    public void Без_ключів_два_розбори_одночасно_і_розділ_один_на_процес()
+    public void Без_ключів_два_розбори_одночасно_і_черга_чотири()
     {
-        var policy = new ImportPreviewRateLimitPolicy(new ConfigurationBuilder().Build());
+        var options = new ImportPreviewRateLimitPolicy(new ConfigurationBuilder().Build()).LimiterOptions();
 
-        var alice = policy.GetPartition(new DefaultHttpContext());
-        var bob = policy.GetPartition(new DefaultHttpContext());
-
-        // Межа захищає пам'ять ПРОЦЕСУ: сто користувачів по одному перегляду з'їдають її
-        // так само, як один зі ста. Мутація: розділ за користувачем — ключі різні.
-        Assert.Equal(alice.PartitionKey, bob.PartitionKey);
-
-        using var limiter = alice.Factory(alice.PartitionKey);
-        using var one = limiter.AttemptAcquire();
-        using var two = limiter.AttemptAcquire();
-        using var three = limiter.AttemptAcquire();
-
-        Assert.True(one.IsAcquired);
-        Assert.True(two.IsAcquired);
-        Assert.False(three.IsAcquired);
+        Assert.Equal(2, options.PermitLimit);
+        Assert.Equal(4, options.QueueLimit);
     }
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
-    public void Перегляд_імпорту_стоїть_під_політикою()
+    public void Межа_перегляду_береться_в_дії_а_не_в_проміжному_ПЗ_до_прив_язки_тіла()
     {
         var action = typeof(DocumentsController).GetMethod(nameof(DocumentsController.ImportPreview));
         Assert.NotNull(action);
 
-        // Мутація: прибрати `[EnableRateLimiting]` з `ImportPreview` — тут null.
-        var attribute = action.GetCustomAttribute<EnableRateLimitingAttribute>();
-        Assert.NotNull(attribute);
+        // ⛔ Мутація: повернути `[EnableRateLimiting]` — оренда знову береться ДО прив'язки
+        // `IFormFile`, і вивантаження тіла займає місце розбору.
+        Assert.Null(action.GetCustomAttribute<EnableRateLimitingAttribute>());
 
-        // Ім'я — ЛІТЕРАЛОМ: константа продукту рухалася б разом із перевіркою.
-        Assert.Equal("import-preview", attribute.PolicyName);
+        // Межа — служба, яку дія отримує вже з прив'язаним файлом.
+        var gate = Assert.Single(action.GetParameters(), p => p.ParameterType == typeof(ImportPreviewGate));
+        Assert.NotNull(gate.GetCustomAttribute<FromServicesAttribute>());
     }
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
-    public void Відмова_має_власний_ключ_каталогу_ECR_REQ_0429()
+    public async Task Межа_вичерпана_дія_відповідає_429_не_торкаючись_розбору()
     {
-        // Ключ — ЛІТЕРАЛОМ; рядок у сіді (en/ru/kz) тримає сторож каталогу помилок.
-        Assert.Equal("err.ECR-REQ-0429.importBusy", ImportPreviewRateLimitPolicy.DetailKey);
-        Assert.NotNull(new ImportPreviewRateLimitPolicy(new ConfigurationBuilder().Build()).OnRejected);
+        using var gate = new ImportPreviewGate(Config(
+            (ImportPreviewRateLimitPolicy.PermitKey, "1"),
+            (ImportPreviewRateLimitPolicy.QueueLimitKey, "0")));
+        using var busy = await gate.EnterAsync(CancellationToken.None);
+
+        // ⚠ Контролер без залежностей: до обробника перегляду дія дійти не має права.
+        var controller = (DocumentsController)RuntimeHelpers.GetUninitializedObject(typeof(DocumentsController));
+        var file = new FormFile(new MemoryStream([1, 2, 3]), 0, 3, "file", "book.xlsx");
+
+        // ⛔ Мутація: прибрати `EnterAsync` з дії — тут NullReferenceException обробника, не 429.
+        var refusal = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => controller.ImportPreview(1, file, gate, CancellationToken.None));
+        Assert.Equal("ECR-REQ-0429", refusal.ErrorCode);
     }
 
     [Theory]

@@ -557,13 +557,20 @@ public sealed class DocumentsController(
     /// <remarks>Імпорт **завжди** через перегляд diff (ФВ-4.3): застосування — окремим викликом.</remarks>
     [HttpPost("{id:long}/import/preview")]
     [RequestSizeLimit(MaxImportBodyBytes)]
-    // ⛔ P1-04 = S1-02: розбір книги — повна модель ClosedXML у пам'яті процесу; одночасних
-    // розборів не більше за межу політики, понад чергу — 429 (див. ImportPreviewRateLimitPolicy).
-    [Microsoft.AspNetCore.RateLimiting.EnableRateLimiting(Ecr.Api.Security.ImportPreviewRateLimitPolicy.PolicyName)]
     [ProducesResponseType<Ecr.Application.Ports.ImportPreview>(StatusCodes.Status200OK)]
-    public async Task<IActionResult> ImportPreview(long id, IFormFile file, CancellationToken ct)
+    public async Task<IActionResult> ImportPreview(
+        long id, IFormFile file, [FromServices] Ecr.Api.Security.ImportPreviewGate previewGate, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(file);
+        ArgumentNullException.ThrowIfNull(previewGate);
+
+        // ⛔ P1-04 = S1-02: розбір книги — повна модель ClosedXML у пам'яті процесу; одночасних
+        // розборів не більше за межу, понад чергу — 429 (`ImportPreviewGate`).
+        //
+        // ⛔ AN-123 (R1-04 = R2-02): місце береться ТУТ, після прив'язки `IFormFile`, — тіло вже
+        // прийняте. Доти `[EnableRateLimiting]` брав його в проміжному ПЗ до прив'язки, і
+        // повільне вивантаження (до 30 МБ) займало місце розбору, нічого не розбираючи.
+        using var parsePermit = await previewGate.EnterAsync(ct).ConfigureAwait(false);
 
         // ⛔ Перегляд НЕ застосовує нічого. Це не проміжний крок майстра, а
         // сам механізм захисту: імпорт без перегляду непомітно перезаписує
