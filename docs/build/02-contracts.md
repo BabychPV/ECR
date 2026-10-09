@@ -2831,6 +2831,17 @@ public interface IRegistrySnapshotLoader
 }
 ```
 
+`LoadAsync` ≡ `(await LoadSourceAsync(ids, asOf)).Build(date)` (L5-12): `LoadSourceAsync` читає БД один раз і
+повертає `IRegistrySnapshotSource`, який будує знімок на будь-яку дату в пам'яті — так правила довідника на пакет
+записів із різними датами вікна чинності не перечитують БД на кожну дату.
+
+```csharp
+public interface IRegistrySnapshotSource
+{
+    public IRegistrySnapshot Build(DateOnly businessDate);
+}
+```
+
 #### `IRegistryUseStore`
 
 Ребра `cfg.RegistryUse` формул версії методології (`SourceKind = 1`, RT-23b,
