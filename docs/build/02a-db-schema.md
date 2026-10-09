@@ -2930,7 +2930,7 @@ CREATE TABLE itg.JobProgress
     InstanceId    nvarchar(64)  NULL,
     -- Черга в базі (MI-02, D-208; міграція MI02JobQueue). Усе NULL, без backfill:
     -- Lane NULL — дзеркало Quartz, черга його не бере. Моменти — SYSUTCDATETIME().
-    Lane              varchar(32)      NULL,  -- JobLanes: 'default', 'recalc'
+    Lane              varchar(32)      NULL,  -- JobLanes: 'interactive', 'default', 'recalc'
     Payload           nvarchar(max)    NULL,  -- JSON аргументів задачі
     AvailableAt       datetime2(3)     NULL,  -- коли можна брати; обов'язковий за Lane
     LeaseUntil        datetime2(3)     NULL,  -- кінець оренди Running

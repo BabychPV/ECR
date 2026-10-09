@@ -162,6 +162,32 @@ public sealed class JobWorkerTests(SqlServerFixture sql) : DbJobQueueTestsBase(s
     }
 
     [Fact]
+    [Trait("Finding", "P1-06")]
+    public async Task Перерахунок_формул_не_чекає_за_довгою_фоновою_задачею_що_зайняла_всі_місця()
+    {
+        // P1-06 (AN-109): формули після PATCH стояли в тій самій FIFO-смузі default, що й довгі фонові задачі;
+        // коли ті займали всі MaxConcurrency місць, перерахунок, на який чекає людина, не стартував. Тепер він
+        // у лейні interactive з власним місцем. Детерміновано: спільне місце одне й зайняте задачею, що не
+        // завершиться до кінця тесту; без резерву перерахунок не стартує ніколи (тест падає за Patience).
+        var probe = new WorkerProbe();
+        await using var host = await StartHostAsync(
+            probe, o => o with { MaxConcurrency = 1, ReservedLanes = [JobLanes.Interactive] });
+
+        var background = await EnqueueJobAsync<WorkerBlockingJob>(host, new { n = 1 });
+        await probe.Started.Task.WaitAsync(Patience);
+
+        var waiting = await EnqueueJobAsync<WorkerProbeJob>(host, new { n = 2 });
+        var formulas = await EnqueueJobAsync<WorkerFormulaJob>(host, new { n = 3 });
+
+        var row = await WaitForStateAsync(formulas, "Succeeded");
+        Assert.Equal(JobLanes.Interactive, row.Lane);
+
+        // Резерв — лише для interactive: фонова задача й далі тримає спільне місце, а звичайна чекає його.
+        Assert.Equal("Running", (await RowAsync(background))?.State);
+        Assert.Equal("Queued", (await RowAsync(waiting))?.State);
+    }
+
+    [Fact]
     public async Task Зупинка_хоста_повертає_задачу_в_чергу_не_зараховуючи_спробу()
     {
         // L2-08 (D-208): зупинка — подія життєвого циклу, а не провал.
@@ -275,6 +301,7 @@ public sealed class JobWorkerTests(SqlServerFixture sql) : DbJobQueueTestsBase(s
         services.AddScoped<DbBackgroundJobScheduler>();
         services.AddSingleton(probe);
         services.AddScoped<WorkerProbeJob>();
+        services.AddScoped<WorkerFormulaJob>();
         services.AddScoped<WorkerFailingJob>();
         services.AddScoped<WorkerVerdictJob>();
         services.AddScoped<WorkerTooComplexJob>();
@@ -361,6 +388,16 @@ public sealed class WorkerProbeJob(WorkerProbe probe, IJobLeaseContext lease) : 
     public Task ExecuteAsync(object? payload, IJobProgress progress, CancellationToken ct)
     {
         probe.Runs.Enqueue((payload as string, lease.Current));
+        return Task.CompletedTask;
+    }
+}
+
+/// <summary>Як перерахунок формул після PATCH: <see cref="JobLaneMap.Of(Type)"/> кладе її в <see cref="JobLanes.Interactive"/>.</summary>
+public sealed class WorkerFormulaJob(WorkerProbe probe) : IFormulaRecalculationJob
+{
+    public Task ExecuteAsync(object? payload, IJobProgress progress, CancellationToken ct)
+    {
+        probe.Runs.Enqueue((payload as string, null));
         return Task.CompletedTask;
     }
 }

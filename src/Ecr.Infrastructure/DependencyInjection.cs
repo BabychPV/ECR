@@ -302,6 +302,9 @@ public static class DependencyInjection
             services.AddSingleton(new Jobs.JobWorkerOptions
             {
                 Lanes = Jobs.JobLaneMap.ApiLanes(Jobs.JobLaneMap.ReadExecutor(configuration)),
+
+                // P1-06 (AN-109): перерахунок формул після PATCH має своє місце понад спільні чотири.
+                ReservedLanes = Jobs.JobLaneMap.ApiReservedLanes,
             });
             services.AddHostedService<Jobs.JobWorker>();
 

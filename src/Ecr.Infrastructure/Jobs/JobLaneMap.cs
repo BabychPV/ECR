@@ -34,18 +34,24 @@ public static class JobLaneMap
 
     /// <summary>
     /// Лейн задачі: <see cref="IRecalculationJob"/> (маркер або реалізація) —
-    /// <see cref="JobLanes.Recalc"/>, решта — <see cref="JobLanes.Default"/>.
+    /// <see cref="JobLanes.Recalc"/>, <see cref="IFormulaRecalculationJob"/> —
+    /// <see cref="JobLanes.Interactive"/>, решта — <see cref="JobLanes.Default"/>.
     /// </summary>
     /// <remarks>
     /// ⚠ Перерахунок ФОРМУЛ шаблону (<see cref="IFormulaRecalculationJob"/>) —
-    /// не <see cref="IRecalculationJob"/> і йде в <see cref="JobLanes.Default"/>:
-    /// окремий пул (<c>D-206</c>) — для методологій, чий прогін іде хвилинами.
+    /// не <see cref="IRecalculationJob"/>: окремий пул (<c>D-206</c>) — для методологій,
+    /// чий прогін іде хвилинами.
+    /// ⛔ P1-06 (AN-109): і не <see cref="JobLanes.Default"/>. Його ставить PATCH комірок, і людина
+    /// чекає оновлених обчислених колонок на сітці; у спільній FIFO-смузі він стояв за довгими
+    /// фоновими задачами (збір, синк, імпорт, знімки звітів), що займали всі місця воркера.
     /// </remarks>
     public static string Of(Type jobType)
     {
         ArgumentNullException.ThrowIfNull(jobType);
 
-        return typeof(IRecalculationJob).IsAssignableFrom(jobType) ? JobLanes.Recalc : JobLanes.Default;
+        return typeof(IRecalculationJob).IsAssignableFrom(jobType) ? JobLanes.Recalc
+            : typeof(IFormulaRecalculationJob).IsAssignableFrom(jobType) ? JobLanes.Interactive
+            : JobLanes.Default;
     }
 
     /// <summary>Лейни, які опитує воркер процесу Api.</summary>
@@ -56,7 +62,10 @@ public static class JobLaneMap
     /// жив би в процесі, що обслуговує HTTP, — рівно те, від чого пул і відокремлюють.
     /// </remarks>
     public static IReadOnlyList<string> ApiLanes(RecalculationExecutor executor)
-        => executor == RecalculationExecutor.Worker ? [JobLanes.Default] : JobLanes.All;
+        => executor == RecalculationExecutor.Worker ? [JobLanes.Interactive, JobLanes.Default] : JobLanes.All;
+
+    /// <summary>Лейни з власними місцями у воркері Api (<see cref="JobWorkerOptions.ReservedLanes"/>, P1-06).</summary>
+    public static IReadOnlyList<string> ApiReservedLanes { get; } = [JobLanes.Interactive];
 
     /// <summary>Виконавець перерахунку з конфігурації; не задано — <see cref="RecalculationExecutor.InProcess"/>.</summary>
     /// <remarks>Недійсне значення старт зупиняє раніше (<c>EcrConfigurationValidation.Choices</c>).</remarks>

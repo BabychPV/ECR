@@ -152,6 +152,14 @@ public sealed class JobLaneTests
 
         Assert.Contains(JobLanes.Default, lanes);
         Assert.Equal(claimsRecalc, lanes.Contains(JobLanes.Recalc));
+
+        // ⛔ P1-06 (AN-109): перерахунок формул (interactive) Api бере завжди, а в режимі Database — ще й
+        // власними місцями понад спільні; у режимі Quartz виконавець черги лише дренує залишки, резерву не треба.
+        Assert.Contains(JobLanes.Interactive, lanes);
+        var reserved = services.Single(d => d.ServiceType == typeof(JobWorkerOptions))
+            .ImplementationInstance is JobWorkerOptions o ? o.ReservedLanes : [];
+        string[] expectedReserved = queueScheduler ? [JobLanes.Interactive] : [];
+        Assert.Equal(expectedReserved, reserved);
     }
 
     [Fact]

@@ -133,11 +133,19 @@ public static class JobLanes
     /// <summary>Перерахунок (<c>IRecalculationJob</c>): окремий пул воркерів (<c>D-206</c>).</summary>
     public const string Recalc = "recalc";
 
+    /// <summary>
+    /// Задачі, на які чекає людина (перерахунок формул після правки комірок, P1-06): воркер Api бере цей
+    /// лейн першим і тримає для нього власні місця понад спільні, тож довгі фонові задачі <see cref="Default"/>
+    /// його не витісняють.
+    /// </summary>
+    public const string Interactive = "interactive";
+
     /// <summary>Межа стовпця <c>itg.JobProgress.Lane</c> (<c>varchar(32)</c>).</summary>
     public const int MaxLength = JobProgress.MaxLaneLength;
 
     /// <summary>Усі відомі лейни.</summary>
-    public static IReadOnlyList<string> All { get; } = [Default, Recalc];
+    /// <remarks>⚠ Порядок — пріоритет claim (<c>DbJobQueue.ClaimAsync</c>): <see cref="Interactive"/> першим.</remarks>
+    public static IReadOnlyList<string> All { get; } = [Interactive, Default, Recalc];
 
     /// <summary>Чи лейн відомий (порівняння точне, з урахуванням регістру).</summary>
     public static bool IsKnown(string? lane) => lane is not null && All.Contains(lane, StringComparer.Ordinal);

@@ -29,6 +29,15 @@ public sealed record JobWorkerOptions
     /// <summary>Скільки задач виконується одночасно.</summary>
     public int MaxConcurrency { get; init; } = 4;
 
+    /// <summary>
+    /// Лейни з власними місцями понад <see cref="MaxConcurrency"/> (P1-06, AN-109): задачі, на які чекає людина,
+    /// не стоять у черзі за довгими фоновими. Діють лише ті, що є і в <see cref="Lanes"/>; порожньо — резерву немає.
+    /// </summary>
+    public IReadOnlyList<string> ReservedLanes { get; init; } = [];
+
+    /// <summary>Скільки місць резерву для <see cref="ReservedLanes"/>.</summary>
+    public int ReservedConcurrency { get; init; } = 1;
+
     /// <summary>Опитування черги, коли роботи немає.</summary>
     public TimeSpan PollInterval { get; init; } = TimeSpan.FromSeconds(1);
 
@@ -140,73 +149,27 @@ public sealed partial class JobWorker(
 
         await CloseOwnPreviousInstanceAsync(owner).ConfigureAwait(false);
 
+        // ⛔ Семафори живуть до кінця `finally` нижче: задача звільняє місце (`RunAsync`) і після зупинки циклу.
         using var slots = new SemaphoreSlim(options.MaxConcurrency, options.MaxConcurrency);
-        var lastExpire = 0L;
-        var queueUnusableReported = false;
+
+        // ⛔ P1-06 (AN-109): лейни, на які чекає людина (`ReservedLanes`, у Api — `interactive`), мають ВЛАСНІ
+        // місця понад `MaxConcurrency`. Спільні місця беруть усі лейни (interactive першим, `JobLanes.All`), але
+        // чотири довгі фонові задачі займають їх усі — і перерахунок формул після PATCH стояв би за ними FIFO.
+        var reserved = options.ReservedLanes.Where(l => options.Lanes.Contains(l, StringComparer.Ordinal)).ToArray();
+        var reservedCount = reserved.Length > 0 ? Math.Max(0, options.ReservedConcurrency) : 0;
+        using var reservedSlots = new SemaphoreSlim(Math.Max(1, reservedCount), Math.Max(1, reservedCount));
 
         try
         {
-            while (!stoppingToken.IsCancellationRequested)
-            {
-                if (lastExpire == 0 || Stopwatch.GetElapsedTime(lastExpire) >= options.ExpireInterval)
-                {
-                    lastExpire = Stopwatch.GetTimestamp();
-                    await ExpireAsync().ConfigureAwait(false);
-                }
+            Task[] loops = reservedCount > 0
+                ?
+                [
+                    PollAsync(owner, options.Lanes, slots, primary: true, stoppingToken),
+                    PollAsync(owner, reserved, reservedSlots, primary: false, stoppingToken),
+                ]
+                : [PollAsync(owner, options.Lanes, slots, primary: true, stoppingToken)];
 
-                await slots.WaitAsync(stoppingToken).ConfigureAwait(false);
-
-                ClaimedJob? job = null;
-                TimeSpan? backoff = null;
-
-                try
-                {
-                    job = await ClaimAsync(owner).ConfigureAwait(false);
-                    queueUnusableReported = false;
-                }
-                catch (InvalidOperationException ex) when (ex.GetType() == typeof(InvalidOperationException))
-                {
-                    // ⛔ «RCSI вимкнено» (DbJobQueue.EnsureRcsiAsync) — стан бази, не збій
-                    // дороги: щосекундний повтор лише засипав би журнал тим самим
-                    // рядком. Critical ОДИН раз на епізод, далі — пауза хвилинами;
-                    // стан і так Unhealthy (DatabaseHealthCheck).
-                    if (!queueUnusableReported)
-                    {
-                        LogQueueUnusable(logger, options.RcsiBackoff, ex);
-                        queueUnusableReported = true;
-                    }
-
-                    backoff = options.RcsiBackoff;
-                }
-#pragma warning disable CA1031 // Цикл воркера не падає від збою бази: пауза і наступна спроба.
-                catch (Exception ex)
-#pragma warning restore CA1031
-                {
-                    LogClaimFailed(logger, options.ErrorBackoff, ex);
-                    backoff = options.ErrorBackoff;
-                }
-
-                if (job is null)
-                {
-                    slots.Release();
-
-                    // ⚠ Сигнал постановки будить лише зі звичайного очікування: у
-                    // паузі після відмови кожна постановка інакше знову будила б цикл.
-                    if (backoff is { } pause)
-                    {
-                        await Task.Delay(pause, stoppingToken).ConfigureAwait(false);
-                    }
-                    else
-                    {
-                        await signal.WaitAsync(options.PollInterval, stoppingToken).ConfigureAwait(false);
-                    }
-
-                    continue;
-                }
-
-                Prune();
-                running[job.Claim.Token] = RunAsync(job, slots, stoppingToken);
-            }
+            await Task.WhenAll(loops).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {
@@ -215,6 +178,90 @@ public sealed partial class JobWorker(
         {
             // Зупинка хоста: задачі отримали скасування і повертаються в чергу (RunAsync).
             await Task.WhenAll(running.Values).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>Цикл захоплення: бере задачі з <paramref name="lanes"/>, доки є вільне місце в <paramref name="slots"/>.</summary>
+    /// <param name="owner">Власник оренди.</param>
+    /// <param name="lanes">Лейни цього циклу.</param>
+    /// <param name="slots">Місця цього циклу.</param>
+    /// <param name="primary">
+    /// Основний цикл: лише він закриває прострочене (<see cref="ExpireAsync"/>) і чекає сигналу постановки.
+    /// Резервний цикл опитує свої лейни за <see cref="JobWorkerOptions.PollInterval"/> і сигналу не бере:
+    /// сигнал будить ОДНОГО (<see cref="JobQueueSignal"/>), і резервний цикл, «з'ївши» його заради чужого лейна,
+    /// відклав би звичайну задачу основного циклу до наступного опитування.
+    /// </param>
+    /// <param name="stopping">Зупинка хоста.</param>
+    private async Task PollAsync(
+        string owner, IReadOnlyCollection<string> lanes, SemaphoreSlim slots, bool primary, CancellationToken stopping)
+    {
+        var lastExpire = 0L;
+        var queueUnusableReported = false;
+
+        while (!stopping.IsCancellationRequested)
+        {
+            if (primary && (lastExpire == 0 || Stopwatch.GetElapsedTime(lastExpire) >= options.ExpireInterval))
+            {
+                lastExpire = Stopwatch.GetTimestamp();
+                await ExpireAsync().ConfigureAwait(false);
+            }
+
+            await slots.WaitAsync(stopping).ConfigureAwait(false);
+
+            ClaimedJob? job = null;
+            TimeSpan? backoff = null;
+
+            try
+            {
+                job = await ClaimAsync(owner, lanes).ConfigureAwait(false);
+                queueUnusableReported = false;
+            }
+            catch (InvalidOperationException ex) when (ex.GetType() == typeof(InvalidOperationException))
+            {
+                // ⛔ «RCSI вимкнено» (DbJobQueue.EnsureRcsiAsync) — стан бази, не збій
+                // дороги: щосекундний повтор лише засипав би журнал тим самим
+                // рядком. Critical ОДИН раз на епізод, далі — пауза хвилинами;
+                // стан і так Unhealthy (DatabaseHealthCheck).
+                if (!queueUnusableReported)
+                {
+                    LogQueueUnusable(logger, options.RcsiBackoff, ex);
+                    queueUnusableReported = true;
+                }
+
+                backoff = options.RcsiBackoff;
+            }
+#pragma warning disable CA1031 // Цикл воркера не падає від збою бази: пауза і наступна спроба.
+            catch (Exception ex)
+#pragma warning restore CA1031
+            {
+                LogClaimFailed(logger, options.ErrorBackoff, ex);
+                backoff = options.ErrorBackoff;
+            }
+
+            if (job is null)
+            {
+                slots.Release();
+
+                // ⚠ Сигнал постановки будить лише зі звичайного очікування: у
+                // паузі після відмови кожна постановка інакше знову будила б цикл.
+                if (backoff is { } pause)
+                {
+                    await Task.Delay(pause, stopping).ConfigureAwait(false);
+                }
+                else if (primary)
+                {
+                    await signal.WaitAsync(options.PollInterval, stopping).ConfigureAwait(false);
+                }
+                else
+                {
+                    await Task.Delay(options.PollInterval, stopping).ConfigureAwait(false);
+                }
+
+                continue;
+            }
+
+            Prune();
+            running[job.Claim.Token] = RunAsync(job, slots, stopping);
         }
     }
 
@@ -229,14 +276,14 @@ public sealed partial class JobWorker(
         }
     }
 
-    private async Task<ClaimedJob?> ClaimAsync(string owner)
+    private async Task<ClaimedJob?> ClaimAsync(string owner, IReadOnlyCollection<string> lanes)
     {
         await using var scope = scopes.CreateAsyncScope();
 
         // ⚠ CancellationToken.None: скасований посеред UPDATE…OUTPUT claim міг би
         // закомітити захоплення, а задачу ніхто б не отримав — до кінця оренди.
         return await scope.ServiceProvider.GetRequiredService<IJobQueue>()
-            .ClaimAsync(options.Lanes, owner, options.Lease, CancellationToken.None)
+            .ClaimAsync(lanes, owner, options.Lease, CancellationToken.None)
             .ConfigureAwait(false);
     }
 

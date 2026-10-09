@@ -175,7 +175,9 @@ public sealed class FormulaRecalculationCoalesceTests(SqlServerFixture sql) : Db
     private async Task RunQueuedFormulaJobAsync(TestDocument doc)
     {
         await using var host = NewHost();
-        var claimed = await host.ClaimAsync();
+
+        // P1-06: планувальник ставить задачу формул у лейн interactive, а не default.
+        var claimed = await host.ClaimLaneOfAsync<IFormulaRecalculationJob>();
         Assert.NotNull(claimed);
         Assert.Equal(FormulaCode, claimed.JobCode);
 
