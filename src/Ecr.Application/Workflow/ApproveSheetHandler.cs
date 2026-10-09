@@ -217,6 +217,14 @@ public sealed class ApproveSheetHandler(
         // від даних (`D-65`), і без цього виклику регуляторна вʼюха назавжди
         // тримала б стан на момент побудови: аркуші затвердили, а звіт для
         // регулятора лишився чернетковим і в перелік не потрапив.
+        //
+        // ⛔ R5-W1 / W1-01: спершу перехід — у БД (та сама транзакція), потім
+        // перерахунок. Статус зрізу рахується запитом `AsNoTracking`, і
+        // незбережений перехід він не бачить: затвердження останнього аркуша
+        // рахувалося як `Submitted`, а відхилення морозило зріз як поданий.
+        // Конфлікт `RowVersion` двох погоджувачів тепер — 409 з `UnitOfWork`,
+        // а не 500 із сирого `SaveChanges` будівника зрізу.
+        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
         await reports.RefreshAsync(documentId, key, ct).ConfigureAwait(false);
 
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);

@@ -166,7 +166,8 @@ public sealed partial class WorkflowTransactionTests
     }
 
     private static RecallSheetHandler Recall(
-        World world, EcrDbContext db, int userId, GrantLevel level, bool submitRight = false)
+        World world, EcrDbContext db, int userId, GrantLevel level, bool submitRight = false,
+        IReportSnapshotBuilder? reportSnapshots = null, DateTime? at = null)
     {
         var documents = Documents(world);
         documents.HasSheetAsync(world.DocumentId, world.SheetDefId, Arg.Any<CancellationToken>()).Returns(true);
@@ -187,7 +188,7 @@ public sealed partial class WorkflowTransactionTests
         user.UserId.Returns(userId);
 
         return new RecallSheetHandler(
-            new WorkflowStore(db), documents, access, new ReportSnapshotSync(NoSnapshots(), documents),
-            new UnitOfWork(db), user, new TestClock(Now));
+            new WorkflowStore(db), documents, access, new ReportSnapshotSync(reportSnapshots ?? NoSnapshots(), documents),
+            new UnitOfWork(db), user, new TestClock(at ?? Now));
     }
 }

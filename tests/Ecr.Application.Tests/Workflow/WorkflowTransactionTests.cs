@@ -192,7 +192,8 @@ public sealed partial class WorkflowTransactionTests(SqlServerFixture sql)
     // ────────────────────────────── збірка ────────────────────────────
 
     private SubmitSheetHandler Submit(
-        World world, EcrDbContext db, IAccessDecisionService access, ISheetEditGate? gate = null)
+        World world, EcrDbContext db, IAccessDecisionService access, ISheetEditGate? gate = null,
+        IReportSnapshotBuilder? reportSnapshots = null)
     {
         var cells = Substitute.For<ICellStore>();
         cells.ReadSliceAsync(Arg.Any<long>(), Arg.Any<CancellationToken>())
@@ -232,11 +233,17 @@ public sealed partial class WorkflowTransactionTests(SqlServerFixture sql)
         // ⚠ Зрізів звітності у цього проєкту немає — `ReportSnapshotSync` тоді
         // законно не робить нічого. Предмет тесту — межа коміту, а не побудова
         // зрізів, і зайвий рухомий шматок лише зробив би падіння двозначним.
-        var snapshots = Substitute.For<IReportSnapshotBuilder>();
-        snapshots.ListAsync(
-                     Arg.Any<int?>(), Arg.Any<int?>(), Arg.Any<IReadOnlyCollection<int>?>(),
-                     Arg.Any<CancellationToken>())
-                 .Returns<IReadOnlyList<ReportSnapshotSummary>>([]);
+        //
+        // ⚠ R5-W1: тести статусу зрізу (`WorkflowTransactionTests.SnapshotStatus`)
+        // підставляють справжній будівник — там предмет саме він.
+        var snapshots = reportSnapshots ?? Substitute.For<IReportSnapshotBuilder>();
+        if (reportSnapshots is null)
+        {
+            snapshots.ListAsync(
+                         Arg.Any<int?>(), Arg.Any<int?>(), Arg.Any<IReadOnlyCollection<int>?>(),
+                         Arg.Any<CancellationToken>())
+                     .Returns<IReadOnlyList<ReportSnapshotSummary>>([]);
+        }
 
         var headers = Substitute.For<IDocumentHeaderStore>();
         headers.GetExpressionValuesAsync(Arg.Any<long>(), Arg.Any<CancellationToken>())

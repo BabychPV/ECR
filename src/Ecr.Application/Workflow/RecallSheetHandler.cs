@@ -160,6 +160,11 @@ public sealed class RecallSheetHandler(
                 ApprovalEvent.For(state, fromStatus, ApprovalAction.Recall, userId, now, reason),
                 innerCt).ConfigureAwait(false);
 
+            // ⛔ R5-W1 / W1-01: перехід — у БД ДО перерахунку статусу зрізу.
+            // Інакше запит статусу (`AsNoTracking`) бачив аркуш ще `Submitted`,
+            // і повністю поданий період морозив зріз як `Submitted` саме в ту
+            // мить, коли аркуш повертався в `Draft`.
+            await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
             await reports.RefreshAsync(documentId, key, innerCt).ConfigureAwait(false);
             await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
         }, ct).ConfigureAwait(false);

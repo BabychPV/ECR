@@ -111,24 +111,26 @@ public sealed partial class WorkflowTransactionTests
     {
         // ⚠ Збій — справжній конфлікт `RowVersion`: між читанням стану і
         // `SaveChangesAsync` рядок змінює інше підключення. Вікно відкриває
-        // `IReportSnapshotBuilder.ListAsync` — останній виклик перед збереженням.
+        // `CurrentApprovalStepAsync` — виклик ПІСЛЯ читання стану і ДО його
+        // збереження. (R5-W1 / W1-01: раніше вікном був `ListAsync` зрізів, але
+        // перехід тепер скидається в БД ДО перерахунку зрізу, і рядок на той
+        // момент уже під X-блокуванням власної транзакції.)
         var world = await ArrangeAsync(submitted: true).ConfigureAwait(true);
 
-        var snapshots = Substitute.For<IReportSnapshotBuilder>();
-        snapshots.ListAsync(
-                     Arg.Any<int?>(), Arg.Any<int?>(), Arg.Any<IReadOnlyCollection<int>?>(),
-                     Arg.Any<CancellationToken>())
-                 .Returns<IReadOnlyList<ReportSnapshotSummary>>(_ =>
-                 {
-                     TouchState(world.DocumentId);
-                     return [];
-                 });
+        var access = AccessAt(step: null);
+        access.CurrentApprovalStepAsync(
+                  Arg.Any<long>(), Arg.Any<int>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+              .Returns(_ =>
+              {
+                  TouchState(world.DocumentId);
+                  return (ApprovalStepView?)null;
+              });
 
         await using var db = CreateContext();
         // ⚠ F-25: `Approver()` — `world` подано від `UserId` (`ArrangeAsync`),
         // і той самий користувач більше не може себе ж і погодити.
         var handler = new ApproveSheetHandler(
-            new WorkflowStore(db), AccessAt(step: null), new ReportSnapshotSync(snapshots, Documents(world)),
+            new WorkflowStore(db), access, new ReportSnapshotSync(NoSnapshots(), Documents(world)),
             new UnitOfWork(db), Approver(), new TestClock(Now), new AuditWriter(db), Documents(world));
 
         await Assert.ThrowsAsync<Ecr.Application.Errors.ConcurrencyConflictException>(

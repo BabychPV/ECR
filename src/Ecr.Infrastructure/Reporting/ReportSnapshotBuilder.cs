@@ -155,8 +155,16 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock, IMemory
     /// <inheritdoc />
     public async Task<SnapshotStatus> RefreshStatusAsync(long snapshotId, CancellationToken ct)
     {
+        // ⛔ R5-W1 / W1-01: рядок зрізу — під `UPDLOCK` до кінця транзакції
+        // робочого процесу, і статус даних рахується ПІСЛЯ блокування. Маркера
+        // конкуренції в `rpt.ReportSnapshot` немає: два затвердження різних
+        // аркушів одного проєкту рахували статус кожне зі свого знімка, і
+        // виграв би останній записаний — застарілий. Під блокуванням другий
+        // чекає коміту першого й рахує вже з його переходом (запит під RCSI
+        // бачить закомічене на момент СВОГО початку).
         var snapshot = await db.ReportSnapshots
-            .FirstOrDefaultAsync(s => s.Id == snapshotId, ct)
+            .FromSql($"SELECT * FROM rpt.ReportSnapshot WITH (UPDLOCK, ROWLOCK) WHERE Id = {snapshotId}")
+            .FirstOrDefaultAsync(ct)
             .ConfigureAwait(false)
             ?? throw new InvalidOperationException($"Зрізу {snapshotId} не існує.");
 
