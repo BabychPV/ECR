@@ -137,6 +137,49 @@ public sealed class CascadeRecalculationTests
         Assert.Equal(0, written);
     }
 
+    /// <summary>
+    /// Аудит 2026-10-09c, C1-02: число формули з діленням пишеться в масштабі сховища.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Що було. <c>[Jan] / 3</c> давало 28 знаків, і саме вони йшли в
+    /// <c>upsert</c> і в контекст залежних формул, хоча база тримає 16
+    /// (<c>decimal(34,16)</c>, округлення від нуля).
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "DAT-02")]
+    public async Task Формула_з_діленням_пишеться_в_масштабі_сховища()
+    {
+        Arrange(jan: 2m, feb: 0m, expression: "[Jan] / 3");
+
+        await Service().RecalculateAsync(TableInstance, Dirty(_janId), CancellationToken.None);
+
+        var upsert = Assert.Single(Applied());
+        Assert.Equal(_totalId, upsert.Address.ColumnDefId);
+        Assert.Equal(16, upsert.Value.ValueNumeric!.Value.Scale);
+        Assert.Equal(0.6666666666666667m, upsert.Value.ValueNumeric);
+    }
+
+    /// <summary>
+    /// Аудит 2026-10-09c, C1-02: незмінене число формули з діленням не пишеться вдруге.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Що було. Збережене <c>0.6666666666666667</c> (16 знаків) проти
+    /// порахованого <c>0.6666…667</c> (28 знаків) — «інше» на кожному прогоні:
+    /// MERGE, рядок аудиту <c>старе = нове</c>, піднятий <c>RowVersion</c>.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "DAT-02")]
+    public async Task Формула_з_діленням_незмінна_не_пишеться_вдруге()
+    {
+        Arrange(jan: 2m, feb: 0m, expression: "[Jan] / 3", calculatedTotal: 0.6666666666666667m);
+
+        var written = await Service().RecalculateAsync(TableInstance, Dirty(_janId), CancellationToken.None);
+
+        Assert.Equal(0, written);
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
     [Trait("Requirement", "D-70")]
@@ -672,9 +715,10 @@ public sealed class CascadeRecalculationTests
     /// </param>
     /// <param name="janCleared"><c>true</c> — січень стерто (явна порожнеча).</param>
     /// <param name="calculatedTotal">Раніше обчислений формулою підсумок, що лежить у базі.</param>
+    /// <param name="expression">Вираз формули підсумку (за замовчуванням <c>[Jan] + [Feb]</c>).</param>
     private void Arrange(
         decimal jan, decimal feb, bool withDependencies = true, decimal? operatorTotal = null,
-        bool janCleared = false, decimal? calculatedTotal = null)
+        bool janCleared = false, decimal? calculatedTotal = null, string expression = "[Jan] + [Feb]")
     {
         var builder = new TemplateBuilder { TemplateVersionId = Version };
         var sheet = builder.Sheet("Water");
@@ -690,7 +734,7 @@ public sealed class CascadeRecalculationTests
         _febId = febColumn.Id;
         _totalId = totalColumn.Id;
 
-        var formula = new FormulaDef(_table.Id, FormulaScope.Column, "[Jan] + [Feb]", ExpressionDialect.Template);
+        var formula = new FormulaDef(_table.Id, FormulaScope.Column, expression, ExpressionDialect.Template);
         typeof(Ecr.Domain.Abstractions.Entity<int>).GetProperty("Id")!.SetValue(formula, 100);
         typeof(FormulaDef).GetProperty(nameof(FormulaDef.ColumnDefId))!.SetValue(formula, _totalId);
         _table.AddFormula(formula);
