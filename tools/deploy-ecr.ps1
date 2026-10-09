@@ -1115,6 +1115,45 @@ function Stop-EcrServicesForSchema {
     return $stopped.ToArray()
 }
 
+# ⛔ R6-X4/X4-04: зупинена служба з типом запуску Automatic піднімається після перезавантаження
+# (патчі ОС у вікні обслуговування) — СТАРА версія на вже новій схемі, якщо розгортання впало між
+# кроками 2 і 6. Тому крок 2 після зупинки вимикає автозапуск (лише служб, що були Automatic:
+# Manual/Disabled — свідомий вибір, не чіпаємо), а крок 6 повертає Automatic, якщо MSI (ServiceInstall
+# Start="auto") ще не повернув його сам. Повертає імена вимкнених служб.
+function Disable-EcrServicesAutoStart {
+    [CmdletBinding(SupportsShouldProcess)]
+    param()
+
+    $disabled = [System.Collections.Generic.List[string]]::new()
+    foreach ($name in 'EcrWorker', 'EcrApi') {
+        $svc = Get-Service -Name $name -ErrorAction SilentlyContinue
+        if (-not $svc -or "$($svc.StartType)" -ne 'Automatic') { continue }
+        if (-not $PSCmdlet.ShouldProcess($name, 'Set-Service -StartupType Disabled before schema change')) { continue }
+
+        Set-Service -Name $name -StartupType Disabled
+        $disabled.Add($name)
+    }
+    return $disabled.ToArray()
+}
+
+# ⛔ R6-X4/X4-04: пара до Disable-EcrServicesAutoStart — крок 6, ДО старту служб. Лише ті, що крок 2
+# вимкнув, і лише якщо досі Disabled (MSI на кроці 3 зазвичай уже переписав тип запуску).
+function Restore-EcrServicesAutoStart {
+    [CmdletBinding(SupportsShouldProcess)]
+    param([AllowNull()] [AllowEmptyCollection()] [string[]] $Names)
+
+    $restored = [System.Collections.Generic.List[string]]::new()
+    foreach ($name in @($Names | Where-Object { $_ })) {
+        $svc = Get-Service -Name $name -ErrorAction SilentlyContinue
+        if (-not $svc -or "$($svc.StartType)" -ne 'Disabled') { continue }
+        if (-not $PSCmdlet.ShouldProcess($name, 'Set-Service -StartupType Automatic')) { continue }
+
+        Set-Service -Name $name -StartupType Automatic
+        $restored.Add($name)
+    }
+    return $restored.ToArray()
+}
+
 # ⛔ R5-U1/U1-03 (аудит 2026-10-09): -FirstDeployment пропускає перевірку копії (S2-04/AN-117) і
 # перевидаляє завдання Agent (14-agent-jobs.sql) — це режим ПОРОЖНЬОЇ бази. Автовизначення режиму
 # свідомо немає (.PARAMETER FirstDeployment), але й хибний прапорець на живій базі не проходить:
@@ -1727,6 +1766,7 @@ function Invoke-DeployQuery {
 
 $detectedEdition = $null
 $stoppedForSchema = @()   # S2-04: служби, зупинені кроком 2 (крок 6 піднімає їх знову)
+$disabledForSchema = @()  # R6-X4/X4-04: служби, яким крок 2 вимкнув автозапуск (крок 6 повертає)
 
 try {
     # ⛔ Q-232: пароль виставляється ПЕРЕД першим-ліпшим викликом sqlcmd,
@@ -1941,6 +1981,12 @@ END
         if ($stoppedForSchema.Count) {
             Write-Host ("  Зупинено перед зміною схеми: $($stoppedForSchema -join ', ') — крок 6 запустить знову; " +
                 "якщо розгортання впаде раніше, служби лишаться зупиненими.") -ForegroundColor Yellow
+        }
+        # ⛔ R6-X4/X4-04: і не дати перезавантаженню у вікні підняти стару версію на новій схемі.
+        $disabledForSchema = @(Disable-EcrServicesAutoStart)
+        if ($disabledForSchema.Count) {
+            Write-Host ("  Автозапуск вимкнено (Disabled): $($disabledForSchema -join ', ') — MSI і крок 6 повернуть Automatic; " +
+                "якщо розгортання впаде раніше, повторіть його (той самий запуск або -SkipSchema).") -ForegroundColor Yellow
         }
 
         foreach ($name in $scripts) {
@@ -2290,6 +2336,12 @@ foreach ($service in @('EcrApi') + @(if ($workerEnabled) { 'EcrWorker' })) {
 
 # ---------------------------------------------------------------------
 Write-Step "Крок 6/7: старт служби"
+
+# ⛔ R6-X4/X4-04: автозапуск, вимкнений кроком 2, — назад ДО старту (якщо MSI не повернув його сам).
+$restoredAutoStart = @(Restore-EcrServicesAutoStart -Names $disabledForSchema)
+if ($restoredAutoStart.Count) {
+    Write-Host "Тип запуску повернуто на Automatic: $($restoredAutoStart -join ', ')." -ForegroundColor Green
+}
 
 if (-not $ServiceAccount) {
     Write-Host "SERVICE_ACCOUNT не задано — служба зареєстрована з типом запуску Manual і не стартує (навмисно, docs/build/10-installer.md §1.4, L10-03)." -ForegroundColor Yellow
