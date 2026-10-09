@@ -1,9 +1,7 @@
 // src/Ecr.Application/Periods/BuildPeriodCalendarHandler.cs
-using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Enums;
-using Ecr.Domain.Errors;
 using Ecr.Domain.Services;
 
 namespace Ecr.Application.Periods;
@@ -17,48 +15,47 @@ public sealed class BuildPeriodCalendarHandler(
     Common.ICurrentUser currentUser,
     PeriodCalendarMaterializer materializer)
 {
-    /// <summary>Створює періоди, яких ще немає.</summary>
+    /// <summary>
+    /// Створює періоди, яких ще немає, і перераховує межі наявних — лише коли викликач має право ПИСАТИ в проєкт і
+    /// це не симуляція; інакше нічого не робить і не відмовляє (читання календаря перевіряє
+    /// <see cref="GetPeriodCalendarHandler"/>).
+    /// </summary>
     /// <param name="projectId">Проєкт.</param>
     /// <param name="ct">Токен скасування.</param>
-    /// <returns>Скільки періодів створено цим викликом.</returns>
-    /// <exception cref="NotFoundException">Проєкт не знайдено.</exception>
+    /// <returns>Скільки періодів створено цим викликом (0 — нічого не будувалося).</returns>
+    /// <remarks>
+    /// ⛔ A1-01 (аудит 09.10c). Обробник викликається з <c>GET …/periods</c> перед читанням. Доти він ВИМАГАВ грант
+    /// <c>Read</c> на проєкт і кидав <c>403</c>: роль, звужена аркушами чи періодами (D-214, D-302), гранти якої
+    /// живуть у звуженому шарі, а не в <c>Grants</c>, календаря не бачила ЗОВСІМ, хоча
+    /// <see cref="GetPeriodCalendarHandler"/> її навмисно пускає. А читач із грантом <c>Read</c> і адміністратор у
+    /// режимі симуляції своїм GET писали в <c>cfg.Period</c> (симуляція блокує лише не-GET). Тепер побудова — побічна
+    /// дія лише для того, хто й так може писати в проєкт (грант <c>Write</c>+ і <c>Document.View</c> у ньому), і
+    /// ніколи — у симуляції; усі інші просто читають наявне.
+    /// </remarks>
     public async Task<int> HandleAsync(int projectId, CancellationToken ct)
     {
-        // ⛔ Право перевіряється ТУТ (`A7-53`). До цього ендпоінт мав лише
-        // `[Authorize]`, тобто оголошене контрактом право не перевіряв ніхто.
-        var profile = await Security.PermissionCheck
-            .RequireInAnyProjectAsync(access, currentUser, "Document.View", ct)
-            .ConfigureAwait(false);
-
-        // ⛔ Q-246: цей обробник не лише ЧИТАЄ — він ПИШЕ нові рядки `cfg.Period`
-        // (нижче, `periods.AddRange` + `SaveChangesAsync`). Без гранта Read
-        // будь-хто з глобальним `Document.View` міг ініціювати запис у чужий
-        // проєкт, якого немає навіть у його власному списку `/api/v1/projects`.
-        //
-        // ⛔ S17: відмова на чужий проєкт — та сама, що на неіснуючий
-        // (`ECR-PRJ-0404`, `ProjectVisibility`), а не `403`: різниця 404/403
-        // розповідала, які id проєктів існують.
-        Projects.ProjectVisibility.RequireVisible(profile, projectId);
-
-        var project = await periods.FindProjectAsync(projectId, ct).ConfigureAwait(false)
-                      ?? throw Projects.ProjectVisibility.NotFound(projectId);
-
-        // ⚠ Видимий (роль, звужена аркушами чи періодами, D-214), але без
-        // гранта Read на сам проєкт — `403`: запис календаря — рівень проєкту,
-        // а проєкт людина бачить, тож приховувати тут нічого.
-        if (profile.LevelFor(ResourceKind.Project, projectId) < GrantLevel.Read)
+        // ⛔ A1-01: симуляція «очима користувача» — лише читання, навіть на GET.
+        if (currentUser.SimulationSessionId is not null || currentUser.UserId is not { } userId)
         {
-            throw new AccessDeniedException(
-                "ECR-AUTH-0403", $"Немає гранта на проєкт {projectId}.",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = "err.ECR-AUTH-0403.noProjectGrant",
-                    ["projectId"] = projectId.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                });
+            return 0;
         }
 
-        // ⛔ ФВ-6.14: право — у ЦЬОМУ проєкті.
-        Security.PermissionCheck.RequireIn(profile, "Document.View", projectId);
+        var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
+
+        // ⛔ Q-246/S17: без гранта на проєкт — не пишемо нічого (і не розповідаємо, чи проєкт є: відмову дасть
+        // читання). ⛔ A1-01: запис календаря — рівень ПРОЄКТУ, тож потрібен грант на запис у сам проєкт; грант
+        // звуженого шару (D-214) у `LevelFor` не видно — і так і має бути: звужена роль календар лише читає.
+        if (profile.LevelFor(ResourceKind.Project, projectId) < GrantLevel.Write
+            || !Security.PermissionCheck.IsGrantedIn(profile, "Document.View", projectId))
+        {
+            return 0;
+        }
+
+        var project = await periods.FindProjectAsync(projectId, ct).ConfigureAwait(false);
+        if (project is null)
+        {
+            return 0;
+        }
 
         // ⚠ Сама побудова живе в `PeriodCalendarMaterializer`, бо той самий
         // календар потрібен і активації проєкту, у якої ІНШЕ право. Тут
