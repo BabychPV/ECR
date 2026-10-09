@@ -645,6 +645,42 @@ public sealed class DocumentStaleResultsStoreTests(SqlServerFixture sql)
         Assert.All(seen, count => Assert.Equal(3, count));
     }
 
+    /// <summary>
+    /// AN-108 / P2-01: епоха — по періоду. Правка в іншому періоді не скидає кеш лічильників цього: за глобальної
+    /// епохи 100 редакторів піднімали її 10–20 разів на секунду, і кеш не влучав ніколи.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Правка_в_іншому_періоді_не_скидає_кеш_лічильників_цього_періоду()
+    {
+        var s = await CacheScenarioAsync();
+        var epoch = new StaleCountsEpoch();
+        var counter = new DbCommandCounter();
+        await using var db = EpochContext(epoch, counter);
+        using var cache = NewCache();
+        var store = new DocumentListSummaryStore(db, cache, new TestClock(Now.AddHours(2)), epoch);
+        var otherPeriod = s.Period == 202608 ? 202607 : 202608;
+
+        Assert.Equal(2, (await SummaryAsync(store, s, null, Me)).StaleResultsCount);
+        var own = epoch.ValueFor(s.Period);
+
+        epoch.Invalidate(db, [otherPeriod]);
+
+        Assert.Equal(own, epoch.ValueFor(s.Period));
+        Assert.True(epoch.ValueFor(otherPeriod) > 0);
+
+        var queriesBefore = counter.Tally.Snapshot().Total;
+        Assert.Equal(2, (await SummaryAsync(store, s, null, Me)).StaleResultsCount);
+
+        // Лише агрегат смуги: лічильники з кешу.
+        Assert.Equal(1, counter.Tally.Snapshot().Total - queriesBefore);
+
+        // Глобальний підйом (невідомий період) скидає і цей.
+        epoch.Invalidate(db);
+        Assert.True(epoch.ValueFor(s.Period) > own);
+    }
+
     // ── допоміжне ────────────────────────────────────────────────────────────────────────
 
     private static async Task<DocumentSummary> CardAsync(EcrDbContext db, TestDocument chain, int period)
