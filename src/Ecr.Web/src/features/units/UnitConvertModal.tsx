@@ -34,13 +34,16 @@ export default function UnitConvertModal({
   const [value, setValue] = useState('1');
   const [fromUnit, setFromUnit] = useState<string | null>(initialFrom);
   const [toUnit, setToUnit] = useState<string | null>(null);
-  const [result, setResult] = useState<ConvertUnitResponse | null>(null);
+  // N4-05: результат несе ключ запитаних даних; показується лише коли вони збігаються з полями зараз.
+  const [answer, setAnswer] = useState<{ readonly key: string; readonly response: ConvertUnitResponse } | null>(null);
+  const inputKey = `${value.trim()}|${fromUnit ?? ''}|${toUnit ?? ''}`;
+  const result = answer !== null && answer.key === inputKey ? answer.response : null;
 
   const source = units.find((unit) => unit.code === fromUnit);
   const targets = source === undefined ? [] : units.filter((u) => u.dimensionId === source.dimensionId);
 
   const convert = useMutation({
-    mutationFn: () =>
+    mutationFn: (key: string) =>
       apiFetch<ConvertUnitResponse>('/api/v1/units/convert', {
         method: 'POST',
         body: JSON.stringify({
@@ -48,8 +51,10 @@ export default function UnitConvertModal({
           fromUnit: fromUnit ?? '',
           toUnit: toUnit ?? '',
         } satisfies ConvertUnitRequest),
-      }),
-    onSuccess: setResult,
+      }).then((response) => ({ key, response })),
+    // ⚠ Відповідь на ЗАСТАРІЛІ поля (людина встигла змінити значення/одиницю, поки запит летів) не показується:
+    // `result` порівнює ключ відповіді з ключем полів зараз.
+    onSuccess: setAnswer,
     onError: showApiError,
   });
 
@@ -67,7 +72,7 @@ export default function UnitConvertModal({
           value={value}
           onChange={(event) => {
             setValue(event.currentTarget.value);
-            setResult(null);
+            setAnswer(null);
           }}
           data-autofocus
         />
@@ -83,7 +88,7 @@ export default function UnitConvertModal({
             // має сенсу, і лишити його означало б надіслати відомо відхилений
             // запит.
             setToUnit(null);
-            setResult(null);
+            setAnswer(null);
           }}
           searchable
         />
@@ -95,7 +100,7 @@ export default function UnitConvertModal({
           value={toUnit}
           onChange={(next) => {
             setToUnit(next);
-            setResult(null);
+            setAnswer(null);
           }}
           searchable
         />
@@ -115,7 +120,7 @@ export default function UnitConvertModal({
             onClick={() => {
               setFromUnit(toUnit);
               setToUnit(fromUnit);
-              setResult(null);
+              setAnswer(null);
             }}
           >
             {t('units.swap')}
@@ -132,7 +137,7 @@ export default function UnitConvertModal({
               loading={convertLoading}
               onClick={() => {
                 if (convert.isPending) return;
-                convert.mutate();
+                convert.mutate(inputKey);
               }}
             >
               {t('units.convert')}
