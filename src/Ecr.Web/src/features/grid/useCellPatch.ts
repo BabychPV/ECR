@@ -203,22 +203,74 @@ export function refreshStaleness(queryClient: QueryClient, documentId: number, p
   void queryClient.invalidateQueries({ queryKey: calculationResultsKey(documentId, periodKey), exact: true });
 }
 
-/** Задачі перерахунку, після яких зрізи документа вже скинуто (N-1): одна задача - одна інвалідація. */
-const settledJobs = new Set<string>();
+/**
+ * Задачі перерахунку, вже враховані в зрізах (N-1): одна задача - одна інвалідація. `'skipped'` - задача нічого
+ * не записала (AN-108 / P2-02) і зрізів не чіпала; пізніше «невідомо що записано» по ній ще перечитає зрізи.
+ */
+const settledJobs = new Map<string, 'refetched' | 'skipped'>();
+
+/**
+ * Задачі перерахунку документа за період, поставлені правками і ще не враховані в зрізах (AN-108 / P2-02),
+ * з порядковим номером постановки. Слідкувач переходить на новішу задачу, не дочекавшись старішої, тож
+ * «остання нічого не записала» ще не означає «нічого не записано»: записане старішою знає лише вона.
+ */
+const pendingRecalculations = new Map<string, Map<string, number>>();
+let recalculationSeq = 0;
+
+/** Запам'ятовує задачу перерахунку, поставлену правкою (AN-108 / P2-02). */
+function registerRecalculation(jobId: string, documentId: number, periodKey: number): void {
+  const key = `${documentId}:${periodKey}`;
+  const jobs = pendingRecalculations.get(key) ?? new Map<string, number>();
+  if (!jobs.has(jobId)) jobs.set(jobId, (recalculationSeq += 1));
+  pendingRecalculations.set(key, jobs);
+}
+
+/**
+ * Прибирає задачу і всі СТАРІШІ за неї з очікуваних; повертає, чи серед старіших була хоч одна - тобто
+ * чи лишився невідомий запис, який мусить перекрити інвалідація цієї.
+ */
+function takeRecalculation(jobId: string, documentId: number, periodKey: number): boolean {
+  const key = `${documentId}:${periodKey}`;
+  const jobs = pendingRecalculations.get(key);
+  if (jobs === undefined) return false;
+  const own = jobs.get(jobId);
+  let olderPending = false;
+  for (const [id, seq] of [...jobs]) {
+    if (id === jobId || (own !== undefined && seq < own)) {
+      if (id !== jobId) olderPending = true;
+      jobs.delete(id);
+    }
+  }
+  if (jobs.size === 0) pendingRecalculations.delete(key);
+  return olderPending;
+}
 
 /**
  * N-1 (RC15): скидає зрізи документа за період ПІСЛЯ завершення перерахунку - один раз на задачу.
  * Повертає `false`, якщо цю задачу вже оброблено (сітка і фоновий слідкувач не дублюють запити).
+ *
+ * ⛔ AN-108 / P2-02: `writtenCount === 0` (сервер: перерахунок нічого не записав) - зрізи не чіпаються: власна
+ * правка вже в кеші (`applyPatchLocally`), а перезапит усіх змонтованих зрізів (до 91) на кожне
+ * автозбереження - найдорожчий наслідок PATCH. `null`/`undefined` (невідомо, старий сервер) - як раніше.
+ * Невраховані старіші задачі того самого документа (слідкувач перейшов з них на цю) теж змушують перечитати.
+ *
+ * @param writtenCount `JobStatus.writtenCount` завершеної задачі.
  */
 export function settleRecalculation(
   queryClient: QueryClient,
   jobId: string,
   documentId: number,
   periodKey: number,
+  writtenCount?: number | null,
 ): boolean {
-  if (settledJobs.has(jobId)) return false;
-  settledJobs.add(jobId);
-  void invalidateSlices(queryClient, { documentId, periodKey });
+  const previous = settledJobs.get(jobId);
+  if (previous === 'refetched') return false;
+  const olderPending = takeRecalculation(jobId, documentId, periodKey);
+  const nothingWritten = writtenCount === 0 && !olderPending;
+  // Уже враховано як «нічого не записала», і знову нічого нового - повтор ігнорується.
+  if (previous === 'skipped' && nothingWritten) return false;
+  settledJobs.set(jobId, nothingWritten ? 'skipped' : 'refetched');
+  if (!nothingWritten) void invalidateSlices(queryClient, { documentId, periodKey });
   return true;
 }
 
@@ -281,6 +333,7 @@ export function followRecalculation(
   periodKey: number,
 ): void {
   const key = `${documentId}:${periodKey}`;
+  registerRecalculation(jobId, documentId, periodKey);
   const existing = activeFollowers.get(key);
   if (existing) {
     existing.jobId = jobId;
@@ -313,7 +366,7 @@ export function followRecalculation(
         if (follower.jobId !== current) continue;
         if (pollInterval(job.state) === false) {
           settled = true;
-          settleRecalculation(queryClient, current, documentId, periodKey);
+          settleRecalculation(queryClient, current, documentId, periodKey, job.writtenCount);
           return;
         }
         await new Promise((resolve) => setTimeout(resolve, RecalculationPollMs));
@@ -514,6 +567,12 @@ interface RecalculationStatus {
    * стежити.
    */
   finishedAt: string | null;
+
+  /**
+   * Скільки комірок записав завершений перерахунок (`JobStatus.writtenCount`, AN-108 / P2-02);
+   * `null` — ще йде або невідомо.
+   */
+  writtenCount: number | null;
 }
 
 /**
@@ -608,6 +667,7 @@ export function useRecalculationStatus(jobId: string | null): RecalculationStatu
     state: job.data?.state,
     outcome,
     finishedAt: shown === null ? null : formatTime(shown),
+    writtenCount: job.data?.writtenCount ?? null,
   };
 }
 

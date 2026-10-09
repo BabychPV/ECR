@@ -369,7 +369,8 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
     // ⛔ N-1 (RC15): перерахунок міняє й ІНШІ таблиці документа (Rollup-цілі на «Contract», формули над ними),
     // а `staleTime` зрізів — 5 хв: перемикання вкладки показувало старе з кешу. Тому не лише власний зріз:
     // усі зрізи документа за період — змонтовані перезапитуються, решта позначається застарілою.
-    settleRecalculation(queryClient, recalculationJobId, documentId, periodKey);
+    // ⚠ AN-108 / P2-02: перерахунок, що нічого не записав (`writtenCount = 0`), зрізів не чіпає.
+    settleRecalculation(queryClient, recalculationJobId, documentId, periodKey, recalc.writtenCount);
   }, [recalc.outcome, recalculationJobId]);
 
   /**
