@@ -11,6 +11,7 @@ using Ecr.Domain.Entities.Reporting;
 using Ecr.Domain.Enums;
 using Ecr.Domain.Errors;
 using Ecr.Domain.ValueObjects;
+using Ecr.Infrastructure.Caching;
 using Ecr.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
@@ -60,6 +61,10 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock, IMemory
     /// наповнення бази. Контейнер її не задає.
     /// </remarks>
     public int RowCeiling { get; init; } = MaxRows;
+
+    /// <summary>Бюджет кешу розкладених зрізів; за замовчуванням — <see cref="MaxCachedCells"/>.</summary>
+    /// <remarks>Окремою властивістю лише заради тестів зрізу, що в бюджет не влазить.</remarks>
+    public int LaidOutCacheBudget { get; init; } = MaxCachedCells;
 
     /// <inheritdoc />
     public async Task<long> BuildAsync(
@@ -357,6 +362,22 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock, IMemory
             rowNos.Count > limit ? last : null);
     }
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// Рядки, а не комірки: <c>rpt.ReportRow</c> зберігає комірку на колонку.
+    /// Підрахунок іде індексом первинного ключа (<c>SnapshotId, RowNo, …</c>)
+    /// і зупиняється на <paramref name="atMost"/>.
+    /// </remarks>
+    public async Task<int> CountRowsAsync(long snapshotId, int atMost, CancellationToken ct)
+        => await db.ReportRows
+            .AsNoTracking()
+            .Where(r => r.SnapshotId == snapshotId)
+            .Select(r => r.RowNo)
+            .Distinct()
+            .Take(Math.Max(atMost, 0))
+            .CountAsync(ct)
+            .ConfigureAwait(false);
+
     /// <summary>
     /// Сторінка зрізу, розкладеного макетом (<c>R8</c>).
     /// </summary>
@@ -377,25 +398,61 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock, IMemory
     /// <c>RowNo</c>: у порядку груп <c>RowNo</c> не зростає. Без макета обидва
     /// числа збігаються, тож клієнт випадків не розрізняє.
     /// </para>
+    /// <para>
+    /// ⛔ AN-120 / L1-02: зріз, що не влазить у бюджет кешу цілком, кешується
+    /// БЕЗ комірок — лише порядок <c>RowNo</c>, групи й підсумки
+    /// (<see cref="LaidOutSnapshot.Rows"/> = <c>null</c>), а сторінка дочитує
+    /// комірки лише своїх рядків (<c>WHERE RowNo IN (…)</c>). До цього зріз понад
+    /// бюджет читався ЦІЛКОМ на кожну сторінку, а вивантаження книги — до 101
+    /// разу поспіль.
+    /// </para>
     /// </remarks>
     private async Task<SnapshotRowsPage> LaidOutRowsAsync(
         long snapshotId, StoredVersion version, IReadOnlyList<ReportColumnSpec> described, ReportLayout layout,
         int delivered, int limit, string language, CancellationToken ct)
     {
         var laidOut = await LaidOutAsync(snapshotId, version, described, layout, ct).ConfigureAwait(false);
-        var view = laidOut.View;
+        var total = laidOut.Order.Length;
+        var from = Math.Clamp(delivered, 0, total);
+        var taken = Math.Min(Math.Max(limit, 0), total - from);
 
         // ⛔ Сторінка й мова — на КОЖЕН запит, поза кешем: у кеші лише вміст
         // зрізу, однаковий для кожного, хто його читає.
-        var page = view.Rows.Skip(delivered).Take(limit).ToList();
+        var page = laidOut.Rows is { } rows
+            ? rows.Skip(from).Take(taken).ToList()
+            : await PageByRowNoAsync(snapshotId, laidOut, from, taken, ct).ConfigureAwait(false);
 
         return new SnapshotRowsPage(
             Titled(laidOut.Stored, language),
             page,
-            delivered + page.Count < view.Rows.Count ? delivered + page.Count : null,
-            view.Groups,
-            view.Totals,
+            from + taken < total ? from + taken : null,
+            laidOut.Groups,
+            laidOut.Totals,
             layout.ShowGroupHeader);
+    }
+
+    /// <summary>Рядки сторінки зрізу, закешованого без комірок: лише свої <c>RowNo</c>, у порядку макета.</summary>
+    private async Task<List<SnapshotRow>> PageByRowNoAsync(
+        long snapshotId, LaidOutSnapshot laidOut, int from, int taken, CancellationToken ct)
+    {
+        if (taken <= 0)
+        {
+            return [];
+        }
+
+        var slice = laidOut.Order.AsSpan(from, taken).ToArray();
+
+        var cells = await db.ReportRows
+            .AsNoTracking()
+            .Where(r => r.SnapshotId == snapshotId && slice.Contains(r.RowNo))
+            .Take(slice.Length * MaxColumnsPerRow)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var byRowNo = WideRows(cells, laidOut.Stored).ToDictionary(r => r.RowNo);
+
+        // Порядок — макета (групи), а не бази: `RowNo` у порядку груп не зростає.
+        return [.. slice.Where(byRowNo.ContainsKey).Select(n => byRowNo[n])];
     }
 
     /// <summary>Зріз, розкладений макетом: з кешу або прочитаний і розкладений зараз.</summary>
@@ -419,10 +476,15 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock, IMemory
     /// <para>
     /// ⚠ <b>Межа пам'яті.</b> <c>SizeLimit</c> у спільного кешу немає і не буде
     /// (<c>RD-05</c>, коментар біля <c>AddMemoryCache</c>), тож стелю тримає
-    /// власний бюджет комірок на кожен екземпляр кешу
-    /// (<see cref="MaxCachedCells"/>) плюс строк: ковзний
-    /// <see cref="LaidOutSliding"/> і абсолютний <see cref="LaidOutLifetime"/>.
-    /// Зріз, що не влазить у бюджет, просто не кешується — і читається як до P4.
+    /// власний бюджет на кожен екземпляр кешу (<see cref="MaxCachedCells"/>)
+    /// плюс строк: ковзний <see cref="LaidOutSliding"/> і абсолютний
+    /// <see cref="LaidOutLifetime"/>. Зріз, що не влазить цілком, кешується без
+    /// комірок (AN-120 / L1-02); не влазить і так — не кешується.
+    /// </para>
+    /// <para>
+    /// ⛔ <b>Одночасні промахи</b> (AN-120 / L1-02) — одне читання на всіх
+    /// (<see cref="SingleFlight{T}"/>, <c>RD-05</c>): після побудови нового зрізу
+    /// його відкривають кілька людей одразу, і кожен читав би його повністю.
     /// </para>
     /// </remarks>
     private async Task<LaidOutSnapshot> LaidOutAsync(
@@ -433,11 +495,42 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock, IMemory
             ? new LaidOutKey(snapshotId, Convert.ToHexString(hash), version.ColumnsJson, version.RulesJson)
             : null;
 
-        if (key is not null && memory.TryGetValue(key, out LaidOutSnapshot? cached) && cached is not null)
+        if (key is null)
+        {
+            return await ReadAndLayOutAsync(snapshotId, described, layout, ct).ConfigureAwait(false);
+        }
+
+        if (memory.TryGetValue(key, out LaidOutSnapshot? cached) && cached is not null)
         {
             return cached;
         }
 
+        var flight = Flights.GetValue(memory, static _ => new SingleFlight<LaidOutSnapshot>());
+
+        return await flight
+            .RunAsync(
+                key.FlightKey(),
+                async token =>
+                {
+                    // Попередній політ міг уже покласти зріз у кеш між перевіркою
+                    // вище і цим місцем — тоді читати вдруге нема чого.
+                    if (memory.TryGetValue(key, out LaidOutSnapshot? warmed) && warmed is not null)
+                    {
+                        return warmed;
+                    }
+
+                    var built = await ReadAndLayOutAsync(snapshotId, described, layout, token).ConfigureAwait(false);
+                    Remember(key, built);
+                    return built;
+                },
+                ct)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>Читає весь зріз і розкладає його макетом — повний вигляд, з комірками.</summary>
+    private async Task<LaidOutSnapshot> ReadAndLayOutAsync(
+        long snapshotId, IReadOnlyList<ReportColumnSpec> described, ReportLayout layout, CancellationToken ct)
+    {
         var cells = await db.ReportRows
             .AsNoTracking()
             .Where(r => r.SnapshotId == snapshotId)
@@ -447,22 +540,33 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock, IMemory
             .ConfigureAwait(false);
 
         var stored = StoredLayout(described, cells);
-        var built = new LaidOutSnapshot(stored, layout.Apply(WideRows(cells, stored)));
+        var view = layout.Apply(WideRows(cells, stored));
 
-        if (key is not null)
-        {
-            Remember(key, built, cells.Count);
-        }
-
-        return built;
+        return new LaidOutSnapshot(
+            stored, [.. view.Rows.Select(r => r.RowNo)], view.Groups, view.Totals, view.Rows, cells.Count);
     }
 
-    /// <summary>Кладе розкладений зріз у кеш, якщо він влазить у бюджет.</summary>
-    private void Remember(LaidOutKey key, LaidOutSnapshot built, int cellCount)
+    /// <summary>Кладе розкладений зріз у кеш: цілком, якщо влазить, інакше — без комірок.</summary>
+    private void Remember(LaidOutKey key, LaidOutSnapshot built)
     {
         var budget = Budgets.GetValue(memory, static _ => new CacheBudget());
 
-        if (!budget.TryReserve(cellCount))
+        // Порядок і групи коштують і в повному записі, і в стислому.
+        var skeleton = built.Order.Length + built.Groups.Count;
+        var full = built.CellCount + skeleton;
+
+        LaidOutSnapshot entry;
+        int cost;
+
+        if (budget.TryReserve(full, LaidOutCacheBudget))
+        {
+            (entry, cost) = (built, full);
+        }
+        else if (budget.TryReserve(skeleton, LaidOutCacheBudget))
+        {
+            (entry, cost) = (built with { Rows = null }, skeleton);
+        }
+        else
         {
             return;
         }
@@ -474,16 +578,21 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock, IMemory
         };
 
         // Бюджет повертається, коли запис іде з кешу з БУДЬ-якої причини:
-        // строк, заміна тим самим ключем (два одночасні промахи), тиск пам'яті.
-        options.RegisterPostEvictionCallback((_, _, _, _) => budget.Release(cellCount));
+        // строк, заміна тим самим ключем, тиск пам'яті.
+        options.RegisterPostEvictionCallback((_, _, _, _) => budget.Release(cost));
 
-        memory.Set(key, built, options);
+        memory.Set(key, entry, options);
     }
 
-    /// <summary>Скільки комірок <c>rpt.ReportRow</c> усі розкладені зрізи разом тримають в одному кеші.</summary>
+    /// <summary>
+    /// Скільки одиниць (комірок <c>rpt.ReportRow</c> плюс рядків порядку й груп)
+    /// усі розкладені зрізи разом тримають в одному кеші.
+    /// </summary>
     /// <remarks>
-    /// Найбільший зріз — <see cref="MaxRows"/> рядків по п'ять колонок, тобто
-    /// рівно ця стеля: він влазить сам, а решта чекає, поки він вийде за строком.
+    /// Найбільший зріз на п'ять колонок — <see cref="MaxRows"/> рядків, тобто
+    /// приблизно ця стеля: він влазить сам, а решта чекає, поки він вийде за
+    /// строком. ⚠ AN-120 / L1-02: колонок буває й десять, і тоді зріз цілком не
+    /// влазить — але влазить без комірок (лише <c>RowNo</c> і групи).
     /// </remarks>
     private const int MaxCachedCells = 1_000_000;
 
@@ -493,32 +602,57 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock, IMemory
     /// <summary>Абсолютна стеля життя розкладеного зрізу.</summary>
     private static readonly TimeSpan LaidOutLifetime = TimeSpan.FromHours(1);
 
-    /// <summary>Бюджет комірок на кожен екземпляр кешу; кеш, що зник, забирає й бюджет.</summary>
+    /// <summary>Бюджет на кожен екземпляр кешу; кеш, що зник, забирає й бюджет.</summary>
     private static readonly ConditionalWeakTable<IMemoryCache, CacheBudget> Budgets = [];
 
+    /// <summary>Політ розкладу на кожен екземпляр кешу: будівник Scoped, а промахи — спільні на процес.</summary>
+    private static readonly ConditionalWeakTable<IMemoryCache, SingleFlight<LaidOutSnapshot>> Flights = [];
+
     /// <summary>Ключ розкладеного зрізу: зріз, його вміст і опис, що задає розклад.</summary>
-    private sealed record LaidOutKey(long SnapshotId, string ContentHash, string ColumnsJson, string RulesJson);
+    private sealed record LaidOutKey(long SnapshotId, string ContentHash, string ColumnsJson, string RulesJson)
+    {
+        /// <summary>Рядковий ключ польоту: та сама тотожність, що й у записі кешу.</summary>
+        public string FlightKey()
+        {
+            var layout = Convert.ToHexString(
+                SHA256.HashData(Encoding.UTF8.GetBytes(ColumnsJson + "\u0000" + RulesJson)));
 
-    /// <summary>Розкладений зріз: колонки й вигляд — без мови, сторінки й користувача.</summary>
-    private sealed record LaidOutSnapshot(IReadOnlyList<ReportColumnSpec> Stored, ReportLayoutView View);
+            return string.Create(CultureInfo.InvariantCulture, $"{SnapshotId}|{ContentHash}|{layout}");
+        }
+    }
 
-    /// <summary>Лічильник комірок у кеші; потокобезпечний.</summary>
+    /// <summary>Розкладений зріз: колонки, порядок рядків, групи й підсумки — без мови, сторінки й користувача.</summary>
+    /// <param name="Stored">Колонки збереженого зрізу.</param>
+    /// <param name="Order"><c>RowNo</c> у порядку макета: групи одна за одною.</param>
+    /// <param name="Groups">Групи по всьому зрізу.</param>
+    /// <param name="Totals">Підсумки по всьому зрізу.</param>
+    /// <param name="Rows">Рядки в порядку <paramref name="Order"/>; <c>null</c> — закешовано без комірок.</param>
+    /// <param name="CellCount">Скільки комірок прочитано при розкладі.</param>
+    private sealed record LaidOutSnapshot(
+        IReadOnlyList<ReportColumnSpec> Stored,
+        int[] Order,
+        IReadOnlyList<SnapshotRowGroup> Groups,
+        IReadOnlyList<SnapshotTotal> Totals,
+        IReadOnlyList<SnapshotRow>? Rows,
+        int CellCount);
+
+    /// <summary>Лічильник одиниць у кеші; потокобезпечний.</summary>
     private sealed class CacheBudget
     {
         private long _used;
 
-        public bool TryReserve(int cells)
+        public bool TryReserve(int units, int capacity)
         {
-            if (Interlocked.Add(ref _used, cells) <= MaxCachedCells)
+            if (Interlocked.Add(ref _used, units) <= capacity)
             {
                 return true;
             }
 
-            Interlocked.Add(ref _used, -cells);
+            Interlocked.Add(ref _used, -units);
             return false;
         }
 
-        public void Release(int cells) => Interlocked.Add(ref _used, -cells);
+        public void Release(int units) => Interlocked.Add(ref _used, -units);
     }
 
     /// <summary>Колонки зрізу, підписані мовою запиту (<c>R9</c>).</summary>

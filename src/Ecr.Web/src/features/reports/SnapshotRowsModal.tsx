@@ -59,6 +59,16 @@ export default function SnapshotRowsModal(props: {
     initialPageParam: null as number | null,
     getNextPageParam: (last) => last.nextCursor,
     enabled: snapshotId !== null,
+    /*
+     * ⛔ AN-120 / L1-02: зріз НЕЗМІННИЙ (D-53) — новий вміст означає новий
+     * зріз з іншим `snapshotId`, тобто інший ключ. Дефолти застосунку
+     * (`staleTime` 30 с і `refetchOnWindowFocus`) тут шкодили: infinite query
+     * на фокусі перезапитує ВСІ вже завантажені сторінки послідовно, і людина,
+     * що догорнула до 20-ї, поверненням у вкладку запускала 20 запитів до
+     * розкладеного (`R8`) зрізу. Оновлювати нема чого — тож і не оновлюємо.
+     */
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
   });
 
   /*

@@ -90,6 +90,21 @@ public interface IReportSnapshotBuilder
     /// <returns><c>null</c> — зрізу немає.</returns>
     public Task<SnapshotRowsPage?> RowsAsync(
         long snapshotId, int afterRowNo, int limit, string language, CancellationToken ct);
+
+    /// <summary>Скільки рядків у зрізі — але не більше за <paramref name="atMost"/>.</summary>
+    /// <param name="snapshotId">Зріз.</param>
+    /// <param name="atMost">
+    /// Стеля підрахунку: тому, хто питає «чи більше за N», досить N + 1, і
+    /// рахувати далі означало б читати індекс зрізу до кінця задарма.
+    /// </param>
+    /// <param name="ct">Скасування.</param>
+    /// <returns>Кількість рядків (не комірок); <c>0</c> — зрізу немає або він порожній.</returns>
+    /// <remarks>
+    /// ⛔ AN-120 / L1-02: вивантаження відмовляє за стелею ДО читання вмісту.
+    /// Раніше стеля перевірялася після того, як зріз уже прочитано сторінками,
+    /// а з макетом (<c>R8</c>) — до 101 повного читання за одне натискання.
+    /// </remarks>
+    public Task<int> CountRowsAsync(long snapshotId, int atMost, CancellationToken ct);
 }
 
 /// <summary>Сторінка рядків зрізу.</summary>

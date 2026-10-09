@@ -82,6 +82,17 @@ public sealed class ExportSnapshotHandler(
         // 403, а не 404: зріз тут уже видимий (грант і `Report.Export` у проєкті).
         PermissionCheck.RequireIn(profile, GetSnapshotRowsHandler.ContentPermission, project);
 
+        // ⛔ AN-120 / L1-02: стеля — ДО читання вмісту, дешевим підрахунком
+        // рядків. Раніше вона перевірялася після циклу нижче: зріз на 200 000
+        // рядків прочитувався сторінками цілком (з макетом `R8` — до 101 повного
+        // читання) і лише ПОТІМ отримував 422.
+        var count = await snapshots.CountRowsAsync(snapshotId, MaxRows + 1, ct).ConfigureAwait(false);
+
+        if (count > MaxRows)
+        {
+            throw TooLarge(snapshotId);
+        }
+
         var first = await Page(snapshotId, 0, ct).ConfigureAwait(false);
         var rows = new List<SnapshotRow>(first.Rows);
         var cursor = first.NextCursor;
@@ -96,17 +107,12 @@ public sealed class ExportSnapshotHandler(
             cursor = next.NextCursor;
         }
 
+        // Друга лінія: підрахунок вище і сторінки — два читання; зріз незмінний,
+        // тож розійтися вони не мають, але книга з «майже всіма» рядками гірша
+        // за зайву перевірку.
         if (rows.Count > MaxRows)
         {
-            throw new BusinessRuleException(
-                ErrorCodes.ReportInvalid,
-                $"У зрізі {snapshotId} понад {MaxRows} рядків: книга такого розміру не будується.",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = "err.ECR-RPT-0422.exportTooLarge",
-                    ["snapshotId"] = snapshotId.ToString(CultureInfo.InvariantCulture),
-                    ["limit"] = MaxRows.ToString(CultureInfo.InvariantCulture),
-                });
+            throw TooLarge(snapshotId);
         }
 
         // ⚠ Групи й підсумки беруться з ПЕРШОЇ сторінки: макет (`R8`) рахується
@@ -135,6 +141,18 @@ public sealed class ExportSnapshotHandler(
                    snapshotId, afterRowNo, GetSnapshotRowsHandler.MaxLimit, currentUser.Language, ct)
                .ConfigureAwait(false)
            ?? throw NotFound(snapshotId);
+
+    /// <summary>Відмова: зріз більший, ніж книга, яку будуємо в пам'яті.</summary>
+    private static BusinessRuleException TooLarge(long snapshotId)
+        => new(
+            ErrorCodes.ReportInvalid,
+            $"У зрізі {snapshotId} понад {MaxRows} рядків: книга такого розміру не будується.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-RPT-0422.exportTooLarge",
+                ["snapshotId"] = snapshotId.ToString(CultureInfo.InvariantCulture),
+                ["limit"] = MaxRows.ToString(CultureInfo.InvariantCulture),
+            });
 
     private static NotFoundException NotFound(long snapshotId)
         => new(
