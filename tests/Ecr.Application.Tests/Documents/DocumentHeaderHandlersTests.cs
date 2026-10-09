@@ -125,10 +125,12 @@ public sealed class DocumentHeaderHandlersTests
 
     private GetDocumentHeaderHandler Get() => new(_documents, _metadataCache, _headers, _access, _user);
 
-    private PatchDocumentHeaderHandler Patch() => new(
+    private PatchDocumentHeaderHandler Patch() => PatchWith(Substitute.For<IRegistryStore>());
+
+    private PatchDocumentHeaderHandler PatchWith(IRegistryStore registries) => new(
         _documents, _metadataCache, _headers, _access, _user,
         _periods, _documentLock, _workflowFacts, _uow, _audit, _jobs, _clock, Substitute.For<ISheetEditGate>(),
-        Substitute.For<IRegistryStore>());
+        registries);
 
     /// <summary>Версія, яку клієнт отримав би з <c>GET</c> на цьому стані шапки.</summary>
     private async Task<string> VersionOfAsync(Dictionary<int, DocumentHeaderValueData> values)
@@ -309,6 +311,37 @@ public sealed class DocumentHeaderHandlersTests
             DocumentId, Request("v", new PatchHeaderField("Count", "not-a-number", false)), CancellationToken.None));
 
         Assert.Equal("ECR-HDR-0422", error.ErrorCode);
+    }
+
+    /// <summary>
+    /// N1-07/N1-08: запис, якого немає в довіднику ПОЛЯ, — це завжди `ECR-HDR-0422` із ключем
+    /// `lookupEntryMissing`: і неіснуючий Id, і запис ЧУЖОГО довідника (інакше різниця 422/4223 розкрила б, чи
+    /// існує запис у довіднику, якого читач може не бачити). Мутація (CI): повернути `FindExistingEntryIdsAsync`
+    /// чи ключ `validationBlocked` → червоніє.
+    /// </summary>
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [InlineData("none")]
+    [InlineData("foreign")]
+    public async Task PATCH_запис_якого_немає_в_довіднику_поля_дає_однакову_відповідь_lookupEntryMissing(string kind)
+    {
+        const long entryId = 777;
+        var registries = Substitute.For<IRegistryStore>();
+        IReadOnlyList<RegistryEntryStanding> standings = kind == "none"
+            ? []
+            : [new RegistryEntryStanding(entryId, PermitRegistryDefId + 1, true, false, null, null)];
+        registries.FindEntryStandingsAsync(Arg.Any<IReadOnlyCollection<long>>(), Arg.Any<CancellationToken>())
+            .Returns(standings);
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(() => PatchWith(registries).HandleAsync(
+            DocumentId, Request("v", new PatchHeaderField("Permit", entryId.ToString(System.Globalization.CultureInfo.InvariantCulture), false)),
+            CancellationToken.None));
+
+        Assert.Equal("ECR-HDR-0422", error.ErrorCode);
+        Assert.Equal("err.ECR-HDR-0422.lookupEntryMissing", error.Details!["messageKey"]);
+        Assert.Equal("Permit", error.Details["headerFieldCode"]);
+
+        await AssertNothingWrittenAsync();
     }
 
     [Fact]

@@ -7374,6 +7374,9 @@ USING (VALUES
     -- COLL:an72-rule-length ── AN-72: правило категорії довше за межу формули (MethodologyCategoryRule.Normalize); ru/kz — порцією COLL:an72-rule-length нижче ──
     (N'err.ECR-CALC-0422.categoryRuleTooLong', N'en', N'The category rule is longer than {max} characters ({length}): shorten the expression or move part of the logic into a Row formula.', 1),
     -- COLL:an72-rule-length ── кінець секції ──
+    -- COLL:an79-lookup-missing ── AN-79 / N1-07/N1-08: запис довідника в полі шапки Lookup відсутній у довіднику цього поля (немає взагалі чи з чужого довідника - одна відповідь); ru/kz — порцією COLL:an79-lookup-missing нижче ──
+    (N'err.ECR-HDR-0422.lookupEntryMissing', N'en', N'The registry entry chosen for header field "{headerFieldCode}" does not exist in the registry of this field.', 1),
+    -- COLL:an79-lookup-missing ── кінець секції ──
     -- COLL:an72-rule-concurrent ── AN-72 / N2-05: два одночасні перші PUT category-rule (UQ_CategoryRule_Version) -> 409; ru/kz — порцією COLL:an72-rule-concurrent нижче ──
     (N'err.ECR-CALC-0409.categoryRuleConcurrent', N'en', N'Someone else has just created the category rule of this version. Reload the version and save the rule again.', 1)
     -- COLL:an72-rule-concurrent ── кінець секції ──
@@ -18091,6 +18094,17 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:an83 ── кінець секції ──
+
+-- COLL:an79-lookup-missing ── ru/kz: AN-79 / N1-07/N1-08: запис довідника поля шапки Lookup відсутній у довіднику цього поля; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-HDR-0422.lookupEntryMissing', N'ru', N'Запись справочника, выбранная для поля шапки «{headerFieldCode}», отсутствует в справочнике этого поля.'),
+    (N'err.ECR-HDR-0422.lookupEntryMissing', N'kz', N'«{headerFieldCode}» тақырып бөлігі өрісі үшін таңдалған анықтамалық жазбасы осы өрістің анықтамалығында жоқ.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:an79-lookup-missing ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

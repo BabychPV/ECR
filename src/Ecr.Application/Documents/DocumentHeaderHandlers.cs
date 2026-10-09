@@ -287,24 +287,32 @@ public sealed class PatchDocumentHeaderHandler(
 
         // ⛔ D-12: неіснуючий запис довідника в полі Lookup — 422 до запису, а не сире
         // порушення FK_DocumentHeaderValue_Entry (500). Один запит на весь батч.
+        // ⛔ N1-07: окремий ключ `lookupEntryMissing` (а не `validationBlocked` з текстом про тип значення).
+        // ⛔ N1-08: запис шукається в довіднику ПОЛЯ: запис ЧУЖОГО довідника — та сама відповідь, що й «немає
+        // такого». Інакше різниця 422 і 4223 `foreignRegistry` казала, чи існує запис у довіднику, якого
+        // читач, можливо, не бачить (Deny на довідник).
         var lookupEntries = toSave
             .Where(p => p.Value.ValueRegistryEntryId is not null)
             .Select(p => (FieldId: p.Key, EntryId: p.Value.ValueRegistryEntryId!.Value))
             .ToList();
         if (lookupEntries.Count > 0)
         {
-            var existing = await registries.FindExistingEntryIdsAsync(
-                [.. lookupEntries.Select(e => e.EntryId).Distinct()], ct).ConfigureAwait(false);
-            var missing = lookupEntries.FirstOrDefault(e => !existing.Contains(e.EntryId));
+            var standings = (await registries.FindEntryStandingsAsync(
+                [.. lookupEntries.Select(e => e.EntryId).Distinct()], ct).ConfigureAwait(false))
+                .ToDictionary(standing => standing.Id);
+            var fieldsOfEntries = snapshot.HeaderFields.ToDictionary(f => f.Id);
+            var missing = lookupEntries.FirstOrDefault(e =>
+                !standings.TryGetValue(e.EntryId, out var standing)
+                || fieldsOfEntries[e.FieldId].LookupRegistryDefId is { } registryId && standing.RegistryDefId != registryId);
             if (missing != default)
             {
-                var missingCode = snapshot.HeaderFields.First(f => f.Id == missing.FieldId).Code;
+                var missingCode = fieldsOfEntries[missing.FieldId].Code;
                 throw new BusinessRuleException(
                     ErrorCodes.HeaderValueInvalid,
                     $"Значення поля шапки «{missingCode}» посилається на неіснуючий запис довідника.",
                     new Dictionary<string, object?>
                     {
-                        ["messageKey"] = "err.ECR-HDR-0422.validationBlocked",
+                        ["messageKey"] = "err.ECR-HDR-0422.lookupEntryMissing",
                         ["headerFieldCode"] = missingCode,
                     });
             }
@@ -504,12 +512,14 @@ public sealed class PatchDocumentHeaderHandler(
 
         foreach (var (field, entryId) in lookups.OrderBy(l => l.Field.Code, StringComparer.Ordinal))
         {
-            // Немає запису — це вже відхилив D-12 (`ECR-HDR-0422`) до транзакції.
+            // Немає запису чи він з чужого довідника — це вже відхилив D-12/N1-08 (`ECR-HDR-0422`) до транзакції.
             if (!standings.TryGetValue(entryId, out var standing))
             {
                 continue;
             }
 
+            // ⚠ N1-08: чужий довідник до сюди не доходить (відхилено вище як `lookupEntryMissing`, щоб не розкривати,
+            // чи існує запис у чужому довіднику); гілка `foreignRegistry` лишається другим рубежем.
             var messageKey =
                 field.LookupRegistryDefId is { } registryId && standing.RegistryDefId != registryId
                     ? "err.ECR-HDR-4223.foreignRegistry"
