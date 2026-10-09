@@ -167,3 +167,76 @@ describe('AN-123: 409 lockTimeout повторюється з відступом
     expect(beacons).toHaveLength(0);
   });
 });
+
+/** `503 ECR-SYS-0503 databaseBusy` з `Retry-After` — як пише `ExceptionHandlingMiddleware` (E1-04). */
+function databaseBusy(retryAfter: string): Response {
+  return new Response(
+    JSON.stringify({
+      title: 'Database temporarily unavailable',
+      status: 503,
+      errorCode: 'ECR-SYS-0503',
+      correlationId: 'c2',
+      messageKey: 'err.ECR-SYS-0503.databaseBusy',
+    }),
+    { status: 503, headers: { 'Content-Type': 'application/problem+json', 'Retry-After': retryAfter } },
+  );
+}
+
+describe('X8-06: 503 ECR-SYS-0503 databaseBusy повторюється сам, не раніше Retry-After', () => {
+  it('перший PATCH 503 з Retry-After 8 — повтор без участі людини через 8 с; тосту немає, правка не утримана', async () => {
+    let patches = 0;
+    const fetchMock = vi.fn((_path: string, init?: RequestInit) => {
+      if (init?.method !== 'PATCH') return Promise.resolve(new Response('{}'));
+      patches += 1;
+
+      return Promise.resolve(patches === 1 ? databaseBusy('8') : ok());
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    renderHook(() => useDocumentPending(1), { wrapper });
+
+    putPendingEdit(Table, Period, edit);
+    scheduleAutosave();
+    await advance(500);
+
+    expect(patchCalls(fetchMock)).toHaveLength(1);
+    // ⛔ Мутація: прибрати гілку `ECR-SYS-0503` в `isTransientBusy` — повтору немає (лише `noteSaveFailed`).
+    expect(isBusyRetryWaiting()).toBe(true);
+    expect(pendingRejections(Table, Period).size).toBe(0);
+    expect(sendableEdits(Table, Period)).toEqual([edit]);
+    expect(showApiError).not.toHaveBeenCalled();
+
+    // Власний відступ — 2,5 с, але сервер назвав 8 с: раніше повтору немає.
+    // ⛔ Мутація: повернути `status !== 429` у `retryAfterOf` — повтор уже на 2,5 с.
+    await advance(7_400);
+    expect(patchCalls(fetchMock)).toHaveLength(1);
+
+    await advance(100);
+    expect(patchCalls(fetchMock)).toHaveLength(2);
+    expect(hasPending()).toBe(false);
+    expect(isBusyRetryWaiting()).toBe(false);
+  });
+
+  it('503 іншого джерела (без ключа databaseBusy) — не минуще «зайнято»: повтор не планується', async () => {
+    const fetchMock = vi.fn((_path: string, init?: RequestInit) => {
+      if (init?.method !== 'PATCH') return Promise.resolve(new Response('{}'));
+
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({ title: 'Source unavailable', status: 503, errorCode: 'ECR-INT-0503', correlationId: 'c3' }),
+          { status: 503, headers: { 'Content-Type': 'application/problem+json', 'Retry-After': '1' } },
+        ),
+      );
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    renderHook(() => useDocumentPending(1), { wrapper });
+
+    putPendingEdit(Table, Period, edit);
+    scheduleAutosave();
+    await advance(500);
+
+    expect(patchCalls(fetchMock)).toHaveLength(1);
+    expect(isBusyRetryWaiting()).toBe(false);
+    // Правка лишається придатною до надсилання (5xx минущий, `saveErrors.ts`), але без автоповтору.
+    expect(sendableEdits(Table, Period)).toEqual([edit]);
+  });
+});

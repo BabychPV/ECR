@@ -31,6 +31,13 @@ export interface EcrProblem {
 /** Ключ минущої відмови «дані зайняті» (`LockWaitGuard.MessageKey` на сервері). */
 export const LockTimeoutMessageKey = 'err.ECR-DOC-4091.lockTimeout';
 
+/**
+ * Ключ минущої відмови «база тимчасово зайнята» (`503 ECR-SYS-0503`, E1-04 на сервері:
+ * дедлок 1205 після повторів EF, тайм-аут, обрив з'єднання). Транзакцію відкочено,
+ * нічого не записано; сервер радить строк повтору в `Retry-After`.
+ */
+export const DatabaseBusyMessageKey = 'err.ECR-SYS-0503.databaseBusy';
+
 /** Виняток клієнта API. */
 export class EcrApiError extends Error {
   constructor(readonly problem: EcrProblem) {
@@ -57,9 +64,15 @@ export class EcrApiError extends Error {
    * нічого не вилікує.
    */
   get isTransientBusy(): boolean {
+    const messageKey = this.problem.extensions2?.['messageKey'];
+
+    // ⛔ X8-06 (R6): `503 ECR-SYS-0503 databaseBusy` — той самий клас «нічого не
+    // записано, повтор пройде»: без нього правки чекали ручного «Retry save», а
+    // `Retry-After` сервера ніхто не читав. ⚠ Лише за ключем: інші 503 (шлюз,
+    // `ECR-INT-0503` інтеграції) сюди не належать.
     return (
-      this.problem.errorCode === 'ECR-DOC-4091' &&
-      this.problem.extensions2?.['messageKey'] === LockTimeoutMessageKey
+      (this.problem.errorCode === 'ECR-DOC-4091' && messageKey === LockTimeoutMessageKey) ||
+      (this.problem.errorCode === 'ECR-SYS-0503' && messageKey === DatabaseBusyMessageKey)
     );
   }
 
@@ -581,13 +594,15 @@ async function problemOf(response: Response, correlationId: string): Promise<Ecr
 }
 
 /**
- * `Retry-After` відповіді `429` у секундах, або `undefined`.
+ * `Retry-After` відповіді `429` або `503` у секундах, або `undefined`.
  *
  * ⚠ Заголовок — єдине місце, де сервер передає строк: у тілі `problem+json`
  * його немає. Без цього поля клієнт міг би лише вгадувати, коли повторити.
+ *
+ * ✎ X8-06 (R6): і `503` — сервер ставить `Retry-After` на `ECR-SYS-0503` (E1-04).
  */
 function retryAfterOf(response: Response): number | undefined {
-  if (response.status !== 429) return undefined;
+  if (response.status !== 429 && response.status !== 503) return undefined;
 
   const raw = response.headers.get('Retry-After')?.trim();
   if (raw === undefined || !/^\d+$/.test(raw)) return undefined;
