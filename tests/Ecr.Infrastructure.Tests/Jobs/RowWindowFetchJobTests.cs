@@ -9,6 +9,7 @@ using Ecr.Application.Ports;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Entities.External;
+using Ecr.Domain.Entities.Integration;
 using Ecr.Domain.Entities.Security;
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
@@ -332,6 +333,10 @@ public sealed class RowWindowFetchJobTests(SqlServerFixture sql)
             values.Select(v => (v.Status, v.IsCurrent)));
         Assert.Null(values[1].ValueTarget);
 
+        // I1-03: у комірці лишилося 0.93 джерела, якого рядок більше не має, — одна подія, не на кожен прогін.
+        Assert.Equal(0.93m, (await CellsAsync(stand, "R1"))[stand.VolumeColumn].Numeric);
+        Assert.Single(await StaleEventsAsync(stand));
+
         // Джерело знову «для всіх» — рядок перечитується, хоча вікно те саме.
         await ExecuteAsync($"UPDATE s SET SelectorValue = NULL {selectSource}");
         source.Result = Result(7200m);
@@ -339,6 +344,57 @@ public sealed class RowWindowFetchJobTests(SqlServerFixture sql)
 
         Assert.Equal(2, source.Requests.Count);
         Assert.Equal(2m, (await CellsAsync(stand, "R1"))[stand.VolumeColumn].Numeric);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "I1-03")]
+    public async Task Зміна_вікна_на_NoData_не_лишає_число_старого_вікна_мовчки()
+    {
+        // ⛔ Аудит I1-03: 0.93 Sm3 за 10:00–11:00, Кінець виправили на 10:05, PI за нове вікно нічого не дав.
+        // Інтеграція комірку не стирає, тож число старого вікна лишається — але вже з подією в журналі
+        // покриття. МУТАЦІЙНИЙ ДОКАЗ: прибрати виклик JournalStaleAsync — подій нуль.
+        await using var stand = await ArrangeAsync(RowWindowSummaryKind.Total, u => (u.PerHourId, u.StdCubicId));
+        await AddRowAsync(stand, "R1", LocalStart, LocalEnd);
+        var source = new FakeWindowSource(Result(3348m));
+        await RunAsync(stand, source);
+
+        await AddRowAsync(stand, "R1", LocalStart.AddMinutes(1), LocalStart.AddMinutes(6));
+        source.Result = Result(null, percentGood: 0m);
+        await RunAsync(stand, source, now: Now.AddHours(1));
+
+        // Повтор NoData у межах RefetchWithinDays: чинний запис уже NoData — другої події немає.
+        await RunAsync(stand, source, now: Now.AddHours(2));
+
+        Assert.Equal(0.93m, (await CellsAsync(stand, "R1"))[stand.VolumeColumn].Numeric);
+        Assert.Equal(RowWindowValueStatus.NoData, Assert.Single(await ValuesAsync(stand), v => v.IsCurrent).Status);
+        var stale = Assert.Single(await StaleEventsAsync(stand));
+        Assert.Equal(CollectionCoverage.SkippedNoData, stale.Status);
+        Assert.Contains("\"R1\"", stale.Details, StringComparison.Ordinal);
+        Assert.Contains("NoData", stale.Details, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "I1-03")]
+    public async Task Збій_на_повторі_того_самого_вікна_подією_про_застаріле_число_не_є()
+    {
+        // Те саме вікно й джерело (лише повтор): число в комірці все ще за це вікно — журнал мовчить.
+        await using var stand = await ArrangeAsync(RowWindowSummaryKind.Total, u => (u.PerHourId, u.StdCubicId));
+        await AddRowAsync(stand, "R1", LocalStart, LocalEnd);
+        var source = new FakeWindowSource(Result(3348m));
+
+        // Вікно ще триває на момент читання (RetrievedAt < кінця) — наступний прогін його повторює.
+        await RunAsync(stand, source, now: new DateTime(2026, 1, 28, 9, 20, 0, DateTimeKind.Utc));
+        await RunAsync(
+            stand,
+            new FakeWindowSource(Result(5m)) { Fail = _ => true },
+            now: Now);
+
+        Assert.Equal(RowWindowValueStatus.SourceError, Assert.Single(await ValuesAsync(stand), v => v.IsCurrent).Status);
+        Assert.Empty(await StaleEventsAsync(stand));
     }
 
     // ── Стенд ────────────────────────────────────────────────────────────────
@@ -367,7 +423,8 @@ public sealed class RowWindowFetchJobTests(SqlServerFixture sql)
             patcher?.Invoke(cellPatcher, db) ?? cellPatcher,
             services.GetRequiredService<IntegrationActor>(),
             clock,
-            recalculation: trigger);
+            recalculation: trigger,
+            coverage: services.GetRequiredService<ICoverageJournal>());
 
         await job.ExecuteAsync(
             new RowWindowFetchRequest(stand.InstanceId, 202601), Substitute.For<IJobProgress>(), CancellationToken.None);
@@ -612,6 +669,21 @@ public sealed class RowWindowFetchJobTests(SqlServerFixture sql)
     // ── Читання стану ────────────────────────────────────────────────────────
 
     private sealed record Stored(string? Text, decimal? Numeric, DateTime? Date, long? EntryId);
+
+    /// <summary>Події «у комірці число попереднього вікна чи джерела» для сутності стенда.</summary>
+    private async Task<List<CollectionCoverage>> StaleEventsAsync(Stand stand)
+    {
+        await using var db = sql.CreateContext();
+        var entities = await db.RowWindowValues.AsNoTracking()
+            .Where(v => v.TableInstanceId == stand.InstanceId)
+            .Select(v => v.SourceEntityId)
+            .Distinct()
+            .ToListAsync();
+
+        return await db.CollectionCoverages.AsNoTracking()
+            .Where(c => entities.Contains(c.SourceEntityId) && c.Details != null && c.Details.Contains("coverageEvents.rowWindowStale"))
+            .ToListAsync();
+    }
 
     private async Task<List<RowWindowValue>> ValuesAsync(Stand stand)
     {

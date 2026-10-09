@@ -77,6 +77,11 @@ describe('collectionRunErrorText', () => {
       'field=F1, mapId=7, percentGood=60, min=95',
     ],
     ['coverageEvents.noData', { field: 'F1', mapId: '7' }, 'field=F1, mapId=7'],
+    [
+      'coverageEvents.rowWindowStale',
+      { rowKey: 'R1', mapId: '7', status: 'NoData' },
+      'rowKey=R1, mapId=7, status=NoData',
+    ],
     ['coverageEvents.eventWriteFailed', { eventId: '7', reason: 'нема доступу' }, 'eventId=7, reason=нема доступу'],
     ['coverageEvents.eventWritePartial', { eventId: '7', rowKey: 'R1' }, 'eventId=7, rowKey=R1'],
     ['coverageEvents.eventRowNotCreated', { eventId: '7', rowKey: 'R1' }, 'eventId=7, rowKey=R1'],

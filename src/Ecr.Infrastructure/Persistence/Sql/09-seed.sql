@@ -7425,6 +7425,9 @@ USING (VALUES
     (N'coverageEvents.partialCoverage', N'en', N'Field {field} (mapping {mapId}): the source covered only {percentGood}% of the period (threshold {min}%). The value was written, but it is incomplete: gaps and bad-quality points are not counted. Check the source before relying on the number.', 1),
     (N'coverageEvents.noData', N'en', N'Field {field} (mapping {mapId}): there are no usable points for the ended period. The cell was not updated and may still hold the value of an earlier run.', 1),
     -- COLL:an105-coverage ── кінець секції ──
+    -- COLL:r5-i1-row-window-stale ── R5-I1 / I1-03: вікно чи джерело рядка змінилося, а нового значення немає — у комірці число попереднього; ru/kz — порцією COLL:r5-i1-row-window-stale нижче ──
+    (N'coverageEvents.rowWindowStale', N'en', N'Row {rowKey} (row-window mapping {mapId}): the window or the source of the row changed, but no new value was obtained ({status}). The cell was not updated and still holds the value for the previous window or source. Check the row before relying on the number.', 1),
+    -- COLL:r5-i1-row-window-stale ── кінець секції ──
     -- COLL:an105-recalc-state ── AN-105 / D2-03: стан аркуша чи періоду змінився під час перерахунку; ru/kz — порцією COLL:an105-recalc-state нижче ──
     (N'err.ECR-CALC-0409.recalcStateChanged', N'en', N'While document {documentId} was being recalculated, a sheet was submitted or period {periodKey} was closed. The new results were not applied and the previous ones stay current; the recalculation repeats with the new state.', 1),
     -- COLL:an105-recalc-state ── кінець секції ──
@@ -18327,6 +18330,17 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:an105-coverage ── кінець секції ──
+
+-- COLL:r5-i1-row-window-stale ── ru/kz: R5-I1 / I1-03: у комірці лишилося число попереднього вікна чи джерела рядка; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'coverageEvents.rowWindowStale', N'ru', N'Строка {rowKey} (сопоставление по окну строки {mapId}): окно или источник строки изменились, но нового значения нет ({status}). Ячейка не обновлена и содержит значение для прежнего окна или источника. Проверьте строку, прежде чем полагаться на число.'),
+    (N'coverageEvents.rowWindowStale', N'kz', N'{rowKey} жолы (жол терезесі бойынша {mapId} сәйкестендіру): жолдың терезесі немесе дереккөзі өзгерді, бірақ жаңа мән алынбады ({status}). Ұяшық жаңартылмады және бұрынғы терезе немесе дереккөз үшін мәнді сақтайды. Санға сенбес бұрын жолды тексеріңіз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:r5-i1-row-window-stale ── кінець секції ──
 
 -- COLL:an105-recalc-state ── ru/kz: AN-105 / D2-03: стан аркуша чи періоду змінився під час перерахунку; власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)

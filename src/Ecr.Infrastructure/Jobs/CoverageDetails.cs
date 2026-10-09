@@ -32,6 +32,7 @@ public static class CoverageDetails
     public const string NeedsConfirmationKey = "coverageEvents.needsConfirmation";
     public const string PartialCoverageKey = "coverageEvents.partialCoverage";
     public const string NoDataKey = "coverageEvents.noData";
+    public const string RowWindowStaleKey = "coverageEvents.rowWindowStale";
     public const string EventWriteFailedKey = "coverageEvents.eventWriteFailed";
     public const string EventWritePartialKey = "coverageEvents.eventWritePartial";
     public const string EventRowNotCreatedKey = "coverageEvents.eventRowNotCreated";
@@ -108,6 +109,13 @@ public static class CoverageDetails
     /// <summary>У скінченому періоді немає придатних точок поля — комірку не оновлено (D2-02).</summary>
     public static string NoData(object field, int mapId)
         => Encode(NoDataKey, ("field", Text(field)), ("mapId", Text(mapId)));
+
+    /// <summary>
+    /// Вікно чи джерело рядка змінилося, а нового значення немає (<paramref name="status"/>): у комірці лишилося
+    /// число попереднього вікна чи джерела (аудит I1-03).
+    /// </summary>
+    public static string RowWindowStale(object rowKey, int mapId, object status)
+        => Encode(RowWindowStaleKey, ("rowKey", Text(rowKey)), ("mapId", Text(mapId)), ("status", Text(status)));
 
     /// <summary>Комірка має правку людини.</summary>
     public static string KeptManual(object cell) => Encode(KeptManualKey, ("cell", Text(cell)));

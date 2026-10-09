@@ -6,6 +6,7 @@ using Ecr.Application.Ports;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.Documents;
 using Ecr.Domain.Entities.External;
+using Ecr.Domain.Entities.Integration;
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
 using Ecr.Infrastructure.Persistence;
@@ -42,7 +43,8 @@ public sealed class RowWindowFetchJob(
     IntegrationActor actor,
     IClock clock,
     IBackgroundJobScheduler? jobs = null,
-    ICalculationTrigger? recalculation = null) : IRowWindowFetchJob
+    ICalculationTrigger? recalculation = null,
+    ICoverageJournal? coverage = null) : IRowWindowFetchJob
 {
     /// <summary>Код задачі в черзі.</summary>
     public static string Code => "row-window-fetch";
@@ -253,7 +255,9 @@ public sealed class RowWindowFetchJob(
             {
                 if (source is not null && !IsSameInvalid(current, startCell?.Date, endCell?.Date))
                 {
-                    items.Add(Item.Invalid(row.Key, source, startCell?.Date, endCell?.Date));
+                    var invalid = Item.Invalid(row.Key, source, startCell?.Date, endCell?.Date);
+                    invalid.Previous = current;
+                    items.Add(invalid);
                 }
 
                 totals.Invalid++;
@@ -269,7 +273,9 @@ public sealed class RowWindowFetchJob(
                 // журнал покриття каже, що число в комірці — не цього рядка (I1-03).
                 if (current is not null && current.Status != RowWindowValueStatus.NotApplicable)
                 {
-                    items.Add(Item.NotApplicable(row.Key, current, span));
+                    var orphan = Item.NotApplicable(row.Key, current, span);
+                    orphan.Previous = current;
+                    items.Add(orphan);
                 }
 
                 continue;
@@ -291,7 +297,9 @@ public sealed class RowWindowFetchJob(
                 break;
             }
 
-            items.Add(await ReadAsync(map, row.Key, source, span, units, entities, dataSources, ct).ConfigureAwait(false));
+            var read = await ReadAsync(map, row.Key, source, span, units, entities, dataSources, ct).ConfigureAwait(false);
+            read.Previous = current;
+            items.Add(read);
         }
 
         if (items.Count == 0)
@@ -301,6 +309,7 @@ public sealed class RowWindowFetchJob(
 
         var applied = await WriteAsync(map, instance, periodKey, items, ct).ConfigureAwait(false);
         await RecordAsync(map, instance, items, context, now, ct).ConfigureAwait(false);
+        await JournalStaleAsync(map, periodKey, items, ct).ConfigureAwait(false);
 
         foreach (var item in items)
         {
@@ -520,6 +529,61 @@ public sealed class RowWindowFetchJob(
         }
     }
 
+    /// <summary>
+    /// Журнал покриття: вікно чи джерело рядка змінилося, а нового числа немає — у комірці лишилося число
+    /// попереднього вікна чи джерела (аудит I1-03).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Інтеграція комірку не стирає (R-B4: <c>IntegrationValue</c> ніколи не null), тож без цього людина бачила
+    /// правдоподібне 0,93 Sm3 за вікно 10:00–11:00 у рядку, де вікно вже 10:00–10:05 і PI нічого не дав. Подія —
+    /// на те джерело, чиє число лишилося, раз на зміну: наступний прогін бачить чинним уже новий запис
+    /// (NoData/SourceError/…), а не Fetched. Стирати комірку — окреме рішення (новий шлях запису, D-118).
+    /// </remarks>
+    private async Task JournalStaleAsync(RowWindowMap map, PeriodKey periodKey, List<Item> items, CancellationToken ct)
+    {
+        if (coverage is null)
+        {
+            return;
+        }
+
+        var events = items
+            .Where(i => !i.Abandoned && KeepsStaleValue(map, i))
+            .Select(i => new CoverageEvent(
+                i.Previous!.SourceEntityId,
+                periodKey,
+                CollectionCoverage.SkippedNoData,
+                CoverageDetails.RowWindowStale(i.RowKey, map.Id, i.Status)))
+            .ToList();
+
+        await coverage.RecordManyAsync(events, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>Попередній запис дав число, новий — ні, і відповідає він уже іншому вікну чи джерелу.</summary>
+    private static bool KeepsStaleValue(RowWindowMap map, Item item)
+    {
+        if (item.Previous is not { Status: RowWindowValueStatus.Fetched or RowWindowValueStatus.Partial } previous
+            || item.Status is not (RowWindowValueStatus.NoData or RowWindowValueStatus.SourceError
+                or RowWindowValueStatus.InvalidWindow or RowWindowValueStatus.NotApplicable))
+        {
+            return false;
+        }
+
+        // Селектор пішов від джерела — число в комірці не цього рядка, навіть за того самого вікна.
+        if (item.Status is RowWindowValueStatus.NotApplicable)
+        {
+            return true;
+        }
+
+        // Те саме вікно й джерело (повтор незакритого вікна, збій на повторі) — число все ще «своє».
+        return previous.FromUtc != item.FromUtc
+               || previous.ToUtc != item.ToUtc
+               || previous.RowWindowMapId != map.Id
+               || previous.SourceEntityId != item.SourceEntityId
+               || !string.Equals(previous.SourceField, item.SourceField, StringComparison.OrdinalIgnoreCase)
+               || previous.Summary != map.Summary
+               || previous.TargetUnitId != map.TargetUnitId;
+    }
+
     /// <summary>Знімає чинні записи запитом, потім додає нові (унікальний індекс «чинний — один»).</summary>
     private async Task RecordAsync(
         RowWindowMap map, TableInstance instance, List<Item> items, RowContext context, DateTime now, CancellationToken ct)
@@ -629,6 +693,9 @@ public sealed class RowWindowFetchJob(
 
         /// <summary>Не журналювати: запис комірок відмовлено (період закрили).</summary>
         public bool Abandoned { get; set; }
+
+        /// <summary>Чинний запис провенансу комірки ДО цього прогону; <c>null</c> — не підтягували.</summary>
+        public RowWindowValue? Previous { get; set; }
 
         public RowWindowValueStatus Status { get; private set; } = fold?.Status ?? RowWindowValueStatus.InvalidWindow;
 

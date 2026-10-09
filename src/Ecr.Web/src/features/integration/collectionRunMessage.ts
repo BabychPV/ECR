@@ -137,6 +137,9 @@ function render(key: string, params: Record<string, string>): string | null {
       return t('coverageEvents.partialCoverage', params);
     case 'coverageEvents.noData':
       return t('coverageEvents.noData', params);
+    // I1-03: вікно чи джерело рядка змінилося, а нового числа немає — у комірці лишилося попереднє.
+    case 'coverageEvents.rowWindowStale':
+      return t('coverageEvents.rowWindowStale', params);
     default:
       return adapterRefusal(key, params);
   }

@@ -49,6 +49,10 @@ public sealed class CoverageDetailsTests
         Assert.Equal("94.99", partial.Params["percentGood"]);
         Assert.Equal("95", partial.Params["min"]);
 
+        Assert.True(JobProgressMessageCodec.TryDecode(CoverageDetails.RowWindowStale("R1", 7, "NoData"), out var stale));
+        Assert.Equal("coverageEvents.rowWindowStale", stale.Key);
+        Assert.Equal(("R1", "7", "NoData"), (stale.Params!["rowKey"], stale.Params["mapId"], stale.Params["status"]));
+
         Assert.True(JobProgressMessageCodec.TryDecode(CoverageDetails.NoData("F", 7), out var noData));
         Assert.Equal("coverageEvents.noData", noData.Key);
         Assert.Equal("7", noData.Params!["mapId"]);
@@ -77,6 +81,7 @@ public sealed class CoverageDetailsTests
     [Theory]
     [InlineData("MaterializeCollectedDataJob.cs", 7)]
     [InlineData("SourceEventSyncJob.cs", 12)]
+    [InlineData("RowWindowFetchJob.cs", 1)]
     public void Coverage_events_in_jobs_take_details_from_the_envelope_helper(string file, int expectedCalls)
     {
         var text = File.ReadAllText(Path.Combine(RepoRoot(), "src", "Ecr.Infrastructure", "Jobs", file));
