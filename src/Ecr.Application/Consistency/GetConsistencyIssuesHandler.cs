@@ -139,7 +139,7 @@ public sealed class GetConsistencyIssuesHandler(
     {
         var keys = result.Items
             .Where(i => i.EntityId is not null && i.EntityType is not null && LocatableTypes.Contains(i.EntityType))
-            .Select(i => (EntityType: i.EntityType!, EntityId: i.EntityId!.Value))
+            .Select(i => (EntityType: i.EntityType!, EntityId: i.EntityId!.Value, i.PeriodKey))
             .Distinct()
             .ToList();
 

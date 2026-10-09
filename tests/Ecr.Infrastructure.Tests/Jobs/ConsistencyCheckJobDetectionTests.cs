@@ -67,6 +67,10 @@ public sealed class ConsistencyCheckJobDetectionTests(SqlServerFixture sql)
         var issue = await FindIssueAsync("ORPHANED_CELL", "doc.CellValue", doc.RowIds[0]);
         Assert.NotNull(issue);
         Assert.Equal(2, issue.Value.Severity);
+
+        // N1-05: знахідка несе період рядка - за ним читач журналу шукає doc.TableRow (ключ партиції).
+        // Мутація: не передавати f.PeriodKey в ConsistencyIssue - PeriodKey лишається NULL, тест червоніє.
+        Assert.Equal(doc.PeriodKey.Value, await FindIssuePeriodAsync("ORPHANED_CELL", "doc.CellValue", doc.RowIds[0]));
     }
 
     [Fact]
@@ -414,6 +418,24 @@ public sealed class ConsistencyCheckJobDetectionTests(SqlServerFixture sql)
             metrics);
 
         await job.ExecuteAsync(null, Substitute.For<IJobProgress>(), CancellationToken.None);
+    }
+
+    private async Task<int?> FindIssuePeriodAsync(string ruleCode, string entityType, long entityId)
+    {
+        await using var connection = new SqlConnection(sql.ConnectionString);
+        await connection.OpenAsync(CancellationToken.None);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT TOP (1) PeriodKey FROM aud.ConsistencyIssue
+            WHERE RuleCode = @rule AND EntityType = @type AND EntityId = @id;
+            """;
+        command.Parameters.AddWithValue("@rule", ruleCode);
+        command.Parameters.AddWithValue("@type", entityType);
+        command.Parameters.AddWithValue("@id", entityId);
+
+        var value = await command.ExecuteScalarAsync(CancellationToken.None);
+
+        return value is null or DBNull ? null : (int)value;
     }
 
     private async Task<(byte Severity, string Message)?> FindIssueAsync(string ruleCode, string entityType, long entityId)

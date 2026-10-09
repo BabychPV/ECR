@@ -161,9 +161,23 @@ BEGIN
         DetailsJson  nvarchar(max) NULL,
         ResolvedAt   datetime2(3)  NULL,
         ResolvedByUserId int       NULL,
+        PeriodKey    int           NULL,
         CONSTRAINT PK_ConsistencyIssue PRIMARY KEY (Id)
     );
 END
+GO
+
+-- N1-05 (AN-80): період знахідки по рядку документа (`doc.CellValue`, `doc.TableRow`). `doc.TableRow`
+-- партиційована за PeriodKey, і читач журналу (`ConsistencyIssueReader.ResolveLocationsAsync`) шукає рядок
+-- за `(PeriodKey, Id)` - одна партиція замість усіх. NULL - знахідка без періоду або записана до N1-05:
+-- для неї читач має запасний шлях (пошук за самим Id).
+--
+-- ⚠ Тут, а не в міграції EF: `aud.ConsistencyIssue` поза моделлю EF і створюється цим скриптом, який у
+-- `setup-dev-db.ps1` іде ПІСЛЯ міграції - на свіжій базі міграція не мала б що змінювати. Апгрейд наявних
+-- баз: ADD nullable без DEFAULT - метадані, наявні рядки лишаються NULL (журнал знахідок не переписується:
+-- облікова гілка застосунку має на `aud.*` лише INSERT і SELECT).
+IF COL_LENGTH(N'aud.ConsistencyIssue', N'PeriodKey') IS NULL
+    ALTER TABLE aud.ConsistencyIssue ADD PeriodKey int NULL;
 GO
 
 -- ⚠ Додано 2026-09-04 (Q-071). Таблиця була в §12 схеми з самого початку, але

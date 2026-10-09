@@ -157,6 +157,79 @@ public sealed class ConsistencyIssueWhereTests(SqlServerFixture sql)
             $"3 рядки дали {small.Queries} запитів, 40 — {large.Queries} (очікувалось по 2)");
     }
 
+    /// <remarks>
+    /// N1-05: знахідка по рядку документа несе період, і читач шукає <c>doc.TableRow</c> за <c>(PeriodKey, Id)</c> —
+    /// одна партиція, а не всі. Знахідка без періоду (записана до N1-05) — запасний шлях: пошук за самим <c>Id</c>.
+    /// Мутація: прибрати предикат <c>seekPeriods.Contains(row.PeriodKeyValue)</c> з
+    /// <c>ConsistencyIssueReader.ResolveLocationsAsync</c> — перший SQL без <c>PeriodKey</c> у <c>WHERE</c>, тест червоніє.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Consistency_issues_location_lookup_seeks_TableRow_by_PeriodKey()
+    {
+        var b = await new TestDocumentBuilder(sql.ConnectionString).BuildAsync().ConfigureAwait(true);
+        var marker = NewMarker();
+        var period = b.PeriodKey.Value;
+        await InsertAsync("ORPHANED_CELL", "doc.CellValue", b.RowIds[0], marker, period).ConfigureAwait(true);
+
+        var capture = new CommandTextCapture();
+        await using var db = new EcrDbContext(
+            new DbContextOptionsBuilder<EcrDbContext>().UseSqlServer(sql.ConnectionString).AddInterceptors(capture).Options);
+        var reader = new ConsistencyIssueReader(db);
+
+        // Знахідка після запису несе період (у відповідь API він не йде: JsonIgnore).
+        var page = await reader
+            .ReadIssuesAsync(null, openOnly: false, severity: null, marker, new Ecr.Application.Common.CursorRequest(50), CancellationToken.None)
+            .ConfigureAwait(true);
+        Assert.Equal(period, Assert.Single(page.Items).PeriodKey);
+
+        // З періодом: рядок знайдено, а SQL несе PeriodKey у WHERE (партиція відсікається).
+        capture.Reset();
+        var seek = await reader
+            .ResolveLocationsAsync([("doc.CellValue", b.RowIds[0], (int?)period)], CancellationToken.None)
+            .ConfigureAwait(true);
+        Assert.Equal(b.DocumentId, seek[("doc.CellValue", b.RowIds[0])].Where.DocumentId);
+        Assert.Matches(PeriodInWhere, Assert.Single(capture.Selects, t => t.Contains("[TableRow]", StringComparison.Ordinal)));
+
+        // Період іншої партиції: за парою (PeriodKey, Id) рядка немає — рядок чужого Id не підміняється.
+        var wrong = await reader
+            .ResolveLocationsAsync([("doc.CellValue", b.RowIds[0], (int?)(period + 1))], CancellationToken.None)
+            .ConfigureAwait(true);
+        Assert.Empty(wrong);
+
+        // Запасний шлях: без періоду пошук за самим Id — той самий рядок, але без PeriodKey у WHERE (контроль тесту).
+        capture.Reset();
+        var legacy = await reader
+            .ResolveLocationsAsync([("doc.CellValue", b.RowIds[0], (int?)null)], CancellationToken.None)
+            .ConfigureAwait(true);
+        Assert.Equal(b.DocumentId, legacy[("doc.CellValue", b.RowIds[0])].Where.DocumentId);
+        Assert.DoesNotMatch(PeriodInWhere, Assert.Single(capture.Selects, t => t.Contains("[TableRow]", StringComparison.Ordinal)));
+    }
+
+    /// <summary>Предикат за <c>PeriodKey</c> після <c>WHERE</c> (умови <c>ON</c> з'єднань стоять до нього).</summary>
+    private static readonly System.Text.RegularExpressions.Regex PeriodInWhere = new(
+        @"WHERE[\s\S]*?\.\[PeriodKey\]\s*(=|IN)", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+    private sealed class CommandTextCapture : Microsoft.EntityFrameworkCore.Diagnostics.DbCommandInterceptor
+    {
+        private readonly List<string> _selects = [];
+
+        public IReadOnlyList<string> Selects => _selects;
+
+        public void Reset() => _selects.Clear();
+
+        public override ValueTask<Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<System.Data.Common.DbDataReader>> ReaderExecutingAsync(
+            System.Data.Common.DbCommand command,
+            Microsoft.EntityFrameworkCore.Diagnostics.CommandEventData eventData,
+            Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<System.Data.Common.DbDataReader> result,
+            CancellationToken cancellationToken = default)
+        {
+            _selects.Add(command.CommandText);
+            return base.ReaderExecutingAsync(command, eventData, result, cancellationToken);
+        }
+    }
+
     private async Task<(int Resolved, int Queries)> MeasureAsync(int rows)
     {
         var b = await new TestDocumentBuilder(sql.ConnectionString).BuildAsync(rowCount: rows).ConfigureAwait(true);
@@ -166,8 +239,8 @@ public sealed class ConsistencyIssueWhereTests(SqlServerFixture sql)
             new DbContextOptionsBuilder<EcrDbContext>().UseSqlServer(sql.ConnectionString).AddInterceptors(counter).Options);
         var reader = new ConsistencyIssueReader(db);
 
-        var keys = b.RowIds.Select(id => ("doc.CellValue", id))
-            .Concat(b.ColumnDefIds.Select(id => ("cfg.ColumnDef", (long)id)))
+        var keys = b.RowIds.Select(id => ("doc.CellValue", id, (int?)b.PeriodKey.Value))
+            .Concat(b.ColumnDefIds.Select(id => ("cfg.ColumnDef", (long)id, (int?)null)))
             .ToList();
 
         counter.Tally.Reset();
@@ -245,21 +318,27 @@ public sealed class ConsistencyIssueWhereTests(SqlServerFixture sql)
     }
 
     /// <summary>Вставляє знахідку напряму; повертає її <c>Id</c>. Текст починається з маркера.</summary>
-    private async Task<long> InsertAsync(string rule, string entityType, long entityId, string marker)
+    /// <param name="rule">Код правила.</param>
+    /// <param name="entityType">Тип сутності.</param>
+    /// <param name="entityId">Ідентифікатор сутності.</param>
+    /// <param name="marker">Маркер тексту.</param>
+    /// <param name="periodKey">Період (N1-05); <c>null</c> — знахідка, записана до N1-05.</param>
+    private async Task<long> InsertAsync(string rule, string entityType, long entityId, string marker, int? periodKey = null)
     {
         await using var connection = new SqlConnection(sql.ConnectionString);
         await connection.OpenAsync(CancellationToken.None).ConfigureAwait(false);
 
         await using var command = connection.CreateCommand();
         command.CommandText = """
-            INSERT aud.ConsistencyIssue (DetectedAt, Severity, RuleCode, EntityType, EntityId, Message)
-            VALUES (SYSUTCDATETIME(), 2, @rule, @type, @id, @message);
+            INSERT aud.ConsistencyIssue (DetectedAt, Severity, RuleCode, EntityType, EntityId, Message, PeriodKey)
+            VALUES (SYSUTCDATETIME(), 2, @rule, @type, @id, @message, @period);
             SELECT CAST(SCOPE_IDENTITY() AS bigint);
             """;
         command.Parameters.AddWithValue("@rule", rule);
         command.Parameters.AddWithValue("@type", entityType);
         command.Parameters.AddWithValue("@id", entityId);
         command.Parameters.AddWithValue("@message", $"{marker} знахідка {entityType} {entityId}");
+        command.Parameters.AddWithValue("@period", (object?)periodKey ?? DBNull.Value);
 
         return (long)(await command.ExecuteScalarAsync(CancellationToken.None).ConfigureAwait(false))!;
     }

@@ -294,7 +294,8 @@ public sealed class ConsistencyCheckJob(
                 "doc.CellValue",
                 f.TableRowId,
                 $"Комірка рядка {f.TableRowId} періоду {f.PeriodKey} посилається на запис довідника "
-                + $"{f.RegistryEntryId}, якого не існує.")));
+                + $"{f.RegistryEntryId}, якого не існує.",
+                f.PeriodKey)));
         }
 
         return issues;
@@ -342,7 +343,8 @@ public sealed class ConsistencyCheckJob(
                 "doc.TableRow",
                 f.RowId,
                 $"Рядок {f.RowId} посилається на екземпляр таблиці {f.TableInstanceId} "
-                + $"періоду {f.PeriodKey}, якого не існує.")));
+                + $"періоду {f.PeriodKey}, якого не існує.",
+                f.PeriodKey)));
         }
 
         return issues;
@@ -571,11 +573,11 @@ public sealed class ConsistencyCheckJob(
     /// </remarks>
     /// <summary>Скільки знахідок іде в один <c>MERGE</c>.</summary>
     /// <remarks>
-    /// SQL Server приймає максимум 2100 параметрів на запит, а тут їх 6 на
-    /// знахідку. 300 × 6 = 1800 — із запасом на службові (той самий розрахунок,
+    /// SQL Server приймає максимум 2100 параметрів на запит, а тут їх 7 на
+    /// знахідку (N1-05 додав <c>PeriodKey</c>). 250 × 7 = 1750 — із запасом на службові (той самий розрахунок,
     /// що й <c>NormalizedCellStore.MergeChunkSize</c>).
     /// </remarks>
-    private const int IssueChunkSize = 300;
+    private const int IssueChunkSize = 250;
 
     private async Task WriteIssuesAsync(IReadOnlyList<ConsistencyIssue> issues, CancellationToken ct)
     {
@@ -592,7 +594,7 @@ public sealed class ConsistencyCheckJob(
 
         foreach (var chunk in issues.Chunk(IssueChunkSize))
         {
-            var parameters = new List<SqlParameter>(chunk.Length * 6);
+            var parameters = new List<SqlParameter>(chunk.Length * 7);
             var values = new System.Text.StringBuilder();
 
             for (var i = 0; i < chunk.Length; i++)
@@ -605,7 +607,7 @@ public sealed class ConsistencyCheckJob(
                 }
 
                 values.Append(CultureInfo.InvariantCulture,
-                    $"(@now{i},@severity{i},@rule{i},@type{i},@id{i},@message{i})");
+                    $"(@now{i},@severity{i},@rule{i},@type{i},@id{i},@message{i},@period{i})");
 
                 parameters.Add(new SqlParameter($"@now{i}", now));
                 parameters.Add(new SqlParameter($"@severity{i}", issue.Severity));
@@ -613,6 +615,12 @@ public sealed class ConsistencyCheckJob(
                 parameters.Add(new SqlParameter($"@type{i}", issue.EntityType));
                 parameters.Add(new SqlParameter($"@id{i}", issue.EntityId));
                 parameters.Add(new SqlParameter($"@message{i}", issue.Message));
+
+                // ⚠ Типізований параметр: безтиповий `DBNull` у `VALUES` вивівся б як nvarchar і зламав `int`-колонку.
+                parameters.Add(new SqlParameter($"@period{i}", System.Data.SqlDbType.Int)
+                {
+                    Value = (object?)issue.PeriodKey ?? DBNull.Value,
+                });
             }
 
             // ⚠ Конкатенація, а не `$"""..."""`: EF1002 забороняє інтерпольований
@@ -622,15 +630,15 @@ public sealed class ConsistencyCheckJob(
             var sql =
                 "MERGE aud.ConsistencyIssue WITH (HOLDLOCK) AS target\n" +
                 "USING (VALUES " + values + ") AS source\n" +
-                "    (DetectedAt, Severity, RuleCode, EntityType, EntityId, Message)\n" +
+                "    (DetectedAt, Severity, RuleCode, EntityType, EntityId, Message, PeriodKey)\n" +
                 "ON  target.RuleCode = source.RuleCode\n" +
                 "AND target.EntityType = source.EntityType\n" +
                 "AND target.EntityId = source.EntityId\n" +
                 "AND target.ResolvedAt IS NULL\n" +
                 "WHEN NOT MATCHED THEN INSERT\n" +
-                "    (DetectedAt, Severity, RuleCode, EntityType, EntityId, Message)\n" +
+                "    (DetectedAt, Severity, RuleCode, EntityType, EntityId, Message, PeriodKey)\n" +
                 "    VALUES (source.DetectedAt, source.Severity, source.RuleCode,\n" +
-                "            source.EntityType, source.EntityId, source.Message);";
+                "            source.EntityType, source.EntityId, source.Message, source.PeriodKey);";
 
             await db.Database.ExecuteSqlRawAsync(sql, parameters.ToArray(), ct).ConfigureAwait(false);
         }
@@ -642,8 +650,12 @@ public sealed class ConsistencyCheckJob(
     /// <param name="EntityType">Тип сутності.</param>
     /// <param name="EntityId">Ідентифікатор сутності.</param>
     /// <param name="Message">Текст для людини.</param>
+    /// <param name="PeriodKey">
+    /// Період рядка документа (N1-05): ключ партиції, за яким читач журналу шукає <c>doc.TableRow</c>; <c>null</c> —
+    /// знахідка без періоду (структура шаблону, архів).
+    /// </param>
     private sealed record ConsistencyIssue(
-        string RuleCode, byte Severity, string EntityType, long EntityId, string Message);
+        string RuleCode, byte Severity, string EntityType, long EntityId, string Message, int? PeriodKey = null);
 
     private sealed record OrphanRow(int PeriodKey, long TableRowId, long RegistryEntryId);
 
