@@ -7387,8 +7387,11 @@ USING (VALUES
     (N'err.ECR-CALC-0409.categoryRuleConcurrent', N'en', N'Someone else has just created the category rule of this version. Reload the version and save the rule again.', 1),
     -- COLL:an72-rule-concurrent ── кінець секції ──
     -- COLL:an80-carryover ── AN-80 / N2-04: перенос результатів поданих аркушів більший за стелю; ru/kz — порцією COLL:an80-carryover нижче ──
-    (N'err.ECR-CALC-0422.carryOverTooLarge', N'en', N'Carrying over the results of the submitted sheets of document {documentId} for period {periodKey} would copy {count} rows, more than the limit of {max}. The run was not applied and the previous results stay current: narrow the binding to the right table.', 1)
+    (N'err.ECR-CALC-0422.carryOverTooLarge', N'en', N'Carrying over the results of the submitted sheets of document {documentId} for period {periodKey} would copy {count} rows, more than the limit of {max}. The run was not applied and the previous results stay current: narrow the binding to the right table.', 1),
     -- COLL:an80-carryover ── кінець секції ──
+    -- COLL:an109-csv-utf8 ── AN-109 / S1-03: імпорт CSV перекладів не в UTF-8 (cp1251 з Excel) -> 422; ru/kz — порцією COLL:an109-csv-utf8 нижче ──
+    (N'err.ECR-REQ-0422.uiStringCsvNotUtf8', N'en', N'The file is not UTF-8 text (it may be saved in a Windows code page). Save it as CSV UTF-8 and try again. Nothing was imported.', 1)
+    -- COLL:an109-csv-utf8 ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -18147,6 +18150,17 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:an80-carryover ── кінець секції ──
+
+-- COLL:an109-csv-utf8 ── ru/kz: AN-109 / S1-03: импорт CSV переводов не в UTF-8; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-REQ-0422.uiStringCsvNotUtf8', N'ru', N'Файл не является текстом в UTF-8 (возможно, он сохранён в кодовой странице Windows). Сохраните его как CSV UTF-8 и повторите. Ничего не импортировано.'),
+    (N'err.ECR-REQ-0422.uiStringCsvNotUtf8', N'kz', N'Файл UTF-8 мәтіні емес (Windows кодтау беті болуы мүмкін). Оны CSV UTF-8 ретінде сақтап, қайталап көріңіз. Ештеңе импортталмады.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:an109-csv-utf8 ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

@@ -74,13 +74,27 @@ public sealed class UiStringsController(
 
         // Понад стелю файл не читається — обробник відмовить після перевірки права.
         var content = string.Empty;
+        var notUtf8 = false;
         if (file.Length <= maxBytes)
         {
-            using var reader = new StreamReader(file.OpenReadStream(), System.Text.Encoding.UTF8);
-            content = await reader.ReadToEndAsync(ct).ConfigureAwait(false);
+            // ⛔ S1-03 (L5-11 для перекладів): строге декодування. Файл, пересохранений Excel у cp1251,
+            // раніше читався з підстановкою «�» і мовчки перезаписував переклад мови для всіх; тепер —
+            // 422 `uiStringCsvNotUtf8` (після перевірки права в обробнику), як у RegistriesController.
+            using var reader = new StreamReader(
+                file.OpenReadStream(), new System.Text.UTF8Encoding(false, throwOnInvalidBytes: true));
+            try
+            {
+                content = await reader.ReadToEndAsync(ct).ConfigureAwait(false);
+            }
+            catch (System.Text.DecoderFallbackException)
+            {
+                notUtf8 = true;
+            }
         }
 
-        return Ok(await import.HandleAsync(lang, content, file.Length, maxBytes, dryRun, ct).ConfigureAwait(false));
+        return Ok(await import
+            .HandleAsync(lang, content, file.Length, maxBytes, dryRun, ct, notUtf8)
+            .ConfigureAwait(false));
     }
 
     /// <summary>Покриття перекладу по мовах. Право <c>System.ManageLocalization</c>.</summary>

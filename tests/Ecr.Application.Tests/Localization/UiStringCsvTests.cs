@@ -55,6 +55,31 @@ public sealed class UiStringCsvTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    public async Task Файл_не_UTF8_дає_422_і_нічого_не_пише()
+    {
+        // S1-03: контролер позначає cp1251-файл (строгий UTF-8), обробник відмовляє, а не пише «�».
+        var before = _catalog.Revision;
+
+        var ex = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Handler().HandleAsync("ru", "key,ru\r\na.quote,��\r\n", 20, UiStringImportHandler.DefaultMaxBytes,
+                dryRun: false, default, contentNotUtf8: true));
+
+        Assert.Equal(UiStringImportHandler.NotUtf8Key, ex.Details?["messageKey"]);
+        Assert.Equal(before, _catalog.Revision);
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    public async Task Файл_не_UTF8_без_права_це_403_а_не_422()
+    {
+        // S1-03: ознака кодування не обходить перевірку права — як entriesCsvNotUtf8 довідників (L5-11).
+        Grant("Template.Edit");
+
+        await Assert.ThrowsAsync<AccessDeniedException>(
+            () => Handler().HandleAsync("ru", string.Empty, 20, UiStringImportHandler.DefaultMaxBytes,
+                dryRun: true, default, contentNotUtf8: true));
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage7)]
     public async Task DryRun_звітує_але_нічого_не_пише()
     {
         var before = _catalog.Revision;

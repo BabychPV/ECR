@@ -89,6 +89,9 @@ public sealed class UiStringImportHandler(
     /// <summary>Стеля розміру файлу, коли конфіг не задає іншої.</summary>
     public const int DefaultMaxBytes = 1024 * 1024;
 
+    /// <summary>Файл не в UTF-8 (S1-03, як <c>entriesCsvNotUtf8</c> довідників за L5-11).</summary>
+    public const string NotUtf8Key = "err.ECR-REQ-0422.uiStringCsvNotUtf8";
+
     /// <summary>Тип події журналу безпеки.</summary>
     public const string ImportedEventType = "UiStringsImported";
 
@@ -101,8 +104,9 @@ public sealed class UiStringImportHandler(
     /// <param name="maxBytes">Стеля розміру.</param>
     /// <param name="dryRun">Лише звіт, без запису.</param>
     /// <param name="ct">Токен скасування.</param>
+    /// <param name="contentNotUtf8">Файл не декодується як UTF-8 (контролер) — відмова 422 після перевірки права (S1-03).</param>
     public async Task<UiStringImportReport> HandleAsync(
-        string languageCode, string content, long sizeBytes, int maxBytes, bool dryRun, CancellationToken ct)
+        string languageCode, string content, long sizeBytes, int maxBytes, bool dryRun, CancellationToken ct, bool contentNotUtf8 = false)
     {
         ArgumentNullException.ThrowIfNull(content);
 
@@ -111,6 +115,13 @@ public sealed class UiStringImportHandler(
         var mayEditMail = PermissionCheck.IsGranted(profile, UiStringMailKeys.Permission);
         await RequireTranslationLanguageAsync(catalog, languageCode, ct).ConfigureAwait(false);
         RequireSize(sizeBytes, maxBytes);
+
+        // ⛔ S1-03: cp1251 із Excel контролер раніше декодував із «�», і після dryRun («Оновлено N»)
+        // переклад мови перезаписувався сміттям; тепер контролер лише позначає це, а відмову дає тут.
+        if (contentNotUtf8)
+        {
+            throw Invalid(NotUtf8Key, "Файл CSV не в кодуванні UTF-8.", languageCode);
+        }
 
         IReadOnlyList<IReadOnlyList<string>> records;
         try
