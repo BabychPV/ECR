@@ -394,7 +394,7 @@ public sealed class MaterializeCollectedDataJob(
                             && (needsTime || p.ValueNumeric != null))
                 .OrderBy(p => p.Timestamp)
                 .Take(ceiling + 1)
-                .Select(p => new PointRow(p.Timestamp, p.ValueNumeric, p.Quality))
+                .Select(p => new PointRow(p.Timestamp, p.ValueNumeric, p.Quality, p.UnitId))
                 .ToListAsync(ct)
                 .ConfigureAwait(false);
 
@@ -416,9 +416,10 @@ public sealed class MaterializeCollectedDataJob(
             // точки ДО нього й першої НА чи ПІСЛЯ кінця. Без них інтеграл місяця,
             // де стиснення PI не лишило точок біля опівночі, недораховував би
             // краї — а подія без точок усередині дала б нуль замість об'єму.
-            var timed = needsTime
+            var timedRows = needsTime
                 ? await TimeSeriesAsync(task.SourceEntityId, field, period, inside, ct).ConfigureAwait(false)
                 : [];
+            var timed = timedRows.Select(p => p.ToTimed()).ToList();
 
             foreach (var map in fieldMaps)
             {
@@ -427,6 +428,21 @@ public sealed class MaterializeCollectedDataJob(
                 var kind = map.Aggregation
                     ?? throw new InvalidOperationException(
                         $"Мапінг {map.Id} не називає способу згортання: конфігурація неповна.");
+
+                // ⛔ X3-02 / ФВ-16.10, D-79: точка несе СВОЮ одиницю джерела. Після прийняття нової одиниці
+                // (ФВ-16.9, `AcceptSourceUnitChange`) у періоді можуть лежати точки старої — переведення
+                // всього ряду за ПОТОЧНОЮ одиницею мапінгу дало б тихий ×24 (`Sm3/h` → `Sm3/d`). Змішаний
+                // ряд не згортається: комірка не пишеться, задача відмовляє з переліком (той самий канал,
+                // що й несумісна одиниця). Точка без одиниці (`UnitId = null`) — «нема з чим порівняти»,
+                // як і в `BoundaryUnitConversion.IsDeclaredUnit`.
+                var rows = IsTimeFold(kind) ? timedRows : inside;
+                if (HasForeignUnit(rows, map.SourceUnitId))
+                {
+                    unitFailures.Add(
+                        $"{field} (мапінг {map.Id.ToString(CultureInfo.InvariantCulture)}): у періоді є точки в іншій "
+                        + "одиниці джерела, ніж оголошує мапінг; зберіть період заново (ручний збір з початку періоду).");
+                    continue;
+                }
 
                 var series = IsTimeFold(kind) ? timed : points;
                 if (series.Count == 0)
@@ -504,7 +520,7 @@ public sealed class MaterializeCollectedDataJob(
     /// крайній відрізок прогалиною, і це правильніше, ніж перескочити через неї
     /// до ще давнішої.
     /// </remarks>
-    private async Task<List<TimedPoint>> TimeSeriesAsync(
+    private async Task<List<PointRow>> TimeSeriesAsync(
         int sourceEntityId, string field, Domain.Entities.Documents.Period.UtcRange period,
         List<PointRow> inside, CancellationToken ct)
     {
@@ -512,7 +528,7 @@ public sealed class MaterializeCollectedDataJob(
             .AsNoTracking()
             .Where(p => p.SourceEntityId == sourceEntityId && p.SourcePath == field && p.Timestamp < period.StartUtc)
             .OrderByDescending(p => p.Timestamp)
-            .Select(p => new PointRow(p.Timestamp, p.ValueNumeric, p.Quality))
+            .Select(p => new PointRow(p.Timestamp, p.ValueNumeric, p.Quality, p.UnitId))
             .FirstOrDefaultAsync(ct)
             .ConfigureAwait(false);
 
@@ -520,25 +536,32 @@ public sealed class MaterializeCollectedDataJob(
             .AsNoTracking()
             .Where(p => p.SourceEntityId == sourceEntityId && p.SourcePath == field && p.Timestamp >= period.EndUtc)
             .OrderBy(p => p.Timestamp)
-            .Select(p => new PointRow(p.Timestamp, p.ValueNumeric, p.Quality))
+            .Select(p => new PointRow(p.Timestamp, p.ValueNumeric, p.Quality, p.UnitId))
             .FirstOrDefaultAsync(ct)
             .ConfigureAwait(false);
 
-        var series = new List<TimedPoint>(inside.Count + 2);
+        var series = new List<PointRow>(inside.Count + 2);
         if (before is not null)
         {
-            series.Add(before.ToTimed());
+            series.Add(before);
         }
 
-        series.AddRange(inside.Select(p => p.ToTimed()));
+        series.AddRange(inside);
 
         if (after is not null)
         {
-            series.Add(after.ToTimed());
+            series.Add(after);
         }
 
         return series;
     }
+
+    /// <summary>Чи є в ряді точка з одиницею джерела, іншою за оголошену мапінгом (X3-02).</summary>
+    /// <param name="rows">Точки, які підуть у згортку.</param>
+    /// <param name="declaredSourceUnitId">Одиниця джерела з мапінгу; <c>null</c> — не оголошена, звіряти нема з чим.</param>
+    private static bool HasForeignUnit(IReadOnlyList<PointRow> rows, int? declaredSourceUnitId)
+        => declaredSourceUnitId is { } declared
+           && rows.Any(p => p.UnitId is { } unit && unit != declared);
 
     /// <summary>Чи згортка за часом (потребує міток часу й меж періоду).</summary>
     private static bool IsTimeFold(AggregationKind? kind)
@@ -558,7 +581,7 @@ public sealed class MaterializeCollectedDataJob(
     /// Названий тип, а не анонімний: архітектурне правило «<c>ToListAsync</c>
     /// без <c>Take</c>» читає інструкцію цілком (`D1-08`).
     /// </remarks>
-    private sealed record PointRow(DateTime Timestamp, decimal? Value, string? Quality)
+    private sealed record PointRow(DateTime Timestamp, decimal? Value, string? Quality, int? UnitId)
     {
         /// <summary>
         /// Точка для згортки за часом: придатна, лише якщо має число і якість

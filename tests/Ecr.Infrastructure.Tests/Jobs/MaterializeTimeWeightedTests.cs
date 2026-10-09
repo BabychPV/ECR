@@ -150,12 +150,62 @@ public sealed class MaterializeTimeWeightedTests(SqlServerFixture sql)
         Assert.Null(await CellAsync(stand, stand.Columns[1]));
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-16.10")]
+    public async Task Точки_періоду_в_різних_одиницях_джерела_не_згортаються_мовчки()
+    {
+        // ⛔ X3-02: після прийняття нової одиниці джерела (ФВ-16.9) мапінг оголошує `Sm3_per_h`, а точка
+        // ДО періоду (межова для інтеграла) лишилась зібраною в `Sm3_per_s`. Переведення всього ряду за
+        // поточною одиницею мапінгу дало б тихо хибний об'єм (×1/3600 на краю).
+        var stand = await ArrangeAsync(
+            new Field("OK", AggregationKind.Avg, null, null, [new(MidJanuary, 5m)]),
+            new Field("MIX", AggregationKind.TimeIntegral, "Sm3_per_h", "Sm3",
+            [
+                new(new DateTime(2025, 12, 25, 0, 0, 0, DateTimeKind.Utc), 3.6m, "Sm3_per_s"),
+                new(MidJanuary, 3.6m, "Sm3_per_h"),
+                new(new DateTime(2026, 2, 5, 0, 0, 0, DateTimeKind.Utc), 3.6m, "Sm3_per_h"),
+            ]));
+
+        // ⛔ МУТАЦІЙНИЙ ДОКАЗ: прибрати `HasForeignUnit` із задачі → комірка MIX отримує змішане число,
+        // винятку немає — червоний.
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(() => RunAsync(stand));
+
+        Assert.Equal("ECR-UOM-0422", error.ErrorCode);
+        Assert.Equal("err.ECR-UOM-0422.boundaryConversionFailed", error.Details!["messageKey"]);
+        Assert.Contains("MIX", error.Message, StringComparison.Ordinal);
+
+        Assert.Equal(5m, Assert.IsType<decimal>(await CellAsync(stand, stand.Columns[0])));
+        Assert.Null(await CellAsync(stand, stand.Columns[1]));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-16.10")]
+    public async Task Точки_в_оголошеній_одиниці_джерела_згортаються_як_раніше()
+    {
+        // Контроль до X3-02: усі точки в оголошеній одиниці — та сама 2 678.4, що й без одиниці на точці.
+        var stand = await ArrangeAsync(
+            new Field("INT", AggregationKind.TimeIntegral, "Sm3_per_h", "Sm3",
+            [
+                new(new DateTime(2025, 12, 25, 0, 0, 0, DateTimeKind.Utc), 3.6m, "Sm3_per_h"),
+                new(MidJanuary, 3.6m, "Sm3_per_h"),
+                new(new DateTime(2026, 2, 5, 0, 0, 0, DateTimeKind.Utc), 3.6m, "Sm3_per_h"),
+            ]));
+
+        var written = await RunAsync(stand);
+
+        Assert.Equal(2678.4m, Assert.Single(written).Value);
+    }
+
     /// <summary>Поле джерела з мапінгом і точками.</summary>
     private sealed record Field(
         string Name, AggregationKind Kind, string? SourceUnit, string? TargetUnit, IReadOnlyList<Point> Points);
 
-    /// <summary>Точка поля.</summary>
-    private sealed record Point(DateTime At, decimal Value);
+    /// <summary>Точка поля; <paramref name="Unit"/> — код одиниці, яку віддало джерело (<c>null</c> — не віддало).</summary>
+    private sealed record Point(DateTime At, decimal Value, string? Unit = null);
 
     /// <summary>Усе, що заведено для одного прогону.</summary>
     private sealed record Stand(TestDocument Chain, int EntityId, string RowKey, IReadOnlyList<int> Columns);
@@ -207,7 +257,7 @@ public sealed class MaterializeTimeWeightedTests(SqlServerFixture sql)
             map.SetUnits(await UnitIdAsync(db, field.SourceUnit), await UnitIdAsync(db, field.TargetUnit));
             db.EntityFieldMaps.Add(map);
 
-            points.AddRange(field.Points.Select(p => new SourceDataPoint(path, p.At, p.Value, null, null, "Good")));
+            points.AddRange(field.Points.Select(p => new SourceDataPoint(path, p.At, p.Value, null, p.Unit, "Good")));
         }
 
         await db.SaveChangesAsync(CancellationToken.None);
