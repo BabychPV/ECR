@@ -42,4 +42,13 @@ public interface IRowWindowMapStore
 
     /// <summary>Видаляє прив'язку разом із джерелами.</summary>
     public Task RemoveMapAsync(RowWindowMap map, CancellationToken ct);
+
+    /// <summary>
+    /// Екземпляри таблиці в періодах <c>Open</c>/<c>Grace</c> — адресати підтягування після того, як прив'язку
+    /// завели, змінили чи відновили (аудит I1-02); не більше <paramref name="limit"/>, за зростанням Id.
+    /// </summary>
+    /// <param name="tableDefId">Таблиця прив'язки.</param>
+    /// <param name="limit">Стеля екземплярів.</param>
+    /// <param name="ct">Скасування.</param>
+    public Task<IReadOnlyList<RowWindowFetchRequest>> OpenInstancesAsync(int tableDefId, int limit, CancellationToken ct);
 }

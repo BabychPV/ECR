@@ -12,6 +12,20 @@ namespace Ecr.Application.Integration;
 /// <param name="ToUtc">Кінець, виключно.</param>
 public sealed record RowWindowSpan(DateTime FromUtc, DateTime ToUtc);
 
+/// <summary>Звідки й як рядок рахується ЗАРАЗ — те, що провенанс комірки мусить повторювати.</summary>
+/// <param name="RowWindowMapId">Прив'язка.</param>
+/// <param name="SourceEntityId">Сутність джерела, яку дав селектор рядка.</param>
+/// <param name="SourceField">Шлях атрибута.</param>
+/// <param name="Summary">Спосіб згортки прив'язки.</param>
+/// <param name="TargetUnitId">Одиниця колонки-цілі.</param>
+/// <remarks>
+/// ⛔ Аудит I1-02: без цього <see cref="RowWindowFetch.NeedsFetch"/> порівнював лише вікно, і правка
+/// селектора (FL-1 → FL-2), атрибута, згортки чи одиниці лишала в комірці число за старою
+/// конфігурацією як «уже підтягнуте».
+/// </remarks>
+public sealed record RowWindowProvenance(
+    int RowWindowMapId, int SourceEntityId, string SourceField, RowWindowSummaryKind Summary, int TargetUnitId);
+
 /// <summary>Підсумок згортки одного вікна: статус, значення й опис конверсії.</summary>
 /// <param name="Status">Статус запису провенансу.</param>
 /// <param name="ValueSource">Згорнуте значення в одиниці джерела (для <c>Total</c> — «одиниця × секунда»).</param>
@@ -157,16 +171,39 @@ public static class RowWindowFetch
     /// <param name="span">Вікно рядка зараз.</param>
     /// <param name="refetchWithinDays">Скільки діб повторювати за пізніми даними PI.</param>
     /// <param name="utcNow">Зараз.</param>
+    /// <param name="expected">
+    /// Звідки рядок рахується зараз; <c>null</c> — не порівнювати (лише вікно й статус).
+    /// </param>
     /// <returns>
-    /// <c>true</c> — записів немає; вікно змінилося; або значення неповне (<c>NoData</c>, <c>Partial</c>,
+    /// <c>true</c> — записів немає; вікно, джерело, атрибут, згортка, одиниця чи прив'язка змінилися;
+    /// попередній запис — «немає джерела для селектора»; або значення неповне (<c>NoData</c>, <c>Partial</c>,
     /// <c>SourceError</c>) і вікно закрилося не раніше, ніж <paramref name="refetchWithinDays"/> діб тому;
     /// або вікно на момент читання ще не закрилося (<c>ToUtc &gt; RetrievedAt</c>).
     /// </returns>
-    public static bool NeedsFetch(RowWindowValue? current, RowWindowSpan span, int refetchWithinDays, DateTime utcNow)
+    public static bool NeedsFetch(
+        RowWindowValue? current, RowWindowSpan span, int refetchWithinDays, DateTime utcNow, RowWindowProvenance? expected = null)
     {
         ArgumentNullException.ThrowIfNull(span);
 
         if (current is null || current.FromUtc != span.FromUtc || current.ToUtc != span.ToUtc)
+        {
+            return true;
+        }
+
+        // ⛔ Аудит I1-02: те саме вікно, але інше «звідки й як» — число в комірці належить старому
+        // джерелу чи старій конфігурації прив'язки, і «вже підтягнуто» тут неправда.
+        if (expected is not null
+            && (current.RowWindowMapId != expected.RowWindowMapId
+                || current.SourceEntityId != expected.SourceEntityId
+                || !string.Equals(current.SourceField, expected.SourceField, StringComparison.OrdinalIgnoreCase)
+                || current.Summary != expected.Summary
+                || current.TargetUnitId != expected.TargetUnitId))
+        {
+            return true;
+        }
+
+        // Селектор рядка раніше не мав джерела, а тепер має (його виправили чи додали джерело).
+        if (current.Status is RowWindowValueStatus.NotApplicable)
         {
             return true;
         }

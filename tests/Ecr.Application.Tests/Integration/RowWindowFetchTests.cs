@@ -260,6 +260,37 @@ public sealed class RowWindowFetchTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Finding", "I1-02")]
+    public void Інше_джерело_атрибут_згортка_одиниця_чи_прив_язка_потребують_підтягування()
+    {
+        // Stored: прив'язка 1, сутність 1, «tag», Total, одиниця 10.
+        var stored = Stored(RowWindowValueStatus.Fetched);
+        var same = new RowWindowProvenance(1, 1, "TAG", RowWindowSummaryKind.Total, 10);
+
+        // Регістр шляху атрибута не різниця (PI порівнює без регістру).
+        Assert.False(RowWindowFetch.NeedsFetch(stored, Span, 7, Now, same));
+
+        // ⛔ МУТАЦІЙНИЙ ДОКАЗ: прибрати порівняння провенансу в NeedsFetch — усі п'ять false.
+        Assert.True(RowWindowFetch.NeedsFetch(stored, Span, 7, Now, same with { SourceEntityId = 2 }));
+        Assert.True(RowWindowFetch.NeedsFetch(stored, Span, 7, Now, same with { SourceField = "tag2" }));
+        Assert.True(RowWindowFetch.NeedsFetch(stored, Span, 7, Now, same with { Summary = RowWindowSummaryKind.Average }));
+        Assert.True(RowWindowFetch.NeedsFetch(stored, Span, 7, Now, same with { TargetUnitId = 11 }));
+        Assert.True(RowWindowFetch.NeedsFetch(stored, Span, 7, Now, same with { RowWindowMapId = 2 }));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Finding", "I1-02")]
+    public void Рядок_що_не_мав_джерела_підтягується_щойно_джерело_з_явилося()
+    {
+        var stored = Stored(RowWindowValueStatus.NotApplicable);
+
+        Assert.True(RowWindowFetch.NeedsFetch(
+            stored, Span, 0, Now, new RowWindowProvenance(1, 1, "tag", RowWindowSummaryKind.Total, 10)));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait("Directive", "HSE301-A1")]
     public void Повне_значення_закритого_вікна_вдруге_не_підтягується()
     {

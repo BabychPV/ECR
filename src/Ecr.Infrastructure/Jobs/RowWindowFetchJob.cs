@@ -30,7 +30,9 @@ namespace Ecr.Infrastructure.Jobs;
 /// ⚠ Провенанс (<c>ext.RowWindowValue</c>) додається, а не переписується: попередній чинний запис комірки
 /// знімається (<c>IsCurrent = 0</c>) окремим збереженням ДО вставки нового — унікальний індекс «чинний запис —
 /// один» не пробачає їхнього порядку в одному пакеті. «Немає джерела для селектора» й недійсне вікно прив'язки
-/// без жодного джерела лише лічаться: <c>RowWindowValue</c> має ключ на сутність джерела, якої тут немає.
+/// без жодного джерела лише лічаться: <c>RowWindowValue</c> має ключ на сутність джерела, якої тут немає. Виняток —
+/// рядок, у комірці якого вже стоїть число іншого джерела (селектор змінили): провенанс <c>NotApplicable</c> пишеться
+/// на те джерело, чиє число лишилося (аудит I1-02).
 /// </para>
 /// </remarks>
 public sealed class RowWindowFetchJob(
@@ -261,10 +263,24 @@ public sealed class RowWindowFetchJob(
             if (source is null)
             {
                 totals.NotApplicable++;
+
+                // ⛔ Аудит I1-02: селектор рядка більше не має джерела, а в комірці — число ІНШОГО
+                // джерела. Провенанс фіксує «немає джерела» (раз: далі чинний запис уже такий), і
+                // журнал покриття каже, що число в комірці — не цього рядка (I1-03).
+                if (current is not null && current.Status != RowWindowValueStatus.NotApplicable)
+                {
+                    items.Add(Item.NotApplicable(row.Key, current, span));
+                }
+
                 continue;
             }
 
-            if (!RowWindowFetch.NeedsFetch(current, span, map.RefetchWithinDays, now))
+            // ⛔ Аудит I1-02: порівнюється не лише вікно, а й «звідки й як» — селектор, атрибут,
+            // згортка, одиниця, прив'язка. Правка селектора ставила задачу (RowWindowTrigger), але
+            // рядок пропускався як «уже підтягнутий», і в комірці лишався об'єм старого факела.
+            var expected = new RowWindowProvenance(
+                map.Id, source.SourceEntityId, source.SourceField, map.Summary, map.TargetUnitId);
+            if (!RowWindowFetch.NeedsFetch(current, span, map.RefetchWithinDays, now, expected))
             {
                 continue;
             }
@@ -295,6 +311,7 @@ public sealed class RowWindowFetchJob(
                 case RowWindowValueStatus.NoData: totals.NoData++; break;
                 case RowWindowValueStatus.KeptManual: totals.KeptManual++; break;
                 case RowWindowValueStatus.InvalidWindow: break;
+                case RowWindowValueStatus.NotApplicable: break;
                 default: totals.Failed++; break;
             }
         }
@@ -387,7 +404,7 @@ public sealed class RowWindowFetchJob(
         var fold = RowWindowFetch.Fold(
             map.Summary, result, map.MinPercentGood, source.SourceUnitId, map.TargetUnitId, units);
 
-        return new Item(rowKey, source, span.FromUtc, span.ToUtc, fold, result)
+        return new Item(rowKey, source.SourceEntityId, source.SourceField, span.FromUtc, span.ToUtc, fold, result)
         {
             Reads = true,
         };
@@ -540,8 +557,8 @@ public sealed class RowWindowFetchJob(
                 item.RowKey,
                 map.TargetColumnDefId,
                 map.Id,
-                item.Source.SourceEntityId,
-                item.Source.SourceField,
+                item.SourceEntityId,
+                item.SourceField,
                 item.FromUtc,
                 item.ToUtc,
                 map.Summary,
@@ -581,14 +598,23 @@ public sealed class RowWindowFetchJob(
 
     /// <summary>Наслідок одного рядка перед записом.</summary>
     private sealed class Item(
-        string rowKey, RowWindowSource source, DateTime fromUtc, DateTime toUtc, RowWindowFold? fold, WindowResult? result)
+        string rowKey,
+        int sourceEntityId,
+        string sourceField,
+        DateTime fromUtc,
+        DateTime toUtc,
+        RowWindowFold? fold,
+        WindowResult? result)
     {
         /// <summary>Мітка «немає меж» для недійсного вікна: колонки провенансу не приймають <c>NULL</c>.</summary>
         public static readonly DateTime Placeholder = new(1900, 1, 1, 0, 0, 0, DateTimeKind.Unspecified);
 
         public string RowKey { get; } = rowKey;
 
-        public RowWindowSource Source { get; } = source;
+        /// <summary>Сутність джерела провенансу; для «немає джерела» — та, чиє число лишилося в комірці.</summary>
+        public int SourceEntityId { get; } = sourceEntityId;
+
+        public string SourceField { get; } = sourceField;
 
         public DateTime FromUtc { get; } = fromUtc;
 
@@ -615,11 +641,16 @@ public sealed class RowWindowFetchJob(
         }
 
         public static Item Failed(string rowKey, RowWindowSource source, RowWindowSpan span, string code)
-            => new(rowKey, source, span.FromUtc, span.ToUtc,
+            => new(rowKey, source.SourceEntityId, source.SourceField, span.FromUtc, span.ToUtc,
                 new RowWindowFold(RowWindowValueStatus.SourceError, null, null, null, null, code), null);
 
         public static Item Invalid(string rowKey, RowWindowSource source, DateTime? start, DateTime? end)
-            => new(rowKey, source, start ?? end ?? Placeholder, end ?? start ?? Placeholder, null, null);
+            => new(rowKey, source.SourceEntityId, source.SourceField, start ?? end ?? Placeholder, end ?? start ?? Placeholder, null, null);
+
+        /// <summary>Для значення селектора джерела немає; провенанс — на джерело попереднього запису.</summary>
+        public static Item NotApplicable(string rowKey, RowWindowValue previous, RowWindowSpan span)
+            => new(rowKey, previous.SourceEntityId, previous.SourceField, span.FromUtc, span.ToUtc,
+                new RowWindowFold(RowWindowValueStatus.NotApplicable, null, null, null, null, null), null);
     }
 
     /// <summary>Лічильники прогону (прогрес <c>jobs.rowWindowDone</c>).</summary>

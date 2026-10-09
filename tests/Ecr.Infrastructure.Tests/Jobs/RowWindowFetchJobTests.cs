@@ -278,6 +278,69 @@ public sealed class RowWindowFetchJobTests(SqlServerFixture sql)
         Assert.Equal(7m, (await CellsAsync(stand, "R1"))[stand.VolumeColumn].Numeric);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "I1-02")]
+    public async Task Зміна_атрибута_джерела_перечитує_закрите_вікно()
+    {
+        // ⛔ Аудит I1-02: те саме вікно, статус Fetched, вікно закрите — але число в комірці від іншого
+        // атрибута. МУТАЦІЙНИЙ ДОКАЗ: не передавати `expected` у NeedsFetch — другого запиту немає,
+        // у комірці лишається 0.93 старого атрибута.
+        await using var stand = await ArrangeAsync(RowWindowSummaryKind.Total, u => (u.PerHourId, u.StdCubicId));
+        await AddRowAsync(stand, "R1", LocalStart, LocalEnd);
+        var source = new FakeWindowSource(Result(3348m));
+        await RunAsync(stand, source);
+        Assert.Equal(0.93m, (await CellsAsync(stand, "R1"))[stand.VolumeColumn].Numeric);
+
+        await ExecuteAsync(
+            "UPDATE s SET SourceField = N'tag.flare2' FROM ext.RowWindowSource s "
+            + $"JOIN ext.RowWindowMap m ON m.Id = s.RowWindowMapId WHERE m.TargetColumnDefId = {stand.VolumeColumn}");
+        source.Result = Result(7200m);
+        await RunAsync(stand, source, now: Now.AddHours(1));
+
+        Assert.Equal(["tag.total", "tag.flare2"], source.Requests.Select(r => r.SourcePath));
+        Assert.Equal(2m, (await CellsAsync(stand, "R1"))[stand.VolumeColumn].Numeric);
+        var current = Assert.Single(await ValuesAsync(stand), v => v.IsCurrent);
+        Assert.Equal((RowWindowValueStatus.Fetched, "tag.flare2"), (current.Status, current.SourceField));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "I1-02")]
+    public async Task Селектор_без_джерела_пише_провенанс_NotApplicable_раз_а_повернення_джерела_перечитує()
+    {
+        // Єдине джерело стає «лише для FL-9»: рядок без селектора більше не має джерела, а в комірці —
+        // число, підтягнуте з нього раніше. МУТАЦІЙНИЙ ДОКАЗ: прибрати Item.NotApplicable у FetchMapAsync —
+        // чинним лишається Fetched, і провенанс каже, що число в комірці — цього рядка.
+        await using var stand = await ArrangeAsync(RowWindowSummaryKind.Total, u => (u.PerHourId, u.StdCubicId));
+        await AddRowAsync(stand, "R1", LocalStart, LocalEnd);
+        var source = new FakeWindowSource(Result(3348m));
+        await RunAsync(stand, source);
+
+        var selectSource = "FROM ext.RowWindowSource s JOIN ext.RowWindowMap m ON m.Id = s.RowWindowMapId "
+                           + $"WHERE m.TargetColumnDefId = {stand.VolumeColumn}";
+        await ExecuteAsync($"UPDATE s SET SelectorValue = N'FL-9' {selectSource}");
+        await RunAsync(stand, source, now: Now.AddHours(1));
+        await RunAsync(stand, source, now: Now.AddHours(2));
+
+        Assert.Single(source.Requests);
+        var values = (await ValuesAsync(stand)).OrderBy(v => v.Id).ToList();
+        Assert.Equal(
+            [(RowWindowValueStatus.Fetched, false), (RowWindowValueStatus.NotApplicable, true)],
+            values.Select(v => (v.Status, v.IsCurrent)));
+        Assert.Null(values[1].ValueTarget);
+
+        // Джерело знову «для всіх» — рядок перечитується, хоча вікно те саме.
+        await ExecuteAsync($"UPDATE s SET SelectorValue = NULL {selectSource}");
+        source.Result = Result(7200m);
+        await RunAsync(stand, source, now: Now.AddHours(3));
+
+        Assert.Equal(2, source.Requests.Count);
+        Assert.Equal(2m, (await CellsAsync(stand, "R1"))[stand.VolumeColumn].Numeric);
+    }
+
     // ── Стенд ────────────────────────────────────────────────────────────────
 
     private static WindowResult Result(decimal? value, decimal? percentGood = 100m)

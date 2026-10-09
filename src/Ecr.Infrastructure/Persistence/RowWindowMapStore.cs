@@ -1,6 +1,7 @@
 using Ecr.Application.Ports;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Entities.External;
+using Ecr.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
 
 namespace Ecr.Infrastructure.Persistence;
@@ -54,6 +55,27 @@ public sealed class RowWindowMapStore(EcrDbContext db) : IRowWindowMapStore
         ArgumentNullException.ThrowIfNull(map);
 
         db.RemoveRange(map.Sources);
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<RowWindowFetchRequest>> OpenInstancesAsync(
+        int tableDefId, int limit, CancellationToken ct)
+    {
+        // Стан — того періоду проєкту документа, якому належить екземпляр: Scheduled ще нема що рахувати,
+        // закритий не змінюється (так само відсіює й сама задача підтягування).
+        var instances = await (
+                from t in db.TableInstances.AsNoTracking()
+                join d in db.Documents.AsNoTracking() on t.DocumentId equals d.Id
+                join p in db.Periods.AsNoTracking()
+                    on new { d.ProjectId, t.PeriodKeyValue } equals new { p.ProjectId, p.PeriodKeyValue }
+                where t.TableDefId == tableDefId && (p.State == PeriodState.Open || p.State == PeriodState.Grace)
+                orderby t.Id
+                select new { t.Id, t.PeriodKeyValue })
+            .Take(limit)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        return [.. instances.Select(i => new RowWindowFetchRequest(i.Id, i.PeriodKeyValue))];
     }
 
     /// <inheritdoc />

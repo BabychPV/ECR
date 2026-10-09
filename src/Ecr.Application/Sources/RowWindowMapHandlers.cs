@@ -161,6 +161,38 @@ internal static class RowWindowMapSupport
         => new[] { map.TargetColumnDefId, map.StartColumnDefId, map.EndColumnDefId, map.SelectorColumnDefId ?? 0 }
             .Where(id => id != 0);
 
+    /// <summary>Стеля екземплярів, яким одна правка прив'язки ставить підтягування.</summary>
+    /// <remarks>Та сама, що в щогодинного повтору (<c>RowWindowRefetchJob.MaxInstances</c>).</remarks>
+    public const int MaxFetchInstances = 1_000;
+
+    /// <summary>
+    /// Ставить підтягування всім екземплярам таблиці прив'язки у відкритих періодах (аудит I1-02).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Без цього заведена чи змінена прив'язка не підтягувала НІЧОГО в рядки, що вже існують: тригер
+    /// реагує лише на правку Початку/Кінця/селектора, а щогодинний повтор бере тільки рядки з наявним
+    /// провенансом. Правки вікон під час паузи тригера теж не ставили (індекс прив'язки на паузі не містить).
+    /// Злиття за екземпляром: сплеск правок дає одну задачу.
+    /// </remarks>
+    public static async Task EnqueueFetchAsync(
+        IRowWindowMapStore store, IBackgroundJobScheduler jobs, RowWindowMap map, CancellationToken ct)
+    {
+        if (!map.IsActive)
+        {
+            return;
+        }
+
+        var instances = await store.OpenInstancesAsync(map.TableDefId, MaxFetchInstances, ct).ConfigureAwait(false);
+
+        foreach (var instance in instances)
+        {
+            await jobs
+                .EnqueueCoalescedAsync<IRowWindowFetchJob>(
+                    RowWindowFetchTarget.Of(instance.TableInstanceId), instance, ct, createdByUserId: null)
+                .ConfigureAwait(false);
+        }
+    }
+
     /// <summary>DTO однієї прив'язки з кодами колонок (один запит).</summary>
     public static async Task<RowWindowMapDto> ToDtoAsync(IRowWindowMapStore store, RowWindowMap map, CancellationToken ct)
         => ToDto(map, await store.FindColumnsAsync([.. ColumnIds(map)], ct).ConfigureAwait(false));
@@ -348,7 +380,8 @@ public sealed class CreateRowWindowMapHandler(
     IUnitOfWork uow,
     IAuditWriter audit,
     IClock clock,
-    IRowWindowColumnIndex columnIndex)
+    IRowWindowColumnIndex columnIndex,
+    IBackgroundJobScheduler jobs)
 {
     /// <summary>Операція в журналі структурних змін.</summary>
     public const string AuditOperation = "CreateRowWindowMap";
@@ -430,6 +463,8 @@ public sealed class CreateRowWindowMapHandler(
         // ставила б підтягування (IRowWindowTrigger питає індекс, а не базу).
         columnIndex.Invalidate();
 
+        await RowWindowMapSupport.EnqueueFetchAsync(store, jobs, created!, ct).ConfigureAwait(false);
+
         return RowWindowMapSupport.ToDto(created!, columns);
     }
 }
@@ -450,7 +485,8 @@ public sealed class UpdateRowWindowMapHandler(
     IUnitOfWork uow,
     IAuditWriter audit,
     IClock clock,
-    IRowWindowColumnIndex columnIndex)
+    IRowWindowColumnIndex columnIndex,
+    IBackgroundJobScheduler jobs)
 {
     /// <summary>Операція в журналі структурних змін.</summary>
     public const string AuditOperation = "UpdateRowWindowMap";
@@ -525,6 +561,10 @@ public sealed class UpdateRowWindowMapHandler(
         // Колонки Початку/Кінця/селектора могли змінитися, а активність — вимкнутися: скидаємо знімок індексу.
         // Старі RowWindowValue лишаються історією — PUT їх не чіпає.
         columnIndex.Invalidate();
+
+        // ⛔ Аудит I1-02: нова конфігурація (джерела, згортка, одиниця) чи відновлення з паузи — рядки
+        // відкритих періодів перечитуються; що саме, вирішує NeedsFetch за провенансом.
+        await RowWindowMapSupport.EnqueueFetchAsync(store, jobs, map, ct).ConfigureAwait(false);
 
         return RowWindowMapSupport.ToDto(map, columns);
     }
