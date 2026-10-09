@@ -99,7 +99,7 @@ public sealed partial class RegistryBatchHandler(
             await uow.ExecuteInTransactionAsync(
                 async token =>
                 {
-                    await DeleteAsync(registryCode, states, token).ConfigureAwait(false);
+                    await DeleteAsync(registryCode, states, dryRun, token).ConfigureAwait(false);
                     await CheckKeysAsync(definition, states, token).ConfigureAwait(false);
                     written = await WriteAsync(definition, states, dryRun, token).ConfigureAwait(false);
 
@@ -285,13 +285,13 @@ public sealed partial class RegistryBatchHandler(
     }
 
     /// <summary>Видалення — наявним обробником (посилання, каскад композиції, ключі, журнал).</summary>
-    private async Task DeleteAsync(string registryCode, List<RowState> states, CancellationToken ct)
+    private async Task DeleteAsync(string registryCode, List<RowState> states, bool dryRun, CancellationToken ct)
     {
         foreach (var state in states.Where(s => s.Item.Op == "delete" && s.Errors.Count == 0))
         {
             try
             {
-                await deleter.HandleAsync(registryCode, state.Entry!.Id, ct).ConfigureAwait(false);
+                await deleter.HandleAsync(registryCode, state.Entry!.Id, ct, dryRun).ConfigureAwait(false);
                 state.Deleted = true;
             }
             catch (EcrException ex) when (ex is BusinessRuleException or NotFoundException)

@@ -375,6 +375,11 @@ public sealed class DeleteRegistryEntryHandler(
     /// <param name="registryCode">Довідник зі шляху запиту.</param>
     /// <param name="registryEntryId">Запис.</param>
     /// <param name="ct">Токен скасування.</param>
+    /// <param name="dryRun">
+    /// Прогін, який відкотиться (пробний прогін пакета): ревізію даних довідника й частин не піднімає
+    /// (L5-13) — інакше кожна жива перевірка робила б справжній <c>UPDATE cfg.RegistryDef</c> і тримала його
+    /// блокування до відкату.
+    /// </param>
     /// <exception cref="NotFoundException">
     /// Запису немає — або він належить ІНШОМУ довіднику, ніж названий у шляху.
     /// </exception>
@@ -387,7 +392,7 @@ public sealed class DeleteRegistryEntryHandler(
     /// <c>404</c>, а не видалення і не <c>400</c>: для того, хто питає, запису
     /// в ЦЬОМУ довіднику справді не існує.
     /// </remarks>
-    public async Task HandleAsync(string registryCode, long registryEntryId, CancellationToken ct)
+    public async Task HandleAsync(string registryCode, long registryEntryId, CancellationToken ct, bool dryRun = false)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(registryCode);
 
@@ -480,7 +485,12 @@ public sealed class DeleteRegistryEntryHandler(
         // ⚠ Той самий `definition`, що вже прочитаний вище для звірки коду.
         // Повторне читання тут було б другим запитом за тим самим рядком — і,
         // що гірше, другою правдою про те, який саме довідник змінюється.
-        definition.BumpDataRevision();
+        //
+        // ⛔ L5-13: не в прогоні, що відкотиться (`dryRun` пакета) — ревізію підніме справжній запис.
+        if (!dryRun)
+        {
+            definition.BumpDataRevision();
+        }
 
         // Частини: логічне видалення й ревізія КОЖНОГО зачепленого довідника — інакше кеш
         // переліку складу (ключ — ревізія довідника) віддавав би видалені рядки.
@@ -489,9 +499,12 @@ public sealed class DeleteRegistryEntryHandler(
             part.SoftDelete(userId, clock.UtcNow);
         }
 
-        foreach (var partRegistry in partRegistries)
+        if (!dryRun)
         {
-            partRegistry.BumpDataRevision();
+            foreach (var partRegistry in partRegistries)
+            {
+                partRegistry.BumpDataRevision();
+            }
         }
 
         // ⛔ Слід у журналі структурних змін — як у сусідньої дії над тим самим

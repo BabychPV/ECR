@@ -650,8 +650,13 @@ public sealed class RegistryEntryWriter(
         // ⛔ L5-13: прогін із заглушковими кодами (dryRun сітки) відкотиться, тож ревізію даних не рухаємо —
         // інакше кожна жива перевірка (кожні ~600 мс) робила справжній UPDATE cfg.RegistryDef і тримала
         // його блокування до відкату, гальмуючи сусідні записи.
+        //
+        // ⛔ L5-13 (друга половина): і ключі в такому прогоні не пишемо. `keys.ApplyAsync` бере
+        // `UPDLOCK, HOLDLOCK` на хеші живих тримачів (`LockLiveHoldersAsync`) — тобто жива перевірка сітки
+        // блокувала б справжні записи тих самих ключів до відкату. Конфлікт ключа з тримачем поза пакетом
+        // звіряє `RegistryBatchHandler.CheckKeysAsync` (без блокувань), дубль усередині пакета — крок вище.
         await SaveBatchAsync(
-                definition, keyDefs, keyDefs.Count > 0 ? staged : [], valueChanges, userId, beforeSave: null, ct,
+                definition, keyDefs, keyDefs.Count > 0 && !placeholderAutoCodes ? staged : [], valueChanges, userId, beforeSave: null, ct,
                 bumpRevision: !placeholderAutoCodes)
             .ConfigureAwait(false);
 
