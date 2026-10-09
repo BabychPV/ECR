@@ -35,6 +35,12 @@ public sealed class CreateRegistryHandler(
     /// <summary>Право на заведення довідника (`02-contracts.md` §9).</summary>
     public const string Permission = "Registry.EditDefinition";
 
+    /// <summary>Ключ відмови «код зайнятий» (з <c>{id}</c> зайнятого довідника).</summary>
+    public const string CodeTakenKey = "err.ECR-REG-4091.registryCodeTaken";
+
+    /// <summary>Те саме без <c>{id}</c>: зайнятий довідник закритий читачеві забороною (L5-08).</summary>
+    public const string CodeTakenHiddenKey = "err.ECR-REG-4091.registryCodeTakenHidden";
+
     /// <summary>Заводить довідник без жодного поля.</summary>
     /// <param name="code">Код, унікальний серед довідників.</param>
     /// <param name="name">Назва мовами каталогу.</param>
@@ -50,7 +56,7 @@ public sealed class CreateRegistryHandler(
     {
         ArgumentNullException.ThrowIfNull(name);
 
-        await Security.PermissionCheck
+        var profile = await Security.PermissionCheck
             .RequireAsync(access, currentUser, Permission, ct)
             .ConfigureAwait(false);
 
@@ -64,16 +70,29 @@ public sealed class CreateRegistryHandler(
         var clash = await registries.FindDefinitionAsync(registryCode.Value, ct).ConfigureAwait(false);
         if (clash is not null)
         {
+            // ⛔ L5-08: ідентифікатор довідника, закритого цьому читачеві явною забороною, не віддається —
+            // ні в тексті, ні в details. Сама відмова лишається: код зайнятий, і інакше другий довідник
+            // із таким кодом не завести. (Те, що код зайнятий, людина дізнається з самого запиту — це не
+            // витік; витік — Id, за яким можна адресувати довідник.)
+            var hidden = RegistryAccess.IsDenied(profile, clash.Id);
+            var details = new Dictionary<string, object?>
+            {
+                ["messageKey"] = hidden ? CodeTakenHiddenKey : CodeTakenKey,
+                ["code"] = registryCode.Value,
+            };
+            if (!hidden)
+            {
+                details["id"] = clash.Id.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            }
+
             throw new BusinessRuleException(
                 "ECR-REG-4091",
-                $"Довідник «{registryCode.Value}» уже існує (ідентифікатор {clash.Id}): "
-                + "код — те, чим на нього посилаються поля-довідники і колонки шаблону.",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = "err.ECR-REG-4091.registryCodeTaken",
-                    ["code"] = registryCode.Value,
-                    ["id"] = clash.Id.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                });
+                hidden
+                    ? $"Довідник «{registryCode.Value}» уже існує: "
+                      + "код — те, чим на нього посилаються поля-довідники і колонки шаблону."
+                    : $"Довідник «{registryCode.Value}» уже існує (ідентифікатор {clash.Id}): "
+                      + "код — те, чим на нього посилаються поля-довідники і колонки шаблону.",
+                details);
         }
 
         var definition = new RegistryDef(
