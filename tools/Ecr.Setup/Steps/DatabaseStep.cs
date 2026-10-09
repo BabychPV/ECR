@@ -19,6 +19,8 @@ internal sealed class DatabaseStep : IWizardStep
     private Label? _sqlLoginWarning;
     private CheckBox? _sqlLoginAcknowledge;
     private CheckBox? _skipSchemaCheckBox;
+    private CheckBox? _trustCertificateCheckBox;
+    private Label? _trustCertificateWarning;
 
     public DatabaseStep(WizardState state)
     {
@@ -38,6 +40,7 @@ internal sealed class DatabaseStep : IWizardStep
 
         root.Controls.Add(BuildConnectionGroup());
         root.Controls.Add(BuildAuthGroup());
+        root.Controls.Add(BuildCertificateGroup());
 
         _skipSchemaCheckBox = new CheckBox
         {
@@ -110,8 +113,17 @@ internal sealed class DatabaseStep : IWizardStep
         if (!SqlPreflight.TryVerifyDatabaseExists(
                 _instanceBox!.Text.Trim(), _databaseBox!.Text.Trim(),
                 _windowsAuthOption!.Checked, _loginBox!.Text.Trim(), _sqlPasswordBox!.Text,
-                out error))
+                _trustCertificateCheckBox!.Checked, out error))
         {
+            // L10-04, D-333: без прапорця сертифікат SQL перевіряється — самопідписаний не пройде.
+            if (!_trustCertificateCheckBox.Checked)
+            {
+                error += Environment.NewLine + Environment.NewLine
+                    + "If the error is about the server certificate (\"certificate chain\", \"not trusted\"): "
+                    + "install a certificate trusted by this machine on SQL Server, or tick "
+                    + "\"Trust the SQL Server certificate (unsafe)\".";
+            }
+
             return false;
         }
 
@@ -126,6 +138,56 @@ internal sealed class DatabaseStep : IWizardStep
         state.SqlLogin = state.SqlAuthIsWindows ? null : _loginBox!.Text.Trim();
         state.SqlLoginPassword = state.SqlAuthIsWindows ? null : ToSecure(_sqlPasswordBox!.Text);
         state.SkipSchema = state.Mode == WizardMode.Update && _skipSchemaCheckBox!.Checked;
+        state.TrustSqlServerCertificate = _trustCertificateCheckBox!.Checked;
+    }
+
+    /// <summary>
+    /// ⛔ L10-04, D-333 (HU-12 R3 = A): довіра до сертифіката SQL Server без перевірки —
+    /// типово вимкнена. Увімкнена — служба й sqlcmd не автентифікують сервер (MITM на шляху
+    /// до SQL бачить і пароль SQL-логіна, і дані); вибір повторюється на кроці «Огляд».
+    /// </summary>
+    private GroupBox BuildCertificateGroup()
+    {
+        var group = new GroupBox { Text = "Encryption", Dock = DockStyle.Top, AutoSize = true, Padding = new Padding(8) };
+
+        var layout = new TableLayoutPanel { Dock = DockStyle.Top, ColumnCount = 1, AutoSize = true };
+
+        layout.Controls.Add(new Label
+        {
+            Text = "The connection to SQL Server is always encrypted (Encrypt=Mandatory). By default the "
+                + "server certificate is verified: SQL Server must present a certificate trusted by this "
+                + "machine whose name matches the instance name.",
+            AutoSize = true,
+            MaximumSize = new Size(520, 0),
+            Margin = new Padding(0, 4, 6, 0),
+        });
+
+        _trustCertificateCheckBox = new CheckBox
+        {
+            Text = "Trust the SQL Server certificate (unsafe)",
+            AutoSize = true,
+            Checked = _state.TrustSqlServerCertificate,
+            Margin = new Padding(0, 8, 6, 0),
+        };
+        _trustCertificateWarning = new Label
+        {
+            Text = "Warning: the server certificate will NOT be verified (TrustServerCertificate=True). "
+                + "Anyone on the network path to SQL Server can impersonate it and read the data and the "
+                + "SQL login password. Use only for a self-signed certificate on a test stand.",
+            AutoSize = true,
+            MaximumSize = new Size(520, 0),
+            ForeColor = Color.DarkRed,
+            Visible = _state.TrustSqlServerCertificate,
+            Margin = new Padding(24, 4, 6, 0),
+        };
+        _trustCertificateCheckBox.CheckedChanged +=
+            (_, _) => _trustCertificateWarning.Visible = _trustCertificateCheckBox.Checked;
+
+        layout.Controls.Add(_trustCertificateCheckBox);
+        layout.Controls.Add(_trustCertificateWarning);
+
+        group.Controls.Add(layout);
+        return group;
     }
 
     private GroupBox BuildConnectionGroup()

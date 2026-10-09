@@ -36,7 +36,7 @@ internal static class SqlPreflight
     /// </summary>
     public static bool TryVerifyDatabaseExists(
         string sqlInstance, string database, bool windowsAuth, string sqlLogin, string sqlPassword,
-        out string error)
+        bool trustServerCertificate, out string error)
     {
         var timeoutText = TimeoutSeconds.ToString(CultureInfo.InvariantCulture);
 
@@ -54,7 +54,13 @@ internal static class SqlPreflight
         };
         psi.ArgumentList.Add("-S");
         psi.ArgumentList.Add(sqlInstance);
-        psi.ArgumentList.Add("-C");
+        // ⛔ L10-04, D-333: -C (довіряти сертифікату без перевірки) — лише за прапорцем майстра,
+        // як і в deploy-ecr.ps1 та рядку підключення служби.
+        if (trustServerCertificate)
+        {
+            psi.ArgumentList.Add("-C");
+        }
+
         psi.ArgumentList.Add("-b");
         psi.ArgumentList.Add("-I");
         psi.ArgumentList.Add("-l");

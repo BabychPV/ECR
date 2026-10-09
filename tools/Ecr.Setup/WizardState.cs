@@ -66,6 +66,11 @@ internal sealed class WizardState
     public SecureString? SqlLoginPassword { get; set; }
     public bool SkipSchema { get; set; }
 
+    // ⛔ L10-04, D-333 (HU-12 R3 = A): довіряти сертифікату SQL Server без перевірки — свідомий
+    // вибір адміністратора, ТИПОВО ВИМКНЕНО. Вимкнено — TrustServerCertificate=False і sqlcmd без
+    // -C: з Encrypt=Mandatory сервер має пред'явити сертифікат, якому довіряє ця машина.
+    public bool TrustSqlServerCertificate { get; set; }
+
     // Крок 4 — пароль адміністратора (лише для FirstDeployment).
     public SecureString? BootstrapPassword { get; set; }
 

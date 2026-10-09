@@ -99,7 +99,7 @@ Api й воркер на **одному** хості — різні ролі й 
 
 | Ключ | Дефолт | Значення |
 |---|---|---|
-| `ConnectionStrings:Ecr` | порожньо | рядок підключення до SQL Server. **Секрет**: `ECR_ConnectionStrings__Ecr` |
+| `ConnectionStrings:Ecr` | порожньо | рядок підключення до SQL Server. **Секрет**: `ECR_ConnectionStrings__Ecr`. ✎ 2026-10-09 (`D-333`): майстер пише `Encrypt=Mandatory;TrustServerCertificate=False` — сертифікат SQL перевіряється; `True` — лише свідомим прапорцем (самопідписаний сертифікат, стенд) |
 | `Schema:StartupMode` | `Validate` | `Validate` — не стартувати, якщо є незастосовані міграції EF. `Migrate` — застосувати незастосовані міграції EF на старті (лише dev/test: у проді обліковий запис служби не має DDL-прав, `D-66`; скрипти `Sql/*.sql` цей режим не виконує) |
 | `Database:EditionMode` | `Auto` | режим редакції SQL Server (`Standard` / `Enterprise`). `Auto` — визначити самостійно на старті. `deploy-ecr.ps1` записує визначене при установці значення в `ECR_Database__EditionMode`, якщо його не задано явно (`docs/build/11-install-guide.md` §2.5) |
 | `Database:CommandTimeoutSeconds` | 60 | таймаут команди SQL, с |
@@ -912,6 +912,13 @@ DataProtection … не захищені»). ⛔ ✎ 2026-09-30: `Environment` �
    `-BehindHttpsProxy` / `-AllowHttp` (інакше зупинка на кроці 1 «Транспорт не обрано»),
    `-ConnectionString`, `-ServiceAccount`, `-PreviousDataProtectionCertificateThumbprints`
    (якщо був) і `-DisableWorker` (якщо воркера не має бути).
+
+   ⛔ ✎ 2026-10-09 (`D-333`, L10-04): `deploy-ecr.ps1` більше **не** довіряє сертифікату
+   SQL Server без перевірки (`sqlcmd` без `-C`). Якщо SQL Server досі на самопідписаному
+   сертифікаті, оновлення зупиниться на кроці 1 з помилкою ланцюга сертифіката: поставте
+   на SQL Server сертифікат, якому довіряє сервер застосунку (ім'я = `-SqlInstance`), або —
+   свідомо, лише стенд — додайте `-TrustServerCertificate`. Те саме для рядка `$cs`:
+   `Encrypt=Mandatory;TrustServerCertificate=False` (або `True` за тим самим вибором).
 
    Спершу запустіть із `-WhatIf`, потім без нього. Кроки скрипта: передумови,
    схема, MSI (`msiexec /qn`), змінні служби, конфіг (лише якщо ще заглушка),
