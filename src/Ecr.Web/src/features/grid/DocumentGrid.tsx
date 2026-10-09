@@ -42,6 +42,7 @@ import {
   rowKeyOfCellKey,
 } from './permissions';
 import { markConfirmed } from './confirmedEdits';
+import { markSliceHidden } from './sliceCache';
 import { UndoStack, type CellEdit } from './undo';
 import {
   buildRequest,
@@ -186,6 +187,14 @@ interface DocumentGridProps {
    * перемальовуються від кліку по зауваженню чужої таблиці.
    */
   navigateTo?: CellNavigationRequest | null;
+
+  /**
+   * Сітка змонтована, але прихована (`C1-01`): режим «одна таблиця», вибрано іншу таблицю.
+   *
+   * ⚠ Прихований зріз не перезапитується після перерахунку чи імпорту — лише стає застарілим
+   * (`markSliceHidden`), а дочитується в мить, коли сітку знову покажуть.
+   */
+  hidden?: boolean;
 }
 
 /** Рядок у моделі grid: значення за кодами колонок плюс службовий ключ. */
@@ -325,6 +334,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
     allowsDynamicRows,
     maxDynamicRows,
     navigateTo = null,
+    hidden = false,
   } = props;
 
   const slice = useQuery({
@@ -345,6 +355,27 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
   const { patch, isPending, status: saveStatus, recalculationJobId } = useCellPatch(documentId);
 
   const queryClient = useQueryClient();
+
+  // C1-01: прихована сітка не бере участі в перезапитах після перерахунку (`invalidateSlices`).
+  useEffect(
+    () => (hidden ? markSliceHidden(tableInstanceId, periodKey) : undefined),
+    [hidden, tableInstanceId, periodKey],
+  );
+
+  // C1-01: показали знову — дочитати зріз, якщо його ІНВАЛІДУВАЛИ, доки сітку не було видно.
+  // ⚠ Саме `isInvalidated`, а не `isStale`: звичайне старіння за `staleTime` поведінки не змінює
+  // (раніше прихована сітка теж не перечитувалася від часу), запит іде лише там, де його
+  // пропустила `invalidateSlices`. ⚠ Лише на перехід «приховано → видно».
+  const wasHidden = useRef(hidden);
+  const { refetch: refetchSlice } = slice;
+  useEffect(() => {
+    const shownNow = wasHidden.current && !hidden;
+    wasHidden.current = hidden;
+    if (!shownNow) return;
+    if (queryClient.getQueryState(['table-slice', tableInstanceId, periodKey])?.isInvalidated === true) {
+      void refetchSlice();
+    }
+  }, [hidden, queryClient, tableInstanceId, periodKey, refetchSlice]);
 
   /**
    * Конфлікт версії, який людина ще не розв'язала (`B-09`).

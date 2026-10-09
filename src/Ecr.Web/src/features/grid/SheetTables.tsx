@@ -174,12 +174,32 @@ export function SheetTables({
   /**
    * Екземпляри таблиць, чиї сітки вже змонтовані.
    *
-   * ⚠ Множина тільки РОСТЕ — див. заборону розмонтовувати в коментарі
-   * компонента. Перемикання аркуша міняє самі `tableInstanceId`, тож
-   * ідентифікатори попереднього аркуша нікому не заважають: вони просто
-   * більше не згадуються.
+   * ⚠ У межах аркуша множина тільки РОСТЕ — див. заборону розмонтовувати в
+   * коментарі компонента.
+   *
+   * ⛔ C1-01: але id, яких на аркуші/періоді вже НЕМАЄ, з неї прибираються
+   * (ефект нижче). Їхні сітки вже розмонтовані перемиканням аркуша (правки
+   * живуть у `pendingStore`, Undo пропало разом із сіткою), а лишені в множині
+   * id при поверненні на аркуш монтували ВСІ колись відвідані сітки одним
+   * комітом — і кожна йшла по свій зріз.
    */
   const [mounted, setMounted] = useState<ReadonlySet<number>>(() => new Set<number>());
+
+  useEffect(() => {
+    const present = new Set(tables.map((table) => table.tableInstanceId));
+
+    setMounted((previous) => {
+      let gone = false;
+      for (const id of previous) {
+        if (!present.has(id)) {
+          gone = true;
+          break;
+        }
+      }
+
+      return gone ? new Set([...previous].filter((id) => present.has(id))) : previous;
+    });
+  }, [tables]);
 
   /** Вузли слотів; заповнює React під час фіксації, ДО ефекту нижче. */
   const slots = useRef(new Map<number, HTMLDivElement>());
@@ -394,6 +414,7 @@ export function SheetTables({
                 allowsDynamicRows={table.allowsDynamicRows}
                 maxDynamicRows={table.maxDynamicRows}
                 navigateTo={navigateTo}
+                hidden={single && !isSelected}
               />
             ) : (
               <LazyTablePlaceholder

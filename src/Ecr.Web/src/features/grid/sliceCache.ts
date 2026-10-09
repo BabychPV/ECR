@@ -111,12 +111,60 @@ export async function invalidateSlices(client: QueryClient, scope: SliceScope): 
     return ids === null || ids.has(address.tableInstanceId);
   };
 
-  await client.invalidateQueries({ predicate: inScope });
+  // C1-01: у межах наміру перезапитуються лише ВИДИМІ зрізи. Приховані сітки режиму «одна
+  // таблиця» (`display: none` у `SheetTables`) лише позначаються застарілими й дочитуються самі,
+  // коли їх знову покажуть (`DocumentGrid`, ефект на `hidden`).
+  await client.invalidateQueries({ predicate: (query) => inScope(query) && !isHiddenSlice(query) });
 
   await client.invalidateQueries({
-    predicate: (query) => isSliceKey(query.queryKey) && !inScope(query),
+    predicate: (query) => isSliceKey(query.queryKey) && (!inScope(query) || isHiddenSlice(query)),
     refetchType: 'none',
   });
+}
+
+/**
+ * Зрізи, чиї сітки змонтовані, але приховані (`C1-01`): ключ `tableInstanceId:periodKey` →
+ * скільки прихованих спостерігачів його тримає.
+ *
+ * ⛔ Реєстр саме ПРИХОВАНИХ, а не видимих: зріз, про який ніхто нічого не заявив (інший
+ * споживач, стек «усі таблиці», тест), лишається на старій поведінці — перезапитується. Помилка в
+ * реєстрації може коштувати зайвого запиту, але не застарілих даних на екрані.
+ *
+ * ⚠ Лічильник, а не множина: дві сітки одного зрізу (теоретично) не мають знімати позначку одна
+ * за одну.
+ */
+const hiddenSlices = new Map<string, number>();
+
+function sliceId(tableInstanceId: number, periodKey: number): string {
+  return `${String(tableInstanceId)}:${String(periodKey)}`;
+}
+
+function isHiddenSlice(query: Query): boolean {
+  const address = sliceAddressOf(query.queryKey);
+  if (address === null) return false;
+
+  return (hiddenSlices.get(sliceId(address.tableInstanceId, address.periodKey)) ?? 0) > 0;
+}
+
+/**
+ * Позначає зріз прихованим; повертає функцію, що знімає позначку (для прибирання ефекту).
+ *
+ * Прихований зріз не перезапитується інвалідацією `invalidateSlices`, а лише стає застарілим.
+ */
+export function markSliceHidden(tableInstanceId: number, periodKey: number): () => void {
+  const id = sliceId(tableInstanceId, periodKey);
+  hiddenSlices.set(id, (hiddenSlices.get(id) ?? 0) + 1);
+
+  let released = false;
+
+  return () => {
+    if (released) return;
+    released = true;
+
+    const left = (hiddenSlices.get(id) ?? 1) - 1;
+    if (left > 0) hiddenSlices.set(id, left);
+    else hiddenSlices.delete(id);
+  };
 }
 
 /**

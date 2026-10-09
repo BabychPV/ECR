@@ -3,7 +3,7 @@ import { QueryClient, QueryObserver, focusManager } from '@tanstack/react-query'
 import type { DocumentTableDto } from '@/api/types';
 import { queryKeys } from '@/api/queryKeys';
 import { createQueryClient } from '@/app/queryClient';
-import { applySliceCachePolicy, invalidateSlices, markSlicesStale } from '../sliceCache';
+import { applySliceCachePolicy, invalidateSlices, markSliceHidden, markSlicesStale } from '../sliceCache';
 
 /**
  * `CL-02` (`DIRECTIVE-14-ARCH.md` §3.5): інвалідація зрізів адресна, а
@@ -243,5 +243,34 @@ describe('CL-02 · політика кешу зрізів', () => {
     // застигають на п'ять хвилин.
     expect(client.getQueryDefaults(['documents']).refetchOnWindowFocus).toBeUndefined();
     expect(client.getQueryDefaults(queryKeys.registries.list()).staleTime).toBeUndefined();
+  });
+});
+
+describe('C1-01 · приховані сітки «одна таблиця» не перезапитуються', () => {
+  it('прихований зріз лише стає застарілим; після зняття позначки знову перезапитується', async () => {
+    const { client, reads, stop } = stand();
+    await vi.waitFor(() => expect(reads(701)).toBe(1));
+    await vi.waitFor(() => expect(reads(700)).toBe(1));
+
+    const release = markSliceHidden(701, PeriodKey);
+
+    // Перерахунок, що щось записав: намір — увесь документ і період (`settleRecalculation`).
+    await invalidateSlices(client, { documentId: DocumentId, periodKey: PeriodKey });
+
+    expect(reads(700)).toBe(2);
+    // ⛔ Ядро: прихований зріз не запитувався, але позначений інвалідованим — сітка дочитає його при показі.
+    expect(reads(701)).toBe(1);
+    expect(
+      client.getQueryCache().find({ queryKey: queryKeys.slices.one(701, PeriodKey) })?.state.isInvalidated,
+    ).toBe(true);
+
+    release();
+    // Подвійне зняття не має знімати чужу позначку.
+    release();
+
+    await invalidateSlices(client, { documentId: DocumentId, periodKey: PeriodKey });
+    expect(reads(701)).toBe(2);
+
+    stop();
   });
 });
