@@ -812,13 +812,39 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock, IMemory
     private async Task<SnapshotStatus> StatusOfDataAsync(
         int projectId, PeriodKey? periodKey, CancellationToken ct)
     {
+        // ⛔ R5-W1 / W1-02: джерело рядків — СКЛАД документів проєкту
+        // (`doc.DocumentSheet`, `IsIncluded`) × періоди, а рядок
+        // `wf.ApprovalState` лише ДОповнює його; аркуш без рядка стану — `Draft`.
+        // Раніше джерелом були самі рядки стану, а вони з'являються лише з
+        // першою дією робочого процесу (`WorkflowStore.GetOrCreateAsync`): один
+        // поданий аркуш із 48 давав зрізу `Submitted`, і звіт ішов у `rpt.v_*`
+        // як поданий. Те саме правило, що в `DocumentStore.SheetStatesQuery` і
+        // `CampaignSummaryStore` (U-03): аркуш поза складом не враховується.
+        //
+        // ⚠ Річний зріз (`periodKey == null`) — УСІ періоди проєкту: зріз за рік
+        // поданий лише тоді, коли подано кожен період. Це найсуворіше
+        // прочитання D-65 — ранній «поданий» річний звіт гірший за чернетковий.
+        //
+        // ⚠ Корельований підзапит (`OUTER APPLY`), не цикл; `PeriodKey` — у
+        // предикаті партиційованої `wf.ApprovalState` (урок `WR-05`).
+        int? key = periodKey?.Value;
+
         var query =
-            from state in db.ApprovalStates.AsNoTracking()
-            join document in db.Documents.AsNoTracking()
-                on state.DocumentId equals document.Id
+            from document in db.Documents.AsNoTracking()
             where document.ProjectId == projectId
-                  && (periodKey == null || state.PeriodKey == periodKey.Value.Value)
-            select state.Status;
+            join sheet in db.DocumentSheets.AsNoTracking()
+                on document.Id equals sheet.DocumentId
+            where sheet.IsIncluded
+            from period in db.Periods.AsNoTracking()
+            where period.ProjectId == projectId
+                  && (key == null || period.PeriodKeyValue == key)
+            select db.ApprovalStates
+                       .Where(a => a.DocumentId == document.Id
+                                   && a.SheetDefId == sheet.SheetDefId
+                                   && a.PeriodKey == period.PeriodKeyValue)
+                       .Select(a => (DocumentStatus?)a.Status)
+                       .FirstOrDefault()
+                   ?? DocumentStatus.Draft;
 
         // ⛔ AN-120 / L1-01: які статуси є — агрегатом у SQL, а не першими
         // `MaxRows` станами за `Id`. Підмножина могла не містити саме того

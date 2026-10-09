@@ -143,6 +143,48 @@ public sealed partial class WorkflowTransactionTests
         Assert.Equal(SnapshotStatus.Draft, (await ReportSnapshotAsync(world.SnapshotId).ConfigureAwait(true)).Status);
     }
 
+    // ─────────────────────────── W1-02 ───────────────────────────
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "D-65")]
+    public async Task W1_02_Аркуш_складу_без_рядка_стану_тримає_зріз_у_Draft()
+    {
+        // Без фіксу: рядок `wf.ApprovalState` є лише в поданого аркуша, другий (ще не
+        // торканий) просто не потрапляв у перелік — {Submitted} → зріз `Submitted` і в `rpt.v_*`.
+        var world = await ArrangeSnapshotAsync(DocumentStatus.Submitted, other: null).ConfigureAwait(true);
+
+        using var cache = new MemoryCache(new MemoryCacheOptions());
+        await using var db = CreateContext();
+
+        var status = await Builder(db, cache).RefreshStatusAsync(world.SnapshotId, CancellationToken.None)
+            .ConfigureAwait(true);
+
+        Assert.Equal(SnapshotStatus.Draft, status);
+        Assert.Equal(SnapshotStatus.Draft, (await ReportSnapshotAsync(world.SnapshotId).ConfigureAwait(true)).Status);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "D-65")]
+    public async Task W1_02_Аркуш_поза_складом_зі_старим_Draft_не_тримає_зріз()
+    {
+        // Без фіксу: виключений зі складу аркуш (`IsIncluded = 0`) зі старим рядком
+        // `Draft` назавжди тримав зріз у `Draft` — склад не враховувався взагалі.
+        var world = await ArrangeSnapshotAsync(DocumentStatus.Submitted, DocumentStatus.Draft).ConfigureAwait(true);
+        await ExcludeSheetAsync(world.World.DocumentId, world.OtherSheetDefId).ConfigureAwait(true);
+
+        using var cache = new MemoryCache(new MemoryCacheOptions());
+        await using var db = CreateContext();
+
+        var status = await Builder(db, cache).RefreshStatusAsync(world.SnapshotId, CancellationToken.None)
+            .ConfigureAwait(true);
+
+        Assert.Equal(SnapshotStatus.Submitted, status);
+    }
+
     // ────────────────────────────── збірка ────────────────────────────
 
     private static ReportSnapshotBuilder Builder(EcrDbContext db, IMemoryCache cache)
@@ -158,6 +200,19 @@ public sealed partial class WorkflowTransactionTests
     {
         await using var db = CreateContext();
         return await db.ReportSnapshots.AsNoTracking().SingleAsync(s => s.Id == snapshotId).ConfigureAwait(false);
+    }
+
+    private async Task ExcludeSheetAsync(long documentId, int sheetDefId)
+    {
+        await using var connection = new SqlConnection(sql.ConnectionString);
+        await connection.OpenAsync().ConfigureAwait(false);
+
+        await using var command = connection.CreateCommand();
+        command.CommandText =
+            "UPDATE doc.DocumentSheet SET IsIncluded = 0 WHERE DocumentId = @documentId AND SheetDefId = @sheetDefId;";
+        command.Parameters.AddWithValue("@documentId", documentId);
+        command.Parameters.AddWithValue("@sheetDefId", sheetDefId);
+        Assert.Equal(1, await command.ExecuteNonQueryAsync().ConfigureAwait(false));
     }
 
     // ────────────────────────────── підготовка ────────────────────────
