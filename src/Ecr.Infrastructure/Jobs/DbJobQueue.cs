@@ -297,7 +297,14 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock) : IJobQueue
         await EnsureRcsiAsync(ct).ConfigureAwait(false);
 
         // Значення лейна в SQL — константа з JobLanes.All, а не рядок викликача.
-        var ordered = JobLanes.All.Where(l => lanes.Contains(l, StringComparer.Ordinal)).ToArray();
+        // ⛔ J1-04: ПОРЯДОК — викликача. Жорсткий порядок JobLanes.All (interactive першим) під
+        // сталим потоком перерахунку формул морив лейн default голодом: спільні місця воркера
+        // ніколи не доходили до матеріалізації, синку подій і знімків звітів. Чергування лейнів
+        // вирішує воркер (`JobWorker.Rotate`), черга лише виконує його порядок.
+        var ordered = lanes
+            .Select(l => JobLanes.All.First(k => string.Equals(k, l, StringComparison.Ordinal)))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
         var token = Guid.NewGuid();
 
         void Bind(SqlParameterCollection p, string lane)

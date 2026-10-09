@@ -45,6 +45,10 @@ public interface IJobQueue
     /// Бере одну задачу з лейнів: спершу прострочені <c>Running</c>
     /// (переклейм), далі <c>Queued</c>, лише якщо на ціль немає <c>Running</c>.
     /// </summary>
+    /// <remarks>
+    /// ⚠ Лейни перебираються в порядку <paramref name="lanes"/> (J1-04): пріоритет між лейнами —
+    /// рішення викликача, а не черги.
+    /// </remarks>
     /// <returns><c>null</c> — брати нічого (включно з 2601/2627 при переході в <c>Running</c>).</returns>
     public Task<ClaimedJob?> ClaimAsync(
         IReadOnlyCollection<string> lanes, string owner, TimeSpan lease, CancellationToken ct);

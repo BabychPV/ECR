@@ -163,7 +163,7 @@ public sealed partial class JobWorker(
         using var slots = new SemaphoreSlim(options.MaxConcurrency, options.MaxConcurrency);
 
         // ⛔ P1-06 (AN-109): лейни, на які чекає людина (`ReservedLanes`, у Api — `interactive`), мають ВЛАСНІ
-        // місця понад `MaxConcurrency`. Спільні місця беруть усі лейни (interactive першим, `JobLanes.All`), але
+        // місця понад `MaxConcurrency`. Спільні місця беруть усі лейни (по черзі — J1-04, `Rotate`), але
         // чотири довгі фонові задачі займають їх усі — і перерахунок формул після PATCH стояв би за ними FIFO.
         var reserved = options.ReservedLanes.Where(l => options.Lanes.Contains(l, StringComparer.Ordinal)).ToArray();
         var reservedCount = reserved.Length > 0 ? Math.Max(0, options.ReservedConcurrency) : 0;
@@ -193,15 +193,19 @@ public sealed partial class JobWorker(
 
         try
         {
-            List<Task> loops = [PollAsync(owner, primaryLanes, slots, primary: true, stoppingToken)];
+            // ⛔ J1-04: основний цикл чергує лейни на кожному claim, ЛИШЕ коли interactive має власні
+            // місця (резервний цикл): тоді перерахунок формул не втрачає гарантії старту, а `default`
+            // (матеріалізація, синк подій, знімки звітів) не голодує під сталим потоком PATCH.
+            List<Task> loops =
+                [PollAsync(owner, primaryLanes, slots, primary: true, rotateLanes: reservedCount > 0, stoppingToken)];
             if (reservedCount > 0)
             {
-                loops.Add(PollAsync(owner, reserved, reservedSlots, primary: false, stoppingToken));
+                loops.Add(PollAsync(owner, reserved, reservedSlots, primary: false, rotateLanes: false, stoppingToken));
             }
 
             if (separate.Length > 0)
             {
-                loops.Add(PollAsync(owner, separate, separateSlots, primary: false, stoppingToken));
+                loops.Add(PollAsync(owner, separate, separateSlots, primary: false, rotateLanes: false, stoppingToken));
             }
 
             await Task.WhenAll(loops).ConfigureAwait(false);
@@ -226,11 +230,18 @@ public sealed partial class JobWorker(
     /// сигнал будить ОДНОГО (<see cref="JobQueueSignal"/>), і резервний цикл, «з'ївши» його заради чужого лейна,
     /// відклав би звичайну задачу основного циклу до наступного опитування.
     /// </param>
+    /// <param name="rotateLanes">Чергувати порядок лейнів на кожному claim (<see cref="Rotate"/>, J1-04).</param>
     /// <param name="stopping">Зупинка хоста.</param>
     private async Task PollAsync(
-        string owner, IReadOnlyCollection<string> lanes, SemaphoreSlim slots, bool primary, CancellationToken stopping)
+        string owner,
+        string[] lanes,
+        SemaphoreSlim slots,
+        bool primary,
+        bool rotateLanes,
+        CancellationToken stopping)
     {
         var lastExpire = 0L;
+        var turn = 0;
         var queueUnusableReported = false;
 
         while (!stopping.IsCancellationRequested)
@@ -248,7 +259,9 @@ public sealed partial class JobWorker(
 
             try
             {
-                job = await ClaimAsync(owner, lanes).ConfigureAwait(false);
+                var claimLanes = rotateLanes ? Rotate(lanes, turn) : lanes;
+                turn = (turn + 1) % Math.Max(1, lanes.Length);
+                job = await ClaimAsync(owner, claimLanes).ConfigureAwait(false);
                 queueUnusableReported = false;
             }
             catch (InvalidOperationException ex) when (ex.GetType() == typeof(InvalidOperationException))
@@ -298,6 +311,29 @@ public sealed partial class JobWorker(
             Prune();
             running[job.Claim.Token] = RunAsync(job, slots, stopping);
         }
+    }
+
+    /// <summary>
+    /// Порядок лейнів для claim номер <paramref name="turn"/>: зсув по колу (J1-04).
+    /// </summary>
+    /// <param name="lanes">Лейни циклу в базовому порядку.</param>
+    /// <param name="turn">Номер claim циклу.</param>
+    /// <returns>Ті самі лейни, починаючи з <c>turn mod N</c>.</returns>
+    /// <remarks>
+    /// ⚠ Порожній лейн не коштує claim: черга переходить до наступного в тому самому запиті,
+    /// тож чергування діє лише тоді, коли задачі є в кількох лейнах одночасно.
+    /// </remarks>
+    internal static string[] Rotate(string[] lanes, int turn)
+    {
+        ArgumentNullException.ThrowIfNull(lanes);
+
+        if (lanes.Length < 2)
+        {
+            return lanes;
+        }
+
+        var start = (int)((uint)turn % (uint)lanes.Length);
+        return [.. lanes.Skip(start), .. lanes.Take(start)];
     }
 
     private void Prune()
