@@ -264,9 +264,15 @@ describe('Дані довідника: табличний редактор', () 
       release();
       await Promise.resolve();
     });
-    act(() => other.focus());
-    fireEvent.keyDown(other, { key: 'Enter' });
-    expect(await within(other).findByRole('textbox')).toBeDefined();
+    // Перезапит рядків закінчується не синхронно з `release()`: мутація лишається `isPending`, доки `onSuccess`
+    // не дочекається інвалідацій, а сітка тим часом `aria-readonly`. Enter до того ігнорується — чекаємо розблокування.
+    await vi.waitFor(() => {
+      expect(cell(1, 2).getAttribute('aria-readonly')).toBeNull();
+    });
+    const unlocked = cell(1, 2);
+    act(() => unlocked.focus());
+    fireEvent.keyDown(unlocked, { key: 'Enter' });
+    expect(await within(unlocked).findByRole('textbox')).toBeDefined();
   });
 
   it('вставка трьох рядків з однаковим Lookup — один запит до довідника-цілі (L9-07)', async () => {
