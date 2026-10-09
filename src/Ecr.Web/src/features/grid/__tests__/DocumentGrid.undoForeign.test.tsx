@@ -163,7 +163,11 @@ describe('DocumentGrid: Undo не затирає чужу правку (G1-05)',
     // Колега записав 9; перезапит зрізу приніс це на екран.
     await act(async () => {
       client.setQueryData(queryKeys.slices.one(1, 202609), slice(9, 'v9'));
-      await Promise.resolve();
+      // ⚠ `notifyManager` TanStack розсилає зміну спостерігачам через
+      // `setTimeout(0)`: без паузи Ctrl+Z ішов би обробником ПОПЕРЕДНЬОГО рендера,
+      // де в комірці ще власне 5, — і законно відкочував би (той самий прийом,
+      // що `refetch` у `RulesMatrixPanel.unsaved.test.tsx`).
+      await new Promise((resolve) => setTimeout(resolve, 50));
     });
 
     await press('z', 'KeyZ');

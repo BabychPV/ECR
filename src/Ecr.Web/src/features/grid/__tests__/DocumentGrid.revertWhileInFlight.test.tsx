@@ -26,6 +26,9 @@ vi.mock('../autosave', async (importOriginal) => {
 vi.mock('@revolist/react-datagrid', () => ({
   RevoGrid: (props: { onAfteredit?: (event: { detail: unknown }) => void }) => (
     <div data-testid="revogrid-stub">
+      <div className="edit-input-wrapper">
+        <input data-testid="editor-input" />
+      </div>
       {['5', '0'].map((val) => (
         <button
           key={val}
@@ -138,6 +141,19 @@ function show(): void {
   );
 }
 
+/**
+ * Людина набирає значення в редакторі комірки, а потім кнопка-заглушка комітить його.
+ *
+ * ⚠ Без вводу в редакторі сітка вважає коміт «редактор відкрито й закрито без
+ * вводу» (`untouched`, AN-39/L8-15), і `captureOverInFlight` такий коміт свідомо
+ * не бере — це захист від луни показаного значення. Тест G1-02 про ЯВНЕ
+ * повернення значення, тож і введення має бути явним.
+ */
+function type(val: string): void {
+  fireEvent.input(screen.getByTestId('editor-input'), { target: { value: val } });
+  fireEvent.click(screen.getByRole('button', { name: `type-${val}` }));
+}
+
 async function pressCtrlS(): Promise<void> {
   await act(async () => {
     fireEvent.keyDown(screen.getByTestId('revogrid-stub'), { key: 's', ctrlKey: true });
@@ -158,13 +174,13 @@ describe('DocumentGrid: повернення до збереженого, пок
 
     await screen.findByTestId('revogrid-stub');
 
-    fireEvent.click(screen.getByRole('button', { name: 'type-5' }));
+    type('5');
     await pressCtrlS();
     await waitFor(() => expect(sent).toHaveLength(1));
     expect(Number(sent[0]?.rows[0]?.cells[0]?.value)).toBe(5);
 
     // Людина бачить помилку й повертає збережене 0, поки PATCH(5) летить.
-    fireEvent.click(screen.getByRole('button', { name: 'type-0' }));
+    type('0');
 
     // Рядок у дорозі — другий запит чекає відповіді першого (`splitByInFlight`).
     await pressCtrlS();
@@ -197,8 +213,8 @@ describe('DocumentGrid: повернення до збереженого, пок
 
     await screen.findByTestId('revogrid-stub');
 
-    fireEvent.click(screen.getByRole('button', { name: 'type-5' }));
-    fireEvent.click(screen.getByRole('button', { name: 'type-0' }));
+    type('5');
+    type('0');
     await pressCtrlS();
 
     expect(sent).toHaveLength(0);
