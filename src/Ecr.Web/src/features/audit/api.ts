@@ -13,6 +13,21 @@ import type { CellChangePage } from '@/api/types';
 /** Походження зміни — ті самі чотири значення, що пише `aud.CellChange.Origin`. */
 export const cellChangeOrigins = ['UserEdit', 'Import', 'ImportOverwrite', 'Recalculation', 'Migration'] as const;
 
+/**
+ * Походження, за якими стоїть ЛЮДИНА: правка в сітці та імпорт книги Excel (і звичайний, і з
+ * явним перезаписом). Те саме, що серверні `CellChangeOrigins.IsHuman` / `HumanOriginsSql`.
+ *
+ * ⛔ AN-115: перерахунок, інтеграція, міграція — система. Вони теж несуть `changedByUserId` (того,
+ * хто їх запустив), але ім'я біля числа, яке порахувала формула, читалося б як «це ввів він».
+ * А імпорт — навпаки: число з книги ввела й застосувала конкретна людина, і «система» ховала б її.
+ */
+export const humanCellChangeOrigins: readonly string[] = ['UserEdit', 'Import', 'ImportOverwrite'];
+
+/** Чи зробила зміну з цим походженням людина (`humanCellChangeOrigins`). */
+export function isHumanOrigin(origin: string | null | undefined): boolean {
+  return origin !== null && origin !== undefined && humanCellChangeOrigins.includes(origin);
+}
+
 /** Календарна дата без години — рівно те, що віддає `<input type="date">`. */
 const DateOnly = /^(\d{4})-(\d{2})-(\d{2})$/;
 

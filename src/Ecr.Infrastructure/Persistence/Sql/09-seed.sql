@@ -6542,6 +6542,9 @@ USING (VALUES
     (N'err.ECR-IMP-0422.overwriteNotConflict', N'en', N'Only rows changed by someone else after the workbook was exported can be overwritten. Build the import preview again.', 1),
     (N'audit.originLabel.ImportOverwrite', N'en', N'Excel import, overwrote a later change', 1),
     -- IMPORT:an114 ── кінець секції ──
+    -- AUDIT:an115 ── автор системної зміни комірки (перерахунок, інтеграція, міграція); ru/kz — порцією AUDIT:an115 у блоці I18N нижче ──
+    (N'audit.systemAuthor', N'en', N'System', 1),
+    -- AUDIT:an115 ── кінець секції ──
     -- API:negative-path ── відмови замість 500 на некоректних полях запиту (прохід по відмовах API) ──
     (N'err.ECR-CALC-0422.versionNumber', N'en', N'The methodology version number must be from 1 to {maxLength} characters.', 1),
     (N'err.ECR-CALC-0422.formulaTooLong', N'en', N'The expression of formula "{code}" is longer than {maxLength} characters.', 1),
@@ -15996,6 +15999,17 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- IMPORT:an114 ── кінець секції ──
+
+-- AUDIT:an115 ── ru/kz автора системної зміни комірки; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'audit.systemAuthor', N'ru', N'Система'),
+    (N'audit.systemAuthor', N'kz', N'Жүйе')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- AUDIT:an115 ── кінець секції ──
 
 -- API:negative-path ── ru/kz відмов замість 500 на некоректних полях запиту; власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)

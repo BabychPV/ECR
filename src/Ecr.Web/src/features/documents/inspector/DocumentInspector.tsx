@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, type JSX, type KeyboardEvent, type RefObject } from 'react';
 import { ActionIcon, Badge, Box, Button, Group, Tabs, Text } from '@mantine/core';
 import type { DocumentTableDto, ValidationFindingDto } from '@/api/types';
-import { useCellChanges } from '@/features/audit/api';
+import { isHumanOrigin, useCellChanges } from '@/features/audit/api';
 import { useTableStatus } from '@/features/documents/api';
 import { formatDateOnly } from '@/shared/format/dateOnly';
 import { formatCount } from '@/shared/format/plural';
@@ -430,8 +430,11 @@ function HistoryTab({
       {items.map((change) => (
         <div key={`${change.changedAt}:${String(change.changedByUserId)}:${change.newValue ?? ''}`} role="listitem" className="ecr-insp-hist">
           <Group justify="space-between" gap="xs" wrap="nowrap">
-            <Text size="sm" fw={500}>
-              {change.changedByDisplayName ?? t('inspector.unknownAuthor', { id: change.changedByUserId })}
+            {/* AN-115: правка й імпорт — ім'я людини; перерахунок/інтеграція/міграція — «Система». */}
+            <Text size="sm" fw={500} data-inspector-author="">
+              {isHumanOrigin(change.origin)
+                ? (change.changedByDisplayName ?? t('inspector.unknownAuthor', { id: change.changedByUserId }))
+                : t('audit.systemAuthor')}
             </Text>
             <Text size="xs" c="dimmed">
               <Timestamp value={change.changedAt} />
