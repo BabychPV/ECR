@@ -35,7 +35,8 @@ public static class JobLaneMap
     /// <summary>
     /// Лейн задачі: <see cref="IRecalculationJob"/> (маркер або реалізація) —
     /// <see cref="JobLanes.Recalc"/>, <see cref="IFormulaRecalculationJob"/> —
-    /// <see cref="JobLanes.Interactive"/>, решта — <see cref="JobLanes.Default"/>.
+    /// <see cref="JobLanes.Interactive"/>, експорт/імпорт Excel (<see cref="IsExcel"/>) —
+    /// <see cref="JobLanes.Excel"/>, решта — <see cref="JobLanes.Default"/>.
     /// </summary>
     /// <remarks>
     /// ⚠ Перерахунок ФОРМУЛ шаблону (<see cref="IFormulaRecalculationJob"/>) —
@@ -51,7 +52,23 @@ public static class JobLaneMap
 
         return typeof(IRecalculationJob).IsAssignableFrom(jobType) ? JobLanes.Recalc
             : typeof(IFormulaRecalculationJob).IsAssignableFrom(jobType) ? JobLanes.Interactive
+            : IsExcel(jobType) ? JobLanes.Excel
             : JobLanes.Default;
+    }
+
+    /// <summary>
+    /// Чи задача — експорт або імпорт Excel (<see cref="IExcelExportJob"/>, <see cref="IExcelImportJob"/>; AN-116).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Одна відповідність на обидва режими: лейн <see cref="JobLanes.Excel"/> (Database) і межа
+    /// <see cref="QuartzJobTypeLimiter"/> (Quartz) питають саме тут — інакше режими розійшлися б у тому,
+    /// що вважати «довгою книгою».
+    /// </remarks>
+    public static bool IsExcel(Type jobType)
+    {
+        ArgumentNullException.ThrowIfNull(jobType);
+
+        return typeof(IExcelExportJob).IsAssignableFrom(jobType) || typeof(IExcelImportJob).IsAssignableFrom(jobType);
     }
 
     /// <summary>Лейни, які опитує воркер процесу Api.</summary>
@@ -62,10 +79,41 @@ public static class JobLaneMap
     /// жив би в процесі, що обслуговує HTTP, — рівно те, від чого пул і відокремлюють.
     /// </remarks>
     public static IReadOnlyList<string> ApiLanes(RecalculationExecutor executor)
-        => executor == RecalculationExecutor.Worker ? [JobLanes.Interactive, JobLanes.Default] : JobLanes.All;
+        => executor == RecalculationExecutor.Worker
+            ? [JobLanes.Interactive, JobLanes.Default, JobLanes.Excel]
+            : JobLanes.All;
 
     /// <summary>Лейни з власними місцями у воркері Api (<see cref="JobWorkerOptions.ReservedLanes"/>, P1-06).</summary>
     public static IReadOnlyList<string> ApiReservedLanes { get; } = [JobLanes.Interactive];
+
+    /// <summary>
+    /// Лейни, які воркер Api бере ЛИШЕ окремим циклом з власною межею (<see cref="JobWorkerOptions.SeparateLanes"/>,
+    /// AN-116): Excel не займає ні спільних місць, ні резерву перерахунку формул.
+    /// </summary>
+    public static IReadOnlyList<string> ApiSeparateLanes { get; } = [JobLanes.Excel];
+
+    /// <summary>
+    /// Ключ межі одночасних задач Excel (AN-116): у режимі Database — місця окремого циклу лейна
+    /// <see cref="JobLanes.Excel"/>, у режимі Quartz — <see cref="QuartzJobTypeLimiter"/>.
+    /// </summary>
+    public const string ExcelMaxConcurrencyKey = "Jobs:Excel:MaxConcurrency";
+
+    /// <summary>Межа одночасних задач Excel, коли ключ не задано.</summary>
+    public const int DefaultExcelMaxConcurrency = 2;
+
+    /// <summary>Межа одночасних задач Excel з конфігурації; не задано чи недійсне — <see cref="DefaultExcelMaxConcurrency"/>.</summary>
+    /// <remarks>Недійсне значення (нечисло, менше за 1) старт зупиняє раніше (<c>EcrConfigurationValidation.Integers</c>).</remarks>
+    public static int ReadExcelMaxConcurrency(IConfiguration configuration)
+    {
+        ArgumentNullException.ThrowIfNull(configuration);
+
+        return int.TryParse(
+                   configuration[ExcelMaxConcurrencyKey], System.Globalization.NumberStyles.Integer,
+                   System.Globalization.CultureInfo.InvariantCulture, out var value)
+               && value >= 1
+            ? value
+            : DefaultExcelMaxConcurrency;
+    }
 
     /// <summary>Виконавець перерахунку з конфігурації; не задано — <see cref="RecalculationExecutor.InProcess"/>.</summary>
     /// <remarks>Недійсне значення старт зупиняє раніше (<c>EcrConfigurationValidation.Choices</c>).</remarks>

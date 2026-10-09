@@ -2491,7 +2491,7 @@ public interface ISystemHealthStore
 
 Черга фонових задач у базі (`MI-02`, `D-208`): рядки `itg.JobProgress` з
 `Lane IS NOT NULL`; `Lane IS NULL` — дзеркало Quartz, черга його не чіпає.
-Лейни — лише константи `JobLanes` (`interactive`, `default`, `recalc`; порядок — пріоритет claim, `interactive` має власні місця у воркері Api, P1-06; сторож
+Лейни — лише константи `JobLanes` (`interactive`, `default`, `excel`, `recalc`; порядок — пріоритет claim, `interactive` має власні місця у воркері Api, P1-06; `excel` бере лише окремий цикл з `Jobs:Excel:MaxConcurrency` місцями, AN-116; сторож
 `JobLaneTests`). Моменти (`AvailableAt`, `LeaseUntil`) — годинник СУБД.
 Постановка — у поточній транзакції `EcrDbContext`; наявна `Queued` на той
 самий `TargetKey` поглинає постановку. Claim: прострочені `Running` першими,

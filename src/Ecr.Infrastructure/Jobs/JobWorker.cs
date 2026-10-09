@@ -38,6 +38,16 @@ public sealed record JobWorkerOptions
     /// <summary>Скільки місць резерву для <see cref="ReservedLanes"/>.</summary>
     public int ReservedConcurrency { get; init; } = 1;
 
+    /// <summary>
+    /// Лейни, які бере ЛИШЕ окремий цикл з власними <see cref="SeparateConcurrency"/> місцями (AN-116): основний
+    /// цикл їх не опитує, тож ці задачі не займають ні <see cref="MaxConcurrency"/>, ні резерву
+    /// <see cref="ReservedLanes"/>. Діють лише ті, що є і в <see cref="Lanes"/>; порожньо — окремого циклу немає.
+    /// </summary>
+    public IReadOnlyList<string> SeparateLanes { get; init; } = [];
+
+    /// <summary>Скільки місць окремого циклу <see cref="SeparateLanes"/> (<c>Jobs:Excel:MaxConcurrency</c> в Api).</summary>
+    public int SeparateConcurrency { get; init; } = JobLaneMap.DefaultExcelMaxConcurrency;
+
     /// <summary>Опитування черги, коли роботи немає.</summary>
     public TimeSpan PollInterval { get; init; } = TimeSpan.FromSeconds(1);
 
@@ -159,15 +169,40 @@ public sealed partial class JobWorker(
         var reservedCount = reserved.Length > 0 ? Math.Max(0, options.ReservedConcurrency) : 0;
         using var reservedSlots = new SemaphoreSlim(Math.Max(1, reservedCount), Math.Max(1, reservedCount));
 
+        // ⛔ AN-116: експорт/імпорт Excel (`SeparateLanes`, у Api — `excel`) — довгі книги з ВЛАСНОЮ межею. Основний
+        // цикл ці лейни НЕ опитує (інакше книги знову займали б спільні місця), резервний — і так лише свої.
+        // Окремий цикл без основних лейнів не має сенсу: тоді все лишається основному (дренаж режиму Quartz).
+        var separate = options.SeparateLanes
+            .Where(l => options.Lanes.Contains(l, StringComparer.Ordinal) && !reserved.Contains(l, StringComparer.Ordinal))
+            .ToArray();
+        var primaryLanes = options.Lanes.Except(separate, StringComparer.Ordinal).ToArray();
+        if (primaryLanes.Length == 0)
+        {
+            separate = [];
+            primaryLanes = [.. options.Lanes];
+        }
+
+        var separateCount = separate.Length > 0 ? Math.Max(0, options.SeparateConcurrency) : 0;
+        if (separateCount == 0)
+        {
+            primaryLanes = [.. primaryLanes, .. separate];
+            separate = [];
+        }
+
+        using var separateSlots = new SemaphoreSlim(Math.Max(1, separateCount), Math.Max(1, separateCount));
+
         try
         {
-            Task[] loops = reservedCount > 0
-                ?
-                [
-                    PollAsync(owner, options.Lanes, slots, primary: true, stoppingToken),
-                    PollAsync(owner, reserved, reservedSlots, primary: false, stoppingToken),
-                ]
-                : [PollAsync(owner, options.Lanes, slots, primary: true, stoppingToken)];
+            List<Task> loops = [PollAsync(owner, primaryLanes, slots, primary: true, stoppingToken)];
+            if (reservedCount > 0)
+            {
+                loops.Add(PollAsync(owner, reserved, reservedSlots, primary: false, stoppingToken));
+            }
+
+            if (separate.Length > 0)
+            {
+                loops.Add(PollAsync(owner, separate, separateSlots, primary: false, stoppingToken));
+            }
 
             await Task.WhenAll(loops).ConfigureAwait(false);
         }

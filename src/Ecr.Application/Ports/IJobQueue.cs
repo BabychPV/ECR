@@ -140,12 +140,19 @@ public static class JobLanes
     /// </summary>
     public const string Interactive = "interactive";
 
+    /// <summary>
+    /// Експорт і імпорт Excel (<c>IExcelExportJob</c>, <c>IExcelImportJob</c>; AN-116): довгі задачі з власною
+    /// межею одночасності (<c>Jobs:Excel:MaxConcurrency</c>). Воркер Api бере цей лейн ЛИШЕ окремим циклом, тож
+    /// книги не займають ні спільних місць <see cref="Default"/>, ні резерву <see cref="Interactive"/>.
+    /// </summary>
+    public const string Excel = "excel";
+
     /// <summary>Межа стовпця <c>itg.JobProgress.Lane</c> (<c>varchar(32)</c>).</summary>
     public const int MaxLength = JobProgress.MaxLaneLength;
 
     /// <summary>Усі відомі лейни.</summary>
     /// <remarks>⚠ Порядок — пріоритет claim (<c>DbJobQueue.ClaimAsync</c>): <see cref="Interactive"/> першим.</remarks>
-    public static IReadOnlyList<string> All { get; } = [Interactive, Default, Recalc];
+    public static IReadOnlyList<string> All { get; } = [Interactive, Default, Excel, Recalc];
 
     /// <summary>Чи лейн відомий (порівняння точне, з урахуванням регістру).</summary>
     public static bool IsKnown(string? lane) => lane is not null && All.Contains(lane, StringComparer.Ordinal);

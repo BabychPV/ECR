@@ -160,6 +160,54 @@ public sealed class JobLaneTests
             .ImplementationInstance is JobWorkerOptions o ? o.ReservedLanes : [];
         string[] expectedReserved = queueScheduler ? [JobLanes.Interactive] : [];
         Assert.Equal(expectedReserved, reserved);
+
+        // ⛔ AN-116: Excel Api бере завжди, але в режимі Database — ЛИШЕ окремим циклом з власною межею
+        // (Jobs:Excel:MaxConcurrency); у режимі Quartz дренаж бере все основним циклом.
+        Assert.Contains(JobLanes.Excel, lanes);
+        var workerOptions = (JobWorkerOptions)services.Single(d => d.ServiceType == typeof(JobWorkerOptions)).ImplementationInstance!;
+        string[] expectedSeparate = queueScheduler ? [JobLanes.Excel] : [];
+        Assert.Equal(expectedSeparate, workerOptions.SeparateLanes);
+        if (queueScheduler)
+        {
+            Assert.Equal(JobLaneMap.DefaultExcelMaxConcurrency, workerOptions.SeparateConcurrency);
+        }
+    }
+
+    [Theory]
+    [InlineData(null, 2)]
+    [InlineData("", 2)]
+    [InlineData("3", 3)]
+    [InlineData("0", 2)]
+    [InlineData("abc", 2)]
+    public void Межа_Excel_з_конфігурації_доходить_до_окремого_циклу_і_до_Quartz(string? value, int expected)
+    {
+        var settings = new Dictionary<string, string?>
+        {
+            ["ConnectionStrings:Ecr"] = "Server=.;Database=EcrJobLaneGuard;Integrated Security=true",
+            [DbBackgroundJobScheduler.ModeKey] = nameof(JobQueueMode.Database),
+            [JobLaneMap.ExcelMaxConcurrencyKey] = value,
+        };
+
+        var services = new ServiceCollection();
+        services.AddEcrInfrastructure(new ConfigurationBuilder().AddInMemoryCollection(settings).Build());
+
+        var options = (JobWorkerOptions)services.Single(d => d.ServiceType == typeof(JobWorkerOptions)).ImplementationInstance!;
+        Assert.Equal(expected, options.SeparateConcurrency);
+
+        // Той самий ключ — межа режиму Quartz (QuartzJobTypeLimiter).
+        var limiter = (QuartzJobTypeLimiter)services.Single(d => d.ServiceType == typeof(QuartzJobTypeLimiter)).ImplementationInstance!;
+        Assert.Equal(expected, limiter.ExcelMaxConcurrency);
+    }
+
+    [Fact]
+    public void Excel_експорт_і_імпорт_мають_свій_лейн_а_решта_ні()
+    {
+        Assert.Equal(JobLanes.Excel, JobLaneMap.Of<IExcelExportJob>());
+        Assert.Equal(JobLanes.Excel, JobLaneMap.Of<IExcelImportJob>());
+        Assert.Equal(JobLanes.Default, JobLaneMap.Of<ICollectionJob>());
+        Assert.Equal(JobLanes.Interactive, JobLaneMap.Of<IFormulaRecalculationJob>());
+        Assert.Equal(JobLanes.Recalc, JobLaneMap.Of<IRecalculationJob>());
+        Assert.DoesNotContain(JobLanes.Excel, JobLaneMap.ApiReservedLanes);
     }
 
     [Fact]

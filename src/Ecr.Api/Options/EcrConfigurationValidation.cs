@@ -63,6 +63,10 @@ public static partial class EcrConfigurationValidation
         (Ecr.Api.Security.ImportPreviewRateLimitPolicy.QueueLimitKey, 0),
         ("Jobs:ShutdownTimeoutSeconds", 1),
         ("Jobs:QueueDepth:RefreshSeconds", 5),
+
+        // AN-116: нуль задач Excel одночасно — не «без межі», а книги, яких не бере ніхто.
+        (Infrastructure.Jobs.JobLaneMap.ExcelMaxConcurrencyKey, 1),
+        (Infrastructure.Jobs.QuartzJobTypeLimiter.ThreadCountKey, 1),
         ("Audit:ExportMaxRows", 1),
         ("Localization:ImportMaxBytes", 1),
         ("Registries:ImportMaxBytes", 1),

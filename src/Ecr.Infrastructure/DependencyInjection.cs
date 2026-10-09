@@ -263,7 +263,15 @@ public static class DependencyInjection
             // рішення `D14-01`, ще не зроблене.
             quartz.UseSimpleTypeLoader();
             quartz.UseInMemoryStore();
+
+            // ⛔ AN-116 (P1-06, режим Quartz): потоків пулу — `Jobs:Quartz:ThreadCount` (типово 16 замість
+            // вбудованих 10). Самі по собі потоки не рятують: межу задач Excel тримає QuartzJobTypeLimiter
+            // (відкладення без потоку), а більший пул дає місце перерахунку формул поруч із довгими зборами.
+            quartz.UseDefaultThreadPool(pool => pool.MaxConcurrency = Jobs.QuartzJobTypeLimiter.ReadThreadCount(configuration));
         });
+
+        // AN-116: межа одночасних задач Excel у режимі Quartz (той самий ключ, що й місця лейна excel у Database).
+        services.AddSingleton(new Jobs.QuartzJobTypeLimiter(Jobs.JobLaneMap.ReadExcelMaxConcurrency(configuration)));
 
         services.AddQuartzHostedService(options =>
         {
@@ -305,6 +313,11 @@ public static class DependencyInjection
 
                 // P1-06 (AN-109): перерахунок формул після PATCH має своє місце понад спільні чотири.
                 ReservedLanes = Jobs.JobLaneMap.ApiReservedLanes,
+
+                // AN-116: експорт/імпорт Excel — лише окремим циклом з власною межею (Jobs:Excel:MaxConcurrency),
+                // не займає ні спільних місць, ні резерву перерахунку формул.
+                SeparateLanes = Jobs.JobLaneMap.ApiSeparateLanes,
+                SeparateConcurrency = Jobs.JobLaneMap.ReadExcelMaxConcurrency(configuration),
             });
             services.AddHostedService<Jobs.JobWorker>();
 

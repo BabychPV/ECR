@@ -40,7 +40,10 @@ public sealed class DbBackgroundJobSchedulerTests(SqlServerFixture sql) : DbJobQ
         // ⛔ P1-06 (AN-109): перерахунок формул після PATCH — не в спільній FIFO-смузі default з довгими фоновими.
         Assert.Equal(JobLanes.Interactive, (await RowAsync(formulas))?.Lane);
         Assert.Equal(JobLanes.Interactive, JobLaneMap.Of<FormulaRecalculationJob>());
-        Assert.Equal(JobLanes.Default, JobLaneMap.Of<IExcelExportJob>());
+        // AN-116: експорт і імпорт Excel — свій лейн з власною межею, не default.
+        Assert.Equal(JobLanes.Excel, JobLaneMap.Of<IExcelExportJob>());
+        Assert.Equal(JobLanes.Excel, JobLaneMap.Of<IExcelImportJob>());
+        Assert.Equal(JobLanes.Default, JobLaneMap.Of<IReportSnapshotJob>());
         Assert.Equal(JobLanes.Recalc, JobLaneMap.Of<RecalculationJob>());
     }
 

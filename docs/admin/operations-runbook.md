@@ -123,6 +123,8 @@ Api й воркер на **одному** хості — різні ролі й 
 | `Jobs:ShutdownTimeoutSeconds` | 120 | скільки чекати завершення фонових задач при зупинці служби, с |
 | `Jobs:Queue:Mode` | `Quartz` | `Database` — черга задач у БД (пише `deploy-ecr.ps1` разом з `EcrWorker`, п. 10). ⚠ Недійсне значення мовчки = `Quartz` |
 | `Jobs:Recalculation:Executor` | `InProcess` | `Worker` — перерахунок у службі `EcrWorker` (лише з `Queue:Mode=Database`). ⚠ Недійсне значення мовчки = `InProcess` |
+| `Jobs:Excel:MaxConcurrency` | 2 | скільки задач експорту/імпорту Excel виконується одночасно (AN-116). `Database`: окремий лейн `excel` з власними місцями — не займає ні чотирьох спільних, ні резерву перерахунку формул; `Quartz`: задача понад межу відкладається на 5 с, не тримаючи потоку пулу. Мінімум 1 |
+| `Jobs:Quartz:ThreadCount` | 16 | потоків пулу Quartz (режим `Quartz`; вбудоване значення Quartz — 10). Мінімум 1 |
 | `Database:SheetLockTimeoutSeconds` | 30 | очікування блокування аркуша, с |
 | `Health:RawDataPointWarnRows` | 20000000 | поріг перегляду R2 для картки `db` (п. 3.1); `0` — вимкнено. ⚠ Нечислове значення робить `db` Unhealthy «Database is unavailable» (перевірки на старті немає) |
 | `Calculations:FullYearWarnSeconds` | 600 | бюджет річного перерахунку (ПРД-13); перевищення — `recalcOverBudget` у картці `jobs` |
