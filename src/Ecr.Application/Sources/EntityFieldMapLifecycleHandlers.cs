@@ -153,6 +153,7 @@ public sealed class AcceptSourceUnitChangeHandler(
     IAuditWriter audit,
     ICurrentUser currentUser,
     IClock clock,
+    IBackgroundJobScheduler jobs,
     IUnitCatalog? units = null)
 {
     /// <summary>Право на керування інтеграцією (`02-contracts.md` §9).</summary>
@@ -160,6 +161,12 @@ public sealed class AcceptSourceUnitChangeHandler(
 
     /// <summary>Тип події журналу безпеки: прийнято зміну одиниці джерела.</summary>
     public const string AcceptedEventType = "MappingSourceUnitChangeAccepted";
+
+    /// <summary>
+    /// На скільки діб ДО моменту паузи дочитується шлях після прийняття (X3-01): запитаний діапазон
+    /// прогону, що поставив паузу, — типовий <c>LookbackDays</c> розкладу (<c>CollectionSchedule</c>, 7).
+    /// </summary>
+    public const int RecollectLookbackDays = 7;
 
     /// <summary>Записує рішення людини про нову одиницю джерела.</summary>
     /// <param name="fieldMapId">Мапінг.</param>
@@ -239,6 +246,9 @@ public sealed class AcceptSourceUnitChangeHandler(
         }
 
         var before = IntegrationConfigAudit.Snapshot(map);
+
+        // ⚠ ДО `AcceptSourceUnitChange`: вона знімає позначку разом із моментом паузи.
+        var pausedSince = map.HasPendingSourceUnitChange ? map.PendingSourceUnitDetectedAt : null;
         var previousUnitId = map.AcceptSourceUnitChange(requestedSourceUnitId);
         var newSourceUnitId = map.SourceUnitId!.Value;
 
@@ -278,6 +288,24 @@ public sealed class AcceptSourceUnitChangeHandler(
                 userId,
                 currentUser.CorrelationId),
             ct).ConfigureAwait(false);
+
+        // ⛔ X3-01: за паузу шлях не читався, а покриття СУТНОСТІ вже наступні прогони закрили за рештою
+        // атрибутів (`pausedPaths` тримає інтервал непокритим лише в прогоні, що поставив паузу). Наздоганяння
+        // цієї дірки не бачить, і без дочитування точок за паузу в `ext.RawDataPoint` не буде ніколи — а
+        // згортка за часом інтерполює через дірку мовчки. Тому рішення людини саме ставить ручний збір
+        // сутності від прогону, що поставив паузу (його запитаний діапазон), до «зараз». Матеріалізацію
+        // дочитаного ставить сам `CollectionJob` (I1-01). Ручна пауза/відновлення моменту паузи не
+        // зберігає — це відоме обмеження, не цей шлях.
+        if (pausedSince is { } since)
+        {
+            await jobs
+                .EnqueueAsync<ICollectionJob>(
+                    new Integration.CollectionTask(
+                        map.SourceEntityId, since.AddDays(-RecollectLookbackDays), ToUtc: null, Manual: true),
+                    ct,
+                    userId)
+                .ConfigureAwait(false);
+        }
 
         return EntityFieldMapLifecycle.Map(map);
     }

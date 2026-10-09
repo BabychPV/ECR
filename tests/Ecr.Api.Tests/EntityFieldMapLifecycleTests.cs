@@ -3,14 +3,19 @@ using System.Globalization;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Ecr.Application.Integration;
+using Ecr.Application.Ports;
 using Ecr.Domain.Entities.External;
 using Ecr.Domain.Entities.Units;
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
 using Ecr.Infrastructure.Persistence;
 using Ecr.TestKit;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using NSubstitute;
 using Xunit;
 
 namespace Ecr.Api.Tests;
@@ -165,10 +170,14 @@ public sealed class EntityFieldMapLifecycleTests(SqlServerFixture sql)
     [Trait("Requirement", "ФВ-16.9")]
     public async Task Прийняття_поміченої_збором_одиниці_без_id_відновлює_збір_а_повторне_дає_409()
     {
-        using var app = new EcrApiFactory(sql);
+        // ⚠ Черга підроблена: прийняття ставить дочитування (X3-01), а справжній збір неактивної
+        // сутності стенду в цьому тесті нічого не доводить.
+        using var baseApp = new EcrApiFactory(sql);
+        using var app = WithJobs(baseApp, Jobs());
 
         var stand = await ArrangeAsync(collectPoints: 0).ConfigureAwait(true);
-        using var client = await ManagerAsync(app, stand.ProjectId).ConfigureAwait(true);
+        using var client = await ProjectUserAsync(app.CreateClient, baseApp, GrantLevel.Manage, stand.ProjectId)
+            .ConfigureAwait(true);
         await MarkPendingAsync(stand.FieldMapId, stand.NewUnitCode, stand.NewUnitId).ConfigureAwait(true);
 
         // Тіло без id: одиницю сервер бере з позначки збору.
@@ -195,6 +204,70 @@ public sealed class EntityFieldMapLifecycleTests(SqlServerFixture sql)
         Assert.Equal(
             "err.ECR-INT-0409.mappingUnitChangeNotPending",
             (await JsonAsync(again).ConfigureAwait(true)).GetProperty("messageKey").GetString());
+    }
+
+    /// <summary>
+    /// X3-01: після прийняття зміни одиниці, яку помітив збір, дані за час паузи дочитуються — рішення ставить
+    /// ручний збір сутності від прогону, що поставив паузу. До виправлення в черзі не було нічого: покриття
+    /// сутності вже закрили наступні прогони, і точок шляху за паузу в <c>ext.RawDataPoint</c> не було ніколи.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-16.9")]
+    public async Task Прийняття_зміни_одиниці_ставить_збір_від_моменту_паузи()
+    {
+        using var baseApp = new EcrApiFactory(sql);
+        var jobs = Jobs();
+        using var app = WithJobs(baseApp, jobs);
+
+        var stand = await ArrangeAsync(collectPoints: 0).ConfigureAwait(true);
+        using var client = await ProjectUserAsync(app.CreateClient, baseApp, GrantLevel.Manage, stand.ProjectId)
+            .ConfigureAwait(true);
+        await MarkPendingAsync(stand.FieldMapId, stand.NewUnitCode, stand.NewUnitId).ConfigureAwait(true);
+
+        var accepted = await client.PostAsJsonAsync(
+            new Uri($"/api/v1/entity-field-maps/{stand.FieldMapId}/accept-unit-change", UriKind.Relative),
+            new { });
+        Assert.Equal(HttpStatusCode.OK, accepted.StatusCode);
+
+        // ⛔ МУТАЦІЙНИЙ ДОКАЗ: прибрати `EnqueueAsync<ICollectionJob>` з `AcceptSourceUnitChangeHandler` →
+        // жодного виклику черги, червоний.
+        var call = Assert.Single(jobs.ReceivedCalls(), c => c.GetMethodInfo().Name == nameof(IBackgroundJobScheduler.EnqueueAsync));
+        Assert.Equal(typeof(ICollectionJob), call.GetMethodInfo().GetGenericArguments()[0]);
+        var task = Assert.IsType<CollectionTask>(call.GetArguments()[0]);
+        Assert.Equal(stand.EntityId, task.SourceEntityId);
+        Assert.Equal(
+            Now.AddDays(-Ecr.Application.Sources.AcceptSourceUnitChangeHandler.RecollectLookbackDays),
+            task.FromUtc);
+        Assert.Null(task.ToUtc);
+        Assert.True(task.Manual);
+    }
+
+    /// <summary>
+    /// Контроль до X3-01: зміна одиниці БЕЗ паузи збору (людина сама оголосила нову) нічого не дочитує —
+    /// збір за мапінгом не зупинявся, дірки немає.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-16.9")]
+    public async Task Прийняття_одиниці_без_паузи_збору_нічого_не_ставить()
+    {
+        using var baseApp = new EcrApiFactory(sql);
+        var jobs = Jobs();
+        using var app = WithJobs(baseApp, jobs);
+
+        var stand = await ArrangeAsync(collectPoints: 0).ConfigureAwait(true);
+        using var client = await ProjectUserAsync(app.CreateClient, baseApp, GrantLevel.Manage, stand.ProjectId)
+            .ConfigureAwait(true);
+
+        var accepted = await client.PostAsJsonAsync(
+            new Uri($"/api/v1/entity-field-maps/{stand.FieldMapId}/accept-unit-change", UriKind.Relative),
+            new { sourceUnitId = stand.NewUnitId });
+        Assert.Equal(HttpStatusCode.OK, accepted.StatusCode);
+
+        Assert.DoesNotContain(jobs.ReceivedCalls(), c => c.GetMethodInfo().Name == nameof(IBackgroundJobScheduler.EnqueueAsync));
     }
 
     [Fact]
@@ -388,7 +461,7 @@ public sealed class EntityFieldMapLifecycleTests(SqlServerFixture sql)
 
     /// <summary>Що заведено для одного тесту.</summary>
     private sealed record Stand(
-        int FieldMapId, int OldUnitId, string OldUnitCode, int NewUnitId, string NewUnitCode, int ProjectId);
+        int FieldMapId, int OldUnitId, string OldUnitCode, int NewUnitId, string NewUnitCode, int ProjectId, int EntityId);
 
     private static Task<HttpResponseMessage> PostAsync(HttpClient client, int fieldMapId, string action)
         => client.PostAsync(
@@ -523,7 +596,7 @@ public sealed class EntityFieldMapLifecycleTests(SqlServerFixture sql)
                 .ConfigureAwait(false);
         }
 
-        return new Stand(map.Id, oldUnit.Id, oldUnit.Code, newUnit.Id, newUnit.Code, chain.ProjectId);
+        return new Stand(map.Id, oldUnit.Id, oldUnit.Code, newUnit.Id, newUnit.Code, chain.ProjectId, entity.Id);
     }
 
     private DbContextOptions<EcrDbContext> Options()
@@ -542,7 +615,12 @@ public sealed class EntityFieldMapLifecycleTests(SqlServerFixture sql)
         => ProjectUserAsync(app, GrantLevel.Manage, projectIds);
 
     /// <summary>Те саме з довільним рівнем гранта на проєкти (L3-11: Write не дорівнює Manage).</summary>
-    private async Task<HttpClient> ProjectUserAsync(EcrApiFactory app, GrantLevel level, params int[] projectIds)
+    private Task<HttpClient> ProjectUserAsync(EcrApiFactory app, GrantLevel level, params int[] projectIds)
+        => ProjectUserAsync(app.CreateClient, app, level, projectIds);
+
+    /// <summary>Те саме через довільну фабрику клієнта (застосунок із підміненою чергою, X3-01).</summary>
+    private async Task<HttpClient> ProjectUserAsync(
+        Func<HttpClient> createClient, EcrApiFactory app, GrantLevel level, params int[] projectIds)
     {
         var name = $"fmlc_{Guid.NewGuid():N}"[..20];
         const string password = "Map-Lifecycle-Probe-2026!";
@@ -566,13 +644,27 @@ public sealed class EntityFieldMapLifecycleTests(SqlServerFixture sql)
             await db.SaveChangesAsync().ConfigureAwait(false);
         }
 
-        var client = app.CreateClient();
+        var client = createClient();
         var login = await client.PostAsJsonAsync(
             new Uri("/api/v1/login/local", UriKind.Relative), new { userName = name, password })
             .ConfigureAwait(false);
         Assert.True(login.IsSuccessStatusCode, $"{login.StatusCode}: {app.ErrorsText}");
         return client;
     }
+
+    /// <summary>Підроблена черга задач: ставлення фіксується, задача не виконується.</summary>
+    private static IBackgroundJobScheduler Jobs()
+    {
+        var jobs = Substitute.For<IBackgroundJobScheduler>();
+        jobs.EnqueueAsync<ICollectionJob>(Arg.Any<object?>(), Arg.Any<CancellationToken>(), Arg.Any<int?>())
+            .Returns("collect-job");
+        return jobs;
+    }
+
+    /// <summary>Той самий застосунок із підміненою чергою (як у <c>DocumentRecalculateReadAccessTests</c>).</summary>
+    private static Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactory<Program> WithJobs(
+        EcrApiFactory app, IBackgroundJobScheduler jobs)
+        => app.WithWebHostBuilder(b => b.ConfigureTestServices(services => services.AddSingleton(jobs)));
 
     /// <summary>Клієнт із чинним сеансом і названими правами.</summary>
     private Task<HttpClient> SignedInAsync(EcrApiFactory app, params string[] permissions)
