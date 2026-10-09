@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
-import { abandonSwitchedSession, apiFetch } from '@/api/client';
+import { abandonSwitchedSession, apiFetch, setSessionUserId } from '@/api/client';
 import type { CurrentUserDto } from '@/api/types';
 
 /**
@@ -37,6 +37,8 @@ export function checkSessionUser(client: QueryClient, me: CurrentUserDto): Curre
     return me;
   }
   seenUserIds.set(client, me.userId);
+  // AN-108 / S2-05: небезпечні запити вкладки несуть цей id (`X-Ecr-User`) — сервер звірить його з cookie.
+  setSessionUserId(me.userId);
   return me;
 }
 

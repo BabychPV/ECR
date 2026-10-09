@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
-import { EcrApiError, apiFetch, isSessionClosed } from '@/api/client';
+import { EcrApiError, apiFetch, isSessionClosed, sessionUserHeaders } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
 import type {
   CellConflictDto,
@@ -749,7 +749,9 @@ export function sendPatchBeacon(documentId: number, request: PatchCellsRequest):
   try {
     fetch(`/api/v1/documents/${documentId}/cells`, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
+      // ⛔ AN-108 / S2-05: маячок іде повз `apiFetch` — id користувача вкладки додається тут; cookie іншого
+      // користувача сервер відхилить (`409 ECR-AUTH-0409`), а не запише правки під його іменем.
+      headers: { 'Content-Type': 'application/json', ...sessionUserHeaders() },
       credentials: 'include',
       keepalive: true,
       body: JSON.stringify(request),
