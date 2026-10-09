@@ -49,7 +49,7 @@ const schedule = (overrides: Partial<CollectionSchedule> = {}): CollectionSchedu
 const json = (body: unknown, status = 200): Response =>
   new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 
-function stub(existing: CollectionSchedule[]): void {
+function stub(existing: CollectionSchedule[], deleteStatus = 204): void {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -59,7 +59,11 @@ function stub(existing: CollectionSchedule[]): void {
       if (url.includes('/ui-strings/')) return json({ languageCode: 'en', revision: 1, strings: Strings });
       if (url.includes('/api/v1/collection-schedules')) {
         if (method === 'GET') return json(existing);
-        if (method === 'DELETE') return new Response(null, { status: 204 });
+        if (method === 'DELETE') {
+          return deleteStatus === 204
+            ? new Response(null, { status: 204 })
+            : json({ title: 'x', status: deleteStatus, errorCode: 'ECR-X-0000' }, deleteStatus);
+        }
         if (method === 'POST') return json(schedule({ id: 11, cron: '0 30 4 * * ?', rowVersion: 'BBBB' }), 201);
 
         return json(schedule({ cron: '0 0 3 * * ?', rowVersion: 'CCCC' }));
@@ -132,6 +136,32 @@ describe('CollectionScheduleTab: L9-30 — лічильник розкладів
 
     // Збережене стало новою точкою відліку — форма знову «без змін».
     await waitFor(() => expect(screen.getByRole('button', { name: 'Save' })).toHaveProperty('disabled', true));
+    expect(sourcesInvalidated(client)).toBe(false);
+  }, 60_000);
+
+  it('відмова видалення НЕ 409 (рядка вже немає, 404) скидає кеш з'єднань — лічильник змінився', async () => {
+    stub([schedule()], 404);
+    const client = await show();
+
+    await waitFor(() => expect(cronInput().value).toBe('0 15 2 * * ?'));
+    await userEvent.click(screen.getByRole('button', { name: 'Remove' }));
+    await screen.findByText('Remove the schedule?');
+    await userEvent.click(screen.getByRole('button', { name: 'Remove' }));
+
+    await waitFor(() => expect(sourcesInvalidated(client)).toBe(true));
+  }, 60_000);
+
+  it('конфлікт 409 кеш з'єднань не чіпає', async () => {
+    stub([schedule()], 409);
+    const client = await show();
+
+    await waitFor(() => expect(cronInput().value).toBe('0 15 2 * * ?'));
+    await userEvent.click(screen.getByRole('button', { name: 'Remove' }));
+    await screen.findByText('Remove the schedule?');
+    await userEvent.click(screen.getByRole('button', { name: 'Remove' }));
+
+    // Дати мутації відпрацювати.
+    await new Promise((resolve) => setTimeout(resolve, 100));
     expect(sourcesInvalidated(client)).toBe(false);
   }, 60_000);
 });
