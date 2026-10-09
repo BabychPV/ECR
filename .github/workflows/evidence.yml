@@ -37,12 +37,12 @@ permissions:
   issues: read
 
 concurrency:
-  # ✎ 2026-09-29 (пряме рішення людини): для dev/integration і #463 група за SHA — GitHub тримає в групі лише один очікуваний прогін, і новий витісняв попередній; тепер кожен пуш має свій вердикт
-  # ✎ 2026-09-30: умова не за номером PR, а за pull_request з гілки dev/integration — номер PR змінюється після кожного мержу (#463→#464)
-  group: evidence-${{ (github.event_name == 'pull_request' && github.head_ref == 'dev/integration' && github.event.pull_request.head.repo.full_name == github.repository) && github.event.pull_request.head.sha || (github.event_name == 'push' && github.ref == 'refs/heads/dev/integration') && github.sha || (github.event.pull_request.number || github.ref) }}
-  # ✎ 2026-09-29 (пряме рішення людини): на dev/integration і PR #463 — не скасовувати,
+  # ✎ 2026-09-29 (пряме рішення людини): для push у dev/integration група за SHA — GitHub тримає в групі лише один очікуваний прогін, і новий витісняв попередній; тепер кожен пуш має свій вердикт
+  # ✎ 2026-10-09 (D-335, L10-09): PR з dev/integration більше не має окремої групи — такий PR забороняє `pr-source`.
+  group: evidence-${{ (github.event_name == 'push' && github.ref == 'refs/heads/dev/integration') && github.sha || (github.event.pull_request.number || github.ref) }}
+  # ✎ 2026-09-29 (пряме рішення людини): на dev/integration — не скасовувати,
   # щоб кожен пуш отримав власний вердикт; на lane/** — скасовувати, як і раніше.
-  cancel-in-progress: ${{ !(github.event_name == 'pull_request' && github.head_ref == 'dev/integration' && github.event.pull_request.head.repo.full_name == github.repository) && !(github.event_name == 'push' && github.ref == 'refs/heads/dev/integration') }}
+  cancel-in-progress: ${{ !(github.event_name == 'push' && github.ref == 'refs/heads/dev/integration') }}
 
 env:
   DOTNET_NOLOGO: 'true'
@@ -53,8 +53,6 @@ jobs:
   build:
     name: build
     runs-on: ubuntu-latest
-    # CI-concurrency 2026-10-01: PR dev/integration -> main не дублює push-прогін тієї ж вершини (ті самі імена контекстів, статуси за SHA).
-    if: ${{ !(github.event_name == 'pull_request' && github.head_ref == 'dev/integration' && github.event.pull_request.head.repo.full_name == github.repository) }}
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -73,7 +71,6 @@ jobs:
   test:
     name: test
     runs-on: ubuntu-latest
-    if: ${{ !(github.event_name == 'pull_request' && github.head_ref == 'dev/integration' && github.event.pull_request.head.repo.full_name == github.repository) }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -102,7 +99,6 @@ jobs:
   honesty-guard:
     name: honesty-guard
     runs-on: ubuntu-latest
-    if: ${{ !(github.event_name == 'pull_request' && github.head_ref == 'dev/integration' && github.event.pull_request.head.repo.full_name == github.repository) }}
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
