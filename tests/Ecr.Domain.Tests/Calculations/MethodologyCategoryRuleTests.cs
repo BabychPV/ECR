@@ -70,6 +70,30 @@ public sealed class MethodologyCategoryRuleTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    public void Вираз_довший_за_межу_формули_не_приймається_ні_при_створенні_ні_при_правці()
+    {
+        // ⛔ L7-01 (AN-72): колонка довжини не обмежує, межу тримає сутність.
+        var version = Draft();
+        var atLimit = new string('a', MethodologyFormula.MaxExpressionLength);
+        var tooLong = atLimit + "a";
+
+        var creating = Assert.Throws<DomainException>(() => version.SetCategoryRule(null, tooLong, Now));
+        Assert.Equal("ECR-CALC-0422", creating.ErrorCode);
+        Assert.Equal("err.ECR-CALC-0422.categoryRuleTooLong", creating.Details?["messageKey"]);
+        Assert.Equal("4000", creating.Details?["max"]);
+        Assert.Equal("4001", creating.Details?["length"]);
+
+        // Рівно на межі — приймається; пробіли по краях до довжини не йдуть.
+        var existing = version.SetCategoryRule(null, "  " + atLimit + "  ", Now);
+        Assert.Equal(atLimit, existing.Expression);
+
+        var editing = Assert.Throws<DomainException>(() => version.SetCategoryRule(existing, tooLong, Later));
+        Assert.Equal("err.ECR-CALC-0422.categoryRuleTooLong", editing.Details?["messageKey"]);
+        Assert.Equal(atLimit, existing.Expression);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
     public void Опублікована_версія_не_приймає_ні_постановки_ні_видалення_правила_категорії()
     {
         var version = Draft();

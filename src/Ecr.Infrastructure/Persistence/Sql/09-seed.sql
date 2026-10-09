@@ -7365,8 +7365,11 @@ USING (VALUES
     -- COLL:rc15misc-rulekey ── кінець секції ──
     -- COLL:rc16rule ── RC16-2: правило категорії перевіряє посилання вже при збереженні; ru/kz — порцією COLL:rc16rule нижче ──
     (N'err.ECR-CALC-0422.categoryRuleUnknownConstant', N'en', N'The category rule references constant CST.{code}, which this version does not define.', 1),
-    (N'err.ECR-CALC-0422.categoryRuleBadFormula', N'en', N'The category rule references !{formula}: it can only read Row formulas of the version (it runs once per row, before the substance loop).', 1)
+    (N'err.ECR-CALC-0422.categoryRuleBadFormula', N'en', N'The category rule references !{formula}: it can only read Row formulas of the version (it runs once per row, before the substance loop).', 1),
     -- COLL:rc16rule ── кінець секції ──
+    -- COLL:an72-rule-length ── AN-72: правило категорії довше за межу формули (MethodologyCategoryRule.Normalize); ru/kz — порцією COLL:an72-rule-length нижче ──
+    (N'err.ECR-CALC-0422.categoryRuleTooLong', N'en', N'The category rule is longer than {max} characters ({length}): shorten the expression or move part of the logic into a Row formula.', 1)
+    -- COLL:an72-rule-length ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -18046,6 +18049,17 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:an77-recalc ── кінець секції ──
+
+-- COLL:an72-rule-length ── ru/kz: AN-72: правило категорії довше за межу формули (MethodologyCategoryRule.Normalize); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-CALC-0422.categoryRuleTooLong', N'ru', N'Правило категории длиннее {max} символов ({length}): сократите выражение или вынесите часть логики в Row-формулу.'),
+    (N'err.ECR-CALC-0422.categoryRuleTooLong', N'kz', N'Санат ережесі {max} таңбадан ұзын ({length}): өрнекті қысқартыңыз немесе логиканың бір бөлігін Row-формулаға шығарыңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:an72-rule-length ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

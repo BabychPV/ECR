@@ -27,7 +27,7 @@ public sealed class MethodologyCategoryRule : Entity<int>
     /// <param name="methodologyVersionId">Версія методології.</param>
     /// <param name="expression">Вираз діалекту Methodology; результат — текст (ключ категорії).</param>
     /// <param name="utcNow">Момент створення з <c>IClock.UtcNow</c>.</param>
-    /// <exception cref="DomainException">Порожній вираз — <c>ECR-CALC-0422</c>.</exception>
+    /// <exception cref="DomainException">Порожній чи задовгий вираз — <c>ECR-CALC-0422</c>.</exception>
     public MethodologyCategoryRule(int methodologyVersionId, string expression, DateTime utcNow)
     {
         MethodologyVersionId = methodologyVersionId;
@@ -62,7 +62,7 @@ public sealed class MethodologyCategoryRule : Entity<int>
         UpdatedAt = utcNow;
     }
 
-    /// <summary>Вираз без крайніх пробілів; порожній не приймається.</summary>
+    /// <summary>Вираз без крайніх пробілів; порожній і довший за <see cref="MethodologyFormula.MaxExpressionLength"/> не приймається.</summary>
     private static string Normalize(string expression)
     {
         if (string.IsNullOrWhiteSpace(expression))
@@ -74,6 +74,23 @@ public sealed class MethodologyCategoryRule : Entity<int>
                 new Dictionary<string, object?> { ["messageKey"] = "err.ECR-CALC-0422.categoryRuleEmpty" });
         }
 
-        return expression.Trim();
+        var trimmed = expression.Trim();
+
+        // ⛔ L7-01 (AN-72): колонка calc.CategoryRule.Expression довжини не обмежує (HasMaxLength потребує
+        // міграції), тож межу тримає сутність: довший за формулу вираз не зберігається й не розбирається.
+        if (trimmed.Length > MethodologyFormula.MaxExpressionLength)
+        {
+            throw new DomainException(
+                "ECR-CALC-0422",
+                $"Правило категорії довше за {MethodologyFormula.MaxExpressionLength} символів ({trimmed.Length}).",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0422.categoryRuleTooLong",
+                    ["max"] = MethodologyFormula.MaxExpressionLength.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    ["length"] = trimmed.Length.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
+        }
+
+        return trimmed;
     }
 }
