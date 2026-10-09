@@ -30,9 +30,16 @@ namespace Ecr.Architecture.Tests;
 /// <c>TraversalStackGuard.TryEnter(…)</c>,
 /// <c>RuntimeHelpers.EnsureSufficientExecutionStack()</c> /
 /// <c>TryEnsureSufficientExecutionStack()</c>, <c>….EnterNesting()</c>.
-/// Парсер і обчислювач мають власних, строгіших сторожів
-/// (<see cref="ParserRecursionCoverageTests"/>,
-/// <see cref="EvaluatorRecursionCoverageTests"/>), тож тут їх пропущено.
+/// Обчислювач має власного, строгішого сторожа
+/// (<see cref="EvaluatorRecursionCoverageTests"/>), тож тут його пропущено.
+///
+/// ⛔ Парсер (<c>Parser.cs</c>) тут НЕ пропущено (L7-01, AN-72, аудит 2026-10-09).
+/// <see cref="ParserRecursionCoverageTests"/> бачить лише методи
+/// <c>Parse*(State s)</c>, тобто рекурсію розбору; а ПІСЛЯ розбору
+/// <c>ParseUncached</c> кликав рекурсивний <c>InferShape</c> по лівому гребеню
+/// дерева — до будь-якого сторожа, і виняток для всього файлу ховав це від обох
+/// тестів. Тепер решту методів <c>Parser.cs</c> (усе, що приймає вузол дерева)
+/// стереже цей загальний граф, а <c>Parse*(State)</c> — власний тест парсера.
 ///
 /// ⚠ Межа методу: граф будується в межах ОДНОГО файлу. Рекурсія крізь два
 /// класи в різних файлах (A.Check → B.Check → A.Check) тут не видна; таких
@@ -45,7 +52,6 @@ public sealed partial class AstTraversalRecursionCoverageTests
     /// <summary>Файли з власними сторожами рекурсії (див. remarks класу).</summary>
     private static readonly HashSet<string> OwnGuardFiles = new(StringComparer.Ordinal)
     {
-        "src/Ecr.Expressions/Parsing/Parser.cs",
         "src/Ecr.Expressions/Evaluation/Evaluator.cs",
     };
 

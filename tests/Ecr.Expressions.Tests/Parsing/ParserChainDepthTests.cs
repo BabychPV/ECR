@@ -1,3 +1,5 @@
+using Ecr.Domain.Enums;
+using Ecr.Expressions.Ast;
 using Ecr.Expressions.Parsing;
 using Ecr.TestKit;
 using Xunit;
@@ -107,5 +109,24 @@ public sealed class ParserChainDepthTests
         var inner = string.Format(System.Globalization.CultureInfo.InvariantCulture, wrapper, Chain(600));
 
         AssertChainTooLong(inner + Repeat("+1", 600));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public void Тип_довгого_ланцюга_виводиться_ітеративно_і_правильно()
+    {
+        // ⛔ L7-01 (AN-72): InferShape викликається одразу після розбору, до будь-якого сторожа,
+        // і ішов лівим гребенем рекурсією. Тип мусить лишитися тим самим, що давала рекурсія:
+        // текст + текст — Text, число + число — Number, `!A + '_' + !B` (Null-форми) — Text.
+        var text = Expr.Parse("'a'" + Repeat("+'a'", 1000));
+        var number = Expr.Parse(Chain(1000));
+        var nullForms = Expr.Parse("!A + '_' + !B", ExpressionDialect.Methodology);
+
+        Assert.True(text.IsSuccess);
+        Assert.Equal(ExpressionValueType.Text, text.Expression!.ResultType);
+        Assert.True(number.IsSuccess);
+        Assert.Equal(ExpressionValueType.Number, number.Expression!.ResultType);
+        Assert.True(nullForms.IsSuccess, string.Join("; ", nullForms.Diagnostics.Select(d => d.Message)));
+        Assert.Equal(ExpressionValueType.Text, nullForms.Expression!.ResultType);
     }
 }

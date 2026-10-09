@@ -1290,24 +1290,83 @@ public sealed class Parser
     /// <c>'Сверхнорматив'</c>), а ексельний <c>IF</c> діалекту A — свій. Один
     /// каталог на обидва давав би тип не тієї мови.
     /// </remarks>
-    private static ExpressionValueType InferShape(AstNode node, ExpressionDialect dialect)
+    private static ExpressionValueType InferShape(AstNode root, ExpressionDialect dialect)
+    {
+        // Вузли без дітей, що впливають на тип, — майже весь корпус: без словника й стека.
+        if (root is not (UnaryNode or BinaryNode or ConditionalNode))
+        {
+            return ShapeOf(root, dialect, NoShapes);
+        }
+
+        // ⛔ L7-01 (аудит 2026-10-09, AN-72): ЦЕ ВИКЛИК ДО БУДЬ-ЯКОГО СТОРОЖА. Рекурсивний
+        // InferShape ішов лівим гребенем `+`-ланцюга на всю його глибину, і гребінь із дужок
+        // (63 рівні × 1024 ланки) валив процес StackOverflowException до того, як будь-який
+        // обхід у Binding зустрічав TraversalStackGuard. Тому обхід ітеративний: явний стек
+        // замість кадрів, послідовність «діти раніше за батька» — зворотний порядок обходу.
+        var order = new List<AstNode>();
+        var pending = new Stack<AstNode>();
+        pending.Push(root);
+
+        while (pending.Count > 0)
+        {
+            var node = pending.Pop();
+            order.Add(node);
+            PushShapeChildren(node, pending);
+        }
+
+        var shapes = new Dictionary<AstNode, ExpressionValueType>(ReferenceEqualityComparer.Instance);
+        for (var i = order.Count - 1; i >= 0; i--)
+        {
+            shapes[order[i]] = ShapeOf(order[i], dialect, shapes);
+        }
+
+        return shapes[root];
+    }
+
+    /// <summary>Порожній словник для вузлів без дітей, що впливають на тип; ніколи не змінюється.</summary>
+    private static readonly Dictionary<AstNode, ExpressionValueType> NoShapes
+        = new(ReferenceEqualityComparer.Instance);
+
+    /// <summary>Піддерева, від типу яких залежить тип вузла (рівно ті, що читає <see cref="ShapeOf"/>).</summary>
+    private static void PushShapeChildren(AstNode node, Stack<AstNode> pending)
+    {
+        switch (node)
+        {
+            case UnaryNode { Operator: UnaryOperator.Not }:
+                break;
+            case UnaryNode unary:
+                pending.Push(unary.Operand);
+                break;
+            case BinaryNode { Operator: BinaryOperator.Add } add:
+                pending.Push(add.Left);
+                pending.Push(add.Right);
+                break;
+            case ConditionalNode conditional:
+                pending.Push(conditional.WhenTrue);
+                break;
+        }
+    }
+
+    /// <summary>Тип вузла за вже відомими типами його піддерев (<paramref name="shapes"/>).</summary>
+    private static ExpressionValueType ShapeOf(
+        AstNode node, ExpressionDialect dialect, Dictionary<AstNode, ExpressionValueType> shapes)
         => node switch
         {
             LiteralNode literal => literal.Type,
             UnaryNode { Operator: UnaryOperator.Not } => ExpressionValueType.Boolean,
-            UnaryNode unary => InferShape(unary.Operand, dialect),
+            UnaryNode unary => shapes[unary.Operand],
             BinaryNode binary => binary.Operator switch
             {
                 BinaryOperator.Concat => ExpressionValueType.Text,
                 // Text + Text, а також Text + Null-форма (поле `!X`, if(...), NULL — тип відомий лише
                 // під час виконання): `!A + '_' + !B` — текст. Обидві Null-форми (`!A + !B`) і все без
                 // тексту лишається Number, як було.
-                BinaryOperator.Add when IsTextPlus(InferShape(binary.Left, dialect), InferShape(binary.Right, dialect))
+                BinaryOperator.Add when IsTextPlus(shapes[binary.Left], shapes[binary.Right])
                     => ExpressionValueType.Text,
                 >= BinaryOperator.Equal and <= BinaryOperator.Or => ExpressionValueType.Boolean,
                 _ => ExpressionValueType.Number,
             },
-            ConditionalNode conditional => InferShape(conditional.WhenTrue, dialect),
+            ConditionalNode conditional => shapes[conditional.WhenTrue],
             FunctionNode function => SignatureOf(function.Name, dialect)?.ResultType
                                      ?? ExpressionValueType.Null,
             PeriodPropertyNode => ExpressionValueType.Number,
