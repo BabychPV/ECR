@@ -169,7 +169,7 @@ public sealed class LoginRateLimitTests(SqlServerFixture sql)
             new { userName = name, password = Password }).ConfigureAwait(true);
 
         // ⛔ Мутаційний доказ: зробити ключ розділу сталим (наприклад, повертати
-        // з `ClientKey` один рядок на всіх) — падає цей рядок, і саме він
+        // з `ForwardedClientAddress.KeyOf` один рядок на всіх) — падає цей рядок, і саме він
         // відрізняє захист від відмови в обслуговуванні власним користувачам.
         Assert.True(
             login.IsSuccessStatusCode,
