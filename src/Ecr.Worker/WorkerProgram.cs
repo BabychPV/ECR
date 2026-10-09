@@ -1,5 +1,8 @@
 // src/Ecr.Worker/WorkerProgram.cs
 
+using System.Data.Common;
+using Ecr.Infrastructure.Persistence;
+using Ecr.Infrastructure.Startup;
 using Ecr.Worker.Isolation;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -22,6 +25,12 @@ internal static partial class WorkerProgram
 
     /// <summary>Наглядач поза Windows.</summary>
     public const int ExitUnsupportedPlatform = 4;
+
+    /// <summary>
+    /// Дочірній: міграції бази й збірки розходяться (або схему не вдалося звірити) — задач не бере
+    /// (R6-X4/X4-02, <c>ECR-SYS-5031</c>).
+    /// </summary>
+    public const int ExitSchemaIncompatible = 5;
 
     /// <summary>Ім'я служби наглядача (P2 реєструє її в MSI).</summary>
     public const string ServiceName = "EcrWorker";
@@ -150,6 +159,22 @@ internal static partial class WorkerProgram
         }
 
         using var host = builder.Build();
+
+        // ⛔ R6-X4/X4-02: до першої задачі — звірка міграцій бази зі збіркою (обидва напрями), як
+        // Api на старті в режимі Validate. Вузли оновлюються не одночасно (D-32): інакше старий
+        // воркер вузла B (перезавантаження у вікні, -SkipOtherNodesCheck) брав би задачі recalc
+        // нового формату на новій схемі, а новий — на ще не накоченій. Відмова — код
+        // ExitSchemaIncompatible; наглядач перезапускає дитину з наростаючою паузою (RestartBackoff),
+        // тож після оновлення схеми чи вузла воркер підхоплюється сам, а задачі лишаються в черзі.
+        var schemaProblem = await CheckSchemaAsync(host.Services, cancellationToken).ConfigureAwait(false);
+        if (schemaProblem is not null)
+        {
+            var logger = host.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Ecr.Worker");
+            LogFatal(logger, schemaProblem);
+            await Console.Error.WriteLineAsync(schemaProblem).ConfigureAwait(false);
+            return ExitSchemaIncompatible;
+        }
+
         try
         {
             await host.RunAsync(cancellationToken).ConfigureAwait(false);
@@ -161,6 +186,28 @@ internal static partial class WorkerProgram
         }
 
         return Environment.ExitCode;
+    }
+
+    /// <summary>
+    /// Звірка міграцій бази зі збіркою для дочірнього (X4-02): текст відмови або <c>null</c>.
+    /// </summary>
+    /// <remarks>
+    /// Fail-closed: база недоступна чи запит упав — теж відмова (не звірили — задач не беремо);
+    /// наглядач повторить спробу з паузою.
+    /// </remarks>
+    private static async Task<string?> CheckSchemaAsync(IServiceProvider services, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await using var scope = services.CreateAsyncScope();
+            var mismatch = await SchemaValidator.MigrationMismatchAsync(
+                scope.ServiceProvider.GetRequiredService<EcrDbContext>(), cancellationToken).ConfigureAwait(false);
+            return mismatch is null ? null : "Дочірній воркер не бере задач — схема бази іншої версії: " + mismatch;
+        }
+        catch (DbException ex)
+        {
+            return "Дочірній воркер не бере задач — схему бази не звірено: " + ex.Message;
+        }
     }
 
     /// <summary>

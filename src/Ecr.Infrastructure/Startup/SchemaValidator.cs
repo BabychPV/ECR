@@ -174,6 +174,47 @@ public sealed class SchemaValidator(
         }
     }
 
+    /// <summary>
+    /// Розбіжність міграцій бази й збірки в будь-який бік — текст причини (з кодом
+    /// <c>ECR-SYS-5031</c>) або <c>null</c>, якщо збігаються.
+    /// </summary>
+    /// <param name="db">Контекст бази, яку звіряємо.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Текст причини або <c>null</c>.</returns>
+    /// <remarks>
+    /// ⛔ R6-X4/X4-02: дочірній воркер черги (<c>Ecr.Worker --child</c>) не має режиму
+    /// <c>Migrate</c> і не бере задач на схемі іншої версії ні в який бік: старий воркер
+    /// на новій схемі (вузол B, D-32) чи новий — на ще не накоченій. Той самий критерій і текст,
+    /// що в <see cref="ValidateAsync"/> Api у режимі <c>Validate</c>.
+    /// </remarks>
+    public static async Task<string?> MigrationMismatchAsync(EcrDbContext db, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        var applied = (await db.Database.GetAppliedMigrationsAsync(ct).ConfigureAwait(false)).ToHashSet(StringComparer.Ordinal);
+        var known = db.Database.GetMigrations().ToHashSet(StringComparer.Ordinal);
+
+        var unknown = applied.Except(known).ToList();
+        if (unknown.Count > 0)
+        {
+            return Incompatible(UnknownMigrationsText(unknown)).Message;
+        }
+
+        var pending = known.Except(applied).ToList();
+        return pending.Count > 0 ? Incompatible(PendingMigrationsText(pending)).Message : null;
+    }
+
+    private static string UnknownMigrationsText(List<string> unknown)
+        => $"У базі є міграції, яких немає у збірці: {string.Join(", ", unknown)}. " +
+           "Схоже на відкат версії застосунку на новішу базу. Старт зупинено.";
+
+    // ⚠ Початок речення «Схема БД застаріла» — той самий, що давав
+    // старий крок `StartupSequence.ApplySchemaModeAsync`: на нього
+    // спирається тест реального старту (`StartupSchemaCheckTests`).
+    private static string PendingMigrationsText(List<string> pending)
+        => $"Схема БД застаріла: не застосовано міграцій — {pending.Count} ({string.Join(", ", pending)}). " +
+           "У режимі Validate застосунок не стартує: працювати на невідповідній схемі " +
+           "гірше, ніж не працювати (D-66).";
+
     /// <summary>Стан міграцій.</summary>
     private async Task ValidateMigrationsAsync(string startupMode, CancellationToken ct)
     {
@@ -187,9 +228,7 @@ public sealed class SchemaValidator(
         var unknown = applied.Except(known).ToList();
         if (unknown.Count > 0)
         {
-            throw Incompatible(
-                $"У базі є міграції, яких немає у збірці: {string.Join(", ", unknown)}. " +
-                "Схоже на відкат версії застосунку на новішу базу. Старт зупинено.");
+            throw Incompatible(UnknownMigrationsText(unknown));
         }
 
         var pending = known.Except(applied).ToList();
@@ -200,13 +239,7 @@ public sealed class SchemaValidator(
 
         if (!string.Equals(startupMode, "Migrate", StringComparison.OrdinalIgnoreCase))
         {
-            // ⚠ Початок речення «Схема БД застаріла» — той самий, що давав
-            // старий крок `StartupSequence.ApplySchemaModeAsync`: на нього
-            // спирається тест реального старту (`StartupSchemaCheckTests`).
-            throw Incompatible(
-                $"Схема БД застаріла: не застосовано міграцій — {pending.Count} ({string.Join(", ", pending)}). " +
-                "У режимі Validate застосунок не стартує: працювати на невідповідній схемі " +
-                "гірше, ніж не працювати (D-66).");
+            throw Incompatible(PendingMigrationsText(pending));
         }
 
         // ⚠ sp_getapplock: два інстанси, які стартують одночасно, інакше

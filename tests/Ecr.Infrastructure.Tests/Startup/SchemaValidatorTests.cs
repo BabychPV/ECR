@@ -214,6 +214,52 @@ public sealed class SchemaValidatorTests(SqlServerFixture sql)
         Assert.Equal(0, (int)(await command.ExecuteScalarAsync())!);
     }
 
+    /// <remarks>
+    /// ⛔ R6-X4/X4-02: дочірній воркер черги звіряє міграції тим самим методом і не бере задач на схемі
+    /// іншої версії в будь-який бік. Мутації (CI): повертати <c>null</c> завжди → червоні «майбутня» і
+    /// «бракує»; перевіряти лише один напрям → червоний інший.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Звірка_міграцій_для_воркера_бачить_обидва_напрями()
+    {
+        await using var db = CreateContext();
+        Assert.Null(await SchemaValidator.MigrationMismatchAsync(db, CancellationToken.None));
+
+        const string Ghost = "29991231235958_WorkerFromTheFuture";
+        await ExecuteAsync(
+            "INSERT INTO dbo.__EFMigrationsHistory (MigrationId, ProductVersion) " +
+            $"VALUES (N'{Ghost}', N'99.0.0')");
+        try
+        {
+            var newer = await SchemaValidator.MigrationMismatchAsync(db, CancellationToken.None);
+            Assert.NotNull(newer);
+            Assert.StartsWith("ECR-SYS-5031: ", newer, StringComparison.Ordinal);
+            Assert.Contains(Ghost, newer, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await ExecuteAsync($"DELETE FROM dbo.__EFMigrationsHistory WHERE MigrationId = N'{Ghost}'");
+        }
+
+        var victim = (await db.Database.GetAppliedMigrationsAsync()).Last();
+        await ExecuteAsync($"DELETE FROM dbo.__EFMigrationsHistory WHERE MigrationId = N'{victim}'");
+        try
+        {
+            var older = await SchemaValidator.MigrationMismatchAsync(db, CancellationToken.None);
+            Assert.NotNull(older);
+            Assert.StartsWith("ECR-SYS-5031: Схема БД застаріла", older, StringComparison.Ordinal);
+            Assert.Contains(victim, older, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await ExecuteAsync(
+                "INSERT INTO dbo.__EFMigrationsHistory (MigrationId, ProductVersion) " +
+                $"VALUES (N'{victim}', N'10.0.11')");
+        }
+    }
+
     /// <summary>Порожня база: є, але без файлових груп і схем партиціонування.</summary>
     /// <param name="suffix">Суфікс імені: різні тести — різні бази.</param>
     /// <param name="compatibilityLevel">Рівень сумісності; <see langword="null"/> — типовий інстансу.</param>
