@@ -327,13 +327,17 @@ public sealed class JobProgressStore(EcrDbContext db) : IJobProgressStore
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// ⚠ AN-108 / P2-03: автор задачі проєктується тим самим читанням рядка — <c>GetJobStatusHandler</c> не
+    /// ходить за ним удруге на кожне опитування стану.
+    /// </remarks>
     public async Task<JobStatus?> FindAsync(string jobId, CancellationToken ct)
         => await db.JobProgresses
             .AsNoTracking()
             .Where(p => p.JobId == jobId)
             .Select(p => new JobStatus(
                 p.JobId, p.State, p.Percent, p.Message, p.Error, p.Attempt, p.CorrelationId, MaxAttempts,
-                p.CreatedAt, p.ErrorCode, p.DocumentId))
+                p.CreatedAt, p.ErrorCode, p.DocumentId, null, p.CreatedByUserId))
             .FirstOrDefaultAsync(ct)
             .ConfigureAwait(false);
 

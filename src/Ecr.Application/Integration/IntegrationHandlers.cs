@@ -218,10 +218,14 @@ public sealed class GetJobStatusHandler(
 
         var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
 
-        var createdByUserId = await jobs.GetCreatedByUserIdAsync(jobId, ct).ConfigureAwait(false);
+        // ⚠ AN-108 / P2-03: автора несе вже прочитаний стан (журнал прогресу проєктує його тим самим SELECT).
+        // Окреме читання — лише для перевірки права, коли стан автора не приніс (системна задача, інший планувальник).
+        var createdByUserId = status.CreatedByUserId;
 
         if (!PermissionCheck.IsGranted(profile, Permission))
         {
+            createdByUserId ??= await jobs.GetCreatedByUserIdAsync(jobId, ct).ConfigureAwait(false);
+
             if (createdByUserId != userId)
             {
                 throw new AccessDeniedException(
