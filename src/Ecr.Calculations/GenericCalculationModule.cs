@@ -355,7 +355,8 @@ public sealed class GenericCalculationModule(
 
         // ⛔ D-161: формули `Legacy` не бачать `EntryRef` (побітно як до RT-23a); `Strict` — бачать.
         var arguments = input.Arguments.ToDictionary(
-            a => a.ArgumentCode, a => ToValue(a, numeric.Mode == NumericMode.Strict), StringComparer.OrdinalIgnoreCase);
+            a => a.ArgumentCode, a => ToValue(a, numeric.Mode == NumericMode.Strict, legacyNumericText: numeric.Mode == NumericMode.Legacy),
+            StringComparer.OrdinalIgnoreCase);
 
         var values = new List<CalculationOutputValue>();
         var units = await UnitsAsync(ct).ConfigureAwait(false);
@@ -425,7 +426,7 @@ public sealed class GenericCalculationModule(
         if (categoryRule is not null && numeric.Mode != NumericMode.Strict)
         {
             var ruleArguments = input.Arguments.ToDictionary(
-                a => a.ArgumentCode, a => ToValue(a, entryRef: true), StringComparer.OrdinalIgnoreCase);
+                a => a.ArgumentCode, a => ToValue(a, entryRef: true, legacyNumericText: false), StringComparer.OrdinalIgnoreCase);
             ruleContext = new MethodologyEvaluationContext(
                 period,
                 ruleArguments,
@@ -1323,18 +1324,36 @@ public sealed class GenericCalculationModule(
     /// Віддавати <c>EntryRef</c>: <c>true</c> — формули <c>Strict</c> і правило категорії будь-якого режиму;
     /// <c>false</c> — формули <c>Legacy</c> (побітно як до RT-23a).
     /// </param>
+    /// <param name="legacyNumericText">
+    /// Текст, що розбирається як <c>double</c> (інваріантна культура), подавати числом —
+    /// <c>true</c> лише для формул <c>Legacy</c>.
+    /// </param>
     /// <remarks>
+    /// ⛔ C1-05 (аудит 2026-10-09c). Чинна збірка подає параметром <c>double</c> будь-яке
+    /// число і будь-який рядок, що розібрався <c>double.TryParse(InvariantCulture)</c>
+    /// (<c>Utilities.cs:188-215</c>, <c>NCalcLegacyTests</c>). Без цього текстова колонка
+    /// зі значенням <c>"1"</c> давала в <c>Legacy</c> <c>@X = 1</c> і <c>in(@X, 1, 2)</c>
+    /// мовчки FALSE, і <c>if</c> ішов в іншу гілку. <c>Strict</c> і правило категорії
+    /// лишаються як є: текст — це текст.
+    ///
     /// ✎ RT-23a: <c>EntryRef</c> (<see cref="CalculationArgument.EntryId"/>) у рантаймі —
     /// число, id запису (§5.3), той самий вибір, що вже діє для <c>Lookup</c>-комірок у
     /// шаблонах. ✎ L2-3: <see cref="CalculationInputBuilder"/> заповнює його завжди, а тут
     /// його ігнорують формули <c>Legacy</c> (<c>D-161</c>); правило категорії читає id в обох режимах.
     /// </remarks>
-    private static ExpressionValue ToValue(CalculationArgument argument, bool entryRef)
+    private static ExpressionValue ToValue(CalculationArgument argument, bool entryRef, bool legacyNumericText)
         => entryRef && argument.EntryId is { } entryId
             ? ExpressionValue.Number(entryId)
             : argument.Value is { } number
                 ? ExpressionValue.Number(number)
                 : argument.ValueString is { } text
-                    ? ExpressionValue.Text(text)
+                    ? legacyNumericText
+                      && double.TryParse(
+                          text,
+                          System.Globalization.NumberStyles.Float,
+                          System.Globalization.CultureInfo.InvariantCulture,
+                          out var parsed)
+                        ? ExpressionValue.LegacyNumber(parsed)
+                        : ExpressionValue.Text(text)
                     : ExpressionValue.Null;
 }
