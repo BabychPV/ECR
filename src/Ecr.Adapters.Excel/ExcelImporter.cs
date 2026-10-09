@@ -160,6 +160,7 @@ public sealed class ExcelImporter(
         var diffs = new List<TableDiff>(map.Tables.Count);
         var changes = new List<ImportChange>();
         var rejected = new List<ImportRejection>();
+        var overwritable = new List<ImportChange>();
 
         // ⛔ Q-168 (аудит фази 2, продуктивність). Таблиці з файлу, яких немає
         // в чинній версії шаблону, відхиляються ТУТ, ДО пакетного читання —
@@ -279,6 +280,7 @@ public sealed class ExcelImporter(
             diffs.Add(diff);
             changes.AddRange(diff.Changes);
             rejected.AddRange(diff.Rejected);
+            overwritable.AddRange(diff.Overwritable ?? []);
         }
 
         // ⛔ `V-10`: значення поза рядками таблиць (порожній документ, рядок під
@@ -305,16 +307,25 @@ public sealed class ExcelImporter(
         // Конфліктів на етапі перегляду ще немає: вони з'являються, якщо між
         // переглядом і застосуванням хтось правив ті самі рядки. Показувати їх
         // наперед означало б вигадати їх.
-        return new ImportPreview(token, changes, rejected, []);
+        return new ImportPreview(token, changes, rejected, [], overwritable);
     }
 
+    /// <summary>Скільки комірок змінить diff без перезапису конфліктних рядків (AN-103).</summary>
+    public Task<int> CountPendingChangesAsync(long documentId, string previewToken, CancellationToken ct)
+        => CountPendingChangesAsync(documentId, previewToken, null, ct);
+
     /// <inheritdoc />
-    public async Task<int> CountPendingChangesAsync(long documentId, string previewToken, CancellationToken ct)
+    public async Task<int> CountPendingChangesAsync(
+        long documentId, string previewToken, IReadOnlyList<ImportOverwriteRow>? overwriteRows, CancellationToken ct)
     {
         var plan = await LoadPlanAsync(previewToken, documentId, ct).ConfigureAwait(false);
 
-        return plan.Tables.Sum(t => t.Changes.Count);
+        return Effective(plan, overwriteRows).Plan.Tables.Sum(t => t.Changes.Count);
     }
+
+    /// <summary>Застосовує diff без перезапису конфліктних рядків (AN-103).</summary>
+    public Task<PatchCellsResponse> ApplyAsync(long documentId, string previewToken, CancellationToken ct)
+        => ApplyAsync(documentId, previewToken, null, ct);
 
     /// <inheritdoc />
     /// <remarks>
@@ -359,9 +370,14 @@ public sealed class ExcelImporter(
     /// 12 таблиць) стали сталими на книгу (<c>ExcelImportApplyWorkbookTests</c>).
     /// Правила ті самі — той самий обробник, ті самі методи правил.
     /// </remarks>
-    public async Task<PatchCellsResponse> ApplyAsync(long documentId, string previewToken, CancellationToken ct)
+    public async Task<PatchCellsResponse> ApplyAsync(
+        long documentId, string previewToken, IReadOnlyList<ImportOverwriteRow>? overwriteRows, CancellationToken ct)
     {
-        var plan = await LoadPlanAsync(previewToken, documentId, ct).ConfigureAwait(false);
+        var loaded = await LoadPlanAsync(previewToken, documentId, ct).ConfigureAwait(false);
+
+        // ✎ AN-114 (D-338): план із доданими змінами рядків, які людина явно
+        // позначила «перезаписати», — далі весь шлях працює саме з ним.
+        var (plan, overwritten) = Effective(loaded, overwriteRows);
 
         var applied = 0;
         var versions = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -479,7 +495,7 @@ public sealed class ExcelImporter(
                 try
                 {
                     responses = await patch
-                        .HandleWorkbookAsync(requests, seeds, rowWindowChanges, innerCt, statuses)
+                        .HandleWorkbookAsync(requests, seeds, rowWindowChanges, innerCt, statuses, overwritten)
                         .ConfigureAwait(false);
                 }
                 catch (EcrException error) when (Blame(error, diffs) is { } named)
@@ -547,6 +563,94 @@ public sealed class ExcelImporter(
 
     /// <summary>Нульовий <c>rowversion</c> у base64: живий рядок такої версії не має.</summary>
     public static readonly string MissingRowVersion = Convert.ToBase64String(new byte[8]);
+
+    /// <summary>
+    /// План, який справді застосовується: збережений перегляд плюс зміни рядків,
+    /// що людина явно позначила «перезаписати» (AN-114, D-338), і ці рядки по
+    /// екземплярах — для журналу.
+    /// </summary>
+    /// <param name="plan">Збережений план перегляду.</param>
+    /// <param name="overwriteRows">Позначені рядки; <c>null</c>/порожньо — план без змін (AN-103).</param>
+    /// <returns>План для застосування і перезаписані рядки (<c>TableInstanceId</c> → <c>RowKey</c>).</returns>
+    /// <remarks>
+    /// ⛔ Перезаписати можна ЛИШЕ рядок, який перегляд показав конфліктом «змінено
+    /// після експорту» (<see cref="TableDiff.Overwritable"/>). Будь-який інший —
+    /// відмова всього застосування (<c>ECR-IMP-0422</c>, <c>overwriteNotConflict</c>),
+    /// а не мовчазний пропуск: клієнт, що просить перезаписати не те, побачив
+    /// не той перегляд. Відмови прав, типу й меж у <c>Overwritable</c> не
+    /// потрапляють узагалі (<see cref="ImportDiffBuilder"/>), тож прапорець їх не обходить.
+    /// <para>
+    /// ⚠ Версія рядка для <c>baseVersion</c> — та сама, з ПЕРЕГЛЯДУ: перезапис
+    /// погоджено на чуже значення, яке людина бачила; правка, що прийшла вже після
+    /// перегляду, і далі відхиляє книгу конфліктом <c>ECR-CELL-0409</c>.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="BusinessRuleException"><c>ECR-IMP-0422</c> — рядок не був конфліктом.</exception>
+    public static (ImportPlan Plan, IReadOnlyDictionary<long, IReadOnlySet<string>>? Overwritten) Effective(
+        ImportPlan plan, IReadOnlyList<ImportOverwriteRow>? overwriteRows)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+
+        if (overwriteRows is null || overwriteRows.Count == 0)
+        {
+            return (plan, null);
+        }
+
+        var wanted = new HashSet<(string TableCode, string RowKey)>();
+        foreach (var row in overwriteRows)
+        {
+            if (row?.TableCode is null || row.RowKey is null)
+            {
+                throw OverwriteNotConflict(row?.TableCode, row?.RowKey);
+            }
+
+            wanted.Add((row.TableCode, row.RowKey));
+        }
+
+        var matched = new HashSet<(string TableCode, string RowKey)>();
+        var overwritten = new Dictionary<long, IReadOnlySet<string>>();
+        var tables = new List<TableDiff>(plan.Tables.Count);
+
+        foreach (var diff in plan.Tables)
+        {
+            var taken = (diff.Overwritable ?? [])
+                .Where(c => c.TableCode is not null && wanted.Contains((c.TableCode, c.RowKey)))
+                .ToList();
+
+            if (taken.Count == 0)
+            {
+                tables.Add(diff);
+                continue;
+            }
+
+            foreach (var change in taken)
+            {
+                matched.Add((change.TableCode!, change.RowKey));
+            }
+
+            overwritten[diff.TableInstanceId] = taken.Select(c => c.RowKey).ToHashSet(StringComparer.Ordinal);
+            tables.Add(diff with { Changes = [.. diff.Changes, .. taken] });
+        }
+
+        if (wanted.FirstOrDefault(w => !matched.Contains(w)) is { TableCode: not null } stray)
+        {
+            throw OverwriteNotConflict(stray.TableCode, stray.RowKey);
+        }
+
+        return (plan with { Tables = tables }, overwritten);
+    }
+
+    /// <summary>Відмова: просять перезаписати рядок, який не був конфліктом «змінено після експорту».</summary>
+    private static BusinessRuleException OverwriteNotConflict(string? tableCode, string? rowKey)
+        => new(
+            "ECR-IMP-0422",
+            "Only rows that were changed after the workbook was exported can be overwritten.",
+            new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["messageKey"] = "err.ECR-IMP-0422.overwriteNotConflict",
+                ["tableCode"] = tableCode ?? string.Empty,
+                ["rowKey"] = rowKey ?? string.Empty,
+            });
 
     /// <summary>
     /// Аркуші таблиць книги, у які застосування пише, — у порядку, у якому
@@ -714,12 +818,12 @@ public sealed class ExcelImporter(
     /// <param name="previewToken">Токен перегляду.</param>
     /// <param name="documentId">
     /// Документ застосування; <c>null</c> — виклик лише РАХУЄ зміни
-    /// (<see cref="CountPendingChangesAsync"/>) і документ ще невідомий обробнику.
+    /// (<c>CountPendingChangesAsync</c>) і документ ще невідомий обробнику.
     /// </param>
     /// <param name="ct">Скасування.</param>
     /// <remarks>
-    /// ⚠ Спільна для <see cref="CountPendingChangesAsync"/> і
-    /// <see cref="ApplyAsync"/> (директива №11, T10 #45): порогове рішення
+    /// ⚠ Спільна для <c>CountPendingChangesAsync</c> і
+    /// <c>ApplyAsync</c> (директива №11, T10 #45): порогове рішення
     /// «синхронно чи в чергу» рахує зміни ТИМ САМИМ читанням, яким їх потім
     /// застосовують, — другий незалежний розбір <c>previewToken</c> міг би
     /// одного дня порахувати інакше, ніж застосує.

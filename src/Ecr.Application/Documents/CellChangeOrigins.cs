@@ -41,6 +41,20 @@ public static class CellChangeOrigins
     public const string Import = "Import";
 
     /// <summary>
+    /// Імпорт книги Excel, у якому людина СВІДОМО перезаписала чужу правку,
+    /// зроблену після експорту (AN-114, D-338: прапорець «перезаписати» на
+    /// конфліктному рядку перегляду).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Для сторожів «правка людини» — те саме, що <see cref="Import"/>
+    /// (<see cref="HumanOriginsSql"/>); клієнт через PATCH його не заявить
+    /// (<see cref="RequireClientOrigin"/>). Окреме значення — лише щоб журнал
+    /// відрізняв «повернула старе число, не знаючи» (цього AN-103 вже не пускає)
+    /// від «знала й перезаписала».
+    /// </remarks>
+    public const string ImportOverwrite = "ImportOverwrite";
+
+    /// <summary>
     /// Походження, які сторожі інтеграції вважають рішенням людини, — готовим
     /// списком для <c>IN (…)</c> у сирому SQL над <c>aud.CellChange</c> (журнал
     /// не є сутністю EF).
@@ -59,7 +73,7 @@ public static class CellChangeOrigins
     /// <c>system</c>.
     /// </para>
     /// </remarks>
-    public const string HumanOriginsSql = "N'" + UserEdit + "', N'" + Import + "'";
+    public const string HumanOriginsSql = "N'" + UserEdit + "', N'" + Import + "', N'" + ImportOverwrite + "'";
 
     /// <summary>Скільки символів значення повертається в тексті відмови.</summary>
     private const int EchoLength = 32;

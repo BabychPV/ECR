@@ -48,6 +48,9 @@ public sealed class ExcelImportRowVersionConflictTests
 
     private static readonly PeriodKey Period = new(PeriodKeyValue);
 
+    /// <summary>Ті самі налаштування, з якими план зберігає <c>ExcelImporter</c>.</summary>
+    private static readonly JsonSerializerOptions PlanOptions = new(JsonSerializerDefaults.Web);
+
     private readonly IRowStore _rows = Substitute.For<IRowStore>();
     private readonly ICellStore _cells = Substitute.For<ICellStore>();
     private readonly IMetadataCache _metadata = Substitute.For<IMetadataCache>();
@@ -163,6 +166,90 @@ public sealed class ExcelImportRowVersionConflictTests
         Assert.Equal(8m, change.NewValue);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Decision", "D-338")]
+    public async Task AN114_конфліктний_рядок_іде_в_план_окремим_переліком_і_застосовується_лише_з_прапорцем()
+    {
+        using var workbook = await ExportAsync();
+        State(r1: 9m, r1Version: "AAAAAAAAC/8=", r2: 5m, r2Version: "AAAAAAAAB9I=");
+        workbook.Worksheet("Sheet").Cell(3, 1).Value = 10;
+
+        var preview = await ImportAsync(workbook);
+
+        // Перегляд показує людині чуже (9) і своє (10) — для рішення «перезаписати».
+        var overwritable = Assert.Single(preview.Overwritable);
+        Assert.Equal("R1", overwritable.RowKey);
+        Assert.Equal(9m, overwritable.OldValue);
+        Assert.Equal(10m, overwritable.NewValue);
+
+        var plan = SavedPlan();
+
+        // ⛔ Без прапорця — AN-103 без змін: рядка R1 у плані застосування немає.
+        var (without, none) = ExcelImporter.Effective(plan, null);
+        Assert.Null(none);
+        Assert.DoesNotContain(without.Tables.SelectMany(t => t.Changes), c => c.RowKey == "R1");
+
+        // ✎ З прапорцем на R1 — зміна в плані, рядок позначено для журналу.
+        // ⛔ Мутація: не додавати `taken` у `Changes` в `Effective` — червоний.
+        var (with, overwritten) = ExcelImporter.Effective(plan, [new ImportOverwriteRow("T1", "R1")]);
+        var change = Assert.Single(with.Tables.SelectMany(t => t.Changes));
+        Assert.Equal("R1", change.RowKey);
+        Assert.Equal("10", Convert.ToString(change.NewValue, System.Globalization.CultureInfo.InvariantCulture));
+        Assert.Equal("R1", Assert.Single(overwritten![InstanceId]));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Decision", "D-338")]
+    public async Task AN114_відмову_правами_прапорець_перезапису_не_обходить()
+    {
+        using var workbook = await ExportAsync();
+        State(r1: 9m, r1Version: "AAAAAAAAC/8=", r2: 5m, r2Version: "AAAAAAAAB9I=");
+        workbook.Worksheet("Sheet").Cell(3, 1).Value = 10;
+
+        // R1.A заборонена правами — відмова прав іде РАНІШЕ за конфлікт версії.
+        var preview = await ImportAsync(
+            workbook,
+            new Dictionary<CellAddress, EditDecision>
+            {
+                [new CellAddress(Period, 1001, InputColumnId)] = EditDecision.Deny(EditDenyReason.RowReadOnly),
+            });
+
+        Assert.Equal("ECR-ACCS-0403", Assert.Single(preview.Rejected).ReasonCode);
+        Assert.Empty(preview.Overwritable);
+
+        // ⛔ Мутація: класти у `overwritable` до перевірки прав (або приймати в
+        // `Effective` будь-який рядок відмови) — відмова прав стала б перезаписом.
+        var error = Assert.Throws<Ecr.Application.Errors.BusinessRuleException>(
+            () => ExcelImporter.Effective(SavedPlan(), [new ImportOverwriteRow("T1", "R1")]));
+        Assert.Equal("ECR-IMP-0422", error.ErrorCode);
+        Assert.Equal("err.ECR-IMP-0422.overwriteNotConflict", error.Details?["messageKey"]);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Decision", "D-338")]
+    public async Task AN114_перезаписати_рядок_без_конфлікту_не_можна()
+    {
+        using var workbook = await ExportAsync();
+        workbook.Worksheet("Sheet").Cell(4, 1).Value = 6;
+
+        await ImportAsync(workbook);
+
+        // R2 — звичайна зміна, не конфлікт: прохання «перезаписати» його — відмова, а не тиша.
+        var error = Assert.Throws<Ecr.Application.Errors.BusinessRuleException>(
+            () => ExcelImporter.Effective(SavedPlan(), [new ImportOverwriteRow("T1", "R2")]));
+        Assert.Equal("err.ECR-IMP-0422.overwriteNotConflict", error.Details?["messageKey"]);
+    }
+
+    /// <summary>Збережений перегляд — той самий план, що бере застосування.</summary>
+    private ImportPlan SavedPlan()
+    {
+        Assert.NotNull(_savedPlan);
+        return JsonSerializer.Deserialize<ImportPlan>(_savedPlan, PlanOptions)!;
+    }
+
     /// <summary>Поточний стан сховища: значення <c>A</c> і версії рядків.</summary>
     private void State(decimal r1, string r1Version, decimal r2, string r2Version)
     {
@@ -233,7 +320,8 @@ public sealed class ExcelImportRowVersionConflictTests
         return new XLWorkbook(copy);
     }
 
-    private async Task<ImportPreview> ImportAsync(XLWorkbook workbook)
+    private async Task<ImportPreview> ImportAsync(
+        XLWorkbook workbook, IReadOnlyDictionary<CellAddress, EditDecision>? decisions = null)
     {
         var stream = new MemoryStream();
         workbook.SaveAs(stream);
@@ -255,7 +343,7 @@ public sealed class ExcelImportRowVersionConflictTests
             .Returns(call => (IReadOnlyDictionary<long, IReadOnlyDictionary<CellAddress, EditDecision>>)
                 call.ArgAt<IReadOnlyCollection<long>>(1).Distinct().ToDictionary(
                     id => id,
-                    _ => (IReadOnlyDictionary<CellAddress, EditDecision>)new Dictionary<CellAddress, EditDecision>()));
+                    _ => decisions ?? new Dictionary<CellAddress, EditDecision>()));
 
         var headers = Substitute.For<IDocumentHeaderStore>();
         headers.GetExpressionValuesAsync(Arg.Any<long>(), Arg.Any<CancellationToken>())

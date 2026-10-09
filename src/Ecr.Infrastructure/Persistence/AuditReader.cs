@@ -144,7 +144,7 @@ public sealed class AuditReader(EcrDbContext db) : IAuditReader
             SELECT ColumnDefId,
                    COUNT_BIG(*),
                    COUNT_BIG(CASE WHEN ChangedAt >= @today THEN 1 END),
-                   COUNT_BIG(CASE WHEN Origin = N'Import' THEN 1 END),
+                   COUNT_BIG(CASE WHEN Origin IN (N'Import', N'ImportOverwrite') THEN 1 END),
                    COUNT_BIG(CASE WHEN Origin = N'Recalculation' THEN 1 END)
               FROM aud.CellChange
              WHERE {where}

@@ -62,6 +62,13 @@ public sealed partial class PatchCellsHandler
     /// структури документа (<see cref="ISheetEditGate.EnterStructureAsync"/>, L6-02)
     /// і звірив під ним версію шаблону.
     /// </param>
+    /// <param name="overwrittenRows">
+    /// ✎ AN-114 (D-338). Рядки (<c>TableInstanceId</c> → <c>RowKey</c>), які людина
+    /// свідомо перезаписала поверх чужих правок, зроблених після експорту книги:
+    /// їхні комірки йдуть у журнал із походженням
+    /// <see cref="CellChangeOrigins.ImportOverwrite"/> замість <c>Origin</c> батчу.
+    /// Лише журнал — правила запису ті самі. <c>null</c> — таких рядків немає.
+    /// </param>
     /// <returns>Відповідь на кожен батч — у порядку <paramref name="requests"/>.</returns>
     /// <remarks>
     /// ⚠ Стан, прочитаний під спільним блокуванням, лишається правдою до кінця
@@ -74,7 +81,8 @@ public sealed partial class PatchCellsHandler
         ICollection<RecalculationSeed> recalculationSeeds,
         ICollection<RowWindowChange> rowWindowChanges,
         CancellationToken ct,
-        IReadOnlyDictionary<int, Domain.Enums.DocumentStatus>? heldSheetStatuses = null)
+        IReadOnlyDictionary<int, Domain.Enums.DocumentStatus>? heldSheetStatuses = null,
+        IReadOnlyDictionary<long, IReadOnlySet<string>>? overwrittenRows = null)
     {
         ArgumentNullException.ThrowIfNull(requests);
         ArgumentNullException.ThrowIfNull(recalculationSeeds);
@@ -144,7 +152,10 @@ public sealed partial class PatchCellsHandler
                 var instance = instances[request.TableInstanceId];
                 return new WorkbookItem(request, Blamed(request.TableInstanceId, () => BuildContext(
                     request, userId, profile, instance, snapshots[instance.TemplateVersionId],
-                    rows.GetValueOrDefault(request.TableInstanceId, Array.Empty<RowState>()))));
+                    rows.GetValueOrDefault(request.TableInstanceId, Array.Empty<RowState>()))))
+                {
+                    OverwrittenRowKeys = overwrittenRows?.GetValueOrDefault(request.TableInstanceId),
+                };
             })
             .ToList();
 
@@ -633,7 +644,8 @@ public sealed partial class PatchCellsHandler
         await audit.WriteCellChangesAsync(
             [.. active.SelectMany(x => BuildAuditRecords(
                 x.Request, x.Applied!.Upserts, x.Applied.Deletes, userId, now, documentId,
-                x.Applied.RowKeyById, previous, isLateEdit, AuditCorrelationId(), x.Context.OutOfWindow))],
+                x.Applied.RowKeyById, previous, isLateEdit, AuditCorrelationId(), x.Context.OutOfWindow,
+                x.OverwrittenRowKeys))],
             ct).ConfigureAwait(false);
 
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
@@ -744,6 +756,9 @@ public sealed partial class PatchCellsHandler
         public RequestContext Context { get; } = context;
 
         public long Id => Request.TableInstanceId;
+
+        /// <summary>Рядки, свідомо перезаписані поверх чужих правок (AN-114); <c>null</c> — немає.</summary>
+        public IReadOnlySet<string>? OverwrittenRowKeys { get; init; }
 
         public List<CellAddress> AccessAddresses { get; set; } = [];
 

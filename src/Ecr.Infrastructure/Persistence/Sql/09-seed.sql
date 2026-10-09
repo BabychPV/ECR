@@ -6531,6 +6531,17 @@ USING (VALUES
     -- IMPORT:an103 ── D1-02: рядок змінено після експорту книги — конфлікт у перегляді імпорту; ru/kz — порцією IMPORT:an103 у блоці I18N нижче ──
     (N'err.ECR-CELL-0409.importRowChangedSinceExport', N'en', N'Someone changed this row after the workbook was exported, so the value from the file is not applied. Export the document again and repeat your changes in the new workbook.', 1),
     -- IMPORT:an103 ── кінець секції ──
+    -- IMPORT:an114 ── D-338: явний перезапис рядків, змінених після експорту книги; ru/kz — порцією IMPORT:an114 у блоці I18N нижче ──
+    (N'import.overwriteTitle', N'en', N'Rows changed by someone else after export', 1),
+    (N'import.overwriteHint', N'en', N'Someone changed these rows after the workbook was exported. Your values from the file replace theirs only in the rows you mark. Unmarked rows keep the current values; the rest of the file is applied.', 1),
+    (N'import.overwriteRow', N'en', N'Overwrite their values with mine', 1),
+    (N'import.overwriteSkip', N'en', N'Apply the rest of the file and keep the current values in unmarked rows', 1),
+    (N'import.overwriteRows', N'en', N'{count} row(s) changed after export', 1),
+    (N'import.theirs', N'en', N'Current value', 1),
+    (N'import.mine', N'en', N'Value in file', 1),
+    (N'err.ECR-IMP-0422.overwriteNotConflict', N'en', N'Only rows changed by someone else after the workbook was exported can be overwritten. Build the import preview again.', 1),
+    (N'audit.originLabel.ImportOverwrite', N'en', N'Excel import, overwrote a later change', 1),
+    -- IMPORT:an114 ── кінець секції ──
     -- API:negative-path ── відмови замість 500 на некоректних полях запиту (прохід по відмовах API) ──
     (N'err.ECR-CALC-0422.versionNumber', N'en', N'The methodology version number must be from 1 to {maxLength} characters.', 1),
     (N'err.ECR-CALC-0422.formulaTooLong', N'en', N'The expression of formula "{code}" is longer than {maxLength} characters.', 1),
@@ -15961,6 +15972,33 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- IMPORT:an103 ── кінець секції ──
+
+-- IMPORT:an114 ── ru/kz D-338: явний перезапис рядків, змінених після експорту книги; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'import.overwriteTitle', N'ru', N'Строки, изменённые другими после выгрузки'),
+    (N'import.overwriteTitle', N'kz', N'Экспорттан кейін басқалар өзгерткен жолдар'),
+    (N'import.overwriteHint', N'ru', N'Кто-то изменил эти строки после выгрузки книги. Ваши значения из файла заменят чужие только в отмеченных строках. В неотмеченных строках останутся текущие значения; остальная часть файла будет применена.'),
+    (N'import.overwriteHint', N'kz', N'Кітап экспортталғаннан кейін біреу бұл жолдарды өзгертті. Файлдағы мәндеріңіз тек белгіленген жолдарда басқалардың мәндерін ауыстырады. Белгіленбеген жолдарда ағымдағы мәндер қалады; файлдың қалған бөлігі қолданылады.'),
+    (N'import.overwriteRow', N'ru', N'Перезаписать чужие значения моими'),
+    (N'import.overwriteRow', N'kz', N'Басқалардың мәндерін менікімен қайта жазу'),
+    (N'import.overwriteSkip', N'ru', N'Применить остальную часть файла и оставить текущие значения в неотмеченных строках'),
+    (N'import.overwriteSkip', N'kz', N'Файлдың қалған бөлігін қолданып, белгіленбеген жолдарда ағымдағы мәндерді қалдыру'),
+    (N'import.overwriteRows', N'ru', N'Строк, изменённых после выгрузки: {count}'),
+    (N'import.overwriteRows', N'kz', N'Экспорттан кейін өзгерген жолдар: {count}'),
+    (N'import.theirs', N'ru', N'Текущее значение'),
+    (N'import.theirs', N'kz', N'Ағымдағы мән'),
+    (N'import.mine', N'ru', N'Значение в файле'),
+    (N'import.mine', N'kz', N'Файлдағы мән'),
+    (N'err.ECR-IMP-0422.overwriteNotConflict', N'ru', N'Перезаписать можно только строки, которые кто-то изменил после выгрузки книги. Постройте предпросмотр импорта заново.'),
+    (N'err.ECR-IMP-0422.overwriteNotConflict', N'kz', N'Тек кітап экспортталғаннан кейін біреу өзгерткен жолдарды қайта жазуға болады. Импорттың алдын ала қарауын қайта құрыңыз.'),
+    (N'audit.originLabel.ImportOverwrite', N'ru', N'Импорт из Excel, перезаписал более позднее изменение'),
+    (N'audit.originLabel.ImportOverwrite', N'kz', N'Excel-ден импорт, кейінгі өзгерісті қайта жазды')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- IMPORT:an114 ── кінець секції ──
 
 -- API:negative-path ── ru/kz відмов замість 500 на некоректних полях запиту; власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)
