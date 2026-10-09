@@ -68,12 +68,29 @@ public static class CellChangeOrigins
     /// наступне «людське» походження не довелося шукати по SQL
     /// (<c>HumanOriginSqlLiteralTests</c> стежить, щоб літерал не повернувся).
     /// <para>
-    /// ⚠ Лише сторожі інтеграції. Підпис автора в конфлікті PATCH
-    /// (<c>CellConflictDto.TheirUser</c>) за контрактом лишає імпорт як
-    /// <c>system</c>.
+    /// ⚠ Той самий перелік, що <see cref="IsHuman"/> (підпис автора в конфлікті
+    /// PATCH, AN-115): SQL-сторож і екран мусять однаково відповідати на
+    /// «людина чи система».
     /// </para>
     /// </remarks>
     public const string HumanOriginsSql = "N'" + UserEdit + "', N'" + Import + "', N'" + ImportOverwrite + "'";
+
+    /// <summary>
+    /// Чи зробила зміну з цим походженням ЛЮДИНА: <see cref="UserEdit"/>,
+    /// <see cref="Import"/>, <see cref="ImportOverwrite"/>. Перерахунок,
+    /// інтеграція, міграція — система.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ AN-115: підпис автора в діалозі конфлікту (<c>PatchCellsHandler</c>)
+    /// визнавав людиною лише <see cref="UserEdit"/>, тож чуже значення з книги
+    /// Excel підписувалося «system», хоча його ввела й застосувала конкретна
+    /// людина. Перелік збігається з <see cref="HumanOriginsSql"/>.
+    /// </remarks>
+    /// <param name="origin">Походження з <c>aud.CellChange.Origin</c>.</param>
+    public static bool IsHuman(string? origin) =>
+        string.Equals(origin, UserEdit, StringComparison.Ordinal)
+        || string.Equals(origin, Import, StringComparison.Ordinal)
+        || string.Equals(origin, ImportOverwrite, StringComparison.Ordinal);
 
     /// <summary>Скільки символів значення повертається в тексті відмови.</summary>
     private const int EchoLength = 32;

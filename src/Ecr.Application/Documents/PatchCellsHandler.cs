@@ -793,11 +793,12 @@ public sealed partial class PatchCellsHandler(
                 TheirUser: null, TheirOrigin: null, TheirChangedAt: null, cell.CurrentVersion);
         }
 
-        // ⛔ Не людина — і імені людини тут бути не може. Перерахунок та імпорт
-        // теж несуть `ChangedByUserId` (той, хто їх запустив), і підставити його
-        // ім'я означало б сказати «Серікбаєв змінив 12.40» про число, яке
-        // порахувала формула.
-        var byPerson = string.Equals(last.Origin, UserEditOrigin, StringComparison.Ordinal);
+        // ⛔ Не людина — і імені людини тут бути не може. Перерахунок теж несе
+        // `ChangedByUserId` (той, хто його запустив), і підставити його ім'я
+        // означало б сказати «Серікбаєв змінив 12.40» про число, яке порахувала
+        // формула. ⚠ Імпорт книги (`Import`, `ImportOverwrite`) — навпаки, число
+        // ввела й застосувала людина, і «system» тут ховав би автора (AN-115).
+        var byPerson = CellChangeOrigins.IsHuman(last.Origin);
 
         return new CellConflictDto(
             cell.RowKey,
