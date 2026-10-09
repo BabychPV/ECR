@@ -8,6 +8,41 @@ namespace Ecr.Infrastructure.Persistence.Migrations
     /// <inheritdoc />
     public partial class D256SmtpSettingsAndChannelRoles : Migration
     {
+        /// <summary>Номер помилки передперевірки відкату (<c>THROW</c>).</summary>
+        public const int PrecheckErrorNumber = 50256;
+
+        /// <summary>
+        /// T-SQL передперевірки <c>Down</c>: <c>THROW 50256</c> з переліком формул довших за 2000 символів,
+        /// ДО звуження <c>nvarchar(4000)</c> → <c>nvarchar(2000)</c>.
+        /// </summary>
+        /// <remarks>
+        /// ⛔ Аудит L10-15 (2026-10-09): без цього звуження на живих формулах (Thermaloxidizer — 2409 символів)
+        /// падало голим «String or binary data would be truncated» без жодного рядка. Механізм той самий, що в
+        /// U1/D148: помилка ДО зміни схеми, перелік (до десяти формул: <c>Id</c>, код, версія, довжина).
+        /// Дані не обрізаються мовчки: скоротити формули (нова версія методології) чи відкотитись із бекапу —
+        /// рішення адміністратора. Без <c>STRING_AGG</c>: підлога сервера — SQL Server 2016.
+        /// </remarks>
+        public const string DownPrecheckSql = """
+            DECLARE @d256Count int = (SELECT COUNT(*) FROM calc.MethodologyFormula WHERE DATALENGTH([Expression]) > 4000);
+            IF @d256Count > 0
+            BEGIN
+                DECLARE @d256List nvarchar(max) = STUFF((
+                    SELECT TOP (10) N'; Id ' + CAST(f.Id AS nvarchar(20)) + N' ' + f.Code
+                           + N' (версія ' + CAST(f.MethodologyVersionId AS nvarchar(20))
+                           + N', ' + CAST(DATALENGTH(f.[Expression]) / 2 AS nvarchar(20)) + N' символів)'
+                    FROM calc.MethodologyFormula AS f
+                    WHERE DATALENGTH(f.[Expression]) > 4000
+                    ORDER BY f.Id
+                    FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), 1, 2, N'');
+                DECLARE @d256Message nvarchar(2048) =
+                    N'Відкат D256 зупинено ДО зміни схеми: формул довших за 2000 символів — '
+                    + CAST(@d256Count AS nvarchar(20)) + N'. Звуження nvarchar(4000) до nvarchar(2000) обрізало б їх. '
+                    + N'Формули (до десяти): ' + @d256List
+                    + N'. Скоротіть їх або відкотіться з бекапу; схему й дані не змінено.';
+                THROW 50256, @d256Message, 1;
+            END
+            """;
+
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
@@ -87,9 +122,14 @@ namespace Ecr.Infrastructure.Persistence.Migrations
         }
 
         /// <inheritdoc />
-        /// <remarks>Down впаде при формулі &gt; 2000 символів (звуження nvarchar(4000) до nvarchar(2000)).</remarks>
+        /// <remarks>
+        /// Формула &gt; 2000 символів → <c>THROW 50256</c> з переліком (<see cref="DownPrecheckSql"/>), а не голе
+        /// «обрізання» (звуження nvarchar(4000) до nvarchar(2000)).
+        /// </remarks>
         protected override void Down(MigrationBuilder migrationBuilder)
         {
+            migrationBuilder.Sql(DownPrecheckSql);
+
             migrationBuilder.AlterColumn<string>(
                 name: "Expression",
                 schema: "calc",
