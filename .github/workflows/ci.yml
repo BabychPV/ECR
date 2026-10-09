@@ -312,6 +312,8 @@ jobs:
   #
   # ⛔ НЕ обов'язковий гейт (пряме рішення людини 2026-09-29): до переліку
   # семи не входить, у `server` не зводиться, `needs` не має — іде паралельно.
+  # ✎ X8-01 (R6): зводиться в агрегатор `windows` (кінець Windows-блоку) —
+  # одне ім'я для ruleset `main`, коли людина вирішить зробити його обов'язковим.
   # Кроки перевірки тут не з `verify-all.ps1`, тож `CiPipelineTests` його не
   # зачіпає.
   worker-windows:
@@ -345,6 +347,8 @@ jobs:
   #
   # ⛔ НЕ обов'язковий гейт (пряме рішення людини 2026-09-29): до переліку
   # семи не входить, у `server` не зводиться, `needs` не має — іде паралельно.
+  # ✎ X8-01 (R6): зводиться в агрегатор `windows` (кінець Windows-блоку) —
+  # одне ім'я для ruleset `main`, коли людина вирішить зробити його обов'язковим.
   # Кроки перевірки тут не з `verify-all.ps1`, тож `CiPipelineTests` його не
   # зачіпає.
   msi-windows:
@@ -423,6 +427,7 @@ jobs:
   #
   # ⛔ НЕ обов'язковий гейт (як `msi (windows)`): до переліку семи не входить,
   # у `server` не зводиться. `needs` — лише заради артефакту поточної MSI.
+  # ✎ X8-01 (R6): зводиться в агрегатор `windows` нижче.
   # Кроки перевірки не з `verify-all.ps1`, тож `CiPipelineTests` його не
   # зачіпає.
   msi-install:
@@ -456,6 +461,38 @@ jobs:
           name: msi-install-logs
           path: ${{ runner.temp }}/msi-logs
           retention-days: 14
+
+  # ⛔ X8-01 (аудит R6): Windows-завдання — єдиний автоматичний доказ того, що
+  # постачається замовнику (MSI на Windows Server, служби EcrApi/EcrWorker, Job
+  # Object, deploy-ecr.ps1 під PowerShell 5.1, D-101). Сім гейтів ідуть на Linux і
+  # цього не бачать: червоний `msi-install` не блокував би PR `rc/<дата>` → `main`.
+  #
+  # ⚠ Агрегатор, а не три імені в ruleset — той самий прийом, що `server` для
+  # `server-part`: перелік Windows-завдань змінюється тут, у файлі, а не в
+  # налаштуваннях GitHub. Обов'язковим для `main` його робить ЛЮДИНА (Settings →
+  # Rules → `windows`); до того він лише зводить три вердикти в один видимий.
+  # `CiPipelineTests.Агрегатор_windows_залежить_від_усіх_Windows_завдань` стереже
+  # склад `needs`.
+  #
+  # ⚠ `if: always()` — як у `server`: без нього червоне завдання дало б `skipped`,
+  # а пропущену обов'язкову перевірку GitHub зараховує як пройдену.
+  windows:
+    name: windows
+    needs: [ worker-windows, msi-windows, msi-install ]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Усі Windows-завдання зелені
+        run: |
+          echo "worker-windows: ${{ needs.worker-windows.result }}"
+          echo "msi-windows: ${{ needs.msi-windows.result }}"
+          echo "msi-install: ${{ needs.msi-install.result }}"
+          for r in "${{ needs.worker-windows.result }}" "${{ needs.msi-windows.result }}" "${{ needs.msi-install.result }}"; do
+            if [ "$r" != "success" ]; then
+              echo "::error::Windows-завдання не зелене ($r): MSI, служби чи Job Object не доведені."
+              exit 1
+            fi
+          done
 
   # ⛔ Набір у ПЕРЕМІШАНОМУ порядку — і це НЕ восьмий гейт. Він не блокує
   # мерж (`continue-on-error`), бо його призначення інше: показати, що набір
