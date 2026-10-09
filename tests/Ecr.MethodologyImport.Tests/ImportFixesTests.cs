@@ -51,6 +51,87 @@ public sealed class ImportFixesTests
         Assert.Equal("Number", Formula(package, "M", "NumConst").ResultType);
     }
 
+    /// <remarks>
+    /// ⛔ Мутаційні точки (N5-09): поверни запис форми «за формулою» (<c>shapes[f.Key] = …</c> щодубля) — дублі з різним
+    /// типом перемикатимуть форму щопроходу, і результат залежатиме від порядку: червоніють обидва порядки й
+    /// <see cref="Дублі_ключа_збігаються_а_не_крутять_усі_проходи"/>.
+    /// </remarks>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void Дублі_ключа_формули_з_різним_типом_дають_Text_незалежно_від_порядку(bool textFirst)
+    {
+        var builder = new AfXmlBuilder();
+        if (textFirst)
+        {
+            builder.Formula("M", "V1", "D", "@X", "'abc'").Formula("M", "V1", "D", "@X", "1");
+        }
+        else
+        {
+            builder.Formula("M", "V1", "D", "@X", "1").Formula("M", "V1", "D", "@X", "'abc'");
+        }
+
+        builder.Formula("M", "V1", "UsesD", "!D", "!D");
+
+        var (package, report) = Run(builder);
+
+        Assert.Equal(1, report.DuplicateFormulaKeys);
+        Assert.All(
+            package.Methodologies.Single().Versions.Single().Formulas.Where(f => f.Name == "D"),
+            f => Assert.Equal("Text", f.ResultType));
+        Assert.Equal("Text", Formula(package, "M", "UsesD").ResultType);
+        Assert.Empty(report.Blockers);
+    }
+
+    [Fact]
+    public void Дублі_ключа_збігаються_а_не_крутять_усі_проходи()
+    {
+        var builder = new AfXmlBuilder()
+            .Formula("M", "V1", "D", "@X", "'abc'")
+            .Formula("M", "V1", "D", "@X", "1");
+        var (model, _) = AnalyzeCommand.Run(AfXmlBuilder.ToStream(builder.Build()));
+
+        var result = FormulaTypeInference.InferDetailed(model, "Common");
+
+        Assert.True(result.Converged);
+        Assert.Equal(FormulaResultKind.Text, result.Shapes["M/V1/D/V1"].Kind);
+    }
+
+    [Fact]
+    public void Ланцюг_довший_за_ліміт_проходів_дає_блокер_а_не_мовчазно_неповні_типи()
+    {
+        // Fi = !F(i+1), останній — літерал: тип «Text» просувається на одну формулу за прохід (порядок — за іменем).
+        const int Length = FormulaTypeInference.MaxPasses + 6;
+        var builder = new AfXmlBuilder();
+        for (var i = 0; i < Length; i++)
+        {
+            var text = i == Length - 1 ? "'x'" : $"!F{i + 1:D3}";
+            builder.Formula("M", "V1", $"F{i:D3}", text, text);
+        }
+
+        var (_, report) = Run(builder);
+
+        Assert.True(report.HasBlockers);
+        Assert.Contains(report.Blockers, b => b.StartsWith(FormulaTypeInference.NotConvergedBlocker, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Ланцюг_у_межах_ліміту_збігається_без_блокера()
+    {
+        const int Length = 10;
+        var builder = new AfXmlBuilder();
+        for (var i = 0; i < Length; i++)
+        {
+            var text = i == Length - 1 ? "'x'" : $"!F{i + 1:D3}";
+            builder.Formula("M", "V1", $"F{i:D3}", text, text);
+        }
+
+        var (package, report) = Run(builder);
+
+        Assert.Empty(report.Blockers);
+        Assert.Equal("Text", Formula(package, "M", "F000").ResultType);
+    }
+
     [Fact]
     public void Звіт_рахує_текстові_формули_і_плюс_над_текстом_та_не_переписує_його()
     {
