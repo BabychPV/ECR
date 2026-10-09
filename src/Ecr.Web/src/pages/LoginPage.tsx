@@ -43,6 +43,7 @@ import { useCatalog } from '@/shared/i18n/useCatalog';
 import { usePublicBootstrap } from '@/features/public/api';
 import { routes } from '@/app/routes';
 import { useEffect } from 'react';
+import { announceSessionChange } from '@/shared/session/sessionChannel';
 
 /**
  * Помилка «каталог перекладів не завантажився» (`D-138`).
@@ -185,6 +186,10 @@ export function LoginPage(): JSX.Element {
         method: 'POST',
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       });
+
+      // ⛔ AN-108 / S2-05: інші вкладки цього браузера працювали під ПОПЕРЕДНІМ сеансом — вони покидають його
+      // (слід незбережених правок їхнього власника, перезавантаження), а не відправляють їх під новим cookie.
+      announceSessionChange();
 
       // ⚠ Слід втрачених правок читається лише ПІСЛЯ входу і лише свого
       // користувача: до входу невідомо, чий він, а показати його будь-кому

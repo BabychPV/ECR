@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import { useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { showApiError } from '@/shared/ui/notify';
 import { registerUnsavedSource, UnsavedSettleMs } from '@/shared/ui/unsavedSources';
-import { onBeforeLoginRedirect } from '@/api/client';
+import { isSessionClosed, onBeforeLoginRedirect } from '@/api/client';
 import { recordLostEdits } from './lostEdits';
 import { resetConfirmed } from './confirmedEdits';
 import { registerHeldEditLookup } from './settleEdits';
@@ -475,6 +475,10 @@ export function useDocumentPending(documentId: number, ownerUserId?: number): vo
   useEffect(
     () =>
       registerUnloadFlush(hasPending, () => {
+        // ⛔ AN-108 / S2-05: сеанс змінився в іншій вкладці — правки вже лежать у сліді `lostEdits` їхнього
+        // власника, а відправити їх зараз означало б записати їх під чужим cookie. Без маячка і без питання.
+        if (isSessionClosed()) return false;
+
         // ⚠ `V-01`: і тут без відхилених — інакше останній шанс зберегти
         // правильні правки згорів би на тій самій відмові.
         const sendable = pendingSlices({ sendableOnly: true });

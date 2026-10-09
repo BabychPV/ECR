@@ -228,6 +228,44 @@ export function beginSignOut(): void {
 /** Скидає позначку виходу — лише для тестів. */
 export function resetSignOutForTests(): void {
   signedOut = false;
+  sessionSwitched = false;
+}
+
+/**
+ * Чи сеанс цієї вкладки змінився деінде (AN-108 / S2-05): в іншій вкладці вийшли або увійшов ІНШИЙ користувач.
+ *
+ * ⛔ Cookie сеансу спільна для всіх вкладок. Після входу B у сусідній вкладці кожен запит цієї вкладки (зокрема
+ * автозбереження і маячок `beforeunload` з правками A) пішов би вже з cookie B — і журнал правок приписав би B
+ * чужі значення. Тому з цієї миті мережа для вкладки закрита так само, як після власного виходу.
+ */
+let sessionSwitched = false;
+
+/** Чи сеанс вкладки закрито: власний вихід або зміна сеансу в іншій вкладці. */
+export function isSessionClosed(): boolean {
+  return signedOut || sessionSwitched;
+}
+
+/** Перезавантаження сторінки; підміняється в тестах. */
+let reloadPage: () => void = () => {
+  window.location.reload();
+};
+
+/** Підміняє перезавантаження — лише для тестів. */
+export function setReloadPageForTests(reload: () => void): void {
+  reloadPage = reload;
+}
+
+/**
+ * Покидає сеанс, що змінився деінде (AN-108 / S2-05): закриває мережу, лишає слід незбережених правок ЇХНЬОГО
+ * власника (той самий шлях, що й `401`, — `onBeforeLoginRedirect`) і перезавантажує вкладку, щоб на екрані не
+ * лишилось даних попереднього користувача. Ідемпотентно.
+ */
+export function abandonSwitchedSession(): void {
+  if (sessionSwitched) return;
+  sessionSwitched = true;
+  if (typeof window === 'undefined') return;
+  runBeforeLoginRedirect(window.location.pathname + window.location.search);
+  reloadPage();
 }
 
 /**
@@ -313,7 +351,7 @@ async function apiFetchRaw(
 ): Promise<Response> {
   const correlationId = newCorrelationId();
 
-  if (signedOut && path !== LOGOUT_PATH) {
+  if ((signedOut && path !== LOGOUT_PATH) || sessionSwitched) {
     throw new EcrApiError({
       title: 'err.ECR-AUTH-0401.signInRequired',
       status: 401,
