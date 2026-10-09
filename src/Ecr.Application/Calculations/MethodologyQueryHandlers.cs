@@ -174,7 +174,7 @@ public sealed class SimulateMethodologyHandler(
         // падав у `new DateOnly(0, …)` — 500, — а `202613` мовчки ставав
         // груднем (`Math.Clamp`), тобто симуляція порівнювала з версією,
         // чинною не на той період, про який питали.
-        var periodDate = PeriodDate(periodKey);
+        RequireValidPeriodKey(periodKey);
 
         var methodology = await methodologies
             .FindByVersionAsync(methodologyVersionId, ct)
@@ -204,10 +204,25 @@ public sealed class SimulateMethodologyHandler(
             // тесту, тим самим правилом, що й у продуктиві (`CalculationOrchestrator`,
             // D-112). Ключ як місяць робив з кварталу 202602 28 лютого замість
             // 30 червня — і diff порівнював не з тією версією.
+            //
+            // ⛔ Аудит L7-11: немає такого періоду в проєкті документа тесту — ЯВНА відмова
+            // (422 `ECR-PRD-0404`, ключ каталогу `periodForDocument`, той самий, що в оркестраторі), а не
+            // запасне «ключ — це місяць». Те читання знову ставило б базою diff версію, чинну не на той
+            // день, який рахує продуктив (квартал 202602 → 28 лютого замість 30 червня), і мовчки.
             var bounds = await periods
                 .FindPeriodBoundsAsync(testCase.Input.DocumentId, periodKey, ct)
-                .ConfigureAwait(false);
-            var published = methodology.VersionOn(bounds?.PeriodEnd ?? periodDate);
+                .ConfigureAwait(false)
+                ?? throw new BusinessRuleException(
+                    "ECR-PRD-0404",
+                    $"Періоду {periodKey} для документа {testCase.Input.DocumentId} (тест «{testCase.Code}») не існує: "
+                    + "дату, на яку чинна версія для порівняння, обчислити нема з чого.",
+                    new Dictionary<string, object?>
+                    {
+                        ["messageKey"] = "err.ECR-PRD-0404.periodForDocument",
+                        ["periodKey"] = periodKey.ToString(CultureInfo.InvariantCulture),
+                        ["documentId"] = testCase.Input.DocumentId.ToString(CultureInfo.InvariantCulture),
+                    });
+            var published = methodology.VersionOn(bounds.PeriodEnd);
 
             // ⚠ Трейс завжди Full незалежно від TraceLevel версії: сенс
             // симуляції саме в тому, щоб побачити кроки. Її результат нікуди
@@ -306,20 +321,17 @@ public sealed class SimulateMethodologyHandler(
             version.CalendarMode,
             trace);
 
-    /// <summary>
-    /// Останній день періоду, якщо читати ключ як місяць, — запасна дата, коли
-    /// документ тесту меж періоду не дає.
-    /// </summary>
+    /// <summary>Відхиляє ключ періоду, який не є ні періодом, ні номером 1..12.</summary>
     /// <param name="periodKey">Ключ періоду з запиту.</param>
     /// <exception cref="BusinessRuleException">
     /// <c>ECR-CALC-0422</c> — ключ не є місяцем <c>РРРРММ</c>.
     /// </exception>
     /// <remarks>
-    /// ⚠ Основна дата — межі періоду документа тесту (L7-11); місяць — лише
-    /// запасна, коли документа з таким періодом немає. Номер поза 1..12 —
-    /// відмова з назвою формату, а не тихе «приведення» до грудня.
+    /// ⚠ Лише перевірка форми ключа: дата, на яку обирається версія для порівняння, — межі періоду документа
+    /// тесту (L7-11), а коли такого періоду в документа немає, симуляція відмовляє (`ECR-PRD-0404`), а не читає
+    /// ключ як місяць. Номер поза 1..12 — відмова з назвою формату, а не тихе «приведення» до грудня.
     /// </remarks>
-    private static DateOnly PeriodDate(int periodKey)
+    private static void RequireValidPeriodKey(int periodKey)
     {
         // PeriodKey = Year*100 + Sequence (R-A6).
         var key = new PeriodKey(periodKey);
@@ -336,6 +348,5 @@ public sealed class SimulateMethodologyHandler(
                 });
         }
 
-        return new DateOnly(key.Year, key.Sequence, DateTime.DaysInMonth(key.Year, key.Sequence));
     }
 }
