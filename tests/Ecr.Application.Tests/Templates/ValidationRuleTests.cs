@@ -40,6 +40,8 @@ public sealed class ValidationRuleTests
 
     private readonly TemplateVersion _draft;
     private readonly TableDef _table;
+    private readonly ColumnDef _volume;
+    private readonly ColumnDef _foreignColumn;
 
     public ValidationRuleTests()
     {
@@ -55,7 +57,10 @@ public sealed class ValidationRuleTests
         _table = builder.Table(sheet, "Main");
 
         // ⚠ V-19: збереження правила резолвить посилання — `[Volume]` має існувати.
-        builder.Column(_table, "Volume");
+        _volume = builder.Column(_table, "Volume");
+
+        // ⛔ A1-03: колонка ІНШОЇ таблиці тієї ж версії — FK її прийняв би.
+        _foreignColumn = builder.Column(builder.Table(sheet, "Other"), "Flow");
 
         _draft = new TemplateVersion(templateId: 1, version: "1.0.0.0", createdByUserId: 7, utcNow: Now);
         typeof(TemplateVersion).GetProperty(nameof(TemplateVersion.Id))!.SetValue(_draft, 1);
@@ -123,6 +128,56 @@ public sealed class ValidationRuleTests
         Assert.Single(_table.ValidationRules);
         Assert.Equal("[Volume] >= 100", updated.Expression);
         Assert.Equal(ValidationSeverity.Warning, updated.Severity);
+    }
+
+    /// <summary>
+    /// ⛔ A1-03 (аудит 09.10c): <c>ColumnDefId</c> з тіла не звірявся з таблицею маршруту. Колонка іншої таблиці
+    /// (чи неіснуюча) робила правило мертвим, а клон — табличним (на всі колонки). Тепер 422 з ключем, правило
+    /// не створюється.
+    /// </summary>
+    [Theory]
+    [InlineData("otherTable")]
+    [InlineData("missing")]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "ФВ-5.2")]
+    public async Task Колонка_поза_таблицею_правила_відхиляється_422(string variant)
+    {
+        var column = variant == "otherTable" ? _foreignColumn.Id : 999;
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Save().HandleAsync(1, _table.Id, "R1", Command(columnDefId: column), CancellationToken.None));
+
+        Assert.Equal(ErrorCodes.TemplateInvalid, error.ErrorCode);
+        Assert.Equal("err.ECR-TMPL-0422.validationColumnNotInTable", error.Details?["messageKey"]);
+        Assert.Empty(_table.ValidationRules);
+    }
+
+    /// <summary>⛔ A1-03: видалена колонка своєї таблиці — теж не ціль правила.</summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "ФВ-5.2")]
+    public async Task Видалена_колонка_таблиці_відхиляється_422()
+    {
+        TemplateBuilder.Delete(_volume);
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Save().HandleAsync(
+                1, _table.Id, "R1", Command(columnDefId: _volume.Id),
+                CancellationToken.None));
+
+        Assert.Equal("err.ECR-TMPL-0422.validationColumnNotInTable", error.Details?["messageKey"]);
+    }
+
+    /// <summary>⛔ A1-03: контроль — колонка своєї таблиці приймається.</summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "ФВ-5.2")]
+    public async Task Колонка_своєї_таблиці_приймається()
+    {
+        var saved = await Save().HandleAsync(
+            1, _table.Id, "R1", Command(columnDefId: _volume.Id), CancellationToken.None);
+
+        Assert.Equal(_volume.Id, saved.ColumnDefId);
     }
 
     [Fact]

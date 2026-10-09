@@ -116,6 +116,24 @@ public sealed class SaveValidationRuleHandler(
                     ["versionId"] = templateVersionId.ToString(System.Globalization.CultureInfo.InvariantCulture),
                 });
 
+        // ⛔ A1-03 (аудит 09.10c): колонка правила — жива колонка ЦІЄЇ таблиці. Доти `ColumnDefId` з тіла не
+        // звірявся ні з чим (FK — лише існування): правило з колонкою іншої таблиці було мертвим
+        // (`ValidationEngine` пропускає його на кожній комірці), а клон версії обнуляв посилання — і правило
+        // ставало табличним, тобто накривало ВСІ колонки й блокувало збереження.
+        if (command.ColumnDefId is { } columnDefId
+            && !table.Columns.Any(c => c.Id == columnDefId && !c.IsDeleted))
+        {
+            throw new BusinessRuleException(
+                ErrorCodes.TemplateInvalid,
+                $"Колонки {columnDefId} у таблиці {table.Code} немає: правило з чужою колонкою не діяло б ніде.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-TMPL-0422.validationColumnNotInTable",
+                    ["columnDefId"] = columnDefId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    ["tableCode"] = table.Code,
+                });
+        }
+
         // ⛔ V-19: правило з `[CDEC] >= ` зберігалося з «saved», а публікація
         // вирази правил не перевіряла зовсім — зламане правило доїжджало до
         // документа. Діалект той самий, яким правило рахує `ValidationEngine`.
