@@ -181,7 +181,7 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock, IMemory
 
                 snapshot.RefreshStatus(status);
 
-                await SwitchCurrentAsync(snapshot, innerCt).ConfigureAwait(false);
+                await SwitchCurrentAsync(snapshot, version.ReportDefId, innerCt).ConfigureAwait(false);
                 await db.SaveChangesAsync(innerCt).ConfigureAwait(false);
             },
             ct).ConfigureAwait(false);
@@ -1207,11 +1207,21 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock, IMemory
     /// цю мить повернула б подвоєні рядки — не помилку, а просто вдвічі більше
     /// число. Фільтрований унікальний індекс не дав би це зберегти, але вже
     /// після того, як транзакція впала б посеред побудови.
+    /// <para>
+    /// ⛔ R6-X7 / X7-02: поточний зріз — один на ОПИС звіту (<c>ReportDefId</c>) ×
+    /// проєкт × період, а не на версію. Вʼюха <c>rpt.v_&lt;Звіт&gt;</c> фільтрує за
+    /// <c>d.Code</c> і версії не бачить (<c>D-53</c>: ім'я вʼюхи — довгоживучий
+    /// контракт усіх версій опису), а побудова завжди бере найновішу опубліковану
+    /// версію (<c>FindCurrentVersionAsync</c>). Доки поточність знімалася лише в межах
+    /// версії, перша ж побудова після публікації нової версії лишала ДВА поточні зрізи
+    /// одного періоду — і вʼюха мовчки подвоювала рядки й суми. Фільтрований індекс
+    /// <c>UX_ReportSnapshot_Current</c> стоїть на версії й цього не ловить.
+    /// </para>
     /// </remarks>
-    private async Task SwitchCurrentAsync(ReportSnapshot snapshot, CancellationToken ct)
+    private async Task SwitchCurrentAsync(ReportSnapshot snapshot, int reportDefId, CancellationToken ct)
     {
         var previous = await db.ReportSnapshots
-            .Where(s => s.ReportVersionId == snapshot.ReportVersionId
+            .Where(s => db.ReportVersions.Any(v => v.Id == s.ReportVersionId && v.ReportDefId == reportDefId)
                         && s.ProjectId == snapshot.ProjectId
                         && s.PeriodKey == snapshot.PeriodKey
                         && s.Id != snapshot.Id
