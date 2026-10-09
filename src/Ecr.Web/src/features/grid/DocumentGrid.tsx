@@ -117,6 +117,7 @@ import { t } from '@/shared/i18n';
 import '@/shared/theme/cell-states.css';
 import './cellEditors.css';
 import { usePendingLoading } from '@/features/common/usePendingLoading';
+import { LookupEntriesStaleTimeMs } from '@/features/registries/api';
 
 /**
  * Остання календарна дата періоду (`periodKey` — `YYYYMM`, той самий формат,
@@ -260,13 +261,6 @@ function dataColumnIndexOf(gridColumnIndex: number, data: TableSliceDto): number
  * самим механізмом, що й для решти колонок.
  */
 const RowLabelColumnWidth = 260;
-
-/**
- * Скільки записи Lookup-довідника в сітці вважаються свіжими: повернення у
- * вкладку раніше не перекачує довідник (до 50 тис. записів), пізніше — один
- * рефетч на фокус.
- */
-const LookupEntriesStaleTimeMs = 5 * 60_000;
 
 /** Поправки ARIA поверх вбудованого `WCAGPlugin` (див. `gridAria.ts`). Масив стабільний: новий на кожен рендер перестворював би плагіни. */
 const GridPlugins = [GridAriaPlugin];
