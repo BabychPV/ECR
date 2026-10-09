@@ -534,8 +534,21 @@ function Assert-EcrFolderOwner {
     }
 }
 
+# ⛔ N5-04 (аудит 2026-10-09): ключ EcrWorker читає не лише SCM, а й САМ EcrApi —
+# RecalculationWorkerProbe відкриває його через Registry.OpenSubKey (KEY_READ),
+# щоб відрізнити Missing/Disabled/Installed. Під gMSA без ACE це давало б
+# Unknown (стани Missing/Disabled приховано). Тому для EcrWorker передається
+# -ReadAccount = -ServiceAccount: один ACE ReadKey. Новий секрет цим не
+# відкривається: Environment EcrWorker містить той самий рядок підключення, що вже
+# в Environment EcrApi, а обидві служби працюють під одним обліковим записом.
+# Альтернативу (ServiceController.StartType через SCM) відкинуто: це зміна коду в
+# src/ (+ пакет ServiceController) заради тієї самої видимості. Без
+# -ServiceAccount служби під LocalSystem, який і так має повний доступ.
 function Protect-ServiceRegistryKey {
-    param([Parameter(Mandatory)] [string] $ServiceName)
+    param(
+        [Parameter(Mandatory)] [string] $ServiceName,
+        [string] $ReadAccount
+    )
     $keyPath = "HKLM:\SYSTEM\CurrentControlSet\Services\$ServiceName"
     $acl = Get-Acl -Path $keyPath
     $acl.SetAccessRuleProtection($true, $false)
@@ -544,6 +557,12 @@ function Protect-ServiceRegistryKey {
         $acl.AddAccessRule([System.Security.AccessControl.RegistryAccessRule]::new(
             [System.Security.Principal.SecurityIdentifier]::new($sid), 'FullControl',
             'ContainerInherit', 'None', 'Allow'))
+    }
+    if ($ReadAccount) {
+        $readSid = try { ([System.Security.Principal.NTAccount]::new($ReadAccount)).Translate([System.Security.Principal.SecurityIdentifier]) }
+                   catch { throw "Не вдалося визначити SID облікового запису служби '$ReadAccount' для читання ключа ${ServiceName}: $($_.Exception.Message)" }
+        $acl.AddAccessRule([System.Security.AccessControl.RegistryAccessRule]::new(
+            $readSid, 'ReadKey', 'ContainerInherit', 'None', 'Allow'))
     }
     Set-Acl -Path $keyPath -AclObject $acl
 }
@@ -1598,8 +1617,11 @@ else {
         foreach ($service in @('EcrApi') + @(if ($workerEnabled) { 'EcrWorker' })) {
             if ($PSCmdlet.ShouldProcess("HKLM:\SYSTEM\CurrentControlSet\Services\$service",
                     'закрити ключ служби від BUILTIN\Users (пароль у Environment)')) {
-                Protect-ServiceRegistryKey -ServiceName $service
-                Write-Host "Ключ служби ${service}: читання лише SYSTEM і Administrators." -ForegroundColor Green
+                # N5-04: API під -ServiceAccount читає ключ EcrWorker (RecalculationWorkerProbe) — лише його.
+                $readAccount = if ($service -eq 'EcrWorker') { $ServiceAccount } else { $null }
+                Protect-ServiceRegistryKey -ServiceName $service -ReadAccount $readAccount
+                Write-Host ("Ключ служби ${service}: читання лише SYSTEM і Administrators" +
+                    $(if ($readAccount) { " (і $readAccount — перевірка стану служби з Api)." } else { '.' })) -ForegroundColor Green
             }
         }
     }

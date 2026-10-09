@@ -4,13 +4,14 @@ using Xunit;
 namespace Ecr.Architecture.Tests;
 
 /// <summary>
-/// N5-02 (аудит 2026-10-09): <c>deploy-ecr.ps1</c> відмовляється ставити MSI, якщо власник
-/// <c>%ProgramData%\ECR</c> (чи <c>config</c>/<c>logs</c>) — не SYSTEM і не Administrators.
+/// N5-02 / N5-04 (аудит 2026-10-09): <c>deploy-ecr.ps1</c> відмовляється ставити MSI, якщо власник
+/// <c>%ProgramData%\ECR</c> (чи <c>config</c>/<c>logs</c>) — не SYSTEM і не Administrators, і дає
+/// обліковому запису служби читання ключа <c>EcrWorker</c> для перевірки стану з Api.
 /// </summary>
 /// <remarks>
 /// Предмет — справжні функції скрипта (вирізаються парсером, <see cref="DeployScriptHarness"/>).
-/// Саму читку власника теки (<c>Get-Acl</c>) перевіряє лише Windows-раннер: <c>tools/verify-msi.ps1</c>
-/// (<c>Assert-TrustedOwner</c>). Тести/мутація — CI, локально не запускались.
+/// Читку власника теки (<c>Get-Acl</c>) перевіряє лише Windows-раннер — <c>tools/verify-msi.ps1</c>
+/// (<c>Assert-TrustedOwner</c>), а запис ACE в реєстр — <c>tools/ci-msi-install.ps1</c> (D5d). Тести/мутація — CI, локально не запускались.
 /// </remarks>
 public sealed class DeployFolderOwnerTests
 {
@@ -65,5 +66,25 @@ public sealed class DeployFolderOwnerTests
         Assert.Contains("'config'", line, StringComparison.Ordinal);
         Assert.Contains("'logs'", line, StringComparison.Ordinal);
         Assert.Contains("$programDataEcr", line, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Ключ_EcrWorker_відкривається_на_читання_лише_обліковому_запису_служби()
+    {
+        var script = File.ReadAllText(Path.Combine(SourceTree.Root, "tools", "deploy-ecr.ps1"));
+
+        // Виклик: лише EcrWorker отримує -ReadAccount = -ServiceAccount; EcrApi — ні.
+        Assert.Contains("$readAccount = if ($service -eq 'EcrWorker') { $ServiceAccount } else { $null }", script, StringComparison.Ordinal);
+        Assert.Contains("Protect-ServiceRegistryKey -ServiceName $service -ReadAccount $readAccount", script, StringComparison.Ordinal);
+
+        // Функція: ReadKey (а не FullControl) і лише коли -ReadAccount задано.
+        var start = script.IndexOf("function Protect-ServiceRegistryKey", StringComparison.Ordinal);
+        var end = script.IndexOf("function Set-BootstrapSecretFile", start, StringComparison.Ordinal);
+        Assert.True(start > 0 && end > start, "функцію Protect-ServiceRegistryKey не знайдено");
+        var body = script[start..end];
+        Assert.Contains("if ($ReadAccount)", body, StringComparison.Ordinal);
+        Assert.Contains("'ReadKey'", body, StringComparison.Ordinal);
     }
 }
