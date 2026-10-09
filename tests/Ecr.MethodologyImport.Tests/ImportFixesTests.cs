@@ -98,6 +98,59 @@ public sealed class ImportFixesTests
         Assert.Equal(reason, resolution.Reason);
     }
 
+    /// <remarks>
+    /// ⛔ Мутаційні точки (N5-01): поверни «год» у <c>Aliases</c> — і ці випадки червоніють (т/год мовчки стала б т/рік
+    /// або т/годину, розбіжність у 8760 разів); прибери перевірку частин дробу в <c>AmbiguousReason</c> — червоніють
+    /// «т/год», «кг/год.» і «Т / ГОД».
+    /// </remarks>
+    [Theory]
+    [InlineData("т/год")]
+    [InlineData("год")]
+    [InlineData("год.")]
+    [InlineData("ГОД")]
+    [InlineData("т/год.")]
+    [InlineData("кг / год")]
+    [InlineData("%")]
+    [InlineData("мвт")]
+    [InlineData("МВт")]
+    public void Неоднозначне_позначення_не_вгадується_і_має_причину(string raw)
+    {
+        var resolution = UnitCanonicalizer.Resolve(raw);
+
+        Assert.Null(resolution.Code);
+        Assert.Contains("неоднозначна", resolution.Reason, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("hour", "h")]
+    [InlineData("hr", "h")]
+    [InlineData("т/рік", "t_per_year")]
+    [InlineData("t/yr", "t_per_year")]
+    public void Однозначна_година_чи_рік_зводиться_як_і_раніше(string raw, string expected)
+    {
+        var resolution = UnitCanonicalizer.Resolve(raw);
+
+        Assert.Equal(expected, resolution.Code);
+        Assert.Null(resolution.Reason);
+    }
+
+    [Fact]
+    public void Неоднозначна_одиниця_потрапляє_у_Issues_і_лишається_в_пакеті_сирим_рядком()
+    {
+        var builder = new AfXmlBuilder()
+            .Constant("M", "V1", "k1", "5", unit: "т/год")
+            .Constant("M", "V1", "k2", "5", unit: "т/рік");
+
+        var (package, report) = Run(builder);
+
+        var units = package.Methodologies.Single().Versions.Single().Constants.ToDictionary(c => c.Name, c => c.Unit);
+        Assert.Equal("т/год", units["k1"]); // не t_per_year і не t_per_h
+        Assert.Equal("t_per_year", units["k2"]);
+        var issue = Assert.Single(report.Units!.Issues);
+        Assert.Equal(("k1", "т/год"), (issue.Constant, issue.RawUnit));
+        Assert.Contains("неоднозначна", issue.Reason, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void Пакет_несе_код_каталогу_для_зведеної_одиниці_і_сирий_рядок_для_нерезолвної()
     {
