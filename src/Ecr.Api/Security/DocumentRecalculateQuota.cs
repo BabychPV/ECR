@@ -90,8 +90,9 @@ public sealed class DocumentRecalculateQuota(IConfiguration configuration, TimeP
         var userKey = "user:" + userId;
 
         // ⛔ L1-10: ключ — нормалізований id, а не сирий сегмент маршруту: `/05/` і `/5/` — один документ,
-        // інакше різний запис того самого id давав окрему межу (обхід 6/хв).
-        var canonicalId = long.TryParse(documentId, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var parsedId)
+        // інакше різний запис того самого id давав окрему межу (обхід 6/хв). `NumberStyles.Integer`, а не `None`:
+        // маршрут `{id:long}` розбирає саме так і приймає `+5`/` 5`, тож `None` лишав їх окремими ключами.
+        var canonicalId = long.TryParse(documentId, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var parsedId)
             ? parsedId.ToString(System.Globalization.CultureInfo.InvariantCulture)
             : documentId;
         var documentKey = userKey + "|doc:" + canonicalId;
