@@ -506,4 +506,61 @@ public sealed class ExcelImporterAtomicApplyTests
         await _importGate.Received(1).EnterStructureAsync(DocumentId, false, Arg.Any<CancellationToken>());
         await _importGate.DidNotReceive().EnterStructureAsync(DocumentId, true, Arg.Any<CancellationToken>());
     }
+
+    /// <summary>
+    /// L6-02 / N1-04: перегляд збудовано за версією шаблону, якої проєкт під замком структури вже не
+    /// має (перенос зафіксувався між переглядом і застосуванням), — <c>409 ECR-DOC-4091</c>, жодного
+    /// запису.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Екземпляри при застосуванні вже читаються за НОВОЮ версією, тож порівняння лише з ними
+    /// розбіжності не бачить: у цьому світі їх перелік порожній, як і в решті тестів файлу. Мутація:
+    /// прибрати звірку <c>plan.TemplateVersionId</c> у <c>ApplyAsync</c> — запис іде, тест червоний.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait("Finding", "L6-02")]
+    public async Task Перегляд_за_версією_якої_проєкт_уже_не_має_не_застосовується()
+    {
+        _previews.FindAsync(Token, Arg.Any<CancellationToken>()).Returns(PlanOfVersion(TemplateVersionId));
+        _importGate.EnterStructureAsync(DocumentId, false, Arg.Any<CancellationToken>())
+            .Returns((int?)(TemplateVersionId + 1));
+
+        var error = await Assert.ThrowsAsync<ConcurrencyConflictException>(
+            () => Importer().ApplyAsync(DocumentId, Token, CancellationToken.None));
+
+        Assert.Equal("ECR-DOC-4091", error.ErrorCode);
+        Assert.Equal(DocumentStructure.StructureChangedKey, error.Details!["messageKey"]);
+        Assert.DoesNotContain(_trace, e => e.StartsWith("write:", StringComparison.Ordinal));
+    }
+
+    /// <summary>L6-02 / N1-04: версія плану збігається з версією під замком — застосування проходить.</summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait("Finding", "L6-02")]
+    public async Task Перегляд_за_версією_проєкту_застосовується()
+    {
+        _previews.FindAsync(Token, Arg.Any<CancellationToken>()).Returns(PlanOfVersion(TemplateVersionId));
+        _importGate.EnterStructureAsync(DocumentId, false, Arg.Any<CancellationToken>())
+            .Returns((int?)TemplateVersionId);
+
+        await Importer().ApplyAsync(DocumentId, Token, CancellationToken.None);
+
+        Assert.Contains(_trace, e => e.StartsWith("write:", StringComparison.Ordinal));
+    }
+
+    private static string PlanOfVersion(int templateVersionId)
+    {
+        var tables = Instances
+            .Select((instance, i) => new TableDiff(
+                instance,
+                Period,
+                [new ImportChange("R1", "Volume", null, 10m * (i + 1))],
+                [],
+                new Dictionary<string, string> { ["R1"] = "0xAA" }))
+            .ToList();
+
+        return JsonSerializer.Serialize(
+            new ImportPlan(DocumentId, Period, tables, UserId: null, TemplateVersionId: templateVersionId), Options);
+    }
 }

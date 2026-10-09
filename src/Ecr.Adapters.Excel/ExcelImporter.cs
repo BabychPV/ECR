@@ -294,7 +294,10 @@ public sealed class ExcelImporter(
         await previews
             .SaveAsync(
                 token,
-                JsonSerializer.Serialize(new ImportPlan(documentId, map.PeriodKey, diffs, userId), Options),
+                // ⛔ L6-02 / N1-04: версія шаблону, за якою побудовано перегляд, їде в план — під
+                // замком структури `ApplyAsync` звіряє її з версією проєкту.
+                JsonSerializer.Serialize(
+                    new ImportPlan(documentId, map.PeriodKey, diffs, userId, instances[0].TemplateVersionId), Options),
                 PreviewLifetime,
                 ct)
             .ConfigureAwait(false);
@@ -420,6 +423,15 @@ public sealed class ExcelImporter(
                 foreach (var version in templateVersions)
                 {
                     DocumentStructure.EnsureUnchanged(locked, version, documentId);
+                }
+
+                // ⛔ L6-02 / N1-04. `templateVersions` вище — з екземплярів, прочитаних ПРИ застосуванні, тож
+                // після переносу між переглядом і застосуванням вони вже нової версії й збігаються
+                // з `locked`: розбіжність приховувалась. Перегляд (відхилення, коди довідників, типи комірок)
+                // побудовано за версією з плану — вона і є міркою. Плани до цієї правки версії не мають.
+                if (plan.TemplateVersionId is { } previewedVersion)
+                {
+                    DocumentStructure.EnsureUnchanged(locked, previewedVersion, documentId);
                 }
 
                 var statuses = new Dictionary<int, Ecr.Domain.Enums.DocumentStatus>();
@@ -863,4 +875,9 @@ public sealed class ExcelImporter(
 /// <param name="PeriodKey">Період.</param>
 /// <param name="Tables">Diff-и таблиць.</param>
 /// <param name="UserId">Користувач, що збудував перегляд (L1-20); <c>null</c> — план до прив'язки.</param>
-public sealed record ImportPlan(long DocumentId, int PeriodKey, IReadOnlyList<TableDiff> Tables, int? UserId = null);
+/// <param name="TemplateVersionId">
+/// Версія шаблону, за якою збудовано перегляд (L6-02 / N1-04); <c>null</c> — план до цієї правки,
+/// звірка версії тоді лише за екземплярами, прочитаними при застосуванні.
+/// </param>
+public sealed record ImportPlan(
+    long DocumentId, int PeriodKey, IReadOnlyList<TableDiff> Tables, int? UserId = null, int? TemplateVersionId = null);

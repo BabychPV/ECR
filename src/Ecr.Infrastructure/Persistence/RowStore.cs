@@ -18,7 +18,8 @@ namespace Ecr.Infrastructure.Persistence;
 /// реалізація — `Q-050`.
 /// </remarks>
 public sealed class RowStore(
-    EcrDbContext db, BulkCellLoader bulk, Domain.Abstractions.IClock clock, ArchiveAwareCellReader? archive = null)
+    EcrDbContext db, BulkCellLoader bulk, Domain.Abstractions.IClock clock, ArchiveAwareCellReader? archive = null,
+    ISheetEditGate? structureGate = null)
     : IRowStore
 {
     // ⚠ F-13. `archive` — необов'язковий параметр, а не звичайна залежність:
@@ -30,6 +31,10 @@ public sealed class RowStore(
     // звичайна, `archive` завжди резолвиться. `null` тут означає «викликач
     // свідомо не дає архівного читача» — фолбек тоді просто вимкнений
     // (поведінка та сама, що й до цього фіксу), а не падіння з NRE.
+    //
+    // ⚠ L6-02: `structureGate` — з тієї ж причини необов'язковий; `null` означає «замок структури
+    // документа бере `new SheetEditGate(db)` з типовою політикою очікування» (у DI — зареєстрований
+    // `ISheetEditGate` із налаштованим тайм-аутом).
     /// <inheritdoc />
     /// <remarks>
     /// <c>WR-05</c>/O3: пошук за <c>Id</c> іде через
@@ -687,7 +692,62 @@ public sealed class RowStore(
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// ⛔ L6-02 / N1-04. Створення екземплярів — це ЗАПИС структури документа, а не читання.
+    /// Доти метод писав без жодного замка й поза транзакцією: у вікні переносу версії шаблону
+    /// (<c>MigrateDocumentVersionHandler</c> бере <c>doc-structure</c> винятково) він вставляв
+    /// екземпляри таблиць СТАРОЇ версії — <c>ECR-TMPL-0404</c> на читанні й подвоєна структура.
+    ///
+    /// ⚠ Швидкий шлях лишився без транзакції й замка: повторне відкриття за наявними екземплярами
+    /// (абсолютна більшість викликів — GET таблиць, експорт, перегляд імпорту) нічого не пише, і
+    /// платити за нього замком не варто. Замок і транзакція — лише коли є що створювати; тоді
+    /// аркуші, таблиці й наявні екземпляри ПЕРЕЧИТУЮТЬСЯ вже під спільним <c>doc-structure</c>
+    /// (окремими операторами: під RCSI знімок береться на початку оператора, тож вони бачать
+    /// перенос, що зафіксувався, поки чекали на замок).
+    ///
+    /// ⚠ Якщо викликач уже тримає транзакцію — замок береться в ній (її коміт належить йому).
+    /// </remarks>
     public async Task<int> EnsureTableInstancesAsync(long documentId, PeriodKey periodKey, CancellationToken ct)
+    {
+        // Швидкий шлях: нічого створювати — нічого блокувати.
+        if ((await FindMissingTableDefsAsync(documentId, periodKey, ct).ConfigureAwait(false)).Count == 0)
+        {
+            return 0;
+        }
+
+        var created = 0;
+
+        try
+        {
+            // ⚠ `UnitOfWork` — той самий, що й в обробників: повтор стратегії виконання відчіплює
+            // сутності, додані невдалою спробою, а власну транзакцію відкрито ЛИШЕ тоді, коли
+            // зовнішньої немає. Конструюється тут, а не вводиться: `RowStore` будують напряму
+            // десятки тестів.
+            await new UnitOfWork(db).ExecuteInTransactionAsync(
+                async token =>
+                {
+                    created = 0;
+                    await (structureGate ?? new SheetEditGate(db))
+                        .EnterStructureAsync(documentId, exclusive: false, token)
+                        .ConfigureAwait(false);
+                    created = await CreateMissingTableInstancesAsync(documentId, periodKey, token).ConfigureAwait(false);
+                },
+                ct).ConfigureAwait(false);
+        }
+        catch (InstancesCreatedConcurrently)
+        {
+            // Переможець створив усе; наша транзакція відкочена, трекер уже очищено.
+            return 0;
+        }
+
+        return created;
+    }
+
+    /// <summary>
+    /// Табличні описи документа за період, для яких екземпляра ще немає; порожній перелік —
+    /// нічого створювати (або період заархівовано).
+    /// </summary>
+    private async Task<List<int>> FindMissingTableDefsAsync(long documentId, PeriodKey periodKey, CancellationToken ct)
     {
         // ⚠ Аркуші документа — це і є перелік того, що в ньому заповнюють
         // (ФВ-3.2). Таблиці беруться з тих аркушів, а не з усього шаблону:
@@ -701,7 +761,7 @@ public sealed class RowStore(
 
         if (sheetIds.Count == 0)
         {
-            return 0;
+            return [];
         }
 
         var tableDefIds = await db.TableDefs
@@ -726,10 +786,23 @@ public sealed class RowStore(
         if (existing.Count == 0 && tableDefIds.Count > 0 && archive is not null
             && await archive.HasArchivedTableInstancesAsync(documentId, periodKey, ct).ConfigureAwait(false))
         {
-            return 0;
+            return [];
         }
 
-        var missing = tableDefIds.Except(existing).Order().ToList();
+        return [.. tableDefIds.Except(existing).Order()];
+    }
+
+    /// <summary>
+    /// Створює відсутні екземпляри; викликається ПІД спільним <c>doc-structure</c> і в транзакції.
+    /// </summary>
+    /// <exception cref="InstancesCreatedConcurrently">
+    /// Паралельне перше відкриття випередило: програш на <c>UQ_TableInstance</c>.
+    /// </exception>
+    private async Task<int> CreateMissingTableInstancesAsync(long documentId, PeriodKey periodKey, CancellationToken ct)
+    {
+        // ⛔ L6-02: читати ПІСЛЯ блокування — те, що знайшов швидкий шлях, могло бути структурою
+        // версії, з якої документ уже перенесено.
+        var missing = await FindMissingTableDefsAsync(documentId, periodKey, ct).ConfigureAwait(false);
         if (missing.Count == 0)
         {
             return 0;
@@ -788,18 +861,25 @@ public sealed class RowStore(
             // порту). Друге програє на `UQ_TableInstance` і доти віддавало 500;
             // переможець уже створив і екземпляри, і рядки, тож тут лишається
             // відпустити свої незбережені й відповісти «нічого не створено».
+            //
+            // ⚠ Транзакція, у якій це сталося, відкочується (виняток виходить із
+            // `ExecuteInTransactionAsync`): невдалий пакет міг устигнути вставити частину рядків, а
+            // доти їх відкочував неявний відкат самого `SaveChanges`.
             foreach (var entry in db.ChangeTracker.Entries()
-                         .Where(e => e.State == EntityState.Added && e.Entity is TableInstance or TableRow)
+                         .Where(e => e.State == EntityState.Added && (e.Entity is TableInstance or TableRow))
                          .ToList())
             {
                 entry.State = EntityState.Detached;
             }
 
-            return 0;
+            throw new InstancesCreatedConcurrently();
         }
 
         return missing.Count;
     }
+
+    /// <summary>Програш гонитви за <c>UQ_TableInstance</c> — штатний вихід, а не помилка.</summary>
+    private sealed class InstancesCreatedConcurrently : Exception;
 
     /// <summary>
     /// Заводить рядки щойно створених екземплярів за описами

@@ -303,6 +303,18 @@ public interface IDocumentStore
     /// </remarks>
     public Task<int?> FindProjectTemplateVersionIdAsync(int projectId, CancellationToken ct);
 
+    /// <summary>
+    /// Версія шаблону ПРОЄКТУ, прочитана ПІД блоком його рядка до кінця транзакції; <c>null</c> —
+    /// проєкту немає.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ L6-02 / N1-04. Створення документа визначає його склад за версією проєкту, а перенос
+    /// проєкту на іншу версію (<c>IDocumentVersionMigrationStore.LockProjectVersionAsync</c>) бере
+    /// той самий блок — тож документ не комітиться зі складом старої версії під проєктом нової.
+    /// Викликається лише всередині транзакції: поза нею блок звільнився б одразу.
+    /// </remarks>
+    public Task<int?> LockProjectTemplateVersionAsync(int projectId, CancellationToken ct);
+
     /// <summary>Стан ПРОЄКТУ; <c>null</c> — проєкту немає.</summary>
     /// <remarks>
     /// ⛔ F-11: створення документа не питало стану проєкту взагалі, і

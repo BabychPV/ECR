@@ -159,41 +159,65 @@ public sealed class CreateDocumentHandler(
 
         for (var attempt = 0; ; attempt++)
         {
-            // BusinessKey складається зі значень колонок IsBusinessKey. До появи
-            // даних значень ще немає, тому ключ будується з проєкту і версії —
-            // унікальність у межах проєкту тримає індекс, а не домовленість.
-            var businessKey = await documents
-                .NextBusinessKeyAsync(projectId, versionId, ct).ConfigureAwait(false);
-
-            var document = new Document(projectId, businessKey, userId, now);
-
-            // ⚠ Ім'я — опційне, ПОРУЧ із BusinessKey, не замість нього: механізм
-            // технічного ключа тут не змінюється (директива "людське ім'я
-            // документа"). Порожній перелік мов (об'єкт `{}`) трактується так
-            // само, як відсутність імені — надсилати його як щось відмінне від
-            // null означало б давати другий спосіб сказати те саме.
-            if (name is { Count: > 0 })
-            {
-                document.SetName(new LocalizedText(name.ToDictionary(StringComparer.Ordinal)));
-            }
-
-            // ⛔ Статус документа НЕ ставиться — його не існує (D-93). Робочий стан
-            // з'явиться у wf.ApprovalState при першому Submit, і буде він на
-            // аркуш × період, а не на документ цілком.
-            foreach (var sheetDefId in sheetDefIds.Distinct())
-            {
-                document.IncludeSheet(sheetDefId);
-            }
-
-            // ⚠ TableInstance створюються ЛІНИВО, при першому записі в період, а
-            // не одразу на всі дванадцять: більшість документів заповнюють не всі
-            // періоди, і дванадцятикратна порожня структура коштувала б місця й
-            // часу на кожному зрізі.
-            await documents.AddAsync(document, ct).ConfigureAwait(false);
+            Document? document = null;
 
             try
             {
-                await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+                // ⛔ L6-02 / N1-04. Склад документа (аркуші, а з ними й таблиці) задає ВЕРСІЯ ШАБЛОНУ
+                // ПРОЄКТУ, прочитана вище без блокування. Перенос проєкту на іншу версію, що
+                // зафіксувався між тим читанням і комітом, лишав документ зі складом старої версії під
+                // проєктом нової: аркуші, яких нова версія не знає, і `ECR-TMPL-0404` на кожному читанні.
+                // Тому запис іде в транзакції під блоком рядка проєкту — тим самим, що бере перенос
+                // (`UPDLOCK, HOLDLOCK` на `doc.Project`, ДО замків структури документів): перенос, що
+                // комітиться першим, показує тут нову версію, і створення відмовляє; створення, що
+                // комітиться першим, потрапляє в перелік документів, який перенос читає вже під блоком.
+                //
+                // ⚠ Один блок — одна спроба. Повтор за ключем (DAT-09, нижче) — окрема транзакція:
+                // невдала вставка в користувацькій транзакції могла б лишити частину пакета.
+                await uow.ExecuteInTransactionAsync(
+                    async innerCt =>
+                    {
+                        var locked = await documents
+                            .LockProjectTemplateVersionAsync(projectId, innerCt).ConfigureAwait(false);
+                        DocumentStructure.EnsureProjectVersionUnchanged(locked, versionId, projectId);
+
+                        // BusinessKey складається зі значень колонок IsBusinessKey. До появи
+                        // даних значень ще немає, тому ключ будується з проєкту і версії —
+                        // унікальність у межах проєкту тримає індекс, а не домовленість.
+                        // ⚠ Під блоком проєкту два створення в одному проєкті йдуть по черзі, тож
+                        // підібраний ключ більше не «знімок, який бачать обоє»; повтор нижче лишається
+                        // для ключів, які ставить людина.
+                        var businessKey = await documents
+                            .NextBusinessKeyAsync(projectId, versionId, innerCt).ConfigureAwait(false);
+
+                        document = new Document(projectId, businessKey, userId, now);
+
+                        // ⚠ Ім'я — опційне, ПОРУЧ із BusinessKey, не замість нього: механізм
+                        // технічного ключа тут не змінюється (директива "людське ім'я
+                        // документа"). Порожній перелік мов (об'єкт `{}`) трактується так
+                        // само, як відсутність імені — надсилати його як щось відмінне від
+                        // null означало б давати другий спосіб сказати те саме.
+                        if (name is { Count: > 0 })
+                        {
+                            document.SetName(new LocalizedText(name.ToDictionary(StringComparer.Ordinal)));
+                        }
+
+                        // ⛔ Статус документа НЕ ставиться — його не існує (D-93). Робочий стан
+                        // з'явиться у wf.ApprovalState при першому Submit, і буде він на
+                        // аркуш × період, а не на документ цілком.
+                        foreach (var sheetDefId in sheetDefIds.Distinct())
+                        {
+                            document.IncludeSheet(sheetDefId);
+                        }
+
+                        // ⚠ TableInstance створюються ЛІНИВО, при першому записі в період, а
+                        // не одразу на всі дванадцять: більшість документів заповнюють не всі
+                        // періоди, і дванадцятикратна порожня структура коштувала б місця й
+                        // часу на кожному зрізі.
+                        await documents.AddAsync(document, innerCt).ConfigureAwait(false);
+                        await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+                    },
+                    ct).ConfigureAwait(false);
             }
             catch (ConcurrencyConflictException e)
                 when (string.Equals(e.ErrorCode, DuplicateKeyCode, StringComparison.Ordinal)
@@ -215,7 +239,7 @@ public sealed class CreateDocumentHandler(
                 continue;
             }
 
-            return document.Id;
+            return document!.Id;
         }
     }
 

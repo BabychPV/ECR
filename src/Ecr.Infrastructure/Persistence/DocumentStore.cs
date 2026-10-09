@@ -593,6 +593,30 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
             .ConfigureAwait(false);
 
     /// <inheritdoc />
+    /// <remarks>
+    /// ⚠ Той самий блок, що й <c>DocumentVersionMigrationStore.LockProjectVersionAsync</c>:
+    /// <c>UPDLOCK, HOLDLOCK, ROWLOCK</c> на рядку <c>doc.Project</c>. Версія читається цим самим
+    /// оператором — під RCSI хінт блокування змушує читати зафіксоване, а не знімок.
+    /// </remarks>
+    public async Task<int?> LockProjectTemplateVersionAsync(int projectId, CancellationToken ct)
+    {
+        _ = db.Database.CurrentTransaction
+            ?? throw new InvalidOperationException(
+                "LockProjectTemplateVersionAsync викликано поза транзакцією: блок рядка проєкту звільнився б одразу.");
+
+        var versions = await db.Database
+            .SqlQuery<int>($"""
+                SELECT TemplateVersionId AS Value
+                FROM   doc.Project WITH (UPDLOCK, HOLDLOCK, ROWLOCK)
+                WHERE  Id = {projectId}
+                """)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        return versions.Count == 0 ? null : versions[0];
+    }
+
+    /// <inheritdoc />
     public async Task<Domain.Enums.ProjectStatus?> FindProjectStatusAsync(int projectId, CancellationToken ct)
         => await db.Projects
             .AsNoTracking()
