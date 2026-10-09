@@ -26,7 +26,8 @@ namespace Ecr.Application.Projects;
 /// несе <c>Project.Manage</c> — тій самій «сумі ролей», яку вже застосовує
 /// <c>AccessDecisionService.LoadAsync</c> для читання грантів. Побічний
 /// наслідок, свідомо прийнятий: усі, хто поділяє цю роль із творцем, теж
-/// отримують доступ до нового проєкту.
+/// отримують доступ до нового проєкту. Ролі, які творець має лише В ОБЛАСТІ
+/// (ФВ-6.14), гранта не отримують (S1-02, аудит 5).
 ///
 /// ⚠ НЕ <c>RotateStampsForRoleAsync</c> — лише точкове скидання кешованого
 /// профілю ЛИШЕ творця (<c>InvalidateProfileAsync</c>), без зміни штампа:
@@ -81,8 +82,16 @@ internal static class ProjectOwnershipGrant
 
         // ⛔ Ролі творця — прямими запитами за Id: ListRolesAsync обрізає Take(500),
         // і роль за межею мовчки не отримувала гранта власності.
+        //
+        // ⛔ S1-02 (аудит 5): лише БЕЗОБЛАСНІ ролі творця (ФВ-6.14). Роль, яку він
+        // має лише в області, права створювати йому не дала (`Project.Manage`
+        // перевіряється глобально — його дала інша роль), а грант `Project:P` на
+        // неї творцеві не діє (P поза областю), зате мовчки дістається всім її
+        // безобласним носіям. Рішення людини вище («хто поділяє роль, поділяє й
+        // право створювати») для такої ролі не виконується.
+        // `UnscopedRoleIds == null` — областей немає, і `RoleIds` уже безобласні.
         var qualifyingRoles = new List<RoleView>();
-        foreach (var roleId in profile.RoleIds.Order())
+        foreach (var roleId in (profile.UnscopedRoleIds ?? profile.RoleIds).Order())
         {
             var role = await users.FindRoleAsync(roleId, ct).ConfigureAwait(false);
             if (role is not null && role.Permissions.Contains(permission))
