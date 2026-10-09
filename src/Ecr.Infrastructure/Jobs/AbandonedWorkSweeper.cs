@@ -109,8 +109,17 @@ public sealed class AbandonedWorkSweeper(EcrDbContext db, IJobProgressStore prog
     private static readonly string[] CalculationJobNames =
         ["." + nameof(IRecalculationJob), "." + nameof(RecalculationJob)];
 
-    /// <summary>Скільки рядків прогресу видаляти за один прохід ретенції.</summary>
+    /// <summary>Скільки рядків прогресу видаляти одним запитом ретенції.</summary>
     public const int PurgeBatch = 5_000;
+
+    /// <summary>Стеля часу одного проходу ретенції (J1-05).</summary>
+    /// <remarks>
+    /// ⛔ Один пакет на прохід (раз на годину) — це не більше 120 тис. рядків на добу, а кожен
+    /// PATCH ставить нову задачу формул: під навантаженням вставок більше, ніж видалень, і
+    /// <c>itg.JobProgress</c> росла б без меж. Пакети йдуть один за одним, доки є кандидати,
+    /// але не довше за цю межу — щоб прохід не тримав таблицю, яку опитують екрани.
+    /// </remarks>
+    public static readonly TimeSpan PurgeTimeBudget = TimeSpan.FromSeconds(20);
 
     /// <summary>Стеля кандидатів кожного журналу за прохід.</summary>
     private const int MaxRunsPerSweep = 500;
@@ -173,12 +182,32 @@ public sealed class AbandonedWorkSweeper(EcrDbContext db, IJobProgressStore prog
         var calculation = await CloseCalculationRunsAsync(utcNow, live, ct).ConfigureAwait(false);
 
         var purged = purge
-            ? await progress
-                .PurgeFinishedAsync(utcNow - IJobProgressStore.RetainFinishedFor, PurgeBatch, ct)
-                .ConfigureAwait(false)
+            ? await PurgeAsync(utcNow - IJobProgressStore.RetainFinishedFor, ct).ConfigureAwait(false)
             : 0;
 
         return new SweepOutcome(jobs, collection, maintenance, purged, calculation);
+    }
+
+    /// <summary>
+    /// Ретенція пакетами, доки є кандидати, у межах <see cref="PurgeTimeBudget"/> (J1-05).
+    /// </summary>
+    /// <param name="olderThan">Межа віку завершених рядків.</param>
+    /// <param name="ct">Скасування.</param>
+    /// <returns>Скільки рядків видалено.</returns>
+    private async Task<int> PurgeAsync(DateTime olderThan, CancellationToken ct)
+    {
+        var started = System.Diagnostics.Stopwatch.GetTimestamp();
+        var purged = 0;
+        int batch;
+
+        do
+        {
+            batch = await progress.PurgeFinishedAsync(olderThan, PurgeBatch, ct).ConfigureAwait(false);
+            purged += batch;
+        }
+        while (batch >= PurgeBatch && System.Diagnostics.Stopwatch.GetElapsedTime(started) < PurgeTimeBudget);
+
+        return purged;
     }
 
     /// <summary>Коди задач, які зараз ЖИВІ (активні, зі свіжим биттям).</summary>
