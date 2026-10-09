@@ -224,7 +224,10 @@ export function RegistryImpactPage(): JSX.Element {
     if (selectionGone && !asking) setSelected(new Set());
   }, [selectionGone, asking]);
 
+  // L9-01: відмову постановки показує `ErrorAlert` нижче (`recalculate.error`) — без `handled` глобальна сітка
+  // додавала другий тост на ту саму відмову.
   const recalculate = useMutation({
+    meta: { handled: true },
     mutationFn: (reason: string) =>
       recalculateImpacted(code, { documentIds: selected.size === 0 ? null : effective, reason }),
     onSuccess: (accepted) => {
