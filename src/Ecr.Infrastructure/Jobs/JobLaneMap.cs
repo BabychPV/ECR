@@ -71,6 +71,31 @@ public static class JobLaneMap
         return typeof(IExcelExportJob).IsAssignableFrom(jobType) || typeof(IExcelImportJob).IsAssignableFrom(jobType);
     }
 
+    /// <summary>Код задачі застосування імпорту Excel у черзі (<c>JobCode</c> = повне ім'я типу, як ставить планувальник).</summary>
+    public static readonly string ExcelImportJobCode = typeof(IExcelImportJob).FullName ?? nameof(IExcelImportJob);
+
+    /// <summary>
+    /// Код задачі, яку лейн бере з черги ПЕРШОЮ, попри FIFO; <c>null</c> — лейн суто FIFO.
+    /// </summary>
+    /// <param name="lane">Лейн.</param>
+    /// <returns>Пріоритетний <c>JobCode</c> або <c>null</c>.</returns>
+    /// <remarks>
+    /// ⛔ AN-123 (L1-04, AUDIT-2026-10-09c). Лейн <see cref="JobLanes.Excel"/> (2 місця) спільний для
+    /// експорту й застосування великого імпорту (понад 2 000 змін), а черга бере
+    /// <c>ORDER BY AvailableAt, JobId</c>. Наприкінці періоду десятки експортів ставали попереду, і
+    /// людина, що відправила дані, хвилинами бачила «у черзі». Застосування імпорту — запис, на
+    /// який людина чекає, а експорт — читання, яке почекає. Обрано пріоритет, а не квоту на
+    /// користувача: одна зміна в claim без нової відмови в API і без нового контракту.
+    ///
+    /// ⚠ Голодування експортів можливе лише за безперервного потоку великих імпортів — він
+    /// обмежений людьми, що їх надсилають, і кожен імпорт попереду має перегляд diff.
+    ///
+    /// ⚠ Лише режим Database (<see cref="DbJobQueue"/>); у Quartz межу тримає
+    /// <see cref="QuartzJobTypeLimiter"/>, порядок там — порядок тригерів.
+    /// </remarks>
+    public static string? PriorityJobCodeOf(string lane)
+        => string.Equals(lane, JobLanes.Excel, StringComparison.Ordinal) ? ExcelImportJobCode : null;
+
     /// <summary>Лейни, які опитує воркер процесу Api.</summary>
     /// <param name="executor">Хто виконує перерахунок.</param>
     /// <remarks>

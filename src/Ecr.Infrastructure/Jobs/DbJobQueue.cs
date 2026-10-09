@@ -97,6 +97,19 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock) : IJobQueue
             CancelRequestedAt = NULL, StartedAt = @shown, [Percent] = 0, [Message] = NULL, Error = NULL, ErrorCode = NULL,
         """ + "\n" + ClaimSet + "\n" + ClaimOutput + ";";
 
+    /// <summary>
+    /// Захоплення <c>Queued</c> лише задач коду <c>@priorityCode</c> — той самий
+    /// <see cref="ClaimQueuedSql"/> з одним додатковим фільтром (AN-123, L1-04).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Окремий прохід перед звичайним, а не <c>ORDER BY CASE</c> у спільному claim: той
+    /// зламав би впорядкований пошук <c>IX_JobProgress_Claim</c> для ВСІХ лейнів (сортування
+    /// всіх <c>Queued</c> лейна на кожен claim), а так зайвий запит — лише в лейні з
+    /// пріоритетом (<see cref="JobLaneMap.PriorityJobCodeOf"/>), де черга коротка.
+    /// </remarks>
+    internal static readonly string ClaimPriorityQueuedSql = ClaimQueuedSql.Replace(
+        "AND q.[State] = 'Queued'", "AND q.JobCode = @priorityCode AND q.[State] = 'Queued'", StringComparison.Ordinal);
+
     /// <summary>Змінні злиття масиву payload (<see cref="MergeArraysSql"/>).</summary>
     private const string MergeDeclarations = """
         DECLARE @basePayload nvarchar(max) = NULL, @addPayload nvarchar(max) = NULL, @merged nvarchar(max) = NULL;
@@ -317,6 +330,27 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock) : IJobQueue
             {
                 foreach (var lane in ordered)
                 {
+                    // ⛔ AN-123 (L1-04): у лейні з пріоритетом спершу його задачі (імпорт Excel
+                    // перед експортами), далі — звичайний FIFO.
+                    if (!reclaimed && JobLaneMap.PriorityJobCodeOf(lane) is { } priority)
+                    {
+                        var first = await RunAsync(
+                                ClaimPriorityQueuedSql,
+                                p =>
+                                {
+                                    Bind(p, lane);
+                                    p.Add("@priorityCode", SqlDbType.NVarChar, 64).Value = priority;
+                                },
+                                r => Read(r, false),
+                                ct)
+                            .ConfigureAwait(false);
+
+                        if (first is not null)
+                        {
+                            return first;
+                        }
+                    }
+
                     var job = await RunAsync(sql, p => Bind(p, lane), r => Read(r, reclaimed), ct)
                         .ConfigureAwait(false);
 
