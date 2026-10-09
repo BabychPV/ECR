@@ -1,5 +1,5 @@
-import { useQuery } from '@tanstack/react-query';
-import { apiFetch } from '@/api/client';
+import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
+import { abandonSwitchedSession, apiFetch } from '@/api/client';
 import type { CurrentUserDto } from '@/api/types';
 
 /**
@@ -18,11 +18,35 @@ export type MeDto = CurrentUserDto;
 /** Ключ запиту профілю. */
 export const MeQueryKey = ['me'] as const;
 
+/**
+ * Користувач, якого ця вкладка вже бачила в `/me` (AN-108 / S2-05).
+ *
+ * ⛔ Другий рубіж після `sessionChannel`: якщо сповіщення не дійшло, а `/me` раптом відповідає ІНШИМ користувачем
+ * (cookie підмінив вхід у сусідній вкладці), вкладка покидає сеанс так само — до того, як автозбереження
+ * відправить утримані правки попереднього користувача під новим cookie. Легальна зміна користувача у вкладці
+ * завжди йде через повне перезавантаження (вихід, `401` → вхід) — а з ним і новий кеш запитів, тож пам'ять
+ * прив'язана до кешу (`QueryClient`), а не до модуля.
+ */
+const seenUserIds = new WeakMap<QueryClient, number>();
+
+/** Звіряє користувача `/me` з тим, кого цей кеш уже бачив; повертає профіль без змін. */
+export function checkSessionUser(client: QueryClient, me: CurrentUserDto): CurrentUserDto {
+  const seen = seenUserIds.get(client);
+  if (seen !== undefined && me.userId !== seen) {
+    abandonSwitchedSession();
+    return me;
+  }
+  seenUserIds.set(client, me.userId);
+  return me;
+}
+
 /** Читає профіль поточного користувача. */
 export function useSession() {
+  const client = useQueryClient();
+
   return useQuery({
     queryKey: MeQueryKey,
-    queryFn: () => apiFetch<CurrentUserDto>('/api/v1/me'),
+    queryFn: async () => checkSessionUser(client, await apiFetch<CurrentUserDto>('/api/v1/me')),
 
     // ⚠ Профіль НЕ кешується надовго: зміна ролей робить сесію недійсною
     // негайно (SecurityStamp), і показувати кнопки за старим профілем
