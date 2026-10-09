@@ -20,6 +20,7 @@ namespace Ecr.Application.Documents;
 public sealed class DeleteDocumentHandler(
     IDocumentStore documents,
     IDocumentDeletionStore deletion,
+    ISheetEditGate structureGate,
     IAccessDecisionService access,
     IUnitOfWork uow,
     IAuditWriter audit,
@@ -76,6 +77,25 @@ public sealed class DeleteDocumentHandler(
         var cells = 0;
         await uow.ExecuteInTransactionAsync(async innerCt =>
         {
+            // ⛔ X8-05 (R6): структура документа — ВИНЯТКОВО й першою дією, як у переносу версії
+            // (`MigrateDocumentVersionHandler`); той самий порядок `doc-structure` → решта, що в усіх
+            // писарів. Доти видалення брало лише `wf.ApprovalState`, а правка комірок, рядок, шапка
+            // його не беруть: видалення йшло паралельно із записом, а запис, що ввійшов у транзакцію
+            // вже після коміту видалення, падав на FK 547 → 500. Тепер запис у транзакції або
+            // завершується до видалення (і видалення забирає його дані разом із рештою), або чекає
+            // й бачить, що документа немає (`SheetEditGate` → 404).
+            if (await structureGate.EnterStructureAsync(documentId, exclusive: true, innerCt).ConfigureAwait(false) is null)
+            {
+                // Паралельне видалення того самого документа вже зафіксувалося.
+                throw new NotFoundException(
+                    "ECR-DOC-0404", $"Документ {documentId} не знайдено.",
+                    new Dictionary<string, object?>(StringComparer.Ordinal)
+                    {
+                        ["messageKey"] = "err.ECR-DOC-0404.document",
+                        ["documentId"] = documentId.ToString(CultureInfo.InvariantCulture),
+                    });
+            }
+
             var facts = await deletion.LockWorkflowFactsAsync(documentId, innerCt).ConfigureAwait(false);
             // ⛔ Відмова не називає код і стан аркуша, якого читач не бачить: схований непорожній аркуш
             // зводиться до загальної причини «документ уже проходив погодження» (без sheetDefId/reason).

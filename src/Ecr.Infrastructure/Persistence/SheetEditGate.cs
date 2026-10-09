@@ -56,6 +56,12 @@ public sealed class SheetEditGate(EcrDbContext db, SheetEditGatePolicy? policy =
 
     private readonly TimeSpan _lockTimeout = (policy ?? SheetEditGatePolicy.Default).LockTimeout;
 
+    /// <summary>
+    /// Документи, яких під блокуванням структури вже не було (<see cref="EnterStructureAsync"/>
+    /// повернув <c>null</c>): їх видалено, поки писар готував запит (X8-05).
+    /// </summary>
+    private readonly HashSet<long> _goneDocuments = [];
+
     /// <summary>Ім'я ресурсу <c>sp_getapplock</c> аркуша «документ × аркуш × період».</summary>
     /// <param name="documentId">Документ.</param>
     /// <param name="sheetDefId">Аркуш.</param>
@@ -97,6 +103,7 @@ public sealed class SheetEditGate(EcrDbContext db, SheetEditGatePolicy? policy =
     private async Task<DocumentStatus> EnterSharedAsync(
         long documentId, int sheetDefId, PeriodKey periodKey, TimeSpan lockTimeout, CancellationToken ct)
     {
+        ThrowIfGone(documentId);
         await AcquireAsync(documentId, sheetDefId, periodKey, SharedMode, lockTimeout, ct).ConfigureAwait(false);
 
         // ⛔ Стан читається ПІСЛЯ блокування і окремим запитом: під RCSI знімок
@@ -116,7 +123,10 @@ public sealed class SheetEditGate(EcrDbContext db, SheetEditGatePolicy? policy =
 
     /// <inheritdoc />
     public Task EnterSubmitAsync(long documentId, int sheetDefId, PeriodKey periodKey, CancellationToken ct)
-        => AcquireAsync(documentId, sheetDefId, periodKey, ExclusiveMode, _lockTimeout, ct);
+    {
+        ThrowIfGone(documentId);
+        return AcquireAsync(documentId, sheetDefId, periodKey, ExclusiveMode, _lockTimeout, ct);
+    }
 
     /// <inheritdoc />
     public async Task<int?> EnterStructureAsync(long documentId, bool exclusive, CancellationToken ct)
@@ -130,12 +140,27 @@ public sealed class SheetEditGate(EcrDbContext db, SheetEditGatePolicy? policy =
             documentId, mode, code,
             exclusive ? "err.ECR-DOC-4091.documentBeingEdited" : "err.ECR-DOC-4091.structureChanging"));
 
+        // ⛔ X8-05 (R6): документа під блокуванням уже немає — видалення (бере структуру
+        // ВИНЯТКОВО, `DeleteDocumentHandler`) зафіксувалося, поки писар готував запит поза
+        // транзакцією. Доти запис ішов далі (`EnsureUnchanged` пропускає `null`, стан аркуша
+        // без рядка — `Draft`) і падав на FK 547 посеред транзакції — тобто 500, який клієнт
+        // ще й повторював як минущий. Тепер наступне блокування аркуша чи шапки цього
+        // документа відмовляє `404 ECR-DOC-0404`.
+        // ⚠ Відмова — на НАСТУПНОМУ блокуванні, а не тут: `RowStore.EnsureTableInstancesAsync`
+        // (матеріалізація, фонові прогони) бере лише структуру й для зниклого документа
+        // законно нічого не створює.
+        if (version is null)
+        {
+            _goneDocuments.Add(documentId);
+        }
+
         return version;
     }
 
     /// <inheritdoc />
     public async Task EnterHeaderAsync(long documentId, bool exclusive, CancellationToken ct)
     {
+        ThrowIfGone(documentId);
         var mode = exclusive ? ExclusiveMode : SharedMode;
         var resource = string.Create(CultureInfo.InvariantCulture, $"ecr:doc-header:{documentId}");
         var (code, _) = await GetAppLockAsync(resource, mode, versionOfDocument: null, _lockTimeout, ct).ConfigureAwait(false);
@@ -152,6 +177,24 @@ public sealed class SheetEditGate(EcrDbContext db, SheetEditGatePolicy? policy =
         var resource = ResourceOf(documentId, sheetDefId, periodKey.Value);
         var (code, _) = await GetAppLockAsync(resource, mode, versionOfDocument: null, lockTimeout, ct).ConfigureAwait(false);
         ThrowIfRefused(code, resource, mode, () => Busy(documentId, sheetDefId, periodKey, mode, code));
+    }
+
+    /// <summary><c>404 ECR-DOC-0404</c>, якщо під блокуванням структури документа вже не було (X8-05).</summary>
+    private void ThrowIfGone(long documentId)
+    {
+        if (!_goneDocuments.Contains(documentId))
+        {
+            return;
+        }
+
+        throw new NotFoundException(
+            ErrorCodes.DocumentNotFound,
+            string.Create(CultureInfo.InvariantCulture, $"Документ {documentId} видалено: нічого не записано."),
+            new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["messageKey"] = "err.ECR-DOC-0404.document",
+                ["documentId"] = documentId.ToString(CultureInfo.InvariantCulture),
+            });
     }
 
     /// <summary>Від'ємний код <c>sp_getapplock</c> — виняток; 0 і 1 — блокування взято.</summary>

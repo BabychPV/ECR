@@ -101,6 +101,11 @@ public interface ISheetEditGate
     /// ⚠ Писар порівнює повернуту версію з тією, за якою будував запит
     /// (<see cref="Documents.DocumentStructure.EnsureUnchanged"/>): розбіжність —
     /// <c>409 ECR-DOC-4091 structureChanged</c>, а не запис під чужою структурою.
+    ///
+    /// ⛔ X8-05 (R6): виняткове бере й видалення документа (<c>DeleteDocumentHandler</c>).
+    /// Повернуто <c>null</c> (документ видалено, поки писар готував запит) — наступне
+    /// блокування аркуша чи шапки ЦЬОГО документа в тій самій транзакції відмовляє
+    /// <c>404 ECR-DOC-0404</c>: запис не доходить до FK 547.
     /// </remarks>
     public Task<int?> EnterStructureAsync(long documentId, bool exclusive, CancellationToken ct);
 
