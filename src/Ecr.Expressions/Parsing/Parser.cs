@@ -1123,6 +1123,20 @@ public sealed class Parser
                     "expr.calendarContextSyntax", null,
                     "The calendar context is written as \"[Period].Property\".", position, 1);
             }
+            else if (offset != 0)
+            {
+                // ⛔ C1-03 (аудит 2026-10-09c). `[Period:-1].Days` розбирався,
+                // а обчислювач (`Evaluator.Period`) брав ПОТОЧНИЙ період:
+                // `IEvaluationContext.Period` один, а межі іншого періоду
+                // знає лише сховище періодів документа (Q-221), не арифметика
+                // ключа. 02b §10 описує тільки `[Period].X`, тож зсув — не
+                // можливість діалекту, а пропущена відмова: тихе число з
+                // похибкою 31/28 замість гучної помилки розбору.
+                s.Error(
+                    "expr.calendarContextOffset", null,
+                    "The calendar context of another period is not supported: write \"[Period].Property\".",
+                    position, 1);
+            }
 
             return new PeriodPropertyNode(property, offset) { Position = position };
         }

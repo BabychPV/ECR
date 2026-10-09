@@ -7451,6 +7451,9 @@ USING (VALUES
     (N'err.ECR-TMPL-0422.validationColumnNotInTable', N'en', N'Column {columnDefId} is not in table {tableCode}. Choose a column of this table.', 1),
     (N'err.ECR-TMPL-0422.cloneValidationRuleForeignColumn', N'en', N'Validation rule {ruleCode} of table {tableCode} refers to column {columnDefId} outside that table; the clone would apply it to all columns. The version cannot be cloned until the rule is fixed.', 1)
     -- COLL:an124-rule-refs ── кінець секції ──
+    -- COLL:an121-calendar-offset ── AN-121 / C1-03: календарний контекст іншого періоду ([Period:-1].Days) не підтримується; ru/kz — порцією COLL:an121-calendar-offset нижче ──
+    ,(N'expr.calendarContextOffset', N'en', N'The calendar context of another period is not supported: write "[Period].Property".', 1)
+    -- COLL:an121-calendar-offset ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -18395,6 +18398,16 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:an124-rule-refs ── кінець секції ──
+-- COLL:an121-calendar-offset ── ru/kz: AN-121 / C1-03: календарний контекст іншого періоду не підтримується; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'expr.calendarContextOffset', N'ru', N'Календарный контекст другого периода не поддерживается: пишите «[Period].Property».'),
+    (N'expr.calendarContextOffset', N'kz', N'Басқа кезеңнің күнтізбелік контексіне қолдау көрсетілмейді: «[Period].Property» түрінде жазыңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:an121-calendar-offset ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t
