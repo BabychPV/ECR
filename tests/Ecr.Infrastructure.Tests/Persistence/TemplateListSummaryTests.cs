@@ -54,14 +54,12 @@ public sealed class TemplateListSummaryTests(SqlServerFixture sql)
             await db.SaveChangesAsync();
         }
 
-        var page = await ListAsync(
-            query: null,
-            new AccessBuilder { UserId = 9 }
-                .Permission("Template.View").Permission("Document.View")
-                .Grant(Ecr.Domain.Enums.ResourceKind.Project, visible.ProjectId, Ecr.Domain.Enums.GrantLevel.Read));
+        var reader = new AccessBuilder { UserId = 9 }
+            .Permission("Template.View").Permission("Document.View")
+            .Grant(Ecr.Domain.Enums.ResourceKind.Project, visible.ProjectId, Ecr.Domain.Enums.GrantLevel.Read);
 
-        var seen = page.Items.Single(t => t.Id == visible.TemplateId);
-        var other = page.Items.Single(t => t.Id == hidden.TemplateId);
+        var seen = await FindAsync(visible.TemplateId, reader);
+        var other = await FindAsync(hidden.TemplateId, reader);
 
         Assert.Equal(1, seen.DocumentCount);
         Assert.NotNull(seen.NameL10n);
@@ -100,7 +98,7 @@ public sealed class TemplateListSummaryTests(SqlServerFixture sql)
         var access = new AccessBuilder { UserId = 9 }.Permission("Template.View");
 
         // До правки: draftEditedAt = момент створення.
-        var before = (await ListAsync(query: null, access)).Items.Single(t => t.Id == doc.TemplateId);
+        var before = await FindAsync(doc.TemplateId, access);
         Assert.Equal(created, before.DraftEditedAt);
 
         await using (var db = sql.CreateContext())
@@ -112,7 +110,7 @@ public sealed class TemplateListSummaryTests(SqlServerFixture sql)
             await db.SaveChangesAsync();
         }
 
-        var after = (await ListAsync(query: null, access)).Items.Single(t => t.Id == doc.TemplateId);
+        var after = await FindAsync(doc.TemplateId, access);
         Assert.Equal(edited, after.DraftEditedAt);
         Assert.Equal(edited, after.UpdatedAt);
         Assert.Equal(edited, after.ArchivedAt);
@@ -123,7 +121,7 @@ public sealed class TemplateListSummaryTests(SqlServerFixture sql)
             await db.SaveChangesAsync();
         }
 
-        var restored = (await ListAsync(query: null, access)).Items.Single(t => t.Id == doc.TemplateId);
+        var restored = await FindAsync(doc.TemplateId, access);
         Assert.False(restored.IsArchived);
         Assert.Null(restored.ArchivedAt);
     }
@@ -160,6 +158,25 @@ public sealed class TemplateListSummaryTests(SqlServerFixture sql)
         }
 
         Assert.Empty((await ListAsync($"{code}zzz", access)).Items);
+    }
+
+    /// <summary>
+    /// Рядок шаблону з переліку — пошуком за його кодом, а не першою сторінкою всього переліку.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ База тестів спільна, перелік упорядкований за <c>Id</c>: щойно шаблонів стає більше за
+    /// <see cref="CursorRequest.MaxLimit"/>, шаблон цього тесту (найновіший) випадає з першої
+    /// сторінки — «Sequence contains no matching element» без жодної вади продукту.
+    /// </remarks>
+    private async Task<TemplateSummary> FindAsync(int templateId, AccessBuilder builder)
+    {
+        string code;
+        await using (var db = sql.CreateContext())
+        {
+            code = (await db.Templates.SingleAsync(t => t.Id == templateId)).Code;
+        }
+
+        return (await ListAsync(code, builder)).Items.Single(t => t.Id == templateId);
     }
 
     private async Task<PagedResult<TemplateSummary>> ListAsync(string? query, AccessBuilder builder)
