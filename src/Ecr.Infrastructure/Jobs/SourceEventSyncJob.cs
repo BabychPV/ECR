@@ -888,12 +888,25 @@ public sealed partial class SourceEventSyncJob(
         await connection.OpenAsync(ct).ConfigureAwait(false);
         await using var tx = (Microsoft.Data.SqlClient.SqlTransaction)await connection.BeginTransactionAsync(ct).ConfigureAwait(false);
 
-        var sheetDefId = await db.TableDefs
-            .AsNoTracking()
-            .Where(t => t.Id == map.TableDefId)
-            .Select(t => (int?)t.SheetDefId)
-            .FirstOrDefaultAsync(ct)
-            .ConfigureAwait(false);
+        // ⛔ L6-02 (писар): структуру документа пишуть під `doc-structure` (спільно — писарі, виключно — перенос
+        // версії). Видалення рядків подій брало лише `sheet-edit`: у вікні переносу воно видаляло за екземплярами
+        // старої версії. Порядок блокувань: `doc-structure` → (`doc-header`) → `sheet-edit`, структура — ПЕРШОЮ
+        // дією транзакції. Не взято за таймаут — видалення лишається наступному прогону.
+        if (!await TryAppLockAsync(connection, tx, SheetEditGate.StructureResourceOf(map.DocumentId), ct).ConfigureAwait(false))
+        {
+            totals.RemovalSkipped += physical.Count;
+            return removed;
+        }
+
+        // ⛔ L6-02: аркуш таблиці читається ПІСЛЯ блокування структури, у цій транзакції (RCSI бере знімок на
+        // початку оператора, тож бачить перенос, що зафіксувався, поки чекали). Таблиці немає — структура
+        // змінилась: нічого не видаляємо.
+        if (await ReadSheetDefIdAsync(connection, tx, map.TableDefId, ct).ConfigureAwait(false) is not { } sheetDefId)
+        {
+            totals.RemovalSkipped += physical.Count;
+            return removed;
+        }
+
         var locked = new Dictionary<int, bool>();
         var deleted = new List<PendingRemoval>();
 
@@ -903,19 +916,18 @@ public sealed partial class SourceEventSyncJob(
             // транзакцією — подання чи правка між рішенням і видаленням інакше губилися б. Як правка в
             // PatchCellsHandler: спільне блокування аркуша, далі гарди повторно — у тій самій транзакції.
             var periodKey = item.State.PeriodKey!.Value;
-            if (sheetDefId is { } sheet)
+            if (!locked.TryGetValue(periodKey, out var taken))
             {
-                if (!locked.TryGetValue(periodKey, out var taken))
-                {
-                    taken = await TryLockSheetAsync(connection, tx, map.DocumentId, sheet, periodKey, ct).ConfigureAwait(false);
-                    locked[periodKey] = taken;
-                }
+                taken = await TryAppLockAsync(
+                        connection, tx, SheetEditGate.ResourceOf(map.DocumentId, sheetDefId, periodKey), ct)
+                    .ConfigureAwait(false);
+                locked[periodKey] = taken;
+            }
 
-                if (!taken)
-                {
-                    totals.RemovalSkipped++;
-                    continue;
-                }
+            if (!taken)
+            {
+                totals.RemovalSkipped++;
+                continue;
             }
 
             if (await RecheckRemovalAsync(connection, tx, map, sheetDefId, item, ct).ConfigureAwait(false) is { } refused)
@@ -958,14 +970,30 @@ public sealed partial class SourceEventSyncJob(
         removed.Add(link.SourceEventId);
     }
 
-    /// <summary>Спільне блокування аркуша в транзакції видалення (той самий ресурс, що й у <c>SheetEditGate</c>).</summary>
-    /// <returns><c>false</c> — аркуш зайнятий поданням довше за таймаут: видалення лишається наступному прогону.</returns>
-    private static async Task<bool> TryLockSheetAsync(
+    /// <summary>Аркуш таблиці, прочитаний у транзакції видалення; <c>null</c> — таблиці вже немає.</summary>
+    private static async Task<int?> ReadSheetDefIdAsync(
         Microsoft.Data.SqlClient.SqlConnection connection,
         Microsoft.Data.SqlClient.SqlTransaction tx,
-        long documentId,
-        int sheetDefId,
-        int periodKey,
+        int tableDefId,
+        CancellationToken ct)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = tx;
+        command.CommandText = "SELECT SheetDefId FROM cfg.TableDef WHERE Id = @table;";
+        command.Parameters.Add("@table", System.Data.SqlDbType.Int).Value = tableDefId;
+        return await command.ExecuteScalarAsync(ct).ConfigureAwait(false) is int sheet ? sheet : null;
+    }
+
+    /// <summary>
+    /// Спільне блокування <c>sp_getapplock</c> у транзакції видалення: структура документа
+    /// (<see cref="SheetEditGate.StructureResourceOf"/>) чи аркуш (<see cref="SheetEditGate.ResourceOf"/>) —
+    /// ті самі ресурси, що й у <c>SheetEditGate</c>.
+    /// </summary>
+    /// <returns><c>false</c> — ресурс зайнятий довше за таймаут: видалення лишається наступному прогону.</returns>
+    private static async Task<bool> TryAppLockAsync(
+        Microsoft.Data.SqlClient.SqlConnection connection,
+        Microsoft.Data.SqlClient.SqlTransaction tx,
+        string resource,
         CancellationToken ct)
     {
         await using var command = connection.CreateCommand();
@@ -974,7 +1002,7 @@ public sealed partial class SourceEventSyncJob(
         command.CommandText = "sp_getapplock";
         command.Parameters.Add(new Microsoft.Data.SqlClient.SqlParameter("@Resource", System.Data.SqlDbType.NVarChar, 255)
         {
-            Value = SheetEditGate.ResourceOf(documentId, sheetDefId, periodKey),
+            Value = resource,
         });
         command.Parameters.Add(new Microsoft.Data.SqlClient.SqlParameter("@LockMode", System.Data.SqlDbType.VarChar, 32) { Value = "Shared" });
         command.Parameters.Add(new Microsoft.Data.SqlClient.SqlParameter("@LockOwner", System.Data.SqlDbType.VarChar, 32) { Value = "Transaction" });

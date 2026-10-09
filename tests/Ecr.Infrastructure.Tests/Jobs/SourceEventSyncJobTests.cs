@@ -884,6 +884,46 @@ public sealed class SourceEventSyncJobTests(SqlServerFixture sql)
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Directive", "HSE301-EFSYNC")]
+    [Trait("Finding", "L6-02")]
+    public async Task ВидаленняРядківПодій_ЧекаєНаСтруктуруДокумента_ДоКоміту()
+    {
+        // ⛔ L6-02 (писар): видалення рядків подій брало лише `sheet-edit`, повз `doc-structure`. Виняткове
+        // блокування структури (як у переносу версії) тримається — видалення має чекати, а не видаляти рядки
+        // посеред переносу. Мутація: прибрати TryAppLockAsync(StructureResourceOf) у ApplyRemovalsAsync.
+        await using var stand = await ArrangeAsync();
+        var source = new FakeEventSource(Ev("E1", Start, End), Ev("E2", Start.AddHours(1), End.AddHours(1)));
+        await RunAsync(stand, source);
+        source.Result = new SourceEventResult([Ev("E2", Start.AddHours(1), End.AddHours(1))], false, null);
+
+        await using var holder = new SqlConnection(sql.ConnectionString);
+        await holder.OpenAsync();
+        await using var tx = (SqlTransaction)await holder.BeginTransactionAsync();
+        await using (var take = holder.CreateCommand())
+        {
+            take.Transaction = tx;
+            take.CommandText = "DECLARE @r int; EXEC @r = sp_getapplock @Resource = @res, @LockMode = 'Exclusive', "
+                               + "@LockOwner = 'Transaction', @LockTimeout = 0; SELECT @r;";
+            take.Parameters.AddWithValue("@res", SheetEditGate.StructureResourceOf(stand.DocumentId));
+            Assert.True(Convert.ToInt32(await take.ExecuteScalarAsync(), CultureInfo.InvariantCulture) >= 0);
+        }
+
+        var job = RunAsync(stand, source);
+        var first = await Task.WhenAny(job, Task.Delay(TimeSpan.FromSeconds(4)));
+        Assert.NotSame(job, first);
+        Assert.Equal(["EF-E1", "EF-E2"], (await RowsAsync(stand)).Select(r => r.RowKey).Order(StringComparer.Ordinal));
+        Assert.Equal(0, await JournalCountAsync(stand));
+
+        await tx.CommitAsync();
+        await job;
+
+        Assert.Equal(["EF-E2"], (await RowsAsync(stand)).Select(r => r.RowKey));
+        Assert.Equal(1, await JournalCountAsync(stand));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Directive", "HSE301-EFSYNC")]
     public async Task ПравкаЛюдиниМіжРішеннямІВидаленням_РядокЛишається()
     {
         // ⛔ L3-04 / D-118: правка людини між ManualRowKeysAsync і DELETE інакше стиралася разом із

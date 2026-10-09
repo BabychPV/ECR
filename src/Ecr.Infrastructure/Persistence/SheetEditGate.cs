@@ -69,6 +69,16 @@ public sealed class SheetEditGate(EcrDbContext db, SheetEditGatePolicy? policy =
     public static string ResourceOf(long documentId, int sheetDefId, int periodKey)
         => string.Create(CultureInfo.InvariantCulture, $"ecr:sheet-edit:{documentId}:{sheetDefId}:{periodKey}");
 
+    /// <summary>Ім'я ресурсу <c>sp_getapplock</c> СТРУКТУРИ документа (L6-02).</summary>
+    /// <param name="documentId">Документ.</param>
+    /// <remarks>
+    /// ⛔ Одне ім'я на всіх писарів структури: видалення рядків подій (<c>SourceEventSyncJob</c>) бере його
+    /// напряму на власному з'єднанні, повз <see cref="EnterStructureAsync"/> (там потрібна транзакція контексту).
+    /// </remarks>
+    /// <returns>Рядок ресурсу.</returns>
+    public static string StructureResourceOf(long documentId)
+        => string.Create(CultureInfo.InvariantCulture, $"ecr:doc-structure:{documentId}");
+
     /// <inheritdoc />
     public async Task<DocumentStatus> EnterEditAsync(
         long documentId, int sheetDefId, PeriodKey periodKey, CancellationToken ct)
@@ -98,7 +108,7 @@ public sealed class SheetEditGate(EcrDbContext db, SheetEditGatePolicy? policy =
     public async Task<int?> EnterStructureAsync(long documentId, bool exclusive, CancellationToken ct)
     {
         var mode = exclusive ? ExclusiveMode : SharedMode;
-        var resource = string.Create(CultureInfo.InvariantCulture, $"ecr:doc-structure:{documentId}");
+        var resource = StructureResourceOf(documentId);
         var (code, version) = await GetAppLockAsync(resource, mode, documentId, ct).ConfigureAwait(false);
 
         // ⚠ Хто чекав, той і читає відмову: перенос — на записи документа, запис — на перенос.
