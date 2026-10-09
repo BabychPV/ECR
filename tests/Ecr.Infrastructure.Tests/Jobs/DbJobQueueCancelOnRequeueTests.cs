@@ -1,5 +1,7 @@
 // tests/Ecr.Infrastructure.Tests/Jobs/DbJobQueueCancelOnRequeueTests.cs
 using Ecr.Application.Ports;
+using Ecr.Infrastructure.Jobs;
+using Ecr.Infrastructure.Persistence;
 using Ecr.TestKit;
 using Xunit;
 
@@ -46,6 +48,52 @@ public sealed class DbJobQueueCancelOnRequeueTests(SqlServerFixture sql) : DbJob
 
         Assert.Equal("Cancelled", (await RowAsync(jobId))!.State);
         Assert.Null(await worker.ClaimAsync());
+    }
+
+    [Fact]
+    [Trait("Finding", "L2-01")]
+    public async Task Requeue_задачі_з_запитом_скасування_знімає_повідомлення_про_ретрай_з_рядка_Cancelled()
+    {
+        var jobId = await EnqueueAsync();
+        await using var worker = NewHost();
+        await using var api = NewHost();
+
+        var claim = (await worker.ClaimAsync())!.Claim;
+        await ReportRetryMessageAsync(jobId);
+        Assert.Equal(CancelOutcome.CancelRequested, await api.Queue.RequestCancelAsync(jobId, CancellationToken.None));
+
+        Assert.True(await worker.Queue.RequeueAsync(claim, TimeSpan.Zero, CancellationToken.None));
+
+        // ⛔ Без CASE у UPDATE на Cancelled-рядку лишається «повтор заплановано».
+        var row = (await RowAsync(jobId))!;
+        Assert.Equal("Cancelled", row.State);
+        Assert.Null(row.Message);
+    }
+
+    [Fact]
+    [Trait("Finding", "L2-01")]
+    public async Task Requeue_без_запиту_скасування_лишає_повідомлення_про_ретрай()
+    {
+        var jobId = await EnqueueAsync();
+        await using var worker = NewHost();
+
+        var claim = (await worker.ClaimAsync())!.Claim;
+        await ReportRetryMessageAsync(jobId);
+
+        Assert.True(await worker.Queue.RequeueAsync(claim, TimeSpan.Zero, CancellationToken.None));
+
+        var row = (await RowAsync(jobId))!;
+        Assert.Equal("Queued", row.State);
+        Assert.NotNull(row.Message);
+        Assert.Contains("jobs.retryScheduled", row.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>Те, що воркер пише перед <c>RequeueAsync</c> (<c>JobWorker</c>, гілка ретраю).</summary>
+    private async Task ReportRetryMessageAsync(string jobId)
+    {
+        await using var db = Sql.CreateContext();
+        var message = JobRetryPolicy.RetryScheduledMessage(1, TimeSpan.FromSeconds(30), new InvalidOperationException("збій"), "corr-1");
+        await new JobProgressStore(db).ReportAsync(jobId, 0, message, DateTime.UtcNow, CancellationToken.None);
     }
 
     [Fact]

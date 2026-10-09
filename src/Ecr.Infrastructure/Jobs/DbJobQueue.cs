@@ -512,6 +512,9 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock) : IJobQueue
                 SET [State] = CASE WHEN CancelRequestedAt IS NULL THEN 'Queued' ELSE 'Cancelled' END,
                     AvailableAt = @available, ClaimToken = NULL, LeaseUntil = NULL,
                     UpdatedAt = @shown, HeartbeatAt = @shown, Payload = ISNULL(@ownPayload, Payload),
+                    -- ⛔ L2-01: воркер пише «retry scheduled» ДО повернення в чергу; рядок, що закривається
+                    -- Cancelled, не має обіцяти повтор — повідомлення знімається в тому самому UPDATE.
+                    [Message] = CASE WHEN CancelRequestedAt IS NULL THEN [Message] ELSE NULL END,
                     Attempt = CASE WHEN @restoreAttempt = 1 AND ISNULL(Attempt, 0) > 0 THEN Attempt - 1 ELSE Attempt END,
                     -- Позаду на ціль уже стоїть інша Queued: дві Queued на ціль не пускає UX_JobProgress_Target_Queued.
                     TargetKey = CASE WHEN @behind IS NULL THEN TargetKey ELSE NULL END
