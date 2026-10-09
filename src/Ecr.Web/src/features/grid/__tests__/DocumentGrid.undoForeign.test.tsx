@@ -174,7 +174,7 @@ describe('DocumentGrid: Undo не затирає чужу правку (G1-05)',
 
     // ⛔ Мутація: прибрати звірку в `applyHistory` — тут другий PATCH з C1=1.
     expect(patches).toHaveLength(1);
-    expect(vi.mocked(showWarning)).toHaveBeenCalledWith('⟦grid.undoChangedSince⟧');
+    expect(vi.mocked(showWarning)).toHaveBeenCalledWith('⟦grid.undoChangedSince (count=1)⟧');
   });
 
   it('контроль: у комірці досі значення кроку — Undo відкочує як завжди', async () => {
