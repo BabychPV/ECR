@@ -5294,6 +5294,16 @@
       "ImportApplyRequest": {
         "description": "Запит на застосування імпорту.",
         "properties": {
+          "overwriteRows": {
+            "description": "✎ AN-114 (D-338). Рядки, для яких людина свідомо перезаписує чужі правки,\nзроблені після експорту книги (конфлікти перегляду\n`err.ECR-CELL-0409.importRowChangedSinceExport`, їхні значення —\n`ImportPreview.overwritable`). Відсутнє/порожнє — конфліктні рядки не\nзастосовуються, решта — так (AN-103). Рядок, що не був таким конфліктом, —\n422 `ECR-IMP-0422` (`overwriteNotConflict`).",
+            "items": {
+              "$ref": "#/components/schemas/ImportOverwriteRow"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
           "previewToken": {
             "description": "Токен раніше побудованого diff.",
             "type": "string"
@@ -5351,6 +5361,24 @@
         ],
         "type": "object"
       },
+      "ImportOverwriteRow": {
+        "description": "Рядок книги, для якого людина свідомо перезаписує чужу правку, зроблену\nпісля експорту (AN-114, D-338).",
+        "properties": {
+          "rowKey": {
+            "description": "Рядок (як `rowKey` відмови-конфлікту перегляду).",
+            "type": "string"
+          },
+          "tableCode": {
+            "description": "Таблиця (як `tableCode` відмови-конфлікту перегляду).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tableCode",
+          "rowKey"
+        ],
+        "type": "object"
+      },
       "ImportPreview": {
         "description": "Результат попереднього перегляду імпорту.",
         "properties": {
@@ -5365,6 +5393,13 @@
             "description": "Комірки, змінені іншим користувачем після відкриття.",
             "items": {
               "$ref": "#/components/schemas/CellConflictDto"
+            },
+            "type": "array"
+          },
+          "overwritable": {
+            "description": "✎ AN-114 (D-338). Комірки рядків, змінених кимось після експорту книги\n(у Rejected вони ж — відмовою\n`err.ECR-CELL-0409.importRowChangedSinceExport`): `OldValue` — чинне\n(чуже) значення, `NewValue` — значення з книги. Застосовуються лише для\nрядків, названих у `ImportApplyRequest.OverwriteRows`.",
+            "items": {
+              "$ref": "#/components/schemas/ImportChange"
             },
             "type": "array"
           },
@@ -5384,7 +5419,8 @@
           "previewToken",
           "changes",
           "rejected",
-          "conflicts"
+          "conflicts",
+          "overwritable"
         ],
         "type": "object"
       },
