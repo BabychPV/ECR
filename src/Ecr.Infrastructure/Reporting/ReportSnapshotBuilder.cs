@@ -93,6 +93,17 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock, IMemory
         // прийти й не звідти — з розкладу або з черги, пережившої переїзд.
         var parameters = ReportParameters.Bind(rowRules.Parameters, parametersJson);
 
+        // ⛔ R6-X7 / X7-04: «побудовано станом на» і прогін походження — моменти ДО
+        // читання джерела, а не після. Агрегація читає джерело потоком (AN-120) і на
+        // великому проєкті триває десятки секунд; прогін, що став актуальним за цей
+        // час (`FinishedAt` усередині вікна), мусить старити зріз (ФВ-10.5): його чисел
+        // у зрізі може не бути. Раніше `BuiltAt` ставився ПІСЛЯ агрегації — такий
+        // прогін зріз не старив, а `CalculationRunId` вказував саме на нього, тобто
+        // походження чисел було хибним. Хибна застарілість (прогін, що закінчився під
+        // час агрегації й таки потрапив у зріз) — безпечний бік: зріз перебудують.
+        var builtAt = clock.UtcNow;
+        var calculationRunId = await CurrentRunAsync(projectId, periodKey, ct).ConfigureAwait(false);
+
         var cells = await AggregateAsync(layout, rowRules, parameters.Values, projectId, periodKey, ct)
             .ConfigureAwait(false);
 
@@ -107,7 +118,7 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock, IMemory
         // вікні, оновлював лише СТАРИЙ поточний зріз, а новий ставав поточним
         // зі статусом до переходу.
         var snapshot = new ReportSnapshot(
-            reportVersionId, projectId, periodKey?.Value, SnapshotStatus.Draft, clock.UtcNow, builtByUserId: null);
+            reportVersionId, projectId, periodKey?.Value, SnapshotStatus.Draft, builtAt, builtByUserId: null);
 
         db.ReportSnapshots.Add(snapshot);
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
@@ -124,8 +135,8 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock, IMemory
             ComputeHash(rows),
 
             // Прогін, з якого взято числа: без нього неможливо сказати, на
-            // чому стоїть значення у звіті.
-            await CurrentRunAsync(projectId, periodKey, ct).ConfigureAwait(false),
+            // чому стоїть значення у звіті. ⚠ Прочитаний ДО агрегації (X7-04).
+            calculationRunId,
 
             // ⚠ Записуються ВИКОРИСТАНІ значення, а не надіслані: замовчування
             // вже підставлені. Інакше зріз, побудований без жодного параметра,
@@ -958,6 +969,9 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock, IMemory
             : SnapshotStatus.Draft;
     }
 
+    /// <summary>Мітка (<c>TagWith</c>) запиту, що читає джерело зрізу.</summary>
+    public const string AggregateTag = "ReportSnapshotBuilder.Aggregate";
+
     /// <summary>Агрегує результати розрахунку в рядки зрізу.</summary>
     private async Task<List<CellValue>> AggregateAsync(
         IReadOnlyList<ReportColumnSpec> layout, ReportRowRules rowRules,
@@ -1032,7 +1046,9 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock, IMemory
         var rows = new List<CellValue>();
         var rowNo = 0;
 
-        await foreach (var result in query.AsAsyncEnumerable().WithCancellation(ct).ConfigureAwait(false))
+        // ⚠ Мітка в тексті запиту — для діагностики (плани, Query Store) і для тесту
+        // X7-04, який перемикає прогін рівно в мить читання джерела.
+        await foreach (var result in query.TagWith(AggregateTag).AsAsyncEnumerable().WithCancellation(ct).ConfigureAwait(false))
         {
             // Без правил (схема 1) рядок читається прямо з джерела, як до R5.
             var ruled = rowRules.IsEmpty
