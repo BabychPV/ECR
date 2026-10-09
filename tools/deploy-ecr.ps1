@@ -203,8 +203,10 @@
     розшифровує ними старі ключі кільця (`UnprotectKeysWithAnyCertificate`).
     Сертифікат має бути в `Cert:\LocalMachine\My`, інакше застосунок лише
     пише Warning. Не задано — змінна не пишеться (поведінка без змін).
-    ⚠ MSI-оновлення стирає Environment служби: при кожному оновленні
-    передавай параметр знову, поки старі ключі ще в кільці.
+    ⚠ MSI-оновлення стирає Environment служби. ✎ R5-U1/U1-05: скрипт
+    знімає його до msiexec і повертає; записане значення = цей параметр ∪
+    те, що вже було в Environment ∪ відбиток DP попередньої установки, якщо
+    -DataProtectionThumbprint його змінив (майстер такого поля не має).
 
 .PARAMETER HttpsThumbprint
     ⛔ D14-08/R-01: ТРАНСПОРТ — рівно один із трьох параметрів (`-HttpsThumbprint`,
@@ -831,6 +833,65 @@ function Get-ServiceEnvironmentValue {
     $entry = @($prop.Environment) | Where-Object { $_ -like "$Name=*" } | Select-Object -First 1
     if (-not $entry) { return $null }
     return $entry.Substring($Name.Length + 1)
+}
+
+# ⛔ R5-U1/U1-05 (аудит 2026-10-09): MajorUpgrade перевстановлює службу й СТИРАЄ її Environment, а
+# скрипт пише лише те, що йому передали. ECR_Secrets__* (PI/SQL-джерела), ECR_Jobs__Workers__*,
+# ECR_PiWebApi__AllowedHosts__*, попередні відбитки DP і телеметрія зникали, і крок 7 зараховував
+# «sources Unhealthy» як успіх. Тому: знімок Environment обох служб ДО msiexec (лише в пам'яті процесу,
+# на диск не пишеться), після msiexec — повернення ВСЬОГО, чого в новому Environment немає, і лише потім
+# кроки 4–5: явні параметри скрипта й рішення (транспорт, режим Api) перекривають старе значення.
+function Get-ServiceEnvironmentEntries {
+    param([Parameter(Mandatory)] [string] $ServiceName)
+
+    $prop = Get-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Services\$ServiceName" -Name Environment -ErrorAction SilentlyContinue
+    if (-not $prop) { return , ([string[]] @()) }
+    return , ([string[]] @(@($prop.Environment) | Where-Object { $_ }))
+}
+
+# Чиста функція: записи знімка, імен яких немає в поточному Environment, — ім'я → значення
+# (порядок знімка; перший запис з іменем виграє, як у Windows). Імена — без урахування регістру.
+function Get-EnvironmentEntriesToRestore {
+    param(
+        [AllowNull()] [AllowEmptyCollection()] [string[]] $Snapshot,
+        [AllowNull()] [AllowEmptyCollection()] [string[]] $Current
+    )
+
+    $present = @{}
+    foreach ($entry in @($Current)) {
+        if ($entry -and $entry.IndexOf('=') -gt 0) { $present[$entry.Substring(0, $entry.IndexOf('='))] = $true }
+    }
+    $restore = [ordered]@{}
+    foreach ($entry in @($Snapshot)) {
+        if (-not $entry -or $entry.IndexOf('=') -le 0) { continue }
+        $name = $entry.Substring(0, $entry.IndexOf('='))
+        if ($present.ContainsKey($name) -or $restore.Contains($name)) { continue }
+        $restore[$name] = $entry.Substring($name.Length + 1)
+    }
+    return $restore
+}
+
+# Чиста функція (U1-05, D-267): попередні відбитки DP = явні ∪ ті, що вже були в Environment ∪ ПОТОЧНИЙ
+# відбиток попередньої установки, якщо його змінено. Інакше заміна сертифіката через майстер (у ньому
+# поля «попередні» немає) робила старі ключі кільця нечитабельними: сеанси й захищені ними секрети
+# (пароль SMTP, секрети каналів) переставали розшифровуватися. Новий поточний відбиток — ніколи не в
+# переліку. $null — писати нічого. Відсутній у сховищі «попередній» застосунок лише попереджає.
+function Resolve-PreviousDataProtectionThumbprints {
+    param(
+        [string] $Explicit,
+        [string] $SnapshotPrevious,
+        [string] $SnapshotCurrent,
+        [string] $NewCurrent
+    )
+
+    $new = ConvertTo-NormalizedThumbprint $NewCurrent
+    $list = [System.Collections.Generic.List[string]]::new()
+    foreach ($raw in @(([string] $Explicit) -split '[;,]') + @(([string] $SnapshotPrevious) -split '[;,]') + @([string] $SnapshotCurrent)) {
+        $thumbprint = ConvertTo-NormalizedThumbprint $raw
+        if ($thumbprint -and $thumbprint -ne $new -and -not $list.Contains($thumbprint)) { $list.Add($thumbprint) }
+    }
+    if (-not $list.Count) { return $null }
+    return ($list -join ';')
 }
 
 # ⚠ Чиста функція (як Merge-ServiceEnvironmentEntry): прибрати запис $Name,
@@ -1829,9 +1890,35 @@ if ($ServicePassword) {
     $msiArgsShown += 'SERVICE_PASSWORD=***'   # ніколи не в плані/логу, лише в реальному виклику
 }
 
+# ⛔ R5-U1/U1-05: знімок Environment ДО msiexec (MajorUpgrade його стирає) — лише в пам'яті.
+$envSnapshot = [ordered]@{}
+foreach ($service in 'EcrApi', 'EcrWorker') { $envSnapshot[$service] = Get-ServiceEnvironmentEntries -ServiceName $service }
+$snapshotEntry = { param($service, $name)
+    $hit = @($envSnapshot[$service] | Where-Object { $_ -like "$name=*" } | Select-Object -First 1)
+    if ($hit.Count) { $hit[0].Substring($name.Length + 1) } else { $null } }
+$previousDataProtection = Resolve-PreviousDataProtectionThumbprints -Explicit $PreviousDataProtectionCertificateThumbprints `
+    -SnapshotPrevious (& $snapshotEntry 'EcrApi' 'ECR_Auth__DataProtection__PreviousCertificateThumbprints') `
+    -SnapshotCurrent (& $snapshotEntry 'EcrApi' 'ECR_Auth__DataProtection__CertificateThumbprint') `
+    -NewCurrent $DataProtectionThumbprint
+
 if ($PSCmdlet.ShouldProcess($MsiPath, "msiexec $($msiArgsShown -join ' ')")) {
     $proc = Start-Process msiexec -ArgumentList $msiArgs -Wait -PassThru
     if ($proc.ExitCode -notin 0, 3010) { throw "msiexec повернув $($proc.ExitCode) — див. ecr-install.log" }
+
+    # ⛔ R5-U1/U1-05: повернути все, чого MSI не лишив, — ДО кроків 4–5 (явні параметри перекривають).
+    # Служби, якої після MSI немає (WORKER_ENABLED=0), не чіпаємо. Значення не друкуються — лише імена.
+    foreach ($service in $envSnapshot.Keys) {
+        if (-not (Test-Path "HKLM:\SYSTEM\CurrentControlSet\Services\$service")) { continue }
+        $restore = Get-EnvironmentEntriesToRestore -Snapshot $envSnapshot[$service] `
+            -Current (Get-ServiceEnvironmentEntries -ServiceName $service)
+        foreach ($name in @($restore.Keys)) {
+            Set-ServiceEnvironmentVariable -ServiceName $service -Name $name -Value $restore[$name]
+        }
+        if ($restore.Count) {
+            Write-Host ("Environment $service відновлено після MSI ($($restore.Count)): $(@($restore.Keys) -join ', ') — " +
+                "явні параметри кроків 4–5 їх перекривають.") -ForegroundColor Green
+        }
+    }
 
     # ⛔ I2-2: режим Api (крок 5) пишеться за ФАКТОМ служби, а не за наміром.
     # Служби немає після WORKER_ENABLED=1 — зупинка тут, до запису Executor = Worker.
@@ -1845,8 +1932,13 @@ if ($PSCmdlet.ShouldProcess($MsiPath, "msiexec $($msiArgsShown -join ' ')")) {
 Write-Step "Крок 4/7: секрети служби (реєстр EcrApi\Environment)"
 
 if (-not $ConnectionString) {
-    Write-Host ("ECR_ConnectionStrings__Ecr не записано (-ConnectionString не задано) — " +
-        "служба впаде при старті, поки значення не буде додано вручну.") -ForegroundColor Yellow
+    if (Get-ServiceEnvironmentValue -ServiceName 'EcrApi' -Name 'ECR_ConnectionStrings__Ecr') {
+        Write-Host "ECR_ConnectionStrings__Ecr не змінено (-ConnectionString не задано): лишається значення попередньої установки (U1-05)." -ForegroundColor Yellow
+    }
+    else {
+        Write-Host ("ECR_ConnectionStrings__Ecr не записано (-ConnectionString не задано) — " +
+            "служба впаде при старті, поки значення не буде додано вручну.") -ForegroundColor Yellow
+    }
 }
 else {
     if ($PSCmdlet.ShouldProcess('HKLM:\SYSTEM\CurrentControlSet\Services\EcrApi\Environment',
@@ -1908,12 +2000,14 @@ if ($PSCmdlet.ShouldProcess('HKLM:\SYSTEM\CurrentControlSet\Services\EcrApi\Envi
 }
 
 # D-267: попередні сертифікати DP (заміна сертифіката) — відбитки, не секрет.
-if ($PreviousDataProtectionCertificateThumbprints -and
+# ⛔ R5-U1/U1-05: явні ∪ уже записані ∪ змінений поточний відбиток попередньої установки
+# (Resolve-PreviousDataProtectionThumbprints, перед кроком 3).
+if ($previousDataProtection -and
     $PSCmdlet.ShouldProcess('HKLM:\SYSTEM\CurrentControlSet\Services\EcrApi\Environment',
         'записати ECR_Auth__DataProtection__PreviousCertificateThumbprints')) {
     Set-ServiceEnvironmentVariable -ServiceName 'EcrApi' -Name 'ECR_Auth__DataProtection__PreviousCertificateThumbprints' `
-        -Value $PreviousDataProtectionCertificateThumbprints
-    Write-Host "ECR_Auth__DataProtection__PreviousCertificateThumbprints записано ($PreviousDataProtectionCertificateThumbprints)." -ForegroundColor Green
+        -Value $previousDataProtection
+    Write-Host "ECR_Auth__DataProtection__PreviousCertificateThumbprints записано ($previousDataProtection)." -ForegroundColor Green
 }
 
 if ($BootstrapPassword) {
