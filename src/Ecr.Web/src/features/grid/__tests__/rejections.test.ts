@@ -53,6 +53,19 @@ describe('rejectionMarksOf — які відмови тримають правк
     expect(rejectionMarksOf(problem(422, 'ECR-CELL-0422'), [bad, good])).toHaveLength(2);
   });
 
+  it('AN-123: 409 ECR-DOC-4091 lockTimeout НЕ тримає — минуще, як 5xx', () => {
+    // ⛔ Мутація: прибрати гілку `isTransientBusy` у `rejectionMarksOf` — тримається весь пакет.
+    expect(
+      rejectionMarksOf(problem(409, 'ECR-DOC-4091', { messageKey: 'err.ECR-DOC-4091.lockTimeout' }), [bad, good]),
+    ).toEqual([]);
+  });
+
+  it('AN-123: інші 4091 (структуру змінено) і далі тримають — повтор того самого не вилікує', () => {
+    expect(
+      rejectionMarksOf(problem(409, 'ECR-DOC-4091', { messageKey: 'err.ECR-DOC-4091.structureChanged' }), [bad]),
+    ).toHaveLength(1);
+  });
+
   it('5xx і мережа НЕ тримають: повтор має везти ті самі правки', () => {
     expect(rejectionMarksOf(problem(500, 'ECR-SYS-0500'), [bad])).toEqual([]);
     expect(rejectionMarksOf(problem(429, 'ECR-REQ-0429'), [bad])).toEqual([]);

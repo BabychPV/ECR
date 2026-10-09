@@ -28,6 +28,9 @@ export interface EcrProblem {
   retryAfterSeconds?: number;
 }
 
+/** Ключ минущої відмови «дані зайняті» (`LockWaitGuard.MessageKey` на сервері). */
+export const LockTimeoutMessageKey = 'err.ECR-DOC-4091.lockTimeout';
+
 /** Виняток клієнта API. */
 export class EcrApiError extends Error {
   constructor(readonly problem: EcrProblem) {
@@ -38,6 +41,26 @@ export class EcrApiError extends Error {
   /** Чи це конфлікт паралельного редагування. */
   get isConflict(): boolean {
     return this.problem.errorCode === 'ECR-CELL-0409';
+  }
+
+  /**
+   * Чи це минуща відмова «дані зайняті» (`409 ECR-DOC-4091` з ключем
+   * `err.ECR-DOC-4091.lockTimeout`, `LockWaitGuard.Busy`): очікування блокування
+   * на сервері вичерпалось, нічого не записано, і той самий запит пройде, щойно
+   * довга операція (перенос версії, великий імпорт) відпустить блокування.
+   *
+   * ⛔ AN-123 (`R1-03`/`R2-01`): НЕ остаточна відмова — правки не утримуються, а
+   * повторюються автозбереженням із відступом (`scheduleBusyRetry`).
+   *
+   * ⚠ Саме за `messageKey`, а не за всім кодом: той самий `ECR-DOC-4091` несе й
+   * «структуру змінено» (`structureChanged`), де повтор того самого запиту
+   * нічого не вилікує.
+   */
+  get isTransientBusy(): boolean {
+    return (
+      this.problem.errorCode === 'ECR-DOC-4091' &&
+      this.problem.extensions2?.['messageKey'] === LockTimeoutMessageKey
+    );
   }
 
   /** Перелік конфліктів, якщо вони є. */

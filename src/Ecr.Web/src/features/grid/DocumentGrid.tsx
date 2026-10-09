@@ -51,7 +51,13 @@ import {
   settleRecalculation,
   type PendingEdit,
 } from './useCellPatch';
-import { holdRejectedEdits, registerSliceSaver, scheduleAutosave } from './autosave';
+import {
+  clearBusyRetry,
+  holdRejectedEdits,
+  registerSliceSaver,
+  scheduleAutosave,
+  useBusyRetryWaiting,
+} from './autosave';
 import { beginInFlight, deferUntilInFlightSettles, splitByInFlight } from './inFlightEdits';
 import { GridAriaPlugin } from './gridAria';
 import { mergePatchNotices, PatchNoticesAlert, type PatchNotice } from './patchNotices';
@@ -576,6 +582,8 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         // сервер щойно прийняв (`discardPendingRows` вище): відхилена комірка
         // того самого рядка, якої в пакеті не було, лишається позначеною.
         setSaveError(null);
+        // ⚠ AN-123: збереження пройшло — стан «чекає, доки дані звільняться» знято.
+        clearBusyRetry();
       } catch (error) {
         // ⛔ `V-01`: відхилені правки ТРИМАЮТЬСЯ — лишаються незбереженими, з
         // маркером і причиною, але наступні пакети автозбереження їх уже не
@@ -601,6 +609,11 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
           // (`requiredInputBlocked`) — другий банер із тим самим по суті
           // повідомленням розсіював би увагу, а не додавав інформацію.
           setSaveError(null);
+        } else if (error instanceof EcrApiError && error.isTransientBusy) {
+          // ⛔ AN-123 (`R1-03`/`R2-01`): «дані зайняті» — не відмова, а очікування.
+          // Червоного банера немає: правки не утримано, повтор заплановано
+          // (`holdRejectedEdits` → `scheduleBusyRetry`), а людина бачить
+          // нейтральний стан «чекає» (`busyWaiting`) у рядку кнопок.
         } else {
           // ⛔ Q-30x (High): ось сам фікс — реальний, локалізований текст
           // сервера («Колонка «C1» очікує число.» і подібні) показується як
@@ -728,6 +741,11 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
   // переживають розмонтування сітки і там знімаються, щойно комірку прийнято
   // або виправлено.
   const rejections = usePendingRejections(tableInstanceId, periodKey);
+
+  // ⛔ AN-123 (`R1-03`/`R2-01`): документ чекає повтору після «дані зайняті».
+  // Це не відмова: правки не утримано, автозбереження повторить їх саме, тож
+  // червона позначка й «Retry save» в цей час лише лякали б і кликали до ручної роботи.
+  const busyWaiting = useBusyRetryWaiting();
 
   // ⚠ `ФВ-2.16`: комірки, які сервер записав за `Warn` поза вікном доступу
   // (`PatchCellsResponse.outOfWindow`, `outOfWindowMarks.ts`), і ті, що сервер
@@ -2075,7 +2093,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
          * ⚠ `V-01`: і тоді, коли останній пакет пройшов, а відхилені комірки
          * лишились: автозбереження їх більше не везе, тож повтор — лише руками.
          */}
-        {(saveStatus === 'error' || rejections.size > 0) && pending.size > 0 && (
+        {((saveStatus === 'error' && !busyWaiting) || rejections.size > 0) && pending.size > 0 && (
           <Button
             loading={saveLoading}
             onClick={() => {
@@ -2101,9 +2119,15 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
          * дав би контраст ~2.2–2.8:1 — те, що вже раз ламало а11y-гейт
          * (`W4.2`) для нечіпаних кольорів Mantine.
          */}
-        {(saveStatus === 'saving' || saveStatus === 'saved') && (
+        {(saveStatus === 'saving' || saveStatus === 'saved') && !busyWaiting && (
           <Text size="xs" c="dimmed" role="status" aria-live="polite" data-save-status={saveStatus}>
             {t(saveStatus === 'saving' ? 'grid.saving' : 'grid.saved')}
+          </Text>
+        )}
+        {/* ⚠ AN-123: нейтральний, як «зберігається», — не колір відмови. */}
+        {busyWaiting && (
+          <Text size="xs" c="dimmed" role="status" aria-live="polite" data-save-status="waiting">
+            {t('grid.saveWaitingBusy')}
           </Text>
         )}
         {/*
@@ -2121,7 +2145,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
          * єдиний постійний слід відмови (банер може бути прокручений), а з
          * ним і `role="alert"`, на якому стоїть `DocumentGrid.a11y-status`.
          */}
-        {(saveStatus === 'error' || rejections.size > 0) && (
+        {((saveStatus === 'error' && !busyWaiting) || rejections.size > 0) && (
           <Badge color="statusError" variant="light" role="alert" data-save-status="error">
             {t('grid.saveFailedMark')}
           </Badge>

@@ -75,7 +75,7 @@ export function cellsOfSaveError(
  *
  * ⛔ Тримаються лише відмови, які повторення НЕ вилікує: невірне значення
  * (`422`), заборона (`403`), кривий запит (`400`) і конфлікт версії рядка
- * (`409`). Мережа, `5xx`, `429` і `401` — минущі: наступний пакет має везти ті
+ * (`409`). Мережа, `5xx`, `429`, `401` і `409 ECR-DOC-4091 lockTimeout` — минущі: наступний пакет має везти ті
  * самі правки, і тримати їх означало б кинути правильні дані через збій
  * зв'язку.
  *
@@ -100,6 +100,11 @@ export function rejectionMarksOf(
   attempted: readonly PendingEdit[],
 ): readonly { edit: PendingEdit; message: string; scope: 'cell' | 'row' }[] {
   if (!(error instanceof EcrApiError)) return [];
+  // ⛔ AN-123 (`R1-03`/`R2-01`): `409 ECR-DOC-4091 lockTimeout` — минуще, як `5xx`:
+  // до N-3 те саме очікування блокування давало `500`, і правки лишались
+  // придатними до надсилання. Утримати їх — означало б, що після зняття
+  // блокування нічого не довезеться само. Повтор із відступом — `holdRejectedEdits`.
+  if (error.isTransientBusy) return [];
   if (![400, 403, 409, 422].includes(error.problem.status) && !error.isRequiredInputMissing) return [];
 
   if (error.isConflict) {

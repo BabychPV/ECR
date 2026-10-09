@@ -7441,6 +7441,9 @@ USING (VALUES
     ,(N'err.ECR-AUTH-0409', N'en', N'You are signed in as someone else', 1),
     (N'err.ECR-AUTH-0409.sessionUserChanged', N'en', N'Another user has signed in to this browser in a different tab. This tab''s changes were not saved under their name. Reload the page and sign in again.', 1)
     -- COLL:an108c-session-user ── кінець секції ──
+    -- COLL:an123-save-busy ── AN-123 / R1-03 = R2-01: автозбереження чекає, доки дані звільняться (409 ECR-DOC-4091 lockTimeout повторюється з відступом); ru/kz — порцією COLL:an123-save-busy нижче ──
+    ,(N'grid.saveWaitingBusy', N'en', N'Data is busy, will save automatically...', 1)
+    -- COLL:an123-save-busy ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -18357,6 +18360,16 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:an108c-session-user ── кінець секції ──
+-- COLL:an123-save-busy ── ru/kz: AN-123 / R1-03 = R2-01: автозбереження чекає, доки дані звільняться; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'grid.saveWaitingBusy', N'ru', N'Данные заняты, сохраним автоматически...'),
+    (N'grid.saveWaitingBusy', N'kz', N'Деректер бос емес, автоматты түрде сақтаймыз...')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:an123-save-busy ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

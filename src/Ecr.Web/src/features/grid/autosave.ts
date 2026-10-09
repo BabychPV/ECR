@@ -1,8 +1,8 @@
-import { useEffect } from 'react';
+import { useEffect, useSyncExternalStore } from 'react';
 import { useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { showApiError } from '@/shared/ui/notify';
 import { registerUnsavedSource, UnsavedSettleMs } from '@/shared/ui/unsavedSources';
-import { isSessionClosed, onBeforeLoginRedirect } from '@/api/client';
+import { EcrApiError, isSessionClosed, onBeforeLoginRedirect } from '@/api/client';
 import { recordLostEdits } from './lostEdits';
 import { resetConfirmed } from './confirmedEdits';
 import { registerHeldEditLookup } from './settleEdits';
@@ -242,6 +242,81 @@ function flushAutosave(): void {
   }
 }
 
+/* ────────────────────────────────────────────────────────────────────────────
+ * Повтор після «дані зайняті» (AN-123, `R1-03`/`R2-01`).
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * Відступи повтору після `409 ECR-DOC-4091 lockTimeout`, мс: 5 → 10 → 20 → 30
+ * (далі 30). Кожен множиться на розкид `[0.5, 1)`.
+ *
+ * ⚠ Саме відступ, а не негайний повтор: блокування тримає довга операція
+ * (перенос версії — хвилини), і кожен повтор займає з'єднання сервера на 15 с
+ * очікування. Без розкиду сотня вкладок, що впали разом, разом і повторювала б.
+ */
+export const BusyRetryDelaysMs: readonly number[] = [5_000, 10_000, 20_000, 30_000];
+
+let busyAttempt = 0;
+let busyTimer: ReturnType<typeof setTimeout> | null = null;
+const busyListeners = new Set<() => void>();
+
+function notifyBusy(): void {
+  for (const listener of busyListeners) listener();
+}
+
+/** Чи чекає документ на повтор після «дані зайняті» (ненав'язливий стан для людини). */
+export function isBusyRetryWaiting(): boolean {
+  return busyTimer !== null;
+}
+
+/**
+ * Планує ОДИН повтор автозбереження з відступом після `lockTimeout`.
+ *
+ * ⚠ Один план на документ: кілька зрізів, що впали в тому самому вікні, не
+ * множать повтори — `flushAutosave` везе всі зрізи разом.
+ *
+ * @param retryAfterSeconds `Retry-After` сервера, якщо він його назвав: нижня межа відступу.
+ */
+export function scheduleBusyRetry(retryAfterSeconds?: number): void {
+  if (busyTimer !== null) return;
+
+  const base = BusyRetryDelaysMs[Math.min(busyAttempt, BusyRetryDelaysMs.length - 1)] ?? 30_000;
+  const jittered = base * (0.5 + Math.random() * 0.5);
+  const delay = Math.max(jittered, (retryAfterSeconds ?? 0) * 1000);
+
+  busyAttempt += 1;
+  busyTimer = setTimeout(() => {
+    busyTimer = null;
+    notifyBusy();
+    flushAutosave();
+  }, delay);
+  notifyBusy();
+}
+
+/** Знімає план повтору й скидає відступ: збереження пройшло або документ закрито. */
+export function clearBusyRetry(): void {
+  const wasWaiting = busyTimer !== null || busyAttempt > 0;
+
+  if (busyTimer !== null) clearTimeout(busyTimer);
+  busyTimer = null;
+  busyAttempt = 0;
+
+  if (wasWaiting) notifyBusy();
+}
+
+function subscribeBusy(listener: () => void): () => void {
+  busyListeners.add(listener);
+
+  return () => {
+    busyListeners.delete(listener);
+  };
+}
+
+/** Стан «чекає, доки дані звільняться» — для індикатора сітки. */
+export function useBusyRetryWaiting(): boolean {
+  return useSyncExternalStore(subscribeBusy, isBusyRetryWaiting, isBusyRetryWaiting);
+}
+
 /**
  * Тримає відхилені правки пакета й довозить решту (`V-01`).
  *
@@ -262,6 +337,14 @@ export function holdRejectedEdits(
   error: unknown,
   attempted: readonly PendingEdit[],
 ): boolean {
+  // ⛔ AN-123 (`R1-03`/`R2-01`): «дані зайняті» нічого не тримає — правки лишаються
+  // придатними до надсилання (і до маячка закриття вкладки), а повтор іде сам.
+  if (error instanceof EcrApiError && error.isTransientBusy) {
+    scheduleBusyRetry(error.problem.retryAfterSeconds);
+
+    return false;
+  }
+
   const marks = rejectionMarksOf(error, attempted);
   if (marks.length === 0) return false;
 
@@ -414,9 +497,12 @@ async function saveOrphanSlice(
       edits.map((edit) => edit.rowKey),
       sent,
     );
+    clearBusyRetry();
   } catch (error) {
     holdRejectedEdits(slice.tableInstanceId, slice.periodKey, error, edits);
-    showApiError(error);
+    // ⚠ AN-123: «дані зайняті» — не тост: повтор уже заплановано, а стан «чекає»
+    // показує індикатор (`useBusyRetryWaiting`).
+    if (!(error instanceof EcrApiError && error.isTransientBusy)) showApiError(error);
   } finally {
     endInFlight();
   }
@@ -454,6 +540,7 @@ export function useDocumentPending(documentId: number, ownerUserId?: number): vo
 
     return () => {
       cancelAutosave();
+      clearBusyRetry();
       resetPending();
       // ⚠ Разом зі сховищем правок — і підтвердження до них (`ФВ-2.16`).
       resetConfirmed();
