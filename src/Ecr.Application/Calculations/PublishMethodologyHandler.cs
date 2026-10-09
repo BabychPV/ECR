@@ -347,7 +347,7 @@ public sealed class PublishMethodologyHandler(
 
         // ⛔ C1-01 (HU-14 Q1): `Legacy` рахує `Max(0, x)` математично, а NCalc 1.3.8 округлював
         // x до цілого — попередження, а не відмова і не зміна семантики.
-        LegacyIntegerMaxMinChecks.Warn(parsed, version.NumericMode, warnings, strings);
+        IntegerMaxMinPublishChecks.Warn(parsed, version.NumericMode, warnings, strings);
 
         Reject(problems);
 

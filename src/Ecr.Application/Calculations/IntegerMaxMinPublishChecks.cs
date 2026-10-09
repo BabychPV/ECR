@@ -1,4 +1,5 @@
-// src/Ecr.Application/Calculations/LegacyIntegerMaxMinChecks.cs
+// src/Ecr.Application/Calculations/IntegerMaxMinPublishChecks.cs
+using System.Runtime.CompilerServices;
 using Ecr.Application.Localization;
 using Ecr.Application.Ports;
 using Ecr.Domain.Enums;
@@ -27,7 +28,7 @@ namespace Ecr.Application.Calculations;
 /// подає параметри <c>double</c> (<c>Utilities.cs:188-215</c>), тож «ціле поле» в
 /// NCalc цілого типу не дає.
 /// </remarks>
-public static class LegacyIntegerMaxMinChecks
+public static class IntegerMaxMinPublishChecks
 {
     /// <summary>Ключ каталогу тексту попередження.</summary>
     public const string WarningKey = "publish.warning.legacyIntegerMaxMin";
@@ -97,7 +98,10 @@ public static class LegacyIntegerMaxMinChecks
 
     /// <summary>Чи може вузол мати в NCalc 1.3.8 цілий тип (див. зауваження класу).</summary>
     private static bool IsInteger(AstNode node)
-        => node switch
+    {
+        // ⛔ L7-01: рекурсія вглиб аргументів; глибину тримає парсер, але сторож — як у MethodologyPublishChecks.
+        RuntimeHelpers.EnsureSufficientExecutionStack();
+        return node switch
         {
             LiteralNode { Type: ExpressionValueType.Number, Value: decimal number } => number.Scale == 0,
             UnaryNode { Operator: UnaryOperator.Negate or UnaryOperator.Plus } unary => IsInteger(unary.Operand),
@@ -113,6 +117,7 @@ public static class LegacyIntegerMaxMinChecks
             FunctionNode call when IsMaxMin(call) => IsInteger(call.Arguments[0]),
             _ => false,
         };
+    }
 
     private static IEnumerable<AstNode> Nodes(AstNode root)
     {

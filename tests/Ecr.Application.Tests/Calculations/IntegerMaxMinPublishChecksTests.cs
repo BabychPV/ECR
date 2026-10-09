@@ -1,4 +1,4 @@
-// tests/Ecr.Application.Tests/Calculations/LegacyIntegerMaxMinChecksTests.cs
+// tests/Ecr.Application.Tests/Calculations/IntegerMaxMinPublishChecksTests.cs
 using Ecr.Application.Calculations;
 using Ecr.Application.Ports;
 using Ecr.Domain.Enums;
@@ -18,7 +18,7 @@ namespace Ecr.Application.Tests.Calculations;
 /// розбіжність із поданими формами на цілі одиниці ніхто не бачив до звірки.
 /// Семантика не змінюється (рішення за замовчуванням) — лише попередження.
 /// </remarks>
-public sealed class LegacyIntegerMaxMinChecksTests
+public sealed class IntegerMaxMinPublishChecksTests
 {
     private readonly RealFormulaEngine _engine = new();
 
@@ -59,11 +59,11 @@ public sealed class LegacyIntegerMaxMinChecksTests
     {
         var strings = new UiStringCatalog("ru", 1, new Dictionary<string, string>(StringComparer.Ordinal)
         {
-            [LegacyIntegerMaxMinChecks.WarningKey] = "Формула {formula}: {functions}",
+            [IntegerMaxMinPublishChecks.WarningKey] = "Формула {formula}: {functions}",
         });
         var warnings = new List<string>();
 
-        LegacyIntegerMaxMinChecks.Warn(Parsed("Max(0, @X)"), NumericMode.Legacy, warnings, strings);
+        IntegerMaxMinPublishChecks.Warn(Parsed("Max(0, @X)"), NumericMode.Legacy, warnings, strings);
 
         Assert.Equal("Формула F: Max", Assert.Single(warnings));
     }
@@ -71,7 +71,7 @@ public sealed class LegacyIntegerMaxMinChecksTests
     private List<string> Warn(string expression, NumericMode mode)
     {
         var warnings = new List<string>();
-        LegacyIntegerMaxMinChecks.Warn(Parsed(expression), mode, warnings, strings: null);
+        IntegerMaxMinPublishChecks.Warn(Parsed(expression), mode, warnings, strings: null);
         return warnings;
     }
 
