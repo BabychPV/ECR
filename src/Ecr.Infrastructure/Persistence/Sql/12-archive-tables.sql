@@ -239,6 +239,23 @@ IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_CellChange_OutOfWindo
         ON ps_AuditByMonth(ChangedAt);
 GO
 
+-- AN-112: дзеркало `IX_CellChange_LateEdit` з `11-audit-tables.sql` (без нього SWITCH
+-- партиції `aud.CellChange` → `arc.AuditCellChange` падає). ONLINE — як там.
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_CellChange_LateEdit'
+               AND object_id = OBJECT_ID(N'arc.AuditCellChange'))
+BEGIN
+    DECLARE @arcLateEditIndex nvarchar(max) =
+        N'CREATE INDEX IX_CellChange_LateEdit '
+        + N'ON arc.AuditCellChange (DocumentId, PeriodKey) INCLUDE (ColumnDefId) '
+        + N'WHERE IsLateEdit = 1'
+        + CASE WHEN CAST(SERVERPROPERTY('EngineEdition') AS int) IN (3, 5, 8)
+               THEN N' WITH (ONLINE = ON)' ELSE N'' END
+        + N' ON ps_AuditByMonth(ChangedAt);';
+    PRINT @arcLateEditIndex;
+    EXEC sys.sp_executesql @arcLateEditIndex;
+END
+GO
+
 IF OBJECT_ID(N'arc.AuditStructureChange', N'U') IS NULL
 BEGIN
     CREATE TABLE arc.AuditStructureChange

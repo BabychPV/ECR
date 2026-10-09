@@ -1146,6 +1146,7 @@ Msg 50301 … Передперевірка U1: оновлення зупинен
 | `ADD Kind tinyint NOT NULL DEFAULT 0` до `calc.CalculationResult` (міграція `HSE301M3Trace`, `20260928084900`) | `migration.sql` | нова колонка з типовим значенням | метаданні, без переписування | переписування **кожного** рядка під `Sch-M`: таблиця недоступна й для читання |
 | `ADD IsOutOfWindow bit NOT NULL DEFAULT(0)` до `aud.CellChange` | `11-audit-tables.sql` | нова колонка з типовим значенням | метаданні, без переписування | переписування кожного рядка під `Sch-M` |
 | дзеркала в `12-archive-tables.sql` (`arc.CellChange.IsOutOfWindow`, `arc.CalculationResult.Kind`, `arc.CalculationStep.MaskedZero`, `arc.TableRow.IsOrphaned`) | `12-archive-tables.sql` | те саме для архівних таблиць | метаданні | переписування під `Sch-M` |
+| `IX_CellChange_LateEdit` на `aud.CellChange` і `arc.AuditCellChange` (AN-112, фільтрований `WHERE IsLateEdit = 1`) | `11-audit-tables.sql`, `12-archive-tables.sql` | новий індекс, вирівняний по `ps_AuditByMonth`; читає всю таблицю, пише лише пізні правки (Grace/Reopen) | `ONLINE = ON` | офлайн: запис у аудит чекає, доки індекс збудується (команду видно в `PRINT`) |
 
 Додавання колонки `NOT NULL` з типовим значенням — операція без переписування лише в
 Enterprise; Standard і Express переписують таблицю. Кожен такий `ADD` виконується **один
