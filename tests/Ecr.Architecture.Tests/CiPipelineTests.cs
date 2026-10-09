@@ -152,6 +152,49 @@ public sealed partial class CiPipelineTests
         Assert.Contains("openssl rand", workflow, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData("ci.yml")]
+    [InlineData("evidence.yml")]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Гейти_не_пропускаються_для_PR_з_dev_integration(string file)
+    {
+        // ⛔ L10-09, D-335 (HU-12 R5 = A): 057a1118 пропускав гейти на PR з head `dev/integration`,
+        // а пропущену обов'язкову перевірку GitHub зараховує як пройдену. Жодна умова в
+        // конвеєрі не дивиться на `head_ref == 'dev/integration'`, крім джоба `pr-source`,
+        // який такий PR валить.
+        var workflow = File.ReadAllText(Path.Combine(Root(), ".github", "workflows", file));
+
+        var skips = workflow.Split('\n')
+            .Where(line => !line.TrimStart().StartsWith('#'))
+            .Where(line => line.Contains("head_ref == 'dev/integration'", StringComparison.Ordinal))
+            .Select(line => line.Trim())
+            .ToList();
+
+        var allowed = file == "ci.yml"
+            ? new[] { "if: github.event_name == 'pull_request' && github.head_ref == 'dev/integration'" }
+            : Array.Empty<string>();
+        Assert.Equal(allowed, skips);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void PR_з_dev_integration_валиться_окремим_джобом()
+    {
+        // D-335: тижневий PR — з `rc/*` (CLAUDE.md §8); PR з `dev/integration` червоний з поясненням.
+        var workflow = Workflow().Replace("\r\n", "\n", StringComparison.Ordinal);
+
+        var start = workflow.IndexOf("\n  pr-source:\n", StringComparison.Ordinal);
+        Assert.True(start >= 0, "Немає джоба pr-source у ci.yml.");
+        var next = workflow.IndexOf("\n  lane-shape:", start, StringComparison.Ordinal);
+        var job = next > start ? workflow[start..next] : workflow[start..];
+
+        Assert.Contains("github.head_ref == 'dev/integration'", job, StringComparison.Ordinal);
+        Assert.Contains("exit 1", job, StringComparison.Ordinal);
+        Assert.Contains("rc/", job, StringComparison.Ordinal);
+    }
+
     private static List<string> Covered(string workflow)
         => workflow.Split('\n')
             .Where(line => !line.TrimStart().StartsWith('#'))
