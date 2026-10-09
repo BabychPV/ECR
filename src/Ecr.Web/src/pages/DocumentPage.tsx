@@ -291,18 +291,20 @@ export function DocumentPage(): JSX.Element {
   const [headerOpenRequest, setHeaderOpenRequest] = useState(0);
 
   const validate = useMutation({
-    mutationFn: (_scope: string) =>
+    // ⛔ N3-01: адреса (`scope`, `documentId`, `periodKey`) - ЗМІННА мутації, знята в мить кліку. Кнопка спершу чекає
+    // збереження набраного (до 3 с); період із замикання виконувався б уже ІНШИЙ, якщо за цей час його змінили.
+    mutationFn: (target: { scope: string; documentId: number; periodKey: number }) =>
       apiFetch<ValidationResultResponse>(
-        `/api/v1/documents/${documentId}/validate`,
+        `/api/v1/documents/${target.documentId}/validate`,
         {
           method: 'POST',
           // ⚠ Період — у ТІЛІ. До `A7-28` сервер читав його з рядка запиту, і
           // валідація мовчки йшла по періоду 0, відповідаючи «помилок немає».
-          body: JSON.stringify({ periodKey } satisfies DocumentPeriodRequest),
+          body: JSON.stringify({ periodKey: target.periodKey } satisfies DocumentPeriodRequest),
         },
       ),
-    onSuccess: (result, requestedScope) => {
-      setFresh({ scope: requestedScope, result });
+    onSuccess: (result, target) => {
+      setFresh({ scope: target.scope, result });
       setValidatedSeq((value) => value + 1);
 
       const errors = result.messages.filter((message) => message.severity === 'Error');
@@ -596,7 +598,7 @@ export function DocumentPage(): JSX.Element {
           canExport={can(session.data, 'Document.Export')}
           validate={{
             loading: validateLoading || validateAction.settling,
-            run: () => validateAction.run(() => validate.mutateAsync(scope), { readOnly: true }),
+            run: () => validateAction.run(() => validate.mutateAsync({ scope, documentId, periodKey }), { readOnly: true }),
           }}
           calculationsStale={calculationsStale}
           documentItems={[...documentLog.menuItems, businessKeyChange.menuItem, versionMigration.menuItem, deletion.menuItem]}

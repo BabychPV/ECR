@@ -24,7 +24,7 @@ function summary(sheetStates: Record<string, string>): DocumentSummary {
   };
 }
 
-function render1(sheetStates: Record<string, string>): void {
+function render1(sheetStates: Record<string, string>, state = 'Draft'): void {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL) => {
@@ -44,7 +44,7 @@ function render1(sheetStates: Record<string, string>): void {
   render(
     <MantineProvider theme={testTheme}>
       <QueryClientProvider client={client}>
-        <SheetActions documentId={1} sheetDefId={2} periodKey={202401} state="Draft" />
+        <SheetActions documentId={1} sheetDefId={2} periodKey={202401} state={state} />
       </QueryClientProvider>
     </MantineProvider>,
   );
@@ -90,4 +90,32 @@ describe('SheetActions: Recalculate і поданий аркуш (L8-12)', () =>
       expect(vi.mocked(fetch).mock.calls.length).toBe(calls);
     },
   );
+});
+
+describe('SheetActions: Recalculate на ПОДАНОМУ аркуші (AN-77 / L8-12)', () => {
+  it.each(['Submitted', 'Approved'])(
+    'цей аркуш %s, сусідній у Draft - кнопка aria-disabled з причиною, клік і F9 не шлють запит',
+    async (state) => {
+      render1({ S1: 'Draft', S2: state }, state);
+
+      const button = await screen.findByRole('button', { name: /recalculate/i });
+      await waitFor(() => expect(button.getAttribute('aria-disabled')).toBe('true'));
+      expect(button.getAttribute('aria-describedby')).toBeTruthy();
+
+      const user = userEvent.setup();
+      await user.click(button);
+      await user.keyboard('{F9}');
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      expect(vi.mocked(fetch).mock.calls.filter((c) => String(c[0]).includes('/recalculate'))).toHaveLength(0);
+    },
+  );
+
+  it('цей аркуш у Draft, сусідній поданий - кнопка активна (контроль)', async () => {
+    render1({ S1: 'Draft', S2: 'Submitted' }, 'Draft');
+
+    const button = await screen.findByRole('button', { name: /recalculate/i });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(button.getAttribute('aria-disabled')).not.toBe('true');
+  });
 });
