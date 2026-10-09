@@ -87,6 +87,13 @@ internal static class DeployArguments
             result.Add(new("SqlPassword", state.SqlLoginPassword));
         }
 
+        // ⛔ L10-04, D-333: sqlcmd скрипта довіряє сертифікату SQL (-C) лише за тим самим
+        // свідомим вибором, що й рядок підключення служби.
+        if (state.TrustSqlServerCertificate)
+        {
+            result.Add(new("TrustServerCertificate", null));
+        }
+
         return result;
     }
 
@@ -102,8 +109,10 @@ internal static class DeployArguments
     /// вибір із попередженням на кроці бази даних. Ключ служби з рядком підключення чи
     /// <c>ECR_Secrets__*</c> у Environment закриває deploy-ecr.ps1 (<c>Protect-ServiceRegistryKey</c>,
     /// S2-01) — і для gMSA, не лише з паролем.
-    /// <c>Encrypt=Mandatory</c> — явно (D-282); <c>TrustServerCertificate</c> лишився як
-    /// був: прибрати його = зламати установки на самопідписаному сертифікаті SQL.
+    /// <c>Encrypt=Mandatory</c> — явно (D-282). <c>TrustServerCertificate</c> — за прапорцем
+    /// майстра (D-333, HU-12 R3 = A), типово <c>False</c>: сервер автентифікується за
+    /// сертифікатом. <c>True</c> — лише свідомий вибір із попередженням на кроках бази й огляду
+    /// (самопідписаний сертифікат SQL).
     /// </remarks>
     internal static SecureString BuildConnectionString(WizardState state)
     {
@@ -124,7 +133,7 @@ internal static class DeployArguments
         }
 
         builder["Encrypt"] = "Mandatory";
-        builder["TrustServerCertificate"] = "True";
+        builder["TrustServerCertificate"] = state.TrustSqlServerCertificate ? "True" : "False";
         return ToSecure(builder.ConnectionString);
     }
 
