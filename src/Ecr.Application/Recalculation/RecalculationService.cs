@@ -925,11 +925,20 @@ public sealed class RecalculationService(
     ///
     /// ⚠ Не взято вчасно — <c>ECR-DOC-4091</c> з порту: задача падає з причиною,
     /// а не пише повз блокування.
+    ///
+    /// ⛔ X6-02: чекати (до 30 с) дозволено лише ПЕРШИЙ аркуш, поки прогін ще не
+    /// тримає жодного. Наступні — без черги (<see cref="ISheetEditGate.EnterEditNoWaitAsync"/>):
+    /// черга FIFO, і прогін, що чекав аркуш N, тримаючи S на аркушах 1…N-1, ставив
+    /// за собою подання тих аркушів, а за ними — автозбереження всіх, хто їх правив
+    /// (аж до 409 «аркуш подається»). Відмова відкочує транзакцію запису й звільняє
+    /// все взяте; фонова задача повторює прогін пізніше (<c>FormulaRecalculationJob</c>
+    /// відкладає себе, <c>RecalculationJob</c> — ретрай).
     /// </remarks>
     private async Task<IReadOnlySet<int>> EnterSheetsAsync(
         long documentId, PeriodKey periodKey, IEnumerable<int> sheetDefIds, int? heldSheetDefId, CancellationToken ct)
     {
         var writable = new HashSet<int>();
+        var holdsAny = false;
 
         foreach (var sheetDefId in sheetDefIds.Distinct().Order())
         {
@@ -942,9 +951,10 @@ public sealed class RecalculationService(
                 continue;
             }
 
-            var status = await sheetGate
-                .EnterEditAsync(documentId, sheetDefId, periodKey, ct)
-                .ConfigureAwait(false);
+            var status = holdsAny
+                ? await sheetGate.EnterEditNoWaitAsync(documentId, sheetDefId, periodKey, ct).ConfigureAwait(false)
+                : await sheetGate.EnterEditAsync(documentId, sheetDefId, periodKey, ct).ConfigureAwait(false);
+            holdsAny = true;
 
             if (status is not (Domain.Enums.DocumentStatus.Submitted or Domain.Enums.DocumentStatus.Approved))
             {

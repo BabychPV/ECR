@@ -58,6 +58,12 @@ public sealed partial class PatchCellsWorkbookTests
             return inner.EnterEditAsync(documentId, sheetDefId, periodKey, ct);
         }
 
+        public Task<DocumentStatus> EnterEditNoWaitAsync(long documentId, int sheetDefId, PeriodKey periodKey, CancellationToken ct)
+        {
+            Calls.Add("sheet:S");
+            return inner.EnterEditNoWaitAsync(documentId, sheetDefId, periodKey, ct);
+        }
+
         public Task EnterSubmitAsync(long documentId, int sheetDefId, PeriodKey periodKey, CancellationToken ct)
         {
             Calls.Add("sheet:X");

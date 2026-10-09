@@ -31,6 +31,12 @@ export interface EcrProblem {
 /** Ключ минущої відмови «дані зайняті» (`LockWaitGuard.MessageKey` на сервері). */
 export const LockTimeoutMessageKey = 'err.ECR-DOC-4091.lockTimeout';
 
+/**
+ * Ключ відмови «аркуш зараз подається» (`SheetEditGate.Busy`, спільне блокування
+ * не дочекалось подання цього аркуша).
+ */
+export const SheetBeingSubmittedMessageKey = 'err.ECR-DOC-4091.sheetBeingSubmitted';
+
 /** Виняток клієнта API. */
 export class EcrApiError extends Error {
   constructor(readonly problem: EcrProblem) {
@@ -55,11 +61,18 @@ export class EcrApiError extends Error {
    * ⚠ Саме за `messageKey`, а не за всім кодом: той самий `ECR-DOC-4091` несе й
    * «структуру змінено» (`structureChanged`), де повтор того самого запиту
    * нічого не вилікує.
+   *
+   * ⛔ X6-02: `sheetBeingSubmitted` — теж минуще. Збереження прочекало (до 30 с)
+   * подання аркуша й нічого не записало; утримати правки до ручного повтору
+   * означало б, що вони не доїдуть самі, навіть коли подання впало. Подання
+   * пройшло — повтор дістане `ECR-DOC-0409`/`403`, і тоді утримання справедливе.
    */
   get isTransientBusy(): boolean {
+    const key = this.problem.extensions2?.['messageKey'];
+
     return (
       this.problem.errorCode === 'ECR-DOC-4091' &&
-      this.problem.extensions2?.['messageKey'] === LockTimeoutMessageKey
+      (key === LockTimeoutMessageKey || key === SheetBeingSubmittedMessageKey)
     );
   }
 

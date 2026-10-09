@@ -985,6 +985,9 @@ public sealed partial class PatchCellsWorkbookTests(SqlServerFixture sql) : IDis
         public Task<DocumentStatus> EnterEditAsync(long documentId, int sheetDefId, PeriodKey periodKey, CancellationToken ct)
             => inner.EnterEditAsync(documentId, sheetDefId, periodKey, ct);
 
+        public Task<DocumentStatus> EnterEditNoWaitAsync(long documentId, int sheetDefId, PeriodKey periodKey, CancellationToken ct)
+            => inner.EnterEditNoWaitAsync(documentId, sheetDefId, periodKey, ct);
+
         public async Task EnterSubmitAsync(long documentId, int sheetDefId, PeriodKey periodKey, CancellationToken ct)
         {
             await beforeSubmit();

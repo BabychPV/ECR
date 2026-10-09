@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.Json;
+using Ecr.Application.Errors;
 using Ecr.Application.Integration;
 using Ecr.Application.Ports;
 using Ecr.Application.Recalculation;
@@ -27,6 +28,9 @@ namespace Ecr.Infrastructure.Jobs;
 /// </remarks>
 public sealed class FormulaRecalculationJob(RecalculationService recalculation, EcrDbContext db) : IFormulaRecalculationJob
 {
+    /// <summary>Ключ каталогу відмови спільного блокування аркуша (<c>SheetEditGate.Busy</c>).</summary>
+    private const string SheetBeingSubmittedKey = "err.ECR-DOC-4091.sheetBeingSubmitted";
+
     /// <summary>Налаштування розбору завдання; спільні на всі виклики.</summary>
     private static readonly JsonSerializerOptions PayloadOptions = new(JsonSerializerDefaults.Web);
 
@@ -72,9 +76,21 @@ public sealed class FormulaRecalculationJob(RecalculationService recalculation, 
         await using var documentLock =
             await RecalculationDocumentLock.AcquireAsync(db, documentId, busyWait, ct).ConfigureAwait(false);
 
-        var written = await recalculation
-            .RecalculateAsync(request.TableInstanceId, dirty, ct)
-            .ConfigureAwait(false);
+        int written;
+        try
+        {
+            written = await recalculation
+                .RecalculateAsync(request.TableInstanceId, dirty, ct)
+                .ConfigureAwait(false);
+        }
+        catch (ConcurrencyConflictException busy) when (IsSheetBeingSubmitted(busy))
+        {
+            // ⛔ X6-02: аркуш цього прогону подається (чи подання вже в черзі), а прогін
+            // інших аркушів у черзі за ним не стоїть (`EnterEditNoWaitAsync`). Це не провал
+            // і не ретрай (спроби 30/60/120 с вичерпались би за годину дедлайну): транзакція
+            // відкочена, нічого не записано — задача повертається в чергу, не рахуючи спроби.
+            throw new JobDeferredException(RecalculationDocumentLock.DeferDelay, busy.Message);
+        }
 
         await progress
             .ReportKeyAsync(
@@ -87,6 +103,15 @@ public sealed class FormulaRecalculationJob(RecalculationService recalculation, 
                 ct)
             .ConfigureAwait(false);
     }
+
+    /// <summary>Відмова «аркуш подається» (<c>ECR-DOC-4091</c>, ключ <c>sheetBeingSubmitted</c>) — минає сама.</summary>
+    /// <remarks>
+    /// ⚠ За кодом і ключем каталогу, не за текстом: той самий <c>ECR-DOC-4091</c> несе й
+    /// «структуру змінено» (<c>structureChanged</c>) — це вже не черга, а інша версія шаблону.
+    /// </remarks>
+    private static bool IsSheetBeingSubmitted(ConcurrencyConflictException ex)
+        => ex.ErrorCode == Domain.Errors.ErrorCodes.SheetBusy
+           && ex.Details?.GetValueOrDefault("messageKey") is SheetBeingSubmittedKey;
 
     /// <summary>Документ екземпляра таблиці; <c>0</c> — екземпляра немає.</summary>
     /// <remarks>

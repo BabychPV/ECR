@@ -991,13 +991,20 @@ public sealed partial class RecalculationJob(
             throw StateChanged(guards.Count > 0 ? guards[0].DocumentId : 0, period, sheetDefId: null);
         }
 
+        // ⛔ X6-02: чекати дозволено лише перший аркуш — поки нічого не тримаємо. Далі без
+        // черги: інакше, чекаючи аркуш N із S на попередніх, перемикання ставило б за собою
+        // подання тих аркушів і автозбереження їхніх редакторів. Відмова (`ECR-DOC-4091`)
+        // відкочує перемикання, як і `recalcStateChanged`, а ретрай задачі повторює прогін.
+        var holdsAny = false;
+
         foreach (var guard in guards.OrderBy(g => g.DocumentId))
         {
             foreach (var sheetDefId in guard.Sheets)
             {
                 var status = sheetGate is not null
-                    ? await sheetGate
-                        .EnterEditAsync(guard.DocumentId, sheetDefId, new PeriodKey(period), ct)
+                    ? await (holdsAny
+                            ? sheetGate.EnterEditNoWaitAsync(guard.DocumentId, sheetDefId, new PeriodKey(period), ct)
+                            : sheetGate.EnterEditAsync(guard.DocumentId, sheetDefId, new PeriodKey(period), ct))
                         .ConfigureAwait(false)
                     : await db.ApprovalStates
                         .AsNoTracking()
@@ -1005,6 +1012,7 @@ public sealed partial class RecalculationJob(
                         .Select(a => (Domain.Enums.DocumentStatus?)a.Status)
                         .FirstOrDefaultAsync(ct)
                         .ConfigureAwait(false) ?? Domain.Enums.DocumentStatus.Draft;
+                holdsAny = true;
 
                 if (status is Domain.Enums.DocumentStatus.Submitted or Domain.Enums.DocumentStatus.Approved)
                 {

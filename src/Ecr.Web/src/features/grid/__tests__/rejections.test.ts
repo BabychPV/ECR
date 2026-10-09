@@ -60,6 +60,16 @@ describe('rejectionMarksOf — які відмови тримають правк
     ).toEqual([]);
   });
 
+  it('X6-02: 409 ECR-DOC-4091 sheetBeingSubmitted НЕ тримає — подання аркуша минає само', () => {
+    // ⛔ Мутація: прибрати `SheetBeingSubmittedMessageKey` з `isTransientBusy` — тримається весь пакет.
+    expect(
+      rejectionMarksOf(
+        problem(409, 'ECR-DOC-4091', { messageKey: 'err.ECR-DOC-4091.sheetBeingSubmitted' }),
+        [bad, good],
+      ),
+    ).toEqual([]);
+  });
+
   it('AN-123: інші 4091 (структуру змінено) і далі тримають — повтор того самого не вилікує', () => {
     expect(
       rejectionMarksOf(problem(409, 'ECR-DOC-4091', { messageKey: 'err.ECR-DOC-4091.structureChanged' }), [bad]),

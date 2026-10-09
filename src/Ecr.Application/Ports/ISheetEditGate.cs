@@ -47,6 +47,27 @@ public interface ISheetEditGate
         long documentId, int sheetDefId, PeriodKey periodKey, CancellationToken ct);
 
     /// <summary>
+    /// Те саме спільне блокування, що й <see cref="EnterEditAsync"/>, але БЕЗ черги:
+    /// не можна взяти одразу (аркуш подається або подання вже чекає в черзі) —
+    /// <c>ConcurrencyConflictException</c> <c>ECR-DOC-4091</c> негайно.
+    /// </summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="sheetDefId">Аркуш.</param>
+    /// <param name="periodKey">Період.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Стан аркуша, прочитаний після того, як блокування взято.</returns>
+    /// <remarks>
+    /// ⛔ X6-02: для багатоаркушевого писаря, що ВЖЕ тримає спільні блокування
+    /// інших аркушів. Черга <c>sp_getapplock</c> — FIFO: чекаючи наступний аркуш
+    /// (до 30 с) і тримаючи попередні, він ставив у чергу за собою подання тих
+    /// аркушів, а за поданнями — автозбереження всіх, хто їх правив, хоча з
+    /// аркушем, на який він чекав, вони нічого спільного не мали. Відмова
+    /// відкочує транзакцію писаря — він звільняє все й повторює пізніше.
+    /// </remarks>
+    public Task<DocumentStatus> EnterEditNoWaitAsync(
+        long documentId, int sheetDefId, PeriodKey periodKey, CancellationToken ct);
+
+    /// <summary>
     /// Виняткове блокування під подання аркуша: чекає, доки зафіксуються правки,
     /// що вже пишуть, і не пускає нових до коміту подання.
     /// </summary>
