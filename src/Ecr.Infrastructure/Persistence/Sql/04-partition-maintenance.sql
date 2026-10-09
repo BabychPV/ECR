@@ -12,36 +12,114 @@ GO
 -- src/Ecr.Infrastructure/Persistence/Sql/04-partition-maintenance.sql
 -- Працює НА ВИПЕРЕДЖЕННЯ: SPLIT порожньої останньої партиції — операція
 -- метаданих; SPLIT непорожньої переміщує дані з блокуванням.
+--
+-- ⛔ U1-02 (аудит 09.10c). SPLIT `pf_ByPeriodKey` бере Sch-M на КОЖНУ таблицю
+--    схеми `ps_ByPeriodKey` (doc.CellValue/TableRow/TableInstance, calc.*,
+--    ext.RowWindowValue). Sch-M несумісне навіть із Sch-S читачів під RCSI, і
+--    запит на нього стає в чергу за найдовшим читачем (нічні перевірки о 02:15,
+--    довгий звіт SSRS), а ЗА НИМ у черзі — усі нові запити до цих таблиць.
+--    Без межі очікування (дефолт `LOCK_TIMEOUT = -1`) черга тримала б
+--    користувачів стільки, скільки триває найдовший читач.
+--
+-- ⚠ Тому кожна спроба SPLIT чекає не довше @LockTimeoutMs (за замовчуванням
+--    5 с — менше за 8 с, після яких PATCH комірки віддає 409, N-3), а 1222
+--    (вичерпано очікування) або 1205 (дедлок) — не провал, а пауза
+--    @RetryDelaySeconds і нова спроба, до @MaxAttempts разів. Між спробами
+--    Sch-M не запитується, тож користувачі проходять. Інша помилка — одразу.
+--
+-- ⚠ LOCK_TIMEOUT ставиться в ДИНАМІЧНОМУ пакеті разом із самим SPLIT: так він
+--    діє рівно на DDL і не змінює сесію викликача (Agent, DBA вручну).
+--
+-- ⚠ Слід — `itg.MaintenanceRun` і на успіх (`Succeeded`, скільки меж додано і
+--    скільки було повторів), і на провал (`Failed` з номером помилки), після
+--    чого помилка йде далі (крок Agent — `Failed`). Раніше рядок писався лише на
+--    успіх і зі статусом `Completed`, якого зведення збоїв `NotificationJob`
+--    (`Status != "Succeeded"`) не відрізняло від провалу.
+--
+-- ⚠ @Today — для тестів і ручного запуску «на дату»; NULL = поточна дата UTC
+--    (як і в `usp_EnsureAuditPartitions`, якій він передається далі).
 CREATE OR ALTER PROCEDURE arc.usp_EnsurePartitions
-    @MonthsAhead int = 6
+    @MonthsAhead       int  = 6,
+    @Today             date = NULL,
+    @LockTimeoutMs     int  = 5000,
+    @MaxAttempts       int  = 10,
+    @RetryDelaySeconds int  = 60
 AS
 BEGIN
     SET NOCOUNT ON;
-    DECLARE @d date = DATEADD(MONTH, 1, GETUTCDATE());
-    DECLARE @i int = 0, @key int, @sql nvarchar(400);
 
-    WHILE @i < @MonthsAhead
-    BEGIN
-        SET @key = YEAR(@d) * 100 + MONTH(@d);
+    IF @LockTimeoutMs IS NULL OR @LockTimeoutMs < 1
+       OR @MaxAttempts IS NULL OR @MaxAttempts < 1
+       OR @RetryDelaySeconds IS NULL OR @RetryDelaySeconds < 0 OR @RetryDelaySeconds > 3600
+        THROW 50017, N'@LockTimeoutMs і @MaxAttempts мають бути додатними, @RetryDelaySeconds — від 0 до 3600.', 1;
 
-        IF NOT EXISTS (SELECT 1 FROM sys.partition_range_values rv
-                       JOIN sys.partition_functions pf ON pf.function_id = rv.function_id
-                       WHERE pf.name = N'pf_ByPeriodKey' AND CAST(rv.value AS int) = @key)
+    DECLARE @started datetime2(3) = SYSUTCDATETIME();
+    DECLARE @d date = DATEADD(MONTH, 1, COALESCE(@Today, CAST(GETUTCDATE() AS date)));
+    DECLARE @i int = 0, @key int, @sql nvarchar(600);
+    DECLARE @attempt int, @done bit, @added int = 0, @retries int = 0;
+    DECLARE @delay char(8) =
+        CONVERT(char(8), DATEADD(SECOND, @RetryDelaySeconds, CAST('00:00:00' AS time(0))), 108);
+
+    BEGIN TRY
+        WHILE @i < @MonthsAhead
         BEGIN
-            ALTER PARTITION SCHEME ps_ByPeriodKey NEXT USED [DATA_HOT];
-            SET @sql = N'ALTER PARTITION FUNCTION pf_ByPeriodKey() SPLIT RANGE (' + CAST(@key AS nvarchar(10)) + N');';
-            EXEC sp_executesql @sql;
+            SET @key = YEAR(@d) * 100 + MONTH(@d);
+
+            IF NOT EXISTS (SELECT 1 FROM sys.partition_range_values rv
+                           JOIN sys.partition_functions pf ON pf.function_id = rv.function_id
+                           WHERE pf.name = N'pf_ByPeriodKey' AND CAST(rv.value AS int) = @key)
+            BEGIN
+                SET @sql = N'SET LOCK_TIMEOUT ' + CAST(@LockTimeoutMs AS nvarchar(10)) + N'; '
+                         + N'ALTER PARTITION SCHEME ps_ByPeriodKey NEXT USED [DATA_HOT]; '
+                         + N'ALTER PARTITION FUNCTION pf_ByPeriodKey() SPLIT RANGE ('
+                         + CAST(@key AS nvarchar(10)) + N');';
+                SET @attempt = 1;
+                SET @done = 0;
+
+                WHILE @done = 0
+                BEGIN
+                    BEGIN TRY
+                        EXEC sp_executesql @sql;
+                        SET @done = 1;
+                        SET @added = @added + 1;
+                    END TRY
+                    BEGIN CATCH
+                        IF ERROR_NUMBER() NOT IN (1222, 1205) OR @attempt >= @MaxAttempts
+                            THROW;
+
+                        SET @attempt = @attempt + 1;
+                        SET @retries = @retries + 1;
+                        IF @RetryDelaySeconds > 0
+                            WAITFOR DELAY @delay;
+                    END CATCH
+                END
+            END
+
+            SET @d = DATEADD(MONTH, 1, @d);
+            SET @i = @i + 1;
         END
 
-        SET @d = DATEADD(MONTH, 1, @d);
-        SET @i = @i + 1;
-    END
+        -- Аудит: межі pf_AuditByMonth - на 12 місяців уперед (окрема функція, окрема процедура).
+        EXEC arc.usp_EnsureAuditPartitions @MonthsAhead = 12, @Today = @Today;
 
-    -- Аудит: межі pf_AuditByMonth - на 12 місяців уперед (окрема функція, окрема процедура).
-    EXEC arc.usp_EnsureAuditPartitions @MonthsAhead = 12;
+        INSERT INTO itg.MaintenanceRun (JobCode, StartedAt, FinishedAt, Status, DetailsJson)
+        VALUES (N'EnsurePartitions', @started, SYSUTCDATETIME(), N'Succeeded',
+                N'{"added":' + CAST(@added AS nvarchar(10))
+                + N',"retries":' + CAST(@retries AS nvarchar(10)) + N'}');
+    END TRY
+    BEGIN CATCH
+        IF XACT_STATE() <> 0 ROLLBACK;
 
-    INSERT INTO itg.MaintenanceRun (JobCode, StartedAt, FinishedAt, Status)
-    VALUES (N'EnsurePartitions', SYSUTCDATETIME(), SYSUTCDATETIME(), N'Completed');
+        INSERT INTO itg.MaintenanceRun (JobCode, StartedAt, FinishedAt, Status, DetailsJson)
+        VALUES (N'EnsurePartitions', @started, SYSUTCDATETIME(), N'Failed',
+                N'{"error":' + CAST(ERROR_NUMBER() AS nvarchar(10))
+                + N',"key":' + ISNULL(CAST(@key AS nvarchar(10)), N'null')
+                + N',"attempts":' + ISNULL(CAST(@attempt AS nvarchar(10)), N'0')
+                + N',"added":' + CAST(@added AS nvarchar(10))
+                + N',"message":"' + STRING_ESCAPE(LEFT(ERROR_MESSAGE(), 500), N'json') + N'"}');
+
+        THROW;
+    END CATCH
 END;
 GO
 

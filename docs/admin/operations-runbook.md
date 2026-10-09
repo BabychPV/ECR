@@ -393,7 +393,7 @@ Server Agent немає — завдання обслуговування НЕ �
 
 | Задача Agent | Коли | Що робить |
 |---|---|---|
-| `ECR: Partitions ahead` | 1-го числа, 02:40 | `arc.usp_EnsurePartitions @MonthsAhead = 6`: межі `pf_ByPeriodKey` на 6 міс. уперед; усередині — `arc.usp_EnsureAuditPartitions @MonthsAhead = 12` |
+| `ECR: Partitions ahead` | 1-го числа, 02:40 | `arc.usp_EnsurePartitions @MonthsAhead = 6`: межі `pf_ByPeriodKey` на 6 міс. уперед; усередині — `arc.usp_EnsureAuditPartitions @MonthsAhead = 12`. Кожен `SPLIT` чекає Sch-M не довше `@LockTimeoutMs` (5 с), після 1222/1205 — пауза `@RetryDelaySeconds` (60 с) і повтор, до `@MaxAttempts` (10) разів; між спробами запити користувачів не стоять у черзі за Sch-M (аудит 09.10c, U1-02). Результат — рядок `itg.MaintenanceRun` `EnsurePartitions`: `Succeeded` (`added`, `retries`) або `Failed` (номер помилки; потрапляє у зведення збоїв) |
 | `ECR: Physical checks` | щодня 03:10 | недовірені/вимкнені FK (50041), невирівняні індекси (50042) |
 
 ⚠ **потрібне рішення замовника:** вікна обслуговування. Код їх не знає. Розклади
