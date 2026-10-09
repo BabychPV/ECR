@@ -50,6 +50,19 @@ internal sealed class WizardState
     // Крок 1 — режим.
     public WizardMode Mode { get; set; } = WizardMode.FirstDeployment;
 
+    /// <summary>
+    /// Режим, обраний на кроці 1 за замовчуванням.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ R5-U1/U1-03: служба EcrApi вже зареєстрована на цьому сервері — типово «Update». Раніше перемикач
+    /// завжди стояв на «First deployment», а цей режим на живій базі обходив обов'язкову перевірку копії
+    /// (S2-04/AN-117); остаточний запобіжник — у <c>deploy-ecr.ps1</c> (база з міграціями → відмова).
+    /// </remarks>
+    /// <param name="apiServiceInstalled">Чи є ключ служби <c>EcrApi</c> у реєстрі.</param>
+    /// <returns>Типовий режим кроку 1.</returns>
+    public static WizardMode DefaultMode(bool apiServiceInstalled) =>
+        apiServiceInstalled ? WizardMode.Update : WizardMode.FirstDeployment;
+
     // Крок 2 — обліковий запис і мережа.
     // L10-03, D-282: типово gMSA, як і перемикач на кроці 2.
     public ServiceAccountMode ServiceAccountMode { get; set; } = ServiceAccountMode.Gmsa;

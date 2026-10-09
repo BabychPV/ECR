@@ -100,6 +100,17 @@ internal sealed class DeployRunner
         return key is not null;
     }
 
+    /// <summary>
+    /// Чи зареєстровано службу EcrApi — тим самим способом, що й <see cref="IsWorkerServiceInstalled"/>.
+    /// R5-U1/U1-03: від цього залежить типовий режим кроку 1 (<c>WizardState.DefaultMode</c>).
+    /// </summary>
+    internal static bool IsApiServiceInstalled()
+    {
+        using var key = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(
+            @"SYSTEM\CurrentControlSet\Services\EcrApi");
+        return key is not null;
+    }
+
     private static string FormatInformation(InformationRecord record)
     {
         // Write-Host у скрипті потрапляє сюди як HostInformationMessage —

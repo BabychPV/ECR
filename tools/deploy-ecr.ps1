@@ -305,6 +305,11 @@
     Явний прапорець, а не автовизначення за станом бази: судження про
     "перше це чи ні" належить тому, хто розгортає, а не евристиці, яка
     вгадує за відсутністю таблиць.
+    ⛔ R5-U1/U1-03: але хибний прапорець не проходить — база з хоч однією
+    застосованою міграцією EF (__EFMigrationsHistory) зупиняє крок 2 до будь-якої
+    зміни: -FirstDeployment обходить перевірку копії, а на живій базі це
+    оновлення без копії. Повтор першого розгортання, що впало після кроку 2, —
+    з -SkipSchema.
 
 .PARAMETER ReadyTimeoutSeconds
     Скільки секунд кроку 7 чекати, поки /health/ready стане Healthy або
@@ -1034,6 +1039,29 @@ function Stop-EcrServicesForSchema {
     return $stopped.ToArray()
 }
 
+# ⛔ R5-U1/U1-03 (аудит 2026-10-09): -FirstDeployment пропускає перевірку копії (S2-04/AN-117) і
+# перевидаляє завдання Agent (14-agent-jobs.sql) — це режим ПОРОЖНЬОЇ бази. Автовизначення режиму
+# свідомо немає (.PARAMETER FirstDeployment), але й хибний прапорець на живій базі не проходить:
+# база з хоч однією застосованою міграцією EF — відмова до будь-якої зміни. Чиста функція: число
+# рядків __EFMigrationsHistory (текст із sqlcmd) → текст відмови або $null. Нечислова відповідь —
+# теж відмова (не знаємо — не обходимо копію).
+function Get-FirstDeploymentProblem {
+    param(
+        [AllowNull()] [AllowEmptyString()] [string] $AppliedCount,
+        [Parameter(Mandatory)] [string] $Database
+    )
+
+    $count = 0
+    if (-not [int]::TryParse(([string] $AppliedCount).Trim(), [System.Globalization.NumberStyles]::None,
+            [System.Globalization.CultureInfo]::InvariantCulture, [ref] $count)) {
+        return "Не вдалося визначити, чи база $Database порожня (відповідь '$AppliedCount'). -FirstDeployment — лише для порожньої бази."
+    }
+    if ($count -eq 0) { return $null }
+    return ("-FirstDeployment, але база $Database уже має $count застосованих міграцій — це ОНОВЛЕННЯ. Нічого не змінено. " +
+        "Запустіть без -FirstDeployment (тоді перевіряється свіжа копія бази, S2-04), у майстрі — режим «Update». " +
+        "Повтор першого розгортання, що впало ПІСЛЯ кроку 2 (схему вже накочено), — з -SkipSchema.")
+}
+
 # ⛔ R5-U1/U1-02 (аудит 2026-10-09): Stop-EcrServicesForSchema зупиняє служби лише
 # ЦІЄЇ машини. За D-32 (≥2 вузли) EcrApi/EcrWorker інших вузлів працювали б далі
 # старою версією на новій схемі (DROP TYPE TVP, ROLLBACK IMMEDIATE, задачі черги
@@ -1602,6 +1630,19 @@ END
 
         # ⛔ S2-04 (HU-13 Q3): свіжа копія — ДО зупинки служб (немає копії — немає й простою).
         if ($FirstDeployment) {
+            # ⛔ R5-U1/U1-03: -FirstDeployment обходить перевірку копії (і перевидаляє завдання Agent) — лише
+            # на базі без жодної застосованої міграції. Майстер типово стояв на «First deployment», тож
+            # оновлення живої бази цим режимом ішло без копії.
+            $appliedRows = Invoke-DeployQuery -TargetDb $Database -Query (
+                "SET NOCOUNT ON; IF OBJECT_ID(N'dbo.__EFMigrationsHistory', N'U') IS NULL SELECT 0 " +
+                "ELSE SELECT COUNT(*) FROM dbo.__EFMigrationsHistory;")
+            if ($null -eq $appliedRows) {
+                Write-Host "  Що база порожня (-FirstDeployment), буде перевірено запитом до __EFMigrationsHistory (-WhatIf: не виконується)." -ForegroundColor DarkGray
+            }
+            else {
+                $firstProblem = Get-FirstDeploymentProblem -AppliedCount ([string] (@($appliedRows) | Select-Object -First 1)) -Database $Database
+                if ($firstProblem) { throw $firstProblem }
+            }
             Write-Host "  Копію бази не перевіряю: -FirstDeployment (порожня база)." -ForegroundColor DarkGray
         }
         elseif ($SkipBackupCheck) {

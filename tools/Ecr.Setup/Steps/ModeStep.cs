@@ -36,11 +36,16 @@ internal sealed class ModeStep : IWizardStep
             AutoSize = true,
         };
 
+        // ⛔ R5-U1/U1-03: служба EcrApi вже є на сервері — типово «Update», а не «First deployment»
+        // (той режим обходить перевірку копії бази; deploy-ecr.ps1 на базі з міграціями однаково відмовить).
+        var installed = DeployRunner.IsApiServiceInstalled();
+        var defaultMode = WizardState.DefaultMode(installed);
+
         _firstDeploymentOption = new RadioButton
         {
             Text = "First deployment",
             AutoSize = true,
-            Checked = true,
+            Checked = defaultMode == WizardMode.FirstDeployment,
             Margin = new Padding(4, 10, 4, 0),
         };
         _firstDeploymentOption.Font = new Font(_firstDeploymentOption.Font, FontStyle.Bold);
@@ -49,6 +54,7 @@ internal sealed class ModeStep : IWizardStep
         {
             Text = "Update an existing installation",
             AutoSize = true,
+            Checked = defaultMode == WizardMode.Update,
             Margin = new Padding(4, 14, 4, 0),
         };
         _updateOption.Font = new Font(_updateOption.Font, FontStyle.Bold);
@@ -73,6 +79,18 @@ internal sealed class ModeStep : IWizardStep
         layout.Controls.Add(firstDeploymentSub);
         layout.Controls.Add(_updateOption);
         layout.Controls.Add(updateSub);
+
+        if (installed)
+        {
+            layout.Controls.Add(new Label
+            {
+                Text = "ECR is already installed on this server — \"Update\" is selected. " +
+                       "\"First deployment\" is only for an empty database.",
+                AutoSize = true,
+                ForeColor = SystemColors.HotTrack,
+                Margin = new Padding(4, 14, 0, 0),
+            });
+        }
 
         group.Controls.Add(layout);
         return group;
