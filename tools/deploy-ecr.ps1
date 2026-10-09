@@ -117,6 +117,10 @@
     DDL-прав, MSI і далі не торкається бази — це стосується лише
     ОРКЕСТРАТОРА, керованого людиною з доступом до БД. Без прапорця —
     попередня поведінка: відсутня база зупиняє скрипт з поясненням.
+    ⛔ R5-U1/U1-04: діє лише разом із -FirstDeployment. При оновленні відсутня
+    база — це хибне чи типове ім'я -Database, а не «ще не створена»: порожня
+    база з переведеною на неї службою — простій. Без -FirstDeployment
+    прапорець нічого не створює (попередження), відсутня база — відмова.
 
 .PARAMETER ServiceAccount
     `DOMAIN\ecr-svc$` (gMSA, рекомендовано — без пароля) або `DOMAIN\user`.
@@ -1598,7 +1602,15 @@ try {
         if ($detectedEdition.Stop) { throw $detectedEdition.Stop }
     }
 
-    if ($CreateDatabaseIfMissing) {
+    # ⛔ R5-U1/U1-04 (аудит 2026-10-09): створювати базу — лише при ПЕРШОМУ розгортанні. Мотив Q-232
+    # («не вимагати окремого кроку DBA») стосується саме його; при оновленні відсутня база означає хибне
+    # чи типове ім'я -Database, і створена порожня база з переведеною на неї службою — простій із
+    # «Готово» в кінці. Без -FirstDeployment -CreateDatabaseIfMissing нічого не створює.
+    if ($CreateDatabaseIfMissing -and -not $FirstDeployment) {
+        Write-Host ("  -CreateDatabaseIfMissing без -FirstDeployment не діє: оновлення ніколи не створює базу " +
+            "(відсутня база = хибне ім'я -Database).") -ForegroundColor Yellow
+    }
+    if ($CreateDatabaseIfMissing -and $FirstDeployment) {
         # ⛔ Q-232 (директива людини, 2026-09-11): раніше відсутня база
         # ЗАВЖДИ зупиняла скрипт — адміністратор БД мав створити її
         # заздалегідь (`docs/build/11-install-guide.md` §0). Людина, що
@@ -1618,7 +1630,10 @@ END
 "@
     }
     else {
-        Invoke-DeploySql -TargetDb 'master' -Query "IF DB_ID('$Database') IS NULL RAISERROR('database missing', 16, 1);"
+        # Текст — ASCII: sqlcmd друкує його як є, а SqlPreflight майстра шукає 'database missing'.
+        Invoke-DeploySql -TargetDb 'master' -Query ("IF DB_ID('$Database') IS NULL RAISERROR('database missing: " +
+            "$($Database.Replace("'", "''").Replace('%', '%%')) does not exist on this instance. An update never creates it - check -Database " +
+            "(first deployment: -FirstDeployment -CreateDatabaseIfMissing).', 16, 1);")
     }
 
     # ---------------------------------------------------------------------

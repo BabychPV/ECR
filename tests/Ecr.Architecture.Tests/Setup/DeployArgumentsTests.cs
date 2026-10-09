@@ -74,9 +74,35 @@ public sealed class DeployArgumentsTests
 
         Assert.DoesNotContain("FirstDeployment", names);
         Assert.DoesNotContain("BootstrapPassword", names);
+        Assert.DoesNotContain("CreateDatabaseIfMissing", names);   // R5-U1/U1-04: оновлення базу не створює
         Assert.Equal(
             ["SkipSchema", "ServiceAccount", "ServicePassword", "SqlLogin", "SqlPassword"],
             names.SkipWhile(n => n != "SkipSchema").ToList());
+    }
+
+    /// <remarks>
+    /// R5-U1/U1-04: оновлення зі зміною схеми й позначкою «I accept the risk» на хибному/типовому імені
+    /// бази створювало порожню базу й переводило на неї службу. Мутація (CI, локально не запускалась):
+    /// повернути безумовний <c>CreateDatabaseIfMissing</c> → тест червоний.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Оновлення_не_дозволяє_скрипту_створювати_базу()
+    {
+        var state = new WizardState
+        {
+            Mode = WizardMode.Update,
+            BackupRiskAccepted = true,
+            ServiceAccountMode = ServiceAccountMode.Gmsa,
+            ServiceAccountName = @"DOMAIN\ecr-svc$",
+        };
+
+        var names = DeployArguments.Build(state).Select(a => a.Key).ToList();
+
+        Assert.DoesNotContain("CreateDatabaseIfMissing", names);
+        Assert.Contains("SkipBackupCheck", names);
+        Assert.Contains("CreateDatabaseIfMissing", DeployArguments.Build(new WizardState { Mode = WizardMode.FirstDeployment }).Select(a => a.Key));
     }
 
     [Fact]

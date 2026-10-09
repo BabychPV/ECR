@@ -123,7 +123,7 @@ internal sealed class DatabaseStep : IWizardStep
         if (!SqlPreflight.TryVerifyDatabaseExists(
                 _instanceBox!.Text.Trim(), _databaseBox!.Text.Trim(),
                 _windowsAuthOption!.Checked, _loginBox!.Text.Trim(), _sqlPasswordBox!.Text,
-                _trustCertificateCheckBox!.Checked, out error))
+                _trustCertificateCheckBox!.Checked, out var databaseMissing, out error))
         {
             // L10-04, D-333: без прапорця сертифікат SQL перевіряється — самопідписаний не пройде.
             if (!_trustCertificateCheckBox.Checked)
@@ -134,6 +134,16 @@ internal sealed class DatabaseStep : IWizardStep
                     + "\"Trust the SQL Server certificate (unsafe)\".";
             }
 
+            return false;
+        }
+
+        // ⛔ R5-U1/U1-04: оновлення потребує НАЯВНОЇ бази. Відсутня — хибне чи типове ім'я; майстер більше
+        // не передає -CreateDatabaseIfMissing для оновлення, а скрипт без -FirstDeployment базу не створює.
+        if (databaseMissing && _state.Mode == WizardMode.Update)
+        {
+            error = $"Database '{_databaseBox.Text.Trim()}' does not exist on '{_instanceBox.Text.Trim()}'. " +
+                    "An update needs the existing ECR database — check the database name " +
+                    "(\"First deployment\" creates a new one).";
             return false;
         }
 

@@ -84,6 +84,39 @@ public sealed class DeployFirstDeploymentGuardTests
         Assert.True(stop > verdict, "служби зупиняються раніше, ніж перевірено, що база порожня");
     }
 
+    /// <remarks>
+    /// R5-U1/U1-04: <c>CREATE DATABASE</c> — лише в гілці <c>-CreateDatabaseIfMissing -and $FirstDeployment</c>;
+    /// інакше відсутня база — відмова з <c>database missing</c> (той самий маркер шукає <c>SqlPreflight</c>).
+    /// Мутація (CI): повернути умову <c>if ($CreateDatabaseIfMissing)</c> → червоний.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Скрипт_створює_базу_лише_при_першому_розгортанні()
+    {
+        var script = File.ReadAllText(Path.Combine(SourceTree.Root, "tools", "deploy-ecr.ps1"));
+
+        var gate = script.IndexOf("if ($CreateDatabaseIfMissing -and $FirstDeployment) {", StringComparison.Ordinal);
+        var create = script.IndexOf("N'CREATE DATABASE '", StringComparison.Ordinal);
+        var missing = script.IndexOf("RAISERROR('database missing", StringComparison.Ordinal);
+
+        Assert.True(gate > 0, "CREATE DATABASE не обмежено -FirstDeployment");
+        Assert.True(create > gate && missing > create, "CREATE DATABASE поза гілкою першого розгортання");
+        Assert.Equal(1, CountOf(script, "N'CREATE DATABASE '"));
+        Assert.DoesNotContain("if ($CreateDatabaseIfMissing) {", script, StringComparison.Ordinal);
+    }
+
+    private static int CountOf(string text, string value)
+    {
+        var count = 0;
+        for (var i = text.IndexOf(value, StringComparison.Ordinal); i >= 0; i = text.IndexOf(value, i + value.Length, StringComparison.Ordinal))
+        {
+            count++;
+        }
+
+        return count;
+    }
+
     /// <remarks>Мутація (CI): повернути завжди <c>FirstDeployment</c> → червоний.</remarks>
     [Theory]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
