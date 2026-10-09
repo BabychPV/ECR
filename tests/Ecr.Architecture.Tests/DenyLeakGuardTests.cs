@@ -136,6 +136,8 @@ public sealed partial class DenyLeakGuardTests
             (2, "⚠ ВІДОМИЙ ВИТІК: EnforceRowCreationRules іде ДО EnsureAccessAsync (fixedRowMode, dynamicRowLimit)"),
         ["src/Ecr.Application/Documents/PatchCellsHandler.cs | деталь tableCode | table.Code"] =
             (2, "⚠ ВІДОМИЙ ВИТІК: те саме, що текст"),
+        ["src/Ecr.Adapters.Excel/ExcelImporter.cs | деталь tableCode | tableCode ?? string.Empty"] =
+            (1, "OverwriteNotConflict (AN-114): ехо рядка, який людина сама просила перезаписати (overwriteRows із запиту), а не дані бази; рядок, якого немає серед конфліктів, нічого не розкриває"),
         ["src/Ecr.Application/Documents/RecalculateDocumentHandler.cs | текст | periodKey.Value"] =
             (1, "TargetOf: ключ злиття черги з Id документа й періоду з самого запиту; ні колонки, ні значення, не потрапляє у відповідь"),
     };
