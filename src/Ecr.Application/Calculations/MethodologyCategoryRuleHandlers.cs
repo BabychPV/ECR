@@ -3,6 +3,7 @@ using System.Globalization;
 using Ecr.Application.Calculations.Dto;
 using Ecr.Application.Common;
 using Ecr.Application.Errors;
+using Ecr.Application.Expressions;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
 using Ecr.Domain.Abstractions;
@@ -177,6 +178,11 @@ public sealed class SaveMethodologyCategoryRuleHandler(
     /// <summary>Вираз мусить розбиратись діалектом Methodology і не повертати число.</summary>
     private void RequireUsable(string expression)
     {
+        // ⛔ L7-01 (AN-72): межа довжини ДО розбору — першим рядком. Колонка calc.CategoryRule.Expression
+        // довжини не обмежує, а правило (Calculation.EditRule) розбиралося в довільну довжину: гребінь із
+        // дужок доходив до обходів дерева, і процес API падав.
+        ExpressionLengthGuard.Require(expression, MethodologyFormula.MaxExpressionLength);
+
         if (string.IsNullOrWhiteSpace(expression))
         {
             throw new BusinessRuleException(
