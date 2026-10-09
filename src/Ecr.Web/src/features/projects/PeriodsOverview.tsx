@@ -4,7 +4,7 @@ import { useQueries, type UseQueryResult } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import type { PagedProjects, PeriodCalendarDto } from '@/api/types';
 import { formatCount, formatPeriodKey } from '@/shared/format';
-import { DayMs, wholeDaysUntil } from '@/shared/siteMoment';
+import { wholeDaysUntil } from '@/shared/siteMoment';
 import { DataTable, type DataTableColumn } from '@/shared/ui/DataTable';
 import { StatStrip } from '@/shared/ui/StatStrip';
 import { StatusBadge, statusKey } from '@/shared/ui/StatusBadge';
@@ -88,11 +88,9 @@ export function periodNote(
   }
 
   if (period.state === 'Scheduled') {
-    const opens = Date.parse(period.startsAt) + calendar.policy.openOffsetDays * DayMs;
-
-    return t('periods.tile.opens', {
-      date: siteDate(new Date(opens).toISOString(), zone, false) ?? '',
-    });
+    // ⚠ `startsAt` — це вже `ComputedOpenAt` (`PeriodStart + OpenOffsetDays`, `GetPeriodCalendarHandler`):
+    // зсув політики вдруге додавати не можна (N4-01).
+    return t('periods.tile.opens', { date: siteDate(period.startsAt, zone, false) ?? '' });
   }
 
   return t('periods.tile.readOnly');

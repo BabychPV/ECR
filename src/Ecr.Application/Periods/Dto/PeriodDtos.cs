@@ -15,7 +15,11 @@ namespace Ecr.Application.Periods.Dto;
 /// <param name="Year">Рік.</param>
 /// <param name="Sequence">Порядковий номер у році: <c>1…12</c> для місячних, <c>1…4</c> для квартальних.</param>
 /// <param name="State">Стан; обчислює <c>PeriodStateJob</c>, а не запит.</param>
-/// <param name="StartsAt">Початок періоду в поясі майданчика.</param>
+/// <param name="StartsAt">
+/// Момент ВІДКРИТТЯ періоду в поясі майданчика — <c>Period.ComputedOpenAt</c>
+/// (<c>PeriodStart + OpenOffsetDays</c>), а не календарний початок місяця. Зсув політики вже врахований:
+/// клієнт не має додавати <c>OpenOffsetDays</c> удруге (N4-01).
+/// </param>
 /// <param name="EndsAt">
 /// Жорстке закриття (<c>PeriodEnd + HardCloseOffsetDays</c>) у поясі
 /// майданчика, виключно: після цього моменту період <c>Closed</c>, і

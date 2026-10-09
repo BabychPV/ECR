@@ -241,6 +241,17 @@ describe('PeriodsOverview: «closes in N days» і рядок плитки', () 
     expect(daysLeft({ ...base, state: 'Scheduled' }, now)).toBeNull();
   });
 
+  it('N4-01: «opens» — це startsAt як є; openOffsetDays удруге не додається', () => {
+    const offsetCalendar = {
+      ...calendar,
+      policy: { ...policy, openOffsetDays: 5 },
+    } as unknown as PeriodCalendarDto;
+    // startsAt уже = ComputedOpenAt (PeriodStart + 5 діб): 6 жовтня, а не 11-го.
+    const scheduled = { ...base, state: 'Scheduled', startsAt: '2026-10-06T00:00:00Z' };
+
+    expect(periodNote(scheduled, offsetCalendar, siteDate, now)).toBe('opens 2026-10-06');
+  });
+
   it('пільговий строк і перевідкриття пояснені словами', () => {
     expect(periodNote({ ...base, state: 'Grace' }, calendar, siteDate, now)).toMatch(/edits are late/);
   });
