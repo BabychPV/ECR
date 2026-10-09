@@ -91,8 +91,40 @@ public sealed class DocumentDeletionStore(EcrDbContext db) : IDocumentDeletionSt
 
         // Похідні дані без зовнішнього ключа: лишити їх — означало б сиріт, що
         // вказують на неіснуючий документ.
-        await db.CalculationResults.Where(r => r.DocumentId == documentId).ExecuteDeleteAsync(ct).ConfigureAwait(false);
-        await db.CalculationInputs.Where(r => r.DocumentId == documentId).ExecuteDeleteAsync(ct).ConfigureAwait(false);
+        //
+        // ⛔ R5-Q1-03: предикат ще й за `PeriodKey`. Голий `DocumentId` — скан УСІХ партицій
+        // `calc.CalculationResult` (`IX_CalculationResult_Lookup` веде `PeriodKey`) і
+        // `calc.CalculationInput` (лише PK `(PeriodKey, Id)`) з U-блокуваннями всередині цієї
+        // транзакції, що вже тримає діапазон `ext.SourceEventMap`. Набір ключів повний за побудовою:
+        // результат і вхід пишуться в `run.PeriodKey ?? 0` (`CalculationResultStore`), а кожен
+        // рядок тримає FK на свій прогін — тож ключі всіх прогонів проєкту документа покривають
+        // усі його рядки; періоди проєкту й 0 — запас на випадок, якщо ця побудова зміниться.
+        var projectId = await db.Documents.AsNoTracking()
+            .Where(d => d.Id == documentId)
+            .Select(d => (int?)d.ProjectId)
+            .FirstOrDefaultAsync(ct).ConfigureAwait(false);
+
+        var documentKeys = new HashSet<int> { 0 };
+        if (projectId is { } project)
+        {
+            documentKeys.UnionWith(await db.CalculationRuns.AsNoTracking()
+                .Where(r => r.ProjectId == project)
+                .Select(r => r.PeriodKey ?? 0)
+                .Distinct()
+                .ToListAsync(ct).ConfigureAwait(false));
+            documentKeys.UnionWith(await db.Periods.AsNoTracking()
+                .Where(p => p.ProjectId == project)
+                .Select(p => p.PeriodKeyValue)
+                .ToListAsync(ct).ConfigureAwait(false));
+        }
+
+        var documentKeyList = documentKeys.ToList();
+        await db.CalculationResults
+            .Where(r => documentKeyList.Contains(r.PeriodKey) && r.DocumentId == documentId)
+            .ExecuteDeleteAsync(ct).ConfigureAwait(false);
+        await db.CalculationInputs
+            .Where(r => documentKeyList.Contains(r.PeriodKey) && r.DocumentId == documentId)
+            .ExecuteDeleteAsync(ct).ConfigureAwait(false);
 
         // ⛔ L10-06: прогони перерахунку САМЕ цього документа (`DocumentId`).
         // Прогони проєкту (`DocumentId = NULL`) лишаються — їх рядки цього
