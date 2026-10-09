@@ -106,8 +106,9 @@ internal static class DeployArguments
     /// ламали рядок або дописували в нього власні параметри. Builder бере значення
     /// в лапки за правилами, які розбирає й <c>SqlConnectionStringBuilder</c>.
     /// Типово — Windows/gMSA (<c>Integrated Security</c>); SQL-логін — свідомий
-    /// вибір із попередженням на кроці бази даних, пароль у реєстрі служби
-    /// закриває deploy-ecr.ps1 (<c>Protect-ServiceRegistryKey</c>).
+    /// вибір із попередженням на кроці бази даних. Ключ служби з рядком підключення чи
+    /// <c>ECR_Secrets__*</c> у Environment закриває deploy-ecr.ps1 (<c>Protect-ServiceRegistryKey</c>,
+    /// S2-01) — і для gMSA, не лише з паролем.
     /// <c>Encrypt=Mandatory</c> — явно (D-282). <c>TrustServerCertificate</c> — за прапорцем
     /// майстра (D-333, HU-12 R3 = A), типово <c>False</c>: сервер автентифікується за
     /// сертифікатом. <c>True</c> — лише свідомий вибір із попередженням на кроках бази й огляду

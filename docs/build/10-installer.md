@@ -783,10 +783,14 @@ $bp = Read-Host -AsSecureString -Prompt 'Пароль bootstrap-адмініст
 4. **Секрети служби** — `ECR_ConnectionStrings__Ecr` у реєстрі служби
    (`HKLM:\SYSTEM\CurrentControlSet\Services\EcrApi\Environment`,
    REG_MULTI_SZ), а не у файлі — секрети ніколи не потрапляють у
-   appsettings.json (D-11). ✎ L10-04 (`D-282`): якщо рядок містить пароль
-   SQL-логіна, ключі `Services\EcrApi` і `Services\EcrWorker` отримують
-   захищений ACL (лише SYSTEM і Administrators; стандартний ACL дає читання
-   `BUILTIN\Users`), а скрипт попереджає, що логін DBA дає застосунку DDL-права.
+   appsettings.json (D-11). ✎ L10-04 (`D-282`), ✎ 2026-10-09 S2-01: щойно
+   Environment служби несе секрет — рядок підключення (`ECR_ConnectionStrings__*`)
+   чи `ECR_Secrets__*` (runbook §2), — ключі `Services\EcrApi` і `Services\EcrWorker`
+   отримують захищений ACL (лише SYSTEM і Administrators; `EcrWorker` — ще
+   `ReadKey` обліковому запису служби, N5-04; стандартний ACL дає читання
+   `BUILTIN\Users`). Раніше — лише коли рядок містив пароль SQL-логіна, тож під
+   gMSA секрети PI/SMTP бачив кожен локальний користувач. Якщо рядок містить
+   пароль SQL-логіна, скрипт ще й попереджає, що логін DBA дає застосунку DDL-права.
    Майстер будує рядок `DbConnectionStringBuilder`-ом (без інтерполяції),
    типово — Windows/gMSA; SQL-логін — лише з підтвердженням на кроці бази. Без `-ConnectionString` — попередження й
    застосунок впаде при старті (Q-213, знайдено реальним прогоном).
