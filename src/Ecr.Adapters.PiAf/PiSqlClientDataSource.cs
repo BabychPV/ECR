@@ -1002,6 +1002,38 @@ public sealed partial class PiSqlClientDataSource(
     private static object? Column(Dictionary<string, object?> row, string name)
         => row.TryGetValue(name, out var value) ? value : null;
 
+    /// <summary>
+    /// L3-09: та сама політика адреси, що й при збереженні джерела
+    /// (<see cref="DataSourceEndpointPolicy.CheckSqlServerAddress"/>), — ще раз перед з'єднанням.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Як <c>SqlDataSource.RequireAllowedAddressAsync</c> (L3-05): збереження перевіряє лише НОВІ
+    /// адреси (D-245), тож джерело, збережене до появи політики, інакше ходило б службовим обліковим
+    /// записом на link-local/metadata без перевірки. Рядок перевіряється ДО підстановки пароля.
+    /// ⚠ Лише літерали й відомі metadata-імена: ім'я, що розв'язується на link-local, ловить
+    /// збереження (є `INetworkResolver`); повторного розв'язання тут немає — залишковий ризик DNS-rebinding.
+    /// </remarks>
+    private static void RequireAllowedAddress(Domain.Entities.External.DataSource source)
+    {
+        var verdict = DataSourceEndpointPolicy.CheckSqlServerAddress(source.Endpoint);
+
+        if (verdict == EndpointVerdict.Allowed)
+        {
+            return;
+        }
+
+        // ⚠ Відмова називає джерело й вердикт, а не вміст рядка з'єднання.
+        throw new BusinessRuleException(
+            SourceUnavailable,
+            $"Адресу джерела {source.Code} відхилено політикою адреси ({verdict}): збір не з'єднується.",
+            new Dictionary<string, object?>
+            {
+                // Той самий ключ, що SqlDataSource.cs: той самий факт («адресу відхилено політикою»).
+                ["messageKey"] = "err.ECR-INT-0503.endpointForbidden",
+                ["dataSource"] = source.Code,
+            });
+    }
+
     /// <summary>Відкриває з'єднання під службовим обліковим записом.</summary>
     /// <remarks>
     /// ⛔ Секрет береться <b>за іменем</b> із <c>SecretName</c> і ніколи з
@@ -1040,6 +1072,8 @@ public sealed partial class PiSqlClientDataSource(
                     ["dataSource"] = source.Code,
                 });
         }
+
+        RequireAllowedAddress(source);
 
         if (secrets.Find(source.SecretName) is { } secret)
         {
