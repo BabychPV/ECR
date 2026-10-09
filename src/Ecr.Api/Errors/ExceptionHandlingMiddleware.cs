@@ -453,6 +453,19 @@ public sealed partial class ExceptionHandlingMiddleware(
                      .Match(e.GetBaseException().Message, @"\d{4}-\d{2}-\d{2}").Value,
              }),
 
+        // ⛔ N2-05 (AN-72): два одночасні ПЕРШІ `PUT …/category-rule` однієї версії читають «правила немає»
+        // обидва й обидва додають рядок; другий відбиває лише `UQ_CategoryRule_Version`. Без арма це
+        // `DbUpdateException` у fallback — голий 500 на звичайну гонку. Конфлікт стану: 409, ключ без
+        // підстановок (повторний PUT уже перепише правило, що з'явилось).
+        Microsoft.EntityFrameworkCore.DbUpdateException e
+            when e.GetBaseException().Message.Contains("UQ_CategoryRule_Version", StringComparison.Ordinal) =>
+            (StatusCodes.Status409Conflict, "ECR-CALC-0409",
+             "Правило категорії цієї версії щойно створив хтось інший: перечитайте версію й збережіть правило ще раз.",
+             new Dictionary<string, object?>
+             {
+                 ["messageKey"] = "err.ECR-CALC-0409.categoryRuleConcurrent",
+             }),
+
         ConcurrencyConflictException e =>
             (StatusCodes.Status409Conflict, e.ErrorCode, e.Message, e.Details),
 
