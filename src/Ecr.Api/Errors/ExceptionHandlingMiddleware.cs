@@ -189,6 +189,13 @@ public sealed partial class ExceptionHandlingMiddleware(
             context.Response.Headers.SetCookie = setCookie;
         }
 
+        // ⛔ R5-E1/E1-04: 503 тимчасового збою БД каже клієнтові, коли повторити.
+        if (status == StatusCodes.Status503ServiceUnavailable && IsTransientDatabaseFailure(exception))
+        {
+            context.Response.Headers.RetryAfter =
+                DatabaseBusyRetryAfterSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        }
+
         await JsonSerializer.SerializeAsync(
             context.Response.Body,
             problem,
@@ -674,6 +681,15 @@ public sealed partial class ExceptionHandlingMiddleware(
         DomainException e =>
             (StatusCodes.Status422UnprocessableEntity, e.ErrorCode, e.Message, e.Details),
 
+        // ⛔ R5-E1/E1-04: тимчасовий збій БД — не «внутрішня помилка», а «спробуйте пізніше». Вичерпані
+        // повтори `EnableRetryOnFailure` (deadlock 1205), тайм-аут команди (-2) і обрив/недоступність
+        // з'єднання раніше йшли у fallback 500 `ECR-SYS-0500`. Код — той самий `ECR-SYS-0503`
+        // («сервіс недоступний», як `schedulerNotConfigured`), причину розрізняє `messageKey`;
+        // `Retry-After` ставить `WriteAsync`. Текст винятку SQL клієнтові не їде (ФВ-6.11).
+        _ when IsTransientDatabaseFailure(exception) =>
+            (StatusCodes.Status503ServiceUnavailable, ErrorCodes.Archiving,
+             "База даних тимчасово зайнята або недоступна; спробуйте за кілька секунд.", DatabaseBusyDetails),
+
         // ⚠ Речення стале (ФВ-6.11), але клієнтові їде з КАТАЛОГУ: українське
         // лишається запасним і для журналу, як і в решті кидків із ключем.
         _ => (StatusCodes.Status500InternalServerError, ErrorCodes.Internal,
@@ -709,6 +725,64 @@ public sealed partial class ExceptionHandlingMiddleware(
     /// <summary>Подробиця <c>ECR-EXPR-0422</c>: ключ каталогу <c>expr.tooComplex</c> (en/ru/kz уже в сіді).</summary>
     private static readonly IReadOnlyDictionary<string, object?> ExpressionTooComplexDetails =
         new Dictionary<string, object?> { [MessageKeyDetailName] = "expr.tooComplex" };
+
+    /// <summary>Скільки секунд радити клієнтові почекати після тимчасового збою БД (<c>Retry-After</c>).</summary>
+    internal const int DatabaseBusyRetryAfterSeconds = 5;
+
+    /// <summary>
+    /// Номери <see cref="Microsoft.Data.SqlClient.SqlException"/>, що означають тимчасовий збій, а не помилку
+    /// запиту: тайм-аут команди, deadlock, тайм-аут блокування та мережеві/доступність з'єднання (перелік
+    /// узгоджено з тим, на що повторює <c>EnableRetryOnFailure</c> SQL Server-провайдера).
+    /// </summary>
+    private static readonly System.Collections.Frozen.FrozenSet<int> TransientSqlNumbers = System.Collections.Frozen.FrozenSet.ToFrozenSet(new[]
+    {
+        -2,     // тайм-аут команди/з'єднання (клієнт)
+        64,     // мережеве ім'я більше недоступне
+        233,    // з'єднання встановлено, але розірвано під час входу
+        1205,   // deadlock victim
+        1222,   // перевищено тайм-аут очікування блокування
+        4060,   // база недоступна під час перемикання
+        10053,  // з'єднання перервано програмою на хості
+        10054,  // з'єднання розірвано віддаленим хостом
+        10060,  // тайм-аут мережевого з'єднання
+        10928,  // ліміт ресурсів
+        10929,  // ліміт ресурсів
+        40197,  // помилка сервісу під час обробки
+        40501,  // сервіс зайнятий
+        40613,  // база тимчасово недоступна
+        49918,  // недостатньо ресурсів
+        49919,  // недостатньо ресурсів
+        49920,  // недостатньо ресурсів
+    });
+
+    /// <summary>
+    /// Чи це тимчасовий збій БД: вичерпані повтори EF або <see cref="Microsoft.Data.SqlClient.SqlException"/> з
+    /// тимчасовим номером (тайм-аут SqlClient — це <c>Number == -2</c>) — будь-де в ланцюжку InnerException.
+    /// ⚠ Голий <see cref="TimeoutException"/> свідомо НЕ тут: його кидають і SMTP, і HTTP-джерела, і «база
+    /// зайнята» для них була б неправдою.
+    /// </summary>
+    /// <param name="exception">Виняток конвеєра.</param>
+    internal static bool IsTransientDatabaseFailure(Exception exception)
+    {
+        for (var current = exception; current is not null; current = current.InnerException)
+        {
+            switch (current)
+            {
+                case Microsoft.EntityFrameworkCore.Storage.RetryLimitExceededException:
+                    return true;
+                case Microsoft.Data.SqlClient.SqlException sql
+                    when sql.Errors.Cast<Microsoft.Data.SqlClient.SqlError>().Any(e => TransientSqlNumbers.Contains(e.Number))
+                         || TransientSqlNumbers.Contains(sql.Number):
+                    return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>Подробиця 503 тимчасового збою БД: лише ключ каталогу (з власним <c>.title</c>).</summary>
+    private static readonly IReadOnlyDictionary<string, object?> DatabaseBusyDetails =
+        new Dictionary<string, object?> { [MessageKeyDetailName] = "err.ECR-SYS-0503.databaseBusy" };
 
     /// <summary>Подробиця 500-ї: лише ключ каталогу, жодних даних винятку.</summary>
     private static readonly IReadOnlyDictionary<string, object?> InternalDetails =
