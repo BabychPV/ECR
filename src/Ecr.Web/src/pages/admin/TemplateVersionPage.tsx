@@ -872,6 +872,11 @@ function TemplateVersionEditor(): JSX.Element {
   // виконає.
   const canEditSheets = can(session.data, 'Template.Edit') && (structure.data?.isEditable ?? false);
 
+  // Коди колонок усієї версії — для умовного форматування (L9-22); `undefined`, поки структура не приїхала.
+  const versionColumnCodes = structure.data?.sheets.flatMap((sheet) =>
+    sheet.tables.flatMap((table) => table.columns.map((column) => column.code)),
+  );
+
   const nextOrdinal = (() => {
     const sheets = structure.data?.sheets ?? [];
     return sheets.length === 0 ? 0 : Math.max(...sheets.map((s) => s.ordinal)) + 1;
@@ -1464,6 +1469,8 @@ function TemplateVersionEditor(): JSX.Element {
             <ConditionalFormatPanel
               templateVersionId={id}
               canEdit={canEditSheets}
+              // L9-22: коди ВСІХ колонок версії — правила зниклих колонок («сироти») не вертаються в PUT.
+              versionColumnCodes={versionColumnCodes}
               columns={conditionalFormatTable.columns.map((column) => ({
                 code: column.code,
                 label: localized(column.headerL10n) || column.code,

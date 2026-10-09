@@ -82,11 +82,22 @@ interface Seed {
   readonly etag: string | null;
 }
 
-function seedOf(set: ConditionalFormatSet, codes: ReadonlySet<string>): Seed {
+/**
+ * @param versionCodes коди ВСІХ колонок версії (L9-22). Правило коду, якого у версії немає (колонку видалено),
+ *   «сирота»: слати його назад — значить блокувати збереження всього набору версії. Без нього (`null`)
+ *   відсікання не робиться.
+ */
+export function seedOf(
+  set: ConditionalFormatSet,
+  codes: ReadonlySet<string>,
+  versionCodes: ReadonlySet<string> | null = null,
+): Seed {
   const own: ConditionalRule[] = [];
   const others: ConditionalFormatRuleDto[] = [];
 
   for (const wire of set.rules) {
+    if (versionCodes !== null && !versionCodes.has(wire.columnCode) && !codes.has(wire.columnCode)) continue;
+
     const rule = codes.has(wire.columnCode) ? ruleFromWire(wire) : null;
     // ⚠ Правило з невідомим оператором не губиться: воно їде назад як було.
     if (rule === null) others.push(wire);
@@ -123,8 +134,11 @@ export function ConditionalFormatPanel({
   templateVersionId,
   columns,
   canEdit,
+  versionColumnCodes,
 }: {
   readonly templateVersionId: number;
+  /** Коди всіх колонок версії (L9-22): правила інших кодів — «сироти» — не вертаються на сервер. */
+  readonly versionColumnCodes?: readonly string[] | undefined;
   /** Колонки таблиці: код і підпис. */
   readonly columns: readonly { readonly code: string; readonly label: string }[];
   /** Чернетка версії і право `Template.Edit`; інакше — лише перегляд. */
@@ -142,6 +156,8 @@ export function ConditionalFormatPanel({
   const focus = useListFocus(rules.length);
 
   const codes = new Set(columns.map((column) => column.code));
+  const versionKey = versionColumnCodes === undefined ? null : versionColumnCodes.join('\u001f');
+  const versionCodes = versionColumnCodes === undefined ? null : new Set(versionColumnCodes);
   const dirty = seed !== null && canonical(rules) !== canonical(seed.own);
 
   // ⚠ Знімок для ефекту: він читає поточну чернетку, а не ту, що була при оголошенні.
@@ -165,13 +181,17 @@ export function ConditionalFormatPanel({
   useEffect(() => {
     if (loaded.data === undefined) return;
 
-    const next = seedOf(loaded.data, new Set(columnKey.split('\u001f')));
+    const next = seedOf(
+      loaded.data,
+      new Set(columnKey.split('\u001f')),
+      versionKey === null ? null : new Set(versionKey.split('\u001f')),
+    );
     if (latest.current.seed !== null && latest.current.dirty) return;
 
     setSeed(next);
     setRules(next.own);
     setConflict(false);
-  }, [loaded.data, columnKey]);
+  }, [loaded.data, columnKey, versionKey]);
 
   const save = useMutation({
     mutationFn: (next: { own: readonly ConditionalRule[]; base: Seed }) =>
@@ -183,7 +203,7 @@ export function ConditionalFormatPanel({
     onSuccess: (saved) => {
       // ⚠ Збережене стає новою точкою відліку ДО перечитання — інакше чернетка
       // лишилась би «зміненою», доки не приїде фоновий запит.
-      const next = seedOf(saved, codes);
+      const next = seedOf(saved, codes, versionCodes);
       setSeed(next);
       setRules(next.own);
       setConflict(false);
@@ -207,7 +227,7 @@ export function ConditionalFormatPanel({
       } catch {
         return;
       }
-      const next = seedOf(fresh, codes);
+      const next = seedOf(fresh, codes, versionCodes);
       setSeed(next);
       setConflict(canonical(latest.current.rules) !== canonical(next.own));
     },
