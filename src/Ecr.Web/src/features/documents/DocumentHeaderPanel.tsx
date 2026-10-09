@@ -17,7 +17,14 @@ import { t } from '@/shared/i18n';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { showDone } from '@/shared/ui/notify';
 import { registerUnsavedSource } from '@/shared/ui/unsavedSources';
-import { bilingualLabel, ContractOrder, isContractReadOnly, splitContractFields, type ContractKey } from './contractSection';
+import {
+  bilingualLabel,
+  ContractOrder,
+  contractKeyOf,
+  isContractReadOnly,
+  splitContractFields,
+  type ContractKey,
+} from './contractSection';
 
 /**
  * Шапка документа: поля версії шаблону разом із поточними значеннями
@@ -591,6 +598,10 @@ export function DocumentHeaderPanel({
     // ⚠ Скасування — до ОСТАННЬОЇ відомої відповіді сервера, не до старої
     // точки відліку: чужі правки, що приїхали перезапитом, стають видимими.
     if (header.data !== undefined) adopt(header.data);
+
+    // ⛔ N3-10: відмова збереження тримала секцію розгорнутою (`mustStayOpen`), а «Скасувати» її не знімало -
+    // людина не могла згорнути шапку, не зберігши нічого.
+    save.reset();
   }
 
   /*
@@ -598,7 +609,16 @@ export function DocumentHeaderPanel({
    * поле: обов'язкове порожнє, недійсна дата, незбережена правка (не
    * сховати те, що ще не збережено), відмова збереження.
    */
-  const missingRequired = fields.filter((field) => field.isRequired && isEmptyHeaderValue(draft[field.code]));
+  // ⛔ N3-10: лише те, що людина МОЖЕ заповнити. Без права редагування (`canEdit=false`) і для службових
+  // полів Contract (File Number, Version - лише читання) порожнє обов'язкове поле тримало б секцію
+  // розгорнутою з причини, яку не зняти.
+  const missingRequired = fields.filter(
+    (field) =>
+      canEdit &&
+      !isContractReadOnly(contractKeyOf(field)) &&
+      field.isRequired &&
+      isEmptyHeaderValue(draft[field.code]),
+  );
   const mustStayOpen =
     missingRequired.length > 0 || invalidDates.size > 0 || dirty.length > 0 || (save.error !== undefined && save.error !== null);
   const expanded = !collapsible || opened || mustStayOpen;

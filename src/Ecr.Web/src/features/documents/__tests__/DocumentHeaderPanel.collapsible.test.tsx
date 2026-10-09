@@ -32,12 +32,19 @@ function field(patch: Partial<Field>): Field {
   };
 }
 
-function show(fields: Field[]): void {
+function show(fields: Field[], canEdit = true): void {
   vi.stubGlobal(
     'fetch',
-    vi.fn(async (input: RequestInfo | URL) => {
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url.endsWith(`/api/v1/documents/${String(DocumentId)}/header`)) {
+        if (init?.method === 'PATCH') {
+          return new Response(
+            JSON.stringify({ title: 'Invalid', status: 422, detail: 'Header refused', errorCode: 'ECR-DOC-0422', correlationId: 'c-1' }),
+            { status: 422, headers: { 'Content-Type': 'application/problem+json' } },
+          );
+        }
+
         return new Response(JSON.stringify({ fields, version: 'V1' }), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
@@ -50,7 +57,7 @@ function show(fields: Field[]): void {
   render(
     <MantineProvider theme={testTheme}>
       <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
-        <DocumentHeaderPanel documentId={DocumentId} canEdit collapsible />
+        <DocumentHeaderPanel documentId={DocumentId} canEdit={canEdit} collapsible />
       </QueryClientProvider>
     </MantineProvider>,
   );
@@ -102,5 +109,41 @@ describe('DocumentHeaderPanel: згорнута секція (UI-16)', () => {
     fireEvent.click(toggle);
     expect(toggle.getAttribute('aria-expanded')).toBe('true');
     expect((screen.getByRole('textbox', { name: 'Operator' }) as HTMLInputElement).value).toBe('B');
+  });
+
+  it('N3-10: без права редагування порожнє обов’язкове поле не тримає секцію розгорнутою', async () => {
+    show([field({ isRequired: true, value: null })], false);
+
+    const toggle = await screen.findByTestId('document-header-toggle');
+
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it('N3-10: службове поле Contract (File Number) лише для читання - не тримає секцію розгорнутою', async () => {
+    show([field({ code: 'FILE_NUMBER', label: { values: { en: 'File Number' } }, isRequired: true, value: null })]);
+
+    const toggle = await screen.findByTestId('document-header-toggle');
+
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it('N3-10: «Скасувати» після відмови збереження знімає помилку - секцію можна згорнути', async () => {
+    show([field({})]);
+
+    const toggle = await screen.findByTestId('document-header-toggle');
+    fireEvent.click(toggle);
+    fireEvent.change(await screen.findByRole('textbox', { name: 'Operator' }), { target: { value: 'B' } });
+    fireEvent.click(screen.getByRole('button', { name: '⟦common.save⟧' }));
+    await waitFor(() => expect(screen.getAllByRole('alert').length).toBeGreaterThan(0));
+
+    fireEvent.click(screen.getByRole('button', { name: '⟦common.cancel⟧' }));
+
+    await waitFor(() => expect(screen.queryByRole('alert')).toBeNull());
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
   });
 });
