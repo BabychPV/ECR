@@ -8893,6 +8893,11 @@
               "integer"
             ]
           },
+          "periodEnd": {
+            "description": "Останній календарний день періоду, включно: дата чинності темпоральних довідників для документів періоду (ФВ-8.5, D1-02).",
+            "format": "date",
+            "type": "string"
+          },
           "periodKey": {
             "description": "`Year*100 + Sequence`; він же ключ партиції.",
             "format": "int32",
@@ -8936,7 +8941,8 @@
           "endsAt",
           "graceEndsAt",
           "isCurrent",
-          "reopenedUntil"
+          "reopenedUntil",
+          "periodEnd"
         ],
         "type": "object"
       },

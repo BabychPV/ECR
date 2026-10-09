@@ -478,6 +478,10 @@ export function DocumentPage(): JSX.Element {
 
   useProjectCurrentPeriodDefault(urlPeriod, calendar.data?.periods, setPeriodKey);
 
+  // ⛔ D1-02: дата чинності довідників у сітці — календарний кінець періоду ІЗ СЕРВЕРА.
+  // `periodKey` для квартальних/річних проєктів — не `YYYYMM`, тож виводити дату з нього не можна.
+  const periodEnd = calendar.data?.periods?.find((period) => period.periodKey === periodKey)?.periodEnd ?? null;
+
   const lock = documentLockOf({
     projectStatus: projects.data?.items?.find((project) => project.id === projectId)?.status,
     periodState: calendar.data?.periods?.find((period) => period.periodKey === periodKey)?.state,
@@ -870,6 +874,7 @@ export function DocumentPage(): JSX.Element {
                 <gridModule.component
                   documentId={documentId}
                   periodKey={periodKey}
+                  periodEnd={periodEnd}
                   readOnly={readOnly}
                   tables={active.tables}
                 />

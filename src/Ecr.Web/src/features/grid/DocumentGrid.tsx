@@ -138,34 +138,6 @@ import './cellEditors.css';
 import { usePendingLoading } from '@/features/common/usePendingLoading';
 import { LookupEntriesStaleTimeMs } from '@/features/registries/api';
 
-/**
- * Остання календарна дата періоду (`periodKey` — `YYYYMM`, той самий формат,
- * що вже кодує `DocumentPage.tsx`/`shared/ui/PeriodPicker.tsx`) як
- * `"YYYY-MM-DD"` — `asOf` для темпоральних Lookup-довідників комірок: документ
- * за березень має бачити довідник станом на березень, а не на сьогодні
- * (ФВ-8.5).
- *
- * ⛔ Не переюзано з `PeriodPicker.tsx`: розбір `periodKey` там лишається
- * приватним (`parsePeriodKey` не експортовано), а сам файл — поза межами
- * дозволених для цієї задачі. Формула ТА САМА (`YYYYMM`, місяць `1..12`),
- * продубльована тут як кілька рядків, а не переосмислена вдруге.
- *
- * `null` — `periodKey` не в очікуваному форматі (місяць поза `1..12`):
- * викликач тоді не надсилає `asOf`, а не падає на невалідній даті.
- */
-function periodEndDateIso(periodKey: number): string | null {
-  const year = Math.trunc(periodKey / 100);
-  const month = periodKey - year * 100;
-
-  if (month < 1 || month > 12) return null;
-
-  // День `0` наступного місяця — останній день ЦЬОГО: конструктор `Date`
-  // сам нормалізує переповнення (грудень → січень наступного року).
-  const lastDay = new Date(year, month, 0).getDate();
-
-  return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
-}
-
 /** Властивості grid. */
 interface DocumentGridProps {
   /** Документ. */
@@ -176,6 +148,20 @@ interface DocumentGridProps {
   tableDefId: number;
   /** Ключ періоду. */
   periodKey: number;
+  /**
+   * Останній день періоду документа (`PeriodDto.periodEnd`, `YYYY-MM-DD`) —
+   * `asOf` темпоральних Lookup-довідників комірок (ФВ-8.5). `null` — календар
+   * проєкту ще не завантажено (або сітка поза сторінкою документа): тоді
+   * темпоральний довідник не питається зовсім.
+   *
+   * ⛔ Дата приходить із сервера, а не виводиться з `periodKey` (D1-02): раніше
+   * тут стояла арифметика `YYYYMM`, і для квартального Q2 (202602) пікер питав
+   * довідник на 28.02 замість 30.06, а для річного 2026 — на 31.01 замість
+   * 31.12. PATCH комірки при цьому звіряв чинність на справжній `PeriodEnd`, і
+   * вибране зі списку значення відхилялося (`PeriodKey.cs` прямо забороняє
+   * виводити місяць з ключа).
+   */
+  periodEnd?: string | null;
   /** Чи доступне редагування на рівні всієї таблиці. */
   readOnly: boolean;
 
@@ -342,6 +328,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
     tableInstanceId,
     tableDefId,
     periodKey,
+    periodEnd = null,
     readOnly,
     allowsDynamicRows,
     maxDynamicRows,
@@ -977,15 +964,20 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
    * `GetRegistryEntriesHandler.cs`, той самий PR) відмовляв `422` для
    * КОЖНОГО довідника, включно з нетемпоральним. Тепер `asOf` іде лише для
    * ТЕМПОРАЛЬНОГО довідника — і це дата КІНЦЯ ПЕРІОДУ документа
-   * (`periodEndDateIso`), а не «сьогодні»: комірка березневого документа має
-   * пропонувати записи, чинні в березні (ФВ-8.5), навіть якщо сьогодні
-   * жовтень.
+   * (`periodEnd` із календаря проєкту, D1-02), а не «сьогодні»: комірка
+   * березневого документа має пропонувати записи, чинні в березні (ФВ-8.5),
+   * навіть якщо сьогодні жовтень.
    */
-  const lookupAsOf = periodEndDateIso(periodKey);
+  const lookupAsOf = periodEnd;
 
   const lookupEntriesQueries = useQueries({
     queries: lookupRegistryCodes.map(({ code, isTemporal }) => {
       const asOf = isTemporal ? lookupAsOf : null;
+
+      // ⛔ Темпоральний довідник без дати не питається взагалі: запит без
+      // `asOf` сервер відхиляє (`422`), а будь-яка «здогадана» дата показала б
+      // записи, які PATCH потім відхилить (D1-02). Календар приходить за мить.
+      const enabled = !isTemporal || asOf !== null;
 
       // ⚠ Базовий шлях — ОКРЕМИЙ шаблонний рядок, без `?asOf=` усередині:
       // `EndpointCoverageTests.Кожна_адреса_яку_викликає_клієнт_існує_на_сервері`
@@ -999,6 +991,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
           apiFetch<RegistryEntryDto[]>(
             asOf === null ? baseUrl : `${baseUrl}?asOf=${asOf}`,
           ),
+        enabled,
 
         // ⚠ Перф: довідник — до 50 тис. записів, а міняє його адміністратор,
         // не оператор сітки. Дефолт застосунку (`staleTime` 30 с + рефетч на

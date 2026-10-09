@@ -22151,6 +22151,11 @@ export interface components {
              */
             notSubmittedSheets?: null | number;
             /**
+             * Format: date
+             * @description Останній календарний день періоду, включно: дата чинності темпоральних довідників для документів періоду (ФВ-8.5, D1-02).
+             */
+            periodEnd: string;
+            /**
              * Format: int32
              * @description `Year*100 + Sequence`; він же ключ партиції.
              */

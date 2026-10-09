@@ -152,7 +152,7 @@ const tables = Array.from({ length: TablesPerSheet }, (_, index) => tableFixture
 function renderSheet(): void {
   render(
     <MantineProvider>
-      <SheetTables documentId={7} periodKey={202609} readOnly={false} tables={tables} />
+      <SheetTables documentId={7} periodKey={202609} periodEnd={null} readOnly={false} tables={tables} />
     </MantineProvider>,
   );
 }

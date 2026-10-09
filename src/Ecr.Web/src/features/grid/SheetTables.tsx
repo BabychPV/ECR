@@ -88,6 +88,8 @@ import { completeCellNavigation, useCellNavigation } from './cellNavigation';
 export interface SheetTablesProps {
   readonly documentId: number;
   readonly periodKey: number;
+  /** Останній день періоду (`PeriodDto.periodEnd`) — `asOf` Lookup-пікерів сітки (D1-02); `null` — ще невідомий. */
+  readonly periodEnd?: string | null;
   readonly readOnly: boolean;
   readonly tables: readonly DocumentTableDto[];
   /**
@@ -161,6 +163,7 @@ export const MountAheadMargin = '200px 0px';
 export function SheetTables({
   documentId,
   periodKey,
+  periodEnd = null,
   readOnly,
   tables,
   layout = 'stack',
@@ -410,6 +413,7 @@ export function SheetTables({
                 tableInstanceId={id}
                 tableDefId={table.tableDefId}
                 periodKey={periodKey}
+                periodEnd={periodEnd}
                 readOnly={readOnly}
                 allowsDynamicRows={table.allowsDynamicRows}
                 maxDynamicRows={table.maxDynamicRows}
