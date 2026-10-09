@@ -136,11 +136,15 @@ public sealed partial class LoginHandler(
 
         // ⛔ L1-03: успіх фіксується ОДНИМ UPDATE з умовою «не заблоковано». Сутність `user` прочитано до паралельних
         // хибних спроб; її запис через EF знімав виставлене ними блокування, і правильний пароль з пачки підбору
-        // отримував cookie після блокування. 0 рядків — запис заблоковано (чи зник): відмова як на заблокований.
+        // отримував cookie після блокування. 0 рядків — запис заблоковано (чи зник): відмова як на хибний пароль.
         if (!await users.TryRegisterSuccessfulLoginAsync(user.Id, now, ct).ConfigureAwait(false))
         {
+            // ⛔ L1-03: тут саме 401, а не 423. Хибні спроби тієї ж пачки дістають 401, тож 423 для єдиного
+            // «іншого» запиту розрізняв би правильний пароль у пачці підбору (оракул). Законний власник на
+            // наступній спробі однаково отримає 423 — з гілки IsLockedOut вище. Повне резервування спроби до
+            // Verify (бюджет «Max + паралельність») — AN-90.
             await FailAsync(userName, "LockedOut", ipAddress, now, ct).ConfigureAwait(false);
-            throw Locked(user);
+            throw InvalidCredentials();
         }
 
         users.RecordAttempt(new LoginAttempt(userName, AuthProvider.Local, true, now, ipAddress));
