@@ -132,6 +132,10 @@ export const CoverageEventStatuses = [
   'RegistryExternalKeyRelinked',
   // Збір: плановий запуск пропущено за залежністю розкладу (ФВ-13.15) — затримка, не втрата.
   'SkippedDependency',
+  // Матеріалізація скінченого періоду (D2-02): число записано з неповним покриттям /
+  // придатних точок немає, комірку не оновлено.
+  'PartialCoverage',
+  'SkippedNoData',
 ] as const;
 export type CoverageEventStatus = (typeof CoverageEventStatuses)[number];
 

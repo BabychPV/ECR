@@ -37,6 +37,8 @@ namespace Ecr.Infrastructure.Jobs;
 /// <item><term>рядок змінювали під час запису, повтори вичерпано</term><description><c>SkippedWriteConflict</c></description></item>
 /// <item><term>правило періоду вимагає підтвердження</term><description><b>не</b> писати; <c>SkippedNeedsConfirmation</c></description></item>
 /// <item><term>комірка порожня або від інтеграції</term><description>записати</description></item>
+/// <item><term>період скінчився, згортка за часом покрила менше <see cref="MinPercentGood"/></term><description>записати (HU-13 Q2, варіант A) і подія <c>PartialCoverage</c> з часткою покриття</description></item>
+/// <item><term>період скінчився, придатних точок поля немає</term><description><b>не</b> писати і <b>не</b> очищати; подія <c>SkippedNoData</c></description></item>
 /// </list>
 ///
 /// ⚠ HSE301 A4: записане (<c>Applied &gt; 0</c>) ставить автоперерахунок документа
@@ -49,8 +51,19 @@ public sealed class MaterializeCollectedDataJob(
     ICellPatcher patcher,
     ICoverageJournal coverage,
     IntegrationActor actor,
-    ICalculationTrigger? recalculation = null) : IMaterializeCollectedDataJob
+    ICalculationTrigger? recalculation = null,
+    IClock? clock = null) : IMaterializeCollectedDataJob
 {
+    /// <summary>
+    /// Поріг частки покриття згортки за часом, нижче якого значення неповне
+    /// (HSE301 §4.1/§4.4: «частка покриття… дає статус <c>Partial</c>»).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Той самий дефолт, що <c>ext.RowWindowMap.MinPercentGood</c> (95): окремої
+    /// колонки порогу в мапінгу поля немає, а міграцію заради неї ця правка не робить.
+    /// </remarks>
+    public const decimal MinPercentGood = 95m;
+
     /// <summary>Код задачі в черзі.</summary>
     public static string Code => "materialize-collected";
 
@@ -185,7 +198,34 @@ public sealed class MaterializeCollectedDataJob(
         var bounds = Domain.Entities.Documents.Period.UtcBounds(
             period.PeriodStart, period.PeriodEnd, SiteTimeZone.Create(period.TimeZoneId).ToTimeZoneInfo());
 
-        var (aggregated, overCeiling, unitFailures) = await AggregateAsync(task, maps, bounds, ct).ConfigureAwait(false);
+        // ⛔ D2-02: неповне покриття й «немає даних» сигналізуються лише ПІСЛЯ
+        // кінця періоду — у відкритому місяці хвіст без точок природний, і подія
+        // щопрогону була б шумом. Без годинника (пряме конструювання в старих
+        // тестах) кінець невідомий — подій немає; контейнер годинник завжди дає.
+        var ended = clock is not null && clock.UtcNow >= bounds.EndUtc;
+
+        var (aggregated, overCeiling, unitFailures, partial, noData) =
+            await AggregateAsync(task, maps, bounds, ended, ct).ConfigureAwait(false);
+
+        // ⛔ D2-02 (HU-13 Q2, варіант A): часткове число ЗАПИСАНО, але не мовчки —
+        // подія з часткою покриття; поле без придатних точок НЕ записано й не
+        // очищено (HSE301 §4.1: «даних не було» ≠ 0) — подія, що в комірці може
+        // лишатися значення попереднього прогону.
+        if (partial.Count > 0 || noData.Count > 0)
+        {
+            await coverage
+                .RecordManyAsync(
+                    [
+                        .. partial.Select(p => new CoverageEvent(
+                            task.SourceEntityId, periodKey, CollectionCoverage.PartialCoverage,
+                            CoverageDetails.PartialCoverage(p.Field, p.MapId, p.PercentGood, MinPercentGood))),
+                        .. noData.Select(n => new CoverageEvent(
+                            task.SourceEntityId, periodKey, CollectionCoverage.SkippedNoData,
+                            CoverageDetails.NoData(n.Field, n.MapId))),
+                    ],
+                    ct)
+                .ConfigureAwait(false);
+        }
 
         // ⛔ Перевищена стеля — не мовчки: рядок у журнал покриття, як і решта
         // причин «зібрано, але не записано» (`D-118`).
@@ -308,8 +348,9 @@ public sealed class MaterializeCollectedDataJob(
     /// <param name="task">Завдання.</param>
     /// <param name="maps">Матеріалізовані мапінги сутності.</param>
     /// <param name="period">Межі періоду екземпляра в UTC, <c>[початок, кінець)</c>.</param>
+    /// <param name="ended">Період уже скінчився: неповне покриття й відсутність даних — події (D2-02).</param>
     /// <param name="ct">Токен скасування.</param>
-    /// <returns>Значення для запису і поля, що перевищили стелю точок.</returns>
+    /// <returns>Значення для запису, поля понад стелю точок, неповне покриття і поля без даних.</returns>
     /// <remarks>
     /// ⛔ D16-03: точки беруться за межами ПЕРІОДУ — усі, що є в
     /// <c>ext.RawDataPoint</c>, — а не за вікном збору <c>task.FromUtc/ToUtc</c>.
@@ -321,9 +362,12 @@ public sealed class MaterializeCollectedDataJob(
     /// на всі поля віддав би один щільний тег за рахунок решти.
     /// </remarks>
     private async Task<Aggregation> AggregateAsync(
-        MaterializeTask task, List<EntityFieldMap> maps, Domain.Entities.Documents.Period.UtcRange period, CancellationToken ct)
+        MaterializeTask task, List<EntityFieldMap> maps, Domain.Entities.Documents.Period.UtcRange period, bool ended,
+        CancellationToken ct)
     {
         var result = new List<IntegrationCellValue>(maps.Count);
+        var partial = new List<PartialField>();
+        var noData = new List<NoDataField>();
         var overCeiling = new List<string>();
         var unitFailures = new List<string>();
         var ceiling = PointCeilingPerField;
@@ -385,6 +429,12 @@ public sealed class MaterializeCollectedDataJob(
                 var series = IsTimeFold(kind) ? timed : points;
                 if (series.Count == 0)
                 {
+                    // ⛔ D2-02: не мовчки — після кінця періоду подія «немає даних».
+                    if (ended)
+                    {
+                        noData.Add(new NoDataField(field, map.Id));
+                    }
+
                     continue;
                 }
 
@@ -397,7 +447,22 @@ public sealed class MaterializeCollectedDataJob(
                 var folded = PeriodFold.Fold(kind, series, period.StartUtc, period.EndUtc, map.IsStep, maxGap: null);
                 if (folded.Value is not { } value)
                 {
+                    // `covered == 0` для згортки за часом / жодної точки всередині
+                    // для згортки точок: комірку НЕ чіпаємо (див. подію).
+                    if (ended)
+                    {
+                        noData.Add(new NoDataField(field, map.Id));
+                    }
+
                     continue;
+                }
+
+                // ⛔ D2-02: число ЗАПИСУЄТЬСЯ (HU-13 Q2, варіант A), але з подією
+                // `PartialCoverage` і часткою покриття — інтеграл лише покритих
+                // відрізків менший за справжній об'єм, і це має бути видно.
+                if (ended && folded.PercentGood is { } good && good < MinPercentGood)
+                {
+                    partial.Add(new PartialField(field, map.Id, good));
                 }
 
                 // ⛔ ФВ-16.10, HSE301 §4.2: конверсія ПІСЛЯ згортки, одна арифметика
@@ -426,7 +491,7 @@ public sealed class MaterializeCollectedDataJob(
             }
         }
 
-        return new Aggregation(result, overCeiling, unitFailures);
+        return new Aggregation(result, overCeiling, unitFailures, partial, noData);
     }
 
     /// <summary>Ряд для згортки за часом: точка до періоду, точки періоду, точка на чи після кінця.</summary>
@@ -508,10 +573,20 @@ public sealed class MaterializeCollectedDataJob(
     /// <param name="Values">Значення для запису.</param>
     /// <param name="OverCeiling">Поля, що перевищили стелю точок.</param>
     /// <param name="UnitFailures">Мапінги, чиє значення не переводиться в цільову одиницю.</param>
+    /// <param name="Partial">Записані значення з покриттям нижче <see cref="MinPercentGood"/>.</param>
+    /// <param name="NoData">Мапінги без придатних точок у періоді — не записано.</param>
     private sealed record Aggregation(
         IReadOnlyList<IntegrationCellValue> Values,
         IReadOnlyList<string> OverCeiling,
-        IReadOnlyList<string> UnitFailures);
+        IReadOnlyList<string> UnitFailures,
+        IReadOnlyList<PartialField> Partial,
+        IReadOnlyList<NoDataField> NoData);
+
+    /// <summary>Мапінг, записаний із неповним покриттям.</summary>
+    private sealed record PartialField(string Field, int MapId, decimal PercentGood);
+
+    /// <summary>Мапінг без придатних точок у періоді.</summary>
+    private sealed record NoDataField(string Field, int MapId);
 }
 
 /// <summary>Розбір завдання матеріалізації.</summary>

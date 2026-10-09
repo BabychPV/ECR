@@ -276,6 +276,11 @@ export const statusTable: Readonly<Record<StatusKind, Readonly<Record<string, St
     // ФВ-13.15: плановий збір пропущено, бо розклад-залежність ще не відбіг. `info` (той самий
     // тон і токени, що `ConflictKeptManual`): це затримка за правилом, а не збій.
     SkippedDependency: 'info',
+    // D2-02: число скінченого періоду записано, але покриття нижче порогу, або
+    // придатних точок немає й комірку не оновлено — `warning`: людина звіряє джерело
+    // (та сама вага, що в `NotificationJob.SeverityOf`).
+    PartialCoverage: 'warning',
+    SkippedNoData: 'warning',
   },
 
   /**

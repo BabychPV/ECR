@@ -528,6 +528,9 @@ public sealed class NotificationJob(
     /// <see cref="CollectionCoverage.RegistryRuleViolation"/>,
     /// <see cref="CollectionCoverage.RegistryExternalKeyRelinked"/> — попередження:
     /// довідник змінився або чекає рішення людини, але це не збій.
+    /// D2-02: <see cref="CollectionCoverage.PartialCoverage"/> (число записано, але
+    /// неповне) і <see cref="CollectionCoverage.SkippedNoData"/> (даних за скінчений
+    /// період немає, комірку не оновлено) — попередження: людина звіряє джерело.
     /// Решта рядків зведення — збої, як і раніше.
     /// Серйозність групи — найвища серед її рядків.
     /// </remarks>
@@ -544,7 +547,9 @@ public sealed class NotificationJob(
                     or CollectionCoverage.RegistryDeactivated
                     or CollectionCoverage.RegistryReactivated
                     or CollectionCoverage.RegistryRuleViolation
-                    or CollectionCoverage.RegistryExternalKeyRelinked => NotificationSeverity.Warning,
+                    or CollectionCoverage.RegistryExternalKeyRelinked
+                    or CollectionCoverage.PartialCoverage
+                    or CollectionCoverage.SkippedNoData => NotificationSeverity.Warning,
                 _ => NotificationSeverity.Error,
             };
 

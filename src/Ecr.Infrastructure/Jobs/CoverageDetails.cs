@@ -30,6 +30,8 @@ public static class CoverageDetails
     public const string KeptManualKey = "coverageEvents.keptManual";
     public const string WriteConflictKey = "coverageEvents.writeConflict";
     public const string NeedsConfirmationKey = "coverageEvents.needsConfirmation";
+    public const string PartialCoverageKey = "coverageEvents.partialCoverage";
+    public const string NoDataKey = "coverageEvents.noData";
     public const string EventWriteFailedKey = "coverageEvents.eventWriteFailed";
     public const string EventWritePartialKey = "coverageEvents.eventWritePartial";
     public const string EventRowNotCreatedKey = "coverageEvents.eventRowNotCreated";
@@ -92,6 +94,20 @@ public static class CoverageDetails
     /// <summary>Поле має більше точок за період, ніж стеля згортки.</summary>
     public static string PointCeiling(object field, int limit)
         => Encode(PointCeilingKey, ("field", Text(field)), ("limit", Text(limit)));
+
+    /// <summary>Згортка за часом скінченого періоду покрила менше порогу — число записано, але неповне (D2-02).</summary>
+    /// <remarks>Частка — з двома знаками після коми, інваріантно: це параметр рядка, а не число для обчислень.</remarks>
+    public static string PartialCoverage(object field, int mapId, decimal percentGood, decimal minPercentGood)
+        => Encode(
+            PartialCoverageKey,
+            ("field", Text(field)),
+            ("mapId", Text(mapId)),
+            ("percentGood", Math.Round(percentGood, 2, MidpointRounding.ToZero).ToString("0.##", CultureInfo.InvariantCulture)),
+            ("min", minPercentGood.ToString("0.##", CultureInfo.InvariantCulture)));
+
+    /// <summary>У скінченому періоді немає придатних точок поля — комірку не оновлено (D2-02).</summary>
+    public static string NoData(object field, int mapId)
+        => Encode(NoDataKey, ("field", Text(field)), ("mapId", Text(mapId)));
 
     /// <summary>Комірка має правку людини.</summary>
     public static string KeptManual(object cell) => Encode(KeptManualKey, ("cell", Text(cell)));

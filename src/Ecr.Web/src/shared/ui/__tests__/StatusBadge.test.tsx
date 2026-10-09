@@ -214,6 +214,8 @@ const expected: readonly (readonly [StatusKind, string, StatusTone])[] = [
   ['coverage', 'RegistryExternalKeyRelinked', 'warning'],
   // ФВ-13.15: пропуск планового збору за залежністю — затримка за правилом, `info`.
   ['coverage', 'SkippedDependency', 'info'],
+  ['coverage', 'PartialCoverage', 'warning'],
+  ['coverage', 'SkippedNoData', 'warning'],
 
   // `SnapshotStatus` (`Enums.cs`, `D-65`): `Rejected` у зрізі немає.
   ['snapshot', 'Draft', 'muted'],

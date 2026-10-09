@@ -132,6 +132,11 @@ function render(key: string, params: Record<string, string>): string | null {
       return t('coverageEvents.eventsTruncated', params);
     case 'coverageEvents.skippedDependency':
       return t('coverageEvents.skippedDependency', params);
+    // D2-02: матеріалізація скінченого періоду — неповне покриття (число записано) і «немає даних».
+    case 'coverageEvents.partialCoverage':
+      return t('coverageEvents.partialCoverage', params);
+    case 'coverageEvents.noData':
+      return t('coverageEvents.noData', params);
     default:
       return adapterRefusal(key, params);
   }

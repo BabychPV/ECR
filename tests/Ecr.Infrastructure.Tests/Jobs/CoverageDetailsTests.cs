@@ -35,6 +35,25 @@ public sealed class CoverageDetailsTests
         Assert.Equal("coverageEvents.periodMissing", missing.Key);
     }
 
+    /// <summary>
+    /// D2-02: частка покриття — параметр рядка, обрізана вниз до двох знаків (94.999 не має
+    /// показуватися як 95, що виглядало б як «поріг досягнуто»).
+    /// </summary>
+    [Fact]
+    public void Partial_coverage_and_no_data_have_their_own_keys_and_percent_is_truncated_not_rounded_up()
+    {
+        Assert.True(JobProgressMessageCodec.TryDecode(CoverageDetails.PartialCoverage("F", 7, 94.999m, 95m), out var partial));
+        Assert.Equal("coverageEvents.partialCoverage", partial.Key);
+        Assert.Equal("F", partial.Params!["field"]);
+        Assert.Equal("7", partial.Params["mapId"]);
+        Assert.Equal("94.99", partial.Params["percentGood"]);
+        Assert.Equal("95", partial.Params["min"]);
+
+        Assert.True(JobProgressMessageCodec.TryDecode(CoverageDetails.NoData("F", 7), out var noData));
+        Assert.Equal("coverageEvents.noData", noData.Key);
+        Assert.Equal("7", noData.Params!["mapId"]);
+    }
+
     [Fact]
     public void Long_failure_reason_is_shortened_before_encoding_so_the_json_stays_valid()
     {
@@ -56,7 +75,7 @@ public sealed class CoverageDetailsTests
     /// <c>CoverageDetails.X(…)</c> літералом <c>$"Комірка {cell}…"</c> — тест червоний.
     /// </summary>
     [Theory]
-    [InlineData("MaterializeCollectedDataJob.cs", 5)]
+    [InlineData("MaterializeCollectedDataJob.cs", 7)]
     [InlineData("SourceEventSyncJob.cs", 12)]
     public void Coverage_events_in_jobs_take_details_from_the_envelope_helper(string file, int expectedCalls)
     {

@@ -71,6 +71,12 @@ describe('collectionRunErrorText', () => {
     ['coverageEvents.keptManual', { cell: 'r1:c2' }, 'cell=r1:c2'],
     ['coverageEvents.writeConflict', { cell: 'r1:c2' }, 'cell=r1:c2'],
     ['coverageEvents.needsConfirmation', { cell: 'r1:c2' }, 'cell=r1:c2'],
+    [
+      'coverageEvents.partialCoverage',
+      { field: 'F1', mapId: '7', percentGood: '60', min: '95' },
+      'field=F1, mapId=7, percentGood=60, min=95',
+    ],
+    ['coverageEvents.noData', { field: 'F1', mapId: '7' }, 'field=F1, mapId=7'],
     ['coverageEvents.eventWriteFailed', { eventId: '7', reason: 'нема доступу' }, 'eventId=7, reason=нема доступу'],
     ['coverageEvents.eventWritePartial', { eventId: '7', rowKey: 'R1' }, 'eventId=7, rowKey=R1'],
     ['coverageEvents.eventRowNotCreated', { eventId: '7', rowKey: 'R1' }, 'eventId=7, rowKey=R1'],

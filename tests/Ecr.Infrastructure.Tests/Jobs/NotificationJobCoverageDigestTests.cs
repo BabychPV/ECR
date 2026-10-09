@@ -388,6 +388,9 @@ public sealed class NotificationJobCoverageDigestTests(SqlServerFixture sql)
     // наступним прогоном / потрібне підтвердження людини — попередження.
     [InlineData(CollectionCoverage.SkippedWriteConflict, NotificationSeverity.Warning)]
     [InlineData(CollectionCoverage.SkippedNeedsConfirmation, NotificationSeverity.Warning)]
+    // D2-02: неповне покриття (число записано) і «немає даних» (комірку не оновлено).
+    [InlineData(CollectionCoverage.PartialCoverage, NotificationSeverity.Warning)]
+    [InlineData(CollectionCoverage.SkippedNoData, NotificationSeverity.Warning)]
     // D-212 PR-3: події синку довідника з AF. Автостворення — робота за
     // політикою External (Info); решта — довідник змінився або чекає людину.
     [InlineData(CollectionCoverage.RegistryAutoCreated, NotificationSeverity.Info)]
