@@ -3,6 +3,7 @@ import { ActionIcon, Badge, Box, Button, Group, Tabs, Text } from '@mantine/core
 import type { DocumentTableDto, ValidationFindingDto } from '@/api/types';
 import { useCellChanges } from '@/features/audit/api';
 import { useTableStatus } from '@/features/documents/api';
+import { formatDateOnly } from '@/shared/format/dateOnly';
 import { formatCount } from '@/shared/format/plural';
 import { t } from '@/shared/i18n';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
@@ -353,13 +354,6 @@ function IssuesTab({
   );
 }
 
-/** Календарна дата `YYYY-MM-DD` у поясі браузера (вікно журналу — `features/audit/api.ts`). */
-function dateOnly(at: Date): string {
-  const pad = (value: number): string => String(value).padStart(2, '0');
-
-  return `${String(at.getFullYear())}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}`;
-}
-
 /**
  * Вікно історії однієї комірки: останні 12 місяців. ⚠ Сервер дозволяє для
  * адреси однієї комірки до 396 діб (`GetCellChangesHandler.MaxCellWindow`);
@@ -369,7 +363,7 @@ function historyWindow(): { from: string; to: string } {
   const today = new Date();
   const from = new Date(today.getFullYear() - 1, today.getMonth(), today.getDate());
 
-  return { from: dateOnly(from), to: dateOnly(today) };
+  return { from: formatDateOnly(from), to: formatDateOnly(today) };
 }
 
 function HistoryTab({
