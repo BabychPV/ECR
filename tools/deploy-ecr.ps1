@@ -1127,6 +1127,33 @@ function Get-FirstDeploymentProblem {
         "Повтор першого розгортання, що впало ПІСЛЯ кроку 2 (схему вже накочено), — з -SkipSchema.")
 }
 
+# ⛔ R5-U1/U1-06 (аудит 2026-10-09): старіший пакет на новішій базі. Чиста функція: міграції бази
+# (__EFMigrationsHistory) проти міграцій пакета (MigrationId у migration.sql) → текст відмови або $null.
+# Хоч одна міграція бази, якої пакет не знає, — база новіша (або з іншої гілки): той самий критерій,
+# що й SchemaValidator на старті Api, але ДО зміни схеми, а не після. Пакет без жодного MigrationId —
+# зламаний migration.sql, теж відмова.
+function Get-SchemaDowngradeProblem {
+    param(
+        [AllowNull()] [AllowEmptyCollection()] [string[]] $DatabaseMigrations,
+        [AllowNull()] [AllowEmptyCollection()] [string[]] $PackageMigrations,
+        [Parameter(Mandatory)] [string] $Database
+    )
+
+    $package = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($id in @($PackageMigrations)) { if ($id -and $id.Trim()) { [void] $package.Add($id.Trim()) } }
+    if ($package.Count -eq 0) {
+        return "У migration.sql пакета немає жодного MigrationId — пакет зламаний; схему $Database НЕ змінено."
+    }
+
+    $unknown = @(@($DatabaseMigrations) | Where-Object { $_ -and $_.Trim() } | ForEach-Object { $_.Trim() } |
+            Where-Object { -not $package.Contains($_) } | Sort-Object -Unique)
+    if (-not $unknown.Count) { return $null }
+    $shown = @($unknown | Select-Object -Last 3) -join ', '
+    return ("База $Database новіша за цей пакет: $($unknown.Count) застосованих міграцій пакет не знає (останні: $shown). " +
+        "Нічого не змінено. Старіший пакет на новішу базу не ставиться — відкат лише за runbook §9 " +
+        "(відновити копію бази, msiexec /x поточної версії, потім попередній пакет).")
+}
+
 # ⛔ R5-U1/U1-02 (аудит 2026-10-09): Stop-EcrServicesForSchema зупиняє служби лише
 # ЦІЄЇ машини. За D-32 (≥2 вузли) EcrApi/EcrWorker інших вузлів працювали б далі
 # старою версією на новій схемі (DROP TYPE TVP, ROLLBACK IMMEDIATE, задачі черги
@@ -1750,6 +1777,28 @@ END
                     --project (Join-Path $root 'src\Ecr.Infrastructure') `
                     --startup-project (Join-Path $root 'src\Ecr.Infrastructure') `
                     --output $migration
+            }
+        }
+
+        # ⛔ R5-U1/U1-06: база новіша за пакет — відмова до зупинки служб і до першого sqlcmd -i.
+        # Інакше 03/04/05/10/15-*.sql старішої версії (CREATE OR ALTER) повертали старі процедури й
+        # тригери на новішу базу, і лише потім MSI відмовляв у пониженні версії (DowngradeError).
+        if (-not (Test-Path $migration)) {
+            Write-Host "  Чи база не новіша за пакет, буде перевірено за migration.sql (-WhatIf: файла ще немає)." -ForegroundColor DarkGray
+        }
+        else {
+            $packageMigrations = @([regex]::Matches((Get-Content -LiteralPath $migration -Raw),
+                    "\[MigrationId\]\s*=\s*N'(\d{14}_[^']+)'") | ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique)
+            $databaseMigrations = Invoke-DeployQuery -TargetDb $Database -Query (
+                "SET NOCOUNT ON; IF OBJECT_ID(N'dbo.__EFMigrationsHistory', N'U') IS NOT NULL " +
+                "SELECT MigrationId FROM dbo.__EFMigrationsHistory;")
+            if ($null -eq $databaseMigrations) {
+                Write-Host "  Чи база не новіша за пакет, буде перевірено запитом до __EFMigrationsHistory (-WhatIf: не виконується)." -ForegroundColor DarkGray
+            }
+            else {
+                $downgradeProblem = Get-SchemaDowngradeProblem -DatabaseMigrations $databaseMigrations `
+                    -PackageMigrations $packageMigrations -Database $Database
+                if ($downgradeProblem) { throw $downgradeProblem }
             }
         }
 
