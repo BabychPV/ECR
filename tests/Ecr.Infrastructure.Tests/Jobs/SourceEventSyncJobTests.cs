@@ -750,6 +750,43 @@ public sealed class SourceEventSyncJobTests(SqlServerFixture sql)
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Directive", "HSE301-EFSYNC")]
+    [Trait("Finding", "L3-07")]
+    public async Task НевпорядкованіПодіїПонадСтелю_ВидаленняВимкнене()
+    {
+        // ⛔ L3-07: курсор Max(StartUtc) правдивий лише для ORDER BY StartTime; запит подій можна
+        // перевизначити. Невпорядкована обрізана сторінка + необрізана друга давали Gone для подій, що на
+        // сторінки не потрапили, і жорстке видалення їхніх рядків.
+        // Мутація: прибрати гілку `!ordered && page.Truncated` у ReadEventPagesAsync.
+        await using var stand = await ArrangeAsync();
+        var e1 = Ev("E1", Start, End);
+        var e2 = Ev("E2", Start.AddHours(1), End.AddHours(1));
+        var e3 = Ev("E3", Start.AddHours(2), End.AddHours(2));
+        var e4 = Ev("E4", Start.AddHours(3), End.AddHours(3));
+        var trigger = Substitute.For<ICalculationTrigger>();
+        await RunAsync(stand, new FakeEventSource(e1, e2, e3, e4), trigger: trigger);
+        Assert.Equal(4, (await RowsAsync(stand)).Count);
+        trigger.ClearReceivedCalls();
+
+        // Перша сторінка обрізана і НЕупорядкована (E3 раніше за E2 у відповіді, але пізніший за початком);
+        // E1 на неї не потрапила. Друга, від курсора Max(Start)=E3, — необрізана й без E1.
+        var source = new FakeEventSource
+        {
+            Pages = query => query.FromUtc < e3.StartUtc
+                ? new SourceEventResult([e3, e2], true, null)
+                : new SourceEventResult([e3, e4], false, null),
+        };
+        await RunAsync(stand, source, trigger: trigger);
+
+        Assert.Equal(["EF-E1", "EF-E2", "EF-E3", "EF-E4"], (await RowsAsync(stand)).Select(r => r.RowKey).Order(StringComparer.Ordinal));
+        Assert.Equal(4, (await LinksAsync(stand)).Count);
+        Assert.Equal(0, await JournalCountAsync(stand));
+        Assert.Empty(trigger.ReceivedCalls());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Directive", "HSE301-EFSYNC")]
     public async Task ПоданняМіжРішеннямІВидаленням_РядокЛишається()
     {
         // ⛔ L3-04: стан аркуша читався ДО транзакції видалення. Подання між рішенням і видаленням

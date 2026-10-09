@@ -403,7 +403,8 @@ public sealed partial class SourceEventSyncJob(
     /// ⛔ L3-07: одне читання зі стелею <see cref="SourceEventQuery.DefaultMaxEvents"/> від найранішого відкритого
     /// періоду (повна звірка) щоразу віддавало ті самі найраніші події — найсвіжіші не синхронізувалися ніколи,
     /// доки старий період не закриють. Запит упорядкований за початком (контракт адаптерів). Сторінка, що не
-    /// зрушила курсор (усі події з одним початком), зупиняє читання як обрізане.
+    /// зрушила курсор (усі події з одним початком), зупиняє читання як обрізане. Обрізана сторінка з НЕупорядкованими
+    /// початками (запит подій перевизначено) теж зупиняє читання як обрізане: курсор там нічого не гарантує.
     /// </remarks>
     private static async Task<(SourceEventResult Result, int Pages)> ReadEventPagesAsync(
         IExternalDataSource adapter, SourceEventQuery query, CancellationToken ct)
@@ -417,7 +418,21 @@ public sealed partial class SourceEventSyncJob(
         {
             var page = await adapter.ReadEventsAsync(query with { FromUtc = cursor }, ct).ConfigureAwait(false);
             pages++;
+
+            // ⛔ L3-07: порядок сторінки перевіряємо за кореневими подіями (дочірні — вкладення, їх початок
+            // порядку не задає). Запит подій можна перевизначити (`PiSqlClient:{код}:EventQuery`), тож контракт
+            // «ORDER BY StartTime» ніде інде не гарантований.
+            var roots = page.Events.Where(e => string.IsNullOrWhiteSpace(e.ParentId)).ToList();
+            var ordered = roots.Zip(roots.Skip(1)).All(p => p.First.StartUtc <= p.Second.StartUtc);
             events.AddRange(page.Events.Where(e => seen.Add(e.EventId)));
+
+            if (!ordered && page.Truncated)
+            {
+                // ⛔ L3-07: курсор Max(StartUtc) правдивий лише для ORDER BY StartTime; інакше пропущені події
+                // стали б «Gone» (остання сторінка не обрізана) і рядки видалилися б жорстко. Обрізане → без
+                // Missing/видалення, а непрочитані події лишаються наступному прогону.
+                return (new SourceEventResult(events, true, null), pages);
+            }
 
             if (!page.Truncated || page.ErrorCode is not null || page.Events.Count == 0)
             {
