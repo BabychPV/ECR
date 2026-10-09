@@ -499,6 +499,30 @@ public sealed class NormalizedCellStore(EcrDbContext db, ArchiveAwareCellReader?
         return (await ApplyBatchAsync([changes], ct).ConfigureAwait(false))[changes.TableInstanceId];
     }
 
+    /// <summary>Транзакція, на якій уже виставлено <c>SET LOCK_TIMEOUT</c> (<see cref="LimitLockWaitAsync"/>).</summary>
+    private SqlTransaction? _lockWaitLimitedFor;
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⛔ AN-106 (P1-01). Охоронець у <see cref="ApplyBatchAsync"/> виставляв ліміт лише перед
+    /// захопленням рядків, а нові рядки (<c>doc.TableRow</c>) вставляються РАНІШЕ — під ескальованим
+    /// блокуванням переносу версії така вставка чекала весь <c>CommandTimeout</c> і падала 500.
+    /// Той самий єдиний <c>SET</c>, лише раніше: <see cref="ApplyBatchAsync"/> у тій самій транзакції
+    /// його вже не повторює. Поза транзакцією — нічого (своя коротка транзакція сховища сама собі).
+    /// </remarks>
+    public async Task LimitLockWaitAsync(CancellationToken ct)
+    {
+        if (db.Database.CurrentTransaction?.GetDbTransaction() is not SqlTransaction transaction
+            || ReferenceEquals(_lockWaitLimitedFor, transaction))
+        {
+            return;
+        }
+
+        var connection = (SqlConnection)db.Database.GetDbConnection();
+        await LockWaitGuard.LimitAsync(connection, transaction, ct).ConfigureAwait(false);
+        _lockWaitLimitedFor = transaction;
+    }
+
     /// <inheritdoc />
     /// <remarks>
     /// ⚠ P8: єдина реалізація і для одного екземпляра (<see cref="ApplyAsync"/>),
@@ -550,10 +574,15 @@ public sealed class NormalizedCellStore(EcrDbContext db, ArchiveAwareCellReader?
             // ⚠ Лише ambient-гілка (запис користувача: PATCH, імпорт): коротке очікування блокувань і
             // 409 ECR-DOC-4091 замість 500 (TIER2 N-3, `LockWaitGuard`). Власна транзакція нижче —
             // фонові перерахунки, їм чекати довше нормально.
+            // ⚠ AN-106: перерахунок (`RecalculationService`) теж пише в ambient-транзакції, тож і він
+            // отримує 15 с замість `CommandTimeout` — задача падає раніше, а не зависає.
+            // ⚠ AN-106: ліміт, уже виставлений на початку цієї транзакції (`LimitLockWaitAsync`),
+            // вдруге не виставляється — бюджет звернень запису той самий (+1 SET на транзакцію).
             var upsertRows = 0;
             await LockWaitGuard.RunAsync(
                 connection,
                 joined,
+                limitAlreadySet: ReferenceEquals(_lockWaitLimitedFor, joined),
                 async () =>
                 {
                     await ClaimRowsAsync(connection, joined, sets, versions, ct).ConfigureAwait(false);

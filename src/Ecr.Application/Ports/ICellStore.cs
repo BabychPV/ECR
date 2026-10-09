@@ -97,6 +97,20 @@ public interface ICellStore
     /// </remarks>
     public Task<IReadOnlyDictionary<long, IReadOnlyDictionary<long, string>>> ApplyBatchAsync(
         IReadOnlyCollection<CellChangeSet> changes, CancellationToken ct);
+
+    /// <summary>
+    /// Обмежує очікування блокувань у відкритій транзакції запису комірок — до першого оператора,
+    /// що може впертися в чуже блокування (стеля рядків, нові рядки).
+    /// </summary>
+    /// <param name="ct">Скасування.</param>
+    /// <returns>Завдання.</returns>
+    /// <remarks>
+    /// ⛔ AN-106 (P1-01): без цього вставка нових рядків під ескальованим блокуванням переносу версії
+    /// чекала весь <c>CommandTimeout</c> і закінчувалась 500. Вичерпане очікування — <c>409
+    /// ECR-DOC-4091</c> (<c>err.ECR-DOC-4091.lockTimeout</c>). Поза транзакцією й у сховищ без SQL —
+    /// нічого.
+    /// </remarks>
+    public Task LimitLockWaitAsync(CancellationToken ct) => Task.CompletedTask;
 }
 
 /// <summary>Комірка з адресою і значенням.</summary>

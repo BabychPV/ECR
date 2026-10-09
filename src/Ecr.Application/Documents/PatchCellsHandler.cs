@@ -2255,6 +2255,11 @@ public sealed partial class PatchCellsHandler(
         await uow.ExecuteInTransactionAsync(async innerCt =>
         {
             await EnsureSheetStillEditableAsync(context, planned, innerCt).ConfigureAwait(false);
+
+            // ⛔ AN-106 (P1-01): ліміт очікування блокувань — до стелі рядків і вставки нових рядків,
+            // а не лише перед записом значень: під ескальованим блокуванням переносу версії вставка в
+            // `doc.TableRow` чекала весь `CommandTimeout` і закінчувалась 500. Той самий єдиний `SET`.
+            await cellStore.LimitLockWaitAsync(innerCt).ConfigureAwait(false);
             await EnsureRowLimitUnderLockAsync(request, context, innerCt).ConfigureAwait(false);
 
             // ⛔ `DAT-04` п. 1: рядки — ПІСЛЯ блокування аркуша й усіх відмов,

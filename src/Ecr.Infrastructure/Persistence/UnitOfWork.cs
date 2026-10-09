@@ -470,7 +470,7 @@ public sealed class UnitOfWork(
 
         if (db.Database.CurrentTransaction is not null)
         {
-            await operation(ct).ConfigureAwait(false);
+            await TranslatingLockWaitAsync(() => operation(ct)).ConfigureAwait(false);
             return;
         }
 
@@ -504,13 +504,43 @@ public sealed class UnitOfWork(
                 }
 
                 await using var transaction = await db.Database.BeginTransactionAsync(ct).ConfigureAwait(false);
-                await operation(ct).ConfigureAwait(false);
-                await transaction.CommitAsync(ct).ConfigureAwait(false);
+                await TranslatingLockWaitAsync(async () =>
+                {
+                    await operation(ct).ConfigureAwait(false);
+                    await transaction.CommitAsync(ct).ConfigureAwait(false);
+                }).ConfigureAwait(false);
             }).ConfigureAwait(false);
         }
         finally
         {
             checkpoint?.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// Вичерпане очікування блокування (<c>SqlException 1222</c>) будь-якого оператора транзакції —
+    /// <c>409 ECR-DOC-4091</c> <c>lockTimeout</c>, а не сирий виняток (500).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ AN-106 (P1-01, аудит 2026-10-09b). <c>SET LOCK_TIMEOUT</c> запису комірок
+    /// (<see cref="LockWaitGuard"/>) — налаштування сеансу: після охоронця воно діє й на аудит
+    /// <c>aud.CellChange</c>, «дотик» документа і <c>SaveChanges</c>. Їхній 1222 (під ескальованим
+    /// блокуванням аудиту чи переносу версії) виходив сирим <c>SqlException</c> /
+    /// <c>DbUpdateException</c> → 500. 1222 буває лише після <c>SET LOCK_TIMEOUT</c>, тож чужих
+    /// таймаутів (клієнтський <c>-2</c>) переклад не ховає.
+    ///
+    /// ⚠ Усередині замикання стратегії повторів: відмова — не транзієнтна, повторювати її
+    /// (ще 15 с очікування на тому самому блокуванні) нема сенсу.
+    /// </remarks>
+    private static async Task TranslatingLockWaitAsync(Func<Task> body)
+    {
+        try
+        {
+            await body().ConfigureAwait(false);
+        }
+        catch (Exception ex) when (LockWaitGuard.FindLockWaitTimeout(ex) is { } timeout)
+        {
+            throw LockWaitGuard.Busy(timeout);
         }
     }
 
