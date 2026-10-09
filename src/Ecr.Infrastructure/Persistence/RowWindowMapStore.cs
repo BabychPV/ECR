@@ -79,6 +79,34 @@ public sealed class RowWindowMapStore(EcrDbContext db) : IRowWindowMapStore
     }
 
     /// <inheritdoc />
+    public async Task<int> SupersedeFoldedValuesAsync(
+        int rowWindowMapId, IReadOnlyList<RowWindowFetchRequest> instances, int sourceEntityId, string sourceField, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(instances);
+        ArgumentException.ThrowIfNullOrWhiteSpace(sourceField);
+
+        if (instances.Count == 0)
+        {
+            return 0;
+        }
+
+        var ids = instances.Select(i => i.TableInstanceId).Distinct().ToList();
+        var periods = instances.Select(i => i.PeriodKey).Distinct().ToList();
+
+        // Запитом, а не через трекер — як і зняття чинного в RowWindowFetchJob (L3-03); ключ партиції в умові.
+        return await db.RowWindowValues
+            .Where(v => v.IsCurrent
+                        && v.RowWindowMapId == rowWindowMapId
+                        && periods.Contains(v.PeriodKey)
+                        && ids.Contains(v.TableInstanceId)
+                        && v.SourceEntityId == sourceEntityId
+                        && v.SourceField == sourceField
+                        && (v.Status == RowWindowValueStatus.Fetched || v.Status == RowWindowValueStatus.Partial))
+            .ExecuteUpdateAsync(set => set.SetProperty(v => v.IsCurrent, false), ct)
+            .ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
     public Task<int> CountValuesAsync(int mapId, CancellationToken ct)
         => db.RowWindowValues.CountAsync(v => v.RowWindowMapId == mapId, ct);
 

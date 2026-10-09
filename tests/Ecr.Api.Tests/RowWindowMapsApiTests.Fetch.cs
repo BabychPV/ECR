@@ -81,6 +81,63 @@ public sealed partial class RowWindowMapsApiTests
         await ExpectFetchAsync(jobs, stand, times: 0);
     }
 
+    /// <summary>
+    /// X3-04: зміна форми ряду (<c>IsStep</c>) чи одиниці джерела атрибута знімає чинність із підтягнутого запису
+    /// закритого вікна — поставлена задача перечитує рядок за новою конфігурацією. Зміна, що згортки не стосується
+    /// (<c>RefetchWithinDays</c>), запис лишає чинним.
+    /// </summary>
+    /// <remarks>
+    /// До виправлення провенанс (<c>RowWindowProvenance</c>) цих полів не містив, <c>NeedsFetch</c> для закритого
+    /// вікна <c>Fetched</c> повертав <c>false</c>, і в комірці лишалося число за старою конфігурацією.
+    /// Мутація: прибрати виклик <c>SupersedeFoldedValuesAsync</c> з <c>UpdateRowWindowMapHandler</c> → запис лишається
+    /// чинним після зміни <c>IsStep</c>, червоний.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "X3-04")]
+    public async Task Зміна_IsStep_чи_одиниці_джерела_знімає_чинність_із_підтягнутого_закритого_вікна()
+    {
+        await using var stand = await ArrangeAsync();
+        await ExecuteAsync(
+            $"UPDATE doc.Period SET State = {(int)PeriodState.Open} WHERE ProjectId = {stand.ProjectId} AND PeriodKey = 202601");
+
+        // ⚠ Черга підроблена: справжня задача сама зняла б чинність, перечитавши рядок, і тест нічого б не довів.
+        var jobs = Substitute.For<IBackgroundJobScheduler>();
+        using var app = new EcrApiFactory(sql);
+        using var host = app.WithWebHostBuilder(b => b.ConfigureTestServices(services => services.AddSingleton(jobs)));
+        using var manager = await SignedInAsync(app, ["Integration.Manage"], stand.ProjectId, GrantLevel.Manage, host);
+
+        var id = await CreateAsync(manager, stand, stand.TargetA);
+        var one = new Uri($"/api/v1/row-window-maps/{id}", UriKind.Relative);
+        var current = $"SELECT COUNT(*) FROM ext.RowWindowValue WHERE RowWindowMapId = {id} AND IsCurrent = 1";
+
+        // Підтягнутий запис закритого вікна (Fetched) за атрибутом джерела A.
+        await AddValueAsync(stand, id);
+        Assert.Equal(1, await ScalarAsync(current));
+
+        // Контроль: зміна, що згортки не стосується, — запис лишається чинним.
+        Assert.Equal(HttpStatusCode.OK, (await manager.PutAsJsonAsync(one, Replace(stand, refetchWithinDays: 3))).StatusCode);
+        Assert.Equal(1, await ScalarAsync(current));
+
+        // Форма ряду змінилась — число за старою конфігурацією більше не «вже підтягнуте».
+        Assert.Equal(
+            HttpStatusCode.OK,
+            (await manager.PutAsJsonAsync(one, Replace(stand, isStep: true, refetchWithinDays: 3))).StatusCode);
+        Assert.Equal(0, await ScalarAsync(current));
+        Assert.Equal(1, await ScalarAsync($"SELECT COUNT(*) FROM ext.RowWindowValue WHERE RowWindowMapId = {id}"));
+
+        // Одиниця джерела атрибута змінилась (решта та сама) — так само.
+        await AddValueAsync(stand, id);
+        Assert.Equal(
+            HttpStatusCode.OK,
+            (await manager.PutAsJsonAsync(
+                one,
+                Replace(stand, isStep: true, refetchWithinDays: 3, sources: [Source("A", stand.EntityId, "Flare.Total", stand.UnitTarget)])))
+            .StatusCode);
+        Assert.Equal(0, await ScalarAsync(current));
+    }
+
     private static async Task ExpectFetchAsync(IBackgroundJobScheduler jobs, Stand stand, int times)
         => await jobs.Received(times).EnqueueCoalescedAsync<IRowWindowFetchJob>(
             RowWindowFetchTarget.Of(stand.InstanceId),

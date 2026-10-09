@@ -51,4 +51,21 @@ public interface IRowWindowMapStore
     /// <param name="limit">Стеля екземплярів.</param>
     /// <param name="ct">Скасування.</param>
     public Task<IReadOnlyList<RowWindowFetchRequest>> OpenInstancesAsync(int tableDefId, int limit, CancellationToken ct);
+
+    /// <summary>
+    /// Знімає чинність із підтягнутих (<c>Fetched</c>/<c>Partial</c>) записів провенансу прив'язки за атрибутом
+    /// у названих екземплярах — після зміни конфігурації згортки, якої провенанс не містить (X3-04).
+    /// </summary>
+    /// <param name="rowWindowMapId">Прив'язка.</param>
+    /// <param name="instances">Екземпляри (відкриті періоди).</param>
+    /// <param name="sourceEntityId">Сутність джерела.</param>
+    /// <param name="sourceField">Шлях атрибута.</param>
+    /// <param name="ct">Скасування.</param>
+    /// <returns>Скільки записів знято.</returns>
+    /// <remarks>
+    /// ⚠ <c>NotApplicable</c>/<c>InvalidWindow</c>/<c>KeptManual</c>/<c>NoData</c>/<c>SourceError</c> не знімаються:
+    /// від конфігурації згортки вони не залежать (чи повторюються за своєю політикою), а <c>KeptManual</c> — рішення людини.
+    /// </remarks>
+    public Task<int> SupersedeFoldedValuesAsync(
+        int rowWindowMapId, IReadOnlyList<RowWindowFetchRequest> instances, int sourceEntityId, string sourceField, CancellationToken ct);
 }

@@ -161,6 +161,61 @@ internal static class RowWindowMapSupport
         => new[] { map.TargetColumnDefId, map.StartColumnDefId, map.EndColumnDefId, map.SelectorColumnDefId ?? 0 }
             .Where(id => id != 0);
 
+    /// <summary>
+    /// Те з конфігурації прив'язки, що змінює число чи статус згортки, але НЕ входить у провенанс підтягування
+    /// (<see cref="RowWindowProvenance"/>): форма ряду, поріг прогалини, поріг покриття й одиниця джерела (X3-04).
+    /// </summary>
+    /// <param name="IsStep">Форма ряду.</param>
+    /// <param name="MaxGapSeconds">Поріг прогалини.</param>
+    /// <param name="MinPercentGood">Поріг покриття.</param>
+    /// <param name="Sources">Атрибути джерел з одиницею джерела.</param>
+    public sealed record FoldConfig(
+        bool IsStep,
+        int? MaxGapSeconds,
+        decimal MinPercentGood,
+        IReadOnlyList<(int SourceEntityId, string SourceField, int SourceUnitId)> Sources)
+    {
+        /// <summary>Знімок поточної конфігурації згортки прив'язки.</summary>
+        /// <param name="map">Прив'язка.</param>
+        public static FoldConfig Of(RowWindowMap map)
+        {
+            ArgumentNullException.ThrowIfNull(map);
+
+            return new(
+                map.IsStep,
+                map.MaxGapSeconds,
+                map.MinPercentGood,
+                [.. map.Sources.Select(s => (s.SourceEntityId, s.SourceField, s.SourceUnitId))]);
+        }
+    }
+
+    /// <summary>
+    /// Атрибути НОВОЇ конфігурації, чиї вже підтягнуті числа порахувала стара конфігурація згортки (X3-04).
+    /// </summary>
+    /// <param name="before">Конфігурація згортки до зміни.</param>
+    /// <param name="after">Прив'язка після зміни.</param>
+    /// <remarks>
+    /// Змінилися форма ряду, поріг прогалини чи поріг покриття — усі атрибути прив'язки; змінилася одиниця джерела
+    /// атрибута — лише він. ⚠ Атрибути, яких у новій конфігурації немає, сюди НЕ потрапляють: їхні рядки задача
+    /// бачить через чинний запис (провенанс, «немає джерела», журнал I1-03), і зняття чинності його б загубило.
+    /// </remarks>
+    public static IReadOnlyList<(int SourceEntityId, string SourceField)> Refolded(FoldConfig before, RowWindowMap after)
+    {
+        ArgumentNullException.ThrowIfNull(before);
+        ArgumentNullException.ThrowIfNull(after);
+
+        var all = before.IsStep != after.IsStep
+                  || before.MaxGapSeconds != after.MaxGapSeconds
+                  || before.MinPercentGood != after.MinPercentGood;
+
+        return [.. after.Sources
+            .Where(s => all || before.Sources.Any(o => o.SourceEntityId == s.SourceEntityId
+                                                       && string.Equals(o.SourceField, s.SourceField, StringComparison.OrdinalIgnoreCase)
+                                                       && o.SourceUnitId != s.SourceUnitId))
+            .GroupBy(s => (s.SourceEntityId, Field: s.SourceField.ToUpperInvariant()))
+            .Select(g => (g.Key.SourceEntityId, g.First().SourceField))];
+    }
+
     /// <summary>Стеля екземплярів, яким одна правка прив'язки ставить підтягування.</summary>
     /// <remarks>Та сама, що в щогодинного повтору (<c>RowWindowRefetchJob.MaxInstances</c>).</remarks>
     public const int MaxFetchInstances = 1_000;
@@ -532,6 +587,7 @@ public sealed class UpdateRowWindowMapHandler(
         await RowWindowMapSupport.RequireReferencesAsync(sources, command.TargetUnitId, inputs, ct).ConfigureAwait(false);
 
         var old = IntegrationConfigAudit.Snapshot(await RowWindowMapSupport.ToDtoAsync(store, map, ct).ConfigureAwait(false));
+        var foldBefore = RowWindowMapSupport.FoldConfig.Of(map);
 
         // Спершу перевірка домену (стан не змінюється, доки вона не пройшла), потім позначка старих джерел до
         // видалення, потім заміна: відмова не лишає відстежених джерел без власника.
@@ -547,10 +603,31 @@ public sealed class UpdateRowWindowMapHandler(
         map.ClearSources();
         RowWindowMapSupport.ApplyPolicyAndSources(map, command.MinPercentGood, command.RefetchWithinDays, command.MaxGapSeconds, inputs);
         map.SetActive(command.IsActive);
+        var refolded = map.IsActive ? RowWindowMapSupport.Refolded(foldBefore, map) : [];
 
         await uow.ExecuteInTransactionAsync(async innerCt =>
         {
             await store.SaveAsync(innerCt).ConfigureAwait(false);
+
+            // ⛔ X3-04: форма ряду, поріг прогалини, поріг покриття й одиниця джерела змінюють число (чи статус), але
+            // не входять у провенанс — без цього закрите вікно Fetched/Partial лишалося «вже підтягнутим» за старою
+            // конфігурацією, а UI показував нову. Зняття чинності — та сама операція, що й у звичайному повторі
+            // (історія лишається); тоді NeedsFetch(current: null) дає true, і поставлена нижче задача перечитує
+            // рядки. ⚠ Лише відкриті екземпляри (ті, яким ставиться задача). Задача, що вже виконується й прочитала
+            // прив'язку до PUT, може ще записати число за старою конфігурацією — закрити це можна лише відбитком
+            // конфігурації в провенансі (міграція).
+            if (refolded.Count > 0)
+            {
+                var open = await store
+                    .OpenInstancesAsync(map.TableDefId, RowWindowMapSupport.MaxFetchInstances, innerCt)
+                    .ConfigureAwait(false);
+                foreach (var (sourceEntityId, sourceField) in refolded)
+                {
+                    await store
+                        .SupersedeFoldedValuesAsync(map.Id, open, sourceEntityId, sourceField, innerCt)
+                        .ConfigureAwait(false);
+                }
+            }
 
             await IntegrationConfigAudit.WriteAsync(
                 audit, clock, currentUser, IntegrationConfigAudit.RowWindowMapType, map.Id, AuditOperation,
@@ -559,7 +636,7 @@ public sealed class UpdateRowWindowMapHandler(
         }, ct).ConfigureAwait(false);
 
         // Колонки Початку/Кінця/селектора могли змінитися, а активність — вимкнутися: скидаємо знімок індексу.
-        // Старі RowWindowValue лишаються історією — PUT їх не чіпає.
+        // Старі RowWindowValue лишаються історією — PUT лише знімає чинність (X3-04 вище), не видаляє.
         columnIndex.Invalidate();
 
         // ⛔ Аудит I1-02: нова конфігурація (джерела, згортка, одиниця) чи відновлення з паузи — рядки
