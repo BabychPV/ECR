@@ -10,6 +10,7 @@ import {
   useMantineColorScheme,
 } from '@mantine/core';
 import { useNavigate } from 'react-router-dom';
+import { useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { apiFetch, beginSignOut, LOGOUT_PATH } from '@/api/client';
 import { t } from '@/shared/i18n';
 import { applyDensity, setDensity, useDensity, type Density } from '@/shared/theme/preferences';
@@ -43,6 +44,7 @@ export function UserMenu({
   changePasswordPath: string;
 }): JSX.Element {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const { colorScheme, setColorScheme } = useMantineColorScheme();
   // ⚠ Підписка (`shared/theme/preferences.ts`), а не власний `useState`:
   // компонент сам перечитує щільність, що прийшла ЗВІДКИ ЗАВГОДНО (клік
@@ -124,7 +126,7 @@ export function UserMenu({
 
         <Menu.Item onClick={() => navigate(changePasswordPath)}>{t('password.title')}</Menu.Item>
 
-        <Menu.Item onClick={signOut}>
+        <Menu.Item onClick={() => void signOut(queryClient)}>
           <Group justify="space-between">{t('profile.logout')}</Group>
         </Menu.Item>
       </Menu.Dropdown>
@@ -146,13 +148,19 @@ export function UserMenu({
  * ⛔ A2-06: `beginSignOut()` — ДО запиту виходу. Інакше опитування й фонові
  * перезапити, що спрацювали між кліком і перезавантаженням, ішли вже без
  * cookie і давали `401` (і власне перенаправлення з `?from=`).
+ *
+ * ⛔ AN-108 / S2-03: кеш запитів очищається ЯВНО, а перехід — `replace`, не
+ * `assign`: сторінка з даними користувача не лишається в історії під «Назад»
+ * на формі входу (і в bfcache — разом із `no-store` оболонки й `pageshow` у
+ * `main.tsx`).
  */
-async function signOut(): Promise<void> {
+async function signOut(queryClient: QueryClient): Promise<void> {
   beginSignOut();
 
   try {
     await apiFetch<void>(LOGOUT_PATH, { method: 'POST' });
   } finally {
-    window.location.assign('/login');
+    queryClient.clear();
+    window.location.replace('/login');
   }
 }

@@ -119,7 +119,9 @@ export function loginUrl(from: string, reason?: LoginReason): string {
 /** Куди перенаправляти при 401; підміняється в тестах. */
 let redirectToLogin: (from: string, reason?: LoginReason) => void = (from, reason) => {
   if (typeof window !== 'undefined') {
-    window.location.assign(loginUrl(from, reason));
+    // ⛔ AN-108 / S2-03: `replace`, не `assign` — сторінка з даними сеансу не лишається в історії (і в bfcache)
+    // під кнопкою «Назад» на формі входу. Повернення після входу несе `?from=`.
+    window.location.replace(loginUrl(from, reason));
   }
 };
 
