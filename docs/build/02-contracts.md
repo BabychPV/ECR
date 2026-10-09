@@ -4179,7 +4179,8 @@ public sealed class NotFoundException(string errorCode, string message)
 > елемент — `RegistryRuleViolationDto` `{entryId, entryCode, rule, severity, messageKey, params}`
 > (`messageKey` = `registries.rules.violated`, параметри `rule`, `entryCode`, `message`; для шаблону
 > «Сума дочірніх» — `value` = Σ; помилка-значення виразу — `errorCode`; правило, яке не розбирається, —
-> `registries.rules.invalid`). Пакет із `dryRun` повертає в `rules[]` і рівень `Error` (відповідь 200,
+> `registries.rules.invalid`; правило, не перевірене через вичерпаний спільний бюджет обчислень пакета (L5-12), —
+> `registries.rules.budgetExhausted` свого рівня, без `errorCode`). Пакет із `dryRun` повертає в `rules[]` і рівень `Error` (відповідь 200,
 > нічого не записано); прев'ю CSV (`dryRun`) правил не виконує. `UniqueWithin` не виконується (`R-5`).
 > Збереження опису (`PUT …/definition`, публікація чернетки): нові, змінені й знову ввімкнені правила
 > розбираються граматикою правил (діалект `Template`, `THIS`, `ROW.`) і перевіряються за формами

@@ -242,6 +242,37 @@ public sealed class RegistrySnapshotLoaderTests(SqlServerFixture sql)
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Directive", "RT-22")]
+    [Trait("Requirement", "L5-12")]
+    public async Task L5_12__джерело_читається_з_бази_раз_а_знімок_на_кожну_дату_будується_без_бази()
+    {
+        var f = await ArrangeAsync();
+        var counter = new DbCommandCounter();
+        await using var db = CountingContext(counter);
+
+        counter.Tally.Reset();
+        var source = await new RegistrySnapshotLoader(db).LoadSourceAsync(
+            [f.StreamId, f.CaseId, f.CompositionId, f.ComponentId], registryAsOfUtc: null, CancellationToken.None);
+        var reads = counter.Tally.Snapshot().Total;
+        Assert.InRange(reads, 1, 5);
+
+        // Дві дати вікна, яке розділяє 15 червня, — і жодного нового запиту.
+        counter.Tally.Reset();
+        var endOfMonth = source.Build(EndOfJune);
+        var before = source.Build(June14);
+        Assert.Equal(0, counter.Tally.Snapshot().Total);
+
+        // Знімок із джерела той самий, що дає LoadAsync на ту саму дату.
+        Assert.Equal([f.CaseOpen], endOfMonth.GetEntries(f.CaseCode)!);
+        Assert.Equal([f.CaseClosed], before.GetEntries(f.CaseCode)!);
+        var direct = await LoadAsync(f, EndOfJune);
+        Assert.Equal(direct.GetEntries(f.CaseCode)!, endOfMonth.GetEntries(f.CaseCode)!);
+        Assert.Equal(direct.GetEntries(f.CompositionCode)!, endOfMonth.GetEntries(f.CompositionCode)!);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Directive", "RT-22")]
     public async Task Порожній_перелік_не_звертається_до_бази()
     {
         var counter = new DbCommandCounter();

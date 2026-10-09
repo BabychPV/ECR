@@ -6710,6 +6710,10 @@ USING (VALUES
     -- COLL:an37m ── AN-37 L7-08: гонка двох публікацій на одну дату (версію-суперника база не називає); ru/kz — порцією COLL:an37m у блоці I18N нижче ──
     (N'err.ECR-CALC-0409.effectiveDateTakenNoVersion', N'en', N'Another version of this methodology was published with effective date {effectiveFrom} at the same moment. Two published versions with the same start date make the methodology choice ambiguous: reload the methodology and publish with another date.', 1),
     -- COLL:an37m ── кінець секції ──
+    -- COLL:an83 ── AN-83 (L5-12, L5-08): правило не перевірено — бюджет пакета вичерпано; 409 «код зайнятий» без Id забороненого довідника; ru/kz — порцією COLL:an83 нижче ──
+    (N'registries.rules.budgetExhausted', N'en', N'Rule {rule} was not checked for entry {entryCode}: the check ran out of its work budget. Save fewer entries at once or simplify the rule.', 1),
+    (N'err.ECR-REG-4091.registryCodeTakenHidden', N'en', N'A registry with code "{code}" already exists: the code is what registry-lookup fields and template columns reference it by.', 1),
+    -- COLL:an83 ── кінець секції ──
     -- COLL:an42vm ── T2-07/T3-03/T4-06: повідомлення валідації зберігаються ключем + підстановками, текст — мовою читача; ru/kz — порцією COLL:an42vm у блоці I18N нижче ──
     (N'validation.check.mismatch', N'en', N'Check: {left} = {leftValue} does not match {right} = {rightValue}: deviation {deviation}, allowed {allowed} ({kind}).', 1),
     (N'validation.column.required', N'en', N'Column "{column}" is required.', 1),
@@ -18074,6 +18078,19 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:an72-rule-concurrent ── кінець секції ──
+
+-- COLL:an83 ── ru/kz AN-83 (L5-12, L5-08); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'registries.rules.budgetExhausted', N'ru', N'Правило {rule} не проверено для записи {entryCode}: проверка исчерпала свой бюджет работы. Сохраняйте меньше записей за раз или упростите правило.'),
+    (N'err.ECR-REG-4091.registryCodeTakenHidden', N'ru', N'Справочник с кодом «{code}» уже существует: по этому коду на него ссылаются поля выбора из справочника и столбцы шаблонов.'),
+    (N'registries.rules.budgetExhausted', N'kz', N'{rule} ережесі {entryCode} жазбасы үшін тексерілмеді: тексеру өзінің жұмыс бюджетін таусты. Бір мезгілде аз жазба сақтаңыз немесе ережені жеңілдетіңіз.'),
+    (N'err.ECR-REG-4091.registryCodeTakenHidden', N'kz', N'«{code}» коды бар анықтамалық бұрыннан бар: анықтамалықтан таңдау өрістері мен үлгі бағандары оған осы код арқылы сілтеме жасайды.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:an83 ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t
