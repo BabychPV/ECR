@@ -71,6 +71,13 @@ internal static class DeployArguments
             result.Add(new("SkipSchema", null));
         }
 
+        // ⛔ AN-117 (S2-04): перевірку свіжої копії скрипт пропускає ЛИШЕ за явною позначкою на кроці бази
+        // («копію зроблено поза SQL Server / я приймаю ризик»); свіжа копія в msdb його не вмикає.
+        if (state.SkipBackupCheck)
+        {
+            result.Add(new("SkipBackupCheck", null));
+        }
+
         if (state.ServiceAccountMode != ServiceAccountMode.LocalSystem)
         {
             result.Add(new("ServiceAccount", state.ServiceAccountName));
