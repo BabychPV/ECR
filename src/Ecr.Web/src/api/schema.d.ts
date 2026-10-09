@@ -22127,7 +22127,9 @@ export interface components {
             sequence: number;
             /**
              * Format: date-time
-             * @description Початок періоду в поясі майданчика.
+             * @description Момент ВІДКРИТТЯ періоду в поясі майданчика — `Period.ComputedOpenAt`
+             *     (`PeriodStart + OpenOffsetDays`), а не календарний початок місяця. Зсув політики вже врахований:
+             *     клієнт не має додавати `OpenOffsetDays` удруге (N4-01).
              */
             startsAt: string;
             /** @description Стан; обчислює `PeriodStateJob`, а не запит. */

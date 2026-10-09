@@ -8858,7 +8858,7 @@
             "type": "integer"
           },
           "startsAt": {
-            "description": "Початок періоду в поясі майданчика.",
+            "description": "Момент ВІДКРИТТЯ періоду в поясі майданчика — `Period.ComputedOpenAt`\n(`PeriodStart + OpenOffsetDays`), а не календарний початок місяця. Зсув політики вже врахований:\nклієнт не має додавати `OpenOffsetDays` удруге (N4-01).",
             "format": "date-time",
             "type": "string"
           },
