@@ -54,6 +54,15 @@
     Developer/Enterprise. Для одноразових стендів (CI-раннер має ~14 ГБ
     вільного). Продуктивна поведінка без перемикача не змінюється.
 
+.PARAMETER Force
+    Дозволити ЗНИЩИТИ наявну базу `-Database`, яка не має позначки `Ecr_DevDb`
+    (її ставить цей самий скрипт одразу після `CREATE DATABASE`). Без перемикача
+    така база — відмова ДО `DROP`: `setup-dev-db.ps1 -Database <робоча база>` не
+    повинен стирати нічого, що створив не він (L10-13). Створені раніше за позначку
+    бази перестворюються з `-Force` один раз; далі позначка є. `smoke.ps1` і
+    `e2e-stand.ps1` передають `-Force` самі: свою тимчасову базу вони вже перевірили
+    за власною позначкою (`Ecr_Smoke_Temp`/`Ecr_E2E_Temp`) до виклику цього скрипту.
+
 .PARAMETER StartupTimeoutSec
     Скільки чекати `/health/live` застосунку на старті із сідом. Умовчання 60 с
     (як і раніше); холодному CI-раннеру дають більше параметром.
@@ -105,7 +114,10 @@ param(
     [string] $Login,
     [string] $Password = $env:ECR_SQL_PASSWORD,
     [switch] $SmallFiles,
-    [int] $StartupTimeoutSec = 60
+    [int] $StartupTimeoutSec = 60,
+
+    # L10-13: див. `.PARAMETER Force`. Без нього наявна база без позначки `Ecr_DevDb` не видаляється.
+    [switch] $Force
 )
 
 $ErrorActionPreference = 'Stop'
@@ -341,6 +353,29 @@ Invoke-NativeStep "dotnet ef migrations script" {
 }
 
 if (-not $Upgrade) {
+# ⛔ L10-13: нижче база з цим іменем безумовно ЗНИЩУЄТЬСЯ (DROP DATABASE). Без позначки
+# `Ecr_DevDb` (її ставить цей самий скрипт після CREATE) і без -Force — відмова ДО DROP.
+# Вивід спершу ЗБИРАЄТЬСЯ, а не `Select -First 1` у конвеєрі (див. гілку -Upgrade вище).
+if (-not $Force) {
+    $guardEap = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $guardOutput = & sqlcmd -S $Server @sqlAuth -C -b -h -1 -W -d master `
+            -Q "SET NOCOUNT ON; DECLARE @r int = 0; IF DB_ID(N'$Database') IS NOT NULL EXEC sp_executesql N'SELECT @r = CASE WHEN EXISTS (SELECT 1 FROM [$Database].sys.extended_properties WHERE class = 0 AND name = N''Ecr_DevDb'') THEN 0 ELSE 1 END', N'@r int OUTPUT', @r OUTPUT; SELECT @r;" 2>&1
+        $guardExitCode = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $guardEap
+    }
+    if ($guardExitCode -ne 0) {
+        throw "Не вдалося перевірити, чи є база $Database на $Server (sqlcmd повернув $guardExitCode): $($guardOutput -join ' ')"
+    }
+    $foreignDatabase = $guardOutput | Where-Object { "$_" -match '^\s*[01]\s*$' } | Select-Object -First 1
+    if ("$foreignDatabase".Trim() -eq '1') {
+        throw "База $Database на $Server вже існує і не має позначки Ecr_DevDb (її створив не цей скрипт) - розгортання знищило б її. Задай інше -Database, прибери базу вручну або повтори з -Force, якщо це справді одноразова база."
+    }
+}
+
 Write-Host "Створюю базу $Database…"
 Invoke-Sql -Db 'master' -Query @"
 IF DB_ID('$Database') IS NOT NULL
@@ -354,6 +389,10 @@ ON PRIMARY (NAME = N'$Database', FILENAME = N'$DataPath\$Database.mdf')
 LOG ON      (NAME = N'${Database}_log', FILENAME = N'$DataPath\${Database}_log.ldf')
 "@ });
 "@
+
+# ⛔ L10-13: позначка «цю базу створив setup-dev-db.ps1» — ДО решти кроків. Без неї
+# наступний запуск без -Force відмовиться перестворювати власну ж базу.
+Invoke-Sql -Db $Database -Query "EXEC sys.sp_addextendedproperty @name = N'Ecr_DevDb', @value = 1;"
 
 # ⚠ Каталог файлів бази. Типовий каталог інстансу — це диск, який обирали не
 # під ECR: 2026-09-18 стенди вибрали його до 0.15 ГБ із 293, бо кожна база тут
