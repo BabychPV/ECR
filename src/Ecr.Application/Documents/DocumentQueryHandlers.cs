@@ -108,6 +108,7 @@ public sealed class ListDocumentsHandler(
         // ⛔ Фільтр за станом рахується лише по аркушах, які читач бачить: інакше `state=Rejected`
         // знаходить документ, відхилений схованим аркушем, — оракул (смуга зведення цього не показує).
         // ⛔ Так само позначка і фільтр `hasLateEdits` не враховують пізні правки схованих колонок (R-7).
+        // ⛔ N1-01: межі ідуть ПАРАМИ «проєкт, Id» (версія шаблону спільна для кількох проєктів).
         filter = await DocumentSheetVisibility
             .HiddenFilterAsync(samples, access, profile, visibleProjects, periodKey, filter, ct).ConfigureAwait(false);
 
@@ -343,7 +344,7 @@ public sealed class GetDocumentHandler(
             {
                 HasLateEdits = await documents
                     .HasVisibleLateEditsAsync(
-                        document.Id, new PeriodKeyFilter(periodKey), DocumentSheetVisibility.HiddenOf(scope), ct)
+                        document.Id, new PeriodKeyFilter(periodKey), DocumentSheetVisibility.HiddenOf(scope, document.ProjectId), ct)
                     .ConfigureAwait(false),
             };
         }

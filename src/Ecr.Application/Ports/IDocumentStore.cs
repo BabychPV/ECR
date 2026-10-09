@@ -112,16 +112,19 @@ public sealed record DocumentSheetState(string Code, LocalizedText NameL10n, str
 /// рядку (<c>BE-09b</c>) — не друге визначення «пізньої правки».
 /// </param>
 /// <param name="HiddenSheetDefIds">
-/// Аркуші, яких читач не бачить: зведений стан для <paramref name="State"/> рахується
+/// Аркуші, яких читач не бачить, ПАРАМИ «проєкт, аркуш»: зведений стан для <paramref name="State"/> рахується
 /// лише по решті (інакше фільтр за станом знаходить документ за станом схованого аркуша —
 /// оракул). <c>null</c> — читач без обмежень.
+/// ⛔ N1-01: версія шаблону спільна для кількох проєктів, а межі читача — по проєкту (<c>Deny Sheet</c> може
+/// стояти лише в A). Плаский перелік Id прибирав би аркуш і з документів B; пара діє лише на документи свого
+/// проєкту.
 /// </param>
 /// <param name="HiddenTableDefIds">
-/// Таблиці, яких читач не бачить: пізня правка їхніх колонок не дає позначку
+/// Таблиці, яких читач не бачить (пари «проєкт, таблиця», як і для аркушів): пізня правка їхніх колонок не дає позначку
 /// <see cref="DocumentSummary.HasLateEdits"/> і не потрапляє у фільтр <paramref name="HasLateEdits"/>
 /// (інакше позначка розкриває активність схованого аркуша, R-7). <c>null</c> — немає.
 /// </param>
-/// <param name="HiddenColumnDefIds">Колонки, яких читач не бачить: те саме, що й для таблиць.</param>
+/// <param name="HiddenColumnDefIds">Колонки, яких читач не бачить (пари «проєкт, колонка»): те саме, що й для таблиць.</param>
 /// <param name="Query">
 /// Пошук (UI-18): підрядок у коді (<c>BusinessKey</c>) або назві документа, без
 /// урахування регістру; <c>null</c> — без пошуку. Шукає ЛИШЕ по полях самого
@@ -138,9 +141,9 @@ public sealed record DocumentSheetState(string Code, LocalizedText NameL10n, str
 /// <param name="NarrowedProjectIds">Проєкти, де читач не бачить хоч щось (аркуш, таблицю, колонку): їхні документи поза фільтром <paramref name="ResultsStale"/>.</param>
 public readonly record struct DocumentListFilter(
     DocumentStatus? State, int? MineUserId, bool? HasLateEdits = null,
-    IReadOnlyCollection<int>? HiddenSheetDefIds = null,
-    IReadOnlyCollection<int>? HiddenTableDefIds = null,
-    IReadOnlyCollection<int>? HiddenColumnDefIds = null,
+    IReadOnlyCollection<(int ProjectId, int Id)>? HiddenSheetDefIds = null,
+    IReadOnlyCollection<(int ProjectId, int Id)>? HiddenTableDefIds = null,
+    IReadOnlyCollection<(int ProjectId, int Id)>? HiddenColumnDefIds = null,
     string? Query = null,
     bool? ResultsStale = null,
     int? StaleByUserId = null,

@@ -187,7 +187,7 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
 
         if (filter.State is { } state && period.Value is { } periodKey)
         {
-            documents = WhereState(documents, state, periodKey, filter.HiddenSheetDefIds?.ToArray());
+            documents = WhereState(documents, state, periodKey, filter.HiddenSheetDefIds);
         }
 
         // BE-09b: та сама умова, що дає позначку в рядку (`LateEditDocumentIds`),
@@ -882,12 +882,20 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
     /// над таблицею.
     /// </remarks>
     private IQueryable<Document> WhereState(
-        IQueryable<Document> documents, DocumentStatus state, int periodKey, int[]? hiddenSheetDefIds)
+        IQueryable<Document> documents, DocumentStatus state, int periodKey,
+        IReadOnlyCollection<(int ProjectId, int Id)>? hiddenSheetDefIds)
     {
         // ⛔ Схований від читача аркуш не бере участі в зведеному стані (ту саму межу накладає смуга):
         // інакше `state=Rejected` знаходив би документ, відхилений лише схованим аркушем.
-        var hidden = hiddenSheetDefIds ?? [];
-        var sheets = db.DocumentSheets.Where(s => s.IsIncluded && !hidden.Contains(s.SheetDefId));
+        // ⛔ N1-01: схований — ПАРА «проєкт, аркуш»: версія шаблону спільна для кількох проєктів, а `Deny Sheet`
+        // може стояти лише в A. Плаский `SheetDefId IN (...)` ховав би цей аркуш і в документах B.
+        var sheets = db.DocumentSheets.Where(s => s.IsIncluded);
+        if (hiddenSheetDefIds is { Count: > 0 })
+        {
+            var hiddenRows = HiddenSheetRows(hiddenSheetDefIds);
+            sheets = sheets.Where(s => !hiddenRows.Contains(s.Id));
+        }
+
         var states = db.ApprovalStates.Where(a => a.PeriodKey == periodKey);
 
         Expression<Func<Document, bool>> rejected = d => sheets.Any(s => s.DocumentId == d.Id
@@ -912,6 +920,32 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
             _ => throw new ArgumentOutOfRangeException(nameof(state), state, "Невідомий стан документа."),
         };
     }
+
+    /// <summary>
+    /// Рядки складу (<c>doc.DocumentSheet.Id</c>), де аркуш схований від читача В ПРОЄКТІ документа (N1-01).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Сирий SQL із парами JSON-ом (<c>OPENJSON … WITH (p, i)</c>): пару «проєкт, аркуш» LINQ у `IN`
+    /// не перекладає, а предикат — той самий <c>h.p = d.ProjectId</c>, що в смузі
+    /// (<c>DocumentListSummaryStore</c>). Лишається <c>IQueryable</c> — компонується підзапитом.
+    /// </remarks>
+    private IQueryable<long> HiddenSheetRows(IReadOnlyCollection<(int ProjectId, int Id)> hidden)
+    {
+        var pairs = PairsJson(hidden);
+
+        return db.Database
+            .SqlQuery<long>($"""
+                SELECT ds.Id AS Value
+                  FROM doc.DocumentSheet AS ds
+                  JOIN doc.Document AS d ON d.Id = ds.DocumentId
+                  JOIN OPENJSON({pairs}) WITH (p int '$.p', i int '$.i') AS h
+                    ON h.p = d.ProjectId AND h.i = ds.SheetDefId
+                """);
+    }
+
+    /// <summary>Пари «проєкт, Id» як JSON-масив <c>[{"p":1,"i":2}]</c> для <c>OPENJSON</c>; <c>null</c> — порожній.</summary>
+    private static string PairsJson(IReadOnlyCollection<(int ProjectId, int Id)>? pairs)
+        => JsonSerializer.Serialize((pairs ?? []).Select(x => new { p = x.ProjectId, i = x.Id }));
 
     private static Expression<Func<T, bool>> Not<T>(Expression<Func<T, bool>> predicate)
         => Expression.Lambda<Func<T, bool>>(Expression.Not(predicate.Body), predicate.Parameters);
@@ -967,9 +1001,11 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
         // ⛔ R-7: пізня правка колонки, схованої від читача (аркуш/таблиця/колонка), не дає позначки —
         // інакше вона розкриває, що у схованому аркуші щось правили після прогону. Ідентифікатори йдуть
         // JSON-масивом (`OPENJSON`), бо перелік змінної довжини в сирий SQL параметрами не розгорнути.
-        var sheets = JsonSerializer.Serialize(hidden.HiddenSheetDefIds ?? []);
-        var tables = JsonSerializer.Serialize(hidden.HiddenTableDefIds ?? []);
-        var columns = JsonSerializer.Serialize(hidden.HiddenColumnDefIds ?? []);
+        // ⛔ N1-01: це ПАРИ «проєкт, Id» (`h.p = dd.ProjectId`): версія шаблону спільна для кількох проєктів,
+        // а схований аркуш/таблиця/колонка — лише в тому проєкті, де стоїть заборона чи звуження.
+        var sheets = PairsJson(hidden.HiddenSheetDefIds);
+        var tables = PairsJson(hidden.HiddenTableDefIds);
+        var columns = PairsJson(hidden.HiddenColumnDefIds);
 
         return db.Database
             .SqlQuery<long>($"""
@@ -981,10 +1017,14 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
                        SELECT 1
                          FROM cfg.ColumnDef AS cd
                          JOIN cfg.TableDef AS td ON td.Id = cd.TableDefId
+                         JOIN doc.Document AS dd ON dd.Id = c.DocumentId
                         WHERE cd.Id = c.ColumnDefId
-                          AND (cd.Id IN (SELECT CONVERT(int, j.value) FROM OPENJSON({columns}) AS j)
-                               OR td.Id IN (SELECT CONVERT(int, j.value) FROM OPENJSON({tables}) AS j)
-                               OR td.SheetDefId IN (SELECT CONVERT(int, j.value) FROM OPENJSON({sheets}) AS j)))
+                          AND (EXISTS (SELECT 1 FROM OPENJSON({columns}) WITH (p int '$.p', i int '$.i') AS h
+                                        WHERE h.p = dd.ProjectId AND h.i = cd.Id)
+                               OR EXISTS (SELECT 1 FROM OPENJSON({tables}) WITH (p int '$.p', i int '$.i') AS h
+                                           WHERE h.p = dd.ProjectId AND h.i = td.Id)
+                               OR EXISTS (SELECT 1 FROM OPENJSON({sheets}) WITH (p int '$.p', i int '$.i') AS h
+                                           WHERE h.p = dd.ProjectId AND h.i = td.SheetDefId)))
                 """);
     }
 

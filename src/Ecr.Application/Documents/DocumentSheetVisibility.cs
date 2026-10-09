@@ -77,24 +77,9 @@ public static class DocumentSheetVisibility
     }
 
     /// <summary>
-    /// Аркуші, яких читач не бачить у жодному з проєктів, — для фільтра переліку за станом.
-    /// Ідентифікатор аркуша належить версії шаблону, тож плоский перелік по проєктах не плутається.
-    /// </summary>
-    /// <param name="samples">Порт, що дає по одному документу проєкту для побудови меж.</param>
-    /// <param name="access">Служба доступу.</param>
-    /// <param name="profile">Профіль читача.</param>
-    /// <param name="projects">Проєкти, документи яких перелічуються.</param>
-    /// <param name="periodKey">Період запиту.</param>
-    /// <param name="ct">Скасування.</param>
-    public static async Task<IReadOnlyCollection<int>?> HiddenSheetIdsAsync(
-        IDocumentListSummaryStore samples, IAccessDecisionService access, AccessProfile profile,
-        IReadOnlyCollection<int> projects, int periodKey, CancellationToken ct)
-        => (await HiddenFilterAsync(samples, access, profile, projects, periodKey, default, ct).ConfigureAwait(false))
-            .HiddenSheetDefIds;
-
-    /// <summary>
     /// Фільтр переліку з тим, чого читач не бачить: аркуші, таблиці й колонки (R-7: пізня правка схованого
-    /// не дає позначки). Читач без обмежень — <paramref name="filter"/> без змін, без запитів.
+    /// не дає позначки) — ПАРАМИ «проєкт, ідентифікатор» (N1-01). Читач без обмежень — <paramref name="filter"/>
+    /// без змін, без запитів.
     /// </summary>
     /// <param name="samples">Порт, що дає по одному документу проєкту для побудови меж.</param>
     /// <param name="access">Служба доступу.</param>
@@ -103,11 +88,18 @@ public static class DocumentSheetVisibility
     /// <param name="periodKey">Період запиту; <c>null</c> — без періоду.</param>
     /// <param name="filter">Фільтр, який доповнюється.</param>
     /// <param name="ct">Скасування.</param>
+    /// <remarks>
+    /// ⛔ N1-01. Ідентифікатор аркуша належить ВЕРСІЇ шаблону, а версія спільна для кількох проєктів, тож
+    /// плаский перелік Id з меж усіх проєктів ховав би аркуш у документах B лише через <c>Deny Sheet</c> в A
+    /// (і навпаки — фільтр <c>state</c> брав би стан аркуша, схованого лише в A). Пара діє лише на документи
+    /// свого проєкту — як <c>SummaryRestrictions.HiddenSheets</c> зведення.
+    /// </remarks>
     public static async Task<DocumentListFilter> HiddenFilterAsync(
         IDocumentListSummaryStore samples, IAccessDecisionService access, AccessProfile profile,
         IReadOnlyCollection<int> projects, int? periodKey, DocumentListFilter filter, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(samples);
+        ArgumentNullException.ThrowIfNull(projects);
 
         if (!HasRestrictions(profile))
         {
@@ -120,9 +112,9 @@ public static class DocumentSheetVisibility
 
         return filter with
         {
-            HiddenSheetDefIds = [.. scopes.Values.SelectMany(s => s.HiddenSheetIds()).Distinct().Order()],
-            HiddenTableDefIds = [.. scopes.Values.SelectMany(s => s.HiddenTableIds()).Distinct().Order()],
-            HiddenColumnDefIds = [.. scopes.Values.SelectMany(s => s.HiddenColumnIds()).Distinct().Order()],
+            HiddenSheetDefIds = [.. scopes.OrderBy(s => s.Key).SelectMany(s => s.Value.HiddenSheetIds().Select(id => (s.Key, id)))],
+            HiddenTableDefIds = [.. scopes.OrderBy(s => s.Key).SelectMany(s => s.Value.HiddenTableIds().Select(id => (s.Key, id)))],
+            HiddenColumnDefIds = [.. scopes.OrderBy(s => s.Key).SelectMany(s => s.Value.HiddenColumnIds().Select(id => (s.Key, id)))],
 
             // ⛔ Фільтр resultsStale не бачить проєктів зі звуженням (та сама межа, що й у зведенні): список
             // потрібен лише йому, тож решту запитів фільтр не обтяжує і не змінює.
@@ -146,12 +138,16 @@ public static class DocumentSheetVisibility
 
     /// <summary>Межі читача як фільтр «що схованo» для одного документа (позначка пізніх правок картки).</summary>
     /// <param name="scope">Межі читання проєкту документа.</param>
-    public static DocumentListFilter HiddenOf(DocumentReadScope scope)
+    /// <param name="projectId">Проєкт документа (пари «проєкт, Id», N1-01).</param>
+    public static DocumentListFilter HiddenOf(DocumentReadScope scope, int projectId)
     {
         ArgumentNullException.ThrowIfNull(scope);
 
         return new DocumentListFilter(
-            null, null, null, scope.HiddenSheetIds(), scope.HiddenTableIds(), scope.HiddenColumnIds());
+            null, null, null,
+            [.. scope.HiddenSheetIds().Select(id => (projectId, id))],
+            [.. scope.HiddenTableIds().Select(id => (projectId, id))],
+            [.. scope.HiddenColumnIds().Select(id => (projectId, id))]);
     }
 
     /// <summary>
