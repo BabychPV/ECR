@@ -331,7 +331,9 @@ Test-Case 'S7. ECR/logs/config — захищений SDDL з власником
         if ($sddl -notmatch '\(A;OICI;0x1200a9;;;BU\)') { throw "$dir SDDL '$sddl' — Users мусять мати лише читання (0x1200a9)" }
         if (($sddl -replace '\(A;OICI;0x1200a9;;;BU\)', '') -match ';;;BU\)') { throw "$dir SDDL '$sddl' — зайвий ACE для Users" }
     }
-    $grant = @(Get-MsiRows "SELECT ``Action``, ``Condition`` FROM ``InstallExecuteSequence`` WHERE ``Action`` = 'EcrLogsServiceAccountGrant'" 2)
+    # ⚠ Без обгортки @(): Get-MsiRows повертає `, $rows` (масив рядків одним об'єктом), і @() зробив би з нього
+    # масив із ОДНОГО елемента — Count завжди 1, а $grant[0][1] під StrictMode падав «Index was outside the bounds».
+    $grant = Get-MsiRows "SELECT ``Action``, ``Condition`` FROM ``InstallExecuteSequence`` WHERE ``Action`` = 'EcrLogsServiceAccountGrant'" 2
     if ($grant.Count -ne 1) { throw "EcrLogsServiceAccountGrant у InstallExecuteSequence: $($grant.Count) рядків — службі не видається запис у logs" }
     if ($grant[0][1] -notmatch 'SERVICE_ACCOUNT') { throw "умова EcrLogsServiceAccountGrant '$($grant[0][1])' — без SERVICE_ACCOUNT" }
 }
