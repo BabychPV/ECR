@@ -417,7 +417,7 @@ public sealed class SubmitApproveTests
 
     private ApproveSheetHandler Approve() => new(_workflow, _access, Reports(), _uow, _user, _clock, _audit, _documents);
 
-    private ReopenDocumentHandler Reopen() => new(_workflow, _access, _uow, _user, _clock, _documents);
+    private ReopenDocumentHandler Reopen() => new(_workflow, _access, _uow, _user, _clock, _documents, Reports());
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
     [Trait("Requirement", "ФВ-3.2")]

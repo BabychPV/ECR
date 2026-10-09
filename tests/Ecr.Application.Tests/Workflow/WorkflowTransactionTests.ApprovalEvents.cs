@@ -176,7 +176,8 @@ public sealed partial class WorkflowTransactionTests
     {
         await using var db = CreateContext();
         var handler = new ReopenDocumentHandler(
-            new WorkflowStore(db), AccessAt(step: null), new UnitOfWork(db), User(), new TestClock(Now), Documents(world));
+            new WorkflowStore(db), AccessAt(step: null), new UnitOfWork(db), User(), new TestClock(Now), Documents(world),
+            new ReportSnapshotSync(NoSnapshots(), Documents(world)));
 
         await handler
             .HandleAsync(world.DocumentId, world.SheetDefId, PeriodKeyValue, reason, CancellationToken.None)

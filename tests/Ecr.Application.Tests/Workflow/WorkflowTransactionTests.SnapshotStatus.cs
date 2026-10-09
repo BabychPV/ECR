@@ -185,6 +185,31 @@ public sealed partial class WorkflowTransactionTests
         Assert.Equal(SnapshotStatus.Submitted, status);
     }
 
+    // ─────────────────────────── W1-03 ───────────────────────────
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "D-65")]
+    public async Task W1_03_Reopen_затвердженого_аркуша_повертає_незаморожений_зріз_у_Draft()
+    {
+        // Без фіксу: `ReopenDocumentHandler` зрізів не чіпав — зріз `Approved` лишався
+        // `Approved` у `rpt.v_*`, хоча аркуш уже в роботі.
+        var world = await ArrangeSnapshotAsync(
+            DocumentStatus.Approved, DocumentStatus.Approved, SnapshotStatus.Approved).ConfigureAwait(true);
+
+        using var cache = new MemoryCache(new MemoryCacheOptions());
+        await using (var db = CreateContext())
+        {
+            await ReopenWith(world.World, db, Builder(db, cache), Now)
+                .HandleAsync(world.World.DocumentId, world.World.SheetDefId, PeriodKeyValue, "уточнення", CancellationToken.None)
+                .ConfigureAwait(true);
+        }
+
+        Assert.Equal(DocumentStatus.Draft, await StatusAsync(world.World).ConfigureAwait(true));
+        Assert.Equal(SnapshotStatus.Draft, (await ReportSnapshotAsync(world.SnapshotId).ConfigureAwait(true)).Status);
+    }
+
     // ────────────────────────────── збірка ────────────────────────────
 
     private static ReportSnapshotBuilder Builder(EcrDbContext db, IMemoryCache cache)
@@ -195,6 +220,12 @@ public sealed partial class WorkflowTransactionTests
         => new(
             new WorkflowStore(db), access, new ReportSnapshotSync(snapshots, Documents(world)),
             new UnitOfWork(db), Approver(), new TestClock(Now), new AuditWriter(db), Documents(world));
+
+    private static ReopenDocumentHandler ReopenWith(
+        World world, EcrDbContext db, IReportSnapshotBuilder snapshots, DateTime at)
+        => new(
+            new WorkflowStore(db), AccessAt(step: null), new UnitOfWork(db), User(), new TestClock(at),
+            Documents(world), new ReportSnapshotSync(snapshots, Documents(world)));
 
     private async Task<ReportSnapshot> ReportSnapshotAsync(long snapshotId)
     {
