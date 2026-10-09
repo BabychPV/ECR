@@ -1,0 +1,12 @@
+# L8/L9 recheck @3a3818ef (agent V3 a5ea4c84) — client paths from src/Ecr.Web/src/
+L8: 17 FIXED, L8-12 REGRESSED, L8-08 PARTIAL(side effect), L8-21 N/A (ValidationPanel dead code only imported by tests), L8-10 FIXED (no shared projectsQuery guard).
+L9: 40 FIXED, PARTIAL L9-01, L9-03, L9-17, L9-19.
+WORK-QUEUE stale: AN-28, AN-39, AN-50 (L8-17, L8-20) still todo.
+
+L8-12 REGRESSED: features/workflow/SheetActions.tsx:761-766 recalcBlockedReason only allSheetsLocked; client always sends sheetDefId (:522-527); server RecalculateDocumentHandler.cs:167-170 IsSubmitted(scopeSheetId) -> 422 4221 when own sheet submitted, neighbour draft. Fix: ownLocked = state Submitted|Approved -> new key workflow.recalculateSheetSubmitted. Test state=Submitted + neighbour Draft: aria-disabled, no POST, F9 too. (commits 1cc6d9d0a RC14-B, 4e6dfd122 RC15-C)
+L8-08 PARTIAL: features/grid/autosave.ts:463-488 beforeunload sends beacon for clean edits then returns held=true; on "Stay" clean edits remain with old baseVersion -> 409 (PatchCellsHandler.cs:638 ordinal compare). Fix: if held -> don't beacon, setTimeout(flushNow,0), return true. Test autosave.heldUnload.test.tsx.
+L9-01 PARTIAL: features/registries/impact/RegistryImpactPage.tsx:227-238 useMutation no meta.handled + ErrorAlert :285 -> double notification; exempt in handledMutation.ratchet.test.ts:21. Ratchet misses `return useMutation(` (registries/api.ts:142, jobs/api.ts:107,153).
+L9-03 PARTIAL: rc812/RegistryDataPage.tsx:254-270 onSuccess void invalidate -> grid unlocked with stale version. Fix: async onSuccess await Promise.all invalidates (like rc816 CompositionPanel.tsx:288-291).
+L9-17 PARTIAL: reports/parameters.ts:278-300 parseDay (years 0-99 -> 19xx), inspector/DocumentInspector.tsx:357-361 dateOnly copies -> use shared/format/dateOnly.ts; rc816 composition.ts:261 formatDecimal rename toInvariantDecimal; SumIndicator.tsx:30 localized.
+L9-19 PARTIAL: rc812/RegistryDataGrid.tsx no virtualization; D-168 (10-decisions.md:435) says RevoGrid. Need tbody windowing + decision update + CHECKSUMS.
+Minor: L9-22 client seedOf (ConditionalFormatPanel.tsx:92) still sends orphans, no vitest; L9-34 09-seed.sql:15582 D-256->D-263; L9-30 onFailure non-409 countersChanged(); L9-41 408/429 stop forever, 5xx infinite; L9-05 useSession.ts:31 retry:false -> retry:1; L9-37 Snapshots disabled for all rows; L8-01 no e2e; L9-18 RegistriesPage/RegistryConstructorPage/MappingRows no isSimulation check; L9-06 RowVersion optional in command; L9-12 without local cache widths overwritten; L9-20 failed not notified.
