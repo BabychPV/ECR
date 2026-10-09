@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, type JSX, type KeyboardEvent, type RefObject } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type JSX, type KeyboardEvent, type RefObject } from 'react';
 import { ActionIcon, Badge, Box, Button, Group, Tabs, Text } from '@mantine/core';
 import type { DocumentTableDto, ValidationFindingDto } from '@/api/types';
 import { isHumanOrigin, useCellChanges } from '@/features/audit/api';
@@ -154,6 +154,16 @@ export function DocumentInspector({
     [documentId],
   );
 
+  // ⛔ C1-02: корінь інспектора підписаний на комірку під курсором (`useInspectedCell` нижче), тож
+  // рендериться на КОЖЕН рух курсора в сітці. Перелік зауважень (`IssuesTab`, `memo`) від цього не
+  // має перемальовуватися: колбек стабільний, а свіжі `onSelectFinding`/`close` — через ref.
+  const selectLatest = useRef<(finding: ValidationFindingDto) => void>(() => undefined);
+  selectLatest.current = (finding) => {
+    onSelectFinding(finding);
+    if (window.matchMedia?.(NarrowQuery).matches === true) close(false);
+  };
+  const onSelectIssue = useCallback((finding: ValidationFindingDto) => selectLatest.current(finding), []);
+
   const cell = useInspectedCell();
   const cellTable =
     cell === null || cell.periodKey !== periodKey
@@ -213,13 +223,7 @@ export function DocumentInspector({
             </Tabs.List>
 
             <Tabs.Panel value="issues" className="ecr-insp-body">
-              <IssuesTab
-                groups={groups}
-                onSelect={(finding) => {
-                  onSelectFinding(finding);
-                  if (window.matchMedia?.(NarrowQuery).matches === true) close(false);
-                }}
-              />
+              <IssuesTab groups={groups} onSelect={onSelectIssue} />
             </Tabs.Panel>
             <Tabs.Panel value="history" className="ecr-insp-body">
               <HistoryTab documentId={documentId} periodKey={periodKey} cell={shownCell} />
@@ -299,13 +303,41 @@ function InspectorTriggers({
   );
 }
 
-function IssuesTab({
+/**
+ * Скільки зауважень групи малювати одразу (`C1-02`).
+ *
+ * ⛔ Сервер кількість зауважень не обмежує: порожня обов'язкова колонка дає зауваження на КОЖЕН
+ * рядок, тобто тисячі на документ. Усі разом — десятки тисяч вузлів DOM і секунди зависання
+ * одразу після «Перевірити» (вкладка відкривається сама). Решта — кнопкою «ще», порціями.
+ */
+export const IssuesPageSize = 100;
+
+function groupKeyOf(group: InspectorIssueGroup): string {
+  return group.kind === 'header' ? 'header' : String(group.tableDefId);
+}
+
+/**
+ * Перелік зауважень. ⛔ `memo` (`C1-02`): батько рендериться на кожен рух курсора, а `groups`
+ * (`useMemo`) і `onSelect` (`useCallback`) між ними стабільні — тож перелік не перебудовується.
+ */
+const IssuesTab = memo(function IssuesTab({
   groups,
   onSelect,
 }: {
   groups: readonly InspectorIssueGroup[] | null;
   onSelect: (finding: ValidationFindingDto) => void;
 }): JSX.Element {
+  // Скільки показано в кожній групі; свіжа перевірка (нові `groups`) починає знову з першої порції.
+  const [shown, setShown] = useState<{ of: typeof groups; by: Readonly<Record<string, number>> }>({
+    of: groups,
+    by: {},
+  });
+  const shownBy = shown.of === groups ? shown.by : {};
+  const limitOf = (key: string): number => shownBy[key] ?? IssuesPageSize;
+  const showMore = (key: string): void => {
+    setShown({ of: groups, by: { ...shownBy, [key]: limitOf(key) + IssuesPageSize } });
+  };
+
   if (groups === null) {
     return <Empty title={t('inspector.notValidatedTitle')} hint={t('inspector.notValidatedHint')} />;
   }
@@ -328,7 +360,7 @@ function IssuesTab({
           </h3>
           {/* ⚠ Кожне зауваження тут — з видимої таблиці (`groupIssues`), тож
               кожне веде в клітинку: кнопка, а не рядок, — фокус із клавіатури. */}
-          {group.issues.map(({ finding, index, navigable }) => {
+          {group.issues.slice(0, limitOf(groupKeyOf(group))).map(({ finding, index, navigable }) => {
             const Row = navigable ? 'button' : 'div';
 
             return (
@@ -359,11 +391,24 @@ function IssuesTab({
               </Row>
             );
           })}
+          {group.issues.length > limitOf(groupKeyOf(group)) && (
+            <Button
+              size="xs"
+              variant="subtle"
+              data-inspector-more={groupKeyOf(group)}
+              onClick={() => showMore(groupKeyOf(group))}
+            >
+              {t('inspector.showMoreIssues', {
+                count: Math.min(IssuesPageSize, group.issues.length - limitOf(groupKeyOf(group))),
+                left: group.issues.length - limitOf(groupKeyOf(group)),
+              })}
+            </Button>
+          )}
         </section>
       ))}
     </div>
   );
-}
+});
 
 /**
  * Вікно історії однієї комірки: останні 12 місяців. ⚠ Сервер дозволяє для

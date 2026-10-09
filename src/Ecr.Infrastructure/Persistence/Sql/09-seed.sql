@@ -7457,6 +7457,9 @@ USING (VALUES
     -- COLL:an121-legacy-maxmin ── AN-121 / C1-01 (HU-14 Q1): попередження публікації Legacy — Max/Min з цілим першим аргументом (NCalc округлював другий); ru/kz — порцією COLL:an121-legacy-maxmin нижче ──
     ,(N'publish.warning.legacyIntegerMaxMin', N'en', N'Formula {formula}: {functions} has an integer first argument and a possibly fractional second one. The legacy system (NCalc 1.3.8) rounded the second argument to an integer here, ECR does not: results may differ from the submitted forms by whole units. Write the first argument with a decimal point (0.0) to make the intent explicit.', 1)
     -- COLL:an121-legacy-maxmin ── кінець секції ──
+    -- COLL:r5c1-issues-more ── R5-C1 / C1-02: інспектор показує зауваження порціями — кнопка «ще»; ru/kz — порцією COLL:r5c1-issues-more нижче ──
+    ,(N'inspector.showMoreIssues', N'en', N'Show {count} more ({left} not shown)', 1)
+    -- COLL:r5c1-issues-more ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -18422,6 +18425,17 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:an121-legacy-maxmin ── кінець секції ──
+
+-- COLL:r5c1-issues-more ── ru/kz: R5-C1 / C1-02: зауваження інспектора порціями; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'inspector.showMoreIssues', N'ru', N'Показать ещё {count} (не показано: {left})'),
+    (N'inspector.showMoreIssues', N'kz', N'Тағы {count} көрсету (көрсетілмегені: {left})')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:r5c1-issues-more ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t
