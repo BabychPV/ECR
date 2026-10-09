@@ -6,6 +6,7 @@ import type { ColumnDto, TableSliceDto } from '@/api/types';
 import { queryKeys } from '@/api/queryKeys';
 import { showWarning } from '@/shared/ui/notify';
 import { cancelAutosave } from '../autosave';
+import { inFlightRowKeys } from '../inFlightEdits';
 import { resetPending } from '../pendingStore';
 import { DocumentGrid } from '../DocumentGrid';
 
@@ -139,6 +140,11 @@ async function editAndSave(): Promise<void> {
   fireEvent.click(screen.getByRole('button', { name: 'type-5' }));
   await press('s', 'KeyS');
   await waitFor(() => expect(patches).toHaveLength(1));
+  // ⚠ Запит надіслано — ще не означає, що відповідь застосовано: `Response.json`
+  // розбирається кілька тактів, і запізніла відповідь лягла б у кеш (`C1 = 5`,
+  // `applyPatchLocally`) ПОВЕРХ «чужого» зрізу, який тест кладе далі, — чужої
+  // правки на екрані вже не було б. Тож крок завершено, лише коли запит пішов з дороги.
+  await waitFor(() => expect(inFlightRowKeys(1, 202609).size).toBe(0));
 }
 
 afterEach(() => {

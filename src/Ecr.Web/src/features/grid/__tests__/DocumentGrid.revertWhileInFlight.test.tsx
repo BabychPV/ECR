@@ -4,6 +4,7 @@ import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ColumnDto, TableSliceDto } from '@/api/types';
 import { cancelAutosave } from '../autosave';
+import { inFlightRowKeys } from '../inFlightEdits';
 import { resetPending } from '../pendingStore';
 import { DocumentGrid } from '../DocumentGrid';
 
@@ -173,6 +174,13 @@ describe('DocumentGrid: повернення до збереженого, пок
       sent[0]?.settle('v2');
       await Promise.resolve();
     });
+
+    // ⚠ Відповідь розбирається кілька тактів (`Response.json`), а відкладене
+    // автозбереження тут приглушене: Ctrl+S, натиснутий поки рядок ще «в дорозі»,
+    // знову відклав би правку — і назавжди. Тож спершу — дочекатися, що запит
+    // справді завершився (`endInFlight`), як `settle` + `waitFor` у
+    // `DocumentGrid.concurrentSave.test.tsx`.
+    await waitFor(() => expect(inFlightRowKeys(1, 202609).size).toBe(0));
 
     // ⛔ Мутаційний доказ: без `captureOverInFlight` сховище порожнє — другого
     // PATCH немає, на сервері лишається 5.
