@@ -260,6 +260,52 @@ public sealed class SchemaValidatorTests(SqlServerFixture sql)
         }
     }
 
+    /// <remarks>
+    /// ⛔ R6-X4/X4-03: штамп релізу схеми (<c>ECR.SchemaRelease</c>, пише крок 2 <c>deploy-ecr.ps1</c>) новіший
+    /// за збірку — старий код на SQL-схемі новішого релізу (зміни лише в <c>Sql/*.sql</c> міграції EF не бачать).
+    /// Без штампа, старіший чи рівний — не відмова. Мутації (CI): повертати <c>null</c> завжди → червоні
+    /// «новіший» і ValidateAsync; порівнювати «≠» замість «&gt;» → червоний «старіший».
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Штамп_релізу_схеми_новіший_за_збірку_зупиняє_старт()
+    {
+        await using var db = CreateContext();
+        var code = new Version(0, 0, 600, 0);
+
+        // Фікстура штампа не ставить — звіряти нема з чим.
+        Assert.Null(await SchemaValidator.SchemaReleaseMismatchAsync(db, code, CancellationToken.None));
+
+        await ExecuteAsync(
+            "EXEC sys.sp_addextendedproperty @name = N'" + SchemaValidator.SchemaReleaseProperty + "', @value = N'0.0.601';");
+        try
+        {
+            var newer = await SchemaValidator.SchemaReleaseMismatchAsync(db, code, CancellationToken.None);
+            Assert.NotNull(newer);
+            Assert.StartsWith("ECR-SYS-5031: ", newer, StringComparison.Ordinal);
+            Assert.Contains("0.0.601", newer, StringComparison.Ordinal);
+            Assert.Contains("0.0.600", newer, StringComparison.Ordinal);
+
+            Assert.Null(await SchemaValidator.SchemaReleaseMismatchAsync(db, new Version(0, 0, 601), CancellationToken.None));
+            Assert.Null(await SchemaValidator.SchemaReleaseMismatchAsync(db, new Version(0, 0, 602), CancellationToken.None));
+
+            await ExecuteAsync(
+                "EXEC sys.sp_updateextendedproperty @name = N'" + SchemaValidator.SchemaReleaseProperty + "', @value = N'99.0.0';");
+            var validator = new SchemaValidator(db, Capabilities(), Clock);
+            var error = await Assert.ThrowsAsync<SchemaIncompatibleException>(
+                () => validator.ValidateAsync("Migrate", CancellationToken.None));
+            Assert.Contains("99.0.0", error.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await ExecuteAsync(
+                "IF EXISTS (SELECT 1 FROM sys.extended_properties WHERE class = 0 AND name = N'" +
+                SchemaValidator.SchemaReleaseProperty + "') EXEC sys.sp_dropextendedproperty @name = N'" +
+                SchemaValidator.SchemaReleaseProperty + "';");
+        }
+    }
+
     /// <summary>Порожня база: є, але без файлових груп і схем партиціонування.</summary>
     /// <param name="suffix">Суфікс імені: різні тести — різні бази.</param>
     /// <param name="compatibilityLevel">Рівень сумісності; <see langword="null"/> — типовий інстансу.</param>

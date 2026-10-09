@@ -39,6 +39,7 @@ public sealed class WorkerChildSchemaCheckTests
 
         var helper = source[end..];
         Assert.Contains("SchemaValidator.MigrationMismatchAsync(", helper, StringComparison.Ordinal);
+        Assert.Contains("SchemaValidator.SchemaReleaseMismatchAsync(", helper, StringComparison.Ordinal);
         Assert.Contains("catch (DbException", helper, StringComparison.Ordinal);
     }
 }

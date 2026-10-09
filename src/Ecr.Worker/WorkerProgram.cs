@@ -200,8 +200,12 @@ internal static partial class WorkerProgram
         try
         {
             await using var scope = services.CreateAsyncScope();
-            var mismatch = await SchemaValidator.MigrationMismatchAsync(
-                scope.ServiceProvider.GetRequiredService<EcrDbContext>(), cancellationToken).ConfigureAwait(false);
+            var db = scope.ServiceProvider.GetRequiredService<EcrDbContext>();
+            var mismatch = await SchemaValidator.MigrationMismatchAsync(db, cancellationToken).ConfigureAwait(false);
+
+            // ⛔ R6-X4/X4-03: і штамп релізу схеми — старий воркер на SQL-схемі новішого релізу.
+            mismatch ??= await SchemaValidator.SchemaReleaseMismatchAsync(db, SchemaValidator.CodeRelease, cancellationToken)
+                .ConfigureAwait(false);
             return mismatch is null ? null : "Дочірній воркер не бере задач — схема бази іншої версії: " + mismatch;
         }
         catch (DbException ex)

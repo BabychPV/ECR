@@ -276,8 +276,12 @@
     Версія для build-msi.ps1, якщо -MsiPath не задано.
 
 .PARAMETER SkipSchema
-    DBA вже накотив схему окремо (крок 2 повністю пропускається, sqlcmd
-    не викликається жодного разу).
+    DBA вже накотив схему окремо (крок 2 не змінює схеми; sqlcmd лише
+    читає штамп релізу схеми).
+    ⛔ R6-X4/X4-03: крок 2 зі схемою в кінці пише штамп ECR.SchemaRelease
+    (розширена властивість бази) = версія пакета. З -SkipSchema штамп
+    звіряється з пакетом ДО msiexec: інший реліз — відмова (спершу оновіть
+    схему цим пакетом); штампа немає (база до R6-X4) — попередження.
 
     ⛔ S2-04 (аудит 2026-10-09b, HU-13 Q3): без -SkipSchema крок 2 спершу
     вимагає свіжу копію бази (-BackupMaxAgeHours), а перед першим sqlcmd зі
@@ -1191,6 +1195,55 @@ function Get-ForeignEcrSessionProblem {
         "вузлів оновлюйте потім з -SkipSchema. Якщо це не ECR (інша програма на SqlClient) — -SkipOtherNodesCheck.")
 }
 
+# ⛔ R6-X4/X4-03: версію схеми знають лише міграції EF, а половина схеми — поза EF (TVP у
+# 15-cell-tvp.sql, процедури 03/04, в'юхи 05, тригери 10, aud.*/arc.*): реліз, що змінює лише
+# Sql/*.sql, не додає рядка в __EFMigrationsHistory. Тому крок 2 (зі схемою) у кінці пише штамп
+# релізу схеми — розширену властивість бази ECR.SchemaRelease = версія пакета, — а -SkipSchema
+# звіряє його з пакетом ДО msiexec. Чиста функція: штамп (текст із sqlcmd) і версія пакета →
+# текст відмови або $null. 'none'/порожньо — база до X4-03 (штампа ще немає): не відмова, бо
+# інакше перший -SkipSchema після цього оновлення завжди падав би; попередження друкує виклик.
+function Get-SchemaReleaseProblem {
+    param(
+        [AllowNull()] [AllowEmptyString()] [string] $Stamp,
+        [AllowNull()] [AllowEmptyString()] [string] $Package,
+        [Parameter(Mandatory)] [string] $Database
+    )
+
+    $stampText = ([string] $Stamp).Trim()
+    if (-not $stampText -or $stampText -eq 'none') { return $null }
+    $packageText = ([string] $Package).Trim()
+    if (-not $packageText) {
+        return "Версію пакета не визначено (-MsiPath без ProductVersion?) — не можу звірити зі схемою $Database (штамп $stampText). Нічого не змінено."
+    }
+    if ($stampText -eq $packageText) { return $null }
+    return ("Схему $Database накочено пакетом $stampText, а ставиться пакет $packageText (-SkipSchema). Нічого не змінено. " +
+        "Спершу deploy-ecr.ps1 ЗІ схемою цим пакетом на одному вузлі (runbook §8), потім -SkipSchema на решті. " +
+        "Якщо DBA накотив Sql/*.sql і migration.sql цього пакета вручну — він же ставить штамп: " +
+        "EXEC sys.sp_updateextendedproperty @name = N'ECR.SchemaRelease', @value = N'$packageText';")
+}
+
+# ⛔ R6-X4/X4-03: версія пакета для штампа схеми — ProductVersion із самого MSI (той самий запит
+# Property, що build-msi.ps1), бо збірки Api/Worker мають ту саму версію (-p:Version=$Version).
+function Get-MsiProductVersion {
+    param([Parameter(Mandatory)] [string] $Path)
+
+    $installer = New-Object -ComObject WindowsInstaller.Installer
+    $database = $installer.OpenDatabase($Path, 0)
+    $view = $database.OpenView("SELECT ``Value`` FROM ``Property`` WHERE ``Property`` = 'ProductVersion'")
+    try {
+        [void] $view.Execute()
+        $record = $view.Fetch()
+        if ($record) { return $record.StringData(1) }
+        return $null
+    }
+    finally {
+        [void] $view.Close()
+        [void] [System.Runtime.InteropServices.Marshal]::ReleaseComObject($view)
+        [void] [System.Runtime.InteropServices.Marshal]::ReleaseComObject($database)
+        [void] [System.Runtime.InteropServices.Marshal]::ReleaseComObject($installer)
+    }
+}
+
 # ⛔ Чиста функція: чи потрібен .NET SDK цьому запуску. Його кличуть у двох місцях —
 # `build-msi.ps1` (коли -MsiPath не задано) і `dotnet ef migrations script` (крок 2,
 # коли схема не з пакета й немає -SkipSchema). Більше ніде: пакований запуск із
@@ -1475,6 +1528,8 @@ if ($ServicePassword) {
 if ($ConfigValues -and -not (Test-Path $ConfigValues)) {
     throw "ConfigValues вказує на неіснуючий файл: $ConfigValues"
 }
+# ⛔ R6-X4/X4-03: версія пакета — штамп релізу схеми (крок 2 пише його, -SkipSchema звіряє).
+$schemaRelease = if ($Version) { $Version } elseif ($MsiPath) { Get-MsiProductVersion -Path (Resolve-Path -LiteralPath $MsiPath).Path } else { $null }
 # ФВ-12.7: недійсну адресу телеметрії відхиляємо ДО msiexec, а не посеред розгортання.
 $telemetryDecision = Resolve-TelemetryEnvironment -OtlpEndpoint $TelemetryOtlpEndpoint -OtlpProtocol $TelemetryOtlpProtocol
 if ($EnableWorker -and $DisableWorker) {
@@ -1744,6 +1799,27 @@ END
     # ---------------------------------------------------------------------
     if ($SkipSchema) {
         Write-Step "Крок 2/7: схема — ПРОПУЩЕНО (-SkipSchema)"
+
+        # ⛔ R6-X4/X4-03: схему не змінюємо, але й не ставимо пакет на схему іншого релізу —
+        # лише читання, відмова ДО msiexec.
+        $stampRows = Invoke-DeployQuery -TargetDb $Database -Query (
+            "SET NOCOUNT ON; SELECT ISNULL((SELECT CAST(value AS nvarchar(32)) FROM sys.extended_properties " +
+            "WHERE class = 0 AND name = N'ECR.SchemaRelease'), N'none');")
+        if ($null -eq $stampRows) {
+            Write-Host "  Штамп релізу схеми буде звірено з пакетом запитом до sys.extended_properties (-WhatIf: не виконується)." -ForegroundColor DarkGray
+        }
+        else {
+            $stamp = [string] (@($stampRows) | Select-Object -First 1)
+            $releaseProblem = Get-SchemaReleaseProblem -Stamp $stamp -Package $schemaRelease -Database $Database
+            if ($releaseProblem) { throw $releaseProblem }
+            if (-not $stamp -or $stamp.Trim() -eq 'none') {
+                Write-Host ("  ⚠ У $Database ще немає штампа релізу схеми (ECR.SchemaRelease): її накочено до R6-X4 або вручну — " +
+                    "відповідність схеми пакету $schemaRelease не звірено.") -ForegroundColor Yellow
+            }
+            else {
+                Write-Host "  Схему $Database накочено цим самим пакетом ($schemaRelease)." -ForegroundColor Green
+            }
+        }
     }
     else {
         Write-Step "Крок 2/7: схема ($Database на $SqlInstance)"
@@ -1876,6 +1952,20 @@ END
                 if (-not (Test-Path $path)) { throw "Немає ${path}: перелік розійшовся з деревом." }
                 Invoke-DeploySql -TargetDb $Database -File $path
             }
+        }
+
+        # ⛔ R6-X4/X4-03: штамп релізу схеми — ПІСЛЯ останнього скрипта (06-rcsi.sql / 14-agent-jobs.sql):
+        # упалий посередині крок 2 штампа не оновлює, і -SkipSchema на інших вузлах тоді відмовить.
+        if ($schemaRelease) {
+            $releaseLiteral = $schemaRelease.Replace("'", "''")
+            Invoke-DeploySql -TargetDb $Database -Query (
+                "IF EXISTS (SELECT 1 FROM sys.extended_properties WHERE class = 0 AND name = N'ECR.SchemaRelease') " +
+                "EXEC sys.sp_updateextendedproperty @name = N'ECR.SchemaRelease', @value = N'$releaseLiteral' " +
+                "ELSE EXEC sys.sp_addextendedproperty @name = N'ECR.SchemaRelease', @value = N'$releaseLiteral';")
+            Write-Host "  Штамп релізу схеми: ECR.SchemaRelease = $schemaRelease." -ForegroundColor Green
+        }
+        else {
+            Write-Host "  ⚠ Версію пакета не визначено — штамп релізу схеми (ECR.SchemaRelease) не записано." -ForegroundColor Yellow
         }
     }
 

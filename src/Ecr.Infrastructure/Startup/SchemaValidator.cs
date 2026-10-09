@@ -136,6 +136,12 @@ public sealed class SchemaValidator(
         // на рівні 120 падали б посеред DDL із текстом, що не каже, як виправити.
         await ValidateCompatibilityLevelAsync(ct).ConfigureAwait(false);
         await ValidateMigrationsAsync(startupMode, ct).ConfigureAwait(false);
+        var release = await SchemaReleaseMismatchAsync(db, CodeRelease, ct).ConfigureAwait(false);
+        if (release is not null)
+        {
+            throw new SchemaIncompatibleException(release);
+        }
+
         await ValidatePhysicalModelAsync(ct).ConfigureAwait(false);
         await ValidateRuntimeOptionsAsync(ct).ConfigureAwait(false);
     }
@@ -201,6 +207,52 @@ public sealed class SchemaValidator(
 
         var pending = known.Except(applied).ToList();
         return pending.Count > 0 ? Incompatible(PendingMigrationsText(pending)).Message : null;
+    }
+
+    /// <summary>Ім'я розширеної властивості бази зі штампом релізу схеми (пише <c>deploy-ecr.ps1</c>, крок 2).</summary>
+    public const string SchemaReleaseProperty = "ECR.SchemaRelease";
+
+    /// <summary>Версія цієї збірки (<c>build-msi.ps1</c>: <c>-p:Version</c> = <c>ProductVersion</c> MSI).</summary>
+    public static Version CodeRelease => typeof(SchemaValidator).Assembly.GetName().Version ?? new Version(0, 0, 0);
+
+    /// <summary>
+    /// Схему бази накочено НОВІШИМ релізом, ніж ця збірка, — текст причини (з кодом
+    /// <c>ECR-SYS-5031</c>) або <c>null</c>.
+    /// </summary>
+    /// <param name="db">Контекст бази.</param>
+    /// <param name="code">Версія збірки (порівнюються три поля).</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Текст причини або <c>null</c>.</returns>
+    /// <remarks>
+    /// ⛔ R6-X4/X4-03: міграції EF не бачать змін лише в <c>Sql/*.sql</c> (TVP, процедури, тригери,
+    /// <c>aud.*</c>), тож старий код на новій SQL-схемі проходив звірку міграцій. Штамп
+    /// <see cref="SchemaReleaseProperty"/> пише крок 2 <c>deploy-ecr.ps1</c> після останнього скрипта.
+    /// Без штампа (база до R6-X4, dev/тест-база) чи з нерозбірним — не відмова: звіряти нема з чим.
+    /// Старіший штамп — теж не відмова тут (новий код на ще не оновленій схемі ловить
+    /// <c>-SkipSchema</c> скрипта і звірка міграцій).
+    /// </remarks>
+    public static async Task<string?> SchemaReleaseMismatchAsync(EcrDbContext db, Version code, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(code);
+        var stamps = await db.Database
+            .SqlQueryRaw<string>(
+                "SELECT CAST(value AS nvarchar(32)) AS Value FROM sys.extended_properties " +
+                "WHERE class = 0 AND name = N'" + SchemaReleaseProperty + "' AND value IS NOT NULL")
+            .ToListAsync(ct).ConfigureAwait(false);
+        if (stamps.Count == 0 || !Version.TryParse(stamps[0], out var stamped))
+        {
+            return null;
+        }
+
+        var schema = new Version(stamped.Major, stamped.Minor, Math.Max(stamped.Build, 0));
+        var build = new Version(code.Major, code.Minor, Math.Max(code.Build, 0));
+        return schema > build
+            ? Incompatible(
+                $"Схему бази накочено пакетом {schema}, а ця збірка — {build}: старий код на новішій схемі " +
+                $"(Sql/*.sql поза міграціями EF). Старт зупинено — оновіть цей вузол пакетом {schema} " +
+                "(deploy-ecr.ps1 -SkipSchema, runbook §8).").Message
+            : null;
     }
 
     private static string UnknownMigrationsText(List<string> unknown)

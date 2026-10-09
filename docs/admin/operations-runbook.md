@@ -877,6 +877,16 @@ DECLARE @a int; EXEC arc.usp_EnsureAuditPartitions @MonthsAhead = 12, @Added = @
 `-SkipSchema` (схему накочує DBA окремо) не перевіряє копію й не зупиняє служби — тоді і те, і інше
 на DBA.
 
+⛔ ✎ R6-X4/X4-03: **штамп релізу схеми.** Міграції EF не бачать змін лише в `Sql/*.sql` (TVP, процедури,
+тригери, `aud.*`). Тому крок 2 зі схемою після останнього скрипта пише розширену властивість бази
+`ECR.SchemaRelease` = версія пакета (`-Version` або `ProductVersion` MSI). `-SkipSchema` звіряє її з пакетом
+**до** `msiexec`: інший реліз — відмова (спершу `deploy-ecr.ps1` зі схемою цим пакетом на одному вузлі);
+штампа ще немає (база до цього оновлення) — лише попередження. Якщо DBA накочує `Sql/*.sql` і
+`migration.sql` вручну, штамп після цього ставить він же:
+`EXEC sys.sp_updateextendedproperty @name = N'ECR.SchemaRelease', @value = N'<версія пакета>';`
+(`sp_addextendedproperty`, якщо властивості ще немає). Api й дочірній `EcrWorker` не стартують, якщо штамп
+**новіший** за їхню збірку (`ECR-SYS-5031`): старий код на схемі новішого релізу.
+
 ✎ 2026-10-01: **вікно обслуговування для великих баз.** Міграція `PerfFixJobsStaleHealth`
 додає до `itg.JobProgress` збережену обчислювану колонку `FanOutParentJobId` (з `Payload`) і індекси
 `IX_JobProgress_FanOutParent`, `IX_JobProgress_State_UpdatedAt`, а також `IX_CalculationRun_Project_FinishedAt`
