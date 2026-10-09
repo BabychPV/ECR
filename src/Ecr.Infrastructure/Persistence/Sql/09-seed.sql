@@ -7371,6 +7371,9 @@ USING (VALUES
     (N'err.ECR-CALC-0422.categoryRuleUnknownConstant', N'en', N'The category rule references constant CST.{code}, which this version does not define.', 1),
     (N'err.ECR-CALC-0422.categoryRuleBadFormula', N'en', N'The category rule references !{formula}: it can only read Row formulas of the version (it runs once per row, before the substance loop).', 1),
     -- COLL:rc16rule ── кінець секції ──
+    -- COLL:an81-codemode ── AN-81 / L4-13: порада до події синку «елемент не створено: режим кодів Manual»; ru/kz — порцією COLL:an81-codemode нижче ──
+    (N'err.ECR-REG-0422.codeModeManualNoAutoCreate', N'en', N'The element was not created as a registry entry: this registry uses Manual entry codes, and sync creates entries from source elements only in Auto code mode. Use a registry with the Auto code mode (the mode cannot be changed once the registry has entries), or add the entry by hand.', 1),
+    -- COLL:an81-codemode ── кінець секції ──
     -- COLL:an72-rule-length ── AN-72: правило категорії довше за межу формули (MethodologyCategoryRule.Normalize); ru/kz — порцією COLL:an72-rule-length нижче ──
     (N'err.ECR-CALC-0422.categoryRuleTooLong', N'en', N'The category rule is longer than {max} characters ({length}): shorten the expression or move part of the logic into a Row formula.', 1),
     -- COLL:an72-rule-length ── кінець секції ──
@@ -18070,6 +18073,17 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:an72-rule-length ── кінець секції ──
+
+-- COLL:an81-codemode ── ru/kz: AN-81 / L4-13: порада до події синку «елемент не створено: режим кодів Manual»; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-REG-0422.codeModeManualNoAutoCreate', N'ru', N'Элемент не создан как запись справочника: у этого справочника ручные коды записей, а синхронизация создаёт записи из элементов источника только в режиме кодов Auto. Используйте справочник с режимом кодов Auto (после появления записей режим изменить нельзя) или добавьте запись вручную.'),
+    (N'err.ECR-REG-0422.codeModeManualNoAutoCreate', N'kz', N'Элемент анықтамалық жазбасы ретінде жасалмады: бұл анықтамалықтың жазба кодтары қолмен енгізіледі, ал синхрондау жазбаларды көз элементтерінен тек Auto код режимінде жасайды. Auto код режимі бар анықтамалықты пайдаланыңыз (жазбалар пайда болғаннан кейін режимді өзгертуге болмайды) немесе жазбаны қолмен қосыңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:an81-codemode ── кінець секції ──
 
 -- COLL:an72-rule-concurrent ── ru/kz: AN-72 / N2-05: два одночасні перші PUT category-rule (UQ_CategoryRule_Version) -> 409; власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)

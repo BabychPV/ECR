@@ -64,6 +64,12 @@ public static class RegistrySyncPlanner
     /// <summary>Причина події <c>ElementUnlinked</c>: автостворення вимагає <c>CodeMode = Auto</c> (Q6=C).</summary>
     public const string CodeModeManualReason = "codeModeManual";
 
+    /// <summary>
+    /// Ключ каталогу поради до події <see cref="CodeModeManualReason"/> (L4-13): що саме зробити, щоб
+    /// елемент AF став записом довідника. Лежить у <c>Details</c> події як <c>messageKey=…</c>.
+    /// </summary>
+    public const string CodeModeManualKey = "err.ECR-REG-0422.codeModeManualNoAutoCreate";
+
     /// <summary>Причина події <c>ElementUnlinked</c>: зв'язок елемента веде на видалений запис (L4-12).</summary>
     public const string EntryDeletedReason = "externalKeyOnDeletedEntry";
 
@@ -430,8 +436,11 @@ public static class RegistrySyncPlanner
         // ім'я («F-101», кирилиця, пробіли) не гарантує валідного EcrCode. Створення — лише в Auto.
         if (input.CodeMode != RegistryCodeMode.Auto)
         {
+            // ⚠ Не лише `reason=`: без ключа каталогу подія казала «codeModeManual» і нічого про те, що
+            // робити (L4-13). Ключ — порада «перейдіть в Auto»; `reason=` лишається ключем дедупу.
             events.Add(new RegistrySyncEvent(
-                RegistrySyncEventKind.ElementUnlinked, element.ExternalId, null, Reason: CodeModeManualReason));
+                RegistrySyncEventKind.ElementUnlinked, element.ExternalId, null,
+                ErrorCode: ValueRejectedCode, MessageKey: CodeModeManualKey, Reason: CodeModeManualReason));
             return null;
         }
 

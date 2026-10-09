@@ -308,20 +308,10 @@ public sealed class RegistrySyncJob(
         var events = new List<SyncEvent>();
         var refused = new List<CreateRefusal>();
 
-        // Manual: код = ім'я елемента. Два елементи з тим самим ім'ям дали б writer'у дубль коду в
-        // пакеті (помилка виклику) — другий і далі відмовляються як «код зайнято» першим.
-        var creates = new List<RegistrySyncCreate>();
-        var codes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var create in plan.Creates)
-        {
-            if (create.Code is { } code && !codes.Add(code))
-            {
-                refused.Add(new CreateRefusal(create, ErrorCodes.RegistryEntryInUse, RegistryEntryWriter.EntryCodeTakenKey));
-                continue;
-            }
-
-            creates.Add(create);
-        }
+        // ⛔ L4-13: тут був дедуп за `create.Code` («Manual: код = ім'я елемента»). Планувальник такого
+        // коду не видає від Q6=C (HU-11): `Manual` не створює записів зовсім (подія з порадою), а в
+        // `Auto` код `null` і його видає writer із послідовності. Гілка не виконувалась ніколи.
+        var creates = new List<RegistrySyncCreate>(plan.Creates);
 
         var updates = Updates(plan);
         var keys = new KeyOps(plan.Relinks, plan.MissingMarks, plan.MissingClears, plan.PathChanges);

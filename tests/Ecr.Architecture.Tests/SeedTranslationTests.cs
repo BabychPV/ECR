@@ -258,6 +258,33 @@ public sealed partial class SeedTranslationTests
         Assert.True(missing.Count == 0, $"Немає в {SeedFile}: " + string.Join(", ", missing));
     }
 
+    /// <summary>
+    /// L4-13 (AN-81): ключ поради до події «елемент не створено: режим кодів Manual» живе в планувальнику
+    /// (<c>RegistrySyncPlanner.CodeModeManualKey</c>), а не в <c>RegistrySyncJob</c>, тож сторож вище його
+    /// не бачить: ключ без каталогу показував би адміністратору сиру причину.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public void Ключ_поради_codeModeManual_є_в_каталозі_трьома_мовами()
+    {
+        var source = File.ReadAllText(Path.Combine(
+            SourceTree.Root, "src", "Ecr.Application", "Integration", "RegistrySync", "RegistrySyncPlanner.cs"));
+        var match = Regex.Match(source, @"CodeModeManualKey\s*=\s*""(err\.[A-Za-z0-9.\-]+)""");
+
+        Assert.True(match.Success, "У RegistrySyncPlanner немає константи CodeModeManualKey.");
+
+        var key = match.Groups[1].Value;
+        var text = SeedText();
+
+        Assert.True(CatalogRows(text).ContainsKey(key), $"{key} en: немає в {SeedFile}.");
+        foreach (var lang in TranslationLanguages)
+        {
+            Assert.True(
+                TranslationRows(text).Any(t => t.Key == key && t.Lang == lang),
+                $"{key} {lang}: немає в {SeedFile}.");
+        }
+    }
+
     private static string SeedText()
         => File.ReadAllText(Path.Combine(SourceTree.Root, SeedFile.Replace('/', Path.DirectorySeparatorChar)));
 
