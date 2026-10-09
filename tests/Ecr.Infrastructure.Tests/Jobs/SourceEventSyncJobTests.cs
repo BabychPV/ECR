@@ -292,6 +292,32 @@ public sealed class SourceEventSyncJobTests(SqlServerFixture sql)
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Directive", "HSE301-A5b")]
+    [Trait("Finding", "L3-06")]
+    public async Task ОдиницяДжерелаБезЦільової_ФактичнаІнша_КоміркаНеПишеться()
+    {
+        // ⛔ L3-06: каталог одиниць вантажився лише коли в полі є і SourceUnitId, і TargetUnitId, а звірка
+        // фактичної одиниці з оголошеною пропускалась при units == null. Поле з одиницею джерела (m3) без
+        // цільової при фактичній Sm3 писало число так, ніби одиниця збіглася.
+        // Мутація: повернути умову `SourceUnitId is not null && TargetUnitId is not null` у SyncMapAsync.
+        await using var stand = await ArrangeAsync();
+        await ExecuteAsync(
+            "UPDATE ext.SourceEventFieldMap SET SourceUnitId = (SELECT Id FROM uom.Unit WHERE Code = N'm3'), TargetUnitId = NULL "
+            + $"WHERE SourceEventMapId = {stand.MapId} AND TargetColumnDefId = {stand.VolumeColumn}");
+
+        // Ev(volume) передає одиницю «Sm3» — не оголошену в полі (m3).
+        await RunAsync(stand, new FakeEventSource(Ev("E1", Start, End, volume: 5m)));
+
+        var cells = await CellsAsync(stand, "EF-E1");
+        Assert.False(cells.ContainsKey(stand.VolumeColumn));
+        var link = Assert.Single(await LinksAsync(stand));
+        Assert.Equal(SourceEventLinkStatus.Unmapped, link.Status);
+        Assert.Contains(stand.VolumeCode, link.UnmappedJson);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Directive", "HSE301-A5b")]
     public async Task Стеля_рядків_нового_рядка_дає_RowLimit_а_після_підняття_стелі_Synced()
     {
         await using var stand = await ArrangeAsync();

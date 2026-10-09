@@ -530,7 +530,10 @@ public sealed partial class SourceEventSyncJob(
             sibling.OtherIds));
 
         var fields = await FieldPlansAsync(map, ct).ConfigureAwait(false);
-        UnitCatalogSnapshot? units = fields.Any(f => f.SourceUnitId is not null && f.TargetUnitId is not null)
+
+        // ⛔ L3-06: каталог потрібен і полю з ОДНІЄЮ одиницею джерела (без цільової): звірка фактичної одиниці
+        // атрибута з оголошеною (SourceEventRowBuilder) при units == null пропускалась мовчки.
+        UnitCatalogSnapshot? units = fields.Any(f => f.SourceUnitId is not null)
             ? await new UnitCatalog(db).GetAsync(ct).ConfigureAwait(false)
             : null;
 
