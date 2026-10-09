@@ -38,7 +38,7 @@ public sealed partial class ExceptionHandlingMiddleware(
     private partial void LogRejected(string code, int status, string correlationId);
 
     [LoggerMessage(Level = LogLevel.Warning,
-        Message = "Відповідь уже почалася, ProblemDetails не надіслано. CorrelationId={CorrelationId}")]
+        Message = "Відповідь уже почалася, ProblemDetails не надіслано; з'єднання обірвано. CorrelationId={CorrelationId}")]
     private partial void LogTooLate(string correlationId);
 
     /// <summary>Обробляє запит.</summary>
@@ -100,7 +100,12 @@ public sealed partial class ExceptionHandlingMiddleware(
         {
             // Відповідь уже пішла — переписати її неможливо. Мовчки це
             // проковтнути гірше, ніж лишити слід у журналі.
+            // ⛔ R5-E1/E1-02: і завершувати конвеєр нормально НЕ можна: Kestrel тоді чесно закриває
+            // chunked-тіло, і потоковий CSV (`AuditController.ExportStructure`) доходить ОБРІЗАНИМ,
+            // але зі статусом 200 — клієнт приймає неповний експорт за цілий. `Abort` рве з'єднання
+            // (RST/без кінцевого chunk), і клієнт бачить збій передачі, а не «успіх».
             LogTooLate(correlationId);
+            context.Abort();
             return;
         }
 
