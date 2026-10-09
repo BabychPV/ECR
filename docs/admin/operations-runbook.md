@@ -136,6 +136,7 @@ Api й воркер на **одному** хості — різні ролі й 
 | `Jobs:Queue:Mode` | `Quartz` | `Database` — черга задач у БД (пише `deploy-ecr.ps1` разом з `EcrWorker`, п. 10). ⚠ Недійсне значення мовчки = `Quartz` |
 | `Jobs:Recalculation:Executor` | `InProcess` | `Worker` — перерахунок у службі `EcrWorker` (лише з `Queue:Mode=Database`). ⚠ Недійсне значення мовчки = `InProcess` |
 | `Database:SheetLockTimeoutSeconds` | 30 | очікування блокування аркуша, с |
+| `Database:MaxPoolSize` | 200 | стеля пулу з'єднань SQL (`Max Pool Size`), якщо в рядку підключення її не задано; задане в рядку має перевагу (AN-106) |
 | `Health:RawDataPointWarnRows` | 20000000 | поріг перегляду R2 для картки `db` (п. 3.1); `0` — вимкнено. ⚠ Нечислове значення робить `db` Unhealthy «Database is unavailable» (перевірки на старті немає) |
 | `Calculations:FullYearWarnSeconds` | 600 | бюджет річного перерахунку (ПРД-13); перевищення — `recalcOverBudget` у картці `jobs` |
 | `Calculations:MaxParallelism` | 4 | паралелізм розрахунку |
