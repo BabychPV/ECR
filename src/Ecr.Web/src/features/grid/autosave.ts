@@ -24,7 +24,7 @@ import { queryKeys } from '@/api/queryKeys';
 import type { TableSliceDto } from '@/api/types';
 import { withKnownVersions } from './edits';
 import { rejectionMarksOf } from './saveErrors';
-import { beginInFlight, deferUntilInFlightSettles, splitByInFlight } from './inFlightEdits';
+import { beginInFlight, deferUntilInFlightSettles, hasInFlight, splitByInFlight } from './inFlightEdits';
 import {
   applyPatchLocally,
   refreshStaleness,
@@ -489,7 +489,13 @@ export function useDocumentPending(documentId: number, ownerUserId?: number): vo
         // `baseVersion` і 409 прийшов би на власні правки. Тому: звичайне збереження
         // ПІСЛЯ обробника (`setTimeout 0`) — воно оновить версії; обрала «Піти» — вкладка
         // закриється, а питання людина вже бачила.
-        if (held) {
+        //
+        // ⛔ AN-104 (`D1-03`): те саме, коли збереження ще В ДОРОЗІ. Маячок віз би
+        // комірки, що вже летять, зі старою версією кешу: відповідь першого запиту
+        // її ще не підняла, і `409` на маячок («все або нічого») забрав би з собою
+        // новіші правки, мовчки (`lostEdits` пишеться лише на `401`). Тож — рідне
+        // питання браузера; «Залишитися» — звичайне збереження після відповіді.
+        if (held || hasInFlight()) {
           setTimeout(() => {
             flushAutosave();
           }, 0);

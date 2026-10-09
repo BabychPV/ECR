@@ -2,7 +2,13 @@ import type { JSX, ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { renderHook } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { cancelAutosave, registerSliceSaver, registerUnloadFlush, useDocumentPending } from '../autosave';
+import {
+  cancelAutosave,
+  registerSliceSaver,
+  registerUnloadFlush,
+  scheduleAutosave,
+  useDocumentPending,
+} from '../autosave';
 import { markPendingRejected, putPendingEdit, resetPending } from '../pendingStore';
 import type { PendingEdit } from '../useCellPatch';
 
@@ -90,5 +96,44 @@ describe('L8-08: beforeunload і утримані правки', () => {
 
     expect(event.defaultPrevented).toBe(false);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * AN-104 / `D1-03`: закриття вкладки, поки збереження ще В ДОРОЗІ.
+ *
+ * ⛔ Маячок віз би весь зріз — і комірку, чий PATCH уже летить, зі старою версією
+ * кешу. Якщо перший запит устигав закомітитись, маячок діставав `409` і («все або
+ * нічого») забирав із собою новішу правку B — мовчки.
+ */
+describe('AN-104 / D1-03: beforeunload під час збереження в дорозі', () => {
+  it('PATCH у дорозі: маячка немає, натомість рідне питання браузера', () => {
+    vi.useFakeTimers();
+    // Перший PATCH (безхазяйний зріз) не відповідає ніколи — він «у дорозі».
+    const fetchMock = vi.fn((..._args: unknown[]) => new Promise<Response>(() => {}));
+    vi.stubGlobal('fetch', fetchMock);
+    renderHook(() => useDocumentPending(1), { wrapper });
+
+    putPendingEdit(4, 202609, edit);
+    scheduleAutosave();
+    vi.runOnlyPendingTimers();
+    const sentBefore = fetchMock.mock.calls.length;
+
+    // Правка B — після відправлення A, перед закриттям вкладки.
+    putPendingEdit(4, 202609, other);
+
+    const event = unloadEvent();
+    window.dispatchEvent(event);
+
+    // ⛔ Мутація: прибрати `hasInFlight()` в обробнику — маячок (`keepalive`) іде
+    // з A@стара версія і B, і `defaultPrevented` лишається `false`.
+    expect(event.defaultPrevented).toBe(true);
+    const beacons = fetchMock.mock.calls.filter(
+      (call) => (call[1] as RequestInit | undefined)?.keepalive === true,
+    );
+    expect(beacons).toHaveLength(0);
+    expect(fetchMock.mock.calls.length).toBe(sentBefore);
+
+    vi.useRealTimers();
   });
 });
