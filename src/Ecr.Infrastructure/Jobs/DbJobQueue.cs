@@ -606,36 +606,51 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock) : IJobQueue
     /// ⚠ На ціль уже стоїть інша <c>Queued</c> — перезапуск зайвий: вона візьме
     /// актуальний стан цілі. <c>UX_JobProgress_Target_Queued</c> відбиває
     /// перехід (2601), і метод повертає <see cref="JobRestartOutcome.CoveredBy"/> з
-    /// ідентифікатором тієї, що чекає (L2-11), — а не «не рядок черги».
+    /// ідентифікатором тієї, що чекає (L2-11), — а не «не рядок черги». Якщо вона вже стартувала —
+    /// називає виконувану; якщо завершилась — повторює перезапуск.
     /// </remarks>
     public async Task<JobRestartOutcome> RestartAsync(string jobId, CancellationToken ct)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(jobId);
 
-        try
+        for (var attempt = 1; ; attempt++)
         {
-            return await RestartRowAsync(jobId, ct).ConfigureAwait(false)
-                ? JobRestartOutcome.Restarted
-                : JobRestartOutcome.NotQueueRow;
-        }
-        catch (SqlException ex) when (IsDuplicateKey(ex))
-        {
-            var covering = await RunAsync(
-                """
-                SELECT TOP (1) q.JobId
-                FROM itg.JobProgress f
-                JOIN itg.JobProgress q ON q.TargetKey = f.TargetKey AND q.[State] = 'Queued' AND q.JobId <> f.JobId
-                WHERE f.JobId = @id AND f.TargetKey IS NOT NULL;
-                """,
-                p => p.Add("@id", SqlDbType.NVarChar, 100).Value = jobId,
-                async r => await r.ReadAsync(ct).ConfigureAwait(false) ? r.GetString(0) : null,
-                ct).ConfigureAwait(false);
+            try
+            {
+                return await RestartRowAsync(jobId, ct).ConfigureAwait(false)
+                    ? JobRestartOutcome.Restarted
+                    : JobRestartOutcome.NotQueueRow;
+            }
+            catch (SqlException ex) when (IsDuplicateKey(ex) && attempt < 3)
+            {
+                if (await FindCoveringJobIdAsync(jobId, ct).ConfigureAwait(false) is { } covering)
+                {
+                    return JobRestartOutcome.CoveredBy(covering);
+                }
 
-            // Та, що чекала, могла встигнути стартувати між відмовою і читанням: перезапуск
-            // однаково зайвий (2601 був), просто назвати її вже нема як.
-            return JobRestartOutcome.CoveredBy(covering ?? string.Empty);
+                // ⛔ L2-11: та, що чекала, встигла завершитися між відмовою і читанням — слот цілі
+                // вільний, перезапуск знову доречний. Порожній ідентифікатор у 409 не віддаємо.
+            }
         }
     }
+
+    /// <summary>
+    /// Задача, що вже виконує роботу цілі <paramref name="jobId"/> (L2-11): <c>Queued</c> спершу,
+    /// інакше <c>Running</c> — та, що чекала, могла встигнути стартувати між відмовою перезапуску й читанням.
+    /// </summary>
+    /// <returns><c>null</c> — ні <c>Queued</c>, ні <c>Running</c> на ціль немає.</returns>
+    internal Task<string?> FindCoveringJobIdAsync(string jobId, CancellationToken ct)
+        => RunAsync(
+            """
+            SELECT TOP (1) q.JobId
+            FROM itg.JobProgress f
+            JOIN itg.JobProgress q ON q.TargetKey = f.TargetKey AND q.[State] IN ('Queued', 'Running') AND q.JobId <> f.JobId
+            WHERE f.JobId = @id AND f.TargetKey IS NOT NULL
+            ORDER BY CASE WHEN q.[State] = 'Queued' THEN 0 ELSE 1 END, q.UpdatedAt DESC;
+            """,
+            p => p.Add("@id", SqlDbType.NVarChar, 100).Value = jobId,
+            async r => await r.ReadAsync(ct).ConfigureAwait(false) ? r.GetString(0) : null,
+            ct);
 
     private Task<bool> RestartRowAsync(string jobId, CancellationToken ct)
     {

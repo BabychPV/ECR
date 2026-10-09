@@ -34,6 +34,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="Ecr.Infrastructure.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- SQL-скрипти йдуть у вихід: їх виконує SQL Agent, а не застосунок (D-66) -->
     <None Update="Persistence\Sql\*.sql" CopyToOutputDirectory="PreserveNewest" />
     <!-- Виняток: 09-seed.sql виконує САМ застосунок (§14), тому він ще й

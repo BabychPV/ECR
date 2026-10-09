@@ -48,6 +48,50 @@ public sealed class RestartCoveredByTests(SqlServerFixture sql) : DbJobQueueTest
     }
 
     [Fact]
+    [Trait("Finding", "L2-11")]
+    public async Task Та_що_чекала_уже_стартувала_Running_називається_а_не_порожній_ідентифікатор()
+    {
+        var (failed, waiting) = await FailedWithQueuedBehindAsync();
+        await using var host = NewHost();
+        Assert.Equal(waiting, (await host.ClaimAsync())!.Claim.JobId);
+        Assert.Equal("Running", (await RowAsync(waiting))!.State);
+
+        // ⛔ Гонка «Queued → Running між відмовою 2601 і читанням»: пошук лише Queued дав null → CoveredBy("").
+        Assert.Equal(waiting, await host.Queue.FindCoveringJobIdAsync(failed, CancellationToken.None));
+    }
+
+    [Fact]
+    [Trait("Finding", "L2-11")]
+    public async Task Пошук_покриття_віддає_Queued_раніше_за_Running()
+    {
+        var target = Target();
+        var failed = await EnqueueAsync(target);
+        await using var host = NewHost();
+        var first = (await host.ClaimAsync())!.Claim;
+        Assert.True(await host.Queue.FailAsync(first, "причина", "ECR-SYS-0500", CancellationToken.None));
+
+        var running = await EnqueueAsync(target);
+        Assert.Equal(running, (await host.ClaimAsync())!.Claim.JobId);
+        var queued = await EnqueueAsync(target);
+        Assert.NotEqual(running, queued);
+
+        Assert.Equal(queued, await host.Queue.FindCoveringJobIdAsync(failed, CancellationToken.None));
+    }
+
+    [Fact]
+    [Trait("Finding", "L2-11")]
+    public async Task Пошук_покриття_без_Queued_і_Running_на_ціль_дає_null()
+    {
+        var target = Target();
+        var failed = await EnqueueAsync(target);
+        await using var host = NewHost();
+        var claim = (await host.ClaimAsync())!.Claim;
+        Assert.True(await host.Queue.FailAsync(claim, "причина", "ECR-SYS-0500", CancellationToken.None));
+
+        Assert.Null(await host.Queue.FindCoveringJobIdAsync(failed, CancellationToken.None));
+    }
+
+    [Fact]
     public async Task Перезапуск_провалу_без_черги_на_ціль_як_і_раніше_перезапускає()
     {
         var target = Target();
