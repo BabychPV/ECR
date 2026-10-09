@@ -591,6 +591,12 @@ public sealed partial class EndpointCoverageTests
             "messageKey рядка звіту пакета записів довідника (ФВ-8.12, RegistryBatchRowError) — "
             + "ключі валідації RegistryBatchHandler/UpsertRegistryEntryHandler, клієнт їх не перелічує."),
         new("shared/ui/problemText.ts", "problem.title", 1, null, [], "title problem+json, коли він — ключ каталогу."),
+        new("shared/ui/problemText.ts", "titleKey", 1, null, [],
+            "X5-02: `<messageKey>.title`, коли сервер не прочитав каталог (title = код); лише через hasText."),
+        new("shared/ui/problemText.ts", "codeKey", 1, null, [],
+            "X5-02: `err.<код>`, коли сервер не прочитав каталог (title = код); лише через hasText."),
+        new("shared/ui/problemText.ts", "key", 1, null, [],
+            "X5-02 catalogDetailOf: messageKey відмови без подробиці (сервер не прочитав каталог); лише через hasText."),
         new("features/notifications/probeResult.ts", "key", 1, null, [],
             "messageKey проби каналу й SMTP (категорія відмови транспорту) — спільний showProbeResult."),
         new("features/integration/TestDataSourceModal.tsx", "key", 1, null, [], "messageKey проби джерела."),

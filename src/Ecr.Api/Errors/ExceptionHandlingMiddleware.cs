@@ -133,11 +133,20 @@ public sealed partial class ExceptionHandlingMiddleware(
             return;
         }
 
+        // ⛔ X5-02: каталог читається ОДИН раз на відповідь (раніше — двічі: заголовок і подробиця,
+        // кожне — нове з'єднання і `SELECT Revision`). А для тимчасового збою БД — жодного разу:
+        // каталог живе в тій самій БД, і похід по нього на 503 `databaseBusy` чекав `Connect Timeout`
+        // двічі (до ~30 с), забирав з'єднання з уже вичерпаного пулу і все одно повертав код замість
+        // заголовка та українське речення. Тоді йде код і `messageKey` без подробиці, а текст
+        // мовою користувача бере клієнт зі свого каталогу (`problemText`).
+        var strings = new CatalogOnce(
+            context, skip: status == StatusCodes.Status503ServiceUnavailable && IsTransientDatabaseFailure(exception));
+
         var problem = new EcrProblemDetails
         {
             Status = status,
-            Title = await LocalizedTitleAsync(context, code, details).ConfigureAwait(false),
-            Detail = await LocalizedDetailAsync(context, code, message, details).ConfigureAwait(false),
+            Title = await LocalizedTitleAsync(strings, code, details).ConfigureAwait(false),
+            Detail = await LocalizedDetailAsync(strings, code, message, details).ConfigureAwait(false),
             Type = $"https://ecr.ncoc.kz/errors/{code}",
             Instance = context.Request.Path,
             ErrorCode = code,
@@ -264,21 +273,16 @@ public sealed partial class ExceptionHandlingMiddleware(
     /// <c>problem+json</c> отримав би обірване з'єднання.
     /// </remarks>
     private static async Task<string> LocalizedTitleAsync(
-        HttpContext context, string code, IReadOnlyDictionary<string, object?>? details = null)
+        CatalogOnce catalog, string code, IReadOnlyDictionary<string, object?>? details = null)
     {
         try
         {
-            var catalog = context.RequestServices.GetService<IUiStringCatalog>();
-            var currentUser = context.RequestServices.GetService<ICurrentUser>();
+            var strings = await catalog.GetAsync().ConfigureAwait(false);
 
-            if (catalog is null || currentUser is null)
+            if (strings is null)
             {
                 return code;
             }
-
-            var strings = await catalog
-                .GetAsync(currentUser.Language, context.RequestAborted)
-                .ConfigureAwait(false);
 
             // ⛔ T3-07: один код (`ECR-TMPL-0409`) покриває різні стани («версію опубліковано», «код
             // зв'язку зайнятий»), і спільний заголовок по коду брехав для другого. Кидок може мати
@@ -309,6 +313,51 @@ public sealed partial class ExceptionHandlingMiddleware(
         }
     }
 
+    /// <summary>Каталог рядків мовою запиту — прочитаний не більше ОДНОГО разу на відповідь (X5-02).</summary>
+    /// <remarks>
+    /// <c>null</c> — каталогу немає: служби не зареєстровано (тести конвеєра), читання впало
+    /// або читати не можна взагалі (<c>skip</c>: тимчасовий збій БД). Два останні випадки —
+    /// <see cref="Unavailable"/>: подробицю з ключем тоді локалізує клієнт.
+    /// </remarks>
+    private sealed class CatalogOnce(HttpContext context, bool skip)
+    {
+        private Task<UiStringCatalog?>? _load;
+
+        /// <summary>Каталог мав бути, але його не прочитано (збій БД або читання).</summary>
+        public bool Unavailable { get; private set; } = skip;
+
+        /// <summary>Каталог або <c>null</c>; не кидає.</summary>
+        public Task<UiStringCatalog?> GetAsync() => _load ??= LoadAsync();
+
+        private async Task<UiStringCatalog?> LoadAsync()
+        {
+            if (Unavailable)
+            {
+                return null;
+            }
+
+            try
+            {
+                var catalog = context.RequestServices?.GetService<IUiStringCatalog>();
+                var currentUser = context.RequestServices?.GetService<ICurrentUser>();
+
+                if (catalog is null || currentUser is null)
+                {
+                    return null;
+                }
+
+                return await catalog.GetAsync(currentUser.Language, context.RequestAborted).ConfigureAwait(false);
+            }
+#pragma warning disable CA1031 // Причина — у ⛔ LocalizedTitleAsync: помилка в обробнику помилок не має права дійти до клієнта.
+            catch (Exception)
+#pragma warning restore CA1031
+            {
+                Unavailable = true;
+                return null;
+            }
+        }
+    }
+
     /// <summary>Ключ каталогу для підпису «Потрібне право» перед кодом права.</summary>
     private const string RequiresPermissionKey = "err.ECR-AUTH-0403.requiresPermission";
 
@@ -336,14 +385,14 @@ public sealed partial class ExceptionHandlingMiddleware(
     /// `Title` уже читався каталогом за `D-95`, а `Detail` поруч — ні, і
     /// речення виходило двомовним).
     /// </remarks>
-    private static async Task<string> LocalizedDetailAsync(
-        HttpContext context, string code, string message, IReadOnlyDictionary<string, object?>? details)
+    private static async Task<string?> LocalizedDetailAsync(
+        CatalogOnce catalog, string code, string message, IReadOnlyDictionary<string, object?>? details)
     {
         if (details is not null
             && details.TryGetValue(MessageKeyDetailName, out var keyValue)
             && keyValue is string messageKey)
         {
-            return await ResolveGenericMessageAsync(context, message, messageKey, details).ConfigureAwait(false);
+            return await ResolveGenericMessageAsync(catalog, message, messageKey, details).ConfigureAwait(false);
         }
 
         if (!string.Equals(code, ErrorCodes.Forbidden, StringComparison.Ordinal)
@@ -356,17 +405,12 @@ public sealed partial class ExceptionHandlingMiddleware(
 
         try
         {
-            var catalog = context.RequestServices.GetService<IUiStringCatalog>();
-            var currentUser = context.RequestServices.GetService<ICurrentUser>();
+            var strings = await catalog.GetAsync().ConfigureAwait(false);
 
-            if (catalog is null || currentUser is null)
+            if (strings is null)
             {
                 return message;
             }
-
-            var strings = await catalog
-                .GetAsync(currentUser.Language, context.RequestAborted)
-                .ConfigureAwait(false);
 
             var label = UiStringResolver.Resolve(strings, RequiresPermissionKey);
 
@@ -393,22 +437,23 @@ public sealed partial class ExceptionHandlingMiddleware(
     /// каталогу взагалі нема, — дійти до клієнта локалізованим без власного
     /// точкового арму в цьому файлі на кожен новий код.
     /// </summary>
-    private static async Task<string> ResolveGenericMessageAsync(
-        HttpContext context, string message, string messageKey, IReadOnlyDictionary<string, object?> details)
+    /// <remarks>
+    /// ⛔ X5-02: каталог недоступний (збій читання або тимчасовий збій БД) — подробиці НЕМАЄ
+    /// (<c>null</c>), а не українського речення розробника: <c>messageKey</c> у відповіді каже
+    /// клієнтові, що подробиця «каталожна», і він показав би її як є. Без подробиці клієнт бере
+    /// текст за тим самим ключем зі свого каталогу (<c>problemText</c>).
+    /// </remarks>
+    private static async Task<string?> ResolveGenericMessageAsync(
+        CatalogOnce catalog, string message, string messageKey, IReadOnlyDictionary<string, object?> details)
     {
         try
         {
-            var catalog = context.RequestServices.GetService<IUiStringCatalog>();
-            var currentUser = context.RequestServices.GetService<ICurrentUser>();
+            var strings = await catalog.GetAsync().ConfigureAwait(false);
 
-            if (catalog is null || currentUser is null)
+            if (strings is null)
             {
-                return message;
+                return catalog.Unavailable ? null : message;
             }
-
-            var strings = await catalog
-                .GetAsync(currentUser.Language, context.RequestAborted)
-                .ConfigureAwait(false);
 
             var template = UiStringResolver.Resolve(strings, messageKey);
 
