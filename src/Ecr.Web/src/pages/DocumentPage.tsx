@@ -24,6 +24,7 @@ import {
 import { DocumentActionBar } from '@/features/documents/DocumentActionBar';
 import { DocumentSaveState } from '@/features/documents/DocumentSaveState';
 import { useDocumentLogActions } from '@/features/documents/DocumentLogActions';
+import { useStaleResultsReminderHost } from '@/features/documents/useStaleResultsReminder';
 import { useVersionMigrationAction } from '@/features/documents/VersionMigrationAction';
 import { DocumentLockBanner } from '@/features/documents/DocumentLockBanner';
 import { documentLockOf, hasLockedSheet, locksDataActions } from '@/features/documents/documentLock';
@@ -537,6 +538,7 @@ export function DocumentPage(): JSX.Element {
 
   // ✎ Лінія B: бейдж у шапці й назва пункту «More», коли числа методологій застаріли. Запит спільний із
   // панеллю чисел (один ключ), тож завершений перерахунок оновлює обох.
+  const staleReminderHost = useStaleResultsReminderHost(documentId);
   const calculationsStale = useCalculationsStale(documentId, periodKey, can(session.data, 'Calculation.View'));
 
   const refetchBoth = (): void => {
@@ -631,6 +633,7 @@ export function DocumentPage(): JSX.Element {
           documentItems={[...documentLog.menuItems, businessKeyChange.menuItem, versionMigration.menuItem, deletion.menuItem]}
           resultsStale={document.resultsStale ?? null}
           resultsStaleSince={document.resultsStaleSince ?? null}
+          staleReminderHost={staleReminderHost}
           status={
             <>
               {/* ✎ UI-15: чип стану аркуша і заповненість одним рядком

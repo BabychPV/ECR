@@ -1,4 +1,4 @@
-import { lazy, Suspense, useRef, type JSX, type ReactNode } from 'react';
+import { lazy, Suspense, useRef, type JSX, type ReactNode, type RefObject } from 'react';
 import { Button, Menu, Text } from '@mantine/core';
 import { ExportButton, exportFormatOptions, type ExportFormat } from '@/features/export/ExportButton';
 import { RecalculateKbd, useSheetActions } from '@/features/workflow/SheetActions';
@@ -6,7 +6,7 @@ import type { DocumentLock } from './documentLock';
 import { DocumentSheetBanner } from './DocumentSheetBanner';
 import { DocumentToolbar } from './DocumentToolbar';
 import { StaleResultsBanner } from './StaleResultsBanner';
-import { useStaleResultsReminder } from './useStaleResultsReminder';
+import { useStaleResultsReminder, type StaleReminderState } from './useStaleResultsReminder';
 import { t } from '@/shared/i18n';
 
 // ⚠ `import()` — той самий чанк, що й раніше в `DocumentPage` (`D-132`): імпорт
@@ -42,6 +42,8 @@ interface DocumentActionBarProps {
   readonly resultsStale?: boolean | null;
   /** Відколи застаріло (UTC ISO); `null`/відсутнє — без дати. */
   readonly resultsStaleSince?: string | null;
+  /** Власник нагадування «вихід із застарілим» - сторінка (N3-08); без нього нагадує сам рядок. */
+  readonly staleReminderHost?: RefObject<StaleReminderState>;
 }
 
 /**
@@ -75,9 +77,10 @@ export function DocumentActionBar({
   status,
   resultsStale,
   resultsStaleSince,
+  staleReminderHost,
 }: DocumentActionBarProps): JSX.Element {
   const actions = useSheetActions({ documentId, sheetDefId, sheetName, periodKey, state, lock });
-  useStaleResultsReminder(documentId, resultsStale === true, actions.recalculate !== null);
+  useStaleResultsReminder(documentId, resultsStale === true, actions.recalculate !== null, staleReminderHost);
   const openImport = useRef<((returnTo?: HTMLElement | null) => void) | null>(null);
   const startExport = useRef<((format: ExportFormat) => void) | null>(null);
 
