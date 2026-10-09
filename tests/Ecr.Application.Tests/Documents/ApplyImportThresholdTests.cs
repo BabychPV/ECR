@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using Ecr.Application.Common;
 using Ecr.Application.Documents;
 using Ecr.Application.Documents.Dto;
@@ -23,7 +22,8 @@ namespace Ecr.Application.Tests.Documents;
 /// <see cref="Великий_diff_не_блокує_запит_довше_за_поріг_часу"/> ловить
 /// САМЕ ЦЕ — прибери перевірку порогу (`pendingCount > LargeImportThreshold`)
 /// у <see cref="ApplyImportHandler.HandleAsync"/>, і він почервоніє, бо
-/// виклик почне чекати на повільний <c>ApplyAsync</c> синхронно.
+/// виклик почне чекати на <c>ApplyAsync</c>, що ніколи не завершується
+/// (AN-111: ворота замість стінного часу).
 /// </remarks>
 public sealed class ApplyImportThresholdTests
 {
@@ -106,34 +106,45 @@ public sealed class ApplyImportThresholdTests
     [Trait("Finding", "T10-45")]
     public async Task Великий_diff_не_блокує_запит_довше_за_поріг_часу()
     {
-        // ⚠ Затримка на порядок довша за будь-який розумний бюджет
-        // синхронного HTTP-обробника (`tz/08 §8.2` — секунди, не десятки).
-        // Обробник має ПОВЕРНУТИСЯ задовго до того, як ця затримка мине —
-        // саме тому, що для великого diff він узагалі не чекає на ApplyAsync.
-        var slowApply = TimeSpan.FromSeconds(5);
-        const int BudgetMs = 500;
+        // ⚠ AN-111: раніше тут був Stopwatch і бюджет 500 мс проти
+        // `Task.Delay(5 с)` — у CI раз вийшло 671 мс (холодний JIT, зайнятий
+        // агент) при правильному коді. Стінний час замінено ворітьми:
+        // `ApplyAsync` повертає задачу, яка НІКОЛИ не завершиться, доки тест
+        // сам її не відпустить. Великий diff не чекає на неї взагалі, тож
+        // виклик обробника вже завершений у момент повернення (усі інші
+        // залежності — підставні, з готовими задачами). Прибери поріг —
+        // обробник почне чекати на ворота, і `IsCompleted` буде false
+        // детерміновано, без жодного таймауту.
+        var gate = new TaskCompletionSource<PatchCellsResponse>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
 
         _importer.CountPendingChangesAsync(DocumentId, Token,Arg.Any<CancellationToken>())
             .Returns(ApplyImportHandler.LargeImportThreshold + 1);
 
         _importer.ApplyAsync(DocumentId, Token, Arg.Any<CancellationToken>())
-            .Returns(async _ =>
-            {
-                await Task.Delay(slowApply);
-                return new PatchCellsResponse(0, new Dictionary<string, string>(), []);
-            });
+            .Returns(_ => gate.Task);
 
         _jobs.EnqueueAsync<IExcelImportJob>(Arg.Any<ExcelImportTask>(), Arg.Any<CancellationToken>(), 9)
             .Returns("job-large-2");
 
-        var stopwatch = Stopwatch.StartNew();
-        var result = await Handler().HandleAsync(DocumentId, Token, CancellationToken.None);
-        stopwatch.Stop();
+        var call = Handler().HandleAsync(DocumentId, Token, CancellationToken.None);
+        try
+        {
+            Assert.True(
+                call.IsCompleted,
+                "Застосування великого імпорту чекає на ApplyAsync — "
+                + "поріг мав відправити його в чергу, а не тримати запит синхронно.");
 
-        Assert.True(
-            stopwatch.ElapsedMilliseconds < BudgetMs,
-            $"Застосування великого імпорту тривало {stopwatch.ElapsedMilliseconds} мс — "
-            + $"поріг мав відправити його в чергу, не чекати {slowApply.TotalSeconds} с синхронно.");
-        Assert.Equal("job-large-2", result.JobId);
+            var result = await call;
+            Assert.Equal("job-large-2", result.JobId);
+            Assert.Null(result.Response);
+            await _importer.DidNotReceiveWithAnyArgs().ApplyAsync(default, default!, default);
+        }
+        finally
+        {
+            // Відпускаємо ворота, щоб мутант (синхронне застосування) не
+            // лишив висячу задачу після червоного тесту.
+            gate.TrySetResult(new PatchCellsResponse(0, new Dictionary<string, string>(), []));
+        }
     }
 }
