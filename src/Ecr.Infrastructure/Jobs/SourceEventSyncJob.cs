@@ -1,6 +1,7 @@
 ﻿// src/Ecr.Infrastructure/Jobs/SourceEventSyncJob.cs
 using System.Globalization;
 using System.Text.Json;
+using Ecr.Application.Documents;
 using Ecr.Application.Errors;
 using Ecr.Application.Integration.SourceEvents;
 using Ecr.Application.Ports;
@@ -1043,7 +1044,7 @@ public sealed partial class SourceEventSyncJob(
 
         await using var command = connection.CreateCommand();
         command.Transaction = tx;
-        command.CommandText = """
+        command.CommandText = $"""
             SELECT COUNT(*) FROM doc.TableRow WITH (UPDLOCK, HOLDLOCK)
              WHERE PeriodKey = @period AND TableInstanceId = @instance AND RowKey = @rowKey;
 
@@ -1067,7 +1068,7 @@ public sealed partial class SourceEventSyncJob(
                   JOIN doc.TableRow  AS r ON r.PeriodKey = c.PeriodKey AND r.Id = c.TableRowId
                  WHERE c.PeriodKey = @period AND r.TableInstanceId = @instance AND c.RowKey = @rowKey
             )
-            SELECT COUNT(*) FROM last_change WHERE rn = 1 AND Origin = N'UserEdit';
+            SELECT COUNT(*) FROM last_change WHERE rn = 1 AND Origin IN ({CellChangeOrigins.HumanOriginsSql});
             """;
         command.Parameters.AddWithValue("@period", periodKey);
         command.Parameters.AddWithValue("@instance", state.TableInstanceId!.Value);
@@ -1258,7 +1259,7 @@ public sealed partial class SourceEventSyncJob(
         await using var connection = new Microsoft.Data.SqlClient.SqlConnection(db.Database.GetConnectionString());
         await connection.OpenAsync(ct).ConfigureAwait(false);
         await using var command = connection.CreateCommand();
-        command.CommandText = """
+        command.CommandText = $"""
             WITH last_change AS (
                 SELECT c.RowKey, c.Origin,
                        ROW_NUMBER() OVER (PARTITION BY c.RowKey, c.ColumnDefId
@@ -1267,7 +1268,7 @@ public sealed partial class SourceEventSyncJob(
                   JOIN doc.TableRow  AS r ON r.PeriodKey = c.PeriodKey AND r.Id = c.TableRowId
                  WHERE c.PeriodKey = @period AND r.TableInstanceId = @instance
             )
-            SELECT DISTINCT RowKey FROM last_change WHERE rn = 1 AND Origin = N'UserEdit';
+            SELECT DISTINCT RowKey FROM last_change WHERE rn = 1 AND Origin IN ({CellChangeOrigins.HumanOriginsSql});
             """;
         command.Parameters.AddWithValue("@period", periodKey);
         command.Parameters.AddWithValue("@instance", tableInstanceId);

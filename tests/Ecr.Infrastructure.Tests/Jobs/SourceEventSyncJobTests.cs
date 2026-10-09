@@ -650,6 +650,71 @@ public sealed class SourceEventSyncJobTests(SqlServerFixture sql)
                 CultureInfo.InvariantCulture));
     }
 
+    /// <summary>
+    /// D2-01: рядок події, доповнений людиною через імпорт книги Excel (<c>Origin = Import</c>), при
+    /// зникненні події в джерелі не видаляється — як і з правкою в сітці (T6).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ МУТАЦІЙНИЙ ДОКАЗ: у <c>SourceEventSyncJob.ManualRowKeysAsync</c> і
+    /// <c>RecheckRemovalAsync</c> повернути <c>Origin = N'UserEdit'</c> → рядок EF-E1 жорстко видалено.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Directive", "HSE301-EFSYNC")]
+    [Trait("Finding", "D2-01")]
+    public async Task Рядок_доповнений_імпортом_не_видаляється()
+    {
+        await using var stand = await ArrangeAsync();
+        var source = new FakeEventSource(Ev("E1", Start, End, volume: 10m), Ev("E2", Start.AddHours(1), End.AddHours(1)));
+        await RunAsync(stand, source);
+        await HumanWriteAsync(stand, "EF-E1", new PatchCell(stand.VolumeCode, 42m), CellChangeOrigins.Import);
+
+        source.Result = new SourceEventResult([Ev("E2", Start.AddHours(1), End.AddHours(1))], false, null);
+        await RunAsync(stand, source);
+
+        Assert.Equal(["EF-E1", "EF-E2"], (await RowsAsync(stand)).Select(r => r.RowKey).Order(StringComparer.Ordinal));
+        Assert.Equal(42m, (await CellsAsync(stand, "EF-E1"))[stand.VolumeColumn].Numeric);
+        Assert.Equal(0, await JournalCountAsync(stand));
+        Assert.Equal(SourceEventLinkStatus.Missing, (await LinksAsync(stand)).Single(l => l.SourceEventId == "E1").Status);
+        Assert.Equal(
+            1,
+            Convert.ToInt32(
+                await ScalarAsync(
+                    $"SELECT COUNT(*) FROM itg.CollectionCoverage WHERE SourceEntityId = {stand.EntityId} AND Status = N'ConflictKeptManual'"),
+                CultureInfo.InvariantCulture));
+    }
+
+    /// <summary>
+    /// D2-01: імпорт, що закомітився між рішенням про видалення і самим видаленням, теж зберігає
+    /// рядок — повторна перевірка під блокуванням визнає <c>Import</c> правкою людини.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ МУТАЦІЙНИЙ ДОКАЗ: у <c>SourceEventSyncJob.RecheckRemovalAsync</c> повернути
+    /// <c>Origin = N'UserEdit'</c> → рядок EF-E1 видалено разом з імпортованим значенням.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Directive", "HSE301-EFSYNC")]
+    [Trait("Finding", "D2-01")]
+    public async Task ІмпортМіжРішеннямІВидаленням_РядокЛишається()
+    {
+        await using var stand = await ArrangeAsync();
+        var source = new FakeEventSource(Ev("E1", Start, End, volume: 10m), Ev("E2", Start.AddHours(1), End.AddHours(1)));
+        await RunAsync(stand, source);
+
+        source.Result = new SourceEventResult([Ev("E2", Start.AddHours(1), End.AddHours(1))], false, null);
+        await RunAsync(
+            stand,
+            source,
+            afterRemovalDecision: () => HumanWriteAsync(stand, "EF-E1", new PatchCell(stand.VolumeCode, 42m), CellChangeOrigins.Import));
+
+        Assert.Equal(["EF-E1", "EF-E2"], (await RowsAsync(stand)).Select(r => r.RowKey).Order(StringComparer.Ordinal));
+        Assert.Equal(42m, (await CellsAsync(stand, "EF-E1"))[stand.VolumeColumn].Numeric);
+        Assert.Equal(0, await JournalCountAsync(stand));
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
@@ -1629,8 +1694,9 @@ public sealed class SourceEventSyncJobTests(SqlServerFixture sql)
         return services.BuildServiceProvider();
     }
 
-    /// <summary>Правка людини через той самий обробник, у власному scope.</summary>
-    private async Task HumanWriteAsync(Stand stand, string rowKey, PatchCell cell)
+    /// <summary>Правка людини через той самий обробник, у власному scope: сітка (<c>UserEdit</c>) або книга Excel (<c>Import</c>).</summary>
+    private async Task HumanWriteAsync(
+        Stand stand, string rowKey, PatchCell cell, string origin = CellChangeOrigins.UserEdit)
     {
         await using var scope = stand.Provider.CreateAsyncScope();
         using var author = scope.ServiceProvider.GetRequiredService<JobActorScope>()
@@ -1642,7 +1708,7 @@ public sealed class SourceEventSyncJobTests(SqlServerFixture sql)
 
         await scope.ServiceProvider.GetRequiredService<PatchCellsHandler>().HandleAsync(
             new PatchCellsRequest(
-                stand.JanuaryInstanceId, 202601, CellChangeOrigins.UserEdit, [new PatchRow(rowKey, version, [cell])]),
+                stand.JanuaryInstanceId, 202601, origin, [new PatchRow(rowKey, version, [cell])]),
             CancellationToken.None);
     }
 

@@ -186,6 +186,44 @@ public sealed class MaterializeIntegrationActorTests(SqlServerFixture sql)
     }
 
     /// <summary>
+    /// D2-01: значення, внесене людиною через імпорт книги Excel (<c>Origin = Import</c>), інтеграція
+    /// теж не переписує — імпорт така сама правка людини (<c>D-118</c>, <c>D-187</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ МУТАЦІЙНИЙ ДОКАЗ: у <c>IntegrationCellPatcher.ManualCellsAsync</c> повернути
+    /// <c>lc.Origin = N'UserEdit'</c> → у комірці 7 від svc-integration, журналу покриття
+    /// <c>ConflictKeptManual</c> немає.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "D2-01")]
+    public async Task Значення_з_імпорту_Excel_не_перезаписується_інтеграцією()
+    {
+        var stand = await ArrangeAsync(TableRowMode.Fixed, newRow: false);
+        var humanId = await AddHumanAsync(stand.RoleId);
+
+        try
+        {
+            await using var provider = BuildProvider(new RowStoreHook());
+            await HumanEditAsync(provider, stand, humanId, 42m, CellChangeOrigins.Import);
+
+            await using var scope = provider.CreateAsyncScope();
+            await RunJobAsync(scope, stand);
+        }
+        finally
+        {
+            await RevokeAsync(stand.RoleId);
+        }
+
+        Assert.Equal(42m, Assert.IsType<decimal>(await CellAsync(stand, stand.ColumnDefIds[0])));
+        Assert.Equal($"{humanId}|Import", await LastChangeAsync(stand, stand.ColumnDefIds[0]));
+
+        var coverage = Assert.Single(await CoverageAsync(stand));
+        Assert.Equal(CollectionCoverage.ConflictKeptManual, coverage.Status);
+    }
+
+    /// <summary>
     /// Комірку під правилом «дозволено з підтвердженням» (<c>ФВ-2.16</c>)
     /// інтеграція не пише: підтвердження — дія людини.
     /// </summary>
@@ -526,8 +564,9 @@ public sealed class MaterializeIntegrationActorTests(SqlServerFixture sql)
         return services.BuildServiceProvider();
     }
 
-    /// <summary>Правка людини через той самий обробник, у власному scope.</summary>
-    private static async Task HumanEditAsync(ServiceProvider provider, Stand stand, int humanId, decimal value)
+    /// <summary>Правка людини через той самий обробник, у власному scope: сітка (<c>UserEdit</c>) або книга Excel (<c>Import</c>).</summary>
+    private static async Task HumanEditAsync(
+        ServiceProvider provider, Stand stand, int humanId, decimal value, string origin = CellChangeOrigins.UserEdit)
     {
         await using var scope = provider.CreateAsyncScope();
         using var author = scope.ServiceProvider.GetRequiredService<JobActorScope>()
@@ -539,7 +578,7 @@ public sealed class MaterializeIntegrationActorTests(SqlServerFixture sql)
 
         await scope.ServiceProvider.GetRequiredService<PatchCellsHandler>().HandleAsync(
             new PatchCellsRequest(
-                stand.Chain.TableInstanceId, stand.Chain.PeriodKey.Value, CellChangeOrigins.UserEdit,
+                stand.Chain.TableInstanceId, stand.Chain.PeriodKey.Value, origin,
                 [new PatchRow(stand.RowKey, version, [new PatchCell(stand.ColumnCodes[0], value)])]),
             CancellationToken.None);
     }

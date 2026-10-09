@@ -28,6 +28,39 @@ public static class CellChangeOrigins
     /// <summary>Правка людини в сітці — єдине, що може заявити клієнт.</summary>
     public const string UserEdit = "UserEdit";
 
+    /// <summary>
+    /// Імпорт книги Excel (<c>ExcelImporter</c>): значення, які людина ввела в
+    /// книгу й свідомо застосувала.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ D2-01 (аудит 09.10b): для сторожів «правка людини» інтеграції і синку
+    /// подій (<c>D-118</c>, <c>D-187</c>) імпорт — така сама правка людини, як
+    /// <see cref="UserEdit"/>. Клієнт заявити його через PATCH не може
+    /// (<see cref="RequireClientOrigin"/>).
+    /// </remarks>
+    public const string Import = "Import";
+
+    /// <summary>
+    /// Походження, які сторожі інтеграції вважають рішенням людини, — готовим
+    /// списком для <c>IN (…)</c> у сирому SQL над <c>aud.CellChange</c> (журнал
+    /// не є сутністю EF).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ D2-01: сторожі порівнювали <c>Origin</c> з літералом <c>UserEdit</c> у трьох
+    /// місцях (<c>IntegrationCellPatcher.ManualCellsAsync</c>,
+    /// <c>SourceEventSyncJob.RecheckRemovalAsync</c>/<c>ManualRowKeysAsync</c>) і
+    /// не бачили <see cref="Import"/>: інтеграція перезаписувала імпортоване, а
+    /// синк жорстко видаляв рядки, доповнені імпортом. Один перелік тут — щоб
+    /// наступне «людське» походження не довелося шукати по SQL
+    /// (<c>HumanOriginSqlLiteralTests</c> стежить, щоб літерал не повернувся).
+    /// <para>
+    /// ⚠ Лише сторожі інтеграції. Підпис автора в конфлікті PATCH
+    /// (<c>CellConflictDto.TheirUser</c>) за контрактом лишає імпорт як
+    /// <c>system</c>.
+    /// </para>
+    /// </remarks>
+    public const string HumanOriginsSql = "N'" + UserEdit + "', N'" + Import + "'";
+
     /// <summary>Скільки символів значення повертається в тексті відмови.</summary>
     private const int EchoLength = 32;
 

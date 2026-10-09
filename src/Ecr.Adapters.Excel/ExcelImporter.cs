@@ -466,7 +466,7 @@ public sealed class ExcelImporter(
                     .Select(diff => new PatchCellsRequest(
                         diff.TableInstanceId,
                         diff.PeriodKey,
-                        "Import",
+                        CellChangeOrigins.Import,
                         [.. diff.Changes
                             .GroupBy(c => c.RowKey, StringComparer.Ordinal)
                             .Select(g => new PatchRow(

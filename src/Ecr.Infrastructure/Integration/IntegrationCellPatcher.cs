@@ -449,8 +449,9 @@ public sealed class IntegrationCellPatcher(
             }
 
             // ⛔ Комірки, що їх правила людина, не чіпаємо (`D-118`). Ознака —
-            // походження останньої зміни в журналі комірок: `UserEdit` означає
-            // свідоме рішення, і інтеграція не має права його стерти.
+            // походження останньої зміни в журналі комірок: `UserEdit` (сітка)
+            // і `Import` (книга Excel, D2-01) означають свідоме рішення, і
+            // інтеграція не має права його стерти.
             if (manual.Contains($"{cell.RowKey}:{column.Code}"))
             {
                 kept.Add($"{cell.RowKey}:{column.Code}");
@@ -619,7 +620,7 @@ public sealed class IntegrationCellPatcher(
         await connection.OpenAsync(ct).ConfigureAwait(false);
 
         await using var command = connection.CreateCommand();
-        command.CommandText = """
+        command.CommandText = $"""
             WITH last_change AS (
                 SELECT c.RowKey, c.ColumnDefId, c.Origin,
                        ROW_NUMBER() OVER (PARTITION BY c.RowKey, c.ColumnDefId
@@ -631,7 +632,7 @@ public sealed class IntegrationCellPatcher(
             SELECT lc.RowKey, cd.Code
               FROM last_change AS lc
               JOIN cfg.ColumnDef AS cd ON cd.Id = lc.ColumnDefId
-             WHERE lc.rn = 1 AND lc.Origin = N'UserEdit';
+             WHERE lc.rn = 1 AND lc.Origin IN ({CellChangeOrigins.HumanOriginsSql});
             """;
 
         command.Parameters.AddWithValue("@period", periodKey.Value);
