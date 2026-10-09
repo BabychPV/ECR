@@ -62,7 +62,9 @@ public sealed class HealthReadyPublicDescriptionTests
         var (body, check) = await ReadyAsync(("db", entry));
 
         Assert.Equal("Degraded", check.GetProperty("status").GetString());
-        Assert.Equal("session keys not protected", check.GetProperty("description").GetString());
+
+        // ⛔ L1-11: стан кільця ключів анонімові не називаємо (раніше тут стояла фраза «session keys not protected»).
+        Assert.Equal(PublicHealthReason.Generic, check.GetProperty("description").GetString());
         Assert.Empty(check.GetProperty("data").EnumerateObject());
         AssertNoSecrets(body);
     }
@@ -80,8 +82,44 @@ public sealed class HealthReadyPublicDescriptionTests
         var (body, check) = await ReadyAsync(("db", entry));
 
         Assert.Equal("Unhealthy", check.GetProperty("status").GetString());
-        Assert.Equal("database unavailable", check.GetProperty("description").GetString());
+
+        // R1 (варіант A): без білого списку анонімові — лише загальна фраза.
+        Assert.Equal(PublicHealthReason.Generic, check.GetProperty("description").GetString());
         AssertNoSecrets(body);
+    }
+
+    /// <remarks>
+    /// ⛔ L1-11 (регресія A2-11): жоден код про ключі сесій не стає фразою, навіть якщо його додано до
+    /// білого списку анонімних причин. Мутація: прибрати <c>AdminOnly</c> і внести код до
+    /// <c>AnonymousReasons</c> → червоний; повернути фрази в <c>Phrases</c> без перевірки → червоний.
+    /// </remarks>
+    [Theory]
+    [InlineData(PublicHealthReason.SessionKeysUnprotected)]
+    [InlineData(PublicHealthReason.KeyCertificateUnavailable)]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    public async Task Причини_про_ключі_сесій_анонімові_не_називаються_ні_Degraded_ні_Unhealthy(string code)
+    {
+        foreach (var status in new[] { HealthStatus.Degraded, HealthStatus.Unhealthy })
+        {
+            var (body, check) = await ReadyAsync(("db", Entry(status, SecretDescription, data: Data(code))));
+
+            Assert.Equal(PublicHealthReason.Generic, check.GetProperty("description").GetString());
+            Assert.DoesNotContain("session key", body, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("key ring", body, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("certificate", body, StringComparison.OrdinalIgnoreCase);
+            AssertNoSecrets(body);
+        }
+    }
+
+    /// <summary>Жодна з відомих фраз про кільце ключів не входить до білого списку сторожа витоку.</summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    public void KnownDescriptions_не_містить_фраз_про_кільце_ключів()
+    {
+        Assert.DoesNotContain(
+            PublicHealthReason.KnownDescriptions,
+            d => d.Contains("session keys", StringComparison.OrdinalIgnoreCase)
+                || d.Contains("key ring", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]

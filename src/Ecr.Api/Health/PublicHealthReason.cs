@@ -13,7 +13,9 @@ namespace Ecr.Api.Health;
 ///
 /// Тому перевірка кладе в <c>Data</c> під <see cref="DataKey"/> лише КОД
 /// причини, а писар перекладає його у фіксовану фразу з
-/// <see cref="Phrases"/>. Довільний текст із перевірки сюди не доходить за
+/// <see cref="Phrases"/> — але лише для кодів із <see cref="AnonymousReasons"/>
+/// (за замовчуванням порожній: усе дає <see cref="Generic"/>, рішення R1),
+/// а коди з <see cref="AdminOnly"/> (ключі сесій) — НІКОЛИ. Довільний текст із перевірки сюди не доходить за
 /// побудовою: невідомий код дає загальну фразу, а не сам код. Ключ
 /// <see cref="DataKey"/> службовий — писар не віддає його в жоден звіт.
 ///
@@ -52,7 +54,7 @@ public static class PublicHealthReason
     /// <summary>Фраза на місці тексту винятку, який перевірка не перехопила сама.</summary>
     public const string CheckFailed = "check failed; details are in the service log";
 
-    private static readonly IReadOnlyDictionary<string, string> Phrases =
+    private static readonly Dictionary<string, string> Phrases =
         new Dictionary<string, string>(StringComparer.Ordinal)
         {
             [RcsiDisabled] = "RCSI is disabled",
@@ -64,13 +66,32 @@ public static class PublicHealthReason
             [DatabaseUnavailable] = "database unavailable",
         };
 
+    /// <summary>
+    /// ⛔ L1-11: коди, які НІКОЛИ не стають фразою для анонімного звіту — стан кільця ключів сесій
+    /// (відкрите кільце чи недоступний сертифікат) безпека не називає навіть у «загальному» вигляді.
+    /// Подробиця лишається в <c>/health/db</c> і <c>/admin/health</c> (за правом). Цей набір не залежить
+    /// від <see cref="AnonymousReasons"/>: його не можна «ввімкнути» перемикачем R1.
+    /// </summary>
+    private static readonly HashSet<string> AdminOnly =
+        new HashSet<string>(StringComparer.Ordinal) { SessionKeysUnprotected, KeyCertificateUnavailable };
+
+    /// <summary>
+    /// Рішення R1 (AUDIT-2026-10-09): які причини анонімний <c>/health/ready</c> може називати фразою.
+    /// Варіант A (за замовчуванням, до рішення людини) — жодної, усе дає <see cref="Generic"/>.
+    /// Варіант B — додати сюди <see cref="RcsiDisabled"/> і <see cref="FilegroupsMissing"/>
+    /// (<see cref="AdminOnly"/> усе одно переможе). Змінюється одним рядком; тести кільця ключів від R1 не залежать,
+    /// решта чекають <see cref="Generic"/> (варіант A) — за B їх оновити.
+    /// </summary>
+    private static readonly HashSet<string> AnonymousReasons =
+        new HashSet<string>(StringComparer.Ordinal);
+
     /// <summary>Усі фрази, які може дати <see cref="Describe"/> (для сторожів витоку).</summary>
     public static IReadOnlyCollection<string> KnownDescriptions { get; } =
-        [.. Phrases.Values, Generic];
+        [.. Phrases.Where(p => AnonymousReasons.Contains(p.Key) && !AdminOnly.Contains(p.Key)).Select(p => p.Value), Generic];
 
     /// <summary>
     /// Нейтральний опис для анонімного звіту: <c>null</c> для <c>Healthy</c>,
-    /// інакше фраза з білого списку або <see cref="Generic"/>.
+    /// інакше фраза з білого списку (<see cref="AnonymousReasons"/>) або <see cref="Generic"/>.
     /// </summary>
     public static string? Describe(HealthReportEntry entry)
     {
@@ -81,6 +102,8 @@ public static class PublicHealthReason
 
         return entry.Data.TryGetValue(DataKey, out var code)
             && code is string text
+            && !AdminOnly.Contains(text)
+            && AnonymousReasons.Contains(text)
             && Phrases.TryGetValue(text, out var phrase)
                 ? phrase
                 : Generic;
