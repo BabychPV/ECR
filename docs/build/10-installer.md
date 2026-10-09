@@ -645,7 +645,9 @@ W2, 5, 9, 15 і статичні перевірки таблиць MSI S1–S5 (
 прав адміністратора.
 
 **CI: джоба `msi-install (windows)`** (`.github/workflows/ci.yml`, НЕ
-обов'язковий гейт; `needs: msi-windows` заради артефакту `ecr-msi`) ставить
+обов'язковий гейт; `needs: msi-windows` заради артефакту `ecr-msi`; ✎ X8-01:
+разом із `worker (windows)` і `msi (windows)` зводиться в агрегатор `windows` —
+обов'язковим для `main` його робить людина в ruleset) ставить
 MSI по-справжньому на ефемерному `windows-latest` через
 `tools/ci-msi-install.ps1`:
 

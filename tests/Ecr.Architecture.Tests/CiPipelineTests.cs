@@ -195,6 +195,60 @@ public sealed partial class CiPipelineTests
         Assert.Contains("rc/", job, StringComparison.Ordinal);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Агрегатор_windows_залежить_від_усіх_Windows_завдань()
+    {
+        // ⛔ X8-01 (R6): реліз — MSI на Windows, а сім гейтів — Linux. Агрегатор `windows`
+        // зводить Windows-завдання в одне ім'я для ruleset `main`; завдання, що випало з
+        // його `needs`, перестало б блокувати мерж мовчки.
+        var workflow = Workflow().Replace("\r\n", "\n", StringComparison.Ordinal);
+
+        var start = workflow.IndexOf("\n  windows:\n", StringComparison.Ordinal);
+        Assert.True(start >= 0, "Немає агрегатора windows у ci.yml — Windows-завдання не зведені в один вердикт.");
+        var next = workflow.IndexOf("\n  # ", start + 1, StringComparison.Ordinal);
+        var job = next > start ? workflow[start..next] : workflow[start..];
+
+        var needs = job.Split('\n').Single(line => line.TrimStart().StartsWith("needs:", StringComparison.Ordinal));
+        foreach (var windowsJob in WindowsJobs(workflow))
+        {
+            Assert.Contains(windowsJob, needs, StringComparison.Ordinal);
+            Assert.Contains($"needs.{windowsJob}.result", job, StringComparison.Ordinal);
+        }
+
+        Assert.Contains("if: ${{ always() }}", job, StringComparison.Ordinal);
+        Assert.Contains("exit 1", job, StringComparison.Ordinal);
+    }
+
+    /// <summary>Завдання <c>ci.yml</c>, що йдуть на Windows-раннері.</summary>
+    private static List<string> WindowsJobs(string workflow)
+    {
+        var jobs = new List<string>();
+        string? current = null;
+        foreach (var line in workflow.Split('\n'))
+        {
+            var job = JobHeader().Match(line);
+            if (job.Success)
+            {
+                current = job.Groups[1].Value;
+                continue;
+            }
+
+            if (current is not null && line.Trim() == "runs-on: windows-latest")
+            {
+                jobs.Add(current);
+            }
+        }
+
+        Assert.NotEmpty(jobs);
+        return jobs;
+    }
+
+    /// <summary>Заголовок завдання у <c>jobs:</c> — рівно два пробіли відступу.</summary>
+    [GeneratedRegex(@"^  ([a-z][a-z0-9-]*):\s*$")]
+    private static partial Regex JobHeader();
+
     private static List<string> Covered(string workflow)
         => workflow.Split('\n')
             .Where(line => !line.TrimStart().StartsWith('#'))
