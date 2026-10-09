@@ -1,11 +1,12 @@
 # Пропозиції для DBA — з вимірами (2026-10-08)
 
-Єдине місце для пропозицій, що потребують DDL або рішення DBA. Усі рядки мають статус **proposed**: у `Sql/` і в міграції EF нічого не додано (D-66 — застосунок без DDL; D-264 — DBA на замовнику). Скрипти нижче — **приклади**, не виконувались на прод-базі. Задачі в черзі — `docs/build/WORK-QUEUE.md`, `DB-5`, `DB-6`. Походження: `docs/build/TODO-REMAINING.md` B3.6/B3.7.
+Єдине місце для пропозицій, що потребують DDL або рішення DBA. Рядки 1-2 мають статус **proposed**: у `Sql/` і в міграції EF для них нічого не додано; рядок 3 виконано (AN-112, дозвіл людини 09.10) (D-66 — застосунок без DDL; D-264 — DBA на замовнику). Скрипти нижче — **приклади**, не виконувались на прод-базі. Задачі в черзі — `docs/build/WORK-QUEUE.md`, `DB-5`, `DB-6`. Походження: `docs/build/TODO-REMAINING.md` B3.6/B3.7.
 
 | # | Пропозиція | Хто вирішує | Статус |
 |---|---|---|---|
 | 1 | Індекс `IX_CellChange_Doc_Period_ChangedAt` на `aud.CellChange` | замовник/DBA (К10) | proposed |
 | 2 | `LOCK_ESCALATION` на `doc.CellValue` / `doc.TableRow` | DBA (замовника не питаємо — рішення координатора 08.10) | proposed |
+| 3 | Фільтрований індекс `IX_CellChange_LateEdit` на `aud.CellChange` | людина (09.10, HU-12/HU-13, `D-343`) | **виконано** (AN-112) |
 
 ## 1. Індекс `aud.CellChange` для resultsStale (DB-5)
 
@@ -65,7 +66,7 @@ WHERE object_id IN (OBJECT_ID(N'doc.CellValue'), OBJECT_ID(N'doc.TableRow'));
 | Ціна | Індекс майже порожній (пізні правки рідкісні: лише Grace/Reopen), запис — лише для рядків з `IsLateEdit = 1` |
 | Ризик | Низький (лише індекс). Потрібен `QUOTED_IDENTIFIER ON` (`sqlcmd -I`), як для `IX_CellChange_OutOfWindow` |
 | Хто вирішує | DBA (К10) |
-| Статус | proposed |
+| Статус | ✎ 2026-10-09: **виконано** (AN-112; дозвіл людини 09.10, `D-343`). Індекс у `Sql/11-audit-tables.sql` і дзеркало в `Sql/12-archive-tables.sql` (`arc.AuditCellChange` — інакше SWITCH архіву падає): ключ `(DocumentId, PeriodKey)`, `INCLUDE (ColumnDefId)`, `WHERE IsLateEdit = 1`, `ON ps_AuditByMonth(ChangedAt)`, ідемпотентно (`IF NOT EXISTS`), `ONLINE = ON` лише на `EngineEdition` 3/5/8 (як `B18HotPathIndexes`). Звірено з предикатом після AN-109: `IsLateEdit = 1` — фільтр, `DocumentId IN (…)` і `PeriodKey = @p` — ключ, `ColumnDefId` (NOT EXISTS схованих колонок) — INCLUDE. Сторож — `AuditLateEditIndexTests` (Architecture). Вимірів після індексу немає |
 
 Приклад скрипта (у стилі `IX_CellChange_OutOfWindow` з `11-audit-tables.sql`):
 

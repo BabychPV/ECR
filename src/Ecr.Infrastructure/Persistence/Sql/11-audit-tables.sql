@@ -92,6 +92,32 @@ BEGIN
 END
 GO
 
+-- P1-05 / AN-112 (DBA-PROPOSALS §3): позначка «пізня правка» у переліку документів,
+-- на картці й фільтр `hasLateEdits` (`DocumentStore.LateEditDocumentIds`).
+-- Предикат запиту: `IsLateEdit = 1` (фільтр індексу), `DocumentId IN (сторінка)`,
+-- `PeriodKey = @p` (лише в тексті «за період», AN-109) і `ColumnDefId` у NOT EXISTS
+-- (сховані колонки/таблиці/аркуші) — тож ключ (DocumentId, PeriodKey) + INCLUDE
+-- (ColumnDefId) покриває запит без key lookup у кластерний індекс. Фільтрований:
+-- пізні правки рідкісні (лише Grace/Reopen, D-70), індекс майже порожній.
+-- Вирівняний по ps_AuditByMonth, як решта індексів таблиці (THROW 50031 у 07).
+-- ONLINE — лише там, де він є (EngineEdition 3/5/8; на Standard/Express — помилка
+-- 1712), той самий прийом, що в міграції B18HotPathIndexes. Ідемпотентний.
+-- Фільтрований індекс потребує QUOTED_IDENTIFIER ON (`sqlcmd -I`; поставлено вгорі).
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_CellChange_LateEdit'
+               AND object_id = OBJECT_ID(N'aud.CellChange'))
+BEGIN
+    DECLARE @lateEditIndex nvarchar(max) =
+        N'CREATE INDEX IX_CellChange_LateEdit '
+        + N'ON aud.CellChange (DocumentId, PeriodKey) INCLUDE (ColumnDefId) '
+        + N'WHERE IsLateEdit = 1'
+        + CASE WHEN CAST(SERVERPROPERTY('EngineEdition') AS int) IN (3, 5, 8)
+               THEN N' WITH (ONLINE = ON)' ELSE N'' END
+        + N' ON ps_AuditByMonth(ChangedAt);';
+    PRINT @lateEditIndex;
+    EXEC sys.sp_executesql @lateEditIndex;
+END
+GO
+
 IF OBJECT_ID(N'aud.StructureChange', N'U') IS NULL
 BEGIN
     CREATE TABLE aud.StructureChange
