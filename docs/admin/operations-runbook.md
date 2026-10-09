@@ -1087,6 +1087,65 @@ Msg 50301 … Передперевірка U1: оновлення зупинен
 Гілку індексу без `ONLINE` тест виконує наживо на Developer, підставляючи
 редакцію 4. Справжнього Standard чи Express у перевірці не було.
 
+**Вікно обслуговування для B18 і `ADD … NOT NULL DEFAULT` на Standard/Express**
+(✎ 2026-10-09, аудит L10-16). Те саме правило, що для U1 вище: на Enterprise/Developer/Azure
+(`EngineEdition` 3, 5, 8) перелічене нижче проходить без простою, на Standard і Express (2, 4)
+працює **офлайн** і потребує вікна. Прод-сервери замовника — Enterprise (`D-101`), тож їх це не
+стосується; правило потрібне для Standard/Express (стенди, пілоти, малі майданчики) і для будь-якої
+бази, оновлюваної з версії, що старіша за відповідну міграцію.
+
+| Крок | Де виконується | Що робить | Enterprise/Developer | Standard/Express |
+|---|---|---|---|---|
+| Міграція `B18HotPathIndexes` (`20260925024920`) | `migration.sql` | 5 індексів: `doc.TableRow` (`IX_TableRow_Live`), `doc.CellValue` (`IX_CellValue_RegistryEntry`, `IX_CellValue_Unit`), `cfg.ColumnDef` (два) | `ONLINE = ON` | офлайн: запис у таблицю чекає, доки індекс збудується |
+| `ADD Kind tinyint NOT NULL DEFAULT 0` до `calc.CalculationResult` (міграція `HSE301M3Trace`, `20260928084900`) | `migration.sql` | нова колонка з типовим значенням | метаданні, без переписування | переписування **кожного** рядка під `Sch-M`: таблиця недоступна й для читання |
+| `ADD IsOutOfWindow bit NOT NULL DEFAULT(0)` до `aud.CellChange` | `11-audit-tables.sql` | нова колонка з типовим значенням | метаданні, без переписування | переписування кожного рядка під `Sch-M` |
+| дзеркала в `12-archive-tables.sql` (`arc.CellChange.IsOutOfWindow`, `arc.CalculationResult.Kind`, `arc.CalculationStep.MaskedZero`, `arc.TableRow.IsOrphaned`) | `12-archive-tables.sql` | те саме для архівних таблиць | метаданні | переписування під `Sch-M` |
+
+Додавання колонки `NOT NULL` з типовим значенням — операція без переписування лише в
+Enterprise; Standard і Express переписують таблицю. Кожен такий `ADD` виконується **один
+раз**: далі `COL_LENGTH(...) IS NULL` / `IF NOT EXISTS` пропускає його, тож вікно потрібне лише
+для бази, яку оновлюють **з** версії без колонки/індексу. Нова база й база, оновлена
+до цих змін раніше, вікна не потребують.
+
+⚠ **Для `aud.CellChange` розбити `ADD` на порції не можна:** журнал незмінний, а `UPDATE`
+(для «додати як `NULL`, заповнити пачками, потім `NOT NULL`») відхиляє тригер
+(`THROW 50060`). Лишається одне вікно на весь `ALTER`. Те саме правило «не редагувати
+міграцію, щоб обійти» (п. 8.2 вище) діє і тут: порядок кроків не змінюйте.
+
+⛔ **Тривалість заздалегідь невідома й не заміряна.** Для цих кроків вимірювання на реальному
+Standard не проводилося (для `PerfFixJobsStaleHealth` у п. 8 вікно заміряне, для B18 і для
+колонок вище — ні; порядок величини з аудиту: `doc.CellValue` ≈ 108 млн рядків на рік
+розрахунків). Тому:
+
+1. На сервері з Standard/Express перевірте редакцію й обсяг таблиць, що перебудовуються:
+
+   ```sql
+   SELECT SERVERPROPERTY('EngineEdition') AS EngineEdition, SERVERPROPERTY('Edition') AS Edition;
+
+   SELECT s.name + N'.' + t.name AS [Table], SUM(ps.row_count) AS [Rows]
+   FROM sys.dm_db_partition_stats AS ps
+   JOIN sys.tables AS t ON t.object_id = ps.object_id
+   JOIN sys.schemas AS s ON s.schema_id = t.schema_id
+   WHERE ps.index_id IN (0, 1)
+     AND (s.name + N'.' + t.name) IN (N'doc.CellValue', N'doc.TableRow', N'calc.CalculationResult', N'aud.CellChange')
+   GROUP BY s.name, t.name;
+   ```
+
+2. Зробіть **пробний прогін на копії з бекапу** (п. 6.2): `powershell -File tools\setup-dev-db.ps1
+   -Server <сервер> -Database <копія> -Upgrade` (оновлює лише наявну базу). Журнал
+   розгортання друкує кожну команду індексу B18 (`PRINT`): за відсутності `ONLINE = ON` в
+   рядку `CREATE INDEX` вікно потрібне. Заміряйте тривалість кроків.
+3. Призначте вікно з **запасом** над виміряним: перерахунок і звіти зупинені, `Stop-Service
+   EcrWorker`, потім `EcrApi` (п. 8, крок 2 — `deploy-ecr.ps1` служб перед схемою не зупиняє).
+   Перевірте місце під журнал транзакцій і файлову групу: переписування таблиці й побудова
+   індексу тимчасово потребують місця порядку обсягу таблиці й журналу.
+4. Не переривайте крок: відкат переписування триває порівнянно з самим переписуванням.
+
+✎ Гілку `ONLINE` для B18 (`IndexesSql`) тримає `B18HotPathIndexesOnlineTests`: гілка без `ONLINE`
+виконується наживо на Developer із підставленою редакцією 2. Справжнього Standard чи Express у
+перевірці не було; поведінку `ADD … NOT NULL DEFAULT` на Standard наведено за документацією SQL
+Server, а не за власним заміром.
+
 ### 8.3. Міграція Q222: помилка 50222 «Передперевірка Q222» (дублі під унікальні індекси)
 
 **Кого стосується.** Бази, розгорнуті до міграції
