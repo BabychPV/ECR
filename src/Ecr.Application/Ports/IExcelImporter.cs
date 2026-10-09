@@ -12,7 +12,18 @@ public interface IExcelImporter
     public Task<ImportPreview> PreviewAsync(long documentId, Stream file, CancellationToken ct);
 
     /// <summary>Застосовує раніше побудований diff після підтвердження користувачем.</summary>
-    public Task<PatchCellsResponse> ApplyAsync(long documentId, string previewToken, CancellationToken ct);
+    /// <param name="documentId">Документ.</param>
+    /// <param name="previewToken">Токен перегляду.</param>
+    /// <param name="overwriteRows">
+    /// ✎ AN-114 (D-338). Рядки, для яких людина свідомо перезаписує чужі правки,
+    /// зроблені після експорту книги; <c>null</c>/порожньо — поведінка AN-103
+    /// (конфліктні рядки не застосовуються, решта — так). Рядок, що не був
+    /// конфліктом «змінено після експорту» в цьому перегляді, — відмова
+    /// <c>ECR-IMP-0422</c> (<c>overwriteNotConflict</c>).
+    /// </param>
+    /// <param name="ct">Скасування.</param>
+    public Task<PatchCellsResponse> ApplyAsync(
+        long documentId, string previewToken, IReadOnlyList<ImportOverwriteRow>? overwriteRows, CancellationToken ct);
 
     /// <summary>
     /// Скільки комірок змінить раніше побудований diff — БЕЗ застосування
@@ -28,19 +39,45 @@ public interface IExcelImporter
     /// ⛔ L1-20: <paramref name="documentId"/> — документ ЗАПИТУ; перегляд іншого документа відмовляє
     /// <c>ECR-IMP-0422</c> (<c>previewOtherDocument</c>) ще ДО постановки в чергу, а не лише всередині задачі.
     /// </para>
-    public Task<int> CountPendingChangesAsync(long documentId, string previewToken, CancellationToken ct);
+    /// <para>
+    /// ✎ AN-114: рахує й перезаписувані рядки (<paramref name="overwriteRows"/>) — їх
+    /// застосування теж пише.
+    /// </para>
+    public Task<int> CountPendingChangesAsync(
+        long documentId, string previewToken, IReadOnlyList<ImportOverwriteRow>? overwriteRows, CancellationToken ct);
 }
+
+/// <summary>
+/// Рядок книги, для якого людина свідомо перезаписує чужу правку, зроблену
+/// після експорту (AN-114, D-338).
+/// </summary>
+/// <param name="TableCode">Таблиця (як <c>tableCode</c> відмови-конфлікту перегляду).</param>
+/// <param name="RowKey">Рядок (як <c>rowKey</c> відмови-конфлікту перегляду).</param>
+/// <remarks>
+/// ⚠ Перелік рядків, а не прапорець на весь імпорт: згода дається на ТЕ, що
+/// людина бачила й позначила, а не «на все, що там буде». Рядок, а не комірка:
+/// конфлікт визначає версія рядка, тож усі його змінені комірки — один конфлікт.
+/// </remarks>
+public sealed record ImportOverwriteRow(string TableCode, string RowKey);
 
 /// <summary>Результат попереднього перегляду імпорту.</summary>
 /// <param name="PreviewToken">Токен для застосування; діє обмежений час.</param>
 /// <param name="Changes">Комірки, які зміняться.</param>
 /// <param name="Rejected">Комірки, які буде відхилено, із причиною.</param>
 /// <param name="Conflicts">Комірки, змінені іншим користувачем після відкриття.</param>
+/// <param name="Overwritable">
+/// ✎ AN-114 (D-338). Комірки рядків, змінених кимось після експорту книги
+/// (у <paramref name="Rejected"/> вони ж — відмовою
+/// <c>err.ECR-CELL-0409.importRowChangedSinceExport</c>): <c>OldValue</c> — чинне
+/// (чуже) значення, <c>NewValue</c> — значення з книги. Застосовуються лише для
+/// рядків, названих у <c>ImportApplyRequest.OverwriteRows</c>.
+/// </param>
 public sealed record ImportPreview(
     string PreviewToken,
     IReadOnlyList<ImportChange> Changes,
     IReadOnlyList<ImportRejection> Rejected,
-    IReadOnlyList<CellConflictDto> Conflicts);
+    IReadOnlyList<CellConflictDto> Conflicts,
+    IReadOnlyList<ImportChange> Overwritable);
 
 /// <summary>Зміна, яку принесе імпорт.</summary>
 /// <param name="RowKey">Рядок.</param>

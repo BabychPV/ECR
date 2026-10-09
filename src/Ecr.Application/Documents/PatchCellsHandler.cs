@@ -2857,9 +2857,19 @@ public sealed partial class PatchCellsHandler(
         IReadOnlyDictionary<CellAddress, CellValueData> previous,
         bool isLateEdit,
         string? correlationId,
-        HashSet<CellAddress>? outOfWindow = null)
+        HashSet<CellAddress>? outOfWindow = null,
+        IReadOnlySet<string>? overwrittenRowKeys = null)
     {
         var records = new List<CellChangeRecord>(upserts.Count + deletes.Count);
+
+        // ✎ AN-114 (D-338): свідомий перезапис чужої правки (рядок змінено після
+        // експорту книги, людина позначила «перезаписати») — власним походженням
+        // у журналі, щоб «хто затер чуже число і чи знав про це» читалося з
+        // `aud.CellChange.Origin` без міграції (nvarchar(32) його вміщує).
+        string OriginOf(string rowKey) =>
+            overwrittenRowKeys is not null && overwrittenRowKeys.Contains(rowKey)
+                ? CellChangeOrigins.ImportOverwrite
+                : request.Origin;
 
         foreach (var u in upserts)
         {
@@ -2891,7 +2901,8 @@ public sealed partial class PatchCellsHandler(
                 now, u.Address, DocumentId: documentId,
                 RowKey: rowKeyById.GetValueOrDefault(u.Address.TableRowId, string.Empty),
                 OldValue: Was(previous, u.Address), NewValue: Describe(u.Value),
-                userId, request.Origin, isLateEdit, CorrelationId: correlationId,
+                userId, OriginOf(rowKeyById.GetValueOrDefault(u.Address.TableRowId, string.Empty)), isLateEdit,
+                CorrelationId: correlationId,
                 IsOutOfWindow: outOfWindow?.Contains(u.Address) == true));
         }
 
@@ -2909,7 +2920,8 @@ public sealed partial class PatchCellsHandler(
                 now, d, DocumentId: documentId,
                 RowKey: rowKeyById.GetValueOrDefault(d.TableRowId, string.Empty),
                 OldValue: Was(previous, d), NewValue: null,
-                userId, request.Origin, isLateEdit, CorrelationId: correlationId,
+                userId, OriginOf(rowKeyById.GetValueOrDefault(d.TableRowId, string.Empty)), isLateEdit,
+                CorrelationId: correlationId,
                 IsOutOfWindow: outOfWindow?.Contains(d) == true));
         }
 

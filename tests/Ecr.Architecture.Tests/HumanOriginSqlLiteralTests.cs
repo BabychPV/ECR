@@ -50,6 +50,7 @@ public sealed class HumanOriginSqlLiteralTests
     [Trait("Finding", "D2-01")]
     public void Перелік_людських_походжень_містить_сітку_й_імпорт()
     {
-        Assert.Equal("N'UserEdit', N'Import'", CellChangeOrigins.HumanOriginsSql);
+        // ✎ AN-114: свідомий перезапис імпортом — теж правка людини.
+        Assert.Equal("N'UserEdit', N'Import', N'ImportOverwrite'", CellChangeOrigins.HumanOriginsSql);
     }
 }
