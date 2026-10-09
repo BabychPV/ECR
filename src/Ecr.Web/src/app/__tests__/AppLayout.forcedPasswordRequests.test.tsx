@@ -129,3 +129,20 @@ describe('AppLayout: зайві запити під примусовою змі�
     expect(fetchMock.mock.calls.length).toBe(before);
   });
 });
+
+describe('AN-108 / S2-03: вихід не лишає даних користувача в кеші вкладки', () => {
+  // ⛔ Мутаційний доказ: прибери `queryClient.clear()` із `signOut` (`UserMenu.tsx`) — профіль лишиться в кеші.
+  it('після «Вийти» кеш запитів порожній', async () => {
+    stubFetch(true);
+    const client = renderApp('/change-password');
+    const user = userEvent.setup();
+
+    await screen.findByText('Зміна пароля');
+    expect(client.getQueryCache().find({ queryKey: ['me'] })).toBeDefined();
+
+    await user.click(screen.getByText('tester'));
+    await user.click(await screen.findByRole('menuitem', { name: '⟦profile.logout⟧' }));
+
+    await waitFor(() => expect(client.getQueryCache().find({ queryKey: ['me'] })).toBeUndefined());
+  });
+});

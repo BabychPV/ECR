@@ -96,6 +96,31 @@ public sealed class SecurityHeadersTests(SqlServerFixture sql)
         Assert.Equal("DENY", Single(response, FrameOptions));
     }
 
+    /// <summary>
+    /// AN-108 / S2-03: відповіді API не лягають у кеш браузера спільного робочого місця — і звичайна, і та, що
+    /// пройшла <c>Response.Clear()</c> обробника помилок.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Відповідь_API_несе_no_store()
+    {
+        using var app = new EcrApiFactory(sql);
+        using var client = app.CreateClient();
+
+        var failedLogin = await client.PostAsJsonAsync(
+            new Uri("/api/v1/login/local", UriKind.Relative),
+            new { userName = "немає-такого-користувача", password = "не-той-пароль" })
+            .ConfigureAwait(true);
+        var anonymousMe = await client
+            .GetAsync(new Uri("/api/v1/me", UriKind.Relative))
+            .ConfigureAwait(true);
+
+        // ⛔ Мутаційний доказ: прибрати гілку `no-store` у `SecurityHeadersMiddleware` — обидва рядки падають.
+        Assert.True(failedLogin.Headers.CacheControl?.NoStore, $"login: {failedLogin.Headers.CacheControl}");
+        Assert.True(anonymousMe.Headers.CacheControl?.NoStore, $"me: {anonymousMe.Headers.CacheControl}");
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
     [Trait(TestCategories.Category, TestCategories.Integration)]

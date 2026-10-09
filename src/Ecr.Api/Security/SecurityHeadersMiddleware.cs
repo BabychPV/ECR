@@ -1,5 +1,7 @@
 // src/Ecr.Api/Security/SecurityHeadersMiddleware.cs
 
+using Microsoft.Net.Http.Headers;
+
 namespace Ecr.Api.Security;
 
 /// <summary>
@@ -111,6 +113,9 @@ public sealed class SecurityHeadersMiddleware
     /// </remarks>
     public const string ReferrerPolicy = "no-referrer";
 
+    /// <summary>Політика кешу відповідей API без власної (AN-108 / S2-03): не зберігати ніде.</summary>
+    public const string NoStore = "no-store";
+
     private readonly RequestDelegate _next;
     private readonly CspSettings _csp;
 
@@ -185,6 +190,15 @@ public sealed class SecurityHeadersMiddleware
             if (isHttps)
             {
                 headers.StrictTransportSecurity = StrictTransportSecurity;
+            }
+
+            // ⛔ AN-108 / S2-03: дані звітності не лягають у дисковий кеш браузера спільного робочого місця і не
+            // переживають вихід. API — `no-store`, якщо обробник не задав власну політику. Умовні запити
+            // клієнта (i18n з `If-None-Match` з власного сховища) від HTTP-кешу браузера не залежать.
+            if (context.Request.Path.StartsWithSegments("/api", StringComparison.OrdinalIgnoreCase)
+                && !headers.ContainsKey(HeaderNames.CacheControl))
+            {
+                headers.CacheControl = NoStore;
             }
 
             return Task.CompletedTask;
