@@ -165,6 +165,7 @@ public sealed partial class RecalculationJob(
         // лише в січні, а не лишає два актуальні прогони з подвоєними рядками.
         // Модель `CalculationRun` не змінюється — `PeriodKey` лишається
         // nullable для прогону, якому немає чого рахувати (див. нижче).
+        await AwaitRegistryWritersAsync(ct).ConfigureAwait(false);
         var startedAt = clock.UtcNow;
         var periodRuns = new SortedDictionary<int, (Domain.Entities.Calculations.CalculationRun Run, ModuleProfile Profile)>();
         Domain.Entities.Calculations.CalculationRun? yearRun = null;
@@ -1160,6 +1161,51 @@ public sealed partial class RecalculationJob(
     /// <param name="documentId">Документ.</param>
     /// <returns>Ім'я ресурсу.</returns>
     public static string DocumentLockResource(long documentId) => RecalculationDocumentLock.Resource(documentId);
+
+    /// <summary>
+    /// Чекає комітів записів даних довідників, що вже почалися, перш ніж прогін візьме <c>startedAt</c>
+    /// (X3-03 / D1-03).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Знімок довідника прогону — <c>AS OF RegistryAsOfUtc</c> (від <c>startedAt</c>), а <c>PeriodStart</c>
+    /// рядка темпоральної таблиці — ПОЧАТОК транзакції запису. Запис, що почався до старту прогону й
+    /// комітиться після читання знімка, у знімок не потрапляв, а його <c>DataChangedAt &lt; StartedAt</c>
+    /// гасив позначку «застаріло» (<c>StaleResultsQuery</c>, <c>RegistryImpactStore</c>): число на старому
+    /// довіднику жило до випадкового перерахунку. Кожен запис даних довідника першим оператором своєї
+    /// транзакції бере X-лок рядка <c>cfg.RegistryDef</c> (<c>UnitOfWork.ApplyRegistryRevisionBumpsAsync</c>),
+    /// тож S-читання <c>DataRevision</c> під <c>READCOMMITTEDLOCK</c> (а не версії RCSI) чекає саме їх.
+    /// <c>MAX(DataRevision)</c>, а не <c>COUNT(*)</c>: лічильник оптимізатор узяв би з некластерного
+    /// індексу, якого оновлення ревізії не блокує.
+    /// <para>
+    /// ⚠ Залишок вікна — мілісекунди між міткою <c>DataChangedAt</c> і першим <c>UPDATE</c> писача. Якщо
+    /// писач готується в зовнішній транзакції ДО першого збереження (rescan синку, <c>beforeSave</c>
+    /// імпорту), його мітка <c>DataChangedAt</c> ставиться при збереженні, тобто ПІСЛЯ <c>startedAt</c>, і
+    /// позначка «застаріло» спрацьовує. Лок береться поза транзакцією й звільняється одразу; задача тримає
+    /// лише сесійний applock документа, якого писачі довідника не беруть. Запис довідника довший за
+    /// <c>CommandTimeout</c> — відмова задачі (видно в журналі), а не прогін на знімку без цього запису
+    /// з погашеною позначкою. Не SQL Server (тести на інших провайдерах) — без очікування.
+    /// </para>
+    /// </remarks>
+    private async Task AwaitRegistryWritersAsync(CancellationToken ct)
+    {
+        if (!db.Database.IsSqlServer())
+        {
+            return;
+        }
+
+        _ = await db.Database
+            .SqlQuery<int>($"""
+                SELECT ISNULL(MAX(DataRevision), 0) AS Value
+                FROM cfg.RegistryDef WITH (READCOMMITTEDLOCK)
+                """)
+
+            // `MAX` повертає рівно один рядок; `OrderBy` + `Take` — межа архітектурного правила 6 і EF 10102,
+            // як у `PartitionCheckJob`.
+            .OrderBy(v => v)
+            .Take(1)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+    }
 
     /// <summary>Бере ексклюзивний лок документа на весь час задачі.</summary>
     /// <returns><c>null</c> — лок не потрібен (перерахунок проєкту без планувальника, не SQL Server).</returns>

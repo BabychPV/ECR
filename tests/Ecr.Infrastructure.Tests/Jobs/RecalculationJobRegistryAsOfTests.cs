@@ -2,10 +2,12 @@
 using Ecr.Application.Calculations;
 using Ecr.Application.Common;
 using Ecr.Application.Ports;
+using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.ValueObjects;
 using Ecr.Expressions.Evaluation;
 using Ecr.Infrastructure.Jobs;
 using Ecr.TestKit;
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using NSubstitute;
 using Xunit;
@@ -67,6 +69,146 @@ public sealed class RecalculationJobRegistryAsOfTests(SqlServerFixture sql)
         // Оркестратор викликано на названий період — і щоразу з моментом прогону.
         Assert.NotEmpty(runner.Moments);
         Assert.All(runner.Moments, moment => Assert.Equal(stored, moment));
+    }
+
+    /// <summary>
+    /// X3-03 / D1-03: прогін, що стартує під час відкритого запису даних довідника, бере <c>startedAt</c>
+    /// (а з ним і момент знімка <c>RegistryAsOfUtc</c>) лише ПІСЛЯ коміту цього запису.
+    /// </summary>
+    /// <remarks>
+    /// Писач імітує <c>UnitOfWork.ApplyRegistryRevisionBumpsAsync</c>: перший оператор його транзакції —
+    /// <c>UPDATE cfg.RegistryDef … DataRevision + 1</c> (X-лок рядка). До виправлення задача брала
+    /// <c>startedAt</c> одразу й не чекала: знімок AS OF startedAt не бачив запису, що комітився пізніше, а
+    /// його <c>DataChangedAt &lt; StartedAt</c> гасив позначку «застаріло».
+    /// <para>
+    /// ⚠ Детерміновано, без «почекати N секунд»: коміт відбувається лише тоді, коли сеанс задачі ВИДНО
+    /// заблокованим писачем (<c>sys.dm_exec_requests.blocking_session_id</c>). Задача, що завершилась раніше,
+    /// ніж її побачили заблокованою, — це і є дефект.
+    /// </para>
+    /// <para>
+    /// Мутація: прибрати <c>AwaitRegistryWritersAsync</c> з задачі → задача завершується, не чекаючи писача,
+    /// червоний.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "X3-03")]
+    public async Task Прогін_що_стартує_під_час_відкритого_запису_довідника_чекає_його_коміту()
+    {
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var document = await builder.BuildAsync();
+
+        int registryId;
+        await using (var setup = builder.CreateContext())
+        {
+            var registry = new RegistryDef(
+                EcrCode.Create($"X303_{Guid.NewGuid():N}"[..20]),
+                new LocalizedText(new Dictionary<string, string> { ["en"] = "X3-03" }),
+                isTemporal: false);
+            setup.RegistryDefs.Add(registry);
+            await setup.SaveChangesAsync();
+            registryId = registry.Id;
+        }
+
+        await using var writer = new SqlConnection(sql.ConnectionString);
+        await writer.OpenAsync();
+        int writerSession;
+        await using (var spid = writer.CreateCommand())
+        {
+            spid.CommandText = "SELECT CAST(@@SPID AS int);";
+            writerSession = (int)(await spid.ExecuteScalarAsync())!;
+        }
+
+        var transaction = (SqlTransaction)await writer.BeginTransactionAsync();
+        await using (var bump = writer.CreateCommand())
+        {
+            bump.Transaction = transaction;
+            bump.CommandText = "UPDATE cfg.RegistryDef SET DataRevision = DataRevision + 1 WHERE Id = @id;";
+            bump.Parameters.AddWithValue("@id", registryId);
+            Assert.Equal(1, await bump.ExecuteNonQueryAsync());
+        }
+
+        var clock = new CommitProbeClock(new DateTime(2026, 2, 3, 10, 15, 30, DateTimeKind.Utc));
+        var request = new RecalculationRequest(
+            ProjectId: document.ProjectId,
+            DocumentId: document.DocumentId,
+            PeriodKey: document.PeriodKey.Value,
+            TriggeredByUserId: null);
+
+        await using var db = builder.CreateContext();
+        var job = new RecalculationJob(db, new RecordingRunner(), RunHandler(), Formulas(), clock);
+        var run = Task.Run(() => job.ExecuteAsync(request, NoOpProgress.Instance, CancellationToken.None));
+
+        try
+        {
+            var blocked = await WaitBlockedByAsync(writerSession, run, TimeSpan.FromSeconds(60));
+            Assert.True(blocked, "Задача перерахунку не чекала на відкритий запис довідника (X3-03).");
+
+            clock.Committed = true;
+            await transaction.CommitAsync();
+        }
+        finally
+        {
+            if (!clock.Committed)
+            {
+                await transaction.RollbackAsync();
+            }
+
+            await transaction.DisposeAsync();
+        }
+
+        await run;
+
+        Assert.NotEmpty(clock.Reads);
+        Assert.All(clock.Reads, committed => Assert.True(committed));
+    }
+
+    /// <summary>Чекає, поки якийсь сеанс стане заблокованим <paramref name="blockerSession"/>.</summary>
+    /// <returns><c>false</c> — задача завершилась (чи вийшов час), так і не чекавши.</returns>
+    private async Task<bool> WaitBlockedByAsync(int blockerSession, Task job, TimeSpan timeout)
+    {
+        await using var probe = new SqlConnection(sql.ConnectionString);
+        await probe.OpenAsync();
+
+        var deadline = DateTime.UtcNow + timeout;
+        while (DateTime.UtcNow < deadline && !job.IsCompleted)
+        {
+            await using var command = probe.CreateCommand();
+            command.CommandText = "SELECT COUNT(*) FROM sys.dm_exec_requests WHERE blocking_session_id = @blocker;";
+            command.Parameters.AddWithValue("@blocker", blockerSession);
+            if ((int)(await command.ExecuteScalarAsync())! > 0)
+            {
+                return true;
+            }
+
+            await Task.Delay(50);
+        }
+
+        return false;
+    }
+
+    /// <summary>Годинник, що запам'ятовує, чи писач уже закомітився на момент кожного читання.</summary>
+    private sealed class CommitProbeClock(DateTime utcNow) : Ecr.Domain.Abstractions.IClock
+    {
+        private volatile bool _committed;
+
+        public bool Committed
+        {
+            get => _committed;
+            set => _committed = value;
+        }
+
+        public System.Collections.Concurrent.ConcurrentQueue<bool> Reads { get; } = new();
+
+        public DateTime UtcNow
+        {
+            get
+            {
+                Reads.Enqueue(_committed);
+                return utcNow;
+            }
+        }
     }
 
     /// <summary>Служба перерахунку формул шаблону над підставними портами.</summary>
