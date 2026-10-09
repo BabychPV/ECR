@@ -241,6 +241,34 @@ describe('Дані довідника: табличний редактор', () 
     expect(await within(other).findByRole('textbox')).toBeDefined();
   });
 
+  it('L9-03: збереження триває, доки не прийшли свіжі рядки — Enter не відкриває редактор на застарілій version', async () => {
+    let release: () => void = () => undefined;
+    const sent = mockServer({ holdRowsAfterCommit: new Promise<void>((resolve) => (release = resolve)) });
+    showDataPage();
+    await screen.findByRole('grid');
+
+    await editText(0, 2, '50.5');
+    fireEvent.keyDown(window, { key: 's', ctrlKey: true });
+    await vi.waitFor(() => {
+      expect(committed(sent)).toHaveLength(1);
+    });
+    // Пакет прийнято, але перезапит рядків ще в дорозі: мутація має лишатися `isPending`.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    const other = cell(1, 2);
+    act(() => other.focus());
+    fireEvent.keyDown(other, { key: 'Enter' });
+    expect(within(other).queryByRole('textbox')).toBeNull();
+
+    await act(async () => {
+      release();
+      await Promise.resolve();
+    });
+    act(() => other.focus());
+    fireEvent.keyDown(other, { key: 'Enter' });
+    expect(await within(other).findByRole('textbox')).toBeDefined();
+  });
+
   it('вставка трьох рядків з однаковим Lookup — один запит до довідника-цілі (L9-07)', async () => {
     mockServer();
     showDataPage();

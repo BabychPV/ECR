@@ -251,7 +251,10 @@ export function RegistryDataPage(): JSX.Element {
 
   const save = useMutation({
     mutationFn: () => saveBatch(code, toBatch(dirty), false),
-    onSuccess: (result) => {
+    // ⚠ L9-03: `async` з `await` інвалідацій (як `CompositionPanel` у rc816): мутація лишається `isPending`, доки
+    // не прийшли свіжі `version` рядків, — інакше Ctrl+S / «Save» одразу після збереження шле пакет зі
+    // старими `version` і дає `entryChanged` на щойно збережений рядок.
+    onSuccess: async (result) => {
       checkRun.current += 1;
       if (!result.applied) {
         setProblems(problemsByRow(result));
@@ -264,10 +267,12 @@ export function RegistryDataPage(): JSX.Element {
       setCheckSummary('');
       setUnmatched(0);
       setSavedAt(new Date());
-      void queryClient.invalidateQueries({ queryKey: queryKeys.registries.all() });
       // Сторінка впливу (RT-25) — ключ поза доменом `registries` (`RegistryImpactPage` `impactKey`):
       // без цього після правки вона показувала попередній перелік зачеплених документів (L9-21).
-      void queryClient.invalidateQueries({ queryKey: ['registry-impact', code] });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.registries.all() }),
+        queryClient.invalidateQueries({ queryKey: ['registry-impact', code] }),
+      ]);
     },
     onError: showApiError,
   });
