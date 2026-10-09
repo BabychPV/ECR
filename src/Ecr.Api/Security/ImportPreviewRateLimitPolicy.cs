@@ -21,7 +21,7 @@ namespace Ecr.Api.Security;
 ///
 /// ⚠ Стелю воріт НЕ знижено (вердикт перевіряльника S1-02): реальна книга директиви
 /// (91 таблиця) — 113 МіБ розпакованого XML, 48 МіБ зламали б законний імпорт.
-/// Обмежується одночасність: <see cref="DefaultPermit"/> розборів одночасно, ще
+/// Обмежується одночасність: <see cref="DefaultConcurrency"/> розборів одночасно, ще
 /// <see cref="DefaultQueueLimit"/> чекають у черзі (оператори наприкінці періоду
 /// імпортують хвилею, і короткому очікуванню краще за відмову), решта — 429
 /// <c>ECR-REQ-0429</c> з ключем каталогу <see cref="DetailKey"/>.
@@ -38,7 +38,7 @@ public sealed class ImportPreviewRateLimitPolicy(IConfiguration configuration) :
     public const string PolicyName = "import-preview";
 
     /// <summary>Скільки переглядів розбирається одночасно, якщо конфігурація мовчить.</summary>
-    public const int DefaultPermit = 2;
+    public const int DefaultConcurrency = 2;
 
     /// <summary>Скільки переглядів чекає в черзі, якщо конфігурація мовчить.</summary>
     public const int DefaultQueueLimit = 4;
@@ -58,7 +58,7 @@ public sealed class ImportPreviewRateLimitPolicy(IConfiguration configuration) :
     /// <summary>Єдиний розділ політики.</summary>
     public const string Partition = "import-preview";
 
-    private readonly int _permit = Math.Max(1, configuration.GetValue(PermitKey, DefaultPermit));
+    private readonly int _permit = Math.Max(1, configuration.GetValue(PermitKey, DefaultConcurrency));
 
     private readonly int _queueLimit = Math.Max(0, configuration.GetValue(QueueLimitKey, DefaultQueueLimit));
 
