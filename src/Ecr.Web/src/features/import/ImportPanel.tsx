@@ -306,7 +306,9 @@ export function ImportPanel({
                 <Stack gap="xs">
                   {(preview.warnings ?? []).map((key) => (
                     <Text key={key} size="sm">
-                      {t(key)}
+                      {/* Ключ — літерал (сторож EndpointCoverageTests): сервер шле лише
+                          ImportMessageKeys.OutdatedWorkbook; невідомий ключ — загальний заголовок. */}
+                      {key === 'import.outdatedWorkbook' ? t('import.outdatedWorkbook') : t('import.warningsTitle')}
                     </Text>
                   ))}
                 </Stack>
