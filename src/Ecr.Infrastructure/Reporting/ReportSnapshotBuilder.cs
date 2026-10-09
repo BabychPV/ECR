@@ -374,6 +374,7 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock, IMemory
             .Where(r => r.SnapshotId == snapshotId)
             .Select(r => r.RowNo)
             .Distinct()
+            .OrderBy(n => n)
             .Take(Math.Max(atMost, 0))
             .CountAsync(ct)
             .ConfigureAwait(false);
@@ -445,6 +446,7 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock, IMemory
         var cells = await db.ReportRows
             .AsNoTracking()
             .Where(r => r.SnapshotId == snapshotId && slice.Contains(r.RowNo))
+            .OrderBy(r => r.RowNo)
             .Take(slice.Length * MaxColumnsPerRow)
             .ToListAsync(ct)
             .ConfigureAwait(false);
@@ -816,6 +818,7 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock, IMemory
         // лише кілька, тож `Take` тут — межа переліку значень enum, а не даних.
         var statuses = await query
             .Distinct()
+            .OrderBy(s => s)
             .Take(MaxStatuses)
             .ToListAsync(ct)
             .ConfigureAwait(false);
