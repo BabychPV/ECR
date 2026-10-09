@@ -54,7 +54,15 @@ REPORT="$(printf '%s\n' "$DIFF" | awk '
     # ⚠ Лише `Skip =` / `[Ignore` В ОДНОМУ рядку. Перенесений аргумент (`Skip` і `=` на різних
     # рядках), `SkipUnless`, `Explicit`, `Assert.Skip` ловить не цей сторож, а Architecture-тест
     # NoDisabledTestsTests (читає весь код тестів і розбирає атрибут до закривної дужки; L10-11).
-    if (!is_comment && (text ~ /Skip[[:space:]]*=/ || text ~ /\[Ignore/)) {
+    #
+    # Виняток — РІВНО один файл: сам Architecture-тест-сторож. Його синтетичні входи
+    # ([InlineData("[Fact(Skip = ...)]")]) мусять містити ті самі шматки тексту, які ловить цей
+    # рядковий сторож, — це рядкові літерали, а не вимкнені тести (хибне спрацювання). Файл від
+    # цього не лишається без нагляду: NoDisabledTestsTests читає КОД усіх тестів (разом із собою),
+    # відкидаючи рядкові літерали, тож справжній `Skip =` у ньому той тест таки зловить.
+    # Шлях точний, не шаблон: інший файл так не звільнити.
+    if (!is_comment && file != "tests/Ecr.Architecture.Tests/NoDisabledTestsTests.cs" &&
+        (text ~ /Skip[[:space:]]*=/ || text ~ /\[Ignore/)) {
       emit(file, line, "тест вимкнено (Skip/Ignore)", text)
     }
 
