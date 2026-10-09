@@ -223,51 +223,39 @@ public sealed class OrphanScanner : IOrphanScanner
     }
 
     /// <summary>
-    /// Періоди, які взагалі перевіряються.
+    /// Ключі періодів, у яких хоч один проєкт має відкритий період.
     /// </summary>
     /// <remarks>
     /// Закриті не чіпаються: їхні дані вже подані, ознака нічого не розблокує
     /// і не заборонить (ФВ-8.13a).
+    /// <para>
+    /// ⛔ ЛИШЕ КЛЮЧІ — грубий фільтр партицій, а НЕ джерело дати чи стану
+    /// (R5-D1 / D1-01). `PeriodKeyValue` (`Year*100+Sequence`) унікальний у
+    /// межах ОДНОГО проєкту: 202601 — це і місячний січень (кінець 31.01), і
+    /// квартальний Q1 (31.03), і річний 2026 (31.12). Раніше тут стояло
+    /// `GroupBy(PeriodKeyValue).First()`: дата й стан ПЕРШОГО відкритого
+    /// періоду з таким ключем застосовувалися до рядків УСІХ проєктів. Звідси
+    /// хибна «сирота», що блокує `Submit`, пропущена справжня сирота і —
+    /// найгірше — `UPDATE` рядків ЗАКРИТОГО періоду одного проєкту, бо чужий
+    /// відкритий період із тим самим ключем видавав для них стан `Open`. Дату
+    /// й стан тепер несе кожен кандидат зі СВОГО періоду
+    /// (`TableRow → TableInstance → Document → Period(ProjectId, PeriodKey)`,
+    /// див. <see cref="NextBatchAsync"/>).
+    /// </para>
     /// </remarks>
     private async Task<PeriodScope> OpenPeriodsAsync(CancellationToken ct)
     {
-        var periods = await _db.Periods
+        var keys = await _db.Periods
             .AsNoTracking()
             .Where(p => p.State == PeriodState.Open || p.State == PeriodState.Grace)
-            .OrderBy(p => p.PeriodKeyValue)
-            .ThenBy(p => p.Id)
-            .Select(p => new { p.PeriodKeyValue, p.State, p.PeriodEnd })
+            .Select(p => p.PeriodKeyValue)
+            .Distinct()
+            .OrderBy(k => k)
             .Take(MaxOpenPeriods)
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
-        // ⚠ `PeriodKeyValue` (`Year*100+Sequence`) унікальний У МЕЖАХ ОДНОГО
-        // проєкту, а не глобально: два РІЗНІ проєкти (обидва `Monthly`) цілком
-        // законно мають відкритий період за той самий календарний місяць
-        // одночасно — кілька проєктів звітують паралельно, це не крайовий
-        // випадок. `GroupBy` тут — ВІДОМЕ спрощення, а не повне рішення:
-        // сканер бере ОДНЕ подання дати/стану на ключ, бо `TableRow`/`CellValue`
-        // несуть лише `PeriodKeyValue`, не `ProjectId` — без нього зіставити
-        // рядок із ПРАВИЛЬНИМ періодом серед кількох однойменних неможливо.
-        // Без угруповання нижче `ToDictionary` кидав `ArgumentException` на
-        // дублікаті ключа, щойно в системі існувало більше одного відкритого
-        // проєкту на той самий період, — сканер ПАДАВ на цілком звичайному
-        // стані, а не на межовому. Повне рішення вимагає зіставляти рядок із
-        // проєктом (`TableRow` → `TableInstance` → `Document` → `Project`), а
-        // не лише з `PeriodKeyValue`; поза межами цього фіксу.
-        var distinct = periods
-            .GroupBy(p => p.PeriodKeyValue)
-            .Select(g => g.First())
-            .ToList();
-
-        return new PeriodScope(
-            [.. distinct.Select(p => p.PeriodKeyValue)],
-
-            // ⚠ Дата резолвінгу — КІНЕЦЬ періоду, а не «сьогодні». Запис,
-            // чинний до 30 червня, лишається чинним для всього червневого
-            // звіту, навіть якщо перевірка йде в жовтні (ФВ-8.5).
-            distinct.ToDictionary(p => p.PeriodKeyValue, p => p.PeriodEnd),
-            distinct.ToDictionary(p => p.PeriodKeyValue, p => p.State));
+        return new PeriodScope(keys);
     }
 
     /// <summary>Читає курсор сканування; заводить його, якщо ще немає.</summary>
@@ -327,11 +315,25 @@ public sealed class OrphanScanner : IOrphanScanner
             join row in _db.TableRows.AsNoTracking()
                 on new { P = cell.PeriodKeyValue, I = cell.TableRowId }
                 equals new { P = row.PeriodKeyValue, I = row.Id }
+            join inst in _db.TableInstances.AsNoTracking()
+                on new { P = row.PeriodKeyValue, I = row.TableInstanceId }
+                equals new { P = inst.PeriodKeyValue, I = inst.Id }
+            join doc in _db.Documents.AsNoTracking()
+                on inst.DocumentId equals doc.Id
+
+            // ⛔ Період СВОГО проєкту (`UQ_Period (ProjectId, PeriodKey)`), а не
+            // «будь-який відкритий із тим самим ключем» (R5-D1 / D1-01). Рядки
+            // проєкту, чий період закритий, сюди не потрапляють узагалі — навіть
+            // коли в іншого проєкту той самий ключ відкритий.
+            join period in _db.Periods.AsNoTracking()
+                on new { P = row.PeriodKeyValue, Pr = doc.ProjectId }
+                equals new { P = period.PeriodKeyValue, Pr = period.ProjectId }
             where !row.IsDeleted
                   && periodKeys.Contains(row.PeriodKeyValue)
+                  && (period.State == PeriodState.Open || period.State == PeriodState.Grace)
                   && (row.PeriodKeyValue > after.PeriodKeyValue
                       || (row.PeriodKeyValue == after.PeriodKeyValue && row.Id > after.RowId))
-            select new { cell, row };
+            select new { cell, row, period.PeriodEnd, period.State };
 
         // ⛔ Фільтр на конкретний запис звужує запит ДО проєкції в іменований
         // `CellReference`, а не після неї. `SetEntryValidityHandler` (єдиний
@@ -351,7 +353,12 @@ public sealed class OrphanScanner : IOrphanScanner
             .ThenBy(x => x.row.Id)
             .ThenBy(x => x.cell.ColumnDefId)
             .Select(x => new CellReference(
-                x.row.Id, x.row.PeriodKeyValue, x.row.IsOrphaned, x.cell.ValueRegistryEntryId!.Value))
+                x.row.Id,
+                x.row.PeriodKeyValue,
+                x.row.IsOrphaned,
+                x.cell.ValueRegistryEntryId!.Value,
+                x.PeriodEnd,
+                x.State))
             .Take(_budget.BatchCells + 1)
             .ToListAsync(ct)
             .ConfigureAwait(false);
@@ -399,7 +406,11 @@ public sealed class OrphanScanner : IOrphanScanner
             .GroupBy(r => (r.PeriodKeyValue, r.RowId))
             .Select(group =>
             {
-                var asOf = scope.AsOf[group.Key.PeriodKeyValue];
+                // ⚠ Дата резолвінгу — КІНЕЦЬ ПЕРІОДУ ПРОЄКТУ цього рядка, а не
+                // «сьогодні» (ФВ-8.5) і не кінець чужого періоду з тим самим
+                // ключем (D1-01). Усі посилання рядка несуть той самий період.
+                var head = group.First();
+                var asOf = head.PeriodEnd;
 
                 var allValid = group.All(r =>
                     entryById.TryGetValue(r.RegistryEntryId, out var entry)
@@ -407,8 +418,8 @@ public sealed class OrphanScanner : IOrphanScanner
 
                 return new OrphanCandidate(
                     new OrphanRowRef(group.Key.PeriodKeyValue, group.Key.RowId),
-                    scope.State[group.Key.PeriodKeyValue],
-                    group.First().IsOrphaned,
+                    head.PeriodState,
+                    head.IsOrphaned,
                     allValid);
             })
             .ToList();
@@ -457,15 +468,18 @@ public sealed class OrphanScanner : IOrphanScanner
     private async Task<List<CellReference>> CompleteRowReferencesAsync(
         List<CellReference> selected, CancellationToken ct)
     {
-        var orphanedByRow = new Dictionary<(int PeriodKeyValue, long RowId), bool>();
+        // ⚠ Разом з ознакою переноситься період ПРОЄКТУ рядка (дата, стан,
+        // D1-01): добір читає лише комірки, а період уже прочитано у вибірці
+        // кандидатів.
+        var headByRow = new Dictionary<(int PeriodKeyValue, long RowId), CellReference>();
         foreach (var reference in selected)
         {
-            orphanedByRow[(reference.PeriodKeyValue, reference.RowId)] = reference.IsOrphaned;
+            headByRow[(reference.PeriodKeyValue, reference.RowId)] = reference;
         }
 
         var complete = new List<CellReference>(selected.Count);
 
-        foreach (var byPeriod in orphanedByRow.Keys.GroupBy(k => k.PeriodKeyValue))
+        foreach (var byPeriod in headByRow.Keys.GroupBy(k => k.PeriodKeyValue))
         {
             var periodKey = byPeriod.Key;
 
@@ -496,11 +510,8 @@ public sealed class OrphanScanner : IOrphanScanner
 
                 foreach (var cell in cells)
                 {
-                    complete.Add(new CellReference(
-                        cell.RowId,
-                        periodKey,
-                        orphanedByRow[(periodKey, cell.RowId)],
-                        cell.RegistryEntryId));
+                    var head = headByRow[(periodKey, cell.RowId)];
+                    complete.Add(head with { RegistryEntryId = cell.RegistryEntryId });
                 }
             }
         }
@@ -646,11 +657,12 @@ public sealed class OrphanScanner : IOrphanScanner
         return decision.Total;
     }
 
-    /// <summary>Періоди, що перевіряються, з їхніми датами й станами.</summary>
-    private sealed record PeriodScope(
-        List<int> PeriodKeys,
-        Dictionary<int, DateOnly> AsOf,
-        Dictionary<int, PeriodState> State)
+    /// <summary>Ключі періодів, що перевіряються (лише грубий фільтр партицій).</summary>
+    /// <remarks>
+    /// ⛔ Без дати й стану навмисно (D1-01): за ключем їх не визначити, бо той
+    /// самий ключ мають періоди різних проєктів і різних видів.
+    /// </remarks>
+    private sealed record PeriodScope(List<int> PeriodKeys)
     {
         /// <summary>Скільки періодів у розгляді.</summary>
         public int Count => PeriodKeys.Count;
@@ -678,8 +690,19 @@ public sealed class OrphanScanner : IOrphanScanner
     /// і архітектурне правило «<c>ToListAsync</c> без <c>Take</c>» бачить
     /// половину інструкції без межі (`D1-08`).
     /// </remarks>
+    /// <param name="RowId">Рядок.</param>
+    /// <param name="PeriodKeyValue">Ключ періоду рядка (ключ партиції).</param>
+    /// <param name="IsOrphaned">Збережена ознака рядка.</param>
+    /// <param name="RegistryEntryId">Запис довідника, на який посилається комірка.</param>
+    /// <param name="PeriodEnd">Кінець періоду ПРОЄКТУ рядка — дата резолвінгу (D1-01).</param>
+    /// <param name="PeriodState">Стан періоду ПРОЄКТУ рядка.</param>
     private sealed record CellReference(
-        long RowId, int PeriodKeyValue, bool IsOrphaned, long RegistryEntryId);
+        long RowId,
+        int PeriodKeyValue,
+        bool IsOrphaned,
+        long RegistryEntryId,
+        DateOnly PeriodEnd,
+        PeriodState PeriodState);
 
     /// <summary>Посилання рядка на запис довідника в межах одного періоду.</summary>
     /// <remarks>
