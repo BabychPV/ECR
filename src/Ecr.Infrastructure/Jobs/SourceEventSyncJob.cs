@@ -792,7 +792,7 @@ public sealed partial class SourceEventSyncJob(
 
             if (!manualByGroup.TryGetValue((instance, periodKey), out var manual))
             {
-                manual = await ManualRowKeysAsync(instance, periodKey, ct).ConfigureAwait(false);
+                manual = await ManualRowKeysAsync(map.DocumentId, instance, periodKey, ct).ConfigureAwait(false);
                 manualByGroup[(instance, periodKey)] = manual;
             }
 
@@ -1061,12 +1061,17 @@ public sealed partial class SourceEventSyncJob(
              WHERE @sheet IS NOT NULL AND DocumentId = @document AND SheetDefId = @sheet AND PeriodKey = @period
                AND Status IN (@submitted, @approved);
 
+            -- ⛔ R5-Q1-01: c.DocumentId = @document — провідна колонка IX_CellChange_Cell; без неї скан УСЬОГО
+            -- журналу аудиту під HOLDLOCK на doc.Period/doc.TableRow вище (екземпляри мапи — лише її документа).
             WITH last_change AS (
                 SELECT c.Origin,
                        ROW_NUMBER() OVER (PARTITION BY c.ColumnDefId ORDER BY c.ChangedAt DESC, c.Id DESC) AS rn
-                  FROM aud.CellChange AS c
-                  JOIN doc.TableRow  AS r ON r.PeriodKey = c.PeriodKey AND r.Id = c.TableRowId
-                 WHERE c.PeriodKey = @period AND r.TableInstanceId = @instance AND c.RowKey = @rowKey
+                  FROM doc.TableRow AS r
+                  JOIN aud.CellChange AS c
+                    ON c.DocumentId = @document
+                   AND c.TableRowId = r.Id
+                   AND c.PeriodKey = r.PeriodKey
+                 WHERE r.PeriodKey = @period AND r.TableInstanceId = @instance AND c.RowKey = @rowKey
             )
             SELECT COUNT(*) FROM last_change WHERE rn = 1 AND Origin IN ({CellChangeOrigins.HumanOriginsSql});
             """;
@@ -1251,27 +1256,43 @@ public sealed partial class SourceEventSyncJob(
         Message = "SourceEventSyncJob: мапінг {MapId} — {Candidates} подій до видалення з {Linked} зв'язків-з-рядками перевищує ліміт, але видалення ПІДТВЕРДЖЕНО вручну.")]
     private static partial void LogRemovalConfirmed(ILogger logger, int mapId, int candidates, int linked);
 
+    /// <summary>Текст запиту <see cref="ManualRowKeysAsync"/> — бойовий, його ж міряє тест.</summary>
+    /// <remarks>
+    /// ⛔ R5-Q1-01: <c>c.DocumentId = @document</c> — провідна колонка <c>IX_CellChange_Cell</c>; без неї
+    /// запит сканував увесь <c>aud.CellChange</c> (усі місячні партиції) на кожну групу видалень.
+    /// </remarks>
+    public const string ManualRowKeysSql = $"""
+        WITH last_change AS (
+            SELECT c.RowKey, c.Origin,
+                   ROW_NUMBER() OVER (PARTITION BY c.RowKey, c.ColumnDefId
+                                          ORDER BY c.ChangedAt DESC, c.Id DESC) AS rn
+              FROM doc.TableRow AS r
+              JOIN aud.CellChange AS c
+                ON c.DocumentId = @document
+               AND c.TableRowId = r.Id
+               AND c.PeriodKey = r.PeriodKey
+             WHERE r.PeriodKey = @period AND r.TableInstanceId = @instance
+        )
+        SELECT DISTINCT RowKey FROM last_change WHERE rn = 1 AND Origin IN ({CellChangeOrigins.HumanOriginsSql});
+        """;
+
     /// <summary>Ключі рядків екземпляра, у яких остання зміна хоч однієї комірки — правка людини (як <c>ManualCellsAsync</c> патчера).</summary>
-    private async Task<HashSet<string>> ManualRowKeysAsync(long tableInstanceId, int periodKey, CancellationToken ct)
+    /// <param name="documentId">Документ мапи — екземпляри мапи належать лише йому (R5-Q1-01).</param>
+    /// <param name="tableInstanceId">Екземпляр таблиці.</param>
+    /// <param name="periodKey">Період.</param>
+    /// <param name="ct">Токен скасування.</param>
+    private async Task<HashSet<string>> ManualRowKeysAsync(
+        long documentId, long tableInstanceId, int periodKey, CancellationToken ct)
     {
         var manual = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         await using var connection = new Microsoft.Data.SqlClient.SqlConnection(db.Database.GetConnectionString());
         await connection.OpenAsync(ct).ConfigureAwait(false);
         await using var command = connection.CreateCommand();
-        command.CommandText = $"""
-            WITH last_change AS (
-                SELECT c.RowKey, c.Origin,
-                       ROW_NUMBER() OVER (PARTITION BY c.RowKey, c.ColumnDefId
-                                              ORDER BY c.ChangedAt DESC, c.Id DESC) AS rn
-                  FROM aud.CellChange AS c
-                  JOIN doc.TableRow  AS r ON r.PeriodKey = c.PeriodKey AND r.Id = c.TableRowId
-                 WHERE c.PeriodKey = @period AND r.TableInstanceId = @instance
-            )
-            SELECT DISTINCT RowKey FROM last_change WHERE rn = 1 AND Origin IN ({CellChangeOrigins.HumanOriginsSql});
-            """;
+        command.CommandText = ManualRowKeysSql;
         command.Parameters.AddWithValue("@period", periodKey);
         command.Parameters.AddWithValue("@instance", tableInstanceId);
+        command.Parameters.Add("@document", System.Data.SqlDbType.BigInt).Value = documentId;
 
         await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
         while (await reader.ReadAsync(ct).ConfigureAwait(false))

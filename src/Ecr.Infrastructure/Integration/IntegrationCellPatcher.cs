@@ -166,7 +166,7 @@ public sealed class IntegrationCellPatcher(
         var instance = await db.TableInstances
             .AsNoTracking()
             .Where(t => t.Id == tableInstanceId && t.PeriodKeyValue == periodKey.Value)
-            .Select(t => new { t.TableDefId })
+            .Select(t => new { t.TableDefId, t.DocumentId })
             .FirstOrDefaultAsync(ct)
             .ConfigureAwait(false)
             ?? throw new InvalidOperationException(
@@ -182,7 +182,9 @@ public sealed class IntegrationCellPatcher(
 
         for (var attempt = 1; ; attempt++)
         {
-            var plan = await PlanAsync(tableInstanceId, periodKey, cells, columnById, rowsOf, ct).ConfigureAwait(false);
+            var plan = await PlanAsync(
+                    instance.DocumentId, tableInstanceId, periodKey, cells, columnById, rowsOf, ct)
+                .ConfigureAwait(false);
             var rejected = plan.Rejected.Count == 0 ? null : plan.Rejected;
 
             if (plan.Rows.Count == 0)
@@ -258,6 +260,7 @@ public sealed class IntegrationCellPatcher(
     /// вікно, у якому правку людини мовчки затирає інтеграція.
     /// </remarks>
     private async Task<WritePlan> PlanAsync(
+        long documentId,
         long tableInstanceId,
         PeriodKey periodKey,
         IReadOnlyList<PlannedCell> cells,
@@ -268,7 +271,7 @@ public sealed class IntegrationCellPatcher(
         var existing = (await rowStore.GetRowsAsync(tableInstanceId, periodKey, ct).ConfigureAwait(false))
             .ToDictionary(r => r.RowKey, StringComparer.Ordinal);
 
-        var manual = await ManualCellsAsync(tableInstanceId, periodKey, ct).ConfigureAwait(false);
+        var manual = await ManualCellsAsync(documentId, tableInstanceId, periodKey, ct).ConfigureAwait(false);
 
         var kept = new List<string>();
         var candidates = KeepManual(cells, columnById, manual, kept);
@@ -596,7 +599,38 @@ public sealed class IntegrationCellPatcher(
         }
     }
 
+    /// <summary>
+    /// Текст запиту «комірки, останню зміну яких зробила людина» — бойовий, його ж міряє тест.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ R5-Q1-01: <c>c.DocumentId = @document</c> — провідна колонка <c>IX_CellChange_Cell
+    /// (DocumentId, TableRowId, ColumnDefId, ChangedAt DESC)</c>. Без неї жоден індекс
+    /// <c>aud.CellChange</c> не давав seek (PK — <c>(ChangedAt, Id)</c>, партиції за <c>ChangedAt</c>),
+    /// і запит сканував УВЕСЬ журнал аудиту системи на кожен запис інтеграції, кожну спробу повтору
+    /// й кожну комірку поштучного фолбеку. Семантика та сама: журнал рядка екземпляра завжди
+    /// належить документу екземпляра, а з'єднання з <c>r.Id</c> і раніше відкидало аудит
+    /// видалених/перестворених рядків.
+    /// </remarks>
+    public const string ManualCellsSql = $"""
+        WITH last_change AS (
+            SELECT c.RowKey, c.ColumnDefId, c.Origin,
+                   ROW_NUMBER() OVER (PARTITION BY c.RowKey, c.ColumnDefId
+                                          ORDER BY c.ChangedAt DESC, c.Id DESC) AS rn
+              FROM doc.TableRow AS r
+              JOIN aud.CellChange AS c
+                ON c.DocumentId = @document
+               AND c.TableRowId = r.Id
+               AND c.PeriodKey = r.PeriodKey
+             WHERE r.PeriodKey = @period AND r.TableInstanceId = @instance
+        )
+        SELECT lc.RowKey, cd.Code
+          FROM last_change AS lc
+          JOIN cfg.ColumnDef AS cd ON cd.Id = lc.ColumnDefId
+         WHERE lc.rn = 1 AND lc.Origin IN ({CellChangeOrigins.HumanOriginsSql});
+        """;
+
     /// <summary>Комірки, останню зміну яких зробила людина.</summary>
+    /// <param name="documentId">Документ екземпляра — провідна колонка індексу журналу (R5-Q1-01).</param>
     /// <param name="tableInstanceId">Екземпляр таблиці.</param>
     /// <param name="periodKey">Період.</param>
     /// <param name="ct">Токен скасування.</param>
@@ -610,7 +644,7 @@ public sealed class IntegrationCellPatcher(
     /// спершу заповнити руками, а потім свідомо віддати інтеграції.
     /// </remarks>
     private async Task<HashSet<string>> ManualCellsAsync(
-        long tableInstanceId, PeriodKey periodKey, CancellationToken ct)
+        long documentId, long tableInstanceId, PeriodKey periodKey, CancellationToken ct)
     {
         var manual = new HashSet<string>(StringComparer.Ordinal);
 
@@ -620,23 +654,11 @@ public sealed class IntegrationCellPatcher(
         await connection.OpenAsync(ct).ConfigureAwait(false);
 
         await using var command = connection.CreateCommand();
-        command.CommandText = $"""
-            WITH last_change AS (
-                SELECT c.RowKey, c.ColumnDefId, c.Origin,
-                       ROW_NUMBER() OVER (PARTITION BY c.RowKey, c.ColumnDefId
-                                              ORDER BY c.ChangedAt DESC, c.Id DESC) AS rn
-                  FROM aud.CellChange AS c
-                  JOIN doc.TableRow  AS r ON r.PeriodKey = c.PeriodKey AND r.Id = c.TableRowId
-                 WHERE c.PeriodKey = @period AND r.TableInstanceId = @instance
-            )
-            SELECT lc.RowKey, cd.Code
-              FROM last_change AS lc
-              JOIN cfg.ColumnDef AS cd ON cd.Id = lc.ColumnDefId
-             WHERE lc.rn = 1 AND lc.Origin IN ({CellChangeOrigins.HumanOriginsSql});
-            """;
+        command.CommandText = ManualCellsSql;
 
         command.Parameters.AddWithValue("@period", periodKey.Value);
         command.Parameters.AddWithValue("@instance", tableInstanceId);
+        command.Parameters.Add("@document", System.Data.SqlDbType.BigInt).Value = documentId;
 
         await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
 
