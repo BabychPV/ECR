@@ -508,6 +508,32 @@ function Test-ConnectionStringHasPassword {
     return $false
 }
 
+# ⛔ N5-02 (аудит 2026-10-09): власник теки зберігає право WRITE_DAC попри будь-який
+# DACL. Якщо %ProgramData%\ECR (або config/logs) ЗАЗДАЛЕГІДЬ створив локальний
+# користувач, MSI виставить захищений DACL, але власником лишиться він — і зможе
+# повернути собі доступ до конфігу (bootstrap.secret, appsettings.Production.json)
+# й журналу. Довіряємо лише SYSTEM і BUILTIN\Administrators; інакше ВІДМОВА
+# до msiexec, а не мовчазне виправлення: вміст такої теки міг підготувати хтось
+# інший, і адміністратор має його оглянути.
+function Test-TrustedOwnerSid {
+    param([string] $Sid)
+    return ($Sid -eq 'S-1-5-18' -or $Sid -eq 'S-1-5-32-544')   # SYSTEM, BUILTIN\Administrators
+}
+
+function Assert-EcrFolderOwner {
+    param([Parameter(Mandatory)] [string[]] $Path)
+    foreach ($folder in $Path) {
+        if (-not (Test-Path -LiteralPath $folder)) { continue }   # свіжа установка: теку створить msiexec (власник SYSTEM)
+        $owner = (Get-Acl -LiteralPath $folder).GetOwner([System.Security.Principal.SecurityIdentifier])
+        if (-not (Test-TrustedOwnerSid $owner.Value)) {
+            $name = try { $owner.Translate([System.Security.Principal.NTAccount]).Value } catch { $owner.Value }
+            throw ("Власник теки $folder — $name ($($owner.Value)), а не SYSTEM чи Administrators: власник зберігає " +
+                "право змінювати права на теку попри захищений ACL з MSI (N5-02). Огляньте вміст теки (її міг підготувати " +
+                "не адміністратор), віддайте її Administrators (takeown /F `"$folder`" /A /R /D Y) і запустіть скрипт знову.")
+        }
+    }
+}
+
 function Protect-ServiceRegistryKey {
     param([Parameter(Mandatory)] [string] $ServiceName)
     $keyPath = "HKLM:\SYSTEM\CurrentControlSet\Services\$ServiceName"
@@ -1488,6 +1514,10 @@ Write-Host ("Воркер перерахунку (EcrWorker): $(if ($workerEnabl
 
 # ---------------------------------------------------------------------
 Write-Step "Крок 3/7: MSI"
+
+# ⛔ N5-02: теки з попередньої установки/підкладені заздалегідь — до msiexec, лише читання.
+$programDataEcr = Join-Path $env:ProgramData 'ECR'
+Assert-EcrFolderOwner -Path $programDataEcr, (Join-Path $programDataEcr 'config'), (Join-Path $programDataEcr 'logs')
 
 if (-not $MsiPath) {
     if ($PSCmdlet.ShouldProcess('build-msi.ps1', "build-msi.ps1 -Version $Version")) {
