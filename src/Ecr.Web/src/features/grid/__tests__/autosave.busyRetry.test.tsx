@@ -143,7 +143,12 @@ describe('AN-123: 409 lockTimeout повторюється з відступом
     expect(hasPending()).toBe(false);
   });
 
-  it('закриття вкладки після 409 lockTimeout: маячок іде, питання немає', async () => {
+  // ✎ R5-G1 / G1-03: було «маячок іде, питання немає». Маячок у мить, коли дані
+  // зайняті (перенос версії тримає блокування хвилинами), дістає той самий
+  // `409 lockTimeout` і губиться мовчки. Тепер — рідне питання браузера і
+  // звичайне збереження після нього; правка при цьому НЕ утримана (суть AN-123
+  // лишається: `sendable` не порожній, повтор іде сам).
+  it('закриття вкладки після 409 lockTimeout: питання браузера, маячка немає, правка не утримана', async () => {
     const fetchMock = mockServer(1);
     renderHook(() => useDocumentPending(1), { wrapper });
 
@@ -154,11 +159,11 @@ describe('AN-123: 409 lockTimeout повторюється з відступом
     const event = new Event('beforeunload', { cancelable: true });
     window.dispatchEvent(event);
 
-    // ⛔ До виправлення правка утримана → `held` → `preventDefault` і жодного маячка.
-    expect(event.defaultPrevented).toBe(false);
+    expect(event.defaultPrevented).toBe(true);
+    expect(sendableEdits(Table, Period)).toEqual([edit]);
     const beacons = fetchMock.mock.calls.filter(
       (call) => (call[1] as RequestInit | undefined)?.keepalive === true,
     );
-    expect(beacons).toHaveLength(1);
+    expect(beacons).toHaveLength(0);
   });
 });

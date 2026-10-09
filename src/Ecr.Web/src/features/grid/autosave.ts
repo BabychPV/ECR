@@ -19,7 +19,15 @@ import {
   resetPending,
   sendableEdits,
   subscribePending,
+  hasFailedSendable,
+  noteSaveFailed,
+  noteSaveSucceeded,
+  resetFailedSaves,
 } from './pendingStore';
+
+// ⚠ `G1-03`/`G1-04`: позначки невдалого збереження живуть у сховищі правок (скидаються
+// разом із ним, `resetPending`); звідси — для зберігачів і сітки.
+export { hasFailedSave, noteSaveSucceeded, resetFailedSaves, useFailedSave } from './pendingStore';
 import { queryKeys } from '@/api/queryKeys';
 import type { TableSliceDto } from '@/api/types';
 import { withKnownVersions } from './edits';
@@ -315,73 +323,6 @@ function subscribeBusy(listener: () => void): () => void {
 /** Стан «чекає, доки дані звільняться» — для індикатора сітки. */
 export function useBusyRetryWaiting(): boolean {
   return useSyncExternalStore(subscribeBusy, isBusyRetryWaiting, isBusyRetryWaiting);
-}
-
-/**
- * Зрізи, чиє ОСТАННЄ збереження не дійшло: мережа, `5xx`, відмова без позначок
- * (`G1-03`).
- *
- * ⛔ Доти питання браузера «Покинути сторінку?» з'являлось лише за утриманих
- * правок або запиту в дорозі. Після мережевої/`5xx` відмови правки лишались
- * «придатними до надсилання», і закриття вкладки покладалося на маячок — до того
- * самого недоступного сервера, мовчки. Тепер такий зріз — привід спитати.
- */
-const failedSlices = new Set<string>();
-const failedListeners = new Set<() => void>();
-
-function notifyFailed(): void {
-  for (const listener of failedListeners) listener();
-}
-
-/** Збереження зрізу дійшло: знімає позначку `G1-03`. */
-export function noteSaveSucceeded(tableInstanceId: number, periodKey: number): void {
-  if (failedSlices.delete(keyOfSlice(tableInstanceId, periodKey))) notifyFailed();
-}
-
-function noteSaveFailed(tableInstanceId: number, periodKey: number): void {
-  const key = keyOfSlice(tableInstanceId, periodKey);
-  if (failedSlices.has(key)) return;
-
-  failedSlices.add(key);
-  notifyFailed();
-}
-
-/** Чи останнє збереження зрізу не дійшло (мережа, `5xx`) — для «Retry save» (`G1-04`). */
-export function hasFailedSave(tableInstanceId: number, periodKey: number): boolean {
-  return failedSlices.has(keyOfSlice(tableInstanceId, periodKey));
-}
-
-/** Те саме, що `hasFailedSave`, — як стан React. */
-export function useFailedSave(tableInstanceId: number, periodKey: number): boolean {
-  const read = (): boolean => hasFailedSave(tableInstanceId, periodKey);
-
-  return useSyncExternalStore(subscribeFailed, read, read);
-}
-
-function subscribeFailed(listener: () => void): () => void {
-  failedListeners.add(listener);
-
-  return () => {
-    failedListeners.delete(listener);
-  };
-}
-
-/** Чи є зріз із невдалим останнім збереженням, у якому ще лежать правки до надсилання. */
-function hasFailedSendable(): boolean {
-  for (const key of failedSlices) {
-    const [tableInstanceId, periodKey] = key.split(':').map(Number) as [number, number];
-    if (sendableEdits(tableInstanceId, periodKey).length > 0) return true;
-  }
-
-  return false;
-}
-
-/** Скидання позначок `G1-03` разом зі сховищем правок (вихід із документа, тести). */
-export function resetFailedSaves(): void {
-  if (failedSlices.size === 0) return;
-
-  failedSlices.clear();
-  notifyFailed();
 }
 
 /**
