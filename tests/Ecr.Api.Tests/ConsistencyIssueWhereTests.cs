@@ -209,7 +209,7 @@ public sealed class ConsistencyIssueWhereTests(SqlServerFixture sql)
 
     /// <summary>Предикат за <c>PeriodKey</c> після <c>WHERE</c> (умови <c>ON</c> з'єднань стоять до нього).</summary>
     private static readonly System.Text.RegularExpressions.Regex PeriodInWhere = new(
-        @"WHERE[\s\S]*?\.\[PeriodKey\]\s*(=|IN)", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+        @"WHERE[\s\S]*?\.\[PeriodKey\]\s*(=|IN)", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
 
     private sealed class CommandTextCapture : Microsoft.EntityFrameworkCore.Diagnostics.DbCommandInterceptor
     {
