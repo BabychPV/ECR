@@ -7464,6 +7464,9 @@ USING (VALUES
     ,(N'err.ECR-SYS-0503.databaseBusy', N'en', N'The database is temporarily busy or unreachable, so the request was not completed. Reload the data and try again in a few seconds; if it keeps happening, contact your administrator.', 1),
     (N'err.ECR-SYS-0503.databaseBusy.title', N'en', N'Database temporarily unavailable', 1)
     -- COLL:r5e1-db-busy ── кінець секції ──
+    -- COLL:r5g1-undo-changed ── R5-G1 / G1-05: Undo/Redo не затирає комірки, змінені після кроку; ru/kz — порцією COLL:r5g1-undo-changed нижче ──
+    ,(N'grid.undoChangedSince', N'en', N'{count} cell(s) changed after this step (by another user, an import or a recalculation). Undo/Redo left them as they are; enter the value manually if needed.', 1)
+    -- COLL:r5g1-undo-changed ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -18453,6 +18456,17 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:r5e1-db-busy ── кінець секції ──
+
+-- COLL:r5g1-undo-changed ── ru/kz: R5-G1 / G1-05: Undo/Redo не затирає комірки, змінені після кроку; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'grid.undoChangedSince', N'ru', N'Ячеек, изменённых после этого шага (другим пользователем, импортом или пересчётом): {count}. Отмена/повтор оставили их как есть; при необходимости введите значение вручную.'),
+    (N'grid.undoChangedSince', N'kz', N'Осы қадамнан кейін өзгертілген ұяшықтар (басқа пайдаланушы, импорт немесе қайта есептеу): {count}. Болдырмау/қайталау оларды өзгертпеді; қажет болса, мәнді қолмен енгізіңіз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:r5g1-undo-changed ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

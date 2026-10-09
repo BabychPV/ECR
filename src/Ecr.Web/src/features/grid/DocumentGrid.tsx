@@ -18,7 +18,8 @@ import type {
 import { useColumnWidths } from '@/features/preferences/columnWidthsSync';
 import { cellAppearanceClassOf, cellAppearanceOf } from './cellAppearance';
 import { cellFormatOf, withCellFormat } from './conditionalAppearance';
-import { cellDisplay, cellText, editorValueOf, isNumericColumn } from './cellValue';
+import { cellDisplay, cellText, editorValueOf, isNumericColumn, sameColumnValue } from './cellValue';
+import { columnIndexOf, rowIndexOf } from './rowIndex';
 import { planPaste, type PasteRejection } from './clipboard';
 import { parseClipboard, toClipboard } from './tsvClipboard';
 import { captureEdit, captureOverInFlight, coerce, revertsToSaved, valueOf, withKnownVersions } from './edits';
@@ -116,7 +117,7 @@ import {
 } from './gridTotals';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
-import { showApiError } from '@/shared/ui/notify';
+import { showApiError, showWarning } from '@/shared/ui/notify';
 import { refusalText } from './saveErrors';
 import { useRowHeight } from '@/shared/theme/preferences';
 import { t } from '@/shared/i18n';
@@ -1345,6 +1346,8 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
               value: fixed,
               isEmpty: false,
               baseVersion: versions.get(target.rowKey) ?? null,
+              // ⚠ `G1-05`, L8-20: що людина бачила в кеші — за цим упізнається чужа правка.
+              before: valueOf(data, target.rowKey, target.columnCode),
             };
           }
         }
@@ -1355,6 +1358,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
           value,
           isEmpty: false,
           baseVersion: versions.get(target.rowKey) ?? null,
+          before: valueOf(data, target.rowKey, target.columnCode),
         };
       });
 
@@ -1373,12 +1377,19 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         // глибину, а Ctrl+Z відкочував би її по комірці.
         history.current.push({
           label: t('grid.paste', { count: edits.length }),
-          edits: edits.map<CellEdit>((edit) => ({
-            rowKey: edit.rowKey,
-            columnCode: edit.columnCode,
-            before: valueOf(data, edit.rowKey, edit.columnCode),
-            after: edit.value,
-          })),
+          // ⚠ `G1-05`: «було» — те, що людина БАЧИЛА: незбережене поверх кешу.
+          // Інакше Undo вставки поверх незбереженої правки відновлював би
+          // збережене, а не те, що стояло на екрані.
+          edits: edits.map<CellEdit>((edit) => {
+            const held = pendingSlice(tableInstanceId, periodKey).get(pendingCellKey(edit));
+
+            return {
+              rowKey: edit.rowKey,
+              columnCode: edit.columnCode,
+              before: held === undefined ? valueOf(data, edit.rowKey, edit.columnCode) : held.isEmpty ? null : held.value,
+              after: edit.value,
+            };
+          }),
         });
 
         touchHistory();
@@ -1750,21 +1761,61 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
     (edits: CellEdit[] | null) => {
       if (edits === null || data === undefined) return;
 
-      const versions = new Map(data.rows.map((row) => [row.rowKey, row.rowVersion]));
+      const rowsByKey = rowIndexOf(data);
+      const columnsByCode = columnIndexOf(data);
+      const unsaved = pendingSlice(tableInstanceId, periodKey);
+
+      // ⛔ `G1-05`: Undo/Redo скасовує СВІЙ крок, а не те, що відтоді записав
+      // хтось інший (колега, імпорт, перерахунок після Recall). Доти крок ішов
+      // наосліп зі свіжою версією рядка й без `before` — сторож L8-20 мовчав, і
+      // сервер приймав запис поверх чужого значення. Тепер комірка, у якій
+      // зараз НЕ те значення, яке крок мав там лишити (`edit.before` — для
+      // Undo це його `after`, `UndoStack.undo` міняє їх місцями), не чіпається,
+      // а людині сказано, скільки таких. Обрано найбезпечніше для даних: чуже
+      // значення не затирається мовчки; перезаписати його можна звичайним
+      // введенням. «Показане» — незбережене зі сховища, якщо воно є, інакше кеш.
+      // Перевіряється ПЕРША зміна кожної комірки в порядку застосування: крок із
+      // двома правками однієї комірки інакше впирався б у проміжне значення.
+      const decided = new Map<string, boolean>();
+      const applicable: CellEdit[] = [];
+      for (const edit of edits) {
+        const key = cellKey(edit.rowKey, edit.columnCode);
+        let ok = decided.get(key);
+        if (ok === undefined) {
+          const held = unsaved.get(pendingCellKey(edit));
+          const shown =
+            held === undefined
+              ? valueOf(data, edit.rowKey, edit.columnCode, rowsByKey)
+              : held.isEmpty
+                ? null
+                : held.value;
+          ok = sameColumnValue(columnsByCode.get(edit.columnCode)?.dataType, shown, edit.before);
+          decided.set(key, ok);
+        }
+        if (ok) applicable.push(edit);
+      }
+
+      const skipped = [...decided.values()].filter((ok) => !ok).length;
+      if (skipped > 0) showWarning(t('grid.undoChangedSince', { count: skipped }));
 
       touchHistory();
 
+      if (applicable.length === 0) return;
+
       saveThroughStore(
-        edits.map((edit) => ({
+        applicable.map((edit) => ({
           rowKey: edit.rowKey,
           columnCode: edit.columnCode,
           value: edit.after,
           isEmpty: false,
-          baseVersion: versions.get(edit.rowKey) ?? null,
+          baseVersion: rowsByKey.get(edit.rowKey)?.rowVersion ?? null,
+          // ⚠ L8-20: значення кешу в мить кроку — за ним `withKnownVersions`
+          // упізнає чужу правку, якщо крок чекатиме повтору.
+          before: valueOf(data, edit.rowKey, edit.columnCode, rowsByKey),
         })),
       );
     },
-    [data, saveThroughStore, touchHistory],
+    [data, saveThroughStore, touchHistory, tableInstanceId, periodKey],
   );
 
   const onKeyDown = useCallback(
