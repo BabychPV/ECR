@@ -474,41 +474,44 @@ public sealed class UnitOfWork(
             return;
         }
 
-        // ⛔ L6-15 (аудит 2026-10-03). Стратегія повторів (1205, обрив з'єднання)
-        // виконує замикання вдруге над ТИМ САМИМ трекером змін. Сутності, які
-        // перша спроба завантажила чи додала, лишалися в ньому: запит другої
-        // спроби повертав уже змінений екземпляр (подання → `wrongState`), а
-        // доданий запис (`ApprovalEvent`) вставлявся двічі. Перед повтором
-        // від'єднується все, що з'явилося в трекері ПІСЛЯ початку першої
-        // спроби: друга спроба читає й додає наново.
+        // ⛔ L6-15 (аудит 2026-10-03) / N1-03 (аудит 2026-10-09). Стратегія повторів (1205, обрив
+        // з'єднання) виконує замикання вдруге над ТИМ САМИМ трекером змін, а база відкотила все,
+        // що зробила перша спроба. Сутності, які перша спроба завантажила чи додала, лишалися в
+        // ньому: запит другої спроби повертав уже змінений екземпляр (подання → `wrongState`), а
+        // доданий запис (`ApprovalEvent`) вставлявся двічі. Сутність, завантажена ДО транзакції
+        // і змінена в замиканні, після першого успішного збереження ставала `Unchanged`: коли відкат
+        // наставав пізніше, повтор не бачив різниці — зміна мовчки губилася, а обробник відповідав 200.
         //
-        // ⚠ Не `ChangeTracker.Clear()`: сутність, завантажену викликачем ДО
-        // транзакції і змінену в замиканні, повтор має зберегти — від'єднана,
-        // вона мовчки не записалася б, а обробник відповів би успіхом.
-        HashSet<object>? trackedBefore = null;
+        // ⚠ Перед повтором трекер ВІДНОВЛЮЄТЬСЯ до стану на початок транзакції
+        // (<see cref="ChangeTrackerCheckpoint"/>): нове відчіплюється, змінене й збережене
+        // повертається до значень ДО першої спроби. Не `ChangeTracker.Clear()` — сутність, завантажену
+        // викликачем ДО транзакції, повтор має зберегти. І не `SaveChanges(acceptAllChangesOnSuccess:
+        // false)` + `AcceptAllChanges()` після коміту — замикання зберігає по кілька разів, і друге
+        // збереження вставило б доданий першим запис удруге.
+        ChangeTrackerCheckpoint? checkpoint = null;
         var strategy = db.Database.CreateExecutionStrategy();
-        await strategy.ExecuteAsync(async () =>
+        try
         {
-            if (trackedBefore is null)
+            await strategy.ExecuteAsync(async () =>
             {
-                trackedBefore = db.ChangeTracker.Entries()
-                    .Select(e => e.Entity)
-                    .ToHashSet(ReferenceEqualityComparer.Instance);
-            }
-            else
-            {
-                foreach (var entry in db.ChangeTracker.Entries()
-                             .Where(e => !trackedBefore.Contains(e.Entity))
-                             .ToList())
+                if (checkpoint is null)
                 {
-                    entry.State = EntityState.Detached;
+                    checkpoint = new ChangeTrackerCheckpoint(db);
                 }
-            }
+                else
+                {
+                    checkpoint.Restore();
+                }
 
-            await using var transaction = await db.Database.BeginTransactionAsync(ct).ConfigureAwait(false);
-            await operation(ct).ConfigureAwait(false);
-            await transaction.CommitAsync(ct).ConfigureAwait(false);
-        }).ConfigureAwait(false);
+                await using var transaction = await db.Database.BeginTransactionAsync(ct).ConfigureAwait(false);
+                await operation(ct).ConfigureAwait(false);
+                await transaction.CommitAsync(ct).ConfigureAwait(false);
+            }).ConfigureAwait(false);
+        }
+        finally
+        {
+            checkpoint?.Dispose();
+        }
     }
 
     /// <summary>
