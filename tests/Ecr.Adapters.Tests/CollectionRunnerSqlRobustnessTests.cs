@@ -145,12 +145,12 @@ public sealed class CollectionRunnerSqlRobustnessTests(SqlServerFixture sql)
 
         var outcome = await RunOnceAsync(
             _ => [],
-            ct: cts.Token,
             onGapRead: () =>
             {
                 cts.Cancel();
                 cts.Token.ThrowIfCancellationRequested();
-            });
+            },
+            ct: cts.Token);
 
         Assert.IsAssignableFrom<OperationCanceledException>(outcome.Error);
         Assert.Equal("Degraded", outcome.Run.Status);
@@ -289,8 +289,8 @@ public sealed class CollectionRunnerSqlRobustnessTests(SqlServerFixture sql)
     private async Task<Outcome> RunOnceAsync(
         Func<string, IReadOnlyList<SourceDataPoint>> points,
         IJobProgress? progress = null,
-        CancellationToken ct = default,
-        Action? onGapRead = null)
+        Action? onGapRead = null,
+        CancellationToken ct = default)
     {
         await using var db = sql.CreateContext();
         var stand = await ArrangeAsync(db);
