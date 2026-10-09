@@ -197,7 +197,10 @@ public sealed class UnitOfWork(
             .ConfigureAwait(false);
 
         // Відстежувані екземпляри — у той самий стан, що й рядок у базі, без позначки «змінено».
-        foreach (var entry in db.ChangeTracker.Entries<RegistryDef>())
+        // ⚠ Знімок переліку (`ToList`): запис значень властивості переводить запис трекера між
+        // станами, а `Entries<T>()` лінійно обходить внутрішні словники станів — без знімка
+        // «Collection was modified» на першому ж зміненому довіднику (інтеграція batch5).
+        foreach (var entry in db.ChangeTracker.Entries<RegistryDef>().ToList())
         {
             if (!ids.Contains(entry.Entity.Id))
             {

@@ -313,11 +313,13 @@ public sealed class RegistryRowsQuery(EcrDbContext db) : IRegistryRowsQuery
         // ⚠ `INNER LOOP JOIN` від впорядкованого переліку: (1) точкові seek-и по PK, а не скан таблиці
         // з U-блокуваннями на чужих рядках; (2) сталий порядок захоплення за `Id` — два пакети з
         // перехресними наборами чекають один на одного, а не взаємоблокуються.
+        // ⚠ `dic.RegistryEntry.Id` у базі — `int` (конвертер у `RegistryEntryConfiguration`), а
+        // `SqlQuery<long>` читає `GetInt64`: без `CAST` — `InvalidCastException` → 500 на кожному пакеті.
         var idsJson = System.Text.Json.JsonSerializer.Serialize(registryEntryIds.Distinct().Order());
 
         await db.Database
             .SqlQuery<long>($"""
-                SELECT e.Id AS Value
+                SELECT CAST(e.Id AS bigint) AS Value
                   FROM OPENJSON({idsJson}) AS j
                  INNER LOOP JOIN dic.RegistryEntry AS e WITH (UPDLOCK, ROWLOCK)
                     ON e.Id = CAST(j.value AS bigint)
