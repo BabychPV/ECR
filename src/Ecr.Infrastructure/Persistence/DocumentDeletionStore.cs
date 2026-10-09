@@ -118,13 +118,21 @@ public sealed class DocumentDeletionStore(EcrDbContext db) : IDocumentDeletionSt
                 .ToListAsync(ct).ConfigureAwait(false));
         }
 
-        var documentKeyList = documentKeys.ToList();
-        await db.CalculationResults
-            .Where(r => documentKeyList.Contains(r.PeriodKey) && r.DocumentId == documentId)
-            .ExecuteDeleteAsync(ct).ConfigureAwait(false);
-        await db.CalculationInputs
-            .Where(r => documentKeyList.Contains(r.PeriodKey) && r.DocumentId == documentId)
-            .ExecuteDeleteAsync(ct).ConfigureAwait(false);
+        // ⛔ По одному ключу на DELETE, а не `PeriodKey IN (@k1, @k2, …)`. Список параметрів
+        // оптимізатор згортає в залишковий OR-предикат і вільний обирати скан вузького
+        // `IX_CalculationResult_Version` (провідний `MethodologyVersionId`) — тоді відсічки партицій
+        // немає зовсім (план на малій/порожній таблиці: Index Scan, 25 із 25). Рівність за
+        // `PeriodKey` дає пошук із відсічкою до однієї партиції за будь-якої статистики.
+        // Ключів — стільки, скільки періодів/прогонів у проєкту (одиниці-десятки), тож це дешево.
+        foreach (var key in documentKeys.Order())
+        {
+            await db.CalculationResults
+                .Where(r => r.PeriodKey == key && r.DocumentId == documentId)
+                .ExecuteDeleteAsync(ct).ConfigureAwait(false);
+            await db.CalculationInputs
+                .Where(r => r.PeriodKey == key && r.DocumentId == documentId)
+                .ExecuteDeleteAsync(ct).ConfigureAwait(false);
+        }
 
         // ⛔ L10-06: прогони перерахунку САМЕ цього документа (`DocumentId`).
         // Прогони проєкту (`DocumentId = NULL`) лишаються — їх рядки цього

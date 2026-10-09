@@ -77,7 +77,9 @@ public sealed class DocumentDeletionCalcPartitionTests(SqlServerFixture sql)
             Assert.False(await check.CalculationInputs.AnyAsync(i => i.Id == periodInputId || i.Id == yearInputId));
         }
 
-        Assert.Equal(2, recorder.Seen.Count);
+        // По DELETE на кожен ключ періоду для кожної з двох таблиць (рівність, а не IN-список —
+        // див. DocumentDeletionStore): ключі {0, період документа} → щонайменше по два на таблицю.
+        Assert.True(recorder.Seen.Count >= 4, $"DELETE результатів/входів: {recorder.Seen.Count}");
 
         int fanout;
         await using (var connection = new SqlConnection(sql.ConnectionString))
@@ -88,16 +90,18 @@ public sealed class DocumentDeletionCalcPartitionTests(SqlServerFixture sql)
             fanout = (int)(await count.ExecuteScalarAsync())!;
         }
 
-        foreach (var (table, delete) in new[]
-                 {
-                     ("[CalculationResult]", recorder.Seen.Single(s => s.Text.Contains("[CalculationResult]", StringComparison.Ordinal))),
-                     ("[CalculationInput]", recorder.Seen.Single(s => s.Text.Contains("[CalculationInput]", StringComparison.Ordinal))),
-                 })
+        foreach (var table in new[] { "[CalculationResult]", "[CalculationInput]" })
         {
-            var accessed = await PartitionsAccessedAsync(table, delete);
+            var deletes = recorder.Seen.Where(s => s.Text.Contains(table, StringComparison.Ordinal)).ToList();
+            Assert.NotEmpty(deletes);
 
-            Assert.NotEmpty(accessed);
-            Assert.All(accessed, n => Assert.True(n < fanout, $"прочитано {n} партицій {table} із {fanout}:\n{delete.Text}"));
+            foreach (var delete in deletes)
+            {
+                var accessed = await PartitionsAccessedAsync(table, delete);
+
+                Assert.NotEmpty(accessed);
+                Assert.All(accessed, n => Assert.True(n < fanout, $"прочитано {n} партицій {table} із {fanout}:\n{delete.Text}"));
+            }
         }
     }
 
