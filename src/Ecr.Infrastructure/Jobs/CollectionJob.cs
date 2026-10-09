@@ -235,30 +235,178 @@ public sealed class CollectionJob(
     private async Task AlertAuthenticationAsync(
         int sourceEntityId, SourceAuthenticationException failure, CancellationToken ct)
     {
-        var code = await db.SourceEntities
+        var source = await db.SourceEntities
             .AsNoTracking()
             .Where(e => e.Id == sourceEntityId)
-            .Select(e => e.Code)
+            .Select(e => new { e.Code, e.DataSourceId })
             .FirstOrDefaultAsync(ct)
-            .ConfigureAwait(false)
-            ?? sourceEntityId.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            .ConfigureAwait(false);
 
+        var code = source?.Code ?? sourceEntityId.ToString(CultureInfo.InvariantCulture);
+
+        var enqueued = source is null
+            ? await EnqueueAuthenticationAlertAsync(code, failure.Message, ct).ConfigureAwait(false)
+            : await EnqueueConnectionAlertOnceAsync(source.DataSourceId, code, failure.Message, ct)
+                .ConfigureAwait(false);
+
+        if (!enqueued)
+        {
+            // ⛔ J1-01: з'єднання вже алертили у вікні тиші — нового листа немає, і чужу чергу
+            // цей тик теж не чіпає. Сама відмова лишається в журналі прогону та у зведенні.
+            return;
+        }
+
+        // ⛔ J1-01: відправляється ЛИШЕ подія цього виду. Повний `FlushAsync` з кожної
+        // сутності, що впала на тику, при недоступній пошті робив `Attempts++` усім
+        // `Pending` (зведенням теж) — і «5 спроб = 5 годин» вичерпувалось за хвилини.
+        await dispatcher.FlushAsync(CollectionFailure.AlertEventCode, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Скільки часу повторна відмова в автентифікації ТОГО САМОГО з'єднання не дає нового
+    /// негайного листа (J1-01).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Розклад збору — на СУТНІСТЬ, а облікові дані — на З'ЄДНАННЯ. Протермінований
+    /// пароль валив усі сутності з'єднання на кожному тику їхнього cron, і кожна клала
+    /// окремий негайний лист усім адміністраторам: 50 сутностей з погодинним cron —
+    /// 1 200 листів на добу кожному, поки хтось не змінить пароль. Шість годин — перша
+    /// відмова лишається «негайною», а нагадування приходить кілька разів на добу, доки
+    /// проблему не усунуто; між листами відмови видно в погодинному зведенні.
+    /// </remarks>
+    public static readonly TimeSpan AuthAlertQuietPeriod = TimeSpan.FromHours(6);
+
+    /// <summary>Скільки мс чекати замок дедуплікації алерту з'єднання.</summary>
+    private const int AuthAlertLockTimeoutMs = 15000;
+
+    /// <summary>
+    /// Мітка з'єднання в кінці тексту алерту — за нею шукається попередній лист того ж
+    /// з'єднання (J1-01).
+    /// </summary>
+    /// <param name="dataSourceId">Ідентифікатор з'єднання (<c>ext.DataSource</c>).</param>
+    /// <returns>Рядок, яким закінчується тіло алерту.</returns>
+    /// <remarks>
+    /// ⚠ Мітка в ТЕКСТІ, а не окрема колонка: колонка — це міграція схеми заради ключа
+    /// дедуплікації однієї події. <c>#</c> перед числом не дає <c>#12</c> збігтися з <c>#112</c>.
+    /// </remarks>
+    public static string ConnectionTag(int dataSourceId)
+        => "[з'єднання #" + dataSourceId.ToString(CultureInfo.InvariantCulture) + "]";
+
+    /// <summary>
+    /// Кладе алерт з'єднання в чергу, якщо в межах <see cref="AuthAlertQuietPeriod"/> його ще
+    /// не клали (або попередній провалився остаточно).
+    /// </summary>
+    /// <param name="dataSourceId">З'єднання сутності.</param>
+    /// <param name="code">Код сутності — для теми листа.</param>
+    /// <param name="message">Текст відмови від збирача.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns><c>true</c>, якщо подію покладено і закомічено.</returns>
+    /// <remarks>
+    /// ⛔ Перевірка й вставка — під транзакційним <c>sp_getapplock</c> на з'єднання: сутності
+    /// одного з'єднання з однаковим cron падають на ТОМУ САМОМУ тику паралельно (кожна —
+    /// окремий Quartz <c>JobKey</c>), і без замка всі вони побачили б «ще не алертили».
+    /// Таймаут замка — не привід мовчати: лист кладеться без дедуплікації (дубль краще за тишу).
+    ///
+    /// ⚠ <c>Failed</c> не рахується: лист, що так і не пішов, вікна тиші не відкриває.
+    /// </remarks>
+    private async Task<bool> EnqueueConnectionAlertOnceAsync(
+        int dataSourceId, string code, string message, CancellationToken ct)
+    {
+        var tag = ConnectionTag(dataSourceId);
+        var body = message
+            + "\n\nПовторні відмови цього з'єднання протягом "
+            + ((int)AuthAlertQuietPeriod.TotalHours).ToString(CultureInfo.InvariantCulture)
+            + " год окремих листів не дають — їх видно в погодинному зведенні.\n"
+            + tag;
+
+        var strategy = db.Database.CreateExecutionStrategy();
+
+        return await strategy.ExecuteAsync(async () =>
+        {
+            // ⚠ Повтор стратегії виконує замикання знову над тим самим трекером: подія,
+            // додана невдалою спробою, не має поїхати другим рядком.
+            foreach (var stale in db.ChangeTracker.Entries<NotificationOutboxItem>()
+                         .Where(e => e.State == EntityState.Added
+                                     && e.Entity.EventCode == CollectionFailure.AlertEventCode)
+                         .ToList())
+            {
+                stale.State = EntityState.Detached;
+            }
+
+            await using var tx = await db.Database.BeginTransactionAsync(ct).ConfigureAwait(false);
+
+            var result = new Microsoft.Data.SqlClient.SqlParameter("@rc", System.Data.SqlDbType.Int)
+            {
+                Direction = System.Data.ParameterDirection.Output,
+            };
+            await db.Database.ExecuteSqlRawAsync(
+                "EXEC @rc = sp_getapplock @Resource = @res, @LockMode = N'Exclusive', "
+                + "@LockOwner = N'Transaction', @LockTimeout = @timeout;",
+                [
+                    result,
+                    new Microsoft.Data.SqlClient.SqlParameter(
+                        "@res", "ecr.collection-auth-alert." + dataSourceId.ToString(CultureInfo.InvariantCulture)),
+                    new Microsoft.Data.SqlClient.SqlParameter("@timeout", AuthAlertLockTimeoutMs),
+                ],
+                ct).ConfigureAwait(false);
+
+            if (result.Value is int rc && rc >= 0)
+            {
+                var quietFrom = clock.UtcNow - AuthAlertQuietPeriod;
+                var alreadyAlerted = await db.NotificationOutbox
+                    .AsNoTracking()
+                    .AnyAsync(
+                        n => n.EventCode == CollectionFailure.AlertEventCode
+                             && n.CreatedAt >= quietFrom
+                             && n.State != "Failed"
+                             && n.Body.EndsWith(tag),
+                        ct)
+                    .ConfigureAwait(false);
+
+                if (alreadyAlerted)
+                {
+                    await tx.CommitAsync(ct).ConfigureAwait(false);
+                    return false;
+                }
+            }
+
+            await outbox
+                .EnqueueAsync(
+                    CollectionFailure.AlertEventCode,
+                    CollectionFailure.AlertSubject(code),
+                    body,
+                    recipients: null,
+                    ct)
+                .ConfigureAwait(false);
+
+            // ⚠ Порт кладе подію в набір змін і НЕ зберігає його сам — саме щоб
+            // подія їхала комітом того, що її породило. Тут породжувача-транзакції
+            // немає, тому коміт робиться явно, і лише після нього має сенс
+            // відправляти.
+            await db.SaveChangesAsync(ct).ConfigureAwait(false);
+            await tx.CommitAsync(ct).ConfigureAwait(false);
+            return true;
+        }).ConfigureAwait(false);
+    }
+
+    /// <summary>Алерт без дедуплікації — для сутності, якої вже немає в базі (з'єднання невідоме).</summary>
+    /// <param name="code">Ідентифікатор сутності текстом.</param>
+    /// <param name="message">Текст відмови від збирача.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Завжди <c>true</c>.</returns>
+    private async Task<bool> EnqueueAuthenticationAlertAsync(string code, string message, CancellationToken ct)
+    {
         await outbox
             .EnqueueAsync(
                 CollectionFailure.AlertEventCode,
                 CollectionFailure.AlertSubject(code),
-                failure.Message,
+                message,
                 recipients: null,
                 ct)
             .ConfigureAwait(false);
 
-        // ⚠ Порт кладе подію в набір змін і НЕ зберігає його сам — саме щоб
-        // подія їхала комітом того, що її породило. Тут породжувача-транзакції
-        // немає, тому коміт робиться явно, і лише після нього має сенс
-        // відправляти.
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
-
-        await dispatcher.FlushAsync(ct).ConfigureAwait(false);
+        return true;
     }
 
     /// <summary>
