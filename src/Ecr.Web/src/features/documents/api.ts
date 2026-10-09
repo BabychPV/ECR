@@ -175,12 +175,25 @@ function documentListSummary(periodKey: number): Promise<DocumentListSummary> {
  */
 export function useDocumentListSummary(
   periodKey: number | null,
+  policy?: DocumentListSummaryPolicy,
 ): UseQueryResult<DocumentListSummary> {
   return useQuery({
     queryKey: ['documents', 'summary', periodKey],
     queryFn: () => documentListSummary(periodKey ?? 0),
     enabled: periodKey !== null,
+    ...policy,
   });
+}
+
+/**
+ * Власна політика свіжості спостерігача зведення (AN-108 / P2-01).
+ *
+ * ⚠ Бейдж меню — підказка, а не стан, який треба тримати секундно точним: зведення — найдорожчий запит
+ * переліку (агрегат по всіх документах + лічильники застарілості по журналу правок).
+ */
+export interface DocumentListSummaryPolicy {
+  readonly staleTime?: number;
+  readonly refetchOnWindowFocus?: boolean;
 }
 
 /** Право, під яким сервер приймає зміну бізнес-ключа документа (ФВ-3.9). */

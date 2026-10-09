@@ -182,7 +182,8 @@ public sealed class AuditWriter(EcrDbContext db, StaleCountsEpoch? staleEpoch = 
 
         // Правка комірки змінює "застарілість результатів": кеш лічильників скидається ПІСЛЯ коміту транзакції
         // (поза транзакцією - одразу), O(1), без звернень до БД.
-        staleEpoch?.Invalidate(db);
+        // ⛔ AN-108 / P2-01: лише періоди цих правок — правка в 202608 не скидає лічильник 202609.
+        staleEpoch?.Invalidate(db, changes.Select(c => c.Address.PeriodKey.Value));
     }
 
     /// <summary>Перекладає журнал у рядки табличного параметра.</summary>
