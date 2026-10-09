@@ -10,6 +10,7 @@ import { showDone } from '@/shared/ui/notify';
 import { problemText } from '@/shared/ui/problemText';
 import { passwordToggleProps } from '@/shared/ui/a11yLabels';
 import { t } from '@/shared/i18n';
+import { usePendingLoading } from '@/features/common/usePendingLoading';
 import { LockReasonMaxLength, correctWindowsSid, lockUser, resetUserPassword, unlockUser } from './userAdminApi';
 
 // Та сама кнопка-тумблер, що й у формі створення користувача (`Q-260`).
@@ -112,6 +113,8 @@ export function UserAdminActions({ user }: { user: UserView }): JSX.Element | nu
       showDone(t('security.sidCorrected'));
     },
   });
+  // ⚠ ФВ-14.26: спінер — лише після порогу; повтор, поки запит летить, стримує обробник.
+  const fixSidLoading = usePendingLoading(fixSid.isPending);
 
   function closeSid(): void {
     setCorrectingSid(false);
@@ -263,7 +266,7 @@ export function UserAdminActions({ user }: { user: UserView }): JSX.Element | nu
         <form
           onSubmit={(event) => {
             event.preventDefault();
-            if (sid.trim().length > 0) fixSid.mutate();
+            if (sid.trim().length > 0 && !fixSid.isPending) fixSid.mutate();
           }}
         >
           <Stack gap="sm">
@@ -285,7 +288,7 @@ export function UserAdminActions({ user }: { user: UserView }): JSX.Element | nu
               <Button variant="default" onClick={closeSid}>
                 {t('common.cancel')}
               </Button>
-              <Button type="submit" disabled={sid.trim().length === 0} loading={fixSid.isPending}>
+              <Button type="submit" disabled={sid.trim().length === 0} loading={fixSidLoading}>
                 {t('security.correctSid')}
               </Button>
             </Group>

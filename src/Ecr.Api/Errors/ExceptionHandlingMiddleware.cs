@@ -327,7 +327,7 @@ public sealed partial class ExceptionHandlingMiddleware(
         public bool Unavailable { get; private set; } = skip;
 
         /// <summary>Каталог або <c>null</c>; не кидає.</summary>
-        public Task<UiStringCatalog?> GetAsync() => _load ??= LoadAsync();
+        internal Task<UiStringCatalog?> GetAsync() => _load ??= LoadAsync();
 
         private async Task<UiStringCatalog?> LoadAsync()
         {

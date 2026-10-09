@@ -206,8 +206,10 @@ describe('X8-06: 503 ECR-SYS-0503 databaseBusy повторюється сам, 
     expect(showApiError).not.toHaveBeenCalled();
 
     // Власний відступ — 2,5 с, але сервер назвав 8 с: раніше повтору немає.
+    // ⚠ 8 с рахуються від ВІДПОВІДІ 503 (на 500 мс, після дебаунсу), а не від правки:
+    // повтор — на 8 500 мс від початку тесту.
     // ⛔ Мутація: повернути `status !== 429` у `retryAfterOf` — повтор уже на 2,5 с.
-    await advance(7_400);
+    await advance(7_900);
     expect(patchCalls(fetchMock)).toHaveLength(1);
 
     await advance(100);
