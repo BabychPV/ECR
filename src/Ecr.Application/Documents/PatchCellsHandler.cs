@@ -2148,6 +2148,30 @@ public sealed partial class PatchCellsHandler(
         }
         catch (ConcurrencyConflictException ex) when (StaleRowIds(ex) is { Count: > 0 } staleRowIds)
         {
+            // ⛔ D1-01 (AN-104): транзакцію вже відкочено — дочитуємо ЧИННІ
+            // версії й відповідаємо тією самою формою, що й швидкий шлях:
+            // справжня колонка, `currentVersion`, «ваше / чинне», автор.
+            // Без цього відмова сховища їхала як `*` з порожньою версією, а це
+            // для клієнта означає «рядка більше немає»: «Keep mine» вимкнено,
+            // утримувався весь пакет, і єдиною дією лишалось «Discard» — на
+            // живому рядку, найчастіше після власного PATCH₁ того самого рядка.
+            //
+            // ⚠ Порожня версія лишається лише там, де рядка справді немає
+            // (видалено між перевіркою й захопленням) — та сама семантика, що в
+            // <see cref="EnsureNoVersionConflictsAsync"/>.
+            var fresh = await rowStore
+                .GetRowsAsync(request.TableInstanceId, context.PeriodKey, ct)
+                .ConfigureAwait(false);
+            // Той самий розбір, що й на вході (`BuildContext`), — лише з чинним
+            // станом рядків; запит, структура й профіль ті самі.
+            var refreshed = BuildContext(
+                request, context.UserId, context.Profile, context.Instance, context.Snapshot, fresh);
+
+            // Кидає з повним переліком, якщо версії розійшлися (звичайний випадок).
+            await EnsureNoVersionConflictsAsync(refreshed, ct).ConfigureAwait(false);
+
+            // Запасний: на момент дочитування версії знову збіглися — подробиць
+            // назвати нема з чого, лишається адресна відмова сховища.
             throw StaleRowsConflict(changes, staleRowIds);
         }
     }

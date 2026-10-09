@@ -64,12 +64,18 @@ type CellProps = { class?: string; 'data-cell-state'?: string };
  * спрацьовує на змонтованій сітці, і те, що правка переживає її розмонтування.
  * Тут перевіряється ІНШЕ — обробник УСПІХУ патчу.
  */
+const scheduled = vi.hoisted(() => ({ count: 0 }));
+
 vi.mock('../autosave', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../autosave')>();
 
   return {
     ...actual,
-    scheduleAutosave: (): void => {},
+    // ⚠ Лічильник, а не таймер: AN-104 перевіряє, що відкладена правка ПРОСИТЬ
+    // автозбереження, коли звільняється запит у дорозі.
+    scheduleAutosave: (): void => {
+      scheduled.count += 1;
+    },
   };
 });
 
@@ -93,6 +99,18 @@ vi.mock('@revolist/react-datagrid', () => ({
         </button>
       ))}
 
+      {/* AN-104: друга комірка ТОГО САМОГО рядка r1. */}
+      <button
+        type="button"
+        onClick={() =>
+          props.onAfteredit?.({
+            detail: { prop: 'C2', model: { __rowKey: 'r1' }, val: '8' },
+          })
+        }
+      >
+        edit-r1-C2
+      </button>
+
       {/* Дзеркало станів комірок: рівно те, що грід намалював би сам. */}
       {['r1', 'r2', 'r3'].map((rowKey) => {
         const column = (props.columns ?? []).find((candidate) => candidate.prop === 'C1');
@@ -111,14 +129,14 @@ vi.mock('@revolist/react-datagrid', () => ({
   ),
 }));
 
-function column(code: string): ColumnDto {
+function column(code: string, id = 1): ColumnDto {
   return {
     code,
     dataType: 'Decimal',
     defaultValue: null,
     displayFormat: null,
     header: code,
-    id: 1,
+    id,
     isReadOnly: false,
     isRequired: false,
     isRequiredByMethodology: false,
@@ -135,7 +153,7 @@ function sliceFixture(): TableSliceDto {
     cellPermissions: {},
     periodKey: 202609,
     tableInstanceId: 1,
-    columns: [column('C1')],
+    columns: [column('C1'), column('C2', 2)],
     rows: ['r1', 'r2', 'r3'].map((rowKey, index) => ({
       cells: { C1: index },
       isOrphaned: false,
@@ -156,6 +174,8 @@ function sliceFixture(): TableSliceDto {
  */
 interface InFlightPatch {
   rowKeys: string[];
+  /** `rowKey:columnCode` надісланих комірок. */
+  cells: string[];
   settle: () => void;
 }
 
@@ -168,11 +188,14 @@ function mockServer(): void {
     'fetch',
     vi.fn((_path: string, init?: RequestInit) => {
       if (init?.method === 'PATCH') {
-        const body = JSON.parse(String(init.body)) as { rows: { rowKey: string }[] };
+        const body = JSON.parse(String(init.body)) as {
+          rows: { rowKey: string; cells: { columnCode: string }[] }[];
+        };
 
         return new Promise<Response>((resolve) => {
           inFlight.push({
             rowKeys: body.rows.map((row) => row.rowKey),
+            cells: body.rows.flatMap((row) => row.cells.map((cell) => `${row.rowKey}:${cell.columnCode}`)),
             settle: () =>
               resolve(
                 new Response(
@@ -367,5 +390,45 @@ describe('keyboardPath 409: рефлекторний Ctrl+S не дублює з
 
     await settle(0);
     await waitFor(() => expect(stateOf('r1')).toBe('none'));
+  });
+});
+
+/**
+ * AN-104 / `D1-01`: ІНША комірка того самого рядка, поки перший запит у дорозі.
+ *
+ * ⛔ Доти дедуплікація ловила лише «ту саму комірку з тим самим значенням»: друга
+ * комірка рядка `r1` летіла другим PATCH із тією самою старою версією (кеш підніме
+ * лише відповідь першого), і сховище відповідало `409` на власну щойно збережену
+ * правку — а клієнт показував «рядка більше немає» з єдиною дією «Discard».
+ */
+describe('AN-104: другий запит у рядок, чий PATCH летить, чекає відповіді', () => {
+  it('правка r1.C2 під час PATCH r1.C1 не йде, доки не прийде відповідь, і після неї просить автозбереження', async () => {
+    mockServer();
+    show();
+
+    await screen.findByTestId('revogrid-stub');
+
+    fireEvent.click(screen.getByRole('button', { name: 'edit-r1' }));
+    await pressCtrlS();
+    await waitFor(() => expect(inFlight).toHaveLength(1));
+    expect(inFlight[0]?.cells).toEqual(['r1:C1']);
+
+    fireEvent.click(screen.getByRole('button', { name: 'edit-r1-C2' }));
+    await pressCtrlS();
+
+    // ⛔ Мутація: прибрати `splitByInFlight` у `save()` — тут уже другий PATCH
+    // (r1.C2 зі старою версією `v0`).
+    expect(inFlight).toHaveLength(1);
+
+    const before = scheduled.count;
+    await settle(0);
+
+    // Звільнення запиту будить відкладене: автозбереження заплановано.
+    expect(scheduled.count).toBeGreaterThan(before);
+
+    // І правка справді йде — тепер, коли рядок вільний.
+    await pressCtrlS();
+    await waitFor(() => expect(inFlight).toHaveLength(2));
+    expect(inFlight[1]?.cells).toEqual(['r1:C2']);
   });
 });

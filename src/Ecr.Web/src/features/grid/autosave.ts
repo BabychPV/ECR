@@ -24,6 +24,7 @@ import { queryKeys } from '@/api/queryKeys';
 import type { TableSliceDto } from '@/api/types';
 import { withKnownVersions } from './edits';
 import { rejectionMarksOf } from './saveErrors';
+import { beginInFlight, deferUntilInFlightSettles, splitByInFlight } from './inFlightEdits';
 import {
   applyPatchLocally,
   refreshStaleness,
@@ -377,19 +378,30 @@ async function saveOrphanSlice(
   documentId: number,
   slice: PendingSlice,
 ): Promise<void> {
+  // ⛔ AN-104 (`D1-01`): рядок, чий запит уже летить, вдруге не шлемо — версія в
+  // кеші ще стара, і сховище відповіло б `409` на власну правку. Доти цей шлях
+  // не мав навіть дедуплікації за значенням. Відкладене повторить автозбереження,
+  // щойно звільниться запит у дорозі.
+  const { now: edits, deferred } = splitByInFlight(slice.tableInstanceId, slice.periodKey, slice.edits);
+
+  if (deferred.length > 0) deferUntilInFlightSettles(scheduleAutosave);
+
+  if (edits.length === 0) return;
+
   // ⛔ `B-09`: версія рядка — остання відома кешу, а не та, з якою правку
   // зроблено (`withKnownVersions`): інакше правка, що чекала повтору, їхала б
   // зі старою версією й діставала `409` на власних змінах.
   const request = buildRequest(
     slice.tableInstanceId,
     slice.periodKey,
-    withKnownVersions(slice.edits, cachedSlice(queryClient, slice.tableInstanceId, slice.periodKey)),
+    withKnownVersions(edits, cachedSlice(queryClient, slice.tableInstanceId, slice.periodKey)),
   );
 
   // ⚠ Знімок ТОГО, ЩО ПІШЛО: доки patch летить, у той самий зріз може
   // прийти нова правка з іншої сітки чи з відновленої черги — і підтверджувати
   // «усе, що було в рядку» означало б стерти значення, якого сервер не бачив.
-  const sent = new Map(slice.edits.map((edit) => [cellKey(edit), edit]));
+  const sent = new Map(edits.map((edit) => [cellKey(edit), edit]));
+  const endInFlight = beginInFlight(slice.tableInstanceId, slice.periodKey, edits);
 
   try {
     const response = await patchCells(documentId, request);
@@ -399,12 +411,14 @@ async function saveOrphanSlice(
     discardPendingRows(
       slice.tableInstanceId,
       slice.periodKey,
-      slice.edits.map((edit) => edit.rowKey),
+      edits.map((edit) => edit.rowKey),
       sent,
     );
   } catch (error) {
-    holdRejectedEdits(slice.tableInstanceId, slice.periodKey, error, slice.edits);
+    holdRejectedEdits(slice.tableInstanceId, slice.periodKey, error, edits);
     showApiError(error);
+  } finally {
+    endInFlight();
   }
 }
 

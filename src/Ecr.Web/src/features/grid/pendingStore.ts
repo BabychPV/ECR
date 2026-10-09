@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from 'react';
 import { sameCellValue } from './cellValue';
+import { resetInFlight } from './inFlightEdits';
 import type { PendingEdit } from './useCellPatch';
 
 /**
@@ -524,6 +525,8 @@ export function resetPending(): void {
   openDocumentId = null;
   slices.clear();
   rejections.clear();
+  // AN-104: реєстр «у дорозі» належить тому самому документу.
+  resetInFlight();
   notify();
 }
 

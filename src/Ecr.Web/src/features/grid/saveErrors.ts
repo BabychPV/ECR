@@ -105,12 +105,23 @@ export function rejectionMarksOf(
   if (error.isConflict) {
     // ⚠ Названі розбіжні комірки; не названо жодної з надісланих — увесь пакет
     // (конфлікт версії стосується рядка, і без переліку не відомо, чиєї комірки).
+    const conflicts = error.conflicts as { rowKey?: unknown; columnCode?: unknown }[];
     const conflicted = new Set(
-      (error.conflicts as { rowKey?: unknown; columnCode?: unknown }[]).map(
-        (conflict) => `${String(conflict.rowKey)}:${String(conflict.columnCode)}`,
-      ),
+      conflicts.map((conflict) => `${String(conflict.rowKey)}:${String(conflict.columnCode)}`),
     );
-    const hit = attempted.filter((edit) => conflicted.has(`${edit.rowKey}:${edit.columnCode}`));
+
+    // ⛔ AN-104 (`D1-01`): `*` — розбіжність ЦІЛОГО рядка (комірки сервер не
+    // назвав). Тримаються правки рівно цього рядка, а не весь пакет: правки
+    // інших рядків конфлікт не зачепив, і утримувати їх означало б зупинити
+    // збереження, якому ніщо не заважає.
+    const wholeRows = new Set(
+      conflicts
+        .filter((conflict) => conflict.columnCode === '*')
+        .map((conflict) => String(conflict.rowKey)),
+    );
+    const hit = attempted.filter(
+      (edit) => conflicted.has(`${edit.rowKey}:${edit.columnCode}`) || wholeRows.has(edit.rowKey),
+    );
 
     return (hit.length > 0 ? hit : attempted).map((edit) => ({
       edit,

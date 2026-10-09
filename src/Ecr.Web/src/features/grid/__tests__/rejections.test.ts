@@ -69,6 +69,20 @@ describe('rejectionMarksOf — які відмови тримають правк
     expect(marks[0]?.scope).toBe('cell');
   });
 
+  it('AN-104 / D1-01: 409 «розійшовся весь рядок» (`*`) тримає правки ЦЬОГО рядка, а не весь пакет', () => {
+    const other = edit('r2', 'C1', 5);
+    const marks = rejectionMarksOf(
+      problem(409, 'ECR-CELL-0409', {
+        conflicts: [{ rowKey: 'r1', columnCode: '*', currentVersion: '' }],
+      }),
+      [bad, good, other],
+    );
+
+    // ⛔ Мутація: прибрати `wholeRows` — `*` не збігається з жодною коміркою, і
+    // утримується весь пакет разом із `r2`, якого конфлікт не стосувався.
+    expect(marks.map((mark) => mark.edit)).toEqual([bad, good]);
+  });
+
   it('409 без переліку тримає весь пакет — інакше він пішов би знову й знову', () => {
     expect(rejectionMarksOf(problem(409, 'ECR-CELL-0409'), [bad, good])).toHaveLength(2);
   });

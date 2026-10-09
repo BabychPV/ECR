@@ -1,6 +1,7 @@
 using Ecr.Application.Common;
 using Ecr.Application.Documents;
 using Ecr.Application.Documents.Dto;
+using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
 using Ecr.Domain.Abstractions;
@@ -90,6 +91,65 @@ public sealed class PatchCellsAtomicityTests(SqlServerFixture sql)
         Assert.Equal(0, auditCount);
     }
 
+    /// <summary>
+    /// D1-01 (AN-104): відмова, спіймана сховищем (чужий запис між швидкою
+    /// перевіркою версії й захопленням рядка), несе ЧИННУ версію і справжню
+    /// колонку, а не «рядка немає» (<c>*</c> з порожньою версією).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Детерміновано, без гонки: декоратор сховища комірок сам піднімає
+    /// версію рядка окремим з'єднанням рівно перед реальним
+    /// <c>ApplyAsync</c> — швидкий шлях уже пройдено, захоплення ще ні.
+    /// ⛔ Мутація: прибрати дочитування в <c>PersistChangesAsync</c> →
+    /// <c>columnCode == "*"</c>, <c>currentVersion == ""</c>, тест червоний.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "D1-01")]
+    public async Task Конфлікт_зі_сховища_несе_чинну_версію_і_колонку_а_не_рядок_зник()
+    {
+        var doc = await new TestDocumentBuilder(sql.ConnectionString)
+            .BuildAsync(rowMode: TableRowMode.Dynamic, ct: CancellationToken.None);
+        var realRowKey = await FirstRowKeyAsync(doc);
+        var baseVersion = await RowVersionBase64Async(doc, realRowKey);
+
+        await using var db = CreateContext();
+        var clock = new FixedClock(new DateTime(2026, 2, 1, 9, 0, 0, DateTimeKind.Utc));
+        var bulk = new BulkCellLoader(sql.ConnectionString, 1000);
+
+        var handler = BuildHandler(
+            new BumpingCellStore(new NormalizedCellStore(db), () => BumpRowAsync(doc, realRowKey)),
+            new RowStore(db, bulk, clock), new DocumentStore(db), new AuditWriter(db), new UnitOfWork(db),
+            clock, doc);
+
+        var request = new PatchCellsRequest(doc.TableInstanceId, doc.PeriodKey.Value, "UserEdit",
+            [new PatchRow(realRowKey, baseVersion, [new PatchCell(CodeOf(doc, 2), 555m)])]);
+
+        var thrown = await Assert.ThrowsAsync<ConcurrencyConflictException>(
+            () => handler.HandleAsync(request, CancellationToken.None));
+
+        var current = await RowVersionBase64Async(doc, realRowKey);
+        Assert.NotEqual(baseVersion, current);
+        Assert.Equal("ECR-CELL-0409", thrown.ErrorCode);
+        Assert.Equal("err.ECR-CELL-0409.batchStale", thrown.Details!["messageKey"]);
+        var conflict = Assert.Single(Assert.IsAssignableFrom<IReadOnlyList<CellConflictDto>>(thrown.Details["conflicts"]));
+        Assert.Equal(realRowKey, conflict.RowKey);
+        Assert.Equal(CodeOf(doc, 2), conflict.ColumnCode);
+        Assert.Equal(current, conflict.CurrentVersion);
+    }
+
+    private async Task BumpRowAsync(TestDocument doc, string rowKey)
+    {
+        await using var connection = new SqlConnection(sql.ConnectionString);
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText =
+            $"UPDATE doc.TableRow SET ModifiedAt = SYSUTCDATETIME() WHERE TableInstanceId = {doc.TableInstanceId} " +
+            $"AND RowKey = '{rowKey}'";
+        Assert.Equal(1, await command.ExecuteNonQueryAsync());
+    }
+
     private PatchCellsHandler BuildHandler(
         ICellStore cells, IRowStore rows, IDocumentStore documents, IAuditWriter audit, IUnitOfWork uow,
         IClock clock, TestDocument doc)
@@ -129,6 +189,9 @@ public sealed class PatchCellsAtomicityTests(SqlServerFixture sql)
         access.BuildProfileAsync(1, Arg.Any<CancellationToken>()).Returns(profile);
         access.CanReadDocumentAsync(Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<CancellationToken>())
             .Returns(EditDecision.Allow());
+        // D1-01: на шляху відмови обробник питає межі читання (S6) — «бачить усе».
+        access.ReadScopeAsync(Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<CancellationToken>())
+            .Returns(ReadScopes.Everything(snapshot));
         // ⛔ Рішення на КОЖНУ пару (рядок, колонка) зрізу — саме так поводиться
         // справжній `AccessDecisionService.CanEditSliceAsync` (`:280-295`:
         // подвійний цикл по рядках і колонках, без пропусків). Тут стояв
@@ -270,5 +333,41 @@ public sealed class PatchCellsAtomicityTests(SqlServerFixture sql)
             await inner.ApplyBatchAsync(changes, ct).ConfigureAwait(false);
             throw new InvalidOperationException(FaultMarker);
         }
+    }
+
+    /// <summary>
+    /// Декоратор, що перед реальним <c>ApplyAsync</c> дає «чужому» записові
+    /// підняти версію рядка — D1-01.
+    /// </summary>
+    private sealed class BumpingCellStore(ICellStore inner, Func<Task> before) : ICellStore
+    {
+        public Task<IReadOnlyList<CellRecord>> ReadSliceAsync(long tableInstanceId, CancellationToken ct)
+            => inner.ReadSliceAsync(tableInstanceId, ct);
+
+        public Task<IReadOnlyList<CellRecord>> ReadSliceAsync(
+            long tableInstanceId, PeriodKey periodKey, CancellationToken ct)
+            => inner.ReadSliceAsync(tableInstanceId, periodKey, ct);
+
+        public Task<IReadOnlyDictionary<long, IReadOnlyList<CellRecord>>> ReadSlicesAsync(
+            IReadOnlyList<long> tableInstanceIds, CancellationToken ct)
+            => inner.ReadSlicesAsync(tableInstanceIds, ct);
+
+        public Task<IReadOnlyDictionary<long, IReadOnlyList<CellRecord>>> ReadSlicesAsync(
+            IReadOnlyList<long> tableInstanceIds, PeriodKey periodKey, CancellationToken ct)
+            => inner.ReadSlicesAsync(tableInstanceIds, periodKey, ct);
+
+        public Task<IReadOnlyDictionary<CellAddress, CellValueData>> ReadCellsAsync(
+            IReadOnlyCollection<CellAddress> addresses, CancellationToken ct)
+            => inner.ReadCellsAsync(addresses, ct);
+
+        public async Task<IReadOnlyDictionary<long, string>> ApplyAsync(CellChangeSet changes, CancellationToken ct)
+        {
+            await before().ConfigureAwait(false);
+            return await inner.ApplyAsync(changes, ct).ConfigureAwait(false);
+        }
+
+        public Task<IReadOnlyDictionary<long, IReadOnlyDictionary<long, string>>> ApplyBatchAsync(
+            IReadOnlyCollection<CellChangeSet> changes, CancellationToken ct)
+            => inner.ApplyBatchAsync(changes, ct);
     }
 }

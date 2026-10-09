@@ -18,7 +18,7 @@ import type {
 import { useColumnWidths } from '@/features/preferences/columnWidthsSync';
 import { cellAppearanceClassOf, cellAppearanceOf } from './cellAppearance';
 import { cellFormatOf, withCellFormat } from './conditionalAppearance';
-import { cellDisplay, cellText, editorValueOf, isNumericColumn, sameCellValue } from './cellValue';
+import { cellDisplay, cellText, editorValueOf, isNumericColumn } from './cellValue';
 import { planPaste, type PasteRejection } from './clipboard';
 import { parseClipboard, toClipboard } from './tsvClipboard';
 import { captureEdit, coerce, revertsToSaved, valueOf, withKnownVersions } from './edits';
@@ -52,6 +52,7 @@ import {
   type PendingEdit,
 } from './useCellPatch';
 import { holdRejectedEdits, registerSliceSaver, scheduleAutosave } from './autosave';
+import { beginInFlight, deferUntilInFlightSettles, splitByInFlight } from './inFlightEdits';
 import { GridAriaPlugin } from './gridAria';
 import { mergePatchNotices, PatchNoticesAlert, type PatchNotice } from './patchNotices';
 // ⚠ Ключ комірки СХОВИЩА під власним іменем: у цьому файлі вже є `cellKey`
@@ -458,7 +459,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
   );
 
   /**
-   * Комірки, чий PATCH зараз У ДОРОЗІ — з тим самим значенням, яке летить.
+   * Запити У ДОРОЗІ і чому другий запит у той самий рядок не шлеться (реєстр — `inFlightEdits.ts`).
    *
    * ⛔ `keyboardPath.spec.ts` (`ФВ-14.16`), крок 6: Ctrl+V шле патч НЕГАЙНО
    * (`saveThroughStore`), а рефлекторний Ctrl+S одразу за ним (`ФВ-4.1`) кличе
@@ -476,8 +477,16 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
    * не заборона другого шляху, а дедуплікація САМЕ такого збігу: другий запит
    * не додає серверу нічого нового, і не слати його дешевше й безпечніше, ніж
    * ловити його ж таки `409`.
+   *
+   * ✎ AN-104 (`D1-01`): дедуплікації «та сама комірка, те саме значення» було
+   * мало — ІНША комірка (або інше значення) того самого рядка, поки перший
+   * запит летить, ішла з тією самою старою версією, і сховище відповідало
+   * `409` на власну щойно збережену правку. Тепер реєстр «у дорозі» —
+   * модульний (`inFlightEdits.ts`, його бачать і безхазяйний зріз, і маячок
+   * закриття вкладки), а рядок, чий запит летить, вдруге не шлеться зовсім:
+   * його правки чекають відповіді й ідуть уже з новою версією. Збіг «та сама
+   * комірка, те саме значення» — окремий випадок цього правила.
    */
-  const inFlightEdits = useRef<Map<string, PendingEdit>>(new Map());
 
   const save = useCallback(
     async (requested: PendingEdit[], versionOverrides?: ReadonlyMap<string, string>) => {
@@ -492,24 +501,22 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         versionOverrides,
       );
 
-      // ⛔ Комірка з тим самим значенням, що вже летить, — не дублюється (див.
-      // коментар `inFlightEdits` вище). Інше значення тієї самої комірки (людина
-      // встигла виправити, доки перший патч летів) дублюванням не вважається —
-      // це вже нова правка, і саме її сервер має побачити.
-      const inFlight = inFlightEdits.current;
-      const edits = allEdits.filter((edit) => {
-        const already = inFlight.get(pendingCellKey(edit));
+      // ⛔ AN-104 (`D1-01`): рядок, чий запит уже летить, — не шлемо вдруге зі
+      // старою версією (див. коментар вище). Відкладені правки лишаються в
+      // сховищі й повторюються автозбереженням, щойно звільниться запит у дорозі.
+      // «Keep mine» (`versionOverrides`) несе версію сервера — його не відкладаємо.
+      const { now: edits, deferred } = splitByInFlight(
+        tableInstanceId,
+        periodKey,
+        allEdits,
+        versionOverrides,
+      );
 
-        return (
-          already === undefined ||
-          already.isEmpty !== edit.isEmpty ||
-          !sameCellValue(already.value, edit.value)
-        );
-      });
+      if (deferred.length > 0) deferUntilInFlightSettles(scheduleAutosave);
 
       if (edits.length === 0) return;
 
-      for (const edit of edits) inFlight.set(pendingCellKey(edit), edit);
+      const endInFlight = beginInFlight(tableInstanceId, periodKey, edits);
 
       // ⚠ Рядки ЦЬОГО патчу — саме їх обов'язкові-вхідні позначки заміняються
       // нижче. Позначки інших рядків (з попереднього, ще не повтореного
@@ -620,14 +627,9 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         // давав ЛИШЕ необроблене знеструмлення проміса в консолі (саме
         // симптом, який документує Stage 1), без жодного адресата.
       } finally {
-        // ⚠ Знімається ЛИШЕ свій запис: поки цей патч летів, та сама комірка
-        // могла дістати ІНШЕ значення й полетіти окремим, новішим патчем
-        // (легальний випадок, не дедуплікований вище) — його запис у
-        // `inFlightEdits` чужий цьому виклику, і знімати його тут не можна.
-        for (const edit of edits) {
-          const key = pendingCellKey(edit);
-          if (inFlight.get(key) === edit) inFlight.delete(key);
-        }
+        // ⚠ Знімається ЛИШЕ свій запис (`beginInFlight`), і це будить відкладені
+        // правки рядків цього запиту — тепер версія в кеші вже нова.
+        endInFlight();
       }
     },
     [patch, periodKey, tableInstanceId, queryClient],
