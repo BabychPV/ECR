@@ -1,6 +1,9 @@
 // tests/Ecr.Infrastructure.Tests/Reporting/ReportSnapshotBuildMomentTests.cs
 using System.Data.Common;
+using Ecr.Domain.Entities.Documents;
 using Ecr.Domain.Entities.Reporting;
+using Ecr.Domain.Entities.Workflow;
+using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
 using Ecr.Infrastructure.Persistence;
 using Ecr.Infrastructure.Reporting;
@@ -75,6 +78,54 @@ public sealed class ReportSnapshotBuildMomentTests(SqlServerFixture sql)
         Assert.True(
             Assert.Single(list, s => s.Id == snapshotId).IsStale,
             "Прогін, що став актуальним посеред агрегації, мав зістарити зріз (ФВ-10.5).");
+    }
+
+    /// <summary>
+    /// R6-X7 / X7-01: зріз, застарілий від народження, статусу даних не успадковує.
+    /// Мутація: прибрати перевірку <c>IsStaleAsync</c> у <c>BuildAsync</c> — зріз
+    /// народжується <c>Submitted</c> (тобто заморожений) зі старими числами.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-9.17")]
+    [Trait("Requirement", "ФВ-10.5")]
+    public async Task Застарілий_від_народження_зріз_за_поданим_періодом_не_народжується_поданим()
+    {
+        var chain = new TestDocumentBuilder(sql.ConnectionString);
+        var document = await chain.BuildAsync();
+        await SubmitPeriodAsync(chain, document);
+        var versionId = await PublishedVersionAsync(chain);
+
+        var clock = new TestClock(Start);
+        var switcher = new RunSwitchOnAggregate(
+            sql.ConnectionString, document.ProjectId, document.PeriodKey.Value, clock,
+            finishedAt: Start.AddMinutes(30), clockAfter: Start.AddHours(1));
+
+        await using var db = new EcrDbContext(new DbContextOptionsBuilder<EcrDbContext>()
+            .UseSqlServer(sql.ConnectionString, o => o.MigrationsHistoryTable("__EFMigrationsHistory", "dbo"))
+            .AddInterceptors(switcher)
+            .Options);
+
+        using var memory = new MemoryCache(new MemoryCacheOptions());
+        var snapshotId = await new ReportSnapshotBuilder(db, clock, memory).BuildAsync(
+            versionId, document.ProjectId, document.PeriodKey, parametersJson: null, CancellationToken.None);
+
+        Assert.NotNull(switcher.RunId);
+        var stored = await db.ReportSnapshots.AsNoTracking().SingleAsync(s => s.Id == snapshotId);
+        Assert.Equal(SnapshotStatus.Draft, stored.Status);
+    }
+
+    /// <summary>Єдиний аркуш складу документа — поданий: статус даних періоду <c>Submitted</c>.</summary>
+    internal static async Task SubmitPeriodAsync(TestDocumentBuilder chain, TestDocument document)
+    {
+        await using var db = chain.CreateContext();
+        db.DocumentSheets.Add(new DocumentSheet(document.DocumentId, document.SheetDefId));
+        var state = new ApprovalState(
+            document.DocumentId, document.SheetDefId, document.PeriodKey.Value);
+        state.Submit(userId: 5, Start);
+        db.ApprovalStates.Add(state);
+        await db.SaveChangesAsync();
     }
 
     /// <summary>Опублікована версія звіту з двома числовими колонками.</summary>

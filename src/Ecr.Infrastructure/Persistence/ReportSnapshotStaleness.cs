@@ -1,4 +1,5 @@
 using Ecr.Domain.Entities.Calculations;
+using Microsoft.EntityFrameworkCore;
 
 namespace Ecr.Infrastructure.Persistence;
 
@@ -56,11 +57,7 @@ internal static class ReportSnapshotStaleness
     {
         ArgumentNullException.ThrowIfNull(db);
 
-        var runs = db.CalculationRuns.Where(r =>
-            r.FinishedAt != null
-            && (r.Status == CalculationRun.CurrentStatus
-                || (r.Status == CalculationRun.SupersededStatus && r.ErrorMessage == null))
-            && (exceptRunId == null || r.Id != exceptRunId));
+        var runs = StalingRuns(db, exceptRunId);
 
         return db.ReportSnapshots
             .Where(s => runs.Any(r =>
@@ -72,4 +69,40 @@ internal static class ReportSnapshotStaleness
                 && r.FinishedAt > s.BuiltAt))
             .Select(s => s.Id);
     }
+
+    /// <summary>
+    /// Чи застарілий був би зріз проєкту й періоду, побудований станом на
+    /// <paramref name="builtAt"/>, — для зрізу, якого в базі ще немає.
+    /// </summary>
+    /// <param name="db">Контекст.</param>
+    /// <param name="projectId">Проєкт зрізу.</param>
+    /// <param name="periodKey">Період зрізу; <c>null</c> — увесь рік.</param>
+    /// <param name="builtAt">Момент «побудовано станом на» (до читання джерела, X7-04).</param>
+    /// <param name="ct">Скасування.</param>
+    /// <remarks>
+    /// ⛔ R6-X7 / X7-01: умова — та сама, що в <see cref="StaleSnapshotIds"/> (ті самі
+    /// прогони, той самий збіг проєкту й періоду, <c>FinishedAt &gt; BuiltAt</c>), лише
+    /// для значень, а не для рядка <c>rpt.ReportSnapshot</c>. Будівникові вона потрібна
+    /// ДО запису зрізу: зріз, застарілий від народження, не має права отримати статус
+    /// <c>Approved</c>/<c>Submitted</c> і піти в <c>rpt.v_*</c> зі старими числами.
+    /// </remarks>
+    public static Task<bool> IsStaleAsync(
+        EcrDbContext db, int projectId, int? periodKey, DateTime builtAt, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+
+        return StalingRuns(db, exceptRunId: null).AnyAsync(
+            r => r.ProjectId == projectId
+                 && (periodKey == null || r.PeriodKey == null || r.PeriodKey == periodKey)
+                 && r.FinishedAt > builtAt,
+            ct);
+    }
+
+    /// <summary>Прогони, що старять зріз: ті, що були актуальними (див. remarks класу).</summary>
+    private static IQueryable<CalculationRun> StalingRuns(EcrDbContext db, long? exceptRunId)
+        => db.CalculationRuns.Where(r =>
+            r.FinishedAt != null
+            && (r.Status == CalculationRun.CurrentStatus
+                || (r.Status == CalculationRun.SupersededStatus && r.ErrorMessage == null))
+            && (exceptRunId == null || r.Id != exceptRunId));
 }

@@ -20,6 +20,11 @@ public interface IReportSnapshotBuilder
     public Task MarkSubmittedAsync(long snapshotId, int userId, CancellationToken ct);
 
     /// <summary>Перераховує статус зрізу після зміни стану затвердження аркушів.</summary>
+    /// <remarks>
+    /// ⛔ R6-X7 / X7-01: застарілий зріз (ФВ-10.5) отримує <c>Draft</c>, а не статус
+    /// даних — його числа старші за актуальний прогін, і в <c>rpt.v_*</c> як
+    /// затверджені чи подані (і під заморожування) вони йти не мають.
+    /// </remarks>
     public Task<SnapshotStatus> RefreshStatusAsync(long snapshotId, CancellationToken ct);
 
     /// <summary>

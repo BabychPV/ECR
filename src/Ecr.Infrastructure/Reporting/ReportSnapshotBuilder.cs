@@ -167,6 +167,18 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock, IMemory
                 await LockSlotAsync(projectId, periodKey?.Value, innerCt).ConfigureAwait(false);
 
                 var status = await StatusOfDataAsync(projectId, periodKey, innerCt).ConfigureAwait(false);
+
+                // ⛔ R6-X7 / X7-01: зріз, застарілий уже від народження (прогін перемкнувся,
+                // поки читалося джерело, X7-04), статусу даних не успадковує — те саме
+                // правило, що в `RefreshStatusAsync`: старі числа не йдуть у `rpt.v_*` як
+                // затверджені чи подані.
+                if (status != SnapshotStatus.Draft
+                    && await ReportSnapshotStaleness.IsStaleAsync(db, projectId, periodKey?.Value, builtAt, innerCt)
+                        .ConfigureAwait(false))
+                {
+                    status = SnapshotStatus.Draft;
+                }
+
                 snapshot.RefreshStatus(status);
 
                 await SwitchCurrentAsync(snapshot, innerCt).ConfigureAwait(false);
@@ -272,6 +284,24 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock, IMemory
             snapshot.ProjectId,
             snapshot.PeriodKey is { } key ? new PeriodKey(key) : null,
             ct).ConfigureAwait(false);
+
+        // ⛔ R6-X7 / X7-01: ЗАСТАРІЛИЙ зріз (ФВ-10.5 — після його побудови актуальним
+        // став прогін його проєкту й періоду) статусу даних НЕ успадковує: він `Draft`.
+        // Статус зрізу — це «що бачить регулятор» (`rpt.v_*` бере лише `Approved`/
+        // `Submitted`), а числа застарілого зрізу старші за затверджені дані. Раніше
+        // подання останнього аркуша давало такому зрізу `Submitted` і морозило його
+        // (`ReportSnapshotSync.MarkSubmittedAsync` морозить лише на `Approved`/
+        // `Submitted`) — держава отримувала старі числа з позначкою «подано», а
+        // поданий зріз уже не виправити. `Draft` прибирає його з `rpt.v_*` і не дає
+        // заморозити; правильні числа дає НОВА побудова — її статус успадковується від
+        // даних, і вона не застаріла.
+        if (status != SnapshotStatus.Draft
+            && await ReportSnapshotStaleness.StaleSnapshotIds(db)
+                .AnyAsync(id => id == snapshot.Id, ct)
+                .ConfigureAwait(false))
+        {
+            status = SnapshotStatus.Draft;
+        }
 
         snapshot.RefreshStatus(status);
         await db.SaveChangesAsync(ct).ConfigureAwait(false);

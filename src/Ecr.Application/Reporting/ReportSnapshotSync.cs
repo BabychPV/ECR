@@ -65,6 +65,12 @@ public sealed class ReportSnapshotSync(IReportSnapshotBuilder snapshots, IDocume
     /// Це навмисно: подана форма вже пішла регуляторові, і зріз лишається
     /// доказом того, що саме він бачив. Повторне подання дає НОВИЙ зріз
     /// (ФВ-9.17).
+    ///
+    /// ⛔ R6-X7 / X7-01: ЗАСТАРІЛИЙ зріз (побудований до останнього актуального
+    /// прогону) не морозиться: <c>RefreshStatusAsync</c> віддає для нього <c>Draft</c>.
+    /// Інакше регулятор отримав би старі числа з позначкою «подано», а поданий зріз
+    /// уже не виправити. Свіжі числа дає нова побудова — за поданим періодом вона
+    /// народжується <c>Submitted</c> зі стану даних (D-65).
     /// </remarks>
     public async Task MarkSubmittedAsync(
         long documentId, PeriodKey periodKey, int userId, CancellationToken ct)

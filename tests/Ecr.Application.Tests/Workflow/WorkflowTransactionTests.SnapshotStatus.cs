@@ -146,6 +146,82 @@ public sealed partial class WorkflowTransactionTests
         Assert.Equal(SnapshotStatus.Draft, (await ReportSnapshotAsync(world.SnapshotId).ConfigureAwait(true)).Status);
     }
 
+    // ─────────────────────────── R6-X7 / X7-01 ───────────────────────────
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-9.17")]
+    [Trait("Requirement", "ФВ-10.5")]
+    public async Task X7_01_Подання_останнього_аркуша_не_морозить_застарілий_зріз()
+    {
+        // Без фіксу: зріз побудовано ДО актуального прогону (застарілий), подання
+        // останнього аркуша давало йому `Submitted` і `MarkSubmitted` — старі числа йшли в
+        // `rpt.v_*` з позначкою «подано», і виправити поданий зріз уже неможливо.
+        var world = await ArrangeSnapshotAsync(sheet: null, other: DocumentStatus.Submitted).ConfigureAwait(true);
+        await CurrentRunAfterSnapshotAsync(world.World.ProjectId).ConfigureAwait(true);
+
+        using var cache = new MemoryCache(new MemoryCacheOptions());
+        await using (var db = CreateContext())
+        {
+            await Submit(world.World, db, Access(), reportSnapshots: Builder(db, cache))
+                .HandleAsync(world.World.DocumentId, world.World.SheetDefId, PeriodKeyValue, CancellationToken.None)
+                .ConfigureAwait(true);
+        }
+
+        // Подання само відбулося — заморожування застарілого зрізу ні.
+        Assert.Equal(DocumentStatus.Submitted, await StatusAsync(world.World).ConfigureAwait(true));
+        var snapshot = await ReportSnapshotAsync(world.SnapshotId).ConfigureAwait(true);
+        Assert.Equal(SnapshotStatus.Draft, snapshot.Status);
+        Assert.Null(snapshot.BuiltByUserId);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "D-65")]
+    [Trait("Requirement", "ФВ-10.5")]
+    public async Task X7_01_Затвердження_не_дає_застарілому_зрізу_Approved()
+    {
+        // Без фіксу: застарілий зріз отримував `Approved` і йшов у `rpt.v_*` зі старими числами.
+        var world = await ArrangeSnapshotAsync(DocumentStatus.Submitted, DocumentStatus.Approved).ConfigureAwait(true);
+        await CurrentRunAfterSnapshotAsync(world.World.ProjectId).ConfigureAwait(true);
+
+        using var cache = new MemoryCache(new MemoryCacheOptions());
+        await using (var db = CreateContext())
+        {
+            await ApproveWith(world.World, db, AccessAt(step: null), Builder(db, cache))
+                .HandleAsync(
+                    world.World.DocumentId, world.World.SheetDefId, PeriodKeyValue, approved: true, reason: null,
+                    CancellationToken.None)
+                .ConfigureAwait(true);
+        }
+
+        Assert.Equal(DocumentStatus.Approved, await StatusAsync(world.World).ConfigureAwait(true));
+        Assert.Equal(SnapshotStatus.Draft, (await ReportSnapshotAsync(world.SnapshotId).ConfigureAwait(true)).Status);
+    }
+
+    /// <summary>
+    /// Актуальний прогін проєкту за період світу, що став актуальним ПІСЛЯ побудови зрізу
+    /// (<c>BuiltAt = Now</c>) — тобто зріз застарілий (ФВ-10.5).
+    /// </summary>
+    private async Task CurrentRunAfterSnapshotAsync(int projectId)
+    {
+        await using var connection = new SqlConnection(sql.ConnectionString);
+        await connection.OpenAsync().ConfigureAwait(false);
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            INSERT calc.CalculationRun (ProjectId, PeriodKey, Status, StartedAt, FinishedAt, ErrorMessage, DocumentId)
+            VALUES (@p, @k, N'Current', @started, @finished, NULL, NULL);
+            """;
+        command.Parameters.AddWithValue("@p", projectId);
+        command.Parameters.AddWithValue("@k", PeriodKeyValue);
+        command.Parameters.AddWithValue("@started", Now.AddMinutes(-5));
+        command.Parameters.AddWithValue("@finished", Now.AddMinutes(1));
+        Assert.Equal(1, await command.ExecuteNonQueryAsync().ConfigureAwait(false));
+    }
+
     // ─────────────────────────── W1-02 ───────────────────────────
 
     [Fact]
