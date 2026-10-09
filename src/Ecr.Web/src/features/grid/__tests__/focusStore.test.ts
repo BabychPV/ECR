@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { focusedCell, publishFocus, resetFocus, subscribeFocus } from '../focusStore';
+import { focusedCell, lastFocusedSlice, publishFocus, resetFocus, subscribeFocus } from '../focusStore';
 
 /**
  * Сховище комірки фокуса (`UI-08`).
@@ -86,5 +86,19 @@ describe('focusStore', () => {
     publishFocus(1, 202609, { rowIndex: 2, columnIndex: 2 });
 
     expect(focusedCell(1, 202609)).toBe(focusedCell(1, 202609));
+  });
+
+  it('N3-02: «останній зріз» — той, де курсор ставили останнім, навіть на ту саму комірку', () => {
+    publishFocus(1, 202609, { rowIndex: 0, columnIndex: 0 });
+    publishFocus(2, 202609, { rowIndex: 0, columnIndex: 0 });
+    expect(lastFocusedSlice()).toBe('2:202609');
+
+    // Клік назад у першу сітку на ту саму комірку: координати не змінились, зріз — так.
+    publishFocus(1, 202609, { rowIndex: 0, columnIndex: 0 });
+    expect(lastFocusedSlice()).toBe('1:202609');
+
+    // Скидання фокуса (клік в інспектор) «останнього» не міняє.
+    publishFocus(1, 202609, null);
+    expect(lastFocusedSlice()).toBe('1:202609');
   });
 });

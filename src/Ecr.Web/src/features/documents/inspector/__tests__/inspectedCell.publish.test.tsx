@@ -83,4 +83,37 @@ describe('комірка для інспектора', () => {
     act(() => publishFocus(7, 202609, null));
     expect(inspectedCell()?.columnDefId).toBe(42);
   });
+
+  it('N3-02: публікує лише сітка, у якій курсор ставили останнім', () => {
+    // Дві змонтовані сітки; після перерахунку обидві перемальовуються, і «остання
+    // за порядком малювання» не має перебивати «останню за фокусом».
+    const mount = (tableInstanceId: number, label: string) => (
+      <GridFormulaBar
+        key={tableInstanceId}
+        tableInstanceId={tableInstanceId}
+        periodKey={202609}
+        slice={{ ...Slice, tableInstanceId }}
+        columns={[{ prop: 'C1' }, { prop: 'F1' }]}
+        rows={[{ __rowKey: 'r1', __rowLabel: label, C1: '5', F1: '12.5' }]}
+        labelProp="__rowLabel"
+      />
+    );
+    const tree = (
+      <MantineProvider>
+        {mount(7, 'Diesel')}
+        {mount(8, 'Hidden')}
+      </MantineProvider>
+    );
+    const { rerender } = render(tree);
+
+    act(() => publishFocus(8, 202609, { rowIndex: 0, columnIndex: 0 }));
+    act(() => publishFocus(7, 202609, { rowIndex: 0, columnIndex: 0 }));
+    expect(inspectedCell()?.tableInstanceId).toBe(7);
+
+    // Перерахунок: обидві сітки перемальовуються.
+    rerender(<MantineProvider>{mount(7, 'Diesel')}{mount(8, 'Hidden')}</MantineProvider>);
+
+    expect(inspectedCell()?.tableInstanceId).toBe(7);
+    expect(inspectedCell()?.rowLabel).toBe('Diesel');
+  });
 });

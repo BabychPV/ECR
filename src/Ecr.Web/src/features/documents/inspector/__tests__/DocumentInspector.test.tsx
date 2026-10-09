@@ -7,7 +7,7 @@ import { MemoryRouter, useLocation } from 'react-router-dom';
 import type { DocumentTableDto, ValidationFindingDto } from '@/api/types';
 import { testTheme } from '@/test/render';
 import { DocumentInspector } from '../DocumentInspector';
-import { clearInspectedCell, publishInspectedCell, type InspectedCell } from '../inspectedCell';
+import { clearInspectedCell, inspectedCell, publishInspectedCell, type InspectedCell } from '../inspectedCell';
 
 /**
  * Інспектор документа (`UI-25`): закритий за замовчуванням, «K issues»
@@ -109,7 +109,9 @@ function Harness({
   messages = Findings,
   onSelect = () => {},
   seq,
+  documentId = 1,
 }: {
+  documentId?: number;
   entry?: string;
   messages?: ValidationFindingDto[] | null;
   onSelect?: (finding: ValidationFindingDto) => void;
@@ -124,7 +126,7 @@ function Harness({
           <LocationProbe />
           <button type="button">Validate</button>
           <DocumentInspector
-            documentId={1}
+            documentId={documentId}
             periodKey={202609}
             tables={VisibleTables}
             messages={messages}
@@ -252,6 +254,17 @@ describe('інспектор документа (UI-25)', () => {
     expect(url).toContain('documentId=1');
     expect(url).toContain('rowKey=R4');
     expect(url).toContain('columnDefId=33');
+  });
+
+  it('N3-02: зміна документа скидає комірку під курсором', () => {
+    vi.stubGlobal('fetch', fetchMock);
+    const { rerender } = render(<Harness documentId={1} />);
+    act(() => publishInspectedCell(Cell));
+    expect(inspectedCell()).not.toBeNull();
+
+    rerender(<Harness documentId={2} />);
+
+    expect(inspectedCell()).toBeNull();
   });
 
   it('комірка іншого документа/періоду не показується', async () => {

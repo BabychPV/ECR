@@ -12,7 +12,7 @@ import { StatusBadge } from '@/shared/ui/StatusBadge';
 import { Timestamp } from '@/shared/ui/Timestamp';
 import { useUrlState } from '@/shared/ui/useUrlState';
 import { ruleLabel } from '@/features/documents/ruleLabel';
-import { useInspectedCell, type InspectedCell } from './inspectedCell';
+import { clearInspectedCell, useInspectedCell, type InspectedCell } from './inspectedCell';
 import {
   addressChip,
   countIssues,
@@ -142,6 +142,15 @@ export function DocumentInspector({
       close(true);
     }
   };
+
+  // ⛔ N3-02: комірка під курсором належить ДОКУМЕНТУ. Зміна документа (і закриття
+  // сторінки) скидає її — інакше вкладки History/Info показували б комірку попереднього.
+  useEffect(
+    () => () => {
+      clearInspectedCell();
+    },
+    [documentId],
+  );
 
   const cell = useInspectedCell();
   const cellTable =
