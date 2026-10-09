@@ -77,6 +77,18 @@ Api й воркер на **одному** хості — різні ролі й 
 ⛔ **Секрети (рядок підключення, паролі, `Secrets:*`) задаються лише змінними
 оточення служби**, ніколи у файлі.
 
+⛔ ✎ 2026-10-09 (S2-01): ключ служби за стандартним ACL читає **кожен локальний
+користувач** (`BUILTIN\Users`). `deploy-ecr.ps1` закриває ключі `EcrApi` і `EcrWorker`
+(лише SYSTEM і Administrators; `EcrWorker` — ще читання обліковому запису служби), щойно
+в їхньому `Environment` є `ECR_ConnectionStrings__*` чи `ECR_Secrets__*`. Секрет, дописаний
+вручну на ключ, який скрипт ще не закривав, лишається видимим — після ручного запису
+`ECR_Secrets__*` повторіть `deploy-ecr.ps1` (`-SkipSchema`) або перевірте ACL:
+
+```powershell
+(Get-Acl HKLM:\SYSTEM\CurrentControlSet\Services\EcrApi).Access |
+    Where-Object { $_.IdentityReference -match 'Users' }   # має бути порожньо
+```
+
 ### 2.1. Ключі
 
 Колонка «Дефолт» — значення з `appsettings.json`. Запасний дефолт у коді

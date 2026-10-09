@@ -530,6 +530,19 @@ function Test-ConnectionStringHasPassword {
     return $false
 }
 
+# ⛔ S2-01 (аудит 2026-10-09b): чи несе Environment служби секрет — рядок
+# підключення (ECR_ConnectionStrings__*) чи канал секретів (ECR_Secrets__*,
+# ConfigurationSecretProvider; runbook §2). Чиста функція над REG_MULTI_SZ-записами
+# `ІМ'Я=значення`; ім'я без урахування регістру (як змінні оточення Windows),
+# порожнє значення — не секрет.
+function Test-ServiceEnvironmentHasSecret {
+    param([string[]] $Entries)
+    foreach ($entry in @($Entries)) {
+        if ("$entry" -match '^ECR_(Secrets|ConnectionStrings)__[^=]+=.') { return $true }
+    }
+    return $false
+}
+
 # ⛔ N5-02 (аудит 2026-10-09): власник теки зберігає право WRITE_DAC попри будь-який
 # DACL. Якщо %ProgramData%\ECR (або config/logs) ЗАЗДАЛЕГІДЬ створив локальний
 # користувач, MSI виставить захищений DACL, але власником лишиться він — і зможе
@@ -1725,16 +1738,7 @@ else {
     if (Test-ConnectionStringHasPassword (ConvertFrom-SecureStringPlain $ConnectionString)) {
         Write-Host ("⚠ Рядок підключення містить пароль SQL-логіна (D-282): служба працює під цим логіном. " +
             "Логін DBA дає застосунку DDL-права (D-66) — рекомендовано Windows/gMSA.") -ForegroundColor Yellow
-        foreach ($service in @('EcrApi') + @(if ($workerEnabled) { 'EcrWorker' })) {
-            if ($PSCmdlet.ShouldProcess("HKLM:\SYSTEM\CurrentControlSet\Services\$service",
-                    'закрити ключ служби від BUILTIN\Users (пароль у Environment)')) {
-                # N5-04: API під -ServiceAccount читає ключ EcrWorker (RecalculationWorkerProbe) — лише його.
-                $readAccount = if ($service -eq 'EcrWorker') { $ServiceAccount } else { $null }
-                Protect-ServiceRegistryKey -ServiceName $service -ReadAccount $readAccount
-                Write-Host ("Ключ служби ${service}: читання лише SYSTEM і Administrators" +
-                    $(if ($readAccount) { " (і $readAccount — перевірка стану служби з Api)." } else { '.' })) -ForegroundColor Green
-            }
-        }
+        # Ключ служби закривається НЕ тут, а після всіх записів Environment (кінець кроку 5, S2-01).
     }
 }
 
@@ -1873,6 +1877,31 @@ foreach ($name in $telemetryDecision.Set.Keys) {
 }
 Write-Host ("Перерахунок: " + $(if ($workerEnabled) { 'служба EcrWorker (Jobs:Queue:Mode = Database, Executor = Worker).' }
         else { 'у процесі EcrApi (Executor = InProcess).' })) -ForegroundColor Green
+
+# ── ⛔ S2-01 (аудит 2026-10-09b): ключ служби закривається від BUILTIN\Users
+# ЗАВЖДИ, коли її Environment несе секрет, — а не лише коли в рядку підключення
+# є пароль SQL (L10-04/D-282). Під Windows/gMSA пароля в рядку немає, але
+# runbook §2 велить класти туди ж ECR_Secrets__* (PI, SMTP, джерела), а ключі
+# служб за стандартним ACL читає кожен локальний користувач. Після ВСІХ записів
+# Environment (кроки 4–5), до старту: -ConnectionString крок 4 пише в Environment
+# кожної служби нижче, решту секретів адміністратор міг покласти раніше.
+foreach ($service in @('EcrApi') + @(if ($workerEnabled) { 'EcrWorker' })) {
+    $envProp = Get-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Services\$service" -Name Environment -ErrorAction SilentlyContinue
+    $envEntries = if ($envProp) { @($envProp.Environment) } else { @() }
+    if (-not ($ConnectionString -or (Test-ServiceEnvironmentHasSecret -Entries $envEntries))) {
+        Write-Host ("Ключ служби ${service}: секретів (ECR_ConnectionStrings__*, ECR_Secrets__*) в Environment немає — ACL не змінюю. " +
+            "Після ручного запису секрету повторіть deploy-ecr.ps1 (runbook §2).") -ForegroundColor DarkGray
+        continue
+    }
+    if ($PSCmdlet.ShouldProcess("HKLM:\SYSTEM\CurrentControlSet\Services\$service",
+            'закрити ключ служби від BUILTIN\Users (секрети в Environment)')) {
+        # N5-04: API під -ServiceAccount читає ключ EcrWorker (RecalculationWorkerProbe) — лише його.
+        $readAccount = if ($service -eq 'EcrWorker') { $ServiceAccount } else { $null }
+        Protect-ServiceRegistryKey -ServiceName $service -ReadAccount $readAccount
+        Write-Host ("Ключ служби ${service}: читання лише SYSTEM і Administrators" +
+            $(if ($readAccount) { " (і $readAccount — перевірка стану служби з Api)." } else { '.' })) -ForegroundColor Green
+    }
+}
 
 # ---------------------------------------------------------------------
 Write-Step "Крок 6/7: старт служби"
