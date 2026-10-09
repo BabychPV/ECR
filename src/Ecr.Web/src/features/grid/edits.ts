@@ -1,5 +1,5 @@
 import type { RowDto, TableSliceDto } from '@/api/types';
-import { sameCellValue, sameDateValue } from './cellValue';
+import { isTextColumnType, sameColumnValue } from './cellValue';
 import { parseNumber } from './clipboard';
 import { decide } from './permissions';
 import { columnIndexOf, rowIndexOf } from './rowIndex';
@@ -81,8 +81,10 @@ export function captureEdit(
   // ⛔ Порівняння саме ЗНАЧЕННЯ (`sameCellValue`), не тексту: `'5'` і
   // `'5.0000000000'` — той самий `decimal`, а текстове порівняння назвало б їх
   // різними й лишило б комірку брудною назавжди.
-  const same = column.dataType === 'Date' ? sameDateValue(after, before) : sameCellValue(after, before);
-  if (same) return null;
+  //
+  // ⛔ `G1-06`: рівність — за типом колонки (`sameColumnValue`): у текстовій
+  // `0012` і `12` — різні коди, а не одне число.
+  if (sameColumnValue(column.dataType, after, before)) return null;
 
   // AN-39/L8-15 (Q10=A / D-283): `defaultValue` порожньої комірки лише ПОКАЗУЄТЬСЯ. Клік повз
   // редактор без вводу повертає в `afteredit` саме його - це не введення. Явний ввід
@@ -97,6 +99,7 @@ export function captureEdit(
       isEmpty: false,
       baseVersion: row.rowVersion,
       before,
+      ...(isTextColumnType(column.dataType) ? { text: true } : {}),
     },
     step: { rowKey: signal.rowKey, columnCode: signal.columnCode, before, after },
     columnHeader: column.header,
@@ -113,7 +116,7 @@ function echoesDefault(
 
   const fallback = coerce(String(column.defaultValue), column.dataType);
 
-  return column.dataType === 'Date' ? sameDateValue(after, fallback) : sameCellValue(after, fallback);
+  return sameColumnValue(column.dataType, after, fallback);
 }
 
 /**
@@ -140,7 +143,7 @@ export function revertsToSaved(
   const after = coerce(signal.raw, column.dataType);
   const before = row.cells[signal.columnCode] ?? null;
 
-  return column.dataType === 'Date' ? sameDateValue(after, before) : sameCellValue(after, before);
+  return sameColumnValue(column.dataType, after, before);
 }
 
 /**
@@ -173,8 +176,7 @@ export function captureOverInFlight(
 
   const after = coerce(signal.raw, column.dataType);
   const inFlight = flying.isEmpty ? null : flying.value;
-  const same = column.dataType === 'Date' ? sameDateValue(after, inFlight) : sameCellValue(after, inFlight);
-  if (same) return null;
+  if (sameColumnValue(column.dataType, after, inFlight)) return null;
 
   return {
     pending: {
@@ -184,6 +186,7 @@ export function captureOverInFlight(
       isEmpty: false,
       baseVersion: row.rowVersion,
       before: inFlight,
+      ...(isTextColumnType(column.dataType) ? { text: true } : {}),
     },
     step: { rowKey: signal.rowKey, columnCode: signal.columnCode, before: inFlight, after },
     columnHeader: column.header,
@@ -258,7 +261,7 @@ export function withKnownVersions(
 function sameSavedValue(slice: TableSliceDto | undefined, columnCode: string, cached: unknown, before: unknown): boolean {
   const dataType = slice === undefined ? undefined : columnIndexOf(slice).get(columnCode)?.dataType;
 
-  return dataType === 'Date' ? sameDateValue(cached, before) : sameCellValue(cached, before);
+  return sameColumnValue(dataType, cached, before);
 }
 
 /**

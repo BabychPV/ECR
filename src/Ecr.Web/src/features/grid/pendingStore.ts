@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react';
-import { sameCellValue } from './cellValue';
+import { sameColumnValue } from './cellValue';
 import { resetInFlight } from './inFlightEdits';
 import type { PendingEdit } from './useCellPatch';
 
@@ -429,7 +429,11 @@ function rebased(edit: PendingEdit, confirmed: PendingEdit | undefined): Pending
 function wasSent(sent: PendingEdit | undefined, edit: PendingEdit): boolean {
   if (sent === undefined) return false;
 
-  return sent.isEmpty === edit.isEmpty && sameCellValue(sent.value, edit.value);
+  if (sent.isEmpty !== edit.isEmpty) return false;
+
+  // ⛔ `G1-06`: текстова колонка — дослівно: `5.0` після надісланого `5` —
+  // НОВІША правка, а не те саме число.
+  return sameColumnValue(sent.text === true || edit.text === true ? 'String' : undefined, sent.value, edit.value);
 }
 
 /** Скільки незбережених комірок у ВСЬОМУ документі. */

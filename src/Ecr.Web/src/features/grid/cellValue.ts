@@ -82,6 +82,39 @@ export function sameCellValue(left: unknown, right: unknown): boolean {
 }
 
 /**
+ * Чи колонка ТЕКСТОВА (`CellDataType.String`): її значення — код, а не число.
+ */
+export function isTextColumnType(dataType: string | undefined): boolean {
+  return dataType === 'String';
+}
+
+/**
+ * Рівність значень комірки З УРАХУВАННЯМ типу колонки (`G1-06`).
+ *
+ * ⛔ `sameCellValue` зводить до десяткового канону БУДЬ-ЯКИЙ рядок, що схожий
+ * на число, — і для текстової колонки це неправда: КВЕД `01.10`, договір
+ * `0012`, індекс `01001` — коди, а не числа. `0012`→`12`, `1.10`→`1.1`,
+ * `5`→`5.0` ставали «без змін»: правка не потрапляла ні у сховище, ні в PATCH,
+ * а сітка показувала нове значення, якого на сервері немає. Тут текстова
+ * колонка порівнює рядки ДОСЛІВНО; числові, довідникові й логічні — як і
+ * раніше, за значенням; дата — за календарною датою.
+ *
+ * @param dataType `undefined` — тип невідомий (колонки немає в зрізі): тоді
+ * правило попереднє, `sameCellValue`.
+ */
+export function sameColumnValue(dataType: string | undefined, left: unknown, right: unknown): boolean {
+  if (dataType === 'Date') return sameDateValue(left, right);
+
+  if (isTextColumnType(dataType)) {
+    const a = left ?? null;
+    const b = right ?? null;
+    if (typeof a === 'string' && typeof b === 'string') return a === b;
+  }
+
+  return sameCellValue(left, right);
+}
+
+/**
  * Значення комірки для МАШИНИ: буфер обміну, перелік у діалозі, журнал.
  *
  * ⛔ Не `formatDecimal`: тут не можна ні групувати розряди, ні міняти
