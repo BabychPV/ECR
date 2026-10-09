@@ -23,7 +23,8 @@ public sealed class DatabaseHealthCheck(
     ICurrentUser currentUser,
     DataProtectionKeyProtection keyProtection,
     IHostEnvironment? environment = null,
-    Microsoft.Extensions.Configuration.IConfiguration? configuration = null) : IHealthCheck
+    Microsoft.Extensions.Configuration.IConfiguration? configuration = null,
+    HealthResultCache? cache = null) : IHealthCheck
 {
     /// <summary>Скільки вільних партицій попереду вважається достатнім.</summary>
     /// <remarks>
@@ -46,6 +47,22 @@ public sealed class DatabaseHealthCheck(
 
     /// <inheritdoc />
     public async Task<HealthCheckResult> CheckHealthAsync(HealthCheckContext context, CancellationToken cancellationToken)
+    {
+        // ⛔ P1-03 (AUDIT-2026-10-09b): перевірка має тег `ready`, тобто біжить на кожну анонімну
+        // пробу: `sys.filegroups`, запас партицій, `sys.databases`, обмеження й усе кільце
+        // `DataProtectionKeys.Xml` — у власному scope і з'єднанні. Кеш той самий, що в
+        // `JobsHealthCheck` (TTL `HealthResultCache.Ttl`, single-flight); U18 не порушується:
+        // RCSI і далі читається живим запитом, лише не частіше ніж раз на TTL.
+        if (cache is null)
+        {
+            return await ComputeAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        var language = await catalog.ResolveLanguageAsync(currentUser.Language, cancellationToken).ConfigureAwait(false);
+        return await cache.GetOrAddAsync($"ready:db:{language}", ComputeAsync, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<HealthCheckResult> ComputeAsync(CancellationToken cancellationToken)
     {
         var data = new Dictionary<string, object>(StringComparer.Ordinal)
         {
