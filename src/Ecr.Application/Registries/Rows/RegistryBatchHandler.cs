@@ -90,7 +90,6 @@ public sealed partial class RegistryBatchHandler(
         var states = items.Select(i => new RowState(i)).ToList();
         await ResolveAsync(definition, states, ct).ConfigureAwait(false);
         ParseNumbers(definition, states);
-        await CheckVersionsAsync(states, ct).ConfigureAwait(false);
 
         IReadOnlyList<RegistryEntryWriteRow> written = [];
         var ruleCheck = Rules.RegistryRuleCheck.None;
@@ -99,6 +98,24 @@ public sealed partial class RegistryBatchHandler(
             await uow.ExecuteInTransactionAsync(
                 async token =>
                 {
+                    // ⛔ D1-04: перевірка `baseVersion` — У ТРАНЗАКЦІЇ і ПІСЛЯ блокування рядків записів.
+                    // Раніше вона стояла до транзакції без блокування: дві правки того самого рядка з
+                    // однією версією обидві її проходили, і друга мовчки затирала першу (`4093` не
+                    // спрацьовував). Під RCSI читання версій — новий оператор після `UPDLOCK`, тож бачить
+                    // уже закомічену чужу правку. `dryRun` блокування не бере (L5-13): він відкочується, а
+                    // жива перевірка сітки не має гальмувати справжній запис.
+                    if (!dryRun)
+                    {
+                        var touched = states
+                            .Where(s => s.Entry is not null)
+                            .Select(s => s.Entry!.Id)
+                            .Distinct()
+                            .Order()
+                            .ToList();
+                        await rows.LockEntriesAsync(touched, token).ConfigureAwait(false);
+                    }
+
+                    await CheckVersionsAsync(states, token).ConfigureAwait(false);
                     await DeleteAsync(registryCode, states, dryRun, token).ConfigureAwait(false);
                     await CheckKeysAsync(definition, states, token).ConfigureAwait(false);
                     written = await WriteAsync(definition, states, dryRun, token).ConfigureAwait(false);

@@ -293,6 +293,41 @@ public sealed class RegistryRowsQuery(EcrDbContext db) : IRegistryRowsQuery
                v.ValueUnitId,
                u == null ? null : u.Code);
 
+    /// <inheritdoc />
+    public async Task LockEntriesAsync(IReadOnlyCollection<long> registryEntryIds, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(registryEntryIds);
+        if (registryEntryIds.Count == 0)
+        {
+            return;
+        }
+
+        if (db.Database.CurrentTransaction is null)
+        {
+            throw new InvalidOperationException(
+                "Блокування записів довідника береться лише всередині транзакції: поза нею воно звільнилося б одразу.");
+        }
+
+        // ⚠ Одним JSON-параметром (`OPENJSON`), як у `ArchiveAwareCellReader`: пакет — до 2000 записів,
+        // ліміт у 2100 параметрів інакше довелося б обходити порціями.
+        // ⚠ `INNER LOOP JOIN` від впорядкованого переліку: (1) точкові seek-и по PK, а не скан таблиці
+        // з U-блокуваннями на чужих рядках; (2) сталий порядок захоплення за `Id` — два пакети з
+        // перехресними наборами чекають один на одного, а не взаємоблокуються.
+        var idsJson = System.Text.Json.JsonSerializer.Serialize(registryEntryIds.Distinct().Order());
+
+        await db.Database
+            .SqlQuery<long>($"""
+                SELECT e.Id AS Value
+                  FROM OPENJSON({idsJson}) AS j
+                 INNER LOOP JOIN dic.RegistryEntry AS e WITH (UPDLOCK, ROWLOCK)
+                    ON e.Id = CAST(j.value AS bigint)
+                """)
+            .OrderBy(v => v)
+            .Take(registryEntryIds.Count)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+    }
+
     /// <summary>Записи «станом на» момент; <c>null</c> — поточні.</summary>
     private IQueryable<RegistryEntry> Entries(DateTime? asOfUtc)
         => asOfUtc is { } asOf
