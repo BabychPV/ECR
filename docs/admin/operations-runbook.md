@@ -138,6 +138,7 @@ Api й воркер на **одному** хості — різні ролі й 
 | `Jobs:Excel:MaxConcurrency` | 2 | скільки задач експорту/імпорту Excel виконується одночасно (AN-116). `Database`: окремий лейн `excel` з власними місцями — не займає ні чотирьох спільних, ні резерву перерахунку формул; `Quartz`: задача понад межу відкладається на 5 с, не тримаючи потоку пулу. Мінімум 1 |
 | `Jobs:Quartz:ThreadCount` | 16 | потоків пулу Quartz (режим `Quartz`; вбудоване значення Quartz — 10). Мінімум 1 |
 | `Database:SheetLockTimeoutSeconds` | 30 | очікування блокування аркуша, с |
+| `Database:MaxPoolSize` | 200 | стеля пулу з'єднань SQL (`Max Pool Size`), якщо в рядку підключення її не задано; задане в рядку має перевагу (AN-106) |
 | `Health:RawDataPointWarnRows` | 20000000 | поріг перегляду R2 для картки `db` (п. 3.1); `0` — вимкнено. ⚠ Нечислове значення робить `db` Unhealthy «Database is unavailable» (перевірки на старті немає) |
 | `Calculations:FullYearWarnSeconds` | 600 | бюджет річного перерахунку (ПРД-13); перевищення — `recalcOverBudget` у картці `jobs` |
 | `Calculations:MaxParallelism` | 4 | паралелізм розрахунку |

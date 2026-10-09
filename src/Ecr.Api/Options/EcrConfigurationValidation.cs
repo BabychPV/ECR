@@ -45,6 +45,7 @@ public static partial class EcrConfigurationValidation
         ("Database:CommandTimeoutSeconds", 0),
         ("Database:BulkBatchSize", 1),
         ("Database:SheetLockTimeoutSeconds", 0),
+        ("Database:MaxPoolSize", 1),
         ("Cache:MetadataSlidingMinutes", 1),
         ("Cache:AccessProfileSlidingMinutes", 1),
         ("Auth:SlidingHours", 1),

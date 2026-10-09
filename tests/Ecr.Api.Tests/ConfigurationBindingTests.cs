@@ -3,6 +3,7 @@ using Ecr.Infrastructure;
 using Ecr.Infrastructure.Caching;
 using Ecr.Infrastructure.Persistence;
 using Ecr.TestKit;
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -92,6 +93,55 @@ public sealed class ConfigurationBindingTests
         // обидва ключі не мали читача, а в коді стояло жорстке 30 хв.
         Assert.Equal(TimeSpan.FromMinutes(240), lifetimes.Metadata);
         Assert.Equal(TimeSpan.FromMinutes(60), lifetimes.AccessProfile);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Finding", "P1-01")]
+    public void Стеля_пулу_зєднань_береться_з_appsettings_у_рядок_підключення_контексту()
+    {
+        // ⛔ AN-106 (P1-01): `Max Pool Size` ніде не задавався — діяв дефолт SqlClient 100, і 100
+        // заблокованих PATCH вичерпували пул. 200 — значення `Database:MaxPoolSize` у файлі.
+        using var provider = Build();
+        using var scope = provider.CreateScope();
+
+        var db = scope.ServiceProvider.GetRequiredService<EcrDbContext>();
+
+        Assert.Equal(200, new SqlConnectionStringBuilder(db.Database.GetConnectionString()).MaxPoolSize);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Finding", "P1-01")]
+    public void Стеля_пулу_бере_саме_значення_конфігурації_а_не_збіг_із_дефолтом()
+    {
+        using var provider = Build(("Database:MaxPoolSize", "137"));
+        using var scope = provider.CreateScope();
+
+        var db = scope.ServiceProvider.GetRequiredService<EcrDbContext>();
+
+        Assert.Equal(137, new SqlConnectionStringBuilder(db.Database.GetConnectionString()).MaxPoolSize);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Finding", "P1-01")]
+    public void Стеля_пулу_в_самому_рядку_підключення_має_перевагу_над_дефолтом()
+    {
+        const string explicitPool = FakeConnection + ";Max Pool Size=50";
+
+        // Задане адміністратором — рядок не чіпається взагалі (той самий ключ пулу SqlClient).
+        Assert.Same(explicitPool, DependencyInjection.WithDefaultMaxPoolSize(explicitPool, 200));
+
+        // Без явного — дефолт; решта рядка та сама.
+        var defaulted = new SqlConnectionStringBuilder(DependencyInjection.WithDefaultMaxPoolSize(FakeConnection, 200));
+        Assert.Equal(200, defaulted.MaxPoolSize);
+        Assert.Equal("EcrUnused", defaulted.InitialCatalog);
+
+        // `Min Pool Size` понад дефолт піднімає стелю до себе — інакше SqlClient відмовив би рядку.
+        var raisedByMin = new SqlConnectionStringBuilder(
+            DependencyInjection.WithDefaultMaxPoolSize(FakeConnection + ";Min Pool Size=300", 200));
+        Assert.Equal(300, raisedByMin.MaxPoolSize);
     }
 
     /// <summary>Розмір пакета, з яким справді створили завантажувач.</summary>

@@ -46,6 +46,15 @@ public static class DependencyInjection
                 "ECR_ConnectionStrings__Ecr і НЕ зберігається в appsettings.json (D-11).");
         }
 
+        // ⛔ AN-106 (P1-01, аудит 2026-10-09b): `Max Pool Size` ніде не задавався — діяв дефолт
+        // SqlClient 100. 100 редакторів, чиї PATCH чекають блокування переносу версії, вичерпували
+        // пул, і решта запитів (відкриття документа, вхід) падала на `Connect Timeout`. Явний дефолт
+        // `Database:MaxPoolSize`; значення в самому рядку підключення (адміністратор) має перевагу.
+        // ⚠ Тут, ДО `UseSqlServer`: решта читачів бере рядок через `Database.GetConnectionString()`,
+        // тож пул один (пули SqlClient ключуються ТОЧНИМ рядком підключення).
+        connectionString = WithDefaultMaxPoolSize(
+            connectionString, Math.Max(1, ReadInt(configuration, "Database:MaxPoolSize", 200)));
+
         // L1-01: збережений новий штамп скидає його кеш (`SecurityStampCacheInvalidator`).
         services.AddSingleton<SecurityStampCacheInvalidator>();
 
@@ -524,6 +533,32 @@ public static class DependencyInjection
     /// <c>Configuration.Abstractions</c>. Тягнути пакет заради двох чисел —
     /// гірше, ніж три рядки розбору.
     /// </remarks>
+    /// <summary>
+    /// Рядок підключення з <c>Max Pool Size</c> = <paramref name="maxPoolSize"/>, якщо в ньому самому
+    /// розміру пулу не задано; задане адміністратором не чіпається.
+    /// </summary>
+    /// <param name="connectionString">Рядок підключення.</param>
+    /// <param name="maxPoolSize">Розмір пулу за замовчуванням.</param>
+    /// <returns>Рядок підключення.</returns>
+    /// <remarks>
+    /// ⚠ <c>Min Pool Size</c>, більший за дефолт, піднімає й стелю до себе — інакше SqlClient
+    /// відмовив би рядку («Min Pool Size більший за Max Pool Size»).
+    /// </remarks>
+    public static string WithDefaultMaxPoolSize(string connectionString, int maxPoolSize)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
+        ArgumentOutOfRangeException.ThrowIfLessThan(maxPoolSize, 1);
+
+        var builder = new Microsoft.Data.SqlClient.SqlConnectionStringBuilder(connectionString);
+        if (builder.ShouldSerialize("Max Pool Size"))
+        {
+            return connectionString;
+        }
+
+        builder.MaxPoolSize = Math.Max(maxPoolSize, builder.MinPoolSize);
+        return builder.ConnectionString;
+    }
+
     private static int ReadInt(IConfiguration configuration, string key, int fallback)
         => int.TryParse(configuration[key], System.Globalization.CultureInfo.InvariantCulture, out var value)
             ? value
