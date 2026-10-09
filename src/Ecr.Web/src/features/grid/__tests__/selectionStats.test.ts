@@ -62,4 +62,30 @@ describe('selectionStats', () => {
     expect(stats?.sum).toBe('-2.0001');
     expect(stats?.average).toBe('-0.6667');
   });
+
+  it('N3-03: Lookup/Unit/текст не додаються (Id довідника — не вимірювання)', () => {
+    const mixed = {
+      ...slice,
+      columns: [
+        { code: 'L', header: 'L', dataType: 'Lookup' },
+        { code: 'D', header: 'D', dataType: 'Decimal' },
+        { code: 'U', header: 'U', dataType: 'Unit' },
+        { code: 'T', header: 'T', dataType: 'Text' },
+      ],
+    } as unknown as TableSliceDto;
+    const mixedRows = [
+      { L: '17', D: '1', U: '5', T: '100' },
+      { L: '23', D: '2', U: '6', T: '200' },
+    ];
+
+    const stats = selectionStats({
+      slice: mixed,
+      columns: [{ prop: 'L' }, { prop: 'D' }, { prop: 'U' }, { prop: 'T' }],
+      rows: mixedRows,
+      range: { fromRow: 0, toRow: 1, fromColumn: 0, toColumn: 3 },
+    });
+
+    expect(stats?.sum).toBe('3');
+    expect(stats?.count).toBe(2);
+  });
 });
