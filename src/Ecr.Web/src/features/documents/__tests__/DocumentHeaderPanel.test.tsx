@@ -379,7 +379,7 @@ describe('DocumentHeaderPanel: збереження', () => {
     expect(showDone).toHaveBeenCalled();
   });
 
-  it('409 ECR-DOC-0409: показує причину і перечитує шапку — чернетка стає значенням сервера', async () => {
+  it('409 ECR-DOC-0409: показує причину і перечитує шапку — набране людиною лишається (AN-104 / D1-04)', async () => {
     show({
       fields: [field({ code: 'A', dataType: 'String', value: 'стара' })],
       patchResponse: {
@@ -403,10 +403,14 @@ describe('DocumentHeaderPanel: збереження', () => {
     expect(alert.textContent).toContain('Someone else changed the document header');
 
     // ⛔ Мутаційний доказ: без перечитування після конфлікту панель лишила б
-    // стару версію, і повторне «Зберегти» знову впало б у 409 — або, гірше,
-    // людина не побачила б чужого значення, яке збирається перезаписати.
+    // стару версію, і повторне «Зберегти» знову впало б у 409.
     await waitFor(() => expect(headerGets.count).toBe(2));
-    await waitFor(() => expect((input as HTMLInputElement).value).toBe('стара'));
+
+    // ✎ AN-104 (`D1-04`): доти тут чекали «стара» — `409` стирав чернетку. Чуже
+    // значення поля `A` не змінилось, тож набране людиною лишається, і конфлікту
+    // полів немає. Розбіжні поля — `DocumentHeaderPanel.conflict.test.tsx`.
+    expect((input as HTMLInputElement).value).toBe('моя');
+    expect(screen.queryByTestId('document-header-conflict')).toBeNull();
   });
 
   it('непорушене поле без значення НЕ вважається зміненим (порожній текст ≡ null)', async () => {

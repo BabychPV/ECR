@@ -7390,8 +7390,18 @@ USING (VALUES
     (N'err.ECR-CALC-0422.carryOverTooLarge', N'en', N'Carrying over the results of the submitted sheets of document {documentId} for period {periodKey} would copy {count} rows, more than the limit of {max}. The run was not applied and the previous results stay current: narrow the binding to the right table.', 1),
     -- COLL:an80-carryover ── кінець секції ──
     -- COLL:an109-csv-utf8 ── AN-109 / S1-03: імпорт CSV перекладів не в UTF-8 (cp1251 з Excel) -> 422; ru/kz — порцією COLL:an109-csv-utf8 нижче ──
-    (N'err.ECR-REQ-0422.uiStringCsvNotUtf8', N'en', N'The file is not UTF-8 text (it may be saved in a Windows code page). Save it as CSV UTF-8 and try again. Nothing was imported.', 1)
+    (N'err.ECR-REQ-0422.uiStringCsvNotUtf8', N'en', N'The file is not UTF-8 text (it may be saved in a Windows code page). Save it as CSV UTF-8 and try again. Nothing was imported.', 1),
     -- COLL:an109-csv-utf8 ── кінець секції ──
+    -- COLL:an104-header-conflict ── AN-104 / D1-04: 409 на шапці не стирає чернетку — «ваше / чинне»; ru/kz — порцією COLL:an104-header-conflict нижче ──
+    (N'document.header.conflictTitle', N'en', N'Someone else changed the header', 1),
+    (N'document.header.conflictHint', N'en', N'These fields were changed by someone else while you were editing. Your values are still in the form: keep yours to overwrite theirs, or use the current values.', 1),
+    (N'document.header.conflictItem', N'en', N'{field}: yours {yours}, current {value}', 1),
+    (N'document.header.conflictKeepMine', N'en', N'Keep mine', 1),
+    (N'document.header.conflictUseCurrent', N'en', N'Use current', 1),
+    (N'document.header.conflictNoValue', N'en', N'(no value)', 1),
+    (N'document.header.conflictYes', N'en', N'yes', 1),
+    (N'document.header.conflictNo', N'en', N'no', 1)
+    -- COLL:an104-header-conflict ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -18161,6 +18171,31 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:an109-csv-utf8 ── кінець секції ──
+
+-- COLL:an104-header-conflict ── ru/kz: AN-104 / D1-04: 409 на шапці не стирає чернетку — «ваше / чинне»; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'document.header.conflictTitle', N'ru', N'Шапку изменил кто-то другой'),
+    (N'document.header.conflictHint', N'ru', N'Пока вы редактировали, эти поля изменил другой пользователь. Ваши значения остались в форме: оставьте свои, чтобы перезаписать чужие, или возьмите текущие.'),
+    (N'document.header.conflictItem', N'ru', N'{field}: ваше {yours}, текущее {value}'),
+    (N'document.header.conflictKeepMine', N'ru', N'Оставить мои'),
+    (N'document.header.conflictUseCurrent', N'ru', N'Взять текущие'),
+    (N'document.header.conflictNoValue', N'ru', N'(нет значения)'),
+    (N'document.header.conflictYes', N'ru', N'да'),
+    (N'document.header.conflictNo', N'ru', N'нет'),
+    (N'document.header.conflictTitle', N'kz', N'Құжаттың тақырып бөлігін басқа біреу өзгертті'),
+    (N'document.header.conflictHint', N'kz', N'Сіз өңдеп жатқанда бұл өрістерді басқа пайдаланушы өзгертті. Сіздің мәндеріңіз формада қалды: басқаныкін қайта жазу үшін өзіңіздікін қалдырыңыз немесе ағымдағы мәндерді алыңыз.'),
+    (N'document.header.conflictItem', N'kz', N'{field}: Сіздікі {yours}, ағымдағы {value}'),
+    (N'document.header.conflictKeepMine', N'kz', N'Менікін қалдыру'),
+    (N'document.header.conflictUseCurrent', N'kz', N'Ағымдағыны алу'),
+    (N'document.header.conflictNoValue', N'kz', N'(мән жоқ)'),
+    (N'document.header.conflictYes', N'kz', N'иә'),
+    (N'document.header.conflictNo', N'kz', N'жоқ')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:an104-header-conflict ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t
