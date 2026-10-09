@@ -54,3 +54,27 @@ ALTER TABLE doc.TableRow  SET (LOCK_ESCALATION = DISABLE);
 SELECT name, lock_escalation_desc FROM sys.tables
 WHERE object_id IN (OBJECT_ID(N'doc.CellValue'), OBJECT_ID(N'doc.TableRow'));
 ```
+
+## 3. Фільтрований індекс пізніх правок `aud.CellChange` (P1-05, AN-109)
+
+| Поле | Зміст |
+|---|---|
+| Навіщо | Позначка «пізня правка» (`DocumentStore.LateEditDocumentIds`) на кожній сторінці `GET /documents`, на картці документа і фільтр `hasLateEdits`. `IsLateEdit` і `PeriodKey` немає ні в `IX_CellChange_Cell`, ні в DB-5, тож на кожну зміну документів сторінки за всю онлайн-історію (≈24 місяці до архівації) іде key lookup у кластерний індекс; `hasLateEdits` без документа сканує всі партиції |
+| Що вже зроблено в коді (AN-109) | Запит розгалужено на два тексти (за період / за будь-який) замість `(@any = 1 OR c.PeriodKey = @p)`: `PeriodKey` став sargable-предикатом під цей індекс. Межі `ChangedAt` у запиті немає свідомо: з даних її не вивести без втрат (`OpenOffsetDays` може бути від'ємним, правка «поза вікном» за Warn-політикою D-239, пізня правка в стані Open після Reopen аркуша D-70 б) |
+| Виміри | Не мірялось. DB-5: позначка на сторінку 16-26 мс на 504 тис. рядків; на 10x — екстраполяція 0,2-0,5 с |
+| Ціна | Індекс майже порожній (пізні правки рідкісні: лише Grace/Reopen), запис — лише для рядків з `IsLateEdit = 1` |
+| Ризик | Низький (лише індекс). Потрібен `QUOTED_IDENTIFIER ON` (`sqlcmd -I`), як для `IX_CellChange_OutOfWindow` |
+| Хто вирішує | DBA (К10) |
+| Статус | proposed |
+
+Приклад скрипта (у стилі `IX_CellChange_OutOfWindow` з `11-audit-tables.sql`):
+
+```sql
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_CellChange_LateEdit'
+               AND object_id = OBJECT_ID(N'aud.CellChange'))
+    CREATE INDEX IX_CellChange_LateEdit
+        ON aud.CellChange (DocumentId, PeriodKey)
+        INCLUDE (ColumnDefId)
+        WHERE IsLateEdit = 1
+        ON ps_AuditByMonth(ChangedAt);
+```

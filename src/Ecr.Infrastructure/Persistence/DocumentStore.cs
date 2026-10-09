@@ -995,37 +995,56 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
     /// </remarks>
     private IQueryable<long> LateEditDocumentIds(PeriodKeyFilter period, DocumentListFilter hidden = default)
     {
-        var anyPeriod = period.Value is null ? 1 : 0;
-        var periodKey = period.Value ?? 0;
-
         // ⛔ R-7: пізня правка колонки, схованої від читача (аркуш/таблиця/колонка), не дає позначки —
         // інакше вона розкриває, що у схованому аркуші щось правили після прогону. Ідентифікатори йдуть
         // JSON-масивом (`OPENJSON`), бо перелік змінної довжини в сирий SQL параметрами не розгорнути.
         // ⛔ N1-01: це ПАРИ «проєкт, Id» (`h.p = dd.ProjectId`): версія шаблону спільна для кількох проєктів,
         // а схований аркуш/таблиця/колонка — лише в тому проєкті, де стоїть заборона чи звуження.
-        var sheets = PairsJson(hidden.HiddenSheetDefIds);
-        var tables = PairsJson(hidden.HiddenTableDefIds);
-        var columns = PairsJson(hidden.HiddenColumnDefIds);
+        object[] args =
+        [
+            PairsJson(hidden.HiddenColumnDefIds),
+            PairsJson(hidden.HiddenTableDefIds),
+            PairsJson(hidden.HiddenSheetDefIds),
+        ];
 
-        return db.Database
-            .SqlQuery<long>($"""
-                SELECT DISTINCT c.DocumentId AS Value
-                  FROM aud.CellChange AS c
-                 WHERE c.IsLateEdit = 1
-                   AND ({anyPeriod} = 1 OR c.PeriodKey = {periodKey})
-                   AND NOT EXISTS (
-                       SELECT 1
-                         FROM cfg.ColumnDef AS cd
-                         JOIN cfg.TableDef AS td ON td.Id = cd.TableDefId
-                         JOIN doc.Document AS dd ON dd.Id = c.DocumentId
-                        WHERE cd.Id = c.ColumnDefId
-                          AND (EXISTS (SELECT 1 FROM OPENJSON({columns}) WITH (p int '$.p', i int '$.i') AS h
-                                        WHERE h.p = dd.ProjectId AND h.i = cd.Id)
-                               OR EXISTS (SELECT 1 FROM OPENJSON({tables}) WITH (p int '$.p', i int '$.i') AS h
-                                           WHERE h.p = dd.ProjectId AND h.i = td.Id)
-                               OR EXISTS (SELECT 1 FROM OPENJSON({sheets}) WITH (p int '$.p', i int '$.i') AS h
-                                           WHERE h.p = dd.ProjectId AND h.i = td.SheetDefId)))
-                """);
+        // ⚠ P1-05 (AN-109): два тексти запиту замість «catch-all» `(@any = 1 OR c.PeriodKey = @p)`. Один кешований
+        // план мусив годитися для обох значень `@any`, тож `PeriodKey` у ньому був лише залишковим фільтром, а
+        // позначка за період ділила план із позначкою «за будь-який період». Тепер запит за період несе
+        // `c.PeriodKey = @p` як звичайний sargable-предикат (придатний для індексу з хвоста нижче).
+        // ⛔ Межі `ChangedAt` тут НЕМАЄ свідомо: з даних її не вивести без втрат. Правка періоду можлива задовго
+        // до його початку (`OpenOffsetDays` може бути від'ємним, правка «поза вікном» за Warn-політикою, D-239),
+        // а пізньою вона стає і в стані Open — після Reopen аркуша (D-70 б). Будь-яка вигадана межа мовчки
+        // знімала б позначку. Справжнє прискорення — фільтрований індекс `WHERE IsLateEdit = 1` (зміна схеми,
+        // хвіст P1-05), а не межа в запиті.
+        var periodPredicate = string.Empty;
+        if (period.Value is { } periodKey)
+        {
+            periodPredicate = "AND c.PeriodKey = {3}";
+            args = [.. args, periodKey];
+        }
+
+        var sql = System.Runtime.CompilerServices.FormattableStringFactory.Create(
+            $$"""
+            SELECT DISTINCT c.DocumentId AS Value
+              FROM aud.CellChange AS c
+             WHERE c.IsLateEdit = 1
+               {{periodPredicate}}
+               AND NOT EXISTS (
+                   SELECT 1
+                     FROM cfg.ColumnDef AS cd
+                     JOIN cfg.TableDef AS td ON td.Id = cd.TableDefId
+                     JOIN doc.Document AS dd ON dd.Id = c.DocumentId
+                    WHERE cd.Id = c.ColumnDefId
+                      AND (EXISTS (SELECT 1 FROM OPENJSON({0}) WITH (p int '$.p', i int '$.i') AS h
+                                    WHERE h.p = dd.ProjectId AND h.i = cd.Id)
+                           OR EXISTS (SELECT 1 FROM OPENJSON({1}) WITH (p int '$.p', i int '$.i') AS h
+                                       WHERE h.p = dd.ProjectId AND h.i = td.Id)
+                           OR EXISTS (SELECT 1 FROM OPENJSON({2}) WITH (p int '$.p', i int '$.i') AS h
+                                       WHERE h.p = dd.ProjectId AND h.i = td.SheetDefId)))
+            """,
+            args);
+
+        return db.Database.SqlQuery<long>(sql);
     }
 
     /// <inheritdoc />
