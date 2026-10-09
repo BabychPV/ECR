@@ -322,7 +322,7 @@ jobs:
     name: worker (windows)
     runs-on: windows-latest
     if: ${{ !(github.event_name == 'pull_request' && github.head_ref == 'dev/integration' && github.event.pull_request.head.repo.full_name == github.repository) }}
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
@@ -332,6 +332,12 @@ jobs:
 
       - name: Тести Ecr.Worker (Job Object)
         run: dotnet test tests/Ecr.Worker.Tests --nologo --filter "Category!=Integration" --logger "trx;LogFileName=worker-windows.trx" --logger "console;verbosity=normal" --results-directory TestResults
+
+      # L10-05: на Linux-раннері сценарій deploy-ecr.ps1 іде через pwsh 7, який ПРИЙМАЄ коментарі в JSON, —
+      # тож «5.1 не читає JSONC» там не доводиться. Цей крок запускає ту саму перевірку у вбудованому Windows
+      # PowerShell 5.1 (%WINDIR%\System32\WindowsPowerShell\v1.0\powershell.exe).
+      - name: Скрипт розгортання у Windows PowerShell 5.1 (L10-05)
+        run: dotnet test tests/Ecr.Architecture.Tests --nologo --filter "FullyQualifiedName~DeployWorkerModeTests" --logger "trx;LogFileName=deploy-ps51-windows.trx" --logger "console;verbosity=normal" --results-directory TestResults
 
   # ⚠ MSI (installer/Ecr.Installer, WiX 5) не збирається ніде в CI: WiX не має
   # збірки під Linux, тож `tools/build-msi.ps1` досі йшов лише руками на

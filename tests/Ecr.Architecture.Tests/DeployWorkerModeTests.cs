@@ -72,9 +72,17 @@ public sealed class DeployWorkerModeTests
         "jsonc.plainValues=$(Test-ConfigIsPlaceholder -Path $Json)"
         "jsonc.edition=$(Get-ConfiguredEditionMode -Path $Commented)"
         "jsonc.value=$(Get-ConfiguredValue -Path $Commented -Keys 'Jobs', 'Queue', 'Mode')"
+
+        "ps.major=$($PSVersionTable.PSVersion.Major)"
+        try { Get-Content -Raw -LiteralPath $Commented | ConvertFrom-Json | Out-Null; 'jsonc.rawThrows=False' }
+        catch { 'jsonc.rawThrows=True' }
         """;
 
-    private static readonly Lazy<IReadOnlyDictionary<string, string>> Results = new(Run);
+    private static readonly Lazy<IReadOnlyDictionary<string, string>> Results = new(() => Run(FindPowerShell()));
+
+    /// <summary>Той самий сценарій, але СТРОГО у вбудованому Windows PowerShell 5.1 (лише Windows).</summary>
+    private static readonly Lazy<IReadOnlyDictionary<string, string>?> WindowsPowerShellResults =
+        new(() => WindowsPowerShell51() is { } exe ? Run(exe) : null);
 
     /// <remarks>
     /// Мутація (прогнано): у <c>Resolve-WorkerDeployment</c> гілку Express
@@ -182,13 +190,65 @@ public sealed class DeployWorkerModeTests
     public void Файл_майданчика_з_коментарями_читається_як_у_Windows_PowerShell_5_1(string key, string expected)
         => Assert.Equal(expected, Value(key));
 
+    /// <remarks>
+    /// L10-05: основний прогін бере <c>pwsh</c> з PATH, а <c>pwsh</c> 7 ПРИЙМАЄ коментарі в JSON, тож
+    /// сторож вище на ньому не червоніє, навіть якщо скрипт знову читатиме конфіг без <c>ConvertFrom-JsoncFile</c>.
+    /// Тут сценарій іде через <c>%WINDIR%\System32\WindowsPowerShell\v1.0\powershell.exe</c> (так запускають
+    /// runbook і install-guide). Доказ середовища — <c>ps.major = 5</c> і <c>jsonc.rawThrows = True</c> (голий
+    /// <c>ConvertFrom-Json</c> на файлі з коментарями тут падає); без нього зелене нічого б не означало.
+    /// Мутація (CI, Windows; локально не запускалась): <c>ConvertFrom-JsoncFile</c> → <c>Get-Content -Raw | ConvertFrom-Json</c>
+    /// → <c>jsonc.*</c> червоні. ⚠ На не-Windows 5.1 немає: там перевіряється лише це, а справжній прогін
+    /// іде у джобі <c>worker (windows)</c> (ci.yml, крок «Windows PowerShell 5.1»).
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Файл_майданчика_з_коментарями_читається_саме_у_Windows_PowerShell_5_1_з_каталогу_системи()
+    {
+        var results = WindowsPowerShellResults.Value;
+        if (results is null)
+        {
+            // Не Windows: вбудованого 5.1 немає; Windows без нього — збій середовища, а не пропуск (див. WindowsPowerShell51).
+            Assert.False(OperatingSystem.IsWindows(), "на Windows немає powershell.exe 5.1");
+            return;
+        }
+
+        Assert.Equal("5", ValueOf(results, "ps.major"));
+        Assert.Equal("True", ValueOf(results, "jsonc.rawThrows"));
+        Assert.Equal("True", ValueOf(results, "jsonc.placeholder"));
+        Assert.Equal("False", ValueOf(results, "jsonc.siteValues"));
+        Assert.Equal("False", ValueOf(results, "jsonc.plainValues"));
+        Assert.Equal("Standard", ValueOf(results, "jsonc.edition"));
+        Assert.Equal("Database", ValueOf(results, "jsonc.value"));
+    }
+
+    private static string ValueOf(IReadOnlyDictionary<string, string> results, string key)
+    {
+        Assert.True(results.TryGetValue(key, out var value), $"ключа {key} немає у виводі:\n{string.Join('\n', results)}");
+        return value!;
+    }
+
+    /// <summary>Вбудований Windows PowerShell 5.1: <c>%WINDIR%\System32\WindowsPowerShell\v1.0\powershell.exe</c>; не Windows — <c>null</c>.</summary>
+    private static string? WindowsPowerShell51()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return null;
+        }
+
+        var exe = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
+
+        // ⛔ Не пропуск: Windows без вбудованого 5.1 — збій середовища, сторож не має мовчати.
+        return File.Exists(exe) ? exe : throw new InvalidOperationException($"Немає {exe}: тест не може виконати deploy-ecr.ps1 у Windows PowerShell 5.1.");
+    }
+
     private static string Value(string key)
     {
         Assert.True(Results.Value.TryGetValue(key, out var value), $"ключа {key} немає у виводі:\n{string.Join('\n', Results.Value)}");
         return value!;
     }
 
-    private static Dictionary<string, string> Run()
+    private static Dictionary<string, string> Run(string powershell)
     {
         var dir = Path.Combine(Path.GetTempPath(), "ecr-deploy-worker-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(dir);
@@ -199,7 +259,7 @@ public sealed class DeployWorkerModeTests
             var json = Path.Combine(dir, "site.json");
             File.WriteAllText(json, """{ "Jobs": { "Queue": { "Mode": "Database" } } }""");
 
-            var start = new ProcessStartInfo(FindPowerShell())
+            var start = new ProcessStartInfo(powershell)
             {
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
