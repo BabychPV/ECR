@@ -15,7 +15,8 @@ namespace Ecr.Application.Tests.Documents;
 /// версії шаблону): межі йдуть у сховище ПАРАМИ «проєкт, Id» (N1-01).
 /// </summary>
 /// <remarks>
-/// Мутація (CI): повернути плаский перелік Id у <c>DocumentSheetVisibility.HiddenFilterAsync</c> → тест червоніє.
+/// Мутація (CI): повернути плаский перелік Id у <c>DocumentSheetVisibility.HiddenFilterAsync</c> → тест пар червоніє;
+/// прибрати звуження до <c>projectId</c> чи передачу меж в <c>ApplyAsync</c> → тести лічильника звернень червоніють (N1-02).
 /// </remarks>
 public sealed class ListDocumentsRestrictedReaderTests
 {
@@ -94,6 +95,45 @@ public sealed class ListDocumentsRestrictedReaderTests
             Arg.Is<DocumentListFilter>(f => HiddenOnlyInA(f)),
             Arg.Any<CursorRequest>(), Arg.Any<IReadOnlyCollection<int>?>(), Arg.Any<CancellationToken>());
     }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    public async Task Запит_з_projectId_будує_межі_лише_цього_проєкту_і_один_раз()
+    {
+        Page([Doc(1, ProjectA)]);
+
+        await Handler().HandleAsync(ProjectA, Period, null, false, null, new CursorRequest(50), default);
+
+        // ⛔ N1-02: раніше межі будувались по ВСІХ видимих проєктах (зразок на проєкт + ReadScope на кожен), а потім ще раз
+        // по документах сторінки: 2N+1 звернень навіть при заданому projectId.
+        await _samples.Received(1).SampleDocumentPerProjectAsync(
+            Arg.Is<IReadOnlyCollection<int>>(p => p.Count == 1 && p.Contains(ProjectA)), Arg.Any<CancellationToken>());
+        Assert.Equal(1, ReadScopeCalls());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    public async Task Перелік_по_кількох_проєктах_будує_межі_раз_на_проєкт_а_не_двічі()
+    {
+        Page([Doc(1, ProjectA), Doc(2, ProjectB)]);
+
+        var result = await Handler().HandleAsync(null, Period, null, false, null, new CursorRequest(50), default);
+
+        // Межі з HiddenFilterAsync (по проєкту) ідуть в ApplyAsync без другого кола ReadScopeAsync: 2 звернення, не 4.
+        Assert.Equal(2, ReadScopeCalls());
+
+        // І застосовані правильно: у A аркуш схований, у B - видимий.
+        Assert.Equal(0, result.Items.Single(d => d.ProjectId == ProjectA).SheetCount);
+        Assert.Equal(1, result.Items.Single(d => d.ProjectId == ProjectB).SheetCount);
+    }
+
+    private int ReadScopeCalls()
+        => _access.ReceivedCalls().Count(c => c.GetMethodInfo().Name == nameof(IAccessDecisionService.ReadScopeAsync));
+
+    private static DocumentSummary Doc(long id, int projectId)
+        => new(id, projectId, $"DOC-{id}", new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc), 1,
+            new Dictionary<string, string>(StringComparer.Ordinal) { ["S1"] = "Draft" },
+            IncludedSheetCodes: ["S1"]);
 
     // Дерево виразу не бере кортежних літералів, тож порівняння - окремим методом.
     private bool HiddenOnlyInA(DocumentListFilter f)

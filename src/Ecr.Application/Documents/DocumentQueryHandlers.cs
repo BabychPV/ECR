@@ -109,8 +109,11 @@ public sealed class ListDocumentsHandler(
         // знаходить документ, відхилений схованим аркушем, — оракул (смуга зведення цього не показує).
         // ⛔ Так само позначка і фільтр `hasLateEdits` не враховують пізні правки схованих колонок (R-7).
         // ⛔ N1-01: межі ідуть ПАРАМИ «проєкт, Id» (версія шаблону спільна для кількох проєктів).
-        filter = await DocumentSheetVisibility
-            .HiddenFilterAsync(samples, access, profile, visibleProjects, periodKey, filter, ct).ConfigureAwait(false);
+        // ⛔ N1-02: межі рахуються лише для `projectId` (якщо задано) і ті самі йдуть в `ApplyAsync` нижче —
+        // без другого кола `ReadScopeAsync` по тих самих проєктах.
+        (filter, var scopes) = await DocumentSheetVisibility
+            .HiddenFilterAsync(samples, access, profile, visibleProjects, projectId, periodKey, filter, ct)
+            .ConfigureAwait(false);
 
         var all = await documents
             .ListAsync(projectId, new PeriodKeyFilter(periodKey), filter, page, visibleProjects, ct)
@@ -125,7 +128,7 @@ public sealed class ListDocumentsHandler(
 
         // ⛔ Аркуші, схована від читача (Deny / звуження ролі аркушами), не називаються ні кодом,
         // ні назвою, ні станом, ні лічильниками: фільтр — у `DocumentSheetVisibility`.
-        visible = await DocumentSheetVisibility.ApplyAsync(access, profile, visible, periodKey, ct).ConfigureAwait(false);
+        visible = await DocumentSheetVisibility.ApplyAsync(access, profile, visible, periodKey, scopes, ct).ConfigureAwait(false);
 
         // ⛔ `all.TotalCount` НЕ проводиться далі як є — саме це й було дірою:
         // обробник не може перевірити, що число зі сховища враховує гранти, а
@@ -331,7 +334,7 @@ public sealed class GetDocumentHandler(
 
         // ⛔ Приховані від читача аркуші не потрапляють у склад, стан і лічильники картки.
         var narrowed = (await DocumentSheetVisibility
-            .ApplyAsync(access, profile, [document], periodKey, ct).ConfigureAwait(false))[0];
+            .ApplyAsync(access, profile, [document], periodKey, known: null, ct).ConfigureAwait(false))[0];
 
         // ⛔ R-7: позначка пізніх правок — лише по тому, що читач бачить.
         if (narrowed.HasLateEdits && DocumentSheetVisibility.HasRestrictions(profile))
