@@ -70,6 +70,24 @@ public sealed class ReportRowRulesTests
         Assert.Equal("then", error.Details!["part"]);
     }
 
+    [Theory] [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [InlineData("when")]
+    [InlineData("value")]
+    public void Вираз_довший_за_межу_відхиляється_до_розбору(string part)
+    {
+        // ⛔ L7-01 (AN-72): ланцюг на 3000 ланок розібрався б у діагностику expr.chainTooLong
+        // (ReportInvalid); відмова ДО розбору — інший код, ECR-REQ-0422, і її дає саме межа довжини.
+        var longChain = "1" + string.Concat(Enumerable.Repeat("+1", 3000));
+        var rule = part == "when"
+            ? new ReportRuleCommand(longChain + " > 0", new(HideRow: true))
+            : new ReportRuleCommand("[Value] > 0", new(Set: new("Value", longChain)));
+
+        var error = Assert.Throws<BusinessRuleException>(() => Compile(rule));
+
+        Assert.Equal(ErrorCodes.RequestInvalid, error.ErrorCode);
+        Assert.Equal("err.ECR-REQ-0422.expressionTooLong", error.Details!["messageKey"]);
+    }
+
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage5)]
     public void Присвоєння_бачить_наступне_правило()
     {

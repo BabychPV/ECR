@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Ecr.Application.Errors;
+using Ecr.Application.Expressions;
 using Ecr.Domain.Enums;
 using Ecr.Domain.Errors;
 using Ecr.Expressions.Ast;
@@ -212,6 +213,10 @@ public sealed class ReportRowRules
     private static ParsedExpression Expression(
         int no, string part, string? text, ReportExpressionScope scope, ExpressionValueType expected)
     {
+        // ⛔ L7-01 (AN-72): межа довжини ДО розбору. Без неї правило звіту (право Report.EditDefinition)
+        // розбиралося в довільну довжину, і гребінь із дужок доходив до обходів дерева.
+        ExpressionLengthGuard.Require(text, ExpressionLengthGuard.MaxFor(ExpressionDialect.Report));
+
         var parsed = new Parser().Parse(text ?? string.Empty, ExpressionDialect.Report);
         var diagnostics = new List<ExpressionDiagnostic>(parsed.Diagnostics);
 
