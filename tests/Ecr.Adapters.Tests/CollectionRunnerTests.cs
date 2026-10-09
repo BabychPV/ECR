@@ -73,6 +73,38 @@ public sealed class CollectionRunnerTests
             Arg.Any<long>(), "Succeeded", Arg.Any<int>(), null, Arg.Any<CancellationToken>());
     }
 
+    [Fact(Timeout = 15000)]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "I1-04")]
+    public async Task Прогалина_що_не_дочитується_не_голодує_запитаний_діапазон()
+    {
+        // Покриття порожнє: прогалина 45 діб, на якій джерело «висне» до спрацювання годинника
+        // прогону (послідовний PiSqlClient на великій прогалині). ⛔ МУТАЦІЙНИЙ ДОКАЗ: повернути в
+        // PlanAsync порядок «давнє першим» — свіжий діапазон не читається, точки немає, покриття немає.
+        var from = Now.AddDays(-1);
+        var world = new World(maxRunDuration: TimeSpan.FromSeconds(2));
+        world.Source.ReadAsync(Arg.Any<CollectionRequest>(), Arg.Any<CancellationToken>())
+            .Returns(call => call.ArgAt<CollectionRequest>(0).FromUtc < from
+                ? NeverAsync(call.ArgAt<CancellationToken>(1))
+                : Task.FromResult(new CollectionResult(
+                    [new SourceDataPoint("tag", Now.AddHours(-2), 10m, null, "kg", "Good")], [], null)));
+
+        await world.Runner.RunAsync(SourceEntityId, from, Now, world.Progress, CancellationToken.None);
+
+        await world.Store.Received().UpsertRawPointsAsync(
+            Arg.Any<long>(), SourceEntityId,
+            Arg.Is<IReadOnlyList<SourceDataPoint>>(p => p.Count == 1 && p[0].Timestamp == Now.AddHours(-2)),
+            Arg.Any<CancellationToken>());
+        await world.Store.Received().WriteCoverageAsync(
+            Arg.Any<long>(), SourceEntityId,
+            Arg.Is<IReadOnlyList<TimeInterval>>(i => i.Contains(new TimeInterval(from, Now))),
+            Arg.Any<CancellationToken>());
+
+        // Прогін фіксує початок усього прочитаного, а не лише запитаного діапазону.
+        await world.Store.Received().StartRunAsync(
+            SourceEntityId, from - CollectionRunner.CatchUpLookback, Now, true, Arg.Any<int?>(), Arg.Any<CancellationToken>());
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait("Finding", "I1-01")]

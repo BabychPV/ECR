@@ -147,7 +147,7 @@ public sealed partial class CollectionRunner(
         var isCatchUp = work.Count > 1;
 
         var runId = await store
-            .StartRunAsync(sourceEntityId, work[0].FromUtc, toUtc, isCatchUp, null, ct)
+            .StartRunAsync(sourceEntityId, work.Min(w => w.FromUtc), toUtc, isCatchUp, null, ct)
             .ConfigureAwait(false);
 
         var covered = new List<TimeInterval>();
@@ -844,9 +844,15 @@ public sealed partial class CollectionRunner(
 
     /// <summary>Що читати: запитаний діапазон плюс давніші прогалини.</summary>
     /// <remarks>
-    /// ⚠ Давнє йде ПЕРШИМ. Прогалина потрібна звітності тим більше, чим вона
-    /// старша: за свіжий діапазон звіт ще не складають, за минулий — уже
-    /// складають.
+    /// ⛔ Аудит I1-04: запитаний діапазон йде ПЕРШИМ, прогалини — за ним (давнє
+    /// першим уже серед них). Покриття пишеться на сутність, тож атрибут, що
+    /// стабільно відмовляє (видалений в AF, <c>ECR-INT-0503</c>/<c>0422</c>),
+    /// тримає прогалину до 45 діб відкритою, і кожен прогін перечитує її для
+    /// всіх атрибутів. Коли свіжий діапазон стояв останнім, послідовний адаптер
+    /// (PiSqlClient) вичерпував ліміт прогону (<see cref="DefaultMaxRunDuration"/>)
+    /// на прогалині, і нові дані ВСІХ атрибутів сутності не надходили зовсім.
+    /// Прогалина від порядку не страждає: прочитане до обриву покривається
+    /// (аудит B3), і наступний прогін продовжує з місця зупинки.
     /// </remarks>
     private async Task<List<TimeInterval>> PlanAsync(
         int sourceEntityId, DateTime fromUtc, DateTime toUtc, CancellationToken ct)
@@ -855,16 +861,16 @@ public sealed partial class CollectionRunner(
             .PlanAsync(sourceEntityId, fromUtc - CatchUpLookback, ct)
             .ConfigureAwait(false);
 
-        var work = gaps
-            .Where(g => g.From < fromUtc)
-            .Select(g => new TimeInterval(g.From, g.To < fromUtc ? g.To : fromUtc))
-            .Where(g => g.ToUtc > g.FromUtc)
-            .ToList();
-
         // Запитаний діапазон читається ЗАВЖДИ, навіть якщо покриття за нього
         // вже є: джерело переписує значення заднім числом, і «вже збирали» не
         // означає «те саме число».
-        work.Add(new TimeInterval(fromUtc, toUtc));
+        var work = new List<TimeInterval> { new(fromUtc, toUtc) };
+
+        work.AddRange(gaps
+            .Where(g => g.From < fromUtc)
+            .Select(g => new TimeInterval(g.From, g.To < fromUtc ? g.To : fromUtc))
+            .Where(g => g.ToUtc > g.FromUtc));
+
         return work;
     }
 
