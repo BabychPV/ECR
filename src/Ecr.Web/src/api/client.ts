@@ -229,6 +229,7 @@ export function beginSignOut(): void {
 export function resetSignOutForTests(): void {
   signedOut = false;
   sessionSwitched = false;
+  sessionUserId = null;
 }
 
 /**
@@ -266,6 +267,37 @@ export function abandonSwitchedSession(): void {
   if (typeof window === 'undefined') return;
   runBeforeLoginRedirect(window.location.pathname + window.location.search);
   reloadPage();
+}
+
+/**
+ * Заголовок з id користувача, якого бачила ця вкладка (AN-108 / S2-05, серверний рубіж `SessionUserMiddleware`).
+ *
+ * ⛔ Клієнтські рубежі (`sessionChannel`, звірка `/me`) можуть не встигнути: сповіщення не дійшло, маячок
+ * `beforeunload` іде в мить вивантаження. Тому небезпечні запити несуть id власника вкладки, і сервер, бачачи
+ * cookie ІНШОГО користувача, відповідає `409 ECR-AUTH-0409`, а не записує правки під чужим іменем.
+ */
+export const SESSION_USER_HEADER = 'X-Ecr-User';
+
+/** Код відмови «вкладка вважає себе іншим користувачем, ніж власник cookie». */
+export const SESSION_USER_MISMATCH = 'ECR-AUTH-0409';
+
+/** Id користувача з `/me`, якого бачила вкладка; `null` — ще не бачила (заголовок не шлеться). */
+let sessionUserId: number | null = null;
+
+/** Запам'ятовує користувача вкладки (`checkSessionUser`); `null` — забути. */
+export function setSessionUserId(id: number | null): void {
+  sessionUserId = id;
+}
+
+/** Заголовок користувача вкладки для запитів повз `apiFetch` (маячок `sendPatchBeacon`). */
+export function sessionUserHeaders(): Record<string, string> {
+  return sessionUserId === null ? {} : { [SESSION_USER_HEADER]: String(sessionUserId) };
+}
+
+/** Чи змінює метод стан (те саме правило, що в `SessionUserMiddleware`/`CsrfOriginMiddleware`). */
+function isStateChanging(method: string | undefined): boolean {
+  const m = (method ?? 'GET').toUpperCase();
+  return m === 'POST' || m === 'PUT' || m === 'PATCH' || m === 'DELETE';
 }
 
 /**
@@ -379,6 +411,11 @@ async function apiFetchRaw(
   // сервер відповідає 415 на кожен файл. Імпорт із перегляду diff — єдине
   // місце системи, яке надсилає файл, і саме тому помилка тут була б
   // одноразовою і назавжди.
+  // ⛔ AN-108 / S2-05: небезпечний запит несе id користувача вкладки — сервер звірить його з cookie.
+  if (sessionUserId !== null && isStateChanging(init?.method) && !headers.has(SESSION_USER_HEADER)) {
+    headers.set(SESSION_USER_HEADER, String(sessionUserId));
+  }
+
   const body = init?.body;
   if (body !== undefined && body !== null && !headers.has('Content-Type') && !isMultipart(body)) {
     headers.set('Content-Type', 'application/json');
@@ -429,7 +466,11 @@ async function apiFetchRaw(
   }
 
   if (!response.ok) {
-    throw new EcrApiError(await problemOf(response, correlationId));
+    const problem = await problemOf(response, correlationId);
+    // ⛔ AN-108 / S2-05: сервер бачить cookie ІНШОГО користувача — та сама реакція, що й на сповіщення
+    // сусідньої вкладки: мережа закривається, незбережені правки лишаються в сліді їхнього власника.
+    if (response.status === 409 && problem.errorCode === SESSION_USER_MISMATCH) abandonSwitchedSession();
+    throw new EcrApiError(problem);
   }
 
   return response;

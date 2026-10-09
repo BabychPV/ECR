@@ -5,6 +5,7 @@ import {
   apiFetch,
   isSessionClosed,
   onBeforeLoginRedirect,
+  SESSION_USER_HEADER,
   resetSignOutForTests,
   setReloadPageForTests,
 } from '@/api/client';
@@ -144,5 +145,75 @@ describe('checkSessionUser', () => {
 
     expect(reload).toHaveBeenCalledTimes(1);
     expect(isSessionClosed()).toBe(true);
+  });
+});
+
+/**
+ * AN-108 / S2-05, серверний рубіж: небезпечні запити несуть `X-Ecr-User`, а `409 ECR-AUTH-0409` покидає сеанс.
+ *
+ * ⛔ Мутаційні докази: прибери встановлення заголовка в `apiFetchRaw` або `sessionUserHeaders()` у маячку — падає
+ * «заголовок їде»; прибери реакцію на `ECR-AUTH-0409` — падає «409 покидає сеанс».
+ */
+describe('X-Ecr-User', () => {
+  const me = (userId: number): CurrentUserDto => ({ userId }) as CurrentUserDto;
+
+  const headerOf = (call: unknown[] | undefined): string | null => {
+    const init = call?.[1] as RequestInit | undefined;
+    return new Headers(init?.headers).get(SESSION_USER_HEADER);
+  };
+
+  it('заголовок їде на PATCH і в маячку, але не на GET і не до першого /me', async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await apiFetch('/api/v1/documents/5/cells', { method: 'PATCH' });
+    expect(headerOf(fetchMock.mock.calls[0])).toBeNull();
+
+    checkSessionUser(new QueryClient(), me(7));
+    await apiFetch('/api/v1/documents/5/cells', { method: 'PATCH' });
+    await apiFetch('/api/v1/documents/5');
+    sendPatchBeacon(5, { tableInstanceId: 1, periodKey: 202609, cells: [] } as never);
+
+    expect(headerOf(fetchMock.mock.calls[1])).toBe('7');
+    expect(headerOf(fetchMock.mock.calls[2])).toBeNull();
+    expect(headerOf(fetchMock.mock.calls[3])).toBe('7');
+  });
+
+  it('409 ECR-AUTH-0409 — вкладка покидає сеанс, як після сповіщення сусідньої', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        new Response(JSON.stringify({ status: 409, errorCode: 'ECR-AUTH-0409', title: 'x' }), {
+          status: 409,
+          headers: { 'Content-Type': 'application/problem+json' },
+        })),
+    );
+    const hook = vi.fn();
+    const off = onBeforeLoginRedirect(hook);
+    checkSessionUser(new QueryClient(), me(7));
+
+    const failure = await apiFetch('/api/v1/documents/5/cells', { method: 'PATCH' }).catch((e: unknown) => e);
+
+    expect(failure).toBeInstanceOf(EcrApiError);
+    expect(hook).toHaveBeenCalledTimes(1);
+    expect(reload).toHaveBeenCalledTimes(1);
+    expect(isSessionClosed()).toBe(true);
+    off();
+  });
+
+  it('інший 409 (конфлікт комірки) сеансу не чіпає', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        new Response(JSON.stringify({ status: 409, errorCode: 'ECR-CELL-0409', title: 'x' }), {
+          status: 409,
+          headers: { 'Content-Type': 'application/problem+json' },
+        })),
+    );
+
+    await apiFetch('/api/v1/documents/5/cells', { method: 'PATCH' }).catch(() => undefined);
+
+    expect(reload).not.toHaveBeenCalled();
+    expect(isSessionClosed()).toBe(false);
   });
 });
