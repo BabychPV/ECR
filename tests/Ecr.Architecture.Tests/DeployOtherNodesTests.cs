@@ -20,12 +20,15 @@ public sealed class DeployOtherNodesTests
             "foreign.$key.ok=$($null -eq $p)"
             "foreign.$key.hosts=$(if ($p) { ([regex]::Matches($p, 'NODE-[A-Z]') | ForEach-Object { $_.Value }) -join ',' } else { '' })"
             "foreign.$key.hint=$([bool] ($p -and $p.Contains('-SkipSchema') -and $p.Contains('-SkipOtherNodesCheck')))"
+            "foreign.$key.perm=$([bool] ($p -and $p.Contains('VIEW SERVER STATE')))"
         }
         Out-Foreign 'none'   @()
         Out-Foreign 'null'   $null
         Out-Foreign 'blank'  @('', '   ')
         Out-Foreign 'one'    @('NODE-B')
         Out-Foreign 'two'    @('NODE-C', 'NODE-B', 'NODE-B ')
+        Out-Foreign 'noperm' @('#ECR-NO-VIEW-SERVER-STATE')
+        Out-Foreign 'nopermpad' @(' #ECR-NO-VIEW-SERVER-STATE ', '')
         """;
 
     private static readonly Lazy<Dictionary<string, string>> Results =
@@ -34,20 +37,25 @@ public sealed class DeployOtherNodesTests
     /// <remarks>
     /// Мутації (CI): повертати <c>$null</c> завжди → червоні <c>one</c>/<c>two</c>; не прибирати порожні
     /// рядки → червоний <c>blank</c>; прибрати підказку <c>-SkipSchema</c> → червоні <c>hint</c>.
+    /// ⛔ R6-X4/X4-01: маркер «немає VIEW SERVER STATE» → відмова (fail-closed), а не «нікого немає»;
+    /// прибрати гілку маркера → червоні <c>noperm</c>/<c>nopermpad</c>.
     /// </remarks>
     [Theory]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     [Trait(TestCategories.Category, TestCategories.Architecture)]
-    [InlineData("none", "True", "", "False")]
-    [InlineData("null", "True", "", "False")]
-    [InlineData("blank", "True", "", "False")]
-    [InlineData("one", "False", "NODE-B", "True")]
-    [InlineData("two", "False", "NODE-B,NODE-C", "True")]
-    public void Сеанси_застосунку_з_інших_вузлів_зупиняють_зміну_схеми(string key, string ok, string hosts, string hint)
+    [InlineData("none", "True", "", "False", "False")]
+    [InlineData("null", "True", "", "False", "False")]
+    [InlineData("blank", "True", "", "False", "False")]
+    [InlineData("one", "False", "NODE-B", "True", "False")]
+    [InlineData("two", "False", "NODE-B,NODE-C", "True", "False")]
+    [InlineData("noperm", "False", "", "True", "True")]
+    [InlineData("nopermpad", "False", "", "True", "True")]
+    public void Сеанси_застосунку_з_інших_вузлів_зупиняють_зміну_схеми(string key, string ok, string hosts, string hint, string perm)
     {
         Assert.Equal(ok, DeployScriptHarness.Value(Results.Value, $"foreign.{key}.ok"));
         Assert.Equal(hosts, DeployScriptHarness.Value(Results.Value, $"foreign.{key}.hosts"));
         Assert.Equal(hint, DeployScriptHarness.Value(Results.Value, $"foreign.{key}.hint"));
+        Assert.Equal(perm, DeployScriptHarness.Value(Results.Value, $"foreign.{key}.perm"));
     }
 
     /// <remarks>
@@ -74,5 +82,28 @@ public sealed class DeployOtherNodesTests
 
         var queryText = script.Substring(query, Math.Min(600, script.Length - query));
         Assert.Contains("HOST_NAME()", queryText, StringComparison.Ordinal);
+    }
+
+    /// <remarks>
+    /// ⛔ R6-X4/X4-01: без <c>VIEW SERVER STATE</c> <c>sys.dm_exec_sessions</c> показує лише власний сеанс
+    /// (нуль рядків без помилки). Тому той самий запит спершу перевіряє право й повертає маркер, який
+    /// <c>Get-ForeignEcrSessionProblem</c> перетворює на відмову. Мутація: прибрати <c>HAS_PERMS_BY_NAME</c>
+    /// або маркер із запиту → червоний.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Запит_інших_вузлів_спершу_перевіряє_VIEW_SERVER_STATE()
+    {
+        var script = File.ReadAllText(Path.Combine(SourceTree.Root, "tools", "deploy-ecr.ps1"));
+
+        var bypass = script.IndexOf("if ($SkipOtherNodesCheck)", StringComparison.Ordinal);
+        var query = script.IndexOf("FROM sys.dm_exec_sessions AS s", StringComparison.Ordinal);
+        Assert.True(bypass > 0 && query > bypass, "запиту до sys.dm_exec_sessions немає");
+
+        var head = script.Substring(bypass, query - bypass);
+        Assert.Contains("HAS_PERMS_BY_NAME(NULL, NULL, N'VIEW SERVER STATE')", head, StringComparison.Ordinal);
+        Assert.Contains("$($script:NoServerStateMarker)", head, StringComparison.Ordinal);
+        Assert.Contains("$script:NoServerStateMarker = '#ECR-NO-VIEW-SERVER-STATE'", script, StringComparison.Ordinal);
     }
 }

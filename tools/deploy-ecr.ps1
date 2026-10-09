@@ -80,6 +80,10 @@
     Логін SQL-автентифікації для кроку схеми — елевований DBA-принципал.
     Без нього — інтегрована (`-E`), тобто обліковий запис, під яким
     запущено сам скрипт.
+    ⛔ R6-X4/X4-01: крім прав на базу, принципалу кроку схеми потрібне
+    серверне VIEW SERVER STATE (sysadmin має його й так): без нього
+    перевірка інших вузлів (-SkipOtherNodesCheck) не бачить чужих сеансів і
+    крок 2 відмовляє, а не пропускає.
 
 .PARAMETER SqlPassword
     Пароль до -SqlLogin. Ніколи не передається sqlcmd аргументом `-P`
@@ -296,6 +300,9 @@
     би в нову схему. Прапорець — лише коли такі сеанси точно не ECR (інша
     програма на SqlClient); відповідальність за зупинку всіх вузлів — на тому,
     хто запускає. Нічого не дає з -SkipSchema (крок 2 тоді не виконується).
+    ⛔ R6-X4/X4-01: принципал без VIEW SERVER STATE бачить у sys.dm_exec_sessions
+    лише власний сеанс — тоді крок 2 теж відмовляє (fail-closed), а не
+    друкує «сеансів немає».
 
 .PARAMETER BackupMaxAgeHours
     Найстаріша прийнятна повна чи диференційна копія -Database за
@@ -1161,6 +1168,10 @@ function Get-SchemaDowngradeProblem {
 # sys.dm_exec_sessions: сеанси застосунку (SqlClient / Application Name ECR*) з
 # ІНШИХ хостів до -Database. Чиста функція: рядки запиту → текст відмови або $null.
 # Повертає відмову ДО зупинки локальних служб — простою від відмови немає.
+# ⛔ R6-X4/X4-01: без VIEW SERVER STATE sys.dm_exec_sessions показує лише ВЛАСНИЙ сеанс
+# (фільтр видимості, не помилка дозволу) — нуль рядків означав би «не бачу», а не «нікого
+# немає». Запит тоді повертає маркер $script:NoServerStateMarker, і це теж відмова (fail-closed).
+$script:NoServerStateMarker = '#ECR-NO-VIEW-SERVER-STATE'
 function Get-ForeignEcrSessionProblem {
     param(
         [AllowNull()] [AllowEmptyCollection()] [string[]] $Rows,
@@ -1168,6 +1179,12 @@ function Get-ForeignEcrSessionProblem {
     )
 
     $hosts = @(@($Rows) | Where-Object { $_ -and $_.Trim() } | ForEach-Object { $_.Trim() } | Sort-Object -Unique)
+    if ($hosts -contains '#ECR-NO-VIEW-SERVER-STATE') {
+        return ("Не можу перевірити інші вузли: обліковому запису кроку схеми бракує VIEW SERVER STATE " +
+            "(sys.dm_exec_sessions без нього показує лише власний сеанс). Схему $Database НЕ змінено й служби не зупинено. " +
+            "DBA: GRANT VIEW SERVER STATE TO [<логін кроку схеми>]; або зупиніть EcrWorker і EcrApi на КОЖНОМУ вузлі " +
+            "і вимкніть їм автозапуск (runbook §8), запустіть скрипт з -SkipOtherNodesCheck, а решту вузлів оновлюйте потім з -SkipSchema.")
+    }
     if (-not $hosts.Count) { return $null }
     return ("До бази $Database під'єднано застосунок з інших вузлів: $($hosts -join ', '). Схему НЕ змінено й служби " +
         "не зупинено. Зупиніть EcrWorker і EcrApi на КОЖНОМУ вузлі (D-32, runbook §8), запустіть скрипт знову, а решту " +
@@ -1823,8 +1840,13 @@ END
                 "вузлі мають бути зупинені — за це відповідає той, хто запускає.") -ForegroundColor Yellow
         }
         else {
+            # ⛔ R6-X4/X4-01: спершу — чи бачить обліковий запис чужі сеанси взагалі (на SQL < 2022 назви
+            # VIEW SERVER PERFORMANCE STATE немає: HAS_PERMS_BY_NAME дає NULL → ISNULL зводить до «ні»).
             $foreignRows = Invoke-DeployQuery -TargetDb 'master' -Query (
-                "SET NOCOUNT ON; SELECT DISTINCT ISNULL(s.host_name, N'?') FROM sys.dm_exec_sessions AS s " +
+                "SET NOCOUNT ON; IF ISNULL(HAS_PERMS_BY_NAME(NULL, NULL, N'VIEW SERVER STATE'), 0) = 0 " +
+                "AND ISNULL(HAS_PERMS_BY_NAME(NULL, NULL, N'VIEW SERVER PERFORMANCE STATE'), 0) = 0 " +
+                "SELECT N'$($script:NoServerStateMarker)' ELSE " +
+                "SELECT DISTINCT ISNULL(s.host_name, N'?') FROM sys.dm_exec_sessions AS s " +
                 "WHERE s.database_id = DB_ID(N'$($Database.Replace("'", "''"))') AND s.is_user_process = 1 " +
                 "AND s.session_id <> @@SPID AND ISNULL(s.host_name, N'') <> HOST_NAME() " +
                 "AND (s.program_name LIKE N'%SqlClient Data Provider%' OR s.program_name LIKE N'ECR%');")
