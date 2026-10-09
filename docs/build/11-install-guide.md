@@ -83,6 +83,14 @@
   кроці 1; рівень сумісності бази нижче 130 зупиняє старт застосунку
   (`ECR-SYS-5031`, `SchemaValidator`). Яку редакцію знайдено і який
   `Database:EditionMode` із цього вийшов, скрипт друкує — розділ 2.5.
+- ✎ 2026-10-09 (`D-333`, L10-04): **сертифікат SQL Server, якому довіряє сервер
+  застосунку.** З'єднання з SQL завжди шифроване (`Encrypt=Mandatory`), і типово
+  сертифікат сервера **перевіряється** (`TrustServerCertificate=False`, `sqlcmd` без
+  `-C`): ланцюг до кореня з `LocalMachine\Root`, ім'я (CN/SAN) — те, що вказано як
+  екземпляр SQL Server у майстрі чи `-SqlInstance`. Самопідписаний сертифікат, який
+  SQL Server генерує сам, перевірку **не проходить** — для нього (лише стенд) є
+  свідомий прапорець «Trust the SQL Server certificate (unsafe)» у майстрі та
+  `-TrustServerCertificate` у `deploy-ecr.ps1` (розділ 2.2, «Сертифікат SQL Server»).
 - Порт для Kestrel (типово `5000`) вільний.
 - **Більше нічого.** `Ecr-Setup-<версія>.exe` (розділ 1, 2.1) — self-contained
   single-file: жодного .NET SDK чи Runtime, жодного Node, жодного
@@ -273,7 +281,11 @@ Import-Certificate -FilePath .\ecr-release-signing.cer -CertStoreLocation Cert:\
    «HTTP — лише стенд». Без явного вибору далі не пустить; докладно — розділ 2.7.
    HTTPS слухає на порту з кроку 2 (для `https://сервер/` — 443).
 5. **Database** — SQL Server, назва бази, автентифікація
-   (Windows або SQL-логін).
+   (Windows або SQL-логін). ✎ 2026-10-09 (`D-333`): прапорець **«Trust the SQL Server
+   certificate (unsafe)»** — типово вимкнений, і тоді сертифікат SQL перевіряється
+   (`TrustServerCertificate=False` у рядку служби, `sqlcmd` без `-C`). Увімкнути —
+   лише для самопідписаного сертифіката на стенді; майстер показує попередження тут
+   і червоний рядок «SQL Server certificate» на екрані Review.
 6. **Administrator Password** — лише в режимі «First deployment»;
    у режимі «Update» цей екран пропускається сам.
 7. **Review** — підсумок усього вище, **без жодного значення пароля**
@@ -338,6 +350,15 @@ HTTP вхід з інших машин не працює. Докладно — �
 Сертифікат **один на всі вузли**; обліковому запису служби потрібне право
 читання його закритого ключа. Докладно — `docs/admin/operations-runbook.md`
 п. 2.1 і п. 6.4 (ротація відкритих ключів після першого ввімкнення).
+
+⛔ **Сертифікат SQL Server** (✎ 2026-10-09, `D-333`, L10-04). Без перемикача
+`-TrustServerCertificate` скрипт викликає `sqlcmd` **без `-C`**: SQL Server має
+пред'явити сертифікат, якому довіряє ця машина, з іменем, що збігається з
+`-SqlInstance`. `-TrustServerCertificate` — свідомий вибір для самопідписаного
+сертифіката (стенд): сервер не автентифікується, скрипт друкує попередження.
+Перемикач стосується лише викликів `sqlcmd` самого скрипта; рядок служби
+`-ConnectionString` складаєте ви — у ньому `Encrypt=Mandatory;TrustServerCertificate=False`
+(або `True` за тим самим свідомим вибором).
 
 ⛔ **Викликати САМЕ так** (`.\deploy-ecr.ps1 ...`), а НЕ
 `pwsh -File .\deploy-ecr.ps1 ...` і не через новий процес: `-ConnectionString`/
@@ -929,6 +950,7 @@ Stop-Service EcrApi
 | Кракозябри в помилках `.ps1`-скриптів | Стара PowerShell 5.1 читає кириличний `.ps1` без UTF-8 BOM у системній кодовій сторінці | Скрипти цього дерева вже мають BOM; якщо власний скрипт — зберегти як UTF-8 **з BOM** |
 | `Cannot convert ... to SecureString` при виклику з `-ConnectionString $cs` | Викликали через `pwsh -File script.ps1 -Param $secureVar` — це НОВИЙ процес, `SecureString` не переживає межу процесів | Викликати `.\deploy-ecr.ps1 ...` напряму в тій самій сесії, без `-File` |
 | `The property 'Statement' cannot be found` під час `npm ci`/`npm run build` | Власний `npm.ps1` несумісний зі `Set-StrictMode -Version Latest` | Викликати `npm.cmd` замість голого `npm` |
+| `sqlcmd`/служба: «The certificate chain was issued by an authority that is not trusted» (або `SSL Provider … certificate`) | ✎ 2026-10-09 (`D-333`): сертифікат SQL Server перевіряється, а він самопідписаний чи ім'я не збігається з екземпляром | Поставити на SQL Server сертифікат, якому довіряє сервер застосунку, з іменем екземпляра; лише на стенді — прапорець майстра «Trust the SQL Server certificate (unsafe)» / `-TrustServerCertificate` і `TrustServerCertificate=True` у рядку |
 | `sqlcmd`: не може підключитись до `localhost` | SQL Server Express встановлюється як ІМЕНОВАНИЙ екземпляр | `<ІмяКомп'ютера>\SQLEXPRESS`, не голий `localhost` |
 | `CS2012`: файл `.pdb` зайнятий | Одночасна/перервана збірка лишила процес `VBCSCompiler.exe` з відкритим файлом | `dotnet build-server shutdown`, за потреби `Stop-Process` на залишених `VBCSCompiler`/`dotnet` |
 | `npm error EPERM ... unlink ... esbuild.exe` | Запущений `npm run dev` тримає файл у `node_modules` | Зупинити dev-сервер (`Stop-Process` на `node`/`esbuild`) перед `npm ci` |
@@ -964,7 +986,8 @@ Restart-Service EcrApi
 
 ```powershell
 $name  = 'ECR_ConnectionStrings__Ecr'
-$value = 'Server=<ІМ''Я>\SQLEXPRESS;Database=ECR;Trusted_Connection=True;TrustServerCertificate=True'
+# D-333: сертифікат SQL перевіряється; TrustServerCertificate=True — лише стенд із самопідписаним
+$value = 'Server=<ІМ''Я>\SQLEXPRESS;Database=ECR;Trusted_Connection=True;Encrypt=Mandatory;TrustServerCertificate=False'
 
 $key = 'HKLM:\SYSTEM\CurrentControlSet\Services\EcrApi'
 $existing = (Get-ItemProperty -Path $key -Name Environment -ErrorAction SilentlyContinue).Environment

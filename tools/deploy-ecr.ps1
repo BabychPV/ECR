@@ -87,6 +87,17 @@
     дочірнього процесу `SQLCMDPASSWORD`, той самий прийом, що вже в
     `verify-sql-scripts.ps1`.
 
+.PARAMETER TrustServerCertificate
+    ⛔ L10-04, D-333 (HU-12 R3 = A): довіряти сертифікату SQL Server БЕЗ
+    перевірки — `sqlcmd -C` на кожному виклику скрипта. ТИПОВО ВИМКНЕНО:
+    sqlcmd (ODBC 18+) шифрує з'єднання й перевіряє сертифікат сервера, тож
+    SQL Server має пред'явити сертифікат, якому довіряє ця машина, з іменем,
+    що збігається з `-SqlInstance`. Перемикач — свідомий вибір для
+    самопідписаного сертифіката (стенд): сервер не автентифікується, MITM на
+    шляху до SQL бачить дані й пароль `-SqlLogin`. Рядок підключення служби
+    (`-ConnectionString`) цей перемикач НЕ змінює — його `TrustServerCertificate`
+    задає той, хто рядок склав (майстер — тим самим прапорцем).
+
 .PARAMETER Database
     Ім'я ЦІЛЬОВОЇ бази — не тимчасової, яку скрипт міг би сам створити й
     видалити (на відміну від verify-sql-scripts.ps1). Без `-CreateDatabaseIfMissing`
@@ -343,6 +354,7 @@ param(
     [Parameter(Mandatory)] [string] $SqlInstance,
     [string] $SqlLogin,
     [System.Security.SecureString] $SqlPassword,
+    [switch] $TrustServerCertificate,
     [Parameter(Mandatory)] [string] $Database,
     [string] $ServiceAccount,
     [System.Security.SecureString] $ServicePassword,
@@ -1255,6 +1267,14 @@ foreach ($warning in $transport.Warnings) { Write-Warning $warning }
 
 $sqlAuth = if ($SqlLogin) { @('-U', $SqlLogin) } else { @('-E') }
 
+# ⛔ L10-04, D-333: `-C` (довіра до сертифіката SQL без перевірки) — лише за явним
+# -TrustServerCertificate. Без нього сертифікат сервера перевіряється.
+$sqlTrust = if ($TrustServerCertificate) { @('-C') } else { @() }
+if ($TrustServerCertificate) {
+    Write-Warning ("-TrustServerCertificate: сертифікат SQL Server НЕ перевіряється (sqlcmd -C). " +
+        "Сервер не автентифікований — лише для самопідписаного сертифіката на стенді (D-333).")
+}
+
 # ⚠ Чиста функція (як Merge-ServiceEnvironmentEntry): без мережі, щоб рішення
 # кроку 7 перевірялося на готових відповідях (D-134), а не лише на живому стенді.
 # Вхід — код відповіді /health/ready і тіло (HealthReportDto: status, checks[]).
@@ -1345,7 +1365,7 @@ function Invoke-DeploySql {
         [string] $File
     )
 
-    $arguments = @('-S', $SqlInstance) + $sqlAuth + @('-C', '-b', '-I', '-d', $TargetDb)
+    $arguments = @('-S', $SqlInstance) + $sqlAuth + $sqlTrust + @('-b', '-I', '-d', $TargetDb)
     $arguments += if ($File) { @('-i', $File) } else { @('-Q', $Query) }
     $what = if ($File) { Split-Path -Leaf $File } else { $Query }
 
@@ -1373,7 +1393,7 @@ function Invoke-DeployQuery {
         [Parameter(Mandatory)] [string] $Query
     )
 
-    $arguments = @('-S', $SqlInstance) + $sqlAuth + @('-C', '-b', '-I', '-h', '-1', '-W', '-s', '|', '-d', $TargetDb, '-Q', $Query)
+    $arguments = @('-S', $SqlInstance) + $sqlAuth + $sqlTrust + @('-b', '-I', '-h', '-1', '-W', '-s', '|', '-d', $TargetDb, '-Q', $Query)
     if (-not $PSCmdlet.ShouldProcess("$SqlInstance / $TargetDb", "sqlcmd -Q $Query")) { return $null }
 
     $previousEap = $ErrorActionPreference

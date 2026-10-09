@@ -119,6 +119,50 @@ public sealed class DeployArgumentsTests
         Assert.Equal("Mandatory", parsed["Encrypt"]);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Типово_сертифікат_SQL_перевіряється_і_скрипт_без_перемикача_довіри()
+    {
+        // L10-04, D-333 (HU-12 R3 = A): прапорець «довіряти сертифікату SQL» типово вимкнений.
+        var state = new WizardState();
+
+        Assert.False(state.TrustSqlServerCertificate);
+        var parsed = Parse(DeployArguments.BuildConnectionString(state));
+        Assert.Equal("Mandatory", parsed["Encrypt"]);
+        Assert.Equal("False", parsed["TrustServerCertificate"]);
+        Assert.DoesNotContain("TrustServerCertificate", DeployArguments.Build(state).Select(a => a.Key));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Увімкнений_прапорець_довіри_дає_True_у_рядку_і_перемикач_скрипту()
+    {
+        // D-333: свідомий вибір адміністратора — і рядок служби, і sqlcmd скрипта (-C).
+        var state = new WizardState { TrustSqlServerCertificate = true };
+
+        var parsed = Parse(DeployArguments.BuildConnectionString(state));
+        Assert.Equal("Mandatory", parsed["Encrypt"]);
+        Assert.Equal("True", parsed["TrustServerCertificate"]);
+        var trust = DeployArguments.Build(state).Single(a => a.Key == "TrustServerCertificate");
+        Assert.Null(trust.Value);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Скрипт_розгортання_кличе_sqlcmd_з_C_лише_за_перемикачем_довіри()
+    {
+        // D-333: раніше `-C` стояв безумовно в кожному виклику sqlcmd deploy-ecr.ps1.
+        var script = File.ReadAllText(Path.Combine(SourceTree.Root, "tools", "deploy-ecr.ps1"));
+
+        Assert.Contains("[switch] $TrustServerCertificate", script, StringComparison.Ordinal);
+        Assert.Contains("$sqlTrust = if ($TrustServerCertificate) { @('-C') } else { @() }", script, StringComparison.Ordinal);
+        Assert.DoesNotContain("@('-C',", script, StringComparison.Ordinal);
+        Assert.Equal(2, script.Split("$sqlAuth + $sqlTrust +").Length - 1);
+    }
+
     private static DbConnectionStringBuilder Parse(SecureString secure)
     {
         var bstr = Marshal.SecureStringToBSTR(secure);
