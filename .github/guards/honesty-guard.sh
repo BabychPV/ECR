@@ -51,6 +51,9 @@ REPORT="$(printf '%s\n' "$DIFF" | awk '
     }
 
     # ── 2. Вимкнений тест ─────────────────────────────────────────────────
+    # ⚠ Лише `Skip =` / `[Ignore` В ОДНОМУ рядку. Перенесений аргумент (`Skip` і `=` на різних
+    # рядках), `SkipUnless`, `Explicit`, `Assert.Skip` ловить не цей сторож, а Architecture-тест
+    # NoDisabledTestsTests (читає весь код тестів і розбирає атрибут до закривної дужки; L10-11).
     if (!is_comment && (text ~ /Skip[[:space:]]*=/ || text ~ /\[Ignore/)) {
       emit(file, line, "тест вимкнено (Skip/Ignore)", text)
     }
