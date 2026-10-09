@@ -1,4 +1,5 @@
 // tests/Ecr.Infrastructure.Tests/Reporting/ReportSnapshotBuildTests.cs
+using Ecr.Domain.Entities.Documents;
 using Ecr.Domain.Entities.Reporting;
 using Ecr.Domain.Entities.Workflow;
 using Ecr.Domain.Enums;
@@ -117,6 +118,11 @@ public sealed class ReportSnapshotBuildTests(SqlServerFixture sql)
 
         // Єдиний аркуш періоду ПОДАНО: `StatusOfDataAsync` виведе `Submitted`,
         // і саме цей статус дістанеться щойно створеному зрізу.
+        //
+        // ⚠ R5-W1 / W1-02: статус зрізу рахується від СКЛАДУ документа (`doc.DocumentSheet`,
+        // `IsIncluded`), а не від самих рядків стану. `TestDocumentBuilder` складу не створює —
+        // без цього рядка аркушів «немає», і зріз чесно `Draft`.
+        db.DocumentSheets.Add(new DocumentSheet(document.DocumentId, document.SheetDefId));
         var state = new ApprovalState(document.DocumentId, document.SheetDefId, document.PeriodKey.Value);
         state.Submit(userId: 5, Now);
         db.ApprovalStates.Add(state);
