@@ -1,6 +1,7 @@
 import type { JSX } from 'react';
 import { Alert, Button, Group, List, Text } from '@mantine/core';
 import type { CellConflictDto } from '@/api/types';
+import { isHumanOrigin } from '@/features/audit/api';
 import { t } from '@/shared/i18n';
 import { cellText } from './cellValue';
 import { conflictTimeLabel } from './useCellPatch';
@@ -78,7 +79,7 @@ export function ConflictPanel({
                   value: valueText(item.theirValue),
                   // ⚠ `null` — «невідомо», і так і написано словом: порожнє
                   // місце читалося б як «ніхто».
-                  user: item.theirUser ?? t('grid.conflictUnknownUser'),
+                  user: conflictAuthor(item),
                   time: conflictTimeLabel(item.theirChangedAt) ?? t('grid.conflictUnknownTime'),
                 })}
           </List.Item>
@@ -113,6 +114,19 @@ export function ConflictPanel({
  */
 export function hasCurrentVersion(conflict: CellConflictDto): boolean {
   return typeof conflict.currentVersion === 'string' && conflict.currentVersion.length > 0;
+}
+
+/**
+ * Хто зробив чужу правку — словами для людини.
+ *
+ * ⚠ AN-115: правка в сітці та імпорт книги (`UserEdit`, `Import`, `ImportOverwrite`) — ім'я, яке
+ * дав сервер; перерахунок, інтеграція, міграція — «Система» словом мови інтерфейсу, а не
+ * технічне `system` із відповіді. `null` — «невідомо»: порожнє місце читалося б як «ніхто».
+ */
+export function conflictAuthor(conflict: CellConflictDto): string {
+  const origin = conflict.theirOrigin;
+  if (origin !== null && origin !== undefined && !isHumanOrigin(origin)) return t('audit.systemAuthor');
+  return conflict.theirUser ?? t('grid.conflictUnknownUser');
 }
 
 function valueText(value: unknown): string {

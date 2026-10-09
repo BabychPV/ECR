@@ -1,7 +1,7 @@
 import { memo, type JSX, type ReactNode } from 'react';
 import { Badge, Box, Group, Table, Text, VisuallyHidden } from '@mantine/core';
 import type { CellChangePage } from '@/api/types';
-import { authorName } from '@/features/audit/authorOptions';
+import { cellAuthorHint, cellAuthorName } from '@/features/audit/authorOptions';
 import { decimalDelta } from '@/features/audit/changeDelta';
 import { Timestamp } from '@/shared/ui/Timestamp';
 import { TwoLine } from '@/shared/ui/TwoLine';
@@ -233,8 +233,11 @@ export const CellChangesTable = memo(function CellChangesTable({
                 <Timestamp value={change.changedAt} />
               </Text>
             </Table.Td>
-            {/* ⛔ `R-18`: імена з сервера, а не «user 3». Номер — підказкою: фільтри стоять на ньому. */}
-            <Table.Td title={`#${String(change.changedByUserId)}`}>{authorName(change)}</Table.Td>
+            {/* ⛔ `R-18`: імена з сервера, а не «user 3». Номер — підказкою: фільтри стоять на ньому.
+                AN-115: перерахунок/інтеграція/міграція — «Система», хто запустив — у підказці. */}
+            <Table.Td title={cellAuthorHint(change)} data-audit-author="">
+              {cellAuthorName(change)}
+            </Table.Td>
             <Table.Td>
               {/* Макет: верхній рядок — комірка, нижній — документ (там «· sheet › table»: серверу
                   бракує назв аркуша/таблиці, TODO-контракт BE-16 у листі UI-38). */}
