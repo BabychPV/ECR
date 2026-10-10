@@ -1,10 +1,12 @@
 // src/Ecr.Application/Integration/IntegrationHandlers.cs
 using System.Globalization;
+using System.Text.Json;
 using Ecr.Application.Common;
 using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
 using Ecr.Application.Templates;
+using Ecr.Domain.Abstractions;
 using Ecr.Domain.Errors;
 
 namespace Ecr.Application.Integration;
@@ -475,12 +477,27 @@ public sealed class ListJobsHandler(
 /// експорту бачив у шухляді «Мої задачі» кнопку «Повторити», яка давала 403.
 /// Чужі й системні задачі (автор <c>null</c>) — як і раніше, лише з правом.
 /// </para>
+/// <para>
+/// ⛔ R9-F3 / F3-02. <c>System.ViewHealth</c> — безпечне право (його має й «Аудитор»), і доти
+/// його власник повторював будь-яку задачу без права на САМУ дію: провалений збір (пише
+/// значення в проєкти) — без небезпечного <c>Integration.Manage</c>, перевірку узгодженості —
+/// без небезпечного <c>System.RunJob</c> і його обов'язкової причини. Тепер ці дві дії вимагають
+/// свого права від КОЖНОГО, хто повторює (<see cref="DangerousActionPermission"/>), а кожен
+/// повтор лягає в <c>aud.SecurityEvent</c> (<see cref="RestartedEventType"/>): хто повторив,
+/// чию задачу. Межа контракту §9 (<c>System.ViewHealth</c> для чужої задачі) не змінена —
+/// звуження до <c>System.RunJob</c> лишається рішенням людини.
+/// </para>
 /// </remarks>
 public sealed class RestartJobHandler(
     IBackgroundJobScheduler jobs,
     IAccessDecisionService access,
-    ICurrentUser currentUser)
+    ICurrentUser currentUser,
+    IAuditWriter audit,
+    IClock clock)
 {
+    /// <summary>Тип події журналу безпеки: ручний перезапуск задачі.</summary>
+    public const string RestartedEventType = "JobRestarted";
+
     /// <summary>Код помилки: задачу можна перезапустити, лише коли вона провалилась.</summary>
     public const string NotFailedErrorCode = ErrorCodes.JobStateConflict;
 
@@ -519,10 +536,25 @@ public sealed class RestartJobHandler(
         // задачі»); чужу чи системну (автор `null`) — лише з правом.
         var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
 
-        if (!PermissionCheck.IsGranted(profile, GetJobStatusHandler.Permission))
-        {
-            var ownerId = await jobs.GetCreatedByUserIdAsync(jobId, ct).ConfigureAwait(false);
+        var ownerId = await jobs.GetCreatedByUserIdAsync(jobId, ct).ConfigureAwait(false);
 
+        if (PermissionCheck.IsGranted(profile, GetJobStatusHandler.Permission))
+        {
+            // ⛔ R9-F3 / F3-02: збір, синк подій і перевірка узгодженості прав під час виконання не
+            // перевіряють — право на саму дію потрібне й власникові `System.ViewHealth`.
+            if (DangerousActionPermission(jobId) is { } required && !PermissionCheck.IsGranted(profile, required))
+            {
+                throw new AccessDeniedException(
+                    "ECR-AUTH-0403", $"Потрібне право {required}.",
+                    new Dictionary<string, object?>
+                    {
+                        ["messageKey"] = "err.ECR-AUTH-0403.permission",
+                        ["permission"] = required,
+                    });
+            }
+        }
+        else
+        {
             // L1-19: автор повторює лише те, на що право ЩЕ за ним (збір, синк подій та
             // перевірка узгодженості прав під час виконання не перевіряють). Відмова —
             // та сама, що для чужої задачі: нічого про цільовий документ чи право.
@@ -569,6 +601,51 @@ public sealed class RestartJobHandler(
                     ["jobId"] = jobId,
                 });
         }
+
+        // ⛔ R9-F3 / F3-02: хто ініціював повтор — доти не писалось ніде (імпорт пише комірки від
+        // імені автора з payload). Після успішного перезапуску, як і решта подій безпеки.
+        await audit.WriteSecurityEventAsync(
+            new SecurityEventRecord(
+                clock.UtcNow,
+                RestartedEventType,
+                TargetUserId: ownerId,
+                TargetRoleId: null,
+                JsonSerializer.Serialize(new { jobId, state = status.State, foreign = ownerId != userId }),
+                userId,
+                currentUser.CorrelationId),
+            ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Небезпечне право на САМУ дію задачі, яке під час виконання не перевіряється: збір і синк
+    /// подій — <c>Integration.Manage</c>, перевірка узгодженості — <c>System.RunJob</c>;
+    /// <c>null</c> — для решти типів.
+    /// </summary>
+    /// <param name="jobId">Ідентифікатор задачі (<c>{Тип}-{guid}</c> або <c>{Тип}~{ціль}~{guid}</c>).</param>
+    /// <returns>Код права або <c>null</c>.</returns>
+    internal static string? DangerousActionPermission(string jobId)
+    {
+        var code = JobCodeOf(jobId);
+
+        if (code is nameof(ICollectionJob) or nameof(ISourceEventSyncJob))
+        {
+            return SaveDataSourceHandler.Permission;
+        }
+
+        return code == nameof(IConsistencyCheckJob)
+            ? Consistency.RunConsistencyCheckHandler.Permission
+            : null;
+    }
+
+    /// <summary>Тип задачі — до першого <c>-</c> або <c>~</c>.</summary>
+    /// <remarks>
+    /// Черга БД і старі id: <c>{Тип}-{guid}</c>; Quartz, цільові задачі: <c>{Тип}~{ціль}~{guid}</c>
+    /// (QuartzJobScheduler.TargetPrefixOf). Імена типів не містять жодного з роздільників.
+    /// </remarks>
+    private static string JobCodeOf(string jobId)
+    {
+        var dash = jobId.AsSpan().IndexOfAny('-', '~');
+        return dash > 0 ? jobId[..dash] : jobId;
     }
 
     /// <summary>
@@ -584,21 +661,12 @@ public sealed class RestartJobHandler(
     private async Task<bool> MayRepeatOwnAsync(
         AccessProfile profile, string jobId, long? documentId, CancellationToken ct)
     {
-        // Тип — до першого `-` (черга БД і старі id: `{Тип}-{guid}`) АБО `~` (Quartz, цільові
-        // задачі: `{Тип}~{ціль}~{guid}`, QuartzJobScheduler.TargetPrefixOf). Імена типів
-        // не містять жодного з роздільників.
-        var dash = jobId.AsSpan().IndexOfAny('-', '~');
-        var code = dash > 0 ? jobId[..dash] : jobId;
-
-        if (code is nameof(ICollectionJob) or nameof(ISourceEventSyncJob))
+        if (DangerousActionPermission(jobId) is { } required)
         {
-            return PermissionCheck.IsGranted(profile, SaveDataSourceHandler.Permission);
+            return PermissionCheck.IsGranted(profile, required);
         }
 
-        if (code == nameof(IConsistencyCheckJob))
-        {
-            return PermissionCheck.IsGranted(profile, Consistency.RunConsistencyCheckHandler.Permission);
-        }
+        var code = JobCodeOf(jobId);
 
         // Каскад власної правки (PatchCells) — як перерахунок: документ іде зі стану задачі.
         if (code is nameof(IRecalculationJob) or nameof(IFormulaRecalculationJob))
@@ -656,8 +724,17 @@ public sealed class RestartJobHandler(
 public sealed class CancelJobHandler(
     IBackgroundJobScheduler jobs,
     IAccessDecisionService access,
-    ICurrentUser currentUser)
+    ICurrentUser currentUser,
+    IAuditWriter audit,
+    IClock clock)
 {
+    /// <summary>Тип події журналу безпеки: скасування задачі.</summary>
+    /// <remarks>
+    /// ⛔ R9-F3 / F3-02: власник <c>System.ViewHealth</c> (і «Аудитор») скасовує чужі задачі за
+    /// контрактом §9, але доти без жодного сліду — хто зупинив чужий перерахунок чи збір.
+    /// </remarks>
+    public const string CancelledEventType = "JobCancelled";
+
     /// <summary>Код помилки: скасувати можна лише задачу, що ще не завершилась.</summary>
     /// <remarks>
     /// ⚠ Значення збігається з <see cref="RestartJobHandler.NotFailedErrorCode"/>
@@ -719,6 +796,7 @@ public sealed class CancelJobHandler(
         }
 
         var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
+        var ownerId = await jobs.GetCreatedByUserIdAsync(jobId, ct).ConfigureAwait(false);
 
         if (!PermissionCheck.IsGranted(profile, GetJobStatusHandler.Permission))
         {
@@ -726,8 +804,6 @@ public sealed class CancelJobHandler(
             // ⚠ `null` (системна задача за розкладом) автором не є нікому:
             // порівняння з `int?` дало б `false`, але покладатися тут на
             // семантику `Nullable` мовчки — не варто, і тест на це є.
-            var ownerId = await jobs.GetCreatedByUserIdAsync(jobId, ct).ConfigureAwait(false);
-
             if (ownerId is null || ownerId.Value != userId)
             {
                 throw new AccessDeniedException(
@@ -757,5 +833,16 @@ public sealed class CancelJobHandler(
         }
 
         await jobs.CancelAsync(jobId, ct).ConfigureAwait(false);
+
+        await audit.WriteSecurityEventAsync(
+            new SecurityEventRecord(
+                clock.UtcNow,
+                CancelledEventType,
+                TargetUserId: ownerId,
+                TargetRoleId: null,
+                JsonSerializer.Serialize(new { jobId, state = status.State, foreign = ownerId != userId }),
+                userId,
+                currentUser.CorrelationId),
+            ct).ConfigureAwait(false);
     }
 }

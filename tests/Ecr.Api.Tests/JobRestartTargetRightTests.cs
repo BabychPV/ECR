@@ -26,11 +26,13 @@ namespace Ecr.Api.Tests;
 public sealed class JobRestartTargetRightTests
 {
     private const int Author = 9;
+    private const int Stranger = 10;
     private const long DocumentId = 77;
 
     private readonly IBackgroundJobScheduler _jobs = Substitute.For<IBackgroundJobScheduler>();
     private readonly IAccessDecisionService _access = Substitute.For<IAccessDecisionService>();
     private readonly ICurrentUser _user = Substitute.For<ICurrentUser>();
+    private readonly IAuditWriter _audit = Substitute.For<IAuditWriter>();
 
     [Theory]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
@@ -130,14 +132,53 @@ public sealed class JobRestartTargetRightTests
         await _jobs.DidNotReceive().RestartAsync(Arg.Any<string>(), Arg.Any<CancellationToken>());
     }
 
-    [Fact]
+    /// <summary>
+    /// R9-F3 / F3-02: <c>System.ViewHealth</c> (безпечне право, є й в «Аудитора») не замінює
+    /// небезпечного права на саму дію: чужий збір чи синк — лише з <c>Integration.Manage</c>,
+    /// перевірку узгодженості — лише з <c>System.RunJob</c>.
+    /// </summary>
+    /// <remarks>Мутація: прибрати перевірку <c>DangerousActionPermission</c> у гілці ViewHealth — червоніє.</remarks>
+    [Theory]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
-    public async Task З_ViewHealth_будь_який_тип_повторюється_без_права_на_дію()
+    [InlineData("ICollectionJob", "Integration.Manage")]
+    [InlineData("ISourceEventSyncJob", "Integration.Manage")]
+    [InlineData("IConsistencyCheckJob", "System.RunJob")]
+    public async Task З_ViewHealth_чужий_збір_і_перевірку_без_права_на_дію_не_повторити(string code, string required)
     {
-        var jobId = Failed("ICollectionJob");
+        var jobId = Failed(code);
+        _jobs.GetCreatedByUserIdAsync(jobId, Arg.Any<CancellationToken>()).Returns(Stranger);
         SignedIn("System.ViewHealth");
 
+        var denied = await Assert.ThrowsAsync<AccessDeniedException>(
+            () => Controller().Restart(jobId, CancellationToken.None));
+
+        Assert.Equal("err.ECR-AUTH-0403.permission", denied.Details?["messageKey"]);
+        Assert.Equal(required, denied.Details?["permission"]);
+        await _jobs.DidNotReceive().RestartAsync(Arg.Any<string>(), Arg.Any<CancellationToken>());
+        await _audit.DidNotReceive().WriteSecurityEventAsync(Arg.Any<SecurityEventRecord>(), Arg.Any<CancellationToken>());
+    }
+
+    /// <summary>
+    /// R9-F3 / F3-02: з правом на дію чужий збір повторюється — і повтор лягає в журнал безпеки
+    /// (хто повторив, чию задачу).
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public async Task З_ViewHealth_і_Integration_Manage_чужий_збір_повторюється_і_лишає_слід()
+    {
+        var jobId = Failed("ICollectionJob");
+        _jobs.GetCreatedByUserIdAsync(jobId, Arg.Any<CancellationToken>()).Returns(Stranger);
+        SignedIn("System.ViewHealth", "Integration.Manage");
+
         Assert.IsType<AcceptedResult>(await Controller().Restart(jobId, CancellationToken.None));
+
+        await _audit.Received(1).WriteSecurityEventAsync(
+            Arg.Is<SecurityEventRecord>(e =>
+                e.EventType == RestartJobHandler.RestartedEventType
+                && e.ChangedByUserId == Author
+                && e.TargetUserId == Stranger
+                && e.DetailsJson != null && e.DetailsJson.Contains(jobId, StringComparison.Ordinal)),
+            Arg.Any<CancellationToken>());
     }
 
     [Theory]
@@ -238,6 +279,6 @@ public sealed class JobRestartTargetRightTests
     private JobsController Controller() => new(
         new GetJobStatusHandler(_jobs, _access, _user, new FakeUiStringCatalog()),
         new ListJobsHandler(_jobs, _access, _user, new FakeUiStringCatalog()),
-        new RestartJobHandler(_jobs, _access, _user),
-        new CancelJobHandler(_jobs, _access, _user));
+        new RestartJobHandler(_jobs, _access, _user, _audit, Substitute.For<Ecr.Domain.Abstractions.IClock>()),
+        new CancelJobHandler(_jobs, _access, _user, _audit, Substitute.For<Ecr.Domain.Abstractions.IClock>()));
 }

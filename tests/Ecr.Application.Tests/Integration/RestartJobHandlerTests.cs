@@ -32,7 +32,7 @@ public sealed class RestartJobHandlerTests
             .Returns(new AccessBuilder { UserId = Viewer }.Permission(GetJobStatusHandler.Permission).Build());
     }
 
-    private RestartJobHandler Handler() => new(_jobs, _access, _user);
+    private RestartJobHandler Handler() => new(_jobs, _access, _user, Substitute.For<IAuditWriter>(), Substitute.For<Ecr.Domain.Abstractions.IClock>());
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
