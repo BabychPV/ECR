@@ -280,6 +280,9 @@ export const LOGOUT_PATH = '/api/v1/logout';
  */
 let signedOut = false;
 
+/** Перевірка власника cookie, що триває (`verifySessionOwner`): одночасні сповіщення зливаються в одну. */
+let ownerCheck: Promise<void> | null = null;
+
 /** Позначає вихід: далі в мережу йде лише сам `POST /api/v1/logout`. */
 export function beginSignOut(): void {
   signedOut = true;
@@ -290,6 +293,7 @@ export function resetSignOutForTests(): void {
   signedOut = false;
   sessionSwitched = false;
   sessionUserId = null;
+  ownerCheck = null;
 }
 
 /**
@@ -327,6 +331,51 @@ export function abandonSwitchedSession(): void {
   if (typeof window === 'undefined') return;
   runBeforeLoginRedirect(window.location.pathname + window.location.search);
   reloadPage();
+}
+
+/**
+ * Реакція на сповіщення сусідньої вкладки «сеанс змінився» (R2-05): покидає сеанс лише коли власник cookie ІНШИЙ.
+ *
+ * ⛔ Сповіщення не каже, ХТО увійшов. Повторний вхід ТОГО САМОГО користувача (cookie спливла, вкладка 1 перейшла
+ * на `/login`) перезавантажував усі інші вкладки й переносив їхні незбережені правки в слід `lostEdits` — хоча
+ * автозбереження під новим cookie того самого користувача було б безпечним. Тут вкладка питає `/me`: той самий
+ * `userId` — нічого не робить; інший, `401`, збій мережі чи невідомий власник вкладки — `abandonSwitchedSession`
+ * (невідомо — безпечніше покинути).
+ *
+ * ⚠ Сирий `fetch`, а не `apiFetch`: `401` не має запускати перенаправлення з `?from=` (вкладка й так піде на вхід
+ * через `abandonSwitchedSession`), а чужий cookie не має ПІДПИСУВАТИСЬ `X-Ecr-User` цієї вкладки. Одночасні
+ * сповіщення (канал + `storage`) зливаються в одну перевірку.
+ *
+ * ⚠ Вихід (`UserMenu.signOut`) безумовний сам по собі: після виходу `/me` дає `401`.
+ */
+export function verifySessionOwner(): Promise<void> {
+  if (isSessionClosed()) return Promise.resolve();
+  if (ownerCheck !== null) return ownerCheck;
+
+  ownerCheck = (async () => {
+    const known = sessionUserId;
+    if (known === null) {
+      abandonSwitchedSession();
+      return;
+    }
+
+    try {
+      const response = await fetch('/api/v1/me', {
+        credentials: 'include',
+        cache: 'no-store',
+        headers: { [CORRELATION_HEADER]: newCorrelationId() },
+      });
+      const owner = response.ok ? ((await response.json()) as { userId?: unknown }) : null;
+
+      if (owner === null || owner.userId !== known) abandonSwitchedSession();
+    } catch {
+      abandonSwitchedSession();
+    }
+  })().finally(() => {
+    ownerCheck = null;
+  });
+
+  return ownerCheck;
 }
 
 /**
