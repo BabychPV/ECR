@@ -26,6 +26,9 @@ internal sealed class DatabaseStep : IWizardStep
     private CheckBox? _backupAcceptCheckBox;
     private Label? _backupAcceptWarning;
     private BackupCheckResult? _backup;
+    private GroupBox? _otherNodesGroup;
+    private CheckBox? _otherNodesAcceptCheckBox;
+    private Label? _otherNodesAcceptWarning;
 
     public DatabaseStep(WizardState state)
     {
@@ -56,6 +59,7 @@ internal sealed class DatabaseStep : IWizardStep
         root.Controls.Add(_skipSchemaCheckBox);
 
         root.Controls.Add(BuildBackupGroup());
+        root.Controls.Add(BuildOtherNodesGroup());
         _skipSchemaCheckBox.CheckedChanged += (_, _) => UpdateBackupVisibility();
 
         return root;
@@ -210,6 +214,67 @@ internal sealed class DatabaseStep : IWizardStep
         var backupRequired = state.Mode == WizardMode.Update && !state.SkipSchema;
         state.Backup = backupRequired ? _backup : null;
         state.BackupRiskAccepted = backupRequired && _backupAcceptCheckBox!.Checked;
+
+        // ⛔ X4-05: позначка діє лише там, де скрипт перевіряв би інші вузли (крок 2 зі зміною схеми).
+        state.OtherNodesStoppedAccepted = !state.SkipSchema && _otherNodesAcceptCheckBox!.Checked;
+    }
+
+    /// <summary>
+    /// ⛔ X4-05 (аудит R6): позначка «інші вузли зупинено вручну / це не ECR» → <c>-SkipOtherNodesCheck</c>.
+    /// Крок 2 скрипта відмовляє, якщо до бази під'єднано застосунок з іншого хоста (D-32), а фільтр
+    /// <c>SqlClient</c> ловить і сторонні засоби (звітні, наші <c>Ecr.MethodologyImport</c>/<c>Ecr.Migration.PiAf</c>).
+    /// Без цієї позначки оператор мусив іти в командний рядок і звикав вмикати обхід. Типово знята; поставлена —
+    /// червоне попередження тут і червоний рядок на кроці Review.
+    /// </summary>
+    private GroupBox BuildOtherNodesGroup()
+    {
+        _otherNodesGroup = new GroupBox
+        {
+            Text = "Other nodes (schema change)",
+            Dock = DockStyle.Top,
+            AutoSize = true,
+            Padding = new Padding(8),
+            Margin = new Padding(0, 12, 0, 0),
+        };
+
+        var layout = new TableLayoutPanel { Dock = DockStyle.Top, ColumnCount = 1, AutoSize = true };
+
+        layout.Controls.Add(new Label
+        {
+            Text = "Before changing the schema deploy-ecr.ps1 refuses if an application session from ANOTHER host "
+                + "is connected to the database (an old node would write into the new schema). It stops the ECR "
+                + "services only on this machine. If it refuses and those sessions are another program, or you "
+                + "have stopped EcrWorker and EcrApi on every other node yourself, tick the box below.",
+            AutoSize = true,
+            MaximumSize = new Size(520, 0),
+            Margin = new Padding(0, 4, 6, 0),
+        });
+
+        _otherNodesAcceptCheckBox = new CheckBox
+        {
+            Text = "Other ECR nodes are stopped manually / the other sessions are not ECR",
+            AutoSize = true,
+            Checked = _state.OtherNodesStoppedAccepted,
+            Margin = new Padding(0, 8, 6, 0),
+        };
+        _otherNodesAcceptWarning = new Label
+        {
+            Text = "Warning: deploy-ecr.ps1 will run with -SkipOtherNodesCheck and will NOT look for other nodes. "
+                + "You are responsible for EcrWorker and EcrApi being stopped on EVERY other node.",
+            AutoSize = true,
+            MaximumSize = new Size(520, 0),
+            ForeColor = Color.DarkRed,
+            Visible = _state.OtherNodesStoppedAccepted,
+            Margin = new Padding(24, 4, 6, 0),
+        };
+        _otherNodesAcceptCheckBox.CheckedChanged +=
+            (_, _) => _otherNodesAcceptWarning.Visible = _otherNodesAcceptCheckBox.Checked;
+
+        layout.Controls.Add(_otherNodesAcceptCheckBox);
+        layout.Controls.Add(_otherNodesAcceptWarning);
+
+        _otherNodesGroup.Controls.Add(layout);
+        return _otherNodesGroup;
     }
 
     /// <summary>
@@ -288,6 +353,17 @@ internal sealed class DatabaseStep : IWizardStep
         if (!required)
         {
             _backupAcceptCheckBox!.Checked = false;
+        }
+
+        // ⛔ X4-05: перевірка інших вузлів іде в кроці 2 в ОБОХ режимах, але лише коли схему змінюють.
+        if (_otherNodesGroup is not null)
+        {
+            var schemaChanges = !_skipSchemaCheckBox.Checked;
+            _otherNodesGroup.Visible = schemaChanges;
+            if (!schemaChanges)
+            {
+                _otherNodesAcceptCheckBox!.Checked = false;
+            }
         }
     }
 
