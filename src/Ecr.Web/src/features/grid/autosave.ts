@@ -596,8 +596,13 @@ export function useDocumentPending(documentId: number, ownerUserId?: number): vo
   // зберегти їх уже нема чим, тож лишаємо слід для сторінки входу
   // (`lostEdits.ts`), прив'язаний до власника.
   useEffect(
-    () => onBeforeLoginRedirect((from) => recordLostEdits(ownerUserId, from)),
-    [ownerUserId],
+    () =>
+      onBeforeLoginRedirect((from) =>
+        recordLostEdits(ownerUserId, from, (tableInstanceId, periodKey, edits) =>
+          withKnownVersions(edits, cachedSlice(queryClient, tableInstanceId, periodKey)),
+        ),
+      ),
+    [ownerUserId, queryClient],
   );
 
   useEffect(() => {

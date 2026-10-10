@@ -7,6 +7,9 @@ import type { JSX, ReactNode } from 'react';
 import { apiFetch, setLoginRedirect } from '@/api/client';
 import { useDocumentPending } from '@/features/grid/autosave';
 import { putPendingEdit, resetPending } from '@/features/grid/pendingStore';
+import { peekLostEdits } from '@/features/grid/lostEdits';
+import { queryKeys } from '@/api/queryKeys';
+import type { TableSliceDto } from '@/api/types';
 import { LoginPage } from '@/pages/LoginPage';
 
 /**
@@ -216,5 +219,61 @@ describe('незбережені правки при обриві сесії', (
     unmount();
 
     expect(sessionStorage.length).toBe(0);
+  });
+
+  /*
+   * ⛔ G1-08: `baseVersion` правки — версія на мить введення, а не надсилання. Правка
+   * над ВЛАСНИМ успішним збереженням того ж рядка (кеш уже `BBB=`) після входу
+   * виглядала б «чужою зміною» і `planRestore` викидав би її як конфлікт.
+   */
+  describe('G1-08: версія рядка в сліді', () => {
+    function cachedSlice(rowVersion: string, cellA: unknown): TableSliceDto {
+      return {
+        tableInstanceId: 1,
+        periodKey: 202609,
+        columns: [],
+        rows: [
+          { rowKey: 'r1', ordinal: 1, rowKind: 'Static', label: null, rowVersion, cells: { A: cellA }, isOrphaned: false },
+        ],
+        cellPermissions: {},
+        cellConfirmations: {},
+      } as unknown as TableSliceDto;
+    }
+
+    async function lose(slice: TableSliceDto): Promise<void> {
+      const client = new QueryClient();
+      client.setQueryData(queryKeys.slices.one(1, 202609), slice);
+      const { unmount } = renderHook(() => useDocumentPending(DocumentId, Owner), {
+        wrapper: ({ children }: { children: ReactNode }): JSX.Element => (
+          <QueryClientProvider client={client}>{children}</QueryClientProvider>
+        ),
+      });
+      putPendingEdit(1, 202609, {
+        rowKey: 'r1',
+        columnCode: 'A',
+        value: '9',
+        isEmpty: false,
+        baseVersion: 'AAA=',
+        before: '4',
+      });
+      await apiFetch('/api/v1/documents/7').catch(() => undefined);
+      unmount();
+    }
+
+    it('рядок піднявся власним збереженням → у слід їде остання відома версія', async () => {
+      stubServer(Owner);
+      await lose(cachedSlice('BBB=', '4'));
+
+      const edit = peekLostEdits(Owner)?.slices[0]?.edits[0];
+      expect(edit?.baseVersion).toBe('BBB=');
+    });
+
+    it('чужа зміна тієї самої комірки → версія лишається старою (конфлікт чесний)', async () => {
+      stubServer(Owner);
+      await lose(cachedSlice('BBB=', '77'));
+
+      const edit = peekLostEdits(Owner)?.slices[0]?.edits[0];
+      expect(edit?.baseVersion).toBe('AAA=');
+    });
   });
 });
