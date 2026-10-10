@@ -252,6 +252,24 @@ public sealed class AcceptSourceUnitChangeHandler(
         var previousUnitId = map.AcceptSourceUnitChange(requestedSourceUnitId);
         var newSourceUnitId = map.SourceUnitId!.Value;
 
+        // ⛔ X3-01: за паузу шлях не читався, а покриття СУТНОСТІ вже наступні прогони закрили за рештою
+        // атрибутів (`pausedPaths` тримає інтервал непокритим лише в прогоні, що поставив паузу). Наздоганяння
+        // цієї дірки не бачить, і без дочитування точок за паузу в `ext.RawDataPoint` не буде ніколи — а
+        // згортка за часом інтерполює через дірку мовчки. Тому рішення людини саме ставить ручний збір
+        // сутності від прогону, що поставив паузу (його запитаний діапазон), до «зараз». Матеріалізацію
+        // дочитаного ставить сам `CollectionJob` (I1-01). Ручна пауза/відновлення моменту паузи не
+        // зберігає — це відоме обмеження, не цей шлях.
+        //
+        // ⛔ R10-V6 / V6-01 (MI-02 (в), як у PatchCellsHandler / DocumentHeaderHandlers): момент паузи стирає
+        // ця сама транзакція, а повторне «Прийняти» після коміту відмовляє 409 (`mappingUnitChangeNotPending`).
+        // Доти збір ставився після коміту, читання кодів і журналу безпеки: збій журналу, зупинка процесу чи
+        // скасування запиту в цьому вікні губили дочитування назавжди. Тепер черга в базі — постановка
+        // ВСЕРЕДИНІ транзакції прийняття, останнім оператором: або прийняття разом із дочитуванням, або нічого
+        // (збій постановки відкочує прийняття, пауза лишається — людина повторить). Quartz у пам'яті — одразу
+        // після коміту (до коміту його задача прочитала б ще призупинений мапінг), але ДО читання кодів і
+        // журналу безпеки, щоб їхній збій не скасовував постановку.
+        var enlist = jobs.EnlistsInCallerTransaction;
+
         // ФВ-12.10: старий і новий стан мапінгу — у журналі структурних змін, в одній транзакції зі зміною.
         await uow.ExecuteInTransactionAsync(async innerCt =>
         {
@@ -261,7 +279,17 @@ public sealed class AcceptSourceUnitChangeHandler(
                 before, IntegrationConfigAudit.Snapshot(map),
                 IntegrationConfigAudit.Reason("integrationAudit.fieldMapUnitAccepted", ("field", map.SourceField)),
                 innerCt).ConfigureAwait(false);
+
+            if (enlist && pausedSince is { } since)
+            {
+                await EnqueueRecollectAsync(map.SourceEntityId, since, userId, innerCt).ConfigureAwait(false);
+            }
         }, ct).ConfigureAwait(false);
+
+        if (!enlist && pausedSince is { } sinceAfterCommit)
+        {
+            await EnqueueRecollectAsync(map.SourceEntityId, sinceAfterCommit, userId, ct).ConfigureAwait(false);
+        }
 
         // Коди читаються ПІСЛЯ збереження й обидва: журнал має відповісти на
         // «з якої на яку» без другого запиту в довідник, якого на той момент
@@ -289,26 +317,19 @@ public sealed class AcceptSourceUnitChangeHandler(
                 currentUser.CorrelationId),
             ct).ConfigureAwait(false);
 
-        // ⛔ X3-01: за паузу шлях не читався, а покриття СУТНОСТІ вже наступні прогони закрили за рештою
-        // атрибутів (`pausedPaths` тримає інтервал непокритим лише в прогоні, що поставив паузу). Наздоганяння
-        // цієї дірки не бачить, і без дочитування точок за паузу в `ext.RawDataPoint` не буде ніколи — а
-        // згортка за часом інтерполює через дірку мовчки. Тому рішення людини саме ставить ручний збір
-        // сутності від прогону, що поставив паузу (його запитаний діапазон), до «зараз». Матеріалізацію
-        // дочитаного ставить сам `CollectionJob` (I1-01). Ручна пауза/відновлення моменту паузи не
-        // зберігає — це відоме обмеження, не цей шлях.
-        if (pausedSince is { } since)
-        {
-            await jobs
-                .EnqueueAsync<ICollectionJob>(
-                    new Integration.CollectionTask(
-                        map.SourceEntityId, since.AddDays(-RecollectLookbackDays), ToUtc: null, Manual: true),
-                    ct,
-                    userId)
-                .ConfigureAwait(false);
-        }
-
         return EntityFieldMapLifecycle.Map(map);
     }
+
+    /// <summary>
+    /// Ручний збір сутності від прогону, що поставив паузу (мінус <see cref="RecollectLookbackDays"/>), до «зараз»
+    /// (X3-01; V6-01 — у транзакції прийняття, коли черга в базі).
+    /// </summary>
+    private Task<string> EnqueueRecollectAsync(int sourceEntityId, DateTime pausedSince, int userId, CancellationToken ct)
+        => jobs.EnqueueAsync<ICollectionJob>(
+            new Integration.CollectionTask(
+                sourceEntityId, pausedSince.AddDays(-RecollectLookbackDays), ToUtc: null, Manual: true),
+            ct,
+            userId);
 }
 
 /// <summary>

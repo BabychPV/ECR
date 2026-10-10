@@ -270,6 +270,93 @@ public sealed class EntityFieldMapLifecycleTests(SqlServerFixture sql)
         Assert.DoesNotContain(jobs.ReceivedCalls(), c => c.GetMethodInfo().Name == nameof(IBackgroundJobScheduler.EnqueueAsync));
     }
 
+    /// <summary>
+    /// R10-V6 / V6-01: збій журналу безпеки ПІСЛЯ коміту прийняття не губить дочитування за паузу — у режимі
+    /// бази задача вже в транзакції прийняття, у Quartz — поставлена одразу після коміту, до журналу.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Доти збір ставився останнім, після читання кодів і <c>WriteSecurityEventAsync</c>: збій журналу
+    /// повертав помилку, прийняття вже закомічене (момент паузи стерто), а повторне «Прийняти» — 409
+    /// <c>mappingUnitChangeNotPending</c>. Мутація: повернути постановку за журнал безпеки → жодного виклику
+    /// черги, обидва рядки червоні.
+    /// </remarks>
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "MI-02")]
+    [Trait("Finding", "V6-01")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task V6_01_збій_журналу_безпеки_після_прийняття_не_губить_дочитування_за_паузу(bool enlists)
+    {
+        using var baseApp = new EcrApiFactory(sql);
+        var jobs = Jobs();
+        jobs.EnlistsInCallerTransaction.Returns(enlists);
+        using var app = baseApp.WithWebHostBuilder(b => b.ConfigureTestServices(services =>
+        {
+            services.AddSingleton(jobs);
+            services.AddScoped<IAuditWriter>(sp => new FailingAcceptAuditWriter(
+                ActivatorUtilities.CreateInstance<Ecr.Infrastructure.Persistence.AuditWriter>(sp)));
+        }));
+
+        var stand = await ArrangeAsync(collectPoints: 0).ConfigureAwait(true);
+        using var client = await ProjectUserAsync(app.CreateClient, baseApp, GrantLevel.Manage, stand.ProjectId)
+            .ConfigureAwait(true);
+        await MarkPendingAsync(stand.FieldMapId, stand.NewUnitCode, stand.NewUnitId).ConfigureAwait(true);
+
+        var accepted = await client.PostAsJsonAsync(
+            new Uri($"/api/v1/entity-field-maps/{stand.FieldMapId}/accept-unit-change", UriKind.Relative),
+            new { });
+
+        // Журнал безпеки впав, але прийняття вже закомічене — і дочитування разом із ним.
+        Assert.False(accepted.IsSuccessStatusCode);
+        Assert.True(await IsActiveAsync(stand.FieldMapId).ConfigureAwait(true));
+        var call = Assert.Single(jobs.ReceivedCalls(), c => c.GetMethodInfo().Name == nameof(IBackgroundJobScheduler.EnqueueAsync));
+        Assert.Equal(typeof(ICollectionJob), call.GetMethodInfo().GetGenericArguments()[0]);
+        var task = Assert.IsType<CollectionTask>(call.GetArguments()[0]);
+        Assert.Equal(
+            Now.AddDays(-Ecr.Application.Sources.AcceptSourceUnitChangeHandler.RecollectLookbackDays),
+            task.FromUtc);
+    }
+
+    /// <summary>
+    /// R10-V6 / V6-01: черга в базі — збій постановки дочитування ВІДКОЧУЄ прийняття (постановка в тілі
+    /// транзакції): мапінг лишається на паузі з позначкою, і людина може повторити рішення.
+    /// </summary>
+    /// <remarks>
+    /// Мутація: винести постановку за межі транзакції (після коміту) → прийняття закомічене, мапінг активний,
+    /// момент паузи стерто — тест червоний.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "MI-02")]
+    [Trait("Finding", "V6-01")]
+    public async Task V6_01_черга_в_базі_збій_постановки_дочитування_відкочує_прийняття()
+    {
+        using var baseApp = new EcrApiFactory(sql);
+        var jobs = Substitute.For<IBackgroundJobScheduler>();
+        jobs.EnlistsInCallerTransaction.Returns(true);
+        jobs.EnqueueAsync<ICollectionJob>(Arg.Any<object?>(), Arg.Any<CancellationToken>(), Arg.Any<int?>())
+            .Returns<string>(_ => throw new InvalidOperationException("itg.JobQueue"));
+        using var app = WithJobs(baseApp, jobs);
+
+        var stand = await ArrangeAsync(collectPoints: 0).ConfigureAwait(true);
+        using var client = await ProjectUserAsync(app.CreateClient, baseApp, GrantLevel.Manage, stand.ProjectId)
+            .ConfigureAwait(true);
+        await MarkPendingAsync(stand.FieldMapId, stand.NewUnitCode, stand.NewUnitId).ConfigureAwait(true);
+        var unitBefore = await SourceUnitIdAsync(stand.FieldMapId).ConfigureAwait(true);
+
+        var accepted = await client.PostAsJsonAsync(
+            new Uri($"/api/v1/entity-field-maps/{stand.FieldMapId}/accept-unit-change", UriKind.Relative),
+            new { });
+
+        Assert.False(accepted.IsSuccessStatusCode);
+        Assert.False(await IsActiveAsync(stand.FieldMapId).ConfigureAwait(true));
+        Assert.Equal(unitBefore, await SourceUnitIdAsync(stand.FieldMapId).ConfigureAwait(true));
+        Assert.True(await HasPendingUnitChangeAsync(stand.FieldMapId).ConfigureAwait(true));
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
@@ -650,6 +737,42 @@ public sealed class EntityFieldMapLifecycleTests(SqlServerFixture sql)
             .ConfigureAwait(false);
         Assert.True(login.IsSuccessStatusCode, $"{login.StatusCode}: {app.ErrorsText}");
         return client;
+    }
+
+    /// <summary>Мапінг чекає рішення про одиницю (момент паузи не стерто).</summary>
+    private async Task<bool> HasPendingUnitChangeAsync(int fieldMapId)
+    {
+        await using var db = new EcrDbContext(Options());
+
+        return await db.EntityFieldMaps.AsNoTracking()
+            .Where(m => m.Id == fieldMapId).Select(m => m.PendingSourceUnitDetectedAt != null).SingleAsync()
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Справжній журнал, що падає лише на події прийняття зміни одиниці (V6-01): вхід і решта подій пишуться.
+    /// </summary>
+    private sealed class FailingAcceptAuditWriter(IAuditWriter inner) : IAuditWriter
+    {
+        public Task WriteCellChangesAsync(IReadOnlyList<CellChangeRecord> changes, CancellationToken ct)
+            => inner.WriteCellChangesAsync(changes, ct);
+
+        public Task WriteStructureChangeAsync(StructureChangeRecord change, CancellationToken ct)
+            => inner.WriteStructureChangeAsync(change, ct);
+
+        public Task WriteSecurityEventAsync(SecurityEventRecord evt, CancellationToken ct)
+            => evt.EventType == Ecr.Application.Sources.AcceptSourceUnitChangeHandler.AcceptedEventType
+                ? throw new InvalidOperationException("aud.SecurityEvent")
+                : inner.WriteSecurityEventAsync(evt, ct);
+
+        public Task WriteSecurityEventsAsync(IReadOnlyList<SecurityEventRecord> events, CancellationToken ct)
+            => inner.WriteSecurityEventsAsync(events, ct);
+
+        public Task WriteIndependentSecurityEventAsync(SecurityEventRecord evt, CancellationToken ct)
+            => inner.WriteIndependentSecurityEventAsync(evt, ct);
+
+        public Task WritePublicationEventAsync(PublicationEventRecord evt, CancellationToken ct)
+            => inner.WritePublicationEventAsync(evt, ct);
     }
 
     /// <summary>Підроблена черга задач: ставлення фіксується, задача не виконується.</summary>
