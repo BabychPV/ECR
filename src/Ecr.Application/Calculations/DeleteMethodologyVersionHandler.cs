@@ -65,20 +65,21 @@ public sealed class DeleteMethodologyVersionHandler(
 
             version = found.Version.Version;
             children = await deletion.DeleteAsync(methodologyVersionId, innerCt).ConfigureAwait(false);
-        }, ct).ConfigureAwait(false);
 
-        // Журнал — ПІСЛЯ коміту: `IAuditWriter` пише власним підключенням
-        // (той самий вибір, що в `DeleteDocumentHandler`).
-        await audit.WriteSecurityEventAsync(
-            new SecurityEventRecord(
-                clock.UtcNow,
-                DeletedEventType,
-                TargetUserId: null,
-                TargetRoleId: null,
-                JsonSerializer.Serialize(new { methodologyId, methodologyVersionId, version, children }),
-                userId,
-                currentUser.CorrelationId),
-            ct).ConfigureAwait(false);
+            // ⛔ F2-03 (аудит R11): журнал — В ТІЙ САМІЙ транзакції (`AuditWriter` бере поточну
+            // транзакцію контексту; той самий вибір, що в `DeleteDocumentHandler`): видалення версії
+            // не комітиться без сліду. Доти запис ішов після коміту й міг загубитися.
+            await audit.WriteSecurityEventAsync(
+                new SecurityEventRecord(
+                    clock.UtcNow,
+                    DeletedEventType,
+                    TargetUserId: null,
+                    TargetRoleId: null,
+                    JsonSerializer.Serialize(new { methodologyId, methodologyVersionId, version, children }),
+                    userId,
+                    currentUser.CorrelationId),
+                innerCt).ConfigureAwait(false);
+        }, ct).ConfigureAwait(false);
     }
 
     /// <summary>404 версії методології з ключем повідомлення.</summary>

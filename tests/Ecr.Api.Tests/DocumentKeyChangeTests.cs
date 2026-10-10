@@ -10,6 +10,7 @@ using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
 using Ecr.Infrastructure.Security;
 using Ecr.TestKit;
+using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Xunit;
 
@@ -129,6 +130,43 @@ public sealed class DocumentKeyChangeTests(SqlServerFixture sql)
 
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
         await AssertKeyUnchangedAsync(s).ConfigureAwait(true);
+    }
+
+    /// <summary>
+    /// F2-03 (аудит R11): слід зміни ключа пишеться В ТІЙ САМІЙ транзакції. Збій запису журналу
+    /// відкочує зміну — ключ лишається старим. Доти журнал ішов ПІСЛЯ коміту: ключ змінювався
+    /// без сліду «хто, з якого на який і чому».
+    /// </summary>
+    /// <remarks>Мутація: повернути запис журналу після `ExecuteInTransactionAsync` — ключ змінено, червоніє.</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "F2-03")]
+    public async Task Збій_запису_журналу_відкочує_зміну_ключа()
+    {
+        var s = await ArrangeAsync(ChangeDocumentKeyHandler.Permission).ConfigureAwait(true);
+
+        using var baseApp = new EcrApiFactory(sql);
+        using var app = FailingSecurityEventAuditWriter.Install(baseApp, ChangeDocumentKeyHandler.EventType);
+        using var client = await SignedInAsync(app, s.UserName, baseApp).ConfigureAwait(true);
+
+        var response = await PostAsync(client, s.DocumentId, $"NEW-{Guid.NewGuid():N}"[..16], s.OldKey, "typo").ConfigureAwait(true);
+
+        Assert.True(response.StatusCode == HttpStatusCode.InternalServerError, $"{response.StatusCode}: {baseApp.ErrorsText}");
+        Assert.Contains(FailingSecurityEventAuditWriter.Marker, baseApp.ErrorsText, StringComparison.Ordinal);
+        await AssertKeyUnchangedAsync(s).ConfigureAwait(true);
+    }
+
+    private static async Task<HttpClient> SignedInAsync(
+        WebApplicationFactory<Program> app, string userName, EcrApiFactory errors)
+    {
+        var client = app.CreateClient();
+        var login = await client.PostAsJsonAsync(
+            new Uri("/api/v1/login/local", UriKind.Relative),
+            new { userName, password = Password }).ConfigureAwait(false);
+
+        Assert.True(login.IsSuccessStatusCode, $"Вхід {userName}: {login.StatusCode}: {errors.ErrorsText}");
+        return client;
     }
 
     private static Task<HttpResponseMessage> PostAsync(

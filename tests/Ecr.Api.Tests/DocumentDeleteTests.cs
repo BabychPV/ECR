@@ -10,6 +10,7 @@ using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
 using Ecr.Infrastructure.Security;
 using Ecr.TestKit;
+using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Xunit;
 
@@ -204,6 +205,46 @@ public sealed class DocumentDeleteTests(SqlServerFixture sql)
 
         await using var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext();
         Assert.True(await db.Documents.AnyAsync(d => d.Id == s.Document.DocumentId).ConfigureAwait(true));
+    }
+
+    /// <summary>
+    /// F2-03 (аудит R11): слід видалення пишеться В ТІЙ САМІЙ транзакції. Збій запису журналу
+    /// відкочує видалення — документ і комірки лишаються. Доти журнал ішов ПІСЛЯ коміту: збій
+    /// (або kill) лишав документ стертим без жодного сліду «хто видалив».
+    /// </summary>
+    /// <remarks>Мутація: повернути запис журналу після `ExecuteInTransactionAsync` — документ зникає, червоніє.</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "F2-03")]
+    public async Task Збій_запису_журналу_відкочує_видалення_документа()
+    {
+        var s = await ArrangeAsync(DeleteDocumentHandler.Permission, GrantLevel.Write).ConfigureAwait(true);
+
+        using var baseApp = new EcrApiFactory(sql);
+        using var app = FailingSecurityEventAuditWriter.Install(baseApp, DeleteDocumentHandler.DeletedEventType);
+        using var client = await SignedInAsync(app, s.UserName, baseApp).ConfigureAwait(true);
+
+        var response = await DeleteAsync(client, s.Document.DocumentId).ConfigureAwait(true);
+        Assert.True(response.StatusCode == HttpStatusCode.InternalServerError, $"{response.StatusCode}: {baseApp.ErrorsText}");
+        Assert.Contains(FailingSecurityEventAuditWriter.Marker, baseApp.ErrorsText, StringComparison.Ordinal);
+
+        await using var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext();
+        var id = s.Document.DocumentId;
+        Assert.True(await db.Documents.AnyAsync(d => d.Id == id).ConfigureAwait(true), "Документ видалено, хоча запис журналу не вдався.");
+        Assert.Equal(2, await db.CellValues.CountAsync(c => s.Document.RowIds.Contains(c.TableRowId)).ConfigureAwait(true));
+    }
+
+    private static async Task<HttpClient> SignedInAsync(
+        WebApplicationFactory<Program> app, string userName, EcrApiFactory errors)
+    {
+        var client = app.CreateClient();
+        var login = await client.PostAsJsonAsync(
+            new Uri("/api/v1/login/local", UriKind.Relative),
+            new { userName, password = Password }).ConfigureAwait(false);
+
+        Assert.True(login.IsSuccessStatusCode, $"Вхід {userName}: {login.StatusCode}: {errors.ErrorsText}");
+        return client;
     }
 
     private static Task<HttpResponseMessage> DeleteAsync(HttpClient client, long documentId)

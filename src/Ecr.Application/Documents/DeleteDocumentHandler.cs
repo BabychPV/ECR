@@ -121,26 +121,28 @@ public sealed class DeleteDocumentHandler(
                 [.. facts.SheetStates.Except(hidden)],
                 facts.HasWorkflowHistory || hidden.Any(s => s.Status != DocumentStatus.Draft));
             cells = await deletion.DeleteAsync(documentId, innerCt).ConfigureAwait(false);
-        }, ct).ConfigureAwait(false);
 
-        // Журнал — ПІСЛЯ коміту: `IAuditWriter` пише власним підключенням, і запис
-        // до коміту лишив би слід видалення, якого не сталося (як у SetTemplateArchivedHandler).
-        await audit.WriteSecurityEventAsync(
-            new SecurityEventRecord(
-                clock.UtcNow,
-                DeletedEventType,
-                TargetUserId: null,
-                TargetRoleId: null,
-                JsonSerializer.Serialize(new
-                {
-                    documentId,
-                    projectId = document.ProjectId,
-                    businessKey = document.BusinessKey,
-                    cells,
-                }),
-                userId,
-                currentUser.CorrelationId),
-            ct).ConfigureAwait(false);
+            // ⛔ F2-03 (аудит R11): журнал — В ТІЙ САМІЙ транзакції. `AuditWriter` бере поточну
+            // транзакцію контексту (`CreateCommand`), тож запис відкочується разом із видаленням.
+            // Доти він ішов ПІСЛЯ коміту: kill чи збій між ними лишав видалення БЕЗ сліду в
+            // журналі безпеки — а це єдиний доказ, хто стер дані за всіма періодами.
+            await audit.WriteSecurityEventAsync(
+                new SecurityEventRecord(
+                    clock.UtcNow,
+                    DeletedEventType,
+                    TargetUserId: null,
+                    TargetRoleId: null,
+                    JsonSerializer.Serialize(new
+                    {
+                        documentId,
+                        projectId = document.ProjectId,
+                        businessKey = document.BusinessKey,
+                        cells,
+                    }),
+                    userId,
+                    currentUser.CorrelationId),
+                innerCt).ConfigureAwait(false);
+        }, ct).ConfigureAwait(false);
     }
 
     /// <summary>Відмовляє, якщо проєкт архівовано або документ має дані в закритому періоді.</summary>

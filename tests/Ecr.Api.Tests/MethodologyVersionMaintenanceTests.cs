@@ -144,6 +144,33 @@ public sealed class MethodologyVersionMaintenanceTests(SqlServerFixture sql)
         Assert.Equal(HttpStatusCode.NotFound, foreign.StatusCode);
     }
 
+    /// <summary>
+    /// F2-03 (аудит R11): слід видалення версії пишеться В ТІЙ САМІЙ транзакції. Збій запису журналу
+    /// відкочує видалення — чернетка й увесь її вміст лишаються. Доти журнал ішов ПІСЛЯ коміту.
+    /// </summary>
+    /// <remarks>Мутація: повернути запис журналу після `ExecuteInTransactionAsync` — чернетку видалено, червоніє.</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "F2-03")]
+    public async Task Збій_запису_журналу_відкочує_видалення_чернетки()
+    {
+        var stand = await ArrangeAsync().ConfigureAwait(true);
+
+        using var baseApp = new EcrApiFactory(sql);
+        using var app = FailingSecurityEventAuditWriter.Install(baseApp, DeleteMethodologyVersionHandler.DeletedEventType);
+        using var client = await SystemHealthControllerTests
+            .SignedInAsync(sql, app, DeleteMethodologyVersionHandler.Permission).ConfigureAwait(true);
+
+        var response = await DeleteAsync(client, stand, stand.DraftId).ConfigureAwait(true);
+        Assert.True(response.StatusCode == HttpStatusCode.InternalServerError, $"{response.StatusCode}: {baseApp.ErrorsText}");
+        Assert.Contains(FailingSecurityEventAuditWriter.Marker, baseApp.ErrorsText, StringComparison.Ordinal);
+
+        await using var db = Db();
+        Assert.True(await db.MethodologyVersions.AnyAsync(v => v.Id == stand.DraftId).ConfigureAwait(true), "Чернетку видалено, хоча запис журналу не вдався.");
+        Assert.True(await db.MethodologyFormulas.AnyAsync(f => f.MethodologyVersionId == stand.DraftId).ConfigureAwait(true));
+    }
+
     private sealed record Stand(int MethodologyId, int PublishedId, int DraftId, IReadOnlyList<int> ColumnIds);
 
     /// <summary>

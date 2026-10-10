@@ -211,6 +211,25 @@ public sealed class MigrateDocumentVersionHandler(
             grantedUsers = await store.ListUsersWithGrantsAsync(plan, MaxInvalidatedUsers, innerCt).ConfigureAwait(false);
             await store.ApplyAsync(projectId, target.Id, plan, innerCt).ConfigureAwait(false);
             result = dto with { Applied = true };
+
+            // ⛔ F2-03 (аудит R11): журнал — В ТІЙ САМІЙ транзакції (`AuditWriter` бере поточну
+            // транзакцію контексту): перенос структури всіх документів проєкту не комітиться без
+            // сліду. Доти запис ішов після коміту й міг загубитися.
+            await audit.WriteSecurityEventAsync(
+                new SecurityEventRecord(
+                    clock.UtcNow, EventType, TargetUserId: null, TargetRoleId: null,
+                    JsonSerializer.Serialize(new
+                    {
+                        documentId,
+                        projectId,
+                        fromVersionId = result.FromVersionId,
+                        toVersionId = result.ToVersionId,
+                        mode = result.Mode.ToString(),
+                        documents = result.DocumentCount,
+                        transferredValues = result.TransferredValues,
+                    }),
+                    profile.UserId, currentUser.CorrelationId),
+                innerCt).ConfigureAwait(false);
         }, ct).ConfigureAwait(false);
 
         // ⛔ Профіль у кеші не бачить зміни грантів, яка не рухає відбиток груп
@@ -219,26 +238,7 @@ public sealed class MigrateDocumentVersionHandler(
         // груп); збій або переповнення переліку — скидання всього кешу, не 500.
         GrantProfileInvalidation.Run(profileCache, log, grantedUsers);
 
-        var applied = result!;
-
-        // Журнал — після коміту, як у ChangeDocumentKeyHandler: IAuditWriter пише власним підключенням.
-        await audit.WriteSecurityEventAsync(
-            new SecurityEventRecord(
-                clock.UtcNow, EventType, TargetUserId: null, TargetRoleId: null,
-                JsonSerializer.Serialize(new
-                {
-                    documentId,
-                    projectId,
-                    fromVersionId = applied.FromVersionId,
-                    toVersionId = applied.ToVersionId,
-                    mode = applied.Mode.ToString(),
-                    documents = applied.DocumentCount,
-                    transferredValues = applied.TransferredValues,
-                }),
-                profile.UserId, currentUser.CorrelationId),
-            ct).ConfigureAwait(false);
-
-        return applied;
+        return result!;
     }
 
     /// <summary>Перелік версій, на які можна перенести документ.</summary>
