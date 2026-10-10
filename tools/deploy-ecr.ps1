@@ -1256,6 +1256,34 @@ function Get-SchemaDowngradeProblem {
         "(відновити копію бази, msiexec /x поточної версії, потім попередній пакет).")
 }
 
+# ⛔ Y3-03 (аудит 2026-10-10): U1-06 дивиться лише на __EFMigrationsHistory, а реліз, що змінює тільки
+# Sql/*.sql (TVP, процедури, тригери), має ті самі міграції EF, що й попередній. Старіший пакет тоді проходив
+# U1-06, крок 2 повертав старі SQL-об'єкти (CREATE OR ALTER) і затирав штамп ECR.SchemaRelease меншою версією,
+# а MSI відмовляв у пониженні (DowngradeError) уже після цього. Чиста функція: штамп бази (текст із sqlcmd) і
+# версія пакета → текст відмови або $null. Відмова — лише коли ОБИДВА значення розбираються як [version] і
+# штамп НОВІШИЙ за пакет ('incomplete:<версія>' рахується за свою версією: недокочений новіший реліз теж
+# новіший); 'none'/порожньо/не-версія/'incomplete:unknown' — не відмова (база до X4-03, невідома версія).
+# Той самий пакет (повтор після збою) і старіший штамп (звичайне оновлення) проходять.
+function Get-SchemaStampDowngradeProblem {
+    param(
+        [AllowNull()] [AllowEmptyString()] [string] $Stamp,
+        [AllowNull()] [AllowEmptyString()] [string] $Package,
+        [Parameter(Mandatory)] [string] $Database
+    )
+
+    $stampText = ([string] $Stamp).Trim()
+    if ($stampText.StartsWith('incomplete:', [System.StringComparison]::Ordinal)) { $stampText = $stampText.Substring('incomplete:'.Length).Trim() }
+    $packageText = ([string] $Package).Trim()
+    $stampVersion = $null
+    $packageVersion = $null
+    if (-not [version]::TryParse($stampText, [ref] $stampVersion)) { return $null }
+    if (-not [version]::TryParse($packageText, [ref] $packageVersion)) { return $null }
+    if ($stampVersion -le $packageVersion) { return $null }
+    return ("Схему $Database накочено пакетом $stampText, новішим за цей ($packageText). Нічого не змінено. " +
+        "Старіший пакет на новішу базу не ставиться (Sql/*.sql старого пакета повернули б старі TVP, процедури й тригери) — " +
+        "відкат лише за runbook §9 (відновити копію бази, msiexec /x поточної версії, потім попередній пакет).")
+}
+
 # ⛔ R5-U1/U1-02 (аудит 2026-10-09): Stop-EcrServicesForSchema зупиняє служби лише
 # ЦІЄЇ машини. За D-32 (≥2 вузли) EcrApi/EcrWorker інших вузлів працювали б далі
 # старою версією на новій схемі (DROP TYPE TVP, ROLLBACK IMMEDIATE, задачі черги
@@ -2006,6 +2034,20 @@ END
                     -PackageMigrations $packageMigrations -Database $Database
                 if ($downgradeProblem) { throw $downgradeProblem }
             }
+        }
+
+        # ⛔ Y3-03: і за штампом релізу схеми (X4-03), а не лише за міграціями EF — до зупинки служб і до
+        # першого sqlcmd зі зміною. Реліз лише з Sql/*.sql міграцій не додає, тож U1-06 його не бачить.
+        $stampGateRows = Invoke-DeployQuery -TargetDb $Database -Query (
+            "SET NOCOUNT ON; SELECT ISNULL((SELECT CAST(value AS nvarchar(64)) FROM sys.extended_properties " +
+            "WHERE class = 0 AND name = N'ECR.SchemaRelease'), N'none');")
+        if ($null -eq $stampGateRows) {
+            Write-Host "  Чи штамп релізу схеми не новіший за пакет, буде перевірено запитом до sys.extended_properties (-WhatIf: не виконується)." -ForegroundColor DarkGray
+        }
+        else {
+            $stampDowngradeProblem = Get-SchemaStampDowngradeProblem -Stamp ([string] (@($stampGateRows) | Select-Object -First 1)) `
+                -Package $schemaRelease -Database $Database
+            if ($stampDowngradeProblem) { throw $stampDowngradeProblem }
         }
 
         # ⛔ Та сама послідовність, що verify-sql-scripts.ps1 (docs/build/
