@@ -133,88 +133,114 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock, IMemory
 
         db.ReportSnapshots.Add(snapshot);
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
-
-        // Агрегації виконуються ТУТ, одним набором запитів. Вʼюха rpt.v_*
-        // нічого не рахує (ФВ-0.3): індексована вʼюха з обчисленнями не
-        // перебудовується інкрементно і зупиняє запис у джерело.
-        var rows = cells.ConvertAll(c => Cell(snapshot.Id, c.RowNo, c.Code, c.Text, c.Number));
-
-        db.ReportRows.AddRange(rows);
-
-        snapshot.Complete(
-            rows.Count,
-            ComputeHash(rows),
-
-            // Прогін, з якого взято числа: без нього неможливо сказати, на
-            // чому стоїть значення у звіті. ⚠ Прочитаний ДО агрегації (X7-04).
-            calculationRunId,
-
-            // ⚠ Записуються ВИКОРИСТАНІ значення, а не надіслані: замовчування
-            // вже підставлені. Інакше зріз, побудований без жодного параметра,
-            // не давав би відповіді на питання «з чим його рахували».
-            parameters.Json ?? parametersJson);
-
-        // Сума щойно порахована `ComputeHash`, тобто поточним форматом: формат
-        // зберігається одразу, а не визначається потім перерахунком.
-        snapshot.RecordHashFormat(VerifyReportSnapshotHandler.FormatCurrent);
-
-        // ⚠ Рядки — окремим збереженням, ПОЗА замком слоту: запис до
-        // 200 000 рядків триває секунди, і тримати весь цей час робочий процес
-        // проєкту за період означало б відмови «зайнято» на поданні. Зріз ще
-        // не поточний, тож регуляторна вʼюха його не бачить.
-        await db.SaveChangesAsync(ct).ConfigureAwait(false);
-
-        // ⛔ R6-X1 / X1-01: статус і перемикання — ОДНІЄЮ короткою транзакцією
-        // під тим самим замком слоту, який бере робочий процес перед пошуком
-        // поточних зрізів (`ReportSnapshotSync`). Перехід або закомітився
-        // раніше — і тоді запит статусу його бачить, — або чекає замка і вже
-        // знаходить НОВИЙ зріз поточним. Третього варіанта, у якому перехід
-        // оновлює лише старий зріз, а новий стає поточним із застарілим
-        // статусом, більше немає. `UPDLOCK` на рядку зрізу (W1-01) цього не
-        // закривав: нового зрізу серед заблокованих ще не було.
+        // ⛔ Y1-04 (аудит R11): зріз уже вставлено (непоточний, з рядками). Будь-яка відмова ДО того, як
+        // його зроблено поточним (замок слоту не взято за `SlotLockTimeout` — 409 «зайнято»; збій запису
+        // рядків; скасування), лишала б «зріз-сироту» з до 200 000 рядків до нічної ретенції (вона обходить
+        // зрізи молодші за `BuildGrace`, 6 год). Тепер сирота прибирається одразу, а відмова йде далі як є.
         long? refusedBy = null;
-        await new UnitOfWork(db, clock).ExecuteInTransactionAsync(
-            async innerCt =>
+        try
+        {
+            // Агрегації виконуються ТУТ, одним набором запитів. Вʼюха rpt.v_*
+            // нічого не рахує (ФВ-0.3): індексована вʼюха з обчисленнями не
+            // перебудовується інкрементно і зупиняє запис у джерело.
+            var rows = cells.ConvertAll(c => Cell(snapshot.Id, c.RowNo, c.Code, c.Text, c.Number));
+
+            // ⛔ Z5-03 / L1-05 (аудит R11): рядки — ПОРЦІЯМИ з відчепленням від трекера, а не одним
+            // `AddRange` на весь зріз. До 200 000 × C відстежуваних сутностей (≈ 1 КБ трекера кожна) в
+            // одному `SaveChanges` — гігабайти в процесі, де працює задача. Порція зберігається й
+            // відчіплюється одразу: трекер тримає не більше `RowSaveChunkSize` комірок. Зріз іще не поточний
+            // (`IsCurrent = 0`), тож проміжний стан порцій регуляторній вʼюсі не видно, а збій посеред
+            // запису прибирає зріз (`DiscardAsync` нижче, Y1-04).
+            foreach (var chunk in rows.Chunk(Math.Max(1, RowSaveChunkSize)))
             {
-                refusedBy = null;
-                await LockSlotAsync(projectId, periodKey?.Value, innerCt).ConfigureAwait(false);
+                db.ReportRows.AddRange(chunk);
+                await db.SaveChangesAsync(ct).ConfigureAwait(false);
 
-                var status = await StatusOfDataAsync(projectId, periodKey, innerCt).ConfigureAwait(false);
-
-                // ⛔ R6-X7 / X7-03: повторна перевірка «поточний зріз ключа поданий» —
-                // під замком слоту, який бере й робочий процес перед заморожуванням
-                // (`ReportSnapshotSync`). Побудова, що почалася до подання останнього
-                // аркуша, тут уже бачить заморожений зріз і відмовляє, а не знімає з
-                // нього поточність. Новий зріз при відмові ВИДАЛЯЄТЬСЯ разом із рядками
-                // (вони збережені вище, поза замком): інакше лишився б непоточний
-                // «зріз-сирота», якого ніхто не просив.
-                var frozen = await FrozenCurrentIdsAsync(version.ReportDefId, projectId, periodKey, innerCt)
-                    .ConfigureAwait(false);
-                if (await FreshFrozenAsync(frozen, projectId, periodKey, status, innerCt).ConfigureAwait(false)
-                    is { } frozenNow)
+                foreach (var entry in db.ChangeTracker.Entries<ReportRow>().ToList())
                 {
-                    await DiscardAsync(snapshot.Id, innerCt).ConfigureAwait(false);
-                    refusedBy = frozenNow;
-                    return;
+                    entry.State = EntityState.Detached;
                 }
+            }
 
-                // ⛔ R6-X7 / X7-01: зріз, застарілий уже від народження (прогін перемкнувся,
-                // поки читалося джерело, X7-04), статусу даних не успадковує — те саме
-                // правило, що в `RefreshStatusAsync`: старі числа не йдуть у `rpt.v_*` як
-                // затверджені чи подані.
-                if (status != SnapshotStatus.Draft
-                    && await ReportSnapshotStaleness.IsStaleAsync(db, projectId, periodKey?.Value, builtAt, innerCt)
-                        .ConfigureAwait(false))
+            snapshot.Complete(
+                rows.Count,
+                ComputeHash(rows),
+
+                // Прогін, з якого взято числа: без нього неможливо сказати, на
+                // чому стоїть значення у звіті. ⚠ Прочитаний ДО агрегації (X7-04).
+                calculationRunId,
+
+                // ⚠ Записуються ВИКОРИСТАНІ значення, а не надіслані: замовчування
+                // вже підставлені. Інакше зріз, побудований без жодного параметра,
+                // не давав би відповіді на питання «з чим його рахували».
+                parameters.Json ?? parametersJson);
+
+            // Сума щойно порахована `ComputeHash`, тобто поточним форматом: формат
+            // зберігається одразу, а не визначається потім перерахунком.
+            snapshot.RecordHashFormat(VerifyReportSnapshotHandler.FormatCurrent);
+
+            // ⚠ Рядки — окремим збереженням (порціями, вище), ПОЗА замком слоту: запис до
+            // 200 000 рядків триває секунди, і тримати весь цей час робочий процес
+            // проєкту за період означало б відмови «зайнято» на поданні. Зріз ще
+            // не поточний, тож регуляторна вʼюха його не бачить. Тут — підсумок зрізу.
+            await db.SaveChangesAsync(ct).ConfigureAwait(false);
+
+            // ⛔ R6-X1 / X1-01: статус і перемикання — ОДНІЄЮ короткою транзакцією
+            // під тим самим замком слоту, який бере робочий процес перед пошуком
+            // поточних зрізів (`ReportSnapshotSync`). Перехід або закомітився
+            // раніше — і тоді запит статусу його бачить, — або чекає замка і вже
+            // знаходить НОВИЙ зріз поточним. Третього варіанта, у якому перехід
+            // оновлює лише старий зріз, а новий стає поточним із застарілим
+            // статусом, більше немає. `UPDLOCK` на рядку зрізу (W1-01) цього не
+            // закривав: нового зрізу серед заблокованих ще не було.
+            await new UnitOfWork(db, clock).ExecuteInTransactionAsync(
+                async innerCt =>
                 {
-                    status = SnapshotStatus.Draft;
-                }
+                    refusedBy = null;
+                    await LockSlotAsync(projectId, periodKey?.Value, innerCt).ConfigureAwait(false);
 
-                snapshot.RefreshStatus(status);
+                    var status = await StatusOfDataAsync(projectId, periodKey, innerCt).ConfigureAwait(false);
 
-                await SwitchCurrentAsync(snapshot, version.ReportDefId, innerCt).ConfigureAwait(false);
-                await db.SaveChangesAsync(innerCt).ConfigureAwait(false);
-            },
-            ct).ConfigureAwait(false);
+                    // ⛔ R6-X7 / X7-03: повторна перевірка «поточний зріз ключа поданий» —
+                    // під замком слоту, який бере й робочий процес перед заморожуванням
+                    // (`ReportSnapshotSync`). Побудова, що почалася до подання останнього
+                    // аркуша, тут уже бачить заморожений зріз і відмовляє, а не знімає з
+                    // нього поточність. Новий зріз при відмові ВИДАЛЯЄТЬСЯ разом із рядками
+                    // (вони збережені вище, поза замком): інакше лишився б непоточний
+                    // «зріз-сирота», якого ніхто не просив.
+                    var frozen = await FrozenCurrentIdsAsync(version.ReportDefId, projectId, periodKey, innerCt)
+                        .ConfigureAwait(false);
+                    if (await FreshFrozenAsync(frozen, projectId, periodKey, status, innerCt).ConfigureAwait(false)
+                        is { } frozenNow)
+                    {
+                        await DiscardAsync(snapshot.Id, innerCt).ConfigureAwait(false);
+                        refusedBy = frozenNow;
+                        return;
+                    }
+
+                    // ⛔ R6-X7 / X7-01: зріз, застарілий уже від народження (прогін перемкнувся,
+                    // поки читалося джерело, X7-04), статусу даних не успадковує — те саме
+                    // правило, що в `RefreshStatusAsync`: старі числа не йдуть у `rpt.v_*` як
+                    // затверджені чи подані.
+                    if (status != SnapshotStatus.Draft
+                        && await ReportSnapshotStaleness.IsStaleAsync(db, projectId, periodKey?.Value, builtAt, innerCt)
+                            .ConfigureAwait(false))
+                    {
+                        status = SnapshotStatus.Draft;
+                    }
+
+                    snapshot.RefreshStatus(status);
+
+                    await SwitchCurrentAsync(snapshot, version.ReportDefId, innerCt).ConfigureAwait(false);
+                    await db.SaveChangesAsync(innerCt).ConfigureAwait(false);
+                },
+                ct).ConfigureAwait(false);
+        }
+        catch (Exception)
+        {
+            await DiscardOrphanAsync(snapshot.Id).ConfigureAwait(false);
+            throw;
+        }
 
         if (refusedBy is { } refused)
         {
@@ -308,6 +334,33 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock, IMemory
         await db.ReportSnapshots.Where(s => s.Id == snapshotId && !s.IsCurrent).ExecuteDeleteAsync(ct).ConfigureAwait(false);
     }
 
+    private const int DefaultRowSaveChunk = 10_000;
+
+    /// <summary>Скільки комірок зрізу зберігається одним <c>SaveChanges</c> (трекер тримає не більше).</summary>
+    /// <remarks>Окремою властивістю лише заради тестів (прийом <c>RowCeiling</c>): довести порціювання на 10 000+ комірок — зайве наповнення бази.</remarks>
+    public int RowSaveChunkSize { get; init; } = DefaultRowSaveChunk;
+
+    /// <summary>
+    /// Прибирає недобудований зріз після відмови: рядки, потім сам зріз (лише НЕ поточний).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Найкраща спроба: власний збій прибирання не маскує справжню причину відмови (її кидає
+    /// викликач далі), а недоприбране дібере <c>ReportRetentionJob</c>. Токен — <c>None</c>:
+    /// скасування запиту не має лишати сироту. Стан трекера не чіпається — контекст після відмови
+    /// далі не використовується (задача завершується).
+    /// </remarks>
+    private async Task DiscardOrphanAsync(long snapshotId)
+    {
+        try
+        {
+            await DiscardAsync(snapshotId, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Див. ремарку: причину відмови не підміняємо; недоприбране дібере ретенція.
+        }
+    }
+
     /// <summary>Відмова побудови: поточний зріз ключа поданий (ФВ-9.17).</summary>
     /// <remarks>
     /// ⛔ R7-Y8 / Y8-01: <see cref="DomainException"/> з <see cref="ErrorCodes.ReportImmutable"/>
@@ -395,7 +448,11 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock, IMemory
     /// перемикання, робочий процес — на перерахунок статусу зрізів. Пів хвилини —
     /// із запасом на навантажений день дедлайну.
     /// </remarks>
-    private const int SlotLockTimeoutMs = 30_000;
+    private const int DefaultSlotLockTimeoutMs = 30_000;
+
+    /// <summary>Скільки чекати замка слоту, мс; за замовчуванням — <see cref="DefaultSlotLockTimeoutMs"/>.</summary>
+    /// <remarks>Окремою властивістю лише заради тестів відмови «слот зайнятий» (прийом <c>RowCeiling</c>): 30 с у тесті — забагато.</remarks>
+    public int SlotLockTimeoutMs { get; init; } = DefaultSlotLockTimeoutMs;
 
     /// <inheritdoc />
     public async Task MarkSubmittedAsync(long snapshotId, int userId, CancellationToken ct)
