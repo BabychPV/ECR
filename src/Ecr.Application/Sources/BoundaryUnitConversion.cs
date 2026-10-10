@@ -61,8 +61,51 @@ public static class BoundaryUnitConversion
             return value;
         }
 
-        return (converter ?? SharedConverter).Convert(
-            value, Spec(units, fromUnitId), Spec(units, toUnitId), explicitConversion: null);
+        var shared = converter ?? SharedConverter;
+
+        // ⛔ Швидкість у швидкість — через чисельник і знаменник, а не через базову одиницю (як і інтеграл,
+        // див. <see cref="ConvertFolded"/>): `FactorToBase` у `Sm3_per_h` — це `1/3600`, якого скінченний
+        // десятковий запис не має, і `0.001 Sm3/s` ставало `3.5999…96` замість `3.6`. Хвіст доходив до
+        // комірки і впирався в масштаб колонки (16 знаків) — межова точка блокувала матеріалізацію.
+        if (RateConvert(value, fromUnitId, toUnitId, units, shared) is { } rate)
+        {
+            return rate;
+        }
+
+        return shared.Convert(value, Spec(units, fromUnitId), Spec(units, toUnitId), explicitConversion: null);
+    }
+
+    /// <summary>
+    /// Швидкість → швидкість: чисельник конвертується доменним конвертером, знаменник — множенням на
+    /// ціле число секунд цілі й діленням (останнім кроком) на секунди джерела. <c>null</c> — хоч одна з
+    /// одиниць не швидкість або знаменники різних розмірностей (тоді — загальний маршрут через базу).
+    /// </summary>
+    private static decimal? RateConvert(
+        decimal value, int fromUnitId, int toUnitId, UnitCatalogSnapshot units, UnitConverter converter)
+    {
+        if (RateParts(units, fromUnitId) is not { } from || RateParts(units, toUnitId) is not { } to)
+        {
+            return null;
+        }
+
+        var fromNumerator = Spec(units, from.Numerator);
+        var toNumerator = Spec(units, to.Numerator);
+        var fromDenominator = Spec(units, from.Denominator);
+        var toDenominator = Spec(units, to.Denominator);
+        if (fromNumerator.DimensionId != toNumerator.DimensionId
+            || fromDenominator.DimensionId != toDenominator.DimensionId
+            || fromDenominator.FactorToBase == 0m
+            || toDenominator.FactorToBase == 0m
+            || fromDenominator.OffsetToBase != 0m
+            || toDenominator.OffsetToBase != 0m)
+        {
+            return null;
+        }
+
+        var numerator = converter.Convert(value, fromNumerator, toNumerator, explicitConversion: null);
+
+        // Sm3/s → Sm3/h: × 3600 (секунд у годині цілі) ÷ 1 (секунд у секунді джерела) = рівно.
+        return numerator * toDenominator.FactorToBase / fromDenominator.FactorToBase;
     }
 
     /// <summary>Чи збігається фактична одиниця джерела з оголошеною (ФВ-16.9).</summary>
