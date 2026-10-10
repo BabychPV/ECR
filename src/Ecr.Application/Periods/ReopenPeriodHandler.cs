@@ -7,6 +7,8 @@ using Ecr.Application.Security;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Enums;
 using Ecr.Domain.Errors;
+using Ecr.Domain.Services;
+using Ecr.Domain.ValueObjects;
 using Microsoft.Extensions.Logging;
 
 namespace Ecr.Application.Periods;
@@ -33,6 +35,9 @@ public sealed partial class ReopenPeriodHandler(
     /// один прогін, а не чергу однакових.
     /// </remarks>
     public const string OrphanScanTarget = "period-reopen";
+
+    /// <summary>Правило ефективного стану — те саме, що в рішенні про запис (F-08) і в <c>WorkflowStore</c>.</summary>
+    private static readonly PeriodStateCalculator EffectiveStates = new();
 
     // ⚠ `materialization` необов'язковий лише заради наявних прямих
     // конструювань обробника в тестах; у застосунку порт зареєстровано
@@ -164,6 +169,24 @@ public sealed partial class ReopenPeriodHandler(
             // Closed → Grace, а не → Open: правки після закриття лишаються
             // ПІЗНІМИ і мають позначатися IsLateEdit (D-70). Відкриття «як було»
             // стерло б різницю між роботою в строк і після нього.
+            // ⛔ X1-05 / W1-07 (аудит R11): адміністратор бачить період ЕФЕКТИВНО закритим (вичерпано
+            // `ReopenedUntil` чи межу закриття), а збережений стан до години лишається `Grace`/`Open`
+            // (його міняє лише `PeriodStateJob`) — і `Period.Reopen` відмовляв `ECR-PRD-0409`
+            // «лише закритий»: глухий кут рівно тоді, коли відкриття й потрібне (і повторно відкрити
+            // щойно сплилий дедлайн теж не можна було). Той самий розрахунок, що в рішенні про запис
+            // (`WorkflowStore.EffectivePeriodStateAsync`): лише для активного проєкту, з річним вікном.
+            // Збережений стан доганяє ефективний тією ж транзакцією, далі — звичайний Reopen.
+            if (period.State != PeriodState.Closed
+                && project.Status == ProjectStatus.Active
+                && EffectiveStates.Effective(
+                       period, now,
+                       YearGraceWindow.For(
+                           project.PeriodEnd, project.YearGraceOffsetDays,
+                           SiteTimeZone.Create(project.TimeZoneId).ToTimeZoneInfo())) == PeriodState.Closed)
+            {
+                period.AdvanceTo(PeriodState.Closed, now);
+            }
+
             var before = period.State;
             period.Reopen(deadline, reason, now);
 
