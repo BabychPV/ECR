@@ -31,6 +31,9 @@ public sealed class EcrConfigurationValidationTests(SqlServerFixture sql)
     [InlineData("Schema:StartupMode", "Migarte")]
     [InlineData("Jobs:Queue:Mode", "Databse")]
     [InlineData("Jobs:Recalculation:Executor", "Workers")]
+    [InlineData("Security:RateLimit:ChangePasswordPermitPerMinute", "0")]     // U1-09: ключа не було в переліку
+    [InlineData("Security:RateLimit:ChangePasswordPermitPerMinute", "5/хв")]
+    [InlineData("Auth:DataProtection:AllowUnprotectedKeys", "yes")]
     public void Недійсне_значення_називає_ключ(string key, string value)
     {
         var problems = EcrConfigurationValidation.Validate(Config((key, value)));
