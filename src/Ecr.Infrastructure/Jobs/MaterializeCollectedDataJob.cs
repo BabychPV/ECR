@@ -413,6 +413,12 @@ public sealed class MaterializeCollectedDataJob(
     /// <param name="Code">Код відмови з каталогу.</param>
     private sealed record RejectedCell(string Cell, string Code);
 
+    /// <summary>
+    /// Причина відмови мапінгу, чий період містить точки в іншій одиниці джерела, ніж оголошує мапінг (X3-02):
+    /// зібрати період заново (ручний збір з початку періоду). Мовонейтральний код (Y4-05).
+    /// </summary>
+    public const string MixedSourceUnitsReason = "mixedSourceUnits";
+
     /// <summary>Відмова задачі, якщо значення хоч одного мапінгу не переводиться в цільову одиницю.</summary>
     /// <param name="unitFailures">Опис кожного такого мапінгу.</param>
     /// <exception cref="BusinessRuleException"><c>ECR-UOM-0422</c> <c>boundaryConversionFailed</c>.</exception>
@@ -542,9 +548,10 @@ public sealed class MaterializeCollectedDataJob(
                 // ніколи. Тому межову точку в іншій одиниці переводимо в оголошену (`Edge`).
                 if (HasForeignUnit(inside, map.SourceUnitId))
                 {
+                    // ⛔ Y4-05: причина - мовонейтральний код, а не українська фраза: рядок іде параметром `{fields}` у
+                    // локалізований текст `boundaryConversionFailed`. Що робити (зібрати період заново), каже відмова.
                     unitFailures.Add(
-                        $"{field} (мапінг {map.Id.ToString(CultureInfo.InvariantCulture)}): у періоді є точки в іншій "
-                        + "одиниці джерела, ніж оголошує мапінг; зберіть період заново (ручний збір з початку періоду).");
+                        $"{field} (map {map.Id.ToString(CultureInfo.InvariantCulture)}): {MixedSourceUnitsReason}");
                     continue;
                 }
 
@@ -609,7 +616,7 @@ public sealed class MaterializeCollectedDataJob(
                 {
                     // ⛔ Несумісні одиниці (`Sm3` ↔ `m3`) — НЕ тихе число: комірка
                     // не пишеться, а задача після запису решти полів відмовляє.
-                    unitFailures.Add($"{field} (мапінг {map.Id.ToString(CultureInfo.InvariantCulture)}): {ex.Message}");
+                    unitFailures.Add($"{field} (map {map.Id.ToString(CultureInfo.InvariantCulture)}): {FailureReason.Of(ex)}");
                     continue;
                 }
 

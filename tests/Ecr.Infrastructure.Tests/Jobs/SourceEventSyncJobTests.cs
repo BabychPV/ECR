@@ -4,6 +4,7 @@ using Ecr.Application;
 using Ecr.Application.Common;
 using Ecr.Application.Documents;
 using Ecr.Application.Documents.Dto;
+using Ecr.Application.Errors;
 using Ecr.Application.Integration.SourceEvents;
 using Ecr.Application.Ports;
 using Ecr.Domain.Abstractions;
@@ -11,6 +12,7 @@ using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Entities.Dictionaries;
 using Ecr.Domain.Entities.Documents;
 using Ecr.Domain.Entities.External;
+using Ecr.Domain.Entities.Integration;
 using Ecr.Domain.Entities.Security;
 using Ecr.Domain.Entities.Workflow;
 using Ecr.Domain.Enums;
@@ -156,6 +158,32 @@ public sealed class SourceEventSyncJobTests(SqlServerFixture sql)
 
         Assert.Single(await RowsAsync(stand));
         Assert.Equal(SourceEventLinkStatus.Synced, Assert.Single(await LinksAsync(stand)).Status);
+    }
+
+    /// <summary>
+    /// Y4-05: відмова запису події йде в журнал покриття ключем каталогу причини, а не українським текстом винятку
+    /// (який шаблон <c>coverageEvents.eventWriteFailed</c> підставив би параметром у англійське/російське речення).
+    /// </summary>
+    /// <remarks>Мутація: повернути <c>Failure = ex.Message</c> - у деталях українська фраза, тест червоний.</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "Y4-05")]
+    public async Task Y4_05_відмова_запису_події_в_журналі_покриття_ключем_причини_а_не_текстом_винятку()
+    {
+        await using var stand = await ArrangeAsync();
+        var source = new FakeEventSource(Ev("E1", Start, End));
+
+        await RunAsync(stand, source, patcherOverride: new RejectingPatcher());
+
+        await using var db = sql.CreateContext();
+        var failed = await db.CollectionCoverages.AsNoTracking()
+            .Where(c => c.SourceEntityId == stand.EntityId && c.Status == CollectionCoverage.SkippedWriteConflict)
+            .Select(c => c.Details)
+            .ToListAsync();
+
+        Assert.Contains(failed, d => d!.Contains("err.ECR-CELL-0422.tooManyDecimals", StringComparison.Ordinal));
+        Assert.All(failed, d => Assert.DoesNotMatch("[\u0400-\u04FF]", d!));
     }
 
     [Fact]
@@ -1459,7 +1487,7 @@ public sealed class SourceEventSyncJobTests(SqlServerFixture sql)
         Stand stand, FakeEventSource source, bool freshContainer = false, ICalculationTrigger? trigger = null,
         ILogger<SourceEventSyncJob>? logger = null, int? entityId = null,
         DateTime? from = null, DateTime? to = null, bool confirm = false, bool clearTrackerOnWrite = false,
-        Func<Task>? afterRemovalDecision = null)
+        Func<Task>? afterRemovalDecision = null, ICellPatcher? patcherOverride = null)
     {
         // ⚠ Метадані таблиці кешуються в контейнері: зміна стелі рядків у базі видна лише новому контейнеру.
         await using var fresh = freshContainer ? BuildProvider() : null;
@@ -1482,7 +1510,7 @@ public sealed class SourceEventSyncJobTests(SqlServerFixture sql)
         var job = new SourceEventSyncJob(
             db,
             [source],
-            clearTrackerOnWrite ? new TrackerClearingPatcher(patcher, db) : patcher,
+            patcherOverride ?? (clearTrackerOnWrite ? new TrackerClearingPatcher(patcher, db) : patcher),
             services.GetRequiredService<ICoverageJournal>(),
             services.GetRequiredService<IntegrationActor>(),
             clock,
@@ -1554,6 +1582,24 @@ public sealed class SourceEventSyncJobTests(SqlServerFixture sql)
             db.ChangeTracker.Clear();
             return result;
         }
+    }
+
+    /// <summary>Патчер, що відхиляє будь-який запис рядків українським повідомленням із ключем каталогу.</summary>
+    private sealed class RejectingPatcher : ICellPatcher
+    {
+        public Task<IntegrationWriteResult> ApplyIntegrationAsync(
+            long documentId, long tableInstanceId, PeriodKey periodKey, IReadOnlyList<IntegrationCellValue> cells, CancellationToken ct)
+            => throw Reject();
+
+        public Task<IntegrationWriteResult> ApplyIntegrationRowsAsync(
+            long documentId, long tableInstanceId, PeriodKey periodKey, IReadOnlyList<IntegrationRowUpsert> rows, CancellationToken ct)
+            => throw Reject();
+
+        private static BusinessRuleException Reject()
+            => new(
+                "ECR-CELL-0422",
+                "Колонка зберігає не більше 16 знаків після коми.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-CELL-0422.tooManyDecimals" });
     }
 
     private sealed class FakeEventSource(params SourceEvent[] events) : IExternalDataSource
