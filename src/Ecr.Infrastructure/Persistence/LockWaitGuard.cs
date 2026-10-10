@@ -26,7 +26,8 @@ namespace Ecr.Infrastructure.Persistence;
 /// <c>SqlException</c> → 500. Тепер <c>UnitOfWork.ExecuteInTransactionAsync</c> перекладає 1222 з
 /// будь-якого оператора транзакції в ту саму відмову (<see cref="FindLockWaitTimeout"/>,
 /// <see cref="Busy"/>). Це не ширше за задум: 1222 буває ЛИШЕ після <c>SET LOCK_TIMEOUT</c>,
-/// а його виставляє тільки запис комірок. Ліміт виставляється ДО створення нових рядків
+/// а його виставляє тільки запис комірок (і поза транзакціями — очікування писачів довідника в
+/// <c>RecalculationJob</c>, Z5-01, що ловить свій 1222 сам і в <c>UnitOfWork</c> не потрапляє). Ліміт виставляється ДО створення нових рядків
 /// (<see cref="LimitAsync"/>, <c>ICellStore.LimitLockWaitAsync</c>), щоб і вставка в
 /// <c>doc.TableRow</c> не чекала весь <c>CommandTimeout</c>.
 ///

@@ -99,35 +99,13 @@ public sealed class RecalculationJobRegistryAsOfTests(SqlServerFixture sql)
         var builder = new TestDocumentBuilder(sql.ConnectionString);
         var document = await builder.BuildAsync();
 
-        int registryId;
-        await using (var setup = builder.CreateContext())
-        {
-            var registry = new RegistryDef(
-                EcrCode.Create($"X303_{Guid.NewGuid():N}"[..20]),
-                new LocalizedText(new Dictionary<string, string> { ["en"] = "X3-03" }),
-                isTemporal: false);
-            setup.RegistryDefs.Add(registry);
-            await setup.SaveChangesAsync();
-            registryId = registry.Id;
-        }
+        // Z5-01: задача чекає лише довідники, які читають методології, — тут він такий.
+        var registryId = await CreateRegistryAsync(builder, "X303", readByMethodology: true);
 
         await using var writer = new SqlConnection(sql.ConnectionString);
         await writer.OpenAsync();
-        int writerSession;
-        await using (var spid = writer.CreateCommand())
-        {
-            spid.CommandText = "SELECT CAST(@@SPID AS int);";
-            writerSession = (int)(await spid.ExecuteScalarAsync())!;
-        }
-
-        var transaction = (SqlTransaction)await writer.BeginTransactionAsync();
-        await using (var bump = writer.CreateCommand())
-        {
-            bump.Transaction = transaction;
-            bump.CommandText = "UPDATE cfg.RegistryDef SET DataRevision = DataRevision + 1 WHERE Id = @id;";
-            bump.Parameters.AddWithValue("@id", registryId);
-            Assert.Equal(1, await bump.ExecuteNonQueryAsync());
-        }
+        var writerSession = await SessionIdAsync(writer);
+        var transaction = await BeginRegistryWriteAsync(writer, registryId);
 
         var clock = new CommitProbeClock(new DateTime(2026, 2, 3, 10, 15, 30, DateTimeKind.Utc));
         var request = new RecalculationRequest(
@@ -162,6 +140,159 @@ public sealed class RecalculationJobRegistryAsOfTests(SqlServerFixture sql)
 
         Assert.NotEmpty(clock.Reads);
         Assert.All(clock.Reads, committed => Assert.True(committed));
+    }
+
+    /// <summary>
+    /// Z5-01: відкритий запис довідника, якого НЕ читає жодна методологія, перерахунок не тримає.
+    /// </summary>
+    /// <remarks>
+    /// До виправлення задача читала <c>MAX(DataRevision)</c> з УСІЄЇ <c>cfg.RegistryDef</c> під
+    /// <c>READCOMMITTEDLOCK</c>: скан чекав на X-лок будь-якого рядка до <c>CommandTimeout</c>, тож тут вона
+    /// падала б <c>SqlException</c> таймауту, а не завершувалась. Такий запис позначки «застаріло» не гасить
+    /// (<c>StaleResultsQuery</c> бере лише ребра <c>SourceKind = 1</c>), чекати його нема чого.
+    /// <para>
+    /// Друга половина: з'єднання контексту, відкрите ДО задачі, після неї лишається без ліміту очікування
+    /// (<c>@@LOCK_TIMEOUT = -1</c>) — <c>SET LOCK_TIMEOUT</c> задачі не протікає в її подальші оператори.
+    /// </para>
+    /// <para>
+    /// Мутації: прибрати фільтр за <c>RegistryUse</c> (скан усієї таблиці) → червоний (таймаут);
+    /// прибрати скидання <c>SET LOCK_TIMEOUT -1</c> → червоний (5000 замість -1).
+    /// </para>
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "Z5-01")]
+    public async Task Запис_довідника_без_методологій_не_тримає_перерахунок()
+    {
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var document = await builder.BuildAsync();
+        var registryId = await CreateRegistryAsync(builder, "Z501U", readByMethodology: false);
+
+        await using var writer = new SqlConnection(sql.ConnectionString);
+        await writer.OpenAsync();
+        var transaction = await BeginRegistryWriteAsync(writer, registryId);
+
+        try
+        {
+            await using var db = builder.CreateContext();
+            await db.Database.OpenConnectionAsync();
+
+            var job = new RecalculationJob(
+                db, new RecordingRunner(), RunHandler(), Formulas(), new TestClock(DateTime.UtcNow));
+            await job.ExecuteAsync(Request(document), NoOpProgress.Instance, CancellationToken.None);
+
+            var lockTimeout = await db.Database
+                .SqlQuery<int>($"SELECT @@LOCK_TIMEOUT AS Value")
+                .OrderBy(v => v)
+                .Take(1)
+                .ToListAsync();
+            Assert.Equal(-1, Assert.Single(lockTimeout));
+        }
+        finally
+        {
+            await transaction.RollbackAsync();
+            await transaction.DisposeAsync();
+        }
+    }
+
+    /// <summary>
+    /// Z5-01: запис довідника, який читає методологія, що не комітиться довше за
+    /// <see cref="RecalculationJob.RegistryWriterWaitMs"/>, — задача ВІДКЛАДАЄТЬСЯ (звільняє місце лейна й
+    /// applock документа), а не висить до <c>CommandTimeout</c> і не стартує прогін.
+    /// </summary>
+    /// <remarks>
+    /// До виправлення межі очікування не було: задача висіла 60 с (<c>CommandTimeout</c>) і падала
+    /// <c>SqlException</c> таймауту, який <c>JobRetryPolicy</c> повторює, — тут червоний за типом винятку.
+    /// Годинник задачі не читався жодного разу: прогону (<c>startedAt</c>) на знімку без цього запису немає.
+    /// <para>Мутація: прибрати <c>SET LOCK_TIMEOUT</c> → червоний.</para>
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "Z5-01")]
+    public async Task Довгий_запис_довідника_методології_відкладає_перерахунок()
+    {
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var document = await builder.BuildAsync();
+        var registryId = await CreateRegistryAsync(builder, "Z501M", readByMethodology: true);
+
+        await using var writer = new SqlConnection(sql.ConnectionString);
+        await writer.OpenAsync();
+        var transaction = await BeginRegistryWriteAsync(writer, registryId);
+
+        var clock = new CommitProbeClock(new DateTime(2026, 2, 3, 10, 15, 30, DateTimeKind.Utc));
+        try
+        {
+            await using var db = builder.CreateContext();
+            var job = new RecalculationJob(db, new RecordingRunner(), RunHandler(), Formulas(), clock);
+
+            var deferred = await Assert.ThrowsAsync<JobDeferredException>(
+                () => job.ExecuteAsync(Request(document), NoOpProgress.Instance, CancellationToken.None));
+
+            Assert.Equal(RecalculationJob.RegistryWriterResource, deferred.Resource);
+            Assert.Equal(RecalculationDocumentLock.DeferDelay, deferred.Delay);
+            Assert.Empty(clock.Reads);
+        }
+        finally
+        {
+            await transaction.RollbackAsync();
+            await transaction.DisposeAsync();
+        }
+    }
+
+    private static RecalculationRequest Request(TestDocument document)
+        => new(
+            ProjectId: document.ProjectId,
+            DocumentId: document.DocumentId,
+            PeriodKey: document.PeriodKey.Value,
+            TriggeredByUserId: null);
+
+    /// <summary>Новий довідник; <paramref name="readByMethodology"/> — з ребром «формула версії методології».</summary>
+    /// <remarks>
+    /// ⚠ Версія методології — <see cref="int.MaxValue"/>: зовнішнього ключа на <c>SourceId</c> немає
+    /// (<c>RegistryUse</c>), а справжньої версії з таким Id не буває — ребро не потрапить у чужі вибірки
+    /// «застаріло» чи «Де використано».
+    /// </remarks>
+    private static async Task<int> CreateRegistryAsync(TestDocumentBuilder builder, string prefix, bool readByMethodology)
+    {
+        await using var setup = builder.CreateContext();
+        var registry = new RegistryDef(
+            EcrCode.Create($"{prefix}_{Guid.NewGuid():N}"[..20]),
+            new LocalizedText(new Dictionary<string, string> { ["en"] = prefix }),
+            isTemporal: false);
+        setup.RegistryDefs.Add(registry);
+        await setup.SaveChangesAsync();
+
+        if (readByMethodology)
+        {
+            setup.RegistryUses.Add(RegistryUse.ForMethodologyFormula(int.MaxValue, "F1", registry.Id, fieldPath: null));
+            await setup.SaveChangesAsync();
+        }
+
+        return registry.Id;
+    }
+
+    private static async Task<int> SessionIdAsync(SqlConnection connection)
+    {
+        await using var spid = connection.CreateCommand();
+        spid.CommandText = "SELECT CAST(@@SPID AS int);";
+        return (int)(await spid.ExecuteScalarAsync())!;
+    }
+
+    /// <summary>
+    /// Відкрита транзакція запису даних довідника: перший оператор — як
+    /// <c>UnitOfWork.ApplyRegistryRevisionBumpsAsync</c> (X-лок рядка <c>cfg.RegistryDef</c>).
+    /// </summary>
+    private static async Task<SqlTransaction> BeginRegistryWriteAsync(SqlConnection writer, int registryId)
+    {
+        var transaction = (SqlTransaction)await writer.BeginTransactionAsync();
+        await using var bump = writer.CreateCommand();
+        bump.Transaction = transaction;
+        bump.CommandText = "UPDATE cfg.RegistryDef SET DataRevision = DataRevision + 1 WHERE Id = @id;";
+        bump.Parameters.AddWithValue("@id", registryId);
+        Assert.Equal(1, await bump.ExecuteNonQueryAsync());
+        return transaction;
     }
 
     /// <summary>Чекає, поки якийсь сеанс стане заблокованим <paramref name="blockerSession"/>.</summary>

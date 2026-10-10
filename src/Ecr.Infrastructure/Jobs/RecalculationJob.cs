@@ -1205,6 +1205,21 @@ public sealed partial class RecalculationJob(
             .ToDictionary(group => group.Key, group => group.Select(row => row.SheetDefId).ToHashSet());
     }
 
+    /// <summary>
+    /// Скільки перерахунок чекає на запис даних довідника, який читають методології, перш ніж
+    /// відкластися (Z5-01), мс. Менше за <see cref="LockWaitGuard.LockTimeoutMs"/>: задача тримає місце
+    /// лейна й applock документа, а відкладення їх звільняє.
+    /// </summary>
+    internal const int RegistryWriterWaitMs = 5_000;
+
+    /// <summary>Ресурс у <see cref="JobDeferredException"/> відкладення через запис довідника (Z5-01).</summary>
+    internal const string RegistryWriterResource = "cfg.RegistryDef";
+
+    private static readonly string SetRegistryWriterWait =
+        string.Create(CultureInfo.InvariantCulture, $"SET LOCK_TIMEOUT {RegistryWriterWaitMs};");
+
+    private const string ResetRegistryWriterWait = "SET LOCK_TIMEOUT -1;";
+
     /// <summary>Ресурс <c>sp_getapplock</c> для перерахунку документа.</summary>
     /// <param name="documentId">Документ.</param>
     /// <returns>Ім'я ресурсу.</returns>
@@ -1229,9 +1244,29 @@ public sealed partial class RecalculationJob(
     /// писач готується в зовнішній транзакції ДО першого збереження (rescan синку, <c>beforeSave</c>
     /// імпорту), його мітка <c>DataChangedAt</c> ставиться при збереженні, тобто ПІСЛЯ <c>startedAt</c>, і
     /// позначка «застаріло» спрацьовує. Лок береться поза транзакцією й звільняється одразу; задача тримає
-    /// лише сесійний applock документа, якого писачі довідника не беруть. Запис довідника довший за
-    /// <c>CommandTimeout</c> — відмова задачі (видно в журналі), а не прогін на знімку без цього запису
-    /// з погашеною позначкою. Не SQL Server (тести на інших провайдерах) — без очікування.
+    /// лише сесійний applock документа, якого писачі довідника не беруть. Не SQL Server (тести на інших
+    /// провайдерах) — без очікування.
+    /// </para>
+    /// <para>
+    /// ⛔ Z5-01 (аудит R8). Раніше читалася ВСЯ <c>cfg.RegistryDef</c> без межі очікування: скан брав S на
+    /// кожному рядку, тож перерахунок будь-якого проєкту чекав на запис БУДЬ-ЯКОГО довідника (імпорт CSV з
+    /// правилами, синк із rescan у тій самій транзакції) до <c>CommandTimeout</c> (60 с), тримаючи місце
+    /// лейна й applock документа, а далі — повтори <c>JobRetryPolicy</c>. Тепер:
+    /// (1) лише довідники з ребром «формула версії методології» (<c>RegistryUse.SourceKind = 1</c>) — рівно
+    /// той набір, для якого існує позначка «застаріло» (<c>StaleResultsQuery</c>, <c>RegistryImpactStore</c>
+    /// фільтрують за тим самим видом ребра); запис довідника без такого ребра результатів методологій не
+    /// гасить і чекати його нема чого; рядки — пошуком по PK (<c>FORCESEEK</c>), без скану чужих;
+    /// (2) межа очікування — <see cref="RegistryWriterWaitMs"/> (<c>SET LOCK_TIMEOUT</c>); вичерпана —
+    /// <see cref="JobDeferredException"/>, як зайнятий документ: місце воркера й applock звільняються,
+    /// повтор — через <see cref="RecalculationDocumentLock.DeferDelay"/> під стелею
+    /// <see cref="JobDeferral.MaxDeferral"/>. Прогону на знімку без незакоміченого запису з погашеною
+    /// позначкою, як і раніше, не буває.
+    /// </para>
+    /// <para>
+    /// ⚠ <c>SET LOCK_TIMEOUT</c> — налаштування сеансу: <c>SET</c> і читання йдуть одним відкритим
+    /// з'єднанням контексту, після читання ліміт знімається (з'єднання, відкрите тут, закривається — пул
+    /// скидає сеанс; уже відкрите — <c>SET LOCK_TIMEOUT -1</c>), щоб решта операторів задачі не отримала
+    /// 1222.
     /// </para>
     /// </remarks>
     private async Task AwaitRegistryWritersAsync(CancellationToken ct)
@@ -1241,18 +1276,53 @@ public sealed partial class RecalculationJob(
             return;
         }
 
-        _ = await db.Database
-            .SqlQuery<int>($"""
-                SELECT ISNULL(MAX(DataRevision), 0) AS Value
-                FROM cfg.RegistryDef WITH (READCOMMITTEDLOCK)
-                """)
+        var openedHere = db.Database.GetDbConnection().State != System.Data.ConnectionState.Open;
+        if (openedHere)
+        {
+            await db.Database.OpenConnectionAsync(ct).ConfigureAwait(false);
+        }
 
-            // `MAX` повертає рівно один рядок; `OrderBy` + `Take` — межа архітектурного правила 6 і EF 10102,
-            // як у `PartitionCheckJob`.
-            .OrderBy(v => v)
-            .Take(1)
-            .ToListAsync(ct)
-            .ConfigureAwait(false);
+        try
+        {
+            await db.Database
+                .ExecuteSqlRawAsync(SetRegistryWriterWait, ct)
+                .ConfigureAwait(false);
+
+            _ = await db.Database
+                .SqlQuery<int>($"""
+                    SELECT ISNULL(MAX(rd.DataRevision), 0) AS Value
+                    FROM cfg.RegistryUse AS u
+                    JOIN cfg.RegistryDef AS rd WITH (READCOMMITTEDLOCK, FORCESEEK) ON rd.Id = u.RegistryDefId
+                    WHERE u.SourceKind = {Domain.Entities.Configuration.RegistryUse.MethodologyVersionSource}
+                    """)
+
+                // `MAX` повертає рівно один рядок; `OrderBy` + `Take` — межа архітектурного правила 6 і EF 10102,
+                // як у `PartitionCheckJob`.
+                .OrderBy(v => v)
+                .Take(1)
+                .ToListAsync(ct)
+                .ConfigureAwait(false);
+        }
+        catch (Microsoft.Data.SqlClient.SqlException ex) when (LockWaitGuard.IsLockWaitTimeout(ex))
+        {
+            throw new JobDeferredException(
+                RecalculationDocumentLock.DeferDelay,
+                "Registry data write is still in progress; recalculation deferred.",
+                RegistryWriterResource);
+        }
+        finally
+        {
+            if (openedHere)
+            {
+                await db.Database.CloseConnectionAsync().ConfigureAwait(false);
+            }
+            else
+            {
+                await db.Database
+                    .ExecuteSqlRawAsync(ResetRegistryWriterWait, CancellationToken.None)
+                    .ConfigureAwait(false);
+            }
+        }
     }
 
     /// <summary>Бере ексклюзивний лок документа на весь час задачі.</summary>
