@@ -455,7 +455,10 @@ public sealed class DeleteRegistryEntryHandler(
 
         // ⚠ Ідентифікатор запису наскрізний по всіх довідниках: запис ЧУЖОГО довідника — та сама
         // `404`, що й неіснуючий, а не видалення «бо id збігся».
-        if (entry is null || entry.RegistryDefId != definition.Id)
+        // ⛔ AN-92: уже видалений запис — теж `404` (як у правки, зміни чинності й читання): повторний
+        // `DELETE` перезаписував `DeletedAt`/`DeletedByUserId`, піднімав ревізію даних довідника (скидаючи
+        // кеш переліку) і писав другий запис журналу «Delete» про те, чого вже немає.
+        if (entry is null || entry.IsDeleted || entry.RegistryDefId != definition.Id)
         {
             throw RegistryAccess.EntryNotFound(registryEntryId, registryCode);
         }
