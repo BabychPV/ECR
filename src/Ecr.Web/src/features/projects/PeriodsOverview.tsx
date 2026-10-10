@@ -1,11 +1,11 @@
 import { type JSX } from 'react';
 import { Anchor, Box, Group, SimpleGrid, Stack, Text, Title, UnstyledButton } from '@mantine/core';
-import { useQueries, type UseQueryResult } from '@tanstack/react-query';
-import { apiFetch } from '@/api/client';
+import { type UseQueryResult } from '@tanstack/react-query';
 import type { PagedProjects, PeriodCalendarDto } from '@/api/types';
 import { formatCount, formatPeriodKey } from '@/shared/format';
 import { wholeDaysUntil } from '@/shared/siteMoment';
 import { DataTable, type DataTableColumn } from '@/shared/ui/DataTable';
+import { useProjectCalendars } from '@/shared/ui/periodStates';
 import { StatStrip } from '@/shared/ui/StatStrip';
 import { StatusBadge, statusKey } from '@/shared/ui/StatusBadge';
 import { TwoLine } from '@/shared/ui/TwoLine';
@@ -209,12 +209,8 @@ function useOverviewRows(projects: readonly ProjectSummary[]): {
 } {
   const now = Date.now();
 
-  const calendars = useQueries({
-    queries: projects.map((project) => ({
-      queryKey: ['periods', project.id],
-      queryFn: () => apiFetch<PeriodCalendarDto>(`/api/v1/projects/${String(project.id)}/periods`),
-    })),
-  });
+  // ⛔ N4-08: одночасність обмежена (`useProjectCalendars`), рядки лишаються для всіх проєктів.
+  const calendars = useProjectCalendars(projects.map((project) => project.id));
 
   const rows: OverviewRow[] = projects.map((project, index) => {
     const calendar = calendars[index]?.data;
