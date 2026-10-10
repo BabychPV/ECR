@@ -5,7 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { TableSliceDto } from '@/api/types';
 import { cancelAutosave } from '../autosave';
 import { resetPending } from '../pendingStore';
-import { DocumentGrid } from '../DocumentGrid';
+import { DocumentGrid, forgetAsOfRequired } from '../DocumentGrid';
 
 /**
  * `GET …/registries/{code}/entries` для Lookup-колонки сітки — `asOf` лише
@@ -129,6 +129,7 @@ function show(periodKey: number = PeriodKey, periodEnd: string | null = Expected
 }
 
 afterEach(() => {
+  forgetAsOfRequired();
   cancelAutosave();
   resetPending();
   vi.unstubAllGlobals();
@@ -175,5 +176,84 @@ describe('DocumentGrid: asOf у запиті записів довідника L
     // ⛔ Мутаційний доказ: поверни виведення дати з `periodKey` — запит
     // піде з `asOf=2026-02-28`, і PATCH відхилить вибране на 2026-06-30.
     expect(entriesRequests[0]).toBe(`asOf=${QuarterEnd}`);
+  });
+});
+
+/**
+ * D1-06: довідник-ЧАСТИНА композиції з темпоральним батьком сам нетемпоральний, але сервер вимагає `asOf`
+ * (`422 err.ECR-REQ-0422.asOfRequired`) — клієнт слав дату лише за `isTemporal`, і пікер лишався порожнім.
+ */
+describe('DocumentGrid: asOf для частини композиції з темпоральним батьком (D1-06)', () => {
+  const requests: (string | null)[] = [];
+
+  function mockCompositionServer(): void {
+    requests.length = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        const [path, query] = url.split('?');
+
+        if (path?.endsWith('/api/v1/registries') === true) {
+          // `isTemporal: false` — як у переліку довідників: темпоральний лише батько.
+          return new Response(JSON.stringify([{ id: 42, code: 'PARTS', nameL10n: { values: {} }, isTemporal: false }]), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+
+        if (path?.includes('/api/v1/registries/') === true && path.endsWith('/entries')) {
+          requests.push(query ?? null);
+          if (query === undefined) {
+            return new Response(
+              JSON.stringify({
+                title: 'asOf required',
+                status: 422,
+                errorCode: 'ECR-REQ-0422',
+                correlationId: 'c1',
+                messageKey: 'err.ECR-REQ-0422.asOfRequired',
+                parameter: 'asOf',
+              }),
+              { status: 422, headers: { 'Content-Type': 'application/problem+json' } },
+            );
+          }
+
+          return new Response(JSON.stringify([{ id: 1, code: 'P1', display: 'Part 1' }]), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+
+        return new Response(JSON.stringify(sliceFixture()), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }),
+    );
+  }
+
+  it('422 asOfRequired для «нетемпорального» довідника → повтор із asOf кінця періоду, помилки немає', async () => {
+    mockCompositionServer();
+    show();
+
+    await screen.findByTestId('revogrid-stub');
+
+    // ⛔ Мутація: прибрати `isAsOfRequired`-гілку в `queryFn` — запит лишається без `asOf` (і єдиним).
+    await waitFor(() => expect(requests).toContain(`asOf=${ExpectedPeriodEnd}`));
+    expect(requests[0]).toBeNull();
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('запам’ятовано: наступна сітка того ж довідника одразу питає з asOf (без другої відмови)', async () => {
+    mockCompositionServer();
+    show();
+    await waitFor(() => expect(requests).toContain(`asOf=${ExpectedPeriodEnd}`));
+    document.body.innerHTML = '';
+
+    requests.length = 0;
+    show();
+
+    await waitFor(() => expect(requests.length).toBeGreaterThan(0));
+    expect(requests.every((query) => query === `asOf=${ExpectedPeriodEnd}`)).toBe(true);
   });
 });

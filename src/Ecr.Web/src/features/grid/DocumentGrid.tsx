@@ -300,6 +300,27 @@ function combineLookupEntries(results: UseQueryResult<RegistryEntryDto[]>[]): {
 }
 
 /**
+ * Довідники, для яких сервер вимагав `asOf`, хоч у переліку вони нетемпоральні (D1-06): частини композиції з
+ * темпоральним батьком. Модульний, а не стан сітки: на документі до 91 таблиці ділять довідник, і кожна не має
+ * наново отримувати ту саму відмову.
+ */
+const asOfRequiredCodes = new Set<string>();
+
+/** Забуває запам'ятоване «довідник вимагає asOf» (для тестів). */
+export function forgetAsOfRequired(): void {
+  asOfRequiredCodes.clear();
+}
+
+/** `422` «asOf обов'язковий» (`ECR-REQ-0422`, `err.ECR-REQ-0422.asOfRequired`). */
+function isAsOfRequired(error: unknown): boolean {
+  return (
+    error instanceof EcrApiError &&
+    error.problem.errorCode === 'ECR-REQ-0422' &&
+    error.problem.extensions2?.['messageKey'] === 'err.ECR-REQ-0422.asOfRequired'
+  );
+}
+
+/**
  * Grid-редактор документа.
  *
  * Обов'язкові можливості (`B21` §12, критерії FQ-1):
@@ -980,14 +1001,21 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
    */
   const lookupAsOf = periodEnd;
 
+  // ⛔ D1-06: довідник-ЧАСТИНА композиції з темпоральним батьком сам нетемпоральний (`isTemporal: false`), але
+  // перелік його записів залежить від дати — сервер вимагає `asOf` і для нього (`422 asOfRequired`), а клієнт слав
+  // його лише за `isTemporal`, тож пікер лишався порожнім. Ланцюг композиції в переліку довідників не описано, тож
+  // дізнаємось із відмови: запам'ятовуємо код і далі шлемо дату кінця періоду (як для темпорального).
+  const [, bumpAsOfRequired] = useState(0);
+
   const lookupEntriesQueries = useQueries({
     queries: lookupRegistryCodes.map(({ code, isTemporal }) => {
-      const asOf = isTemporal ? lookupAsOf : null;
+      const needsAsOf = isTemporal || asOfRequiredCodes.has(code);
+      const asOf = needsAsOf ? lookupAsOf : null;
 
       // ⛔ Темпоральний довідник без дати не питається взагалі: запит без
       // `asOf` сервер відхиляє (`422`), а будь-яка «здогадана» дата показала б
       // записи, які PATCH потім відхилить (D1-02). Календар приходить за мить.
-      const enabled = !isTemporal || asOf !== null;
+      const enabled = !needsAsOf || asOf !== null;
 
       // ⚠ Базовий шлях — ОКРЕМИЙ шаблонний рядок, без `?asOf=` усередині:
       // `EndpointCoverageTests.Кожна_адреса_яку_викликає_клієнт_існує_на_сервері`
@@ -997,10 +1025,20 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
 
       return {
         queryKey: [...queryKeys.registries.entries(code), asOf],
-        queryFn: () =>
-          apiFetch<RegistryEntryDto[]>(
-            asOf === null ? baseUrl : `${baseUrl}?asOf=${asOf}`,
-          ),
+        queryFn: async () => {
+          try {
+            return await apiFetch<RegistryEntryDto[]>(asOf === null ? baseUrl : `${baseUrl}?asOf=${asOf}`);
+          } catch (error) {
+            // D1-06: «asOf обов'язковий» для довідника, якого ми вважали нетемпоральним, — запам'ятати й
+            // перебудувати запит уже з датою (ключ запиту міняється разом із нею).
+            if (asOf === null && isAsOfRequired(error) && !asOfRequiredCodes.has(code)) {
+              asOfRequiredCodes.add(code);
+              bumpAsOfRequired((value) => value + 1);
+            }
+
+            throw error;
+          }
+        },
         enabled,
 
         // ⚠ Перф: довідник — до 50 тис. записів, а міняє його адміністратор,
@@ -1197,7 +1235,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
     // — `gridTotals` — вже віддавали перевагу правці, тож екран і підсумок розходились).
     for (const edit of pending.values()) {
       const key = cellKey(edit.rowKey, edit.columnCode);
-      if (!merged.has(key)) merged.set(key, edit.isEmpty || edit.value === null ? '' : edit.value);
+      merged.set(key, edit.isEmpty || edit.value === null ? '' : edit.value);
     }
     for (const rejection of rejections.values()) {
       const key = cellKey(rejection.edit.rowKey, rejection.edit.columnCode);
