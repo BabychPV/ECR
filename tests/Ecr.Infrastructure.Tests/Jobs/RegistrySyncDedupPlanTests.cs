@@ -218,28 +218,10 @@ public sealed class RegistrySyncDedupPlanTests(SqlServerFixture sql)
     }
 
     /// <summary>План запиту з міткою <see cref="RegistrySyncJob.DedupJournalTag"/> із кешу цієї бази.</summary>
+    /// <remarks>⛔ Лише через <see cref="PlanCache"/>: прямий <c>APPLY</c> над усім кешем відкриває чужі бази (Msg 924, <c>Z8-01</c>).</remarks>
     private async Task<XDocument?> CachedPlanAsync()
     {
-        await using var connection = new SqlConnection(sql.ConnectionString);
-        await connection.OpenAsync().ConfigureAwait(false);
-
-        await using var command = connection.CreateCommand();
-
-        // ⚠ dbid - з атрибутів плану (для параметризованих запитів dm_exec_sql_text.dbid порожній).
-        command.CommandText = """
-            SELECT TOP (1) CAST(qp.query_plan AS nvarchar(max))
-            FROM sys.dm_exec_query_stats AS qs
-            CROSS APPLY sys.dm_exec_sql_text(qs.sql_handle) AS st
-            CROSS APPLY sys.dm_exec_query_plan(qs.plan_handle) AS qp
-            CROSS APPLY sys.dm_exec_plan_attributes(qs.plan_handle) AS pa
-            WHERE pa.attribute = N'dbid' AND CAST(pa.value AS int) = DB_ID()
-              AND st.text LIKE N'%' + @tag + N'%'
-              AND st.text NOT LIKE N'%dm_exec_query_stats%'
-            ORDER BY qs.last_execution_time DESC;
-            """;
-        command.Parameters.AddWithValue("@tag", RegistrySyncJob.DedupJournalTag);
-
-        var text = await command.ExecuteScalarAsync().ConfigureAwait(false) as string;
+        var text = await PlanCache.LatestPlanAsync(sql.ConnectionString, RegistrySyncJob.DedupJournalTag).ConfigureAwait(false);
         return text is null ? null : XDocument.Parse(text);
     }
 }
