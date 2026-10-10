@@ -1,9 +1,10 @@
-﻿import type { JSX } from 'react';
+﻿import { useRef, useState, type JSX } from 'react';
 import {
   Button,
   Divider,
   Group,
   Menu,
+  Modal,
   SegmentedControl,
   Stack,
   Text,
@@ -11,11 +12,12 @@ import {
 } from '@mantine/core';
 import { useNavigate } from 'react-router-dom';
 import { useQueryClient, type QueryClient } from '@tanstack/react-query';
-import { apiFetch, beginSignOut, LOGOUT_PATH } from '@/api/client';
+import { apiFetch, beginSignOut, LOGOUT_PATH, recordBeforeSignOut } from '@/api/client';
 import { announceSessionChange } from '@/shared/session/sessionChannel';
 import { t } from '@/shared/i18n';
 import { applyDensity, setDensity, useDensity, type Density } from '@/shared/theme/preferences';
 import { LanguageSwitcher } from '@/shared/ui/LanguageSwitcher';
+import { flushUnsaved, hasUnsavedChanges, UnsavedSettleMs, unsavedCount } from '@/shared/ui/unsavedSources';
 
 /**
  * Профіль користувача: тема, мова, щільність, зміна пароля, вихід
@@ -40,9 +42,12 @@ import { LanguageSwitcher } from '@/shared/ui/LanguageSwitcher';
 export function UserMenu({
   userName,
   changePasswordPath,
+  settleTimeoutMs = UnsavedSettleMs,
 }: {
   userName: string;
   changePasswordPath: string;
+  /** Скільки чекати на збереження перед виходом (проп — заради тестів, як в `UnsavedGuard`). */
+  settleTimeoutMs?: number;
 }): JSX.Element {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -59,79 +64,138 @@ export function UserMenu({
     applyDensity(value);
   }
 
+  /*
+   * ⛔ F6-01: «Вийти» мовчки знищував незбережені й невдало збережені правки.
+   * Після `beginSignOut()` мережа для вкладки закрита (синтетичний `401`), а
+   * обробник `beforeunload` за закритого сеансу не шле маячка й не питає — тож
+   * довезти набране ПОТІМ уже нічим. Тому спершу — те саме, що робить
+   * `UnsavedGuard` для навігації роутера: зберегти й дочекатися; діалог — ЛИШЕ
+   * якщо не вдалося. Найбезпечніше для даних: без явного «Вийти» в діалозі
+   * людина лишається з правками.
+   */
+  const [saveFailed, setSaveFailed] = useState(false);
+  const flushing = useRef(false);
+
+  async function requestSignOut(): Promise<void> {
+    if (flushing.current) return;
+
+    if (hasUnsavedChanges()) {
+      flushing.current = true;
+      const saved = await flushUnsaved(settleTimeoutMs).finally(() => {
+        flushing.current = false;
+      });
+
+      if (!saved) {
+        setSaveFailed(true);
+
+        return;
+      }
+    }
+
+    await signOut(queryClient);
+  }
+
+  const stay = (): void => {
+    setSaveFailed(false);
+  };
+
+  const leave = (): void => {
+    setSaveFailed(false);
+    void signOut(queryClient);
+  };
+
   return (
-    <Menu shadow="md" width={260} position="bottom-end" withinPortal>
-      <Menu.Target>
-        {/*
-         * ⚠ Кнопка, а не `<Text>` із `onClick`: клавіатурі потрібен елемент,
-         * на який можна перейти табом і натиснути пробілом (`ФВ-14.19`), а
-         * читалці — роль, що обіцяє дію.
-         */}
-        <Button variant="subtle" size="xs">
-          <span className="ecr-ellipsis">{userName}</span>
-        </Button>
-      </Menu.Target>
+    <>
+      <Menu shadow="md" width={260} position="bottom-end" withinPortal>
+        <Menu.Target>
+          {/*
+           * ⚠ Кнопка, а не `<Text>` із `onClick`: клавіатурі потрібен елемент,
+           * на який можна перейти табом і натиснути пробілом (`ФВ-14.19`), а
+           * читалці — роль, що обіцяє дію.
+           */}
+          <Button variant="subtle" size="xs">
+            <span className="ecr-ellipsis">{userName}</span>
+          </Button>
+        </Menu.Target>
 
-      <Menu.Dropdown>
-        <Stack gap="xs" p="xs">
-          <div>
-            <Text size="xs" c="dimmed" mb="xs" id="ecr-theme-label">
-              {t('profile.theme')}
-            </Text>
+        <Menu.Dropdown>
+          <Stack gap="xs" p="xs">
+            <div>
+              <Text size="xs" c="dimmed" mb="xs" id="ecr-theme-label">
+                {t('profile.theme')}
+              </Text>
 
-            {/*
-             * ⚠ Три значення, а не перемикач «темна: так/ні». `auto` — це не
-             * зайвий варіант, а стан за замовчуванням: людина, у якої система
-             * увечері темніє, інакше отримувала б білий екран на весь монітор.
-             */}
-            <SegmentedControl
-              fullWidth
-              size="xs"
-              value={colorScheme}
-              onChange={(value) => {
-                setColorScheme(value as 'light' | 'dark' | 'auto');
-              }}
-              aria-labelledby="ecr-theme-label"
-              data={[
-                { value: 'auto', label: t('profile.themeAuto') },
-                { value: 'light', label: t('profile.themeLight') },
-                { value: 'dark', label: t('profile.themeDark') },
-              ]}
-            />
-          </div>
+              {/*
+               * ⚠ Три значення, а не перемикач «темна: так/ні». `auto` — це не
+               * зайвий варіант, а стан за замовчуванням: людина, у якої система
+               * увечері темніє, інакше отримувала б білий екран на весь монітор.
+               */}
+              <SegmentedControl
+                fullWidth
+                size="xs"
+                value={colorScheme}
+                onChange={(value) => {
+                  setColorScheme(value as 'light' | 'dark' | 'auto');
+                }}
+                aria-labelledby="ecr-theme-label"
+                data={[
+                  { value: 'auto', label: t('profile.themeAuto') },
+                  { value: 'light', label: t('profile.themeLight') },
+                  { value: 'dark', label: t('profile.themeDark') },
+                ]}
+              />
+            </div>
 
-          <LanguageSwitcher />
+            <LanguageSwitcher />
 
-          <div>
-            <Text size="xs" c="dimmed" mb="xs" id="ecr-density-label">
-              {t('profile.density')}
-            </Text>
+            <div>
+              <Text size="xs" c="dimmed" mb="xs" id="ecr-density-label">
+                {t('profile.density')}
+              </Text>
 
-            <SegmentedControl
-              fullWidth
-              size="xs"
-              value={rows}
-              onChange={(value) => {
-                changeDensity(value as Density);
-              }}
-              aria-labelledby="ecr-density-label"
-              data={[
-                { value: 'compact', label: t('profile.densityCompact') },
-                { value: 'comfortable', label: t('profile.densityComfortable') },
-              ]}
-            />
-          </div>
-        </Stack>
+              <SegmentedControl
+                fullWidth
+                size="xs"
+                value={rows}
+                onChange={(value) => {
+                  changeDensity(value as Density);
+                }}
+                aria-labelledby="ecr-density-label"
+                data={[
+                  { value: 'compact', label: t('profile.densityCompact') },
+                  { value: 'comfortable', label: t('profile.densityComfortable') },
+                ]}
+              />
+            </div>
+          </Stack>
 
-        <Divider />
+          <Divider />
 
-        <Menu.Item onClick={() => navigate(changePasswordPath)}>{t('password.title')}</Menu.Item>
+          <Menu.Item onClick={() => navigate(changePasswordPath)}>{t('password.title')}</Menu.Item>
 
-        <Menu.Item onClick={() => void signOut(queryClient)}>
-          <Group justify="space-between">{t('profile.logout')}</Group>
-        </Menu.Item>
-      </Menu.Dropdown>
-    </Menu>
+          <Menu.Item onClick={() => void requestSignOut()}>
+            <Group justify="space-between">{t('profile.logout')}</Group>
+          </Menu.Item>
+        </Menu.Dropdown>
+      </Menu>
+
+      {saveFailed && (
+        <Modal opened onClose={stay} title={t('unsaved.title')}>
+          <Text size="sm">{t('unsaved.body', { count: unsavedCount() })}</Text>
+
+          <Group justify="flex-end" mt="md">
+            {/* ⚠ Фокус — на БЕЗПЕЧНІЙ дії: `Enter` за звичкою лишає людину з її даними. */}
+            <Button variant="default" data-autofocus onClick={stay} data-testid="unsaved-stay">
+              {t('unsaved.stay')}
+            </Button>
+
+            <Button color="statusError" onClick={leave} data-testid="unsaved-leave">
+              {t('unsaved.leave')}
+            </Button>
+          </Group>
+        </Modal>
+      )}
+    </>
   );
 }
 
@@ -157,6 +221,9 @@ export function UserMenu({
  * (`announceSessionChange`), а не з першого `401`.
  */
 async function signOut(queryClient: QueryClient): Promise<void> {
+  // ⛔ F6-01: слід незбереженого (`lostEdits`) — до закриття мережі й
+  // перезавантаження; без незбереженого це нічого не робить.
+  recordBeforeSignOut();
   beginSignOut();
 
   try {

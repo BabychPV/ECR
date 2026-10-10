@@ -249,6 +249,18 @@ function runBeforeLoginRedirect(from: string): void {
   }
 }
 
+/**
+ * Слід незбереженого перед ЯВНИМ виходом (F6-01).
+ *
+ * ⛔ Вихід — теж повне перезавантаження сторінки, як і `401`: усе, що жило лише
+ * в пам'яті, зникає. Людина вже бачила питання й обрала «Вийти», але слід
+ * (`lostEdits`) лишається, щоб після наступного входу можна було відновити
+ * введене. Викликати ДО `beginSignOut()`.
+ */
+export function recordBeforeSignOut(): void {
+  runBeforeLoginRedirect(window.location.pathname + window.location.search);
+}
+
 /** Адреса виходу — єдиний запит, який ще йде після `beginSignOut()`. */
 export const LOGOUT_PATH = '/api/v1/logout';
 
