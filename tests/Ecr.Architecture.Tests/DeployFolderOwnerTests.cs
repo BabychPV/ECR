@@ -62,6 +62,14 @@ public sealed class DeployFolderOwnerTests
         Assert.True(build > call, "власника перевірено після збірки MSI");
         Assert.True(msi > call, "власника перевірено після msiexec");
 
+        // ⛔ R7-Y3/Y3-01: і ДО кроку 2 — інакше відмова лишає нову схему під старими бінарниками,
+        // а служби в Disabled. Мутація (CI): повернути виклик у крок 3 → червоний.
+        var step2 = script.IndexOf("Write-Step \"Крок 2/7", StringComparison.Ordinal);
+        var stop = script.IndexOf("$stoppedForSchema = @(Stop-EcrServicesForSchema)", StringComparison.Ordinal);
+        Assert.True(step2 > 0 && stop > 0, "маркерів кроку 2 не знайдено");
+        Assert.True(step2 > call, "власника перевірено після початку кроку 2");
+        Assert.True(stop > call, "власника перевірено після зупинки служб для схеми");
+
         var line = script[call..script.IndexOf('\n', call)];
         Assert.Contains("'config'", line, StringComparison.Ordinal);
         Assert.Contains("'logs'", line, StringComparison.Ordinal);

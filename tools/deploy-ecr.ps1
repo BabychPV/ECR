@@ -1836,6 +1836,12 @@ END
             "(first deployment: -FirstDeployment -CreateDatabaseIfMissing).', 16, 1);")
     }
 
+    # ⛔ N5-02: теки з попередньої установки/підкладені заздалегідь — лише читання, до msiexec.
+    # ⛔ R7-Y3/Y3-01: і ДО кроку 2 — відмова тут нічого не змінила; після кроку 2 вона лишала нову
+    # схему під старими бінарниками й службами в Disabled (простій до повтору).
+    $programDataEcr = Join-Path $env:ProgramData 'ECR'
+    Assert-EcrFolderOwner -Path $programDataEcr, (Join-Path $programDataEcr 'config'), (Join-Path $programDataEcr 'logs')
+
     # ---------------------------------------------------------------------
     if ($SkipSchema) {
         Write-Step "Крок 2/7: схема — ПРОПУЩЕНО (-SkipSchema)"
@@ -2053,9 +2059,7 @@ Write-Host ("Воркер перерахунку (EcrWorker): $(if ($workerEnabl
 # ---------------------------------------------------------------------
 Write-Step "Крок 3/7: MSI"
 
-# ⛔ N5-02: теки з попередньої установки/підкладені заздалегідь — до msiexec, лише читання.
-$programDataEcr = Join-Path $env:ProgramData 'ECR'
-Assert-EcrFolderOwner -Path $programDataEcr, (Join-Path $programDataEcr 'config'), (Join-Path $programDataEcr 'logs')
+# Власника тек ECR перевірено ще до кроку 2 (N5-02, R7-Y3/Y3-01).
 
 if (-not $MsiPath) {
     if ($PSCmdlet.ShouldProcess('build-msi.ps1', "build-msi.ps1 -Version $Version")) {
