@@ -100,6 +100,92 @@ public sealed class SimulationSessionApiTests(SqlServerFixture sql)
         Assert.NotNull(await EndedAtAsync(sessionId).ConfigureAwait(true));
     }
 
+    /// <summary>
+    /// S1-03 (аудит 5): сеанс закрито на сервері, а cookie з заявкою лишилась — запис не відхиляється
+    /// <c>ECR-SIM-0403</c> (профіль уже звичайний, банера немає), заявка знімається з cookie.
+    /// </summary>
+    /// <remarks>Мутація: повернути безумовне <c>throw</c> у <c>SimulationReadOnlyMiddleware</c> — запис дає 403.</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task S1_03_сеанс_закрито_на_сервері_запис_не_відхиляється_як_симуляція()
+    {
+        var s = await ArrangeAsync().ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+        var client = await SignInAsync(app).ConfigureAwait(true);
+
+        var start = await client.PostAsJsonAsync(
+            new Uri("/api/v1/security/simulation", UriKind.Relative),
+            new { subjectUserId = s.SubjectId, reason = "S1-03 server closed" }).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.Created, start.StatusCode);
+        var sessionId = JsonDocument.Parse(await start.Content.ReadAsStringAsync().ConfigureAwait(true))
+            .RootElement.GetProperty("sessionId").GetInt64();
+
+        // Поки сеанс відкритий — запис заборонено (контроль: правило не зняте).
+        Assert.Equal(HttpStatusCode.Forbidden, (await PostRoleAsync(client, "SIM3A").ConfigureAwait(true)).StatusCode);
+
+        await CloseOnServerAsync(sessionId).ConfigureAwait(true);
+
+        var write = await PostRoleAsync(client, "SIM3B").ConfigureAwait(true);
+        var body = await write.Content.ReadAsStringAsync().ConfigureAwait(true);
+        Assert.True(write.StatusCode == HttpStatusCode.Created, $"{write.StatusCode}: {body}");
+
+        var me = await MeAsync(client).ConfigureAwait(true);
+        Assert.False(me.GetProperty("isSimulation").GetBoolean());
+        Assert.Equal(JsonValueKind.Null, me.GetProperty("simulationSessionId").ValueKind);
+    }
+
+    /// <summary>
+    /// S1-04 (аудит 5): новий вхід видає cookie без сеансу — старий сеанс цієї cookie закривається
+    /// (раніше лишався відкритим в <c>aud.SimulationSession</c>, а закривав його лише вихід).
+    /// </summary>
+    /// <remarks>Мутація: прибрати <c>EndSimulationOfPreviousCookieAsync</c> з входу — <c>EndedAt</c> лишається порожнім.</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task S1_04_повторний_вхід_закриває_відкритий_сеанс_симуляції()
+    {
+        var s = await ArrangeAsync().ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+        var client = await SignInAsync(app).ConfigureAwait(true);
+
+        var start = await client.PostAsJsonAsync(
+            new Uri("/api/v1/security/simulation", UriKind.Relative),
+            new { subjectUserId = s.SubjectId, reason = "S1-04 relogin" }).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.Created, start.StatusCode);
+        var sessionId = JsonDocument.Parse(await start.Content.ReadAsStringAsync().ConfigureAwait(true))
+            .RootElement.GetProperty("sessionId").GetInt64();
+        Assert.Null(await EndedAtAsync(sessionId).ConfigureAwait(true));
+
+        // Той самий клієнт (cookie зі старим сеансом) входить наново.
+        var relogin = await client.PostAsJsonAsync(
+            new Uri("/api/v1/login/local", UriKind.Relative),
+            new { userName = $"sima_{_tag}", password = Password }).ConfigureAwait(true);
+        Assert.True(relogin.IsSuccessStatusCode, $"Повторний вхід: {relogin.StatusCode}: {app.ErrorsText}");
+
+        Assert.NotNull(await EndedAtAsync(sessionId).ConfigureAwait(true));
+    }
+
+    private static Task<HttpResponseMessage> PostRoleAsync(HttpClient client, string prefix)
+        => client.PostAsJsonAsync(
+            new Uri("/api/v1/roles", UriKind.Relative),
+            new
+            {
+                code = $"{prefix}_{Guid.NewGuid():N}"[..14],
+                nameL10n = new Dictionary<string, string> { ["en"] = "x" },
+                permissionCodes = Array.Empty<string>(),
+            });
+
+    private async Task CloseOnServerAsync(long sessionId)
+    {
+        await using var connection = new SqlConnection(sql.ConnectionString);
+        await connection.OpenAsync().ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        command.CommandText = "UPDATE aud.SimulationSession SET EndedAt = SYSUTCDATETIME() WHERE Id = @id AND EndedAt IS NULL;";
+        command.Parameters.AddWithValue("@id", sessionId);
+        Assert.Equal(1, await command.ExecuteNonQueryAsync().ConfigureAwait(false));
+    }
+
     private static async Task<JsonElement> MeAsync(HttpClient client)
     {
         var response = await client.GetAsync(new Uri("/api/v1/me", UriKind.Relative)).ConfigureAwait(false);
