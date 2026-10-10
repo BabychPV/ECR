@@ -244,6 +244,44 @@ public sealed class RegistryEntryDeleteTests(SqlServerFixture sql)
     /// Мутація: прибрати <c>|| entry.IsDeleted</c> у <c>UpsertRegistryEntryHandler.LoadAsync</c> — тест червоніє
     /// (200 замість 404, назва змінилась).
     /// </remarks>
+    /// <summary>
+    /// ⛔ AN-92: повторне видалення вже видаленого запису — <c>404 registryEntry</c>, а не <c>204</c>: ревізія
+    /// даних довідника не росте вдруге, а рядок і слід `DeletedAt` лишаються від першого видалення.
+    /// </summary>
+    /// <remarks>
+    /// Мутація: прибрати <c>|| entry.IsDeleted</c> у <c>DeleteRegistryEntryHandler</c> — другий DELETE дає 204
+    /// і піднімає ревізію, тест червоніє.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "AN-92")]
+    public async Task Повторне_видалення_видаленого_запису_дає_404_і_ревізія_не_росте()
+    {
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, "Registry.View", "Registry.EditData")
+            .ConfigureAwait(true);
+
+        var fixture = await SeedRegistriesAsync().ConfigureAwait(true);
+        var uri = new Uri($"/api/v1/registries/{fixture.Code}/entries/{fixture.EntryId}", UriKind.Relative);
+
+        var first = await client.DeleteAsync(uri).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.NoContent, first.StatusCode);
+        var revisionAfterFirst = await DataRevisionAsync(fixture.DefinitionId).ConfigureAwait(true);
+        var stateAfterFirst = await StateAsync(fixture.EntryId).ConfigureAwait(true);
+
+        var second = await client.DeleteAsync(uri).ConfigureAwait(true);
+        var body = await second.Content.ReadAsStringAsync().ConfigureAwait(true);
+        Assert.True(second.StatusCode == HttpStatusCode.NotFound, $"{second.StatusCode}: {body}");
+
+        var problem = JsonDocument.Parse(body).RootElement;
+        Assert.Equal("ECR-REG-0404", problem.GetProperty("errorCode").GetString());
+        Assert.Equal("err.ECR-REG-0404.registryEntry", problem.GetProperty("messageKey").GetString());
+
+        Assert.Equal(revisionAfterFirst, await DataRevisionAsync(fixture.DefinitionId).ConfigureAwait(true));
+        Assert.Equal(stateAfterFirst, await StateAsync(fixture.EntryId).ConfigureAwait(true));
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
