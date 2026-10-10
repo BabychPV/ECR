@@ -28,6 +28,12 @@ public sealed class ReportRetentionJobTests(SqlServerFixture sql)
 {
     private static readonly DateTime Now = new(2026, 4, 1, 10, 0, 0, DateTimeKind.Utc);
 
+    /// <summary>
+    /// Годинник ретенції: зрізи, побудовані о <see cref="Now"/>, уже старші за
+    /// <see cref="ReportRetentionJob.BuildGrace"/> (R7-Y2-03) — тобто точно не в процесі побудови.
+    /// </summary>
+    private static readonly DateTime RetentionNow = Now + ReportRetentionJob.BuildGrace + TimeSpan.FromMinutes(1);
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
@@ -102,7 +108,7 @@ public sealed class ReportRetentionJobTests(SqlServerFixture sql)
 
         await using (var jobDb = chain.CreateContext())
         {
-            var job = new ReportRetentionJob(jobDb, new TestClock(Now));
+            var job = new ReportRetentionJob(jobDb, new TestClock(RetentionNow));
             await job.ExecuteAsync(null, Substitute.For<IJobProgress>(), CancellationToken.None);
         }
 
@@ -213,7 +219,7 @@ public sealed class ReportRetentionJobTests(SqlServerFixture sql)
             .AddInterceptors(interceptor)
             .Options))
         {
-            var job = new ReportRetentionJob(jobDb, new TestClock(Now));
+            var job = new ReportRetentionJob(jobDb, new TestClock(RetentionNow));
             await job.ExecuteAsync(null, Substitute.For<IJobProgress>(), CancellationToken.None);
         }
 
@@ -232,6 +238,94 @@ public sealed class ReportRetentionJobTests(SqlServerFixture sql)
         Assert.True(
             await verify.ReportRows.AsNoTracking().AnyAsync(r => r.SnapshotId == promotedId, CancellationToken.None),
             "Рядки поданого зрізу видалено — зріз лишився без вмісту.");
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "R7-Y2-03")]
+    public async Task Ретенція_не_чіпає_зріз_що_будується()
+    {
+        // ⛔ R7-Y2-03: побудова комітить зріз (Draft, IsCurrent = 0), окремим збереженням — рядки, і лише
+        // третьою транзакцією під замком слоту робить його поточним. Ретенція між другим і третім кроком
+        // видаляла рядки (зріз «непоточний»), перемикання комітилось, другий DELETE зріз пропускав — поточним
+        // ставав зріз без рядків. Тут — стан після другого кроку, ретенція, потім перемикання.
+        // Мутація: прибрати `BuiltAt < builtBefore` з запитів ReportRetentionJob — рядків 0, червоний.
+        var chain = new TestDocumentBuilder(sql.ConnectionString);
+        var document = await chain.BuildAsync();
+
+        var tag = Guid.NewGuid().ToString("N")[..8];
+        long buildingId;
+        long oldId;
+
+        await using (var db = chain.CreateContext())
+        {
+            var def = new ReportDef(
+                EcrCode.Create($"RBR{tag}"),
+                new LocalizedText(new Dictionary<string, string> { ["en"] = "Build race test" }),
+                isRegulatory: true);
+            db.ReportDefs.Add(def);
+            await db.SaveChangesAsync(CancellationToken.None);
+
+            var version = new ReportVersion(def.Id, "1.0", "[]", "{}", Now);
+            version.Publish();
+            db.ReportVersions.Add(version);
+            await db.SaveChangesAsync(CancellationToken.None);
+
+            // Давній непоточний зріз — доказ, що прогін справді прибирає, а не нічого не робить.
+            var old = new ReportSnapshot(
+                version.Id, document.ProjectId, document.PeriodKey.Value, SnapshotStatus.Draft,
+                Now - ReportRetentionJob.BuildGrace - TimeSpan.FromHours(1), null);
+            old.Complete(rowCount: 1, contentHash: null, calculationRunId: null, parametersJson: null);
+
+            // Зріз, що будується: рядки вже закомічено, IsCurrent ще 0.
+            var building = new ReportSnapshot(
+                version.Id, document.ProjectId, document.PeriodKey.Value, SnapshotStatus.Draft, Now, null);
+            building.Complete(rowCount: 10, contentHash: null, calculationRunId: null, parametersJson: null);
+
+            db.ReportSnapshots.AddRange(old, building);
+            await db.SaveChangesAsync(CancellationToken.None);
+
+            oldId = old.Id;
+            buildingId = building.Id;
+
+            var oldRow = new ReportRow(oldId, rowNo: 1, columnCode: "A");
+            oldRow.SetValue(valueString: null, valueNumeric: 1m, valueDate: null);
+            db.ReportRows.Add(oldRow);
+
+            for (var rowNo = 1; rowNo <= 10; rowNo++)
+            {
+                var row = new ReportRow(buildingId, rowNo, columnCode: "A");
+                row.SetValue(valueString: null, valueNumeric: rowNo, valueDate: null);
+                db.ReportRows.Add(row);
+            }
+
+            await db.SaveChangesAsync(CancellationToken.None);
+        }
+
+        // Ретенція — за хвилину після початку побудови.
+        await using (var jobDb = chain.CreateContext())
+        {
+            var job = new ReportRetentionJob(jobDb, new TestClock(Now + TimeSpan.FromMinutes(1)));
+            await job.ExecuteAsync(null, Substitute.For<IJobProgress>(), CancellationToken.None);
+        }
+
+        // Побудова завершується: зріз стає поточним (третій крок).
+        await using (var db = chain.CreateContext())
+        {
+            var building = await db.ReportSnapshots.SingleAsync(s => s.Id == buildingId, CancellationToken.None);
+            building.MakeCurrent();
+            await db.SaveChangesAsync(CancellationToken.None);
+        }
+
+        await using var verify = chain.CreateContext();
+
+        Assert.Equal(
+            10,
+            await verify.ReportRows.AsNoTracking().CountAsync(r => r.SnapshotId == buildingId, CancellationToken.None));
+        Assert.False(
+            await verify.ReportSnapshots.AsNoTracking().AnyAsync(s => s.Id == oldId, CancellationToken.None),
+            "Давній непоточний зріз мав бути прибраний.");
     }
 
     /// <summary>

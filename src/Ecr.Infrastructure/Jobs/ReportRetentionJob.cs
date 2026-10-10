@@ -66,6 +66,27 @@ public sealed class ReportRetentionJob(EcrDbContext db, IClock clock) : IBackgro
     /// </remarks>
     private const int MaxBatchesPerRun = 20;
 
+    /// <summary>
+    /// Зрізи, молодші за цю межу (за <see cref="Domain.Entities.Reporting.ReportSnapshot.BuiltAt"/>),
+    /// не прибираються: можливо, вони ще будуються.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ R7-Y2-03. <c>ReportSnapshotBuilder</c> комітить новий зріз як <c>Draft</c> з
+    /// <c>IsCurrent = 0</c>, потім ОКРЕМИМ збереженням (поза замком слоту) пише рядки, і лише третьою
+    /// транзакцією під замком слоту робить зріз поточним. Між першим і третім кроком зріз за всіма
+    /// ознаками схожий на «старий непоточний» (D-71). Ретенція видаляла його рядки, побудова
+    /// перемикала <c>IsCurrent = 1</c>, а другий <c>DELETE</c> зріз уже пропускав — і поточним ставав
+    /// зріз без жодного рядка (<c>RowCount</c> і хеш при цьому — повні): регулятор бачив порожній звіт.
+    /// <para>
+    /// ⚠ Вікова межа, а не замок слоту: <c>BuiltAt</c> ставиться ДО агрегації (X7-04), тож усе вікно
+    /// побудови лежить після нього, а побудова триває хвилини, не години. Шість годин перекривають
+    /// будь-яку побудову з великим запасом; D-71 вікової межі не забороняє — прибирання лише
+    /// відкладається на наступну ніч. Безпечний бік: зайвий зріз проживе добу довше, а не поточний
+    /// зріз лишиться порожнім.
+    /// </para>
+    /// </remarks>
+    internal static readonly TimeSpan BuildGrace = TimeSpan.FromHours(6);
+
     /// <inheritdoc />
     public async Task ExecuteAsync(object? payload, IJobProgress progress, CancellationToken ct)
     {
@@ -101,6 +122,9 @@ public sealed class ReportRetentionJob(EcrDbContext db, IClock clock) : IBackgro
         var totalRows = 0;
         var batches = 0;
 
+        // ⛔ R7-Y2-03: див. `BuildGrace`. Межа одна на весь прогін і стоїть у ВСІХ трьох запитах.
+        var builtBefore = clock.UtcNow - BuildGrace;
+
         while (batches < MaxBatchesPerRun)
         {
             // ⚠ Кандидати — НЕ поточні і НЕ подані зрізи (D-71). Обидва
@@ -109,7 +133,7 @@ public sealed class ReportRetentionJob(EcrDbContext db, IClock clock) : IBackgro
             // (`SwitchCurrentAsync`) можуть відбутися між батчами того самого
             // прогону.
             var candidateIds = await db.ReportSnapshots
-                .Where(s => !s.IsCurrent && s.Status != SnapshotStatus.Submitted)
+                .Where(s => !s.IsCurrent && s.Status != SnapshotStatus.Submitted && s.BuiltAt < builtBefore)
                 .OrderBy(s => s.Id)
                 .Select(s => s.Id)
                 .Take(BatchSize)
@@ -139,14 +163,16 @@ public sealed class ReportRetentionJob(EcrDbContext db, IClock clock) : IBackgro
                             && db.ReportSnapshots.Any(
                                 s => s.Id == r.SnapshotId
                                      && !s.IsCurrent
-                                     && s.Status != SnapshotStatus.Submitted))
+                                     && s.Status != SnapshotStatus.Submitted
+                                     && s.BuiltAt < builtBefore))
                 .ExecuteDeleteAsync(ct)
                 .ConfigureAwait(false);
 
             var snapshotsDeleted = await db.ReportSnapshots
                 .Where(s => candidateIds.Contains(s.Id)
                             && !s.IsCurrent
-                            && s.Status != SnapshotStatus.Submitted)
+                            && s.Status != SnapshotStatus.Submitted
+                            && s.BuiltAt < builtBefore)
                 .ExecuteDeleteAsync(ct)
                 .ConfigureAwait(false);
 
