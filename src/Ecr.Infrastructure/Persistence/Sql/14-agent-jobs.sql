@@ -67,18 +67,31 @@ GO
 --
 -- ⚠ Розклад job-local (`sp_add_jobschedule`), а не спільний: спільний пережив
 -- би видалення завдання і залишився б висіти нічий.
+--
+-- ⛔ S2-06 (аудит 2026-10-09b): ім'я завдання в `msdb` унікальне на ВЕСЬ інстанс, а не в базі, тож
+-- ім'я без бази означало «одне завдання на інстанс»: `-FirstDeployment` для другої бази ECR на тому
+-- самому інстансі (PROD і UAT) видаляв за іменем завдання першої й створював своє. Тому ім'я
+-- несе базу — `ECR: Partitions ahead [<база>]` (ліміт sysname — 128 символів). Завдання під СТАРИМ
+-- іменем (без бази) видаляється лише коли його крок виконується в ЦІЙ базі (`database_name`):
+-- чуже старе завдання лишається — його перейменує розгортання тієї бази.
 DECLARE @db sysname = DB_NAME();
+DECLARE @job sysname = LEFT(N'ECR: Partitions ahead [' + @db + N']', 128);
 
-IF EXISTS (SELECT 1 FROM msdb.dbo.sysjobs WHERE name = N'ECR: Partitions ahead')
+IF EXISTS (SELECT 1 FROM msdb.dbo.sysjobs AS j
+             JOIN msdb.dbo.sysjobsteps AS s ON s.job_id = j.job_id
+            WHERE j.name = N'ECR: Partitions ahead' AND s.database_name = @db)
     EXEC msdb.dbo.sp_delete_job @job_name = N'ECR: Partitions ahead', @delete_unused_schedule = 1;
 
+IF EXISTS (SELECT 1 FROM msdb.dbo.sysjobs WHERE name = @job)
+    EXEC msdb.dbo.sp_delete_job @job_name = @job, @delete_unused_schedule = 1;
+
 EXEC msdb.dbo.sp_add_job
-    @job_name = N'ECR: Partitions ahead',
+    @job_name = @job,
     @description = N'arc.usp_EnsurePartitions: межі партицій на 6 місяців уперед (D-66).',
     @enabled = 1;
 
 EXEC msdb.dbo.sp_add_jobstep
-    @job_name = N'ECR: Partitions ahead',
+    @job_name = @job,
     @step_name = N'EnsurePartitions',
     @subsystem = N'TSQL',
     @database_name = @db,
@@ -88,14 +101,14 @@ EXEC msdb.dbo.sp_add_jobstep
     @retry_attempts = 0;
 
 EXEC msdb.dbo.sp_add_jobschedule
-    @job_name = N'ECR: Partitions ahead',
+    @job_name = @job,
     @name = N'ECR: monthly 02:40',
     @freq_type = 16,                  -- щомісяця
     @freq_interval = 1,               -- першого числа
     @freq_recurrence_factor = 1,
     @active_start_time = 24000;       -- 02:40
 
-EXEC msdb.dbo.sp_add_jobserver @job_name = N'ECR: Partitions ahead';
+EXEC msdb.dbo.sp_add_jobserver @job_name = @job;
 GO
 
 -- ── 2. Фізичні інваріанти схеми ──────────────────────────────────────────
@@ -115,6 +128,8 @@ GO
 -- CONSTRAINT` знімає обмеження цілком, а завдання рапортувало успіх.
 -- Вимкнений ключ гірший за недовірений: другий хоча б перевіряє вставки.
 DECLARE @db sysname = DB_NAME();
+-- ⛔ S2-06: ім'я з базою — див. пояснення в блоці 1.
+DECLARE @job sysname = LEFT(N'ECR: Physical checks [' + @db + N']', 128);
 DECLARE @physical nvarchar(max) = N'
 IF EXISTS (SELECT 1 FROM sys.foreign_keys fk
             JOIN sys.tables t ON t.object_id = fk.parent_object_id
@@ -131,16 +146,21 @@ IF EXISTS (SELECT 1 FROM sys.indexes i
              AND ds.type_desc <> N''PARTITION_SCHEME'')
     THROW 50042, N''Індекс партиційованої таблиці лежить поза схемою партиціонування.'', 1;';
 
-IF EXISTS (SELECT 1 FROM msdb.dbo.sysjobs WHERE name = N'ECR: Physical checks')
+IF EXISTS (SELECT 1 FROM msdb.dbo.sysjobs AS j
+             JOIN msdb.dbo.sysjobsteps AS s ON s.job_id = j.job_id
+            WHERE j.name = N'ECR: Physical checks' AND s.database_name = @db)
     EXEC msdb.dbo.sp_delete_job @job_name = N'ECR: Physical checks', @delete_unused_schedule = 1;
 
+IF EXISTS (SELECT 1 FROM msdb.dbo.sysjobs WHERE name = @job)
+    EXEC msdb.dbo.sp_delete_job @job_name = @job, @delete_unused_schedule = 1;
+
 EXEC msdb.dbo.sp_add_job
-    @job_name = N'ECR: Physical checks',
+    @job_name = @job,
     @description = N'Фізичні інваріанти схеми: довіреність FK, розміщення індексів (D-66).',
     @enabled = 1;
 
 EXEC msdb.dbo.sp_add_jobstep
-    @job_name = N'ECR: Physical checks',
+    @job_name = @job,
     @step_name = N'PhysicalChecks',
     @subsystem = N'TSQL',
     @database_name = @db,
@@ -150,13 +170,13 @@ EXEC msdb.dbo.sp_add_jobstep
     @retry_attempts = 0;
 
 EXEC msdb.dbo.sp_add_jobschedule
-    @job_name = N'ECR: Physical checks',
+    @job_name = @job,
     @name = N'ECR: nightly 03:10',
     @freq_type = 4,                   -- щодня
     @freq_interval = 1,
     @active_start_time = 31000;       -- 03:10
 
-EXEC msdb.dbo.sp_add_jobserver @job_name = N'ECR: Physical checks';
+EXEC msdb.dbo.sp_add_jobserver @job_name = @job;
 GO
 
 -- ⛔ Архівація року завданням НЕ ставиться — свідомо. Вона змінює фізичне
