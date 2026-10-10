@@ -242,8 +242,8 @@ describe('StatusBadge: стан → тон', () => {
    * коли й тут забули рядок: два переліки розійшлися б, а тест лишився б
    * зеленим на тому, що від них лишилося.
    */
-  it('перелік вичерпний: 58 пар, і таблиця компонента не має жодної зайвої', () => {
-    expect(expected).toHaveLength(58);
+  it('перелік вичерпний: 59 пар, і таблиця компонента не має жодної зайвої', () => {
+    expect(expected).toHaveLength(59);
     expect(expected.every(([kind, state]) => isKnownStatus(kind, state))).toBe(true);
 
     const inComponent = Object.entries(statusTable).flatMap(([kind, states]) =>
