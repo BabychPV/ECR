@@ -1,5 +1,5 @@
 import { useEffect, type JSX } from 'react';
-import { useQueries } from '@tanstack/react-query';
+import { useQueries, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import type { PeriodCalendarDto } from '@/api/types';
 import { Text } from '@mantine/core';
@@ -89,6 +89,42 @@ export function summarizePeriodStates(
 }
 
 /**
+ * Скільки календарів проєктів летить у мережі одночасно (N4-08).
+ *
+ * ⛔ `useQueries` без межі на 500 проєктів ставив 500 запитів одразу: сервер і браузер (6 з'єднань на хост)
+ * захлинались, а перші екрани чекали в черзі. Рядки НЕ відкидаються (огляд періодів має показувати всі
+ * проєкти) — понад межу календарі просто стартують пізніше, у міру того як попередні завершаться.
+ */
+export const MaxConcurrentCalendars = 20;
+
+/**
+ * Календарі проєктів ключем `['periods', id]` з обмеженою одночасністю (N4-08).
+ *
+ * ⚠ Ключ спільний із календарем сторінки періодів і автовибором періоду в `DocumentsPage`: вже закешований
+ * календар не займає «місця» в черзі. Результати йдуть у порядку `projectIds`.
+ */
+export function useProjectCalendars(projectIds: readonly number[]): UseQueryResult<PeriodCalendarDto>[] {
+  const client = useQueryClient();
+  let budget = MaxConcurrentCalendars;
+
+  return useQueries({
+    queries: projectIds.map((id) => {
+      const status = client.getQueryState(['periods', id])?.status;
+      // Завершений (дані чи помилка) не займає місця; решта — по черзі, поки вистачає бюджету.
+      const settled = status === 'success' || status === 'error';
+      const allowed = settled || budget > 0;
+      if (!settled) budget -= 1;
+
+      return {
+        queryKey: ['periods', id],
+        queryFn: () => apiFetch<PeriodCalendarDto>(`/api/v1/projects/${String(id)}/periods`),
+        enabled: allowed,
+      };
+    }),
+  });
+}
+
+/**
  * Тягне календарі проєктів для `PeriodPicker` і віддає зведення нагору.
  *
  * ⚠ Окремий компонент, а не хук у самому `PeriodPicker`: вибір періоду живе
@@ -97,6 +133,10 @@ export function summarizePeriodStates(
  *
  * ⚠ Ключ запиту — той самий `['periods', id]`, що й в автовиборі періоду на
  * переліку документів і на сторінці документа: календар тягнеться один раз.
+ *
+ * ⛔ N4-06: відмова календаря ОДНОГО проєкту не ховає зведення решти. Раніше «готово» вимагало дані в усіх
+ * календарів, тож один збій назавжди лишав вибір періоду без станів і дедлайнів для всіх проєктів. Тепер
+ * зведення — за календарями, що завантажились, щойно жоден не чекає відповіді; збійний у підсумок не входить.
  */
 export function PeriodStatesLoader({
   projectIds,
@@ -105,27 +145,23 @@ export function PeriodStatesLoader({
   projectIds: readonly number[];
   onChange: (states: ReadonlyMap<number, PeriodStateSummary> | undefined) => void;
 }): JSX.Element | null {
-  const calendars = useQueries({
-    queries: projectIds.map((id) => ({
-      queryKey: ['periods', id],
-      queryFn: () => apiFetch<PeriodCalendarDto>(`/api/v1/projects/${String(id)}/periods`),
-    })),
-  });
+  const calendars = useProjectCalendars(projectIds);
 
-  const ready = calendars.length > 0 && calendars.every((calendar) => calendar.data !== undefined);
+  const loaded = calendars.filter((calendar) => calendar.data !== undefined);
+  const ready = loaded.length > 0 && calendars.every((calendar) => calendar.status !== 'pending');
   // ⚠ Залежність — відбиток даних, а не масив `useQueries` (він новий щоразу).
-  const stamp = ready ? calendars.map((calendar) => calendar.dataUpdatedAt).join(',') : '';
+  const stamp = ready ? loaded.map((calendar) => calendar.dataUpdatedAt).join(',') : '';
 
   useEffect(() => {
     onChange(
       ready
         ? summarizePeriodStates(
-            calendars.map((calendar) => calendar.data?.periods ?? []),
-            calendars.map((calendar) => calendar.data?.timeZoneId ?? 'UTC'),
+            loaded.map((calendar) => calendar.data?.periods ?? []),
+            loaded.map((calendar) => calendar.data?.timeZoneId ?? 'UTC'),
           )
         : undefined,
     );
-    // ⚠ Лише `stamp`: він описує `calendars` повністю, а `onChange` — сеттер стану.
+    // ⚠ Лише `stamp`: він описує `loaded` повністю, а `onChange` — сеттер стану.
   }, [stamp]);
 
   return null;
