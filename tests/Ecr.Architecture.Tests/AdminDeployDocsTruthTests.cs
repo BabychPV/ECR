@@ -133,4 +133,29 @@ public sealed class AdminDeployDocsTruthTests
         Assert.Contains("-ServiceAccount", rollback, StringComparison.Ordinal);
         Assert.Contains("REINSTALL=ALL REINSTALLMODE=vomus SERVICE_ACCOUNT=", rollback, StringComparison.Ordinal);
     }
+
+    /// <summary>
+    /// R8-Z7-05: знімок <c>Environment</c> у <c>deploy-ecr.ps1</c> читає лише наявні служби (до свого msiexec), тож
+    /// після ручного <c>msiexec /x</c> змінні, яких скрипт не пише, губляться; голий <c>/f</c> без
+    /// <c>SERVICE_ACCOUNT</c> і без повтору скрипта суперечить runbook §8. Install-guide §5 мусить зберігати
+    /// <c>Environment</c>, передавати обліковий запис і повторювати <c>deploy-ecr.ps1</c>.
+    /// Мутації: повернути голий <c>msiexec /f Ecr.msi</c> або прибрати збереження <c>Environment</c> → червоний.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Перевстановлення_зберігає_Environment_і_повторює_скрипт()
+    {
+        var script = Read("tools", "deploy-ecr.ps1");
+        var snapshot = script.IndexOf("$envSnapshot[$service] = Get-ServiceEnvironmentEntries -ServiceName $service", StringComparison.Ordinal);
+        var msiexec = script.IndexOf("Start-Process msiexec -ArgumentList $msiArgs", StringComparison.Ordinal);
+        Assert.True(snapshot > 0 && msiexec > snapshot, "знімок Environment більше не перед msiexec скрипта: переглянь install-guide §5");
+
+        var section = Section(InstallGuide(), "## 5. Перевстановлення / відновлення");
+        Assert.DoesNotContain("msiexec /f Ecr.msi", section, StringComparison.Ordinal);
+        Assert.Contains("Services\\EcrApi).Environment", section, StringComparison.Ordinal);
+        Assert.Contains("SERVICE_ACCOUNT=", section, StringComparison.Ordinal);
+        Assert.Contains("deploy-ecr.ps1 -SkipSchema", section, StringComparison.Ordinal);
+        Assert.Contains("ECR_Auth__DataProtection__PreviousCertificateThumbprints", section, StringComparison.Ordinal);
+    }
 }

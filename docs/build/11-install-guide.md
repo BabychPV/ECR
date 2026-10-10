@@ -829,20 +829,49 @@ SERVICE_ACCOUNT=<той самий> WORKER_ENABLED=<1 або 0>` (звичайн
 
 ## 5. Перевстановлення / відновлення {#5-перевстановлення}
 
-**Файл пошкоджено чи службу знесли вручну, версія та сама:**
+⛔ ✎ 2026-10-10 (R8-Z7-05): **будь-який `msiexec` поза `deploy-ecr.ps1`** може лишити службу без
+`Environment` (рядок підключення, відбиток DP, режим Api) — runbook §8; для оновлення MSI це перевірено
+CI-джобом `msi-install` (D3), для ремонту — не перевірялось, тож розраховуйте на гірше. Знімок
+`Environment`, який робить `deploy-ecr.ps1`, бачить лише те, що лежить у службах **на момент його
+запуску**. Тому перед будь-яким кроком нижче збережіть `Environment` обох служб (там секрети — файл
+тримайте як пароль і видаліть після відновлення):
 
 ```powershell
-msiexec /f Ecr.msi /qn /l*v repair.log
+(Get-ItemProperty HKLM:\SYSTEM\CurrentControlSet\Services\EcrApi).Environment    > env-EcrApi.txt
+(Get-ItemProperty HKLM:\SYSTEM\CurrentControlSet\Services\EcrWorker).Environment > env-EcrWorker.txt
+(Get-CimInstance Win32_Service -Filter "Name='EcrApi'").StartName                 # обліковий запис служби
 ```
 
+**Файл пошкоджено чи службу знесли вручну, версія та сама:** не голий `msiexec /f`, а перевстановлення
+з тим самим обліковим записом (MSI не пам'ятає `SERVICE_ACCOUNT` і `WORKER_ENABLED`; без них служба
+стане `LocalSystem`/`Manual`, розділ 4), а **одразу після нього** — `deploy-ecr.ps1` з тими самими
+параметрами, що при оновленні (розділ 4), плюс `-SkipSchema`:
+
+```powershell
+msiexec /i Ecr.msi /qn /l*v repair.log REINSTALL=ALL REINSTALLMODE=vecmus SERVICE_ACCOUNT=<StartName вище> WORKER_ENABLED=<1 або 0>
+.\tools\deploy-ecr.ps1 -SkipSchema <ті самі параметри, що в розділі 4>
+```
+
+Якщо `StartName` = `LocalSystem`, `SERVICE_ACCOUNT` не передавайте (і `-ServiceAccount` теж); звичайний
+(не gMSA) обліковий запис — ще й `SERVICE_PASSWORD` / `-ServicePassword`. Змінні, яких скрипт не пише
+(`ECR_Secrets__*`, `ECR_PiWebApi__AllowedHosts__*`, `ECR_Jobs__Workers__*`, телеметрія,
+`ECR_Auth__DataProtection__PreviousCertificateThumbprints`), звірте зі збереженим файлом і, якщо
+зникли, поверніть (розділ 9). Службу, яку вже знесли вручну, зберегти не вийде — її змінні беріть з
+документації майданчика.
+
 **Хочеться почати з чистого аркуша на цій самій базі** (рідко потрібно
-— спершу `/f` вище):
+— спершу перевстановлення вище). Спершу те саме збереження `Environment` і `StartName`, потім:
 
 ```powershell
 msiexec /x Ecr.msi /qn
 # ... потім секція 2 заново, БЕЗ -FirstDeployment (схема вже накочена,
-# 14-agent-jobs.sql удруге не потрібен)
+# 14-agent-jobs.sql удруге не потрібен), з -ServiceAccount = збережений StartName
 ```
+
+Після `/x` служб немає, тож `deploy-ecr.ps1` нічого з попереднього `Environment` не відновить: змінні,
+яких він не пише (перелік вище), поверніть зі збереженого файлу (розділ 9). Без
+`ECR_Auth__DataProtection__PreviousCertificateThumbprints` ключі кільця, захищені попереднім
+сертифікатом, не розшифруються.
 
 ⛔ Видалення MSI **не чіпає** базу даних і **не чіпає** `%ProgramData%\ECR\`
 (логи й конфіг лишаються на диску — прибирає адміністратор вручну, якщо
