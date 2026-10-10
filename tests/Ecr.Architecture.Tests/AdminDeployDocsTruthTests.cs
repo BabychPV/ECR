@@ -113,4 +113,24 @@ public sealed class AdminDeployDocsTruthTests
         Assert.All(blocks, b => Assert.Contains("-ServiceAccount", b, StringComparison.Ordinal));
         Assert.Contains("StartName", section, StringComparison.Ordinal);
     }
+
+    /// <summary>
+    /// R8-Z7-04: після збою кроку 2 служби <c>Disabled</c> (<c>Disable-EcrServicesAutoStart</c>), а MSI не ставився;
+    /// голий msiexec попереднього MSI без <c>SERVICE_ACCOUNT</c> лишає службу під LocalSystem. Runbook §9 мусить
+    /// мати гілку «Крок 2» з поверненням <c>Automatic</c> і ставити попередню версію з обліковим записом служби.
+    /// Мутації: прибрати <c>Set-Service … Automatic</c>, <c>-ServiceAccount</c> чи рецепт <c>REINSTALL=ALL</c> з §9 → червоний.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Відкат_враховує_вимкнені_служби_і_обліковий_запис()
+    {
+        Assert.Contains("$disabledForSchema = @(Disable-EcrServicesAutoStart)", Read("tools", "deploy-ecr.ps1"), StringComparison.Ordinal);
+
+        var rollback = Section(Runbook(), "## 9. Відкат");
+        Assert.Contains("Set-Service EcrApi -StartupType Automatic", rollback, StringComparison.Ordinal);
+        Assert.Contains("**Крок 2**", rollback, StringComparison.Ordinal);
+        Assert.Contains("-ServiceAccount", rollback, StringComparison.Ordinal);
+        Assert.Contains("REINSTALL=ALL REINSTALLMODE=vomus SERVICE_ACCOUNT=", rollback, StringComparison.Ordinal);
+    }
 }
