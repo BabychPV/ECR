@@ -212,11 +212,14 @@ public sealed class SchemaValidator(
     /// <summary>Ім'я розширеної властивості бази зі штампом релізу схеми (пише <c>deploy-ecr.ps1</c>, крок 2).</summary>
     public const string SchemaReleaseProperty = "ECR.SchemaRelease";
 
+    /// <summary>Префікс штампа «крок 2 почато, не завершено» (R7-Y3/Y3-02).</summary>
+    private const string SchemaReleaseIncompletePrefix = "incomplete:";
+
     /// <summary>Версія цієї збірки (<c>build-msi.ps1</c>: <c>-p:Version</c> = <c>ProductVersion</c> MSI).</summary>
     public static Version CodeRelease => typeof(SchemaValidator).Assembly.GetName().Version ?? new Version(0, 0, 0);
 
     /// <summary>
-    /// Схему бази накочено НОВІШИМ релізом, ніж ця збірка, — текст причини (з кодом
+    /// Схему бази накочено НОВІШИМ релізом, ніж ця збірка, або її оновлення не завершено, — текст причини (з кодом
     /// <c>ECR-SYS-5031</c>) або <c>null</c>.
     /// </summary>
     /// <param name="db">Контекст бази.</param>
@@ -230,6 +233,8 @@ public sealed class SchemaValidator(
     /// Без штампа (база до R6-X4, dev/тест-база) чи з нерозбірним — не відмова: звіряти нема з чим.
     /// Старіший штамп — теж не відмова тут (новий код на ще не оновленій схемі ловить
     /// <c>-SkipSchema</c> скрипта і звірка міграцій).
+    /// ⛔ R7-Y3/Y3-02: штамп <c>incomplete:&lt;версія&gt;</c> (крок 2 ставить його ДО першого скрипта) —
+    /// крок 2 упав посередині, частину <c>Sql/*.sql</c> не накочено: відмова за будь-якої версії збірки.
     /// </remarks>
     public static async Task<string?> SchemaReleaseMismatchAsync(EcrDbContext db, Version code, CancellationToken ct)
     {
@@ -237,9 +242,17 @@ public sealed class SchemaValidator(
         ArgumentNullException.ThrowIfNull(code);
         var stamps = await db.Database
             .SqlQueryRaw<string>(
-                "SELECT CAST(value AS nvarchar(32)) AS Value FROM sys.extended_properties " +
+                "SELECT CAST(value AS nvarchar(64)) AS Value FROM sys.extended_properties " +
                 "WHERE class = 0 AND name = N'" + SchemaReleaseProperty + "' AND value IS NOT NULL")
             .ToListAsync(ct).ConfigureAwait(false);
+        if (stamps.Count > 0 && stamps[0].StartsWith(SchemaReleaseIncompletePrefix, StringComparison.Ordinal))
+        {
+            return Incompatible(
+                $"Оновлення схеми бази до {stamps[0][SchemaReleaseIncompletePrefix.Length..]} почато і не завершено " +
+                "(крок 2 deploy-ecr.ps1 упав посередині, частину скриптів каталогу Sql не накочено). Старт зупинено — " +
+                "повторіть deploy-ecr.ps1 зі схемою, без -SkipSchema (runbook §8).").Message;
+        }
+
         if (stamps.Count == 0 || !Version.TryParse(stamps[0], out var stamped))
         {
             return null;

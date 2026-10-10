@@ -282,6 +282,8 @@
     (розширена властивість бази) = версія пакета. З -SkipSchema штамп
     звіряється з пакетом ДО msiexec: інший реліз — відмова (спершу оновіть
     схему цим пакетом); штампа немає (база до R6-X4) — попередження.
+    ⛔ R7-Y3/Y3-02: до першого скрипта крок 2 ставить штамп 'incomplete:<версія>';
+    упав посередині — -SkipSchema відмовляє (повторіть запуск ЗІ схемою).
 
     ⛔ S2-04 (аудит 2026-10-09b, HU-13 Q3): без -SkipSchema крок 2 спершу
     вимагає свіжу копію бази (-BackupMaxAgeHours), а перед першим sqlcmd зі
@@ -1251,6 +1253,17 @@ function Get-SchemaReleaseProblem {
     $stampText = ([string] $Stamp).Trim()
     if (-not $stampText -or $stampText -eq 'none') { return $null }
     $packageText = ([string] $Package).Trim()
+    # ⛔ R7-Y3/Y3-02: крок 2 зі схемою ставить 'incomplete:<версія>' ДО першого скрипта і замінює його
+    # версією лише після останнього. Такий штамп — крок 2 упав посередині: частину Sql/*.sql не накочено
+    # (на першому релізі зі штампом без нього -SkipSchema бачив 'none' і пропускав). Відмова — на будь-якому пакеті.
+    if ($stampText.StartsWith('incomplete:', [System.StringComparison]::Ordinal)) {
+        $shownPackage = if ($packageText) { $packageText } else { '<версія пакета>' }
+        return ("Оновлення схеми $Database почато і не завершено (штамп $stampText): крок 2 deploy-ecr.ps1 упав посередині, " +
+            "частину Sql/*.sql не накочено. Ставиться пакет $shownPackage (-SkipSchema). Нічого не змінено. " +
+            "Повторіть deploy-ecr.ps1 ЗІ схемою (без -SkipSchema, runbook §8) — скрипти ідемпотентні. " +
+            "Якщо DBA докотив Sql/*.sql і migration.sql вручну — він же ставить штамп: " +
+            "EXEC sys.sp_updateextendedproperty @name = N'ECR.SchemaRelease', @value = N'$shownPackage';")
+    }
     if (-not $packageText) {
         return "Версію пакета не визначено (-MsiPath без ProductVersion?) — не можу звірити зі схемою $Database (штамп $stampText). Нічого не змінено."
     }
@@ -1849,7 +1862,7 @@ END
         # ⛔ R6-X4/X4-03: схему не змінюємо, але й не ставимо пакет на схему іншого релізу —
         # лише читання, відмова ДО msiexec.
         $stampRows = Invoke-DeployQuery -TargetDb $Database -Query (
-            "SET NOCOUNT ON; SELECT ISNULL((SELECT CAST(value AS nvarchar(32)) FROM sys.extended_properties " +
+            "SET NOCOUNT ON; SELECT ISNULL((SELECT CAST(value AS nvarchar(64)) FROM sys.extended_properties " +
             "WHERE class = 0 AND name = N'ECR.SchemaRelease'), N'none');")
         if ($null -eq $stampRows) {
             Write-Host "  Штамп релізу схеми буде звірено з пакетом запитом до sys.extended_properties (-WhatIf: не виконується)." -ForegroundColor DarkGray
@@ -1992,8 +2005,19 @@ END
         $disabledForSchema = @(Disable-EcrServicesAutoStart)
         if ($disabledForSchema.Count) {
             Write-Host ("  Автозапуск вимкнено (Disabled): $($disabledForSchema -join ', ') — MSI і крок 6 повернуть Automatic; " +
-                "якщо розгортання впаде раніше, повторіть його (той самий запуск або -SkipSchema).") -ForegroundColor Yellow
+                "якщо крок 2 впаде, повторіть ТОЙ САМИЙ запуск (зі схемою); " +
+                "-SkipSchema — лише після завершеного кроку 2.") -ForegroundColor Yellow
         }
+
+        # ⛔ R7-Y3/Y3-02: штамп «крок 2 почато» — ДО першого скрипта. Упалий посередині крок 2 інакше лишав
+        # старий штамп (або жодного — перший реліз зі штампом), і -SkipSchema та старт Api/EcrWorker пускали
+        # новий код на недокочену схему (немає aud.ConsistencyIssue.PeriodKey з 11-audit-tables.sql тощо).
+        # 'incomplete:…' відхиляють і Get-SchemaReleaseProblem, і SchemaValidator; замінює його запис нижче.
+        $pendingLiteral = ('incomplete:' + $(if ($schemaRelease) { $schemaRelease } else { 'unknown' })).Replace("'", "''")
+        Invoke-DeploySql -TargetDb $Database -Query (
+            "IF EXISTS (SELECT 1 FROM sys.extended_properties WHERE class = 0 AND name = N'ECR.SchemaRelease') " +
+            "EXEC sys.sp_updateextendedproperty @name = N'ECR.SchemaRelease', @value = N'$pendingLiteral' " +
+            "ELSE EXEC sys.sp_addextendedproperty @name = N'ECR.SchemaRelease', @value = N'$pendingLiteral';")
 
         foreach ($name in $scripts) {
             if ($name -eq '<migration>') {
@@ -2007,7 +2031,7 @@ END
         }
 
         # ⛔ R6-X4/X4-03: штамп релізу схеми — ПІСЛЯ останнього скрипта (06-rcsi.sql / 14-agent-jobs.sql):
-        # упалий посередині крок 2 штампа не оновлює, і -SkipSchema на інших вузлах тоді відмовить.
+        # упалий посередині крок 2 лишає 'incomplete:…' (R7-Y3/Y3-02), і -SkipSchema та старт тоді відмовлять.
         if ($schemaRelease) {
             $releaseLiteral = $schemaRelease.Replace("'", "''")
             Invoke-DeploySql -TargetDb $Database -Query (
@@ -2017,6 +2041,10 @@ END
             Write-Host "  Штамп релізу схеми: ECR.SchemaRelease = $schemaRelease." -ForegroundColor Green
         }
         else {
+            # Крок 2 завершено, але версії немає: 'incomplete:unknown' прибираємо (штампа немає — як до R6-X4).
+            Invoke-DeploySql -TargetDb $Database -Query (
+                "IF EXISTS (SELECT 1 FROM sys.extended_properties WHERE class = 0 AND name = N'ECR.SchemaRelease') " +
+                "EXEC sys.sp_dropextendedproperty @name = N'ECR.SchemaRelease';")
             Write-Host "  ⚠ Версію пакета не визначено — штамп релізу схеми (ECR.SchemaRelease) не записано." -ForegroundColor Yellow
         }
     }

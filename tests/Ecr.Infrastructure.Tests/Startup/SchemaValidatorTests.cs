@@ -306,6 +306,46 @@ public sealed class SchemaValidatorTests(SqlServerFixture sql)
         }
     }
 
+    /// <remarks>
+    /// ⛔ R7-Y3/Y3-02: штамп <c>incomplete:&lt;версія&gt;</c> ставить крок 2 <c>deploy-ecr.ps1</c> ДО першого скрипта —
+    /// крок 2 упав посередині (частину <c>Sql/*.sql</c> не накочено). Старт зупиняється за будь-якої версії
+    /// збірки, зокрема тієї самої. Мутація (CI): прибрати гілку <c>incomplete:</c> → червоний (штамп не
+    /// розбирається як версія і пропускався).
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Незавершене_оновлення_схеми_зупиняє_старт()
+    {
+        await using var db = CreateContext();
+
+        await ExecuteAsync(
+            "EXEC sys.sp_addextendedproperty @name = N'" + SchemaValidator.SchemaReleaseProperty + "', @value = N'incomplete:0.0.600';");
+        try
+        {
+            var same = await SchemaValidator.SchemaReleaseMismatchAsync(db, new Version(0, 0, 600, 0), CancellationToken.None);
+            Assert.NotNull(same);
+            Assert.StartsWith("ECR-SYS-5031: ", same, StringComparison.Ordinal);
+            Assert.Contains("0.0.600", same, StringComparison.Ordinal);
+            Assert.Contains("-SkipSchema", same, StringComparison.Ordinal);
+
+            Assert.NotNull(await SchemaValidator.SchemaReleaseMismatchAsync(db, new Version(0, 0, 599), CancellationToken.None));
+            Assert.NotNull(await SchemaValidator.SchemaReleaseMismatchAsync(db, new Version(0, 0, 601), CancellationToken.None));
+
+            var validator = new SchemaValidator(db, Capabilities(), Clock);
+            var error = await Assert.ThrowsAsync<SchemaIncompatibleException>(
+                () => validator.ValidateAsync("Migrate", CancellationToken.None));
+            Assert.Contains("не завершено", error.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await ExecuteAsync(
+                "IF EXISTS (SELECT 1 FROM sys.extended_properties WHERE class = 0 AND name = N'" +
+                SchemaValidator.SchemaReleaseProperty + "') EXEC sys.sp_dropextendedproperty @name = N'" +
+                SchemaValidator.SchemaReleaseProperty + "';");
+        }
+    }
+
     /// <summary>Порожня база: є, але без файлових груп і схем партиціонування.</summary>
     /// <param name="suffix">Суфікс імені: різні тести — різні бази.</param>
     /// <param name="compatibilityLevel">Рівень сумісності; <see langword="null"/> — типовий інстансу.</param>

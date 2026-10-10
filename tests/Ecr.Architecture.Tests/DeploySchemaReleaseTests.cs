@@ -28,6 +28,9 @@ public sealed class DeploySchemaReleaseTests
         Out-Release 'older'   '0.0.599' '0.0.600'
         Out-Release 'newer'   '0.0.601' '0.0.600'
         Out-Release 'nopkg'   '0.0.600' ''
+        Out-Release 'incomplete'      'incomplete:0.0.600' '0.0.600'
+        Out-Release 'incompleteOther' 'incomplete:0.0.599' '0.0.600'
+        Out-Release 'incompleteNopkg' 'incomplete:0.0.600' ''
         """;
 
     private static readonly Lazy<Dictionary<string, string>> Results =
@@ -36,6 +39,9 @@ public sealed class DeploySchemaReleaseTests
     /// <remarks>
     /// Мутації (CI): повертати <c>$null</c> завжди → червоні <c>older</c>/<c>newer</c>/<c>nopkg</c>; відмова на
     /// <c>none</c> (база до X4-03) → червоний <c>none</c>; без <c>Trim</c> → червоний <c>pad</c>.
+    /// ⛔ R7-Y3/Y3-02: штамп <c>incomplete:…</c> (крок 2 упав посередині) — відмова навіть на тому самому
+    /// пакеті й без версії пакета; мутація «прибрати гілку incomplete» → червоний <c>incompleteNopkg</c>
+    /// (і текст без порад <c>incomplete</c>).
     /// </remarks>
     [Theory]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
@@ -47,6 +53,9 @@ public sealed class DeploySchemaReleaseTests
     [InlineData("older", "False", "True", "True")]
     [InlineData("newer", "False", "True", "True")]
     [InlineData("nopkg", "False", "False", "False")]
+    [InlineData("incomplete", "False", "True", "True")]
+    [InlineData("incompleteOther", "False", "True", "True")]
+    [InlineData("incompleteNopkg", "False", "False", "True")]
     public void SkipSchema_відмовляє_на_схемі_іншого_релізу(string key, string ok, string both, string fix)
     {
         Assert.Equal(ok, DeployScriptHarness.Value(Results.Value, $"release.{key}.ok"));
@@ -71,11 +80,38 @@ public sealed class DeploySchemaReleaseTests
         var verdict = script.IndexOf("Get-SchemaReleaseProblem -Stamp $stamp", StringComparison.Ordinal);
         var step2 = script.IndexOf("Write-Step \"Крок 2/7: схема ($Database", StringComparison.Ordinal);
         var loop = script.IndexOf("foreach ($name in $scripts) {", StringComparison.Ordinal);
-        var write = script.IndexOf("EXEC sys.sp_addextendedproperty @name = N'ECR.SchemaRelease'", StringComparison.Ordinal);
+        var write = script.IndexOf("EXEC sys.sp_addextendedproperty @name = N'ECR.SchemaRelease', @value = N'$releaseLiteral'", StringComparison.Ordinal);
         var msi = script.IndexOf("Write-Step \"Крок 3/7: MSI\"", StringComparison.Ordinal);
 
         Assert.True(skipped > 0 && read > skipped && verdict > read && step2 > verdict, "звірки штампа в гілці -SkipSchema немає");
         Assert.True(loop > step2 && write > loop && msi > write, "штамп не пишеться після циклу скриптів кроку 2");
         Assert.Contains("$schemaRelease = if ($Version) { $Version } elseif ($MsiPath) { Get-MsiProductVersion", script, StringComparison.Ordinal);
+    }
+
+    /// <remarks>
+    /// ⛔ R7-Y3/Y3-02: штамп <c>incomplete:…</c> ставиться ПІСЛЯ зупинки й Disabled служб і ДО першого скрипта
+    /// кроку 2, а підказка після Disabled не радить <c>-SkipSchema</c> на випадок збою кроку 2.
+    /// Мутації: прибрати запис <c>incomplete:</c> або перенести його після циклу; повернути «або -SkipSchema» → червоний.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Незавершений_крок_2_позначено_штампом_до_першого_скрипта()
+    {
+        var script = File.ReadAllText(Path.Combine(SourceTree.Root, "tools", "deploy-ecr.ps1"));
+
+        var disable = script.IndexOf("$disabledForSchema = @(Disable-EcrServicesAutoStart)", StringComparison.Ordinal);
+        var pending = script.IndexOf("$pendingLiteral = ('incomplete:'", StringComparison.Ordinal);
+        var pendingWrite = script.IndexOf("@value = N'$pendingLiteral'", StringComparison.Ordinal);
+        var loop = script.IndexOf("foreach ($name in $scripts) {", StringComparison.Ordinal);
+        var write = script.IndexOf("@value = N'$releaseLiteral'", StringComparison.Ordinal);
+
+        Assert.True(disable > 0, "Disable-EcrServicesAutoStart у кроці 2 не знайдено");
+        Assert.True(pending > disable && pendingWrite > pending && loop > pendingWrite, "штамп incomplete: не стоїть між Disabled і циклом скриптів");
+        Assert.True(write > loop, "остаточний штамп не пишеться після циклу");
+
+        var hint = script[disable..pending];
+        Assert.DoesNotContain("або -SkipSchema", hint, StringComparison.Ordinal);
+        Assert.Contains("ТОЙ САМИЙ запуск", hint, StringComparison.Ordinal);
     }
 }
