@@ -595,8 +595,77 @@ public sealed class DocumentHeaderHandlersTests
                 RecalculateDocumentHandler.TargetOf(DocumentId, new PeriodKey(202603)),
             ],
             targets);
-        Assert.False(enqueuedInTransaction, "Перерахунок поставлено до коміту — задача прочитала б стару шапку.");
+        Assert.False(enqueuedInTransaction, "Quartz: перерахунок поставлено до коміту — задача прочитала б стару шапку.");
         await _jobs.Received(2).EnqueueExclusiveAsync<IRecalculationJob>(
             Arg.Any<string>(), Arg.Any<object?>(), Arg.Any<CancellationToken>(), 9);
+    }
+
+    /// <summary>
+    /// R9-F2 / F2-01 (MI-02 (в)): черга в базі — задачі перерахунку ставляться ВСЕРЕДИНІ транзакції запису шапки,
+    /// після запису й журналу; Quartz — після коміту.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Доти постановка йшла після коміту завжди: kill чи збій постановки лишав нову шапку без перерахунку, а
+    /// сторож свіжості правки шапки не бачить (не <c>aud.CellChange</c>) — подання проходило зі старими <c>HDR.*</c>.
+    /// Мутації: у режимі бази поставити після коміту — рядок <c>true</c> червоний; у Quartz — всередину — <c>false</c>.
+    /// </remarks>
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Requirement", "MI-02")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task F2_01_перерахунок_після_правки_шапки_ставиться_в_транзакції_лише_коли_черга_в_ній(bool enlists)
+    {
+        _jobs.EnlistsInCallerTransaction.Returns(enlists);
+        AddPeriod(202602, PeriodState.Grace);
+        AddPeriod(202603, PeriodState.Open);
+
+        var version = await VersionOfAsync([]);
+        Values([], new() { [_area.Id] = new() { ValueString = "Tengiz" } });
+
+        var events = new List<string>();
+        await _audit.WriteSecurityEventAsync(Arg.Do<SecurityEventRecord>(_ => events.Add("audit")), Arg.Any<CancellationToken>());
+        await _uow.SaveChangesAsync(Arg.Do<CancellationToken>(_ => events.Add("save")));
+        _jobs.EnqueueCoalescedAsync<IRecalculationJob>(
+                Arg.Do<string>(_ => events.Add(_inTransaction ? "enqueue:tx" : "enqueue:after")),
+                Arg.Any<object?>(), Arg.Any<CancellationToken>(), Arg.Any<int?>())
+            .Returns("IRecalculationJob#1");
+
+        await Patch().HandleAsync(
+            DocumentId, Request(version, new PatchHeaderField("Area", "Tengiz", false)), CancellationToken.None);
+
+        // Обидва періоди, усі в одному режимі, і в обох режимах — після запису шапки й журналу.
+        var mode = enlists ? "enqueue:tx" : "enqueue:after";
+        Assert.Equal(["audit", "save", mode, mode], events);
+    }
+
+    /// <summary>
+    /// R9-F2 / F2-01: черга в базі — збій постановки ВІДКОЧУЄ правку шапки (виняток виходить із тіла транзакції),
+    /// а не лишає її зафіксованою без перерахунку.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Requirement", "MI-02")]
+    public async Task F2_01_збій_постановки_в_режимі_бази_виходить_із_тіла_транзакції()
+    {
+        _jobs.EnlistsInCallerTransaction.Returns(true);
+        AddPeriod(202603, PeriodState.Open);
+
+        var version = await VersionOfAsync([]);
+        Values([], new() { [_area.Id] = new() { ValueString = "Tengiz" } });
+
+        bool? failedInTransaction = null;
+        _jobs.EnqueueCoalescedAsync<IRecalculationJob>(
+                Arg.Any<string>(), Arg.Any<object?>(), Arg.Any<CancellationToken>(), Arg.Any<int?>())
+            .Returns<string>(_ =>
+            {
+                failedInTransaction = _inTransaction;
+                throw new TimeoutException("itg.JobProgress");
+            });
+
+        await Assert.ThrowsAsync<TimeoutException>(() => Patch().HandleAsync(
+            DocumentId, Request(version, new PatchHeaderField("Area", "Tengiz", false)), CancellationToken.None));
+
+        Assert.True(failedInTransaction, "Збій постановки стався поза транзакцією — шапка лишилась би без перерахунку.");
     }
 }

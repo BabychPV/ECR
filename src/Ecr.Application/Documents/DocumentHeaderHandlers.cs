@@ -322,6 +322,18 @@ public sealed class PatchDocumentHeaderHandler(
         var fieldsById = snapshot.HeaderFields.ToDictionary(f => f.Id);
         var changed = 0;
 
+        // ⛔ L1-17: витісняти виконуваний перерахунок (Exclusive) може лише власник Calculation.Recalculate —
+        // як на RecalculateDocumentHandler; решта (лише Write на проєкт) ставить без витіснення (Coalesced).
+        var mayPreempt = PermissionCheck.IsGrantedIn(profile, RecalculateDocumentHandler.PreemptPermission, project.Id);
+
+        // ⛔ R9-F2 / F2-01 (MI-02 (в), як у PatchCellsHandler): черга в базі — постановка ВСЕРЕДИНІ транзакції
+        // запису, останнім оператором. Доти задачі ставились після коміту, кожен період окремою командою: kill
+        // або збій постановки між комітом і чергою лишав нову шапку без перерахунку, а сторож свіжості правки
+        // шапки не бачить (вона пише aud.SecurityEvent, не aud.CellChange) — подання йшло зі старими HDR.*.
+        // Тепер або шапка й усі задачі разом, або нічого; воркер бачить задачі лише з комітом (стару шапку не
+        // прочитає). Quartz у пам'яті — ПІСЛЯ коміту, як і досі: до коміту його задача прочитала б стару шапку.
+        var enlist = jobs.EnlistsInCallerTransaction;
+
         await uow.ExecuteInTransactionAsync(async innerCt =>
         {
             // ⛔ L6-02 / L6-06: першими діями — структура документа (спільно; перенос
@@ -339,15 +351,16 @@ public sealed class PatchDocumentHeaderHandler(
             changed = await PersistAsync(
                 documentId, project, profile, request.BaseVersion, toSave, codeById, fieldsById, userId, innerCt)
                 .ConfigureAwait(false);
+
+            if (enlist && changed > 0)
+            {
+                await EnqueueRecalculationAsync(documentId, project, userId, mayPreempt, innerCt).ConfigureAwait(false);
+            }
         }, ct).ConfigureAwait(false);
 
-        // ⚠ Після коміту й поза транзакцією — як у PatchCellsHandler: задача,
-        // поставлена до коміту, під RCSI прочитала б стару шапку.
-        if (changed > 0)
+        // ⚠ Quartz: після коміту й поза транзакцією — задача, поставлена до коміту, під RCSI прочитала б стару шапку.
+        if (!enlist && changed > 0)
         {
-            // ⛔ L1-17: витісняти виконуваний перерахунок (Exclusive) може лише власник Calculation.Recalculate —
-            // як на RecalculateDocumentHandler; решта (лише Write на проєкт) ставить без витіснення (Coalesced).
-            var mayPreempt = PermissionCheck.IsGrantedIn(profile, RecalculateDocumentHandler.PreemptPermission, project.Id);
             await EnqueueRecalculationAsync(documentId, project, userId, mayPreempt, ct).ConfigureAwait(false);
         }
 
