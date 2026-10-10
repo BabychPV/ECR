@@ -573,6 +573,16 @@ public sealed class ImportDiffBuilder
                 // невидиму), а Apply тихо переписував текст. Рядок із самих пробілів —
                 // порожнеча, як і в відбитках (`CalculatedCellFingerprint.Canonical`);
                 // `Same` вважає його рівним такому ж (чи порожньому) поточному.
+                //
+                // ⛔ Y5-06 (хвіст C1): ЧИСЛО в текстовій колонці (Excel перетворив набране
+                // «12.50») — інваріантним найкоротшим записом, як код у `LookupCode`, а не
+                // `GetString()`: той форматує double культурою СЕРВЕРА, і на ru/uk/kk-сервері
+                // у базу йшло «12,5», а на en — «12.5». Значення не залежить від машини API.
+                if (cell.DataType == XLDataType.Number)
+                {
+                    return LookupCode(cell, text);
+                }
+
                 return string.IsNullOrWhiteSpace(raw) ? null : raw;
         }
     }
@@ -617,7 +627,10 @@ public sealed class ImportDiffBuilder
             : null;
     }
 
-    /// <summary>Код запису довідника з комірки: число — інваріантним записом, текст — як є.</summary>
+    /// <summary>
+    /// Текст комірки для коду запису довідника й текстової колонки (Y5-06): число —
+    /// інваріантним записом, текст — як є.
+    /// </summary>
     private static string LookupCode(IXLCell cell, string text)
     {
         if (cell.DataType != XLDataType.Number)

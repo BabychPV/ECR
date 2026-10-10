@@ -1,4 +1,5 @@
 // tests/Ecr.Adapters.Tests/Excel/ExcelImportWorkbookIntegrityTests.cs
+using System.Globalization;
 using ClosedXML.Excel;
 using Ecr.Adapters.Excel;
 using Ecr.Application.Common;
@@ -144,6 +145,48 @@ public sealed class ExcelImportWorkbookIntegrityTests
         var change = Assert.Single(preview.Changes);
         Assert.Equal("S", change.ColumnCode);
         Assert.Equal("new  value ", change.NewValue);
+    }
+
+    // ── Y5-06 ────────────────────────────────────────────────────────────────
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "Y5-06")]
+    public async Task Число_в_текстовій_колонці_не_залежить_від_культури_сервера()
+    {
+        using var workbook = await ExportAsync();
+        workbook.Worksheet(SheetName).Cell(3, 2).Value = 12.5;
+
+        var before = CultureInfo.CurrentCulture;
+        CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("ru-RU");
+        ImportPreview preview;
+        try
+        {
+            // ⛔ Мутація: повернути `GetString()` для числової комірки в гілці тексту —
+            // на ru-RU тут «12,5».
+            preview = await ImportAsync(workbook);
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = before;
+        }
+
+        var change = Assert.Single(preview.Changes);
+        Assert.Equal("S", change.ColumnCode);
+        Assert.Equal("12.5", change.NewValue);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "Y5-06")]
+    public async Task Текстова_колонка_експортується_текстовим_форматом()
+    {
+        // ⚠ Без `@` Excel перетворює набране «12.50» на число ще до імпорту.
+        using var workbook = await ExportAsync();
+        var sheet = workbook.Worksheet(SheetName);
+
+        Assert.Equal("@", sheet.Cell(3, 2).Style.NumberFormat.Format);
+        Assert.NotEqual("@", sheet.Cell(3, 1).Style.NumberFormat.Format);
     }
 
     // ── Стенд ────────────────────────────────────────────────────────────────
