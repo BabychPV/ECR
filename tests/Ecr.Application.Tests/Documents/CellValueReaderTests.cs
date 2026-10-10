@@ -111,6 +111,43 @@ public sealed class CellValueReaderTests
     }
 
     [Theory]
+    [InlineData("2024/4/1 10:00", 10, 0, 0)]
+    [InlineData("2024/04/01 9:05:30", 9, 5, 30)]
+    [InlineData("2024/04/01 09:05", 9, 5, 0)]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Finding", "Z3-04")]
+    public void Z3_04_рік_спереду_через_слеш_з_часом_читається_а_не_відхиляється(
+        string wire, int hour, int minute, int second)
+    {
+        // ⛔ Рік спереду однозначний, а фолбек для слеш-дат закрито (Y5-02): без формулів з часом дату-час Excel із
+        // регіонів із роком спереду (ja, zh, ko) відхиляло як «очікує дату». Неоднозначну `4/1/2024 10:30` нижче
+        // відхиляє й далі (D-346).
+        var data = CellValueReader.Read(FromWire(wire), Column(CellDataType.Date));
+
+        Assert.NotNull(data);
+        Assert.Equal(new DateTime(2024, 4, 1, hour, minute, second, DateTimeKind.Utc), data.ValueDate);
+    }
+
+    [Theory]
+    [InlineData("2024-04-01T00:00:00+05:00", 0, 0)]
+    [InlineData("2024-04-01T23:30:00-05:00", 23, 30)]
+    [InlineData("2024-04-01T10:30:00Z", 10, 30)]
+    [InlineData("2024-04-01T00:00:00.0000000+05:00", 0, 0)]
+    [InlineData("2024-04-01 00:00:00+05:00", 0, 0)]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Finding", "Z3-06")]
+    public void Z3_06_ISO_зі_зсувом_лишає_календарний_день_як_написано_а_не_зсуває_його_через_UTC(
+        string wire, int hour, int minute)
+    {
+        // ⛔ `2024-04-01T00:00:00+05:00` через AdjustToUniversal ставало 2024-03-31 19:00 - колонка Date діставала
+        // ПОПЕРЕДНІЙ день. Інтеграція, що шле ISO зі зсувом, - звичайне джерело таких рядків.
+        var data = CellValueReader.Read(FromWire(wire), Column(CellDataType.Date));
+
+        Assert.NotNull(data);
+        Assert.Equal(new DateTime(2024, 4, 1, hour, minute, 0, DateTimeKind.Utc), data.ValueDate);
+    }
+
+    [Theory]
     [InlineData("1/4/2024")]
     [InlineData("4/1/2024")]
     [InlineData("01/04/2024")]
