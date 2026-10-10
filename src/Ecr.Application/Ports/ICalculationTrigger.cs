@@ -28,6 +28,18 @@ namespace Ecr.Application.Ports;
 /// </remarks>
 public interface ICalculationTrigger
 {
+    /// <summary>
+    /// Чи постановка йде в ПОТОЧНУ транзакцію контексту викликача (черга в базі,
+    /// <see cref="IBackgroundJobScheduler.EnlistsInCallerTransaction"/>, MI-02 (в)).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ F2-04 (аудит R11): <c>true</c> — постановку роблять ВСЕРЕДИНІ транзакції, що змінила дані (видалення
+    /// рядків подій), останнім оператором: збій відкочує й дані, а закомічене завжди має задачу. <c>false</c>
+    /// (Quartz у пам'яті) — задача стартує раніше за коміт і прочитала б старі дані, тож ставити треба ПІСЛЯ
+    /// коміту. Типово <c>false</c> — поведінка, що була до F2-04.
+    /// </remarks>
+    public bool EnlistsInCallerTransaction => false;
+
     /// <summary>Ставить перерахунок документа за період, якщо в період можна писати.</summary>
     /// <param name="documentId">Документ, у комірки якого записано нові дані.</param>
     /// <param name="periodKey">Період запису.</param>

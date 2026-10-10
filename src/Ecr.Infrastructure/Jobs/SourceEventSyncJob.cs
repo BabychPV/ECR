@@ -12,6 +12,7 @@ using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
 using Ecr.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -587,9 +588,10 @@ public sealed partial class SourceEventSyncJob(
         // ⛔ Збій постановки не маскує початковий виняток: є початковий — постановка лише логується й
         // летить початковий; початкового немає — збій постановки летить сам (задача має впасти видимо).
         Exception? initial = null;
+        var requestedInTransaction = new HashSet<int>();
         try
         {
-            var removed = await ApplyRemovalsAsync(map, decision, appliedPeriods, links, linkByEventId, totals, events, ct)
+            var removed = await ApplyRemovalsAsync(map, decision, appliedPeriods, requestedInTransaction, links, linkByEventId, totals, events, ct)
                 .ConfigureAwait(false);
 
             // Подія переїхала в братній шаблон (чи дублюється в ньому): зв'язок знімаємо, РЯДОК лишається —
@@ -642,7 +644,7 @@ public sealed partial class SourceEventSyncJob(
         {
             try
             {
-                await RequestRecalculationAsync(map.DocumentId, appliedPeriods, ct).ConfigureAwait(false);
+                await RequestRecalculationAsync(map.DocumentId, appliedPeriods, requestedInTransaction, ct).ConfigureAwait(false);
             }
             catch (Exception ex) when (initial is not null)
             {
@@ -850,14 +852,15 @@ public sealed partial class SourceEventSyncJob(
     /// </summary>
     /// <remarks>
     /// ⛔ Б1/Б2: журнал пишеться ДО видалення і в тій самій транзакції (журнал, що може розійтися з видаленим, не
-    /// доказ); відкат скасовує все разом. Свій <c>SqlConnection</c> — а не транзакція контексту EF: стратегія повторів
-    /// <c>EnableRetryOnFailure</c> забороняє ручні транзакції поза замиканням, а замикання повторилося б над уже
-    /// зміненим трекером. Видалений зв'язок відчіплюється від трекера, щоб <c>SaveChanges</c> його не видаляв удруге.
+    /// доказ); відкат скасовує все разом. ⛔ F2-04: транзакція — контексту задачі (<c>UnitOfWork.ExecuteInTransactionAsync</c>:
+    /// стратегія повторів + відновлення трекера), тож черга в базі ставить автоперерахунок у ТУ САМУ транзакцію.
+    /// Видалений зв'язок відчіплюється від трекера, щоб <c>SaveChanges</c> його не видаляв удруге.
     /// </remarks>
     private async Task<HashSet<string>> ApplyRemovalsAsync(
         SourceEventMap map,
         RemovalDecision decision,
         HashSet<int> appliedPeriods,
+        HashSet<int> requestedInTransaction,
         List<SourceEventLink> links,
         Dictionary<string, SourceEventLink> linkByEventId,
         Totals totals,
@@ -887,75 +890,112 @@ public sealed partial class SourceEventSyncJob(
             return removed;
         }
 
-        await using var connection = new Microsoft.Data.SqlClient.SqlConnection(db.Database.GetConnectionString());
-        await connection.OpenAsync(ct).ConfigureAwait(false);
-        await using var tx = (Microsoft.Data.SqlClient.SqlTransaction)await connection.BeginTransactionAsync(ct).ConfigureAwait(false);
-
-        // ⛔ L6-02 (писар): структуру документа пишуть під `doc-structure` (спільно — писарі, виключно — перенос
-        // версії). Видалення рядків подій брало лише `sheet-edit`: у вікні переносу воно видаляло за екземплярами
-        // старої версії. Порядок блокувань: `doc-structure` → (`doc-header`) → `sheet-edit`, структура — ПЕРШОЮ
-        // дією транзакції. Не взято за таймаут — видалення лишається наступному прогону.
-        if (!await TryAppLockAsync(connection, tx, SheetEditGate.StructureResourceOf(map.DocumentId), wait: true, ct).ConfigureAwait(false))
-        {
-            totals.RemovalSkipped += physical.Count;
-            return removed;
-        }
-
-        // ⛔ L6-02: аркуш таблиці читається ПІСЛЯ блокування структури, у цій транзакції (RCSI бере знімок на
-        // початку оператора, тож бачить перенос, що зафіксувався, поки чекали). Таблиці немає — структура
-        // змінилась: нічого не видаляємо.
-        if (await ReadSheetDefIdAsync(connection, tx, map.TableDefId, ct).ConfigureAwait(false) is not { } sheetDefId)
-        {
-            totals.RemovalSkipped += physical.Count;
-            return removed;
-        }
-
-        var locked = new Dictionary<int, bool>();
+        // ⛔ F2-04 (аудит R11): видалення рядків і постановка перерахунку — ОДНІЄЮ транзакцією (черга в базі).
+        // Доти видалення комітилось власним ADO-підключенням, а перерахунок ставився окремо ПІСЛЯ (у `finally`
+        // прогону): kill чи збій між ними лишав документ із видаленими рядками й без задачі, а наступний
+        // прогін уже не бачить ні подій, ні рядків — перерахунок ніхто б не поставив.
+        //
+        // ⚠ Транзакція — контексту задачі (`UnitOfWork.ExecuteInTransactionAsync`: стратегія повторів плюс
+        // відновлення трекера перед повтором, L6-15/N1-03), а не окреме підключення: черга в базі ставить
+        // задачу сирим SQL саме в поточну транзакцію контексту. Раніше окреме підключення було потрібне, бо
+        // замикання повторилося б над зміненим трекером; тепер `ChangeTrackerCheckpoint` це закриває.
+        // Лічильники й події збираються локально й переносяться ПІСЛЯ коміту — повтор замикання їх не подвоює.
         var deleted = new List<PendingRemoval>();
+        var skipped = 0;
+        var refused = new List<CoverageEvent>();
+        var requested = new HashSet<int>();
 
-        foreach (var item in physical)
-        {
-            // ⛔ L3-04: рішення (DecideRemovalsAsync) читало стан аркуша й правки людини ПОЗА цією
-            // транзакцією — подання чи правка між рішенням і видаленням інакше губилися б. Як правка в
-            // PatchCellsHandler: спільне блокування аркуша, далі гарди повторно — у тій самій транзакції.
-            // ⛔ R7-Y2-02 (X6-02): чекати дозволено лише ПЕРШИЙ аркуш-період, поки транзакція ще не тримає
-            // жодного `sheet-edit`. Наступні періоди — без черги (`@LockTimeout = 0`): черга `sp_getapplock`
-            // FIFO, і видалення, що чекало період N (його саме подають), тримаючи S на періодах 1…N-1 та
-            // `doc.Period`/`doc.TableRow` під HOLDLOCK, ставило за собою подання тих періодів, автозбереження
-            // їхніх редакторів і `PeriodStateJob`. Не взято — видалення цього періоду лишається наступному прогону.
-            var periodKey = item.State.PeriodKey!.Value;
-            if (!locked.TryGetValue(periodKey, out var taken))
+        await new UnitOfWork(db, clock).ExecuteInTransactionAsync(
+            async innerCt =>
             {
-                taken = await TryAppLockAsync(
-                        connection,
-                        tx,
-                        SheetEditGate.ResourceOf(map.DocumentId, sheetDefId, periodKey),
-                        wait: locked.Count == 0,
-                        ct)
-                    .ConfigureAwait(false);
-                locked[periodKey] = taken;
-            }
+                deleted.Clear();
+                skipped = 0;
+                refused.Clear();
+                requested.Clear();
 
-            if (!taken)
-            {
-                totals.RemovalSkipped++;
-                continue;
-            }
+                var connection = (Microsoft.Data.SqlClient.SqlConnection)db.Database.GetDbConnection();
+                var tx = (Microsoft.Data.SqlClient.SqlTransaction)db.Database.CurrentTransaction!.GetDbTransaction();
 
-            if (await RecheckRemovalAsync(connection, tx, map, sheetDefId, item, ct).ConfigureAwait(false) is { } refused)
-            {
-                events.Add(refused);
-                totals.RemovalSkipped++;
-                continue;
-            }
+                // ⛔ L6-02 (писар): структуру документа пишуть під `doc-structure` (спільно — писарі, виключно — перенос
+                // версії). Видалення рядків подій брало лише `sheet-edit`: у вікні переносу воно видаляло за екземплярами
+                // старої версії. Порядок блокувань: `doc-structure` → (`doc-header`) → `sheet-edit`, структура — ПЕРШОЮ
+                // дією транзакції. Не взято за таймаут — видалення лишається наступному прогону.
+                if (!await TryAppLockAsync(connection, tx, SheetEditGate.StructureResourceOf(map.DocumentId), wait: true, innerCt).ConfigureAwait(false))
+                {
+                    skipped += physical.Count;
+                    return;
+                }
 
-            await JournalAndDeleteAsync(connection, tx, map, item, ct).ConfigureAwait(false);
-            deleted.Add(item);
-        }
+                // ⛔ L6-02: аркуш таблиці читається ПІСЛЯ блокування структури, у цій транзакції (RCSI бере знімок на
+                // початку оператора, тож бачить перенос, що зафіксувався, поки чекали). Таблиці немає — структура
+                // змінилась: нічого не видаляємо.
+                if (await ReadSheetDefIdAsync(connection, tx, map.TableDefId, innerCt).ConfigureAwait(false) is not { } sheetDefId)
+                {
+                    skipped += physical.Count;
+                    return;
+                }
 
-        await tx.CommitAsync(ct).ConfigureAwait(false);
+                var locked = new Dictionary<int, bool>();
+
+                foreach (var item in physical)
+                {
+                    // ⛔ L3-04: рішення (DecideRemovalsAsync) читало стан аркуша й правки людини ПОЗА цією
+                    // транзакцією — подання чи правка між рішенням і видаленням інакше губилися б. Як правка в
+                    // PatchCellsHandler: спільне блокування аркуша, далі гарди повторно — у тій самій транзакції.
+                    // ⛔ R7-Y2-02 (X6-02): чекати дозволено лише ПЕРШИЙ аркуш-період, поки транзакція ще не тримає
+                    // жодного `sheet-edit`. Наступні періоди — без черги (`@LockTimeout = 0`): черга `sp_getapplock`
+                    // FIFO, і видалення, що чекало період N (його саме подають), тримаючи S на періодах 1…N-1 та
+                    // `doc.Period`/`doc.TableRow` під HOLDLOCK, ставило за собою подання тих періодів, автозбереження
+                    // їхніх редакторів і `PeriodStateJob`. Не взято — видалення цього періоду лишається наступному прогону.
+                    var periodKey = item.State.PeriodKey!.Value;
+                    if (!locked.TryGetValue(periodKey, out var taken))
+                    {
+                        taken = await TryAppLockAsync(
+                                connection,
+                                tx,
+                                SheetEditGate.ResourceOf(map.DocumentId, sheetDefId, periodKey),
+                                wait: locked.Count == 0,
+                                innerCt)
+                            .ConfigureAwait(false);
+                        locked[periodKey] = taken;
+                    }
+
+                    if (!taken)
+                    {
+                        skipped++;
+                        continue;
+                    }
+
+                    if (await RecheckRemovalAsync(connection, tx, map, sheetDefId, item, innerCt).ConfigureAwait(false) is { } refusal)
+                    {
+                        refused.Add(refusal);
+                        skipped++;
+                        continue;
+                    }
+
+                    await JournalAndDeleteAsync(connection, tx, map, item, innerCt).ConfigureAwait(false);
+                    deleted.Add(item);
+                }
+
+                // ⛔ F2-04: постановка перерахунку — останнім оператором транзакції, за кожен зачеплений період
+                // (черга зливає дублікати, `EnqueueCoalescedAsync`). Черга поза базою (Quartz) тут НЕ ставить —
+                // її задача стартувала б до коміту; для неї лишається постановка після коміту (`finally` прогону).
+                if (deleted.Count > 0 && recalculation is { EnlistsInCallerTransaction: true })
+                {
+                    foreach (var periodKey in deleted.Select(d => d.State.PeriodKey!.Value).Distinct().Order())
+                    {
+                        await recalculation.RequestAsync(map.DocumentId, new PeriodKey(periodKey), innerCt).ConfigureAwait(false);
+                        requested.Add(periodKey);
+                    }
+                }
+            },
+            ct).ConfigureAwait(false);
 
         // Після коміту: трекер і лічильники (до коміту збій не лишає хибного «видалено»).
+        totals.RemovalSkipped += skipped;
+        events.AddRange(refused);
+        requestedInTransaction.UnionWith(requested);
+
         foreach (var item in deleted)
         {
             db.Entry(item.Link).State = EntityState.Detached;
@@ -1338,14 +1378,16 @@ public sealed partial class SourceEventSyncJob(
     /// не на подію й не на групу; нуль записаного — нуль викликів. Черга зливає дублікати без
     /// витіснення, тригер сам не ставить для закритого, Scheduled чи поданого періоду.
     /// </summary>
-    private async Task RequestRecalculationAsync(long documentId, HashSet<int> appliedPeriods, CancellationToken ct)
+    private async Task RequestRecalculationAsync(
+        long documentId, HashSet<int> appliedPeriods, HashSet<int> alreadyRequested, CancellationToken ct)
     {
         if (recalculation is null)
         {
             return;
         }
 
-        foreach (var periodKey in appliedPeriods.Order())
+        // F2-04: періоди, для яких перерахунок уже поставлено в транзакції видалення, — не дублюємо.
+        foreach (var periodKey in appliedPeriods.Where(k => !alreadyRequested.Contains(k)).Order())
         {
             await recalculation.RequestAsync(documentId, new PeriodKey(periodKey), ct).ConfigureAwait(false);
         }
