@@ -1004,12 +1004,18 @@ DataProtection … не захищені»). ⛔ ✎ 2026-09-30: `Environment` �
 3. Розгортання:
 
    ```powershell
-   powershell -ExecutionPolicy Bypass -File tools\deploy-ecr.ps1 `
+   Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+   $cs = Read-Host -AsSecureString -Prompt 'Рядок підключення служби'
+   .\tools\deploy-ecr.ps1 `
      -SqlInstance <сервер> -Database <база> -MsiPath <шлях до .msi> `
      -ServiceAccount '<DOMAIN\ecr-svc$>' -ConnectionString $cs `
      -DataProtectionThumbprint <відбиток> `
      -HttpsThumbprint <відбиток HTTPS> -AppPort 443 -WhatIf
    ```
+
+   ⛔ ✎ 2026-10-10 (R9-F5/F5-03): викликати **саме так** — `.\tools\deploy-ecr.ps1` у тій самій сесії, а не
+   `powershell -File …`: `-ConnectionString` — `SecureString`, і в новий процес він не переходить (зупинка на
+   прив'язці параметрів «Cannot convert … to SecureString», install-guide §2.2 і §8).
 
    Без `-BootstrapPassword` і без `-FirstDeployment`. На **кожному** оновленні (MSI
    стирає `Environment` служб): транспорт — рівно один із `-HttpsThumbprint` /
@@ -1870,13 +1876,16 @@ Quartz/`InProcess`, а служба `EcrWorker` (MSI її зберігає) ст
 `-ConnectionString`, без `-DisableWorker`, якщо воркер потрібен):
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File tools\deploy-ecr.ps1 `
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+$cs = Read-Host -AsSecureString -Prompt 'Рядок підключення служби'
+.\tools\deploy-ecr.ps1 `
   -SqlInstance <сервер> -Database <база> -MsiPath <шлях до .msi> -SkipSchema `
   -ServiceAccount '<DOMAIN\ecr-svc$>' -ConnectionString $cs -DataProtectionThumbprint <відбиток> `
   -HttpsThumbprint <відбиток HTTPS> -AppPort <той самий порт>
 ```
 
-(`-SkipSchema` — якщо схему вже застосовано; повний виклик — п. 8.) Те саме
+(`-SkipSchema` — якщо схему вже застосовано; повний виклик — п. 8. Не через `powershell -File`:
+`SecureString` у новий процес не переходить, R9-F5/F5-03.) Те саме
 для відкату (п. 9, крок 3). Змінні, яких скрипт не пише
 (`ECR_Jobs__Workers__*`), виставте знову вручну. ✎ 2026-09-30: параметр транспорту
 (`-HttpsThumbprint`, або `-BehindHttpsProxy`, або на стенді `-AllowHttp`) обов'язковий і тут — без
