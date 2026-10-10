@@ -39,6 +39,10 @@ const Strings: Record<string, string> = {
   'registry.import.entryKey': 'Code',
   'registry.import.field': 'Field',
   'registry.import.reason': 'Reason',
+  'registry.import.changesTitle': 'Changes in existing entries ({count})',
+  'registry.import.changesTruncated': 'Only the first {count} changes are shown.',
+  'registry.import.oldValue': 'Current value',
+  'registry.import.newValue': 'Value from file',
   'registry.import.apply': 'Apply',
   'registry.import.applied': '{added} added, {updated} updated, {unchanged} unchanged.',
   'common.cancel': 'Cancel',
@@ -164,6 +168,36 @@ describe('RegistryImportPanel: імпорт записів довідника з
       expect(screen.getByText('3 added')).toBeTruthy();
       expect(screen.getByText('2 updated')).toBeTruthy();
       expect(screen.getByText('9 unchanged')).toBeTruthy();
+    },
+    SlowEnvTimeout,
+  );
+
+  it(
+    'Y5-07: перевірка показує старе й нове значення змінених полів наявних записів',
+    async () => {
+      report = reportOf({
+        changes: [
+          { row: 2, key: 'P1', field: 'CONTRACT', oldValue: '0012', newValue: '12' },
+          { row: 3, key: 'P2', field: 'DUE', oldValue: null, newValue: '2024-04-01' },
+        ],
+        changesTruncated: true,
+      });
+
+      await show();
+      fireEvent.click(await screen.findByRole('button', { name: 'Import from CSV' }));
+
+      pick('permits.csv');
+
+      await applyButton();
+
+      // ⛔ Мутація: прибрати таблицю змін із діалогу — людина знову бачить лише
+      // «2 updated» і не дізнається, що Excel зрізав провідні нулі.
+      expect(screen.getByText('Changes in existing entries (2)')).toBeTruthy();
+      expect(screen.getByText('Only the first 2 changes are shown.')).toBeTruthy();
+      expect(screen.getByText('0012')).toBeTruthy();
+      expect(screen.getByText('12')).toBeTruthy();
+      expect(screen.getByText('2024-04-01')).toBeTruthy();
+      expect(screen.getByText('—')).toBeTruthy();
     },
     SlowEnvTimeout,
   );

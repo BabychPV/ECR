@@ -58,7 +58,29 @@ public sealed record RegistryEntryImportReport(
     /// (<c>dryRun</c>) правил не виконує: воно нічого не записує.
     /// </summary>
     public IReadOnlyList<Rules.RegistryRuleViolationDto> Warnings { get; init; } = [];
+
+    /// <summary>
+    /// Зміни значень полів НАЯВНИХ записів, які файл приносить (у перевірці <c>dryRun</c>) або приніс:
+    /// старе й нове значення текстом; не більше за 1000 (Y5-07).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Excel при збереженні CSV змінює значення без жодної правки людини (провідні нулі
+    /// «0012» → «12», 16+ цифр → «1.23457E+15», дати регіональним форматом). Звіт із самих
+    /// лічильників («оновлено: 37») не давав людині побачити, ЩО саме зміниться.
+    /// </remarks>
+    public IReadOnlyList<RegistryEntryImportChange> Changes { get; init; } = [];
+
+    /// <summary>Змін більше, ніж показано в <c>Changes</c> (Y5-07).</summary>
+    public bool ChangesTruncated { get; init; }
 }
+
+/// <summary>Зміна значення поля наявного запису довідника, яку приносить файл (Y5-07).</summary>
+/// <param name="Row">Номер рядка у файлі; заголовок — 1.</param>
+/// <param name="Key">Код запису, як його записано у файлі.</param>
+/// <param name="Field">Код поля.</param>
+/// <param name="OldValue">Значення до імпорту текстом (числа й дати — інваріантно); <c>null</c> — порожнє.</param>
+/// <param name="NewValue">Значення після імпорту текстом; <c>null</c> — порожнє.</param>
+public sealed record RegistryEntryImportChange(int Row, string Key, string Field, string? OldValue, string? NewValue);
 
 /// <summary>
 /// Імпорт записів довідника з CSV (`BE-24`, крок 3); право <c>Registry.EditData</c>
@@ -126,6 +148,9 @@ public sealed class ImportRegistryEntriesHandler(
 
     /// <summary>Тип події журналу структурних змін.</summary>
     public const string ImportedOperation = "Import";
+
+    /// <summary>Скільки змін полів показує звіт імпорту (Y5-07); решта — <c>ChangesTruncated</c>.</summary>
+    public const int MaxReportedChanges = 1000;
 
     /// <summary>Перевіряє файл і, якщо не <paramref name="dryRun"/> і помилок немає, застосовує.</summary>
     /// <param name="registryCode">Код довідника.</param>
@@ -296,6 +321,10 @@ public sealed class ImportRegistryEntriesHandler(
         // повторний імпорт тим самим значенням — до акумулятора не йдуть.
         var valueChanges = new List<(RegistryEntry Entry, IReadOnlyList<RegistryValueFieldChange> Changes)>();
 
+        // ⛔ Y5-07: ті самі зміни — у звіт людині (і в перевірці dryRun), а не лише в аудит.
+        var reported = new List<RegistryEntryImportChange>();
+        var reportedTotal = 0;
+
         // RT-17a: записи, які файл створив чи змінив, — на них (і на їхніх батьках композиції)
         // після збереження виконуються правила довідника.
         var touched = new List<RegistryEntry>();
@@ -452,6 +481,21 @@ public sealed class ImportRegistryEntriesHandler(
                 valueChanges.Add((entry, changes));
             }
 
+            // ⛔ Y5-07: лише наявні записи — новий запис і так видно лічильником «додано», а
+            // його поля набрала людина. Зміни наявного — те, що Excel міг внести без неї.
+            if (!isNew)
+            {
+                foreach (var change in changes)
+                {
+                    reportedTotal++;
+                    if (reported.Count < MaxReportedChanges)
+                    {
+                        reported.Add(new RegistryEntryImportChange(
+                            rowNumber, code, change.FieldCode, ChangeText(change.OldValue), ChangeText(change.NewValue)));
+                    }
+                }
+            }
+
             // ⛔ Аудит 2026-10-03 (L5-04): «оновлено» — лише якщо writer справді щось змінив. Рахувати за
             // `values.Count` означало, що повторний імпорт власного експорту давав updated=N,
             // піднімав ревізію даних і мітку зміни та робив застарілими прогони розрахунків.
@@ -526,9 +570,17 @@ public sealed class ImportRegistryEntriesHandler(
         errors.Clear();
         errors.AddRange(ordered);
 
+        // ⚠ Рядок, відхилений після циклу (дубль ключа), запису не змінить — його змін у звіті немає.
+        var reportedChanges = reported.Where(c => !flaggedRows.Contains(c.Row)).ToList();
+        var truncated = reportedTotal > reported.Count;
+
         if (dryRun || errors.Count > 0 || added + updated == 0)
         {
-            return new RegistryEntryImportReport(added, updated, unchanged, errors, Applied: false);
+            return new RegistryEntryImportReport(added, updated, unchanged, errors, Applied: false)
+            {
+                Changes = reportedChanges,
+                ChangesTruncated = truncated,
+            };
         }
 
         // ⛔ Одна транзакція writer'а (`Q-244`): ревізія, ключі RT-10b (ключ, який тримає запис
@@ -565,7 +617,11 @@ public sealed class ImportRegistryEntriesHandler(
         if (rules is null || uow is null)
         {
             await SaveAsync(ct).ConfigureAwait(false);
-            return new RegistryEntryImportReport(added, updated, unchanged, errors, Applied: true);
+            return new RegistryEntryImportReport(added, updated, unchanged, errors, Applied: true)
+            {
+                Changes = reportedChanges,
+                ChangesTruncated = truncated,
+            };
         }
 
         // ⛔ RT-17a (§6): правила — після збереження, у тій самій транзакції; Error відкочує файл
@@ -580,8 +636,29 @@ public sealed class ImportRegistryEntriesHandler(
             },
             ct).ConfigureAwait(false);
 
-        return new RegistryEntryImportReport(added, updated, unchanged, errors, Applied: true) { Warnings = check.Warnings };
+        return new RegistryEntryImportReport(added, updated, unchanged, errors, Applied: true)
+        {
+            Warnings = check.Warnings,
+            Changes = reportedChanges,
+            ChangesTruncated = truncated,
+        };
     }
+
+    /// <summary>Значення поля текстом для звіту (Y5-07): числа й дати — інваріантно, без культури сервера.</summary>
+    private static string? ChangeText(object? value) => value switch
+    {
+        null => null,
+        string text => text,
+        DateTime date => date.TimeOfDay == TimeSpan.Zero
+            ? date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)
+            : date.ToString("yyyy-MM-dd'T'HH:mm:ss", CultureInfo.InvariantCulture),
+
+        // ⚠ Сховище тримає decimal(34,16): «12.5000000000000000» людині не потрібне.
+        decimal number => (number / 1.0000000000000000000000000000m).ToString(CultureInfo.InvariantCulture),
+        bool flag => flag ? "true" : "false",
+        IFormattable formattable => formattable.ToString(null, CultureInfo.InvariantCulture),
+        _ => value.ToString(),
+    };
 
     /// <summary>
     /// Читає пакетом усе, що цикл рядків інакше читав би поштучно (<c>B-10</c>).
