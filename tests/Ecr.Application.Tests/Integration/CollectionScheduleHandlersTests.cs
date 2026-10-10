@@ -320,6 +320,47 @@ public sealed class CollectionScheduleHandlersTests
         Assert.Equal("err.ECR-INT-0404.collectionSchedule", missing.Details!["messageKey"]);
     }
 
+    /// <summary>
+    /// AN-101 (a) (аудит R11): створення розкладу додає сутність ВСЕРЕДИНІ замикання транзакції і свіжим екземпляром на
+    /// кожну спробу. Повтор стратегії (транзієнтний збій після <c>SaveChanges</c>) відкочує базу, а відновлення трекера
+    /// не вміє повертати <c>Added</c>: екземпляр, доданий ДО транзакції, лишався б «збереженим» і не вставлявся вдруге.
+    /// </summary>
+    /// <remarks>Мутація: повернути `store.Add(schedule)` перед `ExecuteInTransactionAsync` — Add один і поза транзакцією, червоніє.</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Finding", "AN-101")]
+    public async Task Створення_розкладу_додає_сутність_у_транзакції_свіжою_на_кожну_спробу_повтору()
+    {
+        _store.Entities[77] = ("ENT-77", "Entity 77");
+
+        // Підробка повтору: перша спроба «відкочена» (база порожня), друга виконується заново.
+        _uow.ExecuteInTransactionAsync(Arg.Any<Func<CancellationToken, Task>>(), Arg.Any<CancellationToken>())
+            .Returns(async call =>
+            {
+                var operation = call.Arg<Func<CancellationToken, Task>>();
+                var ct = call.Arg<CancellationToken>();
+                _inTransaction = true;
+
+                try
+                {
+                    await operation(ct);
+                    _store.Rows.Clear();
+                    await operation(ct);
+                }
+                finally
+                {
+                    _inTransaction = false;
+                }
+            });
+
+        var created = await Create().HandleAsync(77, Nightly, isEnabled: true, lookbackDays: null, CancellationToken.None);
+
+        Assert.Equal(2, _store.AddCalls.Count);
+        Assert.All(_store.AddCalls, call => Assert.True(call.InTransaction, "Сутність додано поза транзакцією."));
+        Assert.NotSame(_store.AddCalls[0].Schedule, _store.AddCalls[1].Schedule);
+        Assert.Equal(77, created.SourceEntityId);
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
     [Trait("Requirement", "BE-21c")]
@@ -798,9 +839,14 @@ public sealed class CollectionScheduleHandlersTests
             => Task.FromResult<IReadOnlyList<CollectionSchedule>>(
                 [.. Rows.Where(r => r.Schedule.DependsOnScheduleId == collectionScheduleId).Select(r => r.Schedule)]);
 
+        /// <summary>Усі виклики <see cref="Add"/>: екземпляр і чи було це всередині транзакції.</summary>
+        public List<(CollectionSchedule Schedule, bool InTransaction)> AddCalls { get; } = [];
+
         /// <summary>Ключ присвоюється одразу — базу тут заміняє цей список.</summary>
         public void Add(CollectionSchedule schedule)
         {
+            AddCalls.Add((schedule, InTransaction()));
+
             typeof(Ecr.Domain.Abstractions.Entity<int>).GetProperty("Id")!
                 .SetValue(schedule, Rows.Count + 1);
 
