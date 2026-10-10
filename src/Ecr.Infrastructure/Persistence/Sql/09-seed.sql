@@ -7495,6 +7495,9 @@ USING (VALUES
     -- COLL:r7y5-04-sheet-missing ── R7-Y5 / Y5-04: аркуш таблиці перейменовано або видалено в Excel — відмова таблиці в перегляді імпорту, а не 500; ru/kz — порцією COLL:r7y5-04-sheet-missing нижче ──
     ,(N'err.ECR-IMP-0422.importSheetMissing', N'en', N'The sheet of this table is missing in the file: it was renamed or deleted in Excel after export. Restore the sheet name or download the workbook again.', 1)
     -- COLL:r7y5-04-sheet-missing ── кінець секції ──
+    -- COLL:r7y5-01-layout-changed ── R7-Y5 / Y5-01: рядки чи колонки таблиці в Excel відсортовано, вставлено чи видалено — відмова таблиці, а не значення в чужих рядках; ru/kz — порцією COLL:r7y5-01-layout-changed нижче ──
+    ,(N'err.ECR-IMP-0422.importLayoutChanged', N'en', N'Rows or columns of this table were sorted, inserted, deleted or relabelled in Excel after export, so the values no longer match their rows. The table was not imported. Download the workbook again and edit values in place without sorting or inserting rows and columns.', 1)
+    -- COLL:r7y5-01-layout-changed ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -18576,6 +18579,17 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:r7y5-04-sheet-missing ── кінець секції ──
+
+-- COLL:r7y5-01-layout-changed ── ru/kz: R7-Y5 / Y5-01: рядки чи колонки таблиці в Excel відсортовано, вставлено чи видалено — відмова таблиці, а не значення в чужих рядках; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-IMP-0422.importLayoutChanged', N'ru', N'Строки или столбцы этой таблицы в Excel после экспорта отсортировали, вставили, удалили или переименовали, поэтому значения больше не совпадают со своими строками. Таблица не импортирована. Выгрузите книгу заново и правьте значения на месте, не сортируя и не вставляя строки и столбцы.'),
+    (N'err.ECR-IMP-0422.importLayoutChanged', N'kz', N'Бұл кестенің жолдары немесе бағандары экспорттан кейін Excel-де сұрыпталған, қосылған, жойылған немесе қайта аталған, сондықтан мәндер өз жолдарына сәйкес келмейді. Кесте импортталмады. Кітапты қайта жүктеп алып, жолдар мен бағандарды сұрыптамай және қоспай, мәндерді орнында түзетіңіз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:r7y5-01-layout-changed ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t
