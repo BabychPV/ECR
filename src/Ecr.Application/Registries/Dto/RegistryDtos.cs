@@ -41,6 +41,9 @@ namespace Ecr.Application.Registries.Dto;
 /// Відображуване ім'я (не логін) того, хто зберіг опис; <c>null</c> без права
 /// <c>Registry.EditDefinition</c>, без запису або якщо користувача вже немає.
 /// </param>
+/// <param name="AsOfRequired">
+/// Чи вимагає читання записів параметр <c>asOf</c>: довідник сам темпоральний або темпоральний його батько композиції. Лише в переліку.
+/// </param>
 public sealed record RegistryDefDto(
     int Id,
     string Code,
@@ -56,7 +59,8 @@ public sealed record RegistryDefDto(
     int? UsedInTemplates = null,
     bool? HasDraft = null,
     DateTime? UpdatedAt = null,
-    string? UpdatedByDisplayName = null);
+    string? UpdatedByDisplayName = null,
+    bool? AsOfRequired = null);
 
 /// <summary>Поле довідника.</summary>
 /// <param name="Id">Ідентифікатор поля.</param>

@@ -22672,6 +22672,8 @@ export interface components {
         RegistryCodeMode: "Manual" | "Auto" | null;
         /** @description Опис довідника для конфігуратора і для клієнта. */
         RegistryDefDto: {
+            /** @description Чи вимагає читання записів параметр `asOf`: довідник сам темпоральний або темпоральний його батько композиції. Лише в переліку. */
+            asOfRequired?: null | boolean;
             /** @description Код довідника. */
             code: string;
             /**
