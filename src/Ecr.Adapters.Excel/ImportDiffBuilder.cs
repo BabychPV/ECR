@@ -472,7 +472,8 @@ public sealed class ImportDiffBuilder
             return null;
         }
 
-        var text = cell.GetString().Trim();
+        var raw = cell.GetString();
+        var text = raw.Trim();
 
         switch (definition.DataType)
         {
@@ -565,7 +566,14 @@ public sealed class ImportDiffBuilder
                     : text;
 
             default:
-                return text;
+                // ⛔ Y5-05 (аудит 7): текст — ЯК У КНИЗІ, без `Trim()`. Ні сітка, ні PATCH
+                // текст не обрізають, тож у базі бувають значення з пробілом на краю
+                // («ТОО Альфа »), і експорт пише їх точно. Обрізка на читанні давала на
+                // незміненій книзі «зміну» `"ТОО Альфа " → "ТОО Альфа"` (на екрані
+                // невидиму), а Apply тихо переписував текст. Рядок із самих пробілів —
+                // порожнеча, як і в відбитках (`CalculatedCellFingerprint.Canonical`);
+                // `Same` вважає його рівним такому ж (чи порожньому) поточному.
+                return string.IsNullOrWhiteSpace(raw) ? null : raw;
         }
     }
 
@@ -687,6 +695,14 @@ public sealed class ImportDiffBuilder
         if (incoming is string { Length: 0 })
         {
             incoming = null;
+        }
+
+        // ⛔ Y5-05: поточний текст із самих пробілів (рядком він буває лише в текстовій
+        // колонці — `Current`) і порожня або «пробільна» комірка книги — обидва «нічого»
+        // для людини. Інакше імпорт незміненої книги стирав би такий рядок.
+        if (incoming is null && current is string spaces && string.IsNullOrWhiteSpace(spaces))
+        {
+            return true;
         }
 
         if (current is null || incoming is null)

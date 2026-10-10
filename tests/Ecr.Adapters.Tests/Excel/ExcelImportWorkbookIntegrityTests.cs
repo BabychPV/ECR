@@ -110,11 +110,51 @@ public sealed class ExcelImportWorkbookIntegrityTests
         Assert.Equal(ImportMessageKeys.SheetMissing, rejection.MessageKey);
     }
 
+    // ── Y5-05 ────────────────────────────────────────────────────────────────
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "Y5-05")]
+    public async Task Текст_із_пробілами_на_краях_у_незміненій_книзі_не_дає_зміни()
+    {
+        Text(1001, "ТОО Альфа ");
+        Text(1002, "  відступ");
+        Text(1003, "   ");
+        using var workbook = await ExportAsync();
+
+        // ⛔ Мутація: повернути `Trim()` у гілку тексту `Read` — три фантомні зміни
+        // («ТОО Альфа » → «ТОО Альфа», «  відступ» → «відступ», «   » → стерто).
+        var preview = await ImportAsync(workbook);
+
+        Assert.Empty(preview.Changes);
+        Assert.Empty(preview.Rejected);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "Y5-05")]
+    public async Task Текст_набраний_у_книзі_лягає_як_є_з_пробілами()
+    {
+        Text(1001, "old");
+        using var workbook = await ExportAsync();
+        workbook.Worksheet(SheetName).Cell(3, 2).Value = "new  value ";
+
+        var preview = await ImportAsync(workbook);
+
+        var change = Assert.Single(preview.Changes);
+        Assert.Equal("S", change.ColumnCode);
+        Assert.Equal("new  value ", change.NewValue);
+    }
+
     // ── Стенд ────────────────────────────────────────────────────────────────
 
     private void Number(long rowId, decimal value)
         => _slice.Add(new CellRecord(
             new CellAddress(Period, rowId, NumberColumnId), TableId, new CellValueData { ValueNumeric = value }));
+
+    private void Text(long rowId, string value)
+        => _slice.Add(new CellRecord(
+            new CellAddress(Period, rowId, TextColumnId), TableId, new CellValueData { ValueString = value }));
 
     private async Task<XLWorkbook> ExportAsync()
     {
