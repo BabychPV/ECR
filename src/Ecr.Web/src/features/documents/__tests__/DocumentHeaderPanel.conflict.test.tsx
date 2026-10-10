@@ -193,8 +193,9 @@ describe('AN-104 / D1-04: 409 на шапці не стирає чернетку
     const { b } = await editBAndHitConflict();
 
     await screen.findByTestId('document-header-conflict');
-    // Поки є що вирішувати, банер про застарілу шапку лишається.
-    expect(screen.queryByRole('alert')).not.toBeNull();
+    // Поки є що вирішувати, банер про застарілу шапку лишається. ⚠ `save.error` ставиться ПІСЛЯ async-`onError`
+    // (перечитування шапки), тож банер зʼявляється трохи пізніше за панель «ваше / чинне».
+    await waitFor(() => expect(screen.queryByRole('alert')).not.toBeNull());
 
     fireEvent.click(screen.getByTestId('document-header-conflict-current'));
     await waitFor(() => expect(b.value).toBe('7'));
