@@ -25,16 +25,17 @@ const busy = () =>
     409,
   );
 
+let client = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
+
 const wrapper = ({ children }: { children: ReactNode }) => (
-  <QueryClientProvider client={new QueryClient({ defaultOptions: { mutations: { retry: false } } })}>
-    {children}
-  </QueryClientProvider>
+  <QueryClientProvider client={client}>{children}</QueryClientProvider>
 );
 
 describe('useAddRow', () => {
   const fetchMock = vi.fn<(input: RequestInfo | URL) => Promise<Response>>();
 
   beforeEach(() => {
+    client = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
     fetchMock.mockReset();
     showApiError.mockReset();
     vi.stubGlobal('fetch', fetchMock);
@@ -42,6 +43,7 @@ describe('useAddRow', () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+    client.clear();
   });
 
   it('повторюється після sheetBeingSubmitted і без червоного тосту', async () => {

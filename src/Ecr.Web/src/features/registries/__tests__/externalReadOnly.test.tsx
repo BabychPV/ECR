@@ -103,8 +103,11 @@ function serve(registry: RegistryDefDto, meOverride: Partial<typeof me> = {}): v
   );
 }
 
+let pageClient: QueryClient | null = null;
+
 function showPage(): QueryClient {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  pageClient = client;
 
   render(
     <MantineProvider theme={testTheme}>
@@ -138,6 +141,8 @@ function isDisabled(element: HTMLElement): boolean {
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  // Таймери збирача сміття запитів (5 хв) тримали б контекст `vmThreads` у купі воркера до кінця прогону.
+  pageClient?.clear();
 });
 
 describe('D-211: довідник External — записи лише для перегляду', () => {
