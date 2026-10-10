@@ -31,7 +31,6 @@ public sealed class RegistryEntryImportExcelRoundTripTests
     private readonly ICurrentUser _user = Substitute.For<ICurrentUser>();
     private readonly IClock _clock = Substitute.For<IClock>();
     private readonly IAccessDecisionService _access = Substitute.For<IAccessDecisionService>();
-    private RegistryValue? _contract;
 
     public RegistryEntryImportExcelRoundTripTests()
     {
@@ -115,7 +114,16 @@ public sealed class RegistryEntryImportExcelRoundTripTests
         var change = Assert.Single(report.Changes);
         Assert.Equal(new RegistryEntryImportChange(2, "E0", "CONTRACT", "0012", "12"), change);
         Assert.False(report.ChangesTruncated);
-        Assert.Equal("0012", _contract!.ValueString);
+
+        // «Нічого не пише» — це відсутність збереження, а не незайманий об'єкт у пам'яті: перевірка, як
+        // і відмова з помилками, проганяє той самий `RegistryEntryWriter.ApplyValuesAsync` над
+        // відстежуваними сутностями запиту (так вона й бачить старе/нове значення) і повертається ДО
+        // транзакції; контекст запиту викидається без SaveChanges.
+        Assert.Equal("0012", change.OldValue);
+        await _uow.DidNotReceiveWithAnyArgs()
+            .ExecuteInTransactionAsync(default(Func<CancellationToken, Task>)!, default).ConfigureAwait(true);
+        await _uow.DidNotReceiveWithAnyArgs().SaveChangesAsync(default).ConfigureAwait(true);
+        await _uow.DidNotReceiveWithAnyArgs().BeginTransactionAsync(default).ConfigureAwait(true);
     }
 
     [Fact]
@@ -167,7 +175,6 @@ public sealed class RegistryEntryImportExcelRoundTripTests
 
         var contractValue = new RegistryValue(entry.Id, contract.Id);
         contractValue.Set(CellDataType.String, "0012", null);
-        _contract = contractValue;
 
         _registries.FindDefinitionAsync("PERMITS", Arg.Any<CancellationToken>()).Returns(definition);
         _registries
