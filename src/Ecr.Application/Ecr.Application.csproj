@@ -17,4 +17,9 @@
     <PackageReference Include="Microsoft.Extensions.Caching.Memory" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Z6-02: внутрішні помічники обробників (RowWindowMapSupport) перевіряються без бази. -->
+    <InternalsVisibleTo Include="Ecr.Application.Tests" />
+  </ItemGroup>
+
 </Project>
