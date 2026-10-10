@@ -48,6 +48,21 @@ describe('collectionRunErrorText', () => {
     );
   });
 
+  it('неоднозначне ім’я елемента (AN-81) резолвиться, а не лишається сирим JSON (Y4-02)', () => {
+    const raw = JSON.stringify({
+      k: 'jobs.collectionRunReason',
+      p: { code: 'ECR-INT-0422' },
+      i: {
+        k: 'err.ECR-INT-0422.elementNameAmbiguous',
+        p: { dataSource: 'PI-SQL', sourcePath: 'Stack1|Flow' },
+      },
+    });
+
+    expect(collectionRunErrorText(raw)).toBe(
+      '⟦jobs.collectionRunReason (code=ECR-INT-0422, message=⟦err.ECR-INT-0422.elementNameAmbiguous (dataSource=PI-SQL, sourcePath=Stack1|Flow)⟧)⟧',
+    );
+  });
+
   it('подія `SourceDataRefused` — два рівні вкладення, кожен через каталог', () => {
     const raw = JSON.stringify({
       k: 'coverageEvents.sourceDataRefused',
