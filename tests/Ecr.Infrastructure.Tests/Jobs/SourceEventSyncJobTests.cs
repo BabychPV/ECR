@@ -565,6 +565,69 @@ public sealed class SourceEventSyncJobTests(SqlServerFixture sql)
         Assert.Single(await LinksAsync(stand));
     }
 
+    /// <summary>
+    /// F2-04 (аудит R11): за черги в базі автоперерахунок ставиться В ТІЙ САМІЙ транзакції, що й видалення рядків.
+    /// Збій постановки відкочує видалення: рядок, його зв'язок і запис журналу лишаються, а наступний прогін
+    /// знову бачить зниклу подію. Доти перерахунок ставився окремо ПІСЛЯ коміту видалення: збій чи kill між
+    /// ними лишав видалений рядок без перерахунку, і ніхто б його вже не поставив.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ МУТАЦІЙНИЙ ДОКАЗ: повернути постановку лише після коміту (прибрати блок «F2-04» у
+    /// `ApplyRemovalsAsync`) — рядок EF-E1 видалено, червоніє.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "F2-04")]
+    public async Task F2_04_Збій_постановки_перерахунку_в_черзі_в_базі_відкочує_видалення_рядка()
+    {
+        await using var stand = await ArrangeAsync();
+        var source = new FakeEventSource(
+            Ev("E1", Start, End), Ev("E2", Start.AddHours(1), End.AddHours(1)));
+        await RunAsync(stand, source);
+
+        var trigger = Substitute.For<ICalculationTrigger>();
+        trigger.EnlistsInCallerTransaction.Returns(true);
+        trigger.RequestAsync(Arg.Any<long>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromException<string?>(new InvalidOperationException("черга недоступна")));
+
+        source.Result = new SourceEventResult([Ev("E2", Start.AddHours(1), End.AddHours(1))], false, null);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => RunAsync(stand, source, trigger: trigger));
+
+        // Видалення відкотилося разом із невдалою постановкою: рядок, зв'язок і журнал — як були.
+        Assert.Equal(["EF-E1", "EF-E2"], (await RowsAsync(stand)).Select(r => r.RowKey).Order());
+        Assert.Equal(["E1", "E2"], (await LinksAsync(stand)).Select(l => l.SourceEventId).Order());
+        Assert.Equal(0, await JournalCountAsync(stand, "E1"));
+    }
+
+    /// <summary>
+    /// F2-04: черга в базі — перерахунок видалених періодів ставиться ОДИН раз (у транзакції видалення), а
+    /// фінальна постановка прогону вже поставлений період не дублює; чужа черга (Quartz) — як і раніше, після коміту.
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "F2-04")]
+    public async Task F2_04_Перерахунок_видаленого_періоду_ставиться_рівно_один_раз(bool enlists)
+    {
+        await using var stand = await ArrangeAsync();
+        var source = new FakeEventSource(
+            Ev("E1", Start, End), Ev("E2", Start.AddHours(1), End.AddHours(1)));
+        await RunAsync(stand, source);
+
+        var trigger = Substitute.For<ICalculationTrigger>();
+        trigger.EnlistsInCallerTransaction.Returns(enlists);
+
+        source.Result = new SourceEventResult([Ev("E2", Start.AddHours(1), End.AddHours(1))], false, null);
+        await RunAsync(stand, source, trigger: trigger);
+
+        Assert.Equal(["EF-E2"], (await RowsAsync(stand)).Select(r => r.RowKey));
+        await trigger.Received(1).RequestAsync(stand.DocumentId, new PeriodKey(202601), Arg.Any<CancellationToken>());
+        Assert.Single(trigger.ReceivedCalls(), c => c.GetMethodInfo().Name == nameof(ICalculationTrigger.RequestAsync));
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
