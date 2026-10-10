@@ -45,12 +45,20 @@ public interface IRowWindowMapStore
 
     /// <summary>
     /// Екземпляри таблиці в періодах <c>Open</c>/<c>Grace</c> — адресати підтягування після того, як прив'язку
-    /// завели, змінили чи відновили (аудит I1-02); не більше <paramref name="limit"/>, за зростанням Id.
+    /// завели, змінили чи відновили (аудит I1-02); одна сторінка keyset-а: не більше <paramref name="limit"/>
+    /// з Id більшим за <paramref name="afterTableInstanceId"/>, за зростанням Id.
     /// </summary>
     /// <param name="tableDefId">Таблиця прив'язки.</param>
-    /// <param name="limit">Стеля екземплярів.</param>
+    /// <param name="afterTableInstanceId">Останній Id попередньої сторінки; <c>null</c> — перша сторінка.</param>
+    /// <param name="limit">Розмір сторінки.</param>
     /// <param name="ct">Скасування.</param>
-    public Task<IReadOnlyList<RowWindowFetchRequest>> OpenInstancesAsync(int tableDefId, int limit, CancellationToken ct);
+    /// <remarks>
+    /// ⛔ Аудит Z6-02: викликачі проходять УСІ сторінки (<c>RowWindowMapSupport.ForEachOpenInstancePageAsync</c>).
+    /// Одна сторінка без курсора щоразу давала ті самі перші екземпляри, а решта після зміни прив'язки назавжди
+    /// лишалася з числом за старою конфігурацією.
+    /// </remarks>
+    public Task<IReadOnlyList<RowWindowFetchRequest>> OpenInstancesAsync(
+        int tableDefId, long? afterTableInstanceId, int limit, CancellationToken ct);
 
     /// <summary>
     /// Знімає чинність із підтягнутих (<c>Fetched</c>/<c>Partial</c>) записів провенансу прив'язки за атрибутом

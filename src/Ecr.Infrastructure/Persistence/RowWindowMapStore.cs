@@ -59,8 +59,11 @@ public sealed class RowWindowMapStore(EcrDbContext db) : IRowWindowMapStore
 
     /// <inheritdoc />
     public async Task<IReadOnlyList<RowWindowFetchRequest>> OpenInstancesAsync(
-        int tableDefId, int limit, CancellationToken ct)
+        int tableDefId, long? afterTableInstanceId, int limit, CancellationToken ct)
     {
+        // Ідентичність починається з 1: «після 0» — перша сторінка (Z6-02: keyset замість однієї стелі).
+        var after = afterTableInstanceId ?? 0;
+
         // Стан — того періоду проєкту документа, якому належить екземпляр: Scheduled ще нема що рахувати,
         // закритий не змінюється (так само відсіює й сама задача підтягування).
         var instances = await (
@@ -68,7 +71,9 @@ public sealed class RowWindowMapStore(EcrDbContext db) : IRowWindowMapStore
                 join d in db.Documents.AsNoTracking() on t.DocumentId equals d.Id
                 join p in db.Periods.AsNoTracking()
                     on new { d.ProjectId, t.PeriodKeyValue } equals new { p.ProjectId, p.PeriodKeyValue }
-                where t.TableDefId == tableDefId && (p.State == PeriodState.Open || p.State == PeriodState.Grace)
+                where t.TableDefId == tableDefId
+                      && t.Id > after
+                      && (p.State == PeriodState.Open || p.State == PeriodState.Grace)
                 orderby t.Id
                 select new { t.Id, t.PeriodKeyValue })
             .Take(limit)

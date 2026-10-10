@@ -216,9 +216,82 @@ internal static class RowWindowMapSupport
             .Select(g => (g.Key.SourceEntityId, g.First().SourceField))];
     }
 
-    /// <summary>Стеля екземплярів, яким одна правка прив'язки ставить підтягування.</summary>
-    /// <remarks>Та сама, що в щогодинного повтору (<c>RowWindowRefetchJob.MaxInstances</c>).</remarks>
+    /// <summary>Розмір сторінки екземплярів, яким правка прив'язки ставить підтягування чи знімає чинність.</summary>
+    /// <remarks>
+    /// ⛔ Аудит Z6-02: це сторінка, а не стеля — проходяться всі сторінки (<see cref="ForEachOpenInstancePageAsync"/>).
+    /// Раніше одна вибірка <c>Take(1000)</c> за Id без курсора лишала екземпляри понад першу тисячу (версія шаблону
+    /// спільна для кількох проєктів) без зняття чинності й без задачі — назавжди з числом за старою конфігурацією.
+    /// </remarks>
     public const int MaxFetchInstances = 1_000;
+
+    /// <summary>
+    /// Проходить усі екземпляри таблиці у відкритих періодах сторінками keyset-а за Id (аудит Z6-02).
+    /// </summary>
+    /// <param name="store">Сховище прив'язок.</param>
+    /// <param name="tableDefId">Таблиця прив'язки.</param>
+    /// <param name="onPage">Дія над однією непорожньою сторінкою.</param>
+    /// <param name="ct">Скасування.</param>
+    public static async Task ForEachOpenInstancePageAsync(
+        IRowWindowMapStore store,
+        int tableDefId,
+        Func<IReadOnlyList<RowWindowFetchRequest>, CancellationToken, Task> onPage,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(store);
+        ArgumentNullException.ThrowIfNull(onPage);
+
+        long? after = null;
+        while (true)
+        {
+            var page = await store.OpenInstancesAsync(tableDefId, after, MaxFetchInstances, ct).ConfigureAwait(false);
+            if (page.Count == 0)
+            {
+                return;
+            }
+
+            await onPage(page, ct).ConfigureAwait(false);
+
+            if (page.Count < MaxFetchInstances)
+            {
+                return;
+            }
+
+            after = page[^1].TableInstanceId;
+        }
+    }
+
+    /// <summary>
+    /// Знімає чинність із підтягнутих записів атрибутів, згортку яких змінила правка (X3-04), в УСІХ відкритих
+    /// екземплярах таблиці прив'язки (Z6-02).
+    /// </summary>
+    public static async Task SupersedeRefoldedAsync(
+        IRowWindowMapStore store,
+        RowWindowMap map,
+        IReadOnlyList<(int SourceEntityId, string SourceField)> refolded,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(map);
+        ArgumentNullException.ThrowIfNull(refolded);
+
+        if (refolded.Count == 0)
+        {
+            return;
+        }
+
+        await ForEachOpenInstancePageAsync(
+            store,
+            map.TableDefId,
+            async (page, pageCt) =>
+            {
+                foreach (var (sourceEntityId, sourceField) in refolded)
+                {
+                    await store
+                        .SupersedeFoldedValuesAsync(map.Id, page, sourceEntityId, sourceField, pageCt)
+                        .ConfigureAwait(false);
+                }
+            },
+            ct).ConfigureAwait(false);
+    }
 
     /// <summary>
     /// Ставить підтягування всім екземплярам таблиці прив'язки у відкритих періодах (аудит I1-02).
@@ -232,20 +305,29 @@ internal static class RowWindowMapSupport
     public static async Task EnqueueFetchAsync(
         IRowWindowMapStore store, IBackgroundJobScheduler jobs, RowWindowMap map, CancellationToken ct)
     {
+        ArgumentNullException.ThrowIfNull(map);
+        ArgumentNullException.ThrowIfNull(jobs);
+
         if (!map.IsActive)
         {
             return;
         }
 
-        var instances = await store.OpenInstancesAsync(map.TableDefId, MaxFetchInstances, ct).ConfigureAwait(false);
-
-        foreach (var instance in instances)
-        {
-            await jobs
-                .EnqueueCoalescedAsync<IRowWindowFetchJob>(
-                    RowWindowFetchTarget.Of(instance.TableInstanceId), instance, ct, createdByUserId: null)
-                .ConfigureAwait(false);
-        }
+        // ⛔ Z6-02: усі сторінки, а не перша тисяча.
+        await ForEachOpenInstancePageAsync(
+            store,
+            map.TableDefId,
+            async (page, pageCt) =>
+            {
+                foreach (var instance in page)
+                {
+                    await jobs
+                        .EnqueueCoalescedAsync<IRowWindowFetchJob>(
+                            RowWindowFetchTarget.Of(instance.TableInstanceId), instance, pageCt, createdByUserId: null)
+                        .ConfigureAwait(false);
+                }
+            },
+            ct).ConfigureAwait(false);
     }
 
     /// <summary>DTO однієї прив'язки з кодами колонок (один запит).</summary>
@@ -613,21 +695,10 @@ public sealed class UpdateRowWindowMapHandler(
             // не входять у провенанс — без цього закрите вікно Fetched/Partial лишалося «вже підтягнутим» за старою
             // конфігурацією, а UI показував нову. Зняття чинності — та сама операція, що й у звичайному повторі
             // (історія лишається); тоді NeedsFetch(current: null) дає true, і поставлена нижче задача перечитує
-            // рядки. ⚠ Лише відкриті екземпляри (ті, яким ставиться задача). Задача, що вже виконується й прочитала
-            // прив'язку до PUT, може ще записати число за старою конфігурацією — закрити це можна лише відбитком
-            // конфігурації в провенансі (міграція).
-            if (refolded.Count > 0)
-            {
-                var open = await store
-                    .OpenInstancesAsync(map.TableDefId, RowWindowMapSupport.MaxFetchInstances, innerCt)
-                    .ConfigureAwait(false);
-                foreach (var (sourceEntityId, sourceField) in refolded)
-                {
-                    await store
-                        .SupersedeFoldedValuesAsync(map.Id, open, sourceEntityId, sourceField, innerCt)
-                        .ConfigureAwait(false);
-                }
-            }
+            // рядки. ⚠ Лише відкриті екземпляри (ті, яким ставиться задача) — УСІ, сторінками (Z6-02). Задача, що вже
+            // виконується й прочитала прив'язку до PUT, може ще записати число за старою конфігурацією — закрити це
+            // можна лише відбитком конфігурації в провенансі (міграція).
+            await RowWindowMapSupport.SupersedeRefoldedAsync(store, map, refolded, innerCt).ConfigureAwait(false);
 
             await IntegrationConfigAudit.WriteAsync(
                 audit, clock, currentUser, IntegrationConfigAudit.RowWindowMapType, map.Id, AuditOperation,
