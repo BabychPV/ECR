@@ -32,8 +32,8 @@ public sealed class SeedBuiltInRoleRightsTests(SqlServerFixture sql)
     {
         await using var db = Context();
 
-        // Контроль: вбудована роль права має (сід їх видав).
-        await new SeedRunner(db).RunAsync(CancellationToken.None).ConfigureAwait(true);
+        // Контроль: вбудована роль права має (сід їх видав при створенні бази фікстури — повторно не женемо:
+        // кожен прогін сіду — одна велика транзакція, а журнал тестової бази обмежений `TestDatabaseSizeTests`).
         var builtInRights = await CountRightsAsync(db).ConfigureAwait(true);
         Assert.True(builtInRights > 0, "вбудована ReportViewer має права після сіду");
 
@@ -47,6 +47,7 @@ public sealed class SeedBuiltInRoleRightsTests(SqlServerFixture sql)
             Assert.Equal(0, await CountRightsAsync(db).ConfigureAwait(true));
 
             await new SeedRunner(db).RunAsync(CancellationToken.None).ConfigureAwait(true);
+            await db.Database.ExecuteSqlRawAsync("CHECKPOINT;").ConfigureAwait(true);
 
             Assert.Equal(0, await CountRightsAsync(db).ConfigureAwait(true));
         }
@@ -55,6 +56,7 @@ public sealed class SeedBuiltInRoleRightsTests(SqlServerFixture sql)
             await db.Database.ExecuteSqlInterpolatedAsync(
                 $"UPDATE sec.[Role] SET IsBuiltIn = 1 WHERE Code = {RoleCode}").ConfigureAwait(true);
             await new SeedRunner(db).RunAsync(CancellationToken.None).ConfigureAwait(true);
+            await db.Database.ExecuteSqlRawAsync("CHECKPOINT;").ConfigureAwait(true);
         }
 
         // Після повернення вбудованої ролі сід видає їй права знову.
