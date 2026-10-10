@@ -49,17 +49,26 @@ public sealed class CollectionCoverageDedupPlanTests(SqlServerFixture sql)
     public async Task Дедуп_події_іде_seek_по_сутності_без_скану_PK()
     {
         var (target, other) = await SeedEntitiesAsync().ConfigureAwait(true);
-        await SeedJournalAsync(other).ConfigureAwait(true);
-        await PrepareMeasurementAsync().ConfigureAwait(true);
-
-        await using (var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext())
+        XDocument? plan;
+        try
         {
-            var store = new CollectionStore(db, new TestClock(Now));
-            Assert.True(await RecordAsync(store, target).ConfigureAwait(true), "Перша подія мусить записатися.");
-            Assert.False(await RecordAsync(store, target).ConfigureAwait(true), "Той самий ключ удруге — дедуп.");
+            await SeedJournalAsync(other).ConfigureAwait(true);
+            await PrepareMeasurementAsync().ConfigureAwait(true);
+
+            await using (var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext())
+            {
+                var store = new CollectionStore(db, new TestClock(Now));
+                Assert.True(await RecordAsync(store, target).ConfigureAwait(true), "Перша подія мусить записатися.");
+                Assert.False(await RecordAsync(store, target).ConfigureAwait(true), "Той самий ключ удруге — дедуп.");
+            }
+
+            plan = await CachedPlanAsync().ConfigureAwait(true);
+        }
+        finally
+        {
+            await RemoveJournalAsync(target, other).ConfigureAwait(true);
         }
 
-        var plan = await CachedPlanAsync().ConfigureAwait(true);
         Assert.NotNull(plan);
 
         var reads = plan!.Descendants(XName.Get("RelOp", ShowPlanNs))
@@ -165,6 +174,11 @@ public sealed class CollectionCoverageDedupPlanTests(SqlServerFixture sql)
     }
 
     /// <summary>Багато чужих рядків усіх трьох видів — щоб скан PK був для оптимізатора дорогим.</summary>
+    /// <remarks>
+    /// ⚠ Порціями з CHECKPOINT (як у <c>CollectionStoreCoverageWindowTests</c> і <c>RegistryImpactScanTests</c>):
+    /// одна транзакція на 60 000 рядків з індексами <c>itg.CollectionCoverage</c> видувала журнал спільної
+    /// тестової бази до 136 МБ — за стелю <c>TestDatabaseSizeTests</c> (інтеграція R7).
+    /// </remarks>
     private async Task SeedJournalAsync(int other)
     {
         await using var connection = new SqlConnection(sql.ConnectionString);
@@ -172,20 +186,53 @@ public sealed class CollectionCoverageDedupPlanTests(SqlServerFixture sql)
 
         await using var command = connection.CreateCommand();
         command.CommandTimeout = 300;
-        command.CommandText = $$"""
+        command.CommandText = """
             SET NOCOUNT ON;
-            ;WITH n AS (
-                SELECT TOP ({{BackgroundRowsPerKind}}) ROW_NUMBER() OVER (ORDER BY (SELECT 1)) AS i
-                FROM sys.all_columns AS a CROSS JOIN sys.all_columns AS b)
-            INSERT itg.CollectionCoverage (SourceEntityId, CollectionRunId, PeriodKey, CoveredFrom, CoveredTo, Status, Details)
-            SELECT @other, NULL, NULL, DATEADD(HOUR, i, '2026-01-01'), DATEADD(HOUR, i + 1, '2026-01-01'), NULL, NULL FROM n
-            UNION ALL
-            SELECT @other, NULL, 202601 + (i % 12), '2026-01-01', '2026-01-01', N'SkippedPeriodClosed', N'period closed ' + CONVERT(nvarchar(20), i) FROM n
-            UNION ALL
-            SELECT @other, NULL, NULL, '2026-01-01', '2026-01-01', N'SourceDataRefused',
-                   N'{"key":"' + CONVERT(nvarchar(20), i) + N'"}' FROM n;
+            DECLARE @from int = 0, @k int;
+            WHILE @from < @n
+            BEGIN
+                SET @k = CASE WHEN @n - @from < @chunk THEN @n - @from ELSE @chunk END;
+                ;WITH n AS (
+                    SELECT TOP (@k) @from + ROW_NUMBER() OVER (ORDER BY (SELECT 1)) AS i
+                    FROM sys.all_columns AS a CROSS JOIN sys.all_columns AS b)
+                INSERT itg.CollectionCoverage (SourceEntityId, CollectionRunId, PeriodKey, CoveredFrom, CoveredTo, Status, Details)
+                SELECT @other, NULL, NULL, DATEADD(HOUR, i, '2026-01-01'), DATEADD(HOUR, i + 1, '2026-01-01'), NULL, NULL FROM n
+                UNION ALL
+                SELECT @other, NULL, 202601 + (i % 12), '2026-01-01', '2026-01-01', N'SkippedPeriodClosed', N'period closed ' + CONVERT(nvarchar(20), i) FROM n
+                UNION ALL
+                SELECT @other, NULL, NULL, '2026-01-01', '2026-01-01', N'SourceDataRefused',
+                       N'{"key":"' + CONVERT(nvarchar(20), i) + N'"}' FROM n;
+                SET @from = @from + @k;
+                CHECKPOINT;
+            END;
             """;
         command.Parameters.AddWithValue("@other", other);
+        command.Parameters.AddWithValue("@n", BackgroundRowsPerKind);
+        command.Parameters.AddWithValue("@chunk", 4_000);
+        await command.ExecuteNonQueryAsync().ConfigureAwait(false);
+    }
+
+    /// <summary>Прибирання журналу обох сутностей — теж порціями з CHECKPOINT (спільна база, стеля журналу).</summary>
+    private async Task RemoveJournalAsync(int first, int second)
+    {
+        await using var connection = new SqlConnection(sql.ConnectionString);
+        await connection.OpenAsync().ConfigureAwait(false);
+
+        await using var command = connection.CreateCommand();
+        command.CommandTimeout = 300;
+        command.CommandText = """
+            SET NOCOUNT ON;
+            DECLARE @deleted int = 1;
+            WHILE @deleted > 0
+            BEGIN
+                DELETE TOP (@chunk) FROM itg.CollectionCoverage WHERE SourceEntityId IN (@first, @second);
+                SET @deleted = @@ROWCOUNT;
+                CHECKPOINT;
+            END;
+            """;
+        command.Parameters.AddWithValue("@first", first);
+        command.Parameters.AddWithValue("@second", second);
+        command.Parameters.AddWithValue("@chunk", 10_000);
         await command.ExecuteNonQueryAsync().ConfigureAwait(false);
     }
 
