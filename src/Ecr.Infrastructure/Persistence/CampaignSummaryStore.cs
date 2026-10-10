@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Ecr.Application.Ports;
+using Ecr.Domain.Enums;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 
@@ -59,6 +60,12 @@ public sealed class CampaignSummaryStore(EcrDbContext db) : ICampaignSummaryStor
     /// Підсумки по ВСІХ проєктах періоду, згруповані за строком, поясом і готовністю.
     /// </summary>
     /// <remarks>
+    /// ⛔ X7-05 (аудит R11): «зріз» огляду — лише ГОТОВИЙ (<c>Approved</c>/<c>Submitted</c>,
+    /// <c>SnapshotStatus</c> 1/2), а не будь-який поточний. Поточний зріз статусу <c>Draft</c> —
+    /// побудований від незатверджених даних (або від даних, що відтоді змінилися): регулятор з нього
+    /// не отримав нічого, а проєкт лічився «Готово» щойно всі документи затверджено. Статус — той
+    /// самий критерій, що в регуляторній вʼюсі (D-65: лише <c>Approved</c> і <c>Submitted</c>).
+    ///
     /// ⚠ Групи, а не одне число на кожен клас: «прострочено/під ризиком»
     /// залежить від поясу проєкту й поточного моменту, і рахує їх
     /// <c>CampaignProgressRule</c> у застосунку. Груп стільки, скільки різних
@@ -84,7 +91,7 @@ public sealed class CampaignSummaryStore(EcrDbContext db) : ICampaignSummaryStor
             LEFT JOIN (
                 SELECT r.ProjectId, COUNT(*) AS Snapshots
                 FROM rpt.ReportSnapshot r
-                WHERE r.PeriodKey = @periodKey AND r.IsCurrent = 1
+                WHERE r.PeriodKey = @periodKey AND r.IsCurrent = 1 AND r.Status IN (1, 2)
                 GROUP BY r.ProjectId
             ) sn ON sn.ProjectId = pe.ProjectId
             WHERE pe.PeriodKey = @periodKey
@@ -147,9 +154,11 @@ public sealed class CampaignSummaryStore(EcrDbContext db) : ICampaignSummaryStor
         // ⚠ Лише ПОТОЧНІ зрізи: повторна побудова створює новий рядок, а не
         // переписує старий, і без `IsCurrent` проєкт, зріз якого перебудували
         // тричі, виглядав би втричі готовішим за сусіда.
+        // ⛔ X7-05: і лише ГОТОВІ (`Approved`/`Submitted`) — `Draft`-зріз не є результатом для регулятора.
         var snapshots = await db.ReportSnapshots
             .AsNoTracking()
-            .Where(s => ids.Contains(s.ProjectId) && s.PeriodKey == periodKey && s.IsCurrent)
+            .Where(s => ids.Contains(s.ProjectId) && s.PeriodKey == periodKey && s.IsCurrent
+                        && (s.Status == SnapshotStatus.Approved || s.Status == SnapshotStatus.Submitted))
             .GroupBy(s => s.ProjectId)
             .Select(g => new { ProjectId = g.Key, Count = g.Count() })
             .ToDictionaryAsync(x => x.ProjectId, x => x.Count, ct)

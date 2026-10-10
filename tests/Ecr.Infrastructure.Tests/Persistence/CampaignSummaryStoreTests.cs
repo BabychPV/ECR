@@ -238,6 +238,44 @@ public sealed class CampaignSummaryStoreTests(SqlServerFixture sql)
         Assert.Equal(withSnapshot ? 1 : 0, summary.Totals.Done);
     }
 
+    /// <summary>
+    /// X7-05 (аудит R11): поточний зріз статусу <c>Draft</c> — не готовий зріз: проєкт не «Готово»,
+    /// у лічильнику зрізів його немає. Готові (<c>Approved</c>/<c>Submitted</c>) — є.
+    /// </summary>
+    /// <remarks>
+    /// Мутація: прибрати предикат статусу зі сховища — `Draft`-зріз зараховано, і обидва твердження червоні.
+    /// </remarks>
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "X7-05")]
+    [InlineData(SnapshotStatus.Draft, 0, CampaignProgress.Overdue)]
+    [InlineData(SnapshotStatus.Approved, 1, CampaignProgress.Done)]
+    [InlineData(SnapshotStatus.Submitted, 1, CampaignProgress.Done)]
+    public async Task Зріз_у_Draft_не_робить_проєкт_готовим_і_не_рахується(
+        SnapshotStatus snapshotStatus, int expectedSnapshots, CampaignProgress expected)
+    {
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var key = await FreshPeriodKeyAsync(builder);
+        var chain = await builder.BuildAsync(periodKey: key, ct: CancellationToken.None);
+        await using var db = builder.CreateContext();
+        await ArrangeAsync(db, chain, chain.DocumentId, DocumentStatus.Approved);
+        await AddCurrentSnapshotAsync(db, chain.ProjectId, key, snapshotStatus);
+
+        var today = new DateOnly(2026, 6, 15);
+        var period = await db.Periods.SingleAsync(p => p.ProjectId == chain.ProjectId && p.PeriodKeyValue == key);
+        SetLastDay(period, today.AddDays(-1));
+        await db.SaveChangesAsync(CancellationToken.None);
+
+        var summary = await Handler(db, LocalToUtc(today, 10, 0)).HandleAsync(key, CancellationToken.None);
+
+        var row = summary.Projects.Single(p => p.ProjectId == chain.ProjectId);
+        Assert.Equal(expected, row.Progress);
+        Assert.Equal(expectedSnapshots, row.Snapshots);
+        Assert.Equal(expectedSnapshots, summary.Totals.Snapshots);
+        Assert.Equal(expected == CampaignProgress.Done ? 1 : 0, summary.Totals.Done);
+    }
+
     /// <summary>Пояс проєктів у тестах класифікації (той самий, що дає будівник ланцюга).</summary>
     private static readonly TimeZoneInfo Zone = TimeZoneInfo.FindSystemTimeZoneById("Asia/Atyrau");
 
@@ -449,7 +487,8 @@ public sealed class CampaignSummaryStoreTests(SqlServerFixture sql)
     }
 
     /// <summary>Поточний зріз звіту за проєкт і період.</summary>
-    private static async Task AddCurrentSnapshotAsync(EcrDbContext db, int projectId, int periodKey)
+    private static async Task AddCurrentSnapshotAsync(
+        EcrDbContext db, int projectId, int periodKey, SnapshotStatus status = SnapshotStatus.Approved)
     {
         var tag = $"{Guid.NewGuid():N}"[..8];
         var definition = new ReportDef(
@@ -465,7 +504,7 @@ public sealed class CampaignSummaryStoreTests(SqlServerFixture sql)
         await db.SaveChangesAsync(CancellationToken.None);
 
         var snapshot = new ReportSnapshot(
-            version.Id, projectId, periodKey, SnapshotStatus.Draft, Now, builtByUserId: 1);
+            version.Id, projectId, periodKey, status, Now, builtByUserId: 1);
         snapshot.MakeCurrent();
 
         db.ReportSnapshots.Add(snapshot);
