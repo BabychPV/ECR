@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { TableSliceDto } from '@/api/types';
@@ -248,7 +248,7 @@ describe('DocumentGrid: asOf для частини композиції з те�
     mockCompositionServer();
     show();
     await waitFor(() => expect(requests).toContain(`asOf=${ExpectedPeriodEnd}`));
-    document.body.innerHTML = '';
+    cleanup();
 
     requests.length = 0;
     show();
