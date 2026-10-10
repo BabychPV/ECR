@@ -6,6 +6,7 @@ import { notifications } from '@mantine/notifications';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ImportPreview } from '@/api/types';
 import { ImportPanel } from '../ImportPanel';
+import { importBusyRetry } from '../applyBusyRetry';
 import { testTheme } from '@/test/render';
 import { showDone } from '@/shared/ui/notify';
 
@@ -354,8 +355,16 @@ describe('ImportPanel: застосування впирається в блок
    * помилкою (`() => showApiError(new Error('x'))`) — тут буде
    * `⟦state.errorTitle⟧` замість тексту каталогу.
    */
+  const DefaultRetryDelays = [...importBusyRetry.delaysMs];
+
+  beforeEach(() => {
+    // Z1-02: `sheetBeingSubmitted` повторюється сам; без очікування, щоб тест не чекав секунди.
+    importBusyRetry.delaysMs = [0, 0, 0];
+  });
+
   afterEach(() => {
     vi.restoreAllMocks();
+    importBusyRetry.delaysMs = [...DefaultRetryDelays];
   });
 
   it.each([
@@ -418,5 +427,102 @@ describe('ImportPanel: застосування впирається в блок
 
     // Перегляд лишається відкритим — людина може повторити застосування.
     expect(screen.getByRole('dialog')).toBeTruthy();
+  });
+});
+
+describe('ImportPanel: синхронне застосування повторює 409 sheetBeingSubmitted (Z1-02)', () => {
+  const Default = [...importBusyRetry.delaysMs];
+
+  beforeEach(() => {
+    importBusyRetry.delaysMs = [0, 0, 0];
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    importBusyRetry.delaysMs = [...Default];
+  });
+
+  function busy(): Response {
+    return new Response(
+      JSON.stringify({
+        type: 'https://ecr/errors/ECR-DOC-4091',
+        title: 'Conflict',
+        status: 409,
+        detail: 'busy',
+        errorCode: 'ECR-DOC-4091',
+        correlationId: 'corr-1',
+        messageKey: 'err.ECR-DOC-4091.sheetBeingSubmitted',
+      }),
+      { status: 409, headers: { 'Content-Type': 'application/problem+json' } },
+    );
+  }
+
+  function serve(applies: () => Response): { applyCalls: () => number } {
+    let calls = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+
+        if (url.includes('/import/preview')) {
+          return new Response(
+            JSON.stringify({
+              previewToken: 'tok',
+              changes: [{ rowKey: 'R1', columnCode: 'A', oldValue: null, newValue: 1, tableCode: 'T1' }],
+              rejected: [],
+              conflicts: [],
+              overwritable: [],
+            } satisfies ImportPreview),
+            { status: 200, headers: { 'Content-Type': 'application/json' } },
+          );
+        }
+
+        if (url.includes('/import/apply')) {
+          calls += 1;
+
+          return applies();
+        }
+
+        return new Response('[]', { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }),
+    );
+
+    return { applyCalls: () => calls };
+  }
+
+  it('два 409 sheetBeingSubmitted, потім 200: застосовано без участі людини, помилки немає', async () => {
+    const show = vi.spyOn(notifications, 'show');
+    let n = 0;
+    const server = serve(() => {
+      n += 1;
+
+      return n <= 2
+        ? busy()
+        : new Response(JSON.stringify({ appliedCells: 1, rowVersions: {}, validation: [] }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          });
+    });
+
+    await openPreview();
+    await userEvent.click(screen.getByRole('button', { name: '⟦import.apply⟧' }));
+
+    // ⛔ Мутація: прибрати `withSheetBusyRetry` — перший 409 одразу тост помилки, `import.applied` немає.
+    await vi.waitFor(() => expect(vi.mocked(showDone)).toHaveBeenCalledWith('⟦import.applied⟧'));
+    expect(server.applyCalls()).toBe(3);
+    expect(show).not.toHaveBeenCalledWith(expect.objectContaining({ color: 'statusError' }));
+  });
+
+  it('постійний 409: рівно 1 + 3 спроби, далі людині показано відмову', async () => {
+    const show = vi.spyOn(notifications, 'show');
+    const server = serve(busy);
+
+    await openPreview();
+    await userEvent.click(screen.getByRole('button', { name: '⟦import.apply⟧' }));
+
+    await vi.waitFor(() =>
+      expect(show).toHaveBeenCalledWith(expect.objectContaining({ color: 'statusError' })),
+    );
+    expect(server.applyCalls()).toBe(4);
   });
 });
