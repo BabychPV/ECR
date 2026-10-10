@@ -455,6 +455,14 @@ public sealed class ImportDiffBuilder
                 // тож перезапис рядка пише тільки її правки.
                 if (changedSinceExport)
                 {
+                    // ⛔ R1-05: конфліктна комірка теж рахується в стелю - вона йде і в `Rejected`, і в `Overwritable`, а
+                    // `continue` нижче оминав перевірку `MaxChanges`: таблиця 3000 x 15 після інтеграції (піднімає версії
+                    // рядків) давала 45 000 записів у кожному з двох переліків, тобто відповідь у десятки МБ.
+                    if (changes.Count + overwritable.Count >= MaxChanges)
+                    {
+                        throw TooManyChanges(table);
+                    }
+
                     rejected.Add(new ImportRejection(
                         row.RowKey, column.Code, "ECR-CELL-0409",
                         "The row was changed after the workbook was exported: the value from the file is not applied.",
@@ -472,7 +480,7 @@ public sealed class ImportDiffBuilder
                 // книги мовчки відкидалася, план для Apply містив перші 5000, а
                 // Apply відповідав успіхом. Тепер зміна понад стелю — відмова
                 // всього перегляду: план не зберігається, застосувати нічого.
-                if (changes.Count >= MaxChanges)
+                if (changes.Count + overwritable.Count >= MaxChanges)
                 {
                     throw TooManyChanges(table);
                 }
@@ -540,14 +548,21 @@ public sealed class ImportDiffBuilder
             // ✎ 2026-09-29: ціле, набране текстом із розрядами («1 234»,
             // «1,234» у en-US), — за культурою користувача, і далі вже `int`:
             // застосування (можливо, у фоновій задачі) культури не потребує.
+            //
+            // ⛔ Y5-08: ціле ПОЗА int32 (5 000 000 000: літри, тенге) - законне значення колонки Int: сховище -
+            // `ValueNumeric decimal(34,16)`, і `ColumnDef.ValidateValue` перевіряє лише цілість. Доти воно
+            // лишалося РЯДКОМ, а `Same` для Int порівнює лише число з числом, тож незмінена книга давала фантомну
+            // «зміну» `5000000000 → "5000000000"` на кожному імпорті (перегляд, конфлікти D1-02, стеля змін).
+            // Тепер таке число читається `decimal` (як рядок із цифрами й раніше - у межах int32 лишається `int`).
             case CellDataType.Int:
-                return int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var integer)
-                    ? integer
-                    : CultureNumberReader.Read(text, culture) is { Kind: NumberTextKind.Number, Value: var whole }
-                      && decimal.Truncate(whole) == whole
-                      && whole is >= int.MinValue and <= int.MaxValue
-                        ? (int)whole
-                        : text;
+                if (int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var integer))
+                {
+                    return integer;
+                }
+
+                return ReadNumber(cell, text, culture) is { } whole && decimal.Truncate(whole) == whole
+                    ? (whole is >= int.MinValue and <= int.MaxValue ? (object)(int)whole : whole)
+                    : text;
 
             // ⛔ `V-10`: обчислювані колонки (`Formula`, `Calculated`) тримають
             // ЧИСЛО (`ValueNumeric`) і експортуються числом — і читаються так
@@ -641,6 +656,17 @@ public sealed class ImportDiffBuilder
                 if (cell.DataType == XLDataType.Number)
                 {
                     return LookupCode(cell, text);
+                }
+
+                // ⛔ Z3-05 (хвіст Y5-06): набране в текстовій колонці `1.04.2024` чи `2024-04-01` Excel перетворює на
+                // ДАТУ, а `GetString()` форматує її культурою процесу СЕРВЕРА (`01.04.2024 00:00:00` на ru/kk,
+                // `4/1/2024 12:00:00 AM` на en): у базу йшов довгий рядок із часом, залежний від машини API. Дата -
+                // інваріантним записом, як число вище: день без часу - `yyyy-MM-dd`, з часом - `yyyy-MM-dd HH:mm:ss`.
+                if (cell.DataType == XLDataType.DateTime && cell.TryGetValue(out DateTime typed))
+                {
+                    return typed.TimeOfDay == TimeSpan.Zero
+                        ? typed.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)
+                        : typed.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
                 }
 
                 return string.IsNullOrWhiteSpace(raw) ? null : raw;
