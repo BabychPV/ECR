@@ -334,7 +334,7 @@ public sealed partial class TemplateVersionStore(EcrDbContext db) : ITemplateVer
         return (code.Length + suffix.Length > 64 ? code[..(64 - suffix.Length)] : code) + suffix;
     }
 
-    [System.Text.RegularExpressions.GeneratedRegex(@"_v\d+$")]
+    [System.Text.RegularExpressions.GeneratedRegex(@"_v\d+\z")]
     private static partial System.Text.RegularExpressions.Regex PreviousCloneSuffix();
 
     private void CloneTableRelations(TemplateVersion clone, IReadOnlyList<RelationTemplate> templates)

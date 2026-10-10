@@ -70,11 +70,12 @@ public sealed partial class AccessDenialAuditor : IAccessDenialAuditor
     private const string Unrouted = "(unrouted)";
 
     /// <summary>Ідентифікатор права чи причини: літери, цифри, крапка, підкреслення.</summary>
-    [GeneratedRegex("^[A-Za-z][A-Za-z0-9_.]{0,63}$", RegexOptions.CultureInvariant)]
+    // ⛔ S1-06: `\z` замість `$` (кінцевий LF у рядку журналу).
+    [GeneratedRegex("^[A-Za-z][A-Za-z0-9_.]{0,63}\\z", RegexOptions.CultureInvariant)]
     private static partial Regex Identifier();
 
     /// <summary>Метод HTTP: лише літери, до 16 символів.</summary>
-    [GeneratedRegex("^[A-Za-z]{1,16}$", RegexOptions.CultureInvariant)]
+    [GeneratedRegex("^[A-Za-z]{1,16}\\z", RegexOptions.CultureInvariant)]
     private static partial Regex HttpMethodName();
 
     private readonly IServiceScopeFactory _scopes;

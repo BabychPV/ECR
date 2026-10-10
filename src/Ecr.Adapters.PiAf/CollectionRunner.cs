@@ -972,7 +972,7 @@ public sealed partial class CollectionRunner(
     private static bool IsCatalogCode(string? code)
         => code is not null && CatalogCode().IsMatch(code);
 
-    [System.Text.RegularExpressions.GeneratedRegex(@"^ECR-[A-Z]+-\d{4}$", System.Text.RegularExpressions.RegexOptions.CultureInvariant)]
+    [System.Text.RegularExpressions.GeneratedRegex(@"^ECR-[A-Z]+-\d{4}\z", System.Text.RegularExpressions.RegexOptions.CultureInvariant)]
     private static partial System.Text.RegularExpressions.Regex CatalogCode();
 
     /// <summary>
