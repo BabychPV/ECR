@@ -47,6 +47,12 @@ public sealed class ImportMethodologyPackageHandler(
     /// <summary>Друге право: імпорт заводить і константи.</summary>
     public const string ConstantPermission = "Calculation.EditConstant";
 
+    /// <summary>
+    /// Третє право (F3-04): правило категорії константи (<c>categoryRule</c> пакета) пишеться окремим
+    /// правом <c>Calculation.EditRule</c>, як і в конфігураторі (<c>SaveMethodologyCategoryRuleHandler</c>).
+    /// </summary>
+    public const string CategoryRulePermission = "Calculation.EditRule";
+
     /// <summary>Пояс за замовчуванням — майданчик замовника.</summary>
     public const string DefaultTimeZone = "Asia/Atyrau";
 
@@ -66,6 +72,15 @@ public sealed class ImportMethodologyPackageHandler(
 
         await PermissionCheck.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
         await PermissionCheck.RequireAsync(access, currentUser, ConstantPermission, ct).ConfigureAwait(false);
+
+        // ⛔ F3-04: вузол `categoryRule` — це запис правила категорії, а конфігуратор (PUT …/category-rule) вимагає
+        // для нього Calculation.EditRule. Імпорт перевіряв лише EditFormula і EditConstant, тож користувач без
+        // EditRule писав правило через пакет. Право потрібне лише пакетам, що несуть правило: імпорт без нього
+        // працює з двома правами, як і раніше (формат v1 зворотно сумісний).
+        if (package.Methodologies.Any(m => m.Versions.Any(v => v.CategoryRule is not null)))
+        {
+            await PermissionCheck.RequireAsync(access, currentUser, CategoryRulePermission, ct).ConfigureAwait(false);
+        }
 
         var userId = currentUser.UserId
             ?? throw new AccessDeniedException(
