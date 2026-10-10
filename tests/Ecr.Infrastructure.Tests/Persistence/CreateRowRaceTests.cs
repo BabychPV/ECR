@@ -98,6 +98,41 @@ public sealed class CreateRowRaceTests(SqlServerFixture sql)
         Assert.Equal(nameof(EditDenyReason.DocumentSubmitted), denied.Details?["reason"]?.ToString());
     }
 
+    /// <summary>
+    /// Y7-03 (аудит R11): додавання рядка, що не дочекалося блокування аркуша (його зараз зберігають), відмовляє
+    /// <c>409 ECR-DOC-4091</c> з ключем «дані зайняті, нічого не збережено» (<c>lockTimeout</c>), який клієнт повторює
+    /// автоматично, — а не з ключем подання <c>sheetBeingEdited</c> («Аркуш не подано…»): людина нічого не подавала.
+    /// </summary>
+    /// <remarks>Мутація: у `CreateRowHandler` повернути прямий `EnterSubmitAsync` — ключ `sheetBeingEdited`, червоніє.</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "Y7-03")]
+    public async Task Додавання_рядка_поки_аркуш_зберігається_відмовляє_ключем_зайнято_а_не_ключем_подання()
+    {
+        var doc = await new TestDocumentBuilder(sql.ConnectionString)
+            .BuildAsync(rowCount: SeededRows, rowMode: TableRowMode.Dynamic, ct: CancellationToken.None);
+
+        // Правка (спільне блокування аркуша) тримається в окремій транзакції — до кінця тесту.
+        await using var holder = CreateContext();
+        await using var save = await holder.Database.BeginTransactionAsync();
+        await new SheetEditGate(holder).EnterEditAsync(doc.DocumentId, doc.SheetDefId, doc.PeriodKey, CancellationToken.None);
+
+        await using var createDb = CreateContext();
+        var handler = BuildHandler(
+            createDb, doc, maxRows: null, beforeInsert: null,
+            new SheetEditGatePolicy(TimeSpan.FromMilliseconds(300)));
+
+        var error = await Assert.ThrowsAsync<ConcurrencyConflictException>(() => handler.HandleAsync(
+            doc.DocumentId, doc.TableInstanceId, requestedKey: null, Profile(), CancellationToken.None));
+
+        await save.RollbackAsync();
+
+        Assert.Equal("ECR-DOC-4091", error.ErrorCode);
+        Assert.Equal("err.ECR-DOC-4091.lockTimeout", error.Details!["messageKey"]);
+        Assert.Equal(SeededRows, await RowCountAsync(doc));
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
@@ -155,7 +190,7 @@ public sealed class CreateRowRaceTests(SqlServerFixture sql)
 
     /// <summary>Обробник на справжніх сховищах; <paramref name="beforeInsert"/> — точка перемикання.</summary>
     private static CreateRowHandler BuildHandler(
-        EcrDbContext db, TestDocument doc, int? maxRows, Func<Task>? beforeInsert)
+        EcrDbContext db, TestDocument doc, int? maxRows, Func<Task>? beforeInsert, SheetEditGatePolicy? policy = null)
     {
         var bulk = new BulkCellLoader(db.Database.GetConnectionString()!, 1000);
         var clock = new FixedClock(new DateTime(2026, 2, 1, 9, 0, 1, DateTimeKind.Utc));
@@ -197,7 +232,7 @@ public sealed class CreateRowRaceTests(SqlServerFixture sql)
 
         return new CreateRowHandler(
             new RowStore(db, bulk, clock), new DocumentStore(db), Metadata(doc, maxRows), access,
-            new UnitOfWork(db), clock, new SheetEditGate(db));
+            new UnitOfWork(db), clock, new SheetEditGate(db, policy));
     }
 
     /// <summary>Знімок структури з РЕАЛЬНИМИ ідентифікаторами аркуша й таблиці.</summary>
