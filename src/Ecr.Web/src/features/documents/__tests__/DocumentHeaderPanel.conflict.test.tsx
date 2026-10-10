@@ -187,4 +187,19 @@ describe('AN-104 / D1-04: 409 на шапці не стирає чернетку
     expect(screen.queryByTestId('document-header-conflict')).toBeNull();
     expect(saveButton().hasAttribute('disabled')).toBe(true);
   });
+
+  it('AN-96: після «Взяти чинне» відмова-409 не висить банером — правок і конфліктів немає', async () => {
+    show(fields('1', '7'));
+    const { b } = await editBAndHitConflict();
+
+    await screen.findByTestId('document-header-conflict');
+    // Поки є що вирішувати, банер про застарілу шапку лишається.
+    expect(screen.queryByRole('alert')).not.toBeNull();
+
+    fireEvent.click(screen.getByTestId('document-header-conflict-current'));
+    await waitFor(() => expect(b.value).toBe('7'));
+
+    // ⛔ Мутаційний доказ: поверни `save.error` без `staleSaveError` — банер висить назавжди.
+    await waitFor(() => expect(screen.queryByRole('alert')).toBeNull());
+  });
 });
