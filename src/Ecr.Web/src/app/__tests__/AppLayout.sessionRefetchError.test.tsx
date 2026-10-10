@@ -100,8 +100,9 @@ describe('AppLayout: збій перезапиту /me (L9-05)', () => {
     meStatus = 503;
     const { router } = renderAt('/admin/units?tab=2');
 
-    expect(await screen.findByText('Login page')).toBeTruthy();
+    // L9-05: `/me` повторюється один раз (затримка TanStack 1 с), тож вхід — після повтору.
+    expect(await screen.findByText('Login page', undefined, { timeout: 4000 })).toBeTruthy();
     expect(router.state.location.pathname).toBe('/login');
     expect(new URLSearchParams(router.state.location.search).get('from')).toBe('/admin/units?tab=2');
-  });
+  }, 8000);
 });

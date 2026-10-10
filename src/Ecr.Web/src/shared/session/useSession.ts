@@ -42,6 +42,17 @@ export function checkSessionUser(client: QueryClient, me: CurrentUserDto): Curre
   return me;
 }
 
+/** Скільки `/me` вважається свіжим (P2-06). */
+export const MeStaleTimeMs = 15_000;
+
+/** Скільки разів повторювати збійний `/me` (L9-05). */
+export const MeMaxRetries = 1;
+
+function isClientError(error: unknown): boolean {
+  const status = (error as { problem?: { status?: number } } | null)?.problem?.status;
+  return status !== undefined && status >= 400 && status < 500;
+}
+
 /** Читає профіль поточного користувача. */
 export function useSession() {
   const client = useQueryClient();
@@ -50,11 +61,19 @@ export function useSession() {
     queryKey: MeQueryKey,
     queryFn: async () => checkSessionUser(client, await apiFetch<CurrentUserDto>('/api/v1/me')),
 
-    // ⚠ Профіль НЕ кешується надовго: зміна ролей робить сесію недійсною
-    // негайно (SecurityStamp), і показувати кнопки за старим профілем
-    // означало б обіцяти дію, яку сервер уже не виконає.
-    staleTime: 0,
-    retry: false,
+    // ⛔ P2-06: `staleTime: 0` давав `GET /me` (профіль прав = 1–2 SQL) на КОЖНЕ монтування
+    // одного з ~50 споживачів `useSession()` — кожен перехід маршруту, кожне відкриття
+    // шухляди чи діалогу. Миттєву недійсність сеансу після зміни ролей забезпечує сервер
+    // (`SecurityStampMiddleware` → `401` на першому ж запиті), а кнопки лише підказка
+    // (коментар угорі). Тому коротка свіжість; після довгої відсутності профіль
+    // перечитує `refetchOnWindowFocus`, а свідомі зміни ролей/налаштувань
+    // інвалідують `MeQueryKey` явно (`SimulationPanel`, `ChangePasswordPage`).
+    staleTime: MeStaleTimeMs,
+    // ⛔ L9-05 / AN-97: один повтор для минущого збою (502 під час перезапуску служби, обрив
+    // VPN) — без нього будь-який такий збій на першому завантаженні вів на `/login`.
+    // 4xx не повторюється (як у `createQueryClient`): `403` повтор не виправить, а `401`
+    // `apiFetch` уже обробив перенаправленням.
+    retry: (failureCount, error) => !isClientError(error) && failureCount < MeMaxRetries,
   });
 }
 
