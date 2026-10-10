@@ -190,6 +190,24 @@ public sealed class BoundaryUnitConversionTests
         Assert.Equal("kg→t ×0.001", result.Describe());
     }
 
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-16.10")]
+    [InlineData(AggregationKind.TimeWeightedAvg, 1, StdCubicMetrePerSecondId, StdCubicMetrePerHourId, 3600)]
+    [InlineData(AggregationKind.Avg, 1, StdCubicMetrePerSecondId, StdCubicMetrePerHourId, 3600)]
+    [InlineData(AggregationKind.Max, 3600, StdCubicMetrePerHourId, StdCubicMetrePerSecondId, 1)]
+    public void Згортка_швидкості_в_швидкість_рівно_через_чисельник_і_знаменник(
+        AggregationKind kind, int folded, int source, int target, int expected)
+    {
+        // ⛔ Z2-03: згортки, крім інтеграла, ішли через базову одиницю (`FactorToBase` `Sm3_per_h` =
+        // 0.000277777777777778): 1 Sm3/s → 3599.99999999999712 Sm3/h, хвіст понад масштаб сховища.
+        // МУТАЦІЙНИЙ ДОКАЗ: прибрати `RateConvert` з `ConvertFolded` → 3599.99999999999712 ≠ 3600, червоний.
+        var result = BoundaryUnitConversion.ConvertFolded(kind, folded, source, target, Catalog());
+
+        Assert.Equal((decimal)expected, result.Value);
+        Assert.True(result.IsConverted);
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait("Requirement", "ФВ-16.10")]

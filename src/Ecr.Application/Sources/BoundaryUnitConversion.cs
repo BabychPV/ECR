@@ -64,8 +64,9 @@ public static class BoundaryUnitConversion
 
         var shared = converter ?? SharedConverter;
 
-        // ⛔ Швидкість у швидкість — через чисельник і знаменник, а не через базову одиницю (як і інтеграл,
-        // див. <see cref="ConvertFolded"/>): `FactorToBase` у `Sm3_per_h` — це `1/3600`, якого скінченний
+        // ⛔ Швидкість у швидкість — через чисельник і знаменник, а не через базову одиницю (так само
+        // <see cref="ConvertFolded"/>: інтеграл — через знаменник, решта згорток — через цей самий
+        // <see cref="RateConvert"/>, Z2-03): `FactorToBase` у `Sm3_per_h` — це `1/3600`, якого скінченний
         // десятковий запис не має, і `0.001 Sm3/s` ставало `3.5999…96` замість `3.6`. Хвіст доходив до
         // комірки і впирався в масштаб колонки (16 знаків) — межова точка блокувала матеріалізацію.
         if (RateConvert(value, fromUnitId, toUnitId, units, shared) is { } rate)
@@ -196,7 +197,14 @@ public static class BoundaryUnitConversion
 
         var source = Spec(units, from);
         var target = Spec(units, to);
-        var value = (converter ?? SharedConverter).Convert(folded, source, target, explicitConversion: null);
+
+        // ⛔ Z2-03: швидкість у швидкість — тим самим маршрутом «чисельник/знаменник», що й межова точка
+        // (<see cref="Convert"/>, R7). Через базову одиницю середнє 1 Sm3/s у `Sm3_per_h` ставало
+        // `1 / 0.000277777777777778 = 3599.99999999999712` замість 3600 — і в комірці, і поруч із числом
+        // межової точки тієї самої величини, порахованим точно.
+        var shared = converter ?? SharedConverter;
+        var value = RateConvert(folded, from, to, units, shared)
+                    ?? shared.Convert(folded, source, target, explicitConversion: null);
 
         return new BoundaryValue(value, source.Code, target.Code, null, null, Factor(source, target));
     }
