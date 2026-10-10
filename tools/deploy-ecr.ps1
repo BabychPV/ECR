@@ -257,6 +257,8 @@
     цього майданчика (наприклад, Logging:File:Directory; ⚠ не
     Telemetry:OtlpEndpoint — для телеметрії є -TelemetryOtlpEndpoint) — НІКОЛИ рядок
     підключення чи інший секрет, для нього -ConnectionString (D-11).
+    ⛔ S2-07: розділи ConnectionStrings і Secrets у файлі — відмова до будь-якої зміни
+    (файл читають усі локальні користувачі).
     Записується ЛИШЕ якщо цільовий файл ще заповнювач (порожній об'єкт) —
     інакше крок 5 попереджає і нічого не чіпає.
 
@@ -707,6 +709,28 @@ function ConvertFrom-JsoncFile {
     $raw = [regex]::Replace($raw, '(?m)^\s*//.*$', '')
     $raw = [regex]::Replace($raw, '/\*.*?\*/', '', 'Singleline')
     return $raw | ConvertFrom-Json -ErrorAction Stop
+}
+
+# ⛔ S2-07 (аудит 2026-10-09b): -ConfigValues пишеться в %ProgramData%\ECR\config\appsettings.Production.json,
+# який за ACL теки читає кожен локальний користувач (Users: читання), а правило «секрети ніколи у файлі»
+# (D-11) ніде не примушувалось: скопійований appsettings.Development.json із ConnectionStrings чи Secrets
+# тихо ставав читабельним для всіх. Чиста функція: розібраний JSON → текст відмови або $null. Відмова —
+# верхній розділ ConnectionStrings чи Secrets (без урахування регістру, і як плоский ключ «Secrets:Назва»,
+# який конфігурація читає так само). Інші значення не чіпає: сумнівні імена ключів (Password тощо) — не
+# предмет цієї перевірки.
+function Get-ConfigValuesProblem {
+    param([AllowNull()] $Values)
+
+    if ($null -eq $Values -or $Values -isnot [System.Management.Automation.PSCustomObject]) { return $null }
+    $found = @($Values.PSObject.Properties | ForEach-Object { $_.Name } | Where-Object {
+            $section = ([string] $_).Split(':')[0].Trim()
+            $section -ieq 'ConnectionStrings' -or $section -ieq 'Secrets'
+        } | Sort-Object -Unique)
+    if (-not $found.Count) { return $null }
+    return ("-ConfigValues містить секретний розділ: $($found -join ', '). Файл appsettings.Production.json читає кожен " +
+        "локальний користувач (Users), тож секрети й рядок підключення туди не пишуться (D-11). Нічого не змінено. " +
+        "Рядок підключення — -ConnectionString; решта секретів — лише в Environment служби (runbook §2). " +
+        "Приберіть ці розділи з файлу й повторіть запуск.")
 }
 
 function Test-ConfigIsPlaceholder {
@@ -1657,6 +1681,11 @@ if ($ServicePassword) {
 }
 if ($ConfigValues -and -not (Test-Path $ConfigValues)) {
     throw "ConfigValues вказує на неіснуючий файл: $ConfigValues"
+}
+# ⛔ S2-07: секретні розділи — відмова ДО будь-якої зміни (а не посеред розгортання, коли файл уже пишеться).
+if ($ConfigValues) {
+    $configValuesProblem = Get-ConfigValuesProblem -Values (Get-Content $ConfigValues -Raw | ConvertFrom-Json -ErrorAction Stop)
+    if ($configValuesProblem) { throw $configValuesProblem }
 }
 # ⛔ R6-X4/X4-03: версія пакета — штамп релізу схеми (крок 2 пише його, -SkipSchema звіряє).
 $schemaRelease = if ($Version) { $Version } elseif ($MsiPath) { Get-MsiProductVersion -Path (Resolve-Path -LiteralPath $MsiPath).Path } else { $null }
