@@ -1,5 +1,5 @@
 import type { QueryClient } from '@tanstack/react-query';
-import { apiFetch } from '@/api/client';
+import { apiFetch, EcrApiError } from '@/api/client';
 import type { JobStatus } from '@/api/types';
 import { invalidateSlices } from '@/features/grid/sliceCache';
 import { outcomeOf, pollInterval, PollMs, type PlainJobOutcome } from '@/features/workflow/jobFollow';
@@ -12,6 +12,21 @@ import { outcomeOf, pollInterval, PollMs, type PlainJobOutcome } from '@/feature
  * скажімо, видалили.
  */
 const FollowMaxMs = 30 * 60_000;
+
+/** Скільки опитувань поспіль можуть упасти минущою відмовою, перш ніж стеження здасться (X2-04). */
+const FollowMaxFailures = 5;
+
+/**
+ * Чи відмова опитування минуща: обрив мережі, `408`/`429`, `5xx`. `401`/`403`/`404` та інші `4xx` —
+ * остаточні (права, задачі немає).
+ */
+function isTransientFailure(error: unknown): boolean {
+  if (!(error instanceof EcrApiError)) return true;
+
+  const status = error.problem.status;
+
+  return status >= 500 || status === 408 || status === 429;
+}
 
 /** Параметри для тестів: інтервал і межа часу. */
 export interface FollowImportOptions {
@@ -52,25 +67,32 @@ export async function followImportJob(
   const startedAt = Date.now();
 
   let outcome: PlainJobOutcome = 'unknown';
-  try {
-    for (;;) {
+  let failures = 0;
+  for (;;) {
+    try {
       const job = await queryClient.fetchQuery({
         queryKey: ['job', jobId],
         queryFn: () => apiFetch<JobStatus>(`/api/v1/jobs/${encodeURIComponent(jobId)}`),
         staleTime: 0,
         retry: false,
       });
+      failures = 0;
 
       if (pollInterval(job.state) === false) {
         outcome = outcomeOf(job.state, false);
         break;
       }
-
-      if (Date.now() - startedAt >= maxMs) break;
-      await wait(pollMs);
+    } catch (error) {
+      // ⛔ X2-04: один збій опитування (обрив мережі, 5xx, 429) завершував стеження — зрізи
+      // позначались застарілими ДО кінця імпорту, а сітка лишалась зі старими даними й
+      // `409` на власних правках. Минущу відмову переживаємо кількома спробами поспіль;
+      // остаточну (немає права, задачі немає) — ні: далі питати нема сенсу.
+      failures += 1;
+      if (!isTransientFailure(error) || failures >= FollowMaxFailures) break;
     }
-  } catch {
-    outcome = 'unknown';
+
+    if (Date.now() - startedAt >= maxMs) break;
+    await wait(pollMs);
   }
 
   await invalidateSlices(queryClient, { documentId, periodKey });
