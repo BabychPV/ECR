@@ -87,6 +87,12 @@ public sealed class ReplaceApprovalRouteHandler(
     /// <summary>Право керування проєктами.</summary>
     public const string Permission = "Project.Manage";
 
+    /// <summary>
+    /// Найбільша довжина маршруту (A1-06). Технічна межа від зловживання (кожен крок — рядок `wf.ApprovalStep` і рівень
+    /// погодження людиною), а не бізнес-правило: реальний маршрут — кілька рівнів.
+    /// </summary>
+    public const int MaxSteps = 20;
+
     /// <summary>Замінює маршрут проєкту.</summary>
     /// <param name="projectId">Проєкт.</param>
     /// <param name="roleIds">Ролі кроків у порядку проходження; порожньо — прибрати маршрут.</param>
@@ -118,21 +124,34 @@ public sealed class ReplaceApprovalRouteHandler(
                 });
         }
 
+        // ⛔ A1-06: довжина маршруту обмежена ДО будь-якого запиту до бази. Раніше `roleIds` приймався з тіла без
+        // межі, і кожен крок давав окремий запит `RoleExistsAsync` та рядок `wf.ApprovalStep`.
+        if (roleIds.Count > MaxSteps)
+        {
+            throw new BusinessRuleException(
+                "ECR-DOC-0422",
+                $"Маршрут має {roleIds.Count} кроків, дозволено не більше {MaxSteps}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-DOC-0422.approvalRouteTooLong",
+                    ["count"] = roleIds.Count.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    ["max"] = MaxSteps.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
+        }
+
         // ⛔ Ролі перевіряються ДО будь-якої зміни. Крок на неіснуючу роль дав
         // би маршрут, який неможливо пройти: документ подали б і не
         // затвердили ніколи, а причина була б видима лише в базі.
-        foreach (var roleId in roleIds)
+        // ⚠ Одним запитом на весь набір (A1-06), а не по запиту на крок.
+        if (await workflow.FirstMissingRoleAsync(roleIds, ct).ConfigureAwait(false) is { } missingRoleId)
         {
-            if (!await workflow.RoleExistsAsync(roleId, ct).ConfigureAwait(false))
-            {
-                throw new NotFoundException(
-                    "ECR-SEC-0404", $"Ролі {roleId} не існує.",
-                    new Dictionary<string, object?>
-                    {
-                        ["messageKey"] = "err.ECR-SEC-0404.roleNotFound",
-                        ["roleId"] = roleId.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                    });
-            }
+            throw new NotFoundException(
+                "ECR-SEC-0404", $"Ролі {missingRoleId} не існує.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-SEC-0404.roleNotFound",
+                    ["roleId"] = missingRoleId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
         }
 
         // ⚠ Дубль ролі в маршруті — не помилка: та сама роль може

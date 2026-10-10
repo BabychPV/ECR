@@ -51,7 +51,8 @@ public sealed class ApprovalRouteHandlerTests
                 .Grant(Ecr.Domain.Enums.ResourceKind.Project, ProjectId, Ecr.Domain.Enums.GrantLevel.Manage)
                 .Build());
 
-        _workflow.RoleExistsAsync(Arg.Any<int>(), Arg.Any<CancellationToken>()).Returns(true);
+        _workflow.FirstMissingRoleAsync(Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<CancellationToken>())
+            .Returns((int?)null);
     }
 
     [Fact]
@@ -104,7 +105,7 @@ public sealed class ApprovalRouteHandlerTests
         // ⛔ Крок на неіснуючу роль дав би маршрут, який неможливо пройти:
         // документ подали б і не затвердили ніколи, а причина була б видима
         // лише в базі.
-        _workflow.RoleExistsAsync(22, Arg.Any<CancellationToken>()).Returns(false);
+        _workflow.FirstMissingRoleAsync(Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<CancellationToken>()).Returns(22);
 
         var error = await Assert.ThrowsAsync<NotFoundException>(() => Replace([11, 22]));
 
@@ -263,6 +264,42 @@ public sealed class ApprovalRouteHandlerTests
             .Permission("Project.Manage")
             .Grant(Ecr.Domain.Enums.ResourceKind.Project, ProjectId, Ecr.Domain.Enums.GrantLevel.Read)
             .Build();
+
+    /// <summary>
+    /// A1-06: довжина маршруту обмежена ДО будь-якого запиту до бази; на межі — проходить.
+    /// </summary>
+    /// <remarks>Мутація: прибрати перевірку <c>MaxSteps</c> — перше твердження червоне (маршрут з 21 кроку приймається).</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Finding", "A1-06")]
+    public async Task A1_06_маршрут_довший_за_межу_відхиляється_422_до_запитів_до_бази()
+    {
+        var tooLong = Enumerable.Range(0, ReplaceApprovalRouteHandler.MaxSteps + 1).Select(i => 100 + (i % 2)).ToArray();
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(() => Replace(tooLong));
+
+        Assert.Equal("ECR-DOC-0422", error.ErrorCode);
+        Assert.Equal("err.ECR-DOC-0422.approvalRouteTooLong", error.Details!["messageKey"]);
+        await _workflow.DidNotReceive().FirstMissingRoleAsync(
+            Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<CancellationToken>());
+        await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
+
+        var atLimit = tooLong.Take(ReplaceApprovalRouteHandler.MaxSteps).ToArray();
+        Assert.Equal(ReplaceApprovalRouteHandler.MaxSteps, await Replace(atLimit));
+    }
+
+    /// <summary>A1-06: існування ролей перевіряється ОДНИМ запитом на весь набір, а не по запиту на крок.</summary>
+    /// <remarks>Мутація: повернути перевірку по одній ролі в циклі — викликів стане стільки, скільки кроків.</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Finding", "A1-06")]
+    public async Task A1_06_ролі_маршруту_перевіряються_одним_запитом()
+    {
+        await Replace([11, 22, 11, 33, 44]);
+
+        await _workflow.Received(1).FirstMissingRoleAsync(
+            Arg.Is<IReadOnlyCollection<int>>(ids => ids.Count == 5), Arg.Any<CancellationToken>());
+    }
 
     private Task<int> Replace(int[] roleIds)
         => new ReplaceApprovalRouteHandler(_workflow, _access, _uow, _user)
