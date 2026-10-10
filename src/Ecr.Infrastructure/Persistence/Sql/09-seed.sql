@@ -7567,6 +7567,9 @@ USING (VALUES
     -- COLL:r11l3-calc-0436 ── R11-L3: заголовок коду ECR-CALC-0436; ru/kz — порцією COLL:r11l3-calc-0436 нижче ──
     ,(N'err.ECR-CALC-0436', N'en', N'Formula result type does not match its target', 1)
     -- COLL:r11l3-calc-0436 ── кінець секції ──
+    -- COLL:r11l6-target-hidden ── AN-94: ціль зв'язку — довідник, до якого в читача немає доступу (сервер віддає null); ru — порцією нижче, kz — за термінологом ──
+    ,(N'registries.relationTargetHidden', N'en', N'Target registry is not available to you', 1)
+    -- COLL:r11l6-target-hidden ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -18854,6 +18857,15 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:r11l3-calc-0436 ── кінець секції ──
+-- COLL:r11l6-target-hidden ── ru: AN-94: ціль зв'язку недоступна читачеві; власна порція (kz — за термінологом) ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'registries.relationTargetHidden', N'ru', N'Справочник-цель вам недоступен')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:r11l6-target-hidden ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t
