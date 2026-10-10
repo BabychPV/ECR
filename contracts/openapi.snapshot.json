@@ -10290,6 +10290,46 @@
         ],
         "type": "object"
       },
+      "RegistryEntryImportChange": {
+        "description": "Зміна значення поля наявного запису довідника, яку приносить файл (Y5-07).",
+        "properties": {
+          "field": {
+            "description": "Код поля.",
+            "type": "string"
+          },
+          "key": {
+            "description": "Код запису, як його записано у файлі.",
+            "type": "string"
+          },
+          "newValue": {
+            "description": "Значення після імпорту текстом; `null` — порожнє.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "oldValue": {
+            "description": "Значення до імпорту текстом (числа й дати — інваріантно); `null` — порожнє.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "row": {
+            "description": "Номер рядка у файлі; заголовок — 1.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "row",
+          "key",
+          "field",
+          "oldValue",
+          "newValue"
+        ],
+        "type": "object"
+      },
       "RegistryEntryImportError": {
         "description": "Помилка одного рядка імпорту записів довідника.",
         "properties": {
@@ -10342,6 +10382,17 @@
           },
           "applied": {
             "description": "Чи записано зміни.",
+            "type": "boolean"
+          },
+          "changes": {
+            "description": "Зміни значень полів НАЯВНИХ записів, які файл приносить (у перевірці `dryRun`) або приніс:\nстаре й нове значення текстом; не більше за 1000 (Y5-07).",
+            "items": {
+              "$ref": "#/components/schemas/RegistryEntryImportChange"
+            },
+            "type": "array"
+          },
+          "changesTruncated": {
+            "description": "Змін більше, ніж показано в `Changes` (Y5-07).",
             "type": "boolean"
           },
           "errors": {

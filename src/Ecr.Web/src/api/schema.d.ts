@@ -22902,6 +22902,22 @@ export interface components {
              *     відхиляє запис (`422 ECR-REG-4221`). */
             warnings?: components["schemas"]["RegistryRuleViolationDto"][];
         };
+        /** @description Зміна значення поля наявного запису довідника, яку приносить файл (Y5-07). */
+        RegistryEntryImportChange: {
+            /** @description Код поля. */
+            field: string;
+            /** @description Код запису, як його записано у файлі. */
+            key: string;
+            /** @description Значення після імпорту текстом; `null` — порожнє. */
+            newValue: null | string;
+            /** @description Значення до імпорту текстом (числа й дати — інваріантно); `null` — порожнє. */
+            oldValue: null | string;
+            /**
+             * Format: int32
+             * @description Номер рядка у файлі; заголовок — 1.
+             */
+            row: number;
+        };
         /** @description Помилка одного рядка імпорту записів довідника. */
         RegistryEntryImportError: {
             /** @description Поле, якого стосується помилка; `null` — помилка самого рядка (код,
@@ -22931,6 +22947,11 @@ export interface components {
             added: number;
             /** @description Чи записано зміни. */
             applied: boolean;
+            /** @description Зміни значень полів НАЯВНИХ записів, які файл приносить (у перевірці `dryRun`) або приніс:
+             *     старе й нове значення текстом; не більше за 1000 (Y5-07). */
+            changes?: components["schemas"]["RegistryEntryImportChange"][];
+            /** @description Змін більше, ніж показано в `Changes` (Y5-07). */
+            changesTruncated?: boolean;
             /** @description Відхилені рядки; є хоч один — не застосовано нічого. */
             errors: components["schemas"]["RegistryEntryImportError"][];
             /**
