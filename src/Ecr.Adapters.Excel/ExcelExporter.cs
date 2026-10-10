@@ -600,6 +600,15 @@ public sealed class ExcelExporter(
 
             styleMapper.ApplyNumberFormat(style, column.DisplayFormat, column.Scale);
 
+            // ⛔ Y5-06 (аудит 7): текстова колонка — текстовим форматом `@`. Інакше
+            // набране в порожню комірку «12.50» чи «01.10» Excel перетворював на число
+            // (12.5, втрачений нуль), і імпорт отримував не те, що людина бачила, коли
+            // набирала. Власний формат колонки (`DisplayFormat`) лишається її.
+            if (column.DataType == CellDataType.String && string.IsNullOrWhiteSpace(column.DisplayFormat))
+            {
+                style.NumberFormat.Format = "@";
+            }
+
             if (IsCalculated(column))
             {
                 // ⚠ Обчислена комірка позначається ще до того, як у неї
