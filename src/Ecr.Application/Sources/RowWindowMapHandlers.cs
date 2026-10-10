@@ -584,6 +584,13 @@ public sealed class CreateRowWindowMapHandler(
             command.TargetUnitId);
         RowWindowMapSupport.ApplyPolicyAndSources(map, command.MinPercentGood, command.RefetchWithinDays, command.MaxGapSeconds, inputs);
 
+        // ⛔ V6-02 (MI-02 (в), як у AcceptSourceUnitChangeHandler / PatchCellsHandler): для нової прив'язки жодного
+        // провенансу ще нема, тож щогодинний повтор її не підбере - постановка підтягування після коміту, яку
+        // зупинка процесу чи збій черги міг загубити, лишала прив'язку без жодного прочитаного рядка. Черга в базі:
+        // постановка ВСЕРЕДИНІ транзакції, останнім оператором (разом із прив'язкою або нічого); Quartz у пам'яті -
+        // після коміту (його задача до коміту не бачила б прив'язки).
+        var enlist = jobs.EnlistsInCallerTransaction;
+
         RowWindowMap? created = null;
         await uow.ExecuteInTransactionAsync(async innerCt =>
         {
@@ -594,13 +601,21 @@ public sealed class CreateRowWindowMapHandler(
                 oldJson: null, newJson: IntegrationConfigAudit.Snapshot(RowWindowMapSupport.ToDto(created, columns)),
                 reason: IntegrationConfigAudit.Reason("integrationAudit.rowWindowCreated", ("column", target.Code)),
                 innerCt).ConfigureAwait(false);
+
+            if (enlist)
+            {
+                await RowWindowMapSupport.EnqueueFetchAsync(store, jobs, created, innerCt).ConfigureAwait(false);
+            }
         }, ct).ConfigureAwait(false);
 
         // Знімок колонок вікна живе в пам'яті до 60 с: без скидання правка Початку/Кінця нової прив'язки не
         // ставила б підтягування (IRowWindowTrigger питає індекс, а не базу).
         columnIndex.Invalidate();
 
-        await RowWindowMapSupport.EnqueueFetchAsync(store, jobs, created!, ct).ConfigureAwait(false);
+        if (!enlist)
+        {
+            await RowWindowMapSupport.EnqueueFetchAsync(store, jobs, created!, ct).ConfigureAwait(false);
+        }
 
         return RowWindowMapSupport.ToDto(created!, columns);
     }
@@ -692,6 +707,13 @@ public sealed class UpdateRowWindowMapHandler(
         // ставиться (EnqueueFetchAsync), її поставить відновлення — і NeedsFetch(current: null) перечитає рядок.
         var refolded = RowWindowMapSupport.Refolded(foldBefore, map);
 
+        // ⛔ V6-02 (MI-02 (в)): знято чинність (нижче) і поставлено перечитування мусять бути ОДНІЄЮ дією. Доти
+        // чинність знімала транзакція, а перечитування ставилося після коміту: зупинка процесу чи збій черги в цьому
+        // вікні лишали вікна без чинного числа, а UI вже показував нову конфігурацію. Черга в базі - постановка ВСЕРЕДИНІ
+        // транзакції, останнім оператором; Quartz у пам'яті - після коміту (до коміту його задача прочитала б
+        // стару чинність).
+        var enlist = jobs.EnlistsInCallerTransaction;
+
         await uow.ExecuteInTransactionAsync(async innerCt =>
         {
             await store.SaveAsync(innerCt).ConfigureAwait(false);
@@ -709,6 +731,11 @@ public sealed class UpdateRowWindowMapHandler(
                 audit, clock, currentUser, IntegrationConfigAudit.RowWindowMapType, map.Id, AuditOperation,
                 old, IntegrationConfigAudit.Snapshot(RowWindowMapSupport.ToDto(map, columns)),
                 IntegrationConfigAudit.Reason("integrationAudit.rowWindowChanged", ("id", map.Id)), innerCt).ConfigureAwait(false);
+
+            if (enlist)
+            {
+                await RowWindowMapSupport.EnqueueFetchAsync(store, jobs, map, innerCt).ConfigureAwait(false);
+            }
         }, ct).ConfigureAwait(false);
 
         // Колонки Початку/Кінця/селектора могли змінитися, а активність — вимкнутися: скидаємо знімок індексу.
@@ -717,7 +744,10 @@ public sealed class UpdateRowWindowMapHandler(
 
         // ⛔ Аудит I1-02: нова конфігурація (джерела, згортка, одиниця) чи відновлення з паузи — рядки
         // відкритих періодів перечитуються; що саме, вирішує NeedsFetch за провенансом.
-        await RowWindowMapSupport.EnqueueFetchAsync(store, jobs, map, ct).ConfigureAwait(false);
+        if (!enlist)
+        {
+            await RowWindowMapSupport.EnqueueFetchAsync(store, jobs, map, ct).ConfigureAwait(false);
+        }
 
         return RowWindowMapSupport.ToDto(map, columns);
     }
