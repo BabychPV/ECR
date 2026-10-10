@@ -86,6 +86,23 @@ public sealed class AuditWriter(EcrDbContext db, StaleCountsEpoch? staleEpoch = 
     /// <summary>Ім'я табличного типу журналу комірок.</summary>
     private const string CellChangeTvpTypeName = "aud.CellChangeTvp";
 
+    /// <summary>Скільки записів журналу комірок вміщає один <c>INSERT</c> (P1-02).</summary>
+    /// <remarks>
+    /// ⛔ P1-02. Раніше весь батч — до 50 000 комірок — писався ОДНИМ <c>INSERT … FROM @changes</c>. Оператор, що
+    /// бере щонайменше 5 000 блокувань на одну таблицю чи індекс, ескалує їх до блокування таблиці; для
+    /// <c>aud.CellChange</c> (на ній ще й три індекси) це означало, що один великий PATCH на час транзакції
+    /// зупиняв запис аудиту — отже, і PATCH — усіх інших редакторів. Поріг рахується на оператор, тож батч
+    /// ріжеться на оператори по 2 000 рядків.
+    ///
+    /// ⚠ Журнал лишається в ТІЙ САМІЙ транзакції, що й дані (<see cref="CreateCommand"/>), оператори йдуть
+    /// послідовно в порядку батча — <c>Id</c> зростають у тому самому порядку, що й раніше. Помилка будь-якого
+    /// відкочує все разом із даними. Звичайний PATCH — як і раніше один оператор.
+    /// </remarks>
+    internal const int DefaultInsertChunkSize = 2_000;
+
+    /// <summary>Розмір порції <c>INSERT</c>; тести підміняють його, щоб довести дефект на старій поведінці.</summary>
+    internal int InsertChunkSize { get; init; } = DefaultInsertChunkSize;
+
     /// <summary>
     /// Форма <c>aud.CellChangeTvp</c> — колонка в колонку зі скриптом
     /// <c>15-cell-tvp.sql</c>.
@@ -163,22 +180,37 @@ public sealed class AuditWriter(EcrDbContext db, StaleCountsEpoch? staleEpoch = 
             EnsureFits(nameof(CellChangeRecord.CorrelationId), change.CorrelationId, CorrelationIdLength);
         }
 
-        await using var command = CreateCommand();
+        // ⛔ P1-02: порції по `InsertChunkSize` — див. `DefaultInsertChunkSize`; до порогу — один оператор.
+        // ⚠ Без ambient-транзакції батч, що ріжеться, пише в СВОЇЙ: один оператор був атомарним сам по собі, кілька —
+        // ні, і журнал, у якому є лише частина батча, доказом не є.
+        await using var ownTransaction = changes.Count > InsertChunkSize && db.Database.CurrentTransaction is null
+            ? await db.Database.BeginTransactionAsync(ct).ConfigureAwait(false)
+            : null;
 
-        var rows = command.Parameters.Add("@changes", SqlDbType.Structured);
-        rows.TypeName = CellChangeTvpTypeName;
-        rows.Value = ToRecords(changes);
+        for (var offset = 0; offset < changes.Count; offset += InsertChunkSize)
+        {
+            await using var command = CreateCommand();
 
-        command.CommandText = """
-            INSERT INTO aud.CellChange
-                (ChangedAt, PeriodKey, DocumentId, TableRowId, RowKey, ColumnDefId,
-                 OldValue, NewValue, ChangedByUserId, Origin, IsLateEdit, CorrelationId, IsOutOfWindow)
-            SELECT ChangedAt, PeriodKey, DocumentId, TableRowId, RowKey, ColumnDefId,
-                   OldValue, NewValue, ChangedByUserId, Origin, IsLateEdit, CorrelationId, IsOutOfWindow
-            FROM @changes;
-            """;
+            var rows = command.Parameters.Add("@changes", SqlDbType.Structured);
+            rows.TypeName = CellChangeTvpTypeName;
+            rows.Value = ToRecords(changes, offset, Math.Min(InsertChunkSize, changes.Count - offset));
 
-        await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            command.CommandText = """
+                INSERT INTO aud.CellChange
+                    (ChangedAt, PeriodKey, DocumentId, TableRowId, RowKey, ColumnDefId,
+                     OldValue, NewValue, ChangedByUserId, Origin, IsLateEdit, CorrelationId, IsOutOfWindow)
+                SELECT ChangedAt, PeriodKey, DocumentId, TableRowId, RowKey, ColumnDefId,
+                       OldValue, NewValue, ChangedByUserId, Origin, IsLateEdit, CorrelationId, IsOutOfWindow
+                FROM @changes;
+                """;
+
+            await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        }
+
+        if (ownTransaction is not null)
+        {
+            await ownTransaction.CommitAsync(ct).ConfigureAwait(false);
+        }
 
         // Правка комірки змінює "застарілість результатів": кеш лічильників скидається ПІСЛЯ коміту транзакції
         // (поза транзакцією - одразу), O(1), без звернень до БД.
@@ -188,6 +220,8 @@ public sealed class AuditWriter(EcrDbContext db, StaleCountsEpoch? staleEpoch = 
 
     /// <summary>Перекладає журнал у рядки табличного параметра.</summary>
     /// <param name="changes">Записи журналу; порожнім не буває.</param>
+    /// <param name="offset">Номер першого запису порції.</param>
+    /// <param name="count">Скільки записів у порції.</param>
     /// <returns>Лінива послідовність рядків <c>aud.CellChangeTvp</c>.</returns>
     /// <remarks>
     /// ⚠ Один <see cref="SqlDataRecord"/> на всю послідовність — документована
@@ -198,12 +232,13 @@ public sealed class AuditWriter(EcrDbContext db, StaleCountsEpoch? staleEpoch = 
     /// рядок, який стверджує чужу зміну — найдорожчий різновид неправди, бо
     /// журнал нічим не спростуєш.
     /// </remarks>
-    private static IEnumerable<SqlDataRecord> ToRecords(IReadOnlyList<CellChangeRecord> changes)
+    private static IEnumerable<SqlDataRecord> ToRecords(IReadOnlyList<CellChangeRecord> changes, int offset, int count)
     {
         var row = new SqlDataRecord(CellChangeTvpShape);
 
-        foreach (var c in changes)
+        for (var index = offset; index < offset + count; index++)
         {
+            var c = changes[index];
             row.SetDateTime(0, c.ChangedAt);
             row.SetInt32(1, c.Address.PeriodKey.Value);
             row.SetInt64(2, c.DocumentId);

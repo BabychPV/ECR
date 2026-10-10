@@ -46,6 +46,31 @@ public sealed class NormalizedCellStore(EcrDbContext db, ArchiveAwareCellReader?
     private const int ParameterChunkSize = 100;
 
     /// <summary>
+    /// Скільки комірок вміщає один <c>MERGE doc.CellValue</c> (P1-02).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ P1-02. Раніше весь батч — до <c>PatchCellsRequest.MaxCells</c> = 50 000 комірок — їхав ОДНИМ
+    /// <c>MERGE … WITH (HOLDLOCK)</c>. Один оператор, що бере щонайменше 5 000 блокувань на одну таблицю чи
+    /// індекс, ескалує їх до блокування всієї таблиці (<c>doc.CellValue</c> без <c>LOCK_ESCALATION</c> — це
+    /// ТАБЛИЦЯ): тоді всі інші редактори всіх документів і періодів чекали кінця транзакції (до 15 с, далі
+    /// <c>409 ECR-DOC-4091</c>). Поріг рахується НА ОПЕРАТОР, тому батч ріжеться на оператори, кожен із яких
+    /// лишається далеко під порогом (2 000 рядків × до двох блокувань діапазону/ключа на рядок ≤ 4 000).
+    ///
+    /// ⚠ Атомарність не змінюється: усі оператори йдуть у ТІЙ САМІЙ транзакції (ambient — її комітить
+    /// викликач; власна — коміт після останнього), помилка будь-якого відкочує все. Текст запиту від розміру
+    /// не залежить, тож «один план назавжди» (<c>WR-02</c>) лишається. Звичайний PATCH (до сотень комірок)
+    /// — як і раніше один оператор.
+    ///
+    /// ⚠ Дубль адреси в батчі, що ріжеться, відхиляється ДО запису (<see cref="EnsureUniqueAddresses"/>):
+    /// в одному <c>MERGE</c> такий дубль падав (8672 / порушення ключа), а розрізаний на два оператори —
+    /// мовчки став би оновленням у другому.
+    /// </remarks>
+    internal const int DefaultUpsertChunkSize = 2_000;
+
+    /// <summary>Розмір порції <c>MERGE</c>; тести підміняють його, щоб довести дефект на старій поведінці.</summary>
+    internal int UpsertChunkSize { get; init; } = DefaultUpsertChunkSize;
+
+    /// <summary>
     /// Форма <c>doc.CellValueTvp</c> — колонка в колонку зі скриптом
     /// <c>15-cell-tvp.sql</c>.
     /// </summary>
@@ -636,7 +661,7 @@ public sealed class NormalizedCellStore(EcrDbContext db, ArchiveAwareCellReader?
                 {
                     await ClaimRowsAsync(connection, joined, sets, versions, ct).ConfigureAwait(false);
                     await DeleteAsync(connection, joined, deletes, ct).ConfigureAwait(false);
-                    upsertRows = await UpsertAsync(connection, joined, upserts, ct).ConfigureAwait(false);
+                    upsertRows = await UpsertAsync(connection, joined, upserts, UpsertChunkSize, ct).ConfigureAwait(false);
                     await TouchRowsAsync(connection, joined, sets, versions, ct).ConfigureAwait(false);
                 },
                 ct).ConfigureAwait(false);
@@ -651,7 +676,7 @@ public sealed class NormalizedCellStore(EcrDbContext db, ArchiveAwareCellReader?
 
         await ClaimRowsAsync(connection, tx, sets, versions, ct).ConfigureAwait(false);
         await DeleteAsync(connection, tx, deletes, ct).ConfigureAwait(false);
-        LastUpsertRowsAffected = await UpsertAsync(connection, tx, upserts, ct).ConfigureAwait(false);
+        LastUpsertRowsAffected = await UpsertAsync(connection, tx, upserts, UpsertChunkSize, ct).ConfigureAwait(false);
         await TouchRowsAsync(connection, tx, sets, versions, ct).ConfigureAwait(false);
 
         await tx.CommitAsync(ct).ConfigureAwait(false);
@@ -970,19 +995,66 @@ public sealed class NormalizedCellStore(EcrDbContext db, ArchiveAwareCellReader?
     /// втратити вставки.
     /// </remarks>
     private static async Task<int> UpsertAsync(
-        SqlConnection connection, SqlTransaction tx, IReadOnlyList<CellRecord> upserts, CancellationToken ct)
+        SqlConnection connection,
+        SqlTransaction tx,
+        IReadOnlyList<CellRecord> upserts,
+        int chunkSize,
+        CancellationToken ct)
     {
         if (upserts.Count == 0)
         {
             return 0;
         }
 
+        // ⛔ P1-02: див. `DefaultUpsertChunkSize`. Одна порція — рівно колишня поведінка (один оператор).
+        if (upserts.Count <= chunkSize)
+        {
+            return await UpsertChunkAsync(connection, tx, upserts, 0, upserts.Count, ct).ConfigureAwait(false);
+        }
+
+        EnsureUniqueAddresses(upserts);
+
+        var affected = 0;
+        for (var offset = 0; offset < upserts.Count; offset += chunkSize)
+        {
+            affected += await UpsertChunkAsync(
+                connection, tx, upserts, offset, Math.Min(chunkSize, upserts.Count - offset), ct).ConfigureAwait(false);
+        }
+
+        return affected;
+    }
+
+    /// <summary>Кидає, якщо одна адреса комірки трапляється в батчі двічі (батч, що ріжеться на оператори).</summary>
+    /// <param name="upserts">Комірки батчу.</param>
+    /// <exception cref="ArgumentException">Адреса повторюється.</exception>
+    private static void EnsureUniqueAddresses(IReadOnlyList<CellRecord> upserts)
+    {
+        var seen = new HashSet<CellAddress>(upserts.Count);
+        foreach (var record in upserts)
+        {
+            if (!seen.Add(record.Address))
+            {
+                throw new ArgumentException(
+                    $"Адреса комірки повторюється в пакеті змін: {record.Address}.", nameof(upserts));
+            }
+        }
+    }
+
+    /// <summary>Один <c>MERGE</c> над порцією <paramref name="count"/> комірок від <paramref name="offset"/>.</summary>
+    private static async Task<int> UpsertChunkAsync(
+        SqlConnection connection,
+        SqlTransaction tx,
+        IReadOnlyList<CellRecord> upserts,
+        int offset,
+        int count,
+        CancellationToken ct)
+    {
         await using var command = connection.CreateCommand();
         command.Transaction = tx;
 
         var cells = command.Parameters.Add("@cells", SqlDbType.Structured);
         cells.TypeName = CellTvpTypeName;
-        cells.Value = ToCellRecords(upserts);
+        cells.Value = ToCellRecords(upserts, offset, count);
 
         command.CommandText = $"""
                 MERGE doc.CellValue WITH (HOLDLOCK) AS target
@@ -1027,6 +1099,8 @@ public sealed class NormalizedCellStore(EcrDbContext db, ArchiveAwareCellReader?
     /// Перекладає батч у рядки табличного параметра.
     /// </summary>
     /// <param name="upserts">Комірки батчу; порожнім не буває.</param>
+    /// <param name="offset">Номер першої комірки порції.</param>
+    /// <param name="count">Скільки комірок у порції.</param>
     /// <returns>Лінива послідовність рядків <c>doc.CellValueTvp</c>.</returns>
     /// <remarks>
     /// ⚠ Один <see cref="SqlDataRecord"/> на всю послідовність — це
@@ -1045,12 +1119,13 @@ public sealed class NormalizedCellStore(EcrDbContext db, ArchiveAwareCellReader?
     /// кидати в середині: виняток застане команду напіввідправленою.
     /// Обчислень тут і немає — лише перекладання полів.
     /// </remarks>
-    private static IEnumerable<SqlDataRecord> ToCellRecords(IReadOnlyList<CellRecord> upserts)
+    private static IEnumerable<SqlDataRecord> ToCellRecords(IReadOnlyList<CellRecord> upserts, int offset, int count)
     {
         var row = new SqlDataRecord(CellTvpShape);
 
-        foreach (var record in upserts)
+        for (var index = offset; index < offset + count; index++)
         {
+            var record = upserts[index];
             var value = record.Value;
 
             row.SetInt32(0, record.Address.PeriodKey.Value);
