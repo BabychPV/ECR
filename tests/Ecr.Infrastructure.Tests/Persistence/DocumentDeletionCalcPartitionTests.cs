@@ -1,5 +1,7 @@
 using System.Xml.Linq;
 using Ecr.Domain.Entities.Calculations;
+using Ecr.Domain.Entities.Documents;
+using Ecr.Domain.ValueObjects;
 using Ecr.Infrastructure.Persistence;
 using Ecr.TestKit;
 using Microsoft.Data.SqlClient;
@@ -105,6 +107,58 @@ public sealed class DocumentDeletionCalcPartitionTests(SqlServerFixture sql)
         }
     }
 
+    /// <summary>
+    /// X1-03 (аудит R11): прогони САМЕ цього документа прибираються з рівністю за <c>PeriodKey</c> — по
+    /// DELETE на ключ, а не <c>PeriodKey IN (…)</c>: список параметрів оптимізатор згортає в залишковий
+    /// OR-предикат і вільний обрати скан без відсічки партицій <c>calc.CalculationResult</c>.
+    /// </summary>
+    /// <remarks>Мутація: повернути `keys.Contains(r.PeriodKey)` — у тексті DELETE зʼявляється `IN (`, червоніє.</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "X1-03")]
+    public async Task Прогони_документа_прибираються_рівністю_за_ключем_періоду_а_не_IN_списком()
+    {
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var doc = await builder.BuildAsync(columnCount: 1, rowCount: 1);
+
+        long runId;
+        await using (var db = builder.CreateContext())
+        {
+            // Другий період проєкту й РІЧНИЙ прогін документа: набір ключів — щонайменше два, тож
+            // `Contains` по списку не вироджується в одиночну рівність.
+            db.Periods.Add(new Period(
+                doc.ProjectId, new PeriodKey(doc.PeriodKey.Value + 1), 2, new DateOnly(2026, 2, 1), new DateOnly(2026, 2, 28)));
+
+            // Прогін САМЕ документа: його кроки/входи/результати йдуть гілкою «прогони документа».
+            var run = new CalculationRun(doc.ProjectId, null, null, At, doc.DocumentId);
+            db.CalculationRuns.Add(run);
+            await db.SaveChangesAsync();
+            runId = run.Id;
+        }
+
+        var recorder = new RunScopedCalcDeleteRecorder();
+        await using (var db = new EcrDbContext(new DbContextOptionsBuilder<EcrDbContext>()
+            .UseSqlServer(sql.ConnectionString)
+            .AddInterceptors(recorder)
+            .Options))
+        {
+            await new DocumentDeletionStore(db).DeleteAsync(doc.DocumentId, CancellationToken.None);
+        }
+
+        await using (var check = builder.CreateContext())
+        {
+            Assert.False(await check.CalculationRuns.AnyAsync(r => r.Id == runId));
+        }
+
+        foreach (var table in new[] { "[CalculationStep]", "[CalculationInput]", "[CalculationResult]" })
+        {
+            var deletes = recorder.Seen.Where(t => t.Contains(table, StringComparison.Ordinal)).ToList();
+            Assert.NotEmpty(deletes);
+            Assert.All(deletes, text => Assert.DoesNotMatch(@"\[PeriodKey\]\s+IN\s*\(", text));
+        }
+    }
+
     /// <summary>Повторює DELETE під <c>STATISTICS XML</c> з відкатом: партиції, яких він торкнувся.</summary>
     private async Task<List<int>> PartitionsAccessedAsync(
         string table, (string Text, List<(string Name, System.Data.SqlDbType Type, object Value)> Parameters) delete)
@@ -145,6 +199,29 @@ public sealed class DocumentDeletionCalcPartitionTests(SqlServerFixture sql)
                          && op.Descendants(Showplan + "Object").Any(o => (string?)o.Attribute("Table") == table))
             .Select(op => (int)op.Element(Showplan + "RunTimePartitionSummary")!.Element(Showplan + "PartitionsAccessed")!.Attribute("PartitionCount")!)
             .ToList();
+    }
+}
+
+/// <summary>Запамʼятовує DELETE кроків/входів/результатів за прогоном (<c>CalculationRunId</c>) — текст команди.</summary>
+internal sealed class RunScopedCalcDeleteRecorder : DbCommandInterceptor
+{
+    public List<string> Seen { get; } = [];
+
+    public override ValueTask<InterceptionResult<int>> NonQueryExecutingAsync(
+        System.Data.Common.DbCommand command,
+        CommandEventData eventData,
+        InterceptionResult<int> result,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(command);
+
+        if (command.CommandText.Contains("DELETE", StringComparison.Ordinal)
+            && command.CommandText.Contains("[CalculationRunId]", StringComparison.Ordinal))
+        {
+            Seen.Add(command.CommandText);
+        }
+
+        return base.NonQueryExecutingAsync(command, eventData, result, cancellationToken);
     }
 }
 

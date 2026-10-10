@@ -4,6 +4,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using Ecr.Application.Documents;
 using Ecr.Domain.Entities.Documents;
+using Ecr.Domain.Entities.Reporting;
 using Ecr.Domain.Entities.Security;
 using Ecr.Domain.Entities.Workflow;
 using Ecr.Domain.Enums;
@@ -233,6 +234,68 @@ public sealed class DocumentDeleteTests(SqlServerFixture sql)
         var id = s.Document.DocumentId;
         Assert.True(await db.Documents.AnyAsync(d => d.Id == id).ConfigureAwait(true), "Документ видалено, хоча запис журналу не вдався.");
         Assert.Equal(2, await db.CellValues.CountAsync(c => s.Document.RowIds.Contains(c.TableRowId)).ConfigureAwait(true));
+    }
+
+    /// <summary>
+    /// X1-02 (аудит R11): видалення чернетки перераховує статус поточних зрізів проєкту. Зріз був
+    /// <c>Draft</c> лише через цю чернетку; решта документів затверджена — після видалення зріз
+    /// <c>Approved</c>. Доти статус лишався старим, і регуляторна вʼюха зрізу не бачила.
+    /// </summary>
+    /// <remarks>Мутація: прибрати виклик `RefreshProjectAsync` — статус `Draft`, червоніє.</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "X1-02")]
+    public async Task Видалення_чернетки_перераховує_статус_поточного_зрізу_проєкту()
+    {
+        var s = await ArrangeAsync(DeleteDocumentHandler.Permission, GrantLevel.Write).ConfigureAwait(true);
+
+        long snapshotId;
+        await using (var arrange = new TestDocumentBuilder(sql.ConnectionString).CreateContext())
+        {
+            var now = new DateTime(2026, 1, 20, 9, 0, 0, DateTimeKind.Utc);
+
+            // Другий документ проєкту: аркуш затверджено. Перший (s.Document) — чернетка, що й тримає зріз у Draft.
+            var other = new Document(s.Document.ProjectId, $"X102-{Guid.NewGuid():N}"[..16], s.UserId, now);
+            arrange.Documents.Add(other);
+            await arrange.SaveChangesAsync().ConfigureAwait(true);
+
+            arrange.DocumentSheets.Add(new DocumentSheet(other.Id, s.Document.SheetDefId));
+            var state = new ApprovalState(other.Id, s.Document.SheetDefId, s.Document.PeriodKey.Value);
+            state.Submit(1, now);
+            state.Approve(1, now);
+            arrange.ApprovalStates.Add(state);
+
+            var tag = Guid.NewGuid().ToString("N")[..8];
+            var definition = new ReportDef(
+                EcrCode.Create($"RPT{tag}"),
+                new LocalizedText(new Dictionary<string, string> { ["en"] = "X1-02" }),
+                isRegulatory: true);
+            arrange.ReportDefs.Add(definition);
+            await arrange.SaveChangesAsync().ConfigureAwait(true);
+
+            var version = new ReportVersion(definition.Id, "1.0", "[]", "{}", now);
+            arrange.ReportVersions.Add(version);
+            await arrange.SaveChangesAsync().ConfigureAwait(true);
+
+            var snapshot = new ReportSnapshot(
+                version.Id, s.Document.ProjectId, s.Document.PeriodKey.Value, SnapshotStatus.Draft, now, builtByUserId: 1);
+            snapshot.MakeCurrent();
+            arrange.ReportSnapshots.Add(snapshot);
+            await arrange.SaveChangesAsync().ConfigureAwait(true);
+            snapshotId = snapshot.Id;
+        }
+
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
+
+        var response = await DeleteAsync(client, s.Document.DocumentId).ConfigureAwait(true);
+        Assert.True(response.StatusCode == HttpStatusCode.NoContent, $"{response.StatusCode}: {app.ErrorsText}");
+
+        await using var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext();
+        var status = await db.ReportSnapshots.AsNoTracking()
+            .Where(r => r.Id == snapshotId).Select(r => r.Status).SingleAsync().ConfigureAwait(true);
+        Assert.Equal(SnapshotStatus.Approved, status);
     }
 
     private static async Task<HttpClient> SignedInAsync(

@@ -48,6 +48,55 @@ public sealed class ReportSnapshotSync(IReportSnapshotBuilder snapshots, IDocume
     }
 
     /// <summary>
+    /// Перераховує статус ПОТОЧНИХ неподаних зрізів проєкту за всі періоди — після зміни СКЛАДУ даних
+    /// (видалення документа), а не стану одного аркуша.
+    /// </summary>
+    /// <param name="projectId">Проєкт.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⛔ X1-02 (аудит R11). Статус зрізу успадковується від даних (D-65): «усе затверджено» рахується по
+    /// СКЛАДУ документів проєкту. Видалення документа-чернетки (єдиного неподаного) прибирало з
+    /// порахунку аркуші, через які зріз був <c>Draft</c>, а статус лишався старим: решта документів
+    /// затверджені, а регуляторна вʼюха не бачить зрізу. Аркуш документа без рядка стану рахується
+    /// <c>Draft</c> у КОЖНОМУ періоді, тож зачеплені всі слоти проєкту, а не лише періоди, де в документа
+    /// були стани.
+    /// <para>
+    /// ⚠ Порядок як у <see cref="RefreshAsync"/>: замок слоту — ДО перерахунку (побудова бере той самий
+    /// замок), слоти — за зростанням періоду (річний, <c>NULL</c>, — останнім), перелік зрізів
+    /// перечитується ПІСЛЯ замків. Залишкове вікно: слот нового періоду, що зʼявився між переліком і
+    /// замками, цим викликом не береться — його зріз порахує побудова за станом, що буде видно їй.
+    /// Потребує відкритої транзакції (<see cref="IReportSnapshotBuilder.LockSlotAsync"/>).
+    /// </para>
+    /// </remarks>
+    public async Task RefreshProjectAsync(int projectId, CancellationToken ct)
+    {
+        var slots = (await snapshots.ListAsync(projectId, null, visibleProjectIds: null, ct).ConfigureAwait(false))
+            .Where(s => s.IsCurrent && s.Status != nameof(SnapshotStatus.Submitted))
+            .Select(s => s.PeriodKey)
+            .Distinct()
+            .OrderBy(k => k ?? int.MaxValue)
+            .ToList();
+
+        if (slots.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var slot in slots)
+        {
+            await snapshots.LockSlotAsync(projectId, slot, ct).ConfigureAwait(false);
+        }
+
+        var current = (await snapshots.ListAsync(projectId, null, visibleProjectIds: null, ct).ConfigureAwait(false))
+            .Where(s => s.IsCurrent && s.Status != nameof(SnapshotStatus.Submitted));
+
+        foreach (var snapshot in current)
+        {
+            await snapshots.RefreshStatusAsync(snapshot.Id, ct).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
     /// Морозить поточні зрізи, якщо звітність за період уже подано повністю.
     /// </summary>
     /// <param name="documentId">Документ, аркуш якого щойно подали.</param>
