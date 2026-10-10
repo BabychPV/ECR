@@ -4,7 +4,6 @@ using System.Xml.Linq;
 using Ecr.Application.Ports;
 using Ecr.Infrastructure.Jobs;
 using Ecr.TestKit;
-using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Xunit;
 
@@ -206,20 +205,8 @@ public sealed class DbJobQueueConcurrencyTests(SqlServerFixture sql) : DbJobQueu
         await using var host = NewHost();
         Assert.NotNull(await host.ClaimAsync());
 
-        await using var connection = new SqlConnection(Sql.ConnectionString);
-        await connection.OpenAsync();
-        await using var command = connection.CreateCommand();
-        command.CommandText = """
-            SELECT TOP (1) CONVERT(nvarchar(max), qp.query_plan)
-            FROM sys.dm_exec_query_stats AS qs
-            CROSS APPLY sys.dm_exec_sql_text(qs.sql_handle) AS st
-            CROSS APPLY sys.dm_exec_query_plan(qs.plan_handle) AS qp
-            WHERE CHARINDEX(@marker, st.text) > 0 AND st.text NOT LIKE N'%dm_exec_query_stats%'
-              AND qp.dbid = DB_ID()
-            ORDER BY qs.last_execution_time DESC;
-            """;
-        command.Parameters.AddWithValue("@marker", marker);
-        var raw = await command.ExecuteScalarAsync() as string;
+        // ⛔ Лише через PlanCache: прямий APPLY над усім кешем відкриває чужі бази (Msg 924, Z8-01).
+        var raw = await PlanCache.LatestPlanAsync(Sql.ConnectionString, marker);
         Assert.False(raw is null, $"плану з маркером {marker} немає в кеші: запит не кешується");
 
         XNamespace ns = "http://schemas.microsoft.com/sqlserver/2004/07/showplan";

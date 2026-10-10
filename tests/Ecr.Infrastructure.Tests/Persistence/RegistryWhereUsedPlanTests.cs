@@ -218,39 +218,18 @@ public sealed class RegistryWhereUsedPlanTests(SqlServerFixture sql)
     }
 
     /// <summary>Імена індексів, якими план запиту з міткою R-05 читає <c>doc.CellValue</c>.</summary>
+    /// <remarks>
+    /// ⚠ Мітка однакова в базах усіх worktree на тому самому сервері, тому
+    /// плани беруться лише своєї бази, і лише через <see cref="PlanCache"/>:
+    /// прямий <c>APPLY</c> над усім кешем відкриває чужі бази (Msg 924, <c>Z8-01</c>).
+    /// </remarks>
     private async Task<IReadOnlyList<string>> CellValueIndexesInCachedPlanAsync()
     {
-        await using var connection = new SqlConnection(sql.ConnectionString);
-        await connection.OpenAsync().ConfigureAwait(false);
-
-        await using var command = connection.CreateCommand();
-
-        // ⚠ dbid — з атрибутів плану: для параметризованих запитів
-        // dm_exec_sql_text.dbid порожній, а мітка однакова в базах усіх
-        // worktree на тому самому сервері.
-        command.CommandText = """
-            SELECT CAST(qp.query_plan AS nvarchar(max))
-            FROM sys.dm_exec_query_stats AS qs
-            CROSS APPLY sys.dm_exec_sql_text(qs.sql_handle) AS st
-            CROSS APPLY sys.dm_exec_query_plan(qs.plan_handle) AS qp
-            CROSS APPLY sys.dm_exec_plan_attributes(qs.plan_handle) AS pa
-            WHERE pa.attribute = N'dbid' AND CAST(pa.value AS int) = DB_ID()
-              AND st.text LIKE N'%' + @tag + N'%'
-              AND st.text NOT LIKE N'%dm_exec_query_stats%';
-            """;
-        command.Parameters.AddWithValue("@tag", RegistryStore.WhereUsedCellsTag);
-
         var indexes = new SortedSet<string>(StringComparer.Ordinal);
 
-        await using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
-        while (await reader.ReadAsync().ConfigureAwait(false))
+        foreach (var text in await PlanCache.PlansAsync(sql.ConnectionString, RegistryStore.WhereUsedCellsTag).ConfigureAwait(false))
         {
-            if (reader.IsDBNull(0))
-            {
-                continue;
-            }
-
-            var plan = XDocument.Parse(reader.GetString(0));
+            var plan = XDocument.Parse(text);
             foreach (var target in plan.Descendants(XName.Get("Object", ShowPlanNs)))
             {
                 if ((string?)target.Attribute("Table") == "[CellValue]")

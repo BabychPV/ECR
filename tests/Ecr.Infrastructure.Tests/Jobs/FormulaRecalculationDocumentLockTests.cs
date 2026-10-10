@@ -282,6 +282,7 @@ public sealed class FormulaRecalculationDocumentLockTests(SqlServerFixture sql)
             SELECT COUNT(*) FROM sys.dm_tran_locks
             WHERE resource_type = 'APPLICATION'
               AND request_status = 'GRANT'
+              AND resource_database_id = DB_ID()
               AND resource_description LIKE '%' + @resource + '%'
             """;
         command.Parameters.AddWithValue("@resource", FormattableString.Invariant($"ecr:recalc:doc:{documentId}"));
