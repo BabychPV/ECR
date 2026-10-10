@@ -184,12 +184,15 @@ public sealed class PatchCellsLookupValidityTests
             Arg.Any<CancellationToken>());
     }
 
-    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)] [Trait("Finding", "C7")]
-    public async Task Запис_чужого_довідника_відхиляється()
+    // ⛔ AN-93 (аудит R11): запис чужого довідника — та сама відповідь, що й неіснуючий (`missingEntry`), а не окрема
+    // `foreignRegistry`: різниця казала б, чи існує запис у довіднику, якого читач не бачить (оракул існування).
+    // Мутація: повернути окремий арм `foreignRegistry` у `CheckLookupStandings` — ключ відмови інший, червоніє.
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)] [Trait("Finding", "AN-93")]
+    public async Task Запис_чужого_довідника_відхиляється_так_само_як_неіснуючий()
     {
         Entry(registryDefId: OtherRegistryDefId);
 
-        await AssertRejected("err.ECR-CELL-4223.foreignRegistry");
+        await AssertRejected("err.ECR-CELL-4223.missingEntry");
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)] [Trait("Finding", "C7")]
