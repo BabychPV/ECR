@@ -52,7 +52,7 @@ import {
   rowKeyOfCellKey,
 } from './permissions';
 import { markConfirmed } from './confirmedEdits';
-import { markSliceHidden } from './sliceCache';
+import { markSliceHidden, takeMissedInvalidation } from './sliceCache';
 import { UndoStack, type CellEdit } from './undo';
 import {
   buildRequest,
@@ -372,7 +372,11 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
     const shownNow = wasHidden.current && !hidden;
     wasHidden.current = hidden;
     if (!shownNow) return;
-    if (queryClient.getQueryState(['table-slice', tableInstanceId, periodKey])?.isInvalidated === true) {
+    // ⛔ X2-05: `isInvalidated` лишає й кожне власне збереження (`applyPatchLocally`), тож лише за ним
+    // повернення до сітки коштувало б `GET` зрізу щоразу. Перечитуємо, якщо інвалідацію ПРОПУЩЕНО,
+    // доки сітку було приховано (`invalidateSlices`).
+    const missed = takeMissedInvalidation(tableInstanceId, periodKey);
+    if (missed && queryClient.getQueryState(['table-slice', tableInstanceId, periodKey])?.isInvalidated === true) {
       void refetchSlice();
     }
   }, [hidden, queryClient, tableInstanceId, periodKey, refetchSlice]);
