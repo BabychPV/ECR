@@ -132,6 +132,46 @@ public sealed class CellValueReaderTests
         Assert.Equal("ECR-CELL-0422", error.ErrorCode);
     }
 
+    [Theory]
+    [InlineData("01.04.2024 9:05", 9, 5)]
+    [InlineData("1.4.2024 10:30", 10, 30)]
+    [InlineData("1.4.2024 10:30:00", 10, 30)]
+    [InlineData("01.04.2024 10:30", 10, 30)]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Finding", "Z3-01")]
+    public void Дата_час_з_днем_спереду_не_переставляє_день_і_місяць(string wire, int hour, int minute)
+    {
+        // ⛔ Z3-01 (аудит 8). Дата-час Excel у регіонах ru/kk — `01.04.2024 9:05`
+        // (година без нуля). Точний `dd.MM.yyyy HH:mm` вимагає двох цифр години, тож
+        // рядок падав у фолбек Invariant (M-d) і ставав 4 СІЧНЯ, а `01.04.2024 10:30`
+        // поруч — 1 квітня. Останній рядок — контрольний: його читав і старий розбір.
+        // Мутація: прибрати `d.M.yyyy H:mm[:ss]` з `ExactFormats` — перші три стають 4 січня
+        // (або відмовою, якщо лишити сторожа фолбеку).
+        var data = CellValueReader.Read(FromWire(wire), Column(CellDataType.Date));
+
+        Assert.NotNull(data);
+        Assert.Equal(new DateTime(2024, 4, 1, hour, minute, 0, DateTimeKind.Utc), data.ValueDate);
+    }
+
+    [Theory]
+    [InlineData("01.04.24")]
+    [InlineData("01-04-2024")]
+    [InlineData("1-4-2024")]
+    [InlineData("1.5")]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Finding", "Z3-01")]
+    public void Числова_дата_з_днем_спереду_поза_точними_форматами_відхиляється_а_не_читається_M_d(string wire)
+    {
+        // ⛔ Z3-01 (аудит 8). Усе це фолбек Invariant тихо читав як M-d: `01.04.24`,
+        // `01-04-2024`, `1-4-2024` — 4 січня 2024, а `1.5` — 5 січня поточного року.
+        // Мутація: прибрати перевірку 1–2 цифр і роздільника `.`/`-` у `ClosedToFallback` —
+        // значення лягають у ValueDate переставленими, і `Throws` падає.
+        var error = Assert.Throws<BusinessRuleException>(
+            () => CellValueReader.Read(FromWire(wire), Column(CellDataType.Date)));
+
+        Assert.Equal("ECR-CELL-0422", error.ErrorCode);
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
     public void Довідникова_комірка_тримає_ідентифікатор_а_не_число()
