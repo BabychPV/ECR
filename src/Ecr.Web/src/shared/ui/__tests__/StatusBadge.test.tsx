@@ -181,6 +181,7 @@ const expected: readonly (readonly [StatusKind, string, StatusTone])[] = [
   ['severity', 'Warning', 'warning'],
   ['severity', 'Error', 'danger'],
 
+  ['collectionRun', 'Running', 'info'],
   ['collectionRun', 'Succeeded', 'neutral'],
   ['collectionRun', 'Degraded', 'warning'],
   ['collectionRun', 'Failed', 'danger'],

@@ -725,7 +725,7 @@ public sealed partial class EndpointCoverageTests
         "project" => Status(kind, "Draft", "Active", "Archived"),
         "health" => Status(kind, "Healthy", "Degraded", "Unhealthy"),
         "severity" => Status(kind, "Info", "Warning", "Error"),
-        "collectionRun" => Status(kind, "Succeeded", "Degraded", "Failed"),
+        "collectionRun" => Status(kind, "Running", "Succeeded", "Degraded", "Failed"),
         "coverage" => Status(
             kind, "SkippedPointCeiling", "SkippedPeriodClosed", "ConflictKeptManual",
             "SkippedWriteConflict", "SkippedNeedsConfirmation",

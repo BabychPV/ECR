@@ -7492,6 +7492,9 @@ USING (VALUES
     ,(N'err.ECR-RPT-0409.periodSubmittedRebuild', N'en', N'Snapshot {snapshotId} of this period was submitted, so a new snapshot is not built. Return the submitted sheets for edits first (the sheet''s «Return for edits» action), then build again.', 1),
     (N'snapshots.buildRefusedSubmitted', N'en', N'This period''s snapshot was submitted, so a new one is not built. Return the submitted sheets for edits first (the sheet''s «Return for edits» action), then build again.', 1)
     -- COLL:r7y8-snapshot-submitted ── кінець секції ──
+    -- COLL:r7y4-run-running ── R7-Y4 / Y4-03: прогін збору, що ще триває, на /admin/sources; ru/kz — порцією COLL:r7y4-run-running у блоці I18N нижче ──
+    ,(N'status.collectionRun.Running', N'en', N'Running', 1)
+    -- COLL:r7y4-run-running ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -18562,6 +18565,17 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:r7y8-snapshot-submitted ── кінець секції ──
+
+-- COLL:r7y4-run-running ── ru/kz: R7-Y4 / Y4-03: прогін збору, що ще триває; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'status.collectionRun.Running', N'ru', N'Выполняется'),
+    (N'status.collectionRun.Running', N'kz', N'Орындалуда')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:r7y4-run-running ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t
