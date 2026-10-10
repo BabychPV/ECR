@@ -44,6 +44,7 @@ public sealed class ExcelImportWorkbookIntegrityTests
     private readonly ICellStore _cells = Substitute.For<ICellStore>();
     private readonly IMetadataCache _metadata = Substitute.For<IMetadataCache>();
     private readonly IRegistryStore _registries = Substitute.For<IRegistryStore>();
+    private readonly IPeriodStore _periods = Substitute.For<IPeriodStore>();
     private readonly TemplateVersionSnapshot _snapshot = Snapshot();
     private readonly List<CellRecord> _slice = [];
     private readonly List<Ecr.Domain.Entities.Dictionaries.RegistryEntry> _entries = [];
@@ -69,6 +70,8 @@ public sealed class ExcelImportWorkbookIntegrityTests
             .Returns(_ => (IReadOnlyList<Ecr.Domain.Entities.Dictionaries.RegistryEntry>)[.. _entries]);
 
         _metadata.GetAsync(TemplateVersionId, Arg.Any<CancellationToken>()).Returns(_snapshot);
+        _periods.FindPeriodBoundsAsync(DocumentId, PeriodKeyValue, Arg.Any<CancellationToken>())
+            .Returns(new PeriodBounds(new DateOnly(2026, 9, 1), new DateOnly(2026, 9, 30)));
 
         Number(1001, 10m);
         Number(1002, 20m);
@@ -272,6 +275,101 @@ public sealed class ExcelImportWorkbookIntegrityTests
         Assert.Equal(2, preview.Changes.Count);
     }
 
+    // ── Y5-03 ────────────────────────────────────────────────────────────────
+
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "Y5-03")]
+    [InlineData("inactive", "err.ECR-CELL-4223.importInactiveEntry")]
+    [InlineData("deleted", "err.ECR-CELL-4223.importDeletedEntry")]
+    [InlineData("expired", "err.ECR-CELL-4223.importEntryNotValidOnDate")]
+    public async Task Непридатний_запис_довідника_відхиляється_в_перегляді_а_не_на_застосуванні(
+        string state, string expectedKey)
+    {
+        var entry = Entry(5, "PERMIT_OLD");
+        switch (state)
+        {
+            case "inactive":
+                entry.Deactivate();
+                break;
+            case "deleted":
+                entry.SoftDelete();
+                break;
+            default:
+                // Строк сплив 1 вересня — на останній день періоду (30.09) запис нечинний.
+                entry.SetValidity(new DateOnly(2026, 1, 1), new DateOnly(2026, 9, 1));
+                break;
+        }
+
+        using var workbook = await ExportAsync();
+        workbook.Worksheet(SheetName).Cell(3, 3).Value = "PERMIT_OLD";
+
+        // ⛔ Мутація: прибрати відмову `unusableLookups` у `Build` — тут звичайна зміна,
+        // а застосування потім дає 4223 на всю книгу (C7, `CheckLookupStandings`).
+        var preview = await ImportAsync(workbook);
+
+        Assert.Empty(preview.Changes);
+        var rejection = Assert.Single(preview.Rejected);
+        Assert.Equal("ECR-CELL-4223", rejection.ReasonCode);
+        Assert.Equal(expectedKey, rejection.MessageKey);
+        Assert.Equal("C3", rejection.ExcelCell);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "Y5-03")]
+    public async Task Придатний_запис_довідника_дає_зміну()
+    {
+        Entry(5, "PERMIT_A");
+
+        using var workbook = await ExportAsync();
+        workbook.Worksheet(SheetName).Cell(3, 3).Value = "permit_a";
+
+        var preview = await ImportAsync(workbook);
+
+        Assert.Empty(preview.Rejected);
+        Assert.Equal(5L, Assert.Single(preview.Changes).NewValue);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "Y5-03")]
+    public async Task Цифри_замість_коду_не_стають_ідентифікатором_запису()
+    {
+        // Запис 11 є в тому самому довіднику — «11» у книзі колись тихо ставав посиланням на нього.
+        Entry(5, "PERMIT_A");
+        Entry(11, "PERMIT_B");
+
+        using var workbook = await ExportAsync();
+        workbook.Worksheet(SheetName).Cell(3, 3).Value = "11";
+
+        // ⛔ Мутація: прибрати відмову для рядка в Lookup-колонці — зміна з NewValue «11»,
+        // яку `CellValueReader.Identifier` перетворює на Id 11.
+        var preview = await ImportAsync(workbook);
+
+        Assert.Empty(preview.Changes);
+        var rejection = Assert.Single(preview.Rejected);
+        Assert.Equal(ImportMessageKeys.ExpectsIdentifier, rejection.MessageKey);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "Y5-03")]
+    public async Task Незмінене_осиротіле_посилання_не_дає_ні_зміни_ні_відмови()
+    {
+        // Запису 99 немає серед кодів довідника: експорт пише Id числом.
+        Entry(5, "PERMIT_A");
+        Permit(1001, 99);
+
+        using var workbook = await ExportAsync();
+        Assert.Equal("99", workbook.Worksheet(SheetName).Cell(3, 3).GetString());
+
+        var preview = await ImportAsync(workbook);
+
+        Assert.Empty(preview.Changes);
+        Assert.Empty(preview.Rejected);
+    }
+
     // ── Стенд ────────────────────────────────────────────────────────────────
 
     private void Number(long rowId, decimal value)
@@ -281,6 +379,19 @@ public sealed class ExcelImportWorkbookIntegrityTests
     private void Text(long rowId, string value)
         => _slice.Add(new CellRecord(
             new CellAddress(Period, rowId, TextColumnId), TableId, new CellValueData { ValueString = value }));
+
+    private void Permit(long rowId, long entryId)
+        => _slice.Add(new CellRecord(
+            new CellAddress(Period, rowId, PermitColumnId), TableId, new CellValueData { ValueRegistryEntryId = entryId }));
+
+    private Ecr.Domain.Entities.Dictionaries.RegistryEntry Entry(long id, string code)
+    {
+        var entry = new Ecr.Domain.Entities.Dictionaries.RegistryEntry(
+            PermitRegistryId, EcrCode.Create(code), Name(code));
+        typeof(Entity<long>).GetProperty("Id")!.SetValue(entry, id);
+        _entries.Add(entry);
+        return entry;
+    }
 
     private static void SwapRows(IXLWorksheet sheet, int first, int second)
     {
@@ -348,7 +459,8 @@ public sealed class ExcelImportWorkbookIntegrityTests
             _metadata, _registries, access, user, Substitute.For<IImportPreviewStore>(),
             patch: null!,
             new ImportDiffBuilder(), _cells, _rows,
-            Substitute.For<IUnitOfWork>(), Substitute.For<IBackgroundJobScheduler>(), Substitute.For<ISheetEditGate>());
+            Substitute.For<IUnitOfWork>(), Substitute.For<IBackgroundJobScheduler>(), Substitute.For<ISheetEditGate>(),
+            periods: _periods);
 
         return await importer.PreviewAsync(DocumentId, stream, CancellationToken.None);
     }

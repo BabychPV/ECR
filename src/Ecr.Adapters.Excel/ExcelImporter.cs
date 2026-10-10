@@ -39,7 +39,12 @@ public sealed class ExcelImporter(
     // Порти оверлею необов'язкові лише заради тестів, що конструюють імпортер
     // вручну; у контейнері розв'язуються завжди.
     IMethodologyStore? methodologies = null,
-    ICalculationResultStore? results = null) : IExcelImporter
+    ICalculationResultStore? results = null,
+
+    // ⛔ Y5-03: межі періоду — дата чинності запису довідника в перегляді (C7, D-158).
+    // Необов'язковий лише заради тестів, що конструюють імпортер вручну; без нього
+    // перевірки на дату в перегляді немає (решта причин діють), як і в PATCH без періоду.
+    IPeriodStore? periods = null) : IExcelImporter
 {
     /// <summary>Порожній зріз — таблиця без жодного рядка чи непорожньої комірки.</summary>
     private static readonly IReadOnlyDictionary<string, long> EmptyRowIds =
@@ -147,7 +152,7 @@ public sealed class ExcelImporter(
                          new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.signInRequired" });
 
         var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
-        var lookups = await LookupsAsync(snapshot, ct).ConfigureAwait(false);
+        var (lookups, unusableLookups) = await LookupsAsync(snapshot, documentId, map.PeriodKey, ct).ConfigureAwait(false);
 
         // ⛔ S6 (ФВ-6.6): межі читання того, хто імпортує. Перегляд порівнює
         // книгу з ПОТОЧНИМИ значеннями, і будь-яка відповідь, що залежить від
@@ -293,7 +298,8 @@ public sealed class ExcelImporter(
             var diff = diffBuilder.Build(
                 worksheet, block, map.PeriodKey, table, decisions, lookups, rowIds, versions, current,
                 readable.CanReadColumn,
-                Ecr.Application.Localization.NumberCulture.ForLanguage(currentUser.Language));
+                Ecr.Application.Localization.NumberCulture.ForLanguage(currentUser.Language),
+                unusableLookups);
 
             diffs.Add(diff);
             changes.AddRange(diff.Changes);
@@ -1004,9 +1010,24 @@ public sealed class ExcelImporter(
                    new Dictionary<string, object?> { ["messageKey"] = "err.ECR-IMP-0422.mapBroken" });
     }
 
-    /// <summary>Коди записів довідників: <c>RegistryDefId</c> → код → <c>Id</c>.</summary>
-    private async Task<IReadOnlyDictionary<int, IReadOnlyDictionary<string, long>>> LookupsAsync(
-        TemplateVersionSnapshot snapshot, CancellationToken ct)
+    /// <summary>
+    /// Коди записів довідників (<c>RegistryDefId</c> → код → <c>Id</c>) і записи, які
+    /// застосування відхилило б за <c>C7</c> (<c>Id</c> → ключ тексту відмови перегляду).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Y5-03 (аудит 7). <see cref="IRegistryStore.ListEntriesAsync"/> повертає ВСІ записи
+    /// — видалені, вимкнені, нечинні, — і код такого запису розв'язувався в перегляді в
+    /// звичайну зміну. Застосування ж (<c>PatchCellsHandler.CheckLookupStandings</c>)
+    /// відхиляло його <c>ECR-CELL-4223</c> на ВСЮ книгу, вже після погодженого перегляду.
+    /// Тепер стан запису рахується тут тим самим правилом і в тому ж порядку причин
+    /// (видалений → вимкнений → нечинний на останній день періоду, D-158), і
+    /// <see cref="ImportDiffBuilder"/> відхиляє таку комірку однією відмовою в перегляді.
+    /// Значення, яке вже стоїть у комірці, — не новий вибір (як і в C7): його відсіює
+    /// порівняння з поточним раніше.
+    /// </remarks>
+    private async Task<(IReadOnlyDictionary<int, IReadOnlyDictionary<string, long>> Codes,
+        IReadOnlyDictionary<long, string> Unusable)> LookupsAsync(
+        TemplateVersionSnapshot snapshot, long documentId, int periodKey, CancellationToken ct)
     {
         var registryIds = snapshot.ColumnsById.Values
             .Where(c => !c.IsDeleted && c.LookupRegistryDefId is not null)
@@ -1015,6 +1036,18 @@ public sealed class ExcelImporter(
             .ToList();
 
         var result = new Dictionary<int, IReadOnlyDictionary<string, long>>();
+        var unusable = new Dictionary<long, string>();
+
+        if (registryIds.Count == 0)
+        {
+            return (result, unusable);
+        }
+
+        // Дата чинності — останній день періоду (D-158), як у пікері сітки й у C7.
+        var bounds = periods is null
+            ? null
+            : await periods.FindPeriodBoundsAsync(documentId, periodKey, ct).ConfigureAwait(false);
+        var asOf = bounds?.PeriodEnd;
 
         foreach (var registryId in registryIds)
         {
@@ -1023,9 +1056,22 @@ public sealed class ExcelImporter(
             result[registryId] = entries
                 .GroupBy(e => e.Code, StringComparer.OrdinalIgnoreCase)
                 .ToDictionary(g => g.Key, g => g.First().Id, StringComparer.OrdinalIgnoreCase);
+
+            foreach (var entry in entries)
+            {
+                var reason = entry.IsDeleted ? ImportMessageKeys.LookupDeleted
+                    : !entry.IsActive ? ImportMessageKeys.LookupInactive
+                    : asOf is { } date && !entry.IsValidOn(date) ? ImportMessageKeys.LookupNotValidOnDate
+                    : null;
+
+                if (reason is not null)
+                {
+                    unusable[entry.Id] = reason;
+                }
+            }
         }
 
-        return result;
+        return (result, unusable);
     }
 }
 

@@ -55,6 +55,11 @@ public sealed class ImportDiffBuilder
     /// 2026-09-29, <see cref="NumberCulture"/>); <c>null</c> — Invariant.
     /// Числові комірки Excel читаються числом і від культури не залежать.
     /// </param>
+    /// <param name="unusableLookups">
+    /// ⛔ Y5-03. Записи довідників, які застосування відхилило б за <c>C7</c>
+    /// (видалений, вимкнений, нечинний на кінець періоду): <c>Id</c> → ключ тексту
+    /// відмови перегляду; <c>null</c> — немає таких (або викликач їх не рахує).
+    /// </param>
     /// <remarks>
     /// ⛔ Q-168 (аудит фази 2, продуктивність). Метод БІЛЬШЕ НЕ ходить у базу
     /// сам — <paramref name="rowIds"/>, <paramref name="versions"/> і
@@ -74,7 +79,8 @@ public sealed class ImportDiffBuilder
         IReadOnlyDictionary<string, string> versions,
         IReadOnlyList<CellRecord> current,
         Func<int, bool>? canReadColumn = null,
-        CultureInfo? culture = null)
+        CultureInfo? culture = null,
+        IReadOnlyDictionary<long, string>? unusableLookups = null)
     {
         ArgumentNullException.ThrowIfNull(worksheet);
 
@@ -364,6 +370,39 @@ public sealed class ImportDiffBuilder
                 // ключем; прийняте число (напр. «1,234.5» у en-US, «1 234,5» у
                 // ru) іде далі вже `decimal`, тож застосування (зокрема у фоновій
                 // задачі) культури не потребує.
+                // ⛔ Y5-03 (аудит 7): код, якого немає серед записів довідника колонки, —
+                // відмова в ПЕРЕГЛЯДІ. Доти він лишався рядком, а `CellValueReader.Identifier`
+                // приймав цифровий рядок як Id: людина, що бачила в переліку змін Id («205 →
+                // 11») і вписала в книгу число, тихо отримувала посилання на запис 11 — а
+                // одруківка в Id не ловилася нічим. Коди записів (`EcrCode`) починаються з
+                // літери, тож цифри кодом не бувають. Незмінений Id осиротілого посилання
+                // (експорт пише його числом) відсіяв `Same` вище.
+                if (definition.DataType == CellDataType.Lookup && incoming is string)
+                {
+                    rejected.Add(new ImportRejection(
+                        row.RowKey, column.Code, CellValueReader.TypeMismatch,
+                        "No entry with this code in the column's registry.",
+                        table.Code, table.NameL10n, ImportMessageKeys.ExpectsIdentifier, excelCell));
+
+                    continue;
+                }
+
+                // ⛔ Y5-03 (C7 у перегляді): запис, який застосування відхилило б
+                // (`PatchCellsHandler.CheckLookupStandings` — 4223 на ВСЮ книгу, вже після
+                // погодженого перегляду), — відмова однієї комірки тут.
+                if (definition.DataType == CellDataType.Lookup
+                    && incoming is long entryId
+                    && unusableLookups is not null
+                    && unusableLookups.TryGetValue(entryId, out var unusable))
+                {
+                    rejected.Add(new ImportRejection(
+                        row.RowKey, column.Code, "ECR-CELL-4223",
+                        "The registry entry cannot be chosen: it is deleted, switched off or not valid on the last day of the period.",
+                        table.Code, table.NameL10n, unusable, excelCell));
+
+                    continue;
+                }
+
                 if (incoming is string raw && IsNumeric(definition))
                 {
                     var ambiguous = CultureNumberReader.Read(raw, culture).Kind == NumberTextKind.Ambiguous;
@@ -759,7 +798,13 @@ public sealed class ImportDiffBuilder
                     : incoming is int i && number == i),
             CellDataType.Bool => incoming is bool b && current is bool flag && flag == b,
             CellDataType.Date => incoming is DateTime t && current is DateTime date && date == t,
-            CellDataType.Lookup => incoming is long id && current is long entry && entry == id,
+            // ⛔ Y5-03: осиротіле посилання (запису немає серед кодів довідника колонки)
+            // експорт пише Id числом; незмінене воно повертається тим самим рядком цифр —
+            // це не зміна, а не «нерозпізнаний код».
+            CellDataType.Lookup => incoming is long id
+                ? current is long entry && entry == id
+                : incoming is string orphan && current is long stored
+                  && string.Equals(orphan, stored.ToString(CultureInfo.InvariantCulture), StringComparison.Ordinal),
 
             // ⛔ Unit порівнюється за `ValueUnitId` (аудит §8.3). Без цієї гілки
             // порівняння йшло через `ValueString`, який для Unit-комірки
@@ -903,6 +948,17 @@ public static class ImportMessageKeys
     /// колонки в Excel відсортовано, вставлено, видалено або перейменовано (Y5-01).
     /// </summary>
     public const string LayoutChanged = "err.ECR-IMP-0422.importLayoutChanged";
+
+    /// <summary>Запис довідника з книги видалено (Y5-03, причина C7 у перегляді).</summary>
+    public const string LookupDeleted = "err.ECR-CELL-4223.importDeletedEntry";
+
+    /// <summary>Запис довідника з книги вимкнено (Y5-03, причина C7 у перегляді).</summary>
+    public const string LookupInactive = "err.ECR-CELL-4223.importInactiveEntry";
+
+    /// <summary>
+    /// Запис довідника з книги не чинний на останній день періоду (Y5-03, причина C7 у перегляді).
+    /// </summary>
+    public const string LookupNotValidOnDate = "err.ECR-CELL-4223.importEntryNotValidOnDate";
 
     /// <summary>
     /// У таблиці книги змін більше за <see cref="ImportDiffBuilder.MaxChanges"/> —

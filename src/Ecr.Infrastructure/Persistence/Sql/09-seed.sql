@@ -7506,6 +7506,11 @@ USING (VALUES
     -- COLL:r7y5-01-layout-changed ── R7-Y5 / Y5-01: рядки чи колонки таблиці в Excel відсортовано, вставлено чи видалено — відмова таблиці, а не значення в чужих рядках; ru/kz — порцією COLL:r7y5-01-layout-changed нижче ──
     ,(N'err.ECR-IMP-0422.importLayoutChanged', N'en', N'Rows or columns of this table were sorted, inserted, deleted or relabelled in Excel after export, so the values no longer match their rows. The table was not imported. Download the workbook again and edit values in place without sorting or inserting rows and columns.', 1)
     -- COLL:r7y5-01-layout-changed ── кінець секції ──
+    -- COLL:r7y5-03-lookup-preview ── R7-Y5 / Y5-03: перегляд імпорту відхиляє видалений, вимкнений чи нечинний запис довідника (C7) однією коміркою, а не 4223 на всю книгу; ru/kz — порцією COLL:r7y5-03-lookup-preview нижче ──
+    ,(N'err.ECR-CELL-4223.importDeletedEntry', N'en', N'The registry entry with this code has been deleted and cannot be chosen.', 1),
+    (N'err.ECR-CELL-4223.importInactiveEntry', N'en', N'The registry entry with this code is switched off and cannot be chosen.', 1),
+    (N'err.ECR-CELL-4223.importEntryNotValidOnDate', N'en', N'The registry entry with this code is not valid on the last day of the period and cannot be chosen.', 1)
+    -- COLL:r7y5-03-lookup-preview ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -18623,6 +18628,21 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:r7y5-01-layout-changed ── кінець секції ──
+
+-- COLL:r7y5-03-lookup-preview ── ru/kz: R7-Y5 / Y5-03: перегляд імпорту відхиляє видалений, вимкнений чи нечинний запис довідника (C7) однією коміркою, а не 4223 на всю книгу; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-CELL-4223.importDeletedEntry', N'ru', N'Запись справочника с этим кодом удалена, выбрать её нельзя.'),
+    (N'err.ECR-CELL-4223.importDeletedEntry', N'kz', N'Осы коды бар анықтамалық жазбасы жойылған, оны таңдауға болмайды.'),
+    (N'err.ECR-CELL-4223.importInactiveEntry', N'ru', N'Запись справочника с этим кодом отключена, выбрать её нельзя.'),
+    (N'err.ECR-CELL-4223.importInactiveEntry', N'kz', N'Осы коды бар анықтамалық жазбасы өшірілген, оны таңдауға болмайды.'),
+    (N'err.ECR-CELL-4223.importEntryNotValidOnDate', N'ru', N'Запись справочника с этим кодом недействительна на последний день периода, выбрать её нельзя.'),
+    (N'err.ECR-CELL-4223.importEntryNotValidOnDate', N'kz', N'Осы коды бар анықтамалық жазбасы кезеңнің соңғы күнінде жарамсыз, оны таңдауға болмайды.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:r7y5-03-lookup-preview ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

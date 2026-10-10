@@ -697,6 +697,13 @@ function rejectionText(rejection: ImportRejection): string {
       return t('err.ECR-CELL-0422.importExpectsDate');
     case 'err.ECR-CELL-0422.importExpectsIdentifier':
       return t('err.ECR-CELL-0422.importExpectsIdentifier');
+    // ⛔ Y5-03: запис довідника, який застосування відхилило б (C7), — у перегляді.
+    case 'err.ECR-CELL-4223.importDeletedEntry':
+      return t('err.ECR-CELL-4223.importDeletedEntry');
+    case 'err.ECR-CELL-4223.importInactiveEntry':
+      return t('err.ECR-CELL-4223.importInactiveEntry');
+    case 'err.ECR-CELL-4223.importEntryNotValidOnDate':
+      return t('err.ECR-CELL-4223.importEntryNotValidOnDate');
     default:
       return (key.startsWith('deny.') ? denyText(key.slice('deny.'.length)) : null) ?? t('import.rejectedCell');
   }
