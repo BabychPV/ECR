@@ -87,4 +87,30 @@ public sealed class AdminDeployDocsTruthTests
         Assert.DoesNotContain("зазвичай хвилини", guide, StringComparison.Ordinal);
         Assert.Contains("IX_CalculationResult_DocRun", guide, StringComparison.Ordinal);
     }
+
+    /// <summary>
+    /// R8-Z7-02: MSI не пам'ятає <c>SERVICE_ACCOUNT</c>; без <c>-ServiceAccount</c> <c>deploy-ecr.ps1</c> не передає
+    /// його в msiexec, і служба перереєстровується під LocalSystem з Manual (<c>Service.wxs</c>). Приклад
+    /// оновлення в install-guide §4 мусить містити <c>-ServiceAccount</c>.
+    /// Мутації: прибрати <c>-ServiceAccount</c> з прикладу або умову в скрипті → червоний.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Приклад_оновлення_передає_обліковий_запис_служби()
+    {
+        var script = Read("tools", "deploy-ecr.ps1");
+        Assert.Contains("if ($ServiceAccount) {\r\n    $msiArgs      += \"SERVICE_ACCOUNT=$ServiceAccount\"",
+            script.Replace("\r\n", "\n", StringComparison.Ordinal).Replace("\n", "\r\n", StringComparison.Ordinal),
+            StringComparison.Ordinal);
+
+        var section = Section(InstallGuide(), "## 4. Оновлення на нову версію");
+        var blocks = Regex.Matches(section, @"```powershell\r?\n(.*?)```", RegexOptions.Singleline)
+            .Select(m => m.Groups[1].Value)
+            .Where(b => b.Contains("deploy-ecr.ps1", StringComparison.Ordinal))
+            .ToList();
+        Assert.NotEmpty(blocks);
+        Assert.All(blocks, b => Assert.Contains("-ServiceAccount", b, StringComparison.Ordinal));
+        Assert.Contains("StartName", section, StringComparison.Ordinal);
+    }
 }

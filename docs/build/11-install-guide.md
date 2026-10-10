@@ -754,12 +754,27 @@ Data Protection не захищені сертифікатом. Тому заз�
 сервер, і:
 
 ```powershell
+# ✎ R8-Z7-02: обліковий запис, під яким служба працює ЗАРАЗ (MSI його не пам'ятає):
+(Get-CimInstance Win32_Service -Filter "Name='EcrApi'").StartName
+
 .\tools\deploy-ecr.ps1 `
-    -SqlInstance 'ІМ''Я_СЕРВЕРА\SQLEXPRESS' -Database 'ECR' `
+    -SqlInstance 'ІМ''Я_СЕРВЕРА' -Database 'ECR' `
     -MsiPath '.\Ecr.msi' -ConnectionString $cs `
+    -ServiceAccount 'DOMAIN\ecr-svc$' `
     -DataProtectionThumbprint '<відбиток сертифіката з Cert:\LocalMachine\My>' `
     -HttpsThumbprint '<відбиток сертифіката HTTPS>' -AppPort 443
 ```
+
+⛔ ✎ 2026-10-10 (R8-Z7-02): `-ServiceAccount` — **той самий, що показав `StartName`**, на КОЖНОМУ
+оновленні (звичайний, не gMSA, обліковий запис — ще й `-ServicePassword`, розділ 2.3). Пропускайте його
+лише якщо `StartName` = `LocalSystem` (служба й так під ним, розділ 2.1). Інакше `MajorUpgrade`
+перереєструє `EcrApi`/`EcrWorker` під `LocalSystem` з типом запуску `Manual`, крок 6 їх не стартує,
+крок 7 не дочекається `/health/live` — простій. Повтор скрипта з `-ServiceAccount` **тим самим**
+`.msi` обліковий запис не поверне: для вже встановленого продукту це режим обслуговування (runbook
+§10.2). Лікування — `msiexec /i Ecr.msi /qn /l*v reinstall.log REINSTALL=ALL REINSTALLMODE=vomus
+SERVICE_ACCOUNT=<той самий> WORKER_ENABLED=<1 або 0>` (звичайний обліковий запис — ще й
+`SERVICE_PASSWORD`), потім знову цей виклик `deploy-ecr.ps1`, але з `-SkipSchema` (`Environment` і
+старт). Якщо там SQL Server Express — додайте `-AllowExpress` (без нього крок 1 зупиниться).
 
 (без `-BootstrapPassword` і без `-FirstDeployment` — це не перше
 розгортання; `-ConnectionString`, `-DataProtectionThumbprint` і параметр
@@ -801,9 +816,10 @@ Data Protection не захищені сертифікатом. Тому заз�
 Якщо MSI будували БЕЗ `-MsiPath` (тобто `deploy-ecr.ps1` сам викликав
 `build-msi.ps1`) — достатньо `-Version` замість `-MsiPath`.
 
-⚠ **Без `-ServiceAccount` (розділ 2.2) MSI зупиняє службу на час
-оновлення БЕЗУМОВНО, а запускає її знову НАЗАД лише за умови заданого
-`-ServiceAccount`.** Якщо перше встановлення робили без нього (сервіс
+⚠ **Без `-ServiceAccount` (розділ 2.2) служби на час оновлення зупиняються
+БЕЗУМОВНО (крок 2), а скрипт запускає їх знову лише за умови заданого
+`-ServiceAccount`.** Якщо служба працює під окремим обліковим записом — див. ⛔ R8-Z7-02
+вище: без `-ServiceAccount` вона опиниться під `LocalSystem`. Якщо перше встановлення робили без нього (сервіс
 підняли вручну, розділ 2.1) і оновлення робиться так само без нього —
 після оновлення служба лишиться `Stopped`, і це не збій:
 `Start-Service EcrApi` після кожного такого оновлення — очікувана дія,
