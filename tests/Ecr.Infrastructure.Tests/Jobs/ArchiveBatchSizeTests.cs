@@ -85,10 +85,12 @@ public sealed class ArchiveBatchSizeTests(SqlServerFixture sql)
     /// </summary>
     /// <remarks>
     /// ⛔ Доказ «окремих транзакцій» — збій на ОСТАННІЙ комірці: пакети до неї
-    /// лишаються в doc.*. Однією транзакцією на рік (як було) відкотилося б усе,
-    /// а журнал і ескалація замків росли б разом із роком.
-    /// Мутація: обгорнути крок 1 у `BEGIN TRAN … COMMIT` — після збою 0 комірок,
-    /// тест червоний; `ColumnDefId &lt;= @hiCol` → `&lt;` — звірка 50011 на повторі.
+    /// закомічені. Однією транзакцією на рік (як було) відкотилося б усе,
+    /// а журнал і ескалація замків росли б разом із роком. Після Z6-01 `CATCH`
+    /// прибирає закомічене з doc.*, тож доказ — число прибраних комірок у журналі.
+    /// Мутація: обгорнути крок 1 у `BEGIN TRAN … COMMIT` — прибрано 0 комірок,
+    /// тест червоний; `ColumnDefId &lt;= @hiCol` → `&lt;` — звірка 50011 на повторі;
+    /// прибрати прибирання з `CATCH` (Z6-01) — у doc.* лишаються комірки, червоний.
     /// </remarks>
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
@@ -155,9 +157,19 @@ public sealed class ArchiveBatchSizeTests(SqlServerFixture sql)
             await ExecuteAsync("DROP TRIGGER doc.TR_RestoreBatchFailTest;");
         }
 
-        // ⛔ Пакети до збою закомічені — копія не одна транзакція на рік.
-        var partial = await CountAsync("doc.CellValue");
-        Assert.InRange(partial, 1, cells - 1);
+        // ⛔ Пакети до збою закомічені — копія не одна транзакція на рік. Після Z6-01 `CATCH` прибирає
+        // часткову копію з doc.* (інакше F-13 показував би її як гарячі дані з дірками), тож доказ —
+        // журнал прибирання: прибрано стільки комірок, скільки закомітили пакети ДО збійного.
+        // Однією транзакцією на рік прибирати було б нічого (0), а без пакетів — усе (cells).
+        Assert.Equal(0, await CountAsync("doc.CellValue"));
+        Assert.Equal(0, await CountAsync("doc.TableRow"));
+        Assert.Equal(0, await CountAsync("doc.TableInstance"));
+        var journal = await ScalarAsync<string>(
+            $"SELECT TOP 1 ErrorMessage FROM itg.ArchiveRun WHERE ProjectId = {doc.ProjectId} "
+            + "AND Direction = N'FromArchive' ORDER BY Id DESC");
+        var undone = System.Text.RegularExpressions.Regex.Match(journal ?? string.Empty, @"комірок (\d+)");
+        Assert.True(undone.Success, $"У журналі немає сліду прибирання: {journal}");
+        Assert.InRange(int.Parse(undone.Groups[1].Value, CultureInfo.InvariantCulture), 1, cells - 1);
 
         // Архів цілий: до повної звірки його не чіпають.
         Assert.Equal(cells, await CountAsync("arc.CellValue"));
