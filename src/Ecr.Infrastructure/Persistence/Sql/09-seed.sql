@@ -645,6 +645,9 @@ UPDATE t
   FROM sys_ecr.UiString AS t
   JOIN (VALUES
     (N'common.loading',                  N'en', N'Loading…', N'Loading...'),
+    -- COLL:r11l6 AN-96: плитка рахує ШАБЛОНИ з опублікованою версією (matchesStat), а не версії; kz лишається за термінологом.
+    (N'templates.stat.published', N'en', N'published versions', N'with a published version'),
+    (N'templates.stat.published', N'ru', N'опубликованных версий', N'с опубликованной версией'),
     -- COLL:ui34tpl UI-34b: пошук переліку шаблонів бачить і назву (поле name з GET /templates).
     (N'templates.searchPlaceholder', N'en', N'Template code', N'Template name or code'),
     (N'templates.searchPlaceholder', N'ru', N'Код шаблона', N'Название или код шаблона'),
@@ -6932,7 +6935,7 @@ USING (VALUES
     (N'templates.subtitle', N'en', N'A template is the structure of a report: sheets, tables, columns, formulas and rules. Documents are created from a published version and stay on it.', 1),
     (N'templates.stats', N'en', N'Template summary', 1),
     (N'templates.stat.all', N'en', N'templates', 1),
-    (N'templates.stat.published', N'en', N'published versions', 1),
+    (N'templates.stat.published', N'en', N'with a published version', 1),
     (N'templates.stat.publishedHint', N'en', N'Show templates that have a published version', 1),
     (N'templates.stat.drafts', N'en', N'drafts in progress', 1),
     (N'templates.stat.draftsHint', N'en', N'Show templates with an open draft', 1),
@@ -17159,7 +17162,7 @@ SELECT v.[Key], v.Lang, v.Val
     (N'templates.stats', N'kz', N'Үлгілер бойынша жиынтық'),
     (N'templates.stat.all', N'ru', N'шаблонов'),
     (N'templates.stat.all', N'kz', N'үлгі'),
-    (N'templates.stat.published', N'ru', N'опубликованных версий'),
+    (N'templates.stat.published', N'ru', N'с опубликованной версией'),
     (N'templates.stat.published', N'kz', N'жарияланған нұсқа'),
     (N'templates.stat.publishedHint', N'ru', N'Показать шаблоны с опубликованной версией'),
     (N'templates.stat.publishedHint', N'kz', N'Жарияланған нұсқасы бар үлгілерді көрсету'),
