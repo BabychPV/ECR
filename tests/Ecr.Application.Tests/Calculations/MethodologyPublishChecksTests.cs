@@ -3,6 +3,7 @@ using Ecr.Application.Calculations;
 using Ecr.Application.Errors;
 using Ecr.Domain.Entities.Calculations;
 using Ecr.Domain.Enums;
+using Ecr.Domain.Errors;
 using Ecr.Domain.ValueObjects;
 using Ecr.Expressions.Ast;
 using Ecr.Expressions.Binding;
@@ -93,6 +94,38 @@ public sealed class MethodologyPublishChecksTests
         var problems = Check([Formula("Total", "1 + 2", FormulaResultType.Number)], [dash], []);
 
         Assert.Contains(problems, p => p.Text.Contains("n_ECW_C11_13_", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Finding", "ECR-CALC-0434")]
+    public void ECR_CALC_0434_проблеми_констант_несуть_власний_код_а_решта_лишаються_без_нього()
+    {
+        // ⛔ Доти нерозібрана константа і мітка категорії у виразі лягали в перелік без власного коду (TODO «потрібен окремий
+        // код»). Мутація: прибрати `.WithCode(...)` - `Code` порожній, тест червоний.
+        var dash = MethodologyConstant.FromImport(
+            VersionId, EcrCode.Create("n_ECW_C11_13_"), "-", ConstantKind.Numeric, TonneUnit);
+
+        var unresolved = Check([Formula("Total", "1 + 2", FormulaResultType.Number)], [dash], []);
+        Assert.Equal(
+            ErrorCodes.MethodologyConstantUnusable,
+            Assert.Single(unresolved, p => p.MessageKey == "publish.problem.constantNotNumber").Code);
+        Assert.Equal("ECR-CALC-0434", ErrorCodes.MethodologyConstantUnusable);
+
+        var label = Check(
+            [Formula("Total", "if(@Land_Category = CST.k1_Season_, 1, 2)", FormulaResultType.Number)],
+            [Label("k1_Season_", "<1500")],
+            []);
+        Assert.Equal(
+            ErrorCodes.MethodologyConstantUnusable,
+            Assert.Single(label, p => p.MessageKey == "publish.problem.categoryLabelInExpression").Code);
+
+        // Проблеми, яким окремого коду ще не заведено, його не отримують.
+        var arithmetic = Check(
+            [Formula("Total", "CST.n_ECW_C11_13_ * 2", FormulaResultType.Number)],
+            [Text("n_ECW_C11_13_", "-")],
+            []);
+        Assert.All(arithmetic, p => Assert.Null(p.Code));
     }
 
     [Fact]

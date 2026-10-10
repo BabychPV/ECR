@@ -7543,6 +7543,9 @@ USING (VALUES
     -- COLL:r11l3-overwrite-limit ── R11-L3 / R1-05: застосування імпорту .xlsx з понад 5000 рядків для перезапису - 422, а не 500; ru/kz - порцією COLL:r11l3-overwrite-limit нижче ──
     ,(N'err.ECR-IMP-0422.importTooManyOverwriteRows', N'en', N'More than {maxRows} rows are marked for overwrite. Nothing was applied: overwrite the rows in several batches.', 1)
     -- COLL:r11l3-overwrite-limit ── кінець секції ──
+    -- COLL:r11l3-calc-0434 ── R11-L3: заголовок коду ECR-CALC-0434; ru/kz — порцією COLL:r11l3-calc-0434 нижче ──
+    ,(N'err.ECR-CALC-0434', N'en', N'Methodology constant cannot be used in a formula', 1)
+    -- COLL:r11l3-calc-0434 ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -18775,6 +18778,17 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:r11l3-overwrite-limit ── кінець секції ──
+
+-- COLL:r11l3-calc-0434 ── ru/kz: R11-L3: заголовок коду ECR-CALC-0434; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-CALC-0434', N'ru', N'Константа методологии не может использоваться в формуле'),
+    (N'err.ECR-CALC-0434', N'kz', N'Әдістеме тұрақтысын формулада қолдануға болмайды')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:r11l3-calc-0434 ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t
