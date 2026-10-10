@@ -964,6 +964,105 @@ public sealed class UserStore(EcrDbContext db, SelfStampRotation? selfRotation =
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// ⛔ Один <c>UPDATE</c> з умовою у <c>WHERE</c>: рядок тримає блокування оновлення, тож пачка паралельних
+    /// резервувань серіалізується, і рівно <paramref name="maxFailedAttempts"/> з них отримують 1 рядок.
+    /// ⚠ Праві частини <c>SET</c> читають значення ДО оновлення; минуле блокування скидає лічильник
+    /// (так само, як <see cref="RegisterFailedAttemptAsync"/>). Рівність із доменним
+    /// <c>User.TryReserveAttempt</c> тримає <c>FailedAttemptAtomicTests</c>.
+    /// </remarks>
+    public async Task<bool> TryReserveAttemptAsync(int userId, int maxFailedAttempts, DateTime utcNow, CancellationToken ct)
+    {
+        await db.Database.OpenConnectionAsync(ct).ConfigureAwait(false);
+        try
+        {
+            await using var command = db.Database.GetDbConnection().CreateCommand();
+            command.Transaction = db.Database.CurrentTransaction?.GetDbTransaction();
+            command.CommandText = """
+                UPDATE sec.[User]
+                SET FailedAttempts =
+                        CASE WHEN LockedUntil IS NOT NULL AND LockedUntil <= @now THEN 1
+                             ELSE FailedAttempts + 1 END,
+                    LockedUntil =
+                        CASE WHEN LockedUntil IS NOT NULL AND LockedUntil <= @now THEN NULL
+                             ELSE LockedUntil END
+                WHERE Id = @id
+                  AND (LockedUntil IS NULL OR LockedUntil <= @now)
+                  AND (@max <= 0
+                       OR CASE WHEN LockedUntil IS NOT NULL AND LockedUntil <= @now THEN 0
+                               ELSE FailedAttempts END < @max);
+                """;
+            Add(command, "@id", System.Data.DbType.Int32, userId);
+            Add(command, "@max", System.Data.DbType.Int32, maxFailedAttempts);
+            Add(command, "@now", System.Data.DbType.DateTime2, utcNow);
+
+            return await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false) > 0;
+        }
+        finally
+        {
+            await db.Database.CloseConnectionAsync().ConfigureAwait(false);
+        }
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⚠ Лічильник НЕ чіпається — його вже збільшило <see cref="TryReserveAttemptAsync"/>; тут лише блокування,
+    /// коли бюджет вичерпано. <c>OUTPUT … INTO</c> — з тієї самої причини, що в
+    /// <see cref="RegisterFailedAttemptAsync"/> (тригер на <c>sec.User</c>).
+    /// </remarks>
+    public async Task<FailedAttemptOutcome> RegisterReservedFailureAsync(
+        int userId, int maxFailedAttempts, int lockoutMinutes, DateTime utcNow, CancellationToken ct)
+    {
+        var lockUntil = utcNow.AddMinutes(lockoutMinutes <= 0 ? DefaultLockoutMinutes : lockoutMinutes);
+
+        await db.Database.OpenConnectionAsync(ct).ConfigureAwait(false);
+        try
+        {
+            await using var command = db.Database.GetDbConnection().CreateCommand();
+            command.Transaction = db.Database.CurrentTransaction?.GetDbTransaction();
+            command.CommandText = """
+                DECLARE @out TABLE (FailedAttempts int NOT NULL, LockedUntil datetime2(3) NULL, LockedNow bit NOT NULL);
+
+                UPDATE sec.[User]
+                SET LockedUntil =
+                        CASE WHEN @max > 0 AND FailedAttempts >= @max
+                                  AND (LockedUntil IS NULL OR LockedUntil <= @now)
+                             THEN @until
+                             ELSE LockedUntil END
+                OUTPUT inserted.FailedAttempts,
+                       inserted.LockedUntil,
+                       CASE WHEN inserted.LockedUntil IS NOT NULL AND inserted.LockedUntil > @now
+                                 AND (deleted.LockedUntil IS NULL OR deleted.LockedUntil <= @now)
+                            THEN CAST(1 AS bit) ELSE CAST(0 AS bit) END
+                INTO @out
+                WHERE Id = @id;
+
+                SELECT FailedAttempts, LockedUntil, LockedNow FROM @out;
+                """;
+
+            Add(command, "@id", System.Data.DbType.Int32, userId);
+            Add(command, "@max", System.Data.DbType.Int32, maxFailedAttempts);
+            Add(command, "@now", System.Data.DbType.DateTime2, utcNow);
+            Add(command, "@until", System.Data.DbType.DateTime2, lockUntil);
+
+            await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
+            if (!await reader.ReadAsync(ct).ConfigureAwait(false))
+            {
+                return default;
+            }
+
+            return new FailedAttemptOutcome(
+                reader.GetInt32(0),
+                reader.IsDBNull(1) ? null : DateTime.SpecifyKind(reader.GetDateTime(1), DateTimeKind.Utc),
+                reader.GetBoolean(2));
+        }
+        finally
+        {
+            await db.Database.CloseConnectionAsync().ConfigureAwait(false);
+        }
+    }
+
+    /// <inheritdoc />
     public async Task<bool> TryRegisterSuccessfulLoginAsync(int userId, DateTime utcNow, CancellationToken ct)
     {
         await db.Database.OpenConnectionAsync(ct).ConfigureAwait(false);

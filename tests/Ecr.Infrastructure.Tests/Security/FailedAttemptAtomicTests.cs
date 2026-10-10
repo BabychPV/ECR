@@ -214,7 +214,8 @@ public sealed class FailedAttemptAtomicTests(SqlServerFixture sql)
         await using var check = Context();
         var row = await check.Users.AsNoTracking().SingleAsync(u => u.Id == userId).ConfigureAwait(true);
         Assert.True(row.IsLockedOut(Now), "блокування знято успішним входом");
-        Assert.Equal(Max, row.FailedAttempts);
+        // AN-90: правильна спроба теж зарезервована ДО Verify (+1), тож лічильник = 1 + Max хибних.
+        Assert.Equal(Max + 1, row.FailedAttempts);
         Assert.False(await check.LoginAttempts.AnyAsync(a => a.UserName == name && a.IsSuccess).ConfigureAwait(true));
     }
 
@@ -256,6 +257,112 @@ public sealed class FailedAttemptAtomicTests(SqlServerFixture sql)
             Assert.Equal(failed, row.FailedAttempts);
             Assert.Equal(lockedUntil, row.LockedUntil);
         }
+    }
+
+    /// <summary>
+    /// AN-90/L1-03: пачка паралельних РЕЗЕРВУВАНЬ дає рівно Max «так» — решта відхиляється ДО перевірки пароля.
+    /// </summary>
+    /// <remarks>Мутація: прибрати умову бюджету з <c>WHERE</c> в <c>TryReserveAttemptAsync</c> — «так» стають усі 16.</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-6.4a")]
+    public async Task AN_90_паралельні_резервування_видають_рівно_Max_спроб()
+    {
+        const int Max = 5;
+        var name = await ArrangeUserAsync(maxFailedAttempts: Max).ConfigureAwait(true);
+        var userId = await UserIdAsync(name).ConfigureAwait(true);
+
+        using var start = new ManualResetEventSlim(false);
+        var calls = Enumerable.Range(0, Parallel).Select(_ => Task.Run(async () =>
+        {
+            await using var db = Context();
+            start.Wait();
+            return await new UserStore(db)
+                .TryReserveAttemptAsync(userId, Max, Now, CancellationToken.None).ConfigureAwait(false);
+        })).ToList();
+
+        start.Set();
+        var granted = await Task.WhenAll(calls).ConfigureAwait(true);
+
+        Assert.Equal(Max, granted.Count(g => g));
+
+        await using var check = Context();
+        var row = await check.Users.AsNoTracking().SingleAsync(u => u.Id == userId).ConfigureAwait(true);
+        Assert.Equal(Max, row.FailedAttempts);
+    }
+
+    /// <summary>
+    /// AN-90: бюджет роздано (лічильник = Max, блокування ще немає) — правильний пароль не потрапляє в Verify,
+    /// не дає входу, а запис отримує блокування (не лишається без резервування назавжди).
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-6.4a")]
+    public async Task AN_90_правильний_пароль_при_вичерпаному_бюджеті_не_перевіряється_і_не_пускає()
+    {
+        const int Max = 3;
+        var name = await ArrangeUserAsync(maxFailedAttempts: Max).ConfigureAwait(true);
+        var userId = await UserIdAsync(name).ConfigureAwait(true);
+        await SetCounterAsync(userId, Max, null).ConfigureAwait(true);
+
+        var hasher = new CountingAcceptingHasher();
+        await using (var db = Context())
+        {
+            var handler = new LoginHandler(
+                new UserStore(db), hasher, new UnitOfWork(db), new FixedClock(), NullLogger<LoginHandler>.Instance);
+
+            var refusal = await Assert.ThrowsAsync<AccessDeniedException>(
+                () => handler.HandleAsync(name, "right-password", "10.0.0.3", CancellationToken.None))
+                .ConfigureAwait(true);
+            Assert.Equal("ECR-AUTH-0401", refusal.ErrorCode);
+        }
+
+        Assert.Equal(0, hasher.RealVerifies);
+
+        await using var check = Context();
+        var row = await check.Users.AsNoTracking().SingleAsync(u => u.Id == userId).ConfigureAwait(true);
+        Assert.True(row.IsLockedOut(Now));
+        Assert.Equal(Max, row.FailedAttempts);
+        Assert.False(await check.LoginAttempts.AnyAsync(a => a.UserName == name && a.IsSuccess).ConfigureAwait(true));
+    }
+
+    /// <summary>AN-90: SQL резервування і доменний <c>User.TryReserveAttempt</c> дають однаковий стан.</summary>
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-6.4a")]
+    [InlineData(0, null, 5)]
+    [InlineData(4, null, 5)]
+    [InlineData(5, null, 5)]
+    [InlineData(5, -1, 5)]
+    [InlineData(5, 10, 5)]
+    [InlineData(9, null, 0)]
+    [InlineData(5, 0, 5)]
+    public async Task AN_90_SQL_резервування_збігається_з_доменом(int failedBefore, int? lockedOffsetMinutes, int max)
+    {
+        DateTime? lockedUntil = lockedOffsetMinutes is { } m ? Now.AddMinutes(m) : null;
+
+        var name = await ArrangeUserAsync(maxFailedAttempts: max).ConfigureAwait(true);
+        var userId = await UserIdAsync(name).ConfigureAwait(true);
+        await SetCounterAsync(userId, failedBefore, lockedUntil).ConfigureAwait(true);
+
+        await using var db = Context();
+        var granted = await new UserStore(db).TryReserveAttemptAsync(userId, max, Now, CancellationToken.None)
+            .ConfigureAwait(true);
+
+        var domain = new User("mirror", "mirror", AuthProvider.Local);
+        typeof(User).GetProperty(nameof(User.FailedAttempts))!.SetValue(domain, failedBefore);
+        typeof(User).GetProperty(nameof(User.LockedUntil))!.SetValue(domain, lockedUntil);
+        var domainGranted = domain.TryReserveAttempt(max, Now);
+
+        Assert.Equal(domainGranted, granted);
+
+        await using var check = Context();
+        var row = await check.Users.AsNoTracking().SingleAsync(u => u.Id == userId).ConfigureAwait(true);
+        Assert.Equal(domain.FailedAttempts, row.FailedAttempts);
+        Assert.Equal(domain.LockedUntil, row.LockedUntil);
     }
 
     private async Task<int> UserIdAsync(string name)
@@ -314,6 +421,29 @@ public sealed class FailedAttemptAtomicTests(SqlServerFixture sql)
             entered.Set();
             release.Wait(TimeSpan.FromSeconds(30));
             return true;
+        }
+
+        public bool NeedsRehash(string hash) => false;
+    }
+
+    /// <summary>Хешер, що приймає пароль лише для «справжнього» хеша запису і рахує такі перевірки (приманка не рахується).</summary>
+    private sealed class CountingAcceptingHasher : IPasswordHasher
+    {
+        private int _real;
+
+        public int RealVerifies => Volatile.Read(ref _real);
+
+        public string Hash(string password) => "decoy";
+
+        public bool Verify(string password, string hash)
+        {
+            if (hash == "hash-that-never-matches")
+            {
+                Interlocked.Increment(ref _real);
+                return true;
+            }
+
+            return false;
         }
 
         public bool NeedsRehash(string hash) => false;

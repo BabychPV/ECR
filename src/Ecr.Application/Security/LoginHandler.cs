@@ -126,6 +126,27 @@ public sealed partial class LoginHandler(
             throw Locked(user);
         }
 
+        var policy = await users.GetPolicyAsync(user, ct).ConfigureAwait(false);
+
+        // ⛔ AN-90/L1-03: спроба РЕЗЕРВУЄТЬСЯ атомарно ДО перевірки пароля. Без цього пачка з N паралельних
+        // запитів проходила перевірку «не заблоковано» вище ВСІ разом і перевіряла N паролів, перш ніж перша
+        // хибна спроба поставила блокування: межа Max не трималася. Бюджет вичерпано (чи запис заблоковано
+        // паралельними спробами) — пароль НЕ перевіряється, відповідь як на хибний (401, без оракула 423/401);
+        // приманка вирівнює час.
+        if (!await users.TryReserveAttemptAsync(user.Id, policy.MaxFailedAttempts, now, ct).ConfigureAwait(false))
+        {
+            Decoy(password);
+
+            // ⚠ Бюджет вичерпано, а блокування ще немає (спроби в польоті або поріг у політиці знизили нижче
+            // лічильника): без цього рядка запис лишився б без блокування і без жодної можливості резервування.
+            // Виклик ідемпотентний — чинне блокування не змінює.
+            await users.RegisterReservedFailureAsync(
+                user.Id, policy.MaxFailedAttempts, policy.LockoutMinutes, now, ct).ConfigureAwait(false);
+
+            await FailAsync(userName, "LockedOut", ipAddress, now, ct).ConfigureAwait(false);
+            throw InvalidCredentials();
+        }
+
         // ⚠ Запис без хеша теж платить один Verify (приманкою): інакше він
         // відповідав би швидше за будь-який інший хибний вхід.
         var verified = user.PasswordHash is null
@@ -134,12 +155,9 @@ public sealed partial class LoginHandler(
 
         if (!verified)
         {
-            var policy = await users.GetPolicyAsync(user, ct).ConfigureAwait(false);
-
-            // ⛔ S8(в): лічильник рахує СХОВИЩЕ одним оновленням рядка, а не
-            // сутність у пам'яті з наступним збереженням — інакше паралельні
-            // хибні спроби губили інкременти (lost update) і поріг не наставав.
-            var outcome = await users.RegisterFailedAttemptAsync(
+            // ⛔ S8(в)/AN-90: лічильник уже збільшило резервування — одним UPDATE рядка, а не сутність у пам'яті
+            // з наступним збереженням (lost update). Тут лише блокування, коли бюджет вичерпано.
+            var outcome = await users.RegisterReservedFailureAsync(
                 user.Id, policy.MaxFailedAttempts, policy.LockoutMinutes, now, ct).ConfigureAwait(false);
 
             await FailAsync(userName, outcome.LockedNow ? "LockedOut" : "BadPassword", ipAddress, now, ct)
@@ -155,8 +173,8 @@ public sealed partial class LoginHandler(
         {
             // ⛔ L1-03: тут саме 401, а не 423. Хибні спроби тієї ж пачки дістають 401, тож 423 для єдиного
             // «іншого» запиту розрізняв би правильний пароль у пачці підбору (оракул). Законний власник на
-            // наступній спробі однаково отримає 423 — з гілки IsLockedOut вище. Повне резервування спроби до
-            // Verify (бюджет «Max + паралельність») — AN-90.
+            // наступній спробі однаково отримає 423 — з гілки IsLockedOut вище. Саму гонку «пачка перевіряє
+            // більше за Max паролів» закриває резервування спроби до Verify (AN-90) вище.
             await FailAsync(userName, "LockedOut", ipAddress, now, ct).ConfigureAwait(false);
             throw InvalidCredentials();
         }

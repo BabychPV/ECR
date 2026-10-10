@@ -278,6 +278,59 @@ public sealed class User : Entity<int>
         return true;
     }
 
+    /// <summary>
+    /// Резервує спробу входу ДО перевірки пароля (AN-90/L1-03): бюджет «не більше <paramref name="maxFailedAttempts"/>
+    /// перевірок між блокуваннями» тримається і під пачкою паралельних запитів.
+    /// </summary>
+    /// <param name="maxFailedAttempts">Поріг блокування; ≤ 0 — бюджету немає.</param>
+    /// <param name="utcNow">Поточний момент.</param>
+    /// <returns><c>false</c> — запис заблоковано або бюджет вичерпано: пароль перевіряти не можна.</returns>
+    /// <remarks>
+    /// ⚠ Правило — те саме, що в <c>IUserStore.TryReserveAttemptAsync</c> (SQL); їхню рівність тримає
+    /// <c>FailedAttemptAtomicTests</c>. Блокування, що вже минуло, скидає лічильник — як у
+    /// <see cref="RegisterFailedAttempt"/>.
+    /// </remarks>
+    public bool TryReserveAttempt(int maxFailedAttempts, DateTime utcNow)
+    {
+        if (LockedUntil is { } until)
+        {
+            if (until > utcNow)
+            {
+                return false;
+            }
+
+            FailedAttempts = 0;
+            LockedUntil = null;
+        }
+
+        if (maxFailedAttempts > 0 && FailedAttempts >= maxFailedAttempts)
+        {
+            return false;
+        }
+
+        FailedAttempts++;
+        return true;
+    }
+
+    /// <summary>
+    /// Фіксує, що спробу, зарезервовану <see cref="TryReserveAttempt"/>, провалено: лічильник уже врахував її при
+    /// резервуванні, тож тут лише блокування, коли бюджет вичерпано (AN-90).
+    /// </summary>
+    /// <param name="maxFailedAttempts">Поріг блокування; ≤ 0 — не блокувати.</param>
+    /// <param name="lockoutMinutes">На скільки блокувати; ≤ 0 — 15 хв.</param>
+    /// <param name="utcNow">Поточний момент.</param>
+    /// <returns><c>true</c>, якщо цією відмовою запис заблоковано.</returns>
+    public bool LockIfAttemptBudgetSpent(int maxFailedAttempts, int lockoutMinutes, DateTime utcNow)
+    {
+        if (maxFailedAttempts <= 0 || FailedAttempts < maxFailedAttempts || IsLockedOut(utcNow))
+        {
+            return false;
+        }
+
+        LockedUntil = utcNow.AddMinutes(lockoutMinutes <= 0 ? 15 : lockoutMinutes);
+        return true;
+    }
+
     /// <summary>Межа адміністративного блокування: «доки не розблокують» (BE-12).</summary>
     /// <remarks>
     /// ⚠ Не <see cref="DateTime.MaxValue"/>: його сьомий знак дробу не влазить у
