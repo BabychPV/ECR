@@ -7540,6 +7540,9 @@ USING (VALUES
     -- COLL:r9f6-paste-clipped ── R9-F6 / F6-03: вставка, більша за таблицю, — скільки рядків і колонок не вмістилося; ru/kz — порцією COLL:r9f6-paste-clipped нижче ──
     ,(N'grid.pasteClipped', N'en', N'The copied data is larger than the table: {rows} row(s) below and {columns} column(s) to the right did not fit and were not pasted. Add rows or paste the rest separately.', 1)
     -- COLL:r9f6-paste-clipped ── кінець секції ──
+    -- COLL:r11l3-overwrite-limit ── R11-L3 / R1-05: застосування імпорту .xlsx з понад 5000 рядків для перезапису - 422, а не 500; ru/kz - порцією COLL:r11l3-overwrite-limit нижче ──
+    ,(N'err.ECR-IMP-0422.importTooManyOverwriteRows', N'en', N'More than {maxRows} rows are marked for overwrite. Nothing was applied: overwrite the rows in several batches.', 1)
+    -- COLL:r11l3-overwrite-limit ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -18761,6 +18764,17 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:r9f6-paste-clipped ── кінець секції ──
+
+-- COLL:r11l3-overwrite-limit ── ru/kz: R11-L3 / R1-05: застосування імпорту .xlsx з понад 5000 рядків для перезапису - 422, а не 500; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-IMP-0422.importTooManyOverwriteRows', N'ru', N'Для перезаписи отмечено больше {maxRows} строк. Ничего не применено: перезапишите строки несколькими партиями.'),
+    (N'err.ECR-IMP-0422.importTooManyOverwriteRows', N'kz', N'Қайта жазу үшін {maxRows} жолдан көп белгіленген. Ештеңе қолданылмады: жолдарды бірнеше бөлікпен қайта жазыңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:r11l3-overwrite-limit ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

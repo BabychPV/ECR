@@ -1,5 +1,6 @@
 // src/Ecr.Application/Documents/ExcelExchangeHandlers.cs
 using Ecr.Application.Common;
+using Ecr.Application.Errors;
 using Ecr.Application.Documents.Dto;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
@@ -214,6 +215,20 @@ public sealed class ApplyImportHandler(
     /// </remarks>
     public const int LargeImportThreshold = 2_000;
 
+    /// <summary>
+    /// Скільки рядків можна назвати для перезапису (<c>overwriteRows</c>) в одному застосуванні (R1-05).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Понад це застосування відмовляє <c>422</c>, а не <c>500</c>: великий імпорт іде в чергу, і перелік рядків
+    /// їде в її payload (<c>JobQueueLimits.MaxPayloadLength</c> = 524 288 символів) - кілька тисяч рядків його
+    /// вичерпують, і постановка падала <c>ArgumentOutOfRangeException</c> без пояснення. Межа збігається зі стелею
+    /// змін однієї таблиці перегляду (<c>ImportDiffBuilder.MaxChanges</c>, L6-01).
+    /// </remarks>
+    public const int MaxOverwriteRows = 5_000;
+
+    /// <summary>Ключ каталогу відмови «рядків для перезапису забагато».</summary>
+    public const string TooManyOverwriteRowsKey = "err.ECR-IMP-0422.importTooManyOverwriteRows";
+
     /// <summary>Застосовує diff — синхронно або, для великого, у черзі.</summary>
     /// <param name="documentId">Документ.</param>
     /// <param name="previewToken">Токен раніше побудованого diff.</param>
@@ -242,6 +257,19 @@ public sealed class ApplyImportHandler(
 
         // ⛔ B-08: невидимий документ — 404, як неіснуючий (`DocumentVisibility`).
         await DocumentVisibility.RequireVisibleAsync(access, profile, documentId, Permission, ct).ConfigureAwait(false);
+
+        // ⛔ R1-05: межа - ДО читання плану й постановки в чергу (див. `MaxOverwriteRows`).
+        if (overwriteRows is { Count: > MaxOverwriteRows })
+        {
+            throw new BusinessRuleException(
+                "ECR-IMP-0422",
+                $"More than {MaxOverwriteRows} rows are marked for overwrite: nothing was applied.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = TooManyOverwriteRowsKey,
+                    ["maxRows"] = MaxOverwriteRows.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
+        }
 
         var pendingCount = await importer
             .CountPendingChangesAsync(documentId, previewToken, overwriteRows, ct).ConfigureAwait(false);
