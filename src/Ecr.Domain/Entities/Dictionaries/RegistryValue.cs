@@ -263,6 +263,19 @@ public sealed class RegistryValue : Entity<long>
             DateTime dt => dt,
             DateOnly d => d.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc),
             string s when CellDateParser.TryParse(s, out var parsed) => parsed,
+
+            // ⛔ Y5-02 (аудит 7): CSV довідника, збережений в Excel, несе дату коротким
+            // форматом регіону (`4/1/2024` в en-US — 1 квітня, в en-GB/uk — 4 січня).
+            // Розбір відмовляє, а людині — окремий ключ із порадою писати РРРР-ММ-ДД,
+            // а не «не є датою» на значенні, яке на вигляд — дата.
+            string s when CellDateParser.IsAmbiguousSlashDate(s) => throw new DomainException(
+                "ECR-REG-0422",
+                $"Дата «{s}» неоднозначна: день і місяць можна переставити.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-REG-0422.valueAmbiguousDate",
+                    ["value"] = s,
+                }),
             _ => throw new DomainException(
                 "ECR-REG-0422",
                 $"Значення «{value}» не є датою.",

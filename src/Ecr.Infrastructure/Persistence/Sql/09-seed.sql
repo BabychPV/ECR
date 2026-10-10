@@ -7503,6 +7503,9 @@ USING (VALUES
     (N'err.ECR-CELL-4223.importInactiveEntry', N'en', N'The registry entry with this code is switched off and cannot be chosen.', 1),
     (N'err.ECR-CELL-4223.importEntryNotValidOnDate', N'en', N'The registry entry with this code is not valid on the last day of the period and cannot be chosen.', 1)
     -- COLL:r7y5-03-lookup-preview ── кінець секції ──
+    -- COLL:r7y5-02-ambiguous-date ── R7-Y5 / Y5-02: неоднозначна слеш-дата (4/1/2024) у CSV довідника — відмова з порадою РРРР-ММ-ДД, а не переставлені день і місяць; ru/kz — порцією COLL:r7y5-02-ambiguous-date нижче ──
+    ,(N'err.ECR-REG-0422.valueAmbiguousDate', N'en', N'The date "{value}" is ambiguous: its day and month can be swapped (Excel writes dates in the format of your regional settings). Write the date as YYYY-MM-DD.', 1)
+    -- COLL:r7y5-02-ambiguous-date ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -18610,6 +18613,17 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:r7y5-03-lookup-preview ── кінець секції ──
+
+-- COLL:r7y5-02-ambiguous-date ── ru/kz: R7-Y5 / Y5-02: неоднозначна слеш-дата (4/1/2024) у CSV довідника — відмова з порадою РРРР-ММ-ДД, а не переставлені день і місяць; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-REG-0422.valueAmbiguousDate', N'ru', N'Дата «{value}» неоднозначна: день и месяц можно поменять местами (Excel записывает даты в формате региональных настроек). Запишите дату как ГГГГ-ММ-ДД.'),
+    (N'err.ECR-REG-0422.valueAmbiguousDate', N'kz', N'«{value}» күні екіұшты: күн мен айдың орнын ауыстыруға болады (Excel күндерді аймақтық баптаулар пішімінде жазады). Күнді ЖЖЖЖ-АА-КК түрінде жазыңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:r7y5-02-ambiguous-date ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

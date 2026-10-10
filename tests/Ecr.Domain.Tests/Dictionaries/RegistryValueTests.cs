@@ -86,4 +86,34 @@ public sealed class RegistryValueTests
 
         Assert.Equal(new DateTime(2026, 1, 15, 0, 0, 0, DateTimeKind.Utc), value.ValueDate);
     }
+
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait("Finding", "Y5-02")]
+    [InlineData("4/1/2024")]
+    [InlineData("12/11/2025")]
+    public void Неоднозначна_слеш_дата_довідника_відхиляється_окремим_ключем(string text)
+    {
+        // ⛔ Y5-02 (аудит 7): день і місяць слеш-дати з Excel переставні — розбір відмовляє.
+        var value = new RegistryValue(registryEntryId: 1, registryFieldDefId: 2);
+
+        var error = Assert.Throws<DomainException>(() => value.Set(CellDataType.Date, text, unitId: null));
+
+        Assert.Equal("ECR-REG-0422", error.ErrorCode);
+        Assert.Equal("err.ECR-REG-0422.valueAmbiguousDate", error.Details!["messageKey"]);
+        Assert.Equal(text, error.Details["value"]);
+        Assert.Null(value.ValueDate);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait("Finding", "Y5-02")]
+    public void Однозначна_слеш_дата_довідника_розбирається_день_місяць()
+    {
+        var value = new RegistryValue(registryEntryId: 1, registryFieldDefId: 2);
+
+        value.Set(CellDataType.Date, "13/4/2024", unitId: null);
+
+        Assert.Equal(new DateTime(2024, 4, 13, 0, 0, 0, DateTimeKind.Utc), value.ValueDate);
+    }
 }

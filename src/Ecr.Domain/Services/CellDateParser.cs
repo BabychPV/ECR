@@ -33,6 +33,18 @@ namespace Ecr.Domain.Services;
 /// <c>DateTime.TryParse</c> — Domain нічого не референсить (`LayerRulesTests`,
 /// правило 1), тож спільний розбір може жити лише тут; Application лишається
 /// споживачем, як і був.
+///
+/// ⛔ Y5-02 (аудит 7): СЛЕШ-дата, де обидві перші частини ≤ 12 і різні
+/// (<c>4/1/2024</c>), — НЕОДНОЗНАЧНА, і розбір відмовляє, а не вгадує. Excel
+/// пише дату в CSV коротким форматом регіону: у en-US це <c>M/d/yyyy</c>, у
+/// en-GB/uk — <c>d/M/yyyy</c>, і з самого рядка порядок не відновити. Доти
+/// <c>4/1/2024</c> збігався з точним <c>d/M/yyyy</c> (4 січня), а
+/// <c>4/13/2024</c> провалювався у фолбек Invariant (<c>M/d</c>, 13 квітня):
+/// в одному файлі частина дат тихо мінялася місцями. Те саме правило, що для
+/// чисел (рішення 2026-09-29: «неоднозначне — відмова»). Фолбек для
+/// слеш-дат прибрано: що не пройшло точних форматів, далі не вгадується.
+/// Однозначні слеш-дати (<c>13/4/2024</c>, <c>4/4/2024</c>, <c>2024/04/01</c>)
+/// читаються, як і раніше.
 /// </remarks>
 public static class CellDateParser
 {
@@ -55,7 +67,34 @@ public static class CellDateParser
         "dd.MM.yyyy HH:mm:ss",
         "dd'/'MM'/'yyyy",
         "d'/'M'/'yyyy",
+
+        // Рік спереду через слеш — однозначний; доти його читав фолбек, якого для
+        // слеш-дат більше немає (Y5-02).
+        "yyyy'/'MM'/'dd",
+        "yyyy'/'M'/'d",
     ];
+
+    /// <summary>
+    /// Чи слеш-дата неоднозначна: обидві перші частини — числа від 1 до 12 і різні
+    /// (<c>4/1/2024</c> — 1 квітня в en-US і 4 січня в en-GB/uk).
+    /// </summary>
+    /// <param name="text">Текст дати.</param>
+    public static bool IsAmbiguousSlashDate(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return false;
+        }
+
+        var parts = text.Trim().Split('/');
+
+        return parts.Length == 3
+               && int.TryParse(parts[0], NumberStyles.None, CultureInfo.InvariantCulture, out var first)
+               && int.TryParse(parts[1], NumberStyles.None, CultureInfo.InvariantCulture, out var second)
+               && first is >= 1 and <= 12
+               && second is >= 1 and <= 12
+               && first != second;
+    }
 
     /// <summary>Розбирає дату з тексту; <c>false</c> — формат не розпізнано.</summary>
     /// <param name="text">Текст дати.</param>
@@ -74,6 +113,12 @@ public static class CellDateParser
         const DateTimeStyles Styles =
             DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal;
 
+        // ⛔ Y5-02: неоднозначна слеш-дата — відмова, а не вгадування порядку.
+        if (IsAmbiguousSlashDate(trimmed))
+        {
+            return false;
+        }
+
         if (DateTime.TryParseExact(trimmed, ExactFormats, CultureInfo.InvariantCulture, Styles, out value))
         {
             return true;
@@ -82,6 +127,14 @@ public static class CellDateParser
         // ⚠ Фолбек лишається, але вже НЕ бачить неоднозначного `d.M.yyyy`:
         // його перехопив точний розбір вище. Тут доїжджають формати з мітками
         // часу й зонами, які `ExactFormats` не перелічує.
+        // ⛔ Y5-02: і НЕ бачить слеш-дат — Invariant читає їх як `M/d`, тобто
+        // `4/13/2024` ставало 13 квітня поруч із `4/1/2024` = 4 січня з точного розбору.
+        if (trimmed.Contains('/', StringComparison.Ordinal))
+        {
+            value = default;
+            return false;
+        }
+
         return DateTime.TryParse(trimmed, CultureInfo.InvariantCulture, Styles, out value);
     }
 }
