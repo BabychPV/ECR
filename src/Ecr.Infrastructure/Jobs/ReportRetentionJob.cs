@@ -39,6 +39,14 @@ namespace Ecr.Infrastructure.Jobs;
 /// <c>DeleteBehavior.Restrict</c> (не каскадний), і видалення батька першим
 /// впало б порушенням зовнішнього ключа.
 /// </para>
+/// <para>
+/// ⛔ P1-08. Тим самим нічним прогоном прибираються й ЗАЙВІ прогони перевірки документа
+/// (<c>wf.ValidationResult</c>): кожне «Перевірити» дописує рядок із повним <c>MessagesJson</c> (сотні КБ для
+/// документа з порожніми обов'язковими полями), і до цієї ретенції рядки видалялися лише разом із документом
+/// (<c>DocumentDeletionStore</c>). Лишаються <see cref="ValidationRunsKept"/> НАЙНОВІШИХ прогонів на кожну пару
+/// <c>(DocumentId, PeriodKey)</c>: усі читачі (<c>GetLatestAsync</c>, лічильники переліку, міграція версії) беруть
+/// лише останній прогін, а історію «коли документ став валідним» тримають свіжі прогони.
+/// </para>
 /// </remarks>
 public sealed class ReportRetentionJob(EcrDbContext db, IClock clock) : IBackgroundJob
 {
@@ -65,6 +73,19 @@ public sealed class ReportRetentionJob(EcrDbContext db, IClock clock) : IBackgro
     /// ніч: решту доїсть завтрашній прогін.
     /// </remarks>
     private const int MaxBatchesPerRun = 20;
+
+    /// <summary>Скільки НАЙНОВІШИХ прогонів перевірки лишається на кожну пару «документ + період» (P1-08).</summary>
+    internal const int ValidationRunsKept = 20;
+
+    /// <summary>Скільки прогонів перевірки видаляє один оператор <c>DELETE</c> (P1-08).</summary>
+    /// <remarks>
+    /// Рядок несе <c>nvarchar(max)</c> із повідомленнями, тож межа тримає розмір транзакції й журналу, а не лише
+    /// число рядків: забій, накопичений за місяці без ретенції, не перетворюється на один гігантський оператор.
+    /// </remarks>
+    internal const int ValidationBatchSize = 1_000;
+
+    /// <summary>Скільки батчів прогонів перевірки забирає один нічний прогін; решту доїдає наступний.</summary>
+    internal const int MaxValidationBatchesPerRun = 20;
 
     /// <summary>
     /// Зрізи, молодші за цю межу (за <see cref="Domain.Entities.Reporting.ReportSnapshot.BuiltAt"/>),
@@ -110,6 +131,50 @@ public sealed class ReportRetentionJob(EcrDbContext db, IClock clock) : IBackgro
             await MaintenanceRunFailure.RecordAsync(db, run, ex, clock.UtcNow).ConfigureAwait(false);
             throw;
         }
+    }
+
+    /// <summary>
+    /// P1-08: лишає <see cref="ValidationRunsKept"/> найновіших прогонів перевірки на «документ + період», решту
+    /// видаляє обмеженими батчами.
+    /// </summary>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Скільки прогонів видалено.</returns>
+    /// <remarks>
+    /// ⚠ Один оператор: <c>ROW_NUMBER</c> за <c>(DocumentId, PeriodKey)</c> від найновішого (<c>RunAt DESC, Id DESC</c>
+    /// — той самий порядок, що вибирає «останній» у <c>GetLatestAsync</c>) іде по <c>IX_ValidationResult_Doc</c> без
+    /// читання <c>MessagesJson</c>; <c>TOP</c> зупиняє пошук на першому ж батчі. Нові прогони лише ЗБІЛЬШУЮТЬ ранг
+    /// старих, тож гонка з паралельним «Перевірити» не може зробити видалення неправомірним.
+    /// </remarks>
+    private async Task<int> PruneValidationResultsAsync(CancellationToken ct)
+    {
+        var total = 0;
+
+        for (var batch = 0; batch < MaxValidationBatchesPerRun; batch++)
+        {
+            var deleted = await db.Database
+                .ExecuteSqlAsync(
+                    $"""
+                    DELETE FROM wf.ValidationResult
+                     WHERE Id IN (
+                           SELECT TOP ({ValidationBatchSize}) r.Id
+                             FROM (SELECT Id,
+                                          ROW_NUMBER() OVER (PARTITION BY DocumentId, PeriodKey
+                                                             ORDER BY RunAt DESC, Id DESC) AS Rn
+                                     FROM wf.ValidationResult) AS r
+                            WHERE r.Rn > {ValidationRunsKept});
+                    """,
+                    ct)
+                .ConfigureAwait(false);
+
+            total += deleted;
+
+            if (deleted < ValidationBatchSize)
+            {
+                break;
+            }
+        }
+
+        return total;
     }
 
     /// <summary>Власне прибирання; прогін уже відкрито.</summary>
@@ -200,9 +265,11 @@ public sealed class ReportRetentionJob(EcrDbContext db, IClock clock) : IBackgro
             }
         }
 
+        var validationDeleted = await PruneValidationResultsAsync(ct).ConfigureAwait(false);
+
         run.Complete(
             "Succeeded",
-            $$"""{"snapshotsDeleted":{{totalSnapshots}},"rowsDeleted":{{totalRows}},"batches":{{batches}}}""",
+            $$"""{"snapshotsDeleted":{{totalSnapshots}},"rowsDeleted":{{totalRows}},"batches":{{batches}},"validationResultsDeleted":{{validationDeleted}}}""",
             clock.UtcNow);
 
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
