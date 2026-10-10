@@ -15828,7 +15828,7 @@ OPTION (RECOMPILE);
 GO
 -- COLL:warn-grid ── кінець секції ──
 
--- COLL:smtp-probe ── ru/kz проби SMTP-каналу без адресатів (D-256); власна порція ──
+-- COLL:smtp-probe ── ru/kz проби SMTP-каналу без адресатів (D-263); власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val
   FROM (VALUES
