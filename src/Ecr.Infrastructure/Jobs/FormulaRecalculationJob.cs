@@ -108,8 +108,10 @@ public sealed class FormulaRecalculationJob(RecalculationService recalculation, 
     /// <remarks>
     /// ⚠ За кодом і ключем каталогу, не за текстом: той самий <c>ECR-DOC-4091</c> несе й
     /// «структуру змінено» (<c>structureChanged</c>) — це вже не черга, а інша версія шаблону.
+    /// ⚠ <c>internal</c>: той самий вердикт читає <see cref="RecalculationJob"/> (Y1-02) — одна
+    /// класифікація на обидві задачі, не копія.
     /// </remarks>
-    private static bool IsSheetBeingSubmitted(ConcurrencyConflictException ex)
+    internal static bool IsSheetBeingSubmitted(ConcurrencyConflictException ex)
         => ex.ErrorCode == Domain.Errors.ErrorCodes.SheetBusy
            && ex.Details?.GetValueOrDefault("messageKey") is SheetBeingSubmittedKey;
 

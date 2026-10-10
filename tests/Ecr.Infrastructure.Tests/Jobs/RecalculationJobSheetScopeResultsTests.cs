@@ -290,6 +290,82 @@ public sealed class RecalculationJobSheetScopeResultsTests(SqlServerFixture sql)
             && r.Status == "Failed"));
     }
 
+    /// <summary>
+    /// Y1-02: на 2-му аркуші саме йде подання (<c>EnterEditNoWaitAsync</c> → «аркуш подається») у мить
+    /// перемикання — повторюється лише коротка транзакція перемикання, методології не перераховуються.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ МУТАЦІЙНИЙ ДОКАЗ: прибрати цикл повтору навколо <c>CompleteAsync</c> → задача кидає (відкладається),
+    /// результати лишаються від R1, червоний. Детерміновано: перші дві спроби взяти аркуш без черги
+    /// відмовляють, третя — ні; паузу між повторами обнулено.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "Y1-02")]
+    public async Task Подання_аркуша_в_мить_перемикання_повторює_лише_перемикання()
+    {
+        var arranged = await ArrangeAsync(submitSecondSheet: false);
+        await RunJobAsync(arranged, SheetRequest(arranged, sheetDefId: null), label: 1_000m);
+
+        var gate = Gate(arranged, busyTimes: 2);
+        var runner = await RunJobAsync(arranged, SheetRequest(arranged, sheetDefId: null), label: 2_000m, gate: gate);
+
+        Assert.Equal(1, runner.Calls);
+        await gate.Received(3).EnterEditNoWaitAsync(
+            arranged.Document.DocumentId, arranged.SecondSheetId, arranged.Document.PeriodKey, Arg.Any<CancellationToken>());
+        Assert.Equal(["A|2001", "B|2001"], await ShapeAsync(arranged));
+    }
+
+    /// <summary>
+    /// Y1-02: подання не минуло за всі повтори — задача ВІДКЛАДАЄТЬСЯ (<see cref="JobDeferredException"/>),
+    /// а не падає в ретрай (<c>ConcurrencyConflictException</c> → 3 спроби → <c>Failed</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ МУТАЦІЙНИЙ ДОКАЗ: прибрати перетворення в <c>catch</c> задачі → летить
+    /// <c>ConcurrencyConflictException</c>, червоний. Той самий шлях бере й відмова фази формул
+    /// (<c>RecalculationService.EnterSheetsAsync</c>).
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "Y1-02")]
+    public async Task Тривале_подання_аркуша_відкладає_задачу_а_не_провалює()
+    {
+        var arranged = await ArrangeAsync(submitSecondSheet: false);
+        await RunJobAsync(arranged, SheetRequest(arranged, sheetDefId: null), label: 1_000m);
+
+        var gate = Gate(arranged, busyTimes: int.MaxValue);
+        var thrown = await Record.ExceptionAsync(() => RunJobAsync(
+            arranged, SheetRequest(arranged, sheetDefId: null), label: 2_000m, gate: gate));
+
+        // Відкладення виконавець обробляє ДО `JobRetryPolicy` — спроба не рахується.
+        Assert.IsType<JobDeferredException>(thrown);
+        Assert.Equal(["A|1001", "B|1001"], await ShapeAsync(arranged));
+    }
+
+    /// <summary>
+    /// Фейк воріт аркуша: перший аркуш береться з очікуванням як чернетка, другий без черги
+    /// відмовляє «аркуш подається» перші <paramref name="busyTimes"/> разів.
+    /// </summary>
+    private static ISheetEditGate Gate(Arranged arranged, int busyTimes)
+    {
+        var gate = Substitute.For<ISheetEditGate>();
+        gate.EnterEditAsync(Arg.Any<long>(), Arg.Any<int>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+            .Returns(DocumentStatus.Draft);
+
+        var refused = 0;
+        gate.EnterEditNoWaitAsync(Arg.Any<long>(), Arg.Any<int>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+            .Returns(_ => ++refused <= busyTimes
+                ? Task.FromException<DocumentStatus>(new ConcurrencyConflictException(
+                    "ECR-DOC-4091",
+                    $"Аркуш {arranged.SecondSheetId} подається.",
+                    new Dictionary<string, object?> { ["messageKey"] = "err.ECR-DOC-4091.sheetBeingSubmitted" }))
+                : Task.FromResult(DocumentStatus.Draft));
+
+        return gate;
+    }
+
     private static async Task ClosePeriodAsync(Arranged arranged)
     {
         await using var db = arranged.Builder.CreateContext();
@@ -414,20 +490,27 @@ public sealed class RecalculationJobSheetScopeResultsTests(SqlServerFixture sql)
     private static LocalizedText Name(string value)
         => new(new Dictionary<string, string> { ["en"] = value });
 
-    private static async Task RunJobAsync(
-        Arranged arranged, RecalculationRequest request, decimal label, Func<Task>? during = null)
+    private static async Task<WritingRunner> RunJobAsync(
+        Arranged arranged, RecalculationRequest request, decimal label, Func<Task>? during = null,
+        ISheetEditGate? gate = null)
     {
         await using var db = arranged.Builder.CreateContext();
         var clock = new TestClock(Now);
+        var runner = new WritingRunner(arranged, label, during);
 
         var job = new RecalculationJob(
             db,
-            new WritingRunner(arranged, label, during),
+            runner,
             RunHandler(db, clock),
             FormulaService(),
-            clock);
+            clock,
+            sheetGate: gate)
+        {
+            CompletionBusyDelay = TimeSpan.Zero,
+        };
 
         await job.ExecuteAsync(request, NoOpProgress.Instance, CancellationToken.None);
+        return runner;
     }
 
     private static RunCalculationHandler RunHandler(EcrDbContext db, TestClock clock)
@@ -492,10 +575,14 @@ public sealed class RecalculationJobSheetScopeResultsTests(SqlServerFixture sql)
     {
         private Func<Task>? _during = during;
 
+        /// <summary>Скільки разів оркестратор рахував прив'язки (Y1-02: повтор перемикання — без перерахунку).</summary>
+        public int Calls { get; private set; }
+
         public async Task<ModuleProfile> RunAsync(
             long calculationRunId, long documentId, PeriodKey periodKey,
             IReadOnlyList<CalculationBindingRef> bindings, IJobProgress progress, CancellationToken ct)
         {
+            Calls++;
             if (bindings.Count == 0)
             {
                 return new ModuleProfile();

@@ -92,6 +92,13 @@ public sealed partial class RecalculationJob(
     /// </remarks>
     private const int FormulaPhaseShare = 40;
 
+    /// <summary>Скільки разів повторити транзакцію перемикання, коли аркуш саме подається (Y1-02).</summary>
+    private const int CompletionBusyAttempts = 6;
+
+    /// <summary>Пауза між повторами транзакції перемикання (Y1-02).</summary>
+    /// <remarks>⚠ <c>init</c> — лише заради тестів: секунди очікування там не потрібні.</remarks>
+    internal TimeSpan CompletionBusyDelay { get; init; } = TimeSpan.FromSeconds(5);
+
     /// <summary>Налаштування розбору завдання; спільні на всі виклики.</summary>
     /// <remarks>
     /// Один екземпляр на клас, а не на виклик: <c>JsonSerializerOptions</c>
@@ -471,14 +478,32 @@ public sealed partial class RecalculationJob(
             // документа, а методологічна фаза триває хвилини: подання аркуша чи закриття
             // періоду в цьому вікні інакше мовчки підмінило б числа поданого/затвердженого
             // аркуша (живе посилання, `SubmitSheetHandler`) або записало б у закритий період.
+            //
+            // ⛔ Y1-02: «аркуш подається» (`EnterEditNoWaitAsync` на 2-му й далі аркуші, X6-02) минає
+            // за секунди. Повторюється лише КОРОТКА транзакція перемикання — методології вже
+            // пораховано, і ретрай усієї задачі перерахував би їх заново саме в пік дедлайну. Відмова
+            // відкочує перемикання цілком (перевірка — перша в транзакції), тож повтор безпечний.
+            // Вичерпано — задача відкладається (нижче, `catch`), а не падає.
             foreach (var (period, (run, profile)) in periodRuns)
             {
                 var guards = completionGuards.GetValueOrDefault(period) ?? [];
-                await runs
-                    .CompleteAsync(
-                        run.Id, profile, ct, carryOvers.GetValueOrDefault(period),
-                        token => GuardCompletionAsync(projectId, period, guards, request.ApprovedBy is not null, token))
-                    .ConfigureAwait(false);
+                for (var attempt = 1; ; attempt++)
+                {
+                    try
+                    {
+                        await runs
+                            .CompleteAsync(
+                                run.Id, profile, ct, carryOvers.GetValueOrDefault(period),
+                                token => GuardCompletionAsync(projectId, period, guards, request.ApprovedBy is not null, token))
+                            .ConfigureAwait(false);
+                        break;
+                    }
+                    catch (ConcurrencyConflictException busy)
+                        when (attempt < CompletionBusyAttempts && FormulaRecalculationJob.IsSheetBeingSubmitted(busy))
+                    {
+                        await Task.Delay(CompletionBusyDelay, ct).ConfigureAwait(false);
+                    }
+                }
             }
 
             // L-4: «No matching rule … row N». Не помилка й не відмова - решта рядків уже
@@ -549,6 +574,17 @@ public sealed partial class RecalculationJob(
                 }
 
                 await db.SaveChangesAsync(ct).ConfigureAwait(false);
+            }
+
+            // ⛔ Y1-02: «аркуш подається» (фаза формул — `RecalculationService.EnterSheetsAsync`, або
+            // вичерпані повтори перемикання вище) — не провал і не ретрай: `JobRetryPolicy` дає лише
+            // 30/60/120 с, що вичерпалось би за годину дедлайну, і прогін лишився б `Failed`, а
+            // методології — застарілими (`staleMethodologyResults` блокує наступне «Подати»). Як і
+            // `FormulaRecalculationJob`: задача повертається в чергу, не рахуючи спроби (межа —
+            // `JobDeferral.MaxDeferral`). Незавершені прогони вже позначено вище — повтор створить нові.
+            if (ex is ConcurrencyConflictException busy && FormulaRecalculationJob.IsSheetBeingSubmitted(busy))
+            {
+                throw new JobDeferredException(RecalculationDocumentLock.DeferDelay, busy.Message);
             }
 
             throw;
@@ -994,7 +1030,8 @@ public sealed partial class RecalculationJob(
         // ⛔ X6-02: чекати дозволено лише перший аркуш — поки нічого не тримаємо. Далі без
         // черги: інакше, чекаючи аркуш N із S на попередніх, перемикання ставило б за собою
         // подання тих аркушів і автозбереження їхніх редакторів. Відмова (`ECR-DOC-4091`)
-        // відкочує перемикання, як і `recalcStateChanged`, а ретрай задачі повторює прогін.
+        // відкочує перемикання, як і `recalcStateChanged`; викликач повторює лише цю транзакцію,
+        // а вичерпавши повтори — відкладає задачу (Y1-02).
         var holdsAny = false;
 
         foreach (var guard in guards.OrderBy(g => g.DocumentId))

@@ -932,7 +932,7 @@ public sealed class RecalculationService(
     /// за собою подання тих аркушів, а за ними — автозбереження всіх, хто їх правив
     /// (аж до 409 «аркуш подається»). Відмова відкочує транзакцію запису й звільняє
     /// все взяте; фонова задача повторює прогін пізніше (<c>FormulaRecalculationJob</c>
-    /// відкладає себе, <c>RecalculationJob</c> — ретрай).
+    /// відкладає себе, <c>RecalculationJob</c> — теж відкладає себе, Y1-02).
     /// </remarks>
     private async Task<IReadOnlySet<int>> EnterSheetsAsync(
         long documentId, PeriodKey periodKey, IEnumerable<int> sheetDefIds, int? heldSheetDefId, CancellationToken ct)
