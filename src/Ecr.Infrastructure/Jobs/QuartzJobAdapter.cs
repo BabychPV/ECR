@@ -72,13 +72,20 @@ public sealed partial class QuartzJobAdapter(
         // одночасно. Понад межу задача не чекає на потоці пулу (тримала б його, як лок у I2), а отримує
         // одноразовий триґер через відступ — і рядок лишається Queued. Перевірка ДО виміру затримки старту:
         // відкладена задача ще не взята виконавцем. Порт необов'язковий, як і решта нижче.
+        //
+        // ⛔ Z5-04 / R2-03: (1) черга чекаючих - FIFO (`TryEnter(тип, jobId)`): вільне місце дістається тій, що чекає
+        // найдовше, а не тій, чий триґер відкладення спрацював першим; (2) очікування місця НЕ запускає відлік стелі
+        // відкладень (30 хв, `JobDeferral.MaxDeferral`): вона міряє лок ресурсу, а не чергу за потоком Excel. Доти
+        // триґер очікування ніс «момент першого відкладення» = вхід у чергу, і книга, що простояла в черзі довго,
+        // першим же відкладенням за ЛОКОМ була вже «вичерпаною» й закривалася Failed. Тут лишається лише той відлік,
+        // що вже був (задача могла відкладатись за локом до цього).
         var limiter = provider.GetService<QuartzJobTypeLimiter>();
-        using var typeSlot = limiter?.TryEnter(job.GetType());
+        using var typeSlot = limiter?.TryEnter(job.GetType(), jobId);
         if (limiter is not null && typeSlot is null)
         {
             LogJobTypeLimitReached(logger, jobId, typeName ?? "—", limiter.ExcelMaxConcurrency, limiter.RetryDelay);
             await ScheduleDeferredAsync(
-                    context, CorrelationOf(context), clock, limiter.RetryDelay, DeferredSince(context) ?? clock.UtcNow)
+                    context, CorrelationOf(context), clock, limiter.RetryDelay, DeferredSince(context))
                 .ConfigureAwait(false);
 
             // Тіло злиття (O1), якщо було, лишається задачі до наступного триґера.
@@ -518,18 +525,25 @@ public sealed partial class QuartzJobAdapter(
     /// <see cref="QuartzJobScheduler.RetryAttemptKey"/> — спроба не рахується.
     /// </summary>
     private static async Task ScheduleDeferredAsync(
-        IJobExecutionContext context, string correlationId, IClock clock, TimeSpan delay, DateTime since)
+        IJobExecutionContext context, string correlationId, IClock clock, TimeSpan delay, DateTime? since)
     {
         var jobId = context.JobDetail.Key.Name;
 
-        var trigger = TriggerBuilder.Create()
+        var builder = TriggerBuilder.Create()
             .ForJob(context.JobDetail.Key)
             .WithIdentity($"{jobId}-deferred-{Guid.NewGuid():N}-trigger")
             .UsingJobData(
                 QuartzJobScheduler.RetryAttemptKey, CurrentAttempt(context).ToString(CultureInfo.InvariantCulture))
-            .UsingJobData(QuartzJobScheduler.CorrelationKey, correlationId)
-            // Момент ПЕРШОГО відкладення — далі з триґера в триґер (стеля, борг O1).
-            .UsingJobData(JobDeferral.QuartzSinceKey, since.Ticks.ToString(CultureInfo.InvariantCulture))
+            .UsingJobData(QuartzJobScheduler.CorrelationKey, correlationId);
+
+        // Момент ПЕРШОГО відкладення - далі з триґера в триґер (стеля, борг O1). `null` - відліку немає (очікування
+        // місця в межі типу його не починає, Z5-04): ключ не пишеться.
+        if (since is { } first)
+        {
+            builder.UsingJobData(JobDeferral.QuartzSinceKey, first.Ticks.ToString(CultureInfo.InvariantCulture));
+        }
+
+        var trigger = builder
             .StartAt(new DateTimeOffset(clock.UtcNow, TimeSpan.Zero).Add(delay))
             .Build();
 
