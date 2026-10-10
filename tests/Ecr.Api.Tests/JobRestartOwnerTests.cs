@@ -111,7 +111,7 @@ public sealed class JobRestartOwnerTests
         Assert.Equal(expected, Assert.IsType<JobStatus>(status.Value).ResultUrl);
 
         var list = Assert.IsType<OkObjectResult>(
-            (await Controller().List(null, null, mine: true, null, CancellationToken.None)).Result);
+            (await Controller().List(null, null, mine: true, null, hideRoutine: false, CancellationToken.None)).Result);
         Assert.Equal(expected, Assert.Single(Assert.IsAssignableFrom<IReadOnlyList<JobSummary>>(list.Value)).ResultUrl);
     }
 
@@ -129,7 +129,7 @@ public sealed class JobRestartOwnerTests
             ]);
 
         var list = Assert.IsType<OkObjectResult>(
-            (await Controller().List(null, null, mine: true, null, CancellationToken.None)).Result);
+            (await Controller().List(null, null, mine: true, null, hideRoutine: false, CancellationToken.None)).Result);
 
         Assert.All(Assert.IsAssignableFrom<IReadOnlyList<JobSummary>>(list.Value), s => Assert.Null(s.ResultUrl));
 

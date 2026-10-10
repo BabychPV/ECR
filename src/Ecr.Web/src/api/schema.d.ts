@@ -4616,6 +4616,8 @@ export interface paths {
                     mine?: boolean;
                     /** @description Скільки повернути, 1…50. */
                     limit?: number;
+                    /** @description Без успішних перерахунків формул — для шухляди «Мої задачі». */
+                    hideRoutine?: boolean;
                 };
                 header?: never;
                 path?: never;

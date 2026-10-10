@@ -361,6 +361,9 @@ public sealed class ListJobsHandler(
     /// <c>System.ViewHealth</c>.
     /// </param>
     /// <param name="limit">Скільки повернути, 1…<see cref="MaxLimit"/>; <c>null</c> — стеля.</param>
+    /// <param name="hideRoutine">
+    /// <c>true</c> — без успішних каскадних перерахунків формул (F4-01, <see cref="JobListFilter.HideRoutine"/>).
+    /// </param>
     /// <param name="ct">Скасування.</param>
     /// <remarks>
     /// ⛔ <b>Межа доступу, а не зручність</b> (та сама, що в
@@ -386,7 +389,7 @@ public sealed class ListJobsHandler(
     /// <exception cref="AccessDeniedException">Анонім, або чужі задачі без права.</exception>
     /// <exception cref="BusinessRuleException">Невідомий стан або розмір поза межами.</exception>
     public async Task<IReadOnlyList<JobSummary>> HandleAsync(
-        string? state, string? code, bool mine, int? limit, CancellationToken ct)
+        string? state, string? code, bool mine, int? limit, bool hideRoutine, CancellationToken ct)
     {
         // ⚠ Анонім не має «своїх» задач за визначенням: `mine` для нього не
         // послаблення права, а порожнє поняття. Тому 401 стоїть ПЕРЕД
@@ -437,7 +440,7 @@ public sealed class ListJobsHandler(
         // ⛔ `userId` — з `ICurrentUser`, і це єдине джерело автора в усьому
         // ланцюгу. Мутація «підставити сюди число з запиту» неможлива: такого
         // числа в сигнатурі немає.
-        var filter = new JobListFilter(state, code, mine ? userId : null);
+        var filter = new JobListFilter(state, code, mine ? userId : null, hideRoutine);
 
         var items = await jobs.ListRecentAsync(filter, limit ?? MaxLimit, ct).ConfigureAwait(false);
 

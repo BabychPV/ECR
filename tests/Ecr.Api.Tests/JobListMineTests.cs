@@ -332,6 +332,62 @@ public sealed class JobListMineTests(SqlServerFixture sql)
         Assert.Equal(JsonValueKind.Null, systemStatus.GetProperty("createdByUserId").ValueKind);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "F4-01")]
+    public async Task Шухляда_бачить_експорт_після_60_успішних_перерахунків_формул()
+    {
+        using var app = new EcrApiFactory(sql);
+
+        var author = await SignedInAsync(app).ConfigureAwait(true);
+        using var client = author.Client;
+
+        // ⚠ Час — відносно одного «зараз», з явними зсувами: експорт найстаріший, перерахунки
+        // новіші за нього по секунді кожен. Без зсувів порядок за UpdatedAt був би випадковим.
+        var now = DateTime.UtcNow;
+        var recalcCode = typeof(Ecr.Application.Ports.IFormulaRecalculationJob).FullName!;
+        var exportId = await AddJobAsync(
+            author.UserId, typeof(Ecr.Application.Ports.IExcelExportJob).FullName!, "Succeeded", now.AddMinutes(-10))
+            .ConfigureAwait(true);
+        var failedRecalc = await AddJobAsync(author.UserId, recalcCode, "Failed", now.AddMinutes(-9))
+            .ConfigureAwait(true);
+
+        for (var i = 0; i < 60; i++)
+        {
+            await AddJobAsync(author.UserId, recalcCode, "Succeeded", now.AddMinutes(-8).AddSeconds(i))
+                .ConfigureAwait(true);
+        }
+
+        // ⛔ Сама вада: без `hideRoutine` стеля 50 заповнена успішними перерахунками, і експорт
+        // у відповідь не потрапляє. Якщо цей рядок почервоніє — стеля чи порядок змінились, і
+        // тест нижче вже нічого не доводить.
+        var plain = await IdsAsync(client, app, "mine=true").ConfigureAwait(true);
+        Assert.DoesNotContain(exportId, plain, StringComparer.Ordinal);
+
+        // ⛔ Мутаційний доказ: прибрати предикат `HideRoutine` з `JobProgressStore.ListRecentAsync`
+        // (або не передати прапорець у `JobListFilter` в `ListJobsHandler`) — і експорт зникне.
+        var drawer = await IdsAsync(client, app, "mine=true&hideRoutine=true").ConfigureAwait(true);
+        Assert.Equal(
+            new[] { failedRecalc, exportId }.Order(StringComparer.Ordinal),
+            drawer.Order(StringComparer.Ordinal));
+    }
+
+    /// <summary>Один рядок <c>itg.JobProgress</c> із заданим кодом, кінцевим станом і моментом.</summary>
+    private async Task<string> AddJobAsync(int createdByUserId, string jobCode, string state, DateTime at)
+    {
+        await using var db = Context();
+
+        var jobId = $"{_tag}#{Guid.NewGuid():N}"[..40];
+        var entry = new JobProgress(jobId, jobCode, at, createdByUserId);
+        entry.Finish(state, null, at);
+
+        db.JobProgresses.Add(entry);
+        await db.SaveChangesAsync().ConfigureAwait(false);
+
+        return jobId;
+    }
+
     /// <summary>Ідентифікатори задач із відповіді; падає з текстом сервера на не-200.</summary>
     private static async Task<List<string>> IdsAsync(HttpClient client, EcrApiFactory app, string query)
     {

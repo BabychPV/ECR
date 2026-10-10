@@ -350,6 +350,12 @@ public sealed class JobProgressStore(EcrDbContext db) : IJobProgressStore
             .FirstOrDefaultAsync(ct)
             .ConfigureAwait(false);
 
+    /// <summary>Код рутинної задачі, яку <see cref="JobListFilter.HideRoutine"/> відсікає (F4-01).</summary>
+    private static readonly string FormulaRecalculationJobCode = typeof(IFormulaRecalculationJob).FullName!;
+
+    /// <summary>Успішний кінцевий стан (<c>JobProgress.Finish</c>).</summary>
+    private const string SucceededState = "Succeeded";
+
     /// <inheritdoc />
     public async Task<IReadOnlyList<JobSummary>> ListRecentAsync(
         JobListFilter filter, int limit, CancellationToken ct)
@@ -378,6 +384,15 @@ public sealed class JobProgressStore(EcrDbContext db) : IJobProgressStore
         if (filter.JobCode is { Length: > 0 } code)
         {
             query = query.Where(p => p.JobCode == code);
+        }
+
+        // ⛔ F4-01: рутина відсікається ДО `Take(limit)`. Фільтр після стелі (як клієнтський
+        // `isShownInMyTasks`) не рятує: 50 свіжіших успішних перерахунків формул витісняли
+        // готовий експорт із відповіді ще до того, як клієнт міг їх сховати. State/JobCode — у
+        // INCLUDE `IX_JobProgress_CreatedBy_UpdatedAt`, тож предикат перевіряється в індексі.
+        if (filter.HideRoutine)
+        {
+            query = query.Where(p => !(p.JobCode == FormulaRecalculationJobCode && p.State == SucceededState));
         }
 
         // ⚠ Лівий join: системна задача (автор null) чи видалений автор
