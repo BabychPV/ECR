@@ -109,6 +109,8 @@ interface CellChangeFilter {
   readonly author?: number | null;
   readonly origin?: string | null;
   readonly lateOnly?: boolean;
+  /** Звітний період змін (AN-98): відсів на сервері до сторінки; `null` — усі періоди. */
+  readonly periodKey?: number | null;
   readonly limit?: number;
   readonly cursor?: string | null;
 }
@@ -175,6 +177,10 @@ export function cellChangesQuery(filter: CellChangeFilter): string {
   // а параметр у адресі виглядав би як свідомо обраний фільтр.
   if (filter.lateOnly === true) {
     params.set('lateOnly', 'true');
+  }
+
+  if (filter.periodKey !== null && filter.periodKey !== undefined) {
+    params.set('periodKey', String(filter.periodKey));
   }
 
   if (filter.cursor !== null && filter.cursor !== undefined && filter.cursor.length > 0) {

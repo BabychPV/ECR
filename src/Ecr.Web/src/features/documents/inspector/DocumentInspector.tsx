@@ -438,6 +438,9 @@ function HistoryTab({
       documentId,
       rowKey: cell?.rowKey ?? null,
       columnDefId: cell?.columnDefId ?? null,
+      // AN-98: період іде в запит — сервер віддає 50 НАЙНОВІШИХ змін саме цього періоду, а не 50 найстаріших
+      // за рік по всіх періодах, з яких клієнт лишав кілька.
+      periodKey,
       limit: 50,
     },
     cell !== null,
@@ -463,7 +466,8 @@ function HistoryTab({
     );
   }
 
-  // ⚠ Журнал адресує комірку ДОКУМЕНТА; звітний період — окрема вісь (`R-A6`).
+  // ⚠ Журнал адресує комірку ДОКУМЕНТА; звітний період — окрема вісь (`R-A6`). Основний відсів уже на сервері
+  // (`periodKey` у запиті); тут лишено страхувальний другий рубіж, як у `GetCellChangesHandler`.
   const items = history.data.items.filter((change) => change.periodKey === periodKey);
 
   if (items.length === 0) {
