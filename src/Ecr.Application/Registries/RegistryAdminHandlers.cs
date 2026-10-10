@@ -62,6 +62,8 @@ public sealed class ListRegistriesHandler(
             ? await registries.GetUserDisplayNamesAsync(updaterIds, ct).ConfigureAwait(false)
             : null;
 
+        var byId = definitions.ToDictionary(d => d.Id);
+
         return definitions
             .Where(d => !RegistryAccess.IsDenied(profile, d.Id))
             .Select(d => new RegistryDefDto(
@@ -99,8 +101,45 @@ public sealed class ListRegistriesHandler(
                 UpdatedAt: d.DefinitionUpdatedAt,
                 UpdatedByDisplayName: d.DefinitionUpdatedByUserId is { } updater
                     ? updaterNames?.GetValueOrDefault(updater)
-                    : null))
+                    : null,
+                AsOfRequired: RequiresAsOf(d, byId)))
             .ToList();
+    }
+
+    /// <summary>
+    /// Чи вимагає читання записів довідника <c>asOf</c> (D1-06): він сам темпоральний або темпоральний
+    /// будь-який батько його ланцюжка композиції - те саме правило, що в <c>GetRegistryEntriesHandler</c> і
+    /// <c>GetRegistryRowsHandler</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Прапорця <c>IsTemporal</c> клієнту мало: частина композиції сама нетемпоральна (це правило опису), але під
+    /// темпоральним батьком читається лише з датою, і піцкер без неї отримував <c>422</c>. Цикл композицій опис
+    /// забороняє, але обхід зупиняється на баченому довіднику.
+    /// </remarks>
+    private static bool RequiresAsOf(RegistryDef definition, Dictionary<int, RegistryDef> byId)
+    {
+        if (definition.IsTemporal)
+        {
+            return true;
+        }
+
+        var seen = new HashSet<int> { definition.Id };
+        var child = definition;
+
+        while (child.Fields.FirstOrDefault(f => f.RelationKind == RegistryRelationKind.Composition
+                                                && f.RefRegistryDefId is not null) is { } field
+               && seen.Add(field.RefRegistryDefId!.Value)
+               && byId.TryGetValue(field.RefRegistryDefId.Value, out var parent))
+        {
+            if (parent.IsTemporal)
+            {
+                return true;
+            }
+
+            child = parent;
+        }
+
+        return false;
     }
 }
 

@@ -7,6 +7,7 @@ using Ecr.Application.Security;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Entities.Dictionaries;
+using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
 using Ecr.TestKit;
 using NSubstitute;
@@ -126,8 +127,47 @@ public sealed class RegistryEntriesAsOfValidationTests
         Assert.Equal(1L, result[0].Id);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait("Finding", "D1-06")]
+    public async Task Перелік_довідників_D1_06_частина_під_темпоральним_батьком_вимагає_asOf_хоч_сама_нетемпоральна()
+    {
+        const int partId = 201;
+        const int parentId = 202;
+        const int plainId = 203;
+
+        var parent = Registry(parentId, "CASE_TEMPORAL", isTemporal: true);
+        var part = Registry(partId, "GAS_COMPOSITION", isTemporal: false);
+        var field = new RegistryFieldDef(partId, EcrCode.Create("CASE"), Text("CASE"), CellDataType.Lookup, 1);
+        SetId(field, 2010);
+        field.PointTo(parentId);
+        field.ComposeInto(ParentDeletePolicy.Cascade);
+        part.AddField(field);
+        var plain = Registry(plainId, "SUBSTANCE", isTemporal: false);
+
+        _registries.ListDefinitionsAsync(Arg.Any<CancellationToken>())
+            .Returns(new List<RegistryDef> { parent, part, plain });
+
+        var list = await new ListRegistriesHandler(
+                _registries, _access, _user, Substitute.For<Ecr.Domain.Abstractions.IClock>())
+            .HandleAsync(default);
+
+        // Темпоральний: так; частина за темпоральним батьком: так (саме тут клієнт не слав asOf і діставав 422);
+        // довідник без темпоральності в ланцюжку: ні - контроль, що прапорець не «завжди true».
+        Assert.True(list.Single(d => d.Code == "CASE_TEMPORAL").AsOfRequired);
+        Assert.True(list.Single(d => d.Code == "GAS_COMPOSITION").AsOfRequired);
+        Assert.False(list.Single(d => d.Code == "SUBSTANCE").AsOfRequired);
+    }
+
     private GetRegistryEntriesHandler Handler()
         => new(_registries, new RegistryResolver(), _cache, _access, _user);
+
+    private static RegistryDef Registry(int id, string code, bool isTemporal)
+    {
+        var definition = new RegistryDef(EcrCode.Create(code), Text(code), isTemporal);
+        SetId(definition, id);
+        return definition;
+    }
 
     private void StubDefinition(bool isTemporal, string code)
     {
