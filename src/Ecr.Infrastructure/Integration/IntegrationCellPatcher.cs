@@ -5,6 +5,7 @@ using Ecr.Application.Documents.Dto;
 using Ecr.Application.Security;
 using Ecr.Application.Errors;
 using Ecr.Application.Ports;
+using Ecr.Application.Sources;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Entities.Integration;
@@ -461,7 +462,11 @@ public sealed class IntegrationCellPatcher(
                 continue;
             }
 
-            candidates.Add((cell, column));
+            // ⛔ Z2-01: число межі (згортка, конверсія, точка події) — обчислене, а не введене: до `Scale`
+            // колонки (не більше 16) ДО відсіву незмінних і до обробника (<see cref="IntegrationValueScale"/>).
+            // Інакше колонка зі `Scale = 3` відхиляла `1.3333333333333333` (`ValidateValue` п. 7), обробник —
+            // увесь батч таблиці, а порівняння з чинним значенням бачило б «зміну» на кожному прогоні.
+            candidates.Add((cell with { Value = IntegrationValueScale.ToColumn(cell.Value, column) }, column));
         }
 
         return candidates;

@@ -285,6 +285,40 @@ public sealed class MaterializeTimeWeightedTests(SqlServerFixture sql)
         Assert.Equal(2678.4m, Assert.Single(written).Value);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "Z2-01")]
+    public async Task Число_межі_округлюється_до_Scale_колонки_і_повторний_прогін_не_падає()
+    {
+        // Колонка зі `Scale = 3`: 4/3 → 1.333 (D-148 / ФВ-9.16b — те саме правило, що в методології й імпорті).
+        // Z1-01 зводить число межі лише до масштабу СХОВИЩА (1.3333333333333333); `ColumnDef.ValidateValue` п. 7
+        // за `Scale` колонки відхиляв би його (`validationBlocked`) — і разом з ним увесь батч таблиці.
+        var stand = await ArrangeAsync(
+            new Field("AVG", AggregationKind.Avg, null, null,
+            [
+                new(MidJanuary, 1m),
+                new(MidJanuary.AddHours(1), 1m),
+                new(MidJanuary.AddHours(2), 2m),
+            ]));
+
+        await using (var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext())
+        {
+            var column = await db.ColumnDefs.SingleAsync(c => c.Id == stand.Columns[0]);
+            column.SetNumericFormat(precision: null, scale: 3);
+            await db.SaveChangesAsync(CancellationToken.None);
+        }
+
+        // ⛔ МУТАЦІЙНИЙ ДОКАЗ: прибрати `IntegrationValueScale.ToColumn` з патчера (лишиться округлення Z1-01
+        // до 16 знаків) → `ValidateValue` п. 7 (`validationBlocked`) на весь батч, задача падає, червоний.
+        await RunAsync(stand);
+        Assert.Equal(1.333m, Assert.IsType<decimal>(await CellAsync(stand, stand.Columns[0])));
+
+        // Повторний прогін: округлене значення дорівнює чинному — без відмови і з тим самим числом.
+        await RunAsync(stand);
+        Assert.Equal(1.333m, Assert.IsType<decimal>(await CellAsync(stand, stand.Columns[0])));
+    }
+
     /// <summary>Поле джерела з мапінгом і точками.</summary>
     private sealed record Field(
         string Name, AggregationKind Kind, string? SourceUnit, string? TargetUnit, IReadOnlyList<Point> Points);
