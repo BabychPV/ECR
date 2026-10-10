@@ -32,9 +32,19 @@ namespace Ecr.Api.Tests;
 /// <c>null</c> — продуктивне (5 с). Ручки в конфігурації в нього немає, тому
 /// підміняється реєстрація <see cref="CacheLifetimes"/>.
 /// </param>
-public sealed class EcrApiFactory(SqlServerFixture sql, int stampCacheSeconds = 0, TimeSpan? revisionWindow = null)
+/// <param name="editionMode">
+/// X8-07: режим редакції (<c>Database:EditionMode</c>, наприклад <c>"Enterprise"</c>); <c>null</c> — як є:
+/// <c>Standard</c> із <c>appsettings.Development.json</c>. Прод працює в <c>Enterprise</c> (D-101), де
+/// <c>ArchiveBatchSize</c>, <c>SupportsOnlineIndexRebuild</c> і <c>SupportsResourceGovernor</c> інші; без цього
+/// параметра жоден HTTP-тест цієї гілки не проходив.
+/// </param>
+public sealed class EcrApiFactory(
+    SqlServerFixture sql, int stampCacheSeconds = 0, TimeSpan? revisionWindow = null, string? editionMode = null)
     : WebApplicationFactory<Program>
 {
+    /// <summary>Змінна оточення режиму редакції (<c>Database:EditionMode</c>) — той самий канал, що в проді.</summary>
+    private const string EditionModeVariable = "ECR_Database__EditionMode";
+
     /// <summary>
     /// Помилки, які застосунок записав у лог під час прогону.
     /// </summary>
@@ -134,6 +144,13 @@ public sealed class EcrApiFactory(SqlServerFixture sql, int stampCacheSeconds = 
             "ECR_Auth__StampCacheSeconds",
             stampCacheSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture));
 
+        // ⚠ X8-07: змінну чіпаємо ЛИШЕ коли режим задано явно — типова фабрика поводиться як раніше
+        // (Standard із Development), а змінна не просочується в інші фабрики: Dispose її прибирає.
+        if (editionMode is not null)
+        {
+            Environment.SetEnvironmentVariable(EditionModeVariable, editionMode);
+        }
+
         builder.UseEnvironment("Development");
         builder.ConfigureLogging(logging =>
         {
@@ -209,6 +226,17 @@ public sealed class EcrApiFactory(SqlServerFixture sql, int stampCacheSeconds = 
                 });
             }
         });
+    }
+
+    /// <inheritdoc />
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing && editionMode is not null)
+        {
+            Environment.SetEnvironmentVariable(EditionModeVariable, null);
+        }
+
+        base.Dispose(disposing);
     }
 
     /// <summary>Каталог джерела з однієї позиції; у мережу не ходить.</summary>
