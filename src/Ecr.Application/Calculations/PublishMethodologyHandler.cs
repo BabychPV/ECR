@@ -8,6 +8,7 @@ using Ecr.Application.Ports;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.Calculations;
 using Ecr.Domain.Enums;
+using Ecr.Domain.Errors;
 
 namespace Ecr.Application.Calculations;
 
@@ -1051,7 +1052,7 @@ public sealed class PublishMethodologyHandler(
                 // ⛔ Неоднозначність між двома бібліотеками — відмова, а не
                 // «перший за списком»: інакше число залежало б від порядку
                 // рядків у `calc.MethodologyImport`.
-                // ⚠ TODO: потрібен окремий код `ECR-CALC-0435`.
+                // ⛔ R11-L3: `ECR-CALC-0435`.
                 case MethodologyReferenceOutcome.Ambiguous:
                     problems.Add(PublishProblem.Of(
                         "publish.problem.ambiguousReference",
@@ -1060,7 +1061,8 @@ public sealed class PublishMethodologyHandler(
                         ("formula", formula.Code),
                         ("name", code),
                         ("count", reference.Candidates.Count.ToString(CultureInfo.InvariantCulture)),
-                        ("candidates", string.Join(", ", reference.Candidates))));
+                        ("candidates", string.Join(", ", reference.Candidates)))
+                        .WithCode(ErrorCodes.MethodologyReferenceAmbiguous));
                     break;
 
                 // ⛔ ФВ-9.14: `FORMULA_NOT_FOUND` виявляється ПРИ ПУБЛІКАЦІЇ, а не в

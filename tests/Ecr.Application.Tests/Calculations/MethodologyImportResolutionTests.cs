@@ -178,6 +178,14 @@ public sealed class MethodologyImportResolutionTests
         Assert.Equal("ECR-CALC-0422", error.ErrorCode);
         Assert.Contains("Common", error.Message, StringComparison.Ordinal);
         Assert.Contains("Flert", error.Message, StringComparison.Ordinal);
+
+        // ⛔ R11-L3 (ECR-CALC-0435): сама проблема несе окремий код - доти TODO «потрібен окремий код». Мутація: прибрати
+        // `.WithCode(...)` у `PublishMethodologyHandler.Resolve` - `Code` порожній, тест червоний.
+        var problem = Assert.Single(
+            Assert.IsAssignableFrom<IEnumerable<PublishProblem>>(error.Details!["problems"]),
+            p => p.MessageKey == "publish.problem.ambiguousReference");
+        Assert.Equal(Ecr.Domain.Errors.ErrorCodes.MethodologyReferenceAmbiguous, problem.Code);
+        Assert.Equal("ECR-CALC-0435", problem.Code);
     }
 
     [Fact]
