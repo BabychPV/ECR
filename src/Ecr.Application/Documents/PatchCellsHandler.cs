@@ -1821,17 +1821,21 @@ public sealed partial class PatchCellsHandler(
 
         if (missing.Count > 0)
         {
-            throw new BusinessRuleException(
-                ErrorCodes.CellRegistryEntryMissing,
-                $"Посилання на неіснуючий запис довідника: комірок — {missing.Count}.",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = "err.ECR-CELL-4223.missingEntry",
-                    ["cellCount"] = missing.Count.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                    ["cells"] = missing,
-                });
+            throw MissingEntryRefusal(missing);
         }
     }
+
+    /// <summary>Відмова «запис довідника не існує» — одна й та сама для неіснуючого й чужого довідника (AN-93).</summary>
+    private static BusinessRuleException MissingEntryRefusal(List<object> cells)
+        => new(
+            ErrorCodes.CellRegistryEntryMissing,
+            $"Посилання на неіснуючий запис довідника: комірок — {cells.Count}.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-CELL-4223.missingEntry",
+                ["cellCount"] = cells.Count.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                ["cells"] = cells,
+            });
 
     /// <summary>
     /// Змінені посилання на чужий, видалений, вимкнений чи нечинний на кінець
@@ -1888,15 +1892,10 @@ public sealed partial class PatchCellsHandler(
 
         throw reason switch
         {
-            LookupRejection.ForeignRegistry => new BusinessRuleException(
-                ErrorCodes.CellRegistryEntryMissing,
-                $"Запис належить іншому довіднику, ніж колонка: комірок — {cells.Count}.",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = "err.ECR-CELL-4223.foreignRegistry",
-                    ["cellCount"] = count,
-                    ["cells"] = cells,
-                }),
+            // ⛔ AN-93 (аудит R11): запис ЧУЖОГО довідника — та сама відповідь, що й «немає такого» (як N1-08 для
+            // полів шапки). Різниця `missingEntry` / `foreignRegistry` казала б, чи існує запис у довіднику, який
+            // читач, можливо, не бачить (Deny на довідник): оракул існування за перебором id.
+            LookupRejection.ForeignRegistry => MissingEntryRefusal(cells),
             LookupRejection.Deleted => new BusinessRuleException(
                 ErrorCodes.CellRegistryEntryMissing,
                 $"Запис довідника видалено: комірок — {cells.Count}.",

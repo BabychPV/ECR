@@ -199,6 +199,7 @@ public sealed partial class PatchCellsWorkbookTests(SqlServerFixture sql) : IDis
     [Trait(TestCategories.Stage, TestCategories.Stage6)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Finding", "P8")]
+    [Trait("Finding", "AN-93")]
     public async Task Lookup_на_запис_чужого_довідника_відхиляє_книгу_з_номером_екземпляра()
     {
         var world = await ArrangeAsync([2, 2]);
@@ -214,7 +215,7 @@ public sealed partial class PatchCellsWorkbookTests(SqlServerFixture sql) : IDis
         };
 
         await AssertRejectedAsync<BusinessRuleException>(
-            world, Writer(world), requests, guilty, "ECR-CELL-4223", "err.ECR-CELL-4223.foreignRegistry");
+            world, Writer(world), requests, guilty, "ECR-CELL-4223", "err.ECR-CELL-4223.missingEntry");
     }
 
     [Fact]
