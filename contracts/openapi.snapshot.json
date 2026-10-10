@@ -9780,7 +9780,6 @@
               "boolean"
             ]
           },
-
           "code": {
             "description": "Код довідника.",
             "type": "string"
