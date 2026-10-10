@@ -144,13 +144,18 @@ public interface IWorkflowStore
     /// </remarks>
     public Task RemoveStepsAsync(ApprovalRoute route, CancellationToken ct);
 
-    /// <summary>Чи існує роль із таким ідентифікатором.</summary>
+    /// <summary>Перший (у порядку <paramref name="roleIds"/>) ідентифікатор, якого немає серед ролей; <c>null</c> — усі існують.</summary>
     /// <remarks>
     /// ⚠ Крок маршруту посилається на роль числом. Неіснуюча роль дала б
     /// маршрут, який неможливо пройти: документ подали б і не затвердили
     /// ніколи, а причина була б видима лише в базі.
+    ///
+    /// ⛔ A1-06: ОДНИМ запитом на весь набір, а не по запиту на крок (<c>RoleExistsAsync</c> у циклі): довжину маршруту
+    /// обмежує обробник, але й у межах цієї довжини запит на крок — зайві звернення до бази під <c>Project.Manage</c>.
     /// </remarks>
-    public Task<bool> RoleExistsAsync(int roleId, CancellationToken ct);
+    /// <param name="roleIds">Ролі кроків.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<int?> FirstMissingRoleAsync(IReadOnlyCollection<int> roleIds, CancellationToken ct);
 }
 
 /// <summary>

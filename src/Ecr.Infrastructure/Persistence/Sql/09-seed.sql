@@ -4779,6 +4779,10 @@ USING (VALUES
     (N'err.ECR-REQ-0422.registrySyncPolicyNotBound', N'en', N'Collection entity {id} is not bound to a registry: the sync policy has nothing to apply to.', 1),
     -- ru/kz — окремою порцією `COLL:d212-policy` у блоці I18N нижче.
     -- COLL:d212-policy ── кінець секції ──
+    -- A1-06 ── Довжина маршруту погодження обмежена (`ReplaceApprovalRouteHandler.MaxSteps`) ──
+    (N'err.ECR-DOC-0422.approvalRouteTooLong', N'en', N'An approval route can have at most {max} steps; this one has {count}.', 1),
+    -- ru/kz — окремою порцією `A1-06` у блоці I18N нижче.
+    -- A1-06 ── кінець секції ──
     -- COLL:d212-statuses ── Статуси подій синку довідника з AF (D-212 PR-3, `CollectionCoverage.RegistryStatuses`) ──
     (N'status.coverage.RegistryAutoCreated',        N'en', N'Created from source', 1),
     (N'status.coverage.RegistryDeactivated',        N'en', N'Deactivated: missing in source', 1),
@@ -14209,6 +14213,17 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:d212-policy ── кінець секції ──
+
+-- A1-06 ── ru/kz довжини маршруту погодження; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-DOC-0422.approvalRouteTooLong', N'ru', N'В маршруте согласования может быть не более {max} шагов, а в этом — {count}.'),
+    (N'err.ECR-DOC-0422.approvalRouteTooLong', N'kz', N'Келісу маршрутында {max} қадамнан артық болмауы керек, ал мұнда — {count}.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- A1-06 ── кінець секції ──
 
 -- COLL:d212-statuses ── ru/kz статусів подій синку довідника (D-212 PR-3); власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)
