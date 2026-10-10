@@ -104,6 +104,16 @@ internal sealed class DeployRunner
     /// Чи зареєстровано службу EcrApi — тим самим способом, що й <see cref="IsWorkerServiceInstalled"/>.
     /// R5-U1/U1-03: від цього залежить типовий режим кроку 1 (<c>WizardState.DefaultMode</c>).
     /// </summary>
+    /// <summary>
+    /// ⛔ R9-F5/F5-02: <c>Environment</c> встановленої служби <c>EcrApi</c> (REG_MULTI_SZ) або <c>null</c>.
+    /// </summary>
+    internal static string[]? ReadApiServiceEnvironment()
+    {
+        using var key = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(
+            @"SYSTEM\CurrentControlSet\Services\EcrApi");
+        return key?.GetValue("Environment") as string[];
+    }
+
     internal static bool IsApiServiceInstalled()
     {
         using var key = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(

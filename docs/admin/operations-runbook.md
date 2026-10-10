@@ -1015,7 +1015,10 @@ DataProtection … не захищені»). ⛔ ✎ 2026-09-30: `Environment` �
    стирає `Environment` служб): транспорт — рівно один із `-HttpsThumbprint` /
    `-BehindHttpsProxy` / `-AllowHttp` (інакше зупинка на кроці 1 «Транспорт не обрано»),
    `-ConnectionString`, `-ServiceAccount`, `-PreviousDataProtectionCertificateThumbprints`
-   (якщо був) і `-DisableWorker` (якщо воркера не має бути).
+   (якщо був), `-DisableWorker` (якщо воркера не має бути) і `-AppPort` — **той самий порт**, що зараз
+   у `ASPNETCORE_URLS` служби (✎ 2026-10-10, R9-F5/F5-02: MSI порт не пам'ятає; без `-AppPort` на
+   службі з іншим портом крок 1 відмовляє, а майстер бере поточний порт служби як типовий):
+   `(Get-ItemProperty HKLM:\SYSTEM\CurrentControlSet\Services\EcrApi).Environment | Select-String ASPNETCORE_URLS`.
 
    ⛔ ✎ 2026-10-09 (`D-333`, L10-04): `deploy-ecr.ps1` більше **не** довіряє сертифікату
    SQL Server без перевірки (`sqlcmd` без `-C`). Якщо SQL Server досі на самопідписаному
@@ -1869,7 +1872,8 @@ Quartz/`InProcess`, а служба `EcrWorker` (MSI її зберігає) ст
 ```powershell
 powershell -ExecutionPolicy Bypass -File tools\deploy-ecr.ps1 `
   -SqlInstance <сервер> -Database <база> -MsiPath <шлях до .msi> -SkipSchema `
-  -ConnectionString $cs -DataProtectionThumbprint <відбиток> -HttpsThumbprint <відбиток HTTPS>
+  -ServiceAccount '<DOMAIN\ecr-svc$>' -ConnectionString $cs -DataProtectionThumbprint <відбиток> `
+  -HttpsThumbprint <відбиток HTTPS> -AppPort <той самий порт>
 ```
 
 (`-SkipSchema` — якщо схему вже застосовано; повний виклик — п. 8.) Те саме

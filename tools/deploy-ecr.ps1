@@ -249,6 +249,8 @@
 .PARAMETER AppPort
     Порт Kestrel і правило брандмауера (HTTPS-порт із `-HttpsThumbprint`, http-порт в інших режимах).
     За замовчуванням 5000.
+    ⛔ R9-F5/F5-02: на оновленні передавайте ТОЙ САМИЙ порт, що зараз у службі (MSI його не пам'ятає).
+    Без -AppPort, якщо EcrApi вже слухає інший порт, крок 1 відмовляє до будь-якої зміни.
 
 .PARAMETER ConfigValues
     Шлях до JSON-файлу з НЕсекретними значеннями appsettings.Production.json
@@ -861,6 +863,51 @@ function Get-ServiceEnvironmentEntries {
     $prop = Get-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Services\$ServiceName" -Name Environment -ErrorAction SilentlyContinue
     if (-not $prop) { return , ([string[]] @()) }
     return , ([string[]] @(@($prop.Environment) | Where-Object { $_ }))
+}
+
+# ⛔ R9-F5/F5-02 (аудит 2026-10-10): порт першої адреси ASPNETCORE_URLS ('https://+:443;http://+:80' → 443)
+# або $null, якщо адреси немає чи порт не розпізнано. Чиста функція.
+function Get-UrlsPrimaryPort {
+    param([AllowNull()] [AllowEmptyString()] [string] $Urls)
+
+    if (-not $Urls) { return $null }
+    $first = @($Urls -split ';' | Where-Object { $_.Trim() }) | Select-Object -First 1
+    if (-not $first) { return $null }
+    $port = 0
+    if ($first.Trim() -match '^[A-Za-z][A-Za-z0-9+.-]*://[^/]*:(\d{1,5})(/.*)?$' -and
+        [int]::TryParse($Matches[1], [ref] $port) -and $port -ge 1 -and $port -le 65535) {
+        return $port
+    }
+    return $null
+}
+
+# ⛔ R9-F5/F5-02: MSI порт не пам'ятає (APP_PORT типово 5000), а крок 4 перезаписує ASPNETCORE_URLS з
+# -AppPort. Оновлення без -AppPort (runbook §10.3, «ті самі параметри») переносило службу з 443 на 5000, і
+# крок 7, що опитує вже новий порт, друкував «Готово» — а всі користувачі отримували відмову з'єднання.
+# Чиста функція: Environment служби EcrApi (знімок) + новий порт + чи задано -AppPort явно → текст відмови
+# або $null. Явний -AppPort — свідомий намір (зокрема й зміна порту); служби ще немає — нема що зберігати.
+function Get-AppPortChangeProblem {
+    param(
+        [AllowNull()] [AllowEmptyCollection()] [string[]] $CurrentEnvironment,
+        [Parameter(Mandatory)] [int] $AppPort,
+        [bool] $AppPortBound
+    )
+
+    if ($AppPortBound) { return $null }
+    $urls = $null
+    foreach ($entry in @($CurrentEnvironment)) {
+        if ($entry -and $entry.StartsWith('ASPNETCORE_URLS=', [System.StringComparison]::OrdinalIgnoreCase)) {
+            $urls = $entry.Substring('ASPNETCORE_URLS='.Length)
+            break
+        }
+    }
+    if (-not $urls) { return $null }
+    $current = Get-UrlsPrimaryPort -Urls $urls
+    if ($null -ne $current -and $current -eq $AppPort) { return $null }
+    $shown = if ($null -eq $current) { "адресу '$urls' (порт не розпізнано)" } else { "порт $current ('$urls')" }
+    return ("Служба EcrApi зараз слухає $shown, а -AppPort не задано (типове $AppPort): оновлення змінило б " +
+        "адресу для всіх користувачів, а крок 7 перевірив би вже новий порт і сказав би «Готово». Нічого не змінено. " +
+        "Передайте -AppPort з поточним портом (або з новим — свідомо).")
 }
 
 # Чиста функція: записи знімка, імен яких немає в поточному Environment, — ім'я → значення
@@ -1634,6 +1681,10 @@ if ($transport.Mode -eq 'Https') {
 }
 Write-Host "Транспорт: $($transport.Mode) (ASPNETCORE_URLS = $($transport.Set['ASPNETCORE_URLS']))."
 foreach ($warning in $transport.Warnings) { Write-Warning $warning }
+# ⛔ R9-F5/F5-02: порт — ТАКОЖ до схеми й MSI; лише читання реєстру, тому й під -WhatIf.
+$portProblem = Get-AppPortChangeProblem -CurrentEnvironment (Get-ServiceEnvironmentEntries -ServiceName 'EcrApi') `
+    -AppPort $AppPort -AppPortBound $PSBoundParameters.ContainsKey('AppPort')
+if ($portProblem) { throw $portProblem }
 
 $sqlAuth = if ($SqlLogin) { @('-U', $SqlLogin) } else { @('-E') }
 
