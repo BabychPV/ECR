@@ -54,10 +54,36 @@ namespace Ecr.Infrastructure.Persistence.Migrations
         /// <summary>T-SQL передперевірки: <c>THROW 50801</c> з переліком, якщо є правила довші за межу.</summary>
         public static string PrecheckSql { get; } = BuildPrecheckSql();
 
+        /// <summary>
+        /// T-SQL: скидає статистики (створені вручну чи автоматично, не індексні) на колонці
+        /// <c>calc.CategoryRule.Expression</c>.
+        /// </summary>
+        /// <remarks>
+        /// ⛔ Перевірка оновлення RC16 → RC17 (10.10): на живій базі, де DBA виконав
+        /// <c>sp_createstats</c> (так само робить <c>tools/Ecr.DataGen</c>), <c>ALTER COLUMN</c> падав
+        /// з <c>Msg 5074 The statistics 'Expression' is dependent on column 'Expression'</c>, і
+        /// оновлення зупинялося. Свіжа база цього не ловить: там міграції йдуть до статистик.
+        /// Статистика — лише підказка оптимізатору; SQL Server збере її знову сам.
+        /// </remarks>
+        public static string DropColumnStatisticsSql { get; } = """
+            DECLARE @drop nvarchar(max) = N'';
+            SELECT @drop += N'DROP STATISTICS calc.CategoryRule.' + QUOTENAME(s.name) + N';'
+              FROM sys.stats AS s
+              JOIN sys.stats_columns AS sc ON sc.object_id = s.object_id AND sc.stats_id = s.stats_id
+              JOIN sys.columns AS c ON c.object_id = sc.object_id AND c.column_id = sc.column_id
+             WHERE s.object_id = OBJECT_ID(N'calc.CategoryRule')
+               AND c.name = N'Expression'
+               AND (s.user_created = 1 OR s.auto_created = 1)
+               AND NOT EXISTS (SELECT 1 FROM sys.indexes AS i WHERE i.object_id = s.object_id AND i.index_id = s.stats_id);
+            IF @drop <> N'' EXEC sys.sp_executesql @drop;
+            """;
+
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
             migrationBuilder.Sql(PrecheckSql);
+
+            migrationBuilder.Sql(DropColumnStatisticsSql);
 
             migrationBuilder.AlterColumn<string>(
                 name: "Expression",
@@ -84,6 +110,8 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                 name: "InputsAsOfUtc",
                 schema: "calc",
                 table: "CalculationRun");
+
+            migrationBuilder.Sql(DropColumnStatisticsSql);
 
             migrationBuilder.AlterColumn<string>(
                 name: "Expression",

@@ -136,6 +136,33 @@ public sealed class AN80CarryOverInputsAsOfCategoryRuleLengthMigrationTests(SqlS
             "SELECT COUNT(*) FROM dbo.__EFMigrationsHistory WHERE MigrationId LIKE N'%[_]AN80CarryOverInputsAsOfCategoryRuleLength'"));
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Directive", "AN-80-N2-02")]
+    public async Task Статистика_на_колонці_виразу_не_зупиняє_оновлення_вгору_і_вниз()
+    {
+        // ⛔ Перевірка оновлення RC16 → RC17 (10.10): на живій базі після sp_createstats (DBA чи
+        // tools/Ecr.DataGen) ALTER COLUMN падав з Msg 5074 «statistics … dependent on column».
+        // Без DropColumnStatisticsSql цей тест червоний.
+        var connectionString = await CreateDatabaseBeforeMigrationAsync();
+        await InsertRuleAsync(connectionString, versionId: 1, new string('a', 100));
+        await ExecuteAsync(connectionString, "CREATE STATISTICS [Expression] ON calc.CategoryRule (Expression);");
+
+        await MigrateAsync(connectionString);
+        Assert.Equal(4000, await ExpressionMaxLengthAsync(connectionString));
+
+        // Down повертає nvarchar(max) — і теж мусить пройти, якщо статистика з'явилась знову.
+        await ExecuteAsync(connectionString, "CREATE STATISTICS [Expression] ON calc.CategoryRule (Expression);");
+        await MigrateAsync(connectionString, BeforeMigration);
+        Assert.Equal(-1, await ExpressionMaxLengthAsync(connectionString));
+
+        // Ідемпотентний скрипт (шлях deploy-ecr.ps1 / setup-dev-db.ps1) — так само.
+        await ExecuteAsync(connectionString, "CREATE STATISTICS [Expression] ON calc.CategoryRule (Expression);");
+        await RunIdempotentScriptAsync(connectionString);
+        Assert.Equal(4000, await ExpressionMaxLengthAsync(connectionString));
+    }
+
     /// <summary>Скільки є колонки (опційно - з типом і прапорцем nullable).</summary>
     private static Task<int> ColumnCountAsync(
         string connectionString, string table, string column, string? dataType = null, string? nullable = null)
