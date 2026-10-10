@@ -313,13 +313,7 @@ public sealed class SchemaValidator(
         await using var connection = new SqlConnection(db.Database.GetConnectionString());
         await connection.OpenAsync(ct).ConfigureAwait(false);
 
-        await using (var acquire = connection.CreateCommand())
-        {
-            acquire.CommandText =
-                "EXEC sp_getapplock @Resource = N'Ecr.Migrate', @LockMode = 'Exclusive', " +
-                "@LockOwner = 'Session', @LockTimeout = 120000;";
-            await acquire.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
-        }
+        await AcquireMigrationLockAsync(connection, MigrationLockTimeoutMs, ct).ConfigureAwait(false);
 
         try
         {
@@ -331,6 +325,47 @@ public sealed class SchemaValidator(
             release.CommandText =
                 "EXEC sp_releaseapplock @Resource = N'Ecr.Migrate', @LockOwner = 'Session';";
             await release.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>Скільки старт чекає на блокування міграції іншого вузла, мс.</summary>
+    internal const int MigrationLockTimeoutMs = 120_000;
+
+    /// <summary>
+    /// Бере блокування міграції (<c>sp_getapplock</c>, сеансове); не взяте — відмова старту.
+    /// </summary>
+    /// <param name="connection">Відкрите підключення — воно ж тримає блокування до <c>sp_releaseapplock</c>.</param>
+    /// <param name="lockTimeoutMs">Скільки чекати блокування, мс.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <exception cref="SchemaIncompatibleException">Блокування не отримано за <paramref name="lockTimeoutMs"/>.</exception>
+    /// <remarks>
+    /// ⛔ Y2-05 (аудит R11). Дві хиби. (1) Код повернення <c>sp_getapplock</c> ігнорувався: не взяте за 120 с
+    /// блокування (інший вузол ще мігрує) давало <c>-1</c>, і цей вузол усе одно запускав <c>MigrateAsync</c> —
+    /// паралельні DDL, рівно та гонка, від якої блокування існує. (2) <c>CommandTimeout</c> команди — типові 30 с
+    /// — менший за <c>@LockTimeout</c> 120 с: клієнт обривав очікування вчетверо раніше, ніж сервер
+    /// відмовив би, і старт падав сирим <c>SqlException</c> «Execution Timeout Expired» замість зрозумілої причини.
+    /// Тепер таймаут команди — із запасом над очікуванням блокування, а код повернення перевіряється
+    /// (<c>&lt; 0</c> — не отримано: 0/1 — взято негайно/після очікування).
+    /// </remarks>
+    internal static async Task AcquireMigrationLockAsync(SqlConnection connection, int lockTimeoutMs, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(connection);
+
+        await using var acquire = connection.CreateCommand();
+        acquire.CommandText =
+            "DECLARE @rc int; " +
+            "EXEC @rc = sp_getapplock @Resource = N'Ecr.Migrate', @LockMode = 'Exclusive', " +
+            "@LockOwner = 'Session', @LockTimeout = @timeout; SELECT @rc;";
+        acquire.Parameters.AddWithValue("@timeout", lockTimeoutMs);
+        acquire.CommandTimeout = (lockTimeoutMs / 1000) + 30;
+
+        var code = Convert.ToInt32(await acquire.ExecuteScalarAsync(ct).ConfigureAwait(false), System.Globalization.CultureInfo.InvariantCulture);
+        if (code < 0)
+        {
+            throw Incompatible(
+                $"Не вдалося отримати блокування міграції схеми (Ecr.Migrate) за {lockTimeoutMs / 1000} с " +
+                $"(sp_getapplock повернув {code}): інший вузол ще мігрує базу. Старт зупинено — повторіть запуск, " +
+                "коли міграція завершиться.");
         }
     }
 

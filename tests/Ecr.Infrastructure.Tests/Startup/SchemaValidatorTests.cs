@@ -407,6 +407,41 @@ public sealed class SchemaValidatorTests(SqlServerFixture sql)
         return (T)(await command.ExecuteScalarAsync())!;
     }
 
+    /// <summary>
+    /// Y2-05 (аудит R11): блокування міграції, яке інший вузол тримає довше за очікування, — відмова старту з
+    /// причиною, а не мовчазне продовження (паралельні DDL). Код повернення <c>sp_getapplock</c> тепер перевіряється.
+    /// </summary>
+    /// <remarks>Мутація: прибрати перевірку `code &lt; 0` в `AcquireMigrationLockAsync` — виняток не кидається, червоніє.</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "Y2-05")]
+    public async Task Зайняте_блокування_міграції_зупиняє_старт_із_причиною()
+    {
+        await using var holder = new SqlConnection(sql.ConnectionString);
+        await holder.OpenAsync();
+        await SchemaValidator.AcquireMigrationLockAsync(holder, 1_000, CancellationToken.None);
+
+        await using var waiter = new SqlConnection(sql.ConnectionString);
+        await waiter.OpenAsync();
+
+        var error = await Assert.ThrowsAsync<SchemaIncompatibleException>(
+            () => SchemaValidator.AcquireMigrationLockAsync(waiter, 300, CancellationToken.None));
+
+        Assert.Contains("Ecr.Migrate", error.Message, StringComparison.Ordinal);
+        Assert.Contains("блокування міграції", error.Message, StringComparison.Ordinal);
+
+        // Вільне блокування беруть без відмови (контроль: тест не доводить «завжди кидає»).
+        await using var release = holder.CreateCommand();
+        release.CommandText = "EXEC sp_releaseapplock @Resource = N'Ecr.Migrate', @LockOwner = 'Session';";
+        await release.ExecuteNonQueryAsync();
+
+        await SchemaValidator.AcquireMigrationLockAsync(waiter, 300, CancellationToken.None);
+        await using var release2 = waiter.CreateCommand();
+        release2.CommandText = "EXEC sp_releaseapplock @Resource = N'Ecr.Migrate', @LockOwner = 'Session';";
+        await release2.ExecuteNonQueryAsync();
+    }
+
     /// <summary>Можливості СУБД без звернення до сервера.</summary>
     /// <remarks>
     /// Підміняються саме вони, а не база: підняти SQL Server 2014 Standard
