@@ -813,16 +813,21 @@ public sealed class CollectionStore(EcrDbContext db, IClock clock) : ICollection
     /// <summary>Скільки годин блок масового видалення подій вважається чинним для здоров'я джерел.</summary>
     private const int RemovalBlockHealthHours = 24;
 
-    /// <summary>Одиниці джерела за їхніми символами — одним запитом на весь батч.</summary>
+    /// <summary>Одиниці джерела за їхніми символами — один знімок довідника на весь батч.</summary>
     /// <remarks>
     /// ⚠ Нерозпізнаний символ не потрапляє у словник, і виклик через
     /// <c>TryGetValue</c> дає <c>null</c>, а не здогадку. Одиниця, взята
     /// навмання, — це число, помножене невідомо на що; порожня одиниця
-    /// принаймні видима у звіті про збір (ФВ-16.12). Один запит
-    /// <c>WHERE Code IN (...)</c>, а не по запиту на точку: у типовому батчі
-    /// — лічені РІЗНІ символи одиниць (усі точки одного джерела зазвичай в
-    /// одній), тож запит на кожну точку окремо був би N+1 без жодної
-    /// причини.
+    /// принаймні видима у звіті про збір (ФВ-16.12). Один знімок довідника
+    /// (<see cref="UnitCatalog"/>, одним запитом), а не по запиту на точку: у
+    /// типовому батчі — лічені РІЗНІ символи одиниць, тож запит на кожну точку
+    /// окремо був би N+1 без жодної причини.
+    ///
+    /// ⛔ Z2-02: символ розпізнається тим самим правилом, що й перевірка
+    /// одиниці збору (<see cref="BoundaryUnitConversion.ResolveSourceSymbol"/>):
+    /// PI дає <c>Sm3/h</c>, а не код <c>Sm3_per_h</c>. Доти точка з такою
+    /// одиницею лягала без одиниці, і змішаний ряд (<c>Sm3/h</c> і <c>Sm3/d</c>)
+    /// матеріалізація не бачила (X3-02).
     /// </remarks>
     private async Task<Dictionary<string, int?>> ResolveUnitsAsync(
         IReadOnlyList<SourceDataPoint> points, CancellationToken ct)
@@ -830,7 +835,7 @@ public sealed class CollectionStore(EcrDbContext db, IClock clock) : ICollection
         var symbols = points
             .Where(p => !string.IsNullOrWhiteSpace(p.SourceUnitSymbol))
             .Select(p => p.SourceUnitSymbol!)
-            .Distinct()
+            .Distinct(StringComparer.Ordinal)
             .ToList();
 
         if (symbols.Count == 0)
@@ -838,13 +843,11 @@ public sealed class CollectionStore(EcrDbContext db, IClock clock) : ICollection
             return [];
         }
 
-        var units = await db.Units
-            .AsNoTracking()
-            .Where(u => symbols.Contains(u.Code))
-            .Select(u => new { u.Code, u.Id })
-            .ToListAsync(ct)
-            .ConfigureAwait(false);
+        var units = await new UnitCatalog(db).GetAsync(ct).ConfigureAwait(false);
 
-        return units.ToDictionary(u => u.Code, u => (int?)u.Id);
+        return symbols
+            .Select(symbol => (Symbol: symbol, Unit: BoundaryUnitConversion.ResolveSourceSymbol(symbol, units)))
+            .Where(x => x.Unit is not null)
+            .ToDictionary(x => x.Symbol, x => (int?)x.Unit!.Id, StringComparer.Ordinal);
     }
 }

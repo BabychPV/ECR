@@ -325,4 +325,62 @@ public sealed class BoundaryUnitConversionTests
         Assert.Equal("ECR-INT-0422", error.ErrorCode);
         Assert.Equal("err.ECR-INT-0422.unitMissingFromSnapshot", error.Details!["messageKey"]);
     }
+
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-16.9")]
+    [Trait("Finding", "Z2-02")]
+    [InlineData("Sm3/h", 11, true)]
+    [InlineData("Sm3 / h", 11, true)]
+    [InlineData("Sm3_per_h", 11, true)]
+    [InlineData("Sm3/d", 11, false)]
+    [InlineData("Sm3/d", 13, true)]
+    [InlineData("°C", 20, true)]
+    [InlineData("d", 21, true)]
+    [InlineData("kg", 3, true)]
+    [InlineData("KG", 3, true)]
+    [InlineData("kg/h", 3, false)]
+    [InlineData("м³/год", 11, true)]
+    [InlineData("furlong/fortnight", 11, false)]
+    public void Символ_одиниці_від_джерела_звіряється_з_оголошеною_через_довідник(
+        string symbol, int declared, bool expected)
+    {
+        // ⛔ Z2-02: PI дає символ (`Sm3/h`, `°C`), довідник — код (`Sm3_per_h`, `degC`). Пряме порівняння з
+        // кодом ставило кожну швидкість на паузу без виходу. МУТАЦІЙНИЙ ДОКАЗ: повернути в `IsDeclaredUnit`
+        // `Units.TryGetValue(symbol)` → рядки «Sm3/h», «Sm3 / h», «Sm3/d»→13, «°C», «d», «м³/год» червоні.
+        // Справжня зміна одиниці (`Sm3/d` при оголошеній `Sm3_per_h`) і невідомий символ — і далі «не збіглося».
+        Assert.Equal(expected, BoundaryUnitConversion.IsDeclaredUnit(declared, symbol, SymbolCatalog()));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "Z2-02")]
+    public void Неоднозначний_символ_довідника_не_розпізнається()
+    {
+        // Два записи з тим самим символом — не вгадувати: null, тобто пауза мапінгу, а не довільна одиниця.
+        var units = new UnitCatalogSnapshot(
+            new Dictionary<string, UnitRef>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["Sm3"] = new(1, "Sm3", DimensionId: 12, SymbolL10n: new Dictionary<string, string> { ["en"] = "m3(st)" }),
+                ["Nm3"] = new(2, "Nm3", DimensionId: 12, SymbolL10n: new Dictionary<string, string> { ["en"] = "m3(st)" }),
+            },
+            new Dictionary<string, int>(StringComparer.Ordinal));
+
+        Assert.Null(BoundaryUnitConversion.ResolveSourceSymbol("m3(st)", units));
+        Assert.Equal(1, BoundaryUnitConversion.ResolveSourceSymbol("Sm3", units)!.Id);
+    }
+
+    /// <summary>Довідник із кодами, які символи PI не повторюють буквально.</summary>
+    private static UnitCatalogSnapshot SymbolCatalog() => new(
+        new Dictionary<string, UnitRef>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["kg"] = new(KilogramId, "kg", DimensionId: 1),
+            ["Sm3_per_h"] = new(
+                StdCubicMetrePerHourId, "Sm3_per_h", DimensionId: 13, FactorToBase: 0.000277777777777778m,
+                SymbolL10n: new Dictionary<string, string> { ["en"] = "Sm3_per_h", ["uk"] = "м³/год" }),
+            ["Sm3_per_day"] = new(13, "Sm3_per_day", DimensionId: 13, FactorToBase: 0.000011574074074074m),
+            ["degC"] = new(20, "degC", DimensionId: 5, FactorToBase: 1m, OffsetToBase: 273.15m),
+            ["day"] = new(21, "day", DimensionId: 4, FactorToBase: 86400m),
+        },
+        new Dictionary<string, int>(StringComparer.Ordinal));
 }

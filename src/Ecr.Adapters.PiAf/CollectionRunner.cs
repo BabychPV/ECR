@@ -2,6 +2,7 @@
 using Ecr.Application.Errors;
 using Ecr.Application.Integration;
 using Ecr.Application.Ports;
+using Ecr.Application.Sources;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.External;
 using Ecr.Domain.Entities.Integration;
@@ -1055,7 +1056,9 @@ public sealed partial class CollectionRunner(
             }
 
             var actualCode = point.SourceUnitSymbol!;
-            int? actualId = units.Units.TryGetValue(actualCode, out var actual) ? actual.Id : null;
+            // ⛔ Z2-02: символ PI (`Sm3/d`) → одиниця довідника тим самим правилом, що й перевірка вище: інакше пауза
+            // не знала б нової одиниці, і прийняти її без вибору вручну було б неможливо (`pendingUnitNotInCatalog`).
+            int? actualId = BoundaryUnitConversion.ResolveSourceSymbol(actualCode, units)?.Id;
 
             await store
                 .PauseForSourceUnitChangeAsync(map.Id, actualCode, actualId, ct)
