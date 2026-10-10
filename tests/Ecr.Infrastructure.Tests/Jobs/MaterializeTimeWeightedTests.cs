@@ -157,14 +157,14 @@ public sealed class MaterializeTimeWeightedTests(SqlServerFixture sql)
     public async Task Точки_періоду_в_різних_одиницях_джерела_не_згортаються_мовчки()
     {
         // ⛔ X3-02: після прийняття нової одиниці джерела (ФВ-16.9) мапінг оголошує `Sm3_per_h`, а точка
-        // ДО періоду (межова для інтеграла) лишилась зібраною в `Sm3_per_s`. Переведення всього ряду за
-        // поточною одиницею мапінгу дало б тихо хибний об'єм (×1/3600 на краю).
+        // ВСЕРЕДИНІ періоду лишилась зібраною в `Sm3_per_s`. Переведення всього ряду за поточною одиницею
+        // мапінгу дало б тихо хибний об'єм. (Межову точку старої одиниці — див. Y1-01 нижче — переводимо.)
         var stand = await ArrangeAsync(
             new Field("OK", AggregationKind.Avg, null, null, [new(MidJanuary, 5m)]),
             new Field("MIX", AggregationKind.TimeIntegral, "Sm3_per_h", "Sm3",
             [
-                new(new DateTime(2025, 12, 25, 0, 0, 0, DateTimeKind.Utc), 3.6m, "Sm3_per_s"),
-                new(MidJanuary, 3.6m, "Sm3_per_h"),
+                new(new DateTime(2025, 12, 25, 0, 0, 0, DateTimeKind.Utc), 3.6m, "Sm3_per_h"),
+                new(MidJanuary, 3.6m, "Sm3_per_s"),
                 new(new DateTime(2026, 2, 5, 0, 0, 0, DateTimeKind.Utc), 3.6m, "Sm3_per_h"),
             ]));
 
@@ -178,6 +178,59 @@ public sealed class MaterializeTimeWeightedTests(SqlServerFixture sql)
 
         Assert.Equal(5m, Assert.IsType<decimal>(await CellAsync(stand, stand.Columns[0])));
         Assert.Null(await CellAsync(stand, stand.Columns[1]));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-16.10")]
+    public async Task Межова_точка_старої_одиниці_переводиться_а_не_блокує()
+    {
+        // ⛔ Y1-01: після прийняття нової одиниці й збору «з початку періоду» (порада відмови X3-02) усі
+        // точки січня — в оголошеній `Sm3_per_h`, а межова точка ДО періоду (25.12, сусідній період, збір її
+        // не перечитує) лишилась у старій `Sm3_per_s`. 0.001 Sm3/s = 3.6 Sm3/h — ряд сталий, отже та сама
+        // 2 678.4, що й без змішування (з точністю до 1/3600 у `FactorToBase`, ~1e-15 відносно, — тому допуск).
+        // Межа ПІСЛЯ періоду — теж стара одиниця (той самий шлях).
+        var stand = await ArrangeAsync(
+            new Field("INT", AggregationKind.TimeIntegral, "Sm3_per_h", "Sm3",
+            [
+                new(new DateTime(2025, 12, 25, 0, 0, 0, DateTimeKind.Utc), 0.001m, "Sm3_per_s"),
+                new(MidJanuary, 3.6m, "Sm3_per_h"),
+                new(new DateTime(2026, 2, 5, 0, 0, 0, DateTimeKind.Utc), 0.001m, "Sm3_per_s"),
+            ]));
+
+        // ⛔ МУТАЦІЙНІ ДОКАЗИ:
+        // • повернути межові точки в `HasForeignUnit` → задача кидає ECR-UOM-0422, червоний;
+        // • брати межову точку без переведення (0.001 як «Sm3/h») → краї майже нульові, менше за 2 678.4, червоний.
+        var written = await RunAsync(stand);
+
+        var value = Assert.Single(written).Value;
+        Assert.True(Math.Abs(value - 2678.4m) < 0.000001m, $"Очікувано 2 678.4, отримано {value}.");
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-16.10")]
+    public async Task Межова_точка_несумісної_одиниці_стає_прогалиною_а_не_числом()
+    {
+        // ⛔ Y1-01: межова точка в одиниці іншої розмірності (`m3` проти `Sm3_per_h`) не переводиться —
+        // крайній відрізок стає прогалиною: значення є, але менше за повне (покрито не весь січень), і без
+        // чужого числа на краю (1000 «m3» як «Sm3/h» дало б значення, БІЛЬШЕ за 2 678.4).
+        var stand = await ArrangeAsync(
+            new Field("INT", AggregationKind.TimeIntegral, "Sm3_per_h", "Sm3",
+            [
+                new(new DateTime(2025, 12, 25, 0, 0, 0, DateTimeKind.Utc), 1000m, "m3"),
+                new(MidJanuary, 3.6m, "Sm3_per_h"),
+                new(new DateTime(2026, 2, 5, 0, 0, 0, DateTimeKind.Utc), 3.6m, "Sm3_per_h"),
+            ]));
+
+        // ⛔ МУТАЦІЙНИЙ ДОКАЗ: брати несумісну межу як є → значення > 2 678.4, червоний; відмова за межу →
+        // виняток, червоний.
+        var written = await RunAsync(stand);
+
+        var value = Assert.Single(written).Value;
+        Assert.True(value > 0m && value < 2678.4m, $"Очікувано частковий інтеграл без краю, отримано {value}.");
     }
 
     [Fact]

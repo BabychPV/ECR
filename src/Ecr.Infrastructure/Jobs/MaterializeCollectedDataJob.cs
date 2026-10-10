@@ -416,10 +416,16 @@ public sealed class MaterializeCollectedDataJob(
             // точки ДО нього й першої НА чи ПІСЛЯ кінця. Без них інтеграл місяця,
             // де стиснення PI не лишило точок біля опівночі, недораховував би
             // краї — а подія без точок усередині дала б нуль замість об'єму.
-            var timedRows = needsTime
-                ? await TimeSeriesAsync(task.SourceEntityId, field, period, inside, ct).ConfigureAwait(false)
-                : [];
-            var timed = timedRows.Select(p => p.ToTimed()).ToList();
+            var bounds = needsTime
+                ? await BoundsAsync(task.SourceEntityId, field, period, ct).ConfigureAwait(false)
+                : default;
+
+            // ⛔ Y1-01: межова точка старої одиниці джерела переводиться в оголошену (нижче, `Edge`) — для
+            // цього потрібен довідник, навіть коли самій згортці він не потрібен.
+            if (fieldMaps.Any(m => IsTimeFold(m.Aggregation) && HasForeignEdge(bounds, m.SourceUnitId)))
+            {
+                units ??= await new UnitCatalog(db).GetAsync(ct).ConfigureAwait(false);
+            }
 
             foreach (var map in fieldMaps)
             {
@@ -435,8 +441,12 @@ public sealed class MaterializeCollectedDataJob(
                 // ряд не згортається: комірка не пишеться, задача відмовляє з переліком (той самий канал,
                 // що й несумісна одиниця). Точка без одиниці (`UnitId = null`) — «нема з чим порівняти»,
                 // як і в `BoundaryUnitConversion.IsDeclaredUnit`.
-                var rows = IsTimeFold(kind) ? timedRows : inside;
-                if (HasForeignUnit(rows, map.SourceUnitId))
+                //
+                // ⛔ Y1-01: відмова — лише за точки ВСЕРЕДИНІ періоду. Межові точки (до початку й на/після
+                // кінця) лежать у СУСІДНЬОМУ періоді: збір «з початку періоду», який радить відмова, їх не
+                // перечитує (PI `recorded` без `boundaryType` — `Inside`), і відмова через них не лікувалась
+                // ніколи. Тому межову точку в іншій одиниці переводимо в оголошену (`Edge`).
+                if (HasForeignUnit(inside, map.SourceUnitId))
                 {
                     unitFailures.Add(
                         $"{field} (мапінг {map.Id.ToString(CultureInfo.InvariantCulture)}): у періоді є точки в іншій "
@@ -444,7 +454,9 @@ public sealed class MaterializeCollectedDataJob(
                     continue;
                 }
 
-                var series = IsTimeFold(kind) ? timed : points;
+                var series = IsTimeFold(kind)
+                    ? TimeSeries(bounds, inside, map.SourceUnitId, units)
+                    : points;
                 if (series.Count == 0)
                 {
                     // ⛔ D2-02: не мовчки — після кінця періоду подія «немає даних».
@@ -514,15 +526,14 @@ public sealed class MaterializeCollectedDataJob(
         return new Aggregation(result, overCeiling, unitFailures, partial, noData);
     }
 
-    /// <summary>Ряд для згортки за часом: точка до періоду, точки періоду, точка на чи після кінця.</summary>
+    /// <summary>Межові точки для згортки за часом: остання ДО періоду й перша НА чи ПІСЛЯ кінця.</summary>
     /// <remarks>
     /// ⚠ Межові точки беруться без фільтра якості: погана межова точка робить
     /// крайній відрізок прогалиною, і це правильніше, ніж перескочити через неї
     /// до ще давнішої.
     /// </remarks>
-    private async Task<List<PointRow>> TimeSeriesAsync(
-        int sourceEntityId, string field, Domain.Entities.Documents.Period.UtcRange period,
-        List<PointRow> inside, CancellationToken ct)
+    private async Task<Bounds> BoundsAsync(
+        int sourceEntityId, string field, Domain.Entities.Documents.Period.UtcRange period, CancellationToken ct)
     {
         var before = await db.RawDataPoints
             .AsNoTracking()
@@ -540,21 +551,68 @@ public sealed class MaterializeCollectedDataJob(
             .FirstOrDefaultAsync(ct)
             .ConfigureAwait(false);
 
-        var series = new List<PointRow>(inside.Count + 2);
-        if (before is not null)
+        return new Bounds(before, after);
+    }
+
+    /// <summary>Ряд для згортки за часом: межа до періоду, точки періоду, межа на чи після кінця.</summary>
+    private static List<TimedPoint> TimeSeries(
+        Bounds bounds, List<PointRow> inside, int? declaredSourceUnitId, UnitCatalogSnapshot? units)
+    {
+        var series = new List<TimedPoint>(inside.Count + 2);
+        if (bounds.Before is { } before)
         {
-            series.Add(before);
+            series.Add(Edge(before, declaredSourceUnitId, units).ToTimed());
         }
 
-        series.AddRange(inside);
+        series.AddRange(inside.Select(p => p.ToTimed()));
 
-        if (after is not null)
+        if (bounds.After is { } after)
         {
-            series.Add(after);
+            series.Add(Edge(after, declaredSourceUnitId, units).ToTimed());
         }
 
         return series;
     }
+
+    /// <summary>Межова точка в оголошеній одиниці джерела (Y1-01).</summary>
+    /// <remarks>
+    /// <para>
+    /// ⛔ Точка несе СВОЮ одиницю (X3-02): межова точка сусіднього періоду, зібрана до прийняття нової
+    /// одиниці, переводиться в оголошену мапінгом тією ж арифметикою межі (<see cref="BoundaryUnitConversion"/>) —
+    /// це миттєве значення швидкості, а не згортка, тож переводиться як є (<c>Sm3/s</c> → <c>Sm3/h</c> = ×3600).
+    /// </para>
+    /// <para>
+    /// ⛔ Не переводиться (інша розмірність, одиниці немає в довіднику) — точка стає БЕЗ числа: крайній
+    /// відрізок — прогалина, а не тихе число в чужій одиниці; покриття (<c>PercentGood</c>,
+    /// <c>PartialCoverage</c>) про це скаже.
+    /// </para>
+    /// </remarks>
+    private static PointRow Edge(PointRow point, int? declaredSourceUnitId, UnitCatalogSnapshot? units)
+    {
+        if (point.UnitId is not { } actual || declaredSourceUnitId is not { } declared || actual == declared)
+        {
+            return point;
+        }
+
+        if (point.Value is not { } value || units is null)
+        {
+            return point with { Value = null };
+        }
+
+        try
+        {
+            return point with { Value = BoundaryUnitConversion.Convert(value, actual, declared, units) };
+        }
+        catch (Exception ex) when (ex is DomainException or EcrException)
+        {
+            return point with { Value = null };
+        }
+    }
+
+    /// <summary>Чи є межова точка з одиницею джерела, іншою за оголошену (Y1-01).</summary>
+    private static bool HasForeignEdge(Bounds bounds, int? declaredSourceUnitId)
+        => declaredSourceUnitId is { } declared
+           && ((bounds.Before?.UnitId is { } b && b != declared) || (bounds.After?.UnitId is { } a && a != declared));
 
     /// <summary>Чи є в ряді точка з одиницею джерела, іншою за оголошену мапінгом (X3-02).</summary>
     /// <param name="rows">Точки, які підуть у згортку.</param>
@@ -595,6 +653,11 @@ public sealed class MaterializeCollectedDataJob(
                 Value is not null
                 && (Quality is null || string.Equals(Quality, WindowFold.GoodQuality, StringComparison.OrdinalIgnoreCase)));
     }
+
+    /// <summary>Межові точки періоду для згортки за часом; <c>null</c> — точки за межею немає.</summary>
+    /// <param name="Before">Остання точка до початку періоду.</param>
+    /// <param name="After">Перша точка на чи після кінця періоду.</param>
+    private readonly record struct Bounds(PointRow? Before, PointRow? After);
 
     /// <summary>Результат згортки періоду.</summary>
     /// <param name="Values">Значення для запису.</param>
