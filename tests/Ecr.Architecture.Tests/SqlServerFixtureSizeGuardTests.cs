@@ -29,7 +29,7 @@ public sealed class SqlServerFixtureSizeGuardTests
         Assert.True(dispose > 0, "SqlServerFixture.DisposeAsync не знайдено");
 
         var guard = source.IndexOf("if (_nameSuffix.Length == 0 && ConnectionString.Length > 0)", dispose, StringComparison.Ordinal);
-        var check = source.IndexOf("await FindOversizedFilesAsync(ConnectionString)", dispose, StringComparison.Ordinal);
+        var check = source.IndexOf("await FindOversizedFilesAsync(ConnectionString, MaxFileMbAtCollectionEnd)", dispose, StringComparison.Ordinal);
         var container = source.IndexOf("await _container.DisposeAsync()", dispose, StringComparison.Ordinal);
         var thrown = source.IndexOf("throw new InvalidOperationException", container, StringComparison.Ordinal);
 
@@ -37,7 +37,7 @@ public sealed class SqlServerFixtureSizeGuardTests
         Assert.True(container > check, "розмір має бути виміряно ДО зупинки контейнера");
         Assert.True(thrown > container, "виняток про завеликі файли має летіти ПІСЛЯ зупинки контейнера");
 
-        // Стеля одна на сторож у класі й на перевірку в кінці колекції.
+        // Стеля в класі-сторожі — та сама константа фікстури; стеля наприкінці колекції — окрема й не нижча (храповик).
         var guardClass = File.ReadAllText(Path.Combine(
             SourceTree.Root, "tests", "Ecr.Infrastructure.Tests", "Persistence", "TestDatabaseSizeTests.cs"));
         Assert.Contains("private const int MaxFileMb = SqlServerFixture.MaxFileMb;", guardClass, StringComparison.Ordinal);
