@@ -226,6 +226,37 @@ public sealed class PhysicalModelTests(SqlServerFixture sql)
         Assert.Equal(expected, shape);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "F4-02")]
+    public async Task FormulaDependency_має_покривний_індекс_за_FormulaDefId()
+    {
+        // ⛔ F4-02 (audit-9): граф версії (`ListFormulaDependenciesAsync`) з'єднується за FormulaDefId на
+        // КОЖЕН прогін формул (≈ кожне автозбереження), а `ForeignKeyIndexConvention` вимкнено. Без цього
+        // індексу запит сканував графи всіх опублікованих версій. Ключ — під `ORDER BY FormulaDefId,
+        // SortOrder`; INCLUDE усіх стовпців, бо запит бере рядок цілком (інакше key lookup на кожен рядок
+        // і оптимізатор однаково обрав би скан). Без індексу `shape` — null, і тест червоний.
+        var shape = await ScalarAsync<string>("""
+            SELECT STUFF((SELECT N',' + c.name
+                          FROM sys.index_columns ic
+                          JOIN sys.columns c ON c.object_id = ic.object_id AND c.column_id = ic.column_id
+                          WHERE ic.object_id = i.object_id AND ic.index_id = i.index_id AND ic.is_included_column = 0
+                          ORDER BY ic.key_ordinal FOR XML PATH('')), 1, 1, N'')
+                   + N'|' + ISNULL(STUFF((SELECT N',' + c.name
+                          FROM sys.index_columns ic
+                          JOIN sys.columns c ON c.object_id = ic.object_id AND c.column_id = ic.column_id
+                          WHERE ic.object_id = i.object_id AND ic.index_id = i.index_id AND ic.is_included_column = 1
+                          ORDER BY c.name FOR XML PATH('')), 1, 1, N''), N'-')
+            FROM sys.indexes i
+            WHERE i.object_id = OBJECT_ID(N'cfg.FormulaDependency') AND i.name = N'IX_FormulaDependency_Formula'
+            """);
+
+        Assert.Equal(
+            "FormulaDefId,SortOrder|BindingId,ColumnDefId,DependsOnKind,FilterJson,PeriodOffset,RowKey,SourceKind,TableDefId",
+            shape);
+    }
+
     // ⚠ Тест доданий після Q-060: сім сутностей без конфігурації EF лягали
     // конвенцією в `dbo` з множинним іменем, і міграція створювала таблиці,
     // яких у `02a-db-schema.md` немає. `SchemaValidator` цього не бачить —
