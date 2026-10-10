@@ -402,7 +402,8 @@ public sealed partial class PatchCellsHandler
 
         foreach (var item in gated)
         {
-            item.RequiredInputMessages = EvaluateRequiredInputs(item.Context, item.Planned, item.Applicable, baseline);
+            item.RequiredInputMessages = EvaluateRequiredInputs(
+                item.Context, item.Planned, item.Applicable, baseline, item.Request.Origin);
         }
     }
 

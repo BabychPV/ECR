@@ -124,7 +124,8 @@ public sealed partial class PatchCellsHandler(
         // Справжні `TableRow.Id` з'являються лише всередині транзакції запису
         // (<see cref="MaterializeNewRowsAsync"/>).
         var changes = BuildCellChanges(context, Localization.NumberCulture.ForLanguage(currentUser.Language));
-        var requiredInputMessages = await EnforceRequiredInputsAsync(context, changes, ct).ConfigureAwait(false);
+        var requiredInputMessages = await EnforceRequiredInputsAsync(context, changes, request.Origin, ct)
+            .ConfigureAwait(false);
 
         // ⛔ Шапка документа читається РЕАЛЬНО (раніше HDR.X у правилах
         // валідації завжди давав Null, той самий дефект, що й у
@@ -1303,8 +1304,15 @@ public sealed partial class PatchCellsHandler(
     /// патчі) колонка — перевіряється UNION бази й поточної правки, як вимагає
     /// директива, а не сам лише патч.
     /// </remarks>
+    /// <param name="context">Контекст запиту.</param>
+    /// <param name="changes">Зміни батчу.</param>
+    /// <param name="origin">
+    /// Походження батчу. ⛔ F1-01 (аудит 9): блокує лише батч ЛЮДИНИ
+    /// (<see cref="CellChangeOrigins.IsHuman"/>); для інтеграції вимога лишається попередженням.
+    /// </param>
+    /// <param name="ct">Токен скасування.</param>
     private async Task<List<Validation.ValidationMessage>> EnforceRequiredInputsAsync(
-        RequestContext context, CellChangeLists changes, CancellationToken ct)
+        RequestContext context, CellChangeLists changes, string? origin, CancellationToken ct)
     {
         var messages = new List<Validation.ValidationMessage>();
 
@@ -1353,7 +1361,7 @@ public sealed partial class PatchCellsHandler(
             ? new Dictionary<CellAddress, CellValueData>()
             : await cellStore.ReadCellsAsync(addresses, ct).ConfigureAwait(false);
 
-        return EvaluateRequiredInputs(context, changes, applicable, baseline);
+        return EvaluateRequiredInputs(context, changes, applicable, baseline, origin);
     }
 
     /// <summary>
@@ -1392,8 +1400,18 @@ public sealed partial class PatchCellsHandler(
         RequestContext context,
         CellChangeLists changes,
         IReadOnlyList<ApplicableMethodology> applicable,
-        IReadOnlyDictionary<CellAddress, CellValueData> baseline)
+        IReadOnlyDictionary<CellAddress, CellValueData> baseline,
+        string? origin)
     {
+        // ⛔ F1-01 (аудит 9): вимога методології — вимога до ЛЮДИНИ, яка зберігає рядок.
+        // Інтеграція ручних входів не заповнює й не заповнить; блок на її батчі
+        // (`MaterializeCollectedDataJob` пише всі поля сутності в таблиці одним батчем)
+        // означав, що жодне число з PI не лягає в таблицю, доки людина не заповнить ручну
+        // колонку, а задача падає без повтору. Для системного походження — попередження,
+        // для людини правило не змінюється: її наступна правка рядка так само впреться в
+        // незаповнений вхід.
+        var humanBatch = CellChangeOrigins.IsHuman(origin);
+
         var messages = new List<Validation.ValidationMessage>();
         var neededColumnIds = RequiredInputColumnIds(applicable);
 
@@ -1471,16 +1489,16 @@ public sealed partial class PatchCellsHandler(
                     var defaultHint =
                         $"Колонка «{columnCode}» обов'язкова для методології «{applied.MethodologyCode}».";
 
+                    var blocks = required.Severity == RequiredInputSeverity.Block && humanBatch;
+
                     messages.Add(new Validation.ValidationMessage(
-                        required.Severity == RequiredInputSeverity.Block
-                            ? ValidationSeverity.Error
-                            : ValidationSeverity.Warning,
+                        blocks ? ValidationSeverity.Error : ValidationSeverity.Warning,
                         "ECR-CALC-0437",
                         required.HintL10n?.Get("en") ?? defaultHint,
                         context.Instance.TableDefId,
                         rowKey,
                         columnCode,
-                        BlocksSave: required.Severity == RequiredInputSeverity.Block));
+                        BlocksSave: blocks));
                 }
             }
         }
