@@ -132,4 +132,75 @@ public sealed class PeriodPolicyRecomputeTests
         Assert.Equal(Local(new DateOnly(2026, 4, 1)), scheduled.ComputedOpenAt);
         Assert.Equal(Local(new DateOnly(2026, 6, 14)), scheduled.ComputedCloseAt);
     }
+
+    /// <summary>
+    /// R9-F3 / F3-03: перевідкритий період закривається за дедлайном Reopen, а не за межами,
+    /// які зсунула нова політика.
+    /// </summary>
+    /// <remarks>
+    /// Січень (hard-close 45 → межа 17.03) закрито, 20.03 перевідкрито до 25.03. 21.03 політику
+    /// змінено на hard-close 120 (межа січня стала б 31.05). Без фіксу 26.03 січень ефективно
+    /// <c>Grace</c> (межа ще попереду) — запис дозволено без події Reopen; з фіксом — <c>Closed</c>.
+    /// Мутація: прибрати <c>ReopenedUntil is not null</c> у <c>PeriodBoundaryRefresh</c> — червоніє.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "ФВ-1.10")]
+    public async Task Зміна_політики_не_подовжує_перевідкритий_період_за_дедлайн_Reopen()
+    {
+        var reopenedAt = new DateTime(2026, 3, 20, 6, 0, 0, DateTimeKind.Utc);
+        var until = reopenedAt.AddDays(5);
+        var jan = ReopenedJanuary(reopenedAt, until);
+        var closeBefore = jan.ComputedCloseAt;
+
+        await PolicyHandler(reopenedAt.AddDays(1)).HandleAsync(PolicyId, 0, 15, 120, 45, CancellationToken.None);
+
+        Assert.Equal(closeBefore, jan.ComputedCloseAt);
+        Assert.Equal(PeriodState.Closed, new Ecr.Domain.Services.PeriodStateCalculator().Effective(jan, until.AddDays(1)));
+    }
+
+    /// <summary>
+    /// R9-F3 / F3-03 (вторинний випадок): період, що вже минув свою межу закриття, але
+    /// збережений стан ще <c>Grace</c> (годинна задача станів не відпрацювала), нових меж не
+    /// отримує — зміна політики не відкриває закритий період.
+    /// </summary>
+    /// <remarks>
+    /// Мутація: прибрати перевірку <c>now ≥ ComputedCloseAt</c> у <c>PeriodBoundaryRefresh</c> — червоніє.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "ФВ-1.6")]
+    public async Task Зміна_політики_не_відкриває_період_що_ефективно_вже_закрився()
+    {
+        var project = ProjectBuilder.Project(PeriodKind.Monthly, ZoneId, AccessBuilder.ProjectId);
+        var jan = Make(202601, 1, new DateOnly(2026, 1, 1), new DateOnly(2026, 1, 31));
+        jan.AdvanceTo(PeriodState.Grace, Now);
+        ProjectBuilder.Attach(project, [jan]);
+        _periods.FindProjectAsync(AccessBuilder.ProjectId, Arg.Any<CancellationToken>()).Returns(project);
+        var closeBefore = jan.ComputedCloseAt;
+        var afterClose = closeBefore.AddHours(1);
+
+        await PolicyHandler(afterClose).HandleAsync(PolicyId, 0, 15, 120, 45, CancellationToken.None);
+
+        Assert.Equal(closeBefore, jan.ComputedCloseAt);
+        Assert.Equal(PeriodState.Closed, new Ecr.Domain.Services.PeriodStateCalculator().Effective(jan, afterClose));
+    }
+
+    private Period ReopenedJanuary(DateTime reopenedAt, DateTime until)
+    {
+        var project = ProjectBuilder.Project(PeriodKind.Monthly, ZoneId, AccessBuilder.ProjectId);
+        var jan = Make(202601, 1, new DateOnly(2026, 1, 1), new DateOnly(2026, 1, 31));
+        jan.AdvanceTo(PeriodState.Closed, reopenedAt.AddDays(-1));
+        jan.Reopen(until, "Виправлення звіту за січень", reopenedAt);
+        ProjectBuilder.Attach(project, [jan]);
+        _periods.FindProjectAsync(AccessBuilder.ProjectId, Arg.Any<CancellationToken>()).Returns(project);
+        return jan;
+    }
+
+    private UpdatePeriodPolicyHandler PolicyHandler(DateTime utcNow)
+    {
+        var clock = Substitute.For<Ecr.Domain.Abstractions.IClock>();
+        clock.UtcNow.Returns(utcNow);
+        return new UpdatePeriodPolicyHandler(_periods, _access, _user, _uow, Substitute.For<IAuditWriter>(), clock);
+    }
 }
