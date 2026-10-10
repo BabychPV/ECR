@@ -64,7 +64,7 @@ internal sealed class ReviewStep(ICertificateSource certificates, Func<DateTime>
             "Database schema",
             state.Mode == WizardMode.Update
                 ? (state.SkipSchema ? "do not apply (already applied separately)" : "apply")
-                : "apply (first deployment)");
+                : (state.SkipSchema ? "do not apply (already applied by the previous attempt)" : "apply (first deployment)"));
 
         // ⛔ AN-117 (S2-04): пропущена перевірка копії бази (-SkipBackupCheck) — червоний рядок перед «Install».
         var backupRow = AddRow("Database backup", SchemaBackupRules.Describe(state, out var backupWarning));

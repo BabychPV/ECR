@@ -514,6 +514,28 @@ BACKUP LOG      [Ecr] TO DISK = N'<шлях>\Ecr_log.trn'  WITH CHECKSUM, COMPRE
 -BootstrapPassword`); на наявній базі вхід відновлює інший адміністратор із
 `Security.ManageUsers` (скидання пароля, `admin-guide.md` §2.2–2.3).
 
+**Запису `bootstrap` немає зовсім** (✎ 2026-10-10, R9-F5/F5-01). Типовий шлях: перше розгортання
+впало ПІСЛЯ кроку 2 (схему накочено, а крок 4 з файлом пароля не виконувався — наприклад, `msiexec`
+на кроці 3 відмовив через обліковий запис служби), і повтор пройшов режимом «Update» / без
+`-FirstDeployment`: «Done», але крок 4 надрукував жовте «`-BootstrapPassword` не задано», і в системі
+немає жодного користувача з `Security.ManageUsers` (Windows-вхід створює записи без ролей). Даних це не
+губить. Лікування — повтор на тій самій базі з паролем:
+
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+$cs = Read-Host -AsSecureString -Prompt 'Рядок підключення служби'
+$bp = Read-Host -AsSecureString -Prompt 'Пароль bootstrap'
+.\tools\deploy-ecr.ps1 -FirstDeployment -SkipSchema -BootstrapPassword $bp `
+  -SqlInstance <сервер> -Database <база> -MsiPath <шлях до .msi> `
+  -ServiceAccount '<DOMAIN\ecr-svc$>' -ConnectionString $cs `
+  -DataProtectionThumbprint <відбиток> -HttpsThumbprint <відбиток HTTPS> -AppPort <поточний порт>
+```
+
+У майстрі `Ecr-Setup` — режим «First deployment» + прапорець «Schema already applied by a previous
+attempt of this first deployment (skip)» на кроці бази (майстер тоді передає саме цю комбінацію). Режим
+«Update» пароля bootstrap не передає. `-SkipSchema` тут обов'язковий: без нього `-FirstDeployment` на базі
+з міграціями відмовляє на кроці 2.
+
 ⚠ Процедура відновлення **на стенді не перевірялась**. Перевірте її до
 приймання.
 

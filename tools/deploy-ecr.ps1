@@ -328,7 +328,8 @@
     застосованою міграцією EF (__EFMigrationsHistory) зупиняє крок 2 до будь-якої
     зміни: -FirstDeployment обходить перевірку копії, а на живій базі це
     оновлення без копії. Повтор першого розгортання, що впало після кроку 2, —
-    з -SkipSchema.
+    з -FirstDeployment -SkipSchema -BootstrapPassword (R9-F5/F5-01: без
+    -FirstDeployment пароль bootstrap не записується і адміністратора не буде).
 
 .PARAMETER ReadyTimeoutSeconds
     Скільки секунд кроку 7 чекати, поки /health/ready стане Healthy або
@@ -1176,7 +1177,9 @@ function Get-FirstDeploymentProblem {
     if ($count -eq 0) { return $null }
     return ("-FirstDeployment, але база $Database уже має $count застосованих міграцій — це ОНОВЛЕННЯ. Нічого не змінено. " +
         "Запустіть без -FirstDeployment (тоді перевіряється свіжа копія бази, S2-04), у майстрі — режим «Update». " +
-        "Повтор першого розгортання, що впало ПІСЛЯ кроку 2 (схему вже накочено), — з -SkipSchema.")
+        "Повтор першого розгортання, що впало ПІСЛЯ кроку 2 (схему вже накочено), — з -FirstDeployment -SkipSchema " +
+        "-BootstrapPassword (у майстрі: «First deployment» + «Schema already applied by a previous attempt»). " +
+        "Режим «Update» пароля bootstrap не передає — без нього в системі не буде жодного адміністратора (R9-F5/F5-01).")
 }
 
 # ⛔ R5-U1/U1-06 (аудит 2026-10-09): старіший пакет на новішій базі. Чиста функція: міграції бази
@@ -2265,7 +2268,8 @@ if ($BootstrapPassword) {
 else {
     Write-Host ("-BootstrapPassword не задано — якщо база порожня і жоден " +
         "домен-адміністратор ще не існує, увійти в застосунок після першого розгортання " +
-        "нічим (bootstrap-користувача не буде створено).") -ForegroundColor Yellow
+        "нічим (bootstrap-користувача не буде створено). Повтор першого розгортання, що впало після " +
+        "кроку 2, — з -FirstDeployment -SkipSchema -BootstrapPassword (R9-F5/F5-01).") -ForegroundColor Yellow
 }
 
 # ---------------------------------------------------------------------

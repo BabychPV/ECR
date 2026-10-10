@@ -4,7 +4,7 @@ namespace Ecr.Setup.Steps;
 
 /// <summary>
 /// Крок 3 — SQL Server, база даних, спосіб автентифікації. У режимі
-/// оновлення додатково показує прапорець "-SkipSchema".
+/// обидва режими показують прапорець "-SkipSchema" (перше розгортання — для повтору після кроку 2, R9-F5/F5-01).
 /// </summary>
 internal sealed class DatabaseStep : IWizardStep
 {
@@ -63,15 +63,13 @@ internal sealed class DatabaseStep : IWizardStep
 
     public void OnShow(WizardState state)
     {
-        // Прапорець стосується лише оновлення — у першому розгортанні схему
-        // застосовує сам скрипт, пропускати нічого. Крок будується один раз,
-        // тож видимість перевіряємо щоразу, коли користувач сюди повертається
-        // (могли змінити режим на кроці 1 і прийти назад).
-        _skipSchemaCheckBox!.Visible = state.Mode == WizardMode.Update;
-        if (state.Mode == WizardMode.FirstDeployment)
-        {
-            _skipSchemaCheckBox.Checked = false;
-        }
+        // ⛔ R9-F5/F5-01: прапорець видно в обох режимах. У першому розгортанні — лише для повтору спроби,
+        // що впала ПІСЛЯ кроку 2 скрипта (схему вже накочено): тоді майстер передає разом
+        // -FirstDeployment -SkipSchema -BootstrapPassword. Раніше пропуск був лише в «Update», який пароля
+        // bootstrap не передає, — повтор давав систему без адміністратора. Крок будується один раз, тож
+        // підпис оновлюємо щоразу, коли користувач сюди повертається (могли змінити режим на кроці 1).
+        _skipSchemaCheckBox!.Visible = true;
+        _skipSchemaCheckBox.Text = WizardState.SkipSchemaLabel(state.Mode);
 
         UpdateBackupVisibility();
     }
@@ -147,6 +145,15 @@ internal sealed class DatabaseStep : IWizardStep
             return false;
         }
 
+        // ⛔ R9-F5/F5-01: повтор першого розгортання з пропуском схеми має сенс лише на базі, яку попередня
+        // спроба вже створила й накотила; на відсутній скрипт однаково впаде на звірці штампа схеми.
+        if (databaseMissing && _skipSchemaCheckBox!.Checked)
+        {
+            error = $"Database '{_databaseBox.Text.Trim()}' does not exist on '{_instanceBox.Text.Trim()}', " +
+                    "so its schema cannot have been applied. Untick \"" + _skipSchemaCheckBox.Text + "\".";
+            return false;
+        }
+
         return ValidateBackup(out error);
     }
 
@@ -196,7 +203,7 @@ internal sealed class DatabaseStep : IWizardStep
         state.SqlAuthIsWindows = _windowsAuthOption!.Checked;
         state.SqlLogin = state.SqlAuthIsWindows ? null : _loginBox!.Text.Trim();
         state.SqlLoginPassword = state.SqlAuthIsWindows ? null : ToSecure(_sqlPasswordBox!.Text);
-        state.SkipSchema = state.Mode == WizardMode.Update && _skipSchemaCheckBox!.Checked;
+        state.SkipSchema = _skipSchemaCheckBox!.Checked;
         state.TrustSqlServerCertificate = _trustCertificateCheckBox!.Checked;
 
         // AN-117: позначка діє лише там, де скрипт і перевіряв би копію (оновлення зі зміною схеми).

@@ -4,7 +4,7 @@ namespace Ecr.Setup;
 
 /// <summary>
 /// Спосіб розгортання, обраний на кроці 1 — визначає, чи показувати крок
-/// "Пароль адміністратора" і чи пропонувати "-SkipSchema" на кроці бази даних.
+/// "Пароль адміністратора" і який підпис має прапорець "-SkipSchema" на кроці бази даних.
 /// </summary>
 internal enum WizardMode
 {
@@ -78,6 +78,22 @@ internal sealed class WizardState
     public string? SqlLogin { get; set; }
     public SecureString? SqlLoginPassword { get; set; }
     public bool SkipSchema { get; set; }
+
+    /// <summary>
+    /// Підпис прапорця «схему не застосовувати» на кроці бази.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ R9-F5/F5-01: прапорець є в ОБОХ режимах. У першому розгортанні — для повтору спроби, що впала
+    /// ПІСЛЯ кроку 2 скрипта (схему вже накочено, тож <c>-FirstDeployment</c> без <c>-SkipSchema</c> скрипт
+    /// відмовляє). Раніше майстер дозволяв пропуск лише в «Update», а «Update» не передає
+    /// <c>-BootstrapPassword</c> — повтор закінчувався «Done» і системою без жодного адміністратора.
+    /// </remarks>
+    /// <param name="mode">Режим кроку 1.</param>
+    /// <returns>Текст прапорця.</returns>
+    public static string SkipSchemaLabel(WizardMode mode) =>
+        mode == WizardMode.Update
+            ? "Schema already applied separately (skip)"
+            : "Schema already applied by a previous attempt of this first deployment (skip)";
 
     // ⛔ L10-04, D-333 (HU-12 R3 = A): довіряти сертифікату SQL Server без перевірки — свідомий
     // вибір адміністратора, ТИПОВО ВИМКНЕНО. Вимкнено — TrustServerCertificate=False і sqlcmd без
