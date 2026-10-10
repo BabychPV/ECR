@@ -421,6 +421,10 @@ GO
 -- первинного налаштування; `Approver` × `Report.EditDefinition`, Q-153 /
 -- D-203) — фільтр цього блоку вони не послаблюють.
 --
+-- ⛔ U1-04: усі MERGE прав вбудованих ролей беруть роль лише з `IsBuiltIn = 1`. Власна роль, яку адміністратор
+-- створив із кодом вбудованої (`ReportViewer` до появи сіду, `Viewer` тощо), раніше отримувала її права на
+-- наступному старті: MERGE ролі її не чіпає (код зайнятий), а MERGE прав шукав роль лише за кодом.
+--
 -- ⚠ Без цього блоку жоден користувач не має ЖОДНОГО функціонального права —
 -- включно з тим, кого щойно зробили SystemAdministrator. Ролі без прав
 -- виглядають як робоча конфігурація і мовчки не працюють.
@@ -485,7 +489,7 @@ USING (
         (N'Auditor', N'Security.ViewAudit'),
         (N'Auditor', N'System.ViewHealth')
     ) AS m (RoleCode, Pattern)
-    JOIN sec.Role       AS r ON r.Code = m.RoleCode
+    JOIN sec.Role       AS r ON r.Code = m.RoleCode AND r.IsBuiltIn = 1 -- U1-04: лише вбудована роль, не власна з тим самим кодом
     JOIN sec.Permission AS p ON p.Code LIKE m.Pattern
     WHERE p.IsDangerous = 0
 ) AS s
@@ -508,7 +512,7 @@ USING (
     FROM (VALUES (N'Security.ManageUsers'), (N'Security.ManageRoles')) AS m (Code)
     JOIN sec.Permission AS p ON p.Code = m.Code
     CROSS JOIN sec.Role AS r
-    WHERE r.Code = N'BootstrapAdministrator'
+    WHERE r.Code = N'BootstrapAdministrator' AND r.IsBuiltIn = 1 -- U1-04
 ) AS s
 ON t.RoleId = s.RoleId AND t.PermissionCode = s.PermissionCode
 WHEN NOT MATCHED THEN INSERT (RoleId, PermissionCode) VALUES (s.RoleId, s.PermissionCode);
@@ -531,7 +535,7 @@ USING (
     SELECT r.Id AS RoleId, p.Code AS PermissionCode
     FROM sec.Role AS r
     JOIN sec.Permission AS p ON p.Code = N'Report.EditDefinition'
-    WHERE r.Code = N'Approver'
+    WHERE r.Code = N'Approver' AND r.IsBuiltIn = 1 -- U1-04
 ) AS s
 ON t.RoleId = s.RoleId AND t.PermissionCode = s.PermissionCode
 WHEN NOT MATCHED THEN INSERT (RoleId, PermissionCode) VALUES (s.RoleId, s.PermissionCode);
@@ -567,7 +571,7 @@ USING (
     FROM (VALUES (N'Report.ViewRegulatory'), (N'Report.ViewSnapshot'), (N'Report.Export')) AS m (Code)
     JOIN sec.Permission AS p ON p.Code = m.Code AND p.IsDangerous = 0
     CROSS JOIN sec.Role AS r
-    WHERE r.Code = N'ReportViewer'
+    WHERE r.Code = N'ReportViewer' AND r.IsBuiltIn = 1 -- U1-04
 ) AS s
 ON t.RoleId = s.RoleId AND t.PermissionCode = s.PermissionCode
 WHEN NOT MATCHED THEN INSERT (RoleId, PermissionCode) VALUES (s.RoleId, s.PermissionCode);
@@ -584,7 +588,7 @@ USING (
     SELECT r.Id AS RoleId, p.Code AS PermissionCode
     FROM sec.Role AS r
     JOIN sec.Permission AS p ON p.Code = N'Report.ViewSnapshot' AND p.IsDangerous = 0
-    WHERE r.Code = N'Auditor'
+    WHERE r.Code = N'Auditor' AND r.IsBuiltIn = 1 -- U1-04
 ) AS s
 ON t.RoleId = s.RoleId AND t.PermissionCode = s.PermissionCode
 WHEN NOT MATCHED THEN INSERT (RoleId, PermissionCode) VALUES (s.RoleId, s.PermissionCode);
@@ -609,7 +613,7 @@ USING (
     SELECT r.Id AS RoleId, p.Code AS PermissionCode
     FROM sec.Role AS r
     JOIN sec.Permission AS p ON p.Code = N'Document.Submit' AND p.IsDangerous = 0
-    WHERE r.Code = N'DataEntry'
+    WHERE r.Code = N'DataEntry' AND r.IsBuiltIn = 1 -- U1-04
 ) AS s
 ON t.RoleId = s.RoleId AND t.PermissionCode = s.PermissionCode
 WHEN NOT MATCHED THEN INSERT (RoleId, PermissionCode) VALUES (s.RoleId, s.PermissionCode);
