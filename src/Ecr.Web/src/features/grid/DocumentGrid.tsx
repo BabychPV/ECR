@@ -63,7 +63,7 @@ import {
   type PendingEdit,
 } from './useCellPatch';
 import {
-  clearBusyRetry,
+  noteBusyRetryResolved,
   holdRejectedEdits,
   isBusyRetryWaiting,
   noteSaveSucceeded,
@@ -620,7 +620,8 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         // того самого рядка, якої в пакеті не було, лишається позначеною.
         setSaveError(null);
         // ⚠ AN-123: збереження пройшло — стан «чекає, доки дані звільняться» знято.
-        clearBusyRetry();
+        // ⛔ Y8-04: лише для ЦЬОГО зрізу — повтор іншого зрізу не скасовується.
+        noteBusyRetryResolved(tableInstanceId, periodKey);
       } catch (error) {
         // ⛔ `V-01`: відхилені правки ТРИМАЮТЬСЯ — лишаються незбереженими, з
         // маркером і причиною, але наступні пакети автозбереження їх уже не

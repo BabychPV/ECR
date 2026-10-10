@@ -15,6 +15,7 @@ import {
   markPendingRejected,
   openDocument,
   pendingCount,
+  pendingSlice,
   pendingSlices,
   resetPending,
   sendableEdits,
@@ -309,7 +310,12 @@ export function scheduleBusyRetry(retryAfterSeconds?: number): void {
 
   const base = BusyRetryDelaysMs[Math.min(busyAttempt, BusyRetryDelaysMs.length - 1)] ?? 30_000;
   const jittered = base * (0.5 + Math.random() * 0.5);
-  const delay = Math.max(jittered, (retryAfterSeconds ?? 0) * 1000);
+  // ⛔ Y8-03: `Retry-After` — НИЖНЯ межа, а не заміна розкиду. `max(розкид, Retry-After)` при типовому
+  // `Retry-After` ≥ власного відступу (5 с проти 2,5–5 с) давало рівно `Retry-After` усім клієнтам:
+  // сотня вкладок, що впали разом, повторювала б теж разом — те, від чого розкид і ставили.
+  // Тепер розкид додається ПОВЕРХ названого сервером строку.
+  const floor = (retryAfterSeconds ?? 0) * 1000;
+  const delay = Math.max(jittered, floor + base * 0.5 * Math.random());
 
   busyAttempt += 1;
   busyTimer = setTimeout(() => {
@@ -320,7 +326,13 @@ export function scheduleBusyRetry(retryAfterSeconds?: number): void {
   notifyBusy();
 }
 
-/** Знімає план повтору й скидає відступ: збереження пройшло або документ закрито. */
+/**
+ * Зрізи, що чекають повтору після «дані зайняті» (Y8-04): ключ `tableInstanceId:periodKey`.
+ * План повтору ОДИН на документ, але чекають його окремі зрізи.
+ */
+const busySlices = new Set<string>();
+
+/** Знімає план повтору й скидає відступ: документ закрито (або повтору більше ніхто не чекає). */
 export function clearBusyRetry(): void {
   const wasWaiting = busyTimer !== null || busyAttempt > 0;
 
@@ -328,8 +340,30 @@ export function clearBusyRetry(): void {
   busyTimer = null;
   busyAttempt = 0;
   databaseBusyAttempt = 0;
+  busySlices.clear();
 
   if (wasWaiting) notifyBusy();
+}
+
+/**
+ * Збереження ЗРІЗУ пройшло: знімає його з очікувачів повтору (Y8-04).
+ *
+ * ⛔ Доти успіх будь-якого зрізу викликав `clearBusyRetry()` — глобальний. Зріз A дістав
+ * `503`/`409 lockTimeout` (повтор заплановано), зріз B того самого документа зберігся —
+ * і план A скасовувався: його правки лишались незбереженими без повтору й без жодної
+ * позначки, аж до наступного введення. Тепер план знімається, лише коли повтору не чекає
+ * жоден зріз.
+ */
+export function noteBusyRetryResolved(tableInstanceId: number, periodKey: number): void {
+  busySlices.delete(keyOfSlice(tableInstanceId, periodKey));
+
+  // ⚠ Зріз, чиї правки вже зникли зі сховища (відхилено, скинуто), повтору не чекає.
+  for (const key of [...busySlices]) {
+    const [table, period] = key.split(':').map(Number) as [number, number];
+    if (pendingSlice(table, period).size === 0) busySlices.delete(key);
+  }
+
+  if (busySlices.size === 0) clearBusyRetry();
 }
 
 function subscribeBusy(listener: () => void): () => void {
@@ -378,6 +412,8 @@ export function holdRejectedEdits(
   // ⛔ AN-123 (`R1-03`/`R2-01`): «дані зайняті» нічого не тримає — правки лишаються
   // придатними до надсилання (і до маячка закриття вкладки), а повтор іде сам.
   if (error instanceof EcrApiError && error.isTransientBusy) {
+    busySlices.add(keyOfSlice(tableInstanceId, periodKey));
+
     // ⛔ R7-Y8 / Y8-02: `503 databaseBusy` — не безмежно. Після межі план повтору
     // знято, а зріз позначено «збереження не дійшло»: людина бачить відмову й
     // «Retry save» замість вічного «чекає». Правки лишаються придатними до надсилання.
@@ -387,6 +423,7 @@ export function holdRejectedEdits(
       // ⚠ Чужого плану (повтор `409 lockTimeout` іншого зрізу) не знімаємо: він довезе
       // і цей зріз, а відмова повториться тим самим шляхом.
       if (databaseBusyAttempt > DatabaseBusyAutoRetries) {
+        busySlices.delete(keyOfSlice(tableInstanceId, periodKey));
         noteSaveFailed(tableInstanceId, periodKey);
 
         return false;
@@ -397,6 +434,9 @@ export function holdRejectedEdits(
 
     return false;
   }
+
+  // Y8-04: зріз, що відмовив ІНАКШЕ, повтору «зайнято» більше не чекає.
+  busySlices.delete(keyOfSlice(tableInstanceId, periodKey));
 
   // ⛔ `G1-03`: відмова, яка нічого не утримала (мережа, `5xx`, `4xx` без
   // позначок), лишає правки «придатними до надсилання» — і закриття вкладки має
@@ -562,7 +602,7 @@ async function saveOrphanSlice(
       sent,
     );
     noteSaveSucceeded(slice.tableInstanceId, slice.periodKey);
-    clearBusyRetry();
+    noteBusyRetryResolved(slice.tableInstanceId, slice.periodKey);
   } catch (error) {
     holdRejectedEdits(slice.tableInstanceId, slice.periodKey, error, edits);
     // ⚠ AN-123: «дані зайняті» — не тост: повтор уже заплановано, а стан «чекає»

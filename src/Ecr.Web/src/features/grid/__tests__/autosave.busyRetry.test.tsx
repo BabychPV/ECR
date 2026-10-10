@@ -14,6 +14,7 @@ import {
   hasFailedSave,
   hasPending,
   pendingRejections,
+  pendingSlice,
   putPendingEdit,
   resetPending,
   sendableEdits,
@@ -299,5 +300,89 @@ describe('Y8-02: 503 databaseBusy — межа автоповторів, дал�
     expect(patchCalls(fetchMock).length).toBeGreaterThan(1 + DatabaseBusyAutoRetries);
     expect(isBusyRetryWaiting()).toBe(true);
     expect(hasFailedSave(Table, Period)).toBe(false);
+  });
+});
+
+/**
+ * Y8-03: `Retry-After` — нижня межа відступу, а не його заміна. Раніше `max(розкид, Retry-After)` при
+ * типовому `Retry-After: 5` віддавав усім клієнтам рівно 5 с — повтор синхронний.
+ */
+describe('Y8-03: розкид відступу додається поверх Retry-After', () => {
+  async function firstRetryAfterMs(random: number): Promise<number[]> {
+    vi.spyOn(Math, 'random').mockReturnValue(random);
+    let patches = 0;
+    const fetchMock = vi.fn((_path: string, init?: RequestInit) => {
+      if (init?.method !== 'PATCH') return Promise.resolve(new Response('{}'));
+      patches += 1;
+
+      return Promise.resolve(patches === 1 ? databaseBusy('5') : ok());
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    renderHook(() => useDocumentPending(1), { wrapper });
+
+    putPendingEdit(Table, Period, edit);
+    scheduleAutosave();
+    await advance(500);
+    expect(patchCalls(fetchMock)).toHaveLength(1);
+
+    // Хвилини спостереження від відповіді 503: крок 100 мс, фіксуємо момент повтору.
+    for (let t = 100; t <= 10_000; t += 100) {
+      await advance(100);
+      if (patchCalls(fetchMock).length === 2) return [t];
+    }
+
+    return [];
+  }
+
+  it('найбільший розкид відступає від Retry-After: повтор не раніше 5 с + розкиду', async () => {
+    // ⛔ Мутація: повернути `Math.max(jittered, retryAfter)` — повтор рівно на 5 000 мс для будь-якого розкиду.
+    const [late] = await firstRetryAfterMs(0.99);
+
+    expect(late).toBeGreaterThan(5_100);
+  });
+
+  it('нульовий розкид — рівно Retry-After (нижня межа збережена)', async () => {
+    const [early] = await firstRetryAfterMs(0);
+
+    expect(early).toBe(5_000);
+  });
+});
+
+/**
+ * Y8-04: успіх ІНШОГО зрізу не скасовує запланований повтор. `clearBusyRetry` був глобальним: зріз A
+ * дістав «зайнято», зріз B зберігся — і повтор A зникав разом із планом.
+ */
+describe('Y8-04: повтор зайнятого зрізу переживає успіх іншого зрізу', () => {
+  it('A: 503 → повтор заплановано; B успішно зберігся пізніше → A усе одно повторюється й зберігається', async () => {
+    const calls: Record<number, number> = { 4: 0, 5: 0 };
+    const fetchMock = vi.fn((_path: string, init?: RequestInit) => {
+      if (init?.method !== 'PATCH') return Promise.resolve(new Response('{}'));
+      const table = (JSON.parse(String(init.body)) as { tableInstanceId: number }).tableInstanceId;
+      calls[table] = (calls[table] ?? 0) + 1;
+
+      if (table === 4) return Promise.resolve(calls[4] === 1 ? databaseBusy('1') : ok());
+
+      // Зріз B відповідає ПІСЛЯ відмови A (1 с після відправлення).
+      return new Promise<Response>((resolve) => {
+        setTimeout(() => resolve(ok()), 1_000);
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    renderHook(() => useDocumentPending(1), { wrapper });
+
+    putPendingEdit(4, Period, edit);
+    putPendingEdit(5, Period, { ...edit, rowKey: 'r9' });
+    scheduleAutosave();
+    await advance(500);
+    expect(isBusyRetryWaiting()).toBe(true);
+
+    // B відповів успіхом (500 + 1000 мс); повтор A (Retry-After 1 с + розкид) іще попереду або вже минув.
+    await advance(1_200);
+    await advance(10_000);
+
+    // ⛔ Мутація: повернути глобальний `clearBusyRetry()` на успіху зрізу — A лишається з 1 PATCH і правкою в сховищі.
+    expect(calls[4]).toBe(2);
+    expect(pendingSlice(4, Period).size).toBe(0);
+    expect(isBusyRetryWaiting()).toBe(false);
   });
 });
