@@ -27,12 +27,18 @@ public sealed class MethodologyImportController(ImportMethodologyPackageHandler 
     /// <param name="timeZone">Пояс майданчика (IANA) для дат AF; за замовчуванням <c>Asia/Atyrau</c>.</param>
     /// <param name="ct">Токен скасування.</param>
     /// <remarks>
+    /// ⛔ S1-04: права перевіряються ДО читання тіла (фільтр <c>RequirePermissionsBeforeBody</c>): без права 64 МБ
+    /// пакет не приймається й не розбирається. Обробник перевіряє їх повторно.
+    ///
     /// ⛔ Лише чернетки: публікує інша людина звичайною дією публікації (чотири ока, золотий
     /// набір). Блокери — <c>422</c>, розбіжність із наявною версією — <c>409</c>; обидва зі
     /// звітом у <c>report</c> і без жодного запису. Повторний імпорт того самого пакета —
     /// <c>200</c> з <c>outcome = unchanged</c>.
     /// </remarks>
     [HttpPost("import")]
+    [Ecr.Api.Security.RequirePermissionsBeforeBody(
+        Ecr.Application.Calculations.ImportMethodologyPackageHandler.Permission,
+        Ecr.Application.Calculations.ImportMethodologyPackageHandler.ConstantPermission)]
     [RequestSizeLimit(64 * 1024 * 1024)]
     [ProducesResponseType<MethodologyImportReportDto>(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
