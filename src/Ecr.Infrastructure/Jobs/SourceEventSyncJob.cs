@@ -1601,7 +1601,7 @@ public sealed partial class SourceEventSyncJob(
             // заборонені — по одному не розводимо; наступний прогін побачить закритий період у плані.
             foreach (var row in rows)
             {
-                outcomes[row.RowKey].Failure = ex.Message;
+                outcomes[row.RowKey].Failure = FailureReason.Of(ex);
             }
 
             return 0;
@@ -1628,7 +1628,7 @@ public sealed partial class SourceEventSyncJob(
             }
             catch (Exception ex) when (ex is BusinessRuleException or DomainException)
             {
-                outcomes[row.RowKey].Failure = ex.Message;
+                outcomes[row.RowKey].Failure = FailureReason.Of(ex);
             }
         }
 
