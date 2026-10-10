@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen, within } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
@@ -7,6 +7,7 @@ import type { RegistryDefDto } from '@/api/types';
 import { loadCatalog, t } from '@/shared/i18n';
 import { RegistriesPage } from '@/pages/admin/RegistriesPage';
 import { RegistryEntryEditor } from '@/features/registries/RegistryEntryEditor';
+import { MeQueryKey } from '@/shared/session/useSession';
 import { testTheme } from '@/test/render';
 
 /**
@@ -30,6 +31,7 @@ const SeededStrings: Record<string, string> = {
   'registries.validity': 'Valid',
   'registries.editEntry': 'Edit',
   'registries.newEntry': 'New entry',
+  'registries.newRegistry': 'New registry',
   'registries.search': 'Search',
   'registries.searchPlaceholder': 'Filter by code or name',
   'registries.constructor': 'Constructor',
@@ -81,14 +83,14 @@ function json(body: unknown): Response {
   return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
 }
 
-function serve(registry: RegistryDefDto): void {
+function serve(registry: RegistryDefDto, meOverride: Partial<typeof me> = {}): void {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
 
       if (url.includes('/ui-strings/')) return json({ languageCode: 'en', revision: 1, strings: SeededStrings });
-      if (url.includes('/api/v1/me')) return json(me);
+      if (url.includes('/api/v1/me')) return json({ ...me, ...meOverride });
       if (url.includes('/api/v1/languages')) return json([{ code: 'en', isDefault: true, nameNative: 'English' }]);
       if (url.includes('/entries/42')) {
         return json({ id: 42, code: 'KG', displayL10n: { values: { en: 'Kilogram' } }, values: { QTY: '1.5' } });
@@ -101,7 +103,7 @@ function serve(registry: RegistryDefDto): void {
   );
 }
 
-function showPage(): void {
+function showPage(): QueryClient {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
   render(
@@ -113,6 +115,8 @@ function showPage(): void {
       </QueryClientProvider>
     </MantineProvider>,
   );
+
+  return client;
 }
 
 function showEditor(registry: RegistryDefDto): void {
@@ -179,5 +183,46 @@ describe('D-211: довідник External — записи лише для пе
     expect((screen.getByLabelText(t('registries.code')) as HTMLInputElement).disabled).toBe(true);
     expect(isDisabled(screen.getByRole('button', { name: t('common.save') }))).toBe(true);
     expect(screen.getByText(SeededStrings['registries.externalReadOnly']!)).toBeDefined();
+  });
+});
+
+/**
+ * L9-18: під симуляцією «очима користувача» (`isSimulation`) сервер відхиляє КОЖЕН не-GET (`ECR-SIM-0403`), а
+ * `can()` бачить права ЦІЛІ. Перелік довідників не пропонує створення й правки, які напевно впадуть `403`.
+ *
+ * ⛔ Мутаційний доказ: прибери `&& !simulation` з `canEditData`/`canEditDefinition` у `RegistriesPage.tsx` —
+ * «New entry», «New registry» і «Edit» з'являються під симуляцією, перший тест червоніє.
+ */
+describe('L9-18: симуляція — довідники лише для читання', () => {
+  const AllRights = ['Registry.View', 'Registry.EditData', 'Registry.EditDefinition'];
+
+  async function showSimulated(isSimulation: boolean): Promise<void> {
+    serve(registryOf('Local'), { isSimulation, permissions: AllRights });
+    await loadCatalog('en', 'private');
+
+    const client = showPage();
+    await screen.findByText('Kilogram');
+    // ⚠ Профіль має ПРИЇХАТИ: до нього `can()` дає `false`, і «немає кнопок» було б зеленим на будь-якому коді.
+    await waitFor(() => expect(client.getQueryData(MeQueryKey)).toBeDefined());
+    await act(async () => {
+      await Promise.resolve();
+    });
+  }
+
+  it('під симуляцією немає створення довідника, запису й правки; перехід у конструктор лишається', async () => {
+    await showSimulated(true);
+
+    expect(screen.queryByRole('button', { name: 'New registry' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'New entry' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Edit' })).toBeNull();
+    expect(screen.getByRole('link', { name: 'Constructor' })).toBeDefined();
+  });
+
+  it('контроль: без симуляції ті самі кнопки є', async () => {
+    await showSimulated(false);
+
+    expect(await screen.findByRole('button', { name: 'New registry' })).toBeDefined();
+    expect(screen.getByRole('button', { name: 'New entry' })).toBeDefined();
+    expect(screen.getByRole('button', { name: 'Edit' })).toBeDefined();
   });
 });
