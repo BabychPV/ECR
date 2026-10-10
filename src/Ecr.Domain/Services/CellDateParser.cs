@@ -91,6 +91,12 @@ public static class CellDateParser
         // слеш-дат більше немає (Y5-02).
         "yyyy'/'MM'/'dd",
         "yyyy'/'M'/'d",
+
+        // ⛔ Z3-04: те саме з часом - `2024/4/1 10:00` Excel віддає в регіонах із роком спереду (ja, zh, ko). Рік
+        // спереду однозначний, а фолбек для слеш-дат закрито (Y5-02), тож без цих форматів така дата-час
+        // відхилялася (`expectsDate`), хоч до Y5-02 читалась. `H`/`M`/`d` приймають і 1, і 2 цифри.
+        "yyyy'/'M'/'d H:mm",
+        "yyyy'/'M'/'d H:mm:ss",
     ];
 
     /// <summary>
@@ -153,6 +159,17 @@ public static class CellDateParser
             return false;
         }
 
+        // ⛔ Z3-06: рядок із ЯВНИМ зсувом (`2024-04-01T00:00:00+05:00`) - календарний день і час так, як їх написано, а не
+        // миттєвість, перерахована в UTC: `AdjustToUniversal` робив з нього `2024-03-31 19:00`, і колонка Date (календарний
+        // день) діставала ПОПЕРЕДНІЙ день. Інтеграція через API, що шле ISO зі зсувом, і є звичайним джерелом таких
+        // рядків. Для `Z` (нульовий зсув) нічого не змінюється: час лишається як був.
+        if (HasExplicitOffset(trimmed)
+            && DateTimeOffset.TryParse(trimmed, CultureInfo.InvariantCulture, DateTimeStyles.None, out var withOffset))
+        {
+            value = DateTime.SpecifyKind(withOffset.DateTime, DateTimeKind.Utc);
+            return true;
+        }
+
         if (DateTime.TryParseExact(trimmed, ExactFormats, CultureInfo.InvariantCulture, Styles, out value))
         {
             return true;
@@ -172,6 +189,32 @@ public static class CellDateParser
         }
 
         return DateTime.TryParse(trimmed, CultureInfo.InvariantCulture, Styles, out value);
+    }
+
+    /// <summary>
+    /// Чи рядок несе явний зсув від UTC після часу: <c>Z</c>, <c>+05:00</c>, <c>-0500</c>, <c>+05</c>. Лише ISO-подібні
+    /// рядки з роком спереду (4 цифри й <c>-</c>): дата з назвою місяця чи інші форми лишаються фолбеку.
+    /// </summary>
+    private static bool HasExplicitOffset(string trimmed)
+    {
+        if (trimmed.Length < 11
+            || !char.IsAsciiDigit(trimmed[0]) || !char.IsAsciiDigit(trimmed[1])
+            || !char.IsAsciiDigit(trimmed[2]) || !char.IsAsciiDigit(trimmed[3])
+            || trimmed[4] != '-')
+        {
+            return false;
+        }
+
+        // Зсув - у частині ПІСЛЯ роздільника дати й часу (`T` або пробіл); дефіси дати (`2024-04-01`) зсувом не є.
+        var time = trimmed.IndexOfAny(['T', ' ']);
+        if (time < 0)
+        {
+            return false;
+        }
+
+        var tail = trimmed[(time + 1)..];
+
+        return tail.EndsWith('Z') || tail.EndsWith('z') || tail.AsSpan().IndexOfAny('+', '-') >= 0;
     }
 
     /// <summary>
