@@ -819,4 +819,15 @@ public static class ErrorCodes
     /// <c>AUTH</c>: клієнт реагує на неї як на зміну сеансу (покидає вкладку), а не як на помилку даних.
     /// </remarks>
     public const string SessionUserMismatch = "ECR-AUTH-0409";
+
+    /// <summary>
+    /// Константа методології, яку не можна вжити у формулі: її значення не є ні числом, ні текстом, або це мітка
+    /// категорії у виразі (<c>ECR-CALC-0434</c>, R11-L3).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Раніше обидва випадки лягали в перелік проблем публікації без власного коду (<c>ECR-CALC-0422</c>,
+    /// «найближчий наявний»). Тепер кожна така проблема в <c>problems</c> відповіді несе цей код.
+    /// ⚠ Окремого HTTP-запису не має: перелік проблем публікації відмовляє <c>ECR-CALC-0422</c> `publishChecksFailed`.
+    /// </remarks>
+    public const string MethodologyConstantUnusable = "ECR-CALC-0434";
 }
