@@ -237,15 +237,33 @@ public sealed class NotificationJob(
             .Select(p => new DigestItem(AlertedJobKinds[p.JobCode], p.JobId, p.State, p.Error, p.UpdatedAt))
             .ToList();
 
+        // ⛔ Y4-04: `Details` подій покриття — конверт (`CoverageDetails.Encode`,
+        // `CollectionRunner.Reason`), а рамка рядка й тема листа були українськими
+        // літералами. Лист мовою каталогу за замовчуванням (`DigestLanguage`), як і
+        // причини прогонів вище: конверт резолвиться, рамка — з каталогу, а без
+        // каталогу — англійський запасний шаблон, той самий, що в сіді.
+        var coverageDetails = await JobProgressMessageResolver
+            .ResolveManyAsync(catalog, DigestLanguage, [.. coverage.Select(c => c.Details)], ct)
+            .ConfigureAwait(false);
+
+        var strings = await DigestStringsAsync(ct).ConfigureAwait(false);
+
         var coverageItems = coverage
-            .Select(c => new DigestItem(
+            .Select((c, i) => new DigestItem(
                 CoverageKind,
                 sourceCodes.GetValueOrDefault(
                     c.SourceEntityId, c.SourceEntityId.ToString(CultureInfo.InvariantCulture)),
                 c.Status!,
-                string.Create(
-                    CultureInfo.InvariantCulture,
-                    $"період {c.PeriodKey}: {c.Count} подій; {c.Details}"),
+                Localized(
+                    strings,
+                    "notifications.digest.coverageLine",
+                    CoverageLineFallback,
+                    new Dictionary<string, string>(StringComparer.Ordinal)
+                    {
+                        ["period"] = c.PeriodKey?.ToString(CultureInfo.InvariantCulture) ?? string.Empty,
+                        ["count"] = c.Count.ToString(CultureInfo.InvariantCulture),
+                        ["details"] = coverageDetails[i] ?? string.Empty,
+                    }),
                 c.At))
             .ToList();
 
@@ -274,8 +292,7 @@ public sealed class NotificationJob(
                 "recipients",
                 "sec.User.ReceivesAlerts",
                 "None",
-                "Алерти нікому не надсилаються: жоден активний користувач не має "
-                + "увімкненого отримання алертів і заповненої пошти.",
+                Localized(strings, "notifications.digest.noRecipients", NoRecipientsFallback, null),
                 now));
         }
 
@@ -297,7 +314,7 @@ public sealed class NotificationJob(
         {
             db.NotificationOutbox.Add(new Domain.Entities.Integration.NotificationOutboxItem(
                 "maintenance.failures",
-                $"ECR: збоїв за період — {failures.Count}",
+                Subject(strings, failures.Count),
                 string.Join(
                     Environment.NewLine,
                     failures.Select(f => $"[{f.Kind}] {f.Subject}: {f.Status}. {f.Details}")),
@@ -330,7 +347,7 @@ public sealed class NotificationJob(
                         group.Key,
                         group.Max(f => SeverityOf(f.Kind, f.Status)),
                         EventKeyOf(group.Key, group.Select(f => f.Subject)),
-                        $"ECR: збоїв за період — {lines.Count}",
+                        Subject(strings, lines.Count),
                         string.Join(Environment.NewLine, lines)),
                     ct)
                 .ConfigureAwait(false);
@@ -379,6 +396,60 @@ public sealed class NotificationJob(
     /// Лист мовою кожного адресата — окрема зміна черги сповіщень.
     /// </remarks>
     public const string DigestLanguage = Application.Localization.UiStringResolver.DefaultLanguage;
+
+    /// <summary>Запасна тема зведення — en-значення <c>notifications.digest.subject</c> у сіді.</summary>
+    internal const string SubjectFallback = "ECR: failures in the period — {count}";
+
+    /// <summary>Запасна рамка рядка покриття — en-значення <c>notifications.digest.coverageLine</c>.</summary>
+    internal const string CoverageLineFallback = "period {period}: {count} events; {details}";
+
+    /// <summary>Запасний рядок «немає адресатів» — en-значення <c>notifications.digest.noRecipients</c>.</summary>
+    internal const string NoRecipientsFallback =
+        "Alerts are sent to nobody: no active user has alerts turned on and an email address.";
+
+    /// <summary>
+    /// Каталог мови листа; <c>null</c>, якщо каталог недоступний (Y4-04).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Той самий принцип, що й у <see cref="JobProgressMessageResolver"/>: зведення
+    /// збоїв не має падати вдруге через локалізацію — без каталогу йдуть англійські
+    /// запасні шаблони.
+    /// </remarks>
+    private async Task<UiStringCatalog?> DigestStringsAsync(CancellationToken ct)
+    {
+        try
+        {
+            return await catalog.GetScopedAsync(DigestLanguage, UiStringScope.Private, ct).ConfigureAwait(false);
+        }
+#pragma warning disable CA1031 // Причина — у ⛔ вище: лист без перекладу кращий за лист, якого немає.
+        catch (Exception ex) when (ex is not OperationCanceledException)
+#pragma warning restore CA1031
+        {
+            return null;
+        }
+    }
+
+    /// <summary>Тема листа й повідомлення каналу зі зведенням збоїв.</summary>
+    private static string Subject(UiStringCatalog? strings, int count)
+        => Localized(
+            strings,
+            "notifications.digest.subject",
+            SubjectFallback,
+            new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["count"] = count.ToString(CultureInfo.InvariantCulture),
+            });
+
+    /// <summary>Текст за ключем каталогу мови листа або запасний шаблон, з підстановками.</summary>
+    private static string Localized(
+        UiStringCatalog? strings, string key, string fallback, IReadOnlyDictionary<string, string>? parameters)
+    {
+        var template = strings?.Strings is { } map && map.TryGetValue(key, out var value) && !string.IsNullOrEmpty(value)
+            ? value
+            : fallback;
+
+        return Application.Localization.UiStringResolver.Format(template, parameters);
+    }
 
     /// <summary>Звичайний вид рядка про збій збору.</summary>
     public const string CollectionKind = "collection";
