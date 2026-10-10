@@ -90,7 +90,10 @@ REPORT="$(printf '%s\n' "$DIFF" | awk '
     # ── Облік для евристики 6 ─────────────────────────────────────────────
     if (file ~ /^tests\//) {
       if (text ~ /\[(Fact|Theory)([[:space:]]*\(|\])/) tests[file]++
+      # `Received.InOrder(() => …)` (NSubstitute) — теж асерт: падає, якщо
+      # виклики були в іншому порядку або їх не було (R6-X1 X1-01).
       if (text ~ /Assert\./ || text ~ /\.Received[[:space:]]*\(/ ||
+          text ~ /(^|[^[:alnum:]_])Received\.InOrder[[:space:]]*\(/ ||
           text ~ /Assert$/) asserts[file]++
     }
 
