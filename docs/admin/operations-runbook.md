@@ -1700,6 +1700,49 @@ Msg 50801 … Передперевірка AN-80 N2-02: оновлення зу�
 Тести: `AN80CarryOverInputsAsOfCategoryRuleLengthMigrationTests` (база з довгими правилами, Down/Up,
 скрипт двічі), `CalculationResultCarryOverTests` (позначка застарілості після переносу).
 
+### 8.8. Міграція R11 L4 і скрипти 11/12: нові індекси (час, ONLINE/офлайн, що перевірити)
+
+**Кого стосується.** Бази, розгорнуті до міграції `R11L4SweeperAndApprovalIndexes` і ще не оновлені. Помилок
+оновлення вона не дає (даних не змінює, індекси не унікальні, передперевірки немає), але **будує індекси на
+робочих таблицях**.
+
+**Що будується.**
+
+| Індекс | Таблиця | Навіщо | Чим створюється |
+|---|---|---|---|
+| `IX_CalculationRun_Running (StartedAt) WHERE [Status] = 'Running'` | `calc.CalculationRun` (мільйони прогонів) | прибиральник покинутих прогонів щохвилини шукав `Running` скануючи всю таблицю (Q1-04) | міграція EF |
+| `IX_ApprovalEvent_DocumentAt (DocumentId, At DESC) INCLUDE (Action, ByUserId)` | `wf.ApprovalEvent` | «хто затвердив» у переліку документів (X6-03) | міграція EF |
+| `IX_StructureChange_Entity (EntityType, EntityId, ChangedAt)` | `aud.StructureChange` і дзеркало `arc.AuditStructureChange` | історія сутності конфігурації й перемикання наборів довідників читали весь журнал (Q1-05) | `Sql/11-audit-tables.sql` і `Sql/12-archive-tables.sql` (скрипти розгортання, ідемпотентні) |
+
+**ONLINE чи офлайн** - як у п. 8.5: `SERVERPROPERTY('EngineEdition')` 3 (Enterprise/Developer/Evaluation), 5, 8 -
+`WITH (ONLINE = ON)`; 2 і 4 (Standard/Express) - **офлайн**. Офлайн-побудова `IX_CalculationRun_Running` читає
+всю `calc.CalculationRun` один раз: запис у таблицю (завершення розрахунків) чекає тривалість скану -
+**секунди на мільйони рядків** (самі рядки в індексі - лише прогони `Running`, одиниці). Проводьте оновлення, коли
+розрахунки не йдуть. Індекси `wf.ApprovalEvent` і `aud.StructureChange` - малі таблиці, побудова - секунди.
+Заміри часу на великій базі не проводилися: цифри вище - оцінка за обсягом скану, а не вимір.
+
+⚠ **Дзеркало в архіві обов'язкове.** `arc.usp_ArchiveAudit` перемикає партиції `aud.StructureChange` у
+`arc.AuditStructureChange` командою `SWITCH`, яка падає (Msg 4913) на будь-якій розбіжності індексів. Тому
+індекс створюють **обидва** скрипти: `11` (журнал) і `12` (архів); не виконуйте лише один із них. Звичайне
+розгортання (`setup-dev-db.ps1`, `deploy-ecr.ps1`) виконує обидва в потрібному порядку.
+
+**Що перевірити після оновлення.**
+
+```sql
+SELECT OBJECT_SCHEMA_NAME(object_id) + N'.' + OBJECT_NAME(object_id) AS tbl, name, has_filter
+FROM sys.indexes
+WHERE name IN (N'IX_CalculationRun_Running', N'IX_ApprovalEvent_DocumentAt', N'IX_StructureChange_Entity');
+-- Очікується 4 рядки: calc.CalculationRun, wf.ApprovalEvent, aud.StructureChange, arc.AuditStructureChange.
+```
+
+**Відкат.** `DROP INDEX` кожного (міграція має `Down`). Для `IX_StructureChange_Entity` зніміть індекс
+**з обох** таблиць (`aud.StructureChange` і `arc.AuditStructureChange`) - інакше скрипти `11`/`12` створять його
+знову, а SWITCH із розбіжним індексом падатиме.
+
+Тести: `R11L4SweeperAndApprovalIndexesMigrationTests` (Up/Down/Up, скрипт двічі, наявний індекс, гілка без ONLINE,
+план запитів), `AuditStructureChangeEntityIndexTests` (визначення в журналі й архіві, ідемпотентність скриптів,
+реальний SWITCH, план історії сутності).
+
 ## 9. Відкат
 
 Окремого механізму відкату в коді **немає**. Міграції EF назад не застосовуються,

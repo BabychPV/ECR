@@ -277,6 +277,22 @@ BEGIN
 END
 GO
 
+-- Q1-05: дзеркало `IX_StructureChange_Entity` з `11-audit-tables.sql` (без нього SWITCH партиції
+-- `aud.StructureChange` -> `arc.AuditStructureChange` падає, Msg 4913). Те саме визначення, ONLINE - як там.
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_StructureChange_Entity'
+               AND object_id = OBJECT_ID(N'arc.AuditStructureChange'))
+BEGIN
+    DECLARE @arcStructureEntityIndex nvarchar(max) =
+        N'CREATE INDEX IX_StructureChange_Entity '
+        + N'ON arc.AuditStructureChange (EntityType, EntityId, ChangedAt)'
+        + CASE WHEN CAST(SERVERPROPERTY('EngineEdition') AS int) IN (3, 5, 8)
+               THEN N' WITH (ONLINE = ON)' ELSE N'' END
+        + N' ON ps_AuditByMonth(ChangedAt);';
+    PRINT @arcStructureEntityIndex;
+    EXEC sys.sp_executesql @arcStructureEntityIndex;
+END
+GO
+
 IF OBJECT_ID(N'arc.AuditSecurityEvent', N'U') IS NULL
 BEGIN
     CREATE TABLE arc.AuditSecurityEvent

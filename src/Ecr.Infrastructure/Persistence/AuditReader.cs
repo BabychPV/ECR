@@ -310,6 +310,26 @@ public sealed class AuditReader(EcrDbContext db) : IAuditReader
         return where;
     }
 
+    /// <summary>Текст запиту історії однієї сутності конфігурації (Q1-05); окремо - щоб тест міряв план бойового тексту.</summary>
+    /// <param name="typeParameterNames">Імена параметрів типів сутностей (<c>@t0</c>, <c>@t1</c>…).</param>
+    /// <returns>T-SQL із параметрами <c>@take</c>, <c>@entityId</c> і переданими <c>@tN</c>.</returns>
+    /// <remarks>
+    /// ⚠ Предикат <c>EntityType IN (...) AND EntityId = @entityId</c> обслуговує <c>IX_StructureChange_Entity</c>
+    /// (<c>11-audit-tables.sql</c>): seek по сутності й порядок <c>ChangedAt DESC, Id DESC</c> зворотним проходом
+    /// індексу. Без нього запит йшов зворотним скном кластерного ключа <c>(ChangedAt, Id)</c> усіх партицій.
+    /// </remarks>
+    internal static string StructureHistorySql(IReadOnlyList<string> typeParameterNames)
+        => $"""
+            SELECT TOP (@take)
+                   s.ChangedAt, s.EntityType, s.EntityId, s.Operation,
+                   s.OldJson, s.NewJson, s.ChangeReason, s.ChangedByUserId, u.DisplayName
+              FROM aud.StructureChange AS s
+              LEFT JOIN sec.[User] AS u ON u.Id = s.ChangedByUserId
+             WHERE s.EntityType IN ({string.Join(", ", typeParameterNames)})
+                   AND s.EntityId = @entityId
+             ORDER BY s.ChangedAt DESC, s.Id DESC;
+            """;
+
     /// <inheritdoc />
     public async Task<IReadOnlyList<StructureChangeView>> ReadStructureChangesAsync(
         IReadOnlyList<string> entityTypes, int entityId, int limit, CancellationToken ct)
@@ -337,16 +357,7 @@ public sealed class AuditReader(EcrDbContext db) : IAuditReader
             command.Parameters.AddWithValue(names[i], entityTypes[i]);
         }
 
-        command.CommandText = $"""
-            SELECT TOP (@take)
-                   s.ChangedAt, s.EntityType, s.EntityId, s.Operation,
-                   s.OldJson, s.NewJson, s.ChangeReason, s.ChangedByUserId, u.DisplayName
-              FROM aud.StructureChange AS s
-              LEFT JOIN sec.[User] AS u ON u.Id = s.ChangedByUserId
-             WHERE s.EntityType IN ({string.Join(", ", names)})
-                   AND s.EntityId = @entityId
-             ORDER BY s.ChangedAt DESC, s.Id DESC;
-            """;
+        command.CommandText = StructureHistorySql(names);
 
         command.Parameters.AddWithValue("@take", limit);
         command.Parameters.AddWithValue("@entityId", entityId);
