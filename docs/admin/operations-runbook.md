@@ -393,8 +393,15 @@ Server Agent немає — завдання обслуговування НЕ �
 
 | Задача Agent | Коли | Що робить |
 |---|---|---|
-| `ECR: Partitions ahead` | 1-го числа, 02:40 | `arc.usp_EnsurePartitions @MonthsAhead = 6`: межі `pf_ByPeriodKey` на 6 міс. уперед; усередині — `arc.usp_EnsureAuditPartitions @MonthsAhead = 12`. Кожен `SPLIT` чекає Sch-M не довше `@LockTimeoutMs` (5 с), після 1222/1205 — пауза `@RetryDelaySeconds` (60 с) і повтор, до `@MaxAttempts` (10) разів; між спробами запити користувачів не стоять у черзі за Sch-M (аудит 09.10c, U1-02). Результат — рядок `itg.MaintenanceRun` `EnsurePartitions`: `Succeeded` (`added`, `retries`) або `Failed` (номер помилки; потрапляє у зведення збоїв) |
-| `ECR: Physical checks` | щодня 03:10 | недовірені/вимкнені FK (50041), невирівняні індекси (50042) |
+| `ECR: Partitions ahead [<база>]` | 1-го числа, 02:40 | `arc.usp_EnsurePartitions @MonthsAhead = 6`: межі `pf_ByPeriodKey` на 6 міс. уперед; усередині — `arc.usp_EnsureAuditPartitions @MonthsAhead = 12`. Кожен `SPLIT` чекає Sch-M не довше `@LockTimeoutMs` (5 с), після 1222/1205 — пауза `@RetryDelaySeconds` (60 с) і повтор, до `@MaxAttempts` (10) разів; між спробами запити користувачів не стоять у черзі за Sch-M (аудит 09.10c, U1-02). Результат — рядок `itg.MaintenanceRun` `EnsurePartitions`: `Succeeded` (`added`, `retries`) або `Failed` (номер помилки; потрапляє у зведення збоїв) |
+| `ECR: Physical checks [<база>]` | щодня 03:10 | недовірені/вимкнені FK (50041), невирівняні індекси (50042) |
+
+✎ R11-S2-06: ім'я завдання несе назву бази (`ECR: Partitions ahead [ECR]`): ім'я в `msdb` унікальне на весь
+інстанс, і раніше `-FirstDeployment` для другої бази ECR на тому ж інстансі видаляв завдання першої. Завдання зі
+старим іменем (без `[<база>]`) повторний запуск `14-agent-jobs.sql` для **своєї** бази (крок виконується в ній)
+замінює на нове; чуже старе завдання не чіпає. Для баз, розгорнутих раніше, нове завдання з'явиться лише після
+повтору `14-agent-jobs.sql` (або `-FirstDeployment`): до того діє старе. ⚠ Не перевірено на живому SQL Server Agent
+(у середовищі розробки Agent немає).
 
 ⚠ **потрібне рішення замовника:** вікна обслуговування. Код їх не знає. Розклади
 вище зашиті в коді, тож резервне копіювання ставте поза ними.
@@ -442,7 +449,7 @@ Server Agent немає — завдання обслуговування НЕ �
 | **ключі Data Protection** | таблиця `sec.DataProtectionKey` **в тій самій БД** | потрапляють у бекап бази. Без них недійсні всі сесії й **не розшифровуються секрети каналів сповіщень і пароль SMTP**, заданий у `/admin/notifications` (`D-263`) |
 | **сертифікат** `Auth:DataProtection:CertificateThumbprint` (з закритим ключем) | `LocalMachine\My` | якщо ключі захищені сертифікатом, без нього бекап бази не відкриє їх. Експортуйте PFX окремо, одразу після імпорту (`https-certificate.md` §7) |
 | **попередні** сертифікати Data Protection (`Auth:DataProtection:PreviousCertificateThumbprints`) | `LocalMachine\My` | ключі кільця, зашифровані ними, без них не читаються (`db` Degraded, `unreadableKeyCertificates`). PFX кожного зберігати, доки його ключі в кільці **або** в будь-якому бекапі бази |
-| задачі SQL Agent (`ECR: Partitions ahead`, `ECR: Physical checks`) | `msdb`, **не** в базі ECR | при відновленні на інший інстанс повторити `14-agent-jobs.sql` (або `deploy-ecr.ps1 -FirstDeployment`) |
+| задачі SQL Agent (`ECR: Partitions ahead [<база>]`, `ECR: Physical checks [<база>]`) | `msdb`, **не** в базі ECR | при відновленні на інший інстанс повторити `14-agent-jobs.sql` (або `deploy-ecr.ps1 -FirstDeployment`) |
 | конфіг майданчика | `%ProgramData%\ECR\config\appsettings.Production.json` | налаштування майданчика |
 | змінні оточення служби | `HKLM:\SYSTEM\CurrentControlSet\Services\EcrApi\Environment` | рядок підключення, секрети. Зберігайте в сховищі секретів, не поруч із бекапом |
 
