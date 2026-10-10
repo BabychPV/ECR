@@ -29,6 +29,8 @@ import { t } from '@/shared/i18n';
 export function PipelinePage(): JSX.Element {
   const [entityId, setEntityId] = useUrlNumber('entity');
   const session = useSession();
+  // ⛔ L9-18: під симуляцією сервер відхиляє КОЖЕН не-GET (`ECR-SIM-0403`); `can()` бачить права ЦІЛІ.
+  const mayManage = can(session.data, 'Integration.Manage') && session.data?.isSimulation !== true;
 
   const sources = useQuery({
     queryKey: ['sources'],
@@ -77,7 +79,7 @@ export function PipelinePage(): JSX.Element {
         <EntityPipeline
           key={entity.id}
           entity={entity}
-          allowed={can(session.data, 'Integration.Manage')}
+          allowed={mayManage}
           sourcesHref={routes.adminSources.path}
         />
       )}
