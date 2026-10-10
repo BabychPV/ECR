@@ -700,7 +700,7 @@ public sealed class ActivateProjectHandler(
         // кроку, про який ніде не написано. Порядок виклику двох маршрутів не
         // може бути частиною контракту, якої в контракті немає.
         //
-        var created = await calendar.MaterializeAsync(project, ct).ConfigureAwait(false);
+        var created = await calendar.MaterializeAsync(project, clock.UtcNow, ct).ConfigureAwait(false);
 
         if (created.Count > 0)
         {

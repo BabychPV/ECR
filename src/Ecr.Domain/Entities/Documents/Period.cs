@@ -85,6 +85,42 @@ public sealed class Period : Entity<int>
     }
 
     /// <summary>
+    /// Чи може період отримати нові межі від зміненої політики чи поясу (<see cref="RecomputeBoundaries"/>).
+    /// </summary>
+    /// <param name="utcNow">
+    /// Поточний момент; <c>null</c> — без перевірки «межу закриття вже минуто» (зміна поясу: домен дозволяє
+    /// її лише поки всі періоди <c>Scheduled</c>, ФВ-1.1a).
+    /// </param>
+    /// <returns><c>false</c> — межі періоду вже нічиї зобов'язання змінювати не можуть.</returns>
+    /// <remarks>
+    /// ⛔ R9-F3 / F3-03, R10-V9 / V9-01. ОДНЕ правило для ОБОХ шляхів, що пишуть <c>Computed*At</c>: зміни
+    /// політики (<c>PeriodBoundaryRefresh</c>) і добудови календаря (<c>PeriodCalendar.Build</c>, тобто
+    /// кожного <c>GET …/periods</c> від користувача з грантом <c>Write</c>). Доти сторожі стояли лише на
+    /// першому, і другий одразу після зміни політики переписував межі тих самих періодів.
+    /// <list type="bullet">
+    /// <item>Збережений <c>Closed</c>: його межі — подана звітність і <c>IsLateEdit</c>, ретроактивний зсув
+    /// переписав би минуле.</item>
+    /// <item>Перевідкритий (<see cref="ReopenedUntil"/> задано): відкритим його тримає лише дедлайн
+    /// <see cref="Reopen"/> із причиною; після нього стан рахується за межами, і продовжена межа закриття
+    /// тримала б період у <c>Grace</c> без події Reopen.</item>
+    /// <item>Ефективно закритий (<paramref name="utcNow"/> ≥ <see cref="ComputedCloseAt"/>), а збережений
+    /// стан ще <c>Grace</c>, бо годинна задача станів не відпрацювала: <c>Closed</c> назад веде лише
+    /// Reopen (D-204).</item>
+    /// </list>
+    /// ⚠ Нульові межі (період створено в обхід календаря, A7-26) «минулими» не вважаються — їх саме треба
+    /// порахувати, інакше калькулятор станів назавжди вважав би період закритим.
+    /// </remarks>
+    public bool AcceptsBoundaryRefresh(DateTime? utcNow)
+    {
+        if (State == PeriodState.Closed || ReopenedUntil is not null)
+        {
+            return false;
+        }
+
+        return utcNow is not { } now || ComputedCloseAt == default || now < ComputedCloseAt;
+    }
+
+    /// <summary>
     /// Межі періоду в UTC: <c>[опівніч periodStart, опівніч periodEnd + 1)</c> у
     /// поясі майданчика (D-68, D16-03).
     /// </summary>

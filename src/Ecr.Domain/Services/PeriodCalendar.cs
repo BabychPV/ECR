@@ -107,13 +107,18 @@ public static class PeriodCalendar
     /// <param name="siteTimeZone">Пояс майданчика.</param>
     /// <param name="existing">Уже створені періоди проєкту.</param>
     /// <param name="customCount">Кількість періодів для <c>Custom</c>.</param>
+    /// <param name="utcNow">
+    /// Поточний момент для сторожа «межу закриття вже минуто» (<see cref="Period.AcceptsBoundaryRefresh"/>);
+    /// <c>null</c> — лише сторожі стану (закритий, перевідкритий).
+    /// </param>
     /// <returns>Лише НОВІ періоди — повторний виклик дає порожній список.</returns>
     public static IReadOnlyList<Period> Build(
         Project project,
         PeriodPolicy policy,
         TimeZoneInfo siteTimeZone,
         IReadOnlyCollection<Period> existing,
-        int customCount = 0)
+        int customCount = 0,
+        DateTime? utcNow = null)
     {
         ArgumentNullException.ThrowIfNull(project);
         ArgumentNullException.ThrowIfNull(policy);
@@ -135,11 +140,20 @@ public static class PeriodCalendar
         // читає їх як «усе вже минуло» і оголошує період закритим. Система
         // виглядала налаштованою і не приймала жодного значення.
         //
-        // ⚠ Стан періоду від цього не змінюється: він зберігається окремо, а
-        // задача станів не переводить закритий період назад (ФВ-1.12).
+        // ⛔ R10-V9 / V9-01. Але НЕ всіх наявних. Доти тут стояло «стан періоду
+        // від цього не змінюється» — і це було хибно: після дедлайну Reopen і для
+        // ефективно закритого періоду (збережений стан ще `Grace`) стан визначають
+        // саме межі. Кожен `GET …/periods` від користувача з `Write` одразу після
+        // зміни політики переписував межі перевідкритого періоду, і після `until`
+        // той лишався `Grace` (запис дозволено) без події Reopen — сторожі F3-03
+        // на зміні політики обходились одним відкриттям сторінки. Тепер правило
+        // одне для обох шляхів: `Period.AcceptsBoundaryRefresh`.
         foreach (var period in existing)
         {
-            period.RecomputeBoundaries(policy, siteTimeZone);
+            if (period.AcceptsBoundaryRefresh(utcNow))
+            {
+                period.RecomputeBoundaries(policy, siteTimeZone);
+            }
         }
 
         for (byte sequence = 1; sequence <= count; sequence++)

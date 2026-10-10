@@ -186,6 +186,97 @@ public sealed class PeriodPolicyRecomputeTests
         Assert.Equal(PeriodState.Closed, new Ecr.Domain.Services.PeriodStateCalculator().Effective(jan, afterClose));
     }
 
+    /// <summary>
+    /// R10-V9 / V9-01: після зміни політики <c>GET …/periods</c> від користувача з грантом <c>Write</c>
+    /// (добудова календаря) не подовжує перевідкритий період — той самий сторож, що й у зміни політики.
+    /// </summary>
+    /// <remarks>
+    /// Сценарій F3-03 з одним кроком більше: політику змінено (сторож спрацював), а потім хтось відкрив
+    /// сторінку періодів. Доти <c>PeriodCalendar.Build</c> безумовно перераховував межі всіх наявних
+    /// періодів за НОВОЮ політикою, і після <c>until</c> січень лишався <c>Grace</c>.
+    /// Мутація: прибрати перевірку <c>AcceptsBoundaryRefresh</c> у циклі <c>PeriodCalendar.Build</c> — червоніє.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "ФВ-1.10")]
+    public async Task Перевідкритий_період_GET_календаря_після_зміни_політики_не_подовжує()
+    {
+        var reopenedAt = new DateTime(2026, 3, 20, 6, 0, 0, DateTimeKind.Utc);
+        var until = reopenedAt.AddDays(5);
+        var jan = ReopenedJanuary(reopenedAt, until);
+        var closeBefore = jan.ComputedCloseAt;
+
+        await PolicyHandler(reopenedAt.AddDays(1)).HandleAsync(PolicyId, 0, 15, 120, 45, CancellationToken.None);
+        await CalendarHandler(reopenedAt.AddDays(1)).HandleAsync(AccessBuilder.ProjectId, CancellationToken.None);
+
+        Assert.Equal(closeBefore, jan.ComputedCloseAt);
+        Assert.Equal(PeriodState.Closed, new Ecr.Domain.Services.PeriodStateCalculator().Effective(jan, until.AddDays(1)));
+    }
+
+    /// <summary>
+    /// R10-V9 / V9-01 (вторинний випадок): ефективно закритий період (збережений стан ще <c>Grace</c>)
+    /// <c>GET …/periods</c> після зміни політики знову не відкриває.
+    /// </summary>
+    /// <remarks>
+    /// Мутація: прибрати перевірку <c>now ≥ ComputedCloseAt</c> у <c>Period.AcceptsBoundaryRefresh</c> або
+    /// передавати <c>utcNow = null</c> з <c>PeriodCalendarMaterializer</c> — червоніє.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "ФВ-1.6")]
+    public async Task Ефективно_закритий_період_GET_календаря_після_зміни_політики_не_відкриває()
+    {
+        var project = ProjectBuilder.Project(PeriodKind.Monthly, ZoneId, AccessBuilder.ProjectId);
+        var jan = Make(202601, 1, new DateOnly(2026, 1, 1), new DateOnly(2026, 1, 31));
+        jan.AdvanceTo(PeriodState.Grace, Now);
+        ProjectBuilder.Attach(project, [jan]);
+        _periods.FindProjectAsync(AccessBuilder.ProjectId, Arg.Any<CancellationToken>()).Returns(project);
+        var closeBefore = jan.ComputedCloseAt;
+        var afterClose = closeBefore.AddHours(1);
+
+        await PolicyHandler(afterClose).HandleAsync(PolicyId, 0, 15, 120, 45, CancellationToken.None);
+        await CalendarHandler(afterClose).HandleAsync(AccessBuilder.ProjectId, CancellationToken.None);
+
+        Assert.Equal(closeBefore, jan.ComputedCloseAt);
+        Assert.Equal(PeriodState.Closed, new Ecr.Domain.Services.PeriodStateCalculator().Effective(jan, afterClose));
+    }
+
+    /// <summary>
+    /// R10-V9 / V9-01, зворотний бік: сторож не глушить A7-26 — відкритий період, межа якого ще попереду,
+    /// від <c>GET …/periods</c> нові межі отримує; збережений <c>Closed</c> — ні.
+    /// </summary>
+    /// <remarks>
+    /// Мутація: у <c>PeriodCalendar.Build</c> не перераховувати наявні періоди зовсім — червоніє.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "ФВ-1.6")]
+    public async Task GET_календаря_перераховує_межі_відкритого_періоду_і_не_чіпає_закритого()
+    {
+        var closedJanBefore = _closedJan.ComputedCloseAt;
+        _policy.UpdateOffsets(-3, 10, 30, 45);
+
+        await CalendarHandler(Now).HandleAsync(AccessBuilder.ProjectId, CancellationToken.None);
+
+        Assert.Equal(Local(new DateOnly(2026, 3, 30)), _openFeb.ComputedCloseAt);
+        Assert.Equal(Local(new DateOnly(2026, 5, 30)), _scheduledApr.ComputedCloseAt);
+        Assert.Equal(closedJanBefore, _closedJan.ComputedCloseAt);
+    }
+
+    private Ecr.Application.Periods.BuildPeriodCalendarHandler CalendarHandler(DateTime utcNow)
+    {
+        var clock = Substitute.For<Ecr.Domain.Abstractions.IClock>();
+        clock.UtcNow.Returns(utcNow);
+        var access = Substitute.For<IAccessDecisionService>();
+        access.BuildProfileAsync(AdminId, Arg.Any<CancellationToken>()).Returns(
+            new AccessBuilder { UserId = AdminId }
+                .Permission("Document.View")
+                .Grant(ResourceKind.Project, AccessBuilder.ProjectId, GrantLevel.Write)
+                .Build());
+        return new Ecr.Application.Periods.BuildPeriodCalendarHandler(
+            _periods, _uow, clock, access, _user, new Ecr.Application.Periods.PeriodCalendarMaterializer(_periods));
+    }
+
     private Period ReopenedJanuary(DateTime reopenedAt, DateTime until)
     {
         var project = ProjectBuilder.Project(PeriodKind.Monthly, ZoneId, AccessBuilder.ProjectId);

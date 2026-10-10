@@ -61,7 +61,8 @@ public sealed class BuildPeriodCalendarHandler(
         // календар потрібен і активації проєкту, у якої ІНШЕ право. Тут
         // лишилося рівно те, що специфічне для цього маршруту: перевірка прав
         // вище і збереження нижче.
-        var created = await materializer.MaterializeAsync(project, ct).ConfigureAwait(false);
+        var now = clock.UtcNow;
+        var created = await materializer.MaterializeAsync(project, now, ct).ConfigureAwait(false);
 
         // ⛔ Зберігаємо ЗАВЖДИ, а не лише коли щось створено. До `A7-26` тут
         // стояло дострокове повернення при `created.Count == 0` — і перераховані
@@ -73,9 +74,9 @@ public sealed class BuildPeriodCalendarHandler(
         // змінилися, тому другий виклик поспіль не робить нічого.
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
 
-        // clock тут не для меж — вони від дат проєкту, а не від «зараз», — а
-        // щоб зафіксувати момент побудови в журналі викликача.
-        BuiltAt = clock.UtcNow;
+        // ⚠ Межі рахуються від дат проєкту, а не від «зараз»; момент потрібен
+        // лише сторожу «межу закриття вже минуто» (V9-01) і журналу викликача.
+        BuiltAt = now;
         return created.Count;
     }
 

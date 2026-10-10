@@ -1,5 +1,4 @@
 using Ecr.Domain.Entities.Documents;
-using Ecr.Domain.Enums;
 
 namespace Ecr.Application.Periods;
 
@@ -48,13 +47,9 @@ internal static class PeriodBoundaryRefresh
         var refreshed = 0;
         foreach (var period in periods)
         {
-            if (period.State == PeriodState.Closed || period.ReopenedUntil is not null)
-            {
-                continue;
-            }
-
-            // ⚠ Нульові межі (календар ще не рахував) «минулими» не вважаються — їх саме треба порахувати.
-            if (utcNow is { } now && period.ComputedCloseAt != default && now >= period.ComputedCloseAt)
+            // ⛔ R10-V9 / V9-01: правило живе в домені, бо те саме застосовує добудова календаря
+            // (`PeriodCalendar.Build`) — два шляхи запису меж не можуть мати різних сторожів.
+            if (!period.AcceptsBoundaryRefresh(utcNow))
             {
                 continue;
             }
