@@ -92,6 +92,32 @@ public sealed class ServiceAccountLoginTests
         Assert.Null(await _users.FindByWindowsSidAsync("S-1-5-21-778", CancellationToken.None));
     }
 
+    /// <summary>
+    /// S1-05 (аудит 5): відмова Windows-входу пишеться в журнал з провайдером <c>Windows</c>, а не <c>Local</c>.
+    /// </summary>
+    /// <remarks>Мутація: повернути жорсткий <c>AuthProvider.Local</c> у <c>FailAsync</c> — провайдер <c>Local</c>.</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "S1-05")]
+    public async Task S1_05_відмова_Windows_входу_пишеться_з_провайдером_Windows()
+    {
+        _users.Seed(FakeUserStore.DomainUser(User.IntegrationServiceUserName, "S-1-5-21-779"));
+
+        await Assert.ThrowsAsync<AccessDeniedException>(
+            () => Handler().HandleWindowsAsync(
+                "S-1-5-21-779", User.IntegrationServiceUserName, "svc", [], "10.0.0.1", CancellationToken.None));
+
+        var attempt = Assert.Single(_users.Attempts);
+        Assert.False(attempt.IsSuccess);
+        Assert.Equal("ServiceAccount", attempt.FailReason);
+        Assert.Equal(AuthProvider.Windows, attempt.Provider);
+
+        // Контроль: відмова ЛОКАЛЬНОГО входу лишається Local.
+        await Assert.ThrowsAsync<AccessDeniedException>(
+            () => Handler().HandleAsync("немає-такого", "x", "10.0.0.1", CancellationToken.None));
+        Assert.Equal(AuthProvider.Local, _users.Attempts.Last().Provider);
+    }
+
     private User Local(string name)
     {
         var user = new User(name, name, AuthProvider.Local);

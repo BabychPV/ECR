@@ -443,7 +443,10 @@ public sealed class ReplaceResourceGrantsHandler(
                 TargetRoleId: roleId,
                 DetailsJson: JsonSerializer.Serialize(new { role = role.Code, grants }),
                 ChangedByUserId: actorId,
-                CorrelationId: null),
+
+                // ⚠ S1-05 (аудит 5): без сліду запиту подію не зв'язати з запитом і рештою рядків журналу;
+                // решта подій безпеки (зміна пароля тощо) його несуть.
+                CorrelationId: currentUser.CorrelationId),
             ct).ConfigureAwait(false);
 
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
