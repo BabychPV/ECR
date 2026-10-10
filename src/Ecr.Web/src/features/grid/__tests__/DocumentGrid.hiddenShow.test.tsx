@@ -61,8 +61,9 @@ function mockServer(): void {
   reads = 0;
   vi.stubGlobal(
     'fetch',
-    vi.fn(() => {
-      reads += 1;
+    vi.fn((input: RequestInfo | URL) => {
+      // Лише GET зрізу таблиці: сітка читає й інше (одиниці, довідники).
+      if (String(input).includes(`/tables/${String(Table)}`)) reads += 1;
 
       return Promise.resolve(
         new Response(JSON.stringify(sliceFixture()), { status: 200, headers: { 'Content-Type': 'application/json' } }),
