@@ -97,6 +97,7 @@ describe('collectionRunErrorText', () => {
       { rowKey: 'R1', mapId: '7', status: 'NoData' },
       'rowKey=R1, mapId=7, status=NoData',
     ],
+    ['coverageEvents.cellRejected', { cell: 'R1:T', code: 'ECR-CELL-0422' }, 'cell=R1:T, code=ECR-CELL-0422'],
     ['coverageEvents.eventWriteFailed', { eventId: '7', reason: 'нема доступу' }, 'eventId=7, reason=нема доступу'],
     ['coverageEvents.eventWritePartial', { eventId: '7', rowKey: 'R1' }, 'eventId=7, rowKey=R1'],
     ['coverageEvents.eventRowNotCreated', { eventId: '7', rowKey: 'R1' }, 'eventId=7, rowKey=R1'],

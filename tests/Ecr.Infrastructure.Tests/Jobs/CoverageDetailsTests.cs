@@ -58,6 +58,16 @@ public sealed class CoverageDetailsTests
         Assert.Equal("7", noData.Params!["mapId"]);
     }
 
+    /// <summary>F1-03: відхилена комірка збору — власний ключ, комірка й код каталогу параметрами.</summary>
+    [Fact]
+    public void Rejected_collected_cell_has_its_own_key_with_cell_and_code()
+    {
+        Assert.True(JobProgressMessageCodec.TryDecode(CoverageDetails.CellRejected("R1:T", "ECR-CELL-0422"), out var envelope));
+        Assert.Equal("coverageEvents.cellRejected", envelope.Key);
+        Assert.Equal("R1:T", envelope.Params!["cell"]);
+        Assert.Equal("ECR-CELL-0422", envelope.Params["code"]);
+    }
+
     [Fact]
     public void Long_failure_reason_is_shortened_before_encoding_so_the_json_stays_valid()
     {
@@ -79,7 +89,7 @@ public sealed class CoverageDetailsTests
     /// <c>CoverageDetails.X(…)</c> літералом <c>$"Комірка {cell}…"</c> — тест червоний.
     /// </summary>
     [Theory]
-    [InlineData("MaterializeCollectedDataJob.cs", 7)]
+    [InlineData("MaterializeCollectedDataJob.cs", 8)]
     [InlineData("SourceEventSyncJob.cs", 12)]
     [InlineData("RowWindowFetchJob.cs", 1)]
     public void Coverage_events_in_jobs_take_details_from_the_envelope_helper(string file, int expectedCalls)

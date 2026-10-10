@@ -112,6 +112,9 @@ function render(key: string, params: Record<string, string>): string | null {
       return t('coverageEvents.writeConflict', params);
     case 'coverageEvents.needsConfirmation':
       return t('coverageEvents.needsConfirmation', params);
+    // F1-03: значення комірки збору відхилив обробник запису, решту полів записано.
+    case 'coverageEvents.cellRejected':
+      return t('coverageEvents.cellRejected', params);
     case 'coverageEvents.eventWriteFailed':
       return t('coverageEvents.eventWriteFailed', params);
     case 'coverageEvents.eventWritePartial':

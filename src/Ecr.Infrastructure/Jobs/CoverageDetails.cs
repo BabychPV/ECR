@@ -30,6 +30,7 @@ public static class CoverageDetails
     public const string KeptManualKey = "coverageEvents.keptManual";
     public const string WriteConflictKey = "coverageEvents.writeConflict";
     public const string NeedsConfirmationKey = "coverageEvents.needsConfirmation";
+    public const string CellRejectedKey = "coverageEvents.cellRejected";
     public const string PartialCoverageKey = "coverageEvents.partialCoverage";
     public const string NoDataKey = "coverageEvents.noData";
     public const string RowWindowStaleKey = "coverageEvents.rowWindowStale";
@@ -125,6 +126,13 @@ public static class CoverageDetails
 
     /// <summary>Правило періоду вимагає підтвердження людини.</summary>
     public static string NeedsConfirmation(object cell) => Encode(NeedsConfirmationKey, ("cell", Text(cell)));
+
+    /// <summary>
+    /// Значення комірки збору відхилив обробник запису (F1-03: коміркове правило <c>Error</c> тощо);
+    /// решту полів записано. <paramref name="code"/> — код каталогу, без тексту відмови.
+    /// </summary>
+    public static string CellRejected(object cell, string code)
+        => Encode(CellRejectedKey, ("cell", Text(cell)), ("code", Text(code)));
 
     /// <summary>Подію не записано; <paramref name="reason"/> — текст відмови (дані, не наше формулювання).</summary>
     public static string EventWriteFailed(object eventId, string reason)

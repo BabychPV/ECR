@@ -36,6 +36,7 @@ namespace Ecr.Infrastructure.Jobs;
 /// <item><term>комірка правлена людиною</term><description><b>не</b> перезаписувати; <c>ConflictKeptManual</c></description></item>
 /// <item><term>рядок змінювали під час запису, повтори вичерпано</term><description><c>SkippedWriteConflict</c></description></item>
 /// <item><term>правило періоду вимагає підтвердження</term><description><b>не</b> писати; <c>SkippedNeedsConfirmation</c></description></item>
+/// <item><term>обробник відхилив значення (коміркове правило <c>Error</c> тощо, F1-03)</term><description><b>не</b> писати цю комірку, решту — писати; <c>SkippedWriteConflict</c> з <c>coverageEvents.cellRejected</c></description></item>
 /// <item><term>комірка порожня або від інтеграції</term><description>записати</description></item>
 /// <item><term>період скінчився, згортка за часом покрила менше <see cref="MinPercentGood"/></term><description>записати (HU-13 Q2, варіант A) і подія <c>PartialCoverage</c> з часткою покриття</description></item>
 /// <item><term>період скінчився, придатних точок поля немає</term><description><b>не</b> писати і <b>не</b> очищати; подія <c>SkippedNoData</c></description></item>
@@ -249,9 +250,7 @@ public sealed class MaterializeCollectedDataJob(
 
         await progress.ReportKeyAsync(60, "jobs.materializeWriting", ct).ConfigureAwait(false);
 
-        var written = await patcher
-            .ApplyIntegrationAsync(task.DocumentId, task.TableInstanceId, periodKey, aggregated, ct)
-            .ConfigureAwait(false);
+        var (written, rejected) = await WriteAsync(task, periodKey, aggregated, ct).ConfigureAwait(false);
 
         // ⛔ Конфлікт із правкою людини НЕ мовчазний: людина виправила навмисно,
         // і інтеграція не має права це стерти — але й приховати факт теж.
@@ -283,6 +282,14 @@ public sealed class MaterializeCollectedDataJob(
         events.AddRange((written.AwaitingConfirmation ?? []).Select(cell => new CoverageEvent(
             task.SourceEntityId, periodKey, CollectionCoverage.SkippedNeedsConfirmation,
             CoverageDetails.NeedsConfirmation(cell))));
+
+        // ⛔ F1-03 (аудит 9): значення, яке обробник відхилив (коміркове правило `Error`,
+        // ECR-CELL-0422 validationBlocked тощо), — не мовчки і не аварія задачі: людина
+        // його не правила, наступний прогін спробує знову — той самий статус, яким синк
+        // подій журналює відхилену подію (`SourceEventSyncJob`, `EventWriteFailed`).
+        events.AddRange(rejected.Select(cell => new CoverageEvent(
+            task.SourceEntityId, periodKey, CollectionCoverage.SkippedWriteConflict,
+            CoverageDetails.CellRejected(cell.Cell, cell.Code))));
 
         if (events.Count > 0)
         {
@@ -318,6 +325,93 @@ public sealed class MaterializeCollectedDataJob(
                 ct)
             .ConfigureAwait(false);
     }
+
+    /// <summary>
+    /// Пише згорнуті значення одним батчем; якщо обробник відхилив батч ЦІЛКОМ вердиктом про
+    /// дані, — розводить по одній комірці й повертає відхилені окремо.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ F1-03 (аудит 9): <c>PatchCellsHandler</c> відхиляє весь запит, якщо хоч одна комірка
+    /// не проходить коміркове правило <c>Error</c> (<c>ECR-CELL-0422</c> <c>validationBlocked</c>).
+    /// Матеріалізація шле в одному батчі ВСІ поля сутності в таблиці, тож один сплеск датчика
+    /// понад правило зупиняв запис решти полів, а задача падала без повтору й без подій
+    /// покриття. Той самий прийом, що <c>RowWindowFetchJob.WriteOneByOneAsync</c> (L3-02) і
+    /// <c>SourceEventSyncJob.WriteGroupAsync</c>: решта полів лягає, винне — у журнал покриття.
+    ///
+    /// ⚠ Не розводяться: <see cref="AccessDeniedException"/> (період закрили між перевіркою й
+    /// записом — повторювати поштучно нема чого) і транзієнтні коди
+    /// (<see cref="JobRetryPolicy.TransientRuleCodes"/>, напр. архівування): задача падає й
+    /// повторюється, як і раніше, а не записує «відхилено» для кожного поля.
+    /// </remarks>
+    private async Task<(IntegrationWriteResult Written, List<RejectedCell> Rejected)> WriteAsync(
+        MaterializeTask task, PeriodKey periodKey, IReadOnlyList<IntegrationCellValue> cells, CancellationToken ct)
+    {
+        try
+        {
+            var whole = await patcher
+                .ApplyIntegrationAsync(task.DocumentId, task.TableInstanceId, periodKey, cells, ct)
+                .ConfigureAwait(false);
+            return (whole, []);
+        }
+        catch (Exception ex) when (IsCellVerdict(ex))
+        {
+            // Розводимо по одній нижче.
+        }
+
+        var applied = 0;
+        var kept = new List<string>();
+        var awaiting = new List<string>();
+        var conflicts = new List<string>();
+        var refused = new List<(IntegrationCellValue Cell, string Code)>();
+
+        foreach (var cell in cells)
+        {
+            try
+            {
+                var one = await patcher
+                    .ApplyIntegrationAsync(task.DocumentId, task.TableInstanceId, periodKey, [cell], ct)
+                    .ConfigureAwait(false);
+
+                applied += one.Applied;
+                kept.AddRange(one.KeptManual);
+                awaiting.AddRange(one.AwaitingConfirmation ?? []);
+                conflicts.AddRange(one.WriteConflicts ?? []);
+            }
+            catch (Exception ex) when (IsCellVerdict(ex))
+            {
+                refused.Add((cell, JobRetryPolicy.ErrorCodeOf(ex)));
+            }
+        }
+
+        // Комірка в журналі — `rowKey:columnCode`, як у решти подій патчера.
+        var columnIds = refused.Select(r => r.Cell.ColumnDefId).Distinct().ToList();
+        var codes = columnIds.Count == 0
+            ? new Dictionary<int, string>()
+            : await db.ColumnDefs
+                .AsNoTracking()
+                .Where(c => columnIds.Contains(c.Id))
+                .Select(c => new { c.Id, c.Code })
+                .ToDictionaryAsync(c => c.Id, c => c.Code, ct)
+                .ConfigureAwait(false);
+
+        var rejected = refused
+            .Select(r => new RejectedCell(
+                $"{r.Cell.RowKey}:{codes.GetValueOrDefault(r.Cell.ColumnDefId, r.Cell.ColumnDefId.ToString(CultureInfo.InvariantCulture))}",
+                r.Code))
+            .ToList();
+
+        return (new IntegrationWriteResult(applied, kept, awaiting, conflicts), rejected);
+    }
+
+    /// <summary>Вердикт обробника про дані, а не збій чи «зараз недоступно».</summary>
+    private static bool IsCellVerdict(Exception ex)
+        => ex is DomainException
+           || (ex is BusinessRuleException rule && !JobRetryPolicy.TransientRuleCodes.Contains(rule.ErrorCode));
+
+    /// <summary>Значення, яке обробник відхилив і яке не записано.</summary>
+    /// <param name="Cell"><c>rowKey:columnCode</c>.</param>
+    /// <param name="Code">Код відмови з каталогу.</param>
+    private sealed record RejectedCell(string Cell, string Code);
 
     /// <summary>Відмова задачі, якщо значення хоч одного мапінгу не переводиться в цільову одиницю.</summary>
     /// <param name="unitFailures">Опис кожного такого мапінгу.</param>
