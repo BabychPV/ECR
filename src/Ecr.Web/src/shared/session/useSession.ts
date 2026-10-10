@@ -42,9 +42,6 @@ export function checkSessionUser(client: QueryClient, me: CurrentUserDto): Curre
   return me;
 }
 
-/** Скільки `/me` вважається свіжим (P2-06). */
-export const MeStaleTimeMs = 15_000;
-
 /** Скільки разів повторювати збійний `/me` (L9-05). */
 export const MeMaxRetries = 1;
 
@@ -61,14 +58,20 @@ export function useSession() {
     queryKey: MeQueryKey,
     queryFn: async () => checkSessionUser(client, await apiFetch<CurrentUserDto>('/api/v1/me')),
 
-    // ⛔ P2-06: `staleTime: 0` давав `GET /me` (профіль прав = 1–2 SQL) на КОЖНЕ монтування
-    // одного з ~50 споживачів `useSession()` — кожен перехід маршруту, кожне відкриття
+    // ⛔ P2-06: `refetchOnMount: true` (дефолт) при `staleTime: 0` давав `GET /me` (профіль прав = 1–2 SQL) на
+    // КОЖНЕ монтування одного з ~50 споживачів `useSession()` — кожен перехід маршруту, кожне відкриття
     // шухляди чи діалогу. Миттєву недійсність сеансу після зміни ролей забезпечує сервер
-    // (`SecurityStampMiddleware` → `401` на першому ж запиті), а кнопки лише підказка
-    // (коментар угорі). Тому коротка свіжість; після довгої відсутності профіль
-    // перечитує `refetchOnWindowFocus`, а свідомі зміни ролей/налаштувань
+    // (`SecurityStampMiddleware` → `401` на першому ж запиті), а кнопки лише підказка (коментар угорі), тож
+    // за наявного профілю монтування не перезапитує. Без профілю (перше завантаження, відмова) запит іде.
+    // Після довгої відсутності профіль перечитує `refetchOnWindowFocus`, а свідомі зміни ролей/налаштувань
     // інвалідують `MeQueryKey` явно (`SimulationPanel`, `ChangePasswordPage`).
-    staleTime: MeStaleTimeMs,
+    //
+    // ⛔ НЕ `staleTime: 15_000`, хоч спершу так і було: скінченний `staleTime` на цьому запиті вішав
+    // `SecurityPage.accessFocusReturn.test.tsx` у гейті `client` (воркер `vmThreads` мовчав 6–11 хв і падав
+    // `Worker exited unexpectedly`, 5 прогонів поспіль; варіант `refetchOnMount: false` + `staleTime: 0` —
+    // зелений, 854/854). Причину зависання не з'ясовано — див. звіт lane r11-l6.
+    staleTime: 0,
+    refetchOnMount: false,
     // ⛔ L9-05 / AN-97: один повтор для минущого збою (502 під час перезапуску служби, обрив
     // VPN) — без нього будь-який такий збій на першому завантаженні вів на `/login`.
     // 4xx не повторюється (як у `createQueryClient`): `403` повтор не виправить, а `401`
