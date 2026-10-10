@@ -4783,6 +4783,10 @@ USING (VALUES
     (N'err.ECR-DOC-0422.approvalRouteTooLong', N'en', N'An approval route can have at most {max} steps; this one has {count}.', 1),
     -- ru/kz — окремою порцією `A1-06` у блоці I18N нижче.
     -- A1-06 ── кінець секції ──
+    -- E1-06 ── Тіло запиту понад межу — 413 замість 500 (`ExceptionHandlingMiddleware`, `BadHttpRequestException`) ──
+    (N'err.ECR-REQ-0422.requestTooLarge', N'en', N'The request body is larger than the server accepts. Send less data in one request.', 1),
+    -- ru/kz — окремою порцією `E1-06` у блоці I18N нижче.
+    -- E1-06 ── кінець секції ──
     -- COLL:d212-statuses ── Статуси подій синку довідника з AF (D-212 PR-3, `CollectionCoverage.RegistryStatuses`) ──
     (N'status.coverage.RegistryAutoCreated',        N'en', N'Created from source', 1),
     (N'status.coverage.RegistryDeactivated',        N'en', N'Deactivated: missing in source', 1),
@@ -14212,6 +14216,17 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- A1-06 ── кінець секції ──
+
+-- E1-06 ── ru/kz: тіло запиту завелике; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-REQ-0422.requestTooLarge', N'ru', N'Тело запроса больше, чем принимает сервер. Отправляйте меньше данных за один запрос.'),
+    (N'err.ECR-REQ-0422.requestTooLarge', N'kz', N'Сұраныс денесі сервер қабылдайтын көлемнен үлкен. Бір сұраныста азырақ деректер жіберіңіз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- E1-06 ── кінець секції ──
 
 -- COLL:d212-statuses ── ru/kz статусів подій синку довідника (D-212 PR-3); власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)

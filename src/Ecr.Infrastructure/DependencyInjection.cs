@@ -64,7 +64,7 @@ public static class DependencyInjection
         services.AddDbContext<EcrDbContext>((sp, options) =>
             options.AddInterceptors(
                 sp.GetRequiredService<SecurityStampCacheInvalidator>(),
-                sp.GetRequiredService<StaleCountsEpoch>()).UseSqlServer(connectionString, sql =>
+                sp.GetRequiredService<StaleCountsEpoch>()).ConfigureEfFailureLogLevels().UseSqlServer(connectionString, sql =>
             {
                 sql.MigrationsHistoryTable("__EFMigrationsHistory", "dbo");
                 // ⛔ Саме `Database:`, а не `Sql:` (`S-11`). Префікс у файлі
