@@ -54,6 +54,7 @@ public sealed class AuthController(
             .HandleWindowsAsync(sid, userName, userName, currentUser.GroupSids, RemoteIp, ct)
             .ConfigureAwait(false);
 
+        await EndSimulationOfPreviousCookieAsync(ct).ConfigureAwait(false);
         await SignInAsync(result).ConfigureAwait(false);
         return Ok(Describe(result));
     }
@@ -73,6 +74,7 @@ public sealed class AuthController(
             .HandleAsync(request.UserName, request.Password, RemoteIp, ct)
             .ConfigureAwait(false);
 
+        await EndSimulationOfPreviousCookieAsync(ct).ConfigureAwait(false);
         await SignInAsync(result).ConfigureAwait(false);
         return Ok(Describe(result));
     }
@@ -139,6 +141,36 @@ public sealed class AuthController(
             view.SimulatedForUserId,
             view.SimulatedForUserName,
             view.SimulationSessionId));
+    }
+
+    /// <summary>
+    /// Закриває сеанс симуляції СТАРОЇ cookie, коли вхід видає нову (S1-04, аудит 5).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Новий вхід видає cookie без сеансу, а старий сеанс лишався відкритим в <c>aud.SimulationSession</c>:
+    /// журнал стверджував би, що адміністратор досі дивиться чужими очима (те саме, що V-06 закрив для виходу).
+    /// Cookie читається явно, а не з <c>HttpContext.User</c>: на Windows-вході там принципал Negotiate. Закривається
+    /// лише СВІЙ сеанс (актор = власник старої cookie) — як у <see cref="Logout"/>; недійсна cookie — нічого.
+    /// </remarks>
+    private async Task EndSimulationOfPreviousCookieAsync(CancellationToken ct)
+    {
+        var previous = await HttpContext.AuthenticateAsync(CookieAuthenticationDefaults.AuthenticationScheme)
+            .ConfigureAwait(false);
+        if (previous.Principal is not { } principal
+            || !long.TryParse(
+                principal.FindFirstValue(AuthenticationSetup.SimulationSessionClaim),
+                NumberStyles.None, CultureInfo.InvariantCulture, out var sessionId)
+            || !int.TryParse(
+                principal.FindFirstValue(AuthenticationSetup.UserIdClaim),
+                NumberStyles.None, CultureInfo.InvariantCulture, out var ownerId))
+        {
+            return;
+        }
+
+        if (await simulation.GetActorAsync(sessionId, ct).ConfigureAwait(false) is { } actor && actor == ownerId)
+        {
+            await simulation.EndAsync(sessionId, ct).ConfigureAwait(false);
+        }
     }
 
     /// <summary>Чи стоїть вимога змінити пароль у поточній cookie.</summary>
