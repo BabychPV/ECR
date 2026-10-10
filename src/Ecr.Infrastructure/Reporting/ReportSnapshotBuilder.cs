@@ -133,6 +133,7 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock, IMemory
 
         db.ReportSnapshots.Add(snapshot);
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
+
         // ⛔ Y1-04 (аудит R11): зріз уже вставлено (непоточний, з рядками). Будь-яка відмова ДО того, як
         // його зроблено поточним (замок слоту не взято за `SlotLockTimeout` — 409 «зайнято»; збій запису
         // рядків; скасування), лишала б «зріз-сироту» з до 200 000 рядків до нічної ретенції (вона обходить
