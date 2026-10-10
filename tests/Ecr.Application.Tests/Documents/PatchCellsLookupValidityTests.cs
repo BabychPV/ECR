@@ -192,7 +192,11 @@ public sealed class PatchCellsLookupValidityTests
     {
         Entry(registryDefId: OtherRegistryDefId);
 
-        await AssertRejected("err.ECR-CELL-4223.missingEntry");
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(() => Write());
+
+        Assert.Equal("ECR-CELL-4223", error.ErrorCode);
+        Assert.Equal("err.ECR-CELL-4223.missingEntry", error.Details!["messageKey"]);
+        await _cells.DidNotReceive().ApplyAsync(Arg.Any<CellChangeSet>(), Arg.Any<CancellationToken>());
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)] [Trait("Finding", "C7")]

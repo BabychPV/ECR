@@ -824,7 +824,8 @@ public sealed class SourceEventSyncJobTests(SqlServerFixture sql)
 
         Assert.Equal(["EF-E3"], (await RowsAsync(stand)).Select(r => r.RowKey));
         await trigger.Received(1).RequestAsync(stand.DocumentId, new PeriodKey(202601), Arg.Any<CancellationToken>());
-        Assert.Single(trigger.ReceivedCalls());
+        // F2-04: читання `EnlistsInCallerTransaction` — теж «виклик» підробки; рахуємо лише постановки.
+        Assert.Single(trigger.ReceivedCalls(), c => c.GetMethodInfo().Name == nameof(ICalculationTrigger.RequestAsync));
     }
 
     // ── Блокери рев'ю «Аудита» (Б1–Б4) і межі вікна ──
