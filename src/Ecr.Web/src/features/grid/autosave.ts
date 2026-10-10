@@ -1,7 +1,7 @@
 import { useEffect, useSyncExternalStore } from 'react';
 import { useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { showApiError } from '@/shared/ui/notify';
-import { registerUnsavedSource, UnsavedSettleMs } from '@/shared/ui/unsavedSources';
+import { hasUnsavedChangesExcept, registerUnsavedSource, UnsavedSettleMs } from '@/shared/ui/unsavedSources';
 import { EcrApiError, isSessionClosed, onBeforeLoginRedirect } from '@/api/client';
 import { recordLostEdits } from './lostEdits';
 import { resetConfirmed } from './confirmedEdits';
@@ -472,6 +472,9 @@ export function holdRejectedEdits(
  */
 const AutosaveSettleMs = UnsavedSettleMs;
 
+/** Ідентифікатор сітки в реєстрі джерел незбереженого (`unsavedSources.ts`). */
+const GridUnsavedSourceId = 'grid';
+
 /**
  * Зберігає все незбережене і чекає на результат.
  *
@@ -542,7 +545,7 @@ async function flushAutosaveAndSettle(
  * жити стільки ж. Модуль підвантажується разом із будь-якою сторінкою, що
  * вміє створити правку, — раніше правок бути не може.
  */
-registerUnsavedSource('grid', {
+registerUnsavedSource(GridUnsavedSourceId, {
   hasUnsaved: hasPending,
   unsavedCount: pendingCount,
   flush: flushAutosaveAndSettle,
@@ -711,7 +714,13 @@ export function useDocumentPending(documentId: number, ownerUserId?: number): vo
         );
         const tooBig = beaconBytes(requests) > BeaconBudgetBytes;
 
-        if (held || hasInFlight() || isBusyRetryWaiting() || hasFailedSendable() || tooBig) {
+        // ⛔ F6-05: так само, коли незбережене є в ІНШОМУ джерелі (брудна шапка документа): воно
+        // само питає «Покинути сторінку?», і «Залишитися» лишило б правки сітки після маячка зі
+        // старою версією кешу — `409` на власних правках. Питання ставимо самі, не покладаючись
+        // на чужий обробник.
+        const otherUnsaved = hasUnsavedChangesExcept(GridUnsavedSourceId);
+
+        if (held || otherUnsaved || hasInFlight() || isBusyRetryWaiting() || hasFailedSendable() || tooBig) {
           setTimeout(() => {
             flushAutosave();
           }, 0);

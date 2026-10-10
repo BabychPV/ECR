@@ -2,6 +2,7 @@ import type { JSX, ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { renderHook } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { registerUnsavedSource } from '@/shared/ui/unsavedSources';
 import {
   cancelAutosave,
   registerSliceSaver,
@@ -134,6 +135,41 @@ describe('AN-104 / D1-03: beforeunload під час збереження в д�
     expect(beacons).toHaveLength(0);
     expect(fetchMock.mock.calls.length).toBe(sentBefore);
 
+    vi.useRealTimers();
+  });
+});
+
+/**
+ * F6-05: брудна шапка документа + незбережена правка сітки. Шапка питає «Покинути сторінку?», а
+ * маячок сітки їхав ДО відповіді: «Залишитися» лишало правку в сховищі зі старою версією кешу —
+ * наступне збереження діставало `409` на власних правках.
+ */
+describe('F6-05: beforeunload із незбереженим в іншому джерелі', () => {
+  it('брудна шапка + правка сітки: питання браузера, маячка немає, звичайне збереження після обробника', () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn((..._args: unknown[]) => Promise.resolve(new Response('{}')));
+    vi.stubGlobal('fetch', fetchMock);
+    renderHook(() => useDocumentPending(1), { wrapper });
+    const saved: unknown[] = [];
+    const offSaver = registerSliceSaver(4, 202609, (edits) => saved.push(...edits));
+    const offHeader = registerUnsavedSource('header', { hasUnsaved: () => true });
+
+    putPendingEdit(4, 202609, other);
+
+    const event = unloadEvent();
+    window.dispatchEvent(event);
+
+    // ⛔ Мутація: прибрати `otherUnsaved` в обробнику — маячок (`keepalive`) іде, `defaultPrevented` лишається `false`.
+    expect(event.defaultPrevented).toBe(true);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(saved).toHaveLength(0);
+
+    vi.runAllTimers();
+
+    expect(saved).toEqual([other]);
+    expect(fetchMock).not.toHaveBeenCalled();
+    offHeader();
+    offSaver();
     vi.useRealTimers();
   });
 });
