@@ -20,7 +20,7 @@ const seed = readFileSync(
 function mergeText(lang: 'en' | 'ru'): string {
   const start = seed.indexOf('MERGE sys_ecr.UiString AS t');
   const merge = seed.slice(start);
-  const row = new RegExp(`\(N'templates\.stat\.published',\s*N'${lang}',\s*N'([^']*)'`).exec(merge);
+  const row = new RegExp(String.raw`\(N'templates\.stat\.published',\s*N'${lang}',\s*N'([^']*)'`).exec(merge);
   expect(row, `09-seed.sql: немає templates.stat.published (${lang}) після MERGE`).not.toBeNull();
 
   return row?.[1] ?? '';
