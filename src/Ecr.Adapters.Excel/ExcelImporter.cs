@@ -208,6 +208,24 @@ public sealed class ExcelImporter(
                 continue;
             }
 
+            // ⛔ Y5-04 (аудит 7): аркуш таблиці перейменовано або видалено в Excel після
+            // експорту. `workbook.Worksheet(name)` нижче кидав ArgumentException, а той ішов у
+            // 500 ECR-SYS-0500 — і переглянути не можна було жодної таблиці книги. Тепер —
+            // відмова цієї таблиці з поясненням; решта книги переглядається як звичайно.
+            // ⚠ Назву аркуша в текст не вставляємо: людина бачить таблицю в переліку відмов,
+            // а файл — Deny-контекст (`DenyLeakGuardTests`).
+            if (!workbook.Worksheets.TryGetWorksheet(block.SheetName, out _))
+            {
+                rejected.Add(new ImportRejection(
+                    "—", block.TableCode, "ECR-IMP-0422",
+                    "The sheet of this table is missing in the file: it was renamed or deleted after export.",
+                    block.TableCode,
+                    table.NameL10n,
+                    MessageKey: ImportMessageKeys.SheetMissing));
+
+                continue;
+            }
+
             validBlocks.Add((block, table));
         }
 
