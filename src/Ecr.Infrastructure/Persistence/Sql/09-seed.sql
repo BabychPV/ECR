@@ -6200,6 +6200,10 @@ USING (VALUES
     (N'coverageEvents.cellRejected',            N'en', N'Cell {cell}: the collected value was rejected on write ({code}) and was not written; the other fields were written. The next run will try again.', 1),
     -- ru/kz — окремою порцією `R9F1:cellRejected` у блоці I18N нижче.
     -- R9F1:cellRejected ── кінець секції ──
+    -- R9F1:fieldMapUnit ── F1-02: ціль мапінгу у колонку з одиницею — одиниця колонки (`CreateEntityFieldMapHandler.ApplyUnitsAsync`) ──
+    (N'err.ECR-REQ-0422.fieldMapTargetNotColumnUnit', N'en', N'The target unit of the mapping must be the unit of the column: the cell stores its value in that unit.', 1),
+    -- ru/kz — окремою порцією `R9F1:fieldMapUnit` у блоці I18N нижче.
+    -- R9F1:fieldMapUnit ── кінець секції ──
     -- COLL:auditreason ── Причина зміни налаштувань збору конвертом (`IntegrationConfigAudit.Reason`, `structureChangeReason.ts`) ──
     (N'integrationAudit.scheduleCreated', N'en', N'Collection schedule {id} created for entity "{entity}".', 1),
     (N'integrationAudit.scheduleChanged', N'en', N'Collection schedule {id} of entity "{entity}" changed.', 1),
@@ -15425,6 +15429,17 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- R9F1:cellRejected ── кінець секції ──
+
+-- R9F1:fieldMapUnit ── ru/kz: ціль мапінгу у колонку з одиницею — одиниця колонки (F1-02); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-REQ-0422.fieldMapTargetNotColumnUnit', N'ru', N'Целевая единица сопоставления должна быть единицей колонки: ячейка хранит значение именно в ней.'),
+    (N'err.ECR-REQ-0422.fieldMapTargetNotColumnUnit', N'kz', N'Сәйкестендірудің мақсатты бірлігі бағанның бірлігі болуы керек: ұяшық мәнді дәл сол бірлікте сақтайды.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- R9F1:fieldMapUnit ── кінець секції ──
 
 -- COLL:auditreason ── ru/kz причин зміни налаштувань збору (IntegrationConfigAudit.Reason); власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)

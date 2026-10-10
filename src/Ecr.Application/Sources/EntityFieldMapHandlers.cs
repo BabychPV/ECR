@@ -269,15 +269,57 @@ public sealed class CreateEntityFieldMapHandler(
         }
     }
 
-    /// <summary>Перевіряє й ставить одиниці межі інтеграції (ФВ-16.9), якщо їх названо.</summary>
+    /// <summary>Ключ каталогу відмови «цільова одиниця мапінгу — не одиниця колонки».</summary>
+    public const string TargetNotColumnUnitKey = "err.ECR-REQ-0422.fieldMapTargetNotColumnUnit";
+
+    /// <summary>Перевіряє й ставить одиниці межі інтеграції (ФВ-16.9).</summary>
+    /// <remarks>
+    /// ⛔ F1-02 (аудит 9): форма конфігуратора (<c>CreateMappingModal</c>) одиниць не шле, і мапінг у
+    /// колонку з одиницею (<c>ColumnDef.UnitId</c>, ФВ-16.1) лишався без них: значення з PI лягало
+    /// «як є» під чужою одиницею (<c>Sm3/d</c> у колонку <c>Sm3/h</c> — ×24), а зміна UOM атрибута
+    /// в PI не ставила збір на паузу (<c>IsDeclaredUnit(null, …)</c> = «нема з чим порівняти»).
+    /// Тепер для колонки з одиницею:
+    /// <list type="bullet">
+    /// <item>ціль — одиниця колонки; інша явна ціль — відмова (комірка зберігає значення в одиниці
+    /// колонки, і число в іншій одиниці там хибне);</item>
+    /// <item>джерело, якщо його не названо, — теж одиниця колонки. Це ОГОЛОШЕННЯ, яке перший же збір
+    /// звіряє з UOM атрибута (ФВ-16.9): інша одиниця в PI — пауза мапінгу з фактичною одиницею, яку
+    /// адміністратор приймає (<c>accept-unit-change</c>), і далі конверсія на межі (ФВ-16.10). Тиха
+    /// помилка стає видимою паузою, а форма лишається простою.</item>
+    /// </list>
+    /// Колонка без одиниці й поле реєстру — поведінка як раніше.
+    /// </remarks>
     private async Task ApplyUnitsAsync(EntityFieldMap map, CreateEntityFieldMapCommand command, CancellationToken ct)
     {
-        if (command.SourceUnitId is null && command.TargetUnitId is null)
+        var sourceUnit = command.SourceUnitId;
+        var targetUnit = command.TargetUnitId;
+
+        if (map.TargetColumnDefId is { } columnDefId
+            && await sources.FindColumnUnitIdAsync(columnDefId, ct).ConfigureAwait(false) is { } columnUnitId)
+        {
+            if (targetUnit is { } explicitTarget && explicitTarget != columnUnitId)
+            {
+                throw new BusinessRuleException(
+                    ErrorCodes.RequestInvalid,
+                    "Цільова одиниця мапінгу мусить бути одиницею колонки: комірка зберігає значення саме в ній.",
+                    new Dictionary<string, object?>
+                    {
+                        ["messageKey"] = TargetNotColumnUnitKey,
+                        ["targetUnitId"] = explicitTarget.ToString(CultureInfo.InvariantCulture),
+                        ["columnUnitId"] = columnUnitId.ToString(CultureInfo.InvariantCulture),
+                    });
+            }
+
+            targetUnit = columnUnitId;
+            sourceUnit ??= columnUnitId;
+        }
+
+        if (sourceUnit is null && targetUnit is null)
         {
             return;
         }
 
-        if (command.SourceUnitId is { } sourceUnitId
+        if (sourceUnit is { } sourceUnitId
             && !await sources.UnitExistsAsync(sourceUnitId, ct).ConfigureAwait(false))
         {
             throw new NotFoundException(
@@ -289,7 +331,7 @@ public sealed class CreateEntityFieldMapHandler(
                 });
         }
 
-        if (command.TargetUnitId is { } targetUnitId
+        if (targetUnit is { } targetUnitId
             && !await sources.UnitExistsAsync(targetUnitId, ct).ConfigureAwait(false))
         {
             throw new NotFoundException(
@@ -303,10 +345,10 @@ public sealed class CreateEntityFieldMapHandler(
 
         // ⛔ D-4: одиниці різної розмірності (MJ -> kg) - відмова зараз, а не мапінг, що мовчить.
         await FieldMapUnitCompatibility
-            .EnsureAsync(units, command.SourceField, command.SourceUnitId, command.TargetUnitId, command.Aggregation, ct)
+            .EnsureAsync(units, command.SourceField, sourceUnit, targetUnit, command.Aggregation, ct)
             .ConfigureAwait(false);
 
-        map.SetUnits(command.SourceUnitId, command.TargetUnitId);
+        map.SetUnits(sourceUnit, targetUnit);
     }
 
     /// <summary>Складає DTO мапінгу для відповіді.</summary>

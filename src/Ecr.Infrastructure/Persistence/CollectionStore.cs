@@ -597,6 +597,14 @@ public sealed class CollectionStore(EcrDbContext db, IClock clock) : ICollection
         => db.ColumnDefs.AsNoTracking().AnyAsync(c => c.Id == columnDefId && !c.IsDeleted, ct);
 
     /// <inheritdoc />
+    public Task<int?> FindColumnUnitIdAsync(int columnDefId, CancellationToken ct)
+        => db.ColumnDefs
+            .AsNoTracking()
+            .Where(c => c.Id == columnDefId)
+            .Select(c => c.UnitId)
+            .FirstOrDefaultAsync(ct);
+
+    /// <inheritdoc />
     public async Task<IReadOnlyList<int>> FindProjectIdsUsingColumnAsync(int columnDefId, CancellationToken ct)
     {
         // ⚠ Той самий шлях «колонка → таблиця → екземпляр → документ», що в

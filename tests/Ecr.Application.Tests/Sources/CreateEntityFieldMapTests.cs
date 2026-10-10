@@ -297,6 +297,68 @@ public sealed class CreateEntityFieldMapTests
         Assert.Equal("Flare_01", dto.TargetRowKey);
     }
 
+    /// <summary>
+    /// F1-02 (аудит 9): форма шле мапінг без одиниць; у колонку з одиницею (ФВ-16.1) він лягає з
+    /// ціллю = одиницею колонки і ОГОЛОШЕНОЮ одиницею джерела = тією ж — перший збір звірить її з UOM
+    /// атрибута й поставить мапінг на паузу, якщо в PI інша (ФВ-16.9).
+    /// </summary>
+    /// <remarks>
+    /// МУТАЦІЙНИЙ ДОКАЗ: прибрати гілку <c>FindColumnUnitIdAsync</c> в <c>ApplyUnitsAsync</c> —
+    /// обидві одиниці <c>null</c>, тест червоний.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "F1-02")]
+    public async Task Мапінг_без_одиниць_у_колонку_з_одиницею_бере_одиницю_колонки_для_джерела_й_цілі()
+    {
+        _sources.FindColumnUnitIdAsync(100, Arg.Any<CancellationToken>()).Returns(12);
+
+        var dto = await Handler().HandleAsync(SourceEntityId, ColumnCommand(), CancellationToken.None);
+
+        Assert.Equal(12, dto.SourceUnitId);
+        Assert.Equal(12, dto.TargetUnitId);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "F1-02")]
+    public async Task Названа_одиниця_джерела_лишається_а_ціль_за_замовчуванням_одиниця_колонки()
+    {
+        _sources.FindColumnUnitIdAsync(100, Arg.Any<CancellationToken>()).Returns(12);
+
+        var dto = await Handler().HandleAsync(SourceEntityId, ColumnCommand(sourceUnitId: 11), CancellationToken.None);
+
+        Assert.Equal(11, dto.SourceUnitId);
+        Assert.Equal(12, dto.TargetUnitId);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "F1-02")]
+    public async Task Ціль_не_одиниця_колонки_відхиляється_до_запису()
+    {
+        _sources.FindColumnUnitIdAsync(100, Arg.Any<CancellationToken>()).Returns(12);
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Handler().HandleAsync(
+                SourceEntityId, ColumnCommand(sourceUnitId: 11, targetUnitId: 13), CancellationToken.None));
+
+        Assert.Equal(ErrorCodes.RequestInvalid, error.ErrorCode);
+        Assert.Equal(CreateEntityFieldMapHandler.TargetNotColumnUnitKey, error.Details!["messageKey"]);
+        await _sources.DidNotReceive().AddFieldMapAsync(Arg.Any<EntityFieldMap>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "F1-02")]
+    public async Task Колонка_без_одиниці_мапінг_без_одиниць_як_раніше()
+    {
+        var dto = await Handler().HandleAsync(SourceEntityId, ColumnCommand(), CancellationToken.None);
+
+        Assert.Null(dto.SourceUnitId);
+        Assert.Null(dto.TargetUnitId);
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     public async Task Одиниці_межі_ставляться_коли_названі()
