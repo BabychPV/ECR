@@ -1,6 +1,8 @@
 using Ecr.Application.Ports;
 using Ecr.Domain.Entities.Configuration;
 using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Primitives;
+using Ecr.Domain.Enums;
 using Ecr.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 
@@ -13,6 +15,24 @@ namespace Ecr.Infrastructure.Caching;
 /// Ключ <c>v{id}:r{rev}</c> робить інвалідацію **непотрібною**: презентаційна
 /// правка створює новий ключ, а не псує старий. Це прибирає когерентність кешу
 /// між інстансами як клас проблеми — і саме тому ≥2 інстанси тут дешеві (D-16).
+///
+/// ⛔ Y6-01: це правда лише для СТРУКТУРНО ЗАМОРОЖЕНОЇ версії
+/// (<c>Published</c>/<c>Deprecated</c>). Структурні правки ЧЕРНЕТКИ
+/// <c>PresentationRevision</c> не підіймають, тож ключ для неї не змінюється, а
+/// <see cref="InvalidateAsync"/> скидає лише ЛОКАЛЬНИЙ <see cref="IMemoryCache"/>.
+/// Інший вузол (D-32, ≥2 інстанси) віддавав би знімок до правки до 240 хв —
+/// зокрема й після <c>Publish</c>. Тому знімок чернетки живе не довше за вікно
+/// ревізії (<see cref="DraftLifetime"/>, 5 с — та сама стеля несвіжості, що вже
+/// прийнята для презентаційних правок, `RD-05`), а заморожений — як і раніше.
+/// Свіжоопублікована версія на іншому вузлі бачить доопублікаційний знімок
+/// щонайбільше ці 5 с: далі він витіснений, а новий будується вже з
+/// <c>Frozen = true</c>, тобто з незмінної структури.
+///
+/// ⛔ Y6-01, гонка на одному вузлі: побудова, що почалася ДО правки, клала
+/// старий знімок у кеш ПІСЛЯ <see cref="InvalidateAsync"/> (скидати ще не було
+/// чого). Кожен запис тепер несе токен інвалідації версії, узятий ДО читання
+/// структури; <see cref="InvalidateAsync"/> його скасовує, і <c>Set</c> зі
+/// скасованим токеном у кеш нічого не кладе.
 /// </remarks>
 public sealed class MetadataCache(
     IMemoryCache memory,
@@ -67,11 +87,31 @@ public sealed class MetadataCache(
     /// <summary>Вікно, у якому ревізія не перечитується з бази (`RD-05`).</summary>
     private TimeSpan RevisionWindow => (lifetimes ?? CacheLifetimes.Default).Revision;
 
+    /// <summary>
+    /// Стеля життя знімка ЧЕРНЕТКИ (Y6-01).
+    /// </summary>
+    /// <remarks>
+    /// Вікно ревізії, а коли мемоїзацію вимкнено (нуль) — його дефолт: кешувати
+    /// чернетку без стелі не можна, а нуль у <c>MemoryCacheEntryOptions</c>
+    /// недопустимий. І не довше за загальну стелю <see cref="Lifetime"/>.
+    /// </remarks>
+    private TimeSpan DraftLifetime
+    {
+        get
+        {
+            var window = RevisionWindow > TimeSpan.Zero ? RevisionWindow : CacheLifetimes.DefaultRevision;
+            return window < Lifetime ? window : Lifetime;
+        }
+    }
+
+    /// <summary>Замок створення/зняття токена інвалідації версії (Y6-01).</summary>
+    private static readonly object InvalidationGate = new();
+
     /// <inheritdoc />
     public async Task<TemplateVersionSnapshot> GetAsync(int templateVersionId, CancellationToken ct)
     {
-        var revision = await RevisionAsync(templateVersionId, ct).ConfigureAwait(false);
-        var key = CacheKey(templateVersionId, revision);
+        var state = await RevisionAsync(templateVersionId, ct).ConfigureAwait(false);
+        var key = CacheKey(templateVersionId, state.Revision);
 
         if (memory.TryGetValue(key, out TemplateVersionSnapshot? cached) && cached is not null)
         {
@@ -86,13 +126,13 @@ public sealed class MetadataCache(
         // запитів давали N побудов по шість запитів кожна (`RD-05`, вада `D`).
         // Злиття робить із них одну; решта чекають її результату.
         return await _flight
-            .RunAsync(key, token => BuildAsync(templateVersionId, revision, key, token), ct)
+            .RunAsync(key, token => BuildAsync(templateVersionId, state, key, token), ct)
             .ConfigureAwait(false);
     }
 
     /// <summary>Будує знімок і кладе його в кеш — усередині одного польоту.</summary>
     private async Task<TemplateVersionSnapshot> BuildAsync(
-        int templateVersionId, int revision, string key, CancellationToken ct)
+        int templateVersionId, VersionState state, string key, CancellationToken ct)
     {
         // Повторна перевірка вже всередині польоту: поки ми ставали в чергу,
         // попередній політ міг завершитися і покласти готове.
@@ -101,7 +141,12 @@ public sealed class MetadataCache(
             return ready;
         }
 
-        var snapshot = await LoadAsync(templateVersionId, revision, ct).ConfigureAwait(false);
+        // ⛔ Y6-01: токен береться ДО читання структури. Якщо поки ми читаємо,
+        // хтось закомітив правку і викликав InvalidateAsync, токен уже
+        // скасований — і `Set` нижче не покладе в кеш знімок до правки.
+        var invalidation = InvalidationToken(templateVersionId);
+
+        var snapshot = await LoadAsync(templateVersionId, state.Revision, ct).ConfigureAwait(false);
 
         // Термін не для коректності — її й так тримає ревізія в ключі, запис
         // не «застаріває» доти, доки він там лежить, — а для пам'яті (Q-252):
@@ -112,11 +157,15 @@ public sealed class MetadataCache(
         // ⚠ `Size` тут БІЛЬШЕ НЕМАЄ, і це не недогляд — див. пояснення біля
         // `AddMemoryCache` у `DependencyInjection.cs`: ліміту в сховища немає,
         // а розмір без ліміту не обмежує нічого і лише вдає стелю.
-        memory.Set(key, snapshot, new MemoryCacheEntryOptions
+        var options = new MemoryCacheEntryOptions
         {
             Priority = CacheItemPriority.High,
-            AbsoluteExpirationRelativeToNow = Lifetime,
-        });
+
+            // ⛔ Y6-01: чернетка — коротко, бо ключ для неї не чесний між вузлами.
+            AbsoluteExpirationRelativeToNow = state.Frozen ? Lifetime : DraftLifetime,
+        };
+        options.AddExpirationToken(new CancellationChangeToken(invalidation));
+        memory.Set(key, snapshot, options);
 
         return snapshot;
     }
@@ -139,24 +188,32 @@ public sealed class MetadataCache(
     /// ⚠ Відсутність версії НЕ мемоїзується: нуль користі (шлях однаково
     /// кидає) і зайва морока з <c>null</c> у сховищі значень.
     /// </remarks>
-    private async Task<int> RevisionAsync(int templateVersionId, CancellationToken ct)
+    private async Task<VersionState> RevisionAsync(int templateVersionId, CancellationToken ct)
     {
         var window = RevisionWindow;
         var key = RevisionKey(templateVersionId);
 
-        if (window > TimeSpan.Zero && memory.TryGetValue(key, out int memoized))
+        if (window > TimeSpan.Zero && memory.TryGetValue(key, out VersionState memoized))
         {
             return memoized;
         }
 
-        var revision = await db.TemplateVersions
+        // Y6-01: тим самим запитом — і стан версії (заморожена чи чернетка).
+        // ⚠ Мемо «чернетка», застаріле до 5 с після Publish на іншому вузлі,
+        // безпечне: воно дає лише коротке життя знімка, а не довге.
+        var row = await db.TemplateVersions
             .AsNoTracking()
             .Where(v => v.Id == templateVersionId)
-            .Select(v => (int?)v.PresentationRevision)
+            .Select(v => new
+            {
+                v.PresentationRevision,
+                Frozen = v.Status == TemplateVersionStatus.Published
+                    || v.Status == TemplateVersionStatus.Deprecated,
+            })
             .FirstOrDefaultAsync(ct)
             .ConfigureAwait(false);
 
-        if (revision is null)
+        if (row is null)
         {
             // ⛔ V-17: раніше голий InvalidOperationException, тобто 500
             // «внутрішня помилка» на diff/структуру неіснуючої версії — хоча
@@ -171,17 +228,53 @@ public sealed class MetadataCache(
                 });
         }
 
+        var state = new VersionState(row.PresentationRevision, row.Frozen);
+
         if (window > TimeSpan.Zero)
         {
-            memory.Set(key, revision.Value, new MemoryCacheEntryOptions
+            memory.Set(key, state, new MemoryCacheEntryOptions
             {
                 Priority = CacheItemPriority.High,
                 AbsoluteExpirationRelativeToNow = window,
             });
         }
 
-        return revision.Value;
+        return state;
     }
+
+    /// <summary>Ревізія і структурна замороженість версії (Y6-01).</summary>
+    /// <param name="Revision">Презентаційна ревізія.</param>
+    /// <param name="Frozen"><c>Published</c> або <c>Deprecated</c>.</param>
+    private readonly record struct VersionState(int Revision, bool Frozen);
+
+    /// <summary>
+    /// Поточний токен інвалідації версії (Y6-01) — спільний на процес, бо лежить
+    /// у тому самому <see cref="IMemoryCache"/>.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <c>NeverRemove</c> і без строку: витіснений токен означав би, що записи
+    /// зі старим токеном перестали реагувати на <see cref="InvalidateAsync"/>.
+    /// Записів — по одному на версію, яку процес читав, тобто їх обмежено
+    /// кількістю версій.
+    /// </remarks>
+    private CancellationToken InvalidationToken(int templateVersionId)
+    {
+        var key = InvalidationKey(templateVersionId);
+        lock (InvalidationGate)
+        {
+            if (!memory.TryGetValue(key, out CancellationTokenSource? source) || source is null)
+            {
+                source = new CancellationTokenSource();
+                memory.Set(key, source, new MemoryCacheEntryOptions { Priority = CacheItemPriority.NeverRemove });
+            }
+
+            return source.Token;
+        }
+    }
+
+    /// <summary>Ключ токена інвалідації версії (Y6-01).</summary>
+    /// <param name="templateVersionId">Версія шаблону.</param>
+    private static string InvalidationKey(int templateVersionId) => $"inv:{templateVersionId}";
 
     /// <inheritdoc />
     public async Task InvalidateAsync(int templateVersionId, CancellationToken ct)
@@ -200,6 +293,21 @@ public sealed class MetadataCache(
         // випадки, де стеля несвіжості в 5 с недопустима, і лишити тут старе
         // число означало б, що явна інвалідація не діє ці п'ять секунд.
         memory.Remove(RevisionKey(templateVersionId));
+
+        // ⛔ Y6-01: скасувати токен — це знімає і покладені знімки (усіх
+        // ревізій), і побудову, що зараз у польоті: її `Set` зі скасованим
+        // токеном у кеш нічого не покладе.
+        CancellationTokenSource? source;
+        lock (InvalidationGate)
+        {
+            if (memory.TryGetValue(InvalidationKey(templateVersionId), out source))
+            {
+                memory.Remove(InvalidationKey(templateVersionId));
+            }
+        }
+
+        // Не Dispose: паралельна побудова ще може взяти source.Token (як в AccessProfileCache).
+        source?.Cancel();
 
         var current = revision ?? 0;
         for (var r = Math.Max(0, current - 1); r <= current + 1; r++)
