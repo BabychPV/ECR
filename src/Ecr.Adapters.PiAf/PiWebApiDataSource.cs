@@ -444,7 +444,12 @@ public sealed partial class PiWebApiDataSource(
                 using var message = new HttpRequestMessage(HttpMethod.Get, uri);
                 var client = Authorize(message, secretName);
 
-                using var response = await client.SendAsync(message, ct).ConfigureAwait(false);
+                // ⛔ I1-05: ТІЛЬКИ заголовки. Типова `ResponseContentRead` буферизує ВСЕ тіло в `HttpClient` (до його
+                // `MaxResponseContentBufferSize`, 2 ГБ) ще до повернення `SendAsync` - тож межа `MaxResponseBytes`
+                // у `ReadBoundedAsync` спрацьовувала ПІСЛЯ того, як пам'ять уже вичерпано, і нічого не захищала.
+                // Тіло читається потоком там, де його міряють.
+                using var response = await client
+                    .SendAsync(message, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
 
                 if (!response.IsSuccessStatusCode)
                 {
