@@ -1,10 +1,18 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import type { JSX } from 'react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, render, screen } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import type { TableSliceDto } from '@/api/types';
 import { GridStatusBar } from '../GridStatusBar';
+import { selectionStats } from '../selectionStats';
 import { publishSelection } from '../selectionStore';
 import { testTheme } from '@/test/render';
+
+vi.mock('../selectionStats', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../selectionStats')>();
+
+  return { ...actual, selectionStats: vi.fn(actual.selectionStats) };
+});
 
 /** UI-23: рядок стану під сіткою. */
 
@@ -56,5 +64,30 @@ describe('GridStatusBar', () => {
     expect(screen.getByTestId('grid-status-count').textContent).toContain('3');
     expect(screen.getByTestId('grid-status-sum').textContent).toContain('6');
     expect(screen.getByTestId('grid-status-average').textContent).toContain('2');
+  });
+
+  /*
+   * ⛔ C1-05: сума виділення рахувалась на КОЖЕН рендер батька. Перемальовка з тими самими входами
+   * (виділення, зріз, колонки, рядки не змінились) не має перераховувати нічого.
+   */
+  it('перемальовка батька з тими самими входами не перераховує підсумок виділення', () => {
+    const columns = [{ prop: 'A' }, { prop: 'B' }];
+    // Новий елемент на кожен виклик (як перемальовка батька), входи — ті самі посилання.
+    const tree = (): JSX.Element => (
+      <MantineProvider theme={testTheme}>
+        <GridStatusBar tableInstanceId={9} periodKey={202610} slice={slice} columns={columns} rows={rows} />
+      </MantineProvider>
+    );
+    const view = render(tree());
+    act(() => {
+      publishSelection(9, 202610, { fromRow: 0, toRow: 1, fromColumn: 0, toColumn: 1 });
+    });
+    expect(screen.getByTestId('grid-status-sum').textContent).toContain('6');
+
+    vi.mocked(selectionStats).mockClear();
+    view.rerender(tree());
+    view.rerender(tree());
+
+    expect(vi.mocked(selectionStats)).not.toHaveBeenCalled();
   });
 });
