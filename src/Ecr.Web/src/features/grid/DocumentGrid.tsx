@@ -4,7 +4,7 @@ import { RevoGrid } from '@revolist/react-datagrid';
 import type { ColumnRegular } from '@revolist/revogrid';
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { UseQueryResult } from '@tanstack/react-query';
-import { apiFetch, EcrApiError, type RequiredInputCell } from '@/api/client';
+import { apiFetch, EcrApiError, isSessionClosed, type RequiredInputCell } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
 import type {
   CellConflictDto,
@@ -2118,7 +2118,24 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
           const tracker = trackEditorTouched(node);
           editorTouched.current = tracker;
 
+          // ⛔ F6-02: набране, але не зафіксоване значення є лише в полі
+          // відкритого редактора — у сховищі його немає, тож `registerUnloadFlush`
+          // (дивиться на сховище) про нього не знає, а маячку нічого везти.
+          // Закриття вкладки чи F5 губили його мовчки. Єдиний чесний захист —
+          // рідне питання браузера, і лише коли людина справді щось увела
+          // (`editorTouched`): відкритий без введення редактор не питає.
+          // Сеанс закрито (вихід, зміна в іншій вкладці) — без питання, як і в
+          // `useDocumentPending`: зберегти вже нема чим.
+          const onUnload = (event: BeforeUnloadEvent): void => {
+            if (isSessionClosed() || !tracker.isTouched() || node.querySelector('.edit-input-wrapper') === null) return;
+
+            event.preventDefault();
+            event.returnValue = '';
+          };
+          window.addEventListener('beforeunload', onUnload);
+
           return () => {
+            window.removeEventListener('beforeunload', onUnload);
             tracker.dispose();
             if (editorTouched.current === tracker) editorTouched.current = null;
           };
