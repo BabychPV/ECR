@@ -200,7 +200,12 @@ function RegistryOverview(): JSX.Element {
    */
   const hasRegistries = registries.data !== undefined && registries.data.length > 0;
 
-  const canEditData = can(session.data, 'Registry.EditData');
+  // ⛔ L9-18: під симуляцією «очима користувача» сервер відхиляє КОЖЕН не-GET (`ECR-SIM-0403`), а `can()` бачить
+  // права ЦІЛІ — без цієї умови кнопки створення/правки лишались активними й кожна дія падала `403`
+  // (так само, як `SheetActions`, `RegistryDataPage`, `DataSourcesTable`). Читання (`usage`, експорт) лишається.
+  const simulation = session.data?.isSimulation === true;
+  const canEditData = can(session.data, 'Registry.EditData') && !simulation;
+  const canEditDefinition = can(session.data, 'Registry.EditDefinition') && !simulation;
 
   // D-211: записи External-довідника — лише синком з AF; правка відкривається для перегляду.
   const externalReadOnly = isExternalRegistry(selected);
@@ -373,7 +378,7 @@ function RegistryOverview(): JSX.Element {
                 T4): контролер умів лише читати перелік і правити опис
                 НАЯВНОГО довідника, а сам довідник заводив тільки офлайновий
                 seed — тобто довідника, якого там немає, не міг завести ніхто. */}
-            {can(session.data, 'Registry.EditDefinition') && (
+            {canEditDefinition && (
               <Button variant="default" onClick={() => setCreating(true)}>
                 {t('registries.newRegistry')}
               </Button>
@@ -382,7 +387,7 @@ function RegistryOverview(): JSX.Element {
             {/* ⛔ Заведення запису не мало кнопки (`A7-42`). Довідник без
                 записів — це колонка типу `Lookup`, яка не пропонує нічого,
                 тобто документ, який неможливо заповнити. */}
-            {selected !== undefined && can(session.data, 'Registry.EditData') && (
+            {selected !== undefined && canEditData && (
               <Button disabled={externalReadOnly} onClick={() => setEditing(null)}>
                 {t('registries.newEntry')}
               </Button>
@@ -451,7 +456,7 @@ function RegistryOverview(): JSX.Element {
                 ⚠ Право небезпечне (`Integration.Manage`) і в seed його не
                 має ніхто: кнопка з'явиться лише в того, кому його видали
                 поіменно. */}
-            {can(session.data, 'Integration.Manage') && (
+            {can(session.data, 'Integration.Manage') && !simulation && (
               <SourceKindSwitch registries={registries.data ?? []} />
             )}
           </FilterRow>

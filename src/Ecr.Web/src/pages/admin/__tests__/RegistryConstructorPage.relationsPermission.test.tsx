@@ -52,7 +52,7 @@ function json(body: unknown): Response {
   });
 }
 
-function mockServer(permissions: string[]): void {
+function mockServer(permissions: string[], simulation = false): void {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL) => {
@@ -64,7 +64,7 @@ function mockServer(permissions: string[]): void {
 
       if (path.endsWith('/api/v1/me')) {
         return json({
-          denies: [], grants: {}, isSimulation: false, language: 'en', mustChangePassword: false,
+          denies: [], grants: {}, isSimulation: simulation, language: 'en', mustChangePassword: false,
           permissions, simulatedForUserId: null, userId: 9, userName: 'tester',
         });
       }
@@ -129,6 +129,18 @@ describe('RegistryConstructorPage: вкладка «Зв\'язки» й прав
 
     // ⚠ Спершу дочекатися самої цілі: порожній екран зробив би «немає select» зеленим на будь-якому коді.
     await screen.findByText('SUBSTANCE');
+
+    expect(screen.queryByRole('combobox')).toBeNull();
+  });
+
+  it('L9-18: під симуляцією — лише читання, хоч права цілі є; вкладка «Використання» лишається', async () => {
+    // ⛔ Мутаційний доказ: поверни `mayEdit = can(...)` без `isSimulation` — з'являється вибір цілі, тест червоніє.
+    mockServer(['Registry.View', 'Registry.EditDefinition'], true);
+    await openRelations();
+
+    await screen.findByText('SUBSTANCE');
+    // ⚠ Профіль (`/me`) мав встигнути: до нього права немає й «немає вибору» було б зеленим на будь-якому коді.
+    await screen.findByRole('tab', { name: /registries\.tabUsage/ });
 
     expect(screen.queryByRole('combobox')).toBeNull();
   });
