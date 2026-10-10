@@ -88,6 +88,7 @@ public sealed partial class ReopenPeriodHandler(
         var projectId = 0;
         var periodKey = 0;
         var requiresMaterialization = false;
+        var enlistMaterialization = materialization is { EnlistsInCallerTransaction: true };
 
         await uow.ExecuteInTransactionAsync(async innerCt =>
         {
@@ -188,13 +189,26 @@ public sealed partial class ReopenPeriodHandler(
                 innerCt).ConfigureAwait(false);
 
             await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+
+            // ⛔ F2-02 (аудит R11): черга в базі (MI-02 (в)) — постановка ВСЕРЕДИНІ
+            // транзакції переходу, останнім оператором, як у `PeriodStateJob`
+            // (L2-06): збій постановки відкочує й `Closed → Grace`, і повторний
+            // виклик адміністратора побачить період закритим. Доти постановка йшла
+            // ПІСЛЯ коміту, і її збій лишав `Grace` без задачі: точки, пропущені як
+            // `SkippedPeriodClosed`, не підхоплювала жодна наступна подія.
+            if (enlistMaterialization && requiresMaterialization)
+            {
+                await materialization!
+                    .EnqueueAfterTransitionAsync(projectId, [periodKey], innerCt)
+                    .ConfigureAwait(false);
+            }
         }, ct).ConfigureAwait(false);
 
-        // ⛔ Матеріалізація — ПІСЛЯ коміту (черга не транзакційна): точки,
-        // пропущені поки період був `Closed` (`SkippedPeriodClosed`), інакше
-        // чекали б збору з вікном, що перетинає період, — а для давно минулого
-        // періоду такого вікна не буде ніколи.
-        if (requiresMaterialization && materialization is not null)
+        // ⛔ Матеріалізація — ПІСЛЯ коміту, коли черга поза базою (Quartz у пам'яті,
+        // не транзакційна): точки, пропущені поки період був `Closed`
+        // (`SkippedPeriodClosed`), інакше чекали б збору з вікном, що перетинає
+        // період, — а для давно минулого періоду такого вікна не буде ніколи.
+        if (requiresMaterialization && !enlistMaterialization && materialization is not null)
         {
             await materialization.EnqueueAfterTransitionAsync(projectId, [periodKey], ct).ConfigureAwait(false);
         }

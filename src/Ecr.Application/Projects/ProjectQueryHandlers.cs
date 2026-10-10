@@ -794,14 +794,33 @@ public sealed class ActivateProjectHandler(
                 periodStates.SelectCurrentPeriod(allPeriods)?.Id, now);
         }
 
+        // ⛔ F2-02 (аудит R11): черга в базі (MI-02 (в)) — збереження й постановка
+        // матеріалізації В ОДНІЙ транзакції, постановка останньою (як у
+        // `PeriodStateJob`, L2-06). Доти постановка йшла ПІСЛЯ коміту, і її збій
+        // лишав проєкт `Active` з відкритими періодами, але без задачі: точки PI,
+        // зібрані поки період був `Scheduled`, лишались сирими назавжди.
+        if (materialization is { EnlistsInCallerTransaction: true })
+        {
+            await uow.ExecuteInTransactionAsync(async innerCt =>
+            {
+                await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+                await materialization
+                    .EnqueueAfterTransitionAsync(projectId, toMaterialize, innerCt)
+                    .ConfigureAwait(false);
+            }, ct).ConfigureAwait(false);
+
+            return;
+        }
+
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
 
         // ⛔ Матеріалізація PI для періодів, які перевела сама активація, — ПІСЛЯ
-        // коміту (черга не транзакційна). Точки, зібрані поки проєкт був
-        // чернеткою, а період `Scheduled`, інакше чекали б збору з вікном, що
-        // перетинає період, — а за вимкненого розкладу не дочекалися б ніколи.
-        // Для періодів, що активація одразу закрила, задача лишить
-        // `SkippedPeriodClosed` у журналі покриття замість мовчання.
+        // коміту, коли черга поза базою (Quartz у пам'яті, не транзакційна).
+        // Точки, зібрані поки проєкт був чернеткою, а період `Scheduled`, інакше
+        // чекали б збору з вікном, що перетинає період, — а за вимкненого
+        // розкладу не дочекалися б ніколи. Для періодів, що активація одразу
+        // закрила, задача лишить `SkippedPeriodClosed` у журналі покриття
+        // замість мовчання.
         if (materialization is not null)
         {
             await materialization.EnqueueAfterTransitionAsync(projectId, toMaterialize, ct).ConfigureAwait(false);

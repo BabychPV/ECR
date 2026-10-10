@@ -255,9 +255,84 @@ public sealed class ReopenPeriodTransactionTests(SqlServerFixture sql)
                        .FirstAsync().ConfigureAwait(true));
     }
 
+    /// <remarks>
+    /// ⛔ F2-02 (аудит R11). Черга в базі (<c>EnlistsInCallerTransaction</c>): постановка
+    /// матеріалізації — усередині транзакції переходу. Доти вона йшла після коміту, і її
+    /// збій лишав <c>Grace</c> без задачі. Мутація: повернути постановку після
+    /// <c>ExecuteInTransactionAsync</c> → тест червоний (період <c>Grace</c>, аудит 1).
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "F2-02")]
+    public async Task Збій_постановки_матеріалізації_у_черзі_в_базі_відкочує_відкриття_разом_з_аудитом()
+    {
+        var arranged = await ArrangeAsync(PeriodState.Closed).ConfigureAwait(true);
+
+        var materialization = Substitute.For<IMaterializationScheduler>();
+        materialization.EnlistsInCallerTransaction.Returns(true);
+        materialization.EnqueueAfterTransitionAsync(
+                Arg.Any<int>(), Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromException(new InvalidOperationException("черга недоступна")));
+
+        await using (var db = CreateContext())
+        {
+            var error = await Assert.ThrowsAsync<InvalidOperationException>(
+                () => Handler(new PeriodStore(db), db, new UnitOfWork(db), arranged.ProjectId, materialization: materialization)
+                    .HandleAsync(arranged.PeriodId, "уточнення", Now.AddDays(3), CancellationToken.None))
+                .ConfigureAwait(true);
+            Assert.Equal("черга недоступна", error.Message);
+        }
+
+        // Відкриття відкотилося разом із невдалою постановкою: повтор адміністратора побачить Closed.
+        await using var check = CreateContext();
+        Assert.Equal(
+            PeriodState.Closed,
+            await check.Periods.Where(p => p.Id == arranged.PeriodId).Select(p => p.State)
+                       .FirstAsync().ConfigureAwait(true));
+        Assert.Equal(0, await AuditRowsAsync(arranged.PeriodId).ConfigureAwait(true));
+    }
+
+    /// <remarks>
+    /// F2-02: черга в базі — постановка В транзакції (а не після коміту); черга поза базою
+    /// (Quartz) — ПІСЛЯ коміту, коли транзакції на контексті вже немає.
+    /// </remarks>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "F2-02")]
+    public async Task Матеріалізація_ставиться_в_транзакції_лише_для_черги_в_базі(bool enlists)
+    {
+        var arranged = await ArrangeAsync(PeriodState.Closed).ConfigureAwait(true);
+        await using var db = CreateContext();
+
+        bool? inTransaction = null;
+        var materialization = Substitute.For<IMaterializationScheduler>();
+        materialization.EnlistsInCallerTransaction.Returns(enlists);
+        materialization.EnqueueAfterTransitionAsync(
+                Arg.Any<int>(), Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<CancellationToken>())
+            .Returns(_ =>
+            {
+                inTransaction = db.Database.CurrentTransaction is not null;
+                return Task.CompletedTask;
+            });
+
+        await Handler(new PeriodStore(db), db, new UnitOfWork(db), arranged.ProjectId, materialization: materialization)
+            .HandleAsync(arranged.PeriodId, "уточнення", Now.AddDays(3), CancellationToken.None)
+            .ConfigureAwait(true);
+
+        await materialization.Received(1).EnqueueAfterTransitionAsync(
+            arranged.ProjectId, Arg.Is<IReadOnlyCollection<int>>(k => k.SequenceEqual(new[] { PeriodKeyValue })),
+            Arg.Any<CancellationToken>());
+        Assert.Equal(enlists, inTransaction);
+    }
+
     private ReopenPeriodHandler Handler(
         IPeriodStore periods, EcrDbContext db, IUnitOfWork uow, int projectId,
-        GrantLevel projectGrant = GrantLevel.Manage, IBackgroundJobScheduler? jobs = null)
+        GrantLevel projectGrant = GrantLevel.Manage, IBackgroundJobScheduler? jobs = null,
+        IMaterializationScheduler? materialization = null)
     {
         var access = Substitute.For<IAccessDecisionService>();
         access.BuildProfileAsync(UserId, Arg.Any<CancellationToken>())
@@ -270,7 +345,7 @@ public sealed class ReopenPeriodTransactionTests(SqlServerFixture sql)
         user.UserId.Returns(UserId);
 
         return new ReopenPeriodHandler(
-            periods, access, uow, new AuditWriter(db), user, new TestClock(Now), jobs: jobs);
+            periods, access, uow, new AuditWriter(db), user, new TestClock(Now), materialization, jobs);
     }
 
     /// <summary>Скільки записів «Reopen» про цей період лежить у журналі.</summary>
