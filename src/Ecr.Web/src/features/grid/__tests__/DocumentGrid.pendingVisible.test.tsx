@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ColumnDto, TableSliceDto } from '@/api/types';
 import { cancelAutosave, holdRejectedEdits, resetFailedSaves } from '../autosave';
+import { resetConfirmed } from '../confirmedEdits';
 import { putPendingEdit, resetPending } from '../pendingStore';
 import { DocumentGrid } from '../DocumentGrid';
 import type { PendingEdit } from '../useCellPatch';
@@ -23,8 +24,28 @@ vi.mock('../autosave', async (importOriginal) => {
 });
 
 vi.mock('@revolist/react-datagrid', () => ({
-  RevoGrid: (props: { source?: Record<string, unknown>[] }) => (
+  RevoGrid: (props: {
+    source?: Record<string, unknown>[];
+    onBeforeedit?: (event: { detail: unknown; preventDefault: () => void }) => void;
+    onAfteredit?: (event: { detail: unknown }) => void;
+  }) => (
     <div data-testid="revogrid-stub">
+      <button
+        type="button"
+        onClick={() => {
+          const detail = { prop: 'C1', model: { __rowKey: 'r1' }, val: '5' };
+          let prevented = false;
+          props.onBeforeedit?.({
+            detail,
+            preventDefault: () => {
+              prevented = true;
+            },
+          });
+          if (!prevented) props.onAfteredit?.({ detail });
+        }}
+      >
+        edit-r1
+      </button>
       {(props.source ?? []).map((row) => (
         <span key={String(row['__rowKey'])} data-testid={`value-${String(row['__rowKey'])}`}>
           {String(row['C1'] ?? '')}
@@ -52,9 +73,11 @@ function column(): ColumnDto {
   };
 }
 
+let confirmations: Record<string, string> = {};
+
 function sliceFixture(): TableSliceDto {
   return {
-    cellConfirmations: {},
+    cellConfirmations: confirmations,
     cellPermissions: {},
     periodKey: 202609,
     tableInstanceId: 1,
@@ -108,6 +131,8 @@ function show(): void {
 const unsaved: PendingEdit = { rowKey: 'r2', columnCode: 'C1', value: 7, isEmpty: false, baseVersion: 'v1', before: 2 };
 
 afterEach(() => {
+  confirmations = {};
+  resetConfirmed();
   cancelAutosave();
   resetFailedSaves();
   resetPending();
@@ -143,5 +168,28 @@ describe('DocumentGrid: незбережене видно в сітці (G1-04)'
 
     await screen.findByTestId('value-r2');
     expect(screen.queryByTestId('grid-retry-save')).toBeNull();
+  });
+
+  /*
+   * ⛔ X2-02: підтверджена підстава (`overrides`) перекривала НОВІШУ незбережену правку тієї
+   * самої комірки (вставка й Undo/Redo пишуть у сховище повз неї): «підтвердив 5 → вставив 7»
+   * показувало 5, хоча піде 7.
+   */
+  it('підтверджене 5, потім незбережене 7 тієї самої комірки → на екрані 7, а не 5', async () => {
+    confirmations = { 'r1:C1': 'Outside the permit window' };
+    mockServer();
+    show();
+
+    await screen.findByTestId('value-r1');
+    fireEvent.click(screen.getByRole('button', { name: 'edit-r1' }));
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: /grid\.confirmProceed|Proceed/ }));
+    await waitFor(() => expect(screen.getByTestId('value-r1').textContent).toBe('5'));
+
+    act(() => {
+      putPendingEdit(1, 202609, { rowKey: 'r1', columnCode: 'C1', value: 7, isEmpty: false, baseVersion: 'v0', before: 5 });
+    });
+
+    await waitFor(() => expect(screen.getByTestId('value-r1').textContent).toBe('7'));
   });
 });

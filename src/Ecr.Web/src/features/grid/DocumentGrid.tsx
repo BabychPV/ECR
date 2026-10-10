@@ -1185,6 +1185,11 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
     if (rejections.size === 0 && pending.size === 0) return overrides;
 
     const merged = new Map(overrides);
+    // ⛔ X2-02: незбережена правка — НОВІША за підтверджену підставу: підстава ставиться
+    // лише при підтвердженні одиничної правки/протягування, а вставка й Undo/Redo
+    // пишуть у сховище повз неї. Тут стояло `if (!merged.has(key))`, і після
+    // «підтвердив 5 → вставив 7» екран показував 5, хоча піде 7 (суми колонок
+    // — `gridTotals` — вже віддавали перевагу правці, тож екран і підсумок розходились).
     for (const edit of pending.values()) {
       const key = cellKey(edit.rowKey, edit.columnCode);
       if (!merged.has(key)) merged.set(key, edit.isEmpty || edit.value === null ? '' : edit.value);
