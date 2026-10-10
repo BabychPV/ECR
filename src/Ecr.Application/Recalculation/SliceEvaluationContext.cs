@@ -1,4 +1,5 @@
 using Ecr.Application.Ports;
+using Ecr.Application.Sources;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Services;
@@ -316,15 +317,14 @@ public sealed class SliceEvaluationContext : IBudgetedEvaluationContext
 
         try
         {
-            var converted = Converter.Convert(
-                numeric.Value,
-                new UnitSpec(from.Id, from.Code, from.DimensionId, from.FactorToBase, from.OffsetToBase),
-                new UnitSpec(to.Id, to.Code, to.DimensionId, to.FactorToBase, to.OffsetToBase),
-                explicitConversion: null);
+            // ⛔ Z2-05: та сама арифметика, що на межі інтеграції й у `POST /units/convert`
+            // (`BoundaryUnitConversion.Convert` над доменним `UnitConverter`): швидкість у швидкість - через
+            // чисельник і знаменник, а не через заокруглений `FactorToBase` (`1 Sm3/s` → `3599.99…712`).
+            var converted = BoundaryUnitConversion.Convert(numeric.Value, from.Id, to.Id, _units, Converter);
 
             return ExpressionValue.Number(converted);
         }
-        catch (DomainException)
+        catch (Exception ex) when (ex is DomainException or Errors.EcrException)
         {
             // ⛔ Різні розмірності — те саме `#UNIT`, яке відмова видавала й
             // раніше. Різниця в тому, що ТЕПЕР до цього коду доходять лише

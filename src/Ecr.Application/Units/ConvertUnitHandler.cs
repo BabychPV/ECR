@@ -2,6 +2,8 @@
 using Ecr.Application.Common;
 using Ecr.Application.Errors;
 using Ecr.Application.Ports;
+using Ecr.Application.Sources;
+using Ecr.Domain.Abstractions;
 
 namespace Ecr.Application.Units;
 
@@ -38,53 +40,20 @@ public sealed class ConvertUnitHandler(IUnitCatalog catalog)
         var from = Resolve(catalogue, fromUnit);
         var to = Resolve(catalogue, toUnit);
 
-        // ⛔ Різні розмірності — ВІДМОВА, а не пошук шляху «через базу». Маса в
-        // об'єм не переводиться без щільності, а щільність залежить від
-        // речовини й умов: це константа методології, не конверсія (ФВ-16.3,
-        // ФВ-16.5). Дозволити тут означало б, що те саме число перетворюється
-        // по-різному залежно від того, хто заповнив довідник.
-        if (from.DimensionId != to.DimensionId)
+        // ⛔ Z2-05: уся арифметика й усі відмови - ті самі, що на межі інтеграції й у `CONVERT` виразів
+        // (`BoundaryUnitConversion.Convert` над доменним `UnitConverter`): різні розмірності - ВІДМОВА, а не пошук
+        // шляху «через базу» (маса в об'єм не переводиться без щільності - це константа методології, ФВ-16.3,
+        // ФВ-16.5); нульовий множник ЛЮБОЇ з одиниць - відмова, а не константа `(value × 0) + offset`; швидкість у
+        // швидкість - через чисельник і знаменник, а не через заокруглений `FactorToBase` (`1 Sm3/s` →
+        // `3599.99…712` замість `3600`). Власна копія формули тут розходилася б із ними тихо: кожна дає число.
+        try
         {
-            throw new BusinessRuleException(
-                "ECR-UOM-0422",
-                $"Конверсія {fromUnit} → {toUnit} неможлива: різні розмірності "
-                + $"({from.DimensionId} і {to.DimensionId}). Потрібен контекстний коефіцієнт, "
-                + "а він належить методології, не довіднику одиниць.",
-                new Dictionary<string, object?>
-                {
-                    // Заголовок коду нейтральний — причину каже messageKey.
-                    ["messageKey"] = "err.ECR-UOM-0422.incompatibleDimensions",
-                    ["from"] = fromUnit,
-                    ["to"] = toUnit,
-                });
+            return BoundaryUnitConversion.Convert(value, from.Id, to.Id, catalogue);
         }
-
-        // ⛔ Захист СИМЕТРИЧНИЙ. Перевіряти лише `to` було тихо неправильним
-        // числом: при `from.FactorToBase == 0` вираз `(value * 0) + offset`
-        // згортається до КОНСТАНТИ `from.OffsetToBase` незалежно від `value` —
-        // кожне вхідне значення конвертується в те саме число, без помилки, і
-        // це число потрапляє в поданий регуляторний звіт.
-        if (from.FactorToBase == 0m)
+        catch (DomainException ex)
         {
-            throw new BusinessRuleException(
-                "ECR-UOM-0422",
-                $"Одиниця {fromUnit} має нульовий множник переходу до бази: конверсія неможлива.",
-                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-UOM-0422.zeroFactor", ["code"] = fromUnit });
+            throw new BusinessRuleException(ex.ErrorCode, ex.Message, ex.Details);
         }
-
-        if (to.FactorToBase == 0m)
-        {
-            throw new BusinessRuleException(
-                "ECR-UOM-0422",
-                $"Одиниця {toUnit} має нульовий множник переходу до бази: конверсія неможлива.",
-                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-UOM-0422.zeroFactor", ["code"] = toUnit });
-        }
-
-        // Маршрут через базову одиницю. Зсув потрібен лише температурі, але
-        // формула єдина: для решти OffsetToBase дорівнює нулю, і жодного
-        // окремого випадку не з'являється. Уся арифметика в decimal (D-30).
-        var inBase = (value * from.FactorToBase) + from.OffsetToBase;
-        return (inBase - to.OffsetToBase) / to.FactorToBase;
     }
 
     private static UnitRef Resolve(UnitCatalogSnapshot catalogue, string code)

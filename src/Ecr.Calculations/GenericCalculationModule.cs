@@ -696,6 +696,22 @@ public sealed class GenericCalculationModule(
             codes.TryAdd(unit.Id, unit.Code);
         }
 
+        // ⛔ Z2-05: похідні одиниці (швидкості) - зі своїми чисельником і знаменником, щоб `CONVERT` швидкості у
+        // швидкість не ішов через заокруглений `FactorToBase` (`Sm3_per_h` = 1/3600 до 18 знаків).
+        foreach (var (key, unitId) in snapshot.Derived)
+        {
+            var bar = key.IndexOf('|', StringComparison.Ordinal);
+            if (bar > 0
+                && int.TryParse(key.AsSpan(0, bar), System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var numeratorId)
+                && int.TryParse(key.AsSpan(bar + 1), System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var denominatorId)
+                && codes.TryGetValue(unitId, out var rateCode)
+                && codes.TryGetValue(numeratorId, out var numeratorCode)
+                && codes.TryGetValue(denominatorId, out var denominatorCode))
+            {
+                table.AddRate(rateCode, numeratorCode, denominatorCode);
+            }
+        }
+
         _unitCodes = codes;
         _units = table;
         return table;
