@@ -1,6 +1,7 @@
 import type { JSX } from 'react';
 import { Badge, Group, Text } from '@mantine/core';
 import { t } from '@/shared/i18n';
+import { formatDecimal as formatLocalized } from '@/shared/format/number';
 import { formatDecimal, sumDecimals, withinTolerance, type ChildSumRule } from './composition';
 import type { PendingRow } from './pendingRows';
 
@@ -34,6 +35,15 @@ export function sumState(rule: ChildSumRule, rows: readonly PendingRow[]): SumSt
   };
 }
 
+/**
+ * Число для ПОДАННЯ мовою інтерфейсу (AN-40b): `sumState` рахує й повертає інваріантний запис (`99.8`), а
+ * речення «Σ … = …» у ru/kz мусить мати кому, як сітка й решта екранів (`shared/format/number`). Не число —
+ * як є: ціль із правила могла бути записана довільно.
+ */
+function shown(invariant: string): string {
+  return formatLocalized(invariant) ?? invariant;
+}
+
 /** Рядок «Σ поле = … · ціль … ± …» під панеллю частин. */
 export function SumIndicator({
   rule,
@@ -47,10 +57,10 @@ export function SumIndicator({
   return (
     <Group gap="xs" data-rc816-sum={rule.code} role="status">
       <Text size="sm" fw={600}>
-        {t('registries.rc816.sum', { field: rule.field, sum: state.sum })}
+        {t('registries.rc816.sum', { field: rule.field, sum: shown(state.sum) })}
       </Text>
       <Text size="sm" c="dimmed">
-        {t('registries.rc816.sumTarget', { target: rule.target, tolerance: rule.tolerance })}
+        {t('registries.rc816.sumTarget', { target: shown(rule.target), tolerance: shown(rule.tolerance) })}
       </Text>
       {state.ok === true && (
         <Badge color="statusSuccess" variant="light">
