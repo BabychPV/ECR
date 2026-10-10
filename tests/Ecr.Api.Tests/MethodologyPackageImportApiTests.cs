@@ -196,6 +196,8 @@ public sealed class MethodologyPackageImportApiTests(SqlServerFixture sql)
         var response = await client.PostAsync(new Uri("/api/v1/methodologies/import?dryRun=true", UriKind.Relative), body)
             .ConfigureAwait(true);
 
+        // ⛔ 403, а не 400 розбору: відмова за правом настала ДО читання тіла.
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
         await JsonAsync(response, HttpStatusCode.Forbidden).ConfigureAwait(true);
     }
 
