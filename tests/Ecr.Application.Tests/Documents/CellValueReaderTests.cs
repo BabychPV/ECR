@@ -208,6 +208,49 @@ public sealed class CellValueReaderTests
         Assert.Equal("err.ECR-CELL-0422.expectsDate", error.Details?["messageKey"]);
     }
 
+    [Theory]
+    [InlineData("01 04 2024")]
+    [InlineData("1 4 2024")]
+    [InlineData("1,4,2024")]
+    [InlineData("12 4 2024")]
+    [InlineData("01 - 04 - 2024")]
+    [InlineData("1. 4. 2024")]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Finding", "V8-01")]
+    public void Дата_з_днем_спереду_через_пробіл_чи_кому_відхиляється_а_не_читається_M_d(string wire)
+    {
+        // ⛔ V8-01 (аудит 10). `ClosedToFallback` закривав фолбек Invariant лише за `.`/`-`
+        // після 1–2 цифр: `01 04 2024` і `1,4,2024` ставали 4 січня, `12 4 2024` — 4 грудня,
+        // а `13 4 2024` у тій самій колонці відхилявся.
+        // Мутація: повернути умову `trimmed[digits] is '.' or '-'` — значення лягає в
+        // ValueDate переставленим, і `Throws` падає.
+        var error = Assert.Throws<BusinessRuleException>(
+            () => CellValueReader.Read(FromWire(wire), Column(CellDataType.Date)));
+
+        Assert.Equal("ECR-CELL-0422", error.ErrorCode);
+        Assert.Equal(CellValueReader.AmbiguousDateMessageKey, error.Details?["messageKey"]);
+    }
+
+    [Theory]
+    [InlineData("1-Apr-24", 2024, 4, 1)]
+    [InlineData("01-Apr-2024", 2024, 4, 1)]
+    [InlineData("15-Jan-2024", 2024, 1, 15)]
+    [InlineData("01.Apr.2024", 2024, 4, 1)]
+    [InlineData("1 Apr 2024", 2024, 4, 1)]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Finding", "V8-04")]
+    public void Дата_з_назвою_місяця_і_днем_спереду_читається_однозначно(string wire, int year, int month, int day)
+    {
+        // ⛔ V8-04 (аудит 10). Після Z3-01 `1-Apr-24` (вбудований формат Excel `d-mmm-yy`)
+        // відхилявся з поясненням «порядок дня й місяця не визначити», хоча назва місяця
+        // робить порядок однозначним. Фолбек закрито лише тоді, коли після роздільника — цифра.
+        // Мутація: прибрати перевірку `char.IsAsciiDigit(trimmed[next])` — відмова повертається.
+        var data = CellValueReader.Read(FromWire(wire), Column(CellDataType.Date));
+
+        Assert.NotNull(data);
+        Assert.Equal(new DateTime(year, month, day, 0, 0, 0, DateTimeKind.Utc), data.ValueDate);
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
     public void Довідникова_комірка_тримає_ідентифікатор_а_не_число()
