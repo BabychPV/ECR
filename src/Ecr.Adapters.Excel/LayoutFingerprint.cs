@@ -16,11 +16,22 @@ namespace Ecr.Adapters.Excel;
 /// праворуч від колонок даних) і заголовка кожної колонки, а імпорт звіряє їх із
 /// книгою: розбіжність — відмова всієї таблиці (<see cref="ImportMessageKeys.LayoutChanged"/>).
 ///
-/// ⚠ Межі, названі чесно. (1) Рядки з ОДНАКОВИМ підписом, переставлені між собою, не
-/// ловляться: їх нічим відрізнити. Підпис без опису рядка — ключ рядка, він
-/// унікальний. (2) Сортування лише стовпців даних без стовпця підписів (Excel
-/// за замовчуванням пропонує розширити виділення) теж не ловиться. (3) Книга без
-/// відбитків (вивантажена до цієї правки) звіряється як раніше — ніяк.
+/// ⛔ V7-01: підписи на місці ще не означають, що на місці значення. Сортування лише
+/// стовпців даних без стовпця підписів (Excel це дозволяє, якщо не розширити виділення)
+/// і перестановка рядків з ОДНАКОВИМ підписом лишають підписи як були. Тому після
+/// підписів звіряються відбитки введених комірок (<see cref="ExcelRowRef.Cells"/>):
+/// якщо серед змінених рядків є цикл «рядок A тепер має те, що на експорті мав B,
+/// B — те, що мав C, …, — те, що мав A», значення переставлено, а не виправлено —
+/// відмова таблиці. Цикл, а не рівність усього набору, — щоб одночасна правка
+/// іншого рядка не ховала перестановку. Копія рядка в інший (джерело не змінилося)
+/// циклу не дає — хибної відмови немає. Свідомий обмін значеннями двох рядків теж
+/// відмовляється: безпечний бік, такий обмін можна внести двома імпортами чи в сітці.
+///
+/// ⚠ Межі, названі чесно. (1) Перестановка, у якій КОЖЕН переставлений рядок ще й
+/// виправлено, циклу не дає і не ловиться. (2) Книга без відбитків (вивантажена до
+/// Y5-01 / AN-118) звіряється як раніше — ніяк. (3) Рядки, що на експорті мали
+/// однакові значення, між собою не розрізняються — але й перестановка їх нічого не
+/// зсуває.
 ///
 /// ⚠ Правило відбитка — <see cref="CalculatedCellFingerprint.Of"/> (16 біт на комірку):
 /// колізія на одному рядку можлива (1/65 536), але перестановка зачіпає щонайменше
@@ -96,6 +107,100 @@ public static class LayoutFingerprint
                 if (!string.Equals(label, CalculatedCellFingerprint.Of(cell), StringComparison.Ordinal))
                 {
                     return (row.RowKey, null, cell.Address.ToString() ?? string.Empty);
+                }
+            }
+        }
+
+        return PermutedRow(worksheet, block);
+    }
+
+    /// <summary>
+    /// V7-01: перший рядок циклу перестановки значень серед рядків, чиї введені комірки
+    /// змінено після експорту; <c>null</c> — циклу немає (або відбитків комірок немає).
+    /// </summary>
+    private static (string? RowKey, string? ColumnCode, string Address)? PermutedRow(
+        IXLWorksheet worksheet, ExcelTableBlock block)
+    {
+        var firstEntered = block.Columns.FirstOrDefault(c => !c.IsCalculated);
+
+        if (firstEntered is null)
+        {
+            return null;
+        }
+
+        var changed = new List<(ExcelRowRef Row, string Stored, string Now)>();
+
+        foreach (var row in block.Rows)
+        {
+            if (row.Cells is { } stored
+                && EnteredCellFingerprint.OfRow(worksheet, block.Columns, row.Number) is { } now
+                && !string.Equals(stored, now, StringComparison.Ordinal))
+            {
+                changed.Add((row, stored, now));
+            }
+        }
+
+        if (changed.Count < 2)
+        {
+            return null;
+        }
+
+        // Ребро i → j: рядок i тепер має те, що на експорті мав рядок j (j ≠ i, бо в i
+        // книга ≠ експорт). Цикл у цьому графі — значення переставлено.
+        var byStored = new Dictionary<string, List<int>>(StringComparer.Ordinal);
+
+        for (var i = 0; i < changed.Count; i++)
+        {
+            if (!byStored.TryGetValue(changed[i].Stored, out var bucket))
+            {
+                bucket = [];
+                byStored[changed[i].Stored] = bucket;
+            }
+
+            bucket.Add(i);
+        }
+
+        var empty = new List<int>();
+        var state = new byte[changed.Count]; // 0 — не відвідано, 1 — на стеку, 2 — завершено.
+
+        for (var start = 0; start < changed.Count; start++)
+        {
+            if (state[start] != 0)
+            {
+                continue;
+            }
+
+            // Ітеративний DFS: глибина графа — кількість рядків таблиці, рекурсія тут зайва.
+            var stack = new Stack<(int Node, int Edge)>();
+            stack.Push((start, 0));
+            state[start] = 1;
+
+            while (stack.Count > 0)
+            {
+                var (node, edge) = stack.Pop();
+                var targets = byStored.GetValueOrDefault(changed[node].Now) ?? empty;
+
+                if (edge < targets.Count)
+                {
+                    stack.Push((node, edge + 1));
+                    var next = targets[edge];
+
+                    if (state[next] == 1)
+                    {
+                        var row = changed[next].Row;
+                        return (row.RowKey, null,
+                            worksheet.Cell(row.Number, firstEntered.Number).Address.ToString() ?? string.Empty);
+                    }
+
+                    if (state[next] == 0)
+                    {
+                        state[next] = 1;
+                        stack.Push((next, 0));
+                    }
+                }
+                else
+                {
+                    state[node] = 2;
                 }
             }
         }

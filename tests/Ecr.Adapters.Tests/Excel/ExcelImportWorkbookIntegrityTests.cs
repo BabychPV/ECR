@@ -263,8 +263,8 @@ public sealed class ExcelImportWorkbookIntegrityTests
     [Trait("Finding", "Y5-01")]
     public async Task Книга_без_відбитків_розкладки_читається_як_раніше()
     {
-        // ⚠ Сумісність: книги, вивантажені до Y5-01, не мають `label`/`header` у карті.
-        // Їх не відмовляють — звірки просто немає (тож перестановка проходить, як і доти).
+        // ⚠ Сумісність: книги, вивантажені до Y5-01 і AN-118, не мають `label`/`header`/`cells`
+        // у карті. Їх не відмовляють — звірки просто немає (тож перестановка проходить, як і доти).
         using var workbook = await ExportAsync();
         StripLayoutFingerprints(workbook);
         SwapRows(workbook.Worksheet(SheetName), 3, 5);
@@ -273,6 +273,65 @@ public sealed class ExcelImportWorkbookIntegrityTests
 
         Assert.DoesNotContain(preview.Rejected, r => r.MessageKey == ImportMessageKeys.LayoutChanged);
         Assert.Equal(2, preview.Changes.Count);
+    }
+
+    // ── V7-01 ────────────────────────────────────────────────────────────────
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "V7-01")]
+    public async Task Переставлені_лише_дані_без_стовпця_підписів_дають_відмову_таблиці()
+    {
+        using var workbook = await ExportAsync();
+        SwapData(workbook.Worksheet(SheetName), 3, 5);
+
+        // ⛔ Мутація: `FirstMismatch` повертає `null` замість `PermutedRow(...)` — підписи
+        // в D на місці, і перегляд дає дві правдоподібні зміни (R1 · N: 10 → 30, R3 · N: 30 → 10).
+        var preview = await ImportAsync(workbook);
+
+        Assert.Empty(preview.Changes);
+        var rejection = Assert.Single(preview.Rejected);
+        Assert.Equal("ECR-IMP-0422", rejection.ReasonCode);
+        Assert.Equal(ImportMessageKeys.LayoutChanged, rejection.MessageKey);
+        Assert.Equal("R1", rejection.RowKey);
+        Assert.Equal("A3", rejection.ExcelCell);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "V7-01")]
+    public async Task Перестановка_даних_разом_із_правкою_іншого_рядка_все_одно_дає_відмову()
+    {
+        // Цикл, а не рівність усього набору змінених рядків: правка R2 не ховає обмін R1 ↔ R3.
+        using var workbook = await ExportAsync();
+        var sheet = workbook.Worksheet(SheetName);
+        SwapData(sheet, 3, 5);
+        sheet.Cell(4, 1).Value = 99;
+
+        var preview = await ImportAsync(workbook);
+
+        Assert.Empty(preview.Changes);
+        Assert.Single(preview.Rejected, r => r.MessageKey == ImportMessageKeys.LayoutChanged);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "V7-01")]
+    public async Task Скопійований_рядок_не_дає_відмови_розкладки()
+    {
+        // Контроль хибної відмови: копія R1 у R2 (джерело не змінилося) — звичайна правка.
+        using var workbook = await ExportAsync();
+        var sheet = workbook.Worksheet(SheetName);
+        for (var column = 1; column <= 3; column++)
+        {
+            sheet.Cell(4, column).Value = sheet.Cell(3, column).Value;
+        }
+
+        var preview = await ImportAsync(workbook);
+
+        Assert.DoesNotContain(preview.Rejected, r => r.MessageKey == ImportMessageKeys.LayoutChanged);
+        var change = Assert.Single(preview.Changes);
+        Assert.Equal("R2", change.RowKey);
     }
 
     // ── Y5-03 ────────────────────────────────────────────────────────────────
@@ -403,12 +462,23 @@ public sealed class ExcelImportWorkbookIntegrityTests
         }
     }
 
+    private static void SwapData(IXLWorksheet sheet, int first, int second)
+    {
+        // Лише колонки даних A…C; стовпець підписів D лишається на місці (V7-01).
+        for (var column = 1; column <= 3; column++)
+        {
+            var a = sheet.Cell(first, column).Value;
+            sheet.Cell(first, column).Value = sheet.Cell(second, column).Value;
+            sheet.Cell(second, column).Value = a;
+        }
+    }
+
     private static void StripLayoutFingerprints(XLWorkbook workbook)
     {
         var map = workbook.Worksheet(ExcelWorkbookMap.SheetName);
         var json = string.Concat(map.CellsUsed().OrderBy(c => c.Address.RowNumber).Select(c => c.GetString()));
         var stripped = System.Text.RegularExpressions.Regex.Replace(
-            json, ",\"(label|header)\":\"[0-9a-f]*\"", string.Empty);
+            json, ",\"(label|header|cells)\":\"[0-9a-f]*\"", string.Empty);
         Assert.NotEqual(json, stripped);
         map.Clear();
         map.Cell(1, 1).Value = stripped;
