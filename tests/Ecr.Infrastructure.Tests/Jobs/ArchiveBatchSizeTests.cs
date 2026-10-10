@@ -252,6 +252,18 @@ public sealed class ArchiveBatchSizeTests(SqlServerFixture sql)
             END
             """);
 
+        // ⚠ Z6-01: при збої процедура сама прибирає часткову копію з doc.*. Цей тест — про ІНШИЙ
+        // випадок (V8-02): прибирання теж не вдалося, і часткова копія лишилася. Імітуємо збій
+        // прибирання — інакше гаряча схема порожня і шлях читача «є гаряча частина» не перевіряється.
+        await ExecuteAsync($"""
+            CREATE TRIGGER doc.TR_RestoreCleanupFailTest ON doc.CellValue AFTER DELETE AS
+            BEGIN
+                SET NOCOUNT ON;
+                IF EXISTS (SELECT 1 FROM deleted WHERE PeriodKey = {period})
+                    THROW 50998, N'Штучний збій прибирання часткової копії (тест).', 1;
+            END
+            """);
+
         try
         {
             await Assert.ThrowsAsync<SqlException>(() => ExecuteAsync(
@@ -261,6 +273,7 @@ public sealed class ArchiveBatchSizeTests(SqlServerFixture sql)
         finally
         {
             await ExecuteAsync("DROP TRIGGER doc.TR_RestorePartialReadTest;");
+            await ExecuteAsync("DROP TRIGGER doc.TR_RestoreCleanupFailTest;");
         }
 
         // Передумова: у гарячій схемі справді частина комірок екземпляра, архів цілий.
