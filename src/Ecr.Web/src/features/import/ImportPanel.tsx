@@ -684,6 +684,10 @@ function rejectionText(rejection: ImportRejection): string {
     // ⛔ Y5-04: аркуш таблиці перейменовано або видалено в Excel — відмова таблиці, а не 500.
     case 'err.ECR-IMP-0422.importSheetMissing':
       return t('err.ECR-IMP-0422.importSheetMissing');
+    // ⛔ Y5-01: рядки чи колонки таблиці в Excel відсортовано, вставлено чи видалено —
+    // значення лягли б у чужі рядки, тож таблицю відхилено цілком.
+    case 'err.ECR-IMP-0422.importLayoutChanged':
+      return t('err.ECR-IMP-0422.importLayoutChanged');
     // ⛔ F-06: відмова типу — у перегляді, а не 422 на Apply.
     case 'err.ECR-CELL-0422.importExpectsNumber':
       return t('err.ECR-CELL-0422.importExpectsNumber');

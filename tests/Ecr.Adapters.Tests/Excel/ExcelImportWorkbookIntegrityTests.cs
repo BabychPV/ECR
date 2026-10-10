@@ -189,6 +189,89 @@ public sealed class ExcelImportWorkbookIntegrityTests
         Assert.NotEqual("@", sheet.Cell(3, 1).Style.NumberFormat.Format);
     }
 
+    // ── Y5-01 ────────────────────────────────────────────────────────────────
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "Y5-01")]
+    public async Task Незмінена_книга_не_дає_відмови_розкладки()
+    {
+        // Контроль: відбитки підписів і заголовків збігаються самі з собою.
+        using var workbook = await ExportAsync();
+
+        var preview = await ImportAsync(workbook);
+
+        Assert.Empty(preview.Changes);
+        Assert.Empty(preview.Rejected);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "Y5-01")]
+    public async Task Відсортовані_рядки_дають_відмову_таблиці_а_не_переставлені_значення()
+    {
+        using var workbook = await ExportAsync();
+        SwapRows(workbook.Worksheet(SheetName), 3, 5);
+
+        // ⛔ Мутація: прибрати звірку `LayoutFingerprint.FirstMismatch` у `Build` —
+        // перегляд дає дві правдоподібні зміни (R1 · N: 10 → 30, R3 · N: 30 → 10).
+        var preview = await ImportAsync(workbook);
+
+        Assert.Empty(preview.Changes);
+        var rejection = Assert.Single(preview.Rejected);
+        Assert.Equal("ECR-IMP-0422", rejection.ReasonCode);
+        Assert.Equal(ImportMessageKeys.LayoutChanged, rejection.MessageKey);
+        Assert.Equal("R1", rejection.RowKey);
+        Assert.Equal("D3", rejection.ExcelCell);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "Y5-01")]
+    public async Task Видалений_рядок_дає_відмову_таблиці_а_не_стерте_значення()
+    {
+        using var workbook = await ExportAsync();
+        workbook.Worksheet(SheetName).Row(3).Delete();
+
+        var preview = await ImportAsync(workbook);
+
+        Assert.Empty(preview.Changes);
+        Assert.Contains(preview.Rejected, r => r.MessageKey == ImportMessageKeys.LayoutChanged);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "Y5-01")]
+    public async Task Вставлена_колонка_дає_відмову_за_заголовком()
+    {
+        using var workbook = await ExportAsync();
+        workbook.Worksheet(SheetName).Column(1).InsertColumnsBefore(1);
+
+        var preview = await ImportAsync(workbook);
+
+        Assert.Empty(preview.Changes);
+        var layout = Assert.Single(preview.Rejected, r => r.MessageKey == ImportMessageKeys.LayoutChanged);
+        Assert.Equal("N", layout.ColumnCode);
+        Assert.Equal("A2", layout.ExcelCell);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "Y5-01")]
+    public async Task Книга_без_відбитків_розкладки_читається_як_раніше()
+    {
+        // ⚠ Сумісність: книги, вивантажені до Y5-01, не мають `label`/`header` у карті.
+        // Їх не відмовляють — звірки просто немає (тож перестановка проходить, як і доти).
+        using var workbook = await ExportAsync();
+        StripLayoutFingerprints(workbook);
+        SwapRows(workbook.Worksheet(SheetName), 3, 5);
+
+        var preview = await ImportAsync(workbook);
+
+        Assert.DoesNotContain(preview.Rejected, r => r.MessageKey == ImportMessageKeys.LayoutChanged);
+        Assert.Equal(2, preview.Changes.Count);
+    }
+
     // ── Стенд ────────────────────────────────────────────────────────────────
 
     private void Number(long rowId, decimal value)
@@ -198,6 +281,27 @@ public sealed class ExcelImportWorkbookIntegrityTests
     private void Text(long rowId, string value)
         => _slice.Add(new CellRecord(
             new CellAddress(Period, rowId, TextColumnId), TableId, new CellValueData { ValueString = value }));
+
+    private static void SwapRows(IXLWorksheet sheet, int first, int second)
+    {
+        for (var column = 1; column <= 4; column++)
+        {
+            var a = sheet.Cell(first, column).Value;
+            sheet.Cell(first, column).Value = sheet.Cell(second, column).Value;
+            sheet.Cell(second, column).Value = a;
+        }
+    }
+
+    private static void StripLayoutFingerprints(XLWorkbook workbook)
+    {
+        var map = workbook.Worksheet(ExcelWorkbookMap.SheetName);
+        var json = string.Concat(map.CellsUsed().OrderBy(c => c.Address.RowNumber).Select(c => c.GetString()));
+        var stripped = System.Text.RegularExpressions.Regex.Replace(
+            json, ",\"(label|header)\":\"[0-9a-f]*\"", string.Empty);
+        Assert.NotEqual(json, stripped);
+        map.Clear();
+        map.Cell(1, 1).Value = stripped;
+    }
 
     private async Task<XLWorkbook> ExportAsync()
     {

@@ -85,6 +85,27 @@ public sealed class ImportDiffBuilder
 
         var period = new PeriodKey(periodKey);
 
+        // ⛔ Y5-01 (аудит 7): карта тримає ПОЗИЦІЇ рядків і колонок. Сортування,
+        // вставка чи видалення рядка або колонки в Excel їх зсуває, і значення лягли б
+        // у чужі рядки — зміною, що виглядає як звичайна правка. Розбіжність підпису
+        // рядка чи заголовка колонки з відбитком експорту — відмова ВСІЄЇ таблиці, без
+        // жодної зміни. Межі звірки — у `LayoutFingerprint`.
+        if (LayoutFingerprint.FirstMismatch(worksheet, block) is { } moved)
+        {
+            return new TableDiff(
+                block.TableInstanceId,
+                periodKey,
+                [],
+                [
+                    new ImportRejection(
+                        moved.RowKey ?? "—", moved.ColumnCode ?? "—", "ECR-IMP-0422",
+                        "Rows or columns of the table were sorted, inserted, deleted or relabelled in Excel after export: the table is not imported.",
+                        table.Code, table.NameL10n, ImportMessageKeys.LayoutChanged, moved.Address),
+                ],
+                versions,
+                []);
+        }
+
         var byRowId = rowIds.ToDictionary(p => p.Value, p => p.Key);
 
         // ⚠ Комірки рядків поза переліком ключів відкидаються, а не зводяться
@@ -876,6 +897,12 @@ public static class ImportMessageKeys
     /// Аркуша таблиці в книзі немає: його перейменовано або видалено після експорту (Y5-04).
     /// </summary>
     public const string SheetMissing = "err.ECR-IMP-0422.importSheetMissing";
+
+    /// <summary>
+    /// Підписи рядків чи заголовки колонок таблиці не збігаються з експортом: рядки чи
+    /// колонки в Excel відсортовано, вставлено, видалено або перейменовано (Y5-01).
+    /// </summary>
+    public const string LayoutChanged = "err.ECR-IMP-0422.importLayoutChanged";
 
     /// <summary>
     /// У таблиці книги змін більше за <see cref="ImportDiffBuilder.MaxChanges"/> —

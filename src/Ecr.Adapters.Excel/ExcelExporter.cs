@@ -1016,14 +1016,16 @@ public sealed class ExcelExporter(
 
             var worksheet = workbook.Worksheet(block.SheetName);
 
-            return block with
+            // ⛔ Y5-01: відбитки підписів рядків і заголовків колонок — імпорт звіряє з ними,
+            // чи не відсортовано, не вставлено й не видалено рядки чи колонки в Excel.
+            return LayoutFingerprint.Stamp(worksheet, block with
             {
                 Rows = [.. block.Rows.Select(row => row with
                 {
                     Calc = hasCalculated ? CalculatedCellFingerprint.OfRow(worksheet, block.Columns, row.Number) : null,
                     Cells = hasEntered ? EnteredCellFingerprint.OfRow(worksheet, block.Columns, row.Number) : null,
                 })],
-            };
+            });
         })];
 
     /// <summary>Чи рахує комірки цієї колонки система.</summary>

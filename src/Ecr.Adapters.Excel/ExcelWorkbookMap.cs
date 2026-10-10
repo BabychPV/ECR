@@ -5,9 +5,12 @@ namespace Ecr.Adapters.Excel;
 /// </summary>
 /// <remarks>
 /// ⚠ Пишеться в **прихований аркуш** книги при експорті і читається при
-/// імпорті. Це те, що дозволяє зіставляти аркуші й колонки **за кодами, а не
-/// за позиціями**: зсув однієї колонки у файлі інакше зіпсував би дані так,
-/// що diff показав би зміну в кожній комірці й виглядав би правдоподібно.
+/// імпорті. Карта називає таблиці, колонки й рядки КОДАМИ, але місце кожного
+/// з них у книзі — ПОЗИЦІЄЮ на момент експорту: Excel про карту не знає й
+/// нічого в ній не оновлює. ⛔ Y5-01 (аудит 7): тому сортування, вставка чи
+/// видалення рядка або колонки ловиться відбитками підписів рядків і
+/// заголовків колонок (<see cref="LayoutFingerprint"/>) — розбіжність стає
+/// відмовою таблиці, а не правдоподібним diff зі зсунутими значеннями.
 /// <para>
 /// ⚠ Карта несе <see cref="PeriodKey"/>, бо порт імпорту його не приймає:
 /// <c>PreviewAsync(documentId, file, ct)</c>. Період, узятий «поточний»,
@@ -72,8 +75,20 @@ public sealed record ExcelTableBlock(
 /// <param name="Number">Номер стовпця в книзі, з одиниці.</param>
 /// <param name="IsCalculated">Комірки колонки рахує система — правки відхиляються (<c>ECR-CELL-4221</c>).</param>
 /// <param name="LookupRegistryDefId">Довідник підстановки; <c>null</c> — не підстановка.</param>
+/// <param name="Header">
+/// ⛔ Y5-01. Відбиток заголовка колонки на момент експорту (<see cref="LayoutFingerprint"/>):
+/// вставлена чи видалена в Excel колонка зсуває заголовки, і імпорт відмовляє таблицю,
+/// а не читає значення сусідньої колонки. <c>null</c> — книгу вивантажено до появи поля.
+/// </param>
 public sealed record ExcelColumnRef(
-    int ColumnDefId, string Code, int Number, bool IsCalculated, int? LookupRegistryDefId);
+    int ColumnDefId,
+    string Code,
+    int Number,
+    bool IsCalculated,
+    int? LookupRegistryDefId,
+    [property: System.Text.Json.Serialization.JsonIgnore(
+        Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    string? Header = null);
 
 /// <summary>Рядок блоку.</summary>
 /// <param name="RowKey">Ідентичність рядка в системі.</param>
@@ -101,6 +116,12 @@ public sealed record ExcelColumnRef(
 /// вивантажено до появи поля: тоді конфліктом стає кожна комірка «книга ≠
 /// поточне», а перегляд попереджає (<see cref="ImportMessageKeys.OutdatedWorkbook"/>).
 /// </param>
+/// <param name="Label">
+/// ⛔ Y5-01. Відбиток підпису рядка (стовпець праворуч від колонок даних) на момент
+/// експорту (<see cref="LayoutFingerprint"/>): відсортований, вставлений чи видалений у
+/// Excel рядок зсуває підписи, і імпорт відмовляє таблицю, а не кладе значення в чужий
+/// рядок. <c>null</c> — книгу вивантажено до появи поля.
+/// </param>
 public sealed record ExcelRowRef(
     string RowKey,
     int Number,
@@ -112,4 +133,7 @@ public sealed record ExcelRowRef(
     string? Version = null,
     [property: System.Text.Json.Serialization.JsonIgnore(
         Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
-    string? Cells = null);
+    string? Cells = null,
+    [property: System.Text.Json.Serialization.JsonIgnore(
+        Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    string? Label = null);
