@@ -507,14 +507,14 @@ public static class MethodologyPublishChecks
         var textOnly = ProducesTextOnly(formula.Root!, byCode);
         var surelyNumber = ProducesNumber(formula.Root!, byCode);
 
-        // ⚠ TODO: потрібен окремий код `ECR-CALC-0436` («тип результату формули
-        // не відповідає колонці-приймачу»).
+        // ⛔ R11-L3: `ECR-CALC-0436` («тип результату формули не відповідає приймачу») - усі три проблеми нижче.
         if (formula.ResultType == FormulaResultType.Number && textOnly)
         {
             yield return PublishProblem.Of(
                 "publish.problem.numberReturnsText",
                 $"Формула «{formula.Code}» оголошена числовою, але повертає лише текст.",
-                ("formula", formula.Code));
+                ("formula", formula.Code))
+                .WithCode(ErrorCodes.MethodologyResultTypeMismatch);
         }
 
         if (formula.ResultType == FormulaResultType.Text && surelyNumber)
@@ -522,7 +522,8 @@ public static class MethodologyPublishChecks
             yield return PublishProblem.Of(
                 "publish.problem.textReturnsNumber",
                 $"Формула «{formula.Code}» оголошена текстовою, але повертає число.",
-                ("formula", formula.Code));
+                ("formula", formula.Code))
+                .WithCode(ErrorCodes.MethodologyResultTypeMismatch);
         }
 
         // ⛔ Оголошений вихід лягає в `calc.CalculationResult.Value
@@ -535,7 +536,8 @@ public static class MethodologyPublishChecks
                 "publish.problem.textOutput",
                 $"Формула «{formula.Code}» повертає текст і оголошена виходом методології: "
                 + "результат зберігається в числовій колонці calc.CalculationResult.Value.",
-                ("formula", formula.Code));
+                ("formula", formula.Code))
+                .WithCode(ErrorCodes.MethodologyResultTypeMismatch);
         }
     }
 

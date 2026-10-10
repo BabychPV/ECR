@@ -164,6 +164,35 @@ public sealed class MethodologyPublishChecksTests
         Assert.Contains(problems, p => p.Text.Contains("повертає число", StringComparison.Ordinal));
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Finding", "ECR-CALC-0436")]
+    public void ECR_CALC_0436_усі_три_проблеми_типу_результату_несуть_власний_код()
+    {
+        // ⛔ Доти - TODO «потрібен окремий код ECR-CALC-0436». Мутація: прибрати `.WithCode(...)` на будь-якій з трьох
+        // проблем - `Code` порожній, тест червоний.
+        var numberReturnsText = Check(
+            [Formula("Verdict", "if(@Excess > 0, 'Сверхнорматив', 'В пределе норматива')", FormulaResultType.Number)],
+            [],
+            []);
+        Assert.Equal(
+            "ECR-CALC-0436",
+            Assert.Single(numberReturnsText, p => p.MessageKey == "publish.problem.numberReturnsText").Code);
+
+        var textReturnsNumber = Check([Formula("Total", "@Fuel * 2", FormulaResultType.Text)], [], []);
+        Assert.Equal(
+            "ECR-CALC-0436",
+            Assert.Single(textReturnsNumber, p => p.MessageKey == "publish.problem.textReturnsNumber").Code);
+
+        var textOutput = Check(
+            [Formula("Verdict", "'Превышение!!!'", FormulaResultType.Text)],
+            [],
+            [new MethodologyOutput(VersionId, EcrCode.Create("Verdict"), TonneUnit)]);
+        Assert.Equal(
+            ErrorCodes.MethodologyResultTypeMismatch,
+            Assert.Single(textOutput, p => p.MessageKey == "publish.problem.textOutput").Code);
+    }
+
     [Theory]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
     [InlineData("!ECW_RepairStatus + '_' + !ECW_Category")]
