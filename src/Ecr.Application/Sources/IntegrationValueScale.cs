@@ -54,8 +54,22 @@ public static class IntegrationValueScale
     {
         ArgumentNullException.ThrowIfNull(column);
 
-        var scale = column.DataType == CellDataType.Decimal
-                    && column.Scale is { } declared
+        return Round(number, column.DataType, column.Scale);
+    }
+
+    /// <summary>Число, округлене до масштабу колонки за її типом і <c>Scale</c> (не більше масштабу сховища).</summary>
+    /// <remarks>
+    /// Те саме правило, що й <see cref="Round(decimal, ColumnDef)"/>: перегляд мапінгу (V8-06) не має колонки
+    /// сутністю, лише її тип і масштаб, а число в ньому мусить бути тим, що ляже в комірку.
+    /// </remarks>
+    /// <param name="number">Число межі.</param>
+    /// <param name="dataType">Тип колонки; <c>null</c> - невідомий (масштаб сховища).</param>
+    /// <param name="columnScale"><c>Scale</c> колонки; <c>null</c> - не задано.</param>
+    /// <returns>Округлене число.</returns>
+    public static decimal Round(decimal number, CellDataType? dataType, byte? columnScale)
+    {
+        var scale = dataType == CellDataType.Decimal
+                    && columnScale is { } declared
                     && declared < CellValueReader.StorageScale
             ? declared
             : CellValueReader.StorageScale;

@@ -78,7 +78,7 @@ public sealed class MappingPreviewStore(EcrDbContext db) : IMappingPreviewStore
         var targets = await db.ColumnDefs
             .AsNoTracking()
             .Where(c => targetIds.Contains(c.Id) && !c.IsDeleted)
-            .Select(c => new { c.Id, c.TableDefId, c.Code })
+            .Select(c => new { c.Id, c.TableDefId, c.Code, c.DataType, c.Scale })
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
@@ -132,7 +132,9 @@ public sealed class MappingPreviewStore(EcrDbContext db) : IMappingPreviewStore
                 Code(units, m.TargetUnitId),
                 m.IsActive,
                 PendingSourceUnitChange.From(
-                    m.PendingSourceUnitCode, m.PendingSourceUnitId, m.PendingSourceUnitDetectedAt));
+                    m.PendingSourceUnitCode, m.PendingSourceUnitId, m.PendingSourceUnitDetectedAt),
+                target?.DataType,
+                target?.Scale);
         });
 
         return new MappingPreviewData(

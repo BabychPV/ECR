@@ -3,6 +3,7 @@ using Ecr.Application.Ports;
 using Ecr.Application.Sources;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.External;
+using Ecr.Domain.Enums;
 using Ecr.TestKit;
 using Xunit;
 
@@ -303,6 +304,51 @@ public sealed class BoundaryUnitConversionTests
         Assert.Equal(
             0.0019444444444444m,
             Assert.Single(PreviewMappingHandler.Compose(integral, T0, T0.AddSeconds(8), Catalog()).Fields).FoldedValue);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "V8-06")]
+    public void Перегляд_мапінгу_V8_06_округлює_до_Scale_колонки_як_комірка_а_Int_і_без_Scale_лишає_16_знаків()
+    {
+        var points = new[]
+        {
+            Point("AVG", T0, 1m), Point("AVG", T0.AddSeconds(1), 1m), Point("AVG", T0.AddSeconds(2), 2m),
+        };
+
+        // Без довідника одиниць і з ним: обидва шляхи перегляду ведуть у ту саму комірку.
+        var scaled = PreviewData(
+            Map(1, "AVG", "Avg", null, null) with { TargetColumnDataType = CellDataType.Decimal, TargetColumnScale = 3 },
+            points);
+        Assert.Equal(
+            1.333m, Assert.Single(PreviewMappingHandler.Compose(scaled, T0, T0.AddHours(1)).Fields).FoldedValue);
+        Assert.Equal(
+            1.333m, Assert.Single(PreviewMappingHandler.Compose(scaled, T0, T0.AddHours(1), Catalog()).Fields).FoldedValue);
+
+        // Інтеграл (єдиний шлях з довідником): 7/3600 Sm3, Scale = 4.
+        var integral = PreviewData(
+            Map(1, "FLOW", "TimeIntegral", "Sm3_per_h", "Sm3") with
+            {
+                TargetColumnDataType = CellDataType.Decimal,
+                TargetColumnScale = 4,
+            },
+            Point("FLOW", T0, 1m),
+            Point("FLOW", T0.AddSeconds(7), 1m));
+        Assert.Equal(
+            0.0019m,
+            Assert.Single(PreviewMappingHandler.Compose(integral, T0, T0.AddSeconds(8), Catalog()).Fields).FoldedValue);
+
+        // Контроль: Int-колонка (дробове число там - розбіжність конфігурації) і колонка без Scale - 16 знаків.
+        foreach (var unscaled in new[]
+        {
+            Map(1, "AVG", "Avg", null, null) with { TargetColumnDataType = CellDataType.Int, TargetColumnScale = 3 },
+            Map(1, "AVG", "Avg", null, null) with { TargetColumnDataType = CellDataType.Decimal, TargetColumnScale = null },
+        })
+        {
+            Assert.Equal(
+                1.3333333333333333m,
+                Assert.Single(PreviewMappingHandler.Compose(PreviewData(unscaled, points), T0, T0.AddHours(1)).Fields).FoldedValue);
+        }
     }
 
     private static MappingPreviewData PreviewData(FieldMapRef map, params RawPointRef[] points)
