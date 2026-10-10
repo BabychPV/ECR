@@ -2319,16 +2319,22 @@ public interface IDocumentStore
 #### `IDocumentDeletionStore`
 
 Видалення документа-чернетки (`DELETE /api/v1/documents/{id}`, право
-`Document.Delete`, рішення людини 2026-09-21 «лише чернетки»). Обидва методи —
-в одній транзакції: стани аркушів читаються під `UPDLOCK, HOLDLOCK`, домен
-(`DraftDocumentDeletion`) вирішує, чи це чернетка, і лише тоді дані видаляються
-явно від листя до кореня (каскадів на `doc.Document` немає). `aud.CellChange`
-не чіпається; видалення лягає в `aud.SecurityEvent` (`DocumentDeleted`).
+`Document.Delete`, рішення людини 2026-09-21 «лише чернетки»). Усі методи —
+в одній транзакції: спершу `LockFreezeFactsAsync` (стан проєкту й періоди, у яких
+документ має комірки чи значення PI, — під `UPDLOCK`), потім стани аркушів під
+`UPDLOCK, HOLDLOCK`, домен (`DraftDocumentDeletion`) вирішує, чи це чернетка, і лише
+тоді дані видаляються явно від листя до кореня (каскадів на `doc.Document` немає).
+R9-F3 / F3-01: архівований проєкт або архівація — `409 ECR-DOC-0409`
+(`deleteProjectArchived`, `reason = ProjectArchived`); дані в ефективно закритому
+періоді — `409 ECR-DOC-0409` (`deleteClosedPeriod`, `reason = PeriodClosed`, `periodKey`): «закритий період блокує
+всіх» діє й на видалення. `aud.CellChange` не чіпається; видалення лягає в
+`aud.SecurityEvent` (`DocumentDeleted`).
 
 ```csharp
 public interface IDocumentDeletionStore
 {
     public Task<DocumentWorkflowFacts> LockWorkflowFactsAsync(long documentId, CancellationToken ct);
+    public Task<DocumentFreezeFacts> LockFreezeFactsAsync(long documentId, CancellationToken ct);
     public Task<int> DeleteAsync(long documentId, CancellationToken ct);
 }
 ```

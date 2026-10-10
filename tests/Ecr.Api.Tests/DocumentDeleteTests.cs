@@ -138,6 +138,74 @@ public sealed class DocumentDeleteTests(SqlServerFixture sql)
         Assert.True(again.StatusCode == HttpStatusCode.NotFound, $"{again.StatusCode}: {app.ErrorsText}");
     }
 
+    /// <summary>
+    /// R9-F3 / F3-01: чернетка з даними в закритому періоді не видаляється — «закритий період
+    /// блокує всіх» діє й на видалення; комірки лишаються на місці.
+    /// </summary>
+    /// <remarks>Мутація: прибрати виклик <c>EnsureNotFrozenAsync</c> у <c>DeleteDocumentHandler</c> — 204, червоніє.</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-1.10")]
+    public async Task Чернетка_з_даними_в_закритому_періоді_дає_409_і_дані_лишаються()
+    {
+        var s = await ArrangeAsync(DeleteDocumentHandler.Permission, GrantLevel.Write).ConfigureAwait(true);
+
+        await using (var arrange = new TestDocumentBuilder(sql.ConnectionString).CreateContext())
+        {
+            var updated = await arrange.Database.ExecuteSqlAsync(
+                $"UPDATE doc.Period SET State = {(int)PeriodState.Closed} WHERE ProjectId = {s.Document.ProjectId} AND PeriodKey = {s.Document.PeriodKey.Value}")
+                .ConfigureAwait(true);
+            Assert.Equal(1, updated);
+        }
+
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
+
+        var response = await DeleteAsync(client, s.Document.DocumentId).ConfigureAwait(true);
+        var body = await response.Content.ReadAsStringAsync().ConfigureAwait(true);
+
+        Assert.True(response.StatusCode == HttpStatusCode.Conflict, $"{response.StatusCode}: {body}\n{app.ErrorsText}");
+        var problem = JsonDocument.Parse(body).RootElement;
+        Assert.Equal("ECR-DOC-0409", problem.GetProperty("errorCode").GetString());
+        Assert.Equal("PeriodClosed", problem.GetProperty("reason").GetString());
+
+        await using var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext();
+        Assert.True(await db.Documents.AnyAsync(d => d.Id == s.Document.DocumentId).ConfigureAwait(true));
+        Assert.Equal(2, await db.CellValues.CountAsync(c => s.Document.RowIds.Contains(c.TableRowId)).ConfigureAwait(true));
+    }
+
+    /// <summary>R9-F3 / F3-01: в архівованому проєкті документ не видаляється.</summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Документ_архівованого_проєкту_дає_409_і_лишається_на_місці()
+    {
+        var s = await ArrangeAsync(DeleteDocumentHandler.Permission, GrantLevel.Write).ConfigureAwait(true);
+
+        await using (var arrange = new TestDocumentBuilder(sql.ConnectionString).CreateContext())
+        {
+            var updated = await arrange.Database.ExecuteSqlAsync(
+                $"UPDATE doc.Project SET Status = {(int)ProjectStatus.Archived} WHERE Id = {s.Document.ProjectId}")
+                .ConfigureAwait(true);
+            Assert.Equal(1, updated);
+        }
+
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
+
+        var response = await DeleteAsync(client, s.Document.DocumentId).ConfigureAwait(true);
+        var body = await response.Content.ReadAsStringAsync().ConfigureAwait(true);
+
+        Assert.True(response.StatusCode == HttpStatusCode.Conflict, $"{response.StatusCode}: {body}\n{app.ErrorsText}");
+        var problem = JsonDocument.Parse(body).RootElement;
+        Assert.Equal("ECR-DOC-0409", problem.GetProperty("errorCode").GetString());
+        Assert.Equal("ProjectArchived", problem.GetProperty("reason").GetString());
+
+        await using var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext();
+        Assert.True(await db.Documents.AnyAsync(d => d.Id == s.Document.DocumentId).ConfigureAwait(true));
+    }
+
     private static Task<HttpResponseMessage> DeleteAsync(HttpClient client, long documentId)
         => client.DeleteAsync(new Uri(
             $"/api/v1/documents/{documentId.ToString(System.Globalization.CultureInfo.InvariantCulture)}",

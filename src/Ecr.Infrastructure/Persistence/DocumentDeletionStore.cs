@@ -37,6 +37,77 @@ public sealed class DocumentDeletionStore(EcrDbContext db) : IDocumentDeletionSt
     }
 
     /// <inheritdoc />
+    public async Task<DocumentFreezeFacts> LockFreezeFactsAsync(long documentId, CancellationToken ct)
+    {
+        var project = await db.Documents.AsNoTracking()
+            .Where(d => d.Id == documentId)
+            .Join(db.Projects, d => d.ProjectId, p => p.Id, (d, p) => new { p.Status, p.IsArchiving })
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+
+        if (project is null)
+        {
+            // Документа вже немає: видалення далі все одно нічого не знайде.
+            return new DocumentFreezeFacts(Domain.Enums.ProjectStatus.Draft, false, []);
+        }
+
+        // ⚠ «Дані» — комірки й значення PI за вікном рядка, а не сам екземпляр таблиці: екземпляр
+        // із фіксованими рядками з'являється вже від перегляду періоду (`RowStore`), і порожня
+        // структура закритого періоду видалення не блокує. По одному ключу — рівність за
+        // `PeriodKey` дає відсічку партицій (той самий прийом, що в `DeleteAsync`).
+        var instanceKeys = await db.TableInstances.AsNoTracking()
+            .Where(i => i.DocumentId == documentId)
+            .Select(i => i.PeriodKeyValue)
+            .Distinct()
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var keysWithData = new HashSet<int>();
+        foreach (var key in instanceKeys.Order())
+        {
+            var instances = db.TableInstances.Where(i => i.PeriodKeyValue == key && i.DocumentId == documentId);
+
+            var hasData =
+                await db.CellValues.AnyAsync(
+                    c => c.PeriodKeyValue == key && db.TableRows.Any(
+                        r => r.PeriodKeyValue == key && r.Id == c.TableRowId
+                             && instances.Any(i => i.Id == r.TableInstanceId)),
+                    ct).ConfigureAwait(false)
+                || await db.RowWindowValues.AnyAsync(
+                    v => v.PeriodKey == key && instances.Any(i => i.Id == v.TableInstanceId),
+                    ct).ConfigureAwait(false);
+
+            if (hasData)
+            {
+                keysWithData.Add(key);
+            }
+        }
+
+        if (keysWithData.Count == 0)
+        {
+            return new DocumentFreezeFacts(project.Status, project.IsArchiving, []);
+        }
+
+        // ⚠ UPDLOCK — як `WorkflowStore.LockPeriodAsync`: паралельний `PeriodStateJob` не закриє
+        // період між перевіркою й видаленням. Блокуються періоди проєкту документа (одиниці-десятки
+        // рядків, ROWLOCK); видалення чернетки — рідка дія.
+        var periods = await db.Periods
+            .FromSql($"""
+                SELECT p.* FROM doc.Period AS p WITH (UPDLOCK, ROWLOCK)
+                JOIN doc.Document AS d ON d.ProjectId = p.ProjectId
+                WHERE d.Id = {documentId}
+                """)
+            .AsNoTracking()
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        return new DocumentFreezeFacts(
+            project.Status,
+            project.IsArchiving,
+            [.. periods.Where(p => keysWithData.Contains(p.PeriodKeyValue)).OrderBy(p => p.PeriodKeyValue)]);
+    }
+
+    /// <inheritdoc />
     public async Task<int> DeleteAsync(long documentId, CancellationToken ct)
     {
         // ⛔ L10-06: мапа подій джерела (`ext.SourceEventMap`) — конфігурація

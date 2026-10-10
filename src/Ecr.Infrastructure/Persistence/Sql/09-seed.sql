@@ -7533,6 +7533,10 @@ USING (VALUES
     (N'err.ECR-HDR-0422.ambiguousDate', N'en', N'Header field "{headerFieldCode}": the order of day and month in the date "{value}" cannot be determined (Excel writes dates in the format of your regional settings). Write the date as YYYY-MM-DD or DD.MM.YYYY.', 1),
     (N'err.ECR-CELL-0422.importAmbiguousDate', N'en', N'The order of day and month in this date cannot be determined (Excel writes dates in the format of your regional settings). Write the date as YYYY-MM-DD or DD.MM.YYYY.', 1)
     -- COLL:r8z3-02-ambiguous-date ── кінець секції ──
+    -- COLL:r9f3-01-delete-frozen ── R9-F3 / F3-01: видалення документа відмовляє в архівованому проєкті й за даних у закритому періоді; ru/kz — порцією COLL:r9f3-01-delete-frozen нижче ──
+    ,(N'err.ECR-DOC-0409.deleteProjectArchived', N'en', N'The document cannot be deleted: its project is archived.', 1),
+    (N'err.ECR-DOC-0409.deleteClosedPeriod', N'en', N'The document cannot be deleted: it has data in the closed period {periodKey}. Reopen the period first.', 1)
+    -- COLL:r9f3-01-delete-frozen ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -18731,6 +18735,19 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:r8z3-02-ambiguous-date ── кінець секції ──
+
+-- COLL:r9f3-01-delete-frozen ── ru/kz: R9-F3 / F3-01: видалення документа відмовляє в архівованому проєкті й за даних у закритому періоді; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-DOC-0409.deleteProjectArchived', N'ru', N'Документ нельзя удалить: его проект в архиве.'),
+    (N'err.ECR-DOC-0409.deleteProjectArchived', N'kz', N'Құжатты жою мүмкін емес: оның жобасы мұрағатта.'),
+    (N'err.ECR-DOC-0409.deleteClosedPeriod', N'ru', N'Документ нельзя удалить: в нём есть данные закрытого периода {periodKey}. Сначала переоткройте период.'),
+    (N'err.ECR-DOC-0409.deleteClosedPeriod', N'kz', N'Құжатты жою мүмкін емес: онда жабық {periodKey} кезеңінің деректері бар. Алдымен кезеңді қайта ашыңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:r9f3-01-delete-frozen ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t
