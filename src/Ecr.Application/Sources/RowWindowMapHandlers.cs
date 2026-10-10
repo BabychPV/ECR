@@ -685,7 +685,12 @@ public sealed class UpdateRowWindowMapHandler(
         map.ClearSources();
         RowWindowMapSupport.ApplyPolicyAndSources(map, command.MinPercentGood, command.RefetchWithinDays, command.MaxGapSeconds, inputs);
         map.SetActive(command.IsActive);
-        var refolded = map.IsActive ? RowWindowMapSupport.Refolded(foldBefore, map) : [];
+
+        // ⛔ V8-03: зняття чинності — і на паузі. Інакше «пауза → правка згортки → відновлення» різниці не бачить
+        // (foldBefore останнього PUT — уже нова конфігурація), а NeedsFetch не знає IsStep/MaxGap/MinPercentGood/
+        // одиниці джерела: старе Fetched-число закритого вікна лишалося чинним назавжди. На паузі задача не
+        // ставиться (EnqueueFetchAsync), її поставить відновлення — і NeedsFetch(current: null) перечитає рядок.
+        var refolded = RowWindowMapSupport.Refolded(foldBefore, map);
 
         await uow.ExecuteInTransactionAsync(async innerCt =>
         {

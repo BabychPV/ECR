@@ -138,6 +138,59 @@ public sealed partial class RowWindowMapsApiTests
         Assert.Equal(0, await ScalarAsync(current));
     }
 
+    /// <summary>
+    /// V8-03: пауза → правка згортки (<c>IsStep</c>) на паузі → відновлення так само знімає чинність із підтягнутого
+    /// запису закритого вікна, а відновлення ставить задачу.
+    /// </summary>
+    /// <remarks>
+    /// До виправлення зняття чинності рахувалося лише для активної прив'язки і лише за різницею «до / після цього
+    /// PUT»: на паузі <c>refolded = []</c>, а при відновленні <c>foldBefore</c> — уже нова конфігурація. Запис лишався
+    /// чинним назавжди, <c>NeedsFetch</c> закритого вікна <c>Fetched</c> давав <c>false</c>.
+    /// Мутація: повернути <c>map.IsActive ? Refolded(…) : []</c> в <c>UpdateRowWindowMapHandler</c> → після правки на
+    /// паузі запис лишається чинним, червоний.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "V8-03")]
+    public async Task Правка_IsStep_на_паузі_знімає_чинність_а_відновлення_ставить_підтягування()
+    {
+        await using var stand = await ArrangeAsync();
+        await ExecuteAsync(
+            $"UPDATE doc.Period SET State = {(int)PeriodState.Open} WHERE ProjectId = {stand.ProjectId} AND PeriodKey = 202601");
+
+        // ⚠ Черга підроблена: справжня задача сама зняла б чинність, перечитавши рядок, і тест нічого б не довів.
+        var jobs = Substitute.For<IBackgroundJobScheduler>();
+        using var app = new EcrApiFactory(sql);
+        using var host = app.WithWebHostBuilder(b => b.ConfigureTestServices(services => services.AddSingleton(jobs)));
+        using var manager = await SignedInAsync(app, ["Integration.Manage"], stand.ProjectId, GrantLevel.Manage, host);
+
+        var id = await CreateAsync(manager, stand, stand.TargetA);
+        var one = new Uri($"/api/v1/row-window-maps/{id}", UriKind.Relative);
+        var current = $"SELECT COUNT(*) FROM ext.RowWindowValue WHERE RowWindowMapId = {id} AND IsCurrent = 1";
+
+        await AddValueAsync(stand, id);
+        Assert.Equal(1, await ScalarAsync(current));
+
+        // Пауза без зміни згортки — запис чинний, задачі немає.
+        jobs.ClearReceivedCalls();
+        Assert.Equal(HttpStatusCode.OK, (await manager.PutAsJsonAsync(one, Replace(stand, isActive: false))).StatusCode);
+        Assert.Equal(1, await ScalarAsync(current));
+        await ExpectFetchAsync(jobs, stand, times: 0);
+
+        // Правка форми ряду на паузі — число за старою конфігурацією більше не «вже підтягнуте»; задачі на паузі немає.
+        Assert.Equal(
+            HttpStatusCode.OK,
+            (await manager.PutAsJsonAsync(one, Replace(stand, isStep: true, isActive: false))).StatusCode);
+        Assert.Equal(0, await ScalarAsync(current));
+        Assert.Equal(1, await ScalarAsync($"SELECT COUNT(*) FROM ext.RowWindowValue WHERE RowWindowMapId = {id}"));
+        await ExpectFetchAsync(jobs, stand, times: 0);
+
+        // Відновлення — задача ставиться, і NeedsFetch(current: null) перечитає рядок.
+        Assert.Equal(HttpStatusCode.OK, (await manager.PutAsJsonAsync(one, Replace(stand, isStep: true))).StatusCode);
+        await ExpectFetchAsync(jobs, stand, times: 1);
+    }
+
     private static async Task ExpectFetchAsync(IBackgroundJobScheduler jobs, Stand stand, int times)
         => await jobs.Received(times).EnqueueCoalescedAsync<IRowWindowFetchJob>(
             RowWindowFetchTarget.Of(stand.InstanceId),
