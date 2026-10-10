@@ -159,7 +159,8 @@ public static class RowWindowFetch
             partial ? RowWindowValueStatus.Partial : RowWindowValueStatus.Fetched,
             value,
             result.SourceUnitSymbol,
-            boundary.Value,
+            // ⛔ Z1-01: до масштабу сховища, інакше рядок отримує `SourceError ECR-CELL-0422`.
+            boundary.Storable,
             boundary.Factor,
             null);
     }

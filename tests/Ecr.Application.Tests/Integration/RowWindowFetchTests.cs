@@ -157,6 +157,23 @@ public sealed class RowWindowFetchTests
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait("Directive", "HSE301-A1")]
+    public void Fold_нескінченний_дріб_округлюється_до_масштабу_сховища()
+    {
+        // ⛔ Z1-01: 1 Sm3/h упродовж 7 с = 7/3600 Sm3 (28 знаків після ділення на знаменник).
+        // Без округлення рядок отримував `SourceError ECR-CELL-0422 tooManyDecimals` при записі.
+        // Мутація: `boundary.Storable` → `boundary.Value` у `Fold`, червоний.
+        var total = RowWindowFetch.Fold(
+            RowWindowSummaryKind.Total, Result(7m), 95m, StdCubicMetrePerHourId, StdCubicMetreId, Catalog());
+        var average = RowWindowFetch.Fold(
+            RowWindowSummaryKind.Average, Result(10m / 3m), 95m, StdCubicMetreId, StdCubicMetreId, Catalog());
+
+        Assert.Equal((RowWindowValueStatus.Fetched, 0.0019444444444444m), (total.Status, total.ValueTarget));
+        Assert.Equal((RowWindowValueStatus.Fetched, 3.3333333333333333m), (average.Status, average.ValueTarget));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Directive", "HSE301-A1")]
     public void Fold_Count_не_звіряє_одиниці()
     {
         var fold = RowWindowFetch.Fold(

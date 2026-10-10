@@ -247,6 +247,46 @@ public sealed class BoundaryUnitConversionTests
         Assert.Equal(1, field.PointCount);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-16.10")]
+    public void Значення_межі_до_запису_округлюється_до_масштабу_сховища()
+    {
+        // ⛔ Z1-01: ділення дає 28 знаків, обробник комірок приймає 16.
+        // Мутація: `Storable => Value` → 1.3333333333333333333333333333, червоний.
+        Assert.Equal(1.3333333333333333m, BoundaryValue.Unchanged(4m / 3m).Storable);
+        Assert.Equal(0.0019444444444444m, BoundaryValue.ToStorable(7m / 3600m));
+
+        // Число, що вже вміщається, лишається побітно тим самим (масштаб не змінюється).
+        Assert.Equal(decimal.GetBits(2678.4m), decimal.GetBits(BoundaryValue.Unchanged(2678.4m).Storable));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-13.14")]
+    public void Перегляд_мапінгу_показує_округлене_як_у_комірці_число_з_нескінченним_дробом()
+    {
+        // ⛔ Z1-01: перегляд показує те, що ляже в комірку, — а комірка тримає 16 знаків.
+        // Мутація: прибрати `ToStorable`/`Storable` з перегляду → 28 знаків, червоний.
+        var avg = PreviewData(
+            Map(1, "AVG", "Avg", null, null),
+            Point("AVG", T0, 1m),
+            Point("AVG", T0.AddSeconds(1), 1m),
+            Point("AVG", T0.AddSeconds(2), 2m));
+        Assert.Equal(
+            1.3333333333333333m,
+            Assert.Single(PreviewMappingHandler.Compose(avg, T0, T0.AddHours(1)).Fields).FoldedValue);
+
+        // 1 Sm3/h упродовж 7 с = 7/3600 Sm3 — нескінченний дріб після ділення на знаменник.
+        var integral = PreviewData(
+            Map(1, "FLOW", "TimeIntegral", "Sm3_per_h", "Sm3"),
+            Point("FLOW", T0, 1m),
+            Point("FLOW", T0.AddSeconds(7), 1m));
+        Assert.Equal(
+            0.0019444444444444m,
+            Assert.Single(PreviewMappingHandler.Compose(integral, T0, T0.AddSeconds(8), Catalog()).Fields).FoldedValue);
+    }
+
     private static MappingPreviewData PreviewData(FieldMapRef map, params RawPointRef[] points)
         => new(new SourceEntityRef(1, "FLARE_01", null), [map], points, false, []);
 

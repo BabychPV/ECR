@@ -432,14 +432,15 @@ public sealed class PreviewMappingHandler(
 
         if (unitCatalog is null)
         {
-            return kind == AggregationKind.TimeIntegral ? null : folded;
+            // ⛔ Z1-01: перегляд показує те саме округлене число, що ляже в комірку.
+            return kind == AggregationKind.TimeIntegral ? null : BoundaryValue.ToStorable(folded);
         }
 
         try
         {
             return BoundaryUnitConversion.ConvertFolded(
                 kind, folded, UnitId(unitCatalog, map.SourceUnitCode), UnitId(unitCatalog, map.TargetUnitCode), unitCatalog)
-                .Value;
+                .Storable;
         }
         catch (Exception ex) when (ex is DomainException or EcrException)
         {

@@ -96,6 +96,38 @@ public sealed class MaterializeTimeWeightedTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-16.10")]
+    public async Task Згортки_з_нескінченним_дробом_записуються_округленими_а_не_валять_сутність()
+    {
+        // ⛔ Z1-01: TWA ряду [0 @0 с, 10 @10 с, 10 @30 с] = (50 + 200) / 30 = 8.333…;
+        // Avg точок 1, 1, 2 = 4/3. `decimal` дає 28 знаків, обробник комірок
+        // приймав 16 і відхиляв ВЕСЬ батч сутності (`ECR-CELL-0422 tooManyDecimals`).
+        // Мутація: `boundary.Storable` → `boundary.Value` у задачі → виняток, червоний.
+        var stand = await ArrangeAsync(
+            new Field("TWA", AggregationKind.TimeWeightedAvg, null, null,
+            [
+                new(MidJanuary, 0m),
+                new(MidJanuary.AddSeconds(10), 10m),
+                new(MidJanuary.AddSeconds(30), 10m),
+            ]),
+            new Field("AVG", AggregationKind.Avg, null, null,
+            [
+                new(MidJanuary, 1m),
+                new(MidJanuary.AddHours(1), 1m),
+                new(MidJanuary.AddHours(2), 2m),
+            ]));
+
+        var written = await RunAsync(stand);
+
+        Assert.Equal(8.3333333333333333m, Assert.Single(written, w => w.ColumnDefId == stand.Columns[0]).Value);
+        Assert.Equal(1.3333333333333333m, Assert.Single(written, w => w.ColumnDefId == stand.Columns[1]).Value);
+        Assert.Equal(8.3333333333333333m, Assert.IsType<decimal>(await CellAsync(stand, stand.Columns[0])));
+        Assert.Equal(1.3333333333333333m, Assert.IsType<decimal>(await CellAsync(stand, stand.Columns[1])));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
     public async Task Avg_старого_мапінгу_побітно_той_самий()
     {
         // Точка ДО періоду є, але згортка точок її не бачить — як і до F3.

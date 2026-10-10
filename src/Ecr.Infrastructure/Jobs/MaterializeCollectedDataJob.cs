@@ -519,7 +519,9 @@ public sealed class MaterializeCollectedDataJob(
                     continue;
                 }
 
-                result.Add(new IntegrationCellValue(map.TargetRowKey!, map.TargetColumnDefId!.Value, boundary.Value));
+                // ⛔ Z1-01: до масштабу сховища — хвіст ділення (Avg, integral/covered, ÷3600)
+                // інакше відхиляє ВЕСЬ батч сутності (`ECR-CELL-0422 tooManyDecimals`).
+                result.Add(new IntegrationCellValue(map.TargetRowKey!, map.TargetColumnDefId!.Value, boundary.Storable));
             }
         }
 

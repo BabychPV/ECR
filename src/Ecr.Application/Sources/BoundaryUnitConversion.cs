@@ -1,5 +1,6 @@
 // src/Ecr.Application/Sources/BoundaryUnitConversion.cs
 using System.Globalization;
+using Ecr.Application.Documents;
 using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Domain.Entities.External;
@@ -319,6 +320,25 @@ public sealed record BoundaryValue(
 {
     /// <summary>Чи змінила межа одиницю значення.</summary>
     public bool IsConverted => FromCode is not null;
+
+    /// <summary>Значення, придатне до запису в комірку: не більше <see cref="CellValueReader.StorageScale"/> знаків після коми.</summary>
+    /// <remarks>
+    /// ⛔ Z1-01: згортка й межа ДІЛЯТЬ (<c>Avg</c> — на кількість точок,
+    /// <c>TimeWeightedAvg</c> — на покриті секунди, інтеграл швидкості — на
+    /// 3600/86400, інтерполяція межової точки, <c>RateConvert</c>), і
+    /// <c>decimal</c> віддає 28 знаків. Обробник комірок такі числа відхиляє
+    /// (<c>ECR-CELL-0422 tooManyDecimals</c>) — разом з усім батчем сутності.
+    /// Сховище (<c>decimal(34,16)</c>) все одно тримає 16 знаків, тож
+    /// округлення тут нічого, що можна зберегти, не втрачає. D-109 («мовчки
+    /// не округлюється») — про введення людини, не про обчислене значення.
+    /// </remarks>
+    public decimal Storable => ToStorable(Value);
+
+    /// <summary>Обчислене значення до масштабу сховища (див. <see cref="Storable"/>).</summary>
+    /// <param name="value">Згорнуте чи переведене значення.</param>
+    /// <returns>Те саме число, округлене до <see cref="CellValueReader.StorageScale"/> знаків (від нуля на середині).</returns>
+    public static decimal ToStorable(decimal value)
+        => decimal.Round(value, CellValueReader.StorageScale, MidpointRounding.AwayFromZero);
 
     /// <summary>Без конверсії: значення лягає як є.</summary>
     /// <param name="value">Значення.</param>
