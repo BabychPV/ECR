@@ -332,14 +332,25 @@ public sealed class CollectionStore(EcrDbContext db, IClock clock) : ICollection
         // ключ — шістнадцятковий, тож символів-шаблонів LIKE у ньому немає.
         var pattern = string.Concat("%\"", DedupKeyParam, "\":\"", key, "\"%");
 
+        // ⛔ Y2-01: предикат дослівно = фільтр IX_CollectionCoverage_RegistryEvents
+        // (Status IS NOT NULL AND PeriodKey IS NULL) плюс явна підказка індексу. Без них план —
+        // скан кластерного PK під HOLDLOCK: діапазон до +∞ і стоп УСІХ вставок покриття (острови,
+        // матеріалізація, синк) на весь час скану журналу. З ними діапазон — лише на ключах
+        // (SourceEntityId, Id) однієї сутності, а острови (Status IS NULL) в індекс не потрапляють.
+        // Подія тут завжди з PeriodKey NULL (див. INSERT). Розійдеться фільтр індексу із запитом —
+        // SQL Server відмовить помилкою 8622, а не просканує мовчки (той самий прийом, що в черзі).
+        // Мітка-коментар — щоб план знайшов CollectionCoverageDedupPlanTests.
         var written = await db.Database
             .ExecuteSqlInterpolatedAsync(
                 $"""
+                -- ecr:coverage-event-dedup
                 INSERT INTO itg.CollectionCoverage (SourceEntityId, CoveredFrom, CoveredTo, CollectionRunId, PeriodKey, Status, Details)
                 SELECT {sourceEntityId}, {now}, {now}, NULL, NULL, {status}, {details}
                 WHERE NOT EXISTS (
-                    SELECT 1 FROM itg.CollectionCoverage cc WITH (UPDLOCK, HOLDLOCK)
+                    SELECT 1 FROM itg.CollectionCoverage cc
+                         WITH (UPDLOCK, HOLDLOCK, INDEX(IX_CollectionCoverage_RegistryEvents))
                     WHERE cc.SourceEntityId = {sourceEntityId}
+                      AND cc.Status IS NOT NULL AND cc.PeriodKey IS NULL
                       AND cc.Status = {status}
                       AND cc.Details LIKE {pattern});
                 """,
@@ -351,6 +362,9 @@ public sealed class CollectionStore(EcrDbContext db, IClock clock) : ICollection
 
     /// <summary>Ім'я параметра конверта події, що несе ключ дедуплікації.</summary>
     public const string DedupKeyParam = "key";
+
+    /// <summary>Мітка запиту дедупу подій покриття — ДОСЛІВНО коментар у тексті SQL (план шукає <c>CollectionCoverageDedupPlanTests</c>).</summary>
+    internal const string CoverageEventDedupTag = "ecr:coverage-event-dedup";
 
     /// <summary>
     /// Ключ дедуплікації події: відбиток (сутність, атрибут, інтервал, статус, код).
