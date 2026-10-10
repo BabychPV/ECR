@@ -250,7 +250,7 @@ public sealed partial class LoginHandler(
         // інакше пішов би в `CreateDomain` поруч зі службовим).
         if (user?.IsServiceAccount == true || (user is null && User.IsServiceAccountName(userName)))
         {
-            await FailAsync(userName, "ServiceAccount", ipAddress, now, ct).ConfigureAwait(false);
+            await FailAsync(userName, "ServiceAccount", ipAddress, now, ct, AuthProvider.Windows).ConfigureAwait(false);
             throw InvalidCredentials();
         }
 
@@ -264,7 +264,7 @@ public sealed partial class LoginHandler(
             // (`PUT /users/{id}/windows-sid`, поки запис ще не входив).
             if (await users.FindByUserNameAsync(userName, ct).ConfigureAwait(false) is { } taken)
             {
-                await FailAsync(userName, "SidMismatch", ipAddress, now, ct).ConfigureAwait(false);
+                await FailAsync(userName, "SidMismatch", ipAddress, now, ct, AuthProvider.Windows).ConfigureAwait(false);
                 LogSidMismatch(logger, userName, taken.Id, sid);
                 throw SidMismatch(userName, sid);
             }
@@ -275,7 +275,7 @@ public sealed partial class LoginHandler(
 
         if (!user.IsActive)
         {
-            await FailAsync(userName, "Disabled", ipAddress, now, ct).ConfigureAwait(false);
+            await FailAsync(userName, "Disabled", ipAddress, now, ct, AuthProvider.Windows).ConfigureAwait(false);
             throw InvalidCredentials();
         }
 
@@ -284,7 +284,7 @@ public sealed partial class LoginHandler(
         // сам знімає LockedUntil.
         if (user.IsLockedOut(now))
         {
-            await FailAsync(userName, "LockedOut", ipAddress, now, ct).ConfigureAwait(false);
+            await FailAsync(userName, "LockedOut", ipAddress, now, ct, AuthProvider.Windows).ConfigureAwait(false);
             throw Locked(user);
         }
 
@@ -424,13 +424,18 @@ public sealed partial class LoginHandler(
             });
 
     /// <summary>Записує невдалу спробу і зберігає зміни.</summary>
+    /// <remarks>
+    /// ⛔ S1-05 (аудит 5): провайдер — параметр. Відмови Windows-входу писалися як <c>Local</c>, і журнал
+    /// входів (фільтр за провайдером, облік спроб на доменний запис) їх губив.
+    /// </remarks>
     private async Task FailAsync(
-        string userName, string reason, string? ipAddress, DateTime now, CancellationToken ct)
+        string userName, string reason, string? ipAddress, DateTime now, CancellationToken ct,
+        AuthProvider provider = AuthProvider.Local)
     {
         // ⛔ У журнал іде КАТЕГОРІЯ відмови, а не подробиці: ні введеного
         // пароля, ні його довжини, ні фрагмента (ФВ-6.11).
         users.RecordAttempt(
-            new LoginAttempt(userName, AuthProvider.Local, false, now, ipAddress, reason));
+            new LoginAttempt(userName, provider, false, now, ipAddress, reason));
 
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
     }

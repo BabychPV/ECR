@@ -97,6 +97,26 @@ public sealed class ResourceGrantsVersionTests
             Arg.Any<Func<CancellationToken, Task>>(), Arg.Any<CancellationToken>());
     }
 
+    /// <summary>
+    /// S1-05 (аудит 5): подія <c>ResourceGrantsReplaced</c> несе <c>CorrelationId</c> запиту — як решта подій безпеки.
+    /// </summary>
+    /// <remarks>Мутація: повернути <c>CorrelationId: null</c> у <c>WriteAsync</c> — тест червоний.</remarks>
+    [Fact]
+    public async Task S1_05_ResourceGrantsReplaced_несе_CorrelationId_запиту()
+    {
+        _currentUser.CorrelationId.Returns("corr-s1-05");
+        var audit = Substitute.For<IAuditWriter>();
+        var handler = new ReplaceResourceGrantsHandler(
+            _users, _access, _currentUser, audit, _uow, Substitute.For<IClock>());
+
+        await handler.HandleAsync(
+            10, [Grant(9, GrantLevel.Manage)], ResourceGrantsVersion.Of(_users.GrantsByRole[10]), CancellationToken.None);
+
+        await audit.Received(1).WriteSecurityEventAsync(
+            Arg.Is<SecurityEventRecord>(r => r.EventType == "ResourceGrantsReplaced" && r.CorrelationId == "corr-s1-05"),
+            Arg.Any<CancellationToken>());
+    }
+
     private static ResourceGrantDto Grant(int projectId, GrantLevel level)
         => new(ResourceKind.Project, projectId, level, IsDeny: false);
 
