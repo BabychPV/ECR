@@ -146,7 +146,21 @@ public sealed partial class OutboxDispatcher(
     /// </summary>
     /// <param name="ct">Токен скасування.</param>
     /// <returns>Скільки надіслано і скільки лишилося в очікуванні (`Pending`) у всій черзі.</returns>
-    public async Task<(int Sent, int Pending)> FlushAsync(CancellationToken ct)
+    public Task<(int Sent, int Pending)> FlushAsync(CancellationToken ct)
+        => FlushAsync(onlyEventCode: null, ct);
+
+    /// <summary>
+    /// Відправляє чергу сповіщень — за потреби лише події одного виду.
+    /// </summary>
+    /// <param name="onlyEventCode">
+    /// Код події, яку відправляти; <c>null</c> — уся черга. Негайний алерт
+    /// (<c>CollectionJob</c>) передає свій код: його виклик не має витрачати спроби
+    /// чужих подій (J1-01) — при недоступній пошті кожен повний прогін робив
+    /// <c>Attempts++</c> усім <c>Pending</c>, і зведення ставали <c>Failed</c> за хвилини.
+    /// </param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Скільки надіслано і скільки лишилося в очікуванні (`Pending`) у всій черзі.</returns>
+    public async Task<(int Sent, int Pending)> FlushAsync(string? onlyEventCode, CancellationToken ct)
     {
         var now = clock.UtcNow;
 
@@ -160,7 +174,7 @@ public sealed partial class OutboxDispatcher(
             return (0, await PendingCountAsync(ct).ConfigureAwait(false));
         }
 
-        var claim = await ClaimBatchAsync(now, ct).ConfigureAwait(false);
+        var claim = await ClaimBatchAsync(now, onlyEventCode, ct).ConfigureAwait(false);
 
         if (claim.Items.Count == 0)
         {
@@ -230,6 +244,16 @@ public sealed partial class OutboxDispatcher(
             {
                 throw;
             }
+            catch (Application.Notifications.NotificationPartiallyDeliveredException partial)
+            {
+                // ⛔ J1-03: лист уже пішов решті адресатів — повтор розіслав би його їм удруге
+                // (до MaxAttempts копій). Подія `Sent`, відхилені адреси — у тексті помилки.
+                item.MarkPartiallySent(
+                    clock.UtcNow,
+                    "Доставлено частково: поштовий сервер відхилив адреси — "
+                    + string.Join(", ", partial.Rejected) + ".");
+                sent++;
+            }
             catch (Exception error)
             {
                 // ⛔ Текст без стека (ФВ-6.11): він видимий в інтерфейсі
@@ -289,10 +313,10 @@ public sealed partial class OutboxDispatcher(
     /// побітово з тим, що повернеться з бази.
     /// </remarks>
     private async Task<(Guid Token, List<NotificationOutboxItem> Items)> ClaimBatchAsync(
-        DateTime now, CancellationToken ct)
+        DateTime now, string? onlyEventCode, CancellationToken ct)
     {
         var candidateIds = await db.NotificationOutbox
-            .Where(n => n.State == "Pending")
+            .Where(n => n.State == "Pending" && (onlyEventCode == null || n.EventCode == onlyEventCode))
             .OrderBy(n => n.CreatedAt)
             .Take(MaxPerRun)
             .Select(n => n.Id)

@@ -323,6 +323,24 @@ try {
         Set-ServiceEnvironmentVariable -ServiceName 'EcrApi' -Name 'ECR_CI_After' -Value 'ok'
         if ((Get-ApiEnvironment) -notcontains 'ECR_CI_After=ok') { throw 'запис Environment після захисту не вдався' }
     }
+
+    # N5-04: ключ EcrWorker читає сам EcrApi (RecalculationWorkerProbe) — ACE ReadKey лише для
+    # облікового запису служби, жодного Users. Раннер без gMSA: «обліковий запис служби» тут — поточний користувач.
+    Test-Case 'D5d. Protect-ServiceRegistryKey -ReadAccount: ключ EcrWorker читає обліковий запис служби, Users — ні' {
+        $workerKey = 'HKLM:\SYSTEM\CurrentControlSet\Services\EcrWorker'
+        if (-not (Test-Path $workerKey)) { throw 'ключа EcrWorker немає після установки' }
+        $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent()
+        Protect-ServiceRegistryKey -ServiceName 'EcrWorker' -ReadAccount $identity.Name
+        $acl = Get-Acl -Path $workerKey
+        if (-not $acl.AreAccessRulesProtected) { throw 'ACL ключа EcrWorker успадковується' }
+        $rules = @($acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier]))
+        $reader = @($rules | Where-Object { $_.IdentityReference.Value -eq $identity.User.Value })
+        if (-not $reader) { throw "немає ACE для облікового запису служби $($identity.Name)" }
+        # KEY_READ = 0x20019: саме з ним Registry.OpenSubKey(name) відкриває ключ у RecalculationWorkerProbe.
+        if (-not ($reader | Where-Object { ([int] $_.RegistryRights -band 0x20019) -eq 0x20019 })) { throw "ACE облікового запису служби без KEY_READ: $($reader.RegistryRights)" }
+        $foreign = @($rules | Where-Object { $_.IdentityReference.Value -notin 'S-1-5-18', 'S-1-5-32-544', $identity.User.Value })
+        if ($foreign) { throw "зайві ACE: $(($foreign | ForEach-Object { $_.IdentityReference.Value }) -join ', ')" }
+    }
 }
 finally {
     if (Get-Service EcrApi -ErrorAction SilentlyContinue) { Invoke-Msi "/x `"$msiPath`" /qn /l*v d5x.log" }

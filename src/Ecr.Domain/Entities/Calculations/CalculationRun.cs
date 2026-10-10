@@ -94,6 +94,35 @@ public sealed class CalculationRun : Entity<long>
     /// </remarks>
     public DateTime? RegistryAsOfUtc { get; private set; }
 
+    /// <summary>
+    /// Момент (UTC), на який актуальні ВХОДИ чисел цього прогону — раніший за <see cref="StartedAt"/>, коли прогін
+    /// переніс (<c>CarryOver</c>) результати, пораховані давніше; <c>null</c> — входи чисел знято на старті.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ N2-03 / stale-for-B (D-324): перенесені результати лишаються на ДАНИХ старого прогону. Якби
+    /// «застарілість» міряли від <see cref="StartedAt"/> нового, правка довідника між старим і новим прогоном
+    /// гасла б позначку, хоча перенесені числа її не бачили. Читач застарілості порівнює зміни з
+    /// <c>COALESCE(InputsAsOfUtc, StartedAt)</c>. Ставиться лише вниз (<see cref="LimitInputsAsOf"/>) і лише
+    /// перенесенням: звичайний прогін поле не заповнює.
+    /// </remarks>
+    public DateTime? InputsAsOfUtc { get; private set; }
+
+    /// <summary>Знижує <see cref="InputsAsOfUtc"/> до моменту, на який пораховано перенесені результати.</summary>
+    /// <param name="moment">Момент входів перенесених результатів (UTC): <c>COALESCE(InputsAsOfUtc, StartedAt)</c> прогону-джерела.</param>
+    /// <remarks>
+    /// Береться <c>min</c> з тим, що вже є (<c>InputsAsOfUtc ?? StartedAt</c>): кілька переносів в одному прогоні
+    /// (по документу й за кожною методологією) не можуть підняти момент, а момент пізніший за власний старт
+    /// нічого не міняє — старт і так найпізніша межа.
+    /// </remarks>
+    public void LimitInputsAsOf(DateTime moment)
+    {
+        var utc = moment.Kind == DateTimeKind.Utc ? moment : DateTime.SpecifyKind(moment, DateTimeKind.Utc);
+        if (utc < (InputsAsOfUtc ?? StartedAt))
+        {
+            InputsAsOfUtc = utc;
+        }
+    }
+
     /// <summary>Текст помилки при <c>Failed</c>; порожній при успіху.</summary>
     public string? ErrorMessage { get; private set; }
 

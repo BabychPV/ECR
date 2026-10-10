@@ -28,19 +28,25 @@ internal static class DeployArguments
             new("MsiPath", state.MsiPath),
             new("AppPort", state.Port),
             new("ConnectionString", BuildConnectionString(state)),
-
-            // ⛔ Q-232: директива людини (2026-09-11) — майстер запускає
-            // людина з доступом до бази, тож він завжди дозволяє
-            // deploy-ecr.ps1 створити цільову базу самому, якщо її ще
-            // немає, замість вимагати окремого кроку адміністратора БД
-            // заздалегідь (`docs/build/11-install-guide.md` §0, оновлено).
-            new("CreateDatabaseIfMissing", null),
-
-            // ⛔ S11: без сертифіката служба в Production не стартує, і
-            // deploy-ecr.ps1 зупиняється на кроці 1. Відбиток уже перевірено
-            // майстром (крок сертифіката й «Огляд»), скрипт перевіряє ще раз.
-            new("DataProtectionThumbprint", state.DataProtectionThumbprint),
         };
+
+        // ⛔ Q-232: директива людини (2026-09-11) — майстер запускає
+        // людина з доступом до бази, тож він дозволяє deploy-ecr.ps1
+        // створити цільову базу самому, якщо її ще немає, замість вимагати
+        // окремого кроку адміністратора БД заздалегідь
+        // (`docs/build/11-install-guide.md` §0, оновлено).
+        // ⛔ R5-U1/U1-04: лише при першому розгортанні — мотив директиви стосується саме його. При
+        // оновленні відсутня база = хибне чи типове ім'я, і порожня база з переведеною на неї службою —
+        // простій (DatabaseStep тоді зупиняє майстра ще на кроці бази).
+        if (state.Mode == WizardMode.FirstDeployment)
+        {
+            result.Add(new("CreateDatabaseIfMissing", null));
+        }
+
+        // ⛔ S11: без сертифіката служба в Production не стартує, і
+        // deploy-ecr.ps1 зупиняється на кроці 1. Відбиток уже перевірено
+        // майстром (крок сертифіката й «Огляд»), скрипт перевіряє ще раз.
+        result.Add(new("DataProtectionThumbprint", state.DataProtectionThumbprint));
 
         // ⛔ D14-08: транспорт — рівно один із трьох; без жодного deploy-ecr.ps1 зупиняється (мовчазний
         // HTTP дав би службу, у яку не можна увійти з іншої машини). Стан майстра завжди має вибір.
@@ -71,6 +77,13 @@ internal static class DeployArguments
             result.Add(new("SkipSchema", null));
         }
 
+        // ⛔ AN-117 (S2-04): перевірку свіжої копії скрипт пропускає ЛИШЕ за явною позначкою на кроці бази
+        // («копію зроблено поза SQL Server / я приймаю ризик»); свіжа копія в msdb його не вмикає.
+        if (state.SkipBackupCheck)
+        {
+            result.Add(new("SkipBackupCheck", null));
+        }
+
         if (state.ServiceAccountMode != ServiceAccountMode.LocalSystem)
         {
             result.Add(new("ServiceAccount", state.ServiceAccountName));
@@ -87,6 +100,13 @@ internal static class DeployArguments
             result.Add(new("SqlPassword", state.SqlLoginPassword));
         }
 
+        // ⛔ L10-04, D-333: sqlcmd скрипта довіряє сертифікату SQL (-C) лише за тим самим
+        // свідомим вибором, що й рядок підключення служби.
+        if (state.TrustSqlServerCertificate)
+        {
+            result.Add(new("TrustServerCertificate", null));
+        }
+
         return result;
     }
 
@@ -99,10 +119,13 @@ internal static class DeployArguments
     /// ламали рядок або дописували в нього власні параметри. Builder бере значення
     /// в лапки за правилами, які розбирає й <c>SqlConnectionStringBuilder</c>.
     /// Типово — Windows/gMSA (<c>Integrated Security</c>); SQL-логін — свідомий
-    /// вибір із попередженням на кроці бази даних, пароль у реєстрі служби
-    /// закриває deploy-ecr.ps1 (<c>Protect-ServiceRegistryKey</c>).
-    /// <c>Encrypt=Mandatory</c> — явно (D-282); <c>TrustServerCertificate</c> лишився як
-    /// був: прибрати його = зламати установки на самопідписаному сертифікаті SQL.
+    /// вибір із попередженням на кроці бази даних. Ключ служби з рядком підключення чи
+    /// <c>ECR_Secrets__*</c> у Environment закриває deploy-ecr.ps1 (<c>Protect-ServiceRegistryKey</c>,
+    /// S2-01) — і для gMSA, не лише з паролем.
+    /// <c>Encrypt=Mandatory</c> — явно (D-282). <c>TrustServerCertificate</c> — за прапорцем
+    /// майстра (D-333, HU-12 R3 = A), типово <c>False</c>: сервер автентифікується за
+    /// сертифікатом. <c>True</c> — лише свідомий вибір із попередженням на кроках бази й огляду
+    /// (самопідписаний сертифікат SQL).
     /// </remarks>
     internal static SecureString BuildConnectionString(WizardState state)
     {
@@ -123,7 +146,7 @@ internal static class DeployArguments
         }
 
         builder["Encrypt"] = "Mandatory";
-        builder["TrustServerCertificate"] = "True";
+        builder["TrustServerCertificate"] = state.TrustSqlServerCertificate ? "True" : "False";
         return ToSecure(builder.ConnectionString);
     }
 

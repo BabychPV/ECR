@@ -68,6 +68,24 @@ public sealed partial class QuartzJobAdapter(
         var progress = provider.GetService<IJobProgressStore>();
         var clock = provider.GetRequiredService<IClock>();
 
+        // ⛔ AN-116 (P1-06): межа за ТИПОМ — експорт/імпорт Excel не більше `Jobs:Excel:MaxConcurrency`
+        // одночасно. Понад межу задача не чекає на потоці пулу (тримала б його, як лок у I2), а отримує
+        // одноразовий триґер через відступ — і рядок лишається Queued. Перевірка ДО виміру затримки старту:
+        // відкладена задача ще не взята виконавцем. Порт необов'язковий, як і решта нижче.
+        var limiter = provider.GetService<QuartzJobTypeLimiter>();
+        using var typeSlot = limiter?.TryEnter(job.GetType());
+        if (limiter is not null && typeSlot is null)
+        {
+            LogJobTypeLimitReached(logger, jobId, typeName ?? "—", limiter.ExcelMaxConcurrency, limiter.RetryDelay);
+            await ScheduleDeferredAsync(
+                    context, CorrelationOf(context), clock, limiter.RetryDelay, DeferredSince(context) ?? clock.UtcNow)
+                .ConfigureAwait(false);
+
+            // Тіло злиття (O1), якщо було, лишається задачі до наступного триґера.
+            QuartzPayloadMerges.Reopen(jobId);
+            return;
+        }
+
         // ⚠ Затримка старту (`ФВ-12.2`, `tz/08` §8.3) — ТУТ, а не після
         // блокування нижче: задача вже взята виконавцем, і все, що йде далі, —
         // це вже її робота, а не чекання в черзі. Міряти після лока означало б
@@ -640,6 +658,9 @@ public sealed partial class QuartzJobAdapter(
         IJobProgressStore? store, string jobId, string state, string? error, IClock clock, CancellationToken ct,
         string? errorCode = null)
         => store is null ? Task.CompletedTask : store.FinishAsync(jobId, state, error, clock.UtcNow, ct, errorCode);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Задача {JobId} ({TypeName}) чекає: уже виконується {Limit} задач цього типу; повтор через {Delay}.")]
+    private static partial void LogJobTypeLimitReached(ILogger logger, string jobId, string typeName, int limit, TimeSpan delay);
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Задача {TypeName} ({JobId}) не зареєстрована.")]
     private static partial void LogUnknownJob(ILogger logger, string typeName, string jobId);

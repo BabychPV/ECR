@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
-import { EcrApiError, apiFetch } from '@/api/client';
+import { EcrApiError, apiFetch, isSessionClosed, sessionUserHeaders } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
 import type {
   CellConflictDto,
@@ -38,6 +38,11 @@ export interface PendingEdit {
    * за ним `withKnownVersions` упізнає чужу правку тієї самої комірки (L8-20).
    */
   before?: unknown;
+  /**
+   * `G1-06`: значення текстової колонки — звіряти ДОСЛІВНО (`0012` ≠ `12`).
+   * Лише для клієнта, на сервер не їде; відсутнє — правило за значенням.
+   */
+  text?: boolean;
 }
 
 /**
@@ -146,9 +151,21 @@ export function applyPatchLocally(
   request: PatchCellsRequest,
   response: PatchCellsResponse,
 ): void {
-  queryClient.setQueryData<TableSliceDto>(
-    queryKeys.slices.one(request.tableInstanceId, request.periodKey),
-    (slice) => (slice === undefined ? slice : applyPatchToSlice(slice, request, response)),
+  const key = queryKeys.slices.one(request.tableInstanceId, request.periodKey);
+
+  // ⛔ `G1-01`: `GET` зрізу, що почався ДО коміту цього `PATCH` (перезапит після
+  // перерахунку, `addRow`, «Keep mine»), `setQueryData` НЕ скасовує: його
+  // відповідь, прочитана зі старої БД, перезаписала б кеш старими значеннями й
+  // СТАРИМИ версіями рядків — значення «зникає» з екрана, а наступна власна
+  // правка рядка дістає `409`. Тому, якщо зріз саме читається, після
+  // локального застосування читання ПЕРЕЗАПУСКАЄТЬСЯ: `refetchType: 'all'`
+  // скасовує запит у дорозі (`cancelRefetch`, тихо — без стану помилки) і
+  // ставить новий, що читає вже після коміту. Зайвий `GET` — лише тоді, коли
+  // вікна справді перекрилися; у звичайному разі `CL-01` лишається без запиту.
+  const racing = queryClient.getQueryState(key)?.fetchStatus === 'fetching';
+
+  queryClient.setQueryData<TableSliceDto>(key, (slice) =>
+    slice === undefined ? slice : applyPatchToSlice(slice, request, response),
   );
 
   // ⚠ І зріз позначається застарілим — БЕЗ запиту (`refetchType: 'none'`).
@@ -161,8 +178,8 @@ export function applyPatchLocally(
   // ⛔ Саме ПІСЛЯ `setQueryData`: успішний запис у кеш скидає позначку
   // `isInvalidated`, тож зворотний порядок нічого б не позначив.
   void queryClient.invalidateQueries({
-    queryKey: queryKeys.slices.one(request.tableInstanceId, request.periodKey),
-    refetchType: 'none',
+    queryKey: key,
+    refetchType: racing ? 'all' : 'none',
   });
 
   // ⛔ `ФВ-2.16`: значок «поза вікном» — за `import()`, не статично (`D-132`,
@@ -186,41 +203,133 @@ export function applyPatchLocally(
  * перечитуються разом із карткою, щоб бейдж і банер не розходилися.
  */
 export function refreshStaleness(queryClient: QueryClient, documentId: number, periodKey: number): void {
-  // Правка входу змінює «Needs recalculation (N)» у переліку документів: зведення читається заново.
-  void queryClient.invalidateQueries({ queryKey: ['documents', 'summary'] });
-
   const summaryKey = ['document', documentId, periodKey] as const;
   const summary = queryClient.getQueryData<{ resultsStale?: boolean | null }>(summaryKey);
-  if (summary === undefined || summary.resultsStale !== false) return;
+  const becameStale = summary !== undefined && summary.resultsStale === false;
+
+  // ⛔ AN-108 / P2-01: «Needs recalculation (N)» змінюється лише переходом ЦЬОГО документа false → true. Інакше —
+  // лише позначка «застаріле» без запиту: зведення (найдорожчий агрегат переліку) перечитається при монтуванні
+  // переліку. Безумовний перезапит тут давав `GET /documents/summary` на КОЖНЕ автозбереження через бейдж меню.
+  void queryClient.invalidateQueries({
+    queryKey: ['documents', 'summary', periodKey],
+    refetchType: becameStale ? 'active' : 'none',
+  });
+  if (!becameStale) return;
 
   void queryClient.invalidateQueries({ queryKey: summaryKey, exact: true });
   void queryClient.invalidateQueries({ queryKey: calculationResultsKey(documentId, periodKey), exact: true });
 }
 
-/** Задачі перерахунку, після яких зрізи документа вже скинуто (N-1): одна задача - одна інвалідація. */
-const settledJobs = new Set<string>();
+/**
+ * Задачі перерахунку, вже враховані в зрізах (N-1): одна задача - одна інвалідація. `'skipped'` - задача нічого
+ * не записала (AN-108 / P2-02) і зрізів не чіпала; пізніше «невідомо що записано» по ній ще перечитає зрізи.
+ */
+const settledJobs = new Map<string, 'refetched' | 'skipped'>();
+
+/**
+ * Задачі перерахунку документа за період, поставлені правками і ще не враховані в зрізах (AN-108 / P2-02),
+ * з порядковим номером постановки. Слідкувач переходить на новішу задачу, не дочекавшись старішої, тож
+ * «остання нічого не записала» ще не означає «нічого не записано»: записане старішою знає лише вона.
+ */
+const pendingRecalculations = new Map<string, Map<string, number>>();
+let recalculationSeq = 0;
+
+/** Запам'ятовує задачу перерахунку, поставлену правкою (AN-108 / P2-02). */
+function registerRecalculation(jobId: string, documentId: number, periodKey: number): void {
+  const key = `${documentId}:${periodKey}`;
+  const jobs = pendingRecalculations.get(key) ?? new Map<string, number>();
+  if (!jobs.has(jobId)) jobs.set(jobId, (recalculationSeq += 1));
+  pendingRecalculations.set(key, jobs);
+}
+
+/**
+ * Прибирає задачу і всі СТАРІШІ за неї з очікуваних; повертає, чи серед старіших була хоч одна - тобто
+ * чи лишився невідомий запис, який мусить перекрити інвалідація цієї.
+ */
+function takeRecalculation(jobId: string, documentId: number, periodKey: number): boolean {
+  const key = `${documentId}:${periodKey}`;
+  const jobs = pendingRecalculations.get(key);
+  if (jobs === undefined) return false;
+  const own = jobs.get(jobId);
+  let olderPending = false;
+  for (const [id, seq] of [...jobs]) {
+    if (id === jobId || (own !== undefined && seq < own)) {
+      if (id !== jobId) olderPending = true;
+      jobs.delete(id);
+    }
+  }
+  if (jobs.size === 0) pendingRecalculations.delete(key);
+  return olderPending;
+}
 
 /**
  * N-1 (RC15): скидає зрізи документа за період ПІСЛЯ завершення перерахунку - один раз на задачу.
  * Повертає `false`, якщо цю задачу вже оброблено (сітка і фоновий слідкувач не дублюють запити).
+ *
+ * ⛔ AN-108 / P2-02: `writtenCount === 0` (сервер: перерахунок нічого не записав) - зрізи не чіпаються: власна
+ * правка вже в кеші (`applyPatchLocally`), а перезапит усіх змонтованих зрізів (до 91) на кожне
+ * автозбереження - найдорожчий наслідок PATCH. `null`/`undefined` (невідомо, старий сервер) - як раніше.
+ * Невраховані старіші задачі того самого документа (слідкувач перейшов з них на цю) теж змушують перечитати.
+ *
+ * @param writtenCount `JobStatus.writtenCount` завершеної задачі.
  */
 export function settleRecalculation(
   queryClient: QueryClient,
   jobId: string,
   documentId: number,
   periodKey: number,
+  writtenCount?: number | null,
 ): boolean {
-  if (settledJobs.has(jobId)) return false;
-  settledJobs.add(jobId);
-  void invalidateSlices(queryClient, { documentId, periodKey });
+  const previous = settledJobs.get(jobId);
+  if (previous === 'refetched') return false;
+  const olderPending = takeRecalculation(jobId, documentId, periodKey);
+  const nothingWritten = writtenCount === 0 && !olderPending;
+  // Уже враховано як «нічого не записала», і знову нічого нового - повтор ігнорується.
+  if (previous === 'skipped' && nothingWritten) return false;
+  settledJobs.set(jobId, nothingWritten ? 'skipped' : 'refetched');
+  if (!nothingWritten) void invalidateSlices(queryClient, { documentId, periodKey });
   return true;
 }
 
 /** Скільки разів фоновий слідкувач питає про задачу (2 с * 60 = 2 хв). */
 const FollowMaxPolls = 60;
 
+/**
+ * Загальна стеля життя слідкувача від першої задачі (AN-108 / P2-03): `attempt` скидається на кожну нову задачу,
+ * тож за безперервного введення стеля спроб сама по собі не спрацьовувала ніколи.
+ */
+const FollowMaxMs = 10 * 60_000;
+
 /** Активні слідкувачі: ключ `документ:період` -> остання задача, за якою він стежить. */
 const activeFollowers = new Map<string, { jobId: string }>();
+
+/**
+ * Чи стежить за задачею фоновий слідкувач (AN-108 / P2-03). Тоді сітка лише ЧИТАЄ кеш `['job', id]`, який
+ * наповнює слідкувач, а не опитує той самий стан другим незалежним таймером.
+ */
+export function isFollowedJob(jobId: string): boolean {
+  for (const follower of activeFollowers.values()) {
+    if (follower.jobId === jobId) return true;
+  }
+  return false;
+}
+
+/** Чи прихована вкладка. */
+function isHidden(): boolean {
+  return typeof document !== 'undefined' && document.visibilityState === 'hidden';
+}
+
+/** Чекає, доки вкладка знову стане видимою (AN-108 / P2-03): прихована вкладка не опитує сервер. */
+function untilVisible(): Promise<void> {
+  return new Promise((resolve) => {
+    const onChange = (): void => {
+      if (document.visibilityState === 'hidden') return;
+      document.removeEventListener('visibilitychange', onChange);
+      resolve();
+    };
+    document.addEventListener('visibilitychange', onChange);
+  });
+}
 
 /**
  * Фонове стеження за перерахунком, поставленим правкою (N-1).
@@ -241,6 +350,7 @@ export function followRecalculation(
   periodKey: number,
 ): void {
   const key = `${documentId}:${periodKey}`;
+  registerRecalculation(jobId, documentId, periodKey);
   const existing = activeFollowers.get(key);
   if (existing) {
     existing.jobId = jobId;
@@ -249,10 +359,14 @@ export function followRecalculation(
   const follower = { jobId };
   activeFollowers.set(key, follower);
   void (async () => {
+    let polledJob = follower.jobId;
+    let settled = false;
     try {
-      let polledJob = follower.jobId;
+      const startedAt = Date.now();
       let attempt = 0;
-      while (attempt < FollowMaxPolls) {
+      while (attempt < FollowMaxPolls && Date.now() - startedAt < FollowMaxMs) {
+        // ⚠ Лише коли прихована: інакше перший запит іде синхронно зі стартом слідкувача, як і раніше.
+        if (isHidden()) await untilVisible();
         if (follower.jobId !== polledJob) {
           polledJob = follower.jobId;
           attempt = 0;
@@ -268,15 +382,19 @@ export function followRecalculation(
         // Поки опитували, з'явилась новіша задача: чекаємо на неї, а не скидаємо зрізи передчасно.
         if (follower.jobId !== current) continue;
         if (pollInterval(job.state) === false) {
-          settleRecalculation(queryClient, current, documentId, periodKey);
+          settled = true;
+          settleRecalculation(queryClient, current, documentId, periodKey, job.writtenCount);
           return;
         }
         await new Promise((resolve) => setTimeout(resolve, RecalculationPollMs));
       }
     } catch {
-      // Помилка опитування: слідкувач завершується, сітка має власне стеження.
+      // Помилка опитування: слідкувач завершується, сітка (якщо змонтована) підхоплює стеження — див. `finally`.
     } finally {
       if (activeFollowers.get(key) === follower) activeFollowers.delete(key);
+      // ⚠ AN-108 / P2-03: поки слідкувач жив, змонтована сітка свого таймера не тримала (`isFollowedJob`). Пішов,
+      // не дочекавшись кінця, — один перезапит змусить спостерігача сітки перерахувати інтервал і стежити самому.
+      if (!settled) void queryClient.invalidateQueries({ queryKey: ['job', polledJob], exact: true });
     }
   })();
 }
@@ -466,6 +584,12 @@ interface RecalculationStatus {
    * стежити.
    */
   finishedAt: string | null;
+
+  /**
+   * Скільки комірок записав завершений перерахунок (`JobStatus.writtenCount`, AN-108 / P2-02);
+   * `null` — ще йде або невідомо.
+   */
+  writtenCount: number | null;
 }
 
 /**
@@ -509,8 +633,13 @@ export function useRecalculationStatus(jobId: string | null): RecalculationStatu
     // і сервер чесно відповідає 404. Саме на цьому падав крок 17 `smoke.ps1`.
     queryFn: () => apiFetch<JobStatus>(`/api/v1/jobs/${encodeURIComponent(active ?? '')}`),
     enabled: active !== null,
+    // ⛔ AN-108 / P2-03: за задачею, яку веде фоновий слідкувач (`followRecalculation`), сітка НЕ тримає
+    // другого таймера на той самий ключ — лише читає кеш, який той наповнює. Інтервал перераховується на
+    // кожне оновлення запиту, тож коли слідкувач піде без кінцевого стану, сітка підхопить опитування сама.
     refetchInterval: (query) =>
-      pollInterval(query.state.data?.state) === false ? false : RecalculationPollMs,
+      pollInterval(query.state.data?.state) === false || (active !== null && isFollowedJob(active))
+        ? false
+        : RecalculationPollMs,
     retry: false,
   });
 
@@ -555,6 +684,7 @@ export function useRecalculationStatus(jobId: string | null): RecalculationStatu
     state: job.data?.state,
     outcome,
     finishedAt: shown === null ? null : formatTime(shown),
+    writtenCount: job.data?.writtenCount ?? null,
   };
 }
 
@@ -628,10 +758,17 @@ export function sendPatchBeacon(documentId: number, request: PatchCellsRequest):
     // Навмисно порожньо — причина в коментарі до функції.
   };
 
+  // ⛔ AN-108 / S2-05: сеанс вкладки закрито (вихід або інший користувач у сусідній вкладці) — cookie вже не
+  // власника цих правок. Маячок не обходить `apiFetch`, тож перевірка тут власна; правки лишились у сліді
+  // `lostEdits` під їхнім власником.
+  if (isSessionClosed()) return;
+
   try {
     fetch(`/api/v1/documents/${documentId}/cells`, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
+      // ⛔ AN-108 / S2-05: маячок іде повз `apiFetch` — id користувача вкладки додається тут; cookie іншого
+      // користувача сервер відхилить (`409 ECR-AUTH-0409`), а не запише правки під його іменем.
+      headers: { 'Content-Type': 'application/json', ...sessionUserHeaders() },
       credentials: 'include',
       keepalive: true,
       body: JSON.stringify(request),

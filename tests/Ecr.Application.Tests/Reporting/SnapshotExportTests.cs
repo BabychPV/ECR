@@ -123,6 +123,34 @@ public sealed class SnapshotExportTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "L1-02")]
+    public async Task Зріз_понад_стелю_відмовляє_за_підрахунком_не_читаючи_жодної_сторінки()
+    {
+        // ⛔ AN-120 / L1-02: стеля перевіряється ДО читання вмісту. Раніше
+        // обробник спершу гортав зріз сторінками до кінця (з макетом `R8` —
+        // повне читання зрізу на кожну сторінку) і лише потім відмовляв.
+        var world = Allowed();
+        world.Pages(rowCount: 50_000 + 1);
+        world.Snapshots.CountRowsAsync(SnapshotId, Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(50_000 + 1);
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => world.Handler.HandleAsync(SnapshotId, CancellationToken.None));
+
+        Assert.Equal("err.ECR-RPT-0422.exportTooLarge", error.Details!["messageKey"]);
+
+        // Підрахунку досить знати «чи більше за 50 000» — далі він не рахує.
+        await world.Snapshots.Received(1).CountRowsAsync(SnapshotId, 50_000 + 1, Arg.Any<CancellationToken>());
+
+        // ⛔ Мутаційний доказ: прибери перевірку підрахунку в обробнику — 101
+        // виклик `RowsAsync` до відмови.
+        await world.Snapshots.DidNotReceive().RowsAsync(
+            Arg.Any<long>(), Arg.Any<int>(), Arg.Any<int>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+        await world.Workbooks.DidNotReceive()
+            .WriteAsync(Arg.Any<SnapshotWorkbook>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage5)]
     public async Task Без_права_на_вміст_зрізу_книга_не_будується_і_рядки_не_читаються()
     {
         // ⛔ Рішення людини 2026-09-29: `Report.Export` + грант Read уже НЕ

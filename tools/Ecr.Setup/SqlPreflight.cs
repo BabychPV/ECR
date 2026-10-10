@@ -19,7 +19,7 @@ namespace Ecr.Setup;
 /// ⛔ Q-232: відсутність цільової бази більше НЕ зупиняє цю перевірку —
 /// директива людини (2026-09-11) дозволила `deploy-ecr.ps1
 /// -CreateDatabaseIfMissing` створювати базу самому на кроці 6 (майстер
-/// завжди передає цей прапорець, <see cref="DeployRunner"/>), тож
+/// передає цей прапорець при першому розгортанні — R5-U1/U1-04), тож
 /// відсутня база на кроці 3 — це очікуваний, підтримуваний стан, а не
 /// підстава зупиняти майстра. Ця перевірка й далі підтверджує лише те, що
 /// сервер узагалі ДОСЯЖНИЙ під заданими обліковими даними.
@@ -34,10 +34,15 @@ internal static class SqlPreflight
     /// Обмежена в часі: жодного способу зависнути назавжди на недосяжному
     /// сервері немає.
     /// </summary>
+    /// <remarks>
+    /// ⛔ R5-U1/U1-04: відсутня база — успіх перевірки досяжності, але <paramref name="databaseMissing"/> = true:
+    /// для першого розгортання це очікуваний стан (Q-232), для оновлення — помилка імені бази (вирішує крок бази).
+    /// </remarks>
     public static bool TryVerifyDatabaseExists(
         string sqlInstance, string database, bool windowsAuth, string sqlLogin, string sqlPassword,
-        out string error)
+        bool trustServerCertificate, out bool databaseMissing, out string error)
     {
+        databaseMissing = false;
         var timeoutText = TimeoutSeconds.ToString(CultureInfo.InvariantCulture);
 
         // Той самий запит, що deploy-ecr.ps1 виконує на кроці 1/7 —
@@ -54,7 +59,13 @@ internal static class SqlPreflight
         };
         psi.ArgumentList.Add("-S");
         psi.ArgumentList.Add(sqlInstance);
-        psi.ArgumentList.Add("-C");
+        // ⛔ L10-04, D-333: -C (довіряти сертифікату без перевірки) — лише за прапорцем майстра,
+        // як і в deploy-ecr.ps1 та рядку підключення служби.
+        if (trustServerCertificate)
+        {
+            psi.ArgumentList.Add("-C");
+        }
+
         psi.ArgumentList.Add("-b");
         psi.ArgumentList.Add("-I");
         psi.ArgumentList.Add("-l");
@@ -118,7 +129,7 @@ internal static class SqlPreflight
                 // ⛔ Q-232: і це більше НЕ помилка тут узагалі — директива
                 // людини (2026-09-11) дозволила deploy-ecr.ps1
                 // -CreateDatabaseIfMissing створити базу самому на кроці 6
-                // (майстер передає цей прапорець завжди, DeployRunner.cs).
+                // (майстер передає цей прапорець лише при першому розгортанні, U1-04).
                 // Відсутня база на кроці 3 — очікуваний, підтримуваний стан.
                 var hasDatabaseMissing =
                     stderr.Contains("database missing", StringComparison.OrdinalIgnoreCase)
@@ -126,6 +137,7 @@ internal static class SqlPreflight
 
                 if (hasDatabaseMissing)
                 {
+                    databaseMissing = true;
                     error = string.Empty;
                     return true;
                 }
@@ -141,6 +153,93 @@ internal static class SqlPreflight
 
         error = string.Empty;
         return true;
+    }
+
+    /// <summary>
+    /// Читає вік останньої повної/диференційної копії бази з <c>msdb.dbo.backupset</c> тим самим запитом,
+    /// що <c>deploy-ecr.ps1</c> на кроці 2/7 (<see cref="SchemaBackupRules.Query"/>, AN-117, S2-04).
+    /// </summary>
+    /// <remarks>
+    /// Не вдалося (немає прав на <c>msdb</c>, таймаут) — <see cref="BackupFreshness.Unknown"/> з причиною: майстер
+    /// тоді так само вимагає явної позначки, бо скрипт на тому самому запиті впав би.
+    /// </remarks>
+    public static BackupCheckResult CheckBackup(
+        string sqlInstance, string database, bool windowsAuth, string sqlLogin, string sqlPassword,
+        bool trustServerCertificate)
+    {
+        var timeoutText = TimeoutSeconds.ToString(CultureInfo.InvariantCulture);
+
+        var psi = new ProcessStartInfo("sqlcmd")
+        {
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true,
+        };
+        psi.ArgumentList.Add("-S");
+        psi.ArgumentList.Add(sqlInstance);
+        if (trustServerCertificate)
+        {
+            psi.ArgumentList.Add("-C");
+        }
+
+        psi.ArgumentList.Add("-b");
+        psi.ArgumentList.Add("-I");
+        psi.ArgumentList.Add("-l");
+        psi.ArgumentList.Add(timeoutText);
+
+        // Лише значення: без заголовка стовпця й без пробілів вирівнювання.
+        psi.ArgumentList.Add("-h");
+        psi.ArgumentList.Add("-1");
+        psi.ArgumentList.Add("-W");
+
+        if (windowsAuth)
+        {
+            psi.ArgumentList.Add("-E");
+        }
+        else
+        {
+            psi.ArgumentList.Add("-U");
+            psi.ArgumentList.Add(sqlLogin);
+            psi.Environment["SQLCMDPASSWORD"] = sqlPassword;
+        }
+
+        psi.ArgumentList.Add("-d");
+        psi.ArgumentList.Add("master");
+        psi.ArgumentList.Add("-Q");
+        psi.ArgumentList.Add(SchemaBackupRules.Query(database));
+
+        Process process;
+        try
+        {
+            process = Process.Start(psi) ?? throw new InvalidOperationException("sqlcmd не повернув процес.");
+        }
+        catch (Win32Exception)
+        {
+            return SchemaBackupRules.Unknown("sqlcmd was not found, so the backup history could not be read.");
+        }
+
+        using (process)
+        {
+            var stdoutTask = process.StandardOutput.ReadToEndAsync();
+            var stderrTask = process.StandardError.ReadToEndAsync();
+
+            if (!process.WaitForExit((TimeoutSeconds + 5) * 1000))
+            {
+                TryKill(process);
+                return SchemaBackupRules.Unknown($"SQL Server '{sqlInstance}' did not answer the backup query within {timeoutText} s.");
+            }
+
+            var stdout = stdoutTask.GetAwaiter().GetResult();
+            var stderr = stderrTask.GetAwaiter().GetResult();
+            if (process.ExitCode != 0)
+            {
+                return SchemaBackupRules.Unknown(
+                    "Could not read msdb.dbo.backupset (no permission on msdb?).\n\n" + DiagnosticTail(process.ExitCode, stdout, stderr));
+            }
+
+            return SchemaBackupRules.Assess(stdout, database);
+        }
     }
 
     /// <summary>

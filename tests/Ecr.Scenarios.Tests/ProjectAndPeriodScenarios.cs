@@ -326,6 +326,36 @@ public sealed class ProjectAndPeriodScenarios(SqlServerFixture sql)
     }
 
     /// <summary>
+    /// D1-02 (R5-D1). Календар віддає <c>periodEnd</c> — справжній останній
+    /// день періоду. Сітка бере з нього <c>asOf</c> Lookup-пікера; раніше вона
+    /// виводила дату з <c>periodKey</c> як <c>YYYYMM</c>, і для квартального Q2
+    /// (<c>…02</c>) питала довідник на кінець ЛЮТОГО, тоді як PATCH комірки
+    /// звіряв чинність на 30 червня.
+    /// </summary>
+    [Fact]
+    [Trait("Category", "Integration")]
+    [Trait("Scenario", "D1-02")]
+    public async Task Квартальний_календар_віддає_справжній_кінець_періоду()
+    {
+        using var app = new EcrApiFactory(sql);
+        var admin = await Provisioning.AdministratorAsync(app, "D102", ["Project.Manage", "Document.View", "Template.Edit"]);
+
+        var projectId = await CreateProjectAsync(admin.Client, "D102", "Asia/Atyrau", periodKind: "Quarterly");
+
+        var periods = await admin.Client.GetAsync(new Uri($"/api/v1/projects/{projectId}/periods", UriKind.Relative));
+        Assert.Equal(HttpStatusCode.OK, periods.StatusCode);
+
+        var calendar = await periods.Content.ReadFromJsonAsync<JsonElement>();
+        var second = calendar.GetProperty("periods").EnumerateArray()
+            .Single(p => p.GetProperty("sequence").GetInt32() == 2);
+
+        var year = second.GetProperty("year").GetInt32();
+        Assert.Equal(
+            new DateOnly(year, 6, 30).ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture),
+            second.GetProperty("periodEnd").GetString());
+    }
+
+    /// <summary>
     /// T6/#36 — D-134. Кількість, що НЕ ділить рік нарівно, відхиляється при
     /// створенні, а не мовчки дає зламаний календар пізніше.
     /// </summary>

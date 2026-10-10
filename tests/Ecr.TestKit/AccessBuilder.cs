@@ -30,6 +30,7 @@ public sealed class AccessBuilder
     private readonly HashSet<string> _denies = new(StringComparer.Ordinal);
     private readonly HashSet<string> _permissions = new(StringComparer.Ordinal);
     private readonly HashSet<int> _roles = [];
+    private readonly HashSet<int> _scopedRoles = [];
 
     /// <summary>Користувач, чиї права описуються.</summary>
     public int UserId { get; init; } = 7;
@@ -62,6 +63,17 @@ public sealed class AccessBuilder
         return this;
     }
 
+    /// <summary>
+    /// Додає роль, яку користувач має лише В ОБЛАСТІ (ФВ-6.14): вона є в
+    /// <see cref="AccessProfile.RoleIds"/>, але не в <see cref="AccessProfile.UnscopedRoleIds"/>.
+    /// </summary>
+    public AccessBuilder ScopedRole(int roleId)
+    {
+        _roles.Add(roleId);
+        _scopedRoles.Add(roleId);
+        return this;
+    }
+
     /// <summary>Збирає профіль.</summary>
     public AccessProfile Build(bool simulation = false, int? simulatedFor = null)
         => new()
@@ -73,6 +85,9 @@ public sealed class AccessBuilder
             Grants = _grants,
             Denies = _denies,
             RoleIds = _roles,
+
+            // Як `AccessDecisionService`: без областей — `null` («усі ролі безобласні»).
+            UnscopedRoleIds = _scopedRoles.Count == 0 ? null : _roles.Except(_scopedRoles).ToHashSet(),
             IsSimulation = simulation,
             SimulatedForUserId = simulatedFor,
             SimulationActorUserId = simulation ? UserId : null,

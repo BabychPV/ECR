@@ -35,6 +35,12 @@
     на агенті конвеєра це означає пароль у переліку процесів. Оточення
     дочірнього процесу такої видимості не має.
 
+.PARAMETER Force
+    Дозволити видалити наявну базу `-Database`, яка не має позначки `Ecr_SmallFiles`
+    (її цей скрипт ставить одразу після `CREATE DATABASE`). Без перемикача така база —
+    відмова ДО `DROP`: скрипт створює й видаляє ТИМЧАСОВУ базу, і `-Database <робоча>`
+    не повинен її знищити (L10-13).
+
 .EXAMPLE
     powershell -File tools/verify-sql-scripts.ps1
 #>
@@ -43,7 +49,10 @@ param(
     [string] $Server = 'localhost\SQLEXPRESS',
     [string] $Database = 'EcrSqlScriptCheck',
     [string] $Login,
-    [string] $Password = $env:ECR_SQL_PASSWORD
+    [string] $Password = $env:ECR_SQL_PASSWORD,
+
+    # L10-13: див. `.PARAMETER Force`.
+    [switch] $Force
 )
 
 $ErrorActionPreference = 'Stop'
@@ -119,6 +128,30 @@ function Invoke-Script {
 
     Write-Host "  $Name"
     Invoke-Sql -Db $Database -File $path
+}
+
+# ⛔ L10-13: нижче база з цим іменем безумовно ЗНИЩУЄТЬСЯ (і в `finally` теж). Наявна база без
+# позначки `Ecr_SmallFiles` (її ставить цей скрипт після CREATE) і без -Force — відмова ДО DROP.
+# Охорона стоїть ДО `try`, тож `finally` на відмові не виконується.
+if (-not $Force) {
+    $guardAuth = if ($Login) { @('-U', $Login) } else { @('-E') }
+    $guardEap = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $guardOutput = & sqlcmd -S $Server @guardAuth -C -b -h -1 -W -d master `
+            -Q "SET NOCOUNT ON; DECLARE @r int = 0; IF DB_ID(N'$Database') IS NOT NULL EXEC sp_executesql N'SELECT @r = CASE WHEN EXISTS (SELECT 1 FROM [$Database].sys.extended_properties WHERE class = 0 AND name = N''Ecr_SmallFiles'') THEN 0 ELSE 1 END', N'@r int OUTPUT', @r OUTPUT; SELECT @r;" 2>&1
+        $guardExitCode = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $guardEap
+    }
+    if ($guardExitCode -ne 0) {
+        throw "Не вдалося перевірити, чи є база $Database на $Server (sqlcmd повернув $guardExitCode): $($guardOutput -join ' ')"
+    }
+    $foreignDatabase = $guardOutput | Where-Object { "$_" -match '^\s*[01]\s*$' } | Select-Object -First 1
+    if ("$foreignDatabase".Trim() -eq '1') {
+        throw "База $Database на $Server вже існує і не має позначки Ecr_SmallFiles (не наша тимчасова) - перевірка видалила б її. Задай інше -Database, прибери базу вручну або повтори з -Force."
+    }
 }
 
 Write-Host 'Генерую migration.sql…'

@@ -10,6 +10,9 @@ public enum FormulaResultKind
     Text,
 }
 
+/// <summary>Результат виводу типів: форми за ключем і чи збіглась фіксована точка у ліміт проходів (інакше типи неповні).</summary>
+public sealed record FormulaInferenceResult(IReadOnlyDictionary<string, FormulaShape> Shapes, bool Converged);
+
 /// <summary>Висновок про формулу: тип результату й скільки операторів <c>+</c> склеюють текст (у ECR склейка — <c>&amp;</c>).</summary>
 public sealed record FormulaShape(FormulaResultKind Kind, int TextPlus);
 
@@ -30,8 +33,22 @@ public static partial class FormulaTypeInference
     [GeneratedRegex(@"^CST\.([A-Za-z_]\w*)$", RegexOptions.CultureInvariant)]
     private static partial Regex ConstantRefRegex();
 
+    /// <summary>Ліміт проходів фіксованої точки; вихід за нього без збіжності — блокер <see cref="NotConvergedBlocker"/>.</summary>
+    public const int MaxPasses = 64;
+
+    /// <summary>Початок блокера, коли фіксована точка не збіглась за <see cref="MaxPasses"/> проходів.</summary>
+    public const string NotConvergedBlocker = "FORMULA_TYPE_NOT_CONVERGED";
+
     /// <summary>Ключ — <see cref="FormulaDef.Key"/>.</summary>
     public static IReadOnlyDictionary<string, FormulaShape> Infer(MethodologyModel model, string library)
+        => InferDetailed(model, library).Shapes;
+
+    /// <summary>
+    /// Те саме, що <see cref="Infer"/>, плюс ознака збіжності. Дублі ключа формули (різні елементи AF з однаковим
+    /// <see cref="FormulaDef.Key"/>) зводяться в ОДНУ форму за ключем: Text, якщо хоч один дубль Text
+    /// (<c>TextPlus</c> — максимум серед дублів). Інакше дублі з різним типом перемикали б форму щопроходу.
+    /// </summary>
+    public static FormulaInferenceResult InferDetailed(MethodologyModel model, string library)
     {
         ArgumentNullException.ThrowIfNull(model);
 
@@ -53,44 +70,60 @@ public static partial class FormulaTypeInference
             }
         }
 
-        var shapes = model.Formulas
+        var groups = model.Formulas
             .GroupBy(f => f.Key, StringComparer.Ordinal)
-            .ToDictionary(g => g.Key, _ => new FormulaShape(FormulaResultKind.Number, 0), StringComparer.Ordinal);
+            .Select(g => (Key: g.Key, Formulas: g.ToList()))
+            .ToList();
+        var shapes = groups.ToDictionary(g => g.Key, _ => new FormulaShape(FormulaResultKind.Number, 0), StringComparer.Ordinal);
 
-        // Фіксована точка: Number → Text лише зростає, тож цикл скінченний.
-        for (var pass = 0; pass < 64; pass++)
+        // Фіксована точка: форма за ключем лише зростає (Number → Text, TextPlus ↑), тож цикл скінченний.
+        var converged = false;
+        for (var pass = 0; pass < MaxPasses; pass++)
         {
             var changed = false;
-            foreach (var f in model.Formulas)
+            foreach (var (key, formulas) in groups)
             {
-                var scope = (f.Methodology, f.MethodologyVersion);
-                bool FormulaIsText(string name)
+                var kind = FormulaResultKind.Number;
+                var textPlus = 0;
+                foreach (var f in formulas)
                 {
-                    var own = formulaKeys.TryGetValue(scope, out var n) && n.TryGetValue(name, out var l) ? l : null;
-                    var keys = own ?? (libraryKeys.TryGetValue(name, out var lib) ? lib : null);
-                    return keys is not null && keys.Any(k => shapes[k].Kind == FormulaResultKind.Text);
+                    var scope = (f.Methodology, f.MethodologyVersion);
+                    bool FormulaIsText(string name)
+                    {
+                        var own = formulaKeys.TryGetValue(scope, out var n) && n.TryGetValue(name, out var l) ? l : null;
+                        var keys = own ?? (libraryKeys.TryGetValue(name, out var lib) ? lib : null);
+                        return keys is not null && keys.Any(k => shapes[k].Kind == FormulaResultKind.Text);
+                    }
+
+                    bool ConstantIsText(string name)
+                        => textConstants.Contains((f.Methodology, f.MethodologyVersion, name))
+                           || textConstants.Contains((library, string.Empty, name));
+
+                    var (isText, plus) = Evaluate(f.Text, FormulaIsText, ConstantIsText);
+                    if (isText)
+                    {
+                        kind = FormulaResultKind.Text;
+                    }
+
+                    textPlus = Math.Max(textPlus, plus);
                 }
 
-                bool ConstantIsText(string name)
-                    => textConstants.Contains((f.Methodology, f.MethodologyVersion, name))
-                       || textConstants.Contains((library, string.Empty, name));
-
-                var (isText, plus) = Evaluate(f.Text, FormulaIsText, ConstantIsText);
-                var next = new FormulaShape(isText ? FormulaResultKind.Text : FormulaResultKind.Number, plus);
-                if (next != shapes[f.Key])
+                var next = new FormulaShape(kind, textPlus);
+                if (next != shapes[key])
                 {
-                    shapes[f.Key] = next;
+                    shapes[key] = next;
                     changed = true;
                 }
             }
 
             if (!changed)
             {
+                converged = true;
                 break;
             }
         }
 
-        return shapes;
+        return new FormulaInferenceResult(shapes, converged);
     }
 
     /// <summary>Текст вираз → (чи текст, скільки <c>+</c> склеюють текст).</summary>

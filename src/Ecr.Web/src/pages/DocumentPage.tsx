@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useState, type JSX } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type JSX } from 'react';
 import { isHeaderFinding } from '@/features/documents/inspector/inspectorModel';
 import { Alert, Badge, Skeleton, Stack, Tabs, Text } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
@@ -24,11 +24,13 @@ import {
 import { DocumentActionBar } from '@/features/documents/DocumentActionBar';
 import { DocumentSaveState } from '@/features/documents/DocumentSaveState';
 import { useDocumentLogActions } from '@/features/documents/DocumentLogActions';
+import { useStaleResultsReminderHost } from '@/features/documents/useStaleResultsReminder';
 import { useVersionMigrationAction } from '@/features/documents/VersionMigrationAction';
 import { DocumentLockBanner } from '@/features/documents/DocumentLockBanner';
 import { documentLockOf, hasLockedSheet, locksDataActions } from '@/features/documents/documentLock';
 import { DocumentProgress } from '@/features/documents/DocumentProgress';
 import { useDocumentPending } from '@/features/grid/autosave';
+import type { HeldEdit } from '@/features/grid/pendingStore';
 import { isEditable } from '@/features/workflow/SheetActions';
 import { useCalculationsStale } from '@/features/methodologies/staleCalculations';
 import { can, useSession } from '@/shared/session/useSession';
@@ -291,18 +293,20 @@ export function DocumentPage(): JSX.Element {
   const [headerOpenRequest, setHeaderOpenRequest] = useState(0);
 
   const validate = useMutation({
-    mutationFn: (_scope: string) =>
+    // ⛔ N3-01: адреса (`scope`, `documentId`, `periodKey`) - ЗМІННА мутації, знята в мить кліку. Кнопка спершу чекає
+    // збереження набраного (до 3 с); період із замикання виконувався б уже ІНШИЙ, якщо за цей час його змінили.
+    mutationFn: (target: { scope: string; documentId: number; periodKey: number }) =>
       apiFetch<ValidationResultResponse>(
-        `/api/v1/documents/${documentId}/validate`,
+        `/api/v1/documents/${target.documentId}/validate`,
         {
           method: 'POST',
           // ⚠ Період — у ТІЛІ. До `A7-28` сервер читав його з рядка запиту, і
           // валідація мовчки йшла по періоду 0, відповідаючи «помилок немає».
-          body: JSON.stringify({ periodKey } satisfies DocumentPeriodRequest),
+          body: JSON.stringify({ periodKey: target.periodKey } satisfies DocumentPeriodRequest),
         },
       ),
-    onSuccess: (result, requestedScope) => {
-      setFresh({ scope: requestedScope, result });
+    onSuccess: (result, target) => {
+      setFresh({ scope: target.scope, result });
       setValidatedSeq((value) => value + 1);
 
       const errors = result.messages.filter((message) => message.severity === 'Error');
@@ -386,26 +390,52 @@ export function DocumentPage(): JSX.Element {
 
   // AN-28 P2-1: дія заблокована утриманою (відхиленою) коміркою - показати її:
   // аркуш, прокрутка, фокус і підсвітка - тим самим шляхом, що й зауваження (`ФВ-5.6`).
+  //
+  // ⛔ N3-06: утримана правка ІНШОГО періоду раніше мовчки ігнорувалась - дія блокована, а
+  // показати причину нікуди. Тепер період перемикається, а сама комірка показується, щойно
+  // таблиці цього періоду прочитано (`heldToReveal`): `tables.data` до того - чужого періоду.
+  const heldToReveal = useRef<HeldEdit | null>(null);
+
+  const revealHeld = useCallback(
+    (held: HeldEdit): void => {
+      const target = tables.data?.find((table) => table.tableInstanceId === held.tableInstanceId);
+      if (target === undefined) return;
+
+      if (target.sheetCode !== activeCode) setSheet(target.sheetCode);
+      void import('@/features/grid/cellNavigation').then((module) =>
+        module.requestCellNavigation({
+          tableDefId: target.tableDefId,
+          tableInstanceId: target.tableInstanceId,
+          rowKey: held.edit.rowKey,
+          columnCode: held.edit.columnCode,
+        }),
+      );
+    },
+    [tables.data, activeCode, setSheet],
+  );
+
   useEffect(
     () =>
       registerHeldEditRevealer((held) => {
-        if (held.periodKey !== periodKey) return;
+        if (held.periodKey !== periodKey) {
+          heldToReveal.current = held;
+          setPeriodKey(held.periodKey);
 
-        const target = tables.data?.find((table) => table.tableInstanceId === held.tableInstanceId);
-        if (target === undefined) return;
+          return;
+        }
 
-        if (target.sheetCode !== activeCode) setSheet(target.sheetCode);
-        void import('@/features/grid/cellNavigation').then((module) =>
-          module.requestCellNavigation({
-            tableDefId: target.tableDefId,
-            tableInstanceId: target.tableInstanceId,
-            rowKey: held.edit.rowKey,
-            columnCode: held.edit.columnCode,
-          }),
-        );
+        revealHeld(held);
       }),
-    [periodKey, tables.data, activeCode, setSheet],
+    [periodKey, setPeriodKey, revealHeld],
   );
+
+  useEffect(() => {
+    const held = heldToReveal.current;
+    if (held === null || held.periodKey !== periodKey || tables.data === undefined) return;
+
+    heldToReveal.current = null;
+    revealHeld(held);
+  }, [periodKey, tables.data, revealHeld]);
 
   // ⚠ Стан береться з `SheetStates` документа за КОДОМ аркуша: скалярного
   // статусу документа не існує (D-93) — аркуші за один період бувають у
@@ -447,6 +477,10 @@ export function DocumentPage(): JSX.Element {
   });
 
   useProjectCurrentPeriodDefault(urlPeriod, calendar.data?.periods, setPeriodKey);
+
+  // ⛔ D1-02: дата чинності довідників у сітці — календарний кінець періоду ІЗ СЕРВЕРА.
+  // `periodKey` для квартальних/річних проєктів — не `YYYYMM`, тож виводити дату з нього не можна.
+  const periodEnd = calendar.data?.periods?.find((period) => period.periodKey === periodKey)?.periodEnd ?? null;
 
   const lock = documentLockOf({
     projectStatus: projects.data?.items?.find((project) => project.id === projectId)?.status,
@@ -508,6 +542,7 @@ export function DocumentPage(): JSX.Element {
 
   // ✎ Лінія B: бейдж у шапці й назва пункту «More», коли числа методологій застаріли. Запит спільний із
   // панеллю чисел (один ключ), тож завершений перерахунок оновлює обох.
+  const staleReminderHost = useStaleResultsReminderHost(documentId);
   const calculationsStale = useCalculationsStale(documentId, periodKey, can(session.data, 'Calculation.View'));
 
   const refetchBoth = (): void => {
@@ -596,12 +631,13 @@ export function DocumentPage(): JSX.Element {
           canExport={can(session.data, 'Document.Export')}
           validate={{
             loading: validateLoading || validateAction.settling,
-            run: () => validateAction.run(() => validate.mutateAsync(scope), { readOnly: true }),
+            run: () => validateAction.run(() => validate.mutateAsync({ scope, documentId, periodKey }), { readOnly: true }),
           }}
           calculationsStale={calculationsStale}
           documentItems={[...documentLog.menuItems, businessKeyChange.menuItem, versionMigration.menuItem, deletion.menuItem]}
           resultsStale={document.resultsStale ?? null}
           resultsStaleSince={document.resultsStaleSince ?? null}
+          staleReminderHost={staleReminderHost}
           status={
             <>
               {/* ✎ UI-15: чип стану аркуша і заповненість одним рядком
@@ -838,6 +874,7 @@ export function DocumentPage(): JSX.Element {
                 <gridModule.component
                   documentId={documentId}
                   periodKey={periodKey}
+                  periodEnd={periodEnd}
                   readOnly={readOnly}
                   tables={active.tables}
                 />

@@ -156,9 +156,41 @@ public sealed class LegacyDoubleArithmetic : IEvaluationArithmetic
     /// Аудит A5: порівняння через <c>decimal</c> давало <c>0.1 + 0.2 = 0.3</c> →
     /// TRUE (звуження округлює до 15 знаків), а NCalc дає FALSE — і <c>if</c>
     /// обирав іншу гілку, ніж чинна система.
+    ///
+    /// ⛔ C1-05 (аудит 2026-10-09c). Текстовий аргумент, що є числом, у <c>Legacy</c>
+    /// подається <c>double</c> (як параметр чинної збірки). Щоб <c>@Cat = '1'</c>, яке
+    /// доти порівнювало текст із текстом, і далі давало TRUE, <c>double</c>-значення
+    /// проти тексту, що розбирається числом, порівнюється як <c>double</c> — саме так
+    /// <c>CompareUsingMostPreciseType</c> NCalc зводить пару <c>(double, string)</c>.
+    /// Десяткові літерали (<c>'1' = 1</c>) цим не зачеплені.
     /// </remarks>
     public int? CompareNumbers(ExpressionValue left, ExpressionValue right)
-        => left.AsDouble() is { } a && right.AsDouble() is { } b
-            ? a.CompareTo(b)
+    {
+        if (left.AsDouble() is { } a && right.AsDouble() is { } b)
+        {
+            return a.CompareTo(b);
+        }
+
+        if (left.IsDouble && TextAsDouble(right) is { } rightNumber)
+        {
+            return ((double)left.Value!).CompareTo(rightNumber);
+        }
+
+        if (right.IsDouble && TextAsDouble(left) is { } leftNumber)
+        {
+            return leftNumber.CompareTo((double)right.Value!);
+        }
+
+        return null;
+    }
+
+    private static double? TextAsDouble(ExpressionValue value)
+        => value.Type == ExpressionValueType.Text
+           && double.TryParse(
+               (string)value.Value!,
+               System.Globalization.NumberStyles.Float,
+               System.Globalization.CultureInfo.InvariantCulture,
+               out var number)
+            ? number
             : null;
 }

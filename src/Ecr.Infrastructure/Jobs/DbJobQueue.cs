@@ -97,6 +97,19 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock) : IJobQueue
             CancelRequestedAt = NULL, StartedAt = @shown, [Percent] = 0, [Message] = NULL, Error = NULL, ErrorCode = NULL,
         """ + "\n" + ClaimSet + "\n" + ClaimOutput + ";";
 
+    /// <summary>
+    /// Захоплення <c>Queued</c> лише задач коду <c>@priorityCode</c> — той самий
+    /// <see cref="ClaimQueuedSql"/> з одним додатковим фільтром (AN-123, L1-04).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Окремий прохід перед звичайним, а не <c>ORDER BY CASE</c> у спільному claim: той
+    /// зламав би впорядкований пошук <c>IX_JobProgress_Claim</c> для ВСІХ лейнів (сортування
+    /// всіх <c>Queued</c> лейна на кожен claim), а так зайвий запит — лише в лейні з
+    /// пріоритетом (<see cref="JobLaneMap.PriorityJobCodeOf"/>), де черга коротка.
+    /// </remarks>
+    internal static readonly string ClaimPriorityQueuedSql = ClaimQueuedSql.Replace(
+        "AND q.[State] = 'Queued'", "AND q.JobCode = @priorityCode AND q.[State] = 'Queued'", StringComparison.Ordinal);
+
     /// <summary>Змінні злиття масиву payload (<see cref="MergeArraysSql"/>).</summary>
     private const string MergeDeclarations = """
         DECLARE @basePayload nvarchar(max) = NULL, @addPayload nvarchar(max) = NULL, @merged nvarchar(max) = NULL;
@@ -284,7 +297,14 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock) : IJobQueue
         await EnsureRcsiAsync(ct).ConfigureAwait(false);
 
         // Значення лейна в SQL — константа з JobLanes.All, а не рядок викликача.
-        var ordered = JobLanes.All.Where(l => lanes.Contains(l, StringComparer.Ordinal)).ToArray();
+        // ⛔ J1-04: ПОРЯДОК — викликача. Жорсткий порядок JobLanes.All (interactive першим) під
+        // сталим потоком перерахунку формул морив лейн default голодом: спільні місця воркера
+        // ніколи не доходили до матеріалізації, синку подій і знімків звітів. Чергування лейнів
+        // вирішує воркер (`JobWorker.Rotate`), черга лише виконує його порядок.
+        var ordered = lanes
+            .Select(l => JobLanes.All.First(k => string.Equals(k, l, StringComparison.Ordinal)))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
         var token = Guid.NewGuid();
 
         void Bind(SqlParameterCollection p, string lane)
@@ -317,6 +337,27 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock) : IJobQueue
             {
                 foreach (var lane in ordered)
                 {
+                    // ⛔ AN-123 (L1-04): у лейні з пріоритетом спершу його задачі (імпорт Excel
+                    // перед експортами), далі — звичайний FIFO.
+                    if (!reclaimed && JobLaneMap.PriorityJobCodeOf(lane) is { } priority)
+                    {
+                        var first = await RunAsync(
+                                ClaimPriorityQueuedSql,
+                                p =>
+                                {
+                                    Bind(p, lane);
+                                    p.Add("@priorityCode", SqlDbType.NVarChar, 64).Value = priority;
+                                },
+                                r => Read(r, false),
+                                ct)
+                            .ConfigureAwait(false);
+
+                        if (first is not null)
+                        {
+                            return first;
+                        }
+                    }
+
                     var job = await RunAsync(sql, p => Bind(p, lane), r => Read(r, reclaimed), ct)
                         .ConfigureAwait(false);
 
@@ -512,6 +553,9 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock) : IJobQueue
                 SET [State] = CASE WHEN CancelRequestedAt IS NULL THEN 'Queued' ELSE 'Cancelled' END,
                     AvailableAt = @available, ClaimToken = NULL, LeaseUntil = NULL,
                     UpdatedAt = @shown, HeartbeatAt = @shown, Payload = ISNULL(@ownPayload, Payload),
+                    -- ⛔ L2-01: воркер пише «retry scheduled» ДО повернення в чергу; рядок, що закривається
+                    -- Cancelled, не має обіцяти повтор — повідомлення знімається в тому самому UPDATE.
+                    [Message] = CASE WHEN CancelRequestedAt IS NULL THEN [Message] ELSE NULL END,
                     Attempt = CASE WHEN @restoreAttempt = 1 AND ISNULL(Attempt, 0) > 0 THEN Attempt - 1 ELSE Attempt END,
                     -- Позаду на ціль уже стоїть інша Queued: дві Queued на ціль не пускає UX_JobProgress_Target_Queued.
                     TargetKey = CASE WHEN @behind IS NULL THEN TargetKey ELSE NULL END
@@ -603,36 +647,51 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock) : IJobQueue
     /// ⚠ На ціль уже стоїть інша <c>Queued</c> — перезапуск зайвий: вона візьме
     /// актуальний стан цілі. <c>UX_JobProgress_Target_Queued</c> відбиває
     /// перехід (2601), і метод повертає <see cref="JobRestartOutcome.CoveredBy"/> з
-    /// ідентифікатором тієї, що чекає (L2-11), — а не «не рядок черги».
+    /// ідентифікатором тієї, що чекає (L2-11), — а не «не рядок черги». Якщо вона вже стартувала —
+    /// називає виконувану; якщо завершилась — повторює перезапуск.
     /// </remarks>
     public async Task<JobRestartOutcome> RestartAsync(string jobId, CancellationToken ct)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(jobId);
 
-        try
+        for (var attempt = 1; ; attempt++)
         {
-            return await RestartRowAsync(jobId, ct).ConfigureAwait(false)
-                ? JobRestartOutcome.Restarted
-                : JobRestartOutcome.NotQueueRow;
-        }
-        catch (SqlException ex) when (IsDuplicateKey(ex))
-        {
-            var covering = await RunAsync(
-                """
-                SELECT TOP (1) q.JobId
-                FROM itg.JobProgress f
-                JOIN itg.JobProgress q ON q.TargetKey = f.TargetKey AND q.[State] = 'Queued' AND q.JobId <> f.JobId
-                WHERE f.JobId = @id AND f.TargetKey IS NOT NULL;
-                """,
-                p => p.Add("@id", SqlDbType.NVarChar, 100).Value = jobId,
-                async r => await r.ReadAsync(ct).ConfigureAwait(false) ? r.GetString(0) : null,
-                ct).ConfigureAwait(false);
+            try
+            {
+                return await RestartRowAsync(jobId, ct).ConfigureAwait(false)
+                    ? JobRestartOutcome.Restarted
+                    : JobRestartOutcome.NotQueueRow;
+            }
+            catch (SqlException ex) when (IsDuplicateKey(ex) && attempt < 3)
+            {
+                if (await FindCoveringJobIdAsync(jobId, ct).ConfigureAwait(false) is { } covering)
+                {
+                    return JobRestartOutcome.CoveredBy(covering);
+                }
 
-            // Та, що чекала, могла встигнути стартувати між відмовою і читанням: перезапуск
-            // однаково зайвий (2601 був), просто назвати її вже нема як.
-            return JobRestartOutcome.CoveredBy(covering ?? string.Empty);
+                // ⛔ L2-11: та, що чекала, встигла завершитися між відмовою і читанням — слот цілі
+                // вільний, перезапуск знову доречний. Порожній ідентифікатор у 409 не віддаємо.
+            }
         }
     }
+
+    /// <summary>
+    /// Задача, що вже виконує роботу цілі <paramref name="jobId"/> (L2-11): <c>Queued</c> спершу,
+    /// інакше <c>Running</c> — та, що чекала, могла встигнути стартувати між відмовою перезапуску й читанням.
+    /// </summary>
+    /// <returns><c>null</c> — ні <c>Queued</c>, ні <c>Running</c> на ціль немає.</returns>
+    internal Task<string?> FindCoveringJobIdAsync(string jobId, CancellationToken ct)
+        => RunAsync(
+            """
+            SELECT TOP (1) q.JobId
+            FROM itg.JobProgress f
+            JOIN itg.JobProgress q ON q.TargetKey = f.TargetKey AND q.[State] IN ('Queued', 'Running') AND q.JobId <> f.JobId
+            WHERE f.JobId = @id AND f.TargetKey IS NOT NULL
+            ORDER BY CASE WHEN q.[State] = 'Queued' THEN 0 ELSE 1 END, q.UpdatedAt DESC;
+            """,
+            p => p.Add("@id", SqlDbType.NVarChar, 100).Value = jobId,
+            async r => await r.ReadAsync(ct).ConfigureAwait(false) ? r.GetString(0) : null,
+            ct);
 
     private Task<bool> RestartRowAsync(string jobId, CancellationToken ct)
     {

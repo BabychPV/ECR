@@ -107,6 +107,16 @@ public static class HeaderValueReader
         DateTime date => date,
         DateTimeOffset offset => offset.UtcDateTime,
         string text when CellDateParser.TryParse(text, out var parsed) => parsed,
+
+        // ⛔ Z3-02: дата з днем або місяцем спереду, яку розбір відхилив (Y5-02, Z3-01), —
+        // власний ключ із порадою РРРР-ММ-ДД, а не «очікує дату» на значенні, схожому на дату.
+        string text when CellDateParser.IsRefusedDayMonthDate(text) => throw Mismatch(
+            field, value, ExpectedType.Date,
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-HDR-0422.ambiguousDate",
+                ["value"] = text,
+            }),
         _ => throw Mismatch(field, value, ExpectedType.Date),
     };
 

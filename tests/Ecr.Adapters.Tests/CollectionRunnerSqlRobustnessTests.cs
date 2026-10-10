@@ -97,8 +97,9 @@ public sealed class CollectionRunnerSqlRobustnessTests(SqlServerFixture sql)
     {
         // ⛔ Будь-який виняток, крім правила й watchdog, раніше минав
         // `FinishRunAsync`. Тут його кидає прогрес ПІСЛЯ повністю прочитаного
-        // першого інтервалу (прогалини наздоганяння): прогін мусить стати
-        // «Failed» з назвою винятку, а цей інтервал — лишитися покритим.
+        // першого інтервалу (з R5-I1 / I1-04 це запитаний діапазон, прогалини
+        // наздоганяння — за ним): прогін мусить стати «Failed» з назвою
+        // винятку, а цей інтервал — лишитися покритим.
         // МУТАЦІЙНИЙ ДОКАЗ (прогнано): вимкнути фільтром `catch (Exception ex)
         // when (ex is not SourceAuthenticationException)` у
         // `CollectionRunner.RunAsync` → статус «Running».
@@ -118,9 +119,11 @@ public sealed class CollectionRunnerSqlRobustnessTests(SqlServerFixture sql)
         Assert.DoesNotContain("прогрес недоступний", reason.Params["error"], StringComparison.Ordinal);
         Assert.Contains("ECR-SYS-0500", reason.Params["error"], StringComparison.Ordinal);
 
-        // Покрито рівно перший інтервал — прогалину до запитаного діапазону.
+        // Покрито рівно перший інтервал — запитаний діапазон; прогалина до нього
+        // не прочитана й не покрита (піде в наздоганяння наступного прогону).
         var coverage = Assert.Single(outcome.Coverage);
-        Assert.Equal(FromUtc, coverage.CoveredTo);
+        Assert.Equal(FromUtc, coverage.CoveredFrom);
+        Assert.Equal(Now, coverage.CoveredTo);
     }
 
     [Fact]
@@ -135,14 +138,17 @@ public sealed class CollectionRunnerSqlRobustnessTests(SqlServerFixture sql)
         // (OperationCanceledException ex) when (ct.IsCancellationRequested)` →
         // скасування йде в загальну гілку і стає «Failed» (без обох гілок, як до
         // виправлення, — «Running»).
+        // З R5-I1 / I1-04 запитаний діапазон читається ПЕРШИМ, тож скасування
+        // приходить на читанні прогалини — уже після повністю прочитаного
+        // запитаного діапазону.
         using var cts = new CancellationTokenSource();
 
         var outcome = await RunOnceAsync(
-            _ =>
+            _ => [],
+            onGapRead: () =>
             {
                 cts.Cancel();
                 cts.Token.ThrowIfCancellationRequested();
-                return [];
             },
             ct: cts.Token);
 
@@ -152,10 +158,11 @@ public sealed class CollectionRunnerSqlRobustnessTests(SqlServerFixture sql)
             CollectionRunnerMessageEnvelopeTests.IsReason(outcome.Run.ErrorMessage, "jobs.collectionCancelled", "ECR-INT-0503"),
             outcome.Run.ErrorMessage);
 
-        // Прогалина до запитаного діапазону прочитана до скасування — покрита;
-        // запитаний діапазон — ні, він піде в наздоганяння.
+        // Запитаний діапазон прочитано до скасування — покритий; прогалина — ні,
+        // вона піде в наздоганяння.
         var coverage = Assert.Single(outcome.Coverage);
-        Assert.Equal(FromUtc, coverage.CoveredTo);
+        Assert.Equal(FromUtc, coverage.CoveredFrom);
+        Assert.Equal(Now, coverage.CoveredTo);
     }
 
     [Fact]
@@ -276,11 +283,13 @@ public sealed class CollectionRunnerSqlRobustnessTests(SqlServerFixture sql)
 
     /// <summary>
     /// Один прогін над власною сутністю: джерело на ЗАПИТАНОМУ інтервалі віддає
-    /// <paramref name="points"/>, на прогалині наздоганяння — порожньо.
+    /// <paramref name="points"/>, на прогалині наздоганяння — порожньо (перед тим
+    /// викликавши <paramref name="onGapRead"/>, якщо його задано).
     /// </summary>
     private async Task<Outcome> RunOnceAsync(
         Func<string, IReadOnlyList<SourceDataPoint>> points,
         IJobProgress? progress = null,
+        Action? onGapRead = null,
         CancellationToken ct = default)
     {
         await using var db = sql.CreateContext();
@@ -288,10 +297,16 @@ public sealed class CollectionRunnerSqlRobustnessTests(SqlServerFixture sql)
 
         try
         {
-            var source = Source(request => Task.FromResult(
-                request.FromUtc == FromUtc
-                    ? new CollectionResult(points(stand.Path), [], null)
-                    : new CollectionResult([], [], null)));
+            var source = Source(request =>
+            {
+                if (request.FromUtc == FromUtc)
+                {
+                    return Task.FromResult(new CollectionResult(points(stand.Path), [], null));
+                }
+
+                onGapRead?.Invoke();
+                return Task.FromResult(new CollectionResult([], [], null));
+            });
 
             Exception? error = null;
             try

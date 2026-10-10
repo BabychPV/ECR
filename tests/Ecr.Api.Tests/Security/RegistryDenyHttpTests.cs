@@ -275,6 +275,7 @@ public sealed class RegistryDenyHttpTests(SqlServerFixture sql)
         var relation = (await JsonAsync(definition)).GetProperty("relations").EnumerateArray()
             .Single(r => r.GetProperty("fieldCode").GetString() == "TO_DENIED");
         Assert.Equal(JsonValueKind.Null, relation.GetProperty("targetRegistryCode").ValueKind);
+        Assert.Equal(JsonValueKind.Null, relation.GetProperty("targetRegistryDefId").ValueKind);
 
         // Контроль: той, кому не заборонено, бачить код цілі (поведінка до L5-08 не зламана).
         using var plain = await SignedInAsync(app, denyRegistryId: null);
@@ -282,6 +283,7 @@ public sealed class RegistryDenyHttpTests(SqlServerFixture sql)
         var plainRelation = (await JsonAsync(plainDef)).GetProperty("relations").EnumerateArray()
             .Single(r => r.GetProperty("fieldCode").GetString() == "TO_DENIED");
         Assert.Equal(stand.DeniedCode, plainRelation.GetProperty("targetRegistryCode").GetString());
+        Assert.Equal(stand.DeniedRegistryId, plainRelation.GetProperty("targetRegistryDefId").GetInt32());
     }
 
     private static string[] ReadPaths(string code, long entryId) =>

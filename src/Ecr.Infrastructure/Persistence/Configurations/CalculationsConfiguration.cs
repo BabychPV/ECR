@@ -426,7 +426,8 @@ public sealed class MethodologyCategoryRuleConfiguration : IEntityTypeConfigurat
 
         builder.ToTable("CategoryRule", "calc");
         builder.HasKey(x => x.Id);
-        builder.Property(x => x.Expression).IsRequired();
+        // AN-80: межа та сама, що в `ExpressionLengthGuard` і `MethodologyCategoryRule.Normalize` (4000).
+        builder.Property(x => x.Expression).IsRequired().HasMaxLength(MethodologyFormula.MaxExpressionLength);
         builder.Property(x => x.CreatedAt).HasColumnType("datetime2(3)");
         builder.Property(x => x.UpdatedAt).HasColumnType("datetime2(3)");
 
@@ -500,6 +501,9 @@ public sealed class CalculationRunConfiguration : IEntityTypeConfiguration<Calcu
 
         // RK04 (D-158): момент знімка довідників; NULL — прогін до міграції.
         builder.Property(x => x.RegistryAsOfUtc).HasColumnType("datetime2(3)");
+
+        // N2-03 (AN-80): момент входів чисел, коли прогін переніс результати старішого прогону; NULL — старт.
+        builder.Property(x => x.InputsAsOfUtc).HasColumnType("datetime2(3)");
 
         // ⛔ Унікальний ФІЛЬТРОВАНИЙ індекс — той самий прийом, що вже тримає
         // «поточний зріз» у `UX_ReportSnapshot_Current`. Доти інваріант

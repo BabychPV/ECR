@@ -213,8 +213,18 @@ public interface IBackgroundJobScheduler
 /// витоком — будь-хто читав би чужу чергу, назвавши чуже число.
 /// </para>
 /// </param>
+/// <param name="HideRoutine">
+/// <c>true</c> — без УСПІШНИХ каскадних перерахунків формул (<c>IFormulaRecalculationJob</c>).
+/// <para>
+/// ⛔ F4-01 (audit-9): кожне автозбереження, що прийшло після старту попереднього прогону, дає новий
+/// рядок перерахунку формул. Перелік обрізається стелею ДО будь-якого клієнтського фільтра, тож
+/// після ~50 збережень готовий експорт чи імпорт випадав зі шухляди «Мої задачі», хоча
+/// <c>ExportButton</c> обіцяє, що посилання там лишається. Тому рутина відсікається в запиті, ДО
+/// <c>TOP</c>. Провалений чи незавершений перерахунок лишається: там є що сказати.
+/// </para>
+/// </param>
 public sealed record JobListFilter(
-    string? State = null, string? JobCode = null, int? CreatedByUserId = null)
+    string? State = null, string? JobCode = null, int? CreatedByUserId = null, bool HideRoutine = false)
 {
     /// <summary>Порожнє звуження: усі задачі всіх авторів.</summary>
     public static readonly JobListFilter None = new();
@@ -329,6 +339,11 @@ public interface IJobProgress
 /// Похідний стан для оператора: <c>FannedOut</c> / <c>Succeeded</c> /
 /// <c>SucceededWithErrors</c>; <c>null</c> — як <see cref="State"/>.
 /// </param>
+/// <param name="WrittenCount">
+/// Скільки комірок записав <c>Succeeded</c> перерахунок формул після правки (<c>0</c> — нічого,
+/// клієнт не перечитує зрізи); <c>null</c> — інша задача, ще не завершена або число невідоме
+/// (AN-108 / P2-02, <c>FormulaRecalcOutcome</c>). Заповнює <c>GetJobStatusHandler</c>.
+/// </param>
 public sealed record JobStatus(
     string JobId,
     string State,
@@ -344,7 +359,8 @@ public sealed record JobStatus(
     string? ResultUrl = null,
     int? CreatedByUserId = null,
     FanOutStatus? FanOut = null,
-    string? EffectiveState = null);
+    string? EffectiveState = null,
+    int? WrittenCount = null);
 
 /// <summary>Ідентифікатор поточної задачі; його несе канал прогресу воркера.</summary>
 /// <remarks>Потрібен задачі, що розкладає роботу на дочірні, щоб позначити їх своїм <c>JobId</c>.</remarks>

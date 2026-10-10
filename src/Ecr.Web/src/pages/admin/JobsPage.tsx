@@ -83,6 +83,13 @@ function searchText(job: JobSummary): string {
     .toLocaleLowerCase();
 }
 
+/** Значення `?since=` для плитки «failed in 24 h». */
+const FailedWindow = '24h';
+
+function isWithinLastDay(updatedAt: string): boolean {
+  return Date.now() - Date.parse(updatedAt) <= 24 * 60 * 60 * 1000;
+}
+
 /**
  * Журнал фонових задач (`/admin/jobs`).
  *
@@ -110,13 +117,22 @@ export function JobsPage(): JSX.Element {
   const [mine, setMine] = useUrlState('mine');
   const [query] = useUrlState('q');
   const [type] = useUrlState('type');
-  const [state, setState] = useUrlState('state');
+  const [state] = useUrlState('state');
+  // N4-03: плитка «failed in 24 h» ставить `state=Failed` + `since=24h`, щоб перелік рахувався тим самим
+  // предикатом, що й число на плитці. Випадаючий фільтр стану лишається «усі провалені».
+  const [since] = useUrlState('since');
 
   // ⚠ Старе посилання `?id=` — у `?panel=`, заміною історії: «Назад» не має
   // повертати на адресу, яка одразу ж переписується знову.
   useEffect(() => {
     if (legacyId !== null) setParams({ panel: rawJobId(legacyId), id: null });
   }, [legacyId, setParams]);
+
+  // `since` має сенс лише при `state=Failed`: інакше (стан змінено/скинуто) залишок не має «прилипнути»
+  // до наступного ручного вибору «Failed».
+  useEffect(() => {
+    if (since !== null && state !== 'Failed') setParams({ since: null });
+  }, [since, state, setParams]);
 
   // ⛔ `BE-08`. «Лише мої» знятий за замовчуванням — екран відкривається лише з
   // правом `System.ViewHealth`, і для його власника звуження до своїх було б
@@ -188,12 +204,15 @@ export function JobsPage(): JSX.Element {
     }
   }
 
+  const selectStat = (id: string | null): void => setParams({ state: id, since: id === 'Failed' ? FailedWindow : null });
+
   const needle = (query ?? '').trim().toLocaleLowerCase();
   const shown = all?.filter(
     (job) =>
       (needle === '' || searchText(job).includes(needle)) &&
       (type === null || job.jobCode === type) &&
-      (state === null || badgeStateOf(job) === state),
+      (state === null || badgeStateOf(job) === state) &&
+      (state !== 'Failed' || since !== FailedWindow || isWithinLastDay(job.updatedAt)),
   );
 
   const summary = panel === null ? undefined : all?.find((job) => job.jobId === panel);
@@ -313,7 +332,7 @@ export function JobsPage(): JSX.Element {
           { label: t('jobs.findById'), onClick: () => setFinding(true) },
         ],
       }}
-      stats={stats === undefined ? undefined : { label: t('jobs.statsLabel'), items: stats, active: state, onSelect: setState }}
+      stats={stats === undefined ? undefined : { label: t('jobs.statsLabel'), items: stats, active: state === 'Failed' && since !== FailedWindow ? null : state, onSelect: selectStat }}
       filters={
         <FilterBar
           search={{ label: t('jobs.search'), placeholder: t('jobs.searchPlaceholder') }}

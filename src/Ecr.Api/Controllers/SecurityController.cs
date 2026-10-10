@@ -36,6 +36,7 @@ public sealed class SecurityController(
     Ecr.Application.Security.GetEffectiveAccessHandler effectiveAccess,
     Ecr.Application.Security.ResetUserPasswordHandler resetPassword,
     Ecr.Application.Security.SetUserLockHandler setLock,
+    Ecr.Application.Security.CorrectWindowsSidHandler correctSid,
     Ecr.Domain.Abstractions.IClock clock,
     ICurrentUser currentUser) : ControllerBase
 {
@@ -477,6 +478,26 @@ public sealed class SecurityController(
     }
 
     /// <summary>
+    /// Виправляє SID доменного запису, який ще не входив. Право <c>Security.ManageUsers</c> (X5-01).
+    /// </summary>
+    /// <remarks>
+    /// Не SID — <c>422 ECR-USR-0422</c>; SID має інший запис — <c>409 ECR-USR-0409</c>; запис уже входив — <c>409 ECR-SEC-0409</c>.
+    /// </remarks>
+    [HttpPut("users/{id:int}/windows-sid")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> CorrectWindowsSid(
+        int id, [FromBody] CorrectWindowsSidRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        await correctSid.HandleAsync(id, request.Sid, ct).ConfigureAwait(false);
+        return NoContent();
+    }
+
+    /// <summary>
     /// Починає сеанс симуляції. Право <c>Security.Simulate</c>.
     /// </summary>
     /// <remarks>
@@ -669,6 +690,10 @@ public sealed record ResetPasswordRequest(string NewPassword);
 /// <summary>Блокування або розблокування запису (BE-12).</summary>
 /// <param name="Reason">Причина; обов'язкова, до 400 символів, іде в журнал безпеки.</param>
 public sealed record UserLockRequest(string Reason);
+
+/// <summary>Виправлення SID доменного запису, який ще не входив (X5-01).</summary>
+/// <param name="Sid">Правильний SID облікового запису в домені (<c>S-1-…</c>).</param>
+public sealed record CorrectWindowsSidRequest(string Sid);
 
 /// <summary>Запит на заміну набору ролей користувача.</summary>
 /// <param name="RoleCodes">Коди ролей; порожній набір прибирає всі.</param>

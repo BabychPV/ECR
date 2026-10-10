@@ -217,8 +217,14 @@ export const statusTable: Readonly<Record<StatusKind, Readonly<Record<string, St
    * ⚠ Заведено тому, що чинний виклик помилковий: `SourcesPage.tsx:118`
    * малює `Failed` як `statusWarning` — тобто провал збору виглядає як
    * попередження.
+   *
+   * ⚠ `Running` — законний стан (`CollectionRun` створюється з ним,
+   * `ListCollectionRunsHandler.KnownStates`): поки триває збір, останній
+   * прогін на `/admin/sources` саме такий. Без рядка тут бейдж малював
+   * `⟦status.collectionRun.Running⟧` жовтим (Y4-03).
    */
   collectionRun: {
+    Running: 'info',
     Succeeded: 'neutral',
     Degraded: 'warning',
     Failed: 'danger',
@@ -276,6 +282,11 @@ export const statusTable: Readonly<Record<StatusKind, Readonly<Record<string, St
     // ФВ-13.15: плановий збір пропущено, бо розклад-залежність ще не відбіг. `info` (той самий
     // тон і токени, що `ConflictKeptManual`): це затримка за правилом, а не збій.
     SkippedDependency: 'info',
+    // D2-02: число скінченого періоду записано, але покриття нижче порогу, або
+    // придатних точок немає й комірку не оновлено — `warning`: людина звіряє джерело
+    // (та сама вага, що в `NotificationJob.SeverityOf`).
+    PartialCoverage: 'warning',
+    SkippedNoData: 'warning',
   },
 
   /**

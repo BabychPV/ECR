@@ -80,12 +80,27 @@
     Логін SQL-автентифікації для кроку схеми — елевований DBA-принципал.
     Без нього — інтегрована (`-E`), тобто обліковий запис, під яким
     запущено сам скрипт.
+    ⛔ R6-X4/X4-01: крім прав на базу, принципалу кроку схеми потрібне
+    серверне VIEW SERVER STATE (sysadmin має його й так): без нього
+    перевірка інших вузлів (-SkipOtherNodesCheck) не бачить чужих сеансів і
+    крок 2 відмовляє, а не пропускає.
 
 .PARAMETER SqlPassword
     Пароль до -SqlLogin. Ніколи не передається sqlcmd аргументом `-P`
     (видно в `Get-CimInstance Win32_Process`) — лише через змінну оточення
     дочірнього процесу `SQLCMDPASSWORD`, той самий прийом, що вже в
     `verify-sql-scripts.ps1`.
+
+.PARAMETER TrustServerCertificate
+    ⛔ L10-04, D-333 (HU-12 R3 = A): довіряти сертифікату SQL Server БЕЗ
+    перевірки — `sqlcmd -C` на кожному виклику скрипта. ТИПОВО ВИМКНЕНО:
+    sqlcmd (ODBC 18+) шифрує з'єднання й перевіряє сертифікат сервера, тож
+    SQL Server має пред'явити сертифікат, якому довіряє ця машина, з іменем,
+    що збігається з `-SqlInstance`. Перемикач — свідомий вибір для
+    самопідписаного сертифіката (стенд): сервер не автентифікується, MITM на
+    шляху до SQL бачить дані й пароль `-SqlLogin`. Рядок підключення служби
+    (`-ConnectionString`) цей перемикач НЕ змінює — його `TrustServerCertificate`
+    задає той, хто рядок склав (майстер — тим самим прапорцем).
 
 .PARAMETER Database
     Ім'я ЦІЛЬОВОЇ бази — не тимчасової, яку скрипт міг би сам створити й
@@ -106,6 +121,10 @@
     DDL-прав, MSI і далі не торкається бази — це стосується лише
     ОРКЕСТРАТОРА, керованого людиною з доступом до БД. Без прапорця —
     попередня поведінка: відсутня база зупиняє скрипт з поясненням.
+    ⛔ R5-U1/U1-04: діє лише разом із -FirstDeployment. При оновленні відсутня
+    база — це хибне чи типове ім'я -Database, а не «ще не створена»: порожня
+    база з переведеною на неї службою — простій. Без -FirstDeployment
+    прапорець нічого не створює (попередження), відсутня база — відмова.
 
 .PARAMETER ServiceAccount
     `DOMAIN\ecr-svc$` (gMSA, рекомендовано — без пароля) або `DOMAIN\user`.
@@ -188,8 +207,10 @@
     розшифровує ними старі ключі кільця (`UnprotectKeysWithAnyCertificate`).
     Сертифікат має бути в `Cert:\LocalMachine\My`, інакше застосунок лише
     пише Warning. Не задано — змінна не пишеться (поведінка без змін).
-    ⚠ MSI-оновлення стирає Environment служби: при кожному оновленні
-    передавай параметр знову, поки старі ключі ще в кільці.
+    ⚠ MSI-оновлення стирає Environment служби. ✎ R5-U1/U1-05: скрипт
+    знімає його до msiexec і повертає; записане значення = цей параметр ∪
+    те, що вже було в Environment ∪ відбиток DP попередньої установки, якщо
+    -DataProtectionThumbprint його змінив (майстер такого поля не має).
 
 .PARAMETER HttpsThumbprint
     ⛔ D14-08/R-01: ТРАНСПОРТ — рівно один із трьох параметрів (`-HttpsThumbprint`,
@@ -228,6 +249,8 @@
 .PARAMETER AppPort
     Порт Kestrel і правило брандмауера (HTTPS-порт із `-HttpsThumbprint`, http-порт в інших режимах).
     За замовчуванням 5000.
+    ⛔ R9-F5/F5-02: на оновленні передавайте ТОЙ САМИЙ порт, що зараз у службі (MSI його не пам'ятає).
+    Без -AppPort, якщо EcrApi вже слухає інший порт, крок 1 відмовляє до будь-якої зміни.
 
 .PARAMETER ConfigValues
     Шлях до JSON-файлу з НЕсекретними значеннями appsettings.Production.json
@@ -255,8 +278,46 @@
     Версія для build-msi.ps1, якщо -MsiPath не задано.
 
 .PARAMETER SkipSchema
-    DBA вже накотив схему окремо (крок 2 повністю пропускається, sqlcmd
-    не викликається жодного разу).
+    DBA вже накотив схему окремо (крок 2 не змінює схеми; sqlcmd лише
+    читає штамп релізу схеми).
+    ⛔ R6-X4/X4-03: крок 2 зі схемою в кінці пише штамп ECR.SchemaRelease
+    (розширена властивість бази) = версія пакета. З -SkipSchema штамп
+    звіряється з пакетом ДО msiexec: інший реліз — відмова (спершу оновіть
+    схему цим пакетом); штампа немає (база до R6-X4) — попередження.
+    ⛔ R7-Y3/Y3-02: до першого скрипта крок 2 ставить штамп 'incomplete:<версія>';
+    упав посередині — -SkipSchema відмовляє (повторіть запуск ЗІ схемою).
+
+    ⛔ S2-04 (аудит 2026-10-09b, HU-13 Q3): без -SkipSchema крок 2 спершу
+    вимагає свіжу копію бази (-BackupMaxAgeHours), а перед першим sqlcmd зі
+    зміною схеми ЗУПИНЯЄ EcrWorker і EcrApi (Stop-Service з очікуванням):
+    стара версія не пише в нову схему (DROP TYPE у 15-cell-tvp.sql,
+    передперевірки EF-міграцій, ROLLBACK IMMEDIATE у 06-rcsi.sql). Служби
+    знову піднімає крок 6.
+
+.PARAMETER SkipBackupCheck
+    Не перевіряти свіжу копію бази перед кроком 2 (автоматизація; копію
+    зроблено засобом, що не пише в msdb цього інстансу, — наприклад, на
+    вторинній репліці AG). Відповідальність за копію — на тому, хто
+    запускає: відкат (runbook §9) без неї неможливий.
+
+.PARAMETER SkipOtherNodesCheck
+    ⛔ R5-U1/U1-02: без цього прапорця крок 2 (до зупинки служб і до першого
+    sqlcmd зі зміною схеми) відмовляє, якщо до -Database під'єднано застосунок
+    (SqlClient або Application Name ECR*) з ІНШОГО хоста: за D-32 (≥2 вузли)
+    скрипт зупиняє служби лише на цій машині, і старий код решти вузлів писав
+    би в нову схему. Прапорець — лише коли такі сеанси точно не ECR (інша
+    програма на SqlClient); відповідальність за зупинку всіх вузлів — на тому,
+    хто запускає. Нічого не дає з -SkipSchema (крок 2 тоді не виконується).
+    ⛔ R6-X4/X4-01: принципал без VIEW SERVER STATE бачить у sys.dm_exec_sessions
+    лише власний сеанс — тоді крок 2 теж відмовляє (fail-closed), а не
+    друкує «сеансів немає».
+
+.PARAMETER BackupMaxAgeHours
+    Найстаріша прийнятна повна чи диференційна копія -Database за
+    msdb.dbo.backupset, у годинах (типово 24). Перевіряється лише при
+    оновленні схеми: не з -SkipSchema, не з -FirstDeployment (порожня база),
+    не з -SkipBackupCheck. Дані, введені після копії, відкат втратить —
+    найкраще зробити COPY_ONLY-копію безпосередньо перед запуском.
 
 .PARAMETER FirstDeployment
     Перше розгортання на цій базі — тоді й лише тоді виконується
@@ -265,6 +326,12 @@
     Явний прапорець, а не автовизначення за станом бази: судження про
     "перше це чи ні" належить тому, хто розгортає, а не евристиці, яка
     вгадує за відсутністю таблиць.
+    ⛔ R5-U1/U1-03: але хибний прапорець не проходить — база з хоч однією
+    застосованою міграцією EF (__EFMigrationsHistory) зупиняє крок 2 до будь-якої
+    зміни: -FirstDeployment обходить перевірку копії, а на живій базі це
+    оновлення без копії. Повтор першого розгортання, що впало після кроку 2, —
+    з -FirstDeployment -SkipSchema -BootstrapPassword (R9-F5/F5-01: без
+    -FirstDeployment пароль bootstrap не записується і адміністратора не буде).
 
 .PARAMETER ReadyTimeoutSeconds
     Скільки секунд кроку 7 чекати, поки /health/ready стане Healthy або
@@ -343,6 +410,7 @@ param(
     [Parameter(Mandatory)] [string] $SqlInstance,
     [string] $SqlLogin,
     [System.Security.SecureString] $SqlPassword,
+    [switch] $TrustServerCertificate,
     [Parameter(Mandatory)] [string] $Database,
     [string] $ServiceAccount,
     [System.Security.SecureString] $ServicePassword,
@@ -359,6 +427,9 @@ param(
     [string] $MsiPath,
     [ValidatePattern('^\d+\.\d+\.\d+$')] [string] $Version,
     [switch] $SkipSchema,
+    [switch] $SkipBackupCheck,
+    [switch] $SkipOtherNodesCheck,
+    [ValidateRange(1, 720)] [int] $BackupMaxAgeHours = 24,
     [switch] $FirstDeployment,
     [switch] $CreateDatabaseIfMissing,
     [ValidateRange(10, 3600)] [int] $ReadyTimeoutSeconds = 180,
@@ -508,8 +579,60 @@ function Test-ConnectionStringHasPassword {
     return $false
 }
 
+# ⛔ S2-01 (аудит 2026-10-09b): чи несе Environment служби секрет — рядок
+# підключення (ECR_ConnectionStrings__*) чи канал секретів (ECR_Secrets__*,
+# ConfigurationSecretProvider; runbook §2). Чиста функція над REG_MULTI_SZ-записами
+# `ІМ'Я=значення`; ім'я без урахування регістру (як змінні оточення Windows),
+# порожнє значення — не секрет.
+function Test-ServiceEnvironmentHasSecret {
+    param([string[]] $Entries)
+    foreach ($entry in @($Entries)) {
+        if ("$entry" -match '^ECR_(Secrets|ConnectionStrings)__[^=]+=.') { return $true }
+    }
+    return $false
+}
+
+# ⛔ N5-02 (аудит 2026-10-09): власник теки зберігає право WRITE_DAC попри будь-який
+# DACL. Якщо %ProgramData%\ECR (або config/logs) ЗАЗДАЛЕГІДЬ створив локальний
+# користувач, MSI виставить захищений DACL, але власником лишиться він — і зможе
+# повернути собі доступ до конфігу (bootstrap.secret, appsettings.Production.json)
+# й журналу. Довіряємо лише SYSTEM і BUILTIN\Administrators; інакше ВІДМОВА
+# до msiexec, а не мовчазне виправлення: вміст такої теки міг підготувати хтось
+# інший, і адміністратор має його оглянути.
+function Test-TrustedOwnerSid {
+    param([string] $Sid)
+    return ($Sid -eq 'S-1-5-18' -or $Sid -eq 'S-1-5-32-544')   # SYSTEM, BUILTIN\Administrators
+}
+
+function Assert-EcrFolderOwner {
+    param([Parameter(Mandatory)] [string[]] $Path)
+    foreach ($folder in $Path) {
+        if (-not (Test-Path -LiteralPath $folder)) { continue }   # свіжа установка: теку створить msiexec (власник SYSTEM)
+        $owner = (Get-Acl -LiteralPath $folder).GetOwner([System.Security.Principal.SecurityIdentifier])
+        if (-not (Test-TrustedOwnerSid $owner.Value)) {
+            $name = try { $owner.Translate([System.Security.Principal.NTAccount]).Value } catch { $owner.Value }
+            throw ("Власник теки $folder — $name ($($owner.Value)), а не SYSTEM чи Administrators: власник зберігає " +
+                "право змінювати права на теку попри захищений ACL з MSI (N5-02). Огляньте вміст теки (її міг підготувати " +
+                "не адміністратор), віддайте її Administrators (takeown /F `"$folder`" /A /R /D Y) і запустіть скрипт знову.")
+        }
+    }
+}
+
+# ⛔ N5-04 (аудит 2026-10-09): ключ EcrWorker читає не лише SCM, а й САМ EcrApi —
+# RecalculationWorkerProbe відкриває його через Registry.OpenSubKey (KEY_READ),
+# щоб відрізнити Missing/Disabled/Installed. Під gMSA без ACE це давало б
+# Unknown (стани Missing/Disabled приховано). Тому для EcrWorker передається
+# -ReadAccount = -ServiceAccount: один ACE ReadKey. Новий секрет цим не
+# відкривається: Environment EcrWorker містить той самий рядок підключення, що вже
+# в Environment EcrApi, а обидві служби працюють під одним обліковим записом.
+# Альтернативу (ServiceController.StartType через SCM) відкинуто: це зміна коду в
+# src/ (+ пакет ServiceController) заради тієї самої видимості. Без
+# -ServiceAccount служби під LocalSystem, який і так має повний доступ.
 function Protect-ServiceRegistryKey {
-    param([Parameter(Mandatory)] [string] $ServiceName)
+    param(
+        [Parameter(Mandatory)] [string] $ServiceName,
+        [string] $ReadAccount
+    )
     $keyPath = "HKLM:\SYSTEM\CurrentControlSet\Services\$ServiceName"
     $acl = Get-Acl -Path $keyPath
     $acl.SetAccessRuleProtection($true, $false)
@@ -518,6 +641,12 @@ function Protect-ServiceRegistryKey {
         $acl.AddAccessRule([System.Security.AccessControl.RegistryAccessRule]::new(
             [System.Security.Principal.SecurityIdentifier]::new($sid), 'FullControl',
             'ContainerInherit', 'None', 'Allow'))
+    }
+    if ($ReadAccount) {
+        $readSid = try { ([System.Security.Principal.NTAccount]::new($ReadAccount)).Translate([System.Security.Principal.SecurityIdentifier]) }
+                   catch { throw "Не вдалося визначити SID облікового запису служби '$ReadAccount' для читання ключа ${ServiceName}: $($_.Exception.Message)" }
+        $acl.AddAccessRule([System.Security.AccessControl.RegistryAccessRule]::new(
+            $readSid, 'ReadKey', 'ContainerInherit', 'None', 'Allow'))
     }
     Set-Acl -Path $keyPath -AclObject $acl
 }
@@ -722,6 +851,110 @@ function Get-ServiceEnvironmentValue {
     return $entry.Substring($Name.Length + 1)
 }
 
+# ⛔ R5-U1/U1-05 (аудит 2026-10-09): MajorUpgrade перевстановлює службу й СТИРАЄ її Environment, а
+# скрипт пише лише те, що йому передали. ECR_Secrets__* (PI/SQL-джерела), ECR_Jobs__Workers__*,
+# ECR_PiWebApi__AllowedHosts__*, попередні відбитки DP і телеметрія зникали, і крок 7 зараховував
+# «sources Unhealthy» як успіх. Тому: знімок Environment обох служб ДО msiexec (лише в пам'яті процесу,
+# на диск не пишеться), після msiexec — повернення ВСЬОГО, чого в новому Environment немає, і лише потім
+# кроки 4–5: явні параметри скрипта й рішення (транспорт, режим Api) перекривають старе значення.
+function Get-ServiceEnvironmentEntries {
+    param([Parameter(Mandatory)] [string] $ServiceName)
+
+    $prop = Get-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Services\$ServiceName" -Name Environment -ErrorAction SilentlyContinue
+    if (-not $prop) { return , ([string[]] @()) }
+    return , ([string[]] @(@($prop.Environment) | Where-Object { $_ }))
+}
+
+# ⛔ R9-F5/F5-02 (аудит 2026-10-10): порт першої адреси ASPNETCORE_URLS ('https://+:443;http://+:80' → 443)
+# або $null, якщо адреси немає чи порт не розпізнано. Чиста функція.
+function Get-UrlsPrimaryPort {
+    param([AllowNull()] [AllowEmptyString()] [string] $Urls)
+
+    if (-not $Urls) { return $null }
+    $first = @($Urls -split ';' | Where-Object { $_.Trim() }) | Select-Object -First 1
+    if (-not $first) { return $null }
+    $port = 0
+    if ($first.Trim() -match '^[A-Za-z][A-Za-z0-9+.-]*://[^/]*:(\d{1,5})(/.*)?$' -and
+        [int]::TryParse($Matches[1], [ref] $port) -and $port -ge 1 -and $port -le 65535) {
+        return $port
+    }
+    return $null
+}
+
+# ⛔ R9-F5/F5-02: MSI порт не пам'ятає (APP_PORT типово 5000), а крок 4 перезаписує ASPNETCORE_URLS з
+# -AppPort. Оновлення без -AppPort (runbook §10.3, «ті самі параметри») переносило службу з 443 на 5000, і
+# крок 7, що опитує вже новий порт, друкував «Готово» — а всі користувачі отримували відмову з'єднання.
+# Чиста функція: Environment служби EcrApi (знімок) + новий порт + чи задано -AppPort явно → текст відмови
+# або $null. Явний -AppPort — свідомий намір (зокрема й зміна порту); служби ще немає — нема що зберігати.
+function Get-AppPortChangeProblem {
+    param(
+        [AllowNull()] [AllowEmptyCollection()] [string[]] $CurrentEnvironment,
+        [Parameter(Mandatory)] [int] $AppPort,
+        [bool] $AppPortBound
+    )
+
+    if ($AppPortBound) { return $null }
+    $urls = $null
+    foreach ($entry in @($CurrentEnvironment)) {
+        if ($entry -and $entry.StartsWith('ASPNETCORE_URLS=', [System.StringComparison]::OrdinalIgnoreCase)) {
+            $urls = $entry.Substring('ASPNETCORE_URLS='.Length)
+            break
+        }
+    }
+    if (-not $urls) { return $null }
+    $current = Get-UrlsPrimaryPort -Urls $urls
+    if ($null -ne $current -and $current -eq $AppPort) { return $null }
+    $shown = if ($null -eq $current) { "адресу '$urls' (порт не розпізнано)" } else { "порт $current ('$urls')" }
+    return ("Служба EcrApi зараз слухає $shown, а -AppPort не задано (типове $AppPort): оновлення змінило б " +
+        "адресу для всіх користувачів, а крок 7 перевірив би вже новий порт і сказав би «Готово». Нічого не змінено. " +
+        "Передайте -AppPort з поточним портом (або з новим — свідомо).")
+}
+
+# Чиста функція: записи знімка, імен яких немає в поточному Environment, — ім'я → значення
+# (порядок знімка; перший запис з іменем виграє, як у Windows). Імена — без урахування регістру.
+function Get-EnvironmentEntriesToRestore {
+    param(
+        [AllowNull()] [AllowEmptyCollection()] [string[]] $Snapshot,
+        [AllowNull()] [AllowEmptyCollection()] [string[]] $Current
+    )
+
+    $present = @{}
+    foreach ($entry in @($Current)) {
+        if ($entry -and $entry.IndexOf('=') -gt 0) { $present[$entry.Substring(0, $entry.IndexOf('='))] = $true }
+    }
+    $restore = [ordered]@{}
+    foreach ($entry in @($Snapshot)) {
+        if (-not $entry -or $entry.IndexOf('=') -le 0) { continue }
+        $name = $entry.Substring(0, $entry.IndexOf('='))
+        if ($present.ContainsKey($name) -or $restore.Contains($name)) { continue }
+        $restore[$name] = $entry.Substring($name.Length + 1)
+    }
+    return $restore
+}
+
+# Чиста функція (U1-05, D-267): попередні відбитки DP = явні ∪ ті, що вже були в Environment ∪ ПОТОЧНИЙ
+# відбиток попередньої установки, якщо його змінено. Інакше заміна сертифіката через майстер (у ньому
+# поля «попередні» немає) робила старі ключі кільця нечитабельними: сеанси й захищені ними секрети
+# (пароль SMTP, секрети каналів) переставали розшифровуватися. Новий поточний відбиток — ніколи не в
+# переліку. $null — писати нічого. Відсутній у сховищі «попередній» застосунок лише попереджає.
+function Resolve-PreviousDataProtectionThumbprints {
+    param(
+        [string] $Explicit,
+        [string] $SnapshotPrevious,
+        [string] $SnapshotCurrent,
+        [string] $NewCurrent
+    )
+
+    $new = ConvertTo-NormalizedThumbprint $NewCurrent
+    $list = [System.Collections.Generic.List[string]]::new()
+    foreach ($raw in @(([string] $Explicit) -split '[;,]') + @(([string] $SnapshotPrevious) -split '[;,]') + @([string] $SnapshotCurrent)) {
+        $thumbprint = ConvertTo-NormalizedThumbprint $raw
+        if ($thumbprint -and $thumbprint -ne $new -and -not $list.Contains($thumbprint)) { $list.Add($thumbprint) }
+    }
+    if (-not $list.Count) { return $null }
+    return ($list -join ';')
+}
+
 # ⚠ Чиста функція (як Merge-ServiceEnvironmentEntry): прибрати запис $Name,
 # чужі — незаймані. Та сама кома в `return ,(...)` і з тієї ж причини.
 function Remove-ServiceEnvironmentEntry {
@@ -872,6 +1105,245 @@ function Resolve-JobExecutionConfig {
     }
 
     return [pscustomobject]@{ Set = $set; Remove = [string[]] $remove; Warnings = [string[]] $warnings }
+}
+
+# ⛔ S2-04 (аудит 2026-10-09b, HU-13 Q3): відкат (runbook §9) спирається на копію
+# бази, зроблену перед оновленням, — тож без неї схему не змінюємо. Чиста функція:
+# $AgeMinutes — відповідь запиту до msdb.dbo.backupset (хвилини від останньої
+# повної/диференційної копії або 'none'). $null — копія свіжа; інакше — причина
+# відмови (з підказкою -SkipBackupCheck для автоматизації).
+function Get-SchemaBackupProblem {
+    param(
+        [string] $AgeMinutes,
+        [Parameter(Mandatory)] [int] $MaxAgeHours,
+        [Parameter(Mandatory)] [string] $Database
+    )
+
+    $hint = ("Зробіть копію (BACKUP DATABASE [$Database] TO DISK = N'<шлях>' WITH COPY_ONLY, CHECKSUM; runbook §6.2) " +
+        "і запустіть знову; якщо копію зроблено інакше (msdb іншого вузла, VSS-засіб без запису в msdb) — -SkipBackupCheck.")
+    $raw = "$AgeMinutes".Trim()
+    if (-not $raw -or $raw -eq 'none') {
+        return "Копії бази $Database (повної чи диференційної) у msdb.dbo.backupset немає: відкат оновлення (runbook §9) був би неможливим. $hint"
+    }
+    $minutes = 0
+    if (-not [int]::TryParse($raw, [ref] $minutes)) {
+        return "Неочікувана відповідь на запит про копію бази ${Database}: '$raw'. $hint"
+    }
+    if ($minutes -gt $MaxAgeHours * 60) {
+        return ("Остання копія бази $Database зроблена $([math]::Round($minutes / 60.0, 1)) год тому — старша за " +
+            "-BackupMaxAgeHours ${MaxAgeHours}: відкат втратив би все введене після неї. $hint")
+    }
+    return $null
+}
+
+# ⛔ S2-04: схема змінюється лише без живого застосунку — стара версія не пише в
+# нову схему (DROP TYPE у 15-cell-tvp.sql, передперевірки EF-міграцій між
+# перевіркою й ALTER, ROLLBACK IMMEDIATE у 06-rcsi.sql). Спершу EcrWorker (бере
+# задачі черги), потім EcrApi. Stop-Service -NoWait + WaitForStatus з межею, а не
+# безмежне очікування Stop-Service: служба, що не зупинилась, — відмова ДО першого
+# sqlcmd зі зміною. Повертає імена зупинених служб (крок 6 піднімає їх знову).
+function Stop-EcrServicesForSchema {
+    [CmdletBinding(SupportsShouldProcess)]
+    param([ValidateRange(1, 3600)] [int] $TimeoutSeconds = 120)
+
+    $stopped = [System.Collections.Generic.List[string]]::new()
+    foreach ($name in 'EcrWorker', 'EcrApi') {
+        $svc = Get-Service -Name $name -ErrorAction SilentlyContinue
+        if (-not $svc -or "$($svc.Status)" -eq 'Stopped') { continue }
+        if (-not $PSCmdlet.ShouldProcess($name, 'Stop-Service before schema change')) { continue }
+
+        Stop-Service -Name $name -Force -NoWait
+        try {
+            $svc.WaitForStatus('Stopped', [TimeSpan]::FromSeconds($TimeoutSeconds))
+        }
+        catch {
+            throw ("Служба $name не зупинилась за $TimeoutSeconds с — схему НЕ змінено. Зупиніть її вручну " +
+                "(Stop-Service $name) і запустіть скрипт знову. $($_.Exception.Message)")
+        }
+        $stopped.Add($name)
+    }
+    return $stopped.ToArray()
+}
+
+# ⛔ R6-X4/X4-04: зупинена служба з типом запуску Automatic піднімається після перезавантаження
+# (патчі ОС у вікні обслуговування) — СТАРА версія на вже новій схемі, якщо розгортання впало між
+# кроками 2 і 6. Тому крок 2 після зупинки вимикає автозапуск (лише служб, що були Automatic:
+# Manual/Disabled — свідомий вибір, не чіпаємо), а крок 6 повертає Automatic, якщо MSI (ServiceInstall
+# Start="auto") ще не повернув його сам. Повертає імена вимкнених служб.
+function Disable-EcrServicesAutoStart {
+    [CmdletBinding(SupportsShouldProcess)]
+    param()
+
+    $disabled = [System.Collections.Generic.List[string]]::new()
+    foreach ($name in 'EcrWorker', 'EcrApi') {
+        $svc = Get-Service -Name $name -ErrorAction SilentlyContinue
+        if (-not $svc -or "$($svc.StartType)" -ne 'Automatic') { continue }
+        if (-not $PSCmdlet.ShouldProcess($name, 'Set-Service -StartupType Disabled before schema change')) { continue }
+
+        Set-Service -Name $name -StartupType Disabled
+        $disabled.Add($name)
+    }
+    return $disabled.ToArray()
+}
+
+# ⛔ R6-X4/X4-04: пара до Disable-EcrServicesAutoStart — крок 6, ДО старту служб. Лише ті, що крок 2
+# вимкнув, і лише якщо досі Disabled (MSI на кроці 3 зазвичай уже переписав тип запуску).
+function Restore-EcrServicesAutoStart {
+    [CmdletBinding(SupportsShouldProcess)]
+    param([AllowNull()] [AllowEmptyCollection()] [string[]] $Names)
+
+    $restored = [System.Collections.Generic.List[string]]::new()
+    foreach ($name in @($Names | Where-Object { $_ })) {
+        $svc = Get-Service -Name $name -ErrorAction SilentlyContinue
+        if (-not $svc -or "$($svc.StartType)" -ne 'Disabled') { continue }
+        if (-not $PSCmdlet.ShouldProcess($name, 'Set-Service -StartupType Automatic')) { continue }
+
+        Set-Service -Name $name -StartupType Automatic
+        $restored.Add($name)
+    }
+    return $restored.ToArray()
+}
+
+# ⛔ R5-U1/U1-03 (аудит 2026-10-09): -FirstDeployment пропускає перевірку копії (S2-04/AN-117) і
+# перевидаляє завдання Agent (14-agent-jobs.sql) — це режим ПОРОЖНЬОЇ бази. Автовизначення режиму
+# свідомо немає (.PARAMETER FirstDeployment), але й хибний прапорець на живій базі не проходить:
+# база з хоч однією застосованою міграцією EF — відмова до будь-якої зміни. Чиста функція: число
+# рядків __EFMigrationsHistory (текст із sqlcmd) → текст відмови або $null. Нечислова відповідь —
+# теж відмова (не знаємо — не обходимо копію).
+function Get-FirstDeploymentProblem {
+    param(
+        [AllowNull()] [AllowEmptyString()] [string] $AppliedCount,
+        [Parameter(Mandatory)] [string] $Database
+    )
+
+    $count = 0
+    if (-not [int]::TryParse(([string] $AppliedCount).Trim(), [System.Globalization.NumberStyles]::None,
+            [System.Globalization.CultureInfo]::InvariantCulture, [ref] $count)) {
+        return "Не вдалося визначити, чи база $Database порожня (відповідь '$AppliedCount'). -FirstDeployment — лише для порожньої бази."
+    }
+    if ($count -eq 0) { return $null }
+    return ("-FirstDeployment, але база $Database уже має $count застосованих міграцій — це ОНОВЛЕННЯ. Нічого не змінено. " +
+        "Запустіть без -FirstDeployment (тоді перевіряється свіжа копія бази, S2-04), у майстрі — режим «Update». " +
+        "Повтор першого розгортання, що впало ПІСЛЯ кроку 2 (схему вже накочено), — з -FirstDeployment -SkipSchema " +
+        "-BootstrapPassword (у майстрі: «First deployment» + «Schema already applied by a previous attempt»). " +
+        "Режим «Update» пароля bootstrap не передає — без нього в системі не буде жодного адміністратора (R9-F5/F5-01).")
+}
+
+# ⛔ R5-U1/U1-06 (аудит 2026-10-09): старіший пакет на новішій базі. Чиста функція: міграції бази
+# (__EFMigrationsHistory) проти міграцій пакета (MigrationId у migration.sql) → текст відмови або $null.
+# Хоч одна міграція бази, якої пакет не знає, — база новіша (або з іншої гілки): той самий критерій,
+# що й SchemaValidator на старті Api, але ДО зміни схеми, а не після. Пакет без жодного MigrationId —
+# зламаний migration.sql, теж відмова.
+function Get-SchemaDowngradeProblem {
+    param(
+        [AllowNull()] [AllowEmptyCollection()] [string[]] $DatabaseMigrations,
+        [AllowNull()] [AllowEmptyCollection()] [string[]] $PackageMigrations,
+        [Parameter(Mandatory)] [string] $Database
+    )
+
+    $package = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($id in @($PackageMigrations)) { if ($id -and $id.Trim()) { [void] $package.Add($id.Trim()) } }
+    if ($package.Count -eq 0) {
+        return "У migration.sql пакета немає жодного MigrationId — пакет зламаний; схему $Database НЕ змінено."
+    }
+
+    $unknown = @(@($DatabaseMigrations) | Where-Object { $_ -and $_.Trim() } | ForEach-Object { $_.Trim() } |
+            Where-Object { -not $package.Contains($_) } | Sort-Object -Unique)
+    if (-not $unknown.Count) { return $null }
+    $shown = @($unknown | Select-Object -Last 3) -join ', '
+    return ("База $Database новіша за цей пакет: $($unknown.Count) застосованих міграцій пакет не знає (останні: $shown). " +
+        "Нічого не змінено. Старіший пакет на новішу базу не ставиться — відкат лише за runbook §9 " +
+        "(відновити копію бази, msiexec /x поточної версії, потім попередній пакет).")
+}
+
+# ⛔ R5-U1/U1-02 (аудит 2026-10-09): Stop-EcrServicesForSchema зупиняє служби лише
+# ЦІЄЇ машини. За D-32 (≥2 вузли) EcrApi/EcrWorker інших вузлів працювали б далі
+# старою версією на новій схемі (DROP TYPE TVP, ROLLBACK IMMEDIATE, задачі черги
+# нового формату). Тому до зупинки й до першого sqlcmd зі зміною — запит до
+# sys.dm_exec_sessions: сеанси застосунку (SqlClient / Application Name ECR*) з
+# ІНШИХ хостів до -Database. Чиста функція: рядки запиту → текст відмови або $null.
+# Повертає відмову ДО зупинки локальних служб — простою від відмови немає.
+# ⛔ R6-X4/X4-01: без VIEW SERVER STATE sys.dm_exec_sessions показує лише ВЛАСНИЙ сеанс
+# (фільтр видимості, не помилка дозволу) — нуль рядків означав би «не бачу», а не «нікого
+# немає». Запит тоді повертає маркер $script:NoServerStateMarker, і це теж відмова (fail-closed).
+$script:NoServerStateMarker = '#ECR-NO-VIEW-SERVER-STATE'
+function Get-ForeignEcrSessionProblem {
+    param(
+        [AllowNull()] [AllowEmptyCollection()] [string[]] $Rows,
+        [Parameter(Mandatory)] [string] $Database
+    )
+
+    $hosts = @(@($Rows) | Where-Object { $_ -and $_.Trim() } | ForEach-Object { $_.Trim() } | Sort-Object -Unique)
+    if ($hosts -contains '#ECR-NO-VIEW-SERVER-STATE') {
+        return ("Не можу перевірити інші вузли: обліковому запису кроку схеми бракує VIEW SERVER STATE " +
+            "(sys.dm_exec_sessions без нього показує лише власний сеанс). Схему $Database НЕ змінено й служби не зупинено. " +
+            "DBA: GRANT VIEW SERVER STATE TO [<логін кроку схеми>]; або зупиніть EcrWorker і EcrApi на КОЖНОМУ вузлі " +
+            "і вимкніть їм автозапуск (runbook §8), запустіть скрипт з -SkipOtherNodesCheck, а решту вузлів оновлюйте потім з -SkipSchema.")
+    }
+    if (-not $hosts.Count) { return $null }
+    return ("До бази $Database під'єднано застосунок з інших вузлів: $($hosts -join ', '). Схему НЕ змінено й служби " +
+        "не зупинено. Зупиніть EcrWorker і EcrApi на КОЖНОМУ вузлі (D-32, runbook §8), запустіть скрипт знову, а решту " +
+        "вузлів оновлюйте потім з -SkipSchema. Якщо це не ECR (інша програма на SqlClient) — -SkipOtherNodesCheck.")
+}
+
+# ⛔ R6-X4/X4-03: версію схеми знають лише міграції EF, а половина схеми — поза EF (TVP у
+# 15-cell-tvp.sql, процедури 03/04, в'юхи 05, тригери 10, aud.*/arc.*): реліз, що змінює лише
+# Sql/*.sql, не додає рядка в __EFMigrationsHistory. Тому крок 2 (зі схемою) у кінці пише штамп
+# релізу схеми — розширену властивість бази ECR.SchemaRelease = версія пакета, — а -SkipSchema
+# звіряє його з пакетом ДО msiexec. Чиста функція: штамп (текст із sqlcmd) і версія пакета →
+# текст відмови або $null. 'none'/порожньо — база до X4-03 (штампа ще немає): не відмова, бо
+# інакше перший -SkipSchema після цього оновлення завжди падав би; попередження друкує виклик.
+function Get-SchemaReleaseProblem {
+    param(
+        [AllowNull()] [AllowEmptyString()] [string] $Stamp,
+        [AllowNull()] [AllowEmptyString()] [string] $Package,
+        [Parameter(Mandatory)] [string] $Database
+    )
+
+    $stampText = ([string] $Stamp).Trim()
+    if (-not $stampText -or $stampText -eq 'none') { return $null }
+    $packageText = ([string] $Package).Trim()
+    # ⛔ R7-Y3/Y3-02: крок 2 зі схемою ставить 'incomplete:<версія>' ДО першого скрипта і замінює його
+    # версією лише після останнього. Такий штамп — крок 2 упав посередині: частину Sql/*.sql не накочено
+    # (на першому релізі зі штампом без нього -SkipSchema бачив 'none' і пропускав). Відмова — на будь-якому пакеті.
+    if ($stampText.StartsWith('incomplete:', [System.StringComparison]::Ordinal)) {
+        $shownPackage = if ($packageText) { $packageText } else { '<версія пакета>' }
+        return ("Оновлення схеми $Database почато і не завершено (штамп $stampText): крок 2 deploy-ecr.ps1 упав посередині, " +
+            "частину Sql/*.sql не накочено. Ставиться пакет $shownPackage (-SkipSchema). Нічого не змінено. " +
+            "Повторіть deploy-ecr.ps1 ЗІ схемою (без -SkipSchema, runbook §8) — скрипти ідемпотентні. " +
+            "Якщо DBA докотив Sql/*.sql і migration.sql вручну — він же ставить штамп: " +
+            "EXEC sys.sp_updateextendedproperty @name = N'ECR.SchemaRelease', @value = N'$shownPackage';")
+    }
+    if (-not $packageText) {
+        return "Версію пакета не визначено (-MsiPath без ProductVersion?) — не можу звірити зі схемою $Database (штамп $stampText). Нічого не змінено."
+    }
+    if ($stampText -eq $packageText) { return $null }
+    return ("Схему $Database накочено пакетом $stampText, а ставиться пакет $packageText (-SkipSchema). Нічого не змінено. " +
+        "Спершу deploy-ecr.ps1 ЗІ схемою цим пакетом на одному вузлі (runbook §8), потім -SkipSchema на решті. " +
+        "Якщо DBA накотив Sql/*.sql і migration.sql цього пакета вручну — він же ставить штамп: " +
+        "EXEC sys.sp_updateextendedproperty @name = N'ECR.SchemaRelease', @value = N'$packageText';")
+}
+
+# ⛔ R6-X4/X4-03: версія пакета для штампа схеми — ProductVersion із самого MSI (той самий запит
+# Property, що build-msi.ps1), бо збірки Api/Worker мають ту саму версію (-p:Version=$Version).
+function Get-MsiProductVersion {
+    param([Parameter(Mandatory)] [string] $Path)
+
+    $installer = New-Object -ComObject WindowsInstaller.Installer
+    $database = $installer.OpenDatabase($Path, 0)
+    $view = $database.OpenView("SELECT ``Value`` FROM ``Property`` WHERE ``Property`` = 'ProductVersion'")
+    try {
+        [void] $view.Execute()
+        $record = $view.Fetch()
+        if ($record) { return $record.StringData(1) }
+        return $null
+    }
+    finally {
+        [void] $view.Close()
+        [void] [System.Runtime.InteropServices.Marshal]::ReleaseComObject($view)
+        [void] [System.Runtime.InteropServices.Marshal]::ReleaseComObject($database)
+        [void] [System.Runtime.InteropServices.Marshal]::ReleaseComObject($installer)
+    }
 }
 
 # ⛔ Чиста функція: чи потрібен .NET SDK цьому запуску. Його кличуть у двох місцях —
@@ -1158,6 +1630,8 @@ if ($ServicePassword) {
 if ($ConfigValues -and -not (Test-Path $ConfigValues)) {
     throw "ConfigValues вказує на неіснуючий файл: $ConfigValues"
 }
+# ⛔ R6-X4/X4-03: версія пакета — штамп релізу схеми (крок 2 пише його, -SkipSchema звіряє).
+$schemaRelease = if ($Version) { $Version } elseif ($MsiPath) { Get-MsiProductVersion -Path (Resolve-Path -LiteralPath $MsiPath).Path } else { $null }
 # ФВ-12.7: недійсну адресу телеметрії відхиляємо ДО msiexec, а не посеред розгортання.
 $telemetryDecision = Resolve-TelemetryEnvironment -OtlpEndpoint $TelemetryOtlpEndpoint -OtlpProtocol $TelemetryOtlpProtocol
 if ($EnableWorker -and $DisableWorker) {
@@ -1207,8 +1681,20 @@ if ($transport.Mode -eq 'Https') {
 }
 Write-Host "Транспорт: $($transport.Mode) (ASPNETCORE_URLS = $($transport.Set['ASPNETCORE_URLS']))."
 foreach ($warning in $transport.Warnings) { Write-Warning $warning }
+# ⛔ R9-F5/F5-02: порт — ТАКОЖ до схеми й MSI; лише читання реєстру, тому й під -WhatIf.
+$portProblem = Get-AppPortChangeProblem -CurrentEnvironment (Get-ServiceEnvironmentEntries -ServiceName 'EcrApi') `
+    -AppPort $AppPort -AppPortBound $PSBoundParameters.ContainsKey('AppPort')
+if ($portProblem) { throw $portProblem }
 
 $sqlAuth = if ($SqlLogin) { @('-U', $SqlLogin) } else { @('-E') }
+
+# ⛔ L10-04, D-333: `-C` (довіра до сертифіката SQL без перевірки) — лише за явним
+# -TrustServerCertificate. Без нього сертифікат сервера перевіряється.
+$sqlTrust = if ($TrustServerCertificate) { @('-C') } else { @() }
+if ($TrustServerCertificate) {
+    Write-Warning ("-TrustServerCertificate: сертифікат SQL Server НЕ перевіряється (sqlcmd -C). " +
+        "Сервер не автентифікований — лише для самопідписаного сертифіката на стенді (D-333).")
+}
 
 # ⚠ Чиста функція (як Merge-ServiceEnvironmentEntry): без мережі, щоб рішення
 # кроку 7 перевірялося на готових відповідях (D-134), а не лише на живому стенді.
@@ -1300,7 +1786,7 @@ function Invoke-DeploySql {
         [string] $File
     )
 
-    $arguments = @('-S', $SqlInstance) + $sqlAuth + @('-C', '-b', '-I', '-d', $TargetDb)
+    $arguments = @('-S', $SqlInstance) + $sqlAuth + $sqlTrust + @('-b', '-I', '-d', $TargetDb)
     $arguments += if ($File) { @('-i', $File) } else { @('-Q', $Query) }
     $what = if ($File) { Split-Path -Leaf $File } else { $Query }
 
@@ -1328,7 +1814,7 @@ function Invoke-DeployQuery {
         [Parameter(Mandatory)] [string] $Query
     )
 
-    $arguments = @('-S', $SqlInstance) + $sqlAuth + @('-C', '-b', '-I', '-h', '-1', '-W', '-s', '|', '-d', $TargetDb, '-Q', $Query)
+    $arguments = @('-S', $SqlInstance) + $sqlAuth + $sqlTrust + @('-b', '-I', '-h', '-1', '-W', '-s', '|', '-d', $TargetDb, '-Q', $Query)
     if (-not $PSCmdlet.ShouldProcess("$SqlInstance / $TargetDb", "sqlcmd -Q $Query")) { return $null }
 
     $previousEap = $ErrorActionPreference
@@ -1346,6 +1832,8 @@ function Invoke-DeployQuery {
 }
 
 $detectedEdition = $null
+$stoppedForSchema = @()   # S2-04: служби, зупинені кроком 2 (крок 6 піднімає їх знову)
+$disabledForSchema = @()  # R6-X4/X4-04: служби, яким крок 2 вимкнув автозапуск (крок 6 повертає)
 
 try {
     # ⛔ Q-232: пароль виставляється ПЕРЕД першим-ліпшим викликом sqlcmd,
@@ -1381,7 +1869,15 @@ try {
         if ($detectedEdition.Stop) { throw $detectedEdition.Stop }
     }
 
-    if ($CreateDatabaseIfMissing) {
+    # ⛔ R5-U1/U1-04 (аудит 2026-10-09): створювати базу — лише при ПЕРШОМУ розгортанні. Мотив Q-232
+    # («не вимагати окремого кроку DBA») стосується саме його; при оновленні відсутня база означає хибне
+    # чи типове ім'я -Database, і створена порожня база з переведеною на неї службою — простій із
+    # «Готово» в кінці. Без -FirstDeployment -CreateDatabaseIfMissing нічого не створює.
+    if ($CreateDatabaseIfMissing -and -not $FirstDeployment) {
+        Write-Host ("  -CreateDatabaseIfMissing без -FirstDeployment не діє: оновлення ніколи не створює базу " +
+            "(відсутня база = хибне ім'я -Database).") -ForegroundColor Yellow
+    }
+    if ($CreateDatabaseIfMissing -and $FirstDeployment) {
         # ⛔ Q-232 (директива людини, 2026-09-11): раніше відсутня база
         # ЗАВЖДИ зупиняла скрипт — адміністратор БД мав створити її
         # заздалегідь (`docs/build/11-install-guide.md` §0). Людина, що
@@ -1401,15 +1897,81 @@ END
 "@
     }
     else {
-        Invoke-DeploySql -TargetDb 'master' -Query "IF DB_ID('$Database') IS NULL RAISERROR('database missing', 16, 1);"
+        # Текст — ASCII: sqlcmd друкує його як є, а SqlPreflight майстра шукає 'database missing'.
+        Invoke-DeploySql -TargetDb 'master' -Query ("IF DB_ID('$Database') IS NULL RAISERROR('database missing: " +
+            "$($Database.Replace("'", "''").Replace('%', '%%')) does not exist on this instance. An update never creates it - check -Database " +
+            "(first deployment: -FirstDeployment -CreateDatabaseIfMissing).', 16, 1);")
     }
+
+    # ⛔ N5-02: теки з попередньої установки/підкладені заздалегідь — лише читання, до msiexec.
+    # ⛔ R7-Y3/Y3-01: і ДО кроку 2 — відмова тут нічого не змінила; після кроку 2 вона лишала нову
+    # схему під старими бінарниками й службами в Disabled (простій до повтору).
+    $programDataEcr = Join-Path $env:ProgramData 'ECR'
+    Assert-EcrFolderOwner -Path $programDataEcr, (Join-Path $programDataEcr 'config'), (Join-Path $programDataEcr 'logs')
 
     # ---------------------------------------------------------------------
     if ($SkipSchema) {
         Write-Step "Крок 2/7: схема — ПРОПУЩЕНО (-SkipSchema)"
+
+        # ⛔ R6-X4/X4-03: схему не змінюємо, але й не ставимо пакет на схему іншого релізу —
+        # лише читання, відмова ДО msiexec.
+        $stampRows = Invoke-DeployQuery -TargetDb $Database -Query (
+            "SET NOCOUNT ON; SELECT ISNULL((SELECT CAST(value AS nvarchar(64)) FROM sys.extended_properties " +
+            "WHERE class = 0 AND name = N'ECR.SchemaRelease'), N'none');")
+        if ($null -eq $stampRows) {
+            Write-Host "  Штамп релізу схеми буде звірено з пакетом запитом до sys.extended_properties (-WhatIf: не виконується)." -ForegroundColor DarkGray
+        }
+        else {
+            $stamp = [string] (@($stampRows) | Select-Object -First 1)
+            $releaseProblem = Get-SchemaReleaseProblem -Stamp $stamp -Package $schemaRelease -Database $Database
+            if ($releaseProblem) { throw $releaseProblem }
+            if (-not $stamp -or $stamp.Trim() -eq 'none') {
+                Write-Host ("  ⚠ У $Database ще немає штампа релізу схеми (ECR.SchemaRelease): її накочено до R6-X4 або вручну — " +
+                    "відповідність схеми пакету $schemaRelease не звірено.") -ForegroundColor Yellow
+            }
+            else {
+                Write-Host "  Схему $Database накочено цим самим пакетом ($schemaRelease)." -ForegroundColor Green
+            }
+        }
     }
     else {
         Write-Step "Крок 2/7: схема ($Database на $SqlInstance)"
+
+        # ⛔ S2-04 (HU-13 Q3): свіжа копія — ДО зупинки служб (немає копії — немає й простою).
+        if ($FirstDeployment) {
+            # ⛔ R5-U1/U1-03: -FirstDeployment обходить перевірку копії (і перевидаляє завдання Agent) — лише
+            # на базі без жодної застосованої міграції. Майстер типово стояв на «First deployment», тож
+            # оновлення живої бази цим режимом ішло без копії.
+            $appliedRows = Invoke-DeployQuery -TargetDb $Database -Query (
+                "SET NOCOUNT ON; IF OBJECT_ID(N'dbo.__EFMigrationsHistory', N'U') IS NULL SELECT 0 " +
+                "ELSE SELECT COUNT(*) FROM dbo.__EFMigrationsHistory;")
+            if ($null -eq $appliedRows) {
+                Write-Host "  Що база порожня (-FirstDeployment), буде перевірено запитом до __EFMigrationsHistory (-WhatIf: не виконується)." -ForegroundColor DarkGray
+            }
+            else {
+                $firstProblem = Get-FirstDeploymentProblem -AppliedCount ([string] (@($appliedRows) | Select-Object -First 1)) -Database $Database
+                if ($firstProblem) { throw $firstProblem }
+            }
+            Write-Host "  Копію бази не перевіряю: -FirstDeployment (порожня база)." -ForegroundColor DarkGray
+        }
+        elseif ($SkipBackupCheck) {
+            Write-Host ("  ⚠ Копію бази не перевіряю (-SkipBackupCheck): відкат (runbook §9) можливий лише з копії, " +
+                "зробленої перед оновленням, — за неї відповідає той, хто запускає.") -ForegroundColor Yellow
+        }
+        else {
+            $backupRows = Invoke-DeployQuery -TargetDb 'master' -Query (
+                "SET NOCOUNT ON; SELECT ISNULL(CAST(DATEDIFF(MINUTE, MAX(backup_finish_date), GETDATE()) AS nvarchar(20)), N'none') " +
+                "FROM msdb.dbo.backupset WHERE database_name = N'$($Database.Replace("'", "''"))' AND type IN ('D', 'I');")
+            if ($null -eq $backupRows) {
+                Write-Host "  Свіжість копії бази буде перевірено запитом до msdb.dbo.backupset (-WhatIf: не виконується)." -ForegroundColor DarkGray
+            }
+            else {
+                $backupProblem = Get-SchemaBackupProblem -AgeMinutes ([string] (@($backupRows) | Select-Object -First 1)) `
+                    -MaxAgeHours $BackupMaxAgeHours -Database $Database
+                if ($backupProblem) { throw $backupProblem }
+                Write-Host "  Копія бази ${Database}: не старша за $BackupMaxAgeHours год (msdb.dbo.backupset)." -ForegroundColor Green
+            }
+        }
 
         if ($isPackagedSchema) {
             Write-Host "  migration.sql уже в пакеті — dotnet ef не викликається (немає SDK на чистому сервері)." -ForegroundColor DarkGray
@@ -1421,6 +1983,28 @@ END
                     --project (Join-Path $root 'src\Ecr.Infrastructure') `
                     --startup-project (Join-Path $root 'src\Ecr.Infrastructure') `
                     --output $migration
+            }
+        }
+
+        # ⛔ R5-U1/U1-06: база новіша за пакет — відмова до зупинки служб і до першого sqlcmd -i.
+        # Інакше 03/04/05/10/15-*.sql старішої версії (CREATE OR ALTER) повертали старі процедури й
+        # тригери на новішу базу, і лише потім MSI відмовляв у пониженні версії (DowngradeError).
+        if (-not (Test-Path $migration)) {
+            Write-Host "  Чи база не новіша за пакет, буде перевірено за migration.sql (-WhatIf: файла ще немає)." -ForegroundColor DarkGray
+        }
+        else {
+            $packageMigrations = @([regex]::Matches((Get-Content -LiteralPath $migration -Raw),
+                    "\[MigrationId\]\s*=\s*N'(\d{14}_[^']+)'") | ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique)
+            $databaseMigrations = Invoke-DeployQuery -TargetDb $Database -Query (
+                "SET NOCOUNT ON; IF OBJECT_ID(N'dbo.__EFMigrationsHistory', N'U') IS NOT NULL " +
+                "SELECT MigrationId FROM dbo.__EFMigrationsHistory;")
+            if ($null -eq $databaseMigrations) {
+                Write-Host "  Чи база не новіша за пакет, буде перевірено запитом до __EFMigrationsHistory (-WhatIf: не виконується)." -ForegroundColor DarkGray
+            }
+            else {
+                $downgradeProblem = Get-SchemaDowngradeProblem -DatabaseMigrations $databaseMigrations `
+                    -PackageMigrations $packageMigrations -Database $Database
+                if ($downgradeProblem) { throw $downgradeProblem }
             }
         }
 
@@ -1439,6 +2023,56 @@ END
         ))
         if ($FirstDeployment) { $scripts.Add('14-agent-jobs.sql') }
 
+        # ⛔ R5-U1/U1-02: інші вузли (D-32) — до зупинки локальних служб, лише читання.
+        if ($SkipOtherNodesCheck) {
+            Write-Host ("  ⚠ Сеанси інших вузлів не перевіряю (-SkipOtherNodesCheck): EcrWorker і EcrApi на КОЖНОМУ " +
+                "вузлі мають бути зупинені — за це відповідає той, хто запускає.") -ForegroundColor Yellow
+        }
+        else {
+            # ⛔ R6-X4/X4-01: спершу — чи бачить обліковий запис чужі сеанси взагалі (на SQL < 2022 назви
+            # VIEW SERVER PERFORMANCE STATE немає: HAS_PERMS_BY_NAME дає NULL → ISNULL зводить до «ні»).
+            $foreignRows = Invoke-DeployQuery -TargetDb 'master' -Query (
+                "SET NOCOUNT ON; IF ISNULL(HAS_PERMS_BY_NAME(NULL, NULL, N'VIEW SERVER STATE'), 0) = 0 " +
+                "AND ISNULL(HAS_PERMS_BY_NAME(NULL, NULL, N'VIEW SERVER PERFORMANCE STATE'), 0) = 0 " +
+                "SELECT N'$($script:NoServerStateMarker)' ELSE " +
+                "SELECT DISTINCT ISNULL(s.host_name, N'?') FROM sys.dm_exec_sessions AS s " +
+                "WHERE s.database_id = DB_ID(N'$($Database.Replace("'", "''"))') AND s.is_user_process = 1 " +
+                "AND s.session_id <> @@SPID AND ISNULL(s.host_name, N'') <> HOST_NAME() " +
+                "AND (s.program_name LIKE N'%SqlClient Data Provider%' OR s.program_name LIKE N'ECR%');")
+            if ($null -eq $foreignRows) {
+                Write-Host "  Сеанси застосунку з інших вузлів буде перевірено запитом до sys.dm_exec_sessions (-WhatIf: не виконується)." -ForegroundColor DarkGray
+            }
+            else {
+                $foreignProblem = Get-ForeignEcrSessionProblem -Rows $foreignRows -Database $Database
+                if ($foreignProblem) { throw $foreignProblem }
+                Write-Host "  Сеансів застосунку з інших вузлів до $Database немає." -ForegroundColor Green
+            }
+        }
+
+        # ⛔ S2-04: служби зупинено ДО першого sqlcmd зі зміною схеми; піднімає їх крок 6.
+        $stoppedForSchema = @(Stop-EcrServicesForSchema)
+        if ($stoppedForSchema.Count) {
+            Write-Host ("  Зупинено перед зміною схеми: $($stoppedForSchema -join ', ') — крок 6 запустить знову; " +
+                "якщо розгортання впаде раніше, служби лишаться зупиненими.") -ForegroundColor Yellow
+        }
+        # ⛔ R6-X4/X4-04: і не дати перезавантаженню у вікні підняти стару версію на новій схемі.
+        $disabledForSchema = @(Disable-EcrServicesAutoStart)
+        if ($disabledForSchema.Count) {
+            Write-Host ("  Автозапуск вимкнено (Disabled): $($disabledForSchema -join ', ') — MSI і крок 6 повернуть Automatic; " +
+                "якщо крок 2 впаде, повторіть ТОЙ САМИЙ запуск (зі схемою); " +
+                "-SkipSchema — лише після завершеного кроку 2.") -ForegroundColor Yellow
+        }
+
+        # ⛔ R7-Y3/Y3-02: штамп «крок 2 почато» — ДО першого скрипта. Упалий посередині крок 2 інакше лишав
+        # старий штамп (або жодного — перший реліз зі штампом), і -SkipSchema та старт Api/EcrWorker пускали
+        # новий код на недокочену схему (немає aud.ConsistencyIssue.PeriodKey з 11-audit-tables.sql тощо).
+        # 'incomplete:…' відхиляють і Get-SchemaReleaseProblem, і SchemaValidator; замінює його запис нижче.
+        $pendingLiteral = ('incomplete:' + $(if ($schemaRelease) { $schemaRelease } else { 'unknown' })).Replace("'", "''")
+        Invoke-DeploySql -TargetDb $Database -Query (
+            "IF EXISTS (SELECT 1 FROM sys.extended_properties WHERE class = 0 AND name = N'ECR.SchemaRelease') " +
+            "EXEC sys.sp_updateextendedproperty @name = N'ECR.SchemaRelease', @value = N'$pendingLiteral' " +
+            "ELSE EXEC sys.sp_addextendedproperty @name = N'ECR.SchemaRelease', @value = N'$pendingLiteral';")
+
         foreach ($name in $scripts) {
             if ($name -eq '<migration>') {
                 Invoke-DeploySql -TargetDb $Database -File $migration
@@ -1448,6 +2082,24 @@ END
                 if (-not (Test-Path $path)) { throw "Немає ${path}: перелік розійшовся з деревом." }
                 Invoke-DeploySql -TargetDb $Database -File $path
             }
+        }
+
+        # ⛔ R6-X4/X4-03: штамп релізу схеми — ПІСЛЯ останнього скрипта (06-rcsi.sql / 14-agent-jobs.sql):
+        # упалий посередині крок 2 лишає 'incomplete:…' (R7-Y3/Y3-02), і -SkipSchema та старт тоді відмовлять.
+        if ($schemaRelease) {
+            $releaseLiteral = $schemaRelease.Replace("'", "''")
+            Invoke-DeploySql -TargetDb $Database -Query (
+                "IF EXISTS (SELECT 1 FROM sys.extended_properties WHERE class = 0 AND name = N'ECR.SchemaRelease') " +
+                "EXEC sys.sp_updateextendedproperty @name = N'ECR.SchemaRelease', @value = N'$releaseLiteral' " +
+                "ELSE EXEC sys.sp_addextendedproperty @name = N'ECR.SchemaRelease', @value = N'$releaseLiteral';")
+            Write-Host "  Штамп релізу схеми: ECR.SchemaRelease = $schemaRelease." -ForegroundColor Green
+        }
+        else {
+            # Крок 2 завершено, але версії немає: 'incomplete:unknown' прибираємо (штампа немає — як до R6-X4).
+            Invoke-DeploySql -TargetDb $Database -Query (
+                "IF EXISTS (SELECT 1 FROM sys.extended_properties WHERE class = 0 AND name = N'ECR.SchemaRelease') " +
+                "EXEC sys.sp_dropextendedproperty @name = N'ECR.SchemaRelease';")
+            Write-Host "  ⚠ Версію пакета не визначено — штамп релізу схеми (ECR.SchemaRelease) не записано." -ForegroundColor Yellow
         }
     }
 
@@ -1489,6 +2141,8 @@ Write-Host ("Воркер перерахунку (EcrWorker): $(if ($workerEnabl
 # ---------------------------------------------------------------------
 Write-Step "Крок 3/7: MSI"
 
+# Власника тек ECR перевірено ще до кроку 2 (N5-02, R7-Y3/Y3-01).
+
 if (-not $MsiPath) {
     if ($PSCmdlet.ShouldProcess('build-msi.ps1', "build-msi.ps1 -Version $Version")) {
         & $buildMsi -Version $Version
@@ -1502,6 +2156,9 @@ if (-not $MsiPath) {
     }
 }
 
+# ⛔ R5-U1/U1-01: START_SERVICES НЕ передається НІКОЛИ — MSI служб не стартує,
+# бо їх Environment (рядок підключення, відбиток DP) з'являється лише на кроці 4;
+# старт усередині msiexec = Error 1920 = відкат установки. Старт — крок 6.
 $msiArgs       = @('/i', "`"$MsiPath`"", '/qn', '/l*v', 'ecr-install.log')
 $msiArgsShown  = $msiArgs.Clone()
 if ($ServiceAccount) {
@@ -1526,9 +2183,35 @@ if ($ServicePassword) {
     $msiArgsShown += 'SERVICE_PASSWORD=***'   # ніколи не в плані/логу, лише в реальному виклику
 }
 
+# ⛔ R5-U1/U1-05: знімок Environment ДО msiexec (MajorUpgrade його стирає) — лише в пам'яті.
+$envSnapshot = [ordered]@{}
+foreach ($service in 'EcrApi', 'EcrWorker') { $envSnapshot[$service] = Get-ServiceEnvironmentEntries -ServiceName $service }
+$snapshotEntry = { param($service, $name)
+    $hit = @($envSnapshot[$service] | Where-Object { $_ -like "$name=*" } | Select-Object -First 1)
+    if ($hit.Count) { $hit[0].Substring($name.Length + 1) } else { $null } }
+$previousDataProtection = Resolve-PreviousDataProtectionThumbprints -Explicit $PreviousDataProtectionCertificateThumbprints `
+    -SnapshotPrevious (& $snapshotEntry 'EcrApi' 'ECR_Auth__DataProtection__PreviousCertificateThumbprints') `
+    -SnapshotCurrent (& $snapshotEntry 'EcrApi' 'ECR_Auth__DataProtection__CertificateThumbprint') `
+    -NewCurrent $DataProtectionThumbprint
+
 if ($PSCmdlet.ShouldProcess($MsiPath, "msiexec $($msiArgsShown -join ' ')")) {
     $proc = Start-Process msiexec -ArgumentList $msiArgs -Wait -PassThru
     if ($proc.ExitCode -notin 0, 3010) { throw "msiexec повернув $($proc.ExitCode) — див. ecr-install.log" }
+
+    # ⛔ R5-U1/U1-05: повернути все, чого MSI не лишив, — ДО кроків 4–5 (явні параметри перекривають).
+    # Служби, якої після MSI немає (WORKER_ENABLED=0), не чіпаємо. Значення не друкуються — лише імена.
+    foreach ($service in $envSnapshot.Keys) {
+        if (-not (Test-Path "HKLM:\SYSTEM\CurrentControlSet\Services\$service")) { continue }
+        $restore = Get-EnvironmentEntriesToRestore -Snapshot $envSnapshot[$service] `
+            -Current (Get-ServiceEnvironmentEntries -ServiceName $service)
+        foreach ($name in @($restore.Keys)) {
+            Set-ServiceEnvironmentVariable -ServiceName $service -Name $name -Value $restore[$name]
+        }
+        if ($restore.Count) {
+            Write-Host ("Environment $service відновлено після MSI ($($restore.Count)): $(@($restore.Keys) -join ', ') — " +
+                "явні параметри кроків 4–5 їх перекривають.") -ForegroundColor Green
+        }
+    }
 
     # ⛔ I2-2: режим Api (крок 5) пишеться за ФАКТОМ служби, а не за наміром.
     # Служби немає після WORKER_ENABLED=1 — зупинка тут, до запису Executor = Worker.
@@ -1542,8 +2225,13 @@ if ($PSCmdlet.ShouldProcess($MsiPath, "msiexec $($msiArgsShown -join ' ')")) {
 Write-Step "Крок 4/7: секрети служби (реєстр EcrApi\Environment)"
 
 if (-not $ConnectionString) {
-    Write-Host ("ECR_ConnectionStrings__Ecr не записано (-ConnectionString не задано) — " +
-        "служба впаде при старті, поки значення не буде додано вручну.") -ForegroundColor Yellow
+    if (Get-ServiceEnvironmentValue -ServiceName 'EcrApi' -Name 'ECR_ConnectionStrings__Ecr') {
+        Write-Host "ECR_ConnectionStrings__Ecr не змінено (-ConnectionString не задано): лишається значення попередньої установки (U1-05)." -ForegroundColor Yellow
+    }
+    else {
+        Write-Host ("ECR_ConnectionStrings__Ecr не записано (-ConnectionString не задано) — " +
+            "служба впаде при старті, поки значення не буде додано вручну.") -ForegroundColor Yellow
+    }
 }
 else {
     if ($PSCmdlet.ShouldProcess('HKLM:\SYSTEM\CurrentControlSet\Services\EcrApi\Environment',
@@ -1565,13 +2253,7 @@ else {
     if (Test-ConnectionStringHasPassword (ConvertFrom-SecureStringPlain $ConnectionString)) {
         Write-Host ("⚠ Рядок підключення містить пароль SQL-логіна (D-282): служба працює під цим логіном. " +
             "Логін DBA дає застосунку DDL-права (D-66) — рекомендовано Windows/gMSA.") -ForegroundColor Yellow
-        foreach ($service in @('EcrApi') + @(if ($workerEnabled) { 'EcrWorker' })) {
-            if ($PSCmdlet.ShouldProcess("HKLM:\SYSTEM\CurrentControlSet\Services\$service",
-                    'закрити ключ служби від BUILTIN\Users (пароль у Environment)')) {
-                Protect-ServiceRegistryKey -ServiceName $service
-                Write-Host "Ключ служби ${service}: читання лише SYSTEM і Administrators." -ForegroundColor Green
-            }
-        }
+        # Ключ служби закривається НЕ тут, а після всіх записів Environment (кінець кроку 5, S2-01).
     }
 }
 
@@ -1611,12 +2293,14 @@ if ($PSCmdlet.ShouldProcess('HKLM:\SYSTEM\CurrentControlSet\Services\EcrApi\Envi
 }
 
 # D-267: попередні сертифікати DP (заміна сертифіката) — відбитки, не секрет.
-if ($PreviousDataProtectionCertificateThumbprints -and
+# ⛔ R5-U1/U1-05: явні ∪ уже записані ∪ змінений поточний відбиток попередньої установки
+# (Resolve-PreviousDataProtectionThumbprints, перед кроком 3).
+if ($previousDataProtection -and
     $PSCmdlet.ShouldProcess('HKLM:\SYSTEM\CurrentControlSet\Services\EcrApi\Environment',
         'записати ECR_Auth__DataProtection__PreviousCertificateThumbprints')) {
     Set-ServiceEnvironmentVariable -ServiceName 'EcrApi' -Name 'ECR_Auth__DataProtection__PreviousCertificateThumbprints' `
-        -Value $PreviousDataProtectionCertificateThumbprints
-    Write-Host "ECR_Auth__DataProtection__PreviousCertificateThumbprints записано ($PreviousDataProtectionCertificateThumbprints)." -ForegroundColor Green
+        -Value $previousDataProtection
+    Write-Host "ECR_Auth__DataProtection__PreviousCertificateThumbprints записано ($previousDataProtection)." -ForegroundColor Green
 }
 
 if ($BootstrapPassword) {
@@ -1635,7 +2319,8 @@ if ($BootstrapPassword) {
 else {
     Write-Host ("-BootstrapPassword не задано — якщо база порожня і жоден " +
         "домен-адміністратор ще не існує, увійти в застосунок після першого розгортання " +
-        "нічим (bootstrap-користувача не буде створено).") -ForegroundColor Yellow
+        "нічим (bootstrap-користувача не буде створено). Повтор першого розгортання, що впало після " +
+        "кроку 2, — з -FirstDeployment -SkipSchema -BootstrapPassword (R9-F5/F5-01).") -ForegroundColor Yellow
 }
 
 # ---------------------------------------------------------------------
@@ -1711,21 +2396,59 @@ foreach ($name in $telemetryDecision.Set.Keys) {
 Write-Host ("Перерахунок: " + $(if ($workerEnabled) { 'служба EcrWorker (Jobs:Queue:Mode = Database, Executor = Worker).' }
         else { 'у процесі EcrApi (Executor = InProcess).' })) -ForegroundColor Green
 
+# ── ⛔ S2-01 (аудит 2026-10-09b): ключ служби закривається від BUILTIN\Users
+# ЗАВЖДИ, коли її Environment несе секрет, — а не лише коли в рядку підключення
+# є пароль SQL (L10-04/D-282). Під Windows/gMSA пароля в рядку немає, але
+# runbook §2 велить класти туди ж ECR_Secrets__* (PI, SMTP, джерела), а ключі
+# служб за стандартним ACL читає кожен локальний користувач. Після ВСІХ записів
+# Environment (кроки 4–5), до старту: -ConnectionString крок 4 пише в Environment
+# кожної служби нижче, решту секретів адміністратор міг покласти раніше.
+foreach ($service in @('EcrApi') + @(if ($workerEnabled) { 'EcrWorker' })) {
+    $envProp = Get-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Services\$service" -Name Environment -ErrorAction SilentlyContinue
+    $envEntries = if ($envProp) { @($envProp.Environment) } else { @() }
+    if (-not ($ConnectionString -or (Test-ServiceEnvironmentHasSecret -Entries $envEntries))) {
+        Write-Host ("Ключ служби ${service}: секретів (ECR_ConnectionStrings__*, ECR_Secrets__*) в Environment немає — ACL не змінюю. " +
+            "Після ручного запису секрету повторіть deploy-ecr.ps1 (runbook §2).") -ForegroundColor DarkGray
+        continue
+    }
+    if ($PSCmdlet.ShouldProcess("HKLM:\SYSTEM\CurrentControlSet\Services\$service",
+            'закрити ключ служби від BUILTIN\Users (секрети в Environment)')) {
+        # N5-04: API під -ServiceAccount читає ключ EcrWorker (RecalculationWorkerProbe) — лише його.
+        $readAccount = if ($service -eq 'EcrWorker') { $ServiceAccount } else { $null }
+        Protect-ServiceRegistryKey -ServiceName $service -ReadAccount $readAccount
+        Write-Host ("Ключ служби ${service}: читання лише SYSTEM і Administrators" +
+            $(if ($readAccount) { " (і $readAccount — перевірка стану служби з Api)." } else { '.' })) -ForegroundColor Green
+    }
+}
+
 # ---------------------------------------------------------------------
 Write-Step "Крок 6/7: старт служби"
 
+# ⛔ R6-X4/X4-04: автозапуск, вимкнений кроком 2, — назад ДО старту (якщо MSI не повернув його сам).
+$restoredAutoStart = @(Restore-EcrServicesAutoStart -Names $disabledForSchema)
+if ($restoredAutoStart.Count) {
+    Write-Host "Тип запуску повернуто на Automatic: $($restoredAutoStart -join ', ')." -ForegroundColor Green
+}
+
 if (-not $ServiceAccount) {
     Write-Host "SERVICE_ACCOUNT не задано — служба зареєстрована з типом запуску Manual і не стартує (навмисно, docs/build/10-installer.md §1.4, L10-03)." -ForegroundColor Yellow
+    if ($stoppedForSchema.Count) {
+        Write-Host ("  ⚠ Крок 2 зупинив $($stoppedForSchema -join ', ') перед зміною схеми — без -ServiceAccount скрипт " +
+            "їх не запускає: Start-Service вручну.") -ForegroundColor Yellow
+    }
     if ($workerEnabled) {
         Write-Host ("  ⚠ EcrWorker теж не стартує, а EcrApi вже налаштовано на Executor = Worker: запускай ОБИДВІ служби, " +
             "інакше перерахунок стоятиме в черзі (перевірка worker на /health/ready — Degraded).") -ForegroundColor Yellow
     }
 }
 else {
-    # ⛔ БЕЗУМОВНИЙ перезапуск, не "старт, якщо не Running": MSI (Q-212)
-    # стартує службу ПІД ЧАС msiexec, ДО того, як цей скрипт встиг записати
-    # секрети кроком 4 — щойно записане оточення побачить лише СВІЖИЙ запуск
-    # процесу, не вже працюючий.
+    # ⛔ R5-U1/U1-01: MSI служб НЕ стартує (START_SERVICES крок 3 не передає):
+    # стартована всередині msiexec служба без Environment (рядок підключення,
+    # відбиток DP — їх крок 4 пише ПІСЛЯ msiexec) падала до звіту SCM →
+    # Error 1920 → відкат усієї установки. Старт — тут, після кроків 4–5.
+    # Restart-Service, а не «старт, якщо не Running»: на випадок, коли служба
+    # все ж працює (ручний REINSTALL зі START_SERVICES=1 перед цим скриптом),
+    # щойно записане оточення побачить лише СВІЖИЙ процес.
     $svc = Get-Service -Name EcrApi -ErrorAction SilentlyContinue
     if ($svc -and $PSCmdlet.ShouldProcess('EcrApi', 'Restart-Service')) {
         Restart-Service -Name EcrApi -Force
@@ -1734,8 +2457,8 @@ else {
         Start-Service -Name EcrApi
     }
 
-    # Воркер — з тієї ж причини безумовний перезапуск: MSI міг підняти його
-    # до того, як крок 4 записав рядок підключення.
+    # Воркер — з тієї ж причини безумовний перезапуск (MSI його не стартує, U1-01;
+    # Restart-Service зупиненої служби просто стартує її).
     if ($workerEnabled -and $PSCmdlet.ShouldProcess('EcrWorker', 'Restart-Service')) {
         $worker = Get-Service -Name EcrWorker -ErrorAction SilentlyContinue
         if (-not $worker) { throw 'Служби EcrWorker немає після msiexec з WORKER_ENABLED=1 — див. ecr-install.log.' }

@@ -4,7 +4,7 @@ import type { TableSliceDto } from '@/api/types';
 import { CodeText } from '@/shared/ui/CodeText';
 import { t } from '@/shared/i18n';
 import { publishInspectedCell } from '@/features/documents/inspector/inspectedCell';
-import { useFocusedCell } from './focusStore';
+import { useFocusedCell, useIsLastFocusedSlice } from './focusStore';
 import { formulaBarModel } from './formulaBar';
 import type { TotalsEdit } from './gridTotals';
 
@@ -43,6 +43,7 @@ interface GridFormulaBarProps {
 
 export function GridFormulaBar(props: GridFormulaBarProps): JSX.Element {
   const focus = useFocusedCell(props.tableInstanceId, props.periodKey);
+  const isLastFocused = useIsLastFocusedSlice(props.tableInstanceId, props.periodKey);
 
   const model = formulaBarModel({
     slice: props.slice,
@@ -59,9 +60,14 @@ export function GridFormulaBar(props: GridFormulaBarProps): JSX.Element {
   // `UI-25`: та сама комірка — у вкладки History/Info інспектора документа
   // (`inspectedCell.ts`). Лише публікація; порожній фокус комірку НЕ скидає:
   // клік в інспектор забирає фокус із сітки, і вкладка не має гаснути від цього.
+  //
+  // ⛔ N3-02: публікує ЛИШЕ сітка, у якій курсор ставили останнім
+  // (`useIsLastFocusedSlice`). Ефект без залежностей біжить у КОЖНІЙ змонтованій
+  // сітці на кожному рендері, і після перерахунку «останньою» лишалася та, що
+  // відмалювалась пізніше, — інспектор стрибав на приховану таблицю.
   const column = model === null ? undefined : props.slice.columns.find((c) => c.code === model.columnCode);
   useEffect(() => {
-    if (model === null || column === undefined) return;
+    if (!isLastFocused || model === null || column === undefined) return;
     publishInspectedCell({
       tableInstanceId: props.tableInstanceId,
       periodKey: props.periodKey,

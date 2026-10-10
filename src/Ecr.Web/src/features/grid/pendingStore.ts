@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from 'react';
-import { sameCellValue } from './cellValue';
+import { sameColumnValue } from './cellValue';
+import { resetInFlight } from './inFlightEdits';
 import type { PendingEdit } from './useCellPatch';
 
 /**
@@ -428,7 +429,11 @@ function rebased(edit: PendingEdit, confirmed: PendingEdit | undefined): Pending
 function wasSent(sent: PendingEdit | undefined, edit: PendingEdit): boolean {
   if (sent === undefined) return false;
 
-  return sent.isEmpty === edit.isEmpty && sameCellValue(sent.value, edit.value);
+  if (sent.isEmpty !== edit.isEmpty) return false;
+
+  // ⛔ `G1-06`: текстова колонка — дослівно: `5.0` після надісланого `5` —
+  // НОВІША правка, а не те саме число.
+  return sameColumnValue(sent.text === true || edit.text === true ? 'String' : undefined, sent.value, edit.value);
 }
 
 /** Скільки незбережених комірок у ВСЬОМУ документі. */
@@ -514,6 +519,78 @@ export function pendingSlices(options: { sendableOnly?: boolean } = {}): readonl
     .filter((slice) => slice.edits.length > 0);
 }
 
+/** Ключ зрізу для позначок невдалого збереження. */
+function failedKeyOf(tableInstanceId: number, periodKey: number): string {
+  return `${String(tableInstanceId)}:${String(periodKey)}`;
+}
+
+/**
+ * Зрізи, чиє ОСТАННЄ збереження не дійшло: мережа, `5xx`, відмова без позначок
+ * (`G1-03`).
+ *
+ * ⛔ Доти питання браузера «Покинути сторінку?» з'являлось лише за утриманих
+ * правок або запиту в дорозі. Після мережевої/`5xx` відмови правки лишались
+ * «придатними до надсилання», і закриття вкладки покладалося на маячок — до того
+ * самого недоступного сервера, мовчки. Тепер такий зріз — привід спитати.
+ */
+const failedSlices = new Set<string>();
+const failedListeners = new Set<() => void>();
+
+function notifyFailed(): void {
+  for (const listener of failedListeners) listener();
+}
+
+/** Збереження зрізу дійшло: знімає позначку `G1-03`. */
+export function noteSaveSucceeded(tableInstanceId: number, periodKey: number): void {
+  if (failedSlices.delete(failedKeyOf(tableInstanceId, periodKey))) notifyFailed();
+}
+
+export function noteSaveFailed(tableInstanceId: number, periodKey: number): void {
+  const key = failedKeyOf(tableInstanceId, periodKey);
+  if (failedSlices.has(key)) return;
+
+  failedSlices.add(key);
+  notifyFailed();
+}
+
+/** Чи останнє збереження зрізу не дійшло (мережа, `5xx`) — для «Retry save» (`G1-04`). */
+export function hasFailedSave(tableInstanceId: number, periodKey: number): boolean {
+  return failedSlices.has(failedKeyOf(tableInstanceId, periodKey));
+}
+
+/** Те саме, що `hasFailedSave`, — як стан React. */
+export function useFailedSave(tableInstanceId: number, periodKey: number): boolean {
+  const read = (): boolean => hasFailedSave(tableInstanceId, periodKey);
+
+  return useSyncExternalStore(subscribeFailed, read, read);
+}
+
+function subscribeFailed(listener: () => void): () => void {
+  failedListeners.add(listener);
+
+  return () => {
+    failedListeners.delete(listener);
+  };
+}
+
+/** Чи є зріз із невдалим останнім збереженням, у якому ще лежать правки до надсилання. */
+export function hasFailedSendable(): boolean {
+  for (const key of failedSlices) {
+    const [tableInstanceId, periodKey] = key.split(':').map(Number) as [number, number];
+    if (sendableEdits(tableInstanceId, periodKey).length > 0) return true;
+  }
+
+  return false;
+}
+
+/** Скидання позначок `G1-03` разом зі сховищем правок (вихід із документа, тести). */
+export function resetFailedSaves(): void {
+  if (failedSlices.size === 0) return;
+
+  failedSlices.clear();
+  notifyFailed();
+}
+
 /**
  * Скидає сховище повністю — вихід із документа і тести.
  *
@@ -524,6 +601,10 @@ export function resetPending(): void {
   openDocumentId = null;
   slices.clear();
   rejections.clear();
+  // AN-104: реєстр «у дорозі» належить тому самому документу.
+  resetInFlight();
+  // `G1-03`: позначки невдалого збереження належать тому самому документу.
+  resetFailedSaves();
   notify();
 }
 

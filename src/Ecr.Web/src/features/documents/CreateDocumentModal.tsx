@@ -140,6 +140,10 @@ export function CreateDocumentModal({
   const violations = groupRuleViolations(template.data, sheets);
 
   const create = useMutation({
+    // ⛔ N3-05: відмову показує майстер (банер у кроці Review через `api.fail` у per-call
+    // `onError`). Глобальна сітка (`queryClient.ts`) бачить лише `options.onError`/`meta.handled`,
+    // тож без прапорця додавала другий тост поверх банера.
+    meta: { handled: true },
     mutationFn: () =>
       apiFetch<DocumentIdResponse>('/api/v1/documents', {
         method: 'POST',

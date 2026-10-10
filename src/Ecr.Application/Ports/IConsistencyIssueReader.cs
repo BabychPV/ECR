@@ -30,6 +30,11 @@ namespace Ecr.Application.Ports;
 /// Місце знахідки в структурі (документ, аркуш, таблиця, рядок, колонка) — лише КОДИ.
 /// <c>null</c> — місце невідоме або читач його не бачить (див. <c>GetConsistencyIssuesHandler</c>).
 /// </param>
+/// <param name="PeriodKey">
+/// Період знахідки по рядку документа (<c>doc.CellValue</c>, <c>doc.TableRow</c>); <c>null</c> — знахідка без періоду
+/// або записана до N1-05. ⛔ Лише для розкладу місця: у відповідь API НЕ йде (<c>JsonIgnore</c>) — період прихованого
+/// аркуша читач не мусить бачити.
+/// </param>
 /// <remarks>
 /// ⚠ <paramref name="Message"/> приходить із <c>aud.ConsistencyIssue</c>
 /// українською і НЕ локалізується: механізм каталогу рядків існує для відмов
@@ -47,7 +52,8 @@ public sealed record ConsistencyIssueView(
     string Message,
     DateTime? ResolvedAt,
     int? ResolvedByUserId,
-    ConsistencyIssueWhere? Where = null);
+    ConsistencyIssueWhere? Where = null,
+    [property: System.Text.Json.Serialization.JsonIgnore] int? PeriodKey = null);
 
 /// <summary>Місце знахідки консистентності: лише бізнес-коди, без значень комірок і без назв.</summary>
 /// <param name="DocumentId">Документ; <c>null</c> — знахідка про структуру шаблону, а не документа.</param>
@@ -130,7 +136,11 @@ public interface IConsistencyIssueReader
     /// Розкладає сутності знахідок на місце в структурі — ПАКЕТНО, не більше одного запиту
     /// на тип сутності, незалежно від кількості знахідок.
     /// </summary>
-    /// <param name="entities">Пари <c>(EntityType, EntityId)</c> знахідок однієї сторінки.</param>
+    /// <param name="entities">
+    /// Трійки <c>(EntityType, EntityId, PeriodKey)</c> знахідок однієї сторінки. N1-05: період — ключ партиції
+    /// <c>doc.TableRow</c>, з ним пошук рядка читає одну партицію, а не всі; <c>null</c> (знахідка записана до N1-05)
+    /// — безпечний запасний шлях: пошук за самим <c>Id</c>.
+    /// </param>
     /// <param name="ct">Токен скасування.</param>
     /// <returns>
     /// Лише розкладені пари. <c>doc.CellValue</c> (id рядка) → документ/аркуш/таблиця/рядок
@@ -139,7 +149,7 @@ public interface IConsistencyIssueReader
     /// відсутні. Пара, чия сутність зникла, теж відсутня.
     /// </returns>
     public Task<IReadOnlyDictionary<(string EntityType, long EntityId), ConsistencyLocation>> ResolveLocationsAsync(
-        IReadOnlyCollection<(string EntityType, long EntityId)> entities, CancellationToken ct);
+        IReadOnlyCollection<(string EntityType, long EntityId, int? PeriodKey)> entities, CancellationToken ct);
 }
 
 /// <summary>Лічильники знахідок за вагою в межах фільтра переліку (без фільтра ваги).</summary>

@@ -56,14 +56,41 @@ public sealed class UiStringCsvApiTests(SqlServerFixture sql)
         Assert.Equal((HttpStatusCode.Forbidden, HttpStatusCode.Forbidden), (export.StatusCode, import.StatusCode));
     }
 
-    private static async Task<HttpResponseMessage> ImportAsync(HttpClient client, string csv)
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Directive", "BE-13")]
+    public async Task Файл_cp1251_відхиляється_422_і_каталог_не_змінюється()
+    {
+        // S1-03: «Зберегти як CSV» в Excel з ru/kk-локаллю пише cp1251. Нестрогий UTF-8 читав кирилицю як «�»,
+        // обробник цього не бачив, і не-dryRun імпорт перезаписував переклад мови для всіх.
+        using var app = new EcrApiFactory(sql);
+        var client = await SystemHealthControllerTests.SignedInAsync(sql, app, Permission);
+        var revision = await RevisionAsync(client);
+
+        // "key,ru\r\ncommon.save,Сохранить" у cp1251 (кирилиця — одиночні байти 0xC0..0xFF, невалідний UTF-8).
+        var cp1251 = Encoding.ASCII.GetBytes("key,ru\r\ncommon.save,")
+            .Concat(new byte[] { 0xD1, 0xEE, 0xF5, 0xF0, 0xE0, 0xED, 0xE8, 0xF2, 0xFC })
+            .ToArray();
+        var response = await ImportBytesAsync(client, cp1251, dryRun: false);
+
+        Assert.True(response.StatusCode == HttpStatusCode.UnprocessableEntity, $"{response.StatusCode}: {app.ErrorsText}");
+        Assert.Contains("err.ECR-REQ-0422.uiStringCsvNotUtf8", await response.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+        Assert.Equal(revision, await RevisionAsync(client));
+    }
+
+    private static Task<HttpResponseMessage> ImportAsync(HttpClient client, string csv)
+        => ImportBytesAsync(client, Encoding.UTF8.GetBytes(csv), dryRun: true);
+
+    private static async Task<HttpResponseMessage> ImportBytesAsync(HttpClient client, byte[] bytes, bool dryRun)
     {
         using var content = new MultipartFormDataContent();
-        var file = new ByteArrayContent(Encoding.UTF8.GetBytes(csv));
+        var file = new ByteArrayContent(bytes);
         file.Headers.ContentType = new MediaTypeHeaderValue("text/csv");
         content.Add(file, "file", "ru.csv");
 
-        return await client.PostAsync(new Uri("/api/v1/ui-strings/import?lang=ru&dryRun=true", UriKind.Relative), content);
+        var flag = dryRun ? "true" : "false";
+        return await client.PostAsync(new Uri($"/api/v1/ui-strings/import?lang=ru&dryRun={flag}", UriKind.Relative), content);
     }
 
     private static async Task<int> RevisionAsync(HttpClient client)

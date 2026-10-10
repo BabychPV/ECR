@@ -29,7 +29,8 @@
     Локальний користувач (або $env:ECR_USER).
 
 .PARAMETER Password
-    Пароль як SecureString (або $env:ECR_PASSWORD). У файлах і логах не зберігається.
+    Пароль як SecureString: `Read-Host -AsSecureString`. Скрипт його не записує у файли й логи.
+    $env:ECR_PASSWORD лишено лише для автоматизації (змінна середовища видима дочірнім процесам).
 
 .PARAMETER DataDir
     Каталог CSV і маніфесту (за замовчуванням docs/delivery/reference-data/land-contract).
@@ -41,9 +42,9 @@
     Лише читання: показати, що було б створено.
 
 .EXAMPLE
-    $env:ECR_USER='admin'; $env:ECR_PASSWORD='...'   # лише для поточного сеансу
-    .\Import-ContractDictionaries.ps1 -BaseUrl http://localhost:5092 -DryRun
-    .\Import-ContractDictionaries.ps1 -BaseUrl http://localhost:5092
+    $pw = Read-Host 'Пароль ECR' -AsSecureString   # прихований ввід: у історію PSReadLine не потрапляє
+    .\Import-ContractDictionaries.ps1 -BaseUrl http://localhost:5092 -User admin -Password $pw -DryRun
+    .\Import-ContractDictionaries.ps1 -BaseUrl http://localhost:5092 -User admin -Password $pw
 #>
 [CmdletBinding(SupportsShouldProcess)]
 param(

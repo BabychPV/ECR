@@ -820,17 +820,20 @@ public sealed class CreateUserHandler(
 
         if (provider == AuthProvider.Windows)
         {
+            // ⛔ Родина USR, а не CELL: суб'єкт відмови — обліковий запис,
+            // а не комірка документа. З ECR-CELL-0422 відмова створення
+            // користувача приходила в обробник помилок сітки.
+            // ⛔ X5-01: `""` і не-SID — 422. Раніше `""` давав 500 з домену, а сміття
+            // зберігалося і займало ім'я входу справжньої людини.
+            var sid = WindowsSidFormat.Canonicalize(windowsSid);
+
+            // ⛔ X5-01: SID, що вже має інший запис, — 409 тут, а не 500 на `UX_User_Sid`
+            // під час збереження.
+            await WindowsSidFormat.EnsureFreeAsync(users, sid, exceptUserId: null, ct).ConfigureAwait(false);
+
             // Доменний запис — без пароля взагалі: пароль живе в каталозі, і
             // друга його копія тут була б і зайвою, і небезпечною.
-            user = User.CreateDomain(
-                userName, displayName,
-                // ⛔ Родина USR, а не CELL: суб'єкт відмови — обліковий запис,
-                // а не комірка документа. З ECR-CELL-0422 відмова створення
-                // користувача приходила в обробник помилок сітки.
-                windowsSid ?? throw new BusinessRuleException(
-                    ErrorCodes.UserInvalid, "Для доменного запису потрібен SID.",
-                    new Dictionary<string, object?> { ["messageKey"] = "err.ECR-USR-0422.windowsSidRequired" }),
-                now);
+            user = User.CreateDomain(userName, displayName, sid, now);
         }
         else
         {

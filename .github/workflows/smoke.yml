@@ -34,9 +34,14 @@ on:
 permissions:
   contents: read
 
+# ⛔ N5-07 (аудит 2026-10-09): вершину dev/integration НЕ скасовувати. Прогін на ній — це вердикт
+# (smoke до 40 хв), а швидкі послідовні зведення lane-ів у dev/integration скасовували б кожен
+# попередній прогін, і жодна вершина не мала б вердикту. Нові прогони тієї ж гілки стають у чергу
+# (GitHub тримає лише один очікуючий — найновіший). rc/**, PR у main і ручні запуски, як і раніше,
+# скасовують попередній прогін тієї ж гілки.
 concurrency:
   group: smoke-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/dev/integration' }}
 
 env:
   DOTNET_NOLOGO: 'true'

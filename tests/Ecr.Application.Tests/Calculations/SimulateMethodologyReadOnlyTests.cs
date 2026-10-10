@@ -68,7 +68,12 @@ public sealed class SimulateMethodologyReadOnlyTests
         var user = Substitute.For<ICurrentUser>();
         user.UserId.Returns(9);
 
-        var result = await new SimulateMethodologyHandler(module, store, access, user, Substitute.For<IPeriodStore>())
+        // L7-11: без меж періоду документа тесту симуляція відмовляє, тож період задано.
+        var periods = Substitute.For<IPeriodStore>();
+        periods.FindPeriodBoundsAsync(700, 202601, Arg.Any<CancellationToken>())
+            .Returns(new PeriodBounds(new DateOnly(2026, 1, 1), new DateOnly(2026, 1, 31)));
+
+        var result = await new SimulateMethodologyHandler(module, store, access, user, periods)
             .HandleAsync(VersionId, 202601, CancellationToken.None);
 
         // Контроль: симуляція справді відпрацювала, а не вийшла до обчислень.

@@ -1,5 +1,5 @@
-import { QueryClient } from '@tanstack/react-query';
-import { describe, expect, it } from 'vitest';
+import { QueryClient, QueryObserver } from '@tanstack/react-query';
+import { describe, expect, it, vi } from 'vitest';
 import { calculationResultsKey } from '@/features/methodologies/calculationResultsKey';
 import { refreshStaleness } from '../useCellPatch';
 
@@ -51,4 +51,36 @@ describe('refreshStaleness', () => {
       expect(invalidated(client, ['documents', 'summary', 202609])).toBe(true);
     },
   );
+
+  /**
+   * AN-108 / P2-01: активний спостерігач зведення (бейдж меню на сторінці документа) НЕ перезапитує зведення на
+   * кожне автозбереження — лише на перехід картки false → true.
+   * ⛔ Мутаційний доказ: поверни безумовний `invalidateQueries` з `refetchType` за замовчуванням — перший кейс
+   * почервоніє.
+   */
+  it.each([
+    [{ resultsStale: true }, 0],
+    [undefined, 0],
+    [{ resultsStale: null }, 0],
+    [{ resultsStale: false }, 1],
+  ])('активне зведення, картка %j — перезапитів зведення: %i', async (summary, expected) => {
+    const client = clientWith(summary);
+    const fetchSummary = vi.fn(() => Promise.resolve({ staleResultsCount: 0 }));
+    const observer = new QueryObserver(client, {
+      queryKey: ['documents', 'summary', 202609],
+      queryFn: fetchSummary,
+      staleTime: 60_000,
+    });
+    const unsubscribe = observer.subscribe(() => undefined);
+    await vi.waitFor(() => expect(fetchSummary).toHaveBeenCalledTimes(1));
+    fetchSummary.mockClear();
+
+    refreshStaleness(client, 7, 202609);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(fetchSummary).toHaveBeenCalledTimes(expected);
+    // Без перезапиту зведення все одно позначене застарілим — перелік перечитає його при монтуванні.
+    if (expected === 0) expect(invalidated(client, ['documents', 'summary', 202609])).toBe(true);
+    unsubscribe();
+  });
 });

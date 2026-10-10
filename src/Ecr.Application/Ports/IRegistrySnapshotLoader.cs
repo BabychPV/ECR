@@ -42,4 +42,26 @@ public interface IRegistrySnapshotLoader
         DateOnly businessDate,
         DateTime? registryAsOfUtc,
         CancellationToken ct);
+
+    /// <summary>
+    /// Читає ті самі дані з БД, але знімка на дату не будує: його будує
+    /// <see cref="IRegistrySnapshotSource.Build"/> — стільки разів і на стільки дат, скільки треба.
+    /// </summary>
+    /// <param name="registryDefIds">Довідники — як у <see cref="LoadAsync"/>.</param>
+    /// <param name="registryAsOfUtc">Системний момент <c>AS OF</c> — як у <see cref="LoadAsync"/>.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>
+    /// Джерело знімків; для порожнього переліку — порожнє, без звернень до БД.
+    /// </returns>
+    /// <remarks>
+    /// ⛔ L5-12. Для пакета, якому потрібні знімки на КІЛЬКА дат (правила довідника: кожна <c>ValidFrom</c>
+    /// темпорального запису — окрема дата). Бізнес-дата впливає лише на видимість, яку
+    /// <see cref="IRegistrySnapshotSource.Build"/> застосовує в пам'яті, а читання з БД від неї не
+    /// залежить, тож повторювати його на кожну дату — марно: п'ять запитів над усіма записами довідників.
+    /// <c>LoadAsync(ids, date, asOf)</c> ≡ <c>(await LoadSourceAsync(ids, asOf)).Build(date)</c>.
+    /// </remarks>
+    public Task<IRegistrySnapshotSource> LoadSourceAsync(
+        IReadOnlyCollection<int> registryDefIds,
+        DateTime? registryAsOfUtc,
+        CancellationToken ct);
 }

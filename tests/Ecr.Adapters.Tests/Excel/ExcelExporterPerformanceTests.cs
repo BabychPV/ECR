@@ -61,11 +61,11 @@ public sealed class ExcelExporterPerformanceTests(ITestOutputHelper output)
         output.WriteLine($"таблиць {tableCount}: звернень до сховища {world.Calls}, "
             + $"з них пакетних {world.BatchCalls} ({string.Join(", ", world.CallLog)})");
 
-        // ⛔ Рівно ці чотири: перелік екземплярів, знімок структури, каталог
-        // стилів і ДВА пакетні читання — разом п'ять, і жодне з них не
-        // залежить від числа таблиць.
-        Assert.Equal(5, world.Calls);
-        Assert.Equal(2, world.BatchCalls);
+        // ⛔ Рівно ці: перелік екземплярів, знімок структури, каталог
+        // стилів і ТРИ пакетні читання (ключі рядків, версії рядків — D1-02,
+        // зріз комірок) — разом шість, і жодне з них не залежить від числа таблиць.
+        Assert.Equal(6, world.Calls);
+        Assert.Equal(3, world.BatchCalls);
 
         // Прямий доказ того, що саме зникло: поштучних викликів немає жодного.
         await world.Rows.DidNotReceiveWithAnyArgs()
@@ -212,7 +212,7 @@ public sealed class ExcelExporterPerformanceTests(ITestOutputHelper output)
             + $"виділено {(GC.GetTotalAllocatedBytes() - before) / 1048576} МБ, "
             + $"звернень до сховища {world.Calls}");
 
-        Assert.Equal(5, world.Calls);
+        Assert.Equal(6, world.Calls);
     }
 
     private static ExcelExportOptions Options()
@@ -346,6 +346,14 @@ public sealed class ExcelExporterPerformanceTests(ITestOutputHelper output)
                 .Returns(_ => Record(
                     "GetRowIdsBatch", batch: true,
                     (IReadOnlyDictionary<long, IReadOnlyDictionary<string, long>>)_rowIds));
+
+            // ⛔ D1-02: версії рядків у карту книги — теж одним пакетом на всю книгу.
+            Rows.GetRowVersionsBatchAsync(
+                    Arg.Any<IReadOnlyList<long>>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+                .Returns(_ => Record(
+                    "GetRowVersionsBatch", batch: true,
+                    (IReadOnlyDictionary<long, IReadOnlyDictionary<string, string>>)
+                    new Dictionary<long, IReadOnlyDictionary<string, string>>()));
 
             Cells.ReadSlicesAsync(Arg.Any<IReadOnlyList<long>>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
                 .Returns(_ => Record(

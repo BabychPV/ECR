@@ -271,6 +271,15 @@ function emptyManageSeed(templateVersionId: number): ManageSeed {
  * тепер стосується лише переліку аркушів і таблиць нижче.
  */
 export function TemplateVersionPage(): JSX.Element {
+  const { versionId } = useParams();
+
+  // ⚠ `key={versionId}`: перехід на іншу версію (клон, посилання, «Назад») — це ІНША сторінка, а не та сама з новим
+  // `id`. Без ключа локальний стан (проблеми публікації `publishProblems`, відкриті діалоги, чернетки,
+  // `manageSeed`) переживав перехід і показував відмову ПОПЕРЕДНЬОЇ версії над наступною.
+  return <TemplateVersionEditor key={versionId} />;
+}
+
+function TemplateVersionEditor(): JSX.Element {
   const { id: templateId, versionId } = useParams();
   const id = Number(versionId);
   const queryClient = useQueryClient();
@@ -862,6 +871,11 @@ export function TemplateVersionPage(): JSX.Element {
   // показана форма означала б обіцянку, яку `ECR-TMPL-0409` однаково не
   // виконає.
   const canEditSheets = can(session.data, 'Template.Edit') && (structure.data?.isEditable ?? false);
+
+  // Коди колонок усієї версії — для умовного форматування (L9-22); `undefined`, поки структура не приїхала.
+  const versionColumnCodes = structure.data?.sheets.flatMap((sheet) =>
+    sheet.tables.flatMap((table) => table.columns.map((column) => column.code)),
+  );
 
   const nextOrdinal = (() => {
     const sheets = structure.data?.sheets ?? [];
@@ -1455,6 +1469,8 @@ export function TemplateVersionPage(): JSX.Element {
             <ConditionalFormatPanel
               templateVersionId={id}
               canEdit={canEditSheets}
+              // L9-22: коди ВСІХ колонок версії — правила зниклих колонок («сироти») не вертаються в PUT.
+              versionColumnCodes={versionColumnCodes}
               columns={conditionalFormatTable.columns.map((column) => ({
                 code: column.code,
                 label: localized(column.headerL10n) || column.code,

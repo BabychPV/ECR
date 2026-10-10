@@ -3,12 +3,15 @@ using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Application.Reporting;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.Reporting;
 using Ecr.Domain.Enums;
+using Ecr.Domain.Errors;
 using Ecr.Domain.ValueObjects;
+using Ecr.Infrastructure.Caching;
 using Ecr.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
@@ -41,8 +44,27 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock, IMemory
     /// Річний звіт великого проєкту — десятки тисяч рядків. Межа існує не
     /// тому, що більше не буває, а тому, що без неї помилка в правилах відбору
     /// виглядала б як повільність, а не як помилка.
+    /// <para>
+    /// ⛔ AN-120 / L1-01: стеля — на ВИХОДІ правил відбору (<c>R5</c>), а не на
+    /// джерелі, і перевищення — ВІДМОВА (<c>ECR-RPT-0422</c>), а не обрізання.
+    /// Раніше джерело мовчки зрізалося <c>Take(MaxRows)</c> до правил: зріз
+    /// отримував <c>Complete</c>, суму й <c>IsCurrent</c> на неповних даних, а
+    /// звірка «збігалася», бо рахувала ті самі збережені рядки.
+    /// </para>
     /// </remarks>
     private const int MaxRows = 200_000;
+
+    /// <summary>Стеля рядків зрізу для ЦЬОГО будівника; за замовчуванням — <see cref="MaxRows"/>.</summary>
+    /// <remarks>
+    /// Окремою властивістю лише заради тестів (прийом <c>PointCeilingPerField</c>):
+    /// довести «відмова, а не обрізання» на 200 001 рядку означало б годину
+    /// наповнення бази. Контейнер її не задає.
+    /// </remarks>
+    public int RowCeiling { get; init; } = MaxRows;
+
+    /// <summary>Бюджет кешу розкладених зрізів; за замовчуванням — <see cref="MaxCachedCells"/>.</summary>
+    /// <remarks>Окремою властивістю лише заради тестів зрізу, що в бюджет не влазить.</remarks>
+    public int LaidOutCacheBudget { get; init; } = MaxCachedCells;
 
     /// <inheritdoc />
     public async Task<long> BuildAsync(
@@ -71,16 +93,43 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock, IMemory
         // прийти й не звідти — з розкладу або з черги, пережившої переїзд.
         var parameters = ReportParameters.Bind(rowRules.Parameters, parametersJson);
 
+        // ⛔ R6-X7 / X7-04: «побудовано станом на» і прогін походження — моменти ДО
+        // читання джерела, а не після. Агрегація читає джерело потоком (AN-120) і на
+        // великому проєкті триває десятки секунд; прогін, що став актуальним за цей
+        // час (`FinishedAt` усередині вікна), мусить старити зріз (ФВ-10.5): його чисел
+        // у зрізі може не бути. Раніше `BuiltAt` ставився ПІСЛЯ агрегації — такий
+        // прогін зріз не старив, а `CalculationRunId` вказував саме на нього, тобто
+        // походження чисел було хибним. Хибна застарілість (прогін, що закінчився під
+        // час агрегації й таки потрапив у зріз) — безпечний бік: зріз перебудують.
+        var builtAt = clock.UtcNow;
+        var calculationRunId = await CurrentRunAsync(projectId, periodKey, ct).ConfigureAwait(false);
+
+        // ⛔ R6-X7 / X7-03: поданий (заморожений) поточний зріз не витісняється, доки
+        // його дані не повернуто в роботу. Перевірка тут — лише щоб не читати джерело
+        // задарма; вирішальна — повторна, під замком слоту (нижче).
+        var frozenBefore = await FrozenCurrentIdsAsync(version.ReportDefId, projectId, periodKey, ct)
+            .ConfigureAwait(false);
+        if (await FreshFrozenAsync(frozenBefore, projectId, periodKey, dataStatus: null, ct).ConfigureAwait(false)
+            is { } frozenEarly)
+        {
+            throw FrozenRefusal(frozenEarly, projectId, periodKey);
+        }
+
         var cells = await AggregateAsync(layout, rowRules, parameters.Values, projectId, periodKey, ct)
             .ConfigureAwait(false);
 
         // ⚠ Статус УСПАДКОВУЄТЬСЯ від даних (D-65). Окреме поле «статус звіту»
         // стало б другим джерелом істини і рано чи пізно показало б регулятору
         // Approved на чернетці.
-        var status = await StatusOfDataAsync(projectId, periodKey, ct).ConfigureAwait(false);
-
+        //
+        // ⛔ R6-X1 / X1-01: тут лише заглушка `Draft`. Справжній статус
+        // рахується НАПРИКІНЦІ, під замком слоту і безпосередньо перед
+        // перемиканням `IsCurrent` (див. нижче). Порахований тут, він
+        // застарівав на весь час запису рядків: перехід, що закомітився в цьому
+        // вікні, оновлював лише СТАРИЙ поточний зріз, а новий ставав поточним
+        // зі статусом до переходу.
         var snapshot = new ReportSnapshot(
-            reportVersionId, projectId, periodKey?.Value, status, clock.UtcNow, builtByUserId: null);
+            reportVersionId, projectId, periodKey?.Value, SnapshotStatus.Draft, builtAt, builtByUserId: null);
 
         db.ReportSnapshots.Add(snapshot);
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
@@ -97,8 +146,8 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock, IMemory
             ComputeHash(rows),
 
             // Прогін, з якого взято числа: без нього неможливо сказати, на
-            // чому стоїть значення у звіті.
-            await CurrentRunAsync(projectId, periodKey, ct).ConfigureAwait(false),
+            // чому стоїть значення у звіті. ⚠ Прочитаний ДО агрегації (X7-04).
+            calculationRunId,
 
             // ⚠ Записуються ВИКОРИСТАНІ значення, а не надіслані: замовчування
             // вже підставлені. Інакше зріз, побудований без жодного параметра,
@@ -109,11 +158,244 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock, IMemory
         // зберігається одразу, а не визначається потім перерахунком.
         snapshot.RecordHashFormat(VerifyReportSnapshotHandler.FormatCurrent);
 
-        await SwitchCurrentAsync(snapshot, ct).ConfigureAwait(false);
+        // ⚠ Рядки — окремим збереженням, ПОЗА замком слоту: запис до
+        // 200 000 рядків триває секунди, і тримати весь цей час робочий процес
+        // проєкту за період означало б відмови «зайнято» на поданні. Зріз ще
+        // не поточний, тож регуляторна вʼюха його не бачить.
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
+
+        // ⛔ R6-X1 / X1-01: статус і перемикання — ОДНІЄЮ короткою транзакцією
+        // під тим самим замком слоту, який бере робочий процес перед пошуком
+        // поточних зрізів (`ReportSnapshotSync`). Перехід або закомітився
+        // раніше — і тоді запит статусу його бачить, — або чекає замка і вже
+        // знаходить НОВИЙ зріз поточним. Третього варіанта, у якому перехід
+        // оновлює лише старий зріз, а новий стає поточним із застарілим
+        // статусом, більше немає. `UPDLOCK` на рядку зрізу (W1-01) цього не
+        // закривав: нового зрізу серед заблокованих ще не було.
+        long? refusedBy = null;
+        await new UnitOfWork(db, clock).ExecuteInTransactionAsync(
+            async innerCt =>
+            {
+                refusedBy = null;
+                await LockSlotAsync(projectId, periodKey?.Value, innerCt).ConfigureAwait(false);
+
+                var status = await StatusOfDataAsync(projectId, periodKey, innerCt).ConfigureAwait(false);
+
+                // ⛔ R6-X7 / X7-03: повторна перевірка «поточний зріз ключа поданий» —
+                // під замком слоту, який бере й робочий процес перед заморожуванням
+                // (`ReportSnapshotSync`). Побудова, що почалася до подання останнього
+                // аркуша, тут уже бачить заморожений зріз і відмовляє, а не знімає з
+                // нього поточність. Новий зріз при відмові ВИДАЛЯЄТЬСЯ разом із рядками
+                // (вони збережені вище, поза замком): інакше лишився б непоточний
+                // «зріз-сирота», якого ніхто не просив.
+                var frozen = await FrozenCurrentIdsAsync(version.ReportDefId, projectId, periodKey, innerCt)
+                    .ConfigureAwait(false);
+                if (await FreshFrozenAsync(frozen, projectId, periodKey, status, innerCt).ConfigureAwait(false)
+                    is { } frozenNow)
+                {
+                    await DiscardAsync(snapshot.Id, innerCt).ConfigureAwait(false);
+                    refusedBy = frozenNow;
+                    return;
+                }
+
+                // ⛔ R6-X7 / X7-01: зріз, застарілий уже від народження (прогін перемкнувся,
+                // поки читалося джерело, X7-04), статусу даних не успадковує — те саме
+                // правило, що в `RefreshStatusAsync`: старі числа не йдуть у `rpt.v_*` як
+                // затверджені чи подані.
+                if (status != SnapshotStatus.Draft
+                    && await ReportSnapshotStaleness.IsStaleAsync(db, projectId, periodKey?.Value, builtAt, innerCt)
+                        .ConfigureAwait(false))
+                {
+                    status = SnapshotStatus.Draft;
+                }
+
+                snapshot.RefreshStatus(status);
+
+                await SwitchCurrentAsync(snapshot, version.ReportDefId, innerCt).ConfigureAwait(false);
+                await db.SaveChangesAsync(innerCt).ConfigureAwait(false);
+            },
+            ct).ConfigureAwait(false);
+
+        if (refusedBy is { } refused)
+        {
+            // Видалене в базі не має лишатися в трекері: той самий контекст може
+            // зберігати далі, і EF спробував би оновити рядки, яких уже немає.
+            foreach (var entry in db.ChangeTracker.Entries<ReportRow>()
+                         .Where(e => e.Entity.SnapshotId == snapshot.Id)
+                         .ToList())
+            {
+                entry.State = EntityState.Detached;
+            }
+
+            db.Entry(snapshot).State = EntityState.Detached;
+            throw FrozenRefusal(refused, projectId, periodKey);
+        }
 
         return snapshot.Id;
     }
+
+    /// <summary>
+    /// Поточні ПОДАНІ зрізи опису звіту за проєкт і період.
+    /// </summary>
+    private Task<List<long>> FrozenCurrentIdsAsync(
+        int reportDefId, int projectId, PeriodKey? periodKey, CancellationToken ct)
+    {
+        int? key = periodKey?.Value;
+
+        return db.ReportSnapshots
+            .AsNoTracking()
+            .Where(s => s.IsCurrent
+                        && s.Status == SnapshotStatus.Submitted
+                        && s.ProjectId == projectId
+                        && s.PeriodKey == key
+                        && db.ReportVersions.Any(v => v.Id == s.ReportVersionId && v.ReportDefId == reportDefId))
+            .OrderBy(s => s.Id)
+            .Select(s => s.Id)
+            .Take(MaxCurrentSnapshots)
+            .ToListAsync(ct);
+    }
+
+    /// <summary>
+    /// Поданий поточний зріз, який нова побудова не має права витіснити; <c>null</c> — такого немає.
+    /// </summary>
+    /// <param name="frozenIds">Поточні подані зрізи ключа.</param>
+    /// <param name="projectId">Проєкт.</param>
+    /// <param name="periodKey">Період.</param>
+    /// <param name="dataStatus">Статус даних, якщо вже пораховано; <c>null</c> — порахувати.</param>
+    /// <param name="ct">Скасування.</param>
+    /// <remarks>
+    /// ⛔ R6-X7 / X7-03. Поданий зріз — доказ того, що бачив регулятор (ФВ-9.17), і
+    /// <c>rpt.v_*</c> віддає саме поточний. Нова побудова з іншими параметрами чи за
+    /// іншою версією опису (X7-02) підмінила б у вʼюсі подані числа іншими з тією
+    /// самою позначкою «Submitted» (новий зріз за поданим періодом народжується
+    /// <c>Submitted</c> зі стану даних). Із тими самими параметрами числа збіглися б
+    /// (після подання перерахунок заборонено), тож відмова нічого законного не відбирає.
+    /// <para>
+    /// ⚠ Дозволено, коли (а) дані повернуто в роботу (<c>Reopen</c>/відкликання → статус
+    /// даних <c>Draft</c>) — повторне подання дає НОВИЙ зріз; (б) поданий зріз
+    /// застарілий (ФВ-10.5: після повернення в роботу був перерахунок) — його числа вже
+    /// не ті, що в системі, і нова побудова — саме те, що потрібно.
+    /// </para>
+    /// </remarks>
+    private async Task<long?> FreshFrozenAsync(
+        List<long> frozenIds, int projectId, PeriodKey? periodKey, SnapshotStatus? dataStatus, CancellationToken ct)
+    {
+        if (frozenIds.Count == 0)
+        {
+            return null;
+        }
+
+        var stale = await ReportSnapshotStaleness.StaleSnapshotIds(db)
+            .Where(id => frozenIds.Contains(id))
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var fresh = frozenIds.Except(stale).ToList();
+        if (fresh.Count == 0)
+        {
+            return null;
+        }
+
+        var status = dataStatus ?? await StatusOfDataAsync(projectId, periodKey, ct).ConfigureAwait(false);
+        return status == SnapshotStatus.Draft ? null : fresh[0];
+    }
+
+    /// <summary>Видаляє щойно записаний (ще не поточний) зріз разом із рядками.</summary>
+    /// <remarks>⚠ Рядки ПЕРШИМИ: <c>FK_RepRow_Snap</c> не каскадний (як у <c>ReportRetentionJob</c>).</remarks>
+    private async Task DiscardAsync(long snapshotId, CancellationToken ct)
+    {
+        await db.ReportRows.Where(r => r.SnapshotId == snapshotId).ExecuteDeleteAsync(ct).ConfigureAwait(false);
+        await db.ReportSnapshots.Where(s => s.Id == snapshotId && !s.IsCurrent).ExecuteDeleteAsync(ct).ConfigureAwait(false);
+    }
+
+    /// <summary>Відмова побудови: поточний зріз ключа поданий (ФВ-9.17).</summary>
+    /// <remarks>
+    /// ⛔ R7-Y8 / Y8-01: <see cref="DomainException"/> з <see cref="ErrorCodes.ReportImmutable"/>
+    /// (<c>ECR-RPT-0409</c>, «зріз подано»), а НЕ <see cref="InvalidOperationException"/>.
+    /// Побудова йде у фоновій задачі, а це вердикт про вже збережений стан: з
+    /// <see cref="InvalidOperationException"/> <c>JobRetryPolicy.IsWorthRetrying</c> ішов у
+    /// гілку «збій дороги» — три повтори (210 с «виконується»), а потім <c>ECR-SYS-0500</c>
+    /// («Internal error») на клієнті замість причини й шляху (Reopen).
+    /// <para>
+    /// ⛔ R7-Y7 / Y7-01: та сама відмова, що й синхронна в обробнику запиту
+    /// (<see cref="BuildReportSnapshotHandler.FrozenRefusal"/>) — одне джерело тексту й ключа.
+    /// </para>
+    /// </remarks>
+    internal static DomainException FrozenRefusal(long frozenId, int projectId, PeriodKey? periodKey)
+        => BuildReportSnapshotHandler.FrozenRefusal(frozenId, projectId, periodKey?.Value);
+
+    /// <inheritdoc />
+    public async Task<long?> FindFreshFrozenCurrentAsync(
+        int reportVersionId, int projectId, PeriodKey? periodKey, CancellationToken ct)
+    {
+        var reportDefId = await db.ReportVersions
+            .AsNoTracking()
+            .Where(v => v.Id == reportVersionId)
+            .Select(v => (int?)v.ReportDefId)
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+        if (reportDefId is not { } defId)
+        {
+            return null;
+        }
+
+        var frozen = await FrozenCurrentIdsAsync(defId, projectId, periodKey, ct).ConfigureAwait(false);
+        return await FreshFrozenAsync(frozen, projectId, periodKey, dataStatus: null, ct).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⚠ Замок — на проєкт × період, без версії звіту: робочий процес
+    /// проводить перехід у зрізи ВСІХ версій одним викликом. Річний зріз
+    /// (<paramref name="periodKey"/> <c>null</c>) має власний ресурс.
+    /// <para>
+    /// ⚠ Власник — транзакція: замок знімає коміт або відкат, забутого
+    /// <c>sp_releaseapplock</c> бути не може. Поза транзакцією
+    /// <c>sp_getapplock</c> відмовляє, тож викликач мусить її відкрити.
+    /// </para>
+    /// </remarks>
+    public async Task LockSlotAsync(int projectId, int? periodKey, CancellationToken ct)
+    {
+        var resource = string.Create(
+            CultureInfo.InvariantCulture,
+            $"ecr.rpt-slot.{projectId}.{(periodKey is { } key ? key.ToString(CultureInfo.InvariantCulture) : "year")}");
+
+        var result = new Microsoft.Data.SqlClient.SqlParameter("@rc", System.Data.SqlDbType.Int)
+        {
+            Direction = System.Data.ParameterDirection.Output,
+        };
+
+        await db.Database.ExecuteSqlRawAsync(
+            "EXEC @rc = sp_getapplock @Resource = @res, @LockMode = N'Exclusive', "
+            + "@LockOwner = N'Transaction', @LockTimeout = @timeout;",
+            [
+                result,
+                new Microsoft.Data.SqlClient.SqlParameter("@res", resource),
+                new Microsoft.Data.SqlClient.SqlParameter("@timeout", SlotLockTimeoutMs),
+            ],
+            ct).ConfigureAwait(false);
+
+        // ⚠ Не дочекалися — та сама відмова 409, що й на вичерпаному
+        // очікуванні блокування рядка: дія не виконана, її можна повторити.
+        if (result.Value is not int rc || rc < 0)
+        {
+            throw new ConcurrencyConflictException(
+                ErrorCodes.SheetBusy,
+                "Зрізи звітності за цей період саме перебудовуються. Нічого не збережено; повторіть дію за мить.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = LockWaitGuard.MessageKey,
+                });
+        }
+    }
+
+    /// <summary>Скільки чекати замка слоту зрізів, мс.</summary>
+    /// <remarks>
+    /// Обидві сторони тримають замок коротко: побудова — на запит статусу й
+    /// перемикання, робочий процес — на перерахунок статусу зрізів. Пів хвилини —
+    /// із запасом на навантажений день дедлайну.
+    /// </remarks>
+    private const int SlotLockTimeoutMs = 30_000;
 
     /// <inheritdoc />
     public async Task MarkSubmittedAsync(long snapshotId, int userId, CancellationToken ct)
@@ -133,8 +415,16 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock, IMemory
     /// <inheritdoc />
     public async Task<SnapshotStatus> RefreshStatusAsync(long snapshotId, CancellationToken ct)
     {
+        // ⛔ R5-W1 / W1-01: рядок зрізу — під `UPDLOCK` до кінця транзакції
+        // робочого процесу, і статус даних рахується ПІСЛЯ блокування. Маркера
+        // конкуренції в `rpt.ReportSnapshot` немає: два затвердження різних
+        // аркушів одного проєкту рахували статус кожне зі свого знімка, і
+        // виграв би останній записаний — застарілий. Під блокуванням другий
+        // чекає коміту першого й рахує вже з його переходом (запит під RCSI
+        // бачить закомічене на момент СВОГО початку).
         var snapshot = await db.ReportSnapshots
-            .FirstOrDefaultAsync(s => s.Id == snapshotId, ct)
+            .FromSql($"SELECT * FROM rpt.ReportSnapshot WITH (UPDLOCK, ROWLOCK) WHERE Id = {snapshotId}")
+            .FirstOrDefaultAsync(ct)
             .ConfigureAwait(false)
             ?? throw new InvalidOperationException($"Зрізу {snapshotId} не існує.");
 
@@ -148,6 +438,24 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock, IMemory
             snapshot.ProjectId,
             snapshot.PeriodKey is { } key ? new PeriodKey(key) : null,
             ct).ConfigureAwait(false);
+
+        // ⛔ R6-X7 / X7-01: ЗАСТАРІЛИЙ зріз (ФВ-10.5 — після його побудови актуальним
+        // став прогін його проєкту й періоду) статусу даних НЕ успадковує: він `Draft`.
+        // Статус зрізу — це «що бачить регулятор» (`rpt.v_*` бере лише `Approved`/
+        // `Submitted`), а числа застарілого зрізу старші за затверджені дані. Раніше
+        // подання останнього аркуша давало такому зрізу `Submitted` і морозило його
+        // (`ReportSnapshotSync.MarkSubmittedAsync` морозить лише на `Approved`/
+        // `Submitted`) — держава отримувала старі числа з позначкою «подано», а
+        // поданий зріз уже не виправити. `Draft` прибирає його з `rpt.v_*` і не дає
+        // заморозити; правильні числа дає НОВА побудова — її статус успадковується від
+        // даних, і вона не застаріла.
+        if (status != SnapshotStatus.Draft
+            && await ReportSnapshotStaleness.StaleSnapshotIds(db)
+                .AnyAsync(id => id == snapshot.Id, ct)
+                .ConfigureAwait(false))
+        {
+            status = SnapshotStatus.Draft;
+        }
 
         snapshot.RefreshStatus(status);
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
@@ -340,6 +648,23 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock, IMemory
             rowNos.Count > limit ? last : null);
     }
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// Рядки, а не комірки: <c>rpt.ReportRow</c> зберігає комірку на колонку.
+    /// Підрахунок іде індексом первинного ключа (<c>SnapshotId, RowNo, …</c>)
+    /// і зупиняється на <paramref name="atMost"/>.
+    /// </remarks>
+    public async Task<int> CountRowsAsync(long snapshotId, int atMost, CancellationToken ct)
+        => await db.ReportRows
+            .AsNoTracking()
+            .Where(r => r.SnapshotId == snapshotId)
+            .Select(r => r.RowNo)
+            .Distinct()
+            .OrderBy(n => n)
+            .Take(Math.Max(atMost, 0))
+            .CountAsync(ct)
+            .ConfigureAwait(false);
+
     /// <summary>
     /// Сторінка зрізу, розкладеного макетом (<c>R8</c>).
     /// </summary>
@@ -360,25 +685,62 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock, IMemory
     /// <c>RowNo</c>: у порядку груп <c>RowNo</c> не зростає. Без макета обидва
     /// числа збігаються, тож клієнт випадків не розрізняє.
     /// </para>
+    /// <para>
+    /// ⛔ AN-120 / L1-02: зріз, що не влазить у бюджет кешу цілком, кешується
+    /// БЕЗ комірок — лише порядок <c>RowNo</c>, групи й підсумки
+    /// (<see cref="LaidOutSnapshot.Rows"/> = <c>null</c>), а сторінка дочитує
+    /// комірки лише своїх рядків (<c>WHERE RowNo IN (…)</c>). До цього зріз понад
+    /// бюджет читався ЦІЛКОМ на кожну сторінку, а вивантаження книги — до 101
+    /// разу поспіль.
+    /// </para>
     /// </remarks>
     private async Task<SnapshotRowsPage> LaidOutRowsAsync(
         long snapshotId, StoredVersion version, IReadOnlyList<ReportColumnSpec> described, ReportLayout layout,
         int delivered, int limit, string language, CancellationToken ct)
     {
         var laidOut = await LaidOutAsync(snapshotId, version, described, layout, ct).ConfigureAwait(false);
-        var view = laidOut.View;
+        var total = laidOut.Order.Length;
+        var from = Math.Clamp(delivered, 0, total);
+        var taken = Math.Min(Math.Max(limit, 0), total - from);
 
         // ⛔ Сторінка й мова — на КОЖЕН запит, поза кешем: у кеші лише вміст
         // зрізу, однаковий для кожного, хто його читає.
-        var page = view.Rows.Skip(delivered).Take(limit).ToList();
+        var page = laidOut.Rows is { } rows
+            ? rows.Skip(from).Take(taken).ToList()
+            : await PageByRowNoAsync(snapshotId, laidOut, from, taken, ct).ConfigureAwait(false);
 
         return new SnapshotRowsPage(
             Titled(laidOut.Stored, language),
             page,
-            delivered + page.Count < view.Rows.Count ? delivered + page.Count : null,
-            view.Groups,
-            view.Totals,
+            from + taken < total ? from + taken : null,
+            laidOut.Groups,
+            laidOut.Totals,
             layout.ShowGroupHeader);
+    }
+
+    /// <summary>Рядки сторінки зрізу, закешованого без комірок: лише свої <c>RowNo</c>, у порядку макета.</summary>
+    private async Task<List<SnapshotRow>> PageByRowNoAsync(
+        long snapshotId, LaidOutSnapshot laidOut, int from, int taken, CancellationToken ct)
+    {
+        if (taken <= 0)
+        {
+            return [];
+        }
+
+        var slice = laidOut.Order.AsSpan(from, taken).ToArray();
+
+        var cells = await db.ReportRows
+            .AsNoTracking()
+            .Where(r => r.SnapshotId == snapshotId && slice.Contains(r.RowNo))
+            .OrderBy(r => r.RowNo)
+            .Take(slice.Length * MaxColumnsPerRow)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var byRowNo = WideRows(cells, laidOut.Stored).ToDictionary(r => r.RowNo);
+
+        // Порядок — макета (групи), а не бази: `RowNo` у порядку груп не зростає.
+        return [.. slice.Where(byRowNo.ContainsKey).Select(n => byRowNo[n])];
     }
 
     /// <summary>Зріз, розкладений макетом: з кешу або прочитаний і розкладений зараз.</summary>
@@ -402,10 +764,15 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock, IMemory
     /// <para>
     /// ⚠ <b>Межа пам'яті.</b> <c>SizeLimit</c> у спільного кешу немає і не буде
     /// (<c>RD-05</c>, коментар біля <c>AddMemoryCache</c>), тож стелю тримає
-    /// власний бюджет комірок на кожен екземпляр кешу
-    /// (<see cref="MaxCachedCells"/>) плюс строк: ковзний
-    /// <see cref="LaidOutSliding"/> і абсолютний <see cref="LaidOutLifetime"/>.
-    /// Зріз, що не влазить у бюджет, просто не кешується — і читається як до P4.
+    /// власний бюджет на кожен екземпляр кешу (<see cref="MaxCachedCells"/>)
+    /// плюс строк: ковзний <see cref="LaidOutSliding"/> і абсолютний
+    /// <see cref="LaidOutLifetime"/>. Зріз, що не влазить цілком, кешується без
+    /// комірок (AN-120 / L1-02); не влазить і так — не кешується.
+    /// </para>
+    /// <para>
+    /// ⛔ <b>Одночасні промахи</b> (AN-120 / L1-02) — одне читання на всіх
+    /// (<see cref="SingleFlight{T}"/>, <c>RD-05</c>): після побудови нового зрізу
+    /// його відкривають кілька людей одразу, і кожен читав би його повністю.
     /// </para>
     /// </remarks>
     private async Task<LaidOutSnapshot> LaidOutAsync(
@@ -416,11 +783,42 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock, IMemory
             ? new LaidOutKey(snapshotId, Convert.ToHexString(hash), version.ColumnsJson, version.RulesJson)
             : null;
 
-        if (key is not null && memory.TryGetValue(key, out LaidOutSnapshot? cached) && cached is not null)
+        if (key is null)
+        {
+            return await ReadAndLayOutAsync(snapshotId, described, layout, ct).ConfigureAwait(false);
+        }
+
+        if (memory.TryGetValue(key, out LaidOutSnapshot? cached) && cached is not null)
         {
             return cached;
         }
 
+        var flight = Flights.GetValue(memory, static _ => new SingleFlight<LaidOutSnapshot>());
+
+        return await flight
+            .RunAsync(
+                key.FlightKey(),
+                async token =>
+                {
+                    // Попередній політ міг уже покласти зріз у кеш між перевіркою
+                    // вище і цим місцем — тоді читати вдруге нема чого.
+                    if (memory.TryGetValue(key, out LaidOutSnapshot? warmed) && warmed is not null)
+                    {
+                        return warmed;
+                    }
+
+                    var built = await ReadAndLayOutAsync(snapshotId, described, layout, token).ConfigureAwait(false);
+                    Remember(key, built);
+                    return built;
+                },
+                ct)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>Читає весь зріз і розкладає його макетом — повний вигляд, з комірками.</summary>
+    private async Task<LaidOutSnapshot> ReadAndLayOutAsync(
+        long snapshotId, IReadOnlyList<ReportColumnSpec> described, ReportLayout layout, CancellationToken ct)
+    {
         var cells = await db.ReportRows
             .AsNoTracking()
             .Where(r => r.SnapshotId == snapshotId)
@@ -430,22 +828,33 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock, IMemory
             .ConfigureAwait(false);
 
         var stored = StoredLayout(described, cells);
-        var built = new LaidOutSnapshot(stored, layout.Apply(WideRows(cells, stored)));
+        var view = layout.Apply(WideRows(cells, stored));
 
-        if (key is not null)
-        {
-            Remember(key, built, cells.Count);
-        }
-
-        return built;
+        return new LaidOutSnapshot(
+            stored, [.. view.Rows.Select(r => r.RowNo)], view.Groups, view.Totals, view.Rows, cells.Count);
     }
 
-    /// <summary>Кладе розкладений зріз у кеш, якщо він влазить у бюджет.</summary>
-    private void Remember(LaidOutKey key, LaidOutSnapshot built, int cellCount)
+    /// <summary>Кладе розкладений зріз у кеш: цілком, якщо влазить, інакше — без комірок.</summary>
+    private void Remember(LaidOutKey key, LaidOutSnapshot built)
     {
         var budget = Budgets.GetValue(memory, static _ => new CacheBudget());
 
-        if (!budget.TryReserve(cellCount))
+        // Порядок і групи коштують і в повному записі, і в стислому.
+        var skeleton = built.Order.Length + built.Groups.Count;
+        var full = built.CellCount + skeleton;
+
+        LaidOutSnapshot entry;
+        int cost;
+
+        if (budget.TryReserve(full, LaidOutCacheBudget))
+        {
+            (entry, cost) = (built, full);
+        }
+        else if (budget.TryReserve(skeleton, LaidOutCacheBudget))
+        {
+            (entry, cost) = (built with { Rows = null }, skeleton);
+        }
+        else
         {
             return;
         }
@@ -457,16 +866,21 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock, IMemory
         };
 
         // Бюджет повертається, коли запис іде з кешу з БУДЬ-якої причини:
-        // строк, заміна тим самим ключем (два одночасні промахи), тиск пам'яті.
-        options.RegisterPostEvictionCallback((_, _, _, _) => budget.Release(cellCount));
+        // строк, заміна тим самим ключем, тиск пам'яті.
+        options.RegisterPostEvictionCallback((_, _, _, _) => budget.Release(cost));
 
-        memory.Set(key, built, options);
+        memory.Set(key, entry, options);
     }
 
-    /// <summary>Скільки комірок <c>rpt.ReportRow</c> усі розкладені зрізи разом тримають в одному кеші.</summary>
+    /// <summary>
+    /// Скільки одиниць (комірок <c>rpt.ReportRow</c> плюс рядків порядку й груп)
+    /// усі розкладені зрізи разом тримають в одному кеші.
+    /// </summary>
     /// <remarks>
-    /// Найбільший зріз — <see cref="MaxRows"/> рядків по п'ять колонок, тобто
-    /// рівно ця стеля: він влазить сам, а решта чекає, поки він вийде за строком.
+    /// Найбільший зріз на п'ять колонок — <see cref="MaxRows"/> рядків, тобто
+    /// приблизно ця стеля: він влазить сам, а решта чекає, поки він вийде за
+    /// строком. ⚠ AN-120 / L1-02: колонок буває й десять, і тоді зріз цілком не
+    /// влазить — але влазить без комірок (лише <c>RowNo</c> і групи).
     /// </remarks>
     private const int MaxCachedCells = 1_000_000;
 
@@ -476,32 +890,57 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock, IMemory
     /// <summary>Абсолютна стеля життя розкладеного зрізу.</summary>
     private static readonly TimeSpan LaidOutLifetime = TimeSpan.FromHours(1);
 
-    /// <summary>Бюджет комірок на кожен екземпляр кешу; кеш, що зник, забирає й бюджет.</summary>
+    /// <summary>Бюджет на кожен екземпляр кешу; кеш, що зник, забирає й бюджет.</summary>
     private static readonly ConditionalWeakTable<IMemoryCache, CacheBudget> Budgets = [];
 
+    /// <summary>Політ розкладу на кожен екземпляр кешу: будівник Scoped, а промахи — спільні на процес.</summary>
+    private static readonly ConditionalWeakTable<IMemoryCache, SingleFlight<LaidOutSnapshot>> Flights = [];
+
     /// <summary>Ключ розкладеного зрізу: зріз, його вміст і опис, що задає розклад.</summary>
-    private sealed record LaidOutKey(long SnapshotId, string ContentHash, string ColumnsJson, string RulesJson);
+    private sealed record LaidOutKey(long SnapshotId, string ContentHash, string ColumnsJson, string RulesJson)
+    {
+        /// <summary>Рядковий ключ польоту: та сама тотожність, що й у записі кешу.</summary>
+        public string FlightKey()
+        {
+            var layout = Convert.ToHexString(
+                SHA256.HashData(Encoding.UTF8.GetBytes(ColumnsJson + "\u0000" + RulesJson)));
 
-    /// <summary>Розкладений зріз: колонки й вигляд — без мови, сторінки й користувача.</summary>
-    private sealed record LaidOutSnapshot(IReadOnlyList<ReportColumnSpec> Stored, ReportLayoutView View);
+            return string.Create(CultureInfo.InvariantCulture, $"{SnapshotId}|{ContentHash}|{layout}");
+        }
+    }
 
-    /// <summary>Лічильник комірок у кеші; потокобезпечний.</summary>
+    /// <summary>Розкладений зріз: колонки, порядок рядків, групи й підсумки — без мови, сторінки й користувача.</summary>
+    /// <param name="Stored">Колонки збереженого зрізу.</param>
+    /// <param name="Order"><c>RowNo</c> у порядку макета: групи одна за одною.</param>
+    /// <param name="Groups">Групи по всьому зрізу.</param>
+    /// <param name="Totals">Підсумки по всьому зрізу.</param>
+    /// <param name="Rows">Рядки в порядку <paramref name="Order"/>; <c>null</c> — закешовано без комірок.</param>
+    /// <param name="CellCount">Скільки комірок прочитано при розкладі.</param>
+    private sealed record LaidOutSnapshot(
+        IReadOnlyList<ReportColumnSpec> Stored,
+        int[] Order,
+        IReadOnlyList<SnapshotRowGroup> Groups,
+        IReadOnlyList<SnapshotTotal> Totals,
+        IReadOnlyList<SnapshotRow>? Rows,
+        int CellCount);
+
+    /// <summary>Лічильник одиниць у кеші; потокобезпечний.</summary>
     private sealed class CacheBudget
     {
         private long _used;
 
-        public bool TryReserve(int cells)
+        public bool TryReserve(int units, int capacity)
         {
-            if (Interlocked.Add(ref _used, cells) <= MaxCachedCells)
+            if (Interlocked.Add(ref _used, units) <= capacity)
             {
                 return true;
             }
 
-            Interlocked.Add(ref _used, -cells);
+            Interlocked.Add(ref _used, -units);
             return false;
         }
 
-        public void Release(int cells) => Interlocked.Add(ref _used, -cells);
+        public void Release(int units) => Interlocked.Add(ref _used, -units);
     }
 
     /// <summary>Колонки зрізу, підписані мовою запиту (<c>R9</c>).</summary>
@@ -633,6 +1072,9 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock, IMemory
     /// <summary>Збережена сума зрізу.</summary>
     private sealed record StoredHash(long Id, byte[]? Hash);
 
+    /// <summary>Стеля переліку РІЗНИХ статусів аркушів: значень <see cref="DocumentStatus"/> менше.</summary>
+    private const int MaxStatuses = 32;
+
     /// <summary>Стеля переліку зрізів.</summary>
     private const int MaxSnapshots = 500;
 
@@ -648,16 +1090,50 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock, IMemory
     private async Task<SnapshotStatus> StatusOfDataAsync(
         int projectId, PeriodKey? periodKey, CancellationToken ct)
     {
-        var query =
-            from state in db.ApprovalStates.AsNoTracking()
-            join document in db.Documents.AsNoTracking()
-                on state.DocumentId equals document.Id
-            where document.ProjectId == projectId
-                  && (periodKey == null || state.PeriodKey == periodKey.Value.Value)
-            orderby state.Id
-            select state.Status;
+        // ⛔ R5-W1 / W1-02: джерело рядків — СКЛАД документів проєкту
+        // (`doc.DocumentSheet`, `IsIncluded`) × періоди, а рядок
+        // `wf.ApprovalState` лише ДОповнює його; аркуш без рядка стану — `Draft`.
+        // Раніше джерелом були самі рядки стану, а вони з'являються лише з
+        // першою дією робочого процесу (`WorkflowStore.GetOrCreateAsync`): один
+        // поданий аркуш із 48 давав зрізу `Submitted`, і звіт ішов у `rpt.v_*`
+        // як поданий. Те саме правило, що в `DocumentStore.SheetStatesQuery` і
+        // `CampaignSummaryStore` (U-03): аркуш поза складом не враховується.
+        //
+        // ⚠ Річний зріз (`periodKey == null`) — УСІ періоди проєкту: зріз за рік
+        // поданий лише тоді, коли подано кожен період. Це найсуворіше
+        // прочитання D-65 — ранній «поданий» річний звіт гірший за чернетковий.
+        //
+        // ⚠ Корельований підзапит (`OUTER APPLY`), не цикл; `PeriodKey` — у
+        // предикаті партиційованої `wf.ApprovalState` (урок `WR-05`).
+        int? key = periodKey?.Value;
 
-        var statuses = await query.Take(MaxRows).ToListAsync(ct).ConfigureAwait(false);
+        var query =
+            from document in db.Documents.AsNoTracking()
+            where document.ProjectId == projectId
+            join sheet in db.DocumentSheets.AsNoTracking()
+                on document.Id equals sheet.DocumentId
+            where sheet.IsIncluded
+            from period in db.Periods.AsNoTracking()
+            where period.ProjectId == projectId
+                  && (key == null || period.PeriodKeyValue == key)
+            select db.ApprovalStates
+                       .Where(a => a.DocumentId == document.Id
+                                   && a.SheetDefId == sheet.SheetDefId
+                                   && a.PeriodKey == period.PeriodKeyValue)
+                       .Select(a => (DocumentStatus?)a.Status)
+                       .FirstOrDefault()
+                   ?? DocumentStatus.Draft;
+
+        // ⛔ AN-120 / L1-01: які статуси є — агрегатом у SQL, а не першими
+        // `MaxRows` станами за `Id`. Підмножина могла не містити саме того
+        // чернеткового аркуша, через який зріз не `Approved`. Різних статусів
+        // лише кілька, тож `Take` тут — межа переліку значень enum, а не даних.
+        var statuses = await query
+            .Distinct()
+            .OrderBy(s => s)
+            .Take(MaxStatuses)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
 
         // Аркушів немає — зріз чернетковий. «Нічого не подано» і «все
         // затверджено» не можна плутати: перше означає порожній звіт.
@@ -676,6 +1152,9 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock, IMemory
             ? SnapshotStatus.Submitted
             : SnapshotStatus.Draft;
     }
+
+    /// <summary>Мітка (<c>TagWith</c>) запиту, що читає джерело зрізу.</summary>
+    public const string AggregateTag = "ReportSnapshotBuilder.Aggregate";
 
     /// <summary>Агрегує результати розрахунку в рядки зрізу.</summary>
     private async Task<List<CellValue>> AggregateAsync(
@@ -743,15 +1222,17 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock, IMemory
                 result.Value, result.SubstanceEntryId,
                 result.PeriodKey, result.UnitId, unit.Code, result.MethodologyVersionId, project.Code);
 
-        var results = await query
-            .Take(MaxRows)
-            .ToListAsync(ct)
-            .ConfigureAwait(false);
-
-        var rows = new List<CellValue>(results.Count * layout.Count);
+        // ⛔ AN-120 / L1-01: джерело читається ПОВНІСТЮ, потоком, без `Take`.
+        // Правила відбору (`R5`) бачать кожен рядок джерела, а стеля стоїть на
+        // їхньому ВИХОДІ: звіт, якому з 600 000 результатів потрібні 3 000,
+        // будується, а не втрачає документи з більшими `Id`. Потік, а не
+        // `ToListAsync`: у пам'яті лише рядки, що пройшли правила.
+        var rows = new List<CellValue>();
         var rowNo = 0;
 
-        foreach (var result in results)
+        // ⚠ Мітка в тексті запиту — для діагностики (плани, Query Store) і для тесту
+        // X7-04, який перемикає прогін рівно в мить читання джерела.
+        await foreach (var result in query.TagWith(AggregateTag).AsAsyncEnumerable().WithCancellation(ct).ConfigureAwait(false))
         {
             // Без правил (схема 1) рядок читається прямо з джерела, як до R5.
             var ruled = rowRules.IsEmpty
@@ -764,7 +1245,13 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock, IMemory
                 continue;
             }
 
-            rowNo++;
+            // ⛔ Понад стелю — відмова ДО створення зрізу: задача стає Failed,
+            // попередній зріз лишається поточним (`SwitchCurrentAsync` не
+            // викликався), і неповна форма з чинною сумою не з'являється.
+            if (++rowNo > RowCeiling)
+            {
+                throw TooLarge(projectId, periodKey, RowCeiling);
+            }
 
             // ⛔ Лише описані колонки і в порядку опису (D-52a): за цим порядком
             // рахується сума, і за ним її перераховує `VerifyAsync`.
@@ -780,6 +1267,20 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock, IMemory
 
         return rows;
     }
+
+    /// <summary>Відмова побудови: рядків зрізу (після правил) більше за стелю.</summary>
+    private static BusinessRuleException TooLarge(int projectId, PeriodKey? periodKey, int limit)
+        => new(
+            ErrorCodes.ReportInvalid,
+            $"Зріз проєкту {projectId} за період {periodKey?.Value.ToString(CultureInfo.InvariantCulture) ?? "рік"} "
+            + $"має понад {limit} рядків: побудову відмовлено, попередній зріз лишається чинним.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-RPT-0422.snapshotTooLarge",
+                ["projectId"] = projectId.ToString(CultureInfo.InvariantCulture),
+                ["periodKey"] = periodKey?.Value.ToString(CultureInfo.InvariantCulture),
+                ["limit"] = limit.ToString(CultureInfo.InvariantCulture),
+            });
 
     /// <summary>Значення комірки до появи зрізу: ідентифікатор зрізу додається після правил.</summary>
     private readonly record struct CellValue(int RowNo, string Code, string? Text, decimal? Number);
@@ -860,11 +1361,21 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock, IMemory
     /// цю мить повернула б подвоєні рядки — не помилку, а просто вдвічі більше
     /// число. Фільтрований унікальний індекс не дав би це зберегти, але вже
     /// після того, як транзакція впала б посеред побудови.
+    /// <para>
+    /// ⛔ R6-X7 / X7-02: поточний зріз — один на ОПИС звіту (<c>ReportDefId</c>) ×
+    /// проєкт × період, а не на версію. Вʼюха <c>rpt.v_&lt;Звіт&gt;</c> фільтрує за
+    /// <c>d.Code</c> і версії не бачить (<c>D-53</c>: ім'я вʼюхи — довгоживучий
+    /// контракт усіх версій опису), а побудова завжди бере найновішу опубліковану
+    /// версію (<c>FindCurrentVersionAsync</c>). Доки поточність знімалася лише в межах
+    /// версії, перша ж побудова після публікації нової версії лишала ДВА поточні зрізи
+    /// одного періоду — і вʼюха мовчки подвоювала рядки й суми. Фільтрований індекс
+    /// <c>UX_ReportSnapshot_Current</c> стоїть на версії й цього не ловить.
+    /// </para>
     /// </remarks>
-    private async Task SwitchCurrentAsync(ReportSnapshot snapshot, CancellationToken ct)
+    private async Task SwitchCurrentAsync(ReportSnapshot snapshot, int reportDefId, CancellationToken ct)
     {
         var previous = await db.ReportSnapshots
-            .Where(s => s.ReportVersionId == snapshot.ReportVersionId
+            .Where(s => db.ReportVersions.Any(v => v.Id == s.ReportVersionId && v.ReportDefId == reportDefId)
                         && s.ProjectId == snapshot.ProjectId
                         && s.PeriodKey == snapshot.PeriodKey
                         && s.Id != snapshot.Id

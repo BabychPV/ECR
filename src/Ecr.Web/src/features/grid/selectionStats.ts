@@ -1,6 +1,6 @@
 import type { TableSliceDto } from '@/api/types';
 import { cellKey } from './permissions';
-import { addendOf, scaledOf, unscale, type TotalsEdit } from './gridTotals';
+import { addendOf, isTotalableColumn, scaledOf, unscale, type TotalsEdit } from './gridTotals';
 import type { GridSelection } from './selection';
 
 /** Підсумок виділених числових комірок (UI-23). */
@@ -33,8 +33,8 @@ interface SelectionStatsInput {
  *
  * ⛔ Арифметика — рядкова через `BigInt` (`gridTotals.ts`): `decimal(25,16)`
  * не вкладається в `Number`. Порожні й нечислові комірки не беруть участі
- * (не стають нулем), як і в рядку підсумків. Колонка підпису рядка й колонки
- * без коду зрізу пропускаються.
+ * (не стають нулем), як і в рядку підсумків. Колонка підпису рядка, колонки
+ * без коду зрізу і колонки, що не підсумовуються (`Lookup`, `Unit`, текст), пропускаються.
  *
  * ⚠ `null` — підсумку немає: виділення однієї комірки (макет тоді показує
  * розмір таблиці) або в діапазоні менше двох чисел.
@@ -44,7 +44,12 @@ export function selectionStats(input: SelectionStatsInput): SelectionStats | nul
   if (range === null) return null;
   if (range.fromRow === range.toRow && range.fromColumn === range.toColumn) return null;
 
-  const codes = new Set(slice.columns.map((column) => column.code));
+  // ⛔ N3-03: лише колонки, які підсумовує й рядок підсумків (`isTotalableColumn`).
+  // Раніше сюди потрапляла будь-яка колонка зі значенням-числом — `Lookup` (Id
+  // довідника), `Unit` (Id одиниці) і текст «123»: сума Id виглядала як вимірювання.
+  const codes = new Set(
+    slice.columns.filter((column) => isTotalableColumn(column)).map((column) => column.code),
+  );
   const addends: string[] = [];
 
   for (let columnIndex = range.fromColumn; columnIndex <= range.toColumn; columnIndex += 1) {

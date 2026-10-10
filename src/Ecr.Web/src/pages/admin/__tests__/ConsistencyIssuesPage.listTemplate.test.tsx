@@ -189,3 +189,31 @@ describe('стан знахідки виглядом StatusBadge (звірка b
     }
   });
 });
+
+describe('«Скинути фільтри» у порожньому переліку (N4)', () => {
+  it('скидає вагу, код правила і «показати розв’язані» разом, а не лише вагу', async () => {
+    respondWith({ items: [], nextCursor: null, totalCount: 0, totals: Totals });
+    show('/admin/consistency?severity=Error&ruleCode=ZZ&showResolved=1');
+
+    const clear = await waitFor(() => {
+      const found = document.querySelector<HTMLElement>('[data-table-clear-filters="true"]');
+      expect(found).not.toBeNull();
+
+      return found as HTMLElement;
+    });
+    fireEvent.click(clear);
+
+    await waitFor(() => {
+      expect(location).not.toContain('severity');
+      expect(location).not.toContain('ruleCode');
+      expect(location).not.toContain('showResolved');
+    });
+  });
+
+  it('лише код правила в адресі — кнопка скидання є (раніше її не було)', async () => {
+    respondWith({ items: [], nextCursor: null, totalCount: 0, totals: Totals });
+    show('/admin/consistency?ruleCode=ZZ');
+
+    await waitFor(() => expect(document.querySelector('[data-table-clear-filters="true"]')).not.toBeNull());
+  });
+});

@@ -19,11 +19,16 @@ public static class AnalyzeCommand
             (model, applied) = ReferenceNormalizer.Normalize(model);
         }
 
-        var shapes = FormulaTypeInference.Infer(model, library);
-        var report = MethodologyAnalyzer.Analyze(model, readStats, library) with
+        var inference = FormulaTypeInference.InferDetailed(model, library);
+        var analysis = MethodologyAnalyzer.Analyze(model, readStats, library);
+        var blockers = inference.Converged
+            ? analysis.Blockers
+            : [.. analysis.Blockers, $"{FormulaTypeInference.NotConvergedBlocker}: типи формул не збіглись за {FormulaTypeInference.MaxPasses} проходів — результат неповний"];
+        var report = analysis with
         {
+            Blockers = blockers,
             Normalizations = applied,
-            FormulaTypes = ImportDiagnostics.FormulaTypes(model, shapes),
+            FormulaTypes = ImportDiagnostics.FormulaTypes(model, inference.Shapes),
             Units = ImportDiagnostics.Units(model),
             ColumnNeeds = ImportDiagnostics.ColumnNeeds(model),
         };

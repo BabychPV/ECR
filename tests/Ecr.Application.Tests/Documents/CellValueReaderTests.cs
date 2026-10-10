@@ -87,7 +87,9 @@ public sealed class CellValueReaderTests
     [InlineData("01.04.2024", 2024, 4, 1)]
     [InlineData("13.5.2024", 2024, 5, 13)]
     [InlineData("2024-04-01", 2024, 4, 1)]
-    [InlineData("1/4/2024", 2024, 4, 1)]
+    [InlineData("13/4/2024", 2024, 4, 13)]
+    [InlineData("4/4/2024", 2024, 4, 4)]
+    [InlineData("2024/04/01", 2024, 4, 1)]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
     public void Дата_у_природному_порядку_дня_і_місяця_не_переставляється(
         string wire, int year, int month, int day)
@@ -102,6 +104,147 @@ public sealed class CellValueReaderTests
         // `13.5.2024` — контрольний випадок: 13 не може бути місяцем, тож його
         // і старий розбір читав правильно. Якби тест складався лише з таких,
         // він нічого не доводив би.
+        var data = CellValueReader.Read(FromWire(wire), Column(CellDataType.Date));
+
+        Assert.NotNull(data);
+        Assert.Equal(new DateTime(year, month, day, 0, 0, 0, DateTimeKind.Utc), data.ValueDate);
+    }
+
+    [Theory]
+    [InlineData("1/4/2024")]
+    [InlineData("4/1/2024")]
+    [InlineData("01/04/2024")]
+    [InlineData("4/13/2024")]
+    [InlineData("4/1/2024 10:30")]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Finding", "Y5-02")]
+    public void Неоднозначна_або_американська_слеш_дата_відхиляється_а_не_вгадується(string wire)
+    {
+        // ⛔ Y5-02 (аудит 7). `4/1/2024` — 1 квітня в en-US і 4 січня в en-GB/uk; Excel
+        // пише дату регіональним форматом, тож порядок невідомий. Доти `4/1/2024` ставало
+        // 4 січня (точний `d/M`), а `4/13/2024` — 13 квітня (фолбек Invariant `M/d`):
+        // в одному файлі частина дат тихо мінялася місцями.
+        // Мутація: прибрати `IsAmbiguousSlashDate` у `CellDateParser.TryParse` — перші три
+        // розбираються як `d/M`; повернути фолбек для слеш-дат — четвертий стає 13 квітня.
+        var error = Assert.Throws<BusinessRuleException>(
+            () => CellValueReader.Read(FromWire(wire), Column(CellDataType.Date)));
+
+        Assert.Equal("ECR-CELL-0422", error.ErrorCode);
+    }
+
+    [Theory]
+    [InlineData("01.04.2024 9:05", 9, 5)]
+    [InlineData("1.4.2024 10:30", 10, 30)]
+    [InlineData("1.4.2024 10:30:00", 10, 30)]
+    [InlineData("01.04.2024 10:30", 10, 30)]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Finding", "Z3-01")]
+    public void Дата_час_з_днем_спереду_не_переставляє_день_і_місяць(string wire, int hour, int minute)
+    {
+        // ⛔ Z3-01 (аудит 8). Дата-час Excel у регіонах ru/kk — `01.04.2024 9:05`
+        // (година без нуля). Точний `dd.MM.yyyy HH:mm` вимагає двох цифр години, тож
+        // рядок падав у фолбек Invariant (M-d) і ставав 4 СІЧНЯ, а `01.04.2024 10:30`
+        // поруч — 1 квітня. Останній рядок — контрольний: його читав і старий розбір.
+        // Мутація: прибрати `d.M.yyyy H:mm[:ss]` з `ExactFormats` — перші три стають 4 січня
+        // (або відмовою, якщо лишити сторожа фолбеку).
+        var data = CellValueReader.Read(FromWire(wire), Column(CellDataType.Date));
+
+        Assert.NotNull(data);
+        Assert.Equal(new DateTime(2024, 4, 1, hour, minute, 0, DateTimeKind.Utc), data.ValueDate);
+    }
+
+    [Theory]
+    [InlineData("01.04.24")]
+    [InlineData("01-04-2024")]
+    [InlineData("1-4-2024")]
+    [InlineData("1.5")]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Finding", "Z3-01")]
+    public void Числова_дата_з_днем_спереду_поза_точними_форматами_відхиляється_а_не_читається_M_d(string wire)
+    {
+        // ⛔ Z3-01 (аудит 8). Усе це фолбек Invariant тихо читав як M-d: `01.04.24`,
+        // `01-04-2024`, `1-4-2024` — 4 січня 2024, а `1.5` — 5 січня поточного року.
+        // Мутація: прибрати перевірку 1–2 цифр і роздільника `.`/`-` у `ClosedToFallback` —
+        // значення лягають у ValueDate переставленими, і `Throws` падає.
+        var error = Assert.Throws<BusinessRuleException>(
+            () => CellValueReader.Read(FromWire(wire), Column(CellDataType.Date)));
+
+        Assert.Equal("ECR-CELL-0422", error.ErrorCode);
+    }
+
+    [Theory]
+    [InlineData("4/1/2024")]
+    [InlineData("4/13/2024")]
+    [InlineData("01-04-2024")]
+    [InlineData("01.04.24")]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Finding", "Z3-02")]
+    public void Відхилена_дата_з_днем_чи_місяцем_спереду_пояснюється_окремим_ключем(string wire)
+    {
+        // ⛔ Z3-02 (аудит 8). До 10.10 `4/1/2024` у сітці приймався; після Y5-02 PATCH
+        // відмовляв загальним «Column "C1" expects a date» на значенні, яке на вигляд —
+        // дата. Пояснення з порадою РРРР-ММ-ДД мав лише CSV довідника.
+        // Мутація: прибрати гілку `IsRefusedDayMonthDate` у `CellValueReader.Date` —
+        // ключ знову `expectsDate`.
+        var error = Assert.Throws<BusinessRuleException>(
+            () => CellValueReader.Read(FromWire(wire), Column(CellDataType.Date)));
+
+        Assert.Equal("ECR-CELL-0422", error.ErrorCode);
+        Assert.Equal(CellValueReader.AmbiguousDateMessageKey, error.Details?["messageKey"]);
+        Assert.Equal("C1", error.Details?["columnCode"]);
+        Assert.Equal(wire, error.Details?["value"]);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Finding", "Z3-02")]
+    public void Текст_що_не_схожий_на_дату_лишається_загальною_відмовою()
+    {
+        // Контроль до попереднього тесту: окремий ключ — лише для дат із днем чи місяцем
+        // спереду, а не для будь-якого тексту.
+        var error = Assert.Throws<BusinessRuleException>(
+            () => CellValueReader.Read(FromWire("not a date"), Column(CellDataType.Date)));
+
+        Assert.Equal("err.ECR-CELL-0422.expectsDate", error.Details?["messageKey"]);
+    }
+
+    [Theory]
+    [InlineData("01 04 2024")]
+    [InlineData("1 4 2024")]
+    [InlineData("1,4,2024")]
+    [InlineData("12 4 2024")]
+    [InlineData("01 - 04 - 2024")]
+    [InlineData("1. 4. 2024")]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Finding", "V8-01")]
+    public void Дата_з_днем_спереду_через_пробіл_чи_кому_відхиляється_а_не_читається_M_d(string wire)
+    {
+        // ⛔ V8-01 (аудит 10). `ClosedToFallback` закривав фолбек Invariant лише за `.`/`-`
+        // після 1–2 цифр: `01 04 2024` і `1,4,2024` ставали 4 січня, `12 4 2024` — 4 грудня,
+        // а `13 4 2024` у тій самій колонці відхилявся.
+        // Мутація: повернути умову `trimmed[digits] is '.' or '-'` — значення лягає в
+        // ValueDate переставленим, і `Throws` падає.
+        var error = Assert.Throws<BusinessRuleException>(
+            () => CellValueReader.Read(FromWire(wire), Column(CellDataType.Date)));
+
+        Assert.Equal("ECR-CELL-0422", error.ErrorCode);
+        Assert.Equal(CellValueReader.AmbiguousDateMessageKey, error.Details?["messageKey"]);
+    }
+
+    [Theory]
+    [InlineData("1-Apr-24", 2024, 4, 1)]
+    [InlineData("01-Apr-2024", 2024, 4, 1)]
+    [InlineData("15-Jan-2024", 2024, 1, 15)]
+    [InlineData("01.Apr.2024", 2024, 4, 1)]
+    [InlineData("1 Apr 2024", 2024, 4, 1)]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Finding", "V8-04")]
+    public void Дата_з_назвою_місяця_і_днем_спереду_читається_однозначно(string wire, int year, int month, int day)
+    {
+        // ⛔ V8-04 (аудит 10). Після Z3-01 `1-Apr-24` (вбудований формат Excel `d-mmm-yy`)
+        // відхилявся з поясненням «порядок дня й місяця не визначити», хоча назва місяця
+        // робить порядок однозначним. Фолбек закрито лише тоді, коли після роздільника — цифра.
+        // Мутація: прибрати перевірку `char.IsAsciiDigit(trimmed[next])` — відмова повертається.
         var data = CellValueReader.Read(FromWire(wire), Column(CellDataType.Date));
 
         Assert.NotNull(data);

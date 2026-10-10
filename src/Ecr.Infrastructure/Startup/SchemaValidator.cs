@@ -136,6 +136,12 @@ public sealed class SchemaValidator(
         // на рівні 120 падали б посеред DDL із текстом, що не каже, як виправити.
         await ValidateCompatibilityLevelAsync(ct).ConfigureAwait(false);
         await ValidateMigrationsAsync(startupMode, ct).ConfigureAwait(false);
+        var release = await SchemaReleaseMismatchAsync(db, CodeRelease, ct).ConfigureAwait(false);
+        if (release is not null)
+        {
+            throw new SchemaIncompatibleException(release);
+        }
+
         await ValidatePhysicalModelAsync(ct).ConfigureAwait(false);
         await ValidateRuntimeOptionsAsync(ct).ConfigureAwait(false);
     }
@@ -174,6 +180,106 @@ public sealed class SchemaValidator(
         }
     }
 
+    /// <summary>
+    /// Розбіжність міграцій бази й збірки в будь-який бік — текст причини (з кодом
+    /// <c>ECR-SYS-5031</c>) або <c>null</c>, якщо збігаються.
+    /// </summary>
+    /// <param name="db">Контекст бази, яку звіряємо.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Текст причини або <c>null</c>.</returns>
+    /// <remarks>
+    /// ⛔ R6-X4/X4-02: дочірній воркер черги (<c>Ecr.Worker --child</c>) не має режиму
+    /// <c>Migrate</c> і не бере задач на схемі іншої версії ні в який бік: старий воркер
+    /// на новій схемі (вузол B, D-32) чи новий — на ще не накоченій. Той самий критерій і текст,
+    /// що в <see cref="ValidateAsync"/> Api у режимі <c>Validate</c>.
+    /// </remarks>
+    public static async Task<string?> MigrationMismatchAsync(EcrDbContext db, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        var applied = (await db.Database.GetAppliedMigrationsAsync(ct).ConfigureAwait(false)).ToHashSet(StringComparer.Ordinal);
+        var known = db.Database.GetMigrations().ToHashSet(StringComparer.Ordinal);
+
+        var unknown = applied.Except(known).ToList();
+        if (unknown.Count > 0)
+        {
+            return Incompatible(UnknownMigrationsText(unknown)).Message;
+        }
+
+        var pending = known.Except(applied).ToList();
+        return pending.Count > 0 ? Incompatible(PendingMigrationsText(pending)).Message : null;
+    }
+
+    /// <summary>Ім'я розширеної властивості бази зі штампом релізу схеми (пише <c>deploy-ecr.ps1</c>, крок 2).</summary>
+    public const string SchemaReleaseProperty = "ECR.SchemaRelease";
+
+    /// <summary>Префікс штампа «крок 2 почато, не завершено» (R7-Y3/Y3-02).</summary>
+    private const string SchemaReleaseIncompletePrefix = "incomplete:";
+
+    /// <summary>Версія цієї збірки (<c>build-msi.ps1</c>: <c>-p:Version</c> = <c>ProductVersion</c> MSI).</summary>
+    public static Version CodeRelease => typeof(SchemaValidator).Assembly.GetName().Version ?? new Version(0, 0, 0);
+
+    /// <summary>
+    /// Схему бази накочено НОВІШИМ релізом, ніж ця збірка, або її оновлення не завершено, — текст причини (з кодом
+    /// <c>ECR-SYS-5031</c>) або <c>null</c>.
+    /// </summary>
+    /// <param name="db">Контекст бази.</param>
+    /// <param name="code">Версія збірки (порівнюються три поля).</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Текст причини або <c>null</c>.</returns>
+    /// <remarks>
+    /// ⛔ R6-X4/X4-03: міграції EF не бачать змін лише в <c>Sql/*.sql</c> (TVP, процедури, тригери,
+    /// <c>aud.*</c>), тож старий код на новій SQL-схемі проходив звірку міграцій. Штамп
+    /// <see cref="SchemaReleaseProperty"/> пише крок 2 <c>deploy-ecr.ps1</c> після останнього скрипта.
+    /// Без штампа (база до R6-X4, dev/тест-база) чи з нерозбірним — не відмова: звіряти нема з чим.
+    /// Старіший штамп — теж не відмова тут (новий код на ще не оновленій схемі ловить
+    /// <c>-SkipSchema</c> скрипта і звірка міграцій).
+    /// ⛔ R7-Y3/Y3-02: штамп <c>incomplete:&lt;версія&gt;</c> (крок 2 ставить його ДО першого скрипта) —
+    /// крок 2 упав посередині, частину <c>Sql/*.sql</c> не накочено: відмова за будь-якої версії збірки.
+    /// </remarks>
+    public static async Task<string?> SchemaReleaseMismatchAsync(EcrDbContext db, Version code, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(code);
+        var stamps = await db.Database
+            .SqlQueryRaw<string>(
+                "SELECT CAST(value AS nvarchar(64)) AS Value FROM sys.extended_properties " +
+                "WHERE class = 0 AND name = N'" + SchemaReleaseProperty + "' AND value IS NOT NULL")
+            .ToListAsync(ct).ConfigureAwait(false);
+        if (stamps.Count > 0 && stamps[0].StartsWith(SchemaReleaseIncompletePrefix, StringComparison.Ordinal))
+        {
+            return Incompatible(
+                $"Оновлення схеми бази до {stamps[0][SchemaReleaseIncompletePrefix.Length..]} почато і не завершено " +
+                "(крок 2 deploy-ecr.ps1 упав посередині, частину скриптів каталогу Sql не накочено). Старт зупинено — " +
+                "повторіть deploy-ecr.ps1 зі схемою, без -SkipSchema (runbook §8).").Message;
+        }
+
+        if (stamps.Count == 0 || !Version.TryParse(stamps[0], out var stamped))
+        {
+            return null;
+        }
+
+        var schema = new Version(stamped.Major, stamped.Minor, Math.Max(stamped.Build, 0));
+        var build = new Version(code.Major, code.Minor, Math.Max(code.Build, 0));
+        return schema > build
+            ? Incompatible(
+                $"Схему бази накочено пакетом {schema}, а ця збірка — {build}: старий код на новішій схемі " +
+                $"(скрипти каталогу Sql поза міграціями EF). Старт зупинено — оновіть цей вузол пакетом {schema} " +
+                "(deploy-ecr.ps1 -SkipSchema, runbook §8).").Message
+            : null;
+    }
+
+    private static string UnknownMigrationsText(List<string> unknown)
+        => $"У базі є міграції, яких немає у збірці: {string.Join(", ", unknown)}. " +
+           "Схоже на відкат версії застосунку на новішу базу. Старт зупинено.";
+
+    // ⚠ Початок речення «Схема БД застаріла» — той самий, що давав
+    // старий крок `StartupSequence.ApplySchemaModeAsync`: на нього
+    // спирається тест реального старту (`StartupSchemaCheckTests`).
+    private static string PendingMigrationsText(List<string> pending)
+        => $"Схема БД застаріла: не застосовано міграцій — {pending.Count} ({string.Join(", ", pending)}). " +
+           "У режимі Validate застосунок не стартує: працювати на невідповідній схемі " +
+           "гірше, ніж не працювати (D-66).";
+
     /// <summary>Стан міграцій.</summary>
     private async Task ValidateMigrationsAsync(string startupMode, CancellationToken ct)
     {
@@ -187,9 +293,7 @@ public sealed class SchemaValidator(
         var unknown = applied.Except(known).ToList();
         if (unknown.Count > 0)
         {
-            throw Incompatible(
-                $"У базі є міграції, яких немає у збірці: {string.Join(", ", unknown)}. " +
-                "Схоже на відкат версії застосунку на новішу базу. Старт зупинено.");
+            throw Incompatible(UnknownMigrationsText(unknown));
         }
 
         var pending = known.Except(applied).ToList();
@@ -200,13 +304,7 @@ public sealed class SchemaValidator(
 
         if (!string.Equals(startupMode, "Migrate", StringComparison.OrdinalIgnoreCase))
         {
-            // ⚠ Початок речення «Схема БД застаріла» — той самий, що давав
-            // старий крок `StartupSequence.ApplySchemaModeAsync`: на нього
-            // спирається тест реального старту (`StartupSchemaCheckTests`).
-            throw Incompatible(
-                $"Схема БД застаріла: не застосовано міграцій — {pending.Count} ({string.Join(", ", pending)}). " +
-                "У режимі Validate застосунок не стартує: працювати на невідповідній схемі " +
-                "гірше, ніж не працювати (D-66).");
+            throw Incompatible(PendingMigrationsText(pending));
         }
 
         // ⚠ sp_getapplock: два інстанси, які стартують одночасно, інакше

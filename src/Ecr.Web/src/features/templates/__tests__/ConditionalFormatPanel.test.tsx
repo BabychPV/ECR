@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { EcrApiError } from '@/api/client';
-import { ConditionalFormatPanel } from '../ConditionalFormatPanel';
+import { ConditionalFormatPanel, seedOf } from '../ConditionalFormatPanel';
 import type { ConditionalFormatRuleDto, ConditionalFormatSet } from '../conditionalFormatApi';
 import { renderWithQuery } from '@/test/render';
 
@@ -121,6 +121,39 @@ describe('ConditionalFormatPanel', () => {
 
     // Збережене — нова точка відліку: зберігати знову нічого.
     await waitFor(() => expect((saveButton() as HTMLButtonElement).disabled).toBe(true));
+  });
+
+  it('L9-22: правило зниклої колонки («сирота») не їде в PUT, правила існуючих колонок версії — їдуть', async () => {
+    const orphan: ConditionalFormatRuleDto = { ...foreign, columnCode: 'GONE' };
+    api.getConditionalFormats.mockResolvedValue(set([own, foreign, orphan], '"V1"'));
+
+    renderWithQuery(
+      <ConditionalFormatPanel
+        templateVersionId={7}
+        columns={columns}
+        canEdit
+        versionColumnCodes={['Q', 'N', 'OTHER']}
+      />,
+    );
+    const user = userEvent.setup();
+    const value = await screen.findByRole('textbox', { name: /conditionalFormat\.value(?!To)/ });
+
+    await user.clear(value);
+    await user.type(value, '200');
+    await user.click(saveButton());
+
+    await waitFor(() => expect(api.saveConditionalFormats).toHaveBeenCalledTimes(1));
+    const [, rules] = api.saveConditionalFormats.mock.calls[0] as [number, ConditionalFormatRuleDto[], string];
+    expect(rules).toEqual([foreign, { ...own, value: '200' }]);
+  });
+
+  it('seedOf: без versionCodes відсікання немає; з ними — сироти зникають', () => {
+    const orphan: ConditionalFormatRuleDto = { ...foreign, columnCode: 'GONE' };
+    const loaded = set([own, foreign, orphan], '"V"');
+    const own_ = new Set(['Q', 'N']);
+
+    expect(seedOf(loaded, own_).others.map((rule) => rule.columnCode)).toEqual(['OTHER', 'GONE']);
+    expect(seedOf(loaded, own_, new Set(['Q', 'N', 'OTHER'])).others.map((rule) => rule.columnCode)).toEqual(['OTHER']);
   });
 
   it('неповне правило блокує збереження й пояснює чому', async () => {

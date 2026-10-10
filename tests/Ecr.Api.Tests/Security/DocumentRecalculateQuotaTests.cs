@@ -188,6 +188,26 @@ public sealed class DocumentRecalculateQuotaTests(SqlServerFixture sql)
         Assert.False(quota.TryAcquire("u", "0005", out _, out _));
     }
 
+    /// <remarks>
+    /// L1-10 (PARTIAL): маршрут <c>{id:long}</c> приймає знак і пробіли (<c>+5</c>, <c> 5 </c>) — це той самий документ.
+    /// Мутація: повернути <c>NumberStyles.None</c> у <c>TryAcquire(userId, documentId, …)</c> → червоний.
+    /// </remarks>
+    [Theory]
+    [InlineData("+5")]
+    [InlineData("+05")]
+    [InlineData(" 5")]
+    [InlineData("5 ")]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    public void Запис_id_зі_знаком_чи_пробілом_ділить_межу_з_голим_id(string variant)
+    {
+        var quota = new DocumentRecalculateQuota(
+            new ConfigurationBuilder().AddInMemoryCollection([new(DocumentRecalculateQuota.PermitKey, "2")]).Build(), new ManualClock());
+
+        Assert.True(quota.TryAcquire("u", "5", out _, out _));
+        Assert.True(quota.TryAcquire("u", "05", out _, out _));
+        Assert.False(quota.TryAcquire("u", variant, out _, out _));
+    }
+
     /// <remarks>Мутація: прибрати <c>quota.Refund</c> після <c>next</c> для статусу ≥ 400 без винятку — червоне.</remarks>
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage4)]

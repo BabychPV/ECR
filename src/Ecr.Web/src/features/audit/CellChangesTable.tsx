@@ -1,7 +1,7 @@
 import { memo, type JSX, type ReactNode } from 'react';
 import { Badge, Box, Group, Table, Text, VisuallyHidden } from '@mantine/core';
 import type { CellChangePage } from '@/api/types';
-import { authorName } from '@/features/audit/authorOptions';
+import { cellAuthorHint, cellAuthorName } from '@/features/audit/authorOptions';
 import { decimalDelta } from '@/features/audit/changeDelta';
 import { Timestamp } from '@/shared/ui/Timestamp';
 import { TwoLine } from '@/shared/ui/TwoLine';
@@ -96,6 +96,9 @@ function columnText(change: CellChange): string {
 const OriginIcons: Readonly<Record<string, string>> = {
   UserEdit: 'M4 20l4-1L19 8l-3-3L5 16z',
   Import: 'M12 16V4M7 9l5-5 5 5M4 20h16',
+  // ✎ AN-114: імпорт, що свідомо перезаписав пізнішу чужу правку, — та сама
+  // стрілка імпорту, назва з каталогу каже решту.
+  ImportOverwrite: 'M12 16V4M7 9l5-5 5 5M4 20h16',
   Recalculation: 'M18 7V5H6l7 7-7 7h12v-2',
   Migration:
     'M4 6c0-1.7 3.6-3 8-3s8 1.3 8 3-3.6 3-8 3-8-1.3-8-3zM4 6v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3',
@@ -230,8 +233,11 @@ export const CellChangesTable = memo(function CellChangesTable({
                 <Timestamp value={change.changedAt} />
               </Text>
             </Table.Td>
-            {/* ⛔ `R-18`: імена з сервера, а не «user 3». Номер — підказкою: фільтри стоять на ньому. */}
-            <Table.Td title={`#${String(change.changedByUserId)}`}>{authorName(change)}</Table.Td>
+            {/* ⛔ `R-18`: імена з сервера, а не «user 3». Номер — підказкою: фільтри стоять на ньому.
+                AN-115: перерахунок/інтеграція/міграція — «Система», хто запустив — у підказці. */}
+            <Table.Td title={cellAuthorHint(change)} data-audit-author="">
+              {cellAuthorName(change)}
+            </Table.Td>
             <Table.Td>
               {/* Макет: верхній рядок — комірка, нижній — документ (там «· sheet › table»: серверу
                   бракує назв аркуша/таблиці, TODO-контракт BE-16 у листі UI-38). */}

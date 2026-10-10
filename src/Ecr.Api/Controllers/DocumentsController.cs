@@ -558,9 +558,19 @@ public sealed class DocumentsController(
     [HttpPost("{id:long}/import/preview")]
     [RequestSizeLimit(MaxImportBodyBytes)]
     [ProducesResponseType<Ecr.Application.Ports.ImportPreview>(StatusCodes.Status200OK)]
-    public async Task<IActionResult> ImportPreview(long id, IFormFile file, CancellationToken ct)
+    public async Task<IActionResult> ImportPreview(
+        long id, IFormFile file, [FromServices] Ecr.Api.Security.ImportPreviewGate previewGate, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(file);
+        ArgumentNullException.ThrowIfNull(previewGate);
+
+        // ⛔ P1-04 = S1-02: розбір книги — повна модель ClosedXML у пам'яті процесу; одночасних
+        // розборів не більше за межу, понад чергу — 429 (`ImportPreviewGate`).
+        //
+        // ⛔ AN-123 (R1-04 = R2-02): місце береться ТУТ, після прив'язки `IFormFile`, — тіло вже
+        // прийняте. Доти `[EnableRateLimiting]` брав його в проміжному ПЗ до прив'язки, і
+        // повільне вивантаження (до 30 МБ) займало місце розбору, нічого не розбираючи.
+        using var parsePermit = await previewGate.EnterAsync(ct).ConfigureAwait(false);
 
         // ⛔ Перегляд НЕ застосовує нічого. Це не проміжний крок майстра, а
         // сам механізм захисту: імпорт без перегляду непомітно перезаписує
@@ -592,7 +602,7 @@ public sealed class DocumentsController(
         // ECR-CELL-0409 і перетворюється на 409 середовищем обробки помилок:
         // окрема перевірка тут була б другою, яка вміє розійтися з першою.
         var result = await applyImport
-            .HandleAsync(id, request.PreviewToken, ct)
+            .HandleAsync(id, request.PreviewToken, request.OverwriteRows, ct)
             .ConfigureAwait(false);
 
         return result.JobId is { } jobId
@@ -692,7 +702,16 @@ public sealed record ExportRequest(
 
 /// <summary>Запит на застосування імпорту.</summary>
 /// <param name="PreviewToken">Токен раніше побудованого diff.</param>
-public sealed record ImportApplyRequest(string PreviewToken);
+/// <param name="OverwriteRows">
+/// ✎ AN-114 (D-338). Рядки, для яких людина свідомо перезаписує чужі правки,
+/// зроблені після експорту книги (конфлікти перегляду
+/// <c>err.ECR-CELL-0409.importRowChangedSinceExport</c>, їхні значення —
+/// <c>ImportPreview.overwritable</c>). Відсутнє/порожнє — конфліктні рядки не
+/// застосовуються, решта — так (AN-103). Рядок, що не був таким конфліктом, —
+/// 422 <c>ECR-IMP-0422</c> (<c>overwriteNotConflict</c>).
+/// </param>
+public sealed record ImportApplyRequest(
+    string PreviewToken, IReadOnlyList<Ecr.Application.Ports.ImportOverwriteRow>? OverwriteRows = null);
 
 /// <summary>Результат перевірки документа за період.</summary>
 /// <param name="DocumentId">Документ.</param>

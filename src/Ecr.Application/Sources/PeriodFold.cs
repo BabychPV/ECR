@@ -116,9 +116,11 @@ public static class PeriodFold
     /// </para>
     /// <para>
     /// Згортки точок (<see cref="AggregationKind.Sum"/> … <see cref="AggregationKind.First"/>)
-    /// беруть точки <c>fromUtc ≤ t &lt; toUtc</c> і згортаються тим самим
-    /// <see cref="Fold(AggregationKind, IReadOnlyList{decimal})"/> — без
-    /// урахування якості, як і досі; частка покриття для них не визначена.
+    /// беруть точки <c>fromUtc ≤ t &lt; toUtc</c> з <see cref="TimedPoint.IsGood"/> =
+    /// <c>true</c> (HSE301 §4.6, <c>C1-04</c>) і згортаються тим самим
+    /// <see cref="Fold(AggregationKind, IReadOnlyList{decimal})"/>. Частка покриття
+    /// для них — відсоток придатних серед точок вікна: точок у вікні немає —
+    /// <c>null</c>; є, але всі непридатні — значення <c>null</c> і частка <c>0</c>.
     /// </para>
     /// </remarks>
     public static TimeFoldResult Fold(
@@ -184,16 +186,34 @@ public static class PeriodFold
             case AggregationKind.Max:
             case AggregationKind.First:
             case AggregationKind.Last:
-                var inside = new List<decimal>();
+                // ⛔ HSE301 §4.6 (C1-04): `Quality ≠ Good` — точка не бере участі
+                // в згортці. Сумнівний пік (заклинений датчик, 9999) не має ставати
+                // `Max` місяця, а `Bad`-нуль — занижувати `Avg`. Частку придатних
+                // повертає `PercentGood`: викликач робить із неї `Partial`.
+                var good = new List<decimal>();
+                var total = 0;
                 foreach (var point in ordered)
                 {
-                    if (point.Timestamp >= fromUtc && point.Timestamp < toUtc)
+                    if (point.Timestamp < fromUtc || point.Timestamp >= toUtc)
                     {
-                        inside.Add(point.Value);
+                        continue;
+                    }
+
+                    total++;
+                    if (point.IsGood)
+                    {
+                        good.Add(point.Value);
                     }
                 }
 
-                return new TimeFoldResult(inside.Count == 0 ? null : Fold(kind, inside), null);
+                if (total == 0)
+                {
+                    return new TimeFoldResult(null, null);
+                }
+
+                return new TimeFoldResult(
+                    good.Count == 0 ? null : Fold(kind, good),
+                    good.Count * 100m / total);
 
             default:
                 throw new ArgumentOutOfRangeException(

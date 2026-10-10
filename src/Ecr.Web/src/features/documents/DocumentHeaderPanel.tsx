@@ -1,5 +1,19 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, type JSX } from 'react';
-import { Button, Checkbox, Collapse, Group, Select, SimpleGrid, Stack, Text, TextInput, Title, UnstyledButton } from '@mantine/core';
+import {
+  Alert,
+  Button,
+  Checkbox,
+  Collapse,
+  Group,
+  List,
+  Select,
+  SimpleGrid,
+  Stack,
+  Text,
+  TextInput,
+  Title,
+  UnstyledButton,
+} from '@mantine/core';
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch, EcrApiError } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
@@ -17,7 +31,15 @@ import { t } from '@/shared/i18n';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { showDone } from '@/shared/ui/notify';
 import { registerUnsavedSource } from '@/shared/ui/unsavedSources';
-import { bilingualLabel, ContractOrder, isContractReadOnly, splitContractFields, type ContractKey } from './contractSection';
+import { LookupEntriesStaleTimeMs } from '@/features/registries/api';
+import {
+  bilingualLabel,
+  ContractOrder,
+  contractKeyOf,
+  isContractReadOnly,
+  splitContractFields,
+  type ContractKey,
+} from './contractSection';
 
 /**
  * Шапка документа: поля версії шаблону разом із поточними значеннями
@@ -147,6 +169,67 @@ function sameHeaderValue(field: DocumentHeaderField, a: unknown, b: unknown): bo
   if (field.dataType === 'Date') return sameDateValue(normalize(a), normalize(b));
 
   return sameCellValue(normalize(a), normalize(b));
+}
+
+/**
+ * Поле шапки, яке змінили ОБИДВА — людина в чернетці й хтось інший на сервері — і
+ * по-різному (`D1-04`). Значення — у формі чернетки (`draftOf`): так їх показує
+ * поле вводу й так їх повертає «Взяти чинне».
+ */
+interface HeaderConflict {
+  readonly code: string;
+  readonly mine: unknown;
+  readonly theirs: unknown;
+}
+
+/**
+ * Злиття після `409` (`D1-04`): чинні значення сервера — основа, правки людини —
+ * поверх них, а поля, змінені обома по-різному, — окремим переліком.
+ *
+ * @param base Поля, з яких людина почала правити (стара точка відліку).
+ * @param fresh Чинні поля сервера.
+ * @param mine Чернетка людини.
+ */
+function mergeAfterConflict(
+  base: readonly DocumentHeaderField[],
+  fresh: readonly DocumentHeaderField[],
+  mine: Draft,
+): { draft: Draft; conflicts: HeaderConflict[] } {
+  const baseByCode = new Map(base.map((field) => [field.code, field] as const));
+  const freshDraft = draftOf(fresh);
+  const draft: Draft = { ...freshDraft };
+  const conflicts: HeaderConflict[] = [];
+
+  for (const field of fresh) {
+    const was = baseByCode.get(field.code);
+    if (was === undefined) continue;
+
+    const myValue = effectiveValueOf(field, mine[field.code]);
+
+    // Людина поля не міняла — воно йде за сервером.
+    if (sameHeaderValue(field, myValue, was.value)) continue;
+
+    draft[field.code] = mine[field.code];
+
+    const changedByThem = !sameHeaderValue(field, field.value, was.value);
+    if (changedByThem && !sameHeaderValue(field, myValue, field.value)) {
+      conflicts.push({ code: field.code, mine: mine[field.code], theirs: freshDraft[field.code] });
+    }
+  }
+
+  return { draft, conflicts };
+}
+
+/** Значення поля в рядку конфлікту: порожнє — словом, а не порожнім місцем. */
+function conflictValueText(field: DocumentHeaderField, raw: unknown): string {
+  if (field.dataType === 'Bool') {
+    if (raw === true) return t('document.header.conflictYes');
+    if (raw === false) return t('document.header.conflictNo');
+  }
+
+  if (raw === null || raw === undefined || raw === '') return t('document.header.conflictNoValue');
+
+  return typeof raw === 'string' || typeof raw === 'number' ? String(raw) : cellText(raw);
 }
 
 /** Тіло `PatchHeaderField` для одного зміненого поля. */
@@ -364,6 +447,9 @@ export function DocumentHeaderPanel({
           apiFetch<RegistryEntryDto[]>(
             asOf === null ? baseUrl : `${baseUrl}?asOf=${asOf}`,
           ),
+        // ⛔ AN-108 / P2-04: та сама свіжість, що в сітці (один ключ для нетемпорального довідника). Дефолт 30 с
+        // цього спостерігача перекачував довідник (до 50 тис. записів) на кожне повернення у вкладку.
+        staleTime: LookupEntriesStaleTimeMs,
       };
     }),
   });
@@ -483,9 +569,19 @@ export function DocumentHeaderPanel({
     setDraft(draftOf(fieldsOf(header.data)));
   }
 
+  /*
+   * ⛔ AN-104 (`D1-04`): поля, які людина змінила, а хтось інший тим часом змінив
+   * ІНАКШЕ (`409` на збереженні). Доти `409` замінював УСЮ чернетку значеннями
+   * сервера: набране зникало, порівняти «моє / чинне» ніде, а сторож переходу
+   * (`flushHeaderDraft` → `409`) бачив уже «чисту» чернетку й відпускав людину без
+   * лічильника втрати.
+   */
+  const [headerConflict, setHeaderConflict] = useState<readonly HeaderConflict[]>([]);
+
   function adopt(dto: DocumentHeaderDto): void {
     setSeed({ documentId, dto });
     setDraft(draftOf(fieldsOf(dto)));
+    setHeaderConflict([]);
   }
 
   const save = useMutation({
@@ -497,12 +593,20 @@ export function DocumentHeaderPanel({
       showDone(t('document.header.saved'));
     },
     onError: async (error) => {
-      // ⛔ Шапку змінив хтось інший (`409`): перечитати й показати ЧИННІ
-      // значення, а не лишити чернетку поверх чужих — інакше повторне
-      // «Зберегти» з новою версією перезаписало б те, чого людина не бачила.
+      // ⛔ Шапку змінив хтось інший (`409`): перечитати ЧИННІ значення — вони стають
+      // точкою відліку (нова `baseVersion`), — але набране людиною НЕ стирати
+      // (`D1-04`, AN-104). Поля, яких чужа правка не торкалась, лишаються з її
+      // значеннями; збіглі показуються «ваше / чинне» (`headerConflict`), і
+      // «Зберегти» вимкнене, доки людина не вирішить: перезаписати чуже мовчки
+      // повторним збереженням з новою версією не можна.
       if (error instanceof EcrApiError && error.problem.status === 409) {
         const fresh = await header.refetch();
-        if (fresh.data !== undefined) adopt(fresh.data);
+        if (fresh.data === undefined) return;
+
+        const merged = mergeAfterConflict(seedFields, fieldsOf(fresh.data), draft);
+        setSeed({ documentId, dto: fresh.data });
+        setDraft(merged.draft);
+        setHeaderConflict(merged.conflicts);
       }
     },
   });
@@ -591,6 +695,11 @@ export function DocumentHeaderPanel({
     // ⚠ Скасування — до ОСТАННЬОЇ відомої відповіді сервера, не до старої
     // точки відліку: чужі правки, що приїхали перезапитом, стають видимими.
     if (header.data !== undefined) adopt(header.data);
+    setHeaderConflict([]);
+
+    // ⛔ N3-10: відмова збереження тримала секцію розгорнутою (`mustStayOpen`), а «Скасувати» її не знімало -
+    // людина не могла згорнути шапку, не зберігши нічого.
+    save.reset();
   }
 
   /*
@@ -598,9 +707,22 @@ export function DocumentHeaderPanel({
    * поле: обов'язкове порожнє, недійсна дата, незбережена правка (не
    * сховати те, що ще не збережено), відмова збереження.
    */
-  const missingRequired = fields.filter((field) => field.isRequired && isEmptyHeaderValue(draft[field.code]));
+  // ⛔ N3-10: лише те, що людина МОЖЕ заповнити. Без права редагування (`canEdit=false`) і для службових
+  // полів Contract (File Number, Version - лише читання) порожнє обов'язкове поле тримало б секцію
+  // розгорнутою з причини, яку не зняти.
+  const missingRequired = fields.filter(
+    (field) =>
+      canEdit &&
+      !isContractReadOnly(contractKeyOf(field)) &&
+      field.isRequired &&
+      isEmptyHeaderValue(draft[field.code]),
+  );
   const mustStayOpen =
-    missingRequired.length > 0 || invalidDates.size > 0 || dirty.length > 0 || (save.error !== undefined && save.error !== null);
+    missingRequired.length > 0 ||
+    invalidDates.size > 0 ||
+    dirty.length > 0 ||
+    headerConflict.length > 0 ||
+    (save.error !== undefined && save.error !== null);
   const expanded = !collapsible || opened || mustStayOpen;
   const bodyId = `document-header-body-${String(documentId)}`;
 
@@ -714,10 +836,51 @@ export function DocumentHeaderPanel({
 
       {other.length > 0 && <Stack gap="xs">{other.map((field) => renderField(field, null))}</Stack>}
 
+      {headerConflict.length > 0 && (
+        <Alert color="statusWarning" title={t('document.header.conflictTitle')} data-testid="document-header-conflict">
+          <Text size="sm">{t('document.header.conflictHint')}</Text>
+          <List size="sm" my="xs">
+            {headerConflict.map((item) => {
+              const field = fields.find((candidate) => candidate.code === item.code);
+
+              return (
+                <List.Item key={item.code} data-header-conflict={item.code}>
+                  {t('document.header.conflictItem', {
+                    field: field === undefined ? item.code : localized(field.label),
+                    yours: field === undefined ? '' : conflictValueText(field, item.mine),
+                    value: field === undefined ? '' : conflictValueText(field, item.theirs),
+                  })}
+                </List.Item>
+              );
+            })}
+          </List>
+          <Group gap="xs">
+            <Button size="xs" onClick={() => setHeaderConflict([])} data-testid="document-header-conflict-keep">
+              {t('document.header.conflictKeepMine')}
+            </Button>
+            <Button
+              size="xs"
+              variant="default"
+              onClick={() => {
+                setDraft((current) => {
+                  const next = { ...current };
+                  for (const item of headerConflict) next[item.code] = item.theirs;
+                  return next;
+                });
+                setHeaderConflict([]);
+              }}
+              data-testid="document-header-conflict-current"
+            >
+              {t('document.header.conflictUseCurrent')}
+            </Button>
+          </Group>
+        </Alert>
+      )}
+
       {canEdit && (
         <Group gap="xs">
           <Button
-            disabled={dirty.length === 0 || invalidDates.size > 0}
+            disabled={dirty.length === 0 || invalidDates.size > 0 || headerConflict.length > 0}
             loading={save.isPending}
             onClick={() => save.mutate(dirtyPatch)}
           >

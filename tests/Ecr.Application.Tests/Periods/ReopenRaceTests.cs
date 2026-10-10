@@ -242,7 +242,10 @@ public sealed class ReopenRaceTests(SqlServerFixture sql)
             .Returns(Ecr.Application.Security.EditDecision.Allow());
 
         var handler = new Ecr.Application.Workflow.ReopenDocumentHandler(
-            spy, access, new UnitOfWork(db), user, new TestClock(Now), NSubstitute.Substitute.For<Ecr.Application.Ports.IDocumentStore>());
+            spy, access, new UnitOfWork(db), user, new TestClock(Now), NSubstitute.Substitute.For<Ecr.Application.Ports.IDocumentStore>(),
+            new Ecr.Application.Reporting.ReportSnapshotSync(
+                NSubstitute.Substitute.For<Ecr.Application.Ports.IReportSnapshotBuilder>(),
+                NSubstitute.Substitute.For<Ecr.Application.Ports.IDocumentStore>()));
 
         await handler
             .HandleAsync(documentId, sheetDefId, PeriodKeyValue, "уточнення за скаргою", CancellationToken.None)
@@ -278,6 +281,9 @@ public sealed class ReopenRaceTests(SqlServerFixture sql)
             TransactionWasOpen = db.Database.CurrentTransaction is not null;
             return inner.LockPeriodAsync(documentId, periodKey, ct);
         }
+
+        public Task<PeriodState> EffectivePeriodStateAsync(Period period, DateTime utcNow, CancellationToken ct)
+            => inner.EffectivePeriodStateAsync(period, utcNow, ct);
 
         public Task<Ecr.Domain.Entities.Workflow.ApprovalState> GetOrCreateAsync(
             long documentId, int sheetDefId, PeriodKey periodKey, CancellationToken ct)

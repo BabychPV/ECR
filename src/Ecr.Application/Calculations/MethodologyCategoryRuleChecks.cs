@@ -5,6 +5,7 @@ using Ecr.Application.Ports;
 using Ecr.Domain.Entities.Calculations;
 using Ecr.Domain.Enums;
 using Ecr.Expressions.Ast;
+using Ecr.Expressions.Evaluation;
 
 namespace Ecr.Application.Calculations;
 
@@ -93,6 +94,18 @@ public static class MethodologyCategoryRuleChecks
         }
 
         var problems = new List<PublishProblem>();
+
+        // ✎ N2-01 (AN-72): та сама межа вкладеності, що й для формул (`MethodologyPublishChecks`): правило
+        // глибше за EvaluationBudget.MaxNestingDepth проходило і збереження, і публікацію, а в роботі давало
+        // #BUDGET -> categoryRuleFailed, і рядки мовчки відхилялися.
+        if (ExpressionNesting.Diagnose(result.Expression.Root) is { MessageParams: { } deep })
+        {
+            problems.Add(PublishProblem.Of(
+                "publish.problem.formulaTooDeep",
+                $"Правило категорії надто складне: глибина {deep["depth"]}, дозволено {deep["max"]}.",
+                ("formula", RuleCode), ("depth", deep["depth"]), ("max", deep["max"])));
+        }
+
         var known = constants.Select(c => c.Code).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var scopes = formulas.ToDictionary(f => f.Code, f => f.Scope, StringComparer.OrdinalIgnoreCase);
 

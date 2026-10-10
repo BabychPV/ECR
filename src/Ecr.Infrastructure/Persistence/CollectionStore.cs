@@ -332,14 +332,25 @@ public sealed class CollectionStore(EcrDbContext db, IClock clock) : ICollection
         // ключ — шістнадцятковий, тож символів-шаблонів LIKE у ньому немає.
         var pattern = string.Concat("%\"", DedupKeyParam, "\":\"", key, "\"%");
 
+        // ⛔ Y2-01: предикат дослівно = фільтр IX_CollectionCoverage_RegistryEvents
+        // (Status IS NOT NULL AND PeriodKey IS NULL) плюс явна підказка індексу. Без них план —
+        // скан кластерного PK під HOLDLOCK: діапазон до +∞ і стоп УСІХ вставок покриття (острови,
+        // матеріалізація, синк) на весь час скану журналу. З ними діапазон — лише на ключах
+        // (SourceEntityId, Id) однієї сутності, а острови (Status IS NULL) в індекс не потрапляють.
+        // Подія тут завжди з PeriodKey NULL (див. INSERT). Розійдеться фільтр індексу із запитом —
+        // SQL Server відмовить помилкою 8622, а не просканує мовчки (той самий прийом, що в черзі).
+        // Мітка-коментар — щоб план знайшов CollectionCoverageDedupPlanTests.
         var written = await db.Database
             .ExecuteSqlInterpolatedAsync(
                 $"""
+                -- ecr:coverage-event-dedup
                 INSERT INTO itg.CollectionCoverage (SourceEntityId, CoveredFrom, CoveredTo, CollectionRunId, PeriodKey, Status, Details)
                 SELECT {sourceEntityId}, {now}, {now}, NULL, NULL, {status}, {details}
                 WHERE NOT EXISTS (
-                    SELECT 1 FROM itg.CollectionCoverage cc WITH (UPDLOCK, HOLDLOCK)
+                    SELECT 1 FROM itg.CollectionCoverage cc
+                         WITH (UPDLOCK, HOLDLOCK, INDEX(IX_CollectionCoverage_RegistryEvents))
                     WHERE cc.SourceEntityId = {sourceEntityId}
+                      AND cc.Status IS NOT NULL AND cc.PeriodKey IS NULL
                       AND cc.Status = {status}
                       AND cc.Details LIKE {pattern});
                 """,
@@ -351,6 +362,9 @@ public sealed class CollectionStore(EcrDbContext db, IClock clock) : ICollection
 
     /// <summary>Ім'я параметра конверта події, що несе ключ дедуплікації.</summary>
     public const string DedupKeyParam = "key";
+
+    /// <summary>Мітка запиту дедупу подій покриття — ДОСЛІВНО коментар у тексті SQL (план шукає <c>CollectionCoverageDedupPlanTests</c>).</summary>
+    internal const string CoverageEventDedupTag = "ecr:coverage-event-dedup";
 
     /// <summary>
     /// Ключ дедуплікації події: відбиток (сутність, атрибут, інтервал, статус, код).
@@ -583,6 +597,14 @@ public sealed class CollectionStore(EcrDbContext db, IClock clock) : ICollection
         => db.ColumnDefs.AsNoTracking().AnyAsync(c => c.Id == columnDefId && !c.IsDeleted, ct);
 
     /// <inheritdoc />
+    public Task<int?> FindColumnUnitIdAsync(int columnDefId, CancellationToken ct)
+        => db.ColumnDefs
+            .AsNoTracking()
+            .Where(c => c.Id == columnDefId)
+            .Select(c => c.UnitId)
+            .FirstOrDefaultAsync(ct);
+
+    /// <inheritdoc />
     public async Task<IReadOnlyList<int>> FindProjectIdsUsingColumnAsync(int columnDefId, CancellationToken ct)
     {
         // ⚠ Той самий шлях «колонка → таблиця → екземпляр → документ», що в
@@ -799,16 +821,21 @@ public sealed class CollectionStore(EcrDbContext db, IClock clock) : ICollection
     /// <summary>Скільки годин блок масового видалення подій вважається чинним для здоров'я джерел.</summary>
     private const int RemovalBlockHealthHours = 24;
 
-    /// <summary>Одиниці джерела за їхніми символами — одним запитом на весь батч.</summary>
+    /// <summary>Одиниці джерела за їхніми символами — один знімок довідника на весь батч.</summary>
     /// <remarks>
     /// ⚠ Нерозпізнаний символ не потрапляє у словник, і виклик через
     /// <c>TryGetValue</c> дає <c>null</c>, а не здогадку. Одиниця, взята
     /// навмання, — це число, помножене невідомо на що; порожня одиниця
-    /// принаймні видима у звіті про збір (ФВ-16.12). Один запит
-    /// <c>WHERE Code IN (...)</c>, а не по запиту на точку: у типовому батчі
-    /// — лічені РІЗНІ символи одиниць (усі точки одного джерела зазвичай в
-    /// одній), тож запит на кожну точку окремо був би N+1 без жодної
-    /// причини.
+    /// принаймні видима у звіті про збір (ФВ-16.12). Один знімок довідника
+    /// (<see cref="UnitCatalog"/>, одним запитом), а не по запиту на точку: у
+    /// типовому батчі — лічені РІЗНІ символи одиниць, тож запит на кожну точку
+    /// окремо був би N+1 без жодної причини.
+    ///
+    /// ⛔ Z2-02: символ розпізнається тим самим правилом, що й перевірка
+    /// одиниці збору (<see cref="BoundaryUnitConversion.ResolveSourceSymbol"/>):
+    /// PI дає <c>Sm3/h</c>, а не код <c>Sm3_per_h</c>. Доти точка з такою
+    /// одиницею лягала без одиниці, і змішаний ряд (<c>Sm3/h</c> і <c>Sm3/d</c>)
+    /// матеріалізація не бачила (X3-02).
     /// </remarks>
     private async Task<Dictionary<string, int?>> ResolveUnitsAsync(
         IReadOnlyList<SourceDataPoint> points, CancellationToken ct)
@@ -816,7 +843,7 @@ public sealed class CollectionStore(EcrDbContext db, IClock clock) : ICollection
         var symbols = points
             .Where(p => !string.IsNullOrWhiteSpace(p.SourceUnitSymbol))
             .Select(p => p.SourceUnitSymbol!)
-            .Distinct()
+            .Distinct(StringComparer.Ordinal)
             .ToList();
 
         if (symbols.Count == 0)
@@ -824,13 +851,11 @@ public sealed class CollectionStore(EcrDbContext db, IClock clock) : ICollection
             return [];
         }
 
-        var units = await db.Units
-            .AsNoTracking()
-            .Where(u => symbols.Contains(u.Code))
-            .Select(u => new { u.Code, u.Id })
-            .ToListAsync(ct)
-            .ConfigureAwait(false);
+        var units = await new UnitCatalog(db).GetAsync(ct).ConfigureAwait(false);
 
-        return units.ToDictionary(u => u.Code, u => (int?)u.Id);
+        return symbols
+            .Select(symbol => (Symbol: symbol, Unit: BoundaryUnitConversion.ResolveSourceSymbol(symbol, units)))
+            .Where(x => x.Unit is not null)
+            .ToDictionary(x => x.Symbol, x => (int?)x.Unit!.Id, StringComparer.Ordinal);
     }
 }

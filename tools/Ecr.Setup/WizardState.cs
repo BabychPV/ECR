@@ -4,7 +4,7 @@ namespace Ecr.Setup;
 
 /// <summary>
 /// Спосіб розгортання, обраний на кроці 1 — визначає, чи показувати крок
-/// "Пароль адміністратора" і чи пропонувати "-SkipSchema" на кроці бази даних.
+/// "Пароль адміністратора" і який підпис має прапорець "-SkipSchema" на кроці бази даних.
 /// </summary>
 internal enum WizardMode
 {
@@ -50,12 +50,69 @@ internal sealed class WizardState
     // Крок 1 — режим.
     public WizardMode Mode { get; set; } = WizardMode.FirstDeployment;
 
+    /// <summary>
+    /// Режим, обраний на кроці 1 за замовчуванням.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ R5-U1/U1-03: служба EcrApi вже зареєстрована на цьому сервері — типово «Update». Раніше перемикач
+    /// завжди стояв на «First deployment», а цей режим на живій базі обходив обов'язкову перевірку копії
+    /// (S2-04/AN-117); остаточний запобіжник — у <c>deploy-ecr.ps1</c> (база з міграціями → відмова).
+    /// </remarks>
+    /// <param name="apiServiceInstalled">Чи є ключ служби <c>EcrApi</c> у реєстрі.</param>
+    /// <returns>Типовий режим кроку 1.</returns>
+    public static WizardMode DefaultMode(bool apiServiceInstalled) =>
+        apiServiceInstalled ? WizardMode.Update : WizardMode.FirstDeployment;
+
     // Крок 2 — обліковий запис і мережа.
     // L10-03, D-282: типово gMSA, як і перемикач на кроці 2.
     public ServiceAccountMode ServiceAccountMode { get; set; } = ServiceAccountMode.Gmsa;
     public string? ServiceAccountName { get; set; }
     public SecureString? ServicePassword { get; set; }
     public int Port { get; set; } = 5000;
+
+    /// <summary>
+    /// Порт, який зараз слухає встановлена служба <c>EcrApi</c>: перша адреса <c>ASPNETCORE_URLS</c> з її
+    /// <c>Environment</c> (<c>https://+:443;http://+:80</c> → 443), або <c>null</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ R9-F5/F5-02: MSI порт не пам'ятає, а майстер завжди передає <c>-AppPort</c>. Раніше поле стояло на
+    /// 5000 і в режимі «Update», тож оновлення служби на 443 переносило її на 5000, а крок 7, що опитує вже
+    /// новий порт, казав «Done». Тепер типове значення поля — поточний порт служби.
+    /// </remarks>
+    /// <param name="environment">Записи <c>ім'я=значення</c> з реєстру служби (може бути <c>null</c>).</param>
+    /// <returns>Порт 1..65535 або <c>null</c>.</returns>
+    public static int? PortFromServiceEnvironment(IEnumerable<string>? environment)
+    {
+        const string Prefix = "ASPNETCORE_URLS=";
+        var urls = environment?.FirstOrDefault(e => e is not null && e.StartsWith(Prefix, StringComparison.OrdinalIgnoreCase));
+        if (urls is null)
+        {
+            return null;
+        }
+
+        var first = urls[Prefix.Length..].Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .FirstOrDefault();
+        var scheme = first?.IndexOf("://", StringComparison.Ordinal) ?? -1;
+        if (first is null || scheme <= 0)
+        {
+            return null;
+        }
+
+        var authority = first[(scheme + 3)..];
+        var slash = authority.IndexOf('/', StringComparison.Ordinal);
+        if (slash >= 0)
+        {
+            authority = authority[..slash];
+        }
+
+        var colon = authority.LastIndexOf(':');
+        return colon >= 0
+            && int.TryParse(authority[(colon + 1)..], System.Globalization.NumberStyles.None,
+                System.Globalization.CultureInfo.InvariantCulture, out var port)
+            && port is >= 1 and <= 65535
+                ? port
+                : null;
+    }
     public string? MsiPath { get; set; }
 
     // Крок 3 — база даних.
@@ -65,6 +122,39 @@ internal sealed class WizardState
     public string? SqlLogin { get; set; }
     public SecureString? SqlLoginPassword { get; set; }
     public bool SkipSchema { get; set; }
+
+    /// <summary>
+    /// Підпис прапорця «схему не застосовувати» на кроці бази.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ R9-F5/F5-01: прапорець є в ОБОХ режимах. У першому розгортанні — для повтору спроби, що впала
+    /// ПІСЛЯ кроку 2 скрипта (схему вже накочено, тож <c>-FirstDeployment</c> без <c>-SkipSchema</c> скрипт
+    /// відмовляє). Раніше майстер дозволяв пропуск лише в «Update», а «Update» не передає
+    /// <c>-BootstrapPassword</c> — повтор закінчувався «Done» і системою без жодного адміністратора.
+    /// </remarks>
+    /// <param name="mode">Режим кроку 1.</param>
+    /// <returns>Текст прапорця.</returns>
+    public static string SkipSchemaLabel(WizardMode mode) =>
+        mode == WizardMode.Update
+            ? "Schema already applied separately (skip)"
+            : "Schema already applied by a previous attempt of this first deployment (skip)";
+
+    // ⛔ L10-04, D-333 (HU-12 R3 = A): довіряти сертифікату SQL Server без перевірки — свідомий
+    // вибір адміністратора, ТИПОВО ВИМКНЕНО. Вимкнено — TrustServerCertificate=False і sqlcmd без
+    // -C: з Encrypt=Mandatory сервер має пред'явити сертифікат, якому довіряє ця машина.
+    public bool TrustSqlServerCertificate { get; set; }
+
+    // ⛔ AN-117 (S2-04): копія бази перед оновленням схеми. `Backup` — що показала перевірка
+    // msdb.dbo.backupset на кроці бази (null — не перевірялась); `BackupRiskAccepted` — явна позначка
+    // «копію зроблено поза SQL Server / я приймаю ризик». Лише вона дає deploy-ecr.ps1 -SkipBackupCheck.
+    public BackupCheckResult? Backup { get; set; }
+
+    public bool BackupRiskAccepted { get; set; }
+
+    /// <summary>
+    /// Чи передати <c>-SkipBackupCheck</c>: лише оновлення, що змінює схему, і лише за явною позначкою людини.
+    /// </summary>
+    public bool SkipBackupCheck => Mode == WizardMode.Update && !SkipSchema && BackupRiskAccepted;
 
     // Крок 4 — пароль адміністратора (лише для FirstDeployment).
     public SecureString? BootstrapPassword { get; set; }

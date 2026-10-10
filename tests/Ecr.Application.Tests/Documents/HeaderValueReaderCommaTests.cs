@@ -54,6 +54,26 @@ public sealed class HeaderValueReaderCommaTests
             data.ValueNumeric);
     }
 
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Finding", "Z3-02")]
+    [InlineData("4/1/2024")]
+    [InlineData("01-04-2024")]
+    public void Відхилена_дата_з_днем_чи_місяцем_спереду_в_шапці_пояснюється_окремим_ключем(string text)
+    {
+        // ⛔ Z3-02 (аудит 8): доти — загальне «Header field "D" expects a date».
+        // Мутація: прибрати гілку `IsRefusedDayMonthDate` у `HeaderValueReader.Date` —
+        // ключ знову `expectsDate`.
+        var field = new HeaderFieldDef(templateVersionId: 1, EcrCode.Create("D"), new LocalizedText(), 1, CellDataType.Date);
+
+        var error = Assert.Throws<BusinessRuleException>(() => HeaderValueReader.Read(FromWire(text), field));
+
+        Assert.Equal(ErrorCodes.HeaderValueInvalid, error.ErrorCode);
+        Assert.Equal("err.ECR-HDR-0422.ambiguousDate", error.Details?["messageKey"]);
+        Assert.Equal("D", error.Details?["headerFieldCode"]);
+        Assert.Equal(text, error.Details?["value"]);
+    }
+
     private static TheoryData<string, string> Cross(params string[] texts)
     {
         var data = new TheoryData<string, string>();

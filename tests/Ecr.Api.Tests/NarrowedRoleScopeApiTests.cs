@@ -227,6 +227,51 @@ public sealed class NarrowedRoleScopeApiTests(SqlServerFixture sql)
             .ConfigureAwait(true);
     }
 
+    /// <summary>
+    /// ⛔ A1-01 (аудит 09.10c): календар проєкту — рівень документа (D-214, коментар у
+    /// <c>GetPeriodCalendarHandler</c>), його читає й роль, звужена аркушем чи періодом. Доти <c>GET …/periods</c>
+    /// спершу кликав побудову календаря, яка вимагала грант <c>Read</c> у <c>Grants</c> (грант звуженого шару там не
+    /// видно) — і звужена роль отримувала <c>403</c> завжди. А сам GET писав у <c>cfg.Period</c>: звужена роль лише
+    /// читає, тож рядки й межі періодів після її GET — ті самі.
+    /// </summary>
+    [Theory]
+    [InlineData("sheet")]
+    [InlineData("period")]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-6.14")]
+    public async Task Звужена_роль_читає_календар_і_нічого_в_ньому_не_пише(string narrowing)
+    {
+        var b = await ArrangeAsync().ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+        var scope = narrowing == "sheet" ? Scope(b, sheets: [b.SheetCode]) : Scope(b, from: 202601, to: 202601);
+        using var client = await SignedInAsync(app, b, scope).ConfigureAwait(true);
+        var before = await PeriodRowsAsync(b.ProjectId).ConfigureAwait(true);
+
+        using var response = await client.GetAsync(
+                new Uri($"/api/v1/projects/{b.ProjectId}/periods", UriKind.Relative))
+            .ConfigureAwait(true);
+        var body = await response.Content.ReadAsStringAsync().ConfigureAwait(true);
+
+        Assert.True(response.StatusCode == HttpStatusCode.OK, $"{response.StatusCode}\n{body}\n{app.ErrorsText}");
+        var keys = JsonDocument.Parse(body).RootElement.GetProperty("periods").EnumerateArray()
+            .Select(p => p.GetProperty("periodKey").GetInt32()).ToList();
+        Assert.Contains(b.PeriodKey.Value, keys);
+        Assert.Equal(before, await PeriodRowsAsync(b.ProjectId).ConfigureAwait(true));
+    }
+
+    private async Task<List<string>> PeriodRowsAsync(int projectId)
+    {
+        await using var db = Context();
+        var rows = await db.Periods.AsNoTracking().Where(p => p.ProjectId == projectId)
+            .OrderBy(p => p.PeriodKeyValue)
+            .Select(p => new { p.PeriodKeyValue, p.ComputedOpenAt, p.ComputedGraceAt, p.ComputedCloseAt })
+            .ToListAsync().ConfigureAwait(false);
+
+        return [.. rows.Select(r => FormattableString.Invariant(
+            $"{r.PeriodKeyValue}|{r.ComputedOpenAt:O}|{r.ComputedGraceAt:O}|{r.ComputedCloseAt:O}"))];
+    }
+
     private static string Scope(TestDocument b, string[]? sheets = null, int? from = null, int? to = null)
         => RoleAssignmentScope.Create(
                 [b.ProjectId],

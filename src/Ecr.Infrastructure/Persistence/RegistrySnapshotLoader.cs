@@ -34,11 +34,21 @@ public sealed class RegistrySnapshotLoader(EcrDbContext db) : IRegistrySnapshotL
         DateTime? registryAsOfUtc,
         CancellationToken ct)
     {
+        var source = await LoadSourceAsync(registryDefIds, registryAsOfUtc, ct).ConfigureAwait(false);
+        return source.Build(businessDate);
+    }
+
+    /// <inheritdoc />
+    public async Task<IRegistrySnapshotSource> LoadSourceAsync(
+        IReadOnlyCollection<int> registryDefIds,
+        DateTime? registryAsOfUtc,
+        CancellationToken ct)
+    {
         ArgumentNullException.ThrowIfNull(registryDefIds);
 
         if (registryDefIds.Count == 0)
         {
-            return RegistrySnapshot.Empty;
+            return RegistrySnapshotSource.Empty;
         }
 
         var ids = await CloseOverLookupsAsync(registryDefIds, ct).ConfigureAwait(false);
@@ -75,7 +85,7 @@ public sealed class RegistrySnapshotLoader(EcrDbContext db) : IRegistrySnapshotL
                     u == null ? null : u.Code))
             .ToListAsync(ct).ConfigureAwait(false);
 
-        return RegistrySnapshot.Create(registries, primaryKeys, entries, values, businessDate);
+        return new RegistrySnapshotSource(registries, primaryKeys, entries, values);
     }
 
     /// <summary>

@@ -75,7 +75,11 @@ public sealed class GetRegistryDefinitionHandler(
             fields
                 .Select(f => new RegistryFieldDto(
                     f.Id, f.Code, f.NameL10n, f.DataType.ToString(), f.IsRequired,
-                    IsScopeField: f.IsKey, f.RefRegistryDefId, f.UnitId))
+                    IsScopeField: f.IsKey,
+
+                    // ⛔ L5-08: числовий Id забороненої цілі, як і її код, не віддається.
+                    VisibleTarget(profile, f.RefRegistryDefId),
+                    f.UnitId))
                 .ToList(),
             Relations(definition, fields, byId, linkKinds, profile),
             rules
@@ -108,6 +112,12 @@ public sealed class GetRegistryDefinitionHandler(
                 ? code
                 : f.RegistryFieldDefId.ToString(CultureInfo.InvariantCulture))];
 
+    /// <summary>Id довідника-цілі для читача: <c>null</c>, якщо на ціль у нього явна заборона (L5-08).</summary>
+    /// <param name="profile">Профіль читача.</param>
+    /// <param name="registryDefId">Ціль поля чи зв'язку; <c>null</c> — цілі немає.</param>
+    private static int? VisibleTarget(Security.AccessProfile profile, int? registryDefId)
+        => registryDefId is { } id && RegistryAccess.IsDenied(profile, id) ? null : registryDefId;
+
     /// <summary>Зводить зв'язки з полів і з рядків <c>dic.RegistryEntryLink</c>.</summary>
     /// <param name="definition">Довідник.</param>
     /// <param name="fields">Його поля.</param>
@@ -138,8 +148,9 @@ public sealed class GetRegistryDefinitionHandler(
                 // видалюваний разом із ним.
                 Kind: composition ? "Composition" : target == definition.Id ? "Hierarchy" : "Cascade",
                 FieldCode: field.Code,
-                TargetRegistryDefId: target,
-                // ⛔ L5-08: код забороненого довідника-цілі не віддається (як і в переліку довідників).
+                // ⛔ L5-08: ні Id, ні код забороненого довідника-цілі не віддаються (як і в переліку
+                // довідників): Id розкривав би те саме, що код, — що така ціль є.
+                TargetRegistryDefId: VisibleTarget(profile, target),
                 TargetRegistryCode: !RegistryAccess.IsDenied(profile, target) && codesById.TryGetValue(target, out var targetCode)
                     ? targetCode
                     : null,
@@ -434,7 +445,13 @@ public sealed class SaveRegistryDefinitionHandler(
         }
     }
 
-    private static ConcurrencyConflictException DefinitionChanged(RegistryDef definition)
+    /// <summary><c>409 ECR-REG-0409 definitionChanged</c>: опис змінили після того, як його прочитали.</summary>
+    /// <remarks>
+    /// <c>internal</c>, бо цю саму відмову дає й запис даних (<c>RegistryEntryWriter</c>, D1-05), коли опис
+    /// (ключі, поля) змінився між читанням і транзакцією запису.
+    /// </remarks>
+    /// <param name="definition">Довідник у тій версії, з якою почали.</param>
+    internal static ConcurrencyConflictException DefinitionChanged(RegistryDef definition)
         => new(
             "ECR-REG-0409",
             $"Опис довідника «{definition.Code}» змінили після того, як його прочитали.",

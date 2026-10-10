@@ -54,6 +54,22 @@ public interface IWorkflowStore
     /// </remarks>
     public Task<Period> LockPeriodAsync(long documentId, PeriodKey periodKey, CancellationToken ct);
 
+    /// <summary>
+    /// ЕФЕКТИВНИЙ стан періоду на <paramref name="utcNow"/> — те саме правило, що й у рішенні про
+    /// запис (F-08): <c>PeriodStateCalculator.Effective</c> з річним вікном проєкту, лише для
+    /// активного проєкту; інакше — збережений стан.
+    /// </summary>
+    /// <param name="period">Період, уже взятий <see cref="LockPeriodAsync"/>.</param>
+    /// <param name="utcNow">Поточний момент.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⛔ R5-W1 / W1-04: збережений стан змінює лише годинна <c>PeriodStateJob</c>. Reopen і
+    /// Recall аркуша, що звірялися з ним, повертали аркуш у <c>Draft</c> у ФАКТИЧНО закритому
+    /// періоді, де його вже не можна ні правити, ні подати (D-67).
+    /// </remarks>
+    public Task<Domain.Enums.PeriodState> EffectivePeriodStateAsync(
+        Period period, DateTime utcNow, CancellationToken ct);
+
     /// <summary>Зберігає іммутабельний зріз поданих даних (ФВ-5.7).</summary>
     /// <returns>Ідентифікатор зрізу.</returns>
     public Task<long> SaveSnapshotAsync(SubmissionSnapshotRecord snapshot, CancellationToken ct);

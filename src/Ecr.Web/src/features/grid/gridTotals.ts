@@ -55,7 +55,7 @@ const TotalableColumnTypes: ReadonlySet<string> = new Set([
 ]);
 
 /** Чи підсумовується ця колонка. */
-function isTotalableColumn(column: ColumnDto): boolean {
+export function isTotalableColumn(column: ColumnDto): boolean {
   return TotalableColumnTypes.has(column.dataType);
 }
 

@@ -162,6 +162,90 @@ public sealed class JobWorkerTests(SqlServerFixture sql) : DbJobQueueTestsBase(s
     }
 
     [Fact]
+    [Trait("Finding", "P1-06")]
+    public async Task Перерахунок_формул_не_чекає_за_довгою_фоновою_задачею_що_зайняла_всі_місця()
+    {
+        // P1-06 (AN-109): формули після PATCH стояли в тій самій FIFO-смузі default, що й довгі фонові задачі;
+        // коли ті займали всі MaxConcurrency місць, перерахунок, на який чекає людина, не стартував. Тепер він
+        // у лейні interactive з власним місцем. Детерміновано: спільне місце одне й зайняте задачею, що не
+        // завершиться до кінця тесту; без резерву перерахунок не стартує ніколи (тест падає за Patience).
+        var probe = new WorkerProbe();
+        await using var host = await StartHostAsync(
+            probe, o => o with { MaxConcurrency = 1, ReservedLanes = [JobLanes.Interactive] });
+
+        var background = await EnqueueJobAsync<WorkerBlockingJob>(host, new { n = 1 });
+        await probe.Started.Task.WaitAsync(Patience);
+
+        var waiting = await EnqueueJobAsync<WorkerProbeJob>(host, new { n = 2 });
+        var formulas = await EnqueueJobAsync<WorkerFormulaJob>(host, new { n = 3 });
+
+        var row = await WaitForStateAsync(formulas, "Succeeded");
+        Assert.Equal(JobLanes.Interactive, row.Lane);
+
+        // Резерв — лише для interactive: фонова задача й далі тримає спільне місце, а звичайна чекає його.
+        Assert.Equal("Running", (await RowAsync(background))?.State);
+        Assert.Equal("Queued", (await RowAsync(waiting))?.State);
+    }
+
+    [Fact]
+    [Trait("Finding", "AN-116")]
+    public async Task Excel_стартує_коли_спільне_місце_зайняте_довгою_фоновою_задачею()
+    {
+        // AN-116: експорт/імпорт Excel лежали в default і стояли FIFO за довгими фоновими (або самі займали всі
+        // місця). Тепер лейн excel бере лише окремий цикл з власними місцями. Детерміновано: спільне місце одне й
+        // зайняте задачею, що не завершиться до кінця тесту; без окремого циклу книга не стартує ніколи.
+        var probe = new WorkerProbe();
+        await using var host = await StartHostAsync(probe, Separate);
+
+        var background = await EnqueueJobAsync<WorkerBlockingJob>(host, new { n = 1 });
+        await probe.Started.Task.WaitAsync(Patience);
+
+        var waiting = await EnqueueJobAsync<WorkerProbeJob>(host, new { n = 2 });
+        var excel = await EnqueueJobAsync<WorkerExcelJob>(host, new { n = 3 });
+
+        var row = await WaitForStateAsync(excel, "Succeeded");
+        Assert.Equal(JobLanes.Excel, row.Lane);
+
+        Assert.Equal("Running", (await RowAsync(background))?.State);
+        Assert.Equal("Queued", (await RowAsync(waiting))?.State);
+    }
+
+    [Fact]
+    [Trait("Finding", "AN-116")]
+    public async Task Excel_понад_власну_межу_чекає_і_не_займає_ні_спільного_місця_ні_резерву()
+    {
+        // AN-116: межа Excel (SeparateConcurrency) — своя. Книга, що зайняла єдине місце excel, не пускає другу,
+        // а звичайна задача й перерахунок формул ідуть своїми місцями. Без фіксу (excel у default, MaxConcurrency=1)
+        // звичайна задача не стартувала б — тест падає на ній.
+        var probe = new WorkerProbe();
+        await using var host = await StartHostAsync(probe, Separate);
+
+        var first = await EnqueueJobAsync<WorkerExcelBlockingJob>(host, new { n = 1 });
+        await probe.ExcelStarted.Task.WaitAsync(Patience);
+
+        var second = await EnqueueJobAsync<WorkerExcelJob>(host, new { n = 2 });
+        var plain = await EnqueueJobAsync<WorkerProbeJob>(host, new { n = 3 });
+        var formulas = await EnqueueJobAsync<WorkerFormulaJob>(host, new { n = 4 });
+
+        Assert.Equal(JobLanes.Default, (await WaitForStateAsync(plain, "Succeeded")).Lane);
+        Assert.Equal(JobLanes.Interactive, (await WaitForStateAsync(formulas, "Succeeded")).Lane);
+
+        Assert.Equal("Running", (await RowAsync(first))?.State);
+        var queued = await RowAsync(second);
+        Assert.Equal("Queued", queued?.State);
+        Assert.Equal(JobLanes.Excel, queued?.Lane);
+    }
+
+    /// <summary>Як у воркері Api режиму Database: одне спільне місце, резерв формул і окремий цикл Excel на одне місце.</summary>
+    private static JobWorkerOptions Separate(JobWorkerOptions o) => o with
+    {
+        MaxConcurrency = 1,
+        ReservedLanes = [JobLanes.Interactive],
+        SeparateLanes = [JobLanes.Excel],
+        SeparateConcurrency = 1,
+    };
+
+    [Fact]
     public async Task Зупинка_хоста_повертає_задачу_в_чергу_не_зараховуючи_спробу()
     {
         // L2-08 (D-208): зупинка — подія життєвого циклу, а не провал.
@@ -275,6 +359,9 @@ public sealed class JobWorkerTests(SqlServerFixture sql) : DbJobQueueTestsBase(s
         services.AddScoped<DbBackgroundJobScheduler>();
         services.AddSingleton(probe);
         services.AddScoped<WorkerProbeJob>();
+        services.AddScoped<WorkerFormulaJob>();
+        services.AddScoped<WorkerExcelJob>();
+        services.AddScoped<WorkerExcelBlockingJob>();
         services.AddScoped<WorkerFailingJob>();
         services.AddScoped<WorkerVerdictJob>();
         services.AddScoped<WorkerTooComplexJob>();
@@ -354,6 +441,8 @@ public sealed class WorkerProbe
     public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     public TaskCompletionSource<bool> Cancelled { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    public TaskCompletionSource ExcelStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 }
 
 public sealed class WorkerProbeJob(WorkerProbe probe, IJobLeaseContext lease) : IBackgroundJob
@@ -362,6 +451,36 @@ public sealed class WorkerProbeJob(WorkerProbe probe, IJobLeaseContext lease) : 
     {
         probe.Runs.Enqueue((payload as string, lease.Current));
         return Task.CompletedTask;
+    }
+}
+
+/// <summary>Як перерахунок формул після PATCH: <see cref="JobLaneMap.Of(Type)"/> кладе її в <see cref="JobLanes.Interactive"/>.</summary>
+public sealed class WorkerFormulaJob(WorkerProbe probe) : IFormulaRecalculationJob
+{
+    public Task ExecuteAsync(object? payload, IJobProgress progress, CancellationToken ct)
+    {
+        probe.Runs.Enqueue((payload as string, null));
+        return Task.CompletedTask;
+    }
+}
+
+/// <summary>Як експорт книги: <see cref="JobLaneMap.Of(Type)"/> кладе її в <see cref="JobLanes.Excel"/> (AN-116).</summary>
+public sealed class WorkerExcelJob(WorkerProbe probe) : IExcelExportJob
+{
+    public Task ExecuteAsync(object? payload, IJobProgress progress, CancellationToken ct)
+    {
+        probe.Runs.Enqueue((payload as string, null));
+        return Task.CompletedTask;
+    }
+}
+
+/// <summary>Довгий імпорт книги: тримає місце лейна <see cref="JobLanes.Excel"/> до скасування.</summary>
+public sealed class WorkerExcelBlockingJob(WorkerProbe probe) : IExcelImportJob
+{
+    public async Task ExecuteAsync(object? payload, IJobProgress progress, CancellationToken ct)
+    {
+        probe.ExcelStarted.TrySetResult();
+        await Task.Delay(Timeout.Infinite, ct);
     }
 }
 

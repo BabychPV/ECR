@@ -38,8 +38,10 @@ public static class StrayValueDetector
             known.Add((block.HeaderRow - 1, 1));
 
             // T4-04: стовпець підписів рядків праворуч від колонок даних —
-            // довідковий, імпорт його ігнорує і не вважає сторонім значенням.
-            var labelColumn = block.Columns.Count == 0 ? 1 : block.Columns.Max(c => c.Number) + 1;
+            // довідковий: значень із нього імпорт не бере і сторонніми їх не вважає.
+            // ⛔ Y5-01: але звіряє з відбитками експорту (`LayoutFingerprint`), тож
+            // правило «де цей стовпець» — одне на обидва місця.
+            var labelColumn = LayoutFingerprint.LabelColumn(block);
             known.Add((block.HeaderRow, labelColumn));
 
             foreach (var labeled in block.Rows)

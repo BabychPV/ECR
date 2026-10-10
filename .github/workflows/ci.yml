@@ -48,12 +48,12 @@ permissions:
 # ⚠ Новий поштовх у ту саму гілку скасовує попередній прогін: інакше черга
 # заповнюється відповідями на код, якого вже немає.
 concurrency:
-  # ✎ 2026-09-29 (пряме рішення людини): для dev/integration і #463 група за SHA — GitHub тримає в групі лише один очікуваний прогін, і новий витісняв попередній; тепер кожен пуш має свій вердикт
-  # ✎ 2026-09-30: умова не за номером PR, а за pull_request з гілки dev/integration — номер PR змінюється після кожного мержу (#463→#464)
-  group: ci-${{ (github.event_name == 'pull_request' && github.head_ref == 'dev/integration' && github.event.pull_request.head.repo.full_name == github.repository) && github.event.pull_request.head.sha || (github.event_name == 'push' && github.ref == 'refs/heads/dev/integration') && github.sha || github.ref }}
-  # ✎ 2026-09-29 (пряме рішення людини): на dev/integration і PR #463 — не скасовувати,
+  # ✎ 2026-09-29 (пряме рішення людини): для push у dev/integration група за SHA — GitHub тримає в групі лише один очікуваний прогін, і новий витісняв попередній; тепер кожен пуш має свій вердикт
+  # ✎ 2026-10-09 (D-335, L10-09): PR з dev/integration більше не має окремої групи — такий PR забороняє `pr-source`.
+  group: ci-${{ (github.event_name == 'push' && github.ref == 'refs/heads/dev/integration') && github.sha || github.ref }}
+  # ✎ 2026-09-29 (пряме рішення людини): на dev/integration — не скасовувати,
   # щоб кожен пуш отримав власний вердикт; на lane/** — скасовувати, як і раніше.
-  cancel-in-progress: ${{ !(github.event_name == 'pull_request' && github.head_ref == 'dev/integration' && github.event.pull_request.head.repo.full_name == github.repository) && !(github.event_name == 'push' && github.ref == 'refs/heads/dev/integration') }}
+  cancel-in-progress: ${{ !(github.event_name == 'push' && github.ref == 'refs/heads/dev/integration') }}
 
 env:
   DOTNET_NOLOGO: 'true'
@@ -94,8 +94,6 @@ jobs:
   server-part:
     name: server-part (${{ matrix.part }})
     runs-on: ubuntu-latest
-    # CI-concurrency 2026-10-01: PR dev/integration -> main не дублює push-прогін тієї ж вершини (ті самі імена контекстів, статуси за SHA).
-    if: ${{ !(github.event_name == 'pull_request' && github.head_ref == 'dev/integration' && github.event.pull_request.head.repo.full_name == github.repository) }}
     strategy:
       fail-fast: false
       matrix:
@@ -223,7 +221,7 @@ jobs:
   # зараховує як пройдену: червона частина дала б зелений `server`.
   server:
     needs: server-part
-    if: ${{ always() && !(github.event_name == 'pull_request' && github.head_ref == 'dev/integration' && github.event.pull_request.head.repo.full_name == github.repository) }}
+    if: ${{ always() }}
     runs-on: ubuntu-latest
     steps:
       - name: Усі частини server зелені
@@ -236,7 +234,6 @@ jobs:
 
   client:
     runs-on: ubuntu-latest
-    if: ${{ !(github.event_name == 'pull_request' && github.head_ref == 'dev/integration' && github.event.pull_request.head.repo.full_name == github.repository) }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
@@ -258,14 +255,13 @@ jobs:
       # дав би те саме, але сторож і людина читали б різне, а помилку в
       # такому рядку видно лише за наслідком.
       - name: Гейти клієнта
-        run: pwsh -File tools/verify-all.ps1 -SkipDeployment -Only 'Безпека залежностей','Ліцензії npm','Аудит інструментів (довідково)','Типи клієнта зі знімка','Типи клієнта','Стиль клієнта','Тести клієнта','Збірка клієнта','Бюджет клієнта'
+        run: pwsh -File tools/verify-all.ps1 -SkipDeployment -Only 'Тести інструментів (Pester)','Безпека залежностей','Ліцензії npm','Аудит інструментів (довідково)','Типи клієнта зі знімка','Типи клієнта','Стиль клієнта','Тести клієнта','Збірка клієнта','Бюджет клієнта'
 
   # ⛔ Доступність — окремим завданням, і не для краси. `axe` у jsdom дає
   # близько 35 с на маршрут, і одна тема іде 16-23 хвилини. У складі
   # `client` вона тримала б решту гейтів заручниками; поруч — не тримає нікого.
   a11y:
     runs-on: ubuntu-latest
-    if: ${{ !(github.event_name == 'pull_request' && github.head_ref == 'dev/integration' && github.event.pull_request.head.repo.full_name == github.repository) }}
     # ⚠ W4.3 (accessibility.a11y.test.tsx, коментар над ECR_A11Y_THEME) описував
     # матрицю light/dark як чинну — вона такою не була: ця джоба досі проганяла
     # ОБИДВІ теми ПОСЛІДОВНО в одному виклику Vitest (ECR_A11Y_THEME ніде не
@@ -307,22 +303,32 @@ jobs:
   # `Ecr.Worker.Tests` перевіряють лише зрозумілу відмову
   # `PlatformNotSupportedException`, а самі межі пам'яті й KILL_ON_JOB_CLOSE —
   # ніде. Це завдання ганяє той самий проєкт на Windows, де гілки тестів із
-  # живими процесами справді виконуються. SQL не потрібен.
+  # живими процесами справді виконуються. SQL не потрібен (крім кроку L2-09, Y6-03).
   #
   # ⚠ Тому `--filter "Category!=Integration"`: SQL-тести дочірнього воркера
   # (I1, `[Collection("SqlServer")]`) без `ECR_TEST_SQL` тут упали б. Вони
   # ідуть у `server-part (core)` — крок «Тести .NET» ганяє весь `Ecr.sln`
   # із SQL у контейнері.
   #
+  # ⛔ Y6-03 (R7): але `WorkerSupervisorStopTests` (L2-09: справжній `--child`,
+  # Job Object, сигнал зупинки, повернення задачі в чергу, код виходу 0) на
+  # Linux одразу повертається, а тут його відкидав той самий фільтр — тобто
+  # не виконувався НІДЕ, і «доказ 20/20» у WORK-QUEUE AN-82 не мав прогону
+  # (це й сховало Y6-02). Тому окремий крок нижче: SQL Server LocalDB на
+  # раннері (фікстура сама створює й розгортає базу за `ECR_TEST_SQL`) і
+  # прогін саме цього класу. Повний набір інтеграційних тестів воркера
+  # лишається в `server-part (core)`.
+  #
   # ⛔ НЕ обов'язковий гейт (пряме рішення людини 2026-09-29): до переліку
   # семи не входить, у `server` не зводиться, `needs` не має — іде паралельно.
+  # ✎ X8-01 (R6): зводиться в агрегатор `windows` (кінець Windows-блоку) —
+  # одне ім'я для ruleset `main`, коли людина вирішить зробити його обов'язковим.
   # Кроки перевірки тут не з `verify-all.ps1`, тож `CiPipelineTests` його не
   # зачіпає.
   worker-windows:
     name: worker (windows)
     runs-on: windows-latest
-    if: ${{ !(github.event_name == 'pull_request' && github.head_ref == 'dev/integration' && github.event.pull_request.head.repo.full_name == github.repository) }}
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
@@ -332,6 +338,35 @@ jobs:
 
       - name: Тести Ecr.Worker (Job Object)
         run: dotnet test tests/Ecr.Worker.Tests --nologo --filter "Category!=Integration" --logger "trx;LogFileName=worker-windows.trx" --logger "console;verbosity=normal" --results-directory TestResults
+
+      # Y6-03: LocalDB — якщо образ раннера її не несе, ставимо з Chocolatey (є на windows-latest).
+      - name: SQL Server LocalDB (Y6-03)
+        shell: pwsh
+        run: |
+          if (-not (Get-Command sqllocaldb -ErrorAction SilentlyContinue)) {
+            choco install sqllocaldb -y --no-progress
+            if ($LASTEXITCODE -ne 0) { throw "choco install sqllocaldb: код $LASTEXITCODE" }
+            $tools = Get-ChildItem 'C:\Program Files\Microsoft SQL Server\*\Tools\Binn\SqlLocalDB.exe' | Select-Object -First 1
+            if (-not $tools) { throw 'SqlLocalDB.exe не знайдено після встановлення' }
+            $env:PATH = "$($tools.DirectoryName);$env:PATH"
+            Add-Content -Path $env:GITHUB_PATH -Value $tools.DirectoryName
+          }
+          # Автоматичний екземпляр MSSQLLocalDB `start` створює сам, якщо його ще немає.
+          sqllocaldb start MSSQLLocalDB
+          if ($LASTEXITCODE -ne 0) { throw "sqllocaldb start: код $LASTEXITCODE" }
+          sqllocaldb info MSSQLLocalDB
+
+      # Y6-03: доказ L2-09 на справжньому `--child` — саме цей клас, з SQL.
+      - name: Тести Ecr.Worker (L2-09, справжній --child + SQL)
+        env:
+          ECR_TEST_SQL: 'Server=(localdb)\MSSQLLocalDB;Integrated Security=true;TrustServerCertificate=true'
+        run: dotnet test tests/Ecr.Worker.Tests --nologo --filter "FullyQualifiedName~WorkerSupervisorStopTests" --logger "trx;LogFileName=worker-windows-l2-09.trx" --logger "console;verbosity=normal" --results-directory TestResults
+
+      # L10-05: на Linux-раннері сценарій deploy-ecr.ps1 іде через pwsh 7, який ПРИЙМАЄ коментарі в JSON, —
+      # тож «5.1 не читає JSONC» там не доводиться. Цей крок запускає ту саму перевірку у вбудованому Windows
+      # PowerShell 5.1 (%WINDIR%\System32\WindowsPowerShell\v1.0\powershell.exe).
+      - name: Скрипт розгортання у Windows PowerShell 5.1 (L10-05)
+        run: dotnet test tests/Ecr.Architecture.Tests --nologo --filter "FullyQualifiedName~DeployWorkerModeTests" --logger "trx;LogFileName=deploy-ps51-windows.trx" --logger "console;verbosity=normal" --results-directory TestResults
 
   # ⚠ MSI (installer/Ecr.Installer, WiX 5) не збирається ніде в CI: WiX не має
   # збірки під Linux, тож `tools/build-msi.ps1` досі йшов лише руками на
@@ -344,12 +379,13 @@ jobs:
   #
   # ⛔ НЕ обов'язковий гейт (пряме рішення людини 2026-09-29): до переліку
   # семи не входить, у `server` не зводиться, `needs` не має — іде паралельно.
+  # ✎ X8-01 (R6): зводиться в агрегатор `windows` (кінець Windows-блоку) —
+  # одне ім'я для ruleset `main`, коли людина вирішить зробити його обов'язковим.
   # Кроки перевірки тут не з `verify-all.ps1`, тож `CiPipelineTests` його не
   # зачіпає.
   msi-windows:
     name: msi (windows)
     runs-on: windows-latest
-    if: ${{ !(github.event_name == 'pull_request' && github.head_ref == 'dev/integration' && github.event.pull_request.head.repo.full_name == github.repository) }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -423,6 +459,7 @@ jobs:
   #
   # ⛔ НЕ обов'язковий гейт (як `msi (windows)`): до переліку семи не входить,
   # у `server` не зводиться. `needs` — лише заради артефакту поточної MSI.
+  # ✎ X8-01 (R6): зводиться в агрегатор `windows` нижче.
   # Кроки перевірки не з `verify-all.ps1`, тож `CiPipelineTests` його не
   # зачіпає.
   msi-install:
@@ -456,6 +493,38 @@ jobs:
           name: msi-install-logs
           path: ${{ runner.temp }}/msi-logs
           retention-days: 14
+
+  # ⛔ X8-01 (аудит R6): Windows-завдання — єдиний автоматичний доказ того, що
+  # постачається замовнику (MSI на Windows Server, служби EcrApi/EcrWorker, Job
+  # Object, deploy-ecr.ps1 під PowerShell 5.1, D-101). Сім гейтів ідуть на Linux і
+  # цього не бачать: червоний `msi-install` не блокував би PR `rc/<дата>` → `main`.
+  #
+  # ⚠ Агрегатор, а не три імені в ruleset — той самий прийом, що `server` для
+  # `server-part`: перелік Windows-завдань змінюється тут, у файлі, а не в
+  # налаштуваннях GitHub. Обов'язковим для `main` його робить ЛЮДИНА (Settings →
+  # Rules → `windows`); до того він лише зводить три вердикти в один видимий.
+  # `CiPipelineTests.Агрегатор_windows_залежить_від_усіх_Windows_завдань` стереже
+  # склад `needs`.
+  #
+  # ⚠ `if: always()` — як у `server`: без нього червоне завдання дало б `skipped`,
+  # а пропущену обов'язкову перевірку GitHub зараховує як пройдену.
+  windows:
+    name: windows
+    needs: [ worker-windows, msi-windows, msi-install ]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Усі Windows-завдання зелені
+        run: |
+          echo "worker-windows: ${{ needs.worker-windows.result }}"
+          echo "msi-windows: ${{ needs.msi-windows.result }}"
+          echo "msi-install: ${{ needs.msi-install.result }}"
+          for r in "${{ needs.worker-windows.result }}" "${{ needs.msi-windows.result }}" "${{ needs.msi-install.result }}"; do
+            if [ "$r" != "success" ]; then
+              echo "::error::Windows-завдання не зелене ($r): MSI, служби чи Job Object не доведені."
+              exit 1
+            fi
+          done
 
   # ⛔ Набір у ПЕРЕМІШАНОМУ порядку — і це НЕ восьмий гейт. Він не блокує
   # мерж (`continue-on-error`), бо його призначення інше: показати, що набір
@@ -502,6 +571,26 @@ jobs:
           echo "Сід перемішування: $SEED"
           echo "Відтворити локально: npx vitest run --sequence.shuffle --sequence.seed=$SEED"
           npx vitest run --sequence.shuffle --sequence.seed=$SEED
+
+  # ⛔ ✎ 2026-10-09 (D-335, HU-12 R5 = A; L10-09): PR з `dev/integration` заборонено.
+  # Раніше (057a1118) гейти ci.yml/evidence.yml на такому PR ПРОПУСКАЛИСЯ, щоб не дублювати
+  # push-прогін тієї ж вершини, а пропущену обов'язкову перевірку GitHub зараховує як
+  # пройдену — вердикт PR тримався лише на тому, що push-прогін тієї ж SHA ще існує.
+  # Тепер гейти йдуть на кожному PR без винятків, а дублювання прибрано в джерелі: тижневий
+  # PR іде з нерухомої реліз-гілки `rc/*` (CLAUDE.md §8), на яку push-прогону ci.yml немає.
+  # PR з `dev/integration` цей джоб валить з поясненням; щоб він блокував мерж, а не лише
+  # червонів, `pr-source` треба додати в обов'язкові перевірки `main`.
+  pr-source:
+    if: github.event_name == 'pull_request' && github.head_ref == 'dev/integration'
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: PR з dev/integration заборонено
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          echo "::error::PR з dev/integration в $BASE_REF заборонено (D-335, CLAUDE.md §8): тижневий PR — з нерухомої реліз-гілки rc/<дата>. Закрий цей PR, створи rc/<дата> від перевіреної вершини dev/integration і відкрий PR з неї."
+          exit 1
 
   # ✎ 2026-10-01 (рішення людини): необов'язкова перевірка ФОРМИ lane-гілки.
   # Лише попередження/notice, завжди зелена; жодних `needs:` ні від, ні на неї —

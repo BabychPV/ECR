@@ -62,6 +62,13 @@ public sealed partial class PatchCellsHandler
     /// структури документа (<see cref="ISheetEditGate.EnterStructureAsync"/>, L6-02)
     /// і звірив під ним версію шаблону.
     /// </param>
+    /// <param name="overwrittenRows">
+    /// ✎ AN-114 (D-338). Рядки (<c>TableInstanceId</c> → <c>RowKey</c>), які людина
+    /// свідомо перезаписала поверх чужих правок, зроблених після експорту книги:
+    /// їхні комірки йдуть у журнал із походженням
+    /// <see cref="CellChangeOrigins.ImportOverwrite"/> замість <c>Origin</c> батчу.
+    /// Лише журнал — правила запису ті самі. <c>null</c> — таких рядків немає.
+    /// </param>
     /// <returns>Відповідь на кожен батч — у порядку <paramref name="requests"/>.</returns>
     /// <remarks>
     /// ⚠ Стан, прочитаний під спільним блокуванням, лишається правдою до кінця
@@ -74,7 +81,8 @@ public sealed partial class PatchCellsHandler
         ICollection<RecalculationSeed> recalculationSeeds,
         ICollection<RowWindowChange> rowWindowChanges,
         CancellationToken ct,
-        IReadOnlyDictionary<int, Domain.Enums.DocumentStatus>? heldSheetStatuses = null)
+        IReadOnlyDictionary<int, Domain.Enums.DocumentStatus>? heldSheetStatuses = null,
+        IReadOnlyDictionary<long, IReadOnlySet<string>>? overwrittenRows = null)
     {
         ArgumentNullException.ThrowIfNull(requests);
         ArgumentNullException.ThrowIfNull(recalculationSeeds);
@@ -144,7 +152,10 @@ public sealed partial class PatchCellsHandler
                 var instance = instances[request.TableInstanceId];
                 return new WorkbookItem(request, Blamed(request.TableInstanceId, () => BuildContext(
                     request, userId, profile, instance, snapshots[instance.TemplateVersionId],
-                    rows.GetValueOrDefault(request.TableInstanceId, Array.Empty<RowState>()))));
+                    rows.GetValueOrDefault(request.TableInstanceId, Array.Empty<RowState>()))))
+                {
+                    OverwrittenRowKeys = overwrittenRows?.GetValueOrDefault(request.TableInstanceId),
+                };
             })
             .ToList();
 
@@ -391,7 +402,8 @@ public sealed partial class PatchCellsHandler
 
         foreach (var item in gated)
         {
-            item.RequiredInputMessages = EvaluateRequiredInputs(item.Context, item.Planned, item.Applicable, baseline);
+            item.RequiredInputMessages = EvaluateRequiredInputs(
+                item.Context, item.Planned, item.Applicable, baseline, item.Request.Origin);
         }
     }
 
@@ -527,6 +539,10 @@ public sealed partial class PatchCellsHandler
             Blamed(item.Id, () => CheckSheetStatus(statuses[item.Context.Table.SheetDefId], item.Planned));
         }
 
+        // ⛔ AN-106 (P1-01): ліміт очікування блокувань — до стелі й вставки нових рядків, як у
+        // поштучного (`PersistCoreAsync`); `ApplyBatchAsync` нижче його вже не повторює.
+        await cellStore.LimitLockWaitAsync(ct).ConfigureAwait(false);
+
         var ceiling = active.Where(x => CreatesRowsUnderCeiling(x.Context)).ToList();
         if (ceiling.Count > 0)
         {
@@ -590,6 +606,27 @@ public sealed partial class PatchCellsHandler
                     x.Id.ToString(CultureInfo.InvariantCulture),
                     error.Details!.GetValueOrDefault("tableInstanceId") as string,
                     StringComparison.Ordinal));
+
+            // ⛔ AN-106 (хвіст D1-01 / AN-104): та сама повна відмова, що й у поштучного
+            // (`PersistChangesAsync`) — справжня колонка, `currentVersion`, «ваше / чинне», автор,
+            // а не `*` з порожньою версією («рядка більше немає»).
+            // ⚠ На відміну від поштучного, транзакція книги ще ВІДКРИТА (її відкочує викликач), а
+            // захоплення вже підняло версії НЕзастарілих рядків цієї ж транзакції. Тому чинна версія
+            // береться лише для застарілих рядків (їх ця транзакція не чіпала — читання під RCSI бачить
+            // закомічене чуже), решта лишається прочитаною на вході: інакше власні захоплення
+            // виглядали б чужими конфліктами.
+            var fresh = await rowStore.GetRowsAsync(guilty.Id, period, ct).ConfigureAwait(false);
+            try
+            {
+                await EnsureNoVersionConflictsAsync(WithFreshVersionsOf(guilty.Context, fresh, staleRowIds), ct)
+                    .ConfigureAwait(false);
+            }
+            catch (ConcurrencyConflictException conflict)
+            {
+                throw Blame(conflict, guilty.Id)!;
+            }
+
+            // Запасний: версії знову збіглися — лишається адресна відмова сховища.
             throw Blame(StaleRowsConflict(guilty.Planned, staleRowIds), guilty.Id)!;
         }
         catch (EcrException error) when (active.Count == 1 && Blame(error, active[0].Id) is { } named)
@@ -608,7 +645,8 @@ public sealed partial class PatchCellsHandler
         await audit.WriteCellChangesAsync(
             [.. active.SelectMany(x => BuildAuditRecords(
                 x.Request, x.Applied!.Upserts, x.Applied.Deletes, userId, now, documentId,
-                x.Applied.RowKeyById, previous, isLateEdit, AuditCorrelationId(), x.Context.OutOfWindow))],
+                x.Applied.RowKeyById, previous, isLateEdit, AuditCorrelationId(), x.Context.OutOfWindow,
+                x.OverwrittenRowKeys))],
             ct).ConfigureAwait(false);
 
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
@@ -623,6 +661,40 @@ public sealed partial class PatchCellsHandler
     /// <c>tableInstanceId</c> рядком; тип винятку (а з ним HTTP-статус), код і
     /// <c>messageKey</c> не змінюються.
     /// </remarks>
+    /// <summary>
+    /// Контекст, у якому версії ЗАСТАРІЛИХ рядків (<paramref name="staleRowIds"/>) — чинні з
+    /// <paramref name="fresh"/>, а решта — прочитані на вході (AN-106).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Застарілого рядка, якого вже немає, у версіях немає й тут — <see cref="EnsureNoVersionConflictsAsync"/>
+    /// назве його <c>*</c> з порожньою версією, як і має бути для справді видаленого рядка.
+    /// </remarks>
+    private static RequestContext WithFreshVersionsOf(
+        RequestContext context, IReadOnlyList<RowState> fresh, IReadOnlyList<long> staleRowIds)
+    {
+        var stale = staleRowIds.ToHashSet();
+        var versions = new Dictionary<string, string>(context.Versions, StringComparer.Ordinal);
+        foreach (var (rowKey, rowId) in context.RowIds)
+        {
+            if (stale.Contains(rowId))
+            {
+                versions.Remove(rowKey);
+            }
+        }
+
+        foreach (var row in fresh)
+        {
+            if (stale.Contains(row.Id))
+            {
+                versions[row.RowKey] = row.RowVersion;
+            }
+        }
+
+        // ⚠ Через інтерфейс: властивість `Versions` — `IReadOnlyDictionary` (CA1859 інакше просить конкретний тип).
+        IReadOnlyDictionary<string, string> merged = versions;
+        return context with { Versions = merged };
+    }
+
     private static EcrException? Blame(EcrException error, long tableInstanceId)
     {
         var details = new Dictionary<string, object?>(StringComparer.Ordinal);
@@ -685,6 +757,9 @@ public sealed partial class PatchCellsHandler
         public RequestContext Context { get; } = context;
 
         public long Id => Request.TableInstanceId;
+
+        /// <summary>Рядки, свідомо перезаписані поверх чужих правок (AN-114); <c>null</c> — немає.</summary>
+        public IReadOnlySet<string>? OverwrittenRowKeys { get; init; }
 
         public List<CellAddress> AccessAddresses { get; set; } = [];
 

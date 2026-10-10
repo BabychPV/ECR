@@ -2,6 +2,8 @@
 import { createRoot } from 'react-dom/client';
 import { App } from './app/App';
 import { ErrorBoundary } from './app/ErrorBoundary';
+import { abandonSwitchedSession } from './api/client';
+import { listenSessionChange } from './shared/session/sessionChannel';
 
 /*
  * ⛔ Шрифт САМОХОСТИНГОМ (`@fontsource`), не з CDN. Рішення замовника
@@ -45,6 +47,15 @@ if (container === null) {
 }
 
 /*
+ * ⛔ AN-108 / S2-03: сторінку відновлено з bfcache («Назад» після виходу на
+ * спільному ПК) — на екрані стан ПОПЕРЕДНЬОГО сеансу без жодного запиту до
+ * сервера. Показувати його не можна: повне перезавантаження.
+ */
+window.addEventListener('pageshow', (event) => {
+  if (event.persisted) window.location.reload();
+});
+
+/*
  * ⚠ `ErrorBoundary` — ОСТАННІЙ рубіж (`D14-11`), а не основний: помилку
  * всередині маршруту ловить `errorElement` у `router.tsx`, лишаючи меню й
  * шапку живими. Сюди доходить лише те, що впало ВИЩЕ за дерево маршрутів
@@ -55,6 +66,13 @@ if (container === null) {
  * і сам упасти не може, натомість він навмисно викликає рендер двічі — і межа
  * має стояти там, де вона побачить обидва виклики.
  */
+/*
+ * ⛔ AN-108 / S2-05: вихід або вхід ІНШОГО користувача в сусідній вкладці —
+ * cookie вже не цього сеансу. Вкладка лишає слід незбережених правок їхнього
+ * власника і перезавантажується, а не відправляє їх під чужим cookie.
+ */
+listenSessionChange(abandonSwitchedSession);
+
 createRoot(container).render(
   <StrictMode>
     <ErrorBoundary>

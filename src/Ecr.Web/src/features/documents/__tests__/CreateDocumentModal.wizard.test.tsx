@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
+import { notifications } from '@mantine/notifications';
+import { createQueryClient } from '@/app/queryClient';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { CreateDocumentModal } from '@/features/documents/CreateDocumentModal';
@@ -93,11 +95,11 @@ function Where(): null {
   return null;
 }
 
-function show(): void {
+function show(client: QueryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })): void {
   render(
     <MantineProvider theme={testTheme}>
       <MemoryRouter>
-        <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <QueryClientProvider client={client}>
           <Routes>
             <Route path="*" element={<><Where /><CreateDocumentModal opened onClose={() => {}} /></>} />
           </Routes>
@@ -203,5 +205,21 @@ describe('UI-31: майстер створення документа', () => {
     fireEvent.click(screen.getByRole('button', { name: '⟦wizard.back⟧' }));
     const kept = within(await screen.findByTestId('wizard-step-body')).getAllByRole('checkbox') as HTMLInputElement[];
     expect(kept.map((box) => box.checked)).toEqual([true, true, false]);
+  });
+
+  it('N3-05: відмова сервера - лише банер у кроці, без другого тосту від глобальної сітки', async () => {
+    const toast = vi.spyOn(notifications, 'show');
+    mockServer({ sheets: twoSheets, refuse: true });
+    // Справжня сітка застосунку (`createQueryClient`): із тестовим клієнтом без `mutationCache` дубль не відтворюється.
+    show(createQueryClient());
+    await toSheetsStep();
+
+    fireEvent.click(screen.getByLabelText('Water discharge (WAT2)'));
+    fireEvent.click(next());
+    fireEvent.click(await screen.findByRole('button', { name: '⟦documents.createApply⟧' }));
+
+    await screen.findByTestId('wizard-step-error');
+    expect(toast).not.toHaveBeenCalled();
+    toast.mockRestore();
   });
 });

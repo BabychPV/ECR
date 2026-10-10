@@ -366,6 +366,74 @@ public sealed class RegistryDenyOverridesGlobalRightTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait("Requirement", "L5-08")]
+    public async Task L5_08__опис_довідника_не_віддає_Id_забороненої_цілі_ні_в_полі_ні_в_зв_язку()
+    {
+        // Довідник-посилальник має два Lookup-поля: на заборонений довідник і на відкритий.
+        var referrer = Definition(603, "REFERRER");
+        AddLookup(referrer, 7001, "TO_DENIED", 1, DeniedId);
+        AddLookup(referrer, 7002, "TO_OPEN", 2, OtherId);
+        _registries.FindDefinitionAsync("REFERRER", Arg.Any<CancellationToken>()).Returns(referrer);
+        _registries.ListDefinitionsAsync(Arg.Any<CancellationToken>()).Returns(new List<RegistryDef> { _denied, _other, referrer });
+        _registries.ListRulesAsync(603, Arg.Any<CancellationToken>()).Returns(new List<RegistryRuleDef>());
+        _registries.ListFieldMappingsAsync(603, Arg.Any<CancellationToken>()).Returns(new List<RegistryFieldMapping>());
+        _registries.ListLinkKindsAsync(603, Arg.Any<CancellationToken>()).Returns(new List<RegistryLinkKindStat>());
+        var keys = Substitute.For<IRegistryKeyStore>();
+        keys.ListKeysForUpdateAsync(603, Arg.Any<CancellationToken>()).Returns(new List<RegistryKeyDef>());
+
+        Profile(b => b.Permission("Registry.View").Deny(ResourceKind.Registry, DeniedId));
+        var denied = await new GetRegistryDefinitionHandler(_registries, keys, _access, _user).HandleAsync("REFERRER", default);
+
+        var deniedField = denied.Fields.Single(f => f.Code == "TO_DENIED");
+        var deniedRelation = denied.Relations.Single(r => r.FieldCode == "TO_DENIED");
+        Assert.Null(deniedField.LookupRegistryDefId);
+        Assert.Null(deniedRelation.TargetRegistryDefId);
+        Assert.Null(deniedRelation.TargetRegistryCode);
+
+        // Відкрита ціль — як і раніше.
+        Assert.Equal(OtherId, denied.Fields.Single(f => f.Code == "TO_OPEN").LookupRegistryDefId);
+        var openRelation = denied.Relations.Single(r => r.FieldCode == "TO_OPEN");
+        Assert.Equal(OtherId, openRelation.TargetRegistryDefId);
+        Assert.Equal("OTHER_REG", openRelation.TargetRegistryCode);
+
+        // Контроль: хто не має заборони, бачить і Id, і код (поведінка до L5-08 не зламана).
+        Profile(b => b.Permission("Registry.View"));
+        var plain = await new GetRegistryDefinitionHandler(_registries, keys, _access, _user).HandleAsync("REFERRER", default);
+        Assert.Equal(DeniedId, plain.Fields.Single(f => f.Code == "TO_DENIED").LookupRegistryDefId);
+        var plainRelation = plain.Relations.Single(r => r.FieldCode == "TO_DENIED");
+        Assert.Equal(DeniedId, plainRelation.TargetRegistryDefId);
+        Assert.Equal(DeniedCode, plainRelation.TargetRegistryCode);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait("Requirement", "L5-08")]
+    public async Task L5_08__409_код_зайнятий_не_віддає_Id_забороненого_довідника()
+    {
+        Profile(b => b.Permission("Registry.EditDefinition").Deny(ResourceKind.Registry, DeniedId));
+        var handler = new CreateRegistryHandler(_registries, _uow, _access, _user);
+        var name = new Dictionary<string, string> { ["en"] = "Again" };
+
+        var hidden = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => handler.HandleAsync(DeniedCode, name, isTemporal: false, default));
+
+        Assert.Equal("ECR-REG-4091", hidden.ErrorCode);
+        Assert.Equal(CreateRegistryHandler.CodeTakenHiddenKey, hidden.Details!["messageKey"]);
+        Assert.Equal(DeniedCode, hidden.Details["code"]);
+        Assert.False(hidden.Details.ContainsKey("id"));
+        Assert.DoesNotContain(DeniedId.ToString(System.Globalization.CultureInfo.InvariantCulture), hidden.Message, StringComparison.Ordinal);
+
+        // Контроль: відкритий довідник — як раніше, з Id (клієнт і текст ключа його очікують).
+        var open = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => handler.HandleAsync("OTHER_REG", name, isTemporal: false, default));
+        Assert.Equal(CreateRegistryHandler.CodeTakenKey, open.Details!["messageKey"]);
+        Assert.Equal(OtherId.ToString(System.Globalization.CultureInfo.InvariantCulture), open.Details["id"]);
+
+        await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
     public async Task Історія_довідника__глобальне_View_і_заборона__404_і_журнал_не_читано()
     {
         Profile(b => b.Permission("Registry.View").Deny(ResourceKind.Registry, DeniedId));
@@ -503,6 +571,14 @@ public sealed class RegistryDenyOverridesGlobalRightTests
         var definition = new RegistryDef(EcrCode.Create(code), Text(code), isTemporal: false);
         typeof(Ecr.Domain.Abstractions.Entity<int>).GetProperty("Id")!.SetValue(definition, id);
         return definition;
+    }
+
+    private static void AddLookup(RegistryDef registry, int fieldId, string code, int ordinal, int targetId)
+    {
+        var field = new RegistryFieldDef(registry.Id, EcrCode.Create(code), Text(code), CellDataType.Lookup, ordinal);
+        typeof(Ecr.Domain.Abstractions.Entity<int>).GetProperty("Id")!.SetValue(field, fieldId);
+        field.PointTo(targetId);
+        registry.AddField(field);
     }
 
     private static RegistryEntry Entry(long id, int registryDefId)

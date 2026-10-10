@@ -6,6 +6,7 @@ using Ecr.Application.Ports;
 using Ecr.Application.Security;
 using Ecr.Domain.Abstractions;
 using Ecr.TestKit;
+using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 using Xunit;
 
@@ -217,6 +218,32 @@ public sealed class BootstrapAdminTests
         // Повторний виклик уже нічого не робить — і не пише другої події.
         Assert.False(await Disable().HandleAsync(CancellationToken.None));
         Assert.Single(_events);
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "ФВ-6.18")]
+    [Trait("Finding", "S1-01")]
+    public async Task Windows_вхід_доменного_адміністратора_вимикає_bootstrap_від_його_імені()
+    {
+        await Ensure().HandleAsync(Password, CancellationToken.None);
+        var bootstrap = Assert.Single(_users.Users);
+        var admin = _users.Seed(FakeUserStore.DomainUser("CORP\\ivanov", "S-1-5-21-10-20-30-1001"));
+        var login = new LoginHandler(_users, _hasher, _uow, _clock, NullLogger<LoginHandler>.Instance, Disable());
+
+        // Адміністратора за сховищем ще немає (напр., призначення «з понеділка») — вхід bootstrap не чіпає.
+        await login.HandleWindowsAsync(admin.WindowsSid!, admin.UserName, admin.UserName, [], "10.0.0.1", CancellationToken.None);
+        Assert.True(bootstrap.IsActive);
+        Assert.Empty(_events);
+
+        // ⛔ S1-01: адміністратор рахується лише після СВОГО Windows-входу, тож саме вхід
+        // (а не лише призначення ролі) мусить вимкнути bootstrap — інакше він не вимкнувся б ніколи.
+        _users.HasDomainAdmin = true;
+        await login.HandleWindowsAsync(admin.WindowsSid!, admin.UserName, admin.UserName, [], "10.0.0.1", CancellationToken.None);
+
+        Assert.False(bootstrap.IsActive);
+        var disabled = Assert.Single(_events);
+        Assert.Equal("BootstrapAdminDisabled", disabled.EventType);
+        Assert.Equal(admin.Id, disabled.ChangedByUserId);
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]

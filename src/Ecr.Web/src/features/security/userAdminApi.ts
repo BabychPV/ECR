@@ -4,6 +4,7 @@ import type { components } from '@/api/schema';
 // ⚠ Прямо зі схеми: `api/types.ts` — спільний файл поза межами цієї підзадачі.
 type ResetPasswordRequest = components['schemas']['ResetPasswordRequest'];
 type UserLockRequest = components['schemas']['UserLockRequest'];
+type CorrectWindowsSidRequest = components['schemas']['CorrectWindowsSidRequest'];
 
 /** Межа причини блокування/розблокування — та сама, що на сервері (`UserLockRequest`). */
 export const LockReasonMaxLength = 400;
@@ -33,5 +34,18 @@ export function unlockUser(userId: number, reason: string): Promise<void> {
   return apiFetch<void>(`/api/v1/users/${userId}/unlock`, {
     method: 'POST',
     body: JSON.stringify({ reason } satisfies UserLockRequest),
+  });
+}
+
+/**
+ * Виправлення SID доменного запису, який ще не входив (`X5-01`): `204` без тіла.
+ *
+ * ⚠ Сервер приймає лише непідтверджений SID (`lastSignInAt === null`); після
+ * першого входу — `409 ECR-SEC-0409`.
+ */
+export function correctWindowsSid(userId: number, sid: string): Promise<void> {
+  return apiFetch<void>(`/api/v1/users/${userId}/windows-sid`, {
+    method: 'PUT',
+    body: JSON.stringify({ sid } satisfies CorrectWindowsSidRequest),
   });
 }

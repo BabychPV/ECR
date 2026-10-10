@@ -6196,6 +6196,14 @@ USING (VALUES
     (N'coverageEvents.eventRowNotCreated',      N'en', N'Event {eventId} was not written: row {rowKey} was not created, the value was rejected.', 1),
     -- ru/kz — окремою порцією `COLL:covenv` у блоці I18N нижче.
     -- COLL:covenv ── кінець секції ──
+    -- R9F1:cellRejected ── F1-03: значення комірки збору відхилив обробник запису, решту полів записано (`CoverageDetails.CellRejected`) ──
+    (N'coverageEvents.cellRejected',            N'en', N'Cell {cell}: the collected value was rejected on write ({code}) and was not written; the other fields were written. The next run will try again.', 1),
+    -- ru/kz — окремою порцією `R9F1:cellRejected` у блоці I18N нижче.
+    -- R9F1:cellRejected ── кінець секції ──
+    -- R9F1:fieldMapUnit ── F1-02: ціль мапінгу у колонку з одиницею — одиниця колонки (`CreateEntityFieldMapHandler.ApplyUnitsAsync`) ──
+    (N'err.ECR-REQ-0422.fieldMapTargetNotColumnUnit', N'en', N'The target unit of the mapping must be the unit of the column: the cell stores its value in that unit.', 1),
+    -- ru/kz — окремою порцією `R9F1:fieldMapUnit` у блоці I18N нижче.
+    -- R9F1:fieldMapUnit ── кінець секції ──
     -- COLL:auditreason ── Причина зміни налаштувань збору конвертом (`IntegrationConfigAudit.Reason`, `structureChangeReason.ts`) ──
     (N'integrationAudit.scheduleCreated', N'en', N'Collection schedule {id} created for entity "{entity}".', 1),
     (N'integrationAudit.scheduleChanged', N'en', N'Collection schedule {id} of entity "{entity}" changed.', 1),
@@ -6528,6 +6536,27 @@ USING (VALUES
     (N'import.recalculateHint', N'en', N'The import changed inputs of a methodology. Press «{action}» to update the calculation results.', 1),
     -- ru/kz — окремою порцією `IMPORT:hints` у блоці I18N нижче.
     -- IMPORT:hints ── кінець секції ──
+    -- IMPORT:an103 ── D1-02: рядок змінено після експорту книги — конфлікт у перегляді імпорту; ru/kz — порцією IMPORT:an103 у блоці I18N нижче ──
+    (N'err.ECR-CELL-0409.importRowChangedSinceExport', N'en', N'Someone changed this row after the workbook was exported, so the value from the file is not applied. Export the document again and repeat your changes in the new workbook.', 1),
+    -- IMPORT:an103 ── кінець секції ──
+    -- IMPORT:an114 ── D-338: явний перезапис рядків, змінених після експорту книги; ru/kz — порцією IMPORT:an114 у блоці I18N нижче ──
+    (N'import.overwriteTitle', N'en', N'Rows changed by someone else after export', 1),
+    (N'import.overwriteHint', N'en', N'Someone changed these rows after the workbook was exported. Your values from the file replace theirs only in the rows you mark. Unmarked rows keep the current values; the rest of the file is applied.', 1),
+    (N'import.overwriteRow', N'en', N'Overwrite their values with mine', 1),
+    (N'import.overwriteSkip', N'en', N'Apply the rest of the file and keep the current values in unmarked rows', 1),
+    (N'import.overwriteRows', N'en', N'{count} row(s) changed after export', 1),
+    (N'import.theirs', N'en', N'Current value', 1),
+    (N'import.mine', N'en', N'Value in file', 1),
+    (N'err.ECR-IMP-0422.overwriteNotConflict', N'en', N'Only rows changed by someone else after the workbook was exported can be overwritten. Build the import preview again.', 1),
+    (N'audit.originLabel.ImportOverwrite', N'en', N'Excel import, overwrote a later change', 1),
+    -- IMPORT:an114 ── кінець секції ──
+    -- IMPORT:an118 ── R1-02: попередження перегляду імпорту про книгу, вивантажену до версій рядків і відбитків комірок; ru/kz — порцією IMPORT:an118 у блоці I18N нижче ──
+    (N'import.warningsTitle', N'en', N'Check before applying', 1),
+    (N'import.outdatedWorkbook', N'en', N'This workbook was exported by an earlier version of the system. Values you did not change in it can still replace newer values entered by others or by integrations after the export, and they will be recorded as your changes. Check the list of changes, or export the document again and repeat your changes in the new workbook.', 1),
+    -- IMPORT:an118 ── кінець секції ──
+    -- AUDIT:an115 ── автор системної зміни комірки (перерахунок, інтеграція, міграція); ru/kz — порцією AUDIT:an115 у блоці I18N нижче ──
+    (N'audit.systemAuthor', N'en', N'System', 1),
+    -- AUDIT:an115 ── кінець секції ──
     -- API:negative-path ── відмови замість 500 на некоректних полях запиту (прохід по відмовах API) ──
     (N'err.ECR-CALC-0422.versionNumber', N'en', N'The methodology version number must be from 1 to {maxLength} characters.', 1),
     (N'err.ECR-CALC-0422.formulaTooLong', N'en', N'The expression of formula "{code}" is longer than {maxLength} characters.', 1),
@@ -6710,6 +6739,10 @@ USING (VALUES
     -- COLL:an37m ── AN-37 L7-08: гонка двох публікацій на одну дату (версію-суперника база не називає); ru/kz — порцією COLL:an37m у блоці I18N нижче ──
     (N'err.ECR-CALC-0409.effectiveDateTakenNoVersion', N'en', N'Another version of this methodology was published with effective date {effectiveFrom} at the same moment. Two published versions with the same start date make the methodology choice ambiguous: reload the methodology and publish with another date.', 1),
     -- COLL:an37m ── кінець секції ──
+    -- COLL:an83 ── AN-83 (L5-12, L5-08): правило не перевірено — бюджет пакета вичерпано; 409 «код зайнятий» без Id забороненого довідника; ru/kz — порцією COLL:an83 нижче ──
+    (N'registries.rules.budgetExhausted', N'en', N'Rule {rule} was not checked for entry {entryCode}: the check ran out of its work budget. Save fewer entries at once or simplify the rule.', 1),
+    (N'err.ECR-REG-4091.registryCodeTakenHidden', N'en', N'A registry with code "{code}" already exists: the code is what registry-lookup fields and template columns reference it by.', 1),
+    -- COLL:an83 ── кінець секції ──
     -- COLL:an42vm ── T2-07/T3-03/T4-06: повідомлення валідації зберігаються ключем + підстановками, текст — мовою читача; ru/kz — порцією COLL:an42vm у блоці I18N нижче ──
     (N'validation.check.mismatch', N'en', N'Check: {left} = {leftValue} does not match {right} = {rightValue}: deviation {deviation}, allowed {allowed} ({kind}).', 1),
     (N'validation.column.required', N'en', N'Column "{column}" is required.', 1),
@@ -7344,6 +7377,10 @@ USING (VALUES
     -- COLL:rc16-z5 ── помилка порожнього обов'язкового поля шапки; ru/kz — порцією COLL:rc16-z5 нижче ──
     (N'document.header.requiredError', N'en', N'This field is required', 1),
     -- COLL:rc16-z5 ── кінець секції ──
+    -- COLL:an77-recalc ── N1-06/L8-12: перерахунок усього документа без повного читання; перерахунок на поданому аркуші; ru/kz — порцією COLL:an77-recalc нижче ──
+    (N'err.ECR-AUTH-0403.recalcNeedsFullRead', N'en', N'Recalculating the whole document needs read access to all of its sheets. Recalculate a single sheet instead, or ask for full read access.', 1),
+    (N'workflow.recalculateSheetSubmitted', N'en', N'Sheet {sheet} is submitted or approved and cannot be recalculated. Return it for edits first (the sheet''s «Return for edits» action).', 1),
+    -- COLL:an77-recalc ── кінець секції ──
     -- COLL:stale-ui ── кінець секції ──
     -- COLL:l21scope ── L2-1: область формули (scope) у PUT формули й порівнянні версій; ru/kz — порцією COLL:l21scope нижче ──
     (N'err.ECR-CALC-0422.formulaScopeInvalid', N'en', N'The scope "{scope}" of formula "{code}" is not valid: use Substance (once per substance) or Row (once per row).', 1),
@@ -7361,8 +7398,148 @@ USING (VALUES
     -- COLL:rc15misc-rulekey ── кінець секції ──
     -- COLL:rc16rule ── RC16-2: правило категорії перевіряє посилання вже при збереженні; ru/kz — порцією COLL:rc16rule нижче ──
     (N'err.ECR-CALC-0422.categoryRuleUnknownConstant', N'en', N'The category rule references constant CST.{code}, which this version does not define.', 1),
-    (N'err.ECR-CALC-0422.categoryRuleBadFormula', N'en', N'The category rule references !{formula}: it can only read Row formulas of the version (it runs once per row, before the substance loop).', 1)
+    (N'err.ECR-CALC-0422.categoryRuleBadFormula', N'en', N'The category rule references !{formula}: it can only read Row formulas of the version (it runs once per row, before the substance loop).', 1),
     -- COLL:rc16rule ── кінець секції ──
+    -- COLL:an81-codemode ── AN-81 / L4-13: порада до події синку «елемент не створено: режим кодів Manual»; ru/kz — порцією COLL:an81-codemode нижче ──
+    (N'err.ECR-REG-0422.codeModeManualNoAutoCreate', N'en', N'The element was not created as a registry entry: this registry uses Manual entry codes, and sync creates entries from source elements only in Auto code mode. Use a registry with the Auto code mode (the mode cannot be changed once the registry has entries), or add the entry by hand.', 1),
+    -- COLL:an81-codemode ── кінець секції ──
+    -- COLL:an72-rule-length ── AN-72: правило категорії довше за межу формули (MethodologyCategoryRule.Normalize); ru/kz — порцією COLL:an72-rule-length нижче ──
+    (N'err.ECR-CALC-0422.categoryRuleTooLong', N'en', N'The category rule is longer than {max} characters ({length}): shorten the expression or move part of the logic into a Row formula.', 1),
+    -- COLL:an72-rule-length ── кінець секції ──
+    -- COLL:an79-lookup-missing ── AN-79 / N1-07/N1-08: запис довідника в полі шапки Lookup відсутній у довіднику цього поля (немає взагалі чи з чужого довідника - одна відповідь); ru/kz — порцією COLL:an79-lookup-missing нижче ──
+    (N'err.ECR-HDR-0422.lookupEntryMissing', N'en', N'The registry entry chosen for header field "{headerFieldCode}" does not exist in the registry of this field.', 1),
+    -- COLL:an79-lookup-missing ── кінець секції ──
+    -- COLL:an72-rule-concurrent ── AN-72 / N2-05: два одночасні перші PUT category-rule (UQ_CategoryRule_Version) -> 409; ru/kz — порцією COLL:an72-rule-concurrent нижче ──
+    (N'err.ECR-CALC-0409.categoryRuleConcurrent', N'en', N'Someone else has just created the category rule of this version. Reload the version and save the rule again.', 1),
+    -- COLL:an72-rule-concurrent ── кінець секції ──
+    -- COLL:an107-import-busy ── AN-107 / P1-04 = S1-02: перегляд імпорту книги — межа одночасних розборів вичерпана (ImportPreviewRateLimitPolicy); ru/kz — порцією COLL:an107-import-busy нижче ──
+    (N'err.ECR-REQ-0429.importBusy', N'en', N'The server is busy reading other imported workbooks. Try again in a minute.', 1),
+    -- COLL:an107-import-busy ── кінець секції ──
+    -- COLL:an80-carryover ── AN-80 / N2-04: перенос результатів поданих аркушів більший за стелю; ru/kz — порцією COLL:an80-carryover нижче ──
+    (N'err.ECR-CALC-0422.carryOverTooLarge', N'en', N'Carrying over the results of the submitted sheets of document {documentId} for period {periodKey} would copy {count} rows, more than the limit of {max}. The run was not applied and the previous results stay current: narrow the binding to the right table.', 1),
+    -- COLL:an80-carryover ── кінець секції ──
+    -- COLL:an109-csv-utf8 ── AN-109 / S1-03: імпорт CSV перекладів не в UTF-8 (cp1251 з Excel) -> 422; ru/kz — порцією COLL:an109-csv-utf8 нижче ──
+    (N'err.ECR-REQ-0422.uiStringCsvNotUtf8', N'en', N'The file is not UTF-8 text (it may be saved in a Windows code page). Save it as CSV UTF-8 and try again. Nothing was imported.', 1),
+    -- COLL:an109-csv-utf8 ── кінець секції ──
+    -- COLL:an104-header-conflict ── AN-104 / D1-04: 409 на шапці не стирає чернетку — «ваше / чинне»; ru/kz — порцією COLL:an104-header-conflict нижче ──
+    (N'document.header.conflictTitle', N'en', N'Someone else changed the header', 1),
+    (N'document.header.conflictHint', N'en', N'These fields were changed by someone else while you were editing. Your values are still in the form: keep yours to overwrite theirs, or use the current values.', 1),
+    (N'document.header.conflictItem', N'en', N'{field}: yours {yours}, current {value}', 1),
+    (N'document.header.conflictKeepMine', N'en', N'Keep mine', 1),
+    (N'document.header.conflictUseCurrent', N'en', N'Use current', 1),
+    (N'document.header.conflictNoValue', N'en', N'(no value)', 1),
+    (N'document.header.conflictYes', N'en', N'yes', 1),
+    (N'document.header.conflictNo', N'en', N'no', 1),
+    -- COLL:an104-header-conflict ── кінець секції ──
+    -- COLL:an105-coverage ── AN-105 / D2-02: матеріалізація скінченого періоду — неповне покриття і «немає даних» (HU-13 Q2, A); ru/kz — порцією COLL:an105-coverage нижче ──
+    (N'status.coverage.PartialCoverage', N'en', N'Partial coverage', 1),
+    (N'status.coverage.SkippedNoData', N'en', N'No data for the period', 1),
+    (N'coverageEvents.partialCoverage', N'en', N'Field {field} (mapping {mapId}): the source covered only {percentGood}% of the period (threshold {min}%). The value was written, but it is incomplete: gaps and bad-quality points are not counted. Check the source before relying on the number.', 1),
+    (N'coverageEvents.noData', N'en', N'Field {field} (mapping {mapId}): there are no usable points for the ended period. The cell was not updated and may still hold the value of an earlier run.', 1),
+    -- COLL:an105-coverage ── кінець секції ──
+    -- COLL:r5-i1-row-window-stale ── R5-I1 / I1-03: вікно чи джерело рядка змінилося, а нового значення немає — у комірці число попереднього; ru/kz — порцією COLL:r5-i1-row-window-stale нижче ──
+    (N'coverageEvents.rowWindowStale', N'en', N'Row {rowKey} (row-window mapping {mapId}): the window or the source of the row changed, but no new value was obtained ({status}). The cell was not updated and still holds the value for the previous window or source. Check the row before relying on the number.', 1),
+    -- COLL:r5-i1-row-window-stale ── кінець секції ──
+    -- COLL:an105-recalc-state ── AN-105 / D2-03: стан аркуша чи періоду змінився під час перерахунку; ru/kz — порцією COLL:an105-recalc-state нижче ──
+    (N'err.ECR-CALC-0409.recalcStateChanged', N'en', N'While document {documentId} was being recalculated, a sheet was submitted or period {periodKey} was closed. The new results were not applied and the previous ones stay current; the recalculation repeats with the new state.', 1),
+    -- COLL:an105-recalc-state ── кінець секції ──
+    -- COLL:an105-results-ceiling ── AN-105 / D2-05: актуальних результатів документа за період більше за стелю читання; ru/kz — порцією COLL:an105-results-ceiling нижче ──
+    (N'err.ECR-CALC-0422.resultsTooLarge', N'en', N'Document {documentId} has more than {max} calculation results for period {periodKey}. They are not shown partly, because a partial list would give wrong totals: check the methodology bindings (a binding on the wrong table multiplies rows).', 1),
+    -- COLL:an105-results-ceiling ── кінець секції ──
+    -- COLL:an120-snapshot-ceiling ── AN-120 / L1-01: рядків зрізу (після правил відбору) більше за стелю — відмова, а не обрізання; ru/kz — порцією COLL:an120-snapshot-ceiling нижче ──
+    (N'err.ECR-RPT-0422.snapshotTooLarge', N'en', N'The snapshot of project {projectId} for period {periodKey} has more than {limit} rows after the selection rules. It was not built, because a partial snapshot would look complete; the previous snapshot stays current. Narrow the report with its selection rules or build it per period.', 1),
+    -- COLL:an120-snapshot-ceiling ── кінець секції ──
+    -- COLL:rc15lock ── N-3: PATCH комірки не дочекався блокування (LockWaitGuard); ru/kz — порцією COLL:rc15lock нижче ──
+    (N'err.ECR-DOC-4091.lockTimeout', N'en', N'The data is busy with a long operation (for example, moving another document to a new template version). Nothing was saved; try again in a moment.', 1)
+    -- COLL:rc15lock ── кінець секції ──
+    -- COLL:an108c-session-user ── AN-108 / S2-05: вкладка вважає себе іншим користувачем, ніж власник cookie (X-Ecr-User) -> 409; ru/kz — порцією COLL:an108c-session-user нижче ──
+    ,(N'err.ECR-AUTH-0409', N'en', N'You are signed in as someone else', 1),
+    (N'err.ECR-AUTH-0409.sessionUserChanged', N'en', N'Another user has signed in to this browser in a different tab. This tab''s changes were not saved under their name. Reload the page and sign in again.', 1)
+    -- COLL:an108c-session-user ── кінець секції ──
+    -- COLL:an123-save-busy ── AN-123 / R1-03 = R2-01: автозбереження чекає, доки дані звільняться (409 ECR-DOC-4091 lockTimeout повторюється з відступом); ru/kz — порцією COLL:an123-save-busy нижче ──
+    ,(N'grid.saveWaitingBusy', N'en', N'Data is busy, will save automatically...', 1)
+    -- COLL:an123-save-busy ── кінець секції ──
+    -- COLL:an124-rule-refs ── AN-124 / A1-02, A1-03: посилання правил доступу до періоду й валідації — на свою версію/таблицю; ru/kz — порцією COLL:an124-rule-refs нижче ──
+    ,(N'err.ECR-TMPL-0422.tableNotInSheet', N'en', N'Table {tableDefId} is not on sheet {sheetDefId}: a rule with this pair would not cover a single cell.', 1),
+    (N'err.ECR-TMPL-0422.sourceColumnNotInRuleTarget', N'en', N'Source column {sourceColumnDefId} is not a lookup column of the rule''s table in template version {versionId}. Such a rule would never find a window and would block nothing.', 1),
+    (N'err.ECR-TMPL-0422.cloneAccessRuleForeignRef', N'en', N'Period access rule {ruleId} of version {versionId} refers to a sheet, table or column outside that version. The version cannot be cloned until the rule is fixed.', 1),
+    (N'err.ECR-TMPL-0422.validationColumnNotInTable', N'en', N'Column {columnDefId} is not in table {tableCode}. Choose a column of this table.', 1),
+    (N'err.ECR-TMPL-0422.cloneValidationRuleForeignColumn', N'en', N'Validation rule {ruleCode} of table {tableCode} refers to column {columnDefId} outside that table; the clone would apply it to all columns. The version cannot be cloned until the rule is fixed.', 1)
+    -- COLL:an124-rule-refs ── кінець секції ──
+    -- COLL:an121-calendar-offset ── AN-121 / C1-03: календарний контекст іншого періоду ([Period:-1].Days) не підтримується; ru/kz — порцією COLL:an121-calendar-offset нижче ──
+    ,(N'expr.calendarContextOffset', N'en', N'The calendar context of another period is not supported: write "[Period].Property".', 1)
+    -- COLL:an121-calendar-offset ── кінець секції ──
+    -- COLL:an121-legacy-maxmin ── AN-121 / C1-01 (HU-14 Q1): попередження публікації Legacy — Max/Min з цілим першим аргументом (NCalc округлював другий); ru/kz — порцією COLL:an121-legacy-maxmin нижче ──
+    ,(N'publish.warning.legacyIntegerMaxMin', N'en', N'Formula {formula}: {functions} has an integer first argument and a possibly fractional second one. The legacy system (NCalc 1.3.8) rounded the second argument to an integer here, ECR does not: results may differ from the submitted forms by whole units. Write the first argument with a decimal point (0.0) to make the intent explicit.', 1)
+    -- COLL:an121-legacy-maxmin ── кінець секції ──
+    -- COLL:r5c1-issues-more ── R5-C1 / C1-02: інспектор показує зауваження порціями — кнопка «ще»; ru/kz — порцією COLL:r5c1-issues-more нижче ──
+    ,(N'inspector.showMoreIssues', N'en', N'Show {count} more ({left} not shown)', 1)
+    -- COLL:r5c1-issues-more ── кінець секції ──
+    -- COLL:r5e1-db-busy ── R5-E1 / E1-04: тимчасовий збій БД (deadlock 1205 після повторів, тайм-аут -2, обрив з'єднання) — 503 ECR-SYS-0503 з Retry-After; ru/kz — порцією COLL:r5e1-db-busy нижче ──
+    ,(N'err.ECR-SYS-0503.databaseBusy', N'en', N'The database is temporarily busy or unreachable, so the request was not completed. Reload the data and try again in a few seconds; if it keeps happening, contact your administrator.', 1),
+    (N'err.ECR-SYS-0503.databaseBusy.title', N'en', N'Database temporarily unavailable', 1)
+    -- COLL:r5e1-db-busy ── кінець секції ──
+    -- COLL:r5g1-undo-changed ── R5-G1 / G1-05: Undo/Redo не затирає комірки, змінені після кроку; ru/kz — порцією COLL:r5g1-undo-changed нижче ──
+    ,(N'grid.undoChangedSince', N'en', N'{count} cell(s) changed after this step (by another user, an import or a recalculation). Undo/Redo left them as they are; enter the value manually if needed.', 1)
+    -- COLL:r5g1-undo-changed ── кінець секції ──
+    -- COLL:r6x5-windows-sid ── R6-X5 / X5-01: Windows-вхід з ім'ям, зайнятим записом з іншим SID, — 409 замість 500; перевірка SID у POST /users; виправлення непідтвердженого SID; ru/kz — порцією COLL:r6x5-windows-sid нижче ──
+    ,(N'err.ECR-USR-0409.windowsSidMismatch', N'en', N'The ECR account "{userName}" is linked to a different Windows SID, so sign-in was refused. Ask your administrator to correct the SID of this account to {sid}.', 0),
+    (N'err.ECR-USR-0409.windowsSidMismatch.title', N'en', N'Account is linked to a different SID', 0),
+    (N'err.ECR-USR-0409.windowsSidTaken', N'en', N'SID {sid} is already linked to the account "{userName}".', 1),
+    (N'err.ECR-USR-0409.windowsSidTaken.title', N'en', N'SID already in use', 1),
+    (N'err.ECR-USR-0422.windowsSidMalformed', N'en', N'"{sid}" is not a SID. Enter it in the form S-1-5-21-….', 1),
+    (N'err.ECR-USR-0422.windowsSidNotDomain', N'en', N'"{userName}" is not a domain account: it has no SID.', 1),
+    (N'err.ECR-SEC-0409.windowsSidConfirmed', N'en', N'"{userName}" has already signed in: the domain has confirmed its SID, so it cannot be corrected.', 1),
+    (N'security.correctSid', N'en', N'Correct SID', 1),
+    (N'security.correctSidNamed', N'en', N'Correct SID of {userName}', 1),
+    (N'security.correctSidHint', N'en', N'This domain account has not signed in yet, so its SID can still be corrected. Enter the SID of the account in the domain; the sign-in refusal shown to the person contains it.', 1),
+    (N'security.sidLabel', N'en', N'SID', 1),
+    (N'security.sidCorrected', N'en', N'SID corrected', 1)
+    -- COLL:r6x5-windows-sid ── кінець секції ──
+    -- COLL:r7y8-snapshot-submitted ── R7-Y8 / Y8-01: побудова над поданим зрізом — ECR-RPT-0409 без повторів задачі, тост із шляхом; ru/kz — порцією COLL:r7y8-snapshot-submitted нижче ──
+    ,(N'err.ECR-RPT-0409.periodSubmittedRebuild', N'en', N'Snapshot {snapshotId} of this period was submitted, so a new snapshot is not built. Return the submitted sheets for edits first (the sheet''s «Return for edits» action), then build again.', 1),
+    (N'snapshots.buildRefusedSubmitted', N'en', N'This period''s snapshot was submitted, so a new one is not built. Return the submitted sheets for edits first (the sheet''s «Return for edits» action), then build again.', 1)
+    -- COLL:r7y8-snapshot-submitted ── кінець секції ──
+    -- COLL:r7y4-run-running ── R7-Y4 / Y4-03: прогін збору, що ще триває, на /admin/sources; ru/kz — порцією COLL:r7y4-run-running у блоці I18N нижче ──
+    ,(N'status.collectionRun.Running', N'en', N'Running', 1)
+    -- COLL:r7y4-run-running ── кінець секції ──
+    -- COLL:r7y4-digest ── R7-Y4 / Y4-04: тема й рамка зведення збоїв (NotificationJob) мовою листа; ru/kz — порцією COLL:r7y4-digest у блоці I18N нижче ──
+    ,(N'notifications.digest.subject', N'en', N'ECR: failures in the period — {count}', 1)
+    ,(N'notifications.digest.coverageLine', N'en', N'period {period}: {count} events; {details}', 1)
+    ,(N'notifications.digest.noRecipients', N'en', N'Alerts are sent to nobody: no active user has alerts turned on and an email address.', 1)
+    -- COLL:r7y4-digest ── кінець секції ──
+    -- COLL:r7y5-04-sheet-missing ── R7-Y5 / Y5-04: аркуш таблиці перейменовано або видалено в Excel — відмова таблиці в перегляді імпорту, а не 500; ru/kz — порцією COLL:r7y5-04-sheet-missing нижче ──
+    ,(N'err.ECR-IMP-0422.importSheetMissing', N'en', N'The sheet of this table is missing in the file: it was renamed or deleted in Excel after export. Restore the sheet name or download the workbook again.', 1)
+    -- COLL:r7y5-04-sheet-missing ── кінець секції ──
+    -- COLL:r7y5-01-layout-changed ── R7-Y5 / Y5-01: рядки чи колонки таблиці в Excel відсортовано, вставлено чи видалено — відмова таблиці, а не значення в чужих рядках; ru/kz — порцією COLL:r7y5-01-layout-changed нижче ──
+    ,(N'err.ECR-IMP-0422.importLayoutChanged', N'en', N'Rows or columns of this table were sorted, inserted, deleted or relabelled in Excel after export, so the values no longer match their rows. The table was not imported. Download the workbook again and edit values in place without sorting or inserting rows and columns.', 1)
+    -- COLL:r7y5-01-layout-changed ── кінець секції ──
+    -- COLL:r7y5-03-lookup-preview ── R7-Y5 / Y5-03: перегляд імпорту відхиляє видалений, вимкнений чи нечинний запис довідника (C7) однією коміркою, а не 4223 на всю книгу; ru/kz — порцією COLL:r7y5-03-lookup-preview нижче ──
+    ,(N'err.ECR-CELL-4223.importDeletedEntry', N'en', N'The registry entry with this code has been deleted and cannot be chosen.', 1),
+    (N'err.ECR-CELL-4223.importInactiveEntry', N'en', N'The registry entry with this code is switched off and cannot be chosen.', 1),
+    (N'err.ECR-CELL-4223.importEntryNotValidOnDate', N'en', N'The registry entry with this code is not valid on the last day of the period and cannot be chosen.', 1)
+    -- COLL:r7y5-03-lookup-preview ── кінець секції ──
+    -- COLL:r7y5-02-ambiguous-date ── R7-Y5 / Y5-02: неоднозначна слеш-дата (4/1/2024) у CSV довідника — відмова з порадою РРРР-ММ-ДД, а не переставлені день і місяць; ru/kz — порцією COLL:r7y5-02-ambiguous-date нижче ──
+    ,(N'err.ECR-REG-0422.valueAmbiguousDate', N'en', N'The date "{value}" is ambiguous: its day and month can be swapped (Excel writes dates in the format of your regional settings). Write the date as YYYY-MM-DD.', 1)
+    -- COLL:r7y5-02-ambiguous-date ── кінець секції ──
+    -- COLL:r7y5-07-registry-changes ── R7-Y5 / Y5-07: перевірка CSV довідника показує старе й нове значення кожного зміненого поля наявних записів; ru/kz — порцією COLL:r7y5-07-registry-changes нижче ──
+    ,(N'registry.import.changesTitle', N'en', N'Changes in existing entries ({count}). Excel may change values when saving a CSV (leading zeros, long numbers, dates), so check them before applying.', 1),
+    (N'registry.import.changesTruncated', N'en', N'Only the first {count} changes are shown.', 1),
+    (N'registry.import.oldValue', N'en', N'Current value', 1),
+    (N'registry.import.newValue', N'en', N'Value from file', 1)
+    -- COLL:r7y5-07-registry-changes ── кінець секції ──
+    -- COLL:r8z3-02-ambiguous-date ── R8-Z3 / Z3-02: дата з днем або місяцем спереду (4/1/2024, 01-04-2024, 01.04.24), яку розбір відхилив, — у сітці, шапці й імпорті .xlsx з порадою РРРР-ММ-ДД, а не «очікує дату»; ru/kz — порцією COLL:r8z3-02-ambiguous-date нижче ──
+    ,(N'err.ECR-CELL-0422.ambiguousDate', N'en', N'Column "{columnCode}": the order of day and month in the date "{value}" cannot be determined (Excel writes dates in the format of your regional settings). Write the date as YYYY-MM-DD or DD.MM.YYYY.', 1),
+    (N'err.ECR-HDR-0422.ambiguousDate', N'en', N'Header field "{headerFieldCode}": the order of day and month in the date "{value}" cannot be determined (Excel writes dates in the format of your regional settings). Write the date as YYYY-MM-DD or DD.MM.YYYY.', 1),
+    (N'err.ECR-CELL-0422.importAmbiguousDate', N'en', N'The order of day and month in this date cannot be determined (Excel writes dates in the format of your regional settings). Write the date as YYYY-MM-DD or DD.MM.YYYY.', 1)
+    -- COLL:r8z3-02-ambiguous-date ── кінець секції ──
+    -- COLL:r9f3-01-delete-frozen ── R9-F3 / F3-01: видалення документа відмовляє в архівованому проєкті й за даних у закритому періоді; ru/kz — порцією COLL:r9f3-01-delete-frozen нижче ──
+    ,(N'err.ECR-DOC-0409.deleteProjectArchived', N'en', N'The document cannot be deleted: its project is archived.', 1),
+    (N'err.ECR-DOC-0409.deleteClosedPeriod', N'en', N'The document cannot be deleted: it has data in the closed period {periodKey}. Reopen the period first.', 1)
+    -- COLL:r9f3-01-delete-frozen ── кінець секції ──
+    -- COLL:r9f6-paste-clipped ── R9-F6 / F6-03: вставка, більша за таблицю, — скільки рядків і колонок не вмістилося; ru/kz — порцією COLL:r9f6-paste-clipped нижче ──
+    ,(N'grid.pasteClipped', N'en', N'The copied data is larger than the table: {rows} row(s) below and {columns} column(s) to the right did not fit and were not pasted. Add rows or paste the rest separately.', 1)
+    -- COLL:r9f6-paste-clipped ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -15246,7 +15423,30 @@ SELECT v.[Key], v.Lang, v.Val
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
+
 -- COLL:covenv ── кінець секції ──
+
+-- R9F1:cellRejected ── ru/kz: значення комірки збору відхилив обробник запису (F1-03); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'coverageEvents.cellRejected', N'ru', N'Ячейка {cell}: собранное значение отклонено при записи ({code}) и не записано; остальные поля записаны. Следующий прогон попробует снова.'),
+    (N'coverageEvents.cellRejected', N'kz', N'{cell} ұяшығы: жиналған мән жазу кезінде қабылданбады ({code}) және жазылмады; қалған өрістер жазылды. Келесі іске қосу қайта көреді.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- R9F1:cellRejected ── кінець секції ──
+
+-- R9F1:fieldMapUnit ── ru/kz: ціль мапінгу у колонку з одиницею — одиниця колонки (F1-02); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-REQ-0422.fieldMapTargetNotColumnUnit', N'ru', N'Целевая единица сопоставления должна быть единицей колонки: ячейка хранит значение именно в ней.'),
+    (N'err.ECR-REQ-0422.fieldMapTargetNotColumnUnit', N'kz', N'Сәйкестендірудің мақсатты бірлігі бағанның бірлігі болуы керек: ұяшық мәнді дәл сол бірлікте сақтайды.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- R9F1:fieldMapUnit ── кінець секції ──
 
 -- COLL:auditreason ── ru/kz причин зміни налаштувань збору (IntegrationConfigAudit.Reason); власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)
@@ -15889,6 +16089,68 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- IMPORT:hints ── кінець секції ──
+
+-- IMPORT:an103 ── ru/kz D1-02: рядок змінено після експорту книги; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-CELL-0409.importRowChangedSinceExport', N'ru', N'Кто-то изменил эту строку после выгрузки книги, поэтому значение из файла не применяется. Выгрузите документ заново и повторите изменения в новой книге.'),
+    (N'err.ECR-CELL-0409.importRowChangedSinceExport', N'kz', N'Кітап экспортталғаннан кейін біреу бұл жолды өзгертті, сондықтан файлдағы мән қолданылмайды. Құжатты қайта экспорттап, өзгерістерді жаңа кітапта қайталаңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- IMPORT:an103 ── кінець секції ──
+
+-- IMPORT:an114 ── ru/kz D-338: явний перезапис рядків, змінених після експорту книги; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'import.overwriteTitle', N'ru', N'Строки, изменённые другими после выгрузки'),
+    (N'import.overwriteTitle', N'kz', N'Экспорттан кейін басқалар өзгерткен жолдар'),
+    (N'import.overwriteHint', N'ru', N'Кто-то изменил эти строки после выгрузки книги. Ваши значения из файла заменят чужие только в отмеченных строках. В неотмеченных строках останутся текущие значения; остальная часть файла будет применена.'),
+    (N'import.overwriteHint', N'kz', N'Кітап экспортталғаннан кейін біреу бұл жолдарды өзгертті. Файлдағы мәндеріңіз тек белгіленген жолдарда басқалардың мәндерін ауыстырады. Белгіленбеген жолдарда ағымдағы мәндер қалады; файлдың қалған бөлігі қолданылады.'),
+    (N'import.overwriteRow', N'ru', N'Перезаписать чужие значения моими'),
+    (N'import.overwriteRow', N'kz', N'Басқалардың мәндерін менікімен қайта жазу'),
+    (N'import.overwriteSkip', N'ru', N'Применить остальную часть файла и оставить текущие значения в неотмеченных строках'),
+    (N'import.overwriteSkip', N'kz', N'Файлдың қалған бөлігін қолданып, белгіленбеген жолдарда ағымдағы мәндерді қалдыру'),
+    (N'import.overwriteRows', N'ru', N'Строк, изменённых после выгрузки: {count}'),
+    (N'import.overwriteRows', N'kz', N'Экспорттан кейін өзгерген жолдар: {count}'),
+    (N'import.theirs', N'ru', N'Текущее значение'),
+    (N'import.theirs', N'kz', N'Ағымдағы мән'),
+    (N'import.mine', N'ru', N'Значение в файле'),
+    (N'import.mine', N'kz', N'Файлдағы мән'),
+    (N'err.ECR-IMP-0422.overwriteNotConflict', N'ru', N'Перезаписать можно только строки, которые кто-то изменил после выгрузки книги. Постройте предпросмотр импорта заново.'),
+    (N'err.ECR-IMP-0422.overwriteNotConflict', N'kz', N'Тек кітап экспортталғаннан кейін біреу өзгерткен жолдарды қайта жазуға болады. Импорттың алдын ала қарауын қайта құрыңыз.'),
+    (N'audit.originLabel.ImportOverwrite', N'ru', N'Импорт из Excel, перезаписал более позднее изменение'),
+    (N'audit.originLabel.ImportOverwrite', N'kz', N'Excel-ден импорт, кейінгі өзгерісті қайта жазды')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- IMPORT:an114 ── кінець секції ──
+
+-- IMPORT:an118 ── ru/kz R1-02: попередження про книгу без версій рядків і відбитків комірок; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'import.warningsTitle', N'ru', N'Проверьте перед применением'),
+    (N'import.warningsTitle', N'kz', N'Қолданар алдында тексеріңіз'),
+    (N'import.outdatedWorkbook', N'ru', N'Эта книга выгружена более ранней версией системы. Значения, которые вы в ней не меняли, всё равно могут заменить более новые значения, внесённые другими пользователями или интеграциями после выгрузки, и будут записаны как ваши изменения. Проверьте список изменений или выгрузите документ заново и повторите изменения в новой книге.'),
+    (N'import.outdatedWorkbook', N'kz', N'Бұл кітап жүйенің бұрынғы нұсқасымен экспортталған. Сіз онда өзгертпеген мәндер экспорттан кейін басқа пайдаланушылар немесе интеграциялар енгізген жаңарақ мәндерді бәрібір ауыстыруы мүмкін және сіздің өзгерістеріңіз ретінде жазылады. Өзгерістер тізімін тексеріңіз немесе құжатты қайта экспорттап, өзгерістерді жаңа кітапта қайталаңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- IMPORT:an118 ── кінець секції ──
+
+-- AUDIT:an115 ── ru/kz автора системної зміни комірки; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'audit.systemAuthor', N'ru', N'Система'),
+    (N'audit.systemAuthor', N'kz', N'Жүйе')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- AUDIT:an115 ── кінець секції ──
 
 -- API:negative-path ── ru/kz відмов замість 500 на некоректних полях запиту; власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)
@@ -18029,6 +18291,476 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:rc16rule ── кінець секції ──
+
+-- COLL:an77-recalc ── ru/kz: перерахунок усього документа без повного читання; перерахунок на поданому аркуші; власна порція
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-AUTH-0403.recalcNeedsFullRead', N'ru', N'Пересчёт всего документа требует права чтения всех его листов. Пересчитайте отдельный лист или запросите полный доступ на чтение.'),
+    (N'err.ECR-AUTH-0403.recalcNeedsFullRead', N'kz', N'Бүкіл құжатты қайта есептеу үшін оның барлық парақтарын оқу құқығы қажет. Жеке парақты қайта есептеңіз немесе толық оқу құқығын сұраңыз.'),
+    (N'workflow.recalculateSheetSubmitted', N'ru', N'Лист {sheet} подан или утверждён, пересчитать его нельзя. Сначала верните лист на правки (действие листа «Переоткрыть для правок»).'),
+    (N'workflow.recalculateSheetSubmitted', N'kz', N'{sheet} парағы тапсырылған немесе бекітілген, оны қайта есептеу мүмкін емес. Алдымен парақты түзетуге қайтарыңыз (парақтың «Түзету үшін қайта ашу» әрекеті).')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:an77-recalc ── кінець секції ──
+
+-- COLL:an72-rule-length ── ru/kz: AN-72: правило категорії довше за межу формули (MethodologyCategoryRule.Normalize); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-CALC-0422.categoryRuleTooLong', N'ru', N'Правило категории длиннее {max} символов ({length}): сократите выражение или вынесите часть логики в Row-формулу.'),
+    (N'err.ECR-CALC-0422.categoryRuleTooLong', N'kz', N'Санат ережесі {max} таңбадан ұзын ({length}): өрнекті қысқартыңыз немесе логиканың бір бөлігін Row-формулаға шығарыңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:an72-rule-length ── кінець секції ──
+
+-- COLL:an81-codemode ── ru/kz: AN-81 / L4-13: порада до події синку «елемент не створено: режим кодів Manual»; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-REG-0422.codeModeManualNoAutoCreate', N'ru', N'Элемент не создан как запись справочника: у этого справочника ручные коды записей, а синхронизация создаёт записи из элементов источника только в режиме кодов Auto. Используйте справочник с режимом кодов Auto (после появления записей режим изменить нельзя) или добавьте запись вручную.'),
+    (N'err.ECR-REG-0422.codeModeManualNoAutoCreate', N'kz', N'Элемент анықтамалық жазбасы ретінде жасалмады: бұл анықтамалықтың жазба кодтары қолмен енгізіледі, ал синхрондау жазбаларды көз элементтерінен тек Auto код режимінде жасайды. Auto код режимі бар анықтамалықты пайдаланыңыз (жазбалар пайда болғаннан кейін режимді өзгертуге болмайды) немесе жазбаны қолмен қосыңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:an81-codemode ── кінець секції ──
+
+-- COLL:an72-rule-concurrent ── ru/kz: AN-72 / N2-05: два одночасні перші PUT category-rule (UQ_CategoryRule_Version) -> 409; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-CALC-0409.categoryRuleConcurrent', N'ru', N'Правило категории этой версии только что создал кто-то другой. Перечитайте версию и сохраните правило ещё раз.'),
+    (N'err.ECR-CALC-0409.categoryRuleConcurrent', N'kz', N'Осы нұсқаның санат ережесін жаңа ғана басқа біреу жасады. Нұсқаны қайта жүктеп, ережені қайтадан сақтаңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:an72-rule-concurrent ── кінець секції ──
+
+-- COLL:an83 ── ru/kz AN-83 (L5-12, L5-08); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'registries.rules.budgetExhausted', N'ru', N'Правило {rule} не проверено для записи {entryCode}: проверка исчерпала свой бюджет работы. Сохраняйте меньше записей за раз или упростите правило.'),
+    (N'err.ECR-REG-4091.registryCodeTakenHidden', N'ru', N'Справочник с кодом «{code}» уже существует: по этому коду на него ссылаются поля выбора из справочника и столбцы шаблонов.'),
+    (N'registries.rules.budgetExhausted', N'kz', N'{rule} ережесі {entryCode} жазбасы үшін тексерілмеді: тексеру өзінің жұмыс бюджетін таусты. Бір мезгілде аз жазба сақтаңыз немесе ережені жеңілдетіңіз.'),
+    (N'err.ECR-REG-4091.registryCodeTakenHidden', N'kz', N'«{code}» коды бар анықтамалық бұрыннан бар: анықтамалықтан таңдау өрістері мен үлгі бағандары оған осы код арқылы сілтеме жасайды.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:an83 ── кінець секції ──
+
+-- COLL:an79-lookup-missing ── ru/kz: AN-79 / N1-07/N1-08: запис довідника поля шапки Lookup відсутній у довіднику цього поля; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-HDR-0422.lookupEntryMissing', N'ru', N'Запись справочника, выбранная для поля шапки «{headerFieldCode}», отсутствует в справочнике этого поля.'),
+    (N'err.ECR-HDR-0422.lookupEntryMissing', N'kz', N'«{headerFieldCode}» тақырып бөлігі өрісі үшін таңдалған анықтамалық жазбасы осы өрістің анықтамалығында жоқ.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:an79-lookup-missing ── кінець секції ──
+
+-- COLL:an80-carryover ── ru/kz: AN-80 / N2-04: перенос результатов поданных листов больше потолка; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-CALC-0422.carryOverTooLarge', N'ru', N'Перенос результатов поданных листов документа {documentId} за период {periodKey} скопировал бы {count} строк, что больше предела {max}. Прогон не применён, прежние результаты остаются актуальными: сузьте привязку до нужной таблицы.'),
+    (N'err.ECR-CALC-0422.carryOverTooLarge', N'kz', N'{documentId} құжатының {periodKey} кезеңіндегі тапсырылған парақтардың нәтижелерін көшіру {count} жолды көшірер еді, бұл {max} шегінен артық. Есептеу қолданылған жоқ, алдыңғы нәтижелер өзекті болып қалады: байланыстыруды қажетті кестеге тарылтыңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:an80-carryover ── кінець секції ──
+
+-- COLL:an109-csv-utf8 ── ru/kz: AN-109 / S1-03: импорт CSV переводов не в UTF-8; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-REQ-0422.uiStringCsvNotUtf8', N'ru', N'Файл не является текстом в UTF-8 (возможно, он сохранён в кодовой странице Windows). Сохраните его как CSV UTF-8 и повторите. Ничего не импортировано.'),
+    (N'err.ECR-REQ-0422.uiStringCsvNotUtf8', N'kz', N'Файл UTF-8 мәтіні емес (Windows кодтау беті болуы мүмкін). Оны CSV UTF-8 ретінде сақтап, қайталап көріңіз. Ештеңе импортталмады.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:an109-csv-utf8 ── кінець секції ──
+
+-- COLL:an104-header-conflict ── ru/kz: AN-104 / D1-04: 409 на шапці не стирає чернетку — «ваше / чинне»; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'document.header.conflictTitle', N'ru', N'Шапку изменил кто-то другой'),
+    (N'document.header.conflictHint', N'ru', N'Пока вы редактировали, эти поля изменил другой пользователь. Ваши значения остались в форме: оставьте свои, чтобы перезаписать чужие, или возьмите текущие.'),
+    (N'document.header.conflictItem', N'ru', N'{field}: ваше {yours}, текущее {value}'),
+    (N'document.header.conflictKeepMine', N'ru', N'Оставить мои'),
+    (N'document.header.conflictUseCurrent', N'ru', N'Взять текущие'),
+    (N'document.header.conflictNoValue', N'ru', N'(нет значения)'),
+    (N'document.header.conflictYes', N'ru', N'да'),
+    (N'document.header.conflictNo', N'ru', N'нет'),
+    (N'document.header.conflictTitle', N'kz', N'Құжаттың тақырып бөлігін басқа біреу өзгертті'),
+    (N'document.header.conflictHint', N'kz', N'Сіз өңдеп жатқанда бұл өрістерді басқа пайдаланушы өзгертті. Сіздің мәндеріңіз формада қалды: басқаныкін қайта жазу үшін өзіңіздікін қалдырыңыз немесе ағымдағы мәндерді алыңыз.'),
+    (N'document.header.conflictItem', N'kz', N'{field}: Сіздікі {yours}, ағымдағы {value}'),
+    (N'document.header.conflictKeepMine', N'kz', N'Менікін қалдыру'),
+    (N'document.header.conflictUseCurrent', N'kz', N'Ағымдағыны алу'),
+    (N'document.header.conflictNoValue', N'kz', N'(мән жоқ)'),
+    (N'document.header.conflictYes', N'kz', N'иә'),
+    (N'document.header.conflictNo', N'kz', N'жоқ')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:an104-header-conflict ── кінець секції ──
+
+-- COLL:an107-import-busy ── ru/kz: AN-107 / P1-04 = S1-02: межа одночасних переглядів імпорту книги вичерпана; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-REQ-0429.importBusy', N'ru', N'Сервер занят чтением других импортируемых книг. Повторите попытку через минуту.'),
+    (N'err.ECR-REQ-0429.importBusy', N'kz', N'Сервер басқа импортталатын кітаптарды оқумен бос емес. Бір минуттан кейін қайталаңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:an107-import-busy ── кінець секції ──
+
+-- COLL:an105-coverage ── ru/kz: AN-105 / D2-02: неповне покриття і «немає даних» матеріалізації; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'status.coverage.PartialCoverage', N'ru', N'Неполное покрытие'),
+    (N'status.coverage.PartialCoverage', N'kz', N'Толық емес қамту'),
+    (N'status.coverage.SkippedNoData', N'ru', N'Нет данных за период'),
+    (N'status.coverage.SkippedNoData', N'kz', N'Кезең үшін деректер жоқ'),
+    (N'coverageEvents.partialCoverage', N'ru', N'Поле {field} (сопоставление {mapId}): источник покрыл лишь {percentGood}% периода (порог {min}%). Значение записано, но оно неполное: пропуски и точки плохого качества не учтены. Сверьте источник, прежде чем полагаться на число.'),
+    (N'coverageEvents.partialCoverage', N'kz', N'{field} өрісі ({mapId} сәйкестендіру): дереккөз кезеңнің тек {percentGood}% қамтыды (шегі {min}%). Мән жазылды, бірақ ол толық емес: үзілістер мен сапасы нашар нүктелер ескерілмеген. Санға сенбес бұрын дереккөзді салыстырыңыз.'),
+    (N'coverageEvents.noData', N'ru', N'Поле {field} (сопоставление {mapId}): за завершившийся период нет пригодных точек. Ячейка не обновлена и может содержать значение предыдущего прогона.'),
+    (N'coverageEvents.noData', N'kz', N'{field} өрісі ({mapId} сәйкестендіру): аяқталған кезеңде жарамды нүктелер жоқ. Ұяшық жаңартылмады және алдыңғы іске қосудың мәнін сақтауы мүмкін.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:an105-coverage ── кінець секції ──
+
+-- COLL:r5-i1-row-window-stale ── ru/kz: R5-I1 / I1-03: у комірці лишилося число попереднього вікна чи джерела рядка; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'coverageEvents.rowWindowStale', N'ru', N'Строка {rowKey} (сопоставление по окну строки {mapId}): окно или источник строки изменились, но нового значения нет ({status}). Ячейка не обновлена и содержит значение для прежнего окна или источника. Проверьте строку, прежде чем полагаться на число.'),
+    (N'coverageEvents.rowWindowStale', N'kz', N'{rowKey} жолы (жол терезесі бойынша {mapId} сәйкестендіру): жолдың терезесі немесе дереккөзі өзгерді, бірақ жаңа мән алынбады ({status}). Ұяшық жаңартылмады және бұрынғы терезе немесе дереккөз үшін мәнді сақтайды. Санға сенбес бұрын жолды тексеріңіз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:r5-i1-row-window-stale ── кінець секції ──
+
+-- COLL:an105-recalc-state ── ru/kz: AN-105 / D2-03: стан аркуша чи періоду змінився під час перерахунку; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-CALC-0409.recalcStateChanged', N'ru', N'Пока документ {documentId} пересчитывался, лист был подан или период {periodKey} закрыт. Новые результаты не применены, актуальными остаются прежние; пересчёт повторится с новым состоянием.'),
+    (N'err.ECR-CALC-0409.recalcStateChanged', N'kz', N'{documentId} құжаты қайта есептеліп жатқанда парақ тапсырылды немесе {periodKey} кезеңі жабылды. Жаңа нәтижелер қолданылмады, алдыңғылары өзекті болып қалады; қайта есептеу жаңа күймен қайталанады.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:an105-recalc-state ── кінець секції ──
+
+-- COLL:an105-results-ceiling ── ru/kz: AN-105 / D2-05: актуальних результатів документа за період більше за стелю читання; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-CALC-0422.resultsTooLarge', N'ru', N'У документа {documentId} за период {periodKey} больше {max} результатов расчёта. Частично они не показываются, потому что неполный список дал бы неверные суммы: проверьте привязки методологий (привязка не к той таблице размножает строки).'),
+    (N'err.ECR-CALC-0422.resultsTooLarge', N'kz', N'{documentId} құжатында {periodKey} кезеңі үшін {max}-тан астам есептеу нәтижесі бар. Олар ішінара көрсетілмейді, өйткені толық емес тізім қате қосындылар берер еді: әдістемелердің байланыстыруларын тексеріңіз (басқа кестеге байланыстыру жолдарды көбейтеді).')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:an105-results-ceiling ── кінець секції ──
+
+-- COLL:an120-snapshot-ceiling ── ru/kz: AN-120 / L1-01: рядків зрізу (після правил відбору) більше за стелю; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-RPT-0422.snapshotTooLarge', N'ru', N'В срезе проекта {projectId} за период {periodKey} после правил отбора больше {limit} строк. Срез не построен, потому что неполный срез выглядел бы полным; предыдущий срез остаётся действующим. Сузьте отчёт правилами отбора или стройте его по периодам.'),
+    (N'err.ECR-RPT-0422.snapshotTooLarge', N'kz', N'{projectId} жобасының {periodKey} кезеңіндегі кесіндісінде іріктеу ережелерінен кейін {limit} жолдан көп. Кесінді құрылмады, өйткені толық емес кесінді толық болып көрінер еді; алдыңғы кесінді күшінде қалады. Есепті іріктеу ережелерімен тарылтыңыз немесе оны кезең бойынша құрыңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:an120-snapshot-ceiling ── кінець секції ──
+
+-- COLL:rc15lock ── ru/kz N-3: PATCH комірки не дочекався блокування; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-DOC-4091.lockTimeout', N'ru', N'Данные заняты долгой операцией (например, переносом другого документа на новую версию шаблона). Ничего не сохранено; повторите попытку через мгновение.'),
+    (N'err.ECR-DOC-4091.lockTimeout', N'kz', N'Деректер ұзақ операциямен (мысалы, басқа құжатты үлгінің жаңа нұсқасына ауыстырумен) бос емес. Ештеңе сақталмады; сәлден кейін қайталап көріңіз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:rc15lock ── кінець секції ──
+-- COLL:an108c-session-user ── ru/kz: AN-108 / S2-05: вкладка вважає себе іншим користувачем, ніж власник cookie; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-AUTH-0409', N'ru', N'Вы вошли как другой пользователь'),
+    (N'err.ECR-AUTH-0409', N'kz', N'Сіз басқа пайдаланушы ретінде кірдіңіз'),
+    (N'err.ECR-AUTH-0409.sessionUserChanged', N'ru', N'В другой вкладке этого браузера вошёл другой пользователь. Изменения этой вкладки не сохранены от его имени. Перезагрузите страницу и войдите снова.'),
+    (N'err.ECR-AUTH-0409.sessionUserChanged', N'kz', N'Осы браузердің басқа қойындысында басқа пайдаланушы кірді. Бұл қойындының өзгерістері оның атынан сақталмады. Бетті қайта жүктеп, қайта кіріңіз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:an108c-session-user ── кінець секції ──
+-- COLL:an123-save-busy ── ru/kz: AN-123 / R1-03 = R2-01: автозбереження чекає, доки дані звільняться; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'grid.saveWaitingBusy', N'ru', N'Данные заняты, сохраним автоматически...'),
+    (N'grid.saveWaitingBusy', N'kz', N'Деректер бос емес, автоматты түрде сақтаймыз...')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:an123-save-busy ── кінець секції ──
+-- COLL:an124-rule-refs ── ru/kz: AN-124 / A1-02, A1-03: посилання правил доступу до періоду й валідації — на свою версію/таблицю; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-TMPL-0422.tableNotInSheet', N'ru', N'Таблица {tableDefId} не находится на листе {sheetDefId}: правило с такой парой не охватило бы ни одной ячейки.'),
+    (N'err.ECR-TMPL-0422.tableNotInSheet', N'kz', N'{tableDefId} кестесі {sheetDefId} парағында жоқ: мұндай жұбы бар ереже бірде-бір ұяшықты қамтымас еді.'),
+    (N'err.ECR-TMPL-0422.sourceColumnNotInRuleTarget', N'ru', N'Столбец-источник {sourceColumnDefId} не является справочным столбцом таблицы правила в версии шаблона {versionId}. Такое правило никогда не нашло бы окно и ничего бы не блокировало.'),
+    (N'err.ECR-TMPL-0422.sourceColumnNotInRuleTarget', N'kz', N'{sourceColumnDefId} дереккөз бағаны {versionId} үлгі нұсқасындағы ереже кестесінің анықтамалық бағаны емес. Мұндай ереже ешқашан терезені таппас еді және ештеңені бұғаттамас еді.'),
+    (N'err.ECR-TMPL-0422.cloneAccessRuleForeignRef', N'ru', N'Правило доступа к периоду {ruleId} версии {versionId} ссылается на лист, таблицу или столбец вне этой версии. Версию нельзя клонировать, пока правило не исправлено.'),
+    (N'err.ECR-TMPL-0422.cloneAccessRuleForeignRef', N'kz', N'{versionId} нұсқасының {ruleId} кезеңге қол жеткізу ережесі осы нұсқадан тыс параққа, кестеге немесе бағанға сілтейді. Ереже түзетілмейінше нұсқаны көшіруге болмайды.'),
+    (N'err.ECR-TMPL-0422.validationColumnNotInTable', N'ru', N'Столбца {columnDefId} нет в таблице {tableCode}. Выберите столбец этой таблицы.'),
+    (N'err.ECR-TMPL-0422.validationColumnNotInTable', N'kz', N'{tableCode} кестесінде {columnDefId} бағаны жоқ. Осы кестенің бағанын таңдаңыз.'),
+    (N'err.ECR-TMPL-0422.cloneValidationRuleForeignColumn', N'ru', N'Правило проверки {ruleCode} таблицы {tableCode} ссылается на столбец {columnDefId} вне этой таблицы; клон применил бы его ко всем столбцам. Версию нельзя клонировать, пока правило не исправлено.'),
+    (N'err.ECR-TMPL-0422.cloneValidationRuleForeignColumn', N'kz', N'{tableCode} кестесінің {ruleCode} тексеру ережесі осы кестеден тыс {columnDefId} бағанына сілтейді; көшірме оны барлық бағандарға қолданар еді. Ереже түзетілмейінше нұсқаны көшіруге болмайды.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:an124-rule-refs ── кінець секції ──
+-- COLL:an121-calendar-offset ── ru/kz: AN-121 / C1-03: календарний контекст іншого періоду не підтримується; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'expr.calendarContextOffset', N'ru', N'Календарный контекст другого периода не поддерживается: пишите «[Period].Property».'),
+    (N'expr.calendarContextOffset', N'kz', N'Басқа кезеңнің күнтізбелік контексіне қолдау көрсетілмейді: «[Period].Property» түрінде жазыңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:an121-calendar-offset ── кінець секції ──
+
+-- COLL:an121-legacy-maxmin ── ru/kz: AN-121 / C1-01: Max/Min з цілим першим аргументом у Legacy; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'publish.warning.legacyIntegerMaxMin', N'ru', N'Формула {formula}: у {functions} первый аргумент целый, а второй может быть дробным. Прежняя система (NCalc 1.3.8) округляла здесь второй аргумент до целого, ECR — нет: результаты могут отличаться от поданных форм на целые единицы. Запишите первый аргумент с десятичной точкой (0.0), чтобы намерение было явным.'),
+    (N'publish.warning.legacyIntegerMaxMin', N'kz', N'{formula} формуласы: {functions} ішінде бірінші аргумент бүтін, ал екіншісі бөлшек болуы мүмкін. Бұрынғы жүйе (NCalc 1.3.8) мұнда екінші аргументті бүтінге дейін дөңгелектеген, ECR дөңгелектемейді: нәтижелер тапсырылған формалардан бүтін бірліктерге өзгеше болуы мүмкін. Ниетті анық көрсету үшін бірінші аргументті ондық нүктемен (0.0) жазыңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:an121-legacy-maxmin ── кінець секції ──
+
+-- COLL:r5c1-issues-more ── ru/kz: R5-C1 / C1-02: зауваження інспектора порціями; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'inspector.showMoreIssues', N'ru', N'Показать ещё {count} (не показано: {left})'),
+    (N'inspector.showMoreIssues', N'kz', N'Тағы {count} көрсету (көрсетілмегені: {left})')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:r5c1-issues-more ── кінець секції ──
+
+-- COLL:r5e1-db-busy ── ru/kz: R5-E1 / E1-04: тимчасовий збій БД — 503 ECR-SYS-0503; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-SYS-0503.databaseBusy', N'ru', N'База данных временно занята или недоступна, поэтому запрос не выполнен. Обновите данные и повторите через несколько секунд; если ошибка повторяется, обратитесь к администратору.'),
+    (N'err.ECR-SYS-0503.databaseBusy', N'kz', N'Дерекқор уақытша бос емес немесе қолжетімсіз, сондықтан сұрау орындалмады. Деректерді жаңартып, бірнеше секундтан кейін қайталаңыз; қате қайталанса, әкімшіге хабарласыңыз.'),
+    (N'err.ECR-SYS-0503.databaseBusy.title', N'ru', N'База данных временно недоступна'),
+    (N'err.ECR-SYS-0503.databaseBusy.title', N'kz', N'Дерекқор уақытша қолжетімсіз')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:r5e1-db-busy ── кінець секції ──
+
+-- COLL:r5g1-undo-changed ── ru/kz: R5-G1 / G1-05: Undo/Redo не затирає комірки, змінені після кроку; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'grid.undoChangedSince', N'ru', N'Ячеек, изменённых после этого шага (другим пользователем, импортом или пересчётом): {count}. Отмена/повтор оставили их как есть; при необходимости введите значение вручную.'),
+    (N'grid.undoChangedSince', N'kz', N'Осы қадамнан кейін өзгертілген ұяшықтар (басқа пайдаланушы, импорт немесе қайта есептеу): {count}. Болдырмау/қайталау оларды өзгертпеді; қажет болса, мәнді қолмен енгізіңіз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:r5g1-undo-changed ── кінець секції ──
+
+-- COLL:r6x5-windows-sid ── ru/kz: R6-X5 / X5-01: SID доменного запису — відмова входу, перевірка, виправлення; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-USR-0409.windowsSidMismatch', N'ru', N'Учётная запись ECR «{userName}» привязана к другому SID Windows, поэтому вход отклонён. Попросите администратора исправить SID этой учётной записи на {sid}.'),
+    (N'err.ECR-USR-0409.windowsSidMismatch', N'kz', N'ECR-дегі «{userName}» тіркелгісі басқа Windows SID-іне байланған, сондықтан кіру қабылданбады. Әкімшіден осы тіркелгінің SID-ін {sid} етіп түзетуді сұраңыз.'),
+    (N'err.ECR-USR-0409.windowsSidMismatch.title', N'ru', N'Учётная запись привязана к другому SID'),
+    (N'err.ECR-USR-0409.windowsSidMismatch.title', N'kz', N'Тіркелгі басқа SID-ке байланған'),
+    (N'err.ECR-USR-0409.windowsSidTaken', N'ru', N'SID {sid} уже привязан к учётной записи «{userName}».'),
+    (N'err.ECR-USR-0409.windowsSidTaken', N'kz', N'{sid} SID-і «{userName}» тіркелгісіне бұрыннан байланған.'),
+    (N'err.ECR-USR-0409.windowsSidTaken.title', N'ru', N'SID уже используется'),
+    (N'err.ECR-USR-0409.windowsSidTaken.title', N'kz', N'SID бұрыннан қолданылуда'),
+    (N'err.ECR-USR-0422.windowsSidMalformed', N'ru', N'«{sid}» не является SID. Введите его в виде S-1-5-21-….'),
+    (N'err.ECR-USR-0422.windowsSidMalformed', N'kz', N'«{sid}» SID емес. Оны S-1-5-21-… түрінде енгізіңіз.'),
+    (N'err.ECR-USR-0422.windowsSidNotDomain', N'ru', N'«{userName}» — не доменная учётная запись: SID у неё нет.'),
+    (N'err.ECR-USR-0422.windowsSidNotDomain', N'kz', N'«{userName}» — домендік тіркелгі емес: оның SID-і жоқ.'),
+    (N'err.ECR-SEC-0409.windowsSidConfirmed', N'ru', N'«{userName}» уже входил в систему: домен подтвердил его SID, поэтому исправить его нельзя.'),
+    (N'err.ECR-SEC-0409.windowsSidConfirmed', N'kz', N'«{userName}» жүйеге кірген: домен оның SID-ін растады, сондықтан оны түзетуге болмайды.'),
+    (N'security.correctSid', N'ru', N'Исправить SID'),
+    (N'security.correctSid', N'kz', N'SID-ті түзету'),
+    (N'security.correctSidNamed', N'ru', N'Исправить SID {userName}'),
+    (N'security.correctSidNamed', N'kz', N'{userName} SID-ін түзету'),
+    (N'security.correctSidHint', N'ru', N'Эта доменная учётная запись ещё не входила в систему, поэтому её SID можно исправить. Введите SID учётной записи в домене; он указан в отказе во входе, который видит сотрудник.'),
+    (N'security.correctSidHint', N'kz', N'Бұл домендік тіркелгі жүйеге әлі кірмеген, сондықтан оның SID-ін түзетуге болады. Тіркелгінің домендегі SID-ін енгізіңіз; ол қызметкер көретін кіруден бас тарту хабарында көрсетілген.'),
+    (N'security.sidLabel', N'ru', N'SID'),
+    (N'security.sidLabel', N'kz', N'SID'),
+    (N'security.sidCorrected', N'ru', N'SID исправлен'),
+    (N'security.sidCorrected', N'kz', N'SID түзетілді')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:r6x5-windows-sid ── кінець секції ──
+
+-- COLL:r7y8-snapshot-submitted ── ru/kz: R7-Y8 / Y8-01: побудова над поданим зрізом — ECR-RPT-0409, тост із шляхом; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-RPT-0409.periodSubmittedRebuild', N'ru', N'Срез {snapshotId} этого периода подан, поэтому новый срез не строится. Сначала верните поданные листы на правки (действие листа «Переоткрыть для правок»), затем постройте снова.'),
+    (N'err.ECR-RPT-0409.periodSubmittedRebuild', N'kz', N'Осы кезеңнің {snapshotId} кесіндісі тапсырылған, сондықтан жаңа кесінді құрылмайды. Алдымен тапсырылған парақтарды түзетуге қайтарыңыз (парақтың «Түзету үшін қайта ашу» әрекеті), содан кейін қайта құрыңыз.'),
+    (N'snapshots.buildRefusedSubmitted', N'ru', N'Срез этого периода подан, поэтому новый не строится. Сначала верните поданные листы на правки (действие листа «Переоткрыть для правок»), затем постройте снова.'),
+    (N'snapshots.buildRefusedSubmitted', N'kz', N'Осы кезеңнің кесіндісі тапсырылған, сондықтан жаңасы құрылмайды. Алдымен тапсырылған парақтарды түзетуге қайтарыңыз (парақтың «Түзету үшін қайта ашу» әрекеті), содан кейін қайта құрыңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:r7y8-snapshot-submitted ── кінець секції ──
+
+-- COLL:r7y4-run-running ── ru/kz: R7-Y4 / Y4-03: прогін збору, що ще триває; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'status.collectionRun.Running', N'ru', N'Выполняется'),
+    (N'status.collectionRun.Running', N'kz', N'Орындалуда')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:r7y4-run-running ── кінець секції ──
+
+-- COLL:r7y4-digest ── ru/kz: R7-Y4 / Y4-04: тема й рамка зведення збоїв; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'notifications.digest.subject', N'ru', N'ECR: сбоев за период — {count}'),
+    (N'notifications.digest.subject', N'kz', N'ECR: кезеңдегі ақаулар — {count}'),
+    (N'notifications.digest.coverageLine', N'ru', N'период {period}: событий {count}; {details}'),
+    (N'notifications.digest.coverageLine', N'kz', N'кезең {period}: оқиғалар {count}; {details}'),
+    (N'notifications.digest.noRecipients', N'ru', N'Алерты никому не отправляются: ни у одного активного пользователя не включено получение алертов и не указана почта.'),
+    (N'notifications.digest.noRecipients', N'kz', N'Алерттер ешкімге жіберілмейді: бірде-бір белсенді пайдаланушыда алерт алу қосылмаған және пошта көрсетілмеген.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:r7y4-digest ── кінець секції ──
+-- COLL:r7y5-04-sheet-missing ── ru/kz: R7-Y5 / Y5-04: аркуш таблиці перейменовано або видалено в Excel — відмова таблиці в перегляді імпорту, а не 500; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-IMP-0422.importSheetMissing', N'ru', N'Листа этой таблицы нет в файле: его переименовали или удалили в Excel после экспорта. Верните имя листа или выгрузите книгу заново.'),
+    (N'err.ECR-IMP-0422.importSheetMissing', N'kz', N'Бұл кестенің парағы файлда жоқ: оны экспорттан кейін Excel-де қайта атаған немесе жойған. Парақ атауын қайтарыңыз немесе кітапты қайта жүктеп алыңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:r7y5-04-sheet-missing ── кінець секції ──
+
+-- COLL:r7y5-01-layout-changed ── ru/kz: R7-Y5 / Y5-01: рядки чи колонки таблиці в Excel відсортовано, вставлено чи видалено — відмова таблиці, а не значення в чужих рядках; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-IMP-0422.importLayoutChanged', N'ru', N'Строки или столбцы этой таблицы в Excel после экспорта отсортировали, вставили, удалили или переименовали, поэтому значения больше не совпадают со своими строками. Таблица не импортирована. Выгрузите книгу заново и правьте значения на месте, не сортируя и не вставляя строки и столбцы.'),
+    (N'err.ECR-IMP-0422.importLayoutChanged', N'kz', N'Бұл кестенің жолдары немесе бағандары экспорттан кейін Excel-де сұрыпталған, қосылған, жойылған немесе қайта аталған, сондықтан мәндер өз жолдарына сәйкес келмейді. Кесте импортталмады. Кітапты қайта жүктеп алып, жолдар мен бағандарды сұрыптамай және қоспай, мәндерді орнында түзетіңіз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:r7y5-01-layout-changed ── кінець секції ──
+
+-- COLL:r7y5-03-lookup-preview ── ru/kz: R7-Y5 / Y5-03: перегляд імпорту відхиляє видалений, вимкнений чи нечинний запис довідника (C7) однією коміркою, а не 4223 на всю книгу; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-CELL-4223.importDeletedEntry', N'ru', N'Запись справочника с этим кодом удалена, выбрать её нельзя.'),
+    (N'err.ECR-CELL-4223.importDeletedEntry', N'kz', N'Осы коды бар анықтамалық жазбасы жойылған, оны таңдауға болмайды.'),
+    (N'err.ECR-CELL-4223.importInactiveEntry', N'ru', N'Запись справочника с этим кодом отключена, выбрать её нельзя.'),
+    (N'err.ECR-CELL-4223.importInactiveEntry', N'kz', N'Осы коды бар анықтамалық жазбасы өшірілген, оны таңдауға болмайды.'),
+    (N'err.ECR-CELL-4223.importEntryNotValidOnDate', N'ru', N'Запись справочника с этим кодом недействительна на последний день периода, выбрать её нельзя.'),
+    (N'err.ECR-CELL-4223.importEntryNotValidOnDate', N'kz', N'Осы коды бар анықтамалық жазбасы кезеңнің соңғы күнінде жарамсыз, оны таңдауға болмайды.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:r7y5-03-lookup-preview ── кінець секції ──
+
+-- COLL:r7y5-02-ambiguous-date ── ru/kz: R7-Y5 / Y5-02: неоднозначна слеш-дата (4/1/2024) у CSV довідника — відмова з порадою РРРР-ММ-ДД, а не переставлені день і місяць; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-REG-0422.valueAmbiguousDate', N'ru', N'Дата «{value}» неоднозначна: день и месяц можно поменять местами (Excel записывает даты в формате региональных настроек). Запишите дату как ГГГГ-ММ-ДД.'),
+    (N'err.ECR-REG-0422.valueAmbiguousDate', N'kz', N'«{value}» күні екіұшты: күн мен айдың орнын ауыстыруға болады (Excel күндерді аймақтық баптаулар пішімінде жазады). Күнді ЖЖЖЖ-АА-КК түрінде жазыңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:r7y5-02-ambiguous-date ── кінець секції ──
+
+-- COLL:r7y5-07-registry-changes ── ru/kz: R7-Y5 / Y5-07: перевірка CSV довідника показує старе й нове значення кожного зміненого поля наявних записів; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'registry.import.changesTitle', N'ru', N'Изменения в существующих записях ({count}). Excel может менять значения при сохранении CSV (ведущие нули, длинные числа, даты), поэтому проверьте их перед применением.'),
+    (N'registry.import.changesTitle', N'kz', N'Бар жазбалардағы өзгерістер ({count}). Excel CSV-ді сақтағанда мәндерді өзгертуі мүмкін (алдыңғы нөлдер, ұзын сандар, күндер), сондықтан қолданар алдында тексеріңіз.'),
+    (N'registry.import.changesTruncated', N'ru', N'Показаны только первые {count} изменений.'),
+    (N'registry.import.changesTruncated', N'kz', N'Тек алғашқы {count} өзгеріс көрсетілген.'),
+    (N'registry.import.oldValue', N'ru', N'Текущее значение'),
+    (N'registry.import.oldValue', N'kz', N'Ағымдағы мән'),
+    (N'registry.import.newValue', N'ru', N'Значение из файла'),
+    (N'registry.import.newValue', N'kz', N'Файлдағы мән')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:r7y5-07-registry-changes ── кінець секції ──
+
+-- COLL:r8z3-02-ambiguous-date ── ru/kz: R8-Z3 / Z3-02: дата з днем або місяцем спереду (4/1/2024, 01-04-2024, 01.04.24), яку розбір відхилив, — у сітці, шапці й імпорті .xlsx з порадою РРРР-ММ-ДД, а не «очікує дату»; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-CELL-0422.ambiguousDate', N'ru', N'Столбец «{columnCode}»: порядок дня и месяца в дате «{value}» не определить (Excel записывает даты в формате региональных настроек). Запишите дату как ГГГГ-ММ-ДД или ДД.ММ.ГГГГ.'),
+    (N'err.ECR-CELL-0422.ambiguousDate', N'kz', N'«{columnCode}» бағаны: «{value}» күніндегі күн мен айдың ретін анықтау мүмкін емес (Excel күндерді аймақтық баптаулар пішімінде жазады). Күнді ЖЖЖЖ-АА-КК немесе КК.АА.ЖЖЖЖ түрінде жазыңыз.'),
+    (N'err.ECR-HDR-0422.ambiguousDate', N'ru', N'Поле шапки «{headerFieldCode}»: порядок дня и месяца в дате «{value}» не определить (Excel записывает даты в формате региональных настроек). Запишите дату как ГГГГ-ММ-ДД или ДД.ММ.ГГГГ.'),
+    (N'err.ECR-HDR-0422.ambiguousDate', N'kz', N'«{headerFieldCode}» тақырып бөлігінің өрісі: «{value}» күніндегі күн мен айдың ретін анықтау мүмкін емес (Excel күндерді аймақтық баптаулар пішімінде жазады). Күнді ЖЖЖЖ-АА-КК немесе КК.АА.ЖЖЖЖ түрінде жазыңыз.'),
+    (N'err.ECR-CELL-0422.importAmbiguousDate', N'ru', N'Порядок дня и месяца в этой дате не определить (Excel записывает даты в формате региональных настроек). Запишите дату как ГГГГ-ММ-ДД или ДД.ММ.ГГГГ.'),
+    (N'err.ECR-CELL-0422.importAmbiguousDate', N'kz', N'Бұл күндегі күн мен айдың ретін анықтау мүмкін емес (Excel күндерді аймақтық баптаулар пішімінде жазады). Күнді ЖЖЖЖ-АА-КК немесе КК.АА.ЖЖЖЖ түрінде жазыңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:r8z3-02-ambiguous-date ── кінець секції ──
+
+-- COLL:r9f3-01-delete-frozen ── ru/kz: R9-F3 / F3-01: видалення документа відмовляє в архівованому проєкті й за даних у закритому періоді; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-DOC-0409.deleteProjectArchived', N'ru', N'Документ нельзя удалить: его проект в архиве.'),
+    (N'err.ECR-DOC-0409.deleteProjectArchived', N'kz', N'Құжатты жою мүмкін емес: оның жобасы мұрағатта.'),
+    (N'err.ECR-DOC-0409.deleteClosedPeriod', N'ru', N'Документ нельзя удалить: в нём есть данные закрытого периода {periodKey}. Сначала переоткройте период.'),
+    (N'err.ECR-DOC-0409.deleteClosedPeriod', N'kz', N'Құжатты жою мүмкін емес: онда жабық {periodKey} кезеңінің деректері бар. Алдымен кезеңді қайта ашыңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:r9f3-01-delete-frozen ── кінець секції ──
+-- COLL:r9f6-paste-clipped ── ru/kz: R9-F6 / F6-03: вставка, більша за таблицю, — скільки не вмістилося; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'grid.pasteClipped', N'ru', N'Скопированные данные больше таблицы: строк ниже — {rows}, столбцов справа — {columns}; они не поместились и не вставлены. Добавьте строки или вставьте остаток отдельно.'),
+    (N'grid.pasteClipped', N'kz', N'Көшірілген деректер кестеден үлкен: төмендегі {rows} жол және оң жақтағы {columns} баған сыймады және қойылмады. Жолдар қосыңыз немесе қалғанын бөлек қойыңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:r9f6-paste-clipped ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

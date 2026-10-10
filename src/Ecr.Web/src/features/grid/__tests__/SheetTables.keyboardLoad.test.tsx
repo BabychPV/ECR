@@ -59,6 +59,7 @@ describe('SheetTables: клавіатурний шлях до лінивої т�
         <SheetTables
           documentId={7}
           periodKey={202609}
+          periodEnd={null}
           readOnly={false}
           tables={[tableFixture(1), tableFixture(2)]}
         />

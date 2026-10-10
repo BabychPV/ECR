@@ -110,12 +110,14 @@ export function matchesStat(row: TemplateListRow, stat: string | null): boolean 
   return true;
 }
 
-/** Скільки опублікованих версій у всіх шаблонах (макет: «published versions»). */
-export function publishedVersionCount(rows: readonly TemplateListRow[]): number {
-  return rows.reduce(
-    (sum, row) => sum + row.versions.filter((version) => version.status === 'Published').length,
-    0,
-  );
+/**
+ * Значення плитки «published»: скільки шаблонів проходять фільтр цієї ж плитки (`matchesStat`).
+ *
+ * ⚠ N4-03: раніше плитка рахувала ВЕРСІЇ, а клац по ній показував ШАБЛОНИ — число і список розходились.
+ * Тепер один предикат на обидва.
+ */
+export function publishedCount(rows: readonly TemplateListRow[]): number {
+  return rows.filter((row) => matchesStat(row, 'published')).length;
 }
 
 /**
@@ -133,7 +135,7 @@ export function documentCount(rows: readonly TemplateListRow[]): number | null {
 
 /** Скільки шаблонів мають відкриту чернетку (макет: «drafts in progress»). */
 export function draftCount(rows: readonly TemplateListRow[]): number {
-  return rows.filter((row) => row.draft !== null).length;
+  return rows.filter((row) => matchesStat(row, 'drafts')).length;
 }
 
 /**

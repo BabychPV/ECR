@@ -2,6 +2,7 @@
 using Ecr.Application.Errors;
 using Ecr.Application.Integration;
 using Ecr.Application.Ports;
+using Ecr.Application.Sources;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.External;
 using Ecr.Domain.Entities.Integration;
@@ -110,7 +111,7 @@ public sealed partial class CollectionRunner(
     private const string AuthenticationRefused = "ECR-INT-0502";
 
     /// <inheritdoc />
-    public async Task RunAsync(
+    public async Task<CollectionRunSummary> RunAsync(
         int sourceEntityId, DateTime fromUtc, DateTime toUtc, IJobProgress progress, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(progress);
@@ -147,11 +148,14 @@ public sealed partial class CollectionRunner(
         var isCatchUp = work.Count > 1;
 
         var runId = await store
-            .StartRunAsync(sourceEntityId, work[0].FromUtc, toUtc, isCatchUp, null, ct)
+            .StartRunAsync(sourceEntityId, work.Min(w => w.FromUtc), toUtc, isCatchUp, null, ct)
             .ConfigureAwait(false);
 
         var covered = new List<TimeInterval>();
         var retrieved = 0;
+
+        // Найраніша мітка записаної точки (аудит I1-01): від неї задача ставить матеріалізацію.
+        DateTime? earliestWritten = null;
         string? failureCode = null;
 
         // ⚠ U12: причина — конверт (ключ + параметри, `Q-326`), а не готове
@@ -254,6 +258,11 @@ public sealed partial class CollectionRunner(
                     runId, sourceEntityId, Fresh(result.Points, state.Carried), maps, units, pausedPaths, ct)
                 .ConfigureAwait(false);
             retrieved += saved.Written;
+
+            if (saved.Earliest is { } earliest && (earliestWritten is null || earliest < earliestWritten))
+            {
+                earliestWritten = earliest;
+            }
             state.Pages++;
 
             if (saved.UnitChange is { } change)
@@ -429,7 +438,11 @@ public sealed partial class CollectionRunner(
 
                     // Мапінг, поставлений на паузу через зміну одиниці, у
                     // цьому прогоні більше не читається; інтервал лишається
-                    // непокритим — після рішення людини його забере наздоганяння.
+                    // непокритим лише в ЦЬОМУ прогоні. ⛔ X3-01: наздоганяння
+                    // цю дірку НЕ забере — наступні прогони паузного шляху не
+                    // читають і закривають покриття сутності за рештою
+                    // атрибутів. Дочитування ставить рішення людини
+                    // (`AcceptSourceUnitChangeHandler`, від моменту паузи).
                     if (pausedPaths.Contains(path))
                     {
                         reachedAll = interval.FromUtc;
@@ -639,6 +652,14 @@ public sealed partial class CollectionRunner(
                 Params(("points", Number(retrieved))),
                 ct)
             .ConfigureAwait(false);
+
+        // ⛔ Аудит I1-01: від найранішої ЗАПИСАНОЇ точки, а не лише покритого інтервалу. Точки
+        // пишуться й за непокритий хвіст (сторінки до обриву, атрибути, що встигли), тож у комірки
+        // треба перенести все, що змінилося. Не від початку прогалини: прогалина, за яку джерело
+        // нічого не дало, щопрогону ставила б матеріалізацію (і SkippedPeriodClosed) закритому місяцю.
+        return new CollectionRunSummary(
+            earliestWritten is { } changed && changed < fromUtc ? changed : fromUtc,
+            retrieved);
     }
 
     /// <summary>Конверт причини (<c>Q-326</c>): ключ каталогу й параметри підстановки.</summary>
@@ -828,9 +849,15 @@ public sealed partial class CollectionRunner(
 
     /// <summary>Що читати: запитаний діапазон плюс давніші прогалини.</summary>
     /// <remarks>
-    /// ⚠ Давнє йде ПЕРШИМ. Прогалина потрібна звітності тим більше, чим вона
-    /// старша: за свіжий діапазон звіт ще не складають, за минулий — уже
-    /// складають.
+    /// ⛔ Аудит I1-04: запитаний діапазон йде ПЕРШИМ, прогалини — за ним (давнє
+    /// першим уже серед них). Покриття пишеться на сутність, тож атрибут, що
+    /// стабільно відмовляє (видалений в AF, <c>ECR-INT-0503</c>/<c>0422</c>),
+    /// тримає прогалину до 45 діб відкритою, і кожен прогін перечитує її для
+    /// всіх атрибутів. Коли свіжий діапазон стояв останнім, послідовний адаптер
+    /// (PiSqlClient) вичерпував ліміт прогону (<see cref="DefaultMaxRunDuration"/>)
+    /// на прогалині, і нові дані ВСІХ атрибутів сутності не надходили зовсім.
+    /// Прогалина від порядку не страждає: прочитане до обриву покривається
+    /// (аудит B3), і наступний прогін продовжує з місця зупинки.
     /// </remarks>
     private async Task<List<TimeInterval>> PlanAsync(
         int sourceEntityId, DateTime fromUtc, DateTime toUtc, CancellationToken ct)
@@ -839,16 +866,16 @@ public sealed partial class CollectionRunner(
             .PlanAsync(sourceEntityId, fromUtc - CatchUpLookback, ct)
             .ConfigureAwait(false);
 
-        var work = gaps
-            .Where(g => g.From < fromUtc)
-            .Select(g => new TimeInterval(g.From, g.To < fromUtc ? g.To : fromUtc))
-            .Where(g => g.ToUtc > g.FromUtc)
-            .ToList();
-
         // Запитаний діапазон читається ЗАВЖДИ, навіть якщо покриття за нього
         // вже є: джерело переписує значення заднім числом, і «вже збирали» не
         // означає «те саме число».
-        work.Add(new TimeInterval(fromUtc, toUtc));
+        var work = new List<TimeInterval> { new(fromUtc, toUtc) };
+
+        work.AddRange(gaps
+            .Where(g => g.From < fromUtc)
+            .Select(g => new TimeInterval(g.From, g.To < fromUtc ? g.To : fromUtc))
+            .Where(g => g.ToUtc > g.FromUtc));
+
         return work;
     }
 
@@ -1011,7 +1038,7 @@ public sealed partial class CollectionRunner(
     {
         if (points.Count == 0)
         {
-            return new SaveOutcome(0, null);
+            return new SaveOutcome(0, null, null);
         }
 
         JobProgressMessageEnvelope? unitChange = null;
@@ -1029,7 +1056,9 @@ public sealed partial class CollectionRunner(
             }
 
             var actualCode = point.SourceUnitSymbol!;
-            int? actualId = units.Units.TryGetValue(actualCode, out var actual) ? actual.Id : null;
+            // ⛔ Z2-02: символ PI (`Sm3/d`) → одиниця довідника тим самим правилом, що й перевірка вище: інакше пауза
+            // не знала б нової одиниці, і прийняти її без вибору вручну було б неможливо (`pendingUnitNotInCatalog`).
+            int? actualId = BoundaryUnitConversion.ResolveSourceSymbol(actualCode, units)?.Id;
 
             await store
                 .PauseForSourceUnitChangeAsync(map.Id, actualCode, actualId, ct)
@@ -1051,7 +1080,8 @@ public sealed partial class CollectionRunner(
             ? 0
             : await store.UpsertRawPointsAsync(runId, sourceEntityId, accepted, ct).ConfigureAwait(false);
 
-        return new SaveOutcome(written, unitChange);
+        // Мітка — з того, що пішло в сховище; без записаного матеріалізувати нема чого.
+        return new SaveOutcome(written, unitChange, written > 0 ? accepted.Min(p => p.Timestamp) : null);
     }
 
     /// <summary>
@@ -1114,7 +1144,8 @@ public sealed partial class CollectionRunner(
     /// <summary>Підсумок збереження батча.</summary>
     /// <param name="Written">Скільки точок записано.</param>
     /// <param name="UnitChange">Причина-конверт про зміну одиниці; <c>null</c> — не було.</param>
-    private sealed record SaveOutcome(int Written, JobProgressMessageEnvelope? UnitChange);
+    /// <param name="Earliest">Найраніша мітка записаних точок; <c>null</c> — нічого не записано.</param>
+    private sealed record SaveOutcome(int Written, JobProgressMessageEnvelope? UnitChange, DateTime? Earliest);
 
     /// <summary>Атрибути, які читаємо для сутності.</summary>
     /// <remarks>

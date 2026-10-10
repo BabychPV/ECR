@@ -13,6 +13,7 @@ using Ecr.Domain.ValueObjects;
 using Ecr.Infrastructure.Persistence;
 using Ecr.Infrastructure.Security;
 using Ecr.TestKit;
+using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -520,9 +521,11 @@ public sealed partial class RowWindowMapsApiTests(SqlServerFixture sql)
     }
 
     /// <summary>Користувач із заданими функціональними правами і, якщо задано, грантом на проєкт.</summary>
-    private async Task<HttpClient> SignedInAsync(EcrApiFactory app, string[] permissions, int? projectId, GrantLevel? level)
+    private async Task<HttpClient> SignedInAsync(
+        EcrApiFactory app, string[] permissions, int? projectId, GrantLevel? level, WebApplicationFactory<Program>? host = null)
     {
-        var client = app.CreateClient();
+        // `host` — той самий застосунок із підміненими сервісами (WithWebHostBuilder); помилки читаються з `app`.
+        var client = (host ?? app).CreateClient();
         var name = $"rwm_{Guid.NewGuid():N}"[..20];
 
         await using (var db = NewDb())

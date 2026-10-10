@@ -50,6 +50,10 @@ public sealed class ExcelExporter(
     private static readonly IReadOnlyDictionary<string, long> NoRows =
         new Dictionary<string, long>(StringComparer.Ordinal);
 
+    /// <summary>Порожній перелік версій рядків — для таблиці без рядків (D1-02).</summary>
+    private static readonly IReadOnlyDictionary<string, string> NoVersions =
+        new Dictionary<string, string>(StringComparer.Ordinal);
+
     /// <summary>Порожній зріз — для таблиці, у якої немає непорожніх комірок.</summary>
     private static readonly IReadOnlyList<CellRecord> NoCells = [];
 
@@ -126,6 +130,19 @@ public sealed class ExcelExporter(
             .GetRowIdsBatchAsync(instanceIds, periodKey, ct)
             .ConfigureAwait(false);
 
+        // ⛔ D1-02 (HU-13 Q1, варіант A). Версії рядків — у карту книги, щоб
+        // імпорт відрізнив «людина змінила в книзі» від «хтось змінив у базі
+        // після експорту». Без них старі значення книги мовчки поверталися
+        // поверх чужих пізніших правок.
+        //
+        // ⚠ Версії читаються ДО значень. Запис між двома читаннями тоді дає
+        // версію СТАРШУ за вивантажені значення, і імпорт побачить зайвий
+        // конфлікт (безпечний бік). Зворотний порядок давав би версію, новішу
+        // за значення в книзі, — і саме ту мовчазну втрату, яку це закриває.
+        var versionsBatch = await rowStore
+            .GetRowVersionsBatchAsync(instanceIds, periodKey, ct)
+            .ConfigureAwait(false);
+
         var slicesBatch = await cellStore
             .ReadSlicesAsync(instanceIds, periodKey, ct)
             .ConfigureAwait(false);
@@ -180,6 +197,7 @@ public sealed class ExcelExporter(
                 var block = WriteTable(
                     worksheet, name, table, instance, snapshot, styleMap, lookups, styleSource, options, row,
                     rowIdsBatch.GetValueOrDefault(instance.TableInstanceId, NoRows),
+                    versionsBatch.GetValueOrDefault(instance.TableInstanceId, NoVersions),
                     slicesBatch.GetValueOrDefault(instance.TableInstanceId, NoCells),
                     formatRules,
                     contentLength);
@@ -426,6 +444,7 @@ public sealed class ExcelExporter(
         ExcelExportOptions options,
         int startRow,
         IReadOnlyDictionary<string, long> rowIds,
+        IReadOnlyDictionary<string, string> rowVersions,
         IReadOnlyList<CellRecord> cells,
         IReadOnlyDictionary<string, IReadOnlyList<ConditionalFormatRule>> formatRules,
         List<int> contentLength)
@@ -500,7 +519,7 @@ public sealed class ExcelExporter(
         for (var r = 0; r < keys.Count; r++)
         {
             var number = headerRow + 1 + r;
-            rowRefs.Add(new ExcelRowRef(keys[r], number));
+            rowRefs.Add(new ExcelRowRef(keys[r], number) { Version = rowVersions.GetValueOrDefault(keys[r]) });
             rowNumbers[keys[r]] = number;
         }
 
@@ -580,6 +599,15 @@ public sealed class ExcelExporter(
             }
 
             styleMapper.ApplyNumberFormat(style, column.DisplayFormat, column.Scale);
+
+            // ⛔ Y5-06 (аудит 7): текстова колонка — текстовим форматом `@`. Інакше
+            // набране в порожню комірку «12.50» чи «01.10» Excel перетворював на число
+            // (12.5, втрачений нуль), і імпорт отримував не те, що людина бачила, коли
+            // набирала. Власний формат колонки (`DisplayFormat`) лишається її.
+            if (column.DataType == CellDataType.String && string.IsNullOrWhiteSpace(column.DisplayFormat))
+            {
+                style.NumberFormat.Format = "@";
+            }
 
             if (IsCalculated(column))
             {
@@ -967,17 +995,38 @@ public sealed class ExcelExporter(
         sheet.Hide();
     }
 
-    /// <summary>Блоки карти з відбитками обчислюваних комірок кожного рядка.</summary>
+    /// <summary>Блоки карти з відбитками комірок кожного рядка: обчислюваних (P3) і введених (AN-118).</summary>
+    /// <remarks>
+    /// ⛔ AN-118 (R1-01): відбиток введених комірок — те, що стояло в книзі на
+    /// ЕКСПОРТІ; без нього перегляд не відрізнить правку людини від значення,
+    /// яке лишилося з експорту, у рядку, зміненому після вивантаження.
+    /// ⚠ Рахується з аркуша вже ПІСЛЯ запису значень — тим самим правилом
+    /// (<see cref="CalculatedCellFingerprint.Of"/>), яким імпорт читатиме книгу.
+    /// </remarks>
     private static List<ExcelTableBlock> Fingerprinted(XLWorkbook workbook, IReadOnlyList<ExcelTableBlock> blocks)
-        => [.. blocks.Select(block => block.Columns.Any(c => c.IsCalculated)
-            ? block with
+        => [.. blocks.Select(block =>
+        {
+            var hasCalculated = block.Columns.Any(c => c.IsCalculated);
+            var hasEntered = block.Columns.Any(c => !c.IsCalculated);
+
+            if (!hasCalculated && !hasEntered)
+            {
+                return block;
+            }
+
+            var worksheet = workbook.Worksheet(block.SheetName);
+
+            // ⛔ Y5-01: відбитки підписів рядків і заголовків колонок — імпорт звіряє з ними,
+            // чи не відсортовано, не вставлено й не видалено рядки чи колонки в Excel.
+            return LayoutFingerprint.Stamp(worksheet, block with
             {
                 Rows = [.. block.Rows.Select(row => row with
                 {
-                    Calc = CalculatedCellFingerprint.OfRow(workbook.Worksheet(block.SheetName), block.Columns, row.Number),
+                    Calc = hasCalculated ? CalculatedCellFingerprint.OfRow(worksheet, block.Columns, row.Number) : null,
+                    Cells = hasEntered ? EnteredCellFingerprint.OfRow(worksheet, block.Columns, row.Number) : null,
                 })],
-            }
-            : block)];
+            });
+        })];
 
     /// <summary>Чи рахує комірки цієї колонки система.</summary>
     private static bool IsCalculated(ColumnDef column)

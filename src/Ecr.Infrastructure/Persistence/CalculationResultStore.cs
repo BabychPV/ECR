@@ -1,3 +1,4 @@
+using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.Calculations;
@@ -187,7 +188,7 @@ public sealed class CalculationResultStore(EcrDbContext db, IClock clock, StaleC
         List<(CalculationOutput Output, CalculationTraceStep Step)> steps,
         CancellationToken ct)
     {
-        var nextId = await ReserveStepIdRangeAsync(steps.Count, ct).ConfigureAwait(false);
+        var nextId = await ReserveStepIdRangeAsync(periodKey, steps.Count, ct).ConfigureAwait(false);
         var results = PendingResults(calculationRunId);
 
         foreach (var (output, step) in steps)
@@ -509,8 +510,10 @@ public sealed class CalculationResultStore(EcrDbContext db, IClock clock, StaleC
             return 0;
         }
 
+        // ⚠ ВІДСТЕЖУВАНИЙ запит: нижче прогону знижується `InputsAsOfUtc` (N2-03), а зберігає викликач одним
+        // `SaveChanges` разом із рядками переносу й перемиканням актуальності (`SwitchCurrentRunAsync` читає
+        // той самий відстежуваний екземпляр).
         var run = await db.CalculationRuns
-            .AsNoTracking()
             .FirstOrDefaultAsync(r => r.Id == calculationRunId, ct)
             .ConfigureAwait(false)
             ?? throw new InvalidOperationException($"Прогону {calculationRunId} не існує.");
@@ -531,34 +534,64 @@ public sealed class CalculationResultStore(EcrDbContext db, IClock clock, StaleC
 
         // ⚠ Та сама вибірка «що зараз актуальне», що й у ReadCurrentAsync (перевага документного прогону
         // над проєктним); сам новий прогін ще не актуальний, тож у вибірку не потрапляє.
-        var hasDedicatedCurrent = await db.CalculationRuns
-            .AsNoTracking()
-            .AnyAsync(
-                r => r.DocumentId == documentId
-                     && r.PeriodKey == periodKey
-                     && r.Status == CalculationRun.CurrentStatus
-                     && r.Id != calculationRunId,
-                ct)
-            .ConfigureAwait(false);
+        // ⛔ R5-Q1-02: ідентифікатори актуальних прогонів — окремо, далі seek по кожному
+        // (`IX_CalculationResult_DocRun`), а не lookup на кожен результат усіх минулих прогонів.
+        var currentRunIds = await CurrentRunIdsAsync(documentId, periodKey, calculationRunId, ct).ConfigureAwait(false);
+        if (currentRunIds.Count == 0)
+        {
+            return 0;
+        }
 
-        var source = await db.CalculationResults
+        var sourceQuery = db.CalculationResults
             .AsNoTracking()
-            .Where(r => r.DocumentId == documentId
-                        && r.PeriodKey == periodKey
-                        && r.CalculationRunId != calculationRunId
-                        && versionIds.Contains(r.MethodologyVersionId)
-                        && db.CalculationRuns.Any(
-                            current => current.Id == r.CalculationRunId
-                                       && current.Status == CalculationRun.CurrentStatus
-                                       && (current.DocumentId == documentId
-                                           || (!hasDedicatedCurrent && current.DocumentId == null))))
+            .Where(r => r.PeriodKey == periodKey
+                        && r.DocumentId == documentId
+                        && currentRunIds.Contains(r.CalculationRunId)
+                        && versionIds.Contains(r.MethodologyVersionId));
+
+        // ⛔ N2-04: понад стелю — відмова, а не мовчазне обрізання. Раніше `Take(MaxResults)` губив хвіст:
+        // прогін ставав актуальним, а частина чисел перенесених аркушів зникала з читання без жодної ознаки.
+        // Відмова валить прогін (`Failed`, текст власного винятку лягає в `ErrorMessage`), а попередній
+        // прогін лишається актуальним: перемикання (`SwitchCurrentRunAsync`) іде після переносу.
+        var total = await sourceQuery.CountAsync(ct).ConfigureAwait(false);
+        if (total > CarryOverMaxResults)
+        {
+            throw new BusinessRuleException(
+                "ECR-CALC-0422",
+                $"Перенос результатів документа {documentId} за період {periodKey} перевищує стелю: {total} рядків, дозволено {CarryOverMaxResults}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0422.carryOverTooLarge",
+                    ["documentId"] = documentId,
+                    ["periodKey"] = periodKey,
+                    ["count"] = total,
+                    ["max"] = CarryOverMaxResults,
+                });
+        }
+
+        var source = await sourceQuery
             .OrderBy(r => r.Id)
-            .Take(MaxResults)
             .ToListAsync(ct)
             .ConfigureAwait(false);
         if (source.Count == 0)
         {
             return 0;
+        }
+
+        // ⛔ N2-03 / stale-for-B (D-324): перенесені числа лишаються на даних прогону-джерела, тож момент входів
+        // нового прогону не може бути пізнішим за момент входів джерела — інакше правка довідника між ними
+        // гасила б позначку застарілості. Береться `COALESCE(InputsAsOfUtc, StartedAt)` саме ДЖЕРЕЛА (а не лише
+        // його StartedAt): ланцюжок переносів A → B → C не губить найдавніший момент.
+        var sourceRunIds = source.Select(r => r.CalculationRunId).Distinct().ToList();
+        var sourceRuns = await db.CalculationRuns
+            .AsNoTracking()
+            .Where(r => sourceRunIds.Contains(r.Id))
+            .Select(r => new { r.StartedAt, r.InputsAsOfUtc })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+        foreach (var sourceRun in sourceRuns)
+        {
+            run.LimitInputsAsOf(sourceRun.InputsAsOfUtc ?? sourceRun.StartedAt);
         }
 
         var nextId = await ReserveResultIdRangeAsync(source.Count, ct).ConfigureAwait(false);
@@ -580,15 +613,19 @@ public sealed class CalculationResultStore(EcrDbContext db, IClock clock, StaleC
         return source.Count;
     }
 
+    /// <summary>Стеля результатів, що переносяться (<c>CarryOver</c>), на один документ і період; понад неї — відмова.</summary>
+    /// <remarks>Рядків стільки, скільки виходів × речовин × рядків таблиці; десятки тисяч — ознака хибної прив'язки.</remarks>
+    public const int CarryOverMaxResults = 50_000;
+
     /// <summary>Ключ каталогу причини: прогін не став актуальним, бо новіший уже актуальний.</summary>
     public const string SupersededByNewerKey = "jobs.calculationRunSupersededByNewer";
 
-    /// <summary>Стеля вибірки результатів на один документ і період.</summary>
+    /// <summary>Стеля вибірки результатів на один документ і період; понад неї — відмова (D2-05).</summary>
     /// <remarks>
     /// Рядків стільки, скільки виходів × речовин × рядків таблиці; десятки
     /// тисяч — уже ознака того, що прив'язку поставили на не ту таблицю.
     /// </remarks>
-    private const int MaxResults = 50_000;
+    public const int MaxResults = 50_000;
 
     /// <inheritdoc />
     /// <remarks>
@@ -597,11 +634,13 @@ public sealed class CalculationResultStore(EcrDbContext db, IClock clock, StaleC
     /// за часом» показав би суміш: половина чисел від нової версії методології,
     /// половина від старої, і жодної ознаки на екрані.
     ///
-    /// ⚠ Актуальність питається ПІДЗАПИТОМ (<c>EXISTS</c>), а не з'єднанням:
-    /// прогонів на період може бути кілька (кожен документ перераховується
-    /// окремо), тож «актуальний прогін періоду» — не одне число, а з'єднання з
-    /// проєкцією в тип, на полях якого потім сортують, EF перекласти не може
-    /// взагалі.
+    /// ⚠ Актуальні прогони беруться ОКРЕМИМ запитом (<see cref="CurrentRunIdsAsync"/>),
+    /// а результати — за їхніми ідентифікаторами: прогонів на період може бути
+    /// кілька (кожен документ перераховується окремо), тож «актуальний прогін
+    /// періоду» — не одне число. Доти тут був <c>EXISTS</c> по кожному рядку, і
+    /// він платив key lookup за кожен результат кожного минулого прогону (R5-Q1-02).
+    /// Між двома запитами прогін може змінити актуальність — тоді читаються
+    /// ПОВНІ результати попереднього прогону (результати не видаляються), а не суміш.
     ///
     /// ⛔ Перевага ДОКУМЕНТНОГО прогону над ПРОЄКТНИМ (третя хвиля UX-PASS R4,
     /// «CalculationRun ховає результати сусідніх документів»): відколи
@@ -615,31 +654,38 @@ public sealed class CalculationResultStore(EcrDbContext db, IClock clock, StaleC
     /// документа є ВЛАСНИЙ актуальний прогін, читаємо ЛИШЕ з нього; інакше —
     /// з актуального прогону всього проєкту, як і раніше (документ, що ще
     /// ніколи не мав власного прогону, — типовий і сьогоднішній випадок).
+    ///
+    /// ⛔ D2-05: понад <see cref="MaxResults"/> — ВІДМОВА (<c>ECR-CALC-0422</c>
+    /// <c>resultsTooLarge</c>), а не мовчазне обрізання. Доти <c>Take(MaxResults)</c>
+    /// віддавав перші 50 000 за <c>SourceRowKey</c>: хвіст рядків зникав із сітки
+    /// (<c>CalculatedCellOverlay</c>), експорту Excel і сторінки результатів, а суми
+    /// за кодом виходу ставали заниженими — без жодної ознаки. Симетрично до
+    /// переносу (N2-04, <see cref="CarryOverMaxResults"/>). <c>Take(MaxResults + 1)</c> —
+    /// найдешевший спосіб знати, що рядків БІЛЬШЕ за стелю, а не рівно стільки.
     /// </remarks>
+    /// <exception cref="BusinessRuleException">Результатів документа за період більше за <see cref="MaxResults"/>.</exception>
     public async Task<IReadOnlyList<CalculationResultRow>> ReadCurrentAsync(
         long documentId, int periodKey, CancellationToken ct)
     {
-        var hasDedicatedCurrent = await db.CalculationRuns
-            .AsNoTracking()
-            .AnyAsync(
-                r => r.DocumentId == documentId
-                     && r.PeriodKey == periodKey
-                     && r.Status == CalculationRun.CurrentStatus,
-                ct)
-            .ConfigureAwait(false);
+        // ⛔ R5-Q1-02: спершу ідентифікатори актуальних прогонів (одиниці), далі seek
+        // `IX_CalculationResult_DocRun (PeriodKey, DocumentId, CalculationRunId)` по кожному.
+        // Доти `EXISTS` по прогону робив key lookup на КОЖЕН результат документа-періоду за ВСІ
+        // минулі (Superseded) прогони: `IX_CalculationResult_Lookup` не містить `CalculationRunId`,
+        // а ретенції результатів немає (ЗБР-1) — вартість GET зрізу росла з кожним перерахунком.
+        var runIds = await CurrentRunIdsAsync(documentId, periodKey, excludeRunId: null, ct).ConfigureAwait(false);
+        if (runIds.Count == 0)
+        {
+            return [];
+        }
 
         var rows = await db.CalculationResults
             .AsNoTracking()
-            .Where(r => r.DocumentId == documentId
-                        && r.PeriodKey == periodKey
-                        && db.CalculationRuns.Any(
-                            run => run.Id == r.CalculationRunId
-                                   && run.Status == Domain.Entities.Calculations.CalculationRun.CurrentStatus
-                                   && (run.DocumentId == documentId
-                                       || (!hasDedicatedCurrent && run.DocumentId == null))))
+            .Where(r => r.PeriodKey == periodKey
+                        && r.DocumentId == documentId
+                        && runIds.Contains(r.CalculationRunId))
             .OrderBy(r => r.SourceRowKey)
             .ThenBy(r => r.OutputCode)
-            .Take(MaxResults)
+            .Take(MaxResults + 1)
             .Select(r => new
             {
                 r.MethodologyVersionId,
@@ -652,8 +698,73 @@ public sealed class CalculationResultStore(EcrDbContext db, IClock clock, StaleC
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
+        if (rows.Count > MaxResults)
+        {
+            throw new BusinessRuleException(
+                "ECR-CALC-0422",
+                $"Результатів документа {documentId} за період {periodKey} більше за {MaxResults}: показати їх частково означало б показати хибні суми.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0422.resultsTooLarge",
+                    ["documentId"] = documentId,
+                    ["periodKey"] = periodKey,
+                    ["max"] = MaxResults,
+                });
+        }
+
         return rows.ConvertAll(r => new CalculationResultRow(
             r.MethodologyVersionId, r.SourceRowKey, r.OutputCode, r.Value, r.UnitId, r.SubstanceEntryId));
+    }
+
+    /// <summary>
+    /// Актуальні прогони, з яких читаються результати документа за період: ВЛАСНИЙ документний,
+    /// а коли його для цього періоду немає — ще й прогін усього проєкту (UX-PASS R4).
+    /// </summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="periodKey">Період результатів.</param>
+    /// <param name="excludeRunId">Прогін, який не вважається актуальним (новий прогін у переносі).</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⛔ R5-Q1-02: та сама вибірка, що доти жила в <c>EXISTS</c> по кожному рядку результатів, але
+    /// окремим дешевим запитом: <c>UX_CalculationRun_Current</c> фільтрований за <c>Status = 'Current'</c>
+    /// і веде <c>ProjectId</c>, тож прогонів тут одиниці. Прогін документа належить проєкту документа,
+    /// а прогони без <c>DocumentId</c> інших проєктів результатів цього документа не мають — звуження
+    /// до проєкту семантики не змінює.
+    /// </remarks>
+    private async Task<List<long>> CurrentRunIdsAsync(
+        long documentId, int periodKey, long? excludeRunId, CancellationToken ct)
+    {
+        var projectId = await db.Documents
+            .AsNoTracking()
+            .Where(d => d.Id == documentId)
+            .Select(d => (int?)d.ProjectId)
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+        if (projectId is not { } project)
+        {
+            return [];
+        }
+
+        var current = await db.CalculationRuns
+            .AsNoTracking()
+            .Where(r => r.ProjectId == project
+                        && r.Status == CalculationRun.CurrentStatus
+                        && (r.DocumentId == documentId || r.DocumentId == null))
+            .Select(r => new { r.Id, r.DocumentId, r.PeriodKey })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        if (excludeRunId is { } excluded)
+        {
+            current.RemoveAll(r => r.Id == excluded);
+        }
+
+        var hasDedicatedCurrent = current.Exists(r => r.DocumentId == documentId && r.PeriodKey == periodKey);
+
+        return current
+            .Where(r => r.DocumentId == documentId || (!hasDedicatedCurrent && r.DocumentId == null))
+            .Select(r => r.Id)
+            .ToList();
     }
 
     /// <summary>
@@ -683,13 +794,26 @@ public sealed class CalculationResultStore(EcrDbContext db, IClock clock, StaleC
     /// до MAX спалюються одним резервуванням — один раз на базу, далі
     /// послідовність завжди попереду.
     /// </para>
+    /// <para>
+    /// ⛔ D2-06: MAX — лише в партиції ПЕРІОДУ запису (<c>WHERE PeriodKey = @p</c>). Доти
+    /// <c>MAX(Id)</c> ішов по всій <c>calc.CalculationStep</c>: <c>Id</c> не провідна колонка
+    /// жодного індексу (<c>PK (PeriodKey, Id)</c>, таблиця партиціонована за <c>PeriodKey</c>), тож
+    /// кожен запис трейсу (прив'язка × документ × період, з кожної гілки оркестратора) сканував
+    /// усі партиції. Звуження коректне, бо унікальність потрібна лише в межах ключа
+    /// <c>(PeriodKey, Id)</c>: старий Id іншого періоду з нашим не зіткнеться. Тепер це один
+    /// seek у кінець діапазону PK. Міграції немає.
+    /// </para>
     /// </remarks>
-    private async Task<long> ReserveStepIdRangeAsync(int count, CancellationToken ct)
+    /// <param name="periodKey">Період (партиція), у яку пишуться кроки.</param>
+    /// <param name="count">Скільки Id потрібно.</param>
+    /// <param name="ct">Токен скасування.</param>
+    private async Task<long> ReserveStepIdRangeAsync(int periodKey, int count, CancellationToken ct)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(count);
 
         var legacyMax = await db.CalculationSteps
             .AsNoTracking()
+            .Where(s => s.PeriodKey == periodKey)
             .Select(s => (long?)s.Id)
             .MaxAsync(ct)
             .ConfigureAwait(false) ?? 0;

@@ -27,6 +27,8 @@ public sealed class CollectionRunnerTests
     private const int SourceEntityId = 42;
     private const int KilogramId = 1;
     private const int TonneId = 2;
+    private const int StdCubicMetrePerHourId = 3;
+    private const int StdCubicMetrePerDayId = 4;
 
     private static readonly DateTime Now = new(2026, 3, 1, 12, 0, 0, DateTimeKind.Utc);
 
@@ -71,6 +73,78 @@ public sealed class CollectionRunnerTests
 
         await world.Store.Received().FinishRunAsync(
             Arg.Any<long>(), "Succeeded", Arg.Any<int>(), null, Arg.Any<CancellationToken>());
+    }
+
+    [Fact(Timeout = 15000)]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "I1-04")]
+    public async Task Прогалина_що_не_дочитується_не_голодує_запитаний_діапазон()
+    {
+        // Покриття порожнє: прогалина 45 діб, на якій джерело «висне» до спрацювання годинника
+        // прогону (послідовний PiSqlClient на великій прогалині). ⛔ МУТАЦІЙНИЙ ДОКАЗ: повернути в
+        // PlanAsync порядок «давнє першим» — свіжий діапазон не читається, точки немає, покриття немає.
+        var from = Now.AddDays(-1);
+        var world = new World(maxRunDuration: TimeSpan.FromSeconds(2));
+        world.Source.ReadAsync(Arg.Any<CollectionRequest>(), Arg.Any<CancellationToken>())
+            .Returns(call => call.ArgAt<CollectionRequest>(0).FromUtc < from
+                ? NeverAsync(call.ArgAt<CancellationToken>(1))
+                : Task.FromResult(new CollectionResult(
+                    [new SourceDataPoint("tag", Now.AddHours(-2), 10m, null, "kg", "Good")], [], null)));
+
+        await world.Runner.RunAsync(SourceEntityId, from, Now, world.Progress, CancellationToken.None);
+
+        await world.Store.Received().UpsertRawPointsAsync(
+            Arg.Any<long>(), SourceEntityId,
+            Arg.Is<IReadOnlyList<SourceDataPoint>>(p => p.Count == 1 && p[0].Timestamp == Now.AddHours(-2)),
+            Arg.Any<CancellationToken>());
+        await world.Store.Received().WriteCoverageAsync(
+            Arg.Any<long>(), SourceEntityId,
+            Arg.Is<IReadOnlyList<TimeInterval>>(i => i.Contains(new TimeInterval(from, Now))),
+            Arg.Any<CancellationToken>());
+
+        // Прогін фіксує початок усього прочитаного, а не лише запитаного діапазону.
+        await world.Store.Received().StartRunAsync(
+            SourceEntityId, from - CollectionRunner.CatchUpLookback, Now, true, Arg.Any<int?>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "I1-01")]
+    public async Task RunAsync_повертає_мітку_найранішої_точки_яку_дописало_наздоганяння()
+    {
+        // Покриття порожнє: прогалина [from − 45 діб, from) читається разом із запитаним діапазоном.
+        var from = Now.AddDays(-1);
+        var late = from.AddDays(-10);
+        var world = new World();
+        world.Source.ReadAsync(Arg.Any<CollectionRequest>(), Arg.Any<CancellationToken>())
+            .Returns(call => call.ArgAt<CollectionRequest>(0).FromUtc < from
+                ? new CollectionResult([new SourceDataPoint("tag", late, 3m, null, "kg", "Good")], [], null)
+                : new CollectionResult([new SourceDataPoint("tag", Now.AddHours(-2), 10m, null, "kg", "Good")], [], null));
+
+        // ⛔ МУТАЦІЙНИЙ ДОКАЗ: повертати `fromUtc` замість мітки найранішої записаної точки —
+        // задача матеріалізації не дізнається, що змінився минулий місяць.
+        var summary = await world.Runner.RunAsync(SourceEntityId, from, Now, world.Progress, CancellationToken.None);
+
+        Assert.Equal((late, 2), (summary.ReadFromUtc, summary.PointsWritten));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "I1-01")]
+    public async Task RunAsync_без_давніших_точок_повертає_запитаний_початок()
+    {
+        // Прогалина, за яку джерело нічого не дало, не розширює матеріалізацію: інакше закритий
+        // місяць щопрогону отримував би задачу (і SkippedPeriodClosed) без жодної нової точки.
+        var from = Now.AddDays(-1);
+        var world = new World();
+        world.Source.ReadAsync(Arg.Any<CollectionRequest>(), Arg.Any<CancellationToken>())
+            .Returns(call => call.ArgAt<CollectionRequest>(0).FromUtc < from
+                ? new CollectionResult([], [], null)
+                : new CollectionResult([new SourceDataPoint("tag", Now.AddHours(-2), 10m, null, "kg", "Good")], [], null));
+
+        var summary = await world.Runner.RunAsync(SourceEntityId, from, Now, world.Progress, CancellationToken.None);
+
+        Assert.Equal(from, summary.ReadFromUtc);
     }
 
     [Fact]
@@ -119,6 +193,54 @@ public sealed class CollectionRunnerTests
         await world.Store.DidNotReceive().WriteCoverageAsync(
             Arg.Any<long>(), Arg.Any<int>(),
             Arg.Is<IReadOnlyList<TimeInterval>>(i => i.Count > 0), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-16.9")]
+    [Trait("Finding", "Z2-02")]
+    public async Task Абревіатура_PI_Sm3_слеш_h_відповідає_Sm3_per_h_і_не_ставить_паузу()
+    {
+        // PI віддає `UnitsAbbreviation` = «Sm3/h»; код довідника — `Sm3_per_h` (`EcrCode` без `/`).
+        var world = new World();
+        var map = EntityFieldMap.ToColumn(SourceEntityId, "tag", columnDefId: 7);
+        map.SetUnits(StdCubicMetrePerHourId, null);
+        world.Maps.Add(map);
+        world.Source.ReadAsync(Arg.Any<CollectionRequest>(), Arg.Any<CancellationToken>())
+            .Returns(new CollectionResult([new SourceDataPoint("tag", Now.AddHours(-2), 3.6m, null, "Sm3/h", "Good")], [], null));
+
+        // ⛔ МУТАЦІЙНИЙ ДОКАЗ: повернути в `IsDeclaredUnit` пряме `Units.TryGetValue(symbol)` → «Sm3/h» не
+        // знайдено, мапінг на паузі, точку не записано — червоний.
+        await world.Runner.RunAsync(SourceEntityId, Now.AddDays(-1), Now, world.Progress, CancellationToken.None);
+
+        await world.Store.DidNotReceive().PauseForSourceUnitChangeAsync(
+            Arg.Any<int>(), Arg.Any<string>(), Arg.Any<int?>(), Arg.Any<CancellationToken>());
+        await world.Store.Received().UpsertRawPointsAsync(
+            Arg.Any<long>(), SourceEntityId,
+            Arg.Is<IReadOnlyList<SourceDataPoint>>(p => p.Count == 1 && p[0].SourcePath == "tag"),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-16.9")]
+    [Trait("Finding", "Z2-02")]
+    public async Task Абревіатура_PI_Sm3_слеш_d_при_оголошеній_Sm3_per_h_ставить_паузу_з_одиницею_довідника()
+    {
+        // ФВ-16.9 зберігається: справжня зміна UOM (h → d) — пауза, і пауза знає одиницю довідника
+        // (`Sm3_per_day`), тож людина може прийняти її без вибору вручну.
+        var world = new World();
+        var map = EntityFieldMap.ToColumn(SourceEntityId, "tag", columnDefId: 7);
+        map.SetUnits(StdCubicMetrePerHourId, null);
+        world.Maps.Add(map);
+        world.Source.ReadAsync(Arg.Any<CollectionRequest>(), Arg.Any<CancellationToken>())
+            .Returns(new CollectionResult([new SourceDataPoint("tag", Now.AddHours(-2), 86.4m, null, "Sm3/d", "Good")], [], null));
+
+        await world.Runner.RunAsync(SourceEntityId, Now.AddDays(-1), Now, world.Progress, CancellationToken.None);
+
+        // ⛔ МУТАЦІЙНИЙ ДОКАЗ: `actualId` за прямим пошуком коду → null замість Sm3_per_day — червоний.
+        await world.Store.Received(1).PauseForSourceUnitChangeAsync(
+            Arg.Any<int>(), "Sm3/d", StdCubicMetrePerDayId, Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -441,6 +563,8 @@ public sealed class CollectionRunnerTests
                 {
                     ["kg"] = new(KilogramId, "kg", DimensionId: 1),
                     ["t"] = new(TonneId, "t", DimensionId: 1, FactorToBase: 1000m),
+                    ["Sm3_per_h"] = new(StdCubicMetrePerHourId, "Sm3_per_h", DimensionId: 13, FactorToBase: 0.000277777777777778m),
+                    ["Sm3_per_day"] = new(StdCubicMetrePerDayId, "Sm3_per_day", DimensionId: 13, FactorToBase: 0.000011574074074074m),
                 },
                 new Dictionary<string, int>(StringComparer.Ordinal)));
 

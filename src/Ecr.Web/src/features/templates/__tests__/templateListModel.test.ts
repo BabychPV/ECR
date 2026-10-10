@@ -4,7 +4,8 @@ import {
   documentCount,
   draftCount,
   filterTemplateRows,
-  publishedVersionCount,
+  matchesStat,
+  publishedCount,
   toTemplateListRow,
   type TemplateListSummary,
 } from '@/features/templates/templateListModel';
@@ -99,8 +100,10 @@ describe('показники смуги', () => {
     toTemplateListRow(template(3, 'C'), [version(5, 'Deprecated'), version(6, 'Published')]),
   ];
 
-  it('опубліковані версії рахуються по всіх шаблонах, не по шаблонах', () => {
-    expect(publishedVersionCount(rows)).toBe(3);
+  it('N4-03: плитка «published» = кількість шаблонів, що проходять її ж фільтр (а не версій: 3 ≠ 2)', () => {
+    expect(publishedCount(rows)).toBe(2);
+    expect(publishedCount(rows)).toBe(rows.filter((row) => matchesStat(row, 'published')).length);
+    expect(filterTemplateRows(rows, { query: null, state: null, stat: 'published' })).toHaveLength(publishedCount(rows));
   });
 
   it('чернетки — кількість шаблонів із відкритою чернеткою', () => {

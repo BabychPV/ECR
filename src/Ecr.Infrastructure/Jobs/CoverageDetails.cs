@@ -30,6 +30,10 @@ public static class CoverageDetails
     public const string KeptManualKey = "coverageEvents.keptManual";
     public const string WriteConflictKey = "coverageEvents.writeConflict";
     public const string NeedsConfirmationKey = "coverageEvents.needsConfirmation";
+    public const string CellRejectedKey = "coverageEvents.cellRejected";
+    public const string PartialCoverageKey = "coverageEvents.partialCoverage";
+    public const string NoDataKey = "coverageEvents.noData";
+    public const string RowWindowStaleKey = "coverageEvents.rowWindowStale";
     public const string EventWriteFailedKey = "coverageEvents.eventWriteFailed";
     public const string EventWritePartialKey = "coverageEvents.eventWritePartial";
     public const string EventRowNotCreatedKey = "coverageEvents.eventRowNotCreated";
@@ -93,6 +97,27 @@ public static class CoverageDetails
     public static string PointCeiling(object field, int limit)
         => Encode(PointCeilingKey, ("field", Text(field)), ("limit", Text(limit)));
 
+    /// <summary>Згортка за часом скінченого періоду покрила менше порогу — число записано, але неповне (D2-02).</summary>
+    /// <remarks>Частка — з двома знаками після коми, інваріантно: це параметр рядка, а не число для обчислень.</remarks>
+    public static string PartialCoverage(object field, int mapId, decimal percentGood, decimal minPercentGood)
+        => Encode(
+            PartialCoverageKey,
+            ("field", Text(field)),
+            ("mapId", Text(mapId)),
+            ("percentGood", Math.Round(percentGood, 2, MidpointRounding.ToZero).ToString("0.##", CultureInfo.InvariantCulture)),
+            ("min", minPercentGood.ToString("0.##", CultureInfo.InvariantCulture)));
+
+    /// <summary>У скінченому періоді немає придатних точок поля — комірку не оновлено (D2-02).</summary>
+    public static string NoData(object field, int mapId)
+        => Encode(NoDataKey, ("field", Text(field)), ("mapId", Text(mapId)));
+
+    /// <summary>
+    /// Вікно чи джерело рядка змінилося, а нового значення немає (<paramref name="status"/>): у комірці лишилося
+    /// число попереднього вікна чи джерела (аудит I1-03).
+    /// </summary>
+    public static string RowWindowStale(object rowKey, int mapId, object status)
+        => Encode(RowWindowStaleKey, ("rowKey", Text(rowKey)), ("mapId", Text(mapId)), ("status", Text(status)));
+
     /// <summary>Комірка має правку людини.</summary>
     public static string KeptManual(object cell) => Encode(KeptManualKey, ("cell", Text(cell)));
 
@@ -101,6 +126,13 @@ public static class CoverageDetails
 
     /// <summary>Правило періоду вимагає підтвердження людини.</summary>
     public static string NeedsConfirmation(object cell) => Encode(NeedsConfirmationKey, ("cell", Text(cell)));
+
+    /// <summary>
+    /// Значення комірки збору відхилив обробник запису (F1-03: коміркове правило <c>Error</c> тощо);
+    /// решту полів записано. <paramref name="code"/> — код каталогу, без тексту відмови.
+    /// </summary>
+    public static string CellRejected(object cell, string code)
+        => Encode(CellRejectedKey, ("cell", Text(cell)), ("code", Text(code)));
 
     /// <summary>Подію не записано; <paramref name="reason"/> — текст відмови (дані, не наше формулювання).</summary>
     public static string EventWriteFailed(object eventId, string reason)

@@ -30,6 +30,8 @@ function sliceKey(tableInstanceId: number, periodKey: number): SliceKey {
 }
 
 const focused = new Map<SliceKey, FocusedCell>();
+/** Зріз, у якому курсор ставили ОСТАННІМ (N3-02); `null` — ще ніде. */
+let lastSlice: SliceKey | null = null;
 const listeners = new Set<() => void>();
 
 function notify(): void {
@@ -72,6 +74,13 @@ export function publishFocus(
   const key = sliceKey(tableInstanceId, periodKey);
   const current = focused.get(key) ?? null;
 
+  // ⛔ N3-02: «останній» — той, у кого курсор ПОСТАВИЛИ останнім, навіть коли
+  // комірка та сама (клік назад у сітку A після сітки B). Скидання фокуса (`null`)
+  // «останнього» не міняє: клік в інспектор забирає фокус із сітки, а вкладка
+  // інспектора не має гаснути від цього.
+  const lastChanged = cell !== null && lastSlice !== key;
+  if (cell !== null) lastSlice = key;
+
   if (current === null && cell === null) return;
 
   if (
@@ -80,6 +89,8 @@ export function publishFocus(
     current.rowIndex === cell.rowIndex &&
     current.columnIndex === cell.columnIndex
   ) {
+    if (lastChanged) notify();
+
     return;
   }
 
@@ -87,6 +98,28 @@ export function publishFocus(
   else focused.set(key, cell);
 
   notify();
+}
+
+/**
+ * Зріз, у якому курсор ставили останнім (N3-02); `null` — ще ніде.
+ *
+ * ⚠ Рядок формули кожної змонтованої сітки публікує комірку в інспектор, і без
+ * цього ключа «останньою» лишалася б сітка, що відмалювалась пізніше (після
+ * перерахунку — прихована таблиця), а не та, у якій працює людина.
+ */
+export function lastFocusedSlice(): string | null {
+  return lastSlice;
+}
+
+/** Чи цей зріз — той, у якому курсор ставили останнім; з підпискою. */
+export function useIsLastFocusedSlice(tableInstanceId: number, periodKey: number): boolean {
+  const key = sliceKey(tableInstanceId, periodKey);
+
+  return useSyncExternalStore(
+    subscribeFocus,
+    () => lastSlice === key,
+    () => lastSlice === key,
+  );
 }
 
 /**
@@ -98,6 +131,7 @@ export function publishFocus(
  */
 export function resetFocus(): void {
   focused.clear();
+  lastSlice = null;
   notify();
 }
 

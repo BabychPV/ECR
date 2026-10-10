@@ -1,6 +1,7 @@
 ﻿// src/Ecr.Infrastructure/Jobs/SourceEventSyncJob.cs
 using System.Globalization;
 using System.Text.Json;
+using Ecr.Application.Documents;
 using Ecr.Application.Errors;
 using Ecr.Application.Integration.SourceEvents;
 using Ecr.Application.Ports;
@@ -403,7 +404,8 @@ public sealed partial class SourceEventSyncJob(
     /// ⛔ L3-07: одне читання зі стелею <see cref="SourceEventQuery.DefaultMaxEvents"/> від найранішого відкритого
     /// періоду (повна звірка) щоразу віддавало ті самі найраніші події — найсвіжіші не синхронізувалися ніколи,
     /// доки старий період не закриють. Запит упорядкований за початком (контракт адаптерів). Сторінка, що не
-    /// зрушила курсор (усі події з одним початком), зупиняє читання як обрізане.
+    /// зрушила курсор (усі події з одним початком), зупиняє читання як обрізане. Обрізана сторінка з НЕупорядкованими
+    /// початками (запит подій перевизначено) теж зупиняє читання як обрізане: курсор там нічого не гарантує.
     /// </remarks>
     private static async Task<(SourceEventResult Result, int Pages)> ReadEventPagesAsync(
         IExternalDataSource adapter, SourceEventQuery query, CancellationToken ct)
@@ -417,7 +419,21 @@ public sealed partial class SourceEventSyncJob(
         {
             var page = await adapter.ReadEventsAsync(query with { FromUtc = cursor }, ct).ConfigureAwait(false);
             pages++;
+
+            // ⛔ L3-07: порядок сторінки перевіряємо за кореневими подіями (дочірні — вкладення, їх початок
+            // порядку не задає). Запит подій можна перевизначити (`PiSqlClient:{код}:EventQuery`), тож контракт
+            // «ORDER BY StartTime» ніде інде не гарантований.
+            var roots = page.Events.Where(e => string.IsNullOrWhiteSpace(e.ParentId)).ToList();
+            var ordered = roots.Zip(roots.Skip(1)).All(p => p.First.StartUtc <= p.Second.StartUtc);
             events.AddRange(page.Events.Where(e => seen.Add(e.EventId)));
+
+            if (!ordered && page.Truncated)
+            {
+                // ⛔ L3-07: курсор Max(StartUtc) правдивий лише для ORDER BY StartTime; інакше пропущені події
+                // стали б «Gone» (остання сторінка не обрізана) і рядки видалилися б жорстко. Обрізане → без
+                // Missing/видалення, а непрочитані події лишаються наступному прогону.
+                return (new SourceEventResult(events, true, null), pages);
+            }
 
             if (!page.Truncated || page.ErrorCode is not null || page.Events.Count == 0)
             {
@@ -515,7 +531,10 @@ public sealed partial class SourceEventSyncJob(
             sibling.OtherIds));
 
         var fields = await FieldPlansAsync(map, ct).ConfigureAwait(false);
-        UnitCatalogSnapshot? units = fields.Any(f => f.SourceUnitId is not null && f.TargetUnitId is not null)
+
+        // ⛔ L3-06: каталог потрібен і полю з ОДНІЄЮ одиницею джерела (без цільової): звірка фактичної одиниці
+        // атрибута з оголошеною (SourceEventRowBuilder) при units == null пропускалась мовчки.
+        UnitCatalogSnapshot? units = fields.Any(f => f.SourceUnitId is not null)
             ? await new UnitCatalog(db).GetAsync(ct).ConfigureAwait(false)
             : null;
 
@@ -773,7 +792,7 @@ public sealed partial class SourceEventSyncJob(
 
             if (!manualByGroup.TryGetValue((instance, periodKey), out var manual))
             {
-                manual = await ManualRowKeysAsync(instance, periodKey, ct).ConfigureAwait(false);
+                manual = await ManualRowKeysAsync(map.DocumentId, instance, periodKey, ct).ConfigureAwait(false);
                 manualByGroup[(instance, periodKey)] = manual;
             }
 
@@ -853,7 +872,9 @@ public sealed partial class SourceEventSyncJob(
             totals.Removed++;
         }
 
-        var physical = decision.Rows.Where(r => !r.SharedRow).ToList();
+        // ⚠ R7-Y2-02: за зростанням періоду — ключ `sheet-edit` береться в тому самому порядку, що в інших
+        // багатоаркушевих писарів (`sheet-edit[↑]`); чекає лише перший, решта — без черги (нижче).
+        var physical = decision.Rows.Where(r => !r.SharedRow).OrderBy(r => r.State.PeriodKey!.Value).ToList();
         foreach (var shared in decision.Rows.Where(r => r.SharedRow))
         {
             Drop(shared.Link, links, linkByEventId, removed);
@@ -870,12 +891,25 @@ public sealed partial class SourceEventSyncJob(
         await connection.OpenAsync(ct).ConfigureAwait(false);
         await using var tx = (Microsoft.Data.SqlClient.SqlTransaction)await connection.BeginTransactionAsync(ct).ConfigureAwait(false);
 
-        var sheetDefId = await db.TableDefs
-            .AsNoTracking()
-            .Where(t => t.Id == map.TableDefId)
-            .Select(t => (int?)t.SheetDefId)
-            .FirstOrDefaultAsync(ct)
-            .ConfigureAwait(false);
+        // ⛔ L6-02 (писар): структуру документа пишуть під `doc-structure` (спільно — писарі, виключно — перенос
+        // версії). Видалення рядків подій брало лише `sheet-edit`: у вікні переносу воно видаляло за екземплярами
+        // старої версії. Порядок блокувань: `doc-structure` → (`doc-header`) → `sheet-edit`, структура — ПЕРШОЮ
+        // дією транзакції. Не взято за таймаут — видалення лишається наступному прогону.
+        if (!await TryAppLockAsync(connection, tx, SheetEditGate.StructureResourceOf(map.DocumentId), wait: true, ct).ConfigureAwait(false))
+        {
+            totals.RemovalSkipped += physical.Count;
+            return removed;
+        }
+
+        // ⛔ L6-02: аркуш таблиці читається ПІСЛЯ блокування структури, у цій транзакції (RCSI бере знімок на
+        // початку оператора, тож бачить перенос, що зафіксувався, поки чекали). Таблиці немає — структура
+        // змінилась: нічого не видаляємо.
+        if (await ReadSheetDefIdAsync(connection, tx, map.TableDefId, ct).ConfigureAwait(false) is not { } sheetDefId)
+        {
+            totals.RemovalSkipped += physical.Count;
+            return removed;
+        }
+
         var locked = new Dictionary<int, bool>();
         var deleted = new List<PendingRemoval>();
 
@@ -884,20 +918,28 @@ public sealed partial class SourceEventSyncJob(
             // ⛔ L3-04: рішення (DecideRemovalsAsync) читало стан аркуша й правки людини ПОЗА цією
             // транзакцією — подання чи правка між рішенням і видаленням інакше губилися б. Як правка в
             // PatchCellsHandler: спільне блокування аркуша, далі гарди повторно — у тій самій транзакції.
+            // ⛔ R7-Y2-02 (X6-02): чекати дозволено лише ПЕРШИЙ аркуш-період, поки транзакція ще не тримає
+            // жодного `sheet-edit`. Наступні періоди — без черги (`@LockTimeout = 0`): черга `sp_getapplock`
+            // FIFO, і видалення, що чекало період N (його саме подають), тримаючи S на періодах 1…N-1 та
+            // `doc.Period`/`doc.TableRow` під HOLDLOCK, ставило за собою подання тих періодів, автозбереження
+            // їхніх редакторів і `PeriodStateJob`. Не взято — видалення цього періоду лишається наступному прогону.
             var periodKey = item.State.PeriodKey!.Value;
-            if (sheetDefId is { } sheet)
+            if (!locked.TryGetValue(periodKey, out var taken))
             {
-                if (!locked.TryGetValue(periodKey, out var taken))
-                {
-                    taken = await TryLockSheetAsync(connection, tx, map.DocumentId, sheet, periodKey, ct).ConfigureAwait(false);
-                    locked[periodKey] = taken;
-                }
+                taken = await TryAppLockAsync(
+                        connection,
+                        tx,
+                        SheetEditGate.ResourceOf(map.DocumentId, sheetDefId, periodKey),
+                        wait: locked.Count == 0,
+                        ct)
+                    .ConfigureAwait(false);
+                locked[periodKey] = taken;
+            }
 
-                if (!taken)
-                {
-                    totals.RemovalSkipped++;
-                    continue;
-                }
+            if (!taken)
+            {
+                totals.RemovalSkipped++;
+                continue;
             }
 
             if (await RecheckRemovalAsync(connection, tx, map, sheetDefId, item, ct).ConfigureAwait(false) is { } refused)
@@ -940,14 +982,39 @@ public sealed partial class SourceEventSyncJob(
         removed.Add(link.SourceEventId);
     }
 
-    /// <summary>Спільне блокування аркуша в транзакції видалення (той самий ресурс, що й у <c>SheetEditGate</c>).</summary>
-    /// <returns><c>false</c> — аркуш зайнятий поданням довше за таймаут: видалення лишається наступному прогону.</returns>
-    private static async Task<bool> TryLockSheetAsync(
+    /// <summary>Аркуш таблиці, прочитаний у транзакції видалення; <c>null</c> — таблиці вже немає.</summary>
+    private static async Task<int?> ReadSheetDefIdAsync(
         Microsoft.Data.SqlClient.SqlConnection connection,
         Microsoft.Data.SqlClient.SqlTransaction tx,
-        long documentId,
-        int sheetDefId,
-        int periodKey,
+        int tableDefId,
+        CancellationToken ct)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = tx;
+        command.CommandText = "SELECT SheetDefId FROM cfg.TableDef WHERE Id = @table;";
+        command.Parameters.Add("@table", System.Data.SqlDbType.Int).Value = tableDefId;
+        return await command.ExecuteScalarAsync(ct).ConfigureAwait(false) is int sheet ? sheet : null;
+    }
+
+    /// <summary>
+    /// Спільне блокування <c>sp_getapplock</c> у транзакції видалення: структура документа
+    /// (<see cref="SheetEditGate.StructureResourceOf"/>) чи аркуш (<see cref="SheetEditGate.ResourceOf"/>) —
+    /// ті самі ресурси, що й у <c>SheetEditGate</c>.
+    /// </summary>
+    /// <param name="connection">З'єднання транзакції видалення.</param>
+    /// <param name="tx">Транзакція видалення.</param>
+    /// <param name="resource">Ресурс блокування.</param>
+    /// <param name="wait">
+    /// <c>false</c> — без черги (<c>@LockTimeout = 0</c>), для ресурсу, коли транзакція вже тримає інші
+    /// <c>sheet-edit</c> (R7-Y2-02 / X6-02).
+    /// </param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns><c>false</c> — ресурс зайнятий довше за таймаут: видалення лишається наступному прогону.</returns>
+    private static async Task<bool> TryAppLockAsync(
+        Microsoft.Data.SqlClient.SqlConnection connection,
+        Microsoft.Data.SqlClient.SqlTransaction tx,
+        string resource,
+        bool wait,
         CancellationToken ct)
     {
         await using var command = connection.CreateCommand();
@@ -956,13 +1023,13 @@ public sealed partial class SourceEventSyncJob(
         command.CommandText = "sp_getapplock";
         command.Parameters.Add(new Microsoft.Data.SqlClient.SqlParameter("@Resource", System.Data.SqlDbType.NVarChar, 255)
         {
-            Value = SheetEditGate.ResourceOf(documentId, sheetDefId, periodKey),
+            Value = resource,
         });
         command.Parameters.Add(new Microsoft.Data.SqlClient.SqlParameter("@LockMode", System.Data.SqlDbType.VarChar, 32) { Value = "Shared" });
         command.Parameters.Add(new Microsoft.Data.SqlClient.SqlParameter("@LockOwner", System.Data.SqlDbType.VarChar, 32) { Value = "Transaction" });
         command.Parameters.Add(new Microsoft.Data.SqlClient.SqlParameter("@LockTimeout", System.Data.SqlDbType.Int)
         {
-            Value = SheetEditGatePolicy.DefaultLockTimeoutSeconds * 1000,
+            Value = wait ? SheetEditGatePolicy.DefaultLockTimeoutSeconds * 1000 : 0,
         });
         var result = new Microsoft.Data.SqlClient.SqlParameter("@Result", System.Data.SqlDbType.Int)
         {
@@ -976,7 +1043,8 @@ public sealed partial class SourceEventSyncJob(
     }
 
     /// <summary>
-    /// Гарди видалення ще раз — під блокуванням аркуша і рядка, у транзакції видалення (L3-04).
+    /// Гарди видалення ще раз — під блокуванням аркуша, рядка і періоду, у транзакції видалення (L3-04):
+    /// стан періоду, стан аркуша, правка людини.
     /// </summary>
     /// <returns>Подія покриття, якщо рядок видаляти вже не можна; <c>null</c> — можна.</returns>
     /// <remarks>
@@ -996,33 +1064,60 @@ public sealed partial class SourceEventSyncJob(
 
         await using var command = connection.CreateCommand();
         command.Transaction = tx;
-        command.CommandText = """
+        command.CommandText = $"""
             SELECT COUNT(*) FROM doc.TableRow WITH (UPDLOCK, HOLDLOCK)
              WHERE PeriodKey = @period AND TableInstanceId = @instance AND RowKey = @rowKey;
+
+            -- ⛔ L3-04: стан ПЕРІОДУ — теж під блокуванням у цій транзакції (HOLDLOCK тримає рядок doc.Period до
+            -- коміту: PeriodStateJob/Reopen з UPDLOCK дочекаються видалення, а закриття, що вже закомітилось
+            -- після рішення, видно цьому оператору — RCSI бере знімок на початку оператора).
+            SELECT TOP (1) p.State
+              FROM doc.Period AS p WITH (HOLDLOCK)
+              JOIN doc.Document AS d ON d.ProjectId = p.ProjectId
+             WHERE d.Id = @document AND p.PeriodKey = @period
+               AND p.State NOT IN (@open, @grace);
 
             SELECT TOP (1) Status FROM wf.ApprovalState
              WHERE @sheet IS NOT NULL AND DocumentId = @document AND SheetDefId = @sheet AND PeriodKey = @period
                AND Status IN (@submitted, @approved);
 
+            -- ⛔ R5-Q1-01: c.DocumentId = @document — провідна колонка IX_CellChange_Cell; без неї скан УСЬОГО
+            -- журналу аудиту під HOLDLOCK на doc.Period/doc.TableRow вище (екземпляри мапи — лише її документа).
             WITH last_change AS (
                 SELECT c.Origin,
                        ROW_NUMBER() OVER (PARTITION BY c.ColumnDefId ORDER BY c.ChangedAt DESC, c.Id DESC) AS rn
-                  FROM aud.CellChange AS c
-                  JOIN doc.TableRow  AS r ON r.PeriodKey = c.PeriodKey AND r.Id = c.TableRowId
-                 WHERE c.PeriodKey = @period AND r.TableInstanceId = @instance AND c.RowKey = @rowKey
+                  FROM doc.TableRow AS r
+                  JOIN aud.CellChange AS c
+                    ON c.DocumentId = @document
+                   AND c.TableRowId = r.Id
+                   AND c.PeriodKey = r.PeriodKey
+                 WHERE r.PeriodKey = @period AND r.TableInstanceId = @instance AND c.RowKey = @rowKey
             )
-            SELECT COUNT(*) FROM last_change WHERE rn = 1 AND Origin = N'UserEdit';
+            SELECT COUNT(*) FROM last_change WHERE rn = 1 AND Origin IN ({CellChangeOrigins.HumanOriginsSql});
             """;
         command.Parameters.AddWithValue("@period", periodKey);
         command.Parameters.AddWithValue("@instance", state.TableInstanceId!.Value);
         command.Parameters.AddWithValue("@rowKey", state.RowKey!);
         command.Parameters.AddWithValue("@document", map.DocumentId);
         command.Parameters.Add("@sheet", System.Data.SqlDbType.Int).Value = (object?)sheetDefId ?? DBNull.Value;
+        command.Parameters.Add("@open", System.Data.SqlDbType.TinyInt).Value = (byte)PeriodState.Open;
+        command.Parameters.Add("@grace", System.Data.SqlDbType.TinyInt).Value = (byte)PeriodState.Grace;
         command.Parameters.Add("@submitted", System.Data.SqlDbType.TinyInt).Value = (byte)DocumentStatus.Submitted;
         command.Parameters.Add("@approved", System.Data.SqlDbType.TinyInt).Value = (byte)DocumentStatus.Approved;
 
         await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
         await reader.ReadAsync(ct).ConfigureAwait(false);
+        await reader.NextResultAsync(ct).ConfigureAwait(false);
+
+        if (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            return new CoverageEvent(
+                map.SourceEntityId,
+                new PeriodKey(periodKey),
+                CollectionCoverage.SkippedPeriodClosed,
+                CoverageDetails.PeriodNotOpen((PeriodState)reader.GetByte(0)));
+        }
+
         await reader.NextResultAsync(ct).ConfigureAwait(false);
 
         if (await reader.ReadAsync(ct).ConfigureAwait(false))
@@ -1181,27 +1276,43 @@ public sealed partial class SourceEventSyncJob(
         Message = "SourceEventSyncJob: мапінг {MapId} — {Candidates} подій до видалення з {Linked} зв'язків-з-рядками перевищує ліміт, але видалення ПІДТВЕРДЖЕНО вручну.")]
     private static partial void LogRemovalConfirmed(ILogger logger, int mapId, int candidates, int linked);
 
+    /// <summary>Текст запиту <see cref="ManualRowKeysAsync"/> — бойовий, його ж міряє тест.</summary>
+    /// <remarks>
+    /// ⛔ R5-Q1-01: <c>c.DocumentId = @document</c> — провідна колонка <c>IX_CellChange_Cell</c>; без неї
+    /// запит сканував увесь <c>aud.CellChange</c> (усі місячні партиції) на кожну групу видалень.
+    /// </remarks>
+    public const string ManualRowKeysSql = $"""
+        WITH last_change AS (
+            SELECT c.RowKey, c.Origin,
+                   ROW_NUMBER() OVER (PARTITION BY c.RowKey, c.ColumnDefId
+                                          ORDER BY c.ChangedAt DESC, c.Id DESC) AS rn
+              FROM doc.TableRow AS r
+              JOIN aud.CellChange AS c
+                ON c.DocumentId = @document
+               AND c.TableRowId = r.Id
+               AND c.PeriodKey = r.PeriodKey
+             WHERE r.PeriodKey = @period AND r.TableInstanceId = @instance
+        )
+        SELECT DISTINCT RowKey FROM last_change WHERE rn = 1 AND Origin IN ({CellChangeOrigins.HumanOriginsSql});
+        """;
+
     /// <summary>Ключі рядків екземпляра, у яких остання зміна хоч однієї комірки — правка людини (як <c>ManualCellsAsync</c> патчера).</summary>
-    private async Task<HashSet<string>> ManualRowKeysAsync(long tableInstanceId, int periodKey, CancellationToken ct)
+    /// <param name="documentId">Документ мапи — екземпляри мапи належать лише йому (R5-Q1-01).</param>
+    /// <param name="tableInstanceId">Екземпляр таблиці.</param>
+    /// <param name="periodKey">Період.</param>
+    /// <param name="ct">Токен скасування.</param>
+    private async Task<HashSet<string>> ManualRowKeysAsync(
+        long documentId, long tableInstanceId, int periodKey, CancellationToken ct)
     {
         var manual = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         await using var connection = new Microsoft.Data.SqlClient.SqlConnection(db.Database.GetConnectionString());
         await connection.OpenAsync(ct).ConfigureAwait(false);
         await using var command = connection.CreateCommand();
-        command.CommandText = """
-            WITH last_change AS (
-                SELECT c.RowKey, c.Origin,
-                       ROW_NUMBER() OVER (PARTITION BY c.RowKey, c.ColumnDefId
-                                              ORDER BY c.ChangedAt DESC, c.Id DESC) AS rn
-                  FROM aud.CellChange AS c
-                  JOIN doc.TableRow  AS r ON r.PeriodKey = c.PeriodKey AND r.Id = c.TableRowId
-                 WHERE c.PeriodKey = @period AND r.TableInstanceId = @instance
-            )
-            SELECT DISTINCT RowKey FROM last_change WHERE rn = 1 AND Origin = N'UserEdit';
-            """;
+        command.CommandText = ManualRowKeysSql;
         command.Parameters.AddWithValue("@period", periodKey);
         command.Parameters.AddWithValue("@instance", tableInstanceId);
+        command.Parameters.Add("@document", System.Data.SqlDbType.BigInt).Value = documentId;
 
         await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
         while (await reader.ReadAsync(ct).ConfigureAwait(false))

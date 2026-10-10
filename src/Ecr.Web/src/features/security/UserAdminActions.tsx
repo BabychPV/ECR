@@ -1,5 +1,5 @@
 import { useState, type JSX } from 'react';
-import { Button, Group, Modal, PasswordInput, Stack, Text } from '@mantine/core';
+import { Button, Group, Modal, PasswordInput, Stack, Text, TextInput } from '@mantine/core';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { EcrApiError } from '@/api/client';
 import type { UserView } from '@/api/types';
@@ -10,7 +10,8 @@ import { showDone } from '@/shared/ui/notify';
 import { problemText } from '@/shared/ui/problemText';
 import { passwordToggleProps } from '@/shared/ui/a11yLabels';
 import { t } from '@/shared/i18n';
-import { LockReasonMaxLength, lockUser, resetUserPassword, unlockUser } from './userAdminApi';
+import { usePendingLoading } from '@/features/common/usePendingLoading';
+import { LockReasonMaxLength, correctWindowsSid, lockUser, resetUserPassword, unlockUser } from './userAdminApi';
 
 // Та сама кнопка-тумблер, що й у формі створення користувача (`Q-260`).
 // ✎ `X-26`: пропи — `a11yLabels.passwordToggleProps()` (каталог + запасний літерал).
@@ -54,6 +55,11 @@ type LockAction = 'lock' | 'unlock';
  *
  * ⚠ «Скинути пароль» — лише для `provider === 'Local'`: пароль доменного
  * запису зберігає домен, і сервер відмовляє `domainPasswordReset`.
+ *
+ * ⛔ `X5-01`: «Виправити SID» — лише доменний запис, що ще НЕ входив. SID
+ * набирається руками при створенні, і помилка в одній цифрі назавжди займала
+ * ім'я входу людини (її Windows-вхід відмовляє `windowsSidMismatch`). Після
+ * першого входу SID підтверджено доменом, і сервер його не міняє.
  */
 export function UserAdminActions({ user }: { user: UserView }): JSX.Element | null {
   const session = useSession();
@@ -63,6 +69,8 @@ export function UserAdminActions({ user }: { user: UserView }): JSX.Element | nu
   const [reasonTooLong, setReasonTooLong] = useState(false);
   const [resetting, setResetting] = useState(false);
   const [password, setPassword] = useState('');
+  const [correctingSid, setCorrectingSid] = useState(false);
+  const [sid, setSid] = useState('');
 
   const refresh = (): Promise<void> => queryClient.invalidateQueries({ queryKey: ['users'] });
 
@@ -93,6 +101,26 @@ export function UserAdminActions({ user }: { user: UserView }): JSX.Element | nu
       showDone(t('security.passwordResetDone'));
     },
   });
+
+  // ⚠ `meta.handled`: відмова (не SID, SID зайнятий, запис уже входив) стосується
+  // введеного значення — показується в діалозі, а не страхувальною сіткою.
+  const fixSid = useMutation<void, Error>({
+    meta: { handled: true },
+    mutationFn: () => correctWindowsSid(user.id, sid.trim()),
+    onSuccess: async () => {
+      closeSid();
+      await refresh();
+      showDone(t('security.sidCorrected'));
+    },
+  });
+  // ⚠ ФВ-14.26: спінер — лише після порогу; повтор, поки запит летить, стримує обробник.
+  const fixSidLoading = usePendingLoading(fixSid.isPending);
+
+  function closeSid(): void {
+    setCorrectingSid(false);
+    setSid('');
+    fixSid.reset();
+  }
 
   // ⛔ Поле очищається при КОЖНОМУ закритті — і скасуванні, і успіху: пароль,
   // що лишився в стані, виринув би у наступному відкритті для іншого рядка.
@@ -149,6 +177,14 @@ export function UserAdminActions({ user }: { user: UserView }): JSX.Element | nu
             onClick={() => setResetting(true)}
           >
             {t('security.resetPassword')}
+          </Button>
+        )}
+        {user.provider === 'Windows' && user.lastSignInAt === null && (
+          <Button size="xs" variant="subtle"
+            aria-label={t('security.correctSidNamed', { userName: user.userName })}
+            onClick={() => setCorrectingSid(true)}
+          >
+            {t('security.correctSid')}
           </Button>
         )}
       </Group>
@@ -216,6 +252,44 @@ export function UserAdminActions({ user }: { user: UserView }): JSX.Element | nu
               </Button>
               <Button type="submit" disabled={password.length === 0} loading={reset.isPending}>
                 {t('security.resetPassword')}
+              </Button>
+            </Group>
+          </Stack>
+        </form>
+      </Modal>
+
+      <Modal
+        opened={correctingSid}
+        onClose={closeSid}
+        title={`${t('security.correctSid')} · ${user.userName}`}
+      >
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (sid.trim().length > 0 && !fixSid.isPending) fixSid.mutate();
+          }}
+        >
+          <Stack gap="sm">
+            <Text size="sm">{t('security.correctSidHint')}</Text>
+
+            <TextInput
+              label={t('security.sidLabel')}
+              placeholder="S-1-5-21-…"
+              autoComplete="off"
+              spellCheck={false}
+              value={sid}
+              onChange={(event) => setSid(event.currentTarget.value)}
+              data-autofocus
+            />
+
+            <ErrorAlert error={fixSid.error} />
+
+            <Group justify="flex-end">
+              <Button variant="default" onClick={closeSid}>
+                {t('common.cancel')}
+              </Button>
+              <Button type="submit" disabled={sid.trim().length === 0} loading={fixSidLoading}>
+                {t('security.correctSid')}
               </Button>
             </Group>
           </Stack>

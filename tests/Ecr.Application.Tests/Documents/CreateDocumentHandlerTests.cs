@@ -1,6 +1,7 @@
 // tests/Ecr.Application.Tests/Documents/CreateDocumentHandlerTests.cs
 using Ecr.Application.Common;
 using Ecr.Application.Documents;
+using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
 using Ecr.Domain.Abstractions;
@@ -67,6 +68,14 @@ public sealed class CreateDocumentHandlerTests
         _documents.NextBusinessKeyAsync(
                 AccessBuilder.ProjectId, TemplateVersionId, Arg.Any<CancellationToken>())
             .Returns("P10-V2-0001");
+
+        // ⛔ L6-02 / N1-04: документ пишеться в транзакції під блоком рядка проєкту. Тут — прохідна
+        // транзакція й блок, що показує версію проєкту; саму гонку з переносом тримають
+        // `CreateDocumentStructureLockTests` (Infrastructure.Tests) на справжній базі.
+        _uow.ExecuteInTransactionAsync(Arg.Any<Func<CancellationToken, Task>>(), Arg.Any<CancellationToken>())
+            .Returns(call => call.ArgAt<Func<CancellationToken, Task>>(0)(call.ArgAt<CancellationToken>(1)));
+        _documents.LockProjectTemplateVersionAsync(AccessBuilder.ProjectId, Arg.Any<CancellationToken>())
+            .Returns(TemplateVersionId);
 
         // ⚠ Шаблон версії В ОБІГУ: із `BE-26` створення документа питає про
         // нього, бо архівований шаблон для нових документів не пропонується
@@ -158,6 +167,63 @@ public sealed class CreateDocumentHandlerTests
         Assert.DoesNotContain(
             _documents.ReceivedCalls(),
             c => string.Equals(c.GetMethodInfo().Name, nameof(IDocumentStore.AddAsync), StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// L6-02 / N1-04: проєкт перенесено на іншу версію між читанням версії і записом — документ не
+    /// створюється, відповідь — <c>409 ECR-DOC-4091</c> «структуру змінено».
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Мутація: прибрати <c>DocumentStructure.EnsureProjectVersionUnchanged</c> у
+    /// <c>CreateDocumentHandler</c> — документ додається зі складом старої версії, тест червоний.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Finding", "L6-02")]
+    public async Task Проєкт_перенесено_на_іншу_версію_до_запису_документ_не_створюється()
+    {
+        _documents.LockProjectTemplateVersionAsync(AccessBuilder.ProjectId, Arg.Any<CancellationToken>())
+            .Returns(TemplateVersionId + 1);
+
+        var error = await Assert.ThrowsAsync<ConcurrencyConflictException>(() => Create(name: null));
+
+        Assert.Equal("ECR-DOC-4091", error.ErrorCode);
+        Assert.Equal(DocumentStructure.StructureChangedKey, error.Details!["messageKey"]);
+        Assert.DoesNotContain(
+            _documents.ReceivedCalls(),
+            c => string.Equals(c.GetMethodInfo().Name, nameof(IDocumentStore.AddAsync), StringComparison.Ordinal));
+        await _uow.DidNotReceiveWithAnyArgs().SaveChangesAsync(default);
+    }
+
+    /// <summary>
+    /// L6-02 / N1-04: блок рядка проєкту береться ДО підбору ключа й додавання документа —
+    /// усередині транзакції, а не перед нею.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Finding", "L6-02")]
+    public async Task Блок_проєкту_береться_всередині_транзакції_до_додавання_документа()
+    {
+        var trace = new List<string>();
+        _uow.ExecuteInTransactionAsync(Arg.Any<Func<CancellationToken, Task>>(), Arg.Any<CancellationToken>())
+            .Returns(async call =>
+            {
+                trace.Add("tx:open");
+                await call.ArgAt<Func<CancellationToken, Task>>(0)(call.ArgAt<CancellationToken>(1));
+                trace.Add("tx:commit");
+            });
+        _documents.LockProjectTemplateVersionAsync(AccessBuilder.ProjectId, Arg.Any<CancellationToken>())
+            .Returns(call =>
+            {
+                trace.Add("lock");
+                return Task.FromResult<int?>(TemplateVersionId);
+            });
+        _documents.When(d => d.AddAsync(Arg.Any<Document>(), Arg.Any<CancellationToken>()))
+            .Do(_ => trace.Add("add"));
+
+        await Create(name: null);
+
+        Assert.Equal(["tx:open", "lock", "add", "tx:commit"], trace);
     }
 
     private async Task<long> Create(IReadOnlyDictionary<string, string>? name)

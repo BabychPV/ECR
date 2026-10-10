@@ -39,7 +39,12 @@ public sealed class ExcelImporter(
     // Порти оверлею необов'язкові лише заради тестів, що конструюють імпортер
     // вручну; у контейнері розв'язуються завжди.
     IMethodologyStore? methodologies = null,
-    ICalculationResultStore? results = null) : IExcelImporter
+    ICalculationResultStore? results = null,
+
+    // ⛔ Y5-03: межі періоду — дата чинності запису довідника в перегляді (C7, D-158).
+    // Необов'язковий лише заради тестів, що конструюють імпортер вручну; без нього
+    // перевірки на дату в перегляді немає (решта причин діють), як і в PATCH без періоду.
+    IPeriodStore? periods = null) : IExcelImporter
 {
     /// <summary>Порожній зріз — таблиця без жодного рядка чи непорожньої комірки.</summary>
     private static readonly IReadOnlyDictionary<string, long> EmptyRowIds =
@@ -147,7 +152,7 @@ public sealed class ExcelImporter(
                          new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.signInRequired" });
 
         var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
-        var lookups = await LookupsAsync(snapshot, ct).ConfigureAwait(false);
+        var (lookups, unusableLookups) = await LookupsAsync(snapshot, documentId, map.PeriodKey, ct).ConfigureAwait(false);
 
         // ⛔ S6 (ФВ-6.6): межі читання того, хто імпортує. Перегляд порівнює
         // книгу з ПОТОЧНИМИ значеннями, і будь-яка відповідь, що залежить від
@@ -160,6 +165,7 @@ public sealed class ExcelImporter(
         var diffs = new List<TableDiff>(map.Tables.Count);
         var changes = new List<ImportChange>();
         var rejected = new List<ImportRejection>();
+        var overwritable = new List<ImportChange>();
 
         // ⛔ Q-168 (аудит фази 2, продуктивність). Таблиці з файлу, яких немає
         // в чинній версії шаблону, відхиляються ТУТ, ДО пакетного читання —
@@ -203,6 +209,24 @@ public sealed class ExcelImporter(
                     "Таблиці з файлу немає в чинній версії шаблону.",
                     block.TableCode,
                     MessageKey: ImportMessageKeys.TableMissing));
+
+                continue;
+            }
+
+            // ⛔ Y5-04 (аудит 7): аркуш таблиці перейменовано або видалено в Excel після
+            // експорту. `workbook.Worksheet(name)` нижче кидав ArgumentException, а той ішов у
+            // 500 ECR-SYS-0500 — і переглянути не можна було жодної таблиці книги. Тепер —
+            // відмова цієї таблиці з поясненням; решта книги переглядається як звичайно.
+            // ⚠ Назву аркуша в текст не вставляємо: людина бачить таблицю в переліку відмов,
+            // а файл — Deny-контекст (`DenyLeakGuardTests`).
+            if (!workbook.Worksheets.TryGetWorksheet(block.SheetName, out _))
+            {
+                rejected.Add(new ImportRejection(
+                    "—", block.TableCode, "ECR-IMP-0422",
+                    "The sheet of this table is missing in the file: it was renamed or deleted after export.",
+                    block.TableCode,
+                    table.NameL10n,
+                    MessageKey: ImportMessageKeys.SheetMissing));
 
                 continue;
             }
@@ -274,11 +298,13 @@ public sealed class ExcelImporter(
             var diff = diffBuilder.Build(
                 worksheet, block, map.PeriodKey, table, decisions, lookups, rowIds, versions, current,
                 readable.CanReadColumn,
-                Ecr.Application.Localization.NumberCulture.ForLanguage(currentUser.Language));
+                Ecr.Application.Localization.NumberCulture.ForLanguage(currentUser.Language),
+                unusableLookups);
 
             diffs.Add(diff);
             changes.AddRange(diff.Changes);
             rejected.AddRange(diff.Rejected);
+            overwritable.AddRange(diff.Overwritable ?? []);
         }
 
         // ⛔ `V-10`: значення поза рядками таблиць (порожній документ, рядок під
@@ -294,7 +320,10 @@ public sealed class ExcelImporter(
         await previews
             .SaveAsync(
                 token,
-                JsonSerializer.Serialize(new ImportPlan(documentId, map.PeriodKey, diffs, userId), Options),
+                // ⛔ L6-02 / N1-04: версія шаблону, за якою побудовано перегляд, їде в план — під
+                // замком структури `ApplyAsync` звіряє її з версією проєкту.
+                JsonSerializer.Serialize(
+                    new ImportPlan(documentId, map.PeriodKey, diffs, userId, instances[0].TemplateVersionId), Options),
                 PreviewLifetime,
                 ct)
             .ConfigureAwait(false);
@@ -302,16 +331,51 @@ public sealed class ExcelImporter(
         // Конфліктів на етапі перегляду ще немає: вони з'являються, якщо між
         // переглядом і застосуванням хтось правив ті самі рядки. Показувати їх
         // наперед означало б вигадати їх.
-        return new ImportPreview(token, changes, rejected, []);
+        return new ImportPreview(
+            token, changes, rejected, [], overwritable, OutdatedWorkbook(map) ? [ImportMessageKeys.OutdatedWorkbook] : null);
     }
 
+    /// <summary>
+    /// Чи вивантажено книгу до того, як карта почала нести версії рядків (D1-02)
+    /// і відбитки введених комірок (AN-118).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ AN-118 (R1-02). Без версії рядок, змінений після експорту, не стає
+    /// конфліктом, а без відбитка незмінена комірка конфліктного рядка не
+    /// відрізняється від правки: застаріле значення з такої книги повертає
+    /// новіше чуже і, бувши записане імпортом, стає «людським» (`HumanOriginsSql`)
+    /// — інтеграція його більше не виправить. Відмовляти таку книгу не можна:
+    /// у ній бувають тижні офлайн-правок (D-41), і відмова змусила б людину
+    /// вводити їх наново. Тож — попередження в перегляді: людина бачить перелік
+    /// змін і може вивантажити книгу заново.
+    /// ⚠ Блок без введених колонок відбитка не має й не потребує; рядок без
+    /// версії в новій книзі не буває (експорт бере версії тим самим пакетом, що й рядки).
+    /// </remarks>
+    public static bool OutdatedWorkbook(ExcelWorkbookMap map)
+    {
+        ArgumentNullException.ThrowIfNull(map);
+
+        return map.Tables.Any(block =>
+            block.Columns.Any(c => !c.IsCalculated)
+            && block.Rows.Any(row => row.Version is null || row.Cells is null));
+    }
+
+    /// <summary>Скільки комірок змінить diff без перезапису конфліктних рядків (AN-103).</summary>
+    public Task<int> CountPendingChangesAsync(long documentId, string previewToken, CancellationToken ct)
+        => CountPendingChangesAsync(documentId, previewToken, null, ct);
+
     /// <inheritdoc />
-    public async Task<int> CountPendingChangesAsync(long documentId, string previewToken, CancellationToken ct)
+    public async Task<int> CountPendingChangesAsync(
+        long documentId, string previewToken, IReadOnlyList<ImportOverwriteRow>? overwriteRows, CancellationToken ct)
     {
         var plan = await LoadPlanAsync(previewToken, documentId, ct).ConfigureAwait(false);
 
-        return plan.Tables.Sum(t => t.Changes.Count);
+        return Effective(plan, overwriteRows).Plan.Tables.Sum(t => t.Changes.Count);
     }
+
+    /// <summary>Застосовує diff без перезапису конфліктних рядків (AN-103).</summary>
+    public Task<PatchCellsResponse> ApplyAsync(long documentId, string previewToken, CancellationToken ct)
+        => ApplyAsync(documentId, previewToken, null, ct);
 
     /// <inheritdoc />
     /// <remarks>
@@ -356,9 +420,14 @@ public sealed class ExcelImporter(
     /// 12 таблиць) стали сталими на книгу (<c>ExcelImportApplyWorkbookTests</c>).
     /// Правила ті самі — той самий обробник, ті самі методи правил.
     /// </remarks>
-    public async Task<PatchCellsResponse> ApplyAsync(long documentId, string previewToken, CancellationToken ct)
+    public async Task<PatchCellsResponse> ApplyAsync(
+        long documentId, string previewToken, IReadOnlyList<ImportOverwriteRow>? overwriteRows, CancellationToken ct)
     {
-        var plan = await LoadPlanAsync(previewToken, documentId, ct).ConfigureAwait(false);
+        var loaded = await LoadPlanAsync(previewToken, documentId, ct).ConfigureAwait(false);
+
+        // ✎ AN-114 (D-338): план із доданими змінами рядків, які людина явно
+        // позначила «перезаписати», — далі весь шлях працює саме з ним.
+        var (plan, overwritten) = Effective(loaded, overwriteRows);
 
         var applied = 0;
         var versions = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -422,11 +491,29 @@ public sealed class ExcelImporter(
                     DocumentStructure.EnsureUnchanged(locked, version, documentId);
                 }
 
+                // ⛔ L6-02 / N1-04. `templateVersions` вище — з екземплярів, прочитаних ПРИ застосуванні, тож
+                // після переносу між переглядом і застосуванням вони вже нової версії й збігаються
+                // з `locked`: розбіжність приховувалась. Перегляд (відхилення, коди довідників, типи комірок)
+                // побудовано за версією з плану — вона і є міркою. Плани до цієї правки версії не мають.
+                if (plan.TemplateVersionId is { } previewedVersion)
+                {
+                    DocumentStructure.EnsureUnchanged(locked, previewedVersion, documentId);
+                }
+
+                // ⛔ R7-Y2-02 (X6-02): чекати (до 30 с) дозволено лише ПЕРШИЙ аркуш, поки імпорт ще не
+                // тримає жодного. Наступні — без черги (`EnterEditNoWaitAsync`): черга `sp_getapplock` FIFO, і
+                // імпорт, що чекав аркуш N (його саме подають), тримаючи S на аркушах 1…N-1, ставив за собою
+                // подання тих аркушів, а за ними — автозбереження всіх, хто їх правив. Відмова
+                // (`409 ECR-DOC-4091 sheetBeingSubmitted`) відкочує транзакцію й звільняє все взяте:
+                // синхронний імпорт клієнт повторює як минущий, фоновий (`ExcelImportJob`) відкладає себе.
                 var statuses = new Dictionary<int, Ecr.Domain.Enums.DocumentStatus>();
+                var holdsAny = false;
                 foreach (var sheetDefId in sheets)
                 {
-                    statuses[sheetDefId] = await sheetGate
-                        .EnterEditAsync(documentId, sheetDefId, period, innerCt).ConfigureAwait(false);
+                    statuses[sheetDefId] = holdsAny
+                        ? await sheetGate.EnterEditNoWaitAsync(documentId, sheetDefId, period, innerCt).ConfigureAwait(false)
+                        : await sheetGate.EnterEditAsync(documentId, sheetDefId, period, innerCt).ConfigureAwait(false);
+                    holdsAny = true;
                 }
 
                 // ⚠ Накопичувачі скидаються НА ПОЧАТКУ замикання, а не поруч із
@@ -454,7 +541,7 @@ public sealed class ExcelImporter(
                     .Select(diff => new PatchCellsRequest(
                         diff.TableInstanceId,
                         diff.PeriodKey,
-                        "Import",
+                        CellChangeOrigins.Import,
                         [.. diff.Changes
                             .GroupBy(c => c.RowKey, StringComparer.Ordinal)
                             .Select(g => new PatchRow(
@@ -467,7 +554,7 @@ public sealed class ExcelImporter(
                 try
                 {
                     responses = await patch
-                        .HandleWorkbookAsync(requests, seeds, rowWindowChanges, innerCt, statuses)
+                        .HandleWorkbookAsync(requests, seeds, rowWindowChanges, innerCt, statuses, overwritten)
                         .ConfigureAwait(false);
                 }
                 catch (EcrException error) when (Blame(error, diffs) is { } named)
@@ -535,6 +622,94 @@ public sealed class ExcelImporter(
 
     /// <summary>Нульовий <c>rowversion</c> у base64: живий рядок такої версії не має.</summary>
     public static readonly string MissingRowVersion = Convert.ToBase64String(new byte[8]);
+
+    /// <summary>
+    /// План, який справді застосовується: збережений перегляд плюс зміни рядків,
+    /// що людина явно позначила «перезаписати» (AN-114, D-338), і ці рядки по
+    /// екземплярах — для журналу.
+    /// </summary>
+    /// <param name="plan">Збережений план перегляду.</param>
+    /// <param name="overwriteRows">Позначені рядки; <c>null</c>/порожньо — план без змін (AN-103).</param>
+    /// <returns>План для застосування і перезаписані рядки (<c>TableInstanceId</c> → <c>RowKey</c>).</returns>
+    /// <remarks>
+    /// ⛔ Перезаписати можна ЛИШЕ рядок, який перегляд показав конфліктом «змінено
+    /// після експорту» (<see cref="TableDiff.Overwritable"/>). Будь-який інший —
+    /// відмова всього застосування (<c>ECR-IMP-0422</c>, <c>overwriteNotConflict</c>),
+    /// а не мовчазний пропуск: клієнт, що просить перезаписати не те, побачив
+    /// не той перегляд. Відмови прав, типу й меж у <c>Overwritable</c> не
+    /// потрапляють узагалі (<see cref="ImportDiffBuilder"/>), тож прапорець їх не обходить.
+    /// <para>
+    /// ⚠ Версія рядка для <c>baseVersion</c> — та сама, з ПЕРЕГЛЯДУ: перезапис
+    /// погоджено на чуже значення, яке людина бачила; правка, що прийшла вже після
+    /// перегляду, і далі відхиляє книгу конфліктом <c>ECR-CELL-0409</c>.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="BusinessRuleException"><c>ECR-IMP-0422</c> — рядок не був конфліктом.</exception>
+    public static (ImportPlan Plan, IReadOnlyDictionary<long, IReadOnlySet<string>>? Overwritten) Effective(
+        ImportPlan plan, IReadOnlyList<ImportOverwriteRow>? overwriteRows)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+
+        if (overwriteRows is null || overwriteRows.Count == 0)
+        {
+            return (plan, null);
+        }
+
+        var wanted = new HashSet<(string TableCode, string RowKey)>();
+        foreach (var row in overwriteRows)
+        {
+            if (row?.TableCode is null || row.RowKey is null)
+            {
+                throw OverwriteNotConflict(row?.TableCode, row?.RowKey);
+            }
+
+            wanted.Add((row.TableCode, row.RowKey));
+        }
+
+        var matched = new HashSet<(string TableCode, string RowKey)>();
+        var overwritten = new Dictionary<long, IReadOnlySet<string>>();
+        var tables = new List<TableDiff>(plan.Tables.Count);
+
+        foreach (var diff in plan.Tables)
+        {
+            var taken = (diff.Overwritable ?? [])
+                .Where(c => c.TableCode is not null && wanted.Contains((c.TableCode, c.RowKey)))
+                .ToList();
+
+            if (taken.Count == 0)
+            {
+                tables.Add(diff);
+                continue;
+            }
+
+            foreach (var change in taken)
+            {
+                matched.Add((change.TableCode!, change.RowKey));
+            }
+
+            overwritten[diff.TableInstanceId] = taken.Select(c => c.RowKey).ToHashSet(StringComparer.Ordinal);
+            tables.Add(diff with { Changes = [.. diff.Changes, .. taken] });
+        }
+
+        if (wanted.FirstOrDefault(w => !matched.Contains(w)) is { TableCode: not null } stray)
+        {
+            throw OverwriteNotConflict(stray.TableCode, stray.RowKey);
+        }
+
+        return (plan with { Tables = tables }, overwritten);
+    }
+
+    /// <summary>Відмова: просять перезаписати рядок, який не був конфліктом «змінено після експорту».</summary>
+    private static BusinessRuleException OverwriteNotConflict(string? tableCode, string? rowKey)
+        => new(
+            "ECR-IMP-0422",
+            "Only rows that were changed after the workbook was exported can be overwritten.",
+            new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["messageKey"] = "err.ECR-IMP-0422.overwriteNotConflict",
+                ["tableCode"] = tableCode ?? string.Empty,
+                ["rowKey"] = rowKey ?? string.Empty,
+            });
 
     /// <summary>
     /// Аркуші таблиць книги, у які застосування пише, — у порядку, у якому
@@ -702,12 +877,12 @@ public sealed class ExcelImporter(
     /// <param name="previewToken">Токен перегляду.</param>
     /// <param name="documentId">
     /// Документ застосування; <c>null</c> — виклик лише РАХУЄ зміни
-    /// (<see cref="CountPendingChangesAsync"/>) і документ ще невідомий обробнику.
+    /// (<c>CountPendingChangesAsync</c>) і документ ще невідомий обробнику.
     /// </param>
     /// <param name="ct">Скасування.</param>
     /// <remarks>
-    /// ⚠ Спільна для <see cref="CountPendingChangesAsync"/> і
-    /// <see cref="ApplyAsync"/> (директива №11, T10 #45): порогове рішення
+    /// ⚠ Спільна для <c>CountPendingChangesAsync</c> і
+    /// <c>ApplyAsync</c> (директива №11, T10 #45): порогове рішення
     /// «синхронно чи в чергу» рахує зміни ТИМ САМИМ читанням, яким їх потім
     /// застосовують, — другий незалежний розбір <c>previewToken</c> міг би
     /// одного дня порахувати інакше, ніж застосує.
@@ -787,10 +962,12 @@ public sealed class ExcelImporter(
 
     /// <summary>Карта книги з прихованого аркуша.</summary>
     /// <remarks>
-    /// ⛔ Книга без карти не імпортується. Зіставляти аркуші й колонки за
-    /// позиціями означало б, що вставлена користувачем колонка зсуває всі
-    /// дані на одну вправо — і diff покаже це як зміну кожного значення,
-    /// цілком правдоподібну на вигляд.
+    /// ⛔ Книга без карти не імпортується: без неї невідомо, яка таблиця, колонка й
+    /// рядок стоять де.
+    /// ⚠ Y5-01 (аудит 7): сама карта від зсуву НЕ захищає — вона тримає позиції на
+    /// момент експорту, і вставлена користувачем колонка зсуває дані на одну вправо
+    /// так само. Зсув ловлять відбитки підписів рядків і заголовків колонок
+    /// (<see cref="LayoutFingerprint"/>, звірка — на початку <c>ImportDiffBuilder.Build</c>).
     /// </remarks>
     private static ExcelWorkbookMap ReadMap(XLWorkbook workbook)
     {
@@ -833,9 +1010,24 @@ public sealed class ExcelImporter(
                    new Dictionary<string, object?> { ["messageKey"] = "err.ECR-IMP-0422.mapBroken" });
     }
 
-    /// <summary>Коди записів довідників: <c>RegistryDefId</c> → код → <c>Id</c>.</summary>
-    private async Task<IReadOnlyDictionary<int, IReadOnlyDictionary<string, long>>> LookupsAsync(
-        TemplateVersionSnapshot snapshot, CancellationToken ct)
+    /// <summary>
+    /// Коди записів довідників (<c>RegistryDefId</c> → код → <c>Id</c>) і записи, які
+    /// застосування відхилило б за <c>C7</c> (<c>Id</c> → ключ тексту відмови перегляду).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Y5-03 (аудит 7). <see cref="IRegistryStore.ListEntriesAsync"/> повертає ВСІ записи
+    /// — видалені, вимкнені, нечинні, — і код такого запису розв'язувався в перегляді в
+    /// звичайну зміну. Застосування ж (<c>PatchCellsHandler.CheckLookupStandings</c>)
+    /// відхиляло його <c>ECR-CELL-4223</c> на ВСЮ книгу, вже після погодженого перегляду.
+    /// Тепер стан запису рахується тут тим самим правилом і в тому ж порядку причин
+    /// (видалений → вимкнений → нечинний на останній день періоду, D-158), і
+    /// <see cref="ImportDiffBuilder"/> відхиляє таку комірку однією відмовою в перегляді.
+    /// Значення, яке вже стоїть у комірці, — не новий вибір (як і в C7): його відсіює
+    /// порівняння з поточним раніше.
+    /// </remarks>
+    private async Task<(IReadOnlyDictionary<int, IReadOnlyDictionary<string, long>> Codes,
+        IReadOnlyDictionary<long, string> Unusable)> LookupsAsync(
+        TemplateVersionSnapshot snapshot, long documentId, int periodKey, CancellationToken ct)
     {
         var registryIds = snapshot.ColumnsById.Values
             .Where(c => !c.IsDeleted && c.LookupRegistryDefId is not null)
@@ -844,6 +1036,18 @@ public sealed class ExcelImporter(
             .ToList();
 
         var result = new Dictionary<int, IReadOnlyDictionary<string, long>>();
+        var unusable = new Dictionary<long, string>();
+
+        if (registryIds.Count == 0)
+        {
+            return (result, unusable);
+        }
+
+        // Дата чинності — останній день періоду (D-158), як у пікері сітки й у C7.
+        var bounds = periods is null
+            ? null
+            : await periods.FindPeriodBoundsAsync(documentId, periodKey, ct).ConfigureAwait(false);
+        var asOf = bounds?.PeriodEnd;
 
         foreach (var registryId in registryIds)
         {
@@ -852,9 +1056,22 @@ public sealed class ExcelImporter(
             result[registryId] = entries
                 .GroupBy(e => e.Code, StringComparer.OrdinalIgnoreCase)
                 .ToDictionary(g => g.Key, g => g.First().Id, StringComparer.OrdinalIgnoreCase);
+
+            foreach (var entry in entries)
+            {
+                var reason = entry.IsDeleted ? ImportMessageKeys.LookupDeleted
+                    : !entry.IsActive ? ImportMessageKeys.LookupInactive
+                    : asOf is { } date && !entry.IsValidOn(date) ? ImportMessageKeys.LookupNotValidOnDate
+                    : null;
+
+                if (reason is not null)
+                {
+                    unusable[entry.Id] = reason;
+                }
+            }
         }
 
-        return result;
+        return (result, unusable);
     }
 }
 
@@ -863,4 +1080,9 @@ public sealed class ExcelImporter(
 /// <param name="PeriodKey">Період.</param>
 /// <param name="Tables">Diff-и таблиць.</param>
 /// <param name="UserId">Користувач, що збудував перегляд (L1-20); <c>null</c> — план до прив'язки.</param>
-public sealed record ImportPlan(long DocumentId, int PeriodKey, IReadOnlyList<TableDiff> Tables, int? UserId = null);
+/// <param name="TemplateVersionId">
+/// Версія шаблону, за якою збудовано перегляд (L6-02 / N1-04); <c>null</c> — план до цієї правки,
+/// звірка версії тоді лише за екземплярами, прочитаними при застосуванні.
+/// </param>
+public sealed record ImportPlan(
+    long DocumentId, int PeriodKey, IReadOnlyList<TableDiff> Tables, int? UserId = null, int? TemplateVersionId = null);

@@ -28,6 +28,11 @@ const Strings: Record<string, string> = {
   'security.unlockUserNamed': 'Unlock {userName}',
   'security.resetPasswordNamed': 'Reset password {userName}',
   'workflow.reason': 'Reason',
+  'security.correctSid': 'Correct SID',
+  'security.correctSidNamed': 'Correct SID of {userName}',
+  'security.correctSidHint': 'Not signed in yet',
+  'security.sidLabel': 'SID',
+  'security.sidCorrected': 'SID corrected',
   'common.cancel': 'Cancel',
 };
 
@@ -321,5 +326,43 @@ describe('UserAdminActions: скидання пароля', () => {
     const alert = await screen.findByRole('alert');
     expect(alert.textContent).toContain('Domain account');
     expect(field.closest('.mantine-InputWrapper-root')?.textContent).not.toContain('Domain account');
+  });
+});
+
+describe('UserAdminActions: виправлення SID (X5-01)', () => {
+  const puts = (): Call[] => calls.filter((c) => c.method === 'PUT');
+
+  it('лише доменний запис, що ще не входив', async () => {
+    renderActions(userView({ provider: 'Windows' }));
+    expect(await screen.findByRole('button', { name: /^Correct SID of jdoe$/ })).not.toBeNull();
+  });
+
+  it('доменний запис, що вже входив, і локальний — кнопки немає', async () => {
+    renderActions(userView({ provider: 'Windows', lastSignInAt: '2026-10-01T08:00:00Z' }));
+    expect(await screen.findByRole('button', { name: /^Lock jdoe$/ })).not.toBeNull();
+    expect(screen.queryByRole('button', { name: /^Correct SID of jdoe$/ })).toBeNull();
+  });
+
+  it('локальний запис — кнопки немає', async () => {
+    renderActions(userView({}));
+    expect(await screen.findByRole('button', { name: /^Lock jdoe$/ })).not.toBeNull();
+    expect(screen.queryByRole('button', { name: /^Correct SID of jdoe$/ })).toBeNull();
+  });
+
+  it('SID іде тілом PUT /users/{id}/windows-sid, обрізаний', async () => {
+    const user = userEvent.setup();
+    renderActions(userView({ provider: 'Windows' }));
+
+    await user.click(await screen.findByRole('button', { name: /^Correct SID of jdoe$/ }));
+    const dialog = await screen.findByRole('dialog');
+    const confirm = within(dialog).getByRole('button', { name: 'Correct SID' });
+    expect((confirm as HTMLButtonElement).disabled).toBe(true);
+
+    await user.type(within(dialog).getByRole('textbox', { name: 'SID' }), ' S-1-5-21-1-2-3-1001 ');
+    await user.click(confirm);
+
+    await waitFor(() => expect(puts()).toHaveLength(1));
+    expect(puts()[0]?.url).toMatch(/\/api\/v1\/users\/42\/windows-sid$/);
+    expect(JSON.parse(puts()[0]?.body ?? '{}')).toEqual({ sid: 'S-1-5-21-1-2-3-1001' });
   });
 });

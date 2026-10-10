@@ -230,6 +230,18 @@ if ($ListSteps) {
     $SkipClient = $false
 }
 
+# N5-03: тести скриптів tools/ (Pester 5, без мережі й ECR: Invoke-Ecr підмінено). Крок не потребує ні
+# .NET, ні SQL Server, тож іде в завданні `client` конвеєра (там немає SQL, а pwsh і Pester є на раннері).
+Step 'Тести інструментів (Pester)' {
+    $pesterTests = (Join-Path $root 'tools/tests').Replace("'", "''")
+    $pesterCmd = "Import-Module Pester -MinimumVersion 5.0 -ErrorAction Stop; " +
+        "`$c = New-PesterConfiguration; `$c.Run.Path = '$pesterTests'; `$c.Run.Exit = `$true; " +
+        "`$c.Output.Verbosity = 'Normal'; Invoke-Pester -Configuration `$c"
+    # ⚠ Один список і одне розкладання (див. Invoke-Child): префікс політики виконання — лише у Windows.
+    $pesterArgs = @('-NoProfile') + $psPrefix + @('-Command', $pesterCmd)
+    & $psExe @pesterArgs
+}
+
 Step 'Складання' {
     & dotnet build (Join-Path $root 'Ecr.sln') -v q --nologo
 }

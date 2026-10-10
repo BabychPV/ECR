@@ -94,6 +94,21 @@ public interface IRegistryRowsQuery
     /// <param name="ct">Токен скасування.</param>
     public Task<IReadOnlyList<RegistryRowValue>> ListEqualMatchesAsync(
         int registryFieldDefId, Domain.Enums.CellDataType type, string canonical, DateTime? asOfUtc, CancellationToken ct);
+
+    /// <summary>
+    /// Бере блокування оновлення (<c>UPDLOCK</c>) на рядки записів до кінця поточної транзакції — у
+    /// порядку <c>Id</c>, щоб два пакети з перехресними наборами не ловили взаємоблокування.
+    /// </summary>
+    /// <param name="registryEntryIds">Записи; порожній набір — нічого не робить.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⛔ Лише всередині транзакції (D1-04): перевірка <c>baseVersion</c> після цього блокування читає
+    /// (під RCSI — новим оператором) уже закомічений стан паралельного писача того самого запису, а не
+    /// стан ДО нього. Без блокування дві правки однієї версії обидві проходили перевірку, і друга мовчки
+    /// затирала першу.
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">Виклик поза транзакцією.</exception>
+    public Task LockEntriesAsync(IReadOnlyCollection<long> registryEntryIds, CancellationToken ct);
 }
 
 /// <summary>Правило відбору видимих записів плоского довідника.</summary>

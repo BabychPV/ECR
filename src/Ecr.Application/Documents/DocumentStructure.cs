@@ -65,6 +65,46 @@ public static class DocumentStructure
                 $"Документ {documentId} перенесено на іншу версію шаблону, і аркуша {sheetDefId} у ній немає: нічого не подано, оновіть сторінку."));
     }
 
+    /// <summary>
+    /// Кидає <c>409 ECR-DOC-4091</c>, якщо версія шаблону проєкту під блоком його рядка вже не та,
+    /// за якою готувалося створення документа (L6-02 / N1-04).
+    /// </summary>
+    /// <param name="locked">Версія, прочитана під блоком; <c>null</c> — проєкту немає.</param>
+    /// <param name="expected">Версія, за якою будувався склад нового документа.</param>
+    /// <param name="projectId">Проєкт.</param>
+    /// <exception cref="NotFoundException">Проєкту немає.</exception>
+    /// <exception cref="ConcurrencyConflictException">Проєкт перенесено на іншу версію.</exception>
+    public static void EnsureProjectVersionUnchanged(int? locked, int expected, int projectId)
+    {
+        if (locked is not { } current)
+        {
+            throw new NotFoundException(
+                ErrorCodes.ProjectNotFound,
+                string.Create(CultureInfo.InvariantCulture, $"Проєкт {projectId} не знайдено."),
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-PRJ-0404.project",
+                    ["projectId"] = projectId.ToString(CultureInfo.InvariantCulture),
+                });
+        }
+
+        if (current == expected)
+        {
+            return;
+        }
+
+        throw new ConcurrencyConflictException(
+            ErrorCodes.SheetBusy,
+            string.Create(
+                CultureInfo.InvariantCulture,
+                $"Проєкт {projectId} перенесено на версію шаблону {current}, поки готувався документ за версією {expected}: нічого не створено, повторіть дію."),
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = StructureChangedKey,
+                ["projectId"] = projectId.ToString(CultureInfo.InvariantCulture),
+            });
+    }
+
     private static ConcurrencyConflictException Changed(long documentId, string message)
         => new(
             ErrorCodes.SheetBusy,

@@ -1,11 +1,14 @@
 // tests/Ecr.Infrastructure.Tests/Reporting/ReportSnapshotBuildTests.cs
+using Ecr.Domain.Entities.Documents;
 using Ecr.Domain.Entities.Reporting;
 using Ecr.Domain.Entities.Workflow;
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
 using Ecr.Infrastructure.Reporting;
 using Ecr.TestKit;
+using Ecr.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Caching.Memory;
 using Xunit;
 
@@ -117,6 +120,11 @@ public sealed class ReportSnapshotBuildTests(SqlServerFixture sql)
 
         // Єдиний аркуш періоду ПОДАНО: `StatusOfDataAsync` виведе `Submitted`,
         // і саме цей статус дістанеться щойно створеному зрізу.
+        //
+        // ⚠ R5-W1 / W1-02: статус зрізу рахується від СКЛАДУ документа (`doc.DocumentSheet`,
+        // `IsIncluded`), а не від самих рядків стану. `TestDocumentBuilder` складу не створює —
+        // без цього рядка аркушів «немає», і зріз чесно `Draft`.
+        db.DocumentSheets.Add(new DocumentSheet(document.DocumentId, document.SheetDefId));
         var state = new ApprovalState(document.DocumentId, document.SheetDefId, document.PeriodKey.Value);
         state.Submit(userId: 5, Now);
         db.ApprovalStates.Add(state);
@@ -218,5 +226,125 @@ public sealed class ReportSnapshotBuildTests(SqlServerFixture sql)
         // `Mode` вже підставлене. Інакше зріз, побудований без параметра, не
         // давав би відповіді на питання, на якому значенні стоять його числа.
         Assert.Equal("""{"Threshold":12,"Mode":null}""", stored);
+    }
+    /// <remarks>
+    /// ⛔ R6-X1 / X1-01: перехід робочого процесу, що закомітився ПОКИ побудова писала
+    /// рядки, оновлював лише СТАРИЙ поточний зріз (новий ще не `IsCurrent`), а побудова
+    /// робила свій зріз поточним зі статусом, порахованим ДО запису рядків. Пауза тут —
+    /// перехоплювач першого збереження будівника (зріз уже є, але не поточний): у цю
+    /// мить інша сесія комітить перехід. Без фіксу:
+    /// <list type="bullet">
+    /// <item>останній Submit посеред побудови → новий поточний зріз `Draft`, і регуляторна
+    /// вʼюха (`Status IN (1,2)`) не показує нічого до наступного переходу;</item>
+    /// <item>повернення аркуша в роботу посеред побудови → новий поточний зріз
+    /// `Submitted`, тобто незмінний, хоча аркуш у чернетці.</item>
+    /// </list>
+    /// </remarks>
+    [Theory]
+    [InlineData(false, SnapshotStatus.Submitted)]
+    [InlineData(true, SnapshotStatus.Draft)]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "X1-01")]
+    [Trait("Requirement", "D-65")]
+    public async Task Перехід_посеред_побудови_доходить_до_нового_поточного_зрізу(
+        bool submittedBefore, SnapshotStatus expected)
+    {
+        var chain = new TestDocumentBuilder(sql.ConnectionString);
+        var document = await chain.BuildAsync();
+
+        int versionId;
+        await using (var seed = chain.CreateContext())
+        {
+            // Склад — єдиний аркуш (W1-02: без рядка складу аркушів «немає»).
+            seed.DocumentSheets.Add(new DocumentSheet(document.DocumentId, document.SheetDefId));
+
+            if (submittedBefore)
+            {
+                var state = new ApprovalState(document.DocumentId, document.SheetDefId, document.PeriodKey.Value);
+                state.Submit(userId: 5, Now);
+                seed.ApprovalStates.Add(state);
+            }
+
+            var tag = Guid.NewGuid().ToString("N")[..8];
+            var def = new ReportDef(
+                EcrCode.Create($"RPX{tag}"),
+                new LocalizedText(new Dictionary<string, string> { ["en"] = "Race test" }),
+                isRegulatory: true);
+
+            seed.ReportDefs.Add(def);
+            await seed.SaveChangesAsync(CancellationToken.None);
+
+            var version = new ReportVersion(
+                def.Id,
+                "1.0",
+                """[{"code":"DocumentId","kind":"number"},{"code":"Value","kind":"number"}]""",
+                """{"rowSource":"CalculationResults"}""",
+                Now);
+
+            version.Publish();
+            seed.ReportVersions.Add(version);
+            await seed.SaveChangesAsync(CancellationToken.None);
+            versionId = version.Id;
+        }
+
+        // Перехід іншої сесії, закомічений посеред побудови.
+        var pause = new AfterFirstSave(async ct =>
+        {
+            await using var other = chain.CreateContext();
+            if (submittedBefore)
+            {
+                // Аркуш повернуто в роботу: рядка стану немає → `Draft` за складом.
+                await other.ApprovalStates
+                    .Where(a => a.DocumentId == document.DocumentId
+                                && a.SheetDefId == document.SheetDefId
+                                && a.PeriodKey == document.PeriodKey.Value)
+                    .ExecuteDeleteAsync(ct);
+            }
+            else
+            {
+                // Останній аркуш подано.
+                var state = new ApprovalState(document.DocumentId, document.SheetDefId, document.PeriodKey.Value);
+                state.Submit(userId: 5, Now);
+                other.ApprovalStates.Add(state);
+                await other.SaveChangesAsync(ct);
+            }
+        });
+
+        await using var db = new EcrDbContext(EfWarningGuard.Apply(new DbContextOptionsBuilder<EcrDbContext>()
+                .UseSqlServer(sql.ConnectionString, o => o.MigrationsHistoryTable("__EFMigrationsHistory", "dbo"))
+                .AddInterceptors(pause))
+            .Options);
+
+        var builder = new ReportSnapshotBuilder(db, new TestClock(Now), new MemoryCache(new MemoryCacheOptions()));
+
+        var snapshotId = await builder.BuildAsync(
+            versionId, document.ProjectId, document.PeriodKey, parametersJson: null, CancellationToken.None);
+
+        Assert.True(pause.Fired, "перехоплювач не спрацював: тест не відтворив вікно побудови.");
+
+        await using var check = chain.CreateContext();
+        var made = await check.ReportSnapshots.AsNoTracking().SingleAsync(s => s.Id == snapshotId);
+
+        Assert.True(made.IsCurrent);
+        Assert.Equal(expected, made.Status);
+    }
+
+    /// <summary>Один раз, після першого збереження, виконує дію іншої сесії.</summary>
+    private sealed class AfterFirstSave(Func<CancellationToken, Task> action) : SaveChangesInterceptor
+    {
+        public bool Fired { get; private set; }
+
+        public override async ValueTask<int> SavedChangesAsync(
+            SaveChangesCompletedEventData eventData, int result, CancellationToken cancellationToken = default)
+        {
+            if (!Fired)
+            {
+                Fired = true;
+                await action(cancellationToken).ConfigureAwait(false);
+            }
+
+            return result;
+        }
     }
 }

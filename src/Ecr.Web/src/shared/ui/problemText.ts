@@ -98,7 +98,48 @@ function mayShowDetail(error: EcrApiError): boolean {
 const CatalogKey = /^err\.[A-Za-z0-9.-]+$/;
 
 function titleOf(problem: EcrApiError['problem']): string {
-  return CatalogKey.test(problem.title) ? t(problem.title) : problem.title;
+  if (CatalogKey.test(problem.title)) return t(problem.title);
+
+  // ⛔ X5-02: заголовок, рівний самому коду, — ознака, що сервер НЕ прочитав каталог
+  // (тимчасовий збій БД — каталог живе в ній же; збій читання). Тоді назву бере
+  // власний каталог клієнта: спершу `<messageKey>.title`, далі `err.<код>`. Без цього
+  // 503 `databaseBusy` показував людині «ECR-SYS-0503» замість назви проблеми.
+  // ⚠ Лише через `hasText`: відсутній ключ дав би `⟦…⟧` гірше за код.
+  if (problem.title === problem.errorCode) {
+    const key = messageKeyOf(problem);
+    const titleKey = key === null ? null : `${key}.title`;
+    if (titleKey !== null && hasText(titleKey)) return t(titleKey);
+    const codeKey = `err.${problem.errorCode}`;
+    if (hasText(codeKey)) return t(codeKey);
+  }
+
+  return problem.title;
+}
+
+function messageKeyOf(problem: EcrApiError['problem']): string | null {
+  const key = problem.extensions2?.['messageKey'];
+  return typeof key === 'string' && key.length > 0 ? key : null;
+}
+
+/**
+ * Подробиця з власного каталогу клієнта — коли сервер позначив відмову ключем,
+ * але подробиці НЕ прислав (X5-02: тимчасовий збій БД або збій читання каталогу).
+ *
+ * ⚠ Підстановки — з тих самих розширень відповіді (рядки й числа), що їх бере
+ * серверний резолвер. Ключа в каталозі немає — подробиці немає (`null`), а не `⟦…⟧`.
+ */
+function catalogDetailOf(problem: EcrApiError['problem']): string | null {
+  const key = messageKeyOf(problem);
+  if (key === null || !hasText(key)) return null;
+
+  const params: Record<string, string | number> = {};
+  for (const [name, value] of Object.entries(problem.extensions2 ?? {})) {
+    if (name !== 'messageKey' && (typeof value === 'string' || typeof value === 'number')) {
+      params[name] = value;
+    }
+  }
+
+  return t(key, params);
 }
 
 /**
@@ -130,7 +171,7 @@ export function problemText(error: unknown): ProblemText {
 
   return {
     title: titleOf(error.problem),
-    detail: fromCatalog ? raw : null,
+    detail: fromCatalog ? (raw ?? catalogDetailOf(error.problem)) : null,
     code: error.problem.errorCode,
     correlationId: error.problem.correlationId,
     suppressed: fromCatalog ? null : raw,

@@ -1,4 +1,5 @@
 // tests/Ecr.Application.Tests/Templates/PublishDuplicateColumnBindingTests.cs
+using Ecr.Application.Calculations;
 using Ecr.Application.Ports;
 using Ecr.Application.Templates;
 using Ecr.TestKit;
@@ -74,5 +75,27 @@ public sealed class PublishDuplicateColumnBindingTests
         ]);
 
         Assert.Empty(diagnostics);
+    }
+
+    /// <remarks>
+    /// N2-06: матчер порівнює ТЕКСТ значення (<c>5</c> і <c>"5"</c> — те саме), тож дві прив'язки
+    /// з такими предикатами обирають однакові рядки й є дублем. Мутація: повернути порівняння
+    /// сирого <c>GetRawText()</c> — тест червоніє.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    public void Число_і_рядок_з_тим_самим_текстом_еквівалентні()
+    {
+        Assert.True(BindingPredicate.AreEquivalent("{\"12\":5}", "{\"12\":\"5\"}"));
+        Assert.True(BindingPredicate.AreEquivalent("{\"12\":5,\"3\":\"a\"}", "{ \"3\":\"a\", \"12\":\"5\" }"));
+        Assert.False(BindingPredicate.AreEquivalent("{\"12\":5}", "{\"12\":\"6\"}"));
+
+        var diagnostics = PublishChecks.CheckDuplicateColumnBindings(
+        [
+            new ActiveColumnBinding(10, "T1", "EMISSION", "M1", "EMISSION", "{\"12\":5}"),
+            new ActiveColumnBinding(10, "T1", "EMISSION", "M2", "GSEC", "{\"12\":\"5\"}"),
+        ]);
+
+        Assert.Single(diagnostics);
     }
 }

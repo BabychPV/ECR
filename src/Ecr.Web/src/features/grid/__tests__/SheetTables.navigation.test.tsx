@@ -82,7 +82,7 @@ afterEach(() => {
 function renderSheet(list: readonly DocumentTableDto[] = tables): ReturnType<typeof render> {
   return render(
     <MantineProvider>
-      <SheetTables documentId={7} periodKey={202609} readOnly={false} tables={list} />
+      <SheetTables documentId={7} periodKey={202609} periodEnd={null} readOnly={false} tables={list} />
     </MantineProvider>,
   );
 }
@@ -139,6 +139,7 @@ describe('перехід від зауваження до таблиці арк�
         <SheetTables
           documentId={7}
           periodKey={202609}
+          periodEnd={null}
           readOnly={false}
           tables={[tableFixture(3, 42)]}
         />
@@ -155,7 +156,7 @@ describe('перехід від зауваження до таблиці арк�
     act(() => requestCellNavigation({ tableDefId: 10, rowKey: 'r1', columnCode: 'C1' }));
     view.rerender(
       <MantineProvider>
-        <SheetTables documentId={7} periodKey={202609} readOnly={false} tables={tables} />
+        <SheetTables documentId={7} periodKey={202609} periodEnd={null} readOnly={false} tables={tables} />
       </MantineProvider>,
     );
 

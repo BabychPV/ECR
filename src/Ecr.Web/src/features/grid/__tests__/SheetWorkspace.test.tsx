@@ -73,7 +73,7 @@ function renderWorkspace(entry = '/documents/1?periodKey=202401'): void {
   render(
     <MantineProvider>
       <MemoryRouter initialEntries={[entry]}>
-        <SheetWorkspace documentId={1} periodKey={202401} readOnly={false} tables={Tables} />
+        <SheetWorkspace documentId={1} periodKey={202401} periodEnd={null} readOnly={false} tables={Tables} />
         <LocationProbe />
       </MemoryRouter>
     </MantineProvider>,

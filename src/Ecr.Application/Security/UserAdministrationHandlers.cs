@@ -263,3 +263,51 @@ public sealed class SetUserLockHandler(
             ct).ConfigureAwait(false);
     }
 }
+
+/// <summary>
+/// Виправлення SID доменного запису, який ще не входив. Право <c>Security.ManageUsers</c> (X5-01).
+/// </summary>
+/// <remarks>
+/// ⛔ X5-01: SID у <c>POST /users</c> набирається руками. Помилка в одній цифрі давала запис, що
+/// займав ім'я входу справжньої людини: її Windows-вхід шукає за SID, не знаходить і впирається
+/// в <c>UQ_User_Name</c>. Шляху ремонту без SQL не було — ні зміни SID, ні видалення запису.
+///
+/// ⚠ Лише для непідтвердженого SID (<c>LastSignInAt == null</c>, перевіряє домен): після першого
+/// входу SID належить конкретній людині, і його заміна — передача чужих ролей, а не виправлення.
+/// </remarks>
+public sealed class CorrectWindowsSidHandler(
+    IUserStore users,
+    IAccessDecisionService access,
+    IUnitOfWork uow,
+    IAuditWriter audit,
+    ICurrentUser currentUser,
+    IClock clock)
+{
+    /// <summary>Право керування користувачами.</summary>
+    public const string Permission = "Security.ManageUsers";
+
+    /// <summary>Замінює SID запису-цілі канонічним <paramref name="windowsSid"/>.</summary>
+    /// <param name="userId">Ціль.</param>
+    /// <param name="windowsSid">Правильний SID (<c>S-1-…</c>).</param>
+    /// <param name="ct">Токен скасування.</param>
+    public async Task HandleAsync(int userId, string? windowsSid, CancellationToken ct)
+    {
+        var (actorId, target) = await UserAdministration
+            .ResolveAsync(users, access, currentUser, Permission, userId, ct).ConfigureAwait(false);
+
+        var sid = WindowsSidFormat.Canonicalize(windowsSid);
+        await WindowsSidFormat.EnsureFreeAsync(users, sid, exceptUserId: target.Id, ct).ConfigureAwait(false);
+
+        var previous = target.WindowsSid;
+        target.CorrectUnconfirmedWindowsSid(sid);
+
+        await audit.WriteSecurityEventAsync(
+            new SecurityEventRecord(
+                clock.UtcNow, "WindowsSidCorrected", TargetUserId: target.Id, TargetRoleId: null,
+                DetailsJson: JsonSerializer.Serialize(new { oldSid = previous, newSid = sid }),
+                ChangedByUserId: actorId, CorrelationId: currentUser.CorrelationId),
+            ct).ConfigureAwait(false);
+
+        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+    }
+}

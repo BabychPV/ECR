@@ -3,7 +3,11 @@ namespace Ecr.Application.Documents.Dto;
 
 /// <summary>Результат пакетної зміни.</summary>
 /// <param name="AppliedCells">Скільки комірок записано.</param>
-/// <param name="RowVersions">Нові версії зачеплених рядків: <c>RowKey</c> → hex.</param>
+/// <param name="RowVersions">
+/// Нові версії зачеплених рядків: <c>RowKey</c> → <c>rowversion</c> у Base64 (<c>Convert.ToBase64String</c>),
+/// не hex. Base64 розрізняє регістр: клієнт повертає значення в <c>baseVersion</c> дослівно, а сервер порівнює
+/// його <c>Ordinal</c> — переписане в нижній чи верхній регістр, воно дало б хибний конфлікт <c>409</c>.
+/// </param>
 /// <param name="Validation">Результати валідації рівнів, які не блокують запис (R-B3).</param>
 /// <param name="OutOfWindow">
 /// Адреси <c>rowKey:columnCode</c> комірок, записаних за політикою <c>Warn</c>

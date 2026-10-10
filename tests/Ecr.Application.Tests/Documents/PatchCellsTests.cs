@@ -1235,6 +1235,31 @@ public sealed class PatchCellsTests
     }
 
     /// <summary>
+    /// F1-01 (аудит 9): незаповнений Block-вхід методології не зупиняє запис ІНТЕГРАЦІЇ —
+    /// вона ручних входів не заповнює, а блок відхиляв весь батч матеріалізації таблиці.
+    /// Для людини (сусідній тест вище) блок лишається.
+    /// </summary>
+    /// <remarks>
+    /// МУТАЦІЙНИЙ ДОКАЗ: у <c>EvaluateRequiredInputs</c> прибрати <c>&amp;&amp; humanBatch</c> —
+    /// обробник кидає <c>ECR-CALC-0437</c>, тест червоний.
+    /// </remarks>
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Finding", "F1-01")]
+    public async Task Незаповнена_Block_вхідна_колонка_НЕ_блокує_запис_інтеграції()
+    {
+        WithMethodology(RequiredInputSeverity.Block);
+
+        var response = await Handler().HandleAsync(
+            new PatchCellsRequest(
+                TableInstance, Period, "Integration", [new PatchRow("7001001", "0x0A", [new PatchCell("Volume", 12500m)])]),
+            CancellationToken.None);
+
+        Assert.Equal(1, response.AppliedCells);
+        Assert.DoesNotContain(response.Validation, m => m.RuleCode == "ECR-CALC-0437" && m.Severity == "Error");
+        await _cells.Received(1).ApplyAsync(Arg.Any<CellChangeSet>(), Arg.Any<CancellationToken>());
+    }
+
+    /// <summary>
     /// Довідник одиниць, у якому є одиниця <c>7</c> — та, яку пишуть тести
     /// цього файлу (B-02: неіснуюча одиниця тепер відхиляється до запису).
     /// </summary>

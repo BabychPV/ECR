@@ -139,8 +139,8 @@ public sealed class StaticAssetsAndCompressionTests(SqlServerFixture sql)
             // ⛔ А це головне: оболонка НЕ кешується. Саме закешований
             // `index.html` після оновлення просить чанк, якого вже немає.
             Assert.True(
-                shellResponse.Headers.CacheControl?.NoCache,
-                $"оболонка мусить бути no-cache, а має: {shellResponse.Headers.CacheControl}");
+                shellResponse.Headers.CacheControl?.NoStore,
+                $"оболонка мусить бути no-store (AN-108 / S2-03), а має: {shellResponse.Headers.CacheControl}");
         }
         finally
         {
@@ -210,8 +210,8 @@ public sealed class StaticAssetsAndCompressionTests(SqlServerFixture sql)
             // ⛔ Мутаційний доказ: `app.MapFallbackToFile("index.html")` без
             // `staticFileOptions` — заголовка немає взагалі, тест червоний.
             Assert.True(
-                response.Headers.CacheControl?.NoCache,
-                $"{route}: оболонка з фолбека мусить бути no-cache, а має: {response.Headers.CacheControl}");
+                response.Headers.CacheControl?.NoStore,
+                $"{route}: оболонка з фолбека мусить бути no-store (AN-108 / S2-03), а має: {response.Headers.CacheControl}");
         }
         finally
         {

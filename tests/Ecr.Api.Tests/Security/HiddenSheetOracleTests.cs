@@ -357,7 +357,12 @@ public sealed class HiddenSheetOracleTests(SqlServerFixture sql)
     private static string Normalize(string body, long sheetId)
     {
         var text = Regex.Replace(body, "\"(traceId|correlationId|requestId)\"\\s*:\\s*\"[^\"]*\",?", string.Empty);
-        return Regex.Replace(text, $"(?<![0-9A-Za-z]){sheetId.ToString(CultureInfo.InvariantCulture)}(?![0-9A-Za-z])", "<SHEET>");
+        // ⚠ Не в полі `status`: схований аркуш з Id 404 інакше перетворював `"status":404` на
+        // `<SHEET>` лише в одному з тіл — хибне «тіла різняться» (інтеграція batch5).
+        return Regex.Replace(
+            text,
+            $"(?<![0-9A-Za-z])(?<!\"status\"\\s*:\\s*){sheetId.ToString(CultureInfo.InvariantCulture)}(?![0-9A-Za-z])",
+            "<SHEET>");
     }
 
     private static void AssertVisibleOnly(string endpoint, string body, JsonElement doc, Scenario s, bool withPeriod)

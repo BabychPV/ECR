@@ -38,8 +38,12 @@ public sealed partial class ExceptionHandlingMiddleware(
     private partial void LogRejected(string code, int status, string correlationId);
 
     [LoggerMessage(Level = LogLevel.Warning,
-        Message = "Відповідь уже почалася, ProblemDetails не надіслано. CorrelationId={CorrelationId}")]
+        Message = "Відповідь уже почалася, ProblemDetails не надіслано; з'єднання обірвано. CorrelationId={CorrelationId}")]
     private partial void LogTooLate(string correlationId);
+
+    [LoggerMessage(Level = LogLevel.Information,
+        Message = "Клієнт розірвав з'єднання під час запиту; виняток після обриву не є збоєм сервера. CorrelationId={CorrelationId}")]
+    private partial void LogClientGone(Exception exception, string correlationId);
 
     /// <summary>Обробляє запит.</summary>
     public async Task InvokeAsync(HttpContext context)
@@ -50,13 +54,29 @@ public sealed partial class ExceptionHandlingMiddleware(
         {
             await next(context).ConfigureAwait(false);
         }
-        catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested)
+        catch (Exception ex) when (context.RequestAborted.IsCancellationRequested && ex is not AccessDeniedException)
         {
             // Клієнт відвалився. Тіла відповіді ніхто не прочитає, а новий код
             // помилки заради цього заводити не можна: кожен код каталогу
             // звіряється з `02-contracts.md` §7 в обидва боки, і код, якого
             // ніхто не побачить, лишився б там назавжди як мертвий рядок.
-            context.Response.StatusCode = StatusCodes.Status499ClientClosedRequest;
+            //
+            // ⛔ R5-E1/E1-03: фільтр — на ОБІРВАНИЙ ЗАПИТ, а не на тип винятку. SqlClient на скасуванні
+            // кидає `SqlException` «Operation cancelled by user», а не OCE (те саме визнають
+            // `JobWorker`, `SqlDistributedLock`) — і обрив клієнта посеред SQL ішов у 500 з Error.
+            // Не-OCE лишає слід (Information зі стеком), але не як «необроблена помилка».
+            // Відмова в доступі йде звичайним шляхом: слід у журналі безпеки (ФВ-5.24) не залежить від клієнта.
+            if (ex is not OperationCanceledException)
+            {
+                var correlationId = CorrelationIdOf(context);
+                LogClientGone(ex, correlationId);
+            }
+
+            // ⛔ Після старту відповіді сеттер `StatusCode` у Kestrel кидає `InvalidOperationException`.
+            if (!context.Response.HasStarted)
+            {
+                context.Response.StatusCode = StatusCodes.Status499ClientClosedRequest;
+            }
         }
         catch (Exception ex)
         {
@@ -64,11 +84,14 @@ public sealed partial class ExceptionHandlingMiddleware(
         }
     }
 
-    private async Task WriteAsync(HttpContext context, Exception exception)
-    {
-        var correlationId = context.Items.TryGetValue(CorrelationIdMiddleware.ItemKey, out var raw)
+    private static string CorrelationIdOf(HttpContext context)
+        => context.Items.TryGetValue(CorrelationIdMiddleware.ItemKey, out var raw)
             ? raw as string ?? string.Empty
             : string.Empty;
+
+    private async Task WriteAsync(HttpContext context, Exception exception)
+    {
+        var correlationId = CorrelationIdOf(context);
 
         var (status, code, message, details) = Map(exception);
 
@@ -100,15 +123,30 @@ public sealed partial class ExceptionHandlingMiddleware(
         {
             // Відповідь уже пішла — переписати її неможливо. Мовчки це
             // проковтнути гірше, ніж лишити слід у журналі.
+            //
+            // ⛔ R5-E1/E1-02: і завершувати конвеєр нормально НЕ можна: Kestrel тоді чесно закриває
+            // chunked-тіло, і потоковий CSV (`AuditController.ExportStructure`) доходить ОБРІЗАНИМ,
+            // але зі статусом 200 — клієнт приймає неповний експорт за цілий. `Abort` рве з'єднання
+            // (RST/без кінцевого chunk), і клієнт бачить збій передачі, а не «успіх».
             LogTooLate(correlationId);
+            context.Abort();
             return;
         }
+
+        // ⛔ X5-02: каталог читається ОДИН раз на відповідь (раніше — двічі: заголовок і подробиця,
+        // кожне — нове з'єднання і `SELECT Revision`). А для тимчасового збою БД — жодного разу:
+        // каталог живе в тій самій БД, і похід по нього на 503 `databaseBusy` чекав `Connect Timeout`
+        // двічі (до ~30 с), забирав з'єднання з уже вичерпаного пулу і все одно повертав код замість
+        // заголовка та українське речення. Тоді йде код і `messageKey` без подробиці, а текст
+        // мовою користувача бере клієнт зі свого каталогу (`problemText`).
+        var strings = new CatalogOnce(
+            context, skip: status == StatusCodes.Status503ServiceUnavailable && IsTransientDatabaseFailure(exception));
 
         var problem = new EcrProblemDetails
         {
             Status = status,
-            Title = await LocalizedTitleAsync(context, code, details).ConfigureAwait(false),
-            Detail = await LocalizedDetailAsync(context, code, message, details).ConfigureAwait(false),
+            Title = await LocalizedTitleAsync(strings, code, details).ConfigureAwait(false),
+            Detail = await LocalizedDetailAsync(strings, code, message, details).ConfigureAwait(false),
             Type = $"https://ecr.ncoc.kz/errors/{code}",
             Instance = context.Request.Path,
             ErrorCode = code,
@@ -158,6 +196,13 @@ public sealed partial class ExceptionHandlingMiddleware(
         if (setCookie.Count > 0)
         {
             context.Response.Headers.SetCookie = setCookie;
+        }
+
+        // ⛔ R5-E1/E1-04: 503 тимчасового збою БД каже клієнтові, коли повторити.
+        if (status == StatusCodes.Status503ServiceUnavailable && IsTransientDatabaseFailure(exception))
+        {
+            context.Response.Headers.RetryAfter =
+                DatabaseBusyRetryAfterSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
         }
 
         await JsonSerializer.SerializeAsync(
@@ -228,21 +273,16 @@ public sealed partial class ExceptionHandlingMiddleware(
     /// <c>problem+json</c> отримав би обірване з'єднання.
     /// </remarks>
     private static async Task<string> LocalizedTitleAsync(
-        HttpContext context, string code, IReadOnlyDictionary<string, object?>? details = null)
+        CatalogOnce catalog, string code, IReadOnlyDictionary<string, object?>? details = null)
     {
         try
         {
-            var catalog = context.RequestServices.GetService<IUiStringCatalog>();
-            var currentUser = context.RequestServices.GetService<ICurrentUser>();
+            var strings = await catalog.GetAsync().ConfigureAwait(false);
 
-            if (catalog is null || currentUser is null)
+            if (strings is null)
             {
                 return code;
             }
-
-            var strings = await catalog
-                .GetAsync(currentUser.Language, context.RequestAborted)
-                .ConfigureAwait(false);
 
             // ⛔ T3-07: один код (`ECR-TMPL-0409`) покриває різні стани («версію опубліковано», «код
             // зв'язку зайнятий»), і спільний заголовок по коду брехав для другого. Кидок може мати
@@ -273,6 +313,51 @@ public sealed partial class ExceptionHandlingMiddleware(
         }
     }
 
+    /// <summary>Каталог рядків мовою запиту — прочитаний не більше ОДНОГО разу на відповідь (X5-02).</summary>
+    /// <remarks>
+    /// <c>null</c> — каталогу немає: служби не зареєстровано (тести конвеєра), читання впало
+    /// або читати не можна взагалі (<c>skip</c>: тимчасовий збій БД). Два останні випадки —
+    /// <see cref="Unavailable"/>: подробицю з ключем тоді локалізує клієнт.
+    /// </remarks>
+    private sealed class CatalogOnce(HttpContext context, bool skip)
+    {
+        private Task<UiStringCatalog?>? _load;
+
+        /// <summary>Каталог мав бути, але його не прочитано (збій БД або читання).</summary>
+        public bool Unavailable { get; private set; } = skip;
+
+        /// <summary>Каталог або <c>null</c>; не кидає.</summary>
+        internal Task<UiStringCatalog?> GetAsync() => _load ??= LoadAsync();
+
+        private async Task<UiStringCatalog?> LoadAsync()
+        {
+            if (Unavailable)
+            {
+                return null;
+            }
+
+            try
+            {
+                var catalog = context.RequestServices?.GetService<IUiStringCatalog>();
+                var currentUser = context.RequestServices?.GetService<ICurrentUser>();
+
+                if (catalog is null || currentUser is null)
+                {
+                    return null;
+                }
+
+                return await catalog.GetAsync(currentUser.Language, context.RequestAborted).ConfigureAwait(false);
+            }
+#pragma warning disable CA1031 // Причина — у ⛔ LocalizedTitleAsync: помилка в обробнику помилок не має права дійти до клієнта.
+            catch (Exception)
+#pragma warning restore CA1031
+            {
+                Unavailable = true;
+                return null;
+            }
+        }
+    }
+
     /// <summary>Ключ каталогу для підпису «Потрібне право» перед кодом права.</summary>
     private const string RequiresPermissionKey = "err.ECR-AUTH-0403.requiresPermission";
 
@@ -300,14 +385,14 @@ public sealed partial class ExceptionHandlingMiddleware(
     /// `Title` уже читався каталогом за `D-95`, а `Detail` поруч — ні, і
     /// речення виходило двомовним).
     /// </remarks>
-    private static async Task<string> LocalizedDetailAsync(
-        HttpContext context, string code, string message, IReadOnlyDictionary<string, object?>? details)
+    private static async Task<string?> LocalizedDetailAsync(
+        CatalogOnce catalog, string code, string message, IReadOnlyDictionary<string, object?>? details)
     {
         if (details is not null
             && details.TryGetValue(MessageKeyDetailName, out var keyValue)
             && keyValue is string messageKey)
         {
-            return await ResolveGenericMessageAsync(context, message, messageKey, details).ConfigureAwait(false);
+            return await ResolveGenericMessageAsync(catalog, message, messageKey, details).ConfigureAwait(false);
         }
 
         if (!string.Equals(code, ErrorCodes.Forbidden, StringComparison.Ordinal)
@@ -320,17 +405,12 @@ public sealed partial class ExceptionHandlingMiddleware(
 
         try
         {
-            var catalog = context.RequestServices.GetService<IUiStringCatalog>();
-            var currentUser = context.RequestServices.GetService<ICurrentUser>();
+            var strings = await catalog.GetAsync().ConfigureAwait(false);
 
-            if (catalog is null || currentUser is null)
+            if (strings is null)
             {
                 return message;
             }
-
-            var strings = await catalog
-                .GetAsync(currentUser.Language, context.RequestAborted)
-                .ConfigureAwait(false);
 
             var label = UiStringResolver.Resolve(strings, RequiresPermissionKey);
 
@@ -357,22 +437,23 @@ public sealed partial class ExceptionHandlingMiddleware(
     /// каталогу взагалі нема, — дійти до клієнта локалізованим без власного
     /// точкового арму в цьому файлі на кожен новий код.
     /// </summary>
-    private static async Task<string> ResolveGenericMessageAsync(
-        HttpContext context, string message, string messageKey, IReadOnlyDictionary<string, object?> details)
+    /// <remarks>
+    /// ⛔ X5-02: каталог недоступний (збій читання або тимчасовий збій БД) — подробиці НЕМАЄ
+    /// (<c>null</c>), а не українського речення розробника: <c>messageKey</c> у відповіді каже
+    /// клієнтові, що подробиця «каталожна», і він показав би її як є. Без подробиці клієнт бере
+    /// текст за тим самим ключем зі свого каталогу (<c>problemText</c>).
+    /// </remarks>
+    private static async Task<string?> ResolveGenericMessageAsync(
+        CatalogOnce catalog, string message, string messageKey, IReadOnlyDictionary<string, object?> details)
     {
         try
         {
-            var catalog = context.RequestServices.GetService<IUiStringCatalog>();
-            var currentUser = context.RequestServices.GetService<ICurrentUser>();
+            var strings = await catalog.GetAsync().ConfigureAwait(false);
 
-            if (catalog is null || currentUser is null)
+            if (strings is null)
             {
-                return message;
+                return catalog.Unavailable ? null : message;
             }
-
-            var strings = await catalog
-                .GetAsync(currentUser.Language, context.RequestAborted)
-                .ConfigureAwait(false);
 
             var template = UiStringResolver.Resolve(strings, messageKey);
 
@@ -451,6 +532,19 @@ public sealed partial class ExceptionHandlingMiddleware(
                  ["messageKey"] = "err.ECR-CALC-0409.effectiveDateTakenNoVersion",
                  ["effectiveFrom"] = System.Text.RegularExpressions.Regex
                      .Match(e.GetBaseException().Message, @"\d{4}-\d{2}-\d{2}").Value,
+             }),
+
+        // ⛔ N2-05 (AN-72): два одночасні ПЕРШІ `PUT …/category-rule` однієї версії читають «правила немає»
+        // обидва й обидва додають рядок; другий відбиває лише `UQ_CategoryRule_Version`. Без арма це
+        // `DbUpdateException` у fallback — голий 500 на звичайну гонку. Конфлікт стану: 409, ключ без
+        // підстановок (повторний PUT уже перепише правило, що з'явилось).
+        Microsoft.EntityFrameworkCore.DbUpdateException e
+            when e.GetBaseException().Message.Contains("UQ_CategoryRule_Version", StringComparison.Ordinal) =>
+            (StatusCodes.Status409Conflict, "ECR-CALC-0409",
+             "Правило категорії цієї версії щойно створив хтось інший: перечитайте версію й збережіть правило ще раз.",
+             new Dictionary<string, object?>
+             {
+                 ["messageKey"] = "err.ECR-CALC-0409.categoryRuleConcurrent",
              }),
 
         ConcurrencyConflictException e =>
@@ -577,6 +671,12 @@ public sealed partial class ExceptionHandlingMiddleware(
         BusinessRuleException e when e.ErrorCode == ErrorCodes.JobStateConflict =>
             (StatusCodes.Status409Conflict, e.ErrorCode, e.Message, e.Details),
 
+        // ⛔ AN-108 / S2-05: вкладка вважає себе іншим користувачем, ніж власник cookie
+        // (`SessionUserMiddleware`) — сеанс змінився під нею, конфлікт стану, а не брак права.
+        // ⚠ Правило суфікса нижче цей код теж ловить (`-0409`); арм — явна назва, не єдина опора.
+        BusinessRuleException e when e.ErrorCode == ErrorCodes.SessionUserMismatch =>
+            (StatusCodes.Status409Conflict, e.ErrorCode, e.Message, e.Details),
+
         // ⛔ Те саме правило суфікса, що й для `DomainException` нижче: без нього
         // `ECR-UOM-4091`, `ECR-USR-0409`, `ECR-CALC-0409`, `ECR-TMPL-0409` і
         // `ECR-PRD-0409` з обробників їхали як 422, хоча §7 каже 409.
@@ -626,6 +726,15 @@ public sealed partial class ExceptionHandlingMiddleware(
         DomainException e =>
             (StatusCodes.Status422UnprocessableEntity, e.ErrorCode, e.Message, e.Details),
 
+        // ⛔ R5-E1/E1-04: тимчасовий збій БД — не «внутрішня помилка», а «спробуйте пізніше». Вичерпані
+        // повтори `EnableRetryOnFailure` (deadlock 1205), тайм-аут команди (-2) і обрив/недоступність
+        // з'єднання раніше йшли у fallback 500 `ECR-SYS-0500`. Код — той самий `ECR-SYS-0503`
+        // («сервіс недоступний», як `schedulerNotConfigured`), причину розрізняє `messageKey`;
+        // `Retry-After` ставить `WriteAsync`. Текст винятку SQL клієнтові не їде (ФВ-6.11).
+        _ when IsTransientDatabaseFailure(exception) =>
+            (StatusCodes.Status503ServiceUnavailable, ErrorCodes.Archiving,
+             "База даних тимчасово зайнята або недоступна; спробуйте за кілька секунд.", DatabaseBusyDetails),
+
         // ⚠ Речення стале (ФВ-6.11), але клієнтові їде з КАТАЛОГУ: українське
         // лишається запасним і для журналу, як і в решті кидків із ключем.
         _ => (StatusCodes.Status500InternalServerError, ErrorCodes.Internal,
@@ -661,6 +770,64 @@ public sealed partial class ExceptionHandlingMiddleware(
     /// <summary>Подробиця <c>ECR-EXPR-0422</c>: ключ каталогу <c>expr.tooComplex</c> (en/ru/kz уже в сіді).</summary>
     private static readonly IReadOnlyDictionary<string, object?> ExpressionTooComplexDetails =
         new Dictionary<string, object?> { [MessageKeyDetailName] = "expr.tooComplex" };
+
+    /// <summary>Скільки секунд радити клієнтові почекати після тимчасового збою БД (<c>Retry-After</c>).</summary>
+    internal const int DatabaseBusyRetryAfterSeconds = 5;
+
+    /// <summary>
+    /// Номери <see cref="Microsoft.Data.SqlClient.SqlException"/>, що означають тимчасовий збій, а не помилку
+    /// запиту: тайм-аут команди, deadlock, тайм-аут блокування та мережеві/доступність з'єднання (перелік
+    /// узгоджено з тим, на що повторює <c>EnableRetryOnFailure</c> SQL Server-провайдера).
+    /// </summary>
+    private static readonly System.Collections.Frozen.FrozenSet<int> TransientSqlNumbers = System.Collections.Frozen.FrozenSet.ToFrozenSet(new[]
+    {
+        -2,     // тайм-аут команди/з'єднання (клієнт)
+        64,     // мережеве ім'я більше недоступне
+        233,    // з'єднання встановлено, але розірвано під час входу
+        1205,   // deadlock victim
+        1222,   // перевищено тайм-аут очікування блокування
+        4060,   // база недоступна під час перемикання
+        10053,  // з'єднання перервано програмою на хості
+        10054,  // з'єднання розірвано віддаленим хостом
+        10060,  // тайм-аут мережевого з'єднання
+        10928,  // ліміт ресурсів
+        10929,  // ліміт ресурсів
+        40197,  // помилка сервісу під час обробки
+        40501,  // сервіс зайнятий
+        40613,  // база тимчасово недоступна
+        49918,  // недостатньо ресурсів
+        49919,  // недостатньо ресурсів
+        49920,  // недостатньо ресурсів
+    });
+
+    /// <summary>
+    /// Чи це тимчасовий збій БД: вичерпані повтори EF або <see cref="Microsoft.Data.SqlClient.SqlException"/> з
+    /// тимчасовим номером (тайм-аут SqlClient — це <c>Number == -2</c>) — будь-де в ланцюжку InnerException.
+    /// ⚠ Голий <see cref="TimeoutException"/> свідомо НЕ тут: його кидають і SMTP, і HTTP-джерела, і «база
+    /// зайнята» для них була б неправдою.
+    /// </summary>
+    /// <param name="exception">Виняток конвеєра.</param>
+    internal static bool IsTransientDatabaseFailure(Exception exception)
+    {
+        for (var current = exception; current is not null; current = current.InnerException)
+        {
+            switch (current)
+            {
+                case Microsoft.EntityFrameworkCore.Storage.RetryLimitExceededException:
+                    return true;
+                case Microsoft.Data.SqlClient.SqlException sql
+                    when sql.Errors.Cast<Microsoft.Data.SqlClient.SqlError>().Any(e => TransientSqlNumbers.Contains(e.Number))
+                         || TransientSqlNumbers.Contains(sql.Number):
+                    return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>Подробиця 503 тимчасового збою БД: лише ключ каталогу (з власним <c>.title</c>).</summary>
+    private static readonly IReadOnlyDictionary<string, object?> DatabaseBusyDetails =
+        new Dictionary<string, object?> { [MessageKeyDetailName] = "err.ECR-SYS-0503.databaseBusy" };
 
     /// <summary>Подробиця 500-ї: лише ключ каталогу, жодних даних винятку.</summary>
     private static readonly IReadOnlyDictionary<string, object?> InternalDetails =

@@ -56,6 +56,12 @@ public sealed class SheetEditGate(EcrDbContext db, SheetEditGatePolicy? policy =
 
     private readonly TimeSpan _lockTimeout = (policy ?? SheetEditGatePolicy.Default).LockTimeout;
 
+    /// <summary>
+    /// Документи, яких під блокуванням структури вже не було (<see cref="EnterStructureAsync"/>
+    /// повернув <c>null</c>): їх видалено, поки писар готував запит (X8-05).
+    /// </summary>
+    private readonly HashSet<long> _goneDocuments = [];
+
     /// <summary>Ім'я ресурсу <c>sp_getapplock</c> аркуша «документ × аркуш × період».</summary>
     /// <param name="documentId">Документ.</param>
     /// <param name="sheetDefId">Аркуш.</param>
@@ -69,11 +75,36 @@ public sealed class SheetEditGate(EcrDbContext db, SheetEditGatePolicy? policy =
     public static string ResourceOf(long documentId, int sheetDefId, int periodKey)
         => string.Create(CultureInfo.InvariantCulture, $"ecr:sheet-edit:{documentId}:{sheetDefId}:{periodKey}");
 
+    /// <summary>Ім'я ресурсу <c>sp_getapplock</c> СТРУКТУРИ документа (L6-02).</summary>
+    /// <param name="documentId">Документ.</param>
+    /// <remarks>
+    /// ⛔ Одне ім'я на всіх писарів структури: видалення рядків подій (<c>SourceEventSyncJob</c>) бере його
+    /// напряму на власному з'єднанні, повз <see cref="EnterStructureAsync"/> (там потрібна транзакція контексту).
+    /// </remarks>
+    /// <returns>Рядок ресурсу.</returns>
+    public static string StructureResourceOf(long documentId)
+        => string.Create(CultureInfo.InvariantCulture, $"ecr:doc-structure:{documentId}");
+
     /// <inheritdoc />
-    public async Task<DocumentStatus> EnterEditAsync(
+    public Task<DocumentStatus> EnterEditAsync(
         long documentId, int sheetDefId, PeriodKey periodKey, CancellationToken ct)
+        => EnterSharedAsync(documentId, sheetDefId, periodKey, _lockTimeout, ct);
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⚠ <c>@LockTimeout = 0</c>: <c>sp_getapplock</c> відмовляє (<c>-1</c>) і тоді, коли
+    /// спільне сумісне з наданими, але в черзі вже стоїть виняткове (подання), — саме
+    /// так, як потрібно: не ставати за поданням, тримаючи інші аркуші (X6-02).
+    /// </remarks>
+    public Task<DocumentStatus> EnterEditNoWaitAsync(
+        long documentId, int sheetDefId, PeriodKey periodKey, CancellationToken ct)
+        => EnterSharedAsync(documentId, sheetDefId, periodKey, TimeSpan.Zero, ct);
+
+    private async Task<DocumentStatus> EnterSharedAsync(
+        long documentId, int sheetDefId, PeriodKey periodKey, TimeSpan lockTimeout, CancellationToken ct)
     {
-        await AcquireAsync(documentId, sheetDefId, periodKey, SharedMode, ct).ConfigureAwait(false);
+        ThrowIfGone(documentId);
+        await AcquireAsync(documentId, sheetDefId, periodKey, SharedMode, lockTimeout, ct).ConfigureAwait(false);
 
         // ⛔ Стан читається ПІСЛЯ блокування і окремим запитом: під RCSI знімок
         // береться на початку ОПЕРАТОРА, тож цей оператор бачить подання, яке
@@ -92,19 +123,36 @@ public sealed class SheetEditGate(EcrDbContext db, SheetEditGatePolicy? policy =
 
     /// <inheritdoc />
     public Task EnterSubmitAsync(long documentId, int sheetDefId, PeriodKey periodKey, CancellationToken ct)
-        => AcquireAsync(documentId, sheetDefId, periodKey, ExclusiveMode, ct);
+    {
+        ThrowIfGone(documentId);
+        return AcquireAsync(documentId, sheetDefId, periodKey, ExclusiveMode, _lockTimeout, ct);
+    }
 
     /// <inheritdoc />
     public async Task<int?> EnterStructureAsync(long documentId, bool exclusive, CancellationToken ct)
     {
         var mode = exclusive ? ExclusiveMode : SharedMode;
-        var resource = string.Create(CultureInfo.InvariantCulture, $"ecr:doc-structure:{documentId}");
-        var (code, version) = await GetAppLockAsync(resource, mode, documentId, ct).ConfigureAwait(false);
+        var resource = StructureResourceOf(documentId);
+        var (code, version) = await GetAppLockAsync(resource, mode, documentId, _lockTimeout, ct).ConfigureAwait(false);
 
         // ⚠ Хто чекав, той і читає відмову: перенос — на записи документа, запис — на перенос.
         ThrowIfRefused(code, resource, mode, () => DocumentBusy(
             documentId, mode, code,
             exclusive ? "err.ECR-DOC-4091.documentBeingEdited" : "err.ECR-DOC-4091.structureChanging"));
+
+        // ⛔ X8-05 (R6): документа під блокуванням уже немає — видалення (бере структуру
+        // ВИНЯТКОВО, `DeleteDocumentHandler`) зафіксувалося, поки писар готував запит поза
+        // транзакцією. Доти запис ішов далі (`EnsureUnchanged` пропускає `null`, стан аркуша
+        // без рядка — `Draft`) і падав на FK 547 посеред транзакції — тобто 500, який клієнт
+        // ще й повторював як минущий. Тепер наступне блокування аркуша чи шапки цього
+        // документа відмовляє `404 ECR-DOC-0404`.
+        // ⚠ Відмова — на НАСТУПНОМУ блокуванні, а не тут: `RowStore.EnsureTableInstancesAsync`
+        // (матеріалізація, фонові прогони) бере лише структуру й для зниклого документа
+        // законно нічого не створює.
+        if (version is null)
+        {
+            _goneDocuments.Add(documentId);
+        }
 
         return version;
     }
@@ -112,9 +160,10 @@ public sealed class SheetEditGate(EcrDbContext db, SheetEditGatePolicy? policy =
     /// <inheritdoc />
     public async Task EnterHeaderAsync(long documentId, bool exclusive, CancellationToken ct)
     {
+        ThrowIfGone(documentId);
         var mode = exclusive ? ExclusiveMode : SharedMode;
         var resource = string.Create(CultureInfo.InvariantCulture, $"ecr:doc-header:{documentId}");
-        var (code, _) = await GetAppLockAsync(resource, mode, versionOfDocument: null, ct).ConfigureAwait(false);
+        var (code, _) = await GetAppLockAsync(resource, mode, versionOfDocument: null, _lockTimeout, ct).ConfigureAwait(false);
 
         // ⚠ Хто чекав, той і читає відмову: правка шапки — на подання, подання — на правку шапки.
         ThrowIfRefused(code, resource, mode, () => DocumentBusy(
@@ -123,11 +172,29 @@ public sealed class SheetEditGate(EcrDbContext db, SheetEditGatePolicy? policy =
     }
 
     private async Task AcquireAsync(
-        long documentId, int sheetDefId, PeriodKey periodKey, string mode, CancellationToken ct)
+        long documentId, int sheetDefId, PeriodKey periodKey, string mode, TimeSpan lockTimeout, CancellationToken ct)
     {
         var resource = ResourceOf(documentId, sheetDefId, periodKey.Value);
-        var (code, _) = await GetAppLockAsync(resource, mode, versionOfDocument: null, ct).ConfigureAwait(false);
+        var (code, _) = await GetAppLockAsync(resource, mode, versionOfDocument: null, lockTimeout, ct).ConfigureAwait(false);
         ThrowIfRefused(code, resource, mode, () => Busy(documentId, sheetDefId, periodKey, mode, code));
+    }
+
+    /// <summary><c>404 ECR-DOC-0404</c>, якщо під блокуванням структури документа вже не було (X8-05).</summary>
+    private void ThrowIfGone(long documentId)
+    {
+        if (!_goneDocuments.Contains(documentId))
+        {
+            return;
+        }
+
+        throw new NotFoundException(
+            ErrorCodes.DocumentNotFound,
+            string.Create(CultureInfo.InvariantCulture, $"Документ {documentId} видалено: нічого не записано."),
+            new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["messageKey"] = "err.ECR-DOC-0404.document",
+                ["documentId"] = documentId.ToString(CultureInfo.InvariantCulture),
+            });
     }
 
     /// <summary>Від'ємний код <c>sp_getapplock</c> — виняток; 0 і 1 — блокування взято.</summary>
@@ -159,7 +226,7 @@ public sealed class SheetEditGate(EcrDbContext db, SheetEditGatePolicy? policy =
     /// бачить перенос, що зафіксувався, поки ми чекали на блокування.
     /// </remarks>
     private async Task<(int Code, int? Version)> GetAppLockAsync(
-        string resource, string mode, long? versionOfDocument, CancellationToken ct)
+        string resource, string mode, long? versionOfDocument, TimeSpan lockTimeout, CancellationToken ct)
     {
         var transaction = db.Database.CurrentTransaction
                           ?? throw new InvalidOperationException(
@@ -186,7 +253,7 @@ public sealed class SheetEditGate(EcrDbContext db, SheetEditGatePolicy? policy =
         command.Parameters.Add(new SqlParameter("@LockMode", SqlDbType.VarChar, 32) { Value = mode });
         command.Parameters.Add(new SqlParameter("@LockTimeout", SqlDbType.Int)
         {
-            Value = (int)Math.Min(int.MaxValue, _lockTimeout.TotalMilliseconds),
+            Value = (int)Math.Min(int.MaxValue, lockTimeout.TotalMilliseconds),
         });
         command.Parameters.Add(new SqlParameter("@DocumentId", SqlDbType.BigInt)
         {
@@ -199,7 +266,7 @@ public sealed class SheetEditGate(EcrDbContext db, SheetEditGatePolicy? policy =
 
         // ⚠ Таймаут команди — більший за таймаут блокування: інакше клієнт
         // обірвав би очікування раніше, ніж сервер відповів би кодом відмови.
-        command.CommandTimeout = (int)Math.Ceiling(_lockTimeout.TotalSeconds) + 15;
+        command.CommandTimeout = (int)Math.Ceiling(lockTimeout.TotalSeconds) + 15;
 
         await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
 

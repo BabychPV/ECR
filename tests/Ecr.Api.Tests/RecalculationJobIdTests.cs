@@ -217,8 +217,8 @@ public sealed class RecalculationJobIdTests
     private JobsController Controller() => new(
         new GetJobStatusHandler(_jobs, _access, _user, new FakeUiStringCatalog()),
         new ListJobsHandler(_jobs, _access, _user, new FakeUiStringCatalog()),
-        new RestartJobHandler(_jobs, _access, _user),
-        new CancelJobHandler(_jobs, _access, _user));
+        new RestartJobHandler(_jobs, _access, _user, Substitute.For<IAuditWriter>(), Substitute.For<Ecr.Domain.Abstractions.IClock>()),
+        new CancelJobHandler(_jobs, _access, _user, Substitute.For<IAuditWriter>(), Substitute.For<Ecr.Domain.Abstractions.IClock>()));
 
     /// <summary>
     /// Планувальник, який ПАМ'ЯТАЄ, кого назвали автором задачі.

@@ -226,13 +226,13 @@ File Number = бізнес-ключ документа, Version = версія �
 # з кореня розпакованого набору; адресу задайте за вашим -AppPort (типово 5000, за HTTPS — свою)
 $env:ECR_BASE_URL = 'http://localhost:5000'
 $env:ECR_USER     = '<адміністратор>'          # ролі SystemAdministrator (довідники) і TemplateAdministrator (шапка)
-$env:ECR_PASSWORD = '<пароль>'                 # лише для цього сеансу; у файли не записувати
+$pw = Read-Host 'Пароль ECR' -AsSecureString   # прихований ввід; пароль у тексті команди осідає в історії PSReadLine
 # 1) довідники (7 Lookup, CSV з docs\delivery\reference-data\land-contract): спершу -DryRun
-.\tools\land\Import-ContractDictionaries.ps1 -DryRun
-.\tools\land\Import-ContractDictionaries.ps1
+.\tools\land\Import-ContractDictionaries.ps1 -Password $pw -DryRun
+.\tools\land\Import-ContractDictionaries.ps1 -Password $pw
 # 2) поля шапки у новій версії шаблону Land (клон останньої опублікованої -> PUT полів -> публікація)
-.\tools\land\Apply-ContractHeader.ps1 -TemplateCode Land -DryRun
-.\tools\land\Apply-ContractHeader.ps1 -TemplateCode Land -NewVersion 1.0.1.0
+.\tools\land\Apply-ContractHeader.ps1 -TemplateCode Land -Password $pw -DryRun
+.\tools\land\Apply-ContractHeader.ps1 -TemplateCode Land -Password $pw -NewVersion 1.0.1.0
 # наявні документи можна перенести на нову версію: -MigrateDocumentId 3,4 (спершу dryRun, застосовується лише Safe)
 ```
 
@@ -241,7 +241,7 @@ $env:ECR_PASSWORD = '<пароль>'                 # лише для цьог�
 - Обліковий запис — іменований користувач з потрібними ролями; `bootstrap` права на шаблони не має (A1-05, п. 10 вище).
 - Повторний запуск обох скриптів безпечний: 0 змін, наявні записи довідників і правки адміністратора не перезаписуються, нічого не видаляється. Опублікована версія шаблону незмінна — зміни завжди нова версія.
 - Перший запуск на робочій базі замовника — лише за рішенням людини; на тестовому стенді безпечно.
-- Сторож скриптів `tools/land` неповний (P3); пароль у командному рядку не передавайте — лише `ECR_PASSWORD` або `-Password` (SecureString).
+- Сторож скриптів `tools/land` неповний (P3); пароль у відкритому тексті в командному рядку чи в `$env:ECR_PASSWORD = '…'` не передавайте (історія PSReadLine) — лише `-Password` зі `SecureString` (`Read-Host -AsSecureString`).
 
 ## 7. Дефект
 

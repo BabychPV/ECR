@@ -22,7 +22,7 @@ namespace Ecr.Infrastructure.Tests.Jobs;
 public sealed class DbBackgroundJobSchedulerTests(SqlServerFixture sql) : DbJobQueueTestsBase(sql)
 {
     [Fact]
-    public async Task Перерахунок_іде_в_лейн_recalc_решта_в_default_з_автором_і_документом()
+    public async Task Перерахунок_іде_в_лейн_recalc_формули_в_interactive_з_автором_і_документом()
     {
         await using var host = NewHost();
         var jobs = Scheduler(host);
@@ -37,7 +37,13 @@ public sealed class DbBackgroundJobSchedulerTests(SqlServerFixture sql) : DbJobQ
         Assert.Equal(5L, recalcRow?.DocumentId);
         Assert.StartsWith(nameof(IRecalculationJob) + "-", recalc, StringComparison.Ordinal);
 
-        Assert.Equal(JobLanes.Default, (await RowAsync(formulas))?.Lane);
+        // ⛔ P1-06 (AN-109): перерахунок формул після PATCH — не в спільній FIFO-смузі default з довгими фоновими.
+        Assert.Equal(JobLanes.Interactive, (await RowAsync(formulas))?.Lane);
+        Assert.Equal(JobLanes.Interactive, JobLaneMap.Of<FormulaRecalculationJob>());
+        // AN-116: експорт і імпорт Excel — свій лейн з власною межею, не default.
+        Assert.Equal(JobLanes.Excel, JobLaneMap.Of<IExcelExportJob>());
+        Assert.Equal(JobLanes.Excel, JobLaneMap.Of<IExcelImportJob>());
+        Assert.Equal(JobLanes.Default, JobLaneMap.Of<IReportSnapshotJob>());
         Assert.Equal(JobLanes.Recalc, JobLaneMap.Of<RecalculationJob>());
     }
 

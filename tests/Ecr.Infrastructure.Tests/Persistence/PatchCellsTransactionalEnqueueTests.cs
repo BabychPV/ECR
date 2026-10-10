@@ -59,7 +59,7 @@ public sealed class PatchCellsTransactionalEnqueueTests(SqlServerFixture sql, IT
         {
             ownBeforeCommit = await db.JobProgresses.CountAsync(p => p.Lane != null);
             await using var other = NewHost();
-            claimedBeforeCommit = (await other.ClaimAsync())?.Claim.JobId;
+            claimedBeforeCommit = (await other.ClaimLaneOfAsync<IFormulaRecalculationJob>())?.Claim.JobId;
         });
 
         var response = await Handler(db, uow, DatabaseScheduler(db), doc)
@@ -72,7 +72,7 @@ public sealed class PatchCellsTransactionalEnqueueTests(SqlServerFixture sql, IT
 
         await using var after = NewHost();
         Assert.NotNull(response.RecalculationJobId);
-        Assert.Equal(response.RecalculationJobId, (await after.ClaimAsync())?.Claim.JobId);
+        Assert.Equal(response.RecalculationJobId, (await after.ClaimLaneOfAsync<IFormulaRecalculationJob>())?.Claim.JobId);
         Assert.Equal(1, await QueueCountAsync());
     }
 

@@ -55,6 +55,25 @@ describe('Діагностика доступу', () => {
     expect(alerts.map((a) => a.textContent).join(' ')).toContain('myGroups.unmatched');
   });
 
+  it('заголовок незіставлених груп отримує кількість, а не лишає сирий {count} (Y4-01)', () => {
+    show({
+      ...Empty,
+      groups: [
+        { sid: 'S-1-5-21-1001', matched: true, roleCodes: ['DataEntry'] },
+        { sid: 'S-1-5-21-1002', matched: false, roleCodes: [] },
+        { sid: 'S-1-5-21-1003', matched: false, roleCodes: [] },
+      ],
+      unmatchedSids: ['S-1-5-21-1002', 'S-1-5-21-1003'],
+      effectiveRoleCodes: ['DataEntry'],
+    });
+
+    // ⛔ Плейсхолдер `{count}` є лише в шаблоні ЗАГОЛОВКА (en/ru/kz). Без каталогу
+    // `t()` малює параметри поруч із ключем — тож видно, КУДИ передано число.
+    const text = screen.getAllByRole('alert').map((a) => a.textContent).join(' ');
+    expect(text).toContain('myGroups.unmatchedTitle (count=2)');
+    expect(text).not.toContain('myGroups.unmatchedHint (count=');
+  });
+
   it('порожній перелік груп чужого запису ПОЯСНЮЄТЬСЯ, а не мовчить', () => {
     // ⛔ Квитка чужої сесії в нас немає (`P-02`). Без пояснення порожнеча
     // читалася б як «людина ні в яких групах не перебуває» — неправда, якої

@@ -187,7 +187,7 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
 
         if (filter.State is { } state && period.Value is { } periodKey)
         {
-            documents = WhereState(documents, state, periodKey, filter.HiddenSheetDefIds?.ToArray());
+            documents = WhereState(documents, state, periodKey, filter.HiddenSheetDefIds);
         }
 
         // BE-09b: та сама умова, що дає позначку в рядку (`LateEditDocumentIds`),
@@ -593,6 +593,30 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
             .ConfigureAwait(false);
 
     /// <inheritdoc />
+    /// <remarks>
+    /// ⚠ Той самий блок, що й <c>DocumentVersionMigrationStore.LockProjectVersionAsync</c>:
+    /// <c>UPDLOCK, HOLDLOCK, ROWLOCK</c> на рядку <c>doc.Project</c>. Версія читається цим самим
+    /// оператором — під RCSI хінт блокування змушує читати зафіксоване, а не знімок.
+    /// </remarks>
+    public async Task<int?> LockProjectTemplateVersionAsync(int projectId, CancellationToken ct)
+    {
+        _ = db.Database.CurrentTransaction
+            ?? throw new InvalidOperationException(
+                "LockProjectTemplateVersionAsync викликано поза транзакцією: блок рядка проєкту звільнився б одразу.");
+
+        var versions = await db.Database
+            .SqlQuery<int>($"""
+                SELECT TemplateVersionId AS Value
+                FROM   doc.Project WITH (UPDLOCK, HOLDLOCK, ROWLOCK)
+                WHERE  Id = {projectId}
+                """)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        return versions.Count == 0 ? null : versions[0];
+    }
+
+    /// <inheritdoc />
     public async Task<Domain.Enums.ProjectStatus?> FindProjectStatusAsync(int projectId, CancellationToken ct)
         => await db.Projects
             .AsNoTracking()
@@ -858,12 +882,20 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
     /// над таблицею.
     /// </remarks>
     private IQueryable<Document> WhereState(
-        IQueryable<Document> documents, DocumentStatus state, int periodKey, int[]? hiddenSheetDefIds)
+        IQueryable<Document> documents, DocumentStatus state, int periodKey,
+        IReadOnlyCollection<(int ProjectId, int Id)>? hiddenSheetDefIds)
     {
         // ⛔ Схований від читача аркуш не бере участі в зведеному стані (ту саму межу накладає смуга):
         // інакше `state=Rejected` знаходив би документ, відхилений лише схованим аркушем.
-        var hidden = hiddenSheetDefIds ?? [];
-        var sheets = db.DocumentSheets.Where(s => s.IsIncluded && !hidden.Contains(s.SheetDefId));
+        // ⛔ N1-01: схований — ПАРА «проєкт, аркуш»: версія шаблону спільна для кількох проєктів, а `Deny Sheet`
+        // може стояти лише в A. Плаский `SheetDefId IN (...)` ховав би цей аркуш і в документах B.
+        var sheets = db.DocumentSheets.Where(s => s.IsIncluded);
+        if (hiddenSheetDefIds is { Count: > 0 })
+        {
+            var hiddenRows = HiddenSheetRows(hiddenSheetDefIds);
+            sheets = sheets.Where(s => !hiddenRows.Contains(s.Id));
+        }
+
         var states = db.ApprovalStates.Where(a => a.PeriodKey == periodKey);
 
         Expression<Func<Document, bool>> rejected = d => sheets.Any(s => s.DocumentId == d.Id
@@ -888,6 +920,32 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
             _ => throw new ArgumentOutOfRangeException(nameof(state), state, "Невідомий стан документа."),
         };
     }
+
+    /// <summary>
+    /// Рядки складу (<c>doc.DocumentSheet.Id</c>), де аркуш схований від читача В ПРОЄКТІ документа (N1-01).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Сирий SQL із парами JSON-ом (<c>OPENJSON … WITH (p, i)</c>): пару «проєкт, аркуш» LINQ у `IN`
+    /// не перекладає, а предикат — той самий <c>h.p = d.ProjectId</c>, що в смузі
+    /// (<c>DocumentListSummaryStore</c>). Лишається <c>IQueryable</c> — компонується підзапитом.
+    /// </remarks>
+    private IQueryable<long> HiddenSheetRows(IReadOnlyCollection<(int ProjectId, int Id)> hidden)
+    {
+        var pairs = PairsJson(hidden);
+
+        return db.Database
+            .SqlQuery<long>($"""
+                SELECT ds.Id AS Value
+                  FROM doc.DocumentSheet AS ds
+                  JOIN doc.Document AS d ON d.Id = ds.DocumentId
+                  JOIN OPENJSON({pairs}) WITH (p int '$.p', i int '$.i') AS h
+                    ON h.p = d.ProjectId AND h.i = ds.SheetDefId
+                """);
+    }
+
+    /// <summary>Пари «проєкт, Id» як JSON-масив <c>[{"p":1,"i":2}]</c> для <c>OPENJSON</c>; <c>null</c> — порожній.</summary>
+    private static string PairsJson(IReadOnlyCollection<(int ProjectId, int Id)>? pairs)
+        => JsonSerializer.Serialize((pairs ?? []).Select(x => new { p = x.ProjectId, i = x.Id }));
 
     private static Expression<Func<T, bool>> Not<T>(Expression<Func<T, bool>> predicate)
         => Expression.Lambda<Func<T, bool>>(Expression.Not(predicate.Body), predicate.Parameters);
@@ -937,31 +995,56 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
     /// </remarks>
     private IQueryable<long> LateEditDocumentIds(PeriodKeyFilter period, DocumentListFilter hidden = default)
     {
-        var anyPeriod = period.Value is null ? 1 : 0;
-        var periodKey = period.Value ?? 0;
-
         // ⛔ R-7: пізня правка колонки, схованої від читача (аркуш/таблиця/колонка), не дає позначки —
         // інакше вона розкриває, що у схованому аркуші щось правили після прогону. Ідентифікатори йдуть
         // JSON-масивом (`OPENJSON`), бо перелік змінної довжини в сирий SQL параметрами не розгорнути.
-        var sheets = JsonSerializer.Serialize(hidden.HiddenSheetDefIds ?? []);
-        var tables = JsonSerializer.Serialize(hidden.HiddenTableDefIds ?? []);
-        var columns = JsonSerializer.Serialize(hidden.HiddenColumnDefIds ?? []);
+        // ⛔ N1-01: це ПАРИ «проєкт, Id» (`h.p = dd.ProjectId`): версія шаблону спільна для кількох проєктів,
+        // а схований аркуш/таблиця/колонка — лише в тому проєкті, де стоїть заборона чи звуження.
+        object[] args =
+        [
+            PairsJson(hidden.HiddenColumnDefIds),
+            PairsJson(hidden.HiddenTableDefIds),
+            PairsJson(hidden.HiddenSheetDefIds),
+        ];
 
-        return db.Database
-            .SqlQuery<long>($"""
-                SELECT DISTINCT c.DocumentId AS Value
-                  FROM aud.CellChange AS c
-                 WHERE c.IsLateEdit = 1
-                   AND ({anyPeriod} = 1 OR c.PeriodKey = {periodKey})
-                   AND NOT EXISTS (
-                       SELECT 1
-                         FROM cfg.ColumnDef AS cd
-                         JOIN cfg.TableDef AS td ON td.Id = cd.TableDefId
-                        WHERE cd.Id = c.ColumnDefId
-                          AND (cd.Id IN (SELECT CONVERT(int, j.value) FROM OPENJSON({columns}) AS j)
-                               OR td.Id IN (SELECT CONVERT(int, j.value) FROM OPENJSON({tables}) AS j)
-                               OR td.SheetDefId IN (SELECT CONVERT(int, j.value) FROM OPENJSON({sheets}) AS j)))
-                """);
+        // ⚠ P1-05 (AN-109): два тексти запиту замість «catch-all» `(@any = 1 OR c.PeriodKey = @p)`. Один кешований
+        // план мусив годитися для обох значень `@any`, тож `PeriodKey` у ньому був лише залишковим фільтром, а
+        // позначка за період ділила план із позначкою «за будь-який період». Тепер запит за період несе
+        // `c.PeriodKey = @p` як звичайний sargable-предикат (придатний для індексу з хвоста нижче).
+        // ⛔ Межі `ChangedAt` тут НЕМАЄ свідомо: з даних її не вивести без втрат. Правка періоду можлива задовго
+        // до його початку (`OpenOffsetDays` може бути від'ємним, правка «поза вікном» за Warn-політикою, D-239),
+        // а пізньою вона стає і в стані Open — після Reopen аркуша (D-70 б). Будь-яка вигадана межа мовчки
+        // знімала б позначку. Справжнє прискорення — фільтрований індекс `WHERE IsLateEdit = 1` (зміна схеми,
+        // хвіст P1-05), а не межа в запиті.
+        var periodPredicate = string.Empty;
+        if (period.Value is { } periodKey)
+        {
+            periodPredicate = "AND c.PeriodKey = {3}";
+            args = [.. args, periodKey];
+        }
+
+        var sql = System.Runtime.CompilerServices.FormattableStringFactory.Create(
+            $$"""
+            SELECT DISTINCT c.DocumentId AS Value
+              FROM aud.CellChange AS c
+             WHERE c.IsLateEdit = 1
+               {{periodPredicate}}
+               AND NOT EXISTS (
+                   SELECT 1
+                     FROM cfg.ColumnDef AS cd
+                     JOIN cfg.TableDef AS td ON td.Id = cd.TableDefId
+                     JOIN doc.Document AS dd ON dd.Id = c.DocumentId
+                    WHERE cd.Id = c.ColumnDefId
+                      AND (EXISTS (SELECT 1 FROM OPENJSON({0}) WITH (p int '$.p', i int '$.i') AS h
+                                    WHERE h.p = dd.ProjectId AND h.i = cd.Id)
+                           OR EXISTS (SELECT 1 FROM OPENJSON({1}) WITH (p int '$.p', i int '$.i') AS h
+                                       WHERE h.p = dd.ProjectId AND h.i = td.Id)
+                           OR EXISTS (SELECT 1 FROM OPENJSON({2}) WITH (p int '$.p', i int '$.i') AS h
+                                       WHERE h.p = dd.ProjectId AND h.i = td.SheetDefId)))
+            """,
+            args);
+
+        return db.Database.SqlQuery<long>(sql);
     }
 
     /// <inheritdoc />

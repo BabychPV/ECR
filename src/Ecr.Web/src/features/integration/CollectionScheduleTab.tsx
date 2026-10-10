@@ -105,6 +105,9 @@ export function CollectionScheduleTab({
     // його вже немає.
     if (!(error instanceof EcrApiError && error.problem.status === 409)) {
       void queryClient.invalidateQueries({ queryKey: schedulesKey });
+      // L9-30: `422` («збережено, але не поставлено») створив рядок, а `404` на видаленні — рядка вже немає:
+      // у обох випадках лічильник розкладів з'єднання змінився, хоч мутація впала.
+      countersChanged();
     }
   };
 

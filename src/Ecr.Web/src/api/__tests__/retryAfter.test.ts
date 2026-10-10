@@ -70,7 +70,15 @@ describe('Retry-After у відмові 429', () => {
     expect('retryAfterSeconds' in (await problemOf(429, { 'Retry-After': '1.5' }))).toBe(false);
   });
 
-  it('500 із заголовком → поля немає: строк має сенс лише для 429', async () => {
+  // ✎ X8-06 (R6): сервер ставить `Retry-After` і на `503 ECR-SYS-0503` (E1-04).
+  it('503 з `Retry-After: 5` → 5 секунд', async () => {
+    const problem = await problemOf(503, { 'Retry-After': '5' });
+
+    // ⛔ Мутація: повернути `status !== 429` у `retryAfterOf` — поля немає.
+    expect(problem.retryAfterSeconds).toBe(5);
+  });
+
+  it('500 із заголовком → поля немає: строк має сенс лише для 429 і 503', async () => {
     const problem = await problemOf(500, { 'Retry-After': '7' });
 
     expect('retryAfterSeconds' in problem).toBe(false);

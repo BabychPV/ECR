@@ -1207,14 +1207,14 @@
             ]
           },
           "theirOrigin": {
-            "description": "Походження останньої зміни: `UserEdit`, `Import`,\n`Recalculation`, `Migration`; `null` — невідоме. Потрібне\nпоруч із `system`: «це зробила не людина» без відповіді «а що саме»\nлишає користувача з тим самим питанням.",
+            "description": "Походження останньої зміни: `UserEdit`, `Import`,\n`ImportOverwrite`, `Recalculation`, `Migration`;\n`null` — невідоме. Потрібне\nпоруч із `system`: «це зробила не людина» без відповіді «а що саме»\nлишає користувача з тим самим питанням.",
             "type": [
               "null",
               "string"
             ]
           },
           "theirUser": {
-            "description": "Відображуване ім'я автора останньої зміни; `system` — зміна не людини\n(перерахунок, імпорт, міграція); `null` — автор невідомий. Ніколи не\nлогін і не SID (R-A2, D-86).",
+            "description": "Відображуване ім'я автора останньої зміни. Правка в сітці (`UserEdit`)\nта імпорт книги Excel (`Import`, `ImportOverwrite`) — ім'я людини,\nяка їх зробила; `system` — зміна не людини (перерахунок, інтеграція,\nміграція); `null` — автор невідомий. Ніколи не логін і не SID\n(R-A2, D-86).",
             "type": [
               "null",
               "string"
@@ -2378,6 +2378,19 @@
         "required": [
           "value",
           "unit"
+        ],
+        "type": "object"
+      },
+      "CorrectWindowsSidRequest": {
+        "description": "Виправлення SID доменного запису, який ще не входив (X5-01).",
+        "properties": {
+          "sid": {
+            "description": "Правильний SID облікового запису в домені (`S-1-…`).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sid"
         ],
         "type": "object"
       },
@@ -5294,6 +5307,16 @@
       "ImportApplyRequest": {
         "description": "Запит на застосування імпорту.",
         "properties": {
+          "overwriteRows": {
+            "description": "✎ AN-114 (D-338). Рядки, для яких людина свідомо перезаписує чужі правки,\nзроблені після експорту книги (конфлікти перегляду\n`err.ECR-CELL-0409.importRowChangedSinceExport`, їхні значення —\n`ImportPreview.overwritable`). Відсутнє/порожнє — конфліктні рядки не\nзастосовуються, решта — так (AN-103). Рядок, що не був таким конфліктом, —\n422 `ECR-IMP-0422` (`overwriteNotConflict`).",
+            "items": {
+              "$ref": "#/components/schemas/ImportOverwriteRow"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
           "previewToken": {
             "description": "Токен раніше побудованого diff.",
             "type": "string"
@@ -5351,6 +5374,24 @@
         ],
         "type": "object"
       },
+      "ImportOverwriteRow": {
+        "description": "Рядок книги, для якого людина свідомо перезаписує чужу правку, зроблену\nпісля експорту (AN-114, D-338).",
+        "properties": {
+          "rowKey": {
+            "description": "Рядок (як `rowKey` відмови-конфлікту перегляду).",
+            "type": "string"
+          },
+          "tableCode": {
+            "description": "Таблиця (як `tableCode` відмови-конфлікту перегляду).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tableCode",
+          "rowKey"
+        ],
+        "type": "object"
+      },
       "ImportPreview": {
         "description": "Результат попереднього перегляду імпорту.",
         "properties": {
@@ -5368,6 +5409,13 @@
             },
             "type": "array"
           },
+          "overwritable": {
+            "description": "✎ AN-114 (D-338). Комірки рядків, змінених кимось після експорту книги\n(у Rejected вони ж — відмовою\n`err.ECR-CELL-0409.importRowChangedSinceExport`): `OldValue` — чинне\n(чуже) значення, `NewValue` — значення з книги. Застосовуються лише для\nрядків, названих у `ImportApplyRequest.OverwriteRows`. ⛔ AN-118: лише\nкомірки, які людина в книзі змінила відносно експорту; ті, що лишились як\nбули при вивантаженні, сюди не потрапляють — чуже новіше значення в них\nлишається.",
+            "items": {
+              "$ref": "#/components/schemas/ImportChange"
+            },
+            "type": "array"
+          },
           "previewToken": {
             "description": "Токен для застосування; діє обмежений час.",
             "type": "string"
@@ -5378,13 +5426,24 @@
               "$ref": "#/components/schemas/ImportRejection"
             },
             "type": "array"
+          },
+          "warnings": {
+            "description": "✎ AN-118 (R1-02). Ключі попереджень про книгу загалом (каталог D-95), які\nне забороняють застосування, але людина має їх бачити до нього:\n`import.outdatedWorkbook` — книгу вивантажено до того, як карта почала\nнести версії рядків і відбитки комірок, тож значення, яких у ній не\nчіпали, можуть повернути новіші чужі. `null` — попереджень немає.",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
           }
         },
         "required": [
           "previewToken",
           "changes",
           "rejected",
-          "conflicts"
+          "conflicts",
+          "overwritable"
         ],
         "type": "object"
       },
@@ -5569,6 +5628,14 @@
           "state": {
             "description": "Стан.",
             "type": "string"
+          },
+          "writtenCount": {
+            "description": "Скільки комірок записав `Succeeded` перерахунок формул після правки (`0` — нічого,\nклієнт не перечитує зрізи); `null` — інша задача, ще не завершена або число невідоме\n(AN-108 / P2-02, `FormulaRecalcOutcome`). Заповнює `GetJobStatusHandler`.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
           }
         },
         "required": [
@@ -8522,7 +8589,7 @@
             "additionalProperties": {
               "type": "string"
             },
-            "description": "Нові версії зачеплених рядків: `RowKey` → hex.",
+            "description": "Нові версії зачеплених рядків: `RowKey` → `rowversion` у Base64 (`Convert.ToBase64String`),\nне hex. Base64 розрізняє регістр: клієнт повертає значення в `baseVersion` дослівно, а сервер порівнює\nйого `Ordinal` — переписане в нижній чи верхній регістр, воно дало б хибний конфлікт `409`.",
             "type": "object"
           },
           "validation": {
@@ -8839,6 +8906,11 @@
               "integer"
             ]
           },
+          "periodEnd": {
+            "description": "Останній календарний день періоду, включно: дата чинності темпоральних довідників для документів періоду (ФВ-8.5, D1-02).",
+            "format": "date",
+            "type": "string"
+          },
           "periodKey": {
             "description": "`Year*100 + Sequence`; він же ключ партиції.",
             "format": "int32",
@@ -8858,7 +8930,7 @@
             "type": "integer"
           },
           "startsAt": {
-            "description": "Початок періоду в поясі майданчика.",
+            "description": "Момент ВІДКРИТТЯ періоду в поясі майданчика — `Period.ComputedOpenAt`\n(`PeriodStart + OpenOffsetDays`), а не календарний початок місяця. Зсув політики вже врахований:\nклієнт не має додавати `OpenOffsetDays` удруге (N4-01).",
             "format": "date-time",
             "type": "string"
           },
@@ -8882,7 +8954,8 @@
           "endsAt",
           "graceEndsAt",
           "isCurrent",
-          "reopenedUntil"
+          "reopenedUntil",
+          "periodEnd"
         ],
         "type": "object"
       },
@@ -10217,6 +10290,46 @@
         ],
         "type": "object"
       },
+      "RegistryEntryImportChange": {
+        "description": "Зміна значення поля наявного запису довідника, яку приносить файл (Y5-07).",
+        "properties": {
+          "field": {
+            "description": "Код поля.",
+            "type": "string"
+          },
+          "key": {
+            "description": "Код запису, як його записано у файлі.",
+            "type": "string"
+          },
+          "newValue": {
+            "description": "Значення після імпорту текстом; `null` — порожнє.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "oldValue": {
+            "description": "Значення до імпорту текстом (числа й дати — інваріантно); `null` — порожнє.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "row": {
+            "description": "Номер рядка у файлі; заголовок — 1.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "row",
+          "key",
+          "field",
+          "oldValue",
+          "newValue"
+        ],
+        "type": "object"
+      },
       "RegistryEntryImportError": {
         "description": "Помилка одного рядка імпорту записів довідника.",
         "properties": {
@@ -10269,6 +10382,17 @@
           },
           "applied": {
             "description": "Чи записано зміни.",
+            "type": "boolean"
+          },
+          "changes": {
+            "description": "Зміни значень полів НАЯВНИХ записів, які файл приносить (у перевірці `dryRun`) або приніс:\nстаре й нове значення текстом; не більше за 1000 (Y5-07).",
+            "items": {
+              "$ref": "#/components/schemas/RegistryEntryImportChange"
+            },
+            "type": "array"
+          },
+          "changesTruncated": {
+            "description": "Змін більше, ніж показано в `Changes` (Y5-07).",
             "type": "boolean"
           },
           "errors": {
@@ -24545,6 +24669,14 @@
             "schema": {
               "format": "int32",
               "type": "integer"
+            }
+          },
+          {
+            "description": "Без успішних перерахунків формул — для шухляди «Мої задачі».",
+            "in": "query",
+            "name": "hideRoutine",
+            "schema": {
+              "type": "boolean"
             }
           }
         ],
@@ -42700,6 +42832,112 @@
           }
         },
         "summary": "Знімає блокування — адміністративне чи після невдалих спроб. Право `Security.ManageUsers` (BE-12).",
+        "tags": [
+          "Security"
+        ]
+      }
+    },
+    "/api/v1/users/{id}/windows-sid": {
+      "put": {
+        "description": "Не SID — `422 ECR-USR-0422`; SID має інший запис — `409 ECR-USR-0409`; запис уже входив — `409 ECR-SEC-0409`.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/CorrectWindowsSidRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CorrectWindowsSidRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CorrectWindowsSidRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Виправляє SID доменного запису, який ще не входив. Право `Security.ManageUsers` (X5-01).",
         "tags": [
           "Security"
         ]

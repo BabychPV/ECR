@@ -248,6 +248,11 @@ public sealed class RegistryResolverTests
 
         var before = definition.DataRevision;
 
+        // ⚠ Заглушка ВИКОНУЄ замикання: збереження запису йде транзакцією (D1-05 — блокування й
+        // звірка версії опису), і без цього `SaveChangesAsync` усередині не викликався б узагалі.
+        _uow.ExecuteInTransactionAsync(Arg.Any<Func<CancellationToken, Task>>(), Arg.Any<CancellationToken>())
+            .Returns(call => call.ArgAt<Func<CancellationToken, Task>>(0)(call.ArgAt<CancellationToken>(1)));
+
         await new UpsertRegistryEntryHandler(_registries, _access, _user, new RegistryEntryWriter(_registries, _uow, _audit, _user, _clock)).HandleAsync(
             new RegistryEntryUpsertDto(
                 Id: 101, RegistryDefId: Permits, Code: "PERMIT_A",

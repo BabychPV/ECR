@@ -22,8 +22,19 @@ public sealed class RestoreYearTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
-    public async Task Збій_посередині_розархівації_не_лишає_рік_відновленим_частково_і_повтор_проходить()
+    public async Task Збій_посередині_розархівації_зберігає_архів_і_повтор_проходить()
     {
+        // ⚠ U1-03 (аудит 09.10c): копія тепер пакетами, кожен пакет — окрема
+        // транзакція. Гарантія змістилася з «нічого не повернуто» на «архів
+        // цілий, журнал Failed, читач іде в архів, повтор доводить повернення
+        // без PK-конфлікту».
+        //
+        // ⛔ Z6-01 (аудит 8-го кола): читачі продукту (F-13) журнал не питають —
+        // в архів вони йдуть лише за ПОРОЖНЬОЇ гарячої вибірки. Пакет 1 (комірка
+        // 77) закомічено, пакет 2 (комірка 88) падає: без прибирання в `CATCH`
+        // екземпляр лишався в doc.* з однією коміркою, і зріз віддавав 77 без 88.
+        // Мутація: прибрати блок прибирання з `CATCH` `usp_RestoreYear` — у
+        // doc.* лишається комірка, зріз без 88, червоний.
         const int period = 202705;
         var doc = await DocumentAsync(period);
         await CellAsync(doc, 0, 1, 77m);
@@ -42,28 +53,37 @@ public sealed class RestoreYearTests(SqlServerFixture sql)
             CREATE TRIGGER doc.TR_RestoreFailTest ON doc.CellValue AFTER INSERT AS
             BEGIN
                 SET NOCOUNT ON;
-                IF EXISTS (SELECT 1 FROM inserted WHERE PeriodKey = {period})
+                IF EXISTS (SELECT 1 FROM inserted WHERE PeriodKey = {period} AND ValueNumeric = 88)
                     THROW 50999, N'Штучний збій вставки комірки (тест).', 1;
             END
             """);
 
         try
         {
-            await Assert.ThrowsAsync<SqlException>(() => RestoreAsync(doc.ProjectId, period, period));
+            // Пакет у одну комірку: 77 і 88 — різні транзакції.
+            await Assert.ThrowsAsync<SqlException>(() => RestoreAsync(doc.ProjectId, period, period, batchSize: 1));
         }
         finally
         {
             await ExecuteAsync("DROP TRIGGER doc.TR_RestoreFailTest;");
         }
 
-        // ⛔ Нічого не відновлено частково: ані екземплярів, ані рядків без
-        // своїх комірок у гарячій схемі. Без транзакції тут лишалися
-        // закомічені TableInstance/TableRow, і повтор падав на PK.
-        Assert.Equal(0, await CountAsync("doc.TableInstance", period));
-        Assert.Equal(0, await CountAsync("doc.TableRow", period));
+        // ⛔ Z6-01: закомічені пакети прибрано — у гарячій схемі періоду нічого,
+        // тож F-13 веде читача в архів.
         Assert.Equal(0, await CountAsync("doc.CellValue", period));
+        Assert.Equal(0, await CountAsync("doc.TableRow", period));
+        Assert.Equal(0, await CountAsync("doc.TableInstance", period));
 
-        // Архів — на місці, до рядка.
+        await using (var db = sql.CreateContext())
+        {
+            var slice = await new NormalizedCellStore(db, new ArchiveAwareCellReader(db))
+                .ReadSliceAsync(doc.TableInstanceId, default);
+            var values = slice.Select(c => c.Value.ValueNumeric).ToList();
+            Assert.Contains(77m, values);
+            Assert.Contains(88m, values);
+        }
+
+        // ⛔ Архів — на місці, до рядка: до повної звірки його не чіпають.
         Assert.Equal(archivedInstances, await CountAsync("arc.TableInstance", period));
         Assert.Equal(archivedRows, await CountAsync("arc.TableRow", period));
         Assert.Equal(archivedCells, await CountAsync("arc.CellValue", period));
@@ -81,6 +101,9 @@ public sealed class RestoreYearTests(SqlServerFixture sql)
         await RestoreAsync(doc.ProjectId, period, period);
 
         Assert.Equal(archivedCells, await CountAsync("doc.CellValue", period));
+        Assert.Equal(archivedRows, await CountAsync("doc.TableRow", period));
+        Assert.Equal(archivedInstances, await CountAsync("doc.TableInstance", period));
+        Assert.Equal(0, await CountAsync("arc.CellValue", period));
         Assert.Equal(77m, await ValueAsync(doc, 0, 1));
         Assert.Equal(88m, await ValueAsync(doc, 1, 2));
 
@@ -252,10 +275,10 @@ public sealed class RestoreYearTests(SqlServerFixture sql)
             + $"@FromPeriodKey = {from}, @ToPeriodKey = {to}").ConfigureAwait(false);
     }
 
-    private Task RestoreAsync(int projectId, int from, int to)
+    private Task RestoreAsync(int projectId, int from, int to, int batchSize = 500000)
         => ExecuteAsync(
             $"EXEC arc.usp_RestoreYear @ProjectId = {projectId}, "
-            + $"@FromPeriodKey = {from}, @ToPeriodKey = {to}");
+            + $"@FromPeriodKey = {from}, @ToPeriodKey = {to}, @BatchSize = {batchSize}");
 
     private Task<int> CountAsync(string table, int periodKey)
         => ScalarAsync<int>($"SELECT COUNT(*) FROM {table} WHERE PeriodKey = {periodKey}");

@@ -292,6 +292,32 @@ public sealed class SourceEventSyncJobTests(SqlServerFixture sql)
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Directive", "HSE301-A5b")]
+    [Trait("Finding", "L3-06")]
+    public async Task ОдиницяДжерелаБезЦільової_ФактичнаІнша_КоміркаНеПишеться()
+    {
+        // ⛔ L3-06: каталог одиниць вантажився лише коли в полі є і SourceUnitId, і TargetUnitId, а звірка
+        // фактичної одиниці з оголошеною пропускалась при units == null. Поле з одиницею джерела (m3) без
+        // цільової при фактичній Sm3 писало число так, ніби одиниця збіглася.
+        // Мутація: повернути умову `SourceUnitId is not null && TargetUnitId is not null` у SyncMapAsync.
+        await using var stand = await ArrangeAsync();
+        await ExecuteAsync(
+            "UPDATE ext.SourceEventFieldMap SET SourceUnitId = (SELECT Id FROM uom.Unit WHERE Code = N'm3'), TargetUnitId = NULL "
+            + $"WHERE SourceEventMapId = {stand.MapId} AND TargetColumnDefId = {stand.VolumeColumn}");
+
+        // Ev(volume) передає одиницю «Sm3» — не оголошену в полі (m3).
+        await RunAsync(stand, new FakeEventSource(Ev("E1", Start, End, volume: 5m)));
+
+        var cells = await CellsAsync(stand, "EF-E1");
+        Assert.False(cells.ContainsKey(stand.VolumeColumn));
+        var link = Assert.Single(await LinksAsync(stand));
+        Assert.Equal(SourceEventLinkStatus.Unmapped, link.Status);
+        Assert.Contains(stand.VolumeCode, link.UnmappedJson);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Directive", "HSE301-A5b")]
     public async Task Стеля_рядків_нового_рядка_дає_RowLimit_а_після_підняття_стелі_Synced()
     {
         await using var stand = await ArrangeAsync();
@@ -624,6 +650,71 @@ public sealed class SourceEventSyncJobTests(SqlServerFixture sql)
                 CultureInfo.InvariantCulture));
     }
 
+    /// <summary>
+    /// D2-01: рядок події, доповнений людиною через імпорт книги Excel (<c>Origin = Import</c>), при
+    /// зникненні події в джерелі не видаляється — як і з правкою в сітці (T6).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ МУТАЦІЙНИЙ ДОКАЗ: у <c>SourceEventSyncJob.ManualRowKeysAsync</c> і
+    /// <c>RecheckRemovalAsync</c> повернути <c>Origin = N'UserEdit'</c> → рядок EF-E1 жорстко видалено.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Directive", "HSE301-EFSYNC")]
+    [Trait("Finding", "D2-01")]
+    public async Task Рядок_доповнений_імпортом_не_видаляється()
+    {
+        await using var stand = await ArrangeAsync();
+        var source = new FakeEventSource(Ev("E1", Start, End, volume: 10m), Ev("E2", Start.AddHours(1), End.AddHours(1)));
+        await RunAsync(stand, source);
+        await HumanWriteAsync(stand, "EF-E1", new PatchCell(stand.VolumeCode, 42m), CellChangeOrigins.Import);
+
+        source.Result = new SourceEventResult([Ev("E2", Start.AddHours(1), End.AddHours(1))], false, null);
+        await RunAsync(stand, source);
+
+        Assert.Equal(["EF-E1", "EF-E2"], (await RowsAsync(stand)).Select(r => r.RowKey).Order(StringComparer.Ordinal));
+        Assert.Equal(42m, (await CellsAsync(stand, "EF-E1"))[stand.VolumeColumn].Numeric);
+        Assert.Equal(0, await JournalCountAsync(stand));
+        Assert.Equal(SourceEventLinkStatus.Missing, (await LinksAsync(stand)).Single(l => l.SourceEventId == "E1").Status);
+        Assert.Equal(
+            1,
+            Convert.ToInt32(
+                await ScalarAsync(
+                    $"SELECT COUNT(*) FROM itg.CollectionCoverage WHERE SourceEntityId = {stand.EntityId} AND Status = N'ConflictKeptManual'"),
+                CultureInfo.InvariantCulture));
+    }
+
+    /// <summary>
+    /// D2-01: імпорт, що закомітився між рішенням про видалення і самим видаленням, теж зберігає
+    /// рядок — повторна перевірка під блокуванням визнає <c>Import</c> правкою людини.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ МУТАЦІЙНИЙ ДОКАЗ: у <c>SourceEventSyncJob.RecheckRemovalAsync</c> повернути
+    /// <c>Origin = N'UserEdit'</c> → рядок EF-E1 видалено разом з імпортованим значенням.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Directive", "HSE301-EFSYNC")]
+    [Trait("Finding", "D2-01")]
+    public async Task ІмпортМіжРішеннямІВидаленням_РядокЛишається()
+    {
+        await using var stand = await ArrangeAsync();
+        var source = new FakeEventSource(Ev("E1", Start, End, volume: 10m), Ev("E2", Start.AddHours(1), End.AddHours(1)));
+        await RunAsync(stand, source);
+
+        source.Result = new SourceEventResult([Ev("E2", Start.AddHours(1), End.AddHours(1))], false, null);
+        await RunAsync(
+            stand,
+            source,
+            afterRemovalDecision: () => HumanWriteAsync(stand, "EF-E1", new PatchCell(stand.VolumeCode, 42m), CellChangeOrigins.Import));
+
+        Assert.Equal(["EF-E1", "EF-E2"], (await RowsAsync(stand)).Select(r => r.RowKey).Order(StringComparer.Ordinal));
+        Assert.Equal(42m, (await CellsAsync(stand, "EF-E1"))[stand.VolumeColumn].Numeric);
+        Assert.Equal(0, await JournalCountAsync(stand));
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
@@ -750,6 +841,43 @@ public sealed class SourceEventSyncJobTests(SqlServerFixture sql)
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Directive", "HSE301-EFSYNC")]
+    [Trait("Finding", "L3-07")]
+    public async Task НевпорядкованіПодіїПонадСтелю_ВидаленняВимкнене()
+    {
+        // ⛔ L3-07: курсор Max(StartUtc) правдивий лише для ORDER BY StartTime; запит подій можна
+        // перевизначити. Невпорядкована обрізана сторінка + необрізана друга давали Gone для подій, що на
+        // сторінки не потрапили, і жорстке видалення їхніх рядків.
+        // Мутація: прибрати гілку `!ordered && page.Truncated` у ReadEventPagesAsync.
+        await using var stand = await ArrangeAsync();
+        var e1 = Ev("E1", Start, End);
+        var e2 = Ev("E2", Start.AddHours(1), End.AddHours(1));
+        var e3 = Ev("E3", Start.AddHours(2), End.AddHours(2));
+        var e4 = Ev("E4", Start.AddHours(3), End.AddHours(3));
+        var trigger = Substitute.For<ICalculationTrigger>();
+        await RunAsync(stand, new FakeEventSource(e1, e2, e3, e4), trigger: trigger);
+        Assert.Equal(4, (await RowsAsync(stand)).Count);
+        trigger.ClearReceivedCalls();
+
+        // Перша сторінка обрізана і НЕупорядкована (E3 раніше за E2 у відповіді, але пізніший за початком);
+        // E1 на неї не потрапила. Друга, від курсора Max(Start)=E3, — необрізана й без E1.
+        var source = new FakeEventSource
+        {
+            Pages = query => query.FromUtc < e3.StartUtc
+                ? new SourceEventResult([e3, e2], true, null)
+                : new SourceEventResult([e3, e4], false, null),
+        };
+        await RunAsync(stand, source, trigger: trigger);
+
+        Assert.Equal(["EF-E1", "EF-E2", "EF-E3", "EF-E4"], (await RowsAsync(stand)).Select(r => r.RowKey).Order(StringComparer.Ordinal));
+        Assert.Equal(4, (await LinksAsync(stand)).Count);
+        Assert.Equal(0, await JournalCountAsync(stand));
+        Assert.Empty(trigger.ReceivedCalls());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Directive", "HSE301-EFSYNC")]
     public async Task ПоданняМіжРішеннямІВидаленням_РядокЛишається()
     {
         // ⛔ L3-04: стан аркуша читався ДО транзакції видалення. Подання між рішенням і видаленням
@@ -781,6 +909,129 @@ public sealed class SourceEventSyncJobTests(SqlServerFixture sql)
                     $"SELECT COUNT(*) FROM itg.CollectionCoverage WHERE SourceEntityId = {stand.EntityId} "
                     + "AND Status = N'SkippedPeriodClosed' AND Details LIKE N'%eventRemovalSheetSubmitted%'"),
                 CultureInfo.InvariantCulture));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Directive", "HSE301-EFSYNC")]
+    [Trait("Finding", "L3-04")]
+    public async Task ЗакриттяПеріодуМіжРішеннямІВидаленням_РядокЛишається()
+    {
+        // ⛔ L3-04: стан періоду брався зі знімка на початку SyncMapAsync, а RecheckRemovalAsync його не
+        // перечитував. Закриття періоду між рішенням і видаленням (перехоплювач на останньому запиті рішення)
+        // інакше стирало б рядок закритого періоду. Мутація: прибрати гард `doc.Period` у RecheckRemovalAsync.
+        await using var stand = await ArrangeAsync();
+        var source = new FakeEventSource(Ev("E1", Start, End), Ev("E2", Start.AddHours(1), End.AddHours(1)));
+        await RunAsync(stand, source);
+
+        source.Result = new SourceEventResult([Ev("E2", Start.AddHours(1), End.AddHours(1))], false, null);
+        await RunAsync(stand, source, afterRemovalDecision: async () =>
+        {
+            await using var db = sql.CreateContext();
+            var period = await db.Periods.SingleAsync(p => p.ProjectId == stand.ProjectId && p.PeriodKeyValue == 202601);
+            period.AdvanceTo(PeriodState.Closed, Now);
+            await db.SaveChangesAsync();
+        });
+
+        Assert.Equal(["EF-E1", "EF-E2"], (await RowsAsync(stand)).Select(r => r.RowKey).Order(StringComparer.Ordinal));
+        Assert.Equal(0, await JournalCountAsync(stand));
+        Assert.Equal(
+            1,
+            Convert.ToInt32(
+                await ScalarAsync(
+                    $"SELECT COUNT(*) FROM itg.CollectionCoverage WHERE SourceEntityId = {stand.EntityId} "
+                    + "AND Status = N'SkippedPeriodClosed'"),
+                CultureInfo.InvariantCulture));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Directive", "HSE301-EFSYNC")]
+    [Trait("Finding", "L6-02")]
+    public async Task ВидаленняРядківПодій_ЧекаєНаСтруктуруДокумента_ДоКоміту()
+    {
+        // ⛔ L6-02 (писар): видалення рядків подій брало лише `sheet-edit`, повз `doc-structure`. Виняткове
+        // блокування структури (як у переносу версії) тримається — видалення має чекати, а не видаляти рядки
+        // посеред переносу. Мутація: прибрати TryAppLockAsync(StructureResourceOf) у ApplyRemovalsAsync.
+        await using var stand = await ArrangeAsync();
+        var source = new FakeEventSource(Ev("E1", Start, End), Ev("E2", Start.AddHours(1), End.AddHours(1)));
+        await RunAsync(stand, source);
+        source.Result = new SourceEventResult([Ev("E2", Start.AddHours(1), End.AddHours(1))], false, null);
+
+        await using var holder = new SqlConnection(sql.ConnectionString);
+        await holder.OpenAsync();
+        await using var tx = (SqlTransaction)await holder.BeginTransactionAsync();
+        await using (var take = holder.CreateCommand())
+        {
+            take.Transaction = tx;
+            take.CommandText = "DECLARE @r int; EXEC @r = sp_getapplock @Resource = @res, @LockMode = 'Exclusive', "
+                               + "@LockOwner = 'Transaction', @LockTimeout = 0; SELECT @r;";
+            take.Parameters.AddWithValue("@res", SheetEditGate.StructureResourceOf(stand.DocumentId));
+            Assert.True(Convert.ToInt32(await take.ExecuteScalarAsync(), CultureInfo.InvariantCulture) >= 0);
+        }
+
+        var job = RunAsync(stand, source);
+        var first = await Task.WhenAny(job, Task.Delay(TimeSpan.FromSeconds(4)));
+        Assert.NotSame(job, first);
+        Assert.Equal(["EF-E1", "EF-E2"], (await RowsAsync(stand)).Select(r => r.RowKey).Order(StringComparer.Ordinal));
+        Assert.Equal(0, await JournalCountAsync(stand));
+
+        await tx.CommitAsync();
+        await job;
+
+        Assert.Equal(["EF-E2"], (await RowsAsync(stand)).Select(r => r.RowKey));
+        Assert.Equal(1, await JournalCountAsync(stand));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Directive", "HSE301-EFSYNC")]
+    [Trait("Finding", "R7-Y2-02")]
+    public async Task ВидаленняРядківПодій_НеЧекаєДругийПеріод_ТримаючиПерший()
+    {
+        // ⛔ R7-Y2-02 (X6-02): видалення брало S аркуша по КОЖНОМУ періоду з очікуванням до 30 с, уже
+        // тримаючи S попередніх і `doc.Period`/`doc.TableRow` під HOLDLOCK. Черга `sp_getapplock` FIFO: за ним
+        // ставали подання й автозбереження січня, хоча чекав він лютий. Тепер другий період — без черги:
+        // зайнятий лютий лишається наступному прогону, січень видаляється одразу.
+        // Мутація: `wait: true` для всіх періодів у ApplyRemovalsAsync — задача висить ~30 с, тест червоний.
+        await using var stand = await ArrangeAsync();
+        var january = new DateTime(2026, 1, 28, 9, 0, 0, DateTimeKind.Utc);
+        var february = new DateTime(2026, 2, 2, 9, 0, 0, DateTimeKind.Utc);
+        var keep = Ev("J2", january.AddHours(1), january.AddHours(1).AddMinutes(5));
+        var source = new FakeEventSource(Ev("J1", january, january.AddMinutes(5)), keep, Ev("F1", february, february.AddMinutes(5)));
+        await RunAsync(stand, source);
+        Assert.Equal(
+            ["EF-F1", "EF-J1", "EF-J2"],
+            (await RowsAsync(stand)).Select(r => r.RowKey).Order(StringComparer.Ordinal));
+
+        var sheetDefId = Convert.ToInt32(
+            await ScalarAsync($"SELECT SheetDefId FROM cfg.TableDef WHERE Id = {stand.TableDefId}"), CultureInfo.InvariantCulture);
+
+        // Лютий «подається»: виняткове блокування аркуша-періоду тримає інша транзакція.
+        await using var holder = new SqlConnection(sql.ConnectionString);
+        await holder.OpenAsync();
+        await using var tx = (SqlTransaction)await holder.BeginTransactionAsync();
+        await using (var take = holder.CreateCommand())
+        {
+            take.Transaction = tx;
+            take.CommandText = "DECLARE @r int; EXEC @r = sp_getapplock @Resource = @res, @LockMode = 'Exclusive', "
+                               + "@LockOwner = 'Transaction', @LockTimeout = 0; SELECT @r;";
+            take.Parameters.AddWithValue("@res", SheetEditGate.ResourceOf(stand.DocumentId, sheetDefId, 202602));
+            Assert.True(Convert.ToInt32(await take.ExecuteScalarAsync(), CultureInfo.InvariantCulture) >= 0);
+        }
+
+        source.Result = new SourceEventResult([keep], false, null);
+        var job = RunAsync(stand, source);
+        var first = await Task.WhenAny(job, Task.Delay(TimeSpan.FromSeconds(10)));
+        Assert.Same(job, first);
+        await job;
+
+        Assert.Equal(["EF-F1", "EF-J2"], (await RowsAsync(stand)).Select(r => r.RowKey).Order(StringComparer.Ordinal));
+
+        await tx.RollbackAsync();
     }
 
     [Fact]
@@ -1492,8 +1743,9 @@ public sealed class SourceEventSyncJobTests(SqlServerFixture sql)
         return services.BuildServiceProvider();
     }
 
-    /// <summary>Правка людини через той самий обробник, у власному scope.</summary>
-    private async Task HumanWriteAsync(Stand stand, string rowKey, PatchCell cell)
+    /// <summary>Правка людини через той самий обробник, у власному scope: сітка (<c>UserEdit</c>) або книга Excel (<c>Import</c>).</summary>
+    private async Task HumanWriteAsync(
+        Stand stand, string rowKey, PatchCell cell, string origin = CellChangeOrigins.UserEdit)
     {
         await using var scope = stand.Provider.CreateAsyncScope();
         using var author = scope.ServiceProvider.GetRequiredService<JobActorScope>()
@@ -1505,7 +1757,7 @@ public sealed class SourceEventSyncJobTests(SqlServerFixture sql)
 
         await scope.ServiceProvider.GetRequiredService<PatchCellsHandler>().HandleAsync(
             new PatchCellsRequest(
-                stand.JanuaryInstanceId, 202601, CellChangeOrigins.UserEdit, [new PatchRow(rowKey, version, [cell])]),
+                stand.JanuaryInstanceId, 202601, origin, [new PatchRow(rowKey, version, [cell])]),
             CancellationToken.None);
     }
 

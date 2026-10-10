@@ -42,18 +42,44 @@ public sealed class UserStore(EcrDbContext db, SelfStampRotation? selfRotation =
         => db.Users.FirstOrDefaultAsync(u => u.Id == userId, ct);
 
     /// <inheritdoc />
-    public Task<bool> HasActiveDomainAdminAsync(string permissionCode, CancellationToken ct)
-        => (from user in db.Users
-            join assignment in db.RoleAssignments on user.Id equals assignment.UserId
-            join permission in db.RolePermissions on assignment.RoleId equals permission.RoleId
-            where user.IsActive
-                  && user.Provider == AuthProvider.Windows
+    public async Task<bool> HasActiveDomainAdminAsync(string permissionCode, DateTime utcNow, CancellationToken ct)
+    {
+        var candidates = await (
+                from user in db.Users.AsNoTracking()
+                join assignment in db.RoleAssignments.AsNoTracking() on user.Id equals assignment.UserId
+                join role in db.Roles.AsNoTracking() on assignment.RoleId equals role.Id
+                join permission in db.RolePermissions.AsNoTracking() on role.Id equals permission.RoleId
+                where user.IsActive
+                      && user.Provider == AuthProvider.Windows
 
-                  // ⚠ Bootstrap виключений явно: інакше він рахував би сам себе
-                  // адміністратором і вимикав би себе на першому ж старті.
-                  && !user.IsBootstrapAdmin
-                  && permission.PermissionCode == permissionCode
-            select user.Id).AnyAsync(ct);
+                      // ⚠ Bootstrap виключений явно: інакше він рахував би сам себе
+                      // адміністратором і вимикав би себе на першому ж старті.
+                      && !user.IsBootstrapAdmin
+
+                      // ⛔ S1-01 (аудит 5): SID доменного запису адміністратор вводить
+                      // ВРУЧНУ, і помилку в ньому нічим не видно. Доказ, що за записом
+                      // стоїть справжня людина з каталогу, — лише її вхід Negotiate.
+                      // Без цієї умови друкарська помилка в SID вимикала bootstrap
+                      // і лишала систему без жодного адміністратора — назавжди
+                      // (`BootstrapAdmin.Decide` уже не створює запис заново).
+                      && user.LastSignInAt != null
+                      && (user.LockedUntil == null || user.LockedUntil <= utcNow)
+
+                      // ⛔ Ті самі умови, що й у `CountActivePermissionHoldersAsync`:
+                      // вимкнена роль і роль з областю (`Security.*` діє лише
+                      // глобально) адміністратора не дають — і bootstrap не вимикають.
+                      && role.IsActive
+                      && assignment.ScopeJson == null
+                      && permission.PermissionCode == permissionCode
+                select assignment)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        // Чинність строкового призначення рахує домен (`IsEffectiveOn`, `H-23a`):
+        // підміна «з понеділка» чи вже прострочена bootstrap не вимикає.
+        var today = DateOnly.FromDateTime(utcNow);
+        return candidates.Any(a => a.IsEffectiveOn(today));
+    }
 
     /// <inheritdoc />
     public async Task<int> CountActivePermissionHoldersAsync(

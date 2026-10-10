@@ -294,9 +294,16 @@ export function SnapshotsPage(): JSX.Element {
     } else if (outcome === 'failed') {
       // ⛔ `X-04`: причина — за КОДОМ з каталогу, а не сирий `error`
       // (`ex.Message` сервера — українською чи мовою СУБД).
+      // ⛔ R7-Y8 / Y8-01: `ECR-RPT-0409` у задачі побудови — це лише «зріз періоду
+      // подано» (ФВ-9.17). Загальний текст коду («вже опубліковано: потрібна нова
+      // версія») штовхав би людину створювати нову версію опису, яку сервер так само
+      // відмовить; потрібен шлях — повернути дані в роботу (Reopen).
       notifications.show({
         color: 'statusError',
-        message: errorCodeText(job.data?.errorCode, t('snapshots.buildFailed')),
+        message:
+          job.data?.errorCode === 'ECR-RPT-0409'
+            ? t('snapshots.buildRefusedSubmitted')
+            : errorCodeText(job.data?.errorCode, t('snapshots.buildFailed')),
         closeButtonProps: notificationCloseButtonProps,
       });
     }
@@ -497,6 +504,9 @@ export function SnapshotsPage(): JSX.Element {
                     <VerifyCell
                       result={verified[snapshot.id]}
                       loading={verifyLoading && verify.variables === snapshot.id}
+                      // L9-37: перевірка іншого рядка в польоті — ця кнопка вимкнена (власний рядок лишається
+                      // активним зі спінером, щоб фокус не губився).
+                      disabled={verify.isPending && verify.variables !== snapshot.id}
                       onVerify={() => {
                         // ⛔ L9-37: спінер (`usePendingLoading`) — лише після 100 мс;
                         // до того подвійний клік/Enter слав дві перевірки.
@@ -729,6 +739,7 @@ function ParameterField(props: {
 function VerifyCell(props: {
   result: SnapshotVerifyResponse | undefined;
   loading: boolean;
+  disabled: boolean;
   onVerify: () => void;
 }): JSX.Element {
   const { result } = props;
@@ -736,7 +747,13 @@ function VerifyCell(props: {
   return (
     <>
       <Group gap="xs" wrap="nowrap">
-        <Button size="xs" variant="default" loading={props.loading} onClick={props.onVerify}>
+        <Button
+          size="xs"
+          variant="default"
+          loading={props.loading}
+          disabled={props.disabled}
+          onClick={props.onVerify}
+        >
           {t('snapshots.verify')}
         </Button>
         {result !== undefined && (

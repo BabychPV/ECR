@@ -190,6 +190,24 @@ public sealed class BoundaryUnitConversionTests
         Assert.Equal("kg→t ×0.001", result.Describe());
     }
 
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-16.10")]
+    [InlineData(AggregationKind.TimeWeightedAvg, 1, StdCubicMetrePerSecondId, StdCubicMetrePerHourId, 3600)]
+    [InlineData(AggregationKind.Avg, 1, StdCubicMetrePerSecondId, StdCubicMetrePerHourId, 3600)]
+    [InlineData(AggregationKind.Max, 3600, StdCubicMetrePerHourId, StdCubicMetrePerSecondId, 1)]
+    public void Згортка_швидкості_в_швидкість_рівно_через_чисельник_і_знаменник(
+        AggregationKind kind, int folded, int source, int target, int expected)
+    {
+        // ⛔ Z2-03: згортки, крім інтеграла, ішли через базову одиницю (`FactorToBase` `Sm3_per_h` =
+        // 0.000277777777777778): 1 Sm3/s → 3599.99999999999712 Sm3/h, хвіст понад масштаб сховища.
+        // МУТАЦІЙНИЙ ДОКАЗ: прибрати `RateConvert` з `ConvertFolded` → 3599.99999999999712 ≠ 3600, червоний.
+        var result = BoundaryUnitConversion.ConvertFolded(kind, folded, source, target, Catalog());
+
+        Assert.Equal((decimal)expected, result.Value);
+        Assert.True(result.IsConverted);
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait("Requirement", "ФВ-16.10")]
@@ -247,6 +265,46 @@ public sealed class BoundaryUnitConversionTests
         Assert.Equal(1, field.PointCount);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-16.10")]
+    public void Значення_межі_до_запису_округлюється_до_масштабу_сховища()
+    {
+        // ⛔ Z1-01: ділення дає 28 знаків, обробник комірок приймає 16.
+        // Мутація: `Storable => Value` → 1.3333333333333333333333333333, червоний.
+        Assert.Equal(1.3333333333333333m, BoundaryValue.Unchanged(4m / 3m).Storable);
+        Assert.Equal(0.0019444444444444m, BoundaryValue.ToStorable(7m / 3600m));
+
+        // Число, що вже вміщається, лишається побітно тим самим (масштаб не змінюється).
+        Assert.Equal(decimal.GetBits(2678.4m), decimal.GetBits(BoundaryValue.Unchanged(2678.4m).Storable));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-13.14")]
+    public void Перегляд_мапінгу_показує_округлене_як_у_комірці_число_з_нескінченним_дробом()
+    {
+        // ⛔ Z1-01: перегляд показує те, що ляже в комірку, — а комірка тримає 16 знаків.
+        // Мутація: прибрати `ToStorable`/`Storable` з перегляду → 28 знаків, червоний.
+        var avg = PreviewData(
+            Map(1, "AVG", "Avg", null, null),
+            Point("AVG", T0, 1m),
+            Point("AVG", T0.AddSeconds(1), 1m),
+            Point("AVG", T0.AddSeconds(2), 2m));
+        Assert.Equal(
+            1.3333333333333333m,
+            Assert.Single(PreviewMappingHandler.Compose(avg, T0, T0.AddHours(1)).Fields).FoldedValue);
+
+        // 1 Sm3/h упродовж 7 с = 7/3600 Sm3 — нескінченний дріб після ділення на знаменник.
+        var integral = PreviewData(
+            Map(1, "FLOW", "TimeIntegral", "Sm3_per_h", "Sm3"),
+            Point("FLOW", T0, 1m),
+            Point("FLOW", T0.AddSeconds(7), 1m));
+        Assert.Equal(
+            0.0019444444444444m,
+            Assert.Single(PreviewMappingHandler.Compose(integral, T0, T0.AddSeconds(8), Catalog()).Fields).FoldedValue);
+    }
+
     private static MappingPreviewData PreviewData(FieldMapRef map, params RawPointRef[] points)
         => new(new SourceEntityRef(1, "FLARE_01", null), [map], points, false, []);
 
@@ -267,4 +325,62 @@ public sealed class BoundaryUnitConversionTests
         Assert.Equal("ECR-INT-0422", error.ErrorCode);
         Assert.Equal("err.ECR-INT-0422.unitMissingFromSnapshot", error.Details!["messageKey"]);
     }
+
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-16.9")]
+    [Trait("Finding", "Z2-02")]
+    [InlineData("Sm3/h", 11, true)]
+    [InlineData("Sm3 / h", 11, true)]
+    [InlineData("Sm3_per_h", 11, true)]
+    [InlineData("Sm3/d", 11, false)]
+    [InlineData("Sm3/d", 13, true)]
+    [InlineData("°C", 20, true)]
+    [InlineData("d", 21, true)]
+    [InlineData("kg", 3, true)]
+    [InlineData("KG", 3, true)]
+    [InlineData("kg/h", 3, false)]
+    [InlineData("м³/год", 11, true)]
+    [InlineData("furlong/fortnight", 11, false)]
+    public void Символ_одиниці_від_джерела_звіряється_з_оголошеною_через_довідник(
+        string symbol, int declared, bool expected)
+    {
+        // ⛔ Z2-02: PI дає символ (`Sm3/h`, `°C`), довідник — код (`Sm3_per_h`, `degC`). Пряме порівняння з
+        // кодом ставило кожну швидкість на паузу без виходу. МУТАЦІЙНИЙ ДОКАЗ: повернути в `IsDeclaredUnit`
+        // `Units.TryGetValue(symbol)` → рядки «Sm3/h», «Sm3 / h», «Sm3/d»→13, «°C», «d», «м³/год» червоні.
+        // Справжня зміна одиниці (`Sm3/d` при оголошеній `Sm3_per_h`) і невідомий символ — і далі «не збіглося».
+        Assert.Equal(expected, BoundaryUnitConversion.IsDeclaredUnit(declared, symbol, SymbolCatalog()));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "Z2-02")]
+    public void Неоднозначний_символ_довідника_не_розпізнається()
+    {
+        // Два записи з тим самим символом — не вгадувати: null, тобто пауза мапінгу, а не довільна одиниця.
+        var units = new UnitCatalogSnapshot(
+            new Dictionary<string, UnitRef>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["Sm3"] = new(1, "Sm3", DimensionId: 12, SymbolL10n: new Dictionary<string, string> { ["en"] = "m3(st)" }),
+                ["Nm3"] = new(2, "Nm3", DimensionId: 12, SymbolL10n: new Dictionary<string, string> { ["en"] = "m3(st)" }),
+            },
+            new Dictionary<string, int>(StringComparer.Ordinal));
+
+        Assert.Null(BoundaryUnitConversion.ResolveSourceSymbol("m3(st)", units));
+        Assert.Equal(1, BoundaryUnitConversion.ResolveSourceSymbol("Sm3", units)!.Id);
+    }
+
+    /// <summary>Довідник із кодами, які символи PI не повторюють буквально.</summary>
+    private static UnitCatalogSnapshot SymbolCatalog() => new(
+        new Dictionary<string, UnitRef>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["kg"] = new(KilogramId, "kg", DimensionId: 1),
+            ["Sm3_per_h"] = new(
+                StdCubicMetrePerHourId, "Sm3_per_h", DimensionId: 13, FactorToBase: 0.000277777777777778m,
+                SymbolL10n: new Dictionary<string, string> { ["en"] = "Sm3_per_h", ["uk"] = "м³/год" }),
+            ["Sm3_per_day"] = new(13, "Sm3_per_day", DimensionId: 13, FactorToBase: 0.000011574074074074m),
+            ["degC"] = new(20, "degC", DimensionId: 5, FactorToBase: 1m, OffsetToBase: 273.15m),
+            ["day"] = new(21, "day", DimensionId: 4, FactorToBase: 86400m),
+        },
+        new Dictionary<string, int>(StringComparer.Ordinal));
 }

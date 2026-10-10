@@ -4,6 +4,7 @@ using Ecr.Domain.Entities.Documents;
 using Ecr.Domain.Entities.Workflow;
 using Ecr.Domain.Enums;
 using Ecr.Infrastructure.Persistence;
+using Ecr.Infrastructure.Tests.Jobs;
 using Ecr.TestKit;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
@@ -126,6 +127,55 @@ public sealed class DocumentListFiltersStoreTests(SqlServerFixture sql)
         // застарілі результати), не по запиту на рядок.
         Assert.Equal(4, page.Items.Count);
         Assert.True(counter.Tally.Snapshot().Total == 5, counter.Tally.Snapshot().Format());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Пізні_правки_за_період_і_за_будь_який_період_двома_текстами_без_catch_all()
+    {
+        // P1-05 (AN-109): `(@any = 1 OR c.PeriodKey = @p)` давав один план на обидва випадки, і межа періоду
+        // була лише залишковим фільтром. Тепер позначка за період несе `c.PeriodKey = @p`, а без періоду
+        // предиката періоду немає зовсім; результат той самий.
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var chain = await builder.BuildAsync(ct: CancellationToken.None);
+        var period = chain.PeriodKey.Value;
+
+        long late, otherPeriod;
+        await using (var db = builder.CreateContext())
+        {
+            late = await DocumentAsync(db, chain, "P-LATE", author: 1, DocumentStatus.Draft);
+            otherPeriod = await DocumentAsync(db, chain, "P-OTHER", author: 1, DocumentStatus.Draft);
+        }
+
+        await WriteChangeAsync(late, period, isLate: true);
+        await WriteChangeAsync(otherPeriod, period + 1, isLate: true);
+
+        var recorder = new CommandRecorder();
+        await using var recorded = new EcrDbContext(new DbContextOptionsBuilder<EcrDbContext>()
+            .UseSqlServer(sql.ConnectionString)
+            .AddInterceptors(recorder)
+            .Options);
+        var store = new DocumentStore(recorded);
+
+        var byPeriod = await store.ListAsync(
+            chain.ProjectId, new PeriodKeyFilter(period), default, new CursorRequest(Limit: 50),
+            visibleProjectIds: null, CancellationToken.None);
+        var periodSql = Assert.Single(recorder.Matching("c.IsLateEdit = 1")).Text;
+
+        Assert.True(byPeriod.Items.Single(d => d.Id == late).HasLateEdits);
+        Assert.False(byPeriod.Items.Single(d => d.Id == otherPeriod).HasLateEdits);
+        Assert.DoesNotContain("= 1 OR", periodSql, StringComparison.Ordinal);
+        Assert.Contains("c.PeriodKey = @", periodSql, StringComparison.Ordinal);
+
+        var anyPeriod = await store.ListAsync(
+            chain.ProjectId, new PeriodKeyFilter(null), default, new CursorRequest(Limit: 50),
+            visibleProjectIds: null, CancellationToken.None);
+        var anySql = recorder.Matching("c.IsLateEdit = 1")[^1].Text;
+
+        Assert.True(anyPeriod.Items.Single(d => d.Id == late).HasLateEdits);
+        Assert.True(anyPeriod.Items.Single(d => d.Id == otherPeriod).HasLateEdits);
+        Assert.DoesNotContain("PeriodKey", anySql, StringComparison.Ordinal);
     }
 
     [Fact]

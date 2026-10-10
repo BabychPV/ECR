@@ -157,6 +157,23 @@ public sealed class RowWindowFetchTests
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait("Directive", "HSE301-A1")]
+    public void Fold_нескінченний_дріб_округлюється_до_масштабу_сховища()
+    {
+        // ⛔ Z1-01: 1 Sm3/h упродовж 7 с = 7/3600 Sm3 (28 знаків після ділення на знаменник).
+        // Без округлення рядок отримував `SourceError ECR-CELL-0422 tooManyDecimals` при записі.
+        // Мутація: `boundary.Storable` → `boundary.Value` у `Fold`, червоний.
+        var total = RowWindowFetch.Fold(
+            RowWindowSummaryKind.Total, Result(7m), 95m, StdCubicMetrePerHourId, StdCubicMetreId, Catalog());
+        var average = RowWindowFetch.Fold(
+            RowWindowSummaryKind.Average, Result(10m / 3m), 95m, StdCubicMetreId, StdCubicMetreId, Catalog());
+
+        Assert.Equal((RowWindowValueStatus.Fetched, 0.0019444444444444m), (total.Status, total.ValueTarget));
+        Assert.Equal((RowWindowValueStatus.Fetched, 3.3333333333333333m), (average.Status, average.ValueTarget));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Directive", "HSE301-A1")]
     public void Fold_Count_не_звіряє_одиниці()
     {
         var fold = RowWindowFetch.Fold(
@@ -256,6 +273,37 @@ public sealed class RowWindowFetchTests
         Assert.True(RowWindowFetch.NeedsFetch(null, Span, 7, Now));
         Assert.True(RowWindowFetch.NeedsFetch(Stored(RowWindowValueStatus.Fetched, from: Span.FromUtc.AddMinutes(1)), Span, 7, Now));
         Assert.True(RowWindowFetch.NeedsFetch(Stored(RowWindowValueStatus.Fetched, to: Span.ToUtc.AddMinutes(1)), Span, 7, Now));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Finding", "I1-02")]
+    public void Інше_джерело_атрибут_згортка_одиниця_чи_прив_язка_потребують_підтягування()
+    {
+        // Stored: прив'язка 1, сутність 1, «tag», Total, одиниця 10.
+        var stored = Stored(RowWindowValueStatus.Fetched);
+        var same = new RowWindowProvenance(1, 1, "TAG", RowWindowSummaryKind.Total, 10);
+
+        // Регістр шляху атрибута не різниця (PI порівнює без регістру).
+        Assert.False(RowWindowFetch.NeedsFetch(stored, Span, 7, Now, same));
+
+        // ⛔ МУТАЦІЙНИЙ ДОКАЗ: прибрати порівняння провенансу в NeedsFetch — усі п'ять false.
+        Assert.True(RowWindowFetch.NeedsFetch(stored, Span, 7, Now, same with { SourceEntityId = 2 }));
+        Assert.True(RowWindowFetch.NeedsFetch(stored, Span, 7, Now, same with { SourceField = "tag2" }));
+        Assert.True(RowWindowFetch.NeedsFetch(stored, Span, 7, Now, same with { Summary = RowWindowSummaryKind.Average }));
+        Assert.True(RowWindowFetch.NeedsFetch(stored, Span, 7, Now, same with { TargetUnitId = 11 }));
+        Assert.True(RowWindowFetch.NeedsFetch(stored, Span, 7, Now, same with { RowWindowMapId = 2 }));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Finding", "I1-02")]
+    public void Рядок_що_не_мав_джерела_підтягується_щойно_джерело_з_явилося()
+    {
+        var stored = Stored(RowWindowValueStatus.NotApplicable);
+
+        Assert.True(RowWindowFetch.NeedsFetch(
+            stored, Span, 0, Now, new RowWindowProvenance(1, 1, "tag", RowWindowSummaryKind.Total, 10)));
     }
 
     [Fact]

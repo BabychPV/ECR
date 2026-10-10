@@ -168,8 +168,8 @@ public sealed class FailedAttemptAtomicTests(SqlServerFixture sql)
     /// <remarks>
     /// Сценарій: обробник прочитав незаблокований запис і стоїть у Verify (хешер тримає виклик); у цей час поріг
     /// наставав (хибні спроби). Раніше успіх записував сутність через EF і знімав блокування — вхід проходив
-    /// (cookie після блокування). Тепер — один UPDATE з умовою, 0 рядків → 423 <c>ECR-AUTH-0423</c>, блокування
-    /// лишається, успішної спроби в журналі немає.
+    /// (cookie після блокування). Тепер — один UPDATE з умовою, 0 рядків → 401 <c>ECR-AUTH-0401</c> (як хибний
+    /// пароль, без оракула 423/401), блокування лишається, успішної спроби в журналі немає.
     /// </remarks>
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
@@ -191,7 +191,7 @@ public sealed class FailedAttemptAtomicTests(SqlServerFixture sql)
                 new UserStore(db), new GatedAcceptingHasher(inVerify, release), new UnitOfWork(db), new FixedClock(),
                 NullLogger<LoginHandler>.Instance);
 
-            return await Assert.ThrowsAsync<BusinessRuleException>(
+            return await Assert.ThrowsAsync<AccessDeniedException>(
                 () => handler.HandleAsync(name, "right-password", "10.0.0.2", CancellationToken.None));
         });
 
@@ -206,7 +206,10 @@ public sealed class FailedAttemptAtomicTests(SqlServerFixture sql)
 
         release.Set();
         var refusal = await correct.ConfigureAwait(true);
-        Assert.Equal("ECR-AUTH-0423", refusal.ErrorCode);
+
+        // ⛔ L1-03: програш гонки відповідає як хибний пароль (401), а не 423 — інакше правильний пароль у пачці
+        // підбору відрізнявся б від хибних. Мутація: повернути `throw Locked(user)` → червоний.
+        Assert.Equal("ECR-AUTH-0401", refusal.ErrorCode);
 
         await using var check = Context();
         var row = await check.Users.AsNoTracking().SingleAsync(u => u.Id == userId).ConfigureAwait(true);

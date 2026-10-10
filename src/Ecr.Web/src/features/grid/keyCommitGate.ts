@@ -28,6 +28,7 @@
  * темп людини нічого не затримує — вікно відкривається лише після Enter/Tab.
  */
 
+import { isContainerRendered } from './containerRendered';
 import { isEnterKeyEvent } from './keyboardCompat';
 
 /** Запасний термін очікування кінця переходу фокуса (останній рядок — `focuscell` не буде). */
@@ -352,6 +353,8 @@ export function installKeyCommitGate(container: HTMLElement): () => void {
       detached &&
       holding === null &&
       activeGrid === container &&
+      // ⛔ N3-12: прихована (`display: none`) сітка лишалась «активною» і відкладала вставку/копіювання.
+      isContainerRendered(container) &&
       ArrowKeys.has(key) &&
       !(event.shiftKey || event.ctrlKey || event.metaKey || event.altKey)
     ) {

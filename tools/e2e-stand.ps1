@@ -103,6 +103,9 @@ if ($PSBoundParameters.ContainsKey('RequireFreeGb')) {
     $setupExtra += @('-RequireFreeGb', [string] $RequireFreeGb)
 }
 if ($SmallFiles) { $setupExtra += '-SmallFiles' }
+# L10-13: setup-dev-db.ps1 без -Force відмовляється перестворювати базу без позначки Ecr_DevDb. Свою тимчасову
+# базу цей скрипт уже перевірив за позначкою Ecr_E2E_Temp ДО виклику (чужа база — Fail раніше), тож -Force тут безпечний.
+$setupExtra += '-Force'
 if ($PSBoundParameters.ContainsKey('StartupTimeoutSec')) {
     $setupExtra += @('-StartupTimeoutSec', [string] $StartupTimeoutSec)
 }

@@ -159,8 +159,8 @@ public static class WindowFold
 
             case SourceSummaryKind.Minimum:
             case SourceSummaryKind.Maximum:
-                // ⚠ Згортка точок у PeriodFold якості не бачить — погані
-                // відсіюються тут (§4.6), до виклику.
+                // ⚠ Погані відсіюються тут (§4.6), до виклику: `PeriodFold`
+                // тепер відсіює їх і сам (C1-04), але порожньої серії не приймає.
                 var good = timed.Where(p => p.IsGood).ToList();
                 if (good.Count > 0)
                 {

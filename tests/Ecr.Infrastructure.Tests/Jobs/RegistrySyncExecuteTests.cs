@@ -70,6 +70,10 @@ public sealed class RegistrySyncExecuteTests(SqlServerFixture sql)
             Assert.Contains($"element={g9}", refused.Details, StringComparison.Ordinal);
             Assert.Contains("reason=codeModeManual", refused.Details, StringComparison.Ordinal);
 
+            // L4-13 (AN-81): і порада ключем каталогу, не лише сира причина.
+            Assert.Contains(
+                "messageKey=err.ECR-REG-0422.codeModeManualNoAutoCreate", refused.Details, StringComparison.Ordinal);
+
             // Дедуп: той самий стан — жодної нової події.
             await RunAsync(provider, stand);
             Assert.Single(await EventsAsync(stand), e => e.Status == CollectionCoverage.RegistryElementUnlinked);

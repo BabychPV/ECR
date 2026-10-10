@@ -2195,8 +2195,10 @@ public interface ICellPatcher
 public interface ICollectionRunner
 {
     public interface ICollectionRunner
-    public Task RunAsync(
+    public Task<CollectionRunSummary> RunAsync(
 }
+
+public sealed record CollectionRunSummary(DateTime ReadFromUtc, int PointsWritten);
 ```
 
 #### `ISourceEventSyncJob`
@@ -2317,16 +2319,22 @@ public interface IDocumentStore
 #### `IDocumentDeletionStore`
 
 Видалення документа-чернетки (`DELETE /api/v1/documents/{id}`, право
-`Document.Delete`, рішення людини 2026-09-21 «лише чернетки»). Обидва методи —
-в одній транзакції: стани аркушів читаються під `UPDLOCK, HOLDLOCK`, домен
-(`DraftDocumentDeletion`) вирішує, чи це чернетка, і лише тоді дані видаляються
-явно від листя до кореня (каскадів на `doc.Document` немає). `aud.CellChange`
-не чіпається; видалення лягає в `aud.SecurityEvent` (`DocumentDeleted`).
+`Document.Delete`, рішення людини 2026-09-21 «лише чернетки»). Усі методи —
+в одній транзакції: спершу `LockFreezeFactsAsync` (стан проєкту й періоди, у яких
+документ має комірки чи значення PI, — під `UPDLOCK`), потім стани аркушів під
+`UPDLOCK, HOLDLOCK`, домен (`DraftDocumentDeletion`) вирішує, чи це чернетка, і лише
+тоді дані видаляються явно від листя до кореня (каскадів на `doc.Document` немає).
+R9-F3 / F3-01: архівований проєкт або архівація — `409 ECR-DOC-0409`
+(`deleteProjectArchived`, `reason = ProjectArchived`); дані в ефективно закритому
+періоді — `409 ECR-DOC-0409` (`deleteClosedPeriod`, `reason = PeriodClosed`, `periodKey`): «закритий період блокує
+всіх» діє й на видалення. `aud.CellChange` не чіпається; видалення лягає в
+`aud.SecurityEvent` (`DocumentDeleted`).
 
 ```csharp
 public interface IDocumentDeletionStore
 {
     public Task<DocumentWorkflowFacts> LockWorkflowFactsAsync(long documentId, CancellationToken ct);
+    public Task<DocumentFreezeFacts> LockFreezeFactsAsync(long documentId, CancellationToken ct);
     public Task<int> DeleteAsync(long documentId, CancellationToken ct);
 }
 ```
@@ -2491,7 +2499,7 @@ public interface ISystemHealthStore
 
 Черга фонових задач у базі (`MI-02`, `D-208`): рядки `itg.JobProgress` з
 `Lane IS NOT NULL`; `Lane IS NULL` — дзеркало Quartz, черга його не чіпає.
-Лейни — лише константи `JobLanes` (`default`, `recalc`; сторож
+Лейни — лише константи `JobLanes` (`interactive`, `default`, `excel`, `recalc`; порядок — пріоритет claim, `interactive` має власні місця у воркері Api, P1-06; `excel` бере лише окремий цикл з `Jobs:Excel:MaxConcurrency` місцями, AN-116; сторож
 `JobLaneTests`). Моменти (`AvailableAt`, `LeaseUntil`) — годинник СУБД.
 Постановка — у поточній транзакції `EcrDbContext`; наявна `Queued` на той
 самий `TargetKey` поглинає постановку. Claim: прострочені `Running` першими,
@@ -2831,6 +2839,17 @@ public interface IRegistrySnapshotLoader
 }
 ```
 
+`LoadAsync` ≡ `(await LoadSourceAsync(ids, asOf)).Build(date)` (L5-12): `LoadSourceAsync` читає БД один раз і
+повертає `IRegistrySnapshotSource`, який будує знімок на будь-яку дату в пам'яті — так правила довідника на пакет
+записів із різними датами вікна чинності не перечитують БД на кожну дату.
+
+```csharp
+public interface IRegistrySnapshotSource
+{
+    public IRegistrySnapshot Build(DateOnly businessDate);
+}
+```
+
 #### `IRegistryUseStore`
 
 Ребра `cfg.RegistryUse` формул версії методології (`SourceKind = 1`, RT-23b,
@@ -2856,7 +2875,11 @@ public interface IRegistryUseStore
 public interface IRegistryImpactStore
 {
     public Task<IReadOnlyList<RegistryImpactRow>> ListImpactedAsync(
-        int registryDefId, int take, CancellationToken ct);
+        int registryDefId, IReadOnlyCollection<int>? projectIds, int take, CancellationToken ct);
+
+    // D2-04: для задачі в черзі — лише названі документи, без стелі MaxRows.
+    public Task<IReadOnlyList<RegistryImpactRow>> ListImpactedForDocumentsAsync(
+        int registryDefId, IReadOnlyCollection<long> documentIds, CancellationToken ct);
 }
 ```
 
@@ -2897,9 +2920,13 @@ public interface IReportSnapshotBuilder
     public Task<long> BuildAsync(int reportVersionId, int projectId, PeriodKey? periodKey,
     public Task MarkSubmittedAsync(long snapshotId, int userId, CancellationToken ct);
     public Task<SnapshotStatus> RefreshStatusAsync(long snapshotId, CancellationToken ct);
+    public Task LockSlotAsync(int projectId, int? periodKey, CancellationToken ct);
     public Task<IReadOnlyList<ReportSnapshotSummary>> ListAsync(
+    public Task<int> CountRowsAsync(long snapshotId, int atMost, CancellationToken ct);
 }
 ```
+
+AN-120: побудова відмовляє `ECR-RPT-0422` (`err.ECR-RPT-0422.snapshotTooLarge`), якщо рядків зрізу ПІСЛЯ правил відбору (`R5`) більше за стелю, — а не обрізає джерело мовчки; попередній зріз лишається чинним. X1-01: `LockSlotAsync` — транзакційний `sp_getapplock` на проєкт × період; побудова рахує статус і перемикає `IsCurrent` під ним, робочий процес бере його до пошуку поточних зрізів (`ReportSnapshotSync`). `CountRowsAsync` — підрахунок рядків зі стелею: вивантаження книги відмовляє 422 до читання вмісту.
 
 #### `IReportViewGenerator`
 
@@ -3590,9 +3617,9 @@ public sealed class NotFoundException(string errorCode, string message)
 | `ECR-AUTH-0429` | 429 | вичерпано хвилинну межу спроб входу з АДРЕСИ (`S-10`); у відповіді `Retry-After`. Обліковка при цьому не заблокована — це `ECR-AUTH-0423`, інший суб'єкт і інша дія користувача |
 | `ECR-ACCS-0403` | 403 | відмова `IAccessDecisionService`; у `Extensions2.reason` — `EditDenyReason` |
 | `ECR-SEC-0404` | 404 | користувача або ролі не існує (або роль вимкнена) |
-| `ECR-SEC-0409` | 409 | конфлікт зі станом безпеки: роль із таким кодом уже існує (`UQ_Role`), роль вбудована чи зайнята; дія над власним записом або над останнім адміністратором (BE-12) |
-| `ECR-USR-0422` | 422 | дані облікового запису не проходять перевірку: алерти без пошти, доменний запис без SID, локальний без разового пароля |
-| `ECR-USR-0409` | 409 | обліковий запис із таким іменем уже існує |
+| `ECR-SEC-0409` | 409 | конфлікт зі станом безпеки: роль із таким кодом уже існує (`UQ_Role`), роль вбудована чи зайнята; дія над власним записом або над останнім адміністратором (BE-12); виправлення SID доменного запису, який уже входив (`windowsSidConfirmed`, X5-01) |
+| `ECR-USR-0422` | 422 | дані облікового запису не проходять перевірку: алерти без пошти, доменний запис без SID або з SID не у формі `S-1-…` (`windowsSidMalformed`, X5-01), локальний без разового пароля |
+| `ECR-USR-0409` | 409 | обліковий запис із таким іменем уже існує; SID уже прив'язаний до іншого запису (`windowsSidTaken`); Windows-вхід, чиє ім'я зайняте записом з іншим SID (`windowsSidMismatch`, X5-01: раніше 500 на `UQ_User_Name`) |
 | `ECR-TMPL-0404` | 404 | шаблон або версія не знайдені |
 | `ECR-TMPL-0409` | 409 | спроба структурної зміни в опублікованій версії (ФВ-7.1), **або** правила умовного форматування версії змінили між читанням і записом — `If-Match` не збігся з `ETag` набору (`condFormatChanged`, актуальна версія в `details.version`; `PUT …/conditional-formats`, ФВ-2.7) |
 | `ECR-TMPL-0422` | 422 | публікація не проходить валідацію цілісності |
@@ -3675,12 +3702,13 @@ public sealed class NotFoundException(string errorCode, string message)
 | `ECR-JOB-0404` | 404 | фонової задачі з таким ідентифікатором немає; **або** деталь у планувальнику не пережила перезапуск сервера (сховище черги в пам'яті, D-66) — ручний перезапуск неможливий |
 | `ECR-JOB-0409` | 409 | стан задачі не дозволяє дію: ручний перезапуск не-`Failed` задачі (директива №11, T10 #40), скасування задачі, яка вже не `Queued`/`Running` (BE-02), **або** розклад збору, змінений іншим редактором між читанням і записом — `If-Match` не збігся з `rowVersion` (BE-21b), **або** спроба завести другий розклад для сутності джерела, яка вже має свій (BE-21c), **або** прогін перевірки узгодженості, коли попередній ще `Queued`/`Running` (`consistencyCheckRunning`, BE-30), **або** видалення джерела даних, на яке ще спираються сутності чи розклади (`dataSourceInUse`), **або** тест з'єднання джерела, коли попередній ще йде (`dataSourceTestRunning`), **або** з'єднання, змінене іншим редактором — `If-Match` не збігся з `rowVersion` (`dataSourceChanged`). Константа каталогу — `ErrorCodes.JobStateConflict` |
 | `ECR-SYS-0500` | 500 | необроблена помилка; у логах — `CorrelationId` |
-| `ECR-SYS-0503` | 503 | система в стані архівації (`IsArchiving`) |
+| `ECR-SYS-0503` | 503 | система в стані архівації (`IsArchiving`); **або** планувальник фонових задач не налаштований (`schedulerNotConfigured`); **або** тимчасовий збій БД — deadlock 1205 після вичерпаних повторів (`RetryLimitExceededException`), тайм-аут команди -2, обрив/недоступність з'єднання (`databaseBusy`, R5-E1/E1-04), з заголовком `Retry-After: 5` |
 | `ECR-SYS-5031` | 503 | старт зупинено: база чи сервер несумісні зі збіркою — редакція/версія, незастосовані міграції (Validate), база новіша за збірку, немає файлових груп, функцій чи схем партиціонування (ФВ-7.9, `SchemaValidator`). Код журналу старту: до HTTP не доходить |
 | `ECR-CALC-4222` | 422 | прив'язка методології має більше комірок входу, ніж бюджет прогону `Calculations:MaxInputCellsPerBinding` (ФВ-9.8, `D-205`, `inputCellsOverBudget`); перевірка до виконання рядків — виходи не пишуться, фонова задача перерахунку стає `Failed` без ретраю |
 | `ECR-SIM-4031` | 403 | ціль «View as» (`Security.Simulate`) заборонена політикою (`D-210`): bootstrap-адміністратор (`bootstrapTarget`) або власник хоча б одного небезпечного права `sec.Permission.IsDangerous` з будь-якого чинного чи майбутнього особистого призначення, з областю чи без (`dangerousTarget`; групові призначення чужого запису невідомі — `P-02` — і в профіль сеансу не входять); сеанс не відкривається, спроба пишеться подією `SimulationDenied`. Константа каталогу — `ErrorCodes.SimulationTargetForbidden` |
 | `ECR-TMPL-4091` | 409 | відв'язка (`PUT …/bindings/…`, `isActive=false`) забрала б у колонки типу `Formula` опублікованої (`Published`/`Deprecated`) версії шаблону останнє джерело — ні формули шаблону, ні іншої активної прив'язки (HSE301 C5b, `D-215`, `lastSourceOfPublishedColumn`); джерела рахуються ПІСЛЯ зміни під блоком версії, тож заміна «прив'язати нове → відв'язати старе» проходить. Константа — `ErrorCodes.LastSourceOfPublishedColumn` |
 | `ECR-EXPR-0422` | 422 | дерево виразу надто глибоке для обходу на стеку потоку (L7-01): сторож стека рекурсивного обходу (`RuntimeHelpers.EnsureSufficientExecutionStack`, `TraversalStackGuard`) кинув `InsufficientExecutionStackException` замість переповнення стека, що валить процес; `messageKey` = `expr.tooComplex` («розбийте на кілька формул»). Фонова задача з цією причиною **не повторюється** (`JobRetryPolicy`) і падає один раз із цим кодом. Константа — `ErrorCodes.ExpressionTooComplex` |
+| `ECR-AUTH-0409` | 409 | небезпечний запит (`POST`/`PUT`/`PATCH`/`DELETE`) несе заголовок `X-Ecr-User` (id користувача з `/me`, якого бачила вкладка), а cookie сеансу належить іншому користувачу — у сусідній вкладці увійшов інший (AN-108 / S2-05, `sessionUserChanged`); відмова до обробника (`SessionUserMiddleware`), клієнт покидає сеанс вкладки, як після виходу. Без заголовка (скрипти, служби, старі клієнти) і на вході/виході — не перевіряється. Константа — `ErrorCodes.SessionUserMismatch` |
 
 ### 7.1 Суфікси `messageKey` (`err.<код>.<суфікс>`) нових випадків
 
@@ -3919,6 +3947,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `POST` | `/api/v1/users/{id}/reset-password` | `Security.ManageUsers` | 3 |
 | `POST` | `/api/v1/users/{id}/lock` | `Security.ManageUsers` | 3 |
 | `POST` | `/api/v1/users/{id}/unlock` | `Security.ManageUsers` | 3 |
+| `PUT` | `/api/v1/users/{id}/windows-sid` | `Security.ManageUsers` | 3 |
 | `GET` | `/api/v1/units` | — | 4 |
 | `POST` | `/api/v1/units` | `Uom.EditCatalog` | 4 |
 | `POST` | `/api/v1/units/convert` | — | 4 |
@@ -4179,7 +4208,8 @@ public sealed class NotFoundException(string errorCode, string message)
 > елемент — `RegistryRuleViolationDto` `{entryId, entryCode, rule, severity, messageKey, params}`
 > (`messageKey` = `registries.rules.violated`, параметри `rule`, `entryCode`, `message`; для шаблону
 > «Сума дочірніх» — `value` = Σ; помилка-значення виразу — `errorCode`; правило, яке не розбирається, —
-> `registries.rules.invalid`). Пакет із `dryRun` повертає в `rules[]` і рівень `Error` (відповідь 200,
+> `registries.rules.invalid`; правило, не перевірене через вичерпаний спільний бюджет обчислень пакета (L5-12), —
+> `registries.rules.budgetExhausted` свого рівня, без `errorCode`). Пакет із `dryRun` повертає в `rules[]` і рівень `Error` (відповідь 200,
 > нічого не записано); прев'ю CSV (`dryRun`) правил не виконує. `UniqueWithin` не виконується (`R-5`).
 > Збереження опису (`PUT …/definition`, публікація чернетки): нові, змінені й знову ввімкнені правила
 > розбираються граматикою правил (діалект `Template`, `THIS`, `ROW.`) і перевіряються за формами
@@ -4230,7 +4260,14 @@ public sealed class NotFoundException(string errorCode, string message)
 
 > **`GET /jobs?mine=true` — межа доступу, а не фільтр зручності** (`BE-08`,
 > `Q-156`). Параметри переліку: `state` (`Queued`, `Running`, `Succeeded`,
-> `Failed`, `Cancelled`), `code` (тип задачі), `mine`, `limit` (1…50).
+> `Failed`, `Cancelled`), `code` (тип задачі), `mine`, `limit` (1…50),
+> `hideRoutine` (без успішних `IFormulaRecalculationJob` — шухляда «Мої задачі»).
+>
+> ⛔ `hideRoutine` (F4-01, audit-9): кожне автозбереження після старту попереднього
+> прогону додає рядок перерахунку формул, а стеля 50 застосовується ДО клієнтського
+> фільтра — тож без цього прапорця готовий експорт чи імпорт випадав зі шухляди за
+> кілька хвилин введення. Рутина відсікається в запиті, до `TOP`; провалений чи
+> незавершений перерахунок лишається видимим.
 >
 > ⛔ Рядок таблиці з `?mine=true` і правом «—» — не дубль, а друга межа на
 > тому самому шляху. Автор бачить ВЛАСНІ задачі без `System.ViewHealth`: це

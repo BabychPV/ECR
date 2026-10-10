@@ -10,6 +10,38 @@ namespace Ecr.Infrastructure.Persistence;
 /// <summary>Реалізація <see cref="IWorkflowStore"/> над <see cref="EcrDbContext"/>.</summary>
 public sealed class WorkflowStore(EcrDbContext db) : IWorkflowStore
 {
+    /// <summary>Правило ефективного стану періоду — те саме, що в рішенні про запис (F-08).</summary>
+    private static readonly Domain.Services.PeriodStateCalculator PeriodStates = new();
+
+    /// <inheritdoc />
+    public async Task<Domain.Enums.PeriodState> EffectivePeriodStateAsync(
+        Period period, DateTime utcNow, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(period);
+
+        var project = await db.Projects
+            .AsNoTracking()
+            .Where(p => p.Id == period.ProjectId)
+            .Select(p => new { p.Status, p.PeriodEnd, p.YearGraceOffsetDays, p.TimeZoneId })
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+
+        // ⚠ Лише для АКТИВНОГО проєкту — як у `AccessDecisionService` і в самій
+        // задачі станів (`A7-25`): періоди чернетки за датами не просуваються.
+        if (project is null || project.Status != Domain.Enums.ProjectStatus.Active)
+        {
+            return period.State;
+        }
+
+        return PeriodStates.Effective(
+            period,
+            utcNow,
+            Domain.Services.YearGraceWindow.For(
+                project.PeriodEnd,
+                project.YearGraceOffsetDays,
+                SiteTimeZone.Create(project.TimeZoneId).ToTimeZoneInfo()));
+    }
+
     /// <summary>Порожній набір версій методологій для зрізу без розрахунків.</summary>
     /// <remarks>
     /// Колонка <c>NOT NULL</c> навмисно: «версій не було» і «версії не

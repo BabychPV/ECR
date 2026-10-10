@@ -31,8 +31,17 @@ public interface IUserStore
     /// ⚠ Саме з правом, а не «будь-який доменний». Інакше перший рядовий
     /// співробітник, що увійшов у систему, вимкнув би bootstrap-адміністратора
     /// — і налаштовувати систему стало б нікому (D-97).
+    ///
+    /// ⛔ S1-01 (аудит 5): адміністратором рахується лише той, хто СПРАВДІ може
+    /// адмініструвати: вже входив через Windows (SID підтверджено каталогом),
+    /// не заблокований, має чинне на <paramref name="utcNow"/> безобласне
+    /// призначення активної ролі. Інакше хибний SID, підміна «з понеділка» чи
+    /// роль з областю вимикали bootstrap, не давши натомість нікого.
     /// </remarks>
-    public Task<bool> HasActiveDomainAdminAsync(string permissionCode, CancellationToken ct);
+    /// <param name="permissionCode">Право адміністратора.</param>
+    /// <param name="utcNow">Момент перевірки: блокування й чинність призначення.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<bool> HasActiveDomainAdminAsync(string permissionCode, DateTime utcNow, CancellationToken ct);
 
     /// <summary>
     /// Скільки активних незаблокованих записів тримає <paramref name="permissionCode"/>

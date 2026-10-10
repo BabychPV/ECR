@@ -183,6 +183,15 @@ public sealed partial class PatchCellsWorkbookTests(SqlServerFixture sql) : IDis
         var conflict = Assert.Single((IEnumerable<CellConflictDto>)error.Details["conflicts"]!);
         Assert.Equal(guilty.RowKeys[0], conflict.RowKey);
 
+        // ⛔ AN-106 (хвіст D1-01): та сама повна відмова, що й у поштучного — справжня колонка й
+        // ЧИННА версія, а не `*` з порожньою («рядка більше немає»). Єдиний конфлікт вище водночас
+        // тримає й другий бік: рядки, які ця ж транзакція встигла захопити (підняти їм версію), чужими
+        // конфліктами не названі.
+        Assert.Equal(guilty.ColumnCodes[^1], conflict.ColumnCode);
+        var current = (await VersionsAsync(world))[guilty.InstanceId][guilty.RowKeys[0]];
+        Assert.False(string.IsNullOrEmpty(current));
+        Assert.Equal(current, conflict.CurrentVersion);
+
         await AssertNothingWrittenAsync(world, before, bumpedRowKey: guilty.RowKeys[0]);
     }
 
@@ -370,7 +379,8 @@ public sealed partial class PatchCellsWorkbookTests(SqlServerFixture sql) : IDis
     /// </summary>
     /// ФВ-5.20a: 26 → 27 (один пошук Reopen-стану аркушів для <c>IsLateEdit</c>).
     /// L6-02: 27 → 28 (блокування структури документа разом із версією шаблону, одним пакетом).
-    private const long BookExecutions = 28;
+    /// N-3: 28 → 29 (<c>SET LOCK_TIMEOUT</c> у <c>LockWaitGuard</c>, один раз на пакет).
+    private const long BookExecutions = 29;
 
     private async Task AssertRejectedAsync<TException>(
         World world, AccessProfile profile, List<PatchCellsRequest> requests, Table guilty, string code, string messageKey)
@@ -974,6 +984,9 @@ public sealed partial class PatchCellsWorkbookTests(SqlServerFixture sql) : IDis
     {
         public Task<DocumentStatus> EnterEditAsync(long documentId, int sheetDefId, PeriodKey periodKey, CancellationToken ct)
             => inner.EnterEditAsync(documentId, sheetDefId, periodKey, ct);
+
+        public Task<DocumentStatus> EnterEditNoWaitAsync(long documentId, int sheetDefId, PeriodKey periodKey, CancellationToken ct)
+            => inner.EnterEditNoWaitAsync(documentId, sheetDefId, periodKey, ct);
 
         public async Task EnterSubmitAsync(long documentId, int sheetDefId, PeriodKey periodKey, CancellationToken ct)
         {

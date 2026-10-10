@@ -37,6 +37,77 @@ public sealed class DocumentDeletionStore(EcrDbContext db) : IDocumentDeletionSt
     }
 
     /// <inheritdoc />
+    public async Task<DocumentFreezeFacts> LockFreezeFactsAsync(long documentId, CancellationToken ct)
+    {
+        var project = await db.Documents.AsNoTracking()
+            .Where(d => d.Id == documentId)
+            .Join(db.Projects, d => d.ProjectId, p => p.Id, (d, p) => new { p.Status, p.IsArchiving })
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+
+        if (project is null)
+        {
+            // Документа вже немає: видалення далі все одно нічого не знайде.
+            return new DocumentFreezeFacts(Domain.Enums.ProjectStatus.Draft, false, []);
+        }
+
+        // ⚠ «Дані» — комірки й значення PI за вікном рядка, а не сам екземпляр таблиці: екземпляр
+        // із фіксованими рядками з'являється вже від перегляду періоду (`RowStore`), і порожня
+        // структура закритого періоду видалення не блокує. По одному ключу — рівність за
+        // `PeriodKey` дає відсічку партицій (той самий прийом, що в `DeleteAsync`).
+        var instanceKeys = await db.TableInstances.AsNoTracking()
+            .Where(i => i.DocumentId == documentId)
+            .Select(i => i.PeriodKeyValue)
+            .Distinct()
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var keysWithData = new HashSet<int>();
+        foreach (var key in instanceKeys.Order())
+        {
+            var instances = db.TableInstances.Where(i => i.PeriodKeyValue == key && i.DocumentId == documentId);
+
+            var hasData =
+                await db.CellValues.AnyAsync(
+                    c => c.PeriodKeyValue == key && db.TableRows.Any(
+                        r => r.PeriodKeyValue == key && r.Id == c.TableRowId
+                             && instances.Any(i => i.Id == r.TableInstanceId)),
+                    ct).ConfigureAwait(false)
+                || await db.RowWindowValues.AnyAsync(
+                    v => v.PeriodKey == key && instances.Any(i => i.Id == v.TableInstanceId),
+                    ct).ConfigureAwait(false);
+
+            if (hasData)
+            {
+                keysWithData.Add(key);
+            }
+        }
+
+        if (keysWithData.Count == 0)
+        {
+            return new DocumentFreezeFacts(project.Status, project.IsArchiving, []);
+        }
+
+        // ⚠ UPDLOCK — як `WorkflowStore.LockPeriodAsync`: паралельний `PeriodStateJob` не закриє
+        // період між перевіркою й видаленням. Блокуються періоди проєкту документа (одиниці-десятки
+        // рядків, ROWLOCK); видалення чернетки — рідка дія.
+        var periods = await db.Periods
+            .FromSql($"""
+                SELECT p.* FROM doc.Period AS p WITH (UPDLOCK, ROWLOCK)
+                JOIN doc.Document AS d ON d.ProjectId = p.ProjectId
+                WHERE d.Id = {documentId}
+                """)
+            .AsNoTracking()
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        return new DocumentFreezeFacts(
+            project.Status,
+            project.IsArchiving,
+            [.. periods.Where(p => keysWithData.Contains(p.PeriodKeyValue)).OrderBy(p => p.PeriodKeyValue)]);
+    }
+
+    /// <inheritdoc />
     public async Task<int> DeleteAsync(long documentId, CancellationToken ct)
     {
         // ⛔ L10-06: мапа подій джерела (`ext.SourceEventMap`) — конфігурація
@@ -44,7 +115,23 @@ public sealed class DocumentDeletionStore(EcrDbContext db) : IDocumentDeletionSt
         // видалення падало на FK 547 уже посеред транзакції — і людина бачила
         // 500. Мапу мовчки не видаляємо (це чужа налаштована робота, не дані
         // документа): відмова 409 з причиною, документ лишається цілим.
-        if (await db.SourceEventMaps.AnyAsync(m => m.DocumentId == documentId, ct).ConfigureAwait(false))
+        //
+        // ⛔ L10-06 (аудит 2026-10-09): перевірка — З БЛОКУВАННЯМ (UPDLOCK, HOLDLOCK), а не
+        // голий `AnyAsync`. Під RCSI (06-rcsi.sql) звичайне читання бачить лише ЗАКОМІЧЕНІ рядки:
+        // мапа, яку паралельна транзакція вже вставила, але ще не завершила, лишалась невидимою,
+        // і видалення падало на FK_SEM_Document (547 → 500) посеред транзакції. Блокуюче читання
+        // чекає завершення тієї вставки і бачить її (→ 409), а діапазонне блокування не пускає
+        // нову мапу, доки транзакція видалення не завершиться (той самий прийом, що в
+        // LockWorkflowFactsAsync). ⚠ Індексу з провідним `DocumentId` у ext.SourceEventMap немає
+        // (лише UQ_SourceEventMap), тож діапазон — увесь скан таблиці конфігурації мапінгів; вона
+        // мала, а видалення чернетки — рідка дія, тож ціна — коротка пауза створення мап.
+        var hasEventMap = await db.SourceEventMaps
+            .FromSql($"SELECT * FROM ext.SourceEventMap WITH (UPDLOCK, HOLDLOCK) WHERE DocumentId = {documentId}")
+            .AsNoTracking()
+            .AnyAsync(ct)
+            .ConfigureAwait(false);
+
+        if (hasEventMap)
         {
             throw new DomainException(
                 ErrorCodes.DocumentSubmitted,
@@ -75,8 +162,48 @@ public sealed class DocumentDeletionStore(EcrDbContext db) : IDocumentDeletionSt
 
         // Похідні дані без зовнішнього ключа: лишити їх — означало б сиріт, що
         // вказують на неіснуючий документ.
-        await db.CalculationResults.Where(r => r.DocumentId == documentId).ExecuteDeleteAsync(ct).ConfigureAwait(false);
-        await db.CalculationInputs.Where(r => r.DocumentId == documentId).ExecuteDeleteAsync(ct).ConfigureAwait(false);
+        //
+        // ⛔ R5-Q1-03: предикат ще й за `PeriodKey`. Голий `DocumentId` — скан УСІХ партицій
+        // `calc.CalculationResult` (`IX_CalculationResult_Lookup` веде `PeriodKey`) і
+        // `calc.CalculationInput` (лише PK `(PeriodKey, Id)`) з U-блокуваннями всередині цієї
+        // транзакції, що вже тримає діапазон `ext.SourceEventMap`. Набір ключів повний за побудовою:
+        // результат і вхід пишуться в `run.PeriodKey ?? 0` (`CalculationResultStore`), а кожен
+        // рядок тримає FK на свій прогін — тож ключі всіх прогонів проєкту документа покривають
+        // усі його рядки; періоди проєкту й 0 — запас на випадок, якщо ця побудова зміниться.
+        var projectId = await db.Documents.AsNoTracking()
+            .Where(d => d.Id == documentId)
+            .Select(d => (int?)d.ProjectId)
+            .FirstOrDefaultAsync(ct).ConfigureAwait(false);
+
+        var documentKeys = new HashSet<int> { 0 };
+        if (projectId is { } project)
+        {
+            documentKeys.UnionWith(await db.CalculationRuns.AsNoTracking()
+                .Where(r => r.ProjectId == project)
+                .Select(r => r.PeriodKey ?? 0)
+                .Distinct()
+                .ToListAsync(ct).ConfigureAwait(false));
+            documentKeys.UnionWith(await db.Periods.AsNoTracking()
+                .Where(p => p.ProjectId == project)
+                .Select(p => p.PeriodKeyValue)
+                .ToListAsync(ct).ConfigureAwait(false));
+        }
+
+        // ⛔ По одному ключу на DELETE, а не `PeriodKey IN (@k1, @k2, …)`. Список параметрів
+        // оптимізатор згортає в залишковий OR-предикат і вільний обирати скан вузького
+        // `IX_CalculationResult_Version` (провідний `MethodologyVersionId`) — тоді відсічки партицій
+        // немає зовсім (план на малій/порожній таблиці: Index Scan, 25 із 25). Рівність за
+        // `PeriodKey` дає пошук із відсічкою до однієї партиції за будь-якої статистики.
+        // Ключів — стільки, скільки періодів/прогонів у проєкту (одиниці-десятки), тож це дешево.
+        foreach (var key in documentKeys.Order())
+        {
+            await db.CalculationResults
+                .Where(r => r.PeriodKey == key && r.DocumentId == documentId)
+                .ExecuteDeleteAsync(ct).ConfigureAwait(false);
+            await db.CalculationInputs
+                .Where(r => r.PeriodKey == key && r.DocumentId == documentId)
+                .ExecuteDeleteAsync(ct).ConfigureAwait(false);
+        }
 
         // ⛔ L10-06: прогони перерахунку САМЕ цього документа (`DocumentId`).
         // Прогони проєкту (`DocumentId = NULL`) лишаються — їх рядки цього

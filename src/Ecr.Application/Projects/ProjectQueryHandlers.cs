@@ -339,9 +339,12 @@ public sealed class UpdatePeriodPolicyHandler(
                     continue;
                 }
 
+                // ⛔ R9-F3 / F3-03: з поточним моментом — перевідкритий і ефективно закритий
+                // період нових меж не отримує (зміна політики не відкриває закрите).
                 Periods.PeriodBoundaryRefresh.Apply(
                     project.Periods, policy,
-                    Domain.ValueObjects.SiteTimeZone.Create(project.TimeZoneId).ToTimeZoneInfo());
+                    Domain.ValueObjects.SiteTimeZone.Create(project.TimeZoneId).ToTimeZoneInfo(),
+                    clock.UtcNow);
             }
 
             // ⛔ Журнал — у тій самій транзакції, що й зміна: збій збереження не
@@ -697,7 +700,7 @@ public sealed class ActivateProjectHandler(
         // кроку, про який ніде не написано. Порядок виклику двох маршрутів не
         // може бути частиною контракту, якої в контракті немає.
         //
-        var created = await calendar.MaterializeAsync(project, ct).ConfigureAwait(false);
+        var created = await calendar.MaterializeAsync(project, clock.UtcNow, ct).ConfigureAwait(false);
 
         if (created.Count > 0)
         {

@@ -26,12 +26,29 @@ public sealed class SourcesHealthCheck(
     IUiStringCatalog catalog,
     ICurrentUser currentUser,
     ISecretProvider? secrets = null,
-    IEndpointNetwork? network = null) : IHealthCheck
+    IEndpointNetwork? network = null,
+    HealthResultCache? cache = null) : IHealthCheck
 {
     /// <inheritdoc />
     public async Task<HealthCheckResult> CheckHealthAsync(
         HealthCheckContext context,
         CancellationToken cancellationToken)
+    {
+        // ⛔ P1-03 (AUDIT-2026-10-09b): `/health/ready` анонімний, а ця перевірка — найважча
+        // з усіх: до 5000 сутностей, до 20 000 прогонів і gaps-and-islands по
+        // `itg.CollectionCoverage` за 45 днів на КОЖНУ пробу, у власному scope і з'єднанні.
+        // Як і `JobsHealthCheck`: результат живе `HealthResultCache.Ttl`, одночасні промахи
+        // чекають одного обчислення; ключ — мова, нормалізована реєстром (L1-02).
+        if (cache is null)
+        {
+            return await ComputeAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        var language = await catalog.ResolveLanguageAsync(currentUser.Language, cancellationToken).ConfigureAwait(false);
+        return await cache.GetOrAddAsync($"ready:sources:{language}", ComputeAsync, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<HealthCheckResult> ComputeAsync(CancellationToken cancellationToken)
     {
         // ⚠ Порт лишається необов'язковим: перевірка, яку неможливо створити,
         // валить увесь `/health/ready` винятком контейнера (`Q-051`).

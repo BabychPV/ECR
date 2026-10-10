@@ -45,6 +45,7 @@ public static partial class EcrConfigurationValidation
         ("Database:CommandTimeoutSeconds", 0),
         ("Database:BulkBatchSize", 1),
         ("Database:SheetLockTimeoutSeconds", 0),
+        ("Database:MaxPoolSize", 1),
         ("Cache:MetadataSlidingMinutes", 1),
         ("Cache:AccessProfileSlidingMinutes", 1),
         ("Auth:SlidingHours", 1),
@@ -58,8 +59,15 @@ public static partial class EcrConfigurationValidation
         ("Security:RateLimit:SmtpTestSystemPermitPerHour", 1),
         ("Security:RateLimit:RecalculatePermitPerMinute", 1),
         ("Security:RateLimit:RecalculateUserPermitPerMinute", 1),
+        ("Security:RateLimit:HealthReadyPermitPerMinute", 1),
+        (Ecr.Api.Security.ImportPreviewRateLimitPolicy.PermitKey, 1),
+        (Ecr.Api.Security.ImportPreviewRateLimitPolicy.QueueLimitKey, 0),
         ("Jobs:ShutdownTimeoutSeconds", 1),
         ("Jobs:QueueDepth:RefreshSeconds", 5),
+
+        // AN-116: нуль задач Excel одночасно — не «без межі», а книги, яких не бере ніхто.
+        (Infrastructure.Jobs.JobLaneMap.ExcelMaxConcurrencyKey, 1),
+        (Infrastructure.Jobs.QuartzJobTypeLimiter.ThreadCountKey, 1),
         ("Audit:ExportMaxRows", 1),
         ("Localization:ImportMaxBytes", 1),
         ("Registries:ImportMaxBytes", 1),
@@ -196,6 +204,21 @@ public static partial class EcrConfigurationValidation
                 "очікується відносний шлях (/api/v1/csp-report) або абсолютна адреса http(s) без пробілів, ; , і лапок; порожнє значення вимикає звітування"));
         }
 
+        // S1-01: адреса довіреного проксі з помилкою інакше мовчки випадала б із переліку, і
+        // запити від цього проксі рахувалися б за адресою сокета — одна межа на всіх.
+        var proxiesKey = Ecr.Api.Security.ForwardedClientAddress.KnownProxiesKey;
+        if (Value(configuration, proxiesKey) is { } proxies)
+        {
+            Ecr.Api.Security.ForwardedClientAddress.ParseProxies(proxies, out var invalidProxies);
+            if (invalidProxies.Count > 0)
+            {
+                problems.Add(Describe(
+                    proxiesKey, proxies,
+                    "очікуються IP-адреси довірених проксі через кому, напр. 10.0.0.5, 10.0.0.6; не IP: "
+                    + string.Join(", ", invalidProxies)));
+            }
+        }
+
         // D-212 PR-7: невідомий пояс AF інакше зупиняв би кожен синк довідника з датами вже вночі,
         // а не старт служби з ім'ям ключа.
         var zoneKey = Application.Integration.RegistrySync.RegistrySyncValidity.TimeZoneKey;
@@ -246,6 +269,20 @@ public static partial class EcrConfigurationValidation
             warnings.Add(
                 $"{OtlpEndpointKey} = «{endpoint}», але {Ecr.Api.Observability.TelemetrySetup.EnabledKey} ≠ true — "
                 + "експорт метрик OTLP вимкнено, значення ігнорується (runbook §3.4).");
+        }
+
+        // ⚠ S1-01: без переліку довірених проксі довіряється найправіший запис X-Forwarded-For —
+        // правильно за ОДНИМ проксі, що дописує заголовок, але запит повз проксі (прямо на
+        // порт Kestrel) сам обирає собі адресу.
+        var trustKey = Ecr.Api.Security.ForwardedClientAddress.TrustForwardedForKey;
+        if (Value(configuration, trustKey) is { } trust
+            && bool.TryParse(trust, out var trusted) && trusted
+            && Value(configuration, Ecr.Api.Security.ForwardedClientAddress.KnownProxiesKey) is null)
+        {
+            warnings.Add(
+                $"{trustKey} = true без {Ecr.Api.Security.ForwardedClientAddress.KnownProxiesKey}: адресою клієнта "
+                + "вважається найправіший запис X-Forwarded-For. Закрийте порт застосунку для всіх, крім проксі, "
+                + "або перелічіть адреси проксі (runbook §2.1).");
         }
 
         // ⚠ S14: примусова CSP не проганялася браузерним набором (e2e-stand.ps1) —

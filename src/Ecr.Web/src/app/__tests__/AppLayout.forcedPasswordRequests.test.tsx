@@ -105,7 +105,7 @@ describe('AppLayout: зайві запити під примусовою змі�
     await waitFor(() => expect(requested(fetchMock).some((url) => url.includes('/ui-strings/'))).toBe(true));
 
     expect(requested(fetchMock).filter((url) => url.includes('/api/v1/jobs'))).toEqual([]);
-    expect(client.getQueryCache().find({ queryKey: ['jobs', true] })).toBeUndefined();
+    expect(client.getQueryCache().find({ queryKey: ['jobs', 'my-tasks'] })).toBeUndefined();
     expect(screen.queryByRole('button', { name: '⟦jobs.myTasks⟧' })).toBeNull();
     // Меню профілю з виходом лишається.
     expect(screen.getByText('tester')).toBeTruthy();
@@ -127,5 +127,22 @@ describe('AppLayout: зайві запити під примусовою змі�
     await client.refetchQueries({ queryKey: ['me'] });
 
     expect(fetchMock.mock.calls.length).toBe(before);
+  });
+});
+
+describe('AN-108 / S2-03: вихід не лишає даних користувача в кеші вкладки', () => {
+  // ⛔ Мутаційний доказ: прибери `queryClient.clear()` із `signOut` (`UserMenu.tsx`) — профіль лишиться в кеші.
+  it('після «Вийти» кеш запитів порожній', async () => {
+    stubFetch(true);
+    const client = renderApp('/change-password');
+    const user = userEvent.setup();
+
+    await screen.findByText('Зміна пароля');
+    expect(client.getQueryCache().find({ queryKey: ['me'] })).toBeDefined();
+
+    await user.click(screen.getByText('tester'));
+    await user.click(await screen.findByRole('menuitem', { name: '⟦profile.logout⟧' }));
+
+    await waitFor(() => expect(client.getQueryCache().find({ queryKey: ['me'] })).toBeUndefined());
   });
 });

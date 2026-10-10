@@ -97,6 +97,8 @@ export interface ServerOptions {
   readonly rows?: RegistryRow[];
   /** Збереження (не `dryRun`) відповідає лише після цього проміса — «запит у дорозі». */
   readonly holdCommit?: Promise<unknown>;
+  /** Перелік рядків ПІСЛЯ збереження відповідає лише після цього проміса — «перезапит після збереження в дорозі» (L9-03). */
+  readonly holdRowsAfterCommit?: Promise<unknown>;
   /** Статус відповіді на рядки довідника-цілі `STREAM` (зіставлення `Lookup`); за замовчуванням 200. */
   readonly lookupStatus?: number;
   /** Сеанс симуляції «очима користувача» (`/me.isSimulation`). */
@@ -121,6 +123,7 @@ export function passed(sent: SentBatch): RegistryBatchResult {
 /** Підміняє мережу; повертає журнал надісланих пакетів. */
 export function mockServer(options: ServerOptions = {}): SentBatch[] {
   const sent: SentBatch[] = [];
+  let committed = false;
   const me = {
     denies: [],
     grants: {},
@@ -148,6 +151,7 @@ export function mockServer(options: ServerOptions = {}): SentBatch[] {
         };
         sent.push(batch);
         if (!batch.dryRun && options.holdCommit !== undefined) await options.holdCommit;
+        if (!batch.dryRun) committed = true;
         return json((options.batch ?? passed)(batch));
       }
       if (url.includes('/definition')) return json(definition);
@@ -161,6 +165,7 @@ export function mockServer(options: ServerOptions = {}): SentBatch[] {
         return json({ items: [{ ...storedRows[0], id: 162, code: 'S162', display: '1D-2 · HP Separator Gas', values: {} }], nextCursor: null, totalCount: 1 });
       }
       if (url.includes('/rows')) {
+        if (committed && options.holdRowsAfterCommit !== undefined) await options.holdRowsAfterCommit;
         const items = options.rows ?? storedRows;
         return json({ items, nextCursor: null, totalCount: items.length });
       }

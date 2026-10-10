@@ -31,6 +31,9 @@ public sealed class PeriodCalendarMaterializer(IPeriodStore periods)
 {
     /// <summary>Створює періоди, яких ще немає, і перераховує межі наявних.</summary>
     /// <param name="project">Проєкт із завантаженими періодами.</param>
+    /// <param name="utcNow">
+    /// Поточний момент: період, що вже минув свою межу закриття, нових меж не отримує (R10-V9 / V9-01).
+    /// </param>
     /// <param name="ct">Токен скасування.</param>
     /// <returns>
     /// Лише НОВІ періоди. Порожньо — календар уже повний (або політика не дає
@@ -45,7 +48,7 @@ public sealed class PeriodCalendarMaterializer(IPeriodStore periods)
     /// тут; змінити її означало б чіпати інваріанти агрегата заради зручності
     /// одного сценарію.
     /// </remarks>
-    public async Task<IReadOnlyList<Period>> MaterializeAsync(Project project, CancellationToken ct)
+    public async Task<IReadOnlyList<Period>> MaterializeAsync(Project project, DateTime utcNow, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(project);
 
@@ -64,8 +67,12 @@ public sealed class PeriodCalendarMaterializer(IPeriodStore periods)
         // ⛔ T6/#36: `CustomPeriodCount` передається ЯВНО, а не через параметр
         // за замовчуванням. До цього виклик завжди йшов з `customCount = 0`, і
         // `PeriodKind.Custom` був недосяжний через API.
+        //
+        // ⛔ R10-V9 / V9-01: межі наявних — тим самим правилом, що й зміна
+        // політики (`Period.AcceptsBoundaryRefresh`): закритий, перевідкритий і
+        // ефективно закритий період нових меж не отримує.
         var created = PeriodCalendar.Build(
-            project, policy, zone, project.Periods, project.CustomPeriodCount ?? 0);
+            project, policy, zone, project.Periods, project.CustomPeriodCount ?? 0, utcNow);
 
         if (created.Count > 0)
         {

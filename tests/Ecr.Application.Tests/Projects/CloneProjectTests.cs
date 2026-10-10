@@ -201,6 +201,39 @@ public sealed class CloneProjectTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "ФВ-6.14")]
+    [Trait("Finding", "S1-02")]
+    public async Task Роль_яку_творець_має_лише_в_області_гранта_власності_на_клон_не_отримує()
+    {
+        // Творець: Manager — без області (саме вона дала право створювати),
+        // PlantManager — лише в області «проєкт 1», теж із Project.Manage.
+        const int scopedRoleId = 2;
+        _access.BuildProfileAsync(9, Arg.Any<CancellationToken>())
+            .Returns(new AccessBuilder { UserId = 9 }
+                .Permission("Project.Manage")
+                .Grant(ResourceKind.Project, 1, GrantLevel.Manage)
+                .Role(ManagerRoleId)
+                .ScopedRole(scopedRoleId)
+                .Build());
+        _users.FindRoleAsync(scopedRoleId, Arg.Any<CancellationToken>()).Returns(
+            new RoleView(scopedRoleId, "PlantManager", IsBuiltIn: false, IsActive: true,
+                Permissions: ["Project.Manage"], DangerousPermissions: []));
+        _users.ListGrantsAsync(scopedRoleId, Arg.Any<CancellationToken>())
+            .Returns(new List<ResourceGrantDto>());
+        _users.LockRoleForUpdateAsync(scopedRoleId, Arg.Any<CancellationToken>()).Returns(true);
+
+        await Handler().HandleAsync(1, "KASH_2027", CancellationToken.None);
+
+        // ⛔ S1-02: грант `Project:клон` на PlantManager творцеві не діє (клон поза
+        // його областю), зате дістався б УСІМ безобласним носіям PlantManager.
+        await _users.DidNotReceive().ReplaceGrantsAsync(
+            scopedRoleId, Arg.Any<IReadOnlyList<ResourceGrantDto>>(), Arg.Any<CancellationToken>());
+        await _users.Received(1).ReplaceGrantsAsync(
+            ManagerRoleId, Arg.Any<IReadOnlyList<ResourceGrantDto>>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
     public async Task Без_гранта_на_проєкт_джерело_клонування_відхиляється()
     {
         // ⛔ Q-179 (аудит фази 2, авторизація). Глобальне `Project.Manage`

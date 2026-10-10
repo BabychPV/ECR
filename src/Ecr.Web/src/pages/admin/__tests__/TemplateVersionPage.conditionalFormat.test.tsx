@@ -61,6 +61,18 @@ const structure = {
           columns: [column(100, "AAA", 0), column(101, "BBB", 1)],
           rows: [],
         },
+        // L9-22: колонка іншої таблиці ТІЄЇ Ж версії — її правило не «сирота», а «чуже»: мусить їхати в PUT.
+        {
+          id: 20,
+          code: "T20",
+          nameL10n: { values: { en: "Table 20" } },
+          layoutKind: "Static",
+          maxDynamicRows: null,
+          ordinal: 2,
+          rowMode: "Fixed",
+          columns: [column(200, "ZZZ", 0)],
+          rows: [],
+        },
       ],
     },
   ],
@@ -84,6 +96,16 @@ const stored = [
     backgroundHex: null,
     foregroundHex: "#00ff00",
     isBold: true,
+  },
+  // L9-22: колонки «GONE» у версії немає (її видалили) — правило-сирота не повертається в PUT.
+  {
+    columnCode: "GONE",
+    operator: "empty",
+    value: null,
+    valueTo: null,
+    backgroundHex: "#0000ff",
+    foregroundHex: null,
+    isBold: false,
   },
 ];
 

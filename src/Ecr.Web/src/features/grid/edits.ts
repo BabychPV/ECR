@@ -1,5 +1,5 @@
 import type { RowDto, TableSliceDto } from '@/api/types';
-import { sameCellValue, sameDateValue } from './cellValue';
+import { isTextColumnType, sameColumnValue } from './cellValue';
 import { parseNumber } from './clipboard';
 import { decide } from './permissions';
 import { columnIndexOf, rowIndexOf } from './rowIndex';
@@ -81,8 +81,10 @@ export function captureEdit(
   // ⛔ Порівняння саме ЗНАЧЕННЯ (`sameCellValue`), не тексту: `'5'` і
   // `'5.0000000000'` — той самий `decimal`, а текстове порівняння назвало б їх
   // різними й лишило б комірку брудною назавжди.
-  const same = column.dataType === 'Date' ? sameDateValue(after, before) : sameCellValue(after, before);
-  if (same) return null;
+  //
+  // ⛔ `G1-06`: рівність — за типом колонки (`sameColumnValue`): у текстовій
+  // `0012` і `12` — різні коди, а не одне число.
+  if (sameColumnValue(column.dataType, after, before)) return null;
 
   // AN-39/L8-15 (Q10=A / D-283): `defaultValue` порожньої комірки лише ПОКАЗУЄТЬСЯ. Клік повз
   // редактор без вводу повертає в `afteredit` саме його - це не введення. Явний ввід
@@ -97,6 +99,7 @@ export function captureEdit(
       isEmpty: false,
       baseVersion: row.rowVersion,
       before,
+      ...(isTextColumnType(column.dataType) ? { text: true } : {}),
     },
     step: { rowKey: signal.rowKey, columnCode: signal.columnCode, before, after },
     columnHeader: column.header,
@@ -113,7 +116,7 @@ function echoesDefault(
 
   const fallback = coerce(String(column.defaultValue), column.dataType);
 
-  return column.dataType === 'Date' ? sameDateValue(after, fallback) : sameCellValue(after, fallback);
+  return sameColumnValue(column.dataType, after, fallback);
 }
 
 /**
@@ -140,9 +143,102 @@ export function revertsToSaved(
   const after = coerce(signal.raw, column.dataType);
   const before = row.cells[signal.columnCode] ?? null;
 
-  return column.dataType === 'Date' ? sameDateValue(after, before) : sameCellValue(after, before);
+  return sameColumnValue(column.dataType, after, before);
 }
 
+/**
+ * Повернення до збереженого значення, поки ІНШЕ значення тієї самої комірки
+ * летить на сервер (`G1-02`).
+ *
+ * ⛔ `captureEdit` порівнює введене з КЕШЕМ, а кеш до відповіді ще тримає
+ * збережене: «10 → 20 (полетіло) → 10» виглядало як «без змін», `V-01`
+ * знімав правку зі сховища, а відповідь клала в кеш 20 — на сервері лишалось
+ * значення, яке людина щойно явно виправила. Тут таке введення стає звичайною
+ * правкою поверх того, що летить: `before` — значення в дорозі (саме воно буде в
+ * кеші, коли правка поїде; `splitByInFlight` відкладе її до відповіді), версія —
+ * поточна, її однаково підставить `withKnownVersions`.
+ *
+ * @returns `null`, якщо нічого не летить, введене НЕ повертає збережене або
+ * дорівнює тому, що летить, — тоді діє звичайне правило `V-01`.
+ */
+export function captureOverInFlight(
+  slice: TableSliceDto,
+  signal: EditSignal,
+  flying: PendingEdit | undefined,
+  rows: ReadonlyMap<string, RowDto> = rowIndexOf(slice),
+): CapturedEdit | null {
+  if (flying === undefined || signal.untouched === true) return null;
+  if (!revertsToSaved(slice, signal, rows)) return null;
+
+  const column = columnIndexOf(slice).get(signal.columnCode);
+  const row = rows.get(signal.rowKey);
+  if (column === undefined || row === undefined) return null;
+
+  const after = coerce(signal.raw, column.dataType);
+  const inFlight = flying.isEmpty ? null : flying.value;
+  if (sameColumnValue(column.dataType, after, inFlight)) return null;
+
+  return {
+    pending: {
+      rowKey: signal.rowKey,
+      columnCode: signal.columnCode,
+      value: after,
+      isEmpty: false,
+      baseVersion: row.rowVersion,
+      before: inFlight,
+      ...(isTextColumnType(column.dataType) ? { text: true } : {}),
+    },
+    step: { rowKey: signal.rowKey, columnCode: signal.columnCode, before: inFlight, after },
+    columnHeader: column.header,
+  };
+}
+
+/**
+ * Крок історії з «було» = те, що людина БАЧИЛА (`X2-01`).
+ *
+ * ⛔ `captureEdit` бере `before` з КЕШУ зрізу, а над кешем може стояти
+ * незбережена (або ще не підтверджена сервером) правка тієї самої комірки:
+ * «10 → 20 → 25» до відповіді давало крок `{10→25}`. Undo тоді писав 10, якого
+ * на екрані не було, а наступний Undo (`{10→20}`) бачив 10 замість 20 і хибно
+ * казав «змінено після кроку» (`grid.undoChangedSince`). Те саме правило, що
+ * `G1-05` уже застосував для вставки: незбережене поверх кешу.
+ *
+ * Повертає `null`, якщо крок нічого не змінює на екрані (повторно введено те
+ * саме незбережене значення) — такий крок лише з'їв би глибину історії.
+ */
+export function asShownStep(
+  slice: TableSliceDto,
+  step: CellEdit,
+  held: PendingEdit | undefined,
+): CellEdit | null {
+  if (held === undefined) return step;
+
+  const before = held.isEmpty ? null : held.value;
+  const dataType = columnIndexOf(slice).get(step.columnCode)?.dataType;
+  if (sameColumnValue(dataType, before, step.after)) return null;
+
+  return { ...step, before };
+}
+
+/**
+ * Крок історії для повернення комірки до збереженого значення (`V-01`, `X2-01`).
+ *
+ * ⛔ Доти `V-01` лише знімав незбережену правку і кроку НЕ писав: «10 → 20 → 10»
+ * лишав в історії `{10→20}`, і Ctrl+Z бачив на екрані 10 замість очікуваного 20
+ * — хибне «змінено після кроку». Тепер повернення — звичайний крок
+ * `{показане → збережене}`, і Undo повертає те, що людина бачила перед ним.
+ */
+export function revertStep(
+  slice: TableSliceDto,
+  signal: EditSignal,
+  held: PendingEdit | undefined,
+): CellEdit | null {
+  if (held === undefined) return null;
+
+  const after = valueOf(slice, signal.rowKey, signal.columnCode);
+
+  return asShownStep(slice, { rowKey: signal.rowKey, columnCode: signal.columnCode, before: after, after }, held);
+}
 /**
  * Правки з ОСТАННЬОЮ відомою версією рядка — у мить надсилання, а не введення
  * (`B-09`).
@@ -211,7 +307,7 @@ export function withKnownVersions(
 function sameSavedValue(slice: TableSliceDto | undefined, columnCode: string, cached: unknown, before: unknown): boolean {
   const dataType = slice === undefined ? undefined : columnIndexOf(slice).get(columnCode)?.dataType;
 
-  return dataType === 'Date' ? sameDateValue(cached, before) : sameCellValue(cached, before);
+  return sameColumnValue(dataType, cached, before);
 }
 
 /**

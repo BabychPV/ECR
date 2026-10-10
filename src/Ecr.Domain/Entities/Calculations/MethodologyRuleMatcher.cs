@@ -97,6 +97,27 @@ public static class MethodologyRuleMatcher
         return [.. ordered.Select(r => new CompiledMethodologyRule(r.Code, r.Priority, Parse(r.MatchJson)))];
     }
 
+    /// <summary>Канонічні пари предиката: ті самі, що бачить <see cref="Matches(string, IReadOnlyDictionary{string, string?})"/>, впорядковані за ключем.</summary>
+    /// <param name="matchJson">Плаский JSON-об'єкт «колонка → очікуване значення».</param>
+    /// <returns>
+    /// Пари «колонка → текст значення» за ключем (порядок Ordinal); <c>null</c> — не-об'єкт або зламаний JSON
+    /// (бите правило, що не збігається ні з чим).
+    /// </returns>
+    /// <remarks>
+    /// ⛔ N2-06: єдине джерело істини про «що означає значення в предикаті». Матчер порівнює ТЕКСТ значення
+    /// (<c>5</c> і <c>"5"</c> — те саме), тож перевірка дубля прив'язок (<c>BindingPredicate</c>) мусить
+    /// порівнювати ті самі пари, а не сирий JSON: інакше <c>{"12":5}</c> і <c>{"12":"5"}</c> обирають однакові
+    /// рядки, а P2-1 їх не вважає дублем.
+    /// </remarks>
+    public static IReadOnlyList<KeyValuePair<string, string?>>? CanonicalPairs(string matchJson)
+    {
+        ArgumentNullException.ThrowIfNull(matchJson);
+
+        return Parse(matchJson) is { } pairs
+            ? [.. pairs.OrderBy(p => p.Key, StringComparer.Ordinal)]
+            : null;
+    }
+
     /// <summary><c>ColumnDefId</c>, згадані числовими ключами предиката; зламаний предикат — порожньо.</summary>
     /// <param name="matchJson">Плаский JSON-об'єкт «ColumnDefId → очікуване значення».</param>
     public static IReadOnlyList<int> ColumnIds(string matchJson)

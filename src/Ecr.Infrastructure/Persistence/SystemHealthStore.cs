@@ -33,6 +33,10 @@ public sealed partial class SystemHealthStore(
         CollectionCoverage.SkippedNeedsConfirmation,
         CollectionCoverage.SkippedDependency,
         CollectionCoverage.SourceDataRefused,
+
+        // D2-02: за скінчений період придатних точок немає — комірку не оновлено.
+        // `PartialCoverage` сюди НЕ входить: число перенесено, хоч і неповне.
+        CollectionCoverage.SkippedNoData,
     ];
 
     /// <summary>

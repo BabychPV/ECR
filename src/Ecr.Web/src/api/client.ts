@@ -28,6 +28,22 @@ export interface EcrProblem {
   retryAfterSeconds?: number;
 }
 
+/** Ключ минущої відмови «дані зайняті» (`LockWaitGuard.MessageKey` на сервері). */
+export const LockTimeoutMessageKey = 'err.ECR-DOC-4091.lockTimeout';
+
+/**
+ * Ключ відмови «аркуш зараз подається» (`SheetEditGate.Busy`, спільне блокування
+ * не дочекалось подання цього аркуша).
+ */
+export const SheetBeingSubmittedMessageKey = 'err.ECR-DOC-4091.sheetBeingSubmitted';
+
+/**
+ * Ключ минущої відмови «база тимчасово зайнята» (`503 ECR-SYS-0503`, E1-04 на сервері:
+ * дедлок 1205 після повторів EF, тайм-аут, обрив з'єднання). Транзакцію відкочено,
+ * нічого не записано; сервер радить строк повтору в `Retry-After`.
+ */
+export const DatabaseBusyMessageKey = 'err.ECR-SYS-0503.databaseBusy';
+
 /** Виняток клієнта API. */
 export class EcrApiError extends Error {
   constructor(readonly problem: EcrProblem) {
@@ -38,6 +54,38 @@ export class EcrApiError extends Error {
   /** Чи це конфлікт паралельного редагування. */
   get isConflict(): boolean {
     return this.problem.errorCode === 'ECR-CELL-0409';
+  }
+
+  /**
+   * Чи це минуща відмова «дані зайняті» (`409 ECR-DOC-4091` з ключем
+   * `err.ECR-DOC-4091.lockTimeout`, `LockWaitGuard.Busy`): очікування блокування
+   * на сервері вичерпалось, нічого не записано, і той самий запит пройде, щойно
+   * довга операція (перенос версії, великий імпорт) відпустить блокування.
+   *
+   * ⛔ AN-123 (`R1-03`/`R2-01`): НЕ остаточна відмова — правки не утримуються, а
+   * повторюються автозбереженням із відступом (`scheduleBusyRetry`).
+   *
+   * ⚠ Саме за `messageKey`, а не за всім кодом: той самий `ECR-DOC-4091` несе й
+   * «структуру змінено» (`structureChanged`), де повтор того самого запиту
+   * нічого не вилікує.
+   *
+   * ⛔ X6-02: `sheetBeingSubmitted` — теж минуще. Збереження прочекало (до 30 с)
+   * подання аркуша й нічого не записало; утримати правки до ручного повтору
+   * означало б, що вони не доїдуть самі, навіть коли подання впало. Подання
+   * пройшло — повтор дістане `ECR-DOC-0409`/`403`, і тоді утримання справедливе.
+   */
+  get isTransientBusy(): boolean {
+    const messageKey = this.problem.extensions2?.['messageKey'];
+
+    // ⛔ X8-06 (R6): `503 ECR-SYS-0503 databaseBusy` — той самий клас «нічого не
+    // записано, повтор пройде»: без нього правки чекали ручного «Retry save», а
+    // `Retry-After` сервера ніхто не читав. ⚠ Лише за ключем: інші 503 (шлюз,
+    // `ECR-INT-0503` інтеграції) сюди не належать.
+    return (
+      (this.problem.errorCode === 'ECR-DOC-4091' &&
+        (messageKey === LockTimeoutMessageKey || messageKey === SheetBeingSubmittedMessageKey)) ||
+      (this.problem.errorCode === 'ECR-SYS-0503' && messageKey === DatabaseBusyMessageKey)
+    );
   }
 
   /** Перелік конфліктів, якщо вони є. */
@@ -119,7 +167,9 @@ export function loginUrl(from: string, reason?: LoginReason): string {
 /** Куди перенаправляти при 401; підміняється в тестах. */
 let redirectToLogin: (from: string, reason?: LoginReason) => void = (from, reason) => {
   if (typeof window !== 'undefined') {
-    window.location.assign(loginUrl(from, reason));
+    // ⛔ AN-108 / S2-03: `replace`, не `assign` — сторінка з даними сеансу не лишається в історії (і в bfcache)
+    // під кнопкою «Назад» на формі входу. Повернення після входу несе `?from=`.
+    window.location.replace(loginUrl(from, reason));
   }
 };
 
@@ -199,6 +249,18 @@ function runBeforeLoginRedirect(from: string): void {
   }
 }
 
+/**
+ * Слід незбереженого перед ЯВНИМ виходом (F6-01).
+ *
+ * ⛔ Вихід — теж повне перезавантаження сторінки, як і `401`: усе, що жило лише
+ * в пам'яті, зникає. Людина вже бачила питання й обрала «Вийти», але слід
+ * (`lostEdits`) лишається, щоб після наступного входу можна було відновити
+ * введене. Викликати ДО `beginSignOut()`.
+ */
+export function recordBeforeSignOut(): void {
+  runBeforeLoginRedirect(window.location.pathname + window.location.search);
+}
+
 /** Адреса виходу — єдиний запит, який ще йде після `beginSignOut()`. */
 export const LOGOUT_PATH = '/api/v1/logout';
 
@@ -226,6 +288,76 @@ export function beginSignOut(): void {
 /** Скидає позначку виходу — лише для тестів. */
 export function resetSignOutForTests(): void {
   signedOut = false;
+  sessionSwitched = false;
+  sessionUserId = null;
+}
+
+/**
+ * Чи сеанс цієї вкладки змінився деінде (AN-108 / S2-05): в іншій вкладці вийшли або увійшов ІНШИЙ користувач.
+ *
+ * ⛔ Cookie сеансу спільна для всіх вкладок. Після входу B у сусідній вкладці кожен запит цієї вкладки (зокрема
+ * автозбереження і маячок `beforeunload` з правками A) пішов би вже з cookie B — і журнал правок приписав би B
+ * чужі значення. Тому з цієї миті мережа для вкладки закрита так само, як після власного виходу.
+ */
+let sessionSwitched = false;
+
+/** Чи сеанс вкладки закрито: власний вихід або зміна сеансу в іншій вкладці. */
+export function isSessionClosed(): boolean {
+  return signedOut || sessionSwitched;
+}
+
+/** Перезавантаження сторінки; підміняється в тестах. */
+let reloadPage: () => void = () => {
+  window.location.reload();
+};
+
+/** Підміняє перезавантаження — лише для тестів. */
+export function setReloadPageForTests(reload: () => void): void {
+  reloadPage = reload;
+}
+
+/**
+ * Покидає сеанс, що змінився деінде (AN-108 / S2-05): закриває мережу, лишає слід незбережених правок ЇХНЬОГО
+ * власника (той самий шлях, що й `401`, — `onBeforeLoginRedirect`) і перезавантажує вкладку, щоб на екрані не
+ * лишилось даних попереднього користувача. Ідемпотентно.
+ */
+export function abandonSwitchedSession(): void {
+  if (sessionSwitched) return;
+  sessionSwitched = true;
+  if (typeof window === 'undefined') return;
+  runBeforeLoginRedirect(window.location.pathname + window.location.search);
+  reloadPage();
+}
+
+/**
+ * Заголовок з id користувача, якого бачила ця вкладка (AN-108 / S2-05, серверний рубіж `SessionUserMiddleware`).
+ *
+ * ⛔ Клієнтські рубежі (`sessionChannel`, звірка `/me`) можуть не встигнути: сповіщення не дійшло, маячок
+ * `beforeunload` іде в мить вивантаження. Тому небезпечні запити несуть id власника вкладки, і сервер, бачачи
+ * cookie ІНШОГО користувача, відповідає `409 ECR-AUTH-0409`, а не записує правки під чужим іменем.
+ */
+export const SESSION_USER_HEADER = 'X-Ecr-User';
+
+/** Код відмови «вкладка вважає себе іншим користувачем, ніж власник cookie». */
+export const SESSION_USER_MISMATCH = 'ECR-AUTH-0409';
+
+/** Id користувача з `/me`, якого бачила вкладка; `null` — ще не бачила (заголовок не шлеться). */
+let sessionUserId: number | null = null;
+
+/** Запам'ятовує користувача вкладки (`checkSessionUser`); `null` — забути. */
+export function setSessionUserId(id: number | null): void {
+  sessionUserId = id;
+}
+
+/** Заголовок користувача вкладки для запитів повз `apiFetch` (маячок `sendPatchBeacon`). */
+export function sessionUserHeaders(): Record<string, string> {
+  return sessionUserId === null ? {} : { [SESSION_USER_HEADER]: String(sessionUserId) };
+}
+
+/** Чи змінює метод стан (те саме правило, що в `SessionUserMiddleware`/`CsrfOriginMiddleware`). */
+function isStateChanging(method: string | undefined): boolean {
+  const m = (method ?? 'GET').toUpperCase();
+  return m === 'POST' || m === 'PUT' || m === 'PATCH' || m === 'DELETE';
 }
 
 /**
@@ -234,11 +366,11 @@ export function resetSignOutForTests(): void {
  * ⛔ Дефект, який це закриває: вибір мови в застосунку до сервера НЕ ДОХОДИВ
  * узагалі. Мова користувача живе лише в `localStorage` браузера
  * (`uiLanguage`), у профілі її немає, а `ICurrentUser.Language` на сервері
- * читає claim `ecr:lang`, який у репозиторії НІХТО не записує — грепом по
- * всьому дереву це єдина згадка, читач без письменника. Отже мова серверних
- * текстів визначалася заголовком браузера: оператор перемикав застосунок на
- * англійську, а відмови приходили російською, бо такою була системна мова
- * машини. Перемикач у шапці на них не впливав ніяк.
+ * (`CurrentUser.Language`) береться саме з `Accept-Language` — claim-а мови
+ * (`ecr:lang`) у токені немає, і сервер його не читає. Отже мова серверних
+ * текстів визначалася заголовком браузера, який клієнт не виставляв: оператор
+ * перемикав застосунок на англійську, а відмови приходили російською, бо
+ * такою була системна мова машини. Перемикач у шапці на них не впливав ніяк.
  *
  * ⚠ Значення штовхає сюди шар i18n, а не навпаки. Імпортувати `shared/i18n`
  * із цього модуля не можна: i18n сам тягне `apiFetch` для
@@ -311,7 +443,7 @@ async function apiFetchRaw(
 ): Promise<Response> {
   const correlationId = newCorrelationId();
 
-  if (signedOut && path !== LOGOUT_PATH) {
+  if ((signedOut && path !== LOGOUT_PATH) || sessionSwitched) {
     throw new EcrApiError({
       title: 'err.ECR-AUTH-0401.signInRequired',
       status: 401,
@@ -339,6 +471,11 @@ async function apiFetchRaw(
   // сервер відповідає 415 на кожен файл. Імпорт із перегляду diff — єдине
   // місце системи, яке надсилає файл, і саме тому помилка тут була б
   // одноразовою і назавжди.
+  // ⛔ AN-108 / S2-05: небезпечний запит несе id користувача вкладки — сервер звірить його з cookie.
+  if (sessionUserId !== null && isStateChanging(init?.method) && !headers.has(SESSION_USER_HEADER)) {
+    headers.set(SESSION_USER_HEADER, String(sessionUserId));
+  }
+
   const body = init?.body;
   if (body !== undefined && body !== null && !headers.has('Content-Type') && !isMultipart(body)) {
     headers.set('Content-Type', 'application/json');
@@ -389,7 +526,11 @@ async function apiFetchRaw(
   }
 
   if (!response.ok) {
-    throw new EcrApiError(await problemOf(response, correlationId));
+    const problem = await problemOf(response, correlationId);
+    // ⛔ AN-108 / S2-05: сервер бачить cookie ІНШОГО користувача — та сама реакція, що й на сповіщення
+    // сусідньої вкладки: мережа закривається, незбережені правки лишаються в сліді їхнього власника.
+    if (response.status === 409 && problem.errorCode === SESSION_USER_MISMATCH) abandonSwitchedSession();
+    throw new EcrApiError(problem);
   }
 
   return response;
@@ -477,13 +618,15 @@ async function problemOf(response: Response, correlationId: string): Promise<Ecr
 }
 
 /**
- * `Retry-After` відповіді `429` у секундах, або `undefined`.
+ * `Retry-After` відповіді `429` або `503` у секундах, або `undefined`.
  *
  * ⚠ Заголовок — єдине місце, де сервер передає строк: у тілі `problem+json`
  * його немає. Без цього поля клієнт міг би лише вгадувати, коли повторити.
+ *
+ * ✎ X8-06 (R6): і `503` — сервер ставить `Retry-After` на `ECR-SYS-0503` (E1-04).
  */
 function retryAfterOf(response: Response): number | undefined {
-  if (response.status !== 429) return undefined;
+  if (response.status !== 429 && response.status !== 503) return undefined;
 
   const raw = response.headers.get('Retry-After')?.trim();
   if (raw === undefined || !/^\d+$/.test(raw)) return undefined;

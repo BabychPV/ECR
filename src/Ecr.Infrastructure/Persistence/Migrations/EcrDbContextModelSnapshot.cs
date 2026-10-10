@@ -142,6 +142,9 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                     b.Property<DateTime?>("FinishedAt")
                         .HasColumnType("datetime2(3)");
 
+                    b.Property<DateTime?>("InputsAsOfUtc")
+                        .HasColumnType("datetime2(3)");
+
                     b.Property<string>("ModulesProfileJson")
                         .HasColumnType("nvarchar(max)");
 
@@ -291,7 +294,8 @@ namespace Ecr.Infrastructure.Persistence.Migrations
 
                     b.Property<string>("Expression")
                         .IsRequired()
-                        .HasColumnType("nvarchar(max)");
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
 
                     b.Property<int>("MethodologyVersionId")
                         .HasColumnType("int");
@@ -1136,6 +1140,11 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .HasColumnType("int");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("FormulaDefId", "SortOrder")
+                        .HasDatabaseName("IX_FormulaDependency_Formula");
+
+                    SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex("FormulaDefId", "SortOrder"), new[] { "SourceKind", "BindingId", "DependsOnKind", "TableDefId", "RowKey", "ColumnDefId", "FilterJson", "PeriodOffset" });
 
                     b.HasIndex("TableDefId", "RowKey", "ColumnDefId")
                         .HasDatabaseName("IX_FormulaDependency_Reverse");

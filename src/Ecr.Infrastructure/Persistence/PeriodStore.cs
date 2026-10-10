@@ -6,8 +6,17 @@ using Microsoft.EntityFrameworkCore;
 namespace Ecr.Infrastructure.Persistence;
 
 /// <summary>Реалізація <see cref="IPeriodStore"/> над <see cref="EcrDbContext"/>.</summary>
-public sealed class PeriodStore(EcrDbContext db) : IPeriodStore
+/// <param name="db">Контекст бази.</param>
+/// <param name="clock">
+/// Годинник для ЕФЕКТИВНОГО стану періоду (<see cref="FindPeriodStateAsync"/>, F-08, X6-01).
+/// <c>null</c> — лише пряме конструювання поза DI (тести, читання меж у
+/// <c>IntegrationCellPatcher</c>): тоді стан — збережений, як до X6-01.
+/// </param>
+public sealed class PeriodStore(EcrDbContext db, Ecr.Domain.Abstractions.IClock? clock = null) : IPeriodStore
 {
+    /// <summary>Правило ефективного стану — те саме, що в рішенні про запис (F-08).</summary>
+    private static readonly Ecr.Domain.Services.PeriodStateCalculator PeriodStates = new();
+
     /// <inheritdoc />
     public async Task<Project?> FindProjectAsync(int projectId, CancellationToken ct)
     {
@@ -144,14 +153,51 @@ public sealed class PeriodStore(EcrDbContext db) : IPeriodStore
         // Той самий ланцюг документ → проєкт → період, що й у меж: `PeriodKey`
         // не унікальний глобально, і без проєкту питання «який стан у 202601»
         // відповіді не має.
-        var query =
-            from document in db.Documents.AsNoTracking()
-            join period in db.Periods.AsNoTracking()
-                on document.ProjectId equals period.ProjectId
-            where document.Id == documentId && period.PeriodKeyValue == periodKey
-            select (Ecr.Domain.Enums.PeriodState?)period.State;
+        //
+        // ⛔ X6-01: стан — ЕФЕКТИВНИЙ на `clock.UtcNow`, тим самим правилом, що й
+        // рішення про запис (`AccessDecisionService`, F-08). Доти тут був
+        // збережений `period.State`, який просуває лише годинна задача станів
+        // (о :05): від межі `Grace` до її прогону доступ уже пускав правку як
+        // пізню, а `IsLateEdit` (D-70) писав у журнал `0` — «вчасно» саме в годину
+        // дедлайну. Один запит, як і доти (храповик кількості запитів PATCH):
+        // проєкт — з того самого рядка, період — підзапитом.
+        var row = await (
+                from document in db.Documents.AsNoTracking()
+                where document.Id == documentId
+                join project in db.Projects.AsNoTracking() on document.ProjectId equals project.Id
+                select new
+                {
+                    project.Status,
+                    project.PeriodEnd,
+                    project.YearGraceOffsetDays,
+                    project.TimeZoneId,
+                    Period = db.Periods
+                        .AsNoTracking()
+                        .Where(p => p.ProjectId == document.ProjectId && p.PeriodKeyValue == periodKey)
+                        .FirstOrDefault(),
+                })
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
 
-        return await query.FirstOrDefaultAsync(ct).ConfigureAwait(false);
+        if (row?.Period is not { } period)
+        {
+            return null;
+        }
+
+        // ⚠ Лише для АКТИВНОГО проєкту — як у `AccessDecisionService`, `WorkflowStore`
+        // і в самій задачі станів (`A7-25`): періоди чернетки за датами не просуваються.
+        if (clock is null || row.Status != Ecr.Domain.Enums.ProjectStatus.Active)
+        {
+            return period.State;
+        }
+
+        return PeriodStates.Effective(
+            period,
+            clock.UtcNow,
+            Ecr.Domain.Services.YearGraceWindow.For(
+                row.PeriodEnd,
+                row.YearGraceOffsetDays,
+                Ecr.Domain.ValueObjects.SiteTimeZone.Create(row.TimeZoneId).ToTimeZoneInfo()));
     }
 
     /// <inheritdoc />

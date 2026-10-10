@@ -85,6 +85,23 @@ public sealed class FormulaDependencyConfiguration : IEntityTypeConfiguration<Fo
         // Індекс під зворотний пошук «які формули залежать від цієї комірки».
         builder.HasIndex(x => new { x.TableDefId, x.RowKey, x.ColumnDefId })
                .HasDatabaseName("IX_FormulaDependency_Reverse");
+
+        // ⛔ F4-02 (audit-9): граф версії (`ListFormulaDependenciesAsync`) з'єднується за FormulaDefId,
+        // а `ForeignKeyIndexConvention` вимкнено (`EcrDbContext`) — під `FK_FDep_Formula` індексу не було.
+        // Кожен прогін формул (≈ кожне автозбереження) переглядав таблицю графів УСІХ опублікованих
+        // версій, і вона лише росте. `TableDefId` у `_Reverse` — таблиця-ДЖЕРЕЛО, для вибірки за
+        // версією він не придатний.
+        // ⚠ Покривний (INCLUDE усіх стовпців), бо запит бере рядок цілком: без INCLUDE кожен рядок
+        // платив би key lookup, і на кількох версіях оптимізатор однаково обрав би скан. Нефільтрований:
+        // предикат `IS NOT NULL` з'єднання не зіставляється з фільтром індексу надійно. Ключ збігається
+        // з `ORDER BY FormulaDefId, SortOrder` запиту. Таблиця довідникова й вузька — подвоєння дешеве.
+        builder.HasIndex(x => new { x.FormulaDefId, x.SortOrder })
+               .HasDatabaseName("IX_FormulaDependency_Formula")
+               .IncludeProperties(x => new
+               {
+                   x.SourceKind, x.BindingId, x.DependsOnKind, x.TableDefId, x.RowKey,
+                   x.ColumnDefId, x.FilterJson, x.PeriodOffset,
+               });
     }
 }
 

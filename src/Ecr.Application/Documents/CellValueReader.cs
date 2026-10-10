@@ -299,8 +299,35 @@ public static class CellValueReader
         DateTime date => date,
         DateTimeOffset offset => offset.UtcDateTime,
         string text when CellDateParser.TryParse(text, out var parsed) => parsed,
+        string text when CellDateParser.IsRefusedDayMonthDate(text) => throw AmbiguousDate(column, text),
         _ => throw Mismatch(column, value, ExpectedType.Date),
     };
+
+    /// <summary>Ключ каталогу відхиленої дати з днем або місяцем спереду (код — <see cref="TypeMismatch"/>).</summary>
+    public const string AmbiguousDateMessageKey = "err.ECR-CELL-0422.ambiguousDate";
+
+    /// <summary>
+    /// Відмова для дати, у якої порядок дня й місяця з рядка не відновити
+    /// (<c>4/1/2024</c>, <c>01-04-2024</c>, <c>01.04.24</c>) — Z3-02.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Той самий код, що «очікує дату», але ВЛАСНИЙ ключ із порадою, як
+    /// записати дату: на значенні, яке на вигляд — дата, «колонка очікує дату»
+    /// нічого не пояснює, а такий ввід до Y5-02/Z3-01 приймався. Значення — лише
+    /// в подробицях (як у <see cref="Ambiguous"/>), у тексті для логу його немає.
+    /// </remarks>
+    private static BusinessRuleException AmbiguousDate(ColumnDef column, string text)
+        => new(
+            TypeMismatch,
+            $"Колонка «{column.Code}»: порядок дня й місяця в даті не визначити; запишіть РРРР-ММ-ДД або ДД.ММ.РРРР.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = AmbiguousDateMessageKey,
+                ["columnCode"] = column.Code,
+                ["expected"] = ExpectedType.Date.Code,
+                ["actualKind"] = nameof(String),
+                ["value"] = text,
+            });
 
     /// <summary>Ідентифікатор запису довідника або одиниці.</summary>
     private static int Identifier(object value, ColumnDef column, ExpectedType expected) => value switch

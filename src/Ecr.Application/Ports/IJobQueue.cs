@@ -45,6 +45,10 @@ public interface IJobQueue
     /// Бере одну задачу з лейнів: спершу прострочені <c>Running</c>
     /// (переклейм), далі <c>Queued</c>, лише якщо на ціль немає <c>Running</c>.
     /// </summary>
+    /// <remarks>
+    /// ⚠ Лейни перебираються в порядку <paramref name="lanes"/> (J1-04): пріоритет між лейнами —
+    /// рішення викликача, а не черги.
+    /// </remarks>
     /// <returns><c>null</c> — брати нічого (включно з 2601/2627 при переході в <c>Running</c>).</returns>
     public Task<ClaimedJob?> ClaimAsync(
         IReadOnlyCollection<string> lanes, string owner, TimeSpan lease, CancellationToken ct);
@@ -133,11 +137,26 @@ public static class JobLanes
     /// <summary>Перерахунок (<c>IRecalculationJob</c>): окремий пул воркерів (<c>D-206</c>).</summary>
     public const string Recalc = "recalc";
 
+    /// <summary>
+    /// Задачі, на які чекає людина (перерахунок формул після правки комірок, P1-06): воркер Api бере цей
+    /// лейн першим і тримає для нього власні місця понад спільні, тож довгі фонові задачі <see cref="Default"/>
+    /// його не витісняють.
+    /// </summary>
+    public const string Interactive = "interactive";
+
+    /// <summary>
+    /// Експорт і імпорт Excel (<c>IExcelExportJob</c>, <c>IExcelImportJob</c>; AN-116): довгі задачі з власною
+    /// межею одночасності (<c>Jobs:Excel:MaxConcurrency</c>). Воркер Api бере цей лейн ЛИШЕ окремим циклом, тож
+    /// книги не займають ні спільних місць <see cref="Default"/>, ні резерву <see cref="Interactive"/>.
+    /// </summary>
+    public const string Excel = "excel";
+
     /// <summary>Межа стовпця <c>itg.JobProgress.Lane</c> (<c>varchar(32)</c>).</summary>
     public const int MaxLength = JobProgress.MaxLaneLength;
 
     /// <summary>Усі відомі лейни.</summary>
-    public static IReadOnlyList<string> All { get; } = [Default, Recalc];
+    /// <remarks>⚠ Порядок — пріоритет claim (<c>DbJobQueue.ClaimAsync</c>): <see cref="Interactive"/> першим.</remarks>
+    public static IReadOnlyList<string> All { get; } = [Interactive, Default, Excel, Recalc];
 
     /// <summary>Чи лейн відомий (порівняння точне, з урахуванням регістру).</summary>
     public static bool IsKnown(string? lane) => lane is not null && All.Contains(lane, StringComparer.Ordinal);

@@ -641,6 +641,16 @@ CREATE INDEX IX_FormulaDependency_Reverse
     INCLUDE (FormulaDefId, BindingId) ON [INDEXES];
 GO
 
+-- Граф версії (ListFormulaDependenciesAsync, кожен прогін формул ≈ кожне
+-- автозбереження) з'єднується за FormulaDefId; FK-конвенцію вимкнено, тож без
+-- цього індексу кожен прогін сканував графи всіх опублікованих версій (F4-02).
+-- Покривний: запит бере рядок цілком.
+CREATE INDEX IX_FormulaDependency_Formula
+    ON cfg.FormulaDependency (FormulaDefId, SortOrder)
+    INCLUDE (SourceKind, BindingId, DependsOnKind, TableDefId, RowKey, ColumnDefId,
+             FilterJson, PeriodOffset) ON [INDEXES];
+GO
+
 CREATE TABLE cfg.ValidationRule
 (
     Id           int            IDENTITY(1,1) NOT NULL,
@@ -2930,7 +2940,7 @@ CREATE TABLE itg.JobProgress
     InstanceId    nvarchar(64)  NULL,
     -- Черга в базі (MI-02, D-208; міграція MI02JobQueue). Усе NULL, без backfill:
     -- Lane NULL — дзеркало Quartz, черга його не бере. Моменти — SYSUTCDATETIME().
-    Lane              varchar(32)      NULL,  -- JobLanes: 'default', 'recalc'
+    Lane              varchar(32)      NULL,  -- JobLanes: 'interactive', 'default', 'excel', 'recalc'
     Payload           nvarchar(max)    NULL,  -- JSON аргументів задачі
     AvailableAt       datetime2(3)     NULL,  -- коли можна брати; обов'язковий за Lane
     LeaseUntil        datetime2(3)     NULL,  -- кінець оренди Running

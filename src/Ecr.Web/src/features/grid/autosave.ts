@@ -1,8 +1,8 @@
-import { useEffect } from 'react';
+import { useEffect, useSyncExternalStore } from 'react';
 import { useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { showApiError } from '@/shared/ui/notify';
 import { registerUnsavedSource, UnsavedSettleMs } from '@/shared/ui/unsavedSources';
-import { onBeforeLoginRedirect } from '@/api/client';
+import { EcrApiError, isSessionClosed, onBeforeLoginRedirect } from '@/api/client';
 import { recordLostEdits } from './lostEdits';
 import { resetConfirmed } from './confirmedEdits';
 import { registerHeldEditLookup } from './settleEdits';
@@ -19,11 +19,20 @@ import {
   resetPending,
   sendableEdits,
   subscribePending,
+  hasFailedSendable,
+  noteSaveFailed,
+  noteSaveSucceeded,
+  resetFailedSaves,
 } from './pendingStore';
+
+// ⚠ `G1-03`/`G1-04`: позначки невдалого збереження живуть у сховищі правок (скидаються
+// разом із ним, `resetPending`); звідси — для зберігачів і сітки.
+export { hasFailedSave, noteSaveSucceeded, resetFailedSaves, useFailedSave } from './pendingStore';
 import { queryKeys } from '@/api/queryKeys';
 import type { TableSliceDto } from '@/api/types';
 import { withKnownVersions } from './edits';
 import { rejectionMarksOf } from './saveErrors';
+import { beginInFlight, deferUntilInFlightSettles, hasInFlight, splitByInFlight } from './inFlightEdits';
 import {
   applyPatchLocally,
   refreshStaleness,
@@ -241,6 +250,111 @@ function flushAutosave(): void {
   }
 }
 
+/* ────────────────────────────────────────────────────────────────────────────
+ * Повтор після «дані зайняті» (AN-123, `R1-03`/`R2-01`).
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * Відступи повтору після `409 ECR-DOC-4091 lockTimeout`, мс: 5 → 10 → 20 → 30
+ * (далі 30). Кожен множиться на розкид `[0.5, 1)`.
+ *
+ * ⚠ Саме відступ, а не негайний повтор: блокування тримає довга операція
+ * (перенос версії — хвилини), і кожен повтор займає з'єднання сервера на 15 с
+ * очікування. Без розкиду сотня вкладок, що впали разом, разом і повторювала б.
+ */
+export const BusyRetryDelaysMs: readonly number[] = [5_000, 10_000, 20_000, 30_000];
+
+/**
+ * Скільки разів поспіль автозбереження саме повторює `503 ECR-SYS-0503 databaseBusy`,
+ * перш ніж передати справу людині (R7-Y8 / Y8-02).
+ *
+ * ⛔ Межа — лише для `503`, не для `409 lockTimeout` (AN-123): блокування тримає ІНША
+ * операція, і вона закінчиться. `503` сервер дає і на тайм-аут команди (`-2`,
+ * `ExceptionHandlingMiddleware.TransientSqlNumbers`), а тайм-аут буває детермінованим
+ * для САМОГО запиту (велика вставка на піку) — тоді повтор нічого не лікує, лише
+ * годинами тримає блокування рядків і з'єднання пулу під нейтральним «чекає».
+ * Після межі зріз стає «збереження не дійшло» (`noteSaveFailed`): «Retry save»,
+ * позначка відмови й питання при закритті вкладки. Правки не губляться.
+ *
+ * ⚠ 5 спроб із відступами 5 → 10 → 20 → 30 → 30 с — понад півтори хвилини: минущий
+ * збій (перемикання вузла, обрив пулу) за цей час минає.
+ */
+export const DatabaseBusyAutoRetries = 5;
+
+let busyAttempt = 0;
+/** Поспіль отримані `503 databaseBusy` (окремо від `busyAttempt`: `409 lockTimeout` межі не має). */
+let databaseBusyAttempt = 0;
+let busyTimer: ReturnType<typeof setTimeout> | null = null;
+const busyListeners = new Set<() => void>();
+
+function notifyBusy(): void {
+  for (const listener of busyListeners) listener();
+}
+
+/** Чи чекає документ на повтор після «дані зайняті» (ненав'язливий стан для людини). */
+export function isBusyRetryWaiting(): boolean {
+  return busyTimer !== null;
+}
+
+/**
+ * Планує ОДИН повтор автозбереження з відступом після `lockTimeout`.
+ *
+ * ⚠ Один план на документ: кілька зрізів, що впали в тому самому вікні, не
+ * множать повтори — `flushAutosave` везе всі зрізи разом.
+ *
+ * @param retryAfterSeconds `Retry-After` сервера, якщо він його назвав: нижня межа відступу.
+ */
+export function scheduleBusyRetry(retryAfterSeconds?: number): void {
+  if (busyTimer !== null) return;
+
+  const base = BusyRetryDelaysMs[Math.min(busyAttempt, BusyRetryDelaysMs.length - 1)] ?? 30_000;
+  const jittered = base * (0.5 + Math.random() * 0.5);
+  const delay = Math.max(jittered, (retryAfterSeconds ?? 0) * 1000);
+
+  busyAttempt += 1;
+  busyTimer = setTimeout(() => {
+    busyTimer = null;
+    notifyBusy();
+    flushAutosave();
+  }, delay);
+  notifyBusy();
+}
+
+/** Знімає план повтору й скидає відступ: збереження пройшло або документ закрито. */
+export function clearBusyRetry(): void {
+  const wasWaiting = busyTimer !== null || busyAttempt > 0;
+
+  if (busyTimer !== null) clearTimeout(busyTimer);
+  busyTimer = null;
+  busyAttempt = 0;
+  databaseBusyAttempt = 0;
+
+  if (wasWaiting) notifyBusy();
+}
+
+function subscribeBusy(listener: () => void): () => void {
+  busyListeners.add(listener);
+
+  return () => {
+    busyListeners.delete(listener);
+  };
+}
+
+/** Стан «чекає, доки дані звільняться» — для індикатора сітки. */
+export function useBusyRetryWaiting(): boolean {
+  return useSyncExternalStore(subscribeBusy, isBusyRetryWaiting, isBusyRetryWaiting);
+}
+
+/**
+ * Скільки байтів тіл може везти маячок закриття вкладки (`G1-03`).
+ *
+ * ⛔ Специфікація Fetch обмежує суму тіл `keepalive`-запитів документа 64 КиБ;
+ * більший запит одразу падає мережевою помилкою, яку маячок ковтає. Тобто
+ * вставка на пару тисяч комірок, що чекала повтору, мовчки не доїжджала. Межа
+ * — із запасом на заголовки й округлення; більше — рідне питання браузера.
+ */
+export const BeaconBudgetBytes = 60 * 1024;
+
 /**
  * Тримає відхилені правки пакета й довозить решту (`V-01`).
  *
@@ -261,10 +375,44 @@ export function holdRejectedEdits(
   error: unknown,
   attempted: readonly PendingEdit[],
 ): boolean {
-  const marks = rejectionMarksOf(error, attempted);
-  if (marks.length === 0) return false;
+  // ⛔ AN-123 (`R1-03`/`R2-01`): «дані зайняті» нічого не тримає — правки лишаються
+  // придатними до надсилання (і до маячка закриття вкладки), а повтор іде сам.
+  if (error instanceof EcrApiError && error.isTransientBusy) {
+    // ⛔ R7-Y8 / Y8-02: `503 databaseBusy` — не безмежно. Після межі план повтору
+    // знято, а зріз позначено «збереження не дійшло»: людина бачить відмову й
+    // «Retry save» замість вічного «чекає». Правки лишаються придатними до надсилання.
+    if (error.problem.errorCode === 'ECR-SYS-0503') {
+      databaseBusyAttempt += 1;
 
-  if (markPendingRejected(tableInstanceId, periodKey, marks) === 0) return false;
+      // ⚠ Чужого плану (повтор `409 lockTimeout` іншого зрізу) не знімаємо: він довезе
+      // і цей зріз, а відмова повториться тим самим шляхом.
+      if (databaseBusyAttempt > DatabaseBusyAutoRetries) {
+        noteSaveFailed(tableInstanceId, periodKey);
+
+        return false;
+      }
+    }
+
+    scheduleBusyRetry(error.problem.retryAfterSeconds);
+
+    return false;
+  }
+
+  // ⛔ `G1-03`: відмова, яка нічого не утримала (мережа, `5xx`, `4xx` без
+  // позначок), лишає правки «придатними до надсилання» — і закриття вкладки має
+  // про них спитати, а не довіряти маячку.
+  const marks = rejectionMarksOf(error, attempted);
+  if (marks.length === 0) {
+    noteSaveFailed(tableInstanceId, periodKey);
+
+    return false;
+  }
+
+  if (markPendingRejected(tableInstanceId, periodKey, marks) === 0) {
+    noteSaveFailed(tableInstanceId, periodKey);
+
+    return false;
+  }
 
   const sent = new Set(attempted.map((edit) => cellKey(edit)));
   const innocent = sendableEdits(tableInstanceId, periodKey).some((edit) => sent.has(cellKey(edit)));
@@ -377,19 +525,30 @@ async function saveOrphanSlice(
   documentId: number,
   slice: PendingSlice,
 ): Promise<void> {
+  // ⛔ AN-104 (`D1-01`): рядок, чий запит уже летить, вдруге не шлемо — версія в
+  // кеші ще стара, і сховище відповіло б `409` на власну правку. Доти цей шлях
+  // не мав навіть дедуплікації за значенням. Відкладене повторить автозбереження,
+  // щойно звільниться запит у дорозі.
+  const { now: edits, deferred } = splitByInFlight(slice.tableInstanceId, slice.periodKey, slice.edits);
+
+  if (deferred.length > 0) deferUntilInFlightSettles(scheduleAutosave);
+
+  if (edits.length === 0) return;
+
   // ⛔ `B-09`: версія рядка — остання відома кешу, а не та, з якою правку
   // зроблено (`withKnownVersions`): інакше правка, що чекала повтору, їхала б
   // зі старою версією й діставала `409` на власних змінах.
   const request = buildRequest(
     slice.tableInstanceId,
     slice.periodKey,
-    withKnownVersions(slice.edits, cachedSlice(queryClient, slice.tableInstanceId, slice.periodKey)),
+    withKnownVersions(edits, cachedSlice(queryClient, slice.tableInstanceId, slice.periodKey)),
   );
 
   // ⚠ Знімок ТОГО, ЩО ПІШЛО: доки patch летить, у той самий зріз може
   // прийти нова правка з іншої сітки чи з відновленої черги — і підтверджувати
   // «усе, що було в рядку» означало б стерти значення, якого сервер не бачив.
-  const sent = new Map(slice.edits.map((edit) => [cellKey(edit), edit]));
+  const sent = new Map(edits.map((edit) => [cellKey(edit), edit]));
+  const endInFlight = beginInFlight(slice.tableInstanceId, slice.periodKey, edits);
 
   try {
     const response = await patchCells(documentId, request);
@@ -399,12 +558,18 @@ async function saveOrphanSlice(
     discardPendingRows(
       slice.tableInstanceId,
       slice.periodKey,
-      slice.edits.map((edit) => edit.rowKey),
+      edits.map((edit) => edit.rowKey),
       sent,
     );
+    noteSaveSucceeded(slice.tableInstanceId, slice.periodKey);
+    clearBusyRetry();
   } catch (error) {
-    holdRejectedEdits(slice.tableInstanceId, slice.periodKey, error, slice.edits);
-    showApiError(error);
+    holdRejectedEdits(slice.tableInstanceId, slice.periodKey, error, edits);
+    // ⚠ AN-123: «дані зайняті» — не тост: повтор уже заплановано, а стан «чекає»
+    // показує індикатор (`useBusyRetryWaiting`).
+    if (!(error instanceof EcrApiError && error.isTransientBusy)) showApiError(error);
+  } finally {
+    endInFlight();
   }
 }
 
@@ -440,6 +605,8 @@ export function useDocumentPending(documentId: number, ownerUserId?: number): vo
 
     return () => {
       cancelAutosave();
+      clearBusyRetry();
+      resetFailedSaves();
       resetPending();
       // ⚠ Разом зі сховищем правок — і підтвердження до них (`ФВ-2.16`).
       resetConfirmed();
@@ -461,32 +628,65 @@ export function useDocumentPending(documentId: number, ownerUserId?: number): vo
   useEffect(
     () =>
       registerUnloadFlush(hasPending, () => {
+        // ⛔ AN-108 / S2-05: сеанс змінився в іншій вкладці — правки вже лежать у сліді `lostEdits` їхнього
+        // власника, а відправити їх зараз означало б записати їх під чужим cookie. Без маячка і без питання.
+        if (isSessionClosed()) return false;
+
         // ⚠ `V-01`: і тут без відхилених — інакше останній шанс зберегти
         // правильні правки згорів би на тій самій відмові.
         const sendable = pendingSlices({ sendableOnly: true });
 
         // AN-39/L8-08: відхилені (утримані) правки надіслати неможливо - про них
-        // питаємо; решта їде маячком, як і раніше.
+        // питаємо рідним питанням браузера.
         const held = pendingCount() > sendable.reduce((sum, slice) => sum + slice.edits.length, 0);
 
-        for (const slice of sendable) {
-          sendPatchBeacon(
-            documentId,
-            buildRequest(
-              slice.tableInstanceId,
-              slice.periodKey,
-              withKnownVersions(
-                slice.edits,
-                cachedSlice(queryClient, slice.tableInstanceId, slice.periodKey),
-              ),
-            ),
-          );
+        // ⛔ L8-08 (PARTIAL): за наявності утриманих правок маячок НЕ шлемо. Питання
+        // «Покинути сторінку?» з'являється вже ПІСЛЯ обробника; якщо людина натисне
+        // «Залишитися», правильні правки, що поїхали маячком, лишилися б у сховищі зі старим
+        // `baseVersion` і 409 прийшов би на власні правки. Тому: звичайне збереження
+        // ПІСЛЯ обробника (`setTimeout 0`) — воно оновить версії; обрала «Піти» — вкладка
+        // закриється, а питання людина вже бачила.
+        //
+        // ⛔ AN-104 (`D1-03`): те саме, коли збереження ще В ДОРОЗІ. Маячок віз би
+        // комірки, що вже летять, зі старою версією кешу: відповідь першого запиту
+        // її ще не підняла, і `409` на маячок («все або нічого») забрав би з собою
+        // новіші правки, мовчки (`lostEdits` пишеться лише на `401`). Тож — рідне
+        // питання браузера; «Залишитися» — звичайне збереження після відповіді.
+        //
+        // ⛔ `G1-03`: так само, коли маячок НЕ доїде: «дані зайняті» (повтор
+        // чекає), останнє збереження впало мережею чи `5xx` (маячок пішов би
+        // до того самого недоступного сервера), або пакет більший за ліміт
+        // `keepalive` (64 КиБ — запит падає одразу, мовчки).
+        const requests = sendable.map((slice) =>
+          buildRequest(
+            slice.tableInstanceId,
+            slice.periodKey,
+            withKnownVersions(slice.edits, cachedSlice(queryClient, slice.tableInstanceId, slice.periodKey)),
+          ),
+        );
+        const tooBig = beaconBytes(requests) > BeaconBudgetBytes;
+
+        if (held || hasInFlight() || isBusyRetryWaiting() || hasFailedSendable() || tooBig) {
+          setTimeout(() => {
+            flushAutosave();
+          }, 0);
+
+          return true;
         }
 
-        return held;
+        for (const request of requests) sendPatchBeacon(documentId, request);
+
+        return false;
       }),
     [documentId, queryClient],
   );
+}
+
+/** Сума тіл маячка в байтах UTF-8 — так, як їх рахує ліміт `keepalive`. */
+function beaconBytes(requests: readonly unknown[]): number {
+  const encoder = new TextEncoder();
+
+  return requests.reduce<number>((sum, request) => sum + encoder.encode(JSON.stringify(request)).length, 0);
 }
 
 /** Зріз із кешу — без запиту; `undefined`, якщо його ще не читали. */

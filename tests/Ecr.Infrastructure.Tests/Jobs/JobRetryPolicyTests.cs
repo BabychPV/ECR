@@ -73,6 +73,26 @@ public sealed class JobRetryPolicyTests
         Assert.Equal(ErrorCodes.ExpressionTooComplex, JobRetryPolicy.ErrorCodeOf(tooDeep));
     }
 
+    /// <summary>
+    /// R7-Y8 / Y8-01: відмова побудови над поданим зрізом (ФВ-9.17) — вердикт про стан,
+    /// а не збій дороги: без повторів і з кодом <c>ECR-RPT-0409</c>, не <c>ECR-SYS-0500</c>.
+    /// </summary>
+    /// <remarks>
+    /// Мутація: повернути <c>FrozenRefusal</c> тип <see cref="InvalidOperationException"/> —
+    /// червоні всі три перевірки (три повтори по 30+60+120 с, потім «Internal error»).
+    /// </remarks>
+    [Fact]
+    [Trait("Requirement", "ФВ-9.17")]
+    public void Відмова_побудови_над_поданим_зрізом_не_повторюється_і_має_код_RPT_0409()
+    {
+        Exception refusal = Ecr.Infrastructure.Reporting.ReportSnapshotBuilder.FrozenRefusal(
+            frozenId: 42, projectId: 7, periodKey: new Ecr.Domain.ValueObjects.PeriodKey(202_609));
+
+        Assert.False(JobRetryPolicy.IsWorthRetrying(refusal));
+        Assert.False(JobRetryPolicy.ShouldRetry(0, refusal));
+        Assert.Equal(ErrorCodes.ReportImmutable, JobRetryPolicy.ErrorCodeOf(refusal));
+    }
+
     [Fact]
     public void Прикладна_відмова_ретраїться_лише_з_кодом_недоступності()
     {

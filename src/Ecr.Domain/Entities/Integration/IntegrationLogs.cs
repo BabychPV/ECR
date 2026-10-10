@@ -198,8 +198,21 @@ public sealed class CollectionCoverage : Entity<long>
         RegistryDiverged, RegistryConflictKeptManual, RegistrySourceMissing, RegistryElementUnlinked,
         RegistryValueRejected, RegistryPendingUpdate, SourceDataRefused,
         RegistryAutoCreated, RegistryDeactivated, RegistryReactivated, RegistryRuleViolation,
-        RegistryExternalKeyRelinked, SkippedDependency,
+        RegistryExternalKeyRelinked, SkippedDependency, PartialCoverage, SkippedNoData,
     ];
+
+    /// <summary>
+    /// Матеріалізація (D2-02, HU-13 Q2 варіант A): згортка за часом скінченого періоду
+    /// покрила менше порогу (<c>MinPercentGood</c>, HSE301 §4.1/§4.4 «Partial») —
+    /// число ЗАПИСАНО, але воно неповне; частка покриття — у <c>Details</c>.
+    /// </summary>
+    public const string PartialCoverage = "PartialCoverage";
+
+    /// <summary>
+    /// Матеріалізація (D2-02): у скінченому періоді немає придатних точок поля —
+    /// комірку НЕ оновлено й не очищено, і в ній може лишатися значення попереднього прогону.
+    /// </summary>
+    public const string SkippedNoData = "SkippedNoData";
 
     /// <summary>
     /// Збір: плановий запуск пропущено за залежністю (<c>ФВ-13.15</c>) — розклад

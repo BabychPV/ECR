@@ -28,11 +28,18 @@ vi.mock('@revolist/react-datagrid', () => ({
 const PeriodKey = 202609;
 const ExpectedPeriodEnd = '2026-09-30';
 
-function sliceFixture(): TableSliceDto {
+/**
+ * Квартальний Q2 2026: ключ `202602`, але кінець — `2026-06-30` (D1-02).
+ * Арифметика `YYYYMM` дала б `2026-02-28`.
+ */
+const QuarterKey = 202602;
+const QuarterEnd = '2026-06-30';
+
+function sliceFixture(periodKey: number = PeriodKey): TableSliceDto {
   return {
     cellConfirmations: {},
     cellPermissions: {},
-    periodKey: PeriodKey,
+    periodKey,
     tableInstanceId: 1,
     columns: [
       {
@@ -100,7 +107,7 @@ function mockServer(isTemporal: boolean): void {
   );
 }
 
-function show(): void {
+function show(periodKey: number = PeriodKey, periodEnd: string | null = ExpectedPeriodEnd): void {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
   render(
@@ -110,7 +117,8 @@ function show(): void {
           documentId={1}
           tableInstanceId={1}
           tableDefId={1}
-          periodKey={PeriodKey}
+          periodKey={periodKey}
+          periodEnd={periodEnd}
           readOnly={false}
           allowsDynamicRows={false}
           maxDynamicRows={null}
@@ -154,5 +162,18 @@ describe('DocumentGrid: asOf у запиті записів довідника L
     // тесту: якби `DocumentGrid` рахував "сьогодні" замість дати періоду
     // документа, це порівняння впало б будь-якого дня, крім 30 вересня.
     expect(entriesRequests[0]).toBe(`asOf=${ExpectedPeriodEnd}`);
+  });
+
+  it('квартальний документ — asOf це PeriodEnd із календаря, а не YYYYMM з periodKey (D1-02)', async () => {
+    mockServer(true);
+    show(QuarterKey, QuarterEnd);
+
+    await screen.findByTestId('revogrid-stub');
+
+    await waitFor(() => expect(entriesRequests.length).toBeGreaterThan(0));
+
+    // ⛔ Мутаційний доказ: поверни виведення дати з `periodKey` — запит
+    // піде з `asOf=2026-02-28`, і PATCH відхилить вибране на 2026-06-30.
+    expect(entriesRequests[0]).toBe(`asOf=${QuarterEnd}`);
   });
 });

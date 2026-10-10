@@ -70,6 +70,7 @@ const oneChange: ImportPreview = {
   changes: [{ rowKey: 'R1', columnCode: 'IN', oldValue: 1, newValue: 2, tableCode: 'T1' }],
   rejected: [],
   conflicts: [],
+  overwritable: [],
 };
 
 afterEach(() => {
@@ -95,6 +96,7 @@ describe('ImportPanel: відмови перегляду (P3)', () => {
         },
       ],
       conflicts: [],
+      overwritable: [],
     });
 
     await openPreview();
@@ -131,6 +133,7 @@ describe('ImportPanel: відмови перегляду (P3)', () => {
         },
       ],
       conflicts: [],
+      overwritable: [],
     });
 
     await openPreview();
@@ -140,6 +143,36 @@ describe('ImportPanel: відмови перегляду (P3)', () => {
     // буде загальне `⟦import.rejectedCell⟧`.
     expect(within(table).getByText('⟦err.ECR-CELL-4221.importCalculatedStale⟧')).toBeTruthy();
     expect(within(table).getByText('⟦err.ECR-CELL-4221.importCalculated⟧')).toBeTruthy();
+  });
+
+  it('D1-02: рядок, змінений після експорту, — власний текст конфлікту', async () => {
+    mockServer({
+      previewToken: 'tok',
+      changes: [],
+      rejected: [
+        {
+          rowKey: 'R1',
+          columnCode: 'A',
+          reasonCode: 'ECR-CELL-0409',
+          message: 'diag',
+          messageKey: 'err.ECR-CELL-0409.importRowChangedSinceExport',
+          tableCode: 'T1',
+          excelCell: 'A3',
+        },
+      ],
+      conflicts: [],
+      overwritable: [],
+    });
+
+    await openPreview();
+
+    // ✎ AN-114: конфлікт «змінено після експорту» — окремим розділом із
+    // поясненням і вибором, а не рядком переліку відмов.
+    // ⛔ Мутація: прибрати `isRowConflict` — рядок повернеться в загальні відмови.
+    expect(screen.getByText('⟦import.overwriteTitle⟧')).toBeTruthy();
+    expect(screen.getByText('⟦import.overwriteHint⟧')).toBeTruthy();
+    expect(screen.queryByText('⟦err.ECR-CELL-0409.importRowChangedSinceExport⟧')).toBeNull();
+    expect(within(screen.getByRole('table', { name: 'T1 · R1' })).getByRole('cell', { name: 'A3' })).toBeTruthy();
   });
 
   it('відмова цілої таблиці без адреси — прочерк, а не порожня комірка', async () => {
@@ -158,6 +191,7 @@ describe('ImportPanel: відмови перегляду (P3)', () => {
         },
       ],
       conflicts: [],
+      overwritable: [],
     });
 
     await openPreview();
@@ -212,5 +246,26 @@ describe('ImportPanel: підказка «Recalculate» після застос�
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(recalcHintShown(show)).toBe(false);
     expect(show.mock.calls.some(([data]) => data.color === 'statusError')).toBe(false);
+  });
+});
+
+describe('ImportPanel: попередження про книгу (AN-118, R1-02)', () => {
+  it('книга без версій рядків і відбитків — попередження каталогу, застосування доступне', async () => {
+    mockServer({ ...oneChange, warnings: ['import.outdatedWorkbook'] });
+
+    await openPreview();
+
+    // ⛔ Мутація: прибрати блок `preview.warnings` з діалогу — обидва тексти зникнуть.
+    expect(screen.getByText('⟦import.warningsTitle⟧')).toBeTruthy();
+    expect(screen.getByText('⟦import.outdatedWorkbook⟧')).toBeTruthy();
+    expect(screen.getByRole('button', { name: '⟦import.apply⟧' }).hasAttribute('disabled')).toBe(false);
+  });
+
+  it('без попереджень — блоку немає', async () => {
+    mockServer(oneChange);
+
+    await openPreview();
+
+    expect(screen.queryByText('⟦import.warningsTitle⟧')).toBeNull();
   });
 });

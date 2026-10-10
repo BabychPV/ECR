@@ -19,6 +19,13 @@ public sealed partial class ErrorTitleOverrideKeysTests
     [
         "err.ECR-TMPL-0409.relationCodeTaken.title",
         "err.ECR-TMPL-0409.templateCodeTaken.title",
+        // R5-E1 / E1-04: загальний err.ECR-SYS-0503 — «Система виконує архівацію»; для тимчасового
+        // збою БД (503 з Retry-After) потрібен власний заголовок, тож перекриття задумане.
+        "err.ECR-SYS-0503.databaseBusy.title",
+        // R6-X5 / X5-01: загальний err.ECR-USR-0409 — «User name already in use»; для Windows-входу з ім'ям,
+        // зайнятим записом з іншим SID, і для зайнятого SID він бреше, тож перекриття задумане.
+        "err.ECR-USR-0409.windowsSidMismatch.title",
+        "err.ECR-USR-0409.windowsSidTaken.title",
     ];
 
     [Fact]

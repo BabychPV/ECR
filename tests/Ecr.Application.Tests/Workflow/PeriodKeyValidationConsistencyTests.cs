@@ -74,7 +74,8 @@ public sealed class PeriodKeyValidationConsistencyTests
             Substitute.For<IUnitOfWork>(),
             User(),
             Substitute.For<IClock>(),
-            Substitute.For<IDocumentStore>());
+            Substitute.For<IDocumentStore>(),
+            new ReportSnapshotSync(Substitute.For<IReportSnapshotBuilder>(), Substitute.For<IDocumentStore>()));
 
         var error = await Assert.ThrowsAsync<DomainException>(
             () => handler.HandleAsync(documentId: 1, sheetDefId: 1, InvalidPeriodKey, "причина", CancellationToken.None));

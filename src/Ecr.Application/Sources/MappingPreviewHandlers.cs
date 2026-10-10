@@ -188,8 +188,11 @@ public sealed class PreviewMappingHandler(
 
         foreach (var map in data.Maps)
         {
-            // Згортки точок — лише точки з числом (як і до F3); згортки за
-            // часом бачать і точки без числа: ті роблять відрізки прогалиною.
+            // Згортки точок — лише точки з числом; згортки за часом бачать і
+            // точки без числа: ті роблять відрізки прогалиною. Якість несуть
+            // обидві серії: `PeriodFold` відсіює непридатні й для згорток точок
+            // (HSE301 §4.6, C1-04) — інакше перегляд розійшовся б із перенесенням
+            // (клас A7-27).
             var numeric = new List<TimedPoint>();
             var timed = new List<TimedPoint>();
             foreach (var point in data.Points)
@@ -199,17 +202,16 @@ public sealed class PreviewMappingHandler(
                     continue;
                 }
 
+                var isGood = point.ValueNumeric is not null
+                    && (point.Quality is null
+                        || string.Equals(point.Quality, WindowFold.GoodQuality, StringComparison.OrdinalIgnoreCase));
+
                 if (point.ValueNumeric is { } value)
                 {
-                    numeric.Add(new TimedPoint(point.Timestamp, value));
+                    numeric.Add(new TimedPoint(point.Timestamp, value, isGood));
                 }
 
-                timed.Add(new TimedPoint(
-                    point.Timestamp,
-                    point.ValueNumeric ?? 0m,
-                    point.ValueNumeric is not null
-                    && (point.Quality is null
-                        || string.Equals(point.Quality, WindowFold.GoodQuality, StringComparison.OrdinalIgnoreCase))));
+                timed.Add(new TimedPoint(point.Timestamp, point.ValueNumeric ?? 0m, isGood));
             }
 
             var kind = Parse(map.Aggregation);
@@ -430,14 +432,15 @@ public sealed class PreviewMappingHandler(
 
         if (unitCatalog is null)
         {
-            return kind == AggregationKind.TimeIntegral ? null : folded;
+            // ⛔ Z1-01: перегляд показує те саме округлене число, що ляже в комірку.
+            return kind == AggregationKind.TimeIntegral ? null : BoundaryValue.ToStorable(folded);
         }
 
         try
         {
             return BoundaryUnitConversion.ConvertFolded(
                 kind, folded, UnitId(unitCatalog, map.SourceUnitCode), UnitId(unitCatalog, map.TargetUnitCode), unitCatalog)
-                .Value;
+                .Storable;
         }
         catch (Exception ex) when (ex is DomainException or EcrException)
         {

@@ -181,6 +181,10 @@ function statusFilterLabel(status: CoverageEventStatus): string {
       return t('status.coverage.RegistryExternalKeyRelinked');
     case 'SkippedDependency':
       return t('status.coverage.SkippedDependency');
+    case 'PartialCoverage':
+      return t('status.coverage.PartialCoverage');
+    case 'SkippedNoData':
+      return t('status.coverage.SkippedNoData');
     default:
       return status;
   }

@@ -48,6 +48,21 @@ describe('collectionRunErrorText', () => {
     );
   });
 
+  it('неоднозначне ім’я елемента (AN-81) резолвиться, а не лишається сирим JSON (Y4-02)', () => {
+    const raw = JSON.stringify({
+      k: 'jobs.collectionRunReason',
+      p: { code: 'ECR-INT-0422' },
+      i: {
+        k: 'err.ECR-INT-0422.elementNameAmbiguous',
+        p: { dataSource: 'PI-SQL', sourcePath: 'Stack1|Flow' },
+      },
+    });
+
+    expect(collectionRunErrorText(raw)).toBe(
+      '⟦jobs.collectionRunReason (code=ECR-INT-0422, message=⟦err.ECR-INT-0422.elementNameAmbiguous (dataSource=PI-SQL, sourcePath=Stack1|Flow)⟧)⟧',
+    );
+  });
+
   it('подія `SourceDataRefused` — два рівні вкладення, кожен через каталог', () => {
     const raw = JSON.stringify({
       k: 'coverageEvents.sourceDataRefused',
@@ -71,6 +86,18 @@ describe('collectionRunErrorText', () => {
     ['coverageEvents.keptManual', { cell: 'r1:c2' }, 'cell=r1:c2'],
     ['coverageEvents.writeConflict', { cell: 'r1:c2' }, 'cell=r1:c2'],
     ['coverageEvents.needsConfirmation', { cell: 'r1:c2' }, 'cell=r1:c2'],
+    [
+      'coverageEvents.partialCoverage',
+      { field: 'F1', mapId: '7', percentGood: '60', min: '95' },
+      'field=F1, mapId=7, percentGood=60, min=95',
+    ],
+    ['coverageEvents.noData', { field: 'F1', mapId: '7' }, 'field=F1, mapId=7'],
+    [
+      'coverageEvents.rowWindowStale',
+      { rowKey: 'R1', mapId: '7', status: 'NoData' },
+      'rowKey=R1, mapId=7, status=NoData',
+    ],
+    ['coverageEvents.cellRejected', { cell: 'R1:T', code: 'ECR-CELL-0422' }, 'cell=R1:T, code=ECR-CELL-0422'],
     ['coverageEvents.eventWriteFailed', { eventId: '7', reason: 'нема доступу' }, 'eventId=7, reason=нема доступу'],
     ['coverageEvents.eventWritePartial', { eventId: '7', rowKey: 'R1' }, 'eventId=7, rowKey=R1'],
     ['coverageEvents.eventRowNotCreated', { eventId: '7', rowKey: 'R1' }, 'eventId=7, rowKey=R1'],

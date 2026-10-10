@@ -333,6 +333,22 @@ public sealed class NormalizedCellStore(EcrDbContext db, ArchiveAwareCellReader?
             return await archive.ReadArchivedSliceAsync(tableInstanceId, ct).ConfigureAwait(false);
         }
 
+        // ⛔ V8-02 (Z6-01). Непорожня гаряча вибірка теж може бути лише частиною року: перерваний
+        // КРОК 1 `arc.usp_RestoreYear` комітить пакети окремо, журнал лишає `Failed`, `arc.*` — цілим.
+        // Тоді джерело — архів, як і обіцяє журнал прогонів (`ArchiveAwareCellReader.IsArchivedAsync`).
+        // ⚠ Порожній архів (екземпляра там немає) — не привід сховати гарячі дані: тоді гаряча вибірка.
+        if (rows.Count > 0 && archive is not null
+            && (await archive.ArchivedOfHotInstancesAsync(
+                    [tableInstanceId], [.. rows.Select(r => r.PeriodKeyValue).Distinct()], ct).ConfigureAwait(false))
+                .Contains(tableInstanceId))
+        {
+            var archived = await archive.ReadArchivedSliceAsync(tableInstanceId, ct).ConfigureAwait(false);
+            if (archived.Count > 0)
+            {
+                return archived;
+            }
+        }
+
         // Порожніх комірок у базі не існує взагалі — клієнт бере
         // ColumnDef.DefaultValue (ФВ-3.8). Явна порожнеча — це рядок із
         // IsEmpty = 1, і він повертається (R-B4).
@@ -351,11 +367,44 @@ public sealed class NormalizedCellStore(EcrDbContext db, ArchiveAwareCellReader?
             return await archive.ReadArchivedSlicesAsync(tableInstanceIds, ct).ConfigureAwait(false);
         }
 
-        return rows
+        var hot = rows
             .GroupBy(r => r.TableInstanceId)
             .ToDictionary(
                 g => g.Key,
                 IReadOnlyList<CellRecord> (g) => [.. g.Select(ToRecord)]);
+
+        if (archive is null)
+        {
+            return hot;
+        }
+
+        // ⛔ V8-02 (Z6-01). Той самий критерій, що в SliceOrArchiveAsync, — ОДНИМ запитом на пакет
+        // (храповики звернень: кількість не росте з кількістю таблиць). Якщо за журналом рік в архіві,
+        // з архіву читаються і ці екземпляри, і запитані без жодної гарячої комірки (перерваний КРОК 1
+        // встиг повернути комірки лише частини таблиць). Порожня архівна відповідь гарячих даних не ховає.
+        var archivedIds = await archive
+            .ArchivedOfHotInstancesAsync(hot.Keys, [.. rows.Select(r => r.PeriodKeyValue).Distinct()], ct)
+            .ConfigureAwait(false);
+        if (archivedIds.Count == 0)
+        {
+            return hot;
+        }
+
+        var fromArchive = await archive
+            .ReadArchivedSlicesAsync(
+                [.. tableInstanceIds.Distinct().Where(id => archivedIds.Contains(id) || !hot.ContainsKey(id))], ct)
+            .ConfigureAwait(false);
+
+        var result = new Dictionary<long, IReadOnlyList<CellRecord>>(hot);
+        foreach (var (id, cells) in fromArchive)
+        {
+            if (cells.Count > 0)
+            {
+                result[id] = cells;
+            }
+        }
+
+        return result;
     }
 
     private static CellRecord ToRecord(SliceRow r)
@@ -499,6 +548,30 @@ public sealed class NormalizedCellStore(EcrDbContext db, ArchiveAwareCellReader?
         return (await ApplyBatchAsync([changes], ct).ConfigureAwait(false))[changes.TableInstanceId];
     }
 
+    /// <summary>Транзакція, на якій уже виставлено <c>SET LOCK_TIMEOUT</c> (<see cref="LimitLockWaitAsync"/>).</summary>
+    private SqlTransaction? _lockWaitLimitedFor;
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⛔ AN-106 (P1-01). Охоронець у <see cref="ApplyBatchAsync"/> виставляв ліміт лише перед
+    /// захопленням рядків, а нові рядки (<c>doc.TableRow</c>) вставляються РАНІШЕ — під ескальованим
+    /// блокуванням переносу версії така вставка чекала весь <c>CommandTimeout</c> і падала 500.
+    /// Той самий єдиний <c>SET</c>, лише раніше: <see cref="ApplyBatchAsync"/> у тій самій транзакції
+    /// його вже не повторює. Поза транзакцією — нічого (своя коротка транзакція сховища сама собі).
+    /// </remarks>
+    public async Task LimitLockWaitAsync(CancellationToken ct)
+    {
+        if (db.Database.CurrentTransaction?.GetDbTransaction() is not SqlTransaction transaction
+            || ReferenceEquals(_lockWaitLimitedFor, transaction))
+        {
+            return;
+        }
+
+        var connection = (SqlConnection)db.Database.GetDbConnection();
+        await LockWaitGuard.LimitAsync(connection, transaction, ct).ConfigureAwait(false);
+        _lockWaitLimitedFor = transaction;
+    }
+
     /// <inheritdoc />
     /// <remarks>
     /// ⚠ P8: єдина реалізація і для одного екземпляра (<see cref="ApplyAsync"/>),
@@ -547,10 +620,27 @@ public sealed class NormalizedCellStore(EcrDbContext db, ArchiveAwareCellReader?
         if (ambient is not null)
         {
             var joined = (SqlTransaction)ambient.GetDbTransaction();
-            await ClaimRowsAsync(connection, joined, sets, versions, ct).ConfigureAwait(false);
-            await DeleteAsync(connection, joined, deletes, ct).ConfigureAwait(false);
-            LastUpsertRowsAffected = await UpsertAsync(connection, joined, upserts, ct).ConfigureAwait(false);
-            await TouchRowsAsync(connection, joined, sets, versions, ct).ConfigureAwait(false);
+            // ⚠ Лише ambient-гілка (запис користувача: PATCH, імпорт): коротке очікування блокувань і
+            // 409 ECR-DOC-4091 замість 500 (TIER2 N-3, `LockWaitGuard`). Власна транзакція нижче —
+            // фонові перерахунки, їм чекати довше нормально.
+            // ⚠ AN-106: перерахунок (`RecalculationService`) теж пише в ambient-транзакції, тож і він
+            // отримує 15 с замість `CommandTimeout` — задача падає раніше, а не зависає.
+            // ⚠ AN-106: ліміт, уже виставлений на початку цієї транзакції (`LimitLockWaitAsync`),
+            // вдруге не виставляється — бюджет звернень запису той самий (+1 SET на транзакцію).
+            var upsertRows = 0;
+            await LockWaitGuard.RunAsync(
+                connection,
+                joined,
+                limitAlreadySet: ReferenceEquals(_lockWaitLimitedFor, joined),
+                async () =>
+                {
+                    await ClaimRowsAsync(connection, joined, sets, versions, ct).ConfigureAwait(false);
+                    await DeleteAsync(connection, joined, deletes, ct).ConfigureAwait(false);
+                    upsertRows = await UpsertAsync(connection, joined, upserts, ct).ConfigureAwait(false);
+                    await TouchRowsAsync(connection, joined, sets, versions, ct).ConfigureAwait(false);
+                },
+                ct).ConfigureAwait(false);
+            LastUpsertRowsAffected = upsertRows;
             return Result(versions);
         }
 

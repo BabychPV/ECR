@@ -3,6 +3,7 @@ using System.Globalization;
 using Ecr.Application.Calculations.Dto;
 using Ecr.Application.Common;
 using Ecr.Application.Errors;
+using Ecr.Application.Expressions;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
 using Ecr.Domain.Abstractions;
@@ -138,14 +139,20 @@ public sealed class SaveMethodologyCategoryRuleHandler(
         var outcome = MethodologyCategoryRuleChecks.Check(expression, formulaEngine, formulas, [], constants, null, null);
 
         var problem = outcome.Problems.FirstOrDefault(p => p.MessageKey is
-            "publish.problem.categoryRuleUnknownConstant" or "publish.problem.categoryRuleBadFormula");
+            "publish.problem.categoryRuleUnknownConstant" or "publish.problem.categoryRuleBadFormula"
+            or "publish.problem.formulaTooDeep");
         if (problem is not null)
         {
             var extensions = new Dictionary<string, object?>(StringComparer.Ordinal)
             {
-                ["messageKey"] = problem.MessageKey == "publish.problem.categoryRuleUnknownConstant"
-                    ? "err.ECR-CALC-0422.categoryRuleUnknownConstant"
-                    : "err.ECR-CALC-0422.categoryRuleBadFormula",
+                // ⚠ formulaTooDeep (N2-01): ключ публікації вже має en/ru/kz з {formula}/{depth}/{max};
+                // окремого err.*-ключа для того самого тексту не заводимо.
+                ["messageKey"] = problem.MessageKey switch
+                {
+                    "publish.problem.categoryRuleUnknownConstant" => "err.ECR-CALC-0422.categoryRuleUnknownConstant",
+                    "publish.problem.formulaTooDeep" => "publish.problem.formulaTooDeep",
+                    _ => "err.ECR-CALC-0422.categoryRuleBadFormula",
+                },
                 ["count"] = outcome.Problems.Count.ToString(CultureInfo.InvariantCulture),
             };
             foreach (var (name, value) in problem.Args)
@@ -177,6 +184,11 @@ public sealed class SaveMethodologyCategoryRuleHandler(
     /// <summary>Вираз мусить розбиратись діалектом Methodology і не повертати число.</summary>
     private void RequireUsable(string expression)
     {
+        // ⛔ L7-01 (AN-72): межа довжини ДО розбору — першим рядком. Колонка calc.CategoryRule.Expression
+        // довжини не обмежує, а правило (Calculation.EditRule) розбиралося в довільну довжину: гребінь із
+        // дужок доходив до обходів дерева, і процес API падав.
+        ExpressionLengthGuard.Require(expression, MethodologyFormula.MaxExpressionLength);
+
         if (string.IsNullOrWhiteSpace(expression))
         {
             throw new BusinessRuleException(

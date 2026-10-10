@@ -50,21 +50,10 @@ public sealed class ApproveSheetHandler(
         await Documents.DocumentVisibility
             .RequireSheetVisibleAsync(documents, access, profile, documentId, sheetDefId, key, ct).ConfigureAwait(false);
 
-        var decision = await access.CanApproveAsync(profile, documentId, sheetDefId, key, ct)
-                                   .ConfigureAwait(false);
-        if (!decision.IsAllowed)
-        {
-            throw new AccessDeniedException(
-                "ECR-ACCS-0403",
-                $"Затвердження аркуша {sheetDefId} відхилено: {decision.Reason}.",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = "err.ECR-ACCS-0403.approveDenied",
-                    ["sheetDefId"] = sheetDefId.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                    ["reason"] = decision.Reason.ToString(),
-                    ["reasonKey"] = $"deny.{decision.Reason}",
-                });
-        }
+        // ⚠ Швидка відмова ДО транзакції — без блокувань і без читання стану.
+        // Рішення, на яке справді спирається підпис, приймається ще раз
+        // усередині транзакції (R5-W1 / W1-05, нижче).
+        await RequireApproveAllowedAsync(profile, documentId, sheetDefId, key, ct).ConfigureAwait(false);
 
         // ⛔ `DAT-06`. Стан аркуша, запис у аудит і перерахунок статусу зрізу —
         // ОДНИМ комітом. Транзакції тут не було зовсім, і це не «на всяк
@@ -89,11 +78,44 @@ public sealed class ApproveSheetHandler(
             async innerCt =>
             {
                 var state = await workflow.GetOrCreateAsync(documentId, sheetDefId, key, innerCt).ConfigureAwait(false);
+
+                // ⛔ R5-W1 / W1-05 (TOCTOU): роль кроку маршруту — ПІСЛЯ читання
+                // стану, у тій самій транзакції. Рішення до транзакції бачило
+                // крок N; якщо інший погоджувач устиг закомітити крок N до
+                // `GetOrCreateAsync`, тут уже читається крок N+1 зі свіжим
+                // `RowVersion` — конфлікту немає, і погоджувач кроку N підписав
+                // би крок N+1 (аж до остаточного `Approved` без директора).
+                // Тепер: коміт ДО читання стану — рішення бачить новий крок і
+                // відмовляє; коміт ПІСЛЯ — збереження падає на `RowVersion`
+                // (409). На повторі після 1205 рішення теж перевиконується.
+                await RequireApproveAllowedAsync(profile, documentId, sheetDefId, key, innerCt).ConfigureAwait(false);
+
                 RejectOwnSubmission(state, approved, userId, sheetDefId);
                 await ApproveCoreAsync(state, documentId, sheetDefId, periodKey, approved, reason, userId, innerCt)
                     .ConfigureAwait(false);
             },
             ct).ConfigureAwait(false);
+    }
+
+    /// <summary>Рішення про затвердження (грант, стан, роль поточного кроку маршруту); відмова — 403.</summary>
+    private async Task RequireApproveAllowedAsync(
+        AccessProfile profile, long documentId, int sheetDefId, PeriodKey key, CancellationToken ct)
+    {
+        var decision = await access.CanApproveAsync(profile, documentId, sheetDefId, key, ct)
+                                   .ConfigureAwait(false);
+        if (!decision.IsAllowed)
+        {
+            throw new AccessDeniedException(
+                "ECR-ACCS-0403",
+                $"Затвердження аркуша {sheetDefId} відхилено: {decision.Reason}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-ACCS-0403.approveDenied",
+                    ["sheetDefId"] = sheetDefId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    ["reason"] = decision.Reason.ToString(),
+                    ["reasonKey"] = $"deny.{decision.Reason}",
+                });
+        }
     }
 
     /// <summary>F-25: той самий користувач не подає й не затверджує один аркуш.</summary>
@@ -217,6 +239,14 @@ public sealed class ApproveSheetHandler(
         // від даних (`D-65`), і без цього виклику регуляторна вʼюха назавжди
         // тримала б стан на момент побудови: аркуші затвердили, а звіт для
         // регулятора лишився чернетковим і в перелік не потрапив.
+        //
+        // ⛔ R5-W1 / W1-01: спершу перехід — у БД (та сама транзакція), потім
+        // перерахунок. Статус зрізу рахується запитом `AsNoTracking`, і
+        // незбережений перехід він не бачить: затвердження останнього аркуша
+        // рахувалося як `Submitted`, а відхилення морозило зріз як поданий.
+        // Конфлікт `RowVersion` двох погоджувачів тепер — 409 з `UnitOfWork`,
+        // а не 500 із сирого `SaveChanges` будівника зрізу.
+        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
         await reports.RefreshAsync(documentId, key, ct).ConfigureAwait(false);
 
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);

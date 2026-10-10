@@ -515,6 +515,11 @@ public sealed class RegistrySyncPlannerTests
         Assert.Equal(RegistrySyncEventKind.ElementUnlinked, unlinked.Kind);
         Assert.Equal("NEW-GUID", unlinked.ExternalId);
         Assert.Equal(RegistrySyncPlanner.CodeModeManualReason, unlinked.Reason);
+
+        // L4-13 (AN-81): сира `reason=` без поради людині нічого не казала — тепер є ключ каталогу.
+        Assert.Equal(RegistrySyncPlanner.CodeModeManualKey, unlinked.MessageKey);
+        Assert.Equal("err.ECR-REG-0422.codeModeManualNoAutoCreate", unlinked.MessageKey);
+        Assert.Equal(RegistrySyncPlanner.ValueRejectedCode, unlinked.ErrorCode);
     }
 
     [Fact]

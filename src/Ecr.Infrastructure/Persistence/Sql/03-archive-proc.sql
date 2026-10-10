@@ -233,10 +233,83 @@ BEGIN
         RETURN;
     END;
 
+    ------------------------------------------------------------------------
+    -- ⛔ U1-01 (аудит 09.10c). Очищення цілі нижче — на ВЕСЬ діапазон, і
+    --    безпечне воно лише тоді, коли КОЖЕН рядок `arc.*` діапазону ще має
+    --    свій оригінал у `doc.*`: тобто це копія незавершеного попереднього
+    --    прогону, яку повтор відтворить з джерела.
+    --
+    --    Рядок архіву БЕЗ оригіналу — це вже перенесені дані, джерело яких
+    --    звільнив `TRUNCATE` попереднього успішного прогону. Так буває, коли
+    --    діапазони перекриваються: річний проєкт (202601..202601) архівували
+    --    раніше за місячний (202601..202612) у тій самій партиції, або DBA
+    --    архівував пів року, а потім рік. Коротке замикання вище цього не
+    --    бачить (джерело порожнє не на всьому діапазоні), `DELETE` стирав
+    --    архів 202601 без копії, звірка давала 0 = 0, прогін — `Completed`.
+    --
+    -- ⚠ Перевірка — по КЛЮЧАХ, а не «період порожній у doc.*»: у звільнену
+    --    партицію могли лягти нові документи іншого проєкту, і тоді період у
+    --    `doc.*` непорожній, а старий архів у ньому все одно без оригіналу.
+    --
+    -- ⚠ Відмова — ДО будь-якого `DELETE`; `THROW` усередині `TRY` дає
+    --    `Failed` у журналі й знімає `IsArchiving` через наявний `CATCH`.
+    --    Ціна — анти-з'єднання по архіву діапазону, але лише на гілці, де
+    --    `arc.*` діапазону непорожній (повтор або перекриття), не в звичайному
+    --    прогоні.
+    ------------------------------------------------------------------------
+    IF EXISTS (SELECT 1 FROM arc.TableInstance
+                WHERE PeriodKey BETWEEN @FromPeriodKey AND @ToPeriodKey)
+       OR EXISTS (SELECT 1 FROM arc.TableRow
+                   WHERE PeriodKey BETWEEN @FromPeriodKey AND @ToPeriodKey)
+       OR EXISTS (SELECT 1 FROM arc.CellValue
+                   WHERE PeriodKey BETWEEN @FromPeriodKey AND @ToPeriodKey)
+    BEGIN
+        DECLARE @archivedOnly nvarchar(400) = STUFF((
+            SELECT N', ' + CAST(x.PeriodKey AS nvarchar(10))
+            FROM (SELECT a.PeriodKey
+                    FROM arc.CellValue AS a
+                   WHERE a.PeriodKey BETWEEN @FromPeriodKey AND @ToPeriodKey
+                     AND NOT EXISTS (SELECT 1 FROM doc.CellValue AS d
+                                      WHERE d.PeriodKey = a.PeriodKey
+                                        AND d.TableRowId = a.TableRowId
+                                        AND d.ColumnDefId = a.ColumnDefId)
+                  UNION
+                  SELECT a.PeriodKey
+                    FROM arc.TableRow AS a
+                   WHERE a.PeriodKey BETWEEN @FromPeriodKey AND @ToPeriodKey
+                     AND NOT EXISTS (SELECT 1 FROM doc.TableRow AS d
+                                      WHERE d.PeriodKey = a.PeriodKey AND d.Id = a.Id)
+                  UNION
+                  SELECT a.PeriodKey
+                    FROM arc.TableInstance AS a
+                   WHERE a.PeriodKey BETWEEN @FromPeriodKey AND @ToPeriodKey
+                     AND NOT EXISTS (SELECT 1 FROM doc.TableInstance AS d
+                                      WHERE d.PeriodKey = a.PeriodKey AND d.Id = a.Id)) AS x
+            ORDER BY x.PeriodKey
+            FOR XML PATH(''), TYPE).value('.', 'nvarchar(400)'), 1, 2, N'');
+
+        IF @archivedOnly IS NOT NULL
+        BEGIN
+            DECLARE @overlapMsg nvarchar(800) =
+                N'Діапазон ' + CAST(@FromPeriodKey AS nvarchar(10)) + N'..' +
+                CAST(@ToPeriodKey AS nvarchar(10)) +
+                N' перекриває вже заархівовані дані без оригіналу в гарячій схемі (періоди: ' +
+                @archivedOnly +
+                N'). Архів не змінено. Звузьте діапазон до незаархівованих періодів ' +
+                N'або спершу поверніть ці періоди (arc.usp_RestoreYear).';
+
+            THROW 50016, @overlapMsg, 1;
+        END;
+    END;
+
     -- ⚠ Тут саме DELETE, а не TRUNCATE WITH (PARTITIONS): `arc.*` лежить на
     -- окремій файловій групі колонстором і НЕ партиційована (`02a` §arc,
     -- `D-23`). Партиційний TRUNCATE на ній падає, а TRUNCATE цілої таблиці
     -- знищив би інші роки.
+    --
+    -- ⚠ Сюди доходить лише архів, КОЖЕН рядок якого має оригінал у `doc.*`
+    -- (U1-01 вище), тож `DELETE` на весь діапазон прибирає тільки копії
+    -- незавершеного прогону.
     --
     -- ⚠ Виконується лише коли є що прибирати: у звичайному прогоні це
     -- перевірка існування, а не сканування. Ціна платиться лише на повторі
@@ -538,7 +611,8 @@ GO
 CREATE OR ALTER PROCEDURE arc.usp_RestoreYear
     @ProjectId     int,
     @FromPeriodKey int,
-    @ToPeriodKey   int
+    @ToPeriodKey   int,
+    @BatchSize     int = 500000
 WITH EXECUTE AS OWNER
 AS
 BEGIN
@@ -548,6 +622,13 @@ BEGIN
     DECLARE @k int, @moved bigint = 0;
     DECLARE @srcCells bigint, @srcSum decimal(38,16), @srcRows bigint, @srcInst bigint;
     DECLARE @dstCells bigint, @dstSum decimal(38,16), @dstRows bigint, @dstInst bigint;
+    DECLARE @lastRow bigint, @lastCol int, @hiRow bigint, @hiCol int;
+    DECLARE @lastId bigint, @hiId bigint;
+
+    -- Той самий запобіжник, що в `usp_ArchiveYear`: пакет менше рядка —
+    -- нескінченний цикл копіювання. До журналу: нічого не змінено.
+    IF @BatchSize IS NULL OR @BatchSize < 1
+        THROW 50015, N'@BatchSize має бути додатним числом.', 1;
 
     ------------------------------------------------------------------------
     -- ЖУРНАЛ — на КОЖЕН проєкт, чиї дані повертаються, а не лише на @ProjectId.
@@ -562,7 +643,8 @@ BEGIN
     -- ⚠ Обрано «повернути період усім і записати всіх», а не фільтр за
     --    проєктом. Фільтр породжує гірший дефект: наступна `usp_ArchiveYear`
     --    бачить непорожнє джерело, ОЧИЩАЄ `arc.*` на весь діапазон і копіює
-    --    туди лише повернутий проєкт — архів сусіда знищено без сліду.
+    --    туди лише повернутий проєкт — архів сусіда знищено без сліду
+    --    (з U1-01 — не знищено, а відмова 50016, але рік так і не архівується).
     --    Симетрія з архівацією (той самий набір проєктів — `doc.Period` у
     --    діапазоні) тримає журнал обох напрямів узгодженим; плюс проєкти,
     --    чиї документи реально лежать в `arc.TableInstance`.
@@ -595,16 +677,167 @@ BEGIN
     BEGIN TRY
 
     ------------------------------------------------------------------------
-    -- ОДНА транзакція на весь діапазон.
+    -- КРОК 1. Копія в doc.* — ПАКЕТАМИ, кожен пакет окремою транзакцією
+    -- (аудит 09.10c, U1-03; той самий keyset, що в `usp_ArchiveYear`, L10-14).
     --
-    -- ⛔ Попередня версія мала `XACT_ABORT ON` без `BEGIN TRAN` — тобто
-    --    кожна вставка комітилася окремо. Збій на `doc.CellValue` (FK, місце,
-    --    50011) лишав закомічені `TableInstance`/`TableRow` без комірок, а
-    --    повторний запуск падав на `PK_TableInstance`: розархівація
-    --    застрягала до ручного прибирання.
+    -- ⛔ Раніше весь діапазон (рік — до ~108 млн комірок) вставлявся в
+    --    рядкове `doc.CellValue` з некластерними індексами ОДНІЄЮ транзакцією
+    --    разом із `DELETE` з архіву. Журнал транзакцій не усікається до
+    --    `COMMIT` (десятки ГБ, ризик 9002 і відкату такої ж тривалості), а
+    --    тисячі X-замків ескалювали до X на ВСЮ таблицю: правки комірок у всіх
+    --    періодах отримували 409 на весь час повернення.
     --
-    -- ⚠ Журнал `Running` записано ДО транзакції навмисно: відкат не повинен
-    --    стерти слід прогону, а `CATCH` нижче ставить йому `Failed`.
+    -- ⚠ Атомарність ЗА НАСЛІДКОМ зберігається без однієї великої транзакції:
+    --    - архів не чіпається до повної звірки (КРОК 2), тож збій посередині
+    --      лишає `arc.*` цілим, а журнал — `Failed`;
+    --    - ⛔ Z6-01 (аудит 8-го кола): читачі продукту (`NormalizedCellStore`,
+    --      `RowStore`, правило F-13) журнал НЕ питають — вони йдуть в архів лише
+    --      тоді, коли гаряча вибірка порожня. Тож закомічені пакети посеред
+    --      екземпляра показувалися б як «гарячі» дані з дірками замість архіву.
+    --      Тому `CATCH` нижче ПРИБИРАЄ часткову копію: кожен екземпляр, який
+    --      у `doc.*` збігається з архівом до поля (екземпляр, усі його рядки й
+    --      комірки), видаляється з `doc.*` окремою транзакцією — і F-13 знову
+    --      веде читача в архів. Видаляється лише те, що лежить в `arc.*`
+    --      тотожною копією; екземпляр з будь-якою розбіжністю чи гарячим
+    --      надлишком лишається як є і рахується в журналі;
+    --    - ⚠ Скасування запиту клієнтом (attention) чи обрив з'єднання `CATCH`
+    --      не виконують: журнал лишається `Running`, `IsArchiving = 1`, часткова
+    --      копія — у `doc.*`. Такий прогін треба одразу повторити (runbook §7.1);
+    --    - вставки ідемпотентні (`NOT EXISTS` по ключу), тож повтор пропускає
+    --      вже повернуті рядки і не падає на PK. Саме від застрягання на PK
+    --      колись рятувала одна транзакція: версія ще раніше комітила кожну
+    --      вставку окремо БЕЗ `NOT EXISTS`;
+    --    - частково повернений діапазон не дасть себе переархівувати з
+    --      втратою: `usp_ArchiveYear` бачить рядки `arc.*` без оригіналу в
+    --      `doc.*` і відмовляє (50016, U1-01) — спершу довести повернення.
+    --
+    -- ⚠ Порядок зворотний до архівації: спершу батьківські рядки, потім
+    --    комірки — інакше FK не дає вставити комірку без свого рядка. Тому
+    --    для кожного періоду: усі пакети екземплярів, потім рядків, потім
+    --    комірок.
+    --
+    -- ⚠ `NOT EXISTS` — не маскування конфлікту: уже наявний рядок не
+    --    перезаписується, чи він збігається з архівом, вирішує звірка КРОКУ 2.
+    --
+    -- ⚠ Журнал `Running` записано ДО копії навмисно: збій не повинен стерти
+    --    слід прогону, а `CATCH` нижче ставить йому `Failed`.
+    ------------------------------------------------------------------------
+    SET @k = @FromPeriodKey;
+
+    WHILE @k <= @ToPeriodKey
+    BEGIN
+        SET @lastId = NULL;
+        WHILE 1 = 1
+        BEGIN
+            SET @hiId = NULL;
+            SELECT @hiId = MAX(b.Id)
+            FROM (SELECT TOP (@BatchSize) Id FROM arc.TableInstance
+                   WHERE PeriodKey = @k AND (@lastId IS NULL OR Id > @lastId)
+                   ORDER BY Id) AS b
+            OPTION (RECOMPILE);
+
+            IF @hiId IS NULL BREAK;
+
+            INSERT INTO doc.TableInstance (PeriodKey, Id, DocumentId, TableDefId, CreatedAt, ModifiedAt)
+            SELECT a.PeriodKey, a.Id, a.DocumentId, a.TableDefId, a.CreatedAt, a.ModifiedAt
+            FROM arc.TableInstance AS a
+            WHERE a.PeriodKey = @k
+              AND (@lastId IS NULL OR a.Id > @lastId) AND a.Id <= @hiId
+              AND NOT EXISTS (SELECT 1 FROM doc.TableInstance AS d
+                               WHERE d.PeriodKey = a.PeriodKey AND d.Id = a.Id)
+            OPTION (RECOMPILE);
+
+            SET @lastId = @hiId;
+        END;
+
+        -- D4 аудиту: `IsOrphaned` — з архіву, а не жорсткий 0. Інакше осиротілий
+        -- рядок після архівування+відновлення переставав блокувати подання
+        -- (ECR-SUB-4221) до наступного нічного перерахунку.
+        SET @lastId = NULL;
+        WHILE 1 = 1
+        BEGIN
+            SET @hiId = NULL;
+            SELECT @hiId = MAX(b.Id)
+            FROM (SELECT TOP (@BatchSize) Id FROM arc.TableRow
+                   WHERE PeriodKey = @k AND (@lastId IS NULL OR Id > @lastId)
+                   ORDER BY Id) AS b
+            OPTION (RECOMPILE);
+
+            IF @hiId IS NULL BREAK;
+
+            INSERT INTO doc.TableRow (PeriodKey, Id, TableInstanceId, RowKey, RowDefId, Ordinal,
+                                      IsDeleted, IsOrphaned, ModifiedAt)
+            SELECT a.PeriodKey, a.Id, a.TableInstanceId, a.RowKey, a.RowDefId, a.Ordinal,
+                   a.IsDeleted, a.IsOrphaned, a.ModifiedAt
+            FROM arc.TableRow AS a
+            WHERE a.PeriodKey = @k
+              AND (@lastId IS NULL OR a.Id > @lastId) AND a.Id <= @hiId
+              AND NOT EXISTS (SELECT 1 FROM doc.TableRow AS d
+                               WHERE d.PeriodKey = a.PeriodKey AND d.Id = a.Id)
+            OPTION (RECOMPILE);
+
+            SET @lastId = @hiId;
+        END;
+
+        -- Комірки — двоколонковий keyset (TableRowId, ColumnDefId): межа пакета
+        -- може впасти посередині рядка. Верхня межа обчислюється наперед, і
+        -- INSERT копіює рівно діапазон (last, hi].
+        SELECT @lastRow = NULL, @lastCol = NULL;
+        WHILE 1 = 1
+        BEGIN
+            SELECT @hiRow = NULL, @hiCol = NULL;
+            SELECT TOP (1) @hiRow = b.TableRowId, @hiCol = b.ColumnDefId
+            FROM (SELECT TOP (@BatchSize) TableRowId, ColumnDefId
+                    FROM arc.CellValue
+                   WHERE PeriodKey = @k
+                     AND (@lastRow IS NULL OR TableRowId > @lastRow
+                          OR (TableRowId = @lastRow AND ColumnDefId > @lastCol))
+                   ORDER BY TableRowId, ColumnDefId) AS b
+            ORDER BY b.TableRowId DESC, b.ColumnDefId DESC
+            OPTION (RECOMPILE);
+
+            IF @hiRow IS NULL BREAK;
+
+            INSERT INTO doc.CellValue (PeriodKey, TableRowId, ColumnDefId, TableDefId, ValueString,
+                                       ValueNumeric, ValueDate, ValueBool, ValueRegistryEntryId,
+                                       ValueUnitId, IsCalculated, IsEmpty)
+            SELECT a.PeriodKey, a.TableRowId, a.ColumnDefId, a.TableDefId, a.ValueString,
+                   a.ValueNumeric, a.ValueDate, a.ValueBool, a.ValueRegistryEntryId,
+                   a.ValueUnitId, a.IsCalculated, a.IsEmpty
+            FROM arc.CellValue AS a
+            WHERE a.PeriodKey = @k
+              AND (@lastRow IS NULL OR a.TableRowId > @lastRow
+                   OR (a.TableRowId = @lastRow AND a.ColumnDefId > @lastCol))
+              AND (a.TableRowId < @hiRow OR (a.TableRowId = @hiRow AND a.ColumnDefId <= @hiCol))
+              AND NOT EXISTS (SELECT 1 FROM doc.CellValue AS d
+                               WHERE d.PeriodKey = a.PeriodKey AND d.TableRowId = a.TableRowId
+                                 AND d.ColumnDefId = a.ColumnDefId)
+            OPTION (RECOMPILE);
+
+            SELECT @lastRow = @hiRow, @lastCol = @hiCol;
+        END;
+
+        SET @k = @k + 1;
+    END;
+
+    ------------------------------------------------------------------------
+    -- КРОК 2. Звірка й прибирання архіву — ОДНА коротка транзакція.
+    --
+    -- ⛔ Архів діапазону прибирається ЛИШЕ після збігу всіх сум і в тій
+    --    самій транзакції, що й звірка: або дані в гарячій схемі й архів
+    --    порожній, або архів цілий — стану «архів частково стерто» не буває.
+    --
+    -- ⚠ Звірка — ПО КЛЮЧАХ архіву, а не «усе в партиції». Гаряча партиція
+    --    може вже містити інші рядки (нові документи після архівації), і
+    --    `COUNT(*)` по ній давав хибну розбіжність; а звірка по ключах ще й
+    --    ловить наявний рядок з іншим значенням.
+    --
+    -- ⚠ Саме прибирання робить повтор безпечним: другий виклик бачить
+    --    порожній архів і нічого не вставляє, а не падає на PK.
+    --
+    -- ⚠ У цій транзакції — лише читання і `DELETE` з колонстору `arc.*`
+    --    (позначки видалення), жодної вставки в рядкові індекси `doc.*`:
+    --    X-замки на гарячих таблицях вона не бере.
     ------------------------------------------------------------------------
     BEGIN TRAN;
 
@@ -617,48 +850,6 @@ BEGIN
             SELECT @srcRows = COUNT_BIG(*) FROM arc.TableRow      WHERE PeriodKey = @k;
             SELECT @srcInst = COUNT_BIG(*) FROM arc.TableInstance WHERE PeriodKey = @k;
 
-            -- Порядок зворотний до архівації: спершу батьківські рядки, потім
-            -- комірки. Інакше FK не дає вставити комірку без свого рядка.
-            --
-            -- ⚠ `NOT EXISTS` — не маскування конфлікту, а відновлення після
-            -- ПОПЕРЕДНЬОЇ версії процедури, яка могла лишити частково
-            -- повернутий період. Уже наявний рядок не перезаписується; чи він
-            -- збігається з архівом, вирішує звірка нижче — і зупиняє все, якщо ні.
-            INSERT INTO doc.TableInstance (PeriodKey, Id, DocumentId, TableDefId, CreatedAt, ModifiedAt)
-            SELECT a.PeriodKey, a.Id, a.DocumentId, a.TableDefId, a.CreatedAt, a.ModifiedAt
-            FROM arc.TableInstance AS a
-            WHERE a.PeriodKey = @k
-              AND NOT EXISTS (SELECT 1 FROM doc.TableInstance AS d
-                               WHERE d.PeriodKey = a.PeriodKey AND d.Id = a.Id);
-
-            -- D4 аудиту: `IsOrphaned` — з архіву, а не жорсткий 0. Інакше осиротілий
-            -- рядок після архівування+відновлення переставав блокувати подання
-            -- (ECR-SUB-4221) до наступного нічного перерахунку.
-            INSERT INTO doc.TableRow (PeriodKey, Id, TableInstanceId, RowKey, RowDefId, Ordinal,
-                                      IsDeleted, IsOrphaned, ModifiedAt)
-            SELECT a.PeriodKey, a.Id, a.TableInstanceId, a.RowKey, a.RowDefId, a.Ordinal,
-                   a.IsDeleted, a.IsOrphaned, a.ModifiedAt
-            FROM arc.TableRow AS a
-            WHERE a.PeriodKey = @k
-              AND NOT EXISTS (SELECT 1 FROM doc.TableRow AS d
-                               WHERE d.PeriodKey = a.PeriodKey AND d.Id = a.Id);
-
-            INSERT INTO doc.CellValue (PeriodKey, TableRowId, ColumnDefId, TableDefId, ValueString,
-                                       ValueNumeric, ValueDate, ValueBool, ValueRegistryEntryId,
-                                       ValueUnitId, IsCalculated, IsEmpty)
-            SELECT a.PeriodKey, a.TableRowId, a.ColumnDefId, a.TableDefId, a.ValueString,
-                   a.ValueNumeric, a.ValueDate, a.ValueBool, a.ValueRegistryEntryId,
-                   a.ValueUnitId, a.IsCalculated, a.IsEmpty
-            FROM arc.CellValue AS a
-            WHERE a.PeriodKey = @k
-              AND NOT EXISTS (SELECT 1 FROM doc.CellValue AS d
-                               WHERE d.PeriodKey = a.PeriodKey AND d.TableRowId = a.TableRowId
-                                 AND d.ColumnDefId = a.ColumnDefId);
-
-            -- ⛔ Звірка — ПО КЛЮЧАХ архіву, а не «усе в партиції». Гаряча
-            --    партиція може вже містити інші рядки (нові документи після
-            --    архівації), і `COUNT(*)` по ній давав хибну розбіжність; а
-            --    звірка по ключах ще й ловить наявний рядок з іншим значенням.
             SELECT @dstCells = COUNT_BIG(*), @dstSum = ISNULL(SUM(d.ValueNumeric), 0)
             FROM arc.CellValue AS a
             JOIN doc.CellValue AS d
@@ -691,14 +882,6 @@ BEGIN
             SET @k = @k + 1;
         END
 
-        --------------------------------------------------------------------
-        -- Архів діапазону прибирається ЛИШЕ після збігу всіх сум і в тій
-        -- самій транзакції: або дані в гарячій схемі й архів порожній, або
-        -- навпаки — стану «обидва джерела живі й розходяться» не буває.
-        --
-        -- ⚠ Саме це робить повтор безпечним: другий виклик бачить порожній
-        --    архів і нічого не вставляє, а не падає на PK.
-        --------------------------------------------------------------------
         DELETE FROM arc.CellValue     WHERE PeriodKey BETWEEN @FromPeriodKey AND @ToPeriodKey;
         DELETE FROM arc.TableRow      WHERE PeriodKey BETWEEN @FromPeriodKey AND @ToPeriodKey;
         DELETE FROM arc.TableInstance WHERE PeriodKey BETWEEN @FromPeriodKey AND @ToPeriodKey;
@@ -709,17 +892,135 @@ BEGIN
     BEGIN CATCH
         IF @@TRANCOUNT > 0 ROLLBACK;
 
+        DECLARE @errMessage nvarchar(2048) = ERROR_MESSAGE();
+        DECLARE @undoNote nvarchar(1000) = N'';
+        DECLARE @undoFailed bit = 0;
+
         -- ⚠ Знахідка — ПІСЛЯ відкату, інакше відкотилася б разом із ним.
         IF ERROR_NUMBER() = 50011
             INSERT INTO aud.ConsistencyIssue (DetectedAt, Severity, RuleCode, EntityType, EntityId, Message)
             VALUES (SYSUTCDATETIME(), 3, N'RESTORE_CHECKSUM', N'Period', @k,
                     N'Розбіжність при розархівації; дані архіву збережено.');
 
+        --------------------------------------------------------------------
+        -- ⛔ Z6-01. Прибирання часткової копії з `doc.*`.
+        --
+        --    Читачі (F-13) обирають гарячу схему, щойно в ній є хоч один рядок
+        --    екземпляра, і журналу не питають. Закомічені пакети КРОКУ 1
+        --    лишали екземпляр із частиною комірок — людина бачила дірки замість
+        --    архіву, розрахунок рахував на неповних входах.
+        --
+        -- ⚠ Сюди доходимо лише з цілим архівом: прибирання `arc.*` — остання
+        --    дія транзакції КРОКУ 2 перед `COMMIT`, і будь-яка помилка до нього
+        --    її відкотила. Тому видалення лише того, що має ТОТОЖНУ копію в
+        --    `arc.*`, не може знищити жодного значення.
+        --
+        -- ⚠ Одиниця — ЕКЗЕМПЛЯР цілком (він сам, усі його рядки й комірки),
+        --    одна транзакція на екземпляр: обірване прибирання не лишає
+        --    екземпляр наполовину. Екземпляр із будь-якою розбіжністю чи
+        --    гарячим надлишком (комірка без двійника, змінене значення,
+        --    перерахований результат) НЕ чіпається — він рахується в журналі.
+        --
+        -- ⚠ Рядки порівнюються з `COLLATE Latin1_General_BIN2`: база CI, і
+        --    правка лише регістру інакше вважалася б «тотожною».
+        --------------------------------------------------------------------
+        BEGIN TRY
+            DECLARE @undo TABLE (PeriodKey int NOT NULL, Id bigint NOT NULL, PRIMARY KEY (PeriodKey, Id));
+            DECLARE @undoInst bigint = 0, @undoRows bigint = 0, @undoCells bigint = 0, @undoKept bigint = 0;
+            DECLARE @uPk int, @uId bigint;
+
+            INSERT INTO @undo (PeriodKey, Id)
+            SELECT d.PeriodKey, d.Id
+            FROM doc.TableInstance AS d
+            WHERE d.PeriodKey BETWEEN @FromPeriodKey AND @ToPeriodKey
+              AND EXISTS (SELECT 1 FROM arc.TableInstance AS a
+                           WHERE a.PeriodKey = d.PeriodKey AND a.Id = d.Id
+                             AND EXISTS (SELECT a.DocumentId, a.TableDefId, a.CreatedAt, a.ModifiedAt
+                                         INTERSECT
+                                         SELECT d.DocumentId, d.TableDefId, d.CreatedAt, d.ModifiedAt))
+              AND NOT EXISTS (SELECT 1 FROM doc.TableRow AS r
+                               WHERE r.PeriodKey = d.PeriodKey AND r.TableInstanceId = d.Id
+                                 AND NOT EXISTS (
+                                     SELECT 1 FROM arc.TableRow AS ar
+                                      WHERE ar.PeriodKey = r.PeriodKey AND ar.Id = r.Id
+                                        AND EXISTS (SELECT ar.TableInstanceId, ar.RowKey COLLATE Latin1_General_BIN2,
+                                                           ar.RowDefId, ar.Ordinal, ar.IsDeleted, ar.IsOrphaned, ar.ModifiedAt
+                                                    INTERSECT
+                                                    SELECT r.TableInstanceId, r.RowKey COLLATE Latin1_General_BIN2,
+                                                           r.RowDefId, r.Ordinal, r.IsDeleted, r.IsOrphaned, r.ModifiedAt)))
+              AND NOT EXISTS (SELECT 1 FROM doc.TableRow AS r
+                               JOIN doc.CellValue AS c ON c.PeriodKey = r.PeriodKey AND c.TableRowId = r.Id
+                               WHERE r.PeriodKey = d.PeriodKey AND r.TableInstanceId = d.Id
+                                 AND NOT EXISTS (
+                                     SELECT 1 FROM arc.CellValue AS ac
+                                      WHERE ac.PeriodKey = c.PeriodKey AND ac.TableRowId = c.TableRowId
+                                        AND ac.ColumnDefId = c.ColumnDefId
+                                        AND EXISTS (SELECT ac.TableDefId, ac.ValueString COLLATE Latin1_General_BIN2,
+                                                           ac.ValueNumeric, ac.ValueDate, ac.ValueBool,
+                                                           CAST(ac.ValueRegistryEntryId AS bigint), ac.ValueUnitId,
+                                                           ac.IsCalculated, ac.IsEmpty
+                                                    INTERSECT
+                                                    SELECT c.TableDefId, c.ValueString COLLATE Latin1_General_BIN2,
+                                                           c.ValueNumeric, c.ValueDate, c.ValueBool,
+                                                           CAST(c.ValueRegistryEntryId AS bigint), c.ValueUnitId,
+                                                           c.IsCalculated, c.IsEmpty)));
+
+            -- Екземпляри з двійником в архіві, які прибирання лишає (розбіжність чи надлишок).
+            SELECT @undoKept = COUNT_BIG(*)
+            FROM doc.TableInstance AS d
+            WHERE d.PeriodKey BETWEEN @FromPeriodKey AND @ToPeriodKey
+              AND EXISTS (SELECT 1 FROM arc.TableInstance AS a WHERE a.PeriodKey = d.PeriodKey AND a.Id = d.Id)
+              AND NOT EXISTS (SELECT 1 FROM @undo AS u WHERE u.PeriodKey = d.PeriodKey AND u.Id = d.Id);
+
+            WHILE 1 = 1
+            BEGIN
+                SELECT @uPk = NULL, @uId = NULL;
+                SELECT TOP (1) @uPk = PeriodKey, @uId = Id FROM @undo ORDER BY PeriodKey, Id;
+                IF @uId IS NULL BREAK;
+
+                BEGIN TRAN;
+                    DELETE c
+                    FROM doc.CellValue AS c
+                    JOIN doc.TableRow AS r ON r.PeriodKey = c.PeriodKey AND r.Id = c.TableRowId
+                    WHERE c.PeriodKey = @uPk AND r.PeriodKey = @uPk AND r.TableInstanceId = @uId;
+                    SET @undoCells = @undoCells + @@ROWCOUNT;
+
+                    DELETE FROM doc.TableRow WHERE PeriodKey = @uPk AND TableInstanceId = @uId;
+                    SET @undoRows = @undoRows + @@ROWCOUNT;
+
+                    DELETE FROM doc.TableInstance WHERE PeriodKey = @uPk AND Id = @uId;
+                    SET @undoInst = @undoInst + @@ROWCOUNT;
+                COMMIT;
+
+                DELETE FROM @undo WHERE PeriodKey = @uPk AND Id = @uId;
+            END;
+
+            IF @undoInst > 0 OR @undoKept > 0
+                SET @undoNote = N' | Часткову копію прибрано з doc.* (Z6-01): екземплярів '
+                    + CAST(@undoInst AS nvarchar(20)) + N', рядків ' + CAST(@undoRows AS nvarchar(20))
+                    + N', комірок ' + CAST(@undoCells AS nvarchar(20))
+                    + CASE WHEN @undoKept > 0
+                           THEN N'; лишено з розбіжністю: екземплярів ' + CAST(@undoKept AS nvarchar(20))
+                           ELSE N'' END
+                    + N'.';
+        END TRY
+        BEGIN CATCH
+            IF @@TRANCOUNT > 0 ROLLBACK;
+            SET @undoFailed = 1;
+            SET @undoNote = N' | Прибрати часткову копію з doc.* не вдалося (Z6-01): '
+                + LEFT(ERROR_MESSAGE(), 400)
+                + N'. IsArchiving лишено 1 — повторіть розархівацію.';
+        END CATCH;
+
         UPDATE itg.ArchiveRun
-           SET Status = N'Failed', FinishedAt = SYSUTCDATETIME(), ErrorMessage = ERROR_MESSAGE()
+           SET Status = N'Failed', FinishedAt = SYSUTCDATETIME(),
+               ErrorMessage = LEFT(@errMessage + @undoNote, 2000)
          WHERE Id IN (SELECT RunId FROM @Runs);
 
-        UPDATE doc.Project SET IsArchiving = 0 WHERE Id IN (SELECT ProjectId FROM @Runs);
+        -- ⚠ Не прибрали часткову копію — правки лишаються заблокованими
+        --    (`EditRules`: `ArchivingInProgress`), доки повтор не доведе повернення.
+        IF @undoFailed = 0
+            UPDATE doc.Project SET IsArchiving = 0 WHERE Id IN (SELECT ProjectId FROM @Runs);
         THROW;
     END CATCH;
 

@@ -23,7 +23,8 @@ public sealed class ReopenDocumentHandler(
     IUnitOfWork uow,
     ICurrentUser currentUser,
     IClock clock,
-    IDocumentStore documents)
+    IDocumentStore documents,
+    Reporting.ReportSnapshotSync reports)
 {
     /// <summary>Право, без якого повернення в роботу неможливе (ФВ-6.12).</summary>
     public const string Permission = "Document.Reopen";
@@ -111,19 +112,9 @@ public sealed class ReopenDocumentHandler(
         {
             // ⚠ Період береться з UPDLOCK ДО будь-яких змін (ФВ-1.10a) — тепер
             // блокування справді тримається до кінця транзакції.
-            var period = await workflow.LockPeriodAsync(documentId, key, innerCt).ConfigureAwait(false);
-            if (period.State == PeriodState.Closed)
-            {
-                throw new BusinessRuleException(
-                    "ECR-PRD-4223",
-                    $"Період {periodKey} закрито: спершу відкрийте період, потім аркуш.",
-                    new Dictionary<string, object?>
-                    {
-                        ["messageKey"] = "err.ECR-PRD-4223.reopenPeriodFirst",
-                        ["periodKey"] = periodKey.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                        ["periodState"] = period.State.ToString(),
-                    });
-            }
+            // ⛔ R5-W1 / W1-04: ЕФЕКТИВНИЙ стан періоду, а не збережений (F-08).
+            await ClosedPeriodGuard.RequireNotClosedAsync(workflow, documentId, key, clock.UtcNow, innerCt)
+                .ConfigureAwait(false);
 
             var state = await workflow
                 .GetOrCreateAsync(documentId, sheetDefId, key, innerCt)
@@ -137,6 +128,13 @@ public sealed class ReopenDocumentHandler(
                 ApprovalEvent.For(state, fromStatus, ApprovalAction.Reopen, userId, now, reason),
                 innerCt).ConfigureAwait(false);
 
+            // ⛔ R5-W1 / W1-03: статус НЕЗАМОРОЖЕНОГО зрізу перераховується, як після
+            // Approve/Reject/Recall (D-65, H-23b). Без цього зріз `Approved` лишався
+            // `Approved` у `rpt.v_*`, хоча аркуш щойно повернули в роботу. Заморожений
+            // (поданий) зріз не чіпається — його відсіює `ReportSnapshotSync` (ФВ-9.17).
+            // Перехід скидається в БД ДО перерахунку (W1-01): запит статусу його не бачить.
+            await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+            await reports.RefreshAsync(documentId, key, innerCt).ConfigureAwait(false);
             await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
         }, ct).ConfigureAwait(false);
     }

@@ -54,6 +54,7 @@ public static class DependencyInjection
         services.AddScoped<Security.SetUserEmailHandler>();
         services.AddScoped<Security.ResetUserPasswordHandler>();
         services.AddScoped<Security.SetUserLockHandler>();
+        services.AddScoped<Security.CorrectWindowsSidHandler>();
         services.AddScoped<Security.GetAccessDiagnosticsHandler>();
         services.AddScoped<Security.GetEffectiveAccessHandler>();
         services.AddScoped<DiffTemplateVersionsHandler>();

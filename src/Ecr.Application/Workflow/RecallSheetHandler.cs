@@ -107,19 +107,9 @@ public sealed class RecallSheetHandler(
         {
             // ⚠ Той самий `UPDLOCK`, що й у `Reopen`: аркуш не має повернутися в
             // `Draft` у періоді, який паралельно закриває `PeriodStateJob`.
-            var period = await workflow.LockPeriodAsync(documentId, key, innerCt).ConfigureAwait(false);
-            if (period.State == PeriodState.Closed)
-            {
-                throw new BusinessRuleException(
-                    "ECR-PRD-4223",
-                    $"Період {periodKey} закрито: спершу відкрийте період, потім аркуш.",
-                    new Dictionary<string, object?>
-                    {
-                        ["messageKey"] = "err.ECR-PRD-4223.reopenPeriodFirst",
-                        ["periodKey"] = periodKey.ToString(CultureInfo.InvariantCulture),
-                        ["periodState"] = period.State.ToString(),
-                    });
-            }
+            // ⛔ R5-W1 / W1-04: ЕФЕКТИВНИЙ стан періоду, а не збережений (F-08).
+            await ClosedPeriodGuard.RequireNotClosedAsync(workflow, documentId, key, clock.UtcNow, innerCt)
+                .ConfigureAwait(false);
 
             var state = await workflow.GetOrCreateAsync(documentId, sheetDefId, key, innerCt).ConfigureAwait(false);
 
@@ -160,6 +150,11 @@ public sealed class RecallSheetHandler(
                 ApprovalEvent.For(state, fromStatus, ApprovalAction.Recall, userId, now, reason),
                 innerCt).ConfigureAwait(false);
 
+            // ⛔ R5-W1 / W1-01: перехід — у БД ДО перерахунку статусу зрізу.
+            // Інакше запит статусу (`AsNoTracking`) бачив аркуш ще `Submitted`,
+            // і повністю поданий період морозив зріз як `Submitted` саме в ту
+            // мить, коли аркуш повертався в `Draft`.
+            await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
             await reports.RefreshAsync(documentId, key, innerCt).ConfigureAwait(false);
             await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
         }, ct).ConfigureAwait(false);

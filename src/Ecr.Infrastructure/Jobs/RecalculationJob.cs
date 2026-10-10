@@ -62,7 +62,8 @@ public sealed partial class RecalculationJob(
     Domain.Abstractions.IClock clock,
     IBackgroundJobScheduler? jobs = null,
     RecalculationBudgetMonitor? budget = null,
-    ILogger<RecalculationJob>? logger = null) : IRecalculationJob
+    ILogger<RecalculationJob>? logger = null,
+    ISheetEditGate? sheetGate = null) : IRecalculationJob
 {
     [LoggerMessage(
         Level = LogLevel.Error,
@@ -90,6 +91,13 @@ public sealed partial class RecalculationJob(
     /// щось означати саме тоді, коли прогін довгий і на нього дивляться.
     /// </remarks>
     private const int FormulaPhaseShare = 40;
+
+    /// <summary>Скільки разів повторити транзакцію перемикання, коли аркуш саме подається (Y1-02).</summary>
+    private const int CompletionBusyAttempts = 6;
+
+    /// <summary>Пауза між повторами транзакції перемикання (Y1-02).</summary>
+    /// <remarks>⚠ <c>init</c> — лише заради тестів: секунди очікування там не потрібні.</remarks>
+    internal TimeSpan CompletionBusyDelay { get; init; } = TimeSpan.FromSeconds(5);
 
     /// <summary>Налаштування розбору завдання; спільні на всі виклики.</summary>
     /// <remarks>
@@ -164,12 +172,17 @@ public sealed partial class RecalculationJob(
         // лише в січні, а не лишає два актуальні прогони з подвоєними рядками.
         // Модель `CalculationRun` не змінюється — `PeriodKey` лишається
         // nullable для прогону, якому немає чого рахувати (див. нижче).
+        await AwaitRegistryWritersAsync(ct).ConfigureAwait(false);
         var startedAt = clock.UtcNow;
         var periodRuns = new SortedDictionary<int, (Domain.Entities.Calculations.CalculationRun Run, ModuleProfile Profile)>();
         Domain.Entities.Calculations.CalculationRun? yearRun = null;
 
         // RC14 (P2-4): що переносити в прогін періоду (лише для прогону області аркуша).
         var carryOvers = new Dictionary<int, List<ResultCarryOver>>();
+
+        // D2-03: що перевірити перед перемиканням актуальності кожного періоду — аркуші, які прогін
+        // ПЕРЕРАХУВАВ методологіями (за документами), і чи період ще дозволяє запис.
+        var completionGuards = new Dictionary<int, List<SheetGuard>>();
 
         // L-4: рядки, яким не підійшло жодне правило; назовні — лише кількість і номери.
         var unmatchedRows = new List<UnmatchedRow>();
@@ -404,6 +417,14 @@ public sealed partial class RecalculationJob(
 
                     var (run, runProfile) = await RunForAsync(period).ConfigureAwait(false);
 
+                    if (!completionGuards.TryGetValue(period, out var periodGuards))
+                    {
+                        completionGuards[period] = periodGuards = [];
+                    }
+
+                    periodGuards.Add(new SheetGuard(
+                        documentId, bindingPlan.ActiveSheets.GetValueOrDefault(period) ?? []));
+
                     if (bindingPlan.CarryOver.TryGetValue(period, out var carryMethodologies))
                     {
                         if (!carryOvers.TryGetValue(period, out var periodCarry))
@@ -451,9 +472,39 @@ public sealed partial class RecalculationJob(
 
             // Завершення — прикладний сценарій: профіль і перемикання
             // актуальності однією транзакцією (ФВ-9.11) — на кожен період.
+            //
+            // ⛔ D2-03: стан аркушів і періоду ПЕРЕЧИТУЄТЬСЯ в транзакції перемикання. Рішення
+            // «що рахувати» (`SubmittedSheetsAsync`, `RefusedPeriodsAsync`) ухвалено на старті
+            // документа, а методологічна фаза триває хвилини: подання аркуша чи закриття
+            // періоду в цьому вікні інакше мовчки підмінило б числа поданого/затвердженого
+            // аркуша (живе посилання, `SubmitSheetHandler`) або записало б у закритий період.
+            //
+            // ⛔ Y1-02: «аркуш подається» (`EnterEditNoWaitAsync` на 2-му й далі аркуші, X6-02) минає
+            // за секунди. Повторюється лише КОРОТКА транзакція перемикання — методології вже
+            // пораховано, і ретрай усієї задачі перерахував би їх заново саме в пік дедлайну. Відмова
+            // відкочує перемикання цілком (перевірка — перша в транзакції), тож повтор безпечний.
+            // Вичерпано — задача відкладається (нижче, `catch`), а не падає.
             foreach (var (period, (run, profile)) in periodRuns)
             {
-                await runs.CompleteAsync(run.Id, profile, ct, carryOvers.GetValueOrDefault(period)).ConfigureAwait(false);            }
+                var guards = completionGuards.GetValueOrDefault(period) ?? [];
+                for (var attempt = 1; ; attempt++)
+                {
+                    try
+                    {
+                        await runs
+                            .CompleteAsync(
+                                run.Id, profile, ct, carryOvers.GetValueOrDefault(period),
+                                token => GuardCompletionAsync(projectId, period, guards, request.ApprovedBy is not null, token))
+                            .ConfigureAwait(false);
+                        break;
+                    }
+                    catch (ConcurrencyConflictException busy)
+                        when (attempt < CompletionBusyAttempts && FormulaRecalculationJob.IsSheetBeingSubmitted(busy))
+                    {
+                        await Task.Delay(CompletionBusyDelay, ct).ConfigureAwait(false);
+                    }
+                }
+            }
 
             // L-4: «No matching rule … row N». Не помилка й не відмова - решта рядків уже
             // пораховано; це слід у повідомленні задачі, щоб рядок без правила не зник мовчки.
@@ -523,6 +574,17 @@ public sealed partial class RecalculationJob(
                 }
 
                 await db.SaveChangesAsync(ct).ConfigureAwait(false);
+            }
+
+            // ⛔ Y1-02: «аркуш подається» (фаза формул — `RecalculationService.EnterSheetsAsync`, або
+            // вичерпані повтори перемикання вище) — не провал і не ретрай: `JobRetryPolicy` дає лише
+            // 30/60/120 с, що вичерпалось би за годину дедлайну, і прогін лишився б `Failed`, а
+            // методології — застарілими (`staleMethodologyResults` блокує наступне «Подати»). Як і
+            // `FormulaRecalculationJob`: задача повертається в чергу, не рахуючи спроби (межа —
+            // `JobDeferral.MaxDeferral`). Незавершені прогони вже позначено вище — повтор створить нові.
+            if (ex is ConcurrencyConflictException busy && FormulaRecalculationJob.IsSheetBeingSubmitted(busy))
+            {
+                throw new JobDeferredException(RecalculationDocumentLock.DeferDelay, busy.Message);
             }
 
             throw;
@@ -880,7 +942,17 @@ public sealed partial class RecalculationJob(
                 : 0;
         }
 
-        return new BindingPlan(byPeriod, carryByPeriod, recomputedOnSubmitted);
+        // D2-03: аркуші, чиї таблиці прогін перерахував методологіями, — їх перевіряє `GuardCompletionAsync`.
+        var activeSheets = instances
+            .Where(i => IsActive(i)
+                        && byPeriod.TryGetValue(i.PeriodKeyValue, out var periodBindings)
+                        && periodBindings.Any(b => b.TableInstanceId == i.Id))
+            .GroupBy(i => i.PeriodKeyValue)
+            .ToDictionary(
+                g => g.Key,
+                g => (IReadOnlyList<int>)[.. g.Select(i => i.SheetDefId).Distinct().Order()]);
+
+        return new BindingPlan(byPeriod, carryByPeriod, recomputedOnSubmitted, activeSheets);
     }
 
     /// <summary>Прив'язки методологій за періодами, що переносити з попереднього прогону, і лічильник для журналу.</summary>
@@ -889,17 +961,117 @@ public sealed partial class RecalculationJob(
     /// <param name="RecomputedOnInactive">
     /// Скільки прив'язок неактивних (поза областю/пропущених) таблиць перераховано через спільну методологію.
     /// </param>
+    /// <param name="ActiveSheets">
+    /// D2-03: аркуші, чиї таблиці прогін перераховує методологіями, за періодом (за зростанням Id).
+    /// </param>
     private sealed record BindingPlan(
         IReadOnlyDictionary<int, IReadOnlyList<CalculationBindingRef>> Bindings,
         IReadOnlyDictionary<int, IReadOnlyCollection<int>> CarryOver,
-        int RecomputedOnInactive)
+        int RecomputedOnInactive,
+        IReadOnlyDictionary<int, IReadOnlyList<int>> ActiveSheets)
     {
         /// <summary>Порожній план: нічого не рахується й не переноситься.</summary>
         public static readonly BindingPlan Empty = new(
             ReadOnlyDictionary<int, IReadOnlyList<CalculationBindingRef>>.Empty,
             ReadOnlyDictionary<int, IReadOnlyCollection<int>>.Empty,
-            0);
+            0,
+            ReadOnlyDictionary<int, IReadOnlyList<int>>.Empty);
     }
+
+    /// <summary>Аркуші документа, які прогін періоду перерахував методологіями (D2-03).</summary>
+    /// <param name="DocumentId">Документ.</param>
+    /// <param name="Sheets">Аркуші за зростанням Id — у цьому порядку беруться блокування.</param>
+    private sealed record SheetGuard(long DocumentId, IReadOnlyList<int> Sheets);
+
+    /// <summary>
+    /// D2-03: перевірка перед перемиканням актуальності прогону періоду — у ТІЙ САМІЙ
+    /// транзакції (<see cref="RunCalculationHandler.CompleteAsync"/>, <c>beforeSwitch</c>).
+    /// </summary>
+    /// <param name="projectId">Проєкт.</param>
+    /// <param name="period">Період прогону.</param>
+    /// <param name="guards">Перераховані аркуші за документами.</param>
+    /// <param name="approved">Завдання несе погодження S1 (ФВ-9.7).</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <exception cref="ConcurrencyConflictException">
+    /// <c>ECR-CALC-0409</c> <c>recalcStateChanged</c>: аркуш подано/затверджено або період
+    /// закрито під час прогону. Відмова відкочує перемикання; прогін стає <c>Failed</c>,
+    /// попередній лишається актуальним, а повтор задачі (<c>JobRetryPolicy</c> повторює
+    /// конфлікт стану) планує вже з новим станом — поданий аркуш пропустить і перенесе.
+    /// </exception>
+    /// <remarks>
+    /// ⛔ Аркуш — через спільне блокування <see cref="ISheetEditGate.EnterEditAsync"/>, яке
+    /// подання бере винятково: подання, що йшло паралельно, до цього моменту вже
+    /// зафіксоване (і ми його бачимо) або чекатиме нашого коміту (і тоді перевірить
+    /// <c>IsStale</c> уже за новим прогоном). Блокування — за зростанням (документ, аркуш),
+    /// як у <c>RecalculationService.EnterSheetsAsync</c>. Без воріт (пряме конструювання в
+    /// тестах) — той самий стан читається без блокування.
+    /// <para>
+    /// ⚠ Період, рядка якого немає, не відмовляє — як у <see cref="RefusedPeriodsAsync"/>.
+    /// </para>
+    /// </remarks>
+    private async Task GuardCompletionAsync(
+        int projectId, int period, IReadOnlyList<SheetGuard> guards, bool approved, CancellationToken ct)
+    {
+        // ⛔ X6-01: стан — ЕФЕКТИВНИЙ (F-08), а не збережений: прогін, що завершується між
+        // `ComputedCloseAt` і найближчою годинною задачею станів, інакше перемикав актуальність
+        // у вже закритому періоді без погодження S1.
+        var state = (await EffectiveStatesAsync(
+                    db.Periods.Where(p => p.ProjectId == projectId && p.PeriodKeyValue == period), ct)
+                .ConfigureAwait(false))
+            .Select(p => (Domain.Enums.PeriodState?)p.State)
+            .FirstOrDefault();
+
+        if (state is { } current
+            && RecalculationWritePolicy.Check(current, false, approved) != RecalculationWriteDenial.None)
+        {
+            throw StateChanged(guards.Count > 0 ? guards[0].DocumentId : 0, period, sheetDefId: null);
+        }
+
+        // ⛔ X6-02: чекати дозволено лише перший аркуш — поки нічого не тримаємо. Далі без
+        // черги: інакше, чекаючи аркуш N із S на попередніх, перемикання ставило б за собою
+        // подання тих аркушів і автозбереження їхніх редакторів. Відмова (`ECR-DOC-4091`)
+        // відкочує перемикання, як і `recalcStateChanged`; викликач повторює лише цю транзакцію,
+        // а вичерпавши повтори — відкладає задачу (Y1-02).
+        var holdsAny = false;
+
+        foreach (var guard in guards.OrderBy(g => g.DocumentId))
+        {
+            foreach (var sheetDefId in guard.Sheets)
+            {
+                var status = sheetGate is not null
+                    ? await (holdsAny
+                            ? sheetGate.EnterEditNoWaitAsync(guard.DocumentId, sheetDefId, new PeriodKey(period), ct)
+                            : sheetGate.EnterEditAsync(guard.DocumentId, sheetDefId, new PeriodKey(period), ct))
+                        .ConfigureAwait(false)
+                    : await db.ApprovalStates
+                        .AsNoTracking()
+                        .Where(a => a.DocumentId == guard.DocumentId && a.SheetDefId == sheetDefId && a.PeriodKey == period)
+                        .Select(a => (Domain.Enums.DocumentStatus?)a.Status)
+                        .FirstOrDefaultAsync(ct)
+                        .ConfigureAwait(false) ?? Domain.Enums.DocumentStatus.Draft;
+                holdsAny = true;
+
+                if (status is Domain.Enums.DocumentStatus.Submitted or Domain.Enums.DocumentStatus.Approved)
+                {
+                    throw StateChanged(guard.DocumentId, period, sheetDefId);
+                }
+            }
+        }
+    }
+
+    /// <summary>Відмова D2-03: стан аркуша чи періоду змінився під час перерахунку.</summary>
+    private static ConcurrencyConflictException StateChanged(long documentId, int period, int? sheetDefId)
+        => new(
+            "ECR-CALC-0409",
+            $"Стан аркуша чи періоду {period.ToString(CultureInfo.InvariantCulture)} документа "
+            + $"{documentId.ToString(CultureInfo.InvariantCulture)} змінився під час перерахунку: результати не застосовано.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-CALC-0409.recalcStateChanged",
+                ["documentId"] = documentId,
+                ["periodKey"] = period,
+                ["sheetDefId"] = sheetDefId,
+            });
 
     /// <summary>
     /// Періоди документа, у які цей прогін писати НЕ МАЄ ПРАВА (ФВ-9.7, ФВ-9.17).
@@ -943,12 +1115,13 @@ public sealed partial class RecalculationJob(
     private async Task<IReadOnlySet<int>> RefusedPeriodsAsync(
         RecalculationRequest request, CancellationToken ct)
     {
-        var states = await db.Periods
-            .AsNoTracking()
-            .Where(p => db.Documents.Any(d => d.Id == request.DocumentId && d.ProjectId == p.ProjectId)
-                        && (request.PeriodKey == null || p.PeriodKeyValue == request.PeriodKey))
-            .Select(p => new PeriodStateRow(p.PeriodKeyValue, p.State))
-            .ToListAsync(ct)
+        // ⛔ X6-01: ефективний стан (F-08) — те саме правило, що й у `GuardCompletionAsync`
+        // і в рішенні про запис; інакше прогін, допущений тут за збереженим `Grace`, падав би
+        // на перемиканні за ефективним `Closed` і повторювався до годинної задачі станів.
+        var states = await EffectiveStatesAsync(
+                db.Periods.Where(p => db.Documents.Any(d => d.Id == request.DocumentId && d.ProjectId == p.ProjectId)
+                                      && (request.PeriodKey == null || p.PeriodKeyValue == request.PeriodKey)),
+                ct)
             .ConfigureAwait(false);
 
         // ⛔ RC15 (P2-A): для області аркуша (`SheetDefId`) період відхиляється, коли поданий САМ цей аркуш; для
@@ -1032,10 +1205,125 @@ public sealed partial class RecalculationJob(
             .ToDictionary(group => group.Key, group => group.Select(row => row.SheetDefId).ToHashSet());
     }
 
+    /// <summary>
+    /// Скільки перерахунок чекає на запис даних довідника, який читають методології, перш ніж
+    /// відкластися (Z5-01), мс. Менше за <see cref="LockWaitGuard.LockTimeoutMs"/>: задача тримає місце
+    /// лейна й applock документа, а відкладення їх звільняє.
+    /// </summary>
+    internal const int RegistryWriterWaitMs = 5_000;
+
+    /// <summary>Ресурс у <see cref="JobDeferredException"/> відкладення через запис довідника (Z5-01).</summary>
+    internal const string RegistryWriterResource = "cfg.RegistryDef";
+
+    private static readonly string SetRegistryWriterWait =
+        string.Create(CultureInfo.InvariantCulture, $"SET LOCK_TIMEOUT {RegistryWriterWaitMs};");
+
+    private const string ResetRegistryWriterWait = "SET LOCK_TIMEOUT -1;";
+
     /// <summary>Ресурс <c>sp_getapplock</c> для перерахунку документа.</summary>
     /// <param name="documentId">Документ.</param>
     /// <returns>Ім'я ресурсу.</returns>
     public static string DocumentLockResource(long documentId) => RecalculationDocumentLock.Resource(documentId);
+
+    /// <summary>
+    /// Чекає комітів записів даних довідників, що вже почалися, перш ніж прогін візьме <c>startedAt</c>
+    /// (X3-03 / D1-03).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Знімок довідника прогону — <c>AS OF RegistryAsOfUtc</c> (від <c>startedAt</c>), а <c>PeriodStart</c>
+    /// рядка темпоральної таблиці — ПОЧАТОК транзакції запису. Запис, що почався до старту прогону й
+    /// комітиться після читання знімка, у знімок не потрапляв, а його <c>DataChangedAt &lt; StartedAt</c>
+    /// гасив позначку «застаріло» (<c>StaleResultsQuery</c>, <c>RegistryImpactStore</c>): число на старому
+    /// довіднику жило до випадкового перерахунку. Кожен запис даних довідника першим оператором своєї
+    /// транзакції бере X-лок рядка <c>cfg.RegistryDef</c> (<c>UnitOfWork.ApplyRegistryRevisionBumpsAsync</c>),
+    /// тож S-читання <c>DataRevision</c> під <c>READCOMMITTEDLOCK</c> (а не версії RCSI) чекає саме їх.
+    /// <c>MAX(DataRevision)</c>, а не <c>COUNT(*)</c>: лічильник оптимізатор узяв би з некластерного
+    /// індексу, якого оновлення ревізії не блокує.
+    /// <para>
+    /// ⚠ Залишок вікна — мілісекунди між міткою <c>DataChangedAt</c> і першим <c>UPDATE</c> писача. Якщо
+    /// писач готується в зовнішній транзакції ДО першого збереження (rescan синку, <c>beforeSave</c>
+    /// імпорту), його мітка <c>DataChangedAt</c> ставиться при збереженні, тобто ПІСЛЯ <c>startedAt</c>, і
+    /// позначка «застаріло» спрацьовує. Лок береться поза транзакцією й звільняється одразу; задача тримає
+    /// лише сесійний applock документа, якого писачі довідника не беруть. Не SQL Server (тести на інших
+    /// провайдерах) — без очікування.
+    /// </para>
+    /// <para>
+    /// ⛔ Z5-01 (аудит R8). Раніше читалася ВСЯ <c>cfg.RegistryDef</c> без межі очікування: скан брав S на
+    /// кожному рядку, тож перерахунок будь-якого проєкту чекав на запис БУДЬ-ЯКОГО довідника (імпорт CSV з
+    /// правилами, синк із rescan у тій самій транзакції) до <c>CommandTimeout</c> (60 с), тримаючи місце
+    /// лейна й applock документа, а далі — повтори <c>JobRetryPolicy</c>. Тепер:
+    /// (1) лише довідники з ребром «формула версії методології» (<c>RegistryUse.SourceKind = 1</c>) — рівно
+    /// той набір, для якого існує позначка «застаріло» (<c>StaleResultsQuery</c>, <c>RegistryImpactStore</c>
+    /// фільтрують за тим самим видом ребра); запис довідника без такого ребра результатів методологій не
+    /// гасить і чекати його нема чого; рядки — пошуком по PK (<c>FORCESEEK</c>), без скану чужих;
+    /// (2) межа очікування — <see cref="RegistryWriterWaitMs"/> (<c>SET LOCK_TIMEOUT</c>); вичерпана —
+    /// <see cref="JobDeferredException"/>, як зайнятий документ: місце воркера й applock звільняються,
+    /// повтор — через <see cref="RecalculationDocumentLock.DeferDelay"/> під стелею
+    /// <see cref="JobDeferral.MaxDeferral"/>. Прогону на знімку без незакоміченого запису з погашеною
+    /// позначкою, як і раніше, не буває.
+    /// </para>
+    /// <para>
+    /// ⚠ <c>SET LOCK_TIMEOUT</c> — налаштування сеансу: <c>SET</c> і читання йдуть одним відкритим
+    /// з'єднанням контексту, після читання ліміт знімається (з'єднання, відкрите тут, закривається — пул
+    /// скидає сеанс; уже відкрите — <c>SET LOCK_TIMEOUT -1</c>), щоб решта операторів задачі не отримала
+    /// 1222.
+    /// </para>
+    /// </remarks>
+    private async Task AwaitRegistryWritersAsync(CancellationToken ct)
+    {
+        if (!db.Database.IsSqlServer())
+        {
+            return;
+        }
+
+        var openedHere = db.Database.GetDbConnection().State != System.Data.ConnectionState.Open;
+        if (openedHere)
+        {
+            await db.Database.OpenConnectionAsync(ct).ConfigureAwait(false);
+        }
+
+        try
+        {
+            await db.Database
+                .ExecuteSqlRawAsync(SetRegistryWriterWait, ct)
+                .ConfigureAwait(false);
+
+            _ = await db.Database
+                .SqlQuery<int>($"""
+                    SELECT ISNULL(MAX(rd.DataRevision), 0) AS Value
+                    FROM cfg.RegistryUse AS u
+                    JOIN cfg.RegistryDef AS rd WITH (READCOMMITTEDLOCK, FORCESEEK) ON rd.Id = u.RegistryDefId
+                    WHERE u.SourceKind = {Domain.Entities.Configuration.RegistryUse.MethodologyVersionSource}
+                    """)
+
+                // `MAX` повертає рівно один рядок; `OrderBy` + `Take` — межа архітектурного правила 6 і EF 10102,
+                // як у `PartitionCheckJob`.
+                .OrderBy(v => v)
+                .Take(1)
+                .ToListAsync(ct)
+                .ConfigureAwait(false);
+        }
+        catch (Microsoft.Data.SqlClient.SqlException ex) when (LockWaitGuard.IsLockWaitTimeout(ex))
+        {
+            throw new JobDeferredException(
+                RecalculationDocumentLock.DeferDelay,
+                "Registry data write is still in progress; recalculation deferred.",
+                RegistryWriterResource);
+        }
+        finally
+        {
+            if (openedHere)
+            {
+                await db.Database.CloseConnectionAsync().ConfigureAwait(false);
+            }
+            else
+            {
+                await db.Database
+                    .ExecuteSqlRawAsync(ResetRegistryWriterWait, CancellationToken.None)
+                    .ConfigureAwait(false);
+            }
+        }
+    }
 
     /// <summary>Бере ексклюзивний лок документа на весь час задачі.</summary>
     /// <returns><c>null</c> — лок не потрібен (перерахунок проєкту без планувальника, не SQL Server).</returns>
@@ -1167,6 +1455,49 @@ public sealed partial class RecalculationJob(
 
     /// <summary>Стан одного періоду — для гейту запису.</summary>
     private sealed record PeriodStateRow(int PeriodKeyValue, Domain.Enums.PeriodState State);
+
+    /// <summary>
+    /// Стеля вибірки періодів для гейту стану: проєкт — один рік, тобто щонайбільше 12 періодів
+    /// (D-108), як і <c>PeriodStore.MaxPeriods</c>; межа — правило 6 <c>LayerRulesTests</c>.
+    /// </summary>
+    private const int MaxPeriods = 64;
+
+    /// <summary>Правило ефективного стану — те саме, що в рішенні про запис (F-08).</summary>
+    private static readonly Domain.Services.PeriodStateCalculator PeriodStates = new();
+
+    /// <summary>
+    /// X6-01: ЕФЕКТИВНИЙ стан періодів на <c>clock.UtcNow</c> — тим самим правилом, що й
+    /// <c>AccessDecisionService</c> (F-08) і <c>IPeriodStore.FindPeriodStateAsync</c>.
+    /// </summary>
+    /// <param name="source">Періоди, стан яких потрібен.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⚠ Лише для АКТИВНОГО проєкту (`A7-25`): періоди чернетки за датами не просуваються.
+    /// Ефективний стан — лише вперед від збереженого, тож закритого він не відкриває.
+    /// </remarks>
+    private async Task<List<PeriodStateRow>> EffectiveStatesAsync(
+        IQueryable<Domain.Entities.Documents.Period> source, CancellationToken ct)
+    {
+        var rows = await (
+                from p in source.AsNoTracking()
+                join project in db.Projects.AsNoTracking() on p.ProjectId equals project.Id
+                orderby p.PeriodKeyValue
+                select new { Period = p, project.Status, project.PeriodEnd, project.YearGraceOffsetDays, project.TimeZoneId })
+            .Take(MaxPeriods)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var now = clock.UtcNow;
+        return [.. rows.Select(r => new PeriodStateRow(
+            r.Period.PeriodKeyValue,
+            r.Status == Domain.Enums.ProjectStatus.Active
+                ? PeriodStates.Effective(
+                    r.Period,
+                    now,
+                    Domain.Services.YearGraceWindow.For(
+                        r.PeriodEnd, r.YearGraceOffsetDays, SiteTimeZone.Create(r.TimeZoneId).ToTimeZoneInfo()))
+                : r.Period.State))];
+    }
 
     /// <summary>Прогрес однієї фази: шкала зсунута й стиснута, повідомлення назване.</summary>
     /// <param name="inner">Канал прогресу задачі.</param>

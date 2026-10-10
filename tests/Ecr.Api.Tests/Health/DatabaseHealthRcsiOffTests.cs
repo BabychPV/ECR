@@ -109,9 +109,9 @@ public sealed class DatabaseHealthRcsiOffTests(SqlServerFixture sql)
 
         // ⛔ L1-11: анонімному /health/ready опис перевірки «db» (шлях RCSI-скрипта) не віддається; діагностика
         // для оператора лишається в самій перевірці (тест вище) і в журналі.
-        // A2-11: замість null — коротка нейтральна причина з білого списку.
+        // A2-11: замість null — коротка нейтральна причина; R1 (варіант A) — лише загальна фраза.
         Assert.DoesNotContain("Sql/06-rcsi.sql", body, StringComparison.Ordinal);
-        Assert.Equal("RCSI is disabled", dbCheck.GetProperty("description").GetString());
+        Assert.Equal(PublicHealthReason.Generic, dbCheck.GetProperty("description").GetString());
         Assert.DoesNotContain(PublicHealthReason.DataKey, body, StringComparison.Ordinal);
     }
 

@@ -176,6 +176,12 @@ public interface ICollectionStore
     public Task<bool> ColumnDefExistsAsync(int columnDefId, CancellationToken ct);
 
     /// <summary>
+    /// Одиниця, у якій колонка зберігає значення (<c>ColumnDef.UnitId</c>, ФВ-16.1); <c>null</c> — колонка
+    /// без одиниці або її немає.
+    /// </summary>
+    public Task<int?> FindColumnUnitIdAsync(int columnDefId, CancellationToken ct);
+
+    /// <summary>
     /// Проєкти, у які може писати мапінг на цю колонку (S3 аудиту безпеки).
     /// </summary>
     /// <remarks>

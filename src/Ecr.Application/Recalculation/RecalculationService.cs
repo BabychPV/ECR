@@ -925,11 +925,20 @@ public sealed class RecalculationService(
     ///
     /// ⚠ Не взято вчасно — <c>ECR-DOC-4091</c> з порту: задача падає з причиною,
     /// а не пише повз блокування.
+    ///
+    /// ⛔ X6-02: чекати (до 30 с) дозволено лише ПЕРШИЙ аркуш, поки прогін ще не
+    /// тримає жодного. Наступні — без черги (<see cref="ISheetEditGate.EnterEditNoWaitAsync"/>):
+    /// черга FIFO, і прогін, що чекав аркуш N, тримаючи S на аркушах 1…N-1, ставив
+    /// за собою подання тих аркушів, а за ними — автозбереження всіх, хто їх правив
+    /// (аж до 409 «аркуш подається»). Відмова відкочує транзакцію запису й звільняє
+    /// все взяте; фонова задача повторює прогін пізніше (<c>FormulaRecalculationJob</c>
+    /// відкладає себе, <c>RecalculationJob</c> — теж відкладає себе, Y1-02).
     /// </remarks>
     private async Task<IReadOnlySet<int>> EnterSheetsAsync(
         long documentId, PeriodKey periodKey, IEnumerable<int> sheetDefIds, int? heldSheetDefId, CancellationToken ct)
     {
         var writable = new HashSet<int>();
+        var holdsAny = false;
 
         foreach (var sheetDefId in sheetDefIds.Distinct().Order())
         {
@@ -942,9 +951,10 @@ public sealed class RecalculationService(
                 continue;
             }
 
-            var status = await sheetGate
-                .EnterEditAsync(documentId, sheetDefId, periodKey, ct)
-                .ConfigureAwait(false);
+            var status = holdsAny
+                ? await sheetGate.EnterEditNoWaitAsync(documentId, sheetDefId, periodKey, ct).ConfigureAwait(false)
+                : await sheetGate.EnterEditAsync(documentId, sheetDefId, periodKey, ct).ConfigureAwait(false);
+            holdsAny = true;
 
             if (status is not (Domain.Enums.DocumentStatus.Submitted or Domain.Enums.DocumentStatus.Approved))
             {
@@ -1016,7 +1026,14 @@ public sealed class RecalculationService(
                 continue;
             }
 
-            var data = ToCellValue(result.Value);
+            // ⛔ C1-02 (аудит 2026-10-09c). Число формули — до масштабу СХОВИЩА
+            // (`decimal(34,16)`) ДО порівняння, запису й контексту. Ділення дає
+            // 28 знаків, а збережене читається з 16: `x / 3` інакше «змінювалось»
+            // на кожному прогоні (MERGE, аудит `старе = нове`, піднятий
+            // `RowVersion`), а залежна формула цього прогону бачила б інше число,
+            // ніж побачить наступного разу з бази.
+            var value = AsStored(result.Value);
+            var data = ToCellValue(value);
             if (data is null)
             {
                 continue;
@@ -1043,7 +1060,7 @@ public sealed class RecalculationService(
             // для каскаду. Різниця тут нульова за побудовою (значення те
             // саме), але залежність порядку — ні, і покласти цей рядок після
             // `continue` означало б завести її наново.
-            values[key] = result.Value;
+            values[key] = value;
 
             // ⛔ Директива №14 частина 3, `DAT-02` п. 1. Незмінене не
             // пишеться. Колонкова формула віддає ціль у КОЖНОМУ рядку
@@ -1464,6 +1481,22 @@ public sealed class RecalculationService(
         return await Registries.RegistryFieldSnapshotLoader
             .LoadAsync(registryStore, requests, ct, units).ConfigureAwait(false);
     }
+
+    /// <summary>Число виразу, приведене до масштабу сховища комірки.</summary>
+    /// <remarks>
+    /// ⛔ C1-02. Правило — те, яким значення реально лягає в <c>doc.CellValue</c>:
+    /// TVP <c>decimal(34,16)</c> округлює на шляху запису «від нуля»
+    /// (<see cref="MidpointRounding.AwayFromZero"/>; виміряно на SQL Server:
+    /// <c>0.00000000000000025 → 0.0000000000000003</c>,
+    /// <c>0.99999999999999999999 → 1.0000000000000000</c>). Те саме правило
+    /// вже тримають <c>RegistryValue</c> і <c>CellValueReader</c>. Інші типи
+    /// (і <c>double</c> діалекту <c>Legacy</c>) не чіпаються.
+    /// </remarks>
+    private static Ecr.Expressions.Evaluation.ExpressionValue AsStored(Ecr.Expressions.Evaluation.ExpressionValue value)
+        => value.Type == Ecr.Expressions.Ast.ExpressionValueType.Number && value.Value is decimal number
+            ? Ecr.Expressions.Evaluation.ExpressionValue.Number(
+                decimal.Round(number, Documents.CellValueReader.StorageScale, MidpointRounding.AwayFromZero))
+            : value;
 
     /// <summary>Значення виразу як значення комірки; <c>null</c> — записувати нічого.</summary>
     private static CellValueData? ToCellValue(Ecr.Expressions.Evaluation.ExpressionValue value)

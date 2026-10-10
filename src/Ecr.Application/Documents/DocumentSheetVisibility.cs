@@ -77,52 +77,53 @@ public static class DocumentSheetVisibility
     }
 
     /// <summary>
-    /// Аркуші, яких читач не бачить у жодному з проєктів, — для фільтра переліку за станом.
-    /// Ідентифікатор аркуша належить версії шаблону, тож плоский перелік по проєктах не плутається.
-    /// </summary>
-    /// <param name="samples">Порт, що дає по одному документу проєкту для побудови меж.</param>
-    /// <param name="access">Служба доступу.</param>
-    /// <param name="profile">Профіль читача.</param>
-    /// <param name="projects">Проєкти, документи яких перелічуються.</param>
-    /// <param name="periodKey">Період запиту.</param>
-    /// <param name="ct">Скасування.</param>
-    public static async Task<IReadOnlyCollection<int>?> HiddenSheetIdsAsync(
-        IDocumentListSummaryStore samples, IAccessDecisionService access, AccessProfile profile,
-        IReadOnlyCollection<int> projects, int periodKey, CancellationToken ct)
-        => (await HiddenFilterAsync(samples, access, profile, projects, periodKey, default, ct).ConfigureAwait(false))
-            .HiddenSheetDefIds;
-
-    /// <summary>
     /// Фільтр переліку з тим, чого читач не бачить: аркуші, таблиці й колонки (R-7: пізня правка схованого
-    /// не дає позначки). Читач без обмежень — <paramref name="filter"/> без змін, без запитів.
+    /// не дає позначки) — ПАРАМИ «проєкт, ідентифікатор» (N1-01). Читач без обмежень — <paramref name="filter"/>
+    /// без змін, без запитів.
     /// </summary>
     /// <param name="samples">Порт, що дає по одному документу проєкту для побудови меж.</param>
     /// <param name="access">Служба доступу.</param>
     /// <param name="profile">Профіль читача.</param>
     /// <param name="projects">Проєкти, документи яких перелічуються.</param>
+    /// <param name="projectId">Фільтр запиту за проєктом: межі рахуються лише для нього (N1-02); <c>null</c> — усі <paramref name="projects"/>.</param>
     /// <param name="periodKey">Період запиту; <c>null</c> — без періоду.</param>
     /// <param name="filter">Фільтр, який доповнюється.</param>
     /// <param name="ct">Скасування.</param>
-    public static async Task<DocumentListFilter> HiddenFilterAsync(
-        IDocumentListSummaryStore samples, IAccessDecisionService access, AccessProfile profile,
-        IReadOnlyCollection<int> projects, int? periodKey, DocumentListFilter filter, CancellationToken ct)
+    /// <returns>
+    /// Доповнений фільтр і межі, пораховані дорогою: їх варто передати в <see cref="ApplyAsync"/>, щоб не
+    /// будувати вдруге (<c>null</c> — читач без обмежень, нічого не рахувалось).
+    /// </returns>
+    /// <remarks>
+    /// ⛔ N1-01. Ідентифікатор аркуша належить ВЕРСІЇ шаблону, а версія спільна для кількох проєктів, тож
+    /// плаский перелік Id з меж усіх проєктів ховав би аркуш у документах B лише через <c>Deny Sheet</c> в A
+    /// (і навпаки — фільтр <c>state</c> брав би стан аркуша, схованого лише в A). Пара діє лише на документи
+    /// свого проєкту — як <c>SummaryRestrictions.HiddenSheets</c> зведення.
+    /// </remarks>
+    public static async Task<(DocumentListFilter Filter, IReadOnlyDictionary<int, DocumentReadScope>? Scopes)>
+        HiddenFilterAsync(
+            IDocumentListSummaryStore samples, IAccessDecisionService access, AccessProfile profile,
+            IReadOnlyCollection<int> projects, int? projectId, int? periodKey, DocumentListFilter filter,
+            CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(samples);
+        ArgumentNullException.ThrowIfNull(projects);
 
         if (!HasRestrictions(profile))
         {
-            return filter;
+            return (filter, null);
         }
 
-        var sample = await samples.SampleDocumentPerProjectAsync(projects, ct).ConfigureAwait(false);
+        // ⛔ N1-02: запит звужений до одного проєкту — межі інших проєктів не потрібні ні фільтру, ні сторінці.
+        IReadOnlyCollection<int> scoped = projectId is { } only ? [.. projects.Where(p => p == only)] : projects;
+        var sample = await samples.SampleDocumentPerProjectAsync(scoped, ct).ConfigureAwait(false);
         var scopes = await ScopesAsync(access, profile, sample.Select(s => (s.Key, s.Value)), periodKey, ct)
             .ConfigureAwait(false);
 
-        return filter with
+        var narrowedFilter = filter with
         {
-            HiddenSheetDefIds = [.. scopes.Values.SelectMany(s => s.HiddenSheetIds()).Distinct().Order()],
-            HiddenTableDefIds = [.. scopes.Values.SelectMany(s => s.HiddenTableIds()).Distinct().Order()],
-            HiddenColumnDefIds = [.. scopes.Values.SelectMany(s => s.HiddenColumnIds()).Distinct().Order()],
+            HiddenSheetDefIds = [.. scopes.OrderBy(s => s.Key).SelectMany(s => s.Value.HiddenSheetIds().Select(id => (s.Key, id)))],
+            HiddenTableDefIds = [.. scopes.OrderBy(s => s.Key).SelectMany(s => s.Value.HiddenTableIds().Select(id => (s.Key, id)))],
+            HiddenColumnDefIds = [.. scopes.OrderBy(s => s.Key).SelectMany(s => s.Value.HiddenColumnIds().Select(id => (s.Key, id)))],
 
             // ⛔ Фільтр resultsStale не бачить проєктів зі звуженням (та сама межа, що й у зведенні): список
             // потрібен лише йому, тож решту запитів фільтр не обтяжує і не змінює.
@@ -130,6 +131,8 @@ public static class DocumentSheetVisibility
                 ? filter.NarrowedProjectIds
                 : [.. scopes.Where(s => IsProjectNarrowed(s.Value)).Select(s => s.Key).Order()],
         };
+
+        return (narrowedFilter, scopes);
     }
 
     /// <summary>
@@ -146,12 +149,16 @@ public static class DocumentSheetVisibility
 
     /// <summary>Межі читача як фільтр «що схованo» для одного документа (позначка пізніх правок картки).</summary>
     /// <param name="scope">Межі читання проєкту документа.</param>
-    public static DocumentListFilter HiddenOf(DocumentReadScope scope)
+    /// <param name="projectId">Проєкт документа (пари «проєкт, Id», N1-01).</param>
+    public static DocumentListFilter HiddenOf(DocumentReadScope scope, int projectId)
     {
         ArgumentNullException.ThrowIfNull(scope);
 
         return new DocumentListFilter(
-            null, null, null, scope.HiddenSheetIds(), scope.HiddenTableIds(), scope.HiddenColumnIds());
+            null, null, null,
+            [.. scope.HiddenSheetIds().Select(id => (projectId, id))],
+            [.. scope.HiddenTableIds().Select(id => (projectId, id))],
+            [.. scope.HiddenColumnIds().Select(id => (projectId, id))]);
     }
 
     /// <summary>
@@ -235,10 +242,14 @@ public static class DocumentSheetVisibility
     /// <param name="profile">Профіль читача.</param>
     /// <param name="documents">Документи зі сховища.</param>
     /// <param name="periodKey">Період запиту.</param>
+    /// <param name="known">
+    /// Межі, вже пораховані <see cref="HiddenFilterAsync"/> (N1-02): проєкти з них не будуються вдруге;
+    /// проєкт, якого там нема, добудовується як звичайно. <c>null</c> — нічого не відомо.
+    /// </param>
     /// <param name="ct">Скасування.</param>
     public static async Task<List<DocumentSummary>> ApplyAsync(
         IAccessDecisionService access, AccessProfile profile, IReadOnlyList<DocumentSummary> documents,
-        int? periodKey, CancellationToken ct)
+        int? periodKey, IReadOnlyDictionary<int, DocumentReadScope>? known, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(documents);
 
@@ -247,8 +258,17 @@ public static class DocumentSheetVisibility
             return [.. documents];
         }
 
-        var scopes = await ScopesAsync(access, profile, documents.Select(d => (d.ProjectId, d.Id)), periodKey, ct)
-            .ConfigureAwait(false);
+        var scopes = known is null
+            ? new Dictionary<int, DocumentReadScope>()
+            : new Dictionary<int, DocumentReadScope>(known);
+        var missing = documents.Where(d => !scopes.ContainsKey(d.ProjectId)).Select(d => (d.ProjectId, d.Id)).ToList();
+        if (missing.Count > 0)
+        {
+            foreach (var (project, scope) in await ScopesAsync(access, profile, missing, periodKey, ct).ConfigureAwait(false))
+            {
+                scopes[project] = scope;
+            }
+        }
 
         return [.. documents.Select(d => For(d, scopes[d.ProjectId]))];
     }

@@ -142,9 +142,24 @@ internal sealed class AccountAndNetworkStep : IWizardStep
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
 
-        _portUpDown = new NumericUpDown { Minimum = 1, Maximum = 65535, Value = 5000, Width = 100 };
+        // ⛔ R9-F5/F5-02: типово — порт, який зараз слухає встановлена служба (MSI його не пам'ятає, а
+        // майстер завжди передає -AppPort): оновлення не переносить службу з 443 на 5000 мовчки.
+        var currentPort = WizardState.PortFromServiceEnvironment(DeployRunner.ReadApiServiceEnvironment());
+        _portUpDown = new NumericUpDown { Minimum = 1, Maximum = 65535, Value = currentPort ?? 5000, Width = 100 };
         layout.Controls.Add(new Label { Text = "Port:", AutoSize = true, Margin = new Padding(0, 6, 6, 0) }, 0, 0);
         layout.Controls.Add(_portUpDown, 1, 0);
+        if (currentPort is not null)
+        {
+            layout.Controls.Add(
+                new Label
+                {
+                    Text = $"(the installed service listens on {currentPort.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)})",
+                    AutoSize = true,
+                    Margin = new Padding(6, 6, 0, 0),
+                },
+                2,
+                0);
+        }
 
         _msiPathBox = new TextBox { Dock = DockStyle.Fill };
 

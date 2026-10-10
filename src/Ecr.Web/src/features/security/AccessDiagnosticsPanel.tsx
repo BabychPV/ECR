@@ -53,8 +53,11 @@ export function AccessDiagnosticsPanel({
       )}
 
       {view.groupsFromTicket && view.groups.length > 0 && view.unmatchedSids.length > 0 && (
-        <Alert color="statusWarning" title={t('myGroups.unmatchedTitle')}>
-          {t('myGroups.unmatchedHint', { count: view.unmatchedSids.length })}
+        <Alert
+          color="statusWarning"
+          title={t('myGroups.unmatchedTitle', { count: view.unmatchedSids.length })}
+        >
+          {t('myGroups.unmatchedHint')}
         </Alert>
       )}
 

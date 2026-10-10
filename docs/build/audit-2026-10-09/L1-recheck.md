@@ -1,0 +1,7 @@
+# L1 recheck (agent a25cc400): 16 FIXED, L1-16 N/A D-286, PARTIAL L1-03, L1-10, REGRESSED L1-11, L1-21 tail.
+L1-03 PARTIAL: LoginHandler.cs:121-144 — lost race after lockout returns 423 for correct password vs 401 for wrong -> password oracle in parallel batch; budget Max+parallelism remains. Fix: throw InvalidCredentials() instead of Locked(user) on TryRegisterSuccessfulLoginAsync false; test FailedAttemptAtomicTests.cs:178 -> ECR-AUTH-0401. Full: reserve attempt before Verify.
+L1-10 PARTIAL: DocumentRecalculateQuota.cs:94-96 NumberStyles.None; route {id:long} accepts +5 -> per-doc 6/min bypass. Fix NumberStyles.Integer; test "+5".
+L1-11 REGRESSED: e8503409 (A2-11) after 30e875c3: PublicHealthReason.cs Phrases "session keys not protected"/"key ring certificate unavailable" returned to anonymous /health/ready (HealthResponse.cs:101-104; DatabaseHealthCheck.cs:119,142); test HealthReadyPublicDescriptionTests.cs:55-66 pins leak. Fix AdminOnly set -> Generic; tests HealthReadyPublicDescriptionTests.cs:65, DatabaseHealthUnprotectedKeysTests.cs:39. Human: RCSI/filegroups phrases?
+L1-21 tail: client comments claim server reads ecr:lang: api/client.ts:237, api/__tests__/requestLanguage.test.ts:9, shared/i18n/index.ts:162.
+L1-18 tail: limit 200 before filter (WQ:165).
+WQ stale: row 98 (L1-19/L1-20 done e4e00db5/41fbc95e/ce1097ce), 139 (L1-04 in HEAD be225648), 134-135 (L1-09/L1-18 actually code-fixed 36982567, 9c52b281, 8de63d2b), 62 AN-26 todo (done fe98d7f2,a69f4460,bc77f2d1).

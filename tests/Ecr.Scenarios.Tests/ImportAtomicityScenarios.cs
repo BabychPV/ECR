@@ -59,21 +59,24 @@ public sealed class ImportAtomicityScenarios(SqlServerFixture sql)
         var doc = await ArrangeThreeTableDocumentAsync(app, admin);
         admin = doc.Admin;
 
-        // 1. У кожній із трьох таблиць — число 1. Це стан, який потрапить у книгу.
+        // 1. У кожній із трьох таблиць — число 1, потім 2. У книгу потрапляє 2.
         foreach (var (_, instanceId) in doc.Tables)
         {
             await WriteAsync(app, admin.Client, doc, instanceId, 1m);
         }
 
-        var book = await ExportAsync(app, admin.Client, doc);
-
-        // 2. Після вивантаження всі три числа стають 2. Тепер книга розходиться
-        //    з базою в УСІХ трьох таблицях — саме це й робить diff книгою, а не
-        //    правкою однієї таблиці.
         foreach (var (_, instanceId) in doc.Tables)
         {
             await WriteAsync(app, admin.Client, doc, instanceId, 2m);
         }
+
+        // 2. Людина в книзі повертає всі три числа на 1. Тепер книга розходиться
+        //    з базою в УСІХ трьох таблицях — саме це й робить diff книгою, а не
+        //    правкою однієї таблиці.
+        // ⛔ D1-02: розбіжність — ПРАВКОЮ КНИГИ, а не записом у базу після
+        //    експорту. Книга, вивантажена до чужого запису, тепер дає конфлікт
+        //    рядка в перегляді (`importRowChangedSinceExport`), а не зміну.
+        var book = EditAll(await ExportAsync(app, admin.Client, doc), to: 1m);
 
         var staleToken = await PreviewAsync(app, admin.Client, doc.DocumentId, book);
 
@@ -114,9 +117,14 @@ public sealed class ImportAtomicityScenarios(SqlServerFixture sql)
         // (г) Задач перерахунку поставлено НУЛЬ.
         Assert.Equal(jobsBefore, await FormulaJobsAsync());
 
-        // 4. Та сама книга, перегляд побудований заново — застосовується цілком
-        //    і ставить РІВНО ОДНУ задачу на документ, а не одну на таблицю.
-        var freshToken = await PreviewAsync(app, admin.Client, doc.DocumentId, book);
+        // 4. Книга, вивантажена заново і так само виправлена людиною, —
+        //    застосовується цілком і ставить РІВНО ОДНУ задачу на документ, а
+        //    не одну на таблицю.
+        // ⛔ D1-02: саме ЗАНОВО. Стара книга вивантажена до запису 3 у TABLE2, і
+        //    її перегляд тепер дає конфлікт рядка, а не зміну (окремий тест —
+        //    `ExcelImportRowVersionConflictTests`).
+        var freshBook = EditAll(await ExportAsync(app, admin.Client, doc), to: 1m);
+        var freshToken = await PreviewAsync(app, admin.Client, doc.DocumentId, freshBook);
         var jobsBeforeSuccess = await FormulaJobsAsync();
 
         var applied = await admin.Client.PostAsJsonAsync(
@@ -342,6 +350,28 @@ public sealed class ImportAtomicityScenarios(SqlServerFixture sql)
         Assert.True(row.ValueKind == JsonValueKind.Object, $"рядка R1 немає у зрізі: {body.GetRawText()}");
 
         return row;
+    }
+
+    /// <summary>
+    /// Книга, у якій людина замінила кожне число аркуша даних на
+    /// <paramref name="to"/> (у кожній таблиці воно одне — <c>R1.A</c>).
+    /// </summary>
+    private static byte[] EditAll(byte[] book, decimal to)
+    {
+        using var workbook = new ClosedXML.Excel.XLWorkbook(new MemoryStream(book));
+        var sheet = workbook.Worksheets.First(w => w.Visibility == ClosedXML.Excel.XLWorksheetVisibility.Visible);
+        var cells = sheet.CellsUsed(c => c.DataType == ClosedXML.Excel.XLDataType.Number).ToList();
+
+        Assert.Equal(TableCodes.Length, cells.Count);
+        foreach (var cell in cells)
+        {
+            cell.Value = to;
+        }
+
+        using var output = new MemoryStream();
+        workbook.SaveAs(output);
+
+        return output.ToArray();
     }
 
     /// <summary>Вивантажує книгу документа тим самим шляхом, що й користувач.</summary>

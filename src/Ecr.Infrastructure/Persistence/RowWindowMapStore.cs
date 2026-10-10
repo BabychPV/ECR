@@ -1,6 +1,7 @@
 using Ecr.Application.Ports;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Entities.External;
+using Ecr.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
 
 namespace Ecr.Infrastructure.Persistence;
@@ -54,6 +55,60 @@ public sealed class RowWindowMapStore(EcrDbContext db) : IRowWindowMapStore
         ArgumentNullException.ThrowIfNull(map);
 
         db.RemoveRange(map.Sources);
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<RowWindowFetchRequest>> OpenInstancesAsync(
+        int tableDefId, long? afterTableInstanceId, int limit, CancellationToken ct)
+    {
+        // Ідентичність починається з 1: «після 0» — перша сторінка (Z6-02: keyset замість однієї стелі).
+        var after = afterTableInstanceId ?? 0;
+
+        // Стан — того періоду проєкту документа, якому належить екземпляр: Scheduled ще нема що рахувати,
+        // закритий не змінюється (так само відсіює й сама задача підтягування).
+        var instances = await (
+                from t in db.TableInstances.AsNoTracking()
+                join d in db.Documents.AsNoTracking() on t.DocumentId equals d.Id
+                join p in db.Periods.AsNoTracking()
+                    on new { d.ProjectId, t.PeriodKeyValue } equals new { p.ProjectId, p.PeriodKeyValue }
+                where t.TableDefId == tableDefId
+                      && t.Id > after
+                      && (p.State == PeriodState.Open || p.State == PeriodState.Grace)
+                orderby t.Id
+                select new { t.Id, t.PeriodKeyValue })
+            .Take(limit)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        return [.. instances.Select(i => new RowWindowFetchRequest(i.Id, i.PeriodKeyValue))];
+    }
+
+    /// <inheritdoc />
+    public async Task<int> SupersedeFoldedValuesAsync(
+        int rowWindowMapId, IReadOnlyList<RowWindowFetchRequest> instances, int sourceEntityId, string sourceField, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(instances);
+        ArgumentException.ThrowIfNullOrWhiteSpace(sourceField);
+
+        if (instances.Count == 0)
+        {
+            return 0;
+        }
+
+        var ids = instances.Select(i => i.TableInstanceId).Distinct().ToList();
+        var periods = instances.Select(i => i.PeriodKey).Distinct().ToList();
+
+        // Запитом, а не через трекер — як і зняття чинного в RowWindowFetchJob (L3-03); ключ партиції в умові.
+        return await db.RowWindowValues
+            .Where(v => v.IsCurrent
+                        && v.RowWindowMapId == rowWindowMapId
+                        && periods.Contains(v.PeriodKey)
+                        && ids.Contains(v.TableInstanceId)
+                        && v.SourceEntityId == sourceEntityId
+                        && v.SourceField == sourceField
+                        && (v.Status == RowWindowValueStatus.Fetched || v.Status == RowWindowValueStatus.Partial))
+            .ExecuteUpdateAsync(set => set.SetProperty(v => v.IsCurrent, false), ct)
+            .ConfigureAwait(false);
     }
 
     /// <inheritdoc />

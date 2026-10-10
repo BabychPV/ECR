@@ -36,8 +36,22 @@ public sealed record LoginResult(
 /// і однакова не лише за текстом, а й за часом: інакше ендпоінт стає засобом
 /// перебору імен, а перебір імен — половина роботи зловмисника.
 /// </remarks>
+/// <param name="users">Сховище облікових записів.</param>
+/// <param name="hasher">Хешер паролів.</param>
+/// <param name="uow">Одиниця роботи.</param>
+/// <param name="clock">Годинник.</param>
+/// <param name="logger">Журнал.</param>
+/// <param name="disableBootstrap">
+/// Вимкнення bootstrap після Windows-входу доменного адміністратора (S1-01).
+/// У продукті його завжди дає DI; <c>null</c> — лише в тестах, яким цей крок не потрібен.
+/// </param>
 public sealed partial class LoginHandler(
-    IUserStore users, IPasswordHasher hasher, IUnitOfWork uow, IClock clock, ILogger<LoginHandler> logger)
+    IUserStore users,
+    IPasswordHasher hasher,
+    IUnitOfWork uow,
+    IClock clock,
+    ILogger<LoginHandler> logger,
+    DisableBootstrapAdminHandler? disableBootstrap = null)
 {
     /// <summary>
     /// Хеш, об який «перевіряється» пароль неіснуючого користувача.
@@ -136,11 +150,15 @@ public sealed partial class LoginHandler(
 
         // ⛔ L1-03: успіх фіксується ОДНИМ UPDATE з умовою «не заблоковано». Сутність `user` прочитано до паралельних
         // хибних спроб; її запис через EF знімав виставлене ними блокування, і правильний пароль з пачки підбору
-        // отримував cookie після блокування. 0 рядків — запис заблоковано (чи зник): відмова як на заблокований.
+        // отримував cookie після блокування. 0 рядків — запис заблоковано (чи зник): відмова як на хибний пароль.
         if (!await users.TryRegisterSuccessfulLoginAsync(user.Id, now, ct).ConfigureAwait(false))
         {
+            // ⛔ L1-03: тут саме 401, а не 423. Хибні спроби тієї ж пачки дістають 401, тож 423 для єдиного
+            // «іншого» запиту розрізняв би правильний пароль у пачці підбору (оракул). Законний власник на
+            // наступній спробі однаково отримає 423 — з гілки IsLockedOut вище. Повне резервування спроби до
+            // Verify (бюджет «Max + паралельність») — AN-90.
             await FailAsync(userName, "LockedOut", ipAddress, now, ct).ConfigureAwait(false);
-            throw Locked(user);
+            throw InvalidCredentials();
         }
 
         users.RecordAttempt(new LoginAttempt(userName, AuthProvider.Local, true, now, ipAddress));
@@ -220,6 +238,19 @@ public sealed partial class LoginHandler(
 
         if (user is null)
         {
+            // ⛔ X5-01: ім'я з квитка вже зайняте записом з ІНШИМ SID — друкарська помилка в
+            // SID, набраному в `POST /users`, або локальний запис з тим самим ім'ям. Раніше
+            // `CreateDomain` падав на `UQ_User_Name`: 500, а невдала спроба відкочувалась разом
+            // зі збоєм — на екрані безпеки слідів не було. Тепер 409 з причиною, спроба в журналі
+            // входів, а Warning каже адміністраторові, який запис виправити і на який SID
+            // (`PUT /users/{id}/windows-sid`, поки запис ще не входив).
+            if (await users.FindByUserNameAsync(userName, ct).ConfigureAwait(false) is { } taken)
+            {
+                await FailAsync(userName, "SidMismatch", ipAddress, now, ct).ConfigureAwait(false);
+                LogSidMismatch(logger, userName, taken.Id, sid);
+                throw SidMismatch(userName, sid);
+            }
+
             user = User.CreateDomain(userName, displayName, sid, now);
             users.Add(user);
         }
@@ -244,6 +275,16 @@ public sealed partial class LoginHandler(
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
 
         var assigned = await MatchGroupsAsync(user.Id, userName, groupSids, now, ct).ConfigureAwait(false);
+
+        // ⛔ S1-01 (аудит 5): доменний адміністратор рахується лише після
+        // СВОГО входу — до того його SID ніщо не підтверджує, і запис із
+        // друкарською помилкою вимикав bootstrap, лишаючи систему без
+        // адміністратора. Тож вимикає bootstrap саме цей вхід (D-97: «щойно
+        // з'явився») — після коміту `LastSignInAt` вище, інакше запит його не бачить.
+        if (disableBootstrap is not null)
+        {
+            await disableBootstrap.HandleAsync(user.Id, ct).ConfigureAwait(false);
+        }
 
         return new LoginResult(
             user.Id, user.UserName, user.DisplayName, user.SecurityStamp, MustChangePassword: false, assigned);
@@ -336,6 +377,33 @@ public sealed partial class LoginHandler(
                   + "SID у квитку: {SidCount} ({Sids}). Особистих призначень: {PersonalRoles}.")]
     private static partial void LogNoGroupMatch(
         ILogger logger, string userName, int sidCount, string sids, int personalRoles);
+
+    /// <summary>Рядок журналу про Windows-вхід, чиє ім'я зайняте записом з іншим SID (X5-01).</summary>
+    /// <param name="logger">Журнал.</param>
+    /// <param name="userName">Ім'я входу з квитка.</param>
+    /// <param name="userId">Запис, що тримає ім'я.</param>
+    /// <param name="sid">SID із квитка — на нього запис і треба виправити.</param>
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "Windows-вхід {UserName} відхилено: ім'я зайняте записом #{UserId} з іншим SID. "
+                  + "SID у квитку: {Sid}. Виправлення — PUT /api/v1/users/<id запису>/windows-sid, поки запис не входив.")]
+    private static partial void LogSidMismatch(ILogger logger, string userName, int userId, string sid);
+
+    /// <summary>Відмова Windows-входу: ім'я входу прив'язане до іншого SID (X5-01).</summary>
+    /// <remarks>
+    /// ⚠ SID у подробиці — власний SID того, хто входить (його вже автентифікував домен):
+    /// людині є що передати адміністраторові. Ключ — у ПУБЛІЧНІЙ області, як
+    /// <c>invalidCredentials</c>: це екран входу.
+    /// </remarks>
+    private static BusinessRuleException SidMismatch(string userName, string sid)
+        => new(
+            "ECR-USR-0409", $"Обліковий запис «{userName}» прив'язаний до іншого SID; зверніться до адміністратора.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-USR-0409.windowsSidMismatch",
+                ["userName"] = userName,
+                ["sid"] = sid,
+            });
 
     /// <summary>Записує невдалу спробу і зберігає зміни.</summary>
     private async Task FailAsync(

@@ -47,6 +47,9 @@
   DATABASE` на інстансі для облікового запису, яким запущено крок 3/6
   майстра (чи `-SqlLogin`/інтегровані облікові дані `deploy-ecr.ps1`
   напряму). База НІКОЛИ не видаляється — лише створюється за відсутності.
+  ✎ R5-U1/U1-04: створюється лише при **першому** розгортанні (`-FirstDeployment`,
+  у майстрі — «First deployment»). Оновлення базу не створює: відсутня база
+  означає хибне ім'я, і майстер (крок бази) та скрипт зупиняються.
 
   > ⛔ **✎ 2026-09-18 (директива №14 §9, `R-07`). «Express достатньо» —
   > неправда, і відмова від неї тиха.** На Express продукт установиться,
@@ -83,6 +86,14 @@
   кроці 1; рівень сумісності бази нижче 130 зупиняє старт застосунку
   (`ECR-SYS-5031`, `SchemaValidator`). Яку редакцію знайдено і який
   `Database:EditionMode` із цього вийшов, скрипт друкує — розділ 2.5.
+- ✎ 2026-10-09 (`D-333`, L10-04): **сертифікат SQL Server, якому довіряє сервер
+  застосунку.** З'єднання з SQL завжди шифроване (`Encrypt=Mandatory`), і типово
+  сертифікат сервера **перевіряється** (`TrustServerCertificate=False`, `sqlcmd` без
+  `-C`): ланцюг до кореня з `LocalMachine\Root`, ім'я (CN/SAN) — те, що вказано як
+  екземпляр SQL Server у майстрі чи `-SqlInstance`. Самопідписаний сертифікат, який
+  SQL Server генерує сам, перевірку **не проходить** — для нього (лише стенд) є
+  свідомий прапорець «Trust the SQL Server certificate (unsafe)» у майстрі та
+  `-TrustServerCertificate` у `deploy-ecr.ps1` (розділ 2.2, «Сертифікат SQL Server»).
 - Порт для Kestrel (типово `5000`) вільний.
 - **Більше нічого.** `Ecr-Setup-<версія>.exe` (розділ 1, 2.1) — self-contained
   single-file: жодного .NET SDK чи Runtime, жодного Node, жодного
@@ -273,7 +284,18 @@ Import-Certificate -FilePath .\ecr-release-signing.cer -CertStoreLocation Cert:\
    «HTTP — лише стенд». Без явного вибору далі не пустить; докладно — розділ 2.7.
    HTTPS слухає на порту з кроку 2 (для `https://сервер/` — 443).
 5. **Database** — SQL Server, назва бази, автентифікація
-   (Windows або SQL-логін).
+   (Windows або SQL-логін). ✎ 2026-10-09 (`D-333`): прапорець **«Trust the SQL Server
+   certificate (unsafe)»** — типово вимкнений, і тоді сертифікат SQL перевіряється
+   (`TrustServerCertificate=False` у рядку служби, `sqlcmd` без `-C`). Увімкнути —
+   лише для самопідписаного сертифіката на стенді; майстер показує попередження тут
+   і червоний рядок «SQL Server certificate» на екрані Review.
+   ✎ 2026-10-09 (AN-117, S2-04): у режимі «Update» (без «Schema already applied separately»)
+   на «Next» майстер тим самим запитом, що й `deploy-ecr.ps1`, читає `msdb.dbo.backupset`:
+   повна чи диференційна копія не старша за 24 год — далі; інакше зупиняє з підказкою
+   `BACKUP DATABASE … WITH COPY_ONLY, CHECKSUM`. Копію, зроблену поза SQL Server (VSS-засіб,
+   інший вузол AG), визнає лише явна позначка **«A backup was made outside SQL Server / I accept
+   the risk»** — тоді й лише тоді майстер передає `-SkipBackupCheck`, а на екрані Review рядок
+   «Database backup» червоний.
 6. **Administrator Password** — лише в режимі «First deployment»;
    у режимі «Update» цей екран пропускається сам.
 7. **Review** — підсумок усього вище, **без жодного значення пароля**
@@ -339,6 +361,15 @@ HTTP вхід з інших машин не працює. Докладно — �
 читання його закритого ключа. Докладно — `docs/admin/operations-runbook.md`
 п. 2.1 і п. 6.4 (ротація відкритих ключів після першого ввімкнення).
 
+⛔ **Сертифікат SQL Server** (✎ 2026-10-09, `D-333`, L10-04). Без перемикача
+`-TrustServerCertificate` скрипт викликає `sqlcmd` **без `-C`**: SQL Server має
+пред'явити сертифікат, якому довіряє ця машина, з іменем, що збігається з
+`-SqlInstance`. `-TrustServerCertificate` — свідомий вибір для самопідписаного
+сертифіката (стенд): сервер не автентифікується, скрипт друкує попередження.
+Перемикач стосується лише викликів `sqlcmd` самого скрипта; рядок служби
+`-ConnectionString` складаєте ви — у ньому `Encrypt=Mandatory;TrustServerCertificate=False`
+(або `True` за тим самим свідомим вибором).
+
 ⛔ **Викликати САМЕ так** (`.\deploy-ecr.ps1 ...`), а НЕ
 `pwsh -File .\deploy-ecr.ps1 ...` і не через новий процес: `-ConnectionString`/
 `-BootstrapPassword`/`-ServicePassword` — `SecureString`, а `SecureString`
@@ -349,7 +380,7 @@ HTTP вхід з інших машин не працює. Докладно — �
 **Що робить цей один виклик** (детально — `docs/build/10-installer.md`
 §10): перевіряє передумови → накочує схему БД → встановлює MSI → пише
 секрети в реєстр служби → пише нЕсекретну конфігурацію → (лише якщо
-задано `-ServiceAccount`, розділ 2.2) стартує службу й чекає, поки
+задано `-ServiceAccount`, розділ 2.3) стартує службу й чекає, поки
 `/health/live` відповість.
 
 ⚠ **Без `-ServiceAccount` (як у прикладі вище) служба реєструється, але
@@ -358,15 +389,25 @@ HTTP вхід з інших машин не працює. Докладно — �
 («Служба не відповіла за відведений час»): він чесно чекає на
 `/health/live` до кінця, а стартувати службу без облікового запису
 свідомо не буде. Це не збій установки — усі попередні 6 кроків уже
-відпрацювали. Далі вручну:
+відпрацювали. Далі вручну — ✎ 2026-10-10 (R9-F5/F5-04) **обидві** служби: воркер ставиться типово
+(I2-2), і `EcrApi` записано `Executor=Worker`, тож без `EcrWorker` кожен перерахунок стоїть у черзі (скрипт
+про це теж попереджає жовтим):
 
 ```powershell
 Start-Service EcrApi
-Invoke-WebRequest http://localhost:5000/health/live -UseBasicParsing
+if (Get-Service EcrWorker -ErrorAction SilentlyContinue) { Start-Service EcrWorker }
+# Адреса — як у виклику: з -HttpsThumbprint -AppPort 443 — https://<ім'я з сертифіката HTTPS>/health/live;
+# з -AllowHttp чи -BehindHttpsProxy — http://localhost:<AppPort>/health/live (типово 5000).
+Invoke-WebRequest 'https://<ім''я з сертифіката HTTPS>/health/live' -UseBasicParsing
 ```
 
+⚠ Без `-ServiceAccount` **обидві** служби мають тип запуску `Manual` (L10-03, `docs/build/10-installer.md`
+§1.4): після **кожного перезавантаження** сервера (патчі ОС) і кожного оновлення вони лишаються зупиненими,
+доки хтось не виконає цей блок знову. Для контуру, що має переживати перезавантаження без людини, — розділ 2.3
+(`-ServiceAccount`: тип запуску `Automatic`, скрипт стартує служби сам).
+
 Якщо потрібно, щоб `deploy-ecr.ps1` сам довів справу до працюючої
-служби за один виклик, без ручного `Start-Service` — дивись 2.2.
+служби за один виклик, без ручного `Start-Service` — дивись 2.3.
 
 ### 2.3 Якщо служба має працювати під окремим обліковим записом {#2-3-обліковий-запис}
 
@@ -384,9 +425,11 @@ $svcPass = Read-Host -AsSecureString -Prompt 'Пароль облікового 
 ... -ServiceAccount 'DOMAIN\ecr-svc' -ServicePassword $svcPass
 ```
 
-Без `-ServiceAccount` служба піднімається під `LocalSystem` — цього
-достатньо для тестового/внутрішнього контуру, якщо `LocalSystem` має
-доступ до SQL Server (Windows-автентифікація комп'ютера).
+Без `-ServiceAccount` служби реєструються під `LocalSystem` з типом запуску `Manual` і **не стартують
+самі** — ні після встановлення, ні після перезавантаження (✎ 2026-10-10, R9-F5/F5-04; L10-03). Це
+годиться лише для стенда, де після кожного перезавантаження й оновлення хтось вручну стартує `EcrApi`
+**і** `EcrWorker` (блок «Далі вручну» в 2.2), і лише якщо `LocalSystem` має доступ до SQL Server
+(Windows-автентифікація комп'ютера). Робочий контур — з `-ServiceAccount`.
 
 ⚠ **Кілька екземплярів на одному хості.** Дві служби ECR **однієї ролі**
 (дві Api чи перекритий рецикл пулу; два воркери) на **ту саму** базу на одній
@@ -606,9 +649,15 @@ cookie `Secure` працює, бо браузер говорить із прок
 - Застосунок **не довіряє `X-Forwarded-*`** (`UseForwardedHeaders` не вмикається).
   Наслідок: він бачить запит як HTTP, тож **HSTS не віддає** — ставте його на
   проксі; перенаправлення `http` → `https` — теж на проксі.
-- Обмежувач входу рахує IP клієнта як адресу проксі. Щоб він брав `X-Forwarded-For`,
-  задайте `ECR_Security__RateLimit__TrustForwardedFor=true` — **лише** коли цей
-  заголовок ставить довірений проксі, а прямого доступу до порту Kestrel немає.
+- Обмежувач входу рахує IP клієнта як адресу проксі: без прапорця нижче всі користувачі
+  ділять одне вікно 60 входів/хв. Щоб він брав `X-Forwarded-For`, задайте
+  `ECR_Security__RateLimit__TrustForwardedFor=true` і `ECR_Security__RateLimit__KnownProxies=<IP проксі>`
+  (через кому, якщо їх кілька). Ланцюг читається **справа наліво**: IIS ARR і nginx
+  (`$proxy_add_x_forwarded_for`) **дописують** адресу клієнта праворуч до того, що прислав
+  сам клієнт, тож клієнтом вважається найправіший запис, що не є адресою з `KnownProxies`;
+  ліві записи (їх може підробити будь-хто) не враховуються. Із `KnownProxies` заголовок
+  читається лише від проксі; без нього — від будь-кого, тож тоді прямого доступу до порту
+  Kestrel бути не може (старт пише попередження). Подробиці — `operations-runbook.md` §2.1.
 - **Закрийте порт Kestrel брандмауером для всіх, крім проксі:** служба слухає http на
   всіх інтерфейсах (скрипт про це попереджає), а вхід у нього напряму все одно не
   працюватиме (cookie `Secure`), але порт відкритий.
@@ -717,12 +766,27 @@ Data Protection не захищені сертифікатом. Тому заз�
 сервер, і:
 
 ```powershell
+# ✎ R8-Z7-02: обліковий запис, під яким служба працює ЗАРАЗ (MSI його не пам'ятає):
+(Get-CimInstance Win32_Service -Filter "Name='EcrApi'").StartName
+
 .\tools\deploy-ecr.ps1 `
-    -SqlInstance 'ІМ''Я_СЕРВЕРА\SQLEXPRESS' -Database 'ECR' `
+    -SqlInstance 'ІМ''Я_СЕРВЕРА' -Database 'ECR' `
     -MsiPath '.\Ecr.msi' -ConnectionString $cs `
+    -ServiceAccount 'DOMAIN\ecr-svc$' `
     -DataProtectionThumbprint '<відбиток сертифіката з Cert:\LocalMachine\My>' `
     -HttpsThumbprint '<відбиток сертифіката HTTPS>' -AppPort 443
 ```
+
+⛔ ✎ 2026-10-10 (R8-Z7-02): `-ServiceAccount` — **той самий, що показав `StartName`**, на КОЖНОМУ
+оновленні (звичайний, не gMSA, обліковий запис — ще й `-ServicePassword`, розділ 2.3). Пропускайте його
+лише якщо `StartName` = `LocalSystem` (служба й так під ним, розділ 2.1). Інакше `MajorUpgrade`
+перереєструє `EcrApi`/`EcrWorker` під `LocalSystem` з типом запуску `Manual`, крок 6 їх не стартує,
+крок 7 не дочекається `/health/live` — простій. Повтор скрипта з `-ServiceAccount` **тим самим**
+`.msi` обліковий запис не поверне: для вже встановленого продукту це режим обслуговування (runbook
+§10.2). Лікування — `msiexec /i Ecr.msi /qn /l*v reinstall.log REINSTALL=ALL REINSTALLMODE=vomus
+SERVICE_ACCOUNT=<той самий> WORKER_ENABLED=<1 або 0>` (звичайний обліковий запис — ще й
+`SERVICE_PASSWORD`), потім знову цей виклик `deploy-ecr.ps1`, але з `-SkipSchema` (`Environment` і
+старт). Якщо там SQL Server Express — додайте `-AllowExpress` (без нього крок 1 зупиниться).
 
 (без `-BootstrapPassword` і без `-FirstDeployment` — це не перше
 розгортання; `-ConnectionString`, `-DataProtectionThumbprint` і параметр
@@ -742,8 +806,16 @@ Data Protection не захищені сертифікатом. Тому заз�
 попереджає перед `msiexec`, якщо так прибирається наявна служба).
 
 `MajorUpgrade` сам знімає стару версію й ставить нову
-(`docs/build/10-installer.md` §1.5) — простою бути не мало б, окрім
-короткої паузи на рестарт служби. Конфігурація в `%ProgramData%\ECR\config\`
+(`docs/build/10-installer.md` §1.5). ✎ 2026-10-09 (S2-04, HU-13 Q3): **простій є** —
+від зміни схеми (крок 2/7) до старту нової версії (крок 6/7) ✎ 2026-10-10 (R8-Z7-01):
+тривалість залежить від бази й **не заміряна**: перше оновлення з RC16 чи старішої
+версії будує офлайн (на будь-якій редакції, Enterprise теж) індекс `IX_CalculationResult_DocRun` на
+всій `calc.CalculationResult`; вікно — за пробним прогоном на копії (runbook §8.2, «Індекси
+`calc.CalculationResult` з `07-partition-tables.sql`»). Перед
+першим скриптом схеми `deploy-ecr.ps1` зупиняє `EcrWorker` і `EcrApi`, а ще раніше
+вимагає свіжу копію бази (`msdb.dbo.backupset`, не старша за `-BackupMaxAgeHours`,
+типово 24 год; `-SkipBackupCheck` — для автоматизації). Деталі —
+`docs/admin/operations-runbook.md` §8 «Копія і зупинка служб». Конфігурація в `%ProgramData%\ECR\config\`
 і ~~логи в~~ тека `%ProgramData%\ECR\logs\` **переживають** оновлення
 (`NeverOverwrite` — той самий файл, що адміністратор, можливо, вже
 відредагував, оновлення його не чіпає).
@@ -756,32 +828,62 @@ Data Protection не захищені сертифікатом. Тому заз�
 Якщо MSI будували БЕЗ `-MsiPath` (тобто `deploy-ecr.ps1` сам викликав
 `build-msi.ps1`) — достатньо `-Version` замість `-MsiPath`.
 
-⚠ **Без `-ServiceAccount` (розділ 2.2) MSI зупиняє службу на час
-оновлення БЕЗУМОВНО, а запускає її знову НАЗАД лише за умови заданого
-`-ServiceAccount`.** Якщо перше встановлення робили без нього (сервіс
+⚠ **Без `-ServiceAccount` (розділ 2.3) служби на час оновлення зупиняються
+БЕЗУМОВНО (крок 2), а скрипт запускає їх знову лише за умови заданого
+`-ServiceAccount`.** Якщо служба працює під окремим обліковим записом — див. ⛔ R8-Z7-02
+вище: без `-ServiceAccount` вона опиниться під `LocalSystem`. Якщо перше встановлення робили без нього (сервіс
 підняли вручну, розділ 2.1) і оновлення робиться так само без нього —
-після оновлення служба лишиться `Stopped`, і це не збій:
-`Start-Service EcrApi` після кожного такого оновлення — очікувана дія,
-не діагностика.
+після оновлення служби лишаться `Stopped`, і це не збій:
+`Start-Service EcrApi` **і** `Start-Service EcrWorker` (якщо воркер є; ✎ 2026-10-10, R9-F5/F5-04) після
+кожного такого оновлення й перезавантаження — очікувана дія, не діагностика.
 
 ---
 
 ## 5. Перевстановлення / відновлення {#5-перевстановлення}
 
-**Файл пошкоджено чи службу знесли вручну, версія та сама:**
+⛔ ✎ 2026-10-10 (R8-Z7-05): **будь-який `msiexec` поза `deploy-ecr.ps1`** може лишити службу без
+`Environment` (рядок підключення, відбиток DP, режим Api) — runbook §8; для оновлення MSI це перевірено
+CI-джобом `msi-install` (D3), для ремонту — не перевірялось, тож розраховуйте на гірше. Знімок
+`Environment`, який робить `deploy-ecr.ps1`, бачить лише те, що лежить у службах **на момент його
+запуску**. Тому перед будь-яким кроком нижче збережіть `Environment` обох служб (там секрети — файл
+тримайте як пароль і видаліть після відновлення):
 
 ```powershell
-msiexec /f Ecr.msi /qn /l*v repair.log
+(Get-ItemProperty HKLM:\SYSTEM\CurrentControlSet\Services\EcrApi).Environment    > env-EcrApi.txt
+(Get-ItemProperty HKLM:\SYSTEM\CurrentControlSet\Services\EcrWorker).Environment > env-EcrWorker.txt
+(Get-CimInstance Win32_Service -Filter "Name='EcrApi'").StartName                 # обліковий запис служби
 ```
 
+**Файл пошкоджено чи службу знесли вручну, версія та сама:** не голий `msiexec /f`, а перевстановлення
+з тим самим обліковим записом (MSI не пам'ятає `SERVICE_ACCOUNT` і `WORKER_ENABLED`; без них служба
+стане `LocalSystem`/`Manual`, розділ 4), а **одразу після нього** — `deploy-ecr.ps1` з тими самими
+параметрами, що при оновленні (розділ 4), плюс `-SkipSchema`:
+
+```powershell
+msiexec /i Ecr.msi /qn /l*v repair.log REINSTALL=ALL REINSTALLMODE=vecmus SERVICE_ACCOUNT=<StartName вище> WORKER_ENABLED=<1 або 0>
+.\tools\deploy-ecr.ps1 -SkipSchema <ті самі параметри, що в розділі 4>
+```
+
+Якщо `StartName` = `LocalSystem`, `SERVICE_ACCOUNT` не передавайте (і `-ServiceAccount` теж); звичайний
+(не gMSA) обліковий запис — ще й `SERVICE_PASSWORD` / `-ServicePassword`. Змінні, яких скрипт не пише
+(`ECR_Secrets__*`, `ECR_PiWebApi__AllowedHosts__*`, `ECR_Jobs__Workers__*`, телеметрія,
+`ECR_Auth__DataProtection__PreviousCertificateThumbprints`), звірте зі збереженим файлом і, якщо
+зникли, поверніть (розділ 9). Службу, яку вже знесли вручну, зберегти не вийде — її змінні беріть з
+документації майданчика.
+
 **Хочеться почати з чистого аркуша на цій самій базі** (рідко потрібно
-— спершу `/f` вище):
+— спершу перевстановлення вище). Спершу те саме збереження `Environment` і `StartName`, потім:
 
 ```powershell
 msiexec /x Ecr.msi /qn
 # ... потім секція 2 заново, БЕЗ -FirstDeployment (схема вже накочена,
-# 14-agent-jobs.sql удруге не потрібен)
+# 14-agent-jobs.sql удруге не потрібен), з -ServiceAccount = збережений StartName
 ```
+
+Після `/x` служб немає, тож `deploy-ecr.ps1` нічого з попереднього `Environment` не відновить: змінні,
+яких він не пише (перелік вище), поверніть зі збереженого файлу (розділ 9). Без
+`ECR_Auth__DataProtection__PreviousCertificateThumbprints` ключі кільця, захищені попереднім
+сертифікатом, не розшифруються.
 
 ⛔ Видалення MSI **не чіпає** базу даних і **не чіпає** `%ProgramData%\ECR\`
 (логи й конфіг лишаються на диску — прибирає адміністратор вручну, якщо
@@ -923,6 +1025,7 @@ Stop-Service EcrApi
 | Кракозябри в помилках `.ps1`-скриптів | Стара PowerShell 5.1 читає кириличний `.ps1` без UTF-8 BOM у системній кодовій сторінці | Скрипти цього дерева вже мають BOM; якщо власний скрипт — зберегти як UTF-8 **з BOM** |
 | `Cannot convert ... to SecureString` при виклику з `-ConnectionString $cs` | Викликали через `pwsh -File script.ps1 -Param $secureVar` — це НОВИЙ процес, `SecureString` не переживає межу процесів | Викликати `.\deploy-ecr.ps1 ...` напряму в тій самій сесії, без `-File` |
 | `The property 'Statement' cannot be found` під час `npm ci`/`npm run build` | Власний `npm.ps1` несумісний зі `Set-StrictMode -Version Latest` | Викликати `npm.cmd` замість голого `npm` |
+| `sqlcmd`/служба: «The certificate chain was issued by an authority that is not trusted» (або `SSL Provider … certificate`) | ✎ 2026-10-09 (`D-333`): сертифікат SQL Server перевіряється, а він самопідписаний чи ім'я не збігається з екземпляром | Поставити на SQL Server сертифікат, якому довіряє сервер застосунку, з іменем екземпляра; лише на стенді — прапорець майстра «Trust the SQL Server certificate (unsafe)» / `-TrustServerCertificate` і `TrustServerCertificate=True` у рядку |
 | `sqlcmd`: не може підключитись до `localhost` | SQL Server Express встановлюється як ІМЕНОВАНИЙ екземпляр | `<ІмяКомп'ютера>\SQLEXPRESS`, не голий `localhost` |
 | `CS2012`: файл `.pdb` зайнятий | Одночасна/перервана збірка лишила процес `VBCSCompiler.exe` з відкритим файлом | `dotnet build-server shutdown`, за потреби `Stop-Process` на залишених `VBCSCompiler`/`dotnet` |
 | `npm error EPERM ... unlink ... esbuild.exe` | Запущений `npm run dev` тримає файл у `node_modules` | Зупинити dev-сервер (`Stop-Process` на `node`/`esbuild`) перед `npm ci` |
@@ -958,7 +1061,8 @@ Restart-Service EcrApi
 
 ```powershell
 $name  = 'ECR_ConnectionStrings__Ecr'
-$value = 'Server=<ІМ''Я>\SQLEXPRESS;Database=ECR;Trusted_Connection=True;TrustServerCertificate=True'
+# D-333: сертифікат SQL перевіряється; TrustServerCertificate=True — лише стенд із самопідписаним
+$value = 'Server=<ІМ''Я>\SQLEXPRESS;Database=ECR;Trusted_Connection=True;Encrypt=Mandatory;TrustServerCertificate=False'
 
 $key = 'HKLM:\SYSTEM\CurrentControlSet\Services\EcrApi'
 $existing = (Get-ItemProperty -Path $key -Name Environment -ErrorAction SilentlyContinue).Environment

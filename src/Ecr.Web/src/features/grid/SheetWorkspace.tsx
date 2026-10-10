@@ -17,7 +17,7 @@ const NavigatorHiddenKey = 'ecr.tableNavigator.hidden';
 
 const NavigatorId = 'ecr-table-navigator';
 
-type SheetWorkspaceProps = Pick<SheetTablesProps, 'documentId' | 'periodKey' | 'readOnly' | 'tables'>;
+type SheetWorkspaceProps = Pick<SheetTablesProps, 'documentId' | 'periodKey' | 'periodEnd' | 'readOnly' | 'tables'>;
 
 /**
  * Робоче місце аркуша (`UI-22`): ліворуч дерево таблиць зі станами, праворуч ОДНА таблиця.
@@ -32,7 +32,7 @@ type SheetWorkspaceProps = Pick<SheetTablesProps, 'documentId' | 'periodKey' | '
  * ⚠ Живе в чанку сітки (`DocumentPage` бере його через `import()`), тож до бюджету маршруту
  * (`D-132`) не додає нічого.
  */
-export function SheetWorkspace({ documentId, periodKey, readOnly, tables }: SheetWorkspaceProps): JSX.Element {
+export function SheetWorkspace({ documentId, periodKey, periodEnd = null, readOnly, tables }: SheetWorkspaceProps): JSX.Element {
   const [view] = useUrlState('view');
   const [tableKey, setTableKey] = useUrlState('table');
   const status = useTableStatus(documentId, periodKey);
@@ -71,7 +71,13 @@ export function SheetWorkspace({ documentId, periodKey, readOnly, tables }: Shee
     return (
       <>
         <GridKeyHint readOnly={readOnly} />
-        <SheetTables documentId={documentId} periodKey={periodKey} readOnly={readOnly} tables={tables} />
+        <SheetTables
+          documentId={documentId}
+          periodKey={periodKey}
+          periodEnd={periodEnd}
+          readOnly={readOnly}
+          tables={tables}
+        />
       </>
     );
   }
@@ -119,6 +125,7 @@ export function SheetWorkspace({ documentId, periodKey, readOnly, tables }: Shee
         <SheetTables
           documentId={documentId}
           periodKey={periodKey}
+          periodEnd={periodEnd}
           readOnly={readOnly}
           tables={tables}
           layout="single"

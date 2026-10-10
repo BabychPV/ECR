@@ -56,31 +56,55 @@
     <ComponentGroup Id="AppFolders">
 
       <!--
-        ACL на теку логів. Служба пише, Users лише читають.
-        Без явного ACL тека успадкує права ProgramData, де Users можуть
-        створювати файли — а це чужий запис у наш журнал.
+        ⛔ L10-02 / N5-05 (аудит 2026-10-09): ACL на теку логів — ЗАХИЩЕНИЙ DACL.
+        Колишній `util:PermissionEx User="Users"` лише ДОДАВАВ ACE «читання» до
+        успадкованого: тека й далі успадковувала від %ProgramData% право
+        BUILTIN\Users створювати файли й дописувати — чужий запис у наш журнал
+        (підкладений файл/символьне посилання, підмінений ротаційний файл).
 
-        ⚠ `util:PermissionEx` у WiX 5.0.2 НЕ підтримує умову — ні атрибутом
-        (WIX0004), ні дочірнім елементом, своїм чи `util:` (WIX0200/WIX0005:
-        компілятор перевірено emпірично на всіх трьох варіантах). Тому
-        умовний грант SERVICE_ACCOUNT — ОКРЕМИЙ компонент з умовою на самому
-        `<Component>` (перевірений, стандартний механізм), а не на
-        `PermissionEx` усередині нього.
+        Ядрове PermissionEx (таблиця MsiLockPermissionsEx, Windows Installer 5.0
+        — InstallerVersion="500" у Package.wxs), бо лише SDDL задає «P» (без
+        успадкування) — так само, як ConfigFolderAcl нижче. SYSTEM і
+        Administrators — повний доступ, Users — лише читання й обхід (0x1200a9).
+        `O:BAG:SY` — власник Administrators, група SYSTEM: див. примітку про
+        власника біля DataFolderAcl нижче.
+
+        Службі (SERVICE_ACCOUNT) потрібен ЗАПИС — він видається окремою
+        відкладеною дією EcrLogsServiceAccountGrant нижче (icacls /grant
+        ЗБЕРІГАЄ захищений DACL), а не `util:PermissionEx`: той пише DACL без
+        PROTECTED_DACL_SECURITY_INFORMATION і знову вмикав би успадкування, тобто
+        повертав би Users:Write саме на бойовому шляху (з SERVICE_ACCOUNT).
+        Без облікового запису служба під LocalSystem — їй досить SYSTEM:FA.
 
         ⚠ Явний GUID, не "*": компонент, чий KeyPath — сама тека
         (CreateFolder без File), не приймає автогенерований GUID (WIX0230).
       -->
       <Component Id="LogsFolder" Directory="LOGSFOLDER" Guid="c1a9e6b2-4f3d-4e2a-9c7f-1a2b3c4d5e6f">
         <CreateFolder>
-          <util:PermissionEx User="Users" GenericRead="yes" GenericExecute="yes" />
+          <PermissionEx Sddl="O:BAG:SYD:PAI(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;BU)" />
         </CreateFolder>
         <RemoveFolder Id="RemoveLogsFolder" On="uninstall" />
       </Component>
 
-      <Component Id="LogsFolderServiceAccountAcl" Directory="LOGSFOLDER"
-                 Guid="7e2d4a91-6c3b-4f5e-8a1d-2f9c6b7e0a3d" Condition="SERVICE_ACCOUNT">
+      <!--
+        ⛔ N5-02 (аудит 2026-10-09): батьківська тека %ProgramData%\ECR — теж
+        захищений DACL з власником Administrators. Якщо її заздалегідь створив
+        локальний користувач, він лишається ВЛАСНИКОМ і має неявне право
+        WRITE_DAC: після установки він міг би повернути собі доступ до logs і
+        config.
+
+        ⚠ Власника SDDL (`O:`) наявної теки Windows Installer може й не змінити:
+        документація MsiLockPermissionsEx про `O:` мовчить, а зібрати WiX у
+        цій лінії не було чим. Тому справжній бар'єр — дві перевірки ПОЗА MSI:
+        `deploy-ecr.ps1` ВІДМОВЛЯЄТЬСЯ ставити, якщо власник теки ECR/config/logs
+        не SYSTEM і не Administrators, а `verify-msi.ps1` перевіряє власника після
+        установки. `O:BAG:SY` тут — перша спроба виправити власника, на свіжій
+        теці власник і так SYSTEM (msiexec).
+      -->
+      <Component Id="DataFolderAcl" Directory="DATAFOLDER"
+                 Guid="9b3f6d52-1e84-4c7a-a06d-5e2b8c4f7a19">
         <CreateFolder>
-          <util:PermissionEx User="[SERVICE_ACCOUNT]" GenericAll="yes" />
+          <PermissionEx Sddl="O:BAG:SYD:PAI(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;BU)" />
         </CreateFolder>
       </Component>
 
@@ -128,11 +152,35 @@
       <Component Id="ConfigFolderAcl" Directory="CONFIGFOLDER"
                  Guid="2c6e8b14-7d3a-4f91-b5e0-9a4d1c7f2e83">
         <CreateFolder>
-          <PermissionEx Sddl="D:PAI(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;BU)" />
+          <PermissionEx Sddl="O:BAG:SYD:PAI(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;BU)" />
         </CreateFolder>
       </Component>
 
     </ComponentGroup>
+
+    <!--
+      ⛔ L10-02 / N5-05: запис служби в теку логів після того, як захищений DACL
+      вже виставлено. Той самий механізм, що й EcrApiDemandStart (Service.wxs):
+      відкладена WixQuietExec після InstallServices (MsiLockPermissionsEx
+      обробляється в CreateFolders/InstallFiles/InstallServices — тобто ДО цієї
+      дії). `icacls /grant` додає явний ACE і не чіпає прапорця захисту від
+      успадкування. Modify (M), а не повний доступ: службі потрібні запис і
+      ротація, але не WRITE_DAC/WRITE_OWNER. Шлях без кінцевого `\` перед
+      лапкою (інакше `\"` екранує лапку).
+
+      Умова — SERVICE_ACCOUNT і стан компонента LogsFolder ($LogsFolder = 3:
+      ставиться чи перевстановлюється; DACL перезаписується щоразу, тож і
+      грант — щоразу). Помилка icacls (немає такого облікового запису) зупиняє
+      установку з відкатом, як і раніше зупиняв `util:PermissionEx`.
+    -->
+    <SetProperty Id="EcrLogsServiceAccountGrant" Sequence="execute" Before="EcrLogsServiceAccountGrant"
+                 Value="&quot;[System64Folder]icacls.exe&quot; &quot;[CommonAppDataFolder]ECR\logs&quot; /grant &quot;[SERVICE_ACCOUNT]:(OI)(CI)M&quot;" />
+    <CustomAction Id="EcrLogsServiceAccountGrant" BinaryRef="Wix4UtilCA_$(sys.BUILDARCHSHORT)" DllEntry="WixQuietExec"
+                  Execute="deferred" Impersonate="no" Return="check" />
+    <InstallExecuteSequence>
+      <Custom Action="EcrLogsServiceAccountGrant" After="InstallServices"
+              Condition="SERVICE_ACCOUNT AND $LogsFolder = 3" />
+    </InstallExecuteSequence>
 
     <!--
       ⚠ Логи при видаленні НЕ прибираються (RemoveFolder спрацює лише якщо

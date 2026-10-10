@@ -1,5 +1,6 @@
 // src/Ecr.Application/Sources/BoundaryUnitConversion.cs
 using System.Globalization;
+using Ecr.Application.Documents;
 using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Domain.Entities.External;
@@ -61,8 +62,52 @@ public static class BoundaryUnitConversion
             return value;
         }
 
-        return (converter ?? SharedConverter).Convert(
-            value, Spec(units, fromUnitId), Spec(units, toUnitId), explicitConversion: null);
+        var shared = converter ?? SharedConverter;
+
+        // ⛔ Швидкість у швидкість — через чисельник і знаменник, а не через базову одиницю (так само
+        // <see cref="ConvertFolded"/>: інтеграл — через знаменник, решта згорток — через цей самий
+        // <see cref="RateConvert"/>, Z2-03): `FactorToBase` у `Sm3_per_h` — це `1/3600`, якого скінченний
+        // десятковий запис не має, і `0.001 Sm3/s` ставало `3.5999…96` замість `3.6`. Хвіст доходив до
+        // комірки і впирався в масштаб колонки (16 знаків) — межова точка блокувала матеріалізацію.
+        if (RateConvert(value, fromUnitId, toUnitId, units, shared) is { } rate)
+        {
+            return rate;
+        }
+
+        return shared.Convert(value, Spec(units, fromUnitId), Spec(units, toUnitId), explicitConversion: null);
+    }
+
+    /// <summary>
+    /// Швидкість → швидкість: чисельник конвертується доменним конвертером, знаменник — множенням на
+    /// ціле число секунд цілі й діленням (останнім кроком) на секунди джерела. <c>null</c> — хоч одна з
+    /// одиниць не швидкість або знаменники різних розмірностей (тоді — загальний маршрут через базу).
+    /// </summary>
+    private static decimal? RateConvert(
+        decimal value, int fromUnitId, int toUnitId, UnitCatalogSnapshot units, UnitConverter converter)
+    {
+        if (RateParts(units, fromUnitId) is not { } from || RateParts(units, toUnitId) is not { } to)
+        {
+            return null;
+        }
+
+        var fromNumerator = Spec(units, from.Numerator);
+        var toNumerator = Spec(units, to.Numerator);
+        var fromDenominator = Spec(units, from.Denominator);
+        var toDenominator = Spec(units, to.Denominator);
+        if (fromNumerator.DimensionId != toNumerator.DimensionId
+            || fromDenominator.DimensionId != toDenominator.DimensionId
+            || fromDenominator.FactorToBase == 0m
+            || toDenominator.FactorToBase == 0m
+            || fromDenominator.OffsetToBase != 0m
+            || toDenominator.OffsetToBase != 0m)
+        {
+            return null;
+        }
+
+        var numerator = converter.Convert(value, fromNumerator, toNumerator, explicitConversion: null);
+
+        // Sm3/s → Sm3/h: × 3600 (секунд у годині цілі) ÷ 1 (секунд у секунді джерела) = рівно.
+        return numerator * toDenominator.FactorToBase / fromDenominator.FactorToBase;
     }
 
     /// <summary>Чи збігається фактична одиниця джерела з оголошеною (ФВ-16.9).</summary>
@@ -91,7 +136,79 @@ public static class BoundaryUnitConversion
             return true;
         }
 
-        return units.Units.TryGetValue(actualSourceUnitCode, out var actual) && actual.Id == declared;
+        // ⛔ Z2-02: джерело дає СИМВОЛ (PI `UnitsAbbreviation`: `Sm3/h`, `°C`), а не код довідника
+        // (`EcrCode` не допускає ні `/`, ні `°`). Пряме порівняння з кодом ставило кожну швидкість на паузу,
+        // з якої не виводило й прийняття тієї самої одиниці (`mappingUnitUnchanged`).
+        return ResolveSourceSymbol(actualSourceUnitCode, units) is { } actual && actual.Id == declared;
+    }
+
+    /// <summary>
+    /// Одиниця довідника за символом, яким її назвало джерело; <c>null</c> — не розпізнано.
+    /// </summary>
+    /// <param name="symbol">Символ від джерела (PI: <c>UnitsAbbreviation</c>) або код довідника.</param>
+    /// <param name="units">Знімок довідника.</param>
+    /// <returns>Одиниця або <c>null</c>, якщо символ не відповідає рівно одній одиниці.</returns>
+    /// <remarks>
+    /// <para>
+    /// Порядок: (1) код довідника як є — поведінка до Z2-02 не змінюється; (2) запис символу
+    /// в синтаксисі коду: пробіли прибрано, <c>/</c> → <c>_per_</c>, <c>°C</c> → <c>degC</c>,
+    /// знаменник <c>d</c> → <c>day</c> (<c>Sm3/h</c> → <c>Sm3_per_h</c>, <c>Sm3/d</c> → <c>Sm3_per_day</c>) —
+    /// те саме правило <c>/</c> → <c>_per_</c>, яким <c>MethodologyPackagePlanner.ResolveUnit</c> читає
+    /// одиниці AF; (3) символ одиниці в довіднику (<c>SymbolL10n</c>) — лише за ОДНОЗНАЧНОГО збігу.
+    /// </para>
+    /// <para>
+    /// ⛔ Здогадки немає: кожен крок дає лише одиницю, чий код чи символ ЗБІГАЄТЬСЯ з записом джерела.
+    /// Нерозпізнаний символ — <c>null</c>, тобто пауза мапінгу (ФВ-16.9), а не число, помножене невідомо на що.
+    /// Символ AF, якого ці правила не покривають, адміністратор додає в символи одиниці (крок 3).
+    /// </para>
+    /// </remarks>
+    public static UnitRef? ResolveSourceSymbol(string? symbol, UnitCatalogSnapshot units)
+    {
+        ArgumentNullException.ThrowIfNull(units);
+
+        if (string.IsNullOrWhiteSpace(symbol))
+        {
+            return null;
+        }
+
+        if (units.Units.TryGetValue(symbol, out var byCode))
+        {
+            return byCode;
+        }
+
+        var compact = symbol.Replace(' ', ' ').Replace(" ", string.Empty, StringComparison.Ordinal);
+        if (units.Units.TryGetValue(AsCatalogCode(compact), out var byPattern))
+        {
+            return byPattern;
+        }
+
+        var bySymbol = units.Units.Values
+            .Where(u => u.SymbolL10n?.Values.Any(s => string.Equals(
+                s.Replace(' ', ' ').Replace(" ", string.Empty, StringComparison.Ordinal),
+                compact,
+                StringComparison.OrdinalIgnoreCase)) == true)
+            .DistinctBy(u => u.Id)
+            .Take(2)
+            .ToList();
+
+        return bySymbol.Count == 1 ? bySymbol[0] : null;
+    }
+
+    /// <summary>Запис символу в синтаксисі коду довідника: <c>Sm3/d</c> → <c>Sm3_per_day</c>, <c>°C</c> → <c>degC</c>.</summary>
+    private static string AsCatalogCode(string compact)
+    {
+        var code = compact
+            .Replace("°C", "degC", StringComparison.OrdinalIgnoreCase)
+            .Replace("/", "_per_", StringComparison.Ordinal);
+
+        if (string.Equals(code, "d", StringComparison.Ordinal))
+        {
+            return "day";
+        }
+
+        return code.EndsWith("_per_d", StringComparison.Ordinal)
+            ? string.Concat(code.AsSpan(0, code.Length - "_per_d".Length), "_per_day")
+            : code;
     }
 
     /// <summary>Переводить результат згортки в цільову одиницю мапінгу.</summary>
@@ -152,7 +269,14 @@ public static class BoundaryUnitConversion
 
         var source = Spec(units, from);
         var target = Spec(units, to);
-        var value = (converter ?? SharedConverter).Convert(folded, source, target, explicitConversion: null);
+
+        // ⛔ Z2-03: швидкість у швидкість — тим самим маршрутом «чисельник/знаменник», що й межова точка
+        // (<see cref="Convert"/>, R7). Через базову одиницю середнє 1 Sm3/s у `Sm3_per_h` ставало
+        // `1 / 0.000277777777777778 = 3599.99999999999712` замість 3600 — і в комірці, і поруч із числом
+        // межової точки тієї самої величини, порахованим точно.
+        var shared = converter ?? SharedConverter;
+        var value = RateConvert(folded, from, to, units, shared)
+                    ?? shared.Convert(folded, source, target, explicitConversion: null);
 
         return new BoundaryValue(value, source.Code, target.Code, null, null, Factor(source, target));
     }
@@ -276,6 +400,25 @@ public sealed record BoundaryValue(
 {
     /// <summary>Чи змінила межа одиницю значення.</summary>
     public bool IsConverted => FromCode is not null;
+
+    /// <summary>Значення, придатне до запису в комірку: не більше <see cref="CellValueReader.StorageScale"/> знаків після коми.</summary>
+    /// <remarks>
+    /// ⛔ Z1-01: згортка й межа ДІЛЯТЬ (<c>Avg</c> — на кількість точок,
+    /// <c>TimeWeightedAvg</c> — на покриті секунди, інтеграл швидкості — на
+    /// 3600/86400, інтерполяція межової точки, <c>RateConvert</c>), і
+    /// <c>decimal</c> віддає 28 знаків. Обробник комірок такі числа відхиляє
+    /// (<c>ECR-CELL-0422 tooManyDecimals</c>) — разом з усім батчем сутності.
+    /// Сховище (<c>decimal(34,16)</c>) все одно тримає 16 знаків, тож
+    /// округлення тут нічого, що можна зберегти, не втрачає. D-109 («мовчки
+    /// не округлюється») — про введення людини, не про обчислене значення.
+    /// </remarks>
+    public decimal Storable => ToStorable(Value);
+
+    /// <summary>Обчислене значення до масштабу сховища (див. <see cref="Storable"/>).</summary>
+    /// <param name="value">Згорнуте чи переведене значення.</param>
+    /// <returns>Те саме число, округлене до <see cref="CellValueReader.StorageScale"/> знаків (від нуля на середині).</returns>
+    public static decimal ToStorable(decimal value)
+        => decimal.Round(value, CellValueReader.StorageScale, MidpointRounding.AwayFromZero);
 
     /// <summary>Без конверсії: значення лягає як є.</summary>
     /// <param name="value">Значення.</param>

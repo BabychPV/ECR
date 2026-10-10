@@ -36,7 +36,7 @@ public sealed class ConsistencyIssueReader(EcrDbContext db) : IConsistencyIssueR
         command.CommandText = $"""
             SELECT TOP (@take)
                    Id, DetectedAt, Severity, RuleCode, EntityType, EntityId,
-                   Message, ResolvedAt, ResolvedByUserId
+                   Message, ResolvedAt, ResolvedByUserId, PeriodKey
               FROM aud.ConsistencyIssue
              WHERE Id < @before
                    {(ruleCode is null ? string.Empty : "AND RuleCode = @ruleCode")}
@@ -83,7 +83,8 @@ public sealed class ConsistencyIssueReader(EcrDbContext db) : IConsistencyIssueR
                         reader.IsDBNull(7)
                             ? null
                             : DateTime.SpecifyKind(reader.GetDateTime(7), DateTimeKind.Utc),
-                        reader.IsDBNull(8) ? null : reader.GetInt32(8))));
+                        reader.IsDBNull(8) ? null : reader.GetInt32(8),
+                        PeriodKey: reader.IsDBNull(9) ? null : reader.GetInt32(9))));
             }
         }
 
@@ -188,59 +189,65 @@ public sealed class ConsistencyIssueReader(EcrDbContext db) : IConsistencyIssueR
     /// не має місця в структурі документа. Для них — порожньо.
     /// </remarks>
     public async Task<IReadOnlyDictionary<(string EntityType, long EntityId), ConsistencyLocation>> ResolveLocationsAsync(
-        IReadOnlyCollection<(string EntityType, long EntityId)> entities, CancellationToken ct)
+        IReadOnlyCollection<(string EntityType, long EntityId, int? PeriodKey)> entities, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(entities);
 
         var result = new Dictionary<(string EntityType, long EntityId), ConsistencyLocation>();
 
-        var rowIds = entities
-            .Where(e => e.EntityType == "doc.CellValue")
+        // ⛔ N1-05: `doc.TableRow` партиційована за `PeriodKey` — пошук за самим `Id` читав усі партиції. Знахідка
+        // тепер несе період (пише `ConsistencyCheckJob`), і рядок шукається за `(PeriodKey, Id)`: одна партиція на
+        // період. Знахідки без періоду (записані до N1-05) — безпечний запасний шлях: пошук за `Id`, як було.
+        var cellRefs = entities.Where(e => e.EntityType == "doc.CellValue").ToList();
+
+        var seekPairs = cellRefs
+            .Where(e => e.PeriodKey is not null)
+            .Select(e => (RowId: e.EntityId, Period: e.PeriodKey!.Value))
+            .ToHashSet();
+
+        var legacyRowIds = cellRefs
+            .Where(e => e.PeriodKey is null)
             .Select(e => e.EntityId)
             .Distinct()
             .ToList();
 
-        if (rowIds.Count > 0)
+        var rowLocations = new List<RowLocationRow>();
+
+        if (seekPairs.Count > 0)
         {
-            var rows = await (
-                from row in db.TableRows.AsNoTracking()
-                where rowIds.Contains(row.Id)
-                join instance in db.TableInstances.AsNoTracking()
-                    on new { row.PeriodKeyValue, Id = row.TableInstanceId }
-                    equals new { instance.PeriodKeyValue, instance.Id }
-                join document in db.Documents.AsNoTracking() on instance.DocumentId equals document.Id
-                join project in db.Projects.AsNoTracking() on document.ProjectId equals project.Id
-                join table in db.TableDefs.AsNoTracking() on instance.TableDefId equals table.Id
-                join sheet in db.SheetDefs.AsNoTracking() on table.SheetDefId equals sheet.Id
-                orderby row.Id
-                select new
-                {
-                    RowId = row.Id,
-                    row.PeriodKeyValue,
-                    RowKey = row.RowKeyValue,
-                    DocumentId = document.Id,
-                    document.BusinessKey,
-                    document.ProjectId,
-                    project.TemplateVersionId,
-                    SheetDefId = sheet.Id,
-                    SheetCode = sheet.Code,
-                    TableDefId = table.Id,
-                    TableCode = table.Code,
-                })
-                .Take(rowIds.Count)
-                .ToListAsync(ct)
+            var seekIds = seekPairs.Select(p => p.RowId).Distinct().ToList();
+            var seekPeriods = seekPairs.Select(p => p.Period).Distinct().ToList();
+
+            var found = await ReadRowLocationsAsync(
+                    db.TableRows.AsNoTracking()
+                        .Where(row => seekPeriods.Contains(row.PeriodKeyValue) && seekIds.Contains(row.Id)),
+                    seekIds.Count,
+                    ct)
                 .ConfigureAwait(false);
 
-            foreach (var r in rows)
-            {
-                result[("doc.CellValue", r.RowId)] = new ConsistencyLocation(
-                    r.ProjectId,
-                    r.TemplateVersionId,
-                    r.PeriodKeyValue,
-                    r.SheetDefId,
-                    r.TableDefId,
-                    new ConsistencyIssueWhere(r.DocumentId, r.BusinessKey, r.SheetCode, r.TableCode, r.RowKey, null));
-            }
+            // Декартів добуток «періоди × id» міг зачепити рядок чужого періоду з тим самим Id: лишаються лише
+            // справжні пари знахідок.
+            rowLocations.AddRange(found.Where(r => seekPairs.Contains((r.RowId, r.PeriodKeyValue))));
+        }
+
+        if (legacyRowIds.Count > 0)
+        {
+            rowLocations.AddRange(await ReadRowLocationsAsync(
+                    db.TableRows.AsNoTracking().Where(row => legacyRowIds.Contains(row.Id)),
+                    legacyRowIds.Count,
+                    ct)
+                .ConfigureAwait(false));
+        }
+
+        foreach (var r in rowLocations)
+        {
+            result[("doc.CellValue", r.RowId)] = new ConsistencyLocation(
+                r.ProjectId,
+                r.TemplateVersionId,
+                r.PeriodKeyValue,
+                r.SheetDefId,
+                r.TableDefId,
+                new ConsistencyIssueWhere(r.DocumentId, r.BusinessKey, r.SheetCode, r.TableCode, r.RowKey, null));
         }
 
         var columnIds = entities
@@ -285,6 +292,49 @@ public sealed class ConsistencyIssueReader(EcrDbContext db) : IConsistencyIssueR
 
         return result;
     }
+
+    /// <summary>Місце рядка документа: коди й ідентифікатори для рішення про видимість.</summary>
+    private sealed record RowLocationRow(
+        long RowId,
+        int PeriodKeyValue,
+        string RowKey,
+        long DocumentId,
+        string BusinessKey,
+        int ProjectId,
+        int TemplateVersionId,
+        int SheetDefId,
+        string SheetCode,
+        int TableDefId,
+        string TableCode);
+
+    /// <summary>Розкладає вже відфільтровані рядки на документ, аркуш і таблицю — одним запитом.</summary>
+    private async Task<List<RowLocationRow>> ReadRowLocationsAsync(
+        IQueryable<Ecr.Domain.Entities.Documents.TableRow> rows, int take, CancellationToken ct)
+        => await (
+            from row in rows
+            join instance in db.TableInstances.AsNoTracking()
+                on new { row.PeriodKeyValue, Id = row.TableInstanceId }
+                equals new { instance.PeriodKeyValue, instance.Id }
+            join document in db.Documents.AsNoTracking() on instance.DocumentId equals document.Id
+            join project in db.Projects.AsNoTracking() on document.ProjectId equals project.Id
+            join table in db.TableDefs.AsNoTracking() on instance.TableDefId equals table.Id
+            join sheet in db.SheetDefs.AsNoTracking() on table.SheetDefId equals sheet.Id
+            orderby row.Id
+            select new RowLocationRow(
+                row.Id,
+                row.PeriodKeyValue,
+                row.RowKeyValue,
+                document.Id,
+                document.BusinessKey,
+                document.ProjectId,
+                project.TemplateVersionId,
+                sheet.Id,
+                sheet.Code,
+                table.Id,
+                table.Code))
+            .Take(take)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
 
     /// <summary>Умова пошуку: текст, код правила або номер сутності.</summary>
     private const string QueryPredicate = """

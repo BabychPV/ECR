@@ -64,11 +64,12 @@ public sealed class RegistrySyncDedupPlanTests(SqlServerFixture sql)
         List<string> journal;
         await using (var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext())
         {
-            journal = await RegistrySyncJob.DedupJournal(db, target).ToListAsync().ConfigureAwait(true);
+            journal = await RegistrySyncJob.DedupJournal(db, target, RegistrySyncJob.DedupWindow(3))
+                .ToListAsync().ConfigureAwait(true);
         }
 
-        // Запит повертає рівно події цієї сутності (а не порожньо через хибний план/фільтр).
-        Assert.Equal(["a; key=s1:1", "b; key=s2:2", "c; key=s3:3"], journal);
+        // Запит повертає рівно події цієї сутності (а не порожньо через хибний план/фільтр), від новішої.
+        Assert.Equal(["c; key=s3:3", "b; key=s2:2", "a; key=s1:1"], journal);
 
         var plan = await CachedPlanAsync().ConfigureAwait(true);
         Assert.NotNull(plan);
@@ -91,6 +92,56 @@ public sealed class RegistrySyncDedupPlanTests(SqlServerFixture sql)
             accesses.All(a => a.Physical == "Index Seek" && a.Index == ExpectedIndex),
             $"Очікувався лише Index Seek по {ExpectedIndex}, у плані: {described}.");
     }
+
+    /// <summary>
+    /// AN-81 L4-11: дедуп читає НАЙНОВІШІ <c>window</c> подій сутності, а не всю історію: старші за вікно
+    /// у вибірку не потрапляють, порядок — від найновішої.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Directive", "AN-81-L4-11")]
+    public async Task Дедуп_подій_синку_читає_лише_найновіші_події_у_межах_вікна()
+    {
+        var tag = Guid.NewGuid().ToString("N")[..8].ToUpperInvariant();
+        var (target, other) = await SeedEntitiesAsync(tag).ConfigureAwait(true);
+
+        await using (var connection = new SqlConnection(sql.ConnectionString))
+        {
+            await connection.OpenAsync().ConfigureAwait(true);
+            await using var command = connection.CreateCommand();
+            command.CommandText = """
+                INSERT itg.CollectionCoverage (SourceEntityId, CollectionRunId, PeriodKey, CoveredFrom, CoveredTo, Status, Details)
+                VALUES (@target, NULL, NULL, '2026-10-01', '2026-10-01', N'RegistryPendingUpdate', N'1; key=s1:1'),
+                       (@target, NULL, NULL, '2026-10-01', '2026-10-01', N'RegistryPendingUpdate', N'2; key=s2:2'),
+                       (@other,  NULL, NULL, '2026-10-01', '2026-10-01', N'RegistryPendingUpdate', N'x; key=s9:9'),
+                       (@target, NULL, NULL, '2026-10-01', '2026-10-01', N'RegistryPendingUpdate', N'3; key=s3:3'),
+                       (@target, NULL, NULL, '2026-10-01', '2026-10-01', N'RegistryPendingUpdate', N'4; key=s4:4');
+                """;
+            command.Parameters.AddWithValue("@target", target);
+            command.Parameters.AddWithValue("@other", other);
+            await command.ExecuteNonQueryAsync().ConfigureAwait(true);
+        }
+
+        await using var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext();
+
+        var window = await RegistrySyncJob.DedupJournal(db, target, 2).ToListAsync().ConfigureAwait(true);
+        Assert.Equal(["4; key=s4:4", "3; key=s3:3"], window);
+
+        var all = await RegistrySyncJob.DedupJournal(db, target, 100).ToListAsync().ConfigureAwait(true);
+        Assert.Equal(["4; key=s4:4", "3; key=s3:3", "2; key=s2:2", "1; key=s1:1"], all);
+    }
+
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [InlineData(0, RegistrySyncJob.DedupWindowFloor)]
+    [InlineData(1, RegistrySyncJob.DedupWindowFloor)]
+    [InlineData(500, RegistrySyncJob.DedupWindowFloor)]
+    [InlineData(501, 2004)]
+    [InlineData(10_000, 40_000)]
+    [InlineData(int.MaxValue, int.MaxValue)]
+    public void Вікно_дедупу_не_менше_нижньої_межі_і_кратне_подіям_прогону(int events, int expected)
+        => Assert.Equal(expected, RegistrySyncJob.DedupWindow(events));
 
     private async Task<(int Target, int Other)> SeedEntitiesAsync(string tag)
     {
@@ -167,28 +218,10 @@ public sealed class RegistrySyncDedupPlanTests(SqlServerFixture sql)
     }
 
     /// <summary>План запиту з міткою <see cref="RegistrySyncJob.DedupJournalTag"/> із кешу цієї бази.</summary>
+    /// <remarks>⛔ Лише через <see cref="PlanCache"/>: прямий <c>APPLY</c> над усім кешем відкриває чужі бази (Msg 924, <c>Z8-01</c>).</remarks>
     private async Task<XDocument?> CachedPlanAsync()
     {
-        await using var connection = new SqlConnection(sql.ConnectionString);
-        await connection.OpenAsync().ConfigureAwait(false);
-
-        await using var command = connection.CreateCommand();
-
-        // ⚠ dbid - з атрибутів плану (для параметризованих запитів dm_exec_sql_text.dbid порожній).
-        command.CommandText = """
-            SELECT TOP (1) CAST(qp.query_plan AS nvarchar(max))
-            FROM sys.dm_exec_query_stats AS qs
-            CROSS APPLY sys.dm_exec_sql_text(qs.sql_handle) AS st
-            CROSS APPLY sys.dm_exec_query_plan(qs.plan_handle) AS qp
-            CROSS APPLY sys.dm_exec_plan_attributes(qs.plan_handle) AS pa
-            WHERE pa.attribute = N'dbid' AND CAST(pa.value AS int) = DB_ID()
-              AND st.text LIKE N'%' + @tag + N'%'
-              AND st.text NOT LIKE N'%dm_exec_query_stats%'
-            ORDER BY qs.last_execution_time DESC;
-            """;
-        command.Parameters.AddWithValue("@tag", RegistrySyncJob.DedupJournalTag);
-
-        var text = await command.ExecuteScalarAsync().ConfigureAwait(false) as string;
+        var text = await PlanCache.LatestPlanAsync(sql.ConnectionString, RegistrySyncJob.DedupJournalTag).ConfigureAwait(false);
         return text is null ? null : XDocument.Parse(text);
     }
 }

@@ -111,10 +111,10 @@ public sealed class NotificationJobCoverageDigestTests(SqlServerFixture sql)
             Assert.DoesNotContain(mine, i => i.Details.Contains("203500", StringComparison.Ordinal));
 
             var ceiling = Assert.Single(mine, i => i.Status == CollectionCoverage.SkippedPointCeiling);
-            Assert.Equal("період 203501: 5 подій; TOTAL: 120000 points, ceiling 100000", ceiling.Details);
+            Assert.Equal("period 203501: 5 events; TOTAL: 120000 points, ceiling 100000", ceiling.Details);
 
             var closed = Assert.Single(mine, i => i.Status == CollectionCoverage.SkippedPeriodClosed);
-            Assert.Equal("період 203412: 1 подій; Period 203412 is closed", closed.Details);
+            Assert.Equal("period 203412: 1 events; Period 203412 is closed", closed.Details);
 
             // ⚠ Подія матриці — збій ЗБОРУ (адресат — відповідальний за джерело),
             // а не збій задачі.
@@ -133,7 +133,7 @@ public sealed class NotificationJobCoverageDigestTests(SqlServerFixture sql)
                 .FirstOrDefaultAsync();
 
             Assert.NotNull(queued);
-            Assert.Contains("період 203501: 5 подій", queued!.Body, StringComparison.Ordinal);
+            Assert.Contains("period 203501: 5 events", queued!.Body, StringComparison.Ordinal);
         }
         finally
         {
@@ -381,6 +381,91 @@ public sealed class NotificationJobCoverageDigestTests(SqlServerFixture sql)
         }
     }
 
+    /// <summary>
+    /// Y4-04: конверт у <c>Details</c> події покриття, рамка рядка й тема листа йдуть
+    /// мовою листа (<see cref="NotificationJob.DigestLanguage"/>), а не сирим JSON
+    /// з українською рамкою.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Регресія: лист і Teams несли
+    /// <c>період 203601: 1 подій; {"k":"coverageEvents.periodClosed",…}</c> під темою
+    /// <c>ECR: збоїв за період — 1</c>. Мутації «Details як є» чи «українська
+    /// рамка/тема» роблять цей тест червоним.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "Y4-04")]
+    public async Task Конверт_події_покриття_і_тема_листа_йдуть_мовою_листа()
+    {
+        var now = new DateTime(2035, 9, 9, 9, 0, 0, DateTimeKind.Utc);
+        var world = await ArrangeAsync(now);
+
+        try
+        {
+            await using (var setup = CreateContext())
+            {
+                setup.CollectionCoverages.Add(CollectionCoverage.Skipped(
+                    world.EntityId, 203601, CollectionCoverage.SkippedPeriodClosed,
+                    CoverageDetails.PeriodNotOpen("Closed"), now.AddMinutes(-30)));
+                await setup.SaveChangesAsync(CancellationToken.None);
+            }
+
+            var catalog = Substitute.For<IUiStringCatalog>();
+            catalog.GetScopedAsync(NotificationJob.DigestLanguage, UiStringScope.Private, Arg.Any<CancellationToken>())
+                .Returns(new UiStringCatalog(
+                    NotificationJob.DigestLanguage,
+                    1,
+                    new Dictionary<string, string>
+                    {
+                        [CoverageDetails.PeriodClosedKey] = "the period is {state}",
+                        ["notifications.digest.subject"] = "Digest: {count} failure(s)",
+                        ["notifications.digest.coverageLine"] = "P{period} x{count}: {details}",
+                    }));
+
+            var (_, messages) = await RunJobAsync(now, NotificationSeverity.Info, catalog);
+
+            var message = Assert.Single(messages);
+            Assert.Contains(
+                $"[coverage] {world.EntityCode}: {CollectionCoverage.SkippedPeriodClosed}. P203601 x1: the period is Closed",
+                message.Body,
+                StringComparison.Ordinal);
+            Assert.DoesNotContain("\"k\":", LineOf(message.Body, world.EntityCode), StringComparison.Ordinal);
+            Assert.StartsWith("Digest: ", message.Subject, StringComparison.Ordinal);
+
+            await using var db = CreateContext();
+            var queued = await db.NotificationOutbox
+                .AsNoTracking()
+                .Where(n => n.EventCode == "maintenance.failures" && n.Body.Contains(world.EntityCode))
+                .OrderByDescending(n => n.Id)
+                .FirstOrDefaultAsync();
+
+            Assert.NotNull(queued);
+            Assert.Contains("P203601 x1: the period is Closed", queued!.Body, StringComparison.Ordinal);
+            Assert.DoesNotContain("\"k\":", LineOf(queued.Body, world.EntityCode), StringComparison.Ordinal);
+            Assert.StartsWith("Digest: ", queued.Subject, StringComparison.Ordinal);
+            Assert.DoesNotMatch(@"\p{IsCyrillic}", queued.Subject);
+        }
+        finally
+        {
+            await CleanupAsync(world.EntityId);
+        }
+    }
+
+    /// <summary>
+    /// Y4-04: без каталогу тема й рамка — англійські запасні шаблони, ті самі, що
+    /// en-значення в сіді, а не українські літерали.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "Y4-04")]
+    public void Запасні_шаблони_зведення_англійські()
+    {
+        Assert.Equal("ECR: failures in the period — {count}", NotificationJob.SubjectFallback);
+        Assert.Equal("period {period}: {count} events; {details}", NotificationJob.CoverageLineFallback);
+        Assert.DoesNotMatch(@"\p{IsCyrillic}", NotificationJob.NoRecipientsFallback);
+    }
+
     [Theory]
     [InlineData(CollectionCoverage.SkippedPeriodClosed, NotificationSeverity.Warning)]
     [InlineData(CollectionCoverage.SkippedPointCeiling, NotificationSeverity.Error)]
@@ -388,6 +473,9 @@ public sealed class NotificationJobCoverageDigestTests(SqlServerFixture sql)
     // наступним прогоном / потрібне підтвердження людини — попередження.
     [InlineData(CollectionCoverage.SkippedWriteConflict, NotificationSeverity.Warning)]
     [InlineData(CollectionCoverage.SkippedNeedsConfirmation, NotificationSeverity.Warning)]
+    // D2-02: неповне покриття (число записано) і «немає даних» (комірку не оновлено).
+    [InlineData(CollectionCoverage.PartialCoverage, NotificationSeverity.Warning)]
+    [InlineData(CollectionCoverage.SkippedNoData, NotificationSeverity.Warning)]
     // D-212 PR-3: події синку довідника з AF. Автостворення — робота за
     // політикою External (Info); решта — довідник змінився або чекає людину.
     [InlineData(CollectionCoverage.RegistryAutoCreated, NotificationSeverity.Info)]
@@ -440,7 +528,10 @@ public sealed class NotificationJobCoverageDigestTests(SqlServerFixture sql)
         entity.Deactivate();
         db.SourceEntities.Add(entity);
 
-        db.MaintenanceRuns.Add(new MaintenanceRun(NotificationJob.Code, now.AddHours(-1)));
+        // ⚠ Завершений успішно: вікно бере лише завершений не-Failed прогін (J1-02).
+        var previousRun = new MaintenanceRun(NotificationJob.Code, now.AddHours(-1));
+        previousRun.Complete("Succeeded", null, now.AddHours(-1));
+        db.MaintenanceRuns.Add(previousRun);
         await db.SaveChangesAsync(CancellationToken.None);
 
         return new World(entity.Id, entityCode);
@@ -497,6 +588,12 @@ public sealed class NotificationJobCoverageDigestTests(SqlServerFixture sql)
 
         return (deliveries, messages);
     }
+
+    /// <summary>Рядок тіла листа про цю сутність (база спільна: чужі рядки не враховуються).</summary>
+    private static string LineOf(string body, string subject)
+        => Assert.Single(
+            body.Split(Environment.NewLine, StringSplitOptions.TrimEntries),
+            l => l.Contains(subject, StringComparison.Ordinal));
 
     /// <summary>Рядки зведення, що стосуються саме цієї сутності.</summary>
     private static List<Item> ItemsOf(string detailsJson, string subject)

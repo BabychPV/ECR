@@ -181,6 +181,7 @@ const expected: readonly (readonly [StatusKind, string, StatusTone])[] = [
   ['severity', 'Warning', 'warning'],
   ['severity', 'Error', 'danger'],
 
+  ['collectionRun', 'Running', 'info'],
   ['collectionRun', 'Succeeded', 'neutral'],
   ['collectionRun', 'Degraded', 'warning'],
   ['collectionRun', 'Failed', 'danger'],
@@ -214,6 +215,9 @@ const expected: readonly (readonly [StatusKind, string, StatusTone])[] = [
   ['coverage', 'RegistryExternalKeyRelinked', 'warning'],
   // ФВ-13.15: пропуск планового збору за залежністю — затримка за правилом, `info`.
   ['coverage', 'SkippedDependency', 'info'],
+  // D2-02 (AN-105): покриття скінченого періоду нижче порогу / без придатних точок — `warning`.
+  ['coverage', 'PartialCoverage', 'warning'],
+  ['coverage', 'SkippedNoData', 'warning'],
 
   // `SnapshotStatus` (`Enums.cs`, `D-65`): `Rejected` у зрізі немає.
   ['snapshot', 'Draft', 'muted'],
@@ -238,8 +242,8 @@ describe('StatusBadge: стан → тон', () => {
    * коли й тут забули рядок: два переліки розійшлися б, а тест лишився б
    * зеленим на тому, що від них лишилося.
    */
-  it('перелік вичерпний: 56 пар, і таблиця компонента не має жодної зайвої', () => {
-    expect(expected).toHaveLength(56);
+  it('перелік вичерпний: 59 пар, і таблиця компонента не має жодної зайвої', () => {
+    expect(expected).toHaveLength(59);
     expect(expected.every(([kind, state]) => isKnownStatus(kind, state))).toBe(true);
 
     const inComponent = Object.entries(statusTable).flatMap(([kind, states]) =>

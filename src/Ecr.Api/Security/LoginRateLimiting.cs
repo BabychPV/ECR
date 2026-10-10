@@ -152,17 +152,31 @@ public static class LoginRateLimiting
     /// <summary>Префікс розділу звітів CSP — щоб не збігтися з розділами входу за адресою.</summary>
     private const string CspReportPartitionPrefix = "csp-report:";
 
-    /// <summary>Ключ конфігурації: чи довіряти <c>X-Forwarded-For</c>.</summary>
-    private const string TrustForwardedForKey = "Security:RateLimit:TrustForwardedFor";
+    /// <summary>Скільки анонімних проб <c>/health/ready</c> з однієї адреси дозволено за хвилину (P1-03).</summary>
+    /// <remarks>
+    /// ⛔ P1-03 (AUDIT-2026-10-09b): <c>/health/ready</c> анонімний навмисно (моніторинг,
+    /// балансувальник, <c>deploy-ecr.ps1</c>), але кожна проба запускала важкі перевірки,
+    /// кожну у власному scope і з'єднанні: цикл <c>curl</c> вичерпував пул з'єднань для всіх
+    /// користувачів. Кеш результатів (<c>HealthResultCache</c>) гасить підсилення, межа —
+    /// саму частоту з одного джерела.
+    ///
+    /// ⚠ 60/хв — із запасом: <c>deploy-ecr.ps1</c> опитує раз на 3 с (20/хв), балансувальник
+    /// і SCM — раз на 5–30 с. <c>/health/live</c> не обмежується: він не робить нічого.
+    /// Відмова — голе 429 з <c>Retry-After</c>, як для CSP: каталог рядків — це база.
+    /// </remarks>
+    public const int DefaultHealthReadyPermitPerMinute = 60;
 
-    /// <summary>Заголовок зворотного проксі з адресою початкового клієнта.</summary>
-    private const string ForwardedForHeader = "X-Forwarded-For";
+    /// <summary>Шлях анонімної проби готовності.</summary>
+    public const string HealthReadyPath = "/health/ready";
+
+    /// <summary>Ключ конфігурації: межа проб готовності за хвилину.</summary>
+    private const string HealthReadyPermitKey = "Security:RateLimit:HealthReadyPermitPerMinute";
+
+    /// <summary>Префікс розділу проб готовності — щоб не збігтися з розділами входу за адресою.</summary>
+    private const string HealthReadyPartitionPrefix = "health-ready:";
 
     /// <summary>Розділ, у який складаються НЕобмежувані запити.</summary>
     private const string UnlimitedPartition = "unlimited";
-
-    /// <summary>Ключ розділу, коли адреси клієнта немає (наприклад, у тестовому хості).</summary>
-    private const string UnknownClient = "unknown";
 
     /// <summary>
     /// Код відмови.
@@ -240,12 +254,17 @@ public static class LoginRateLimiting
             ChangePasswordPermitKey, DefaultChangePasswordPermitPerMinute);
         var cspReportPermit = configuration.GetValue(
             CspReportPermitKey, DefaultCspReportPermitPerMinute);
-        var trustForwardedFor = configuration.GetValue(TrustForwardedForKey, defaultValue: false);
+        var healthReadyPermit = configuration.GetValue(
+            HealthReadyPermitKey, DefaultHealthReadyPermitPerMinute);
+
+        // S1-01: адреса клієнта за проксі — найправіший недовірений запис X-Forwarded-For.
+        var clientAddress = ForwardedClientAddress.FromConfiguration(configuration);
 
         // Системна межа проб транспорту — не в глобальному обмежувачі: той рахує і ВІДХИЛЕНІ запити, а квота
         // мусить витрачатися лише прийнятими політикою користувача (див. SmtpTestQuotaMiddleware).
         services.AddSingleton<SmtpTestSystemQuota>();
         services.AddSingleton<DocumentRecalculateQuota>(); // межа перерахунку документа: власний лічильник із поверненням при відмові
+        services.AddSingleton<ImportPreviewGate>(); // AN-123: межа розборів перегляду імпорту — у дії, після прив'язки тіла
 
         services.AddRateLimiter(options =>
         {
@@ -255,18 +274,24 @@ public static class LoginRateLimiting
             {
                 if (context.Request.Path.StartsWithSegments(LoginPathPrefix, StringComparison.OrdinalIgnoreCase))
                 {
-                    return PerMinute(ClientKey(context, trustForwardedFor), permitPerMinute);
+                    return PerMinute(clientAddress.KeyOf(context), permitPerMinute);
                 }
 
                 if (IsCspReport(context))
                 {
                     return PerMinute(
-                        CspReportPartitionPrefix + ClientKey(context, trustForwardedFor), cspReportPermit);
+                        CspReportPartitionPrefix + clientAddress.KeyOf(context), cspReportPermit);
+                }
+
+                if (IsHealthReady(context))
+                {
+                    return PerMinute(
+                        HealthReadyPartitionPrefix + clientAddress.KeyOf(context), healthReadyPermit);
                 }
 
                 if (IsChangePassword(context))
                 {
-                    return PerMinute(ChangePasswordKey(context, trustForwardedFor), changePasswordPermit);
+                    return PerMinute(ChangePasswordKey(context, clientAddress), changePasswordPermit);
                 }
 
                 return RateLimitPartition.GetNoLimiter(UnlimitedPartition);
@@ -278,10 +303,11 @@ public static class LoginRateLimiting
             //
             // ⚠ Звіти CSP — голе 429 із `Retry-After`, без тіла: `RejectAsync` ходить
             // у каталог рядків (тобто в базу), а це анонімний шлях скидання
-            // навантаження, і браузер тіла однаково не читає.
+            // навантаження, і браузер тіла однаково не читає. Те саме для
+            // `/health/ready` (P1-03): відмова, що йде в базу, з'їла б економію межі.
             options.OnRejected = static (rejection, ct) =>
             {
-                if (IsCspReport(rejection.HttpContext))
+                if (IsCspReport(rejection.HttpContext) || IsHealthReady(rejection.HttpContext))
                 {
                     return RejectBare(rejection);
                 }
@@ -323,6 +349,10 @@ public static class LoginRateLimiting
         => context.Request.Path.Equals(
             Controllers.CspReportController.RoutePath, StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>Чи запит — проба готовності (P1-03).</summary>
+    private static bool IsHealthReady(HttpContext context)
+        => context.Request.Path.StartsWithSegments(HealthReadyPath, StringComparison.OrdinalIgnoreCase);
+
     /// <summary>429 без тіла, з <c>Retry-After</c>.</summary>
     private static ValueTask RejectBare(OnRejectedContext rejection)
     {
@@ -344,12 +374,12 @@ public static class LoginRateLimiting
     /// тут уже є. Ідентифікатор — наш <c>UserId</c>, а не ім'я: ім'я не
     /// міняється, але саме Id — ключ усього аудиту (D-86).
     /// </remarks>
-    private static string ChangePasswordKey(HttpContext context, bool trustForwardedFor)
+    private static string ChangePasswordKey(HttpContext context, ForwardedClientAddress clientAddress)
     {
         var userId = context.User.FindFirstValue(AuthenticationSetup.UserIdClaim);
 
         return string.IsNullOrEmpty(userId)
-            ? ChangePasswordPartitionPrefix + "ip:" + ClientKey(context, trustForwardedFor)
+            ? ChangePasswordPartitionPrefix + "ip:" + clientAddress.KeyOf(context)
             : ChangePasswordPartitionPrefix + "user:" + userId;
     }
 
@@ -375,56 +405,6 @@ public static class LoginRateLimiting
         }
 
         await WriteProblemAsync(context, code, detailKey, detailFallback, ct).ConfigureAwait(false);
-    }
-
-    /// <summary>
-    /// Ключ розділу: хто саме «один клієнт».
-    /// </summary>
-    /// <remarks>
-    /// ⛔ Типово — адреса СОКЕТА, і <c>X-Forwarded-For</c> ігнорується. Заголовок
-    /// пише клієнт, а не мережа: якби ключ брався з нього, нападник міняв би
-    /// його щозапиту і межа не спрацювала б ЖОДНОГО разу — «захист», який
-    /// нічого не тримає, гірший за його відсутність, бо про нього звітують.
-    ///
-    /// ⚠ Зворотний бік названий прямо: якщо ECR колись стане за зворотним
-    /// проксі, адреса сокета стане адресою проксі — одна на всіх, і перший же
-    /// користувач вичерпає межу для решти, тобто «захист» перетвориться на
-    /// відмову в обслуговуванні своїм же. Саме тому ручка
-    /// <c>Security:RateLimit:TrustForwardedFor</c> існує і типово ВИМКНЕНА:
-    /// вмикати її можна лише там, де проксі ГАРАНТОВАНО переписує заголовок, а
-    /// не дописує до клієнтського. Сьогодні інсталятор піднімає Kestrel
-    /// напряму (<c>R-01</c>), тож типовим станом є «проксі немає».
-    ///
-    /// ⚠ IPv4, відображений в IPv6 (<c>::ffff:10.0.0.1</c>), зводиться до
-    /// IPv4: інакше той самий клієнт мав би два розділи залежно від того, як
-    /// саме стек прийняв з'єднання, тобто подвоєну межу.
-    /// </remarks>
-    private static string ClientKey(HttpContext context, bool trustForwardedFor)
-    {
-        if (trustForwardedFor)
-        {
-            var forwarded = context.Request.Headers[ForwardedForHeader].ToString();
-
-            if (!string.IsNullOrWhiteSpace(forwarded))
-            {
-                // Найлівіший запис — початковий клієнт; решта — ланцюг проксі.
-                var first = forwarded.Split(',')[0].Trim();
-
-                if (first.Length > 0)
-                {
-                    return first;
-                }
-            }
-        }
-
-        var address = context.Connection.RemoteIpAddress;
-
-        if (address is null)
-        {
-            return UnknownClient;
-        }
-
-        return (address.IsIPv4MappedToIPv6 ? address.MapToIPv4() : address).ToString();
     }
 
     /// <summary>

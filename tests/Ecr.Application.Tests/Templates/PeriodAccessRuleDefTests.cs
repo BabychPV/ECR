@@ -39,6 +39,11 @@ public sealed class PeriodAccessRuleDefTests
     private readonly TemplateVersion _draft;
     private readonly SheetDef _sheet;
     private readonly TableDef _table;
+    private readonly ColumnDef _lookup;
+    private readonly ColumnDef _decimal;
+    private readonly SheetDef _otherSheet;
+    private readonly TableDef _otherTable;
+    private readonly ColumnDef _otherLookup;
 
     public PeriodAccessRuleDefTests()
     {
@@ -52,12 +57,17 @@ public sealed class PeriodAccessRuleDefTests
         var builder = new TemplateBuilder { TemplateVersionId = 1 };
         _sheet = builder.Sheet("Water");
         _table = builder.Table(_sheet, "Main");
+        _lookup = builder.Column(_table, "PERMIT", CellDataType.Lookup);
+        _decimal = builder.Column(_table, "QTY", CellDataType.Decimal);
+        _otherSheet = builder.Sheet("Air");
+        _otherTable = builder.Table(_otherSheet, "Permits");
+        _otherLookup = builder.Column(_otherTable, "PERMIT_REF", CellDataType.Lookup);
 
         _draft = new TemplateVersion(templateId: 1, version: "1.0.0.0", createdByUserId: 7, utcNow: Now);
         typeof(TemplateVersion).GetProperty(nameof(TemplateVersion.Id))!.SetValue(_draft, 1);
         typeof(TemplateVersion)
             .GetField("_sheets", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
-            .SetValue(_draft, new List<SheetDef> { _sheet });
+            .SetValue(_draft, new List<SheetDef> { _sheet, _otherSheet });
 
         _clock.UtcNow.Returns(Now);
         _user.UserId.Returns(9);
@@ -124,6 +134,92 @@ public sealed class PeriodAccessRuleDefTests
         Assert.Equal(ErrorCodes.TemplateInvalid, error.ErrorCode);
         Assert.Equal("err.ECR-TMPL-0422.sourceWindowRequiresColumn", error.Details?["messageKey"]);
         _rules.DidNotReceive().Add(Arg.Any<PeriodAccessRuleDef>());
+    }
+
+    /// <summary>
+    /// ⛔ A1-02 (аудит 09.10c): контроль — Lookup-колонка ТІЄЇ таблиці, про яку правило, приймається.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "ФВ-2.15")]
+    public async Task SourceWindow_з_Lookup_колонкою_своєї_таблиці_приймається()
+    {
+        var created = await Create().HandleAsync(
+            1,
+            CreateCommand(PeriodAccessRuleKind.SourceWindow, tableDefId: _table.Id, sourceColumnDefId: _lookup.Id),
+            CancellationToken.None);
+
+        Assert.Equal(_lookup.Id, created.SourceColumnDefId);
+        _rules.Received(1).Add(Arg.Any<PeriodAccessRuleDef>());
+    }
+
+    /// <summary>
+    /// ⛔ A1-02: колонка-джерело іншої таблиці, іншої версії чи не-Lookup не дає значень у рядках зрізу —
+    /// правило «налаштоване», а не блокує нічого (fail-open). Відмова 422 з ключем, правило не заводиться.
+    /// </summary>
+    [Theory]
+    [InlineData("otherTable")]
+    [InlineData("otherVersion")]
+    [InlineData("notLookup")]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "ФВ-2.15")]
+    public async Task SourceWindow_з_чужою_або_не_Lookup_колонкою_відхиляється_422(string variant)
+    {
+        var column = variant switch
+        {
+            "otherTable" => _otherLookup.Id,
+            "otherVersion" => 999,
+            _ => _decimal.Id,
+        };
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Create().HandleAsync(
+                1,
+                CreateCommand(PeriodAccessRuleKind.SourceWindow, tableDefId: _table.Id, sourceColumnDefId: column),
+                CancellationToken.None));
+
+        Assert.Equal(ErrorCodes.TemplateInvalid, error.ErrorCode);
+        Assert.Equal("err.ECR-TMPL-0422.sourceColumnNotInRuleTarget", error.Details?["messageKey"]);
+        _rules.DidNotReceive().Add(Arg.Any<PeriodAccessRuleDef>());
+    }
+
+    /// <summary>
+    /// ⛔ A1-02: аркуш і таблиця перевірялися кожен окремо — пара «аркуш A + таблиця з аркуша B» зберігалася, а
+    /// <c>Targets</c> вимагає збігу обох: правило не накривало жодної комірки.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    public async Task Таблиця_не_з_обраного_аркуша_відхиляється_422()
+    {
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Create().HandleAsync(
+                1, CreateCommand(sheetDefId: _sheet.Id, tableDefId: _otherTable.Id), CancellationToken.None));
+
+        Assert.Equal(ErrorCodes.TemplateInvalid, error.ErrorCode);
+        Assert.Equal("err.ECR-TMPL-0422.tableNotInSheet", error.Details?["messageKey"]);
+        _rules.DidNotReceive().Add(Arg.Any<PeriodAccessRuleDef>());
+    }
+
+    /// <summary>
+    /// ⛔ A1-02: команда зміни колонку-джерело не несе, а таблицю міняє — колонку правила звіряють з НОВОЮ ціллю.
+    /// Перенести SourceWindow на таблицю, де його колонки немає, означало б той самий мертвий замок.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    public async Task Зміна_таблиці_SourceWindow_без_його_колонки_відхиляється_422()
+    {
+        var rule = WithId(
+            PeriodAccessRuleDef.ForSourceWindow(1, _lookup.Id, OutOfWindowBehavior.ReadOnly).ForTable(_table.Id), 43);
+        _rules.FindAsync(43, Arg.Any<CancellationToken>()).Returns(rule);
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Save().HandleAsync(
+                1, 43,
+                new UpdatePeriodAccessRuleCommand(OutOfWindowBehavior.ReadOnly, null, _otherTable.Id, null, null),
+                CancellationToken.None));
+
+        Assert.Equal("err.ECR-TMPL-0422.sourceColumnNotInRuleTarget", error.Details?["messageKey"]);
+        Assert.Equal(_table.Id, rule.TableDefId);
     }
 
     [Fact]

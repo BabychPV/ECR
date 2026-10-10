@@ -152,6 +152,126 @@ public sealed partial class CiPipelineTests
         Assert.Contains("openssl rand", workflow, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData("ci.yml")]
+    [InlineData("evidence.yml")]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Гейти_не_пропускаються_для_PR_з_dev_integration(string file)
+    {
+        // ⛔ L10-09, D-335 (HU-12 R5 = A): 057a1118 пропускав гейти на PR з head `dev/integration`,
+        // а пропущену обов'язкову перевірку GitHub зараховує як пройдену. Жодна умова в
+        // конвеєрі не дивиться на `head_ref == 'dev/integration'`, крім джоба `pr-source`,
+        // який такий PR валить.
+        var workflow = File.ReadAllText(Path.Combine(Root(), ".github", "workflows", file));
+
+        var skips = workflow.Split('\n')
+            .Where(line => !line.TrimStart().StartsWith('#'))
+            .Where(line => line.Contains("head_ref == 'dev/integration'", StringComparison.Ordinal))
+            .Select(line => line.Trim())
+            .ToList();
+
+        var allowed = file == "ci.yml"
+            ? new[] { "if: github.event_name == 'pull_request' && github.head_ref == 'dev/integration'" }
+            : Array.Empty<string>();
+        Assert.Equal(allowed, skips);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void PR_з_dev_integration_валиться_окремим_джобом()
+    {
+        // D-335: тижневий PR — з `rc/*` (CLAUDE.md §8); PR з `dev/integration` червоний з поясненням.
+        var workflow = Workflow().Replace("\r\n", "\n", StringComparison.Ordinal);
+
+        var start = workflow.IndexOf("\n  pr-source:\n", StringComparison.Ordinal);
+        Assert.True(start >= 0, "Немає джоба pr-source у ci.yml.");
+        var next = workflow.IndexOf("\n  lane-shape:", start, StringComparison.Ordinal);
+        var job = next > start ? workflow[start..next] : workflow[start..];
+
+        Assert.Contains("github.head_ref == 'dev/integration'", job, StringComparison.Ordinal);
+        Assert.Contains("exit 1", job, StringComparison.Ordinal);
+        Assert.Contains("rc/", job, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Агрегатор_windows_залежить_від_усіх_Windows_завдань()
+    {
+        // ⛔ X8-01 (R6): реліз — MSI на Windows, а сім гейтів — Linux. Агрегатор `windows`
+        // зводить Windows-завдання в одне ім'я для ruleset `main`; завдання, що випало з
+        // його `needs`, перестало б блокувати мерж мовчки.
+        var workflow = Workflow().Replace("\r\n", "\n", StringComparison.Ordinal);
+
+        var start = workflow.IndexOf("\n  windows:\n", StringComparison.Ordinal);
+        Assert.True(start >= 0, "Немає агрегатора windows у ci.yml — Windows-завдання не зведені в один вердикт.");
+        var next = workflow.IndexOf("\n  # ", start + 1, StringComparison.Ordinal);
+        var job = next > start ? workflow[start..next] : workflow[start..];
+
+        var needs = job.Split('\n').Single(line => line.TrimStart().StartsWith("needs:", StringComparison.Ordinal));
+        foreach (var windowsJob in WindowsJobs(workflow))
+        {
+            Assert.Contains(windowsJob, needs, StringComparison.Ordinal);
+            Assert.Contains($"needs.{windowsJob}.result", job, StringComparison.Ordinal);
+        }
+
+        Assert.Contains("if: ${{ always() }}", job, StringComparison.Ordinal);
+        Assert.Contains("exit 1", job, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("smoke.yml")]
+    [InlineData("e2e-stand.yml")]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Smoke_і_e2e_запускаються_на_релізному_PR_у_main(string file)
+    {
+        // ⛔ X8-02 (R6): smoke і e2e-stand — єдині автоматичні проходи шляху користувача на
+        // живому процесі. Обов'язковими для `main` їх робить людина (ruleset); передумова —
+        // щоб на PR `rc/<дата>` → `main` вони ВЗАГАЛІ стартували. Тригер, що загубився при
+        // правці, лишив би обов'язкову перевірку в стані «expected» назавжди або, без
+        // ruleset, — тихо прибрав би єдиний наскрізний прогін релізу.
+        var workflow = File.ReadAllText(Path.Combine(Root(), ".github", "workflows", file))
+            .Replace("\r\n", "\n", StringComparison.Ordinal);
+
+        Assert.Matches(@"(?m)^  pull_request:\s*\n\s+branches:\s*\[[^\]]*\bmain\b", workflow);
+
+        if (file == "e2e-stand.yml")
+        {
+            Assert.Contains("startsWith(github.head_ref, 'rc/')", workflow, StringComparison.Ordinal);
+        }
+    }
+
+    /// <summary>Завдання <c>ci.yml</c>, що йдуть на Windows-раннері.</summary>
+    private static List<string> WindowsJobs(string workflow)
+    {
+        var jobs = new List<string>();
+        string? current = null;
+        foreach (var line in workflow.Split('\n'))
+        {
+            var job = JobHeader().Match(line);
+            if (job.Success)
+            {
+                current = job.Groups[1].Value;
+                continue;
+            }
+
+            if (current is not null && line.Trim() == "runs-on: windows-latest")
+            {
+                jobs.Add(current);
+            }
+        }
+
+        Assert.NotEmpty(jobs);
+        return jobs;
+    }
+
+    /// <summary>Заголовок завдання у <c>jobs:</c> — рівно два пробіли відступу.</summary>
+    [GeneratedRegex(@"^  ([a-z][a-z0-9-]*):\s*$")]
+    private static partial Regex JobHeader();
+
     private static List<string> Covered(string workflow)
         => workflow.Split('\n')
             .Where(line => !line.TrimStart().StartsWith('#'))

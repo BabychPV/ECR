@@ -47,6 +47,11 @@ public sealed class RegistryResourceGrantAccessTests
     {
         _user.UserId.Returns(9);
 
+        // ⚠ Заглушка ВИКОНУЄ замикання: збереження запису йде транзакцією (D1-05 — блокування й звірка
+        // версії опису), і без цього `SaveChangesAsync` усередині не викликався б узагалі.
+        _uow.ExecuteInTransactionAsync(Arg.Any<Func<CancellationToken, Task>>(), Arg.Any<CancellationToken>())
+            .Returns(call => call.ArgAt<Func<CancellationToken, Task>>(0)(call.ArgAt<CancellationToken>(1)));
+
         _cache.GetOrAddAsync(
                 Arg.Any<string>(),
                 Arg.Any<Func<CancellationToken, Task<IReadOnlyList<RegistryEntry>>>>(),

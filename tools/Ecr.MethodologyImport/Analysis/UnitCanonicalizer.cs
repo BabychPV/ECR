@@ -15,6 +15,9 @@ public static class UnitCanonicalizer
     public const string ReasonEmpty = "порожня одиниця";
     public const string ReasonUnknown = "немає в каталозі ECR і в таблиці псевдонімів";
 
+    /// <summary>Початок причини для позначення, яке читається більш ніж одним способом (N5-01): код не вгадується.</summary>
+    public const string ReasonAmbiguousPrefix = "неоднозначна: ";
+
     /// <summary>Коди каталогу, на які посилаються формули методологій (сід + таблиця рушія).</summary>
     public static IReadOnlyCollection<string> KnownCodes { get; } =
     [
@@ -27,13 +30,24 @@ public static class UnitCanonicalizer
     // Ключ — нормалізована форма (нижній регістр, без пробілів, «/» → «_per_», надрядкові 2/3 → цифри).
     private static readonly Dictionary<string, string> Aliases = new(StringComparer.Ordinal)
     {
-        ["кг"] = "kg", ["т"] = "t", ["г"] = "g", ["мг"] = "mg", ["л"] = "l", ["с"] = "s", ["хв"] = "min", ["год"] = "h",
-        ["доба"] = "day", ["добу"] = "day", ["рік"] = "year", ["год."] = "h", ["tonne"] = "t", ["tonnes"] = "t",
+        ["кг"] = "kg", ["т"] = "t", ["г"] = "g", ["мг"] = "mg", ["л"] = "l", ["с"] = "s", ["хв"] = "min",
+        ["доба"] = "day", ["добу"] = "day", ["рік"] = "year", ["tonne"] = "t", ["tonnes"] = "t",
         ["ton"] = "t", ["sec"] = "s", ["hour"] = "h", ["hr"] = "h", ["yr"] = "year", ["years"] = "year",
         ["days"] = "day", ["м3"] = "m3", ["м2"] = "m2", ["дж"] = "J", ["гдж"] = "GJ", ["мдж"] = "MJ", ["тдж"] = "TJ",
         ["безрозм."] = "one", ["безразмерная"] = "one",
-        ["кг_per_т"] = "kg_per_t", ["т_per_рік"] = "t_per_year", ["т_per_год"] = "t_per_year", ["t_per_yr"] = "t_per_year",
+        ["кг_per_т"] = "kg_per_t", ["т_per_рік"] = "t_per_year", ["t_per_yr"] = "t_per_year",
         ["г_per_с"] = "g_per_s", ["мг_per_м3"] = "mg_per_m3", ["кг_per_м3"] = "kg_per_m3",
+    };
+
+    // Позначення, що читаються більш ніж одним способом: код не вгадується (дзеркало Ambiguous з Ecr.Bootstrap.Excel.UnitRecognizer).
+    // «год» — година (укр.) або рік (рос.): мовчки обране читання дало б розбіжність у 8760 разів (т/год ↔ т/рік).
+    // Ключ — нормалізована форма; «год.» з крапкою Normalize не прибирає, тож вона окремий запис.
+    private static readonly Dictionary<string, string> Ambiguous = new(StringComparer.Ordinal)
+    {
+        ["год"] = "«год» — це «година» (укр.) або «рік» (рос.)",
+        ["год."] = "«год.» — це «година» (укр.) або «рік» (рос.)",
+        ["%"] = "«%» — масовий (pct_wt) чи об'ємний (pct_vol) відсоток",
+        ["мвт"] = "«МВт» — потужність; у каталозі є лише енергія (MWh)",
     };
 
     private static readonly Dictionary<string, string> ByLowerCode =
@@ -54,6 +68,11 @@ public static class UnitCanonicalizer
         }
 
         var key = Normalize(trimmed);
+        if (AmbiguousReason(key) is { } ambiguous)
+        {
+            return new UnitResolution(trimmed, null, ReasonAmbiguousPrefix + ambiguous);
+        }
+
         if (Aliases.TryGetValue(key, out var alias))
         {
             return new UnitResolution(trimmed, alias, null);
@@ -63,6 +82,25 @@ public static class UnitCanonicalizer
         return ByLowerCode.TryGetValue(key, out var code)
             ? new UnitResolution(trimmed, code, null)
             : new UnitResolution(trimmed, null, ReasonUnknown);
+    }
+
+    /// <summary>Причина, якщо нормалізована форма або будь-яка частина дробу (<c>т_per_год</c> → <c>год</c>) неоднозначна.</summary>
+    private static string? AmbiguousReason(string key)
+    {
+        if (Ambiguous.TryGetValue(key, out var whole))
+        {
+            return whole;
+        }
+
+        foreach (var part in key.Split("_per_", StringSplitOptions.None))
+        {
+            if (Ambiguous.TryGetValue(part, out var why))
+            {
+                return why;
+            }
+        }
+
+        return null;
     }
 
     /// <summary>Нижній регістр, без пробілів (у т.ч. нерозривних), «/» → «_per_», «³» → «3», «²» → «2».</summary>

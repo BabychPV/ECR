@@ -1002,6 +1002,14 @@ public sealed class Evaluator(
 
     private static ExpressionValue Period(PeriodPropertyNode node, IEvaluationContext context)
     {
+        // ⛔ C1-03. Розбір відхиляє `[Period:±N].X` (`expr.calendarContextOffset`);
+        // вузол із зсувом сюди дійти не мав би. Якщо дійде (дерево, зібране в
+        // обхід розбору), — помилка, а не число ПОТОЧНОГО періоду.
+        if (node.PeriodOffset != 0)
+        {
+            return ExpressionValue.Error(ExpressionErrors.BadValue);
+        }
+
         var period = context.Period;
         return node.Property.ToUpperInvariant() switch
         {

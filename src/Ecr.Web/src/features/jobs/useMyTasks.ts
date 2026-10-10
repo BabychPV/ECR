@@ -1,12 +1,12 @@
 import { useQuery, type UseQueryResult } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import type { JobSummary } from '@/api/types';
-import { recentJobsUrl } from './api';
+import { myTasksUrl } from './api';
 import { activeJobCount } from './myTasks';
 
 /*
- * ⛔ Адреса НЕ набирається тут іще раз: вона береться з `recentJobsUrl`
- * (`features/jobs/api.ts`), де й живе єдиний у клієнті літерал `/api/v1/jobs`.
+ * ⛔ Адреса НЕ набирається тут іще раз: вона береться з `myTasksUrl`
+ * (`features/jobs/api.ts`), де живуть і решта клієнтських літералів `/api/v1/jobs`.
  * Друга копія рядка — це друге місце, яке треба не забути правити, і перший же
  * привід для розбіжності між шапкою й екраном черги.
  */
@@ -41,14 +41,15 @@ const MyTasksIdlePollMs = 30_000;
  * `createdByUserId` не лише зайве — воно неможливе: без `mine` користувач без
  * права отримав би `403` ще до будь-якої фільтрації.
  *
- * ⚠ Ключ запиту — той самий `['jobs', true]`, що в `useRecentJobs(true)`:
- * шапка й екран черги дивляться на ОДНУ відповідь сервера, а не роблять два
- * запити на те саме питання. Відрізняється лише темп опитування.
+ * ⚠ Ключ запиту — ВЛАСНИЙ (`['jobs', 'my-tasks']`), а не `['jobs', true]` екрана черги:
+ * з F4-01 шапка питає сервер про ІНШЕ (`hideRoutine=true` — без успішних перерахунків
+ * формул), і спільний ключ показував би одну відповідь під виглядом другої. Префікс
+ * `['jobs']` той самий, тож інвалідації `['jobs']` (імпорт, повтор, скасування) зачіпають обидва.
  */
 export function useMyTasks(): UseQueryResult<JobSummary[]> {
   return useQuery({
-    queryKey: ['jobs', true],
-    queryFn: () => apiFetch<JobSummary[]>(recentJobsUrl(true)),
+    queryKey: ['jobs', 'my-tasks'],
+    queryFn: () => apiFetch<JobSummary[]>(myTasksUrl()),
     refetchInterval: (query) =>
       activeJobCount(query.state.data) > 0 ? MyTasksActivePollMs : MyTasksIdlePollMs,
   });

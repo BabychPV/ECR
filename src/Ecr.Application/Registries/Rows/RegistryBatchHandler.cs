@@ -90,7 +90,6 @@ public sealed partial class RegistryBatchHandler(
         var states = items.Select(i => new RowState(i)).ToList();
         await ResolveAsync(definition, states, ct).ConfigureAwait(false);
         ParseNumbers(definition, states);
-        await CheckVersionsAsync(states, ct).ConfigureAwait(false);
 
         IReadOnlyList<RegistryEntryWriteRow> written = [];
         var ruleCheck = Rules.RegistryRuleCheck.None;
@@ -99,7 +98,34 @@ public sealed partial class RegistryBatchHandler(
             await uow.ExecuteInTransactionAsync(
                 async token =>
                 {
-                    await DeleteAsync(registryCode, states, token).ConfigureAwait(false);
+                    // ⛔ D1-04: перевірка `baseVersion` — У ТРАНЗАКЦІЇ і ПІСЛЯ блокування рядків записів.
+                    // Раніше вона стояла до транзакції без блокування: дві правки того самого рядка з
+                    // однією версією обидві її проходили, і друга мовчки затирала першу (`4093` не
+                    // спрацьовував). Під RCSI читання версій — новий оператор після `UPDLOCK`, тож бачить
+                    // уже закомічену чужу правку. `dryRun` блокування не бере (L5-13): він відкочується, а
+                    // жива перевірка сітки не має гальмувати справжній запис.
+                    if (!dryRun)
+                    {
+                        // ⚠ Порядок блокувань: СПЕРШУ рядок опису, потім записи — так само, як у
+                        // `RegistryEntryWriter.SaveBatchAsync` (D1-05) і в інших писачів. Зворотний порядок
+                        // (записи → опис) проти CSV/синку (опис → записи) дав би взаємоблокування.
+                        if (await registries.LockDefinitionIsStaleAsync(definition.Id, definition.DefinitionVersion, token)
+                                .ConfigureAwait(false))
+                        {
+                            throw SaveRegistryDefinitionHandler.DefinitionChanged(definition);
+                        }
+
+                        var touched = states
+                            .Where(s => s.Entry is not null)
+                            .Select(s => s.Entry!.Id)
+                            .Distinct()
+                            .Order()
+                            .ToList();
+                        await rows.LockEntriesAsync(touched, token).ConfigureAwait(false);
+                    }
+
+                    await CheckVersionsAsync(states, token).ConfigureAwait(false);
+                    await DeleteAsync(registryCode, states, dryRun, token).ConfigureAwait(false);
                     await CheckKeysAsync(definition, states, token).ConfigureAwait(false);
                     written = await WriteAsync(definition, states, dryRun, token).ConfigureAwait(false);
 
@@ -285,13 +311,13 @@ public sealed partial class RegistryBatchHandler(
     }
 
     /// <summary>Видалення — наявним обробником (посилання, каскад композиції, ключі, журнал).</summary>
-    private async Task DeleteAsync(string registryCode, List<RowState> states, CancellationToken ct)
+    private async Task DeleteAsync(string registryCode, List<RowState> states, bool dryRun, CancellationToken ct)
     {
         foreach (var state in states.Where(s => s.Item.Op == "delete" && s.Errors.Count == 0))
         {
             try
             {
-                await deleter.HandleAsync(registryCode, state.Entry!.Id, ct).ConfigureAwait(false);
+                await deleter.HandleAsync(registryCode, state.Entry!.Id, ct, dryRun).ConfigureAwait(false);
                 state.Deleted = true;
             }
             catch (EcrException ex) when (ex is BusinessRuleException or NotFoundException)

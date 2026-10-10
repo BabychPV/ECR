@@ -81,6 +81,46 @@ public sealed class GetJobStatusHandlerTests
         Assert.NotNull(status);
     }
 
+    /// <summary>
+    /// AN-108 / P2-03: автора несе вже прочитаний стан — другого читання того самого рядка на кожне опитування немає,
+    /// а відповідь і далі несе <c>CreatedByUserId</c>.
+    /// </summary>
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Автор_зі_стану_без_другого_читання_журналу(bool viewHealth)
+    {
+        _user.UserId.Returns(Author);
+        var access = new AccessBuilder { UserId = Author };
+        _access.BuildProfileAsync(Author, Arg.Any<CancellationToken>())
+            .Returns(viewHealth ? access.Permission(GetJobStatusHandler.Permission).Build() : access.Build());
+        _jobs.GetStatusAsync(JobId, Arg.Any<CancellationToken>())
+            .Returns(new JobStatus(JobId, "Running", 40, null, null, CreatedByUserId: Author));
+
+        var status = await Handler().HandleAsync(JobId, CancellationToken.None);
+
+        Assert.NotNull(status);
+        Assert.Equal(Author, status!.CreatedByUserId);
+        await _jobs.DidNotReceive().GetCreatedByUserIdAsync(Arg.Any<string>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    public async Task Чужий_за_автором_зі_стану_відхиляється()
+    {
+        _user.UserId.Returns(Stranger);
+        _access.BuildProfileAsync(Stranger, Arg.Any<CancellationToken>())
+            .Returns(new AccessBuilder { UserId = Stranger }.Build());
+        _jobs.GetStatusAsync(JobId, Arg.Any<CancellationToken>())
+            .Returns(new JobStatus(JobId, "Running", 40, null, null, CreatedByUserId: Author));
+
+        var denied = await Assert.ThrowsAsync<AccessDeniedException>(
+            () => Handler().HandleAsync(JobId, CancellationToken.None));
+
+        Assert.Equal("ECR-AUTH-0403", denied.ErrorCode);
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     public async Task Анонім_без_ідентифікатора_користувача_відхиляється_до_будь_якого_запиту_до_задач()

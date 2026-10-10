@@ -74,7 +74,10 @@ public sealed class JobQueueDepthMetricTests(SqlServerFixture sql) : DbJobQueueT
         Assert.Equal(1, seen[(JobLanes.Default, "Running")]);
         Assert.Equal(1, seen[(JobLanes.Recalc, "Queued")]);
         Assert.Equal(0, seen[(JobLanes.Recalc, "Running")]);
-        Assert.Equal(4, seen.Count);
+
+        // P1-06: лейн interactive має свій ряд і з нулями (порожній лейн не зникає з графіка).
+        Assert.Equal(0, seen[(JobLanes.Interactive, "Queued")]);
+        Assert.Equal(JobLanes.All.Count * 2, seen.Count);
     }
 
     [Fact]

@@ -133,17 +133,29 @@ public sealed class RegistryImpactScanTests(SqlServerFixture sql)
         await using var command = connection.CreateCommand();
         command.CommandTimeout = 120;
         // Id — з SEQUENCE (діапазоном: NEXT VALUE FOR несумісний з TOP).
+        // ⚠ Порціями з CHECKPOINT (як у `CollectionStoreRawPointUpsertTests`): одна транзакція
+        // на 40 000 результатів із чотирма індексами `calc.CalculationResult` (R5-Q1 додав
+        // покривний `IX_CalculationResult_DocRun`) видувала журнал спільної тестової бази за
+        // стелю `TestDatabaseSizeTests` (інтеграція batch5).
         command.CommandText = """
-            DECLARE @first sql_variant;
-            EXEC sys.sp_sequence_get_range @sequence_name = N'calc.CalculationResultSeq',
-                 @range_size = @n, @range_first_value = @first OUTPUT;
-            INSERT calc.CalculationResult (Id, PeriodKey, CalculationRunId, MethodologyVersionId, DocumentId,
-                                           SourceRowKey, OutputCode, Value, UnitId, Kind)
-            SELECT TOP (@n) CONVERT(bigint, @first) + ROW_NUMBER() OVER (ORDER BY (SELECT 1)) - 1,
-                   @period, @run, @version, @doc, NULL, N'FOREIGN', 1, @unit, 0
-            FROM sys.all_objects AS a CROSS JOIN sys.all_objects AS b
+            SET NOCOUNT ON;
+            DECLARE @left int = @n, @k int, @first sql_variant;
+            WHILE @left > 0
+            BEGIN
+                SET @k = CASE WHEN @left < @chunk THEN @left ELSE @chunk END;
+                EXEC sys.sp_sequence_get_range @sequence_name = N'calc.CalculationResultSeq',
+                     @range_size = @k, @range_first_value = @first OUTPUT;
+                INSERT calc.CalculationResult (Id, PeriodKey, CalculationRunId, MethodologyVersionId, DocumentId,
+                                               SourceRowKey, OutputCode, Value, UnitId, Kind)
+                SELECT TOP (@k) CONVERT(bigint, @first) + ROW_NUMBER() OVER (ORDER BY (SELECT 1)) - 1,
+                       @period, @run, @version, @doc, NULL, N'FOREIGN', 1, @unit, 0
+                FROM sys.all_objects AS a CROSS JOIN sys.all_objects AS b;
+                SET @left = @left - @k;
+                CHECKPOINT;
+            END;
             """;
         command.Parameters.AddWithValue("@n", ForeignRows);
+        command.Parameters.AddWithValue("@chunk", 10_000);
         command.Parameters.AddWithValue("@period", periodKey);
         command.Parameters.AddWithValue("@run", runId);
         command.Parameters.AddWithValue("@version", versionId);

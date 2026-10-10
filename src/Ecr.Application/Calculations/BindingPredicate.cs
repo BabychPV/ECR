@@ -1,6 +1,4 @@
 // src/Ecr.Application/Calculations/BindingPredicate.cs
-using System.Text.Json;
-
 namespace Ecr.Application.Calculations;
 
 /// <summary>
@@ -23,25 +21,12 @@ public static class BindingPredicate
     public static bool AreEquivalent(string left, string right)
         => string.Equals(Normalize(left), Normalize(right), StringComparison.Ordinal);
 
+    // ⛔ N2-06: канонічні пари матчера (значення — як текст, `5` ≡ `"5"`), а не сирий JSON.
     private static string Normalize(string json)
-    {
-        try
-        {
-            using var document = JsonDocument.Parse(json);
-            if (document.RootElement.ValueKind != JsonValueKind.Object)
-            {
-                return json.Trim();
-            }
-
-            return string.Join(
+        => Ecr.Domain.Entities.Calculations.MethodologyRuleMatcher.CanonicalPairs(json) is { } pairs
+            ? string.Join(
                 ';',
-                document.RootElement.EnumerateObject()
-                    .OrderBy(p => p.Name, StringComparer.Ordinal)
-                    .Select(p => p.Name + "=" + p.Value.GetRawText()));
-        }
-        catch (JsonException)
-        {
-            return json.Trim();
-        }
-    }
+                pairs.Select(p => System.Text.Json.JsonSerializer.Serialize(p.Key)
+                                  + "=" + System.Text.Json.JsonSerializer.Serialize(p.Value)))
+            : json.Trim();
 }

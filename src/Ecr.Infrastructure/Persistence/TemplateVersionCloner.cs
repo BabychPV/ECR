@@ -1,6 +1,8 @@
 using System.Reflection;
+using Ecr.Application.Errors;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Enums;
+using Ecr.Domain.Errors;
 
 namespace Ecr.Infrastructure.Persistence;
 
@@ -118,6 +120,25 @@ public static class TemplateVersionCloner
                     if (table.Columns.FirstOrDefault(c => c.Id == rule.ColumnDefId)?.Code is { } code)
                     {
                         ruleLinks.Add(new RuleLink(rule, table, code));
+                    }
+                    else if (rule.ColumnDefId is { } foreign)
+                    {
+                        // ⛔ A1-03 (аудит 09.10c): колонки правила в його таблиці немає (до A1-03 API приймало
+                        // колонку будь-якої таблиці). Скидання нижче обнуляє `ColumnDefId` усім правилам, а лінку
+                        // тут не було б — правило клону стало б ТАБЛИЧНИМ, тобто накрило б усі колонки таблиці й
+                        // заблокувало б збереження. Ні мовчки розширити, ні мовчки загубити: відмова з ключем,
+                        // кодом правила й таблиці — до будь-якого запису (граф джерела ще не чіпали).
+                        throw new BusinessRuleException(
+                            ErrorCodes.TemplateInvalid,
+                            $"Правило валідації {rule.Code} таблиці {table.Code} посилається на колонку {foreign} " +
+                            "поза цією таблицею: клон зробив би його правилом на всі колонки.",
+                            new Dictionary<string, object?>
+                            {
+                                ["messageKey"] = "err.ECR-TMPL-0422.cloneValidationRuleForeignColumn",
+                                ["ruleCode"] = rule.Code,
+                                ["tableCode"] = table.Code,
+                                ["columnDefId"] = foreign.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                            });
                     }
                 }
             }

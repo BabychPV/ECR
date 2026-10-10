@@ -235,6 +235,92 @@ public sealed class RegistryEntryDeleteTests(SqlServerFixture sql)
         Assert.False(await IsDeletedAsync(fixture.EntryId).ConfigureAwait(true));
     }
 
+    /// <summary>
+    /// ⛔ L5-15 (аудит 2026-10-09): ручна правка логічно видаленого запису за Id — <c>404 registryEntry</c>,
+    /// значення не змінюються. <c>FindEntryAsync</c> видалених не фільтрує, тож без <c>IsDeleted</c> у
+    /// <c>UpsertRegistryEntryHandler.LoadAsync</c> запис мовчки перейменовувався, а ревізія довідника росла.
+    /// </summary>
+    /// <remarks>
+    /// Мутація: прибрати <c>|| entry.IsDeleted</c> у <c>UpsertRegistryEntryHandler.LoadAsync</c> — тест червоніє
+    /// (200 замість 404, назва змінилась).
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Правка_видаленого_запису_за_Id_дає_404_і_значення_не_змінюються()
+    {
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, "Registry.View", "Registry.EditData")
+            .ConfigureAwait(true);
+
+        var fixture = await SeedRegistriesAsync().ConfigureAwait(true);
+        await MarkDeletedAsync(fixture.EntryId).ConfigureAwait(true);
+        var before = await StateAsync(fixture.EntryId).ConfigureAwait(true);
+        var revisionBefore = await DataRevisionAsync(fixture.DefinitionId).ConfigureAwait(true);
+
+        var response = await client
+            .PostAsJsonAsync(
+                new Uri($"/api/v1/registries/{fixture.Code}/entries", UriKind.Relative),
+                new
+                {
+                    id = (long?)fixture.EntryId,
+                    registryDefId = fixture.DefinitionId,
+                    code = "IGNORED",
+                    display = new { values = new Dictionary<string, string> { ["en"] = "Changed after delete" } },
+                    parentEntryId = (long?)null,
+                    values = new Dictionary<string, object?>(),
+                })
+            .ConfigureAwait(true);
+
+        var body = await response.Content.ReadAsStringAsync().ConfigureAwait(true);
+        Assert.True(response.StatusCode == HttpStatusCode.NotFound, $"{response.StatusCode}: {body}");
+
+        var problem = JsonDocument.Parse(body).RootElement;
+        Assert.Equal("ECR-REG-0404", problem.GetProperty("errorCode").GetString());
+        Assert.Equal("err.ECR-REG-0404.registryEntry", problem.GetProperty("messageKey").GetString());
+
+        Assert.Equal(before, await StateAsync(fixture.EntryId).ConfigureAwait(true));
+        Assert.Equal(revisionBefore, await DataRevisionAsync(fixture.DefinitionId).ConfigureAwait(true));
+    }
+
+    /// <summary>
+    /// ⛔ L5-15: зміна вікна чинності видаленого запису за Id — <c>404 registryEntry</c>, вікно не змінюється.
+    /// </summary>
+    /// <remarks>
+    /// Мутація: прибрати <c>|| entry.IsDeleted</c> у <c>SetEntryValidityHandler</c> — тест червоніє
+    /// (200 і нове вікно в базі).
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Зміна_вікна_чинності_видаленого_запису_за_Id_дає_404_і_вікно_не_змінюється()
+    {
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, "Registry.View", "Registry.EditData")
+            .ConfigureAwait(true);
+
+        var fixture = await SeedRegistriesAsync(isTemporal: true).ConfigureAwait(true);
+        await MarkDeletedAsync(fixture.EntryId).ConfigureAwait(true);
+        var before = await StateAsync(fixture.EntryId).ConfigureAwait(true);
+        var revisionBefore = await DataRevisionAsync(fixture.DefinitionId).ConfigureAwait(true);
+
+        var response = await client
+            .PostAsJsonAsync(
+                new Uri($"/api/v1/registries/{fixture.Code}/entries/{fixture.EntryId}/validity", UriKind.Relative),
+                new { from = new DateOnly(2026, 1, 1), to = new DateOnly(2027, 1, 1) })
+            .ConfigureAwait(true);
+
+        var body = await response.Content.ReadAsStringAsync().ConfigureAwait(true);
+        Assert.True(response.StatusCode == HttpStatusCode.NotFound, $"{response.StatusCode}: {body}");
+
+        var problem = JsonDocument.Parse(body).RootElement;
+        Assert.Equal("ECR-REG-0404", problem.GetProperty("errorCode").GetString());
+        Assert.Equal("err.ECR-REG-0404.registryEntry", problem.GetProperty("messageKey").GetString());
+
+        Assert.Equal(before, await StateAsync(fixture.EntryId).ConfigureAwait(true));
+        Assert.Equal(revisionBefore, await DataRevisionAsync(fixture.DefinitionId).ConfigureAwait(true));
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
@@ -263,14 +349,14 @@ public sealed class RegistryEntryDeleteTests(SqlServerFixture sql)
     /// Без нього перевірку належності довелося б імітувати неіснуючим кодом, а
     /// це інший сценарій: там немає ні довідника, ні запису.
     /// </remarks>
-    private async Task<RegistryFixture> SeedRegistriesAsync()
+    private async Task<RegistryFixture> SeedRegistriesAsync(bool isTemporal = false)
     {
         var tag = $"{Guid.NewGuid():N}"[..8].ToUpperInvariant();
 
         await using var db = new EcrDbContext(Options());
 
         var mine = new RegistryDef(
-            EcrCode.Create($"REGD{tag}"), Name($"Registry {tag}"), isTemporal: false);
+            EcrCode.Create($"REGD{tag}"), Name($"Registry {tag}"), isTemporal);
 
         var other = new RegistryDef(
             EcrCode.Create($"REGO{tag}"), Name($"Other {tag}"), isTemporal: false);
@@ -378,6 +464,27 @@ public sealed class RegistryEntryDeleteTests(SqlServerFixture sql)
         constant.SetScope(category: null, registryEntryId);
         db.MethodologyConstants.Add(constant);
         await db.SaveChangesAsync().ConfigureAwait(false);
+    }
+
+    /// <summary>Логічно видаляє запис напряму в базі (без ревізії й журналу): стан «уже видалений».</summary>
+    private async Task MarkDeletedAsync(long registryEntryId)
+    {
+        await using var db = new EcrDbContext(Options());
+
+        var entry = await db.RegistryEntries.SingleAsync(e => e.Id == registryEntryId).ConfigureAwait(false);
+        entry.SoftDelete();
+        await db.SaveChangesAsync().ConfigureAwait(false);
+    }
+
+    /// <summary>Назва й вікно чинності запису — те, що ручна правка мала б змінити.</summary>
+    private async Task<string> StateAsync(long registryEntryId)
+    {
+        await using var db = new EcrDbContext(Options());
+
+        var entry = await db.RegistryEntries.AsNoTracking()
+            .SingleAsync(e => e.Id == registryEntryId).ConfigureAwait(false);
+
+        return $"{JsonSerializer.Serialize(entry.DisplayL10n.Values)}|{entry.ValidFrom:O}|{entry.ValidTo:O}|{entry.IsDeleted}";
     }
 
     /// <summary>Чи позначений запис видаленим у базі.</summary>

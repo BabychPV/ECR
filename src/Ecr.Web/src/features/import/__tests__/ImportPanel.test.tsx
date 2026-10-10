@@ -78,6 +78,7 @@ describe('ImportPanel: перелік змін і відмов', () => {
       ],
       rejected: [],
       conflicts: [],
+      overwritable: [],
     });
 
     await openPreview();
@@ -93,6 +94,7 @@ describe('ImportPanel: перелік змін і відмов', () => {
       changes: [{ rowKey: 'R1', columnCode: 'C1', oldValue: null, newValue: '6', tableCode: 'T2' }],
       rejected: [],
       conflicts: [],
+      overwritable: [],
     });
 
     await openPreview();
@@ -123,6 +125,7 @@ describe('ImportPanel: перелік змін і відмов', () => {
         },
       ],
       conflicts: [],
+      overwritable: [],
     });
 
     await openPreview();
@@ -149,6 +152,7 @@ describe('ImportPanel: перелік змін і відмов', () => {
         },
       ],
       conflicts: [],
+      overwritable: [],
     });
 
     await openPreview();
@@ -181,7 +185,7 @@ describe('ImportPanel: індикація за тривалістю розбор
             finish = () =>
               resolve(
                 new Response(
-                  JSON.stringify({ previewToken: 'tok', changes: [], rejected: [], conflicts: [] } satisfies ImportPreview),
+                  JSON.stringify({ previewToken: 'tok', changes: [], rejected: [], conflicts: [], overwritable: [] } satisfies ImportPreview),
                   { status: 200, headers: { 'Content-Type': 'application/json' } },
                 ),
               );
@@ -280,6 +284,7 @@ describe('ImportPanel: четвертий раунд (F-01, F-06)', () => {
         },
       ],
       conflicts: [],
+      overwritable: [],
     });
 
     await openPreview();
@@ -310,6 +315,7 @@ describe('ImportPanel: четвертий раунд (F-01, F-06)', () => {
               changes: [{ rowKey: 'R1', columnCode: 'A', oldValue: null, newValue: 1, tableCode: 'T1' }],
               rejected: [],
               conflicts: [],
+              overwritable: [],
             } satisfies ImportPreview),
             { status: 200, headers: { 'Content-Type': 'application/json' } },
           );
@@ -376,6 +382,7 @@ describe('ImportPanel: застосування впирається в блок
               changes: [{ rowKey: 'R1', columnCode: 'A', oldValue: null, newValue: 1, tableCode: 'T1' }],
               rejected: [],
               conflicts: [],
+              overwritable: [],
             } satisfies ImportPreview),
             { status: 200, headers: { 'Content-Type': 'application/json' } },
           );

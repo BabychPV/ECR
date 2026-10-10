@@ -38,7 +38,8 @@ public sealed class RecalculationWorkerHealthCheck(
     IConfiguration configuration,
     IRecalculationWorkerProbe probe,
     IUiStringCatalog catalog,
-    ICurrentUser currentUser) : IHealthCheck
+    ICurrentUser currentUser,
+    HealthResultCache? cache = null) : IHealthCheck
 {
     /// <summary>Скільки задача перерахунку може чекати, перш ніж черга вважається застряглою.</summary>
     /// <remarks>
@@ -49,6 +50,19 @@ public sealed class RecalculationWorkerHealthCheck(
 
     /// <inheritdoc />
     public async Task<HealthCheckResult> CheckHealthAsync(HealthCheckContext context, CancellationToken cancellationToken)
+    {
+        // ⛔ P1-03 (AUDIT-2026-10-09b): два `COUNT(*)` по `itg.JobProgress` і опит служби на
+        // кожну анонімну пробу `/health/ready` — той самий кеш, що в `JobsHealthCheck`.
+        if (cache is null)
+        {
+            return await ComputeAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        var language = await catalog.ResolveLanguageAsync(currentUser.Language, cancellationToken).ConfigureAwait(false);
+        return await cache.GetOrAddAsync($"ready:worker:{language}", ComputeAsync, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<HealthCheckResult> ComputeAsync(CancellationToken cancellationToken)
     {
         var mode = DbBackgroundJobScheduler.ReadMode(configuration);
         var executor = JobLaneMap.ReadExecutor(configuration);

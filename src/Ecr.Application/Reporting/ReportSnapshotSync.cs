@@ -65,6 +65,12 @@ public sealed class ReportSnapshotSync(IReportSnapshotBuilder snapshots, IDocume
     /// Це навмисно: подана форма вже пішла регуляторові, і зріз лишається
     /// доказом того, що саме він бачив. Повторне подання дає НОВИЙ зріз
     /// (ФВ-9.17).
+    ///
+    /// ⛔ R6-X7 / X7-01: ЗАСТАРІЛИЙ зріз (побудований до останнього актуального
+    /// прогону) не морозиться: <c>RefreshStatusAsync</c> віддає для нього <c>Draft</c>.
+    /// Інакше регулятор отримав би старі числа з позначкою «подано», а поданий зріз
+    /// уже не виправити. Свіжі числа дає нова побудова — за поданим періодом вона
+    /// народжується <c>Submitted</c> зі стану даних (D-65).
     /// </remarks>
     public async Task MarkSubmittedAsync(
         long documentId, PeriodKey periodKey, int userId, CancellationToken ct)
@@ -99,6 +105,15 @@ public sealed class ReportSnapshotSync(IReportSnapshotBuilder snapshots, IDocume
         {
             return [];
         }
+
+        // ⛔ R6-X1 / X1-01: замок слоту — ДО переліку. Побудова зрізу бере той
+        // самий замок перед тим, як порахувати статус нового зрізу і зробити
+        // його поточним. Без нього перехід посеред побудови бачив поточним
+        // лише СТАРИЙ зріз, і новий ставав поточним зі статусом до переходу:
+        // останній Submit не морозив його, Approve не піднімав. Тепер перехід
+        // або закомітився раніше (і побудова його врахує), або чекає замка й
+        // знаходить уже новий зріз.
+        await snapshots.LockSlotAsync(projectId.Value, periodKey.Value, ct).ConfigureAwait(false);
 
         // ⚠ `visibleProjectIds: null` — і це не пропущена перевірка (Q-239).
         // Тут немає користувача, чиї гранти можна було б спитати: клас

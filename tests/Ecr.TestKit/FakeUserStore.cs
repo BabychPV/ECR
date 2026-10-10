@@ -126,7 +126,7 @@ public sealed class FakeUserStore : IUserStore
         => Task.FromResult(_users.Find(u => u.Id == userId));
 
     /// <inheritdoc />
-    public Task<bool> HasActiveDomainAdminAsync(string permissionCode, CancellationToken ct)
+    public Task<bool> HasActiveDomainAdminAsync(string permissionCode, DateTime utcNow, CancellationToken ct)
         => Task.FromResult(HasDomainAdmin);
 
     /// <inheritdoc />

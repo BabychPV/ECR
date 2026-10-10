@@ -124,7 +124,8 @@ public sealed partial class PatchCellsHandler(
         // Справжні `TableRow.Id` з'являються лише всередині транзакції запису
         // (<see cref="MaterializeNewRowsAsync"/>).
         var changes = BuildCellChanges(context, Localization.NumberCulture.ForLanguage(currentUser.Language));
-        var requiredInputMessages = await EnforceRequiredInputsAsync(context, changes, ct).ConfigureAwait(false);
+        var requiredInputMessages = await EnforceRequiredInputsAsync(context, changes, request.Origin, ct)
+            .ConfigureAwait(false);
 
         // ⛔ Шапка документа читається РЕАЛЬНО (раніше HDR.X у правилах
         // валідації завжди давав Null, той самий дефект, що й у
@@ -793,11 +794,12 @@ public sealed partial class PatchCellsHandler(
                 TheirUser: null, TheirOrigin: null, TheirChangedAt: null, cell.CurrentVersion);
         }
 
-        // ⛔ Не людина — і імені людини тут бути не може. Перерахунок та імпорт
-        // теж несуть `ChangedByUserId` (той, хто їх запустив), і підставити його
-        // ім'я означало б сказати «Серікбаєв змінив 12.40» про число, яке
-        // порахувала формула.
-        var byPerson = string.Equals(last.Origin, UserEditOrigin, StringComparison.Ordinal);
+        // ⛔ Не людина — і імені людини тут бути не може. Перерахунок теж несе
+        // `ChangedByUserId` (той, хто його запустив), і підставити його ім'я
+        // означало б сказати «Серікбаєв змінив 12.40» про число, яке порахувала
+        // формула. ⚠ Імпорт книги (`Import`, `ImportOverwrite`) — навпаки, число
+        // ввела й застосувала людина, і «system» тут ховав би автора (AN-115).
+        var byPerson = CellChangeOrigins.IsHuman(last.Origin);
 
         return new CellConflictDto(
             cell.RowKey,
@@ -1302,8 +1304,15 @@ public sealed partial class PatchCellsHandler(
     /// патчі) колонка — перевіряється UNION бази й поточної правки, як вимагає
     /// директива, а не сам лише патч.
     /// </remarks>
+    /// <param name="context">Контекст запиту.</param>
+    /// <param name="changes">Зміни батчу.</param>
+    /// <param name="origin">
+    /// Походження батчу. ⛔ F1-01 (аудит 9): блокує лише батч ЛЮДИНИ
+    /// (<see cref="CellChangeOrigins.IsHuman"/>); для інтеграції вимога лишається попередженням.
+    /// </param>
+    /// <param name="ct">Токен скасування.</param>
     private async Task<List<Validation.ValidationMessage>> EnforceRequiredInputsAsync(
-        RequestContext context, CellChangeLists changes, CancellationToken ct)
+        RequestContext context, CellChangeLists changes, string? origin, CancellationToken ct)
     {
         var messages = new List<Validation.ValidationMessage>();
 
@@ -1352,7 +1361,7 @@ public sealed partial class PatchCellsHandler(
             ? new Dictionary<CellAddress, CellValueData>()
             : await cellStore.ReadCellsAsync(addresses, ct).ConfigureAwait(false);
 
-        return EvaluateRequiredInputs(context, changes, applicable, baseline);
+        return EvaluateRequiredInputs(context, changes, applicable, baseline, origin);
     }
 
     /// <summary>
@@ -1391,8 +1400,18 @@ public sealed partial class PatchCellsHandler(
         RequestContext context,
         CellChangeLists changes,
         IReadOnlyList<ApplicableMethodology> applicable,
-        IReadOnlyDictionary<CellAddress, CellValueData> baseline)
+        IReadOnlyDictionary<CellAddress, CellValueData> baseline,
+        string? origin)
     {
+        // ⛔ F1-01 (аудит 9): вимога методології — вимога до ЛЮДИНИ, яка зберігає рядок.
+        // Інтеграція ручних входів не заповнює й не заповнить; блок на її батчі
+        // (`MaterializeCollectedDataJob` пише всі поля сутності в таблиці одним батчем)
+        // означав, що жодне число з PI не лягає в таблицю, доки людина не заповнить ручну
+        // колонку, а задача падає без повтору. Для системного походження — попередження,
+        // для людини правило не змінюється: її наступна правка рядка так само впреться в
+        // незаповнений вхід.
+        var humanBatch = CellChangeOrigins.IsHuman(origin);
+
         var messages = new List<Validation.ValidationMessage>();
         var neededColumnIds = RequiredInputColumnIds(applicable);
 
@@ -1470,16 +1489,16 @@ public sealed partial class PatchCellsHandler(
                     var defaultHint =
                         $"Колонка «{columnCode}» обов'язкова для методології «{applied.MethodologyCode}».";
 
+                    var blocks = required.Severity == RequiredInputSeverity.Block && humanBatch;
+
                     messages.Add(new Validation.ValidationMessage(
-                        required.Severity == RequiredInputSeverity.Block
-                            ? ValidationSeverity.Error
-                            : ValidationSeverity.Warning,
+                        blocks ? ValidationSeverity.Error : ValidationSeverity.Warning,
                         "ECR-CALC-0437",
                         required.HintL10n?.Get("en") ?? defaultHint,
                         context.Instance.TableDefId,
                         rowKey,
                         columnCode,
-                        BlocksSave: required.Severity == RequiredInputSeverity.Block));
+                        BlocksSave: blocks));
                 }
             }
         }
@@ -2148,6 +2167,30 @@ public sealed partial class PatchCellsHandler(
         }
         catch (ConcurrencyConflictException ex) when (StaleRowIds(ex) is { Count: > 0 } staleRowIds)
         {
+            // ⛔ D1-01 (AN-104): транзакцію вже відкочено — дочитуємо ЧИННІ
+            // версії й відповідаємо тією самою формою, що й швидкий шлях:
+            // справжня колонка, `currentVersion`, «ваше / чинне», автор.
+            // Без цього відмова сховища їхала як `*` з порожньою версією, а це
+            // для клієнта означає «рядка більше немає»: «Keep mine» вимкнено,
+            // утримувався весь пакет, і єдиною дією лишалось «Discard» — на
+            // живому рядку, найчастіше після власного PATCH₁ того самого рядка.
+            //
+            // ⚠ Порожня версія лишається лише там, де рядка справді немає
+            // (видалено між перевіркою й захопленням) — та сама семантика, що в
+            // <see cref="EnsureNoVersionConflictsAsync"/>.
+            var fresh = await rowStore
+                .GetRowsAsync(request.TableInstanceId, context.PeriodKey, ct)
+                .ConfigureAwait(false);
+            // Той самий розбір, що й на вході (`BuildContext`), — лише з чинним
+            // станом рядків; запит, структура й профіль ті самі.
+            var refreshed = BuildContext(
+                request, context.UserId, context.Profile, context.Instance, context.Snapshot, fresh);
+
+            // Кидає з повним переліком, якщо версії розійшлися (звичайний випадок).
+            await EnsureNoVersionConflictsAsync(refreshed, ct).ConfigureAwait(false);
+
+            // Запасний: на момент дочитування версії знову збіглися — подробиць
+            // назвати нема з чого, лишається адресна відмова сховища.
             throw StaleRowsConflict(changes, staleRowIds);
         }
     }
@@ -2231,6 +2274,11 @@ public sealed partial class PatchCellsHandler(
         await uow.ExecuteInTransactionAsync(async innerCt =>
         {
             await EnsureSheetStillEditableAsync(context, planned, innerCt).ConfigureAwait(false);
+
+            // ⛔ AN-106 (P1-01): ліміт очікування блокувань — до стелі рядків і вставки нових рядків,
+            // а не лише перед записом значень: під ескальованим блокуванням переносу версії вставка в
+            // `doc.TableRow` чекала весь `CommandTimeout` і закінчувалась 500. Той самий єдиний `SET`.
+            await cellStore.LimitLockWaitAsync(innerCt).ConfigureAwait(false);
             await EnsureRowLimitUnderLockAsync(request, context, innerCt).ConfigureAwait(false);
 
             // ⛔ `DAT-04` п. 1: рядки — ПІСЛЯ блокування аркуша й усіх відмов,
@@ -2833,9 +2881,19 @@ public sealed partial class PatchCellsHandler(
         IReadOnlyDictionary<CellAddress, CellValueData> previous,
         bool isLateEdit,
         string? correlationId,
-        HashSet<CellAddress>? outOfWindow = null)
+        HashSet<CellAddress>? outOfWindow = null,
+        IReadOnlySet<string>? overwrittenRowKeys = null)
     {
         var records = new List<CellChangeRecord>(upserts.Count + deletes.Count);
+
+        // ✎ AN-114 (D-338): свідомий перезапис чужої правки (рядок змінено після
+        // експорту книги, людина позначила «перезаписати») — власним походженням
+        // у журналі, щоб «хто затер чуже число і чи знав про це» читалося з
+        // `aud.CellChange.Origin` без міграції (nvarchar(32) його вміщує).
+        string OriginOf(string rowKey) =>
+            overwrittenRowKeys is not null && overwrittenRowKeys.Contains(rowKey)
+                ? CellChangeOrigins.ImportOverwrite
+                : request.Origin;
 
         foreach (var u in upserts)
         {
@@ -2867,7 +2925,8 @@ public sealed partial class PatchCellsHandler(
                 now, u.Address, DocumentId: documentId,
                 RowKey: rowKeyById.GetValueOrDefault(u.Address.TableRowId, string.Empty),
                 OldValue: Was(previous, u.Address), NewValue: Describe(u.Value),
-                userId, request.Origin, isLateEdit, CorrelationId: correlationId,
+                userId, OriginOf(rowKeyById.GetValueOrDefault(u.Address.TableRowId, string.Empty)), isLateEdit,
+                CorrelationId: correlationId,
                 IsOutOfWindow: outOfWindow?.Contains(u.Address) == true));
         }
 
@@ -2885,7 +2944,8 @@ public sealed partial class PatchCellsHandler(
                 now, d, DocumentId: documentId,
                 RowKey: rowKeyById.GetValueOrDefault(d.TableRowId, string.Empty),
                 OldValue: Was(previous, d), NewValue: null,
-                userId, request.Origin, isLateEdit, CorrelationId: correlationId,
+                userId, OriginOf(rowKeyById.GetValueOrDefault(d.TableRowId, string.Empty)), isLateEdit,
+                CorrelationId: correlationId,
                 IsOutOfWindow: outOfWindow?.Contains(d) == true));
         }
 

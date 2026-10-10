@@ -26,6 +26,24 @@ public interface ICollectionRunner
     /// непокритим і потрапляє в наздоганяння. Виняток тут означає, що збирати
     /// не можна взагалі — зламана конфігурація або змінена одиниця джерела.
     /// </remarks>
-    public Task RunAsync(
+    /// <returns>
+    /// Що прогін насправді змінив: наздоганяння читає прогалини й ДО
+    /// <paramref name="fromUtc"/>, і задача мусить знати, за який діапазон
+    /// переносити зібране в комірки (аудит I1-01).
+    /// </returns>
+    public Task<CollectionRunSummary> RunAsync(
         int sourceEntityId, DateTime fromUtc, DateTime toUtc, IJobProgress progress, CancellationToken ct);
 }
+
+/// <summary>Підсумок прогону збору.</summary>
+/// <param name="ReadFromUtc">
+/// Від якого моменту в сирому шарі могли змінитися дані: запитаний початок або,
+/// якщо наздоганяння записало давніші точки, мітка найранішої з них.
+/// </param>
+/// <param name="PointsWritten">Скільки точок записано.</param>
+/// <remarks>
+/// ⛔ Аудит I1-01: без цього матеріалізація ставилася лише на запитане вікно, і
+/// точки, які наздоганяння дописало за минулий місяць, у його комірки не
+/// потрапляли ніколи — звіт ішов із заниженим числом.
+/// </remarks>
+public sealed record CollectionRunSummary(DateTime ReadFromUtc, int PointsWritten);

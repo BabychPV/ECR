@@ -190,7 +190,14 @@ public sealed partial class PiSqlClientDataSource(
 
         using var connection = await OpenAsync(source, ct).ConfigureAwait(false);
 
-        var template = await TemplateAsync(connection, source.Code, element, ct).ConfigureAwait(false);
+        var lookup = await TemplateAsync(connection, source.Code, element, ct).ConfigureAwait(false);
+
+        if (lookup.Ambiguous)
+        {
+            throw ElementNameAmbiguous(source.Code, request.SourcePath);
+        }
+
+        var template = lookup.Template;
 
         if (template is null)
         {
@@ -287,7 +294,14 @@ public sealed partial class PiSqlClientDataSource(
 
         using var connection = await OpenAsync(source, ct).ConfigureAwait(false);
 
-        var template = await TemplateAsync(connection, source.Code, element, ct).ConfigureAwait(false);
+        var lookup = await TemplateAsync(connection, source.Code, element, ct).ConfigureAwait(false);
+
+        if (lookup.Ambiguous)
+        {
+            throw ElementNameAmbiguous(source.Code, request.SourcePath);
+        }
+
+        var template = lookup.Template;
         if (template is null)
         {
             return new WindowResult(
@@ -426,7 +440,7 @@ public sealed partial class PiSqlClientDataSource(
 
     /// <summary>Поточні значення шляхів «елемент|атрибут»: шаблон — раз на елемент, значення — раз на шлях.</summary>
     /// <param name="paths">Шляхи.</param>
-    /// <param name="templateOf">Шаблон елемента; <c>null</c> — елемента немає.</param>
+    /// <param name="templateOf">Пошук шаблона елемента: знайдено / немає / ім'я неоднозначне.</param>
     /// <param name="pointOf">Поточна точка (шлях, елемент, шаблон, атрибут); <c>null</c> — не прочиталась.</param>
     /// <remarks>
     /// ⛔ L4-09: шаблон елемента перечитувався на КОЖЕН атрибут — два запити RTQP на пару, тобто на
@@ -435,22 +449,33 @@ public sealed partial class PiSqlClientDataSource(
     /// </remarks>
     internal static async Task<CurrentValuesResult> ReadCurrentPathsAsync(
         IReadOnlyCollection<string> paths,
-        Func<string, Task<string?>> templateOf,
+        Func<string, Task<TemplateLookup>> templateOf,
         Func<string, string, string, string, Task<SourceDataPoint?>> pointOf)
     {
         var values = new List<SourceDataPoint>();
         var failures = new List<CurrentValueFailure>();
-        var templates = new Dictionary<string, string?>(StringComparer.Ordinal);
+        var templates = new Dictionary<string, TemplateLookup>(StringComparer.Ordinal);
 
         foreach (var path in paths.Where(p => !string.IsNullOrWhiteSpace(p)).Distinct(StringComparer.Ordinal))
         {
             var (element, attribute) = Split(path);
 
-            if (!templates.TryGetValue(element, out var template))
+            if (!templates.TryGetValue(element, out var lookup))
             {
-                template = await templateOf(element).ConfigureAwait(false);
-                templates[element] = template;
+                lookup = await templateOf(element).ConfigureAwait(false);
+                templates[element] = lookup;
             }
+
+            // ⛔ L4-10: однакове ім'я в різних гілках AF — значення, прочитане за ним, може бути чужим.
+            // Відмова шляху, а не «перший за порядком»; решта шляхів читається далі.
+            if (lookup.Ambiguous)
+            {
+                failures.Add(new CurrentValueFailure(
+                    path, IExternalDataSource.QueryRefusedCode, ElementNameAmbiguousKey));
+                continue;
+            }
+
+            var template = lookup.Template;
 
             if (template is null)
             {
@@ -977,6 +1002,38 @@ public sealed partial class PiSqlClientDataSource(
     private static object? Column(Dictionary<string, object?> row, string name)
         => row.TryGetValue(name, out var value) ? value : null;
 
+    /// <summary>
+    /// L3-09: та сама політика адреси, що й при збереженні джерела
+    /// (<see cref="DataSourceEndpointPolicy.CheckSqlServerAddress"/>), — ще раз перед з'єднанням.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Як <c>SqlDataSource.RequireAllowedAddressAsync</c> (L3-05): збереження перевіряє лише НОВІ
+    /// адреси (D-245), тож джерело, збережене до появи політики, інакше ходило б службовим обліковим
+    /// записом на link-local/metadata без перевірки. Рядок перевіряється ДО підстановки пароля.
+    /// ⚠ Лише літерали й відомі metadata-імена: ім'я, що розв'язується на link-local, ловить
+    /// збереження (є `INetworkResolver`); повторного розв'язання тут немає — залишковий ризик DNS-rebinding.
+    /// </remarks>
+    private static void RequireAllowedAddress(Domain.Entities.External.DataSource source)
+    {
+        var verdict = DataSourceEndpointPolicy.CheckSqlServerAddress(source.Endpoint);
+
+        if (verdict == EndpointVerdict.Allowed)
+        {
+            return;
+        }
+
+        // ⚠ Відмова називає джерело й вердикт, а не вміст рядка з'єднання.
+        throw new BusinessRuleException(
+            SourceUnavailable,
+            $"Адресу джерела {source.Code} відхилено політикою адреси ({verdict}): збір не з'єднується.",
+            new Dictionary<string, object?>
+            {
+                // Той самий ключ, що SqlDataSource.cs: той самий факт («адресу відхилено політикою»).
+                ["messageKey"] = "err.ECR-INT-0503.endpointForbidden",
+                ["dataSource"] = source.Code,
+            });
+    }
+
     /// <summary>Відкриває з'єднання під службовим обліковим записом.</summary>
     /// <remarks>
     /// ⛔ Секрет береться <b>за іменем</b> із <c>SecretName</c> і ніколи з
@@ -1015,6 +1072,8 @@ public sealed partial class PiSqlClientDataSource(
                     ["dataSource"] = source.Code,
                 });
         }
+
+        RequireAllowedAddress(source);
 
         if (secrets.Find(source.SecretName) is { } secret)
         {
@@ -1298,8 +1357,45 @@ public sealed partial class PiSqlClientDataSource(
            && details.TryGetValue("messageKey", out var key)
            && string.Equals(key as string, TimestampUnreadableKey, StringComparison.Ordinal);
 
-    /// <summary>Шаблон елемента; <c>null</c> — елемента немає.</summary>
-    private async Task<string?> TemplateAsync(
+    /// <summary>Ключ каталогу відмови «ім'я елемента неоднозначне» (L4-10).</summary>
+    internal const string ElementNameAmbiguousKey = "err.ECR-INT-0422.elementNameAmbiguous";
+
+    /// <summary>Результат пошуку шаблона елемента за іменем.</summary>
+    /// <param name="Template">Шаблон; <c>null</c> — елемента немає (або ім'я неоднозначне).</param>
+    /// <param name="Ambiguous">За іменем знайшлося кілька елементів: читати за ним не можна.</param>
+    internal readonly record struct TemplateLookup(string? Template, bool Ambiguous)
+    {
+        /// <summary>Елемента немає.</summary>
+        public static TemplateLookup Missing => new(null, false);
+
+        /// <summary>Рівно один елемент із таким шаблоном.</summary>
+        /// <param name="template">Шаблон.</param>
+        public static TemplateLookup Found(string? template) => new(template, false);
+
+        /// <summary>Кілька елементів із таким іменем.</summary>
+        public static TemplateLookup AmbiguousName => new(null, true);
+    }
+
+    /// <summary>Відмова «ім'я елемента неоднозначне» для шляхів, що читаються цілим запитом.</summary>
+    private static BusinessRuleException ElementNameAmbiguous(string dataSource, string sourcePath)
+        => new(
+            IExternalDataSource.QueryRefusedCode,
+            $"У джерелі {dataSource} кілька елементів мають ім'я з шляху «{sourcePath}»: "
+            + "значення, прочитане за іменем, могло б належати іншому елементу, тож інтервал не зібрано.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = ElementNameAmbiguousKey,
+                ["dataSource"] = dataSource,
+                ["sourcePath"] = sourcePath,
+            });
+
+    /// <summary>Шаблон елемента за іменем; <see cref="TemplateLookup.Missing"/> — елемента немає.</summary>
+    /// <remarks>
+    /// ⛔ L4-10: читається до ДВОХ рядків, а не перший за порядком. Ім'я елемента в AF унікальне лише в
+    /// межах батька; запит `WHERE e.Name = ?` бачить усю базу, тож другий рядок — це тезка поза коренем
+    /// сутності, і її значення не можна видавати за значення потрібного елемента.
+    /// </remarks>
+    private async Task<TemplateLookup> TemplateAsync(
         OdbcConnection connection, string dataSourceCode, string element, CancellationToken ct)
     {
         using var command = connection.CreateCommand();
@@ -1309,12 +1405,30 @@ public sealed partial class PiSqlClientDataSource(
         // ⛔ Q-251: цей виклик — частина шляху `ReadAsync` (єдиний викликач
         // нижче), тож повторюється тим самим правилом, а не лишається дірою
         // всередині щойно виправленого методу.
+        // ⚠ Без `SingleRow`: цей режим просить драйвер віддати один рядок, а потрібно побачити другий.
         using var reader = await RetryAsync(
-            () => command.ExecuteReaderAsync(CommandBehavior.SingleRow, ct),
+            () => command.ExecuteReaderAsync(CommandBehavior.Default, ct),
             IsTransientOdbcFailure,
             ct).ConfigureAwait(false);
 
-        return await reader.ReadAsync(ct).ConfigureAwait(false) ? reader["Template"] as string : null;
+        return await LookupAsync(reader, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>Розбір результату запиту шаблона: порожньо / один рядок / більше одного.</summary>
+    /// <param name="reader">Читач результату запиту шаблона.</param>
+    /// <param name="ct">Скасування.</param>
+    internal static async Task<TemplateLookup> LookupAsync(DbDataReader reader, CancellationToken ct)
+    {
+        if (!await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            return TemplateLookup.Missing;
+        }
+
+        var template = reader["Template"] as string;
+
+        return await reader.ReadAsync(ct).ConfigureAwait(false)
+            ? TemplateLookup.AmbiguousName
+            : TemplateLookup.Found(template);
     }
 
     /// <summary>

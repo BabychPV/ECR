@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Ecr.TestKit;
+using Microsoft.Data.SqlClient;
 using Xunit;
 
 namespace Ecr.Scenarios.Tests;
@@ -31,6 +32,12 @@ public sealed class DocumentConcurrencyScenarios(SqlServerFixture sql)
 
     /// <summary>Скільки документів створювати одночасно.</summary>
     private const int ParallelCreations = 10;
+
+    /// <summary>Документів під навантажувальним сценарієм: × 2 таблиці × 2 рядки = 32 незалежні рядки.</summary>
+    private const int LoadDocuments = 8;
+
+    /// <summary>Скільки разів пустити всі 32 записи одночасно.</summary>
+    private const int LoadRounds = 5;
 
     /// <summary>
     /// `DAT-01`: два оператори пишуть у РІЗНІ таблиці одного документа
@@ -179,6 +186,141 @@ public sealed class DocumentConcurrencyScenarios(SqlServerFixture sql)
         // Один документ завела сама підготовка, решту — паралельний блок.
         Assert.Equal(ParallelCreations + 1, keys.Count);
         Assert.Equal(keys.Count, keys.Distinct(StringComparer.Ordinal).Count());
+    }
+
+    /// <summary>
+    /// X8-03 (R6): 32 одночасні <c>PATCH</c> у різні рядки восьми документів через увесь
+    /// конвеєр — і кожна підтверджена (<c>200</c>) правка лежить у зрізі та в журналі.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Доти найбільший паралельний тест запису комірок мав ДВА одночасні запити й доводив
+    /// лише коди відповідей. Вимога — 100 одночасних користувачів (НФ-8.1), і саме під
+    /// навантаженням ламаються речі, яких послідовний прогін не бачить: дедлок між «дотиком»
+    /// документа і постановкою перерахунку (після вичерпання повторів — 503), рядок аудиту,
+    /// записаний поза транзакцією значення (200 без сліду в <c>aud.CellChange</c>).
+    ///
+    /// ⚠ Доказ — ДАНІ, а не коди: після всіх раундів кожен рядок перечитується через API й
+    /// звіряється з останнім підтвердженим значенням, а журнал має рівно стільки змін
+    /// <c>UserEdit</c>, скільки підтверджено.
+    ///
+    /// ⛔ Мутація: прибрати <c>documents.TouchAsync</c> з транзакції
+    /// (<c>PatchCellsHandler.PersistChangesAsync</c>) або писати аудит власним підключенням —
+    /// червоніє перечитування чи лічильник журналу. Конкурентний тест — правило N/20 (CI).
+    /// </remarks>
+    [Fact]
+    [Trait("Category", "Integration")]
+    [Trait("Directive", "DAT-01")]
+    [Trait("Requirement", "НФ-8.1")]
+    public async Task Тридцять_два_одночасні_записи_в_різні_рядки_всі_збережені_і_в_журналі()
+    {
+        using var app = new EcrApiFactory(sql);
+        var admin = await Provisioning.AdministratorAsync(
+            app, "L32",
+            ["Project.Manage", "Document.View", "Document.Create", "Template.Edit", "Template.Publish"]);
+
+        var (versionId, sheetDefId) = await BuildTwoTableVersionAsync(app, admin.Client, "L32");
+        var (projectId, firstDocumentId, periodKey) = await CreateDocumentAsync(app, admin, versionId, sheetDefId, "L32");
+
+        var documentIds = new List<long> { firstDocumentId };
+        for (var d = 1; d < LoadDocuments; d++)
+        {
+            var created = await admin.Client.PostAsJsonAsync(
+                new Uri("/api/v1/documents", UriKind.Relative),
+                new { projectId, templateVersionId = versionId, sheetDefIds = new[] { sheetDefId } });
+            Assert.True(created.StatusCode == HttpStatusCode.Created, $"{created.StatusCode}: {app.ErrorsText}");
+            documentIds.Add((await created.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("documentId").GetInt64());
+        }
+
+        var targets = new List<(long DocumentId, long Table, string RowKey)>();
+        foreach (var documentId in documentIds)
+        {
+            var tables = await admin.Client.GetAsync(
+                new Uri($"/api/v1/documents/{documentId}/tables?periodKey={periodKey}", UriKind.Relative));
+            Assert.True(tables.StatusCode == HttpStatusCode.OK, $"{tables.StatusCode}: {app.ErrorsText}");
+            var instances = (await tables.Content.ReadFromJsonAsync<JsonElement>()).EnumerateArray()
+                .Select(t => t.GetProperty("tableInstanceId").GetInt64())
+                .ToList();
+            Assert.True(instances.Count == 2, $"документ {documentId} має {instances.Count} таблиць(і) замість двох.");
+
+            foreach (var table in instances)
+            {
+                foreach (var rowKey in new[] { "R1", "R2" })
+                {
+                    targets.Add((documentId, table, rowKey));
+                }
+            }
+        }
+
+        Assert.Equal(LoadDocuments * 4, targets.Count);
+
+        var acknowledged = new Dictionary<(long Table, string RowKey), int>();
+        for (var round = 1; round <= LoadRounds; round++)
+        {
+            // Версії — ПЕРЕД раундом: кожен запис піднімає `RowVersion`, і стара версія
+            // дала б законний 409, тобто сховала б предмет перевірки.
+            var versions = new List<string>();
+            foreach (var target in targets)
+            {
+                versions.Add(await RowVersionAsync(app, admin.Client, target.DocumentId, target.Table, target.RowKey));
+            }
+
+            // ⛔ Усі 32 запити стартують ДО першого завершення.
+            var sends = targets
+                .Select((t, i) => PatchAsync(
+                    admin.Client, t.DocumentId, periodKey, t.Table, t.RowKey, versions[i], (round * 1000) + i))
+                .ToList();
+            var replies = await Task.WhenAll(sends);
+
+            for (var i = 0; i < replies.Length; i++)
+            {
+                if (replies[i].StatusCode != HttpStatusCode.OK)
+                {
+                    var body = await replies[i].Content.ReadAsStringAsync();
+                    Assert.Fail(
+                        $"раунд {round}, ціль {i} (документ {targets[i].DocumentId}, {targets[i].RowKey}): "
+                        + $"{(int)replies[i].StatusCode} {body}{Environment.NewLine}{app.ErrorsText}");
+                }
+
+                acknowledged[(targets[i].Table, targets[i].RowKey)] = (round * 1000) + i;
+            }
+        }
+
+        // ⛔ Доказ — дані: кожна підтверджена правка лежить у зрізі…
+        foreach (var target in targets)
+        {
+            var slice = await admin.Client.GetAsync(
+                new Uri($"/api/v1/documents/{target.DocumentId}/tables/{target.Table}", UriKind.Relative));
+            Assert.True(slice.StatusCode == HttpStatusCode.OK, $"{slice.StatusCode}: {app.ErrorsText}");
+            var row = (await slice.Content.ReadFromJsonAsync<JsonElement>())
+                .GetProperty("rows").EnumerateArray()
+                .Single(r => string.Equals(r.GetProperty("rowKey").GetString(), target.RowKey, StringComparison.Ordinal));
+            Assert.True(row.GetProperty("cells").TryGetProperty("A", out var cell), row.GetRawText());
+            Assert.Equal((decimal)acknowledged[(target.Table, target.RowKey)], JsonNumber.AsDecimal(cell));
+        }
+
+        // …і в журналі рівно стільки змін, скільки підтверджено.
+        await using var connection = new SqlConnection(sql.ConnectionString);
+        await connection.OpenAsync();
+        await using var count = connection.CreateCommand();
+        count.CommandText =
+            "SELECT COUNT(*) FROM aud.CellChange WHERE Origin = N'UserEdit' AND DocumentId IN ("
+            + string.Join(',', documentIds) + ");";
+        Assert.Equal(targets.Count * LoadRounds, (int)(await count.ExecuteScalarAsync())!);
+    }
+
+    /// <summary>Поточна версія рядка <paramref name="rowKey"/> зрізу таблиці.</summary>
+    private static async Task<string> RowVersionAsync(
+        EcrApiFactory app, HttpClient client, long documentId, long tableInstanceId, string rowKey)
+    {
+        var slice = await client.GetAsync(
+            new Uri($"/api/v1/documents/{documentId}/tables/{tableInstanceId}", UriKind.Relative));
+        Assert.True(slice.StatusCode == HttpStatusCode.OK, $"{slice.StatusCode}: {app.ErrorsText}");
+
+        var row = (await slice.Content.ReadFromJsonAsync<JsonElement>())
+            .GetProperty("rows").EnumerateArray()
+            .Single(r => string.Equals(r.GetProperty("rowKey").GetString(), rowKey, StringComparison.Ordinal));
+
+        return row.GetProperty("rowVersion").GetString()!;
     }
 
     /// <summary>Перший рядок зрізу таблиці: ключ і поточна версія.</summary>

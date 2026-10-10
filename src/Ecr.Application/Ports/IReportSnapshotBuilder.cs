@@ -16,11 +16,46 @@ public interface IReportSnapshotBuilder
     public Task<long> BuildAsync(int reportVersionId, int projectId, PeriodKey? periodKey,
                           string? parametersJson, CancellationToken ct);
 
+    /// <summary>
+    /// Поданий поточний зріз опису звіту за проєкт і період, який нова побудова
+    /// не має права витіснити (X7-03, ФВ-9.17); <c>null</c> — такого немає.
+    /// </summary>
+    /// <param name="reportVersionId">Версія звіту, за якою просять побудову.</param>
+    /// <param name="projectId">Проєкт.</param>
+    /// <param name="periodKey">Період; <c>null</c> — річний зріз.</param>
+    /// <param name="ct">Скасування.</param>
+    /// <remarks>
+    /// ⛔ R7-Y7 / Y7-01: та сама перевірка, що й рання в <see cref="BuildAsync"/>, —
+    /// для синхронної відмови <c>409</c> ДО постановки задачі. Вирішальна лишається
+    /// в побудові (під замком слоту): подання може закомітитись між запитом і задачею.
+    /// </remarks>
+    public Task<long?> FindFreshFrozenCurrentAsync(int reportVersionId, int projectId, PeriodKey? periodKey,
+                                                   CancellationToken ct);
+
     /// <summary>Позначає зріз поданим — після цього він іммутабельний.</summary>
     public Task MarkSubmittedAsync(long snapshotId, int userId, CancellationToken ct);
 
     /// <summary>Перераховує статус зрізу після зміни стану затвердження аркушів.</summary>
+    /// <remarks>
+    /// ⛔ R6-X7 / X7-01: застарілий зріз (ФВ-10.5) отримує <c>Draft</c>, а не статус
+    /// даних — його числа старші за актуальний прогін, і в <c>rpt.v_*</c> як
+    /// затверджені чи подані (і під заморожування) вони йти не мають.
+    /// </remarks>
     public Task<SnapshotStatus> RefreshStatusAsync(long snapshotId, CancellationToken ct);
+
+    /// <summary>
+    /// Бере замок «слоту» зрізів (проєкт × період) до кінця поточної транзакції.
+    /// </summary>
+    /// <param name="projectId">Проєкт.</param>
+    /// <param name="periodKey">Період; <c>null</c> — річний зріз.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⛔ R6-X1 / X1-01: той самий замок бере побудова перед тим, як порахувати
+    /// статус нового зрізу й зробити його поточним. Робочий процес бере його
+    /// ДО пошуку поточних зрізів — інакше перехід, що закомітився посеред
+    /// побудови, оновлював лише старий зріз. Потребує відкритої транзакції.
+    /// </remarks>
+    public Task LockSlotAsync(int projectId, int? periodKey, CancellationToken ct);
 
     /// <summary>Перелік побудованих зрізів.</summary>
     /// <param name="projectId">Проєкт; <c>null</c> — усі.</param>
@@ -90,6 +125,21 @@ public interface IReportSnapshotBuilder
     /// <returns><c>null</c> — зрізу немає.</returns>
     public Task<SnapshotRowsPage?> RowsAsync(
         long snapshotId, int afterRowNo, int limit, string language, CancellationToken ct);
+
+    /// <summary>Скільки рядків у зрізі — але не більше за <paramref name="atMost"/>.</summary>
+    /// <param name="snapshotId">Зріз.</param>
+    /// <param name="atMost">
+    /// Стеля підрахунку: тому, хто питає «чи більше за N», досить N + 1, і
+    /// рахувати далі означало б читати індекс зрізу до кінця задарма.
+    /// </param>
+    /// <param name="ct">Скасування.</param>
+    /// <returns>Кількість рядків (не комірок); <c>0</c> — зрізу немає або він порожній.</returns>
+    /// <remarks>
+    /// ⛔ AN-120 / L1-02: вивантаження відмовляє за стелею ДО читання вмісту.
+    /// Раніше стеля перевірялася після того, як зріз уже прочитано сторінками,
+    /// а з макетом (<c>R8</c>) — до 101 повного читання за одне натискання.
+    /// </remarks>
+    public Task<int> CountRowsAsync(long snapshotId, int atMost, CancellationToken ct);
 }
 
 /// <summary>Сторінка рядків зрізу.</summary>

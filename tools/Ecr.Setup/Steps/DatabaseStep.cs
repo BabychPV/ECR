@@ -4,7 +4,7 @@ namespace Ecr.Setup.Steps;
 
 /// <summary>
 /// Крок 3 — SQL Server, база даних, спосіб автентифікації. У режимі
-/// оновлення додатково показує прапорець "-SkipSchema".
+/// обидва режими показують прапорець "-SkipSchema" (перше розгортання — для повтору після кроку 2, R9-F5/F5-01).
 /// </summary>
 internal sealed class DatabaseStep : IWizardStep
 {
@@ -19,6 +19,13 @@ internal sealed class DatabaseStep : IWizardStep
     private Label? _sqlLoginWarning;
     private CheckBox? _sqlLoginAcknowledge;
     private CheckBox? _skipSchemaCheckBox;
+    private CheckBox? _trustCertificateCheckBox;
+    private Label? _trustCertificateWarning;
+    private GroupBox? _backupGroup;
+    private Label? _backupStatus;
+    private CheckBox? _backupAcceptCheckBox;
+    private Label? _backupAcceptWarning;
+    private BackupCheckResult? _backup;
 
     public DatabaseStep(WizardState state)
     {
@@ -38,6 +45,7 @@ internal sealed class DatabaseStep : IWizardStep
 
         root.Controls.Add(BuildConnectionGroup());
         root.Controls.Add(BuildAuthGroup());
+        root.Controls.Add(BuildCertificateGroup());
 
         _skipSchemaCheckBox = new CheckBox
         {
@@ -47,20 +55,23 @@ internal sealed class DatabaseStep : IWizardStep
         };
         root.Controls.Add(_skipSchemaCheckBox);
 
+        root.Controls.Add(BuildBackupGroup());
+        _skipSchemaCheckBox.CheckedChanged += (_, _) => UpdateBackupVisibility();
+
         return root;
     }
 
     public void OnShow(WizardState state)
     {
-        // Прапорець стосується лише оновлення — у першому розгортанні схему
-        // застосовує сам скрипт, пропускати нічого. Крок будується один раз,
-        // тож видимість перевіряємо щоразу, коли користувач сюди повертається
-        // (могли змінити режим на кроці 1 і прийти назад).
-        _skipSchemaCheckBox!.Visible = state.Mode == WizardMode.Update;
-        if (state.Mode == WizardMode.FirstDeployment)
-        {
-            _skipSchemaCheckBox.Checked = false;
-        }
+        // ⛔ R9-F5/F5-01: прапорець видно в обох режимах. У першому розгортанні — лише для повтору спроби,
+        // що впала ПІСЛЯ кроку 2 скрипта (схему вже накочено): тоді майстер передає разом
+        // -FirstDeployment -SkipSchema -BootstrapPassword. Раніше пропуск був лише в «Update», який пароля
+        // bootstrap не передає, — повтор давав систему без адміністратора. Крок будується один раз, тож
+        // підпис оновлюємо щоразу, коли користувач сюди повертається (могли змінити режим на кроці 1).
+        _skipSchemaCheckBox!.Visible = true;
+        _skipSchemaCheckBox.Text = WizardState.SkipSchemaLabel(state.Mode);
+
+        UpdateBackupVisibility();
     }
 
     public bool Validate(out string error)
@@ -110,12 +121,79 @@ internal sealed class DatabaseStep : IWizardStep
         if (!SqlPreflight.TryVerifyDatabaseExists(
                 _instanceBox!.Text.Trim(), _databaseBox!.Text.Trim(),
                 _windowsAuthOption!.Checked, _loginBox!.Text.Trim(), _sqlPasswordBox!.Text,
-                out error))
+                _trustCertificateCheckBox!.Checked, out var databaseMissing, out error))
         {
+            // L10-04, D-333: без прапорця сертифікат SQL перевіряється — самопідписаний не пройде.
+            if (!_trustCertificateCheckBox.Checked)
+            {
+                error += Environment.NewLine + Environment.NewLine
+                    + "If the error is about the server certificate (\"certificate chain\", \"not trusted\"): "
+                    + "install a certificate trusted by this machine on SQL Server, or tick "
+                    + "\"Trust the SQL Server certificate (unsafe)\".";
+            }
+
             return false;
         }
 
-        return true;
+        // ⛔ R5-U1/U1-04: оновлення потребує НАЯВНОЇ бази. Відсутня — хибне чи типове ім'я; майстер більше
+        // не передає -CreateDatabaseIfMissing для оновлення, а скрипт без -FirstDeployment базу не створює.
+        if (databaseMissing && _state.Mode == WizardMode.Update)
+        {
+            error = $"Database '{_databaseBox.Text.Trim()}' does not exist on '{_instanceBox.Text.Trim()}'. " +
+                    "An update needs the existing ECR database — check the database name " +
+                    "(\"First deployment\" creates a new one).";
+            return false;
+        }
+
+        // ⛔ R9-F5/F5-01: повтор першого розгортання з пропуском схеми має сенс лише на базі, яку попередня
+        // спроба вже створила й накотила; на відсутній скрипт однаково впаде на звірці штампа схеми.
+        if (databaseMissing && _skipSchemaCheckBox!.Checked)
+        {
+            error = $"Database '{_databaseBox.Text.Trim()}' does not exist on '{_instanceBox.Text.Trim()}', " +
+                    "so its schema cannot have been applied. Untick \"" + _skipSchemaCheckBox.Text + "\".";
+            return false;
+        }
+
+        return ValidateBackup(out error);
+    }
+
+    /// <summary>
+    /// ⛔ AN-117 (S2-04): оновлення, що змінює схему, — лише зі свіжою копією бази (той самий запит до
+    /// msdb.dbo.backupset, що в deploy-ecr.ps1) АБО з явною позначкою «копію зроблено поза SQL Server / я
+    /// приймаю ризик», яка й дає скрипту -SkipBackupCheck. Без цього кроку майстер доходив до «Install» і
+    /// зупинявся на кроці 2/7 скрипта без способу визнати копію, зроблену VSS чи на вторинній репліці.
+    /// </summary>
+    private bool ValidateBackup(out string error)
+    {
+        error = string.Empty;
+        _backup = null;
+
+        if (_state.Mode != WizardMode.Update || _skipSchemaCheckBox!.Checked)
+        {
+            return true;
+        }
+
+        _backup = SqlPreflight.CheckBackup(
+            _instanceBox!.Text.Trim(), _databaseBox!.Text.Trim(),
+            _windowsAuthOption!.Checked, _loginBox!.Text.Trim(), _sqlPasswordBox!.Text,
+            _trustCertificateCheckBox!.Checked);
+
+        var fresh = _backup.Freshness == BackupFreshness.Fresh;
+        _backupStatus!.Text = _backup.Detail;
+        _backupStatus.ForeColor = fresh ? Color.DarkGreen : Color.DarkRed;
+
+        if (fresh || _backupAcceptCheckBox!.Checked)
+        {
+            return true;
+        }
+
+        error = _backup.Detail + Environment.NewLine + Environment.NewLine
+            + $"The update changes the database schema; rollback (runbook 9) needs a backup made right before it "
+            + $"(not older than {SchemaBackupRules.MaxAgeHours} h). Make one, for example:" + Environment.NewLine
+            + $"BACKUP DATABASE [{_databaseBox.Text.Trim()}] TO DISK = N'<path>' WITH COPY_ONLY, CHECKSUM" + Environment.NewLine
+            + "and press Next again, or - if the backup was made outside SQL Server (VSS tool, another AG node) - tick "
+            + "\"" + _backupAcceptCheckBox.Text + "\".";
+        return false;
     }
 
     public void Apply(WizardState state)
@@ -125,7 +203,141 @@ internal sealed class DatabaseStep : IWizardStep
         state.SqlAuthIsWindows = _windowsAuthOption!.Checked;
         state.SqlLogin = state.SqlAuthIsWindows ? null : _loginBox!.Text.Trim();
         state.SqlLoginPassword = state.SqlAuthIsWindows ? null : ToSecure(_sqlPasswordBox!.Text);
-        state.SkipSchema = state.Mode == WizardMode.Update && _skipSchemaCheckBox!.Checked;
+        state.SkipSchema = _skipSchemaCheckBox!.Checked;
+        state.TrustSqlServerCertificate = _trustCertificateCheckBox!.Checked;
+
+        // AN-117: позначка діє лише там, де скрипт і перевіряв би копію (оновлення зі зміною схеми).
+        var backupRequired = state.Mode == WizardMode.Update && !state.SkipSchema;
+        state.Backup = backupRequired ? _backup : null;
+        state.BackupRiskAccepted = backupRequired && _backupAcceptCheckBox!.Checked;
+    }
+
+    /// <summary>
+    /// ⛔ AN-117 (S2-04): крок «копію бази зроблено» — лише в оновленні, що змінює схему. Позначка типово знята;
+    /// поставлена — червоне попередження тут і червоний рядок «Database backup» на кроці Review.
+    /// </summary>
+    private GroupBox BuildBackupGroup()
+    {
+        _backupGroup = new GroupBox
+        {
+            Text = "Database backup (update)",
+            Dock = DockStyle.Top,
+            AutoSize = true,
+            Padding = new Padding(8),
+            Margin = new Padding(0, 12, 0, 0),
+        };
+
+        var layout = new TableLayoutPanel { Dock = DockStyle.Top, ColumnCount = 1, AutoSize = true };
+
+        layout.Controls.Add(new Label
+        {
+            Text = "Before changing the schema the update requires a full or differential backup of the database "
+                + $"not older than {SchemaBackupRules.MaxAgeHours} h in msdb.dbo.backupset; the ECR services are stopped "
+                + "for the schema change. The backup history is checked when you press Next.",
+            AutoSize = true,
+            MaximumSize = new Size(520, 0),
+            Margin = new Padding(0, 4, 6, 0),
+        });
+
+        _backupStatus = new Label
+        {
+            Text = "Not checked yet.",
+            AutoSize = true,
+            MaximumSize = new Size(520, 0),
+            Margin = new Padding(0, 6, 6, 0),
+        };
+        layout.Controls.Add(_backupStatus);
+
+        _backupAcceptCheckBox = new CheckBox
+        {
+            Text = "A backup was made outside SQL Server / I accept the risk",
+            AutoSize = true,
+            Checked = _state.BackupRiskAccepted,
+            Margin = new Padding(0, 8, 6, 0),
+        };
+        _backupAcceptWarning = new Label
+        {
+            Text = "Warning: deploy-ecr.ps1 will run with -SkipBackupCheck and will NOT verify the backup. "
+                + "If there is no backup made right before the update, a failed update cannot be rolled back "
+                + "(runbook 9) without losing data.",
+            AutoSize = true,
+            MaximumSize = new Size(520, 0),
+            ForeColor = Color.DarkRed,
+            Visible = _state.BackupRiskAccepted,
+            Margin = new Padding(24, 4, 6, 0),
+        };
+        _backupAcceptCheckBox.CheckedChanged +=
+            (_, _) => _backupAcceptWarning.Visible = _backupAcceptCheckBox.Checked;
+
+        layout.Controls.Add(_backupAcceptCheckBox);
+        layout.Controls.Add(_backupAcceptWarning);
+
+        _backupGroup.Controls.Add(layout);
+        return _backupGroup;
+    }
+
+    private void UpdateBackupVisibility()
+    {
+        if (_backupGroup is null || _skipSchemaCheckBox is null)
+        {
+            return;
+        }
+
+        var required = _state.Mode == WizardMode.Update && !_skipSchemaCheckBox.Checked;
+        _backupGroup.Visible = required;
+        if (!required)
+        {
+            _backupAcceptCheckBox!.Checked = false;
+        }
+    }
+
+    /// <summary>
+    /// ⛔ L10-04, D-333 (HU-12 R3 = A): довіра до сертифіката SQL Server без перевірки —
+    /// типово вимкнена. Увімкнена — служба й sqlcmd не автентифікують сервер (MITM на шляху
+    /// до SQL бачить і пароль SQL-логіна, і дані); вибір повторюється на кроці «Огляд».
+    /// </summary>
+    private GroupBox BuildCertificateGroup()
+    {
+        var group = new GroupBox { Text = "Encryption", Dock = DockStyle.Top, AutoSize = true, Padding = new Padding(8) };
+
+        var layout = new TableLayoutPanel { Dock = DockStyle.Top, ColumnCount = 1, AutoSize = true };
+
+        layout.Controls.Add(new Label
+        {
+            Text = "The connection to SQL Server is always encrypted (Encrypt=Mandatory). By default the "
+                + "server certificate is verified: SQL Server must present a certificate trusted by this "
+                + "machine whose name matches the instance name.",
+            AutoSize = true,
+            MaximumSize = new Size(520, 0),
+            Margin = new Padding(0, 4, 6, 0),
+        });
+
+        _trustCertificateCheckBox = new CheckBox
+        {
+            Text = "Trust the SQL Server certificate (unsafe)",
+            AutoSize = true,
+            Checked = _state.TrustSqlServerCertificate,
+            Margin = new Padding(0, 8, 6, 0),
+        };
+        _trustCertificateWarning = new Label
+        {
+            Text = "Warning: the server certificate will NOT be verified (TrustServerCertificate=True). "
+                + "Anyone on the network path to SQL Server can impersonate it and read the data and the "
+                + "SQL login password. Use only for a self-signed certificate on a test stand.",
+            AutoSize = true,
+            MaximumSize = new Size(520, 0),
+            ForeColor = Color.DarkRed,
+            Visible = _state.TrustSqlServerCertificate,
+            Margin = new Padding(24, 4, 6, 0),
+        };
+        _trustCertificateCheckBox.CheckedChanged +=
+            (_, _) => _trustCertificateWarning.Visible = _trustCertificateCheckBox.Checked;
+
+        layout.Controls.Add(_trustCertificateCheckBox);
+        layout.Controls.Add(_trustCertificateWarning);
+
+        group.Controls.Add(layout);
+        return group;
     }
 
     private GroupBox BuildConnectionGroup()

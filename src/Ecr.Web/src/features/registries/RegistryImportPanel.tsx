@@ -1,5 +1,5 @@
 import { useRef, useState, type JSX } from 'react';
-import { Alert, Badge, Button, Group, Modal, Stack, Table } from '@mantine/core';
+import { Alert, Badge, Button, Group, Modal, Stack, Table, Text } from '@mantine/core';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from '@/api/queryKeys';
 import type { RegistryEntryImportReport } from '@/api/types';
@@ -104,6 +104,9 @@ export function RegistryImportPanel({ registryCode, disabled = false }: Registry
   // залишатися недоступною РІВНО за цієї умови.
   const blocked = (reviewed?.errors.length ?? 0) > 0;
 
+  // ⚠ Звіт сервера до Y5-07 поля не мав — тоді змін просто не показуємо.
+  const changes = reviewed?.changes ?? [];
+
   function close(): void {
     setReport(null);
     setFile(null);
@@ -194,6 +197,44 @@ export function RegistryImportPanel({ registryCode, disabled = false }: Registry
                   ))}
                 </Table.Tbody>
               </Table>
+            )}
+
+            {/* ⛔ Y5-07: що саме зміниться в НАЯВНИХ записах — старе й нове значення поля.
+                Excel при збереженні CSV змінює значення сам (провідні нулі, експонента, дати
+                регіональним форматом), і лічильник «оновлено: N» цього не показував. */}
+            {changes.length > 0 && (
+              <>
+                <Text fw={600} size="sm">
+                  {t('registry.import.changesTitle', { count: changes.length })}
+                </Text>
+                {reviewed.changesTruncated === true && (
+                  <Text size="sm" c="dimmed">
+                    {t('registry.import.changesTruncated', { count: changes.length })}
+                  </Text>
+                )}
+                <Table striped withTableBorder className="ecr-sticky-head">
+                  <Table.Thead>
+                    <Table.Tr>
+                      <Table.Th>{t('registry.import.row')}</Table.Th>
+                      <Table.Th>{t('registry.import.entryKey')}</Table.Th>
+                      <Table.Th>{t('registry.import.field')}</Table.Th>
+                      <Table.Th>{t('registry.import.oldValue')}</Table.Th>
+                      <Table.Th>{t('registry.import.newValue')}</Table.Th>
+                    </Table.Tr>
+                  </Table.Thead>
+                  <Table.Tbody>
+                    {changes.map((change, index) => (
+                      <Table.Tr key={`${String(change.row)}:${change.key}:${change.field}:${String(index)}`}>
+                        <Table.Td>{change.row}</Table.Td>
+                        <Table.Td>{change.key}</Table.Td>
+                        <Table.Td>{change.field}</Table.Td>
+                        <Table.Td>{change.oldValue ?? '—'}</Table.Td>
+                        <Table.Td>{change.newValue ?? '—'}</Table.Td>
+                      </Table.Tr>
+                    ))}
+                  </Table.Tbody>
+                </Table>
+              </>
             )}
 
             <Group justify="flex-end">

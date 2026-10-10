@@ -4616,6 +4616,8 @@ export interface paths {
                     mine?: boolean;
                     /** @description Скільки повернути, 1…50. */
                     limit?: number;
+                    /** @description Без успішних перерахунків формул — для шухляди «Мої задачі». */
+                    hideRoutine?: boolean;
                 };
                 header?: never;
                 path?: never;
@@ -17861,6 +17863,84 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/users/{id}/windows-sid": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Виправляє SID доменного запису, який ще не входив. Право `Security.ManageUsers` (X5-01).
+         * @description Не SID — `422 ECR-USR-0422`; SID має інший запис — `409 ECR-USR-0409`; запис уже входив — `409 ECR-SEC-0409`.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["CorrectWindowsSidRequest"];
+                    "application/json": components["schemas"]["CorrectWindowsSidRequest"];
+                    "text/json": components["schemas"]["CorrectWindowsSidRequest"];
+                };
+            };
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/health/db": {
         parameters: {
             query?: never;
@@ -18600,13 +18680,16 @@ export interface components {
              */
             theirChangedAt: null | string;
             /** @description Походження останньої зміни: `UserEdit`, `Import`,
-             *     `Recalculation`, `Migration`; `null` — невідоме. Потрібне
+             *     `ImportOverwrite`, `Recalculation`, `Migration`;
+             *     `null` — невідоме. Потрібне
              *     поруч із `system`: «це зробила не людина» без відповіді «а що саме»
              *     лишає користувача з тим самим питанням. */
             theirOrigin: null | string;
-            /** @description Відображуване ім'я автора останньої зміни; `system` — зміна не людини
-             *     (перерахунок, імпорт, міграція); `null` — автор невідомий. Ніколи не
-             *     логін і не SID (R-A2, D-86). */
+            /** @description Відображуване ім'я автора останньої зміни. Правка в сітці (`UserEdit`)
+             *     та імпорт книги Excel (`Import`, `ImportOverwrite`) — ім'я людини,
+             *     яка їх зробила; `system` — зміна не людини (перерахунок, інтеграція,
+             *     міграція); `null` — автор невідомий. Ніколи не логін і не SID
+             *     (R-A2, D-86). */
             theirUser: null | string;
             /** @description Чинне значення комірки — те, що лежить у сховищі зараз; `null` —
              *     комірки немає або назвати її неможливо. */
@@ -19115,6 +19198,11 @@ export interface components {
              * @description Значення у цільовій одиниці.
              */
             value: string;
+        };
+        /** @description Виправлення SID доменного запису, який ще не входив (X5-01). */
+        CorrectWindowsSidRequest: {
+            /** @description Правильний SID облікового запису в домені (`S-1-…`). */
+            sid: string;
         };
         /** @description Подія журналу покриття: інтервал зібрано, але в комірки він не ліг. */
         CoverageEventView: {
@@ -20496,6 +20584,13 @@ export interface components {
         IFormFile: string;
         /** @description Запит на застосування імпорту. */
         ImportApplyRequest: {
+            /** @description ✎ AN-114 (D-338). Рядки, для яких людина свідомо перезаписує чужі правки,
+             *     зроблені після експорту книги (конфлікти перегляду
+             *     `err.ECR-CELL-0409.importRowChangedSinceExport`, їхні значення —
+             *     `ImportPreview.overwritable`). Відсутнє/порожнє — конфліктні рядки не
+             *     застосовуються, решта — так (AN-103). Рядок, що не був таким конфліктом, —
+             *     422 `ECR-IMP-0422` (`overwriteNotConflict`). */
+            overwriteRows?: null | components["schemas"]["ImportOverwriteRow"][];
             /** @description Токен раніше побудованого diff. */
             previewToken: string;
         };
@@ -20519,16 +20614,39 @@ export interface components {
             tableCode?: null | string;
             tableNameL10n?: null | components["schemas"]["LocalizedText"];
         };
+        /** @description Рядок книги, для якого людина свідомо перезаписує чужу правку, зроблену
+         *     після експорту (AN-114, D-338). */
+        ImportOverwriteRow: {
+            /** @description Рядок (як `rowKey` відмови-конфлікту перегляду). */
+            rowKey: string;
+            /** @description Таблиця (як `tableCode` відмови-конфлікту перегляду). */
+            tableCode: string;
+        };
         /** @description Результат попереднього перегляду імпорту. */
         ImportPreview: {
             /** @description Комірки, які зміняться. */
             changes: components["schemas"]["ImportChange"][];
             /** @description Комірки, змінені іншим користувачем після відкриття. */
             conflicts: components["schemas"]["CellConflictDto"][];
+            /** @description ✎ AN-114 (D-338). Комірки рядків, змінених кимось після експорту книги
+             *     (у Rejected вони ж — відмовою
+             *     `err.ECR-CELL-0409.importRowChangedSinceExport`): `OldValue` — чинне
+             *     (чуже) значення, `NewValue` — значення з книги. Застосовуються лише для
+             *     рядків, названих у `ImportApplyRequest.OverwriteRows`. ⛔ AN-118: лише
+             *     комірки, які людина в книзі змінила відносно експорту; ті, що лишились як
+             *     були при вивантаженні, сюди не потрапляють — чуже новіше значення в них
+             *     лишається. */
+            overwritable: components["schemas"]["ImportChange"][];
             /** @description Токен для застосування; діє обмежений час. */
             previewToken: string;
             /** @description Комірки, які буде відхилено, із причиною. */
             rejected: components["schemas"]["ImportRejection"][];
+            /** @description ✎ AN-118 (R1-02). Ключі попереджень про книгу загалом (каталог D-95), які
+             *     не забороняють застосування, але людина має їх бачити до нього:
+             *     `import.outdatedWorkbook` — книгу вивантажено до того, як карта почала
+             *     нести версії рядків і відбитки комірок, тож значення, яких у ній не
+             *     чіпали, можуть повернути новіші чужі. `null` — попереджень немає. */
+            warnings?: null | string[];
         };
         /** @description Відхилена комірка з причиною — користувач має бачити, які саме (ФВ-4.4). */
         ImportRejection: {
@@ -20612,6 +20730,13 @@ export interface components {
             resultUrl?: null | string;
             /** @description Стан. */
             state: string;
+            /**
+             * Format: int32
+             * @description Скільки комірок записав `Succeeded` перерахунок формул після правки (`0` — нічого,
+             *     клієнт не перечитує зрізи); `null` — інша задача, ще не завершена або число невідоме
+             *     (AN-108 / P2-02, `FormulaRecalcOutcome`). Заповнює `GetJobStatusHandler`.
+             */
+            writtenCount?: null | number;
         };
         /** @description Задача в переліку черги — легша за JobStatus. */
         JobSummary: {
@@ -21933,7 +22058,9 @@ export interface components {
             /** @description Ідентифікатор поставленої задачі перерахунку формул; `null` —
              *     перерахунку НЕ поставлено (`BE-05`). */
             recalculationJobId?: null | string;
-            /** @description Нові версії зачеплених рядків: `RowKey` → hex. */
+            /** @description Нові версії зачеплених рядків: `RowKey` → `rowversion` у Base64 (`Convert.ToBase64String`),
+             *     не hex. Base64 розрізняє регістр: клієнт повертає значення в `baseVersion` дослівно, а сервер порівнює
+             *     його `Ordinal` — переписане в нижній чи верхній регістр, воно дало б хибний конфлікт `409`. */
             rowVersions: {
                 [key: string]: string;
             };
@@ -22109,6 +22236,11 @@ export interface components {
              */
             notSubmittedSheets?: null | number;
             /**
+             * Format: date
+             * @description Останній календарний день періоду, включно: дата чинності темпоральних довідників для документів періоду (ФВ-8.5, D1-02).
+             */
+            periodEnd: string;
+            /**
              * Format: int32
              * @description `Year*100 + Sequence`; він же ключ партиції.
              */
@@ -22125,7 +22257,9 @@ export interface components {
             sequence: number;
             /**
              * Format: date-time
-             * @description Початок періоду в поясі майданчика.
+             * @description Момент ВІДКРИТТЯ періоду в поясі майданчика — `Period.ComputedOpenAt`
+             *     (`PeriodStart + OpenOffsetDays`), а не календарний початок місяця. Зсув політики вже врахований:
+             *     клієнт не має додавати `OpenOffsetDays` удруге (N4-01).
              */
             startsAt: string;
             /** @description Стан; обчислює `PeriodStateJob`, а не запит. */
@@ -22770,6 +22904,22 @@ export interface components {
              *     відхиляє запис (`422 ECR-REG-4221`). */
             warnings?: components["schemas"]["RegistryRuleViolationDto"][];
         };
+        /** @description Зміна значення поля наявного запису довідника, яку приносить файл (Y5-07). */
+        RegistryEntryImportChange: {
+            /** @description Код поля. */
+            field: string;
+            /** @description Код запису, як його записано у файлі. */
+            key: string;
+            /** @description Значення після імпорту текстом; `null` — порожнє. */
+            newValue: null | string;
+            /** @description Значення до імпорту текстом (числа й дати — інваріантно); `null` — порожнє. */
+            oldValue: null | string;
+            /**
+             * Format: int32
+             * @description Номер рядка у файлі; заголовок — 1.
+             */
+            row: number;
+        };
         /** @description Помилка одного рядка імпорту записів довідника. */
         RegistryEntryImportError: {
             /** @description Поле, якого стосується помилка; `null` — помилка самого рядка (код,
@@ -22799,6 +22949,11 @@ export interface components {
             added: number;
             /** @description Чи записано зміни. */
             applied: boolean;
+            /** @description Зміни значень полів НАЯВНИХ записів, які файл приносить (у перевірці `dryRun`) або приніс:
+             *     старе й нове значення текстом; не більше за 1000 (Y5-07). */
+            changes?: components["schemas"]["RegistryEntryImportChange"][];
+            /** @description Змін більше, ніж показано в `Changes` (Y5-07). */
+            changesTruncated?: boolean;
             /** @description Відхилені рядки; є хоч один — не застосовано нічого. */
             errors: components["schemas"]["RegistryEntryImportError"][];
             /**

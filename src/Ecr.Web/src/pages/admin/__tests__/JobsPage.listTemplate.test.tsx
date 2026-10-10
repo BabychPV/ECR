@@ -19,13 +19,13 @@ import { JobsPage } from '@/pages/admin/JobsPage';
 const jobs = [
   { jobCode: 'Ecr.Application.Ports.IRecalculationJob', jobId: 'run-1', percent: 40, state: 'Running', startedAt: '2026-10-06T09:00:00Z', updatedAt: '2026-10-06T09:01:00Z', createdByDisplayName: 'Olena', documentId: 12 },
   { jobCode: 'Ecr.Application.Ports.IRecalculationJob', jobId: 'run-2', percent: 0, state: 'Queued', startedAt: '2026-10-06T09:02:00Z', updatedAt: '2026-10-06T09:02:00Z', createdByDisplayName: 'Olena' },
-  { jobCode: 'Ecr.Application.Ports.IExcelExportJob', jobId: 'exp-1', percent: 35, state: 'Failed', startedAt: '2026-10-06T08:00:00Z', updatedAt: '2026-10-06T08:01:00Z', createdByDisplayName: null, errorCode: 'ECR-JOB-0409' },
+  { jobCode: 'Ecr.Application.Ports.IExcelExportJob', jobId: 'exp-1', percent: 35, state: 'Failed', startedAt: '2026-10-06T08:00:00Z', updatedAt: new Date(Date.now() - 60 * 60 * 1000).toISOString(), createdByDisplayName: null, errorCode: 'ECR-JOB-0409' },
   { jobCode: 'Ecr.Application.Ports.IExcelExportJob', jobId: 'exp-2', percent: 100, state: 'Succeeded', startedAt: '2026-10-06T07:00:00Z', updatedAt: '2026-10-06T07:01:00Z', createdByDisplayName: 'Taras', message: 'Export ready' },
 ];
 
 const requested: string[] = [];
 
-function respond(): void {
+function respond(list: readonly Record<string, unknown>[] = jobs): void {
   requested.length = 0;
   vi.stubGlobal(
     'fetch',
@@ -48,7 +48,7 @@ function respond(): void {
         const job = jobs.find((row) => row.jobId === decodeURIComponent(one[1] ?? ''));
         return job === undefined ? json(null, 404) : json({ ...job, error: null, message: job.message ?? null });
       }
-      if (url.includes('/api/v1/jobs')) return json(url.includes('mine=true') ? jobs.slice(0, 2) : jobs);
+      if (url.includes('/api/v1/jobs')) return json(url.includes('mine=true') ? list.slice(0, 2) : list);
 
       return json(null, 404);
     }),
@@ -119,6 +119,22 @@ describe('JobsPage на шаблоні переліку (UI-28)', () => {
 
     await waitFor(() => expect(shownIds()).toEqual(['exp-1']));
     expect(location).toContain('state=Failed');
+  });
+
+  it('N4-03: плитка «failed in 24 h» не показує провалу старшого за добу; фільтр стану — показує', async () => {
+    const old = { ...jobs[2], jobId: 'old-fail', updatedAt: '2026-01-01T00:00:00Z' };
+
+    respond([...jobs, old]);
+    show('/admin/jobs?state=Failed&since=24h');
+    await waitFor(() => expect(shownIds()).toEqual(['exp-1']));
+  });
+
+  it('N4-03: «усі провалені» (state без since) показує і старий провал', async () => {
+    const old = { ...jobs[2], jobId: 'old-fail', updatedAt: '2026-01-01T00:00:00Z' };
+
+    respond([...jobs, old]);
+    show('/admin/jobs?state=Failed');
+    await waitFor(() => expect(shownIds()).toEqual(['exp-1', 'old-fail']));
   });
 
   it('пошук і тип — з адреси; нічого не підійшло — «no match», а не «задач ще не було»', async () => {

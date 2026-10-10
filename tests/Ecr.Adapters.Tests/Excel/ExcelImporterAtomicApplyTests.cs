@@ -506,4 +506,126 @@ public sealed class ExcelImporterAtomicApplyTests
         await _importGate.Received(1).EnterStructureAsync(DocumentId, false, Arg.Any<CancellationToken>());
         await _importGate.DidNotReceive().EnterStructureAsync(DocumentId, true, Arg.Any<CancellationToken>());
     }
+
+    /// <summary>
+    /// L6-02 / N1-04: перегляд збудовано за версією шаблону, якої проєкт під замком структури вже не
+    /// має (перенос зафіксувався між переглядом і застосуванням), — <c>409 ECR-DOC-4091</c>, жодного
+    /// запису.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Екземпляри при застосуванні вже читаються за НОВОЮ версією, тож порівняння лише з ними
+    /// розбіжності не бачить: у цьому світі їх перелік порожній, як і в решті тестів файлу. Мутація:
+    /// прибрати звірку <c>plan.TemplateVersionId</c> у <c>ApplyAsync</c> — запис іде, тест червоний.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait("Finding", "L6-02")]
+    public async Task Перегляд_за_версією_якої_проєкт_уже_не_має_не_застосовується()
+    {
+        _previews.FindAsync(Token, Arg.Any<CancellationToken>()).Returns(PlanOfVersion(TemplateVersionId));
+        _importGate.EnterStructureAsync(DocumentId, false, Arg.Any<CancellationToken>())
+            .Returns((int?)(TemplateVersionId + 1));
+
+        var error = await Assert.ThrowsAsync<ConcurrencyConflictException>(
+            () => Importer().ApplyAsync(DocumentId, Token, CancellationToken.None));
+
+        Assert.Equal("ECR-DOC-4091", error.ErrorCode);
+        Assert.Equal(DocumentStructure.StructureChangedKey, error.Details!["messageKey"]);
+        Assert.DoesNotContain(_trace, e => e.StartsWith("write:", StringComparison.Ordinal));
+    }
+
+    /// <summary>L6-02 / N1-04: версія плану збігається з версією під замком — застосування проходить.</summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait("Finding", "L6-02")]
+    public async Task Перегляд_за_версією_проєкту_застосовується()
+    {
+        _previews.FindAsync(Token, Arg.Any<CancellationToken>()).Returns(PlanOfVersion(TemplateVersionId));
+        _importGate.EnterStructureAsync(DocumentId, false, Arg.Any<CancellationToken>())
+            .Returns((int?)TemplateVersionId);
+
+        await Importer().ApplyAsync(DocumentId, Token, CancellationToken.None);
+
+        Assert.Contains(_trace, e => e.StartsWith("write:", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// AN-114 (D-338): рядок, змінений після експорту, застосовується лише з явним
+    /// «перезаписати» — і журнал позначає його походженням <c>ImportOverwrite</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Мутації: не передати <c>overwritten</c> у <c>HandleWorkbookAsync</c> (або
+    /// писати <c>request.Origin</c> у <c>BuildAuditRecords</c>) — R1 таблиці 501 у
+    /// журналі як <c>Import</c>, червоний; не додати перезаписані в план — «write:501» зникне.
+    /// </remarks>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Decision", "D-338")]
+    public async Task AN114_конфліктний_рядок_пишеться_лише_з_прапорцем_і_позначається_в_журналі(bool overwrite)
+    {
+        _previews.FindAsync(Token, Arg.Any<CancellationToken>()).Returns(PlanWithConflictIn501());
+        var records = new List<CellChangeRecord>();
+        _audit.When(a => a.WriteCellChangesAsync(Arg.Any<IReadOnlyList<CellChangeRecord>>(), Arg.Any<CancellationToken>()))
+              .Do(call => records.AddRange(call.ArgAt<IReadOnlyList<CellChangeRecord>>(0)));
+
+        await Importer().ApplyAsync(
+            DocumentId, Token, overwrite ? [new ImportOverwriteRow("Main", "R1")] : null, CancellationToken.None);
+
+        var written = _trace.Where(e => e.StartsWith("write:", StringComparison.Ordinal)).ToList();
+        if (!overwrite)
+        {
+            // ⛔ Без прапорця — AN-103: конфліктна таблиця не пишеться, решта — так.
+            Assert.Equal(["write:502", "write:503"], written);
+            Assert.All(records, r => Assert.Equal(CellChangeOrigins.Import, r.Origin));
+            return;
+        }
+
+        Assert.Equal(["write:501", "write:502", "write:503"], written);
+        Assert.Equal(
+            CellChangeOrigins.ImportOverwrite,
+            Assert.Single(records, r => r.Address.TableRowId == 1001).Origin);
+        Assert.All(
+            records.Where(r => r.Address.TableRowId != 1001),
+            r => Assert.Equal(CellChangeOrigins.Import, r.Origin));
+    }
+
+    /// <summary>План: у 501 рядок R1 — конфлікт «змінено після експорту», у 502/503 — звичайні зміни.</summary>
+    private static string PlanWithConflictIn501()
+    {
+        var tables = Instances
+            .Select((instance, i) => i == 0
+                ? new TableDiff(
+                    instance,
+                    Period,
+                    [],
+                    [new ImportRejection("R1", "Volume", "ECR-CELL-0409", "diag", "Main", null, ImportMessageKeys.RowChangedSinceExport)],
+                    new Dictionary<string, string> { ["R1"] = "0xAA" },
+                    [new ImportChange("R1", "Volume", null, 10m, "Main")])
+                : new TableDiff(
+                    instance,
+                    Period,
+                    [new ImportChange("R1", "Volume", null, 10m * (i + 1), "Main")],
+                    [],
+                    new Dictionary<string, string> { ["R1"] = "0xAA" }))
+            .ToList();
+
+        return JsonSerializer.Serialize(new ImportPlan(DocumentId, Period, tables), Options);
+    }
+
+    private static string PlanOfVersion(int templateVersionId)
+    {
+        var tables = Instances
+            .Select((instance, i) => new TableDiff(
+                instance,
+                Period,
+                [new ImportChange("R1", "Volume", null, 10m * (i + 1))],
+                [],
+                new Dictionary<string, string> { ["R1"] = "0xAA" }))
+            .ToList();
+
+        return JsonSerializer.Serialize(
+            new ImportPlan(DocumentId, Period, tables, UserId: null, TemplateVersionId: templateVersionId), Options);
+    }
 }

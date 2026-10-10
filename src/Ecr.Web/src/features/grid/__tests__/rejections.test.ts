@@ -53,6 +53,29 @@ describe('rejectionMarksOf — які відмови тримають правк
     expect(rejectionMarksOf(problem(422, 'ECR-CELL-0422'), [bad, good])).toHaveLength(2);
   });
 
+  it('AN-123: 409 ECR-DOC-4091 lockTimeout НЕ тримає — минуще, як 5xx', () => {
+    // ⛔ Мутація: прибрати гілку `isTransientBusy` у `rejectionMarksOf` — тримається весь пакет.
+    expect(
+      rejectionMarksOf(problem(409, 'ECR-DOC-4091', { messageKey: 'err.ECR-DOC-4091.lockTimeout' }), [bad, good]),
+    ).toEqual([]);
+  });
+
+  it('X6-02: 409 ECR-DOC-4091 sheetBeingSubmitted НЕ тримає — подання аркуша минає само', () => {
+    // ⛔ Мутація: прибрати `SheetBeingSubmittedMessageKey` з `isTransientBusy` — тримається весь пакет.
+    expect(
+      rejectionMarksOf(
+        problem(409, 'ECR-DOC-4091', { messageKey: 'err.ECR-DOC-4091.sheetBeingSubmitted' }),
+        [bad, good],
+      ),
+    ).toEqual([]);
+  });
+
+  it('AN-123: інші 4091 (структуру змінено) і далі тримають — повтор того самого не вилікує', () => {
+    expect(
+      rejectionMarksOf(problem(409, 'ECR-DOC-4091', { messageKey: 'err.ECR-DOC-4091.structureChanged' }), [bad]),
+    ).toHaveLength(1);
+  });
+
   it('5xx і мережа НЕ тримають: повтор має везти ті самі правки', () => {
     expect(rejectionMarksOf(problem(500, 'ECR-SYS-0500'), [bad])).toEqual([]);
     expect(rejectionMarksOf(problem(429, 'ECR-REQ-0429'), [bad])).toEqual([]);
@@ -67,6 +90,20 @@ describe('rejectionMarksOf — які відмови тримають правк
 
     expect(marks.map((mark) => mark.edit)).toEqual([good]);
     expect(marks[0]?.scope).toBe('cell');
+  });
+
+  it('AN-104 / D1-01: 409 «розійшовся весь рядок» (`*`) тримає правки ЦЬОГО рядка, а не весь пакет', () => {
+    const other = edit('r2', 'C1', 5);
+    const marks = rejectionMarksOf(
+      problem(409, 'ECR-CELL-0409', {
+        conflicts: [{ rowKey: 'r1', columnCode: '*', currentVersion: '' }],
+      }),
+      [bad, good, other],
+    );
+
+    // ⛔ Мутація: прибрати `wholeRows` — `*` не збігається з жодною коміркою, і
+    // утримується весь пакет разом із `r2`, якого конфлікт не стосувався.
+    expect(marks.map((mark) => mark.edit)).toEqual([bad, good]);
   });
 
   it('409 без переліку тримає весь пакет — інакше він пішов би знову й знову', () => {

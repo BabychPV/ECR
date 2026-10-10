@@ -60,7 +60,7 @@ function json(body: unknown, status = 200): Response {
   });
 }
 
-function respond(permissions: readonly string[]): { versionBodies: string[] } {
+function respond(permissions: readonly string[], card: typeof Card = Card): { versionBodies: string[] } {
   const state = { versionBodies: [] as string[] };
 
   vi.stubGlobal(
@@ -93,7 +93,7 @@ function respond(permissions: readonly string[]): { versionBodies: string[] } {
         return json(Versions);
       }
 
-      if (/\/api\/v1\/templates\/7$/.test(url)) return json(Card);
+      if (/\/api\/v1\/templates\/7$/.test(url)) return json(card);
 
       return json(null);
     }),
@@ -227,6 +227,29 @@ describe('TemplateCardPage: версії шаблону і один «назад
       expect(continueDraft.getAttribute('href')).toBe('/admin/templates/7/versions/12');
       expect(within(section).getByRole('button', { name: /templates\.newVersion/ }).getAttribute('data-variant')).toBe('default');
       expect(document.querySelector('h1')?.parentElement?.parentElement?.querySelector('[data-status-kind="version"]')).not.toBeNull();
+    },
+    Timeout * 3,
+  );
+
+  it(
+    'N4-04: архівований шаблон — бейдж «Archived» (як у переліку), а не «Deprecated»',
+    async () => {
+      respond(['Template.Edit'], { ...Card, isActive: false });
+      show();
+
+      await versionsTable();
+
+      const badge = await waitFor(
+        () => {
+          const found = document.querySelector<HTMLElement>('[data-status-state="Archived"]');
+          expect(found).not.toBeNull();
+
+          return found as HTMLElement;
+        },
+        { timeout: Timeout },
+      );
+      expect(badge.dataset['statusKind']).toBe('project');
+      expect(document.querySelector('[data-status-state="Deprecated"]')).toBeNull();
     },
     Timeout * 3,
   );

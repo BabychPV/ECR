@@ -129,6 +129,11 @@ public sealed class RegistrySyncJob(
     /// <summary>Префікс ключа дедупу в <c>Details</c> події.</summary>
     public const string DedupKeyPrefix = "; key=";
 
+    /// <summary>
+    /// Нижня межа вікна дедупу (<see cref="DedupWindow"/>): скільки НАЙНОВІШИХ подій сутності читає дедуп.
+    /// </summary>
+    public const int DedupWindowFloor = 2_000;
+
     /// <summary>Мітка запиту дедупу (<see cref="DedupJournal"/>) - за нею тест знаходить його план у кеші.</summary>
     public const string DedupJournalTag = "ecr:registry-sync-dedup";
 
@@ -308,20 +313,10 @@ public sealed class RegistrySyncJob(
         var events = new List<SyncEvent>();
         var refused = new List<CreateRefusal>();
 
-        // Manual: код = ім'я елемента. Два елементи з тим самим ім'ям дали б writer'у дубль коду в
-        // пакеті (помилка виклику) — другий і далі відмовляються як «код зайнято» першим.
-        var creates = new List<RegistrySyncCreate>();
-        var codes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var create in plan.Creates)
-        {
-            if (create.Code is { } code && !codes.Add(code))
-            {
-                refused.Add(new CreateRefusal(create, ErrorCodes.RegistryEntryInUse, RegistryEntryWriter.EntryCodeTakenKey));
-                continue;
-            }
-
-            creates.Add(create);
-        }
+        // ⛔ L4-13: тут був дедуп за `create.Code` («Manual: код = ім'я елемента»). Планувальник такого
+        // коду не видає від Q6=C (HU-11): `Manual` не створює записів зовсім (подія з порадою), а в
+        // `Auto` код `null` і його видає writer із послідовності. Гілка не виконувалась ніколи.
+        var creates = new List<RegistrySyncCreate>(plan.Creates);
 
         var updates = Updates(plan);
         var keys = new KeyOps(plan.Relinks, plan.MissingMarks, plan.MissingClears, plan.PathChanges);
@@ -1091,7 +1086,26 @@ public sealed class RegistrySyncJob(
     }
 
     /// <summary>
-    /// Журнал подій синку цієї сутності з ключем дедупу в <c>Details</c>, у порядку <c>Id</c>.
+    /// Вікно дедупу: скільки найновіших подій сутності читати, коли цей прогін має
+    /// <paramref name="events"/> подій.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ AN-81 L4-11: дедуп тягнув у пам'ять УСЮ історію подій сутності щопрогону (журнал лише росте).
+    /// Потрібне ж лише «остання подія предмета»; предмети цього прогону — не більше за
+    /// <paramref name="events"/>, тож читаються найновіші <c>max(<see cref="DedupWindowFloor"/>, 4 × events)</c>:
+    /// кілька попередніх прогонів із запасом.
+    /// <para>
+    /// ⚠ Ціна вікна названа прямо: предмет, остання подія якого пішла за вікно, повідомляється ЩЕ РАЗ
+    /// (і тим самим знову стає новим у вікні). Це нагадування раз на багато прогонів, а не щопрогону.
+    /// </para>
+    /// </remarks>
+    /// <param name="events">Подій у цьому прогоні (після відсікання).</param>
+    public static int DedupWindow(int events)
+        => (int)Math.Min(int.MaxValue, Math.Max(DedupWindowFloor, 4L * events));
+
+    /// <summary>
+    /// НАЙНОВІШІ <paramref name="window"/> подій синку цієї сутності з ключем дедупу в <c>Details</c>,
+    /// від найновішої до найстарішої (за <c>Id</c>).
     /// </summary>
     /// <remarks>
     /// ⛔ AN-34 L4-11: запит мусить іти індексом <c>IX_CollectionCoverage_RegistryEvents</c>
@@ -1101,10 +1115,18 @@ public sealed class RegistrySyncJob(
     /// <c>PeriodKey == null</c> і <c>Status != null</c> збігаються з фільтром індексу дослівно -
     /// без них оптимізатор не має права його брати. Мітка - щоб план знайшов
     /// <c>RegistrySyncDedupPlanTests</c>.
+    /// <para>
+    /// ⛔ AN-81 L4-11: <c>ORDER BY Id DESC TOP (window)</c> — зворотний обхід того самого індексу, без
+    /// зміни схеми: читається не більше <paramref name="window"/> рядків, а не вся історія (<see cref="DedupWindow"/>).
+    /// </para>
     /// </remarks>
-    public static IQueryable<string> DedupJournal(EcrDbContext db, int sourceEntityId)
+    /// <param name="db">Контекст.</param>
+    /// <param name="sourceEntityId">Сутність джерела.</param>
+    /// <param name="window">Скільки найновіших подій узяти (див. <see cref="DedupWindow"/>).</param>
+    public static IQueryable<string> DedupJournal(EcrDbContext db, int sourceEntityId, int window)
     {
         ArgumentNullException.ThrowIfNull(db);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(window);
 
         var statuses = CollectionCoverage.RegistryStatuses.ToList();
         return db.CollectionCoverages
@@ -1116,13 +1138,14 @@ public sealed class RegistrySyncJob(
                         && statuses.Contains(c.Status)
                         && c.Details != null
                         && c.Details.Contains(DedupKeyPrefix))
-            .OrderBy(c => c.Id)
+            .OrderByDescending(c => c.Id)
+            .Take(window)
             .Select(c => c.Details!);
     }
 
     /// <summary>
     /// Відкидає події, для яких ОСТАННЯ подія того самого предмета цієї сутності має те саме
-    /// значення. Один запит на прогін.
+    /// значення. Один запит на прогін, у межах вікна <see cref="DedupWindow"/>.
     /// </summary>
     private async Task<List<SyncEvent>> DeduplicateAsync(int sourceEntityId, List<SyncEvent> events, CancellationToken ct)
     {
@@ -1131,17 +1154,18 @@ public sealed class RegistrySyncJob(
             return events;
         }
 
-        var journal = await DedupJournal(db, sourceEntityId)
+        var journal = await DedupJournal(db, sourceEntityId, DedupWindow(events.Count))
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
-        // Предмет → значення ОСТАННЬОЇ його події (порядок за Id: пізніша перезаписує).
+        // Предмет → значення ОСТАННЬОЇ його події. Журнал — від найновішої: перша зустрінута
+        // подія предмета і є остання, старші його події ігноруються.
         var latest = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var details in journal)
         {
             if (ParseKey(details) is { } key)
             {
-                latest[key.Subject] = key.Value;
+                latest.TryAdd(key.Subject, key.Value);
             }
         }
 

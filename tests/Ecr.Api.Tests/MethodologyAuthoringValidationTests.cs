@@ -85,7 +85,7 @@ public sealed class MethodologyAuthoringValidationTests(SqlServerFixture sql)
 
     /// <remarks>
     /// Мутація: повернути <c>Math.Clamp</c> без перевірки в
-    /// <c>SimulateMethodologyHandler.PeriodDate</c> — <c>0</c> дає <c>500</c>,
+    /// <c>SimulateMethodologyHandler.RequireValidPeriodKey</c> — <c>0</c> дає <c>500</c>,
     /// <c>202613</c> — <c>200</c>; обидва рядки червоні.
     /// </remarks>
     [Theory]

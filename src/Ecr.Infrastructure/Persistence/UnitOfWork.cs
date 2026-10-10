@@ -28,6 +28,16 @@ public sealed class UnitOfWork(
     // зареєстрований `IClock`.
     private readonly IClock _clock = clock ?? new SystemClock();
 
+    /// <summary>
+    /// Довідники, чия ревізія даних зросла в поточній (ще не закомічені) транзакції — за контекстом,
+    /// а не за екземпляром одиниці роботи: кілька <see cref="UnitOfWork"/> над одним контекстом (тести,
+    /// служба ключів) пишуть в одну транзакцію, і переставити мітку має той, хто її комітить (D1-03).
+    /// </summary>
+    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<EcrDbContext, HashSet<int>>
+        RegistryChangesInTransaction = new();
+
+    private HashSet<int> ChangedRegistries => RegistryChangesInTransaction.GetValue(db, _ => []);
+
     /// <inheritdoc />
     public async Task<int> SaveChangesAsync(CancellationToken ct)
     {
@@ -52,6 +62,12 @@ public sealed class UnitOfWork(
                 {
                     await ApplyRegistryRevisionBumpsAsync(bumps, token).ConfigureAwait(false);
                     saved = await db.SaveChangesAsync(token).ConfigureAwait(false);
+
+                    // D1-03: мітку `DataChangedAt` буде переставлено перед КОМІТОМ транзакції.
+                    foreach (var bump in bumps)
+                    {
+                        ChangedRegistries.Add(bump.Id);
+                    }
                 },
                 ct).ConfigureAwait(false);
             return saved;
@@ -140,6 +156,61 @@ public sealed class UnitOfWork(
                 now ??= _clock.UtcNow;
                 entry.Entity.MarkDataChanged(now.Value);
             }
+        }
+    }
+
+    /// <summary>
+    /// Переставляє <see cref="RegistryDef.DataChangedAt"/> довідникам, зміненим у цій транзакції, на
+    /// момент безпосередньо ПЕРЕД комітом (D1-03).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Мітка, поставлена в <c>SaveChangesAsync</c>, — момент ПОЧАТКУ запису, а транзакція пакета чи
+    /// CSV триває після неї ще секунди (правила довідника, перерахунок сиріт, синк). Прогін розрахунку,
+    /// що стартував у цьому вікні, читає знімок без незакомічених рядків — тобто рахує на СТАРОМУ
+    /// довіднику, — а умова «застаріло» (`DataChangedAt &gt; StartedAt` у <c>StaleResultsQuery</c>,
+    /// <c>RegistryImpactStore</c>, <c>MethodologyStore</c>) гасилася, бо мітка була РАНІША за старт.
+    /// Мітка перед комітом пізніша за старт будь-якого прогону, який міг не побачити цих рядків, тож
+    /// такий результат тепер позначається застарілим. Рядок <c>cfg.RegistryDef</c> уже під X-блокуванням
+    /// цієї транзакції (<c>UPDATE … DataRevision</c>), тож новий <c>UPDATE</c> нікого не чекає.
+    /// <para>
+    /// ⚠ Залишкове вікно — мілісекунди між цим оператором і самим комітом плюс розбіжність годинників
+    /// машин API і Worker (NTP). Повна відтворюваність <c>replay</c> того самого <c>AS OF</c> цим не
+    /// гарантується: прогін, що не побачив правки, тепер ПОЗНАЧЕНИЙ застарілим, а не виправлений.
+    /// </para>
+    /// </remarks>
+    /// <param name="ct">Токен скасування.</param>
+    private async Task RestampRegistryDataChangesAsync(CancellationToken ct)
+    {
+        var changed = ChangedRegistries;
+        if (changed.Count == 0)
+        {
+            return;
+        }
+
+        var ids = changed.Order().ToList();
+        changed.Clear();
+
+        var now = _clock.UtcNow;
+        await db.RegistryDefs
+            .Where(d => ids.Contains(d.Id))
+            .ExecuteUpdateAsync(s => s.SetProperty(d => d.DataChangedAt, (DateTime?)now), ct)
+            .ConfigureAwait(false);
+
+        // Відстежувані екземпляри — у той самий стан, що й рядок у базі, без позначки «змінено».
+        // ⚠ Знімок переліку (`ToList`): запис значень властивості переводить запис трекера між
+        // станами, а `Entries<T>()` лінійно обходить внутрішні словники станів — без знімка
+        // «Collection was modified» на першому ж зміненому довіднику (інтеграція batch5).
+        foreach (var entry in db.ChangeTracker.Entries<RegistryDef>().ToList())
+        {
+            if (!ids.Contains(entry.Entity.Id))
+            {
+                continue;
+            }
+
+            var property = entry.Property(d => d.DataChangedAt);
+            property.CurrentValue = now;
+            property.OriginalValue = now;
+            property.IsModified = false;
         }
     }
 
@@ -250,6 +321,33 @@ public sealed class UnitOfWork(
     /// </remarks>
     private static EcrException? TryMapDuplicateKey(DbUpdateException ex)
     {
+        // ⛔ L4-08. Зовнішній ключ запису довідника вибирається за ІНДЕКСОМ, який порушено, а не за
+        // першою доданою сутністю: пакет синку несе запис, його ключі й значення разом, і `ex.Entries`
+        // перелічує їх усіх — арм `RegistryEntry` нижче перехопив би чужу відмову й назвав її гонкою
+        // за кодом запису. Ключ — той самий, що в `RegistryExternalKeyStore.AddAsync`
+        // (ручна прив'язка): паралельна прив'язка того самого GUID джерела між знімком синку й
+        // збереженням давала сирий `DbUpdateException`, який не входить в `IsBatchFailure`, і падав
+        // увесь прогін.
+        //
+        // ⚠ `BusinessRuleException`, а не `ConcurrencyConflictException`: так само, як у ручної
+        // прив'язки, — синк розрізняє відмову рядка (`IsBatchFailure`) за обома, а клієнт ручної
+        // прив'язки бачить один і той самий код `ECR-REG-0409` незалежно від того, хто програв.
+        if (SqlConflict.ViolatesIndex(ex, "UQ_RegistryExternalKey")
+            && ex.Entries.FirstOrDefault(e =>
+                e.State is EntityState.Added or EntityState.Modified
+                && e.Entity is Domain.Entities.Dictionaries.RegistryExternalKey)
+                is { Entity: Domain.Entities.Dictionaries.RegistryExternalKey externalKey })
+        {
+            return new BusinessRuleException(
+                ErrorCodes.RegistryEntryInUse,
+                $"Ідентифікатор «{externalKey.ExternalId}» щойно прив'язав інший запит.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-REG-0409.externalKeyTakenConcurrently",
+                    ["externalId"] = externalKey.ExternalId,
+                });
+        }
+
         foreach (var entry in ex.Entries)
         {
             switch (entry.Entity)
@@ -415,7 +513,8 @@ public sealed class UnitOfWork(
         var transaction = await strategy
             .ExecuteAsync(() => db.Database.BeginTransactionAsync(ct))
             .ConfigureAwait(false);
-        return new TransactionScope(transaction);
+        ChangedRegistries.Clear();
+        return new TransactionScope(transaction, RestampRegistryDataChangesAsync);
     }
 
     /// <inheritdoc />
@@ -443,45 +542,84 @@ public sealed class UnitOfWork(
 
         if (db.Database.CurrentTransaction is not null)
         {
-            await operation(ct).ConfigureAwait(false);
+            await TranslatingLockWaitAsync(() => operation(ct)).ConfigureAwait(false);
             return;
         }
 
-        // ⛔ L6-15 (аудит 2026-10-03). Стратегія повторів (1205, обрив з'єднання)
-        // виконує замикання вдруге над ТИМ САМИМ трекером змін. Сутності, які
-        // перша спроба завантажила чи додала, лишалися в ньому: запит другої
-        // спроби повертав уже змінений екземпляр (подання → `wrongState`), а
-        // доданий запис (`ApprovalEvent`) вставлявся двічі. Перед повтором
-        // від'єднується все, що з'явилося в трекері ПІСЛЯ початку першої
-        // спроби: друга спроба читає й додає наново.
+        // ⛔ L6-15 (аудит 2026-10-03) / N1-03 (аудит 2026-10-09). Стратегія повторів (1205, обрив
+        // з'єднання) виконує замикання вдруге над ТИМ САМИМ трекером змін, а база відкотила все,
+        // що зробила перша спроба. Сутності, які перша спроба завантажила чи додала, лишалися в
+        // ньому: запит другої спроби повертав уже змінений екземпляр (подання → `wrongState`), а
+        // доданий запис (`ApprovalEvent`) вставлявся двічі. Сутність, завантажена ДО транзакції
+        // і змінена в замиканні, після першого успішного збереження ставала `Unchanged`: коли відкат
+        // наставав пізніше, повтор не бачив різниці — зміна мовчки губилася, а обробник відповідав 200.
         //
-        // ⚠ Не `ChangeTracker.Clear()`: сутність, завантажену викликачем ДО
-        // транзакції і змінену в замиканні, повтор має зберегти — від'єднана,
-        // вона мовчки не записалася б, а обробник відповів би успіхом.
-        HashSet<object>? trackedBefore = null;
+        // ⚠ Перед повтором трекер ВІДНОВЛЮЄТЬСЯ до стану на початок транзакції
+        // (<see cref="ChangeTrackerCheckpoint"/>): нове відчіплюється, змінене й збережене
+        // повертається до значень ДО першої спроби. Не `ChangeTracker.Clear()` — сутність, завантажену
+        // викликачем ДО транзакції, повтор має зберегти. І не `SaveChanges(acceptAllChangesOnSuccess:
+        // false)` + `AcceptAllChanges()` після коміту — замикання зберігає по кілька разів, і друге
+        // збереження вставило б доданий першим запис удруге.
+        ChangeTrackerCheckpoint? checkpoint = null;
         var strategy = db.Database.CreateExecutionStrategy();
-        await strategy.ExecuteAsync(async () =>
+        try
         {
-            if (trackedBefore is null)
+            await strategy.ExecuteAsync(async () =>
             {
-                trackedBefore = db.ChangeTracker.Entries()
-                    .Select(e => e.Entity)
-                    .ToHashSet(ReferenceEqualityComparer.Instance);
-            }
-            else
-            {
-                foreach (var entry in db.ChangeTracker.Entries()
-                             .Where(e => !trackedBefore.Contains(e.Entity))
-                             .ToList())
+                if (checkpoint is null)
                 {
-                    entry.State = EntityState.Detached;
+                    checkpoint = new ChangeTrackerCheckpoint(db);
                 }
-            }
+                else
+                {
+                    checkpoint.Restore();
+                }
 
-            await using var transaction = await db.Database.BeginTransactionAsync(ct).ConfigureAwait(false);
-            await operation(ct).ConfigureAwait(false);
-            await transaction.CommitAsync(ct).ConfigureAwait(false);
-        }).ConfigureAwait(false);
+                await using var transaction = await db.Database.BeginTransactionAsync(ct).ConfigureAwait(false);
+
+                // Повтор стратегії починає транзакцію з нуля: довідники першої спроби вже відкочено.
+                ChangedRegistries.Clear();
+                await TranslatingLockWaitAsync(async () =>
+                {
+                    await operation(ct).ConfigureAwait(false);
+
+                    // ⛔ D1-03: мітка `DataChangedAt` — перед самим комітом, а не на початку запису.
+                    await RestampRegistryDataChangesAsync(ct).ConfigureAwait(false);
+                    await transaction.CommitAsync(ct).ConfigureAwait(false);
+                }).ConfigureAwait(false);
+            }).ConfigureAwait(false);
+        }
+        finally
+        {
+            checkpoint?.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// Вичерпане очікування блокування (<c>SqlException 1222</c>) будь-якого оператора транзакції —
+    /// <c>409 ECR-DOC-4091</c> <c>lockTimeout</c>, а не сирий виняток (500).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ AN-106 (P1-01, аудит 2026-10-09b). <c>SET LOCK_TIMEOUT</c> запису комірок
+    /// (<see cref="LockWaitGuard"/>) — налаштування сеансу: після охоронця воно діє й на аудит
+    /// <c>aud.CellChange</c>, «дотик» документа і <c>SaveChanges</c>. Їхній 1222 (під ескальованим
+    /// блокуванням аудиту чи переносу версії) виходив сирим <c>SqlException</c> /
+    /// <c>DbUpdateException</c> → 500. 1222 буває лише після <c>SET LOCK_TIMEOUT</c>, тож чужих
+    /// таймаутів (клієнтський <c>-2</c>) переклад не ховає.
+    ///
+    /// ⚠ Усередині замикання стратегії повторів: відмова — не транзієнтна, повторювати її
+    /// (ще 15 с очікування на тому самому блокуванні) нема сенсу.
+    /// </remarks>
+    private static async Task TranslatingLockWaitAsync(Func<Task> body)
+    {
+        try
+        {
+            await body().ConfigureAwait(false);
+        }
+        catch (Exception ex) when (LockWaitGuard.FindLockWaitTimeout(ex) is { } timeout)
+        {
+            throw LockWaitGuard.Busy(timeout);
+        }
     }
 
     /// <summary>
@@ -492,12 +630,15 @@ public sealed class UnitOfWork(
     /// під RCSI забута транзакція тримає версії рядків у tempdb і псує життя
     /// всій базі, а не тільки своєму запиту.
     /// </remarks>
-    private sealed class TransactionScope(IDbContextTransaction transaction) : IAsyncDisposable, IEcrTransaction
+    private sealed class TransactionScope(
+        IDbContextTransaction transaction, Func<CancellationToken, Task> beforeCommit) : IAsyncDisposable, IEcrTransaction
     {
         private bool _committed;
 
         public async Task CommitAsync(CancellationToken ct)
         {
+            // D1-03: мітка `DataChangedAt` змінених довідників — перед самим комітом.
+            await beforeCommit(ct).ConfigureAwait(false);
             await transaction.CommitAsync(ct).ConfigureAwait(false);
             _committed = true;
         }

@@ -569,7 +569,7 @@ public sealed class NotificationOutboxConfiguration : IEntityTypeConfiguration<N
         builder.Property(x => x.Subject).HasMaxLength(400).IsRequired();
         builder.Property(x => x.Recipients).HasMaxLength(4000);
         builder.Property(x => x.State).HasMaxLength(20).IsRequired();
-        builder.Property(x => x.Error).HasMaxLength(1000);
+        builder.Property(x => x.Error).HasMaxLength(NotificationOutboxItem.ErrorMaxLength);
         builder.Property(x => x.ClaimedAt);
         builder.Property(x => x.ClaimToken);
 

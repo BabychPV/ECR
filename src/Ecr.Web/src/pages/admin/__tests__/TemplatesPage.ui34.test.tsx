@@ -196,7 +196,10 @@ describe('TemplatesPage (UI-34): смуга показників і фільтр
     const strip = screen.getByRole('group', { name: /templates\.stats⟧/ });
 
     expect(strip.textContent).toMatch(/4\s*⟦templates\.stat\.all⟧/);
-    expect(strip.textContent).toMatch(/3\s*⟦templates\.stat\.published⟧/);
+    // N4-03: плитка «published» — ШАБЛОНИ з опублікованою версією (AIR і FLARE), а не версії:
+    // у AIR їх дві (1.0.0, 1.1.0), разом з FLARE це 3 версії, але 2 шаблони.
+    expect(strip.textContent).toMatch(/2\s*⟦templates\.stat\.published⟧/);
+    expect(strip.textContent).not.toMatch(/3\s*⟦templates\.stat\.published⟧/);
     expect(strip.textContent).toMatch(/2\s*⟦templates\.stat\.drafts⟧/);
     expect(strip.textContent).toMatch(/15\s*⟦templates\.stat\.documents⟧/);
   });

@@ -1,4 +1,5 @@
 using Ecr.Application.Calculations;
+using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
@@ -221,6 +222,28 @@ public sealed class GoldenSetTests
 
         Assert.Contains("TC-1", divergence, StringComparison.Ordinal);
         Assert.Contains("gsec", divergence, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "ФВ-13.7")]
+    [InlineData("gsec@abc")]
+    [InlineData("gsec@")]
+    [InlineData("@901")]
+    public void Старий_зіпсований_ключ_на_публікації_дає_422_з_ключем_каталогу_а_не_500(string key)
+    {
+        // Аудит L7-10: збереження тесту такий ключ уже відхиляє (TestCaseExpectedKeyTests), але запис, що
+        // лишився зі старих часів, доходив до Judge і давав InvalidOperationException → 500. Тепер та сама
+        // відмова, що й при збереженні: ECR-CALC-0422, testCaseJsonInvalid, поле expectedJson, шлях $.<ключ>.
+        var broken = TestCase(new Dictionary<string, decimal> { [key] = 1m }, 0m);
+
+        var error = Assert.Throws<BusinessRuleException>(() => GoldenSet.Judge(broken, Output(1m)));
+
+        Assert.Equal("ECR-CALC-0422", error.ErrorCode);
+        Assert.Equal("err.ECR-CALC-0422.testCaseJsonInvalid", error.Details!["messageKey"]);
+        Assert.Equal("TC-1", error.Details!["testCode"]);
+        Assert.Equal("expectedJson", error.Details!["field"]);
+        Assert.Equal($"$.{key}", error.Details!["reason"]);
     }
 
     private static MethodologyTestCase TestCase(decimal expected, decimal tolerance)

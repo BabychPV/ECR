@@ -46,9 +46,11 @@ public sealed class RegistryRuleEngineTests
     private readonly List<RegistryRuleDef> _caseRules = [];
     private readonly List<RegistryRuleDef> _compositionRules = [];
     private readonly InMemoryRegistrySnapshot _snapshot = new();
+    private readonly RecordingSource _source;
 
     public RegistryRuleEngineTests()
     {
+        _source = new RecordingSource(_snapshot);
         _clock.UtcNow.Returns(Now);
         _user.Language.Returns("en");
 
@@ -78,8 +80,9 @@ public sealed class RegistryRuleEngineTests
                 .ToList());
         _keys.FindEntryCodesAsync(Arg.Any<IReadOnlyCollection<long>>(), Arg.Any<CancellationToken>())
             .Returns(call => call.ArgAt<IReadOnlyCollection<long>>(0).ToDictionary(id => id, id => $"E{id}"));
-        _loader.LoadAsync(Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<DateOnly>(), Arg.Any<DateTime?>(), Arg.Any<CancellationToken>())
-            .Returns(_snapshot);
+        // L5-12: рушій читає БД один раз (LoadSourceAsync), а знімок кожної дати будує джерело в пам'яті.
+        _loader.LoadSourceAsync(Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<DateTime?>(), Arg.Any<CancellationToken>())
+            .Returns(_source);
 
         _snapshot
             .AddRegistry("STREAM_CASE", ["NAME", "T_C", "COMPONENT"])
@@ -186,7 +189,8 @@ public sealed class RegistryRuleEngineTests
         Assert.Equal(CaseEntry, violation.EntryId);
         Assert.Equal("E4411", violation.EntryCode);
         Assert.Equal("SUM_100", violation.Rule);
-        await _loader.Received().LoadAsync(Arg.Any<IReadOnlyCollection<int>>(), date, null, Arg.Any<CancellationToken>());
+        await _loader.Received(1).LoadSourceAsync(Arg.Any<IReadOnlyCollection<int>>(), null, Arg.Any<CancellationToken>());
+        Assert.Equal([date], _source.BuiltDates);
     }
 
     [Fact]
@@ -215,8 +219,8 @@ public sealed class RegistryRuleEngineTests
         var check = await Engine().EvaluateAsync(_composition, [9001], [], null, default);
 
         Assert.Empty(check.Violations);
-        await _loader.DidNotReceive().LoadAsync(
-            Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<DateOnly>(), Arg.Any<DateTime?>(), Arg.Any<CancellationToken>());
+        await _loader.DidNotReceive().LoadSourceAsync(
+            Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<DateTime?>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -307,10 +311,142 @@ public sealed class RegistryRuleEngineTests
         Assert.Empty(check.Violations);
     }
 
-    private RegistryRuleEngine Engine()
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Requirement", "L5-12")]
+    public async Task L5_12__бюджет_спільний_на_пакет__вичерпання_дає_budgetExhausted_а_не_мовчання()
+    {
+        // До виправлення кожен прогін мав власні 20 000 кроків, тож пакет із тридцяти записів не
+        // вичерпував нічого й жодного порушення не було. Тепер бюджет один на виклик: 30 записів по
+        // кілька кроків перевищують 40, а перші записи (їх оцінено першими) вкладаються.
+        _compositionRules.Add(Rule(CompositionId, "PCT_NOT_NEGATIVE", RegistryRuleKind.Expression, "ROW.MOL_PCT >= 0", ValidationSeverity.Error));
+        var ids = AddManyRows(30);
+
+        // Контроль: на типовому бюджеті ті самі 30 записів чисті.
+        var plain = await Engine().EvaluateAsync(_composition, ids, [], null, default);
+        Assert.Empty(plain.Violations);
+
+        var check = await Engine(packageBudgetSteps: 40).EvaluateAsync(_composition, ids, [], null, default);
+
+        // Порушення — рівно на хвості пакета: суцільному, бо вичерпаний бюджет не відновлюється.
+        Assert.NotEmpty(check.Violations);
+        Assert.All(check.Violations, v =>
+        {
+            Assert.Equal(RegistryRuleEngine.BudgetExhaustedKey, v.MessageKey);
+            Assert.Equal("PCT_NOT_NEGATIVE", v.Rule);
+            Assert.Equal("Error", v.Severity);
+        });
+        var flagged = check.Violations.Select(v => v.EntryId).ToArray();
+        Assert.Equal(ids.OrderBy(i => i).TakeLast(flagged.Length), flagged.OrderBy(i => i));
+        Assert.DoesNotContain(ids.Min(), flagged);
+
+        // Неперевірене правило рівня Error відмовляє, а не пропускає (запис відкотиться).
+        var thrown = Assert.Throws<BusinessRuleException>(check.ThrowIfErrors);
+        Assert.Equal("ECR-REG-4221", thrown.ErrorCode);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Requirement", "L5-12")]
+    public async Task L5_12__вичерпання_бюджету_для_Warning_лише_попереджає()
+    {
+        _compositionRules.Add(Rule(CompositionId, "PCT_NOT_NEGATIVE", RegistryRuleKind.Expression, "ROW.MOL_PCT >= 0", ValidationSeverity.Warning));
+        var ids = AddManyRows(30);
+
+        var check = await Engine(packageBudgetSteps: 40).EvaluateAsync(_composition, ids, [], null, default);
+
+        Assert.Empty(check.Errors);
+        Assert.NotEmpty(check.Warnings);
+        Assert.All(check.Warnings, w => Assert.Equal(RegistryRuleEngine.BudgetExhaustedKey, w.MessageKey));
+        check.ThrowIfErrors();
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Requirement", "L5-12")]
+    public async Task L5_12__правило_що_вичерпало_бюджет_не_видає_помилку_значення_за_порушення_даних()
+    {
+        // Бюджет у один крок: навіть перший вузол не вкладається. Це не «ROW.MOL_PCT >= 0 хибне» і не
+        // «#BUDGET як код помилки у ViolatedKey»: правило не перевірено.
+        _compositionRules.Add(Rule(CompositionId, "PCT_NOT_NEGATIVE", RegistryRuleKind.Expression, "ROW.MOL_PCT >= 0", ValidationSeverity.Error));
+        _compositionRules.Add(Rule(
+            CompositionId, "COMPONENT_WHEN_PCT", RegistryRuleKind.RequiredWhen, "ROW.MOL_PCT > 50",
+            ValidationSeverity.Error, """{"field":"COMPONENT"}"""));
+        _compositionRules.Add(Rule(
+            CompositionId, "COMPONENT_KNOWN", RegistryRuleKind.CrossRegistry, "TRUE",
+            ValidationSeverity.Error, """{"field":"COMPONENT","registry":"COMPONENT"}"""));
+
+        var check = await Engine(packageBudgetSteps: 1).EvaluateAsync(_composition, [9001], [], null, default);
+
+        Assert.Equal(3, check.Violations.Count);
+        Assert.All(check.Violations, v =>
+        {
+            Assert.Equal(RegistryRuleEngine.BudgetExhaustedKey, v.MessageKey);
+            Assert.False(v.Params.ContainsKey("errorCode"));
+            Assert.Equal(9001, v.EntryId);
+        });
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Requirement", "L5-12")]
+    public async Task L5_12__база_читається_один_раз_а_знімок_будується_на_кожну_дату_вікна()
+    {
+        // Три записи темпорального довідника з різними початками вікна: сьогодні (2026-09-29), 2027-01-01
+        // і 2028-01-01. Раніше кожна дата — повний LoadAsync (п'ять запитів); тепер одне читання й три
+        // побудови знімка в пам'яті.
+        _compositionRules.Add(Rule(CompositionId, "PCT_NOT_NEGATIVE", RegistryRuleKind.Expression, "ROW.MOL_PCT >= 0", ValidationSeverity.Error));
+        var future = new DateOnly(2027, 1, 1);
+        var later = new DateOnly(2028, 1, 1);
+        _registries.FindEntryStandingsAsync(Arg.Any<IReadOnlyCollection<long>>(), Arg.Any<CancellationToken>())
+            .Returns(call => call.ArgAt<IReadOnlyCollection<long>>(0)
+                .Select(id => new RegistryEntryStanding(
+                    id, 0, IsActive: true, IsDeleted: false, id == 9002 ? future : id == 9003 ? later : null, null))
+                .ToList());
+        _snapshot.AddEntry("GAS_COMPOSITION", 9003, "C3", Row(10m), ordinal: 3);
+
+        var check = await Engine().EvaluateAsync(_composition, [9001, 9002, 9003], [], null, default);
+
+        Assert.Empty(check.Violations);
+        await _loader.Received(1).LoadSourceAsync(
+            Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<DateTime?>(), Arg.Any<CancellationToken>());
+        await _loader.DidNotReceive().LoadAsync(
+            Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<DateOnly>(), Arg.Any<DateTime?>(), Arg.Any<CancellationToken>());
+        Assert.Equal([DateOnly.FromDateTime(Now), future, later], _source.BuiltDates.Order());
+    }
+
+    private List<long> AddManyRows(int count)
+    {
+        var ids = new List<long> { 9001, 9002 };
+        for (var i = 0; i < count - 2; i++)
+        {
+            var id = 9100 + i;
+            _snapshot.AddEntry("GAS_COMPOSITION", id, $"M{i}", Row(1m), ordinal: 10 + i);
+            ids.Add(id);
+        }
+
+        return ids;
+    }
+
+    private RegistryRuleEngine Engine(int? packageBudgetSteps = null)
         => new(
             _registries, _keys, _loader, new RegistryRuleCompiler(new Parser()),
-            new Evaluator(new FunctionRegistry()), _user, _clock);
+            new Evaluator(new FunctionRegistry()), _user, _clock)
+        {
+            PackageBudgetSteps = packageBudgetSteps ?? RegistryRuleEngine.DefaultPackageBudgetSteps,
+        };
+
+    /// <summary>Джерело знімків, що віддає той самий знімок і записує, на які дати його «побудовано».</summary>
+    private sealed class RecordingSource(IRegistrySnapshot snapshot) : IRegistrySnapshotSource
+    {
+        public List<DateOnly> BuiltDates { get; } = [];
+
+        public IRegistrySnapshot Build(DateOnly businessDate)
+        {
+            BuiltDates.Add(businessDate);
+            return snapshot;
+        }
+    }
 
     private static RegistryRuleDef SumRule(ValidationSeverity severity)
         => Rule(

@@ -112,6 +112,9 @@ function render(key: string, params: Record<string, string>): string | null {
       return t('coverageEvents.writeConflict', params);
     case 'coverageEvents.needsConfirmation':
       return t('coverageEvents.needsConfirmation', params);
+    // F1-03: значення комірки збору відхилив обробник запису, решту полів записано.
+    case 'coverageEvents.cellRejected':
+      return t('coverageEvents.cellRejected', params);
     case 'coverageEvents.eventWriteFailed':
       return t('coverageEvents.eventWriteFailed', params);
     case 'coverageEvents.eventWritePartial':
@@ -132,6 +135,14 @@ function render(key: string, params: Record<string, string>): string | null {
       return t('coverageEvents.eventsTruncated', params);
     case 'coverageEvents.skippedDependency':
       return t('coverageEvents.skippedDependency', params);
+    // D2-02: матеріалізація скінченого періоду — неповне покриття (число записано) і «немає даних».
+    case 'coverageEvents.partialCoverage':
+      return t('coverageEvents.partialCoverage', params);
+    case 'coverageEvents.noData':
+      return t('coverageEvents.noData', params);
+    // I1-03: вікно чи джерело рядка змінилося, а нового числа немає — у комірці лишилося попереднє.
+    case 'coverageEvents.rowWindowStale':
+      return t('coverageEvents.rowWindowStale', params);
     default:
       return adapterRefusal(key, params);
   }
@@ -146,6 +157,10 @@ function render(key: string, params: Record<string, string>): string | null {
  * `PiSqlClientDataSource`, `PiWebApiDataSource`, `SourceUnitConverter`).
  * Невідомий ключ — `null`, і вся причина лишається сирим рядком: чесніше за
  * вгаданий переклад.
+ *
+ * ⛔ Повноту переліку стереже `AdapterRefusalClientKeysTests`
+ * (Ecr.Architecture.Tests): ключ відмови адаптера без гілки тут дав би сирий
+ * JSON на екрані прогону й журналу покриття (Y4-02, `elementNameAmbiguous`).
  */
 function adapterRefusal(key: string, params: Record<string, string>): string | null {
   switch (key) {
@@ -153,6 +168,8 @@ function adapterRefusal(key: string, params: Record<string, string>): string | n
       return t('err.ECR-INT-0422.timestampUnreadable', params);
     case 'err.ECR-INT-0422.timestampsOutOfOrder':
       return t('err.ECR-INT-0422.timestampsOutOfOrder', params);
+    case 'err.ECR-INT-0422.elementNameAmbiguous':
+      return t('err.ECR-INT-0422.elementNameAmbiguous', params);
     case 'err.ECR-INT-0422.queryKindNotConfigured':
       return t('err.ECR-INT-0422.queryKindNotConfigured', params);
     case 'err.ECR-INT-0422.sourceUnitMismatch':

@@ -37,7 +37,8 @@
     ⚠ Без -ServiceAccount служби реєструються під LocalSystem, але НЕ
     стартують (EcrServiceAutoStart/EcrWorkerAutoStart умовні на
     SERVICE_ACCOUNT) і мають тип запуску Manual (L10-03) — саме так і в CI,
-    де SQL для старту служб немає.
+    де SQL для старту служб немає. З -ServiceAccount служби теж не стартують:
+    START_SERVICES скрипт не передає (R5-U1/U1-01).
 #>
 [CmdletBinding()]
 param(
@@ -176,16 +177,18 @@ function Assert-StartMode([string] $name) {
     return $svc
 }
 
-# ⛔ L10-02: тека config — захищений DACL (без успадкування від %ProgramData%,
-# де BUILTIN\Users можуть створювати файли). Писати в неї й у файл конфігу
-# можуть лише SYSTEM і Administrators; Users — лише читати.
-function Assert-NoForeignWrite([string] $path) {
+# ⛔ L10-02 / N5-05: теки config і logs — захищений DACL (без успадкування від
+# %ProgramData%, де BUILTIN\Users можуть створювати файли). Писати в них можуть
+# лише SYSTEM і Administrators (і, для logs, обліковий запис служби — $AllowSid);
+# Users — лише читати.
+$trustedOwnerSids = 'S-1-5-18', 'S-1-5-32-544'   # SYSTEM, BUILTIN\Administrators
+function Assert-NoForeignWrite([string] $path, [string[]] $AllowSid = @()) {
     $acl = Get-Acl -LiteralPath $path
     # WriteData/CreateFiles, AppendData, WriteExtendedAttributes,
     # DeleteSubdirectoriesAndFiles, WriteAttributes, Delete, WRITE_DAC,
     # WRITE_OWNER, GENERIC_ALL, GENERIC_WRITE.
     $writeMask = 0x2 -bor 0x4 -bor 0x10 -bor 0x40 -bor 0x100 -bor 0x10000 -bor 0x40000 -bor 0x80000 -bor 0x10000000 -bor 0x40000000
-    $trusted = 'S-1-5-18', 'S-1-5-32-544'   # SYSTEM, BUILTIN\Administrators
+    $trusted = @($trustedOwnerSids) + @($AllowSid)
     foreach ($rule in $acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier])) {
         if ($rule.AccessControlType -ne 'Allow') { continue }
         if ($trusted -contains $rule.IdentityReference.Value) { continue }
@@ -195,12 +198,36 @@ function Assert-NoForeignWrite([string] $path) {
     }
     return $acl
 }
-function Assert-ConfigFolderProtected {
-    $dir = Join-Path $env:ProgramData 'ECR\config'
+# ⛔ N5-02: власник теки зберігає WRITE_DAC попри будь-який DACL. Якщо
+# %ProgramData%\ECR заздалегідь створив локальний користувач, DACL з MSI його
+# не позбавляє права повернути собі доступ — тож власник мусить бути SYSTEM
+# або Administrators.
+function Assert-TrustedOwner([string] $path) {
+    $owner = (Get-Acl -LiteralPath $path).GetOwner([System.Security.Principal.SecurityIdentifier])
+    if ($trustedOwnerSids -notcontains $owner.Value) {
+        throw "$path : власник $($owner.Value) — не SYSTEM і не Administrators; власник теки зберігає WRITE_DAC попри DACL"
+    }
+}
+function Assert-EcrFoldersProtected {
+    $root = Join-Path $env:ProgramData 'ECR'
+    Assert-TrustedOwner $root
+
+    $dir = Join-Path $root 'config'
     $acl = Assert-NoForeignWrite $dir
     if (-not $acl.AreAccessRulesProtected) { throw "$dir успадковує права %ProgramData% (DACL не захищений)" }
+    Assert-TrustedOwner $dir
     $file = Join-Path $dir 'appsettings.Production.json'
     if (Test-Path -LiteralPath $file) { Assert-NoForeignWrite $file | Out-Null }
+
+    # logs: службі видано Modify окремою дією (icacls /grant) — її SID дозволений.
+    $logs = Join-Path $root 'logs'
+    $allow = @()
+    if ($ServiceAccount) {
+        $allow = @(([System.Security.Principal.NTAccount] $ServiceAccount).Translate([System.Security.Principal.SecurityIdentifier]).Value)
+    }
+    $logsAcl = Assert-NoForeignWrite $logs $allow
+    if (-not $logsAcl.AreAccessRulesProtected) { throw "$logs успадковує права %ProgramData% (DACL не захищений): Users мають право створювати файли в журналі" }
+    Assert-TrustedOwner $logs
 }
 
 # ── Статичні перевірки: таблиці MSI, без установки ────────────────────────
@@ -262,13 +289,29 @@ Test-Case 'S3. Служба EcrWorker умовна, --supervisor, бінарни
     if ($comp[0][2] -ne $exe[0][0]) { throw "KeyPath компонента '$($comp[0][2])' — не Ecr.Worker.exe ('$($exe[0][0])')" }
 }
 
-Test-Case 'S4. Старт EcrWorker — лише за WORKER_ENABLED=1 і SERVICE_ACCOUNT' {
+Test-Case 'S4. Старт EcrWorker — лише за WORKER_ENABLED=1, SERVICE_ACCOUNT і START_SERVICES=1' {
     # Event: 0x1 = Start при установці.
     $ctl = Get-MsiRows "SELECT ``Component_``, ``Event`` FROM ``ServiceControl`` WHERE ``Name`` = 'EcrWorker'" 2
     $starts = @($ctl | Where-Object { ([int] $_[1] -band 0x1) -ne 0 })
     if ($starts.Count -ne 1) { throw "ServiceControl зі стартом EcrWorker: $($starts.Count)" }
     $cond = (Get-MsiRows "SELECT ``Condition`` FROM ``Component`` WHERE ``Component`` = '$($starts[0][0])'" 1)[0][0]
-    if ($cond -notmatch 'WORKER_ENABLED' -or $cond -notmatch 'SERVICE_ACCOUNT') { throw "умова старту '$cond'" }
+    if ($cond -notmatch 'WORKER_ENABLED' -or $cond -notmatch 'SERVICE_ACCOUNT' -or $cond -notmatch 'START_SERVICES\s*=\s*"1"') { throw "умова старту '$cond'" }
+}
+
+# ⛔ R5-U1/U1-01: служба, стартована всередині msiexec без Environment (рядок
+# підключення й відбиток DP пише deploy-ecr.ps1 лише ПІСЛЯ msiexec), падає →
+# Error 1920 → відкат установки. Кожен рядок ServiceControl зі стартом — лише
+# в компоненті з умовою START_SERVICES = "1".
+Test-Case 'S4a. Старт будь-якої служби під час msiexec — лише за START_SERVICES=1 (U1-01)' {
+    $ctl = Get-MsiRows 'SELECT `Component_`, `Event`, `Name` FROM `ServiceControl`' 3
+    $starts = @($ctl | Where-Object { ([int] $_[1] -band 0x1) -ne 0 })
+    if ($starts.Count -lt 2) { throw "ServiceControl зі стартом: $($starts.Count), очікували EcrApi і EcrWorker" }
+    foreach ($row in $starts) {
+        $cond = (Get-MsiRows "SELECT ``Condition`` FROM ``Component`` WHERE ``Component`` = '$($row[0])'" 1)[0][0]
+        if ($cond -notmatch 'START_SERVICES\s*=\s*"1"') { throw "старт $($row[2]) у компоненті з умовою '$cond' — без START_SERVICES" }
+    }
+    $secure = Get-MsiRows "SELECT ``Value`` FROM ``Property`` WHERE ``Property`` = 'SecureCustomProperties'" 1
+    if (($secure[0][0] -split ';') -notcontains 'START_SERVICES') { throw 'START_SERVICES не в SecureCustomProperties' }
 }
 
 Test-Case 'S5. EcrApi — безумовна, як і раніше' {
@@ -290,6 +333,26 @@ Test-Case 'S6. Без SERVICE_ACCOUNT обидві служби стають Man
             throw "немає дії з 'sc.exe config $service start= demand'"
         }
     }
+}
+
+# L10-02 / N5-02 / N5-05: теки ECR, logs і config — один захищений SDDL з
+# власником Administrators (O:BAG:SYD:P…), Users лише читають (0x1200a9), а
+# запис службі в logs видає окрема дія icacls (не util:PermissionEx).
+Test-Case 'S7. ECR/logs/config — захищений SDDL з власником Administrators (L10-02, N5-02)' {
+    $rows = Get-MsiRows 'SELECT `LockObject`, `Table`, `SDDLText` FROM `MsiLockPermissionsEx`' 3
+    foreach ($dir in 'DATAFOLDER', 'LOGSFOLDER', 'CONFIGFOLDER') {
+        $found = @($rows | Where-Object { $_[0] -eq $dir -and $_[1] -eq 'CreateFolder' })
+        if ($found.Count -ne 1) { throw "MsiLockPermissionsEx для $dir (CreateFolder): $($found.Count) рядків, очікували 1" }
+        $sddl = $found[0][2]
+        if ($sddl -notmatch '^O:BAG:SYD:P') { throw "$dir SDDL '$sddl' — очікували O:BAG:SYD:P… (власник Administrators, захищений DACL)" }
+        if ($sddl -notmatch '\(A;OICI;0x1200a9;;;BU\)') { throw "$dir SDDL '$sddl' — Users мусять мати лише читання (0x1200a9)" }
+        if (($sddl -replace '\(A;OICI;0x1200a9;;;BU\)', '') -match ';;;BU\)') { throw "$dir SDDL '$sddl' — зайвий ACE для Users" }
+    }
+    # ⚠ Без обгортки @(): Get-MsiRows повертає `, $rows` (масив рядків одним об'єктом), і @() зробив би з нього
+    # масив із ОДНОГО елемента — Count завжди 1, а $grant[0][1] під StrictMode падав «Index was outside the bounds».
+    $grant = Get-MsiRows "SELECT ``Action``, ``Condition`` FROM ``InstallExecuteSequence`` WHERE ``Action`` = 'EcrLogsServiceAccountGrant'" 2
+    if ($grant.Count -ne 1) { throw "EcrLogsServiceAccountGrant у InstallExecuteSequence: $($grant.Count) рядків — службі не видається запис у logs" }
+    if ($grant[0][1] -notmatch 'SERVICE_ACCOUNT') { throw "умова EcrLogsServiceAccountGrant '$($grant[0][1])' — без SERVICE_ACCOUNT" }
 }
 
 function Get-MsiProperty([string] $name) {
@@ -336,13 +399,12 @@ Test-Case '1. Чиста установка' {
     if ($w.PathName -notmatch 'Ecr\.Worker\.exe"?\s+--supervisor') { throw "PathName = $($w.PathName)" }
     $api = Get-CimInstance Win32_Service -Filter "Name='EcrApi'"
     if ($w.StartName -ne $api.StartName) { throw "обліковий запис EcrWorker '$($w.StartName)' ≠ EcrApi '$($api.StartName)'" }
-    # Без облікового запису служби не стартують (§1.4) — і воркер теж.
-    if (-not $ServiceAccount) {
-        foreach ($s in $api, $w) { if ($s.State -ne 'Stopped') { throw "$($s.Name) у стані $($s.State) без SERVICE_ACCOUNT, очікували Stopped" } }
-    }
+    # Без START_SERVICES=1 служби під час msiexec не стартують — ні без облікового запису (§1.4),
+    # ні з ним (R5-U1/U1-01: старт — крок 6 deploy-ecr.ps1, після запису Environment).
+    foreach ($s in $api, $w) { if ($s.State -ne 'Stopped') { throw "$($s.Name) у стані $($s.State) після msiexec без START_SERVICES, очікували Stopped" } }
     $exe = ($w.PathName -replace '^"([^"]+)".*$', '$1')
     if (-not (Test-Path $exe)) { throw "бінарника служби немає на диску: $exe" }
-    Assert-ConfigFolderProtected
+    Assert-EcrFoldersProtected
 }
 
 Test-Case 'W1. WORKER_ENABLED=0 прибирає службу, EcrApi лишається (REINSTALL, транзитивний компонент)' {
@@ -384,9 +446,9 @@ if ($PreviousMsiPath) {
         if ($versions.Count -ne 1 -or $versions[0] -ne $currentVersion) {
             throw "після оновлення встановлено версії [$($versions -join ', ')], очікували лише $currentVersion"
         }
-        # L10-02: наявна тека з успадкованими правами (поставила попередня MSI)
-        # після оновлення теж захищена.
-        Assert-ConfigFolderProtected
+        # L10-02/N5-05: наявні теки з успадкованими правами (поставила попередня MSI)
+        # після оновлення теж захищені: config і logs.
+        Assert-EcrFoldersProtected
     }
 }
 

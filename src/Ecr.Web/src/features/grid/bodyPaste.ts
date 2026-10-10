@@ -22,6 +22,8 @@
  * комірки), у модалці й усередині сітки (її бачить React) не чіпаємо.
  */
 
+import { isContainerRendered } from './containerRendered';
+
 /** Запобіжник: озброєння спливає через стільки мс після останньої активності в сітці. */
 export const ArmTtlMs = 30_000;
 
@@ -70,6 +72,8 @@ export function installBodyPasteRedirect(
 
   const handler = (event: ClipboardEvent): void => {
     if (armed !== container || !container.isConnected || event.defaultPrevented) return;
+    // ⛔ N3-12: прихована (`display: none`) сітка не приймає вставку - озброєною вона лишалась до 30 с.
+    if (!isContainerRendered(container)) return;
     if (!hasSelection()) return;
 
     const target = event.target;

@@ -96,9 +96,12 @@
         запис → служба зареєстрована, але НЕ запущена», а не «запущена
         під LocalSystem за замовчуванням». Тип запуску в цьому разі —
         Manual (EcrApiDemandStart нижче, L10-03).
+        ⛔ R5-U1/U1-01: і лише за START_SERVICES=1 (Package.wxs) — інакше служба
+        без Environment (рядок підключення, відбиток DP) падає всередині msiexec
+        → Error 1920 → відкат усієї установки. Старт — крок 6 deploy-ecr.ps1.
       -->
       <Component Id="EcrServiceAutoStart" Directory="INSTALLFOLDER"
-                 Guid="4d8f2a71-9e3c-4b6d-a2f5-7c1e9b0d3a6f" Condition="SERVICE_ACCOUNT">
+                 Guid="4d8f2a71-9e3c-4b6d-a2f5-7c1e9b0d3a6f" Condition="SERVICE_ACCOUNT AND START_SERVICES = &quot;1&quot;">
         <ServiceControl Id="EcrApiServiceStart" Name="EcrApi" Start="install" Wait="yes" />
       </Component>
     </ComponentGroup>

@@ -807,6 +807,21 @@ describe('T5-03: Ctrl+V/Ctrl+C одразу після стрілки чекаю
     second.dispose();
   });
 
+  it('N3-12: прихована (display: none) активна сітка не відкладає вставку на стрілку з <body>', () => {
+    const grid = mountGrid(4, 1, true, false, { revoEvents: true });
+
+    grid.press('ArrowDown');
+    vi.advanceTimersByTime(2000);
+    (document.activeElement as HTMLElement | null)?.blur();
+
+    grid.container.style.display = 'none';
+    arrowFromBody(grid.container);
+
+    expect(deferWhileCommitting(grid.container, () => undefined)).toBe(false);
+    vi.advanceTimersByTime(2000);
+    grid.dispose();
+  });
+
   it('після переходу і Shift+стрілка (лише діапазон) вставка не відкладається', () => {
     const grid = mountGrid(4, 1, true, false, { revoEvents: true });
 

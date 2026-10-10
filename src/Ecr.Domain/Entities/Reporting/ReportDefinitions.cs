@@ -151,7 +151,10 @@ public sealed class ReportSnapshot : Entity<long>
     /// </remarks>
     public SnapshotStatus Status { get; private set; }
 
-    /// <summary>Чи це поточний зріз для пари «версія × проєкт × період».</summary>
+    /// <summary>
+    /// Чи це поточний зріз для «опис звіту × проєкт × період» — один на всі версії
+    /// опису (R6-X7 / X7-02: вʼюха <c>rpt.v_*</c> версій не розрізняє).
+    /// </summary>
     public bool IsCurrent { get; private set; }
 
     /// <summary>Скільки рядків у зрізі.</summary>

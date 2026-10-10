@@ -344,6 +344,16 @@ export interface SheetActionsModel {
   readonly dialogs: JSX.Element;
 }
 
+/**
+ * ⛔ N3-01: адреса дії - `аркуш × період`, ЗНЯТА В МИТЬ КЛІКУ. Кнопка спершу чекає збереження набраного
+ * (`settleAndFlushEdits`, до 3 с), і якщо за цей час перемкнути вкладку, опції мутації вже від ІНШОГО
+ * аркуша: подавалося б не те, що оператор бачив під курсором, і права на нього не перевірялися б заново.
+ * Тож адреса їде ЗМІННОЮ мутації, а не береться з пропів під час виконання. `sheetName` - лише для тосту
+ * відмови (він називає аркуш, над яким дія).
+ */
+type SheetAddress = { readonly sheetDefId: number; readonly periodKey: number };
+type ActionTarget = SheetAddress & { readonly sheetName: string | null };
+
 export function useSheetActions({
   documentId,
   sheetDefId,
@@ -355,85 +365,99 @@ export function useSheetActions({
   const queryClient = useQueryClient();
   const session = useSession();
 
+  // Знімок адреси цього рендеру: те, що оператор бачить у мить кліку (N3-01).
+  const here: ActionTarget = { sheetDefId, periodKey, sheetName };
+
   // Яка дія чекає на причину; `null` — діалог закритий.
   const [asking, setAsking] = useState<'approve' | 'reject' | 'reopen' | 'recall' | null>(null);
 
-  /** Перечитує стан документа після кожної зміни робочого процесу. */
-  const refresh = async (): Promise<void> => {
-    await queryClient.invalidateQueries({ queryKey: ['document', documentId, periodKey] });
+  // ⚠ Адреса, для якої відкрито діалог: підтвердження діє на аркуш, що питали, а не на той, що відкритий
+  // на мить підтвердження (вкладку можна перемкнути й під діалогом - історія браузера, гарячі клавіші).
+  const askedAt = useRef<ActionTarget>(here);
+  const ask = (action: 'approve' | 'reject' | 'reopen' | 'recall'): void => {
+    askedAt.current = here;
+    setAsking(action);
+  };
+
+  /** Перечитує стан документа після кожної зміни робочого процесу - ТОГО аркуша й періоду, над якими була дія. */
+  const refresh = async (at: SheetAddress): Promise<void> => {
+    await queryClient.invalidateQueries({ queryKey: ['document', documentId, at.periodKey] });
     // ⛔ AN-28/L8-02: `cellPermissions` зрізу залежать від стану аркуша
     // (`EditRules.CanEdit` -> `DocumentSubmitted`), а зріз живе 5 хв без
     // перезапиту на фокус. Без цього після Recall/Return/Reopen сітка лишалась
     // сірою до F5. Зрізи ЦЬОГО аркуша перезапитуються, решта лише позначається.
-    await invalidateSlices(queryClient, { documentId, periodKey, sheetDefId });
+    await invalidateSlices(queryClient, { documentId, periodKey: at.periodKey, sheetDefId: at.sheetDefId });
   };
 
   // ФВ-5.19: попередження, які сервер попросив підтвердити; `null` — діалог закритий.
   const [warnings, setWarnings] = useState<string[] | null>(null);
+  // ⚠ Адреса подання, на яке сервер попросив підтвердити попередження: «Submit anyway» подає ЇЇ.
+  const warnedAt = useRef<ActionTarget>(here);
 
   const submit = useMutation({
-    mutationFn: (acknowledgeWarnings: boolean) =>
+    mutationFn: ({ sheetDefId: sheet, periodKey: period, acknowledgeWarnings }: ActionTarget & { acknowledgeWarnings: boolean }) =>
       apiFetch(`/api/v1/documents/${documentId}/submit`, {
         method: 'POST',
         body: JSON.stringify({
-          sheetDefId,
-          periodKey,
+          sheetDefId: sheet,
+          periodKey: period,
           acknowledgeWarnings,
         } satisfies SheetWorkflowRequest),
       }),
-    onSuccess: async () => {
+    onSuccess: async (_result, at) => {
       setWarnings(null);
-      await refresh();
+      await refresh(at);
       showDone(t('document.submitted'));
     },
     // ⚠ Причина показується як є: Submit при осиротілих рядках
     // (`ECR-SUB-4221`) — це не «помилка сервера», а перелік того, що треба
     // виправити. Виняток — «попередження без підтвердження» (ФВ-5.19): це
     // питання, а не відмова, тож замість тосту — діалог із переліком.
-    onError: (error) => {
+    onError: (error, at) => {
       const pending = warningsToConfirm(error);
       if (pending === null) {
         setWarnings(null);
-        showSheetError(error, sheetName);
+        showSheetError(error, at.sheetName);
         return;
       }
+      warnedAt.current = at;
       setWarnings(pending);
     },
   });
 
   const decide = useMutation({
-    mutationFn: (verdict: { approved: boolean; reason: string | null }) =>
+    mutationFn: (verdict: ActionTarget & { approved: boolean; reason: string | null }) =>
       apiFetch(`/api/v1/documents/${documentId}/approve`, {
         method: 'POST',
         body: JSON.stringify({
-          sheetDefId,
-          periodKey,
+          sheetDefId: verdict.sheetDefId,
+          periodKey: verdict.periodKey,
           approved: verdict.approved,
           reason: verdict.reason,
         } satisfies ApproveSheetRequest),
       }),
     onSuccess: async (_result, verdict) => {
-      await refresh();
+      await refresh(verdict);
       setAsking(null);
       showDone(verdict.approved ? t('workflow.approved') : t('workflow.rejected'));
     },
-    onError: (error) => showSheetError(error, sheetName),
+    onError: (error, verdict) => showSheetError(error, verdict.sheetName),
   });
 
   const reopen = useMutation({
-    mutationFn: (reason: string) =>
+    mutationFn: ({ sheetDefId: sheet, periodKey: period, reason }: ActionTarget & { reason: string }) =>
       apiFetch(`/api/v1/documents/${documentId}/reopen`, {
         method: 'POST',
-        body: JSON.stringify({ sheetDefId, periodKey, reason } satisfies ReopenDocumentRequest),
+        body: JSON.stringify({ sheetDefId: sheet, periodKey: period, reason } satisfies ReopenDocumentRequest),
       }),
-    onSuccess: async () => {
-      await refresh();
+    onSuccess: async (_result, at) => {
+      await refresh(at);
       setAsking(null);
       showDone(t('workflow.reopened'));
     },
     // ⚠ Найчастіша відмова тут — `ECR-PRD-4223`: період закрито, і спершу
     // треба відкрити період, а це інше право (`D-67`). Текст веде саме туди.
-    onError: (error) => showSheetError(error, sheetName),
+    onError: (error, at) => showSheetError(error, at.sheetName),
   });
 
   /*
@@ -451,18 +475,18 @@ export function useSheetActions({
   const canRecall = isAllowed('recall', state) && recallAvailability.data?.canRecall === true;
 
   const recall = useMutation({
-    mutationFn: (reason: string) =>
+    mutationFn: ({ sheetDefId: sheet, periodKey: period, reason }: ActionTarget & { reason: string }) =>
       apiFetch(`/api/v1/documents/${documentId}/recall`, {
         method: 'POST',
-        body: JSON.stringify({ sheetDefId, periodKey, reason } satisfies RecallSheetRequest),
+        body: JSON.stringify({ sheetDefId: sheet, periodKey: period, reason } satisfies RecallSheetRequest),
       }),
-    onSuccess: async () => {
-      await refresh();
+    onSuccess: async (_result, at) => {
+      await refresh(at);
       setAsking(null);
       showDone(t('workflow.recalled'));
     },
     // ⚠ `409` тут — не збій: погоджувач устиг підписати крок, і текст каже саме це.
-    onError: (error) => showSheetError(error, sheetName),
+    onError: (error, at) => showSheetError(error, at.sheetName),
   });
 
   /**
@@ -515,26 +539,26 @@ export function useSheetActions({
   const recalcJobId = recalc?.jobId ?? null;
 
   const recalculate = useMutation({
-    mutationFn: () =>
+    mutationFn: (at: ActionTarget) =>
       // ⛔ Q-331: `sheetDefId` тепер справді звужує перерахунок до ЦЬОГО
       // аркуша (директива паритету зі старою системою, прогалина 2) — до
       // цього пакета кнопка передавала лише `periodKey`, і сервер
       // перераховував увесь документ незалежно від того, з якого аркуша її
       // натиснули.
       apiEnqueue(`/api/v1/documents/${documentId}/recalculate`, {
-        periodKey,
-        sheetDefId,
+        periodKey: at.periodKey,
+        sheetDefId: at.sheetDefId,
       } satisfies RecalculateDocumentRequest),
-    onSuccess: (job) => {
+    onSuccess: (job, at) => {
       // ⚠ Адреса фіксується САМЕ ТУТ — у мить, коли задача стала в чергу, — і
       // далі не змінюється, хай оператор ходить по періодах скільки хоче.
-      setRecalc({ jobId: job.jobId, documentId, sheetDefId, periodKey });
+      setRecalc({ jobId: job.jobId, documentId, sheetDefId: at.sheetDefId, periodKey: at.periodKey });
       // ⛔ Аудит-пас 8, lane6, п.8: людський вигляд у ТОСТІ, `jobId` у стані
       // (`setRecalcJobId`) — і, отже, в запиті опитування нижче — не
       // змінюється.
       showDone(`${t('workflow.recalcQueued', { job: humanizeJobId(job.jobId) })} ${t('workflow.recalcSkipsSubmitted')}`);
     },
-    onError: (error) => showSheetError(error, sheetName),
+    onError: (error, at) => showSheetError(error, at.sheetName),
   });
 
   /**
@@ -761,9 +785,15 @@ export function useSheetActions({
   const canRecalculate = !dataLocked && !narrow && can(me, 'Document.View');
   // ✎ RC15-C: сервер пропускає подані/затверджені аркуші й перераховує решту; відмова (4221) - лише коли
   // подані ВСІ, тож тільки тоді кнопка вимкнена.
-  const recalcBlockedReason = allSheetsLocked(summary?.sheetStates)
-    ? t('workflow.recalculateAllSubmitted', { period: formatPeriodKey(periodKey) || String(periodKey) })
-    : null;
+  // ✎ AN-77 / L8-12: клієнт завжди шле `sheetDefId`, а для цієї області сервер відмовляє, щойно поданий
+  // САМ цей аркуш (`RecalculateDocumentHandler`, ФВ-9.17), хай сусідні й у чернетці, - кнопка (і F9, і
+  // кнопка банера) вимкнена з причиною. «Усі подані» лишається для випадку, коли стан цього аркуша невідомий.
+  const ownLocked = state === 'Submitted' || state === 'Approved';
+  const recalcBlockedReason = ownLocked
+    ? t('workflow.recalculateSheetSubmitted', { sheet: sheetName ?? String(sheetDefId) })
+    : allSheetsLocked(summary?.sheetStates)
+      ? t('workflow.recalculateAllSubmitted', { period: formatPeriodKey(periodKey) || String(periodKey) })
+      : null;
   const recalcBusy = recalculate.isPending || recalcRunning || settled.settling;
 
   /*
@@ -783,7 +813,7 @@ export function useSheetActions({
       ? null
       : recalcBlockedReason !== null
         ? () => showWarning(recalcBlockedReason)
-        : () => void settled.run(() => recalculate.mutateAsync());
+        : () => void settled.run(() => recalculate.mutateAsync(here));
   });
   useEffect(() => {
     const onKey = (event: KeyboardEvent): void => {
@@ -826,7 +856,7 @@ export function useSheetActions({
         verb={t('workflow.submitAnyway')}
         danger={false}
         isPending={submit.isPending || settled.settling}
-        onConfirm={() => settled.run(() => submit.mutateAsync(true))}
+        onConfirm={() => settled.run(() => submit.mutateAsync({ ...warnedAt.current, acknowledgeWarnings: true }))}
         onClose={() => setWarnings(null)}
       />
 
@@ -837,7 +867,7 @@ export function useSheetActions({
         verb={t('workflow.approve')}
         danger={false}
         isPending={decide.isPending || settled.settling}
-        onConfirm={() => settled.run(() => decide.mutateAsync({ approved: true, reason: null }))}
+        onConfirm={() => settled.run(() => decide.mutateAsync({ ...askedAt.current, approved: true, reason: null }))}
         onClose={() => setAsking(null)}
       />
 
@@ -848,7 +878,7 @@ export function useSheetActions({
         description={t('workflow.recallHint')}
         confirmLabel={t('workflow.recall')}
         isPending={recall.isPending}
-        onConfirm={(reason) => recall.mutate(reason)}
+        onConfirm={(reason) => recall.mutate({ ...askedAt.current, reason })}
         onClose={() => setAsking(null)}
       />
 
@@ -859,7 +889,7 @@ export function useSheetActions({
         description={t('workflow.rejectHint')}
         confirmLabel={t('workflow.reject')}
         isPending={decide.isPending || settled.settling}
-        onConfirm={(reason) => settled.run(() => decide.mutateAsync({ approved: false, reason }))}
+        onConfirm={(reason) => settled.run(() => decide.mutateAsync({ ...askedAt.current, approved: false, reason }))}
         onClose={() => setAsking(null)}
       />
 
@@ -870,7 +900,7 @@ export function useSheetActions({
         description={t('workflow.reopenHint')}
         confirmLabel={t('workflow.reopen')}
         isPending={reopen.isPending}
-        onConfirm={(reason) => reopen.mutate(reason)}
+        onConfirm={(reason) => reopen.mutate({ ...askedAt.current, reason })}
         onClose={() => setAsking(null)}
       />
     </>
@@ -884,16 +914,19 @@ export function useSheetActions({
           blockedReason: recalcBlockedReason,
           // AN-28/L8-01: спершу зберегти набране; відмова збереження - дії немає.
           run: () =>
-            recalcBlockedReason !== null ? showWarning(recalcBlockedReason) : settled.run(() => recalculate.mutateAsync()),
+            recalcBlockedReason !== null ? showWarning(recalcBlockedReason) : settled.run(() => recalculate.mutateAsync(here)),
         }
       : null,
     submit: canSubmit
-      ? { loading: submitLoading || settled.settling, run: () => settled.run(() => submit.mutateAsync(false)) }
+      ? {
+          loading: submitLoading || settled.settling,
+          run: () => settled.run(() => submit.mutateAsync({ ...here, acknowledgeWarnings: false })),
+        }
       : null,
-    approve: canApprove ? { loading: decideLoading || settled.settling, ask: () => setAsking('approve') } : null,
-    reject: canReject ? { ask: () => setAsking('reject') } : null,
-    reopen: canReopen ? { ask: () => setAsking('reopen') } : null,
-    recall: canRecall ? { ask: () => setAsking('recall') } : null,
+    approve: canApprove ? { loading: decideLoading || settled.settling, ask: () => ask('approve') } : null,
+    reject: canReject ? { ask: () => ask('reject') } : null,
+    reopen: canReopen ? { ask: () => ask('reopen') } : null,
+    recall: canRecall ? { ask: () => ask('recall') } : null,
     dialogs,
   };
 }

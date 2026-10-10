@@ -345,6 +345,10 @@ public sealed class PublishMethodologyHandler(
             warnings,
             strings));
 
+        // ⛔ C1-01 (HU-14 Q1): `Legacy` рахує `Max(0, x)` математично, а NCalc 1.3.8 округлював
+        // x до цілого — попередження, а не відмова і не зміна семантики.
+        IntegerMaxMinPublishChecks.Warn(parsed, version.NumericMode, warnings, strings);
+
         Reject(problems);
 
         // ⛔ RT-23b (FEATURE-REGISTRY-TABLES §5.5, перевірки 15–19): описка в довіднику, полі

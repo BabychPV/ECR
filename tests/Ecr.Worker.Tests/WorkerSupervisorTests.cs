@@ -184,6 +184,8 @@ public sealed partial class WorkerSupervisorTests
 
         // ⛔ Без сигналу дочірній гине від закриття Job Object посеред задачі: штатного
         // виходу немає, і задача перерахунку переклеймлюється з ReclaimCount + 1.
+        // ⚠ Що стається з РЯДКОМ черги (Queued, ReclaimCount = 0), доводить справжній дочірній у
+        // WorkerSupervisorStopTests: тут — лише заглушка, бази немає.
         Assert.Equal(0, Assert.Single(exits));
     }
 

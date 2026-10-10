@@ -37,6 +37,8 @@ public sealed class JobCancelTests
     private readonly IBackgroundJobScheduler _jobs = Substitute.For<IBackgroundJobScheduler>();
     private readonly IAccessDecisionService _access = Substitute.For<IAccessDecisionService>();
     private readonly ICurrentUser _user = Substitute.For<ICurrentUser>();
+    private readonly IAuditWriter _audit = Substitute.For<IAuditWriter>();
+    private readonly Ecr.Domain.Abstractions.IClock _clock = Substitute.For<Ecr.Domain.Abstractions.IClock>();
 
     /// <summary>Стан, який повертає підроблений планувальник; <c>CancelAsync</c> його змінює.</summary>
     private string _state = "Running";
@@ -185,6 +187,29 @@ public sealed class JobCancelTests
         await _jobs.DidNotReceive().GetCreatedByUserIdAsync("no-such-job", Arg.Any<CancellationToken>());
     }
 
+    /// <summary>
+    /// R9-F3 / F3-02: скасування чужої задачі власником <c>System.ViewHealth</c> лишає слід у
+    /// <c>aud.SecurityEvent</c> — хто зупинив і чию задачу.
+    /// </summary>
+    /// <remarks>Мутація: прибрати запис <c>JobCancelled</c> у <c>CancelJobHandler</c> — червоніє.</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public async Task Скасування_чужої_задачі_пише_подію_JobCancelled()
+    {
+        WithHealthPermission(Stranger);
+        _jobs.GetCreatedByUserIdAsync(JobId, Arg.Any<CancellationToken>()).Returns(Author);
+
+        await Handler().HandleAsync(JobId, CancellationToken.None);
+
+        await _audit.Received(1).WriteSecurityEventAsync(
+            Arg.Is<SecurityEventRecord>(e =>
+                e.EventType == CancelJobHandler.CancelledEventType
+                && e.ChangedByUserId == Stranger
+                && e.TargetUserId == Author
+                && e.DetailsJson != null && e.DetailsJson.Contains(JobId, StringComparison.Ordinal)),
+            Arg.Any<CancellationToken>());
+    }
+
     private void WithHealthPermission(int userId)
     {
         _user.UserId.Returns(userId);
@@ -201,7 +226,7 @@ public sealed class JobCancelTests
             .Returns(new AccessBuilder { UserId = userId }.Build());
     }
 
-    private CancelJobHandler Handler() => new(_jobs, _access, _user);
+    private CancelJobHandler Handler() => new(_jobs, _access, _user, _audit, _clock);
 
     /// <summary>
     /// Контролер зі СПРАВЖНІМИ обробниками на підроблених портах.
@@ -214,6 +239,6 @@ public sealed class JobCancelTests
     private JobsController Controller() => new(
         new GetJobStatusHandler(_jobs, _access, _user, new FakeUiStringCatalog()),
         new ListJobsHandler(_jobs, _access, _user, new FakeUiStringCatalog()),
-        new RestartJobHandler(_jobs, _access, _user),
+        new RestartJobHandler(_jobs, _access, _user, _audit, _clock),
         Handler());
 }

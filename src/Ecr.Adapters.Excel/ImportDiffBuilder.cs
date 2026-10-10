@@ -55,6 +55,11 @@ public sealed class ImportDiffBuilder
     /// 2026-09-29, <see cref="NumberCulture"/>); <c>null</c> — Invariant.
     /// Числові комірки Excel читаються числом і від культури не залежать.
     /// </param>
+    /// <param name="unusableLookups">
+    /// ⛔ Y5-03. Записи довідників, які застосування відхилило б за <c>C7</c>
+    /// (видалений, вимкнений, нечинний на кінець періоду): <c>Id</c> → ключ тексту
+    /// відмови перегляду; <c>null</c> — немає таких (або викликач їх не рахує).
+    /// </param>
     /// <remarks>
     /// ⛔ Q-168 (аудит фази 2, продуктивність). Метод БІЛЬШЕ НЕ ходить у базу
     /// сам — <paramref name="rowIds"/>, <paramref name="versions"/> і
@@ -74,7 +79,8 @@ public sealed class ImportDiffBuilder
         IReadOnlyDictionary<string, string> versions,
         IReadOnlyList<CellRecord> current,
         Func<int, bool>? canReadColumn = null,
-        CultureInfo? culture = null)
+        CultureInfo? culture = null,
+        IReadOnlyDictionary<long, string>? unusableLookups = null)
     {
         ArgumentNullException.ThrowIfNull(worksheet);
 
@@ -84,6 +90,27 @@ public sealed class ImportDiffBuilder
         ArgumentNullException.ThrowIfNull(decisions);
 
         var period = new PeriodKey(periodKey);
+
+        // ⛔ Y5-01 (аудит 7): карта тримає ПОЗИЦІЇ рядків і колонок. Сортування,
+        // вставка чи видалення рядка або колонки в Excel їх зсуває, і значення лягли б
+        // у чужі рядки — зміною, що виглядає як звичайна правка. Розбіжність підпису
+        // рядка чи заголовка колонки з відбитком експорту — відмова ВСІЄЇ таблиці, без
+        // жодної зміни. Межі звірки — у `LayoutFingerprint`.
+        if (LayoutFingerprint.FirstMismatch(worksheet, block) is { } moved)
+        {
+            return new TableDiff(
+                block.TableInstanceId,
+                periodKey,
+                [],
+                [
+                    new ImportRejection(
+                        moved.RowKey ?? "—", moved.ColumnCode ?? "—", "ECR-IMP-0422",
+                        "Rows or columns of the table were sorted, inserted, deleted or relabelled in Excel after export: the table is not imported.",
+                        table.Code, table.NameL10n, ImportMessageKeys.LayoutChanged, moved.Address),
+                ],
+                versions,
+                []);
+        }
 
         var byRowId = rowIds.ToDictionary(p => p.Value, p => p.Key);
 
@@ -99,9 +126,17 @@ public sealed class ImportDiffBuilder
 
         var changes = new List<ImportChange>();
         var rejected = new List<ImportRejection>();
+        var overwritable = new List<ImportChange>();
 
         foreach (var row in block.Rows)
         {
+            // ⛔ D1-02: рядок змінено в базі ПІСЛЯ експорту книги (версія в карті ≠
+            // поточній). Книга без версії (вивантажена до D1-02) — `false`,
+            // колишня поведінка, а перегляд попереджає (AN-118, R1-02).
+            var changedSinceExport = row.Version is { } exported
+                                      && versions.TryGetValue(row.RowKey, out var now)
+                                      && !string.Equals(exported, now, StringComparison.Ordinal);
+
             foreach (var column in block.Columns)
             {
                 if (!columnsById.TryGetValue(column.ColumnDefId, out var definition))
@@ -202,6 +237,21 @@ public sealed class ImportDiffBuilder
                         stale ? ImportMessageKeys.CalculatedStale : ImportMessageKeys.Calculated,
                         excelCell));
 
+                    continue;
+                }
+
+                // ⛔ AN-118 (R1-01, HU-14 Q2 — «лише змінені комірки»). У рядку,
+                // зміненому після експорту, комірка, що збігається з відбитком
+                // ЕКСПОРТУ, — не правка людини: це значення, яке лишилося в книзі
+                // з вивантаження. Різниця «книга ≠ поточне» в ній — чужа пізніша
+                // правка (інша людина, інтеграція), і її не можна ні повернути
+                // перезаписом рядка (AN-114), ні закріпити як людську
+                // (`ImportOverwrite` у `HumanOriginsSql` → `KeepManual`). Тож —
+                // ані зміни, ані конфлікту, ані відмови: чуже значення лишається.
+                // ⚠ Без відбитка (книга до AN-118) `Unchanged` дає `false`, і
+                // комірка йде далі колишнім шляхом — конфліктом рядка.
+                if (changedSinceExport && EnteredCellFingerprint.Unchanged(row, block.Columns, column, cell))
+                {
                     continue;
                 }
 
@@ -320,6 +370,39 @@ public sealed class ImportDiffBuilder
                 // ключем; прийняте число (напр. «1,234.5» у en-US, «1 234,5» у
                 // ru) іде далі вже `decimal`, тож застосування (зокрема у фоновій
                 // задачі) культури не потребує.
+                // ⛔ Y5-03 (аудит 7): код, якого немає серед записів довідника колонки, —
+                // відмова в ПЕРЕГЛЯДІ. Доти він лишався рядком, а `CellValueReader.Identifier`
+                // приймав цифровий рядок як Id: людина, що бачила в переліку змін Id («205 →
+                // 11») і вписала в книгу число, тихо отримувала посилання на запис 11 — а
+                // одруківка в Id не ловилася нічим. Коди записів (`EcrCode`) починаються з
+                // літери, тож цифри кодом не бувають. Незмінений Id осиротілого посилання
+                // (експорт пише його числом) відсіяв `Same` вище.
+                if (definition.DataType == CellDataType.Lookup && incoming is string)
+                {
+                    rejected.Add(new ImportRejection(
+                        row.RowKey, column.Code, CellValueReader.TypeMismatch,
+                        "No entry with this code in the column's registry.",
+                        table.Code, table.NameL10n, ImportMessageKeys.ExpectsIdentifier, excelCell));
+
+                    continue;
+                }
+
+                // ⛔ Y5-03 (C7 у перегляді): запис, який застосування відхилило б
+                // (`PatchCellsHandler.CheckLookupStandings` — 4223 на ВСЮ книгу, вже після
+                // погодженого перегляду), — відмова однієї комірки тут.
+                if (definition.DataType == CellDataType.Lookup
+                    && incoming is long entryId
+                    && unusableLookups is not null
+                    && unusableLookups.TryGetValue(entryId, out var unusable))
+                {
+                    rejected.Add(new ImportRejection(
+                        row.RowKey, column.Code, "ECR-CELL-4223",
+                        "The registry entry cannot be chosen: it is deleted, switched off or not valid on the last day of the period.",
+                        table.Code, table.NameL10n, unusable, excelCell));
+
+                    continue;
+                }
+
                 if (incoming is string raw && IsNumeric(definition))
                 {
                     var ambiguous = CultureNumberReader.Read(raw, culture).Kind == NumberTextKind.Ambiguous;
@@ -343,6 +426,47 @@ public sealed class ImportDiffBuilder
                     continue;
                 }
 
+                // ⛔ D1-02 (HU-13 Q1, варіант A). Рядок, змінений у базі ПІСЛЯ
+                // експорту книги (версія в карті ≠ поточній), — конфлікт, а не
+                // зміна. Доти різниця рахувалась «книга проти поточного», і
+                // число, яке людина в книзі не чіпала, мовчки повертало чужу
+                // пізнішу правку (журнал ще й записував її як `Import` цієї
+                // людини). Версії перегляду (`versions`) стережуть лише вікно
+                // «перегляд → застосування», тож без версії ЕКСПОРТУ це не ловилося.
+                //
+                // ⚠ Тут, останньою перевіркою перед зміною: конфліктом стає лише
+                // те, що інакше було б записано. Комірка, яка й так збігається з
+                // поточною, відмовою, правами чи типом — показується як була.
+                //
+                // ⚠ Книга без версії (вивантажена до цієї правки) — колишня
+                // поведінка. Підроблена версія дає рівно те саме, тож вона не
+                // обхід прав: ця перевірка стереже чесну людину від чужої правки,
+                // а не систему від людини.
+                //
+                // ✎ AN-114 (D-338, «+ прапорець перезаписати»). Зміна, яку
+                // конфлікт не пустив, лягає ще й у `overwritable` — окремий
+                // перелік плану, НЕ в `changes`. Застосування бере її лише для
+                // рядка, який людина явно назвала (`ImportApplyRequest.OverwriteRows`).
+                // ⛔ Саме тут, ПІСЛЯ прав, типу й меж: у перелік потрапляє лише
+                // те, що пройшло всі інші перевірки, тож прапорець перезапису
+                // не обходить жодної іншої відмови — їх у переліку просто немає.
+                // ⛔ AN-118: і лише комірки, які людина в книзі ЗМІНИЛА відносно
+                // експорту, — незмінені відсіяні вище (`EnteredCellFingerprint`),
+                // тож перезапис рядка пише тільки її правки.
+                if (changedSinceExport)
+                {
+                    rejected.Add(new ImportRejection(
+                        row.RowKey, column.Code, "ECR-CELL-0409",
+                        "The row was changed after the workbook was exported: the value from the file is not applied.",
+                        table.Code, table.NameL10n, ImportMessageKeys.RowChangedSinceExport, excelCell));
+
+                    overwritable.Add(new ImportChange(
+                        row.RowKey, column.Code, Display(existing, definition), incoming, table.Code, table.NameL10n,
+                        roundedFrom));
+
+                    continue;
+                }
+
                 // ⛔ L6-01 (аудит 2026-10-03, DAT-05 «усе або нічого»). Доти тут
                 // стояв `break` ЛИШЕ внутрішнього циклу на 5000-й зміні: решта
                 // книги мовчки відкидалася, план для Apply містив перші 5000, а
@@ -359,7 +483,7 @@ public sealed class ImportDiffBuilder
             }
         }
 
-        return new TableDiff(block.TableInstanceId, periodKey, changes, rejected, versions);
+        return new TableDiff(block.TableInstanceId, periodKey, changes, rejected, versions, overwritable);
     }
 
     /// <summary>
@@ -408,7 +532,8 @@ public sealed class ImportDiffBuilder
             return null;
         }
 
-        var text = cell.GetString().Trim();
+        var raw = cell.GetString();
+        var text = raw.Trim();
 
         switch (definition.DataType)
         {
@@ -501,7 +626,24 @@ public sealed class ImportDiffBuilder
                     : text;
 
             default:
-                return text;
+                // ⛔ Y5-05 (аудит 7): текст — ЯК У КНИЗІ, без `Trim()`. Ні сітка, ні PATCH
+                // текст не обрізають, тож у базі бувають значення з пробілом на краю
+                // («ТОО Альфа »), і експорт пише їх точно. Обрізка на читанні давала на
+                // незміненій книзі «зміну» `"ТОО Альфа " → "ТОО Альфа"` (на екрані
+                // невидиму), а Apply тихо переписував текст. Рядок із самих пробілів —
+                // порожнеча, як і в відбитках (`CalculatedCellFingerprint.Canonical`);
+                // `Same` вважає його рівним такому ж (чи порожньому) поточному.
+                //
+                // ⛔ Y5-06 (хвіст C1): ЧИСЛО в текстовій колонці (Excel перетворив набране
+                // «12.50») — інваріантним найкоротшим записом, як код у `LookupCode`, а не
+                // `GetString()`: той форматує double культурою СЕРВЕРА, і на ru/uk/kk-сервері
+                // у базу йшло «12,5», а на en — «12.5». Значення не залежить від машини API.
+                if (cell.DataType == XLDataType.Number)
+                {
+                    return LookupCode(cell, text);
+                }
+
+                return string.IsNullOrWhiteSpace(raw) ? null : raw;
         }
     }
 
@@ -545,7 +687,10 @@ public sealed class ImportDiffBuilder
             : null;
     }
 
-    /// <summary>Код запису довідника з комірки: число — інваріантним записом, текст — як є.</summary>
+    /// <summary>
+    /// Текст комірки для коду запису довідника й текстової колонки (Y5-06): число —
+    /// інваріантним записом, текст — як є.
+    /// </summary>
     private static string LookupCode(IXLCell cell, string text)
     {
         if (cell.DataType != XLDataType.Number)
@@ -625,6 +770,14 @@ public sealed class ImportDiffBuilder
             incoming = null;
         }
 
+        // ⛔ Y5-05: поточний текст із самих пробілів (рядком він буває лише в текстовій
+        // колонці — `Current`) і порожня або «пробільна» комірка книги — обидва «нічого»
+        // для людини. Інакше імпорт незміненої книги стирав би такий рядок.
+        if (incoming is null && current is string spaces && string.IsNullOrWhiteSpace(spaces))
+        {
+            return true;
+        }
+
         if (current is null || incoming is null)
         {
             return current is null && incoming is null;
@@ -645,7 +798,13 @@ public sealed class ImportDiffBuilder
                     : incoming is int i && number == i),
             CellDataType.Bool => incoming is bool b && current is bool flag && flag == b,
             CellDataType.Date => incoming is DateTime t && current is DateTime date && date == t,
-            CellDataType.Lookup => incoming is long id && current is long entry && entry == id,
+            // ⛔ Y5-03: осиротіле посилання (запису немає серед кодів довідника колонки)
+            // експорт пише Id числом; незмінене воно повертається тим самим рядком цифр —
+            // це не зміна, а не «нерозпізнаний код».
+            CellDataType.Lookup => incoming is long id
+                ? current is long entry && entry == id
+                : incoming is string orphan && current is long stored
+                  && string.Equals(orphan, stored.ToString(CultureInfo.InvariantCulture), StringComparison.Ordinal),
 
             // ⛔ Unit порівнюється за `ValueUnitId` (аудит §8.3). Без цієї гілки
             // порівняння йшло через `ValueString`, який для Unit-комірки
@@ -710,12 +869,20 @@ public sealed class ImportDiffBuilder
 /// Версії рядків на момент перегляду — ними перевіряється, чи не змінив
 /// хтось дані між переглядом і застосуванням.
 /// </param>
+/// <param name="Overwritable">
+/// ✎ AN-114 (D-338). Зміни, які не потрапили в <paramref name="Changes"/> лише
+/// через конфлікт «рядок змінено після експорту» (<see cref="ImportMessageKeys.RowChangedSinceExport"/>):
+/// усі інші перевірки вони пройшли. Застосовуються тільки для рядків, які
+/// людина явно позначила «перезаписати»; без позначки — як у AN-103, ніяк.
+/// <c>null</c> — план, збережений до цієї правки.
+/// </param>
 public sealed record TableDiff(
     long TableInstanceId,
     int PeriodKey,
     IReadOnlyList<ImportChange> Changes,
     IReadOnlyList<ImportRejection> Rejected,
-    IReadOnlyDictionary<string, string> RowVersions);
+    IReadOnlyDictionary<string, string> RowVersions,
+    IReadOnlyList<ImportChange>? Overwritable = null);
 
 /// <summary>
 /// Ключі текстів відмов прев'ю імпорту в каталозі (D-95, `V-10`).
@@ -727,6 +894,14 @@ public sealed record TableDiff(
 /// </remarks>
 public static class ImportMessageKeys
 {
+    /// <summary>
+    /// ⛔ AN-118 (R1-02). Попередження перегляду (<c>ImportPreview.Warnings</c>):
+    /// книгу вивантажено до того, як карта почала нести версії рядків і відбитки
+    /// введених комірок. Значення, яких людина в книзі не чіпала, перегляд не
+    /// відрізняє від її правок, тож вони можуть повернути новіші чужі.
+    /// </summary>
+    public const string OutdatedWorkbook = "import.outdatedWorkbook";
+
     /// <summary>Комірку рахує система, і користувач змінив її значення.</summary>
     public const string Calculated = "err.ECR-CELL-4221.importCalculated";
 
@@ -735,6 +910,12 @@ public static class ImportMessageKeys
     /// експорту — книга застаріла (P3).
     /// </summary>
     public const string CalculatedStale = "err.ECR-CELL-4221.importCalculatedStale";
+
+    /// <summary>
+    /// Рядок змінено в базі після експорту книги, і людина в книзі задала в
+    /// ньому інше значення — конфлікт, а не перезапис чужої правки (D1-02).
+    /// </summary>
+    public const string RowChangedSinceExport = "err.ECR-CELL-0409.importRowChangedSinceExport";
 
     /// <summary>Рядка з ключем із файлу в документі немає.</summary>
     public const string NoRow = "err.ECR-ROW-0404.importNoRow";
@@ -758,6 +939,28 @@ public static class ImportMessageKeys
     public const string TableMissing = "err.ECR-IMP-0422.importTableMissing";
 
     /// <summary>
+    /// Аркуша таблиці в книзі немає: його перейменовано або видалено після експорту (Y5-04).
+    /// </summary>
+    public const string SheetMissing = "err.ECR-IMP-0422.importSheetMissing";
+
+    /// <summary>
+    /// Підписи рядків чи заголовки колонок таблиці не збігаються з експортом: рядки чи
+    /// колонки в Excel відсортовано, вставлено, видалено або перейменовано (Y5-01).
+    /// </summary>
+    public const string LayoutChanged = "err.ECR-IMP-0422.importLayoutChanged";
+
+    /// <summary>Запис довідника з книги видалено (Y5-03, причина C7 у перегляді).</summary>
+    public const string LookupDeleted = "err.ECR-CELL-4223.importDeletedEntry";
+
+    /// <summary>Запис довідника з книги вимкнено (Y5-03, причина C7 у перегляді).</summary>
+    public const string LookupInactive = "err.ECR-CELL-4223.importInactiveEntry";
+
+    /// <summary>
+    /// Запис довідника з книги не чинний на останній день періоду (Y5-03, причина C7 у перегляді).
+    /// </summary>
+    public const string LookupNotValidOnDate = "err.ECR-CELL-4223.importEntryNotValidOnDate";
+
+    /// <summary>
     /// У таблиці книги змін більше за <see cref="ImportDiffBuilder.MaxChanges"/> —
     /// відмова всього перегляду (L6-01), а не мовчазне обрізання.
     /// </summary>
@@ -774,6 +977,9 @@ public static class ImportMessageKeys
 
     /// <summary>Значення з книги не читається як дата.</summary>
     public const string ExpectsDate = "err.ECR-CELL-0422.importExpectsDate";
+
+    /// <summary>Дата з книги з днем або місяцем спереду, порядок яких не визначити (Z3-02).</summary>
+    public const string AmbiguousDate = "err.ECR-CELL-0422.importAmbiguousDate";
 
     /// <summary>Код із книги не знайдено серед записів довідника (або одиниць) колонки.</summary>
     public const string ExpectsIdentifier = "err.ECR-CELL-0422.importExpectsIdentifier";
@@ -793,6 +999,7 @@ public static class ImportMessageKeys
         "err.ECR-CELL-0422.expectsNumber" => ExpectsNumber,
         "err.ECR-CELL-0422.expectsBoolean" => ExpectsBoolean,
         "err.ECR-CELL-0422.expectsDate" => ExpectsDate,
+        CellValueReader.AmbiguousDateMessageKey => AmbiguousDate,
         "err.ECR-CELL-0422.expectsIdentifier" => ExpectsIdentifier,
         "err.ECR-CELL-0422.expectsUnitIdentifier" => ExpectsUnit,
         "err.ECR-CELL-0422.tooManyIntegerDigits" => IntegerDigits,

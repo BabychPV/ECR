@@ -201,8 +201,10 @@ public sealed record StructureChangeFilter(
 /// логіном не відповідається — у діалозі конфлікту має стояти ім'я.
 /// </param>
 /// <param name="Origin">
-/// Походження: <c>UserEdit</c>, <c>Import</c>, <c>Recalculation</c>,
-/// <c>Migration</c>. Усе, крім <c>UserEdit</c>, — не людина.
+/// Походження: <c>UserEdit</c>, <c>Import</c>, <c>ImportOverwrite</c>,
+/// <c>Recalculation</c>, <c>Migration</c>. Людина — <c>UserEdit</c>,
+/// <c>Import</c>, <c>ImportOverwrite</c>
+/// (<see cref="Ecr.Application.Documents.CellChangeOrigins.IsHuman"/>); решта — система.
 /// </param>
 public sealed record LastCellChange(
     DateTime ChangedAt,

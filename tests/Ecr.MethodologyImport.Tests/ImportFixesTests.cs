@@ -51,6 +51,87 @@ public sealed class ImportFixesTests
         Assert.Equal("Number", Formula(package, "M", "NumConst").ResultType);
     }
 
+    /// <remarks>
+    /// ⛔ Мутаційні точки (N5-09): поверни запис форми «за формулою» (<c>shapes[f.Key] = …</c> щодубля) — дублі з різним
+    /// типом перемикатимуть форму щопроходу, і результат залежатиме від порядку: червоніють обидва порядки й
+    /// <see cref="Дублі_ключа_збігаються_а_не_крутять_усі_проходи"/>.
+    /// </remarks>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void Дублі_ключа_формули_з_різним_типом_дають_Text_незалежно_від_порядку(bool textFirst)
+    {
+        var builder = new AfXmlBuilder();
+        if (textFirst)
+        {
+            builder.Formula("M", "V1", "D", "@X", "'abc'").Formula("M", "V1", "D", "@X", "1");
+        }
+        else
+        {
+            builder.Formula("M", "V1", "D", "@X", "1").Formula("M", "V1", "D", "@X", "'abc'");
+        }
+
+        builder.Formula("M", "V1", "UsesD", "!D", "!D");
+
+        var (package, report) = Run(builder);
+
+        Assert.Equal(1, report.DuplicateFormulaKeys);
+        Assert.All(
+            package.Methodologies.Single().Versions.Single().Formulas.Where(f => f.Name == "D"),
+            f => Assert.Equal("Text", f.ResultType));
+        Assert.Equal("Text", Formula(package, "M", "UsesD").ResultType);
+        Assert.Empty(report.Blockers);
+    }
+
+    [Fact]
+    public void Дублі_ключа_збігаються_а_не_крутять_усі_проходи()
+    {
+        var builder = new AfXmlBuilder()
+            .Formula("M", "V1", "D", "@X", "'abc'")
+            .Formula("M", "V1", "D", "@X", "1");
+        var (model, _) = AnalyzeCommand.Run(AfXmlBuilder.ToStream(builder.Build()));
+
+        var result = FormulaTypeInference.InferDetailed(model, "Common");
+
+        Assert.True(result.Converged);
+        Assert.Equal(FormulaResultKind.Text, result.Shapes["M/V1/D/V1"].Kind);
+    }
+
+    [Fact]
+    public void Ланцюг_довший_за_ліміт_проходів_дає_блокер_а_не_мовчазно_неповні_типи()
+    {
+        // Fi = !F(i+1), останній — літерал: тип «Text» просувається на одну формулу за прохід (порядок — за іменем).
+        const int Length = FormulaTypeInference.MaxPasses + 6;
+        var builder = new AfXmlBuilder();
+        for (var i = 0; i < Length; i++)
+        {
+            var text = i == Length - 1 ? "'x'" : $"!F{i + 1:D3}";
+            builder.Formula("M", "V1", $"F{i:D3}", text, text);
+        }
+
+        var (_, report) = Run(builder);
+
+        Assert.True(report.HasBlockers);
+        Assert.Contains(report.Blockers, b => b.StartsWith(FormulaTypeInference.NotConvergedBlocker, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Ланцюг_у_межах_ліміту_збігається_без_блокера()
+    {
+        const int Length = 10;
+        var builder = new AfXmlBuilder();
+        for (var i = 0; i < Length; i++)
+        {
+            var text = i == Length - 1 ? "'x'" : $"!F{i + 1:D3}";
+            builder.Formula("M", "V1", $"F{i:D3}", text, text);
+        }
+
+        var (package, report) = Run(builder);
+
+        Assert.Empty(report.Blockers);
+        Assert.Equal("Text", Formula(package, "M", "F000").ResultType);
+    }
+
     [Fact]
     public void Звіт_рахує_текстові_формули_і_плюс_над_текстом_та_не_переписує_його()
     {
@@ -96,6 +177,59 @@ public sealed class ImportFixesTests
 
         Assert.Null(resolution.Code);
         Assert.Equal(reason, resolution.Reason);
+    }
+
+    /// <remarks>
+    /// ⛔ Мутаційні точки (N5-01): поверни «год» у <c>Aliases</c> — і ці випадки червоніють (т/год мовчки стала б т/рік
+    /// або т/годину, розбіжність у 8760 разів); прибери перевірку частин дробу в <c>AmbiguousReason</c> — червоніють
+    /// «т/год», «кг/год.» і «Т / ГОД».
+    /// </remarks>
+    [Theory]
+    [InlineData("т/год")]
+    [InlineData("год")]
+    [InlineData("год.")]
+    [InlineData("ГОД")]
+    [InlineData("т/год.")]
+    [InlineData("кг / год")]
+    [InlineData("%")]
+    [InlineData("мвт")]
+    [InlineData("МВт")]
+    public void Неоднозначне_позначення_не_вгадується_і_має_причину(string raw)
+    {
+        var resolution = UnitCanonicalizer.Resolve(raw);
+
+        Assert.Null(resolution.Code);
+        Assert.Contains("неоднозначна", resolution.Reason, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("hour", "h")]
+    [InlineData("hr", "h")]
+    [InlineData("т/рік", "t_per_year")]
+    [InlineData("t/yr", "t_per_year")]
+    public void Однозначна_година_чи_рік_зводиться_як_і_раніше(string raw, string expected)
+    {
+        var resolution = UnitCanonicalizer.Resolve(raw);
+
+        Assert.Equal(expected, resolution.Code);
+        Assert.Null(resolution.Reason);
+    }
+
+    [Fact]
+    public void Неоднозначна_одиниця_потрапляє_у_Issues_і_лишається_в_пакеті_сирим_рядком()
+    {
+        var builder = new AfXmlBuilder()
+            .Constant("M", "V1", "k1", "5", unit: "т/год")
+            .Constant("M", "V1", "k2", "5", unit: "т/рік");
+
+        var (package, report) = Run(builder);
+
+        var units = package.Methodologies.Single().Versions.Single().Constants.ToDictionary(c => c.Name, c => c.Unit);
+        Assert.Equal("т/год", units["k1"]); // не t_per_year і не t_per_h
+        Assert.Equal("t_per_year", units["k2"]);
+        var issue = Assert.Single(report.Units!.Issues);
+        Assert.Equal(("k1", "т/год"), (issue.Constant, issue.RawUnit));
+        Assert.Contains("неоднозначна", issue.Reason, StringComparison.Ordinal);
     }
 
     [Fact]

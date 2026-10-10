@@ -24,7 +24,7 @@
  * стан, який дозволяє побудову наосліп.
  */
 
-import { formatDateOnly } from '@/shared/format';
+import { formatDateOnly, parseDateOnly } from '@/shared/format';
 
 /** Тип оголошеного параметра. Той самий словник, що приймає сервер. */
 type ReportParameterType = 'Number' | 'Text' | 'Boolean' | 'Date';
@@ -284,17 +284,8 @@ export function parseDay(raw: unknown): Date | null {
 
   if (!/^\d{4}-\d{2}-\d{2}/.test(text)) return null;
 
-  const year = Number(text.slice(0, 4));
-  const month = Number(text.slice(5, 7));
-  const day = Number(text.slice(8, 10));
-  const value = new Date(year, month - 1, day);
-
-  // ⚠ Перевірка складниками, а не `isNaN`: `new Date(2026, 1, 31)` не «погана
-  // дата», а мовчки третє березня — тобто запис `2026-02-31` повернувся б із
-  // форми іншим днем, ніж прийшов.
-  if (value.getFullYear() !== year || value.getMonth() !== month - 1 || value.getDate() !== day) {
-    return null;
-  }
-
-  return value;
+  // L9-17: власна копія читала рік через `new Date(year, …)`, і роки 0–99 ставали 1900–1999. Спільний
+  // `parseDateOnly` розбирає рядок, перевіряє існування дня і не знає цієї пастки. Хвіст після дня
+  // (час у замовчуванні) лишається ігнорованим, як і було.
+  return parseDateOnly(text.slice(0, 10));
 }

@@ -5,6 +5,7 @@ using Ecr.Application.Ports;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Enums;
+using Ecr.Expressions;
 using Ecr.Expressions.Ast;
 using Ecr.Expressions.Evaluation;
 
@@ -47,6 +48,23 @@ namespace Ecr.Application.Registries.Rules;
 /// ⚠ Довідник без правил (і без батьків із правилами) коштує один запит на правила власного
 /// довідника плюс по три на кожен рівень композиції; знімок не вантажиться.
 /// </para>
+/// <para>
+/// ⛔ L5-12: робота ОДНОГО виклику <see cref="EvaluateAsync"/> (пакет: upsert, CSV, синк) обмежена
+/// спільним бюджетом кроків (<see cref="PackageBudgetSteps"/>), а не лише межею одного виразу
+/// (<see cref="Evaluator.MaxEvaluationSteps"/>): без нього пакет із N записів і M правил платив би
+/// N·M окремих бюджетів, тобто мав би стелю N·M·20 000 кроків. Межа одного виразу лишається (аварійний
+/// вираз не з'їдає весь пакет), а витрачене кожним прогоном списується зі спільного бюджету. Коли
+/// бюджет вичерпано, правило, що лишилося неперевіреним, дає порушення
+/// <see cref="BudgetExhaustedKey"/> СВОГО рівня — не тишу й не «порушено»: <c>Error</c> відкотить
+/// запис (відмовляємо, а не пропускаємо неперевірене), <c>Warning</c> лише попередить.
+/// </para>
+/// <para>
+/// ⛔ L5-12: дані знімка довідників читаються з БД ОДИН раз на пакет
+/// (<see cref="IRegistrySnapshotLoader.LoadSourceAsync"/>); знімок кожної дати — це лише
+/// <see cref="IRegistrySnapshotSource.Build"/> у пам'яті. Раніше кожна нова дата вікна (кожна
+/// <c>ValidFrom</c> темпорального довідника в пакеті) була повним <c>LoadAsync</c>: п'ять запитів
+/// над усіма записами довідників.
+/// </para>
 /// </remarks>
 public sealed class RegistryRuleEngine(
     IRegistryStore registries,
@@ -63,11 +81,30 @@ public sealed class RegistryRuleEngine(
     /// <summary>Ключ порушення: правило не вдалося виконати — вираз чи параметри неправильні.</summary>
     public const string InvalidKey = "registries.rules.invalid";
 
+    /// <summary>
+    /// Ключ порушення: правило не перевірено — вичерпано бюджет обчислення (пакета чи одного виразу).
+    /// </summary>
+    public const string BudgetExhaustedKey = "registries.rules.budgetExhausted";
+
     /// <summary>Ключ відмови <c>422 ECR-REG-4221</c>.</summary>
     public const string RuleViolatedErrorKey = "err.ECR-REG-4221.ruleViolated";
 
+    /// <summary>
+    /// Спільний бюджет кроків пакета за замовчуванням: 100 стель одного виразу. Це запобіжник, а не
+    /// замір: пакет із тисячами записів і кількома правилами по кількадесят кроків на запис вкладається
+    /// з багатократним запасом, а аварійне правило (агрегат по всьому довіднику на кожен запис) впирається
+    /// в нього замість того, щоб рахувати без межі.
+    /// </summary>
+    public const int DefaultPackageBudgetSteps = 100 * Evaluator.MaxEvaluationSteps;
+
     /// <summary>Скільки рівнів композиції вгору перевіряється — запобіжник від кола в даних.</summary>
     private const int MaxDepth = 16;
+
+    /// <summary>
+    /// Спільний бюджет кроків одного виклику <see cref="EvaluateAsync"/>; за замовчуванням
+    /// <see cref="DefaultPackageBudgetSteps"/>. Змінюється лише тестами.
+    /// </summary>
+    public int PackageBudgetSteps { get; init; } = DefaultPackageBudgetSteps;
 
     /// <inheritdoc />
     public async Task<RegistryRuleCheck> EvaluateAsync(
@@ -112,6 +149,8 @@ public sealed class RegistryRuleEngine(
             .ToDictionary(s => s.Id);
 
         var today = businessDate ?? DateOnly.FromDateTime(clock.UtcNow);
+        var package = new EvaluationBudget(PackageBudgetSteps);
+        IRegistrySnapshotSource? source = null;
         var loaded = new Dictionary<DateOnly, (IRegistrySnapshot Snapshot, RegistryRuleContext Context, Dictionary<string, HashSet<long>> Visible)>();
         var found = new List<(CompiledRegistryRule Rule, long EntryId, Dictionary<string, string?> Params, string MessageKey)>();
 
@@ -127,7 +166,9 @@ public sealed class RegistryRuleEngine(
                 var date = DateOf(standing, today);
                 if (!loaded.TryGetValue(date, out var view))
                 {
-                    var snapshot = await snapshots.LoadAsync(needed, date, registryAsOfUtc: null, ct).ConfigureAwait(false);
+                    // ⛔ L5-12: БД читається один раз на пакет; кожна наступна дата — лише побудова знімка в пам'яті.
+                    source ??= await snapshots.LoadSourceAsync(needed, registryAsOfUtc: null, ct).ConfigureAwait(false);
+                    var snapshot = source.Build(date);
                     view = (snapshot, new RegistryRuleContext(snapshot, date), new Dictionary<string, HashSet<long>>(StringComparer.OrdinalIgnoreCase));
                     loaded[date] = view;
                 }
@@ -140,7 +181,7 @@ public sealed class RegistryRuleEngine(
 
                 foreach (var rule in item.Rules)
                 {
-                    if (Evaluate(rule, entryId, view.Snapshot, view.Context) is { } violation)
+                    if (Evaluate(rule, entryId, view.Snapshot, view.Context, package) is { } violation)
                     {
                         found.Add((rule, entryId, violation.Params, violation.MessageKey));
                     }
@@ -238,7 +279,7 @@ public sealed class RegistryRuleEngine(
 
     /// <summary>Порушення правила на записі; <c>null</c> — правило виконане або не застосовується.</summary>
     private (string MessageKey, Dictionary<string, string?> Params)? Evaluate(
-        CompiledRegistryRule rule, long entryId, IRegistrySnapshot snapshot, RegistryRuleContext context)
+        CompiledRegistryRule rule, long entryId, IRegistrySnapshot snapshot, RegistryRuleContext context, EvaluationBudget package)
     {
         if (!rule.IsValid)
         {
@@ -246,14 +287,20 @@ public sealed class RegistryRuleEngine(
         }
 
         var parameters = new Dictionary<string, string?>();
-        var condition = Run(rule.Condition!, entryId, context);
+        var condition = Run(rule.Condition!, entryId, context, package);
+
+        // ⛔ L5-12: #BUDGET — не «порушення з кодом помилки», а правило, яке не вдалося перевірити.
+        if (IsBudgetExceeded(condition))
+        {
+            return (BudgetExhaustedKey, new Dictionary<string, string?>());
+        }
 
         switch (rule.Rule.RuleKind)
         {
             case RegistryRuleKind.Expression:
                 if (Fails(condition, parameters))
                 {
-                    if (rule.Measure is not null && Run(rule.Measure, entryId, context).AsNumber() is { } measured)
+                    if (rule.Measure is not null && Run(rule.Measure, entryId, context, package).AsNumber() is { } measured)
                     {
                         parameters["value"] = measured.ToString("G29", CultureInfo.InvariantCulture);
                     }
@@ -290,7 +337,12 @@ public sealed class RegistryRuleEngine(
                 var lookup = new FunctionNode(
                     RegistryForms.Find,
                     [new LiteralNode(rule.TargetRegistry!, ExpressionValueType.Text), new RowFieldNode([rule.Field!])]);
-                var match = Run(lookup, entryId, context);
+                var match = Run(lookup, entryId, context, package);
+                if (IsBudgetExceeded(match))
+                {
+                    return (BudgetExhaustedKey, new Dictionary<string, string?>());
+                }
+
                 if (!match.IsError)
                 {
                     return null;
@@ -359,8 +411,31 @@ public sealed class RegistryRuleEngine(
         return (bool)value.Value!;
     }
 
-    private ExpressionValue Run(AstNode node, long entryId, RegistryRuleContext context)
-        => evaluator.Evaluate(RegistryRuleContext.Bind(node, entryId), context, ExpressionDialect.Template);
+    /// <summary>
+    /// Один прогін виразу під власним бюджетом: не більше стелі одного виразу і не більше, ніж лишилося
+    /// у пакета; витрачене списується зі спільного бюджету. Вичерпаний бюджет пакета — <c>#BUDGET</c>
+    /// без обчислення.
+    /// </summary>
+    private ExpressionValue Run(AstNode node, long entryId, RegistryRuleContext context, EvaluationBudget package)
+    {
+        if (package.IsExhausted)
+        {
+            return ExpressionValue.Error(Ecr.Expressions.ExpressionErrors.BudgetExceeded);
+        }
+
+        var run = new EvaluationBudget(Math.Min(Evaluator.MaxEvaluationSteps, package.MaxSteps - package.Spent));
+        try
+        {
+            return evaluator.Evaluate(RegistryRuleContext.Bind(node, entryId), context, ExpressionDialect.Template, run);
+        }
+        finally
+        {
+            package.TryConsume(run.Spent);
+        }
+    }
+
+    private static bool IsBudgetExceeded(ExpressionValue value)
+        => value.IsError && string.Equals(value.ErrorCode, Ecr.Expressions.ExpressionErrors.BudgetExceeded, StringComparison.Ordinal);
 
     private static List<RegistryRuleDef> Executable(IReadOnlyList<RegistryRuleDef> rules)
         => [.. rules.Where(r => r.IsActive && r.RuleKind != RegistryRuleKind.UniqueWithin).OrderBy(r => r.Code, StringComparer.Ordinal)];

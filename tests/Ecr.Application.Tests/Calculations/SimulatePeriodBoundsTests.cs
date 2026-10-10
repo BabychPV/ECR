@@ -1,5 +1,6 @@
 using Ecr.Application.Calculations;
 using Ecr.Application.Common;
+using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
 using Ecr.Domain.Entities.Calculations;
@@ -46,13 +47,19 @@ public sealed class SimulatePeriodBoundsTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
-    public async Task Без_меж_періоду_ключ_читається_як_місяць()
+    public async Task Без_меж_періоду_у_документа_тесту_явна_відмова_а_не_ключ_як_місяць()
     {
         var (module, handler) = Stand(bounds: null);
 
-        await handler.HandleAsync(DraftVersionId, 202602, CancellationToken.None);
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => handler.HandleAsync(DraftVersionId, 202602, CancellationToken.None));
 
-        await module.Received().ExecuteAsync(
+        // Аудит L7-11: раніше тут мовчки читався «лютий» (база diff — січнева версія замість чинної на кінець періоду).
+        Assert.Equal("ECR-PRD-0404", error.ErrorCode);
+        Assert.Equal("err.ECR-PRD-0404.periodForDocument", error.Details!["messageKey"]);
+        Assert.Equal("202602", error.Details!["periodKey"]);
+        Assert.Equal(DocumentId.ToString(System.Globalization.CultureInfo.InvariantCulture), error.Details!["documentId"]);
+        await module.DidNotReceive().ExecuteAsync(
             Arg.Is<CalculationInput>(i => i.Methodology.MethodologyVersionId == JanuaryVersionId), Arg.Any<CancellationToken>());
     }
 

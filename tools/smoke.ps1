@@ -108,6 +108,9 @@ if ($PSBoundParameters.ContainsKey('RequireFreeGb')) {
     $setupExtra += @('-RequireFreeGb', [string] $RequireFreeGb)
 }
 if ($SmallFiles) { $setupExtra += '-SmallFiles' }
+# L10-13: setup-dev-db.ps1 без -Force відмовляється перестворювати базу без позначки Ecr_DevDb. Свою тимчасову
+# базу цей скрипт уже перевірив за позначкою Ecr_Smoke_Temp ДО виклику (чужа база — Fail раніше), тож -Force тут безпечний.
+$setupExtra += '-Force'
 if ($PSBoundParameters.ContainsKey('StartupTimeoutSec')) {
     $setupExtra += @('-StartupTimeoutSec', [string] $StartupTimeoutSec)
 }
@@ -372,13 +375,15 @@ try {
         # ⚠ Разовий пароль bootstrap змінено ще першим прогоном: вхід — чинним
         # паролем, і саме він доводить, що оновлення не зламало облікові записи.
         Step 'вхід bootstrap чинним паролем'
-        $login = Call POST '/api/v1/login/local' @{ userName = 'bootstrap'; password = $AdminPassword }
+        # ⚠ Не $login: PowerShell не розрізняє регістр, і це був би параметр [string] $Login —
+        # відповідь ставала рядком, а mustChangePassword — $null (зміна пароля мовчки пропускалась).
+        $loginResult = Call POST '/api/v1/login/local' @{ userName = 'bootstrap'; password = $AdminPassword }
         Call GET '/api/v1/me' | Out-Null
 
         # ⚠ База після `setup-dev-db.ps1` без прогону smoke має bootstrap із разовим
         # паролем (`mustChangePassword`): усе, крім зміни пароля, дає 428. Тоді
         # змінюємо його, як у свіжому режимі.
-        if ($login.mustChangePassword) {
+        if ($loginResult.mustChangePassword) {
             Step 'зміна разового пароля'
             Call POST '/api/v1/auth/change-password' `
                 @{ currentPassword = $AdminPassword; newPassword = 'Smoke-Real-2026!' } | Out-Null

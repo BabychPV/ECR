@@ -44,6 +44,17 @@ internal sealed class ReviewStep(ICertificateSource certificates, Func<DateTime>
             state.SqlAuthIsWindows
                 ? "Windows Authentication"
                 : $"SQL login ({state.SqlLogin}), password: {Presence(state.SqlLoginPassword is not null)}");
+        // ⛔ L10-04, D-333: довіра до сертифіката SQL без перевірки — видно перед «Встановити».
+        var certificateRow = AddRow(
+            "SQL Server certificate",
+            state.TrustSqlServerCertificate
+                ? "WARNING: trusted WITHOUT verification (TrustServerCertificate=True) - unsafe, test stand only"
+                : "verified (TrustServerCertificate=False)");
+        if (state.TrustSqlServerCertificate)
+        {
+            certificateRow.ForeColor = Color.DarkRed;
+        }
+
         AddRow("Service account", DescribeServiceAccount(state));
         AddRow("Port", state.Port.ToString(System.Globalization.CultureInfo.InvariantCulture));
         AddRow("Data Protection certificate", state.DataProtectionThumbprint ?? "not selected");
@@ -53,7 +64,14 @@ internal sealed class ReviewStep(ICertificateSource certificates, Func<DateTime>
             "Database schema",
             state.Mode == WizardMode.Update
                 ? (state.SkipSchema ? "do not apply (already applied separately)" : "apply")
-                : "apply (first deployment)");
+                : (state.SkipSchema ? "do not apply (already applied by the previous attempt)" : "apply (first deployment)"));
+
+        // ⛔ AN-117 (S2-04): пропущена перевірка копії бази (-SkipBackupCheck) — червоний рядок перед «Install».
+        var backupRow = AddRow("Database backup", SchemaBackupRules.Describe(state, out var backupWarning));
+        if (backupWarning)
+        {
+            backupRow.ForeColor = Color.DarkRed;
+        }
 
         if (state.Mode == WizardMode.FirstDeployment)
         {
@@ -107,8 +125,8 @@ internal sealed class ReviewStep(ICertificateSource certificates, Func<DateTime>
 
     private static string Presence(bool provided) => provided ? "provided" : "not provided";
 
-    private void AddRow(string parameter, string value)
+    private ListViewItem AddRow(string parameter, string value)
     {
-        _list!.Items.Add(new ListViewItem(new[] { parameter, value }));
+        return _list!.Items.Add(new ListViewItem(new[] { parameter, value }));
     }
 }

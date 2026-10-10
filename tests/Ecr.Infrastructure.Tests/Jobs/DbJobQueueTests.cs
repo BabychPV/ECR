@@ -80,6 +80,11 @@ public abstract class DbJobQueueTestsBase(SqlServerFixture sql) : IAsyncLifetime
         public Task<ClaimedJob?> ClaimAsync(string owner = "test/host")
             => Queue.ClaimAsync(DefaultLane, owner, JobQueueLimits.DefaultLease, CancellationToken.None);
 
+        /// <summary>Claim з лейна, куди задачу <typeparamref name="TJob"/> ставить планувальник (<see cref="JobLaneMap.Of{TJob}"/>).</summary>
+        public Task<ClaimedJob?> ClaimLaneOfAsync<TJob>(string owner = "test/host")
+            where TJob : IBackgroundJob
+            => Queue.ClaimAsync([JobLaneMap.Of<TJob>()], owner, JobQueueLimits.DefaultLease, CancellationToken.None);
+
         public ValueTask DisposeAsync() => Db.DisposeAsync();
     }
 }

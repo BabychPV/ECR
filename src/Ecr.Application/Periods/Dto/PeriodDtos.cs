@@ -15,7 +15,11 @@ namespace Ecr.Application.Periods.Dto;
 /// <param name="Year">Рік.</param>
 /// <param name="Sequence">Порядковий номер у році: <c>1…12</c> для місячних, <c>1…4</c> для квартальних.</param>
 /// <param name="State">Стан; обчислює <c>PeriodStateJob</c>, а не запит.</param>
-/// <param name="StartsAt">Початок періоду в поясі майданчика.</param>
+/// <param name="StartsAt">
+/// Момент ВІДКРИТТЯ періоду в поясі майданчика — <c>Period.ComputedOpenAt</c>
+/// (<c>PeriodStart + OpenOffsetDays</c>), а не календарний початок місяця. Зсув політики вже врахований:
+/// клієнт не має додавати <c>OpenOffsetDays</c> удруге (N4-01).
+/// </param>
 /// <param name="EndsAt">
 /// Жорстке закриття (<c>PeriodEnd + HardCloseOffsetDays</c>) у поясі
 /// майданчика, виключно: після цього моменту період <c>Closed</c>, і
@@ -32,6 +36,7 @@ namespace Ecr.Application.Periods.Dto;
 /// </param>
 /// <param name="IsCurrent">Чи є періодом за замовчуванням для UI.</param>
 /// <param name="ReopenedUntil">Якщо період відкрито повторно — до якого моменту.</param>
+/// <param name="PeriodEnd">Останній календарний день періоду, включно: дата чинності темпоральних довідників для документів періоду (ФВ-8.5, D1-02).</param>
 /// <param name="NotSubmittedSheets">
 /// Скільки аркушів проєкту в цьому періоді ще не подано (чернетка, без стану чи відхилено) — UI-33, D1.
 /// <c>null</c> — не запитувано (<c>withSheetCounts=false</c>) АБО читач має інструменти, що ховають аркуші, і число
@@ -49,6 +54,7 @@ public sealed record PeriodDto(
     DateTimeOffset? GraceEndsAt,
     bool IsCurrent,
     DateTimeOffset? ReopenedUntil,
+    DateOnly PeriodEnd,
     int? NotSubmittedSheets = null);
 
 /// <summary>Календар проєкту.</summary>

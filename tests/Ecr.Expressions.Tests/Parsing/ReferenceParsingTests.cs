@@ -72,6 +72,34 @@ public sealed class ReferenceParsingTests
         Assert.Equal("Main", back.TableCode);
     }
 
+    /// <summary>
+    /// Аудит 2026-10-09c, C1-03: календарний контекст іншого періоду відхиляється розбором.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Що було. <c>[Period:-1].Seconds</c> розбирався без діагностики, а
+    /// обчислювач брав секунди ПОТОЧНОГО періоду: г/с минулого місяця
+    /// ділилися на секунди цього (лютий проти січня — 31/28).
+    /// </remarks>
+    [Theory] [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [InlineData("[Period:-1].Days")]
+    [InlineData("[Period:-1].Seconds")]
+    [InlineData("[Period:+1].Start")]
+    [InlineData("[Period:-12].Year")]
+    public void Календар_іншого_періоду_відхиляється(string text)
+    {
+        var result = Expr.Parse(text);
+
+        Assert.Contains(result.Diagnostics, d => d.MessageKey == "expr.calendarContextOffset");
+    }
+
+    /// <summary>C1-03: поточний календар і комірка іншого періоду й далі розбираються.</summary>
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public void Календар_поточного_періоду_й_крос_період_комірки_розбираються()
+    {
+        Assert.Empty(Expr.Parse("[Period].Days").Diagnostics);
+        Assert.Empty(Expr.Parse("[Period:-1].[Main].[7001001].[Total] / [Period].Seconds").Diagnostics);
+    }
+
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)]
     public void Вихід_за_межі_проєкту_дає_null_а_не_помилку()
     {

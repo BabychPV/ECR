@@ -1,5 +1,8 @@
 // src/Ecr.Worker/WorkerProgram.cs
 
+using System.Data.Common;
+using Ecr.Infrastructure.Persistence;
+using Ecr.Infrastructure.Startup;
 using Ecr.Worker.Isolation;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -17,11 +20,17 @@ internal static partial class WorkerProgram
     /// <summary>Невідомий режим чи аргумент.</summary>
     public const int ExitUsage = 2;
 
-    /// <summary>Недійсна конфігурація <c>Jobs:Workers:*</c>.</summary>
+    /// <summary>Недійсна конфігурація <c>Jobs:Workers:*</c> або ключів дочірнього (<see cref="WorkerConfigurationValidation"/>).</summary>
     public const int ExitInvalidConfiguration = 3;
 
     /// <summary>Наглядач поза Windows.</summary>
     public const int ExitUnsupportedPlatform = 4;
+
+    /// <summary>
+    /// Дочірній: міграції бази й збірки розходяться (або схему не вдалося звірити) — задач не бере
+    /// (R6-X4/X4-02, <c>ECR-SYS-5031</c>).
+    /// </summary>
+    public const int ExitSchemaIncompatible = 5;
 
     /// <summary>Ім'я служби наглядача (P2 реєструє її в MSI).</summary>
     public const string ServiceName = "EcrWorker";
@@ -71,7 +80,11 @@ internal static partial class WorkerProgram
         var builder = CreateBuilder(stub: null);
         builder.Services.AddWindowsService(o => o.ServiceName = ServiceName);
 
-        var problems = WorkerPoolOptions.TryLoad(builder.Configuration, out var options);
+        // ⛔ R5-U1/U1-07: і ключі, які читає дочірній (Database:*, Calculations:*), — служба не стартує з
+        // недійсним значенням, як і Api (U19), а не дає дітям мовчки взяти дефолт.
+        var problems = WorkerPoolOptions.TryLoad(builder.Configuration, out var options)
+            .Concat(WorkerConfigurationValidation.Validate(builder.Configuration))
+            .ToList();
         if (problems.Count == 0)
         {
             builder.Services.AddSingleton(options);
@@ -88,7 +101,7 @@ internal static partial class WorkerProgram
 
         if (problems.Count > 0)
         {
-            var message = "Недійсна конфігурація пулу воркерів — служба не стартує:"
+            var message = "Недійсна конфігурація воркера — служба не стартує:"
                 + Environment.NewLine + string.Join(Environment.NewLine, problems.Select(p => "  " + p));
             LogFatal(logger, message);
             await Console.Error.WriteLineAsync(message).ConfigureAwait(false);
@@ -124,7 +137,9 @@ internal static partial class WorkerProgram
         builder.ConfigureContainer(new DefaultServiceProviderFactory(
             new ServiceProviderOptions { ValidateScopes = true, ValidateOnBuild = false }));
 
-        var problems = WorkerPoolOptions.TryLoad(builder.Configuration, out var pool);
+        var problems = WorkerPoolOptions.TryLoad(builder.Configuration, out var pool)
+            .Concat(WorkerConfigurationValidation.Validate(builder.Configuration))
+            .ToList();
         if (problems.Count > 0)
         {
             await Console.Error.WriteLineAsync(string.Join(Environment.NewLine, problems)).ConfigureAwait(false);
@@ -144,9 +159,45 @@ internal static partial class WorkerProgram
         }
 
         using var host = builder.Build();
+
+        // ⛔ R6-X4/X4-02: до першої задачі — звірка міграцій бази зі збіркою (обидва напрями), як
+        // Api на старті в режимі Validate. Вузли оновлюються не одночасно (D-32): інакше старий
+        // воркер вузла B (перезавантаження у вікні, -SkipOtherNodesCheck) брав би задачі recalc
+        // нового формату на новій схемі, а новий — на ще не накоченій. Відмова — код
+        // ExitSchemaIncompatible; наглядач перезапускає дитину з наростаючою паузою (RestartBackoff),
+        // тож після оновлення схеми чи вузла воркер підхоплюється сам, а задачі лишаються в черзі.
+        var schemaProblem = await CheckSchemaAsync(host.Services, cancellationToken).ConfigureAwait(false);
+        if (schemaProblem is not null)
+        {
+            var logger = host.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Ecr.Worker");
+            LogFatal(logger, schemaProblem);
+            await Console.Error.WriteLineAsync(schemaProblem).ConfigureAwait(false);
+            return ExitSchemaIncompatible;
+        }
+
+        return await RunBuiltChildAsync(host, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Робочий цикл уже побудованого дочірнього хоста зі скиданням метрик ДО його звільнення.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Y6-02: тут стояло <c>try { host.RunAsync } finally { Flush(host.Services) }</c>. Розширення
+    /// <c>RunAsync</c> у власному <c>finally</c> звільняє хост, а звільнений <c>ServiceProvider</c>
+    /// на <c>GetService</c> кидає <see cref="ObjectDisposedException"/> — тож КОЖНА штатна зупинка
+    /// справжнього <c>--child</c> закінчувалася необробленим винятком (код <c>0xE0434352</c>, подія
+    /// «Application Error»), а справжній виняток з <c>RunAsync</c> підмінявся цим. Тому
+    /// <c>RunAsync</c> розгорнуто: старт і очікування зупинки (<c>StopAsync</c> усередині),
+    /// скидання буфера, а звільнення хоста лишається власникові (<c>using</c> у викликача).
+    /// </remarks>
+    internal static async Task<int> RunBuiltChildAsync(IHost host, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(host);
+
         try
         {
-            await host.RunAsync(cancellationToken).ConfigureAwait(false);
+            await host.StartAsync(cancellationToken).ConfigureAwait(false);
+            await host.WaitForShutdownAsync(cancellationToken).ConfigureAwait(false);
         }
         finally
         {
@@ -157,17 +208,56 @@ internal static partial class WorkerProgram
         return Environment.ExitCode;
     }
 
-    /// <summary>Хост воркера: тека exe як корінь, <see cref="SettingsFile"/> і <c>ECR_</c> поверх.</summary>
+    /// <summary>
+    /// Звірка міграцій бази зі збіркою для дочірнього (X4-02): текст відмови або <c>null</c>.
+    /// </summary>
+    /// <remarks>
+    /// Fail-closed: база недоступна чи запит упав — теж відмова (не звірили — задач не беремо);
+    /// наглядач повторить спробу з паузою.
+    /// </remarks>
+    private static async Task<string?> CheckSchemaAsync(IServiceProvider services, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await using var scope = services.CreateAsyncScope();
+            var db = scope.ServiceProvider.GetRequiredService<EcrDbContext>();
+            var mismatch = await SchemaValidator.MigrationMismatchAsync(db, cancellationToken).ConfigureAwait(false);
+
+            // ⛔ R6-X4/X4-03: і штамп релізу схеми — старий воркер на SQL-схемі новішого релізу.
+            mismatch ??= await SchemaValidator.SchemaReleaseMismatchAsync(db, SchemaValidator.CodeRelease, cancellationToken)
+                .ConfigureAwait(false);
+            return mismatch is null ? null : "Дочірній воркер не бере задач — схема бази іншої версії: " + mismatch;
+        }
+        catch (DbException ex)
+        {
+            return "Дочірній воркер не бере задач — схему бази не звірено: " + ex.Message;
+        }
+    }
+
+    /// <summary>
+    /// Хост воркера: тека exe як корінь, <see cref="SettingsFile"/>, файл майданчика
+    /// (<see cref="SiteSettingsPath"/>) і <c>ECR_</c> поверх.
+    /// </summary>
     /// <param name="stub">Заглушка дочірнього для тестів наглядача.</param>
     /// <param name="contentRoot">Корінь вмісту; <c>null</c> — тека exe.</param>
+    /// <param name="commonApplicationData">Корінь <c>%ProgramData%</c>; <c>null</c> — системний (тести дають тимчасову теку).</param>
     /// <remarks>
     /// ⛔ L2-12: exe лежить у теці Api (<c>Worker.wxs</c>: INSTALLFOLDER), а типові джерела
     /// <c>HostApplicationBuilder</c> підхоплюють звідти <c>appsettings.json</c> і
     /// <c>appsettings.{Environment}.json</c> Api — з <c>Jobs:Queue:Mode = Quartz</c>, телеметрією й
     /// <c>Calculations:*</c> Api. Їх прибрано: решта типових джерел (змінні оточення, логування)
     /// лишається, конфігурація воркера — лише його файл і <c>ECR_</c>.
+    /// ⛔ R5-U1/U1-07 (аудит 2026-10-09): і файл майданчика — той самий
+    /// <c>%ProgramData%\ECR\config\appsettings.Production.json</c>, що читає Api (runbook §2: «налаштування
+    /// майданчика редагуйте тут»). Без нього <c>Database:*</c> і <c>Calculations:*</c>, задані там, діяли
+    /// лише на Api, а перерахунок (з I2-2 — у дочірньому воркері) лишався на дефолтах. Порядок: файл
+    /// воркера (у теці програми, переписується MSI) &lt; файл майданчика &lt; <c>ECR_</c>. Режим черги з
+    /// файлу майданчика дочірньому не шкодить: його складання прибирає планувальники й лейни Api.
+    /// Без перечитування на льоту (<c>reloadOnChange: false</c>): перевірка старту
+    /// (<see cref="WorkerConfigurationValidation"/>) інакше не бачила б нового значення.
     /// </remarks>
-    internal static HostApplicationBuilder CreateBuilder(ChildStubOptions? stub, string? contentRoot = null)
+    internal static HostApplicationBuilder CreateBuilder(
+        ChildStubOptions? stub, string? contentRoot = null, string? commonApplicationData = null)
     {
         var builder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings
         {
@@ -182,6 +272,10 @@ internal static partial class WorkerProgram
         }
 
         builder.Configuration.AddJsonFile(SettingsFile, optional: true, reloadOnChange: false);
+        builder.Configuration.AddJsonFile(
+            SiteSettingsPath(commonApplicationData ?? Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData)),
+            optional: true,
+            reloadOnChange: false);
         builder.Configuration.AddEnvironmentVariables(prefix: "ECR_");
         if (stub is not null)
         {
@@ -192,6 +286,11 @@ internal static partial class WorkerProgram
 
         return builder;
     }
+
+    /// <summary>Файл майданчика — той самий шлях, що <c>ProgramDataConfiguration.AddProgramDataConfig</c> в Api.</summary>
+    /// <param name="commonApplicationData">Корінь <c>%ProgramData%</c>.</param>
+    internal static string SiteSettingsPath(string commonApplicationData)
+        => Path.Combine(commonApplicationData, "ECR", "config", "appsettings.Production.json");
 
     /// <summary>Цей самий exe у ролі <c>--child</c> (через <c>dotnet</c> — з шляхом до dll).</summary>
     private static ChildCommand SelfAsChild(IReadOnlyList<string> extra)

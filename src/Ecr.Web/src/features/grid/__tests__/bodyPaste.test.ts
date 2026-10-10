@@ -56,6 +56,29 @@ describe('installBodyPasteRedirect v2 (T4-02)', () => {
     m.dispose();
   });
 
+  it('N3-12: озброєна, але прихована (display: none) сітка вставку не приймає; після показу - приймає', () => {
+    const m = mount();
+    m.focusCell();
+    m.container.style.display = 'none';
+
+    paste(document.body);
+    expect(m.handler).not.toHaveBeenCalled();
+
+    // Предок теж рахується: «single» ховає обгортку таблиці, а не сам контейнер сітки.
+    m.container.style.display = '';
+    const wrapper = document.createElement('div');
+    wrapper.style.display = 'none';
+    document.body.appendChild(wrapper);
+    wrapper.appendChild(m.container);
+    paste(document.body);
+    expect(m.handler).not.toHaveBeenCalled();
+
+    wrapper.style.display = '';
+    paste(document.body);
+    expect(m.handler).toHaveBeenCalledTimes(1);
+    m.dispose();
+  });
+
   it('(а) озброює й afteredit, і keydown усередині сітки', () => {
     const afterEdit = mount();
     afterEdit.container.dispatchEvent(new CustomEvent('afteredit'));

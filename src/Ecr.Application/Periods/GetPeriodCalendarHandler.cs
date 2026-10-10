@@ -93,6 +93,12 @@ public sealed class GetPeriodCalendarHandler(
                 // Поточний період — підказка UI, а не правило доступу (D-77).
                 project.CurrentPeriodId == p.Id,
                 p.ReopenedUntil is { } until ? ToSite(until, zone) : null,
+
+                // ⛔ Календарний кінець періоду — та сама дата, що й
+                // `PeriodBounds.PeriodEnd` у PATCH комірок. Клієнт не виводить її
+                // з `PeriodKey`: для квартальних і річних проєктів `YYYYMM` хибний
+                // (D1-02, `PeriodKey.cs`).
+                p.PeriodEnd,
                 notSubmitted is null ? null : notSubmitted.GetValueOrDefault(p.PeriodKeyValue)))
             .ToList();
 

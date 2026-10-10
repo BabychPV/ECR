@@ -53,6 +53,9 @@ public sealed class SmtpNotificationSender(
     /// <summary>Скільки чекати на сервер, перш ніж вважати спробу невдалою.</summary>
     private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(30);
 
+    /// <summary>Запас жорсткої межі понад дедлайн.</summary>
+    private static readonly TimeSpan HardStopGrace = TimeSpan.FromSeconds(5);
+
     private readonly ISecretProvider _secrets = secrets;
     private readonly SmtpPasswordProtector? _protector = protector;
     private readonly TimeProvider _time = time ?? TimeProvider.System;
@@ -67,6 +70,12 @@ public sealed class SmtpNotificationSender(
 
     /// <summary>Скільки разів налаштування читалися з БД — для тестів кешу.</summary>
     public int DatabaseReads { get; private set; }
+
+    /// <summary>
+    /// Загальний дедлайн однієї відправки (з'єднання, рукостискання, передача). За замовчуванням — той
+    /// самий <see cref="Timeout"/>, на який розраховують черга й задачі; тести задають коротший.
+    /// </summary>
+    public TimeSpan SendDeadline { get; init; } = Timeout;
 
     /// <inheritdoc />
     public void Invalidate()
@@ -120,10 +129,94 @@ public sealed class SmtpNotificationSender(
 
         using var client = CreateClient(settings);
 
-        // ⚠ `SendMailAsync` із токеном: без нього зупинка застосунку чекала б
-        // на таймаут SMTP.
-        await client.SendMailAsync(message, ct).ConfigureAwait(false);
+        // ⛔ R5-E1/E1-01: `SmtpClient.Timeout` діє ЛИШЕ на синхронний `Send`; `SendMailAsync` без власного
+        // дедлайну чекає мовчазний сервер (неявний TLS на 465, напіввідкрите з'єднання) безстроково — і
+        // разом з ним `PeriodStateJob` під `DisallowConcurrentExecution`/applock: переходи періодів стоять.
+        // Тож дедлайн — зведеним токеном (скасування закриває з'єднання) плюс жорстка межа `WaitAsync` на
+        // випадок, якщо транспорт скасування не почує. Спрацювання — `TimeoutException`: звичайна
+        // відмова спроби (рядок `Failed`/лічильник черги), а не зупинка застосунку.
+        try
+        {
+            await SendWithDeadlineAsync(token => client.SendMailAsync(message, token), SendDeadline, ct)
+                .ConfigureAwait(false);
+        }
+        catch (SmtpFailedRecipientException failure)
+        {
+            // ⛔ J1-03: частину адресатів сервер відхилив на RCPT, але DATA пішла решті —
+            // `SmtpClient` кидає ПІСЛЯ відправки. Звичайний збій тут означав би повтор усім
+            // (до MaxAttempts копій тим, хто лист уже отримав). Відмова ВСІМ — як і була.
+            if (AsPartialDelivery(failure, message.To.Count) is { } partial)
+            {
+                throw partial;
+            }
+
+            throw;
+        }
     }
+
+    /// <summary>
+    /// Чи відмова адресатів — ЧАСТКОВА доставка (сервер прийняв лист хоча б для одного).
+    /// </summary>
+    /// <param name="failure">Відмова <see cref="SmtpClient"/>.</param>
+    /// <param name="recipientCount">Скільки адресатів мав лист.</param>
+    /// <returns>Виняток часткової доставки; <c>null</c> — відхилено всіх (лист не пішов).</returns>
+    /// <remarks>
+    /// ⚠ <see cref="SmtpClient"/> кидає ДО DATA лише тоді, коли відхилено ВСІХ адресатів; інакше —
+    /// після відправки: <see cref="SmtpFailedRecipientException"/> для однієї відхиленої адреси,
+    /// <see cref="SmtpFailedRecipientsException"/> для кількох.
+    /// </remarks>
+    internal static NotificationPartiallyDeliveredException? AsPartialDelivery(
+        SmtpFailedRecipientException failure, int recipientCount)
+    {
+        ArgumentNullException.ThrowIfNull(failure);
+
+        string[] rejected = failure is SmtpFailedRecipientsException { InnerExceptions.Length: > 0 } many
+            ? [.. many.InnerExceptions.Select(e => e.FailedRecipient ?? "?")]
+            : [failure.FailedRecipient ?? "?"];
+
+        return rejected.Length < recipientCount ? new NotificationPartiallyDeliveredException(rejected) : null;
+    }
+
+    /// <summary>
+    /// Виконує <paramref name="send"/> не довше за <paramref name="deadline"/>; перевищення —
+    /// <see cref="TimeoutException"/>, скасування <paramref name="ct"/> — <see cref="OperationCanceledException"/>.
+    /// </summary>
+    /// <param name="send">Відправка, що приймає зведений токен.</param>
+    /// <param name="deadline">Дедлайн.</param>
+    /// <param name="ct">Токен зупинки.</param>
+    internal static async Task SendWithDeadlineAsync(
+        Func<CancellationToken, Task> send, TimeSpan deadline, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(send);
+
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        linked.CancelAfter(deadline);
+
+        var sending = send(linked.Token);
+
+        try
+        {
+            // Запас понад дедлайн: спершу хай спрацює м'яке скасування (воно закриває з'єднання).
+            await sending.WaitAsync(deadline + HardStopGrace, ct).ConfigureAwait(false);
+        }
+        catch (Exception error) when (!ct.IsCancellationRequested
+                                       && error is OperationCanceledException or TimeoutException)
+        {
+            // OCE — спрацював зведений токен; TimeoutException — жорстка межа: транспорт скасування не
+            // почув, задачу покидаємо (клієнт закриється `using`), але її виняток не лишається неспостереженим.
+            Observe(sending);
+            throw new TimeoutException(
+                string.Create(CultureInfo.InvariantCulture, $"SMTP: сервер не відповів за {deadline.TotalSeconds:0.#} с."),
+                error);
+        }
+    }
+
+    private static void Observe(Task task)
+        => _ = task.ContinueWith(
+            static t => _ = t.Exception,
+            CancellationToken.None,
+            TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
 
     /// <summary>
     /// Клієнт під ефективні налаштування. ⛔ S2 (ent6): без логіна — лише анонімна відправка. Інтегрована

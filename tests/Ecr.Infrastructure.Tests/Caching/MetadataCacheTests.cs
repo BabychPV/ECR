@@ -129,7 +129,9 @@ public sealed class MetadataCacheTests(SqlServerFixture sql)
     [Trait(TestCategories.Category, TestCategories.Integration)]
     public async Task Ревізія_перечитується_після_спливу_вікна()
     {
-        var doc = await ArrangeAsync();
+        // Y6-01: опублікована — бо знімок ЧЕРНЕТКИ живе лише вікно ревізії, і
+        // через 6 с його вже немає (див. `Знімок_чернетки_…_на_іншому_вузлі`).
+        var doc = await ArrangePublishedAsync();
         var clock = new ManualClock();
         var memory = new MemoryCache(new MemoryCacheOptions { Clock = clock });
 
@@ -346,7 +348,9 @@ public sealed class MetadataCacheTests(SqlServerFixture sql)
     [Trait(TestCategories.Category, TestCategories.Integration)]
     public async Task Старий_знімок_лишається_валідним_для_старого_ключа()
     {
-        var doc = await ArrangeAsync();
+        // Y6-01: властивість D-16 — для структурно замороженої версії; знімок
+        // чернетки за 6 с уже витіснено стелею вікна ревізії.
+        var doc = await ArrangePublishedAsync();
 
         // Той самий керований годинник і з тієї ж причини, що вище: вікно
         // мемоїзації ревізії (`RD-05`) треба перевести, а не пересидіти.
@@ -444,6 +448,179 @@ public sealed class MetadataCacheTests(SqlServerFixture sql)
 
     private async Task<TestDocument> ArrangeAsync()
         => await new TestDocumentBuilder(sql.ConnectionString).BuildAsync(ct: CancellationToken.None);
+
+    /// <summary>Те саме, але версію опубліковано (структурно заморожена, Y6-01).</summary>
+    private async Task<TestDocument> ArrangePublishedAsync()
+    {
+        var doc = await ArrangeAsync();
+        await using var db = CreateContext([]);
+        await db.Database.ExecuteSqlRawAsync(
+            "UPDATE cfg.TemplateVersion SET Status = 1, PublishedAt = SYSUTCDATETIME(), PublishedByUserId = 1 WHERE Id = {0}",
+            doc.TemplateVersionId);
+        return doc;
+    }
+
+    /// <summary>Структурна правка чернетки повз кеш — так, як її бачить ІНШИЙ вузол (Y6-01).</summary>
+    private async Task DeleteSheetAsync(int sheetDefId)
+    {
+        await using var db = CreateContext([]);
+        await db.Database.ExecuteSqlRawAsync(
+            "UPDATE cfg.SheetDef SET IsDeleted = 1, DeletedAt = SYSUTCDATETIME() WHERE Id = {0}",
+            sheetDefId);
+    }
+
+    /// <summary>
+    /// Y6-01, сценарій 1: два вузли — два <see cref="MemoryCache"/> над однією
+    /// базою. Структурна правка чернетки на вузлі A ревізію не підіймає, а
+    /// інвалідація A до B не доходить; B мусить побачити правку не пізніше за
+    /// вікно ревізії, а не через 240 хв.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Мутація: у <c>BuildAsync</c> повернути <c>Lifetime</c> для чернетки —
+    /// B віддає знімок з аркушем, тест червоніє.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Знімок_чернетки_не_переживає_структурну_правку_на_іншому_вузлі()
+    {
+        var doc = await ArrangeAsync();
+        var clock = new ManualClock();
+        var nodeA = new MemoryCache(new MemoryCacheOptions { Clock = clock });
+        var nodeB = new MemoryCache(new MemoryCacheOptions { Clock = clock });
+
+        TemplateVersionSnapshot before;
+        await using (var db = CreateContext([]))
+        {
+            before = await new MetadataCache(nodeB, db).GetAsync(doc.TemplateVersionId, CancellationToken.None);
+        }
+
+        Assert.Single(before.Sheets);
+
+        // Правка «на вузлі A»: коміт + ЛОКАЛЬНА інвалідація A.
+        await DeleteSheetAsync(doc.SheetDefId);
+        await using (var db = CreateContext([]))
+        {
+            await new MetadataCache(nodeA, db).InvalidateAsync(doc.TemplateVersionId, CancellationToken.None);
+        }
+
+        clock.Advance(TimeSpan.FromSeconds(6));
+
+        TemplateVersionSnapshot after;
+        await using (var db = CreateContext([]))
+        {
+            after = await new MetadataCache(nodeB, db).GetAsync(doc.TemplateVersionId, CancellationToken.None);
+        }
+
+        Assert.Equal(before.CacheKey, after.CacheKey);
+        Assert.Empty(after.Sheets);
+    }
+
+    /// <summary>
+    /// Y6-01: опублікована версія і далі кешується на повну стелю — перебудови
+    /// після вікна ревізії немає (лише перечитування ревізії).
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Знімок_опублікованої_версії_живе_довше_за_вікно_ревізії()
+    {
+        var doc = await ArrangePublishedAsync();
+        var clock = new ManualClock();
+        var memory = new MemoryCache(new MemoryCacheOptions { Clock = clock });
+
+        TemplateVersionSnapshot first;
+        await using (var db = CreateContext([]))
+        {
+            first = await new MetadataCache(memory, db).GetAsync(doc.TemplateVersionId, CancellationToken.None);
+        }
+
+        clock.Advance(TimeSpan.FromMinutes(10));
+
+        TemplateVersionSnapshot second;
+        await using (var db = CreateContext([]))
+        {
+            second = await new MetadataCache(memory, db).GetAsync(doc.TemplateVersionId, CancellationToken.None);
+        }
+
+        Assert.Same(first, second);
+    }
+
+    /// <summary>
+    /// Y6-01, сценарій 2: побудова, що почалася ДО правки, не має права покласти
+    /// старий знімок у кеш ПІСЛЯ <see cref="MetadataCache.InvalidateAsync"/>.
+    /// </summary>
+    /// <remarks>
+    /// Детерміновано, без таймаутів-як-синхронізації: перехоплювач тримає
+    /// ТРЕТЮ команду побудови (ревізія → аркуші → таблиці), тобто аркуші вже
+    /// прочитано старими. Поки вона стоїть, аркуш видаляється і викликається
+    /// інвалідація; далі побудова завершується.
+    /// ⚠ Мутація: прибрати <c>AddExpirationToken</c> у <c>BuildAsync</c> —
+    /// наступне читання (у межах 5 с) бере старий знімок із кешу, тест червоніє.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Побудова_в_польоті_не_кладе_в_кеш_знімок_після_інвалідації()
+    {
+        var doc = await ArrangeAsync();
+        var memory = new MemoryCache(new MemoryCacheOptions());
+        var gate = new HoldNthCommand(3);
+
+        await using var blocked = new EcrDbContext(new DbContextOptionsBuilder<EcrDbContext>()
+            .UseSqlServer(sql.ConnectionString)
+            .AddInterceptors(gate)
+            .Options);
+
+        var inFlight = new MetadataCache(memory, blocked).GetAsync(doc.TemplateVersionId, CancellationToken.None);
+
+        await gate.Reached.Task.WaitAsync(TimeSpan.FromSeconds(60));
+
+        await DeleteSheetAsync(doc.SheetDefId);
+        await using (var db = CreateContext([]))
+        {
+            await new MetadataCache(memory, db).InvalidateAsync(doc.TemplateVersionId, CancellationToken.None);
+        }
+
+        gate.Release.SetResult();
+        var stale = await inFlight;
+
+        // Санітарна перевірка: побудова справді прочитала аркуші ДО правки.
+        Assert.Single(stale.Sheets);
+
+        TemplateVersionSnapshot fresh;
+        await using (var db = CreateContext([]))
+        {
+            fresh = await new MetadataCache(memory, db).GetAsync(doc.TemplateVersionId, CancellationToken.None);
+        }
+
+        Assert.Empty(fresh.Sheets);
+    }
+
+    /// <summary>Тримає N-ту команду контексту, доки тест її не відпустить.</summary>
+    private sealed class HoldNthCommand(int n) : DbCommandInterceptor
+    {
+        private int _count;
+
+        public TaskCompletionSource Reached { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public override async ValueTask<InterceptionResult<System.Data.Common.DbDataReader>> ReaderExecutingAsync(
+            System.Data.Common.DbCommand command,
+            CommandEventData eventData,
+            InterceptionResult<System.Data.Common.DbDataReader> result,
+            CancellationToken cancellationToken = default)
+        {
+            if (Interlocked.Increment(ref _count) == n)
+            {
+                Reached.SetResult();
+                await Release.Task.WaitAsync(TimeSpan.FromSeconds(60), cancellationToken);
+            }
+
+            return result;
+        }
+    }
 
     private EcrDbContext CreateContext(List<string> executed)
         => new(new DbContextOptionsBuilder<EcrDbContext>()
