@@ -374,6 +374,20 @@ export function RegistryRelations({
                     return relation.targetRegistryCode ?? relation.linkKind ?? '—';
                   }
                   const current = field.id in linkEdits ? linkEdits[field.id] : relation.targetRegistryDefId;
+                  // ⛔ AN-94 (L5-08): сервер НЕ віддає ні Id, ні код ЗАБОРОНЕНОГО довідника-цілі — обидва `null`, хоча
+                  // зв'язок є (рядок `relations` буває лише для поля з ціллю). Це не «ціль не задано» (давні поля без
+                  // цілі — окремі рядки `unlinked` нижче): міняти нічого, а підпис «оберіть довідник» збрехав би.
+                  if (
+                    !(field.id in linkEdits)
+                    && relation.targetRegistryDefId === null
+                    && relation.targetRegistryCode === null
+                  ) {
+                    return (
+                      <Text size="sm" c="dimmed" data-relation-target-hidden={field.code}>
+                        {t('registries.relationTargetHidden')}
+                      </Text>
+                    );
+                  }
                   // ⚠ Перелік довідників ще їде або не прочитався: без опції поточної цілі `NativeSelect`
                   // показав би «—», тобто «зв'язку немає», хоча він є.
                   const known = current == null || registryOptions.some((o) => o.value === String(current));

@@ -7543,6 +7543,9 @@ USING (VALUES
     -- COLL:r9f6-paste-clipped ── R9-F6 / F6-03: вставка, більша за таблицю, — скільки рядків і колонок не вмістилося; ru/kz — порцією COLL:r9f6-paste-clipped нижче ──
     ,(N'grid.pasteClipped', N'en', N'The copied data is larger than the table: {rows} row(s) below and {columns} column(s) to the right did not fit and were not pasted. Add rows or paste the rest separately.', 1)
     -- COLL:r9f6-paste-clipped ── кінець секції ──
+    -- COLL:r11l6-target-hidden ── AN-94: ціль зв'язку — довідник, до якого в читача немає доступу (сервер віддає null); ru — порцією нижче, kz — за термінологом ──
+    ,(N'registries.relationTargetHidden', N'en', N'Target registry is not available to you', 1)
+    -- COLL:r11l6-target-hidden ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -18764,6 +18767,16 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:r9f6-paste-clipped ── кінець секції ──
+
+-- COLL:r11l6-target-hidden ── ru: AN-94: ціль зв'язку недоступна читачеві; власна порція (kz — за термінологом) ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'registries.relationTargetHidden', N'ru', N'Справочник-цель вам недоступен')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:r11l6-target-hidden ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t
