@@ -24670,6 +24670,14 @@
               "format": "int32",
               "type": "integer"
             }
+          },
+          {
+            "description": "Без успішних перерахунків формул — для шухляди «Мої задачі».",
+            "in": "query",
+            "name": "hideRoutine",
+            "schema": {
+              "type": "boolean"
+            }
           }
         ],
         "responses": {

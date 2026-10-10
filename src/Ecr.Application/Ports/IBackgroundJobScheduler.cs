@@ -213,8 +213,18 @@ public interface IBackgroundJobScheduler
 /// витоком — будь-хто читав би чужу чергу, назвавши чуже число.
 /// </para>
 /// </param>
+/// <param name="HideRoutine">
+/// <c>true</c> — без УСПІШНИХ каскадних перерахунків формул (<c>IFormulaRecalculationJob</c>).
+/// <para>
+/// ⛔ F4-01 (audit-9): кожне автозбереження, що прийшло після старту попереднього прогону, дає новий
+/// рядок перерахунку формул. Перелік обрізається стелею ДО будь-якого клієнтського фільтра, тож
+/// після ~50 збережень готовий експорт чи імпорт випадав зі шухляди «Мої задачі», хоча
+/// <c>ExportButton</c> обіцяє, що посилання там лишається. Тому рутина відсікається в запиті, ДО
+/// <c>TOP</c>. Провалений чи незавершений перерахунок лишається: там є що сказати.
+/// </para>
+/// </param>
 public sealed record JobListFilter(
-    string? State = null, string? JobCode = null, int? CreatedByUserId = null)
+    string? State = null, string? JobCode = null, int? CreatedByUserId = null, bool HideRoutine = false)
 {
     /// <summary>Порожнє звуження: усі задачі всіх авторів.</summary>
     public static readonly JobListFilter None = new();

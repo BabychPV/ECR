@@ -27,6 +27,7 @@ public sealed class JobsController(
     /// <param name="code">Код (тип) задачі, як у <c>JobSummary.jobCode</c>.</param>
     /// <param name="mine">Лише власні задачі; не вимагає <c>System.ViewHealth</c>.</param>
     /// <param name="limit">Скільки повернути, 1…50.</param>
+    /// <param name="hideRoutine">Без успішних перерахунків формул — для шухляди «Мої задачі».</param>
     /// <param name="ct">Скасування.</param>
     /// <remarks>
     /// ⛔ Без цього ендпоінта збій задачі був видимий лише тому, хто вже знає
@@ -54,8 +55,9 @@ public sealed class JobsController(
         [FromQuery] string? code,
         [FromQuery] bool mine,
         [FromQuery] int? limit,
+        [FromQuery] bool hideRoutine,
         CancellationToken ct)
-        => Ok(await list.HandleAsync(state, code, mine, limit, ct).ConfigureAwait(false));
+        => Ok(await list.HandleAsync(state, code, mine, limit, hideRoutine, ct).ConfigureAwait(false));
 
     /// <summary>
     /// Стан задачі за її ідентифікатором. Право <c>System.ViewHealth</c>.

@@ -105,7 +105,7 @@ describe('AppLayout: зайві запити під примусовою змі�
     await waitFor(() => expect(requested(fetchMock).some((url) => url.includes('/ui-strings/'))).toBe(true));
 
     expect(requested(fetchMock).filter((url) => url.includes('/api/v1/jobs'))).toEqual([]);
-    expect(client.getQueryCache().find({ queryKey: ['jobs', true] })).toBeUndefined();
+    expect(client.getQueryCache().find({ queryKey: ['jobs', 'my-tasks'] })).toBeUndefined();
     expect(screen.queryByRole('button', { name: '⟦jobs.myTasks⟧' })).toBeNull();
     // Меню профілю з виходом лишається.
     expect(screen.getByText('tester')).toBeTruthy();

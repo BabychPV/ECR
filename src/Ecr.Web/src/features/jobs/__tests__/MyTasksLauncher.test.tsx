@@ -169,6 +169,9 @@ describe('кнопка «My tasks» у шапці', () => {
      */
     await waitFor(() => expect(requested.length).toBeGreaterThan(0));
     expect(requested.every((url) => url.includes('mine=true'))).toBe(true);
+    // ⛔ F4-01: рутина відсікається на сервері, ДО стелі в 50 рядків. Приберіть `hideRoutine`
+    // з `myTasksUrl` — і після ~50 автозбережень готовий експорт знову випаде зі шухляди.
+    expect(requested.every((url) => url.includes('hideRoutine=true'))).toBe(true);
 
     // ⚠ Ключа ще немає в каталозі (`09-seed.sql` — сусідній PR), і `t()`
     // навмисно НЕ губить параметрів: позначка відсутнього рядка несе `n=1`.
