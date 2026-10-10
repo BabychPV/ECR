@@ -202,12 +202,15 @@ public sealed class AuditStructureChangeEntityIndexTests
         return await ScalarAsync<string>(
             cs,
             $"""
-            SELECT (SELECT STRING_AGG(c.name + CASE WHEN ic.is_descending_key = 1 THEN N' DESC' ELSE N'' END, N',')
+            SELECT (SELECT STRING_AGG(CAST(c.name AS nvarchar(128)) COLLATE DATABASE_DEFAULT
+                                      + CASE WHEN ic.is_descending_key = 1 THEN N' DESC' ELSE N'' END, N',')
                            WITHIN GROUP (ORDER BY ic.key_ordinal)
                       FROM sys.index_columns AS ic
                       JOIN sys.columns AS c ON c.object_id = ic.object_id AND c.column_id = ic.column_id
                      WHERE ic.object_id = i.object_id AND ic.index_id = i.index_id AND ic.is_included_column = 0)
-                   + N'|' + ds.name + N'|' + i.type_desc + N'|' + CAST(i.has_filter AS nvarchar(1))
+                   + N'|' + CAST(ds.name AS nvarchar(128)) COLLATE DATABASE_DEFAULT
+                   + N'|' + CAST(i.type_desc AS nvarchar(60)) COLLATE DATABASE_DEFAULT
+                   + N'|' + CAST(i.has_filter AS nvarchar(1))
               FROM sys.indexes AS i
               JOIN sys.data_spaces AS ds ON ds.data_space_id = i.data_space_id
              WHERE i.object_id = OBJECT_ID(N'{table}') AND i.name = N'{IndexName}';
