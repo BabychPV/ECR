@@ -541,6 +541,14 @@ public sealed class CalculationRunConfiguration : IEntityTypeConfiguration<Calcu
         builder.HasIndex(x => new { x.ProjectId, x.FinishedAt }, "IX_CalculationRun_Project_FinishedAt")
                .IncludeProperties(x => new { x.PeriodKey, x.Status, x.ErrorMessage });
 
+        // Q1-04: прибиральник покинутих прогонів (`AbandonedWorkSweeper.CloseCalculationRunsAsync`) щохвилини
+        // читає `Status = 'Running' AND StartedAt < @межа ORDER BY StartedAt`. Жоден з індексів вище цього не
+        // обслуговує (фільтр першого — `Current`, другий починається з `ProjectId`), тож кожну хвилину запит
+        // сканував усю `calc.CalculationRun` (мільйони прогонів). Фільтрований індекс по `Running` має рядки лише
+        // для прогонів, що йдуть просто зараз (одиниці), тож запит — seek по кількох рядках.
+        builder.HasIndex(x => x.StartedAt, "IX_CalculationRun_Running")
+               .HasFilter("[Status] = 'Running'");
+
         builder.HasOne<Project>().WithMany().HasForeignKey(x => x.ProjectId)
                .HasConstraintName("FK_CR_Project");
     }
