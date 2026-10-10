@@ -98,6 +98,13 @@ public sealed class ReportSnapshotCurrencyTests(SqlServerFixture sql)
         Assert.Equal(ErrorCodes.ReportImmutable, refused.ErrorCode);
         Assert.Equal("err.ECR-RPT-0409.periodSubmittedRebuild", refused.Details?["messageKey"]);
 
+        // ⛔ R7-Y7 / Y7-01: синхронна перевірка обробника запиту бачить той самий поданий зріз
+        // і відмовляє 409 ще до постановки задачі.
+        Assert.Equal(
+            submitted,
+            await builder.FindFreshFrozenCurrentAsync(
+                version, document.ProjectId, document.PeriodKey, CancellationToken.None));
+
         var all = await SnapshotsAsync(chain, document);
         var only = Assert.Single(all);
         Assert.Equal(submitted, only.Id);
@@ -183,6 +190,10 @@ public sealed class ReportSnapshotCurrencyTests(SqlServerFixture sql)
             state.Recall("X7-03", firstStepId: null);
             await other.SaveChangesAsync();
         }
+
+        // Після повернення в роботу синхронна перевірка обробника вже не відмовляє.
+        Assert.Null(await builder.FindFreshFrozenCurrentAsync(
+            version, document.ProjectId, document.PeriodKey, CancellationToken.None));
 
         var rebuilt = await builder.BuildAsync(
             version, document.ProjectId, document.PeriodKey, parametersJson: null, CancellationToken.None);

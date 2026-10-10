@@ -316,19 +316,32 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock, IMemory
     /// <see cref="InvalidOperationException"/> <c>JobRetryPolicy.IsWorthRetrying</c> ішов у
     /// гілку «збій дороги» — три повтори (210 с «виконується»), а потім <c>ECR-SYS-0500</c>
     /// («Internal error») на клієнті замість причини й шляху (Reopen).
+    /// <para>
+    /// ⛔ R7-Y7 / Y7-01: та сама відмова, що й синхронна в обробнику запиту
+    /// (<see cref="BuildReportSnapshotHandler.FrozenRefusal"/>) — одне джерело тексту й ключа.
+    /// </para>
     /// </remarks>
     internal static DomainException FrozenRefusal(long frozenId, int projectId, PeriodKey? periodKey)
-        => new(
-            ErrorCodes.ReportImmutable,
-            $"Зріз {frozenId.ToString(CultureInfo.InvariantCulture)} проєкту "
-            + $"{projectId.ToString(CultureInfo.InvariantCulture)} за період "
-            + $"{periodKey?.Value.ToString(CultureInfo.InvariantCulture) ?? "рік"} поданий: нова побудова — лише "
-            + "після повернення даних у роботу (Reopen), ФВ-9.17. Поданий зріз лишається поточним.",
-            new Dictionary<string, object?>
-            {
-                ["messageKey"] = "err.ECR-RPT-0409.periodSubmittedRebuild",
-                ["snapshotId"] = frozenId.ToString(CultureInfo.InvariantCulture),
-            });
+        => BuildReportSnapshotHandler.FrozenRefusal(frozenId, projectId, periodKey?.Value);
+
+    /// <inheritdoc />
+    public async Task<long?> FindFreshFrozenCurrentAsync(
+        int reportVersionId, int projectId, PeriodKey? periodKey, CancellationToken ct)
+    {
+        var reportDefId = await db.ReportVersions
+            .AsNoTracking()
+            .Where(v => v.Id == reportVersionId)
+            .Select(v => (int?)v.ReportDefId)
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+        if (reportDefId is not { } defId)
+        {
+            return null;
+        }
+
+        var frozen = await FrozenCurrentIdsAsync(defId, projectId, periodKey, ct).ConfigureAwait(false);
+        return await FreshFrozenAsync(frozen, projectId, periodKey, dataStatus: null, ct).ConfigureAwait(false);
+    }
 
     /// <inheritdoc />
     /// <remarks>

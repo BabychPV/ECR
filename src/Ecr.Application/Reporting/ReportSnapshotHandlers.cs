@@ -4,8 +4,10 @@ using Ecr.Application.Common;
 using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
+using Ecr.Domain.Abstractions;
 using Ecr.Domain.Enums;
 using Ecr.Domain.Errors;
+using Ecr.Domain.ValueObjects;
 
 namespace Ecr.Application.Reporting;
 
@@ -116,7 +118,8 @@ public sealed class BuildReportSnapshotHandler(
     IReportDefinitionStore definitions,
     IBackgroundJobScheduler jobs,
     IAccessDecisionService access,
-    ICurrentUser currentUser)
+    ICurrentUser currentUser,
+    IReportSnapshotBuilder snapshots)
 {
     /// <summary>Право на побудову зрізу (`02-contracts.md` §9).</summary>
     public const string Permission = "Report.BuildSnapshot";
@@ -136,6 +139,9 @@ public sealed class BuildReportSnapshotHandler(
     /// </exception>
     /// <exception cref="BusinessRuleException">
     /// Значення параметрів не сходяться з оголошеннями версії — <c>ECR-RPT-0422</c>.
+    /// </exception>
+    /// <exception cref="DomainException">
+    /// Поточний зріз звіту за проєкт і період поданий — <c>ECR-RPT-0409</c> (Y7-01).
     /// </exception>
     public async Task<string> HandleAsync(
         string code, int projectId, int periodKey,
@@ -190,11 +196,48 @@ public sealed class BuildReportSnapshotHandler(
         // нема чого — запит давно повернув 202.
         var bound = ReportParameters.Bind(ReportParameters.Of(version.RulesJson), parameters);
 
+        // ⛔ R7-Y7 / Y7-01: поданий поточний зріз (X7-03, ФВ-9.17) — відмова 409 ТУТ, а не
+        // в задачі. Інакше запит повертав 202 «у черзі», а людина дізнавалася про відмову
+        // лише з провалу задачі. Вирішальна перевірка лишається в побудові (під замком
+        // слоту): подання може закомітитись уже після цієї відповіді.
+        if (await snapshots
+                .FindFreshFrozenCurrentAsync(version.Id, projectId, new PeriodKey(periodKey), ct)
+                .ConfigureAwait(false) is { } frozenId)
+        {
+            throw FrozenRefusal(frozenId, projectId, periodKey);
+        }
+
         return await jobs
             .EnqueueAsync<IReportSnapshotJob>(
                 new ReportSnapshotTask(version.Id, projectId, periodKey, bound.Json), ct)
             .ConfigureAwait(false);
     }
+
+    /// <summary>
+    /// Відмова побудови: поточний зріз опису звіту за проєкт і період поданий (X7-03, ФВ-9.17).
+    /// </summary>
+    /// <param name="frozenId">Поданий поточний зріз.</param>
+    /// <param name="projectId">Проєкт.</param>
+    /// <param name="periodKey">Період; <c>null</c> — річний зріз.</param>
+    /// <remarks>
+    /// ⛔ R7-Y7 / Y7-01: ОДНА відмова на обидва місця — синхронну перевірку тут і
+    /// вирішальну в побудові (<c>ReportSnapshotBuilder</c>, R7-Y8 / Y8-01). <see cref="DomainException"/>
+    /// з <c>ECR-RPT-0409</c>: у запиті це <c>409</c> із локалізованим текстом за
+    /// <c>messageKey</c>, у фоновій задачі — вердикт без ретраїв (<c>JobRetryPolicy</c>)
+    /// і код провалу <c>ECR-RPT-0409</c> замість <c>ECR-SYS-0500</c>.
+    /// </remarks>
+    public static DomainException FrozenRefusal(long frozenId, int projectId, int? periodKey)
+        => new(
+            ErrorCodes.ReportImmutable,
+            $"Зріз {frozenId.ToString(CultureInfo.InvariantCulture)} проєкту "
+            + $"{projectId.ToString(CultureInfo.InvariantCulture)} за період "
+            + $"{periodKey?.ToString(CultureInfo.InvariantCulture) ?? "рік"} поданий: нова побудова — лише "
+            + "після повернення даних у роботу (Reopen), ФВ-9.17. Поданий зріз лишається поточним.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-RPT-0409.periodSubmittedRebuild",
+                ["snapshotId"] = frozenId.ToString(CultureInfo.InvariantCulture),
+            });
 }
 
 /// <summary>

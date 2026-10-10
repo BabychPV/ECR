@@ -16,6 +16,22 @@ public interface IReportSnapshotBuilder
     public Task<long> BuildAsync(int reportVersionId, int projectId, PeriodKey? periodKey,
                           string? parametersJson, CancellationToken ct);
 
+    /// <summary>
+    /// Поданий поточний зріз опису звіту за проєкт і період, який нова побудова
+    /// не має права витіснити (X7-03, ФВ-9.17); <c>null</c> — такого немає.
+    /// </summary>
+    /// <param name="reportVersionId">Версія звіту, за якою просять побудову.</param>
+    /// <param name="projectId">Проєкт.</param>
+    /// <param name="periodKey">Період; <c>null</c> — річний зріз.</param>
+    /// <param name="ct">Скасування.</param>
+    /// <remarks>
+    /// ⛔ R7-Y7 / Y7-01: та сама перевірка, що й рання в <see cref="BuildAsync"/>, —
+    /// для синхронної відмови <c>409</c> ДО постановки задачі. Вирішальна лишається
+    /// в побудові (під замком слоту): подання може закомітитись між запитом і задачею.
+    /// </remarks>
+    public Task<long?> FindFreshFrozenCurrentAsync(int reportVersionId, int projectId, PeriodKey? periodKey,
+                                                   CancellationToken ct);
+
     /// <summary>Позначає зріз поданим — після цього він іммутабельний.</summary>
     public Task MarkSubmittedAsync(long snapshotId, int userId, CancellationToken ct);
 
