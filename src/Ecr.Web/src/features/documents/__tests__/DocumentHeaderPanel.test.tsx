@@ -606,6 +606,30 @@ describe('DocumentHeaderPanel: Lookup-поле — picker за довідник�
     });
   });
 
+  it('великий довідник: у списку не більше 50 пунктів, пошук лишається по всьому переліку (C1-04)', async () => {
+    // ⛔ Мутаційний доказ: прибери `limit` у `Select` поля Lookup — у DOM усі 120 пунктів, тест червоніє.
+    const entries = Array.from({ length: 120 }, (_, index) =>
+      registryEntry({ id: 1000 + index, display: `Location ${String(index).padStart(3, '0')}` }),
+    );
+    show({
+      fields: [
+        field({ code: 'LOC', dataType: 'Lookup', value: null, lookupRegistryDefId: 7, label: { values: { en: 'Location' } } }),
+      ],
+      registries: { list: [registryDef({ id: 7, code: 'LOCATIONS' })], entries: { LOCATIONS: entries } },
+    });
+
+    const select = await screen.findByLabelText('Location');
+    await waitFor(() => expect(select.hasAttribute('disabled')).toBe(false));
+
+    fireEvent.click(select);
+    await screen.findByRole('option', { name: 'Location 000' });
+    expect(screen.getAllByRole('option')).toHaveLength(50);
+
+    // Пошук іде по ВСЬОМУ переліку, а не по показаних 50.
+    fireEvent.change(select, { target: { value: 'Location 119' } });
+    expect(await screen.findByRole('option', { name: 'Location 119' })).toBeTruthy();
+  });
+
   it('запис видалено з довідника — не падає, показує зрозумілий стан (id, не порожньо)', async () => {
     show({
       fields: [
