@@ -18,7 +18,7 @@ import type {
 import { useColumnWidths } from '@/features/preferences/columnWidthsSync';
 import { cellAppearanceClassOf, cellAppearanceOf } from './cellAppearance';
 import { cellFormatOf, withCellFormat } from './conditionalAppearance';
-import { cellDisplay, cellText, editorValueOf, isNumericColumn, sameColumnValue } from './cellValue';
+import { cellDisplay, cellText, editorValueOf, isNumericColumn, isTextColumnType, sameColumnValue } from './cellValue';
 import { columnIndexOf, rowIndexOf } from './rowIndex';
 import { planPaste, type PasteRejection } from './clipboard';
 import { parseClipboard, toClipboard } from './tsvClipboard';
@@ -1360,6 +1360,8 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
               baseVersion: versions.get(target.rowKey) ?? null,
               // ⚠ `G1-05`, L8-20: що людина бачила в кеші — за цим упізнається чужа правка.
               before: valueOf(data, target.rowKey, target.columnCode),
+              // ⛔ X2-03: як і в `captureEdit` — текстову колонку звіряти дослівно (`G1-06`).
+              ...(isTextColumnType(column.dataType) ? { text: true } : {}),
             };
           }
         }
@@ -1371,6 +1373,8 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
           isEmpty: false,
           baseVersion: versions.get(target.rowKey) ?? null,
           before: valueOf(data, target.rowKey, target.columnCode),
+          // ⛔ X2-03: без позначки `0012` і `12` для підтвердження «надіслано» — те саме число.
+          ...(isTextColumnType(column?.dataType) ? { text: true } : {}),
         };
       });
 
@@ -1873,6 +1877,8 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
           // ⚠ L8-20: значення кешу в мить кроку — за ним `withKnownVersions`
           // упізнає чужу правку, якщо крок чекатиме повтору.
           before: valueOf(data, edit.rowKey, edit.columnCode, rowsByKey),
+          // ⛔ X2-03: текстова колонка — звіряти дослівно (`G1-06`), як у `captureEdit`.
+          ...(isTextColumnType(columnsByCode.get(edit.columnCode)?.dataType) ? { text: true } : {}),
         })),
       );
     },
