@@ -60,7 +60,7 @@ export function DocumentListFilterBar({
 }: DocumentListFilterBarProps): JSX.Element {
   const noPeriod = periodKey === null;
   // Той самий запит, що в смузі лічильників (`DocumentListSummaryStrip`): один ключ — один мережевий виклик.
-  const summaryStale = useDocumentListSummary(periodKey).data?.staleResultsCount;
+  const summaryStale = useDocumentListSummary(periodKey, undefined, filters.projectId).data?.staleResultsCount;
   const staleCount = summaryStale === undefined ? undefined : Math.max(summaryStale, staleOnPage);
   // ⛔ Поле показує ВЛАСНЕ значення, а не адресу (`useFieldDraft`), як і `FilterBar`: кероване адресою
   // воно губило літери, бо адреса оновлюється переходом і запізнюється.
