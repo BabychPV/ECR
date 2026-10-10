@@ -689,8 +689,20 @@ BEGIN
     --
     -- ⚠ Атомарність ЗА НАСЛІДКОМ зберігається без однієї великої транзакції:
     --    - архів не чіпається до повної звірки (КРОК 2), тож збій посередині
-    --      лишає `arc.*` цілим, а журнал — `Failed`; `ArchiveAwareCellReader`
-    --      і далі читає архів (провалений прогін не рахується);
+    --      лишає `arc.*` цілим, а журнал — `Failed`;
+    --    - ⛔ Z6-01 (аудит 8-го кола): читачі продукту (`NormalizedCellStore`,
+    --      `RowStore`, правило F-13) журнал НЕ питають — вони йдуть в архів лише
+    --      тоді, коли гаряча вибірка порожня. Тож закомічені пакети посеред
+    --      екземпляра показувалися б як «гарячі» дані з дірками замість архіву.
+    --      Тому `CATCH` нижче ПРИБИРАЄ часткову копію: кожен екземпляр, який
+    --      у `doc.*` збігається з архівом до поля (екземпляр, усі його рядки й
+    --      комірки), видаляється з `doc.*` окремою транзакцією — і F-13 знову
+    --      веде читача в архів. Видаляється лише те, що лежить в `arc.*`
+    --      тотожною копією; екземпляр з будь-якою розбіжністю чи гарячим
+    --      надлишком лишається як є і рахується в журналі;
+    --    - ⚠ Скасування запиту клієнтом (attention) чи обрив з'єднання `CATCH`
+    --      не виконують: журнал лишається `Running`, `IsArchiving = 1`, часткова
+    --      копія — у `doc.*`. Такий прогін треба одразу повторити (runbook §7.1);
     --    - вставки ідемпотентні (`NOT EXISTS` по ключу), тож повтор пропускає
     --      вже повернуті рядки і не падає на PK. Саме від застрягання на PK
     --      колись рятувала одна транзакція: версія ще раніше комітила кожну
@@ -880,17 +892,135 @@ BEGIN
     BEGIN CATCH
         IF @@TRANCOUNT > 0 ROLLBACK;
 
+        DECLARE @errMessage nvarchar(2048) = ERROR_MESSAGE();
+        DECLARE @undoNote nvarchar(1000) = N'';
+        DECLARE @undoFailed bit = 0;
+
         -- ⚠ Знахідка — ПІСЛЯ відкату, інакше відкотилася б разом із ним.
         IF ERROR_NUMBER() = 50011
             INSERT INTO aud.ConsistencyIssue (DetectedAt, Severity, RuleCode, EntityType, EntityId, Message)
             VALUES (SYSUTCDATETIME(), 3, N'RESTORE_CHECKSUM', N'Period', @k,
                     N'Розбіжність при розархівації; дані архіву збережено.');
 
+        --------------------------------------------------------------------
+        -- ⛔ Z6-01. Прибирання часткової копії з `doc.*`.
+        --
+        --    Читачі (F-13) обирають гарячу схему, щойно в ній є хоч один рядок
+        --    екземпляра, і журналу не питають. Закомічені пакети КРОКУ 1
+        --    лишали екземпляр із частиною комірок — людина бачила дірки замість
+        --    архіву, розрахунок рахував на неповних входах.
+        --
+        -- ⚠ Сюди доходимо лише з цілим архівом: прибирання `arc.*` — остання
+        --    дія транзакції КРОКУ 2 перед `COMMIT`, і будь-яка помилка до нього
+        --    її відкотила. Тому видалення лише того, що має ТОТОЖНУ копію в
+        --    `arc.*`, не може знищити жодного значення.
+        --
+        -- ⚠ Одиниця — ЕКЗЕМПЛЯР цілком (він сам, усі його рядки й комірки),
+        --    одна транзакція на екземпляр: обірване прибирання не лишає
+        --    екземпляр наполовину. Екземпляр із будь-якою розбіжністю чи
+        --    гарячим надлишком (комірка без двійника, змінене значення,
+        --    перерахований результат) НЕ чіпається — він рахується в журналі.
+        --
+        -- ⚠ Рядки порівнюються з `COLLATE Latin1_General_BIN2`: база CI, і
+        --    правка лише регістру інакше вважалася б «тотожною».
+        --------------------------------------------------------------------
+        BEGIN TRY
+            DECLARE @undo TABLE (PeriodKey int NOT NULL, Id bigint NOT NULL, PRIMARY KEY (PeriodKey, Id));
+            DECLARE @undoInst bigint = 0, @undoRows bigint = 0, @undoCells bigint = 0, @undoKept bigint = 0;
+            DECLARE @uPk int, @uId bigint;
+
+            INSERT INTO @undo (PeriodKey, Id)
+            SELECT d.PeriodKey, d.Id
+            FROM doc.TableInstance AS d
+            WHERE d.PeriodKey BETWEEN @FromPeriodKey AND @ToPeriodKey
+              AND EXISTS (SELECT 1 FROM arc.TableInstance AS a
+                           WHERE a.PeriodKey = d.PeriodKey AND a.Id = d.Id
+                             AND EXISTS (SELECT a.DocumentId, a.TableDefId, a.CreatedAt, a.ModifiedAt
+                                         INTERSECT
+                                         SELECT d.DocumentId, d.TableDefId, d.CreatedAt, d.ModifiedAt))
+              AND NOT EXISTS (SELECT 1 FROM doc.TableRow AS r
+                               WHERE r.PeriodKey = d.PeriodKey AND r.TableInstanceId = d.Id
+                                 AND NOT EXISTS (
+                                     SELECT 1 FROM arc.TableRow AS ar
+                                      WHERE ar.PeriodKey = r.PeriodKey AND ar.Id = r.Id
+                                        AND EXISTS (SELECT ar.TableInstanceId, ar.RowKey COLLATE Latin1_General_BIN2,
+                                                           ar.RowDefId, ar.Ordinal, ar.IsDeleted, ar.IsOrphaned, ar.ModifiedAt
+                                                    INTERSECT
+                                                    SELECT r.TableInstanceId, r.RowKey COLLATE Latin1_General_BIN2,
+                                                           r.RowDefId, r.Ordinal, r.IsDeleted, r.IsOrphaned, r.ModifiedAt)))
+              AND NOT EXISTS (SELECT 1 FROM doc.TableRow AS r
+                               JOIN doc.CellValue AS c ON c.PeriodKey = r.PeriodKey AND c.TableRowId = r.Id
+                               WHERE r.PeriodKey = d.PeriodKey AND r.TableInstanceId = d.Id
+                                 AND NOT EXISTS (
+                                     SELECT 1 FROM arc.CellValue AS ac
+                                      WHERE ac.PeriodKey = c.PeriodKey AND ac.TableRowId = c.TableRowId
+                                        AND ac.ColumnDefId = c.ColumnDefId
+                                        AND EXISTS (SELECT ac.TableDefId, ac.ValueString COLLATE Latin1_General_BIN2,
+                                                           ac.ValueNumeric, ac.ValueDate, ac.ValueBool,
+                                                           CAST(ac.ValueRegistryEntryId AS bigint), ac.ValueUnitId,
+                                                           ac.IsCalculated, ac.IsEmpty
+                                                    INTERSECT
+                                                    SELECT c.TableDefId, c.ValueString COLLATE Latin1_General_BIN2,
+                                                           c.ValueNumeric, c.ValueDate, c.ValueBool,
+                                                           CAST(c.ValueRegistryEntryId AS bigint), c.ValueUnitId,
+                                                           c.IsCalculated, c.IsEmpty)));
+
+            -- Екземпляри з двійником в архіві, які прибирання лишає (розбіжність чи надлишок).
+            SELECT @undoKept = COUNT_BIG(*)
+            FROM doc.TableInstance AS d
+            WHERE d.PeriodKey BETWEEN @FromPeriodKey AND @ToPeriodKey
+              AND EXISTS (SELECT 1 FROM arc.TableInstance AS a WHERE a.PeriodKey = d.PeriodKey AND a.Id = d.Id)
+              AND NOT EXISTS (SELECT 1 FROM @undo AS u WHERE u.PeriodKey = d.PeriodKey AND u.Id = d.Id);
+
+            WHILE 1 = 1
+            BEGIN
+                SELECT @uPk = NULL, @uId = NULL;
+                SELECT TOP (1) @uPk = PeriodKey, @uId = Id FROM @undo ORDER BY PeriodKey, Id;
+                IF @uId IS NULL BREAK;
+
+                BEGIN TRAN;
+                    DELETE c
+                    FROM doc.CellValue AS c
+                    JOIN doc.TableRow AS r ON r.PeriodKey = c.PeriodKey AND r.Id = c.TableRowId
+                    WHERE c.PeriodKey = @uPk AND r.PeriodKey = @uPk AND r.TableInstanceId = @uId;
+                    SET @undoCells = @undoCells + @@ROWCOUNT;
+
+                    DELETE FROM doc.TableRow WHERE PeriodKey = @uPk AND TableInstanceId = @uId;
+                    SET @undoRows = @undoRows + @@ROWCOUNT;
+
+                    DELETE FROM doc.TableInstance WHERE PeriodKey = @uPk AND Id = @uId;
+                    SET @undoInst = @undoInst + @@ROWCOUNT;
+                COMMIT;
+
+                DELETE FROM @undo WHERE PeriodKey = @uPk AND Id = @uId;
+            END;
+
+            IF @undoInst > 0 OR @undoKept > 0
+                SET @undoNote = N' | Часткову копію прибрано з doc.* (Z6-01): екземплярів '
+                    + CAST(@undoInst AS nvarchar(20)) + N', рядків ' + CAST(@undoRows AS nvarchar(20))
+                    + N', комірок ' + CAST(@undoCells AS nvarchar(20))
+                    + CASE WHEN @undoKept > 0
+                           THEN N'; лишено з розбіжністю: екземплярів ' + CAST(@undoKept AS nvarchar(20))
+                           ELSE N'' END
+                    + N'.';
+        END TRY
+        BEGIN CATCH
+            IF @@TRANCOUNT > 0 ROLLBACK;
+            SET @undoFailed = 1;
+            SET @undoNote = N' | Прибрати часткову копію з doc.* не вдалося (Z6-01): '
+                + LEFT(ERROR_MESSAGE(), 400)
+                + N'. IsArchiving лишено 1 — повторіть розархівацію.';
+        END CATCH;
+
         UPDATE itg.ArchiveRun
-           SET Status = N'Failed', FinishedAt = SYSUTCDATETIME(), ErrorMessage = ERROR_MESSAGE()
+           SET Status = N'Failed', FinishedAt = SYSUTCDATETIME(),
+               ErrorMessage = LEFT(@errMessage + @undoNote, 2000)
          WHERE Id IN (SELECT RunId FROM @Runs);
 
-        UPDATE doc.Project SET IsArchiving = 0 WHERE Id IN (SELECT ProjectId FROM @Runs);
+        -- ⚠ Не прибрали часткову копію — правки лишаються заблокованими
+        --    (`EditRules`: `ArchivingInProgress`), доки повтор не доведе повернення.
+        IF @undoFailed = 0
+            UPDATE doc.Project SET IsArchiving = 0 WHERE Id IN (SELECT ProjectId FROM @Runs);
         THROW;
     END CATCH;
 
