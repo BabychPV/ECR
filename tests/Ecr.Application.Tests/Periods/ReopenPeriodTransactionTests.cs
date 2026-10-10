@@ -329,6 +329,57 @@ public sealed class ReopenPeriodTransactionTests(SqlServerFixture sql)
         Assert.Equal(enlists, inTransaction);
     }
 
+    /// <remarks>
+    /// ⛔ X1-05 / W1-07 (аудит R11). Період ефективно закритий (межа закриття минула), а збережений
+    /// стан до години лишається <c>Grace</c> — адміністратор бачить «Закрито», а Reopen відмовляв
+    /// <c>ECR-PRD-0409</c> «лише закритий». Тепер збережений стан доганяє ефективний тією ж
+    /// транзакцією, і відкриття проходить. Мутація: прибрати блок `AdvanceTo(Closed)` — червоний.
+    /// </remarks>
+    [Theory]
+    [InlineData(PeriodState.Grace)]
+    [InlineData(PeriodState.Open)]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "X1-05")]
+    public async Task Ефективно_закритий_період_зі_збереженим_відкритим_станом_відкривається(PeriodState stored)
+    {
+        var arranged = await ArrangeAsync(stored, activeProject: true).ConfigureAwait(true);
+
+        await using (var db = CreateContext())
+        {
+            await Handler(new PeriodStore(db), db, new UnitOfWork(db), arranged.ProjectId)
+                .HandleAsync(arranged.PeriodId, "уточнення за скаргою", Now.AddDays(3), CancellationToken.None)
+                .ConfigureAwait(true);
+        }
+
+        await using var check = CreateContext();
+        var period = await check.Periods.AsNoTracking().SingleAsync(p => p.Id == arranged.PeriodId).ConfigureAwait(true);
+        Assert.Equal(PeriodState.Grace, period.State);
+        Assert.Equal(Now.AddDays(3), period.ReopenedUntil);
+        Assert.Equal(1, await AuditRowsAsync(arranged.PeriodId).ConfigureAwait(true));
+    }
+
+    /// <remarks>
+    /// X1-05: доганяння стану — лише для АКТИВНОГО проєкту (як у рішенні про запис): період чернетки
+    /// за датами не просувається, і збережений `Grace` лишається «не закритим» — відмова як і була.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "X1-05")]
+    public async Task Період_чернетки_зі_збереженим_Grace_не_відкривається_як_закритий()
+    {
+        var arranged = await ArrangeAsync(PeriodState.Grace).ConfigureAwait(true);
+
+        await using var db = CreateContext();
+        var error = await Assert.ThrowsAsync<DomainException>(
+            () => Handler(new PeriodStore(db), db, new UnitOfWork(db), arranged.ProjectId)
+                .HandleAsync(arranged.PeriodId, "уточнення", Now.AddDays(3), CancellationToken.None))
+            .ConfigureAwait(true);
+
+        Assert.Equal("err.ECR-PRD-0409.reopenOnlyClosed", error.Details!["messageKey"]);
+    }
+
     private ReopenPeriodHandler Handler(
         IPeriodStore periods, EcrDbContext db, IUnitOfWork uow, int projectId,
         GrantLevel projectGrant = GrantLevel.Manage, IBackgroundJobScheduler? jobs = null,
@@ -364,7 +415,7 @@ public sealed class ReopenPeriodTransactionTests(SqlServerFixture sql)
     }
 
     /// <summary>Проєкт із періодом у заданому стані.</summary>
-    private async Task<Arranged> ArrangeAsync(PeriodState state)
+    private async Task<Arranged> ArrangeAsync(PeriodState state, bool activeProject = false)
     {
         await using var db = CreateContext();
         var tag = Guid.NewGuid().ToString("N")[..10];
@@ -387,6 +438,12 @@ public sealed class ReopenPeriodTransactionTests(SqlServerFixture sql)
             templateVersionId: version.Id, PeriodKind.Monthly, periodPolicyId: 1, "Asia/Atyrau");
         db.Projects.Add(project);
         await db.SaveChangesAsync().ConfigureAwait(false);
+
+        if (activeProject)
+        {
+            project.Activate(Now);
+            await db.SaveChangesAsync().ConfigureAwait(false);
+        }
 
         var period = new Period(
             project.Id, new PeriodKey(PeriodKeyValue), 1,
