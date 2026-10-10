@@ -44,6 +44,10 @@ public sealed class WindowsSidCollisionTests
     {
         _clock.UtcNow.Returns(Now);
         _hasher.Hash(Arg.Any<string>()).Returns("new-hash");
+
+        // Z4-01: заміна SID іде в транзакції — підставний UoW виконує її тіло, як справжній.
+        _uow.ExecuteInTransactionAsync(Arg.Any<Func<CancellationToken, Task>>(), Arg.Any<CancellationToken>())
+            .Returns(call => call.Arg<Func<CancellationToken, Task>>()(CancellationToken.None));
         _actor = _users.Seed(new User("admin", "Admin", AuthProvider.Local));
         _users.Roles.Add(new RoleView(1, "Admins", IsBuiltIn: false, IsActive: true, ["Security.ManageUsers"], []));
         _current.UserId.Returns(_actor.Id);

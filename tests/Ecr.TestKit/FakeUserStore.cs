@@ -659,6 +659,20 @@ public sealed class FakeUserStore : IUserStore
     }
 
     /// <inheritdoc />
+    public Task<bool> TryCorrectUnconfirmedWindowsSidAsync(
+        int userId, string windowsSid, string securityStamp, CancellationToken ct)
+    {
+        var user = _users.Find(u => u.Id == userId);
+        if (user is null || user.Provider != AuthProvider.Windows || user.LastSignInAt is not null)
+        {
+            return Task.FromResult(false);
+        }
+
+        user.CorrectUnconfirmedWindowsSid(windowsSid);
+        return Task.FromResult(true);
+    }
+
+    /// <inheritdoc />
     public Task<bool> TryRegisterSuccessfulLoginAsync(int userId, DateTime utcNow, CancellationToken ct)
     {
         var user = _users.Find(u => u.Id == userId);

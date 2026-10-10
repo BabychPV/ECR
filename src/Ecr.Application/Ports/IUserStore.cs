@@ -363,6 +363,22 @@ public interface IUserStore
         int userId, int maxFailedAttempts, int lockoutMinutes, DateTime utcNow, CancellationToken ct);
 
     /// <summary>
+    /// Виправляє SID доменного запису, ЯКЩО він ще не входив, — одним <c>UPDATE</c> з умовою (Z4-01).
+    /// </summary>
+    /// <param name="userId">Обліковий запис.</param>
+    /// <param name="windowsSid">Канонічний SID.</param>
+    /// <param name="securityStamp">Новий штамп (виправлення міняє зіставлення — сесій немає, але правило одне).</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns><c>true</c> — SID замінено; <c>false</c> — запис уже входив (чи не доменний, чи зник): нічого не змінено.</returns>
+    /// <remarks>
+    /// ⛔ «Не входив» перевірялося на сутності, прочитаній ДО запису, а <c>SaveChanges</c> писав SID безумовно: вхід,
+    /// що встиг між читанням і записом, лишав підтверджений каталогом SID перезаписаним — ролі чужої людини.
+    /// Умова <c>LastSignInAt IS NULL</c> тепер у самому <c>UPDATE</c>. Сутність у пам'яті НЕ змінюється.
+    /// </remarks>
+    public Task<bool> TryCorrectUnconfirmedWindowsSidAsync(
+        int userId, string windowsSid, string securityStamp, CancellationToken ct);
+
+    /// <summary>
     /// РЕЗЕРВУЄ спробу входу АТОМАРНО — до перевірки пароля (AN-90/L1-03, ФВ-6.4a).
     /// </summary>
     /// <param name="userId">Обліковий запис.</param>

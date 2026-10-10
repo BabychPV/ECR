@@ -1063,6 +1063,33 @@ public sealed class UserStore(EcrDbContext db, SelfStampRotation? selfRotation =
     }
 
     /// <inheritdoc />
+    public async Task<bool> TryCorrectUnconfirmedWindowsSidAsync(
+        int userId, string windowsSid, string securityStamp, CancellationToken ct)
+    {
+        await db.Database.OpenConnectionAsync(ct).ConfigureAwait(false);
+        try
+        {
+            await using var command = db.Database.GetDbConnection().CreateCommand();
+            command.Transaction = db.Database.CurrentTransaction?.GetDbTransaction();
+            command.CommandText = """
+                UPDATE sec.[User]
+                SET WindowsSid = @sid, SecurityStamp = @stamp
+                WHERE Id = @id AND Provider = @windows AND LastSignInAt IS NULL;
+                """;
+            Add(command, "@id", System.Data.DbType.Int32, userId);
+            Add(command, "@sid", System.Data.DbType.String, windowsSid);
+            Add(command, "@stamp", System.Data.DbType.String, securityStamp);
+            Add(command, "@windows", System.Data.DbType.Byte, (byte)AuthProvider.Windows);
+
+            return await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false) > 0;
+        }
+        finally
+        {
+            await db.Database.CloseConnectionAsync().ConfigureAwait(false);
+        }
+    }
+
+    /// <inheritdoc />
     public async Task<bool> TryRegisterSuccessfulLoginAsync(int userId, DateTime utcNow, CancellationToken ct)
     {
         await db.Database.OpenConnectionAsync(ct).ConfigureAwait(false);
