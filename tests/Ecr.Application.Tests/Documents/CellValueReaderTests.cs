@@ -87,7 +87,9 @@ public sealed class CellValueReaderTests
     [InlineData("01.04.2024", 2024, 4, 1)]
     [InlineData("13.5.2024", 2024, 5, 13)]
     [InlineData("2024-04-01", 2024, 4, 1)]
-    [InlineData("1/4/2024", 2024, 4, 1)]
+    [InlineData("13/4/2024", 2024, 4, 13)]
+    [InlineData("4/4/2024", 2024, 4, 4)]
+    [InlineData("2024/04/01", 2024, 4, 1)]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
     public void Дата_у_природному_порядку_дня_і_місяця_не_переставляється(
         string wire, int year, int month, int day)
@@ -106,6 +108,28 @@ public sealed class CellValueReaderTests
 
         Assert.NotNull(data);
         Assert.Equal(new DateTime(year, month, day, 0, 0, 0, DateTimeKind.Utc), data.ValueDate);
+    }
+
+    [Theory]
+    [InlineData("1/4/2024")]
+    [InlineData("4/1/2024")]
+    [InlineData("01/04/2024")]
+    [InlineData("4/13/2024")]
+    [InlineData("4/1/2024 10:30")]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Finding", "Y5-02")]
+    public void Неоднозначна_або_американська_слеш_дата_відхиляється_а_не_вгадується(string wire)
+    {
+        // ⛔ Y5-02 (аудит 7). `4/1/2024` — 1 квітня в en-US і 4 січня в en-GB/uk; Excel
+        // пише дату регіональним форматом, тож порядок невідомий. Доти `4/1/2024` ставало
+        // 4 січня (точний `d/M`), а `4/13/2024` — 13 квітня (фолбек Invariant `M/d`):
+        // в одному файлі частина дат тихо мінялася місцями.
+        // Мутація: прибрати `IsAmbiguousSlashDate` у `CellDateParser.TryParse` — перші три
+        // розбираються як `d/M`; повернути фолбек для слеш-дат — четвертий стає 13 квітня.
+        var error = Assert.Throws<BusinessRuleException>(
+            () => CellValueReader.Read(FromWire(wire), Column(CellDataType.Date)));
+
+        Assert.Equal("ECR-CELL-0422", error.ErrorCode);
     }
 
     [Fact]
