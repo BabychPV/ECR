@@ -188,7 +188,12 @@ public sealed class CollectionJob(
             throw;
         }
 
-        if (schedule is not null)
+        // ⛔ I1-06: `Degraded` (джерело відмовило чи не вклалося в час; діапазон непокритий і піде в наздоганяння) -
+        // НЕ успішний прогін розкладу. `LastRunAt` читає залежність (ФВ-13.15: «спершу залежний, потім цей»), і
+        // «відбіг» на відмові джерела пускав залежні розклади збирати, коли їхні вхідні дані не підтягнуто; а
+        // watermark рухається лише за успішним прогоном. Залежність не блокує вічно (`MaxDependencyStaleness`), а
+        // наступний тик за cron повторить збір.
+        if (schedule is not null && summary?.Degraded != true)
         {
             // Watermark рухається лише за успішним прогоном і лише вперед.
             await SaveRunAsync(db, schedule, now, to, ct).ConfigureAwait(false);

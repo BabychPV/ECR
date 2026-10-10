@@ -659,7 +659,8 @@ public sealed partial class CollectionRunner(
         // нічого не дало, щопрогону ставила б матеріалізацію (і SkippedPeriodClosed) закритому місяцю.
         return new CollectionRunSummary(
             earliestWritten is { } changed && changed < fromUtc ? changed : fromUtc,
-            retrieved);
+            retrieved,
+            Degraded: failureCode is not null);
     }
 
     /// <summary>Конверт причини (<c>Q-326</c>): ключ каталогу й параметри підстановки.</summary>

@@ -41,9 +41,13 @@ public interface ICollectionRunner
 /// якщо наздоганяння записало давніші точки, мітка найранішої з них.
 /// </param>
 /// <param name="PointsWritten">Скільки точок записано.</param>
+/// <param name="Degraded">
+/// Прогін закрито <c>Degraded</c>: джерело відмовило чи не вклалося в час, частину діапазону не прочитано (піде
+/// в наздоганяння). Точки, що встигли записатися, - записані; але це НЕ успішний прогін розкладу (I1-06).
+/// </param>
 /// <remarks>
 /// ⛔ Аудит I1-01: без цього матеріалізація ставилася лише на запитане вікно, і
 /// точки, які наздоганяння дописало за минулий місяць, у його комірки не
 /// потрапляли ніколи — звіт ішов із заниженим числом.
 /// </remarks>
-public sealed record CollectionRunSummary(DateTime ReadFromUtc, int PointsWritten);
+public sealed record CollectionRunSummary(DateTime ReadFromUtc, int PointsWritten, bool Degraded = false);
