@@ -1401,6 +1401,11 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
 
         touchHistory();
         saveThroughStore(edits);
+
+        // ⛔ F6-03: що не вмістилося в таблицю, не вставлено — і людині це сказано.
+        if (plan.clipped.rows > 0 || plan.clipped.columns > 0) {
+          showWarning(t('grid.pasteClipped', { rows: plan.clipped.rows, columns: plan.clipped.columns }));
+        }
       };
 
       // ⛔ `ФВ-2.16`: вставка в комірки `AllowWithConfirmation` ішла повз діалог

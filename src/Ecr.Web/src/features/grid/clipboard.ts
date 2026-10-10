@@ -218,6 +218,12 @@ interface PastePlan {
   targets: PasteTarget[];
   /** Заборонені комірки з причинами — їх показують користувачеві. */
   rejected: PasteRejection[];
+  /**
+   * F6-03: скільки рядків буфера не вмістилося нижче таблиці й скільки колонок —
+   * правіше. Не вставляються (рядків, яких у документі немає, вставка не
+   * створює), але й не зникають мовчки: людині кажуть, скільки відкинуто.
+   */
+  clipped: { rows: number; columns: number };
 }
 
 /** Чи можна писати в комірку і чому ні. */
@@ -264,9 +270,11 @@ function ambiguityOf(value: string, locale: string): string | null {
  * Без нього перевіряються ВСІ колонки: безпечніше відхилити `1,234` у
  * текстовій колонці, ніж тихо записати `1.234` у десяткову.
  *
- * ⚠ Буфер, більший за сітку, обрізається мовчки — це нормальна поведінка
- * Excel: вставка в кут таблиці не має створювати рядків, яких у документі
- * немає.
+ * ⚠ Буфер, більший за сітку, обрізається — це нормальна поведінка Excel:
+ * вставка в кут таблиці не має створювати рядків, яких у документі немає.
+ * ⛔ F6-03: але НЕ мовчки. Доти людина бачила «вставилося» і не помічала, що
+ * дві третини скопійованих рядків не потрапили — рівно той наслідок, через
+ * який вище відхиляється весь батч. Скільки відкинуто — у `clipped`.
  */
 export function planPaste(
   matrix: ClipboardMatrix,
@@ -309,5 +317,14 @@ export function planPaste(
     }
   }
 
-  return rejected.length > 0 ? { targets: [], rejected } : { targets, rejected };
+  // ⚠ Рахується від буфера, а не від циклу: цикл зупиняється на краю таблиці.
+  const clipped = {
+    rows: Math.max(0, anchor.rowIndex + matrix.length - rowKeys.length),
+    columns: Math.max(
+      0,
+      anchor.columnIndex + matrix.reduce((widest, row) => Math.max(widest, row.length), 0) - columnCodes.length,
+    ),
+  };
+
+  return rejected.length > 0 ? { targets: [], rejected, clipped } : { targets, rejected, clipped };
 }
