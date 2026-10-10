@@ -18511,6 +18511,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Звітний період змін (AN-98); без нього — усі. Чужі періоди відсіює сервер до сторінки.",
+            "in": "query",
+            "name": "periodKey",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
           }
         ],
         "responses": {

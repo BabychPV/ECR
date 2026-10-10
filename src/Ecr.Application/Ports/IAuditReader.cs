@@ -132,6 +132,11 @@ public sealed record StructureChangeView(
 /// Застосовується в SQL ДО <c>TOP</c>/курсора, тож сторінка, <c>nextCursor</c> і підрахунок рахуються по видимих;
 /// порожній перелік — жодного рядка. Колонка, якої немає в переліку, невидима (закрито за замовчуванням).
 /// </param>
+/// <param name="PeriodKey">
+/// AN-98 (N3-07): звітний період змін; <c>null</c> — усі. Це вісь, відмінна від вікна <c>ChangedAt</c> (місяць зміни ≠
+/// звітний період), тож без неї історія комірки збирала зміни ВСІХ періодів документа, а клієнт відсіював чужі вже
+/// після того, як сервер віддав сторінку.
+/// </param>
 public sealed record CellChangeFilter(
     DateTime From,
     DateTime To,
@@ -142,7 +147,8 @@ public sealed record CellChangeFilter(
     string? Origin = null,
     bool LateOnly = false,
     string? Query = null,
-    IReadOnlyList<int>? VisibleColumnIds = null)
+    IReadOnlyList<int>? VisibleColumnIds = null,
+    int? PeriodKey = null)
 {
     /// <summary>Фільтр адресує РІВНО ОДНУ комірку — документ, рядок і колонку.</summary>
     /// <remarks>
@@ -163,6 +169,15 @@ public sealed record CellChangeFilter(
     /// </remarks>
     public bool IsCellAddressWithoutDocument
         => DocumentId is null && (RowKey is not null || ColumnDefId is not null);
+
+    /// <summary>Порядок сторінки: історія ОДНІЄЇ комірки — найновіші першими, загальний журнал — від найстаріших.</summary>
+    /// <remarks>
+    /// ⚠ AN-98: історія комірки відповідає на «що з цим числом було останнім», тож перша сторінка мусить починатися
+    /// з найсвіжішої зміни; «найстаріші 50 за рік» ховали її за першими правками. Загальний журнал лишається за
+    /// зростанням (гортання аудитора від початку вікна). Обидва порядки — за кластерним ключем таблиці
+    /// <c>(ChangedAt, Id)</c> (P1-07): прямий або зворотний обхід індексу без сортування вікна.
+    /// </remarks>
+    public bool NewestFirst => IsSingleCell;
 }
 
 /// <summary>Фільтр загального журналу структурних змін (<c>BE-16</c>).</summary>
