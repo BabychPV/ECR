@@ -175,9 +175,29 @@ internal static partial class WorkerProgram
             return ExitSchemaIncompatible;
         }
 
+        return await RunBuiltChildAsync(host, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Робочий цикл уже побудованого дочірнього хоста зі скиданням метрик ДО його звільнення.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Y6-02: тут стояло <c>try { host.RunAsync } finally { Flush(host.Services) }</c>. Розширення
+    /// <c>RunAsync</c> у власному <c>finally</c> звільняє хост, а звільнений <c>ServiceProvider</c>
+    /// на <c>GetService</c> кидає <see cref="ObjectDisposedException"/> — тож КОЖНА штатна зупинка
+    /// справжнього <c>--child</c> закінчувалася необробленим винятком (код <c>0xE0434352</c>, подія
+    /// «Application Error»), а справжній виняток з <c>RunAsync</c> підмінявся цим. Тому
+    /// <c>RunAsync</c> розгорнуто: старт і очікування зупинки (<c>StopAsync</c> усередині),
+    /// скидання буфера, а звільнення хоста лишається власникові (<c>using</c> у викликача).
+    /// </remarks>
+    internal static async Task<int> RunBuiltChildAsync(IHost host, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(host);
+
         try
         {
-            await host.RunAsync(cancellationToken).ConfigureAwait(false);
+            await host.StartAsync(cancellationToken).ConfigureAwait(false);
+            await host.WaitForShutdownAsync(cancellationToken).ConfigureAwait(false);
         }
         finally
         {

@@ -13,7 +13,7 @@ namespace Ecr.Architecture.Tests;
 public sealed class WorkerChildSchemaCheckTests
 {
     /// <remarks>
-    /// Мутації: прибрати виклик <c>CheckSchemaAsync</c> або перенести його після <c>host.RunAsync</c> → червоний;
+    /// Мутації: прибрати виклик <c>CheckSchemaAsync</c> або перенести його після <c>RunBuiltChildAsync</c> → червоний;
     /// прибрати <c>return ExitSchemaIncompatible</c> → червоний.
     /// </remarks>
     [Fact]
@@ -32,10 +32,11 @@ public sealed class WorkerChildSchemaCheckTests
         var build = body.IndexOf("using var host = builder.Build();", StringComparison.Ordinal);
         var check = body.IndexOf("await CheckSchemaAsync(host.Services", StringComparison.Ordinal);
         var refuse = body.IndexOf("return ExitSchemaIncompatible;", StringComparison.Ordinal);
-        var run = body.IndexOf("await host.RunAsync(", StringComparison.Ordinal);
+        // Y6-02: цикл хоста винесено в RunBuiltChildAsync (скидання метрик ДО звільнення хоста).
+        var run = body.IndexOf("await RunBuiltChildAsync(host,", StringComparison.Ordinal);
 
         Assert.True(build > 0 && check > build, "звірки схеми немає після Build()");
-        Assert.True(refuse > check && run > refuse, "звірка схеми не стоїть ДО host.RunAsync з відмовою");
+        Assert.True(refuse > check && run > refuse, "звірка схеми не стоїть ДО RunBuiltChildAsync з відмовою");
 
         var helper = source[end..];
         Assert.Contains("SchemaValidator.MigrationMismatchAsync(", helper, StringComparison.Ordinal);
