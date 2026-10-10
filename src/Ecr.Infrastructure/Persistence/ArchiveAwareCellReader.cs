@@ -51,6 +51,60 @@ public sealed class ArchiveAwareCellReader(EcrDbContext db)
         return archived == Domain.Entities.Integration.ArchiveRun.ToArchive;
     }
 
+    /// <summary>
+    /// Які з екземплярів, знайдених у ГАРЯЧІЙ схемі, за журналом прогонів зараз лежать в архіві
+    /// (останній завершений прогін їхнього проєкту й періоду — <c>ToArchive</c>).
+    /// </summary>
+    /// <param name="tableInstanceIds">Екземпляри з гарячої вибірки.</param>
+    /// <param name="periodKeys">Періоди цих екземплярів (для відсікання партицій).</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⛔ V8-02 (Z6-01). Гарячий рядок не доводить, що рік уже повернуто: КРОК 1
+    /// <c>arc.usp_RestoreYear</c> комітить пакети окремо (екземпляри, рядки, потім комірки), і збій
+    /// посередині лишає в <c>doc.*</c> частину року, журнал — <c>Failed</c>, а <c>arc.*</c> — цілим.
+    /// Доти читачі переходили на архів лише за порожньою гарячою вибіркою й показували цю частину як
+    /// повні дані. Той самий критерій, що <see cref="IsArchivedAsync"/>, — ОДНИМ запитом на весь пакет
+    /// (кількість звернень не росте з кількістю таблиць).
+    /// </remarks>
+    public async Task<IReadOnlySet<long>> ArchivedOfHotInstancesAsync(
+        IReadOnlyCollection<long> tableInstanceIds, IReadOnlyCollection<int> periodKeys, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(tableInstanceIds);
+        ArgumentNullException.ThrowIfNull(periodKeys);
+        if (tableInstanceIds.Count == 0 || periodKeys.Count == 0)
+        {
+            return new HashSet<long>();
+        }
+
+        var ids = tableInstanceIds.Distinct().ToList();
+        var periods = periodKeys.Distinct().ToList();
+
+        var latest = await (
+                from t in db.TableInstances.AsNoTracking()
+                where periods.Contains(t.PeriodKeyValue) && ids.Contains(t.Id)
+                join d in db.Documents.AsNoTracking() on t.DocumentId equals d.Id
+                select new
+                {
+                    t.Id,
+                    Direction = db.ArchiveRuns
+                        .Where(r => r.ProjectId == d.ProjectId
+                                    && r.Status == "Completed"
+                                    && r.FromPeriodKey <= t.PeriodKeyValue
+                                    && r.ToPeriodKey >= t.PeriodKeyValue)
+                        .OrderByDescending(r => r.StartedAt)
+                        .ThenByDescending(r => r.Id)
+                        .Select(r => r.Direction)
+                        .FirstOrDefault(),
+                })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        return latest
+            .Where(x => x.Direction == Domain.Entities.Integration.ArchiveRun.ToArchive)
+            .Select(x => x.Id)
+            .ToHashSet();
+    }
+
     /// <summary>Читає комірки періоду звідти, де вони зараз лежать.</summary>
     /// <param name="projectId">Проєкт.</param>
     /// <param name="tableInstanceId">Екземпляр таблиці.</param>

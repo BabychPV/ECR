@@ -1,4 +1,5 @@
 using System.Globalization;
+using Ecr.Infrastructure.Persistence;
 using Ecr.TestKit;
 using Microsoft.Data.SqlClient;
 using Xunit;
@@ -178,6 +179,116 @@ public sealed class ArchiveBatchSizeTests(SqlServerFixture sql)
         Assert.Equal(0, await CountAsync("arc.TableRow"));
         Assert.Equal(0, await CountAsync("arc.TableInstance"));
     }
+
+    /// <summary>
+    /// V8-02 (Z6-01): після збою посеред КРОКУ 1 <c>arc.usp_RestoreYear</c> читачі зрізу беруть архів, а не
+    /// закомічену частину року з гарячої схеми.
+    /// </summary>
+    /// <remarks>
+    /// Доти <c>NormalizedCellStore</c> переходив на архів лише за порожньою гарячою вибіркою: частина комірок
+    /// (пакети до збою) показувалася як повний зріз, решта — порожніми, хоча журнал (<c>Failed</c>) і архів кажуть
+    /// «рік в архіві».
+    /// Мутація: прибрати перевірку <c>ArchivedOfHotInstancesAsync</c> у <c>SliceOrArchiveAsync</c>/
+    /// <c>SlicesOrArchiveAsync</c> — зріз коротший за архів, червоний.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "V8-02")]
+    public async Task Після_збою_посеред_розархівації_зріз_читається_з_архіву_а_не_частково_з_гарячої_схеми()
+    {
+        const int period = 202805;
+        var doc = await new TestDocumentBuilder(sql.ConnectionString)
+            .BuildAsync(periodKey: period, columnCount: 3, rowCount: 5, ct: CancellationToken.None);
+
+        var value = 1m;
+        foreach (var row in doc.RowIds)
+        {
+            foreach (var column in doc.ColumnDefIds.Skip(1))
+            {
+                await ExecuteAsync($"""
+                    INSERT INTO doc.CellValue
+                        (PeriodKey, TableRowId, ColumnDefId, TableDefId, ValueNumeric, IsCalculated, IsEmpty)
+                    VALUES ({period}, {row}, {column}, {doc.TableDefId},
+                            {value.ToString(CultureInfo.InvariantCulture)}, 0, 0);
+                    """);
+                value += 1m;
+            }
+        }
+
+        await ExecuteAsync($"""
+            UPDATE doc.Project SET Status = 4, ClosedAt = '2020-01-01'
+             WHERE Id IN (SELECT DISTINCT ProjectId FROM doc.Period WHERE PeriodKey = {period});
+            """);
+
+        var expected = await InstanceCellsAsync("doc", doc.TableInstanceId, period);
+        Assert.True(expected >= 10, $"фікстура замала: комірок {expected}");
+
+        await ExecuteAsync(
+            $"EXEC arc.usp_ArchiveYear @ProjectId = {doc.ProjectId}, "
+            + $"@FromPeriodKey = {period}, @ToPeriodKey = {period};");
+
+        var lastRow = doc.RowIds.Max();
+        var lastColumn = doc.ColumnDefIds.Skip(1).Max();
+        await ExecuteAsync($"""
+            CREATE TRIGGER doc.TR_RestorePartialReadTest ON doc.CellValue AFTER INSERT AS
+            BEGIN
+                SET NOCOUNT ON;
+                IF EXISTS (SELECT 1 FROM inserted
+                            WHERE PeriodKey = {period} AND TableRowId = {lastRow} AND ColumnDefId = {lastColumn})
+                    THROW 50999, N'Штучний збій на останньому пакеті (тест).', 1;
+            END
+            """);
+
+        try
+        {
+            await Assert.ThrowsAsync<SqlException>(() => ExecuteAsync(
+                $"EXEC arc.usp_RestoreYear @ProjectId = {doc.ProjectId}, "
+                + $"@FromPeriodKey = {period}, @ToPeriodKey = {period}, @BatchSize = 3;"));
+        }
+        finally
+        {
+            await ExecuteAsync("DROP TRIGGER doc.TR_RestorePartialReadTest;");
+        }
+
+        // Передумова: у гарячій схемі справді частина комірок екземпляра, архів цілий.
+        Assert.InRange(await InstanceCellsAsync("doc", doc.TableInstanceId, period), 1, expected - 1);
+        Assert.Equal(expected, await InstanceCellsAsync("arc", doc.TableInstanceId, period));
+
+        await using (var db = sql.CreateContext())
+        {
+            var store = new NormalizedCellStore(db, new ArchiveAwareCellReader(db));
+
+            Assert.Equal(expected, (await store.ReadSliceAsync(doc.TableInstanceId, CancellationToken.None)).Count);
+            Assert.Equal(
+                expected, (await store.ReadSliceAsync(doc.TableInstanceId, doc.PeriodKey, CancellationToken.None)).Count);
+            Assert.Equal(
+                expected,
+                (await store.ReadSlicesAsync([doc.TableInstanceId], CancellationToken.None))[doc.TableInstanceId].Count);
+            Assert.Equal(
+                expected,
+                (await store.ReadSlicesAsync([doc.TableInstanceId], doc.PeriodKey, CancellationToken.None))[doc.TableInstanceId].Count);
+        }
+
+        // Контроль: повтор доводить повернення — тепер джерело гаряча схема, і зріз той самий.
+        await ExecuteAsync(
+            $"EXEC arc.usp_RestoreYear @ProjectId = {doc.ProjectId}, "
+            + $"@FromPeriodKey = {period}, @ToPeriodKey = {period}, @BatchSize = 3;");
+        Assert.Equal(0, await InstanceCellsAsync("arc", doc.TableInstanceId, period));
+
+        await using (var db = sql.CreateContext())
+        {
+            var store = new NormalizedCellStore(db, new ArchiveAwareCellReader(db));
+            Assert.Equal(expected, (await store.ReadSliceAsync(doc.TableInstanceId, CancellationToken.None)).Count);
+        }
+    }
+
+    /// <summary>Комірки одного екземпляра в схемі <paramref name="schema"/> (<c>doc</c> чи <c>arc</c>).</summary>
+    private Task<int> InstanceCellsAsync(string schema, long tableInstanceId, int period)
+        => ScalarAsync<int>(
+            $"SELECT COUNT(*) FROM {schema}.CellValue c "
+            + $"JOIN {schema}.TableRow r ON r.PeriodKey = c.PeriodKey AND r.Id = c.TableRowId "
+            + $"WHERE r.TableInstanceId = {tableInstanceId} AND r.PeriodKey = {period}");
 
     [Theory]
     [InlineData("0")]
