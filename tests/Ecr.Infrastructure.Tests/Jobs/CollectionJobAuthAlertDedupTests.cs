@@ -49,8 +49,8 @@ public sealed class CollectionJobAuthAlertDedupTests(SqlServerFixture sql)
             await FailAllAsync(entityIds, clock);
             Assert.Equal(1, await CountAsync(tag));
 
-            // Через годину той самий тик — у межах вікна тиші: нового листа немає.
-            clock.Advance(TimeSpan.FromHours(1));
+            // Через пів вікна той самий тик — у межах вікна тиші (1 год, D-353): нового листа немає.
+            clock.Advance(CollectionJob.AuthAlertQuietPeriod / 2);
             await FailAllAsync(entityIds, clock);
             Assert.Equal(1, await CountAsync(tag));
 
