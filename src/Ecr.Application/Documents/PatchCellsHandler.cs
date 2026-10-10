@@ -2375,8 +2375,9 @@ public sealed partial class PatchCellsHandler(
 
         if (CreatesRowsUnderCeiling(context))
         {
-            await sheetGate
-                .EnterSubmitAsync(context.Instance.DocumentId, context.Table.SheetDefId, context.PeriodKey, ct)
+            // ⛔ Y7-03: відмова «зайнято» — про рядки, а не про подання (див. `RowWriteLock`).
+            await RowWriteLock
+                .EnterAsync(sheetGate, context.Instance.DocumentId, context.Table.SheetDefId, context.PeriodKey, ct)
                 .ConfigureAwait(false);
         }
 

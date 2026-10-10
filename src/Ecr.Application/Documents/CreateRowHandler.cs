@@ -217,8 +217,9 @@ public sealed class CreateRowHandler(
             instance.TemplateVersionId,
             instance.DocumentId);
 
-        await sheetGate
-            .EnterSubmitAsync(instance.DocumentId, table.SheetDefId, PeriodKeyOf(instance), ct)
+        // ⛔ Y7-03: відмова «зайнято» — про рядок, а не про подання (див. `RowWriteLock`).
+        await RowWriteLock
+            .EnterAsync(sheetGate, instance.DocumentId, table.SheetDefId, PeriodKeyOf(instance), ct)
             .ConfigureAwait(false);
         var status = await sheetGate
             .EnterEditAsync(instance.DocumentId, table.SheetDefId, PeriodKeyOf(instance), ct)
