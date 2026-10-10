@@ -346,8 +346,14 @@ $bp = Read-Host -AsSecureString -Prompt 'Пароль bootstrap-адмініст
     -DataProtectionThumbprint '<відбиток сертифіката з Cert:\LocalMachine\My>' `
     -HttpsThumbprint '<відбиток сертифіката HTTPS з Cert:\LocalMachine\My>' -AppPort 443 `
     -BootstrapPassword $bp `
-    -FirstDeployment
+    -FirstDeployment `
+    -CreateDatabaseIfMissing
 ```
+
+✎ R11-F5/F5-06: `-CreateDatabaseIfMissing` — щоб на чистому сервері (бази `ECR` ще немає, розділ 0)
+скрипт створив її сам. Без нього `-FirstDeployment` зупиняється на кроці 1 повідомленням
+`database missing` і нічого не змінює. Прапорець діє лише разом з `-FirstDeployment`; майстер
+`EcrSetup.exe` передає його сам у режимі «First deployment».
 
 ⛔ **З 2026-09-30 (`D14-08`) обов'язковий ще й вибір транспорту** —
 `-HttpsThumbprint` (як вище), `-BehindHttpsProxy` або `-AllowHttp` (лише стенд), рівно
@@ -963,7 +969,7 @@ msiexec /x {ProductCode} /qn
 | Транспорт і строк сертифіката HTTPS | `/health/ready` → перевірка `transport` (Degraded — `-AllowHttp` у Production або сертифікат спливає) |
 | Детальний стан БД/партицій | `http://localhost:<APP_PORT>/health/db` |
 | Рядок підключення (постійний секрет) | `Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Services\EcrApi' -Name Environment` |
-| Одноразовий файл bootstrap-пароля (має зникнути після першого входу — `Q-215`) | `Test-Path '%ProgramData%\ECR\config\bootstrap.secret'` |
+| Одноразовий файл bootstrap-пароля (має зникнути після першого входу — `Q-215`) | `Test-Path (Join-Path $env:ProgramData 'ECR\config\bootstrap.secret')` |
 
 ### Файловий журнал {#7-файловий-журнал}
 
@@ -1042,14 +1048,23 @@ Stop-Service EcrApi
 пароль вручну, без `deploy-ecr.ps1 -BootstrapPassword` і без майстра:
 
 ```powershell
-Set-Content -Path '%ProgramData%\ECR\config\bootstrap.secret' `
-    -Value '<пароль тут>' -Encoding UTF8 -NoNewline
+# ✎ R11-F5/F5-05: у PowerShell `%ProgramData%` НЕ розкривається (це синтаксис cmd) —
+# шлях береться з $env:ProgramData.
+$secret = Join-Path $env:ProgramData 'ECR\config\bootstrap.secret'
+Set-Content -LiteralPath $secret -Value '<пароль тут>' -Encoding UTF8 -NoNewline
 # ACL звужити на обліковий запис служби (Read, Delete) вручну —
 # icacls, чи Set-Acl тим самим прийомом, що Set-BootstrapSecretFile
 # у tools/deploy-ecr.ps1 — інакше файл лишається читабельним ширше,
 # ніж треба.
 Restart-Service EcrApi
 ```
+
+⚠ Застосунок використовує файл лише з власником `BUILTIN\Administrators` або `SYSTEM`
+(`BootstrapSecretFile.UntrustedOwner`): файл з іншим власником він **не читає, а видаляє**, і
+адміністратора bootstrap не буде створено. `Set-BootstrapSecretFile` у `tools/deploy-ecr.ps1` ставить
+власника явно (`SetOwner('BUILTIN\Administrators')`) на порожньому файлі з захищеним ACL і лише потім
+пише пароль; вручну після `Set-Content` перевірте `(Get-Acl $secret).Owner` і за потреби
+виправте його тим самим `Set-Acl`. Найнадійніше — не вручну, а `deploy-ecr.ps1 -BootstrapPassword`.
 
 Рядок підключення живе у
 `HKLM:\SYSTEM\CurrentControlSet\Services\EcrApi\Environment`

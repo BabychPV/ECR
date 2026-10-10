@@ -930,8 +930,14 @@ DECLARE @a int; EXEC arc.usp_EnsureAuditPartitions @MonthsAhead = 12, @Added = @
       Set-Service EcrWorker -StartupType Disabled -ErrorAction SilentlyContinue
       Set-Service EcrApi -StartupType Disabled
       ```
-      Тип запуску поверне `deploy-ecr.ps1 -SkipSchema` цього вузла (п. 3: MSI ставить службу з `Start="auto"`,
-      крок 6 — `Automatic`, якщо служба досі `Disabled`). Служби вузла, де запускаєте скрипт, він вимикає й
+      ✎ R11-Z7/Z7-06: тип запуску на **цьому** вузлі повертає **MSI**, а не крок 6: `deploy-ecr.ps1 -SkipSchema`
+      ставить пакет, і оновлення (нова версія) перевстановлює службу з `Start="auto"`. Крок 6
+      (`Restore-EcrServicesAutoStart`) повертає `Automatic` лише службам, які вимкнув крок 2 **цього самого**
+      запуску, а з `-SkipSchema` крок 2 не виконується, і цей список порожній. Тому, якщо на вузлі **вже стоїть
+      ця сама версія** (повторний прохід: `msiexec /i` встановленого продукту — режим обслуговування, службу
+      не перевстановлює), служби лишаться `Disabled`, а `Restart-Service` на кроці 6 впаде: поверніть тип запуску
+      вручну **до** запуску скрипта — `Set-Service EcrApi -StartupType Automatic` (і `Set-Service EcrWorker
+      -StartupType Automatic`, якщо воркер увімкнено). Служби вузла, де запускаєте скрипт зі схемою, він вимикає й
       повертає сам;
    2. `deploy-ecr.ps1` (зі схемою) на одному вузлі;
    3. на кожному іншому вузлі — `deploy-ecr.ps1 -SkipSchema` з тими самими параметрами (MSI,
@@ -1653,7 +1659,13 @@ Msg 50801 … Передперевірка AN-80 N2-02: оновлення зу�
 
 **Що робити.**
 
-1. `Stop-Service EcrApi`, повний бекап (п. 6.2).
+1. ✎ R11-Y3/Y3-04: **`deploy-ecr.ps1` уже зупинив `EcrWorker` і `EcrApi`** і перевів у `Disabled` ті, що
+   були `Automatic` (п. 8, «Якщо крок 2 упав»), — `Stop-Service` не потрібен. Схему цією міграцією не змінено
+   (передперевірка — її перша команда), але штамп схеми вже `incomplete:<версія>`, тож Api, яку не
+   запустити (`Disabled`, `ECR-SYS-5031`), недоступна: **`PUT …/category-rule` з п. 3 тут неможливий**,
+   правила доведеться виправляти SQL (п. 3). Зручніше **до** запуску `deploy-ecr.ps1`: запит з п. 2 працює й
+   на старій схемі (вираз — `nvarchar(max)`), і поки Api працює, чернетки виправляються через `PUT`.
+   Повний бекап (п. 6.2).
 2. Повний перелік (порожньо, коли все чисто):
 
    ```sql
@@ -1665,9 +1677,11 @@ Msg 50801 … Передперевірка AN-80 N2-02: оновлення зу�
    ```
 
 3. Скоротіть вираз кожного правила: частину логіки можна винести в Row-формулу версії й послатися на
-   неї (`!ФОРМУЛА`). Для **чернетки** (`Status = 0`) - `PUT …/methodologies/{id}/versions/{vid}/category-rule`
-   з коротшим виразом. Для **опублікованої** версії правило незмінне через API: узгодьте новий вираз з
-   методологом і змініть його напряму (`UPDATE calc.CategoryRule SET Expression = … WHERE Id = …`), після
+   неї (`!ФОРМУЛА`). Для **чернетки** (`Status = 0`) за працюючої Api (до запуску скрипта) -
+   `PUT …/methodologies/{id}/versions/{vid}/category-rule` з коротшим виразом; після падіння кроку 2 Api
+   не працює, і чернетку теж правлять напряму (як нижче). Для **опублікованої** версії правило незмінне через
+   API: узгодьте новий вираз з методологом і змініть його напряму
+   (`UPDATE calc.CategoryRule SET Expression = … WHERE Id = …`), після
    чого перерахуйте документи, що читають це правило. ⚠ Вираз не обрізають «до 4000» механічно: це інша
    формула.
 4. Повторіть запит з кроку 2: порожньо.
@@ -1850,17 +1864,29 @@ Set-Service EcrWorker -StartupType Automatic
 Start-Service EcrWorker
 ```
 
-Якщо службу прибирали (чи ніколи не ставили) — найпростіше повторити
-`deploy-ecr.ps1 … -SkipSchema` (без `-DisableWorker`) з тим самим
+Якщо службу ніколи не ставили, або ставиться **нова** версія пакета, —
+найпростіше повторити `deploy-ecr.ps1 … -SkipSchema` (без `-DisableWorker`) з тим самим
 `-ConnectionString`: MSI з `WORKER_ENABLED=1`, рядок підключення в
-`Environment`, режим Api, перезапуск і перевірка — разом. Вручну — той самий
-MSI, що в 10.1, з `WORKER_ENABLED=1`, потім рядок підключення
-(`docs/build/11-install-guide.md` §9, служба `EcrWorker`),
-`Restart-Service EcrWorker` і режим Api, як вище.
+`Environment`, режим Api, перезапуск і перевірка — разом.
 
-⚠ Той самий MSI-файл, що вже встановлено, без `REINSTALL=ALL
-REINSTALLMODE=vomus` нічого не перемикає: це режим обслуговування, умови
-компонентів не переобчислюються.
+⛔ ✎ R11-Z7/Z7-07: якщо службу прибирали (10.1) **тим самим MSI, що вже встановлено**, повтор
+`deploy-ecr.ps1 -SkipSchema` цього MSI **не спрацює**: він передає `/i … WORKER_ENABLED=1` без `REINSTALL`,
+для встановленого продукту це режим обслуговування (умови компонентів не переобчислюються), служба не
+з'являється, і скрипт зупиняється на кроці 3 повідомленням «Служби EcrWorker немає після msiexec з
+WORKER_ENABLED=1» (режим Api при цьому не змінено). Спершу поверніть службу тим самим MSI з перевстановленням:
+
+```powershell
+msiexec /i Ecr.msi /qn /l*v worker-on.log REINSTALL=ALL REINSTALLMODE=vomus WORKER_ENABLED=1 SERVICE_ACCOUNT=DOMAIN\ecr-svc$
+```
+
+і лише потім `deploy-ecr.ps1 … -SkipSchema` з тим самим `-ConnectionString` (рядок підключення в
+`Environment`, режим Api, перезапуск і перевірка). Вручну — той самий MSI з `WORKER_ENABLED=1`, потім рядок
+підключення (`docs/build/11-install-guide.md` §9, служба `EcrWorker`), `Restart-Service EcrWorker` і режим
+Api, як вище.
+
+⚠ `SERVICE_ACCOUNT` — той самий, що при установці (див. 10.1). Той самий MSI-файл, що вже встановлено, без
+`REINSTALL=ALL REINSTALLMODE=vomus` нічого не перемикає: це режим обслуговування, умови компонентів не
+переобчислюються.
 
 ### 10.3. Відкат воркера
 
