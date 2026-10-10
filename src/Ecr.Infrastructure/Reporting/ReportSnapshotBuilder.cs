@@ -310,15 +310,25 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock, IMemory
 
     /// <summary>Відмова побудови: поточний зріз ключа поданий (ФВ-9.17).</summary>
     /// <remarks>
-    /// ⚠ <see cref="InvalidOperationException"/>, як решта відмов будівника: побудова
-    /// йде у фоновій задачі, і відмова — це стан <c>Failed</c> із цим текстом.
+    /// ⛔ R7-Y8 / Y8-01: <see cref="DomainException"/> з <see cref="ErrorCodes.ReportImmutable"/>
+    /// (<c>ECR-RPT-0409</c>, «зріз подано»), а НЕ <see cref="InvalidOperationException"/>.
+    /// Побудова йде у фоновій задачі, а це вердикт про вже збережений стан: з
+    /// <see cref="InvalidOperationException"/> <c>JobRetryPolicy.IsWorthRetrying</c> ішов у
+    /// гілку «збій дороги» — три повтори (210 с «виконується»), а потім <c>ECR-SYS-0500</c>
+    /// («Internal error») на клієнті замість причини й шляху (Reopen).
     /// </remarks>
-    private static InvalidOperationException FrozenRefusal(long frozenId, int projectId, PeriodKey? periodKey)
+    internal static DomainException FrozenRefusal(long frozenId, int projectId, PeriodKey? periodKey)
         => new(
+            ErrorCodes.ReportImmutable,
             $"Зріз {frozenId.ToString(CultureInfo.InvariantCulture)} проєкту "
             + $"{projectId.ToString(CultureInfo.InvariantCulture)} за період "
             + $"{periodKey?.Value.ToString(CultureInfo.InvariantCulture) ?? "рік"} поданий: нова побудова — лише "
-            + "після повернення даних у роботу (Reopen), ФВ-9.17. Поданий зріз лишається поточним.");
+            + "після повернення даних у роботу (Reopen), ФВ-9.17. Поданий зріз лишається поточним.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-RPT-0409.periodSubmittedRebuild",
+                ["snapshotId"] = frozenId.ToString(CultureInfo.InvariantCulture),
+            });
 
     /// <inheritdoc />
     /// <remarks>

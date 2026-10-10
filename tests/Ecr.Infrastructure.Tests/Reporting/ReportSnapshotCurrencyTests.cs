@@ -1,7 +1,9 @@
 // tests/Ecr.Infrastructure.Tests/Reporting/ReportSnapshotCurrencyTests.cs
 using System.Data.Common;
+using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.Reporting;
 using Ecr.Domain.Enums;
+using Ecr.Domain.Errors;
 using Ecr.Domain.ValueObjects;
 using Ecr.Infrastructure.Persistence;
 using Ecr.Infrastructure.Reporting;
@@ -89,8 +91,12 @@ public sealed class ReportSnapshotCurrencyTests(SqlServerFixture sql)
         var submitted = await builder.BuildAsync(
             version, document.ProjectId, document.PeriodKey, parametersJson: null, CancellationToken.None);
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() => builder.BuildAsync(
+        // ⛔ R7-Y8 / Y8-01: доменна відмова з кодом «зріз подано», а не InvalidOperationException —
+        // інакше черга тричі повторює вердикт і клієнт бачить ECR-SYS-0500.
+        var refused = await Assert.ThrowsAsync<DomainException>(() => builder.BuildAsync(
             version, document.ProjectId, document.PeriodKey, parametersJson: null, CancellationToken.None));
+        Assert.Equal(ErrorCodes.ReportImmutable, refused.ErrorCode);
+        Assert.Equal("err.ECR-RPT-0409.periodSubmittedRebuild", refused.Details?["messageKey"]);
 
         var all = await SnapshotsAsync(chain, document);
         var only = Assert.Single(all);
@@ -137,8 +143,9 @@ public sealed class ReportSnapshotCurrencyTests(SqlServerFixture sql)
             .AddInterceptors(submitDuringRead)
             .Options);
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() => new ReportSnapshotBuilder(db, new TestClock(Now), memory)
+        var refused = await Assert.ThrowsAsync<DomainException>(() => new ReportSnapshotBuilder(db, new TestClock(Now), memory)
             .BuildAsync(version, document.ProjectId, document.PeriodKey, parametersJson: null, CancellationToken.None));
+        Assert.Equal(ErrorCodes.ReportImmutable, refused.ErrorCode);
 
         Assert.True(submitDuringRead.Fired);
         var only = Assert.Single(await SnapshotsAsync(chain, document));

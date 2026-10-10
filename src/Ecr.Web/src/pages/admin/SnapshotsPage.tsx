@@ -294,9 +294,16 @@ export function SnapshotsPage(): JSX.Element {
     } else if (outcome === 'failed') {
       // ⛔ `X-04`: причина — за КОДОМ з каталогу, а не сирий `error`
       // (`ex.Message` сервера — українською чи мовою СУБД).
+      // ⛔ R7-Y8 / Y8-01: `ECR-RPT-0409` у задачі побудови — це лише «зріз періоду
+      // подано» (ФВ-9.17). Загальний текст коду («вже опубліковано: потрібна нова
+      // версія») штовхав би людину створювати нову версію опису, яку сервер так само
+      // відмовить; потрібен шлях — повернути дані в роботу (Reopen).
       notifications.show({
         color: 'statusError',
-        message: errorCodeText(job.data?.errorCode, t('snapshots.buildFailed')),
+        message:
+          job.data?.errorCode === 'ECR-RPT-0409'
+            ? t('snapshots.buildRefusedSubmitted')
+            : errorCodeText(job.data?.errorCode, t('snapshots.buildFailed')),
         closeButtonProps: notificationCloseButtonProps,
       });
     }
