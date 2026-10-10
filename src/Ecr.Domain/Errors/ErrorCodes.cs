@@ -830,4 +830,15 @@ public static class ErrorCodes
     /// ⚠ Окремого HTTP-запису не має: перелік проблем публікації відмовляє <c>ECR-CALC-0422</c> `publishChecksFailed`.
     /// </remarks>
     public const string MethodologyConstantUnusable = "ECR-CALC-0434";
+
+    /// <summary>
+    /// Посилання <c>!Назва</c> знайдено у двох чи більше імпортованих бібліотеках методологій (<c>ECR-CALC-0435</c>,
+    /// R11-L3).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Неоднозначність - відмова публікації, а не «перший за списком»: інакше число залежало б від порядку рядків
+    /// <c>calc.MethodologyImport</c>. Код несе проблема в <c>problems</c> відмови <c>ECR-CALC-0422</c>
+    /// (<c>publishChecksFailed</c>).
+    /// </remarks>
+    public const string MethodologyReferenceAmbiguous = "ECR-CALC-0435";
 }
