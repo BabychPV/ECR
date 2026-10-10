@@ -65,6 +65,7 @@ import {
 import {
   clearBusyRetry,
   holdRejectedEdits,
+  isBusyRetryWaiting,
   noteSaveSucceeded,
   registerSliceSaver,
   scheduleAutosave,
@@ -646,6 +647,10 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
           // Червоного банера немає: правки не утримано, повтор заплановано
           // (`holdRejectedEdits` → `scheduleBusyRetry`), а людина бачить
           // нейтральний стан «чекає» (`busyWaiting`) у рядку кнопок.
+          // ⛔ R7-Y8 / Y8-02: якщо повтор НЕ заплановано (`503 databaseBusy` вичерпав
+          // `DatabaseBusyAutoRetries`), це вже відмова — причина в банері, поруч
+          // «Retry save» і позначка (`noteSaveFailed` у `holdRejectedEdits`).
+          if (!isBusyRetryWaiting()) setSaveError(refusalText(error));
         } else {
           // ⛔ Q-30x (High): ось сам фікс — реальний, локалізований текст
           // сервера («Колонка «C1» очікує число.» і подібні) показується як

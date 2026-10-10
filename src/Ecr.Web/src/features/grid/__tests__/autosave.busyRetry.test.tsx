@@ -3,13 +3,21 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { renderHook } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import {
+  DatabaseBusyAutoRetries,
   cancelAutosave,
   clearBusyRetry,
   isBusyRetryWaiting,
   scheduleAutosave,
   useDocumentPending,
 } from '../autosave';
-import { hasPending, pendingRejections, putPendingEdit, resetPending, sendableEdits } from '../pendingStore';
+import {
+  hasFailedSave,
+  hasPending,
+  pendingRejections,
+  putPendingEdit,
+  resetPending,
+  sendableEdits,
+} from '../pendingStore';
 import type { PendingEdit } from '../useCellPatch';
 import { showApiError } from '@/shared/ui/notify';
 
@@ -240,5 +248,56 @@ describe('X8-06: 503 ECR-SYS-0503 databaseBusy повторюється сам, 
     expect(isBusyRetryWaiting()).toBe(false);
     // Правка лишається придатною до надсилання (5xx минущий, `saveErrors.ts`), але без автоповтору.
     expect(sendableEdits(Table, Period)).toEqual([edit]);
+  });
+});
+
+/**
+ * R7-Y8 / Y8-02: `503 databaseBusy` повторюється НЕ безмежно. Сервер дає його і на
+ * тайм-аут команди (`-2`), а той буває детермінованим для самого запиту (велика
+ * вставка на піку): повтор нічого не лікує, а людина годинами бачить «чекає» без
+ * «Retry save». Після `DatabaseBusyAutoRetries` повторів — «збереження не дійшло».
+ *
+ * Мутація: прибрати межу в `holdRejectedEdits` — PATCH-ів більше за 1 + межа,
+ * `isBusyRetryWaiting()` лишається `true`, `hasFailedSave` — `false`.
+ */
+describe('Y8-02: 503 databaseBusy — межа автоповторів, далі відмова людині', () => {
+  it('постійний 503: рівно 1 + DatabaseBusyAutoRetries PATCH, далі повтору немає, зріз — «не збережено», правка ціла', async () => {
+    const fetchMock = vi.fn((_path: string, init?: RequestInit) => {
+      if (init?.method !== 'PATCH') return Promise.resolve(new Response('{}'));
+
+      return Promise.resolve(databaseBusy('5'));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    renderHook(() => useDocumentPending(1), { wrapper });
+
+    putPendingEdit(Table, Period, edit);
+    scheduleAutosave();
+    await advance(500);
+    expect(hasFailedSave(Table, Period)).toBe(false);
+
+    // Відступи з Retry-After 5 і розкидом ×0.5: 5 + 5 + 10 + 15 + 15 = 50 с; з запасом — 10 хв.
+    for (let i = 0; i < 20; i += 1) await advance(30_000);
+
+    expect(patchCalls(fetchMock)).toHaveLength(1 + DatabaseBusyAutoRetries);
+    expect(isBusyRetryWaiting()).toBe(false);
+    expect(hasFailedSave(Table, Period)).toBe(true);
+    // ⛔ Дані не губляться: правка не утримана й не скинута — її довезе «Retry save».
+    expect(sendableEdits(Table, Period)).toEqual([edit]);
+    expect(pendingRejections(Table, Period).size).toBe(0);
+  });
+
+  it('контроль: 409 lockTimeout межі не має — після тієї самої кількості відмов повтор усе ще заплановано', async () => {
+    const fetchMock = mockServer(Number.MAX_SAFE_INTEGER);
+    renderHook(() => useDocumentPending(1), { wrapper });
+
+    putPendingEdit(Table, Period, edit);
+    scheduleAutosave();
+    await advance(500);
+
+    for (let i = 0; i < 20; i += 1) await advance(30_000);
+
+    expect(patchCalls(fetchMock).length).toBeGreaterThan(1 + DatabaseBusyAutoRetries);
+    expect(isBusyRetryWaiting()).toBe(true);
+    expect(hasFailedSave(Table, Period)).toBe(false);
   });
 });

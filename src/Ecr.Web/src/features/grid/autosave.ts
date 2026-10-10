@@ -264,7 +264,26 @@ function flushAutosave(): void {
  */
 export const BusyRetryDelaysMs: readonly number[] = [5_000, 10_000, 20_000, 30_000];
 
+/**
+ * Скільки разів поспіль автозбереження саме повторює `503 ECR-SYS-0503 databaseBusy`,
+ * перш ніж передати справу людині (R7-Y8 / Y8-02).
+ *
+ * ⛔ Межа — лише для `503`, не для `409 lockTimeout` (AN-123): блокування тримає ІНША
+ * операція, і вона закінчиться. `503` сервер дає і на тайм-аут команди (`-2`,
+ * `ExceptionHandlingMiddleware.TransientSqlNumbers`), а тайм-аут буває детермінованим
+ * для САМОГО запиту (велика вставка на піку) — тоді повтор нічого не лікує, лише
+ * годинами тримає блокування рядків і з'єднання пулу під нейтральним «чекає».
+ * Після межі зріз стає «збереження не дійшло» (`noteSaveFailed`): «Retry save»,
+ * позначка відмови й питання при закритті вкладки. Правки не губляться.
+ *
+ * ⚠ 5 спроб із відступами 5 → 10 → 20 → 30 → 30 с — понад півтори хвилини: минущий
+ * збій (перемикання вузла, обрив пулу) за цей час минає.
+ */
+export const DatabaseBusyAutoRetries = 5;
+
 let busyAttempt = 0;
+/** Поспіль отримані `503 databaseBusy` (окремо від `busyAttempt`: `409 lockTimeout` межі не має). */
+let databaseBusyAttempt = 0;
 let busyTimer: ReturnType<typeof setTimeout> | null = null;
 const busyListeners = new Set<() => void>();
 
@@ -308,6 +327,7 @@ export function clearBusyRetry(): void {
   if (busyTimer !== null) clearTimeout(busyTimer);
   busyTimer = null;
   busyAttempt = 0;
+  databaseBusyAttempt = 0;
 
   if (wasWaiting) notifyBusy();
 }
@@ -358,6 +378,21 @@ export function holdRejectedEdits(
   // ⛔ AN-123 (`R1-03`/`R2-01`): «дані зайняті» нічого не тримає — правки лишаються
   // придатними до надсилання (і до маячка закриття вкладки), а повтор іде сам.
   if (error instanceof EcrApiError && error.isTransientBusy) {
+    // ⛔ R7-Y8 / Y8-02: `503 databaseBusy` — не безмежно. Після межі план повтору
+    // знято, а зріз позначено «збереження не дійшло»: людина бачить відмову й
+    // «Retry save» замість вічного «чекає». Правки лишаються придатними до надсилання.
+    if (error.problem.errorCode === 'ECR-SYS-0503') {
+      databaseBusyAttempt += 1;
+
+      // ⚠ Чужого плану (повтор `409 lockTimeout` іншого зрізу) не знімаємо: він довезе
+      // і цей зріз, а відмова повториться тим самим шляхом.
+      if (databaseBusyAttempt > DatabaseBusyAutoRetries) {
+        noteSaveFailed(tableInstanceId, periodKey);
+
+        return false;
+      }
+    }
+
     scheduleBusyRetry(error.problem.retryAfterSeconds);
 
     return false;
