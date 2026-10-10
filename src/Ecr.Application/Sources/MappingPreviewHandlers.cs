@@ -432,15 +432,18 @@ public sealed class PreviewMappingHandler(
 
         if (unitCatalog is null)
         {
-            // ⛔ Z1-01: перегляд показує те саме округлене число, що ляже в комірку.
-            return kind == AggregationKind.TimeIntegral ? null : BoundaryValue.ToStorable(folded);
+            // ⛔ Z1-01: перегляд показує те саме округлене число, що ляже в комірку - до масштабу сховища (16) і далі
+            // до `Scale` колонки-адресата (V8-06, `IntegrationValueScale`, як у `IntegrationCellPatcher`).
+            return kind == AggregationKind.TimeIntegral ? null : ToCell(BoundaryValue.ToStorable(folded), map);
         }
 
         try
         {
-            return BoundaryUnitConversion.ConvertFolded(
-                kind, folded, UnitId(unitCatalog, map.SourceUnitCode), UnitId(unitCatalog, map.TargetUnitCode), unitCatalog)
-                .Storable;
+            return ToCell(
+                BoundaryUnitConversion.ConvertFolded(
+                    kind, folded, UnitId(unitCatalog, map.SourceUnitCode), UnitId(unitCatalog, map.TargetUnitCode), unitCatalog)
+                    .Storable,
+                map);
         }
         catch (Exception ex) when (ex is DomainException or EcrException)
         {
@@ -448,6 +451,13 @@ public sealed class PreviewMappingHandler(
             return null;
         }
     }
+
+    /// <summary>
+    /// Число так, як воно ляже в комірку колонки-адресата: до її <c>Scale</c> (V8-06). Перегляд показував число зі
+    /// 16 знаками, а комірка зберігала його за <c>Scale</c> колонки - те, що бачила людина, не було тим, що запишеться.
+    /// </summary>
+    private static decimal ToCell(decimal stored, FieldMapRef map)
+        => IntegrationValueScale.Round(stored, map.TargetColumnDataType, map.TargetColumnScale);
 
     /// <summary>Ключ каталогу: значення не переведено в цільову одиницю (причина - у журналі задачі перенесення).</summary>
     private const string ConversionFailedKey = "err.ECR-UOM-0422.boundaryConversionFailed";
