@@ -3,6 +3,7 @@ using System.Text.Json;
 using Ecr.Adapters.Excel;
 using Ecr.Application.Common;
 using Ecr.Application.Documents;
+using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
 using Ecr.Domain.Abstractions;
@@ -12,6 +13,7 @@ using Ecr.Domain.ValueObjects;
 using Ecr.Expressions.Evaluation;
 using Ecr.TestKit;
 using NSubstitute;
+using NSubstitute.ExceptionExtensions;
 using Xunit;
 
 namespace Ecr.Adapters.Tests.Excel;
@@ -63,6 +65,9 @@ public sealed class ExcelImportSheetLockOrderTests
 
     /// <summary>Журнал: блокування аркушів і записи таблиць у порядку, у якому вони сталися.</summary>
     private readonly List<string> _trace = [];
+
+    /// <summary>Режим кожного взяття аркуша: <c>wait:N</c> (з чергою) чи <c>nowait:N</c> (без черги).</summary>
+    private readonly List<string> _modes = [];
 
     public ExcelImportSheetLockOrderTests()
     {
@@ -120,6 +125,16 @@ public sealed class ExcelImportSheetLockOrderTests
              .Returns(call =>
              {
                  _trace.Add($"lock:{call.ArgAt<int>(1)}");
+                 _modes.Add($"wait:{call.ArgAt<int>(1)}");
+                 return Task.FromResult(DocumentStatus.Draft);
+             });
+
+        // ⚠ R7-Y2-02: другий і наступні аркуші імпорт бере без черги — той самий журнал, інша мітка режиму.
+        _gate.EnterEditNoWaitAsync(DocumentId, Arg.Any<int>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+             .Returns(call =>
+             {
+                 _trace.Add($"lock:{call.ArgAt<int>(1)}");
+                 _modes.Add($"nowait:{call.ArgAt<int>(1)}");
                  return Task.FromResult(DocumentStatus.Draft);
              });
 
@@ -157,6 +172,46 @@ public sealed class ExcelImportSheetLockOrderTests
         Assert.Equal(
             ["write:601", "write:602"],
             _trace.Where(e => e.StartsWith("write:", StringComparison.Ordinal)).ToList());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "R7-Y2-02")]
+    public async Task Чекає_лише_перший_аркуш_книги_наступні_беруться_без_черги()
+    {
+        // ⛔ R7-Y2-02 (X6-02): імпорт чекав (до 30 с) КОЖЕН аркуш, тримаючи S попередніх. Черга
+        // `sp_getapplock` FIFO: за імпортом, що чекав аркуш 20 (його подають), ставали подання аркуша 10,
+        // а за ними — автозбереження всіх його редакторів. Справжню чергу SQL доводить
+        // `SheetEditGateNoWaitTests`; тут — що імпорт її не займає.
+        // Мутація: `EnterEditAsync` для всіх аркушів у ExcelImporter.ApplyAsync — червоний.
+        await Importer().ApplyAsync(DocumentId, Token, CancellationToken.None);
+
+        // Перше взяття кожного аркуша (повторні тим самим власником — з обробника правки — не важать).
+        var firstTakes = _modes
+            .GroupBy(m => m[(m.IndexOf(':', StringComparison.Ordinal) + 1)..], StringComparer.Ordinal)
+            .Select(g => g.First())
+            .ToList();
+
+        Assert.Equal(["wait:10", "nowait:20"], firstTakes);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "R7-Y2-02")]
+    public async Task Аркуш_що_подається_відмовляє_одразу_і_книга_не_пишеться()
+    {
+        _gate.EnterEditNoWaitAsync(DocumentId, 20, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+             .ThrowsAsync(new ConcurrencyConflictException(
+                 Ecr.Domain.Errors.ErrorCodes.SheetBusy,
+                 "Аркуш подається.",
+                 new Dictionary<string, object?> { ["messageKey"] = "err.ECR-DOC-4091.sheetBeingSubmitted" }));
+
+        var error = await Assert.ThrowsAsync<ConcurrencyConflictException>(
+            () => Importer().ApplyAsync(DocumentId, Token, CancellationToken.None));
+
+        Assert.Equal(Ecr.Domain.Errors.ErrorCodes.SheetBusy, error.ErrorCode);
+        Assert.DoesNotContain(_trace, e => e.StartsWith("write:", StringComparison.Ordinal));
+        await _previews.DidNotReceive().RemoveAsync(Arg.Any<string>(), Arg.Any<CancellationToken>());
     }
 
     private ExcelImporter Importer()

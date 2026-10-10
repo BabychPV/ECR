@@ -989,6 +989,55 @@ public sealed class SourceEventSyncJobTests(SqlServerFixture sql)
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Directive", "HSE301-EFSYNC")]
+    [Trait("Finding", "R7-Y2-02")]
+    public async Task ВидаленняРядківПодій_НеЧекаєДругийПеріод_ТримаючиПерший()
+    {
+        // ⛔ R7-Y2-02 (X6-02): видалення брало S аркуша по КОЖНОМУ періоду з очікуванням до 30 с, уже
+        // тримаючи S попередніх і `doc.Period`/`doc.TableRow` під HOLDLOCK. Черга `sp_getapplock` FIFO: за ним
+        // ставали подання й автозбереження січня, хоча чекав він лютий. Тепер другий період — без черги:
+        // зайнятий лютий лишається наступному прогону, січень видаляється одразу.
+        // Мутація: `wait: true` для всіх періодів у ApplyRemovalsAsync — задача висить ~30 с, тест червоний.
+        await using var stand = await ArrangeAsync();
+        var january = new DateTime(2026, 1, 28, 9, 0, 0, DateTimeKind.Utc);
+        var february = new DateTime(2026, 2, 2, 9, 0, 0, DateTimeKind.Utc);
+        var keep = Ev("J2", january.AddHours(1), january.AddHours(1).AddMinutes(5));
+        var source = new FakeEventSource(Ev("J1", january, january.AddMinutes(5)), keep, Ev("F1", february, february.AddMinutes(5)));
+        await RunAsync(stand, source);
+        Assert.Equal(
+            ["EF-F1", "EF-J1", "EF-J2"],
+            (await RowsAsync(stand)).Select(r => r.RowKey).Order(StringComparer.Ordinal));
+
+        var sheetDefId = Convert.ToInt32(
+            await ScalarAsync($"SELECT SheetDefId FROM cfg.TableDef WHERE Id = {stand.TableDefId}"), CultureInfo.InvariantCulture);
+
+        // Лютий «подається»: виняткове блокування аркуша-періоду тримає інша транзакція.
+        await using var holder = new SqlConnection(sql.ConnectionString);
+        await holder.OpenAsync();
+        await using var tx = (SqlTransaction)await holder.BeginTransactionAsync();
+        await using (var take = holder.CreateCommand())
+        {
+            take.Transaction = tx;
+            take.CommandText = "DECLARE @r int; EXEC @r = sp_getapplock @Resource = @res, @LockMode = 'Exclusive', "
+                               + "@LockOwner = 'Transaction', @LockTimeout = 0; SELECT @r;";
+            take.Parameters.AddWithValue("@res", SheetEditGate.ResourceOf(stand.DocumentId, sheetDefId, 202602));
+            Assert.True(Convert.ToInt32(await take.ExecuteScalarAsync(), CultureInfo.InvariantCulture) >= 0);
+        }
+
+        source.Result = new SourceEventResult([keep], false, null);
+        var job = RunAsync(stand, source);
+        var first = await Task.WhenAny(job, Task.Delay(TimeSpan.FromSeconds(10)));
+        Assert.Same(job, first);
+        await job;
+
+        Assert.Equal(["EF-F1", "EF-J2"], (await RowsAsync(stand)).Select(r => r.RowKey).Order(StringComparer.Ordinal));
+
+        await tx.RollbackAsync();
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Directive", "HSE301-EFSYNC")]
     public async Task ПравкаЛюдиниМіжРішеннямІВидаленням_РядокЛишається()
     {
         // ⛔ L3-04 / D-118: правка людини між ManualRowKeysAsync і DELETE інакше стиралася разом із

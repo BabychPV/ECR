@@ -476,11 +476,20 @@ public sealed class ExcelImporter(
                     DocumentStructure.EnsureUnchanged(locked, previewedVersion, documentId);
                 }
 
+                // ⛔ R7-Y2-02 (X6-02): чекати (до 30 с) дозволено лише ПЕРШИЙ аркуш, поки імпорт ще не
+                // тримає жодного. Наступні — без черги (`EnterEditNoWaitAsync`): черга `sp_getapplock` FIFO, і
+                // імпорт, що чекав аркуш N (його саме подають), тримаючи S на аркушах 1…N-1, ставив за собою
+                // подання тих аркушів, а за ними — автозбереження всіх, хто їх правив. Відмова
+                // (`409 ECR-DOC-4091 sheetBeingSubmitted`) відкочує транзакцію й звільняє все взяте:
+                // синхронний імпорт клієнт повторює як минущий, фоновий (`ExcelImportJob`) відкладає себе.
                 var statuses = new Dictionary<int, Ecr.Domain.Enums.DocumentStatus>();
+                var holdsAny = false;
                 foreach (var sheetDefId in sheets)
                 {
-                    statuses[sheetDefId] = await sheetGate
-                        .EnterEditAsync(documentId, sheetDefId, period, innerCt).ConfigureAwait(false);
+                    statuses[sheetDefId] = holdsAny
+                        ? await sheetGate.EnterEditNoWaitAsync(documentId, sheetDefId, period, innerCt).ConfigureAwait(false)
+                        : await sheetGate.EnterEditAsync(documentId, sheetDefId, period, innerCt).ConfigureAwait(false);
+                    holdsAny = true;
                 }
 
                 // ⚠ Накопичувачі скидаються НА ПОЧАТКУ замикання, а не поруч із

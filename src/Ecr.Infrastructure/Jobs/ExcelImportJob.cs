@@ -1,6 +1,8 @@
 using System.Globalization;
 using Ecr.Application.Common;
 using Ecr.Application.Documents;
+using Ecr.Application.Documents.Dto;
+using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
 
@@ -59,8 +61,20 @@ public sealed class ExcelImportJob(
 
         await progress.ReportKeyAsync(10, "jobs.importApplyingDiff", ct).ConfigureAwait(false);
 
-        var result = await importer
-            .ApplyAsync(task.DocumentId, task.PreviewToken, task.OverwriteRows, ct).ConfigureAwait(false);
+        PatchCellsResponse result;
+        try
+        {
+            result = await importer
+                .ApplyAsync(task.DocumentId, task.PreviewToken, task.OverwriteRows, ct).ConfigureAwait(false);
+        }
+        catch (ConcurrencyConflictException busy) when (IsSheetBeingSubmitted(busy))
+        {
+            // ⛔ R7-Y2-02 (X6-02): аркуш книги подається (чи подання вже в черзі), а імпорт за ним у черзі
+            // не стоїть (`EnterEditNoWaitAsync` для другого й наступних аркушів). Транзакція відкочена,
+            // нічого не записано, перегляд не спожито (знімається лише після коміту) — це не провал і не
+            // ретрай (спроби вичерпались би за годину дедлайну): задача повертається в чергу, не рахуючи спроби.
+            throw new JobDeferredException(RecalculationDocumentLock.DeferDelay, busy.Message);
+        }
 
         // ⚠ Клієнт не забирає окремий файл (на відміну від експорту) — сам
         // результат застосування невеликий, і повідомлення прогресу досить,
@@ -77,6 +91,14 @@ public sealed class ExcelImportJob(
                 ct)
             .ConfigureAwait(false);
     }
+
+    /// <summary>Ключ каталогу відмови «аркуш подається» (<c>ECR-DOC-4091</c>).</summary>
+    private const string SheetBeingSubmittedKey = "err.ECR-DOC-4091.sheetBeingSubmitted";
+
+    /// <summary>Відмова «аркуш подається» — минає сама (за кодом і ключем, не за текстом, як у <c>FormulaRecalculationJob</c>).</summary>
+    private static bool IsSheetBeingSubmitted(ConcurrencyConflictException ex)
+        => ex.ErrorCode == Domain.Errors.ErrorCodes.SheetBusy
+           && ex.Details?.GetValueOrDefault("messageKey") is SheetBeingSubmittedKey;
 }
 
 /// <summary>Розбір завдання застосування імпорту.</summary>

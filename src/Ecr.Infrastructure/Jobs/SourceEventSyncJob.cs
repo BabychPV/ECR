@@ -872,7 +872,9 @@ public sealed partial class SourceEventSyncJob(
             totals.Removed++;
         }
 
-        var physical = decision.Rows.Where(r => !r.SharedRow).ToList();
+        // ⚠ R7-Y2-02: за зростанням періоду — ключ `sheet-edit` береться в тому самому порядку, що в інших
+        // багатоаркушевих писарів (`sheet-edit[↑]`); чекає лише перший, решта — без черги (нижче).
+        var physical = decision.Rows.Where(r => !r.SharedRow).OrderBy(r => r.State.PeriodKey!.Value).ToList();
         foreach (var shared in decision.Rows.Where(r => r.SharedRow))
         {
             Drop(shared.Link, links, linkByEventId, removed);
@@ -893,7 +895,7 @@ public sealed partial class SourceEventSyncJob(
         // версії). Видалення рядків подій брало лише `sheet-edit`: у вікні переносу воно видаляло за екземплярами
         // старої версії. Порядок блокувань: `doc-structure` → (`doc-header`) → `sheet-edit`, структура — ПЕРШОЮ
         // дією транзакції. Не взято за таймаут — видалення лишається наступному прогону.
-        if (!await TryAppLockAsync(connection, tx, SheetEditGate.StructureResourceOf(map.DocumentId), ct).ConfigureAwait(false))
+        if (!await TryAppLockAsync(connection, tx, SheetEditGate.StructureResourceOf(map.DocumentId), wait: true, ct).ConfigureAwait(false))
         {
             totals.RemovalSkipped += physical.Count;
             return removed;
@@ -916,11 +918,20 @@ public sealed partial class SourceEventSyncJob(
             // ⛔ L3-04: рішення (DecideRemovalsAsync) читало стан аркуша й правки людини ПОЗА цією
             // транзакцією — подання чи правка між рішенням і видаленням інакше губилися б. Як правка в
             // PatchCellsHandler: спільне блокування аркуша, далі гарди повторно — у тій самій транзакції.
+            // ⛔ R7-Y2-02 (X6-02): чекати дозволено лише ПЕРШИЙ аркуш-період, поки транзакція ще не тримає
+            // жодного `sheet-edit`. Наступні періоди — без черги (`@LockTimeout = 0`): черга `sp_getapplock`
+            // FIFO, і видалення, що чекало період N (його саме подають), тримаючи S на періодах 1…N-1 та
+            // `doc.Period`/`doc.TableRow` під HOLDLOCK, ставило за собою подання тих періодів, автозбереження
+            // їхніх редакторів і `PeriodStateJob`. Не взято — видалення цього періоду лишається наступному прогону.
             var periodKey = item.State.PeriodKey!.Value;
             if (!locked.TryGetValue(periodKey, out var taken))
             {
                 taken = await TryAppLockAsync(
-                        connection, tx, SheetEditGate.ResourceOf(map.DocumentId, sheetDefId, periodKey), ct)
+                        connection,
+                        tx,
+                        SheetEditGate.ResourceOf(map.DocumentId, sheetDefId, periodKey),
+                        wait: locked.Count == 0,
+                        ct)
                     .ConfigureAwait(false);
                 locked[periodKey] = taken;
             }
@@ -990,11 +1001,20 @@ public sealed partial class SourceEventSyncJob(
     /// (<see cref="SheetEditGate.StructureResourceOf"/>) чи аркуш (<see cref="SheetEditGate.ResourceOf"/>) —
     /// ті самі ресурси, що й у <c>SheetEditGate</c>.
     /// </summary>
+    /// <param name="connection">З'єднання транзакції видалення.</param>
+    /// <param name="tx">Транзакція видалення.</param>
+    /// <param name="resource">Ресурс блокування.</param>
+    /// <param name="wait">
+    /// <c>false</c> — без черги (<c>@LockTimeout = 0</c>), для ресурсу, коли транзакція вже тримає інші
+    /// <c>sheet-edit</c> (R7-Y2-02 / X6-02).
+    /// </param>
+    /// <param name="ct">Токен скасування.</param>
     /// <returns><c>false</c> — ресурс зайнятий довше за таймаут: видалення лишається наступному прогону.</returns>
     private static async Task<bool> TryAppLockAsync(
         Microsoft.Data.SqlClient.SqlConnection connection,
         Microsoft.Data.SqlClient.SqlTransaction tx,
         string resource,
+        bool wait,
         CancellationToken ct)
     {
         await using var command = connection.CreateCommand();
@@ -1009,7 +1029,7 @@ public sealed partial class SourceEventSyncJob(
         command.Parameters.Add(new Microsoft.Data.SqlClient.SqlParameter("@LockOwner", System.Data.SqlDbType.VarChar, 32) { Value = "Transaction" });
         command.Parameters.Add(new Microsoft.Data.SqlClient.SqlParameter("@LockTimeout", System.Data.SqlDbType.Int)
         {
-            Value = SheetEditGatePolicy.DefaultLockTimeoutSeconds * 1000,
+            Value = wait ? SheetEditGatePolicy.DefaultLockTimeoutSeconds * 1000 : 0,
         });
         var result = new Microsoft.Data.SqlClient.SqlParameter("@Result", System.Data.SqlDbType.Int)
         {
