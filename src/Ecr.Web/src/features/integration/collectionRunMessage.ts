@@ -22,9 +22,47 @@ import { t } from '@/shared/i18n';
  */
 export function collectionRunErrorText(raw: string): string {
   const envelope = decode(raw);
-  if (envelope === null) return raw;
+  if (envelope === null) return keyedDetailsText(raw) ?? raw;
 
   return resolve(envelope) ?? raw;
+}
+
+/**
+ * Подія синку довідника (`RegistrySyncJob`) пише деталі НЕ конвертом, а рядком `name=value; …`, де
+ * `messageKey=` — ключ каталогу (AN-95: подія `codeModeManual` лишалась сирим `reason=codeModeManual`, а порада
+ * «перейдіть в Auto» не діставалась читачеві).
+ *
+ * ⚠ Повертає `null`, коли ключа немає або цей файл його не знає: сирий рядок чесніший за вгаданий переклад.
+ * Решта частин (`element=`) не губиться — вона називає, ПРО ЯКИЙ елемент подія. Частини `reason=`, `error=` і
+ * хвіст дедупу (`key=…`) — службові й показані словами вже не потрібні.
+ */
+function keyedDetailsText(raw: string): string | null {
+  if (!raw.includes('messageKey=')) return null;
+
+  const params: Record<string, string> = {};
+  let key: string | null = null;
+  let element: string | null = null;
+
+  for (const part of raw.split('; ')) {
+    const eq = part.indexOf('=');
+    if (eq <= 0) continue;
+
+    const name = part.slice(0, eq);
+    if (name === 'key') break;
+
+    const value = part.slice(eq + 1);
+    if (name === 'messageKey') key = value;
+    // Службові частини в підстановки не йдуть: вони не плейсхолдери каталогу.
+    else if (name !== 'reason' && name !== 'error') params[name] = value;
+    if (name === 'element') element = part;
+  }
+
+  if (key === null || key.length === 0) return null;
+
+  const text = render(key, params);
+  if (text === null) return null;
+
+  return element === null ? text : `${text} (${element})`;
 }
 
 interface Envelope {
@@ -202,6 +240,10 @@ function adapterRefusal(key: string, params: Record<string, string>): string | n
       return t('err.ECR-INT-0503.piWebApiResponseTooLarge', params);
     case 'err.ECR-INT-0503.controlCharacterInName':
       return t('err.ECR-INT-0503.controlCharacterInName', params);
+    // AN-95: подія синку довідника «елемент не створено» (`RegistrySyncPlanner.CodeModeManualKey`): ключ приходить у
+    // `Details` рядком `messageKey=…` (`keyedDetailsText`), а не конвертом. Не відмова адаптера, тому лише тут.
+    case 'err.ECR-REG-0422.codeModeManualNoAutoCreate':
+      return t('err.ECR-REG-0422.codeModeManualNoAutoCreate', params);
     default:
       return null;
   }
