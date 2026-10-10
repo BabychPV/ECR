@@ -57,6 +57,27 @@ public sealed class PiWebApiResponseLimitTests
         Assert.Equal(1, handler.Calls);
     }
 
+    /// <summary>
+    /// I1-05: межа спрацьовує під час ЧИТАННЯ потоку, а не після того, як <c>HttpClient</c> уже зібрав усе тіло в пам'ять.
+    /// </summary>
+    /// <remarks>
+    /// Мутація: повернути <c>client.SendAsync(message, ct)</c> (типове <c>ResponseContentRead</c>) - <c>HttpClient</c>
+    /// вичитує весь мегабайт до перевірки межі, тест червоний.
+    /// </remarks>
+    [Fact]
+    public async Task I1_05_тіло_без_ContentLength_не_вичитується_повністю_до_перевірки_межі()
+    {
+        const int total = 1_000_000;
+        var stream = new ChunkedStream(total, chunk: 1_000);
+        var handler = new CountingHandler(() => new StreamContent(stream));
+        var sut = Create(handler, limit: 100);
+
+        await Assert.ThrowsAsync<SourceResponseTooLargeException>(() => sut.ReadAsync(Request(), CancellationToken.None));
+
+        // Межа 100 байт: рушій зупиняється на першому ж шматку, а не збирає мільйон.
+        Assert.True(stream.Consumed < total / 10, $"Прочитано {stream.Consumed} із {total} байт.");
+    }
+
     [Fact]
     public void ТиповаМежа_50МБ() => Assert.Equal(50L * 1024 * 1024, PiWebApiDataSource.DefaultMaxResponseBytes);
 
@@ -78,6 +99,53 @@ public sealed class PiWebApiResponseLimitTests
         secrets.Find(Arg.Any<string>()).Returns((string?)null);
 
         return new PiWebApiDataSource(new HttpClient(handler), store, secrets) { MaxResponseBytes = limit };
+    }
+
+    /// <summary>Потік без довжини (не підтримує пошук): віддає <c>total</c> байт шматками й рахує прочитане.</summary>
+    private sealed class ChunkedStream(int total, int chunk) : Stream
+    {
+        private int consumed;
+
+        public int Consumed => Volatile.Read(ref consumed);
+
+        public override bool CanRead => true;
+
+        public override bool CanSeek => false;
+
+        public override bool CanWrite => false;
+
+        public override long Length => throw new NotSupportedException();
+
+        public override long Position
+        {
+            get => throw new NotSupportedException();
+            set => throw new NotSupportedException();
+        }
+
+        public override int Read(byte[] buffer, int offset, int count) => Read(buffer.AsSpan(offset, count));
+
+        public override int Read(Span<byte> buffer)
+        {
+            var give = Math.Min(Math.Min(buffer.Length, chunk), total - consumed);
+            if (give <= 0)
+            {
+                return 0;
+            }
+
+            buffer[..give].Fill((byte)'x');
+            consumed += give;
+            return give;
+        }
+
+        public override void Flush()
+        {
+        }
+
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+
+        public override void SetLength(long value) => throw new NotSupportedException();
+
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
     }
 
     private sealed class CountingHandler(Func<HttpContent> content) : HttpMessageHandler
