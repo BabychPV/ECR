@@ -1,6 +1,5 @@
 using System.Globalization;
 using System.Text.Json;
-using System.Text.RegularExpressions;
 using Ecr.Application.Common;
 using Ecr.Application.Errors;
 using Ecr.Application.Ports;
@@ -188,7 +187,7 @@ public sealed partial class AssignGroupRoleHandler(
 
         if (text.StartsWith("S-1-", StringComparison.OrdinalIgnoreCase))
         {
-            if (!SidPattern().IsMatch(text))
+            if (!WindowsSidFormat.IsWellFormed(text))
             {
                 throw Invalid("err.ECR-REQ-0422.principalSidMalformed", $"«{text}» не є SID.", text);
             }
@@ -208,9 +207,6 @@ public sealed partial class AssignGroupRoleHandler(
         => new(
             ErrorCodes.RequestInvalid, message,
             new Dictionary<string, object?> { ["messageKey"] = messageKey, ["principal"] = principal });
-
-    [GeneratedRegex(@"^S-1-\d+(-\d+){1,14}$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
-    private static partial Regex SidPattern();
 }
 
 /// <summary>Відкликання ролі в групи. Право <c>Security.ManageUsers</c>.</summary>

@@ -285,7 +285,8 @@ public static partial class ReportParameters
     private static bool WithinScale(decimal number) => decimal.Round(number, 16) == number;
 
     /// <summary>Ім'я параметра так, як його читає лексер (<c>02b</c> §3.4).</summary>
-    [GeneratedRegex(@"^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z0-9_]+)*$")]
+    // ⛔ S1-06: `\z` замість `$` — ім'я з кінцевим LF не є іменем.
+    [GeneratedRegex(@"^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z0-9_]+)*\z")]
     private static partial Regex Name();
 
     private static BusinessRuleException Invalid(string code, string reason)
