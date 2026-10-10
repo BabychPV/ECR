@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using Ecr.TestKit;
 using Xunit;
 
@@ -53,5 +54,37 @@ public sealed class AdminDeployDocsTruthTests
             Assert.DoesNotContain("стара версія лишається робочою", flat, StringComparison.Ordinal);
             Assert.DoesNotContain("MSI не встановлено, стара версія працює", flat, StringComparison.Ordinal);
         }
+    }
+
+    /// <summary>
+    /// R8-Z7-01: індекси на <c>calc.CalculationResult</c> у <c>Sql/*.sql</c> будуються на першому оновленні
+    /// бази без них, у <c>07-partition-tables.sql</c> — офлайн на будь-якій редакції. Кожен такий індекс
+    /// мусить бути названий у runbook (вікно обслуговування), а install-guide не обіцяє «хвилин».
+    /// Мутації: прибрати рядок індексу з runbook §8.2 або повернути «зазвичай хвилини» → червоний.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Офлайн_індекси_результатів_описані_у_вікні_оновлення()
+    {
+        var sqlDir = Path.Combine(SourceTree.Root, "src", "Ecr.Infrastructure", "Persistence", "Sql");
+        var names = Directory.GetFiles(sqlDir, "*.sql")
+            .SelectMany(f => Regex.Matches(File.ReadAllText(f),
+                    @"CREATE\s+(?:UNIQUE\s+)?(?:NONCLUSTERED\s+|CLUSTERED\s+)?INDEX\s+(\w+)\s+ON\s+calc\.CalculationResult\b",
+                    RegexOptions.IgnoreCase)
+                .Select(m => m.Groups[1].Value))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        Assert.Contains("IX_CalculationResult_DocRun", names);
+
+        var runbook = Runbook();
+        foreach (var name in names)
+        {
+            Assert.Contains("`" + name + "`", runbook, StringComparison.Ordinal);
+        }
+
+        var guide = InstallGuide().Replace("\r\n", " ", StringComparison.Ordinal).Replace("\n", " ", StringComparison.Ordinal);
+        Assert.DoesNotContain("зазвичай хвилини", guide, StringComparison.Ordinal);
+        Assert.Contains("IX_CalculationResult_DocRun", guide, StringComparison.Ordinal);
     }
 }
