@@ -35,8 +35,12 @@ public sealed class DeleteDocumentHandler(
     IUnitOfWork uow,
     IAuditWriter audit,
     ICurrentUser currentUser,
-    IClock clock)
+    IClock clock,
+    Reporting.ReportSnapshotSync? reports = null)
 {
+    // ⚠ `reports` необов'язковий лише заради наявних прямих конструювань обробника в тестах; у застосунку
+    // клас зареєстровано (`Ecr.Application.DependencyInjection`), і контейнер його передає.
+
     /// <summary>Право на видалення документа.</summary>
     public const string Permission = "Document.Delete";
 
@@ -121,6 +125,15 @@ public sealed class DeleteDocumentHandler(
                 [.. facts.SheetStates.Except(hidden)],
                 facts.HasWorkflowHistory || hidden.Any(s => s.Status != DocumentStatus.Draft));
             cells = await deletion.DeleteAsync(documentId, innerCt).ConfigureAwait(false);
+
+            // ⛔ X1-02 (аудит R11): статус поточних зрізів проєкту успадковується від СКЛАДУ даних (D-65), а
+            // документ щойно з нього зник — без перерахунку зріз, що був `Draft` лише через цю чернетку,
+            // лишався б чернетковим при затверджених решті документів. У тій самій транзакції: збій
+            // відкочує й видалення.
+            if (reports is not null)
+            {
+                await reports.RefreshProjectAsync(document.ProjectId, innerCt).ConfigureAwait(false);
+            }
 
             // ⛔ F2-03 (аудит R11): журнал — В ТІЙ САМІЙ транзакції. `AuditWriter` бере поточну
             // транзакцію контексту (`CreateCommand`), тож запис відкочується разом із видаленням.
