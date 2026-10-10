@@ -117,6 +117,37 @@ public sealed class JobsHealthCacheTests
         return (check, store);
     }
 
+    /// <summary>
+    /// R2-06: запис кешу датується ЗАВЕРШЕННЯМ обчислення, а не початком. Перевірка, що йшла довше за TTL, одразу після
+    /// завершення — ще свіжа: наступна проба бере її з кешу, а не рахує знову.
+    /// </summary>
+    /// <remarks>Мутація: повернути `Store(key, now, …)` (мітка початку) — друга проба рахує удруге.</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    public async Task R2_06_повільне_обчислення_датується_завершенням_а_не_початком()
+    {
+        var time = new ManualTime();
+        var cache = new HealthResultCache(time, TimeSpan.FromSeconds(5));
+        var computations = 0;
+
+        Task<HealthCheckResult> Slow(CancellationToken ct)
+        {
+            computations++;
+            time.Advance(TimeSpan.FromSeconds(8)); // перевірка йде довше за TTL
+            return Task.FromResult(HealthCheckResult.Healthy("slow"));
+        }
+
+        await cache.GetOrAddAsync("db", Slow, CancellationToken.None);
+        await cache.GetOrAddAsync("db", Slow, CancellationToken.None);
+
+        Assert.Equal(1, computations);
+
+        // Справжній термін придатності — від завершення: через TTL запис протухає.
+        time.Advance(TimeSpan.FromSeconds(6));
+        await cache.GetOrAddAsync("db", Slow, CancellationToken.None);
+        Assert.Equal(2, computations);
+    }
+
     /// <summary>Каталог із реєстром мов: невідома мова — <c>en</c>, як у справжнього сховища.</summary>
     private sealed class RegistryCatalog : IUiStringCatalog
     {
