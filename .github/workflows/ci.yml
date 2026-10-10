@@ -303,12 +303,21 @@ jobs:
   # `Ecr.Worker.Tests` перевіряють лише зрозумілу відмову
   # `PlatformNotSupportedException`, а самі межі пам'яті й KILL_ON_JOB_CLOSE —
   # ніде. Це завдання ганяє той самий проєкт на Windows, де гілки тестів із
-  # живими процесами справді виконуються. SQL не потрібен.
+  # живими процесами справді виконуються. SQL не потрібен (крім кроку L2-09, Y6-03).
   #
   # ⚠ Тому `--filter "Category!=Integration"`: SQL-тести дочірнього воркера
   # (I1, `[Collection("SqlServer")]`) без `ECR_TEST_SQL` тут упали б. Вони
   # ідуть у `server-part (core)` — крок «Тести .NET» ганяє весь `Ecr.sln`
   # із SQL у контейнері.
+  #
+  # ⛔ Y6-03 (R7): але `WorkerSupervisorStopTests` (L2-09: справжній `--child`,
+  # Job Object, сигнал зупинки, повернення задачі в чергу, код виходу 0) на
+  # Linux одразу повертається, а тут його відкидав той самий фільтр — тобто
+  # не виконувався НІДЕ, і «доказ 20/20» у WORK-QUEUE AN-82 не мав прогону
+  # (це й сховало Y6-02). Тому окремий крок нижче: SQL Server LocalDB на
+  # раннері (фікстура сама створює й розгортає базу за `ECR_TEST_SQL`) і
+  # прогін саме цього класу. Повний набір інтеграційних тестів воркера
+  # лишається в `server-part (core)`.
   #
   # ⛔ НЕ обов'язковий гейт (пряме рішення людини 2026-09-29): до переліку
   # семи не входить, у `server` не зводиться, `needs` не має — іде паралельно.
@@ -329,6 +338,29 @@ jobs:
 
       - name: Тести Ecr.Worker (Job Object)
         run: dotnet test tests/Ecr.Worker.Tests --nologo --filter "Category!=Integration" --logger "trx;LogFileName=worker-windows.trx" --logger "console;verbosity=normal" --results-directory TestResults
+
+      # Y6-03: LocalDB — якщо образ раннера її не несе, ставимо з Chocolatey (є на windows-latest).
+      - name: SQL Server LocalDB (Y6-03)
+        shell: pwsh
+        run: |
+          if (-not (Get-Command sqllocaldb -ErrorAction SilentlyContinue)) {
+            choco install sqllocaldb -y --no-progress
+            if ($LASTEXITCODE -ne 0) { throw "choco install sqllocaldb: код $LASTEXITCODE" }
+            $tools = Get-ChildItem 'C:\Program Files\Microsoft SQL Server\*\Tools\Binn\SqlLocalDB.exe' | Select-Object -First 1
+            if (-not $tools) { throw 'SqlLocalDB.exe не знайдено після встановлення' }
+            $env:PATH = "$($tools.DirectoryName);$env:PATH"
+            Add-Content -Path $env:GITHUB_PATH -Value $tools.DirectoryName
+          }
+          # Автоматичний екземпляр MSSQLLocalDB `start` створює сам, якщо його ще немає.
+          sqllocaldb start MSSQLLocalDB
+          if ($LASTEXITCODE -ne 0) { throw "sqllocaldb start: код $LASTEXITCODE" }
+          sqllocaldb info MSSQLLocalDB
+
+      # Y6-03: доказ L2-09 на справжньому `--child` — саме цей клас, з SQL.
+      - name: Тести Ecr.Worker (L2-09, справжній --child + SQL)
+        env:
+          ECR_TEST_SQL: 'Server=(localdb)\MSSQLLocalDB;Integrated Security=true;TrustServerCertificate=true'
+        run: dotnet test tests/Ecr.Worker.Tests --nologo --filter "FullyQualifiedName~WorkerSupervisorStopTests" --logger "trx;LogFileName=worker-windows-l2-09.trx" --logger "console;verbosity=normal" --results-directory TestResults
 
       # L10-05: на Linux-раннері сценарій deploy-ecr.ps1 іде через pwsh 7, який ПРИЙМАЄ коментарі в JSON, —
       # тож «5.1 не читає JSONC» там не доводиться. Цей крок запускає ту саму перевірку у вбудованому Windows

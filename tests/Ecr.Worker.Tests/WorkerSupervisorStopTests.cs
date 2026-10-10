@@ -29,7 +29,9 @@ namespace Ecr.Worker.Tests;
 /// закриття Job Object, рядок лишається <c>Running</c>, тест червоний.
 /// </para>
 /// Тест лише для Windows (Job Object): на інших ОС повертається одразу — відмову платформи
-/// перевіряють тести <see cref="WorkerSupervisorTests"/>. Доказ 20/20 дає CI-завдання <c>worker (windows)</c>.
+/// перевіряють тести <see cref="WorkerSupervisorTests"/>. Доказ — CI-завдання <c>worker (windows)</c>, окремий
+/// крок із LocalDB (<c>worker-windows-l2-09.trx</c>, Y6-03): до R7 тест там відкидав фільтр
+/// <c>Category!=Integration</c>, і «20/20» прогону не мав.
 /// </remarks>
 [Collection("SqlServer")]
 [Trait(TestCategories.Stage, TestCategories.Stage8)]
