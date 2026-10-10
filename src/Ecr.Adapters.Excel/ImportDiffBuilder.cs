@@ -844,6 +844,11 @@ public static class ImportMessageKeys
     public const string TableMissing = "err.ECR-IMP-0422.importTableMissing";
 
     /// <summary>
+    /// Аркуша таблиці в книзі немає: його перейменовано або видалено після експорту (Y5-04).
+    /// </summary>
+    public const string SheetMissing = "err.ECR-IMP-0422.importSheetMissing";
+
+    /// <summary>
     /// У таблиці книги змін більше за <see cref="ImportDiffBuilder.MaxChanges"/> —
     /// відмова всього перегляду (L6-01), а не мовчазне обрізання.
     /// </summary>
