@@ -36,6 +36,18 @@ export function activeJobCount(jobs: readonly JobSummary[] | undefined): number 
 /** Повне ім'я маркера каскадного перерахунку формул (`QuartzJobScheduler` пише `FullName`). */
 const FormulaRecalculationCode = 'Ecr.Application.Ports.IFormulaRecalculationJob';
 
+/**
+ * Скільки власних задач вимагають ЧАСТОГО опитування шапки (P2-05).
+ *
+ * ⛔ Каскадний перерахунок формул ставиться на кожне автозбереження, і за ним уже стежить сама сітка
+ * (`recalc`). Якщо його рахувати тут, шапка тримала 3-секундний темп, поки оператор друкує, — по запиту
+ * на вкладку кожні 3 с заради задачі, яку шапка не показує як «своє». Бейдж на кнопці (`activeJobCount`)
+ * це не міняє: працюючий перерахунок і далі видно в шухляді.
+ */
+export function pollingJobCount(jobs: readonly JobSummary[] | undefined): number {
+  return (jobs ?? []).filter((job) => isActiveJob(job.state) && job.jobCode !== FormulaRecalculationCode).length;
+}
+
 /** Повне ім'я маркера експорту документа. */
 const ExportCode = 'Ecr.Application.Ports.IExcelExportJob';
 
