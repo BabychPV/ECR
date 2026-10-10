@@ -47,6 +47,8 @@ function json(body: unknown): Response {
   return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
 }
 
+let lastClient: QueryClient | null = null;
+
 function show(isSimulation: boolean): QueryClient {
   vi.stubGlobal(
     'fetch',
@@ -70,6 +72,7 @@ function show(isSimulation: boolean): QueryClient {
   );
 
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  lastClient = client;
 
   render(
     <MantineProvider theme={testTheme}>
@@ -87,6 +90,8 @@ function show(isSimulation: boolean): QueryClient {
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  // Таймери збирача сміття запитів (5 хв) тримали б контекст `vmThreads` у купі воркера до кінця прогону.
+  lastClient?.clear();
 });
 
 describe('MappingPreviewPage: симуляція (L9-18)', () => {

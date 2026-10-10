@@ -129,8 +129,11 @@ function projectOf(url: string): number {
   return Number(/projects\/(\d+)\/periods/.exec(url)?.[1]);
 }
 
+const clients: QueryClient[] = [];
+
 function renderWithClient(ui: ReactElement) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  clients.push(client);
   return render(
     createElement(
       MantineProvider,
@@ -143,6 +146,8 @@ function renderWithClient(ui: ReactElement) {
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  // Таймери збирача сміття запитів (5 хв) тримали б контекст `vmThreads` у купі воркера до кінця прогону.
+  for (const client of clients.splice(0)) client.clear();
 });
 
 describe('PeriodStatesLoader: збій одного календаря (N4-06)', () => {
@@ -170,7 +175,7 @@ describe('PeriodStatesLoader: збій одного календаря (N4-06)',
 });
 
 describe('одночасність календарів (N4-08)', () => {
-  const ProjectCount = MaxConcurrentCalendars * 2 + 5;
+  const ProjectCount = MaxConcurrentCalendars + 6;
   let inFlight = 0;
   let maxInFlight = 0;
   let requested = new Set<number>();

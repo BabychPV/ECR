@@ -48,6 +48,8 @@ describe('useSession', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     resetSignOutForTests();
+    // Таймери збирача сміття запитів (5 хв) тримали б контекст `vmThreads` у купі воркера до кінця прогону.
+    client.clear();
   });
 
   it('минущий збій /me (503) повторюється один раз і профіль зʼявляється', async () => {
