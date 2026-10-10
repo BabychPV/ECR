@@ -172,6 +172,42 @@ public sealed class CellValueReaderTests
         Assert.Equal("ECR-CELL-0422", error.ErrorCode);
     }
 
+    [Theory]
+    [InlineData("4/1/2024")]
+    [InlineData("4/13/2024")]
+    [InlineData("01-04-2024")]
+    [InlineData("01.04.24")]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Finding", "Z3-02")]
+    public void Відхилена_дата_з_днем_чи_місяцем_спереду_пояснюється_окремим_ключем(string wire)
+    {
+        // ⛔ Z3-02 (аудит 8). До 10.10 `4/1/2024` у сітці приймався; після Y5-02 PATCH
+        // відмовляв загальним «Column "C1" expects a date» на значенні, яке на вигляд —
+        // дата. Пояснення з порадою РРРР-ММ-ДД мав лише CSV довідника.
+        // Мутація: прибрати гілку `IsRefusedDayMonthDate` у `CellValueReader.Date` —
+        // ключ знову `expectsDate`.
+        var error = Assert.Throws<BusinessRuleException>(
+            () => CellValueReader.Read(FromWire(wire), Column(CellDataType.Date)));
+
+        Assert.Equal("ECR-CELL-0422", error.ErrorCode);
+        Assert.Equal(CellValueReader.AmbiguousDateMessageKey, error.Details?["messageKey"]);
+        Assert.Equal("C1", error.Details?["columnCode"]);
+        Assert.Equal(wire, error.Details?["value"]);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Finding", "Z3-02")]
+    public void Текст_що_не_схожий_на_дату_лишається_загальною_відмовою()
+    {
+        // Контроль до попереднього тесту: окремий ключ — лише для дат із днем чи місяцем
+        // спереду, а не для будь-якого тексту.
+        var error = Assert.Throws<BusinessRuleException>(
+            () => CellValueReader.Read(FromWire("not a date"), Column(CellDataType.Date)));
+
+        Assert.Equal("err.ECR-CELL-0422.expectsDate", error.Details?["messageKey"]);
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
     public void Довідникова_комірка_тримає_ідентифікатор_а_не_число()

@@ -77,10 +77,12 @@ public sealed class RegistryEntryImportExcelRoundTripTests
     {
         // ⛔ «4/13/2024» точного формату d/M не має, і фолбек Invariant читав його як
         // 13 квітня — поруч із «4/1/2024» = 4 січня в тому самому файлі.
+        // ✎ Z3-02 (аудит 8): відмова — тим самим ключем із порадою РРРР-ММ-ДД, що й
+        // «4/1/2024», а не «не є датою» на значенні, яке на вигляд — дата.
         var (report, _) = await ImportAsync("4/13/2024", dryRun: true);
 
         var error = Assert.Single(report.Errors);
-        Assert.Equal("err.ECR-REG-0422.valueNotDate", error.MessageKey);
+        Assert.Equal("err.ECR-REG-0422.valueAmbiguousDate", error.MessageKey);
     }
 
     [Theory]

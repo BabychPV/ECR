@@ -695,6 +695,9 @@ function rejectionText(rejection: ImportRejection): string {
       return t('err.ECR-CELL-0422.importExpectsBoolean');
     case 'err.ECR-CELL-0422.importExpectsDate':
       return t('err.ECR-CELL-0422.importExpectsDate');
+    // ⛔ Z3-02: дата з днем або місяцем спереду (4/1/2024, 01-04-2024) — з порадою РРРР-ММ-ДД.
+    case 'err.ECR-CELL-0422.importAmbiguousDate':
+      return t('err.ECR-CELL-0422.importAmbiguousDate');
     case 'err.ECR-CELL-0422.importExpectsIdentifier':
       return t('err.ECR-CELL-0422.importExpectsIdentifier');
     // ⛔ Y5-03: запис довідника, який застосування відхилило б (C7), — у перегляді.

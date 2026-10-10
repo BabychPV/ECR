@@ -268,7 +268,9 @@ public sealed class RegistryValue : Entity<long>
             // форматом регіону (`4/1/2024` в en-US — 1 квітня, в en-GB/uk — 4 січня).
             // Розбір відмовляє, а людині — окремий ключ із порадою писати РРРР-ММ-ДД,
             // а не «не є датою» на значенні, яке на вигляд — дата.
-            string s when CellDateParser.IsAmbiguousSlashDate(s) => throw new DomainException(
+            // ⛔ Z3-02: так само для `4/13/2024` (M/d, яке розбір теж не вгадує) і для
+            // дефісу чи двозначного року з днем спереду (Z3-01) — одне правило з комірками.
+            string s when CellDateParser.IsRefusedDayMonthDate(s) => throw new DomainException(
                 "ECR-REG-0422",
                 $"Дата «{s}» неоднозначна: день і місяць можна переставити.",
                 new Dictionary<string, object?>

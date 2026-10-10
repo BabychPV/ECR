@@ -978,6 +978,9 @@ public static class ImportMessageKeys
     /// <summary>Значення з книги не читається як дата.</summary>
     public const string ExpectsDate = "err.ECR-CELL-0422.importExpectsDate";
 
+    /// <summary>Дата з книги з днем або місяцем спереду, порядок яких не визначити (Z3-02).</summary>
+    public const string AmbiguousDate = "err.ECR-CELL-0422.importAmbiguousDate";
+
     /// <summary>Код із книги не знайдено серед записів довідника (або одиниць) колонки.</summary>
     public const string ExpectsIdentifier = "err.ECR-CELL-0422.importExpectsIdentifier";
 
@@ -996,6 +999,7 @@ public static class ImportMessageKeys
         "err.ECR-CELL-0422.expectsNumber" => ExpectsNumber,
         "err.ECR-CELL-0422.expectsBoolean" => ExpectsBoolean,
         "err.ECR-CELL-0422.expectsDate" => ExpectsDate,
+        CellValueReader.AmbiguousDateMessageKey => AmbiguousDate,
         "err.ECR-CELL-0422.expectsIdentifier" => ExpectsIdentifier,
         "err.ECR-CELL-0422.expectsUnitIdentifier" => ExpectsUnit,
         "err.ECR-CELL-0422.tooManyIntegerDigits" => IntegerDigits,
