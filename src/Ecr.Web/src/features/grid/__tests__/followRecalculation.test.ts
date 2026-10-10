@@ -237,3 +237,16 @@ describe('AN-108 / P2-02: перерахунок, що нічого не зап�
     expect(stale(client, other)).toBe(true);
   });
 });
+
+/** P2-07: пам'ять про враховані задачі не росте безмежно протягом життя вкладки. */
+describe('P2-07: settledJobs обмежено', () => {
+  it('300 задач: найстаріша забута (її повтор знову враховується), найсвіжіша пам’ятається', () => {
+    const client = new QueryClient();
+
+    for (let i = 0; i < 300; i += 1) expect(settleRecalculation(client, `cap#${String(i)}`, 77, 202609, 3)).toBe(true);
+
+    // ⛔ Мутація: прибрати обрізання — `cap#0` досі в карті, повтор дає `false`.
+    expect(settleRecalculation(client, 'cap#0', 77, 202609, 3)).toBe(true);
+    expect(settleRecalculation(client, 'cap#299', 77, 202609, 3)).toBe(false);
+  });
+});
