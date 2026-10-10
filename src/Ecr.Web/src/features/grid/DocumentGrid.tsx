@@ -1806,7 +1806,11 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
 
   const applyHistory = useCallback(
     (edits: CellEdit[] | null) => {
-      if (edits === null || data === undefined) return;
+      // ⛔ F6-04: у режимі лише для читання (подано, закритий період, вузький
+      // екран) крок не пишеться — як і решта шляхів запису (`onPaste`, правки
+      // діапазону). Інакше екран показував «скасоване» значення в поданому
+      // аркуші, а відмовлений сервером пакет висів «не збережено» й блокував вихід.
+      if (edits === null || data === undefined || readOnly) return;
 
       const rowsByKey = rowIndexOf(data);
       const columnsByCode = columnIndexOf(data);
@@ -1862,7 +1866,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         })),
       );
     },
-    [data, saveThroughStore, touchHistory, tableInstanceId, periodKey],
+    [data, readOnly, saveThroughStore, touchHistory, tableInstanceId, periodKey],
   );
 
   const onKeyDown = useCallback(
@@ -1882,6 +1886,13 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
       // (Ctrl+S лишається: зберегти все.)
       if (isInCellEditor(event.target)) return;
 
+      // ⛔ F6-04: перевірка ДО `history.current.undo()` — інакше крок знімався б
+      // зі стека й губився, хоча нічого не застосовано.
+      if (readOnly && (shortcut === 'undo' || shortcut === 'redo')) {
+        event.preventDefault();
+        return;
+      }
+
       if (shortcut === 'undo') {
         event.preventDefault();
         applyHistory(history.current.undo());
@@ -1899,7 +1910,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
     // (`pending` не змінюється), тож обробник не оновлювався: Ctrl+Y брав
     // крок зі стека, а зберігав зі старими версіями рядків або не зберігав
     // зовсім (`data === undefined` першого рендера) — кнопки ж працювали.
-    [pending, save, applyHistory],
+    [pending, save, applyHistory, readOnly],
   );
 
   /**
@@ -2216,10 +2227,10 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
       {slice.error !== null && <ErrorAlert error={slice.error} onRetry={() => void slice.refetch()} />}
 
       <Group gap="xs" key={historyRevision}>
-        <Button variant="default" disabled={!history.current.canUndo} onClick={() => applyHistory(history.current.undo())}>
+        <Button variant="default" disabled={readOnly || !history.current.canUndo} onClick={() => applyHistory(history.current.undo())}>
           {t('grid.undo')}
         </Button>
-        <Button variant="default" disabled={!history.current.canRedo} onClick={() => applyHistory(history.current.redo())}>
+        <Button variant="default" disabled={readOnly || !history.current.canRedo} onClick={() => applyHistory(history.current.redo())}>
           {t('grid.redo')}
         </Button>
         {Object.keys(widths).length > 0 && (
