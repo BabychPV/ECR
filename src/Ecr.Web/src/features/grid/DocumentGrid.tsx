@@ -2,14 +2,13 @@ import { useCallback, useEffect, useMemo, useRef, useState, type JSX } from 'rea
 import { Alert, Badge, Button, Group, List, Modal, Stack, Text } from '@mantine/core';
 import { RevoGrid } from '@revolist/react-datagrid';
 import type { ColumnRegular } from '@revolist/revogrid';
-import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { UseQueryResult } from '@tanstack/react-query';
 import { apiFetch, EcrApiError, isSessionClosed, type RequiredInputCell } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
 import type {
   CellConflictDto,
   ColumnDto,
-  CreateRowRequest,
   RegistryDefDto,
   RegistryEntryDto,
   TableSliceDto,
@@ -127,8 +126,9 @@ import {
 } from './gridTotals';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
-import { showApiError, showWarning } from '@/shared/ui/notify';
+import { showWarning } from '@/shared/ui/notify';
 import { refusalText } from './saveErrors';
+import { useAddRow } from './useAddRow';
 import { useRowHeight } from '@/shared/theme/preferences';
 import { t } from '@/shared/i18n';
 // ⚠ Порядок стилів збережений: `cell-states.css` (раніше — у `App.tsx`) іде
@@ -435,30 +435,8 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
     settleRecalculation(queryClient, recalculationJobId, documentId, periodKey, recalc.writtenCount);
   }, [recalc.outcome, recalculationJobId]);
 
-  /**
-   * Додавання рядка динамічної таблиці (`ФВ-3.2`).
-   *
-   * ⛔ До аудиту цієї дії в інтерфейсі не було зовсім: ендпоінт існував і
-   * працював, а динамічна таблиця лишалася порожньою назавжди — рядок у неї
-   * не міг додати ніхто (`A7-39`).
-   *
-   * ⚠ Ключ не задається: сервер видає GUID у форматі `N`. Просити ключ у
-   * користувача означало б віддати йому ідентичність рядка, на яку
-   * посилаються формули й аудит.
-   */
-  const addRow = useMutation({
-    mutationFn: () =>
-      apiFetch(`/api/v1/documents/${documentId}/rows`, {
-        method: 'POST',
-        body: JSON.stringify({ tableInstanceId, rowKey: null } satisfies CreateRowRequest),
-      }),
-    onSuccess: () => void slice.refetch(),
-
-    // ⚠ Стеля рядків і дублікат ключа приходять як `ECR-ROW-0409` з числом у
-    // тексті: «досягнуто межу динамічних рядків таблиці: 200». Це те, що
-    // людина може зрозуміти й погодити, а «не вдалося» — ні.
-    onError: showApiError,
-  });
+  // Додавання рядка динамічної таблиці (`ФВ-3.2`) — `useAddRow.ts` (A7-39, Y7-03).
+  const addRow = useAddRow(documentId, tableInstanceId, () => void slice.refetch());
   const history = useRef(new UndoStack(`${tableInstanceId}:${periodKey}`));
   const [rejected, setRejected] = useState<PasteRejection[]>([]);
 
