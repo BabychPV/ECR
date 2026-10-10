@@ -174,6 +174,32 @@ public sealed class UnitConverterTests
         Assert.Throws<DomainException>(() => _converter.Convert(2m, kg, broken, null));
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait("Finding", "Z2-05")]
+    public void Z2_05_швидкість_у_швидкість_через_чисельник_і_знаменник_рівно_а_не_через_заокруглену_базу()
+    {
+        const byte StdVolume = 12;
+        const byte Time = 4;
+        var sm3 = new UnitSpec(1, "Sm3", StdVolume, 1m, 0m);
+        var second = new UnitSpec(2, "s", Time, 1m, 0m);
+        var hour = new UnitSpec(3, "h", Time, 3600m, 0m);
+
+        // 1 Sm3/s = 3600 Sm3/h рівно; 3.6 Sm3/h = 0.001 Sm3/s рівно.
+        Assert.Equal(3600m, _converter.ConvertRate(1m, sm3, second, sm3, hour));
+        Assert.Equal(0.001m, _converter.ConvertRate(3.6m, sm3, hour, sm3, second));
+
+        // Контроль: маршрут через базу з 1/3600, заокругленим до 18 знаків (як у uom.Unit), справді не точний.
+        var perSecond = new UnitSpec(10, "Sm3_per_s", 13, 1m, 0m);
+        var perHour = new UnitSpec(11, "Sm3_per_h", 13, 0.000277777777777778m, 0m);
+        Assert.NotEqual(3600m, _converter.Convert(1m, perSecond, perHour, null));
+
+        // Різні розмірності частин - маршруту немає (null), а не вгадане число.
+        var kg = new UnitSpec(4, "kg", 1, 1m, 0m);
+        Assert.Null(_converter.ConvertRate(1m, sm3, second, kg, hour));
+        Assert.Null(_converter.ConvertRate(1m, sm3, second, sm3, new UnitSpec(5, "bad", Time, 0m, 0m)));
+    }
+
     /// <summary>Одиниця для сценарію; поля, яких не торкаємось, лишаються типовими.</summary>
     private static Unit Make(
         string code, byte dimensionId, bool isBase, decimal factor, int id, decimal offset = 0m)

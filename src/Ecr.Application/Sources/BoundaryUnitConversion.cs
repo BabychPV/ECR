@@ -90,24 +90,12 @@ public static class BoundaryUnitConversion
             return null;
         }
 
-        var fromNumerator = Spec(units, from.Numerator);
-        var toNumerator = Spec(units, to.Numerator);
-        var fromDenominator = Spec(units, from.Denominator);
-        var toDenominator = Spec(units, to.Denominator);
-        if (fromNumerator.DimensionId != toNumerator.DimensionId
-            || fromDenominator.DimensionId != toDenominator.DimensionId
-            || fromDenominator.FactorToBase == 0m
-            || toDenominator.FactorToBase == 0m
-            || fromDenominator.OffsetToBase != 0m
-            || toDenominator.OffsetToBase != 0m)
-        {
-            return null;
-        }
-
-        var numerator = converter.Convert(value, fromNumerator, toNumerator, explicitConversion: null);
-
-        // Sm3/s → Sm3/h: × 3600 (секунд у годині цілі) ÷ 1 (секунд у секунді джерела) = рівно.
-        return numerator * toDenominator.FactorToBase / fromDenominator.FactorToBase;
+        return converter.ConvertRate(
+            value,
+            Spec(units, from.Numerator),
+            Spec(units, from.Denominator),
+            Spec(units, to.Numerator),
+            Spec(units, to.Denominator));
     }
 
     /// <summary>Чи збігається фактична одиниця джерела з оголошеною (ФВ-16.9).</summary>

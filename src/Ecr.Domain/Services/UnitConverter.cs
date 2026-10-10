@@ -141,6 +141,48 @@ public sealed class UnitConverter
         return (inBase - to.OffsetToBase) / to.FactorToBase;
     }
 
+    /// <summary>
+    /// Швидкість → швидкість (<c>Sm3/s</c> → <c>Sm3/h</c>, <c>kg/t</c> → <c>t/t</c>): чисельник конвертується
+    /// <see cref="Convert(decimal, UnitSpec, UnitSpec, UnitConversion?)"/>, знаменник - множенням на множник
+    /// знаменника цілі й діленням (останнім кроком) на множник знаменника джерела. <c>null</c> - маршрут
+    /// чисельник/знаменник неможливий (різні розмірності частин, нульовий множник чи зсув знаменника): викликач
+    /// іде загальним маршрутом через базу, який дасть відмову.
+    /// </summary>
+    /// <param name="value">Значення у вихідній швидкості.</param>
+    /// <param name="fromNumerator">Чисельник вихідної одиниці.</param>
+    /// <param name="fromDenominator">Знаменник вихідної одиниці.</param>
+    /// <param name="toNumerator">Чисельник цільової одиниці.</param>
+    /// <param name="toDenominator">Знаменник цільової одиниці.</param>
+    /// <returns>Значення в цільовій швидкості або <c>null</c>.</returns>
+    /// <remarks>
+    /// ⛔ Z2-05: маршрут через <c>FactorToBase</c> швидкості дає хвіст там, де множник не має скінченного запису
+    /// (<c>Sm3_per_h = 1/3600</c>): <c>1 Sm3/s</c> ставало <c>3599.99999999999712</c> замість <c>3600</c>. Це ЄДИНА
+    /// формула такого переходу: її кличуть конверсія на межі інтеграції, <c>CONVERT</c> виразів методології й
+    /// шаблону та <c>POST /units/convert</c> - копія в кожному шарі розійшлася б тихо (кожна дає число).
+    /// </remarks>
+    public decimal? ConvertRate(
+        decimal value,
+        UnitSpec fromNumerator,
+        UnitSpec fromDenominator,
+        UnitSpec toNumerator,
+        UnitSpec toDenominator)
+    {
+        if (fromNumerator.DimensionId != toNumerator.DimensionId
+            || fromDenominator.DimensionId != toDenominator.DimensionId
+            || fromDenominator.FactorToBase == 0m
+            || toDenominator.FactorToBase == 0m
+            || fromDenominator.OffsetToBase != 0m
+            || toDenominator.OffsetToBase != 0m)
+        {
+            return null;
+        }
+
+        var numerator = Convert(value, fromNumerator, toNumerator, explicitConversion: null);
+
+        // Sm3/s -> Sm3/h: x 3600 (секунд у годині цілі) / 1 (секунд у секунді джерела) = рівно.
+        return numerator * toDenominator.FactorToBase / fromDenominator.FactorToBase;
+    }
+
     /// <summary>Чи можлива конверсія без явного правила.</summary>
     /// <param name="from">Вихідна одиниця.</param>
     /// <param name="to">Цільова одиниця.</param>
