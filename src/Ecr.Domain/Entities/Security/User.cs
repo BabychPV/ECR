@@ -396,19 +396,27 @@ public sealed class User : Entity<int>
 
         if (LastSignInAt is not null)
         {
-            throw new Abstractions.DomainException(
-                ErrorCodes.SecurityConflict,
-                $"«{UserName}» уже входив: його SID підтверджено каталогом і не виправляється.",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = "err.ECR-SEC-0409.windowsSidConfirmed",
-                    ["userName"] = UserName,
-                });
+            throw WindowsSidConfirmed(UserName);
         }
 
         WindowsSid = windowsSid;
         RefreshSecurityStamp();
     }
+
+    /// <summary>
+    /// Відмова «SID уже підтверджено входом» — 409 <c>ECR-SEC-0409</c>. Одна форма для перевірки в домені і для
+    /// умовного <c>UPDATE</c> сховища (<c>IUserStore.TryCorrectUnconfirmedWindowsSidAsync</c>, Z4-01).
+    /// </summary>
+    /// <param name="userName">Ім'я входу запису.</param>
+    public static Abstractions.DomainException WindowsSidConfirmed(string userName)
+        => new(
+            ErrorCodes.SecurityConflict,
+            $"«{userName}» уже входив: його SID підтверджено каталогом і не виправляється.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-SEC-0409.windowsSidConfirmed",
+                ["userName"] = userName,
+            });
 
     /// <summary>Вимикає bootstrap-запис. **Не видаляє**: він потрібен в аудиті.</summary>
     public void DisableAsBootstrap()
