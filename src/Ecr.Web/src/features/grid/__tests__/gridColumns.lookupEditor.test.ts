@@ -5,6 +5,8 @@ import type { ColumnDto, RegistryEntryDto, TableSliceDto } from '@/api/types';
 import { gridColumns } from '../DocumentGrid';
 import { NoLocalFlags } from '../cellState';
 import { coerce } from '../edits';
+import { lookupIdOfText } from '../LookupCellEditor';
+import { unitIdOfCode } from '../UnitCellEditor';
 
 /** `EditorBase.render` типізовано СОЮЗОМ (`VNode | VNode[] | string | void`) — редактор тут завжди повертає рівно `VNode`, тож тест звужує це один раз тут, а не в кожному виклику. */
 function renderOf(instance: EditorBase): VNode {
@@ -254,5 +256,62 @@ describe('gridColumns — Lookup-колонка: dropdown записів дов�
 
     expect(document.body.textContent).not.toContain('grid.listLoading');
     expect(optionValues(node)).toEqual(['']);
+  });
+});
+
+/**
+ * C1-03: вставка з Excel шукала запис довідника/одиницю лінійним `find` на КОЖНУ комірку. Тепер індекс
+ * будується раз на масив; правило збігу те саме (код раніше за назву, перший запис виграє).
+ *
+ * ⚠ Масив обгорнуто у `Proxy`, що рахує читання елементів: 2000 пошуків по 1000 записах за лінійного
+ * пошуку — мільйони читань, за індексу — порядку розміру довідника.
+ */
+describe('C1-03: пошук запису довідника й одиниці за текстом вставки', () => {
+  function counted<T>(items: T[]): { list: readonly T[]; reads: () => number } {
+    let reads = 0;
+    const list = new Proxy(items, {
+      get(target, key, receiver) {
+        if (typeof key === 'string' && /^\d+$/.test(key)) reads += 1;
+
+        return Reflect.get(target, key, receiver) as unknown;
+      },
+    });
+
+    return { list, reads: () => reads };
+  }
+
+  const entries = (count: number): RegistryEntryDto[] =>
+    Array.from({ length: count }, (_, i) => ({ id: i + 1, code: `K${String(i)}`, display: `Name ${String(i)}` }) as RegistryEntryDto);
+
+  it('правило збігу: код раніше за назву, без регістру, перший запис виграє, невідоме — null', () => {
+    const list = [
+      { id: 1, code: 'KZ', display: 'Казахстан' },
+      { id: 2, code: 'kz', display: 'Дубль' },
+      { id: 3, code: 'X', display: 'KZ' },
+    ] as RegistryEntryDto[];
+
+    expect(lookupIdOfText(' kz ', list)).toBe(1);
+    expect(lookupIdOfText('казахстан', list)).toBe(1);
+    expect(lookupIdOfText('дубль', list)).toBe(2);
+    expect(lookupIdOfText('нема', list)).toBeNull();
+    expect(lookupIdOfText('  ', list)).toBeNull();
+  });
+
+  it('2000 вставлених комірок по довіднику з 1000 записів не читають його 2000 разів', () => {
+    const { list, reads } = counted(entries(1000));
+
+    for (let i = 0; i < 2000; i += 1) expect(lookupIdOfText(`k${String(i % 1000)}`, list)).toBe((i % 1000) + 1);
+
+    // ⛔ Мутація: повернути `entries.find(...)` — мільйони читань.
+    expect(reads()).toBeLessThan(10_000);
+  });
+
+  it('те саме для одиниць', () => {
+    const units = Array.from({ length: 1000 }, (_, i) => ({ id: i + 1, code: `u${String(i)}` }));
+    const { list, reads } = counted(units as never[]);
+
+    for (let i = 0; i < 2000; i += 1) expect(unitIdOfCode(`U${String(i % 1000)}`, list as never)).toBe((i % 1000) + 1);
+
+    expect(reads()).toBeLessThan(10_000);
   });
 });

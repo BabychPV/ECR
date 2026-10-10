@@ -62,7 +62,24 @@ export function unitIdOfCode(text: string, units: readonly UnitRef[]): number | 
   const wanted = text.trim().toLowerCase();
   if (wanted.length === 0) return null;
 
-  return units.find((unit) => unit.code.toLowerCase() === wanted)?.id ?? null;
+  // ⛔ C1-03: індекс на масив одиниць, а не `find` на кожну вставлену комірку. Перший збіг виграє, як і раніше.
+  return idByCodeIndexOf(units).get(wanted) ?? null;
+}
+
+const idByCodeCache = new WeakMap<readonly UnitRef[], ReadonlyMap<string, number>>();
+
+function idByCodeIndexOf(units: readonly UnitRef[]): ReadonlyMap<string, number> {
+  const known = idByCodeCache.get(units);
+  if (known !== undefined) return known;
+
+  const index = new Map<string, number>();
+  for (const unit of units) {
+    const code = unit.code.toLowerCase();
+    if (!index.has(code)) index.set(code, unit.id);
+  }
+  idByCodeCache.set(units, index);
+
+  return index;
 }
 
 const codeCache = new WeakMap<readonly UnitRef[], ReadonlyMap<number, string>>();

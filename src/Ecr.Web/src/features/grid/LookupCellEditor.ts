@@ -62,11 +62,39 @@ export function lookupIdOfText(text: string, entries: readonly RegistryEntryDto[
   const wanted = text.trim().toLowerCase();
   if (wanted.length === 0) return null;
 
-  return (
-    entries.find((entry) => entry.code.toLowerCase() === wanted)?.id ??
-    entries.find((entry) => entry.display.toLowerCase() === wanted)?.id ??
-    null
-  );
+  // ⛔ C1-03: два `entries.find(...)` на КОЖНУ вставлену комірку — довідник на тисячі записів × вставка на
+  // тисячі комірок давали десятки мільйонів порівнянь у синхронному `onPaste`. Тепер індекс будується раз
+  // на масив записів (як `displayIndexOf`); правило те саме: код раніше за назву, перший запис виграє.
+  const index = textIndexOf(entries);
+
+  return index.byCode.get(wanted) ?? index.byDisplay.get(wanted) ?? null;
+}
+
+interface TextIndex {
+  readonly byCode: ReadonlyMap<string, number>;
+  readonly byDisplay: ReadonlyMap<string, number>;
+}
+
+const textCache = new WeakMap<readonly RegistryEntryDto[], TextIndex>();
+
+function textIndexOf(entries: readonly RegistryEntryDto[]): TextIndex {
+  const known = textCache.get(entries);
+  if (known !== undefined) return known;
+
+  const byCode = new Map<string, number>();
+  const byDisplay = new Map<string, number>();
+  for (const entry of entries) {
+    const code = entry.code.toLowerCase();
+    if (!byCode.has(code)) byCode.set(code, entry.id);
+
+    const display = entry.display.toLowerCase();
+    if (!byDisplay.has(display)) byDisplay.set(display, entry.id);
+  }
+
+  const built = { byCode, byDisplay };
+  textCache.set(entries, built);
+
+  return built;
 }
 
 /**
