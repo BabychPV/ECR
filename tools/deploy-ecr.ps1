@@ -1581,7 +1581,11 @@ function Resolve-TransportConfig {
         $set[$requireName] = 'true'
         $warnings += ("-BehindHttpsProxy: TLS має завершуватись на проксі; Kestrel слухає http на всіх інтерфейсах порту $AppPort — " +
             "закрий його брандмауером для всіх, крім проксі. Застосунок не довіряє X-Forwarded-*: HSTS і перенаправлення http→https — " +
-            "на проксі. Без проксі вхід не працюватиме (cookie Secure).")
+            "на проксі. Без проксі вхід не працюватиме (cookie Secure). " +
+            "S2-02: обмежувач входу бачить лише адресу проксі — одне вікно входу на всіх клієнтів; скрипт НЕ пише " +
+            "ECR_Security__RateLimit__TrustForwardedFor і ECR_Security__RateLimit__KnownProxies (адресу проксі знає лише " +
+            "той, хто його налаштував): виставте їх у Environment служби вручну, і повторіть після кожного оновлення MSI, " +
+            "яке стирає Environment (runbook §2.1, https-certificate.md).")
         return New-TransportVerdict 'Proxy' $set $remove $warnings 'http' 'Ok' $null
     }
 
