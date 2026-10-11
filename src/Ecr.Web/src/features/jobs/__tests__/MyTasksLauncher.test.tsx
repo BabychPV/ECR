@@ -112,6 +112,18 @@ function mockFetch(): void {
         );
       }
 
+      if (url.includes('/api/v1/me/edit-assignments')) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              assignedToMe: [{ assignmentId: 1, documentId: 5, documentKey: 'D', slice: 'January', status: 'Assigned' }],
+              awaitingMyValidation: [{ assignmentId: 2, documentId: 6, documentKey: 'E', slice: 'March', status: 'Filled' }],
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } },
+          ),
+        );
+      }
+
       return Promise.resolve(new Response(JSON.stringify(null), { status: 404 }));
     }),
   );
@@ -178,6 +190,16 @@ describe('кнопка «My tasks» у шапці', () => {
     const badge = await screen.findByLabelText('⟦jobs.myTasksActive (n=1)⟧');
     expect(badge.getAttribute('data-my-tasks-active')).toBe('1');
     expect(badge.textContent).toBe('1');
+  });
+
+  it('передані місяці - ОКРЕМА позначка поруч з активними задачами, а не їх частина (EA-5c)', async () => {
+    mockFetch();
+    mount();
+
+    const edits = await screen.findByLabelText('⟦myTasks.edit.pendingBadge (n=2)⟧');
+    expect(edits.getAttribute('data-my-tasks-edits')).toBe('2');
+    // Позначка активних фонових задач лишилась зі своїм смислом (1 активна), число передач її не змінило.
+    expect((await screen.findByLabelText('⟦jobs.myTasksActive (n=1)⟧')).textContent).toBe('1');
   });
 
   it('клік відкриває шухляду й лише тоді довантажує її модуль', async () => {

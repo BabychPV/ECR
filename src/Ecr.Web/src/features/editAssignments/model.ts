@@ -1,7 +1,7 @@
 import { formatMonthName } from '@/shared/format';
 import { formatPeriodKey } from '@/shared/format/periodKey';
 import { t } from '@/shared/i18n';
-import type { AssignmentSlice, EditAssignment } from './types';
+import type { AssignmentSlice, EditAssignment, MyEditAssignmentsView } from './types';
 
 /** Однакові зрізи: порівняння по чотирьох селекторах, `undefined` ≡ `null`. */
 export function sameSlice(a: AssignmentSlice, b: AssignmentSlice): boolean {
@@ -42,4 +42,21 @@ export function nextMonthSlice(slice: AssignmentSlice): AssignmentSlice | null {
 /** Кількість передач, що чекають валідації власника (чіп «Awaiting validation»). */
 export function awaitingValidationCount(assignments: readonly EditAssignment[]): number {
   return assignments.filter((a) => a.status === 'Filled').length;
+}
+
+/**
+ * Адреса документа передачі (для «My tasks»).
+ *
+ * ⛔ Літерал, а не `generatePath` (`features` не імпортують `app`, як `myTaskDocumentHref`).
+ * Для «Validate…» - шторка передач документа (`?panel=edit-assignments`, DESIGN §8).
+ */
+export function editAssignmentHref(documentId: number, validate: boolean): string {
+  const base = `/documents/${String(documentId)}`;
+
+  return validate ? `${base}?panel=edit-assignments` : base;
+}
+
+/** Скільки рядків у «My tasks» вимагають дії (виконати + провалідувати): окремий від «активних задач» індикатор. */
+export function pendingEditAssignmentCount(data: MyEditAssignmentsView | undefined): number {
+  return (data?.assignedToMe.length ?? 0) + (data?.awaitingMyValidation.length ?? 0);
 }
