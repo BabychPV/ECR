@@ -51,6 +51,13 @@ public readonly record struct CellAccessContext(
     public PeriodKey? Period { get; init; }
 
     /// <summary>
+    /// У документа є хоч одна передача зрізу (EA-B). Лише ознака для служби: правила
+    /// <see cref="EditRules"/> її не читають. Дає змогу документам без передач не платити
+    /// ні читанням передач у рішенні, ні повторною перевіркою під блокуванням.
+    /// </summary>
+    public bool HasEditAssignments { get; init; }
+
+    /// <summary>
     /// Передача зрізу (EA-B) дозволяє цьому користувачеві писати в цю комірку:
     /// <c>Read → Write</c>, лише для місячної колонки переданого місяця. Рахує
     /// <see cref="EditAssignmentGuard"/>; за замовчуванням — ні.

@@ -1,4 +1,4 @@
-﻿using Ecr.Domain.Enums;
+using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
 
 namespace Ecr.Application.Security;

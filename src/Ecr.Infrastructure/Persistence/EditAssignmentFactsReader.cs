@@ -1,4 +1,4 @@
-﻿// src/Ecr.Infrastructure/Persistence/EditAssignmentFactsReader.cs
+// src/Ecr.Infrastructure/Persistence/EditAssignmentFactsReader.cs
 using Ecr.Application.Security;
 using Ecr.Domain.Entities.Documents;
 using Ecr.Domain.Enums;
@@ -40,30 +40,17 @@ internal static class EditAssignmentFactsReader
             return result;
         }
 
-        IQueryable<EditAssignment> source;
         if (forUpdate)
         {
-            if (documentIds.Count != 1)
-            {
-                throw new ArgumentException("Блокувальне читання передач — по одному документу.", nameof(documentIds));
-            }
-
-            var documentId = documentIds.First();
-            source = db.EditAssignments
-                .FromSql($"SELECT * FROM doc.EditAssignment WITH (UPDLOCK, ROWLOCK) WHERE DocumentId = {documentId}")
-                .AsNoTracking();
-        }
-        else
-        {
-            source = db.EditAssignments.AsNoTracking().Where(a => documentIds.Contains(a.DocumentId));
+            return await LoadLockedAsync(db, documentIds, userId, ct).ConfigureAwait(false);
         }
 
         var rows = await (
-                from a in source
+                from a in db.EditAssignments.AsNoTracking()
+                where documentIds.Contains(a.DocumentId)
                 join d in db.Documents.AsNoTracking() on a.DocumentId equals d.Id
                 join u in db.Users.AsNoTracking() on a.DelegatedByUserId equals u.Id
-                select new
-                {
+                select new FactRow(
                     a.DocumentId,
                     a.SheetCode,
                     a.TableCode,
@@ -73,16 +60,110 @@ internal static class EditAssignmentFactsReader
                     a.ValidationStatus,
                     a.DelegatedByUserId,
                     a.ExpiresAt,
-                    DelegatorActive = u.IsActive,
-                    OwnerUserId = d.CreatedByUserId,
-                    Mine = db.EditAssignmentRecipients
+                    u.IsActive,
+                    d.CreatedByUserId,
+                    db.EditAssignmentRecipients
                         .Where(r => r.AssignmentId == a.Id && r.UserId == userId)
                         .Select(r => (EditAssignmentRecipientStatus?)r.Status)
-                        .FirstOrDefault(),
-                })
+                        .FirstOrDefault()))
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
+        return Group(rows);
+    }
+
+    private sealed record FactRow(
+        long DocumentId,
+        string? SheetCode,
+        string? TableCode,
+        byte? MonthNumber,
+        int? PeriodKeyValue,
+        bool IsExclusive,
+        EditAssignmentValidationStatus ValidationStatus,
+        int DelegatedByUserId,
+        DateTime? ExpiresAt,
+        bool DelegatorActive,
+        int OwnerUserId,
+        EditAssignmentRecipientStatus? Mine);
+
+    /// <summary>
+    /// Читання під блокуванням запису: передачі документа і рядок виконавця — кожне під
+    /// <c>REPEATABLEREAD, ROWLOCK</c> (спільні блокування до коміту).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ P1-R1/R2 (аудит). Раніше UPDLOCK стояв лише на <c>doc.EditAssignment</c>, а стан виконавця
+    /// читався підзапитом по <c>doc.EditAssignmentRecipient</c> БЕЗ підказки: під RCSI він бачив
+    /// знімок на початок statement, і «Заповнено»/зняття виконавця, зафіксовані під час очікування
+    /// блокування, не було видно — правка проходила. Тепер обидві таблиці читаються окремими
+    /// statement-ами зі спільним блокуванням, що тримається до коміту: перехід станів (U/X на цих
+    /// рядках) чекає завершення запису, а вже зафіксований перехід видно (блокуюче читання не
+    /// використовує знімок).
+    ///
+    /// ⚠ Спільне, а не оновлювальне: два записи по одному документу не серіалізуються (U несумісний
+    /// з U) — серіалізується лише перехід станів проти запису.
+    /// </remarks>
+    private static async Task<IReadOnlyDictionary<long, (int OwnerUserId, IReadOnlyList<EditAssignmentFact> Facts)>>
+        LoadLockedAsync(EcrDbContext db, IReadOnlyCollection<long> documentIds, int userId, CancellationToken ct)
+    {
+        var documentId = documentIds.Single();
+
+        var assignments = await db.EditAssignments
+            .FromSql($"SELECT * FROM doc.EditAssignment WITH (REPEATABLEREAD, ROWLOCK) WHERE DocumentId = {documentId}")
+            .AsNoTracking()
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var empty = new Dictionary<long, (int, IReadOnlyList<EditAssignmentFact>)>();
+        if (assignments.Count == 0)
+        {
+            return empty;
+        }
+
+        var mine = await db.EditAssignmentRecipients
+            .FromSql($"""
+                SELECT r.* FROM doc.EditAssignmentRecipient AS r WITH (REPEATABLEREAD, ROWLOCK)
+                WHERE r.UserId = {userId}
+                  AND r.AssignmentId IN (SELECT a.Id FROM doc.EditAssignment AS a WHERE a.DocumentId = {documentId})
+                """)
+            .AsNoTracking()
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+        var statusById = mine.ToDictionary(r => r.AssignmentId, r => r.Status);
+
+        var ownerUserId = await db.Documents.AsNoTracking()
+            .Where(d => d.Id == documentId)
+            .Select(d => d.CreatedByUserId)
+            .SingleAsync(ct)
+            .ConfigureAwait(false);
+
+        var delegatorIds = assignments.Select(a => a.DelegatedByUserId).Distinct().ToList();
+        var active = await db.Users.AsNoTracking()
+            .Where(u => delegatorIds.Contains(u.Id))
+            .Select(u => new { u.Id, u.IsActive })
+            .ToDictionaryAsync(u => u.Id, u => u.IsActive, ct)
+            .ConfigureAwait(false);
+
+        var rows = assignments.Select(a => new FactRow(
+            a.DocumentId,
+            a.SheetCode,
+            a.TableCode,
+            a.MonthNumber,
+            a.PeriodKeyValue,
+            a.IsExclusive,
+            a.ValidationStatus,
+            a.DelegatedByUserId,
+            a.ExpiresAt,
+            active.GetValueOrDefault(a.DelegatedByUserId),
+            ownerUserId,
+            statusById.TryGetValue(a.Id, out var status) ? status : (EditAssignmentRecipientStatus?)null));
+
+        return Group(rows);
+    }
+
+    private static Dictionary<long, (int OwnerUserId, IReadOnlyList<EditAssignmentFact> Facts)> Group(
+        IEnumerable<FactRow> rows)
+    {
+        var result = new Dictionary<long, (int, IReadOnlyList<EditAssignmentFact>)>();
         foreach (var group in rows.GroupBy(r => r.DocumentId))
         {
             var facts = group

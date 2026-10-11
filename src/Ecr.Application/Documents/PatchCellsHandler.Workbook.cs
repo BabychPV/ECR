@@ -540,9 +540,16 @@ public sealed partial class PatchCellsHandler
             Blamed(item.Id, () => CheckSheetStatus(statuses[item.Context.Table.SheetDefId], item.Planned));
         }
 
-        // ⛔ EA-B (G-11): передача зрізу повторно під блокуваннями аркушів — один раз на книгу.
-        // Відкликання між переглядом і застосуванням імпорту → відмова, нічого не записано.
-        var assignmentGate = await ReadAssignmentGateAsync(active[0].Context.Profile, documentId, ct)
+        // ⛔ AN-106 (P1-01): ліміт очікування блокувань — до стелі й вставки нових рядків, як у
+        // поштучного (`PersistCoreAsync`); `ApplyBatchAsync` нижче його вже не повторює.
+        await cellStore.LimitLockWaitAsync(ct).ConfigureAwait(false);
+
+        // ⛔ EA-B (G-11): передача зрізу повторно під блокуваннями аркушів — один раз на книгу,
+        // ПІСЛЯ ліміту очікування блокувань. Відкликання між переглядом і застосуванням імпорту →
+        // відмова, нічого не записано.
+        var assignmentsNeeded = active.Exists(x => x.Context.AssignmentsPresent || x.Context.LiftedColumns.Count > 0);
+        var assignmentGate = await ReadAssignmentGateAsync(
+                active[0].Context.Profile, documentId, assignmentsNeeded, ct)
             .ConfigureAwait(false);
         if (assignmentGate is not null)
         {
@@ -566,10 +573,6 @@ public sealed partial class PatchCellsHandler
                 });
             }
         }
-
-        // ⛔ AN-106 (P1-01): ліміт очікування блокувань — до стелі й вставки нових рядків, як у
-        // поштучного (`PersistCoreAsync`); `ApplyBatchAsync` нижче його вже не повторює.
-        await cellStore.LimitLockWaitAsync(ct).ConfigureAwait(false);
 
         var ceiling = active.Where(x => CreatesRowsUnderCeiling(x.Context)).ToList();
         if (ceiling.Count > 0)

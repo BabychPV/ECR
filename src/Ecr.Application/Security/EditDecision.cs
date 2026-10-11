@@ -35,6 +35,14 @@ public readonly record struct EditDecision(
     /// </summary>
     public bool ViaAssignment { get; init; }
 
+    /// <summary>
+    /// У документа цього рішення є передачі зрізу (EA-B): запис мусить повторно перевірити їх
+    /// під блокуванням аркуша, навіть якщо САМЕ це рішення передачею не піднято (заборона
+    /// «Заповнено»/ексклюзивність могла з'явитися між рішенням і комітом). Документ без передач —
+    /// <c>false</c>: повторного читання немає.
+    /// </summary>
+    public bool AssignmentsPresent { get; init; }
+
     public static EditDecision Allow() => new(true, EditDenyReason.None);
 
     /// <summary>Дозволено завдяки передачі зрізу (підйом <c>Read → Write</c>).</summary>

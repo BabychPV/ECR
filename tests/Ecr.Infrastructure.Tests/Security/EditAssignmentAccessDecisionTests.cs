@@ -1,4 +1,4 @@
-﻿using Ecr.Application.Common;
+using Ecr.Application.Common;
 using Ecr.Application.Security;
 using Ecr.Domain.Entities.Documents;
 using Ecr.Domain.Entities.Security;
@@ -75,7 +75,8 @@ public sealed class EditAssignmentAccessDecisionTests(SqlServerFixture sql) : ID
 
     /// <summary>Документ із двома місячними колонками, власником, делегатором, виконавцем і сторонньою людиною.</summary>
     private async Task<World> ArrangeAsync(
-        bool exclusive = true, DateTime? expiresAt = null, Action<EditAssignment>? shape = null)
+        bool exclusive = true, DateTime? expiresAt = null, Action<EditAssignment>? shape = null,
+        byte? month = OwnMonth)
     {
         var builder = new TestDocumentBuilder(sql.ConnectionString);
         var doc = await builder.BuildAsync(PeriodKeyValue, columnCount: 3, rowCount: 2, ct: CancellationToken.None);
@@ -106,7 +107,7 @@ public sealed class EditAssignmentAccessDecisionTests(SqlServerFixture sql) : ID
 
         var assignment = new EditAssignment(
             doc.DocumentId,
-            EditAssignmentSlice.Create(sheetCode: null, tableCode: null, monthNumber: OwnMonth, periodKey: null),
+            EditAssignmentSlice.Create(sheetCode: null, tableCode: null, monthNumber: month, periodKey: null),
             isExclusive: exclusive,
             delegatedByUserId: delegator.Id,
             handoffId: Guid.NewGuid(),
@@ -153,6 +154,7 @@ public sealed class EditAssignmentAccessDecisionTests(SqlServerFixture sql) : ID
 
         Assert.True(decisions[w.Cell(w.OwnMonthColumn)].IsAllowed);
         Assert.True(decisions[w.Cell(w.OwnMonthColumn)].ViaAssignment);
+        Assert.True(decisions[w.Cell(w.OwnMonthColumn)].AssignmentsPresent);
         Assert.Equal(EditDenyReason.InsufficientGrantLevel, decisions[w.Cell(w.OtherMonthColumn)].Reason);
         Assert.Equal(EditDenyReason.InsufficientGrantLevel, decisions[w.Cell(w.PlainColumn)].Reason);
     }
@@ -287,6 +289,71 @@ public sealed class EditAssignmentAccessDecisionTests(SqlServerFixture sql) : ID
         var rows = await service.CanCreateRowsAsync(
             profile, w.Doc.TableInstanceId, ["new-row"], CancellationToken.None);
         Assert.False(rows["new-row"].Row.IsAllowed);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "EA-B")]
+    public async Task Створення_рядка_закривається_передачею_без_місяця_а_виконавцю_не_піднімається()
+    {
+        // Передача на весь документ (без місяця): на рівні рядка діють лише заборони (D5).
+        var w = await ArrangeAsync(month: null);
+        const string newRow = "new-row";
+
+        async Task<EditDecision> RowAsync(AccessProfile profile)
+        {
+            await using var db = w.Builder.CreateContext();
+            var rows = await Service(db).CanCreateRowsAsync(
+                profile, w.Doc.TableInstanceId, [newRow], CancellationToken.None);
+            return rows[newRow].Row;
+        }
+
+        var stranger = await RowAsync(Profile(w, w.StrangerUserId, GrantLevel.Write));
+        Assert.Equal(EditDenyReason.LockedByOwner, stranger.Reason);
+
+        Assert.True((await RowAsync(Profile(w, w.OwnerUserId, GrantLevel.Write))).IsAllowed);
+
+        // Виконавець із Read: підйому на рівні рядка немає.
+        var reader = await RowAsync(Profile(w, w.ExecutorUserId, GrantLevel.Read));
+        Assert.Equal(EditDenyReason.InsufficientGrantLevel, reader.Reason);
+
+        // Виконавець із Write: поки Assigned — можна; після «Заповнено» і «Валідовано» — ні.
+        var writer = Profile(w, w.ExecutorUserId, GrantLevel.Write);
+        Assert.True((await RowAsync(writer)).IsAllowed);
+
+        await MutateAsync(w, a => a.FillRecipient(w.ExecutorUserId, Now));
+        Assert.Equal(EditDenyReason.AssignmentFilled, (await RowAsync(writer)).Reason);
+
+        await MutateAsync(w, a => a.Validate(w.DelegatorUserId, Now));
+        Assert.Equal(EditDenyReason.AssignmentValidated, (await RowAsync(writer)).Reason);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "EA-B")]
+    public async Task Документ_без_передач_не_читає_їх_і_не_позначається_ознакою()
+    {
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var doc = await builder.BuildAsync(PeriodKeyValue, columnCount: 2, rowCount: 1, ct: CancellationToken.None);
+        await using var db = builder.CreateContext();
+        var period = await db.Periods.FirstAsync(
+            p => p.ProjectId == doc.ProjectId && p.PeriodKeyValue == PeriodKeyValue, CancellationToken.None);
+        period.AdvanceTo(PeriodState.Open, Now);
+        await db.SaveChangesAsync(CancellationToken.None);
+
+        var profile = new AccessBuilder { UserId = 4242 }
+            .Grant(ResourceKind.Project, doc.ProjectId, GrantLevel.Write)
+            .Build();
+        var address = new CellAddress(doc.PeriodKey, doc.RowIds[0], doc.ColumnDefIds[0]);
+
+        var decisions = await Service(db).CanEditCellsAsync(
+            profile, doc.TableInstanceId, doc.PeriodKey, [address], CancellationToken.None);
+
+        Assert.True(decisions[address].IsAllowed);
+        Assert.False(decisions[address].AssignmentsPresent);
+        Assert.False(decisions[address].ViaAssignment);
     }
 
     [Fact]

@@ -1,4 +1,4 @@
-﻿using Ecr.Application.Calculations;
+using Ecr.Application.Calculations;
 using Ecr.Application.Common;
 using Ecr.Application.Documents.Dto;
 using Ecr.Application.Errors;
@@ -268,6 +268,13 @@ public sealed partial class PatchCellsHandler(
         /// блокуванням вимагає, щоб передача там усе ще діяла.
         /// </summary>
         public HashSet<int> LiftedColumns { get; } = [];
+
+        /// <summary>
+        /// У документа є передачі зрізу (<see cref="EditDecision.AssignmentsPresent"/> дозволеного
+        /// рішення): під блокуванням аркуша їх треба прочитати знову. <c>false</c> — документ без
+        /// передач, повторного читання немає.
+        /// </summary>
+        public bool AssignmentsPresent { get; set; }
     }
 
     /// <summary>Розподіл змін по upsert/delete разом із супутнім станом.</summary>
@@ -1006,6 +1013,11 @@ public sealed partial class PatchCellsHandler(
                 {
                     context.LiftedColumns.Add(address.ColumnDefId);
                 }
+
+                if (decision.IsAllowed && decision.AssignmentsPresent)
+                {
+                    context.AssignmentsPresent = true;
+                }
             }
         }
 
@@ -1062,6 +1074,11 @@ public sealed partial class PatchCellsHandler(
                     if (decision.IsAllowed && decision.ViaAssignment)
                     {
                         context.LiftedColumns.Add(columnDefId);
+                    }
+
+                    if (decision.IsAllowed && decision.AssignmentsPresent)
+                    {
+                        context.AssignmentsPresent = true;
                     }
                 }
             }
@@ -2300,6 +2317,12 @@ public sealed partial class PatchCellsHandler(
             // а не лише перед записом значень: під ескальованим блокуванням переносу версії вставка в
             // `doc.TableRow` чекала весь `CommandTimeout` і закінчувалась 500. Той самий єдиний `SET`.
             await cellStore.LimitLockWaitAsync(innerCt).ConfigureAwait(false);
+
+            // ⛔ EA-B: передача зрізу повторно — під блокуванням аркуша, ПІСЛЯ ліміту очікування
+            // блокувань (інакше спільні блокування передач чекали б без стелі й дедлок 1205 ішов би
+            // 500, а не ECR-DOC-4091).
+            await EnsureAssignmentsHoldAsync(context, planned, innerCt).ConfigureAwait(false);
+
             await EnsureRowLimitUnderLockAsync(request, context, innerCt).ConfigureAwait(false);
 
             // ⛔ `DAT-04` п. 1: рядки — ПІСЛЯ блокування аркуша й усіх відмов,
@@ -2408,8 +2431,6 @@ public sealed partial class PatchCellsHandler(
             .ConfigureAwait(false);
 
         CheckSheetStatus(status, changes);
-
-        await EnsureAssignmentsHoldAsync(context, changes, ct).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -2451,7 +2472,8 @@ public sealed partial class PatchCellsHandler(
     /// <summary>Причина, з якої передача під блокуванням забороняє запис; <c>null</c> — запис дозволено.</summary>
     private async Task<EditDenyReason?> FindAssignmentDenialAsync(RequestContext context, CancellationToken ct)
     {
-        var gate = await ReadAssignmentGateAsync(context.Profile, context.Instance.DocumentId, ct)
+        var needed = context.AssignmentsPresent || context.LiftedColumns.Count > 0;
+        var gate = await ReadAssignmentGateAsync(context.Profile, context.Instance.DocumentId, needed, ct)
             .ConfigureAwait(false);
 
         return gate is null ? null : AssignmentDenial(context, gate);
@@ -2462,11 +2484,20 @@ public sealed partial class PatchCellsHandler(
     /// (симуляція, системний шлях, немає сховища).
     /// </summary>
     private async Task<EditAssignmentGateFacts?> ReadAssignmentGateAsync(
-        AccessProfile profile, long documentId, CancellationToken ct)
+        AccessProfile profile, long documentId, bool needed, CancellationToken ct)
     {
-        if (assignments is null || profile.IsSimulation || profile.IsIntegrationWriter)
+        if (!needed || profile.IsSimulation || profile.IsIntegrationWriter)
         {
             return null;
+        }
+
+        // ⛔ fail-closed: у документа є передачі (або правку дозволила саме передача), а сховища
+        // для повторної перевірки немає — писати не можна. У проді сховище вприснуте завжди
+        // (DependencyInjection); `null` можливий лише в тестових фабриках.
+        if (assignments is null)
+        {
+            throw new InvalidOperationException(
+                "Передачі зрізу діють, але сховища для повторної перевірки під блокуванням немає.");
         }
 
         return await assignments.ReadFactsForGateAsync(documentId, profile.UserId, ct).ConfigureAwait(false);
