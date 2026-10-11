@@ -146,6 +146,7 @@ internal static class EditAssignmentMapper
 /// </remarks>
 public sealed class UpsertEditAssignmentHandler(
     IEditAssignmentStore assignments,
+    IEditorSetStore sets,
     IEditAssignmentManagementStore store,
     IAccessDecisionService access,
     IDocumentStore documents,
@@ -169,8 +170,14 @@ public sealed class UpsertEditAssignmentHandler(
     public const string AssignedNotification = "edit.assigned";
 
     /// <summary>Виконує upsert; повертає передачу в її стані після збереження.</summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="request">Тіло.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <param name="overwrite">
+    /// Явне перезаписування складу (apply-set/copy): <c>baseVersion</c> наявної передачі не потрібна.
+    /// </param>
     public async Task<EditAssignmentDto> HandleAsync(
-        long documentId, UpsertEditAssignmentRequest request, CancellationToken ct)
+        long documentId, UpsertEditAssignmentRequest request, CancellationToken ct, bool overwrite = false)
     {
         ArgumentNullException.ThrowIfNull(request);
 
@@ -230,6 +237,15 @@ public sealed class UpsertEditAssignmentHandler(
             }
         }
 
+        // Набір — лише власний (чужий ≡ відсутній); назва фіксується знімком.
+        string? appliedSetName = null;
+        if (request.AppliedSetId is { } setId)
+        {
+            var set = await sets.FindAsync(userId, setId, ct).ConfigureAwait(false)
+                ?? throw EditAssignmentAccess.Invalid("editorSetNotFound", "Набору виконавців не знайдено.");
+            appliedSetName = set.Name;
+        }
+
         var now = clock.UtcNow;
         EditAssignment? result = null;
 
@@ -275,7 +291,10 @@ public sealed class UpsertEditAssignmentHandler(
                     return;
                 }
 
-                EditAssignmentAccess.RequireVersion(request.BaseVersion, existing);
+                if (!overwrite)
+                {
+                    EditAssignmentAccess.RequireVersion(request.BaseVersion, existing);
+                }
 
                 var removed = existing.Recipients.Where(r => !recipientIds.Contains(r.UserId)).Select(r => r.UserId).ToList();
                 foreach (var id in removed)
@@ -306,6 +325,11 @@ public sealed class UpsertEditAssignmentHandler(
                 }
 
                 result = existing;
+            }
+
+            if (request.AppliedSetId is { } appliedId)
+            {
+                result!.MarkAppliedSet(appliedId, appliedSetName);
             }
 
             foreach (var id in newlyAssigned)
