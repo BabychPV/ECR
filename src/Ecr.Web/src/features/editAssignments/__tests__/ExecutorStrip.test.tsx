@@ -31,7 +31,10 @@ interface Calls {
   readonly gets: string[];
 }
 
-function mockApi(initial: readonly MyEditAssignment[], options: { fillStatus?: number; listStatus?: number } = {}): Calls {
+function mockApi(
+  initial: readonly MyEditAssignment[],
+  options: { fillStatus?: number; listStatus?: number; simulation?: boolean } = {},
+): Calls {
   let items = [...initial];
   const calls: Calls = { fills: [], gets: [] };
 
@@ -39,6 +42,16 @@ function mockApi(initial: readonly MyEditAssignment[], options: { fillStatus?: n
     'fetch',
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
+
+      if (options.simulation !== undefined && url.endsWith('/api/v1/me')) {
+        return new Response(
+          JSON.stringify({
+            denies: [], grants: {}, isSimulation: options.simulation, language: 'en', mustChangePassword: false,
+            permissions: ['Document.View'], simulatedForUserId: null, userId: 1, userName: 'executor',
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      }
 
       if (url.endsWith('/api/v1/me/edit-assignments')) {
         calls.gets.push(url);
@@ -201,6 +214,16 @@ describe('ExecutorStrip', () => {
     show();
 
     expect((await screen.findByTestId('executor-strip-text')).textContent).toContain('editAssign.bar.returnedNoReason');
+  });
+
+  it('у симуляції текст смуги є, а кнопки «Заповнено» немає і fill не викликається', async () => {
+    const calls = mockApi([january], { simulation: true });
+    show();
+
+    const strip = await screen.findByTestId('executor-strip');
+    await waitFor(() => expect(screen.queryByTestId('executor-strip-fill')).toBeNull());
+    expect(within(strip).getByTestId('executor-strip-text').textContent).toContain('editAssign.bar.assigned');
+    expect(calls.fills).toEqual([]);
   });
 
   it('«Заповнено» і «Валідовано» - без кнопки', async () => {

@@ -77,9 +77,10 @@ const NoAssignments: MyEditAssignmentsView = { assignedToMe: [], awaitingMyValid
  */
 export async function getMyEditAssignments(): Promise<MyEditAssignmentsView> {
   try {
-    const dto = await apiFetch<Partial<MyEditAssignmentsView>>('/api/v1/me/edit-assignments');
+    // 204/пусте тіло дає `null`: звертання `dto.assignedToMe` кидало б TypeError замість порожнього стану.
+    const dto = await apiFetch<Partial<MyEditAssignmentsView> | null>('/api/v1/me/edit-assignments');
 
-    return { assignedToMe: dto.assignedToMe ?? [], awaitingMyValidation: dto.awaitingMyValidation ?? [] };
+    return { assignedToMe: dto?.assignedToMe ?? [], awaitingMyValidation: dto?.awaitingMyValidation ?? [] };
   } catch (error) {
     if (error instanceof EcrApiError && (error.problem.status === 404 || error.problem.status === 403)) return NoAssignments;
 

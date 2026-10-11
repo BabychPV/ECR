@@ -2,6 +2,7 @@ import { useRef, useState, type JSX } from 'react';
 import { Button, Group, Paper, Popover, Stack, Text } from '@mantine/core';
 import { usePendingLoading } from '@/features/common/usePendingLoading';
 import { t } from '@/shared/i18n';
+import { useSession } from '@/shared/session/useSession';
 import { showApiError } from '@/shared/ui/notify';
 import { useFillEditAssignment, useMyEditAssignments } from './api';
 import type { MyEditAssignment } from './types';
@@ -29,6 +30,8 @@ interface ExecutorStripProps {
  */
 export function ExecutorStrip({ documentId, periodKey }: ExecutorStripProps): JSX.Element | null {
   const mine = useMyEditAssignments();
+  // Симуляція «лише перегляд»: «Заповнено» - дія від імені виконавця, у режимі симуляції її немає (як у меню EditAssignmentsAction).
+  const simulating = useSession().data?.isSimulation === true;
   const fill = useFillEditAssignment(documentId, periodKey);
   const fillLoading = usePendingLoading(fill.isPending);
   const host = useRef<HTMLDivElement>(null);
@@ -65,7 +68,7 @@ export function ExecutorStrip({ documentId, periodKey }: ExecutorStripProps): JS
       <Stack gap="xs">
         {items.map((item) => {
           const label = item.slice;
-          const canFill = item.status !== 'Filled';
+          const canFill = item.status !== 'Filled' && !simulating;
 
           return (
             <Group
