@@ -170,6 +170,46 @@ public static class MethodologyCategoryRuleChecks
     }
 
     /// <summary>Коди констант, що мають ≥ 2 різні категорії (без «Common» і без категорії).</summary>
+    /// <summary>
+    /// R16-4: звіряє <c>@</c>-аргументи правила з колонками прив'язаних таблиць. Відмова — той самий код
+    /// <c>ECR-CALC-0422</c>, що й для <c>CST.X</c> (<c>categoryRuleUnknownConstant</c>) і <c>!X</c>
+    /// (<c>categoryRuleBadFormula</c>), ключ <c>err.ECR-CALC-0422.categoryRuleUnknownArgument</c>.
+    /// </summary>
+    /// <param name="rule">Розібране правило (<see cref="Outcome.Rule"/>).</param>
+    /// <param name="columnCodesByTable">Коди колонок прив'язаних таблиць.</param>
+    /// <exception cref="Ecr.Application.Errors.BusinessRuleException">
+    /// <c>ECR-CALC-0422</c> — аргумент без колонки у прив'язаній таблиці.
+    /// </exception>
+    /// <remarks>
+    /// ⚠ <c>ECR-CALC-0438</c> лишається кодом звірки аргументів ФОРМУЛ (публікація, збереження прив'язки):
+    /// правило категорії — окремий предмет з трьома однотипними відмовами під одним кодом.
+    /// </remarks>
+    public static void CheckArgumentColumns(
+        ParsedFormula rule, IReadOnlyDictionary<int, IReadOnlyList<string>> columnCodesByTable)
+    {
+        ArgumentNullException.ThrowIfNull(rule);
+
+        try
+        {
+            MethodologyPublishChecks.CheckArgumentTableColumns([rule], columnCodesByTable);
+        }
+        catch (Ecr.Application.Errors.BusinessRuleException error)
+            when (error.ErrorCode == Ecr.Domain.Errors.ErrorCodes.MethodologyArgumentColumnMissing)
+        {
+            var extensions = new Dictionary<string, object?>(StringComparer.Ordinal);
+            if (error.Details is { } details)
+            {
+                foreach (var (name, value) in details)
+                {
+                    extensions[name] = value;
+                }
+            }
+
+            extensions["messageKey"] = "err.ECR-CALC-0422.categoryRuleUnknownArgument";
+            throw new Ecr.Application.Errors.BusinessRuleException("ECR-CALC-0422", error.Message, extensions);
+        }
+    }
+
     private static List<string> Categorised(IReadOnlyList<MethodologyConstant> constants)
         => [.. constants
             .Where(c => !string.IsNullOrEmpty(c.Category)

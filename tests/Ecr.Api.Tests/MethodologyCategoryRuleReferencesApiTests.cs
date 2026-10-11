@@ -34,7 +34,7 @@ public sealed class MethodologyCategoryRuleReferencesApiTests(SqlServerFixture s
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage4)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
-    public async Task Аргумент_якого_немає_в_прив_язаній_таблиці_дає_422_0438_і_правило_не_пишеться()
+    public async Task Аргумент_якого_немає_в_прив_язаній_таблиці_дає_422_0422_UnknownArgument_і_правило_не_пишеться()
     {
         using var app = new EcrApiFactory(sql);
         using var client = await SignedInAsync(app).ConfigureAwait(true);
@@ -43,7 +43,9 @@ public sealed class MethodologyCategoryRuleReferencesApiTests(SqlServerFixture s
         var response = await PutAsync(client, stand, "@Nope").ConfigureAwait(true);
 
         var problem = await ProblemAsync(response, HttpStatusCode.UnprocessableEntity).ConfigureAwait(true);
-        Assert.Equal("err.ECR-CALC-0438.missingColumns", problem.GetProperty("messageKey").GetString());
+        Assert.Equal("err.ECR-CALC-0422.categoryRuleUnknownArgument", problem.GetProperty("messageKey").GetString());
+        // R16-4: єдиний код відмови правила категорії для @Nope, CST.X, !X.
+        Assert.Equal("ECR-CALC-0422", problem.GetProperty("errorCode").GetString());
         Assert.Contains("@Nope", problem.ToString(), StringComparison.Ordinal);
         Assert.Equal(0, await RuleCountAsync(stand.VersionId).ConfigureAwait(true));
     }
@@ -76,6 +78,7 @@ public sealed class MethodologyCategoryRuleReferencesApiTests(SqlServerFixture s
 
         var problem = await ProblemAsync(response, HttpStatusCode.UnprocessableEntity).ConfigureAwait(true);
         Assert.Equal("err.ECR-CALC-0422.categoryRuleUnknownConstant", problem.GetProperty("messageKey").GetString());
+        Assert.Equal("ECR-CALC-0422", problem.GetProperty("errorCode").GetString());
         Assert.Contains("NOPE_CONST", problem.ToString(), StringComparison.OrdinalIgnoreCase);
         Assert.Equal(0, await RuleCountAsync(stand.VersionId).ConfigureAwait(true));
     }
@@ -95,6 +98,7 @@ public sealed class MethodologyCategoryRuleReferencesApiTests(SqlServerFixture s
 
         var problem = await ProblemAsync(response, HttpStatusCode.UnprocessableEntity).ConfigureAwait(true);
         Assert.Equal("err.ECR-CALC-0422.categoryRuleBadFormula", problem.GetProperty("messageKey").GetString());
+        Assert.Equal("ECR-CALC-0422", problem.GetProperty("errorCode").GetString());
         Assert.Contains(expression[1..], problem.ToString(), StringComparison.OrdinalIgnoreCase);
         Assert.Equal(0, await RuleCountAsync(stand.VersionId).ConfigureAwait(true));
     }

@@ -332,7 +332,7 @@ public sealed class PublishMethodologyHandler(
         // ✎ L-2: і `@`-аргументи правила категорії — воно читає той самий рядок.
         ParsedFormula[] ruleFormulas = categoryRule.Rule is { } rule ? [rule] : [];
         await CheckArgumentColumnsAsync(
-                methodology.Id, [.. parsed, .. LibraryFormulas(libraries), .. ruleFormulas], ct)
+                methodology.Id, [.. parsed, .. LibraryFormulas(libraries)], ruleFormulas, ct)
             .ConfigureAwait(false);
 
         // ⛔ V-18: невідома константа — іменна відмова, а не рядок у «N проблем».
@@ -742,6 +742,9 @@ public sealed class PublishMethodologyHandler(
     /// неї, а не до конкретної версії (вона переживає всі версії одразу).
     /// </param>
     /// <param name="formulas">Розібрані формули версії, що публікується.</param>
+    /// <param name="categoryRule">
+    /// Розібране правило категорії (порожньо — правила немає): його відмова — <c>ECR-CALC-0422</c>, не 0438.
+    /// </param>
     /// <param name="ct">Токен скасування.</param>
     /// <remarks>
     /// ⚠ Методологія без жодної прив'язки перевірку пропускає мовчки: це не
@@ -751,7 +754,10 @@ public sealed class PublishMethodologyHandler(
     /// Перевіряти нема з чим, доки прив'язки не існує.
     /// </remarks>
     private async Task CheckArgumentColumnsAsync(
-        int methodologyId, IReadOnlyList<ParsedFormula> formulas, CancellationToken ct)
+        int methodologyId,
+        IReadOnlyList<ParsedFormula> formulas,
+        IReadOnlyList<ParsedFormula> categoryRule,
+        CancellationToken ct)
     {
         var methodologyBindings = await bindings.ListAsync(methodologyId, ct).ConfigureAwait(false);
         if (methodologyBindings.Count == 0)
@@ -765,6 +771,13 @@ public sealed class PublishMethodologyHandler(
             .ConfigureAwait(false);
 
         MethodologyPublishChecks.CheckArgumentTableColumns(formulas, columnCodesByTable);
+
+        // R16-4: правило категорії - окремо й тим самим кодом, що й при збереженні (`PUT category-rule`):
+        // ECR-CALC-0422 / categoryRuleUnknownArgument, а не 0438 формул.
+        foreach (var rule in categoryRule)
+        {
+            MethodologyCategoryRuleChecks.CheckArgumentColumns(rule, columnCodesByTable);
+        }
     }
 
     /// <summary>Усі виклики функцій у дереві, у порядку обходу.</summary>
