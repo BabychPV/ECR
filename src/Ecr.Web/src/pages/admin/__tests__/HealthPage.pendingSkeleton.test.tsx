@@ -31,5 +31,7 @@ describe('HealthPage: очікування першого звіту', () => {
     const skeleton = screen.getByTestId('health-checks-skeleton');
     expect(skeleton.getAttribute('aria-busy')).toBe('true');
     expect(skeleton.textContent).toContain('⟦health.checking⟧');
+    // Пустий стан «жодної перевірки» не малюється поруч зі скелетом (аудит P1-3).
+    expect(screen.queryByText('⟦health.noChecks⟧')).toBeNull();
   });
 });

@@ -299,33 +299,35 @@ export function HealthPage(): JSX.Element {
             він іде, сторінка вже стоїть на місці — шапка, секція бази і скелети секцій за формою
             справжніх, а не один рядок «Loading…» (приймання RC19: 12–16 с здавалися зависанням). */}
         {ready.isPending && <HealthChecksSkeleton />}
-        <AsyncBoundary<HealthReport>
-          isPending={false}
-          error={ready.error}
-          data={report}
-          isEmpty={(value) => value.checks.length === 0}
-          emptyTitle={t('health.noChecks')}
-          emptyHint={t('health.noChecksHint')}
-          onRetry={() => void ready.refetch()}
-        >
-          {(value) => (
-            <Stack gap="md">
-              {ordered(value.checks)
-                .filter((check) => check.name !== 'db')
-                .map((check) => (
-                  /* ⛔ Заголовок — `checkLabel`, а не `{check.name}` (`U-14`):
-                     `db`, `jobs`, `sources` — внутрішні ідентифікатори з
-                     `Program.cs` (`AddCheck<…>("db", …)`). */
-                  <HealthSection
-                    key={check.name}
-                    id={check.name}
-                    title={checkLabel(check.name)}
-                    check={check}
-                  />
-                ))}
-            </Stack>
-          )}
-        </AsyncBoundary>
+        {!ready.isPending && (
+          <AsyncBoundary<HealthReport>
+            isPending={false}
+            error={ready.error}
+            data={report}
+            isEmpty={(value) => value.checks.length === 0}
+            emptyTitle={t('health.noChecks')}
+            emptyHint={t('health.noChecksHint')}
+            onRetry={() => void ready.refetch()}
+          >
+            {(value) => (
+              <Stack gap="md">
+                {ordered(value.checks)
+                  .filter((check) => check.name !== 'db')
+                  .map((check) => (
+                    /* ⛔ Заголовок — `checkLabel`, а не `{check.name}` (`U-14`):
+                       `db`, `jobs`, `sources` — внутрішні ідентифікатори з
+                       `Program.cs` (`AddCheck<…>("db", …)`). */
+                    <HealthSection
+                      key={check.name}
+                      id={check.name}
+                      title={checkLabel(check.name)}
+                      check={check}
+                    />
+                  ))}
+              </Stack>
+            )}
+          </AsyncBoundary>
+        )}
 
         {/* ⚠ Довідкові факти, не вміст екрана: доки їх немає (ще вантажаться,
             відмова, відповідь не тієї форми) — секція не малюється взагалі
