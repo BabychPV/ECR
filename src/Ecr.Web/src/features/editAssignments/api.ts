@@ -25,9 +25,9 @@ function useRefreshAfter(documentId: number): () => Promise<void> {
 
   return async () => {
     await Promise.all([
-      client.invalidateQueries({ queryKey: queryKeys.editAssignments.ofDocument(documentId) }),
+      client.invalidateQueries({ queryKey: queryKeys.editAssignments.forDocument(documentId) }),
       client.invalidateQueries({ queryKey: queryKeys.editAssignments.mine() }),
-      client.invalidateQueries({ queryKey: ['document', documentId] }),
+      client.invalidateQueries({ queryKey: queryKeys.document.ofDocument(documentId) }),
     ]);
   };
 }
