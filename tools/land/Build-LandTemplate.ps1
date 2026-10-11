@@ -115,6 +115,9 @@ function LoginAs([string]$u) {
 Log "Модель: $modelFile"
 $Mdl = Get-Content -LiteralPath $modelFile -Raw -Encoding UTF8 | ConvertFrom-Json
 Log ("Аркушів {0}, таблиць {1}, колонок {2}, довідників {3}" -f $Mdl.stats.reportSheets, $Mdl.stats.tables, $Mdl.stats.columns, $Mdl.stats.registries)
+$cellFormulaCount = 0
+foreach ($sh in @($Mdl.sheets)) { foreach ($tb in @($sh.tables)) { $cellFormulaCount += @($tb.cellFormulas | Where-Object { $_ }).Count } }
+Log ("Формул комірок (Cell, PUT formulas/cell): {0}" -f $cellFormulaCount)
 if ($DryRun) { Log 'DryRun: лише розбір моделі; звернень до API немає.'; return }
 
 $S = @{ Registries = @{}; RegEntries = @{}; Units = @{}; TemplateId = $null; VersionId = $null; Tables = @{}; Cols = @{} }
@@ -510,6 +513,44 @@ function Fill-StructureSql([int]$vid) {
     finally { $cn.Close() }
 }
 
+# D1: формули РІВНЯ КОМІРКИ (PUT …/formulas/cell/{rowKey}/{columnDefId}). Модель несе їх у таблиці як cellFormulas
+# ({row, column, expression}); для 7.0 Water consolidation це 18 рядків × 12 місяців = 216 перехресних формул
+# виду (a+b+c)/1000 з аркуша 7. Water Report (багато-до-багатьох: коди 7009016/17/18 живлять кілька цілей).
+# Працює в обох режимах -StructureMode (Sql і Api): ідентифікатори таблиць/колонок беруться зі структури версії.
+# Ідемпотентно: PUT за адресою комірки змінює наявну формулу, а не заводить другу.
+function Put-CellFormulas([int]$vid) {
+    $planned = @()
+    foreach ($sh in @($Mdl.sheets)) {
+        foreach ($tb in @($sh.tables)) {
+            foreach ($cf in @($tb.cellFormulas)) {
+                if ($null -eq $cf) { continue }
+                $planned += [pscustomobject]@{ Sheet = [string]$sh.code; Table = [string]$tb.code; Row = [string]$cf.row; Column = [string]$cf.column; Expr = [string]$cf.expression }
+            }
+        }
+    }
+    if ($planned.Count -eq 0) { Log '  формул комірок у моделі немає'; return 0 }
+    $st = (Api GET "/api/v1/template-versions/$vid/structure").Json
+    $ids = @{}
+    foreach ($s in @($st.sheets)) {
+        foreach ($t in @($s.tables)) {
+            $cols = @{}
+            foreach ($c in @($t.columns)) { $cols[[string]$c.code] = [int]$c.id }
+            $ids["$($s.code)/$($t.code)"] = @{ Id = [int]$t.id; Cols = $cols }
+        }
+    }
+    $n = 0
+    foreach ($p in $planned) {
+        $tb = $ids["$($p.Sheet)/$($p.Table)"]
+        if ($null -eq $tb) { throw "Формула комірки $($p.Row)/$($p.Column): немає таблиці $($p.Sheet)/$($p.Table) у структурі версії $vid." }
+        if (-not $tb.Cols.ContainsKey($p.Column)) { throw "Формула комірки $($p.Row)/$($p.Column): немає колонки в $($p.Sheet)/$($p.Table)." }
+        $cellUrl = "/api/v1/template-versions/$vid/tables/$($tb.Id)/formulas/cell/$([uri]::EscapeDataString($p.Row))/$($tb.Cols[$p.Column])"
+        $null = Api PUT $cellUrl @{ dialect = 'Template'; expression = $p.Expr }
+        $n++
+    }
+    Log "  формул комірок записано: $n"
+    return $n
+}
+
 function Stage-Template {
     Log '== Template =='
     LoginAs 'land-owner'
@@ -604,6 +645,7 @@ function Stage-Template {
         Log ("  аркуш {0}: таблиць {1}" -f $sh.code, @($sh.tables).Count)
     }
     Log "  колонок $nCols, формул $nF, рядків $nRows, правил $nRules"
+    $nCell = Put-CellFormulas $vid
 
     # умовне форматування (cellIs Removed → сірий): одним PUT на версію
     if (@($Mdl.conditionalFormats).Count -gt 0) {
