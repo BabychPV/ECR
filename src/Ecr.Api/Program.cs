@@ -143,6 +143,8 @@ builder.Services.ConfigureHttpJsonOptions(
 // Quartz стає придатним лише після ApplicationStarted. Без цієї реєстрації
 // вночі мовчазно не відбувалася б жодна перевірка.
 builder.Services.AddHostedService<Ecr.Api.Startup.RecurringScheduleService>();
+// Фоновий прогрів знімка /health/facts після старту (не блокує; Health:WarmupOnStart=false вимикає).
+builder.Services.AddHostedService<Ecr.Api.Startup.HealthFactsWarmupService>();
 // ⛔ U8: стандартні 30 с зупинки хоста обривали перерахунок, імпорт чи збір
 // посеред роботи. Тепер задачі отримують скасування на зупинці
 // (`RecurringScheduleService.StopAsync`, до Quartz), а хост чекає, поки вони запишуть `Cancelled`
