@@ -1085,6 +1085,11 @@
               }
             ]
           },
+          "fromArchive": {
+            "default": false,
+            "description": "НФ-8.9.6 / D-247: рядок прочитано з архіву аудиту (`arc.AuditCellChange`, партиція перенесена\n`arc.usp_ArchiveAudit`), а не з гарячої `aud.CellChange`. Лише позначка джерела: значення, автор і\nмежі читання ті самі, що в гарячого рядка.",
+            "type": "boolean"
+          },
           "isLateEdit": {
             "description": "Зміна в `Grace` або після `Reopen` (D-70).",
             "type": "boolean"
