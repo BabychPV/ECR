@@ -90,14 +90,22 @@ public sealed class SeedTests(SqlServerFixture sql)
         Assert.Equal(1, await ScalarAsync(
             "SELECT COUNT(*) FROM sec.Permission WHERE Code = N'Report.ViewCampaign' AND IsDangerous = 1"));
 
-        Assert.Equal(0, await ScalarAsync(
-            "SELECT COUNT(*) FROM sec.RolePermission WHERE PermissionCode = N'Report.ViewCampaign'"));
+        // ✎ 2026-10-11 (FP:sysadmin-rights, рішення людини): шаблон `Report.%` погоджувача його й далі
+        // не бере; єдиний носій — SystemAdministrator, окремим MERGE (секція `FP:sysadmin-rights`).
+        Assert.Equal(
+            "SystemAdministrator",
+            await StringAsync("""
+                SELECT STRING_AGG(r.Code, N',') WITHIN GROUP (ORDER BY r.Code)
+                FROM sec.RolePermission AS rp
+                JOIN sec.Role AS r ON r.Id = rp.RoleId AND r.IsBuiltIn = 1
+                WHERE rp.PermissionCode = N'Report.ViewCampaign'
+                """));
     }
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
-    public async Task Право_на_сповіщення_є_в_каталозі_небезпечне_і_нікому_не_роздане()
+    public async Task Право_на_сповіщення_є_в_каталозі_небезпечне_і_видане_лише_системному_адміністратору()
     {
         // `BE-32`: носій вирішує, куди сервер шле повідомлення, і замінює
         // секрети каналів — той самий клас, що `Integration.Manage`.
@@ -107,9 +115,16 @@ public sealed class SeedTests(SqlServerFixture sql)
             """));
 
         // ⛔ Шаблон `%` системного адміністратора його не видає: фільтр
-        // `IsDangerous = 0` стоїть у самому MERGE роздач.
-        Assert.Equal(0, await ScalarAsync(
-            "SELECT COUNT(*) FROM sec.RolePermission WHERE PermissionCode = N'System.ManageNotifications'"));
+        // `IsDangerous = 0` стоїть у самому MERGE роздач. ✎ 2026-10-11: поіменний MERGE секції
+        // `FP:sysadmin-rights` (рішення людини) видає його ЛИШЕ SystemAdministrator.
+        Assert.Equal(
+            "SystemAdministrator",
+            await StringAsync("""
+                SELECT STRING_AGG(r.Code, N',') WITHIN GROUP (ORDER BY r.Code)
+                FROM sec.RolePermission AS rp
+                JOIN sec.Role AS r ON r.Id = rp.RoleId AND r.IsBuiltIn = 1
+                WHERE rp.PermissionCode = N'System.ManageNotifications'
+                """));
     }
 
     [Fact]
@@ -393,6 +408,11 @@ public sealed class SeedTests(SqlServerFixture sql)
         // `Report.EditDefinition` (рішення людини на Q-153, `D-203`). Він
         // виданий окремим MERGE, а не послабленням фільтра, і тест тримає
         // саме це: крім цієї пари небезпечного в складених ролях НЕМАЄ.
+        //
+        // ✎ 2026-10-11 (`FP:sysadmin-rights`, рішення людини за проходом «від першого обличчя»):
+        // третій поіменний виняток — SystemAdministrator отримує ВІСІМ адмін-прав керування
+        // (`SysAdminDangerous` нижче), окремим MERGE. Решта небезпечного (Period.Reopen,
+        // Document.ChangeKey, Report.EditDefinition) йому не видана — і цей тест тримає саме це.
         Assert.Equal(0, await ScalarAsync($"""
             SELECT COUNT(*)
             FROM sec.RolePermission AS rp
@@ -401,6 +421,7 @@ public sealed class SeedTests(SqlServerFixture sql)
             WHERE p.IsDangerous = 1
               AND r.Code <> N'{BootstrapAdmin.RoleCode}'
               AND NOT (r.Code = N'Approver' AND p.Code = N'Report.EditDefinition')
+              AND NOT (r.Code = N'SystemAdministrator' AND p.Code IN ({SysAdminDangerousSql}))
             """));
 
         // ⚠ Виняток рівно один і названий. Він не послаблення правила, а його
@@ -437,10 +458,116 @@ public sealed class SeedTests(SqlServerFixture sql)
             """));
 
         // Симуляція — найпоказовіший випадок: вона дає чужі очі, а отже, чужі
-        // дані, і видаватися має поіменно. Її не має НІХТО, включно з роллю
-        // первинного налаштування.
-        Assert.Equal(0, await ScalarAsync(
-            "SELECT COUNT(*) FROM sec.RolePermission WHERE PermissionCode = N'Security.Simulate'"));
+        // дані, і видаватися має поіменно. Її не має ніхто, крім SystemAdministrator (рішення людини
+        // 2026-10-11, «Security.*»); роль первинного налаштування її не має й далі.
+        Assert.Equal(
+            "SystemAdministrator",
+            await StringAsync("""
+                SELECT STRING_AGG(r.Code, N',') WITHIN GROUP (ORDER BY r.Code)
+                FROM sec.RolePermission AS rp
+                JOIN sec.Role AS r ON r.Id = rp.RoleId
+                WHERE rp.PermissionCode = N'Security.Simulate'
+                """));
+    }
+
+    /// <summary>
+    /// Адмін-права керування, видані SystemAdministrator секцією <c>FP:sysadmin-rights</c> (рішення
+    /// людини 2026-10-11). Перелік дзеркалить MERGE сіду; сторож нижче звіряє його з каталогом.
+    /// </summary>
+    private static readonly string[] SysAdminDangerous =
+    [
+        "Security.ManageUsers", "Security.ManageRoles", "Security.Simulate",
+        "Integration.Manage", "System.ManageNotifications", "System.RunJob",
+        "Report.ViewCampaign", "Calculation.Publish",
+    ];
+
+    /// <summary>Небезпечні права, які SystemAdministrator НЕ має (на рішення людини, див. секцію сіду).</summary>
+    private static readonly string[] SysAdminWithheld =
+    [
+        "Report.EditDefinition", "Period.Reopen", "Document.ChangeKey",
+    ];
+
+    private static string SysAdminDangerousSql
+        => string.Join(", ", SysAdminDangerous.Select(code => $"N'{code}'"));
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-6.12")]
+    public async Task Системний_адміністратор_має_кожне_адмін_право_каталогу_крім_названих_виключень()
+    {
+        // ⛔ FP:sysadmin-rights (прохід «від першого обличчя» 2026-10-11, P2; рішення людини):
+        // вбудована роль з назвою «системний адміністратор» не бачила Security, Mapping, Pipeline,
+        // Notifications, Campaign і не публікувала методики — «усе, крім небезпечного» віддавало
+        // їй безпечне, а адміністрування якраз небезпечне.
+        //
+        // Сторож-храповик: КОЖНЕ право каталогу є в ролі, крім названого переліку утримуваних.
+        // Нове право (особливо небезпечне), яке забули віддати чи свідомо втримати, червоніє тут —
+        // рішення про нього приймається явно, а не випадає з шаблону `%`.
+        Assert.Equal(0, await ScalarAsync($"""
+            SELECT COUNT(*)
+            FROM sec.Permission AS p
+            WHERE p.Code NOT IN ({string.Join(", ", SysAdminWithheld.Select(code => $"N'{code}'"))})
+              AND NOT EXISTS (
+                SELECT 1
+                FROM sec.RolePermission AS rp
+                JOIN sec.Role AS r ON r.Id = rp.RoleId AND r.IsBuiltIn = 1
+                WHERE r.Code = N'SystemAdministrator' AND rp.PermissionCode = p.Code)
+            """));
+
+        // ⚠ Утримані — справді небезпечні й справді не видані (інакше список утримуваних брехав би).
+        Assert.Equal(0, await ScalarAsync($"""
+            SELECT COUNT(*)
+            FROM sec.RolePermission AS rp
+            JOIN sec.Role AS r ON r.Id = rp.RoleId AND r.IsBuiltIn = 1
+            WHERE r.Code = N'SystemAdministrator'
+              AND rp.PermissionCode IN ({string.Join(", ", SysAdminWithheld.Select(code => $"N'{code}'"))})
+            """));
+
+        // Перелік виданих небезпечних — рівно названі вісім: нічого зайвого.
+        Assert.Equal(SysAdminDangerous.Length, await ScalarAsync("""
+            SELECT COUNT(*)
+            FROM sec.RolePermission AS rp
+            JOIN sec.Role       AS r ON r.Id   = rp.RoleId AND r.IsBuiltIn = 1
+            JOIN sec.Permission AS p ON p.Code = rp.PermissionCode
+            WHERE r.Code = N'SystemAdministrator' AND p.IsDangerous = 1
+            """));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-6.12")]
+    public async Task Розгорнута_база_без_адмін_прав_системного_адміністратора_отримує_їх_повторним_seed()
+    {
+        // ⚠ Стара база: розгорнута до рішення, пар немає. MERGE лише додає — наявна роль отримує
+        // відсутні пари на наступному старті (`SeedRunner`), без окремого скрипта оновлення.
+        await ExecuteAsync($"""
+            DELETE rp
+            FROM sec.RolePermission AS rp
+            JOIN sec.Role AS r ON r.Id = rp.RoleId AND r.IsBuiltIn = 1
+            WHERE r.Code = N'SystemAdministrator'
+              AND rp.PermissionCode IN ({SysAdminDangerousSql})
+            """);
+
+        Assert.Equal(0, await ScalarAsync($"""
+            SELECT COUNT(*)
+            FROM sec.RolePermission AS rp
+            JOIN sec.Role AS r ON r.Id = rp.RoleId AND r.IsBuiltIn = 1
+            WHERE r.Code = N'SystemAdministrator' AND rp.PermissionCode IN ({SysAdminDangerousSql})
+            """));
+
+        await using (var db = CreateContext())
+        {
+            await new SeedRunner(db).RunAsync(CancellationToken.None);
+        }
+
+        Assert.Equal(SysAdminDangerous.Length, await ScalarAsync($"""
+            SELECT COUNT(*)
+            FROM sec.RolePermission AS rp
+            JOIN sec.Role AS r ON r.Id = rp.RoleId AND r.IsBuiltIn = 1
+            WHERE r.Code = N'SystemAdministrator' AND rp.PermissionCode IN ({SysAdminDangerousSql})
+            """));
     }
 
     [Fact]

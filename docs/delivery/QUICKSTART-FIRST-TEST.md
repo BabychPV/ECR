@@ -136,9 +136,12 @@ Invoke-RestMethod https://ecr.test.local/health/ready        # status: Healthy �
 2. Логін `bootstrap`, пароль — з `-BootstrapPassword`. Система одразу вимагає новий:
    ≥ 12 символів, без імені користувача, не з переліку поширених.
 3. `/admin/security`: завести собі адміністратора, автора даних (`DataEntry`) і
-   погоджувача (`Approver`), видати ресурсний грант на проєкт. `bootstrap` вимкнеться
-   сам, щойно інший користувач отримає `Security.ManageUsers` — заведіть свого
-   адміністратора **до** цього.
+   погоджувача (`Approver`), видати ресурсний грант на проєкт. Роль `SystemAdministrator`
+   несе повний набір адмін-прав (Security, Mapping/Pipeline, Notifications, Campaign,
+   публікація методик). `bootstrap` вимикається **сам лише** тоді, коли доменний (Windows)
+   адміністратор із `Security.ManageUsers` уже входив у систему. На локальному стенді
+   (без домену) заблокуйте `bootstrap` вручну в `/admin/security` (Users → Lock),
+   **щойно** є іменований користувач із роллю `SystemAdministrator`, який успішно входить.
 4. Порожня база не має шаблонів і проєктів: далі сценарії В-1 → В-2 → В-3 → Г-1
    (`docs/TESTER-HANDOVER.md` §3.5, §4).
 

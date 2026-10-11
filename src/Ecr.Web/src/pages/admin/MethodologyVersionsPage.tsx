@@ -166,9 +166,9 @@ export function MethodologyVersionsPage(): JSX.Element {
   // обов'язкові, — вужча відповідальність, і саме тому в неї свій дозвіл.
   const mayManageRequiredInputs = can(session.data, 'Calculation.ManageRequiredInputs');
 
-  // ⛔ Право небезпечне (`sec.Permission.IsDangerous`) і вбудованим ролям
-  // seed-ом не видається взагалі (`PublishMethodologyHandler`, D-40):
-  // публікація змінює числа, які вже подані регуляторові.
+  // ⛔ Право небезпечне (`sec.Permission.IsDangerous`): шаблони сіду його не роздають
+  // (`PublishMethodologyHandler`, D-40) — публікація змінює числа, які вже подані регуляторові.
+  // ✎ 2026-10-11: вбудований `SystemAdministrator` отримує його поіменно (секція `FP:sysadmin-rights`).
   const mayPublish = can(session.data, 'Calculation.Publish');
 
   const [selectedId, setSelectedId] = useState<string | null>(null);

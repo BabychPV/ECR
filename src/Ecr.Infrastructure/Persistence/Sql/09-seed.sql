@@ -19719,3 +19719,48 @@ WHERE  run.PeriodKey IS NULL
 PRINT CONCAT(N'period0-supersede: ', @@ROWCOUNT, N' rows');
 GO
 -- COLL:period0-supersede ── кінець секції ─────────────────────────────────────
+
+-- FP:sysadmin-rights ── Системний адміністратор: адмін-права керування (рішення людини 2026-10-11) ──
+-- ✎ Прохід «від першого обличчя» (FIRST-PERSON-2026-10-11, P2-2): вбудований `SystemAdministrator`
+-- («усе, крім небезпечного») не бачив Security, Mapping, Pipeline, Notifications, Campaign і не
+-- публікував методики — назва ролі обіцяла протилежне. Рішення людини (квіз 11.10): роль має
+-- ВСІ адмін-права керування.
+--
+-- ⛔ Поіменно й ОКРЕМИМ MERGE, а НЕ послабленням фільтра `IsDangerous = 0` у блоці роздач вище:
+-- шаблон `%` решти ролей небезпечного й далі не бере (`Approver` ×
+-- `Report.EditDefinition` — окремий MERGE `D-203`; `BootstrapAdministrator` — два права).
+-- Той самий механізм, що й у двох наявних поіменних винятків.
+--
+-- ⚠ Видано рівно ВІСІМ прав — адмін-керування (`D-207`: розділення обов'язків адміністраторів
+-- не обмежуємо; `D-121`: носій `Security.ManageRoles` і так видає будь-яке право):
+--   Security.ManageUsers · Security.ManageRoles · Security.Simulate  — користувачі, ролі, «View as»;
+--   Integration.Manage — джерела, мапінг, конвеєр; System.ManageNotifications — канали й SMTP;
+--   System.RunJob — ручний запуск системних задач; Report.ViewCampaign — огляд кампанії;
+--   Calculation.Publish — публікація методик.
+-- Захист «чотирьох очей» стоїть у точці ВИКОРИСТАННЯ, не видачі, і цей MERGE його не чіпає:
+-- публікація методики автором її створення відмовляється (`ФВ-9.6`, `D-226`), Reopen вимагає
+-- причини, симуляція пишеться в аудит, а ціль симуляції з небезпечним правом заборонена.
+--
+-- ⛔ НЕ видано навмисно (операційні/бізнесові, а не адмін-керування — на рішення людини):
+--   Report.EditDefinition (авторство державної форми; `D-203`, лише Approver) ·
+--   Period.Reopen (повторне відкриття закритого періоду) · Document.ChangeKey (зміна бізнес-ключа).
+--
+-- ⚠ MERGE … WHEN NOT MATCHED: наявна база отримує пари на наступному старті (`SeedRunner`)
+-- без міграції схеми; право, зняте адміністратором з вбудованої ролі, повторний сід поверне
+-- (так само, як і решту вбудованих пар; потрібен інший набір — власна роль).
+MERGE sec.RolePermission AS t
+USING (
+    SELECT r.Id AS RoleId, p.Code AS PermissionCode
+    FROM (VALUES
+        (N'Security.ManageUsers'), (N'Security.ManageRoles'), (N'Security.Simulate'),
+        (N'Integration.Manage'), (N'System.ManageNotifications'), (N'System.RunJob'),
+        (N'Report.ViewCampaign'), (N'Calculation.Publish')
+    ) AS m (Code)
+    JOIN sec.Permission AS p ON p.Code = m.Code
+    CROSS JOIN sec.Role AS r
+    WHERE r.Code = N'SystemAdministrator' AND r.IsBuiltIn = 1 -- U1-04
+) AS s
+ON t.RoleId = s.RoleId AND t.PermissionCode = s.PermissionCode
+WHEN NOT MATCHED THEN INSERT (RoleId, PermissionCode) VALUES (s.RoleId, s.PermissionCode);
+GO
+-- FP:sysadmin-rights ── кінець секції ────────────────────────────────────────
