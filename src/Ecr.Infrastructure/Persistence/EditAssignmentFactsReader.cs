@@ -23,7 +23,7 @@ internal static class EditAssignmentFactsReader
     /// <param name="documentIds">Документи; для <paramref name="forUpdate"/> — рівно один.</param>
     /// <param name="userId">Для чийого стану виконавця будуються факти.</param>
     /// <param name="forUpdate">
-    /// <c>true</c> — рядки передач беруться під <c>UPDLOCK, ROWLOCK</c> (повторна перевірка в
+    /// <c>true</c> — рядки передач і виконавця беруться під <c>REPEATABLEREAD, ROWLOCK</c> (повторна перевірка в
     /// транзакції запису: перехід <c>Fill/Validate/Return</c> чекає її завершення).
     /// </param>
     /// <param name="ct">Токен скасування.</param>
@@ -91,7 +91,7 @@ internal static class EditAssignmentFactsReader
     /// <c>REPEATABLEREAD, ROWLOCK</c> (спільні блокування до коміту).
     /// </summary>
     /// <remarks>
-    /// ⛔ P1-R1/R2 (аудит). Раніше UPDLOCK стояв лише на <c>doc.EditAssignment</c>, а стан виконавця
+    /// ⛔ P1-R1/R2 (аудит). Раніше `UPDLOCK` стояв лише на <c>doc.EditAssignment</c>, а стан виконавця
     /// читався підзапитом по <c>doc.EditAssignmentRecipient</c> БЕЗ підказки: під RCSI він бачив
     /// знімок на початок statement, і «Заповнено»/зняття виконавця, зафіксовані під час очікування
     /// блокування, не було видно — правка проходила. Тепер обидві таблиці читаються окремими
@@ -119,16 +119,21 @@ internal static class EditAssignmentFactsReader
             return empty;
         }
 
+        // ⛔ P2-N3: ідентифікатори — з першого statement, а не підзапитом по документу: з підзапитом
+        // оптимізатор міг піти через IX_EditAssignmentRecipient_User (UserId, Status) і узяти спільні
+        // блокування на ВСІ рядки виконавця в ІНШИХ документах — тобто заблокувати чужі Fill. Тут —
+        // пошук за первинним ключем (AssignmentId, UserId), не більше MaxPerDocument ключів.
+        var idsJson = System.Text.Json.JsonSerializer.Serialize(assignments.Select(a => a.Id));
+
         var mine = await db.EditAssignmentRecipients
             .FromSql($"""
                 SELECT r.* FROM doc.EditAssignmentRecipient AS r WITH (REPEATABLEREAD, ROWLOCK)
                 WHERE r.UserId = {userId}
-                  AND r.AssignmentId IN (SELECT a.Id FROM doc.EditAssignment AS a WHERE a.DocumentId = {documentId})
+                  AND r.AssignmentId IN (SELECT CAST(j.[value] AS bigint) FROM OPENJSON({idsJson}) AS j)
                 """)
             .AsNoTracking()
             .ToListAsync(ct)
-            .ConfigureAwait(false);
-        var statusById = mine.ToDictionary(r => r.AssignmentId, r => r.Status);
+            .ConfigureAwait(false);        var statusById = mine.ToDictionary(r => r.AssignmentId, r => r.Status);
 
         var ownerUserId = await db.Documents.AsNoTracking()
             .Where(d => d.Id == documentId)
@@ -136,6 +141,9 @@ internal static class EditAssignmentFactsReader
             .SingleAsync(ct)
             .ConfigureAwait(false);
 
+        // ⚠ Активність делегатора і автор документа читаються БЕЗ блокування: вимкнення делегатора
+        // не піднімає права, а лише знімає підйом; читання — зафіксований стан на момент statement
+        // (вікно мілісекунд, без ескалації) — прийнято (docs/build/02-contracts.md, розділ EA).
         var delegatorIds = assignments.Select(a => a.DelegatedByUserId).Distinct().ToList();
         var active = await db.Users.AsNoTracking()
             .Where(u => delegatorIds.Contains(u.Id))

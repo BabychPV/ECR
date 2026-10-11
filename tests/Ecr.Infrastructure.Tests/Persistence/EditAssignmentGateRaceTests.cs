@@ -48,12 +48,23 @@ public sealed class EditAssignmentGateRaceTests(SqlServerFixture sql) : IDisposa
 
     public void Dispose() => _memory.Dispose();
 
-    private sealed record Scene(TestDocument Doc, int ExecutorId, int DelegatorId, long AssignmentId, string RowKey, string BaseVersion);
+    private sealed record Scene(
+        TestDocument Doc, int ExecutorId, int DelegatorId, int StrangerId, long AssignmentId, string RowKey, string BaseVersion);
+
+    /// <summary>Хто пише: виконавець (Read, піднімає передача) або третя особа з Write за роллю.</summary>
+    public enum Actor
+    {
+        Executor,
+        StrangerWithWrite,
+    }
 
     public enum Interference
     {
         None,
         Fill,
+        Validate,
+        Expire,
+        MakeExclusive,
         Remove,
         DeactivateDelegator,
     }
@@ -76,6 +87,8 @@ public sealed class EditAssignmentGateRaceTests(SqlServerFixture sql) : IDisposa
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "EA-B")]
     [InlineData(Interference.Fill, EditDenyReason.AssignmentFilled)]
+    [InlineData(Interference.Validate, EditDenyReason.AssignmentValidated)]
+    [InlineData(Interference.Expire, EditDenyReason.AssignmentExpired)]
     [InlineData(Interference.Remove, EditDenyReason.InsufficientGrantLevel)]
     [InlineData(Interference.DeactivateDelegator, EditDenyReason.InsufficientGrantLevel)]
     public async Task Правка_між_рішенням_і_комітом_відхиляється_після_зміни_передачі(
@@ -96,6 +109,7 @@ public sealed class EditAssignmentGateRaceTests(SqlServerFixture sql) : IDisposa
     [Trait("Requirement", "EA-B")]
     [InlineData(Interference.Fill, EditDenyReason.AssignmentFilled)]
     [InlineData(Interference.Remove, EditDenyReason.InsufficientGrantLevel)]
+    [InlineData(Interference.DeactivateDelegator, EditDenyReason.InsufficientGrantLevel)]
     public async Task Книга_між_рішенням_і_комітом_відхиляється_після_зміни_передачі(
         Interference interference, EditDenyReason expected)
     {
@@ -106,6 +120,37 @@ public sealed class EditAssignmentGateRaceTests(SqlServerFixture sql) : IDisposa
         AssertDenied(error, expected);
         Assert.Null(await LiveValueAsync(scene));
         Assert.Equal(0, await AuditCountAsync(scene));
+    }
+
+    /// <remarks>
+    /// ⛔ N6: третя особа з Write за роллю, правку НЕ піднімає передача (<c>LiftedColumns</c> порожній).
+    /// Ексклюзивність вмикається між рішенням і комітом: відхилити може лише гейт, що читає передачі,
+    /// бо в документа вони вже є (<c>AssignmentsPresent</c> із рішення). Мутація «needed лише за
+    /// LiftedColumns» червоніє саме тут.
+    /// </remarks>
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "EA-B")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Третя_особа_з_Write_відхиляється_якщо_між_рішенням_і_комітом_передачу_зроблено_ексклюзивною(
+        bool workbook)
+    {
+        var scene = await ArrangeAsync(exclusive: false);
+
+        // Контроль (інший документ): без втручання неексклюзивна передача третю особу не блокує.
+        var control = await RunPatchAsync(scene, Interference.None, workbook, actor: Actor.StrangerWithWrite);
+        Assert.Null(control);
+        Assert.Equal(EditedValue, await LiveValueAsync(scene));
+
+        var fresh = await ArrangeAsync(exclusive: false);
+
+        var error = await RunPatchAsync(fresh, Interference.MakeExclusive, workbook, actor: Actor.StrangerWithWrite);
+
+        AssertDenied(error, EditDenyReason.LockedByOwner);
+        Assert.Null(await LiveValueAsync(fresh));
+        Assert.Equal(0, await AuditCountAsync(fresh));
     }
 
     [Fact]
@@ -130,7 +175,8 @@ public sealed class EditAssignmentGateRaceTests(SqlServerFixture sql) : IDisposa
         Assert.Equal(expected.ToString(), denied.Details?["reason"]?.ToString());
     }
 
-    private async Task<Exception?> RunPatchAsync(Scene scene, Interference interference, bool workbook, bool withStore = true)
+    private async Task<Exception?> RunPatchAsync(
+        Scene scene, Interference interference, bool workbook, bool withStore = true, Actor actor = Actor.Executor)
     {
         await using var patchDb = CreateContext();
         await using var serviceDb = CreateContext();
@@ -143,7 +189,7 @@ public sealed class EditAssignmentGateRaceTests(SqlServerFixture sql) : IDisposa
             Substitute.For<ICurrentUser>(),
             new WorkflowStore(serviceDb));
 
-        var handler = BuildHandler(patchDb, scene, real, interference, withStore);
+        var handler = BuildHandler(patchDb, scene, real, interference, withStore, actor);
         var request = new PatchCellsRequest(
             scene.Doc.TableInstanceId, scene.Doc.PeriodKey.Value, "UserEdit",
             [new PatchRow(scene.RowKey, scene.BaseVersion, [new PatchCell($"C2_{scene.Doc.ColumnDefIds[1]}", EditedValue)])]);
@@ -174,46 +220,27 @@ public sealed class EditAssignmentGateRaceTests(SqlServerFixture sql) : IDisposa
     }
 
     private PatchCellsHandler BuildHandler(
-        EcrDbContext db, Scene scene, AccessDecisionService real, Interference interference, bool withStore)
+        EcrDbContext db, Scene scene, AccessDecisionService real, Interference interference, bool withStore,
+        Actor actor)
     {
         var doc = scene.Doc;
         var bulk = new BulkCellLoader(db.Database.GetConnectionString()!, 1000);
         var clock = new FixedClock(Now.AddSeconds(1));
-        var profile = new AccessBuilder { UserId = scene.ExecutorId }
-            .Grant(ResourceKind.Project, doc.ProjectId, GrantLevel.Read)
+        var actorId = actor == Actor.Executor ? scene.ExecutorId : scene.StrangerId;
+        var profile = new AccessBuilder { UserId = actorId }
+            .Grant(
+                ResourceKind.Project, doc.ProjectId,
+                actor == Actor.Executor ? GrantLevel.Read : GrantLevel.Write)
             .Build();
 
         var periods = Substitute.For<IPeriodStore>();
         periods.FindPeriodStateAsync(doc.DocumentId, doc.PeriodKey.Value, Arg.Any<CancellationToken>())
                .Returns((PeriodState?)PeriodState.Open);
 
-        async Task Interfere()
-        {
-            switch (interference)
-            {
-                case Interference.Fill:
-                    await MutateAsync(scene, a => a.FillRecipient(scene.ExecutorId, Now));
-                    break;
-                case Interference.Remove:
-                    await using (var other = CreateContext())
-                    {
-                        var store = new EditAssignmentStore(other);
-                        var found = await store.FindAsync(doc.DocumentId, scene.AssignmentId, CancellationToken.None);
-                        store.Remove(found!);
-                        await other.SaveChangesAsync(CancellationToken.None);
-                    }
-
-                    break;
-                case Interference.DeactivateDelegator:
-                    await ExecuteAsync("UPDATE sec.[User] SET IsActive = 0 WHERE Id = " + scene.DelegatorId);
-                    break;
-                default:
-                    break;
-            }
-        }
+        Task Interfere() => InterfereAsync(scene, interference);
 
         var access = Substitute.For<IAccessDecisionService>();
-        access.BuildProfileAsync(scene.ExecutorId, Arg.Any<CancellationToken>()).Returns(profile);
+        access.BuildProfileAsync(actorId, Arg.Any<CancellationToken>()).Returns(profile);
         access.CanReadDocumentAsync(Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<CancellationToken>())
               .Returns(EditDecision.Allow());
         access.CanEditCellsAsync(
@@ -255,7 +282,7 @@ public sealed class EditAssignmentGateRaceTests(SqlServerFixture sql) : IDisposa
                .Returns(new Dictionary<string, ExpressionValue>());
 
         var user = Substitute.For<ICurrentUser>();
-        user.UserId.Returns(scene.ExecutorId);
+        user.UserId.Returns(actorId);
 
         return new PatchCellsHandler(
             new NormalizedCellStore(db), new RowStore(db, bulk, clock), new DocumentStore(db), periods,
@@ -267,13 +294,195 @@ public sealed class EditAssignmentGateRaceTests(SqlServerFixture sql) : IDisposa
             assignments: withStore ? new EditAssignmentStore(db) : null);
     }
 
-    private async Task<Scene> ArrangeAsync()
+    private async Task InterfereAsync(Scene scene, Interference interference)
+    {
+        var doc = scene.Doc;
+        switch (interference)
+        {
+            case Interference.Fill:
+                await MutateAsync(scene, a => a.FillRecipient(scene.ExecutorId, Now));
+                break;
+            case Interference.Validate:
+                await MutateAsync(scene, a =>
+                {
+                    a.FillRecipient(scene.ExecutorId, Now);
+                    a.Validate(scene.DelegatorId, Now);
+                });
+                break;
+            case Interference.Expire:
+                await ExecuteAsync($"UPDATE doc.EditAssignment SET ExpiresAt = '2026-01-01' WHERE Id = {scene.AssignmentId}");
+                break;
+            case Interference.MakeExclusive:
+                await ExecuteAsync($"UPDATE doc.EditAssignment SET IsExclusive = 1 WHERE Id = {scene.AssignmentId}");
+                break;
+            case Interference.Remove:
+                await using (var other = CreateContext())
+                {
+                    var store = new EditAssignmentStore(other);
+                    var found = await store.FindAsync(doc.DocumentId, scene.AssignmentId, CancellationToken.None);
+                    store.Remove(found!);
+                    await other.SaveChangesAsync(CancellationToken.None);
+                }
+
+                break;
+            case Interference.DeactivateDelegator:
+                await ExecuteAsync("UPDATE sec.[User] SET IsActive = 0 WHERE Id = " + scene.DelegatorId);
+                break;
+            default:
+                break;
+        }
+    }
+
+
+    /// <summary>Створення рядка: рішення — справжня служба, втручання — одразу після нього.</summary>
+    private async Task<Exception?> RunCreateRowAsync(
+        Scene scene, Interference interference, bool withStore, Actor actor)
+    {
+        await using var db = CreateContext();
+        await using var serviceDb = CreateContext();
+
+        var real = new AccessDecisionService(
+            serviceDb,
+            new MetadataCache(_memory, serviceDb),
+            new AccessProfileCache(_memory),
+            new FixedClock(Now),
+            Substitute.For<ICurrentUser>(),
+            new WorkflowStore(serviceDb));
+
+        var doc = scene.Doc;
+        var actorId = actor == Actor.Executor ? scene.ExecutorId : scene.StrangerId;
+
+        // Рядки — окремо від підйому (D5): виконавцю потрібне Write за роллю, щоб рішення дійшло до заборони.
+        var profile = new AccessBuilder { UserId = actorId }
+            .Grant(ResourceKind.Project, doc.ProjectId, GrantLevel.Write)
+            .Build();
+
+        var bulk = new BulkCellLoader(db.Database.GetConnectionString()!, 1000);
+        var clock = new FixedClock(Now.AddSeconds(1));
+
+        var access = Substitute.For<IAccessDecisionService>();
+        access.CanReadDocumentAsync(Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<CancellationToken>())
+              .Returns(EditDecision.Allow());
+        access.CanCreateRowsAsync(
+                  Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<IReadOnlyCollection<string>>(),
+                  Arg.Any<CancellationToken>())
+              .Returns(async c =>
+              {
+                  var decisions = await real.CanCreateRowsAsync(
+                      c.ArgAt<AccessProfile>(0), c.ArgAt<long>(1), c.ArgAt<IReadOnlyCollection<string>>(2),
+                      CancellationToken.None);
+                  await InterfereAsync(scene, interference);
+                  return decisions;
+              });
+
+        var handler = new CreateRowHandler(
+            new RowStore(db, bulk, clock), new DocumentStore(db), Metadata(doc), access,
+            new UnitOfWork(db), clock, new SheetEditGate(db),
+            withStore ? new EditAssignmentStore(db) : null);
+
+        try
+        {
+            await handler.HandleAsync(
+                    doc.DocumentId, doc.TableInstanceId, requestedKey: null, profile, CancellationToken.None)
+                .WaitAsync(HookTimeout);
+            return null;
+        }
+        catch (TimeoutException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            return ex;
+        }
+    }
+
+    private Task<int> RowCountAsync(Scene scene)
+        => ScalarAsync<int>(
+            $"SELECT COUNT(*) FROM doc.TableRow WHERE PeriodKey = {scene.Doc.PeriodKey.Value} "
+            + $"AND TableInstanceId = {scene.Doc.TableInstanceId} AND IsDeleted = 0");
+
+    private static void AssertRowDenied(Exception? error, EditDenyReason expected)
+    {
+        var denied = Assert.IsType<AccessDeniedException>(error);
+        Assert.Equal("ECR-ACCS-0403", denied.ErrorCode);
+        Assert.Equal("err.ECR-ACCS-0403.addRowDenied", denied.Details?["messageKey"]?.ToString());
+        Assert.Equal(expected.ToString(), denied.Details?["reason"]?.ToString());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "EA-B")]
+    public async Task Створення_рядка_без_втручання_проходить()
+    {
+        var scene = await ArrangeAsync();
+        var before = await RowCountAsync(scene);
+
+        var error = await RunCreateRowAsync(scene, Interference.None, withStore: true, Actor.Executor);
+
+        Assert.Null(error);
+        Assert.Equal(before + 1, await RowCountAsync(scene));
+    }
+
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "EA-B")]
+    [InlineData(Interference.Fill, EditDenyReason.AssignmentFilled)]
+    [InlineData(Interference.Validate, EditDenyReason.AssignmentValidated)]
+    [InlineData(Interference.Expire, EditDenyReason.AssignmentExpired)]
+    public async Task Створення_рядка_виконавцем_між_рішенням_і_комітом_відхиляється_після_зміни_передачі(
+        Interference interference, EditDenyReason expected)
+    {
+        var scene = await ArrangeAsync();
+        var before = await RowCountAsync(scene);
+
+        var error = await RunCreateRowAsync(scene, interference, withStore: true, Actor.Executor);
+
+        AssertRowDenied(error, expected);
+        Assert.Equal(before, await RowCountAsync(scene));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "EA-B")]
+    public async Task Створення_рядка_третьою_особою_відхиляється_якщо_передачу_зроблено_ексклюзивною()
+    {
+        var scene = await ArrangeAsync(exclusive: false);
+        var before = await RowCountAsync(scene);
+
+        var error = await RunCreateRowAsync(
+            scene, Interference.MakeExclusive, withStore: true, Actor.StrangerWithWrite);
+
+        AssertRowDenied(error, EditDenyReason.LockedByOwner);
+        Assert.Equal(before, await RowCountAsync(scene));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "EA-B")]
+    public async Task Створення_рядка_без_сховища_передач_у_документа_з_передачами_відхиляється()
+    {
+        var scene = await ArrangeAsync(exclusive: false);
+        var before = await RowCountAsync(scene);
+
+        var error = await RunCreateRowAsync(
+            scene, Interference.None, withStore: false, Actor.StrangerWithWrite);
+
+        Assert.NotNull(error);
+        Assert.Equal(before, await RowCountAsync(scene));
+    }
+    private async Task<Scene> ArrangeAsync(bool exclusive = true)
     {
         var builder = new TestDocumentBuilder(sql.ConnectionString);
         var doc = await builder.BuildAsync(rowMode: TableRowMode.Dynamic, ct: CancellationToken.None);
 
         int executor;
         int delegator;
+        int stranger;
         long assignmentId;
         await using (var db = CreateContext())
         {
@@ -283,17 +492,19 @@ public sealed class EditAssignmentGateRaceTests(SqlServerFixture sql) : IDisposa
 
             var delegatorUser = NewUser();
             var executorUser = NewUser();
-            db.Users.AddRange(delegatorUser, executorUser);
+            var strangerUser = NewUser();
+            db.Users.AddRange(delegatorUser, executorUser, strangerUser);
             await db.SaveChangesAsync(CancellationToken.None);
             delegator = delegatorUser.Id;
             executor = executorUser.Id;
+            stranger = strangerUser.Id;
 
             // Зріз — період документа без місяця: піднімає будь-яку колонку періоду (метадані
             // поштучного хендлера — тестові, без місячних колонок).
             var assignment = new EditAssignment(
                 doc.DocumentId,
                 EditAssignmentSlice.Create(null, null, null, doc.PeriodKey.Value),
-                isExclusive: true, delegatedByUserId: delegator, handoffId: Guid.NewGuid(),
+                isExclusive: exclusive, delegatedByUserId: delegator, handoffId: Guid.NewGuid(),
                 createdByUserId: delegator, utcNow: Now);
             assignment.AddRecipient(executor, delegator, Now);
             new EditAssignmentStore(db).Add(assignment);
@@ -305,7 +516,7 @@ public sealed class EditAssignmentGateRaceTests(SqlServerFixture sql) : IDisposa
             $"SELECT RowKey FROM doc.TableRow WHERE PeriodKey = {doc.PeriodKey.Value} AND Id = {doc.RowIds[0]}");
         var version = await VersionAsync(doc, rowKey);
 
-        return new Scene(doc, executor, delegator, assignmentId, rowKey, version);
+        return new Scene(doc, executor, delegator, stranger, assignmentId, rowKey, version);
     }
 
     private async Task MutateAsync(Scene scene, Action<EditAssignment> change)
