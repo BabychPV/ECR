@@ -340,7 +340,7 @@ public sealed class ContractIntegrityTests
 
         var facts = EditAssignmentGuard.Evaluate(
             userId: 7, documentOwnerUserId: 1, isIntegrationWriter: false, [fact],
-            new EditSliceFacts("F1", "T1", new PeriodKey(202601), ColumnIsMonth: true, ColumnMonthNumber: 1),
+            new EditSliceFacts("F1", "T1", new Ecr.Domain.ValueObjects.PeriodKey(202601), ColumnIsMonth: true, ColumnMonthNumber: 1),
             new DateTime(2026, 10, 11, 0, 0, 0, DateTimeKind.Utc));
 
         var writer = new AccessBuilder().Grant(ResourceKind.Project, AccessBuilder.ProjectId, GrantLevel.Write).Build();
