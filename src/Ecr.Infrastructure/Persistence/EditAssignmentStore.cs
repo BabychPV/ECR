@@ -35,6 +35,17 @@ public sealed class EditAssignmentStore(EcrDbContext db) : IEditAssignmentStore
             .FirstOrDefaultAsync(ct);
 
     /// <inheritdoc />
+    public async Task<EditAssignmentGateFacts> ReadFactsForGateAsync(long documentId, int userId, CancellationToken ct)
+    {
+        var read = await EditAssignmentFactsReader.LoadAsync(db, [documentId], userId, forUpdate: true, ct)
+            .ConfigureAwait(false);
+
+        return read.TryGetValue(documentId, out var found)
+            ? new EditAssignmentGateFacts(found.OwnerUserId, found.Facts)
+            : new EditAssignmentGateFacts(0, []);
+    }
+
+    /// <inheritdoc />
     public Task<EditAssignment?> FindBySliceKeyAsync(long documentId, string sliceKey, CancellationToken ct)
         => db.EditAssignments
             .Include(a => a.Recipients)

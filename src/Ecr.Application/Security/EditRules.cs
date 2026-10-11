@@ -193,9 +193,11 @@ public static class EditRules
         // None (немає гранта, IsDeny, невидимий проєкт) не піднімається.
         // Піднесення — ДО правил періоду шаблону (їх застосовує служба поверх
         // дозволу), тож вони його перекривають, як і звичайний дозвіл.
+        var lifted = false;
         if (context.DelegatedWrite && effective == GrantLevel.Read)
         {
             effective = GrantLevel.Write;
+            lifted = true;
         }
 
         if (effective < GrantLevel.Write)
@@ -214,7 +216,7 @@ public static class EditRules
             return EditDecision.Deny(EditDenyReason.LockedByOwner);
         }
 
-        return EditDecision.Allow();
+        return lifted ? EditDecision.AllowViaAssignment() : EditDecision.Allow();
     }
 
     /// <summary>

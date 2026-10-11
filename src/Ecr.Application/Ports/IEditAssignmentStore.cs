@@ -28,6 +28,12 @@ public sealed record EditAssignmentTaskRow(
     DateTime? ExpiresAt,
     DateTime StatusChangedAt);
 
+/// <summary>Факти передач документа для повторної перевірки запису під блокуванням (EA-B).</summary>
+/// <param name="OwnerUserId">Автор документа.</param>
+/// <param name="Facts">Передачі документа з погляду користувача.</param>
+public sealed record EditAssignmentGateFacts(
+    int OwnerUserId, IReadOnlyList<Ecr.Application.Security.EditAssignmentFact> Facts);
+
 /// <summary>
 /// Сховище передач зрізу (EA-1, <c>doc.EditAssignment*</c>). Усі методи — всередині
 /// <see cref="IUnitOfWork.ExecuteInTransactionAsync"/> там, де вони пишуть; збереження — через
@@ -56,6 +62,18 @@ public interface IEditAssignmentStore
 
     /// <summary>Скільки передач у документа (ліміт <see cref="EditAssignment.MaxPerDocument"/>).</summary>
     public Task<int> CountByDocumentAsync(long documentId, CancellationToken ct);
+
+    /// <summary>
+    /// Факти передач документа для САМОГО користувача під <c>UPDLOCK, ROWLOCK</c> (EA-B): повторна
+    /// перевірка передачі в транзакції запису, під блокуванням аркуша. Переходи станів чекають
+    /// завершення цієї транзакції; відкликання/«Заповнено», зафіксовані раніше, видно тут.
+    /// Викликається ВСЕРЕДИНІ транзакції.
+    /// </summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="userId">Хто пише.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Автор документа й факти; порожній список — передач немає.</returns>
+    public Task<EditAssignmentGateFacts> ReadFactsForGateAsync(long documentId, int userId, CancellationToken ct);
 
     /// <summary>Додає нову передачу в контекст (запис — <see cref="IUnitOfWork.SaveChangesAsync"/>).</summary>
     public void Add(EditAssignment assignment);

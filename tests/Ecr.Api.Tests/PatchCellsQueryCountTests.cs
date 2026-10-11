@@ -74,8 +74,12 @@ public sealed class PatchCellsQueryCountTests(SqlServerFixture sql)
     /// 24 — AN-36 / L6-02: спільний applock структури документа з читанням
     /// версії шаблону одним батчем (перенос версії не губить правку); свідомий
     /// +1, не дрейф.
+    /// 26 — EA-B «передача місяця»: +1 читання передач документа в рішенні про
+    /// доступ (`EditAssignmentFactsReader`, один запит на виклик) і +1 повторне
+    /// читання під блокуванням аркуша (`ReadFactsForGateAsync`, UPDLOCK).
+    /// Свідомі +2, не дрейф; документ без передач платить рівно їх.
     /// </remarks>
-    private const int MaxCommands = 24;
+    private const int MaxCommands = 26;
 
     private const string Password = "Api-Patch-Ratchet-2026!";
 
