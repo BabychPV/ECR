@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
+import { queryKeys } from '@/api/queryKeys';
 import { invalidateSlices } from '@/features/grid/sliceCache';
 import { formatMonthName, formatMonthYear } from '@/shared/format';
 import { t } from '@/shared/i18n';
@@ -59,11 +60,6 @@ export function fillEditAssignmentUrl(documentId: number, assignmentId: number):
   return `/api/v1/documents/${String(documentId)}/edit-assignments/${String(assignmentId)}/fill`;
 }
 
-/** Ключі кешу домену (рядкові літерали в компонентах заборонені - `queryKeys.ts`). */
-export const editAssignmentKeys = {
-  mine: (documentId: number) => ['edit-assignments', 'mine', documentId] as const,
-};
-
 /**
  * Власні передачі виконавця в документі.
  *
@@ -72,7 +68,7 @@ export const editAssignmentKeys = {
  */
 export function useMyEditAssignments(documentId: number): UseQueryResult<MyEditAssignmentList> {
   return useQuery({
-    queryKey: editAssignmentKeys.mine(documentId),
+    queryKey: queryKeys.editAssignments.mine(documentId),
     queryFn: () => apiFetch<MyEditAssignmentList>(myEditAssignmentsUrl(documentId)),
     // Стан змінює інша людина (власник повертає чи валідує): без перезапиту на фокус смуга брехала б до F5.
     refetchOnWindowFocus: true,
@@ -91,7 +87,7 @@ export function useFillEditAssignment(documentId: number, periodKey: number) {
     mutationFn: (assignmentId: number) =>
       apiFetch<unknown>(fillEditAssignmentUrl(documentId, assignmentId), { method: 'POST', body: JSON.stringify({}) }),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: editAssignmentKeys.mine(documentId) });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.editAssignments.mine() });
       await invalidateSlices(queryClient, { documentId, periodKey });
     },
   });
