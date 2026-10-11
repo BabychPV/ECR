@@ -88,7 +88,7 @@ $here = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvoca
 if (-not $DataDir) { $DataDir = Join-Path $here '..\..\docs\delivery\reference-data\land-contract' }
 . (Join-Path $here 'EcrApi.ps1')
 # `powershell -File ... -MigrateDocumentId 3,10` передає ОДИН рядок «3,10» (не масив) — розбираємо самі.
-$MigrateDocumentId = @(ConvertTo-DocumentIdList $MigrateDocumentId)
+$migrateIds = @(ConvertTo-DocumentIdList $MigrateDocumentId)
 
 # Підписи за аркушем «2. Contract» (EN - RU). Там, де в Excel немає російського підпису
 # (Processed on, Permit Number), RU не вигадується.
@@ -192,7 +192,7 @@ foreach ($d in $desired) {
 # --- міграція документів (функція; викликається і коли змін шапки немає) ---------------------
 function Invoke-DocumentMigration {
     param([int]$TargetVersionId)
-    foreach ($docId in @($MigrateDocumentId)) {
+    foreach ($docId in @($migrateIds)) {
         if (-not $docId) { continue }
         $path = "/api/v1/documents/$docId/migrate-version"
         # dry-run завжди синхронний.
@@ -230,7 +230,7 @@ function Invoke-DocumentMigration {
     }
 }
 
-$hasMigration = @($MigrateDocumentId | Where-Object { $_ }).Count -gt 0
+$hasMigration = @($migrateIds | Where-Object { $_ }).Count -gt 0
 
 if ($todo.Count -eq 0 -and $null -eq $draft) {
     Write-Host "Версія $($baseVersion.version) (id $($baseVersion.id)) уже відповідає маніфесту: 0 змін."

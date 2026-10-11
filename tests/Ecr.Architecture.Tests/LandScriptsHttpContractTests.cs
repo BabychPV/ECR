@@ -96,7 +96,7 @@ public sealed class LandScriptsHttpContractTests
         Assert.Contains("Invoke-DocumentMigration", zeroChanges.Groups["body"].Value);
         Assert.Contains("$hasMigration", zeroChanges.Groups["body"].Value);
         // @($null).Count == 1: порожній -MigrateDocumentId не має вважатися «є документи».
-        Assert.Matches(@"\$hasMigration = @\(\$MigrateDocumentId \| Where-Object", apply);
+        Assert.Matches(@"\$hasMigration = @\(\$migrateIds \| Where-Object", apply);
 
         Assert.Contains("Test-EcrTemplateUnsuitable $pub", apply);
         Assert.Contains("Test-EcrTemplateUnsuitable $cl", apply);
