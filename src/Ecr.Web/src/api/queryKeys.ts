@@ -220,6 +220,15 @@ export function sliceAddressOf(
   return { tableInstanceId, periodKey };
 }
 
+/** Домен `editAssignments`: передачі місяця третій стороні (EA-5). */
+const editAssignments = {
+  /** `GET /api/v1/documents/{id}/edit-assignments` - передачі ОДНОГО документа. */
+  ofDocument: (documentId: number) => ['editAssignments', 'document', documentId] as const,
+
+  /** `GET /api/v1/me/edit-assignments` - «Мої задачі» (усі ролі й документи). */
+  mine: () => ['editAssignments', 'mine'] as const,
+};
+
 /**
  * Єдина точка правди для ключів TanStack Query.
  *
@@ -235,4 +244,5 @@ export const queryKeys = {
   registries,
   methodologies,
   slices,
+  editAssignments,
 };

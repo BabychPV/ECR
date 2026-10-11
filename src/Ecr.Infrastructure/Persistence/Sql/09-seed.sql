@@ -7596,6 +7596,23 @@ USING (VALUES
     ,(N'err.ECR-TMPL-0422.lookupRegistryRequired', N'en', N'Column "{columnCode}" is of type Lookup and needs a registry: pick one.', 1)
     ,(N'err.ECR-TMPL-0422.headerFieldLookupRegistryRequired', N'en', N'Header field "{headerFieldCode}" is of type Lookup and needs a registry: pick one.', 1)
     -- COLL:rc20lookup ── кінець секції ──
+    -- EDA5d:validate-return ── EA-5d: діалоги «Валідувати» і «Повернути з коментарем»; ru/kz — порцією EDA5d:validate-return нижче ──
+    ,(N'editAssign.validate', N'en', N'Validate', 1)
+    ,(N'editAssign.validateTitle', N'en', N'Validate {slice}?', 1)
+    ,(N'editAssign.validateText', N'en', N'All executors have marked this month as filled.', 1)
+    ,(N'editAssign.validateConsequence', N'en', N'Executors stay locked out of editing. You can still return the month with a comment.', 1)
+    ,(N'editAssign.validated', N'en', N'{slice} validated.', 1)
+    ,(N'editAssign.return', N'en', N'Return…', 1)
+    ,(N'editAssign.returnTitle', N'en', N'Return {slice} for edits', 1)
+    ,(N'editAssign.returnReason', N'en', N'Comment', 1)
+    ,(N'editAssign.returnHint', N'en', N'Say what has to be corrected: the executors ({names}) see this text. Up to {max} characters.', 1)
+    ,(N'editAssign.returnConfirm', N'en', N'Return', 1)
+    ,(N'editAssign.returned', N'en', N'{slice} returned for edits.', 1)
+    ,(N'editAssign.blocked.alreadyValidated', N'en', N'This month is already validated.', 1)
+    ,(N'editAssign.blocked.noRecipients', N'en', N'No executors are assigned to this month.', 1)
+    ,(N'editAssign.blocked.notAllFilled', N'en', N'Not all executors have marked this month as filled yet.', 1)
+    ,(N'editAssign.blocked.nothingToReturn', N'en', N'There is nothing to return: no executor has filled this month.', 1)
+    -- EDA5d:validate-return ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -18942,6 +18959,44 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:quota-verify-validate ── кінець секції ──
+-- EDA5d:validate-return ── ru/kz: EA-5d: діалоги «Валідувати» і «Повернути з коментарем»; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'editAssign.validate', N'ru', N'Валидировать'),
+    (N'editAssign.validate', N'kz', N'Валидациялау'),
+    (N'editAssign.validateTitle', N'ru', N'Валидировать {slice}?'),
+    (N'editAssign.validateTitle', N'kz', N'{slice} валидациялау керек пе?'),
+    (N'editAssign.validateText', N'ru', N'Все исполнители отметили этот месяц как заполненный.'),
+    (N'editAssign.validateText', N'kz', N'Барлық орындаушылар бұл айды толтырылған деп белгіледі.'),
+    (N'editAssign.validateConsequence', N'ru', N'Исполнители остаются без права правки. Месяц можно будет вернуть с комментарием.'),
+    (N'editAssign.validateConsequence', N'kz', N'Орындаушылар өңдей алмай қалады. Айды кейін пікірмен қайтаруға болады.'),
+    (N'editAssign.validated', N'ru', N'{slice} валидирован.'),
+    (N'editAssign.validated', N'kz', N'{slice} валидацияланды.'),
+    (N'editAssign.return', N'ru', N'Вернуть…'),
+    (N'editAssign.return', N'kz', N'Қайтару…'),
+    (N'editAssign.returnTitle', N'ru', N'Вернуть {slice} на доработку'),
+    (N'editAssign.returnTitle', N'kz', N'{slice} айын пысықтауға қайтару'),
+    (N'editAssign.returnReason', N'ru', N'Комментарий'),
+    (N'editAssign.returnReason', N'kz', N'Пікір'),
+    (N'editAssign.returnHint', N'ru', N'Укажите, что нужно исправить: исполнители ({names}) увидят этот текст. Не более {max} символов.'),
+    (N'editAssign.returnHint', N'kz', N'Нені түзету керектігін көрсетіңіз: орындаушылар ({names}) осы мәтінді көреді. {max} таңбадан аспауы керек.'),
+    (N'editAssign.returnConfirm', N'ru', N'Вернуть'),
+    (N'editAssign.returnConfirm', N'kz', N'Қайтару'),
+    (N'editAssign.returned', N'ru', N'{slice} возвращён на доработку.'),
+    (N'editAssign.returned', N'kz', N'{slice} пысықтауға қайтарылды.'),
+    (N'editAssign.blocked.alreadyValidated', N'ru', N'Этот месяц уже валидирован.'),
+    (N'editAssign.blocked.alreadyValidated', N'kz', N'Бұл ай әлдеқашан валидацияланған.'),
+    (N'editAssign.blocked.noRecipients', N'ru', N'Для этого месяца не назначены исполнители.'),
+    (N'editAssign.blocked.noRecipients', N'kz', N'Бұл айға орындаушылар тағайындалмаған.'),
+    (N'editAssign.blocked.notAllFilled', N'ru', N'Не все исполнители ещё отметили месяц как заполненный.'),
+    (N'editAssign.blocked.notAllFilled', N'kz', N'Барлық орындаушылар айды әлі толтырылған деп белгілеген жоқ.'),
+    (N'editAssign.blocked.nothingToReturn', N'ru', N'Возвращать нечего: ни один исполнитель не заполнил этот месяц.'),
+    (N'editAssign.blocked.nothingToReturn', N'kz', N'Қайтаратын ештеңе жоқ: ешбір орындаушы айды толтырмаған.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- EDA5d:validate-return ── кінець секції ──
 
 -- COLL:rpt-version-duplicate ── ru/kz: повторний номер версії опису звіту (ECR-RPT-4091.version); власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)

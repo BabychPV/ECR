@@ -29,6 +29,7 @@ export function ReasonModal({
   confirmLabel,
   isPending,
   minLength,
+  maxLength,
   onConfirm,
   onClose,
 }: {
@@ -47,6 +48,16 @@ export function ReasonModal({
    * порожнім полем, що і є те `422`, заради якого діалог існує.
    */
   minLength?: number | undefined;
+
+  /**
+   * Скільки символів поле прийме щонайбільше (за замовчуванням - без межі).
+   *
+   * ⚠ Межа жорстка в самому полі, а не червоний текст після набору: сервер
+   * відмовить `422` (`reasonTooLong`), і читати це з відмови - той самий
+   * дефект, проти якого діалог існує. Рахується до `trim()`, тож
+   * надіслане (після `trim()`) межу не перевищить.
+   */
+  maxLength?: number | undefined;
   onConfirm: (reason: string) => void;
   onClose: () => void;
 }): JSX.Element {
@@ -74,6 +85,7 @@ export function ReasonModal({
         description={description}
         value={reason}
         onChange={(event) => setReason(event.currentTarget.value)}
+        maxLength={maxLength}
         minRows={3}
         autosize
         data-autofocus
