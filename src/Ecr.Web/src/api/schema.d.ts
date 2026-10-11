@@ -18677,6 +18677,13 @@ export interface components {
              */
             documentId: number;
             documentNameL10n?: null | components["schemas"]["LocalizedText"];
+            /**
+             * @description НФ-8.9.6 / D-247: рядок прочитано з архіву аудиту (`arc.AuditCellChange`, партиція перенесена
+             *     `arc.usp_ArchiveAudit`), а не з гарячої `aud.CellChange`. Лише позначка джерела: значення, автор і
+             *     межі читання ті самі, що в гарячого рядка.
+             * @default false
+             */
+            fromArchive: boolean;
             /** @description Зміна в `Grace` або після `Reopen` (D-70). */
             isLateEdit: boolean;
             /**
