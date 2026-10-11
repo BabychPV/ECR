@@ -7597,48 +7597,6 @@ USING (VALUES
     ,(N'err.ECR-REQ-0429.tooManyVerifications', N'en', N'Too many snapshot verification requests in a short time. Wait a moment and try again.', 1)
     ,(N'err.ECR-REQ-0429.tooManyValidations', N'en', N'Too many document validation requests in a short time. Wait a moment and try again.', 1)
     -- COLL:quota-verify-validate ── кінець секції ──
--- COLL:ea-api ── ru/kz: передача місяця виконавцям (EA-C); власна порція ──
-INSERT INTO #I18N ([Key], Lang, Val)
-SELECT v.[Key], v.Lang, v.Val
-  FROM (VALUES
-    (N'err.ECR-ACCS-0403.notEditAssignmentManager', N'ru', N'Передавать месяц исполнителям может только автор документа или менеджер проекта.'),
-    (N'err.ECR-ACCS-0403.notEditAssignmentManager', N'kz', N'Айды орындаушыларға тек құжат авторы немесе жоба менеджері бере алады.'),
-    (N'err.ECR-ACCS-0403.editAssignmentReadOnly', N'ru', N'Документ сейчас доступен только для чтения (архив или имитация).'),
-    (N'err.ECR-ACCS-0403.editAssignmentReadOnly', N'kz', N'Құжат қазір тек оқуға арналған (мұрағат немесе симуляция).'),
-    (N'err.ECR-DOC-0409.editAssignmentStale', N'ru', N'Передачу изменили после того, как вы её открыли. Перезагрузите и повторите действие.'),
-    (N'err.ECR-DOC-0409.editAssignmentStale', N'kz', N'Тапсырманы сіз ашқаннан кейін өзгертті. Қайта жүктеп, әрекетті қайталаңыз.'),
-    (N'err.ECR-DOC-0409.editAssignmentState', N'ru', N'Это действие невозможно в текущем состоянии передачи.'),
-    (N'err.ECR-DOC-0409.editAssignmentState', N'kz', N'Бұл әрекет тапсырманың ағымдағы күйінде мүмкін емес.'),
-    (N'err.ECR-REQ-0422.editAssignmentBaseVersion', N'ru', N'Запрос должен указывать версию передачи, с которой начато действие (baseVersion).'),
-    (N'err.ECR-REQ-0422.editAssignmentBaseVersion', N'kz', N'Сұраныста әрекет басталған тапсырма нұсқасы (baseVersion) көрсетілуі керек.'),
-    (N'err.ECR-REQ-0422.editAssignmentSliceInvalid', N'ru', N'Срез передачи задан некорректно.'),
-    (N'err.ECR-REQ-0422.editAssignmentSliceInvalid', N'kz', N'Тапсырма кесіндісі дұрыс емес.'),
-    (N'err.ECR-REQ-0422.editAssignmentNoteTooLong', N'ru', N'Инструкция длиннее 500 символов.'),
-    (N'err.ECR-REQ-0422.editAssignmentNoteTooLong', N'kz', N'Нұсқаулық 500 таңбадан ұзын.'),
-    (N'err.ECR-REQ-0422.editAssignmentRecipientInvalid', N'ru', N'Одного из исполнителей нельзя назначить на этот документ.'),
-    (N'err.ECR-REQ-0422.editAssignmentRecipientInvalid', N'kz', N'Орындаушылардың бірін бұл құжатқа тағайындау мүмкін емес.'),
-    (N'err.ECR-REQ-0422.editAssignmentTooManyRecipients', N'ru', N'Слишком много исполнителей в одной передаче.'),
-    (N'err.ECR-REQ-0422.editAssignmentTooManyRecipients', N'kz', N'Бір тапсырмада орындаушылар тым көп.'),
-    (N'err.ECR-REQ-0422.editAssignmentDelegationExceedsOwnRights', N'ru', N'Передавать можно только ячейки, которые вы сами можете редактировать. Сузьте срез до листов, на которые у вас есть право записи.'),
-    (N'err.ECR-REQ-0422.editAssignmentDelegationExceedsOwnRights', N'kz', N'Тек өзіңіз өңдей алатын ұяшықтарды беруге болады. Кесіндіні жазуға құқығыңыз бар парақтарға тарылтыңыз.'),
-    (N'err.ECR-REQ-0422.editAssignmentUnknownSlice', N'ru', N'В документе нет такого среза.'),
-    (N'err.ECR-REQ-0422.editAssignmentUnknownSlice', N'kz', N'Құжатта мұндай кесінді жоқ.'),
-    (N'err.ECR-REQ-0422.editAssignmentTooManyAssignments', N'ru', N'В документе слишком много передач.'),
-    (N'err.ECR-REQ-0422.editAssignmentTooManyAssignments', N'kz', N'Құжатта тапсырмалар тым көп.'),
-    (N'err.ECR-REQ-0422.editAssignmentNotAllFilled', N'ru', N'Валидация возможна только после того, как все исполнители заполнили срез.'),
-    (N'err.ECR-REQ-0422.editAssignmentNotAllFilled', N'kz', N'Растау барлық орындаушылар кесіндіні толтырғаннан кейін ғана мүмкін.'),
-    (N'err.ECR-REQ-0422.editAssignmentReasonRequired', N'ru', N'Укажите причину возврата.'),
-    (N'err.ECR-REQ-0422.editAssignmentReasonRequired', N'kz', N'Қайтару себебін көрсетіңіз.'),
-    (N'err.ECR-REQ-0422.editAssignmentReasonTooLong', N'ru', N'Причина длиннее 500 символов.'),
-    (N'err.ECR-REQ-0422.editAssignmentReasonTooLong', N'kz', N'Себеп 500 таңбадан ұзын.'),
-    (N'err.ECR-REQ-0422.editAssignmentQueryTooShort', N'ru', N'Для поиска введите не менее двух символов.'),
-    (N'err.ECR-REQ-0422.editAssignmentQueryTooShort', N'kz', N'Іздеу үшін кемінде екі таңба енгізіңіз.'),
-    (N'err.ECR-REQ-0422.editAssignmentRoleInvalid', N'ru', N'Неизвестная роль фильтра.'),
-    (N'err.ECR-REQ-0422.editAssignmentRoleInvalid', N'kz', N'Сүзгі рөлі белгісіз.')
-       ) AS v ([Key], Lang, Val)
-OPTION (RECOMPILE);
-GO
--- COLL:ea-api ── кінець секції ──
     -- COLL:rc16mig ── D-2 RC15B: перенос версії шаблону фоновою задачею (прогрес стадій, підсумок, друга людина вже запустила перенос); ru/kz — порцією COLL:rc16mig нижче ──
     ,(N'jobs.kind.migrateDocumentVersion', N'en', N'Template version migration', 1)
     ,(N'jobs.migrateStarted', N'en', N'Migration started', 1)
@@ -19651,6 +19609,48 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:rc20rule ── кінець секції ──
+-- COLL:ea-api ── ru/kz: передача місяця виконавцям (EA-C); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-ACCS-0403.notEditAssignmentManager', N'ru', N'Передавать месяц исполнителям может только автор документа или менеджер проекта.'),
+    (N'err.ECR-ACCS-0403.notEditAssignmentManager', N'kz', N'Айды орындаушыларға тек құжат авторы немесе жоба менеджері бере алады.'),
+    (N'err.ECR-ACCS-0403.editAssignmentReadOnly', N'ru', N'Документ сейчас доступен только для чтения (архив или имитация).'),
+    (N'err.ECR-ACCS-0403.editAssignmentReadOnly', N'kz', N'Құжат қазір тек оқуға арналған (мұрағат немесе симуляция).'),
+    (N'err.ECR-DOC-0409.editAssignmentStale', N'ru', N'Передачу изменили после того, как вы её открыли. Перезагрузите и повторите действие.'),
+    (N'err.ECR-DOC-0409.editAssignmentStale', N'kz', N'Тапсырманы сіз ашқаннан кейін өзгертті. Қайта жүктеп, әрекетті қайталаңыз.'),
+    (N'err.ECR-DOC-0409.editAssignmentState', N'ru', N'Это действие невозможно в текущем состоянии передачи.'),
+    (N'err.ECR-DOC-0409.editAssignmentState', N'kz', N'Бұл әрекет тапсырманың ағымдағы күйінде мүмкін емес.'),
+    (N'err.ECR-REQ-0422.editAssignmentBaseVersion', N'ru', N'Запрос должен указывать версию передачи, с которой начато действие (baseVersion).'),
+    (N'err.ECR-REQ-0422.editAssignmentBaseVersion', N'kz', N'Сұраныста әрекет басталған тапсырма нұсқасы (baseVersion) көрсетілуі керек.'),
+    (N'err.ECR-REQ-0422.editAssignmentSliceInvalid', N'ru', N'Срез передачи задан некорректно.'),
+    (N'err.ECR-REQ-0422.editAssignmentSliceInvalid', N'kz', N'Тапсырма кесіндісі дұрыс емес.'),
+    (N'err.ECR-REQ-0422.editAssignmentNoteTooLong', N'ru', N'Инструкция длиннее 500 символов.'),
+    (N'err.ECR-REQ-0422.editAssignmentNoteTooLong', N'kz', N'Нұсқаулық 500 таңбадан ұзын.'),
+    (N'err.ECR-REQ-0422.editAssignmentRecipientInvalid', N'ru', N'Одного из исполнителей нельзя назначить на этот документ.'),
+    (N'err.ECR-REQ-0422.editAssignmentRecipientInvalid', N'kz', N'Орындаушылардың бірін бұл құжатқа тағайындау мүмкін емес.'),
+    (N'err.ECR-REQ-0422.editAssignmentTooManyRecipients', N'ru', N'Слишком много исполнителей в одной передаче.'),
+    (N'err.ECR-REQ-0422.editAssignmentTooManyRecipients', N'kz', N'Бір тапсырмада орындаушылар тым көп.'),
+    (N'err.ECR-REQ-0422.editAssignmentDelegationExceedsOwnRights', N'ru', N'Передавать можно только ячейки, которые вы сами можете редактировать. Сузьте срез до листов, на которые у вас есть право записи.'),
+    (N'err.ECR-REQ-0422.editAssignmentDelegationExceedsOwnRights', N'kz', N'Тек өзіңіз өңдей алатын ұяшықтарды беруге болады. Кесіндіні жазуға құқығыңыз бар парақтарға тарылтыңыз.'),
+    (N'err.ECR-REQ-0422.editAssignmentUnknownSlice', N'ru', N'В документе нет такого среза.'),
+    (N'err.ECR-REQ-0422.editAssignmentUnknownSlice', N'kz', N'Құжатта мұндай кесінді жоқ.'),
+    (N'err.ECR-REQ-0422.editAssignmentTooManyAssignments', N'ru', N'В документе слишком много передач.'),
+    (N'err.ECR-REQ-0422.editAssignmentTooManyAssignments', N'kz', N'Құжатта тапсырмалар тым көп.'),
+    (N'err.ECR-REQ-0422.editAssignmentNotAllFilled', N'ru', N'Валидация возможна только после того, как все исполнители заполнили срез.'),
+    (N'err.ECR-REQ-0422.editAssignmentNotAllFilled', N'kz', N'Растау барлық орындаушылар кесіндіні толтырғаннан кейін ғана мүмкін.'),
+    (N'err.ECR-REQ-0422.editAssignmentReasonRequired', N'ru', N'Укажите причину возврата.'),
+    (N'err.ECR-REQ-0422.editAssignmentReasonRequired', N'kz', N'Қайтару себебін көрсетіңіз.'),
+    (N'err.ECR-REQ-0422.editAssignmentReasonTooLong', N'ru', N'Причина длиннее 500 символов.'),
+    (N'err.ECR-REQ-0422.editAssignmentReasonTooLong', N'kz', N'Себеп 500 таңбадан ұзын.'),
+    (N'err.ECR-REQ-0422.editAssignmentQueryTooShort', N'ru', N'Для поиска введите не менее двух символов.'),
+    (N'err.ECR-REQ-0422.editAssignmentQueryTooShort', N'kz', N'Іздеу үшін кемінде екі таңба енгізіңіз.'),
+    (N'err.ECR-REQ-0422.editAssignmentRoleInvalid', N'ru', N'Неизвестная роль фильтра.'),
+    (N'err.ECR-REQ-0422.editAssignmentRoleInvalid', N'kz', N'Сүзгі рөлі белгісіз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:ea-api ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t
