@@ -70,6 +70,13 @@ export interface RestoreSlice {
   readonly edits: readonly PendingEdit[];
 }
 
+/** Підставляє в правки зрізу останні відомі версії рядків (див. `withKnownVersions`). */
+export type RefreshVersions = (
+  tableInstanceId: number,
+  periodKey: number,
+  edits: readonly PendingEdit[],
+) => readonly PendingEdit[];
+
 /** Що втрачено. */
 export interface LostEdits {
   readonly documentId: number;
@@ -105,7 +112,7 @@ function storage(): Storage | null {
  * відкидається: половина таблиці краще за жодної, а що саме не вмістилося,
  * видно з різниці `count` і `restorableCount`.
  */
-function capSlices(slices: ReturnType<typeof pendingSlices>): RestoreSlice[] {
+function capSlices(slices: readonly RestoreSlice[]): RestoreSlice[] {
   const capped: RestoreSlice[] = [];
   let left = MaxRestoredEdits;
 
@@ -132,12 +139,31 @@ function capSlices(slices: ReturnType<typeof pendingSlices>): RestoreSlice[] {
  * без власника показався б будь-кому, а тепер ще й дав би застосувати чужі
  * числа.
  */
-export function recordLostEdits(ownerUserId: number | undefined, from: string): void {
+export function recordLostEdits(
+  ownerUserId: number | undefined,
+  from: string,
+  refreshVersions?: RefreshVersions,
+): void {
   const documentId = currentDocumentId();
   const count = pendingCount();
   if (ownerUserId === undefined || documentId === null || count === 0) return;
 
-  const value: LostEdits = { documentId, count, from, slices: capSlices(pendingSlices()) };
+  // ⛔ G1-08: `baseVersion` у сховищі — версія на мить ВВЕДЕННЯ (`captureEdit`); її
+  // підтягує до останньої відомої лише надсилання (`withKnownVersions`), а на `401`
+  // надсилання вже нема. Без цього правка, що стояла поверх ВЛАСНОГО успішного
+  // збереження того ж рядка (кеш уже піднявся до `v2`, правка досі `v1`), після входу
+  // виглядала б «чужою зміною рядка» — `planRestore` відкидав би власні правки
+  // людини як конфлікт. Тому у слід кладемо версії, з якими їх надіслав би
+  // автозбереження в цю саму мить.
+  const slices =
+    refreshVersions === undefined
+      ? pendingSlices()
+      : pendingSlices().map((slice) => ({
+          ...slice,
+          edits: refreshVersions(slice.tableInstanceId, slice.periodKey, slice.edits),
+        }));
+
+  const value: LostEdits = { documentId, count, from, slices: capSlices(slices) };
   try {
     storage()?.setItem(lostEditsKey(ownerUserId), JSON.stringify(value));
   } catch {

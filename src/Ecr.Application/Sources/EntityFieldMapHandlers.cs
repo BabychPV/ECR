@@ -316,6 +316,15 @@ public sealed class CreateEntityFieldMapHandler(
 
         if (sourceUnit is null && targetUnit is null)
         {
+            // ⛔ Z2-04: інтеграл без жодної одиниці нічне перенесення відхиляє на кожному періоді
+            // (`integralUnitsUndeclared`) - відмова тут, а не після першого прогону.
+            if (command.Aggregation == AggregationKind.TimeIntegral)
+            {
+                await FieldMapUnitCompatibility
+                    .EnsureAsync(units, command.SourceField, null, null, command.Aggregation, ct)
+                    .ConfigureAwait(false);
+            }
+
             return;
         }
 

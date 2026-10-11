@@ -140,6 +140,69 @@ public sealed class ImportDiffBuilderRoundTripTests
         Assert.Equal(ImportMessageKeys.Calculated, rejection.MessageKey);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "Y5-08")]
+    public void Y5_08_ціле_понад_int32_незміненої_книги_не_дає_фантомної_зміни_а_справжня_правка_лишається()
+    {
+        // ⛔ `Int` у сховищі - `ValueNumeric decimal(34,16)`, межа int32 там не діє (5 000 000 000: літри, тенге). Доти
+        // таке число читалося РЯДКОМ, а `Same` порівнює для Int лише число з числом: фантом
+        // `5000000000 -> "5000000000"` на кожному імпорті. Мутація: повернути `whole is >= int.MinValue and <= int.MaxValue`
+        // у умову читання - перший `Assert.Empty` червоний.
+        var (table, column) = Table(CellDataType.Int);
+
+        using var workbook = new XLWorkbook();
+        var worksheet = workbook.Worksheets.Add("S0");
+        worksheet.Cell(2, 1).Value = 5_000_000_000d;
+
+        var unchanged = Build(worksheet, table, column, new CellValueData { ValueNumeric = 5_000_000_000m });
+
+        Assert.Empty(unchanged.Changes);
+        Assert.Empty(unchanged.Rejected);
+
+        worksheet.Cell(2, 1).Value = 5_000_000_001d;
+
+        var change = Assert.Single(
+            Build(worksheet, table, column, new CellValueData { ValueNumeric = 5_000_000_000m }).Changes);
+        Assert.Equal(5_000_000_001m, change.NewValue);
+    }
+
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "Z3-05")]
+    [InlineData("ru-RU")]
+    [InlineData("en-US")]
+    [InlineData("kk-KZ")]
+    public void Z3_05_дата_в_текстовій_колонці_читається_інваріантно_а_не_культурою_сервера(string culture)
+    {
+        // ⛔ Excel перетворює набране в текстовій колонці `1.04.2024` на DateTime, а `GetString()` форматує його
+        // культурою процесу: `01.04.2024 00:00:00` (ru/kk), `4/1/2024 12:00:00 AM` (en). У базу йшов рядок, залежний від
+        // машини API. Мутація: прибрати гілку `XLDataType.DateTime` - рядок залежить від культури, тест червоний.
+        var (table, column) = Table(CellDataType.String);
+
+        using var workbook = new XLWorkbook();
+        var worksheet = workbook.Worksheets.Add("S0");
+        worksheet.Cell(2, 1).Value = new DateTime(2024, 4, 1);
+        worksheet.Cell(3, 1).Value = new DateTime(2024, 4, 1, 10, 30, 15);
+
+        var previous = System.Globalization.CultureInfo.CurrentCulture;
+        try
+        {
+            System.Globalization.CultureInfo.CurrentCulture = System.Globalization.CultureInfo.GetCultureInfo(culture);
+
+            var day = Assert.Single(Build(worksheet, table, column, new CellValueData { ValueString = "x" }).Changes);
+            Assert.Equal("2024-04-01", day.NewValue);
+
+            var withTime = Assert.Single(
+                BuildAt(worksheet, 3, table, column, new CellValueData { ValueString = "x" }).Changes);
+            Assert.Equal("2024-04-01 10:30:15", withTime.NewValue);
+        }
+        finally
+        {
+            System.Globalization.CultureInfo.CurrentCulture = previous;
+        }
+    }
+
     private static (TableDef Table, ColumnDef Column) Table(CellDataType type)
     {
         var builder = new TemplateBuilder { TemplateVersionId = 1 };
@@ -152,12 +215,16 @@ public sealed class ImportDiffBuilderRoundTripTests
     }
 
     private static TableDiff Build(IXLWorksheet worksheet, TableDef table, ColumnDef column, CellValueData existing)
+        => BuildAt(worksheet, 2, table, column, existing);
+
+    private static TableDiff BuildAt(
+        IXLWorksheet worksheet, int rowNumber, TableDef table, ColumnDef column, CellValueData existing)
         => new ImportDiffBuilder().Build(
             worksheet,
             new ExcelTableBlock(
                 TableInstance, table.Id, table.Code, "S0", HeaderRow: 1,
                 Columns: [new ExcelColumnRef(column.Id, column.Code, 1, false, null)],
-                Rows: [new ExcelRowRef(RowKey, 2)]),
+                Rows: [new ExcelRowRef(RowKey, rowNumber)]),
             PeriodKeyValue,
             table,
             new Dictionary<CellAddress, EditDecision>(),

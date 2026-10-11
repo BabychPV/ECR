@@ -348,6 +348,23 @@ public sealed class UnitOfWork(
                 });
         }
 
+        // ⛔ A1-05. `PUT /notifications/rules` без `If-Match`: дві паралельні заміни матриці читають «клітинки немає»
+        // обидві й обидві додають правило пари «подія + канал»; другу відбиває лише `UQ_NotificationRule_EventChannel` —
+        // голий 500 на звичайну гонку. Конфлікт стану (409): повторний PUT уже перепише клітинку, що з'явилась.
+        // ⚠ Код і ключ ЗАГАЛЬНІ («дані змінилися після того, як ви їх прочитали») — ті самі, що дає
+        // `DbUpdateConcurrencyException` вище; окремого коду каталог для матриці правил не має, а вигаданий
+        // потребував би рядка в §7 контракту.
+        if (SqlConflict.ViolatesIndex(ex, "UQ_NotificationRule_EventChannel"))
+        {
+            return new ConcurrencyConflictException(
+                "ECR-CELL-0409",
+                "Матрицю правил сповіщень щойно змінив хтось інший: перечитайте її й збережіть ще раз.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CELL-0409.concurrentChange",
+                });
+        }
+
         foreach (var entry in ex.Entries)
         {
             switch (entry.Entity)

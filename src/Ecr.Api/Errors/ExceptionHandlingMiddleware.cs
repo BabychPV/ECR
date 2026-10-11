@@ -726,6 +726,19 @@ public sealed partial class ExceptionHandlingMiddleware(
         DomainException e =>
             (StatusCodes.Status422UnprocessableEntity, e.ErrorCode, e.Message, e.Details),
 
+        // ⛔ E1-06 (X5-03): `BadHttpRequestException` Kestrel — вина КЛІЄНТА, а не сервера: тіло понад межу
+        // (`MaxRequestBodySize`, `[RequestSizeLimit]`) дає 413, обірване/некоректне тіло чи заголовки — 400.
+        // Без арма це був 500 `ECR-SYS-0500` з Error у журналі на звичайний запит завеликого файлу.
+        // ⚠ Код — наявний `ECR-REQ-0422` (як `InvalidModelStateResponseFactory` у `Program.cs`), статус — від
+        // самого винятку; текст винятку клієнтові не їде.
+        Microsoft.AspNetCore.Http.BadHttpRequestException e =>
+            e.StatusCode == StatusCodes.Status413PayloadTooLarge
+                ? (StatusCodes.Status413PayloadTooLarge, ErrorCodes.RequestInvalid,
+                   "Тіло запиту перевищує дозволений розмір.", RequestTooLargeDetails)
+                : (StatusCodes.Status400BadRequest, ErrorCodes.RequestInvalid,
+                   "Запит не відповідає очікуваній формі: перевірте типи полів і синтаксис JSON.",
+                   MalformedRequestDetails),
+
         // ⛔ R5-E1/E1-04: тимчасовий збій БД — не «внутрішня помилка», а «спробуйте пізніше». Вичерпані
         // повтори `EnableRetryOnFailure` (deadlock 1205), тайм-аут команди (-2) і обрив/недоступність
         // з'єднання раніше йшли у fallback 500 `ECR-SYS-0500`. Код — той самий `ECR-SYS-0503`
@@ -782,14 +795,19 @@ public sealed partial class ExceptionHandlingMiddleware(
     private static readonly System.Collections.Frozen.FrozenSet<int> TransientSqlNumbers = System.Collections.Frozen.FrozenSet.ToFrozenSet(new[]
     {
         -2,     // тайм-аут команди/з'єднання (клієнт)
+        2,      // сервер не знайдено чи недоступний (E1-05)
+        40,     // не вдалося відкрити з'єднання з SQL Server (E1-05)
+        53,     // мережевий шлях (named pipes) не знайдено (E1-05)
         64,     // мережеве ім'я більше недоступне
         233,    // з'єднання встановлено, але розірвано під час входу
+        121,    // тайм-аут семафора: розрив мережі під час запиту (E1-05)
         1205,   // deadlock victim
         1222,   // перевищено тайм-аут очікування блокування
         4060,   // база недоступна під час перемикання
         10053,  // з'єднання перервано програмою на хості
         10054,  // з'єднання розірвано віддаленим хостом
         10060,  // тайм-аут мережевого з'єднання
+        10061,  // з'єднання відхилено: SQL Server не слухає порт (E1-05)
         10928,  // ліміт ресурсів
         10929,  // ліміт ресурсів
         40197,  // помилка сервісу під час обробки
@@ -813,6 +831,12 @@ public sealed partial class ExceptionHandlingMiddleware(
         {
             switch (current)
             {
+                // ⛔ E1-05: вичерпаний пул з'єднань SqlClient кидає НЕ `SqlException`, а `InvalidOperationException`
+                // («Timeout expired … prior to obtaining a connection from the pool»): запит не дістав з'єднання, бо
+                // всі зайняті, — це «спробуйте пізніше», а не внутрішня помилка. Розпізнається за повідомленням
+                // SqlClient (іншого ознаки в нього немає); інші `InvalidOperationException` лишаються 500.
+                case InvalidOperationException pool when IsPoolExhausted(pool):
+                    return true;
                 case Microsoft.EntityFrameworkCore.Storage.RetryLimitExceededException:
                     return true;
                 case Microsoft.Data.SqlClient.SqlException sql
@@ -824,6 +848,18 @@ public sealed partial class ExceptionHandlingMiddleware(
 
         return false;
     }
+
+    /// <summary>Чи це відмова SqlClient «пул з'єднань вичерпано» (повідомлення містить фразу про отримання з'єднання з пулу).</summary>
+    private static bool IsPoolExhausted(InvalidOperationException exception)
+        => exception.Message.Contains("obtaining a connection from the pool", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Подробиця 413: ключ каталогу <c>err.ECR-REQ-0422.requestTooLarge</c>.</summary>
+    private static readonly IReadOnlyDictionary<string, object?> RequestTooLargeDetails =
+        new Dictionary<string, object?> { [MessageKeyDetailName] = "err.ECR-REQ-0422.requestTooLarge" };
+
+    /// <summary>Подробиця 400 некоректного запиту: той самий ключ, що в `InvalidModelStateResponseFactory`.</summary>
+    private static readonly IReadOnlyDictionary<string, object?> MalformedRequestDetails =
+        new Dictionary<string, object?> { [MessageKeyDetailName] = "err.ECR-REQ-0422.malformedRequest" };
 
     /// <summary>Подробиця 503 тимчасового збою БД: лише ключ каталогу (з власним <c>.title</c>).</summary>
     private static readonly IReadOnlyDictionary<string, object?> DatabaseBusyDetails =

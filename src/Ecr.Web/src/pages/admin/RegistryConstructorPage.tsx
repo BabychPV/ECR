@@ -230,7 +230,11 @@ export function RegistryConstructorPage(): JSX.Element {
     setReason(saved.reason);
   }, [definition.data, draft.data, draft.isPending]);
 
-  const mayEdit = can(session.data, 'Registry.EditDefinition');
+  // ⛔ L9-18: під симуляцією сервер відхиляє КОЖЕН не-GET (`ECR-SIM-0403`), а `can()` бачить права ЦІЛІ — форма
+  // лишалась редагованою і кожне збереження падало `403`. Вкладка «Використання» — читання (`GET …/usage`),
+  // тож лишається за самим правом.
+  const mayView = can(session.data, 'Registry.EditDefinition');
+  const mayEdit = mayView && session.data?.isSimulation !== true;
   const ready =
     rules.every(isComplete) && newFields.every(isFieldComplete) && reason.trim().length > 0;
 
@@ -313,7 +317,7 @@ export function RegistryConstructorPage(): JSX.Element {
                 {/* ⚠ Лише з правом `Registry.EditDefinition` — те саме право, що
                     на сервері (`GetRegistryUsageHandler`): вкладка без права
                     вела б у відому відмову. */}
-                {mayEdit && <Tabs.Tab value="usage">{t('registries.tabUsage')}</Tabs.Tab>}
+                {mayView && <Tabs.Tab value="usage">{t('registries.tabUsage')}</Tabs.Tab>}
               </Tabs.List>
 
               <Tabs.Panel value="fields" pt="sm">
@@ -402,7 +406,7 @@ export function RegistryConstructorPage(): JSX.Element {
                 )}
               </Tabs.Panel>
 
-              {mayEdit && (
+              {mayView && (
                 <Tabs.Panel value="usage" pt="sm">
                   <RegistryUsagePanel code={loaded.code} />
                 </Tabs.Panel>

@@ -39,6 +39,9 @@ public sealed class CalculationTrigger(
     IWorkflowStore workflow) : ICalculationTrigger
 {
     /// <inheritdoc />
+    public bool EnlistsInCallerTransaction => jobs.EnlistsInCallerTransaction;
+
+    /// <inheritdoc />
     public async Task<string?> RequestAsync(long documentId, PeriodKey periodKey, CancellationToken ct)
     {
         var state = await periods.FindPeriodStateAsync(documentId, periodKey.Value, ct).ConfigureAwait(false);

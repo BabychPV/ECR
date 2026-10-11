@@ -610,24 +610,43 @@ public sealed class CreateCollectionScheduleHandler(
                 .RequireValidAsync(store, selfId: null, entity.DataSourceId, dependsOn, ct).ConfigureAwait(false);
         }
 
-        var schedule = new CollectionSchedule(sourceEntityId, text);
-        schedule.SetDependency(dependsOnScheduleId);
-
-        if (lookbackDays is { } days)
+        CollectionSchedule NewSchedule()
         {
-            schedule.SetLookback(days);
+            var created = new CollectionSchedule(sourceEntityId, text);
+            created.SetDependency(dependsOnScheduleId);
+
+            if (lookbackDays is { } days)
+            {
+                created.SetLookback(days);
+            }
+
+            if (!isEnabled)
+            {
+                created.Disable();
+            }
+
+            return created;
         }
 
-        if (!isEnabled)
-        {
-            schedule.Disable();
-        }
-
-        store.Add(schedule);
+        var schedule = NewSchedule();
+        var attempt = 0;
 
         // ФВ-12.10: новий розклад — у журналі структурних змін, в одній транзакції зі збереженням.
         await CollectionScheduleDependencyRules.RunMappingConflictAsync(store, 0, () => uow.ExecuteInTransactionAsync(async innerCt =>
         {
+            // ⛔ AN-101 (a) (аудит R11): сутність додається ВСЕРЕДИНІ замикання і свіжим екземпляром на кожну спробу.
+            // `ChangeTrackerCheckpoint` не відновлює `Added`, а `store.Add` ДО транзакції давав таке: транзієнтний збій
+            // ПІСЛЯ `SaveChanges` (журнал, коміт) відкочував транзакцію, а трекер уже вважав розклад збереженим
+            // (`Unchanged`, `Id` відкоченої identity) — повтор нічого не вставляв, журнал писав про неіснуючий розклад,
+            // відповідь була 201. Той самий прийом, що `CreateDataSourceHandler` (ent4 P2-2); попередній екземпляр
+            // повтор відчіплює сам (створений після початку транзакції).
+            if (attempt++ > 0)
+            {
+                schedule = NewSchedule();
+            }
+
+            store.Add(schedule);
+
             if (dependsOnScheduleId is { } locked)
             {
                 // S-D1: залежність могли видалити чи переключити між ранньою перевіркою і збереженням.

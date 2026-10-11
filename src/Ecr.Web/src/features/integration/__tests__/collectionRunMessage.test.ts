@@ -141,3 +141,27 @@ describe('collectionRunErrorText', () => {
     expect(collectionRunErrorText('{"x":1}')).toBe('{"x":1}');
   });
 });
+
+/**
+ * AN-95: подія синку довідника несе ключ каталогу в `Details` рядком `name=value; …`, а не конвертом.
+ *
+ * ⛔ Мутаційний доказ: прибери `keyedDetailsText` з `collectionRunErrorText` — повертається сирий рядок з
+ * `reason=codeModeManual`, і перший тест червоніє.
+ */
+describe('collectionRunErrorText: деталі події синку з messageKey (AN-95)', () => {
+  const raw =
+    'element=F-101; error=ECR-REG-0422; messageKey=err.ECR-REG-0422.codeModeManualNoAutoCreate; reason=codeModeManual; key=element=F-101; entry=; field=';
+
+  it('ключ резолвиться через каталог, елемент лишається названим, службові частини зникають', () => {
+    // Каталог у тесті порожній: `t()` дає `⟦ключ (підстановки)⟧` — по ньому видно, що ключ резолвився.
+    expect(collectionRunErrorText(raw)).toBe(
+      '⟦err.ECR-REG-0422.codeModeManualNoAutoCreate (element=F-101)⟧ (element=F-101)',
+    );
+  });
+
+  it('невідомий ключ — сирий рядок, а не вгаданий переклад', () => {
+    const unknown = 'element=F-1; messageKey=err.ECR-XXX-0000.nobodyKnowsThis; key=element=F-1';
+
+    expect(collectionRunErrorText(unknown)).toBe(unknown);
+  });
+});

@@ -12,7 +12,11 @@ namespace Ecr.Domain.ValueObjects;
 public readonly partial record struct EcrCode
 {
     /// <summary>Регулярний вираз допустимого коду.</summary>
-    public const string Pattern = "^[A-Za-z][A-Za-z0-9_]{0,63}$";
+    /// <remarks>
+    /// ⛔ S1-06: кінець — <c>\z</c>, а не <c>$</c>. У .NET <c>$</c> збігається і ПЕРЕД кінцевим переведенням рядка,
+    /// тож код «ABC» + LF проходив перевірку й потрапляв у лексер виразів, що ділить текст за переносами.
+    /// </remarks>
+    public const string Pattern = "^[A-Za-z][A-Za-z0-9_]{0,63}\\z";
 
     [GeneratedRegex(Pattern, RegexOptions.CultureInvariant)]
     private static partial Regex Validator();

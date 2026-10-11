@@ -116,6 +116,10 @@ export async function invalidateSlices(client: QueryClient, scope: SliceScope): 
   // коли їх знову покажуть (`DocumentGrid`, ефект на `hidden`).
   await client.invalidateQueries({ predicate: (query) => inScope(query) && !isHiddenSlice(query) });
 
+  // X2-05: прихований зріз, чию інвалідацію ПРОПУЩЕНО (перерахунок, імпорт) — єдиний, що
+  // його треба перечитати при показі; власне збереження теж лишає `isInvalidated`.
+  recordMissedWhileHidden(client);
+
   await client.invalidateQueries({
     predicate: (query) => isSliceKey(query.queryKey) && (!inScope(query) || isHiddenSlice(query)),
     refetchType: 'none',
@@ -137,6 +141,29 @@ const hiddenSlices = new Map<string, number>();
 
 function sliceId(tableInstanceId: number, periodKey: number): string {
   return `${String(tableInstanceId)}:${String(periodKey)}`;
+}
+
+/**
+ * Приховані зрізи, яких торкнулася ЧУЖА інвалідація (`invalidateSlices`, `markSlicesStale`) — і
+ * які ще не дочитані при показі (`X2-05`).
+ *
+ * ⛔ `isInvalidated` зріз отримує й після КОЖНОГО власного збереження (`applyPatchLocally`
+ * позначає його застарілим без запиту), тож за самою позначкою сітка, що знову стала видимою,
+ * перечитувала найважчий `GET` системи, хоча нічого не пропустила. Пропущена інвалідація — лише
+ * та, що пройшла тут, поки сітка була прихована.
+ */
+const missedWhileHidden = new Set<string>();
+
+function recordMissedWhileHidden(client: QueryClient): void {
+  for (const query of client.getQueryCache().findAll({ predicate: (candidate) => isHiddenSlice(candidate) })) {
+    const address = sliceAddressOf(query.queryKey);
+    if (address !== null) missedWhileHidden.add(sliceId(address.tableInstanceId, address.periodKey));
+  }
+}
+
+/** Чи пропущено інвалідацію зрізу, поки сітку було приховано; читання знімає позначку. */
+export function takeMissedInvalidation(tableInstanceId: number, periodKey: number): boolean {
+  return missedWhileHidden.delete(sliceId(tableInstanceId, periodKey));
 }
 
 function isHiddenSlice(query: Query): boolean {
@@ -177,5 +204,6 @@ export function markSliceHidden(tableInstanceId: number, periodKey: number): () 
  * змонтують потім, прочитають свіже самі.
  */
 export async function markSlicesStale(client: QueryClient): Promise<void> {
+  recordMissedWhileHidden(client);
   await client.invalidateQueries({ queryKey: queryKeys.slices.all(), refetchType: 'none' });
 }

@@ -198,10 +198,9 @@ public sealed class SnapshotWorkbookWriter : ISnapshotWorkbookWriter
     /// зведеної таблиці. Той, хто її відкрив, дізнається про це не одразу.
     ///
     /// ⚠ <b>Excel тримає 15 значущих цифр.</b> Число зберігається як
-    /// <c>double</c> (це формат книги, а не наш вибір), тож <c>decimal(38,16)</c>
-    /// бази в книгу повністю не поміщається: значення з 16+ значущими цифрами
-    /// округлиться. Для звірки байт у байт лишається <c>GET …/rows</c>, де
-    /// число їде десятковим без утрат.
+    /// <c>double</c> (це формат книги), тож значення, яке <c>double</c> не
+    /// повертає без втрат (понад 15 значущих цифр), пишеться ТЕКСТОМ — D-373,
+    /// те саме правило, що в експорті довідника. ≤ 15 цифр лишаються числом.
     /// </remarks>
     private static void Write(IXLCell cell, object? value, string kind)
     {
@@ -212,8 +211,17 @@ public sealed class SnapshotWorkbookWriter : ISnapshotWorkbookWriter
 
         switch (kind)
         {
-            case ReportSourceColumns.Number when AsNumber(value) is { } number:
-                cell.Value = number;
+            case ReportSourceColumns.Number
+                when AsNumber(value) is { } number && RegistryWorkbookWriter.IsExactInDouble(number):
+                cell.Value = (double)number;
+                return;
+
+            case ReportSourceColumns.Number when AsNumber(value) is { } wide:
+                // D-373 (X7-06): понад 15 значущих цифр — ТЕКСТОМ, точні цифри
+                // збереженого decimal без хвоста нулів; те саме правило, що в
+                // експорті довідника (`RegistryWorkbookWriter.IsExactInDouble`).
+                cell.Value = (wide / 1.0000000000000000000000000000m)
+                    .ToString(CultureInfo.InvariantCulture);
                 return;
 
             case ReportSourceColumns.Date when AsDate(value) is { } date:

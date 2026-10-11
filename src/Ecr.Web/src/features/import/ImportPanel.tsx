@@ -16,6 +16,7 @@ import { denyText } from '@/features/grid/permissions';
 import { useOpenerFocusReturn } from '@/features/projects/useOpenerFocusReturn';
 import { invalidateSlices } from '@/features/grid/sliceCache';
 import { followImportJob } from './followImportJob';
+import { withSheetBusyRetry } from './applyBusyRetry';
 import { calculationResults } from '@/features/methodologies/api';
 import { RecalculateHintId, calculationResultsKey } from '@/features/methodologies/calculationResultsKey';
 import { notificationCloseButtonProps, showApiError, showDone } from '@/shared/ui/notify';
@@ -113,11 +114,14 @@ export function ImportPanel({
   });
 
   const apply = useMutation({
+    // ⛔ Z1-02: `409 sheetBeingSubmitted` — минуще, застосування повторюється саме (`applyBusyRetry.ts`).
     mutationFn: (request: ImportApplyRequest) =>
-      apiFetch<PatchCellsResponse | JobAcceptedResponse>(`/api/v1/documents/${documentId}/import/apply`, {
-        method: 'POST',
-        body: JSON.stringify(request),
-      }),
+      withSheetBusyRetry(() =>
+        apiFetch<PatchCellsResponse | JobAcceptedResponse>(`/api/v1/documents/${documentId}/import/apply`, {
+          method: 'POST',
+          body: JSON.stringify(request),
+        }),
+      ),
     onSuccess: async (result) => {
       // ⛔ F-01: понад поріг (`LargeImportThreshold`, 2000 комірок) сервер
       // відповідає `202` з `jobId` — імпорт ЩЕ НЕ застосовано. «Imported»

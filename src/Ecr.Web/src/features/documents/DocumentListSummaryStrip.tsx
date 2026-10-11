@@ -17,7 +17,7 @@ interface DocumentListSummaryStripProps {
    * ⛔ Смуга не тримає власного «обраного»: і вона, і перелік фільтра читають
    * `state` з АДРЕСИ (`useDocumentListFilters`), тож розійтися їм нема де.
    */
-  readonly filters: Pick<DocumentListFilters, 'state' | 'setState'>;
+  readonly filters: Pick<DocumentListFilters, 'state' | 'setState'> & Partial<Pick<DocumentListFilters, 'projectId'>>;
 }
 
 /** Лічильник смуги. `state` — значення фільтра; `null` — лічильник не фільтрує. */
@@ -58,7 +58,8 @@ interface Counter {
  * `periodKey` стоїть тут явно, а не лише в `enabled` запиту.
  */
 export function DocumentListSummaryStrip({ periodKey, filters }: DocumentListSummaryStripProps): JSX.Element | null {
-  const summary = useDocumentListSummary(periodKey);
+  // ⛔ Y7-02: лічильники за тим самим проєктом, що й перелік під смугою.
+  const summary = useDocumentListSummary(periodKey, undefined, filters.projectId ?? null);
 
   if (periodKey === null || summary.data === undefined) {
     return null;

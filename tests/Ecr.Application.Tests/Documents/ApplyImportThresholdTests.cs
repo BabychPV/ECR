@@ -88,6 +88,37 @@ public sealed class ApplyImportThresholdTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "R1-05")]
+    public async Task R1_05_понад_межу_рядків_для_перезапису_422_до_плану_і_черги_а_межа_включно_проходить()
+    {
+        // ⛔ Перелік рядків їде в payload задачі (до 524 288 символів): кілька тисяч рядків його вичерпували, і
+        // постановка падала `ArgumentOutOfRangeException` -> 500. Мутація: прибрати межу - перший виклик не відмовляє.
+        IReadOnlyList<ImportOverwriteRow> Rows(int count)
+            => [.. Enumerable.Range(1, count).Select(i => new ImportOverwriteRow("T1", $"R{i}"))];
+
+        var tooMany = await Assert.ThrowsAsync<BusinessRuleException>(() => Handler().HandleAsync(
+            DocumentId, Token, Rows(ApplyImportHandler.MaxOverwriteRows + 1), CancellationToken.None));
+
+        Assert.Equal("ECR-IMP-0422", tooMany.ErrorCode);
+        Assert.Equal(ApplyImportHandler.TooManyOverwriteRowsKey, tooMany.Details!["messageKey"]);
+        Assert.Equal(ApplyImportHandler.MaxOverwriteRows.ToString(System.Globalization.CultureInfo.InvariantCulture), tooMany.Details["maxRows"]);
+        await _importer.DidNotReceiveWithAnyArgs().CountPendingChangesAsync(default, default!, default, default);
+        await _jobs.DidNotReceiveWithAnyArgs().EnqueueAsync<IExcelImportJob>(default, default, default);
+
+        // Рівно межа - проходить далі, як і раніше.
+        _importer.CountPendingChangesAsync(DocumentId, Token, Arg.Any<IReadOnlyList<ImportOverwriteRow>?>(), Arg.Any<CancellationToken>())
+            .Returns(1);
+        _importer.ApplyAsync(DocumentId, Token, Arg.Any<IReadOnlyList<ImportOverwriteRow>?>(), Arg.Any<CancellationToken>())
+            .Returns(new PatchCellsResponse(1, new Dictionary<string, string>(), []));
+
+        var ok = await Handler().HandleAsync(
+            DocumentId, Token, Rows(ApplyImportHandler.MaxOverwriteRows), CancellationToken.None);
+
+        Assert.NotNull(ok.Response);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait("Finding", "L1-20")]
     public async Task Перегляд_іншого_документа_відмовляє_до_черги_і_нічого_не_ставить()
     {

@@ -110,13 +110,15 @@ public sealed class Hse301UnitsTests
         // (decimal(34,16)) об'єм точний: 3.6 · 930 / 3600 = 0.93.
         Assert.Equal(0.93m, Math.Round(3.6m * Convert(930m, "s", "h"), 16));
 
-        // Шлях межі (§4.2): Sm3/h → база Sm3/s → × s. База StdVolume — Sm3,
-        // база Time — s, тож добуток уже в Sm3.
-        // ⚠ НЕ 0.93: 1/3600 у decimal(38,18) = 0.000277777777777778, і похибка
-        // 7.44e-16 видна на шкалі комірки. Тому інтеграл на межі (F3) — через
-        // знаменник h, а не через цей множник.
-        var viaBase = Convert(3.6m, "Sm3_per_h", "Sm3_per_s") * 930m;
-        Assert.Equal(0.930000000000000744m, viaBase);
+        // Шлях межі (§4.2): Sm3/h → Sm3/s → × s. ⛔ Z2-05: швидкість у швидкість - через чисельник і знаменник
+        // (`UnitConverter.ConvertRate`), а не через `FactorToBase` швидкості: 1/3600 у decimal(38,18) =
+        // 0.000277777777777778, і маршрут через базу давав 0.930000000000000744 (похибка 7.44e-16 видна на шкалі
+        // комірки). Тепер 3.6 Sm3/h = рівно 0.001 Sm3/s, і добуток - рівно 0.93.
+        Assert.Equal(0.001m, Convert(3.6m, "Sm3_per_h", "Sm3_per_s"));
+        Assert.Equal(0.93m, Convert(3.6m, "Sm3_per_h", "Sm3_per_s") * 930m);
+
+        // Зворотне, що давало 3599.99999999999712: 1 Sm3/s = рівно 3600 Sm3/h.
+        Assert.Equal(3600m, Convert(1m, "Sm3_per_s", "Sm3_per_h"));
     }
 
     [Fact]
@@ -261,6 +263,22 @@ public sealed class Hse301UnitsTests
                 }
 
                 var expected = ((1m * from.Factor) + from.Offset - to.Offset) / to.Factor;
+
+                // ⛔ Z2-05: швидкість у швидкість дзеркало рахує через чисельник і знаменник, а не через заокруглений
+                // `FactorToBase` (`1 Sm3/s` → рівно 3600, а не 3599.99999999999712), тож для таких пар формула
+                // «через базу» - лише орієнтир із допуском 1e-12 відносно: збіг множників із сідом цим не слабшає
+                // (помилка в множнику дала б відхилення на порядки більше).
+                if (IsRatePair(units, from, to))
+                {
+                    if (actual.AsNumber() is not { } rate
+                        || Math.Abs(rate - expected) > Math.Abs(expected) * 0.000000000001m)
+                    {
+                        mismatches.Add($"{from.Code} → {to.Code}: сід {expected}, дзеркало {Show(actual)}");
+                    }
+
+                    continue;
+                }
+
                 if (actual.AsNumber() != expected)
                 {
                     mismatches.Add($"{from.Code} → {to.Code}: сід {expected}, дзеркало {Show(actual)}");
@@ -273,6 +291,13 @@ public sealed class Hse301UnitsTests
             "UnitTable.Seed розійшовся з 09-seed.sql:" + Environment.NewLine
             + string.Join(Environment.NewLine, mismatches.Take(20)));
     }
+
+    /// <summary>Обидві одиниці похідні, а їхні чисельники й знаменники однієї розмірності (маршрут «швидкість у швидкість»).</summary>
+    private static bool IsRatePair(Dictionary<string, SeedUnit> units, SeedUnit from, SeedUnit to)
+        => from.Numerator is { } fromNumerator && from.Denominator is { } fromDenominator
+           && to.Numerator is { } toNumerator && to.Denominator is { } toDenominator
+           && units[fromNumerator].Dimension == units[toNumerator].Dimension
+           && units[fromDenominator].Dimension == units[toDenominator].Dimension;
 
     private static decimal Convert(decimal value, string from, string to)
     {

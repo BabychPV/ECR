@@ -71,6 +71,10 @@ public sealed record SourceEntityRef(int Id, string Code, string? DisplayName);
 /// <param name="TargetUnitCode">Одиниця, в якій значення лягає в ECR.</param>
 /// <param name="IsActive">Мапінг діє; <c>false</c> — призупинений (<c>BE-27</c>).</param>
 /// <param name="PendingSourceUnitChange">Пауза через зміну одиниці джерела (ФВ-16.9).</param>
+/// <param name="TargetColumnDataType">Тип колонки-адресата; <c>null</c> — колонки немає чи тип не відомий.</param>
+/// <param name="TargetColumnScale">
+/// <c>Scale</c> колонки-адресата (лише <c>Decimal</c>); <c>null</c> — не задано: число лягає до масштабу сховища.
+/// </param>
 public sealed record FieldMapRef(
     int Id,
     string SourceField,
@@ -82,7 +86,9 @@ public sealed record FieldMapRef(
     string? SourceUnitCode,
     string? TargetUnitCode,
     bool IsActive,
-    PendingSourceUnitChange? PendingSourceUnitChange = null);
+    PendingSourceUnitChange? PendingSourceUnitChange = null,
+    Ecr.Domain.Enums.CellDataType? TargetColumnDataType = null,
+    byte? TargetColumnScale = null);
 
 /// <summary>Реальний рядок джерела — точка <c>ext.RawDataPoint</c> як є.</summary>
 /// <param name="SourcePath">Шлях атрибута в джерелі.</param>

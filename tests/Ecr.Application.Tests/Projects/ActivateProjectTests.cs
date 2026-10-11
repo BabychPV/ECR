@@ -271,4 +271,46 @@ public sealed class ActivateProjectTests
         await _materialization.DidNotReceiveWithAnyArgs()
             .EnqueueAfterTransitionAsync(default, default!, default);
     }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "F2-02")]
+    public async Task Черга_в_базі_ставить_матеріалізацію_в_одній_транзакції_із_збереженням_останнім_оператором()
+    {
+        // ⛔ F2-02 (аудит R11): постановка після коміту, що впала, лишала активний проєкт без
+        // задачі. Черга в базі (MI-02 (в)) — збереження й постановка в одній транзакції.
+        // Мутація: повернути постановку після `SaveChangesAsync` поза транзакцією → червоний.
+        var project = Arrange();
+        _materialization.EnlistsInCallerTransaction.Returns(true);
+
+        var inTransaction = false;
+        _uow.ExecuteInTransactionAsync(Arg.Any<Func<CancellationToken, Task>>(), Arg.Any<CancellationToken>())
+            .Returns(async call =>
+            {
+                inTransaction = true;
+                try
+                {
+                    await call.ArgAt<Func<CancellationToken, Task>>(0)(call.ArgAt<CancellationToken>(1));
+                }
+                finally
+                {
+                    inTransaction = false;
+                }
+            });
+
+        var enqueuedInTransaction = false;
+        _materialization
+            .When(m => m.EnqueueAfterTransitionAsync(project.Id, Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<CancellationToken>()))
+            .Do(_ => enqueuedInTransaction = inTransaction);
+
+        await Handler().HandleAsync(project.Id, CancellationToken.None);
+
+        Assert.True(enqueuedInTransaction, "Постановку матеріалізації виконано поза транзакцією активації.");
+        Received.InOrder(() =>
+        {
+            _uow.SaveChangesAsync(Arg.Any<CancellationToken>());
+            _materialization.EnqueueAfterTransitionAsync(
+                project.Id, Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<CancellationToken>());
+        });
+    }
 }

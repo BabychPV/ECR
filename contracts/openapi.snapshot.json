@@ -9773,6 +9773,13 @@
       "RegistryDefDto": {
         "description": "Опис довідника для конфігуратора і для клієнта.",
         "properties": {
+          "asOfRequired": {
+            "description": "Чи вимагає читання записів параметр `asOf`: довідник сам темпоральний або темпоральний його батько композиції. Лише в переліку.",
+            "type": [
+              "null",
+              "boolean"
+            ]
+          },
           "code": {
             "description": "Код довідника.",
             "type": "string"
@@ -18510,6 +18517,15 @@
             "name": "q",
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "description": "Звітний період змін (AN-98); без нього — усі. Чужі періоди відсіює сервер до сторінки.",
+            "in": "query",
+            "name": "periodKey",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
             }
           }
         ],

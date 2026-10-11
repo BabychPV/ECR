@@ -20,8 +20,13 @@ public sealed class TransientDatabaseFailureMappingTests
     [Theory]
     [Trait("Requirement", "ФВ-6.11")]
     [InlineData(-2)]
+    [InlineData(2)]       // E1-05: сервер не знайдено
+    [InlineData(40)]      // E1-05: не вдалося відкрити з'єднання
+    [InlineData(53)]      // E1-05: мережевий шлях не знайдено
+    [InlineData(121)]     // E1-05: тайм-аут семафора
     [InlineData(1205)]
     [InlineData(10054)]
+    [InlineData(10061)]   // E1-05: з'єднання відхилено
     [InlineData(40613)]
     public void Тимчасовий_номер_SqlException_дає_503_databaseBusy(int number)
     {
@@ -32,6 +37,56 @@ public sealed class TransientDatabaseFailureMappingTests
         Assert.Equal(StatusCodes.Status503ServiceUnavailable, status);
         Assert.Equal("ECR-SYS-0503", code);
         Assert.Equal("err.ECR-SYS-0503.databaseBusy", details!["messageKey"]);
+    }
+
+    /// <summary>
+    /// E1-05: вичерпаний пул з'єднань SqlClient — <c>InvalidOperationException</c>, а не <c>SqlException</c>; це 503,
+    /// а інший <c>InvalidOperationException</c> лишається 500. Мутація: прибрати гілку <c>IsPoolExhausted</c> — 500.
+    /// </summary>
+    [Fact]
+    [Trait("Requirement", "ФВ-6.11")]
+    public void E1_05_вичерпаний_пул_з_єднань_дає_503_а_інший_InvalidOperationException_500()
+    {
+        var pool = new InvalidOperationException(
+            "Timeout expired.  The timeout period elapsed prior to obtaining a connection from the pool.  "
+            + "This may have occurred because all pooled connections were in use and max pool size was reached.");
+
+        var (status, code, _, details) = Map(pool);
+        Assert.Equal(StatusCodes.Status503ServiceUnavailable, status);
+        Assert.Equal("ECR-SYS-0503", code);
+        Assert.Equal("err.ECR-SYS-0503.databaseBusy", details!["messageKey"]);
+
+        // Пул у ланцюжку (EF обгортає) — теж.
+        Assert.Equal(
+            StatusCodes.Status503ServiceUnavailable, Map(new DbUpdateException("save failed", pool)).Status);
+
+        Assert.Equal(
+            StatusCodes.Status500InternalServerError,
+            Map(new InvalidOperationException("Sequence contains no elements")).Status);
+    }
+
+    /// <summary>
+    /// E1-06 (X5-03): <c>BadHttpRequestException</c> Kestrel — вина клієнта: 413 для тіла понад межу, 400 для решти;
+    /// текст винятку клієнтові не їде. Мутація: прибрати арм — 500 <c>ECR-SYS-0500</c>.
+    /// </summary>
+    [Fact]
+    [Trait("Requirement", "ФВ-6.11")]
+    public void E1_06_BadHttpRequestException_дає_413_або_400_а_не_500()
+    {
+        var tooLarge = new BadHttpRequestException("Request body too large. secret-internal-detail", StatusCodes.Status413PayloadTooLarge);
+
+        var (status, code, message, details) = Map(tooLarge);
+        Assert.Equal(StatusCodes.Status413PayloadTooLarge, status);
+        Assert.Equal("ECR-REQ-0422", code);
+        Assert.Equal("err.ECR-REQ-0422.requestTooLarge", details!["messageKey"]);
+        Assert.DoesNotContain("secret-internal-detail", message, StringComparison.Ordinal);
+
+        var (badStatus, badCode, badMessage, badDetails) = Map(
+            new BadHttpRequestException("Unexpected end of request content. secret-internal-detail", StatusCodes.Status400BadRequest));
+        Assert.Equal(StatusCodes.Status400BadRequest, badStatus);
+        Assert.Equal("ECR-REQ-0422", badCode);
+        Assert.Equal("err.ECR-REQ-0422.malformedRequest", badDetails!["messageKey"]);
+        Assert.DoesNotContain("secret-internal-detail", badMessage, StringComparison.Ordinal);
     }
 
     [Fact]

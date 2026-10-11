@@ -185,7 +185,7 @@ public sealed class MethodologyCategoryRuleApiTests(SqlServerFixture sql)
     public async Task Пакет_імпорту_з_вузлом_categoryRule_створює_чернетку_з_правилом_а_повтор_без_змін()
     {
         using var app = new EcrApiFactory(sql);
-        using var client = await SignedInAsync(app, ["Calculation.View", "Calculation.EditFormula", "Calculation.EditConstant"])
+        using var client = await SignedInAsync(app, ["Calculation.View", "Calculation.EditFormula", "Calculation.EditConstant", "Calculation.EditRule"])
             .ConfigureAwait(true);
         var code = $"CRI{Guid.NewGuid():N}"[..16];
 
@@ -229,7 +229,7 @@ public sealed class MethodologyCategoryRuleApiTests(SqlServerFixture sql)
     public async Task Пакет_імпорту_з_нерозібраним_правилом_дає_422_і_нічого_не_пише()
     {
         using var app = new EcrApiFactory(sql);
-        using var client = await SignedInAsync(app, ["Calculation.View", "Calculation.EditFormula", "Calculation.EditConstant"])
+        using var client = await SignedInAsync(app, ["Calculation.View", "Calculation.EditFormula", "Calculation.EditConstant", "Calculation.EditRule"])
             .ConfigureAwait(true);
         var code = $"CRB{Guid.NewGuid():N}"[..16];
 
@@ -238,6 +238,33 @@ public sealed class MethodologyCategoryRuleApiTests(SqlServerFixture sql)
         var problem = await ProblemAsync(response, HttpStatusCode.UnprocessableEntity).ConfigureAwait(true);
         var blocker = problem.GetProperty("report").GetProperty("blockers").EnumerateArray().Single();
         Assert.Equal("categoryRuleInvalid", blocker.GetProperty("kind").GetString());
+
+        await using var db = new EcrDbContext(Options());
+        Assert.False(await db.Methodologies.AnyAsync(m => m.Code == code).ConfigureAwait(true));
+    }
+
+    /// <summary>
+    /// F3-04: вузол <c>categoryRule</c> пакета пишеться лише з правом <c>Calculation.EditRule</c> — як і PUT
+    /// конфігуратора. З EditFormula + EditConstant — 403 (і для сухого прогону), без запису; пакет без правила
+    /// проходить із двома правами, як і раніше.
+    /// </summary>
+    /// <remarks>Мутація: прибрати перевірку <c>CategoryRulePermission</c> в обробнику — імпорт дає 200 і пише правило.</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task F3_04_пакет_з_categoryRule_без_права_EditRule_дає_403_і_не_пише()
+    {
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, ["Calculation.View", "Calculation.EditFormula", "Calculation.EditConstant"])
+            .ConfigureAwait(true);
+        var code = $"CRF{Guid.NewGuid():N}"[..16];
+
+        Assert.Equal(
+            HttpStatusCode.Forbidden,
+            (await ImportAsync(client, code, "@Fuel", dryRun: true).ConfigureAwait(true)).StatusCode);
+        Assert.Equal(
+            HttpStatusCode.Forbidden,
+            (await ImportAsync(client, code, "@Fuel", dryRun: false).ConfigureAwait(true)).StatusCode);
 
         await using var db = new EcrDbContext(Options());
         Assert.False(await db.Methodologies.AnyAsync(m => m.Code == code).ConfigureAwait(true));

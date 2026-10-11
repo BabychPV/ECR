@@ -271,6 +271,23 @@ describe('CoverageEventsPanel', () => {
     expect(await screen.findByRole('option', { name: '⟦status.coverage.SkippedDependency⟧' })).toBeTruthy();
   });
 
+  it('AN-95: подія синку з messageKey у Details рядком — порада з каталогу, а не сирий reason=codeModeManual', async () => {
+    // ⛔ Мутаційний доказ: прибери `keyedDetailsText` у `collectionRunErrorText` — у комірці лишається сирий рядок.
+    const details =
+      'element=F-101; error=ECR-REG-0422; messageKey=err.ECR-REG-0422.codeModeManualNoAutoCreate; reason=codeModeManual; key=element=F-101; entry=; field=';
+    const Unlinked = { ...Ceiling, id: 9401, sourceEntityCode: 'STACK-1', sourceEntityName: null, periodKey: null, status: 'RegistryElementUnlinked', details };
+    respond(() => ({ items: [Unlinked], nextCursor: null, totalCount: null }));
+    show();
+
+    await screen.findByText('STACK-1');
+
+    const row = document.querySelector<HTMLElement>('tr[data-row-key="9401"]') as HTMLElement;
+    expect(
+      within(row).getByText('⟦err.ECR-REG-0422.codeModeManualNoAutoCreate (element=F-101)⟧ (element=F-101)'),
+    ).toBeTruthy();
+    expect(within(row).queryByText(details)).toBeNull();
+  });
+
   it('фільтр статусу пропонує відмову джерела з підписом каталогу', async () => {
     respond(() => ({ items: [], nextCursor: null, totalCount: null }));
     show();

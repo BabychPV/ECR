@@ -236,10 +236,17 @@ public sealed class DocumentDeletionStore(EcrDbContext db) : IDocumentDeletionSt
                     .ToListAsync(ct).ConfigureAwait(false));
             }
 
-            var keys = periodKeys.ToList();
-            await db.CalculationSteps.Where(s => keys.Contains(s.PeriodKey) && runIds.Contains(s.CalculationRunId)).ExecuteDeleteAsync(ct).ConfigureAwait(false);
-            await db.CalculationInputs.Where(i => keys.Contains(i.PeriodKey) && runIds.Contains(i.CalculationRunId)).ExecuteDeleteAsync(ct).ConfigureAwait(false);
-            await db.CalculationResults.Where(r => keys.Contains(r.PeriodKey) && runIds.Contains(r.CalculationRunId)).ExecuteDeleteAsync(ct).ConfigureAwait(false);
+            // ⛔ X1-03 (аудит R11): по одному ключу на DELETE — рівність за `PeriodKey`, а не
+            // `PeriodKey IN (…)` (див. коментар до першого циклу): список параметрів оптимізатор
+            // згортає в залишковий OR-предикат і вільний обирати скан вузького індексу без відсічки
+            // партицій — на `calc.CalculationResult` це скан усіх партицій усередині транзакції видалення.
+            foreach (var key in periodKeys.Order())
+            {
+                await db.CalculationSteps.Where(s => s.PeriodKey == key && runIds.Contains(s.CalculationRunId)).ExecuteDeleteAsync(ct).ConfigureAwait(false);
+                await db.CalculationInputs.Where(i => i.PeriodKey == key && runIds.Contains(i.CalculationRunId)).ExecuteDeleteAsync(ct).ConfigureAwait(false);
+                await db.CalculationResults.Where(r => r.PeriodKey == key && runIds.Contains(r.CalculationRunId)).ExecuteDeleteAsync(ct).ConfigureAwait(false);
+            }
+
             await db.CalculationRuns.Where(r => runIds.Contains(r.Id)).ExecuteDeleteAsync(ct).ConfigureAwait(false);
         }
 

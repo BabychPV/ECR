@@ -59,6 +59,8 @@ export interface paths {
                     /** @description Пошук (UI-38): підрядок бізнес-ключа документа, ключа рядка чи коду колонки; до 100 знаків (довше
                      *     обрізається), спецсимволи `LIKE` — буквальні. Лише по видимих читачу рядках. */
                     q?: string;
+                    /** @description Звітний період змін (AN-98); без нього — усі. Чужі періоди відсіює сервер до сторінки. */
+                    periodKey?: number;
                 };
                 header?: never;
                 path?: never;
@@ -22672,6 +22674,8 @@ export interface components {
         RegistryCodeMode: "Manual" | "Auto" | null;
         /** @description Опис довідника для конфігуратора і для клієнта. */
         RegistryDefDto: {
+            /** @description Чи вимагає читання записів параметр `asOf`: довідник сам темпоральний або темпоральний його батько композиції. Лише в переліку. */
+            asOfRequired?: null | boolean;
             /** @description Код довідника. */
             code: string;
             /**

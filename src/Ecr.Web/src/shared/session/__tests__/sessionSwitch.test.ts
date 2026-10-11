@@ -8,6 +8,8 @@ import {
   SESSION_USER_HEADER,
   resetSignOutForTests,
   setReloadPageForTests,
+  setSessionUserId,
+  verifySessionOwner,
 } from '@/api/client';
 import type { CurrentUserDto } from '@/api/types';
 import { sendPatchBeacon } from '@/features/grid/useCellPatch';
@@ -215,5 +217,71 @@ describe('X-Ecr-User', () => {
 
     expect(reload).not.toHaveBeenCalled();
     expect(isSessionClosed()).toBe(false);
+  });
+});
+
+/**
+ * R2-05: повторний вхід ТОГО САМОГО користувача не перезавантажує інші вкладки.
+ *
+ * ⛔ Мутаційні докази: поверни у `main.tsx` `listenSessionChange(abandonSwitchedSession)` — вкладка
+ * перезавантажується при тому самому користувачі (та сама поведінка, що в `verifySessionOwner` без перевірки);
+ * прибери порівняння `userId` — падає «інший користувач».
+ */
+describe('verifySessionOwner', () => {
+  const meResponse = (userId: number): Response =>
+    new Response(JSON.stringify({ userId }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+
+  it('той самий користувач — вкладка не перезавантажується і правки лишаються', async () => {
+    const fetchMock = vi.fn(async () => meResponse(7));
+    vi.stubGlobal('fetch', fetchMock);
+    const hook = vi.fn();
+    const off = onBeforeLoginRedirect(hook);
+    setSessionUserId(7);
+
+    await Promise.all([verifySessionOwner(), verifySessionOwner()]);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(reload).not.toHaveBeenCalled();
+    expect(hook).not.toHaveBeenCalled();
+    expect(isSessionClosed()).toBe(false);
+    off();
+  });
+
+  it('інший користувач — слід правок лишається, вкладка перезавантажується', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => meResponse(8)));
+    const hook = vi.fn();
+    const off = onBeforeLoginRedirect(hook);
+    setSessionUserId(7);
+
+    await verifySessionOwner();
+
+    expect(hook).toHaveBeenCalledTimes(1);
+    expect(reload).toHaveBeenCalledTimes(1);
+    expect(isSessionClosed()).toBe(true);
+    off();
+  });
+
+  it('401 (вихід в іншій вкладці) і збій мережі — вкладка покидає сеанс', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(null, { status: 401 })));
+    setSessionUserId(7);
+    await verifySessionOwner();
+    expect(reload).toHaveBeenCalledTimes(1);
+
+    resetSignOutForTests();
+    reload.mockReset();
+    vi.stubGlobal('fetch', vi.fn(async () => Promise.reject(new TypeError('offline'))));
+    setSessionUserId(7);
+    await verifySessionOwner();
+    expect(reload).toHaveBeenCalledTimes(1);
+  });
+
+  it('вкладка ще не бачила /me — власник невідомий, безпечніше покинути без запиту', async () => {
+    const fetchMock = vi.fn(async () => meResponse(7));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await verifySessionOwner();
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(reload).toHaveBeenCalledTimes(1);
   });
 });

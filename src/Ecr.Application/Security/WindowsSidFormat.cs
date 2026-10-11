@@ -37,7 +37,7 @@ internal static partial class WindowsSidFormat
                 new Dictionary<string, object?> { ["messageKey"] = "err.ECR-USR-0422.windowsSidRequired" });
         }
 
-        if (!SidPattern().IsMatch(text))
+        if (!IsWellFormed(text))
         {
             throw new BusinessRuleException(
                 ErrorCodes.UserInvalid, $"«{text}» не є SID.",
@@ -73,6 +73,17 @@ internal static partial class WindowsSidFormat
         }
     }
 
-    [GeneratedRegex(@"^S-1-\d+(-\d+){1,14}$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    /// <summary>Чи рядок має форму SID (<c>S-1-…</c>); регістр не важливий — канонізація піднімає його вгору.</summary>
+    /// <param name="text">Рядок після обрізання пробілів.</param>
+    /// <remarks>
+    /// ⛔ Z4-02/S1-06: (а) <c>[0-9]</c>, а не <c>\d</c> — <c>\d</c> у .NET збігається з цифрами Unicode («٣»), і такий
+    /// «SID» проходив форму та падав далі (500 замість 422); (б) кінець — <c>\z</c>, а не <c>$</c> (кінцевий LF);
+    /// (в) довжина обмежена: орган — до 15 цифр (48 біт), підорган — до 10 (32 біти), до 14 підорганів — тож
+    /// найдовший SID ≈ 170 знаків, а не необмежений рядок. Регістр — явно <c>[Ss]</c>, без <c>IgnoreCase</c>
+    /// (його таблиці рівності ширші за ASCII).
+    /// </remarks>
+    public static bool IsWellFormed(string text) => SidPattern().IsMatch(text);
+
+    [GeneratedRegex(@"^[Ss]-1-[0-9]{1,15}(-[0-9]{1,10}){1,14}\z", RegexOptions.CultureInvariant)]
     private static partial Regex SidPattern();
 }

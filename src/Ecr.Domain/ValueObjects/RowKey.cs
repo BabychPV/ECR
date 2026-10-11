@@ -11,7 +11,8 @@ namespace Ecr.Domain.ValueObjects;
 /// </summary>
 public readonly partial record struct RowKey
 {
-    public const string Pattern = @"^[A-Za-z0-9_.\-]{1,100}$";
+    /// <remarks>⛔ S1-06: кінець — <c>\z</c>, а не <c>$</c> (<c>$</c> пропускає кінцевий LF).</remarks>
+    public const string Pattern = @"^[A-Za-z0-9_.\-]{1,100}\z";
 
     [GeneratedRegex(Pattern, RegexOptions.CultureInvariant)]
     private static partial Regex Validator();

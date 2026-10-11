@@ -75,4 +75,20 @@ public sealed class EcrCodeTests
         Assert.Equal("err.ECR-CFG-0422.invalidCode", exception.Details!["messageKey"]);
         Assert.Equal("bad code", exception.Details["code"]);
     }
+
+    /// <summary>
+    /// S1-06 (аудит 3): <c>$</c> у .NET збігається перед кінцевим LF, тож «ABC» + LF проходив перевірку коду.
+    /// Мутація: повернути <c>$</c> замість <c>\z</c> у <c>EcrCode.Pattern</c> — тест червоний.
+    /// </summary>
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [InlineData("ABC\n")]
+    [InlineData("ABC\r\n")]
+    [InlineData("ABC\n\n")]
+    public void Код_із_кінцевим_переведенням_рядка_недопустимий(string value)
+    {
+        Assert.False(EcrCode.TryCreate(value, out _));
+        Assert.Throws<Ecr.Domain.Abstractions.DomainException>(() => EcrCode.Create(value));
+        Assert.True(EcrCode.TryCreate("ABC", out _));
+    }
 }

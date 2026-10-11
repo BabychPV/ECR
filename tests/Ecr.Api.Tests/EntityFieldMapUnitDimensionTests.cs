@@ -36,7 +36,7 @@ public sealed class EntityFieldMapUnitDimensionTests(SqlServerFixture sql)
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Finding", "D-4")]
-    public async Task D4_створення_мапінгу_з_несумісними_розмірностями_422_а_сумісні_й_інтеграл_проходять()
+    public async Task D4_створення_мапінгу_з_несумісними_розмірностями_422_сумісні_проходять_а_інтеграл_не_швидкості_422()
     {
         var chain = await new TestDocumentBuilder(sql.ConnectionString).BuildAsync(ct: CancellationToken.None)
             .ConfigureAwait(true);
@@ -67,10 +67,16 @@ public sealed class EntityFieldMapUnitDimensionTests(SqlServerFixture sql)
                 .ConfigureAwait(true);
             Assert.True(compatible.StatusCode == HttpStatusCode.OK, $"{compatible.StatusCode}: {app.ErrorsText}");
 
-            // Інтеграл за часом: перехід між розмірностями законний (швидкість x с -> величина) і приймається.
+            // ⛔ Z2-04: інтеграл за часом пропускає лише ПЕРЕВІРКУ РОЗМІРНОСТЕЙ (швидкість x с -> величина), але не
+            // перевірку конверсії: MJ - не швидкість «величина / час», тож нічне перенесення відмовляло б на кожному
+            // періоді. Тепер відмова - при налаштуванні, з тим самим ключем, що й у задачі.
             var integral = await CreateAsync(client, entityId, "U_integral", chain.ColumnDefIds[0], units.Energy, units.Mass, "TimeIntegral")
                 .ConfigureAwait(true);
-            Assert.True(integral.StatusCode == HttpStatusCode.OK, $"{integral.StatusCode}: {app.ErrorsText}");
+            Assert.Equal(HttpStatusCode.UnprocessableEntity, integral.StatusCode);
+            var integralProblem = await JsonAsync(integral).ConfigureAwait(true);
+            Assert.Equal("ECR-UOM-0422", integralProblem.GetProperty("errorCode").GetString());
+            Assert.Equal(
+                "err.ECR-UOM-0422.integralSourceNotRate", integralProblem.GetProperty("messageKey").GetString());
         }
         finally
         {

@@ -363,6 +363,55 @@ public interface IUserStore
         int userId, int maxFailedAttempts, int lockoutMinutes, DateTime utcNow, CancellationToken ct);
 
     /// <summary>
+    /// Виправляє SID доменного запису, ЯКЩО він ще не входив, — одним <c>UPDATE</c> з умовою (Z4-01).
+    /// </summary>
+    /// <param name="userId">Обліковий запис.</param>
+    /// <param name="windowsSid">Канонічний SID.</param>
+    /// <param name="securityStamp">Новий штамп (виправлення міняє зіставлення — сесій немає, але правило одне).</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns><c>true</c> — SID замінено; <c>false</c> — запис уже входив (чи не доменний, чи зник): нічого не змінено.</returns>
+    /// <remarks>
+    /// ⛔ «Не входив» перевірялося на сутності, прочитаній ДО запису, а <c>SaveChanges</c> писав SID безумовно: вхід,
+    /// що встиг між читанням і записом, лишав підтверджений каталогом SID перезаписаним — ролі чужої людини.
+    /// Умова <c>LastSignInAt IS NULL</c> тепер у самому <c>UPDATE</c>. Сутність у пам'яті НЕ змінюється.
+    /// </remarks>
+    public Task<bool> TryCorrectUnconfirmedWindowsSidAsync(
+        int userId, string windowsSid, string securityStamp, CancellationToken ct);
+
+    /// <summary>
+    /// РЕЗЕРВУЄ спробу входу АТОМАРНО — до перевірки пароля (AN-90/L1-03, ФВ-6.4a).
+    /// </summary>
+    /// <param name="userId">Обліковий запис.</param>
+    /// <param name="maxFailedAttempts">Поріг блокування; ≤ 0 — бюджету немає.</param>
+    /// <param name="utcNow">Поточний момент.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>
+    /// <c>true</c> — спробу зарезервовано (лічильник +1), пароль можна перевіряти; <c>false</c> — запис
+    /// заблоковано (паралельними спробами чи адміністратором) або бюджет «Max перевірок між блокуваннями» уже
+    /// роздано іншим спробам.
+    /// </returns>
+    /// <remarks>
+    /// ⛔ Без резервування пачка з N паралельних запитів проходила перевірку «не заблоковано» ВСІ разом і
+    /// перевіряла N паролів до того, як перша хибна спроба поставила блокування: межа Max не трималася, а
+    /// правильний пароль у пачці міг пройти. Тепер перевірка паролів обмежена Max за блокування, скільки б
+    /// запитів не надійшло. Минуле блокування скидає лічильник (як <see cref="RegisterFailedAttemptAsync"/>).
+    /// Програш — це відмова «як хибний пароль» (401) на боці обробника.
+    /// </remarks>
+    public Task<bool> TryReserveAttemptAsync(int userId, int maxFailedAttempts, DateTime utcNow, CancellationToken ct);
+
+    /// <summary>
+    /// Фіксує ПРОВАЛ зарезервованої спроби: блокує запис, якщо бюджет вичерпано (AN-90).
+    /// </summary>
+    /// <param name="userId">Обліковий запис.</param>
+    /// <param name="maxFailedAttempts">Поріг блокування; ≤ 0 — не блокувати.</param>
+    /// <param name="lockoutMinutes">На скільки блокувати; ≤ 0 — 15 хв.</param>
+    /// <param name="utcNow">Поточний момент.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Стан лічильника ПІСЛЯ відмови; лічильник тут НЕ збільшується — його збільшило резервування.</returns>
+    public Task<FailedAttemptOutcome> RegisterReservedFailureAsync(
+        int userId, int maxFailedAttempts, int lockoutMinutes, DateTime utcNow, CancellationToken ct);
+
+    /// <summary>
     /// Фіксує ВДАЛИЙ вхід АТОМАРНО — одним <c>UPDATE</c> з умовою «запис не заблоковано» (L1-03).
     /// </summary>
     /// <param name="userId">Обліковий запис.</param>

@@ -520,7 +520,8 @@ public sealed partial class PatchCellsHandler
                             "спільне блокування аркуша: виняткове поверх нього — прихований дедлок.");
                     }
 
-                    await sheetGate.EnterSubmitAsync(documentId, sheet.Key, period, ct).ConfigureAwait(false);
+                    // ⛔ Y7-03: відмова «зайнято» — про рядки, а не про подання (див. `RowWriteLock`).
+                    await RowWriteLock.EnterAsync(sheetGate, documentId, sheet.Key, period, ct).ConfigureAwait(false);
                 }
 
                 // ⚠ Стан, уже прочитаний викликачем під спільним блокуванням цієї

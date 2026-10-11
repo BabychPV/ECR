@@ -112,7 +112,8 @@ public sealed class ImportRegistryEntriesHandler(
     RegistryEntryWriter writer,
     IUnitOfWork? uow = null,
     Rules.IRegistryRuleEngine? rules = null,
-    IUnitStore? units = null)
+    IUnitStore? units = null,
+    IRegistryKeyStore? keyStore = null)
 {
     // ⚠ `units` (RT-16) — код одиниці в полі типу Unit: так його пише експорт. Без порту (тести, що
     // будують обробник руками) поле приймає лише Id, як і досі.
@@ -572,6 +573,11 @@ public sealed class ImportRegistryEntriesHandler(
 
         // ⚠ Рядок, відхилений після циклу (дубль ключа), запису не змінить — його змін у звіті немає.
         var reportedChanges = reported.Where(c => !flaggedRows.Contains(c.Row)).ToList();
+
+        // ⛔ Z3-03 (Y5-07): Lookup і Unit у переліку змін - КОДАМИ, а не сирими Id. CSV несе посилання кодом запису й
+        // кодом одиниці (експорт: «посилання - кодами»), а `RegistryEntryChange` бере значення з `RawValue`, тобто
+        // Id: людина бачила «Поточне 57 -> З файлу 63» і не могла звірити це з файлом, де стоїть `SITE-A`.
+        reportedChanges = await WithReferenceCodesAsync(definition, reportedChanges, ct).ConfigureAwait(false);
         var truncated = reportedTotal > reported.Count;
 
         if (dryRun || errors.Count > 0 || added + updated == 0)
@@ -642,6 +648,69 @@ public sealed class ImportRegistryEntriesHandler(
             Changes = reportedChanges,
             ChangesTruncated = truncated,
         };
+    }
+
+    /// <summary>
+    /// Замінює Id запису довідника й одиниці в переліку змін їхніми кодами (Z3-03); те, чого немає в сховищі (або
+    /// не число), лишається як було. Без порту кодів (<see cref="IRegistryKeyStore"/>) - перелік без змін.
+    /// </summary>
+    private async Task<List<RegistryEntryImportChange>> WithReferenceCodesAsync(
+        RegistryDef definition, List<RegistryEntryImportChange> changes, CancellationToken ct)
+    {
+        if (keyStore is null || changes.Count == 0)
+        {
+            return changes;
+        }
+
+        var entryFields = definition.Fields
+            .Where(f => f.DataType == CellDataType.Lookup).Select(f => f.Code).ToHashSet(StringComparer.Ordinal);
+        var unitFields = definition.Fields
+            .Where(f => f.DataType == CellDataType.Unit).Select(f => f.Code).ToHashSet(StringComparer.Ordinal);
+        if (entryFields.Count == 0 && unitFields.Count == 0)
+        {
+            return changes;
+        }
+
+        static IEnumerable<long> Ids(IEnumerable<RegistryEntryImportChange> source, HashSet<string> fields)
+            => source
+                .Where(c => fields.Contains(c.Field))
+                .SelectMany(c => new[] { c.OldValue, c.NewValue })
+                .Select(v => long.TryParse(v, NumberStyles.None, CultureInfo.InvariantCulture, out var id) ? id : (long?)null)
+                .OfType<long>();
+
+        var entryIds = Ids(changes, entryFields).Distinct().ToList();
+        var unitIds = Ids(changes, unitFields).Where(id => id <= int.MaxValue).Select(id => (int)id).Distinct().ToList();
+
+        var entryCodes = entryIds.Count == 0
+            ? new Dictionary<long, string>()
+            : await keyStore.FindEntryCodesAsync(entryIds, ct).ConfigureAwait(false);
+        var unitCodes = unitIds.Count == 0
+            ? new Dictionary<int, string>()
+            : await keyStore.FindUnitCodesAsync(unitIds, ct).ConfigureAwait(false);
+
+        string? Translate(string? value, bool unit)
+        {
+            if (!long.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var id))
+            {
+                return value;
+            }
+
+            if (unit)
+            {
+                return id <= int.MaxValue && unitCodes.TryGetValue((int)id, out var unitCode) ? unitCode : value;
+            }
+
+            return entryCodes.TryGetValue(id, out var entryCode) ? entryCode : value;
+        }
+
+        return
+        [
+            .. changes.Select(c => entryFields.Contains(c.Field)
+                ? c with { OldValue = Translate(c.OldValue, unit: false), NewValue = Translate(c.NewValue, unit: false) }
+                : unitFields.Contains(c.Field)
+                    ? c with { OldValue = Translate(c.OldValue, unit: true), NewValue = Translate(c.NewValue, unit: true) }
+                    : c),
+        ];
     }
 
     /// <summary>Значення поля текстом для звіту (Y5-07): числа й дати — інваріантно, без культури сервера.</summary>

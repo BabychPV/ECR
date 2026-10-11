@@ -33,6 +33,9 @@ export function MappingPreviewPage(): JSX.Element {
   const [createOpened, setCreateOpened] = useState(false);
   const session = useSession();
   const queryClient = useQueryClient();
+  // ⛔ L9-18: під симуляцією сервер відхиляє КОЖЕН не-GET (`ECR-SIM-0403`), а `can()` бачить права ЦІЛІ:
+  // «Add mapping», пауза, видалення й зміна одиниці лишались би активними й падали `403` (як `SheetActions`).
+  const mayManage = can(session.data, 'Integration.Manage') && session.data?.isSimulation !== true;
 
   const sources = useQuery({
     queryKey: ['sources'],
@@ -75,7 +78,7 @@ export function MappingPreviewPage(): JSX.Element {
 
             {/* ⛔ Прогалина 1 директиви паритету: до цієї кнопки заведення
                 мапінгу мало лише один шлях — ручний SQL. */}
-            {entityId !== null && can(session.data, 'Integration.Manage') && (
+            {entityId !== null && mayManage && (
               <Button variant="default" onClick={() => setCreateOpened(true)}>
                 {t('mapping.create')}
               </Button>
@@ -142,7 +145,7 @@ export function MappingPreviewPage(): JSX.Element {
               )}
 
               <MappingGaps preview={data} />
-              <MappingRows preview={data} allowed={can(session.data, 'Integration.Manage')} />
+              <MappingRows preview={data} allowed={mayManage} />
             </>
           )}
         </AsyncBoundary>

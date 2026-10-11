@@ -158,6 +158,37 @@ public sealed class CollectionScheduleDependencyGateTests(SqlServerFixture sql)
         Assert.Null((await db.CollectionSchedules.SingleAsync(s => s.SourceEntityId == dependentEntity)).DependsOnScheduleId);
     }
 
+    /// <summary>
+    /// I1-06: прогін, що закрився <c>Degraded</c> (джерело відмовило), не «відбігає» розклад: <c>LastRunAt</c> і
+    /// watermark стоять, тож залежні розклади не вважають залежність виконаною.
+    /// </summary>
+    /// <remarks>
+    /// Мутація: прибрати умову <c>summary?.Degraded != true</c> у <c>CollectionJob</c> - <c>LastRunAt</c> рухається і на
+    /// відмові, перший рядок теорії червоний.
+    /// </remarks>
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "I1-06")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task I1_06_Degraded_прогін_не_відбігає_розклад_а_успішний_відбігає(bool degraded)
+    {
+        await using var db = Context();
+        var ranBefore = Now.AddHours(-5);
+        var (dependencyEntity, _) = await ArrangeAsync(db, dependencyRan: ranBefore, ownRan: null);
+        var runner = Substitute.For<ICollectionRunner>();
+        runner.RunAsync(dependencyEntity, Arg.Any<DateTime>(), Arg.Any<DateTime>(), Arg.Any<IJobProgress>(), Arg.Any<CancellationToken>())
+            .Returns(new CollectionRunSummary(Now.AddDays(-7), 5, degraded));
+
+        await Job(db, runner).ExecuteAsync(
+            new CollectionJobRequest(dependencyEntity, null, null), Substitute.For<IJobProgress>(), CancellationToken.None);
+
+        var schedule = await db.CollectionSchedules.AsNoTracking().SingleAsync(s => s.SourceEntityId == dependencyEntity);
+        Assert.Equal(degraded ? ranBefore : Now, schedule.LastRunAt);
+        Assert.Equal(degraded, schedule.Watermark is null);
+    }
+
     private static CollectionJob Job(EcrDbContext db, ICollectionRunner runner)
         => new(
             runner,

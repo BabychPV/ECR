@@ -393,8 +393,15 @@ Server Agent немає — завдання обслуговування НЕ �
 
 | Задача Agent | Коли | Що робить |
 |---|---|---|
-| `ECR: Partitions ahead` | 1-го числа, 02:40 | `arc.usp_EnsurePartitions @MonthsAhead = 6`: межі `pf_ByPeriodKey` на 6 міс. уперед; усередині — `arc.usp_EnsureAuditPartitions @MonthsAhead = 12`. Кожен `SPLIT` чекає Sch-M не довше `@LockTimeoutMs` (5 с), після 1222/1205 — пауза `@RetryDelaySeconds` (60 с) і повтор, до `@MaxAttempts` (10) разів; між спробами запити користувачів не стоять у черзі за Sch-M (аудит 09.10c, U1-02). Результат — рядок `itg.MaintenanceRun` `EnsurePartitions`: `Succeeded` (`added`, `retries`) або `Failed` (номер помилки; потрапляє у зведення збоїв) |
-| `ECR: Physical checks` | щодня 03:10 | недовірені/вимкнені FK (50041), невирівняні індекси (50042) |
+| `ECR: Partitions ahead [<база>]` | 1-го числа, 02:40 | `arc.usp_EnsurePartitions @MonthsAhead = 6`: межі `pf_ByPeriodKey` на 6 міс. уперед; усередині — `arc.usp_EnsureAuditPartitions @MonthsAhead = 12`. Кожен `SPLIT` чекає Sch-M не довше `@LockTimeoutMs` (5 с), після 1222/1205 — пауза `@RetryDelaySeconds` (60 с) і повтор, до `@MaxAttempts` (10) разів; між спробами запити користувачів не стоять у черзі за Sch-M (аудит 09.10c, U1-02). Результат — рядок `itg.MaintenanceRun` `EnsurePartitions`: `Succeeded` (`added`, `retries`) або `Failed` (номер помилки; потрапляє у зведення збоїв) |
+| `ECR: Physical checks [<база>]` | щодня 03:10 | недовірені/вимкнені FK (50041), невирівняні індекси (50042) |
+
+✎ R11-S2-06: ім'я завдання несе назву бази (`ECR: Partitions ahead [ECR]`): ім'я в `msdb` унікальне на весь
+інстанс, і раніше `-FirstDeployment` для другої бази ECR на тому ж інстансі видаляв завдання першої. Завдання зі
+старим іменем (без `[<база>]`) повторний запуск `14-agent-jobs.sql` для **своєї** бази (крок виконується в ній)
+замінює на нове; чуже старе завдання не чіпає. Для баз, розгорнутих раніше, нове завдання з'явиться лише після
+повтору `14-agent-jobs.sql` (або `-FirstDeployment`): до того діє старе. ⚠ Не перевірено на живому SQL Server Agent
+(у середовищі розробки Agent немає).
 
 ⚠ **потрібне рішення замовника:** вікна обслуговування. Код їх не знає. Розклади
 вище зашиті в коді, тож резервне копіювання ставте поза ними.
@@ -442,7 +449,7 @@ Server Agent немає — завдання обслуговування НЕ �
 | **ключі Data Protection** | таблиця `sec.DataProtectionKey` **в тій самій БД** | потрапляють у бекап бази. Без них недійсні всі сесії й **не розшифровуються секрети каналів сповіщень і пароль SMTP**, заданий у `/admin/notifications` (`D-263`) |
 | **сертифікат** `Auth:DataProtection:CertificateThumbprint` (з закритим ключем) | `LocalMachine\My` | якщо ключі захищені сертифікатом, без нього бекап бази не відкриє їх. Експортуйте PFX окремо, одразу після імпорту (`https-certificate.md` §7) |
 | **попередні** сертифікати Data Protection (`Auth:DataProtection:PreviousCertificateThumbprints`) | `LocalMachine\My` | ключі кільця, зашифровані ними, без них не читаються (`db` Degraded, `unreadableKeyCertificates`). PFX кожного зберігати, доки його ключі в кільці **або** в будь-якому бекапі бази |
-| задачі SQL Agent (`ECR: Partitions ahead`, `ECR: Physical checks`) | `msdb`, **не** в базі ECR | при відновленні на інший інстанс повторити `14-agent-jobs.sql` (або `deploy-ecr.ps1 -FirstDeployment`) |
+| задачі SQL Agent (`ECR: Partitions ahead [<база>]`, `ECR: Physical checks [<база>]`) | `msdb`, **не** в базі ECR | при відновленні на інший інстанс повторити `14-agent-jobs.sql` (або `deploy-ecr.ps1 -FirstDeployment`) |
 | конфіг майданчика | `%ProgramData%\ECR\config\appsettings.Production.json` | налаштування майданчика |
 | змінні оточення служби | `HKLM:\SYSTEM\CurrentControlSet\Services\EcrApi\Environment` | рядок підключення, секрети. Зберігайте в сховищі секретів, не поруч із бекапом |
 
@@ -930,8 +937,14 @@ DECLARE @a int; EXEC arc.usp_EnsureAuditPartitions @MonthsAhead = 12, @Added = @
       Set-Service EcrWorker -StartupType Disabled -ErrorAction SilentlyContinue
       Set-Service EcrApi -StartupType Disabled
       ```
-      Тип запуску поверне `deploy-ecr.ps1 -SkipSchema` цього вузла (п. 3: MSI ставить службу з `Start="auto"`,
-      крок 6 — `Automatic`, якщо служба досі `Disabled`). Служби вузла, де запускаєте скрипт, він вимикає й
+      ✎ R11-Z7/Z7-06: тип запуску на **цьому** вузлі повертає **MSI**, а не крок 6: `deploy-ecr.ps1 -SkipSchema`
+      ставить пакет, і оновлення (нова версія) перевстановлює службу з `Start="auto"`. Крок 6
+      (`Restore-EcrServicesAutoStart`) повертає `Automatic` лише службам, які вимкнув крок 2 **цього самого**
+      запуску, а з `-SkipSchema` крок 2 не виконується, і цей список порожній. Тому, якщо на вузлі **вже стоїть
+      ця сама версія** (повторний прохід: `msiexec /i` встановленого продукту — режим обслуговування, службу
+      не перевстановлює), служби лишаться `Disabled`, а `Restart-Service` на кроці 6 впаде: поверніть тип запуску
+      вручну **до** запуску скрипта — `Set-Service EcrApi -StartupType Automatic` (і `Set-Service EcrWorker
+      -StartupType Automatic`, якщо воркер увімкнено). Служби вузла, де запускаєте скрипт зі схемою, він вимикає й
       повертає сам;
    2. `deploy-ecr.ps1` (зі схемою) на одному вузлі;
    3. на кожному іншому вузлі — `deploy-ecr.ps1 -SkipSchema` з тими самими параметрами (MSI,
@@ -1653,7 +1666,13 @@ Msg 50801 … Передперевірка AN-80 N2-02: оновлення зу�
 
 **Що робити.**
 
-1. `Stop-Service EcrApi`, повний бекап (п. 6.2).
+1. ✎ R11-Y3/Y3-04: **`deploy-ecr.ps1` уже зупинив `EcrWorker` і `EcrApi`** і перевів у `Disabled` ті, що
+   були `Automatic` (п. 8, «Якщо крок 2 упав»), — `Stop-Service` не потрібен. Схему цією міграцією не змінено
+   (передперевірка — її перша команда), але штамп схеми вже `incomplete:<версія>`, тож Api, яку не
+   запустити (`Disabled`, `ECR-SYS-5031`), недоступна: **`PUT …/category-rule` з п. 3 тут неможливий**,
+   правила доведеться виправляти SQL (п. 3). Зручніше **до** запуску `deploy-ecr.ps1`: запит з п. 2 працює й
+   на старій схемі (вираз — `nvarchar(max)`), і поки Api працює, чернетки виправляються через `PUT`.
+   Повний бекап (п. 6.2).
 2. Повний перелік (порожньо, коли все чисто):
 
    ```sql
@@ -1665,9 +1684,11 @@ Msg 50801 … Передперевірка AN-80 N2-02: оновлення зу�
    ```
 
 3. Скоротіть вираз кожного правила: частину логіки можна винести в Row-формулу версії й послатися на
-   неї (`!ФОРМУЛА`). Для **чернетки** (`Status = 0`) - `PUT …/methodologies/{id}/versions/{vid}/category-rule`
-   з коротшим виразом. Для **опублікованої** версії правило незмінне через API: узгодьте новий вираз з
-   методологом і змініть його напряму (`UPDATE calc.CategoryRule SET Expression = … WHERE Id = …`), після
+   неї (`!ФОРМУЛА`). Для **чернетки** (`Status = 0`) за працюючої Api (до запуску скрипта) -
+   `PUT …/methodologies/{id}/versions/{vid}/category-rule` з коротшим виразом; після падіння кроку 2 Api
+   не працює, і чернетку теж правлять напряму (як нижче). Для **опублікованої** версії правило незмінне через
+   API: узгодьте новий вираз з методологом і змініть його напряму
+   (`UPDATE calc.CategoryRule SET Expression = … WHERE Id = …`), після
    чого перерахуйте документи, що читають це правило. ⚠ Вираз не обрізають «до 4000» механічно: це інша
    формула.
 4. Повторіть запит з кроку 2: порожньо.
@@ -1678,6 +1699,49 @@ Msg 50801 … Передперевірка AN-80 N2-02: оновлення зу�
 
 Тести: `AN80CarryOverInputsAsOfCategoryRuleLengthMigrationTests` (база з довгими правилами, Down/Up,
 скрипт двічі), `CalculationResultCarryOverTests` (позначка застарілості після переносу).
+
+### 8.8. Міграція R11 L4 і скрипти 11/12: нові індекси (час, ONLINE/офлайн, що перевірити)
+
+**Кого стосується.** Бази, розгорнуті до міграції `R11L4SweeperAndApprovalIndexes` і ще не оновлені. Помилок
+оновлення вона не дає (даних не змінює, індекси не унікальні, передперевірки немає), але **будує індекси на
+робочих таблицях**.
+
+**Що будується.**
+
+| Індекс | Таблиця | Навіщо | Чим створюється |
+|---|---|---|---|
+| `IX_CalculationRun_Running (StartedAt) WHERE [Status] = 'Running'` | `calc.CalculationRun` (мільйони прогонів) | прибиральник покинутих прогонів щохвилини шукав `Running` скануючи всю таблицю (Q1-04) | міграція EF |
+| `IX_ApprovalEvent_DocumentAt (DocumentId, At DESC) INCLUDE (Action, ByUserId)` | `wf.ApprovalEvent` | «хто затвердив» у переліку документів (X6-03) | міграція EF |
+| `IX_StructureChange_Entity (EntityType, EntityId, ChangedAt)` | `aud.StructureChange` і дзеркало `arc.AuditStructureChange` | історія сутності конфігурації й перемикання наборів довідників читали весь журнал (Q1-05) | `Sql/11-audit-tables.sql` і `Sql/12-archive-tables.sql` (скрипти розгортання, ідемпотентні) |
+
+**ONLINE чи офлайн** - як у п. 8.5: `SERVERPROPERTY('EngineEdition')` 3 (Enterprise/Developer/Evaluation), 5, 8 -
+`WITH (ONLINE = ON)`; 2 і 4 (Standard/Express) - **офлайн**. Офлайн-побудова `IX_CalculationRun_Running` читає
+всю `calc.CalculationRun` один раз: запис у таблицю (завершення розрахунків) чекає тривалість скану -
+**секунди на мільйони рядків** (самі рядки в індексі - лише прогони `Running`, одиниці). Проводьте оновлення, коли
+розрахунки не йдуть. Індекси `wf.ApprovalEvent` і `aud.StructureChange` - малі таблиці, побудова - секунди.
+Заміри часу на великій базі не проводилися: цифри вище - оцінка за обсягом скану, а не вимір.
+
+⚠ **Дзеркало в архіві обов'язкове.** `arc.usp_ArchiveAudit` перемикає партиції `aud.StructureChange` у
+`arc.AuditStructureChange` командою `SWITCH`, яка падає (Msg 4913) на будь-якій розбіжності індексів. Тому
+індекс створюють **обидва** скрипти: `11` (журнал) і `12` (архів); не виконуйте лише один із них. Звичайне
+розгортання (`setup-dev-db.ps1`, `deploy-ecr.ps1`) виконує обидва в потрібному порядку.
+
+**Що перевірити після оновлення.**
+
+```sql
+SELECT OBJECT_SCHEMA_NAME(object_id) + N'.' + OBJECT_NAME(object_id) AS tbl, name, has_filter
+FROM sys.indexes
+WHERE name IN (N'IX_CalculationRun_Running', N'IX_ApprovalEvent_DocumentAt', N'IX_StructureChange_Entity');
+-- Очікується 4 рядки: calc.CalculationRun, wf.ApprovalEvent, aud.StructureChange, arc.AuditStructureChange.
+```
+
+**Відкат.** `DROP INDEX` кожного (міграція має `Down`). Для `IX_StructureChange_Entity` зніміть індекс
+**з обох** таблиць (`aud.StructureChange` і `arc.AuditStructureChange`) - інакше скрипти `11`/`12` створять його
+знову, а SWITCH із розбіжним індексом падатиме.
+
+Тести: `R11L4SweeperAndApprovalIndexesMigrationTests` (Up/Down/Up, скрипт двічі, наявний індекс, гілка без ONLINE,
+план запитів), `AuditStructureChangeEntityIndexTests` (визначення в журналі й архіві, ідемпотентність скриптів,
+реальний SWITCH, план історії сутності).
 
 ## 9. Відкат
 
@@ -1850,17 +1914,29 @@ Set-Service EcrWorker -StartupType Automatic
 Start-Service EcrWorker
 ```
 
-Якщо службу прибирали (чи ніколи не ставили) — найпростіше повторити
-`deploy-ecr.ps1 … -SkipSchema` (без `-DisableWorker`) з тим самим
+Якщо службу ніколи не ставили, або ставиться **нова** версія пакета, —
+найпростіше повторити `deploy-ecr.ps1 … -SkipSchema` (без `-DisableWorker`) з тим самим
 `-ConnectionString`: MSI з `WORKER_ENABLED=1`, рядок підключення в
-`Environment`, режим Api, перезапуск і перевірка — разом. Вручну — той самий
-MSI, що в 10.1, з `WORKER_ENABLED=1`, потім рядок підключення
-(`docs/build/11-install-guide.md` §9, служба `EcrWorker`),
-`Restart-Service EcrWorker` і режим Api, як вище.
+`Environment`, режим Api, перезапуск і перевірка — разом.
 
-⚠ Той самий MSI-файл, що вже встановлено, без `REINSTALL=ALL
-REINSTALLMODE=vomus` нічого не перемикає: це режим обслуговування, умови
-компонентів не переобчислюються.
+⛔ ✎ R11-Z7/Z7-07: якщо службу прибирали (10.1) **тим самим MSI, що вже встановлено**, повтор
+`deploy-ecr.ps1 -SkipSchema` цього MSI **не спрацює**: він передає `/i … WORKER_ENABLED=1` без `REINSTALL`,
+для встановленого продукту це режим обслуговування (умови компонентів не переобчислюються), служба не
+з'являється, і скрипт зупиняється на кроці 3 повідомленням «Служби EcrWorker немає після msiexec з
+WORKER_ENABLED=1» (режим Api при цьому не змінено). Спершу поверніть службу тим самим MSI з перевстановленням:
+
+```powershell
+msiexec /i Ecr.msi /qn /l*v worker-on.log REINSTALL=ALL REINSTALLMODE=vomus WORKER_ENABLED=1 SERVICE_ACCOUNT=DOMAIN\ecr-svc$
+```
+
+і лише потім `deploy-ecr.ps1 … -SkipSchema` з тим самим `-ConnectionString` (рядок підключення в
+`Environment`, режим Api, перезапуск і перевірка). Вручну — той самий MSI з `WORKER_ENABLED=1`, потім рядок
+підключення (`docs/build/11-install-guide.md` §9, служба `EcrWorker`), `Restart-Service EcrWorker` і режим
+Api, як вище.
+
+⚠ `SERVICE_ACCOUNT` — той самий, що при установці (див. 10.1). Той самий MSI-файл, що вже встановлено, без
+`REINSTALL=ALL REINSTALLMODE=vomus` нічого не перемикає: це режим обслуговування, умови компонентів не
+переобчислюються.
 
 ### 10.3. Відкат воркера
 

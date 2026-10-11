@@ -159,9 +159,17 @@ export function listDocuments(params: DocumentListParams): Promise<DocumentListP
 /** Лічильники над переліком документів (`BE-09`); тип — зі згенерованої схеми. */
 type DocumentListSummary = components['schemas']['DocumentListSummaryResponse'];
 
-/** Зведення переліку за період. Адреса — повним літералом: її шукає сторож споживачів. */
-function documentListSummary(periodKey: number): Promise<DocumentListSummary> {
-  return apiFetch<DocumentListSummary>(`/api/v1/documents/summary?periodKey=${String(periodKey)}`);
+/**
+ * Зведення переліку за період (і, за потреби, проєкт).
+ *
+ * ⚠ Адреса — через `URLSearchParams` у шаблоні з одним літералом `/api/v1/documents/summary?…`, як і в
+ * `listDocuments`: сторож споживачів бере весь вміст між лапками.
+ */
+function documentListSummary(periodKey: number, projectId: number | null): Promise<DocumentListSummary> {
+  const query = new URLSearchParams({ periodKey: String(periodKey) });
+  if (projectId !== null) query.set('projectId', String(projectId));
+
+  return apiFetch<DocumentListSummary>(`/api/v1/documents/summary?${query.toString()}`);
 }
 
 /**
@@ -172,14 +180,20 @@ function documentListSummary(periodKey: number): Promise<DocumentListSummary> {
  *
  * ⚠ Ключ починається з `'documents'` навмисно: усе, що інвалідовує перелік
  * (створення документа), тим самим префіксом оновлює і смугу над ним.
+ *
+ * ⛔ Y7-02: `projectId` — той самий фільтр, що й у переліку (`?projectId=`). Сервер уміє зводити за проєктом
+ * (`GET /documents/summary?projectId=`), а клієнт його не передавав: за вибраного проєкту смуга над таблицею
+ * рахувала ВСІ видимі документи, тобто числа розходились із рядками під нею. Без проєкту ключ лишається
+ * `['documents','summary',periodKey]` — на нього спираються інвалідації (`refreshStaleness`).
  */
 export function useDocumentListSummary(
   periodKey: number | null,
   policy?: DocumentListSummaryPolicy,
+  projectId: number | null = null,
 ): UseQueryResult<DocumentListSummary> {
   return useQuery({
-    queryKey: ['documents', 'summary', periodKey],
-    queryFn: () => documentListSummary(periodKey ?? 0),
+    queryKey: projectId === null ? ['documents', 'summary', periodKey] : ['documents', 'summary', periodKey, projectId],
+    queryFn: () => documentListSummary(periodKey ?? 0, projectId),
     enabled: periodKey !== null,
     ...policy,
   });

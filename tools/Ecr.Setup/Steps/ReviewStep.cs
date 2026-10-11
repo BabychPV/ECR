@@ -73,6 +73,13 @@ internal sealed class ReviewStep(ICertificateSource certificates, Func<DateTime>
             backupRow.ForeColor = Color.DarkRed;
         }
 
+        // ⛔ X4-05: обхід перевірки інших вузлів (-SkipOtherNodesCheck) — червоний рядок перед «Install».
+        if (state.SkipOtherNodesCheck)
+        {
+            AddRow("Other nodes check", "SKIPPED (-SkipOtherNodesCheck) - EcrWorker and EcrApi must be stopped on EVERY other node")
+                .ForeColor = Color.DarkRed;
+        }
+
         if (state.Mode == WizardMode.FirstDeployment)
         {
             AddRow("Bootstrap administrator password", Presence(state.BootstrapPassword is not null));

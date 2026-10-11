@@ -52,6 +52,9 @@ public static partial class EcrConfigurationValidation
         ("Auth:StampCacheSeconds", 0),
         (Startup.HttpsTransport.PortKey, 0),
         ("Security:RateLimit:LoginPermitPerMinute", 1),
+
+        // U1-09: читається `GetValue<int>` на старті, але в переліку його не було — нуль дав би межу «жодного запиту».
+        ("Security:RateLimit:ChangePasswordPermitPerMinute", 1),
         ("Security:RateLimit:SearchPermit", 1),
         ("Security:RateLimit:SearchWindowSeconds", 1),
         ("Security:RateLimit:CspReportPermitPerMinute", 1),
@@ -97,6 +100,10 @@ public static partial class EcrConfigurationValidation
     [
         "Auth:RequireHttps",
         "Auth:EnableNegotiate",
+
+        // U1-09: читається `GetValue<bool>`; опечатка («ye») інакше падала б із повідомленням біндера, а не
+        // з переліком недійсних ключів разом з рештою.
+        Ecr.Api.Auth.AuthenticationSetup.AllowUnprotectedKeysKey,
         "Security:RateLimit:TrustForwardedFor",
         "Security:Csp:ReportOnly",
         "Security:Csp:Enforce",

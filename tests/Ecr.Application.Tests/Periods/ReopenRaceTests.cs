@@ -329,8 +329,8 @@ public sealed class ReopenRaceTests(SqlServerFixture sql)
         public Task RemoveStepsAsync(Ecr.Domain.Entities.Workflow.ApprovalRoute route, CancellationToken ct)
             => inner.RemoveStepsAsync(route, ct);
 
-        public Task<bool> RoleExistsAsync(int roleId, CancellationToken ct)
-            => inner.RoleExistsAsync(roleId, ct);
+        public Task<int?> FirstMissingRoleAsync(IReadOnlyCollection<int> roleIds, CancellationToken ct)
+            => inner.FirstMissingRoleAsync(roleIds, ct);
     }
 
     /// <summary>Проєкт, документ і період у заданому стані.</summary>

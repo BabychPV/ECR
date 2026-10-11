@@ -3,6 +3,7 @@ using System.Globalization;
 using ClosedXML.Excel;
 using Ecr.Adapters.Excel;
 using Ecr.Application.Errors;
+using Ecr.Application.Ports;
 using Ecr.Application.Security;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Enums;
@@ -79,9 +80,43 @@ public sealed class ImportDiffBuilderChangeLimitTests
         Assert.Empty(diff.Rejected);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "R1-05")]
+    public void R1_05_конфліктні_комірки_теж_рахуються_в_стелю_а_не_роздувають_перегляд()
+    {
+        // ⛔ Конфліктна комірка (рядок змінено після експорту) йде в `Rejected` і в `Overwritable`, а `continue` оминав
+        // перевірку `MaxChanges`: таблиця 3000 x 15 давала 45 000 записів у кожному переліку. Мутація: прибрати
+        // перевірку в гілці `changedSinceExport` - відмови немає, обидва переліки по 5001, тест червоний.
+        var (worksheet, block, table, rowIds, versions, workbook) = Arrange(
+            ImportDiffBuilder.MaxChanges + 1, filled: ImportDiffBuilder.MaxChanges + 1, exportedVersion: "0x01");
+        using var _ = workbook;
+
+        var ex = Assert.Throws<BusinessRuleException>(() => new ImportDiffBuilder().Build(
+            worksheet, block, PeriodKeyValue, table, NoDecisions, NoLookups, rowIds, versions, []));
+
+        Assert.Equal(ImportMessageKeys.TooManyChanges, ex.Details!["messageKey"]);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "R1-05")]
+    public void R1_05_конфлікти_в_межах_стелі_проходять_цілком()
+    {
+        var (worksheet, block, table, rowIds, versions, workbook) = Arrange(
+            ImportDiffBuilder.MaxChanges, filled: ImportDiffBuilder.MaxChanges, exportedVersion: "0x01");
+        using var _ = workbook;
+
+        var diff = new ImportDiffBuilder().Build(
+            worksheet, block, PeriodKeyValue, table, NoDecisions, NoLookups, rowIds, versions, []);
+
+        Assert.Equal(ImportDiffBuilder.MaxChanges, Assert.IsAssignableFrom<IReadOnlyCollection<ImportChange>>(diff.Overwritable).Count);
+        Assert.Empty(diff.Changes);
+    }
+
     private static (IXLWorksheet Worksheet, ExcelTableBlock Block, TableDef Table,
         Dictionary<string, long> RowIds, Dictionary<string, string> Versions, XLWorkbook Workbook)
-        Arrange(int rows, int filled)
+        Arrange(int rows, int filled, string? exportedVersion = null)
     {
         var builder = new TemplateBuilder { TemplateVersionId = 1 };
         var sheet = builder.Sheet("Water");
@@ -98,7 +133,7 @@ public sealed class ImportDiffBuilderChangeLimitTests
         {
             var key = "R" + i.ToString(CultureInfo.InvariantCulture);
             builder.Row(table, key, i);
-            rowRefs.Add(new ExcelRowRef(key, i + 1));
+            rowRefs.Add(new ExcelRowRef(key, i + 1, Version: exportedVersion));
             rowIds[key] = 1000 + i;
             versions[key] = "0x0A";
 

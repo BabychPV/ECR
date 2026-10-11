@@ -227,6 +227,13 @@ export function refreshStaleness(queryClient: QueryClient, documentId: number, p
 const settledJobs = new Map<string, 'refetched' | 'skipped'>();
 
 /**
+ * Скільки задач пам'ятаємо як враховані (P2-07). ⛔ Карта росла на кожну задачу перерахунку весь вік вкладки
+ * (оператор тримає її відкритою днями, правка = задача). Повтор рішення потрібен лише для недавніх задач
+ * (сітка і слідкувач доганяють одну й ту саму), тож старіші забуваємо — за порядком вставлення.
+ */
+const SettledJobsLimit = 256;
+
+/**
  * Задачі перерахунку документа за період, поставлені правками і ще не враховані в зрізах (AN-108 / P2-02),
  * з порядковим номером постановки. Слідкувач переходить на новішу задачу, не дочекавшись старішої, тож
  * «остання нічого не записала» ще не означає «нічого не записано»: записане старішою знає лише вона.
@@ -286,7 +293,14 @@ export function settleRecalculation(
   const nothingWritten = writtenCount === 0 && !olderPending;
   // Уже враховано як «нічого не записала», і знову нічого нового - повтор ігнорується.
   if (previous === 'skipped' && nothingWritten) return false;
+  // ⚠ Видалення перед записом — щоб оновлена задача стала найсвіжішою в порядку вставлення.
+  settledJobs.delete(jobId);
   settledJobs.set(jobId, nothingWritten ? 'skipped' : 'refetched');
+  while (settledJobs.size > SettledJobsLimit) {
+    const oldest = settledJobs.keys().next();
+    if (oldest.done === true) break;
+    settledJobs.delete(oldest.value);
+  }
   if (!nothingWritten) void invalidateSlices(queryClient, { documentId, periodKey });
   return true;
 }

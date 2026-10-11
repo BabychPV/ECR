@@ -17,8 +17,10 @@ namespace Ecr.Application.Sources;
 /// причини, а нічне перенесення відмовляло лише на першому прогоні із зібраними даними.
 /// </para>
 /// <para>
-/// ⚠ Інтеграл за часом пропускається: «швидкість × с» → величина (<c>Sm3/h</c> → <c>Sm3</c>) - законний перехід
-/// між розмірностями, його перевіряє конверсія на межі (<see cref="BoundaryUnitConversion"/>).
+/// ⚠ Інтеграл за часом не проходить перевірку розмірностей джерело/ціль: «швидкість × с» → величина
+/// (<c>Sm3/h</c> → <c>Sm3</c>) - законний перехід між розмірностями. Його перевіряє конверсія на межі
+/// (<see cref="BoundaryUnitConversion"/>) - і ТЕ САМЕ правило виконується тут при налаштуванні (Z2-04), а не лише
+/// в нічному перенесенні.
 /// </para>
 /// <para>
 /// ⚠ Невідома одиниця (немає в знімку) несумісністю НЕ вважається: її відсутність ловить існування одиниці
@@ -66,8 +68,22 @@ public static class FieldMapUnitCompatibility
         IUnitCatalog? units, string sourceField, int? sourceUnitId, int? targetUnitId,
         AggregationKind? aggregation, CancellationToken ct)
     {
-        if (units is null || sourceUnitId is null || targetUnitId is null || sourceUnitId == targetUnitId
-            || aggregation == AggregationKind.TimeIntegral)
+        if (units is null)
+        {
+            return;
+        }
+
+        // ⛔ Z2-04: інтеграл за часом не звільнений від перевірки, а перевіряється ІНШИМ правилом - тим самим, що
+        // виконує нічне перенесення (`BoundaryUnitConversion.ConvertFolded`): обидві одиниці оголошено, джерело - швидкість
+        // «величина / час», чисельник сумісний з ціллю. Раніше мапінг «MJ → kg» з інтегралом приймався, а задача
+        // відмовляла щоночі на кожному періоді.
+        if (aggregation == AggregationKind.TimeIntegral)
+        {
+            await EnsureIntegralAsync(units, sourceUnitId, targetUnitId, ct).ConfigureAwait(false);
+            return;
+        }
+
+        if (sourceUnitId is null || targetUnitId is null || sourceUnitId == targetUnitId)
         {
             return;
         }
@@ -94,6 +110,29 @@ public static class FieldMapUnitCompatibility
                 ["sourceUnitId"] = sourceUnitId.Value.ToString(CultureInfo.InvariantCulture),
                 ["targetUnitId"] = targetUnitId.Value.ToString(CultureInfo.InvariantCulture),
             });
+    }
+
+    /// <summary>
+    /// Пробна конверсія інтеграла: ті самі відмови, що дала б задача на першому прогоні, - але при налаштуванні.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Одиниця, якої немає в знімку, відмовою тут не стає (її ловить існування одиниці й конверсія на межі) -
+    /// як і в <see cref="IsIncompatible"/>.
+    /// </remarks>
+    private static async Task EnsureIntegralAsync(
+        IUnitCatalog units, int? sourceUnitId, int? targetUnitId, CancellationToken ct)
+    {
+        var catalog = await units.GetAsync(ct).ConfigureAwait(false);
+
+        if ((sourceUnitId is { } s && catalog.DimensionOf(s) == 0)
+            || (targetUnitId is { } t && catalog.DimensionOf(t) == 0))
+        {
+            return;
+        }
+
+        // Значення не важливе: відмова залежить лише від одиниць.
+        _ = BoundaryUnitConversion.ConvertFolded(
+            AggregationKind.TimeIntegral, 0m, sourceUnitId, targetUnitId, catalog);
     }
 
     private static string CodeOf(UnitCatalogSnapshot catalog, int unitId)

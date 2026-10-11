@@ -41,7 +41,14 @@ public sealed class AuditReader(EcrDbContext db) : IAuditReader
 
         await using var command = connection.CreateCommand();
 
-        var where = BuildCellChangeWhere(filter, command, Cursor.Decode(page.Cursor));
+        var where = BuildCellChangeWhere(filter, command, Cursor.DecodeAt(page.Cursor));
+
+        // ⛔ P1-07: порядок — ЗА КЛАСТЕРНИМ КЛЮЧЕМ таблиці `(ChangedAt, Id)`, а не за `Id`. Партиції йдуть за
+        // `ChangedAt`, тож `ORDER BY Id` змушував рушій прочитати ВЕСЬ відсічений вікном (до 92 діб) обсяг і
+        // сортувати його на кожну сторінку; прямий (чи зворотний, для історії комірки — AN-98) обхід індексу
+        // зупиняється після `@take` рядків. `Id` — другий складник: пакет пишеться одним `ChangedAt`.
+        var order = filter.NewestFirst ? "ChangedAt DESC, Id DESC" : "ChangedAt, Id";
+        var outerOrder = filter.NewestFirst ? "a.ChangedAt DESC, a.Id DESC" : "a.ChangedAt, a.Id";
 
         // ⚠ `R-18`: імена — ПІСЛЯ вибору сторінки, у зовнішньому запиті. Вікно й
         // курсор лишаються дослівно тими самими над самою `aud.CellChange`
@@ -59,7 +66,7 @@ public sealed class AuditReader(EcrDbContext db) : IAuditReader
                            OldValue, NewValue, ChangedByUserId, Origin, IsLateEdit, IsOutOfWindow
                       FROM aud.CellChange
                      WHERE {where}
-                     ORDER BY Id
+                     ORDER BY {order}
                    ) AS a
               LEFT JOIN sec.[User] AS u ON u.Id = a.ChangedByUserId
               LEFT JOIN doc.Document AS d ON d.Id = a.DocumentId
@@ -69,7 +76,7 @@ public sealed class AuditReader(EcrDbContext db) : IAuditReader
               OUTER APPLY (SELECT TOP (1) r.LabelL10n
                              FROM cfg.RowDef AS r
                             WHERE r.TableDefId = c.TableDefId AND r.RowKey = a.RowKey AND r.IsDeleted = 0) AS rd
-             ORDER BY a.Id;
+             ORDER BY {outerOrder};
             """;
 
         command.Parameters.AddWithValue("@take", page.Limit + 1);
@@ -119,7 +126,7 @@ public sealed class AuditReader(EcrDbContext db) : IAuditReader
         // (`CountCellChangesByColumnAsync` + межі читання S6) — читач порту не знає, що саме читач бачить.
         return new PagedResult<CellChangeView>(
             items,
-            hasMore ? Cursor.Encode(rows[page.Limit - 1].Id) : null,
+            hasMore ? Cursor.Encode(rows[page.Limit - 1].View.ChangedAt, rows[page.Limit - 1].Id) : null,
             TotalCount: null);
     }
 
@@ -136,7 +143,7 @@ public sealed class AuditReader(EcrDbContext db) : IAuditReader
 
         // ⚠ Той самий WHERE, що й у читанні сторінки (одне джерело — BuildCellChangeWhere): вікно за
         // ChangedAt відсікає партиції, і підрахунок читає лише їх. Без курсору.
-        var where = BuildCellChangeWhere(filter, command, afterId: null);
+        var where = BuildCellChangeWhere(filter, command, after: null);
 
         // ⚠ Розріз за колонкою, а не одне число: відсів за межами читання (S6) — прерогатива виклику,
         // і сума з прихованих колонок не повинна навіть існувати поруч із відповіддю. Один прохід, без join.
@@ -178,7 +185,8 @@ public sealed class AuditReader(EcrDbContext db) : IAuditReader
     /// WHERE над <c>aud.CellChange</c> за фільтром: вікно, необов'язковий курсор і звуження.
     /// Параметри додаються в <paramref name="command"/>.
     /// </summary>
-    private static StringBuilder BuildCellChangeWhere(CellChangeFilter filter, SqlCommand command, long? afterId)
+    private static StringBuilder BuildCellChangeWhere(
+        CellChangeFilter filter, SqlCommand command, (DateTime At, long Id)? after)
     {
         // ⚠ Вікно за ChangedAt стоїть ПЕРШИМ у WHERE не заради стилю: саме воно
         // відсікає партиції. Курсор за Id додається до нього, а не замість —
@@ -187,10 +195,20 @@ public sealed class AuditReader(EcrDbContext db) : IAuditReader
         command.Parameters.AddWithValue("@from", filter.From);
         command.Parameters.AddWithValue("@to", filter.To);
 
-        if (afterId is { } after)
+        if (after is { } position)
         {
-            where.Append("\n                   AND Id > @after");
-            command.Parameters.AddWithValue("@after", after);
+            // ⚠ Курсор — пара кластерного ключа `(ChangedAt, Id)` (P1-07). Перша умова за `ChangedAt` — кордон
+            // діапазону для seek по індексу, друга — точна «строго після/перед» позиції; без неї рядки з тим самим
+            // `ChangedAt` (пакет) повторилися б чи загубилися на межі сторінки. Напрямок — за порядком сторінки.
+            where.Append(filter.NewestFirst
+                ? "\n                   AND ChangedAt <= @afterAt AND (ChangedAt < @afterAt OR Id < @afterId)"
+                : "\n                   AND ChangedAt >= @afterAt AND (ChangedAt > @afterAt OR Id > @afterId)");
+
+            // ⚠ `datetime2(3)` — ширина колонки зі схеми: інша точність змусила б перетворювати КОЛОНКУ.
+            var moment = command.Parameters.Add("@afterAt", SqlDbType.DateTime2);
+            moment.Scale = 3;
+            moment.Value = position.At;
+            command.Parameters.Add("@afterId", SqlDbType.BigInt).Value = position.Id;
         }
 
         // ⛔ Умова додається ЛИШЕ за наявності значення, і кожна — іменованим
@@ -233,6 +251,12 @@ public sealed class AuditReader(EcrDbContext db) : IAuditReader
         if (filter.ChangedByUserId is { } changedBy)
         {
             And("ChangedByUserId = @changedBy", "@changedBy", changedBy, SqlDbType.Int);
+        }
+
+        if (filter.PeriodKey is { } periodKey)
+        {
+            // AN-98: період — окрема вісь від вікна `ChangedAt`; відсів на сервері, ДО `TOP` і курсора.
+            And("PeriodKey = @periodKey", "@periodKey", periodKey, SqlDbType.Int);
         }
 
         if (filter.Origin is { } origin)
@@ -286,6 +310,26 @@ public sealed class AuditReader(EcrDbContext db) : IAuditReader
         return where;
     }
 
+    /// <summary>Текст запиту історії однієї сутності конфігурації (Q1-05); окремо - щоб тест міряв план бойового тексту.</summary>
+    /// <param name="typeParameterNames">Імена параметрів типів сутностей (<c>@t0</c>, <c>@t1</c>…).</param>
+    /// <returns>T-SQL із параметрами <c>@take</c>, <c>@entityId</c> і переданими <c>@tN</c>.</returns>
+    /// <remarks>
+    /// ⚠ Предикат <c>EntityType IN (...) AND EntityId = @entityId</c> обслуговує <c>IX_StructureChange_Entity</c>
+    /// (<c>11-audit-tables.sql</c>): seek по сутності й порядок <c>ChangedAt DESC, Id DESC</c> зворотним проходом
+    /// індексу. Без нього запит йшов зворотним скном кластерного ключа <c>(ChangedAt, Id)</c> усіх партицій.
+    /// </remarks>
+    internal static string StructureHistorySql(IReadOnlyList<string> typeParameterNames)
+        => $"""
+            SELECT TOP (@take)
+                   s.ChangedAt, s.EntityType, s.EntityId, s.Operation,
+                   s.OldJson, s.NewJson, s.ChangeReason, s.ChangedByUserId, u.DisplayName
+              FROM aud.StructureChange AS s
+              LEFT JOIN sec.[User] AS u ON u.Id = s.ChangedByUserId
+             WHERE s.EntityType IN ({string.Join(", ", typeParameterNames)})
+                   AND s.EntityId = @entityId
+             ORDER BY s.ChangedAt DESC, s.Id DESC;
+            """;
+
     /// <inheritdoc />
     public async Task<IReadOnlyList<StructureChangeView>> ReadStructureChangesAsync(
         IReadOnlyList<string> entityTypes, int entityId, int limit, CancellationToken ct)
@@ -313,16 +357,7 @@ public sealed class AuditReader(EcrDbContext db) : IAuditReader
             command.Parameters.AddWithValue(names[i], entityTypes[i]);
         }
 
-        command.CommandText = $"""
-            SELECT TOP (@take)
-                   s.ChangedAt, s.EntityType, s.EntityId, s.Operation,
-                   s.OldJson, s.NewJson, s.ChangeReason, s.ChangedByUserId, u.DisplayName
-              FROM aud.StructureChange AS s
-              LEFT JOIN sec.[User] AS u ON u.Id = s.ChangedByUserId
-             WHERE s.EntityType IN ({string.Join(", ", names)})
-                   AND s.EntityId = @entityId
-             ORDER BY s.ChangedAt DESC, s.Id DESC;
-            """;
+        command.CommandText = StructureHistorySql(names);
 
         command.Parameters.AddWithValue("@take", limit);
         command.Parameters.AddWithValue("@entityId", entityId);

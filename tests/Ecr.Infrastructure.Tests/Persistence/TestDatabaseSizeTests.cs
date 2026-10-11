@@ -47,7 +47,7 @@ public sealed class TestDatabaseSizeTests(SqlServerFixture sql)
     /// 56–72 МБ. Велика заливка в тесті — порціями, як там і в
     /// <c>CollectionStoreCoverageWindowTests</c>.
     /// </remarks>
-    private const int MaxFileMb = 128;
+    private const int MaxFileMb = SqlServerFixture.MaxFileMb;
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
@@ -65,6 +65,25 @@ public sealed class TestDatabaseSizeTests(SqlServerFixture sql)
         // сказало б, чи це файлова група з `01-filegroups.sql`, чи журнал, що
         // розрісся від довгої транзакції, — а лікуються вони по-різному.
         Assert.Empty(oversized);
+    }
+
+    /// <summary>
+    /// Z8-03: ця перевірка знімає розмір лише в ту мить, коли до неї дійшла черга, — журнал, що розрісся від класу
+    /// ПІСЛЯ неї, проходив. Тому те саме питання ставить <c>SqlServerFixture.DisposeAsync</c> наприкінці колекції.
+    /// Тут — що спільна функція справді бачить завеликі файли (стеля 0 МБ — завжди є) і мовчить на великій стелі;
+    /// що <c>DisposeAsync</c> її кличе й кидає виняток після зупинки контейнера — <c>SqlServerFixtureSizeGuardTests</c>.
+    /// Мутація: повернути <c>null</c> завжди → червоний перший Assert.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Спільна_перевірка_розміру_бачить_завеликі_файли()
+    {
+        var withZeroCeiling = await SqlServerFixture.FindOversizedFilesAsync(sql.ConnectionString, maxFileMb: 0);
+        Assert.False(string.IsNullOrEmpty(withZeroCeiling), "стеля 0 МБ мусить знаходити файли тестової бази");
+        Assert.Contains(" МБ", withZeroCeiling, StringComparison.Ordinal);
+
+        Assert.Null(await SqlServerFixture.FindOversizedFilesAsync(sql.ConnectionString, maxFileMb: int.MaxValue));
     }
 
     [Fact]

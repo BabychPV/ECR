@@ -411,7 +411,12 @@ public sealed class CalculationResultStore(EcrDbContext db, IClock clock, StaleC
             ?? throw new InvalidOperationException($"Прогону {calculationRunId} не існує.");
 
         // Новий актуальний прогін змінює "застарілість результатів" (кеш лічильників скидається після коміту).
-        staleEpoch?.Invalidate(db);
+        //
+        // ⛔ R2-04 / Z5-02 (AN-108): ЛИШЕ свого періоду. Застарілість періоду P рахується з прогонів ТОГО Ж періоду
+        // (`StaleResultsQuery`: `r0.PeriodKey = P`), а `Invalidate(db)` без періоду піднімав ГЛОБАЛЬНУ епоху - кеш
+        // лічильників УСІХ періодів і проєктів скидався після кожного завершеного перерахунку. Прогін без періоду
+        // (повний, `PeriodKey = null`) лишає глобальний підйом: його вплив на конкретні періоди не відомий.
+        staleEpoch?.Invalidate(db, run.PeriodKey is { } periodKey ? [periodKey] : null);
 
         // ⚠ Обидві половини — в одній транзакції (ФВ-9.11; відкриває її
         // `RunCalculationHandler.CompleteAsync`). Між зняттям актуальності зі старого прогону і

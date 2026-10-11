@@ -4,6 +4,7 @@ using Ecr.Application;
 using Ecr.Application.Common;
 using Ecr.Application.Documents;
 using Ecr.Application.Documents.Dto;
+using Ecr.Application.Errors;
 using Ecr.Application.Integration.SourceEvents;
 using Ecr.Application.Ports;
 using Ecr.Domain.Abstractions;
@@ -11,6 +12,7 @@ using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Entities.Dictionaries;
 using Ecr.Domain.Entities.Documents;
 using Ecr.Domain.Entities.External;
+using Ecr.Domain.Entities.Integration;
 using Ecr.Domain.Entities.Security;
 using Ecr.Domain.Entities.Workflow;
 using Ecr.Domain.Enums;
@@ -156,6 +158,32 @@ public sealed class SourceEventSyncJobTests(SqlServerFixture sql)
 
         Assert.Single(await RowsAsync(stand));
         Assert.Equal(SourceEventLinkStatus.Synced, Assert.Single(await LinksAsync(stand)).Status);
+    }
+
+    /// <summary>
+    /// Y4-05: відмова запису події йде в журнал покриття ключем каталогу причини, а не українським текстом винятку
+    /// (який шаблон <c>coverageEvents.eventWriteFailed</c> підставив би параметром у англійське/російське речення).
+    /// </summary>
+    /// <remarks>Мутація: повернути <c>Failure = ex.Message</c> - у деталях українська фраза, тест червоний.</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "Y4-05")]
+    public async Task Y4_05_відмова_запису_події_в_журналі_покриття_ключем_причини_а_не_текстом_винятку()
+    {
+        await using var stand = await ArrangeAsync();
+        var source = new FakeEventSource(Ev("E1", Start, End));
+
+        await RunAsync(stand, source, patcherOverride: new RejectingPatcher());
+
+        await using var db = sql.CreateContext();
+        var failed = await db.CollectionCoverages.AsNoTracking()
+            .Where(c => c.SourceEntityId == stand.EntityId && c.Status == CollectionCoverage.SkippedWriteConflict)
+            .Select(c => c.Details)
+            .ToListAsync();
+
+        Assert.Contains(failed, d => d!.Contains("err.ECR-CELL-0422.tooManyDecimals", StringComparison.Ordinal));
+        Assert.All(failed, d => Assert.DoesNotMatch("[\u0400-\u04FF]", d!));
     }
 
     [Fact]
@@ -537,6 +565,69 @@ public sealed class SourceEventSyncJobTests(SqlServerFixture sql)
         Assert.Single(await LinksAsync(stand));
     }
 
+    /// <summary>
+    /// F2-04 (аудит R11): за черги в базі автоперерахунок ставиться В ТІЙ САМІЙ транзакції, що й видалення рядків.
+    /// Збій постановки відкочує видалення: рядок, його зв'язок і запис журналу лишаються, а наступний прогін
+    /// знову бачить зниклу подію. Доти перерахунок ставився окремо ПІСЛЯ коміту видалення: збій чи kill між
+    /// ними лишав видалений рядок без перерахунку, і ніхто б його вже не поставив.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ МУТАЦІЙНИЙ ДОКАЗ: повернути постановку лише після коміту (прибрати блок «F2-04» у
+    /// `ApplyRemovalsAsync`) — рядок EF-E1 видалено, червоніє.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "F2-04")]
+    public async Task F2_04_Збій_постановки_перерахунку_в_черзі_в_базі_відкочує_видалення_рядка()
+    {
+        await using var stand = await ArrangeAsync();
+        var source = new FakeEventSource(
+            Ev("E1", Start, End), Ev("E2", Start.AddHours(1), End.AddHours(1)));
+        await RunAsync(stand, source);
+
+        var trigger = Substitute.For<ICalculationTrigger>();
+        trigger.EnlistsInCallerTransaction.Returns(true);
+        trigger.RequestAsync(Arg.Any<long>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromException<string?>(new InvalidOperationException("черга недоступна")));
+
+        source.Result = new SourceEventResult([Ev("E2", Start.AddHours(1), End.AddHours(1))], false, null);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => RunAsync(stand, source, trigger: trigger));
+
+        // Видалення відкотилося разом із невдалою постановкою: рядок, зв'язок і журнал — як були.
+        Assert.Equal(["EF-E1", "EF-E2"], (await RowsAsync(stand)).Select(r => r.RowKey).Order());
+        Assert.Equal(["E1", "E2"], (await LinksAsync(stand)).Select(l => l.SourceEventId).Order());
+        Assert.Equal(0, await JournalCountAsync(stand, "E1"));
+    }
+
+    /// <summary>
+    /// F2-04: черга в базі — перерахунок видалених періодів ставиться ОДИН раз (у транзакції видалення), а
+    /// фінальна постановка прогону вже поставлений період не дублює; чужа черга (Quartz) — як і раніше, після коміту.
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "F2-04")]
+    public async Task F2_04_Перерахунок_видаленого_періоду_ставиться_рівно_один_раз(bool enlists)
+    {
+        await using var stand = await ArrangeAsync();
+        var source = new FakeEventSource(
+            Ev("E1", Start, End), Ev("E2", Start.AddHours(1), End.AddHours(1)));
+        await RunAsync(stand, source);
+
+        var trigger = Substitute.For<ICalculationTrigger>();
+        trigger.EnlistsInCallerTransaction.Returns(enlists);
+
+        source.Result = new SourceEventResult([Ev("E2", Start.AddHours(1), End.AddHours(1))], false, null);
+        await RunAsync(stand, source, trigger: trigger);
+
+        Assert.Equal(["EF-E2"], (await RowsAsync(stand)).Select(r => r.RowKey));
+        await trigger.Received(1).RequestAsync(stand.DocumentId, new PeriodKey(202601), Arg.Any<CancellationToken>());
+        Assert.Single(trigger.ReceivedCalls(), c => c.GetMethodInfo().Name == nameof(ICalculationTrigger.RequestAsync));
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
@@ -733,7 +824,8 @@ public sealed class SourceEventSyncJobTests(SqlServerFixture sql)
 
         Assert.Equal(["EF-E3"], (await RowsAsync(stand)).Select(r => r.RowKey));
         await trigger.Received(1).RequestAsync(stand.DocumentId, new PeriodKey(202601), Arg.Any<CancellationToken>());
-        Assert.Single(trigger.ReceivedCalls());
+        // F2-04: читання `EnlistsInCallerTransaction` — теж «виклик» підробки; рахуємо лише постановки.
+        Assert.Single(trigger.ReceivedCalls(), c => c.GetMethodInfo().Name == nameof(ICalculationTrigger.RequestAsync));
     }
 
     // ── Блокери рев'ю «Аудита» (Б1–Б4) і межі вікна ──
@@ -1459,7 +1551,7 @@ public sealed class SourceEventSyncJobTests(SqlServerFixture sql)
         Stand stand, FakeEventSource source, bool freshContainer = false, ICalculationTrigger? trigger = null,
         ILogger<SourceEventSyncJob>? logger = null, int? entityId = null,
         DateTime? from = null, DateTime? to = null, bool confirm = false, bool clearTrackerOnWrite = false,
-        Func<Task>? afterRemovalDecision = null)
+        Func<Task>? afterRemovalDecision = null, ICellPatcher? patcherOverride = null)
     {
         // ⚠ Метадані таблиці кешуються в контейнері: зміна стелі рядків у базі видна лише новому контейнеру.
         await using var fresh = freshContainer ? BuildProvider() : null;
@@ -1482,7 +1574,7 @@ public sealed class SourceEventSyncJobTests(SqlServerFixture sql)
         var job = new SourceEventSyncJob(
             db,
             [source],
-            clearTrackerOnWrite ? new TrackerClearingPatcher(patcher, db) : patcher,
+            patcherOverride ?? (clearTrackerOnWrite ? new TrackerClearingPatcher(patcher, db) : patcher),
             services.GetRequiredService<ICoverageJournal>(),
             services.GetRequiredService<IntegrationActor>(),
             clock,
@@ -1554,6 +1646,24 @@ public sealed class SourceEventSyncJobTests(SqlServerFixture sql)
             db.ChangeTracker.Clear();
             return result;
         }
+    }
+
+    /// <summary>Патчер, що відхиляє будь-який запис рядків українським повідомленням із ключем каталогу.</summary>
+    private sealed class RejectingPatcher : ICellPatcher
+    {
+        public Task<IntegrationWriteResult> ApplyIntegrationAsync(
+            long documentId, long tableInstanceId, PeriodKey periodKey, IReadOnlyList<IntegrationCellValue> cells, CancellationToken ct)
+            => throw Reject();
+
+        public Task<IntegrationWriteResult> ApplyIntegrationRowsAsync(
+            long documentId, long tableInstanceId, PeriodKey periodKey, IReadOnlyList<IntegrationRowUpsert> rows, CancellationToken ct)
+            => throw Reject();
+
+        private static BusinessRuleException Reject()
+            => new(
+                "ECR-CELL-0422",
+                "Колонка зберігає не більше 16 знаків після коми.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-CELL-0422.tooManyDecimals" });
     }
 
     private sealed class FakeEventSource(params SourceEvent[] events) : IExternalDataSource

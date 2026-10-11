@@ -33,6 +33,13 @@ public sealed class MethodologyImportController(ImportMethodologyPackageHandler 
     /// <c>200</c> з <c>outcome = unchanged</c>.
     /// </remarks>
     [HttpPost("import")]
+
+    // ⛔ S1-04: права перевіряються ДО читання тіла (фільтр `RequirePermissionsBeforeBody`): без права пакет до 64 МБ
+    // не приймається й не розбирається. Обробник перевіряє їх повторно. ⚠ Звичайним коментарем, а не XML-документом:
+    // XML-документ дії потрапляє в опис операції OpenAPI, тобто в контракт (`contracts/openapi.snapshot.json`).
+    [Ecr.Api.Security.RequirePermissionsBeforeBody(
+        Ecr.Application.Calculations.ImportMethodologyPackageHandler.Permission,
+        Ecr.Application.Calculations.ImportMethodologyPackageHandler.ConstantPermission)]
     [RequestSizeLimit(64 * 1024 * 1024)]
     [ProducesResponseType<MethodologyImportReportDto>(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]

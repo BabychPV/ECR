@@ -46,6 +46,18 @@ export function hasUnsavedChanges(): boolean {
   return false;
 }
 
+/**
+ * Чи є незбережене в КОЖНОМУ джерелі, окрім названого (`F6-05`).
+ *
+ * ⚠ Для джерела, якому треба знати, чи спитає людину хтось інший (напр. сітка при закритті
+ * вкладки: інакше її маячок їде ще до питання, і «Залишитися» лишає її правки зі старою версією).
+ */
+export function hasUnsavedChangesExcept(excludedId: string): boolean {
+  for (const [id, source] of sources) if (id !== excludedId && source.hasUnsaved()) return true;
+
+  return false;
+}
+
 export function unsavedCount(): number {
   let total = 0;
   for (const source of sources.values()) {

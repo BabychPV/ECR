@@ -659,7 +659,8 @@ public sealed partial class CollectionRunner(
         // нічого не дало, щопрогону ставила б матеріалізацію (і SkippedPeriodClosed) закритому місяцю.
         return new CollectionRunSummary(
             earliestWritten is { } changed && changed < fromUtc ? changed : fromUtc,
-            retrieved);
+            retrieved,
+            Degraded: failureCode is not null);
     }
 
     /// <summary>Конверт причини (<c>Q-326</c>): ключ каталогу й параметри підстановки.</summary>
@@ -972,7 +973,7 @@ public sealed partial class CollectionRunner(
     private static bool IsCatalogCode(string? code)
         => code is not null && CatalogCode().IsMatch(code);
 
-    [System.Text.RegularExpressions.GeneratedRegex(@"^ECR-[A-Z]+-\d{4}$", System.Text.RegularExpressions.RegexOptions.CultureInvariant)]
+    [System.Text.RegularExpressions.GeneratedRegex(@"^ECR-[A-Z]+-\d{4}\z", System.Text.RegularExpressions.RegexOptions.CultureInvariant)]
     private static partial System.Text.RegularExpressions.Regex CatalogCode();
 
     /// <summary>

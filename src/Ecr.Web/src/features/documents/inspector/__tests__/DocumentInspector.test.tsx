@@ -265,6 +265,8 @@ describe('інспектор документа (UI-25)', () => {
     expect(url).toContain('documentId=1');
     expect(url).toContain('rowKey=R4');
     expect(url).toContain('columnDefId=33');
+    // AN-98: період іде в запит (відсів на сервері до сторінки), а не лишається на клієнті.
+    expect(new URL(url, 'http://localhost').searchParams.get('periodKey')).toBe('202609');
   });
 
   it('N3-02: зміна документа скидає комірку під курсором', () => {

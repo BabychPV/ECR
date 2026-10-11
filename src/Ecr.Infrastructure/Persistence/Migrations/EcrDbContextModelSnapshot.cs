@@ -179,6 +179,9 @@ namespace Ecr.Infrastructure.Persistence.Migrations
 
                     SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex(new[] { "ProjectId", "FinishedAt" }, "IX_CalculationRun_Project_FinishedAt"), new[] { "PeriodKey", "Status", "ErrorMessage" });
 
+                    b.HasIndex(new[] { "StartedAt" }, "IX_CalculationRun_Running")
+                        .HasFilter("[Status] = 'Running'");
+
                     b.ToTable("CalculationRun", "calc");
                 });
 
@@ -5229,6 +5232,12 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .HasColumnType("tinyint");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("DocumentId", "At")
+                        .IsDescending(false, true)
+                        .HasDatabaseName("IX_ApprovalEvent_DocumentAt");
+
+                    SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex("DocumentId", "At"), new[] { "Action", "ByUserId" });
 
                     b.HasIndex("DocumentId", "PeriodKey", "At")
                         .IsDescending(false, false, true)

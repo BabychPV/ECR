@@ -58,6 +58,7 @@ public sealed class AuditController(
     /// Пошук (UI-38): підрядок бізнес-ключа документа, ключа рядка чи коду колонки; до 100 знаків (довше
     /// обрізається), спецсимволи <c>LIKE</c> — буквальні. Лише по видимих читачу рядках.
     /// </param>
+    /// <param name="periodKey">Звітний період змін (AN-98); без нього — усі. Чужі періоди відсіює сервер до сторінки.</param>
     /// <param name="ct">Токен скасування.</param>
     [HttpGet("cells")]
     [ProducesResponseType<Ecr.Application.Common.PagedResult<Ecr.Application.Ports.CellChangeView>>(
@@ -75,6 +76,7 @@ public sealed class AuditController(
         [FromQuery] long? documentId, [FromQuery] string? rowKey, [FromQuery] int? columnDefId,
         [FromQuery] int? author, [FromQuery] string? origin, [FromQuery] bool lateOnly,
         [FromQuery] int limit, [FromQuery] string? cursor, [FromQuery] string? q,
+        [FromQuery] int? periodKey,
         CancellationToken ct)
     {
         var page = new CursorRequest(limit == 0 ? 50 : limit, cursor);
@@ -90,7 +92,8 @@ public sealed class AuditController(
             author,
             string.IsNullOrWhiteSpace(origin) ? null : origin,
             lateOnly,
-            string.IsNullOrWhiteSpace(q) ? null : q);
+            string.IsNullOrWhiteSpace(q) ? null : q,
+            PeriodKey: periodKey);
 
         // Вікно, його ширина, розмір сторінки й обидва рівні доступу
         // перевіряються в обробнику: правило «без вікна запит іде по всіх

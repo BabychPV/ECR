@@ -81,6 +81,68 @@ public sealed class ProgramDataConfigurationTests
         }
     }
 
+    /// <summary>
+    /// U1-08: синтаксична помилка у файлі на ЖИВІЙ службі (перечитування) не обнуляє налаштування — лишаються значення
+    /// з останнього вдалого читання, а помилка іде в <see cref="ProgramDataConfiguration.ReloadFailed"/>; після
+    /// виправлення файлу нове значення підхоплюється. Перше читання (старт) з поганим файлом — як і раніше, виняток.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Перечитування викликається детерміновано (<c>IConfigurationRoot.Reload</c>), а не через файловий спостерігач
+    /// (його затримка зробила б тест плаваючим). Мутація: повернути <c>AddJsonFile</c> замість свого постачальника —
+    /// <c>Reload</c> кидає виняток, а значення зникає.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    public void U1_08_синтаксична_помилка_при_перечитуванні_лишає_останні_вдалі_значення()
+    {
+        var root = CreateConfigFile("""{ "Telemetry": { "OtlpEndpoint": "http://collector:4317" } }""");
+        var failures = new System.Collections.Concurrent.ConcurrentBag<string>();
+        var previousHandler = ProgramDataConfiguration.ReloadFailed;
+        ProgramDataConfiguration.ReloadFailed = (file, _) => failures.Add(file);
+        try
+        {
+            var config = (IConfigurationRoot)new ConfigurationBuilder().AddProgramDataConfig(root).Build();
+            Assert.Equal("http://collector:4317", config["Telemetry:OtlpEndpoint"]);
+
+            var path = Path.Combine(root, "ECR", "config", "appsettings.Production.json");
+            File.WriteAllText(path, """{ "Telemetry": { "OtlpEndpoint": "http://collector:4317", } """);
+
+            config.Reload();
+
+            Assert.Equal("http://collector:4317", config["Telemetry:OtlpEndpoint"]);
+
+            // ⚠ NotEmpty, а не Single: файловий спостерігач (reloadOnChange) теж може перечитати зіпсований файл.
+            Assert.NotEmpty(failures);
+
+            // Виправили файл — нове значення діє.
+            File.WriteAllText(path, """{ "Telemetry": { "OtlpEndpoint": "http://other:4317" } }""");
+            config.Reload();
+
+            Assert.Equal("http://other:4317", config["Telemetry:OtlpEndpoint"]);
+        }
+        finally
+        {
+            ProgramDataConfiguration.ReloadFailed = previousHandler;
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    public void U1_08_непридатний_файл_на_старті_лишається_відмовою()
+    {
+        var root = CreateConfigFile("""{ "Telemetry": { "OtlpEndpoint": """);
+        try
+        {
+            // Перше читання — не «перечитування»: служба не стартує з файлом, якого не може розібрати.
+            Assert.ThrowsAny<Exception>(() => new ConfigurationBuilder().AddProgramDataConfig(root).Build());
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     private static string CreateConfigFile(string json)
     {
         var root = Directory.CreateTempSubdirectory().FullName;

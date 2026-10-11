@@ -31,6 +31,15 @@ export function recentJobsUrl(mine: boolean): string {
 }
 
 /**
+ * Скільки рядків просить шухляда шапки (P2-05).
+ *
+ * ⛔ Без `limit` сервер щоразу віддавав стелю в 50 рядків (кожен — з корельованим підзапитом автора), хоча
+ * шухляда показує свіжі власні задачі, а екран `#/admin/jobs` лишається на повному переліку. Опитування
+ * раз на 30 с (3 с при активній задачі) від кожної вкладки множить різницю.
+ */
+export const MyTasksLimit = 20;
+
+/**
  * Адреса шухляди «Мої задачі» в шапці: власні задачі БЕЗ успішних перерахунків формул.
  *
  * ⛔ F4-01 (audit-9): сервер віддає не більше 50 найсвіжіших рядків, а кожне автозбереження
@@ -41,7 +50,7 @@ export function recentJobsUrl(mine: boolean): string {
  * і далі бачить усе.
  */
 export function myTasksUrl(): string {
-  return '/api/v1/jobs?mine=true&hideRoutine=true';
+  return `/api/v1/jobs?mine=true&hideRoutine=true&limit=${String(MyTasksLimit)}`;
 }
 
 /**

@@ -27,7 +27,8 @@ public sealed partial class CreateTemplateVersionHandler(
     /// археологію: «1.2», «v1.2», «1.2 final» і «1.2(2)» — це чотири різні
     /// версії, які люди вважають однією.
     /// </remarks>
-    [GeneratedRegex(@"^\d+\.\d+\.\d+\.\d+$")]
+    // ⛔ S1-06: `\z` замість `$` (кінцевий LF) і `[0-9]` замість `\d` (цифри Unicode проходили перевірку).
+    [GeneratedRegex(@"^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+\z")]
     private static partial Regex VersionFormat { get; }
 
     /// <summary>Створює версію.</summary>

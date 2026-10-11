@@ -597,6 +597,34 @@ public sealed class DocumentStaleResultsStoreTests(SqlServerFixture sql)
         Assert.True(epoch.Value > before);
     }
 
+    /// <summary>
+    /// R2-04 / Z5-02: перемикання актуального прогону піднімає епоху ЛИШЕ свого періоду. Доти воно піднімало
+    /// глобальну, і кеш лічильників усіх періодів скидався після кожного завершеного перерахунку.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "Z5-02")]
+    public async Task Z5_02_перемикання_актуального_прогону_піднімає_епоху_лише_свого_періоду()
+    {
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var chain = await builder.BuildAsync(ct: CancellationToken.None);
+        var epoch = new StaleCountsEpoch();
+        await using var db = EpochContext(epoch);
+
+        var version = await VersionAsync(db);
+        var run = await RunAsync(db, chain, version, Now, [chain.DocumentId]);
+        var own = epoch.ValueFor(chain.PeriodKey.Value);
+        var otherPeriod = chain.PeriodKey.Value == 202608 ? 202607 : 202608;
+        var otherBefore = epoch.ValueFor(otherPeriod);
+
+        await new CalculationResultStore(db, new TestClock(Now), epoch)
+            .SwitchCurrentRunAsync(run.Id, "{}", CancellationToken.None);
+
+        Assert.True(epoch.ValueFor(chain.PeriodKey.Value) > own);
+        Assert.Equal(otherBefore, epoch.ValueFor(otherPeriod));
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage6)]
     [Trait(TestCategories.Category, TestCategories.Integration)]

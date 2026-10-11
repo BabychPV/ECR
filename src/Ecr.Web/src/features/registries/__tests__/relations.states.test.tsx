@@ -92,7 +92,30 @@ describe('Зв\'язки: стани', () => {
     expect(screen.getByText('12')).toBeDefined();
   });
 
-  it('поле Lookup без цілі (давні дані) — підпис «ціль не задано», aria-invalid, обрати підпис не можна', () => {
+  it('AN-94: ціль — заборонений довідник (сервер віддає null) — «недоступний», а не «ціль не задано»; вибору немає', () => {
+    // ⛔ Мутаційний доказ: прибери перевірку `targetRegistryDefId === null` у `RegistryRelations` — з'явиться
+    // вибір «ціль не задано» (хибне твердження: ціль є, лише не видима читачеві).
+    const onChangeLink = vi.fn();
+    const hidden: RegistryDefinitionDto = {
+      ...Definition,
+      relations: [{ ...Definition.relations[0]!, targetRegistryDefId: null, targetRegistryCode: null }],
+    };
+    show(
+      <RegistryRelations
+        definition={hidden}
+        canEdit
+        registryOptions={[{ value: '5', label: 'Substances (SUBSTANCE)' }]}
+        onChangeLink={onChangeLink}
+      />,
+    );
+
+    expect(screen.queryByRole('combobox', { name: /registries\.relationTargetFor/ })).toBeNull();
+    expect(screen.getByText(/registries\.relationTargetHidden/)).toBeDefined();
+    expect(screen.queryByText(/registries\.relationTargetMissing/)).toBeNull();
+    expect(onChangeLink).not.toHaveBeenCalled();
+  });
+
+  it('поле Lookup із зареєстрованою правкою «без цілі» — підпис «ціль не задано», aria-invalid, обрати підпис не можна', () => {
     const onChangeLink = vi.fn();
     const legacy: RegistryDefinitionDto = {
       ...Definition,
@@ -103,6 +126,7 @@ describe('Зв\'язки: стани', () => {
         definition={legacy}
         canEdit
         registryOptions={[{ value: '5', label: 'Substances (SUBSTANCE)' }]}
+        linkEdits={{ 42: null }}
         onChangeLink={onChangeLink}
       />,
     );

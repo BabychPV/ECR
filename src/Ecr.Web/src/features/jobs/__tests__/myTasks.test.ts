@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { myTasksUrl, MyTasksLimit } from '@/features/jobs/api';
+import { MyTasksActivePollMs, MyTasksIdlePollMs, myTasksPollMs } from '@/features/jobs/useMyTasks';
 import type { JobSummary } from '@/api/types';
 import {
   ActiveJobStates,
@@ -95,5 +97,32 @@ describe('F-27: що і як показує «My tasks»', () => {
     expect(
       myTaskMessage({ ...exported, jobCode: 'Ecr.Application.Ports.IExcelImportJob' } as JobSummary),
     ).toBe('3f1c0b0e9a2d4c6e8b7a5f4d3c2b1a09');
+  });
+});
+
+/**
+ * P2-05: шухляда шапки просить не 50 рядків, а `MyTasksLimit`, а працюючий каскадний перерахунок формул
+ * (ставиться на кожне автозбереження) не тримає 3-секундний темп.
+ *
+ * ⛔ Мутаційні докази: прибери `limit` з `myTasksUrl` — падає перший тест; поверни `activeJobCount` у
+ * `myTasksPollMs` — падає другий.
+ */
+describe('P2-05: навантаження шапки', () => {
+  const recalc = (state: string): JobSummary =>
+    ({ ...job(state), jobCode: 'Ecr.Application.Ports.IFormulaRecalculationJob' }) as JobSummary;
+
+  it('адреса несе limit', () => {
+    expect(myTasksUrl()).toBe(`/api/v1/jobs?mine=true&hideRoutine=true&limit=${String(MyTasksLimit)}`);
+    expect(MyTasksLimit).toBeLessThan(50);
+  });
+
+  it('лише перерахунок формул у роботі — повільний темп; експорт у роботі — швидкий', () => {
+    expect(myTasksPollMs([recalc('Running'), recalc('Queued')])).toBe(MyTasksIdlePollMs);
+    expect(myTasksPollMs([recalc('Running'), job('Running')])).toBe(MyTasksActivePollMs);
+    expect(myTasksPollMs(undefined)).toBe(MyTasksIdlePollMs);
+  });
+
+  it('бейдж на кнопці і далі рахує працюючий перерахунок', () => {
+    expect(activeJobCount([recalc('Running')])).toBe(1);
   });
 });

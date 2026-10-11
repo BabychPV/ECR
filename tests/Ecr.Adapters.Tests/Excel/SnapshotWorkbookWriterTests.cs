@@ -133,13 +133,10 @@ public sealed class SnapshotWorkbookWriterTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage5)]
-    public async Task Число_з_двадцятьма_значущими_цифрами_втрачає_точність_у_книзі()
+    public async Task Число_з_двадцятьма_значущими_цифрами_лягає_у_книгу_текстом_без_втрат()
     {
-        // ⛔ Це НЕ дефект експорту й не те, що можна полагодити тут: книга
-        // зберігає число як `double`, тобто ~15 значущих цифр. Рішення «усюди
-        // 16 знаків» стосується ЗБЕРІГАННЯ (`decimal(38,16)`); Excel його не
-        // витримує. Тест стоїть, щоб межа була названа й перевірена, а не
-        // знайдена колись звіркою звіту з базою.
+        // D-373 (X7-06): понад 15 значущих цифр — текст із точними цифрами
+        // (без хвоста нулів), як в експорті довідника.
         const decimal exact = 1234567890.1234567890m;
 
         SnapshotColumn[] columns = [new("Value", ReportSourceColumns.Number, "Value")];
@@ -148,10 +145,25 @@ public sealed class SnapshotWorkbookWriterTests
 
         using var sheet = await SheetOf(new SnapshotWorkbook(7, columns, [row])).ConfigureAwait(true);
 
-        var stored = (decimal)sheet.Cell(2, 1).GetDouble();
+        Assert.Equal(XLDataType.Text, sheet.Cell(2, 1).DataType);
+        Assert.Equal("1234567890.123456789", sheet.Cell(2, 1).GetString());
+        Assert.Equal(
+            exact, decimal.Parse(sheet.Cell(2, 1).GetString(), CultureInfo.InvariantCulture));
+    }
 
-        Assert.NotEqual(exact, stored);
-        Assert.Equal(Math.Round(exact, 5), Math.Round(stored, 5));
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public async Task Число_з_п_ятнадцятьма_значущими_цифрами_лишається_числом()
+    {
+        const decimal fifteen = 123456789012.345m;
+
+        SnapshotColumn[] columns = [new("Value", ReportSourceColumns.Number, "Value")];
+        var row = new SnapshotRow(
+            1, new Dictionary<string, object?>(StringComparer.Ordinal) { ["Value"] = fifteen });
+
+        using var sheet = await SheetOf(new SnapshotWorkbook(7, columns, [row])).ConfigureAwait(true);
+
+        Assert.Equal(XLDataType.Number, sheet.Cell(2, 1).DataType);
+        Assert.Equal(123456789012.345, sheet.Cell(2, 1).GetDouble());
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage5)]

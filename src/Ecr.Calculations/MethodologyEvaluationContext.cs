@@ -1,4 +1,6 @@
 using Ecr.Application.Ports;
+using Ecr.Domain.Abstractions;
+using Ecr.Domain.Services;
 using Ecr.Expressions;
 using Ecr.Expressions.Ast;
 using Ecr.Expressions.Evaluation;
@@ -212,6 +214,8 @@ public sealed class MethodologyEvaluationContext(
 /// </remarks>
 public sealed class UnitTable
 {
+    private static readonly UnitConverter Converter = new();
+
     private readonly Dictionary<string, Entry> _units = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, (decimal Factor, decimal Offset)> _explicit =
         new(StringComparer.OrdinalIgnoreCase);
@@ -220,7 +224,11 @@ public sealed class UnitTable
     /// <param name="Dimension">Розмірність; конверсія можлива лише в її межах.</param>
     /// <param name="FactorToBase">Множник переходу до базової одиниці.</param>
     /// <param name="OffsetToBase">Зсув; ненульовий лише в температури.</param>
-    private readonly record struct Entry(byte Dimension, decimal FactorToBase, decimal OffsetToBase);
+    /// <param name="Id">Внутрішній номер: доменний конвертер розрізняє одиниці за ним.</param>
+    /// <param name="Numerator">Код чисельника похідної одиниці (швидкості); <c>null</c> - одиниця не похідна.</param>
+    /// <param name="Denominator">Код знаменника похідної одиниці; <c>null</c> - одиниця не похідна.</param>
+    private readonly record struct Entry(
+        byte Dimension, decimal FactorToBase, decimal OffsetToBase, int Id, string? Numerator, string? Denominator);
 
     /// <summary>Додає одиницю.</summary>
     /// <param name="code">Код одиниці.</param>
@@ -228,7 +236,27 @@ public sealed class UnitTable
     /// <param name="factorToBase">Множник до базової.</param>
     /// <param name="offsetToBase">Зсув до базової.</param>
     public void Add(string code, byte dimension, decimal factorToBase, decimal offsetToBase = 0m)
-        => _units[code] = new Entry(dimension, factorToBase, offsetToBase);
+        => _units[code] = new Entry(
+            dimension, factorToBase, offsetToBase,
+            _units.TryGetValue(code, out var known) ? known.Id : _units.Count + 1,
+            known.Numerator, known.Denominator);
+
+    /// <summary>Позначає одиницю похідною: її чисельник і знаменник (<c>Sm3_per_h</c> = <c>Sm3</c> / <c>h</c>).</summary>
+    /// <param name="code">Код похідної одиниці (уже додана).</param>
+    /// <param name="numeratorCode">Код чисельника.</param>
+    /// <param name="denominatorCode">Код знаменника.</param>
+    /// <remarks>
+    /// ⛔ Z2-05: без цього швидкість у швидкість йшла б через <c>FactorToBase</c> швидкості, а в <c>Sm3_per_h</c> це
+    /// <c>1/3600</c>, заокруглене до 18 знаків: <c>CONVERT(1, "Sm3_per_s", "Sm3_per_h")</c> давало
+    /// <c>3599.99999999999712</c>. Чисельник і знаменник дають рівні <c>3600</c> (<see cref="UnitConverter.ConvertRate"/>).
+    /// </remarks>
+    public void AddRate(string code, string numeratorCode, string denominatorCode)
+    {
+        if (_units.TryGetValue(code, out var entry))
+        {
+            _units[code] = entry with { Numerator = numeratorCode, Denominator = denominatorCode };
+        }
+    }
 
     /// <summary>Додає явну конверсію <c>uom.Conversion</c>.</summary>
     /// <param name="from">Вихідна одиниця.</param>
@@ -274,17 +302,40 @@ public sealed class UnitTable
             return ExpressionValue.Error(ExpressionErrors.BadUnit);
         }
 
-        // ⛔ Різні розмірності — відмова. Саме тут щільність не стає конверсією:
-        // коефіцієнт залежить від речовини й умов і живе в константах
-        // методології (ФВ-16.3, ФВ-16.5).
-        if (from.Dimension != to.Dimension || to.FactorToBase == 0m)
+        // ⛔ Z2-05: арифметика - доменний `UnitConverter` (ту саму кличуть межа інтеграції, шаблон і
+        // `POST /units/convert`), а не власна копія формули. Різні розмірності - відмова: саме тут щільність не
+        // стає конверсією, коефіцієнт залежить від речовини й умов і живе в константах методології (ФВ-16.3,
+        // ФВ-16.5). Нульовий множник ЛЮБОЇ з одиниць - теж відмова (копія перевіряла лише цільову, і нульовий
+        // множник джерела давав константу). Швидкість у швидкість - через чисельник і знаменник.
+        try
+        {
+            var fromSpec = Spec(fromUnitCode, from);
+            var toSpec = Spec(toUnitCode, to);
+
+            if (RateParts(from) is { } fromRate && RateParts(to) is { } toRate
+                && Converter.ConvertRate(number, fromRate.Numerator, fromRate.Denominator, toRate.Numerator, toRate.Denominator)
+                    is { } rate)
+            {
+                return ExpressionValue.Number(rate);
+            }
+
+            return ExpressionValue.Number(Converter.Convert(number, fromSpec, toSpec, explicitConversion: null));
+        }
+        catch (DomainException)
         {
             return ExpressionValue.Error(ExpressionErrors.BadUnit);
         }
-
-        var inBase = (number * from.FactorToBase) + from.OffsetToBase;
-        return ExpressionValue.Number((inBase - to.OffsetToBase) / to.FactorToBase);
     }
+
+    private static UnitSpec Spec(string code, Entry entry)
+        => new(entry.Id, code, entry.Dimension, entry.FactorToBase, entry.OffsetToBase);
+
+    /// <summary>Чисельник і знаменник похідної одиниці; <c>null</c> - одиниця не похідна або частин немає в довіднику.</summary>
+    private (UnitSpec Numerator, UnitSpec Denominator)? RateParts(Entry entry)
+        => entry.Numerator is { } numerator && entry.Denominator is { } denominator
+           && _units.TryGetValue(numerator, out var n) && _units.TryGetValue(denominator, out var d)
+            ? (Spec(numerator, n), Spec(denominator, d))
+            : null;
 
     /// <summary>Довідник із базовими одиницями `09-seed.sql`.</summary>
     /// <remarks>
@@ -360,6 +411,28 @@ public sealed class UnitTable
         table.Add("Nm3_per_h", dimension: 13, factorToBase: 0.000298116622938150m);
         table.Add("Nm3_per_day", dimension: 13, factorToBase: 0.000012421525955756m);
         table.Add("mg_per_Nm3", dimension: 16, factorToBase: 0.000000931775541532m);
+
+        // Похідні одиниці сіду: чисельник і знаменник (колонки `NumCode`/`DenCode` секцій сіду; Z2-05).
+        table.AddRate("g_per_s", "g", "s");
+        table.AddRate("t_per_year", "t", "year");
+        table.AddRate("kg_per_t", "kg", "t");
+        table.AddRate("g_per_GJ", "g", "GJ");
+        table.AddRate("mg_per_m3", "mg", "m3");
+        table.AddRate("kg_per_m3", "kg", "m3");
+        table.AddRate("Sm3_per_s", "Sm3", "s");
+        table.AddRate("Sm3_per_h", "Sm3", "h");
+        table.AddRate("kg_per_Sm3", "kg", "Sm3");
+        table.AddRate("MJ_per_Sm3", "MJ", "Sm3");
+        table.AddRate("MJ_per_kg", "MJ", "kg");
+        table.AddRate("t_per_t", "t", "t");
+        table.AddRate("kg_per_TJ", "kg", "TJ");
+        table.AddRate("g_per_mol", "g", "mol");
+        table.AddRate("mg_per_Sm3", "mg", "Sm3");
+        table.AddRate("Sm3_per_day", "Sm3", "day");
+        table.AddRate("Nm3_per_s", "Nm3", "s");
+        table.AddRate("Nm3_per_h", "Nm3", "h");
+        table.AddRate("Nm3_per_day", "Nm3", "day");
+        table.AddRate("mg_per_Nm3", "mg", "Nm3");
 
         return table;
     }

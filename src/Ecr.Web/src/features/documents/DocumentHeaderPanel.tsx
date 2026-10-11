@@ -71,6 +71,9 @@ type DocumentHeaderDto = components['schemas']['DocumentHeaderDto'];
 type DocumentHeaderField = components['schemas']['DocumentHeaderFieldDto'];
 type PatchHeaderField = components['schemas']['PatchHeaderField'];
 
+/** Скільки пунктів Lookup-поля шапки показується одночасно (C1-04). */
+const LookupOptionsLimit = 50;
+
 /** Стабільне посилання на порожній перелік — поле без довідника (ще
  * завантажується/немає) не отримує новий масив на кожен рендер. */
 const EmptyLookupEntries: readonly RegistryEntryDto[] = [];
@@ -717,12 +720,22 @@ export function DocumentHeaderPanel({
       field.isRequired &&
       isEmptyHeaderValue(draft[field.code]),
   );
+  // ⛔ AN-96 (хвіст N3-10): `409` лишав `save.error` НАЗАВЖДИ — і після «Взяти чинне» (чернетка збіглась із
+  // сервером, нічого не змінено, конфліктів немає) червоний банер про застарілу шапку висів, а секція не
+  // згортались (`mustStayOpen`). Відмова-`409` вичерпана, коли її причини немає: правок немає і рішення
+  // «ваше / чинне» вже ухвалено. Поки є що вирішувати чи зберігати, банер лишається.
+  const staleSaveError =
+    save.error instanceof EcrApiError &&
+    save.error.problem.status === 409 &&
+    dirty.length === 0 &&
+    headerConflict.length === 0;
+  const saveError = staleSaveError ? null : (save.error ?? null);
   const mustStayOpen =
     missingRequired.length > 0 ||
     invalidDates.size > 0 ||
     dirty.length > 0 ||
     headerConflict.length > 0 ||
-    (save.error !== undefined && save.error !== null);
+    saveError !== null;
   const expanded = !collapsible || opened || mustStayOpen;
   const bodyId = `document-header-body-${String(documentId)}`;
 
@@ -895,7 +908,7 @@ export function DocumentHeaderPanel({
         </Group>
       )}
 
-      {save.error !== undefined && save.error !== null && <ErrorAlert error={save.error} />}
+      {saveError !== null && <ErrorAlert error={saveError} />}
     </>
   );
 
@@ -1144,6 +1157,10 @@ function HeaderFieldInput({
         label={label}
         disabled={disabled || lookupPending}
         searchable
+        // ⛔ C1-04: довідник — до 50 тис. записів (`LookupEntriesStaleTimeMs`), а `Select` без межі малює ВСІ
+        // пункти в DOM при відкритті. `limit` обрізає лише показане: пошук іде по всьому переліку
+        // (той самий прийом, що пояс у `CreateProjectModal`).
+        limit={LookupOptionsLimit}
         clearable
         nothingFoundMessage={
           lookupPending ? t('document.header.lookupLoading') : t('document.header.lookupEmpty')

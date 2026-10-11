@@ -52,4 +52,18 @@ public sealed class RowKeyTests
 
         Assert.NotEqual(first, second);
     }
+
+    /// <summary>
+    /// S1-06 (аудит 3): ключ рядка з кінцевим LF недопустимий (<c>$</c> пропускав його).
+    /// Мутація: повернути <c>$</c> замість <c>\z</c> у <c>RowKey.Pattern</c> — тест червоний.
+    /// </summary>
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [InlineData("7001001\n")]
+    [InlineData("R1\r\n")]
+    public void Ключ_із_кінцевим_переведенням_рядка_недопустимий(string value)
+    {
+        Assert.False(RowKey.TryCreate(value, out _));
+        Assert.True(RowKey.TryCreate("7001001", out _));
+    }
 }

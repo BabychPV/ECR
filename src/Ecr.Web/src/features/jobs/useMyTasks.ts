@@ -2,7 +2,7 @@ import { useQuery, type UseQueryResult } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import type { JobSummary } from '@/api/types';
 import { myTasksUrl } from './api';
-import { activeJobCount } from './myTasks';
+import { pollingJobCount } from './myTasks';
 
 /*
  * ⛔ Адреса НЕ набирається тут іще раз: вона береться з `myTasksUrl`
@@ -12,7 +12,7 @@ import { activeJobCount } from './myTasks';
  */
 
 /** Опитування, доки серед ВЛАСНИХ задач є `Queued`/`Running`. */
-const MyTasksActivePollMs = 3_000;
+export const MyTasksActivePollMs = 3_000;
 
 /**
  * Опитування, коли активних задач немає.
@@ -30,7 +30,12 @@ const MyTasksActivePollMs = 3_000;
  * частіше, ніж будь-який інший запит застосунку вже вважає своє значення
  * застарілим.
  */
-const MyTasksIdlePollMs = 30_000;
+export const MyTasksIdlePollMs = 30_000;
+
+/** Темп опитування шапки за переліком власних задач (P2-05: перерахунок формул його не прискорює). */
+export function myTasksPollMs(jobs: readonly JobSummary[] | undefined): number {
+  return pollingJobCount(jobs) > 0 ? MyTasksActivePollMs : MyTasksIdlePollMs;
+}
 
 /**
  * Власні фонові задачі для шухляди «My tasks» у шапці (`UI-07`, `BE-08`).
@@ -50,7 +55,6 @@ export function useMyTasks(): UseQueryResult<JobSummary[]> {
   return useQuery({
     queryKey: ['jobs', 'my-tasks'],
     queryFn: () => apiFetch<JobSummary[]>(myTasksUrl()),
-    refetchInterval: (query) =>
-      activeJobCount(query.state.data) > 0 ? MyTasksActivePollMs : MyTasksIdlePollMs,
+    refetchInterval: (query) => myTasksPollMs(query.state.data),
   });
 }

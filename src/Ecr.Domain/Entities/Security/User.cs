@@ -278,6 +278,59 @@ public sealed class User : Entity<int>
         return true;
     }
 
+    /// <summary>
+    /// Резервує спробу входу ДО перевірки пароля (AN-90/L1-03): бюджет «не більше <paramref name="maxFailedAttempts"/>
+    /// перевірок між блокуваннями» тримається і під пачкою паралельних запитів.
+    /// </summary>
+    /// <param name="maxFailedAttempts">Поріг блокування; ≤ 0 — бюджету немає.</param>
+    /// <param name="utcNow">Поточний момент.</param>
+    /// <returns><c>false</c> — запис заблоковано або бюджет вичерпано: пароль перевіряти не можна.</returns>
+    /// <remarks>
+    /// ⚠ Правило — те саме, що в <c>IUserStore.TryReserveAttemptAsync</c> (SQL); їхню рівність тримає
+    /// <c>FailedAttemptAtomicTests</c>. Блокування, що вже минуло, скидає лічильник — як у
+    /// <see cref="RegisterFailedAttempt"/>.
+    /// </remarks>
+    public bool TryReserveAttempt(int maxFailedAttempts, DateTime utcNow)
+    {
+        if (LockedUntil is { } until)
+        {
+            if (until > utcNow)
+            {
+                return false;
+            }
+
+            FailedAttempts = 0;
+            LockedUntil = null;
+        }
+
+        if (maxFailedAttempts > 0 && FailedAttempts >= maxFailedAttempts)
+        {
+            return false;
+        }
+
+        FailedAttempts++;
+        return true;
+    }
+
+    /// <summary>
+    /// Фіксує, що спробу, зарезервовану <see cref="TryReserveAttempt"/>, провалено: лічильник уже врахував її при
+    /// резервуванні, тож тут лише блокування, коли бюджет вичерпано (AN-90).
+    /// </summary>
+    /// <param name="maxFailedAttempts">Поріг блокування; ≤ 0 — не блокувати.</param>
+    /// <param name="lockoutMinutes">На скільки блокувати; ≤ 0 — 15 хв.</param>
+    /// <param name="utcNow">Поточний момент.</param>
+    /// <returns><c>true</c>, якщо цією відмовою запис заблоковано.</returns>
+    public bool LockIfAttemptBudgetSpent(int maxFailedAttempts, int lockoutMinutes, DateTime utcNow)
+    {
+        if (maxFailedAttempts <= 0 || FailedAttempts < maxFailedAttempts || IsLockedOut(utcNow))
+        {
+            return false;
+        }
+
+        LockedUntil = utcNow.AddMinutes(lockoutMinutes <= 0 ? 15 : lockoutMinutes);
+        return true;
+    }
+
     /// <summary>Межа адміністративного блокування: «доки не розблокують» (BE-12).</summary>
     /// <remarks>
     /// ⚠ Не <see cref="DateTime.MaxValue"/>: його сьомий знак дробу не влазить у
@@ -343,19 +396,27 @@ public sealed class User : Entity<int>
 
         if (LastSignInAt is not null)
         {
-            throw new Abstractions.DomainException(
-                ErrorCodes.SecurityConflict,
-                $"«{UserName}» уже входив: його SID підтверджено каталогом і не виправляється.",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = "err.ECR-SEC-0409.windowsSidConfirmed",
-                    ["userName"] = UserName,
-                });
+            throw WindowsSidConfirmed(UserName);
         }
 
         WindowsSid = windowsSid;
         RefreshSecurityStamp();
     }
+
+    /// <summary>
+    /// Відмова «SID уже підтверджено входом» — 409 <c>ECR-SEC-0409</c>. Одна форма для перевірки в домені і для
+    /// умовного <c>UPDATE</c> сховища (<c>IUserStore.TryCorrectUnconfirmedWindowsSidAsync</c>, Z4-01).
+    /// </summary>
+    /// <param name="userName">Ім'я входу запису.</param>
+    public static Abstractions.DomainException WindowsSidConfirmed(string userName)
+        => new(
+            ErrorCodes.SecurityConflict,
+            $"«{userName}» уже входив: його SID підтверджено каталогом і не виправляється.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-SEC-0409.windowsSidConfirmed",
+                ["userName"] = userName,
+            });
 
     /// <summary>Вимикає bootstrap-запис. **Не видаляє**: він потрібен в аудиті.</summary>
     public void DisableAsBootstrap()

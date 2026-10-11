@@ -124,8 +124,27 @@ public sealed class WorkflowStore(EcrDbContext db) : IWorkflowStore
     }
 
     /// <inheritdoc />
-    public async Task<bool> RoleExistsAsync(int roleId, CancellationToken ct)
-        => await db.Roles.AsNoTracking().AnyAsync(r => r.Id == roleId, ct).ConfigureAwait(false);
+    public async Task<int?> FirstMissingRoleAsync(IReadOnlyCollection<int> roleIds, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(roleIds);
+
+        var distinct = roleIds.Distinct().ToList();
+        var existing = (await db.Roles.AsNoTracking()
+                .Where(r => distinct.Contains(r.Id))
+                .Select(r => r.Id)
+                .ToListAsync(ct).ConfigureAwait(false))
+            .ToHashSet();
+
+        foreach (var id in roleIds)
+        {
+            if (!existing.Contains(id))
+            {
+                return id;
+            }
+        }
+
+        return null;
+    }
 
     /// <inheritdoc />
     public async Task<ApprovalState> GetOrCreateAsync(

@@ -421,6 +421,10 @@ GO
 -- первинного налаштування; `Approver` × `Report.EditDefinition`, Q-153 /
 -- D-203) — фільтр цього блоку вони не послаблюють.
 --
+-- ⛔ U1-04: усі MERGE прав вбудованих ролей беруть роль лише з `IsBuiltIn = 1`. Власна роль, яку адміністратор
+-- створив із кодом вбудованої (`ReportViewer` до появи сіду, `Viewer` тощо), раніше отримувала її права на
+-- наступному старті: MERGE ролі її не чіпає (код зайнятий), а MERGE прав шукав роль лише за кодом.
+--
 -- ⚠ Без цього блоку жоден користувач не має ЖОДНОГО функціонального права —
 -- включно з тим, кого щойно зробили SystemAdministrator. Ролі без прав
 -- виглядають як робоча конфігурація і мовчки не працюють.
@@ -485,7 +489,7 @@ USING (
         (N'Auditor', N'Security.ViewAudit'),
         (N'Auditor', N'System.ViewHealth')
     ) AS m (RoleCode, Pattern)
-    JOIN sec.Role       AS r ON r.Code = m.RoleCode
+    JOIN sec.Role       AS r ON r.Code = m.RoleCode AND r.IsBuiltIn = 1 -- U1-04: лише вбудована роль, не власна з тим самим кодом
     JOIN sec.Permission AS p ON p.Code LIKE m.Pattern
     WHERE p.IsDangerous = 0
 ) AS s
@@ -508,7 +512,7 @@ USING (
     FROM (VALUES (N'Security.ManageUsers'), (N'Security.ManageRoles')) AS m (Code)
     JOIN sec.Permission AS p ON p.Code = m.Code
     CROSS JOIN sec.Role AS r
-    WHERE r.Code = N'BootstrapAdministrator'
+    WHERE r.Code = N'BootstrapAdministrator' AND r.IsBuiltIn = 1 -- U1-04
 ) AS s
 ON t.RoleId = s.RoleId AND t.PermissionCode = s.PermissionCode
 WHEN NOT MATCHED THEN INSERT (RoleId, PermissionCode) VALUES (s.RoleId, s.PermissionCode);
@@ -531,7 +535,7 @@ USING (
     SELECT r.Id AS RoleId, p.Code AS PermissionCode
     FROM sec.Role AS r
     JOIN sec.Permission AS p ON p.Code = N'Report.EditDefinition'
-    WHERE r.Code = N'Approver'
+    WHERE r.Code = N'Approver' AND r.IsBuiltIn = 1 -- U1-04
 ) AS s
 ON t.RoleId = s.RoleId AND t.PermissionCode = s.PermissionCode
 WHEN NOT MATCHED THEN INSERT (RoleId, PermissionCode) VALUES (s.RoleId, s.PermissionCode);
@@ -567,7 +571,7 @@ USING (
     FROM (VALUES (N'Report.ViewRegulatory'), (N'Report.ViewSnapshot'), (N'Report.Export')) AS m (Code)
     JOIN sec.Permission AS p ON p.Code = m.Code AND p.IsDangerous = 0
     CROSS JOIN sec.Role AS r
-    WHERE r.Code = N'ReportViewer'
+    WHERE r.Code = N'ReportViewer' AND r.IsBuiltIn = 1 -- U1-04
 ) AS s
 ON t.RoleId = s.RoleId AND t.PermissionCode = s.PermissionCode
 WHEN NOT MATCHED THEN INSERT (RoleId, PermissionCode) VALUES (s.RoleId, s.PermissionCode);
@@ -584,7 +588,7 @@ USING (
     SELECT r.Id AS RoleId, p.Code AS PermissionCode
     FROM sec.Role AS r
     JOIN sec.Permission AS p ON p.Code = N'Report.ViewSnapshot' AND p.IsDangerous = 0
-    WHERE r.Code = N'Auditor'
+    WHERE r.Code = N'Auditor' AND r.IsBuiltIn = 1 -- U1-04
 ) AS s
 ON t.RoleId = s.RoleId AND t.PermissionCode = s.PermissionCode
 WHEN NOT MATCHED THEN INSERT (RoleId, PermissionCode) VALUES (s.RoleId, s.PermissionCode);
@@ -609,7 +613,7 @@ USING (
     SELECT r.Id AS RoleId, p.Code AS PermissionCode
     FROM sec.Role AS r
     JOIN sec.Permission AS p ON p.Code = N'Document.Submit' AND p.IsDangerous = 0
-    WHERE r.Code = N'DataEntry'
+    WHERE r.Code = N'DataEntry' AND r.IsBuiltIn = 1 -- U1-04
 ) AS s
 ON t.RoleId = s.RoleId AND t.PermissionCode = s.PermissionCode
 WHEN NOT MATCHED THEN INSERT (RoleId, PermissionCode) VALUES (s.RoleId, s.PermissionCode);
@@ -645,6 +649,9 @@ UPDATE t
   FROM sys_ecr.UiString AS t
   JOIN (VALUES
     (N'common.loading',                  N'en', N'Loading…', N'Loading...'),
+    -- COLL:r11l6 AN-96: плитка рахує ШАБЛОНИ з опублікованою версією (matchesStat), а не версії; kz лишається за термінологом.
+    (N'templates.stat.published', N'en', N'published versions', N'with a published version'),
+    (N'templates.stat.published', N'ru', N'опубликованных версий', N'с опубликованной версией'),
     -- COLL:ui34tpl UI-34b: пошук переліку шаблонів бачить і назву (поле name з GET /templates).
     (N'templates.searchPlaceholder', N'en', N'Template code', N'Template name or code'),
     (N'templates.searchPlaceholder', N'ru', N'Код шаблона', N'Название или код шаблона'),
@@ -4775,6 +4782,14 @@ USING (VALUES
     (N'err.ECR-REQ-0422.registrySyncPolicyNotBound', N'en', N'Collection entity {id} is not bound to a registry: the sync policy has nothing to apply to.', 1),
     -- ru/kz — окремою порцією `COLL:d212-policy` у блоці I18N нижче.
     -- COLL:d212-policy ── кінець секції ──
+    -- A1-06 ── Довжина маршруту погодження обмежена (`ReplaceApprovalRouteHandler.MaxSteps`) ──
+    (N'err.ECR-DOC-0422.approvalRouteTooLong', N'en', N'An approval route can have at most {max} steps; this one has {count}.', 1),
+    -- ru/kz — окремою порцією `A1-06` у блоці I18N нижче.
+    -- A1-06 ── кінець секції ──
+    -- E1-06 ── Тіло запиту понад межу — 413 замість 500 (`ExceptionHandlingMiddleware`, `BadHttpRequestException`) ──
+    (N'err.ECR-REQ-0422.requestTooLarge', N'en', N'The request body is larger than the server accepts. Send less data in one request.', 1),
+    -- ru/kz — окремою порцією `E1-06` у блоці I18N нижче.
+    -- E1-06 ── кінець секції ──
     -- COLL:d212-statuses ── Статуси подій синку довідника з AF (D-212 PR-3, `CollectionCoverage.RegistryStatuses`) ──
     (N'status.coverage.RegistryAutoCreated',        N'en', N'Created from source', 1),
     (N'status.coverage.RegistryDeactivated',        N'en', N'Deactivated: missing in source', 1),
@@ -6932,7 +6947,7 @@ USING (VALUES
     (N'templates.subtitle', N'en', N'A template is the structure of a report: sheets, tables, columns, formulas and rules. Documents are created from a published version and stay on it.', 1),
     (N'templates.stats', N'en', N'Template summary', 1),
     (N'templates.stat.all', N'en', N'templates', 1),
-    (N'templates.stat.published', N'en', N'published versions', 1),
+    (N'templates.stat.published', N'en', N'with a published version', 1),
     (N'templates.stat.publishedHint', N'en', N'Show templates that have a published version', 1),
     (N'templates.stat.drafts', N'en', N'drafts in progress', 1),
     (N'templates.stat.draftsHint', N'en', N'Show templates with an open draft', 1),
@@ -7540,6 +7555,21 @@ USING (VALUES
     -- COLL:r9f6-paste-clipped ── R9-F6 / F6-03: вставка, більша за таблицю, — скільки рядків і колонок не вмістилося; ru/kz — порцією COLL:r9f6-paste-clipped нижче ──
     ,(N'grid.pasteClipped', N'en', N'The copied data is larger than the table: {rows} row(s) below and {columns} column(s) to the right did not fit and were not pasted. Add rows or paste the rest separately.', 1)
     -- COLL:r9f6-paste-clipped ── кінець секції ──
+    -- COLL:r11l3-overwrite-limit ── R11-L3 / R1-05: застосування імпорту .xlsx з понад 5000 рядків для перезапису - 422, а не 500; ru/kz - порцією COLL:r11l3-overwrite-limit нижче ──
+    ,(N'err.ECR-IMP-0422.importTooManyOverwriteRows', N'en', N'More than {maxRows} rows are marked for overwrite. Nothing was applied: overwrite the rows in several batches.', 1)
+    -- COLL:r11l3-overwrite-limit ── кінець секції ──
+    -- COLL:r11l3-calc-0434 ── R11-L3: заголовок коду ECR-CALC-0434; ru/kz — порцією COLL:r11l3-calc-0434 нижче ──
+    ,(N'err.ECR-CALC-0434', N'en', N'Methodology constant cannot be used in a formula', 1)
+    -- COLL:r11l3-calc-0434 ── кінець секції ──
+    -- COLL:r11l3-calc-0435 ── R11-L3: заголовок коду ECR-CALC-0435; ru/kz — порцією COLL:r11l3-calc-0435 нижче ──
+    ,(N'err.ECR-CALC-0435', N'en', N'Formula reference is ambiguous', 1)
+    -- COLL:r11l3-calc-0435 ── кінець секції ──
+    -- COLL:r11l3-calc-0436 ── R11-L3: заголовок коду ECR-CALC-0436; ru/kz — порцією COLL:r11l3-calc-0436 нижче ──
+    ,(N'err.ECR-CALC-0436', N'en', N'Formula result type does not match its target', 1)
+    -- COLL:r11l3-calc-0436 ── кінець секції ──
+    -- COLL:r11l6-target-hidden ── AN-94: ціль зв'язку — довідник, до якого в читача немає доступу (сервер віддає null); ru — порцією нижче, kz — за термінологом ──
+    ,(N'registries.relationTargetHidden', N'en', N'Target registry is not available to you', 1)
+    -- COLL:r11l6-target-hidden ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -14194,6 +14224,28 @@ OPTION (RECOMPILE);
 GO
 -- COLL:d212-policy ── кінець секції ──
 
+-- A1-06 ── ru/kz довжини маршруту погодження; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-DOC-0422.approvalRouteTooLong', N'ru', N'В маршруте согласования может быть не более {max} шагов, а в этом — {count}.'),
+    (N'err.ECR-DOC-0422.approvalRouteTooLong', N'kz', N'Келісу маршрутында {max} қадамнан артық болмауы керек, ал мұнда — {count}.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- A1-06 ── кінець секції ──
+
+-- E1-06 ── ru/kz: тіло запиту завелике; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-REQ-0422.requestTooLarge', N'ru', N'Тело запроса больше, чем принимает сервер. Отправляйте меньше данных за один запрос.'),
+    (N'err.ECR-REQ-0422.requestTooLarge', N'kz', N'Сұраныс денесі сервер қабылдайтын көлемнен үлкен. Бір сұраныста азырақ деректер жіберіңіз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- E1-06 ── кінець секції ──
+
 -- COLL:d212-statuses ── ru/kz статусів подій синку довідника (D-212 PR-3); власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val
@@ -15779,7 +15831,7 @@ OPTION (RECOMPILE);
 GO
 -- COLL:warn-grid ── кінець секції ──
 
--- COLL:smtp-probe ── ru/kz проби SMTP-каналу без адресатів (D-256); власна порція ──
+-- COLL:smtp-probe ── ru/kz проби SMTP-каналу без адресатів (D-263); власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val
   FROM (VALUES
@@ -17159,7 +17211,7 @@ SELECT v.[Key], v.Lang, v.Val
     (N'templates.stats', N'kz', N'Үлгілер бойынша жиынтық'),
     (N'templates.stat.all', N'ru', N'шаблонов'),
     (N'templates.stat.all', N'kz', N'үлгі'),
-    (N'templates.stat.published', N'ru', N'опубликованных версий'),
+    (N'templates.stat.published', N'ru', N'с опубликованной версией'),
     (N'templates.stat.published', N'kz', N'жарияланған нұсқа'),
     (N'templates.stat.publishedHint', N'ru', N'Показать шаблоны с опубликованной версией'),
     (N'templates.stat.publishedHint', N'kz', N'Жарияланған нұсқасы бар үлгілерді көрсету'),
@@ -18761,6 +18813,59 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:r9f6-paste-clipped ── кінець секції ──
+
+-- COLL:r11l3-overwrite-limit ── ru/kz: R11-L3 / R1-05: застосування імпорту .xlsx з понад 5000 рядків для перезапису - 422, а не 500; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-IMP-0422.importTooManyOverwriteRows', N'ru', N'Для перезаписи отмечено больше {maxRows} строк. Ничего не применено: перезапишите строки несколькими партиями.'),
+    (N'err.ECR-IMP-0422.importTooManyOverwriteRows', N'kz', N'Қайта жазу үшін {maxRows} жолдан көп белгіленген. Ештеңе қолданылмады: жолдарды бірнеше бөлікпен қайта жазыңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:r11l3-overwrite-limit ── кінець секції ──
+
+-- COLL:r11l3-calc-0434 ── ru/kz: R11-L3: заголовок коду ECR-CALC-0434; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-CALC-0434', N'ru', N'Константа методологии не может использоваться в формуле'),
+    (N'err.ECR-CALC-0434', N'kz', N'Әдістеме тұрақтысын формулада қолдануға болмайды')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:r11l3-calc-0434 ── кінець секції ──
+
+-- COLL:r11l3-calc-0435 ── ru/kz: R11-L3: заголовок коду ECR-CALC-0435; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-CALC-0435', N'ru', N'Ссылка на формулу неоднозначна'),
+    (N'err.ECR-CALC-0435', N'kz', N'Формулаға сілтеме бір мәнді емес')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:r11l3-calc-0435 ── кінець секції ──
+
+-- COLL:r11l3-calc-0436 ── ru/kz: R11-L3: заголовок коду ECR-CALC-0436; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-CALC-0436', N'ru', N'Тип результата формулы не соответствует приёмнику'),
+    (N'err.ECR-CALC-0436', N'kz', N'Формула нәтижесінің түрі қабылдағышқа сәйкес келмейді')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:r11l3-calc-0436 ── кінець секції ──
+-- COLL:r11l6-target-hidden ── ru: AN-94: ціль зв'язку недоступна читачеві; власна порція (kz — за термінологом) ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'registries.relationTargetHidden', N'ru', N'Справочник-цель вам недоступен')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:r11l6-target-hidden ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

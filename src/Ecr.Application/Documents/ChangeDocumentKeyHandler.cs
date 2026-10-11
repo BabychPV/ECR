@@ -134,15 +134,17 @@ public sealed class ChangeDocumentKeyHandler(
             projectId = document.ProjectId;
             document.ChangeBusinessKey(key, profile.UserId, clock.UtcNow);
             await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
-        }, ct).ConfigureAwait(false);
 
-        // Журнал — ПІСЛЯ коміту, як у DeleteDocumentHandler: IAuditWriter пише власним підключенням.
-        await audit.WriteSecurityEventAsync(
-            new SecurityEventRecord(
-                clock.UtcNow, EventType, TargetUserId: null, TargetRoleId: null,
-                JsonSerializer.Serialize(new { documentId, projectId, oldKey, newKey = key, reason = why }),
-                profile.UserId, currentUser.CorrelationId),
-            ct).ConfigureAwait(false);
+            // ⛔ F2-03 (аудит R11): журнал — В ТІЙ САМІЙ транзакції (`AuditWriter` бере поточну
+            // транзакцію контексту): зміну бізнес-ключа не можна закомітити без сліду «хто, з якого
+            // ключа на який і чому». Доти запис ішов після коміту й міг загубитися.
+            await audit.WriteSecurityEventAsync(
+                new SecurityEventRecord(
+                    clock.UtcNow, EventType, TargetUserId: null, TargetRoleId: null,
+                    JsonSerializer.Serialize(new { documentId, projectId, oldKey, newKey = key, reason = why }),
+                    profile.UserId, currentUser.CorrelationId),
+                innerCt).ConfigureAwait(false);
+        }, ct).ConfigureAwait(false);
     }
 
     private static BusinessRuleException Invalid(string message, string messageKey)

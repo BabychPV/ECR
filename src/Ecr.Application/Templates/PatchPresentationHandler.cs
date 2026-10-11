@@ -25,7 +25,8 @@ public sealed class PatchPresentationHandler(
     IUnitOfWork uow,
     IClock clock,
     Security.IAccessDecisionService access,
-    Common.ICurrentUser currentUser)
+    Common.ICurrentUser currentUser,
+    Ports.IStyleCatalog? styles = null)
 {
     /// <summary>Застосовує презентаційні зміни.</summary>
     /// <param name="templateVersionId">Версія.</param>
@@ -65,6 +66,35 @@ public sealed class PatchPresentationHandler(
         // `[null]` давав NullReferenceException, `IsHidden: "abc"` — помилку CONVERT, а підпис
         // `"abc"` ЗБЕРІГАВСЯ (200) і далі кожне читання структури версії падало на розборі JSON.
         RequireWellFormed(changes);
+
+        // ⛔ A1-04: стиль мусить належати ЦІЙ версії. Значення — просто число з тіла запиту; SQL `UPDATE` ключа на
+        // `cfg.StyleDef` не має, тож стиль чужої версії чи неіснуючий записувався мовчки.
+        if (styles is not null)
+        {
+            var styleChanges = changes.Where(c => c.Field == "StyleId" && c.Value is not null).ToList();
+            if (styleChanges.Count > 0)
+            {
+                var ofVersion = await styles.GetAsync(templateVersionId, ct).ConfigureAwait(false);
+                foreach (var change in styleChanges)
+                {
+                    if (!int.TryParse(
+                            change.Value, System.Globalization.NumberStyles.None,
+                            System.Globalization.CultureInfo.InvariantCulture, out var styleId)
+                        || !ofVersion.ContainsKey(styleId))
+                    {
+                        throw new BusinessRuleException(
+                            "ECR-TMPL-0422",
+                            $"Стиль {change.Value} не належить версії {templateVersionId}.",
+                            new Dictionary<string, object?>
+                            {
+                                ["messageKey"] = "err.ECR-TMPL-0422.presentationValueInvalid",
+                                ["entityType"] = change.EntityType,
+                                ["field"] = change.Field,
+                            });
+                    }
+                }
+            }
+        }
 
         // ФВ-2.6: порядок — ціле від 0. Без перевірки «abc» доїхало б до
         // `CONVERT(int, @value)` у сховищі і вийшло б 500 замість 422.

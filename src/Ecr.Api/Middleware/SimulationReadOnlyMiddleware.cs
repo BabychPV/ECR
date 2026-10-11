@@ -1,5 +1,10 @@
+using System.Globalization;
+using System.Security.Claims;
 using Ecr.Api.Auth;
 using Ecr.Application.Errors;
+using Ecr.Application.Ports;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.Cookies;
 
 namespace Ecr.Api.Middleware;
 
@@ -36,25 +41,70 @@ public sealed class SimulationReadOnlyMiddleware(RequestDelegate next)
 
     /// <summary>Перевіряє запит.</summary>
     /// <param name="context">Контекст запиту.</param>
-    public Task InvokeAsync(HttpContext context)
+    /// <param name="simulation">Сервіс сеансів симуляції (Scoped, тож параметром, а не конструктором).</param>
+    /// <remarks>
+    /// ⛔ S1-03 (аудит 5): сеанс закрито НА СЕРВЕРІ (завершено з іншого клієнта того самого актора), а cookie з
+    /// заявкою <c>ecr:sim</c> лишилась. Профіль для такого сеансу вже звичайний
+    /// (<c>SimulationAwareAccessDecisionService</c>), банера немає, а тут кожен запис давав <c>403 ECR-SIM-0403</c> —
+    /// користувач без видимої причини не міг нічого змінити до виходу. Тепер «лише читання» діє, поки сеанс
+    /// ВІДКРИТИЙ на сервері; закритий — заявку знімаємо з cookie й запит іде як звичайний. Перевірка — лише для
+    /// небезпечних методів під заявкою (симуляція рідкісна), відмова бази не відкриває запис (виняток іде вгору).
+    /// </remarks>
+    public async Task InvokeAsync(HttpContext context, ISimulationService simulation)
     {
         ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(simulation);
 
         if (context.User is { Identity.IsAuthenticated: true }
             && context.User.HasClaim(c => c.Type == AuthenticationSetup.SimulationSessionClaim)
             && !IsSafe(context.Request.Method)
             && !Allowed.Contains(context.Request.Path.Value ?? string.Empty, StringComparer.OrdinalIgnoreCase))
         {
-            throw new AccessDeniedException(
-                "ECR-SIM-0403",
-                "Сеанс симуляції — лише читання: змінювати дані не можна.",
-                new Dictionary<string, object?>(StringComparer.Ordinal)
-                {
-                    ["messageKey"] = "err.ECR-SIM-0403.readOnly",
-                });
+            if (await IsSessionOpenAsync(context, simulation).ConfigureAwait(false))
+            {
+                throw new AccessDeniedException(
+                    "ECR-SIM-0403",
+                    "Сеанс симуляції — лише читання: змінювати дані не можна.",
+                    new Dictionary<string, object?>(StringComparer.Ordinal)
+                    {
+                        ["messageKey"] = "err.ECR-SIM-0403.readOnly",
+                    });
+            }
+
+            await DropStaleClaimAsync(context).ConfigureAwait(false);
         }
 
-        return next(context);
+        await next(context).ConfigureAwait(false);
+    }
+
+    /// <summary>Чи сеанс із заявки ще відкритий на сервері. Нерозбірна заявка — «відкритий» (відмова безпечна).</summary>
+    private static async Task<bool> IsSessionOpenAsync(
+        HttpContext context, ISimulationService simulation)
+    {
+        var raw = context.User.FindFirst(AuthenticationSetup.SimulationSessionClaim)?.Value;
+        if (!long.TryParse(raw, NumberStyles.None, CultureInfo.InvariantCulture, out var sessionId))
+        {
+            return true;
+        }
+
+        return await simulation.GetActorAsync(sessionId, context.RequestAborted).ConfigureAwait(false) is not null;
+    }
+
+    /// <summary>Перевидає cookie без заявки закритого сеансу й знімає її з принципала цього запиту.</summary>
+    private static async Task DropStaleClaimAsync(HttpContext context)
+    {
+        var claims = context.User.Claims
+            .Where(c => c.Type != AuthenticationSetup.SimulationSessionClaim)
+            .Select(c => new Claim(c.Type, c.Value))
+            .ToList();
+
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(
+            claims, CookieAuthenticationDefaults.AuthenticationScheme));
+
+        await context.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, principal)
+            .ConfigureAwait(false);
+
+        context.User = principal;
     }
 
     private static bool IsSafe(string method)

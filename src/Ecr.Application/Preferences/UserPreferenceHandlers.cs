@@ -42,7 +42,7 @@ public static partial class UserPreferenceRules
            && KeyFormat().IsMatch(key)
            && (ExactKeys.Contains(key) || Prefixes.Any(p => key.StartsWith(p, StringComparison.Ordinal)));
 
-    [GeneratedRegex(@"^[A-Za-z][A-Za-z0-9]*(\.[A-Za-z0-9_-]+)*$", RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"^[A-Za-z][A-Za-z0-9]*(\.[A-Za-z0-9_-]+)*\z", RegexOptions.CultureInvariant)]
     private static partial Regex KeyFormat();
 
     internal static string RequireKey(string? key)

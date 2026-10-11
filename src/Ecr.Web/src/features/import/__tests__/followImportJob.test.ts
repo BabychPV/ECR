@@ -75,4 +75,52 @@ describe('followImportJob (G1-07)', () => {
     expect(outcome).toBe('unknown');
     expect(client.getQueryState(['table-slice', 70, 202609])?.isInvalidated).toBe(true);
   });
+
+  /*
+   * ⛔ X2-04: один збій опитування (обрив мережі, 503) завершував стеження зі станом `unknown`, і
+   * зрізи позначались застарілими ДО завершення імпорту.
+   */
+  it('минущий збій опитування (мережа, 503) не завершує стеження: далі Succeeded', async () => {
+    const queue: ('network' | 'busy' | 'Running' | 'Succeeded')[] = ['network', 'busy', 'Running', 'Succeeded'];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => {
+        const step = queue.shift();
+        if (step === 'network') return Promise.reject(new TypeError('Failed to fetch'));
+        if (step === 'busy') return Promise.resolve(new Response(null, { status: 503 }));
+
+        return Promise.resolve(
+          new Response(JSON.stringify({ id: 'job-1', state: step }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          }),
+        );
+      }),
+    );
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    client.setQueryData(['table-slice', 70, 202609], { rows: [] });
+
+    const outcome = await followImportJob(client, 'job-1', 1, 202609, {
+      wait: () => {
+        // Поки задача не завершилась, зріз не інвалідовано.
+        expect(client.getQueryState(['table-slice', 70, 202609])?.isInvalidated).toBe(false);
+
+        return Promise.resolve();
+      },
+    });
+
+    expect(outcome).toBe('succeeded');
+    expect(queue).toEqual([]);
+  });
+
+  it('збої не безкінечні: після п’яти поспіль стеження здається зі станом unknown', async () => {
+    const fetchMock = vi.fn(() => Promise.reject(new TypeError('Failed to fetch')));
+    vi.stubGlobal('fetch', fetchMock);
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+
+    const outcome = await followImportJob(client, 'job-1', 1, 202609, { wait: () => Promise.resolve() });
+
+    expect(outcome).toBe('unknown');
+    expect(fetchMock).toHaveBeenCalledTimes(5);
+  });
 });

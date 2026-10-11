@@ -179,6 +179,28 @@ public sealed class MethodologyPackageImportApiTests(SqlServerFixture sql)
         await JsonAsync(response, HttpStatusCode.Forbidden).ConfigureAwait(true);
     }
 
+    /// <summary>
+    /// S1-04 (аудит 3): право перевіряється ДО читання тіла. Користувач без права з тілом, яке не розбирається,
+    /// отримує 403, а не 400 розбору: 400 означало б, що сервер уже прийняв і спробував розібрати тіло.
+    /// </summary>
+    /// <remarks>Мутація: прибрати <c>[RequirePermissionsBeforeBody]</c> з дії — відповідь 400.</remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task S1_04_без_права_відмова_до_розбору_тіла()
+    {
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, ["Calculation.View"]).ConfigureAwait(true);
+
+        using var body = new StringContent("{ це не JSON", System.Text.Encoding.UTF8, "application/json");
+        var response = await client.PostAsync(new Uri("/api/v1/methodologies/import?dryRun=true", UriKind.Relative), body)
+            .ConfigureAwait(true);
+
+        // ⛔ 403, а не 400 розбору: відмова за правом настала ДО читання тіла.
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        await JsonAsync(response, HttpStatusCode.Forbidden).ConfigureAwait(true);
+    }
+
     // ── Опора ─────────────────────────────────────────────────────────────
 
     internal sealed record PackageNames(string Library, string Owner);

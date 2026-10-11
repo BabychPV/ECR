@@ -103,6 +103,9 @@ public sealed class ProjectPermissionCheckTests
     {
         ["Ecr.Application.Integration.ListCollectionRunsHandler::HandleAsync"] =
             "RequireAnyAsync з переліком Integration.View/Integration.Manage — обидва глобальні.",
+        ["Ecr.Api.Security.RequirePermissionsBeforeBodyAttribute::OnAuthorizationAsync"] =
+            "S1-04: фільтр виконує ДО читання тіла ті самі глобальні права, що й обробник; перелік кодів задає дія "
+            + "атрибутом (Calculation.EditFormula/EditConstant — глобальні), обробник перевіряє їх повторно літералами.",
     };
 
     /// <summary>

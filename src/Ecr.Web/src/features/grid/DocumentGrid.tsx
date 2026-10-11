@@ -2,14 +2,13 @@ import { useCallback, useEffect, useMemo, useRef, useState, type JSX } from 'rea
 import { Alert, Badge, Button, Group, List, Modal, Stack, Text } from '@mantine/core';
 import { RevoGrid } from '@revolist/react-datagrid';
 import type { ColumnRegular } from '@revolist/revogrid';
-import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { UseQueryResult } from '@tanstack/react-query';
 import { apiFetch, EcrApiError, isSessionClosed, type RequiredInputCell } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
 import type {
   CellConflictDto,
   ColumnDto,
-  CreateRowRequest,
   RegistryDefDto,
   RegistryEntryDto,
   TableSliceDto,
@@ -18,7 +17,7 @@ import type {
 import { useColumnWidths } from '@/features/preferences/columnWidthsSync';
 import { cellAppearanceClassOf, cellAppearanceOf } from './cellAppearance';
 import { cellFormatOf, withCellFormat } from './conditionalAppearance';
-import { cellDisplay, cellText, editorValueOf, isNumericColumn, sameColumnValue } from './cellValue';
+import { cellDisplay, cellText, editorValueOf, isNumericColumn, isTextColumnType, sameColumnValue } from './cellValue';
 import { columnIndexOf, rowIndexOf } from './rowIndex';
 import { planPaste, type PasteRejection } from './clipboard';
 import { parseClipboard, toClipboard } from './tsvClipboard';
@@ -52,7 +51,7 @@ import {
   rowKeyOfCellKey,
 } from './permissions';
 import { markConfirmed } from './confirmedEdits';
-import { markSliceHidden } from './sliceCache';
+import { markSliceHidden, takeMissedInvalidation } from './sliceCache';
 import { UndoStack, type CellEdit } from './undo';
 import {
   buildRequest,
@@ -63,7 +62,7 @@ import {
   type PendingEdit,
 } from './useCellPatch';
 import {
-  clearBusyRetry,
+  noteBusyRetryResolved,
   holdRejectedEdits,
   isBusyRetryWaiting,
   noteSaveSucceeded,
@@ -127,8 +126,9 @@ import {
 } from './gridTotals';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
-import { showApiError, showWarning } from '@/shared/ui/notify';
+import { showWarning } from '@/shared/ui/notify';
 import { refusalText } from './saveErrors';
+import { useAddRow } from './useAddRow';
 import { useRowHeight } from '@/shared/theme/preferences';
 import { t } from '@/shared/i18n';
 // ⚠ Порядок стилів збережений: `cell-states.css` (раніше — у `App.tsx`) іде
@@ -300,6 +300,27 @@ function combineLookupEntries(results: UseQueryResult<RegistryEntryDto[]>[]): {
 }
 
 /**
+ * Довідники, для яких сервер вимагав `asOf`, хоч у переліку вони нетемпоральні (D1-06): частини композиції з
+ * темпоральним батьком. Модульний, а не стан сітки: на документі до 91 таблиці ділять довідник, і кожна не має
+ * наново отримувати ту саму відмову.
+ */
+const asOfRequiredCodes = new Set<string>();
+
+/** Забуває запам'ятоване «довідник вимагає asOf» (для тестів). */
+export function forgetAsOfRequired(): void {
+  asOfRequiredCodes.clear();
+}
+
+/** `422` «asOf обов'язковий» (`ECR-REQ-0422`, `err.ECR-REQ-0422.asOfRequired`). */
+function isAsOfRequired(error: unknown): boolean {
+  return (
+    error instanceof EcrApiError &&
+    error.problem.errorCode === 'ECR-REQ-0422' &&
+    error.problem.extensions2?.['messageKey'] === 'err.ECR-REQ-0422.asOfRequired'
+  );
+}
+
+/**
  * Grid-редактор документа.
  *
  * Обов'язкові можливості (`B21` §12, критерії FQ-1):
@@ -372,7 +393,11 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
     const shownNow = wasHidden.current && !hidden;
     wasHidden.current = hidden;
     if (!shownNow) return;
-    if (queryClient.getQueryState(['table-slice', tableInstanceId, periodKey])?.isInvalidated === true) {
+    // ⛔ X2-05: `isInvalidated` лишає й кожне власне збереження (`applyPatchLocally`), тож лише за ним
+    // повернення до сітки коштувало б `GET` зрізу щоразу. Перечитуємо, якщо інвалідацію ПРОПУЩЕНО,
+    // доки сітку було приховано (`invalidateSlices`).
+    const missed = takeMissedInvalidation(tableInstanceId, periodKey);
+    if (missed && queryClient.getQueryState(['table-slice', tableInstanceId, periodKey])?.isInvalidated === true) {
       void refetchSlice();
     }
   }, [hidden, queryClient, tableInstanceId, periodKey, refetchSlice]);
@@ -410,30 +435,8 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
     settleRecalculation(queryClient, recalculationJobId, documentId, periodKey, recalc.writtenCount);
   }, [recalc.outcome, recalculationJobId]);
 
-  /**
-   * Додавання рядка динамічної таблиці (`ФВ-3.2`).
-   *
-   * ⛔ До аудиту цієї дії в інтерфейсі не було зовсім: ендпоінт існував і
-   * працював, а динамічна таблиця лишалася порожньою назавжди — рядок у неї
-   * не міг додати ніхто (`A7-39`).
-   *
-   * ⚠ Ключ не задається: сервер видає GUID у форматі `N`. Просити ключ у
-   * користувача означало б віддати йому ідентичність рядка, на яку
-   * посилаються формули й аудит.
-   */
-  const addRow = useMutation({
-    mutationFn: () =>
-      apiFetch(`/api/v1/documents/${documentId}/rows`, {
-        method: 'POST',
-        body: JSON.stringify({ tableInstanceId, rowKey: null } satisfies CreateRowRequest),
-      }),
-    onSuccess: () => void slice.refetch(),
-
-    // ⚠ Стеля рядків і дублікат ключа приходять як `ECR-ROW-0409` з числом у
-    // тексті: «досягнуто межу динамічних рядків таблиці: 200». Це те, що
-    // людина може зрозуміти й погодити, а «не вдалося» — ні.
-    onError: showApiError,
-  });
+  // Додавання рядка динамічної таблиці (`ФВ-3.2`) — `useAddRow.ts` (A7-39, Y7-03).
+  const addRow = useAddRow(documentId, tableInstanceId, () => void slice.refetch());
   const history = useRef(new UndoStack(`${tableInstanceId}:${periodKey}`));
   const [rejected, setRejected] = useState<PasteRejection[]>([]);
 
@@ -616,7 +619,8 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         // того самого рядка, якої в пакеті не було, лишається позначеною.
         setSaveError(null);
         // ⚠ AN-123: збереження пройшло — стан «чекає, доки дані звільняться» знято.
-        clearBusyRetry();
+        // ⛔ Y8-04: лише для ЦЬОГО зрізу — повтор іншого зрізу не скасовується.
+        noteBusyRetryResolved(tableInstanceId, periodKey);
       } catch (error) {
         // ⛔ `V-01`: відхилені правки ТРИМАЮТЬСЯ — лишаються незбереженими, з
         // маркером і причиною, але наступні пакети автозбереження їх уже не
@@ -975,14 +979,21 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
    */
   const lookupAsOf = periodEnd;
 
+  // ⛔ D1-06: довідник-ЧАСТИНА композиції з темпоральним батьком сам нетемпоральний (`isTemporal: false`), але
+  // перелік його записів залежить від дати — сервер вимагає `asOf` і для нього (`422 asOfRequired`), а клієнт слав
+  // його лише за `isTemporal`, тож пікер лишався порожнім. Ланцюг композиції в переліку довідників не описано, тож
+  // дізнаємось із відмови: запам'ятовуємо код і далі шлемо дату кінця періоду (як для темпорального).
+  const [, bumpAsOfRequired] = useState(0);
+
   const lookupEntriesQueries = useQueries({
     queries: lookupRegistryCodes.map(({ code, isTemporal }) => {
-      const asOf = isTemporal ? lookupAsOf : null;
+      const needsAsOf = isTemporal || asOfRequiredCodes.has(code);
+      const asOf = needsAsOf ? lookupAsOf : null;
 
       // ⛔ Темпоральний довідник без дати не питається взагалі: запит без
       // `asOf` сервер відхиляє (`422`), а будь-яка «здогадана» дата показала б
       // записи, які PATCH потім відхилить (D1-02). Календар приходить за мить.
-      const enabled = !isTemporal || asOf !== null;
+      const enabled = !needsAsOf || asOf !== null;
 
       // ⚠ Базовий шлях — ОКРЕМИЙ шаблонний рядок, без `?asOf=` усередині:
       // `EndpointCoverageTests.Кожна_адреса_яку_викликає_клієнт_існує_на_сервері`
@@ -992,10 +1003,20 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
 
       return {
         queryKey: [...queryKeys.registries.entries(code), asOf],
-        queryFn: () =>
-          apiFetch<RegistryEntryDto[]>(
-            asOf === null ? baseUrl : `${baseUrl}?asOf=${asOf}`,
-          ),
+        queryFn: async () => {
+          try {
+            return await apiFetch<RegistryEntryDto[]>(asOf === null ? baseUrl : `${baseUrl}?asOf=${asOf}`);
+          } catch (error) {
+            // D1-06: «asOf обов'язковий» для довідника, якого ми вважали нетемпоральним, — запам'ятати й
+            // перебудувати запит уже з датою (ключ запиту міняється разом із нею).
+            if (asOf === null && isAsOfRequired(error) && !asOfRequiredCodes.has(code)) {
+              asOfRequiredCodes.add(code);
+              bumpAsOfRequired((value) => value + 1);
+            }
+
+            throw error;
+          }
+        },
         enabled,
 
         // ⚠ Перф: довідник — до 50 тис. записів, а міняє його адміністратор,
@@ -1185,9 +1206,14 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
     if (rejections.size === 0 && pending.size === 0) return overrides;
 
     const merged = new Map(overrides);
+    // ⛔ X2-02: незбережена правка — НОВІША за підтверджену підставу: підстава ставиться
+    // лише при підтвердженні одиничної правки/протягування, а вставка й Undo/Redo
+    // пишуть у сховище повз неї. Тут стояло `if (!merged.has(key))`, і після
+    // «підтвердив 5 → вставив 7» екран показував 5, хоча піде 7 (суми колонок
+    // — `gridTotals` — вже віддавали перевагу правці, тож екран і підсумок розходились).
     for (const edit of pending.values()) {
       const key = cellKey(edit.rowKey, edit.columnCode);
-      if (!merged.has(key)) merged.set(key, edit.isEmpty || edit.value === null ? '' : edit.value);
+      merged.set(key, edit.isEmpty || edit.value === null ? '' : edit.value);
     }
     for (const rejection of rejections.values()) {
       const key = cellKey(rejection.edit.rowKey, rejection.edit.columnCode);
@@ -1355,6 +1381,8 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
               baseVersion: versions.get(target.rowKey) ?? null,
               // ⚠ `G1-05`, L8-20: що людина бачила в кеші — за цим упізнається чужа правка.
               before: valueOf(data, target.rowKey, target.columnCode),
+              // ⛔ X2-03: як і в `captureEdit` — текстову колонку звіряти дослівно (`G1-06`).
+              ...(isTextColumnType(column.dataType) ? { text: true } : {}),
             };
           }
         }
@@ -1366,6 +1394,8 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
           isEmpty: false,
           baseVersion: versions.get(target.rowKey) ?? null,
           before: valueOf(data, target.rowKey, target.columnCode),
+          // ⛔ X2-03: без позначки `0012` і `12` для підтвердження «надіслано» — те саме число.
+          ...(isTextColumnType(column?.dataType) ? { text: true } : {}),
         };
       });
 
@@ -1868,6 +1898,8 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
           // ⚠ L8-20: значення кешу в мить кроку — за ним `withKnownVersions`
           // упізнає чужу правку, якщо крок чекатиме повтору.
           before: valueOf(data, edit.rowKey, edit.columnCode, rowsByKey),
+          // ⛔ X2-03: текстова колонка — звіряти дослівно (`G1-06`), як у `captureEdit`.
+          ...(isTextColumnType(columnsByCode.get(edit.columnCode)?.dataType) ? { text: true } : {}),
         })),
       );
     },

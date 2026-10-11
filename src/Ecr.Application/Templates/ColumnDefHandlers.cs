@@ -52,7 +52,8 @@ public sealed class SaveColumnDefHandler(
     IAccessDecisionService access,
     Common.ICurrentUser currentUser,
     IUnitCatalog units,
-    IRegistryStore? registries = null)
+    IRegistryStore? registries = null,
+    IStyleCatalog? styles = null)
 {
     /// <summary>Право на редагування структури версії (`02-contracts.md` §9).</summary>
     public const string Permission = "Template.Edit";
@@ -142,6 +143,26 @@ public sealed class SaveColumnDefHandler(
         }
 
         await RequireKnownUnitAsync(units, command.UnitId, code, ct).ConfigureAwait(false);
+
+        // ⛔ A1-04: `StyleId` приходить з тіла запиту, а ключа на `cfg.StyleDef` у колонки немає. Стиль ЧУЖОЇ версії
+        // (чи неіснуючий) записувався мовчки: показ читав би чужий вигляд, клон версії лишав би посилання порожнім.
+        // Лише при створенні або зміні стилю — наявне висяче посилання перейменування колонки не блокує.
+        if (styles is not null && command.StyleId is { } styleId && existing?.StyleId != styleId)
+        {
+            var ofVersion = await styles.GetAsync(templateVersionId, ct).ConfigureAwait(false);
+            if (!ofVersion.ContainsKey(styleId))
+            {
+                throw new BusinessRuleException(
+                    ErrorCodes.TemplateInvalid,
+                    $"Стиль {styleId} не належить версії {templateVersionId}.",
+                    new Dictionary<string, object?>
+                    {
+                        ["messageKey"] = "err.ECR-TMPL-0422.presentationValueInvalid",
+                        ["entityType"] = nameof(ColumnDef),
+                        ["field"] = nameof(ColumnDef.StyleId),
+                    });
+            }
+        }
 
         // ✎ RC16-2: ключа на довідник у ColumnDef немає - неіснуючу ціль відсікаємо тут.
         // Лише при створенні або зміні цілі: перейменування/зсув колонки на довідник, що згодом деактивували чи

@@ -299,15 +299,31 @@ public sealed class CorrectWindowsSidHandler(
         await WindowsSidFormat.EnsureFreeAsync(users, sid, exceptUserId: target.Id, ct).ConfigureAwait(false);
 
         var previous = target.WindowsSid;
+
+        // Доменна перевірка на прочитаній сутності дає зрозумілу відмову в типовому випадку (запис уже входив).
         target.CorrectUnconfirmedWindowsSid(sid);
+        var newStamp = target.SecurityStamp;
 
-        await audit.WriteSecurityEventAsync(
-            new SecurityEventRecord(
-                clock.UtcNow, "WindowsSidCorrected", TargetUserId: target.Id, TargetRoleId: null,
-                DetailsJson: JsonSerializer.Serialize(new { oldSid = previous, newSid = sid }),
-                ChangedByUserId: actorId, CorrelationId: currentUser.CorrelationId),
+        // ⛔ Z4-01: але саме вона — TOCTOU. Вхід, що встиг між читанням і записом, лишав підтверджений каталогом SID
+        // перезаписаним (SaveChanges писав його безумовно). Тому САМА заміна — умовний UPDATE (`LastSignInAt IS NULL`)
+        // в одній транзакції з подією аудиту; 0 рядків — програш гонки: та сама відмова 409, що й вище, і жодного запису.
+        await uow.ExecuteInTransactionAsync(
+            async token =>
+            {
+                if (!await users.TryCorrectUnconfirmedWindowsSidAsync(target.Id, sid, newStamp, token).ConfigureAwait(false))
+                {
+                    throw User.WindowsSidConfirmed(target.UserName);
+                }
+
+                await audit.WriteSecurityEventAsync(
+                    new SecurityEventRecord(
+                        clock.UtcNow, "WindowsSidCorrected", TargetUserId: target.Id, TargetRoleId: null,
+                        DetailsJson: JsonSerializer.Serialize(new { oldSid = previous, newSid = sid }),
+                        ChangedByUserId: actorId, CorrelationId: currentUser.CorrelationId),
+                    token).ConfigureAwait(false);
+
+                await uow.SaveChangesAsync(token).ConfigureAwait(false);
+            },
             ct).ConfigureAwait(false);
-
-        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
     }
 }

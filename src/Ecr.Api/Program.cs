@@ -224,6 +224,10 @@ builder.Services.AddHealthChecks()
 
 var app = builder.Build();
 
+// U1-08: невдале перечитування файлу конфігурації майданчика (ProgramData, ECR, config, appsettings.Production.json) лягає в журнал.
+ProgramDataConfiguration.AttachReloadLogger(
+    app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Ecr.Configuration"));
+
 // ⚠ ДО послідовності старту: якщо в теку журналу не вдається писати, про це
 // треба сказати раніше, ніж старт упаде з іншої причини й пояснення не лишиться.
 app.ReportFileLog();

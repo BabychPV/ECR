@@ -178,6 +178,12 @@ public sealed class MaterializeTimeWeightedTests(SqlServerFixture sql)
         Assert.Equal("err.ECR-UOM-0422.boundaryConversionFailed", error.Details!["messageKey"]);
         Assert.Contains("BAD", error.Message, StringComparison.Ordinal);
 
+        // ⛔ Y4-05: перелік іде параметром {fields} у локалізований текст - причина там ключ каталогу, а не
+        // українське речення винятку.
+        var fields = Assert.IsType<string>(error.Details["fields"]);
+        Assert.Contains("err.ECR-UOM-0422.incompatibleDimensions", fields, StringComparison.Ordinal);
+        Assert.DoesNotMatch("[Ѐ-ӿ]", fields);
+
         Assert.Equal(5m, Assert.IsType<decimal>(await CellAsync(stand, stand.Columns[0])));
         Assert.Null(await CellAsync(stand, stand.Columns[1]));
     }
@@ -207,6 +213,10 @@ public sealed class MaterializeTimeWeightedTests(SqlServerFixture sql)
         Assert.Equal("ECR-UOM-0422", error.ErrorCode);
         Assert.Equal("err.ECR-UOM-0422.boundaryConversionFailed", error.Details!["messageKey"]);
         Assert.Contains("MIX", error.Message, StringComparison.Ordinal);
+
+        var fields = Assert.IsType<string>(error.Details["fields"]);
+        Assert.Contains(MaterializeCollectedDataJob.MixedSourceUnitsReason, fields, StringComparison.Ordinal);
+        Assert.DoesNotMatch("[Ѐ-ӿ]", fields);
 
         Assert.Equal(5m, Assert.IsType<decimal>(await CellAsync(stand, stand.Columns[0])));
         Assert.Null(await CellAsync(stand, stand.Columns[1]));

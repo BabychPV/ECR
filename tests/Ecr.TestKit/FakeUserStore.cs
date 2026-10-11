@@ -637,6 +637,42 @@ public sealed class FakeUserStore : IUserStore
     }
 
     /// <inheritdoc />
+    /// <remarks>Домен: <c>User.TryReserveAttempt</c> — те саме правило, що в SQL бойового сховища (AN-90).</remarks>
+    public Task<bool> TryReserveAttemptAsync(int userId, int maxFailedAttempts, DateTime utcNow, CancellationToken ct)
+    {
+        var user = _users.Find(u => u.Id == userId);
+        return Task.FromResult(user is not null && user.TryReserveAttempt(maxFailedAttempts, utcNow));
+    }
+
+    /// <inheritdoc />
+    public Task<FailedAttemptOutcome> RegisterReservedFailureAsync(
+        int userId, int maxFailedAttempts, int lockoutMinutes, DateTime utcNow, CancellationToken ct)
+    {
+        var user = _users.Find(u => u.Id == userId);
+        if (user is null)
+        {
+            return Task.FromResult(default(FailedAttemptOutcome));
+        }
+
+        var locked = user.LockIfAttemptBudgetSpent(maxFailedAttempts, lockoutMinutes, utcNow);
+        return Task.FromResult(new FailedAttemptOutcome(user.FailedAttempts, user.LockedUntil, locked));
+    }
+
+    /// <inheritdoc />
+    public Task<bool> TryCorrectUnconfirmedWindowsSidAsync(
+        int userId, string windowsSid, string securityStamp, CancellationToken ct)
+    {
+        var user = _users.Find(u => u.Id == userId);
+        if (user is null || user.Provider != AuthProvider.Windows || user.LastSignInAt is not null)
+        {
+            return Task.FromResult(false);
+        }
+
+        user.CorrectUnconfirmedWindowsSid(windowsSid);
+        return Task.FromResult(true);
+    }
+
+    /// <inheritdoc />
     public Task<bool> TryRegisterSuccessfulLoginAsync(int userId, DateTime utcNow, CancellationToken ct)
     {
         var user = _users.Find(u => u.Id == userId);

@@ -55,6 +55,27 @@ public sealed class SqlServerFixture : IAsyncLifetime
     /// </remarks>
     private const int AppCommandTimeoutSeconds = 60;
 
+    /// <summary>
+    /// Стеля одного файла тестової бази, МБ: один приріст файла (64 МБ) понад початкові 64 — нормальна робота,
+    /// більше — ні. Стеля сторожа <c>TestDatabaseSizeTests</c> (рання, названа відмова); наприкінці колекції
+    /// <see cref="DisposeAsync"/> міряє за <see cref="MaxFileMbAtCollectionEnd"/>.
+    /// </summary>
+    public const int MaxFileMb = 128;
+
+    /// <summary>
+    /// Стеля одного файла наприкінці колекції, МБ: початкові 8 (model) + два прирости по 64.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ ЗАМІР, а не бажання: перший прогін перевірки наприкінці колекції (CI run 38079429594, 10.10.2026) показав
+    /// <c>EcrTest_Infrastructure_* = 136 МБ</c> і журнал <c>136 МБ</c> — тобто якийсь клас ПІСЛЯ сторожа
+    /// <c>TestDatabaseSizeTests</c> (він бачить ≤ 72 МБ) дає другий приріст файла. Це саме та сліпа зона, яку
+    /// закриває Z8-03, і вона реальна. Стеля 128 одразу зробила б червоними всі ~1500 тестів колекції через
+    /// чужий клас, тож тут — храповик на виміряному рівні (+один приріст запасу): ще один приріст понад 136 —
+    /// червоний. ⚠ [debt] знайти клас, що росте після сторожа (великі заливки: порціями з CHECKPOINT), і повернути
+    /// стелю до <see cref="MaxFileMb"/>.
+    /// </remarks>
+    public const int MaxFileMbAtCollectionEnd = 192;
+
     private readonly string _nameSuffix = string.Empty;
 
     private MsSqlContainer? _container;
@@ -107,12 +128,57 @@ public sealed class SqlServerFixture : IAsyncLifetime
         await BuildSchemaAsync().ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Файли поточної бази, більші за <paramref name="maxFileMb"/> МБ: <c>"ім'я = N МБ, …"</c>, або <c>null</c>.
+    /// </summary>
+    /// <param name="connectionString">Рядок підключення до тестової бази.</param>
+    /// <param name="maxFileMb">Стеля одного файла, МБ.</param>
+    /// <returns>Перелік завеликих файлів чи <c>null</c>, коли таких немає.</returns>
+    public static async Task<string?> FindOversizedFilesAsync(string connectionString, int maxFileMb = MaxFileMb)
+    {
+        await using var connection = new SqlConnection(connectionString);
+        await connection.OpenAsync().ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT STRING_AGG(CAST(name + N' = ' + CAST(size / 128 AS nvarchar(10)) + N' МБ' AS nvarchar(max)), N', ')
+            FROM sys.database_files
+            WHERE size / 128 > @max
+            """;
+        command.Parameters.Add(new SqlParameter("@max", maxFileMb));
+
+        return await command.ExecuteScalarAsync().ConfigureAwait(false) as string;
+    }
+
     /// <inheritdoc />
     public async Task DisposeAsync()
     {
+        // ⛔ Z8-03: розмір файлів — НАПРИКІНЦІ колекції, а не лише в сторожі `TestDatabaseSizeTests`. Сторож знімає
+        // розмір у ту мить, коли до нього дійшла черга (порядок класів xUnit не задається), тож журнал, що розрісся
+        // від класу, який виконується ПІСЛЯ нього, проходив зеленим. Виняток тут xUnit 2 показує як збій
+        // прибирання колекції — прогін червоніє. Лише спільна база колекції (власні бази з суфіксом — на тесті).
+        string? oversized = null;
+        if (_nameSuffix.Length == 0 && ConnectionString.Length > 0)
+        {
+            try
+            {
+                oversized = await FindOversizedFilesAsync(ConnectionString, MaxFileMbAtCollectionEnd).ConfigureAwait(false);
+            }
+            catch (SqlException)
+            {
+                // База вже недоступна (її скинув тест) — міряти нічого; сторож у класі лишається.
+            }
+        }
+
         if (_container is not null)
         {
             await _container.DisposeAsync().ConfigureAwait(false);
+        }
+
+        if (oversized is not null)
+        {
+            throw new InvalidOperationException(
+                $"Файли тестової бази перетнули стелю {MaxFileMbAtCollectionEnd} МБ до кінця прогону колекції: {oversized}. "
+                + "Велику заливку в тесті — порціями з CHECKPOINT (див. TestDatabaseSizeTests).");
         }
 
         // Локальний сервер лишається з базою: після невдалого прогону в неї

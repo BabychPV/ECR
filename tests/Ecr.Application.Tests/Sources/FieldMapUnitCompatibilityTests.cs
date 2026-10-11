@@ -94,4 +94,111 @@ public sealed class FieldMapUnitCompatibilityTests
             CancellationToken.None);
         await sources.Received(1).AddFieldMapAsync(Arg.Any<EntityFieldMap>(), Arg.Any<CancellationToken>());
     }
+
+    private const int Second = 4;
+    private const int Hour = 5;
+    private const int CubicPerHour = 6;
+    private const int StdCubic = 7;
+
+    private static readonly UnitCatalogSnapshot IntegralCatalog = new(
+        new Dictionary<string, UnitRef>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["kg"] = new UnitRef(Kg, "kg", 1),
+            ["MJ"] = new UnitRef(Mj, "MJ", 2),
+            ["s"] = new UnitRef(Second, "s", 4, 1m),
+            ["h"] = new UnitRef(Hour, "h", 4, 3600m),
+            ["Sm3"] = new UnitRef(StdCubic, "Sm3", 12, 1m),
+            ["Sm3_per_h"] = new UnitRef(CubicPerHour, "Sm3_per_h", 13, 0.000277777777777778m),
+        },
+        new Dictionary<string, int>(StringComparer.Ordinal) { [$"{StdCubic}|{Hour}"] = CubicPerHour });
+
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "Z2-04")]
+    [InlineData(Mj, Kg, "err.ECR-UOM-0422.integralSourceNotRate")]
+    [InlineData(Kg, Kg, "err.ECR-UOM-0422.integralSourceNotRate")]
+    [InlineData(null, StdCubic, "err.ECR-UOM-0422.integralUnitsUndeclared")]
+    [InlineData(CubicPerHour, null, "err.ECR-UOM-0422.integralUnitsUndeclared")]
+    [InlineData(null, null, "err.ECR-UOM-0422.integralUnitsUndeclared")]
+    public async Task Z2_04_інтеграл_що_нічне_перенесення_відхилило_б_відмовляє_при_налаштуванні(
+        int? source, int? target, string expectedKey)
+    {
+        var units = Substitute.For<IUnitCatalog>();
+        units.GetAsync(Arg.Any<CancellationToken>()).Returns(IntegralCatalog);
+
+        var ex = await Assert.ThrowsAsync<BusinessRuleException>(() => FieldMapUnitCompatibility.EnsureAsync(
+            units, "Flow", source, target, AggregationKind.TimeIntegral, CancellationToken.None));
+
+        Assert.Equal(ErrorCodes.UnitDimensionMismatch, ex.ErrorCode);
+        Assert.Equal(expectedKey, ex.Details!["messageKey"]);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "Z2-04")]
+    public async Task Z2_04_інтеграл_швидкості_в_її_величину_і_невідома_одиниця_проходять()
+    {
+        var units = Substitute.For<IUnitCatalog>();
+        units.GetAsync(Arg.Any<CancellationToken>()).Returns(IntegralCatalog);
+
+        // Sm3/h x с -> Sm3: законно.
+        await FieldMapUnitCompatibility.EnsureAsync(
+            units, "Flow", CubicPerHour, StdCubic, AggregationKind.TimeIntegral, CancellationToken.None);
+
+        // Одиниці немає в знімку - її ловить існування одиниці, а не ця перевірка.
+        await FieldMapUnitCompatibility.EnsureAsync(
+            units, "Flow", 999, StdCubic, AggregationKind.TimeIntegral, CancellationToken.None);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "Z2-04")]
+    public async Task Z2_04_інтеграл_швидкості_в_чужу_розмірність_відмовляє_конверсією_а_не_проходить()
+    {
+        var units = Substitute.For<IUnitCatalog>();
+        units.GetAsync(Arg.Any<CancellationToken>()).Returns(IntegralCatalog);
+
+        // Sm3/h x с -> kg: чисельник Sm3 у kg не переводиться.
+        var ex = await Assert.ThrowsAsync<DomainException>(() => FieldMapUnitCompatibility.EnsureAsync(
+            units, "Flow", CubicPerHour, Kg, AggregationKind.TimeIntegral, CancellationToken.None));
+
+        Assert.Equal("ECR-UOM-0422", ex.ErrorCode);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "Z2-04")]
+    public async Task Z2_04_створення_інтеграла_без_жодної_одиниці_відхиляється_і_нічого_не_пише()
+    {
+        var sources = Substitute.For<ICollectionStore>();
+        var access = Substitute.For<IAccessDecisionService>();
+        var user = Substitute.For<ICurrentUser>();
+        var uow = Substitute.For<IUnitOfWork>();
+        var units = Substitute.For<IUnitCatalog>();
+        units.GetAsync(Arg.Any<CancellationToken>()).Returns(IntegralCatalog);
+
+        user.UserId.Returns(9);
+        uow.ExecuteInTransactionAsync(Arg.Any<Func<CancellationToken, Task>>(), Arg.Any<CancellationToken>())
+            .Returns(call => call.Arg<Func<CancellationToken, Task>>()(call.Arg<CancellationToken>()));
+        access.BuildProfileAsync(9, Arg.Any<CancellationToken>())
+            .Returns(new AccessBuilder { UserId = 9 }.Permission("Integration.Manage").Build());
+        sources.FindSourceEntityAsync(5, Arg.Any<CancellationToken>())
+            .Returns(new SourceEntity(1, "AF01", RegistrySourceKind.External));
+        sources.ColumnDefExistsAsync(Arg.Any<int>(), Arg.Any<CancellationToken>()).Returns(true);
+        sources.FindProjectIdsUsingColumnAsync(Arg.Any<int>(), Arg.Any<CancellationToken>()).Returns(Array.Empty<int>());
+        sources.AddFieldMapAsync(Arg.Any<EntityFieldMap>(), Arg.Any<CancellationToken>())
+            .Returns(call => call.Arg<EntityFieldMap>());
+
+        var handler = new CreateEntityFieldMapHandler(
+            sources, access, user, uow, Substitute.For<IAuditWriter>(), Substitute.For<IClock>(), units);
+
+        var ex = await Assert.ThrowsAsync<BusinessRuleException>(() => handler.HandleAsync(
+            5,
+            new CreateEntityFieldMapCommand(
+                "Flow", FieldTargetKind.Column, 100, null, null, null, "R1", AggregationKind.TimeIntegral),
+            CancellationToken.None));
+
+        Assert.Equal("err.ECR-UOM-0422.integralUnitsUndeclared", ex.Details!["messageKey"]);
+        await sources.DidNotReceiveWithAnyArgs().AddFieldMapAsync(default!, default);
+    }
 }

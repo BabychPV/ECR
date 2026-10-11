@@ -1,4 +1,4 @@
-import { useDeferredValue, type JSX } from 'react';
+import { memo, useDeferredValue, useMemo, type JSX } from 'react';
 import { Group, Text } from '@mantine/core';
 import type { TableSliceDto } from '@/api/types';
 import { formatDecimal } from '@/shared/format/number';
@@ -31,16 +31,24 @@ interface GridStatusBarProps {
  * ⚠ Без `aria-live`: читалка не має озвучувати кожен рух курсора (ризик із
  * `UI-ADOPTION-TASKS`, UI-23); рядок читається на вимогу.
  */
-export function GridStatusBar(props: GridStatusBarProps): JSX.Element {
+function GridStatusBarView(props: GridStatusBarProps): JSX.Element {
   const range = useDeferredValue(useSelectedRange(props.tableInstanceId, props.periodKey));
 
-  const stats = selectionStats({
-    slice: props.slice,
-    columns: props.columns,
-    rows: props.rows,
-    range,
-    ...(props.pending === undefined ? {} : { pending: props.pending }),
-  });
+  // ⛔ C1-05: сума виділення — це прохід по всіх комірках діапазону (до 500×60) з `BigInt`-арифметикою, а тут
+  // вона рахувалась на КОЖЕН рендер батька (кожен рух курсора, кожна правка) — навіть коли ні виділення, ні
+  // дані не змінились. Тепер — лише при зміні входів.
+  const { slice, columns, rows, pending } = props;
+  const stats = useMemo(
+    () =>
+      selectionStats({
+        slice,
+        columns,
+        rows,
+        range,
+        ...(pending === undefined ? {} : { pending }),
+      }),
+    [slice, columns, rows, range, pending],
+  );
 
   return (
     <Group
@@ -70,3 +78,6 @@ export function GridStatusBar(props: GridStatusBarProps): JSX.Element {
     </Group>
   );
 }
+
+/** Рядок стану; `memo` — перемальовка батька з тими самими входами його не чіпає (C1-05). */
+export const GridStatusBar = memo(GridStatusBarView);

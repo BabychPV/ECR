@@ -67,7 +67,7 @@ public sealed partial class ConditionalFormatRule : Entity<int>
     public string? ForegroundHex { get; private set; }
     public bool IsBold { get; private set; }
 
-    [GeneratedRegex("^#[0-9a-fA-F]{6}$")]
+    [GeneratedRegex("^#[0-9a-fA-F]{6}\\z")]
     private static partial Regex HexColor();
 
     /// <summary>Скільки операндів потрібно оператору: 0 (<c>empty</c>/<c>notEmpty</c>), 1, 2 (<c>between</c>).</summary>

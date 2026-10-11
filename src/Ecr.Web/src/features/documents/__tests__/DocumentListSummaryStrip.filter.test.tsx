@@ -255,3 +255,41 @@ describe('DocumentListSummaryStrip: лічильник — фільтр стан
     },
   );
 });
+
+/**
+ * Y7-02: смуга лічильників рахує за ТИМ САМИМ проєктом, що й таблиця під нею.
+ *
+ * ⛔ Мутаційний доказ: прибери `projectId` з `documentListSummary` (`documents/api.ts`) — у запиті немає
+ * `projectId=5`, перший тест червоніє.
+ */
+describe('DocumentListSummaryStrip: фільтр проєкту (Y7-02)', () => {
+  function showStrip(projectId: number | null): void {
+    mockFetch();
+
+    render(
+      <MantineProvider theme={testTheme}>
+        <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+          <DocumentListSummaryStrip periodKey={202601} filters={{ state: null, setState: vi.fn(), projectId }} />
+        </QueryClientProvider>
+      </MantineProvider>,
+    );
+  }
+
+  const queryOf = (): URLSearchParams => new URLSearchParams(summaries[0]?.split('?')[1] ?? '');
+
+  it('обраний проєкт іде в запит зведення', async () => {
+    showStrip(5);
+    await strip();
+
+    expect(summaries).toHaveLength(1);
+    expect(queryOf().get('periodKey')).toBe('202601');
+    expect(queryOf().get('projectId')).toBe('5');
+  });
+
+  it('без проєкту параметра немає', async () => {
+    showStrip(null);
+    await strip();
+
+    expect(queryOf().has('projectId')).toBe(false);
+  });
+});

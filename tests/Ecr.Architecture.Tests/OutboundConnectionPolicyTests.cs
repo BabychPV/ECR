@@ -127,7 +127,7 @@ public sealed class OutboundConnectionPolicyTests
         OwnDb("src/Ecr.Infrastructure/Persistence/AuditWriter.cs", 1),
         OwnDb("src/Ecr.Infrastructure/Persistence/RuleCoverageReader.cs", 1),
         OwnDb("src/Ecr.Infrastructure/Integration/IntegrationCellPatcher.cs", 1),
-        OwnDb("src/Ecr.Infrastructure/Jobs/SourceEventSyncJob.cs", 2),
+        OwnDb("src/Ecr.Infrastructure/Jobs/SourceEventSyncJob.cs", 1), // F2-04: видалення рядків подій — транзакція контексту, окреме підключення лишилось одне
         OwnDb("src/Ecr.Infrastructure/Persistence/BulkCellLoader.cs", 2,          // DependencyInjection: ConnectionStrings
             ("new SqlBulkCopy", 1)),
     ];

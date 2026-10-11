@@ -433,8 +433,7 @@ public static class MethodologyPublishChecks
     {
         foreach (var constant in constants.Where(c => !c.IsResolved))
         {
-            // ⚠ TODO: потрібен окремий код `ECR-CALC-0434` («значення константи
-            // не є ані числом, ані текстом»). Поки — найближчий наявний.
+            // ⛔ R11-L3: `ECR-CALC-0434` («константа не придатна до вжитку»), а не безіменна проблема.
             yield return constant.Kind == ConstantKind.Numeric
                 ? PublishProblem.Of(
                     "publish.problem.constantNotNumber",
@@ -442,10 +441,12 @@ public static class MethodologyPublishChecks
                     + $"«{constant.TextValue ?? "—"}» не є числом: потрібне рішення методолога, "
                     + "а не нуль за замовчуванням.",
                     ("code", constant.Code), ("value", constant.TextValue ?? "—"))
+                    .WithCode(ErrorCodes.MethodologyConstantUnusable)
                 : PublishProblem.Of(
                     "publish.problem.constantNoText",
                     $"Константа «{constant.Code}» виду {constant.Kind} не має тексту.",
-                    ("code", constant.Code), ("kind", constant.Kind.ToString()));
+                    ("code", constant.Code), ("kind", constant.Kind.ToString()))
+                    .WithCode(ErrorCodes.MethodologyConstantUnusable);
         }
     }
 
@@ -466,14 +467,15 @@ public static class MethodologyPublishChecks
             }
 
             // ⛔ Мітка категорії у виразі — сплутаний ключ звуження зі значенням.
-            // ⚠ TODO: потрібен окремий код `ECR-CALC-0434`.
+            // ⛔ R11-L3: `ECR-CALC-0434`.
             if (!constant.IsAllowedInExpression)
             {
                 yield return PublishProblem.Of(
                     "publish.problem.categoryLabelInExpression",
                     $"Формула «{formula.Code}» посилається на «CST.{code}» — "
                     + "це мітка категорії, а не значення: у виразах вона не бере участі.",
-                    ("formula", formula.Code), ("code", code));
+                    ("formula", formula.Code), ("code", code))
+                    .WithCode(ErrorCodes.MethodologyConstantUnusable);
                 continue;
             }
 
@@ -505,14 +507,14 @@ public static class MethodologyPublishChecks
         var textOnly = ProducesTextOnly(formula.Root!, byCode);
         var surelyNumber = ProducesNumber(formula.Root!, byCode);
 
-        // ⚠ TODO: потрібен окремий код `ECR-CALC-0436` («тип результату формули
-        // не відповідає колонці-приймачу»).
+        // ⛔ R11-L3: `ECR-CALC-0436` («тип результату формули не відповідає приймачу») - усі три проблеми нижче.
         if (formula.ResultType == FormulaResultType.Number && textOnly)
         {
             yield return PublishProblem.Of(
                 "publish.problem.numberReturnsText",
                 $"Формула «{formula.Code}» оголошена числовою, але повертає лише текст.",
-                ("formula", formula.Code));
+                ("formula", formula.Code))
+                .WithCode(ErrorCodes.MethodologyResultTypeMismatch);
         }
 
         if (formula.ResultType == FormulaResultType.Text && surelyNumber)
@@ -520,7 +522,8 @@ public static class MethodologyPublishChecks
             yield return PublishProblem.Of(
                 "publish.problem.textReturnsNumber",
                 $"Формула «{formula.Code}» оголошена текстовою, але повертає число.",
-                ("formula", formula.Code));
+                ("formula", formula.Code))
+                .WithCode(ErrorCodes.MethodologyResultTypeMismatch);
         }
 
         // ⛔ Оголошений вихід лягає в `calc.CalculationResult.Value
@@ -533,7 +536,8 @@ public static class MethodologyPublishChecks
                 "publish.problem.textOutput",
                 $"Формула «{formula.Code}» повертає текст і оголошена виходом методології: "
                 + "результат зберігається в числовій колонці calc.CalculationResult.Value.",
-                ("formula", formula.Code));
+                ("formula", formula.Code))
+                .WithCode(ErrorCodes.MethodologyResultTypeMismatch);
         }
     }
 
@@ -738,6 +742,10 @@ public static class MethodologyPublishChecks
 /// <param name="MessageKey">Ключ <c>publish.problem.*</c> у <c>sys.UiString</c>.</param>
 /// <param name="Args">Підстановки <c>{ім'я}</c> — лише рядки (так їх читає клієнтський <c>t()</c>).</param>
 /// <param name="Text">Запасне речення сервера — для журналу і повідомлення винятку.</param>
+/// <param name="Code">
+/// Код помилки каталогу (<c>ECR-CALC-043x</c>) для проблем із власним кодом; <c>null</c> — проблема без окремого коду
+/// (відмова публікації в цілому — <c>ECR-CALC-0422</c>).
+/// </param>
 /// <remarks>
 /// ⛔ Доти перелік проблем їхав у <c>detail</c> одним українським реченням, а
 /// клієнт мовою інтерфейсу бачив лише «N problems» — без жодної назви формули чи
@@ -745,7 +753,7 @@ public static class MethodologyPublishChecks
 /// перекладає кожен пункт сам.
 /// </remarks>
 public sealed record PublishProblem(
-    string MessageKey, IReadOnlyDictionary<string, string> Args, string Text)
+    string MessageKey, IReadOnlyDictionary<string, string> Args, string Text, string? Code = null)
 {
     /// <summary>Складає проблему з ключа, запасного тексту й підстановок.</summary>
     /// <param name="messageKey">Ключ каталогу.</param>
@@ -761,6 +769,11 @@ public sealed record PublishProblem(
             args.ToDictionary(a => a.Name, a => a.Value, StringComparer.Ordinal),
             text);
     }
+
+    /// <summary>Та сама проблема з кодом помилки каталогу.</summary>
+    /// <param name="code">Код (<c>ECR-CALC-043x</c>).</param>
+    /// <returns>Копія з <see cref="Code"/>.</returns>
+    public PublishProblem WithCode(string code) => this with { Code = code };
 
     /// <inheritdoc />
     public override string ToString() => Text;

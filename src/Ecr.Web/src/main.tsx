@@ -2,7 +2,7 @@
 import { createRoot } from 'react-dom/client';
 import { App } from './app/App';
 import { ErrorBoundary } from './app/ErrorBoundary';
-import { abandonSwitchedSession } from './api/client';
+import { verifySessionOwner } from './api/client';
 import { listenSessionChange } from './shared/session/sessionChannel';
 
 /*
@@ -71,7 +71,10 @@ window.addEventListener('pageshow', (event) => {
  * cookie вже не цього сеансу. Вкладка лишає слід незбережених правок їхнього
  * власника і перезавантажується, а не відправляє їх під чужим cookie.
  */
-listenSessionChange(abandonSwitchedSession);
+// ⛔ R2-05: не безумовно — повторний вхід ТОГО САМОГО користувача вкладок не чіпає (`verifySessionOwner`).
+listenSessionChange(() => {
+  void verifySessionOwner();
+});
 
 createRoot(container).render(
   <StrictMode>

@@ -257,6 +257,8 @@
     цього майданчика (наприклад, Logging:File:Directory; ⚠ не
     Telemetry:OtlpEndpoint — для телеметрії є -TelemetryOtlpEndpoint) — НІКОЛИ рядок
     підключення чи інший секрет, для нього -ConnectionString (D-11).
+    ⛔ S2-07: розділи ConnectionStrings і Secrets у файлі — відмова до будь-якої зміни
+    (файл читають усі локальні користувачі).
     Записується ЛИШЕ якщо цільовий файл ще заповнювач (порожній об'єкт) —
     інакше крок 5 попереджає і нічого не чіпає.
 
@@ -707,6 +709,28 @@ function ConvertFrom-JsoncFile {
     $raw = [regex]::Replace($raw, '(?m)^\s*//.*$', '')
     $raw = [regex]::Replace($raw, '/\*.*?\*/', '', 'Singleline')
     return $raw | ConvertFrom-Json -ErrorAction Stop
+}
+
+# ⛔ S2-07 (аудит 2026-10-09b): -ConfigValues пишеться в %ProgramData%\ECR\config\appsettings.Production.json,
+# який за ACL теки читає кожен локальний користувач (Users: читання), а правило «секрети ніколи у файлі»
+# (D-11) ніде не примушувалось: скопійований appsettings.Development.json із ConnectionStrings чи Secrets
+# тихо ставав читабельним для всіх. Чиста функція: розібраний JSON → текст відмови або $null. Відмова —
+# верхній розділ ConnectionStrings чи Secrets (без урахування регістру, і як плоский ключ «Secrets:Назва»,
+# який конфігурація читає так само). Інші значення не чіпає: сумнівні імена ключів (Password тощо) — не
+# предмет цієї перевірки.
+function Get-ConfigValuesProblem {
+    param([AllowNull()] $Values)
+
+    if ($null -eq $Values -or $Values -isnot [System.Management.Automation.PSCustomObject]) { return $null }
+    $found = @($Values.PSObject.Properties | ForEach-Object { $_.Name } | Where-Object {
+            $section = ([string] $_).Split(':')[0].Trim()
+            $section -ieq 'ConnectionStrings' -or $section -ieq 'Secrets'
+        } | Sort-Object -Unique)
+    if (-not $found.Count) { return $null }
+    return ("-ConfigValues містить секретний розділ: $($found -join ', '). Файл appsettings.Production.json читає кожен " +
+        "локальний користувач (Users), тож секрети й рядок підключення туди не пишуться (D-11). Нічого не змінено. " +
+        "Рядок підключення — -ConnectionString; решта секретів — лише в Environment служби (runbook §2). " +
+        "Приберіть ці розділи з файлу й повторіть запуск.")
 }
 
 function Test-ConfigIsPlaceholder {
@@ -1256,6 +1280,34 @@ function Get-SchemaDowngradeProblem {
         "(відновити копію бази, msiexec /x поточної версії, потім попередній пакет).")
 }
 
+# ⛔ Y3-03 (аудит 2026-10-10): U1-06 дивиться лише на __EFMigrationsHistory, а реліз, що змінює тільки
+# Sql/*.sql (TVP, процедури, тригери), має ті самі міграції EF, що й попередній. Старіший пакет тоді проходив
+# U1-06, крок 2 повертав старі SQL-об'єкти (CREATE OR ALTER) і затирав штамп ECR.SchemaRelease меншою версією,
+# а MSI відмовляв у пониженні (DowngradeError) уже після цього. Чиста функція: штамп бази (текст із sqlcmd) і
+# версія пакета → текст відмови або $null. Відмова — лише коли ОБИДВА значення розбираються як [version] і
+# штамп НОВІШИЙ за пакет ('incomplete:<версія>' рахується за свою версією: недокочений новіший реліз теж
+# новіший); 'none'/порожньо/не-версія/'incomplete:unknown' — не відмова (база до X4-03, невідома версія).
+# Той самий пакет (повтор після збою) і старіший штамп (звичайне оновлення) проходять.
+function Get-SchemaStampDowngradeProblem {
+    param(
+        [AllowNull()] [AllowEmptyString()] [string] $Stamp,
+        [AllowNull()] [AllowEmptyString()] [string] $Package,
+        [Parameter(Mandatory)] [string] $Database
+    )
+
+    $stampText = ([string] $Stamp).Trim()
+    if ($stampText.StartsWith('incomplete:', [System.StringComparison]::Ordinal)) { $stampText = $stampText.Substring('incomplete:'.Length).Trim() }
+    $packageText = ([string] $Package).Trim()
+    $stampVersion = $null
+    $packageVersion = $null
+    if (-not [version]::TryParse($stampText, [ref] $stampVersion)) { return $null }
+    if (-not [version]::TryParse($packageText, [ref] $packageVersion)) { return $null }
+    if ($stampVersion -le $packageVersion) { return $null }
+    return ("Схему $Database накочено пакетом $stampText, новішим за цей ($packageText). Нічого не змінено. " +
+        "Старіший пакет на новішу базу не ставиться (Sql/*.sql старого пакета повернули б старі TVP, процедури й тригери) — " +
+        "відкат лише за runbook §9 (відновити копію бази, msiexec /x поточної версії, потім попередній пакет).")
+}
+
 # ⛔ R5-U1/U1-02 (аудит 2026-10-09): Stop-EcrServicesForSchema зупиняє служби лише
 # ЦІЄЇ машини. За D-32 (≥2 вузли) EcrApi/EcrWorker інших вузлів працювали б далі
 # старою версією на новій схемі (DROP TYPE TVP, ROLLBACK IMMEDIATE, задачі черги
@@ -1529,7 +1581,11 @@ function Resolve-TransportConfig {
         $set[$requireName] = 'true'
         $warnings += ("-BehindHttpsProxy: TLS має завершуватись на проксі; Kestrel слухає http на всіх інтерфейсах порту $AppPort — " +
             "закрий його брандмауером для всіх, крім проксі. Застосунок не довіряє X-Forwarded-*: HSTS і перенаправлення http→https — " +
-            "на проксі. Без проксі вхід не працюватиме (cookie Secure).")
+            "на проксі. Без проксі вхід не працюватиме (cookie Secure). " +
+            "S2-02: обмежувач входу бачить лише адресу проксі — одне вікно входу на всіх клієнтів; скрипт НЕ пише " +
+            "ECR_Security__RateLimit__TrustForwardedFor і ECR_Security__RateLimit__KnownProxies (адресу проксі знає лише " +
+            "той, хто його налаштував): виставте їх у Environment служби вручну, і повторіть після кожного оновлення MSI, " +
+            "яке стирає Environment (runbook §2.1, https-certificate.md).")
         return New-TransportVerdict 'Proxy' $set $remove $warnings 'http' 'Ok' $null
     }
 
@@ -1629,6 +1685,11 @@ if ($ServicePassword) {
 }
 if ($ConfigValues -and -not (Test-Path $ConfigValues)) {
     throw "ConfigValues вказує на неіснуючий файл: $ConfigValues"
+}
+# ⛔ S2-07: секретні розділи — відмова ДО будь-якої зміни (а не посеред розгортання, коли файл уже пишеться).
+if ($ConfigValues) {
+    $configValuesProblem = Get-ConfigValuesProblem -Values (Get-Content $ConfigValues -Raw | ConvertFrom-Json -ErrorAction Stop)
+    if ($configValuesProblem) { throw $configValuesProblem }
 }
 # ⛔ R6-X4/X4-03: версія пакета — штамп релізу схеми (крок 2 пише його, -SkipSchema звіряє).
 $schemaRelease = if ($Version) { $Version } elseif ($MsiPath) { Get-MsiProductVersion -Path (Resolve-Path -LiteralPath $MsiPath).Path } else { $null }
@@ -2006,6 +2067,20 @@ END
                     -PackageMigrations $packageMigrations -Database $Database
                 if ($downgradeProblem) { throw $downgradeProblem }
             }
+        }
+
+        # ⛔ Y3-03: і за штампом релізу схеми (X4-03), а не лише за міграціями EF — до зупинки служб і до
+        # першого sqlcmd зі зміною. Реліз лише з Sql/*.sql міграцій не додає, тож U1-06 його не бачить.
+        $stampGateRows = Invoke-DeployQuery -TargetDb $Database -Query (
+            "SET NOCOUNT ON; SELECT ISNULL((SELECT CAST(value AS nvarchar(64)) FROM sys.extended_properties " +
+            "WHERE class = 0 AND name = N'ECR.SchemaRelease'), N'none');")
+        if ($null -eq $stampGateRows) {
+            Write-Host "  Чи штамп релізу схеми не новіший за пакет, буде перевірено запитом до sys.extended_properties (-WhatIf: не виконується)." -ForegroundColor DarkGray
+        }
+        else {
+            $stampDowngradeProblem = Get-SchemaStampDowngradeProblem -Stamp ([string] (@($stampGateRows) | Select-Object -First 1)) `
+                -Package $schemaRelease -Database $Database
+            if ($stampDowngradeProblem) { throw $stampDowngradeProblem }
         }
 
         # ⛔ Та сама послідовність, що verify-sql-scripts.ps1 (docs/build/

@@ -7,6 +7,8 @@ using Ecr.Application.Security;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Enums;
 using Ecr.Domain.Errors;
+using Ecr.Domain.Services;
+using Ecr.Domain.ValueObjects;
 using Microsoft.Extensions.Logging;
 
 namespace Ecr.Application.Periods;
@@ -33,6 +35,9 @@ public sealed partial class ReopenPeriodHandler(
     /// один прогін, а не чергу однакових.
     /// </remarks>
     public const string OrphanScanTarget = "period-reopen";
+
+    /// <summary>Правило ефективного стану — те саме, що в рішенні про запис (F-08) і в <c>WorkflowStore</c>.</summary>
+    private static readonly PeriodStateCalculator EffectiveStates = new();
 
     // ⚠ `materialization` необов'язковий лише заради наявних прямих
     // конструювань обробника в тестах; у застосунку порт зареєстровано
@@ -88,6 +93,7 @@ public sealed partial class ReopenPeriodHandler(
         var projectId = 0;
         var periodKey = 0;
         var requiresMaterialization = false;
+        var enlistMaterialization = materialization is { EnlistsInCallerTransaction: true };
 
         await uow.ExecuteInTransactionAsync(async innerCt =>
         {
@@ -163,6 +169,24 @@ public sealed partial class ReopenPeriodHandler(
             // Closed → Grace, а не → Open: правки після закриття лишаються
             // ПІЗНІМИ і мають позначатися IsLateEdit (D-70). Відкриття «як було»
             // стерло б різницю між роботою в строк і після нього.
+            // ⛔ X1-05 / W1-07 (аудит R11): адміністратор бачить період ЕФЕКТИВНО закритим (вичерпано
+            // `ReopenedUntil` чи межу закриття), а збережений стан до години лишається `Grace`/`Open`
+            // (його міняє лише `PeriodStateJob`) — і `Period.Reopen` відмовляв `ECR-PRD-0409`
+            // «лише закритий»: глухий кут рівно тоді, коли відкриття й потрібне (і повторно відкрити
+            // щойно сплилий дедлайн теж не можна було). Той самий розрахунок, що в рішенні про запис
+            // (`WorkflowStore.EffectivePeriodStateAsync`): лише для активного проєкту, з річним вікном.
+            // Збережений стан доганяє ефективний тією ж транзакцією, далі — звичайний Reopen.
+            if (period.State != PeriodState.Closed
+                && project.Status == ProjectStatus.Active
+                && EffectiveStates.Effective(
+                       period, now,
+                       YearGraceWindow.For(
+                           project.PeriodEnd, project.YearGraceOffsetDays,
+                           SiteTimeZone.Create(project.TimeZoneId).ToTimeZoneInfo())) == PeriodState.Closed)
+            {
+                period.AdvanceTo(PeriodState.Closed, now);
+            }
+
             var before = period.State;
             period.Reopen(deadline, reason, now);
 
@@ -188,13 +212,26 @@ public sealed partial class ReopenPeriodHandler(
                 innerCt).ConfigureAwait(false);
 
             await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+
+            // ⛔ F2-02 (аудит R11): черга в базі (MI-02 (в)) — постановка ВСЕРЕДИНІ
+            // транзакції переходу, останнім оператором, як у `PeriodStateJob`
+            // (L2-06): збій постановки відкочує й `Closed → Grace`, і повторний
+            // виклик адміністратора побачить період закритим. Доти постановка йшла
+            // ПІСЛЯ коміту, і її збій лишав `Grace` без задачі: точки, пропущені як
+            // `SkippedPeriodClosed`, не підхоплювала жодна наступна подія.
+            if (enlistMaterialization && requiresMaterialization)
+            {
+                await materialization!
+                    .EnqueueAfterTransitionAsync(projectId, [periodKey], innerCt)
+                    .ConfigureAwait(false);
+            }
         }, ct).ConfigureAwait(false);
 
-        // ⛔ Матеріалізація — ПІСЛЯ коміту (черга не транзакційна): точки,
-        // пропущені поки період був `Closed` (`SkippedPeriodClosed`), інакше
-        // чекали б збору з вікном, що перетинає період, — а для давно минулого
-        // періоду такого вікна не буде ніколи.
-        if (requiresMaterialization && materialization is not null)
+        // ⛔ Матеріалізація — ПІСЛЯ коміту, коли черга поза базою (Quartz у пам'яті,
+        // не транзакційна): точки, пропущені поки період був `Closed`
+        // (`SkippedPeriodClosed`), інакше чекали б збору з вікном, що перетинає
+        // період, — а для давно минулого періоду такого вікна не буде ніколи.
+        if (requiresMaterialization && !enlistMaterialization && materialization is not null)
         {
             await materialization.EnqueueAfterTransitionAsync(projectId, [periodKey], ct).ConfigureAwait(false);
         }

@@ -84,6 +84,13 @@ internal static class DeployArguments
             result.Add(new("SkipBackupCheck", null));
         }
 
+        // ⛔ X4-05: майстер вміє передати обхід перевірки інших вузлів, який радить текст відмови скрипта, —
+        // але лише за явною позначкою на кроці бази.
+        if (state.SkipOtherNodesCheck)
+        {
+            result.Add(new("SkipOtherNodesCheck", null));
+        }
+
         if (state.ServiceAccountMode != ServiceAccountMode.LocalSystem)
         {
             result.Add(new("ServiceAccount", state.ServiceAccountName));

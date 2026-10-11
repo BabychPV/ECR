@@ -33,7 +33,7 @@ public sealed class MethodologyFormulaScopeApiTests(SqlServerFixture sql)
     private const string Password = "Api-Formula-Scope-2026!";
 
     private static readonly string[] EditorPermissions =
-        ["Calculation.View", "Calculation.EditFormula", "Calculation.EditConstant"];
+        ["Calculation.View", "Calculation.EditFormula", "Calculation.EditConstant", "Calculation.EditRule"];
 
     private static readonly string[] ViewerPermissions = ["Calculation.View"];
 

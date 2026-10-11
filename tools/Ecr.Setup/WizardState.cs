@@ -156,6 +156,23 @@ internal sealed class WizardState
     /// </summary>
     public bool SkipBackupCheck => Mode == WizardMode.Update && !SkipSchema && BackupRiskAccepted;
 
+    /// <summary>
+    /// Явна позначка на кроці бази: «інші вузли ECR зупинено вручну / сеанси з інших хостів — не ECR».
+    /// </summary>
+    /// <remarks>
+    /// ⛔ X4-05 (аудит R6): крок 2 скрипта відмовляє, якщо до бази під'єднано застосунок (SqlClient або
+    /// Application Name ECR*) з ІНШОГО хоста, і в тексті відмови радить <c>-SkipOtherNodesCheck</c>, якого
+    /// майстер передати не вмів — оператор ішов у командний рядок і звикав вмикати обхід. Позначка типово
+    /// знята; лише вона дає скрипту <c>-SkipOtherNodesCheck</c>.
+    /// </remarks>
+    public bool OtherNodesStoppedAccepted { get; set; }
+
+    /// <summary>
+    /// Чи передати <c>-SkipOtherNodesCheck</c>: лише коли скрипт змінює схему (з <c>-SkipSchema</c> перевірка
+    /// інших вузлів у кроці 2 не виконується) і лише за явною позначкою людини.
+    /// </summary>
+    public bool SkipOtherNodesCheck => !SkipSchema && OtherNodesStoppedAccepted;
+
     // Крок 4 — пароль адміністратора (лише для FirstDeployment).
     public SecureString? BootstrapPassword { get; set; }
 

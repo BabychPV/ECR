@@ -1,3 +1,5 @@
+using Microsoft.Extensions.Configuration.Json;
+
 namespace Ecr.Api.Startup;
 
 /// <summary>
@@ -11,7 +13,7 @@ namespace Ecr.Api.Startup;
 /// перекривають цей файл, а не навпаки — той самий порядок викликів, що
 /// й тут, а не лише в описі.
 /// </remarks>
-public static class ProgramDataConfiguration
+public static partial class ProgramDataConfiguration
 {
     /// <summary>
     /// Додає <c>%ProgramData%\ECR\config\appsettings.Production.json</c> як
@@ -26,8 +28,75 @@ public static class ProgramDataConfiguration
     public static IConfigurationBuilder AddProgramDataConfig(
         this IConfigurationBuilder builder, string commonApplicationDataFolder)
     {
+        ArgumentNullException.ThrowIfNull(builder);
+
         var path = Path.Combine(
             commonApplicationDataFolder, "ECR", "config", "appsettings.Production.json");
-        return builder.AddJsonFile(path, optional: true, reloadOnChange: true);
+
+        // ⛔ U1-08: свій постачальник замість `AddJsonFile`. Стандартний `FileConfigurationProvider` на ПЕРЕЧИТУВАННІ
+        // (файл змінено на живій службі) спершу СКИДАЄ усі ключі файлу, а потім розбирає його: синтаксична помилка
+        // (зайва кома, незакрита дужка при ручному редагуванні) лишала службу без жодного значення з файлу —
+        // дефолти коду замість налаштувань майданчика, без жодного рядка в журналі. Тепер невдале перечитування
+        // залишає ОСТАННЄ ВДАЛЕ значення і лише повідомляє про помилку (`ReloadFailed`). Перше читання (старт)
+        // поводиться як раніше: непридатний файл зупиняє службу.
+        var source = new ResilientJsonConfigurationSource
+        {
+            Path = path,
+            Optional = true,
+            ReloadOnChange = true,
+        };
+        source.ResolveFileProvider();
+        return builder.Add(source);
+    }
+
+    /// <summary>
+    /// Куди звітувати про невдале перечитування файлу (U1-08). За замовчуванням — нікуди; <c>Program.cs</c> підключає
+    /// журнал після побудови хоста (<see cref="AttachReloadLogger"/>).
+    /// </summary>
+    public static Action<string, Exception>? ReloadFailed { get; set; }
+
+    /// <summary>Підключає журнал для звітів про невдале перечитування файлу конфігурації.</summary>
+    /// <param name="logger">Журнал.</param>
+    public static void AttachReloadLogger(ILogger logger)
+    {
+        ArgumentNullException.ThrowIfNull(logger);
+
+        ReloadFailed = (file, exception) => LogReloadFailed(logger, exception, file);
+    }
+
+    [LoggerMessage(
+        Level = LogLevel.Error,
+        Message = "Файл конфігурації {File} змінено з помилкою: лишаються значення з останнього вдалого читання. "
+                  + "Виправте файл — зміни підхопляться автоматично.")]
+    private static partial void LogReloadFailed(ILogger logger, Exception exception, string file);
+
+    private sealed class ResilientJsonConfigurationSource : JsonConfigurationSource
+    {
+        public override IConfigurationProvider Build(IConfigurationBuilder builder)
+        {
+            EnsureDefaults(builder);
+            return new ResilientJsonConfigurationProvider(this);
+        }
+    }
+
+    private sealed class ResilientJsonConfigurationProvider(JsonConfigurationSource source) : JsonConfigurationProvider(source)
+    {
+        private Dictionary<string, string?>? _lastGood;
+
+        public override void Load(Stream stream)
+        {
+            try
+            {
+                base.Load(stream);
+                _lastGood = new Dictionary<string, string?>(Data, StringComparer.OrdinalIgnoreCase);
+            }
+            catch (Exception ex) when (_lastGood is not null && ex is not OperationCanceledException)
+            {
+                // `FileConfigurationProvider` на перечитуванні вже підмінив `Data` порожнім словником — повертаємо
+                // останній вдалий знімок і не пробиваємо виняток у потік спостерігача за файлом.
+                Data = new Dictionary<string, string?>(_lastGood, StringComparer.OrdinalIgnoreCase);
+                ReloadFailed?.Invoke(Source.Path ?? string.Empty, ex);
+            }
+        }
     }
 }

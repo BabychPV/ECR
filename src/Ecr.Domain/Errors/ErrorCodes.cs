@@ -819,4 +819,37 @@ public static class ErrorCodes
     /// <c>AUTH</c>: клієнт реагує на неї як на зміну сеансу (покидає вкладку), а не як на помилку даних.
     /// </remarks>
     public const string SessionUserMismatch = "ECR-AUTH-0409";
+
+    /// <summary>
+    /// Константа методології, яку не можна вжити у формулі: її значення не є ні числом, ні текстом, або це мітка
+    /// категорії у виразі (<c>ECR-CALC-0434</c>, R11-L3).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Раніше обидва випадки лягали в перелік проблем публікації без власного коду (<c>ECR-CALC-0422</c>,
+    /// «найближчий наявний»). Тепер кожна така проблема в <c>problems</c> відповіді несе цей код.
+    /// ⚠ Окремого HTTP-запису не має: перелік проблем публікації відмовляє <c>ECR-CALC-0422</c> `publishChecksFailed`.
+    /// </remarks>
+    public const string MethodologyConstantUnusable = "ECR-CALC-0434";
+
+    /// <summary>
+    /// Посилання <c>!Назва</c> знайдено у двох чи більше імпортованих бібліотеках методологій (<c>ECR-CALC-0435</c>,
+    /// R11-L3).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Неоднозначність - відмова публікації, а не «перший за списком»: інакше число залежало б від порядку рядків
+    /// <c>calc.MethodologyImport</c>. Код несе проблема в <c>problems</c> відмови <c>ECR-CALC-0422</c>
+    /// (<c>publishChecksFailed</c>).
+    /// </remarks>
+    public const string MethodologyReferenceAmbiguous = "ECR-CALC-0435";
+
+    /// <summary>
+    /// Оголошений тип результату формули методології не відповідає тому, що вираз повертає, або приймачу результату
+    /// (<c>ECR-CALC-0436</c>, R11-L3).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Обидва напрями мовчазні по-різному: текст у числовій колонці падає конверсією або обнуляється, а число, оголошене
+    /// текстом, тихо йде в звіт рядком; текстовий вихід методології нікуди подіти (<c>calc.CalculationResult.Value</c> -
+    /// число). Код несе проблема в <c>problems</c> відмови <c>ECR-CALC-0422</c> (<c>publishChecksFailed</c>).
+    /// </remarks>
+    public const string MethodologyResultTypeMismatch = "ECR-CALC-0436";
 }

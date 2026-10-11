@@ -152,6 +152,64 @@ public sealed class RegistryEntryImportExcelRoundTripTests
         Assert.Equal(0, report.Updated);
     }
 
+    // ── Z3-03 ────────────────────────────────────────────────────────────────
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait("Finding", "Z3-03")]
+    public async Task Z3_03_Lookup_у_переліку_змін_кодами_запису_а_не_сирими_Id()
+    {
+        // ⛔ CSV несе посилання КОДОМ (`SITE-B`), а звіт показував «57 -> 63»: людина не могла звірити його з файлом.
+        // Мутація: прибрати `WithReferenceCodesAsync` - у звіті Id, тест червоний.
+        const int siteRegistryId = 12;
+        var definition = new RegistryDef(EcrCode.Create("PERMITS"), Text("Permits"), isTemporal: false);
+        typeof(Entity<int>).GetProperty(nameof(Entity<int>.Id))!.SetValue(definition, RegistryDefId);
+
+        var site = new RegistryFieldDef(definition.Id, EcrCode.Create("SITE"), Text("SITE"), CellDataType.Lookup, ordinal: 1);
+        typeof(Entity<int>).GetProperty(nameof(Entity<int>.Id))!.SetValue(site, 603);
+        site.PointTo(siteRegistryId);
+        definition.AddField(site);
+
+        var entry = new RegistryEntry(definition.Id, EcrCode.Create("E0"), Text("E0"));
+        typeof(Entity<long>).GetProperty(nameof(Entity<long>.Id))!.SetValue(entry, 100L);
+
+        var siteB = new RegistryEntry(siteRegistryId, EcrCode.Create("SITE_B"), Text("B"));
+        typeof(Entity<long>).GetProperty(nameof(Entity<long>.Id))!.SetValue(siteB, 63L);
+
+        var siteValue = new RegistryValue(entry.Id, site.Id);
+        siteValue.Set(CellDataType.Lookup, 57L, null);
+
+        _registries.FindDefinitionAsync("PERMITS", Arg.Any<CancellationToken>()).Returns(definition);
+        _registries
+            .FindEntriesByCodesAsync(definition.Id, Arg.Any<IReadOnlyCollection<string>>(), Arg.Any<CancellationToken>())
+            .Returns((IReadOnlyList<RegistryEntry>)[entry]);
+        _registries
+            .FindEntriesByCodesAsync(siteRegistryId, Arg.Any<IReadOnlyCollection<string>>(), Arg.Any<CancellationToken>())
+            .Returns((IReadOnlyList<RegistryEntry>)[siteB]);
+        _registries
+            .ListValuesForEntriesAsync(Arg.Any<IReadOnlyCollection<long>>(), Arg.Any<CancellationToken>())
+            .Returns((IReadOnlyList<RegistryValue>)[siteValue]);
+
+        var keys = Substitute.For<IRegistryKeyStore>();
+        keys.FindEntryCodesAsync(Arg.Any<IReadOnlyCollection<long>>(), Arg.Any<CancellationToken>())
+            .Returns(new Dictionary<long, string> { [57L] = "SITE_A", [63L] = "SITE_B" });
+
+        var handler = new ImportRegistryEntriesHandler(
+            _registries, _audit, _access, _user, _clock, new RegistryEntryWriter(_registries, _uow, _audit, _user, _clock),
+            keyStore: keys);
+
+        var content = $"code,SITE{(char)13}{(char)10}E0,SITE_B{(char)13}{(char)10}";
+        var report = await handler
+            .HandleAsync(
+                "PERMITS", content, Encoding.UTF8.GetByteCount(content), ImportRegistryEntriesHandler.DefaultMaxBytes,
+                dryRun: true, CancellationToken.None)
+            .ConfigureAwait(true);
+
+        Assert.Empty(report.Errors);
+        var change = Assert.Single(report.Changes);
+        Assert.Equal(new RegistryEntryImportChange(2, "E0", "SITE", "SITE_A", "SITE_B"), change);
+    }
+
     // ── Стенд ────────────────────────────────────────────────────────────────
 
     private async Task<(RegistryEntryImportReport Report, RegistryValue Value)> ImportAsync(
