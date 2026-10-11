@@ -29,6 +29,7 @@ public sealed class TemplateVersionsController(
     SaveTableDefHandler saveTable,
     DeleteTableDefHandler deleteTable,
     SaveColumnDefHandler saveColumn,
+    SaveColumnDefsBatchHandler saveColumns,
     GetColumnDefHandler getColumn,
     DeleteColumnDefHandler deleteColumn,
     GetHeaderFieldDefsHandler headerFields,
@@ -501,6 +502,44 @@ public sealed class TemplateVersionsController(
                     request.IsMonthColumn, request.MonthNumber),
                 ct)
             .ConfigureAwait(false));
+    }
+
+    /// <summary>
+    /// Записує пачку колонок таблиці чернетки одним запитом і однією транзакцією. Право <c>Template.Edit</c>.
+    /// </summary>
+    /// <param name="id">Версія-чернетка.</param>
+    /// <param name="tableId">Таблиця, якій належать колонки.</param>
+    /// <param name="request">Колонки пачки: код і налаштування, як у <c>PUT …/columns/{code}</c>; до 500.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⛔ G13 (Land): по одній колонці 5000 колонок шаблону писалися годинами — кожен <c>PUT</c> читає всю
+    /// структуру версії. Тут вона читається раз; перевірки ті самі, що в одиночному <c>PUT</c>, і йдуть ДО запису:
+    /// пачка застосовується цілком або не змінює нічого. Створення чи зміна — за кодом, як в одиночному записі.
+    /// Відповідь — колонки в порядку запиту.
+    /// </remarks>
+    [HttpPut("tables/{tableId:int}/columns")]
+    [ProducesResponseType<IReadOnlyList<ColumnDefDto>>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<IReadOnlyList<ColumnDefDto>>> SaveColumns(
+        int id, int tableId, [FromBody] SaveColumnsBatchRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var items = (request.Columns ?? [])
+            .Select(c => new SaveColumnDefItem(
+                c.Code,
+                new SaveColumnDefCommand(
+                    c.HeaderL10n, c.Ordinal, c.DataType,
+                    c.IsRequired, c.IsReadOnly, c.IsHidden,
+                    c.Precision, c.Scale,
+                    c.DefaultValue, c.DisplayFormat, c.StyleId,
+                    c.LookupRegistryDefId, c.LookupFilter, c.UnitId, c.WidthPx,
+                    c.IsMonthColumn, c.MonthNumber)))
+            .ToList();
+
+        return Ok(await saveColumns.HandleAsync(id, tableId, items, ct).ConfigureAwait(false));
     }
 
     /// <summary>
@@ -980,6 +1019,49 @@ public sealed record SaveTableDefRequest(
 /// <param name="IsMonthColumn">Колонка прив'язана до календарного місяця; вимагає <c>MonthNumber</c>; без обох полів місяць не змінюється.</param>
 /// <param name="MonthNumber">Місяць 1..12; лише разом з <c>IsMonthColumn</c>.</param>
 public sealed record SaveColumnDefRequest(
+    IReadOnlyDictionary<string, string> HeaderL10n,
+    int? Ordinal,
+    Ecr.Domain.Enums.CellDataType DataType,
+    bool IsRequired,
+    bool IsReadOnly,
+    bool IsHidden,
+    byte? Precision,
+    byte? Scale,
+    string? DefaultValue,
+    string? DisplayFormat,
+    int? StyleId,
+    int? LookupRegistryDefId,
+    string? LookupFilter,
+    int? UnitId,
+    int? WidthPx = null,
+    bool? IsMonthColumn = null,
+    byte? MonthNumber = null);
+
+/// <summary>Тіло пакетного запису колонок таблиці (<c>PUT …/tables/{tableId}/columns</c>, G13).</summary>
+/// <param name="Columns">Колонки пачки; не більше 500; коди різні.</param>
+public sealed record SaveColumnsBatchRequest(IReadOnlyList<SaveColumnBatchItem> Columns);
+
+/// <summary>Колонка пачки: код і ті самі налаштування, що в <see cref="SaveColumnDefRequest"/>.</summary>
+/// <param name="Code">Код колонки.</param>
+/// <param name="HeaderL10n">Заголовок колонки мовами каталогу.</param>
+/// <param name="Ordinal"><c>null</c> — нова колонка стає останньою за порядком.</param>
+/// <param name="DataType">Тип даних; незмінний після створення.</param>
+/// <param name="IsRequired">Обов'язковість заповнення.</param>
+/// <param name="IsReadOnly">Заборона ручного вводу.</param>
+/// <param name="IsHidden">Видимість колонки; презентаційне поле.</param>
+/// <param name="Precision">Точність для <c>Decimal</c>.</param>
+/// <param name="Scale">Масштаб для <c>Decimal</c>.</param>
+/// <param name="DefaultValue">Значення за замовчуванням порожньої комірки.</param>
+/// <param name="DisplayFormat">Формат відображення; презентаційне поле.</param>
+/// <param name="StyleId">Стиль показу; презентаційне поле.</param>
+/// <param name="LookupRegistryDefId">Довідник; лише для колонки типу <c>Lookup</c>.</param>
+/// <param name="LookupFilter">Звуження списку довідника.</param>
+/// <param name="UnitId">Одиниця значень колонки (ФВ-16.1); не для типу <c>Unit</c>.</param>
+/// <param name="WidthPx">Типова ширина, px, 40..800; <c>null</c> — типова за типом.</param>
+/// <param name="IsMonthColumn">Колонка прив'язана до календарного місяця; вимагає <c>MonthNumber</c>.</param>
+/// <param name="MonthNumber">Місяць 1..12; лише разом з <c>IsMonthColumn</c>.</param>
+public sealed record SaveColumnBatchItem(
+    string Code,
     IReadOnlyDictionary<string, string> HeaderL10n,
     int? Ordinal,
     Ecr.Domain.Enums.CellDataType DataType,

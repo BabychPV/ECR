@@ -7480,6 +7480,10 @@ USING (VALUES
     (N'methodologies.categoryRuleSaved', N'en', N'The category rule has been saved.', 1),
     (N'methodologies.categoryRuleDeleted', N'en', N'The category rule has been deleted.', 1),
     -- CAT:l2ui ── кінець секції ──
+    -- COLL:g13colbatch ── G13: пакетний запис колонок таблиці; ru/kz — порцією COLL:g13colbatch нижче ──
+    (N'err.ECR-TMPL-0422.columnBatchTooLarge', N'en', N'The batch has {count} columns; one request accepts at most {max}. Split it into several requests.', 1),
+    (N'err.ECR-TMPL-0422.columnBatchDuplicateCode', N'en', N'Column code "{columnCode}" appears more than once in the batch: one code is one column.', 1),
+    -- COLL:g13colbatch ── кінець секції ──
     -- COLL:stale-err ── resultsStale у переліку документів: відмови параметрів; ru/kz — порцією COLL:stale-err нижче ──
     (N'err.ECR-REQ-0422.resultsStaleNeedsPeriod', N'en', N'Filtering by stale results needs a period: staleness belongs to a period.', 1),
     (N'err.ECR-REQ-0422.staleBy', N'en', N'staleBy accepts only "me" and only together with resultsStale=true.', 1),
@@ -18676,6 +18680,19 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:bind2 ── кінець секції ──
+
+-- COLL:g13colbatch ── ru/kz G13: пакетний запис колонок таблиці; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-TMPL-0422.columnBatchTooLarge', N'ru', N'В пачке столбцов: {count}, а один запрос принимает не больше {max}. Разбейте пачку на несколько запросов.'),
+    (N'err.ECR-TMPL-0422.columnBatchTooLarge', N'kz', N'Пакетте {count} баған бар, ал бір сұрау ең көбі {max} қабылдайды. Пакетті бірнеше сұрауға бөліңіз.'),
+    (N'err.ECR-TMPL-0422.columnBatchDuplicateCode', N'ru', N'Код столбца «{columnCode}» повторяется в пачке: один код - один столбец.'),
+    (N'err.ECR-TMPL-0422.columnBatchDuplicateCode', N'kz', N'«{columnCode}» баған коды пакетте қайталанады: бір код - бір баған.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:g13colbatch ── кінець секції ──
 
 -- COLL:l21scope ── ru/kz: область формули (scope) у PUT формули й порівнянні версій; власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)

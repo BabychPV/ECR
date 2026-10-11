@@ -77,6 +77,7 @@ public static class DependencyInjection
         // Третій і четвертий зрізи — колонка й рядок таблиці (ФВ-2.1..ФВ-2.5,
         // W5.2), за зразком аркуша й таблиці вище.
         services.AddScoped<SaveColumnDefHandler>();
+        services.AddScoped<SaveColumnDefsBatchHandler>();
         services.AddScoped<GetColumnDefHandler>();
         services.AddScoped<DeleteColumnDefHandler>();
         services.AddScoped<SaveRowDefHandler>();

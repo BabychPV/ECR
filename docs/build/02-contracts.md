@@ -3875,6 +3875,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `DELETE` | `/api/v1/template-versions/{id}/sheets/{sheetCode}/tables/{code}` | `Template.Edit` | 7 |
 | `GET` | `/api/v1/template-versions/{id}/tables/{tableId}/columns/{code}` | `Template.View` | 7 |
 | `PUT` | `/api/v1/template-versions/{id}/tables/{tableId}/columns/{code}` | `Template.Edit` | 7 |
+| `PUT` | `/api/v1/template-versions/{id}/tables/{tableId}/columns` | `Template.Edit` | 7 |
 | `DELETE` | `/api/v1/template-versions/{id}/tables/{tableId}/columns/{code}` | `Template.Edit` | 7 |
 | `GET` | `/api/v1/template-versions/{id}/header-fields` | `Template.View` | 8 |
 | `PUT` | `/api/v1/template-versions/{id}/header-fields/{code}` | `Template.Edit` | 8 |
