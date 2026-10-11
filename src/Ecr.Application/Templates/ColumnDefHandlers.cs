@@ -168,10 +168,12 @@ public sealed class SaveColumnDefHandler(
         // Лише при створенні або зміні цілі: перейменування/зсув колонки на довідник, що згодом деактивували чи
         // заборонили, не блокується (висяче посилання відсіє публікація - `CheckLookupRegistries`).
         if (command.DataType == CellDataType.Lookup
-            && (existing is null || existing.LookupRegistryDefId != command.LookupRegistryDefId))
+            && (existing is null || command.LookupRegistryDefId is null
+                || existing.LookupRegistryDefId != command.LookupRegistryDefId))
         {
             await LookupRegistryGuard
-                .RequireForColumnAsync(registries, access, userId, command.LookupRegistryDefId, code, ct)
+                .RequireForColumnAsync(
+                    registries, access, userId, command.LookupRegistryDefId, existing?.LookupRegistryDefId, code, ct)
                 .ConfigureAwait(false);
         }
 

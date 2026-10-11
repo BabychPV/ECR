@@ -396,6 +396,27 @@ public sealed class LookupRegistryReferenceApiTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Зміна_типу_наявної_колонки_на_Lookup_без_довідника_422_з_ключем()
+    {
+        var draft = await ArrangeAsync();
+        using var app = new EcrApiFactory(sql);
+        using var client = await SystemHealthControllerTests.SignedInAsync(sql, app, "Template.View", "Template.Edit");
+        var created = await PutColumnAsync(client, draft, "LK_TOLOOK", null, dataType: "Decimal");
+        Assert.True(created.IsSuccessStatusCode, await created.Content.ReadAsStringAsync());
+
+        var problem = await RejectedAsync(await PutColumnAsync(client, draft, "LK_TOLOOK", null));
+
+        Assert.Equal("err.ECR-TMPL-0422.lookupRegistryRequired", problem.GetProperty("messageKey").GetString());
+        await using var db = Context();
+        Assert.Equal(
+            CellDataType.Decimal,
+            await db.ColumnDefs.Where(c => c.TableDefId == draft.TableId && c.Code == "LK_TOLOOK")
+                .Select(c => c.DataType).SingleAsync());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
     public async Task Довідник_у_колонці_не_Lookup_422_lookupRequiresLookupType()
     {
         // Зворотний бік: lookupRegistryDefId задано, а тип не Lookup - домен відмовляє (SetLookup), а не ігнорує і не 500.
