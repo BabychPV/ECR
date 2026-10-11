@@ -5047,3 +5047,9 @@ public sealed record RowDto(
 > **Одиниці — не «довідник за смаком».** Набір вище фіксований, бо на нього
 > посилаються фікстури і тести конверсій. Додавати можна, змінювати
 > `FactorToBase` наявних — ні.
+
+### Передача місяця виконавцям (EA)
+
+#### `IEditAssignmentStore`, `IEditorSetStore`
+
+Сховища передач зрізу документа виконавцям (`doc.EditAssignment*`, міграція `EA1EditAssignment`) і наборів виконавців власника (`doc.EditorSet*`). Вибірка конкретної передачі — завжди за парою `(DocumentId, Id)`, набору — `(OwnerUserId, Id)`: чужа чи відсутня дає `null` (одна відповідь «не знайдено»). `FindForUpdateAsync` — рядок передачі під `UPDLOCK` для переходів станів (Fill/Validate/Return). `ReadFactsForGateAsync` — факти передач документа для користувача, що пише, під `REPEATABLEREAD, ROWLOCK` на передачах І на його рядку виконавця: повторна перевірка в транзакції запису під блокуванням аркуша (`PatchCellsHandler`, `CreateRowHandler`); спільні блокування тримаються до коміту, тож перехід станів чекає запис, а зафіксований перехід видно (блокуюче читання не користується RCSI-знімком). Рішення «підйом Read → Write / `LockedByOwner` / `AssignmentFilled` / `AssignmentValidated` / `AssignmentExpired`» — чиста функція `EditAssignmentGuard` у `EditRules.CanEdit`; `AccessDecisionService` читає передачі лише для документа, у якого вони є (ознака — `EXISTS` у запиті умов доступу).

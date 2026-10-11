@@ -418,6 +418,7 @@ public sealed partial class EndpointCoverageTests
                 "deny.DocumentSubmitted", "deny.DocumentApproved", "deny.ColumnReadOnly", "deny.RowReadOnly",
                 "deny.CalculatedCell", "deny.ProjectArchived", "deny.ArchivingInProgress", "deny.BusinessRule",
                 "deny.SimulationReadOnly", "deny.OutsidePermitWindow", "deny.InsufficientGrantLevel",
+                "deny.LockedByOwner", "deny.AssignmentFilled", "deny.AssignmentValidated", "deny.AssignmentExpired",
             ],
             "Підказка сірої комірки за причиною заборони."),
 
