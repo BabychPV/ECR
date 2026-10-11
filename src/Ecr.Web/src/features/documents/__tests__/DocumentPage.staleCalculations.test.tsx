@@ -45,6 +45,7 @@ function mockFetch(
   permissions: string[],
   staleSequence: boolean[],
   recalcRefusal = false,
+  runStatus: unknown = { runId: null, finishedAt: null, unmatchedRows: null },
 ): { posts: () => number } {
   let calcReads = 0;
   let posts = 0;
@@ -67,6 +68,9 @@ function mockFetch(
           userName: 'tester',
         });
       }
+
+      // ✎ D14: стан прогону - рядки без правила (calculation-run); адреса не містить calculation-results.
+      if (url.includes('/calculation-run')) return jsonResponse(runStatus);
 
       if (url.includes('/calculation-results')) {
         const stale = staleSequence[Math.min(calcReads, staleSequence.length - 1)] ?? false;
@@ -141,8 +145,9 @@ function show(
   permissions: string[],
   staleSequence: boolean[],
   recalcRefusal = false,
+  runStatus?: unknown,
 ): { posts: () => number } {
-  const probe = mockFetch(permissions, staleSequence, recalcRefusal);
+  const probe = mockFetch(permissions, staleSequence, recalcRefusal, runStatus);
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
   render(
@@ -198,6 +203,47 @@ describe('DocumentPage: застарілі числа методологій', (
       expect(await screen.findByRole('menuitem', { name: /⟦workflow\.recalculate⟧/ })).toBeDefined();
       expect(screen.queryByTestId(BadgeId)).toBeNull();
       expect(screen.queryByRole('menuitem', { name: /recalculateCalculations/ })).toBeNull();
+    },
+    Slow,
+  );
+
+  it(
+    'D14: рядок без правила (Removed) - інформаційна позначка з ключем рядка, не помилка',
+    async () => {
+      show(['Document.View', 'Calculation.View'], [false], false, {
+        runId: 7,
+        finishedAt: '2026-01-02T00:00:00Z',
+        unmatchedRows: { count: 1, rows: [{ tableInstanceId: 1, rowNumber: 2, rowKey: 'R-REMOVED' }] },
+      });
+
+      const banner = await screen.findByTestId('document-unmatched-rows', undefined, { timeout: Slow });
+      expect(banner.getAttribute('role')).toBe('status');
+      expect(screen.getByTestId('document-unmatched-rows-hint').textContent).toContain('2 (R-REMOVED)');
+    },
+    Slow,
+  );
+
+  it(
+    'D14: прогін без рядків без правила - позначки немає (стан прогону прочитано)',
+    async () => {
+      show(['Document.View', 'Calculation.View'], [false]);
+      await screen.findByRole('button', ValidateButton, { timeout: Slow });
+      await waitFor(() => {
+        expect(vi.mocked(fetch).mock.calls.some(([u]) => String(u).includes('/calculation-run'))).toBe(true);
+      });
+      expect(screen.queryByTestId('document-unmatched-rows')).toBeNull();
+    },
+    Slow,
+  );
+
+  it(
+    'D14: без права Calculation.View запиту стану прогону немає',
+    async () => {
+      show(['Document.View'], [false], false, { runId: 1, finishedAt: null, unmatchedRows: { count: 1, rows: [] } });
+
+      await screen.findByRole('button', ValidateButton, { timeout: Slow });
+      expect(vi.mocked(fetch).mock.calls.some(([u]) => String(u).includes('/calculation-run'))).toBe(false);
+      expect(screen.queryByTestId('document-unmatched-rows')).toBeNull();
     },
     Slow,
   );
