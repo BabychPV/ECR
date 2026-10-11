@@ -1351,24 +1351,6 @@ public sealed partial class EndpointCoverageTests
         // ⚠ Звільнення тимчасове: прибрати в тому ж коміті, що додає виклик у `features/audit`.
         "GET /api/v1/audit/cells/summary",
 
-        // EA-C (передача місяця виконавцям): серверна частина готова, клієнт — окрема хмарна лінія EA-5 (шторка,
-        // майстер, смуга виконавця, «Мої задачі»; макет EA-0). ⚠ Звільнення тимчасове: прибрати відповідні рядки
-        // в тому ж коміті, що додає виклик у `features/documents/editAssignments`.
-        "DELETE /api/v1/documents/{p}/edit-assignments/{p}",
-        "DELETE /api/v1/me/editor-sets/{p}",
-        "GET /api/v1/documents/{p}/edit-assignments",
-        "GET /api/v1/documents/{p}/edit-assignments/candidates",
-        "GET /api/v1/me/edit-assignments",
-        "GET /api/v1/me/editor-sets",
-        "POST /api/v1/documents/{p}/edit-assignments",
-        "POST /api/v1/documents/{p}/edit-assignments/{p}/fill",
-        "POST /api/v1/documents/{p}/edit-assignments/{p}/validate",
-        "POST /api/v1/documents/{p}/edit-assignments/{p}/return",
-        "POST /api/v1/documents/{p}/edit-assignments/apply-set",
-        "POST /api/v1/documents/{p}/edit-assignments/copy",
-        "POST /api/v1/me/editor-sets",
-        "PUT /api/v1/me/editor-sets/{p}",
-
         // ⚠ Тут стояла ще й `POST /api/v1/units/convert` з поясненням
         // «числа конвертуються там, де їх вводять». Пояснення було
         // НЕПРАВДОЮ: жодне місце клієнта нічого не конвертувало.
