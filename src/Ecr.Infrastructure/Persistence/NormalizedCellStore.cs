@@ -982,7 +982,7 @@ public sealed class NormalizedCellStore(EcrDbContext db, ArchiveAwareCellReader?
 
         var cells = command.Parameters.Add("@cells", SqlDbType.Structured);
         cells.TypeName = CellTvpTypeName;
-        cells.Value = ToCellRecords(upserts);
+        cells.Value = ToCellRecords(InKeyOrder(upserts));
 
         command.CommandText = $"""
                 MERGE doc.CellValue WITH (HOLDLOCK) AS target
@@ -1022,6 +1022,25 @@ public sealed class NormalizedCellStore(EcrDbContext db, ArchiveAwareCellReader?
 
         return await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
     }
+
+    /// <summary>Комірки батча в порядку первинного ключа <c>doc.CellValue</c> (<c>PeriodKey, TableRowId, ColumnDefId</c>).</summary>
+    /// <param name="upserts">Комірки батча.</param>
+    /// <returns>Той самий набір, відсортований за ключем.</returns>
+    /// <remarks>
+    /// ⚠ RC19 P3-2. <c>MERGE … WITH (HOLDLOCK)</c> бере діапазонні замки ключів у порядку подачі табличного
+    /// параметра. Два паралельні PATCH-і з перетином комірок, що подали їх у різному порядку (порядок клієнта),
+    /// беруть замки навхрест — це 1205 або довге очікування, яке доходить до тайм-ауту команди (-2) і 503. Єдиний
+    /// порядок ключів (як для захоплення рядків у <see cref="ClaimGroupAsync"/>) робить очікування чергою, а не
+    /// циклом. Сортування стабільне й дешеве (100 комірок — мікросекунди); семантика <c>MERGE</c> від порядку
+    /// джерела не залежить.
+    /// </remarks>
+    internal static IReadOnlyList<CellRecord> InKeyOrder(IReadOnlyList<CellRecord> upserts)
+        => upserts.Count < 2
+            ? upserts
+            : [.. upserts
+                .OrderBy(r => r.Address.PeriodKey.Value)
+                .ThenBy(r => r.Address.TableRowId)
+                .ThenBy(r => r.Address.ColumnDefId)];
 
     /// <summary>
     /// Перекладає батч у рядки табличного параметра.
