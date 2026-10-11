@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { EcrApiError, type EcrProblem } from '@/api/client';
 import type { PendingEdit } from '../useCellPatch';
-import { cellsOfSaveError } from '../saveErrors';
+import { cellsOfSaveError, rejectedCellReasons } from '../saveErrors';
 
 /**
  * Finding 2 (High, Stage 1): реальна причина відмови збереження
@@ -103,5 +103,35 @@ describe('cellsOfSaveError', () => {
     const error = new EcrApiError(problem({ detail: 'Щось пішло не так' }));
 
     expect(cellsOfSaveError(error, [edit('R1', 'C1')])).toEqual([]);
+  });
+});
+
+describe('rejectedCellReasons (D2: причина відмови DV у банері)', () => {
+  it('віддає текст правила з cells[].message, без дублів і без безіменних колонок', () => {
+    const error = new EcrApiError(
+      problem({
+        extensions2: {
+          messageKey: 'err.ECR-CELL-0422.validationBlocked',
+          cellCount: '2',
+          cells: [
+            { rowKey: 'R1', columnCode: 'C1', ruleCode: 'DV_X', message: 'Value must be <= 672' },
+            { rowKey: 'R1', columnCode: 'C1', ruleCode: 'DV_X', message: 'Value must be <= 672' },
+            { rowKey: 'R2', columnCode: 'C1', ruleCode: 'DV_X', message: 'Value must be <= 672' },
+            { rowKey: 'R3', columnCode: 'C2', ruleCode: 'DV_Y', message: '   ' },
+            { rowKey: 'R4', ruleCode: 'DV_Z', message: 'без колонки' },
+          ],
+        },
+      }),
+    );
+
+    expect(rejectedCellReasons(error)).toEqual([
+      { rowKey: 'R1', columnCode: 'C1', message: 'Value must be <= 672' },
+      { rowKey: 'R2', columnCode: 'C1', message: 'Value must be <= 672' },
+    ]);
+  });
+
+  it('не EcrApiError або без cells — порожній список', () => {
+    expect(rejectedCellReasons(new Error('boom'))).toEqual([]);
+    expect(rejectedCellReasons(new EcrApiError(problem()))).toEqual([]);
   });
 });
