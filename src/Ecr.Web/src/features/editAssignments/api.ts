@@ -5,6 +5,7 @@ import type {
   EditAssignment,
   EditAssignmentsList,
   EditorSet,
+  MyEditAssignmentsView,
   UpsertAssignmentRequest,
 } from './types';
 
@@ -58,4 +59,11 @@ export function getEditorSets(): Promise<readonly EditorSet[]> {
 
 export function createEditorSet(body: { readonly name: string; readonly userIds: readonly number[] }): Promise<EditorSet> {
   return apiFetch<EditorSet>('/api/v1/me/editor-sets', json('POST', body));
+}
+
+/** «Мої» передачі всіх документів: `{assignedToMe, awaitingMyValidation}` (без параметрів - єдина форма для 5a/5b/5c). */
+export async function getMyEditAssignments(): Promise<MyEditAssignmentsView> {
+  const dto = await apiFetch<Partial<MyEditAssignmentsView>>('/api/v1/me/edit-assignments');
+
+  return { assignedToMe: dto.assignedToMe ?? [], awaitingMyValidation: dto.awaitingMyValidation ?? [] };
 }

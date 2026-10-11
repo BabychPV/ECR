@@ -19,7 +19,13 @@ export interface MatrixActions {
 const Months = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] as const;
 
 /** Матриця «місяць × виконавець × статус»: подання «Months» — рядок = передача. */
-function MonthsTable({ assignments, actions }: { readonly assignments: readonly EditAssignment[]; readonly actions: MatrixActions }): JSX.Element {
+function MonthsTable({
+  assignments,
+  actions,
+}: {
+  readonly assignments: readonly EditAssignment[];
+  readonly actions: MatrixActions | undefined;
+}): JSX.Element {
   return (
     <Table.ScrollContainer minWidth={320}>
       <Table data-testid="edit-assignments-months">
@@ -70,9 +76,7 @@ function MonthsTable({ assignments, actions }: { readonly assignments: readonly 
               <Table.Td>
                 <AssignmentBadge state={a.status} />
               </Table.Td>
-              <Table.Td>
-                <RowMenu assignment={a} actions={actions} />
-              </Table.Td>
+              <Table.Td>{actions === undefined ? null : <RowMenu assignment={a} actions={actions} />}</Table.Td>
             </Table.Tr>
           ))}
         </Table.Tbody>
@@ -173,7 +177,8 @@ export function AssignmentsMatrix({
 }: {
   readonly view: MatrixView;
   readonly assignments: readonly EditAssignment[];
-  readonly actions: MatrixActions;
+  /** `undefined` - лише перегляд (не керуючий, симуляція): стовпець дій порожній. */
+  readonly actions: MatrixActions | undefined;
 }): JSX.Element {
   return view === 'months' ? <MonthsTable assignments={assignments} actions={actions} /> : <PeopleTable assignments={assignments} />;
 }

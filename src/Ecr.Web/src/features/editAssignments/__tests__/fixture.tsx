@@ -56,6 +56,7 @@ export interface ServerOptions {
   readonly listStatus?: number;
   readonly putStatus?: number;
   readonly grant?: string;
+  readonly simulation?: boolean;
 }
 
 export function jsonResponse(body: unknown, status = 200): Response {
@@ -88,7 +89,7 @@ export function mockServer(sent: Sent[], options: ServerOptions = {}): void {
 
       if (url.includes('/api/v1/me')) {
         return jsonResponse({
-          denies: [], grants: { 'Project:7': options.grant ?? 'Write' }, isSimulation: false, language: 'en',
+          denies: [], grants: { 'Project:7': options.grant ?? 'Write' }, isSimulation: options.simulation ?? false, language: 'en',
           mustChangePassword: false, permissions: ['Document.View'], simulatedForUserId: null, userId: 1, userName: 'owner',
         });
       }
