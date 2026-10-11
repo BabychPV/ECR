@@ -352,6 +352,12 @@ public sealed class GetDocumentHandler(
             };
         }
 
-        return narrowed;
+        // EA-C: рішення сервера для пункту меню «Доступ до редагування»; автор береться з сховища, а не з
+        // OwnerUserId відповіді (той null для звуженого читача).
+        return narrowed with
+        {
+            CanManageEditAccess = EditAssignments.EditAssignmentAccess.CanManage(
+                profile, document.ProjectId, document.OwnerUserId ?? 0, document.ProjectIsReadOnly),
+        };
     }
 }

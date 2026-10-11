@@ -228,6 +228,7 @@ public static class DocumentSheetVisibility
             ModifiedAt = narrowed ? null : document.ModifiedAt,
             ModifiedByDisplayName = narrowed ? null : document.ModifiedByDisplayName,
             OwnerDisplayName = narrowed ? null : document.OwnerDisplayName,
+            OwnerUserId = narrowed ? null : document.OwnerUserId,
             ApproverDisplayName = narrowed ? null : document.ApproverDisplayName,
 
             // ⛔ Застарілість рахується по ВСІХ входах документа, а видимий вихід може від схованого не залежати:
