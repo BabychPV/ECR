@@ -294,7 +294,10 @@ public sealed class DocumentDataExporter(
         var restricted = hiddenTables.Count > 0 || hiddenColumns is { Count: > 0 };
         var result = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var group in table.Formulas
-                     .Where(f => !f.IsDeleted && f.ColumnDefId is { } id && byColumn.ContainsKey(id))
+                     // ⚠ D1: формула КОМІРКИ (Cell) — не формула колонки; без цього фільтра
+                     // перша комірочна формула стала б «формулою колонки» всієї колонки в CSV.
+                     .Where(f => !f.IsDeleted && f.Scope != FormulaScope.Cell
+                                 && f.ColumnDefId is { } id && byColumn.ContainsKey(id))
                      .GroupBy(f => f.ColumnDefId!.Value))
         {
             var chosen = group

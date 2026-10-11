@@ -207,13 +207,145 @@ public sealed class FormulaDefTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
-    public async Task Область_Cell_тут_не_приймається()
+    public async Task Область_поза_переліком_не_приймається()
     {
         var error = await Assert.ThrowsAsync<BusinessRuleException>(() => Save().HandleAsync(
-            1, _table.Id, FormulaScope.Cell, _column.Id.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            1, _table.Id, (FormulaScope)99, _column.Id.ToString(System.Globalization.CultureInfo.InvariantCulture),
             Command(), CancellationToken.None));
 
         Assert.Equal(ErrorCodes.TemplateInvalid, error.ErrorCode);
+    }
+
+    private static string ColumnTarget(ColumnDef column)
+        => column.Id.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "D1")]
+    public async Task Формула_комірки_адресується_парою_рядок_колонка_і_зберігається_з_обома_ключами()
+    {
+        var saved = await Save().HandleAsync(
+            1, _table.Id, FormulaScope.Cell, _row.RowKeyValue, Command("[Jan] / 1000"),
+            CancellationToken.None, ColumnTarget(_column));
+
+        Assert.Equal(FormulaScope.Cell, saved.Scope);
+        Assert.Equal(_row.Id, saved.RowDefId);
+        Assert.Equal(_column.Id, saved.ColumnDefId);
+        Assert.Single(_table.Formulas);
+
+        await _audit.Received(1).WriteStructureChangeAsync(
+            Arg.Is<StructureChangeRecord>(r => r.EntityType == "FormulaDef" && r.Operation == "Create"),
+            Arg.Any<CancellationToken>());
+        await _metadataCache.Received(1).InvalidateAsync(1, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "D1")]
+    public async Task Повторний_запис_тієї_самої_комірки_оновлює_а_різні_комірки_дають_різні_формули()
+    {
+        var second = new RowDef(_table.Id, RowKey.Create("7001002"), 1, Text("7001002"), RowKind.Item);
+        SetId(second, 201);
+        _table.AddRow(second);
+
+        await Save().HandleAsync(
+            1, _table.Id, FormulaScope.Cell, _row.RowKeyValue, Command("[Jan]"),
+            CancellationToken.None, ColumnTarget(_column));
+        var updated = await Save().HandleAsync(
+            1, _table.Id, FormulaScope.Cell, _row.RowKeyValue, Command("[Jan] + [Feb]"),
+            CancellationToken.None, ColumnTarget(_column));
+
+        Assert.Single(_table.Formulas);
+        Assert.Equal("[Jan] + [Feb]", updated.Expression);
+
+        // Другий рядок тієї ж колонки — друга формула, а не заміна першої.
+        await Save().HandleAsync(
+            1, _table.Id, FormulaScope.Cell, second.RowKeyValue, Command("[Jan]"),
+            CancellationToken.None, ColumnTarget(_column));
+
+        Assert.Equal(2, _table.Formulas.Count);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "D1")]
+    public async Task Формула_комірки_на_НЕобчислюваній_колонці_відхиляється()
+    {
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(() => Save().HandleAsync(
+            1, _table.Id, FormulaScope.Cell, _row.RowKeyValue, Command(),
+            CancellationToken.None, ColumnTarget(_manualColumn)));
+
+        Assert.Equal(ErrorCodes.ComputationOnManualColumn, error.ErrorCode);
+        Assert.Empty(_table.Formulas);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "D1")]
+    public async Task Формула_комірки_без_колонки_рядка_чи_з_неіснуючою_адресою_відхиляється_404()
+    {
+        var noColumn = await Assert.ThrowsAsync<NotFoundException>(() => Save().HandleAsync(
+            1, _table.Id, FormulaScope.Cell, _row.RowKeyValue, Command(), CancellationToken.None));
+        var unknownColumn = await Assert.ThrowsAsync<NotFoundException>(() => Save().HandleAsync(
+            1, _table.Id, FormulaScope.Cell, _row.RowKeyValue, Command(), CancellationToken.None, "9999"));
+        var unknownRow = await Assert.ThrowsAsync<NotFoundException>(() => Save().HandleAsync(
+            1, _table.Id, FormulaScope.Cell, "missing", Command(), CancellationToken.None, ColumnTarget(_column)));
+
+        Assert.All([noColumn, unknownColumn, unknownRow], e => Assert.Equal("ECR-TMPL-0404", e.ErrorCode));
+        Assert.Empty(_table.Formulas);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "D1")]
+    public async Task Видалення_формули_комірки_м_яке_і_не_чіпає_колонкову_формулу_тієї_ж_колонки()
+    {
+        await Save().HandleAsync(
+            1, _table.Id, FormulaScope.Column, ColumnTarget(_column), Command("[Jan]"), CancellationToken.None);
+        await Save().HandleAsync(
+            1, _table.Id, FormulaScope.Cell, _row.RowKeyValue, Command("[Feb]"),
+            CancellationToken.None, ColumnTarget(_column));
+        Assert.Equal(2, _table.Formulas.Count);
+
+        await Delete().HandleAsync(
+            1, _table.Id, FormulaScope.Cell, _row.RowKeyValue, CancellationToken.None, ColumnTarget(_column));
+
+        // ⛔ Ідентичність Cell — пара (рядок, колонка): колонкова формула тієї ж
+        // колонки лишилася живою (їх розводить публікація V-03, а не збереження).
+        Assert.True(Assert.Single(_table.Formulas, f => f.Scope == FormulaScope.Cell).IsDeleted);
+        Assert.False(Assert.Single(_table.Formulas, f => f.Scope == FormulaScope.Column).IsDeleted);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "D1")]
+    public async Task Видалення_неіснуючої_формули_комірки_відхиляється_404()
+    {
+        var error = await Assert.ThrowsAsync<NotFoundException>(() => Delete().HandleAsync(
+            1, _table.Id, FormulaScope.Cell, _row.RowKeyValue, CancellationToken.None, ColumnTarget(_column)));
+
+        Assert.Equal("ECR-TMPL-0404", error.ErrorCode);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "D1")]
+    public void Домен_прив_язує_Cell_лише_до_області_Cell()
+    {
+        var cell = new FormulaDef(_table.Id, FormulaScope.Cell, "1", ExpressionDialect.Template);
+        cell.AssignCell(_row.Id, _column.Id);
+
+        Assert.Equal(_row.Id, cell.RowDefId);
+        Assert.Equal(_column.Id, cell.ColumnDefId);
+
+        // Ні Column, ні Row не можна прив'язати до комірки — і навпаки.
+        var column = new FormulaDef(_table.Id, FormulaScope.Column, "1", ExpressionDialect.Template);
+        var row = new FormulaDef(_table.Id, FormulaScope.Row, "1", ExpressionDialect.Template);
+
+        Assert.Equal("ECR-TMPL-0422", Assert.Throws<DomainException>(() => column.AssignCell(_row.Id, _column.Id)).ErrorCode);
+        Assert.Equal("ECR-TMPL-0422", Assert.Throws<DomainException>(() => row.AssignCell(_row.Id, _column.Id)).ErrorCode);
+        Assert.Equal("ECR-TMPL-0422", Assert.Throws<DomainException>(() => cell.AssignColumn(_column.Id)).ErrorCode);
+        Assert.Equal("ECR-TMPL-0422", Assert.Throws<DomainException>(() => cell.AssignRow(_row.Id)).ErrorCode);
     }
 
     [Fact]

@@ -125,14 +125,21 @@ public sealed class TemplateBuilder
         var formula = new FormulaDef(table.Id, scope, expression, dialect);
         SetId(formula, _nextId++);
 
-        if (column is not null)
+        if (scope == FormulaScope.Cell && column is not null && row is not null)
         {
-            formula.AssignColumn(column.Id);
+            formula.AssignCell(row.Id, column.Id);
         }
-
-        if (row is not null)
+        else
         {
-            formula.AssignRow(row.Id);
+            if (column is not null)
+            {
+                formula.AssignColumn(column.Id);
+            }
+
+            if (row is not null)
+            {
+                formula.AssignRow(row.Id);
+            }
         }
 
         table.AddFormula(formula);

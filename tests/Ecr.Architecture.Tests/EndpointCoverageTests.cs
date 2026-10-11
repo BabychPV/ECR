@@ -1351,6 +1351,12 @@ public sealed partial class EndpointCoverageTests
         // ⚠ Звільнення тимчасове: прибрати в тому ж коміті, що додає виклик у `features/audit`.
         "GET /api/v1/audit/cells/summary",
 
+        // D1: авторство формули комірки (Cell) йде з API/скрипта побудови шаблону
+        // (tools/land/Build-LandTemplate.ps1); екрана редактора комірочних формул ще немає.
+        // ⚠ Звільнення тимчасове: прибрати в тому ж коміті, що додає виклик у `features/templates`.
+        "PUT /api/v1/template-versions/{p}/tables/{p}/formulas/cell/{p}/{p}",
+        "DELETE /api/v1/template-versions/{p}/tables/{p}/formulas/cell/{p}/{p}",
+
         // ⚠ Тут стояла ще й `POST /api/v1/units/convert` з поясненням
         // «числа конвертуються там, де їх вводять». Пояснення було
         // НЕПРАВДОЮ: жодне місце клієнта нічого не конвертувало.
