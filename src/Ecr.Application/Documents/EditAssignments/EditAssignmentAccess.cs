@@ -108,10 +108,10 @@ internal static class EditAssignmentAccess
             });
     }
 
-    /// <summary>422 з ключем каталогу <c>err.ECR-REQ-0422.{key}</c>.</summary>
-    public static BusinessRuleException Invalid(string key, string message, IReadOnlyDictionary<string, object?>? extra = null)
+    /// <summary>422; <paramref name="messageKey"/> — повний ключ каталогу (сторож звіряє його із сідом).</summary>
+    public static BusinessRuleException Invalid(string messageKey, string message, IReadOnlyDictionary<string, object?>? extra = null)
     {
-        var details = new Dictionary<string, object?> { ["messageKey"] = "err.ECR-REQ-0422." + key };
+        var details = new Dictionary<string, object?> { ["messageKey"] = messageKey };
         if (extra is not null)
         {
             foreach (var pair in extra)
@@ -148,7 +148,7 @@ internal static class EditAssignmentAccess
     {
         if (string.IsNullOrWhiteSpace(baseVersion))
         {
-            throw Invalid("editAssignmentBaseVersion", "Запит має нести baseVersion — версію передачі, яку бачив власник.");
+            throw Invalid("err.ECR-REQ-0422.editAssignmentBaseVersion", "Запит має нести baseVersion — версію передачі, яку бачив власник.");
         }
 
         var actual = EditAssignmentVersion.Of(assignment);
@@ -163,7 +163,7 @@ internal static class EditAssignmentAccess
     {
         if (dto is null)
         {
-            throw Invalid("editAssignmentSliceInvalid", "Не вказано зріз передачі.");
+            throw Invalid("err.ECR-REQ-0422.editAssignmentSliceInvalid", "Не вказано зріз передачі.");
         }
 
         try
@@ -172,7 +172,7 @@ internal static class EditAssignmentAccess
         }
         catch (Exception ex) when (ex is ArgumentException)
         {
-            throw Invalid("editAssignmentSliceInvalid", "Зріз передачі задано некоректно.");
+            throw Invalid("err.ECR-REQ-0422.editAssignmentSliceInvalid", "Зріз передачі задано некоректно.");
         }
     }
 
@@ -276,7 +276,7 @@ internal static class EditAssignmentAccess
 
         if (!matchedVisibleSheet || !matchedAnyColumn)
         {
-            throw Invalid("editAssignmentUnknownSlice", "Зрізу з такими параметрами в документі немає.");
+            throw Invalid("err.ECR-REQ-0422.editAssignmentUnknownSlice", "Зрізу з такими параметрами в документі немає.");
         }
 
         return new OwnRightsCheck([.. beyond], hiddenBeyond);

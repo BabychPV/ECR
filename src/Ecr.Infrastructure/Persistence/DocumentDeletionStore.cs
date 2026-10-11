@@ -1,4 +1,4 @@
-﻿using Ecr.Application.Ports;
+using Ecr.Application.Ports;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Errors;
 using Microsoft.EntityFrameworkCore;
@@ -254,6 +254,16 @@ public sealed class DocumentDeletionStore(EcrDbContext db) : IDocumentDeletionSt
         await db.ValidationResults.Where(v => v.DocumentId == documentId).ExecuteDeleteAsync(ct).ConfigureAwait(false);
         await db.DocumentHeaderValues.Where(v => v.DocumentId == documentId).ExecuteDeleteAsync(ct).ConfigureAwait(false);
         await db.ApprovalStates.Where(s => s.DocumentId == documentId).ExecuteDeleteAsync(ct).ConfigureAwait(false);
+
+        // EA-C (аудит P2): рядок документа — під UPDLOCK ДО видалення передач. Створення/зміна передачі бере
+        // той самий блокування (IEditAssignmentManagementStore.LockDocumentAsync), тож вставка нової передачі
+        // не може проскочити між видаленням передач і видаленням документа (FK) — вона або встигла раніше й
+        // буде видалена нижче, або чекає й побачить, що документа немає (404).
+        _ = await db.Documents
+            .FromSql($"SELECT * FROM doc.Document WITH (UPDLOCK, ROWLOCK) WHERE Id = {documentId}")
+            .Select(d => d.Id)
+            .Take(1)
+            .ToListAsync(ct).ConfigureAwait(false);
 
         // EA-1: передачі зрізу (виконавці — листя, передача — корінь); FK без каскаду, як усі решта.
         await db.EditAssignmentRecipients

@@ -87,12 +87,12 @@ public sealed class EditorSetsHandler(
         {
             if (await sets.CountByOwnerAsync(userId, innerCt).ConfigureAwait(false) >= EditorSet.MaxPerOwner)
             {
-                throw EditAssignmentAccess.Invalid("editorSetTooMany", "Забагато наборів виконавців.");
+                throw EditAssignmentAccess.Invalid("err.ECR-REQ-0422.editorSetTooMany", "Забагато наборів виконавців.");
             }
 
             if (await sets.NameExistsAsync(userId, name, null, innerCt).ConfigureAwait(false))
             {
-                throw EditAssignmentAccess.Invalid("editorSetNameTaken", "Набір із такою назвою вже є.");
+                throw EditAssignmentAccess.Invalid("err.ECR-REQ-0422.editorSetNameTaken", "Набір із такою назвою вже є.");
             }
 
             var set = new EditorSet(userId, name, now);
@@ -128,7 +128,7 @@ public sealed class EditorSetsHandler(
             var actual = EditAssignmentVersion.OfBytes(set.RowVersion);
             if (string.IsNullOrWhiteSpace(request.BaseVersion))
             {
-                throw EditAssignmentAccess.Invalid("editorSetBaseVersion", "Запит має нести baseVersion набору.");
+                throw EditAssignmentAccess.Invalid("err.ECR-REQ-0422.editorSetBaseVersion", "Запит має нести baseVersion набору.");
             }
 
             if (!string.Equals(actual, request.BaseVersion.Trim(), StringComparison.OrdinalIgnoreCase))
@@ -144,7 +144,7 @@ public sealed class EditorSetsHandler(
 
             if (await sets.NameExistsAsync(userId, name, setId, innerCt).ConfigureAwait(false))
             {
-                throw EditAssignmentAccess.Invalid("editorSetNameTaken", "Набір із такою назвою вже є.");
+                throw EditAssignmentAccess.Invalid("err.ECR-REQ-0422.editorSetNameTaken", "Набір із такою назвою вже є.");
             }
 
             set.Rename(name, now);
@@ -181,13 +181,13 @@ public sealed class EditorSetsHandler(
         var name = request.Name?.Trim();
         if (string.IsNullOrEmpty(name) || name.Length > EditorSet.MaxNameLength || name.Any(char.IsControl))
         {
-            throw EditAssignmentAccess.Invalid("editorSetNameInvalid", "Назва набору — 1..100 символів без керувальних.");
+            throw EditAssignmentAccess.Invalid("err.ECR-REQ-0422.editorSetNameInvalid", "Назва набору — 1..100 символів без керувальних.");
         }
 
         var ids = (request.MemberUserIds ?? []).Distinct().ToList();
         if (ids.Count > EditorSet.MaxMembers)
         {
-            throw EditAssignmentAccess.Invalid("editorSetTooManyMembers", "У наборі забагато виконавців.");
+            throw EditAssignmentAccess.Invalid("err.ECR-REQ-0422.editorSetTooManyMembers", "У наборі забагато виконавців.");
         }
 
         if (ids.Count > 0)
@@ -195,7 +195,7 @@ public sealed class EditorSetsHandler(
             var found = await users.GetUsersAsync(ids, ct).ConfigureAwait(false);
             if (ids.Any(id => id == ownerId || !found.TryGetValue(id, out var u) || !u.IsActive))
             {
-                throw EditAssignmentAccess.Invalid("editorSetMemberInvalid", "Одного з виконавців не можна додати до набору.");
+                throw EditAssignmentAccess.Invalid("err.ECR-REQ-0422.editorSetMemberInvalid", "Одного з виконавців не можна додати до набору.");
             }
         }
 
@@ -212,7 +212,7 @@ public sealed class EditorSetsHandler(
     private static NotFoundException SetNotFound()
         => new(
             Domain.Errors.ErrorCodes.DocumentNotFound, "Набір виконавців не знайдено.",
-            new Dictionary<string, object?> { ["messageKey"] = EditAssignmentAccess.DocumentKey });
+            new Dictionary<string, object?> { ["messageKey"] = "err.ECR-DOC-0404.editorSet" });
 
     private static EditorSetDto ToDto(EditorSet set, IReadOnlyDictionary<int, EditAssignmentUserRef> names)
         => new(
@@ -257,7 +257,7 @@ public sealed class BatchEditAssignmentsHandler(
         RequireSlices(request.Slices);
 
         var set = await sets.FindAsync(userId, request.SetId, ct).ConfigureAwait(false)
-            ?? throw EditAssignmentAccess.Invalid("editorSetNotFound", "Набору виконавців не знайдено.");
+            ?? throw EditAssignmentAccess.Invalid("err.ECR-REQ-0422.editorSetNotFound", "Набору виконавців не знайдено.");
         var members = set.Members.Select(m => m.UserId).ToList();
 
         var result = new List<EditAssignmentDto>();
@@ -312,8 +312,7 @@ public sealed class BatchEditAssignmentsHandler(
     {
         if (slices is null || slices.Count == 0 || slices.Count > MaxSlices)
         {
-            throw EditAssignmentAccess.Invalid(
-                "editAssignmentTooManySlices", "За один виклик можна вказати від 1 до 12 зрізів.");
+            throw EditAssignmentAccess.Invalid("err.ECR-REQ-0422.editAssignmentTooManySlices", "За один виклик можна вказати від 1 до 12 зрізів.");
         }
     }
 }
