@@ -65,6 +65,31 @@ public sealed class RecalculationServiceTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public void Залежність_від_колонки_знаходиться_і_за_адресою_видаленого_рядка()
+    {
+        // D3: підсумок по динамічній таблиці залежить від УСІХ рядків колонки. Ребра по комірках стоять лише
+        // для рядків, що були живими при побудові плану; видалений рядок адреси в плані не має — без
+        // колонкового індексу насіння від нього не знаходило б жодної формули.
+        var plan = new RecalculationPlan();
+        plan.Declare(1, evaluationOrder: 0);
+        plan.Declare(2, evaluationOrder: 1);
+        plan.DependsOnColumn(1, 11);
+        plan.DependsOnCell(2, Cell(1001, 12));
+
+        var dirty = new DirtySet();
+        dirty.Add(Cell(9999, 11)); // видалений рядок: його ідентифікатора в плані немає
+
+        var order = Service().Plan(dirty, plan);
+
+        Assert.Equal([1], order);
+
+        // Інша колонка того самого видаленого рядка — залежної від колонки 11 формули не чіпає.
+        var other = new DirtySet();
+        other.Add(Cell(9999, 13));
+        Assert.Empty(Service().Plan(other, plan));
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)]
     // ⚠ Трейт ФВ-3.5 знято: `IsCrossSheet` у проді ніхто не виставляє (`D-227`), тож ця гілка
     // мертва. Відкладення доводять `FormulaRecalculationCoalesceTests` (черга зі злиттям).
     public void Крос_аркушний_rollup_відкладається_а_не_рахується_синхронно()

@@ -1555,6 +1555,7 @@ public sealed class RecalculationService(
 public sealed class RecalculationPlan
 {
     private readonly Dictionary<CellAddress, List<int>> _byCell = [];
+    private readonly Dictionary<int, List<int>> _byColumn = [];
     private readonly Dictionary<int, List<int>> _byFormula = [];
     private readonly Dictionary<int, int> _order = [];
     private readonly HashSet<int> _crossSheet = [];
@@ -1601,9 +1602,37 @@ public sealed class RecalculationPlan
         list.Add(formulaDefId);
     }
 
-    /// <summary>Формули, залежні від комірки.</summary>
+    /// <summary>Формула залежить від УСІХ рядків колонки (предикат динамічної таблиці), а не від окремих комірок.</summary>
+    /// <remarks>
+    /// ⛔ D3: ребра <see cref="DependsOnCell"/> такої залежності адресують лише ЖИВІ рядки на момент побудови
+    /// плану. Видалений (чи ще не існуючий) рядок адреси в плані не має, і видалення в ньому не знаходило б
+    /// жодної залежної формули — підсумок лишався б із видаленим рядком. Колонковий індекс відповідає на
+    /// «що залежить від колонки X будь-якого рядка» і для таких адрес.
+    /// </remarks>
+    public void DependsOnColumn(int formulaDefId, int columnDefId)
+    {
+        if (!_byColumn.TryGetValue(columnDefId, out var list))
+        {
+            _byColumn[columnDefId] = list = [];
+        }
+
+        if (!list.Contains(formulaDefId))
+        {
+            list.Add(formulaDefId);
+        }
+    }
+
+    /// <summary>Формули, залежні від комірки (і від усіх рядків її колонки, див. <see cref="DependsOnColumn"/>).</summary>
     public IReadOnlyList<int> DependentsOf(CellAddress address)
-        => _byCell.TryGetValue(address, out var list) ? list : [];
+    {
+        var exact = _byCell.TryGetValue(address, out var list) ? list : null;
+        if (!_byColumn.TryGetValue(address.ColumnDefId, out var wholeColumn))
+        {
+            return exact ?? [];
+        }
+
+        return exact is null ? wholeColumn : [.. exact.Union(wholeColumn)];
+    }
 
     /// <summary>Формули, залежні від результату формули.</summary>
     public IReadOnlyList<int> DependentsOfFormula(int formulaDefId)
