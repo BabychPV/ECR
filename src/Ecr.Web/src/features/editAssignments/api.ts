@@ -1,4 +1,7 @@
-import { apiFetch } from '@/api/client';
+import { useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
+import { apiFetch, EcrApiError } from '@/api/client';
+import { queryKeys } from '@/api/queryKeys';
+import { invalidateSlices } from '@/features/grid/sliceCache';
 import type {
   AssignmentSlice,
   Candidate,
@@ -61,9 +64,64 @@ export function createEditorSet(body: { readonly name: string; readonly userIds:
   return apiFetch<EditorSet>('/api/v1/me/editor-sets', json('POST', body));
 }
 
-/** «Мої» передачі всіх документів: `{assignedToMe, awaitingMyValidation}` (без параметрів - єдина форма для 5a/5b/5c). */
-export async function getMyEditAssignments(): Promise<MyEditAssignmentsView> {
-  const dto = await apiFetch<Partial<MyEditAssignmentsView>>('/api/v1/me/edit-assignments');
+/** Порожня відповідь: немає передач або сервер ще не вміє їх віддавати. */
+const NoAssignments: MyEditAssignmentsView = { assignedToMe: [], awaitingMyValidation: [] };
 
-  return { assignedToMe: dto.assignedToMe ?? [], awaitingMyValidation: dto.awaitingMyValidation ?? [] };
+/**
+ * «Мої» передачі всіх документів: `{assignedToMe, awaitingMyValidation}` - єдина форма для «My tasks» (5c) і смуги
+ * виконавця (5b; та фільтрує за `documentId` на клієнті).
+ *
+ * ⚠ `404`/`403` = «функції для цього користувача/стенда немає» (сервер EA-4 ще не злито, або передачі вимкнено):
+ * це порожній стан, а не помилка. Без цього кожен відкритий шухляда «My tasks» писав би «не вдалося завантажити»
+ * усім. Інші збої (5xx, мережа) лишаються помилкою.
+ */
+export async function getMyEditAssignments(): Promise<MyEditAssignmentsView> {
+  try {
+    const dto = await apiFetch<Partial<MyEditAssignmentsView>>('/api/v1/me/edit-assignments');
+
+    return { assignedToMe: dto.assignedToMe ?? [], awaitingMyValidation: dto.awaitingMyValidation ?? [] };
+  } catch (error) {
+    if (error instanceof EcrApiError && (error.problem.status === 404 || error.problem.status === 403)) return NoAssignments;
+
+    throw error;
+  }
+}
+
+/** Опитування, поки шухляда «My tasks» відкрита, - раз на хвилину; закрита - лише при фокусі/навігації. */
+const OpenedPollMs = 60_000;
+
+/**
+ * Власні передачі (один ключ кешу `editAssignments.mine()` на шухляду й смугу: один запит, а не два).
+ * Стан змінює інша людина (власник повертає чи валідує): без перезапиту на фокус смуга брехала б до F5.
+ */
+export function useMyEditAssignments(opened = false): UseQueryResult<MyEditAssignmentsView> {
+  return useQuery({
+    queryKey: queryKeys.editAssignments.mine(),
+    queryFn: getMyEditAssignments,
+    refetchOnWindowFocus: true,
+    refetchInterval: opened ? OpenedPollMs : false,
+    staleTime: opened ? 0 : 30_000,
+  });
+}
+
+/** `POST …/{id}/fill`: лише сам виконавець, ідемпотентно (дизайн §6). */
+export function fillEditAssignment(documentId: number, id: number): Promise<unknown> {
+  return apiFetch<unknown>(`${base(documentId)}/${String(id)}/fill`, json('POST', {}));
+}
+
+/**
+ * Галочка «Заповнено». Після успіху перечитуються власні передачі й зрізи документа: `cellPermissions` стали
+ * `AssignmentFilled`. ⚠ `meta.handled`: помилку показує виклик (`mutate({onError})`), друга від сітки не потрібна.
+ */
+export function useFillEditAssignment(documentId: number, periodKey: number) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    meta: { handled: true },
+    mutationFn: (assignmentId: number) => fillEditAssignment(documentId, assignmentId),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.editAssignments.mine() });
+      await invalidateSlices(queryClient, { documentId, periodKey });
+    },
+  });
 }
