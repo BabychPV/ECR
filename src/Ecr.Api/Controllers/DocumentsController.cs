@@ -1,3 +1,4 @@
+using Ecr.Api.Security;
 using Ecr.Application.Common;
 using Ecr.Application.Documents;
 using Ecr.Application.Documents.Dto;
@@ -5,6 +6,7 @@ using Ecr.Domain.ValueObjects;
 using Ecr.Application.Workflow;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace Ecr.Api.Controllers;
 
@@ -225,6 +227,8 @@ public sealed class DocumentsController(
     /// запису не заважають.
     /// </remarks>
     [HttpPost("{id:long}/validate")]
+    [EnableRateLimiting(DocumentValidateRateLimitPolicy.PolicyName)] // P1-08: 100/хв на користувача
+    [ProducesResponseType(StatusCodes.Status429TooManyRequests)]
 
     // ⛔ Тип відповіді оголошений явно, а тіло — іменований запис, а не
     // анонімний об'єкт: в анонімного немає імені в схемі OpenAPI, тому
