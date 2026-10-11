@@ -27,7 +27,7 @@
 | `Approver` | `Document.View/Export/Reopen`, `Registry.View`, `Calculation.View`, `Report.*` без небезпечних (`ViewRegulatory`, `ViewSnapshot`, `BuildSnapshot`, `Export`) і окремим рядком — небезпечне `Report.EditDefinition` (`D-203`) |
 | `Viewer` | `Document.View`, `Registry.View`, `Calculation.View`, `Report.ViewRegulatory`, `Report.Export` |
 | `Auditor` | `Document.View`, `Registry.View`, `Calculation.View`, `Template.View`, `Integration.View`, `Report.ViewRegulatory`, `Report.ViewSnapshot` (без `Report.Export`), `Security.ViewAudit`, `System.ViewHealth` |
-| `ReportViewer` | `Report.ViewRegulatory`, `Report.ViewSnapshot`, `Report.Export` (секція `SEC:RPT` сіду). Без ресурсного гранта Read на проєкт не бачить нічого |
+| `ReportViewer` | `Report.ViewRegulatory`, `Report.ViewSnapshot`, `Report.Export` (секція `SEC:RPT` сіду). Без ресурсного гранта Read на проєкт не бачить нічого. Стартова сторінка — «Report snapshots» (без `Document.View` перелік документів недоступний); перелік проєктів для вибору (`GET /api/v1/projects`) віддається і за `Report.ViewRegulatory` (FP-1) |
 | `BootstrapAdministrator` | лише `Security.ManageUsers`, `Security.ManageRoles` |
 
 ⛔ Шаблонні роздачі сіду фільтруються `WHERE p.IsDangerous = 0` у самому `MERGE`.

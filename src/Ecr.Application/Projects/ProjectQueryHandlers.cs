@@ -28,12 +28,28 @@ public sealed record ProjectSummary(
     int? CurrentPeriodId,
     int PeriodCount);
 
-/// <summary>Перелік проєктів. Право <c>Document.View</c>.</summary>
+/// <summary>Перелік проєктів. Право <c>Document.View</c> або <c>Report.ViewRegulatory</c>.</summary>
+/// <remarks>
+/// ⛔ FP-1 (прохід «від першого обличчя» 2026-10-11, P1). Перелік читав лише
+/// <c>Document.View</c>, а вбудована роль <c>ReportViewer</c> («для регулятора»)
+/// має <c>Report.ViewRegulatory</c>, <c>Report.ViewSnapshot</c> і <c>Report.Export</c> — без
+/// <c>Document.View</c>. Екран зрізів (<c>/admin/snapshots</c>) бере перелік проєктів для
+/// вибору, і роль, створена саме для читання зрізів, отримувала на ньому 403 на
+/// <c>GET /projects</c> разом із «зрізів ще немає». Тепер перелік віддається і за правом
+/// переглядача звітів — з тим самим фільтром за грантами: проєкти без гранта Read не
+/// видно, а право перевіряється в самому проєкті (ФВ-6.14), так що роль з областю {A} бачить A.
+/// </remarks>
 public sealed class ListProjectsHandler(
     IProjectStore projects, IAccessDecisionService access, ICurrentUser currentUser)
 {
     /// <summary>Право перегляду.</summary>
     public const string Permission = "Document.View";
+
+    /// <summary>
+    /// Друге право, за яким перелік теж віддається: екран регуляторних зрізів без
+    /// переліку проєктів порожній (FP-1).
+    /// </summary>
+    public const string ReportPermission = "Report.ViewRegulatory";
 
     /// <summary>Повертає сторінку проєктів, видимих користувачу.</summary>
     /// <param name="page">Курсорна пагінація.</param>
@@ -48,7 +64,7 @@ public sealed class ListProjectsHandler(
                          new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.signInRequired" });
 
         var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
-        if (!profile.HasInAnyProject(Permission))
+        if (!profile.HasInAnyProject(Permission) && !profile.HasInAnyProject(ReportPermission))
         {
             throw new AccessDeniedException(
                 "ECR-AUTH-0403", $"Потрібне право {Permission}.",
@@ -89,7 +105,10 @@ public sealed class ListProjectsHandler(
 
             // ⛔ ФВ-6.14: і право перегляду — в самому проєкті (оператор
             // з областю «A» бачить у переліку лише A).
-            .Where(id => PermissionCheck.IsGrantedIn(profile, Permission, id))
+            // ⛔ FP-1: або право перегляду документів, або право переглядача звітів — теж у
+            // самому проєкті, не глобально.
+            .Where(id => PermissionCheck.IsGrantedIn(profile, Permission, id)
+                         || PermissionCheck.IsGrantedIn(profile, ReportPermission, id))
             .ToList();
 
         return await projects.ListAsync(page, visibleIds, ct).ConfigureAwait(false);

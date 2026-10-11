@@ -3,6 +3,7 @@ import { Loader, Center } from '@mantine/core';
 import { createBrowserRouter, type RouteObject } from 'react-router-dom';
 import { AdminLayout } from './AdminLayout';
 import { AppLayout } from './AppLayout';
+import { HomeRoute } from './HomeRoute';
 import { RouteErrorPage } from './RouteErrorPage';
 import { RouteGuard } from './RouteGuard';
 import {
@@ -238,7 +239,17 @@ export const router = createBrowserRouter([
       // (`./routes`) — єдиного місця, де ці рядки набираються руками.
       // `index: true` — виняток: домашній маршрут не має власного сегмента,
       // тож `routes.home.path` ('/') тут не застосовний як `path`.
-      { index: true, element: guarded(routes.home.handle, <DocumentsPage />), handle: routes.home.handle },
+      // ⛔ FP-1: роль без `Document.View`, але з `Report.ViewRegulatory`, стартує зі зрізів.
+      {
+        index: true,
+        element: guarded(
+          routes.home.handle,
+          <HomeRoute>
+            <DocumentsPage />
+          </HomeRoute>,
+        ),
+        handle: routes.home.handle,
+      },
       {
         path: childPath(routes.changePassword),
         element: guarded(routes.changePassword.handle, <ChangePasswordPage />),
