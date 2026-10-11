@@ -721,6 +721,28 @@ public sealed class CalculationResultStore(EcrDbContext db, IClock clock, StaleC
             r.MethodologyVersionId, r.SourceRowKey, r.OutputCode, r.Value, r.UnitId, r.SubstanceEntryId));
     }
 
+    /// <inheritdoc />
+    public async Task<CurrentRunProfile?> ReadCurrentRunProfileAsync(
+        long documentId, int periodKey, CancellationToken ct)
+    {
+        var runIds = await CurrentRunIdsAsync(documentId, periodKey, excludeRunId: null, ct).ConfigureAwait(false);
+        if (runIds.Count == 0)
+        {
+            return null;
+        }
+
+        var run = await db.CalculationRuns
+            .AsNoTracking()
+            .Where(r => runIds.Contains(r.Id) && (r.PeriodKey ?? 0) == periodKey)
+            .OrderByDescending(r => r.DocumentId != null)
+            .ThenByDescending(r => r.Id)
+            .Select(r => new { r.Id, r.FinishedAt, r.ModulesProfileJson })
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+
+        return run is null ? null : new CurrentRunProfile(run.Id, run.FinishedAt, run.ModulesProfileJson);
+    }
+
     /// <summary>
     /// Актуальні прогони, з яких читаються результати документа за період: ВЛАСНИЙ документний,
     /// а коли його для цього періоду немає — ще й прогін усього проєкту (UX-PASS R4).

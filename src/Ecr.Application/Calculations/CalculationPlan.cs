@@ -201,20 +201,113 @@ public sealed class ModuleProfile
         _rejected.AddRange(rows);
     }
 
+    /// <summary>Скільки ключів рядків без правила зберігається на документ у профілі (D14).</summary>
+    public const int UnmatchedKeysKept = 10;
+
     /// <summary>Профіль як JSON для <c>ModulesProfileJson</c>.</summary>
     /// <remarks>
     /// Порядок від найповільнішого навмисно: файл читає людина, і перший рядок
     /// має відповідати на питання «куди пішов час».
+    /// <para>
+    /// ✎ D14: корінь — об'єкт <c>{"modules":[…],"unmatched":[…]}</c>, а не масив модулів, як було.
+    /// <c>unmatched</c> — по одному запису на документ, у якого є рядки без правила: кількість і до
+    /// <see cref="UnmatchedKeysKept"/> ключів; значень комірок немає навмисно. Ключа немає, коли таких рядків
+    /// немає. Старі прогони в базі лишаються масивом — <see cref="ReadUnmatched"/> читає обидві форми.
+    /// </para>
     /// </remarks>
     public string ToJson()
-        => JsonSerializer.Serialize(Stats.Select(s => new
+    {
+        var modules = Stats.Select(s => new
         {
             module = s.Code,
             ms = s.Elapsed.TotalMilliseconds.ToString("F1", CultureInfo.InvariantCulture),
             rows = s.Rows,
             calls = s.Calls,
-        }));
+        }).ToList();
+
+        var unmatched = _unmatched
+            .GroupBy(r => r.DocumentId)
+            .OrderBy(g => g.Key)
+            .Select(g => new
+            {
+                documentId = g.Key,
+                count = g.Count(),
+                rows = g.OrderBy(r => r.TableInstanceId).ThenBy(r => r.RowNumber)
+                    .Take(UnmatchedKeysKept)
+                    .Select(r => new { tableInstanceId = r.TableInstanceId, rowNumber = r.RowNumber, rowKey = r.RowKey })
+                    .ToList(),
+            })
+            .ToList();
+
+        return unmatched.Count == 0
+            ? JsonSerializer.Serialize(new { modules })
+            : JsonSerializer.Serialize(new { modules, unmatched });
+    }
+
+    /// <summary>Читає з <c>ModulesProfileJson</c> рядки без правила ОДНОГО документа (D14).</summary>
+    /// <param name="profileJson">Збережений профіль; <c>null</c>, масив старого формату й некоректний JSON дають <c>null</c>.</param>
+    /// <param name="documentId">Документ.</param>
+    /// <returns>Кількість і до <see cref="UnmatchedKeysKept"/> ключів; <c>null</c> — рядків без правила немає.</returns>
+    public static UnmatchedSummary? ReadUnmatched(string? profileJson, long documentId)
+    {
+        if (string.IsNullOrWhiteSpace(profileJson))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(profileJson);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object
+                || !doc.RootElement.TryGetProperty("unmatched", out var list)
+                || list.ValueKind != JsonValueKind.Array)
+            {
+                return null;
+            }
+
+            foreach (var item in list.EnumerateArray())
+            {
+                if (item.ValueKind != JsonValueKind.Object
+                    || !item.TryGetProperty("documentId", out var id)
+                    || id.ValueKind != JsonValueKind.Number
+                    || id.GetInt64() != documentId
+                    || !item.TryGetProperty("count", out var count)
+                    || count.GetInt32() <= 0)
+                {
+                    continue;
+                }
+
+                var rows = new List<UnmatchedRow>();
+                if (item.TryGetProperty("rows", out var rowList) && rowList.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var row in rowList.EnumerateArray())
+                    {
+                        rows.Add(new UnmatchedRow(
+                            row.GetProperty("tableInstanceId").GetInt64(),
+                            row.GetProperty("rowNumber").GetInt32(),
+                            row.GetProperty("rowKey").GetString() ?? string.Empty,
+                            documentId));
+                    }
+                }
+
+                return new UnmatchedSummary(count.GetInt32(), rows);
+            }
+
+            return null;
+        }
+        catch (Exception ex) when (ex is JsonException or InvalidOperationException or KeyNotFoundException
+                                       or FormatException)
+        {
+            // Профіль — діагностика: зіпсований запис не повинен ламати читання документа.
+            return null;
+        }
+    }
 }
+
+/// <summary>Рядки документа без правила в профілі прогону (D14).</summary>
+/// <param name="Count">Скільки рядків документа не закрило жодне правило.</param>
+/// <param name="Rows">До <see cref="ModuleProfile.UnmatchedKeysKept"/> рядків за зростанням таблиці й номера.</param>
+public sealed record UnmatchedSummary(int Count, IReadOnlyList<UnmatchedRow> Rows);
 
 /// <summary>Час і обсяг одного модуля в прогоні.</summary>
 /// <param name="Code">Код модуля.</param>
@@ -227,7 +320,8 @@ public sealed record ModuleStat(string Code, TimeSpan Elapsed, int Rows, int Cal
 /// <param name="TableInstanceId">Екземпляр таблиці.</param>
 /// <param name="RowNumber">Номер рядка, з 1, у порядку створення (за <c>TableRow.Id</c>).</param>
 /// <param name="RowKey">Публічний ключ рядка.</param>
-public sealed record UnmatchedRow(long TableInstanceId, int RowNumber, string RowKey);
+/// <param name="DocumentId">Документ прогону (D14): прогін проєкту зводить профілі багатьох документів в один.</param>
+public sealed record UnmatchedRow(long TableInstanceId, int RowNumber, string RowKey, long DocumentId = 0);
 
 /// <summary>
 /// Рядок, відхилений правилом категорії (L2-6): ключ категорії не отримано (порожній, помилка обчислення,
