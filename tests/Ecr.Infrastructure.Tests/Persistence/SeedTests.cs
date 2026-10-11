@@ -1,4 +1,4 @@
-﻿using Ecr.Infrastructure.Persistence;
+using Ecr.Infrastructure.Persistence;
 using Ecr.Application.Security;
 using Ecr.TestKit;
 using Microsoft.Data.SqlClient;
@@ -893,10 +893,10 @@ public sealed class SeedTests(SqlServerFixture sql)
     public async Task Кожна_розмірність_має_рівно_одну_базову_одиницю()
     {
         // Первинні розмірності (1..7; 12, 14, 15 — HSE301 F1: StdVolume,
-        // Velocity, Area) мають базову одиницю; похідні (8..11, 13, 16..19) —
-        // ні, бо складаються з чисельника і знаменника.
-        Assert.Equal(10, await ScalarAsync("SELECT COUNT(*) FROM uom.Unit WHERE IsBase = 1"));
-        Assert.Equal(10, await ScalarAsync("SELECT COUNT(*) FROM uom.Dimension WHERE BaseUnitId IS NOT NULL"));
+        // Velocity, Area; 21, 23 — LAND:units: Power, Pressure) мають базову одиницю; похідні
+        // (8..11, 13, 16..20, 22) — ні, бо складаються з чисельника і знаменника.
+        Assert.Equal(12, await ScalarAsync("SELECT COUNT(*) FROM uom.Unit WHERE IsBase = 1"));
+        Assert.Equal(12, await ScalarAsync("SELECT COUNT(*) FROM uom.Dimension WHERE BaseUnitId IS NOT NULL"));
 
         // Двох базових в одній розмірності бути не може — це тримає
         // фільтрований унікальний індекс UX_Unit_BasePerDimension, тобто
@@ -915,8 +915,9 @@ public sealed class SeedTests(SqlServerFixture sql)
         // Складаються ПОСИЛАННЯМИ, а не розбором рядка «g_per_s» (ФВ-16.2):
         // розбір коду означав би, що перейменування одиниці ламає конверсію.
         // 14 (ФВ-16.2 і HSE301:F1) + mg_per_Sm3 і Sm3_per_day (UNITS:ecr-derived)
-        // + Nm3_per_s/_h/_day і mg_per_Nm3 (HSE301:NM3).
-        Assert.Equal(20, await ScalarAsync(
+        // + Nm3_per_s/_h/_day і mg_per_Nm3 (HSE301:NM3)
+        // + rpm, m3_per_h, l_per_h, kg_per_h, t_per_h, mg_per_l (LAND:units).
+        Assert.Equal(26, await ScalarAsync(
             "SELECT COUNT(*) FROM uom.Unit WHERE NumeratorUnitId IS NOT NULL AND DenominatorUnitId IS NOT NULL"));
 
         // UNITS:ecr-derived: чисельник і знаменник — саме ті, що в коді, а не

@@ -370,6 +370,112 @@ WHERE u.SymbolL10n = N'{"en":"' + u.Code + N'"}' AND u.NameL10n = N'{"en":"' + u
 GO
 -- HSE301:NM3 ── кінець секції ───────────────────────────────────────────────
 
+-- LAND:units ── одиниці шаблону Land (G8): потужність, оберти, обʼємна витрата, тиск ──
+-- Перелік одиниць із заголовків колонок Excel-шаблону (template-model.json), яких бракувало
+-- в каталозі: kW, rpm, l/h, m3/h, kg/h, t/h, mg/l, thous. m3, kPa, ppm wt. kg/h, t/h, mg/l і
+-- thous. m3 раніше заводились лише через API стенда (Build-LandTemplate.ps1) - тепер вони в сіді,
+-- тож свіжа база їх має. Лише дописування: наявні одиниці й розмірності не змінюються (MERGE
+-- вставляє відсутні, наявну одиницю з тим самим кодом не чіпає); Id розмірностей 20-23 вільні
+-- (1-19 зайняті), Id одиниць - IDENTITY.
+--
+-- ⚠ Нові розмірності: VolumeFlow = Volume/Time (20) і Frequency = Dimensionless/Time (22) - похідні, без
+-- базової одиниці, складаються посиланнями (ФВ-16.2); Power (21, база W) і Pressure (23, база Pa) -
+-- первинні: kW - не J/s із знаменником s (швидкість у швидкість ігнорує власний множник одиниць з однаковими
+-- чисельником і знаменником), а кратна W. Не змішується з StdVolumeFlow (13): m3/h - робочий
+-- кубометр, Sm3/h - стандартний (V-12), CONVERT між ними відмовляє (#UNIT).
+-- ⚠ Множники - як їх зберігає decimal(38,18): 1/3600 = 0.000277777777777778 (як Sm3_per_h),
+-- l/h = 1/3 600 000 до 18 знаків; швидкість у швидкість конвертується через чисельник і
+-- знаменник (Z2-05), тож округлення на точність CONVERT між похідними не впливає.
+-- ⚠ Не заведено: kg/month (24 колонки; одиниці «місяць» у каталозі немає, а 30 днів - вигадка;
+-- колонка - обсяг за місяць, тобто kg), g/m2*sec (2 колонки; потрібна розмірність
+-- «потік маси на площу»), hours/day (частка годин - не одиниця виміру). Дзеркало воркера -
+-- `UnitTable.Seed` (Ecr.Calculations), звіряє `Hse301UnitsTests`.
+MERGE uom.Dimension AS t
+USING (VALUES
+  (20, N'VolumeFlow', 1, 2,    4),      -- Volume / Time
+  (21, N'Power',      0, NULL, NULL),
+  (22, N'Frequency',  1, 7,    4),      -- Dimensionless / Time
+  (23, N'Pressure',   0, NULL, NULL)
+) AS s (Id, Code, IsDerived, Num, Den)
+ON t.Id = s.Id
+WHEN NOT MATCHED THEN INSERT (Id, Code, NameL10n, IsDerived, NumeratorDimensionId, DenominatorDimensionId)
+     VALUES (s.Id, s.Code, N'{"en":"' + s.Code + N'"}', s.IsDerived, s.Num, s.Den);
+GO
+
+MERGE uom.Unit AS t
+USING (VALUES
+  (N'W',           21, 1, 1.0,       0.0),
+  (N'kW',          21, 0, 1000.0,    0.0),
+  (N'Pa',          23, 1, 1.0,       0.0),
+  (N'kPa',         23, 0, 1000.0,    0.0),
+  (N'thousand_m3',  2, 0, 1000.0,    0.0),
+  (N'ppm_wt',       9, 0, 0.000001,  0.0)
+) AS s (Code, DimensionId, IsBase, Factor, [Offset])
+ON t.Code = s.Code
+WHEN NOT MATCHED THEN INSERT (Code, SymbolL10n, NameL10n, DimensionId, IsBase, FactorToBase, OffsetToBase)
+     VALUES (s.Code, N'{"en":"' + s.Code + N'"}', N'{"en":"' + s.Code + N'"}',
+             s.DimensionId, s.IsBase, s.Factor, s.[Offset]);
+GO
+
+MERGE uom.Unit AS t
+USING (VALUES
+  (N'rpm',      22, N'one', N'min', 0.016666666666666667),   -- 1 / 60
+  (N'm3_per_h', 20, N'm3', N'h',   0.000277777777777778),    -- 1 / 3600
+  (N'l_per_h',  20, N'l',  N'h',   0.000000277777777778),    -- 0.001 / 3600
+  (N'kg_per_h',  8, N'kg', N'h',   0.000277777777777778),    -- 1 / 3600
+  (N't_per_h',   8, N't',  N'h',   0.277777777777777778),    -- 1000 / 3600
+  (N'mg_per_l', 11, N'mg', N'l',   0.001)                    -- 1e-6 / 1e-3
+) AS s (Code, DimensionId, NumCode, DenCode, Factor)
+ON t.Code = s.Code
+WHEN NOT MATCHED THEN INSERT
+     (Code, SymbolL10n, NameL10n, DimensionId, IsBase, FactorToBase, OffsetToBase,
+      NumeratorUnitId, DenominatorUnitId)
+     VALUES (s.Code, N'{"en":"' + s.Code + N'"}', N'{"en":"' + s.Code + N'"}',
+             s.DimensionId, 0, s.Factor, 0,
+             (SELECT Id FROM uom.Unit WHERE Code = s.NumCode),
+             (SELECT Id FROM uom.Unit WHERE Code = s.DenCode));
+GO
+
+UPDATE d SET BaseUnitId = u.Id
+FROM uom.Dimension d
+JOIN uom.Unit u ON u.DimensionId = d.Id AND u.IsBase = 1
+WHERE d.BaseUnitId IS NULL AND d.Id IN (21, 23);
+GO
+
+-- en/ru/kz символи й назви: лише поки в базі стоїть вставлений код-заглушка
+-- (правку адміністратора з /admin/units не затирає).
+UPDATE u SET SymbolL10n = s.Symbol, NameL10n = s.Name
+FROM uom.Unit u
+JOIN (VALUES
+  (N'Pa',          N'{"en":"Pa","ru":"Па","kz":"Па"}',
+                   N'{"en":"Pascal","ru":"Паскаль","kz":"Паскаль"}'),
+  (N'kPa',         N'{"en":"kPa","ru":"кПа","kz":"кПа"}',
+                   N'{"en":"Kilopascal","ru":"Килопаскаль","kz":"Килопаскаль"}'),
+  (N'thousand_m3', N'{"en":"thous. m3","ru":"тыс. м3","kz":"мың м3"}',
+                   N'{"en":"Thousand cubic metres","ru":"Тысяча кубометров","kz":"Мың текше метр"}'),
+  (N'ppm_wt',      N'{"en":"ppm wt","ru":"чнм вес.","kz":"салм. млн-1"}',
+                   N'{"en":"Parts per million by weight","ru":"Части на миллион по весу","kz":"Салмағы бойынша миллионнан бір бөлік"}'),
+  (N'W',           N'{"en":"W","ru":"Вт","kz":"Вт"}',
+                   N'{"en":"Watt","ru":"Ватт","kz":"Ватт"}'),
+  (N'kW',          N'{"en":"kW","ru":"кВт","kz":"кВт"}',
+                   N'{"en":"Kilowatt","ru":"Киловатт","kz":"Киловатт"}'),
+  (N'rpm',         N'{"en":"rpm","ru":"об/мин","kz":"айн/мин"}',
+                   N'{"en":"Revolutions per minute","ru":"Оборотов в минуту","kz":"Минутына айналым"}'),
+  (N'm3_per_h',    N'{"en":"m3/h","ru":"м3/ч","kz":"м3/сағ"}',
+                   N'{"en":"Cubic metre per hour","ru":"Кубометр в час","kz":"Сағатына текше метр"}'),
+  (N'l_per_h',     N'{"en":"l/h","ru":"л/ч","kz":"л/сағ"}',
+                   N'{"en":"Litre per hour","ru":"Литр в час","kz":"Сағатына литр"}'),
+  (N'kg_per_h',    N'{"en":"kg/h","ru":"кг/ч","kz":"кг/сағ"}',
+                   N'{"en":"Kilogram per hour","ru":"Килограмм в час","kz":"Сағатына килограмм"}'),
+  (N't_per_h',     N'{"en":"t/h","ru":"т/ч","kz":"т/сағ"}',
+                   N'{"en":"Tonne per hour","ru":"Тонна в час","kz":"Сағатына тонна"}'),
+  (N'mg_per_l',    N'{"en":"mg/l","ru":"мг/л","kz":"мг/л"}',
+                   N'{"en":"Milligram per litre","ru":"Миллиграмм на литр","kz":"Литріне миллиграмм"}')
+) AS s (Code, Symbol, Name) ON s.Code = u.Code
+WHERE u.SymbolL10n = N'{"en":"' + u.Code + N'"}' AND u.NameL10n = N'{"en":"' + u.Code + N'"}';
+GO
+-- LAND:units ── кінець секції ──────────────────────────────────────────────────
+
 -- Політика паролів і вбудовані ролі
 MERGE sec.PasswordPolicy AS t USING (VALUES (N'Default')) AS s (Code) ON t.Code = s.Code
 WHEN NOT MATCHED THEN INSERT (Code) VALUES (s.Code);
