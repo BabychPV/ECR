@@ -2,6 +2,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Ecr.Application.Workflow;
 using Ecr.Domain.Entities.Documents;
 using Ecr.Domain.Entities.Security;
 using Ecr.Domain.Enums;
@@ -106,8 +107,24 @@ public sealed class RejectedSheetHttpFlowTests(SqlServerFixture sql)
 
         var afterResubmit = await SubmissionSnapshotsAsync(s).ConfigureAwait(true);
         Assert.True(
-            afterResubmit.Count > snapshotsBeforeResubmit.Count && afterResubmit[^1].Payload.Contains("20", StringComparison.Ordinal),
-            "повторне подання мусить зафіксувати нову версію з виправленим значенням");
+            afterResubmit.Count > snapshotsBeforeResubmit.Count,
+            "повторне подання мусить зафіксувати НОВУ версію подання");
+
+        // ⛔ Точно, а не підрядком: `Contains("20")` збігався б із будь-якою цифрою «20» у payload (номер
+        // рядка, ідентифікатор, дата, «0.2…»). Значення читається тим самим кодом, що пише зріз, — за
+        // колонкою числової комірки; нова версія несе 20, а попередня (перше подання) — 10.
+        var numberColumnId = s.Document.ColumnDefIds[1];
+
+        static decimal CellValue(string payload, int columnId)
+        {
+            var cell = Assert.Single(SubmissionPayload.Read(payload), c => c.Column == columnId);
+            Assert.NotNull(cell.Value);
+
+            return decimal.Parse(cell.Value, System.Globalization.CultureInfo.InvariantCulture);
+        }
+
+        Assert.Equal(10m, CellValue(snapshotsBeforeResubmit[^1].Payload, numberColumnId));
+        Assert.Equal(20m, CellValue(afterResubmit[^1].Payload, numberColumnId));
 
         // 8. Затвердження → Approved; ФВ-5.14: запис заборонено, зафіксована версія не змінилась.
         await ExpectAsync(
