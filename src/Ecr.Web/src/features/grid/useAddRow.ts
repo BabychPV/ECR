@@ -1,7 +1,42 @@
 import { useMutation } from '@tanstack/react-query';
 import { apiFetch, EcrApiError } from '@/api/client';
 import type { CreateRowRequest } from '@/api/types';
-import { showApiError } from '@/shared/ui/notify';
+import { hasText, t } from '@/shared/i18n';
+import { notifications } from '@mantine/notifications';
+import { notificationCloseButtonProps, showApiError } from '@/shared/ui/notify';
+import { denyText } from './permissions';
+
+/**
+ * Текст відмови додавання рядка за правом (`403 ECR-ACCS-0403.addRowDenied`) — причина мовою
+ * інтерфейсу, а не сирим кодом («InsufficientGrantLevel», D9 приймальної Land 12.10).
+ *
+ * ⚠ Сервер кладе в `reason` лише назву причини (`EditDenyReason`); текст бере каталог за тим самим
+ * `deny.<Причина>`, що й підказка сірої комірки (`denyText`). Невідома причина чи немає ключа — `null`,
+ * і відмову показує звичайний `showApiError`.
+ */
+export function addRowDenialText(error: unknown): string | null {
+  if (!(error instanceof EcrApiError) || error.problem.errorCode !== 'ECR-ACCS-0403') return null;
+
+  const extensions = error.problem.extensions2 ?? {};
+  const reason = extensions['reason'];
+  if (extensions['messageKey'] !== 'err.ECR-ACCS-0403.addRowDenied' || typeof reason !== 'string') return null;
+  if (!hasText('err.ECR-ACCS-0403.addRowDenied')) return null;
+
+  const text = denyText(reason);
+  if (text === null) return null;
+
+  return t('err.ECR-ACCS-0403.addRowDenied', { reason: text.replace(/\.+$/, '') });
+}
+
+function showAddRowError(error: unknown): void {
+  const text = addRowDenialText(error);
+  if (text === null) {
+    showApiError(error);
+    return;
+  }
+
+  notifications.show({ color: 'statusError', message: text, closeButtonProps: notificationCloseButtonProps });
+}
 
 /** Скільки разів додавання рядка повторюється саме після минущої зайнятості (Y7-03). */
 export const AddRowBusyRetries = 2;
@@ -53,6 +88,6 @@ export function useAddRow(documentId: number, tableInstanceId: number, onAdded: 
     // ⚠ Стеля рядків і дублікат ключа приходять як `ECR-ROW-0409` з числом у
     // тексті: «досягнуто межу динамічних рядків таблиці: 200». Це те, що
     // людина може зрозуміти й погодити, а «не вдалося» — ні.
-    onError: showApiError,
+    onError: showAddRowError,
   });
 }
