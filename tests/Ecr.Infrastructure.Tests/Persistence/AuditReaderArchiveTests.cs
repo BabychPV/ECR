@@ -288,6 +288,102 @@ public sealed class AuditReaderArchiveTests(SqlServerFixture sql, ITestOutputHel
         Assert.True(archived.AudScans <= 3, $"архівне вікно: заходів у aud.CellChange {archived.AudScans}: {archived}");
     }
 
+    [Theory]
+    [InlineData(229)]
+    [InlineData(230)]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "НФ-8.9.6")]
+    public async Task Відмова_в_праві_SELECT_на_архів_знімає_архів_а_не_журнал(int number)
+    {
+        // ⛔ Службовий акаунт з вузьким переліком прав (D-264) без SELECT на `arc.AuditCellChange` не повинен
+        // втратити ВЕСЬ журнал: пробник архіву читає архівну таблицю на кожному зверненні. Мутація «прибрати
+        // `catch (SqlException) when (229 or 230)`» — тест червоніє SqlException замість значення.
+        var calls = new List<bool>();
+
+        var result = await AuditReader.WithArchiveFallbackAsync(
+            withArchive =>
+            {
+                calls.Add(withArchive);
+                return withArchive ? throw Sql(number) : Task.FromResult("лише гаряче");
+            });
+
+        Assert.Equal("лише гаряче", result);
+        Assert.Equal([true, false], calls);
+    }
+
+    [Theory]
+    [InlineData(208)]
+    [InlineData(1205)]
+    [InlineData(2)]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "НФ-8.9.6")]
+    public async Task Інші_помилки_SQL_не_ховаються_падінням_на_гаряче(int number)
+    {
+        var calls = 0;
+
+        var error = await Assert.ThrowsAsync<SqlException>(() => AuditReader.WithArchiveFallbackAsync<string>(
+            _ =>
+            {
+                calls++;
+                throw Sql(number);
+            }));
+
+        Assert.Equal(number, error.Number);
+        Assert.Equal(1, calls);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "НФ-8.9.6")]
+    public async Task Повторна_відмова_в_праві_на_гарячій_таблиці_пробивається_нагору()
+    {
+        var calls = new List<bool>();
+
+        var error = await Assert.ThrowsAsync<SqlException>(() => AuditReader.WithArchiveFallbackAsync<string>(
+            withArchive =>
+            {
+                calls.Add(withArchive);
+                throw Sql(229);
+            }));
+
+        Assert.Equal(229, error.Number);
+        Assert.Equal([true, false], calls);
+    }
+
+    /// <summary><see cref="SqlException"/> із заданим номером: публічного конструктора немає, тож — рефлексією.</summary>
+    private static SqlException Sql(int number)
+    {
+        var errorCtor = typeof(SqlError)
+            .GetConstructors(System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
+            .OrderByDescending(c => c.GetParameters().Length)
+            .First();
+        var args = errorCtor.GetParameters()
+            .Select(p => p.Name == "infoNumber" ? number : DefaultOf(p.ParameterType))
+            .ToArray();
+        var error = (SqlError)errorCtor.Invoke(args);
+
+        var errors = (SqlErrorCollection)Activator.CreateInstance(typeof(SqlErrorCollection), nonPublic: true)!;
+        typeof(SqlErrorCollection)
+            .GetMethod("Add", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
+            .Invoke(errors, [error]);
+
+        var create = typeof(SqlException)
+            .GetMethods(System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)
+            .First(m => m.Name == "CreateException"
+                        && m.GetParameters().Select(p => p.ParameterType)
+                            .SequenceEqual([typeof(SqlErrorCollection), typeof(string)]));
+
+        var exception = (SqlException)create.Invoke(null, [errors, "16.0"])!;
+        Assert.Equal(number, exception.Number);
+
+        return exception;
+    }
+
+    private static object? DefaultOf(Type type)
+        => type == typeof(string) ? "test"
+            : type.IsValueType ? Activator.CreateInstance(type)
+            : null;
+
     /// <summary>Обхід усіх сторінок; перевірка, що курсор завершується.</summary>
     private static async Task<List<CellChangeView>> WalkAsync(AuditReader reader, CellChangeFilter filter, int limit)
     {

@@ -94,6 +94,18 @@ public sealed class AuditReaderArchiveSwitchTests
                 limit: 2);
             Assert.Equal(["feb-1", "feb-late", "feb-2"], february.Select(c => c.NewValue));
             Assert.Equal([true, false, true], february.Select(c => c.FromArchive));
+
+            // База без архівної таблиці (скрипт 12-archive-tables.sql ще не виконано) читається, як до НФ-8.9.6:
+            // журнал не падає, а віддає гаряче. Мутація «прибрати `OBJECT_ID(...) IS NOT NULL` у пробнику» —
+            // червоніє «Invalid object name 'arc.AuditCellChange'».
+            await ExecAsync(cs, "DROP TABLE arc.AuditCellChange;");
+
+            var withoutArchive = await ReadAllAsync(reader, filter);
+            Assert.Equal(["feb-late", "sep-1", "oct-1"], withoutArchive.Select(c => c.NewValue));
+            Assert.All(withoutArchive, c => Assert.False(c.FromArchive));
+
+            var countsWithoutArchive = await reader.CountCellChangesByColumnAsync(filter, Today, CancellationToken.None);
+            Assert.Equal(3, countsWithoutArchive.Sum(c => c.Total));
         }
         finally
         {
