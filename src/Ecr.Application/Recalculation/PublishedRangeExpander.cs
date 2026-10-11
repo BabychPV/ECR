@@ -36,6 +36,10 @@ internal sealed class PublishedRangeExpander(IReadOnlyDictionary<int, FormulaDep
         var run = Published(table, fromRowKey, toRowKey, dependencyIndex);
         if (run is null)
         {
+            // ⚠ Запасний шлях — за поточним порядком. Позицію в <see cref="ByPosition"/> НЕ записано:
+            // це і є сигнал споживачу, що пробігу немає. Для опублікованої версії з графом
+            // `SliceEvaluationContext.NoteRangeFallback` рахує й пише попередження; Excel-експорт
+            // у цьому випадку лишає діапазон за макетом книги (як і для чернетки).
             return base.ExpandAt(table, fromRowKey, toRowKey, dependencyIndex, diagnostics, position);
         }
 

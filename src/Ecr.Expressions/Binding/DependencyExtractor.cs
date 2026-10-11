@@ -200,9 +200,11 @@ public sealed class DependencyExtractor(ReferenceResolver resolver, RangeExpande
 
         if (reference.Row is RowSelector.Range range)
         {
-            // ⚠ Діапазон РОЗКРИВАЄТЬСЯ тут, при публікації, і далі не існує.
+            // ⚠ Діапазон РОЗКРИВАЄТЬСЯ тут, при публікації, у конкретні ключі, і саме
+            // їх (а не поточний Ordinal) читає рантайм (ФВ-0.2, `PublishedRangeExpander`).
             // Саме це робить зміну Ordinal після публікації безпечною:
-            // формула вже посилається на конкретні рядки.
+            // формула вже посилається на конкретні рядки. `found.Count` у `ExpandAt` —
+            // SortOrder першого ребра посилання: за ним рантайм знаходить його пробіг.
             if (tables is null || !tables.TryGetValue(resolved.TableDefId, out var table))
             {
                 diagnostics?.Add(new ExpressionDiagnostic(
