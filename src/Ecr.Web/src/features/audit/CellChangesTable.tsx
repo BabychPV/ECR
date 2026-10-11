@@ -233,7 +233,7 @@ export const CellChangesTable = memo(function CellChangesTable({
                 <Timestamp value={change.changedAt} />
               </Text>
               {/* НФ-8.9.6 / D-247: рядок із архіву аудиту — позначка джерела, значення й межі читання ті самі. */}
-              {change.fromArchive === true && (
+              {change.fromArchive && (
                 <Badge
                   ml="xs"
                   size="xs"
