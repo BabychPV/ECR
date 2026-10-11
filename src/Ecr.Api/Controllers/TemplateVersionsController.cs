@@ -441,6 +441,46 @@ public sealed class TemplateVersionsController(
     }
 
     /// <summary>
+    /// Записує формулу ОДНІЄЇ комірки таблиці версії-чернетки (область
+    /// <c>Cell</c>, D1). Право <c>Template.Edit</c>.
+    /// </summary>
+    /// <param name="id">Версія-чернетка.</param>
+    /// <param name="tableDefId">Таблиця, якій належить комірка.</param>
+    /// <param name="rowKey"><c>RowKey</c> рядка комірки (текстом).</param>
+    /// <param name="columnDefId">Числовий <c>ColumnDefId</c> колонки комірки.</param>
+    /// <param name="request">Вираз і діалект.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⚠ Окремий маршрут, а не ще одне значення <c>{scope}</c>: адреса комірки —
+    /// ПАРА (рядок, колонка), і єдиний сегмент <c>{target}</c> її не вміщає без
+    /// склеювання, яке довелося б розбирати назад. Колонка комірки мусить бути
+    /// обчислюваною (<c>ECR-TMPL-4227</c>, як і для <c>column</c>); перетин із
+    /// колонковою чи рядковою формулою тієї ж комірки відхиляє ПУБЛІКАЦІЯ (V-03).
+    /// </remarks>
+    [HttpPut("tables/{tableDefId:int}/formulas/cell/{rowKey}/{columnDefId:int}")]
+    [ProducesResponseType<FormulaDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<FormulaDto>> SaveCellFormula(
+        int id, int tableDefId, string rowKey, int columnDefId,
+        [FromBody] SaveFormulaDefRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        return Ok(await saveFormula
+            .HandleAsync(
+                id,
+                tableDefId,
+                Ecr.Domain.Enums.FormulaScope.Cell,
+                rowKey,
+                new SaveFormulaDefCommand(request.Dialect, request.Expression),
+                ct,
+                columnDefId.ToString(System.Globalization.CultureInfo.InvariantCulture))
+            .ConfigureAwait(false));
+    }
+
+    /// <summary>
     /// Повний склад однієї колонки — те, що приймає й повертає <c>PUT</c> нижче.
     /// Право <c>Template.View</c>.
     /// </summary>
@@ -738,6 +778,30 @@ public sealed class TemplateVersionsController(
     {
         await deleteFormula
             .HandleAsync(id, tableDefId, ParseFormulaScope(scope), target, ct)
+            .ConfigureAwait(false);
+
+        return NoContent();
+    }
+
+    /// <summary>
+    /// Прибирає формулу комірки з чернетки (м'яко, <c>ФВ-7.6</c>). Право <c>Template.Edit</c>.
+    /// </summary>
+    /// <param name="id">Версія-чернетка.</param>
+    /// <param name="tableDefId">Таблиця, якій належить комірка.</param>
+    /// <param name="rowKey"><c>RowKey</c> рядка комірки.</param>
+    /// <param name="columnDefId">Числовий <c>ColumnDefId</c> колонки комірки.</param>
+    /// <param name="ct">Токен скасування.</param>
+    [HttpDelete("tables/{tableDefId:int}/formulas/cell/{rowKey}/{columnDefId:int}")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> DeleteCellFormula(
+        int id, int tableDefId, string rowKey, int columnDefId, CancellationToken ct)
+    {
+        await deleteFormula
+            .HandleAsync(
+                id, tableDefId, Ecr.Domain.Enums.FormulaScope.Cell, rowKey, ct,
+                columnDefId.ToString(System.Globalization.CultureInfo.InvariantCulture))
             .ConfigureAwait(false);
 
         return NoContent();

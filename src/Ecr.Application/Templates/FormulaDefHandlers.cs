@@ -79,30 +79,32 @@ public sealed class SaveFormulaDefHandler(
     /// <summary>Створює або змінює формулу колонки чи рядка.</summary>
     /// <param name="templateVersionId">Версія-чернетка.</param>
     /// <param name="tableDefId">Таблиця, якій належить ціль.</param>
-    /// <param name="scope">
-    /// <c>Column</c> чи <c>Row</c> — інші області цей зріз не приймає (<c>Cell</c>
-    /// поєднує обидві адреси одразу і сюди не адресується).
-    /// </param>
+    /// <param name="scope"><c>Column</c>, <c>Row</c> або <c>Cell</c> (D1).</param>
     /// <param name="target">
-    /// <c>ColumnDefId</c> числом при <c>Column</c>; <c>RowKey</c> текстом при <c>Row</c>.
+    /// <c>ColumnDefId</c> числом при <c>Column</c>; <c>RowKey</c> текстом при
+    /// <c>Row</c> і <c>Cell</c>.
     /// </param>
     /// <param name="command">Вираз і діалект.</param>
     /// <param name="ct">Токен скасування.</param>
+    /// <param name="columnTarget">
+    /// Лише для <c>Cell</c>: <c>ColumnDefId</c> числом (друга половина адреси
+    /// комірки). Для <c>Column</c>/<c>Row</c> не використовується.
+    /// </param>
     /// <returns>Збережена формула.</returns>
     /// <exception cref="NotFoundException">Версії, таблиці, колонки чи рядка немає.</exception>
     /// <exception cref="BusinessRuleException">
-    /// Область не <c>Column</c>/<c>Row</c> (<c>ECR-TMPL-0422</c>) або колонка
-    /// формули не обчислювана (<c>ECR-TMPL-4227</c>).
+    /// Невідома область (<c>ECR-TMPL-0422</c>) або колонка формули (Column чи
+    /// Cell) не обчислювана (<c>ECR-TMPL-4227</c>).
     /// </exception>
     /// <exception cref="DomainException">
     /// Версія структурно заморожена (<c>ECR-TMPL-0409</c>).
     /// </exception>
     public async Task<FormulaDto> HandleAsync(
         int templateVersionId, int tableDefId, FormulaScope scope, string target,
-        SaveFormulaDefCommand command, CancellationToken ct)
+        SaveFormulaDefCommand command, CancellationToken ct, string? columnTarget = null)
     {
         ArgumentNullException.ThrowIfNull(command);
-        RequireColumnOrRow(scope);
+        RequireKnownScope(scope);
 
         await PermissionCheck.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
 
@@ -122,18 +124,25 @@ public sealed class SaveFormulaDefHandler(
         version.EnsureStructurallyMutable();
         version.TouchDraft(userId, clock.UtcNow);
 
-        var (table, existing, resolvedId) = FindTarget(version, tableDefId, scope, target);
+        var (table, existing, resolvedId, cellColumnId) =
+            FindTarget(version, tableDefId, scope, target, columnTarget);
 
-        RequireComputedColumn(table, scope, resolvedId);
+        RequireComputedColumn(table, scope, scope == FormulaScope.Cell ? cellColumnId!.Value : resolvedId);
 
         // ⛔ V-19: синтаксис і посилання — ДО запису. Раніше `[CDEC] * * 2` і
         // `[NOPE] + 1` зберігалися з «saved», і автор дізнавався про помилку
         // лише на публікації, та ще й загальним «does not pass validation».
+        // ⚠ Для Cell сайт має і рядок, і колонку — так само, як у публікації
+        // (`PublishChecks.Run`): `{Month}` резолвиться в колонку комірки.
         ExpressionRejection.RequireValid(
             formulaEngine, version, command.Expression, command.Dialect,
-            scope == FormulaScope.Column
-                ? new ExpressionSite(table.Id, null, resolvedId)
-                : new ExpressionSite(table.Id, table.Rows.First(r => r.Id == resolvedId).RowKeyValue, null),
+            scope switch
+            {
+                FormulaScope.Column => new ExpressionSite(table.Id, null, resolvedId),
+                FormulaScope.Cell => new ExpressionSite(
+                    table.Id, table.Rows.First(r => r.Id == resolvedId).RowKeyValue, cellColumnId),
+                _ => new ExpressionSite(table.Id, table.Rows.First(r => r.Id == resolvedId).RowKeyValue, null),
+            },
             FormulaDef.MaxExpressionLength);
 
         var hasDocuments = await store.HasDocumentsAsync(templateVersionId, ct).ConfigureAwait(false);
@@ -145,7 +154,8 @@ public sealed class SaveFormulaDefHandler(
             ? classifier.ClassifyAddition(nameof(FormulaDef))
             : classifier.Classify(nameof(FormulaDef), nameof(FormulaDef.Expression), hasDocuments);
 
-        SaveTableRelationHandler.RejectBreaking(change, Address(tableDefId, scope, target), hasDocuments, "Зміна");
+        SaveTableRelationHandler.RejectBreaking(
+            change, Address(tableDefId, scope, target, columnTarget), hasDocuments, "Зміна");
 
         var oldJson = existing is null ? null : Describe(existing);
 
@@ -164,6 +174,10 @@ public sealed class SaveFormulaDefHandler(
                 if (scope == FormulaScope.Column)
                 {
                     existing.AssignColumn(resolvedId);
+                }
+                else if (scope == FormulaScope.Cell)
+                {
+                    existing.AssignCell(resolvedId, cellColumnId!.Value);
                 }
                 else
                 {
@@ -205,19 +219,18 @@ public sealed class SaveFormulaDefHandler(
         return Map(existing!);
     }
 
-    /// <summary>Область формули, яку приймає цей зріз.</summary>
-    /// <exception cref="BusinessRuleException"><c>Cell</c> чи інше значення поза цим переліком.</exception>
-    private static void RequireColumnOrRow(FormulaScope scope)
+    /// <summary>Область формули, яку приймає цей зріз: Column, Row або Cell (D1).</summary>
+    /// <exception cref="BusinessRuleException">Значення поза переліком.</exception>
+    private static void RequireKnownScope(FormulaScope scope)
     {
-        if (scope is FormulaScope.Column or FormulaScope.Row)
+        if (scope is FormulaScope.Column or FormulaScope.Row or FormulaScope.Cell)
         {
             return;
         }
 
         throw new BusinessRuleException(
             ErrorCodes.TemplateInvalid,
-            $"Область формули {scope} тут не приймається: адресується лише Column або Row " +
-            "(Cell поєднує обидві адреси одразу — для нього немає єдиної адреси).",
+            $"Область формули {scope} тут не приймається: адресується Column, Row або Cell.",
             new Dictionary<string, object?>
             {
                 ["messageKey"] = "err.ECR-TMPL-0422.formulaScopeInvalid",
@@ -273,7 +286,10 @@ public sealed class SaveFormulaDefHandler(
     /// <exception cref="BusinessRuleException">Колонка не обчислювана.</exception>
     private static void RequireComputedColumn(TableDef table, FormulaScope scope, int resolvedId)
     {
-        if (scope != FormulaScope.Column)
+        // ⚠ D1: Cell цілить в ОДНУ колонку (як Column), тож вимога обчислюваності
+        // на нього поширюється; інакше людина вводила б число в комірку, яку
+        // перерахунок затре (колонка Decimal лишається ручною).
+        if (scope == FormulaScope.Row)
         {
             return;
         }
@@ -322,8 +338,8 @@ public sealed class SaveFormulaDefHandler(
     /// пропуском в еталоні, а не новим рішенням, узятим лише тут.
     /// </remarks>
     /// <exception cref="NotFoundException">Таблиці, колонки чи рядка з такою адресою немає.</exception>
-    internal static (TableDef Table, FormulaDef? Existing, int ResolvedId) FindTarget(
-        TemplateVersion version, int tableDefId, FormulaScope scope, string target)
+    internal static (TableDef Table, FormulaDef? Existing, int ResolvedId, int? CellColumnId) FindTarget(
+        TemplateVersion version, int tableDefId, FormulaScope scope, string target, string? columnTarget = null)
     {
         // ⛔ B-14 (UX-аудит, четвертий раунд): наявний хелпер, спільний із
         // ColumnDefHandlers/RowDefHandlers — той самий факт «таблиці з таким
@@ -351,7 +367,7 @@ public sealed class SaveFormulaDefHandler(
             var existingOnColumn = table.Formulas.FirstOrDefault(f =>
                 !f.IsDeleted && f.Scope == FormulaScope.Column && f.ColumnDefId == column.Id);
 
-            return (table, existingOnColumn, column.Id);
+            return (table, existingOnColumn, column.Id, null);
         }
 
         var row = table.Rows.FirstOrDefault(r => string.Equals(r.RowKeyValue, target, StringComparison.Ordinal))
@@ -365,14 +381,41 @@ public sealed class SaveFormulaDefHandler(
                     ["tableDefId"] = tableDefId.ToString(System.Globalization.CultureInfo.InvariantCulture),
                 });
 
+        if (scope == FormulaScope.Cell)
+        {
+            // ⚠ D1: друга половина адреси — колонка. Колонка живої версії,
+            // не видалена; той самий 404, що й для Column-адреси.
+            if (!int.TryParse(columnTarget, out var cellColumnId)
+                || table.Columns.FirstOrDefault(c => c.Id == cellColumnId && !c.IsDeleted) is not { } cellColumn)
+            {
+                throw new NotFoundException(
+                    ErrorCodes.TemplateNotFound,
+                    $"Колонки «{columnTarget}» у таблиці {tableDefId} немає.",
+                    new Dictionary<string, object?>
+                    {
+                        ["messageKey"] = "err.ECR-TMPL-0404.column",
+                        ["columnDefId"] = columnTarget,
+                    });
+            }
+
+            var existingOnCell = table.Formulas.FirstOrDefault(f =>
+                !f.IsDeleted && f.Scope == FormulaScope.Cell
+                && f.RowDefId == row.Id && f.ColumnDefId == cellColumn.Id);
+
+            return (table, existingOnCell, row.Id, cellColumn.Id);
+        }
+
         var existingOnRow = table.Formulas.FirstOrDefault(f =>
             !f.IsDeleted && f.Scope == FormulaScope.Row && f.RowDefId == row.Id);
 
-        return (table, existingOnRow, row.Id);
+        return (table, existingOnRow, row.Id, null);
     }
 
     /// <summary>Текстова адреса формули — для повідомлень про руйнівну зміну.</summary>
-    private static string Address(int tableDefId, FormulaScope scope, string target) => $"{tableDefId}/{scope}/{target}";
+    private static string Address(int tableDefId, FormulaScope scope, string target, string? columnTarget = null)
+        => columnTarget is null
+            ? $"{tableDefId}/{scope}/{target}"
+            : $"{tableDefId}/{scope}/{target}/{columnTarget}";
 
     /// <summary>Складає DTO формули для відповіді.</summary>
     internal static FormulaDto Map(FormulaDef formula)
@@ -401,9 +444,9 @@ public sealed record SaveFormulaDefCommand(ExpressionDialect Dialect, string Exp
 /// <summary>Формула для відповіді клієнту.</summary>
 /// <param name="Id">Ідентифікатор.</param>
 /// <param name="TableDefId">Таблиця, якій належить формула.</param>
-/// <param name="Scope">Область: <c>Column</c> чи <c>Row</c>.</param>
-/// <param name="ColumnDefId">Колонка, якщо <c>Scope == Column</c>.</param>
-/// <param name="RowDefId">Рядок, якщо <c>Scope == Row</c> (сурогатний ключ; адреса запиту — <c>RowKey</c>).</param>
+/// <param name="Scope">Область: <c>Column</c>, <c>Row</c> чи <c>Cell</c>.</param>
+/// <param name="ColumnDefId">Колонка, якщо <c>Scope == Column</c> чи <c>Cell</c>.</param>
+/// <param name="RowDefId">Рядок, якщо <c>Scope == Row</c> чи <c>Cell</c> (сурогатний ключ; адреса запиту — <c>RowKey</c>).</param>
 /// <param name="Dialect">Діалект виразу.</param>
 /// <param name="Expression">Текст виразу.</param>
 public sealed record FormulaDto(
@@ -438,10 +481,12 @@ public sealed class DeleteFormulaDefHandler(
     /// <param name="scope"><c>Column</c> чи <c>Row</c>.</param>
     /// <param name="target"><c>ColumnDefId</c> числом при <c>Column</c>; <c>RowKey</c> текстом при <c>Row</c>.</param>
     /// <param name="ct">Токен скасування.</param>
+    /// <param name="columnTarget">Лише для <c>Cell</c>: <c>ColumnDefId</c> числом.</param>
     /// <exception cref="NotFoundException">Версії, цілі чи формули на ній немає.</exception>
     /// <exception cref="BusinessRuleException">Версія структурно заморожена.</exception>
     public async Task HandleAsync(
-        int templateVersionId, int tableDefId, FormulaScope scope, string target, CancellationToken ct)
+        int templateVersionId, int tableDefId, FormulaScope scope, string target, CancellationToken ct,
+        string? columnTarget = null)
     {
         await PermissionCheck.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
 
@@ -456,11 +501,16 @@ public sealed class DeleteFormulaDefHandler(
         version.EnsureStructurallyMutable();
         version.TouchDraft(userId, clock.UtcNow);
 
-        var (_, formula, _) = SaveFormulaDefHandler.FindTarget(version, tableDefId, scope, target);
+        var (_, formula, _, _) = SaveFormulaDefHandler.FindTarget(version, tableDefId, scope, target, columnTarget);
 
         if (formula is null)
         {
-            var kind = scope == FormulaScope.Column ? "колонці" : "рядку";
+            var kind = scope switch
+            {
+                FormulaScope.Column => "колонці",
+                FormulaScope.Cell => "комірці",
+                _ => "рядку",
+            };
             throw new NotFoundException(
                 ErrorCodes.TemplateNotFound,
                 $"На {kind} «{target}» у таблиці {tableDefId} немає формули.",
@@ -477,7 +527,9 @@ public sealed class DeleteFormulaDefHandler(
         var change = classifier.ClassifyDeletion(nameof(FormulaDef), hasDocuments);
 
         SaveTableRelationHandler.RejectBreaking(
-            change, $"{tableDefId}/{scope}/{target}", hasDocuments, "Видалення");
+            change,
+            columnTarget is null ? $"{tableDefId}/{scope}/{target}" : $"{tableDefId}/{scope}/{target}/{columnTarget}",
+            hasDocuments, "Видалення");
 
         // ⛔ Q-244: аудит і `SoftDelete`/`SaveChanges` тепер одна транзакція.
         await uow.ExecuteInTransactionAsync(async innerCt =>
