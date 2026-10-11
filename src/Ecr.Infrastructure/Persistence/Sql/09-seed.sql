@@ -7821,6 +7821,7 @@ USING (VALUES
     ,(N'err.ECR-REQ-0422.editorSetBaseVersion', N'en', N'The request must say which version of the set it started from (baseVersion).', 1)
     ,(N'err.ECR-REQ-0422.editAssignmentTooManySlices', N'en', N'Specify from 1 to 12 slices per request.', 1)
     ,(N'err.ECR-DOC-0404.editorSet', N'en', N'The executor set was not found.', 1)
+    ,(N'err.ECR-DOC-0404.editAssignment', N'en', N'The assignment was not found.', 1)
     -- COLL:ea-api ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
@@ -19676,7 +19677,9 @@ SELECT v.[Key], v.Lang, v.Val
     (N'err.ECR-REQ-0422.editAssignmentTooManySlices', N'ru', N'Укажите от 1 до 12 срезов в одном запросе.'),
     (N'err.ECR-REQ-0422.editAssignmentTooManySlices', N'kz', N'Бір сұраныста 1-ден 12-ге дейін кесінді көрсетіңіз.'),
     (N'err.ECR-DOC-0404.editorSet', N'ru', N'Набор исполнителей не найден.'),
-    (N'err.ECR-DOC-0404.editorSet', N'kz', N'Орындаушылар жиыны табылмады.')
+    (N'err.ECR-DOC-0404.editorSet', N'kz', N'Орындаушылар жиыны табылмады.'),
+    (N'err.ECR-DOC-0404.editAssignment', N'ru', N'Передача не найдена.'),
+    (N'err.ECR-DOC-0404.editAssignment', N'kz', N'Тапсырма табылмады.')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
@@ -19880,7 +19883,7 @@ INSERT INTO aud.SecurityEvent (ChangedAt, EventType, TargetUserId, TargetRoleId,
 SELECT SYSUTCDATETIME(), N'RolePermissionsGranted', NULL, r.Id,
        CONCAT(N'{"role":"SystemAdministrator","source":"seed FP:sysadmin-rights","count":', COUNT(*),
               N',"permissions":["',
-              STRING_AGG(CAST(rp.PermissionCode AS nvarchar(max)), N'","') WITHIN GROUP (ORDER BY rp.PermissionCode),
+              STUFF((SELECT N'","' + CAST(x.PermissionCode AS nvarchar(max)) FROM sec.RolePermission AS x WHERE x.RoleId = r.Id AND NOT EXISTS (SELECT 1 FROM #FpSysAdminRightsBefore AS xb WHERE xb.RoleId = x.RoleId AND xb.PermissionCode = x.PermissionCode) ORDER BY x.PermissionCode FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), 1, 3, N''),
               N'"]}'),
        0, NULL
 FROM sec.Role AS r

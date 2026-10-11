@@ -173,11 +173,34 @@ public sealed class UpsertEditAssignmentHandler(
     /// <param name="documentId">Документ.</param>
     /// <param name="request">Тіло.</param>
     /// <param name="ct">Токен скасування.</param>
-    /// <param name="overwrite">
-    /// Явне перезаписування складу (apply-set/copy): <c>baseVersion</c> наявної передачі не потрібна.
-    /// </param>
     public async Task<EditAssignmentDto> HandleAsync(
-        long documentId, UpsertEditAssignmentRequest request, CancellationToken ct, bool overwrite = false)
+        long documentId, UpsertEditAssignmentRequest request, CancellationToken ct)
+    {
+        var prepared = await PrepareAsync(documentId, request, overwrite: false, appliedSetOverride: null, ct)
+            .ConfigureAwait(false);
+        return await CommitAsync(prepared, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Усі перевірки БЕЗ запису: права, зріз, «у межах власних прав», одержувачі, набір. Пакетні дії
+    /// (apply-set, copy) готують ВСІ зрізи до першого запису — відмова на k-му не лишає 1..k-1.
+    /// </summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="request">Тіло.</param>
+    /// <param name="overwrite">
+    /// Явне перезаписування складу (apply-set/copy): <c>baseVersion</c> наявної передачі не потрібна, а
+    /// відповідь повертає кожну застосовану передачу з її новою версією.
+    /// </param>
+    /// <param name="appliedSetOverride">
+    /// Знімок набору без пошуку (copy: набір міг бути іншого менеджера — його не шукаємо за власником).
+    /// </param>
+    /// <param name="ct">Токен скасування.</param>
+    internal async Task<PreparedUpsert> PrepareAsync(
+        long documentId,
+        UpsertEditAssignmentRequest request,
+        bool overwrite,
+        AppliedSetSnapshot? appliedSetOverride,
+        CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(request);
 
@@ -236,137 +259,156 @@ public sealed class UpsertEditAssignmentHandler(
         }
 
         // Набір — лише власний (чужий ≡ відсутній); назва фіксується знімком.
-        string? appliedSetName = null;
-        if (request.AppliedSetId is { } setId)
+        AppliedSetSnapshot? appliedSet = appliedSetOverride;
+        if (appliedSet is null && request.AppliedSetId is { } setId)
         {
             var set = await sets.FindAsync(userId, setId, ct).ConfigureAwait(false)
                 ?? throw EditAssignmentAccess.Invalid("err.ECR-REQ-0422.editorSetNotFound", "Набору виконавців не знайдено.");
-            appliedSetName = set.Name;
+            appliedSet = new AppliedSetSnapshot(set.Id, set.Name);
         }
 
+        return new PreparedUpsert(
+            document, userId, slice, recipientIds, request.IsExclusive, note, appliedSet, users,
+            request.BaseVersion, overwrite);
+    }
+
+    /// <summary>Записує підготовлену передачу в одній транзакції.</summary>
+    internal async Task<EditAssignmentDto> CommitAsync(PreparedUpsert p, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(p);
+
+        var document = p.Document;
+        var documentId = document.Id;
+        var userId = p.UserId;
+        var slice = p.Slice;
+        var recipientIds = p.RecipientIds;
+        var note = p.Note;
+        var users = p.Users;
         var now = clock.UtcNow;
         EditAssignment? result = null;
 
         try
         {
-        await uow.ExecuteInTransactionAsync(async innerCt =>
-        {
-            // ⛔ Аудит P2: документ могли видалити між перевіркою прав і вставкою — блокуємо його рядок.
-            if (!await store.LockDocumentAsync(documentId, innerCt).ConfigureAwait(false))
+            await uow.ExecuteInTransactionAsync(async innerCt =>
             {
-                throw EditAssignmentAccess.NotFound(documentId);
-            }
+                // Очікування блокувань обмежене (409 ECR-DOC-4091 замість висіння до CommandTimeout).
+                await store.LimitLockWaitAsync(innerCt).ConfigureAwait(false);
 
-            var existing = await store
-                .FindBySliceKeyForUpdateAsync(documentId, slice.Key, innerCt).ConfigureAwait(false);
+                var existing = await store
+                    .FindBySliceKeyForUpdateAsync(documentId, slice.Key, innerCt).ConfigureAwait(false);
 
-            if (existing is not null)
-            {
-                await store.LockRecipientsAsync(existing.Id, innerCt).ConfigureAwait(false);
-            }
+                var events = new List<SecurityEventRecord>();
+                var newlyAssigned = new List<int>();
 
-            var events = new List<SecurityEventRecord>();
-            var newlyAssigned = new List<int>();
-
-            if (existing is null)
-            {
-                if (await assignments.CountByDocumentAsync(documentId, innerCt).ConfigureAwait(false) >= EditAssignment.MaxPerDocument)
+                if (existing is null)
                 {
-                    throw EditAssignmentAccess.Invalid("err.ECR-REQ-0422.editAssignmentTooManyAssignments", "У документі забагато передач.");
-                }
-
-                var assignment = new EditAssignment(
-                    documentId, slice, request.IsExclusive, delegatedByUserId: userId, Guid.NewGuid(), userId, now,
-                    expiresAt: null, note: note);
-                foreach (var id in recipientIds)
-                {
-                    assignment.AddRecipient(id, userId, now);
-                    newlyAssigned.Add(id);
-                }
-
-                assignments.Add(assignment);
-                result = assignment;
-            }
-            else
-            {
-                var sameMembers = existing.Recipients.Select(r => r.UserId).OrderBy(i => i)
-                    .SequenceEqual(recipientIds.OrderBy(i => i));
-                var sameFlags = existing.IsExclusive == request.IsExclusive
-                    && string.Equals(existing.Note ?? string.Empty, note ?? string.Empty, StringComparison.Ordinal);
-
-                if (sameMembers && sameFlags)
-                {
-                    // Ідемпотентний повтор: нічого не змінюємо й не журналюємо.
-                    result = existing;
-                    return;
-                }
-
-                if (!overwrite)
-                {
-                    EditAssignmentAccess.RequireVersion(request.BaseVersion, existing);
-                }
-
-                var removed = existing.Recipients.Where(r => !recipientIds.Contains(r.UserId)).Select(r => r.UserId).ToList();
-                foreach (var id in removed)
-                {
-                    existing.RemoveRecipient(id, userId, now);
-                }
-
-                foreach (var id in recipientIds)
-                {
-                    if (existing.AddRecipient(id, userId, now))
+                    // ⛔ P2: документ могли видалити між перевіркою прав і вставкою — блокуємо його рядок, і
+                    // ЛИШЕ на створенні (аудит P1-C1): зміна наявної тримає U на рядку передачі, а видалення
+                    // документа видаляє передачі після власного UPDLOCK — тож документ не зникне, а друге
+                    // блокування на doc.Document дало б інверсію з записом комірки (S передача → U документ).
+                    if (!await store.LockDocumentAsync(documentId, innerCt).ConfigureAwait(false))
                     {
+                        throw EditAssignmentAccess.NotFound(documentId);
+                    }
+
+                    if (await assignments.CountByDocumentAsync(documentId, innerCt).ConfigureAwait(false) >= EditAssignment.MaxPerDocument)
+                    {
+                        throw EditAssignmentAccess.Invalid("err.ECR-REQ-0422.editAssignmentTooManyAssignments", "У документі забагато передач.");
+                    }
+
+                    var assignment = new EditAssignment(
+                        documentId, slice, p.IsExclusive, delegatedByUserId: userId, Guid.NewGuid(), userId, now,
+                        expiresAt: null, note: note);
+                    foreach (var id in recipientIds)
+                    {
+                        assignment.AddRecipient(id, userId, now);
                         newlyAssigned.Add(id);
+                    }
+
+                    assignments.Add(assignment);
+                    result = assignment;
+                }
+                else
+                {
+                    await store.LockRecipientsAsync(existing.Id, innerCt).ConfigureAwait(false);
+
+                    var sameMembers = existing.Recipients.Select(r => r.UserId).OrderBy(i => i)
+                        .SequenceEqual(recipientIds.OrderBy(i => i));
+                    var sameFlags = existing.IsExclusive == p.IsExclusive
+                        && string.Equals(existing.Note ?? string.Empty, note ?? string.Empty, StringComparison.Ordinal);
+                    var sameSet = existing.AppliedSetId == p.AppliedSet?.Id;
+
+                    if (sameMembers && sameFlags && sameSet)
+                    {
+                        // Ідемпотентний повтор: нічого не змінюємо й не журналюємо.
+                        result = existing;
+                        return;
+                    }
+
+                    if (!p.Overwrite)
+                    {
+                        EditAssignmentAccess.RequireVersion(p.BaseVersion, existing);
+                    }
+
+                    var removed = existing.Recipients.Where(r => !recipientIds.Contains(r.UserId)).Select(r => r.UserId).ToList();
+                    foreach (var id in removed)
+                    {
+                        existing.RemoveRecipient(id, userId, now);
+                    }
+
+                    foreach (var id in recipientIds)
+                    {
+                        if (existing.AddRecipient(id, userId, now))
+                        {
+                            newlyAssigned.Add(id);
+                        }
+                    }
+
+                    // Додавання/зняття виконавця саме скидає валідацію (домен); знімання «Заповнено»-виконавця її не ламає.
+                    existing.Reconfigure(p.IsExclusive, note, userId, now);
+                    existing.Redelegate(userId, now);
+
+                    foreach (var id in removed)
+                    {
+                        events.Add(Event(RevokedEvent, now, id, userId, documentId, existing, "recipientRemoved"));
+                    }
+
+                    if (!sameFlags)
+                    {
+                        events.Add(Event(ChangedEvent, now, null, userId, documentId, existing, "flags"));
+                    }
+
+                    result = existing;
+                }
+
+                // Знімок набору оновлюється і тоді, коли склад і ознаки ті самі (аудит P2).
+                result!.MarkAppliedSet(p.AppliedSet?.Id, p.AppliedSet?.Name);
+
+                foreach (var id in newlyAssigned)
+                {
+                    events.Add(Event(GrantedEvent, now, id, userId, documentId, result, "grant"));
+                }
+
+                // Лист — лише тим, у кого є адреса; recipients: null (розсилка всім) заборонено.
+                foreach (var id in newlyAssigned)
+                {
+                    if (users.TryGetValue(id, out var u) && !string.IsNullOrWhiteSpace(u.Email))
+                    {
+                        await outbox.EnqueueAsync(
+                            AssignedNotification,
+                            $"ECR: {document.BusinessKey} — please fill in {EditAssignmentMapper.DescribeSlice(result)}",
+                            BuildAssignedBody(document.BusinessKey, result, note),
+                            u.Email, innerCt).ConfigureAwait(false);
                     }
                 }
 
-                // Додавання виконавця саме скидає валідацію (AddRecipient); знімання «Заповнено»-виконавця її не ламає.
-                existing.Reconfigure(request.IsExclusive, note, userId, now);
-                existing.Redelegate(userId, now);
-
-                foreach (var id in removed)
+                if (events.Count > 0)
                 {
-                    events.Add(Event(RevokedEvent, now, id, userId, documentId, existing, "recipientRemoved"));
+                    await audit.WriteSecurityEventsAsync(events, innerCt).ConfigureAwait(false);
                 }
 
-                if (!sameFlags)
-                {
-                    events.Add(Event(ChangedEvent, now, null, userId, documentId, existing, "flags"));
-                }
-
-                result = existing;
-            }
-
-            if (request.AppliedSetId is { } appliedId)
-            {
-                result!.MarkAppliedSet(appliedId, appliedSetName);
-            }
-
-            foreach (var id in newlyAssigned)
-            {
-                events.Add(Event(GrantedEvent, now, id, userId, documentId, result!, "grant"));
-            }
-
-            // Лист — лише тим, у кого є адреса; recipients: null (розсилка всім) заборонено.
-            foreach (var id in newlyAssigned)
-            {
-                if (users.TryGetValue(id, out var u) && !string.IsNullOrWhiteSpace(u.Email))
-                {
-                    await outbox.EnqueueAsync(
-                        AssignedNotification,
-                        $"ECR: {document.BusinessKey} — please fill in {EditAssignmentMapper.DescribeSlice(result!)}",
-                        BuildAssignedBody(document.BusinessKey, result!, note),
-                        u.Email, innerCt).ConfigureAwait(false);
-                }
-            }
-
-            if (events.Count > 0)
-            {
-                await audit.WriteSecurityEventsAsync(events, innerCt).ConfigureAwait(false);
-            }
-
-            await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
-        }, ct).ConfigureAwait(false);
+                await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+            }, ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (IsUniqueViolation(ex))
         {
@@ -419,10 +461,29 @@ public sealed class UpsertEditAssignmentHandler(
     }
 }
 
+/// <summary>Знімок набору, застосованого до передачі (id і назва на момент застосування).</summary>
+/// <param name="Id">Набір.</param>
+/// <param name="Name">Назва.</param>
+internal sealed record AppliedSetSnapshot(int Id, string Name);
+
+/// <summary>Перевірена, але ще не записана передача (див. <c>UpsertEditAssignmentHandler.PrepareAsync</c>).</summary>
+internal sealed record PreparedUpsert(
+    EditAssignmentDocumentRef Document,
+    int UserId,
+    EditAssignmentSlice Slice,
+    List<int> RecipientIds,
+    bool IsExclusive,
+    string? Note,
+    AppliedSetSnapshot? AppliedSet,
+    IReadOnlyDictionary<int, EditAssignmentUserRef> Users,
+    string? BaseVersion,
+    bool Overwrite);
 /// <summary>Зняття передачі (разом із виконавцями).</summary>
 public sealed class DeleteEditAssignmentHandler(
     IEditAssignmentStore assignments,
     IEditAssignmentManagementStore store,
+    IDocumentStore documents,
+    IMetadataCache metadata,
     IAccessDecisionService access,
     IUnitOfWork uow,
     IAuditWriter audit,
@@ -437,13 +498,18 @@ public sealed class DeleteEditAssignmentHandler(
         var document = await EditAssignmentAccess
             .RequireVisibleDocumentAsync(store, profile, documentId, ct).ConfigureAwait(false);
         EditAssignmentAccess.RequireManager(profile, document);
+        var scope = await EditAssignmentAccess
+            .ReadScopeAsync(documents, metadata, profile, document.ProjectId, documentId, ct).ConfigureAwait(false);
 
         var now = clock.UtcNow;
         await uow.ExecuteInTransactionAsync(async innerCt =>
         {
+            await store.LimitLockWaitAsync(innerCt).ConfigureAwait(false);
+
             var assignment = await assignments.FindForUpdateAsync(documentId, assignmentId, innerCt).ConfigureAwait(false)
-                ?? throw EditAssignmentAccess.NotFound(documentId);
+                ?? throw EditAssignmentAccess.AssignmentNotFound(documentId);
             await store.LockRecipientsAsync(assignment.Id, innerCt).ConfigureAwait(false);
+            EditAssignmentAccess.RequireSheetVisible(scope, assignment, documentId);
 
             var events = assignment.Recipients
                 .Select(r => new SecurityEventRecord(
@@ -484,6 +550,8 @@ public sealed class DeleteEditAssignmentHandler(
 public sealed class FillEditAssignmentHandler(
     IEditAssignmentStore assignments,
     IEditAssignmentManagementStore store,
+    IDocumentStore documents,
+    IMetadataCache metadata,
     IAccessDecisionService access,
     IUnitOfWork uow,
     IAuditWriter audit,
@@ -504,6 +572,8 @@ public sealed class FillEditAssignmentHandler(
         var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
         var document = await EditAssignmentAccess
             .RequireVisibleDocumentAsync(store, profile, documentId, ct).ConfigureAwait(false);
+        var scope = await EditAssignmentAccess
+            .ReadScopeAsync(documents, metadata, profile, document.ProjectId, documentId, ct).ConfigureAwait(false);
 
         if (profile.IsSimulation || document.ProjectStatus == ProjectStatus.Archived || document.IsArchiving)
         {
@@ -517,13 +587,16 @@ public sealed class FillEditAssignmentHandler(
 
         await uow.ExecuteInTransactionAsync(async innerCt =>
         {
+            await store.LimitLockWaitAsync(innerCt).ConfigureAwait(false);
+
             var assignment = await assignments.FindForUpdateAsync(documentId, assignmentId, innerCt).ConfigureAwait(false);
             if (assignment is null || assignment.FindRecipient(userId) is null)
             {
-                throw EditAssignmentAccess.NotFound(documentId);
+                throw EditAssignmentAccess.AssignmentNotFound(documentId);
             }
 
             await store.LockRecipientsAsync(assignment.Id, innerCt).ConfigureAwait(false);
+            EditAssignmentAccess.RequireSheetVisible(scope, assignment, documentId);
 
             result = assignment;
             if (!assignment.FillRecipient(userId, now))
@@ -567,6 +640,8 @@ public sealed class FillEditAssignmentHandler(
 public sealed class ValidateEditAssignmentHandler(
     IEditAssignmentStore assignments,
     IEditAssignmentManagementStore store,
+    IDocumentStore documents,
+    IMetadataCache metadata,
     IAccessDecisionService access,
     IUnitOfWork uow,
     IAuditWriter audit,
@@ -591,15 +666,20 @@ public sealed class ValidateEditAssignmentHandler(
         var document = await EditAssignmentAccess
             .RequireVisibleDocumentAsync(store, profile, documentId, ct).ConfigureAwait(false);
         EditAssignmentAccess.RequireManager(profile, document);
+        var scope = await EditAssignmentAccess
+            .ReadScopeAsync(documents, metadata, profile, document.ProjectId, documentId, ct).ConfigureAwait(false);
 
         var now = clock.UtcNow;
         EditAssignment? result = null;
 
         await uow.ExecuteInTransactionAsync(async innerCt =>
         {
+            await store.LimitLockWaitAsync(innerCt).ConfigureAwait(false);
+
             var assignment = await assignments.FindForUpdateAsync(documentId, assignmentId, innerCt).ConfigureAwait(false)
-                ?? throw EditAssignmentAccess.NotFound(documentId);
+                ?? throw EditAssignmentAccess.AssignmentNotFound(documentId);
             await store.LockRecipientsAsync(assignment.Id, innerCt).ConfigureAwait(false);
+            EditAssignmentAccess.RequireSheetVisible(scope, assignment, documentId);
             result = assignment;
 
             if (assignment.ValidationStatus == EditAssignmentValidationStatus.Validated)
@@ -661,6 +741,8 @@ public sealed class ValidateEditAssignmentHandler(
 public sealed class ReturnEditAssignmentHandler(
     IEditAssignmentStore assignments,
     IEditAssignmentManagementStore store,
+    IDocumentStore documents,
+    IMetadataCache metadata,
     IAccessDecisionService access,
     IUnitOfWork uow,
     IAuditWriter audit,
@@ -685,8 +767,13 @@ public sealed class ReturnEditAssignmentHandler(
         var document = await EditAssignmentAccess
             .RequireVisibleDocumentAsync(store, profile, documentId, ct).ConfigureAwait(false);
         EditAssignmentAccess.RequireManager(profile, document);
+        var scope = await EditAssignmentAccess
+            .ReadScopeAsync(documents, metadata, profile, document.ProjectId, documentId, ct).ConfigureAwait(false);
 
-        var reason = request.Reason?.Trim();
+        // Причина йде в журнал безпеки й лист: керувальні символи (переноси, NUL) прибираються (аудит P3).
+        var reason = request.Reason is null
+            ? null
+            : string.Concat(request.Reason.Select(c => char.IsControl(c) ? ' ' : c)).Trim();
         if (string.IsNullOrEmpty(reason))
         {
             throw EditAssignmentAccess.Invalid("err.ECR-REQ-0422.editAssignmentReasonRequired", "Вкажіть причину повернення.");
@@ -702,9 +789,12 @@ public sealed class ReturnEditAssignmentHandler(
 
         await uow.ExecuteInTransactionAsync(async innerCt =>
         {
+            await store.LimitLockWaitAsync(innerCt).ConfigureAwait(false);
+
             var assignment = await assignments.FindForUpdateAsync(documentId, assignmentId, innerCt).ConfigureAwait(false)
-                ?? throw EditAssignmentAccess.NotFound(documentId);
+                ?? throw EditAssignmentAccess.AssignmentNotFound(documentId);
             await store.LockRecipientsAsync(assignment.Id, innerCt).ConfigureAwait(false);
+            EditAssignmentAccess.RequireSheetVisible(scope, assignment, documentId);
             result = assignment;
 
             EditAssignmentAccess.RequireVersion(request.BaseVersion, assignment);
@@ -818,11 +908,25 @@ public sealed class ListEditAssignmentCandidatesHandler(
             throw EditAssignmentAccess.Invalid("err.ECR-REQ-0422.editAssignmentQueryTooShort", "Запит має містити щонайменше два символи.");
         }
 
-        var found = await store.SearchCandidatesAsync(q, MaxResults + 1, ct).ConfigureAwait(false);
-        return [.. found
-            .Where(u => u.Id != userId && u.Id != document.CreatedByUserId)
-            .Take(MaxResults)
-            .Select(u => new EditAssignmentCandidateDto(u.Id, u.DisplayName))];
+        // Лише користувачі, які ВЖЕ мають Read на проєкт документа (інакше передача їм відмовила б, а список
+        // не повинен бути переліком усіх облікових записів — аудит S3).
+        var found = await store.SearchCandidatesAsync(q, MaxResults * 3, ct).ConfigureAwait(false);
+        var result = new List<EditAssignmentCandidateDto>();
+        foreach (var u in found.Where(u => u.Id != userId && u.Id != document.CreatedByUserId))
+        {
+            var candidate = await access.BuildProfileAsync(u.Id, ct).ConfigureAwait(false);
+            if (candidate.SeesDocumentsOf(document.ProjectId)
+                && PermissionCheck.IsGrantedIn(candidate, "Document.View", document.ProjectId))
+            {
+                result.Add(new EditAssignmentCandidateDto(u.Id, u.DisplayName));
+                if (result.Count == MaxResults)
+                {
+                    break;
+                }
+            }
+        }
+
+        return result;
     }
 }
 
@@ -832,6 +936,8 @@ public sealed class ListEditAssignmentCandidatesHandler(
 /// </summary>
 public sealed class ListMyEditAssignmentsHandler(
     IEditAssignmentManagementStore store,
+    IDocumentStore documents,
+    IMetadataCache metadata,
     IAccessDecisionService access,
     Common.ICurrentUser currentUser)
 {
@@ -849,7 +955,32 @@ public sealed class ListMyEditAssignmentsHandler(
 
         var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
         var rows = await store.ListMineAsync(userId, documentId, ct).ConfigureAwait(false);
-        var visible = rows.Where(r => profile.SeesDocumentsOf(r.ProjectId)).ToList();
+        var projectVisible = rows.Where(r => profile.SeesDocumentsOf(r.ProjectId)).ToList();
+
+        // ⛔ Аудит S4: код аркуша/таблиці не віддається, якщо користувач не читає аркуш зрізу (Deny/звуження):
+        // така передача в його «Моїх задачах» не з'являється. Межі читання — один раз на документ.
+        var scopes = new Dictionary<long, DocumentReadScope>();
+        var visible = new List<MyEditAssignmentRow>();
+        foreach (var row in projectVisible)
+        {
+            if (row.SheetCode is not null)
+            {
+                if (!scopes.TryGetValue(row.DocumentId, out var scope))
+                {
+                    scope = await EditAssignmentAccess
+                        .ReadScopeAsync(documents, metadata, profile, row.ProjectId, row.DocumentId, ct)
+                        .ConfigureAwait(false);
+                    scopes[row.DocumentId] = scope;
+                }
+
+                if (!scope.CanReadSheetCode(row.SheetCode))
+                {
+                    continue;
+                }
+            }
+
+            visible.Add(row);
+        }
 
         var assigned = wantAssignee
             ? visible
