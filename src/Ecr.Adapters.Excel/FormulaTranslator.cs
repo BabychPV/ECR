@@ -340,6 +340,14 @@ public sealed class FormulaTranslator
                     ? one
                     : MissingReference;
 
+            case RowSelector.Range
+                when context.PublishedRanges is { } published
+                     && published.TryGetValue(reference.Position, out var publishedKeys):
+                // ⛔ ФВ-0.2: рядки діапазону — ті, що розкрила ПУБЛІКАЦІЯ й читає розрахунок, а не все
+                // між кінцями за поточним макетом книги: презентаційна правка порядку (ФВ-7.2) міняє
+                // макет, але не склад діапазону формули.
+                return PublishedRange(table, publishedKeys, column, coordinates);
+
             case RowSelector.Range range:
                 var from = coordinates.TryGetValue((table, range.FromRowKey, column), out var head)
                     ? head
@@ -357,6 +365,82 @@ public sealed class FormulaTranslator
                 // координату не перетворюються.
                 return MissingReference;
         }
+    }
+
+    /// <summary>Адреса комірки Excel: необов'язковий префікс аркуша, колонка, рядок.</summary>
+    private static readonly System.Text.RegularExpressions.Regex AddressPattern = new(
+        @"^(?<sheet>.*!)?\$?(?<col>[A-Za-z]{1,3})\$?(?<row>\d+)$",
+        System.Text.RegularExpressions.RegexOptions.CultureInvariant,
+        TimeSpan.FromSeconds(1));
+
+    /// <summary>
+    /// Ключі діапазону, розкриті публікацією, у координатах книги: <c>A3:A5</c>, якщо вони йдуть у книзі
+    /// суцільно й за зростанням, інакше — об'єднання посилань <c>(A3,A6,A5)</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Об'єднання — єдиний спосіб віддати Excel РІВНО ті рядки, які рахує система, коли макет книги
+    /// вже не збігається з порядком публікації. Діапазон між кінцями порахував би чужі рядки й мовчки
+    /// дав би інше число. Якщо хоч один ключ не має координати — <see cref="MissingReference"/>:
+    /// формула в книгу не пишеться, комірка лишається значенням (<c>V-10</c>).
+    /// </remarks>
+    private static string PublishedRange(
+        string table,
+        IReadOnlyList<string> keys,
+        string column,
+        IReadOnlyDictionary<(string, string, string), string> coordinates)
+    {
+        if (keys.Count == 0)
+        {
+            return MissingReference;
+        }
+
+        var cells = new List<string>(keys.Count);
+
+        foreach (var key in keys)
+        {
+            if (!coordinates.TryGetValue((table, key, column), out var address))
+            {
+                return MissingReference;
+            }
+
+            cells.Add(address);
+        }
+
+        return IsContiguous(cells)
+            ? $"{cells[0]}:{cells[^1]}"
+            : "(" + string.Join(',', cells) + ")";
+    }
+
+    /// <summary>Чи йдуть адреси в одній колонці одного аркуша суцільно, рядок за рядком, зростаючи.</summary>
+    private static bool IsContiguous(List<string> cells)
+    {
+        string? sheet = null;
+        string? column = null;
+        var previous = 0;
+
+        for (var i = 0; i < cells.Count; i++)
+        {
+            var match = AddressPattern.Match(cells[i]);
+            if (!match.Success)
+            {
+                return false;
+            }
+
+            var row = int.Parse(match.Groups["row"].Value, CultureInfo.InvariantCulture);
+            var currentSheet = match.Groups["sheet"].Value;
+            var currentColumn = match.Groups["col"].Value.ToUpperInvariant();
+
+            if (i > 0 && (currentSheet != sheet || currentColumn != column || row != previous + 1))
+            {
+                return false;
+            }
+
+            sheet = currentSheet;
+            column = currentColumn;
+            previous = row;
+        }
+
+        return true;
     }
 
     private static string Literal(LiteralNode literal) => literal.Value switch
@@ -407,4 +491,11 @@ public sealed class FormulaTranslator
 /// <summary>Комірка книги, для якої транслюється формула.</summary>
 /// <param name="TableCode">Таблиця комірки; <c>null</c> — невідома.</param>
 /// <param name="RowKey">Рядок комірки; <c>null</c> — невідомий.</param>
-public sealed record FormulaContext(string? TableCode, string? RowKey);
+/// <param name="PublishedRanges">
+/// Діапазони формули за позицією посилання в тексті виразу → ключі рядків, які розкрила публікація
+/// (<c>cfg.FormulaDependency</c>, ФВ-0.2); <c>null</c> чи відсутня позиція — діапазон за макетом книги.
+/// </param>
+public sealed record FormulaContext(
+    string? TableCode,
+    string? RowKey,
+    IReadOnlyDictionary<int, IReadOnlyList<string>>? PublishedRanges = null);
