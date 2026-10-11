@@ -7596,6 +7596,67 @@ USING (VALUES
     ,(N'err.ECR-TMPL-0422.lookupRegistryRequired', N'en', N'Column "{columnCode}" is of type Lookup and needs a registry: pick one.', 1)
     ,(N'err.ECR-TMPL-0422.headerFieldLookupRegistryRequired', N'en', N'Header field "{headerFieldCode}" is of type Lookup and needs a registry: pick one.', 1)
     -- COLL:rc20lookup ── кінець секції ──
+    -- COLL:p3-rc19 ── RC19: підписи журналу Audit (операція, сутність, подія безпеки) і скелет Health; ru/kz — порцією COLL:p3-rc19 нижче ──
+    ,(N'audit.operationLabel.Create', N'en', N'Created', 1)
+    ,(N'audit.operationLabel.Update', N'en', N'Updated', 1)
+    ,(N'audit.operationLabel.Delete', N'en', N'Deleted', 1)
+    ,(N'audit.operationLabel.Import', N'en', N'Imported', 1)
+    ,(N'audit.operationLabel.ImportPackage', N'en', N'Package imported', 1)
+    ,(N'audit.operationLabel.Reopen', N'en', N'Reopened', 1)
+    ,(N'audit.operationLabel.Publish', N'en', N'Published', 1)
+    ,(N'audit.operationLabel.Clone', N'en', N'Cloned', 1)
+    ,(N'audit.operationLabel.Pin', N'en', N'Pinned', 1)
+    ,(N'audit.operationLabel.Unpin', N'en', N'Unpinned', 1)
+    ,(N'audit.operationLabel.SetValidity', N'en', N'Validity changed', 1)
+    ,(N'audit.operationLabel.Invalidated', N'en', N'Marked invalid', 1)
+    ,(N'audit.operationLabel.SwitchSourceSet', N'en', N'Source set switched', 1)
+    ,(N'audit.operationLabel.SaveDefinitionDraft', N'en', N'Definition draft saved', 1)
+    ,(N'audit.operationLabel.DiscardDefinitionDraft', N'en', N'Definition draft discarded', 1)
+    ,(N'audit.operationLabel.SaveRules', N'en', N'Rules saved', 1)
+    ,(N'audit.entityLabel.cfg.RegistryDef', N'en', N'Registry definition', 1)
+    ,(N'audit.entityLabel.cfg.RegistryDefinitionDraft', N'en', N'Registry definition draft', 1)
+    ,(N'audit.entityLabel.cfg.CalculationBinding', N'en', N'Calculation binding', 1)
+    ,(N'audit.entityLabel.cfg.TableDef', N'en', N'Table definition', 1)
+    ,(N'audit.entityLabel.dic.RegistryEntry', N'en', N'Registry entry', 1)
+    ,(N'audit.entityLabel.dic.RegistryExternalKey', N'en', N'Registry external key', 1)
+    ,(N'audit.entityLabel.calc.MethodologyPackage', N'en', N'Methodology package', 1)
+    ,(N'audit.entityLabel.Project', N'en', N'Project', 1)
+    ,(N'audit.entityLabel.Project.CurrentPeriod', N'en', N'Project current period', 1)
+    ,(N'audit.entityLabel.Period', N'en', N'Period', 1)
+    ,(N'audit.entityLabel.PeriodPolicy', N'en', N'Period policy', 1)
+    ,(N'audit.entityLabel.ReportVersion', N'en', N'Report version', 1)
+    ,(N'audit.eventLabel.AccessDenied', N'en', N'Access denied', 1)
+    ,(N'audit.eventLabel.AuditStructureExported', N'en', N'Structure audit exported', 1)
+    ,(N'audit.eventLabel.ConsistencyCheckRunRequested', N'en', N'Consistency check requested', 1)
+    ,(N'audit.eventLabel.DataSourceConnectionTested', N'en', N'Source connection tested', 1)
+    ,(N'audit.eventLabel.DataSourceDeleted', N'en', N'Data source deleted', 1)
+    ,(N'audit.eventLabel.DataSourceSaved', N'en', N'Data source saved', 1)
+    ,(N'audit.eventLabel.DocumentDeleted', N'en', N'Document deleted', 1)
+    ,(N'audit.eventLabel.DocumentExportDownloaded', N'en', N'Document export downloaded', 1)
+    ,(N'audit.eventLabel.DocumentExportRequested', N'en', N'Document export requested', 1)
+    ,(N'audit.eventLabel.DocumentHeaderChanged', N'en', N'Document header changed', 1)
+    ,(N'audit.eventLabel.DocumentKeyChanged', N'en', N'Document key changed', 1)
+    ,(N'audit.eventLabel.DocumentVersionMigrated', N'en', N'Document moved to another template version', 1)
+    ,(N'audit.eventLabel.JobCancelled', N'en', N'Job cancelled', 1)
+    ,(N'audit.eventLabel.JobRestarted', N'en', N'Job restarted', 1)
+    ,(N'audit.eventLabel.MappingDeleted', N'en', N'Mapping deleted', 1)
+    ,(N'audit.eventLabel.MappingPaused', N'en', N'Mapping paused', 1)
+    ,(N'audit.eventLabel.MappingResumed', N'en', N'Mapping resumed', 1)
+    ,(N'audit.eventLabel.MappingSourceUnitChangeAccepted', N'en', N'Source unit change accepted', 1)
+    ,(N'audit.eventLabel.MethodologyVersionDeleted', N'en', N'Methodology version deleted', 1)
+    ,(N'audit.eventLabel.RecalculationApprovalConfirmed', N'en', N'Recalculation approval confirmed', 1)
+    ,(N'audit.eventLabel.RecalculationApprovalRequested', N'en', N'Recalculation approval requested', 1)
+    ,(N'audit.eventLabel.RecalculationApprovalUsed', N'en', N'Recalculation approval used', 1)
+    ,(N'audit.eventLabel.RegistryExported', N'en', N'Registry exported', 1)
+    ,(N'audit.eventLabel.RegistryValueChanged', N'en', N'Registry value changed', 1)
+    ,(N'audit.eventLabel.SheetSubmitWarningsAcknowledged', N'en', N'Sheet submitted with warnings acknowledged', 1)
+    ,(N'audit.eventLabel.TemplateArchived', N'en', N'Template archived', 1)
+    ,(N'audit.eventLabel.TemplateRestored', N'en', N'Template restored', 1)
+    ,(N'audit.eventLabel.UiStringsImported', N'en', N'Interface texts imported', 1)
+    ,(N'audit.eventLabel.UnitUpdated', N'en', N'Unit updated', 1)
+    ,(N'audit.eventLabel.UserEmailChanged', N'en', N'User email changed', 1)
+    ,(N'health.checking', N'en', N'Checking all services… the first check can take a few seconds.', 1)
+    -- COLL:p3-rc19 ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -18965,6 +19026,132 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:rc20lookup ── кінець секції ──
+-- COLL:p3-rc19 ── ru/kz: підписи журналу Audit і скелет Health; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'audit.operationLabel.Create', N'ru', N'Создание'),
+    (N'audit.operationLabel.Update', N'ru', N'Изменение'),
+    (N'audit.operationLabel.Delete', N'ru', N'Удаление'),
+    (N'audit.operationLabel.Import', N'ru', N'Импорт'),
+    (N'audit.operationLabel.ImportPackage', N'ru', N'Импорт пакета'),
+    (N'audit.operationLabel.Reopen', N'ru', N'Повторное открытие'),
+    (N'audit.operationLabel.Publish', N'ru', N'Публикация'),
+    (N'audit.operationLabel.Clone', N'ru', N'Копирование'),
+    (N'audit.operationLabel.Pin', N'ru', N'Закрепление'),
+    (N'audit.operationLabel.Unpin', N'ru', N'Открепление'),
+    (N'audit.operationLabel.SetValidity', N'ru', N'Изменение срока действия'),
+    (N'audit.operationLabel.Invalidated', N'ru', N'Признано недействительным'),
+    (N'audit.operationLabel.SwitchSourceSet', N'ru', N'Переключение набора справочников'),
+    (N'audit.operationLabel.SaveDefinitionDraft', N'ru', N'Сохранение черновика определения'),
+    (N'audit.operationLabel.DiscardDefinitionDraft', N'ru', N'Отмена черновика определения'),
+    (N'audit.operationLabel.SaveRules', N'ru', N'Сохранение правил'),
+    (N'audit.entityLabel.cfg.RegistryDef', N'ru', N'Определение справочника'),
+    (N'audit.entityLabel.cfg.RegistryDefinitionDraft', N'ru', N'Черновик определения справочника'),
+    (N'audit.entityLabel.cfg.CalculationBinding', N'ru', N'Привязка расчёта'),
+    (N'audit.entityLabel.cfg.TableDef', N'ru', N'Определение таблицы'),
+    (N'audit.entityLabel.dic.RegistryEntry', N'ru', N'Запись справочника'),
+    (N'audit.entityLabel.dic.RegistryExternalKey', N'ru', N'Внешний ключ справочника'),
+    (N'audit.entityLabel.calc.MethodologyPackage', N'ru', N'Пакет методик'),
+    (N'audit.entityLabel.Project', N'ru', N'Проект'),
+    (N'audit.entityLabel.Project.CurrentPeriod', N'ru', N'Текущий период проекта'),
+    (N'audit.entityLabel.Period', N'ru', N'Период'),
+    (N'audit.entityLabel.PeriodPolicy', N'ru', N'Политика периодов'),
+    (N'audit.entityLabel.ReportVersion', N'ru', N'Версия отчёта'),
+    (N'audit.eventLabel.AccessDenied', N'ru', N'Отказ в доступе'),
+    (N'audit.eventLabel.AuditStructureExported', N'ru', N'Экспорт аудита структуры'),
+    (N'audit.eventLabel.ConsistencyCheckRunRequested', N'ru', N'Запущена проверка согласованности'),
+    (N'audit.eventLabel.DataSourceConnectionTested', N'ru', N'Проверено подключение к источнику'),
+    (N'audit.eventLabel.DataSourceDeleted', N'ru', N'Источник данных удалён'),
+    (N'audit.eventLabel.DataSourceSaved', N'ru', N'Источник данных сохранён'),
+    (N'audit.eventLabel.DocumentDeleted', N'ru', N'Документ удалён'),
+    (N'audit.eventLabel.DocumentExportDownloaded', N'ru', N'Экспорт документа скачан'),
+    (N'audit.eventLabel.DocumentExportRequested', N'ru', N'Запрошен экспорт документа'),
+    (N'audit.eventLabel.DocumentHeaderChanged', N'ru', N'Изменена шапка документа'),
+    (N'audit.eventLabel.DocumentKeyChanged', N'ru', N'Изменён ключ документа'),
+    (N'audit.eventLabel.DocumentVersionMigrated', N'ru', N'Документ перенесён на другую версию шаблона'),
+    (N'audit.eventLabel.JobCancelled', N'ru', N'Задача отменена'),
+    (N'audit.eventLabel.JobRestarted', N'ru', N'Задача перезапущена'),
+    (N'audit.eventLabel.MappingDeleted', N'ru', N'Сопоставление удалено'),
+    (N'audit.eventLabel.MappingPaused', N'ru', N'Сопоставление приостановлено'),
+    (N'audit.eventLabel.MappingResumed', N'ru', N'Сопоставление возобновлено'),
+    (N'audit.eventLabel.MappingSourceUnitChangeAccepted', N'ru', N'Принято изменение единицы источника'),
+    (N'audit.eventLabel.MethodologyVersionDeleted', N'ru', N'Версия методики удалена'),
+    (N'audit.eventLabel.RecalculationApprovalConfirmed', N'ru', N'Подтверждено согласование пересчёта'),
+    (N'audit.eventLabel.RecalculationApprovalRequested', N'ru', N'Запрошено согласование пересчёта'),
+    (N'audit.eventLabel.RecalculationApprovalUsed', N'ru', N'Использовано согласование пересчёта'),
+    (N'audit.eventLabel.RegistryExported', N'ru', N'Справочник экспортирован'),
+    (N'audit.eventLabel.RegistryValueChanged', N'ru', N'Изменено значение справочника'),
+    (N'audit.eventLabel.SheetSubmitWarningsAcknowledged', N'ru', N'Лист отправлен с подтверждёнными предупреждениями'),
+    (N'audit.eventLabel.TemplateArchived', N'ru', N'Шаблон архивирован'),
+    (N'audit.eventLabel.TemplateRestored', N'ru', N'Шаблон восстановлен'),
+    (N'audit.eventLabel.UiStringsImported', N'ru', N'Импортированы тексты интерфейса'),
+    (N'audit.eventLabel.UnitUpdated', N'ru', N'Единица измерения изменена'),
+    (N'audit.eventLabel.UserEmailChanged', N'ru', N'Изменена почта пользователя'),
+    (N'audit.operationLabel.Create', N'kz', N'Құру'),
+    (N'audit.operationLabel.Update', N'kz', N'Өзгерту'),
+    (N'audit.operationLabel.Delete', N'kz', N'Жою'),
+    (N'audit.operationLabel.Import', N'kz', N'Импорттау'),
+    (N'audit.operationLabel.ImportPackage', N'kz', N'Топтаманы импорттау'),
+    (N'audit.operationLabel.Reopen', N'kz', N'Қайта ашу'),
+    (N'audit.operationLabel.Publish', N'kz', N'Жариялау'),
+    (N'audit.operationLabel.Clone', N'kz', N'Көшіру'),
+    (N'audit.operationLabel.Pin', N'kz', N'Бекіту'),
+    (N'audit.operationLabel.Unpin', N'kz', N'Бекітуді алу'),
+    (N'audit.operationLabel.SetValidity', N'kz', N'Жарамдылық мерзімін өзгерту'),
+    (N'audit.operationLabel.Invalidated', N'kz', N'Жарамсыз деп танылды'),
+    (N'audit.operationLabel.SwitchSourceSet', N'kz', N'Анықтамалықтар жиынын ауыстыру'),
+    (N'audit.operationLabel.SaveDefinitionDraft', N'kz', N'Анықтама жобасын сақтау'),
+    (N'audit.operationLabel.DiscardDefinitionDraft', N'kz', N'Анықтама жобасын болдырмау'),
+    (N'audit.operationLabel.SaveRules', N'kz', N'Ережелерді сақтау'),
+    (N'audit.entityLabel.cfg.RegistryDef', N'kz', N'Анықтамалық анықтамасы'),
+    (N'audit.entityLabel.cfg.RegistryDefinitionDraft', N'kz', N'Анықтамалық анықтамасының жобасы'),
+    (N'audit.entityLabel.cfg.CalculationBinding', N'kz', N'Есептеу байламы'),
+    (N'audit.entityLabel.cfg.TableDef', N'kz', N'Кесте анықтамасы'),
+    (N'audit.entityLabel.dic.RegistryEntry', N'kz', N'Анықтамалық жазбасы'),
+    (N'audit.entityLabel.dic.RegistryExternalKey', N'kz', N'Анықтамалықтың сыртқы кілті'),
+    (N'audit.entityLabel.calc.MethodologyPackage', N'kz', N'Әдістеме топтамасы'),
+    (N'audit.entityLabel.Project', N'kz', N'Жоба'),
+    (N'audit.entityLabel.Project.CurrentPeriod', N'kz', N'Жобаның ағымдағы кезеңі'),
+    (N'audit.entityLabel.Period', N'kz', N'Кезең'),
+    (N'audit.entityLabel.PeriodPolicy', N'kz', N'Кезең саясаты'),
+    (N'audit.entityLabel.ReportVersion', N'kz', N'Есеп нұсқасы'),
+    (N'audit.eventLabel.AccessDenied', N'kz', N'Қол жеткізуден бас тарту'),
+    (N'audit.eventLabel.AuditStructureExported', N'kz', N'Құрылым аудитін экспорттау'),
+    (N'audit.eventLabel.ConsistencyCheckRunRequested', N'kz', N'Келісімділік тексеруі сұралды'),
+    (N'audit.eventLabel.DataSourceConnectionTested', N'kz', N'Көзге қосылым тексерілді'),
+    (N'audit.eventLabel.DataSourceDeleted', N'kz', N'Дерек көзі жойылды'),
+    (N'audit.eventLabel.DataSourceSaved', N'kz', N'Дерек көзі сақталды'),
+    (N'audit.eventLabel.DocumentDeleted', N'kz', N'Құжат жойылды'),
+    (N'audit.eventLabel.DocumentExportDownloaded', N'kz', N'Құжат экспорты жүктелді'),
+    (N'audit.eventLabel.DocumentExportRequested', N'kz', N'Құжат экспорты сұралды'),
+    (N'audit.eventLabel.DocumentHeaderChanged', N'kz', N'Құжат тақырыбы өзгертілді'),
+    (N'audit.eventLabel.DocumentKeyChanged', N'kz', N'Құжат кілті өзгертілді'),
+    (N'audit.eventLabel.DocumentVersionMigrated', N'kz', N'Құжат үлгінің басқа нұсқасына көшірілді'),
+    (N'audit.eventLabel.JobCancelled', N'kz', N'Тапсырма тоқтатылды'),
+    (N'audit.eventLabel.JobRestarted', N'kz', N'Тапсырма қайта іске қосылды'),
+    (N'audit.eventLabel.MappingDeleted', N'kz', N'Сәйкестендіру жойылды'),
+    (N'audit.eventLabel.MappingPaused', N'kz', N'Сәйкестендіру тоқтатылды'),
+    (N'audit.eventLabel.MappingResumed', N'kz', N'Сәйкестендіру жалғастырылды'),
+    (N'audit.eventLabel.MappingSourceUnitChangeAccepted', N'kz', N'Көз өлшем бірлігінің өзгеруі қабылданды'),
+    (N'audit.eventLabel.MethodologyVersionDeleted', N'kz', N'Әдістеме нұсқасы жойылды'),
+    (N'audit.eventLabel.RecalculationApprovalConfirmed', N'kz', N'Қайта есептеуді келісу расталды'),
+    (N'audit.eventLabel.RecalculationApprovalRequested', N'kz', N'Қайта есептеуді келісу сұралды'),
+    (N'audit.eventLabel.RecalculationApprovalUsed', N'kz', N'Қайта есептеуді келісу пайдаланылды'),
+    (N'audit.eventLabel.RegistryExported', N'kz', N'Анықтамалық экспортталды'),
+    (N'audit.eventLabel.RegistryValueChanged', N'kz', N'Анықтамалық мәні өзгертілді'),
+    (N'audit.eventLabel.SheetSubmitWarningsAcknowledged', N'kz', N'Парақ ескертулер расталып жіберілді'),
+    (N'audit.eventLabel.TemplateArchived', N'kz', N'Үлгі мұрағатталды'),
+    (N'audit.eventLabel.TemplateRestored', N'kz', N'Үлгі қалпына келтірілді'),
+    (N'audit.eventLabel.UiStringsImported', N'kz', N'Интерфейс мәтіндері импортталды'),
+    (N'audit.eventLabel.UnitUpdated', N'kz', N'Өлшем бірлігі өзгертілді'),
+    (N'audit.eventLabel.UserEmailChanged', N'kz', N'Пайдаланушы поштасы өзгертілді'),
+    (N'health.checking', N'ru', N'Проверяем все службы… первая проверка может занять несколько секунд.'),
+    (N'health.checking', N'kz', N'Барлық қызметтерді тексеріп жатырмыз… алғашқы тексеру бірнеше секунд алуы мүмкін.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:p3-rc19 ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

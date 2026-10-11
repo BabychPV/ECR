@@ -100,7 +100,7 @@ describe('AuditPage: вкладка структурних змін', () => {
         </MantineProvider>,
       );
 
-      await screen.findByText('SaveRules', {}, { timeout: SlowEnvTimeout });
+      await screen.findByText('Save rules', {}, { timeout: SlowEnvTimeout });
 
       // ⛔ Мутація: прибрати `!structure` з `useCellChanges(filter, !structure)`
       // — тут з'явиться другий запит, по партиціях `aud.CellChange`, заради

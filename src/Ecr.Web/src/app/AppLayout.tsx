@@ -191,9 +191,13 @@ const NavbarIconsOnlyWidth = 64;
 
 /**
  * Ширина, від якої меню — колонка поруч зі сторінкою, а не шухляда за
- * бургером (`breakpoint: 'sm'` у `AppShell` нижче, 48em у Mantine).
+ * бургером. ⚠ Макет `docs/design/hybrid/index.html`: `@media (max-width:900px)` — `.side` стає
+ * шаром поверх. Раніше було 48em (768 px): на планшеті меню 260 px з'їдало третину ширини, і
+ * таблиця документів стискалась до переносів у кожній клітинці. Значення — те саме, що
+ * `breakpoint` у `AppShell` нижче.
  */
-const NavbarDesktopQuery = '(min-width: 48em)';
+const NavbarDesktopBreakpoint = 900;
+const NavbarDesktopQuery = `(min-width: ${NavbarDesktopBreakpoint}px)`;
 
 /**
  * Кнопка виходу із симуляції — лінивим чанком (UI-12, бюджет `D-132`).
@@ -418,7 +422,7 @@ export function AppLayout(): JSX.Element {
         header={{ height: 40 }}
         navbar={{
           width: iconsOnly ? NavbarIconsOnlyWidth : NavbarWidth,
-          breakpoint: 'sm',
+          breakpoint: NavbarDesktopBreakpoint,
           // T1-15 (б): під примусовою зміною пароля меню не потрібне — усі API дають 428.
           collapsed: { mobile: !opened || me.mustChangePassword, desktop: me.mustChangePassword },
         }}
