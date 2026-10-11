@@ -38,7 +38,10 @@ export type DenyReason =
   | 'BusinessRule'
   | 'SimulationReadOnly'
   | 'OutsidePermitWindow'
-  | 'InsufficientGrantLevel';
+  | 'InsufficientGrantLevel'
+  | 'LockedByOwner'
+  | 'AssignmentFilled'
+  | 'AssignmentValidated';
 
 /** Рішення про комірку. */
 export interface CellDecision {
@@ -78,6 +81,10 @@ const Hints: Record<DenyReason, string> = {
   SimulationReadOnly: 'deny.SimulationReadOnly',
   OutsidePermitWindow: 'deny.OutsidePermitWindow',
   InsufficientGrantLevel: 'deny.InsufficientGrantLevel',
+  // EA-5b: передача місяця виконавцю (`EditDenyReason` 16–18 з EA-1; сервер їх ще не віддає, клієнт готовий).
+  LockedByOwner: 'deny.LockedByOwner',
+  AssignmentFilled: 'deny.AssignmentFilled',
+  AssignmentValidated: 'deny.AssignmentValidated',
 };
 
 /** Ключ комірки у словнику прав, який віддає сервер. */

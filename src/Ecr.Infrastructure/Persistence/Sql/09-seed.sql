@@ -5986,6 +5986,21 @@ USING (VALUES
     (N'documents.migrateItemValues', N'en', N'Entered values', 1),
     (N'documents.migrateMoreItems', N'en', N'More differences not shown: {count}.', 1),
     -- DOC:migrate-version: кінець секції
+    -- EDA:executor-strip ── EA-5b: смуга виконавця над таблицею документа (`ExecutorStrip`); власна порція.
+    (N'deny.LockedByOwner', N'en', N'This part of the document is handed to other people to fill in. Ask the owner if you need to edit it.', 1),
+    (N'deny.AssignmentFilled', N'en', N'You marked this month as filled. The owner has to return it before you can edit it again.', 1),
+    (N'deny.AssignmentValidated', N'en', N'The owner has validated this month: it can no longer be edited.', 1),
+    (N'editAssign.slice.period', N'en', N'Period {period}', 1),
+    (N'editAssign.slice.all', N'en', N'Whole document', 1),
+    (N'editAssign.bar.assigned', N'en', N'Month assigned to you: {slice}', 1),
+    (N'editAssign.bar.returned', N'en', N'{slice} returned by the owner: {reason}', 1),
+    (N'editAssign.bar.returnedNoReason', N'en', N'{slice} returned by the owner', 1),
+    (N'editAssign.bar.filled', N'en', N'{slice}: filled, awaiting the owner''s validation', 1),
+    (N'editAssign.bar.validated', N'en', N'{slice}: validated by the owner', 1),
+    (N'editAssign.bar.markFilled', N'en', N'Mark as filled', 1),
+    (N'editAssign.bar.confirmFill', N'en', N'After this you can''t edit {slice} until the owner returns it.', 1),
+    (N'editAssign.bar.note', N'en', N'Owner''s note: {note}', 1),
+    -- EDA:executor-strip: кінець секції
     -- REGCTOR812 ── ФВ-8.12: табличний редактор даних довідника (`features/registries/rc812`).
     (N'registries.data.title', N'en', N'Registry data', 1),
     (N'registries.data.open', N'en', N'Open data', 1),
@@ -14603,6 +14618,41 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- DOC:migrate-version ── кінець секції ──
+
+-- EDA:executor-strip ── ru/kz смуги виконавця (EA-5b); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'deny.LockedByOwner', N'ru', N'Эта часть документа передана другим людям для заполнения. Если нужно её править, обратитесь к владельцу.'),
+    (N'deny.LockedByOwner', N'kz', N'Құжаттың бұл бөлігі толтыру үшін басқа адамдарға берілген. Өзгерту қажет болса, иесіне хабарласыңыз.'),
+    (N'deny.AssignmentFilled', N'ru', N'Вы отметили этот месяц как заполненный. Править его снова можно после того, как владелец вернёт его на доработку.'),
+    (N'deny.AssignmentFilled', N'kz', N'Сіз бұл айды толтырылды деп белгіледіңіз. Қайта өзгерту үшін иесі оны пысықтауға қайтаруы керек.'),
+    (N'deny.AssignmentValidated', N'ru', N'Владелец валидировал этот месяц: править его больше нельзя.'),
+    (N'deny.AssignmentValidated', N'kz', N'Иесі бұл айды валидациялады: оны енді өзгертуге болмайды.'),
+    (N'editAssign.slice.period', N'ru', N'Период {period}'),
+    (N'editAssign.slice.period', N'kz', N'Кезең {period}'),
+    (N'editAssign.slice.all', N'ru', N'Весь документ'),
+    (N'editAssign.slice.all', N'kz', N'Бүкіл құжат'),
+    (N'editAssign.bar.assigned', N'ru', N'Месяц передан вам: {slice}'),
+    (N'editAssign.bar.assigned', N'kz', N'Ай сізге берілді: {slice}'),
+    (N'editAssign.bar.returned', N'ru', N'{slice} возвращён владельцем: {reason}'),
+    (N'editAssign.bar.returned', N'kz', N'{slice} иесі қайтарды: {reason}'),
+    (N'editAssign.bar.returnedNoReason', N'ru', N'{slice} возвращён владельцем'),
+    (N'editAssign.bar.returnedNoReason', N'kz', N'{slice} иесі қайтарды'),
+    (N'editAssign.bar.filled', N'ru', N'{slice}: заполнено, ожидает валидации владельцем'),
+    (N'editAssign.bar.filled', N'kz', N'{slice}: толтырылды, иесінің валидациясын күтуде'),
+    (N'editAssign.bar.validated', N'ru', N'{slice}: валидировано владельцем'),
+    (N'editAssign.bar.validated', N'kz', N'{slice}: иесі валидациялады'),
+    (N'editAssign.bar.markFilled', N'ru', N'Отметить заполненным'),
+    (N'editAssign.bar.markFilled', N'kz', N'Толтырылды деп белгілеу'),
+    (N'editAssign.bar.confirmFill', N'ru', N'После этого вы не сможете править {slice}, пока владелец не вернёт его на доработку.'),
+    (N'editAssign.bar.confirmFill', N'kz', N'Осыдан кейін иесі қайтармайынша {slice} өзгерту мүмкін болмайды.'),
+    (N'editAssign.bar.note', N'ru', N'Примечание владельца: {note}'),
+    (N'editAssign.bar.note', N'kz', N'Иесінің ескертпесі: {note}')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- EDA:executor-strip ── кінець секції ──
 
 -- MIMP ── ru/kz імпорту пакета методологій; власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)
