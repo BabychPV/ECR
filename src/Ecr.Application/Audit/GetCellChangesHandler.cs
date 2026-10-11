@@ -10,6 +10,12 @@ namespace Ecr.Application.Audit;
 /// Історія змін комірок. Право <c>Security.ViewAudit</c> — або
 /// <c>Document.View</c>, коли запит адресує РІВНО ОДНУ комірку (D15-16).
 /// </summary>
+/// <remarks>
+/// ⛔ НФ-8.9.6 / D-247: порт віддає і гарячий журнал, і архів аудиту (рядок з архіву —
+/// <see cref="CellChangeView.FromArchive"/>). Обробник про архів НЕ знає навмисно: право, вікно, грант на
+/// документ і межі читання (S6, R-11, D-214) йдуть у <see cref="CellChangeFilter"/> і діють на обидві таблиці
+/// однаково — окремого «архівного» шляху з власною, слабшою перевіркою тут немає й бути не повинно.
+/// </remarks>
 public sealed class GetCellChangesHandler(
     IAuditReader audit, IAccessDecisionService access, ICurrentUser currentUser, TimeProvider? clock = null)
 {
