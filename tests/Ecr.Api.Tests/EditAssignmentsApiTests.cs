@@ -362,7 +362,8 @@ public sealed class EditAssignmentsApiTests(SqlServerFixture sql)
                 : null;
         }
 
-        // Manage проєкту — так; Write не автор і Read — ні (клієнт не показує пункт, а не ловить 403).
+        // Автор (лише Write) і Manage проєкту — так; Write не автор і Read — ні (клієнт не показує пункт, а не ловить 403).
+        Assert.True(await CanManageAsync(s.Author.UserName).ConfigureAwait(true));
         Assert.True(await CanManageAsync(s.Manager.UserName).ConfigureAwait(true));
         Assert.False(await CanManageAsync(s.Writer.UserName).ConfigureAwait(true));
         Assert.False(await CanManageAsync(s.Executor.UserName).ConfigureAwait(true));
@@ -370,8 +371,26 @@ public sealed class EditAssignmentsApiTests(SqlServerFixture sql)
         // Автор документа (ownerUserId) віддається читачеві картки.
         using var owner = await SignedInAsync(app, s.Manager.UserName).ConfigureAwait(true);
         var body = await JsonAsync(await owner.GetAsync(card).ConfigureAwait(true), HttpStatusCode.OK, app).ConfigureAwait(true);
-        Assert.Equal(1, body.GetProperty("ownerUserId").GetInt32());
+        Assert.Equal(s.Author.Id, body.GetProperty("ownerUserId").GetInt32());
     }
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Автор_документа_з_одним_Write_передає_і_знімає_передачу()
+    {
+        var s = await ArrangeAsync().ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+        using var author = await SignedInAsync(app, s.Author.UserName).ConfigureAwait(true);
+
+        var created = await JsonAsync(
+            await author.PostAsJsonAsync(ListUri(s), CreateBody(s, s.Executor.Id)).ConfigureAwait(true),
+            HttpStatusCode.OK, app).ConfigureAwait(true);
+        Assert.Equal("Assigned", created.GetProperty("status").GetString());
+
+        var id = created.GetProperty("id").GetInt64();
+        var del = await author.DeleteAsync(new Uri($"{ListUri(s)}/{id.ToString(CultureInfo.InvariantCulture)}", UriKind.Relative)).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.NoContent, del.StatusCode);
+    }
+
     private static Uri ListUri(Scenario s)
         => new($"/api/v1/documents/{s.DocumentId.ToString(CultureInfo.InvariantCulture)}/edit-assignments", UriKind.Relative);
 
@@ -463,11 +482,18 @@ public sealed class EditAssignmentsApiTests(SqlServerFixture sql)
         var other = await NewUserAsync("eao", GrantLevel.Read, withView: true).ConfigureAwait(false);
         var stranger = await NewUserAsync("eas", null, withView: false).ConfigureAwait(false);
 
-        return new Scenario(document.DocumentId, document.SheetCode, manager, writer, executor, other, stranger);
+        // Автор документа — відомий користувач із відомим паролем (Write, не Manage): фікстура будує документ
+        // від імені bootstrap-користувача, тож авторство переписується прямо в базі.
+        var author = await NewUserAsync("eaa", GrantLevel.Write, withView: true).ConfigureAwait(false);
+        await db.Database.ExecuteSqlInterpolatedAsync(
+            $"UPDATE doc.Document SET CreatedByUserId = {author.Id} WHERE Id = {document.DocumentId}").ConfigureAwait(false);
+
+        return new Scenario(document.DocumentId, document.SheetCode, manager, writer, executor, other, stranger, author);
     }
 
     private sealed record Person(int Id, string UserName);
 
     private sealed record Scenario(
-        long DocumentId, string SheetCode, Person Manager, Person Writer, Person Executor, Person OtherExecutor, Person Stranger);
+        long DocumentId, string SheetCode, Person Manager, Person Writer, Person Executor, Person OtherExecutor,
+        Person Stranger, Person Author);
 }
