@@ -33,6 +33,10 @@ public sealed partial class ExceptionHandlingMiddleware(
     [LoggerMessage(Level = LogLevel.Error, Message = "Необроблений виняток. CorrelationId={CorrelationId}")]
     private partial void LogUnhandled(Exception exception, string correlationId);
 
+    [LoggerMessage(Level = LogLevel.Warning,
+        Message = "База даних тимчасово зайнята або недоступна (503, Retry-After); {Code}. CorrelationId={CorrelationId}")]
+    private partial void LogDatabaseBusy(Exception exception, string code, string correlationId);
+
     [LoggerMessage(Level = LogLevel.Information,
         Message = "Запит відхилено: {Code} ({Status}). CorrelationId={CorrelationId}")]
     private partial void LogRejected(string code, int status, string correlationId);
@@ -101,7 +105,14 @@ public sealed partial class ExceptionHandlingMiddleware(
             context.RequestServices.GetService<Observability.EcrMetrics>()?.RecordConflict();
         }
 
-        if (status >=StatusCodes.Status500InternalServerError)
+        if (status == StatusCodes.Status503ServiceUnavailable && IsTransientDatabaseFailure(exception))
+        {
+            // ⛔ RC19 P3-2: тимчасова зайнятість БД (тайм-аут команди -2, 1205 після повторів, обрив з'єднання) —
+            // це «спробуйте за мить», яку клієнт уже отримав 503 + Retry-After, а не необроблений виняток: рівень
+            // Error слугував хибним сигналом дефекту коду. Стек лишається (Warning) — за ним шукають причину.
+            LogDatabaseBusy(exception, code, correlationId);
+        }
+        else if (status >= StatusCodes.Status500InternalServerError)
         {
             // Стек іде В ЛОГ, і тільки туди. Клієнт отримує CorrelationId —
             // цього досить, щоб знайти цей самий запис.
