@@ -99,6 +99,37 @@ public sealed class FormulaDef : Entity<int>
     }
 
     /// <summary>
+    /// Прив'язує формулу до однієї комірки (рядок × колонка) — точка входу для
+    /// <see cref="FormulaScope.Cell"/>.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ D1 (міжтаблична консолідація, напр. 7.0 ← 7): рантайм і
+    /// <c>CK_Formula_Scope</c> Cell-область вже мали (<c>Scope = 2</c> вимагає
+    /// обох ключів); бракувало лише цієї операції в домені, тож комірочну
+    /// формулу не можна було завести інакше, ніж рефлексією чи конструктором
+    /// у тесті.
+    /// </remarks>
+    /// <exception cref="DomainException">Область формули не <c>Cell</c>.</exception>
+    public void AssignCell(int rowDefId, int columnDefId)
+    {
+        if (Scope != FormulaScope.Cell)
+        {
+            throw new DomainException(
+                "ECR-TMPL-0422",
+                $"Формулу з областю {Scope} не можна прив'язати до комірки: очікується Cell.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-TMPL-0422.formulaAssignScopeMismatch",
+                    ["scope"] = Scope.ToString(),
+                    ["expectedScope"] = nameof(FormulaScope.Cell),
+                });
+        }
+
+        RowDefId = rowDefId;
+        ColumnDefId = columnDefId;
+    }
+
+    /// <summary>
     /// Змінює текст виразу.
     /// </summary>
     /// <remarks>
