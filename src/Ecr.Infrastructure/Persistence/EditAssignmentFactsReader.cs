@@ -50,6 +50,7 @@ internal static class EditAssignmentFactsReader
                 where documentIds.Contains(a.DocumentId)
                 join d in db.Documents.AsNoTracking() on a.DocumentId equals d.Id
                 join u in db.Users.AsNoTracking() on a.DelegatedByUserId equals u.Id
+                orderby a.DocumentId, a.Id
                 select new FactRow(
                     a.DocumentId,
                     a.SheetCode,
@@ -112,6 +113,7 @@ internal static class EditAssignmentFactsReader
         var assignments = await db.EditAssignments
             .FromSql($"SELECT * FROM doc.EditAssignment WITH (REPEATABLEREAD, ROWLOCK) WHERE DocumentId = {documentId}")
             .AsNoTracking()
+            .OrderBy(a => a.Id)
             .Take(EditAssignment.MaxPerDocument)
             .ToListAsync(ct)
             .ConfigureAwait(false);
@@ -135,6 +137,7 @@ internal static class EditAssignmentFactsReader
                   AND r.AssignmentId IN (SELECT CAST(j.[value] AS bigint) FROM OPENJSON({idsJson}) AS j)
                 """)
             .AsNoTracking()
+            .OrderBy(r => r.AssignmentId)
             .Take(EditAssignment.MaxPerDocument)
             .ToListAsync(ct)
             .ConfigureAwait(false);

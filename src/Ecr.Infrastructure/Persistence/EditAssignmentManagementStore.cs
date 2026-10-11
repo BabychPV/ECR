@@ -28,6 +28,7 @@ public sealed class EditAssignmentManagementStore(EcrDbContext db) : IEditAssign
     public async Task<bool> LockDocumentAsync(long documentId, CancellationToken ct)
         => (await db.Documents
             .FromSql($"SELECT * FROM doc.Document WITH (UPDLOCK, ROWLOCK) WHERE Id = {documentId}")
+            .OrderBy(d => d.Id)
             .Select(d => d.Id)
             .Take(1)
             .ToListAsync(ct).ConfigureAwait(false)).Count > 0;
@@ -52,6 +53,7 @@ public sealed class EditAssignmentManagementStore(EcrDbContext db) : IEditAssign
         _ = await db.EditAssignments
             .FromSql($"SELECT * FROM doc.EditAssignment WITH (XLOCK, ROWLOCK) WHERE Id = {assignmentId}")
             .AsNoTracking()
+            .OrderBy(a => a.Id)
             .Select(a => a.Id)
             .Take(1)
             .ToListAsync(ct).ConfigureAwait(false);
@@ -59,6 +61,7 @@ public sealed class EditAssignmentManagementStore(EcrDbContext db) : IEditAssign
         _ = await db.EditAssignmentRecipients
             .FromSql($"SELECT * FROM doc.EditAssignmentRecipient WITH (UPDLOCK, ROWLOCK) WHERE AssignmentId = {assignmentId}")
             .AsNoTracking()
+            .OrderBy(r => r.UserId)
             .Select(r => r.UserId)
             .Take(EditAssignment.MaxRecipients)
             .ToListAsync(ct).ConfigureAwait(false);

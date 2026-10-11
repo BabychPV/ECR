@@ -261,6 +261,7 @@ public sealed class DocumentDeletionStore(EcrDbContext db) : IDocumentDeletionSt
         // буде видалена нижче, або чекає й побачить, що документа немає (404).
         _ = await db.Documents
             .FromSql($"SELECT * FROM doc.Document WITH (UPDLOCK, ROWLOCK) WHERE Id = {documentId}")
+            .OrderBy(d => d.Id)
             .Select(d => d.Id)
             .Take(1)
             .ToListAsync(ct).ConfigureAwait(false);

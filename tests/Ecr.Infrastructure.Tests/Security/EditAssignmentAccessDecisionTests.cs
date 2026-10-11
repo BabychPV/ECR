@@ -112,7 +112,9 @@ public sealed class EditAssignmentAccessDecisionTests(SqlServerFixture sql) : ID
             delegatedByUserId: delegator.Id,
             handoffId: Guid.NewGuid(),
             createdByUserId: delegator.Id,
-            utcNow: Now,
+            // Строк, що вже минув, будується від «давнішого створення» (домен не приймає строк у минулому):
+            // валідацію не послаблюємо, рішення оцінюється за годинником Now.
+            utcNow: expiresAt is { } expiry && expiry <= Now ? expiry.AddDays(-10) : Now,
             expiresAt: expiresAt);
         assignment.AddRecipient(executor.Id, delegator.Id, Now);
         shape?.Invoke(assignment);

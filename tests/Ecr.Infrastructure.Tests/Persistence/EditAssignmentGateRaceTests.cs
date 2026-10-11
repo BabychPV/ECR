@@ -478,7 +478,8 @@ public sealed class EditAssignmentGateRaceTests(SqlServerFixture sql) : IDisposa
     private async Task<Scene> ArrangeAsync(bool exclusive = true)
     {
         var builder = new TestDocumentBuilder(sql.ConnectionString);
-        var doc = await builder.BuildAsync(rowMode: TableRowMode.Dynamic, ct: CancellationToken.None);
+        // Mixed, а не Dynamic: шаблон із рядками в Dynamic-таблиці TableDef.AddRow відхиляє (знімок метаданих не збирається).
+        var doc = await builder.BuildAsync(rowMode: TableRowMode.Mixed, ct: CancellationToken.None);
 
         int executor;
         int delegator;
