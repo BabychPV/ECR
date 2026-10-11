@@ -129,6 +129,7 @@ import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { showWarning } from '@/shared/ui/notify';
 import { refusalText } from './saveErrors';
 import { useAddRow } from './useAddRow';
+import { DeleteRowControl } from './DeleteRowControl';
 import { useRowHeight } from '@/shared/theme/preferences';
 import { t } from '@/shared/i18n';
 // ⚠ Порядок стилів збережений: `cell-states.css` (раніше — у `App.tsx`) іде
@@ -2429,6 +2430,18 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
           >
             {t('grid.addRow')}
           </Button>
+        )}
+
+        {/* ✎ D3-A: видалення рядка, доданого користувачем (діє на рядок фокусної комірки); підтвердження в
+            самому компоненті. Той самий предикат видимості, що й «Додати рядок». */}
+        {allowsDynamicRows && !readOnly && data !== undefined && (
+          <DeleteRowControl
+            documentId={documentId}
+            tableInstanceId={tableInstanceId}
+            periodKey={periodKey}
+            slice={data}
+            onDeleted={() => void slice.refetch()}
+          />
         )}
       </Group>
 
