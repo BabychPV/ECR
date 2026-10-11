@@ -32,6 +32,7 @@ public sealed class NoMatchingRuleDiagnosticTests
     private const int TemplateVersion = 3;
     private const int Period = 202601;
     private const int FuelColumn = 11;
+    private const int StatusColumn = 12;
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
@@ -44,7 +45,7 @@ public sealed class NoMatchingRuleDiagnosticTests
 
         // Рядок 1 (Gas) закрило правило; рядки 2 (Diesel) і 3 (Coal) — ні.
         Assert.Equal(
-            [new UnmatchedRow(TableInstance, 2, "R001"), new UnmatchedRow(TableInstance, 3, "R002")],
+            [new UnmatchedRow(TableInstance, 2, "R001", DocumentId), new UnmatchedRow(TableInstance, 3, "R002", DocumentId)],
             profile.UnmatchedRows);
         Assert.Equal(1, profile.Stats.Single().Rows);
     }
@@ -76,7 +77,56 @@ public sealed class NoMatchingRuleDiagnosticTests
         var profile = await Run(provider, [42, 43]);
 
         // Coal (рядок 3) не закрила жодна з двох.
-        Assert.Equal([new UnmatchedRow(TableInstance, 3, "R002")], profile.UnmatchedRows);
+        Assert.Equal([new UnmatchedRow(TableInstance, 3, "R002", DocumentId)], profile.UnmatchedRows);
+    }
+
+    /// <summary>
+    /// D14: рядок зі статусом Removed при правилі «Running» — не рахується, і діагностика ПОТРАПЛЯЄ У ПРОФІЛЬ
+    /// прогону (<c>ModulesProfileJson</c>), а не лише в повідомлення задачі: читач ключа бачить саме цей рядок.
+    /// </summary>
+    /// <remarks>
+    /// Мутація: прибрати <c>unmatched</c> з <c>ModuleProfile.ToJson</c> (або <c>DocumentId</c> з рядка) —
+    /// червоніє перша перевірка читання профілю.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-13.9")]
+    public async Task Рядок_Removed_при_правилі_Running_лишає_ключ_у_збереженому_профілі()
+    {
+        var provider = Arrange(
+            [(Methodology: 42, Version: 71, Rule: $$"""{"{{FuelColumn}}":"Gas","{{StatusColumn}}":"Running"}""")],
+            [
+                Cell(1000, FuelColumn, "Gas"), Cell(1000, StatusColumn, "Running"),
+                Cell(1001, FuelColumn, "Gas"), Cell(1001, StatusColumn, "Removed"),
+                Cell(1002, FuelColumn, "Gas"), Cell(1002, StatusColumn, "Running"),
+            ]);
+
+        var profile = await Run(provider, [42]);
+
+        Assert.Equal(2, profile.Stats.Single().Rows);
+        var stored = ModuleProfile.ReadUnmatched(profile.ToJson(), DocumentId);
+        Assert.NotNull(stored);
+        Assert.Equal(1, stored.Count);
+        Assert.Equal([new UnmatchedRow(TableInstance, 2, "R001", DocumentId)], stored.Rows);
+        Assert.Null(ModuleProfile.ReadUnmatched(profile.ToJson(), DocumentId + 1));
+    }
+
+    /// <summary>
+    /// D14: версія без правил рядків не читає (<c>AllRowKeys = null</c>) — діагностики немає, у профілі ключа
+    /// <c>unmatched</c> теж. Про відсутність правил кажуть <c>methodologies.noRules</c> і попередження публікації.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-13.9")]
+    public async Task Версія_без_правил_не_дає_діагностики_і_ключа_unmatched()
+    {
+        var provider = Arrange([(Methodology: 42, Version: 71, Rule: null)]);
+
+        var profile = await Run(provider, [42]);
+
+        Assert.Empty(profile.UnmatchedRows);
+        Assert.DoesNotContain("unmatched", profile.ToJson(), StringComparison.Ordinal);
+        Assert.Null(ModuleProfile.ReadUnmatched(profile.ToJson(), DocumentId));
     }
 
     private static async Task<ModuleProfile> Run(ServiceProvider provider, int[] methodologies)
@@ -97,7 +147,8 @@ public sealed class NoMatchingRuleDiagnosticTests
 
     /// <summary>Три рядки: Gas, Diesel, Coal у колонці палива. Кожна методологія — своє правило.</summary>
     private static ServiceProvider Arrange(
-        IReadOnlyList<(int Methodology, int Version, string Rule)> methodologies)
+        IReadOnlyList<(int Methodology, int Version, string? Rule)> methodologies,
+        IReadOnlyList<CellRecord>? slice = null)
     {
         var store = Substitute.For<IMethodologyStore>();
         var periods = Substitute.For<IPeriodStore>();
@@ -110,7 +161,9 @@ public sealed class NoMatchingRuleDiagnosticTests
             store.GetPublishedVersionsAsync(methodology, Arg.Any<CancellationToken>())
                  .Returns([PublishedVersion(methodology, version)]);
             store.GetRulesAsync(version, Arg.Any<CancellationToken>())
-                 .Returns([new MethodologyRule(version, EcrCode.Create("RULE"), rule, priority: 10)]);
+                 .Returns(rule is null
+                     ? []
+                     : [new MethodologyRule(version, EcrCode.Create("RULE"), rule, priority: 10)]);
             store.GetFormulasAsync(version, Arg.Any<CancellationToken>()).Returns([formula]);
             store.GetSubstancesAsync(version, Arg.Any<CancellationToken>()).Returns([]);
             store.GetOutputsAsync(version, Arg.Any<CancellationToken>())
@@ -128,11 +181,12 @@ public sealed class NoMatchingRuleDiagnosticTests
 
         var cells = Substitute.For<ICellStore>();
         cells.ReadSliceAsync(TableInstance, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>()).Returns(
-        [
-            Cell(1000, "Gas"),
-            Cell(1001, "Diesel"),
-            Cell(1002, "Coal"),
-        ]);
+            slice ??
+            [
+                Cell(1000, "Gas"),
+                Cell(1001, "Diesel"),
+                Cell(1002, "Coal"),
+            ]);
 
         var metadata = Substitute.For<IMetadataCache>();
         metadata.GetAsync(TemplateVersion, Arg.Any<CancellationToken>()).Returns(
@@ -168,9 +222,11 @@ public sealed class NoMatchingRuleDiagnosticTests
         return services.BuildServiceProvider();
     }
 
-    private static CellRecord Cell(long rowId, string value)
+    private static CellRecord Cell(long rowId, string value) => Cell(rowId, FuelColumn, value);
+
+    private static CellRecord Cell(long rowId, int column, string value)
         => new(
-            new CellAddress(new PeriodKey(Period), rowId, FuelColumn),
+            new CellAddress(new PeriodKey(Period), rowId, column),
             TableDefId: 3,
             new CellValueData { ValueString = value });
 
