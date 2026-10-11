@@ -152,6 +152,7 @@ public sealed class EcrApiFactory(
         }
 
         builder.UseEnvironment("Development");
+        builder.UseSetting("Health:WarmupOnStart", "false");
         builder.ConfigureLogging(logging =>
         {
             // ⛔ Типові постачальники прибираються ЦІЛКОМ, і головний тут —

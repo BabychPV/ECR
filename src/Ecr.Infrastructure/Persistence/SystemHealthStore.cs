@@ -54,6 +54,9 @@ public sealed partial class SystemHealthStore(
          WHERE x.rn = 1 AND x.Status = 'Failed' AND s.IsActive = 1
         """;
 
+    /// <summary>Скільки чекаємо на один зонд до системного уявлення СУБД.</summary>
+    private static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(4);
+
     private readonly HealthProbeSql _probes = probes ?? HealthProbeSql.Default;
 
     // Без переданого кешу (прямі виклики в тестах) — власний, на екземпляр: між викликами
@@ -61,7 +64,13 @@ public sealed partial class SystemHealthStore(
     private readonly HealthCountCache _failedCache = failedCache ?? new HealthCountCache();
 
     /// <inheritdoc />
-    public async Task<SystemHealthSnapshot> ReadAsync(DateTime utcNow, CancellationToken ct)
+    public Task<SystemHealthSnapshot> ReadAsync(DateTime utcNow, CancellationToken ct)
+        // ⚠ Знімок спільний для всіх, хто має System.ViewHealth: холодний прохід по
+        // CollectionRun/Coverage + msdb займав 12–16 с, тож його рахує один виклик на 30 с,
+        // а при збої віддається попередній знімок (HealthCountCache.GetOrComputeSnapshotAsync).
+        => _failedCache.GetOrComputeSnapshotAsync(utcNow, token => ReadCoreAsync(utcNow, token), ct);
+
+    private async Task<SystemHealthSnapshot> ReadCoreAsync(DateTime utcNow, CancellationToken ct)
     {
         var day = utcNow.AddHours(-24);
         var week = utcNow - GapWindow;
@@ -131,12 +140,17 @@ public sealed partial class SystemHealthStore(
     /// <summary>Скалярний запит до системного уявлення; відмова або відсутність права — <c>null</c>.</summary>
     private async Task<T?> ProbeAsync<T>(string sql, CancellationToken ct)
     {
+        // ⚠ Таймаут зонда: системні уявлення (msdb, dm_os_volume_stats) бувають повільними;
+        // один такий зонд не має тримати всю відповідь — «не відомо» (null), як і за браку права.
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeout.CancelAfter(ProbeTimeout);
+
         try
         {
             // ⚠ `SELECT … AS Value` — вимога `SqlQueryRaw` для скалярів.
-            return await db.Database.SqlQueryRaw<T>(sql).FirstOrDefaultAsync(ct).ConfigureAwait(false);
+            return await db.Database.SqlQueryRaw<T>(sql).FirstOrDefaultAsync(timeout.Token).ConfigureAwait(false);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
             // ⛔ Лише ТИП винятку: текст помилки SQL Server містить ім'я сервера, бази
             // чи об'єкта, і це не те, що має опинитися навіть в журналі «для зручності».
