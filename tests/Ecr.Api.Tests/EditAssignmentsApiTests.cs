@@ -401,7 +401,8 @@ public sealed class EditAssignmentsApiTests(SqlServerFixture sql)
         var body = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
         var json = JsonDocument.Parse(body).RootElement;
         string Prop(string name) => json.TryGetProperty(name, out var v) ? v.ToString() : string.Empty;
-        return $"{(int)response.StatusCode}|{Prop("errorCode")}|{Prop("messageKey")}|{Prop("documentId")}";
+        // title/detail входять у порівняння: відмінність тексту так само розкрила б різницю випадків.
+        return $"{(int)response.StatusCode}|{Prop("errorCode")}|{Prop("messageKey")}|{Prop("documentId")}|{Prop("title")}|{Prop("detail")}";
     }
 
     [Fact]
@@ -668,7 +669,8 @@ public sealed class EditAssignmentsApiTests(SqlServerFixture sql)
         // Зміна (isExclusive) іде в тлі: вона тримає U на передачі й чекає X, але НЕ тримає документ.
         var change = owner.PostAsJsonAsync(
             ListUri(s), CreateBody(s, s.Executor.Id, isExclusive: false, baseVersion: version));
-        await Task.Delay(1500).ConfigureAwait(true);
+        // Чекаємо не годинник, а факт очікування: зміна стала в чергу на X передачі (LCK_M_X у dm_tran_locks).
+        await WaitForLockWaitAsync().ConfigureAwait(true);
 
         // «Дотик» документа записом не чекає: якби зміна тримала U на doc.Document — тут 1222/1205.
         await using (var touch = writer.CreateCommand())
@@ -688,13 +690,13 @@ public sealed class EditAssignmentsApiTests(SqlServerFixture sql)
 
     [Fact]
     [Trait(TestCategories.Category, TestCategories.Integration)]
-    public async Task Створення_передачі_чекає_блокування_документа_і_віддає_409_а_не_висне()
+    public async Task Створення_передачі_спершу_чекає_документ_і_не_тримає_діапазон_передачі_порядок_P2_1()
     {
         var s = await ArrangeAsync().ConfigureAwait(true);
         using var app = new EcrApiFactory(sql);
         using var owner = await SignedInAsync(app, s.Manager.UserName).ConfigureAwait(true);
 
-        // «Видалення документа» тримає UPDLOCK на рядку документа (так само бере DocumentDeletionStore).
+        // «Видалення документа» тримає UPDLOCK на рядку документа ПЕРШИМ (так само бере DocumentDeletionStore).
         await using var holder = new SqlConnection(sql.ConnectionString);
         await holder.OpenAsync().ConfigureAwait(true);
         await using var tx = (SqlTransaction)await holder.BeginTransactionAsync().ConfigureAwait(true);
@@ -705,18 +707,129 @@ public sealed class EditAssignmentsApiTests(SqlServerFixture sql)
             await cmd.ExecuteScalarAsync().ConfigureAwait(true);
         }
 
-        // Створення бере блокування документа (LockDocumentAsync) і через обмежене очікування віддає 409.
-        var response = await owner.PostAsJsonAsync(ListUri(s), CreateBody(s, s.Executor.Id)).ConfigureAwait(true);
-        var problem = await JsonAsync(response, HttpStatusCode.Conflict, app).ConfigureAwait(true);
-        Assert.Equal("err.ECR-DOC-4091.lockTimeout", problem.GetProperty("messageKey").GetString());
+        var create = owner.PostAsJsonAsync(ListUri(s), CreateBody(s, s.Executor.Id));
+        await WaitForLockWaitAsync().ConfigureAwait(true);
+
+        // ⛔ Створення стоїть у черзі за документом і НЕ тримає блокувань на передачах: якби воно спершу взяло
+        // HOLDLOCK-діапазон передачі (UQ_EditAssignment), а потім чекало документ, видалення (документ → передача)
+        // дало б цикл і 1205. Мутація «знову FindBySliceKeyForUpdate до LockDocument» червоніє тут.
+        Assert.Equal(0, await GrantedLocksOnAssignmentsAsync().ConfigureAwait(true));
 
         await tx.RollbackAsync().ConfigureAwait(true);
-
-        // Без видалення — створення проходить.
-        var again = await owner.PostAsJsonAsync(ListUri(s), CreateBody(s, s.Executor.Id)).ConfigureAwait(true);
-        Assert.Equal(HttpStatusCode.OK, again.StatusCode);
+        var response = await create.ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
 
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Створення_передачі_віддає_нейтральне_409_а_не_текст_про_міграцію_шаблону()
+    {
+        var s = await ArrangeAsync().ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+        using var owner = await SignedInAsync(app, s.Manager.UserName).ConfigureAwait(true);
+
+        await using var holder = new SqlConnection(sql.ConnectionString);
+        await holder.OpenAsync().ConfigureAwait(true);
+        await using var tx = (SqlTransaction)await holder.BeginTransactionAsync().ConfigureAwait(true);
+        await using (var cmd = holder.CreateCommand())
+        {
+            cmd.Transaction = tx;
+            cmd.CommandText = $"SELECT Id FROM doc.Document WITH (UPDLOCK, ROWLOCK) WHERE Id = {s.DocumentId}";
+            await cmd.ExecuteScalarAsync().ConfigureAwait(true);
+        }
+
+        // Очікування обмежене (15 с): 409 ECR-DOC-4091 з ключем передачі, а не спільним lockTimeout.
+        var response = await owner.PostAsJsonAsync(ListUri(s), CreateBody(s, s.Executor.Id)).ConfigureAwait(true);
+        var problem = await JsonAsync(response, HttpStatusCode.Conflict, app).ConfigureAwait(true);
+        Assert.Equal("err.ECR-DOC-4091.editAssignmentBusy", problem.GetProperty("messageKey").GetString());
+
+        await tx.RollbackAsync().ConfigureAwait(true);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Склад_набору_перевіряється_одним_правилом_без_оракула_існування()
+    {
+        var s = await ArrangeAsync().ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+        using var owner = await SignedInAsync(app, s.Manager.UserName).ConfigureAwait(true);
+        var sets = new Uri("/api/v1/me/editor-sets", UriKind.Relative);
+
+        // Без жодного Read і неіснуючий — та сама відповідь побайтно.
+        var ghostId = 987_654_321;
+        var noRead = await ShapeAsync(await owner.PostAsJsonAsync(sets, new { name = "S1", memberUserIds = new[] { s.Stranger.Id } }).ConfigureAwait(true)).ConfigureAwait(true);
+        var missing = await ShapeAsync(await owner.PostAsJsonAsync(sets, new { name = "S1", memberUserIds = new[] { ghostId } }).ConfigureAwait(true)).ConfigureAwait(true);
+        Assert.Equal(missing, noRead);
+        Assert.StartsWith("422|", noRead, StringComparison.Ordinal);
+
+        // З Read — проходить, і ім'я з'являється лише тут.
+        var ok = await JsonAsync(
+            await owner.PostAsJsonAsync(sets, new { name = "S1", memberUserIds = new[] { s.Executor.Id } }).ConfigureAwait(true),
+            HttpStatusCode.OK, app).ConfigureAwait(true);
+        Assert.Equal(s.Executor.Id, Assert.Single(ok.GetProperty("members").EnumerateArray()).GetProperty("userId").GetInt32());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Повторний_upsert_без_набору_ідемпотентний_і_мітку_набору_не_знімає()
+    {
+        var s = await ArrangeAsync().ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+        using var owner = await SignedInAsync(app, s.Manager.UserName).ConfigureAwait(true);
+
+        var set = await JsonAsync(
+            await owner.PostAsJsonAsync(
+                new Uri("/api/v1/me/editor-sets", UriKind.Relative),
+                new { name = "Keep", memberUserIds = new[] { s.Executor.Id } }).ConfigureAwait(true),
+            HttpStatusCode.OK, app).ConfigureAwait(true);
+        var applied = await JsonAsync(
+            await owner.PostAsJsonAsync(
+                new Uri($"{ListUri(s)}/apply-set", UriKind.Relative),
+                new { setId = set.GetProperty("id").GetInt32(), slices = new[] { new { sheetCode = s.SheetCode } } }).ConfigureAwait(true),
+            HttpStatusCode.OK, app).ConfigureAwait(true);
+        var first = Assert.Single(applied.GetProperty("assignments").EnumerateArray());
+
+        // Той самий склад і ознаки без набору й без baseVersion — 200 без змін, мітка набору лишається.
+        var again = await JsonAsync(
+            await owner.PostAsJsonAsync(ListUri(s), CreateBody(s, s.Executor.Id)).ConfigureAwait(true),
+            HttpStatusCode.OK, app).ConfigureAwait(true);
+        Assert.Equal(first.GetProperty("version").GetString(), again.GetProperty("version").GetString());
+        Assert.Equal("Keep", again.GetProperty("appliedSetName").GetString());
+    }
+
+    private async Task WaitForLockWaitAsync()
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(15);
+        while (DateTime.UtcNow < deadline)
+        {
+            if (await ScalarAsync(
+                    "SELECT COUNT(*) FROM sys.dm_tran_locks WHERE resource_database_id = DB_ID() AND request_status = 'WAIT'")
+                .ConfigureAwait(false) > 0)
+            {
+                return;
+            }
+
+            await Task.Delay(50).ConfigureAwait(false);
+        }
+
+        Assert.Fail("Запит не став у чергу на блокування за 15 с.");
+    }
+
+    private Task<int> GrantedLocksOnAssignmentsAsync()
+        => ScalarAsync(
+            "SELECT COUNT(*) FROM sys.dm_tran_locks AS l JOIN sys.partitions AS p ON p.hobt_id = l.resource_associated_entity_id "
+            + "WHERE l.resource_database_id = DB_ID() AND l.request_status = 'GRANT' AND l.request_session_id <> @@SPID "
+            + "AND l.request_mode IN (N'U', N'X', N'RangeS-U', N'RangeX-X', N'RangeS-S', N'RangeI-N') "
+            + "AND p.object_id = OBJECT_ID(N'doc.EditAssignment')");
+
+    private async Task<int> ScalarAsync(string commandText)
+    {
+        await using var connection = new SqlConnection(sql.ConnectionString);
+        await connection.OpenAsync().ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        command.CommandText = commandText;
+        return Convert.ToInt32(await command.ExecuteScalarAsync().ConfigureAwait(false), CultureInfo.InvariantCulture);
+    }
     private static Uri ListUri(Scenario s)
         => new($"/api/v1/documents/{s.DocumentId.ToString(CultureInfo.InvariantCulture)}/edit-assignments", UriKind.Relative);
 
