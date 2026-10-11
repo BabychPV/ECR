@@ -29,6 +29,9 @@ public sealed class EditAssignment : Entity<long>
     /// <summary>Стеля передач на документ.</summary>
     public const int MaxPerDocument = 200;
 
+    /// <summary>Стеля строку дії передачі, діб від моменту створення.</summary>
+    public const int MaxLifetimeDays = 366;
+
     /// <summary>Стеля виконавців у одній передачі.</summary>
     public const int MaxRecipients = 100;
 
@@ -66,6 +69,18 @@ public sealed class EditAssignment : Entity<long>
         if (handoffId == Guid.Empty)
         {
             throw new ArgumentException("Ідентифікатор групи передачі не може бути порожнім.", nameof(handoffId));
+        }
+
+        // Час — завжди UTC: Local переводимо, Unspecified вважаємо UTC.
+        expiresAt = expiresAt is { } raw
+            ? (raw.Kind == DateTimeKind.Local ? raw.ToUniversalTime() : DateTime.SpecifyKind(raw, DateTimeKind.Utc))
+            : null;
+
+        // Термін дії: не в минулому й не далі за стелю (аудит P3).
+        if (expiresAt is { } expiry && (expiry <= utcNow || expiry > utcNow.AddDays(MaxLifetimeDays)))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(expiresAt), expiresAt, $"Термін дії передачі має бути в майбутньому й не пізніше ніж через {MaxLifetimeDays} діб.");
         }
 
         DocumentId = documentId;
@@ -200,7 +215,9 @@ public sealed class EditAssignment : Entity<long>
         }
 
         _recipients.Remove(recipient);
-        Touch(byUserId, utcNow);
+
+        // Склад змінився — раніше дана валідація більше не справджується (аудит P3).
+        ResetValidation(byUserId, utcNow);
         return true;
     }
 

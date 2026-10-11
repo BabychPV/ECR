@@ -43,7 +43,7 @@ public sealed record EditAssignmentSlice
     /// <summary>Канонічний ключ зрізу, напр. <c>S=F1|T=*|M=1|P=*</c>.</summary>
     public string Key => string.Create(
         CultureInfo.InvariantCulture,
-        $"S={SheetCode ?? "*"}|T={TableCode ?? "*"}|M={(MonthNumber is { } m ? m.ToString(CultureInfo.InvariantCulture) : "*")}"
+        $"S={SheetCode?.ToUpperInvariant() ?? "*"}|T={TableCode?.ToUpperInvariant() ?? "*"}|M={(MonthNumber is { } m ? m.ToString(CultureInfo.InvariantCulture) : "*")}"
         + $"|P={(PeriodKey is { } p ? p.ToString(CultureInfo.InvariantCulture) : "*")}");
 
     /// <summary>Створює зріз і перевіряє інваріанти (ті самі, що CHECK-обмеження таблиці).</summary>

@@ -23,6 +23,21 @@ public sealed class EditAssignmentManagementStore(EcrDbContext db) : IEditAssign
             .FirstOrDefaultAsync(ct).ConfigureAwait(false);
 
     /// <inheritdoc />
+    public async Task<bool> LockDocumentAsync(long documentId, CancellationToken ct)
+        => (await db.Documents
+            .FromSql($"SELECT * FROM doc.Document WITH (UPDLOCK, ROWLOCK) WHERE Id = {documentId}")
+            .Select(d => d.Id)
+            .ToListAsync(ct).ConfigureAwait(false)).Count > 0;
+
+    /// <inheritdoc />
+    public async Task LockRecipientsAsync(long assignmentId, CancellationToken ct)
+        => _ = await db.EditAssignmentRecipients
+            .FromSql($"SELECT * FROM doc.EditAssignmentRecipient WITH (UPDLOCK, ROWLOCK) WHERE AssignmentId = {assignmentId}")
+            .AsNoTracking()
+            .Select(r => r.UserId)
+            .ToListAsync(ct).ConfigureAwait(false);
+
+    /// <inheritdoc />
     public Task<EditAssignment?> FindBySliceKeyForUpdateAsync(long documentId, string sliceKey, CancellationToken ct)
         => db.EditAssignments
             .FromSql($"SELECT * FROM doc.EditAssignment WITH (UPDLOCK, HOLDLOCK) WHERE DocumentId = {documentId} AND SliceKey = {sliceKey}")
