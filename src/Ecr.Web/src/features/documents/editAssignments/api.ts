@@ -8,14 +8,6 @@ import type {
   UpsertAssignmentRequest,
 } from './types';
 
-/** Спільний префікс ключів кешу: будь-яка мутація інвалідує все під ним (шторка, «Мої задачі», смуга виконавця). */
-export const editAssignmentsKey = ['edit-assignments'] as const;
-
-export const documentAssignmentsKey = (documentId: number) => [...editAssignmentsKey, 'document', documentId] as const;
-export const editorSetsKey = [...editAssignmentsKey, 'sets'] as const;
-export const candidatesKey = (documentId: number, q: string) =>
-  [...editAssignmentsKey, 'candidates', documentId, q] as const;
-
 /** Найкоротший запит до `candidates` (дизайн §6: `q` ≥ 2). */
 export const MinCandidateQuery = 2;
 

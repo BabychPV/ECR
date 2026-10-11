@@ -1,6 +1,7 @@
 import { useState, type JSX } from 'react';
 import { Button, Group, SegmentedControl, Stack, Text } from '@mantine/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { queryKeys } from '@/api/queryKeys';
 import { formatMonthName } from '@/shared/format';
 import { t } from '@/shared/i18n';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
@@ -14,9 +15,6 @@ import {
   copyEditAssignment,
   createEditorSet,
   deleteEditAssignment,
-  documentAssignmentsKey,
-  editAssignmentsKey,
-  editorSetsKey,
   getEditAssignments,
   getEditorSets,
   putEditAssignment,
@@ -60,13 +58,13 @@ export function EditAssignmentsDrawer({ documentId, sheets }: EditAssignmentsDra
   const [removing, setRemoving] = useState<EditAssignment | null>(null);
 
   const query = useQuery({
-    queryKey: documentAssignmentsKey(documentId),
+    queryKey: queryKeys.editAssignments.forDocument(documentId),
     queryFn: () => getEditAssignments(documentId),
     enabled: opened,
   });
-  const sets = useQuery({ queryKey: editorSetsKey, queryFn: getEditorSets, enabled: opened && dialog === WizardDialogId });
+  const sets = useQuery({ queryKey: queryKeys.editAssignments.editorSets(), queryFn: getEditorSets, enabled: opened && dialog === WizardDialogId });
 
-  const refresh = (): Promise<void> => queryClient.invalidateQueries({ queryKey: editAssignmentsKey });
+  const refresh = (): Promise<void> => queryClient.invalidateQueries({ queryKey: queryKeys.editAssignments.all() });
   const done = (message: string): void => {
     setAnnounce(message);
     showDone(message);
