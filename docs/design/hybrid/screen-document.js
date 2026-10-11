@@ -8,6 +8,7 @@
               result-submitted · result-approved · result-rejected · result-returned · result-imported ·
               result-exported · result-conflict-resolved · result-restored
    ?panel=  : issues · history · info      (+ глобальні: tasks · notes)
+   «Edit access» (передача місяця): див. screen-edit-assignments.js — ?panel=edit-assignments, ?dialog=assign-*, ea=…, lang=
    Додаткові параметри: sheet=0..4 · table=<n> · sheetState=Draft|Submitted|Approved|Rejected|Returned · issues=warnings|clean · as=Approver
    ===================================================================== */
 (function (E) {
@@ -148,11 +149,11 @@
   function readOnlyReason() { var st = sheet().state, p = E.data.period(S.period);
     if (st === 'Approved') return 'Locked: sheet approved 18 Sep 2026 by A. Iskakov'; if (st === 'Submitted') return 'Locked: sheet submitted for approval';
     if (p.state === 'NotOpened') return 'Locked: period not opened yet'; if (!periodOpen()) return 'Locked: period closed'; if (!E.can('Document.Edit')) return 'Read-only: your role cannot edit data'; return null; }
-  function lockText(r, c) { var ro = readOnlyReason(); if (T.cols[c][3] === 'calc') return 'Calculated by formula SUM(C3:C10)'; if (ro) return ro; if (T.cols[c][3] === 'locked') return 'Locked: value comes from registry “Permit limits”'; if (T.lockedRows[r]) return T.lockedRows[r]; return null; }
+  function lockText(r, c) { var ro = readOnlyReason(); if (T.cols[c][3] === 'calc') return 'Calculated by formula SUM(C3:C10)'; if (ro) return ro; var ea = E.ea && E.ea.lockText(S.docId, S.period); if (ea) return ea; if (T.cols[c][3] === 'locked') return 'Locked: value comes from registry “Permit limits”'; if (T.lockedRows[r]) return T.lockedRows[r]; return null; }
   function canEdit(r, c) { return !lockText(r, c); }
 
   /* ================= grid ================= */
-  function cellCls(r, c) { var cl = T.cells[r][c], k = 'c', col = T.cols[c][3], is = T.issues[r + ':' + c]; if (col === 'calc') k += ' is-calc'; else if (col === 'locked' || T.lockedRows[r]) k += ' is-locked'; if (cl.dirty) k += ' is-dirty'; if (cl.rounded) k += ' is-rounded'; if (is) k += is.sev === 'error' ? ' is-error' : ' is-warn'; return k; }
+  function cellCls(r, c) { var cl = T.cells[r][c], k = 'c', col = T.cols[c][3], is = T.issues[r + ':' + c]; if (col === 'calc') k += ' is-calc'; else if (col === 'locked' || T.lockedRows[r] || (E.ea && E.ea.lockText(S.docId, S.period))) k += ' is-locked'; if (cl.dirty) k += ' is-dirty'; if (cl.rounded) k += ' is-rounded'; if (is) k += is.sev === 'error' ? ' is-error' : ' is-warn'; return k; }
   function cellTip(r, c) { var cl = T.cells[r][c], p = [], is = T.issues[r + ':' + c], lt = lockText(r, c); if (is) p.push(is.msg); if (lt) p.push(lt); if (cl.dirty) p.push('Unsaved change'); if (cl.rounded) p.push('Shown rounded to 4 decimals'); return p.join(' · '); }
   function cellHtml(r, c) { var cl = T.cells[r][c], s = fmt(cl.v); return cl.rounded ? '<span class="v">' + s + '</span>' : s; }
   function renderGrid() {
@@ -244,6 +245,7 @@
     var box = q('#doc-actions'), st = sheet().state, ro = !!readOnlyReason(), edit = editableState() && periodOpen(), c = counts(); box.textContent = '';
     var more = [{ label: 'Validate', icon: 'checkCircle', onClick: runValidate, smOnly: true, disabled: !edit }, { label: 'Import from Excel…', icon: 'upload', disabled: ro, onClick: function () { ctx.openDialog('import-file'); } }, { label: 'Export to Excel', icon: 'download', onClick: function () { ctx.openDialog('export-progress'); } },
       { label: 'Recalculate', icon: 'refresh', kbd: 'F9', disabled: ro, onClick: doRecalc }, { label: 'Rounded values…', icon: 'ruler', onClick: function () { ctx.openDialog('rounded-list'); } }, { label: 'Cell history', icon: 'history', onClick: function () { openInspector('history'); } }];
+    if (E.ea) E.ea.moreItems().forEach(function (it) { more.push(it); });
     if (st === 'Submitted' && E.can('Document.Submit')) more.push({ sep: true }, { label: 'Recall submission', icon: 'return', onClick: function () { setSheetState('Draft'); E.Toast('Submission recalled — the sheet is a draft again', { action: { label: 'Undo', onClick: function () { setSheetState('Submitted'); } } }); } });
     more.push({ sep: true }, { label: 'Delete sheet…', icon: 'trash', danger: true, disabled: ro || !E.can('Document.Delete'), title: E.can('Document.Delete') ? null : 'Requires the permission “Delete documents and sheets”', onClick: function () { ctx.openDialog('delete-sheet'); } });
     if (edit && E.can('Document.Submit')) box.appendChild(E.Button({ label: 'Validate', icon: 'checkCircle', id: 'doc-validate', onClick: runValidate }));
@@ -316,7 +318,7 @@
   function setSheetState(st) { sheet().state = st; delete statusCache[S.docId + ':' + S.s]; renderDoc(); }
   var periodPicker = null;
   function renderDoc() {
-    var tb = TABLES[S.s][S.t]; renderState(); renderActions(); renderBanner();
+    var tb = TABLES[S.s][S.t]; renderState(); renderActions(); renderBanner(); if (E.ea) E.ea.paintBar(q('#doc-ea-bar'));
     q('#doc-table-title').textContent = tb.no + ' ' + tb.name; q('#doc-table-title').title = tb.no + ' ' + tb.name;
     renderGrid(); q('#doc-table-meta').textContent = T.rows.length + ' × 12'; q('#doc-undo').disabled = !T.undo.length; q('#doc-redo').disabled = !T.redo.length;
     renderTabs(); renderTree(); renderCounts(); renderSave(); if (S.inspOpen) renderInspector();
@@ -408,7 +410,7 @@
       '<div class="eh-ctx"><span id="doc-period-slot"></span><span class="doc-state" id="doc-state"></span><div class="save" id="doc-save" role="status" aria-live="polite"></div><div class="eh-actions" id="doc-actions"></div></div></div>' +
       '<div id="doc-result"></div><div class="split">' +
       '<aside class="side doc-nav" id="doc-nav" aria-label="Table navigator"><div class="doc-progress" id="doc-progress"></div><div class="nav-tools"><div class="with-icon">' + ic('search', 14) + '<input class="input" id="doc-nav-search" type="search" placeholder="Filter tables" aria-label="Filter tables of this sheet"></div><button class="icon-btn" type="button" id="doc-nav-errors" aria-pressed="false" title="Show only tables with errors" aria-label="Show only tables with errors">' + ic('alert') + '</button></div><div class="tree" id="doc-tree"></div></aside>' +
-      '<div class="main doc-work" id="doc-work"><div id="doc-banner"></div><div class="tablebar"><button class="icon-btn" type="button" id="doc-nav-toggle" aria-pressed="true" title="Table navigator" aria-label="Toggle table navigator">' + ic('panelL') + '</button><span class="vsep"></span><h2 id="doc-table-title"></h2><span class="meta" id="doc-table-meta"></span><span class="sp"></span>' +
+      '<div class="main doc-work" id="doc-work"><div id="doc-banner"></div><div id="doc-ea-bar"></div><div class="tablebar"><button class="icon-btn" type="button" id="doc-nav-toggle" aria-pressed="true" title="Table navigator" aria-label="Toggle table navigator">' + ic('panelL') + '</button><span class="vsep"></span><h2 id="doc-table-title"></h2><span class="meta" id="doc-table-meta"></span><span class="sp"></span>' +
       '<button class="icon-btn" type="button" id="doc-undo" title="Undo (Ctrl+Z)" aria-label="Undo" disabled>' + ic('undo') + '</button><button class="icon-btn" type="button" id="doc-redo" title="Redo (Ctrl+Y)" aria-label="Redo" disabled>' + ic('redo') + '</button><span class="vsep"></span><button class="issues-btn" type="button" id="doc-issues-btn" aria-pressed="false"></button><button class="icon-btn" type="button" id="doc-history-btn" aria-pressed="false" title="History of the selected cell" aria-label="History of the selected cell">' + ic('history') + '</button></div>' +
       '<div class="fbar" aria-label="Formula bar"><div class="fbar-addr" id="doc-fbar-addr">R1 · C1</div><div class="fbar-fx" aria-hidden="true">fx</div><div class="fbar-val" id="doc-fbar-val"></div><div class="fbar-col" id="doc-fbar-col"></div></div>' +
       '<div class="grid-wrap" id="doc-grid" tabindex="0" role="grid" aria-label="Table data. Arrow keys move, Enter edits, Ctrl+V pastes from Excel."></div><div class="statusbar"><div class="sheet-tabs" id="doc-sheet-tabs" role="tablist" aria-label="Sheets"></div><div class="selstats" id="doc-selstats"></div></div></div>' +
@@ -444,6 +446,7 @@
     c.proto({ id: 'issues', label: 'Validation (demo)', buttons: [{ label: 'Fix errors, keep warnings', onClick: function () { fixAll('warnings'); renderDoc(); } }, { label: 'Fix everything', onClick: function () { fixAll('clean'); renderDoc(); } }] });
     c.hasUnsaved(function () { return dirtyCount() > 0; }, { count: dirtyCount, text: 'Changes are kept for the whole document while you move between sheets, but they are lost if you leave the document without saving.', onSave: finishSave, onDiscard: discardChanges });
     c.onLeave(function () { clearTimeout(save.timer); if (save.mode === 'dirty' || save.mode === 'saving') finishSave(); root = null; });
+    if (E.ea) E.ea.register(c, { docId: function () { return S.docId; }, doc: function () { return S.doc; }, period: function () { return S.period; }, rerender: function () { if (root && document.contains(root)) renderDoc(); } });
     renderDoc(); if (!c.query.dialog && !c.query.panel) gridEl.focus({ preventScroll: true });
   } });
 
