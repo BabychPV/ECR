@@ -286,7 +286,7 @@ export function DocumentsPage(): JSX.Element {
             {/* ⛔ Створення документа не мало в інтерфейсі жодної кнопки
                 (`A7-42`): система, уся суть якої — заповнення документів,
                 не давала створити перший. */}
-            {can(session.data, 'Document.Create') && (
+            {can(session.data, 'Document.Create') && session.data?.isSimulation !== true && (
               <Button
                 onClick={() => {
                   setCreatingRequested(true);

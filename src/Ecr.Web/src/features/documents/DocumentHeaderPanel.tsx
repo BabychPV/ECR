@@ -1162,6 +1162,8 @@ function HeaderFieldInput({
         // (той самий прийом, що пояс у `CreateProjectModal`).
         limit={LookupOptionsLimit}
         clearable
+        // ⛔ Повторний клік по обраному не очищає обов'язкове поле; очистити можна лише необов'язкове.
+        allowDeselect={!field.isRequired}
         nothingFoundMessage={
           lookupPending ? t('document.header.lookupLoading') : t('document.header.lookupEmpty')
         }

@@ -79,6 +79,8 @@ export function RegistriesList(): JSX.Element {
   const all = registries.data ?? [];
   const opened = panel === null ? undefined : registries.data?.find((registry) => registry.code === panel);
   const canCreate = can(session.data, 'Registry.EditDefinition');
+  // ⛔ У симуляції сеанс лише читає (`isSimulation`): створення довідника заблоковане, як і решта записів.
+  const mayCreate = canCreate && session.data?.isSimulation !== true;
 
   /*
    * ⚠ Фокус повертається на назву в рядку, з якого шторку відкрили: шторка
@@ -230,7 +232,7 @@ export function RegistriesList(): JSX.Element {
         count={registries.data === undefined ? undefined : all.length}
         description={t('registries.list.subtitle')}
         primary={
-          canCreate ? { label: t('registries.newRegistry'), onClick: () => setCreating(true) } : undefined
+          mayCreate ? { label: t('registries.newRegistry'), onClick: () => setCreating(true) } : undefined
         }
         // ⚠ Перемикання master набором (`ФВ-13.10`) — власний вузол із діалогом, не `HeaderAction`.
         actions={can(session.data, 'Integration.Manage') ? <SourceKindSwitch registries={all} /> : undefined}
@@ -271,7 +273,7 @@ export function RegistriesList(): JSX.Element {
           emptyTitle={t('registries.empty')}
           emptyHint={t('registries.emptyHint')}
           emptyAction={
-            canCreate ? (
+            mayCreate ? (
               <Button onClick={() => setCreating(true)}>{t('registries.newRegistry')}</Button>
             ) : undefined
           }

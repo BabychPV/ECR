@@ -42,7 +42,7 @@ const document_ = {
   sheetStates: {},
 };
 
-function mockFetch(): void {
+function mockFetch(isSimulation = false): void {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL) => {
@@ -53,7 +53,7 @@ function mockFetch(): void {
           JSON.stringify({
             denies: [],
             grants: {},
-            isSimulation: false,
+            isSimulation,
             language: 'en',
             mustChangePassword: false,
             permissions: ['Document.Create'],
@@ -124,6 +124,19 @@ describe('DocumentsPage: CreateDocumentModal лінивий (D-132)', () => {
 
       expect(await screen.findByRole('dialog', { name: 'create-stub' })).toBeTruthy();
       expect(probe.evaluated).toBe(true);
+    },
+    SlowEnvTimeout,
+  );
+
+  it(
+    'симуляція: кнопки «Створити» немає',
+    async () => {
+      // ⛔ Мутаційний доказ: прибери `isSimulation` з умови кнопки в `DocumentsPage.tsx` — тест червоніє.
+      mockFetch(true);
+      show();
+
+      await screen.findByText('P1-V1-0001', {}, { timeout: SlowEnvTimeout });
+      expect(screen.queryByRole('button', { name: '⟦documents.create⟧' })).toBeNull();
     },
     SlowEnvTimeout,
   );
