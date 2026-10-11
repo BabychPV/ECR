@@ -27,15 +27,31 @@ public sealed class EditAssignmentManagementStore(EcrDbContext db) : IEditAssign
         => (await db.Documents
             .FromSql($"SELECT * FROM doc.Document WITH (UPDLOCK, ROWLOCK) WHERE Id = {documentId}")
             .Select(d => d.Id)
+            .Take(1)
             .ToListAsync(ct).ConfigureAwait(false)).Count > 0;
 
     /// <inheritdoc />
     public async Task LockRecipientsAsync(long assignmentId, CancellationToken ct)
-        => _ = await db.EditAssignmentRecipients
+    {
+        // ⛔ N4: порядок блокувань — sheet-gate → рядок передачі → рядки виконавців. Перехід бере X на передачі
+        // ПЕРШИМ (без зміни рядка: XLOCK, а не UPDATE — версія не бампається на ідемпотентних повторах), і лише
+        // потім U на виконавцях. Запис комірки (EA-B) читає ті самі таблиці в тому самому порядку під S; якби
+        // перехід узяв X на виконавці раніше, ніж на передачі, вийшов би цикл «запис тримає S(передача) і чекає
+        // S(виконавець); перехід тримає X(виконавець) і чекає X(передача)».
+        _ = await db.EditAssignments
+            .FromSql($"SELECT * FROM doc.EditAssignment WITH (XLOCK, ROWLOCK) WHERE Id = {assignmentId}")
+            .AsNoTracking()
+            .Select(a => a.Id)
+            .Take(1)
+            .ToListAsync(ct).ConfigureAwait(false);
+
+        _ = await db.EditAssignmentRecipients
             .FromSql($"SELECT * FROM doc.EditAssignmentRecipient WITH (UPDLOCK, ROWLOCK) WHERE AssignmentId = {assignmentId}")
             .AsNoTracking()
             .Select(r => r.UserId)
+            .Take(EditAssignment.MaxRecipients)
             .ToListAsync(ct).ConfigureAwait(false);
+    }
 
     /// <inheritdoc />
     public Task<EditAssignment?> FindBySliceKeyForUpdateAsync(long documentId, string sliceKey, CancellationToken ct)

@@ -119,12 +119,12 @@ internal static class EditAssignmentMapper
 
         if (a.SheetCode is not null)
         {
-            parts.Add($"sheet {a.SheetCode}");
+            parts.Add("a selected sheet"); // ⛔ код аркуша не йде в лист: одержувач міг мати Deny на нього (T1-01)
         }
 
         if (a.TableCode is not null)
         {
-            parts.Add($"table {a.TableCode}");
+            parts.Add("a selected table");
         }
 
         return parts.Count == 0 ? "whole document" : string.Join(", ", parts);
@@ -192,7 +192,7 @@ public sealed class UpsertEditAssignmentHandler(
         var note = request.Note?.Trim();
         if (note is { Length: > EditAssignment.MaxNoteLength })
         {
-            throw EditAssignmentAccess.Invalid("editAssignmentNoteTooLong", "Інструкція довша за 500 символів.");
+            throw EditAssignmentAccess.Invalid("err.ECR-REQ-0422.editAssignmentNoteTooLong", "Інструкція довша за 500 символів.");
         }
 
         var recipientIds = (request.RecipientUserIds ?? []).Distinct().ToList();
@@ -203,8 +203,7 @@ public sealed class UpsertEditAssignmentHandler(
 
         if (recipientIds.Count > EditAssignment.MaxRecipients)
         {
-            throw EditAssignmentAccess.Invalid(
-                "editAssignmentTooManyRecipients", "У передачі забагато виконавців.");
+            throw EditAssignmentAccess.Invalid("err.ECR-REQ-0422.editAssignmentTooManyRecipients", "У передачі забагато виконавців.");
         }
 
         // «Лише в межах власних прав»: з даних шаблону, у сесії того, хто передає.
@@ -213,8 +212,7 @@ public sealed class UpsertEditAssignmentHandler(
         var own = EditAssignmentAccess.SheetsBeyondOwnRights(profile, document.ProjectId, snapshot, slice);
         if (own.Exceeds)
         {
-            throw EditAssignmentAccess.Invalid(
-                "editAssignmentDelegationExceedsOwnRights",
+            throw EditAssignmentAccess.Invalid("err.ECR-REQ-0422.editAssignmentDelegationExceedsOwnRights",
                 "Передавати можна лише комірки, які ви самі можете редагувати.",
                 new Dictionary<string, object?> { ["sheetCodes"] = own.VisibleSheetCodes });
         }
@@ -242,7 +240,7 @@ public sealed class UpsertEditAssignmentHandler(
         if (request.AppliedSetId is { } setId)
         {
             var set = await sets.FindAsync(userId, setId, ct).ConfigureAwait(false)
-                ?? throw EditAssignmentAccess.Invalid("editorSetNotFound", "Набору виконавців не знайдено.");
+                ?? throw EditAssignmentAccess.Invalid("err.ECR-REQ-0422.editorSetNotFound", "Набору виконавців не знайдено.");
             appliedSetName = set.Name;
         }
 
@@ -274,8 +272,7 @@ public sealed class UpsertEditAssignmentHandler(
             {
                 if (await assignments.CountByDocumentAsync(documentId, innerCt).ConfigureAwait(false) >= EditAssignment.MaxPerDocument)
                 {
-                    throw EditAssignmentAccess.Invalid(
-                        "editAssignmentTooManyAssignments", "У документі забагато передач.");
+                    throw EditAssignmentAccess.Invalid("err.ECR-REQ-0422.editAssignmentTooManyAssignments", "У документі забагато передач.");
                 }
 
                 var assignment = new EditAssignment(
@@ -412,8 +409,7 @@ public sealed class UpsertEditAssignmentHandler(
     }
 
     private static BusinessRuleException RecipientInvalid()
-        => EditAssignmentAccess.Invalid(
-            "editAssignmentRecipientInvalid", "Одного з виконавців не можна призначити на цей документ.");
+        => EditAssignmentAccess.Invalid("err.ECR-REQ-0422.editAssignmentRecipientInvalid", "Одного з виконавців не можна призначити на цей документ.");
 
     private static string BuildAssignedBody(string documentKey, EditAssignment a, string? note)
     {
@@ -615,8 +611,7 @@ public sealed class ValidateEditAssignmentHandler(
 
             if (!assignment.AllFilled)
             {
-                throw EditAssignmentAccess.Invalid(
-                    "editAssignmentNotAllFilled", "Валідувати можна лише після того, як усі виконавці заповнили зріз.");
+                throw EditAssignmentAccess.Invalid("err.ECR-REQ-0422.editAssignmentNotAllFilled", "Валідувати можна лише після того, як усі виконавці заповнили зріз.");
             }
 
             assignment.Validate(userId, now);
@@ -694,12 +689,12 @@ public sealed class ReturnEditAssignmentHandler(
         var reason = request.Reason?.Trim();
         if (string.IsNullOrEmpty(reason))
         {
-            throw EditAssignmentAccess.Invalid("editAssignmentReasonRequired", "Вкажіть причину повернення.");
+            throw EditAssignmentAccess.Invalid("err.ECR-REQ-0422.editAssignmentReasonRequired", "Вкажіть причину повернення.");
         }
 
         if (reason.Length > EditAssignment.MaxNoteLength)
         {
-            throw EditAssignmentAccess.Invalid("editAssignmentReasonTooLong", "Причина довша за 500 символів.");
+            throw EditAssignmentAccess.Invalid("err.ECR-REQ-0422.editAssignmentReasonTooLong", "Причина довша за 500 символів.");
         }
 
         var now = clock.UtcNow;
@@ -721,8 +716,7 @@ public sealed class ReturnEditAssignmentHandler(
                 var requested = request.UserIds.Distinct().ToList();
                 if (requested.Any(id => !members.ContainsKey(id)))
                 {
-                    throw EditAssignmentAccess.Invalid(
-                        "editAssignmentRecipientInvalid", "Одного з виконавців не можна призначити на цей документ.");
+                    throw EditAssignmentAccess.Invalid("err.ECR-REQ-0422.editAssignmentRecipientInvalid", "Одного з виконавців не можна призначити на цей документ.");
                 }
 
                 targets = [.. requested.Select(id => members[id])];
@@ -821,8 +815,7 @@ public sealed class ListEditAssignmentCandidatesHandler(
         var q = query?.Trim();
         if (string.IsNullOrEmpty(q) || q.Length < MinQueryLength)
         {
-            throw EditAssignmentAccess.Invalid(
-                "editAssignmentQueryTooShort", "Запит має містити щонайменше два символи.");
+            throw EditAssignmentAccess.Invalid("err.ECR-REQ-0422.editAssignmentQueryTooShort", "Запит має містити щонайменше два символи.");
         }
 
         var found = await store.SearchCandidatesAsync(q, MaxResults + 1, ct).ConfigureAwait(false);
@@ -851,7 +844,7 @@ public sealed class ListMyEditAssignmentsHandler(
         var wantOwner = string.IsNullOrEmpty(role) || string.Equals(role, "owner", StringComparison.OrdinalIgnoreCase);
         if (!wantAssignee && !wantOwner)
         {
-            throw EditAssignmentAccess.Invalid("editAssignmentRoleInvalid", "Невідома роль фільтра.");
+            throw EditAssignmentAccess.Invalid("err.ECR-REQ-0422.editAssignmentRoleInvalid", "Невідома роль фільтра.");
         }
 
         var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);

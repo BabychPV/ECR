@@ -82,6 +82,8 @@ public sealed partial class DenyLeakGuardTests
     /// </remarks>
     private static readonly Dictionary<string, (int Count, string Why)> Reviewed = new(StringComparer.Ordinal)
     {
+        ["src/Ecr.Application/Documents/EditAssignments/EditAssignmentHandlers.cs | деталь sheetCodes | own.VisibleSheetCodes"] =
+            (1, "коди аркушів, які передавач САМ бачить (DocumentReadScope.CanReadSheetCode) і не може писати; схований аркуш не називається, а лише дає перевищення без імені"),
         ["src/Ecr.Application/Consistency/GetConsistencyIssuesHandler.cs | деталь severity | severity.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)"] =
             (1, "ехо числового параметра запиту (вага 1..3), не колонка і не значення; відмова ДО читання журналу"),
         ["src/Ecr.Adapters.Excel/ExcelExporter.cs | текст | block.SheetName"] =
