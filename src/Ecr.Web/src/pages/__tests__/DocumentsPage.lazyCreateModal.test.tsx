@@ -84,12 +84,12 @@ function mockFetch(isSimulation = false): void {
   );
 }
 
-function show(): void {
+function show(path = '/'): void {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
   render(
     <MantineProvider theme={testTheme}>
-      <MemoryRouter initialEntries={['/']}>
+      <MemoryRouter initialEntries={[path]}>
         <QueryClientProvider client={client}>
           <DocumentsPage />
         </QueryClientProvider>
@@ -137,6 +137,18 @@ describe('DocumentsPage: CreateDocumentModal лінивий (D-132)', () => {
 
       await screen.findByText('P1-V1-0001', {}, { timeout: SlowEnvTimeout });
       expect(screen.queryByRole('button', { name: '⟦documents.create⟧' })).toBeNull();
+    },
+    SlowEnvTimeout,
+  );
+
+  it(
+    'симуляція: ?create=1 в URL не відкриває створення',
+    async () => {
+      mockFetch(true);
+      show('/?create=1');
+
+      await screen.findByText('P1-V1-0001', {}, { timeout: SlowEnvTimeout });
+      expect(screen.queryByRole('dialog')).toBeNull();
     },
     SlowEnvTimeout,
   );

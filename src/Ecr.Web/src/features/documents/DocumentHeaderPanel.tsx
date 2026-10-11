@@ -1161,7 +1161,8 @@ function HeaderFieldInput({
         // пункти в DOM при відкритті. `limit` обрізає лише показане: пошук іде по всьому переліку
         // (той самий прийом, що пояс у `CreateProjectModal`).
         limit={LookupOptionsLimit}
-        clearable
+        // ⛔ Обов'язкове поле не очищається ні хрестиком, ні повторним кліком по обраному; необов'язкове — обома.
+        clearable={!field.isRequired}
         // ⛔ Повторний клік по обраному не очищає обов'язкове поле; очистити можна лише необов'язкове.
         allowDeselect={!field.isRequired}
         nothingFoundMessage={
