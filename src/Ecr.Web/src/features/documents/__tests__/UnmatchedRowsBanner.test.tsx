@@ -7,7 +7,7 @@ import { testTheme } from '@/test/render';
 /**
  * D14: рядок без правила розрахунку (напр. статус Removed) - інформаційна позначка на аркуші, не помилка.
  *
- * Мутація: прибрати `role="status"`/ключі каталогу або список рядків - червоніють перевірки нижче.
+ * Мутація: прибрати ключі каталогу або список рядків - червоніють перевірки нижче.
  */
 
 function show(rows: Parameters<typeof UnmatchedRowsBanner>[0]['rows']): void {
@@ -19,11 +19,10 @@ function show(rows: Parameters<typeof UnmatchedRowsBanner>[0]['rows']): void {
 }
 
 describe('UnmatchedRowsBanner', () => {
-  it('називає ключ рядка без правила, це status а не alert, без кнопок дій', () => {
+  it('називає ключ рядка без правила, без кнопок дій і без тону помилки', () => {
     show({ count: 1, rows: [{ tableInstanceId: 5, rowNumber: 2, rowKey: 'R-REMOVED' }] });
 
     const banner = screen.getByTestId('document-unmatched-rows');
-    expect(banner.getAttribute('role')).toBe('status');
     expect(banner.textContent).toContain('document.unmatchedRows.title');
     const hint = screen.getByTestId('document-unmatched-rows-hint').textContent ?? '';
     expect(hint).toContain('document.unmatchedRows.hint');

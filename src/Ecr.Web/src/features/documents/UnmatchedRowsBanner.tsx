@@ -25,7 +25,6 @@ export function UnmatchedRowsBanner({ rows }: UnmatchedRowsBannerProps): JSX.Ele
     <Alert
       color="brand"
       variant="light"
-      role="status"
       title={t('document.unmatchedRows.title')}
       data-testid="document-unmatched-rows"
     >
