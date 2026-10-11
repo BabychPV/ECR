@@ -127,10 +127,10 @@ export function TableNavigator({
               size={4}
               radius="xl"
               value={(progress.filled / progress.total) * 100}
-              aria-label={t('grid.tree.tablesFilled', { filled: progress.filled, total: progress.total })}
+              aria-label={t('grid.tree.tablesFilledSheet', { filled: progress.filled, total: progress.total })}
             />
             <div className="ecr-tnav-progress-line" data-testid="table-navigator-progress">
-              <span>{t('grid.tree.tablesFilled', { filled: progress.filled, total: progress.total })}</span>
+              <span>{t('grid.tree.tablesFilledSheet', { filled: progress.filled, total: progress.total })}</span>
               {issues !== null && issues > 0 && (
                 <>
                   <span aria-hidden="true">·</span>

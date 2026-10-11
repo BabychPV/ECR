@@ -1,6 +1,6 @@
-﻿import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import type { ColumnDto, TableSliceDto } from '@/api/types';
-import { cellKey, confirmationOf, decide, guardOf } from '@/features/grid/permissions';
+import { addRowDenialOf, cellKey, confirmationOf, decide, guardOf } from '@/features/grid/permissions';
 
 /** Права по комірках приходять із сервера і показуються, а не вгадуються. */
 function column(overrides: Partial<ColumnDto> = {}): ColumnDto {
@@ -198,5 +198,32 @@ describe('Підтвердження перед правкою (ФВ-2.16, #43)'
 
     expect(confirmationOf(data, 'R1', column({ code: 'C1' }))).toBeNull();
     expect(confirmationOf(data, 'R1', column({ code: 'C2' }))).not.toBeNull();
+  });
+});
+
+describe('addRowDenialOf (D9: «Add row» без гранту)', () => {
+  const twoRows = (permissions: Record<string, string>): TableSliceDto => {
+    const base = slice(permissions);
+    return { ...base, rows: [...base.rows, { ...base.rows[0]!, rowKey: 'R2', ordinal: 2 }] };
+  };
+
+  it('кожна вхідна комірка відхилена грантом — кнопка вимкнена з причиною', () => {
+    const denial = addRowDenialOf(
+      twoRows({ [cellKey('R1', 'C1')]: 'InsufficientGrantLevel', [cellKey('R2', 'C1')]: 'InsufficientGrantLevel' }),
+    );
+
+    expect(denial?.reason).toBe('InsufficientGrantLevel');
+    expect(denial?.hint).not.toBe('');
+  });
+
+  it('хоч одна комірка дозволена або відхилена не грантом — null', () => {
+    expect(addRowDenialOf(twoRows({ [cellKey('R1', 'C1')]: 'NoGrant' }))).toBeNull();
+    expect(
+      addRowDenialOf(twoRows({ [cellKey('R1', 'C1')]: 'NoGrant', [cellKey('R2', 'C1')]: 'PeriodClosed' })),
+    ).toBeNull();
+  });
+
+  it('порожня таблиця — null (права не відомі)', () => {
+    expect(addRowDenialOf({ ...slice({}), rows: [] })).toBeNull();
   });
 });
