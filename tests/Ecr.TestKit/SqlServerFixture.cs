@@ -72,9 +72,24 @@ public sealed class SqlServerFixture : IAsyncLifetime
     /// закриває Z8-03, і вона реальна. Стеля 128 одразу зробила б червоними всі ~1500 тестів колекції через
     /// чужий клас, тож тут — храповик на виміряному рівні (+один приріст запасу): ще один приріст понад 136 —
     /// червоний. ⚠ [debt] знайти клас, що росте після сторожа (великі заливки: порціями з CHECKPOINT), і повернути
-    /// стелю до <see cref="MaxFileMb"/>.
+    /// стелю до <see cref="MaxFileMb"/>. Діагностика (хто виріс, топ таблиць) — <see cref="DatabaseGrowthTracker"/>,
+    /// у CI — Step Summary прогону «Ріст тестової бази».
     /// </remarks>
     public const int MaxFileMbAtCollectionEnd = 192;
+
+    /// <summary>Спільна фікстура процесу (без суфікса імені) — для <see cref="TrackDatabaseGrowthAttribute"/>.</summary>
+    internal static SqlServerFixture? Shared { get; private set; }
+
+    /// <summary>
+    /// Діагностика росту спільної бази (хто з тестів виростив файл) — лише для фікстури колекції, без суфікса.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ [debt] D-375: клас, що росте після <c>TestDatabaseSizeTests</c>, досі не названий. Звіт іде в Step Summary
+    /// прогону щоразу, коли файл спільної бази більший за <see cref="MaxFileMb"/> (див. <see cref="DatabaseGrowthTracker"/>),
+    /// і в повідомлення збою, коли перетято <see cref="MaxFileMbAtCollectionEnd"/>. Назвали винного й виправили
+    /// (порціями з CHECKPOINT) — повертати стелю наприкінці колекції до <see cref="MaxFileMb"/>.
+    /// </remarks>
+    internal DatabaseGrowthTracker? Growth { get; private set; }
 
     private readonly string _nameSuffix = string.Empty;
 
@@ -126,6 +141,14 @@ public sealed class SqlServerFixture : IAsyncLifetime
 
         ConnectionString = await CreateEmptyDatabaseAsync(serverConnection).ConfigureAwait(false);
         await BuildSchemaAsync().ConfigureAwait(false);
+
+        // Лише спільна база колекції; початкова точка — ПІСЛЯ розгортання схеми: її ріст не належить жодному тесту.
+        if (_nameSuffix.Length == 0)
+        {
+            Growth = new DatabaseGrowthTracker(ConnectionString);
+            Growth.Sample("<розгортання схеми>");
+            Shared = this;
+        }
     }
 
     /// <summary>
@@ -157,11 +180,19 @@ public sealed class SqlServerFixture : IAsyncLifetime
         // від класу, який виконується ПІСЛЯ нього, проходив зеленим. Виняток тут xUnit 2 показує як збій
         // прибирання колекції — прогін червоніє. Лише спільна база колекції (власні бази з суфіксом — на тесті).
         string? oversized = null;
+        string? growthReport = null;
         if (_nameSuffix.Length == 0 && ConnectionString.Length > 0)
         {
             try
             {
                 oversized = await FindOversizedFilesAsync(ConnectionString, MaxFileMbAtCollectionEnd).ConfigureAwait(false);
+
+                // ⚠ Звіт ДО зупинки контейнера (потрібна жива база) і для будь-якого файла вище за MaxFileMb (128), а не
+                // лише вище стелі колекції: так клас, що росте, видно в Step Summary і на зеленому прогоні (D-375).
+                if (Growth is not null)
+                {
+                    growthReport = await Growth.BuildReportAsync(DatabaseName, MaxFileMb).ConfigureAwait(false);
+                }
             }
             catch (SqlException)
             {
@@ -169,16 +200,27 @@ public sealed class SqlServerFixture : IAsyncLifetime
             }
         }
 
+        if (ReferenceEquals(Shared, this))
+        {
+            Shared = null;
+        }
+
         if (_container is not null)
         {
             await _container.DisposeAsync().ConfigureAwait(false);
+        }
+
+        if (growthReport is not null)
+        {
+            DatabaseGrowthTracker.Publish(growthReport);
         }
 
         if (oversized is not null)
         {
             throw new InvalidOperationException(
                 $"Файли тестової бази перетнули стелю {MaxFileMbAtCollectionEnd} МБ до кінця прогону колекції: {oversized}. "
-                + "Велику заливку в тесті — порціями з CHECKPOINT (див. TestDatabaseSizeTests).");
+                + "Велику заливку в тесті — порціями з CHECKPOINT (див. TestDatabaseSizeTests)."
+                + (growthReport is null ? string.Empty : Environment.NewLine + growthReport));
         }
 
         // Локальний сервер лишається з базою: після невдалого прогону в неї

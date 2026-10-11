@@ -37,6 +37,11 @@ public sealed class SqlServerFixtureSizeGuardTests
         Assert.True(container > check, "розмір має бути виміряно ДО зупинки контейнера");
         Assert.True(thrown > container, "виняток про завеликі файли має летіти ПІСЛЯ зупинки контейнера");
 
+        // D-375: діагностика росту (хто виріс, топ таблиць) читає ЖИВУ базу, тож будується до зупинки контейнера — і
+        // під тим самим захистом «лише спільна база колекції». Мутація: перенести виклик нижче за DisposeAsync контейнера.
+        var report = source.IndexOf("await Growth.BuildReportAsync(DatabaseName, MaxFileMb)", dispose, StringComparison.Ordinal);
+        Assert.True(report > guard && report < container, "звіт про ріст бази має будуватися ДО зупинки контейнера, у блоці спільної бази");
+
         // Стеля в класі-сторожі — та сама константа фікстури; стеля наприкінці колекції — окрема й не нижча (храповик).
         var guardClass = File.ReadAllText(Path.Combine(
             SourceTree.Root, "tests", "Ecr.Infrastructure.Tests", "Persistence", "TestDatabaseSizeTests.cs"));
