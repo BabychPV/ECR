@@ -49,6 +49,28 @@ public readonly record struct CellAccessContext(
     /// ролям, звуженим періодами (D-214): без нього вони тут не діють.
     /// </summary>
     public PeriodKey? Period { get; init; }
+
+    /// <summary>
+    /// Передача зрізу (EA-B) дозволяє цьому користувачеві писати в цю комірку:
+    /// <c>Read → Write</c>, лише для місячної колонки переданого місяця. Рахує
+    /// <see cref="EditAssignmentGuard"/>; за замовчуванням — ні.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Піднімає ЛИШЕ <see cref="GrantLevel.Read"/> (<see cref="EditRules.CanEdit"/>
+    /// перевіряє це сам): <see cref="GrantLevel.None"/> — включно з явною
+    /// забороною — не піднімається ніколи. <c>CanSubmit</c>/<c>CanApprove</c>/
+    /// <c>CanReopen</c> цього поля не читають — подання аркуша не піднімається.
+    /// </remarks>
+    public bool DelegatedWrite { get; init; }
+
+    /// <summary>
+    /// Заборона запису від передачі зрізу: <see cref="EditDenyReason.None"/>,
+    /// <see cref="EditDenyReason.LockedByOwner"/>,
+    /// <see cref="EditDenyReason.AssignmentFilled"/>,
+    /// <see cref="EditDenyReason.AssignmentValidated"/> або
+    /// <see cref="EditDenyReason.AssignmentExpired"/>.
+    /// </summary>
+    public EditDenyReason AssignmentLock { get; init; }
 }
 
 /// <summary>
@@ -154,7 +176,28 @@ public static class EditRules
         // ВІДСУТНІЙ (None, включно із забороною на будь-якому рівні) і грант
         // Є, але нижчий за Write (Read), — різні відповіді для користувача:
         // «просити грант» проти «просити підвищення рівня».
+        // ⛔ EA-B (R4): «Заповнено»/«Валідовано» відхиляють ДО гранта — виконавець
+        // має побачити причину свого стану, а не «немає права». Стани вище
+        // (період, подано, архів, симуляція, readonly) уже відпрацювали (R2).
+        if (context.AssignmentLock is EditDenyReason.AssignmentFilled
+            or EditDenyReason.AssignmentValidated or EditDenyReason.AssignmentExpired)
+        {
+            return EditDecision.Deny(context.AssignmentLock);
+        }
+
         var effective = Effective(profile, context);
+
+        // ⛔ EA-B (R1): піднімається ЛИШЕ Read → Write, тобто рівно випадок, що
+        // без передачі дав би InsufficientGrantLevel (грант є, нижчий за Write,
+        // не заборонений, проєкт видимий — усе це вже всередині Effective).
+        // None (немає гранта, IsDeny, невидимий проєкт) не піднімається.
+        // Піднесення — ДО правил періоду шаблону (їх застосовує служба поверх
+        // дозволу), тож вони його перекривають, як і звичайний дозвіл.
+        if (context.DelegatedWrite && effective == GrantLevel.Read)
+        {
+            effective = GrantLevel.Write;
+        }
+
         if (effective < GrantLevel.Write)
         {
             return effective == GrantLevel.None
@@ -162,6 +205,13 @@ public static class EditRules
                 : EditDecision.Deny(
                     EditDenyReason.InsufficientGrantLevel,
                     $"Наявний рівень гранта — {effective}; для редагування потрібен {GrantLevel.Write}.");
+        }
+
+        // Після гранта: людина без права взагалі бачить NoGrant (вище), а не
+        // «передано власником».
+        if (context.AssignmentLock == EditDenyReason.LockedByOwner)
+        {
+            return EditDecision.Deny(EditDenyReason.LockedByOwner);
         }
 
         return EditDecision.Allow();

@@ -4329,7 +4329,11 @@
           "BusinessRule",
           "SimulationReadOnly",
           "OutsidePermitWindow",
-          "InsufficientGrantLevel"
+          "InsufficientGrantLevel",
+          "LockedByOwner",
+          "AssignmentFilled",
+          "AssignmentValidated",
+          "AssignmentExpired"
         ]
       },
       "EffectiveAccessContribution": {
