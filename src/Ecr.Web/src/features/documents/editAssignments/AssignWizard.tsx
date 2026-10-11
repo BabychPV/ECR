@@ -6,7 +6,8 @@ import { formatMonthName } from '@/shared/format';
 import { t } from '@/shared/i18n';
 import { KeyValue } from '@/shared/ui/KeyValue';
 import { Wizard, type WizardApi, type WizardStep } from '@/shared/ui/Wizard';
-import { MinCandidateQuery, candidatesKey, editorSetsKey, getCandidates, getEditorSets } from './api';
+import { queryKeys } from '@/api/queryKeys';
+import { MinCandidateQuery, getCandidates, getEditorSets } from './api';
 import type { Candidate, EditorSet, RecipientVisibility } from './types';
 
 /** Дані майстра; живуть лише в `Wizard` (стан кроків — локальний, не в адресі). */
@@ -136,9 +137,9 @@ function WhoStep({
 }): JSX.Element {
   const [query, setQuery] = useState('');
   const [debounced] = useDebouncedValue(query.trim(), 250);
-  const sets = useQuery({ queryKey: editorSetsKey, queryFn: getEditorSets });
+  const sets = useQuery({ queryKey: queryKeys.editAssignments.editorSets(), queryFn: getEditorSets });
   const search = useQuery({
-    queryKey: candidatesKey(documentId, debounced),
+    queryKey: queryKeys.editAssignments.candidates(documentId, debounced),
     queryFn: () => getCandidates(documentId, debounced),
     enabled: debounced.length >= MinCandidateQuery,
   });
@@ -240,7 +241,7 @@ export function AssignWizard({
   onApply,
   onClose,
 }: AssignWizardProps): JSX.Element {
-  const sets = useQuery({ queryKey: editorSetsKey, queryFn: getEditorSets });
+  const sets = useQuery({ queryKey: queryKeys.editAssignments.editorSets(), queryFn: getEditorSets });
 
   // Галочка підсумку живе тут, а не в даних `Wizard`: `summary` не отримує `update`.
   const [alsoOthers, setAlsoOthers] = useState(initialData.alsoOthers);
