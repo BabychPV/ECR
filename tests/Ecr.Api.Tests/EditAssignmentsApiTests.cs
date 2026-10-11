@@ -274,6 +274,77 @@ public sealed class EditAssignmentsApiTests(SqlServerFixture sql)
         Assert.Contains(s.Executor.Id.ToString(CultureInfo.InvariantCulture), body, StringComparison.Ordinal);
     }
 
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Набір_застосовується_до_зрізів_копіюється_і_зміна_зі_старою_версією_409()
+    {
+        var s = await ArrangeAsync().ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+        using var owner = await SignedInAsync(app, s.Manager.UserName).ConfigureAwait(true);
+        using var other = await SignedInAsync(app, s.OtherExecutor.UserName).ConfigureAwait(true);
+        var setsUri = new Uri("/api/v1/me/editor-sets", UriKind.Relative);
+
+        var set = await JsonAsync(
+            await owner.PostAsJsonAsync(setsUri, new { name = "Dept 5", memberUserIds = new[] { s.Executor.Id } }).ConfigureAwait(true),
+            HttpStatusCode.OK, app).ConfigureAwait(true);
+        var setId = set.GetProperty("id").GetInt32();
+        var setVersion = set.GetProperty("version").GetString();
+
+        // Чужий користувач не бачить набір і не змінює його.
+        var foreignList = await JsonAsync(await other.GetAsync(setsUri).ConfigureAwait(true), HttpStatusCode.OK, app).ConfigureAwait(true);
+        Assert.Empty(foreignList.EnumerateArray());
+        var foreignPut = await other.PutAsJsonAsync(
+            new Uri($"/api/v1/me/editor-sets/{setId.ToString(CultureInfo.InvariantCulture)}", UriKind.Relative),
+            new { name = "X", memberUserIds = Array.Empty<int>(), baseVersion = setVersion }).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.NotFound, foreignPut.StatusCode);
+
+        // Застосування до двох зрізів.
+        var applied = await JsonAsync(
+            await owner.PostAsJsonAsync(
+                new Uri($"{ListUri(s)}/apply-set", UriKind.Relative),
+                new
+                {
+                    setId,
+                    slices = new[]
+                    {
+                        new { sheetCode = s.SheetCode, periodKey = (int?)202601 },
+                        new { sheetCode = s.SheetCode, periodKey = (int?)202602 },
+                    },
+                }).ConfigureAwait(true),
+            HttpStatusCode.OK, app).ConfigureAwait(true);
+        var items = applied.GetProperty("assignments").EnumerateArray().ToList();
+        Assert.Equal(2, items.Count);
+        Assert.All(items, i => Assert.Equal("Dept 5", i.GetProperty("appliedSetName").GetString()));
+
+        // Копіювання на третій зріз.
+        var copied = await JsonAsync(
+            await owner.PostAsJsonAsync(
+                new Uri($"{ListUri(s)}/copy", UriKind.Relative),
+                new
+                {
+                    fromSlice = new { sheetCode = s.SheetCode, periodKey = (int?)202601 },
+                    toSlices = new[] { new { sheetCode = s.SheetCode, periodKey = (int?)202603 } },
+                }).ConfigureAwait(true),
+            HttpStatusCode.OK, app).ConfigureAwait(true);
+        var copy = Assert.Single(copied.GetProperty("assignments").EnumerateArray());
+        Assert.Equal(s.Executor.Id, Assert.Single(copy.GetProperty("recipients").EnumerateArray()).GetProperty("userId").GetInt32());
+
+        // Зміна набору: зі свіжою версією — 200, зі старою — 409.
+        var putUri = new Uri($"/api/v1/me/editor-sets/{setId.ToString(CultureInfo.InvariantCulture)}", UriKind.Relative);
+        var updated = await JsonAsync(
+            await owner.PutAsJsonAsync(putUri, new { name = "Dept 5b", memberUserIds = new[] { s.Executor.Id }, baseVersion = setVersion }).ConfigureAwait(true),
+            HttpStatusCode.OK, app).ConfigureAwait(true);
+        Assert.Equal("Dept 5b", updated.GetProperty("name").GetString());
+
+        var stale = await owner.PutAsJsonAsync(
+            putUri, new { name = "Dept 5c", memberUserIds = new[] { s.Executor.Id }, baseVersion = setVersion }).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.Conflict, stale.StatusCode);
+
+        // Видалення набору лишає передачі.
+        Assert.Equal(HttpStatusCode.NoContent, (await owner.DeleteAsync(putUri).ConfigureAwait(true)).StatusCode);
+        var list = await JsonAsync(await owner.GetAsync(ListUri(s)).ConfigureAwait(true), HttpStatusCode.OK, app).ConfigureAwait(true);
+        Assert.Equal(3, list.GetProperty("assignments").GetArrayLength());
+    }
     private static Uri ListUri(Scenario s)
         => new($"/api/v1/documents/{s.DocumentId.ToString(CultureInfo.InvariantCulture)}/edit-assignments", UriKind.Relative);
 
