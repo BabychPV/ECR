@@ -19789,7 +19789,7 @@ INSERT INTO aud.SecurityEvent (ChangedAt, EventType, TargetUserId, TargetRoleId,
 SELECT SYSUTCDATETIME(), N'RolePermissionsGranted', NULL, r.Id,
        CONCAT(N'{"role":"SystemAdministrator","source":"seed FP:sysadmin-rights","count":', COUNT(*),
               N',"permissions":["',
-              STRING_AGG(CAST(rp.PermissionCode AS nvarchar(max)), N'","') WITHIN GROUP (ORDER BY rp.PermissionCode),
+              STUFF((SELECT N'","' + CAST(x.PermissionCode AS nvarchar(max)) FROM sec.RolePermission AS x WHERE x.RoleId = r.Id AND NOT EXISTS (SELECT 1 FROM #FpSysAdminRightsBefore AS xb WHERE xb.RoleId = x.RoleId AND xb.PermissionCode = x.PermissionCode) ORDER BY x.PermissionCode FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), 1, 3, N''),
               N'"]}'),
        0, NULL
 FROM sec.Role AS r
