@@ -163,8 +163,10 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock, IMemory
                 }
             }
 
+            // R16-5: `rows` — КОМІРКИ (рядок × колонка опису), а `RowCount` зрізу — кількість РЯДКІВ: 1024 рядки
+            // на 4 колонки давали 4096 у переліку зрізів («Rows») і в журналі.
             snapshot.Complete(
-                rows.Count,
+                rows.Select(r => r.RowNo).Distinct().Count(),
                 ComputeHash(rows),
 
                 // Прогін, з якого взято числа: без нього неможливо сказати, на
