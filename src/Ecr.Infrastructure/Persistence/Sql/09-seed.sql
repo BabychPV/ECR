@@ -1472,6 +1472,7 @@ USING (VALUES
     (N'err.ECR-RPT-0422.nameRequired',       N'en', N'Give the report a name in at least one language: it is addressed by that name in the list.', 1),
     (N'err.ECR-RPT-0422.version',            N'en', N'The report version number must be from 1 to {maxLength} characters.', 1),
     (N'err.ECR-RPT-4091.code',               N'en', N'A report with code "{code}" is already described.', 1),
+    (N'err.ECR-RPT-4091.version',            N'en', N'Version "{version}" already exists in this report definition: the version number must be unique.', 1),
     (N'err.ECR-RPT-0404.def',                N'en', N'Report definition {reportDefId} does not exist.', 1),
     (N'err.ECR-RPT-0404.version',            N'en', N'Report version {reportVersionId} does not exist.', 1),
     (N'err.ECR-RPT-0404.versionWrongDef',    N'en', N'Version {reportVersionId} belongs to definition {versionDefId}, not {reportDefId}.', 1),
@@ -18937,6 +18938,17 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:quota-verify-validate ── кінець секції ──
+
+-- COLL:rpt-version-duplicate ── ru/kz: повторний номер версії опису звіту (ECR-RPT-4091.version); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-RPT-4091.version', N'ru', N'Версия «{version}» в этом описании отчёта уже есть: номер версии должен быть уникальным.'),
+    (N'err.ECR-RPT-4091.version', N'kz', N'«{version}» нұсқасы бұл есеп анықтамасында бұрыннан бар: нұсқа нөмірі бірегей болуы тиіс.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:rpt-version-duplicate ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

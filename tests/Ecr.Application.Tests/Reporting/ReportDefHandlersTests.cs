@@ -76,12 +76,34 @@ public sealed class ReportDefHandlersTests
         var command = new CreateReportVersionCommand("1", Columns(), Rules: null);
 
         var error = await Assert.ThrowsAsync<NotFoundException>(
-            () => new CreateReportVersionHandler(_defs, _versions, _uow, _clock, _access, _user)
+            () => new CreateReportVersionHandler(_definitions, _defs, _versions, _uow, _clock, _access, _user)
                 .HandleAsync(77, command, CancellationToken.None));
 
         Assert.Equal(ErrorCodes.ReportNotFound, error.ErrorCode);
         Assert.Equal("err.ECR-RPT-0404.def", error.Details!["messageKey"]);
         Assert.Equal("77", error.Details["reportDefId"]);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public async Task Повторний_номер_версії_опису_дає_ключ_каталогу_і_нічого_не_додає()
+    {
+        _defs.FindAsync(5, Arg.Any<CancellationToken>()).Returns(new ReportDef(
+            Ecr.Domain.ValueObjects.EcrCode.Create("RPT5"),
+            new Ecr.Domain.ValueObjects.LocalizedText(new Dictionary<string, string> { ["en"] = "Report" }),
+            false));
+        _definitions.VersionExistsAsync(5, "2.0", Arg.Any<CancellationToken>()).Returns(true);
+
+        var command = new CreateReportVersionCommand("2.0", Columns(), Rules: null);
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => new CreateReportVersionHandler(_definitions, _defs, _versions, _uow, _clock, _access, _user)
+                .HandleAsync(5, command, CancellationToken.None));
+
+        Assert.Equal(ErrorCodes.ReportDefDuplicate, error.ErrorCode);
+        Assert.Equal("err.ECR-RPT-4091.version", error.Details!["messageKey"]);
+        Assert.Equal("2.0", error.Details["version"]);
+        _versions.DidNotReceive().Add(Arg.Any<ReportVersion>());
     }
 
     [Fact]

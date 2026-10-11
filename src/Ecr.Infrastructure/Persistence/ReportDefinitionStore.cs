@@ -89,6 +89,16 @@ public sealed class ReportDefinitionStore(EcrDbContext db) : IReportDefinitionSt
         return db.ReportDefs.AsNoTracking().AnyAsync(d => d.Code == code, ct);
     }
 
+    /// <inheritdoc />
+    public Task<bool> VersionExistsAsync(int reportDefId, string version, CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(version);
+
+        // ⚠ Без фільтра на стан: номер тримає УНІКАЛЬНИЙ індекс `UQ_ReportVersion` (опис + номер),
+        // і чернетка займає його так само, як опублікована версія.
+        return db.ReportVersions.AsNoTracking().AnyAsync(v => v.ReportDefId == reportDefId && v.Version == version, ct);
+    }
+
     /// <summary>Стеля переліку описів звітів.</summary>
     private const int MaxDefinitions = 500;
 
