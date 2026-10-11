@@ -341,6 +341,9 @@ export type SaveCalculationBindingRequest = Schemas['SaveCalculationBindingReque
 /** Число, яке дав актуальний прогін розрахунку на документі. */
 export type CalculationResultDto = Schemas['CalculationResultDto'];
 
+/** Стан актуального прогону документа за період: рядки без правила розрахунку (D14). */
+export type CalculationRunStatusDto = Schemas['CalculationRunStatusDto'];
+
 /** Diff публікації методології: що саме зміниться в числах (`ФВ-9.6`). */
 export type MethodologyPublicationDiff = Schemas['MethodologyPublicationDiff'];
 
