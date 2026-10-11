@@ -84,6 +84,14 @@ public static class RecalculationPlanBuilder
             // з тієї, де сталася правка. Один спільний перелік рядків давав би
             // формулі, що читає сусідню таблицю, чужі ідентифікатори — тобто
             // ребро графа в нікуди, і формула не перераховувалася б ніколи.
+            // ⛔ D3: залежність від колонки без конкретного рядка — ще й колонковий індекс, незалежно від
+            // того, чи є в таблиці живі рядки: адреса видаленого рядка в `_byCell` відсутня, і без цього
+            // ребра видалення рядка не перераховувало б залежних підсумків.
+            if (dependency.RowKey is null && dependency.ColumnDefId is { } wholeColumnId)
+            {
+                plan.DependsOnColumn(formulaId, wholeColumnId);
+            }
+
             if (dependency.TableDefId is { } targetTable
                 && rowIdsByTable.TryGetValue(targetTable, out var rowIds))
             {
