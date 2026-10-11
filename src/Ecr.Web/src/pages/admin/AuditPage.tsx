@@ -12,7 +12,13 @@ import {
 import type { CellChangePage } from '@/api/types';
 import { useAuthorOptions } from '@/features/audit/authorOptions';
 import { CellChangesTable, originLabel } from '@/features/audit/CellChangesTable';
-import { cellChangeOrigins, cellChangesQuery, isSingleCell, useCellChanges } from '@/features/audit/api';
+import {
+  archiveWindow,
+  cellChangeOrigins,
+  cellChangesQuery,
+  isSingleCell,
+  useCellChanges,
+} from '@/features/audit/api';
 import { FilterHints, FilterInline, FilterRow, readerOnlyDescription } from '@/shared/ui/FilterBar';
 import { SecurityEventsPanel } from '@/features/audit/SecurityEventsPanel';
 import { StructureChangesPanel } from '@/features/audit/StructureChangesPanel';
@@ -310,6 +316,21 @@ export function AuditPage(): JSX.Element {
             </Badge>
           </FilterInline>
         )}
+        {/* НФ-8.9.6 / D-247: вікно за межею «гарячого» журналу — читається з архіву аудиту. Дати
+            лишаються звичайними полями «From/To»: кнопка лише ставить їх на 90 днів перед межею архіву. */}
+        <FilterInline>
+          <Button
+            variant="light"
+            title={t('audit.archiveWindowHint')}
+            data-audit-archive-window=""
+            onClick={() => {
+              const range = archiveWindow();
+              setParams({ from: range.from, to: range.to });
+            }}
+          >
+            {t('audit.archiveWindow')}
+          </Button>
+        </FilterInline>
         <FilterInline>
           <Button
             variant="subtle"
