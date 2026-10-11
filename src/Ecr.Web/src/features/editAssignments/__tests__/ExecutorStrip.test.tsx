@@ -58,7 +58,7 @@ function mockApi(
 
         if (options.listStatus !== undefined && options.listStatus !== 200) {
           return new Response(
-            JSON.stringify({ title: 'x', status: options.listStatus, errorCode: 'ECR-GEN-0404', correlationId: 'c' }),
+            JSON.stringify({ title: 'x', status: options.listStatus, errorCode: 'ECR-DOC-0404', correlationId: 'c' }),
             { status: options.listStatus, headers: { 'Content-Type': 'application/problem+json' } },
           );
         }
@@ -74,7 +74,7 @@ function mockApi(
 
         if (options.fillStatus !== undefined && options.fillStatus !== 200) {
           return new Response(
-            JSON.stringify({ title: 'x', status: options.fillStatus, errorCode: 'ECR-ACCS-0404', correlationId: 'c' }),
+            JSON.stringify({ title: 'x', status: options.fillStatus, errorCode: 'ECR-DOC-0404', correlationId: 'c' }),
             { status: options.fillStatus, headers: { 'Content-Type': 'application/problem+json' } },
           );
         }

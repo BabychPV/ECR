@@ -102,7 +102,7 @@ describe('EditAssignmentsSection', () => {
   });
 
   it.each([404, 403])('%i - тихий порожній стан: без помилки й без секцій (передач на стенді ще немає)', async (status) => {
-    show({ code: 'ECR-GEN-0404' }, status);
+    show({ code: 'ECR-DOC-0404' }, status);
 
     await waitFor(() => expect(calls).toHaveLength(1));
     await new Promise((resolve) => setTimeout(resolve, 20));
