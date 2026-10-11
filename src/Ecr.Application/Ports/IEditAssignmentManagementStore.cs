@@ -20,6 +20,19 @@ public interface IEditAssignmentManagementStore
     /// <summary>Документ як посилання для авторизації; <c>null</c> — документа немає.</summary>
     public Task<EditAssignmentDocumentRef?> FindDocumentAsync(long documentId, CancellationToken ct);
 
+    /// <summary>
+    /// Блокує рядок документа (<c>UPDLOCK</c>) до коміту транзакції; <c>false</c> — документа вже немає.
+    /// Створення/зміна передачі йде під цим блокуванням: видалення документа (воно бере те саме)
+    /// не може проскочити між перевіркою і вставкою (аудит P2).
+    /// </summary>
+    public Task<bool> LockDocumentAsync(long documentId, CancellationToken ct);
+
+    /// <summary>
+    /// Блокує рядки виконавців передачі (<c>UPDLOCK</c>) до коміту. Викликається одразу після взяття рядка
+    /// передачі: порядок блокувань structure → header → sheet-edit → assignment → recipients (EA-B).
+    /// </summary>
+    public Task LockRecipientsAsync(long assignmentId, CancellationToken ct);
+
     /// <summary>Передача документа за ключем зрізу — з блокуванням, відстежується; <c>null</c>, якщо немає.</summary>
     public Task<EditAssignment?> FindBySliceKeyForUpdateAsync(long documentId, string sliceKey, CancellationToken ct);
 

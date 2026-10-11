@@ -249,10 +249,23 @@ public sealed class UpsertEditAssignmentHandler(
         var now = clock.UtcNow;
         EditAssignment? result = null;
 
+        try
+        {
         await uow.ExecuteInTransactionAsync(async innerCt =>
         {
+            // ⛔ Аудит P2: документ могли видалити між перевіркою прав і вставкою — блокуємо його рядок.
+            if (!await store.LockDocumentAsync(documentId, innerCt).ConfigureAwait(false))
+            {
+                throw EditAssignmentAccess.NotFound(documentId);
+            }
+
             var existing = await store
                 .FindBySliceKeyForUpdateAsync(documentId, slice.Key, innerCt).ConfigureAwait(false);
+
+            if (existing is not null)
+            {
+                await store.LockRecipientsAsync(existing.Id, innerCt).ConfigureAwait(false);
+            }
 
             var events = new List<SecurityEventRecord>();
             var newlyAssigned = new List<int>();
@@ -357,6 +370,12 @@ public sealed class UpsertEditAssignmentHandler(
 
             await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
         }, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (IsUniqueViolation(ex))
+        {
+            // Двоє створили той самий зріз одночасно (або дубль іншого регістру): друга сторона бачить конфлікт.
+            throw EditAssignmentAccess.Stale(string.Empty);
+        }
 
         var ids = new HashSet<int> { result!.DelegatedByUserId };
         ids.UnionWith(result.Recipients.Select(r => r.UserId));
@@ -377,6 +396,20 @@ public sealed class UpsertEditAssignmentHandler(
                 via,
             }),
             byUserId, currentUser.CorrelationId);
+
+    private static bool IsUniqueViolation(Exception ex)
+    {
+        for (var e = ex; e is not null; e = e.InnerException)
+        {
+            // 2601 — дубль унікального індексу, 2627 — порушення обмеження UNIQUE.
+            if (e.GetType().Name == "SqlException" && e.Message.Contains("duplicate key", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     private static BusinessRuleException RecipientInvalid()
         => EditAssignmentAccess.Invalid(
@@ -414,6 +447,7 @@ public sealed class DeleteEditAssignmentHandler(
         {
             var assignment = await assignments.FindForUpdateAsync(documentId, assignmentId, innerCt).ConfigureAwait(false)
                 ?? throw EditAssignmentAccess.NotFound(documentId);
+            await store.LockRecipientsAsync(assignment.Id, innerCt).ConfigureAwait(false);
 
             var events = assignment.Recipients
                 .Select(r => new SecurityEventRecord(
@@ -493,6 +527,8 @@ public sealed class FillEditAssignmentHandler(
                 throw EditAssignmentAccess.NotFound(documentId);
             }
 
+            await store.LockRecipientsAsync(assignment.Id, innerCt).ConfigureAwait(false);
+
             result = assignment;
             if (!assignment.FillRecipient(userId, now))
             {
@@ -567,6 +603,7 @@ public sealed class ValidateEditAssignmentHandler(
         {
             var assignment = await assignments.FindForUpdateAsync(documentId, assignmentId, innerCt).ConfigureAwait(false)
                 ?? throw EditAssignmentAccess.NotFound(documentId);
+            await store.LockRecipientsAsync(assignment.Id, innerCt).ConfigureAwait(false);
             result = assignment;
 
             if (assignment.ValidationStatus == EditAssignmentValidationStatus.Validated)
@@ -672,6 +709,7 @@ public sealed class ReturnEditAssignmentHandler(
         {
             var assignment = await assignments.FindForUpdateAsync(documentId, assignmentId, innerCt).ConfigureAwait(false)
                 ?? throw EditAssignmentAccess.NotFound(documentId);
+            await store.LockRecipientsAsync(assignment.Id, innerCt).ConfigureAwait(false);
             result = assignment;
 
             EditAssignmentAccess.RequireVersion(request.BaseVersion, assignment);
