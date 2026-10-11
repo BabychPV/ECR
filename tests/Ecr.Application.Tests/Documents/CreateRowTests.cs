@@ -160,6 +160,21 @@ public sealed class CreateRowTests
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
     [Trait("Requirement", "ФВ-3.2")]
+    public async Task Порядковий_номер_нового_рядка_це_найбільший_наявний_плюс_один_а_не_кількість_плюс_один()
+    {
+        // D3: після видалення живих рядків менше, ніж найбільший номер, і «кількість + 1» повторила б номер
+        // наявного рядка. Живих тут 2, найбільший номер 7 → новий має бути 8 (а не 3).
+        Arrange(TableRowMode.Dynamic, maxRows: null, "a", "b");
+        _rows.GetMaxOrdinalAsync(TableInstance, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>()).Returns(7);
+
+        await Handler().HandleAsync(700, TableInstance, requestedKey: null, Profile(), CancellationToken.None);
+
+        await _rows.Received(1).CreateRowAsync(
+            TableInstance, Arg.Any<PeriodKey>(), Arg.Any<RowKey>(), 8, Arg.Any<CancellationToken>());
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "ФВ-3.2")]
     public async Task Перевищення_MaxDynamicRows_відхиляється()
     {
         Arrange(TableRowMode.Dynamic, maxRows: 2, "a", "b");

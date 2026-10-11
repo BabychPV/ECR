@@ -61,6 +61,10 @@ public sealed record UserIdResponse(int UserId);
 /// <param name="RowKey">Ключ рядка; на нього посилаються формули й аудит.</param>
 public sealed record RowKeyResponse(string RowKey);
 
+/// <summary>Видалений рядок динамічної таблиці (D3).</summary>
+/// <param name="RecalculationJobId">Задача перерахунку, поставлена видаленням; <c>null</c> — таблиця без колонок.</param>
+public sealed record DeleteRowResponse(string? RecalculationJobId);
+
 /// <summary>
 /// Розпочатий сеанс симуляції.
 /// </summary>

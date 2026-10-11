@@ -137,6 +137,7 @@ public static class DependencyInjection
         services.AddScoped<GetDocumentHandler>();
         services.AddScoped<GetTableSliceHandler>();
         services.AddScoped<CreateRowHandler>();
+        services.AddScoped<DeleteRowHandler>();
 
         // Вирази, валідація і перерахунок (модулі 2.6–2.8)
         services.AddScoped<Validation.ValidationEngine>();

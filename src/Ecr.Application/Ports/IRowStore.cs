@@ -127,6 +127,35 @@ public interface IRowStore
         long tableInstanceId, PeriodKey periodKey, RowKey rowKey, int ordinal, CancellationToken ct);
 
     /// <summary>
+    /// Найбільший <c>Ordinal</c> серед УСІХ рядків екземпляра в періоді, включно з
+    /// видаленими; <c>0</c> — рядків немає (D3).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Включно з видаленими навмисно: «живих + 1» після видалення дає номер, що вже
+    /// носив видалений рядок, і порядковий номер у аудиті перестає вказувати на один
+    /// рядок. Запит несе <c>PeriodKey</c> (ключ партиції).
+    /// </remarks>
+    public Task<int> GetMaxOrdinalAsync(long tableInstanceId, PeriodKey periodKey, CancellationToken ct);
+
+    /// <summary>
+    /// Живий (не видалений) рядок екземпляра за ключем; <c>null</c> — такого немає
+    /// АБО його вже видалено (D3: зовні це одна й та сама відповідь).
+    /// </summary>
+    public Task<LiveRowRef?> FindLiveRowAsync(
+        long tableInstanceId, PeriodKey periodKey, string rowKey, CancellationToken ct);
+
+    /// <summary>
+    /// М'яко видаляє рядок (<c>TableRow.SoftDelete</c>) і зберігає зміну в поточній
+    /// транзакції; <c>false</c> — живого рядка з таким <c>Id</c> уже немає (D3).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Комірки й <c>RowKey</c> лишаються: <c>UQ_TableRow_Key</c> не знає
+    /// <c>IsDeleted</c>, тож ключ видаленого рядка ЗАЙНЯТИЙ, а читачі (усі з
+    /// <c>!IsDeleted</c>) рядок не бачать.
+    /// </remarks>
+    public Task<bool> SoftDeleteRowAsync(long rowId, PeriodKey periodKey, CancellationToken ct);
+
+    /// <summary>
     /// Створює кілька рядків ОДНИМ пакетом; <c>Id</c> повертаються в тому
     /// самому порядку, що й <paramref name="rowKeys"/>.
     /// </summary>
@@ -264,6 +293,13 @@ public interface IRowStore
 /// <param name="PeriodKey">Період екземпляра; він же ключ партиції.</param>
 public sealed record TableInstanceRef(
     long TableInstanceId, long DocumentId, int TableDefId, int TemplateVersionId, int PeriodKey);
+
+/// <summary>Живий рядок екземпляра для видалення (D3).</summary>
+/// <param name="Id"><c>TableRow.Id</c>.</param>
+/// <param name="Ordinal">Порядковий номер.</param>
+/// <param name="RowDefId">Опис рядка з шаблону; <c>null</c> — рядок додав користувач.</param>
+/// <param name="IsSourceManaged">Рядок створила подія джерела (<c>ext.SourceEventLink</c>) і веде її синхронізація.</param>
+public sealed record LiveRowRef(long Id, int Ordinal, int? RowDefId, bool IsSourceManaged);
 
 /// <summary>Набір нових рядків одного екземпляра для <see cref="IRowStore.CreateRowsBatchAsync"/>.</summary>
 /// <param name="TableInstanceId">Екземпляр таблиці.</param>

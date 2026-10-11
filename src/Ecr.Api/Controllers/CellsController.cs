@@ -1,4 +1,4 @@
-﻿using Ecr.Application.Documents;
+using Ecr.Application.Documents;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
 using Ecr.Domain.Errors;
@@ -17,6 +17,7 @@ public sealed class CellsController(
     PatchCellsHandler patchHandler,
     GetTableSliceHandler sliceHandler,
     CreateRowHandler rowHandler,
+    DeleteRowHandler deleteRowHandler,
     IAccessDecisionService access,
     IRowStore rows,
     Ecr.Api.Auth.CurrentUser currentUser) : ControllerBase
@@ -138,6 +139,27 @@ public sealed class CellsController(
             new Contracts.RowKeyResponse(rowKey.Value));
     }
 
+    /// <summary>М'яко видаляє динамічний рядок таблиці (D3).</summary>
+    /// <remarks>
+    /// Лише рядки, додані користувачем; лише поки аркуш у Draft/Rejected; право — те саме, що на створення рядка.
+    /// Рядка немає або його вже видалено — однакова 404 (нерозкриття).
+    /// </remarks>
+    [HttpDelete("tables/{tableInstanceId:long}/rows/{rowKey}")]
+    [ProducesResponseType<Contracts.DeleteRowResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<ActionResult<Contracts.DeleteRowResponse>> DeleteRow(
+        long documentId, long tableInstanceId, string rowKey, CancellationToken ct)
+    {
+        var profile = await ProfileAsync(ct).ConfigureAwait(false);
+
+        var result = await deleteRowHandler
+            .HandleAsync(documentId, tableInstanceId, rowKey, profile, ct)
+            .ConfigureAwait(false);
+
+        return new Contracts.DeleteRowResponse(result.RecalculationJobId);
+    }
     /// <summary>Профіль доступу поточного користувача.</summary>
     private Task<AccessProfile> ProfileAsync(CancellationToken ct)
         => access.BuildProfileAsync(

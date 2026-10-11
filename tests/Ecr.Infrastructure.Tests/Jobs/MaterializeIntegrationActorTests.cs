@@ -829,6 +829,14 @@ public sealed class MaterializeIntegrationActorTests(SqlServerFixture sql)
             IReadOnlyList<RowCreationBatch> batches, CancellationToken ct)
             => inner.CreateRowsBatchAsync(batches, ct);
 
+        public Task<int> GetMaxOrdinalAsync(long tableInstanceId, PeriodKey periodKey, CancellationToken ct)
+            => inner.GetMaxOrdinalAsync(tableInstanceId, periodKey, ct);
+
+        public Task<LiveRowRef?> FindLiveRowAsync(long tableInstanceId, PeriodKey periodKey, string rowKey, CancellationToken ct)
+            => inner.FindLiveRowAsync(tableInstanceId, periodKey, rowKey, ct);
+
+        public Task<bool> SoftDeleteRowAsync(long rowId, PeriodKey periodKey, CancellationToken ct)
+            => inner.SoftDeleteRowAsync(rowId, periodKey, ct);
         public Task TouchRowsAsync(IReadOnlyList<long> rowIds, PeriodKey periodKey, DateTime utcNow, CancellationToken ct)
             => inner.TouchRowsAsync(rowIds, periodKey, utcNow, ct);
 

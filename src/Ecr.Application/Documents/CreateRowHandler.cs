@@ -295,10 +295,17 @@ public sealed class CreateRowHandler(
                 });
         }
 
-        // 6. Id береться з SEQUENCE ДО вставки — саме це дозволяє вантажити
+        // 6. Порядковий номер — НАЙБІЛЬШИЙ наявний + 1 (D3), а не кількість + 1: після видалення рядка
+        //    «живих + 1» повторював би номер уже наявного рядка (і номер видаленого в аудиті). Рахується
+        //    під тим самим блокуванням аркуша, що й вставка, тож два одночасні створення номер не задвоюють.
+        var ordinal = await rowStore
+            .GetMaxOrdinalAsync(tableInstanceId, PeriodKeyOf(instance), ct)
+            .ConfigureAwait(false) + 1;
+
+        // 7. Id береться з SEQUENCE ДО вставки — саме це дозволяє вантажити
         //    рядок і його комірки одним проходом SqlBulkCopy.
         await rowStore.CreateRowAsync(tableInstanceId, PeriodKeyOf(instance), key,
-                                      ordinal: existing.Count + 1, ct).ConfigureAwait(false);
+                                      ordinal, ct).ConfigureAwait(false);
 
         // ⛔ Новий рядок — це зміна документа (`H-23d`). Без цього «додав рядок»
         // не змінювало ані `ModifiedAt`, ані автора: у переліку документ

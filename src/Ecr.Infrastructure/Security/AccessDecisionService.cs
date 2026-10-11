@@ -1610,6 +1610,7 @@ public sealed class AccessDecisionService(
                where tableInstanceIds.Contains(row.TableInstanceId)
                      && cell.PeriodKeyValue == periodKey.Value
                      && row.PeriodKeyValue == periodKey.Value
+                     && !row.IsDeleted
                      && cell.ValueRegistryEntryId != null
                      && sourceColumns.Contains(cell.ColumnDefId)
                select new SourceWindowRow(

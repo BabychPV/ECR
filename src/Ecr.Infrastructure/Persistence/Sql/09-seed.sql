@@ -7823,6 +7823,18 @@ USING (VALUES
     -- COLL:rpt-version-race ── гонка двох створень версії звіту (UQ_ReportVersion) -> 409; ru/kz - порцією COLL:rpt-version-race нижче ──
     ,(N'err.ECR-RPT-4091.versionConcurrent', N'en', N'Someone else has just created a version with this number in this report definition. Reload the definition and pick another version number.', 1)
     -- COLL:rpt-version-race ── кінець секції ──
+    -- COLL:d3rowdelete ── D3-A: видалення динамічного рядка документа (кнопка, підтвердження, відмови); ru/kz — порцією COLL:d3rowdelete нижче ──
+    ,(N'grid.deleteRow', N'en', N'Delete row', 1)
+    ,(N'grid.deleteRowHint', N'en', N'Select a cell of a row you added to delete it.', 1)
+    ,(N'grid.deleteRowTitle', N'en', N'Delete row “{row}”?', 1)
+    ,(N'grid.deleteRowConsequence', N'en', N'The row disappears from the table, totals and reports. Its values are kept in the audit trail.', 1)
+    ,(N'grid.deleteRowNote', N'en', N'There is no undo for this action. Only a row you added can be deleted, and only while the sheet is a draft or rejected.', 1)
+    ,(N'grid.deleteRowVerb', N'en', N'Delete row', 1)
+    ,(N'err.ECR-ACCS-0403.deleteRowDenied', N'en', N'A row cannot be deleted from this table: {reason}.', 1)
+    ,(N'err.ECR-ROW-0404.rowNotFound', N'en', N'The row was not found in this table. It may have been deleted already.', 1)
+    ,(N'err.ECR-ROW-0409.templateRowNotDeletable', N'en', N'This row comes from the template and cannot be deleted.', 1)
+    ,(N'err.ECR-ROW-0409.sourceRowNotDeletable', N'en', N'This row is maintained by a source event and cannot be deleted by hand.', 1)
+    -- COLL:d3rowdelete ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -19688,6 +19700,34 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:rpt-version-race ── кінець секції ──
+-- COLL:d3rowdelete ── ru/kz D3-A: видалення динамічного рядка документа; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'grid.deleteRow', N'ru', N'Удалить строку'),
+    (N'grid.deleteRow', N'kz', N'Жолды жою'),
+    (N'grid.deleteRowHint', N'ru', N'Выберите ячейку строки, которую вы добавили, чтобы удалить её.'),
+    (N'grid.deleteRowHint', N'kz', N'Жолды жою үшін өзіңіз қосқан жолдың ұяшығын таңдаңыз.'),
+    (N'grid.deleteRowTitle', N'ru', N'Удалить строку «{row}»?'),
+    (N'grid.deleteRowTitle', N'kz', N'«{row}» жолын жою керек пе?'),
+    (N'grid.deleteRowConsequence', N'ru', N'Строка исчезнет из таблицы, итогов и отчётов. Её значения сохранятся в журнале аудита.'),
+    (N'grid.deleteRowConsequence', N'kz', N'Жол кестеден, қорытындылардан және есептерден жоғалады. Оның мәндері аудит журналында сақталады.'),
+    (N'grid.deleteRowNote', N'ru', N'Отменить это действие нельзя. Удалить можно только добавленную вами строку и только пока лист в черновике или отклонён.'),
+    (N'grid.deleteRowNote', N'kz', N'Бұл әрекетті болдырмау мүмкін емес. Тек өзіңіз қосқан жолды және тек парақ жоба немесе қабылданбаған күйде болғанда жоюға болады.'),
+    (N'grid.deleteRowVerb', N'ru', N'Удалить строку'),
+    (N'grid.deleteRowVerb', N'kz', N'Жолды жою'),
+    (N'err.ECR-ACCS-0403.deleteRowDenied', N'ru', N'Из этой таблицы нельзя удалить строку: {reason}.'),
+    (N'err.ECR-ACCS-0403.deleteRowDenied', N'kz', N'Бұл кестеден жолды жоюға болмайды: {reason}.'),
+    (N'err.ECR-ROW-0404.rowNotFound', N'ru', N'Строка в этой таблице не найдена. Возможно, она уже удалена.'),
+    (N'err.ECR-ROW-0404.rowNotFound', N'kz', N'Бұл кестеде жол табылмады. Ол бұрын жойылған болуы мүмкін.'),
+    (N'err.ECR-ROW-0409.templateRowNotDeletable', N'ru', N'Эта строка берётся из шаблона, её нельзя удалить.'),
+    (N'err.ECR-ROW-0409.templateRowNotDeletable', N'kz', N'Бұл жол үлгіден алынған, оны жоюға болмайды.'),
+    (N'err.ECR-ROW-0409.sourceRowNotDeletable', N'ru', N'Эта строка ведётся событием источника, её нельзя удалить вручную.'),
+    (N'err.ECR-ROW-0409.sourceRowNotDeletable', N'kz', N'Бұл жолды дереккөз оқиғасы жүргізеді, оны қолмен жоюға болмайды.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:d3rowdelete ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

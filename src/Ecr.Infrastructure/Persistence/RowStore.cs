@@ -356,6 +356,50 @@ public sealed class RowStore(
     }
 
     /// <inheritdoc />
+    public async Task<int> GetMaxOrdinalAsync(long tableInstanceId, PeriodKey periodKey, CancellationToken ct)
+    {
+        // ⚠ ВСІ рядки, включно з видаленими (див. порт): навмисно без `!IsDeleted`.
+        var max = await db.TableRows.AsNoTracking()
+            .Where(r => r.PeriodKeyValue == periodKey.Value && r.TableInstanceId == tableInstanceId)
+            .MaxAsync(r => (int?)r.Ordinal, ct)
+            .ConfigureAwait(false);
+
+        return max ?? 0;
+    }
+
+    /// <inheritdoc />
+    public Task<LiveRowRef?> FindLiveRowAsync(
+        long tableInstanceId, PeriodKey periodKey, string rowKey, CancellationToken ct)
+        => RowsQuery(db, tableInstanceId, periodKey)
+            .Where(r => r.RowKeyValue == rowKey)
+            .Select(r => new LiveRowRef(
+                r.Id, r.Ordinal, r.RowDefId,
+                // Рядок, який веде синхронізація подій джерела: ручне видалення зламало б її (ключ зайнятий).
+                db.SourceEventLinks.Any(l => l.TableInstanceId == r.TableInstanceId
+                                             && l.PeriodKey == r.PeriodKeyValue
+                                             && l.RowKey == r.RowKeyValue)))
+            .FirstOrDefaultAsync(ct);
+
+    /// <inheritdoc />
+    public async Task<bool> SoftDeleteRowAsync(long rowId, PeriodKey periodKey, CancellationToken ct)
+    {
+        // ⚠ З ключем партиції (`PeriodKey`) і лише ЖИВИЙ: повторне видалення — `false`, не помилка бази.
+        var row = await db.TableRows
+            .FirstOrDefaultAsync(r => r.PeriodKeyValue == periodKey.Value && r.Id == rowId && !r.IsDeleted, ct)
+            .ConfigureAwait(false);
+
+        if (row is null)
+        {
+            return false;
+        }
+
+        row.SoftDelete(clock.UtcNow);
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
+
+        return true;
+    }
+
+    /// <inheritdoc />
     /// <remarks>
     /// <c>Id</c> береться з <c>SEQUENCE</c> ДО вставки (B02 §2.3): так рядок і
     /// його комірки можна завантажити одним проходом, без другого кроку з
