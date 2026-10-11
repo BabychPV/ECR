@@ -31,6 +31,7 @@ import { useDebouncedFilter } from '@/shared/ui/useDebouncedFilter';
 import { useUrlNumber, useUrlParamsSetter, useUrlState } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
 import { fetchAllProjects } from '@/features/projects/allProjects';
+import { DisabledReason } from '@/features/common/DisabledReason';
 
 /**
  * Діалог створення документа — за `import()` (`D-132`), як і решта
@@ -133,6 +134,18 @@ export function DocumentsPage(): JSX.Element {
     // ⛔ `X-07`: усі сторінки, а не перші 200 мовчки (`fetchAllProjects`).
     queryFn: fetchAllProjects,
   });
+
+  /*
+   * ⛔ FP-3 (прохід «від першого обличчя» 2026-10-11, P2). Користувач без жодного гранта на
+   * проєкт (вбудовані `SystemAdministrator`/`TemplateAdministrator`/`PeriodAdministrator` у
+   * щойно розгорнутій системі) бачив «документів немає — вони з'являться, щойно період
+   * відкрито», тобто підказку про ПЕРІОД там, де справжня причина — ДОСТУП. Перелік проєктів
+   * порожній лише за відсутності гранта (сервер фільтрує його за грантами), тож це і є ознака.
+   *
+   * ⚠ Лише коли перелік проєктів УСПІШНО прочитано й порожній: на відмові чи в дорозі
+   * твердження про доступ було б неправдою про дані.
+   */
+  const noProjects = projects.isSuccess && projects.data.items.length === 0;
 
   /*
    * ⛔ `U-10`. Перелік відкривався з ПОРОЖНІМ полем «Period», тому колонка
@@ -286,15 +299,20 @@ export function DocumentsPage(): JSX.Element {
             {/* ⛔ Створення документа не мало в інтерфейсі жодної кнопки
                 (`A7-42`): система, уся суть якої — заповнення документів,
                 не давала створити перший. */}
+            {/* ⛔ FP-3 (прохід «від першого обличчя» 2026-10-11): без жодного доступного проєкту
+                створювати документ немає де — діалог відкривався б із порожнім вибором проєкту.
+                Кнопка названа причину, а не мовчить. */}
             {can(session.data, 'Document.Create') && session.data?.isSimulation !== true && (
-              <Button
-                onClick={() => {
-                  setCreatingRequested(true);
-                  setCreating(true);
-                }}
-              >
-                {t('documents.create')}
-              </Button>
+              <DisabledReason reason={noProjects ? t('documents.noProjects') : null}>
+                <Button
+                  onClick={() => {
+                    setCreatingRequested(true);
+                    setCreating(true);
+                  }}
+                >
+                  {t('documents.create')}
+                </Button>
+              </DisabledReason>
             )}
           </Group>
         }
@@ -366,8 +384,20 @@ export function DocumentsPage(): JSX.Element {
         error={query.error}
         data={query.data}
         isEmpty={(page) => page.items.length === 0}
-        emptyTitle={filters.active ? t('documents.noMatch') : t('documents.empty')}
-        emptyHint={filters.active ? t('documents.noMatchHint') : t('documents.emptyHint')}
+        emptyTitle={
+          filters.active
+            ? t('documents.noMatch')
+            : noProjects
+              ? t('documents.noProjects')
+              : t('documents.empty')
+        }
+        emptyHint={
+          filters.active
+            ? t('documents.noMatchHint')
+            : noProjects
+              ? t('documents.noProjectsHint')
+              : t('documents.emptyHint')
+        }
         emptyAction={
           filters.active ? (
             <Button variant="default" onClick={filters.reset}>
@@ -571,7 +601,11 @@ export function DocumentsPage(): JSX.Element {
 
       {creatingRequested && (
         <Suspense fallback={null}>
-          <CreateDocumentModal opened={creating} onClose={() => setCreating(false)} />
+          <CreateDocumentModal
+            opened={creating}
+            onClose={() => setCreating(false)}
+            preferredPeriodKey={periodKey}
+          />
         </Suspense>
       )}
     </>

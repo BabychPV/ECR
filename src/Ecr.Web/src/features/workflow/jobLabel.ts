@@ -33,6 +33,17 @@ const KindKeys: Record<string, string> = {
   IConsistencyCheckJob: 'jobs.kind.consistencyCheck',
   IOrphanScanJob: 'jobs.kind.orphanScan',
   IRegistryImpactRecalculationJob: 'jobs.kind.registryImpactRecalculation',
+  // ⛔ FP-7 (прохід «від першого обличчя» 2026-10-11): повторювані задачі реєструються КОНКРЕТНИМ
+  // класом, а не маркером-інтерфейсом (`typeof(TJob).FullName`), тож у переліку `/admin/jobs`
+  // стояли `NotificationJob`, `PeriodStateJob`, `RowWindowRefetchJob` поряд з «Recalculation».
+  ArchiveJob: 'jobs.kind.archive',
+  NotificationJob: 'jobs.kind.notification',
+  PartitionCheckJob: 'jobs.kind.partitionCheck',
+  PeriodStateJob: 'jobs.kind.periodState',
+  RegistrySyncJob: 'jobs.kind.registrySync',
+  ReportRetentionJob: 'jobs.kind.reportRetention',
+  ReportSnapshotFormatJob: 'jobs.kind.reportSnapshotFormat',
+  RowWindowRefetchJob: 'jobs.kind.rowWindowRefetch',
 };
 
 /** Просте ім'я типу з повного (`Ecr.Application.Ports.IRecalculationJob`). */

@@ -73,10 +73,12 @@ function mockFetch(isSimulation = false): void {
       }
 
       if (url.includes('/api/v1/projects')) {
-        return new Response(JSON.stringify({ items: [], nextCursor: null, totalCount: 0 }), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json' },
-        });
+        // ✎ FP-3: перелік проєктів не порожній — без жодного проєкту кнопка «Створити» недоступна
+        // (створювати немає де), а цей тест про ЛІНИВІСТЬ діалогу, а не про відсутність доступу.
+        return new Response(
+          JSON.stringify({ items: [{ id: 1, code: 'PRJ', status: 'Active' }], nextCursor: null, totalCount: 1 }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
       }
 
       return new Response(JSON.stringify(null), { status: 200 });
