@@ -67,7 +67,10 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
             .Where(d => d.Id == documentId)
             .Select(d => new
             {
-                d.Id, d.ProjectId, d.BusinessKey, d.CreatedAt, d.NameL10n,
+                d.Id, d.ProjectId, d.BusinessKey, d.CreatedAt, d.NameL10n, d.CreatedByUserId,
+                // EA-C: стан проєкту для canManageEditAccess — у тому самому запиті (без додаткового роундтрипу).
+                ProjectReadOnly = db.Projects.Where(p => p.Id == d.ProjectId)
+                    .Select(p => p.Status == ProjectStatus.Archived || p.IsArchiving).FirstOrDefault(),
                 // D-12: картка читає «коли й ким змінено» так само, як перелік (`ListAsync`); раніше ці поля тут
                 // не вибирались, і картка віддавала `null` усім. Звуженому читачеві їх знімає R-7 (`DocumentSheetVisibility.For`).
                 d.ModifiedAt,
@@ -124,7 +127,9 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
             ApproverDisplayName: document.Approver,
             ResultsStale: stale is null ? null : stale.ContainsKey(documentId),
             ResultsStaleSince: stale?.GetValueOrDefault(documentId),
-            TemplateVersion: document.TemplateVersion);
+            TemplateVersion: document.TemplateVersion,
+            OwnerUserId: document.CreatedByUserId,
+            ProjectIsReadOnly: document.ProjectReadOnly);
     }
 
 
