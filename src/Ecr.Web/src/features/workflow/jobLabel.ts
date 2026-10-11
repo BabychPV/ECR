@@ -47,7 +47,22 @@ function simpleTypeName(value: string): string {
 export function jobKindLabel(jobCode: string): string {
   const key = KindKeys[simpleTypeName(jobCode)];
 
-  return key === undefined ? simpleTypeName(jobCode) : t(key);
+  return key === undefined ? readableTypeName(simpleTypeName(jobCode)) : t(key);
+}
+
+/**
+ * Запасний підпис невідомого типу: `IRegistrySyncJob` → «Registry sync». Прибирає .NET-обгортку
+ * (`I…Job`) і розбиває PascalCase на слова — це не переклад і не вигадка, а та сама назва, лише
+ * читабельна. Нову задачу, якої немає в `KindKeys`, адміністратор бачить словами, а не ім'ям класу;
+ * ключ каталогу додають, коли потрібен переклад ru/kz.
+ */
+function readableTypeName(name: string): string {
+  const core = name.replace(/^I(?=[A-Z])/, '').replace(/Job$/, '');
+  const words = core.replace(/([a-z0-9])([A-Z])/g, '$1 $2').trim();
+
+  if (words === '') return name;
+
+  return words.charAt(0).toUpperCase() + words.slice(1).toLowerCase();
 }
 
 /** Формат `jobId` звичайної (не повторюваної) постановки — `Тип-GUID32`. */
