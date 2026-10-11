@@ -396,7 +396,7 @@ public sealed class LookupRegistryReferenceApiTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
-    public async Task Зміна_типу_наявної_колонки_на_Lookup_без_довідника_422_з_ключем()
+    public async Task Зміна_типу_наявної_колонки_на_Lookup_без_довідника_422_тип_незмінний()
     {
         var draft = await ArrangeAsync();
         using var app = new EcrApiFactory(sql);
@@ -406,7 +406,9 @@ public sealed class LookupRegistryReferenceApiTests(SqlServerFixture sql)
 
         var problem = await RejectedAsync(await PutColumnAsync(client, draft, "LK_TOLOOK", null));
 
-        Assert.Equal("err.ECR-TMPL-0422.lookupRegistryRequired", problem.GetProperty("messageKey").GetString());
+        // Тип наявної колонки незмінний (columnDataTypeImmutable), тож шлях «наявна → Lookup без довідника» закритий ще до
+        // guard-у null-цілі; guard покриває створення (тести вище).
+        Assert.Equal("err.ECR-TMPL-0422.columnDataTypeImmutable", problem.GetProperty("messageKey").GetString());
         await using var db = Context();
         Assert.Equal(
             CellDataType.Decimal,
