@@ -7,6 +7,7 @@ import { testTheme } from '@/test/render';
 import { EditAssignmentsSection } from '@/features/jobs/EditAssignmentsSection';
 import { editAssignmentHref, pendingEditAssignmentCount } from '@/features/editAssignments/model';
 import type { MyEditAssignmentsView } from '@/features/editAssignments/types';
+import { myAssignment } from '@/features/editAssignments/__tests__/fixture';
 
 /**
  * Секції передач у «My tasks» (EA-5c): мок `GET /api/v1/me/edit-assignments` на контракті з DESIGN-OWNER-EDIT-GRANTS.
@@ -17,18 +18,25 @@ const calls: string[] = [];
 
 const payload: MyEditAssignmentsView = {
   assignedToMe: [
-    { assignmentId: 1, documentId: 11, documentKey: 'AIR-2026-01', slice: 'January', status: 'Assigned', note: 'due 5th' },
-    {
+    myAssignment({ assignmentId: 1, documentId: 11, documentKey: 'AIR-2026-01', month: 1, note: 'due 5th' }),
+    myAssignment({
       assignmentId: 2,
       documentId: 12,
       documentKey: 'AIR-2026-02',
-      slice: 'February',
+      month: 2,
       status: 'Returned',
       returnReason: '<b>Fix</b> units',
-    },
+    }),
   ],
   awaitingMyValidation: [
-    { assignmentId: 3, documentId: 13, documentKey: 'AIR-2026-03', slice: 'March', status: 'Filled', filledAt: '2026-10-07T09:30:00Z' },
+    myAssignment({
+      assignmentId: 3,
+      documentId: 13,
+      documentKey: 'AIR-2026-03',
+      month: 3,
+      status: 'Filled',
+      statusChangedAt: '2026-10-07T09:30:00Z',
+    }),
   ],
 };
 

@@ -21,6 +21,7 @@ const Document: DocumentSummary = {
   sheetStates: { GEN: 'Draft' },
   hasLateEdits: false,
   ownerDisplayName: 'Owner Olena',
+  canManageEditAccess: true,
 };
 
 function Search(): JSX.Element {
@@ -62,14 +63,15 @@ afterEach(() => {
 });
 
 describe('useEditAssignmentsAction', () => {
-  it('без гранта Write на проєкт пункту немає', async () => {
-    show('Read');
+  it('сервер каже «не керує» (canManageEditAccess=false) - пункту немає, хоч би грант був Manage', async () => {
+    show('Manage', { document: { ...Document, canManageEditAccess: false } });
+    await none();
+  });
 
-    await waitFor(() => expect(vi.mocked(fetch)).toHaveBeenCalled());
-    await new Promise((resolve) => setTimeout(resolve, 20));
-
-    expect(screen.queryByRole('menuitem', { name: '⟦editAssign.menu⟧' })).toBeNull();
-    cleanup();
+  it('поле відсутнє (старий сервер) - пункту немає', async () => {
+    const { canManageEditAccess: _omit, ...legacy } = Document;
+    show('Manage', { document: legacy });
+    await none();
   });
 
   const none = async (): Promise<void> => {
@@ -84,18 +86,7 @@ describe('useEditAssignmentsAction', () => {
     await none();
   });
 
-  it('Write без ім\'я автора (звужена роль) не керує: пункту немає', async () => {
-    show('Write', { document: { ...Document, ownerDisplayName: null } });
-    await none();
-  });
-
-  it('Manage керує і без ім\'я автора', async () => {
-    show('Manage', { document: { ...Document, ownerDisplayName: null } });
-
-    expect(await screen.findByRole('menuitem', { name: '⟦editAssign.menu⟧' })).toBeDefined();
-  });
-
-  it('з Write пункт є; клік пише ?panel=edit-assignments і відкриває шторку з даними', async () => {
+  it('canManageEditAccess=true: пункт є; клік пише ?panel=edit-assignments і відкриває шторку з даними', async () => {
     show('Write');
 
     fireEvent.click(await screen.findByRole('menuitem', { name: '⟦editAssign.menu⟧' }));

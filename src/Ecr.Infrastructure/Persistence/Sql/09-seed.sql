@@ -7725,10 +7725,6 @@ USING (VALUES
     ,(N'editAssign.removeText', N'en', N'Executors will no longer be able to edit these cells. Values already entered stay in the document.', 1)
     ,(N'editAssign.empty', N'en', N'Nothing is handed over yet', 1)
     ,(N'editAssign.emptyHint', N'en', N'Use “Assign month…” to hand a month to someone to fill in.', 1)
-    ,(N'editAssign.visibility.Visible', N'en', N'sees the document', 1)
-    ,(N'editAssign.visibility.NotVisible', N'en', N'does not see the document', 1)
-    ,(N'editAssign.visibility.Unknown', N'en', N'visibility unknown', 1)
-    ,(N'editAssign.visibilityHint', N'en', N'Ask an administrator to grant the Executor role to people who do not see the document.', 1)
     ,(N'editAssign.done.assigned', N'en', N'Assigned months: {count}', 1)
     ,(N'editAssign.done.validated', N'en', N'{slice} validated', 1)
     ,(N'editAssign.done.returned', N'en', N'{slice} returned for rework', 1)
@@ -7758,7 +7754,6 @@ USING (VALUES
     ,(N'editAssign.wizard.summary.months', N'en', N'Months', 1)
     ,(N'editAssign.wizard.summary.sheet', N'en', N'Only sheet', 1)
     ,(N'editAssign.wizard.summary.fromSet', N'en', N'From set “{name}”', 1)
-    ,(N'editAssign.wizard.summary.visibility', N'en', N'Who sees the document', 1)
     ,(N'editAssign.wizard.summary.exclusive', N'en', N'Others cannot edit these cells until the month is validated or taken back.', 1)
     ,(N'editAssign.wizard.summary.shared', N'en', N'Others with editing rights by role can still edit these cells.', 1)
     ,(N'editAssign.wizard.alsoOthers', N'en', N'Also allow others by role', 1)
@@ -19309,14 +19304,6 @@ SELECT v.[Key], v.Lang, v.Val
     (N'editAssign.empty', N'kz', N'Әзірге ештеңе берілмеген'),
     (N'editAssign.emptyHint', N'ru', N'Нажмите «Передать месяц…», чтобы передать месяц на заполнение.'),
     (N'editAssign.emptyHint', N'kz', N'Айды толтыруға беру үшін «Айды беру…» батырмасын басыңыз.'),
-    (N'editAssign.visibility.Visible', N'ru', N'видит документ'),
-    (N'editAssign.visibility.Visible', N'kz', N'құжатты көреді'),
-    (N'editAssign.visibility.NotVisible', N'ru', N'не видит документ'),
-    (N'editAssign.visibility.NotVisible', N'kz', N'құжатты көрмейді'),
-    (N'editAssign.visibility.Unknown', N'ru', N'видимость неизвестна'),
-    (N'editAssign.visibility.Unknown', N'kz', N'көрінуі белгісіз'),
-    (N'editAssign.visibilityHint', N'ru', N'Попросите администратора выдать роль «Исполнитель» тем, кто не видит документ.'),
-    (N'editAssign.visibilityHint', N'kz', N'Құжатты көрмейтіндерге «Орындаушы» рөлін беруді әкімшіден сұраңыз.'),
     (N'editAssign.done.assigned', N'ru', N'Передано месяцев: {count}'),
     (N'editAssign.done.assigned', N'kz', N'Берілген айлар: {count}'),
     (N'editAssign.done.validated', N'ru', N'{slice}: проверено'),
@@ -19375,8 +19362,6 @@ SELECT v.[Key], v.Lang, v.Val
     (N'editAssign.wizard.summary.sheet', N'kz', N'Тек парақ'),
     (N'editAssign.wizard.summary.fromSet', N'ru', N'Из набора «{name}»'),
     (N'editAssign.wizard.summary.fromSet', N'kz', N'«{name}» жинағынан'),
-    (N'editAssign.wizard.summary.visibility', N'ru', N'Кто видит документ'),
-    (N'editAssign.wizard.summary.visibility', N'kz', N'Құжатты кім көреді'),
     (N'editAssign.wizard.summary.exclusive', N'ru', N'Остальные не смогут редактировать эти ячейки, пока месяц не проверен или не забран.'),
     (N'editAssign.wizard.summary.exclusive', N'kz', N'Ай расталмайынша немесе қайтарып алынбайынша, басқалар бұл ұяшықтарды өңдей алмайды.'),
     (N'editAssign.wizard.summary.shared', N'ru', N'Остальные с правом редактирования по роли тоже смогут их редактировать.'),

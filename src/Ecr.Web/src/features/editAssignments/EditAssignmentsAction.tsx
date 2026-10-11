@@ -4,7 +4,6 @@ import type { DocumentSummary } from '@/api/types';
 import { can, useSession, type MeDto } from '@/shared/session/useSession';
 import { t } from '@/shared/i18n';
 import { useDetailPanel } from '@/shared/ui/DetailDrawer';
-import { hasProjectGrant } from '@/features/documents/BusinessKeyChangeAction';
 
 /**
  * Сама шторка (і майстер, матриця) — окремим чанком: `DocumentPage` під межею бюджету (`D-132`),
@@ -31,22 +30,15 @@ interface EditAssignmentsAction {
 }
 
 /**
- * Чи показувати вхід: дзеркало `CanManageEditAssignments` (дизайн §2.4) настільки, наскільки його видно клієнту.
- *
- * - документ видимий (`Document.View`) і НЕ симуляція;
- * - грант `Manage` на проєкт - керує будь-хто з ним;
- * - грант `Write` - лише автор документа. ⚠ `DocumentSummary` віддає ім'я автора (`ownerDisplayName`), а не його
- *   id, тож клієнт не може порівняти автора з собою. Слабший за сервер гейт тут був би «Write - показуємо всім»;
- *   замість цього `Write` без `ownerDisplayName` (звужена роль: сервер не розкриває автора, D-214) не керує - так
- *   само, як на сервері. Точний гейт «автор» потребує `ownerUserId` у `DocumentSummary` (адитивно, серверна лінія).
- *   Остаточне рішення завжди за сервером: не автор отримає `403`, а не кнопки керування.
+ * Чи показувати вхід: рішення СЕРВЕРА (`DocumentSummary.canManageEditAccess` = автор ∨ `Manage` проєкту, та сама
+ * функція, що в обробниках `edit-assignments`) плюс «не симуляція» і видимий документ. Клієнт власного гейту не
+ * вигадує: попередня евристика за грантами пускала в шторку не-автора з `Write` (403).
  */
 export function canOpenEditAssignments(me: MeDto | undefined, document: DocumentSummary | undefined): boolean {
   if (document === undefined || me === undefined) return false;
   if (me.isSimulation || !can(me, 'Document.View')) return false;
-  if (hasProjectGrant(me, document.projectId, 'Manage')) return true;
 
-  return hasProjectGrant(me, document.projectId, 'Write') && document.ownerDisplayName != null;
+  return document.canManageEditAccess === true;
 }
 
 /**

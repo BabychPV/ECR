@@ -1,5 +1,5 @@
 import { useEffect, useState, type JSX } from 'react';
-import { Button, Checkbox, Chip, Group, List, Pill, Select, Stack, Switch, Text, TextInput, Textarea } from '@mantine/core';
+import { Button, Checkbox, Chip, Group, Pill, Select, Stack, Switch, Text, TextInput, Textarea } from '@mantine/core';
 import { useDebouncedValue } from '@mantine/hooks';
 import { useQuery } from '@tanstack/react-query';
 import { formatMonthName } from '@/shared/format';
@@ -8,7 +8,7 @@ import { KeyValue } from '@/shared/ui/KeyValue';
 import { Wizard, type WizardApi, type WizardStep } from '@/shared/ui/Wizard';
 import { queryKeys } from '@/api/queryKeys';
 import { MinCandidateQuery, getCandidates, getEditorSets } from './api';
-import type { Candidate, EditorSet, RecipientVisibility } from './types';
+import type { Candidate, EditorSet } from './types';
 
 /** Дані майстра; живуть лише в `Wizard` (стан кроків — локальний, не в адресі). */
 export interface AssignWizardData {
@@ -47,24 +47,12 @@ export interface AssignWizardProps {
   readonly onClose: () => void;
 }
 
-function visibilityLabel(v: RecipientVisibility): string {
-  switch (v) {
-    case 'Visible':
-      return t('editAssign.visibility.Visible');
-    case 'NotVisible':
-      return t('editAssign.visibility.NotVisible');
-    default:
-      return t('editAssign.visibility.Unknown');
-  }
-}
-
 /** Склад виконавців з урахуванням набору: набір + вручну додані, без дублів. */
 export function resolveUsers(data: AssignWizardData, sets: readonly EditorSet[]): readonly Candidate[] {
   const set = sets.find((s) => String(s.id) === data.setId);
   const fromSet: Candidate[] = (set?.members ?? []).map((m) => ({
     userId: m.userId,
     displayName: m.displayName,
-    visibility: m.visibility ?? 'Unknown',
   }));
   const seen = new Set<number>();
 
@@ -189,16 +177,11 @@ function WhoStep({
                 removeButtonProps={{ 'aria-label': t('editAssign.wizard.removeUser', { name: u.displayName }) }}
                 onRemove={() => update({ users: data.users.filter((m) => m.userId !== u.userId) })}
               >
-                {u.displayName} · {visibilityLabel(u.visibility)}
+                {u.displayName}
               </Pill>
             );
           })}
         </Pill.Group>
-      ) : null}
-      {picked.some((u) => u.visibility === 'NotVisible') ? (
-        <Text size="xs" c="dimmed" role="note">
-          {t('editAssign.visibilityHint')}
-        </Text>
       ) : null}
       <Switch
         label={t('editAssign.wizard.saveAsSet')}
@@ -304,13 +287,6 @@ export function AssignWizard({
                 },
               ]}
             />
-            <List size="sm" aria-label={t('editAssign.wizard.summary.visibility')}>
-              {users.map((u) => (
-                <List.Item key={u.userId}>
-                  {u.displayName}: {visibilityLabel(u.visibility)}
-                </List.Item>
-              ))}
-            </List>
             <Text size="sm">
               {alsoOthers ? t('editAssign.wizard.summary.shared') : t('editAssign.wizard.summary.exclusive')}
             </Text>

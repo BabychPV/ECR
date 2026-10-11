@@ -8,6 +8,7 @@ import { createQueryClient } from '@/app/queryClient';
 import { ExecutorStrip } from '@/features/editAssignments/ExecutorStrip';
 import type { MyEditAssignment } from '@/features/editAssignments/types';
 import { testTheme } from '@/test/render';
+import { myAssignment } from './fixture';
 
 /**
  * EA-5b: смуга виконавця. Мок API - за контрактом `DESIGN-OWNER-EDIT-GRANTS-2026-10-11.md` §6:
@@ -18,13 +19,7 @@ import { testTheme } from '@/test/render';
 const DocumentId = 7;
 const Period = 202601;
 
-const january: MyEditAssignment = {
-  assignmentId: 11,
-  documentId: DocumentId,
-  documentKey: 'AIR-2026-01',
-  slice: 'January',
-  status: 'Assigned',
-};
+const january: MyEditAssignment = myAssignment({ assignmentId: 11, documentId: DocumentId, documentKey: 'AIR-2026-01', month: 1 });
 
 interface Calls {
   readonly fills: string[];
@@ -237,7 +232,7 @@ describe('ExecutorStrip', () => {
   });
 
   it('передачі ІНШИХ документів у смузі не показуються (фільтр на клієнті)', async () => {
-    const calls = mockApi([{ ...january, assignmentId: 99, documentId: 8, slice: 'February' }]);
+    const calls = mockApi([myAssignment({ assignmentId: 99, documentId: 8, month: 2 })]);
     show();
 
     await waitFor(() => expect(calls.gets).toHaveLength(1));

@@ -3,6 +3,11 @@ import { formatPeriodKey } from '@/shared/format/periodKey';
 import { t } from '@/shared/i18n';
 import type { AssignmentSlice, EditAssignment, MyEditAssignmentsView } from './types';
 
+/** Зріз із усіма чотирма селекторами (схема вимагає всі ключі; `null` = не обмежено). */
+export function makeSlice(parts: Partial<AssignmentSlice> = {}): AssignmentSlice {
+  return { sheetCode: null, tableCode: null, monthNumber: null, periodKey: null, ...parts };
+}
+
 /** Однакові зрізи: порівняння по чотирьох селекторах, `undefined` ≡ `null`. */
 export function sameSlice(a: AssignmentSlice, b: AssignmentSlice): boolean {
   return (

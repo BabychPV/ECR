@@ -116,8 +116,8 @@ function mockFetch(): void {
         return Promise.resolve(
           new Response(
             JSON.stringify({
-              assignedToMe: [{ assignmentId: 1, documentId: 5, documentKey: 'D', slice: 'January', status: 'Assigned' }],
-              awaitingMyValidation: [{ assignmentId: 2, documentId: 6, documentKey: 'E', slice: 'March', status: 'Filled' }],
+              assignedToMe: [{ assignmentId: 1, documentId: 5, documentKey: 'D', slice: { monthNumber: 1, periodKey: null, sheetCode: null, tableCode: null }, status: 'Assigned' }],
+              awaitingMyValidation: [{ assignmentId: 2, documentId: 6, documentKey: 'E', slice: { monthNumber: 3, periodKey: null, sheetCode: null, tableCode: null }, status: 'Filled' }],
             }),
             { status: 200, headers: { 'Content-Type': 'application/json' } },
           ),

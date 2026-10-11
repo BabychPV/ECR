@@ -15,6 +15,9 @@ import { December, DocumentId, February, January, mockServer, type Sent, type Se
  */
 
 const sent: Sent[] = [];
+/** Upsert передачі - `POST …/edit-assignments` (сервер не має `PUT`). */
+const slice = (monthNumber: number): Record<string, unknown> => ({ monthNumber, periodKey: null, sheetCode: null, tableCode: null });
+const isUpsert = (s: Sent): boolean => s.method === 'POST' && s.url.endsWith('/edit-assignments');
 const Sheets = [{ code: 'AIR', name: 'Air emissions' }];
 
 function show(options: ServerOptions = {}, entry = '/?panel=edit-assignments'): void {
@@ -88,7 +91,7 @@ describe('EditAssignmentsDrawer — матриця', () => {
   });
 
   it('порожня шторка пояснює, що робити', async () => {
-    show({ list: { owner: { userId: 1, displayName: 'Owner Olena' }, canManage: true, assignments: [] } });
+    show({ list: { ownerDisplayName: 'Owner Olena', canManage: true, assignments: [] } });
 
     expect(await screen.findByText('⟦editAssign.empty⟧')).toBeDefined();
     expect(screen.getByText('⟦editAssign.emptyHint⟧')).toBeDefined();
@@ -132,7 +135,7 @@ describe('EditAssignmentsDrawer — переходи', () => {
     fireEvent.click(confirm);
 
     await waitFor(() => expect(sent.some((s) => s.url.endsWith('/1/return'))).toBe(true));
-    expect(sent.find((s) => s.url.endsWith('/1/return'))?.body).toEqual({ reason: 'Fix row 4', baseVersion: 'v1' });
+    expect(sent.find((s) => s.url.endsWith('/1/return'))?.body).toEqual({ reason: 'Fix row 4', baseVersion: 'v1', userIds: null });
   });
 
   it('Remove питає підтвердження, потім шле DELETE', async () => {
@@ -151,7 +154,7 @@ describe('EditAssignmentsDrawer — переходи', () => {
   });
 
   it('Repeat for next month копіює склад на наступний місяць; для грудня пункту немає', async () => {
-    show({ list: { owner: { userId: 1, displayName: 'O' }, canManage: true, assignments: [January, December] } });
+    show({ list: { ownerDisplayName: 'O', canManage: true, assignments: [January, December] } });
 
     const jan = await rowOf('January');
     fireEvent.click(within(jan).getByRole('button', { name: '⟦editAssign.rowActions (slice=January)⟧' }));
@@ -159,12 +162,12 @@ describe('EditAssignmentsDrawer — переходи', () => {
 
     await waitFor(() => expect(sent.some((s) => s.url.endsWith('/copy'))).toBe(true));
     expect(sent.find((s) => s.url.endsWith('/copy'))?.body).toEqual({
-      fromSlice: { monthNumber: 1 },
-      toSlices: [{ monthNumber: 2 }],
+      fromSlice: slice(1),
+      toSlices: [slice(2)],
     });
     cleanup();
 
-    show({ list: { owner: { userId: 1, displayName: 'O' }, canManage: true, assignments: [December] } });
+    show({ list: { ownerDisplayName: 'O', canManage: true, assignments: [December] } });
     const dec = await rowOf('December');
     fireEvent.click(within(dec).getByRole('button', { name: '⟦editAssign.rowActions (slice=December)⟧' }));
     await screen.findByRole('menuitem', { name: '⟦editAssign.edit⟧' });
@@ -184,7 +187,7 @@ describe('EditAssignmentsDrawer — відмова і режими', () => {
 
 describe('EditAssignmentsDrawer — майстер', () => {
   async function openWizard(): Promise<void> {
-    show({ list: { owner: { userId: 1, displayName: 'O' }, canManage: true, assignments: [February] } });
+    show({ list: { ownerDisplayName: 'O', canManage: true, assignments: [February] } });
     await rowOf('February');
     fireEvent.click(screen.getByRole('button', { name: '⟦editAssign.assign⟧' }));
     await screen.findByTestId('wizard-step-body');
@@ -192,7 +195,7 @@ describe('EditAssignmentsDrawer — майстер', () => {
 
   const next = (): HTMLButtonElement => screen.getByTestId('wizard-next') as HTMLButtonElement;
 
-  it('місяць → набір/виконавець → підсумок → PUT з ексклюзивністю за замовчуванням', async () => {
+  it('місяць → набір/виконавець → підсумок → POST (upsert) з ексклюзивністю за замовчуванням', async () => {
     await openWizard();
 
     // Крок 1: «Next» вимкнено, доки не вибрано місяць; зайнятий місяць має попередження про заміну.
@@ -212,19 +215,19 @@ describe('EditAssignmentsDrawer — майстер', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Kovalenko' }));
     fireEvent.click(next());
 
-    // Підсумок: місяці, виконавці з видимістю, ексклюзивність.
+    // Підсумок: місяці, виконавці, ексклюзивність.
     const summary = await screen.findByTestId('wizard-summary');
     expect(within(summary).getByText('January, February')).toBeDefined();
-    expect(within(summary).getByText(/Kovalenko: ⟦editAssign.visibility.Visible⟧/)).toBeDefined();
+    expect(within(summary).getByText('Kovalenko')).toBeDefined();
     expect(within(summary).getByText('⟦editAssign.wizard.summary.exclusive⟧')).toBeDefined();
 
     fireEvent.click(screen.getByTestId('wizard-apply'));
 
-    await waitFor(() => expect(sent.filter((s) => s.method === 'PUT')).toHaveLength(2));
-    const [jan, feb] = sent.filter((s) => s.method === 'PUT');
-    expect(jan?.body).toEqual({ slice: { monthNumber: 1 }, recipientUserIds: [12], isExclusive: true });
+    await waitFor(() => expect(sent.filter((s) => isUpsert(s))).toHaveLength(2));
+    const [jan, feb] = sent.filter((s) => isUpsert(s));
+    expect(jan?.body).toEqual({ slice: slice(1), recipientUserIds: [12], isExclusive: true });
     // Наявна передача оновлюється з baseVersion.
-    expect(feb?.body).toEqual({ slice: { monthNumber: 2 }, recipientUserIds: [12], isExclusive: true, baseVersion: 'v2' });
+    expect(feb?.body).toEqual({ slice: slice(2), recipientUserIds: [12], isExclusive: true, baseVersion: 'v2' });
   });
 
   it('галочка «дозволити й іншим» знімає ексклюзивність; набір розгортається знімком; «Зберегти як набір» створює набір', async () => {
@@ -236,9 +239,7 @@ describe('EditAssignmentsDrawer — майстер', () => {
     await screen.findByLabelText('⟦editAssign.wizard.search⟧');
     fireEvent.click(screen.getByRole('textbox', { name: '⟦editAssign.wizard.set⟧' }));
     fireEvent.click(await screen.findByRole('option', { name: 'Dept 5' }));
-    expect(await screen.findByText(/Sydorenko · ⟦editAssign.visibility.NotVisible⟧/)).toBeDefined();
-    // Підказка адміністратору — лише коли хтось не бачить документ.
-    expect(screen.getByText('⟦editAssign.visibilityHint⟧')).toBeDefined();
+    expect(await screen.findByText('Sydorenko')).toBeDefined();
 
     fireEvent.click(screen.getByRole('switch', { name: '⟦editAssign.wizard.saveAsSet⟧' }));
     fireEvent.change(screen.getByLabelText('⟦editAssign.wizard.setName⟧'), { target: { value: 'Spring team' } });
@@ -249,10 +250,10 @@ describe('EditAssignmentsDrawer — майстер', () => {
     expect(screen.getByText('⟦editAssign.wizard.summary.shared⟧')).toBeDefined();
     fireEvent.click(screen.getByTestId('wizard-apply'));
 
-    await waitFor(() => expect(sent.some((s) => s.method === 'PUT')).toBe(true));
-    expect(sent.find((s) => s.url.endsWith('/me/editor-sets'))?.body).toEqual({ name: 'Spring team', userIds: [9] });
-    expect(sent.find((s) => s.method === 'PUT')?.body).toEqual({
-      slice: { monthNumber: 3 },
+    await waitFor(() => expect(sent.some((s) => isUpsert(s))).toBe(true));
+    expect(sent.find((s) => s.url.endsWith('/me/editor-sets'))?.body).toEqual({ name: 'Spring team', memberUserIds: [9] });
+    expect(sent.find((s) => isUpsert(s))?.body).toEqual({
+      slice: slice(3),
       recipientUserIds: [9],
       isExclusive: false,
       appliedSetId: 55,
@@ -261,7 +262,7 @@ describe('EditAssignmentsDrawer — майстер', () => {
 
   it('422 «понад власні права» лишає майстер відкритим і показує причину банером у підсумку', async () => {
     const shown = vi.spyOn(notifications, 'show');
-    show({ list: { owner: { userId: 1, displayName: 'O' }, canManage: true, assignments: [] }, putStatus: 422 });
+    show({ list: { ownerDisplayName: 'O', canManage: true, assignments: [] }, putStatus: 422 });
     await screen.findByText('⟦editAssign.empty⟧');
     fireEvent.click(screen.getByRole('button', { name: '⟦editAssign.assign⟧' }));
     await screen.findByTestId('wizard-step-body');

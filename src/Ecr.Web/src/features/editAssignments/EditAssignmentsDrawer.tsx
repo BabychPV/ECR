@@ -18,13 +18,13 @@ import {
   deleteEditAssignment,
   getEditAssignments,
   getEditorSets,
-  putEditAssignment,
+  upsertEditAssignment,
   returnEditAssignment,
   validateEditAssignment,
 } from './api';
 import { AssignWizard, emptyAssignData, resolveUsers, type AssignWizardData } from './AssignWizard';
 import { AssignmentsMatrix, type MatrixActions, type MatrixView } from './AssignmentsMatrix';
-import { awaitingValidationCount, nextMonthSlice, sameSlice, sliceLabel } from './model';
+import { awaitingValidationCount, makeSlice, nextMonthSlice, sameSlice, sliceLabel } from './model';
 import { ReturnReasonMaxLength, type EditAssignment, type EditAssignmentsList } from './types';
 
 /** Значення `?panel=` шторки (одне місце — меню й шторка читають звідси). */
@@ -106,7 +106,7 @@ export function EditAssignmentsDrawer({ documentId, sheets }: EditAssignmentsDra
   const giveBack = useMutation({
     meta: handled,
     mutationFn: ({ a, reason }: { a: EditAssignment; reason: string }) =>
-      returnEditAssignment(documentId, a.id, { reason, baseVersion: a.version }),
+      returnEditAssignment(documentId, a.id, { reason, baseVersion: a.version, userIds: null }),
     onSuccess: (_, { a }) => {
       setReturning(null);
       done(t('editAssign.done.returned', { slice: sliceLabel(a.slice) }));
@@ -139,7 +139,7 @@ export function EditAssignmentsDrawer({ documentId, sheets }: EditAssignmentsDra
     onSettled: refresh,
   });
 
-  /** Застосування майстра: набір (за потреби) → по одному PUT на місяць; зупиняється на першій відмові. */
+  /** Застосування майстра: набір (за потреби) → по одному POST (upsert) на місяць; зупиняється на першій відмові. */
   const apply = useMutation({
     meta: handled,
     mutationFn: async (d: AssignWizardData) => {
@@ -147,15 +147,15 @@ export function EditAssignmentsDrawer({ documentId, sheets }: EditAssignmentsDra
       let appliedSetId = d.setId === null ? undefined : Number(d.setId);
 
       if (d.saveAsSet && d.setName.trim() !== '') {
-        const created = await createEditorSet({ name: d.setName.trim(), userIds: users.map((u) => u.userId) });
+        const created = await createEditorSet({ name: d.setName.trim(), memberUserIds: users.map((u) => u.userId) });
         appliedSetId = created.id;
       }
 
       for (const month of d.months) {
-        const slice = { monthNumber: month, ...(d.sheetCode === null ? {} : { sheetCode: d.sheetCode }) };
+        const slice = makeSlice({ monthNumber: month, sheetCode: d.sheetCode });
         const existing = assignments.find((a) => sameSlice(a.slice, slice));
 
-        await putEditAssignment(documentId, {
+        await upsertEditAssignment(documentId, {
           slice,
           recipientUserIds: users.map((u) => u.userId),
           isExclusive: !d.alsoOthers,
@@ -183,7 +183,7 @@ export function EditAssignmentsDrawer({ documentId, sheets }: EditAssignmentsDra
         ...emptyAssignData,
         months: a.slice.monthNumber == null ? [] : [a.slice.monthNumber],
         sheetCode: a.slice.sheetCode ?? null,
-        users: a.recipients.map((r) => ({ userId: r.userId, displayName: r.displayName, visibility: r.visibility })),
+        users: a.recipients.map((r) => ({ userId: r.userId, displayName: r.displayName })),
         note: a.note ?? '',
         alsoOthers: !a.isExclusive,
       }),
@@ -218,7 +218,7 @@ export function EditAssignmentsDrawer({ documentId, sheets }: EditAssignmentsDra
               <Text size="sm" c="dimmed">
                 {t('editAssign.hint')}
               </Text>
-              <Text size="sm">{t('editAssign.owner', { name: d.owner.displayName })}</Text>
+              <Text size="sm">{t('editAssign.owner', { name: d.ownerDisplayName })}</Text>
               {awaiting > 0 ? (
                 <Text size="sm" fw={500} data-testid="edit-assignments-awaiting">
                   {t('editAssign.awaiting', { count: awaiting })}

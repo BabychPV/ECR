@@ -1,5 +1,6 @@
 import { vi } from 'vitest';
-import type { EditAssignment, EditAssignmentsList } from '../types';
+import { makeSlice } from '../model';
+import type { AssignmentRecipient, AssignmentSlice, EditAssignment, EditAssignmentsList, MyEditAssignment } from '../types';
 
 /**
  * Мок сервера для тестів шторки «Доступ до редагування» (EA-5a).
@@ -15,40 +16,55 @@ export interface Sent {
 
 export const DocumentId = 42;
 
-export function assignment(overrides: Partial<EditAssignment> & Pick<EditAssignment, 'id' | 'slice'>): EditAssignment {
+export function assignment(
+  overrides: Partial<Omit<EditAssignment, 'slice'>> & { readonly id: number; readonly slice: Partial<AssignmentSlice> },
+): EditAssignment {
   return {
     isExclusive: true,
     status: 'Assigned',
     recipients: [],
     version: `v${String(overrides.id)}`,
+    appliedSetId: null,
+    appliedSetName: null,
+    delegatedByDisplayName: 'Owner Olena',
+    delegatedByUserId: 1,
+    modifiedAt: '2026-10-01T00:00:00Z',
+    note: null,
+    validatedAt: null,
+    validatedByDisplayName: null,
     ...overrides,
+    slice: makeSlice(overrides.slice),
   };
+}
+
+function recipient(
+  userId: number,
+  displayName: string,
+  status: 'Assigned' | 'Filled' | 'Returned',
+  returnReason: string | null = null,
+): AssignmentRecipient {
+  return { userId, displayName, status, isActive: true, filledAt: null, returnCount: 0, returnReason, returnedAt: null };
 }
 
 export const January = assignment({
   id: 1,
   slice: { monthNumber: 1 },
   status: 'Filled',
-  recipients: [
-    { userId: 7, displayName: 'Ivanov', status: 'Filled', isActive: true, visibility: 'Visible' },
-    { userId: 8, displayName: 'Petrenko', status: 'Filled', isActive: true, visibility: 'Unknown' },
-  ],
+  recipients: [recipient(7, 'Ivanov', 'Filled'), recipient(8, 'Petrenko', 'Filled')],
 });
 
 export const February = assignment({
   id: 2,
   slice: { monthNumber: 2 },
   status: 'Returned',
-  recipients: [
-    { userId: 7, displayName: 'Ivanov', status: 'Returned', returnReason: 'Check row 4', isActive: true, visibility: 'Visible' },
-  ],
+  recipients: [recipient(7, 'Ivanov', 'Returned', 'Check row 4')],
 });
 
 export const December = assignment({
   id: 3,
   slice: { monthNumber: 12 },
   status: 'Assigned',
-  recipients: [{ userId: 7, displayName: 'Ivanov', status: 'Assigned', isActive: true, visibility: 'Visible' }],
+  recipients: [recipient(7, 'Ivanov', 'Assigned')],
 });
 
 export interface ServerOptions {
@@ -65,7 +81,7 @@ export function jsonResponse(body: unknown, status = 200): Response {
 
 export function mockServer(sent: Sent[], options: ServerOptions = {}): void {
   const list: EditAssignmentsList = options.list ?? {
-    owner: { userId: 1, displayName: 'Owner Olena' },
+    ownerDisplayName: 'Owner Olena',
     canManage: true,
     assignments: [January, February],
   };
@@ -80,10 +96,10 @@ export function mockServer(sent: Sent[], options: ServerOptions = {}): void {
       if (url.includes('/api/v1/me/editor-sets')) {
         if (method === 'POST') {
           sent.push({ method, url, body });
-          return jsonResponse({ id: 55, name: String(body?.name), members: [] });
+          return jsonResponse({ id: 55, name: String(body?.name), members: [], version: 'sv55' });
         }
         return jsonResponse([
-          { id: 3, name: 'Dept 5', members: [{ userId: 9, displayName: 'Sydorenko', visibility: 'NotVisible' }] },
+          { id: 3, name: 'Dept 5', members: [{ userId: 9, displayName: 'Sydorenko', isActive: true }], version: 'sv3' },
         ]);
       }
 
@@ -96,8 +112,8 @@ export function mockServer(sent: Sent[], options: ServerOptions = {}): void {
 
       if (url.includes('/edit-assignments/candidates')) {
         return jsonResponse([
-          { userId: 11, displayName: 'Koval', visibility: 'NotVisible' },
-          { userId: 12, displayName: 'Kovalenko', visibility: 'Visible' },
+          { userId: 11, displayName: 'Koval' },
+          { userId: 12, displayName: 'Kovalenko' },
         ]);
       }
 
@@ -108,7 +124,7 @@ export function mockServer(sent: Sent[], options: ServerOptions = {}): void {
             : jsonResponse({ title: 'Forbidden', status: options.listStatus, errorCode: 'ECR-ACCS-0403' }, options.listStatus);
         }
         sent.push({ method, url, body });
-        if (method === 'PUT' && options.putStatus !== undefined && options.putStatus !== 200) {
+        if (method === 'POST' && url.endsWith('/edit-assignments') && options.putStatus !== undefined && options.putStatus !== 200) {
           return jsonResponse(
             {
               title: 'Validation failed',
@@ -127,4 +143,25 @@ export function mockServer(sent: Sent[], options: ServerOptions = {}): void {
       throw new Error(`неочікуваний запит у тесті: ${method} ${url}`);
     }),
   );
+}
+
+/** Рядок `GET /me/edit-assignments` у формі сервера (`MyEditAssignmentDto`). */
+export function myAssignment(
+  overrides: Partial<Omit<MyEditAssignment, 'slice'>> & { readonly assignmentId: number; readonly documentId: number; readonly month?: number },
+): MyEditAssignment {
+  const { month, ...rest } = overrides;
+
+  return {
+    documentKey: `DOC-${String(overrides.documentId)}`,
+    delegatedByDisplayName: 'Owner Olena',
+    filledCount: 0,
+    recipientCount: 1,
+    note: null,
+    returnReason: null,
+    status: 'Assigned',
+    statusChangedAt: null,
+    version: 'v1',
+    ...rest,
+    slice: makeSlice({ monthNumber: month ?? 1 }),
+  };
 }

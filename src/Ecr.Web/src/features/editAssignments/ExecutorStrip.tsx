@@ -5,6 +5,7 @@ import { t } from '@/shared/i18n';
 import { useSession } from '@/shared/session/useSession';
 import { showApiError } from '@/shared/ui/notify';
 import { useFillEditAssignment, useMyEditAssignments } from './api';
+import { sliceLabel } from './model';
 import type { MyEditAssignment } from './types';
 
 interface ExecutorStripProps {
@@ -67,7 +68,7 @@ export function ExecutorStrip({ documentId, periodKey }: ExecutorStripProps): JS
     >
       <Stack gap="xs">
         {items.map((item) => {
-          const label = item.slice;
+          const label = sliceLabel(item.slice);
           const canFill = item.status !== 'Filled' && !simulating;
 
           return (
@@ -153,5 +154,8 @@ function textOf(item: MyEditAssignment, slice: string): string {
         : t('editAssign.bar.returnedNoReason', { slice });
     case 'Filled':
       return t('editAssign.bar.filled', { slice });
+    default:
+      // Невідомий статус нового сервера: нейтральний текст, а не порожній рядок.
+      return t('editAssign.bar.assigned', { slice });
   }
 }

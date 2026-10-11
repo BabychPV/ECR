@@ -113,6 +113,11 @@ function RowMenu({ assignment, actions }: { readonly assignment: EditAssignment;
   );
 }
 
+/** Сервер віддає статус рядком; невідомий малюється нейтрально («передано»). */
+function recipientStatus(status: string): RecipientStatus {
+  return status === 'Filled' || status === 'Returned' ? status : 'Assigned';
+}
+
 /** Коротка позначка статусу виконавця в клітинці «людина × місяць»; повне слово — для читалки. */
 function CellMark({ status }: { readonly status: RecipientStatus }): JSX.Element {
   const glyph = status === 'Filled' ? '●' : status === 'Returned' ? '↩' : '◔';
@@ -135,7 +140,9 @@ function PeopleTable({ assignments }: { readonly assignments: readonly EditAssig
   const cell = (userId: number, month: number): RecipientStatus | null => {
     const match = assignments.find((a) => a.slice.monthNumber === month && a.recipients.some((r) => r.userId === userId));
 
-    return match?.recipients.find((r) => r.userId === userId)?.status ?? null;
+    const status = match?.recipients.find((r) => r.userId === userId)?.status;
+
+    return status === undefined ? null : recipientStatus(status);
   };
 
   return (

@@ -3,65 +3,99 @@ import { apiFetch, EcrApiError } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
 import { invalidateSlices } from '@/features/grid/sliceCache';
 import type {
-  AssignmentSlice,
+  ApplyEditorSetRequest,
   Candidate,
+  CopyAssignmentRequest,
   EditAssignment,
+  EditAssignmentBatch,
   EditAssignmentsList,
   EditorSet,
   MyEditAssignmentsView,
+  ReturnAssignmentRequest,
+  SaveEditorSetRequest,
   UpsertAssignmentRequest,
+  ValidateAssignmentRequest,
 } from './types';
 
 /** Найкоротший запит до `candidates` (дизайн §6: `q` ≥ 2). */
 export const MinCandidateQuery = 2;
 
-const base = (documentId: number): string => `/api/v1/documents/${String(documentId)}/edit-assignments`;
-
-const json = (method: string, body: unknown): RequestInit => ({ method, body: JSON.stringify(body) });
+/*
+ * ⛔ Адреси - ЛІТЕРАЛИ в самому виклику (шаблонний рядок із `${…}`), а не `base(documentId)` + суфікс: сторож
+ * `EndpointCoverageTests` читає код регулярним виразом і через допоміжну функцію не бачив жодного виклику (9 дій
+ * сервера лишались «без споживача»). Метод - теж літерал `method: '…'` поруч з адресою. Відповідність схемі
+ * (метод, шлях, тіло) стереже `__tests__/api.contract.test.ts`.
+ */
 
 export function getEditAssignments(documentId: number): Promise<EditAssignmentsList> {
-  return apiFetch<EditAssignmentsList>(base(documentId));
+  return apiFetch<EditAssignmentsList>(`/api/v1/documents/${String(documentId)}/edit-assignments`);
 }
 
-/** Ідемпотентний upsert за ключем зрізу; для наявної передачі потрібна `baseVersion`. */
-export function putEditAssignment(documentId: number, request: UpsertAssignmentRequest): Promise<EditAssignment> {
-  return apiFetch<EditAssignment>(base(documentId), json('PUT', request));
+/** Ідемпотентний upsert за ключем зрізу (`POST`, не `PUT`); для наявної передачі потрібна `baseVersion`. */
+export function upsertEditAssignment(documentId: number, request: UpsertAssignmentRequest): Promise<EditAssignment> {
+  return apiFetch<EditAssignment>(`/api/v1/documents/${String(documentId)}/edit-assignments`, {
+    method: 'POST',
+    body: JSON.stringify(request),
+  });
 }
 
 export function deleteEditAssignment(documentId: number, id: number): Promise<void> {
-  return apiFetch<void>(`${base(documentId)}/${String(id)}`, { method: 'DELETE' });
+  return apiFetch<void>(`/api/v1/documents/${String(documentId)}/edit-assignments/${String(id)}`, { method: 'DELETE' });
 }
 
 export function validateEditAssignment(documentId: number, id: number, baseVersion: string): Promise<EditAssignment> {
-  return apiFetch<EditAssignment>(`${base(documentId)}/${String(id)}/validate`, json('POST', { baseVersion }));
+  const body: ValidateAssignmentRequest = { baseVersion };
+
+  return apiFetch<EditAssignment>(`/api/v1/documents/${String(documentId)}/edit-assignments/${String(id)}/validate`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
 }
 
-export function returnEditAssignment(
-  documentId: number,
-  id: number,
-  body: { readonly reason: string; readonly baseVersion: string; readonly userIds?: readonly number[] },
-): Promise<EditAssignment> {
-  return apiFetch<EditAssignment>(`${base(documentId)}/${String(id)}/return`, json('POST', body));
+export function returnEditAssignment(documentId: number, id: number, body: ReturnAssignmentRequest): Promise<EditAssignment> {
+  return apiFetch<EditAssignment>(`/api/v1/documents/${String(documentId)}/edit-assignments/${String(id)}/return`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
 }
 
 /** «Повторити для наступного місяця»: склад копіюється зі станами `Assigned`. */
-export function copyEditAssignment(
-  documentId: number,
-  body: { readonly fromSlice: AssignmentSlice; readonly toSlices: readonly AssignmentSlice[] },
-): Promise<unknown> {
-  return apiFetch<unknown>(`${base(documentId)}/copy`, json('POST', body));
+export function copyEditAssignment(documentId: number, body: CopyAssignmentRequest): Promise<EditAssignmentBatch> {
+  return apiFetch<EditAssignmentBatch>(`/api/v1/documents/${String(documentId)}/edit-assignments/copy`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+/** Передача за збереженим набором на кілька зрізів одним викликом (атомарно на сервері). */
+export function applyEditorSet(documentId: number, body: ApplyEditorSetRequest): Promise<EditAssignmentBatch> {
+  return apiFetch<EditAssignmentBatch>(`/api/v1/documents/${String(documentId)}/edit-assignments/apply-set`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
 }
 
 export function getCandidates(documentId: number, q: string): Promise<readonly Candidate[]> {
-  return apiFetch<readonly Candidate[]>(`${base(documentId)}/candidates?q=${encodeURIComponent(q)}`);
+  return apiFetch<readonly Candidate[]>(
+    `/api/v1/documents/${String(documentId)}/edit-assignments/candidates?q=${encodeURIComponent(q)}`,
+  );
 }
 
 export function getEditorSets(): Promise<readonly EditorSet[]> {
   return apiFetch<readonly EditorSet[]>('/api/v1/me/editor-sets');
 }
 
-export function createEditorSet(body: { readonly name: string; readonly userIds: readonly number[] }): Promise<EditorSet> {
-  return apiFetch<EditorSet>('/api/v1/me/editor-sets', json('POST', body));
+export function createEditorSet(body: SaveEditorSetRequest): Promise<EditorSet> {
+  return apiFetch<EditorSet>('/api/v1/me/editor-sets', { method: 'POST', body: JSON.stringify(body) });
+}
+
+/** Зміна складу/назви набору; `baseVersion` - з `EditorSet.version`. */
+export function updateEditorSet(id: number, body: SaveEditorSetRequest): Promise<EditorSet> {
+  return apiFetch<EditorSet>(`/api/v1/me/editor-sets/${String(id)}`, { method: 'PUT', body: JSON.stringify(body) });
+}
+
+export function deleteEditorSet(id: number): Promise<void> {
+  return apiFetch<void>(`/api/v1/me/editor-sets/${String(id)}`, { method: 'DELETE' });
 }
 
 /** Порожня відповідь: немає передач або сервер ще не вміє їх віддавати. */
@@ -78,7 +112,7 @@ const NoAssignments: MyEditAssignmentsView = { assignedToMe: [], awaitingMyValid
 export async function getMyEditAssignments(): Promise<MyEditAssignmentsView> {
   try {
     // 204/пусте тіло дає `null`: звертання `dto.assignedToMe` кидало б TypeError замість порожнього стану.
-    const dto = await apiFetch<Partial<MyEditAssignmentsView> | null>('/api/v1/me/edit-assignments');
+    const dto = await apiFetch<MyEditAssignmentsView | null>('/api/v1/me/edit-assignments');
 
     return { assignedToMe: dto?.assignedToMe ?? [], awaitingMyValidation: dto?.awaitingMyValidation ?? [] };
   } catch (error) {
@@ -106,8 +140,10 @@ export function useMyEditAssignments(opened = false): UseQueryResult<MyEditAssig
 }
 
 /** `POST …/{id}/fill`: лише сам виконавець, ідемпотентно (дизайн §6). */
-export function fillEditAssignment(documentId: number, id: number): Promise<unknown> {
-  return apiFetch<unknown>(`${base(documentId)}/${String(id)}/fill`, json('POST', {}));
+export function fillEditAssignment(documentId: number, id: number): Promise<EditAssignment> {
+  return apiFetch<EditAssignment>(`/api/v1/documents/${String(documentId)}/edit-assignments/${String(id)}/fill`, {
+    method: 'POST',
+  });
 }
 
 /**

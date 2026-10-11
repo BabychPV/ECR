@@ -4,7 +4,7 @@ import { Link } from 'react-router-dom';
 import { formatDateTime } from '@/shared/format/datetime';
 import { t } from '@/shared/i18n';
 import { useMyEditAssignments } from '@/features/editAssignments/api';
-import { editAssignmentHref } from '@/features/editAssignments/model';
+import { editAssignmentHref, sliceLabel } from '@/features/editAssignments/model';
 import type { MyEditAssignment } from '@/features/editAssignments/types';
 
 /**
@@ -76,8 +76,9 @@ function AssignmentGroup({
                   {item.documentKey}
                 </Text>
                 <Text size="xs" c="dimmed">
-                  {item.slice}
-                  {item.filledAt != null && ` · ${t('myTasks.edit.filledAt', { date: formatDateTime(item.filledAt) })}`}
+                  {sliceLabel(item.slice)}
+                  {item.status === 'Filled' && item.statusChangedAt != null
+                    && ` · ${t('myTasks.edit.filledAt', { date: formatDateTime(item.statusChangedAt) })}`}
                 </Text>
               </div>
               <Badge variant={item.status === 'Returned' ? 'filled' : 'light'} color={statusColor(item.status)}>
