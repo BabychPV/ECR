@@ -5385,7 +5385,7 @@
         "description": "Формула для відповіді клієнту.",
         "properties": {
           "columnDefId": {
-            "description": "Колонка, якщо `Scope == Column`.",
+            "description": "Колонка, якщо `Scope == Column` чи `Cell`.",
             "format": "int32",
             "type": [
               "null",
@@ -5406,7 +5406,7 @@
             "type": "integer"
           },
           "rowDefId": {
-            "description": "Рядок, якщо `Scope == Row` (сурогатний ключ; адреса запиту — `RowKey`).",
+            "description": "Рядок, якщо `Scope == Row` чи `Cell` (сурогатний ключ; адреса запиту — `RowKey`).",
             "format": "int32",
             "type": [
               "null",
@@ -5415,7 +5415,7 @@
           },
           "scope": {
             "$ref": "#/components/schemas/FormulaScope",
-            "description": "Область: `Column` чи `Row`."
+            "description": "Область: `Column`, `Row` чи `Cell`."
           },
           "tableDefId": {
             "description": "Таблиця, якій належить формула.",
@@ -41942,6 +41942,257 @@
           }
         },
         "summary": "Записує стиль версії-чернетки (заводить чи змінює за кодом). Право\n`Template.Edit`.",
+        "tags": [
+          "TemplateVersions"
+        ]
+      }
+    },
+    "/api/v1/template-versions/{id}/tables/{tableDefId}/formulas/cell/{rowKey}/{columnDefId}": {
+      "delete": {
+        "parameters": [
+          {
+            "description": "Версія-чернетка.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Таблиця, якій належить комірка.",
+            "in": "path",
+            "name": "tableDefId",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "`RowKey` рядка комірки.",
+            "in": "path",
+            "name": "rowKey",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Числовий `ColumnDefId` колонки комірки.",
+            "in": "path",
+            "name": "columnDefId",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "summary": "Прибирає формулу комірки з чернетки (м'яко, `ФВ-7.6`). Право `Template.Edit`.",
+        "tags": [
+          "TemplateVersions"
+        ]
+      },
+      "put": {
+        "description": "⚠ Окремий маршрут, а не ще одне значення `{scope}`: адреса комірки —\nПАРА (рядок, колонка), і єдиний сегмент `{target}` її не вміщає без\nсклеювання, яке довелося б розбирати назад. Колонка комірки мусить бути\nобчислюваною (`ECR-TMPL-4227`, як і для `column`); перетин із\nколонковою чи рядковою формулою тієї ж комірки відхиляє ПУБЛІКАЦІЯ (V-03).",
+        "parameters": [
+          {
+            "description": "Версія-чернетка.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Таблиця, якій належить комірка.",
+            "in": "path",
+            "name": "tableDefId",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "`RowKey` рядка комірки (текстом).",
+            "in": "path",
+            "name": "rowKey",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Числовий `ColumnDefId` колонки комірки.",
+            "in": "path",
+            "name": "columnDefId",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveFormulaDefRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveFormulaDefRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveFormulaDefRequest"
+              }
+            }
+          },
+          "description": "Токен скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FormulaDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FormulaDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/FormulaDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Записує формулу ОДНІЄЇ комірки таблиці версії-чернетки (область\n`Cell`, D1). Право `Template.Edit`.",
         "tags": [
           "TemplateVersions"
         ]
