@@ -1,4 +1,4 @@
-﻿using Ecr.Application.Documents;
+using Ecr.Application.Documents;
 using Ecr.Application.Templates;
 using Ecr.Domain.Services;
 using Microsoft.Extensions.DependencyInjection;
@@ -218,6 +218,16 @@ public static class DependencyInjection
         services.AddScoped<Documents.ListDocumentVersionsHandler>();
         services.AddScoped<Documents.CompareDocumentVersionsHandler>();
         services.AddScoped<Workflow.RecallSheetHandler>();
+
+        // EA-C: передача місяця третій стороні — керування й переходи станів.
+        services.AddScoped<Documents.EditAssignments.ListEditAssignmentsHandler>();
+        services.AddScoped<Documents.EditAssignments.UpsertEditAssignmentHandler>();
+        services.AddScoped<Documents.EditAssignments.DeleteEditAssignmentHandler>();
+        services.AddScoped<Documents.EditAssignments.FillEditAssignmentHandler>();
+        services.AddScoped<Documents.EditAssignments.ValidateEditAssignmentHandler>();
+        services.AddScoped<Documents.EditAssignments.ReturnEditAssignmentHandler>();
+        services.AddScoped<Documents.EditAssignments.ListEditAssignmentCandidatesHandler>();
+        services.AddScoped<Documents.EditAssignments.ListMyEditAssignmentsHandler>();
 
         // Локалізація (модуль 3.7)
         services.AddScoped<Localization.GetUiStringsHandler>();
