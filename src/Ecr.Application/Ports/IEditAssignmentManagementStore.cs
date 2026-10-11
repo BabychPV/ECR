@@ -39,6 +39,9 @@ public interface IEditAssignmentManagementStore
     /// </summary>
     public Task LimitLockWaitAsync(CancellationToken ct);
 
+    /// <summary>Чи є передача цього зрізу (читання без блокування).</summary>
+    public Task<bool> SliceExistsAsync(long documentId, string sliceKey, CancellationToken ct);
+
     /// <summary>Передача документа за ключем зрізу — з блокуванням, відстежується; <c>null</c>, якщо немає.</summary>
     public Task<EditAssignment?> FindBySliceKeyForUpdateAsync(long documentId, string sliceKey, CancellationToken ct);
 
@@ -47,7 +50,7 @@ public interface IEditAssignmentManagementStore
         IReadOnlyCollection<int> userIds, CancellationToken ct);
 
     /// <summary>Пошук активних користувачів за частиною імені/логіну; без email і SID.</summary>
-    public Task<IReadOnlyList<EditAssignmentUserRef>> SearchCandidatesAsync(string query, int take, CancellationToken ct);
+    public Task<IReadOnlyList<EditAssignmentUserRef>> SearchCandidatesAsync(string query, int skip, int take, CancellationToken ct);
 
     /// <summary>
     /// Передачі, пов'язані з користувачем: як виконавця (рядки виконавця) і як власника

@@ -7822,6 +7822,8 @@ USING (VALUES
     ,(N'err.ECR-REQ-0422.editAssignmentTooManySlices', N'en', N'Specify from 1 to 12 slices per request.', 1)
     ,(N'err.ECR-DOC-0404.editorSet', N'en', N'The executor set was not found.', 1)
     ,(N'err.ECR-DOC-0404.editAssignment', N'en', N'The assignment was not found.', 1)
+    ,(N'err.ECR-DOC-4091.editAssignmentBusy', N'en', N'The assignment is busy with another action. Nothing was saved; try again in a moment.', 1)
+    ,(N'err.ECR-ACCS-0403.editorSetsForbidden', N'en', N'Executor sets are available to users who can write to a project.', 1)
     -- COLL:ea-api ── кінець секції ──
     -- COLL:rpt-version-race ── гонка двох створень версії звіту (UQ_ReportVersion) -> 409; ru/kz - порцією COLL:rpt-version-race нижче ──
     ,(N'err.ECR-RPT-4091.versionConcurrent', N'en', N'Someone else has just created a version with this number in this report definition. Reload the definition and pick another version number.', 1)
@@ -19682,7 +19684,11 @@ SELECT v.[Key], v.Lang, v.Val
     (N'err.ECR-DOC-0404.editorSet', N'ru', N'Набор исполнителей не найден.'),
     (N'err.ECR-DOC-0404.editorSet', N'kz', N'Орындаушылар жиыны табылмады.'),
     (N'err.ECR-DOC-0404.editAssignment', N'ru', N'Передача не найдена.'),
-    (N'err.ECR-DOC-0404.editAssignment', N'kz', N'Тапсырма табылмады.')
+    (N'err.ECR-DOC-0404.editAssignment', N'kz', N'Тапсырма табылмады.'),
+    (N'err.ECR-DOC-4091.editAssignmentBusy', N'ru', N'Передача занята другим действием. Ничего не сохранено; повторите через мгновение.'),
+    (N'err.ECR-DOC-4091.editAssignmentBusy', N'kz', N'Тапсырманы басқа әрекет пайдаланып жатыр. Ештеңе сақталмады; сәлден кейін қайталаңыз.'),
+    (N'err.ECR-ACCS-0403.editorSetsForbidden', N'ru', N'Наборы исполнителей доступны пользователям с правом записи в проект.'),
+    (N'err.ECR-ACCS-0403.editorSetsForbidden', N'kz', N'Орындаушылар жиындары жобаға жазу құқығы бар пайдаланушыларға қолжетімді.')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO

@@ -289,10 +289,26 @@ public sealed class UpsertEditAssignmentHandler(
 
         try
         {
-            await uow.ExecuteInTransactionAsync(async innerCt =>
+            await EditAssignmentAccess.InTransactionAsync(uow, async innerCt =>
             {
                 // Очікування блокувань обмежене (409 ECR-DOC-4091 замість висіння до CommandTimeout).
                 await store.LimitLockWaitAsync(innerCt).ConfigureAwait(false);
+
+                // ⛔ Аудит P2-1: порядок блокувань — документ → передача, як у видалення документа (воно бере
+                // doc.Document першим). Тому існування зрізу читаємо БЕЗ блокування, і лише для нового зрізу
+                // спершу беремо документ, а вже потім HOLDLOCK-діапазон передачі. Зміна наявної документ не
+                // блокує (аудит P1-C1): U на передачі не дає видалити документ, а блокування doc.Document
+                // дало б інверсію із записом комірки (S передача → U документ).
+                var documentLocked = false;
+                if (!await store.SliceExistsAsync(documentId, slice.Key, innerCt).ConfigureAwait(false))
+                {
+                    if (!await store.LockDocumentAsync(documentId, innerCt).ConfigureAwait(false))
+                    {
+                        throw EditAssignmentAccess.NotFound(documentId);
+                    }
+
+                    documentLocked = true;
+                }
 
                 var existing = await store
                     .FindBySliceKeyForUpdateAsync(documentId, slice.Key, innerCt).ConfigureAwait(false);
@@ -302,13 +318,11 @@ public sealed class UpsertEditAssignmentHandler(
 
                 if (existing is null)
                 {
-                    // ⛔ P2: документ могли видалити між перевіркою прав і вставкою — блокуємо його рядок, і
-                    // ЛИШЕ на створенні (аудит P1-C1): зміна наявної тримає U на рядку передачі, а видалення
-                    // документа видаляє передачі після власного UPDLOCK — тож документ не зникне, а друге
-                    // блокування на doc.Document дало б інверсію з записом комірки (S передача → U документ).
-                    if (!await store.LockDocumentAsync(documentId, innerCt).ConfigureAwait(false))
+                    // Зріз видалили між читанням і блокуванням: документ не заблоковано — повторити запит
+                    // (блокування документа ПІСЛЯ діапазону передачі дало б інверсію із видаленням).
+                    if (!documentLocked)
                     {
-                        throw EditAssignmentAccess.NotFound(documentId);
+                        throw EditAssignmentAccess.Stale(string.Empty);
                     }
 
                     if (await assignments.CountByDocumentAsync(documentId, innerCt).ConfigureAwait(false) >= EditAssignment.MaxPerDocument)
@@ -336,7 +350,8 @@ public sealed class UpsertEditAssignmentHandler(
                         .SequenceEqual(recipientIds.OrderBy(i => i));
                     var sameFlags = existing.IsExclusive == p.IsExclusive
                         && string.Equals(existing.Note ?? string.Empty, note ?? string.Empty, StringComparison.Ordinal);
-                    var sameSet = existing.AppliedSetId == p.AppliedSet?.Id;
+                    // Відсутній набір у запиті мітку НЕ знімає (повтор без набору ідемпотентний, знімок лишається).
+                    var sameSet = p.AppliedSet is null || existing.AppliedSetId == p.AppliedSet.Id;
 
                     if (sameMembers && sameFlags && sameSet)
                     {
@@ -382,7 +397,10 @@ public sealed class UpsertEditAssignmentHandler(
                 }
 
                 // Знімок набору оновлюється і тоді, коли склад і ознаки ті самі (аудит P2).
-                result!.MarkAppliedSet(p.AppliedSet?.Id, p.AppliedSet?.Name);
+                if (p.AppliedSet is not null)
+                {
+                    result!.MarkAppliedSet(p.AppliedSet.Id, p.AppliedSet.Name);
+                }
 
                 foreach (var id in newlyAssigned)
                 {
@@ -502,7 +520,7 @@ public sealed class DeleteEditAssignmentHandler(
             .ReadScopeAsync(documents, metadata, profile, document.ProjectId, documentId, ct).ConfigureAwait(false);
 
         var now = clock.UtcNow;
-        await uow.ExecuteInTransactionAsync(async innerCt =>
+        await EditAssignmentAccess.InTransactionAsync(uow, async innerCt =>
         {
             await store.LimitLockWaitAsync(innerCt).ConfigureAwait(false);
 
@@ -585,7 +603,7 @@ public sealed class FillEditAssignmentHandler(
         var now = clock.UtcNow;
         EditAssignment? result = null;
 
-        await uow.ExecuteInTransactionAsync(async innerCt =>
+        await EditAssignmentAccess.InTransactionAsync(uow, async innerCt =>
         {
             await store.LimitLockWaitAsync(innerCt).ConfigureAwait(false);
 
@@ -672,7 +690,7 @@ public sealed class ValidateEditAssignmentHandler(
         var now = clock.UtcNow;
         EditAssignment? result = null;
 
-        await uow.ExecuteInTransactionAsync(async innerCt =>
+        await EditAssignmentAccess.InTransactionAsync(uow, async innerCt =>
         {
             await store.LimitLockWaitAsync(innerCt).ConfigureAwait(false);
 
@@ -787,7 +805,7 @@ public sealed class ReturnEditAssignmentHandler(
         var now = clock.UtcNow;
         EditAssignment? result = null;
 
-        await uow.ExecuteInTransactionAsync(async innerCt =>
+        await EditAssignmentAccess.InTransactionAsync(uow, async innerCt =>
         {
             await store.LimitLockWaitAsync(innerCt).ConfigureAwait(false);
 
@@ -892,6 +910,10 @@ public sealed class ListEditAssignmentCandidatesHandler(
     /// <summary>Мінімальна довжина запиту.</summary>
     public const int MinQueryLength = 2;
 
+    private const int PageSize = 60;
+
+    private const int MaxPages = 10;
+
     /// <summary>Повертає кандидатів.</summary>
     public async Task<IReadOnlyList<EditAssignmentCandidateDto>> HandleAsync(
         long documentId, string? query, CancellationToken ct)
@@ -910,22 +932,33 @@ public sealed class ListEditAssignmentCandidatesHandler(
 
         // Лише користувачі, які ВЖЕ мають Read на проєкт документа (інакше передача їм відмовила б, а список
         // не повинен бути переліком усіх облікових записів — аудит S3).
-        var found = await store.SearchCandidatesAsync(q, MaxResults * 3, ct).ConfigureAwait(false);
         var result = new List<EditAssignmentCandidateDto>();
-        foreach (var u in found.Where(u => u.Id != userId && u.Id != document.CreatedByUserId))
+
+        // Сторінки по MaxResults*3 доти, доки не набрано MaxResults або кандидати не скінчились (межа сторінок —
+        // захист від скану всіх облікових записів): хто має Read, не витісняється тими, хто його не має.
+        for (var page = 0; page < MaxPages; page++)
         {
-            var candidate = await access.BuildProfileAsync(u.Id, ct).ConfigureAwait(false);
-            if (candidate.SeesDocumentsOf(document.ProjectId)
-                && PermissionCheck.IsGrantedIn(candidate, "Document.View", document.ProjectId))
+            var batch = await store
+                .SearchCandidatesAsync(q, page * PageSize, PageSize, ct).ConfigureAwait(false);
+            foreach (var u in batch.Where(u => u.Id != userId && u.Id != document.CreatedByUserId))
             {
-                result.Add(new EditAssignmentCandidateDto(u.Id, u.DisplayName));
-                if (result.Count == MaxResults)
+                var candidate = await access.BuildProfileAsync(u.Id, ct).ConfigureAwait(false);
+                if (candidate.SeesDocumentsOf(document.ProjectId)
+                    && PermissionCheck.IsGrantedIn(candidate, "Document.View", document.ProjectId))
                 {
-                    break;
+                    result.Add(new EditAssignmentCandidateDto(u.Id, u.DisplayName));
+                    if (result.Count == MaxResults)
+                    {
+                        return result;
+                    }
                 }
             }
-        }
 
+            if (batch.Count < PageSize)
+            {
+                break;
+            }
+        }
         return result;
     }
 }

@@ -37,6 +37,11 @@ public sealed class EditAssignmentManagementStore(EcrDbContext db) : IEditAssign
         => db.Database.ExecuteSqlRawAsync(LimitLockWaitSql, ct);
 
     /// <inheritdoc />
+    public Task<bool> SliceExistsAsync(long documentId, string sliceKey, CancellationToken ct)
+        => db.EditAssignments.AsNoTracking()
+            .AnyAsync(a => a.DocumentId == documentId && a.SliceKey == sliceKey, ct);
+
+    /// <inheritdoc />
     public async Task LockRecipientsAsync(long assignmentId, CancellationToken ct)
     {
         // ⛔ N4: порядок блокувань — sheet-gate → рядок передачі → рядки виконавців. Перехід бере X на передачі
@@ -87,7 +92,7 @@ public sealed class EditAssignmentManagementStore(EcrDbContext db) : IEditAssign
 
     /// <inheritdoc />
     public async Task<IReadOnlyList<EditAssignmentUserRef>> SearchCandidatesAsync(
-        string query, int take, CancellationToken ct)
+        string query, int skip, int take, CancellationToken ct)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(query);
 
@@ -95,6 +100,7 @@ public sealed class EditAssignmentManagementStore(EcrDbContext db) : IEditAssign
             .Where(u => u.IsActive && !u.IsBootstrapAdmin
                 && u.DisplayName.Contains(query))
             .OrderBy(u => u.DisplayName).ThenBy(u => u.Id)
+            .Skip(skip)
             .Take(take)
             .Select(u => new EditAssignmentUserRef(u.Id, u.DisplayName, null, true))
             .ToListAsync(ct).ConfigureAwait(false);
