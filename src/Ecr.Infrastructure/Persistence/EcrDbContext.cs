@@ -83,6 +83,18 @@ public sealed class EcrDbContext(DbContextOptions<EcrDbContext> options)
     public DbSet<CellValue> CellValues => Set<CellValue>();
     public DbSet<DocumentHeaderValue> DocumentHeaderValues => Set<DocumentHeaderValue>();
 
+    /// <summary>Передачі зрізу документа виконавцям (EA-1): зріз, ексклюзивність, стан валідації.</summary>
+    public DbSet<EditAssignment> EditAssignments => Set<EditAssignment>();
+
+    /// <summary>Виконавці передач із власним станом Передано/Заповнено/Повернуто (EA-1).</summary>
+    public DbSet<EditAssignmentRecipient> EditAssignmentRecipients => Set<EditAssignmentRecipient>();
+
+    /// <summary>Набори виконавців власника (EA-1).</summary>
+    public DbSet<EditorSet> EditorSets => Set<EditorSet>();
+
+    /// <summary>Члени наборів виконавців (EA-1).</summary>
+    public DbSet<EditorSetMember> EditorSetMembers => Set<EditorSetMember>();
+
     // sec
     public DbSet<User> Users => Set<User>();
     public DbSet<Role> Roles => Set<Role>();

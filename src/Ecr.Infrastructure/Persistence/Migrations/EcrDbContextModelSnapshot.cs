@@ -2655,6 +2655,232 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                     b.ToTable("DocumentSheet", "doc");
                 });
 
+            modelBuilder.Entity("Ecr.Domain.Entities.Documents.EditAssignment", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<int?>("AppliedSetId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("AppliedSetName")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<int>("CreatedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("DelegatedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<long>("DocumentId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime?>("ExpiresAt")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<Guid>("HandoffId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<bool>("IsExclusive")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true, "DF_EditAssignment_Excl");
+
+                    b.Property<DateTime>("ModifiedAt")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<int>("ModifiedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<byte?>("MonthNumber")
+                        .HasColumnType("tinyint");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<int?>("PeriodKeyValue")
+                        .HasColumnType("int")
+                        .HasColumnName("PeriodKey");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<string>("SheetCode")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("SliceKey")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("TableCode")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<DateTime?>("ValidatedAt")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<int?>("ValidatedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<byte>("ValidationStatus")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("tinyint")
+                        .HasDefaultValue((byte)0, "DF_EditAssignment_Valid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AppliedSetId")
+                        .HasDatabaseName("IX_EditAssignment_AppliedSet")
+                        .HasFilter("[AppliedSetId] IS NOT NULL");
+
+                    b.HasIndex("HandoffId")
+                        .HasDatabaseName("IX_EditAssignment_Handoff");
+
+                    b.HasIndex("DocumentId", "SliceKey")
+                        .IsUnique()
+                        .HasDatabaseName("UQ_EditAssignment");
+
+                    b.ToTable("EditAssignment", "doc", t =>
+                        {
+                            t.HasCheckConstraint("CK_EditAssignment_Month", "MonthNumber IS NULL OR MonthNumber BETWEEN 1 AND 12");
+
+                            t.HasCheckConstraint("CK_EditAssignment_Note", "Note IS NULL OR LEN(Note) > 0");
+
+                            t.HasCheckConstraint("CK_EditAssignment_Period", "PeriodKey IS NULL OR (PeriodKey / 100 BETWEEN 1900 AND 9999 AND PeriodKey % 100 BETWEEN 1 AND 99)");
+
+                            t.HasCheckConstraint("CK_EditAssignment_SliceKey", "LEN(SliceKey) > 0");
+
+                            t.HasCheckConstraint("CK_EditAssignment_Table", "TableCode IS NULL OR SheetCode IS NOT NULL");
+
+                            t.HasCheckConstraint("CK_EditAssignment_Validation", "(ValidationStatus = 0 AND ValidatedAt IS NULL AND ValidatedByUserId IS NULL) OR (ValidationStatus = 1 AND ValidatedAt IS NOT NULL AND ValidatedByUserId IS NOT NULL)");
+                        });
+                });
+
+            modelBuilder.Entity("Ecr.Domain.Entities.Documents.EditAssignmentRecipient", b =>
+                {
+                    b.Property<long>("AssignmentId")
+                        .HasColumnType("bigint");
+
+                    b.Property<int>("UserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("AssignedAt")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<int>("AssignedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime?>("FilledAt")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<short>("ReturnCount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("smallint")
+                        .HasDefaultValue((short)0, "DF_EditAssignmentRecipient_RetCnt");
+
+                    b.Property<string>("ReturnReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<DateTime?>("ReturnedAt")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<int?>("ReturnedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<byte>("Status")
+                        .HasColumnType("tinyint");
+
+                    b.Property<DateTime>("StatusChangedAt")
+                        .HasColumnType("datetime2(3)");
+
+                    b.HasKey("AssignmentId", "UserId");
+
+                    b.HasIndex("UserId", "Status")
+                        .HasDatabaseName("IX_EditAssignmentRecipient_User");
+
+                    SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex("UserId", "Status"), new[] { "AssignmentId" });
+
+                    b.ToTable("EditAssignmentRecipient", "doc", t =>
+                        {
+                            t.HasCheckConstraint("CK_EditAssignmentRecipient_Reason", "ReturnReason IS NULL OR LEN(LTRIM(RTRIM(ReturnReason))) > 0");
+
+                            t.HasCheckConstraint("CK_EditAssignmentRecipient_State", "(Status = 0 AND FilledAt IS NULL AND ReturnedAt IS NULL AND ReturnedByUserId IS NULL AND ReturnReason IS NULL AND ReturnCount = 0) OR (Status = 1 AND FilledAt IS NOT NULL) OR (Status = 2 AND ReturnedAt IS NOT NULL AND ReturnedByUserId IS NOT NULL AND ReturnReason IS NOT NULL AND ReturnCount >= 1)");
+                        });
+                });
+
+            modelBuilder.Entity("Ecr.Domain.Entities.Documents.EditorSet", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<DateTime>("ModifiedAt")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<int>("OwnerUserId")
+                        .HasColumnType("int");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OwnerUserId", "Name")
+                        .IsUnique()
+                        .HasDatabaseName("UQ_EditorSet_Owner");
+
+                    b.ToTable("EditorSet", "doc", t =>
+                        {
+                            t.HasCheckConstraint("CK_EditorSet_Name", "LEN(LTRIM(RTRIM(Name))) > 0");
+                        });
+                });
+
+            modelBuilder.Entity("Ecr.Domain.Entities.Documents.EditorSetMember", b =>
+                {
+                    b.Property<int>("SetId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("UserId")
+                        .HasColumnType("int");
+
+                    b.HasKey("SetId", "UserId");
+
+                    b.ToTable("EditorSetMember", "doc");
+                });
+
             modelBuilder.Entity("Ecr.Domain.Entities.Documents.Period", b =>
                 {
                     b.Property<int>("Id")
@@ -6224,6 +6450,92 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .HasConstraintName("FK_DocSheet_Sheet");
                 });
 
+            modelBuilder.Entity("Ecr.Domain.Entities.Documents.EditAssignment", b =>
+                {
+                    b.HasOne("Ecr.Domain.Entities.Documents.EditorSet", null)
+                        .WithMany()
+                        .HasForeignKey("AppliedSetId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_EditAssignment_Set");
+
+                    b.HasOne("Ecr.Domain.Entities.Security.User", null)
+                        .WithMany()
+                        .HasForeignKey("DelegatedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_EditAssignment_DelegatedBy");
+
+                    b.HasOne("Ecr.Domain.Entities.Documents.Document", null)
+                        .WithMany()
+                        .HasForeignKey("DocumentId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_EditAssignment_Document");
+
+                    b.HasOne("Ecr.Domain.Entities.Security.User", null)
+                        .WithMany()
+                        .HasForeignKey("ValidatedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_EditAssignment_ValidatedBy");
+                });
+
+            modelBuilder.Entity("Ecr.Domain.Entities.Documents.EditAssignmentRecipient", b =>
+                {
+                    b.HasOne("Ecr.Domain.Entities.Security.User", null)
+                        .WithMany()
+                        .HasForeignKey("AssignedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_EditAssignmentRecipient_AssignedBy");
+
+                    b.HasOne("Ecr.Domain.Entities.Documents.EditAssignment", null)
+                        .WithMany("Recipients")
+                        .HasForeignKey("AssignmentId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_EditAssignmentRecipient_Assignment");
+
+                    b.HasOne("Ecr.Domain.Entities.Security.User", null)
+                        .WithMany()
+                        .HasForeignKey("ReturnedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_EditAssignmentRecipient_ReturnedBy");
+
+                    b.HasOne("Ecr.Domain.Entities.Security.User", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_EditAssignmentRecipient_User");
+                });
+
+            modelBuilder.Entity("Ecr.Domain.Entities.Documents.EditorSet", b =>
+                {
+                    b.HasOne("Ecr.Domain.Entities.Security.User", null)
+                        .WithMany()
+                        .HasForeignKey("OwnerUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_EditorSet_Owner");
+                });
+
+            modelBuilder.Entity("Ecr.Domain.Entities.Documents.EditorSetMember", b =>
+                {
+                    b.HasOne("Ecr.Domain.Entities.Documents.EditorSet", null)
+                        .WithMany("Members")
+                        .HasForeignKey("SetId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_EditorSetMember_Set");
+
+                    b.HasOne("Ecr.Domain.Entities.Security.User", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_EditorSetMember_User");
+                });
+
             modelBuilder.Entity("Ecr.Domain.Entities.Documents.Period", b =>
                 {
                     b.HasOne("Ecr.Domain.Entities.Documents.Project", null)
@@ -6938,6 +7250,16 @@ namespace Ecr.Infrastructure.Persistence.Migrations
             modelBuilder.Entity("Ecr.Domain.Entities.Documents.Document", b =>
                 {
                     b.Navigation("Sheets");
+                });
+
+            modelBuilder.Entity("Ecr.Domain.Entities.Documents.EditAssignment", b =>
+                {
+                    b.Navigation("Recipients");
+                });
+
+            modelBuilder.Entity("Ecr.Domain.Entities.Documents.EditorSet", b =>
+                {
+                    b.Navigation("Members");
                 });
 
             modelBuilder.Entity("Ecr.Domain.Entities.Documents.Project", b =>
