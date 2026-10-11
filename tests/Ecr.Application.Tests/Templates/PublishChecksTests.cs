@@ -190,6 +190,65 @@ public sealed class PublishChecksTests
         Assert.False(jan.IsComputed);
     }
 
+    /// <remarks>
+    /// ⛔ FP-5 (прохід «від першого обличчя» 2026-10-11): приймач Rollup мусить бути <c>Formula</c>
+    /// (D-230), а публікація вимагала для <c>Formula</c> формулу шаблону — приймач не мав ні її, ні
+    /// прив'язки, і єдиним обходом була фіктивна формула <c>0</c>. Приймач активного Rollup — теж
+    /// джерело значення.
+    /// <para>
+    /// Мутація: прибрати об'єднання <c>rollupTargets</c> у <c>PublishTemplateVersionHandler</c> — тут
+    /// не змінюється (чиста функція), зате червоніє <c>RollupTargetColumnIds</c>-перелік нижче.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "ФВ-2.12")]
+    public void Приймач_активного_Rollup_знімає_зауваження_4226_а_неактивний_і_чужа_колонка_ні()
+    {
+        var builder = new TemplateBuilder { TemplateVersionId = 1 };
+        var sheet = builder.Sheet("Water");
+        var detail = builder.Table(sheet, "Detail");
+        builder.Column(detail, "Amount");
+        builder.Row(detail, "7001001", 1);
+
+        var summary = builder.Table(sheet, "Summary");
+        var total = builder.Column(summary, "Total", CellDataType.Formula);
+        var other = builder.Column(summary, "Other", CellDataType.Formula);
+        builder.Row(summary, "7001002", 1);
+
+        var version = builder.Version();
+
+        // До зв'язку: обидві Formula-колонки без джерела.
+        Assert.Equal(2, PublishChecks.CheckStructure(version).Count(d => d.Code == "ECR-TMPL-4226"));
+
+        var relation = new TableRelationDef(
+            EcrCode.Create("ROLL"), detail.Id, summary.Id, TableRelationKind.Rollup, "{}");
+        relation.Update(
+            detail.Id, summary.Id, TableRelationKind.Rollup, "{}",
+            """{"sourceColumn":"Amount","targetColumn":"Total","aggregate":"sum"}""", 0, isActive: true);
+
+        var targets = PublishChecks.RollupTargetColumnIds(version, [relation]);
+        Assert.Equal([total.Id], targets.ToArray());
+
+        // Приймач Rollup — джерело; чужа Formula-колонка Other лишається без джерела.
+        var diagnostic = Assert.Single(PublishChecks.CheckStructure(version, targets));
+        Assert.Equal("ECR-TMPL-4226", diagnostic.Code);
+        Assert.Equal("Other", diagnostic.MessageParams!["columnCode"]);
+        Assert.NotEqual(other.Id, total.Id);
+
+        // Вимкнений зв'язок нічого не джерелить.
+        relation.Update(
+            detail.Id, summary.Id, TableRelationKind.Rollup, "{}",
+            """{"sourceColumn":"Amount","targetColumn":"Total","aggregate":"sum"}""", 0, isActive: false);
+        Assert.Empty(PublishChecks.RollupTargetColumnIds(version, [relation]));
+
+        // Зв'язок на неіснуючу колонку чи з неприйнятним MapJson — теж ні.
+        relation.Update(
+            detail.Id, summary.Id, TableRelationKind.Rollup, "{}",
+            """{"sourceColumn":"Amount","targetColumn":"Nope","aggregate":"sum"}""", 0, isActive: true);
+        Assert.Empty(PublishChecks.RollupTargetColumnIds(version, [relation]));
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
     public void Фіксована_таблиця_без_жодного_рядка_відхиляє_публікацію()

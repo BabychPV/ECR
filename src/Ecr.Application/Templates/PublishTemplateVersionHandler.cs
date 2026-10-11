@@ -162,7 +162,16 @@ public sealed partial class PublishTemplateVersionHandler(
             .ListBoundColumnIdsAsync(templateVersionId, ct)
             .ConfigureAwait(false);
 
-        diagnostics = [.. diagnostics, .. PublishChecks.CheckStructure(version, boundColumnIds)];
+        // ⛔ FP-5: приймач активного зв'язку Rollup — теж джерело значення колонки `Formula`: його пише
+        // `RelationRecalculator`, формули шаблону чи прив'язки в нього бути не може (D-230). Без цього
+        // публікація вимагала фіктивну формулу `0`.
+        var relations = await versionStore.ListTableRelationsAsync(templateVersionId, ct).ConfigureAwait(false);
+        var rollupTargets = PublishChecks.RollupTargetColumnIds(version, relations);
+        IReadOnlySet<int> sourcedColumnIds = rollupTargets.Count == 0
+            ? boundColumnIds
+            : new HashSet<int>(boundColumnIds.Concat(rollupTargets));
+
+        diagnostics = [.. diagnostics, .. PublishChecks.CheckStructure(version, sourcedColumnIds)];
 
         // ⛔ D-R2: активна прив'язка до методології без опублікованої версії валила б
         // ВЕСЬ перерахунок документа — відмовляємо тут, до публікації.

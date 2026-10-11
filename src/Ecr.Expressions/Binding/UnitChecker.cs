@@ -114,6 +114,19 @@ public sealed class UnitChecker
             {
                 if (left is null || right is null)
                 {
+                    // ⛔ FP-4 (прохід «від першого обличчя» 2026-10-11, P2): `null` має ДВА сенси.
+                    // Літерал і безрозмірна колонка — справді безрозмірні, `x * 1000` лишає одиницю
+                    // x. А аргумент методології `@x` — одиниця НЕВІДОМА (вона в колонці, до якої
+                    // версію прив'язано): `@fuel * CST.EF` не має одиниці коефіцієнта, це «не
+                    // судиться». Раніше результат брав одиницю коефіцієнта й зіставлявся з
+                    // оголошеним виходом — паливо (т) × коефіцієнт (т/т) відхилялося як «різні
+                    // розмірності», і публікація проходила лише з коефіцієнтом, оголошеним у «т».
+                    if ((left is null && HasUnknownUnit(node.Left))
+                        || (right is null && HasUnknownUnit(node.Right)))
+                    {
+                        return null;
+                    }
+
                     return left ?? right;
                 }
 
@@ -129,7 +142,8 @@ public sealed class UnitChecker
             {
                 if (right is null)
                 {
-                    return left;
+                    // FP-4: ділення на аргумент з невідомою одиницею — результат теж невідомий.
+                    return HasUnknownUnit(node.Right) ? null : left;
                 }
 
                 if (left is null)
@@ -417,6 +431,31 @@ public sealed class UnitChecker
     /// <summary>Код одиниці з літерала; <c>null</c> — це не літерал.</summary>
     private static string? UnitCode(AstNode node)
         => node is LiteralNode { Value: string code } ? code : null;
+
+    /// <summary>
+    /// Чи має піддерево НЕВІДОМУ одиницю: містить аргумент методології (<c>@x</c>), одиницю якого
+    /// знає лише колонка прив'язки (FP-4). Відрізняється від «безрозмірного» (літерал, колонка без
+    /// одиниці), який у добутку одиницю співмножника зберігає.
+    /// </summary>
+    /// <remarks>
+    /// Обхід зупиняється на <c>CONVERT</c>: його результат має оголошену цільову одиницю.
+    /// </remarks>
+    private static bool HasUnknownUnit(AstNode node)
+    {
+        // ⛔ L7-01: окремий від Check рекурсивний спуск по тому самому піддереву.
+        RuntimeHelpers.EnsureSufficientExecutionStack();
+
+        return node switch
+        {
+            SymbolReferenceNode { Kind: SymbolKind.Argument } => true,
+            FunctionNode f when f.Name.Equals("CONVERT", StringComparison.OrdinalIgnoreCase) => false,
+            FunctionNode f => f.Arguments.Any(HasUnknownUnit),
+            BinaryNode b => HasUnknownUnit(b.Left) || HasUnknownUnit(b.Right),
+            UnaryNode u => HasUnknownUnit(u.Operand),
+            ConditionalNode c => HasUnknownUnit(c.WhenTrue) || HasUnknownUnit(c.WhenFalse),
+            _ => false,
+        };
+    }
 
     /// <summary>
     /// Чи містить піддерево посилання на колонку з одиницею на рядок, яку не

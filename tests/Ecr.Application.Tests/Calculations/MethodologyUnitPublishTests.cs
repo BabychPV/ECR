@@ -244,6 +244,48 @@ public sealed class MethodologyUnitPublishTests
     }
 
     /// <remarks>
+    /// ⛔ FP-4 (прохід «від першого обличчя» 2026-10-11): паливо (аргумент, одиниця якого відома лише
+    /// колонці прив'язки) × коефіцієнт викиду (кг/т) = маса. Раніше результат брав одиницю
+    /// КОЕФІЦІЄНТА (кг/т, інша розмірність), і вихід, оголошений у масі, відхилявся як «різні
+    /// розмірності»; публікація проходила лише з коефіцієнтом, оголошеним у «т». Невідома одиниця
+    /// аргумента — «не судиться», а не «безрозмірна».
+    /// <para>
+    /// Мутація: прибрати <c>HasUnknownUnit</c> з гілки <c>Multiply</c> <c>UnitChecker</c> — червоні обидва
+    /// рядки <c>Аргумент_на_коефіцієнт…</c> (відмова <c>expr.unit.dimensionMismatch</c>).
+    /// </para>
+    /// </remarks>
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "ФВ-16.6")]
+    [InlineData("@fuel * CST.EF")]
+    [InlineData("CST.EF * @fuel")]
+    [InlineData("(@fuel + CST.A) / CST.A * CST.EF * @fuel")]
+    public async Task Аргумент_на_коефіцієнт_публікується_з_виходом_в_одиниці_маси(string expression)
+    {
+        Formulas([Formula(1, "M", expression, unit: Tonne, arguments: "fuel")]);
+
+        await Publish();
+
+        Assert.True(_version.IsPublished);
+    }
+
+    /// <summary>
+    /// Але відома розмірність, що суперечить оголошеній, ловиться й далі: безрозмірний літерал
+    /// одиницю не змінює, тож `CST.EF * 2` — це кг/т, а вихід оголошено в масі.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "ФВ-16.6")]
+    public async Task Коефіцієнт_на_літерал_з_виходом_у_масі_відхиляється_як_і_раніше()
+    {
+        Formulas([Formula(1, "M", "CST.EF * 2", unit: Tonne)]);
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(Publish);
+
+        Assert.Equal("expr.unit.dimensionMismatch", error.Details!["messageKey"]);
+    }
+
+    /// <remarks>
     /// ⚠ Константа по речовинах у різних одиницях: одиниця <c>CST.K</c> залежить
     /// від рядка, і статично її не знає ніхто — тому не перевіряється, а не
     /// відхиляється за першим рядком.

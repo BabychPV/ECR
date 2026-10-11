@@ -518,6 +518,54 @@ public static class PublishChecks
         return diagnostics;
     }
 
+    /// <summary>
+    /// Колонки-приймачі активних зв'язків <c>Rollup</c> версії — джерело значення для
+    /// <c>ECR-TMPL-4226</c> (FP-5).
+    /// </summary>
+    /// <param name="version">Версія зі структурою.</param>
+    /// <param name="relations">Зв'язки версії (<c>ListTableRelationsAsync</c>).</param>
+    /// <returns><c>Id</c> колонок, у які пише Rollup.</returns>
+    /// <remarks>
+    /// ⛔ Прохід «від першого обличчя» 2026-10-11, P2. Приймач Rollup мусить бути колонкою
+    /// <c>Formula</c> («рахує система», D-230: ручний ввід відмовляє <c>ECR-CELL-4221</c>), а
+    /// публікація вимагала для кожної <c>Formula</c>-колонки формулу шаблону чи прив'язку методології
+    /// (<c>ECR-TMPL-4226</c>) — приймач Rollup не мав жодного з двох, і єдиним обходом була фіктивна
+    /// формула <c>0</c>. Джерело значення такої колонки — сам зв'язок (<c>RelationRecalculator</c>),
+    /// тож він рівноправний із формулою й прив'язкою.
+    ///
+    /// ⚠ Лише АКТИВНІ зв'язки виду Rollup, і лише ті, чий <c>MapJson</c> розбирається й вказує колонку
+    /// цієї версії: зв'язок, що нікуди не пише, нічого не джерелить, а відмова розбору — справа
+    /// <c>RelationSpecValidator</c> на збереженні зв'язку, не цієї перевірки.
+    /// </remarks>
+    public static IReadOnlySet<int> RollupTargetColumnIds(
+        TemplateVersion version, IReadOnlyList<TableRelationDef> relations)
+    {
+        ArgumentNullException.ThrowIfNull(version);
+        ArgumentNullException.ThrowIfNull(relations);
+
+        var tables = LiveTables(version.Sheets).ToDictionary(t => t.Id);
+        var ids = new HashSet<int>();
+
+        foreach (var relation in relations.Where(r => r.IsActive && r.RelationKind == TableRelationKind.Rollup))
+        {
+            var spec = RelationSpecParser.ParseRollup(relation.MapJson);
+            if (!spec.IsOk || !tables.TryGetValue(relation.TargetTableDefId, out var table))
+            {
+                continue;
+            }
+
+            var column = table.Columns.FirstOrDefault(c =>
+                !c.IsDeleted && string.Equals(c.Code, spec.Value!.TargetColumn, StringComparison.Ordinal));
+
+            if (column is not null)
+            {
+                ids.Add(column.Id);
+            }
+        }
+
+        return ids;
+    }
+
     /// <summary>Довідники, на які вказують живі <c>Lookup</c>-колонки й <c>Lookup</c>-поля шапки версії.</summary>
     /// <param name="version">Версія зі структурою.</param>
     /// <returns>Різні <c>Id</c> довідників.</returns>
