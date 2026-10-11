@@ -35,6 +35,8 @@ import { useDocumentPending } from '@/features/grid/autosave';
 import type { HeldEdit } from '@/features/grid/pendingStore';
 import { isEditable } from '@/features/workflow/SheetActions';
 import { useCalculationsStale } from '@/features/methodologies/staleCalculations';
+import { UnmatchedRowsBanner } from '@/features/documents/UnmatchedRowsBanner';
+import { useUnmatchedRows } from '@/features/documents/useUnmatchedRows';
 import { can, useSession } from '@/shared/session/useSession';
 import { localized } from '@/shared/i18n/localized';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
@@ -553,6 +555,8 @@ export function DocumentPage(): JSX.Element {
   // панеллю чисел (один ключ), тож завершений перерахунок оновлює обох.
   const staleReminderHost = useStaleResultsReminderHost(documentId);
   const calculationsStale = useCalculationsStale(documentId, periodKey, can(session.data, 'Calculation.View'));
+  // ✎ D14: рядки без правила розрахунку - інформація під рядком дій, не помилка.
+  const unmatchedRows = useUnmatchedRows(documentId, periodKey, can(session.data, 'Calculation.View'));
 
   const refetchBoth = (): void => {
     void summary.refetch();
@@ -672,6 +676,8 @@ export function DocumentPage(): JSX.Element {
           }
         />
       )}
+
+      {unmatchedRows !== null && <UnmatchedRowsBanner rows={unmatchedRows} />}
 
       {/* ⛔ `F-18`: ЧОМУ тут нічого не змінити — одразу під рядком дій, до
           будь-якої сітки: сірі комірки без пояснення читаються як збій.
