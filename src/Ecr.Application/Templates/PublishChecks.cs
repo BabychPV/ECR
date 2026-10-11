@@ -549,12 +549,45 @@ public static class PublishChecks
     /// </remarks>
     /// <returns>Зауваження публікації; порожньо - усе гаразд.</returns>
     public static IReadOnlyList<ExpressionDiagnostic> CheckLookupRegistries(
-        TemplateVersion version, IReadOnlySet<int> usableRegistryIds)
+        TemplateVersion version, IReadOnlySet<int>? usableRegistryIds)
     {
         ArgumentNullException.ThrowIfNull(version);
-        ArgumentNullException.ThrowIfNull(usableRegistryIds);
 
         var diagnostics = new List<ExpressionDiagnostic>();
+
+        // R16-1 (RC17): Lookup без довідника (висяче значення з бази, створеної до CK) - діагностика, а не мовчання.
+        // usableRegistryIds == null - існування довідників не перевіряється (збирання без сховища довідників).
+        foreach (var table in LiveTables(version.Sheets))
+        {
+            foreach (var column in table.Columns.Where(c =>
+                !c.IsDeleted && c.DataType == CellDataType.Lookup && c.LookupRegistryDefId is null))
+            {
+                diagnostics.Add(new ExpressionDiagnostic(
+                    "ECR-TMPL-0422",
+                    $"Колонка {table.Code}.{column.Code} типу Lookup не має довідника.",
+                    0,
+                    1,
+                    "err.ECR-TMPL-0422.lookupRegistryRequired",
+                    new Dictionary<string, string> { ["columnCode"] = $"{table.Code}.{column.Code}" }));
+            }
+        }
+
+        foreach (var field in version.HeaderFields.Where(f =>
+            !f.IsDeleted && f.DataType == CellDataType.Lookup && f.LookupRegistryDefId is null))
+        {
+            diagnostics.Add(new ExpressionDiagnostic(
+                "ECR-TMPL-0422",
+                $"Поле шапки {field.Code} типу Lookup не має довідника.",
+                0,
+                1,
+                "err.ECR-TMPL-0422.headerFieldLookupRegistryRequired",
+                new Dictionary<string, string> { ["headerFieldCode"] = field.Code }));
+        }
+
+        if (usableRegistryIds is null)
+        {
+            return diagnostics;
+        }
 
         foreach (var table in LiveTables(version.Sheets))
         {

@@ -27,14 +27,35 @@ internal static class LookupRegistryGuard
     /// <param name="access">Рішення доступу.</param>
     /// <param name="userId">Автор правки.</param>
     /// <param name="registryDefId">Довідник із команди.</param>
+    /// <param name="currentRegistryDefId">Довідник наявної колонки (<c>null</c> - колонка нова чи без довідника).</param>
     /// <param name="columnCode">Код колонки - для тексту відмови.</param>
     /// <param name="ct">Токен скасування.</param>
     /// <exception cref="BusinessRuleException"><c>ECR-TMPL-0422</c>, ключ <c>lookupRegistryUnknown</c>.</exception>
     internal static async Task RequireForColumnAsync(
         IRegistryStore? registries, IAccessDecisionService access, int userId, int? registryDefId,
-        string columnCode, CancellationToken ct)
+        int? currentRegistryDefId, string columnCode, CancellationToken ct)
     {
-        if (registryDefId is not { } id || await IsUsableAsync(registries, access, userId, id, ct).ConfigureAwait(false))
+        // R16-1 (RC17): Lookup без довідника - 422, а не 500 на CK_ColumnDef_Lookup. Тіло без довідника при
+        // наявній цілі - «не прислано = не чіпати» (ApplyOptionalFields), це не відмова.
+        if (registryDefId is null)
+        {
+            if (currentRegistryDefId is not null)
+            {
+                return;
+            }
+
+            throw new BusinessRuleException(
+                ErrorCodes.TemplateInvalid,
+                $"Колонка «{columnCode}» типу Lookup потребує довідника.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-TMPL-0422.lookupRegistryRequired",
+                    ["columnCode"] = columnCode,
+                });
+        }
+
+        var id = registryDefId.Value;
+        if (await IsUsableAsync(registries, access, userId, id, ct).ConfigureAwait(false))
         {
             return;
         }
@@ -55,14 +76,33 @@ internal static class LookupRegistryGuard
     /// <param name="access">Рішення доступу.</param>
     /// <param name="userId">Автор правки.</param>
     /// <param name="registryDefId">Довідник із команди.</param>
+    /// <param name="currentRegistryDefId">Довідник наявного поля (<c>null</c> - поле нове чи без довідника).</param>
     /// <param name="fieldCode">Код поля - для тексту відмови.</param>
     /// <param name="ct">Токен скасування.</param>
     /// <exception cref="BusinessRuleException"><c>ECR-TMPL-0422</c>, ключ <c>headerFieldLookupRegistryUnknown</c>.</exception>
     internal static async Task RequireForHeaderFieldAsync(
         IRegistryStore? registries, IAccessDecisionService access, int userId, int? registryDefId,
-        string fieldCode, CancellationToken ct)
+        int? currentRegistryDefId, string fieldCode, CancellationToken ct)
     {
-        if (registryDefId is not { } id || await IsUsableAsync(registries, access, userId, id, ct).ConfigureAwait(false))
+        if (registryDefId is null)
+        {
+            if (currentRegistryDefId is not null)
+            {
+                return;
+            }
+
+            throw new BusinessRuleException(
+                ErrorCodes.TemplateInvalid,
+                $"Поле шапки «{fieldCode}» типу Lookup потребує довідника.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-TMPL-0422.headerFieldLookupRegistryRequired",
+                    ["headerFieldCode"] = fieldCode,
+                });
+        }
+
+        var id = registryDefId.Value;
+        if (await IsUsableAsync(registries, access, userId, id, ct).ConfigureAwait(false))
         {
             return;
         }

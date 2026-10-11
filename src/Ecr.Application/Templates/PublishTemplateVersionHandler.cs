@@ -180,10 +180,12 @@ public sealed partial class PublishTemplateVersionHandler(
         diagnostics = [.. diagnostics, .. PublishChecks.CheckDuplicateColumnBindings(activeBindings)];
 
         // ✎ RC16-2: ціль Lookup-колонок і Lookup-полів шапки - живий активний довідник.
-        // Без сховища довідників (збирання без нього) перевірка пропускається, як і в `PublishMethodologyHandler`.
+        // Без сховища довідників (збирання без нього) існування цілі не перевіряється, як і в `PublishMethodologyHandler`;
+        // Lookup без довідника (R16-1) відсівається завжди.
+        HashSet<int>? usable = null;
         if (registries is not null)
         {
-            var usable = new HashSet<int>();
+            usable = [];
             foreach (var registryId in PublishChecks.LookupRegistryIds(version))
             {
                 var definition = await registries.FindDefinitionByIdAsync(registryId, ct).ConfigureAwait(false);
@@ -192,9 +194,9 @@ public sealed partial class PublishTemplateVersionHandler(
                     usable.Add(registryId);
                 }
             }
-
-            diagnostics = [.. diagnostics, .. PublishChecks.CheckLookupRegistries(version, usable)];
         }
+
+        diagnostics = [.. diagnostics, .. PublishChecks.CheckLookupRegistries(version, usable)];
 
         // RC14 (Land): конфлікт, де вибір методології робиться правилами, не блокує — лише журнал.
         if (logger is not null)
