@@ -36,7 +36,12 @@ public sealed class RecalculationService(
 
     // D-230: хук зв'язків Rollup. Необов'язковий: прямі `new RecalculationService(...)` у тестах його не
     // передають, DI підставляє `RelationRecalculator`.
-    Calculations.IRelationRecalculator? relationRecalculator = null) : ISubmitRecalculation
+    Calculations.IRelationRecalculator? relationRecalculator = null,
+
+    // ФВ-0.2: куди писати попередження про діапазон, розкритий за поточним порядком попри збережений
+    // граф (`SliceEvaluationContext`). Необов'язковий: без нього лишається лічильник
+    // `ecr.recalc.range_fallback`; DI підставляє `ILogger<RecalculationService>`.
+    Microsoft.Extensions.Logging.ILogger<RecalculationService>? logger = null) : ISubmitRecalculation
 {
     /// <summary>Автор обчислених значень: їх ставить система, а не людина.</summary>
     /// <remarks>
@@ -497,7 +502,8 @@ public sealed class RecalculationService(
             snapshot, values, headerValues,
             await PeriodOf(instance.DocumentId, periodKey, ct).ConfigureAwait(false),
             catalogue, rowIdsByTable, registryFields,
-            formulaDependencies: dependencies);
+            formulaDependencies: dependencies,
+            logger: logger);
 
         // Результати групуються за екземпляром: кожна таблиця пишеться
         // своїм набором змін, бо `CellChangeSet` адресує один екземпляр.

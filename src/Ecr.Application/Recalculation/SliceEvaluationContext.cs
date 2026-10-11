@@ -8,6 +8,7 @@ using Ecr.Expressions.Ast;
 using Ecr.Expressions.Binding;
 using Ecr.Expressions.Evaluation;
 using Ecr.Expressions.Functions;
+using Microsoft.Extensions.Logging;
 
 namespace Ecr.Application.Recalculation;
 
@@ -28,7 +29,7 @@ namespace Ecr.Application.Recalculation;
 /// що»: це діалект ШАБЛОНУ (<c>ФВ-9.1</c>), а не методології. Формула
 /// шаблону, яка дістає константу методології, перестає бути формулою шаблону.
 /// </remarks>
-public sealed class SliceEvaluationContext : IBudgetedEvaluationContext
+public sealed partial class SliceEvaluationContext : IBudgetedEvaluationContext
 {
     /// <inheritdoc />
     /// <remarks>
@@ -95,6 +96,10 @@ public sealed class SliceEvaluationContext : IBudgetedEvaluationContext
     /// діапазони <c>[A:B]</c> розкриваються так, як при публікації, а не за поточним <c>Ordinal</c>
     /// (ФВ-0.2). <c>null</c> — чернетка чи граф не збережено: діапазон за поточним порядком.
     /// </param>
+    /// <param name="logger">
+    /// Куди писати попередження про діапазон, розкритий за поточним порядком попри збережений граф
+    /// (ФВ-0.2); <c>null</c> — лише лічильник <c>ecr.recalc.range_fallback</c>.
+    /// </param>
     public SliceEvaluationContext(
         TemplateVersionSnapshot snapshot,
         IReadOnlyDictionary<CellKey, ExpressionValue> values,
@@ -103,10 +108,13 @@ public sealed class SliceEvaluationContext : IBudgetedEvaluationContext
         UnitCatalogSnapshot units,
         IReadOnlyDictionary<int, IReadOnlyDictionary<string, long>> rowsByTable,
         IReadOnlyDictionary<long, IReadOnlyDictionary<string, ExpressionValue>>? registryFields = null,
-        IReadOnlyList<FormulaDependency>? formulaDependencies = null)
+        IReadOnlyList<FormulaDependency>? formulaDependencies = null,
+        ILogger? logger = null)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
         _formulaDependencies = formulaDependencies;
+        _logger = logger;
+        _templateVersionId = snapshot.TemplateVersionId;
 
         _resolver = new ReferenceResolver(snapshot);
         _tables = snapshot.Sheets.SelectMany(s => s.Tables).ToDictionary(t => t.Id);
@@ -125,6 +133,11 @@ public sealed class SliceEvaluationContext : IBudgetedEvaluationContext
     private readonly Dictionary<int, IReadOnlyDictionary<int, IReadOnlyList<string>>> _publishedRanges = [];
     private FormulaDef? _formula;
     private AstNode? _formulaRoot;
+    private readonly ILogger? _logger;
+    private readonly int _templateVersionId;
+
+    /// <summary>Діапазони, про які вже сказано (формула, позиція): один запис на прогін, а не на рядок.</summary>
+    private readonly HashSet<(int FormulaDefId, int Position)> _fallbackNoted = [];
 
     /// <summary>
     /// Повідомляє контексту, яку формулу обчислюють: діапазони її посилань розкриваються ключами,
@@ -158,12 +171,9 @@ public sealed class SliceEvaluationContext : IBudgetedEvaluationContext
         return byPosition.TryGetValue(reference.Position, out var keys) ? keys : null;
     }
 
-    private Dictionary<int, IReadOnlyList<string>> BuildPublishedRanges(FormulaDef formula, AstNode root)
+    private IReadOnlyDictionary<int, IReadOnlyList<string>> BuildPublishedRanges(FormulaDef formula, AstNode root)
     {
-        _edgesByFormula ??= _formulaDependencies!
-            .Where(d => d.SourceKind == 0 && d.FormulaDefId is not null)
-            .GroupBy(d => d.FormulaDefId!.Value)
-            .ToDictionary(g => g.Key, g => g.ToDictionary(d => d.SortOrder));
+        _edgesByFormula ??= PublishedRanges.EdgesByFormula(_formulaDependencies!);
 
         if (!_edgesByFormula.TryGetValue(formula.Id, out var edges)
             || !_tables.TryGetValue(formula.TableDefId, out var table))
@@ -171,15 +181,47 @@ public sealed class SliceEvaluationContext : IBudgetedEvaluationContext
             return new Dictionary<int, IReadOnlyList<string>>();
         }
 
-        // ⚠ Той самий обхід, що й при публікації (`PublishChecks.Dependencies`): ті самі таблиця,
-        // рядок і колонка формули, тому `SortOrder` збігається з позицією у збереженому графі.
-        var expander = new PublishedRangeExpander(edges);
-        new DependencyExtractor(_resolver, expander).Extract(
-            root, table.Id, FormulaOutputs.RowKeyOf(table, formula), _tables,
-            diagnostics: null, formula.ColumnDefId);
-
-        return expander.ByPosition;
+        // ⚠ Той самий обхід, що й при публікації (`PublishChecks.Dependencies`) — і той самий код, що
+        // читає діапазони в Excel-експорті (`PublishedRanges`).
+        return PublishedRanges.Resolve(formula, root, table, _tables, _resolver, edges);
     }
+
+    /// <summary>
+    /// Фіксує діапазон ОПУБЛІКОВАНОЇ формули (граф версії має її ребра), для якого в графі не знайшлося
+    /// пробігу, тож його розкрито за поточним порядком рядків.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Тихе число там, де публікація зафіксувала інше, — саме клас помилок ФВ-0.2. Чернетка (граф
+    /// порожній) — норма й не рахується; рахується лише версія, у якої граф є, а пробіг посилання
+    /// загубився (змінений вираз, граф іншої редакції). Один запис на (формулу, позицію) за контекст:
+    /// формулу рахують по рядку, і без цього журнал заповнили б повтори одного й того самого.
+    /// </remarks>
+    private void NoteRangeFallback(CellReferenceNode reference, RowSelector.Range range)
+    {
+        if (_formula is null
+            || _edgesByFormula is null
+            || !_edgesByFormula.ContainsKey(_formula.Id)
+            || !_fallbackNoted.Add((_formula.Id, reference.Position)))
+        {
+            return;
+        }
+
+        RecalculationMetrics.RecordRangeFallback();
+
+        if (_logger is { } logger)
+        {
+            LogRangeFallback(
+                logger, _formula.Id, _templateVersionId, range.FromRowKey, range.ToRowKey, reference.Position);
+        }
+    }
+
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "ФВ-0.2: діапазон [{FromRowKey}:{ToRowKey}] формули {FormulaDefId} версії шаблону {TemplateVersionId} "
+            + "розкрито за поточним порядком рядків: у збереженому графі cfg.FormulaDependency немає пробігу "
+            + "для посилання на позиції {Position}. Число може відрізнятися від зафіксованого публікацією.")]
+    private static partial void LogRangeFallback(
+        ILogger logger, int formulaDefId, int templateVersionId, string fromRowKey, string toRowKey, int position);
 
     /// <inheritdoc />
     public PeriodContext Period { get; }
@@ -216,11 +258,17 @@ public sealed class SliceEvaluationContext : IBudgetedEvaluationContext
         if (reference.Row is RowSelector.Range range
             && _tables.TryGetValue(resolved.TableDefId, out var table))
         {
+            var keys = PublishedRange(reference);
+            if (keys is null)
+            {
+                NoteRangeFallback(reference, range);
+                keys = _expander.Expand(table, range.FromRowKey, range.ToRowKey);
+            }
+
             return
             [
-                .. (PublishedRange(reference) ?? _expander.Expand(table, range.FromRowKey, range.ToRowKey))
-                    .Select(rowKey => Value(
-                        resolved.TableDefId, rowKey, resolved.ColumnDefId, reference.PeriodOffset)),
+                .. keys.Select(rowKey => Value(
+                    resolved.TableDefId, rowKey, resolved.ColumnDefId, reference.PeriodOffset)),
             ];
         }
 
