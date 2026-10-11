@@ -72,6 +72,15 @@ namespace Ecr.Application.Ports;
 /// RC15: версія шаблону проєкту документа (<c>TemplateVersion.Version</c>, рядок). Адитивне поле; метадані шаблону не секрет,
 /// тож звуження читача його не знімає. Заповнює лише шлях картки (<c>FindAsync</c>); перелік віддає <c>null</c>.
 /// </param>
+/// <param name="OwnerUserId">
+/// EA-C: ідентифікатор автора документа (<c>CreatedByUserId</c>) — поруч з <paramref name="OwnerDisplayName"/> тим самим розкриттям,
+/// тож для звуженого читача — <c>null</c> (<c>DocumentSheetVisibility.For</c>). Заповнює лише шлях картки (<c>FindAsync</c>).
+/// </param>
+/// <param name="CanManageEditAccess">
+/// EA-C: чи може поточний користувач керувати передачами місяця — рішення СЕРВЕРА (автор ∨ <c>Manage</c> проєкту,
+/// та сама функція, що в обробниках <c>edit-assignments</c>). Клієнт показує пункт меню лише за ним. Лише картка.
+/// </param>
+/// <param name="ProjectIsReadOnly">Проєкт архівується/в архіві; не контракт (<c>JsonIgnore</c>), потрібне для <paramref name="CanManageEditAccess"/>.</param>
 public sealed record DocumentSummary(
     long Id,
     int ProjectId,
@@ -91,7 +100,10 @@ public sealed record DocumentSummary(
     string? ApproverDisplayName = null,
     bool? ResultsStale = null,
     DateTime? ResultsStaleSince = null,
-    string? TemplateVersion = null);
+    string? TemplateVersion = null,
+    int? OwnerUserId = null,
+    bool? CanManageEditAccess = null,
+    [property: System.Text.Json.Serialization.JsonIgnore] bool ProjectIsReadOnly = false);
 
 /// <summary>Аркуш складу документа в переліку: код, назва, стан за період.</summary>
 /// <param name="Code">Код аркуша (<c>SheetDef.Code</c>); він же ключ у <c>DocumentSummary.SheetStates</c>.</param>
