@@ -7620,6 +7620,15 @@ USING (VALUES
     ,(N'err.ECR-REQ-0422.editAssignmentReasonTooLong', N'en', N'The reason is longer than 500 characters.', 1)
     ,(N'err.ECR-REQ-0422.editAssignmentQueryTooShort', N'en', N'Enter at least two characters to search.', 1)
     ,(N'err.ECR-REQ-0422.editAssignmentRoleInvalid', N'en', N'Unknown role filter.', 1)
+    ,(N'err.ECR-DOC-0409.editorSetStale', N'en', N'The executor set was changed after you opened it. Reload and repeat the action.', 1)
+    ,(N'err.ECR-REQ-0422.editorSetNotFound', N'en', N'The executor set was not found.', 1)
+    ,(N'err.ECR-REQ-0422.editorSetTooMany', N'en', N'Too many executor sets.', 1)
+    ,(N'err.ECR-REQ-0422.editorSetNameTaken', N'en', N'A set with this name already exists.', 1)
+    ,(N'err.ECR-REQ-0422.editorSetNameInvalid', N'en', N'The set name must be 1 to 100 characters without control characters.', 1)
+    ,(N'err.ECR-REQ-0422.editorSetTooManyMembers', N'en', N'Too many executors in the set.', 1)
+    ,(N'err.ECR-REQ-0422.editorSetMemberInvalid', N'en', N'One of the executors cannot be added to the set.', 1)
+    ,(N'err.ECR-REQ-0422.editorSetBaseVersion', N'en', N'The request must say which version of the set it started from (baseVersion).', 1)
+    ,(N'err.ECR-REQ-0422.editAssignmentTooManySlices', N'en', N'Specify from 1 to 12 slices per request.', 1)
     -- COLL:ea-api ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
@@ -19004,7 +19013,25 @@ SELECT v.[Key], v.Lang, v.Val
     (N'err.ECR-REQ-0422.editAssignmentQueryTooShort', N'ru', N'Для поиска введите не менее двух символов.'),
     (N'err.ECR-REQ-0422.editAssignmentQueryTooShort', N'kz', N'Іздеу үшін кемінде екі таңба енгізіңіз.'),
     (N'err.ECR-REQ-0422.editAssignmentRoleInvalid', N'ru', N'Неизвестная роль фильтра.'),
-    (N'err.ECR-REQ-0422.editAssignmentRoleInvalid', N'kz', N'Сүзгі рөлі белгісіз.')
+    (N'err.ECR-REQ-0422.editAssignmentRoleInvalid', N'kz', N'Сүзгі рөлі белгісіз.'),
+    (N'err.ECR-DOC-0409.editorSetStale', N'ru', N'Набор исполнителей изменили после того, как вы его открыли. Перезагрузите и повторите действие.'),
+    (N'err.ECR-DOC-0409.editorSetStale', N'kz', N'Орындаушылар жиынын сіз ашқаннан кейін өзгертті. Қайта жүктеп, әрекетті қайталаңыз.'),
+    (N'err.ECR-REQ-0422.editorSetNotFound', N'ru', N'Набор исполнителей не найден.'),
+    (N'err.ECR-REQ-0422.editorSetNotFound', N'kz', N'Орындаушылар жиыны табылмады.'),
+    (N'err.ECR-REQ-0422.editorSetTooMany', N'ru', N'Слишком много наборов исполнителей.'),
+    (N'err.ECR-REQ-0422.editorSetTooMany', N'kz', N'Орындаушылар жиындары тым көп.'),
+    (N'err.ECR-REQ-0422.editorSetNameTaken', N'ru', N'Набор с таким названием уже есть.'),
+    (N'err.ECR-REQ-0422.editorSetNameTaken', N'kz', N'Мұндай атаумен жиын бұрыннан бар.'),
+    (N'err.ECR-REQ-0422.editorSetNameInvalid', N'ru', N'Название набора — от 1 до 100 символов без управляющих.'),
+    (N'err.ECR-REQ-0422.editorSetNameInvalid', N'kz', N'Жиын атауы — басқару таңбаларынсыз 1-ден 100-ге дейін таңба.'),
+    (N'err.ECR-REQ-0422.editorSetTooManyMembers', N'ru', N'Слишком много исполнителей в наборе.'),
+    (N'err.ECR-REQ-0422.editorSetTooManyMembers', N'kz', N'Жиында орындаушылар тым көп.'),
+    (N'err.ECR-REQ-0422.editorSetMemberInvalid', N'ru', N'Одного из исполнителей нельзя добавить в набор.'),
+    (N'err.ECR-REQ-0422.editorSetMemberInvalid', N'kz', N'Орындаушылардың бірін жиынға қосу мүмкін емес.'),
+    (N'err.ECR-REQ-0422.editorSetBaseVersion', N'ru', N'Запрос должен указывать версию набора, с которой начато действие (baseVersion).'),
+    (N'err.ECR-REQ-0422.editorSetBaseVersion', N'kz', N'Сұраныста әрекет басталған жиын нұсқасы (baseVersion) көрсетілуі керек.'),
+    (N'err.ECR-REQ-0422.editAssignmentTooManySlices', N'ru', N'Укажите от 1 до 12 срезов в одном запросе.'),
+    (N'err.ECR-REQ-0422.editAssignmentTooManySlices', N'kz', N'Бір сұраныста 1-ден 12-ге дейін кесінді көрсетіңіз.')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO

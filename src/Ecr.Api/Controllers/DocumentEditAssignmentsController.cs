@@ -22,7 +22,8 @@ public sealed class DocumentEditAssignmentsController(
     FillEditAssignmentHandler fill,
     ValidateEditAssignmentHandler validate,
     ReturnEditAssignmentHandler returnBack,
-    ListEditAssignmentCandidatesHandler candidates) : ControllerBase
+    ListEditAssignmentCandidatesHandler candidates,
+    BatchEditAssignmentsHandler batch) : ControllerBase
 {
     /// <summary>Передачі документа (для автора й менеджера проєкту).</summary>
     [HttpGet]
@@ -87,6 +88,25 @@ public sealed class DocumentEditAssignmentsController(
         long documentId, long assignmentId, [FromBody] ReturnEditAssignmentRequest request, CancellationToken ct)
         => Ok(await returnBack.HandleAsync(documentId, assignmentId, request, ct).ConfigureAwait(false));
 
+    /// <summary>Застосовує набір виконавців власника до 1..12 зрізів (наприклад, до місяців).</summary>
+    [HttpPost("apply-set")]
+    [ProducesResponseType<EditAssignmentBatchDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> ApplySet(
+        long documentId, [FromBody] ApplyEditorSetRequest request, CancellationToken ct)
+        => Ok(await batch.ApplySetAsync(documentId, request, ct).ConfigureAwait(false));
+
+    /// <summary>Копіює склад і ознаки наявної передачі на 1..12 інших зрізів («на наступний місяць»).</summary>
+    [HttpPost("copy")]
+    [ProducesResponseType<EditAssignmentBatchDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> Copy(
+        long documentId, [FromBody] CopyEditAssignmentRequest request, CancellationToken ct)
+        => Ok(await batch.CopyAsync(documentId, request, ct).ConfigureAwait(false));
     /// <summary>Пошук кандидатів у виконавці (≥ 2 символи, ≤ 20; без email і SID).</summary>
     [HttpGet("candidates")]
     [ProducesResponseType<IReadOnlyList<EditAssignmentCandidateDto>>(StatusCodes.Status200OK)]

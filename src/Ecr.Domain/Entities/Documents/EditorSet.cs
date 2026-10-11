@@ -71,6 +71,33 @@ public sealed class EditorSet : Entity<int>
         return true;
     }
 
+    /// <summary>Перейменовує набір (унікальність у межах власника — на стороні сховища).</summary>
+    public void Rename(string name, DateTime utcNow)
+    {
+        Name = NormalizeName(name);
+        ModifiedAt = utcNow;
+    }
+
+    /// <summary>Замінює склад набору (знімаються відсутні у <paramref name="userIds"/>, додаються нові).</summary>
+    /// <exception cref="InvalidOperationException">Перевищено <see cref="MaxMembers"/>.</exception>
+    public void ReplaceMembers(IEnumerable<int> userIds, DateTime utcNow)
+    {
+        ArgumentNullException.ThrowIfNull(userIds);
+
+        var ids = userIds.Distinct().ToList();
+        if (ids.Count > MaxMembers)
+        {
+            throw new InvalidOperationException($"У наборі не може бути більше {MaxMembers} членів.");
+        }
+
+        _members.RemoveAll(m => !ids.Contains(m.UserId));
+        foreach (var id in ids)
+        {
+            AddMember(id);
+        }
+
+        ModifiedAt = utcNow;
+    }
     private static string NormalizeName(string name)
     {
         var trimmed = name?.Trim();
