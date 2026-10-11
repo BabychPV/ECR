@@ -13,10 +13,10 @@ namespace Ecr.Expressions.Tests.Binding;
 /// Діапазони розкриваються **при публікації**, а не в рантаймі.
 /// </summary>
 /// <remarks>
-/// Тест <c>Зміна_Ordinal_після_публікації_не_змінює_результат</c> — головний
-/// у цьому файлі. Якби діапазон обчислювався за <c>Ordinal</c> у рантаймі,
-/// презентаційна правка мовчки змінювала б числа: даних не зіпсовано,
-/// а результат інший — найгірший клас помилок.
+/// ⛔ Тут перевіряється САМ розкривач (<see cref="RangeExpander"/>) і граф залежностей. Інваріант ФВ-0.2 «зміна
+/// <c>Ordinal</c> не змінює результат формули» тут перевіряти нічим: колишній тест не міг впасти (його
+/// "результат" рахувався з власного вхідного списку) і видалений; перевірка на фактичних шляхах продукту —
+/// <c>Ecr.Application.Tests/Recalculation/RangeSurvivesReorderTests</c> (REQ-COVERAGE-2026-10-11 §5 п. 5).
 /// </remarks>
 public sealed class RangeExpansionTests
 {
@@ -45,35 +45,6 @@ public sealed class RangeExpansionTests
 
         Assert.Equal(["7001001", "7001002", "7001003"], keys);
         Assert.DoesNotContain("7001004", keys);
-    }
-
-    [Fact]
-    [Trait(TestCategories.Stage, TestCategories.Stage2)]
-    [Trait("Requirement", "ФВ-0.2")]
-    public void Зміна_Ordinal_після_публікації_НЕ_змінює_результат_формули()
-    {
-        var (_, table) = FixedTable();
-
-        // Публікація: діапазон розкрито в конкретні ключі.
-        var published = Expander.Expand(table, "7001001", "7001003");
-
-        // Презентаційна правка: рядок 7001004 переїхав усередину діапазону.
-        table.Rows.Single(r => r.RowKeyValue == "7001004").Reorder(2);
-        table.Rows.Single(r => r.RowKeyValue == "7001002").Reorder(4);
-
-        // ⚠ Формула вже посилається на ключі, а не на порядок. Якби діапазон
-        // рахувався в рантаймі за Ordinal, у сумі з'явився б 7001004 — числа
-        // змінилися б від правки, яка не чіпала даних.
-        var context = new TestEvaluationContext { CurrentSheet = "Water", CurrentTable = "Main" };
-        foreach (var (key, amount) in new[] { ("7001001", 10m), ("7001002", 20m), ("7001003", 30m), ("7001004", 999m) })
-        {
-            context.SetCell("Water", "Main", key, "Jan", ExpressionValue.Number(amount));
-        }
-
-        var total = published.Sum(key => context.Cells[TestEvaluationContext.Key("Water", "Main", key, "Jan")].AsNumber()!.Value);
-
-        Assert.Equal(60m, total);
-        Assert.Equal(["7001001", "7001002", "7001003"], published);
     }
 
     [Fact]
