@@ -345,6 +345,33 @@ public sealed class EditAssignmentsApiTests(SqlServerFixture sql)
         var list = await JsonAsync(await owner.GetAsync(ListUri(s)).ConfigureAwait(true), HttpStatusCode.OK, app).ConfigureAwait(true);
         Assert.Equal(3, list.GetProperty("assignments").GetArrayLength());
     }
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Картка_документа_віддає_canManageEditAccess_за_рішенням_сервера()
+    {
+        var s = await ArrangeAsync().ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+        var card = new Uri($"/api/v1/documents/{s.DocumentId.ToString(CultureInfo.InvariantCulture)}", UriKind.Relative);
+
+        async Task<bool?> CanManageAsync(string userName)
+        {
+            using var client = await SignedInAsync(app, userName).ConfigureAwait(true);
+            var json = await JsonAsync(await client.GetAsync(card).ConfigureAwait(true), HttpStatusCode.OK, app).ConfigureAwait(true);
+            return json.TryGetProperty("canManageEditAccess", out var v) && v.ValueKind != JsonValueKind.Null
+                ? v.GetBoolean()
+                : null;
+        }
+
+        // Manage проєкту — так; Write не автор і Read — ні (клієнт не показує пункт, а не ловить 403).
+        Assert.True(await CanManageAsync(s.Manager.UserName).ConfigureAwait(true));
+        Assert.False(await CanManageAsync(s.Writer.UserName).ConfigureAwait(true));
+        Assert.False(await CanManageAsync(s.Executor.UserName).ConfigureAwait(true));
+
+        // Автор документа (ownerUserId) віддається читачеві картки.
+        using var owner = await SignedInAsync(app, s.Manager.UserName).ConfigureAwait(true);
+        var body = await JsonAsync(await owner.GetAsync(card).ConfigureAwait(true), HttpStatusCode.OK, app).ConfigureAwait(true);
+        Assert.Equal(1, body.GetProperty("ownerUserId").GetInt32());
+    }
     private static Uri ListUri(Scenario s)
         => new($"/api/v1/documents/{s.DocumentId.ToString(CultureInfo.InvariantCulture)}/edit-assignments", UriKind.Relative);
 
