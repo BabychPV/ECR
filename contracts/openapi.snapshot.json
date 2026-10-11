@@ -3902,6 +3902,13 @@
             "description": "Бізнес-ключ, унікальний у межах проєкту.",
             "type": "string"
           },
+          "canManageEditAccess": {
+            "description": "EA-C: чи може поточний користувач керувати передачами місяця — рішення СЕРВЕРА (автор ∨ `Manage` проєкту,\nта сама функція, що в обробниках `edit-assignments`). Клієнт показує пункт меню лише за ним. Лише картка.",
+            "type": [
+              "null",
+              "boolean"
+            ]
+          },
           "createdAt": {
             "description": "Момент створення.",
             "format": "date-time",
@@ -3956,6 +3963,14 @@
             "type": [
               "null",
               "string"
+            ]
+          },
+          "ownerUserId": {
+            "description": "EA-C: ідентифікатор автора документа (`CreatedByUserId`) — поруч з OwnerDisplayName тим самим розкриттям,\nтож для звуженого читача — `null` (`DocumentSheetVisibility.For`). Заповнює лише шлях картки (`FindAsync`).",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
             ]
           },
           "projectId": {

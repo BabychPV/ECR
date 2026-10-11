@@ -20872,6 +20872,9 @@ export interface components {
             approverDisplayName?: null | string;
             /** @description Бізнес-ключ, унікальний у межах проєкту. */
             businessKey: string;
+            /** @description EA-C: чи може поточний користувач керувати передачами місяця — рішення СЕРВЕРА (автор ∨ `Manage` проєкту,
+             *     та сама функція, що в обробниках `edit-assignments`). Клієнт показує пункт меню лише за ним. Лише картка. */
+            canManageEditAccess?: null | boolean;
             /**
              * Format: date-time
              * @description Момент створення.
@@ -20908,6 +20911,12 @@ export interface components {
              *     вже немає. ⛔ Для читача, чий доступ звужено нижче проєкту, — `null` (`DocumentSheetVisibility.For`):
              *     ім'я людини — окреме розкриття, його не віддаємо там, де документ показано частково. */
             ownerDisplayName?: null | string;
+            /**
+             * Format: int32
+             * @description EA-C: ідентифікатор автора документа (`CreatedByUserId`) — поруч з OwnerDisplayName тим самим розкриттям,
+             *     тож для звуженого читача — `null` (`DocumentSheetVisibility.For`). Заповнює лише шлях картки (`FindAsync`).
+             */
+            ownerUserId?: null | number;
             /**
              * Format: int32
              * @description Проєкт.
