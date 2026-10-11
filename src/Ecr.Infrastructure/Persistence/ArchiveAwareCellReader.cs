@@ -130,7 +130,7 @@ public sealed class ArchiveAwareCellReader(EcrDbContext db)
             join row in db.TableRows.AsNoTracking()
                 on new { P = cell.PeriodKeyValue, I = cell.TableRowId }
                 equals new { P = row.PeriodKeyValue, I = row.Id }
-            where row.TableInstanceId == tableInstanceId && row.PeriodKeyValue == periodKey.Value
+            where row.TableInstanceId == tableInstanceId && row.PeriodKeyValue == periodKey.Value && !row.IsDeleted
             orderby cell.TableRowId, cell.ColumnDefId
             select new ArchivedCell(
                 cell.PeriodKeyValue, cell.TableRowId, cell.ColumnDefId, cell.TableDefId,

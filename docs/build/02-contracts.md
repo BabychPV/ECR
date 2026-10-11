@@ -3922,6 +3922,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `GET` | `/api/v1/documents/{id}/tables/{tableInstanceId}` | `Document.View` | 1 |
 | `PATCH` | `/api/v1/documents/{id}/cells` | — (через `IAccessDecisionService`) | 1 |
 | `POST` | `/api/v1/documents/{id}/rows` | — | 1 |
+| `DELETE` | `/api/v1/documents/{id}/tables/{tableInstanceId}/rows/{rowKey}` | — (через `IAccessDecisionService`, як `POST …/rows`) | 1 |
 | `POST` | `/api/v1/documents/{id}/validate` | `Document.View` | 2 |
 | `GET` | `/api/v1/documents/{id}/validation` | `Document.View` | 2 |
 | `POST` | `/api/v1/documents/{id}/recalculate` | `Document.View` | 2 |

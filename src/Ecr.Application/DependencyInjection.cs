@@ -1,4 +1,4 @@
-﻿using Ecr.Application.Documents;
+using Ecr.Application.Documents;
 using Ecr.Application.Templates;
 using Ecr.Domain.Services;
 using Microsoft.Extensions.DependencyInjection;
@@ -137,6 +137,7 @@ public static class DependencyInjection
         services.AddScoped<GetDocumentHandler>();
         services.AddScoped<GetTableSliceHandler>();
         services.AddScoped<CreateRowHandler>();
+        services.AddScoped<DeleteRowHandler>();
 
         // Вирази, валідація і перерахунок (модулі 2.6–2.8)
         services.AddScoped<Validation.ValidationEngine>();
