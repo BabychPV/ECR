@@ -7596,6 +7596,9 @@ USING (VALUES
     ,(N'err.ECR-TMPL-0422.lookupRegistryRequired', N'en', N'Column "{columnCode}" is of type Lookup and needs a registry: pick one.', 1)
     ,(N'err.ECR-TMPL-0422.headerFieldLookupRegistryRequired', N'en', N'Header field "{headerFieldCode}" is of type Lookup and needs a registry: pick one.', 1)
     -- COLL:rc20lookup ── кінець секції ──
+    -- COLL:rpt-version-race ── гонка двох створень версії звіту (UQ_ReportVersion) -> 409; ru/kz - порцією COLL:rpt-version-race нижче ──
+    ,(N'err.ECR-RPT-4091.versionConcurrent', N'en', N'Someone else has just created a version with this number in this report definition. Reload the definition and pick another version number.', 1)
+    -- COLL:rpt-version-race ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -18965,6 +18968,16 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:rc20lookup ── кінець секції ──
+-- COLL:rpt-version-race ── ru/kz: гонка двох створень версії звіту (ECR-RPT-4091.versionConcurrent); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-RPT-4091.versionConcurrent', N'ru', N'Версию с этим номером в этом описании отчёта только что создал кто-то другой. Перечитайте описание и выберите другой номер версии.'),
+    (N'err.ECR-RPT-4091.versionConcurrent', N'kz', N'Осы есеп анықтамасында осы нөмірлі нұсқаны жаңа ғана басқа біреу жасады. Анықтаманы қайта жүктеп, басқа нұсқа нөмірін таңдаңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:rpt-version-race ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t
