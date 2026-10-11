@@ -7663,6 +7663,84 @@ USING (VALUES
     ,(N'audit.eventLabel.UserEmailChanged', N'en', N'User email changed', 1)
     ,(N'health.checking', N'en', N'Checking all services… the first check can take a few seconds.', 1)
     -- COLL:p3-rc19 ── кінець секції ──
+    -- EDA:ea5a ── EA-5a: шторка «Доступ до редагування» (передача місяця); ru/kz — порцією EDA:ea5a нижче ──
+    ,(N'editAssign.menu', N'en', N'Edit access', 1)
+    ,(N'editAssign.title', N'en', N'Edit access', 1)
+    ,(N'editAssign.close', N'en', N'Close edit access panel', 1)
+    ,(N'editAssign.hint', N'en', N'Hand a month to someone to fill in, then validate it.', 1)
+    ,(N'editAssign.owner', N'en', N'Owner: {name}', 1)
+    ,(N'editAssign.awaiting', N'en', N'Awaiting validation: {count}', 1)
+    ,(N'editAssign.view', N'en', N'View', 1)
+    ,(N'editAssign.view.months', N'en', N'Months', 1)
+    ,(N'editAssign.view.people', N'en', N'People', 1)
+    ,(N'editAssign.col.slice', N'en', N'Month', 1)
+    ,(N'editAssign.col.executors', N'en', N'Executors', 1)
+    ,(N'editAssign.col.status', N'en', N'Status', 1)
+    ,(N'editAssign.col.actions', N'en', N'Actions', 1)
+    ,(N'editAssign.col.person', N'en', N'Person', 1)
+    ,(N'editAssign.rowActions', N'en', N'Actions for {slice}', 1)
+    ,(N'editAssign.status.Open', N'en', N'Owner only', 1)
+    ,(N'editAssign.status.Assigned', N'en', N'Assigned', 1)
+    ,(N'editAssign.status.InProgress', N'en', N'In progress', 1)
+    ,(N'editAssign.status.Filled', N'en', N'Filled, awaiting validation', 1)
+    ,(N'editAssign.status.Validated', N'en', N'Validated', 1)
+    ,(N'editAssign.status.Returned', N'en', N'Returned', 1)
+    ,(N'editAssign.ownerOnly', N'en', N'Owner only', 1)
+    ,(N'editAssign.inactive', N'en', N'(disabled)', 1)
+    ,(N'editAssign.returnedWith', N'en', N'Returned: {reason}', 1)
+    ,(N'editAssign.sliceAll', N'en', N'Whole document', 1)
+    ,(N'editAssign.sliceSheet', N'en', N'sheet {sheet}', 1)
+    ,(N'editAssign.sliceTable', N'en', N'table {table}', 1)
+    ,(N'editAssign.assign', N'en', N'Assign month…', 1)
+    ,(N'editAssign.repeatNext', N'en', N'Repeat for next month', 1)
+    ,(N'editAssign.validate', N'en', N'Validate', 1)
+    ,(N'editAssign.return', N'en', N'Return…', 1)
+    ,(N'editAssign.edit', N'en', N'Edit', 1)
+    ,(N'editAssign.remove', N'en', N'Remove', 1)
+    ,(N'editAssign.returnTitle', N'en', N'Return {slice} for rework', 1)
+    ,(N'editAssign.returnReason', N'en', N'What needs to be fixed', 1)
+    ,(N'editAssign.removeTitle', N'en', N'Take {slice} back from the executors?', 1)
+    ,(N'editAssign.removeText', N'en', N'Executors will no longer be able to edit these cells. Values already entered stay in the document.', 1)
+    ,(N'editAssign.empty', N'en', N'Nothing is handed over yet', 1)
+    ,(N'editAssign.emptyHint', N'en', N'Use “Assign month…” to hand a month to someone to fill in.', 1)
+    ,(N'editAssign.visibility.Visible', N'en', N'sees the document', 1)
+    ,(N'editAssign.visibility.NotVisible', N'en', N'does not see the document', 1)
+    ,(N'editAssign.visibility.Unknown', N'en', N'visibility unknown', 1)
+    ,(N'editAssign.visibilityHint', N'en', N'Ask an administrator to grant the Executor role to people who do not see the document.', 1)
+    ,(N'editAssign.done.assigned', N'en', N'Assigned months: {count}', 1)
+    ,(N'editAssign.done.validated', N'en', N'{slice} validated', 1)
+    ,(N'editAssign.done.returned', N'en', N'{slice} returned for rework', 1)
+    ,(N'editAssign.done.removed', N'en', N'{slice} taken back', 1)
+    ,(N'editAssign.done.repeated', N'en', N'Repeated for {month}', 1)
+    ,(N'editAssign.wizard.title', N'en', N'Assign month', 1)
+    ,(N'editAssign.wizard.step.what', N'en', N'What', 1)
+    ,(N'editAssign.wizard.step.who', N'en', N'To whom', 1)
+    ,(N'editAssign.wizard.months', N'en', N'Months to hand over', 1)
+    ,(N'editAssign.wizard.replaces', N'en', N'Already assigned, the executors will be replaced: {months}', 1)
+    ,(N'editAssign.wizard.onlySheet', N'en', N'Only sheet (optional)', 1)
+    ,(N'editAssign.wizard.onlySheetHint', N'en', N'Leave empty to hand over the month on all sheets.', 1)
+    ,(N'editAssign.wizard.set', N'en', N'Saved set of executors', 1)
+    ,(N'editAssign.wizard.setNone', N'en', N'No set', 1)
+    ,(N'editAssign.wizard.search', N'en', N'Find people', 1)
+    ,(N'editAssign.wizard.searchHint', N'en', N'At least 2 characters', 1)
+    ,(N'editAssign.wizard.found', N'en', N'Found people', 1)
+    ,(N'editAssign.wizard.picked', N'en', N'Chosen executors', 1)
+    ,(N'editAssign.wizard.removeUser', N'en', N'Remove {name}', 1)
+    ,(N'editAssign.wizard.saveAsSet', N'en', N'Save as set', 1)
+    ,(N'editAssign.wizard.setName', N'en', N'Set name', 1)
+    ,(N'editAssign.wizard.note', N'en', N'Note for executors (optional)', 1)
+    ,(N'editAssign.wizard.noRecipients', N'en', N'Choose at least one executor or a saved set.', 1)
+    ,(N'editAssign.wizard.noSetName', N'en', N'Enter a name for the set.', 1)
+    ,(N'editAssign.wizard.reviewText', N'en', N'Check the hand-over before applying.', 1)
+    ,(N'editAssign.wizard.apply', N'en', N'Assign', 1)
+    ,(N'editAssign.wizard.summary.months', N'en', N'Months', 1)
+    ,(N'editAssign.wizard.summary.sheet', N'en', N'Only sheet', 1)
+    ,(N'editAssign.wizard.summary.fromSet', N'en', N'From set “{name}”', 1)
+    ,(N'editAssign.wizard.summary.visibility', N'en', N'Who sees the document', 1)
+    ,(N'editAssign.wizard.summary.exclusive', N'en', N'Others cannot edit these cells until the month is validated or taken back.', 1)
+    ,(N'editAssign.wizard.summary.shared', N'en', N'Others with editing rights by role can still edit these cells.', 1)
+    ,(N'editAssign.wizard.alsoOthers', N'en', N'Also allow others by role', 1)
+    -- EDA:ea5a ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -19009,6 +19087,166 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:quota-verify-validate ── кінець секції ──
+-- EDA:ea5a ── ru/kz: EA-5a: шторка «Доступ до редагування»; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'editAssign.menu', N'ru', N'Доступ к редактированию'),
+    (N'editAssign.menu', N'kz', N'Өңдеу рұқсаты'),
+    (N'editAssign.title', N'ru', N'Доступ к редактированию'),
+    (N'editAssign.title', N'kz', N'Өңдеу рұқсаты'),
+    (N'editAssign.close', N'ru', N'Закрыть панель доступа к редактированию'),
+    (N'editAssign.close', N'kz', N'Өңдеу рұқсаты панелін жабу'),
+    (N'editAssign.hint', N'ru', N'Передайте месяц исполнителю на заполнение, затем проверьте его.'),
+    (N'editAssign.hint', N'kz', N'Айды толтыру үшін орындаушыға беріңіз, содан кейін растаңыз.'),
+    (N'editAssign.owner', N'ru', N'Владелец: {name}'),
+    (N'editAssign.owner', N'kz', N'Иесі: {name}'),
+    (N'editAssign.awaiting', N'ru', N'Ожидают проверки: {count}'),
+    (N'editAssign.awaiting', N'kz', N'Растауды күтуде: {count}'),
+    (N'editAssign.view', N'ru', N'Вид'),
+    (N'editAssign.view', N'kz', N'Көрініс'),
+    (N'editAssign.view.months', N'ru', N'Месяцы'),
+    (N'editAssign.view.months', N'kz', N'Айлар'),
+    (N'editAssign.view.people', N'ru', N'Люди'),
+    (N'editAssign.view.people', N'kz', N'Адамдар'),
+    (N'editAssign.col.slice', N'ru', N'Месяц'),
+    (N'editAssign.col.slice', N'kz', N'Ай'),
+    (N'editAssign.col.executors', N'ru', N'Исполнители'),
+    (N'editAssign.col.executors', N'kz', N'Орындаушылар'),
+    (N'editAssign.col.status', N'ru', N'Статус'),
+    (N'editAssign.col.status', N'kz', N'Күйі'),
+    (N'editAssign.col.actions', N'ru', N'Действия'),
+    (N'editAssign.col.actions', N'kz', N'Әрекеттер'),
+    (N'editAssign.col.person', N'ru', N'Человек'),
+    (N'editAssign.col.person', N'kz', N'Адам'),
+    (N'editAssign.rowActions', N'ru', N'Действия для {slice}'),
+    (N'editAssign.rowActions', N'kz', N'{slice} үшін әрекеттер'),
+    (N'editAssign.status.Open', N'ru', N'Только владелец'),
+    (N'editAssign.status.Open', N'kz', N'Тек иесі'),
+    (N'editAssign.status.Assigned', N'ru', N'Передано'),
+    (N'editAssign.status.Assigned', N'kz', N'Берілді'),
+    (N'editAssign.status.InProgress', N'ru', N'В работе'),
+    (N'editAssign.status.InProgress', N'kz', N'Орындалуда'),
+    (N'editAssign.status.Filled', N'ru', N'Заполнено, ждёт проверки'),
+    (N'editAssign.status.Filled', N'kz', N'Толтырылды, растауды күтуде'),
+    (N'editAssign.status.Validated', N'ru', N'Проверено'),
+    (N'editAssign.status.Validated', N'kz', N'Расталды'),
+    (N'editAssign.status.Returned', N'ru', N'Возвращено'),
+    (N'editAssign.status.Returned', N'kz', N'Қайтарылды'),
+    (N'editAssign.ownerOnly', N'ru', N'Только владелец'),
+    (N'editAssign.ownerOnly', N'kz', N'Тек иесі'),
+    (N'editAssign.inactive', N'ru', N'(отключён)'),
+    (N'editAssign.inactive', N'kz', N'(өшірулі)'),
+    (N'editAssign.returnedWith', N'ru', N'Возвращено: {reason}'),
+    (N'editAssign.returnedWith', N'kz', N'Қайтарылды: {reason}'),
+    (N'editAssign.sliceAll', N'ru', N'Весь документ'),
+    (N'editAssign.sliceAll', N'kz', N'Бүкіл құжат'),
+    (N'editAssign.sliceSheet', N'ru', N'лист {sheet}'),
+    (N'editAssign.sliceSheet', N'kz', N'{sheet} парағы'),
+    (N'editAssign.sliceTable', N'ru', N'таблица {table}'),
+    (N'editAssign.sliceTable', N'kz', N'{table} кестесі'),
+    (N'editAssign.assign', N'ru', N'Передать месяц…'),
+    (N'editAssign.assign', N'kz', N'Айды беру…'),
+    (N'editAssign.repeatNext', N'ru', N'Повторить на следующий месяц'),
+    (N'editAssign.repeatNext', N'kz', N'Келесі айға қайталау'),
+    (N'editAssign.validate', N'ru', N'Проверить'),
+    (N'editAssign.validate', N'kz', N'Растау'),
+    (N'editAssign.return', N'ru', N'Вернуть…'),
+    (N'editAssign.return', N'kz', N'Қайтару…'),
+    (N'editAssign.edit', N'ru', N'Изменить'),
+    (N'editAssign.edit', N'kz', N'Өзгерту'),
+    (N'editAssign.remove', N'ru', N'Снять передачу'),
+    (N'editAssign.remove', N'kz', N'Беруді алу'),
+    (N'editAssign.returnTitle', N'ru', N'Вернуть {slice} на доработку'),
+    (N'editAssign.returnTitle', N'kz', N'{slice} кезеңін пысықтауға қайтару'),
+    (N'editAssign.returnReason', N'ru', N'Что нужно исправить'),
+    (N'editAssign.returnReason', N'kz', N'Не түзету керек'),
+    (N'editAssign.removeTitle', N'ru', N'Забрать {slice} у исполнителей?'),
+    (N'editAssign.removeTitle', N'kz', N'{slice} кезеңін орындаушылардан қайтарып алу керек пе?'),
+    (N'editAssign.removeText', N'ru', N'Исполнители больше не смогут редактировать эти ячейки. Уже введённые значения останутся в документе.'),
+    (N'editAssign.removeText', N'kz', N'Орындаушылар бұл ұяшықтарды енді өңдей алмайды. Енгізілген мәндер құжатта қалады.'),
+    (N'editAssign.empty', N'ru', N'Пока ничего не передано'),
+    (N'editAssign.empty', N'kz', N'Әзірге ештеңе берілмеген'),
+    (N'editAssign.emptyHint', N'ru', N'Нажмите «Передать месяц…», чтобы передать месяц на заполнение.'),
+    (N'editAssign.emptyHint', N'kz', N'Айды толтыруға беру үшін «Айды беру…» батырмасын басыңыз.'),
+    (N'editAssign.visibility.Visible', N'ru', N'видит документ'),
+    (N'editAssign.visibility.Visible', N'kz', N'құжатты көреді'),
+    (N'editAssign.visibility.NotVisible', N'ru', N'не видит документ'),
+    (N'editAssign.visibility.NotVisible', N'kz', N'құжатты көрмейді'),
+    (N'editAssign.visibility.Unknown', N'ru', N'видимость неизвестна'),
+    (N'editAssign.visibility.Unknown', N'kz', N'көрінуі белгісіз'),
+    (N'editAssign.visibilityHint', N'ru', N'Попросите администратора выдать роль «Исполнитель» тем, кто не видит документ.'),
+    (N'editAssign.visibilityHint', N'kz', N'Құжатты көрмейтіндерге «Орындаушы» рөлін беруді әкімшіден сұраңыз.'),
+    (N'editAssign.done.assigned', N'ru', N'Передано месяцев: {count}'),
+    (N'editAssign.done.assigned', N'kz', N'Берілген айлар: {count}'),
+    (N'editAssign.done.validated', N'ru', N'{slice}: проверено'),
+    (N'editAssign.done.validated', N'kz', N'{slice}: расталды'),
+    (N'editAssign.done.returned', N'ru', N'{slice} возвращено на доработку'),
+    (N'editAssign.done.returned', N'kz', N'{slice} пысықтауға қайтарылды'),
+    (N'editAssign.done.removed', N'ru', N'{slice} забрано у исполнителей'),
+    (N'editAssign.done.removed', N'kz', N'{slice} қайтарып алынды'),
+    (N'editAssign.done.repeated', N'ru', N'Повторено на {month}'),
+    (N'editAssign.done.repeated', N'kz', N'{month} үшін қайталанды'),
+    (N'editAssign.wizard.title', N'ru', N'Передача месяца'),
+    (N'editAssign.wizard.title', N'kz', N'Айды беру'),
+    (N'editAssign.wizard.step.what', N'ru', N'Что'),
+    (N'editAssign.wizard.step.what', N'kz', N'Не'),
+    (N'editAssign.wizard.step.who', N'ru', N'Кому'),
+    (N'editAssign.wizard.step.who', N'kz', N'Кімге'),
+    (N'editAssign.wizard.months', N'ru', N'Месяцы для передачи'),
+    (N'editAssign.wizard.months', N'kz', N'Берілетін айлар'),
+    (N'editAssign.wizard.replaces', N'ru', N'Уже переданы, состав исполнителей будет заменён: {months}'),
+    (N'editAssign.wizard.replaces', N'kz', N'Бұрын берілген, орындаушылар құрамы ауыстырылады: {months}'),
+    (N'editAssign.wizard.onlySheet', N'ru', N'Только лист (необязательно)'),
+    (N'editAssign.wizard.onlySheet', N'kz', N'Тек парақ (міндетті емес)'),
+    (N'editAssign.wizard.onlySheetHint', N'ru', N'Оставьте пустым, чтобы передать месяц на всех листах.'),
+    (N'editAssign.wizard.onlySheetHint', N'kz', N'Айды барлық парақтар бойынша беру үшін бос қалдырыңыз.'),
+    (N'editAssign.wizard.set', N'ru', N'Сохранённый набор исполнителей'),
+    (N'editAssign.wizard.set', N'kz', N'Орындаушылардың сақталған жинағы'),
+    (N'editAssign.wizard.setNone', N'ru', N'Без набора'),
+    (N'editAssign.wizard.setNone', N'kz', N'Жинақсыз'),
+    (N'editAssign.wizard.search', N'ru', N'Найти людей'),
+    (N'editAssign.wizard.search', N'kz', N'Адамдарды іздеу'),
+    (N'editAssign.wizard.searchHint', N'ru', N'Не меньше 2 символов'),
+    (N'editAssign.wizard.searchHint', N'kz', N'Кемінде 2 таңба'),
+    (N'editAssign.wizard.found', N'ru', N'Найденные люди'),
+    (N'editAssign.wizard.found', N'kz', N'Табылған адамдар'),
+    (N'editAssign.wizard.picked', N'ru', N'Выбранные исполнители'),
+    (N'editAssign.wizard.picked', N'kz', N'Таңдалған орындаушылар'),
+    (N'editAssign.wizard.removeUser', N'ru', N'Убрать {name}'),
+    (N'editAssign.wizard.removeUser', N'kz', N'{name} алып тастау'),
+    (N'editAssign.wizard.saveAsSet', N'ru', N'Сохранить как набор'),
+    (N'editAssign.wizard.saveAsSet', N'kz', N'Жинақ ретінде сақтау'),
+    (N'editAssign.wizard.setName', N'ru', N'Название набора'),
+    (N'editAssign.wizard.setName', N'kz', N'Жинақ атауы'),
+    (N'editAssign.wizard.note', N'ru', N'Заметка для исполнителей (необязательно)'),
+    (N'editAssign.wizard.note', N'kz', N'Орындаушыларға ескертпе (міндетті емес)'),
+    (N'editAssign.wizard.noRecipients', N'ru', N'Выберите хотя бы одного исполнителя или набор.'),
+    (N'editAssign.wizard.noRecipients', N'kz', N'Кемінде бір орындаушыны немесе жинақты таңдаңыз.'),
+    (N'editAssign.wizard.noSetName', N'ru', N'Введите название набора.'),
+    (N'editAssign.wizard.noSetName', N'kz', N'Жинақ атауын енгізіңіз.'),
+    (N'editAssign.wizard.reviewText', N'ru', N'Проверьте передачу перед применением.'),
+    (N'editAssign.wizard.reviewText', N'kz', N'Қолданар алдында беруді тексеріңіз.'),
+    (N'editAssign.wizard.apply', N'ru', N'Передать'),
+    (N'editAssign.wizard.apply', N'kz', N'Беру'),
+    (N'editAssign.wizard.summary.months', N'ru', N'Месяцы'),
+    (N'editAssign.wizard.summary.months', N'kz', N'Айлар'),
+    (N'editAssign.wizard.summary.sheet', N'ru', N'Только лист'),
+    (N'editAssign.wizard.summary.sheet', N'kz', N'Тек парақ'),
+    (N'editAssign.wizard.summary.fromSet', N'ru', N'Из набора «{name}»'),
+    (N'editAssign.wizard.summary.fromSet', N'kz', N'«{name}» жинағынан'),
+    (N'editAssign.wizard.summary.visibility', N'ru', N'Кто видит документ'),
+    (N'editAssign.wizard.summary.visibility', N'kz', N'Құжатты кім көреді'),
+    (N'editAssign.wizard.summary.exclusive', N'ru', N'Остальные не смогут редактировать эти ячейки, пока месяц не проверен или не забран.'),
+    (N'editAssign.wizard.summary.exclusive', N'kz', N'Ай расталмайынша немесе қайтарып алынбайынша, басқалар бұл ұяшықтарды өңдей алмайды.'),
+    (N'editAssign.wizard.summary.shared', N'ru', N'Остальные с правом редактирования по роли тоже смогут их редактировать.'),
+    (N'editAssign.wizard.summary.shared', N'kz', N'Рөл бойынша өңдеу құқығы бар басқалар да оларды өңдей алады.'),
+    (N'editAssign.wizard.alsoOthers', N'ru', N'Разрешить и остальным по ролям'),
+    (N'editAssign.wizard.alsoOthers', N'kz', N'Рөл бойынша басқаларға да рұқсат ету')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- EDA:ea5a ── кінець секції ──
 
 -- COLL:rpt-version-duplicate ── ru/kz: повторний номер версії опису звіту (ECR-RPT-4091.version); власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)
