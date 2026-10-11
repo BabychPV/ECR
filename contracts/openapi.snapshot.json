@@ -269,6 +269,40 @@
           null
         ]
       },
+      "ApplyEditorSetRequest": {
+        "description": "Тіло «застосувати набір до зрізів».",
+        "properties": {
+          "isExclusive": {
+            "default": true,
+            "description": "Ексклюзивність.",
+            "type": "boolean"
+          },
+          "note": {
+            "description": "Інструкція.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "setId": {
+            "description": "Набір власника.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "slices": {
+            "description": "Зрізи (1..12).",
+            "items": {
+              "$ref": "#/components/schemas/EditAssignmentSliceDto"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "setId",
+          "slices"
+        ],
+        "type": "object"
+      },
       "ApprovalRouteDto": {
         "description": "Маршрут погодження проєкту.",
         "properties": {
@@ -2386,6 +2420,27 @@
         ],
         "type": "object"
       },
+      "CopyEditAssignmentRequest": {
+        "description": "Тіло «скопіювати передачу на інші зрізи» (наприклад, на наступний місяць).",
+        "properties": {
+          "fromSlice": {
+            "$ref": "#/components/schemas/EditAssignmentSliceDto",
+            "description": "Зріз-джерело (наявна передача)."
+          },
+          "toSlices": {
+            "description": "Зрізи-цілі (1..12).",
+            "items": {
+              "$ref": "#/components/schemas/EditAssignmentSliceDto"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "fromSlice",
+          "toSlices"
+        ],
+        "type": "object"
+      },
       "CorrectWindowsSidRequest": {
         "description": "Виправлення SID доменного запису, який ще не входив (X5-01).",
         "properties": {
@@ -3852,6 +3907,13 @@
             "description": "Бізнес-ключ, унікальний у межах проєкту.",
             "type": "string"
           },
+          "canManageEditAccess": {
+            "description": "EA-C: чи може поточний користувач керувати передачами місяця — рішення СЕРВЕРА (автор ∨ `Manage` проєкту,\nта сама функція, що в обробниках `edit-assignments`). Клієнт показує пункт меню лише за ним. Лише картка.",
+            "type": [
+              "null",
+              "boolean"
+            ]
+          },
           "createdAt": {
             "description": "Момент створення.",
             "format": "date-time",
@@ -3906,6 +3968,14 @@
             "type": [
               "null",
               "string"
+            ]
+          },
+          "ownerUserId": {
+            "description": "EA-C: ідентифікатор автора документа (`CreatedByUserId`) — поруч з OwnerDisplayName тим самим розкриттям,\nтож для звуженого читача — `null` (`DocumentSheetVisibility.For`). Заповнює лише шлях картки (`FindAsync`).",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
             ]
           },
           "projectId": {
@@ -4311,6 +4381,271 @@
         ],
         "type": "object"
       },
+      "EditAssignmentBatchDto": {
+        "description": "Відповідь «застосувати набір»/«скопіювати»: створені чи оновлені передачі.",
+        "properties": {
+          "assignments": {
+            "description": "Передачі за порядком зрізів у запиті.",
+            "items": {
+              "$ref": "#/components/schemas/EditAssignmentDto"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "assignments"
+        ],
+        "type": "object"
+      },
+      "EditAssignmentCandidateDto": {
+        "description": "Кандидат у виконавці (без email і SID).",
+        "properties": {
+          "displayName": {
+            "description": "Ім'я.",
+            "type": "string"
+          },
+          "userId": {
+            "description": "Користувач.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "userId",
+          "displayName"
+        ],
+        "type": "object"
+      },
+      "EditAssignmentDto": {
+        "description": "Передача зрізу з виконавцями.",
+        "properties": {
+          "appliedSetId": {
+            "description": "Набір, з якого взято склад.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "appliedSetName": {
+            "description": "Знімок назви набору.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "delegatedByDisplayName": {
+            "description": "Ім'я делегатора.",
+            "type": "string"
+          },
+          "delegatedByUserId": {
+            "description": "Чиїми правами обмежено передачу.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "id": {
+            "description": "Ідентифікатор.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "isExclusive": {
+            "description": "Інші за ролями не можуть писати в зріз.",
+            "type": "boolean"
+          },
+          "modifiedAt": {
+            "description": "Коли змінено.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "note": {
+            "description": "Інструкція виконавцям.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "recipients": {
+            "description": "Виконавці.",
+            "items": {
+              "$ref": "#/components/schemas/EditAssignmentRecipientDto"
+            },
+            "type": "array"
+          },
+          "slice": {
+            "$ref": "#/components/schemas/EditAssignmentSliceDto",
+            "description": "Зріз."
+          },
+          "status": {
+            "description": "Похідний: `Open` | `Assigned` | `InProgress` | `Filled` | `Returned` | `Validated`.",
+            "type": "string"
+          },
+          "validatedAt": {
+            "description": "Коли валідовано.",
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "validatedByDisplayName": {
+            "description": "Хто валідував.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "version": {
+            "description": "Версія для `baseVersion`.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "slice",
+          "isExclusive",
+          "status",
+          "validatedAt",
+          "validatedByDisplayName",
+          "delegatedByUserId",
+          "delegatedByDisplayName",
+          "note",
+          "appliedSetId",
+          "appliedSetName",
+          "recipients",
+          "modifiedAt",
+          "version"
+        ],
+        "type": "object"
+      },
+      "EditAssignmentListDto": {
+        "description": "Перелік передач документа для менеджера.",
+        "properties": {
+          "assignments": {
+            "description": "Передачі (без аркушів, схованих від викликача).",
+            "items": {
+              "$ref": "#/components/schemas/EditAssignmentDto"
+            },
+            "type": "array"
+          },
+          "canManage": {
+            "description": "Викликач може керувати (завжди `true` для 200).",
+            "type": "boolean"
+          },
+          "ownerDisplayName": {
+            "description": "Автор документа.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ownerDisplayName",
+          "canManage",
+          "assignments"
+        ],
+        "type": "object"
+      },
+      "EditAssignmentRecipientDto": {
+        "description": "Виконавець у передачі.",
+        "properties": {
+          "displayName": {
+            "description": "Ім'я.",
+            "type": "string"
+          },
+          "filledAt": {
+            "description": "Коли заповнив.",
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "isActive": {
+            "description": "Обліковий запис не вимкнений.",
+            "type": "boolean"
+          },
+          "returnCount": {
+            "description": "Скільки разів повертали.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "returnReason": {
+            "description": "Причина повернення.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "returnedAt": {
+            "description": "Коли повернули.",
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "status": {
+            "description": "`Assigned` | `Filled` | `Returned`.",
+            "type": "string"
+          },
+          "userId": {
+            "description": "Користувач.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "userId",
+          "displayName",
+          "status",
+          "filledAt",
+          "returnedAt",
+          "returnReason",
+          "returnCount",
+          "isActive"
+        ],
+        "type": "object"
+      },
+      "EditAssignmentSliceDto": {
+        "description": "Зріз передачі: усі селектори необов'язкові; жодного — «весь документ».",
+        "properties": {
+          "monthNumber": {
+            "description": "Місяць 1..12 для місячних колонок.",
+            "format": "uint8",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "periodKey": {
+            "description": "Ключ періоду `Рік*100+№`.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "sheetCode": {
+            "description": "Код аркуша.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "tableCode": {
+            "description": "Код таблиці (потребує SheetCode).",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "sheetCode",
+          "tableCode",
+          "monthNumber",
+          "periodKey"
+        ],
+        "type": "object"
+      },
       "EditDenyReason": {
         "description": "Причина відмови в доступі. Повертається замість `bool` (ФВ-6.8).",
         "enum": [
@@ -4335,6 +4670,62 @@
           "AssignmentValidated",
           "AssignmentExpired"
         ]
+      },
+      "EditorSetDto": {
+        "description": "Набір виконавців власника.",
+        "properties": {
+          "id": {
+            "description": "Ідентифікатор.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "members": {
+            "description": "Члени.",
+            "items": {
+              "$ref": "#/components/schemas/EditorSetMemberDto"
+            },
+            "type": "array"
+          },
+          "name": {
+            "description": "Назва.",
+            "type": "string"
+          },
+          "version": {
+            "description": "Версія для `baseVersion`.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "members",
+          "version"
+        ],
+        "type": "object"
+      },
+      "EditorSetMemberDto": {
+        "description": "Член набору виконавців.",
+        "properties": {
+          "displayName": {
+            "description": "Ім'я.",
+            "type": "string"
+          },
+          "isActive": {
+            "description": "Обліковий запис не вимкнений.",
+            "type": "boolean"
+          },
+          "userId": {
+            "description": "Користувач.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "userId",
+          "displayName",
+          "isActive"
+        ],
+        "type": "object"
       },
       "EffectiveAccessContribution": {
         "description": "Один внесок у підсумковий рівень: яка роль, яким призначенням і що саме дала.",
@@ -7664,6 +8055,112 @@
         "required": [
           "jobId",
           "documentId"
+        ],
+        "type": "object"
+      },
+      "MyEditAssignmentDto": {
+        "description": "Моя задача як виконавця або очікування валідації як власника.",
+        "properties": {
+          "assignmentId": {
+            "description": "Передача.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "delegatedByDisplayName": {
+            "description": "Хто передав.",
+            "type": "string"
+          },
+          "documentId": {
+            "description": "Документ.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "documentKey": {
+            "description": "Бізнес-ключ документа.",
+            "type": "string"
+          },
+          "filledCount": {
+            "description": "Скільки заповнили.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "note": {
+            "description": "Інструкція власника.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "recipientCount": {
+            "description": "Скільки виконавців (без імен).",
+            "format": "int32",
+            "type": "integer"
+          },
+          "returnReason": {
+            "description": "Причина повернення (лише мені).",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "slice": {
+            "$ref": "#/components/schemas/EditAssignmentSliceDto",
+            "description": "Зріз."
+          },
+          "status": {
+            "description": "Мій стан виконавця (`Assigned`/`Returned`/`Filled`) або похідний стан зрізу для власника.",
+            "type": "string"
+          },
+          "statusChangedAt": {
+            "description": "Коли змінився стан.",
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "version": {
+            "description": "Версія для `baseVersion`.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "assignmentId",
+          "documentId",
+          "documentKey",
+          "slice",
+          "status",
+          "returnReason",
+          "note",
+          "delegatedByDisplayName",
+          "recipientCount",
+          "filledCount",
+          "statusChangedAt",
+          "version"
+        ],
+        "type": "object"
+      },
+      "MyEditAssignmentsDto": {
+        "description": "Відповідь «Мої задачі» за передачами.",
+        "properties": {
+          "assignedToMe": {
+            "description": "Виконати: `Assigned` і `Returned`.",
+            "items": {
+              "$ref": "#/components/schemas/MyEditAssignmentDto"
+            },
+            "type": "array"
+          },
+          "awaitingMyValidation": {
+            "description": "Усі виконавці заповнили — чекає валідації мною.",
+            "items": {
+              "$ref": "#/components/schemas/MyEditAssignmentDto"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "assignedToMe",
+          "awaitingMyValidation"
         ],
         "type": "object"
       },
@@ -12102,6 +12599,39 @@
           "Registry"
         ]
       },
+      "ReturnEditAssignmentRequest": {
+        "description": "Тіло повернення на доопрацювання.",
+        "properties": {
+          "baseVersion": {
+            "description": "Версія передачі, яку бачив власник.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "reason": {
+            "description": "Причина 1..500.",
+            "type": "string"
+          },
+          "userIds": {
+            "description": "Кого повернути; порожньо — усіх «Заповнено».",
+            "items": {
+              "format": "int32",
+              "type": "integer"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          }
+        },
+        "required": [
+          "userIds",
+          "reason",
+          "baseVersion"
+        ],
+        "type": "object"
+      },
       "RoleIdResponse": {
         "description": "Створена роль.",
         "properties": {
@@ -13001,6 +13531,35 @@
           "nameL10n",
           "transport",
           "endpoint"
+        ],
+        "type": "object"
+      },
+      "SaveEditorSetRequest": {
+        "description": "Тіло створення/зміни набору.",
+        "properties": {
+          "baseVersion": {
+            "description": "Обов'язкова для зміни (`PUT`).",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "memberUserIds": {
+            "description": "Члени (≤ 500).",
+            "items": {
+              "format": "int32",
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "name": {
+            "description": "Назва 1..100.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "memberUserIds"
         ],
         "type": "object"
       },
@@ -17834,6 +18393,55 @@
         ],
         "type": "object"
       },
+      "UpsertEditAssignmentRequest": {
+        "description": "Тіло створення/зміни передачі (upsert за зрізом).",
+        "properties": {
+          "appliedSetId": {
+            "description": "Набір, з якого взято склад (знімок назви беремо на сервері).",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "baseVersion": {
+            "description": "Обов'язкова для зміни наявної передачі.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "isExclusive": {
+            "default": true,
+            "description": "Закрити зріз іншим за ролями; за замовчуванням `true`.",
+            "type": "boolean"
+          },
+          "note": {
+            "description": "Інструкція (≤ 500).",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "recipientUserIds": {
+            "description": "Виконавці (1..100).",
+            "items": {
+              "format": "int32",
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "slice": {
+            "$ref": "#/components/schemas/EditAssignmentSliceDto",
+            "description": "Зріз."
+          }
+        },
+        "required": [
+          "slice",
+          "recipientUserIds"
+        ],
+        "type": "object"
+      },
       "UsageItemDto": {
         "description": "Одне місце, що посилається на ресурс.",
         "properties": {
@@ -18056,6 +18664,22 @@
           "email",
           "receivesAlerts",
           "lastSignInAt"
+        ],
+        "type": "object"
+      },
+      "ValidateEditAssignmentRequest": {
+        "description": "Тіло валідації.",
+        "properties": {
+          "baseVersion": {
+            "description": "Версія передачі, яку бачив власник.",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "baseVersion"
         ],
         "type": "object"
       },
@@ -21789,6 +22413,1042 @@
         ]
       }
     },
+    "/api/v1/documents/{documentId}/edit-assignments": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "documentId",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EditAssignmentListDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EditAssignmentListDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/EditAssignmentListDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Передачі документа (для автора й менеджера проєкту).",
+        "tags": [
+          "DocumentEditAssignments"
+        ]
+      },
+      "post": {
+        "description": "`422` — вихід за власні права, виконавець без доступу до документа, некоректний зріз;\n`409` — застаріла `baseVersion`.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "documentId",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpsertEditAssignmentRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpsertEditAssignmentRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpsertEditAssignmentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EditAssignmentDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EditAssignmentDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/EditAssignmentDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Створює або змінює передачу зрізу (upsert за зрізом; повтор ідемпотентний).",
+        "tags": [
+          "DocumentEditAssignments"
+        ]
+      }
+    },
+    "/api/v1/documents/{documentId}/edit-assignments/apply-set": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "documentId",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApplyEditorSetRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApplyEditorSetRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApplyEditorSetRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EditAssignmentBatchDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EditAssignmentBatchDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/EditAssignmentBatchDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Застосовує набір виконавців власника до 1..12 зрізів (наприклад, до місяців).",
+        "tags": [
+          "DocumentEditAssignments"
+        ]
+      }
+    },
+    "/api/v1/documents/{documentId}/edit-assignments/candidates": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "documentId",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/EditAssignmentCandidateDto"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/EditAssignmentCandidateDto"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/EditAssignmentCandidateDto"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Пошук кандидатів у виконавці (≥ 2 символи, ≤ 20; без email і SID).",
+        "tags": [
+          "DocumentEditAssignments"
+        ]
+      }
+    },
+    "/api/v1/documents/{documentId}/edit-assignments/copy": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "documentId",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/CopyEditAssignmentRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CopyEditAssignmentRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CopyEditAssignmentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EditAssignmentBatchDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EditAssignmentBatchDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/EditAssignmentBatchDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Копіює склад і ознаки наявної передачі на 1..12 інших зрізів («на наступний місяць»).",
+        "tags": [
+          "DocumentEditAssignments"
+        ]
+      }
+    },
+    "/api/v1/documents/{documentId}/edit-assignments/{assignmentId}": {
+      "delete": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "documentId",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "assignmentId",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Знімає передачу.",
+        "tags": [
+          "DocumentEditAssignments"
+        ]
+      }
+    },
+    "/api/v1/documents/{documentId}/edit-assignments/{assignmentId}/fill": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "documentId",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "assignmentId",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EditAssignmentDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EditAssignmentDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/EditAssignmentDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "«Заповнено» — лише сам виконавець; повтор — 200 без змін.",
+        "tags": [
+          "DocumentEditAssignments"
+        ]
+      }
+    },
+    "/api/v1/documents/{documentId}/edit-assignments/{assignmentId}/return": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "documentId",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "assignmentId",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReturnEditAssignmentRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReturnEditAssignmentRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReturnEditAssignmentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EditAssignmentDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EditAssignmentDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/EditAssignmentDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Повернення на доопрацювання з обов'язковою причиною (допустимо й після валідації).",
+        "tags": [
+          "DocumentEditAssignments"
+        ]
+      }
+    },
+    "/api/v1/documents/{documentId}/edit-assignments/{assignmentId}/validate": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "documentId",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "assignmentId",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/ValidateEditAssignmentRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ValidateEditAssignmentRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ValidateEditAssignmentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EditAssignmentDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EditAssignmentDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/EditAssignmentDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Валідація власником: усі виконавці мають бути «Заповнено».",
+        "tags": [
+          "DocumentEditAssignments"
+        ]
+      }
+    },
     "/api/v1/documents/{documentId}/rows": {
       "post": {
         "parameters": [
@@ -25259,6 +26919,345 @@
         "summary": "Поточний користувач і його права для UI.",
         "tags": [
           "Auth"
+        ]
+      }
+    },
+    "/api/v1/me/edit-assignments": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "role",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "documentId",
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MyEditAssignmentsDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MyEditAssignmentsDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/MyEditAssignmentsDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Мої передачі: `role=assignee` — виконати; `role=owner` — чекають моєї валідації;\nбез `role` — обидва списки. Лише рядки самого викликача, без імен інших виконавців.",
+        "tags": [
+          "MeEditAssignments"
+        ]
+      }
+    },
+    "/api/v1/me/editor-sets": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/EditorSetDto"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/EditorSetDto"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/EditorSetDto"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "Набори поточного користувача.",
+        "tags": [
+          "MeEditorSets"
+        ]
+      },
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveEditorSetRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveEditorSetRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveEditorSetRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EditorSetDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EditorSetDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/EditorSetDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Створює набір.",
+        "tags": [
+          "MeEditorSets"
+        ]
+      }
+    },
+    "/api/v1/me/editor-sets/{setId}": {
+      "delete": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "setId",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Видаляє набір (вже створені передачі лишаються).",
+        "tags": [
+          "MeEditorSets"
+        ]
+      },
+      "put": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "setId",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveEditorSetRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveEditorSetRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveEditorSetRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EditorSetDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EditorSetDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/EditorSetDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Змінює назву й склад набору (`baseVersion` обов'язкова).",
+        "tags": [
+          "MeEditorSets"
         ]
       }
     },
@@ -43155,6 +45154,9 @@
       "name": "DataSources"
     },
     {
+      "name": "DocumentEditAssignments"
+    },
+    {
       "name": "Documents"
     },
     {
@@ -43180,6 +45182,12 @@
     },
     {
       "name": "Languages"
+    },
+    {
+      "name": "MeEditAssignments"
+    },
+    {
+      "name": "MeEditorSets"
     },
     {
       "name": "Methodologies"
