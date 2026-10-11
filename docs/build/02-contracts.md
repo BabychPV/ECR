@@ -3932,6 +3932,20 @@ public sealed class NotFoundException(string errorCode, string message)
 | `GET` | `/api/v1/documents/{id}/versions` | `Document.View` | 3 |
 | `GET` | `/api/v1/documents/{id}/compare` | `Document.View` | 3 |
 | `POST` | `/api/v1/documents/{id}/recall` | — | 3 |
+| `GET` | `/api/v1/documents/{id}/edit-assignments` | — (автор документа ∨ `Manage` проєкту; обробник) | 8 |
+| `POST` | `/api/v1/documents/{id}/edit-assignments` | — (автор документа ∨ `Manage` проєкту; обробник) | 8 |
+| `DELETE` | `/api/v1/documents/{id}/edit-assignments/{assignmentId}` | — (автор документа ∨ `Manage` проєкту; обробник) | 8 |
+| `POST` | `/api/v1/documents/{id}/edit-assignments/{assignmentId}/fill` | — (лише сам виконавець; інакше 404) | 8 |
+| `POST` | `/api/v1/documents/{id}/edit-assignments/{assignmentId}/validate` | — (автор документа ∨ `Manage` проєкту; обробник) | 8 |
+| `POST` | `/api/v1/documents/{id}/edit-assignments/{assignmentId}/return` | — (автор документа ∨ `Manage` проєкту; обробник) | 8 |
+| `GET` | `/api/v1/documents/{id}/edit-assignments/candidates` | — (автор документа ∨ `Manage` проєкту; обробник) | 8 |
+| `POST` | `/api/v1/documents/{id}/edit-assignments/apply-set` | — (автор документа ∨ `Manage` проєкту; обробник) | 8 |
+| `POST` | `/api/v1/documents/{id}/edit-assignments/copy` | — (автор документа ∨ `Manage` проєкту; обробник) | 8 |
+| `GET` | `/api/v1/me/edit-assignments` | — (лише рядки самого викликача) | 8 |
+| `GET` | `/api/v1/me/editor-sets` | — (лише власні набори) | 8 |
+| `POST` | `/api/v1/me/editor-sets` | — (лише власні набори) | 8 |
+| `PUT` | `/api/v1/me/editor-sets/{setId}` | — (лише власні набори; чужий — 404) | 8 |
+| `DELETE` | `/api/v1/me/editor-sets/{setId}` | — (лише власні набори; чужий — 404) | 8 |
 | `GET` | `/api/v1/documents/{id}/recall` | — | 3 |
 | `GET` | `/api/v1/documents/{id}/tables` | `Document.View` | 6 |
 | `GET` | `/api/v1/documents/{id}/tables/status` | `Document.View` | 6 |
@@ -5050,8 +5064,11 @@ public sealed record RowDto(
 
 ### Передача місяця виконавцям (EA)
 
-#### `IEditAssignmentStore`, `IEditorSetStore`
+#### `IEditAssignmentStore`, `IEditorSetStore`, `IEditAssignmentManagementStore`
 
 Сховища передач зрізу документа виконавцям (`doc.EditAssignment*`, міграція `EA1EditAssignment`) і наборів виконавців власника (`doc.EditorSet*`). Вибірка конкретної передачі — завжди за парою `(DocumentId, Id)`, набору — `(OwnerUserId, Id)`: чужа чи відсутня дає `null` (одна відповідь «не знайдено»). `FindForUpdateAsync` — рядок передачі під `UPDLOCK` для переходів станів (Fill/Validate/Return). `ReadFactsForGateAsync` — факти передач документа для користувача, що пише, під `REPEATABLEREAD, ROWLOCK` на передачах І на його рядку виконавця: повторна перевірка в транзакції запису під блокуванням аркуша (`PatchCellsHandler`, `CreateRowHandler`); спільні блокування тримаються до коміту, тож перехід станів чекає запис, а зафіксований перехід видно (блокуюче читання не користується RCSI-знімком). Рішення «підйом Read → Write / `LockedByOwner` / `AssignmentFilled` / `AssignmentValidated` / `AssignmentExpired`» — чиста функція `EditAssignmentGuard` у `EditRules.CanEdit`; `AccessDecisionService` читає передачі лише для документа, у якого вони є (ознака — `EXISTS` у запиті умов доступу).
 
 **Прийняті вікна (EA-B).** (1) Документ, що на момент рішення передач НЕ мав (AssignmentsPresent = false), повторно під гейтом передач не читає: якщо між рішенням і гейтом створено ексклюзивну передачу, правка третьої особи з Write пройде — без ескалації (вікно мілісекунд; запис, що почався раніше за коміт створення, впорядкований «до»); платити +1 читання на кожну правку кожного документа без передач не прийнято. (2) Активність делегатора й автор документа читаються під гейтом БЕЗ блокування: вимкнення делегатора лише знімає підйом, ескалації немає. (3) Порядок блокувань переходів станів (Fill/Validate/Return): sheet-gate → рядок передачі (U) → рядок виконавця; UPDATE рядка виконавця ніколи не передує sheet-gate, інакше дедлок 1205 із записом (він бере sheet-gate, потім спільні блокування передачі й виконавця).
+
+**Одержувач «має Read» (EA-C, Q1).** Перевірка при передачі (`POST …/edit-assignments`) будується за ПРОФІЛЕМ одержувача без членства в AD-групах: групи чужої людини з токена його сесії невідомі (`AccessDecisionService.GroupSidsFor`, P-02), а гейт запису (EA-B) груп одержувача й не читає — він порівнює лише `userId`. Наслідок і рішення: користувач, який бачить документ ЛИШЕ через AD-групу, отримає `422 editAssignmentRecipientInvalid` (однакове з «немає/вимкнено/без доступу», без оракула); адміністратор видає йому роль «Виконавець» прямим призначенням (D-214). Хибне «так» неможливе — відмова безпечна.
+

@@ -7629,6 +7629,7 @@ USING (VALUES
     ,(N'err.ECR-REQ-0422.editorSetMemberInvalid', N'en', N'One of the executors cannot be added to the set.', 1)
     ,(N'err.ECR-REQ-0422.editorSetBaseVersion', N'en', N'The request must say which version of the set it started from (baseVersion).', 1)
     ,(N'err.ECR-REQ-0422.editAssignmentTooManySlices', N'en', N'Specify from 1 to 12 slices per request.', 1)
+    ,(N'err.ECR-DOC-0404.editorSet', N'en', N'The executor set was not found.', 1)
     -- COLL:ea-api ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
@@ -19031,7 +19032,9 @@ SELECT v.[Key], v.Lang, v.Val
     (N'err.ECR-REQ-0422.editorSetBaseVersion', N'ru', N'Запрос должен указывать версию набора, с которой начато действие (baseVersion).'),
     (N'err.ECR-REQ-0422.editorSetBaseVersion', N'kz', N'Сұраныста әрекет басталған жиын нұсқасы (baseVersion) көрсетілуі керек.'),
     (N'err.ECR-REQ-0422.editAssignmentTooManySlices', N'ru', N'Укажите от 1 до 12 срезов в одном запросе.'),
-    (N'err.ECR-REQ-0422.editAssignmentTooManySlices', N'kz', N'Бір сұраныста 1-ден 12-ге дейін кесінді көрсетіңіз.')
+    (N'err.ECR-REQ-0422.editAssignmentTooManySlices', N'kz', N'Бір сұраныста 1-ден 12-ге дейін кесінді көрсетіңіз.'),
+    (N'err.ECR-DOC-0404.editorSet', N'ru', N'Набор исполнителей не найден.'),
+    (N'err.ECR-DOC-0404.editorSet', N'kz', N'Орындаушылар жиыны табылмады.')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
