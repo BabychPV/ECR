@@ -4,7 +4,7 @@ import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 import { mantineProviderProps } from '@/shared/theme/provider';
-import { EditAssignmentsDrawer } from '@/features/documents/editAssignments/EditAssignmentsDrawer';
+import { EditAssignmentsDrawer } from '@/features/editAssignments/EditAssignmentsDrawer';
 import { Themes } from '@/test/__tests__/a11yFixtures';
 import { describe as describeViolations, findViolations } from '@/test/a11y';
 import { DocumentId, mockServer, type Sent } from './fixture';

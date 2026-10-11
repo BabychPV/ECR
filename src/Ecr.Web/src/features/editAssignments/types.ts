@@ -84,3 +84,40 @@ export interface EditorSet {
   readonly name: string;
   readonly members: readonly EditorSetMember[];
 }
+
+/** Стан рядка «моїх» передач: `Assigned`/`Returned` - потрібна дія виконавця; `Filled` - чекає валідації власника. */
+export type MyAssignmentStatus = 'Assigned' | 'Returned' | 'Filled';
+
+/**
+ * Рядок `GET /api/v1/me/edit-assignments`: лише рядки викликача, без імен інших виконавців (дизайн §6, R9).
+ * `slice` - уже локалізований сервером підпис зрізу («January»), клієнт його не збирає.
+ */
+export interface MyEditAssignment {
+  readonly assignmentId: number;
+  readonly documentId: number;
+  readonly documentKey: string;
+  readonly slice: string;
+  readonly status: MyAssignmentStatus;
+
+  /** Примітка власника - звичайний текст (≤ 500). */
+  readonly note?: string | null | undefined;
+
+  /** Коментар повернення (≤ 500) - лише для `Returned`. */
+  readonly returnReason?: string | null | undefined;
+
+  /** Коли виконавець заповнив - лише для `Filled`. */
+  readonly filledAt?: string | null | undefined;
+}
+
+/**
+ * Відповідь без параметрів - єдина форма для шторки «My tasks» і смуги виконавця в документі
+ * (смуга фільтрує за `documentId` на клієнті). `assignedToMe` може містити й `Filled`: смуга показує
+ * «заповнено - чекає валідації», доки власник не валідував.
+ */
+export interface MyEditAssignmentsView {
+  readonly assignedToMe: readonly MyEditAssignment[];
+  readonly awaitingMyValidation: readonly MyEditAssignment[];
+}
+
+/** Межа тексту повернення/примітки (дизайн §5: `reasonTooLong` > 500). */
+export const ReturnReasonMaxLength = 500;

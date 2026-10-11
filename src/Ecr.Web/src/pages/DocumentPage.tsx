@@ -26,7 +26,7 @@ import { DocumentSaveState } from '@/features/documents/DocumentSaveState';
 import { useDocumentLogActions } from '@/features/documents/DocumentLogActions';
 import { useStaleResultsReminderHost } from '@/features/documents/useStaleResultsReminder';
 import { useVersionMigrationAction } from '@/features/documents/VersionMigrationAction';
-import { useEditAssignmentsAction } from '@/features/documents/editAssignments/EditAssignmentsAction';
+import { useEditAssignmentsAction } from '@/features/editAssignments/EditAssignmentsAction';
 import { DocumentLockBanner } from '@/features/documents/DocumentLockBanner';
 import { documentLockOf, hasLockedSheet, locksDataActions } from '@/features/documents/documentLock';
 import { DocumentProgress } from '@/features/documents/DocumentProgress';

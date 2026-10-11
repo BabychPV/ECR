@@ -7,6 +7,7 @@ import { t } from '@/shared/i18n';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { ConfirmModal } from '@/shared/ui/ConfirmModal';
 import { DetailDrawer } from '@/shared/ui/DetailDrawer';
+import { useSession } from '@/shared/session/useSession';
 import { showApiError, showDone } from '@/shared/ui/notify';
 import { problemText } from '@/shared/ui/problemText';
 import { ReasonModal } from '@/shared/ui/ReasonModal';
@@ -22,15 +23,23 @@ import {
   validateEditAssignment,
 } from './api';
 import { AssignWizard, emptyAssignData, resolveUsers, type AssignWizardData } from './AssignWizard';
-import { AssignmentsMatrix, type MatrixView } from './AssignmentsMatrix';
+import { AssignmentsMatrix, type MatrixActions, type MatrixView } from './AssignmentsMatrix';
 import { awaitingValidationCount, nextMonthSlice, sameSlice, sliceLabel } from './model';
-import type { EditAssignment, EditAssignmentsList } from './types';
+import { ReturnReasonMaxLength, type EditAssignment, type EditAssignmentsList } from './types';
 
 /** Значення `?panel=` шторки (одне місце — меню й шторка читають звідси). */
 export const EditAssignmentsPanelId = 'edit-assignments';
 
 /** Значення `?dialog=` майстра. */
 const WizardDialogId = 'edit-assignment-wizard';
+
+/** Кого зачепить «Повернути» за замовчуванням: активні виконавці в стані `Filled`. */
+function returnableNames(a: EditAssignment): string {
+  return a.recipients
+    .filter((r) => r.isActive && r.status === 'Filled')
+    .map((r) => r.displayName)
+    .join(', ');
+}
 
 export interface EditAssignmentsDrawerProps {
   readonly documentId: number;
@@ -54,8 +63,13 @@ export function EditAssignmentsDrawer({ documentId, sheets }: EditAssignmentsDra
   const [view, setView] = useState<MatrixView>('months');
   const [seed, setSeed] = useState<AssignWizardData>(emptyAssignData);
   const [announce, setAnnounce] = useState('');
+  const [validating, setValidating] = useState<EditAssignment | null>(null);
   const [returning, setReturning] = useState<EditAssignment | null>(null);
   const [removing, setRemoving] = useState<EditAssignment | null>(null);
+
+  // Симуляція «очима користувача» - лише перегляд: жодних переходів (дизайн §2.4: ¬симуляція).
+  const session = useSession();
+  const simulating = session.data?.isSimulation === true;
 
   const query = useQuery({
     queryKey: queryKeys.editAssignments.forDocument(documentId),
@@ -74,14 +88,23 @@ export function EditAssignmentsDrawer({ documentId, sheets }: EditAssignmentsDra
   const assignments = data?.assignments ?? [];
   const awaiting = awaitingValidationCount(assignments);
 
+  // ⚠ `onError` оголошено в `mutate()`, а глобальна сітка `queryClient` дивиться на опції МУТАЦІЇ: без
+  // `meta.handled` друга відмова показалась б двома тостами поспіль.
+  const handled = { handled: true } as const;
+
   const validate = useMutation({
+    meta: handled,
     mutationFn: (a: EditAssignment) => validateEditAssignment(documentId, a.id, a.version),
-    onSuccess: (_, a) => done(t('editAssign.done.validated', { slice: sliceLabel(a.slice) })),
+    onSuccess: (_, a) => {
+      setValidating(null);
+      done(t('editAssign.done.validated', { slice: sliceLabel(a.slice) }));
+    },
     onError: showApiError,
     onSettled: refresh,
   });
 
   const giveBack = useMutation({
+    meta: handled,
     mutationFn: ({ a, reason }: { a: EditAssignment; reason: string }) =>
       returnEditAssignment(documentId, a.id, { reason, baseVersion: a.version }),
     onSuccess: (_, { a }) => {
@@ -93,6 +116,7 @@ export function EditAssignmentsDrawer({ documentId, sheets }: EditAssignmentsDra
   });
 
   const remove = useMutation({
+    meta: handled,
     mutationFn: (a: EditAssignment) => deleteEditAssignment(documentId, a.id),
     onSuccess: (_, a) => {
       setRemoving(null);
@@ -103,6 +127,7 @@ export function EditAssignmentsDrawer({ documentId, sheets }: EditAssignmentsDra
   });
 
   const repeat = useMutation({
+    meta: handled,
     mutationFn: (a: EditAssignment) => {
       const next = nextMonthSlice(a.slice);
       if (next === null) throw new Error('no next slice');
@@ -116,6 +141,7 @@ export function EditAssignmentsDrawer({ documentId, sheets }: EditAssignmentsDra
 
   /** Застосування майстра: набір (за потреби) → по одному PUT на місяць; зупиняється на першій відмові. */
   const apply = useMutation({
+    meta: handled,
     mutationFn: async (d: AssignWizardData) => {
       const users = resolveUsers(d, sets.data ?? []);
       let appliedSetId = d.setId === null ? undefined : Number(d.setId);
@@ -147,8 +173,8 @@ export function EditAssignmentsDrawer({ documentId, sheets }: EditAssignmentsDra
     setDialog(WizardDialogId);
   };
 
-  const actions = {
-    onValidate: (a: EditAssignment) => validate.mutate(a),
+  const actions: MatrixActions = {
+    onValidate: (a: EditAssignment) => setValidating(a),
     onReturn: (a: EditAssignment) => setReturning(a),
     onRemove: (a: EditAssignment) => setRemoving(a),
     onRepeat: (a: EditAssignment) => repeat.mutate(a),
@@ -171,7 +197,7 @@ export function EditAssignmentsDrawer({ documentId, sheets }: EditAssignmentsDra
         closeLabel={t('editAssign.close')}
         size="xl"
         footer={
-          data?.canManage === true ? (
+          data?.canManage === true && !simulating ? (
             <Button onClick={() => openWizard(emptyAssignData)} data-autofocus>
               {t('editAssign.assign')}
             </Button>
@@ -209,7 +235,7 @@ export function EditAssignmentsDrawer({ documentId, sheets }: EditAssignmentsDra
                   ]}
                 />
               </Group>
-              <AssignmentsMatrix view={view} assignments={d.assignments} actions={actions} />
+              <AssignmentsMatrix view={view} assignments={d.assignments} actions={d.canManage && !simulating ? actions : undefined} />
             </Stack>
           )}
         </AsyncBoundary>
@@ -242,11 +268,31 @@ export function EditAssignmentsDrawer({ documentId, sheets }: EditAssignmentsDra
         />
       ) : null}
 
+      <ConfirmModal
+        opened={validating !== null}
+        title={t('editAssign.validateTitle', { slice: validating === null ? '' : sliceLabel(validating.slice) })}
+        text={t('editAssign.validateText')}
+        consequences={[t('editAssign.validateConsequence')]}
+        verb={t('editAssign.validate')}
+        danger={false}
+        isPending={validate.isPending}
+        onConfirm={() => {
+          if (validating !== null) validate.mutate(validating);
+        }}
+        onClose={() => setValidating(null)}
+      />
+
       <ReasonModal
         opened={returning !== null}
         title={t('editAssign.returnTitle', { slice: returning === null ? '' : sliceLabel(returning.slice) })}
         label={t('editAssign.returnReason')}
-        confirmLabel={t('editAssign.return')}
+        description={t('editAssign.returnHint', {
+          names: returning === null ? '' : returnableNames(returning),
+          max: ReturnReasonMaxLength,
+        })}
+        confirmLabel={t('editAssign.returnConfirm')}
+        minLength={1}
+        maxLength={ReturnReasonMaxLength}
         isPending={giveBack.isPending}
         onConfirm={(reason) => {
           if (returning !== null) giveBack.mutate({ a: returning, reason });

@@ -7673,6 +7673,11 @@ USING (VALUES
     ,(N'editAssign.wizard.summary.exclusive', N'en', N'Others cannot edit these cells until the month is validated or taken back.', 1)
     ,(N'editAssign.wizard.summary.shared', N'en', N'Others with editing rights by role can still edit these cells.', 1)
     ,(N'editAssign.wizard.alsoOthers', N'en', N'Also allow others by role', 1)
+    ,(N'editAssign.validateTitle', N'en', N'Validate {slice}?', 1)
+    ,(N'editAssign.validateText', N'en', N'All executors have marked this month as filled.', 1)
+    ,(N'editAssign.validateConsequence', N'en', N'Executors stay locked out of editing. You can still return the month with a comment.', 1)
+    ,(N'editAssign.returnHint', N'en', N'Say what has to be corrected: the executors ({names}) see this text. Up to {max} characters.', 1)
+    ,(N'editAssign.returnConfirm', N'en', N'Return', 1)
     -- EDA:ea5a ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
@@ -19175,7 +19180,17 @@ SELECT v.[Key], v.Lang, v.Val
     (N'editAssign.wizard.summary.shared', N'ru', N'Остальные с правом редактирования по роли тоже смогут их редактировать.'),
     (N'editAssign.wizard.summary.shared', N'kz', N'Рөл бойынша өңдеу құқығы бар басқалар да оларды өңдей алады.'),
     (N'editAssign.wizard.alsoOthers', N'ru', N'Разрешить и остальным по ролям'),
-    (N'editAssign.wizard.alsoOthers', N'kz', N'Рөл бойынша басқаларға да рұқсат ету')
+    (N'editAssign.wizard.alsoOthers', N'kz', N'Рөл бойынша басқаларға да рұқсат ету'),
+    (N'editAssign.validateTitle', N'ru', N'Валидировать {slice}?'),
+    (N'editAssign.validateTitle', N'kz', N'{slice} валидациялау керек пе?'),
+    (N'editAssign.validateText', N'ru', N'Все исполнители отметили этот месяц как заполненный.'),
+    (N'editAssign.validateText', N'kz', N'Барлық орындаушылар бұл айды толтырылған деп белгіледі.'),
+    (N'editAssign.validateConsequence', N'ru', N'Исполнители остаются без права правки. Месяц можно будет вернуть с комментарием.'),
+    (N'editAssign.validateConsequence', N'kz', N'Орындаушылар өңдей алмай қалады. Айды кейін пікірмен қайтаруға болады.'),
+    (N'editAssign.returnHint', N'ru', N'Укажите, что нужно исправить: исполнители ({names}) увидят этот текст. Не более {max} символов.'),
+    (N'editAssign.returnHint', N'kz', N'Нені түзету керектігін көрсетіңіз: орындаушылар ({names}) осы мәтінді көреді. {max} таңбадан аспауы керек.'),
+    (N'editAssign.returnConfirm', N'ru', N'Вернуть'),
+    (N'editAssign.returnConfirm', N'kz', N'Қайтару')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO

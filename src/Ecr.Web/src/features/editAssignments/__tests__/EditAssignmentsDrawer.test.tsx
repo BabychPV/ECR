@@ -1,9 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClientProvider } from '@tanstack/react-query';
+import { notifications } from '@mantine/notifications';
 import { MemoryRouter } from 'react-router-dom';
-import { EditAssignmentsDrawer } from '@/features/documents/editAssignments/EditAssignmentsDrawer';
+import { createQueryClient } from '@/app/queryClient';
+import { EditAssignmentsDrawer } from '@/features/editAssignments/EditAssignmentsDrawer';
 import { testTheme } from '@/test/render';
 import { December, DocumentId, February, January, mockServer, type Sent, type ServerOptions } from './fixture';
 
@@ -18,7 +20,9 @@ const Sheets = [{ code: 'AIR', name: 'Air emissions' }];
 function show(options: ServerOptions = {}, entry = '/?panel=edit-assignments'): void {
   sent.length = 0;
   mockServer(sent, options);
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  // Справжня сітка застосунку: без `meta.handled` відмова майстра дала б ще й другий (глобальний) тост.
+  const client = createQueryClient();
+  client.setDefaultOptions({ queries: { retry: false } });
 
   render(
     <MantineProvider theme={testTheme}>
@@ -99,6 +103,11 @@ describe('EditAssignmentsDrawer — переходи', () => {
     fireEvent.click(within(jan).getByRole('button', { name: '⟦editAssign.rowActions (slice=January)⟧' }));
     fireEvent.click(await screen.findByRole('menuitem', { name: '⟦editAssign.validate⟧' }));
 
+    // Підтвердження ДО запиту: без кліку в діалозі нічого не пішло.
+    const dialog = await screen.findByRole('dialog', { name: '⟦editAssign.validateTitle (slice=January)⟧' });
+    expect(sent).toHaveLength(0);
+    fireEvent.click(within(dialog).getByRole('button', { name: '⟦editAssign.validate⟧' }));
+
     await waitFor(() => expect(sent.some((s) => s.url.endsWith('/1/validate'))).toBe(true));
     expect(sent.find((s) => s.url.endsWith('/1/validate'))?.body).toEqual({ baseVersion: 'v1' });
   });
@@ -111,8 +120,12 @@ describe('EditAssignmentsDrawer — переходи', () => {
     fireEvent.click(await screen.findByRole('menuitem', { name: '⟦editAssign.return⟧' }));
 
     const dialog = await screen.findByRole('dialog', { name: '⟦editAssign.returnTitle (slice=January)⟧' });
-    const confirm = within(dialog).getByRole('button', { name: '⟦editAssign.return⟧' }) as HTMLButtonElement;
+    const confirm = within(dialog).getByRole('button', { name: '⟦editAssign.returnConfirm⟧' }) as HTMLButtonElement;
     expect(confirm.disabled).toBe(true);
+
+    // Підказка називає виконавців, яких зачепить повернення, і межу довжини; поле не дасть набрати більше.
+    expect(within(dialog).getByText('⟦editAssign.returnHint (names=Ivanov, Petrenko, max=500)⟧')).toBeDefined();
+    expect(within(dialog).getByRole('textbox').getAttribute('maxlength')).toBe('500');
 
     fireEvent.change(within(dialog).getByRole('textbox'), { target: { value: 'Fix row 4' } });
     expect(confirm.disabled).toBe(false);
@@ -156,6 +169,16 @@ describe('EditAssignmentsDrawer — переходи', () => {
     fireEvent.click(within(dec).getByRole('button', { name: '⟦editAssign.rowActions (slice=December)⟧' }));
     await screen.findByRole('menuitem', { name: '⟦editAssign.edit⟧' });
     expect(screen.queryByRole('menuitem', { name: '⟦editAssign.repeatNext⟧' })).toBeNull();
+  });
+});
+
+describe('EditAssignmentsDrawer — відмова і режими', () => {
+  it('у симуляції - лише перегляд: ні «Assign», ні меню дій у рядках', async () => {
+    show({ simulation: true });
+    await rowOf('January');
+
+    expect(screen.queryByRole('button', { name: '⟦editAssign.assign⟧' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '⟦editAssign.rowActions (slice=January)⟧' })).toBeNull();
   });
 });
 
@@ -237,6 +260,7 @@ describe('EditAssignmentsDrawer — майстер', () => {
   });
 
   it('422 «понад власні права» лишає майстер відкритим і показує причину банером у підсумку', async () => {
+    const shown = vi.spyOn(notifications, 'show');
     show({ list: { owner: { userId: 1, displayName: 'O' }, canManage: true, assignments: [] }, putStatus: 422 });
     await screen.findByText('⟦editAssign.empty⟧');
     fireEvent.click(screen.getByRole('button', { name: '⟦editAssign.assign⟧' }));
@@ -253,5 +277,9 @@ describe('EditAssignmentsDrawer — майстер', () => {
 
     expect((await screen.findByTestId('wizard-step-error')).textContent).toContain('You cannot hand over sheets');
     expect(screen.getByTestId('wizard-summary')).toBeDefined();
+    // Причина показана ЛИШЕ в майстрі: ні власного, ні глобального тоста.
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(shown).not.toHaveBeenCalled();
+    shown.mockRestore();
   });
 });
