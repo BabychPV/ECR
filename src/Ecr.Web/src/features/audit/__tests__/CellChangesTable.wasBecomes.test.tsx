@@ -22,6 +22,7 @@ const Change: CellChange = {
   origin: 'UserEdit',
   isLateEdit: false,
   isOutOfWindow: false,
+  fromArchive: false,
   changedByDisplayName: 'D. Nurlanova',
   documentBusinessKey: 'AKT-001',
   documentNameL10n: null,
