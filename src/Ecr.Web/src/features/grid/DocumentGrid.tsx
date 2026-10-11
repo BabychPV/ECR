@@ -43,6 +43,7 @@ import { createUnitCellEditor, unitCellDisplay, unitIdOfCode } from './UnitCellE
 import { createDateCellEditor } from './DateCellEditor';
 import { roundToScale, type RoundedCell } from './rounding';
 import {
+  addRowDenialOf,
   cellKey,
   cellsNeedingConfirmation,
   confirmationOf,
@@ -2250,6 +2251,8 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
   // ⚠ `ФВ-14.26`: спінер на кнопці — лише після 100 мс дії, не з першого кадру.
   const saveLoading = usePendingLoading(isPending);
   const addRowLoading = usePendingLoading(addRow.isPending);
+  // ✎ D9: грант не дозволяє правити жодну вхідну комірку — «Add row» вимкнена з причиною.
+  const addRowDenial = useMemo(() => (data === undefined ? null : addRowDenialOf(data)), [data]);
 
   return (
     /*
@@ -2422,7 +2425,12 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
           <Button
             variant="default"
             loading={addRowLoading}
-            disabled={maxDynamicRows !== null && (data?.rows.length ?? 0) >= maxDynamicRows}
+            disabled={
+              addRowDenial !== null || (maxDynamicRows !== null && (data?.rows.length ?? 0) >= maxDynamicRows)
+            }
+            // ✎ D9: причина — підказкою кнопки (у вимкненої кнопки немає власного `title`-тексту).
+            title={addRowDenial?.hint}
+            data-add-row-denied={addRowDenial?.reason}
             onClick={() => {
               if (addRow.isPending) return;
               addRow.mutate();

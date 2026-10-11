@@ -51,6 +51,17 @@ export function sheetDenialText(error: unknown, sheetName: string | null | undef
     params['reason'] = t(reasonKey).replace(/\.+$/, '');
   }
 
+  // ✎ D4 (приймальна Land 12.10): для затвердження/відхилення причина «NoGrant»/«InsufficientGrantLevel»
+  // у каталозі говорить про ПРАВКУ КОМІРКИ («немає права редагувати цю комірку») — оманливо: людині бракує
+  // права затверджувати. Підставляється власна причина, а не текст про комірку.
+  if (
+    key === 'err.ECR-ACCS-0403.approveDenied' &&
+    (reasonKey === 'deny.NoGrant' || reasonKey === 'deny.InsufficientGrantLevel') &&
+    hasText('deny.approve.NoRight')
+  ) {
+    params['reason'] = t('deny.approve.NoRight');
+  }
+
   params['sheetDefId'] = `«${name}»`;
 
   return t(key, params);

@@ -41,7 +41,7 @@ function seedMergeBlock(): string {
 
 /** Значення ключа `document.tablesFilled` для `en` у блоці MERGE. */
 function tablesFilledText(): string {
-  const row = /\(N'document\.tablesFilled',\s*N'en',\s*N'([^']*)'/.exec(seedMergeBlock());
+  const row = /\(N'document\.tablesFilledInDocument',\s*N'en',\s*N'([^']*)'/.exec(seedMergeBlock());
 
   expect(row, "09-seed.sql: у MERGE немає ключа document.tablesFilled (en)").not.toBeNull();
 

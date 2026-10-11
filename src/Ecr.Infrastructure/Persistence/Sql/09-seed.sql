@@ -7853,6 +7853,11 @@ USING (VALUES
     ,(N'document.unmatchedRows.title', N'en', N'Some rows are not included in the calculation', 1)
     ,(N'document.unmatchedRows.hint', N'en', N'{count} row(s) matched no calculation rule and were skipped, for example because the status is not Running. This is information, not an error. Row: {rows}', 1)
     -- COLL:d14unmatched ── кінець секції ──
+    -- LUF:fixes ── приймальна Land 12.10 (D4/D11): текст відмови затвердження без права; лічильники таблиць із підписом області; ru/kz — порцією LUF:fixes нижче ──
+    ,(N'deny.approve.NoRight', N'en', N'you do not have the right to approve or reject sheets in this project: ask an administrator for the approver role', 1)
+    ,(N'grid.tree.tablesFilledSheet', N'en', N'{filled} of {total} tables filled on this sheet', 1)
+    ,(N'document.tablesFilledInDocument', N'en', N'Tables filled completely in the whole document: {filled} of {total}', 1)
+    -- LUF:fixes ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -19795,6 +19800,20 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:d14unmatched ── кінець секції ──
+-- LUF:fixes ── ru/kz: приймальна Land 12.10 (D4/D11); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'deny.approve.NoRight', N'ru', N'у вас нет права утверждать или отклонять листы в этом проекте: попросите администратора выдать роль утверждающего'),
+    (N'deny.approve.NoRight', N'kz', N'осы жобада парақтарды бекіту немесе қайтару құқығыңыз жоқ: әкімшіден бекітуші рөлін беруді сұраңыз'),
+    (N'grid.tree.tablesFilledSheet', N'ru', N'Заполнено таблиц на этом листе: {filled} из {total}'),
+    (N'grid.tree.tablesFilledSheet', N'kz', N'Осы парақта толтырылған кестелер: {filled} / {total}'),
+    (N'document.tablesFilledInDocument', N'ru', N'Полностью заполнено таблиц во всём документе: {filled} из {total}'),
+    (N'document.tablesFilledInDocument', N'kz', N'Бүкіл құжатта толық толтырылған кестелер: {filled} / {total}')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- LUF:fixes ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

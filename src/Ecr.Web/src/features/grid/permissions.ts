@@ -184,6 +184,35 @@ export function denyText(reason: string): string | null {
   return known === null ? null : deny(known).hint;
 }
 
+/**
+ * Причина, через яку людина не може додати рядок (D9, приймальна Land): у КОЖНІЙ
+ * вхідній комірці зрізу сервер відхилив правку саме за грантом. Тоді кнопка «Add row»
+ * лише обіцяла б те, що сервер відхилить, — вона вимикається з тією самою підказкою,
+ * що й сіра комірка.
+ *
+ * ⚠ Клієнт не вгадує права: висновок лише з `cellPermissions` самого сервера. Порожня
+ * таблиця (немає рядків, на які сервер міг би відповісти) — `null`: кнопка лишається,
+ * а відмову сервера покаже `useAddRow` локалізованим текстом.
+ */
+export function addRowDenialOf(slice: TableSliceDto): { reason: DenyReason; hint: string } | null {
+  if (slice.rows.length === 0) return null;
+
+  const column = slice.columns.find(
+    (candidate) => candidate.dataType !== 'Formula' && candidate.dataType !== 'Calculated' && !candidate.isReadOnly,
+  );
+  if (column === undefined) return null;
+
+  let found: DenyReason | null = null;
+
+  for (const row of slice.rows) {
+    const permission = slice.cellPermissions[cellKey(row.rowKey, column.code)];
+    if (permission !== 'NoGrant' && permission !== 'InsufficientGrantLevel') return null;
+    found ??= permission;
+  }
+
+  return found === null ? null : { reason: found, hint: deny(found).hint };
+}
+
 function deny(reason: DenyReason): CellDecision {
   // ⚠ Текст береться в момент рішення, а не при завантаженні модуля: каталог
   // приходить із сервера пізніше за імпорти, і таблиця, обчислена наперед,
