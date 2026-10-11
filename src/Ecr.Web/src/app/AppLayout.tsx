@@ -23,6 +23,7 @@ import {
   Text,
 } from '@mantine/core';
 import { useDisclosure, useMediaQuery } from '@mantine/hooks';
+import { NavbarDesktopBreakpoint, NavbarDesktopQuery } from '@/app/navbarBreakpoint';
 import { notifications } from '@mantine/notifications';
 import { Navigate, Outlet, ScrollRestoration, useLocation, useMatches } from 'react-router-dom';
 import { Breadcrumbs, isRouteHandle } from './Breadcrumbs';
@@ -188,16 +189,6 @@ function sessionLanguageOf(profileLanguage: string): string {
  */
 const NavbarWidth = 260;
 const NavbarIconsOnlyWidth = 64;
-
-/**
- * Ширина, від якої меню — колонка поруч зі сторінкою, а не шухляда за
- * бургером. ⚠ Макет `docs/design/hybrid/index.html`: `@media (max-width:900px)` — `.side` стає
- * шаром поверх. Раніше було 48em (768 px): на планшеті меню 260 px з'їдало третину ширини, і
- * таблиця документів стискалась до переносів у кожній клітинці. Значення — те саме, що
- * `breakpoint` у `AppShell` нижче.
- */
-const NavbarDesktopBreakpoint = 900;
-const NavbarDesktopQuery = `(min-width: ${NavbarDesktopBreakpoint}px)`;
 
 /**
  * Кнопка виходу із симуляції — лінивим чанком (UI-12, бюджет `D-132`).
@@ -443,11 +434,10 @@ export function AppLayout(): JSX.Element {
         <AppShell.Header className="ecr-app-header">
           <Group h="100%" px="md" justify="space-between" wrap="nowrap">
             <Group gap="sm" wrap="nowrap" className="ecr-topbar-start">
-              {!me.mustChangePassword && (
+              {!me.mustChangePassword && !desktop && (
                 <Burger
                   opened={opened}
                   onClick={toggle}
-                  hiddenFrom="sm"
                   size="sm"
                   aria-label={t('nav.menu')}
                 />
@@ -558,8 +548,8 @@ export function AppLayout(): JSX.Element {
               </NavGroupSection>
             ))}
           </AppShell.Section>
-          {!me.mustChangePassword && (
-            <AppShell.Section visibleFrom="sm" pt="xs">
+          {!me.mustChangePassword && desktop && (
+            <AppShell.Section pt="xs">
               <NavbarCollapseToggle collapsed={iconsOnly} controls={NavbarItemsId} />
             </AppShell.Section>
           )}
