@@ -210,7 +210,7 @@ export function VersionMigrationDialog({
 
         {jobRunning && (
           <Stack gap="xs" data-migrate-progress="">
-            <Progress value={job.data?.percent ?? 0} aria-label={t('documents.migrateVersionTitle')} />
+            <Progress color="var(--ecr-accent)" value={job.data?.percent ?? 0} aria-label={t('documents.migrateVersionTitle')} />
             <Text size="sm">{t('documents.migrateRunning', { percent: job.data?.percent ?? 0 })}</Text>
             {jobMessage !== null && (
               <Text size="xs" c="dimmed">
