@@ -33,6 +33,12 @@ public interface IEditAssignmentManagementStore
     /// </summary>
     public Task LockRecipientsAsync(long assignmentId, CancellationToken ct);
 
+    /// <summary>
+    /// Обмежує очікування блокувань у поточній транзакції (<c>SET LOCK_TIMEOUT</c>): вичерпане очікування
+    /// <c>UnitOfWork</c> перекладає в <c>409 ECR-DOC-4091</c> замість висіння до <c>CommandTimeout</c>.
+    /// </summary>
+    public Task LimitLockWaitAsync(CancellationToken ct);
+
     /// <summary>Передача документа за ключем зрізу — з блокуванням, відстежується; <c>null</c>, якщо немає.</summary>
     public Task<EditAssignment?> FindBySliceKeyForUpdateAsync(long documentId, string sliceKey, CancellationToken ct);
 

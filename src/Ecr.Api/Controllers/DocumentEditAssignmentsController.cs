@@ -1,6 +1,8 @@
+using Ecr.Api.Security;
 using Ecr.Application.Documents.EditAssignments;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace Ecr.Api.Controllers;
 
@@ -109,6 +111,7 @@ public sealed class DocumentEditAssignmentsController(
         => Ok(await batch.CopyAsync(documentId, request, ct).ConfigureAwait(false));
     /// <summary>Пошук кандидатів у виконавці (≥ 2 символи, ≤ 20; без email і SID).</summary>
     [HttpGet("candidates")]
+    [EnableRateLimiting(SearchRateLimitPolicy.PolicyName)] // T8: межа на користувача, 429
     [ProducesResponseType<IReadOnlyList<EditAssignmentCandidateDto>>(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]

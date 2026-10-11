@@ -51,6 +51,7 @@ public sealed record EditAssignmentBatchDto(IReadOnlyList<EditAssignmentDto> Ass
 public sealed class EditorSetsHandler(
     IEditorSetStore sets,
     IEditAssignmentManagementStore users,
+    IAccessDecisionService access,
     IUnitOfWork uow,
     IAuditWriter audit,
     Common.ICurrentUser currentUser,
@@ -65,7 +66,7 @@ public sealed class EditorSetsHandler(
     /// <summary>Набори власника.</summary>
     public async Task<IReadOnlyList<EditorSetDto>> ListAsync(CancellationToken ct)
     {
-        var userId = EditAssignmentAccess.RequireUser(currentUser);
+        var userId = await RequireWriterAsync(ct).ConfigureAwait(false);
         var all = await sets.ListByOwnerAsync(userId, ct).ConfigureAwait(false);
         var ids = all.SelectMany(s => s.Members.Select(m => m.UserId)).Distinct().ToList();
         var names = await users.GetUsersAsync(ids, ct).ConfigureAwait(false);
@@ -77,13 +78,13 @@ public sealed class EditorSetsHandler(
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        var userId = EditAssignmentAccess.RequireUser(currentUser);
+        var userId = await RequireWriterAsync(ct).ConfigureAwait(false);
         var members = await ValidateAsync(request, userId, ct).ConfigureAwait(false);
         var name = request.Name.Trim();
         var now = clock.UtcNow;
         EditorSet? created = null;
 
-        await uow.ExecuteInTransactionAsync(async innerCt =>
+        await RunUniqueAsync(async innerCt =>
         {
             if (await sets.CountByOwnerAsync(userId, innerCt).ConfigureAwait(false) >= EditorSet.MaxPerOwner)
             {
@@ -115,13 +116,13 @@ public sealed class EditorSetsHandler(
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        var userId = EditAssignmentAccess.RequireUser(currentUser);
+        var userId = await RequireWriterAsync(ct).ConfigureAwait(false);
         var members = await ValidateAsync(request, userId, ct).ConfigureAwait(false);
         var name = request.Name.Trim();
         var now = clock.UtcNow;
         EditorSet? updated = null;
 
-        await uow.ExecuteInTransactionAsync(async innerCt =>
+        await RunUniqueAsync(async innerCt =>
         {
             var set = await sets.FindAsync(userId, setId, innerCt).ConfigureAwait(false) ?? throw SetNotFound();
 
@@ -162,10 +163,10 @@ public sealed class EditorSetsHandler(
     /// <summary>Видаляє набір; передачі, застосовані з нього, лишаються (знімок), посилання обнуляється.</summary>
     public async Task DeleteAsync(int setId, CancellationToken ct)
     {
-        var userId = EditAssignmentAccess.RequireUser(currentUser);
+        var userId = await RequireWriterAsync(ct).ConfigureAwait(false);
         var now = clock.UtcNow;
 
-        await uow.ExecuteInTransactionAsync(async innerCt =>
+        await RunUniqueAsync(async innerCt =>
         {
             var set = await sets.FindAsync(userId, setId, innerCt).ConfigureAwait(false) ?? throw SetNotFound();
             var memberIds = set.Members.Select(m => m.UserId).ToList();
@@ -176,6 +177,32 @@ public sealed class EditorSetsHandler(
         }, ct).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Транзакція зміни набору; дубль унікального імені при гонці «перевірив — вставив» (UQ_EditorSet_Owner)
+    /// дає 422 <c>editorSetNameTaken</c>, а не 500 (аудит P3).
+    /// </summary>
+    private async Task RunUniqueAsync(Func<CancellationToken, Task> operation, CancellationToken ct)
+    {
+        try
+        {
+            await uow.ExecuteInTransactionAsync(operation, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (EditAssignmentAccess.IsUniqueViolation(ex))
+        {
+            throw EditAssignmentAccess.Invalid("err.ECR-REQ-0422.editorSetNameTaken", "Набір із такою назвою вже є.");
+        }
+    }
+    /// <summary>
+    /// Набори виконавців — лише для користувачів із правом запису хоча б у одному проєкті (аудит S2): інакше
+    /// перевірка складу (`ValidateAsync`) і ім'я в відповіді давали б оракул «є/активний» за довільним Id.
+    /// </summary>
+    private async Task<int> RequireWriterAsync(CancellationToken ct)
+    {
+        var userId = EditAssignmentAccess.RequireUser(currentUser);
+        var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
+        EditAssignmentAccess.RequireWriteInAnyProject(profile);
+        return userId;
+    }
     private async Task<List<int>> ValidateAsync(SaveEditorSetRequest request, int ownerId, CancellationToken ct)
     {
         var name = request.Name?.Trim();
@@ -228,18 +255,23 @@ public sealed class EditorSetsHandler(
 }
 
 /// <summary>
-/// «Застосувати набір до зрізів» і «Скопіювати передачу на наступний місяць»: послідовні upsert-и
-/// (кожен — власна транзакція) з явним перезаписуванням складу. Ліміт — 12 зрізів за виклик.
+/// «Застосувати набір до зрізів» і «Скопіювати передачу на наступний місяць»: ВСІ зрізи перевіряються
+/// до першого запису (відмова на k-му не лишає 1..k-1), далі — послідовні upsert-и (кожен — власна
+/// транзакція) з явним перезаписуванням складу. Ліміт — 12 зрізів за виклик.
 /// </summary>
 /// <remarks>
-/// ⚠ Не атомарно по зрізах: відмова на k-му зрізі лишає попередні застосованими (кожен зріз
-/// ідемпотентний — повтор запиту доводить решту).
+/// ⚠ Перезаписування явне й не вимагає <c>baseVersion</c> наявних передач: дія «застосувати набір/копіювати»
+/// за задумом замінює склад зрізу; відповідь повертає КОЖНУ застосовану передачу з новою версією, а в
+/// журнал безпеки йдуть події зняття/надання по виконавцях. Запис по зрізах не атомарний лише проти збоїв
+/// бази й паралельних змін (кожен зріз ідемпотентний — повтор доводить решту).
 /// </remarks>
 public sealed class BatchEditAssignmentsHandler(
     UpsertEditAssignmentHandler upsert,
     IEditAssignmentStore assignments,
     IEditAssignmentManagementStore store,
     IEditorSetStore sets,
+    IDocumentStore documents,
+    IMetadataCache metadata,
     IAccessDecisionService access,
     Common.ICurrentUser currentUser)
 {
@@ -259,17 +291,19 @@ public sealed class BatchEditAssignmentsHandler(
         var set = await sets.FindAsync(userId, request.SetId, ct).ConfigureAwait(false)
             ?? throw EditAssignmentAccess.Invalid("err.ECR-REQ-0422.editorSetNotFound", "Набору виконавців не знайдено.");
         var members = set.Members.Select(m => m.UserId).ToList();
+        var snapshot = new AppliedSetSnapshot(set.Id, set.Name);
 
-        var result = new List<EditAssignmentDto>();
+        // Спершу ВСІ перевірки (права, межі власних прав, одержувачі), далі запис.
+        var prepared = new List<PreparedUpsert>();
         foreach (var slice in request.Slices)
         {
-            result.Add(await upsert.HandleAsync(
+            prepared.Add(await upsert.PrepareAsync(
                 documentId,
                 new UpsertEditAssignmentRequest(slice, members, request.IsExclusive, request.Note, set.Id),
-                ct, overwrite: true).ConfigureAwait(false));
+                overwrite: true, snapshot, ct).ConfigureAwait(false));
         }
 
-        return new EditAssignmentBatchDto(result);
+        return await CommitAllAsync(prepared, ct).ConfigureAwait(false);
     }
 
     /// <summary>Копіює склад і ознаки наявної передачі на інші зрізи.</summary>
@@ -279,40 +313,65 @@ public sealed class BatchEditAssignmentsHandler(
         ArgumentNullException.ThrowIfNull(request);
 
         var userId = EditAssignmentAccess.RequireUser(currentUser);
-        await RequireManagerAsync(userId, documentId, ct).ConfigureAwait(false);
+        var (profile, document) = await RequireManagerAsync(userId, documentId, ct).ConfigureAwait(false);
         RequireSlices(request.ToSlices);
 
         var from = EditAssignmentAccess.ToSlice(request.FromSlice);
         var source = (await assignments.ListByDocumentAsync(documentId, ct).ConfigureAwait(false))
             .FirstOrDefault(a => string.Equals(a.SliceKey, from.Key, StringComparison.Ordinal))
-            ?? throw EditAssignmentAccess.NotFound(documentId);
+            ?? throw EditAssignmentAccess.AssignmentNotFound(documentId);
+
+        // ⛔ Аудит P1-S1: зріз-джерело з аркушем, схованим від викликача, — та сама відповідь, що й «немає».
+        var scope = await EditAssignmentAccess
+            .ReadScopeAsync(documents, metadata, profile, document.ProjectId, documentId, ct).ConfigureAwait(false);
+        EditAssignmentAccess.RequireSheetVisible(scope, source, documentId);
+
         var members = source.Recipients.Select(r => r.UserId).ToList();
 
-        var result = new List<EditAssignmentDto>();
+        // Набір міг бути застосований ІНШИМ менеджером: його не шукаємо за власником, переносимо знімок.
+        var snapshot = source.AppliedSetId is { } setId
+            ? new AppliedSetSnapshot(setId, source.AppliedSetName ?? string.Empty)
+            : null;
+
+        var prepared = new List<PreparedUpsert>();
         foreach (var slice in request.ToSlices)
         {
-            result.Add(await upsert.HandleAsync(
+            prepared.Add(await upsert.PrepareAsync(
                 documentId,
                 new UpsertEditAssignmentRequest(slice, members, source.IsExclusive, source.Note, source.AppliedSetId),
-                ct, overwrite: true).ConfigureAwait(false));
+                overwrite: true, snapshot, ct).ConfigureAwait(false));
+        }
+
+        return await CommitAllAsync(prepared, ct).ConfigureAwait(false);
+    }
+
+    private async Task<EditAssignmentBatchDto> CommitAllAsync(List<PreparedUpsert> prepared, CancellationToken ct)
+    {
+        var result = new List<EditAssignmentDto>(prepared.Count);
+        foreach (var item in prepared)
+        {
+            result.Add(await upsert.CommitAsync(item, ct).ConfigureAwait(false));
         }
 
         return new EditAssignmentBatchDto(result);
     }
 
-    private async Task RequireManagerAsync(int userId, long documentId, CancellationToken ct)
+    private async Task<(AccessProfile Profile, EditAssignmentDocumentRef Document)> RequireManagerAsync(
+        int userId, long documentId, CancellationToken ct)
     {
         var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
         var document = await EditAssignmentAccess
             .RequireVisibleDocumentAsync(store, profile, documentId, ct).ConfigureAwait(false);
         EditAssignmentAccess.RequireManager(profile, document);
+        return (profile, document);
     }
 
     private static void RequireSlices(IReadOnlyList<EditAssignmentSliceDto>? slices)
     {
         if (slices is null || slices.Count == 0 || slices.Count > MaxSlices)
         {
-            throw EditAssignmentAccess.Invalid("err.ECR-REQ-0422.editAssignmentTooManySlices", "За один виклик можна вказати від 1 до 12 зрізів.");
+            throw EditAssignmentAccess.Invalid(
+                "err.ECR-REQ-0422.editAssignmentTooManySlices", "За один виклик можна вказати від 1 до 12 зрізів.");
         }
     }
 }

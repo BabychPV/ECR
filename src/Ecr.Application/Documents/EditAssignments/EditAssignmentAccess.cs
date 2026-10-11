@@ -23,6 +23,80 @@ internal static class EditAssignmentAccess
     /// <summary>Ключ каталогу: документа немає або він не видимий.</summary>
     public const string DocumentNotFoundMessageKey = "err.ECR-DOC-0404.document";
 
+    /// <summary>
+    /// «Передачі немає» у ВИДИМОМУ документі: відсутня, чужого документа, з аркушем, схованим від
+    /// викликача, — одна й та сама відповідь побайтно (T7/T8), нейтральна (без слова «документ»).
+    /// </summary>
+    public static NotFoundException AssignmentNotFound(long documentId)
+        => new(
+            ErrorCodes.DocumentNotFound, "Передачу не знайдено.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-DOC-0404.editAssignment",
+                ["documentId"] = documentId.ToString(CultureInfo.InvariantCulture),
+            });
+
+    /// <summary>Межі читання документа для профілю (приховані аркуші, S6/D-214).</summary>
+    public static async Task<DocumentReadScope> ReadScopeAsync(
+        IDocumentStore documents, IMetadataCache metadata, AccessProfile profile, int projectId, long documentId,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(documents);
+        ArgumentNullException.ThrowIfNull(metadata);
+
+        var templateVersionId = await documents.GetTemplateVersionIdAsync(documentId, ct).ConfigureAwait(false);
+        var snapshot = await metadata.GetAsync(templateVersionId, ct).ConfigureAwait(false);
+        return DocumentReadScope.For(profile, projectId, snapshot);
+    }
+
+    /// <summary>Аркуш передачі схований від викликача — «передачі немає» (аудит P1-S1).</summary>
+    public static void RequireSheetVisible(DocumentReadScope scope, EditAssignment assignment, long documentId)
+    {
+        ArgumentNullException.ThrowIfNull(scope);
+        ArgumentNullException.ThrowIfNull(assignment);
+
+        if (assignment.SheetCode is not null && !scope.CanReadSheetCode(assignment.SheetCode))
+        {
+            throw AssignmentNotFound(documentId);
+        }
+    }
+
+    /// <summary>Чи має профіль рівень <c>Write</c> хоча б в одному проєкті (без заборони).</summary>
+    public static bool HasWriteInAnyProject(AccessProfile profile)
+    {
+        ArgumentNullException.ThrowIfNull(profile);
+
+        return profile.Grants.Any(g =>
+            g.Key.StartsWith(nameof(ResourceKind.Project) + ":", StringComparison.Ordinal)
+            && g.Value >= GrantLevel.Write
+            && !profile.Denies.Contains(g.Key));
+    }
+
+    /// <summary>Вимагає <c>Write</c> хоча б в одному проєкті (набори виконавців, S2) або 403.</summary>
+    public static void RequireWriteInAnyProject(AccessProfile profile)
+    {
+        if (HasWriteInAnyProject(profile))
+        {
+            return;
+        }
+
+        throw new AccessDeniedException(
+            ErrorCodes.AccessDenied, "Набори виконавців доступні користувачам із правом запису.",
+            new Dictionary<string, object?> { ["messageKey"] = "err.ECR-ACCS-0403.notEditAssignmentManager" });
+    }
+    /// <summary>Чи виняток — порушення унікального індексу бази (2601/2627) у ланцюгу внутрішніх.</summary>
+    public static bool IsUniqueViolation(Exception ex)
+    {
+        for (var e = ex; e is not null; e = e.InnerException)
+        {
+            if (e.GetType().Name == "SqlException" && e.Message.Contains("duplicate key", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
     /// <summary>Автентифікований користувач або 401.</summary>
     public static int RequireUser(Common.ICurrentUser currentUser)
     {

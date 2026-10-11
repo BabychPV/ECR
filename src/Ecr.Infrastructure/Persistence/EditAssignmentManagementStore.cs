@@ -14,6 +14,8 @@ namespace Ecr.Infrastructure.Persistence;
 /// </remarks>
 public sealed class EditAssignmentManagementStore(EcrDbContext db) : IEditAssignmentManagementStore
 {
+    private static readonly string LimitLockWaitSql = "SET LOCK_TIMEOUT " + LockWaitGuard.LockTimeoutMs.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
     /// <inheritdoc />
     public async Task<EditAssignmentDocumentRef?> FindDocumentAsync(long documentId, CancellationToken ct)
         => await db.Documents.AsNoTracking()
@@ -29,6 +31,10 @@ public sealed class EditAssignmentManagementStore(EcrDbContext db) : IEditAssign
             .Select(d => d.Id)
             .Take(1)
             .ToListAsync(ct).ConfigureAwait(false)).Count > 0;
+
+    /// <inheritdoc />
+    public Task LimitLockWaitAsync(CancellationToken ct)
+        => db.Database.ExecuteSqlRawAsync(LimitLockWaitSql, ct);
 
     /// <inheritdoc />
     public async Task LockRecipientsAsync(long assignmentId, CancellationToken ct)
@@ -87,7 +93,7 @@ public sealed class EditAssignmentManagementStore(EcrDbContext db) : IEditAssign
 
         return await db.Users.AsNoTracking()
             .Where(u => u.IsActive && !u.IsBootstrapAdmin
-                && (u.DisplayName.Contains(query) || u.UserName.Contains(query)))
+                && u.DisplayName.Contains(query))
             .OrderBy(u => u.DisplayName).ThenBy(u => u.Id)
             .Take(take)
             .Select(u => new EditAssignmentUserRef(u.Id, u.DisplayName, null, true))
