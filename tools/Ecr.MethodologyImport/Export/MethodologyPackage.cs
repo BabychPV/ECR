@@ -72,6 +72,9 @@ public sealed record MethodologyPackage(
 
     public const string CategoryRuleFormula = "ECW_Location";
 
+    /// <summary>Формула, що дає ключ категорії там, де <c>ECW_Location</c> немає (G12).</summary>
+    public const string CategoryFormula = "ECW_Category";
+
     private static readonly HashSet<string> RowScopeFormulas =
         new(["ECW_Location", "ECW_RepairStatus", "ECW_Category"], StringComparer.Ordinal);
 
@@ -112,13 +115,34 @@ public sealed record MethodologyPackage(
                                     .Select(c => new PackageConstantValue(c.Category, c.Version, c.Value, c.StartDate, c.EndDate))
                                     .ToList()))
                             .ToList(),
-                        formulas[(g.Key, v)].Any(f => f.Available && f.Name == CategoryRuleFormula)
-                            ? new PackageCategoryRule("!" + CategoryRuleFormula)
-                            : null))
+                        CategoryRuleOf(formulas[(g.Key, v)])))
                     .ToList()))
             .ToList();
 
         return new MethodologyPackage(FormatName, CurrentVersion, library, methodologies, report.Blockers);
+    }
+
+    /// <summary>
+    /// Правило категорії версії: <c>!ECW_Location</c>, якщо є така доступна формула (5.1), інакше <c>!ECW_Category</c>
+    /// (5.2, 7.16, 7.21 — категорію дає сама формула <c>ECW_Category</c>); без обох — правила немає.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ G12 (Land): правило <c>!ECW_Category</c> для 5.2/7.21 раніше задавали руками після імпорту, а для 7.16
+    /// (константи за категоріями Summer/Winter, ключ — формула <c>ECW_Category</c>) його не було взагалі — версія з
+    /// категорійними константами без правила не резолвить категорію й не публікується з коректним золотим набором.
+    /// Правила за довідником (<c>REGFIELD(@Lookup,'NAME')</c> у 5.4/6.1/7.7/7.8) з AF не виводяться — це рішення
+    /// про шаблон, а не властивість методології: їх задає той, хто знає, яка колонка шаблону дає категорію.
+    /// </remarks>
+    private static PackageCategoryRule? CategoryRuleOf(IEnumerable<FormulaDef> versionFormulas)
+    {
+        var names = versionFormulas.Where(f => f.Available).Select(f => f.Name).ToHashSet(StringComparer.Ordinal);
+
+        if (names.Contains(CategoryRuleFormula))
+        {
+            return new PackageCategoryRule("!" + CategoryRuleFormula);
+        }
+
+        return names.Contains(CategoryFormula) ? new PackageCategoryRule("!" + CategoryFormula) : null;
     }
 
     /// <summary>Код каталогу ECR, якщо одиницю AF зведено; інакше рядок AF як є (нерезолвну звітує analyze, сервер — <c>unitUnknown</c>).</summary>
