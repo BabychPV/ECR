@@ -9,6 +9,7 @@ import { useDebouncedFilter, useFilterCursor } from '@/shared/ui/useDebouncedFil
 import { useFieldDraft } from '@/shared/ui/useFieldDraft';
 import { useUrlNumber, useUrlState } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
+import { securityEventLabel } from './auditLabels';
 
 /**
  * Журнал подій безпеки (ФВ-5.24, ФВ-6.11) — третя вкладка екрана аудиту: зміни прав і ролей та
@@ -95,7 +96,7 @@ export function SecurityEventsPanel({ from, to }: { from: string; to: string }):
                     </Table.Td>
                     {/* `R-18`: ім'я з сервера; номер — у підказці. */}
                     <Table.Td title={`#${String(event.changedByUserId)}`}>{authorName(event)}</Table.Td>
-                    <Table.Td>{event.eventType}</Table.Td>
+                    <Table.Td title={event.eventType}>{securityEventLabel(event.eventType)}</Table.Td>
                     <Table.Td>
                       <Text size="xs" ff="monospace" style={{ wordBreak: 'break-all' }}>
                         {event.detailsJson ?? '—'}

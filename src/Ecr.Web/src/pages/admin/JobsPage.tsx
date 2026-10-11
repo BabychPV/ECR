@@ -204,6 +204,9 @@ export function JobsPage(): JSX.Element {
     }
   }
 
+  // Читабельні назви — за абеткою, а не в порядку, у якому задачі зустрілись у журналі.
+  typeOptions.sort((a, b) => a.label.localeCompare(b.label));
+
   const selectStat = (id: string | null): void => setParams({ state: id, since: id === 'Failed' ? FailedWindow : null });
 
   const needle = (query ?? '').trim().toLocaleLowerCase();

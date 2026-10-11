@@ -36,8 +36,14 @@ describe('jobKindLabel', () => {
     );
   });
 
-  it('невідомий тип — повертає просте ім\'я, а не вигадує підпис', () => {
-    expect(jobKindLabel('Ecr.Application.Ports.ISomeNewJob')).toBe('ISomeNewJob');
+  it('невідомий тип — читабельна назва зі складових імені, а не ім\'я класу', () => {
+    expect(jobKindLabel('Ecr.Application.Ports.ISomeNewJob')).toBe('Some new');
+    expect(jobKindLabel('Ecr.Infrastructure.Jobs.RegistrySyncJob')).toBe('Registry sync');
+  });
+
+  it('ім\'я без обгортки I…Job лишається цілим словом', () => {
+    expect(jobKindLabel('Thing')).toBe('Thing');
+    expect(jobKindLabel('Job')).toBe('Job');
   });
 });
 
