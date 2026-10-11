@@ -27,6 +27,7 @@ import { useDocumentLogActions } from '@/features/documents/DocumentLogActions';
 import { useStaleResultsReminderHost } from '@/features/documents/useStaleResultsReminder';
 import { useVersionMigrationAction } from '@/features/documents/VersionMigrationAction';
 import { useEditAssignmentsAction } from '@/features/editAssignments/EditAssignmentsAction';
+import { ExecutorStrip } from '@/features/editAssignments/ExecutorStrip';
 import { DocumentLockBanner } from '@/features/documents/DocumentLockBanner';
 import { documentLockOf, hasLockedSheet, locksDataActions } from '@/features/documents/documentLock';
 import { DocumentProgress } from '@/features/documents/DocumentProgress';
@@ -676,6 +677,9 @@ export function DocumentPage(): JSX.Element {
           будь-якої сітки: сірі комірки без пояснення читаються як збій.
           ✎ UI-26: за наявного аркуша банер малює панель дій (з контекстом). */}
       {active === undefined && <DocumentLockBanner lock={lock} periodKey={periodKey} />}
+
+      {/* EA-5b: передача місяця - «Місяць передано вам», «Заповнено», коментар повернення. Права комірок рішає сервер. */}
+      <ExecutorStrip documentId={documentId} periodKey={periodKey} />
 
       {/* `UI-42`: чому тут нічого не змінити на телефоні — тим самим місцем, що й інші блокування.
           Аркуш і так закритий (банер вище) — другий банер не потрібен. */}
