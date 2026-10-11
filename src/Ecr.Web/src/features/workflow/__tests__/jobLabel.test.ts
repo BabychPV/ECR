@@ -36,6 +36,19 @@ describe('jobKindLabel', () => {
     );
   });
 
+  it.each([
+    ['NotificationJob', 'notification'],
+    ['PeriodStateJob', 'periodState'],
+    ['RowWindowRefetchJob', 'rowWindowRefetch'],
+    ['Ecr.Infrastructure.Jobs.ArchiveJob', 'archive'],
+    ['PartitionCheckJob', 'partitionCheck'],
+    ['RegistrySyncJob', 'registrySync'],
+    ['ReportRetentionJob', 'reportRetention'],
+    ['ReportSnapshotFormatJob', 'reportSnapshotFormat'],
+  ])('FP-7: повторювана задача конкретного класу %s має людську назву, а не сирий тип', (type, key) => {
+    expect(jobKindLabel(type)).toBe(`⟦jobs.kind.${key}⟧`);
+  });
+
   it('невідомий тип — повертає просте ім\'я, а не вигадує підпис', () => {
     expect(jobKindLabel('Ecr.Application.Ports.ISomeNewJob')).toBe('ISomeNewJob');
   });

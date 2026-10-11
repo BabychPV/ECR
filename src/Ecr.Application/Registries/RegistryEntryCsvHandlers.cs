@@ -250,12 +250,20 @@ public sealed class ImportRegistryEntriesHandler(
             {
                 // Невідома колонка валить УВЕСЬ файл одразу — не рядок: клієнт
                 // або переплутав довідник, або читає застарілий опис.
+                //
+                // ⛔ FP-6 (прохід «від першого обличчя» 2026-10-11, P2): новий довідник без полів не
+                // завантажити файлом `code,name` — відмова «немає поля name» не каже, що полів немає
+                // ВЗАГАЛІ і що колонки файла — це коди полів. Окремий ключ для цього випадку.
                 throw new BusinessRuleException(
                     "ECR-REG-0422",
-                    $"Довідник «{registryCode}» не має поля «{name}»: колонка невідома.",
+                    fieldsByCode.Count == 0
+                        ? $"Довідник «{registryCode}» ще не має полів: колонку «{name}» імпортувати нікуди."
+                        : $"Довідник «{registryCode}» не має поля «{name}»: колонка невідома.",
                     new Dictionary<string, object?>
                     {
-                        ["messageKey"] = "err.ECR-REG-0422.entriesCsvUnknownColumn",
+                        ["messageKey"] = fieldsByCode.Count == 0
+                            ? "err.ECR-REG-0422.entriesCsvNoFields"
+                            : "err.ECR-REG-0422.entriesCsvUnknownColumn",
                         ["registryCode"] = registryCode,
                         ["column"] = name,
                     });

@@ -314,6 +314,9 @@ describe('DocumentsPage: фільтри переліку (BE-09b)', () => {
   it(
     '(б) документів немає взагалі — «документів немає», без кнопки скидання',
     async () => {
+      // ✎ FP-3: проєкт є (доступ видано), але документів немає. Без жодного проєкту текст інший —
+      // «немає доступу» (`DocumentsPage.noProjects.test.tsx`).
+      withProject = true;
       mockFetch('empty');
       show('/?periodKey=202601');
 

@@ -428,6 +428,11 @@ public sealed partial class EndpointCoverageTests
                 "jobs.kind.collection", "jobs.kind.sourceEventSync", "jobs.kind.rowWindowFetch",
                 "jobs.kind.consistencyCheck", "jobs.kind.orphanScan", "jobs.kind.registryImpactRecalculation",
                 "jobs.kind.migrateDocumentVersion",
+
+                // FP-7: повторювані задачі конкретного класу (`typeof(TJob).FullName`).
+                "jobs.kind.archive", "jobs.kind.notification", "jobs.kind.partitionCheck",
+                "jobs.kind.periodState", "jobs.kind.registrySync", "jobs.kind.reportRetention",
+                "jobs.kind.reportSnapshotFormat", "jobs.kind.rowWindowRefetch",
             ],
             "Назва типу фонової задачі (KindKeys)."),
 

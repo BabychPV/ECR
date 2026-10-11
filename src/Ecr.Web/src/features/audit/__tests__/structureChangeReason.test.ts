@@ -41,6 +41,8 @@ describe('structureChangeReasonText', () => {
     'integrationAudit.registryPolicyChanged',
     'integrationAudit.dataSourceCreated',
     'integrationAudit.dataSourceChanged',
+    // FP-7: «Перераховано рядків» більше не готова українська фраза на англійському інтерфейсі.
+    'registryAudit.entryValidityRescanned',
   ])('%s — відомий ключ розгортається', (key) => {
     const raw = JSON.stringify({ k: key, p: { id: '1' } });
 

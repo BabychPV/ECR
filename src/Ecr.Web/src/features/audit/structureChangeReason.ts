@@ -74,6 +74,9 @@ function render(key: string, params: Record<string, string>): string | null {
       return t('integrationAudit.dataSourceCreated', params);
     case 'integrationAudit.dataSourceChanged':
       return t('integrationAudit.dataSourceChanged', params);
+    // FP-7: зміна вікна дії запису довідника — скільки рядків перераховано (`SetEntryValidityHandler`).
+    case 'registryAudit.entryValidityRescanned':
+      return t('registryAudit.entryValidityRescanned', params);
     default:
       return null;
   }
