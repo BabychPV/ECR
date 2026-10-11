@@ -169,7 +169,6 @@ public static class MethodologyCategoryRuleChecks
         return new Outcome(problems, new ParsedFormula(RuleCode, FormulaResultType.Text, result.Expression.Root));
     }
 
-    /// <summary>Коди констант, що мають ≥ 2 різні категорії (без «Common» і без категорії).</summary>
     /// <summary>
     /// R16-4: звіряє <c>@</c>-аргументи правила з колонками прив'язаних таблиць. Відмова — той самий код
     /// <c>ECR-CALC-0422</c>, що й для <c>CST.X</c> (<c>categoryRuleUnknownConstant</c>) і <c>!X</c>
@@ -210,6 +209,7 @@ public static class MethodologyCategoryRuleChecks
         }
     }
 
+    /// <summary>Коди констант, що мають ≥ 2 різні категорії (без «Common» і без категорії).</summary>
     private static List<string> Categorised(IReadOnlyList<MethodologyConstant> constants)
         => [.. constants
             .Where(c => !string.IsNullOrEmpty(c.Category)
