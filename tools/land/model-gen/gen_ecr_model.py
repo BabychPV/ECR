@@ -819,6 +819,64 @@ for sh in X['sheets']:
             stat_tables += 1
     out['sheets'].append(s_out)
 
+# ---- D1: перехресні формули 7.0 <- 7. Water Report -> формули РІВНЯ КОМІРКИ (PUT …/formulas/cell/{rowKey}/{columnDefId})
+# Excel: D..O = (сума конкретних рядків аркуша 7 у тій самій місячній колонці) / 1000. Формула лишається в діалекті
+# шаблону: адреси A1 переписуються на [Аркуш].[Таблиця].[RowKey].[Колонка]; діапазонів немає. Усе, що не
+# розв'язується (рядок/колонка поза моделлю, інший аркуш), НЕ мовчить — потрапляє в cellFormulasUnresolved.
+def _cell_formulas_7_0():
+    s70 = next((s for s in out['sheets'] if s['excelName'].startswith('7.0')), None)
+    s7 = next((s for s in out['sheets'] if s['excelName'].startswith('7. ')), None)
+    if not s70 or not s7:
+        return
+    t70, t7 = s70['tables'][0], s7['tables'][0]
+    src_name = s7['excelName']
+    rowkey_by_excel = {rw['excelRow']: rw['key'] for rw in t7['rows']}
+    col_by_letter = {c['excel']: c['code'] for c in t7['columns'] if c.get('excel')}
+    dst_row_by_excel = {rw['excelRow']: rw['key'] for rw in t70['rows']}
+    dst_col_by_letter = {c['excel']: c['code'] for c in t70['columns'] if c.get('excel')}
+    ref_re = re.compile(r"'%s'!\$?([A-Z]+)\$?(\d+)" % re.escape(src_name))
+    sheet70 = PS[s70['excelName']]['cells']
+    res, bad = [], []
+    for L in 'DEFGHIJKLMNO':
+        mcode = dst_col_by_letter.get(L)
+        for r, rkey in sorted(dst_row_by_excel.items()):
+            x = sheet70.get('%s%d' % (L, r))
+            if not x or not x.get('f'):
+                continue
+            f = x['f']
+            problems = []
+
+            def repl(m):
+                col, row = m.group(1), int(m.group(2))
+                k, c = rowkey_by_excel.get(row), col_by_letter.get(col)
+                if not k or not c:
+                    problems.append('%s%d' % (col, row))
+                    return m.group(0)
+                if c != mcode:
+                    problems.append('%s%d (month %s != %s)' % (col, row, c, mcode))
+                return '[%s].[%s].[%s].[%s]' % (s7['code'], t7['code'], k, c)
+
+            expr = ref_re.sub(repl, f)
+            if re.search(r"'[^']+'!", expr):
+                problems.append('reference to another sheet')
+            if problems or not mcode:
+                bad.append({'cell': '%s%d' % (L, r), 'formula': f, 'why': 'unresolved: ' + ', '.join(problems or ['target column'])})
+                continue
+            res.append({'row': rkey, 'column': mcode, 'expression': expr, 'excelCell': '%s%d' % (L, r), 'excelFormula': f})
+    # Колонка з комірочною формулою мусить бути обчислюваною (ECR-TMPL-4227), інакше PUT …/formulas/cell відхиляється.
+    covered = {x['column'] for x in res}
+    for c_ in t70['columns']:
+        if c_['code'] in covered:
+            c_['dataType'] = 'Formula'
+            c_['readOnly'] = True
+            c_.pop('dv', None)
+    t70['cellFormulas'] = res
+    t70['cellFormulasUnresolved'] = bad
+    print('D1 cellFormulas 7.0:', len(res), 'unresolved:', len(bad))
+
+
+_cell_formulas_7_0()
+
 cfs = []
 seen_cf = set()
 for sh in X['sheets']:
