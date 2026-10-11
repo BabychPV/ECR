@@ -118,6 +118,7 @@ public static class DependencyInjection
         services.AddScoped<IDocumentKeyStore, DocumentKeyStore>();
         services.AddScoped<IEditAssignmentStore, EditAssignmentStore>();
         services.AddScoped<IEditorSetStore, EditorSetStore>();
+        services.AddScoped<IEditAssignmentManagementStore, EditAssignmentManagementStore>();
         services.AddScoped<IColumnDefSearchStore, ColumnDefSearchStore>();
         services.AddScoped<ISearchStore, SearchStore>();
         services.AddScoped<IValidationResultStore, ValidationResultStore>();
