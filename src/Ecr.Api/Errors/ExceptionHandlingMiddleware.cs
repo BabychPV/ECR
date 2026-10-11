@@ -547,6 +547,24 @@ public sealed partial class ExceptionHandlingMiddleware(
                  ["messageKey"] = "err.ECR-CALC-0409.categoryRuleConcurrent",
              }),
 
+        // ⛔ Хвіст інтеграції 11.10: два одночасні створення версії звіту з тим самим номером
+        // (`POST /reports/{id}/versions`) проходять перевірку `VersionExistsAsync` обидва (check-then-insert,
+        // `CreateReportVersionHandler`), і другу відбиває лише `UQ_ReportVersion`. Без арма це
+        // `DbUpdateException` у fallback — голий 500 на звичайну гонку. Конфлікт стану: 409, код той самий
+        // `ECR-RPT-4091`, що й у перевірці обробника.
+        // ⚠ Ключ каталогу ІНШИЙ: `err.ECR-RPT-4091.version` вимагає `{version}`, а номер версії з тексту
+        // порушення SQL Server витягати крихко (ключ індексу — `(ReportDefId, Version)`), тож власний
+        // `versionConcurrent` без підстановок: повторний запит із тим самим номером уже дасть звичайну
+        // відмову обробника з номером у тексті.
+        Microsoft.EntityFrameworkCore.DbUpdateException e
+            when e.GetBaseException().Message.Contains("UQ_ReportVersion", StringComparison.Ordinal) =>
+            (StatusCodes.Status409Conflict, ErrorCodes.ReportDefDuplicate,
+             "Версію з таким номером у цьому описі звіту щойно створив хтось інший: номер версії унікальний.",
+             new Dictionary<string, object?>
+             {
+                 ["messageKey"] = "err.ECR-RPT-4091.versionConcurrent",
+             }),
+
         ConcurrencyConflictException e =>
             (StatusCodes.Status409Conflict, e.ErrorCode, e.Message, e.Details),
 
