@@ -15396,6 +15396,150 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/template-versions/{id}/tables/{tableDefId}/formulas/cell/{rowKey}/{columnDefId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Записує формулу ОДНІЄЇ комірки таблиці версії-чернетки (область
+         *     `Cell`, D1). Право `Template.Edit`.
+         * @description ⚠ Окремий маршрут, а не ще одне значення `{scope}`: адреса комірки —
+         *     ПАРА (рядок, колонка), і єдиний сегмент `{target}` її не вміщає без
+         *     склеювання, яке довелося б розбирати назад. Колонка комірки мусить бути
+         *     обчислюваною (`ECR-TMPL-4227`, як і для `column`); перетин із
+         *     колонковою чи рядковою формулою тієї ж комірки відхиляє ПУБЛІКАЦІЯ (V-03).
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Версія-чернетка. */
+                    id: number;
+                    /** @description Таблиця, якій належить комірка. */
+                    tableDefId: number;
+                    /** @description `RowKey` рядка комірки (текстом). */
+                    rowKey: string;
+                    /** @description Числовий `ColumnDefId` колонки комірки. */
+                    columnDefId: number;
+                };
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["SaveFormulaDefRequest"];
+                    "application/json": components["schemas"]["SaveFormulaDefRequest"];
+                    "text/json": components["schemas"]["SaveFormulaDefRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["FormulaDto"];
+                        "text/json": components["schemas"]["FormulaDto"];
+                        "text/plain": components["schemas"]["FormulaDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        /** Прибирає формулу комірки з чернетки (м'яко, `ФВ-7.6`). Право `Template.Edit`. */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Версія-чернетка. */
+                    id: number;
+                    /** @description Таблиця, якій належить комірка. */
+                    tableDefId: number;
+                    /** @description `RowKey` рядка комірки. */
+                    rowKey: string;
+                    /** @description Числовий `ColumnDefId` колонки комірки. */
+                    columnDefId: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/template-versions/{id}/tables/{tableDefId}/formulas/{scope}/{target}": {
         parameters: {
             query?: never;
@@ -20440,7 +20584,7 @@ export interface components {
         FormulaDto: {
             /**
              * Format: int32
-             * @description Колонка, якщо `Scope == Column`.
+             * @description Колонка, якщо `Scope == Column` чи `Cell`.
              */
             columnDefId: null | number;
             /** @description Діалект виразу. */
@@ -20454,10 +20598,10 @@ export interface components {
             id: number;
             /**
              * Format: int32
-             * @description Рядок, якщо `Scope == Row` (сурогатний ключ; адреса запиту — `RowKey`).
+             * @description Рядок, якщо `Scope == Row` чи `Cell` (сурогатний ключ; адреса запиту — `RowKey`).
              */
             rowDefId: null | number;
-            /** @description Область: `Column` чи `Row`. */
+            /** @description Область: `Column`, `Row` чи `Cell`. */
             scope: components["schemas"]["FormulaScope"];
             /**
              * Format: int32
