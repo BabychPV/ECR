@@ -221,6 +221,56 @@ export function sliceAddressOf(
 }
 
 /**
+ * Домен `editAssignments`: передачі місяця третій стороні (EA-5a…5d).
+ *
+ * ⛔ Чотири клієнтські лінії мали чотири різні ключі «моїх передач»
+ * (`['edit-assignments','mine',id]`, `['edit-assignments','mine']`,
+ * `['editAssignments','mine']`): інвалідація однієї мовчки не зачіпала
+ * решту. Усе — лише звідси; перший елемент завжди `'editAssignments'`, тож
+ * `all()` скидає домен цілком, а `mine()` без аргументу — префікс усіх
+ * `mine(docId)`.
+ */
+const editAssignments = {
+  /** Префікс усього домену. */
+  all: () => ['editAssignments'] as const,
+
+  /**
+   * «Мої» передачі (виконавець / «чекає моєї валідації»). Без `documentId` -
+   * усі документи («Мої задачі», `GET /me/edit-assignments`); з ним - зріз
+   * одного документа (смуга виконавця). `mine()` є префіксом `mine(id)`.
+   */
+  mine: (documentId?: number) =>
+    documentId === undefined
+      ? (['editAssignments', 'mine'] as const)
+      : (['editAssignments', 'mine', documentId] as const),
+
+  /** Передачі ОДНОГО документа (шторка власника, `GET /documents/{id}/edit-assignments`). */
+  forDocument: (documentId: number) => ['editAssignments', 'document', documentId] as const,
+
+  /** Збережені набори виконавців власника. */
+  editorSets: () => ['editAssignments', 'sets'] as const,
+
+  /** Кандидати-виконавці документа за пошуковим рядком. */
+  candidates: (documentId: number, query: string) =>
+    ['editAssignments', 'candidates', documentId, query] as const,
+};
+
+/**
+ * Домен `document` - лише ті ключі, що потрібні новому коду. Форма ТА САМА,
+ * що в літералах `DocumentPage` (`['document', id, period]`): префіксна
+ * інвалідація `SheetActions`/імпорту/передач зіставляється за першими
+ * елементами, тому змінювати форму не можна.
+ */
+const documentKeys = {
+  /** Префікс усіх запитів документа (`['document', id]`) - усі періоди й похідні. */
+  ofDocument: (documentId: number) => ['document', documentId] as const,
+
+  /** Зведення документа за періодом - ключ `useQuery` у `DocumentPage`. */
+  summary: (documentId: number, periodKey: number | undefined) =>
+    ['document', documentId, periodKey] as const,
+};
+
+/**
  * Єдина точка правди для ключів TanStack Query.
  *
  * Охоплює домени, потрібні для першого зрізу навігаційної архітектури —
@@ -235,4 +285,6 @@ export const queryKeys = {
   registries,
   methodologies,
   slices,
+  editAssignments,
+  document: documentKeys,
 };

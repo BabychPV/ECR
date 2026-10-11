@@ -156,4 +156,19 @@ describe('queryKeys — фабрика ключів TanStack Query', () => {
     expect(queryKeys.methodologies.formulas(undefined)).toEqual(['methodologies', 'formulas', undefined]);
     expect(queryKeys.templates.versionsOf(undefined)).toEqual(['templates', 'versionsOf', undefined]);
   });
+  it('editAssignments: mine() - префікс mine(docId), all() - префікс усього домену, форми не розходяться', () => {
+    expect(isPrefixOf(queryKeys.editAssignments.mine(), queryKeys.editAssignments.mine(7))).toBe(true);
+    expect(isPrefixOf(queryKeys.editAssignments.all(), queryKeys.editAssignments.forDocument(7))).toBe(true);
+    expect(isPrefixOf(queryKeys.editAssignments.all(), queryKeys.editAssignments.editorSets())).toBe(true);
+    expect(isPrefixOf(queryKeys.editAssignments.all(), queryKeys.editAssignments.candidates(7, 'ab'))).toBe(true);
+    expect(isPrefixOf(queryKeys.editAssignments.mine(7), queryKeys.editAssignments.mine(8))).toBe(false);
+    expect(isPrefixOf(queryKeys.editAssignments.forDocument(7), queryKeys.editAssignments.mine(7))).toBe(false);
+    expect(queryKeys.editAssignments.mine()).toEqual(['editAssignments', 'mine']);
+  });
+
+  it('document: ofDocument(id) - префікс summary(id, period), форма збігається з літералом DocumentPage', () => {
+    expect(queryKeys.document.summary(5, 202610)).toEqual(['document', 5, 202610]);
+    expect(isPrefixOf(queryKeys.document.ofDocument(5), queryKeys.document.summary(5, 202610))).toBe(true);
+    expect(isPrefixOf(queryKeys.document.ofDocument(5), queryKeys.document.summary(6, 202610))).toBe(false);
+  });
 });
