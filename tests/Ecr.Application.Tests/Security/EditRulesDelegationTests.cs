@@ -1,4 +1,4 @@
-﻿// tests/Ecr.Application.Tests/Security/EditRulesDelegationTests.cs
+// tests/Ecr.Application.Tests/Security/EditRulesDelegationTests.cs
 using Ecr.Application.Security;
 using Ecr.Domain.Enums;
 using Ecr.TestKit;

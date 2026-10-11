@@ -1,4 +1,4 @@
-﻿// tests/Ecr.Application.Tests/Security/EditAssignmentGuardTests.cs
+// tests/Ecr.Application.Tests/Security/EditAssignmentGuardTests.cs
 using Ecr.Application.Security;
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;

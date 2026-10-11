@@ -1,4 +1,4 @@
-﻿using Ecr.Application.Errors;
+using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
 using Ecr.Domain.Abstractions;
@@ -1075,7 +1075,13 @@ public sealed class AccessDecisionService(
                 columns[column.Id] = Decide(profile, slice, rowKey, column, EmptyWindows);
             }
 
-            result[rowKey] = new NewRowAccess(EditRules.CanEdit(profile, rowContext), columns);
+            var rowDecision = EditRules.CanEdit(profile, rowContext);
+            if (slice.DocumentHasAssignments)
+            {
+                rowDecision = rowDecision with { AssignmentsPresent = true };
+            }
+
+            result[rowKey] = new NewRowAccess(rowDecision, columns);
         }
 
         return result;
@@ -1192,7 +1198,12 @@ public sealed class AccessDecisionService(
 
         // Прапорець «через передачу» переживає правила періоду, що замінили
         // рішення на AllowWithConfirmation/AllowMarked.
-        return viaAssignment && decision.IsAllowed ? decision with { ViaAssignment = true } : decision;
+        if (viaAssignment && decision.IsAllowed)
+        {
+            decision = decision with { ViaAssignment = true };
+        }
+
+        return slice.DocumentHasAssignments ? decision with { AssignmentsPresent = true } : decision;
     }
 
     /// <summary>Опис рядка з шаблону за його ключем; <c>null</c> — рядок вільний.</summary>
@@ -1221,6 +1232,9 @@ public sealed class AccessDecisionService(
         /// немає чи вони його не стосуються (документ без передач, симуляція, системний шлях).
         /// </summary>
         public DelegationFacts? Delegation { get; init; }
+
+        /// <summary>У документа зрізу є передачі (ознака для повторної перевірки під гейтом).</summary>
+        public bool DocumentHasAssignments { get; init; }
     }
 
     /// <summary>Передачі документа, звужені до зрізу, і те, що потрібно правилу <see cref="EditAssignmentGuard"/>.</summary>
@@ -1291,11 +1305,6 @@ public sealed class AccessDecisionService(
 
         var result = new Dictionary<long, SliceContext>(instances.Count);
 
-        // ⛔ EA-B: передачі читаються З БАЗИ на кожне рішення (не з кешу профілю —
-        // профіль не знає документа) і ОДНИМ запитом на виклик, а не на групу.
-        var assignments = await EditAssignmentsAsync(
-                profile, [.. instances.Select(i => i.DocumentId).Distinct()], ct)
-            .ConfigureAwait(false);
 
         foreach (var group in instances.GroupBy(i => (i.DocumentId, i.PeriodKeyValue)))
         {
@@ -1320,6 +1329,13 @@ public sealed class AccessDecisionService(
                 .ConfigureAwait(false);
 
             var projectId = sharedBySheet.Values.First().ProjectId;
+
+            // ⛔ EA-B: передачі читаються З БАЗИ на кожне рішення (не з кешу профілю — профіль не
+            // знає документа) і ЛИШЕ для документа, у якого вони є (ознака — з запиту умов доступу).
+            var documentHasAssignments = sharedBySheet.Values.First().HasEditAssignments;
+            var assignments = documentHasAssignments
+                ? await EditAssignmentsAsync(profile, [documentId], ct).ConfigureAwait(false)
+                : EmptyAssignments;
 
             // ⛔ Правила доступу до періоду (`ФВ-2.15`) і все, що їм потрібно,
             // читається ОДИН раз на групу — див. `PeriodRuleContextAsync`.
@@ -1363,6 +1379,7 @@ public sealed class AccessDecisionService(
                     periodKey, instance.TableDefId, sheetDefId, shared, columns, snapshot, ruleContext)
                 {
                     Delegation = delegation,
+                    DocumentHasAssignments = documentHasAssignments,
                 };
             }
         }
@@ -1376,6 +1393,9 @@ public sealed class AccessDecisionService(
     /// системних шляхів (D3). Проєкція — `EditAssignmentFactsReader`, спільна з
     /// повторною перевіркою під блокуванням аркуша.
     /// </remarks>
+    private static readonly IReadOnlyDictionary<long, (int OwnerUserId, IReadOnlyList<EditAssignmentFact> Facts)>
+        EmptyAssignments = new Dictionary<long, (int, IReadOnlyList<EditAssignmentFact>)>();
+
     private async Task<IReadOnlyDictionary<long, (int OwnerUserId, IReadOnlyList<EditAssignmentFact> Facts)>>
         EditAssignmentsAsync(AccessProfile profile, IReadOnlyCollection<long> documentIds, CancellationToken ct)
     {
@@ -1762,6 +1782,10 @@ public sealed class AccessDecisionService(
                     p.PeriodEnd,
                     p.YearGraceOffsetDays,
                     p.TimeZoneId,
+
+                    // ⛔ EA-B: ознака «у документа є передачі» — EXISTS у тому самому запиті,
+                    // 0 нових звернень; документ без передач не читає їх ні в рішенні, ні під гейтом.
+                    HasAssignments = db.EditAssignments.Any(x => x.DocumentId == documentId),
                     Period = db.Periods
                         .AsNoTracking()
                         .Where(x => x.ProjectId == d.ProjectId && x.PeriodKeyValue == periodValue)
@@ -1860,6 +1884,7 @@ public sealed class AccessDecisionService(
             // комусь потрібен.
             SheetCode = sheetCode,
             Period = periodKey,
+            HasEditAssignments = state.HasAssignments,
         };
     }
 

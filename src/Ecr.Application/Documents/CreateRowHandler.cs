@@ -15,7 +15,12 @@ public sealed class CreateRowHandler(
     IAccessDecisionService access,
     IUnitOfWork uow,
     IClock clock,
-    ISheetEditGate sheetGate)
+    ISheetEditGate sheetGate,
+
+    // ⛔ EA-B: повторна перевірка передачі зрізу під блокуванням аркуша (заборона «Заповнено»/
+    // ексклюзивність між рішенням і комітом). Контейнер передає завжди; `null` — лише тестові
+    // фабрики, і тоді документ із передачами відхиляється (fail-closed).
+    IEditAssignmentStore? assignments = null)
 {
     /// <summary>Створює рядок і повертає його ключ.</summary>
     /// <exception cref="Errors.BusinessRuleException">
@@ -121,7 +126,8 @@ public sealed class CreateRowHandler(
         var key = requestedKey ?? RowKey.NewDynamic();
 
         // 3. Права — ДО транзакції й ВИНЯТКОВОГО блокування аркуша (P3).
-        await RequireCreateAllowedAsync(profile, tableInstanceId, key, ct).ConfigureAwait(false);
+        var createDecision = await RequireCreateAllowedAsync(profile, tableInstanceId, key, ct).ConfigureAwait(false);
+        var sheetCode = snapshot.Sheets.FirstOrDefault(s => s.Id == table.SheetDefId)?.Code;
 
         // ⛔ C3. Решта — стан аркуша, стеля рядків, дубль ключа, `ordinal` і сама
         // вставка — ОДНІЄЮ транзакцією під блокуванням аркуша × періоду. Доти
@@ -131,7 +137,8 @@ public sealed class CreateRowHandler(
         // брали `ordinal = Count + 1` — стелю перевищено, порядковий номер
         // задвоєно (`CreateRowRaceTests`).
         await uow.ExecuteInTransactionAsync(
-            innerCt => CreateUnderLockAsync(instance, table, tableInstanceId, key, profile, innerCt),
+            innerCt => CreateUnderLockAsync(
+                instance, table, tableInstanceId, key, profile, createDecision.AssignmentsPresent, sheetCode, innerCt),
             ct).ConfigureAwait(false);
 
         return key;
@@ -166,7 +173,7 @@ public sealed class CreateRowHandler(
     /// в шаблоні (<c>RowIsReadOnly</c>) — з незмінної версії шаблону.
     /// </para>
     /// </remarks>
-    private async Task RequireCreateAllowedAsync(
+    private async Task<EditDecision> RequireCreateAllowedAsync(
         AccessProfile profile, long tableInstanceId, RowKey key, CancellationToken ct)
     {
         var decisions = await access
@@ -192,6 +199,8 @@ public sealed class CreateRowHandler(
                     ["reason"] = decision.Reason.ToString(),
                 });
         }
+
+        return decision;
     }
 
     /// <summary>
@@ -209,7 +218,7 @@ public sealed class CreateRowHandler(
     /// </remarks>
     private async Task CreateUnderLockAsync(
         Ports.TableInstanceRef instance, TableDef table, long tableInstanceId, RowKey key,
-        AccessProfile profile, CancellationToken ct)
+        AccessProfile profile, bool assignmentsPresent, string? sheetCode, CancellationToken ct)
     {
         // ⛔ L6-02: структура документа — першою, до блокування аркуша.
         DocumentStructure.EnsureUnchanged(
@@ -246,6 +255,12 @@ public sealed class CreateRowHandler(
                     ["reason"] = denied.ToString(),
                 });
         }
+
+        // ⛔ EA-B (P2-R4): передача зрізу повторно — під блокуванням аркуша. «Заповнено»,
+        // «Валідовано», строк чи ексклюзивність чужої передачі, що з'явилися між рішенням і
+        // коммітом, відхиляють створення рядка тією ж відмовою, що й служба доступу.
+        await EnsureAssignmentsHoldAsync(instance, table, profile, assignmentsPresent, sheetCode, ct)
+            .ConfigureAwait(false);
 
         var existing = await rowStore.GetRowIdsAsync(tableInstanceId, PeriodKeyOf(instance), ct).ConfigureAwait(false);
 
@@ -295,6 +310,51 @@ public sealed class CreateRowHandler(
             .ConfigureAwait(false);
 
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+    }
+
+    private async Task EnsureAssignmentsHoldAsync(
+        Ports.TableInstanceRef instance, TableDef table, AccessProfile profile, bool assignmentsPresent,
+        string? sheetCode, CancellationToken ct)
+    {
+        if (!assignmentsPresent || profile.IsSimulation || profile.IsIntegrationWriter)
+        {
+            return;
+        }
+
+        if (assignments is null)
+        {
+            throw new InvalidOperationException(
+                "Передачі зрізу діють, але сховища для повторної перевірки під блокуванням немає.");
+        }
+
+        var gate = await assignments
+            .ReadFactsForGateAsync(instance.DocumentId, profile.UserId, ct)
+            .ConfigureAwait(false);
+
+        // Рівень рядка: без колонки й місяця, без підйому (D5) — лише заборони передачі.
+        var facts = EditAssignmentGuard.Evaluate(
+            profile.UserId,
+            gate.OwnerUserId,
+            isIntegrationWriter: false,
+            gate.Facts,
+            new EditSliceFacts(
+                sheetCode, table.Code, PeriodKeyOf(instance), ColumnIsMonth: false, ColumnMonthNumber: null,
+                IsRowLevel: true),
+            clock.UtcNow);
+
+        if (facts.Lock == EditDenyReason.None)
+        {
+            return;
+        }
+
+        throw new Errors.AccessDeniedException(
+            "ECR-ACCS-0403",
+            $"Рядок у цю таблицю додати не можна: {facts.Lock}.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-ACCS-0403.addRowDenied",
+                ["reason"] = facts.Lock.ToString(),
+            });
     }
 
     // Період екземпляра таблиці зберігається разом із ним; на Етапі 1 його
