@@ -2386,6 +2386,514 @@ export interface paths {
         };
         trace?: never;
     };
+    "/api/v1/documents/{documentId}/edit-assignments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Передачі документа (для автора й менеджера проєкту). */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    documentId: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["EditAssignmentListDto"];
+                        "text/json": components["schemas"]["EditAssignmentListDto"];
+                        "text/plain": components["schemas"]["EditAssignmentListDto"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        /**
+         * Створює або змінює передачу зрізу (upsert за зрізом; повтор ідемпотентний).
+         * @description `422` — вихід за власні права, виконавець без доступу до документа, некоректний зріз;
+         *     `409` — застаріла `baseVersion`.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    documentId: number;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["UpsertEditAssignmentRequest"];
+                    "application/json": components["schemas"]["UpsertEditAssignmentRequest"];
+                    "text/json": components["schemas"]["UpsertEditAssignmentRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["EditAssignmentDto"];
+                        "text/json": components["schemas"]["EditAssignmentDto"];
+                        "text/plain": components["schemas"]["EditAssignmentDto"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/documents/{documentId}/edit-assignments/candidates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Пошук кандидатів у виконавці (≥ 2 символи, ≤ 20; без email і SID). */
+        get: {
+            parameters: {
+                query?: {
+                    q?: string;
+                };
+                header?: never;
+                path: {
+                    documentId: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["EditAssignmentCandidateDto"][];
+                        "text/json": components["schemas"]["EditAssignmentCandidateDto"][];
+                        "text/plain": components["schemas"]["EditAssignmentCandidateDto"][];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/documents/{documentId}/edit-assignments/{assignmentId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Знімає передачу. */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    documentId: number;
+                    assignmentId: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/documents/{documentId}/edit-assignments/{assignmentId}/fill": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** «Заповнено» — лише сам виконавець; повтор — 200 без змін. */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    documentId: number;
+                    assignmentId: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["EditAssignmentDto"];
+                        "text/json": components["schemas"]["EditAssignmentDto"];
+                        "text/plain": components["schemas"]["EditAssignmentDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/documents/{documentId}/edit-assignments/{assignmentId}/return": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Повернення на доопрацювання з обов'язковою причиною (допустимо й після валідації). */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    documentId: number;
+                    assignmentId: number;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["ReturnEditAssignmentRequest"];
+                    "application/json": components["schemas"]["ReturnEditAssignmentRequest"];
+                    "text/json": components["schemas"]["ReturnEditAssignmentRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["EditAssignmentDto"];
+                        "text/json": components["schemas"]["EditAssignmentDto"];
+                        "text/plain": components["schemas"]["EditAssignmentDto"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/documents/{documentId}/edit-assignments/{assignmentId}/validate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Валідація власником: усі виконавці мають бути «Заповнено». */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    documentId: number;
+                    assignmentId: number;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["ValidateEditAssignmentRequest"];
+                    "application/json": components["schemas"]["ValidateEditAssignmentRequest"];
+                    "text/json": components["schemas"]["ValidateEditAssignmentRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["EditAssignmentDto"];
+                        "text/json": components["schemas"]["EditAssignmentDto"];
+                        "text/plain": components["schemas"]["EditAssignmentDto"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/documents/{documentId}/rows": {
         parameters: {
             query?: never;
@@ -5154,6 +5662,59 @@ export interface paths {
                         "application/json": components["schemas"]["CurrentUserDto"];
                         "text/json": components["schemas"]["CurrentUserDto"];
                         "text/plain": components["schemas"]["CurrentUserDto"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/me/edit-assignments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Мої передачі: `role=assignee` — виконати; `role=owner` — чекають моєї валідації;
+         *     без `role` — обидва списки. Лише рядки самого викликача, без імен інших виконавців. */
+        get: {
+            parameters: {
+                query?: {
+                    role?: string;
+                    documentId?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MyEditAssignmentsDto"];
+                        "text/json": components["schemas"]["MyEditAssignmentsDto"];
+                        "text/plain": components["schemas"]["MyEditAssignmentsDto"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
                     };
                 };
             };
@@ -20195,6 +20756,119 @@ export interface components {
             /** @description Опубліковані версії того самого шаблону, крім поточної, від новішої. */
             targets: components["schemas"]["TemplateVersionSummary"][];
         };
+        /** @description Кандидат у виконавці (без email і SID). */
+        EditAssignmentCandidateDto: {
+            /** @description Ім'я. */
+            displayName: string;
+            /**
+             * Format: int32
+             * @description Користувач.
+             */
+            userId: number;
+        };
+        /** @description Передача зрізу з виконавцями. */
+        EditAssignmentDto: {
+            /**
+             * Format: int32
+             * @description Набір, з якого взято склад.
+             */
+            appliedSetId: null | number;
+            /** @description Знімок назви набору. */
+            appliedSetName: null | string;
+            /** @description Ім'я делегатора. */
+            delegatedByDisplayName: string;
+            /**
+             * Format: int32
+             * @description Чиїми правами обмежено передачу.
+             */
+            delegatedByUserId: number;
+            /**
+             * Format: int64
+             * @description Ідентифікатор.
+             */
+            id: number;
+            /** @description Інші за ролями не можуть писати в зріз. */
+            isExclusive: boolean;
+            /**
+             * Format: date-time
+             * @description Коли змінено.
+             */
+            modifiedAt: string;
+            /** @description Інструкція виконавцям. */
+            note: null | string;
+            /** @description Виконавці. */
+            recipients: components["schemas"]["EditAssignmentRecipientDto"][];
+            /** @description Зріз. */
+            slice: components["schemas"]["EditAssignmentSliceDto"];
+            /** @description Похідний: `Open` | `Assigned` | `InProgress` | `Filled` | `Returned` | `Validated`. */
+            status: string;
+            /**
+             * Format: date-time
+             * @description Коли валідовано.
+             */
+            validatedAt: null | string;
+            /** @description Хто валідував. */
+            validatedByDisplayName: null | string;
+            /** @description Версія для `baseVersion`. */
+            version: string;
+        };
+        /** @description Перелік передач документа для менеджера. */
+        EditAssignmentListDto: {
+            /** @description Передачі (без аркушів, схованих від викликача). */
+            assignments: components["schemas"]["EditAssignmentDto"][];
+            /** @description Викликач може керувати (завжди `true` для 200). */
+            canManage: boolean;
+            /** @description Автор документа. */
+            ownerDisplayName: string;
+        };
+        /** @description Виконавець у передачі. */
+        EditAssignmentRecipientDto: {
+            /** @description Ім'я. */
+            displayName: string;
+            /**
+             * Format: date-time
+             * @description Коли заповнив.
+             */
+            filledAt: null | string;
+            /** @description Обліковий запис не вимкнений. */
+            isActive: boolean;
+            /**
+             * Format: int32
+             * @description Скільки разів повертали.
+             */
+            returnCount: number;
+            /** @description Причина повернення. */
+            returnReason: null | string;
+            /**
+             * Format: date-time
+             * @description Коли повернули.
+             */
+            returnedAt: null | string;
+            /** @description `Assigned` | `Filled` | `Returned`. */
+            status: string;
+            /**
+             * Format: int32
+             * @description Користувач.
+             */
+            userId: number;
+        };
+        /** @description Зріз передачі: усі селектори необов'язкові; жодного — «весь документ». */
+        EditAssignmentSliceDto: {
+            /**
+             * Format: uint8
+             * @description Місяць 1..12 для місячних колонок.
+             */
+            monthNumber: null | number;
+            /**
+             * Format: int32
+             * @description Ключ періоду `Рік*100+№`.
+             */
+            periodKey: null | number;
+            /** @description Код аркуша. */
+            sheetCode: null | string;
+            /** @description Код таблиці (потребує SheetCode). */
+            tableCode: null | string;
+        };
         /**
          * @description Причина відмови в доступі. Повертається замість `bool` (ФВ-6.8).
          * @enum {unknown}
@@ -21704,6 +22378,55 @@ export interface components {
             documentId: number;
             /** @description Задача: `GET /jobs/{jobId}` дає прогрес і підсумок. */
             jobId: string;
+        };
+        /** @description Моя задача як виконавця або очікування валідації як власника. */
+        MyEditAssignmentDto: {
+            /**
+             * Format: int64
+             * @description Передача.
+             */
+            assignmentId: number;
+            /** @description Хто передав. */
+            delegatedByDisplayName: string;
+            /**
+             * Format: int64
+             * @description Документ.
+             */
+            documentId: number;
+            /** @description Бізнес-ключ документа. */
+            documentKey: string;
+            /**
+             * Format: int32
+             * @description Скільки заповнили.
+             */
+            filledCount: number;
+            /** @description Інструкція власника. */
+            note: null | string;
+            /**
+             * Format: int32
+             * @description Скільки виконавців (без імен).
+             */
+            recipientCount: number;
+            /** @description Причина повернення (лише мені). */
+            returnReason: null | string;
+            /** @description Зріз. */
+            slice: components["schemas"]["EditAssignmentSliceDto"];
+            /** @description Мій стан виконавця (`Assigned`/`Returned`/`Filled`) або похідний стан зрізу для власника. */
+            status: string;
+            /**
+             * Format: date-time
+             * @description Коли змінився стан.
+             */
+            statusChangedAt: null | string;
+            /** @description Версія для `baseVersion`. */
+            version: string;
+        };
+        /** @description Відповідь «Мої задачі» за передачами. */
+        MyEditAssignmentsDto: {
+            /** @description Виконати: `Assigned` і `Returned`. */
+            assignedToMe: components["schemas"]["MyEditAssignmentDto"][];
+            /** @description Усі виконавці заповнили — чекає валідації мною. */
+            awaitingMyValidation: components["schemas"]["MyEditAssignmentDto"][];
         };
         /**
          * @description Транспорт каналу сповіщень. Числа зберігаються в базі — не перенумеровувати.
@@ -23771,6 +24494,15 @@ export interface components {
          * @enum {unknown}
          */
         ResourceKind: "Project" | "Sheet" | "Table" | "Column" | "Registry";
+        /** @description Тіло повернення на доопрацювання. */
+        ReturnEditAssignmentRequest: {
+            /** @description Версія передачі, яку бачив власник. */
+            baseVersion: null | string;
+            /** @description Причина 1..500. */
+            reason: string;
+            /** @description Кого повернути; порожньо — усіх «Заповнено». */
+            userIds: null | number[];
+        };
         /** @description Створена роль. */
         RoleIdResponse: {
             /**
@@ -26476,6 +27208,27 @@ export interface components {
                 [key: string]: string;
             };
         };
+        /** @description Тіло створення/зміни передачі (upsert за зрізом). */
+        UpsertEditAssignmentRequest: {
+            /**
+             * Format: int32
+             * @description Набір, з якого взято склад (знімок назви беремо на сервері).
+             */
+            appliedSetId?: null | number;
+            /** @description Обов'язкова для зміни наявної передачі. */
+            baseVersion?: null | string;
+            /**
+             * @description Закрити зріз іншим за ролями; за замовчуванням `true`.
+             * @default true
+             */
+            isExclusive: boolean;
+            /** @description Інструкція (≤ 500). */
+            note?: null | string;
+            /** @description Виконавці (1..100). */
+            recipientUserIds: number[];
+            /** @description Зріз. */
+            slice: components["schemas"]["EditAssignmentSliceDto"];
+        };
         /** @description Одне місце, що посилається на ресурс. */
         UsageItemDto: {
             /** @description Ідентифікатор залежного об'єкта — рядком, бо ключі різних таблиць різного типу. */
@@ -26573,6 +27326,11 @@ export interface components {
             receivesAlerts: boolean;
             /** @description Ім'я входу. */
             userName: string;
+        };
+        /** @description Тіло валідації. */
+        ValidateEditAssignmentRequest: {
+            /** @description Версія передачі, яку бачив власник. */
+            baseVersion: null | string;
         };
         /** @description Тіло запиту на перевірку виразу. */
         ValidateExpressionBody: {
