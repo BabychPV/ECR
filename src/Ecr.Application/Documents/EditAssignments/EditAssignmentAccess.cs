@@ -82,7 +82,7 @@ internal static class EditAssignmentAccess
 
         throw new AccessDeniedException(
             ErrorCodes.AccessDenied, "Набори виконавців доступні користувачам із правом запису.",
-            new Dictionary<string, object?> { ["messageKey"] = "err.ECR-ACCS-0403.notEditAssignmentManager" });
+            new Dictionary<string, object?> { ["messageKey"] = "err.ECR-ACCS-0403.editorSetsForbidden" });
     }
     /// <summary>Чи виняток — порушення унікального індексу бази (2601/2627) у ланцюгу внутрішніх.</summary>
     public static bool IsUniqueViolation(Exception ex)
@@ -97,6 +97,40 @@ internal static class EditAssignmentAccess
 
         return false;
     }
+    /// <summary>
+    /// Транзакція керування передачею. Вичерпане очікування блокування (<c>ECR-DOC-4091</c> від
+    /// <c>UnitOfWork</c>) перекладається в нейтральний ключ передачі: спільний текст каталогу говорить про
+    /// перенос версії шаблону, що для передач оманливо (аудит P3).
+    /// </summary>
+    public static async Task InTransactionAsync(
+        IUnitOfWork uow, Func<CancellationToken, Task> operation, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(uow);
+
+        try
+        {
+            await uow.ExecuteInTransactionAsync(operation, ct).ConfigureAwait(false);
+        }
+        catch (ConcurrencyConflictException ex) when (ex.ErrorCode == ErrorCodes.SheetBusy)
+        {
+            throw new ConcurrencyConflictException(
+                ErrorCodes.SheetBusy, "Передачу зайнято іншою дією; нічого не збережено.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-DOC-4091.editAssignmentBusy" });
+        }
+    }
+
+    /// <summary>Чи має профіль хоча б в одному проєкті Read і вище (без заборони) — для складу набору.</summary>
+    public static bool HasReadInAnyProject(AccessProfile profile)
+    {
+        ArgumentNullException.ThrowIfNull(profile);
+
+        return profile.Grants.Any(g =>
+                   g.Key.StartsWith(nameof(ResourceKind.Project) + ":", StringComparison.Ordinal)
+                   && g.Value >= GrantLevel.Read
+                   && !profile.Denies.Contains(g.Key))
+               || profile.Scoped.Keys.Any(profile.SeesDocumentsOf);
+    }
+
     /// <summary>Автентифікований користувач або 401.</summary>
     public static int RequireUser(Common.ICurrentUser currentUser)
     {

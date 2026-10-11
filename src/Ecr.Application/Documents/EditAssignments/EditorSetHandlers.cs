@@ -219,10 +219,21 @@ public sealed class EditorSetsHandler(
 
         if (ids.Count > 0)
         {
+            // Єдина відповідь для «немає / вимкнений / сам власник / без жодного Read» (аудит P2-3): інакше набір
+            // виходив би оракулом існування облікових записів з іменем у відповіді.
             var found = await users.GetUsersAsync(ids, ct).ConfigureAwait(false);
-            if (ids.Any(id => id == ownerId || !found.TryGetValue(id, out var u) || !u.IsActive))
+            foreach (var id in ids)
             {
-                throw EditAssignmentAccess.Invalid("err.ECR-REQ-0422.editorSetMemberInvalid", "Одного з виконавців не можна додати до набору.");
+                var valid = id != ownerId
+                    && found.TryGetValue(id, out var u)
+                    && u.IsActive
+                    && EditAssignmentAccess.HasReadInAnyProject(
+                        await access.BuildProfileAsync(id, ct).ConfigureAwait(false));
+
+                if (!valid)
+                {
+                    throw EditAssignmentAccess.Invalid("err.ECR-REQ-0422.editorSetMemberInvalid", "Одного з виконавців не можна додати до набору.");
+                }
             }
         }
 
@@ -303,6 +314,7 @@ public sealed class BatchEditAssignmentsHandler(
                 overwrite: true, snapshot, ct).ConfigureAwait(false));
         }
 
+        await RequireRoomAsync(documentId, prepared, ct).ConfigureAwait(false);
         return await CommitAllAsync(prepared, ct).ConfigureAwait(false);
     }
 
@@ -342,9 +354,25 @@ public sealed class BatchEditAssignmentsHandler(
                 overwrite: true, snapshot, ct).ConfigureAwait(false));
         }
 
+        await RequireRoomAsync(documentId, prepared, ct).ConfigureAwait(false);
         return await CommitAllAsync(prepared, ct).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Ліміт передач документа перевіряється для ВСІЄЇ пачки до першого запису (аудит P3): відмова на k-му зрізі
+    /// після запису 1..k-1 була б частковим застосуванням.
+    /// </summary>
+    private async Task RequireRoomAsync(long documentId, List<PreparedUpsert> prepared, CancellationToken ct)
+    {
+        var existing = (await assignments.ListByDocumentAsync(documentId, ct).ConfigureAwait(false))
+            .Select(a => a.SliceKey).ToHashSet(StringComparer.Ordinal);
+        var added = prepared.Select(p => p.Slice.Key).Distinct(StringComparer.Ordinal).Count(k => !existing.Contains(k));
+        if (existing.Count + added > EditAssignment.MaxPerDocument)
+        {
+            throw EditAssignmentAccess.Invalid(
+                "err.ECR-REQ-0422.editAssignmentTooManyAssignments", "У документі забагато передач.");
+        }
+    }
     private async Task<EditAssignmentBatchDto> CommitAllAsync(List<PreparedUpsert> prepared, CancellationToken ct)
     {
         var result = new List<EditAssignmentDto>(prepared.Count);
