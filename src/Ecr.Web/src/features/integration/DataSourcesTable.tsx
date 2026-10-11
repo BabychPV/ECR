@@ -38,6 +38,11 @@ export function DataSourcesTable(): JSX.Element {
   const simulated = session.data?.isSimulation === true;
   const canManage = canView && !simulated;
 
+  // ⛔ `Integration.EditSchedule`: сервер вимагає його й на ПЕРЕЛІК розкладів, тож без нього вкладки
+  // «Schedule» НЕМАЄ (а не вкладка з `403`). Під симуляцією перелік читається, а зміни — ні.
+  const canSchedule = can(session.data, 'Integration.EditSchedule');
+  const canEditSchedule = canSchedule && !simulated;
+
   const sources = useQuery({ queryKey: DataSourcesQueryKey, queryFn: listDataSources });
 
   // ⛔ Шухляда відкривається лише для з'єднання, яке справді є в переліку:
@@ -152,6 +157,8 @@ export function DataSourcesTable(): JSX.Element {
           source={opened}
           canView={canView}
           canManage={canManage}
+          canSchedule={canSchedule}
+          canEditSchedule={canEditSchedule}
           // Видалене з'єднання — закрита шухляда, а не застарілий `?panel=`.
           onDeleted={() => setPanel(null)}
         />

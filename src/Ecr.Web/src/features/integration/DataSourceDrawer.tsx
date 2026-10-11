@@ -81,6 +81,8 @@ export function DataSourceDrawer({
   source,
   canView,
   canManage,
+  canSchedule,
+  canEditSchedule,
   onDeleted,
 }: {
   readonly source: DataSource;
@@ -96,6 +98,20 @@ export function DataSourceDrawer({
    * а не вимкнені.
    */
   readonly canManage: boolean;
+
+  /**
+   * `Integration.EditSchedule` у профілі: вкладка «Schedule». Це право сервер вимагає й на ПЕРЕЛІК
+   * розкладів (`CollectionSchedulesController`), тож без нього вкладка лише показала б `403`, а не
+   * розклади — вкладки НЕМАЄ (так само, як сутностей і подій без `Integration.Manage`). Під
+   * симуляцією — `true`, хоча `canEditSchedule` ні.
+   */
+  readonly canSchedule: boolean;
+
+  /**
+   * `canSchedule` поза симуляцією: без нього перелік розкладів видно, а форми створення, правки
+   * й видалення НЕМАЄ — сервер відхилив би кожну (`ECR-SIM-0403`).
+   */
+  readonly canEditSchedule: boolean;
 
   /** З'єднання видалено — шухляду треба закрити. */
   readonly onDeleted: () => void;
@@ -211,7 +227,9 @@ export function DataSourceDrawer({
         <Tabs defaultValue="connection" keepMounted={false}>
           <Tabs.List>
             <Tabs.Tab value="connection">{t('sources.connection')}</Tabs.Tab>
-            <Tabs.Tab value="schedule">{t('sources.tabSchedule')}</Tabs.Tab>
+            {/* ⛔ Без `Integration.EditSchedule` вкладки НЕМАЄ: перелік розкладів сервер віддає
+                лише з цим правом, і «Schedule» без нього була б вкладкою з відмовою `403`. */}
+            {canSchedule && <Tabs.Tab value="schedule">{t('sources.tabSchedule')}</Tabs.Tab>}
             {/* ⛔ Без `Integration.Manage` вкладки НЕМАЄ: і перелік, і заведення,
                 і прив'язка вимагають саме цього права. */}
             {canView && <Tabs.Tab value="entities">{t('sources.tabEntities')}</Tabs.Tab>}
@@ -226,11 +244,13 @@ export function DataSourceDrawer({
 
           {/* ⚠ `L2`: закрита за замовчуванням, і `keepMounted={false}` означає,
               що розклади не читаються, доки вкладку не відкрили. */}
-          <Tabs.Panel value="schedule" pt="sm">
-            <Suspense fallback={<Loader size="sm" />}>
-              <DataSourceScheduleTab source={source} />
-            </Suspense>
-          </Tabs.Panel>
+          {canSchedule && (
+            <Tabs.Panel value="schedule" pt="sm">
+              <Suspense fallback={<Loader size="sm" />}>
+                <DataSourceScheduleTab source={source} readOnly={!canEditSchedule} />
+              </Suspense>
+            </Tabs.Panel>
+          )}
 
           {canView && (
             <Tabs.Panel value="entities" pt="sm">
