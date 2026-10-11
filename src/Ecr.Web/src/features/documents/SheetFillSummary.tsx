@@ -51,7 +51,7 @@ export function SheetFillSummary({ documentId, periodKey }: SheetFillSummaryProp
       {summary.total > 0 && (
         // ✎ UI-15: дрібний підпис у рядку прогресу шапки (макет `.dp-l`), не заголовок.
         <Text size="xs" c="dimmed" data-testid="sheet-fill-count">
-          {t('document.tablesFilled', { filled: summary.filled, total: summary.total })}
+          {t('document.tablesFilledInDocument', { filled: summary.filled, total: summary.total })}
         </Text>
       )}
 
