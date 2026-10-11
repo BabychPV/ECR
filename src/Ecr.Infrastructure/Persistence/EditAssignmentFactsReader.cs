@@ -66,6 +66,8 @@ internal static class EditAssignmentFactsReader
                         .Where(r => r.AssignmentId == a.Id && r.UserId == userId)
                         .Select(r => (EditAssignmentRecipientStatus?)r.Status)
                         .FirstOrDefault()))
+            // ⚠ Межа — стеля передач на документ (200) на кожен запитаний документ: легітимне не відсікається.
+            .Take(EditAssignment.MaxPerDocument * documentIds.Count)
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
@@ -110,6 +112,7 @@ internal static class EditAssignmentFactsReader
         var assignments = await db.EditAssignments
             .FromSql($"SELECT * FROM doc.EditAssignment WITH (REPEATABLEREAD, ROWLOCK) WHERE DocumentId = {documentId}")
             .AsNoTracking()
+            .Take(EditAssignment.MaxPerDocument)
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
@@ -132,8 +135,11 @@ internal static class EditAssignmentFactsReader
                   AND r.AssignmentId IN (SELECT CAST(j.[value] AS bigint) FROM OPENJSON({idsJson}) AS j)
                 """)
             .AsNoTracking()
+            .Take(EditAssignment.MaxPerDocument)
             .ToListAsync(ct)
-            .ConfigureAwait(false);        var statusById = mine.ToDictionary(r => r.AssignmentId, r => r.Status);
+            .ConfigureAwait(false);
+
+        var statusById = mine.ToDictionary(r => r.AssignmentId, r => r.Status);
 
         var ownerUserId = await db.Documents.AsNoTracking()
             .Where(d => d.Id == documentId)
