@@ -1,8 +1,9 @@
 import { lazy, Suspense, useRef, useState, type JSX } from 'react';
-import { Badge, Button, Text } from '@mantine/core';
+import { Badge, Button, Group, Text } from '@mantine/core';
 import { t } from '@/shared/i18n';
 import { useMyTasks } from './useMyTasks';
 import { activeJobCount } from './myTasks';
+import { pendingEditAssignmentCount, useMyEditAssignments } from './editAssignments';
 
 /**
  * Вхід у шухляду «My tasks» із шапки застосунку (`UI-07`, `UX-09`).
@@ -33,6 +34,11 @@ const StaleDocumentsSection = lazy(async () => ({
   default: (await import('./StaleDocumentsSection')).StaleDocumentsSection,
 }));
 
+// Передані місяці (EA-5c) - так само окремий чанк.
+const EditAssignmentsSection = lazy(async () => ({
+  default: (await import('./EditAssignmentsSection')).EditAssignmentsSection,
+}));
+
 function prefetchDrawer(): void {
   loadDrawer().catch(() => undefined);
 }
@@ -55,6 +61,10 @@ export function MyTasksLauncher(): JSX.Element {
 
   const tasks = useMyTasks();
   const active = activeJobCount(tasks.data);
+
+  // Передачі - ОКРЕМИЙ індикатор: позначка «активні фонові задачі» не міняє сенсу (DESIGN-OWNER-EDIT-GRANTS §7, M0).
+  const edit = useMyEditAssignments(opened);
+  const pendingEdits = pendingEditAssignmentCount(edit.data);
 
   const label = t('jobs.myTasks');
 
@@ -81,16 +91,32 @@ export function MyTasksLauncher(): JSX.Element {
            * ⛔ Нуль не малюється зовсім. Позначка «0» — це шум, що змушує
            * щоразу її читати, аби пересвідчитись: нічого не відбувається.
            */
-          active > 0 ? (
-            <Badge
-              size="sm"
-              circle
-              color="brand"
-              aria-label={t('jobs.myTasksActive', { n: active })}
-              data-my-tasks-active={String(active)}
-            >
-              {active}
-            </Badge>
+          active > 0 || pendingEdits > 0 ? (
+            <Group gap="xs" wrap="nowrap">
+              {active > 0 && (
+                <Badge
+                  size="sm"
+                  circle
+                  color="brand"
+                  aria-label={t('jobs.myTasksActive', { n: active })}
+                  data-my-tasks-active={String(active)}
+                >
+                  {active}
+                </Badge>
+              )}
+              {pendingEdits > 0 && (
+                <Badge
+                  size="sm"
+                  circle
+                  variant="outline"
+                  color="brand"
+                  aria-label={t('myTasks.edit.pendingBadge', { n: pendingEdits })}
+                  data-my-tasks-edits={String(pendingEdits)}
+                >
+                  {pendingEdits}
+                </Badge>
+              )}
+            </Group>
           ) : null
         }
       >
@@ -111,9 +137,14 @@ export function MyTasksLauncher(): JSX.Element {
             error={tasks.error}
             onRetry={() => void tasks.refetch()}
             staleSection={
-              <Suspense fallback={null}>
-                <StaleDocumentsSection opened={opened} />
-              </Suspense>
+              <>
+                <Suspense fallback={null}>
+                  <EditAssignmentsSection opened={opened} />
+                </Suspense>
+                <Suspense fallback={null}>
+                  <StaleDocumentsSection opened={opened} />
+                </Suspense>
+              </>
             }
           />
         </Suspense>
