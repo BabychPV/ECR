@@ -70,6 +70,7 @@ public sealed class InvisibleDocumentNotFoundTests(SqlServerFixture sql)
         yield return ("GET", id => $"/api/v1/documents/{id}/header", null);
         yield return ("GET", id => $"/api/v1/documents/{id}/validation?periodKey={period}", null);
         yield return ("GET", id => $"/api/v1/documents/{id}/calculation-results?periodKey={period}", null);
+        yield return ("GET", id => $"/api/v1/documents/{id}/calculation-run?periodKey={period}", null);
         yield return ("POST", id => $"/api/v1/documents/{id}/validate", new { periodKey = period });
         yield return ("POST", id => $"/api/v1/documents/{id}/recalculate", new { periodKey = period });
         yield return ("GET", id => $"/api/v1/documents/{id}/tables/{tableInstanceId}", null);

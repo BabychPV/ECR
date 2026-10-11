@@ -222,7 +222,7 @@ public sealed class CalculationOrchestrator(
                 .ConfigureAwait(false);
         }
 
-        profile.RecordUnmatched(UnmatchedRowsOf(rowMatches));
+        profile.RecordUnmatched(UnmatchedRowsOf(rowMatches, documentId));
         profile.RecordRejected(rejected.OrderBy(r => r.TableInstanceId).ThenBy(r => r.RowNumber));
 
         return profile;
@@ -254,7 +254,7 @@ public sealed class CalculationOrchestrator(
     /// (<c>AllRowKeys = null</c>) рядків не бачить і діагностики не дає. Номер рядка — позиція
     /// за <c>TableRow.Id</c>, з 1; значень комірок діагностика не містить.
     /// </remarks>
-    private static List<UnmatchedRow> UnmatchedRowsOf(IEnumerable<RowMatchSummary> summaries)
+    private static List<UnmatchedRow> UnmatchedRowsOf(IEnumerable<RowMatchSummary> summaries, long documentId)
     {
         var unmatched = new List<UnmatchedRow>();
         foreach (var table in summaries.GroupBy(s => s.TableInstanceId).OrderBy(g => g.Key))
@@ -270,7 +270,7 @@ public sealed class CalculationOrchestrator(
             {
                 if (!matched.Contains(all[i]))
                 {
-                    unmatched.Add(new UnmatchedRow(table.Key, i + 1, all[i]));
+                    unmatched.Add(new UnmatchedRow(table.Key, i + 1, all[i], documentId));
                 }
             }
         }

@@ -32,6 +32,7 @@ public sealed class DocumentsController(
     GetDocumentTablesHandler tables,
     GetTableStatusHandler tableStatus,
     GetCalculationResultsHandler calculationResults,
+    GetCalculationRunStatusHandler calculationRunStatus,
     ExportDocumentHandler export,
     DownloadExportHandler downloadExport,
     PreviewImportHandler previewImport,
@@ -520,6 +521,19 @@ public sealed class DocumentsController(
     public async Task<IActionResult> CalculationResults(
         long id, [FromQuery] int periodKey, CancellationToken ct)
         => Ok(await calculationResults.HandleAsync(id, periodKey, ct).ConfigureAwait(false));
+
+    /// <summary>
+    /// Стан актуального прогону документа за період: рядки без правила (D14). Право <c>Calculation.View</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Інформація, а не помилка: рядок, якому не підійшло жодне правило (напр. статус не Running), у розрахунку
+    /// не бере участі. Відповідь не містить профілю часу по модулях і чужих документів прогону.
+    /// </remarks>
+    [HttpGet("{id:long}/calculation-run")]
+    [ProducesResponseType<Ecr.Application.Calculations.Dto.CalculationRunStatusDto>(StatusCodes.Status200OK)]
+    public async Task<IActionResult> CalculationRun(
+        long id, [FromQuery] int periodKey, CancellationToken ct)
+        => Ok(await calculationRunStatus.HandleAsync(id, periodKey, ct).ConfigureAwait(false));
 
     /// <summary>Експорт у <c>.xlsx</c>. Право <c>Document.Export</c>.</summary>
     [HttpPost("{id:long}/export")]
