@@ -1,4 +1,4 @@
-using Ecr.Domain.Entities.Calculations;
+﻿using Ecr.Domain.Entities.Calculations;
 using Ecr.Application.Calculations;
 using Ecr.Application.Ports;
 using Ecr.Domain.Abstractions;
@@ -52,6 +52,37 @@ public sealed class MethodologyResolver(
     public async Task<MethodologyDescriptor?> ResolveVersionAsync(
         int methodologyId, DateOnly onDate, CancellationToken ct)
     {
+        var resolution = await ResolveBindingVersionAsync(methodologyId, onDate, ct).ConfigureAwait(false);
+
+        if (resolution.NoPublishedVersion)
+        {
+            throw NoPublishedVersion(methodologyId);
+        }
+
+        return resolution.Descriptor;
+    }
+
+    /// <summary>
+    /// Те саме, що <see cref="ResolveVersionAsync"/>, але методологію БЕЗ жодної опублікованої версії
+    /// не відмовляє, а позначає прапором — для перерахунку документа (G14).
+    /// </summary>
+    /// <param name="methodologyId">Методологія.</param>
+    /// <param name="onDate">Дата періоду.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>
+    /// Дескриптор чинної версії; <c>Descriptor = null</c> і <c>NoPublishedVersion = false</c> — ще не діє;
+    /// <c>NoPublishedVersion = true</c> — публікацій немає взагалі.
+    /// </returns>
+    /// <remarks>
+    /// ⛔ G14: одна привʼязана неопублікована методологія валила ВЕСЬ прогін (<c>ECR-CALC-0422</c>) разом
+    /// з опублікованими методологіями тієї ж таблиці — на шаблоні Land (десятки привʼязок) це робило
+    /// неможливим перерахунок, доки вручну не зніме кожну чернетку. Тепер оркестратор пропускає таку
+    /// привʼязку й називає її в повідомленні задачі (<c>jobs.recalcMethodologyUnpublished</c>), решта
+    /// рахується. Публікаційна перевірка (D-R2) лишається відмовою — там це помилка конфігурації шаблону.
+    /// </remarks>
+    public async Task<VersionResolution> ResolveBindingVersionAsync(
+        int methodologyId, DateOnly onDate, CancellationToken ct)
+    {
         var versions = await store.GetPublishedVersionsAsync(methodologyId, ct).ConfigureAwait(false);
 
         // ⛔ Правило вибору береться з домену
@@ -71,34 +102,39 @@ public sealed class MethodologyResolver(
         // методологію прив'язали до таблиці, але вона не має чим рахувати.
         if (!versions.Any(v => v.EffectiveFrom is not null))
         {
-            throw new DomainException(
-                "ECR-CALC-0422",
-                $"Methodology {methodologyId.ToString(System.Globalization.CultureInfo.InvariantCulture)} "
-                + "is bound to a table but has no published version to calculate with.",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = "err.ECR-CALC-0422.noPublishedVersion",
-                    ["methodologyId"] = methodologyId.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                });
+            return new VersionResolution(null, NoPublishedVersion: true);
         }
 
         // ⚠ F-04: версії є, але всі починаються ПІЗНІШЕ — на цю дату
         // методологія ще не діє, і цей період вона не рахує (див. remarks).
         if (version is null)
         {
-            return null;
+            return new VersionResolution(null, NoPublishedVersion: false);
         }
 
-        return new MethodologyDescriptor(
-            methodologyId,
-            version.Id,
-            version.Version,
-            version.Version,
-            version.Level,
-            version.NumericMode,
-            version.CalendarMode,
-            version.TraceLevel);
+        return new VersionResolution(
+            new MethodologyDescriptor(
+                methodologyId,
+                version.Id,
+                version.Version,
+                version.Version,
+                version.Level,
+                version.NumericMode,
+                version.CalendarMode,
+                version.TraceLevel),
+            NoPublishedVersion: false);
     }
+
+    private static DomainException NoPublishedVersion(int methodologyId)
+        => new(
+            "ECR-CALC-0422",
+            $"Methodology {methodologyId.ToString(System.Globalization.CultureInfo.InvariantCulture)} "
+            + "is bound to a table but has no published version to calculate with.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-CALC-0422.noPublishedVersion",
+                ["methodologyId"] = methodologyId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            });
 
     /// <summary>Визначає, які рядки документа обробляє методологія.</summary>
     /// <param name="methodologyVersionId">Версія методології.</param>
@@ -221,6 +257,11 @@ public sealed class MethodologyResolver(
         return new RowMatchOutcome(matched, [.. rowIds.OrderBy(r => r.Value).Select(r => r.Key)]);
     }
 }
+
+/// <summary>Результат підбору версії методології для привʼязки (G14).</summary>
+/// <param name="Descriptor">Чинна на дату версія; <c>null</c> — немає (ще не діє або не опублікована).</param>
+/// <param name="NoPublishedVersion">Опублікованих версій немає взагалі.</param>
+public sealed record VersionResolution(MethodologyDescriptor? Descriptor, bool NoPublishedVersion);
 
 /// <summary>Результат зіставлення рядків таблиці з правилами версії.</summary>
 /// <param name="Matches">Рядки, що їх закрило правило.</param>

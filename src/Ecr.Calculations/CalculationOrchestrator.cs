@@ -124,17 +124,28 @@ public sealed class CalculationOrchestrator(
 
         // 1. Версія методології — за ДАТОЮ ПЕРІОДУ, не за «поточною» (ФВ-9.3).
         var resolved = new List<ResolvedBinding>(bindings.Count);
+        var skippedUnpublished = new SortedSet<int>();
         foreach (var binding in bindings)
         {
-            var descriptor = await resolver
-                .ResolveVersionAsync(binding.MethodologyId, onDate, ct)
+            var resolution = await resolver
+                .ResolveBindingVersionAsync(binding.MethodologyId, onDate, ct)
                 .ConfigureAwait(false);
 
-            if (descriptor is not null)
+            // ⛔ G14: привʼязана методологія без опублікованої версії пропускається з попередженням,
+            // а не валить увесь прогін (раніше — ECR-CALC-0422 на весь документ).
+            if (resolution.NoPublishedVersion)
             {
-                resolved.Add(new ResolvedBinding(binding.TableInstanceId, descriptor));
+                skippedUnpublished.Add(binding.MethodologyId);
+                continue;
+            }
+
+            if (resolution.Descriptor is not null)
+            {
+                resolved.Add(new ResolvedBinding(binding.TableInstanceId, resolution.Descriptor));
             }
         }
+
+        profile.RecordSkippedUnpublished(skippedUnpublished);
 
         // 2. Пакети незалежних методологій. ⛔ Порожні залежності — не
         //    «поки немає в схемі» (`calc.MethodologyDependency` є), а інваріант:

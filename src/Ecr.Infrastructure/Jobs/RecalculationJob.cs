@@ -188,6 +188,9 @@ public sealed partial class RecalculationJob(
         var unmatchedRows = new List<UnmatchedRow>();
         var rejectedRows = new List<RejectedRow>();
 
+        // G14: методології без опублікованих версій — привʼязки пропущено, прогін не падає.
+        var skippedUnpublished = new SortedSet<int>();
+
         Domain.Entities.Calculations.CalculationRun NewRun(int? periodKey)
             => new(
                 projectId, periodKey, request.TriggeredByUserId, startedAt,
@@ -454,6 +457,7 @@ public sealed partial class RecalculationJob(
                     runProfile.Merge(profile);
                     unmatchedRows.AddRange(profile.UnmatchedRows);
                     rejectedRows.AddRange(profile.RejectedRows);
+                    skippedUnpublished.UnionWith(profile.SkippedUnpublishedMethodologies);
                 }
             }
 
@@ -521,6 +525,14 @@ public sealed partial class RecalculationJob(
             {
                 await progress
                     .ReportAsync(100, JobProgressMessageCodec.Encode(CategoryRuleRejectedEnvelope(rejectedRows)), ct)
+                    .ConfigureAwait(false);
+            }
+
+            // G14: привʼязана методологія без опублікованої версії - попередження, а не відмова.
+            if (skippedUnpublished.Count > 0)
+            {
+                await progress
+                    .ReportAsync(100, JobProgressMessageCodec.Encode(UnpublishedMethodologyEnvelope(skippedUnpublished)), ct)
                     .ConfigureAwait(false);
             }
         }
@@ -1412,6 +1424,26 @@ public sealed partial class RecalculationJob(
             {
                 ["count"] = rejected.Count.ToString(CultureInfo.InvariantCulture),
                 ["rows"] = rejected.Count > NoMatchingRuleRowsShown ? shown + ", …" : shown,
+            });
+    }
+
+    /// <summary>
+    /// Конверт «привʼязані методології без опублікованих версій пропущено» (<c>jobs.recalcMethodologyUnpublished</c>,
+    /// G14): кількість і перші ідентифікатори методологій.
+    /// </summary>
+    /// <param name="methodologyIds">Пропущені методології за весь прогін.</param>
+    private static JobProgressMessageEnvelope UnpublishedMethodologyEnvelope(SortedSet<int> methodologyIds)
+    {
+        var shown = string.Join(
+            ", ",
+            methodologyIds.Take(NoMatchingRuleRowsShown).Select(id => id.ToString(CultureInfo.InvariantCulture)));
+
+        return new JobProgressMessageEnvelope(
+            "jobs.recalcMethodologyUnpublished",
+            new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["count"] = methodologyIds.Count.ToString(CultureInfo.InvariantCulture),
+                ["methodologies"] = methodologyIds.Count > NoMatchingRuleRowsShown ? shown + ", …" : shown,
             });
     }
 

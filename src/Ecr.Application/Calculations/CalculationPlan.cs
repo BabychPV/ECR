@@ -119,6 +119,7 @@ public sealed class ModuleProfile
     private readonly Dictionary<string, ModuleStat> _stats = new(StringComparer.Ordinal);
     private readonly List<UnmatchedRow> _unmatched = [];
     private readonly List<RejectedRow> _rejected = [];
+    private readonly List<int> _skippedUnpublished = [];
 
     /// <summary>Записує виконання одного модуля.</summary>
     /// <param name="moduleCode">Код модуля.</param>
@@ -154,6 +155,7 @@ public sealed class ModuleProfile
 
         _unmatched.AddRange(other._unmatched);
         _rejected.AddRange(other._rejected);
+        RecordSkippedUnpublished(other._skippedUnpublished);
 
         foreach (var stat in other._stats.Values)
         {
@@ -187,6 +189,28 @@ public sealed class ModuleProfile
         ArgumentNullException.ThrowIfNull(rows);
 
         _unmatched.AddRange(rows);
+    }
+
+    /// <summary>
+    /// Методології, привʼязки яких пропущено, бо жодної версії не опубліковано (G14). Сортовано, без дублікатів.
+    /// </summary>
+    public IReadOnlyList<int> SkippedUnpublishedMethodologies => _skippedUnpublished;
+
+    /// <summary>Записує методології без опублікованих версій, пропущені в прогоні.</summary>
+    /// <param name="methodologyIds">Ідентифікатори методологій.</param>
+    public void RecordSkippedUnpublished(IEnumerable<int> methodologyIds)
+    {
+        ArgumentNullException.ThrowIfNull(methodologyIds);
+
+        foreach (var id in methodologyIds)
+        {
+            if (!_skippedUnpublished.Contains(id))
+            {
+                _skippedUnpublished.Add(id);
+            }
+        }
+
+        _skippedUnpublished.Sort();
     }
 
     /// <summary>Рядки, яким правило категорії версії не дало ключа категорії (L2-6).</summary>
