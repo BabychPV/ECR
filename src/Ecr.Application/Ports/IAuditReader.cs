@@ -37,6 +37,11 @@ namespace Ecr.Application.Ports;
 /// Підпис фіксованого рядка (<c>cfg.RowDef.LabelL10n</c>) за ключем рядка; <c>null</c> — рядок динамічний
 /// або визначення вже немає. Лише структура, значень комірок тут немає.
 /// </param>
+/// <param name="FromArchive">
+/// НФ-8.9.6 / D-247: рядок прочитано з архіву аудиту (<c>arc.AuditCellChange</c>, партиція перенесена
+/// <c>arc.usp_ArchiveAudit</c>), а не з гарячої <c>aud.CellChange</c>. Лише позначка джерела: значення, автор і
+/// межі читання ті самі, що в гарячого рядка.
+/// </param>
 public sealed record CellChangeView(
     DateTime ChangedAt,
     int PeriodKey,
@@ -59,7 +64,8 @@ public sealed record CellChangeView(
     Ecr.Domain.ValueObjects.LocalizedText? SheetNameL10n = null,
     string? TableCode = null,
     Ecr.Domain.ValueObjects.LocalizedText? TableNameL10n = null,
-    Ecr.Domain.ValueObjects.LocalizedText? RowLabelL10n = null);
+    Ecr.Domain.ValueObjects.LocalizedText? RowLabelL10n = null,
+    bool FromArchive = false);
 
 /// <summary>Підсумок журналу змін комірок за вікном (UI-38, C2) — лише те, що читач бачить.</summary>
 /// <param name="Total">Усього змін у вікні й за фільтром.</param>
@@ -241,6 +247,13 @@ public interface IAuditReader
     /// **обов'язкове**: <c>aud.CellChange</c> партиційована за <c>ChangedAt</c>,
     /// і запит без меж пішов би по всіх партиціях, включно з архівними. Місяць
     /// зміни і звітний період — різні осі: правка за січень може статися в березні.
+    ///
+    /// ⛔ НФ-8.9.6 / D-247: читач бачить і ГАРЯЧИЙ журнал (<c>aud.CellChange</c>), і АРХІВ
+    /// (<c>arc.AuditCellChange</c>, партиції, перенесені <c>arc.usp_ArchiveAudit</c>): зміни, які вікно
+    /// захоплює з обох таблиць, йдуть ОДНІЄЮ видачею за ключем <c>(ChangedAt, Id)</c> (Id в архіві ті самі, що були
+    /// в гарячій таблиці, — SWITCH їх зберігає), тож курсор не помічає межі «гаряче/архів». Усі звуження фільтра,
+    /// включно з <see cref="CellChangeFilter.VisibleColumnIds"/>, застосовуються до обох таблиць ОДНИМ текстом
+    /// умови: архів не може бути слабшим за гарячий журнал. Рядок з архіву несе <see cref="CellChangeView.FromArchive"/>.
     /// </remarks>
     /// <param name="filter">Вікно й звуження журналу.</param>
     /// <param name="page">Курсорна пагінація.</param>
@@ -254,6 +267,9 @@ public interface IAuditReader
     /// <remarks>
     /// ⚠ Сирі лічильники по ВСІХ колонках вікна: відсів за межами читання (S6) робить виклик над словником
     /// колонок — читач ніколи не отримує суму з прихованих. Один прохід по вікну, без N+1.
+    ///
+    /// ⚠ НФ-8.9.6: рахується те саме, що віддає <see cref="ReadCellChangesAsync"/> — гарячий журнал плюс
+    /// архів (<c>arc.AuditCellChange</c>) у межах вікна; сума сторінки й підсумок не розходяться на межі архіву.
     /// </remarks>
     /// <param name="filter">Вікно й звуження журналу (курсор не застосовується).</param>
     /// <param name="todayStartUtc">Початок поточної доби UTC.</param>
