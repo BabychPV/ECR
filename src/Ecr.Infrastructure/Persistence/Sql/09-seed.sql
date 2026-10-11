@@ -19748,6 +19748,13 @@ GO
 -- ⚠ MERGE … WHEN NOT MATCHED: наявна база отримує пари на наступному старті (`SeedRunner`)
 -- без міграції схеми; право, зняте адміністратором з вбудованої ролі, повторний сід поверне
 -- (так само, як і решту вбудованих пар; потрібен інший набір — власна роль).
+--
+-- ✎ Видача адмін-прав — подія безпеки: знімок пар ролі ДО MERGE; у журнал (`aud.SecurityEvent`,
+-- тип `RolePermissionsGranted`) іде лише те, що додав саме він, тож повторний старт тиші не рве.
+IF OBJECT_ID(N'tempdb..#FpSysAdminRightsBefore') IS NOT NULL DROP TABLE #FpSysAdminRightsBefore;
+SELECT rp.RoleId, rp.PermissionCode INTO #FpSysAdminRightsBefore
+FROM sec.RolePermission AS rp
+JOIN sec.Role AS r ON r.Id = rp.RoleId AND r.IsBuiltIn = 1 AND r.Code = N'SystemAdministrator';
 MERGE sec.RolePermission AS t
 USING (
     SELECT r.Id AS RoleId, p.Code AS PermissionCode
@@ -19762,5 +19769,22 @@ USING (
 ) AS s
 ON t.RoleId = s.RoleId AND t.PermissionCode = s.PermissionCode
 WHEN NOT MATCHED THEN INSERT (RoleId, PermissionCode) VALUES (s.RoleId, s.PermissionCode);
+GO
+-- ✎ Одна подія безпеки на кожну видачу: роль, кількість, перелік кодів прав, джерело. Без
+-- користувачів (система: ChangedByUserId = 0, як у решти системних записів). Нових пар немає — немає й події.
+INSERT INTO aud.SecurityEvent (ChangedAt, EventType, TargetUserId, TargetRoleId, DetailsJson, ChangedByUserId, CorrelationId)
+SELECT SYSUTCDATETIME(), N'RolePermissionsGranted', NULL, r.Id,
+       CONCAT(N'{"role":"SystemAdministrator","source":"seed FP:sysadmin-rights","count":', COUNT(*),
+              N',"permissions":["',
+              STRING_AGG(CAST(rp.PermissionCode AS nvarchar(max)), N'","') WITHIN GROUP (ORDER BY rp.PermissionCode),
+              N'"]}'),
+       0, NULL
+FROM sec.Role AS r
+JOIN sec.RolePermission AS rp ON rp.RoleId = r.Id
+WHERE r.Code = N'SystemAdministrator' AND r.IsBuiltIn = 1
+  AND NOT EXISTS (SELECT 1 FROM #FpSysAdminRightsBefore AS b
+                  WHERE b.RoleId = rp.RoleId AND b.PermissionCode = rp.PermissionCode)
+GROUP BY r.Id;
+DROP TABLE #FpSysAdminRightsBefore;
 GO
 -- FP:sysadmin-rights ── кінець секції ────────────────────────────────────────

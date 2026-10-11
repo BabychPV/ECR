@@ -490,6 +490,70 @@ public sealed class SeedTests(SqlServerFixture sql)
     private static string SysAdminDangerousSql
         => string.Join(", ", SysAdminDangerous.Select(code => $"N'{code}'"));
 
+    /// <remarks>
+    /// ⛔ Видача адмін-прав роллю — подія безпеки, а не мовчазна зміна даних: рівно ОДНА подія
+    /// <c>RolePermissionsGranted</c> з роллю, кількістю й кодами прав, системним автором і без
+    /// користувачів; повторний старт нічого не додає. Мутація: прибрати <c>NOT EXISTS</c> із
+    /// секції <c>FP:sysadmin-rights</c> — друга частина (повтор) червоніє; прибрати INSERT — перша.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-6.12")]
+    public async Task Видача_адмін_прав_системному_адміністратору_пишеться_однією_подією_безпеки_без_повтору()
+    {
+        const string EventFilter =
+            "EventType = N'RolePermissionsGranted' AND DetailsJson LIKE N'%seed FP:sysadmin-rights%'";
+
+        var eventsBefore = await ScalarAsync($"SELECT COUNT(*) FROM aud.SecurityEvent WHERE {EventFilter}");
+
+        await ExecuteAsync($"""
+            DELETE rp
+            FROM sec.RolePermission AS rp
+            JOIN sec.Role AS r ON r.Id = rp.RoleId AND r.IsBuiltIn = 1
+            WHERE r.Code = N'SystemAdministrator'
+              AND rp.PermissionCode IN ({SysAdminDangerousSql})
+            """);
+
+        await using (var db = CreateContext())
+        {
+            await new SeedRunner(db).RunAsync(CancellationToken.None);
+        }
+
+        Assert.Equal(
+            eventsBefore + 1,
+            await ScalarAsync($"SELECT COUNT(*) FROM aud.SecurityEvent WHERE {EventFilter}"));
+
+        // Остання подія: роль-ціль, системний автор, без користувача-цілі.
+        Assert.Equal(1, await ScalarAsync($"""
+            SELECT COUNT(*)
+            FROM aud.SecurityEvent
+            WHERE Id = (SELECT MAX(Id) FROM aud.SecurityEvent WHERE {EventFilter})
+              AND ChangedByUserId = 0 AND TargetUserId IS NULL
+              AND TargetRoleId = (SELECT Id FROM sec.Role WHERE Code = N'SystemAdministrator' AND IsBuiltIn = 1)
+            """));
+
+        var details = await StringAsync(
+            $"SELECT TOP (1) DetailsJson FROM aud.SecurityEvent WHERE {EventFilter} ORDER BY Id DESC");
+        using var json = System.Text.Json.JsonDocument.Parse(details!);
+        Assert.Equal("SystemAdministrator", json.RootElement.GetProperty("role").GetString());
+        Assert.Equal(SysAdminDangerous.Length, json.RootElement.GetProperty("count").GetInt32());
+        Assert.Equal(
+            SysAdminDangerous.Order(StringComparer.Ordinal),
+            json.RootElement.GetProperty("permissions").EnumerateArray()
+                .Select(p => p.GetString()!).Order(StringComparer.Ordinal));
+
+        // Повторний старт: пар не додано — нової події немає.
+        await using (var db = CreateContext())
+        {
+            await new SeedRunner(db).RunAsync(CancellationToken.None);
+        }
+
+        Assert.Equal(
+            eventsBefore + 1,
+            await ScalarAsync($"SELECT COUNT(*) FROM aud.SecurityEvent WHERE {EventFilter}"));
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
