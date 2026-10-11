@@ -213,7 +213,8 @@ public sealed class DependencyExtractor(ReferenceResolver resolver, RangeExpande
                 return;
             }
 
-            foreach (var rowKey in expander.Expand(table, range.FromRowKey, range.ToRowKey, diagnostics, reference.Position))
+            foreach (var rowKey in expander.ExpandAt(
+                         table, range.FromRowKey, range.ToRowKey, found.Count, diagnostics, reference.Position))
             {
                 found.Add(new ExtractedDependency(
                     kind, resolved.TableDefId, rowKey, resolved.ColumnDefId, null, offset, found.Count));

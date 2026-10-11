@@ -90,6 +90,11 @@ public sealed class SliceEvaluationContext : IBudgetedEvaluationContext
     /// <c>cfg.FormulaDependency</c>). <c>null</c> — прогін без жодної цілі,
     /// що читає REGFIELD; рівнозначно порожньому знімку.
     /// </param>
+    /// <param name="formulaDependencies">
+    /// Граф залежностей версії, збережений при публікації (<c>cfg.FormulaDependency</c>): за ним
+    /// діапазони <c>[A:B]</c> розкриваються так, як при публікації, а не за поточним <c>Ordinal</c>
+    /// (ФВ-0.2). <c>null</c> — чернетка чи граф не збережено: діапазон за поточним порядком.
+    /// </param>
     public SliceEvaluationContext(
         TemplateVersionSnapshot snapshot,
         IReadOnlyDictionary<CellKey, ExpressionValue> values,
@@ -97,9 +102,11 @@ public sealed class SliceEvaluationContext : IBudgetedEvaluationContext
         PeriodContext period,
         UnitCatalogSnapshot units,
         IReadOnlyDictionary<int, IReadOnlyDictionary<string, long>> rowsByTable,
-        IReadOnlyDictionary<long, IReadOnlyDictionary<string, ExpressionValue>>? registryFields = null)
+        IReadOnlyDictionary<long, IReadOnlyDictionary<string, ExpressionValue>>? registryFields = null,
+        IReadOnlyList<FormulaDependency>? formulaDependencies = null)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
+        _formulaDependencies = formulaDependencies;
 
         _resolver = new ReferenceResolver(snapshot);
         _tables = snapshot.Sheets.SelectMany(s => s.Tables).ToDictionary(t => t.Id);
@@ -109,6 +116,69 @@ public sealed class SliceEvaluationContext : IBudgetedEvaluationContext
         _rowsByTable = rowsByTable ?? throw new ArgumentNullException(nameof(rowsByTable));
         _registryFields = registryFields ?? EmptyRegistryFields;
         Period = period;
+    }
+
+    /// <summary>Збережений при публікації граф залежностей версії (<c>cfg.FormulaDependency</c>).</summary>
+    private readonly IReadOnlyList<FormulaDependency>? _formulaDependencies;
+
+    private Dictionary<int, Dictionary<int, FormulaDependency>>? _edgesByFormula;
+    private readonly Dictionary<int, IReadOnlyDictionary<int, IReadOnlyList<string>>> _publishedRanges = [];
+    private FormulaDef? _formula;
+    private AstNode? _formulaRoot;
+
+    /// <summary>
+    /// Повідомляє контексту, яку формулу обчислюють: діапазони її посилань розкриваються ключами,
+    /// зафіксованими при публікації (ФВ-0.2), а не поточним <c>Ordinal</c>.
+    /// </summary>
+    /// <param name="formula">Формула; <c>null</c> — формула невідома, діапазон за поточним порядком.</param>
+    /// <param name="root">Корінь розібраного виразу цієї формули.</param>
+    public void UseFormula(FormulaDef? formula, AstNode? root)
+    {
+        _formula = formula;
+        _formulaRoot = root;
+    }
+
+    /// <summary>
+    /// Ключі діапазону за позицією посилання, як їх розкрила публікація; <c>null</c> — збереженого
+    /// пробігу немає (чернетка, граф не збережено), діапазон береться за поточним порядком.
+    /// </summary>
+    private IReadOnlyList<string>? PublishedRange(CellReferenceNode reference)
+    {
+        if (_formula is null || _formulaRoot is null || _formulaDependencies is null)
+        {
+            return null;
+        }
+
+        if (!_publishedRanges.TryGetValue(_formula.Id, out var byPosition))
+        {
+            byPosition = BuildPublishedRanges(_formula, _formulaRoot);
+            _publishedRanges[_formula.Id] = byPosition;
+        }
+
+        return byPosition.TryGetValue(reference.Position, out var keys) ? keys : null;
+    }
+
+    private Dictionary<int, IReadOnlyList<string>> BuildPublishedRanges(FormulaDef formula, AstNode root)
+    {
+        _edgesByFormula ??= _formulaDependencies!
+            .Where(d => d.SourceKind == 0 && d.FormulaDefId is not null)
+            .GroupBy(d => d.FormulaDefId!.Value)
+            .ToDictionary(g => g.Key, g => g.ToDictionary(d => d.SortOrder));
+
+        if (!_edgesByFormula.TryGetValue(formula.Id, out var edges)
+            || !_tables.TryGetValue(formula.TableDefId, out var table))
+        {
+            return new Dictionary<int, IReadOnlyList<string>>();
+        }
+
+        // ⚠ Той самий обхід, що й при публікації (`PublishChecks.Dependencies`): ті самі таблиця,
+        // рядок і колонка формули, тому `SortOrder` збігається з позицією у збереженому графі.
+        var expander = new PublishedRangeExpander(edges);
+        new DependencyExtractor(_resolver, expander).Extract(
+            root, table.Id, FormulaOutputs.RowKeyOf(table, formula), _tables,
+            diagnostics: null, formula.ColumnDefId);
+
+        return expander.ByPosition;
     }
 
     /// <inheritdoc />
@@ -139,16 +209,16 @@ public sealed class SliceEvaluationContext : IBudgetedEvaluationContext
             return [ExpressionValue.Error(ExpressionErrors.BadReference)];
         }
 
-        // ⚠ Діапазон розкривається ТУТ так само, як при публікації: у графі
-        // залежностей він уже розкритий у конкретні рядки, і читати треба ті
-        // самі.
+        // ⛔ ФВ-0.2: діапазон розкрито при публікації в конкретні ключі (`cfg.FormulaDependency`), і
+        // читати треба ТІ САМІ рядки. Розкриття за поточним `RowDef.Ordinal` давало інше число після
+        // презентаційної зміни порядку (60 → 1039). Поточний порядок — лише запасний шлях, коли
+        // збереженого пробігу немає (чернетка, граф не збережено).
         if (reference.Row is RowSelector.Range range
             && _tables.TryGetValue(resolved.TableDefId, out var table))
         {
             return
             [
-                .. _expander
-                    .Expand(table, range.FromRowKey, range.ToRowKey)
+                .. (PublishedRange(reference) ?? _expander.Expand(table, range.FromRowKey, range.ToRowKey))
                     .Select(rowKey => Value(
                         resolved.TableDefId, rowKey, resolved.ColumnDefId, reference.PeriodOffset)),
             ];

@@ -13,8 +13,27 @@ namespace Ecr.Expressions.Binding;
 /// <c>Ordinal</c>, презентаційна правка мовчки змінювала б числа — найгірший
 /// клас помилок, бо даних не зіпсовано, а результат інший.
 /// </remarks>
-public sealed class RangeExpander
+public class RangeExpander
 {
+    /// <summary>
+    /// Розкриває діапазон так, як його розкрила публікація: <paramref name="dependencyIndex"/> —
+    /// позиція першого ребра цього посилання в списку залежностей формули (<c>SortOrder</c>).
+    /// </summary>
+    /// <remarks>
+    /// За замовчуванням — той самий <see cref="Expand"/> за поточним <c>Ordinal</c>. Рантайм
+    /// (<c>PublishedRangeExpander</c>) перевизначає метод і бере ключі, зафіксовані при
+    /// <c>Publish</c> у <c>cfg.FormulaDependency</c>: презентаційна зміна <c>Ordinal</c> після
+    /// публікації не має міняти склад діапазону.
+    /// </remarks>
+    public virtual IReadOnlyList<string> ExpandAt(
+        TableDef table,
+        string fromRowKey,
+        string toRowKey,
+        int dependencyIndex,
+        List<ExpressionDiagnostic>? diagnostics = null,
+        int position = 0)
+        => Expand(table, fromRowKey, toRowKey, diagnostics, position);
+
     /// <summary>Розкриває діапазон у список ключів.</summary>
     /// <param name="table">Таблиця, в якій живуть рядки.</param>
     /// <param name="fromRowKey">Початок діапазону.</param>
