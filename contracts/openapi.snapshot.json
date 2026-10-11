@@ -13412,6 +13412,148 @@
         ],
         "type": "object"
       },
+      "SaveColumnBatchItem": {
+        "description": "Колонка пачки: код і ті самі налаштування, що в SaveColumnDefRequest.",
+        "properties": {
+          "code": {
+            "description": "Код колонки.",
+            "type": "string"
+          },
+          "dataType": {
+            "$ref": "#/components/schemas/CellDataType",
+            "description": "Тип даних; незмінний після створення."
+          },
+          "defaultValue": {
+            "description": "Значення за замовчуванням порожньої комірки.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "displayFormat": {
+            "description": "Формат відображення; презентаційне поле.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "headerL10n": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Заголовок колонки мовами каталогу.",
+            "type": "object"
+          },
+          "isHidden": {
+            "description": "Видимість колонки; презентаційне поле.",
+            "type": "boolean"
+          },
+          "isMonthColumn": {
+            "description": "Колонка прив'язана до календарного місяця; вимагає `MonthNumber`.",
+            "type": [
+              "null",
+              "boolean"
+            ]
+          },
+          "isReadOnly": {
+            "description": "Заборона ручного вводу.",
+            "type": "boolean"
+          },
+          "isRequired": {
+            "description": "Обов'язковість заповнення.",
+            "type": "boolean"
+          },
+          "lookupFilter": {
+            "description": "Звуження списку довідника.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "lookupRegistryDefId": {
+            "description": "Довідник; лише для колонки типу `Lookup`.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "monthNumber": {
+            "description": "Місяць 1..12; лише разом з `IsMonthColumn`.",
+            "format": "uint8",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "ordinal": {
+            "description": "`null` — нова колонка стає останньою за порядком.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "precision": {
+            "description": "Точність для `Decimal`.",
+            "format": "uint8",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "scale": {
+            "description": "Масштаб для `Decimal`.",
+            "format": "uint8",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "styleId": {
+            "description": "Стиль показу; презентаційне поле.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "unitId": {
+            "description": "Одиниця значень колонки (ФВ-16.1); не для типу `Unit`.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "widthPx": {
+            "description": "Типова ширина, px, 40..800; `null` — типова за типом.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          }
+        },
+        "required": [
+          "code",
+          "headerL10n",
+          "ordinal",
+          "dataType",
+          "isRequired",
+          "isReadOnly",
+          "isHidden",
+          "precision",
+          "scale",
+          "defaultValue",
+          "displayFormat",
+          "styleId",
+          "lookupRegistryDefId",
+          "lookupFilter",
+          "unitId"
+        ],
+        "type": "object"
+      },
       "SaveColumnDefRequest": {
         "description": "Налаштування колонки таблиці чернетки (`W5.2`).",
         "properties": {
@@ -13546,6 +13688,22 @@
           "lookupRegistryDefId",
           "lookupFilter",
           "unitId"
+        ],
+        "type": "object"
+      },
+      "SaveColumnsBatchRequest": {
+        "description": "Тіло пакетного запису колонок таблиці (`PUT …/tables/{tableId}/columns`, G13).",
+        "properties": {
+          "columns": {
+            "description": "Колонки пачки; не більше 500; коди різні.",
+            "items": {
+              "$ref": "#/components/schemas/SaveColumnBatchItem"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "columns"
         ],
         "type": "object"
       },
@@ -42033,6 +42191,151 @@
           }
         },
         "summary": "Записує формулу колонки чи рядка чернетки (`W5.3`). Право `Template.Edit`.",
+        "tags": [
+          "TemplateVersions"
+        ]
+      }
+    },
+    "/api/v1/template-versions/{id}/tables/{tableId}/columns": {
+      "put": {
+        "description": "⛔ G13 (Land): по одній колонці 5000 колонок шаблону писалися годинами — кожен `PUT` читає всю\nструктуру версії. Тут вона читається раз; перевірки ті самі, що в одиночному `PUT`, і йдуть ДО запису:\nпачка застосовується цілком або не змінює нічого. Створення чи зміна — за кодом, як в одиночному записі.\nВідповідь — колонки в порядку запиту.",
+        "parameters": [
+          {
+            "description": "Версія-чернетка.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Таблиця, якій належать колонки.",
+            "in": "path",
+            "name": "tableId",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveColumnsBatchRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveColumnsBatchRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveColumnsBatchRequest"
+              }
+            }
+          },
+          "description": "Токен скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ColumnDefDto"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ColumnDefDto"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ColumnDefDto"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Записує пачку колонок таблиці чернетки одним запитом і однією транзакцією. Право `Template.Edit`.",
         "tags": [
           "TemplateVersions"
         ]

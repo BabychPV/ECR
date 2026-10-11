@@ -16583,6 +16583,95 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/template-versions/{id}/tables/{tableId}/columns": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Записує пачку колонок таблиці чернетки одним запитом і однією транзакцією. Право `Template.Edit`.
+         * @description ⛔ G13 (Land): по одній колонці 5000 колонок шаблону писалися годинами — кожен `PUT` читає всю
+         *     структуру версії. Тут вона читається раз; перевірки ті самі, що в одиночному `PUT`, і йдуть ДО запису:
+         *     пачка застосовується цілком або не змінює нічого. Створення чи зміна — за кодом, як в одиночному записі.
+         *     Відповідь — колонки в порядку запиту.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Версія-чернетка. */
+                    id: number;
+                    /** @description Таблиця, якій належать колонки. */
+                    tableId: number;
+                };
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["SaveColumnsBatchRequest"];
+                    "application/json": components["schemas"]["SaveColumnsBatchRequest"];
+                    "text/json": components["schemas"]["SaveColumnsBatchRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ColumnDefDto"][];
+                        "text/json": components["schemas"]["ColumnDefDto"][];
+                        "text/plain": components["schemas"]["ColumnDefDto"][];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/template-versions/{id}/tables/{tableId}/columns/{code}": {
         parameters: {
             query?: never;
@@ -25425,6 +25514,71 @@ export interface components {
              *     не збігається з жодним рядком, і прив'язка мовчки не спрацьовувала б. */
             matchJson: string;
         };
+        /** @description Колонка пачки: код і ті самі налаштування, що в SaveColumnDefRequest. */
+        SaveColumnBatchItem: {
+            /** @description Код колонки. */
+            code: string;
+            /** @description Тип даних; незмінний після створення. */
+            dataType: components["schemas"]["CellDataType"];
+            /** @description Значення за замовчуванням порожньої комірки. */
+            defaultValue: null | string;
+            /** @description Формат відображення; презентаційне поле. */
+            displayFormat: null | string;
+            /** @description Заголовок колонки мовами каталогу. */
+            headerL10n: {
+                [key: string]: string;
+            };
+            /** @description Видимість колонки; презентаційне поле. */
+            isHidden: boolean;
+            /** @description Колонка прив'язана до календарного місяця; вимагає `MonthNumber`. */
+            isMonthColumn?: null | boolean;
+            /** @description Заборона ручного вводу. */
+            isReadOnly: boolean;
+            /** @description Обов'язковість заповнення. */
+            isRequired: boolean;
+            /** @description Звуження списку довідника. */
+            lookupFilter: null | string;
+            /**
+             * Format: int32
+             * @description Довідник; лише для колонки типу `Lookup`.
+             */
+            lookupRegistryDefId: null | number;
+            /**
+             * Format: uint8
+             * @description Місяць 1..12; лише разом з `IsMonthColumn`.
+             */
+            monthNumber?: null | number;
+            /**
+             * Format: int32
+             * @description `null` — нова колонка стає останньою за порядком.
+             */
+            ordinal: null | number;
+            /**
+             * Format: uint8
+             * @description Точність для `Decimal`.
+             */
+            precision: null | number;
+            /**
+             * Format: uint8
+             * @description Масштаб для `Decimal`.
+             */
+            scale: null | number;
+            /**
+             * Format: int32
+             * @description Стиль показу; презентаційне поле.
+             */
+            styleId: null | number;
+            /**
+             * Format: int32
+             * @description Одиниця значень колонки (ФВ-16.1); не для типу `Unit`.
+             */
+            unitId: null | number;
+            /**
+             * Format: int32
+             * @description Типова ширина, px, 40..800; `null` — типова за типом.
+             */
+            widthPx?: null | number;
+        };
         /** @description Налаштування колонки таблиці чернетки (`W5.2`). */
         SaveColumnDefRequest: {
             /** @description Тип даних; незмінний після створення. */
@@ -25487,6 +25641,11 @@ export interface components {
              * @description Типова ширина, px, 40..800 (D-234); `null` — типова за типом.
              */
             widthPx?: null | number;
+        };
+        /** @description Тіло пакетного запису колонок таблиці (`PUT …/tables/{tableId}/columns`, G13). */
+        SaveColumnsBatchRequest: {
+            /** @description Колонки пачки; не більше 500; коди різні. */
+            columns: components["schemas"]["SaveColumnBatchItem"][];
         };
         /** @description Тіло `PUT …/conditional-formats`. */
         SaveConditionalFormatsRequest: {
