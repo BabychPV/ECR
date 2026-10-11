@@ -177,7 +177,136 @@ public sealed class EditAssignment : Entity<long>
         }
 
         _recipients.Add(new EditAssignmentRecipient(Id, userId, assignedByUserId, utcNow));
+
+        // Новий виконавець ще не заповнив: раніше дана валідація більше не справджується.
+        ResetValidation(assignedByUserId, utcNow);
         return true;
+    }
+
+    /// <summary>Чи всі виконавці зрізу позначили «Заповнено» (і виконавці є).</summary>
+    public bool AllFilled =>
+        _recipients.Count > 0 && _recipients.TrueForAll(r => r.Status == EditAssignmentRecipientStatus.Filled);
+
+    /// <summary>Знаходить виконавця за користувачем; <c>null</c> — такого немає.</summary>
+    public EditAssignmentRecipient? FindRecipient(int userId) => _recipients.Find(r => r.UserId == userId);
+
+    /// <summary>Прибирає виконавця зі складу. Повертає <c>false</c>, якщо виконавця не було.</summary>
+    public bool RemoveRecipient(int userId, int byUserId, DateTime utcNow)
+    {
+        var recipient = FindRecipient(userId);
+        if (recipient is null)
+        {
+            return false;
+        }
+
+        _recipients.Remove(recipient);
+        Touch(byUserId, utcNow);
+        return true;
+    }
+
+    /// <summary>
+    /// Виконавець позначає «Заповнено» (<c>Assigned/Returned → Filled</c>). Повтор на <c>Filled</c> — без змін.
+    /// </summary>
+    /// <returns><c>true</c>, якщо стан змінено; <c>false</c> — виконавець уже в <c>Filled</c> (ідемпотентність).</returns>
+    /// <exception cref="InvalidOperationException">Виконавця немає в передачі.</exception>
+    public bool FillRecipient(int userId, DateTime utcNow)
+    {
+        var recipient = FindRecipient(userId)
+            ?? throw new InvalidOperationException("Користувача немає серед виконавців передачі.");
+
+        if (recipient.Status == EditAssignmentRecipientStatus.Filled)
+        {
+            return false;
+        }
+
+        recipient.MarkFilled(utcNow);
+        Touch(userId, utcNow);
+        return true;
+    }
+
+    /// <summary>
+    /// Власник валідує зріз: усі виконавці мусять бути <c>Filled</c>. Повтор на <c>Validated</c> — без змін.
+    /// </summary>
+    /// <returns><c>true</c>, якщо стан змінено.</returns>
+    /// <exception cref="InvalidOperationException">Не всі виконавці заповнили.</exception>
+    public bool Validate(int byUserId, DateTime utcNow)
+    {
+        if (ValidationStatus == EditAssignmentValidationStatus.Validated)
+        {
+            return false;
+        }
+
+        if (!AllFilled)
+        {
+            throw new InvalidOperationException("Валідувати можна лише коли всі виконавці заповнили зріз.");
+        }
+
+        ValidationStatus = EditAssignmentValidationStatus.Validated;
+        ValidatedAt = utcNow;
+        ValidatedByUserId = byUserId;
+        Touch(byUserId, utcNow);
+        return true;
+    }
+
+    /// <summary>
+    /// Власник повертає виконавця на доопрацювання (<c>Filled → Returned</c>) з причиною; валідація скидається.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">Виконавця немає або він не в стані <c>Filled</c>.</exception>
+    /// <exception cref="ArgumentException">Причина порожня чи довша за <see cref="MaxNoteLength"/>.</exception>
+    public void ReturnRecipient(int userId, int byUserId, string reason, DateTime utcNow)
+    {
+        var text = reason?.Trim();
+        if (string.IsNullOrEmpty(text) || text.Length > MaxNoteLength)
+        {
+            throw new ArgumentException($"Причина повернення — 1..{MaxNoteLength} символів.", nameof(reason));
+        }
+
+        var recipient = FindRecipient(userId)
+            ?? throw new InvalidOperationException("Користувача немає серед виконавців передачі.");
+
+        if (recipient.Status != EditAssignmentRecipientStatus.Filled)
+        {
+            throw new InvalidOperationException("Повернути можна лише виконавця зі станом «Заповнено».");
+        }
+
+        recipient.MarkReturned(byUserId, text, utcNow);
+        ResetValidation(byUserId, utcNow);
+    }
+
+    /// <summary>Змінює ексклюзивність і примітку (склад і зріз — окремо).</summary>
+    public void Reconfigure(bool isExclusive, string? note, int byUserId, DateTime utcNow)
+    {
+        IsExclusive = isExclusive;
+        Note = NormalizeNote(note);
+        Touch(byUserId, utcNow);
+    }
+
+    /// <summary>Фіксує, що склад застосовано з набору (знімок назви); <c>null</c> — склад вибрано вручну.</summary>
+    public void MarkAppliedSet(int? setId, string? setName)
+    {
+        AppliedSetId = setId;
+        AppliedSetName = setId is null ? null : setName;
+    }
+
+    /// <summary>Переприв'язує делегатора (межі прав знімаються з нього в момент зміни складу/зрізу).</summary>
+    public void Redelegate(int delegatedByUserId, DateTime utcNow)
+    {
+        DelegatedByUserId = delegatedByUserId;
+        Touch(delegatedByUserId, utcNow);
+    }
+
+    private void ResetValidation(int byUserId, DateTime utcNow)
+    {
+        ValidationStatus = EditAssignmentValidationStatus.NotValidated;
+        ValidatedAt = null;
+        ValidatedByUserId = null;
+        Touch(byUserId, utcNow);
+    }
+
+    private void Touch(int byUserId, DateTime utcNow)
+    {
+        ModifiedAt = utcNow;
+        ModifiedByUserId = byUserId;
     }
 
     private static string? NormalizeNote(string? note)
@@ -253,4 +382,23 @@ public sealed class EditAssignmentRecipient
 
     /// <summary>Мітка оптимістичної конкурентності.</summary>
     public byte[] RowVersion { get; private set; } = [];
+
+    /// <summary>Перехід у <c>Filled</c>; викликає лише <see cref="EditAssignment"/>.</summary>
+    internal void MarkFilled(DateTime utcNow)
+    {
+        Status = EditAssignmentRecipientStatus.Filled;
+        FilledAt = utcNow;
+        StatusChangedAt = utcNow;
+    }
+
+    /// <summary>Перехід у <c>Returned</c>; викликає лише <see cref="EditAssignment"/>.</summary>
+    internal void MarkReturned(int byUserId, string reason, DateTime utcNow)
+    {
+        Status = EditAssignmentRecipientStatus.Returned;
+        ReturnedAt = utcNow;
+        ReturnedByUserId = byUserId;
+        ReturnReason = reason;
+        ReturnCount++;
+        StatusChangedAt = utcNow;
+    }
 }
