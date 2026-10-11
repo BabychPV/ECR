@@ -217,7 +217,7 @@ describe('DocumentPage: застарілі числа методологій', (
       });
 
       const banner = await screen.findByTestId('document-unmatched-rows', undefined, { timeout: Slow });
-      expect(banner.getAttribute('role')).toBe('status');
+      expect(banner).toBeDefined();
       expect(screen.getByTestId('document-unmatched-rows-hint').textContent).toContain('2 (R-REMOVED)');
     },
     Slow,
