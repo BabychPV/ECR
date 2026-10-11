@@ -693,6 +693,44 @@
         ],
         "type": "object"
       },
+      "CalculationRunStatusDto": {
+        "description": "Стан актуального прогону документа за період для аркуша (D14).",
+        "properties": {
+          "finishedAt": {
+            "description": "Коли прогін завершився (UTC).",
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "runId": {
+            "description": "Актуальний прогін; `null` — документ за цей період не рахували.",
+            "format": "int64",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "unmatchedRows": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/UnmatchedRowsDto",
+                "description": "Рядки без правила; `null` — таких немає, а також для читача зі звуженою видимістю."
+              }
+            ]
+          }
+        },
+        "required": [
+          "runId",
+          "finishedAt",
+          "unmatchedRows"
+        ],
+        "type": "object"
+      },
       "CalendarMode": {
         "description": "Джерело календарних величин періоду (D-78). Різниця конвенцій змінює всі\nчисла при перерахунку в г/с і т/рік.",
         "enum": [
@@ -18118,6 +18156,53 @@
         ],
         "type": "object"
       },
+      "UnmatchedRowItemDto": {
+        "description": "Один рядок без правила (D14).",
+        "properties": {
+          "rowKey": {
+            "description": "Публічний ключ рядка.",
+            "type": "string"
+          },
+          "rowNumber": {
+            "description": "Номер рядка, з 1, у порядку створення.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "tableInstanceId": {
+            "description": "Екземпляр таблиці.",
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "tableInstanceId",
+          "rowNumber",
+          "rowKey"
+        ],
+        "type": "object"
+      },
+      "UnmatchedRowsDto": {
+        "description": "Рядки документа, яким не підійшло жодне правило розрахунку (D14).",
+        "properties": {
+          "count": {
+            "description": "Скільки рядків документа не закрило жодне правило.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "rows": {
+            "description": "До 10 рядків за зростанням таблиці й номера.",
+            "items": {
+              "$ref": "#/components/schemas/UnmatchedRowItemDto"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "count",
+          "rows"
+        ],
+        "type": "object"
+      },
       "UpdateCollectionScheduleRequest": {
         "description": "Тіло зміни розкладу.",
         "properties": {
@@ -24147,6 +24232,57 @@
           }
         },
         "summary": "Числа, які дав розрахунок методологій. Право `Calculation.View`.",
+        "tags": [
+          "Documents"
+        ]
+      }
+    },
+    "/api/v1/documents/{id}/calculation-run": {
+      "get": {
+        "description": "⚠ Інформація, а не помилка: рядок, якому не підійшло жодне правило (напр. статус не Running), у розрахунку\nне бере участі. Відповідь не містить профілю часу по модулях і чужих документів прогону.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "periodKey",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CalculationRunStatusDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CalculationRunStatusDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/CalculationRunStatusDto"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "Стан актуального прогону документа за період: рядки без правила (D14). Право `Calculation.View`.",
         "tags": [
           "Documents"
         ]

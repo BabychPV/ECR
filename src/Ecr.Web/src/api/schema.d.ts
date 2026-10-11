@@ -3523,6 +3523,52 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/documents/{id}/calculation-run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Стан актуального прогону документа за період: рядки без правила (D14). Право `Calculation.View`.
+         * @description ⚠ Інформація, а не помилка: рядок, якому не підійшло жодне правило (напр. статус не Running), у розрахунку
+         *     не бере участі. Відповідь не містить профілю часу по модулях і чужих документів прогону.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    periodKey?: number;
+                };
+                header?: never;
+                path: {
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CalculationRunStatusDto"];
+                        "text/json": components["schemas"]["CalculationRunStatusDto"];
+                        "text/plain": components["schemas"]["CalculationRunStatusDto"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/documents/{id}/compare": {
         parameters: {
             query?: never;
@@ -19442,6 +19488,20 @@ export interface components {
              */
             value: string;
         };
+        /** @description Стан актуального прогону документа за період для аркуша (D14). */
+        CalculationRunStatusDto: {
+            /**
+             * Format: date-time
+             * @description Коли прогін завершився (UTC).
+             */
+            finishedAt: null | string;
+            /**
+             * Format: int64
+             * @description Актуальний прогін; `null` — документ за цей період не рахували.
+             */
+            runId: null | number;
+            unmatchedRows: null | components["schemas"]["UnmatchedRowsDto"];
+        };
         /**
          * @description Джерело календарних величин періоду (D-78). Різниця конвенцій змінює всі
          *     числа при перерахунку в г/с і т/рік.
@@ -27608,6 +27668,31 @@ export interface components {
             pointCount: number;
             /** @description Шлях атрибута в джерелі. */
             sourcePath: string;
+        };
+        /** @description Один рядок без правила (D14). */
+        UnmatchedRowItemDto: {
+            /** @description Публічний ключ рядка. */
+            rowKey: string;
+            /**
+             * Format: int32
+             * @description Номер рядка, з 1, у порядку створення.
+             */
+            rowNumber: number;
+            /**
+             * Format: int64
+             * @description Екземпляр таблиці.
+             */
+            tableInstanceId: number;
+        };
+        /** @description Рядки документа, яким не підійшло жодне правило розрахунку (D14). */
+        UnmatchedRowsDto: {
+            /**
+             * Format: int32
+             * @description Скільки рядків документа не закрило жодне правило.
+             */
+            count: number;
+            /** @description До 10 рядків за зростанням таблиці й номера. */
+            rows: components["schemas"]["UnmatchedRowItemDto"][];
         };
         /** @description Тіло зміни розкладу. */
         UpdateCollectionScheduleRequest: {
