@@ -96,7 +96,7 @@ function Invoke-Ecr {
         }
         if ($Method -eq 'POST' -and $Path -match '^/api/v1/documents/(\d+)/migrate-version$') {
             # R16-2: документ уже на цільовій версії — сервер відмовляє 422 migrateSameVersion (і на dry-run).
-            if (@($s.SameVersionDocs) -contains [int]$Matches[1]) {
+            if ($s.ContainsKey('SameVersionDocs') -and @($s.SameVersionDocs) -contains [int]$Matches[1]) {
                 $r = New-FakeResponse 422 @{ code = 'ECR-TMPL-0422' }
                 $r.Text = '{"code":"ECR-TMPL-0422","details":{"messageKey":"err.ECR-TMPL-0422.migrateSameVersion"}}'
                 return $r
@@ -138,6 +138,9 @@ function Invoke-Ecr {
             Fields     = $fields
             Registries = $global:EcrTest.Registries
             NextId     = 50
+            # Документи, на яких migrate-version відмовляє 422 migrateSameVersion; без ключа StrictMode кидає
+            # PropertyNotFoundException на читанні $s.SameVersionDocs у Invoke-FakeEcr.
+            SameVersionDocs = @()
         }
     }
 
