@@ -66,17 +66,29 @@ internal static class EditAssignmentAccess
     /// </remarks>
     public static bool CanManage(AccessProfile profile, EditAssignmentDocumentRef document)
     {
-        ArgumentNullException.ThrowIfNull(profile);
         ArgumentNullException.ThrowIfNull(document);
 
-        if (profile.IsSimulation || document.ProjectStatus == ProjectStatus.Archived || document.IsArchiving)
+        return CanManage(
+            profile, document.ProjectId, document.CreatedByUserId,
+            document.ProjectStatus == ProjectStatus.Archived || document.IsArchiving);
+    }
+
+    /// <summary>
+    /// Та сама функція над скалярами — для картки документа (GET /documents/{id}), де посилання
+    /// <see cref="EditAssignmentDocumentRef"/> немає. ⛔ Єдине місце правила: картка й обробники не розходяться.
+    /// </summary>
+    public static bool CanManage(AccessProfile profile, int projectId, int authorUserId, bool projectReadOnly)
+    {
+        ArgumentNullException.ThrowIfNull(profile);
+
+        if (profile.IsSimulation || projectReadOnly || !profile.SeesDocumentsOf(projectId))
         {
             return false;
         }
 
-        var level = profile.LevelFor(ResourceKind.Project, document.ProjectId);
+        var level = profile.LevelFor(ResourceKind.Project, projectId);
         return level >= GrantLevel.Write
-            && (document.CreatedByUserId == profile.UserId || level >= GrantLevel.Manage);
+            && (authorUserId == profile.UserId || level >= GrantLevel.Manage);
     }
 
     /// <summary>Вимагає права керування або 403 <c>notEditAssignmentManager</c>.</summary>
