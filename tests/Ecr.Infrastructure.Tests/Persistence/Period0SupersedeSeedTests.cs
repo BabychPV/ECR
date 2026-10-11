@@ -36,8 +36,6 @@ public sealed class Period0SupersedeSeedTests(SqlServerFixture sql)
 {
     private static readonly DateTime Now = new(2026, 9, 29, 10, 0, 0, DateTimeKind.Utc);
 
-    /// <summary>Колонок в описі зрізу: <c>RowCount</c> рахує комірки.</summary>
-    private const int Columns = 4;
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
@@ -69,7 +67,7 @@ public sealed class Period0SupersedeSeedTests(SqlServerFixture sql)
 
         // До скрипта річний зріз бере і «період 0», і січень — саме це й дефект.
         var before = await BuildYearAsync(builder, db, report.Id, document.ProjectId);
-        Assert.Equal(3 * Columns, before.RowCount);
+        Assert.Equal(3, before.RowCount);
 
         var messages = await RunSeedAsync();
 
@@ -86,7 +84,7 @@ public sealed class Period0SupersedeSeedTests(SqlServerFixture sql)
             await db.CalculationResults.AsNoTracking().CountAsync(r => r.CalculationRunId == yearRun));
 
         var after = await BuildYearAsync(builder, db, report.Id, document.ProjectId);
-        Assert.Equal(1 * Columns, after.RowCount);
+        Assert.Equal(1, after.RowCount);
     }
 
     [Fact]
@@ -149,7 +147,7 @@ public sealed class Period0SupersedeSeedTests(SqlServerFixture sql)
         var builder = new ReportSnapshotBuilder(db, new TestClock(Now), new MemoryCache(new MemoryCacheOptions()));
 
         var before = await BuildYearAsync(builder, db, report.Id, document.ProjectId);
-        Assert.Equal(3 * Columns, before.RowCount);
+        Assert.Equal(3, before.RowCount);
 
         await RunSeedAsync();
 
