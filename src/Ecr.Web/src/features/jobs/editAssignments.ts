@@ -1,5 +1,6 @@
 import { useQuery, type UseQueryResult } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
+import { queryKeys } from '@/api/queryKeys';
 
 /*
  * «Передача місяця третій стороні» (EA-5c): секції «Assigned to me» і «Awaiting my validation» у «My tasks».
@@ -39,9 +40,6 @@ export interface MyEditAssignmentsView {
   readonly awaitingMyValidation: readonly MyEditAssignment[];
 }
 
-/** Ключ запиту (DESIGN §7); інвалідується будь-якою мутацією передач. */
-export const myEditAssignmentsKey = ['edit-assignments', 'mine'] as const;
-
 /** Опитування, поки шухляда закрита, не працює: лише при фокусі/навігації. Відкрита шухляда - раз на хвилину. */
 const OpenedPollMs = 60_000;
 
@@ -67,7 +65,7 @@ export function pendingEditAssignmentCount(data: MyEditAssignmentsView | undefin
 
 export function useMyEditAssignments(opened: boolean): UseQueryResult<MyEditAssignmentsView> {
   return useQuery({
-    queryKey: myEditAssignmentsKey,
+    queryKey: queryKeys.editAssignments.mine(),
     queryFn: async (): Promise<MyEditAssignmentsView> => {
       const dto = await apiFetch<Partial<MyEditAssignmentsView>>(myEditAssignmentsUrl());
 
