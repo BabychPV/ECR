@@ -95,6 +95,12 @@ function Invoke-Ecr {
             return New-FakeResponse 200 @{}
         }
         if ($Method -eq 'POST' -and $Path -match '^/api/v1/documents/(\d+)/migrate-version$') {
+            # R16-2: документ уже на цільовій версії — сервер відмовляє 422 migrateSameVersion (і на dry-run).
+            if (@($s.SameVersionDocs) -contains [int]$Matches[1]) {
+                $r = New-FakeResponse 422 @{ code = 'ECR-TMPL-0422' }
+                $r.Text = '{"code":"ECR-TMPL-0422","details":{"messageKey":"err.ECR-TMPL-0422.migrateSameVersion"}}'
+                return $r
+            }
             if ($Body.dryRun) { return New-FakeResponse 200 @{ canApply = $true; refusals = @() } }
             return New-FakeResponse 200 @{ transferredValues = 0; lostValues = 0 }
         }
@@ -235,6 +241,26 @@ Describe 'Apply-ContractHeader.ps1: міграція документів тіл
         $mig = @($global:FakeEcr.Calls | Where-Object { $_.Path -eq '/api/v1/documents/3/migrate-version' })
         $mig | Should -Not -BeNullOrEmpty
         foreach ($m in $mig) { $m.Body.targetVersionId | Should -Be 50 }
+    }
+
+    It 'R16-2: документ уже на цільовій версії (422 migrateSameVersion) — «0 змін», без помилки, інші документи йдуть далі' {
+        Initialize-FakeEcr @(
+            @{ id = 1; version = '1.0.0.0'; status = 'Published'; match = $true }
+        )
+        $global:FakeEcr.SameVersionDocs = @(3)
+        { Invoke-Header @{ MigrateDocumentId = @(3, 10) } } | Should -Not -Throw
+        $applies = @($global:FakeEcr.Calls | Where-Object { $_.Path -like '*/migrate-version' -and -not $_.Body.dryRun })
+        $applies | Should -HaveCount 1
+        $applies[0].Path | Should -Be '/api/v1/documents/10/migrate-version'
+    }
+
+    It 'R16-3: «3,10» одним рядком (powershell -File) — два документи, а не 310' {
+        Initialize-FakeEcr @(
+            @{ id = 1; version = '1.0.0.0'; status = 'Published'; match = $true }
+        )
+        Invoke-Header @{ MigrateDocumentId = '3,10' }
+        $paths = @($global:FakeEcr.Calls | Where-Object { $_.Path -like '*/migrate-version' } | ForEach-Object { $_.Path } | Select-Object -Unique)
+        $paths | Should -Be @('/api/v1/documents/3/migrate-version', '/api/v1/documents/10/migrate-version')
     }
 
     It 'невідомий -SourceVersionId — помилка' {
