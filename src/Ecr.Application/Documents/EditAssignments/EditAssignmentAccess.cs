@@ -21,7 +21,7 @@ namespace Ecr.Application.Documents.EditAssignments;
 internal static class EditAssignmentAccess
 {
     /// <summary>Ключ каталогу: документа немає або він не видимий.</summary>
-    public const string DocumentKey = "err.ECR-DOC-0404.document";
+    public const string DocumentNotFoundMessageKey = "err.ECR-DOC-0404.document";
 
     /// <summary>Автентифікований користувач або 401.</summary>
     public static int RequireUser(Common.ICurrentUser currentUser)
@@ -53,7 +53,7 @@ internal static class EditAssignmentAccess
             ErrorCodes.DocumentNotFound, $"Документ {documentId.ToString(CultureInfo.InvariantCulture)} не знайдено.",
             new Dictionary<string, object?>
             {
-                ["messageKey"] = DocumentKey,
+                ["messageKey"] = DocumentNotFoundMessageKey,
                 ["documentId"] = documentId.ToString(CultureInfo.InvariantCulture),
             });
 
