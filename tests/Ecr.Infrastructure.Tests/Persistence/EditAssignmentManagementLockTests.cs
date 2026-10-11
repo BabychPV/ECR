@@ -29,36 +29,35 @@ public sealed class EditAssignmentManagementLockTests(SqlServerFixture sql)
     [Trait(TestCategories.Stage, TestCategories.Stage6)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "EA-C")]
-    public async Task Створення_передачі_чекає_видалення_документа_а_видалений_документ_дає_false()
+    public async Task Справжнє_видалення_документа_бере_блокування_до_видалення_передач_і_чекає_створення()
     {
         var seed = await SeedAsync();
 
-        // «Видалення»: транзакція тримає UPDLOCK на рядку документа (так само бере й DocumentDeletionStore).
-        await using (var deleter = CreateContext())
-        await using (var transaction = await deleter.Database.BeginTransactionAsync())
-        {
-            _ = await deleter.Documents
-                .FromSql($"SELECT * FROM doc.Document WITH (UPDLOCK, ROWLOCK) WHERE Id = {seed.DocumentId}")
-                .Select(d => d.Id).ToListAsync();
+        // Створення передачі тримає UPDLOCK на документі (LockDocumentAsync) і ще не завершилось.
+        await using var creator = CreateContext();
+        await using var creatorTx = await creator.Database.BeginTransactionAsync();
+        Assert.True(await new EditAssignmentManagementStore(creator).LockDocumentAsync(seed.DocumentId, CancellationToken.None));
 
-            await using var creator = CreateContext();
-            await using var creatorTx = await creator.Database.BeginTransactionAsync();
-            await creator.Database.ExecuteSqlRawAsync("SET LOCK_TIMEOUT 0");
-            var ex = await Assert.ThrowsAnyAsync<Exception>(
-                () => new EditAssignmentManagementStore(creator).LockDocumentAsync(seed.DocumentId, CancellationToken.None));
-            Assert.Contains(LockTimeoutExceeded, SqlNumbers(ex));
+        // Справжнє видалення (DocumentDeletionStore) без очікування: має впертися в 1222 ДО видалення передач.
+        await using var deleter = CreateContext();
+        await using var deleterTx = await deleter.Database.BeginTransactionAsync();
+        await deleter.Database.ExecuteSqlRawAsync("SET LOCK_TIMEOUT 0");
+        var ex = await Assert.ThrowsAnyAsync<Exception>(
+            () => new DocumentDeletionStore(deleter).DeleteAsync(seed.DocumentId, CancellationToken.None));
+        Assert.Contains(LockTimeoutExceeded, SqlNumbers(ex));
 
-            await transaction.RollbackAsync();
-        }
+        // ⛔ Мутація «прибрати UPDLOCK із DocumentDeletionStore»: видалення дійшло б до передач і прибрало б їх
+        // у своїй транзакції (1222 лише на самому документі) — тут передача мусить бути ще на місці.
+        Assert.Equal(1, await deleter.EditAssignments.CountAsync(a => a.DocumentId == seed.DocumentId));
 
-        // Після завершення «видалення» створювач проходить; документа, якого немає, — false (→ 404).
+        await deleterTx.RollbackAsync();
+        await creatorTx.RollbackAsync();
+
+        // Видалений документ: створювач бачить false (→ 404), а не вставляє передачу у ніщо.
         await using var after = CreateContext();
         await using var afterTx = await after.Database.BeginTransactionAsync();
-        var store = new EditAssignmentManagementStore(after);
-        Assert.True(await store.LockDocumentAsync(seed.DocumentId, CancellationToken.None));
-        Assert.False(await store.LockDocumentAsync(long.MaxValue, CancellationToken.None));
+        Assert.False(await new EditAssignmentManagementStore(after).LockDocumentAsync(long.MaxValue, CancellationToken.None));
     }
-
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage6)]
     [Trait(TestCategories.Category, TestCategories.Integration)]

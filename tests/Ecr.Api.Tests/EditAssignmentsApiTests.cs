@@ -3,12 +3,14 @@ using System.Globalization;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Ecr.Domain.Entities.Documents;
 using Ecr.Domain.Entities.Security;
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Infrastructure.Security;
 using Ecr.TestKit;
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Xunit;
 
@@ -391,6 +393,330 @@ public sealed class EditAssignmentsApiTests(SqlServerFixture sql)
         Assert.Equal(HttpStatusCode.NoContent, del.StatusCode);
     }
 
+    // ───────────────────────── Аудит EA-C (P1/P2): приховані аркуші, IDOR, RequireManager, атомарність ─────────────────────────
+
+    /// <summary>Те, що клієнт бачить у відмові: статус, код і ключ каталогу (traceId не порівнюється).</summary>
+    private static async Task<string> ShapeAsync(HttpResponseMessage response)
+    {
+        var body = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+        var json = JsonDocument.Parse(body).RootElement;
+        string Prop(string name) => json.TryGetProperty(name, out var v) ? v.ToString() : string.Empty;
+        return $"{(int)response.StatusCode}|{Prop("errorCode")}|{Prop("messageKey")}|{Prop("documentId")}";
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Аркуш_схований_від_менеджера_дає_ту_саму_відповідь_що_й_відсутня_передача()
+    {
+        var s = await ArrangeAsync().ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+        using var owner = await SignedInAsync(app, s.Manager.UserName).ConfigureAwait(true);
+        using var hidden = await SignedInAsync(app, s.HiddenManager.UserName).ConfigureAwait(true);
+
+        var created = await JsonAsync(
+            await owner.PostAsJsonAsync(ListUri(s), CreateBody(s, s.Executor.Id)).ConfigureAwait(true),
+            HttpStatusCode.OK, app).ConfigureAwait(true);
+        var id = created.GetProperty("id").GetInt64();
+        var version = created.GetProperty("version").GetString();
+        var missing = id + 987_654;
+
+        var del = await ShapeAsync(await hidden.DeleteAsync(new Uri($"{ListUri(s)}/{id}", UriKind.Relative)).ConfigureAwait(true)).ConfigureAwait(true);
+        var delMissing = await ShapeAsync(await hidden.DeleteAsync(new Uri($"{ListUri(s)}/{missing}", UriKind.Relative)).ConfigureAwait(true)).ConfigureAwait(true);
+        Assert.Equal(delMissing, del);
+        Assert.StartsWith("404|", del, StringComparison.Ordinal);
+
+        var val = await ShapeAsync(await hidden.PostAsJsonAsync(ActionUri(s, id, "validate"), new { baseVersion = version }).ConfigureAwait(true)).ConfigureAwait(true);
+        var valMissing = await ShapeAsync(await hidden.PostAsJsonAsync(ActionUri(s, missing, "validate"), new { baseVersion = version }).ConfigureAwait(true)).ConfigureAwait(true);
+        Assert.Equal(valMissing, val);
+
+        var ret = await ShapeAsync(await hidden.PostAsJsonAsync(ActionUri(s, id, "return"), new { reason = "x", baseVersion = version }).ConfigureAwait(true)).ConfigureAwait(true);
+        var retMissing = await ShapeAsync(await hidden.PostAsJsonAsync(ActionUri(s, missing, "return"), new { reason = "x", baseVersion = version }).ConfigureAwait(true)).ConfigureAwait(true);
+        Assert.Equal(retMissing, ret);
+
+        // Copy: зріз-джерело схований ≡ зрізу-джерела немає.
+        var copyHidden = await ShapeAsync(await hidden.PostAsJsonAsync(
+            new Uri($"{ListUri(s)}/copy", UriKind.Relative),
+            new
+            {
+                fromSlice = new { sheetCode = s.SheetCode },
+                toSlices = new[] { new { sheetCode = s.SheetCode, periodKey = (int?)202602 } },
+            }).ConfigureAwait(true)).ConfigureAwait(true);
+        var copyMissing = await ShapeAsync(await hidden.PostAsJsonAsync(
+            new Uri($"{ListUri(s)}/copy", UriKind.Relative),
+            new
+            {
+                fromSlice = new { sheetCode = s.SheetCode, periodKey = (int?)209912 },
+                toSlices = new[] { new { sheetCode = s.SheetCode, periodKey = (int?)202602 } },
+            }).ConfigureAwait(true)).ConfigureAwait(true);
+        Assert.Equal(copyMissing, copyHidden);
+
+        // Перелік — без передачі схованого аркуша, і нічого не видалено.
+        var list = await JsonAsync(await hidden.GetAsync(ListUri(s)).ConfigureAwait(true), HttpStatusCode.OK, app).ConfigureAwait(true);
+        Assert.Empty(list.GetProperty("assignments").EnumerateArray());
+        var still = await JsonAsync(await owner.GetAsync(ListUri(s)).ConfigureAwait(true), HttpStatusCode.OK, app).ConfigureAwait(true);
+        Assert.Single(still.GetProperty("assignments").EnumerateArray());
+
+        // Передача зрізу зі схованим аркушем — 422 без назви аркуша.
+        var denied = await hidden.PostAsJsonAsync(ListUri(s), CreateBody(s, s.Executor.Id)).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, denied.StatusCode);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Передача_іншого_документа_недосяжна_через_чужий_aid_а_відповідь_та_сама_що_й_для_відсутньої()
+    {
+        var s = await ArrangeAsync().ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+        using var owner = await SignedInAsync(app, s.Manager.UserName).ConfigureAwait(true);
+        using var exec = await SignedInAsync(app, s.Executor.UserName).ConfigureAwait(true);
+
+        var created = await JsonAsync(
+            await owner.PostAsJsonAsync(ListUri(s), CreateBody(s, s.Executor.Id)).ConfigureAwait(true),
+            HttpStatusCode.OK, app).ConfigureAwait(true);
+        var id = created.GetProperty("id").GetInt64();
+        var version = created.GetProperty("version").GetString();
+        var other = new Uri($"/api/v1/documents/{s.OtherDocumentId.ToString(CultureInfo.InvariantCulture)}/edit-assignments", UriKind.Relative);
+
+        async Task<(string Foreign, string Missing)> PairAsync(HttpClient client, string action, object? body)
+        {
+            var foreign = new Uri($"{other}/{id}/{action}", UriKind.Relative);
+            var missing = new Uri($"{other}/{id + 987_654}/{action}", UriKind.Relative);
+            var a = await client.PostAsJsonAsync(foreign, body).ConfigureAwait(false);
+            var b = await client.PostAsJsonAsync(missing, body).ConfigureAwait(false);
+            return (await ShapeAsync(a).ConfigureAwait(false), await ShapeAsync(b).ConfigureAwait(false));
+        }
+
+        var fill = await PairAsync(exec, "fill", new { }).ConfigureAwait(true);
+        Assert.Equal(fill.Missing, fill.Foreign);
+        var validate = await PairAsync(owner, "validate", new { baseVersion = version }).ConfigureAwait(true);
+        Assert.Equal(validate.Missing, validate.Foreign);
+        var ret = await PairAsync(owner, "return", new { reason = "x", baseVersion = version }).ConfigureAwait(true);
+        Assert.Equal(ret.Missing, ret.Foreign);
+
+        var delForeign = await ShapeAsync(await owner.DeleteAsync(new Uri($"{other}/{id}", UriKind.Relative)).ConfigureAwait(true)).ConfigureAwait(true);
+        var delMissing = await ShapeAsync(await owner.DeleteAsync(new Uri($"{other}/{id + 987_654}", UriKind.Relative)).ConfigureAwait(true)).ConfigureAwait(true);
+        Assert.Equal(delMissing, delForeign);
+        Assert.StartsWith("404|", delForeign, StringComparison.Ordinal);
+
+        // Передача у своєму документі не зачеплена.
+        var list = await JsonAsync(await owner.GetAsync(ListUri(s)).ConfigureAwait(true), HttpStatusCode.OK, app).ConfigureAwait(true);
+        Assert.Single(list.GetProperty("assignments").EnumerateArray());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Кожна_дія_керування_вимагає_права_менеджера()
+    {
+        var s = await ArrangeAsync().ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+        using var owner = await SignedInAsync(app, s.Manager.UserName).ConfigureAwait(true);
+        using var writer = await SignedInAsync(app, s.Writer.UserName).ConfigureAwait(true);
+
+        var created = await JsonAsync(
+            await owner.PostAsJsonAsync(ListUri(s), CreateBody(s, s.Executor.Id)).ConfigureAwait(true),
+            HttpStatusCode.OK, app).ConfigureAwait(true);
+        var id = created.GetProperty("id").GetInt64();
+
+        var responses = new List<(string Name, HttpResponseMessage Response)>
+        {
+            ("validate", await writer.PostAsJsonAsync(ActionUri(s, id, "validate"), new { baseVersion = "x" }).ConfigureAwait(true)),
+            ("return", await writer.PostAsJsonAsync(ActionUri(s, id, "return"), new { reason = "x", baseVersion = "x" }).ConfigureAwait(true)),
+            ("delete", await writer.DeleteAsync(new Uri($"{ListUri(s)}/{id}", UriKind.Relative)).ConfigureAwait(true)),
+            ("candidates", await writer.GetAsync(new Uri($"{ListUri(s)}/candidates?q=ea", UriKind.Relative)).ConfigureAwait(true)),
+            ("apply-set", await writer.PostAsJsonAsync(
+                new Uri($"{ListUri(s)}/apply-set", UriKind.Relative),
+                new { setId = 1, slices = new[] { new { sheetCode = s.SheetCode } } }).ConfigureAwait(true)),
+            ("copy", await writer.PostAsJsonAsync(
+                new Uri($"{ListUri(s)}/copy", UriKind.Relative),
+                new { fromSlice = new { sheetCode = s.SheetCode }, toSlices = new[] { new { sheetCode = s.SheetCode, periodKey = (int?)202602 } } }).ConfigureAwait(true)),
+        };
+
+        foreach (var (name, response) in responses)
+        {
+            Assert.True(response.StatusCode == HttpStatusCode.Forbidden, $"{name}: {response.StatusCode}");
+            var key = JsonDocument.Parse(await response.Content.ReadAsStringAsync().ConfigureAwait(true))
+                .RootElement.GetProperty("messageKey").GetString();
+            Assert.Equal("err.ECR-ACCS-0403.notEditAssignmentManager", key);
+        }
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Причина_довша_за_500_дає_422_а_apply_set_з_хибним_зрізом_не_пише_нічого()
+    {
+        var s = await ArrangeAsync().ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+        using var owner = await SignedInAsync(app, s.Manager.UserName).ConfigureAwait(true);
+
+        var created = await JsonAsync(
+            await owner.PostAsJsonAsync(ListUri(s), CreateBody(s, s.Executor.Id)).ConfigureAwait(true),
+            HttpStatusCode.OK, app).ConfigureAwait(true);
+        var id = created.GetProperty("id").GetInt64();
+
+        var tooLong = await owner.PostAsJsonAsync(
+            ActionUri(s, id, "return"),
+            new { reason = new string('x', 501), baseVersion = created.GetProperty("version").GetString() }).ConfigureAwait(true);
+        var problem = await JsonAsync(tooLong, HttpStatusCode.UnprocessableEntity, app).ConfigureAwait(true);
+        Assert.Equal("err.ECR-REQ-0422.editAssignmentReasonTooLong", problem.GetProperty("messageKey").GetString());
+
+        // apply-set: перший зріз коректний, другий — невідомий аркуш; після 422 нічого нового не створено.
+        var set = await JsonAsync(
+            await owner.PostAsJsonAsync(
+                new Uri("/api/v1/me/editor-sets", UriKind.Relative),
+                new { name = "Atomic", memberUserIds = new[] { s.OtherExecutor.Id } }).ConfigureAwait(true),
+            HttpStatusCode.OK, app).ConfigureAwait(true);
+
+        var apply = await owner.PostAsJsonAsync(
+            new Uri($"{ListUri(s)}/apply-set", UriKind.Relative),
+            new
+            {
+                setId = set.GetProperty("id").GetInt32(),
+                slices = new[]
+                {
+                    new { sheetCode = s.SheetCode, periodKey = (int?)202604 },
+                    new { sheetCode = "NO_SUCH_SHEET", periodKey = (int?)202605 },
+                },
+            }).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, apply.StatusCode);
+
+        var list = await JsonAsync(await owner.GetAsync(ListUri(s)).ConfigureAwait(true), HttpStatusCode.OK, app).ConfigureAwait(true);
+        Assert.Single(list.GetProperty("assignments").EnumerateArray());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Copy_передачі_застосованої_з_набору_іншого_менеджера_проходить()
+    {
+        var s = await ArrangeAsync().ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+        using var first = await SignedInAsync(app, s.Manager.UserName).ConfigureAwait(true);
+        using var second = await SignedInAsync(app, s.Manager2.UserName).ConfigureAwait(true);
+
+        var set = await JsonAsync(
+            await first.PostAsJsonAsync(
+                new Uri("/api/v1/me/editor-sets", UriKind.Relative),
+                new { name = "Mine", memberUserIds = new[] { s.Executor.Id } }).ConfigureAwait(true),
+            HttpStatusCode.OK, app).ConfigureAwait(true);
+        await JsonAsync(
+            await first.PostAsJsonAsync(
+                new Uri($"{ListUri(s)}/apply-set", UriKind.Relative),
+                new { setId = set.GetProperty("id").GetInt32(), slices = new[] { new { sheetCode = s.SheetCode, periodKey = (int?)202601 } } })
+                .ConfigureAwait(true),
+            HttpStatusCode.OK, app).ConfigureAwait(true);
+
+        // Другий менеджер НЕ власник набору — копія все одно проходить і зберігає знімок назви.
+        var copied = await JsonAsync(
+            await second.PostAsJsonAsync(
+                new Uri($"{ListUri(s)}/copy", UriKind.Relative),
+                new
+                {
+                    fromSlice = new { sheetCode = s.SheetCode, periodKey = (int?)202601 },
+                    toSlices = new[] { new { sheetCode = s.SheetCode, periodKey = (int?)202602 } },
+                }).ConfigureAwait(true),
+            HttpStatusCode.OK, app).ConfigureAwait(true);
+        var item = Assert.Single(copied.GetProperty("assignments").EnumerateArray());
+        Assert.Equal("Mine", item.GetProperty("appliedSetName").GetString());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Набори_виконавців_лише_для_тих_хто_має_Write_а_кандидати_лише_з_Read()
+    {
+        var s = await ArrangeAsync().ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+        using var reader = await SignedInAsync(app, s.Executor.UserName).ConfigureAwait(true);
+        using var owner = await SignedInAsync(app, s.Manager.UserName).ConfigureAwait(true);
+
+        var sets = new Uri("/api/v1/me/editor-sets", UriKind.Relative);
+        Assert.Equal(HttpStatusCode.Forbidden, (await reader.GetAsync(sets).ConfigureAwait(true)).StatusCode);
+        var create = await reader.PostAsJsonAsync(sets, new { name = "x", memberUserIds = new[] { s.Stranger.Id } }).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.Forbidden, create.StatusCode);
+
+        // Кандидати: користувач без доступу до проєкту (Stranger) у відповіді не з'являється.
+        var found = await owner.GetAsync(
+            new Uri($"{ListUri(s)}/candidates?q={Uri.EscapeDataString(s.Stranger.UserName[..6])}", UriKind.Relative)).ConfigureAwait(true);
+        var body = await found.Content.ReadAsStringAsync().ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.OK, found.StatusCode);
+        Assert.DoesNotContain(s.Stranger.Id.ToString(CultureInfo.InvariantCulture), body, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Зміна_наявної_передачі_не_бере_блокування_документа_і_не_інвертується_із_записом()
+    {
+        var s = await ArrangeAsync().ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+        using var owner = await SignedInAsync(app, s.Manager.UserName).ConfigureAwait(true);
+
+        var created = await JsonAsync(
+            await owner.PostAsJsonAsync(ListUri(s), CreateBody(s, s.Executor.Id)).ConfigureAwait(true),
+            HttpStatusCode.OK, app).ConfigureAwait(true);
+        var id = created.GetProperty("id").GetInt64();
+        var version = created.GetProperty("version").GetString();
+
+        // «Запис комірки»: S на рядку передачі (REPEATABLEREAD) і лише потім U/X на документі (дотик).
+        await using var writer = new SqlConnection(sql.ConnectionString);
+        await writer.OpenAsync().ConfigureAwait(true);
+        await using var tx = (SqlTransaction)await writer.BeginTransactionAsync().ConfigureAwait(true);
+        await using (var cmd = writer.CreateCommand())
+        {
+            cmd.Transaction = tx;
+            cmd.CommandText = $"SELECT Id FROM doc.EditAssignment WITH (REPEATABLEREAD, ROWLOCK) WHERE Id = {id}";
+            await cmd.ExecuteScalarAsync().ConfigureAwait(true);
+        }
+
+        // Зміна (isExclusive) іде в тлі: вона тримає U на передачі й чекає X, але НЕ тримає документ.
+        var change = owner.PostAsJsonAsync(
+            ListUri(s), CreateBody(s, s.Executor.Id, isExclusive: false, baseVersion: version));
+        await Task.Delay(1500).ConfigureAwait(true);
+
+        // «Дотик» документа записом не чекає: якби зміна тримала U на doc.Document — тут 1222/1205.
+        await using (var touch = writer.CreateCommand())
+        {
+            touch.Transaction = tx;
+            touch.CommandText = "SET LOCK_TIMEOUT 3000; UPDATE doc.Document SET ModifiedAt = ModifiedAt "
+                + $"WHERE Id = {s.DocumentId}";
+            await touch.ExecuteNonQueryAsync().ConfigureAwait(true);
+        }
+
+        await tx.CommitAsync().ConfigureAwait(true);
+
+        var response = await change.ConfigureAwait(true);
+        var updated = await JsonAsync(response, HttpStatusCode.OK, app).ConfigureAwait(true);
+        Assert.False(updated.GetProperty("isExclusive").GetBoolean());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Створення_передачі_чекає_блокування_документа_і_віддає_409_а_не_висне()
+    {
+        var s = await ArrangeAsync().ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+        using var owner = await SignedInAsync(app, s.Manager.UserName).ConfigureAwait(true);
+
+        // «Видалення документа» тримає UPDLOCK на рядку документа (так само бере DocumentDeletionStore).
+        await using var holder = new SqlConnection(sql.ConnectionString);
+        await holder.OpenAsync().ConfigureAwait(true);
+        await using var tx = (SqlTransaction)await holder.BeginTransactionAsync().ConfigureAwait(true);
+        await using (var cmd = holder.CreateCommand())
+        {
+            cmd.Transaction = tx;
+            cmd.CommandText = $"SELECT Id FROM doc.Document WITH (UPDLOCK, ROWLOCK) WHERE Id = {s.DocumentId}";
+            await cmd.ExecuteScalarAsync().ConfigureAwait(true);
+        }
+
+        // Створення бере блокування документа (LockDocumentAsync) і через обмежене очікування віддає 409.
+        var response = await owner.PostAsJsonAsync(ListUri(s), CreateBody(s, s.Executor.Id)).ConfigureAwait(true);
+        var problem = await JsonAsync(response, HttpStatusCode.Conflict, app).ConfigureAwait(true);
+        Assert.Equal("err.ECR-DOC-4091.lockTimeout", problem.GetProperty("messageKey").GetString());
+
+        await tx.RollbackAsync().ConfigureAwait(true);
+
+        // Без видалення — створення проходить.
+        var again = await owner.PostAsJsonAsync(ListUri(s), CreateBody(s, s.Executor.Id)).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.OK, again.StatusCode);
+    }
+
     private static Uri ListUri(Scenario s)
         => new($"/api/v1/documents/{s.DocumentId.ToString(CultureInfo.InvariantCulture)}/edit-assignments", UriKind.Relative);
 
@@ -441,7 +767,7 @@ public sealed class EditAssignmentsApiTests(SqlServerFixture sql)
         var document = await builder.BuildAsync(columnCount: 2, rowCount: 1).ConfigureAwait(false);
         await using var db = builder.CreateContext();
 
-        async Task<Person> NewUserAsync(string prefix, GrantLevel? level, bool withView, bool denyColumn = false)
+        async Task<Person> NewUserAsync(string prefix, GrantLevel? level, bool withView, bool denyColumn = false, bool denySheet = false)
         {
             var userName = $"{prefix}_{Guid.NewGuid():N}"[..20];
             var user = new User(userName, userName, AuthProvider.Local);
@@ -472,6 +798,12 @@ public sealed class EditAssignmentsApiTests(SqlServerFixture sql)
                     role.Id, ResourceKind.Column, document.ColumnDefIds[1], GrantLevel.None, isDeny: true));
             }
 
+            if (denySheet)
+            {
+                db.ResourceGrants.Add(new ResourceGrant(
+                    role.Id, ResourceKind.Sheet, document.SheetDefId, GrantLevel.None, isDeny: true));
+            }
+
             await db.SaveChangesAsync().ConfigureAwait(false);
             return new Person(user.Id, userName);
         }
@@ -488,12 +820,23 @@ public sealed class EditAssignmentsApiTests(SqlServerFixture sql)
         await db.Database.ExecuteSqlInterpolatedAsync(
             $"UPDATE doc.Document SET CreatedByUserId = {author.Id} WHERE Id = {document.DocumentId}").ConfigureAwait(false);
 
-        return new Scenario(document.DocumentId, document.SheetCode, manager, writer, executor, other, stranger, author);
+        // Менеджер із забороною на аркуш (бачить документ, не бачить аркуш), другий менеджер і другий документ
+        // того самого проєкту (IDOR між документами).
+        var hidden = await NewUserAsync("eah", GrantLevel.Manage, withView: true, denySheet: true).ConfigureAwait(false);
+        var manager2 = await NewUserAsync("eam2", GrantLevel.Manage, withView: true).ConfigureAwait(false);
+
+        var otherDocument = new Document(document.ProjectId, $"OTH{Guid.NewGuid():N}"[..14], 1, new DateTime(2026, 1, 15, 10, 0, 0, DateTimeKind.Utc));
+        db.Documents.Add(otherDocument);
+        await db.SaveChangesAsync().ConfigureAwait(false);
+
+        return new Scenario(
+            document.DocumentId, document.SheetCode, manager, writer, executor, other, stranger, author,
+            hidden, manager2, otherDocument.Id);
     }
 
     private sealed record Person(int Id, string UserName);
 
     private sealed record Scenario(
         long DocumentId, string SheetCode, Person Manager, Person Writer, Person Executor, Person OtherExecutor,
-        Person Stranger, Person Author);
+        Person Stranger, Person Author, Person HiddenManager, Person Manager2, long OtherDocumentId);
 }
