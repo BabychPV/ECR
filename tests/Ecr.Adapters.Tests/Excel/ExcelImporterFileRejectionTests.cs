@@ -59,6 +59,7 @@ public sealed class ExcelImporterFileRejectionTests
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait("Finding", "F-24")]
+    [Trait("Requirement", "ФВ-4.3")]
     public async Task Прострочений_перегляд_відмовляє_з_ключем_а_не_українською_деталлю()
     {
         var previews = Substitute.For<IImportPreviewStore>();
@@ -81,6 +82,7 @@ public sealed class ExcelImporterFileRejectionTests
     /// </summary>
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-4.3")]
     public async Task Чужий_токен_перегляду_відмовляє_як_відсутній()
     {
         var plan = System.Text.Json.JsonSerializer.Serialize(
@@ -111,6 +113,7 @@ public sealed class ExcelImporterFileRejectionTests
     /// </summary>
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-4.3")]
     public async Task Перегляд_іншого_документа_не_рахується_до_черги()
     {
         var plan = System.Text.Json.JsonSerializer.Serialize(new ImportPlan(1, 202601, [], UserId: 5), PlanJson);

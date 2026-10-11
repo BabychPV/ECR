@@ -35,6 +35,7 @@ public sealed class ImportRoundTripScenarios(SqlServerFixture sql)
     [InlineData(false)]
     [Trait("Category", "Integration")]
     [Trait("Finding", "V-10")]
+    [Trait("Requirement", "ФВ-4.3")]
     public async Task Незмінена_книга_дає_нуль_змін_і_нуль_відмов_а_змінена_вхідна_комірка_застосовується(
         bool includeFormulas)
     {
