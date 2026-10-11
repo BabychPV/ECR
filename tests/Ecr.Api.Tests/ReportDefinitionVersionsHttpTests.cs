@@ -135,6 +135,36 @@ public sealed class ReportDefinitionVersionsHttpTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-10.4")]
+    public async Task Нова_версія_заводиться_чернеткою_а_повторний_номер_версії_дає_409_а_не_500()
+    {
+        using var app = new EcrApiFactory(sql);
+        using var author = await SystemHealthControllerTests.SignedInAsync(sql, app, Author).ConfigureAwait(true);
+        var (defId, _) = await CreateDefinitionAsync(app, author).ConfigureAwait(true);
+
+        // Контроль: інший номер — законна чернетка, інакше 409 нижче доводив би лише, що дія завжди відмовляє.
+        using var created = await author.PostAsJsonAsync(VersionsUrl(defId), NewVersionBody("2.0")).ConfigureAwait(true);
+        var createdBody = await created.Content.ReadAsStringAsync().ConfigureAwait(true);
+        Assert.True(created.StatusCode == HttpStatusCode.OK, $"{(int)created.StatusCode}: {createdBody}\n{app.ErrorsText}");
+        using (var json = JsonDocument.Parse(createdBody))
+        {
+            Assert.Equal("Draft", json.RootElement.GetProperty("status").GetString());
+            Assert.Equal("2.0", json.RootElement.GetProperty("version").GetString());
+        }
+
+        // Той самий номер у тому самому описі: `UQ_ReportVersion`. Без перевірки це `DbUpdateException` → 500.
+        using var duplicate = await author.PostAsJsonAsync(VersionsUrl(defId), NewVersionBody("2.0")).ConfigureAwait(true);
+
+        var refusal = await RefusalAsync(app, duplicate, HttpStatusCode.Conflict, "ECR-RPT-4091").ConfigureAwait(true);
+        Assert.Equal("err.ECR-RPT-4091.version", refusal.MessageKey);
+
+        await using var db = Db();
+        Assert.Equal(2, await db.ReportVersions.CountAsync(v => v.ReportDefId == defId).ConfigureAwait(true));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "ФВ-14.7")]
     public async Task Публікація_без_права_EditDefinition_403_і_версія_лишається_чернеткою()
     {

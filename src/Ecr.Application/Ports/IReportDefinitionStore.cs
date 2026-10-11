@@ -55,6 +55,18 @@ public interface IReportDefinitionStore
     /// <c>500</c> замість «такий звіт уже є».
     /// </remarks>
     public Task<bool> ExistsAsync(string code, CancellationToken ct);
+
+    /// <summary>Чи вже є в описі звіту версія з таким номером.</summary>
+    /// <param name="reportDefId">Опис звіту.</param>
+    /// <param name="version">Номер версії.</param>
+    /// <param name="ct">Скасування.</param>
+    /// <remarks>
+    /// Перевіряється ДО вставки з тієї самої причини, що й <see cref="ExistsAsync"/>:
+    /// <c>UQ_ReportVersion</c> відхилив би дублікат винятком провайдера, який доїхав би
+    /// клієнтові як <c>500</c> замість «такий номер версії вже є». Чернетка й опублікована
+    /// версія займають номер однаково.
+    /// </remarks>
+    public Task<bool> VersionExistsAsync(int reportDefId, string version, CancellationToken ct);
 }
 
 /// <summary>Чинна версія звіту — рівно те, що потрібно побудові зрізу.</summary>
