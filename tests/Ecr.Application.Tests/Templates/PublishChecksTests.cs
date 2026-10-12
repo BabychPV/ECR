@@ -595,6 +595,35 @@ public sealed class PublishChecksTests
             StringComparison.Ordinal);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait("Requirement", "ФВ-5.11")]
+    public void Комірочна_формула_не_знімає_обовязковість_з_усієї_колонки()
+    {
+        // Червоний до фіксу: Cell-формула однієї комірки R02 · Total приховувала 4225 для колонки
+        // цілком. Контроль нижче: формула області Column колонку справді покриває.
+        var cell = CellConsolidationRequired(FormulaScope.Cell);
+        var column = CellConsolidationRequired(FormulaScope.Column);
+
+        Assert.Contains(ExpressionErrors.RequiredNotCovered, Render(Run(cell, Units())), StringComparison.Ordinal);
+        Assert.DoesNotContain(ExpressionErrors.RequiredNotCovered, Render(Run(column, Units())), StringComparison.Ordinal);
+    }
+
+    private static TemplateVersion CellConsolidationRequired(FormulaScope scope)
+    {
+        var builder = new TemplateBuilder { TemplateVersionId = 1 };
+        var total = builder.Table(builder.Sheet("Water_Total"), "Total");
+        var target = builder.Column(total, "Jan", CellDataType.Formula, isMonthColumn: true);
+        target.SetRequired(true);
+        var row = builder.Row(total, "R02", 1);
+        builder.Row(total, "R03", 2);
+        _ = scope == FormulaScope.Cell
+            ? builder.Formula(total, "1 + 1", FormulaScope.Cell, target, row)
+            : builder.Formula(total, "1 + 1", FormulaScope.Column, target);
+
+        return builder.Version();
+    }
+
     /// <summary>
     /// Дві таблиці на різних аркушах: джерело (<c>Water_Report.Report</c>, два
     /// рядки) і консолідація (<c>Water_Total.Total</c>, комірка <c>R02·Jan</c>

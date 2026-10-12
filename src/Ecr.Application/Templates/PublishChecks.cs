@@ -1063,8 +1063,11 @@ public static class PublishChecks
         // Правило без колонки накриває таблицю цілком.
         var coversEverything = covered.Contains(null);
 
+        // ⛔ D1: колонку заповнює ЛИШЕ формула області Column. Комірочна (Cell) формула має
+        // ColumnDefId свого стовпця, але рахує одну комірку: раніше одна така формула знімала
+        // 4225 для ВСІЄЇ колонки, і решта її комірок лишалися обов'язковими без виконавця.
         var computed = table.Formulas
-            .Where(f => !f.IsDeleted)
+            .Where(f => !f.IsDeleted && f.Scope == Domain.Enums.FormulaScope.Column)
             .Select(f => f.ColumnDefId)
             .ToHashSet();
 
