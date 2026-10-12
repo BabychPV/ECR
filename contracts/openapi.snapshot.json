@@ -8436,6 +8436,16 @@
               }
             ]
           },
+          "tableRenames": {
+            "description": "Необов'язкова мапа «було → стало» кодів таблиць (і колонок) для структури, перейменованої в цільовій версії\n(напр. `T9a_03 → T9a_17a`): без неї таблиця з новим кодом — «нова», а стара — «зникла», і введені в неї\nзначення блокують перенос (`dataLoss`). Діє лише там, де відповідника за кодом немає; суперечність парі\nверсій — `422 ECR-SCHM-0422` (`renameConflict`). Права ті самі, що й у переносу.",
+            "items": {
+              "$ref": "#/components/schemas/VersionMigrationTableRename"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
           "targetVersionId": {
             "description": "Опублікована версія того самого шаблону.",
             "format": "int32",
@@ -19731,6 +19741,24 @@
         ],
         "type": "object"
       },
+      "VersionMigrationColumnRename": {
+        "description": "Перейменування колонки таблиці між версіями: «було → стало» за кодом колонки.",
+        "properties": {
+          "fromColumnCode": {
+            "description": "Код колонки у вихідній версії.",
+            "type": "string"
+          },
+          "toColumnCode": {
+            "description": "Код колонки в цільовій версії.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "fromColumnCode",
+          "toColumnCode"
+        ],
+        "type": "object"
+      },
       "VersionMigrationItem": {
         "description": "Одна відмінність між версіями, як її бачить перенос.",
         "properties": {
@@ -19787,6 +19815,41 @@
           "Safe",
           "Presentation"
         ]
+      },
+      "VersionMigrationTableRename": {
+        "description": "Перейменування таблиці між версіями: «було → стало» за кодом таблиці (і, за потреби, колонок).",
+        "properties": {
+          "columns": {
+            "description": "Перейменування колонок цієї таблиці; `null` — колонки збігаються за кодами.",
+            "items": {
+              "$ref": "#/components/schemas/VersionMigrationColumnRename"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "fromTableCode": {
+            "description": "Код таблиці у вихідній версії.",
+            "type": "string"
+          },
+          "sheetCode": {
+            "description": "Код аркуша; `null` — діє на будь-якому аркуші, де є така таблиця.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "toTableCode": {
+            "description": "Код таблиці в цільовій версії; рівний FromTableCode — лише перейменування колонок.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "fromTableCode",
+          "toTableCode"
+        ],
+        "type": "object"
       },
       "WorkflowEventDto": {
         "description": "Подія журналу переходів стану аркуша (`BE-11b`).",

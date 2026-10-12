@@ -10,7 +10,13 @@ namespace Ecr.Application.Documents.VersionMigration;
 /// Хто поставив задачу — від його імені вона й виконується (права, гранти, підпис журналу), як
 /// <see cref="ExcelImportTask"/> (F-01). <c>null</c> — завдання без автора: відмовляє <c>ECR-AUTH-0401</c>.
 /// </param>
-public sealed record MigrateDocumentVersionTask(long DocumentId, int TargetVersionId, string Mode, JobActor? Actor = null);
+/// <param name="TableRenames">
+/// Мапа «було → стало» кодів таблиць (і колонок) — із запиту; <c>null</c> — без мапи (задачі, поставлені до цього
+/// поля, десеріалізуються з <c>null</c> і ведуть себе як раніше).
+/// </param>
+public sealed record MigrateDocumentVersionTask(
+    long DocumentId, int TargetVersionId, string Mode, JobActor? Actor = null,
+    IReadOnlyList<VersionMigrationTableRename>? TableRenames = null);
 
 /// <summary>Підсумок фонового переносу.</summary>
 /// <param name="ToVersion">Цільова версія.</param>

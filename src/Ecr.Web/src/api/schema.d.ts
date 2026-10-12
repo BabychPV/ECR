@@ -23486,6 +23486,11 @@ export interface components {
             /** @description `true` — лише звіт, без змін (завжди синхронно: швидкий). */
             dryRun: boolean;
             mode: null | components["schemas"]["VersionMigrationMode"];
+            /** @description Необов'язкова мапа «було → стало» кодів таблиць (і колонок) для структури, перейменованої в цільовій версії
+             *     (напр. `T9a_03 → T9a_17a`): без неї таблиця з новим кодом — «нова», а стара — «зникла», і введені в неї
+             *     значення блокують перенос (`dataLoss`). Діє лише там, де відповідника за кодом немає; суперечність парі
+             *     версій — `422 ECR-SCHM-0422` (`renameConflict`). Права ті самі, що й у переносу. */
+            tableRenames?: null | components["schemas"]["VersionMigrationTableRename"][];
             /**
              * Format: int32
              * @description Опублікована версія того самого шаблону.
@@ -28769,6 +28774,13 @@ export interface components {
              */
             versionId: number;
         };
+        /** @description Перейменування колонки таблиці між версіями: «було → стало» за кодом колонки. */
+        VersionMigrationColumnRename: {
+            /** @description Код колонки у вихідній версії. */
+            fromColumnCode: string;
+            /** @description Код колонки в цільовій версії. */
+            toColumnCode: string;
+        };
         /** @description Одна відмінність між версіями, як її бачить перенос. */
         VersionMigrationItem: {
             /** @description Клас зміни (ФВ-7.3). */
@@ -28797,6 +28809,17 @@ export interface components {
          * @enum {unknown}
          */
         VersionMigrationMode: "Safe" | "Presentation";
+        /** @description Перейменування таблиці між версіями: «було → стало» за кодом таблиці (і, за потреби, колонок). */
+        VersionMigrationTableRename: {
+            /** @description Перейменування колонок цієї таблиці; `null` — колонки збігаються за кодами. */
+            columns?: null | components["schemas"]["VersionMigrationColumnRename"][];
+            /** @description Код таблиці у вихідній версії. */
+            fromTableCode: string;
+            /** @description Код аркуша; `null` — діє на будь-якому аркуші, де є така таблиця. */
+            sheetCode?: null | string;
+            /** @description Код таблиці в цільовій версії; рівний FromTableCode — лише перейменування колонок. */
+            toTableCode: string;
+        };
         /** @description Подія журналу переходів стану аркуша (`BE-11b`). */
         WorkflowEventDto: {
             /** @description Дія (`ApprovalAction`). */
