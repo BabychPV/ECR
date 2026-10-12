@@ -100,7 +100,7 @@ describe('useCellStyles', () => {
     await act(() =>
       result.current.mutateAsync({
         cells: Array.from({ length: 5000 }, (_, i) => cell(i)),
-        area: { allRows: true, columnCodes: ['A'] },
+        areas: [{ allRows: true, columnCodes: ['A'] }],
       }),
     );
 
@@ -118,9 +118,19 @@ describe('useCellStyles', () => {
     const { result, client } = setup();
     const invalidate = vi.spyOn(client, 'invalidateQueries');
 
-    await act(() => result.current.mutateAsync({ cells: [cell(1)], area: { allRows: true, allColumns: true } }));
+    await act(() => result.current.mutateAsync({ cells: [cell(1)], areas: [{ allRows: true, allColumns: true }] }));
 
     expect(show.mock.calls[0]?.[0]).toMatchObject({ color: 'statusWarning', 'data-testid': 'cell-color-toast' });
     await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: sliceKey }));
+  });
+
+  it('понад 50 000 комірок: кілька запитів по rowKeys, відмови підсумовуються', async () => {
+    apiFetch.mockResolvedValue({ appliedCells: 10, resetCells: 0, deniedCells: 1, deniedByReason: { NoWriteRight: 1 }, skippedCells: 0 });
+    const { result } = setup();
+
+    await act(() => result.current.mutateAsync({ cells: [cell(1)], areas: [{ rowKeys: ['R1'], allColumns: true }, { rowKeys: ['R2'], allColumns: true }] }));
+
+    expect(apiFetch).toHaveBeenCalledTimes(2);
+    expect(show.mock.calls[0]?.[0]).toMatchObject({ color: 'statusWarning' });
   });
 });

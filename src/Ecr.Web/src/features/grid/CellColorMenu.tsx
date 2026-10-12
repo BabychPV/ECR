@@ -20,7 +20,7 @@ interface Props {
   readonly disabled: boolean;
   readonly disabledHint: string | null;
   /** Машинна причина недоступності (`readOnly` — аркуш закрито/немає права, `noSelection`). */
-  readonly disabledReason?: 'readOnly' | 'noSelection';
+  readonly disabledReason?: string;
   /** Рядок стану недоступності для людини, що читає з екрана. */
   readonly pending?: boolean;
   /** Область: виділення / весь рядок / вся колонка / вся таблиця. */
