@@ -566,8 +566,15 @@ public sealed class ExcelExporter(
             Widen(contentLength, labelColumn, text.Length);
         }
 
-        // CELL-STYLE L3b: користувацьке оформлення — ПІСЛЯ стилю колонки й ДО умовного форматування
-        // (порядок шарів сітки: колонка < користувач < умовний формат).
+        // D-393: порядок шарів — колонка < РЯДОК < користувач < умовний формат. Стиль рядка шаблону
+        // (`RowDef.StyleId`, як `RowDto.Style` у зрізі) — після стилю колонки, до користувацького кольору.
+        if (options.IncludeStyles)
+        {
+            ApplyRowStyles(worksheet, snapshot, table, keys, rowNumbers, columns.Count, styleMap);
+        }
+
+        // CELL-STYLE L3b: користувацьке оформлення — ПІСЛЯ стилю колонки й рядка, ДО умовного форматування
+        // (порядок шарів сітки: колонка < рядок < користувач < умовний формат).
         ApplyUserStyles(worksheet, userStyles, rowIds, columnNumbers, rowNumbers);
 
         ApplyConditionalFormats(
@@ -719,6 +726,37 @@ public sealed class ExcelExporter(
         if (length > contentLength[column])
         {
             contentLength[column] = length;
+        }
+    }
+
+    /// <summary>
+    /// Стиль РЯДКА шаблону (<c>RowDef.StyleId</c> -> <c>StyleDef</c>) на комірки даних рядка — поверх стилю
+    /// колонки, під користувацьким кольором і умовним форматуванням (D-393). Той самий стиль, що віддає зріз
+    /// у <c>RowDto.Style</c>; рядок без опису в шаблоні чи без стилю не чіпається.
+    /// </summary>
+    private void ApplyRowStyles(
+        IXLWorksheet worksheet,
+        TemplateVersionSnapshot snapshot,
+        TableDef table,
+        List<string> keys,
+        Dictionary<string, int> rowNumbers,
+        int columnCount,
+        IReadOnlyDictionary<int, StyleDef> styleMap)
+    {
+        if (columnCount == 0)
+        {
+            return;
+        }
+
+        foreach (var key in keys)
+        {
+            if (snapshot.RowsByKey.TryGetValue((table.Id, key), out var rowDef)
+                && rowDef.StyleId is { } styleId
+                && styleMap.TryGetValue(styleId, out var style)
+                && rowNumbers.TryGetValue(key, out var number))
+            {
+                styleMapper.ApplyRowStyle(worksheet.Range(number, 1, number, columnCount).Style, style);
+            }
         }
     }
 

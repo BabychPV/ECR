@@ -1,4 +1,5 @@
-import type { CellFormatDto, CellStyleChange, TableSliceDto } from '@/api/types';
+import type { CellFormatDto, CellStyleChange, CellStyleDto, TableSliceDto } from '@/api/types';
+import { cellAppearanceOf } from './cellAppearance';
 import { isHexColour } from '@/shared/theme/cellPalette';
 import { withCellFormat } from './conditionalAppearance';
 import { cellKey } from './permissions';
@@ -43,6 +44,98 @@ export function isValidPatch(patch: CellStylePatch): boolean {
   );
 }
 
+/** Область застосування кольору: виділення або розширення до рядка/колонки/таблиці. */
+export type StyleScope = 'selection' | 'row' | 'column' | 'table';
+
+export const StyleScopes: readonly StyleScope[] = ['selection', 'row', 'column', 'table'];
+
+/**
+ * Прямокутник (індекси в сітці) для області. `selection` — як є; `row` — виділені рядки
+ * на всю ширину; `column` — виділені колонки на всю висоту; `table` — усе (виділення не потрібне).
+ * `null` — область порожня (немає виділення для рядка/колонки).
+ */
+export function scopeRange(
+  slice: Pick<TableSliceDto, 'rows' | 'columns'>,
+  range: GridSelection['range'] | null,
+  labelOffset: number,
+  scope: StyleScope,
+): GridSelection['range'] | null {
+  const lastRow = slice.rows.length - 1;
+  const firstColumn = labelOffset;
+  const lastColumn = labelOffset + slice.columns.length - 1;
+
+  if (scope === 'table') return { fromRow: 0, toRow: lastRow, fromColumn: firstColumn, toColumn: lastColumn };
+  if (range === null) return null;
+  if (scope === 'row') return { ...range, fromColumn: firstColumn, toColumn: lastColumn };
+  if (scope === 'column') return { ...range, fromRow: 0, toRow: lastRow };
+
+  return range;
+}
+
+/** Область запиту без кольорів (рядки × колонки) для `PatchCellStylesRequest.scope`; `selection` — `null` (йдуть `items`). */
+export interface StyleArea {
+  readonly rowKeys?: string[];
+  readonly columnCodes?: string[];
+  readonly allRows?: boolean;
+  readonly allColumns?: boolean;
+}
+
+/**
+ * Область для ОДНОГО запиту `scope` (сервер сам розгортає, рахує права і дає часткову відмову).
+ * `row` — виділені рядки × усі колонки; `column` — усі рядки × виділені колонки; `table` — усе.
+ */
+export function areaOf(
+  slice: Pick<TableSliceDto, 'rows' | 'columns'>,
+  range: GridSelection['range'] | null,
+  labelOffset: number,
+  scope: StyleScope,
+): StyleArea | null {
+  if (scope === 'selection') return null;
+  if (scope === 'table') return { allRows: true, allColumns: true };
+  if (range === null) return null;
+
+  const rowKeys = slice.rows.slice(Math.max(0, range.fromRow), range.toRow + 1).map((r) => r.rowKey);
+  const columnCodes = slice.columns.slice(Math.max(0, range.fromColumn - labelOffset), range.toColumn - labelOffset + 1).map((c) => c.code);
+
+  return scope === 'row' ? { rowKeys, allColumns: true } : { columnCodes, allRows: true };
+}
+
+/**
+ * Шар «рядок»: шаблонний стиль рядка (`RowDto.style`) поверх стилю колонки. Колір/вирівнювання
+ * рядка перекриває колонку, жирність/курсив/перенос — додаються.
+ */
+export function withRowStyle(column: CellStyleDto | null | undefined, row: CellStyleDto | null | undefined): CellStyleDto | null {
+  if (row === null || row === undefined) return column ?? null;
+  if (column === null || column === undefined) return row;
+
+  return {
+    ...column,
+    isBold: column.isBold || row.isBold,
+    isItalic: column.isItalic || row.isItalic,
+    wrapText: column.wrapText || row.wrapText,
+    foregroundArgb: row.foregroundArgb ?? column.foregroundArgb,
+    backgroundArgb: row.backgroundArgb ?? column.backgroundArgb,
+    horizontalAlign: row.horizontalAlign ?? column.horizontalAlign,
+    verticalAlign: row.verticalAlign ?? column.verticalAlign,
+  };
+}
+
+/** Властивості комірки заголовка за `TableSliceDto.headerStyle` (клас + змінні, як у комірок). */
+export function headerStyleProps(style: CellStyleDto | null | undefined): { class: string; style: Record<string, string> } | null {
+  const appearance = cellAppearanceOf(style);
+
+  if (appearance === undefined) return null;
+
+  const vars: Record<string, string> = {};
+  for (const [name, value] of Object.entries(appearance)) {
+    if (name.startsWith('--') && typeof value === 'string') vars[name] = value;
+  }
+  if (appearance.fontWeight === 'bold') vars['--ecr-header-weight'] = 'bold';
+  if (appearance.fontStyle === 'italic') vars['--ecr-header-style'] = 'italic';
+
+  return { class: 'ecr-header-styled', style: vars };
+}
+
 export function userStyleOf(slice: Pick<TableSliceDto, 'cellStyles'>, key: string): UserCellFormat | null {
   const found = slice.cellStyles?.[key];
 
@@ -64,12 +157,80 @@ export function withUserStyle(
 }
 
 /**
- * Причини відмови, які на колір НЕ впливають: обчислена комірка і колонка «лише
- * читання» не редагуються, але фарбуються (як в Excel — захищений аркуш з
- * дозволом форматувати). Усе інше (немає запису, заборона, подано) колір теж
- * забороняє; останнє слово — за сервером.
+ * Причини відмови, які на колір НЕ впливають (лише для старого сервера без `styleAccess`): обчислена
+ * комірка і колонка «лише читання» не редагуються, але фарбуються (як в Excel).
  */
 const StyleNeutralReasons: ReadonlySet<string> = new Set(['None', 'CalculatedCell', 'ColumnReadOnly']);
+
+interface DeniedSets {
+  readonly rows: ReadonlySet<string>;
+  readonly columns: ReadonlySet<string>;
+}
+
+/** Переліки заборон як `Set` (O(1) на комірку); кеш за об'єктом `styleAccess` — він новий з кожним зрізом. */
+const deniedSetsCache = new WeakMap<object, DeniedSets>();
+
+function deniedSetsOf(access: NonNullable<TableSliceDto['styleAccess']>): DeniedSets {
+  let sets = deniedSetsCache.get(access);
+
+  if (sets === undefined) {
+    sets = { rows: new Set(access.styleDeniedRowKeys), columns: new Set(access.styleDeniedColumnCodes) };
+    deniedSetsCache.set(access, sets);
+  }
+
+  return sets;
+}
+
+/** Чи можна фарбувати комірку: за `styleAccess` сервера (одне джерело істини), інакше — за нейтральними причинами. */
+export function canColourCell(slice: TableSliceDto, rowKey: string, columnCode: string): boolean {
+  const access = slice.styleAccess;
+
+  if (access === null || access === undefined) {
+    const permission = slice.cellPermissions[cellKey(rowKey, columnCode)];
+
+    return permission === undefined || StyleNeutralReasons.has(permission);
+  }
+
+  const denied = deniedSetsOf(access);
+
+  return (
+    access.canStyle &&
+    !denied.rows.has(rowKey) &&
+    !denied.columns.has(columnCode) &&
+    access.styleDeniedCells[cellKey(rowKey, columnCode)] === undefined
+  );
+}
+
+/** Оптимістичне оновлення кешу — лише до цієї кількості комірок; більше — чекаємо відповідь і перечитуємо зріз. */
+export const OptimisticMaxCells = 5000;
+
+/** Скільки комірок у прямокутнику (для «N з M» у попередженні). */
+export function rangeCellCount(range: GridSelection['range'] | null): number {
+  return range === null ? 0 : (range.toRow - range.fromRow + 1) * (range.toColumn - range.fromColumn + 1);
+}
+
+/** Стеля сервера на комірок в одному `scope` (`tooManyCells`). */
+export const CellStyleScopeMaxCells = 50_000;
+
+/** Розбиває область на запити ≤ 50 000 комірок: понад стелю — явні `rowKeys` порціями. */
+export function areaChunks(slice: Pick<TableSliceDto, 'rows' | 'columns'>, area: StyleArea): StyleArea[] {
+  const columns = area.columnCodes?.length ?? (area.allColumns === true ? slice.columns.length : 0);
+  const rowKeys = area.rowKeys ?? (area.allRows === true ? slice.rows.map((r) => r.rowKey) : []);
+
+  if (columns === 0 || rowKeys.length * columns <= CellStyleScopeMaxCells) return [area];
+
+  const perChunk = Math.max(1, Math.floor(CellStyleScopeMaxCells / columns));
+  const result: StyleArea[] = [];
+
+  for (let i = 0; i < rowKeys.length; i += perChunk) {
+    result.push({
+      rowKeys: rowKeys.slice(i, i + perChunk),
+      ...(area.columnCodes === undefined ? { allColumns: true } : { columnCodes: area.columnCodes }),
+    });
+  }
+
+  return result;
+}
 
 /**
  * Комірки виділеного прямокутника (індекси — у даних, не в сітці), на які в
@@ -79,6 +240,7 @@ export function colourableCells(
   slice: TableSliceDto,
   range: GridSelection['range'] | null,
   labelOffset: number,
+  limit: number = Number.POSITIVE_INFINITY,
 ): { rowKey: string; columnCode: string }[] {
   if (range === null || slice.rows.length === 0 || slice.columns.length === 0) return [];
 
@@ -95,9 +257,9 @@ export function colourableCells(
       const column = slice.columns[c];
       if (column === undefined) continue;
 
-      const permission = slice.cellPermissions[cellKey(row.rowKey, column.code)];
-      if (permission === undefined || StyleNeutralReasons.has(permission)) {
+      if (canColourCell(slice, row.rowKey, column.code)) {
         cells.push({ rowKey: row.rowKey, columnCode: column.code });
+        if (cells.length >= limit) return cells;
       }
     }
   }

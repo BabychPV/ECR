@@ -19,7 +19,7 @@ import { cellAppearanceClassOf, cellAppearanceOf } from './cellAppearance';
 import { cellFormatOf, withCellFormat } from './conditionalAppearance';
 import { CellColorMenu, type ColourTarget } from './CellColorMenu';
 import { useCellStyles } from './useCellStyles';
-import { colourableCells, userStyleOf, withUserStyle } from './userCellStyle';
+import { OptimisticMaxCells, areaChunks, areaOf, colourableCells, headerStyleProps, scopeRange, userStyleOf, withRowStyle, withUserStyle, type StyleScope } from './userCellStyle';
 import { cellDisplay, cellText, editorValueOf, isNumericColumn, isTextColumnType, sameColumnValue } from './cellValue';
 import { columnIndexOf, rowIndexOf } from './rowIndex';
 import { planPaste, type PasteRejection } from './clipboard';
@@ -53,6 +53,7 @@ import {
   decide,
   guardOf,
   rowKeyOfCellKey,
+  denyText,
 } from './permissions';
 import { markConfirmed } from './confirmedEdits';
 import { markSliceHidden, takeMissedInvalidation } from './sliceCache';
@@ -388,28 +389,44 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
   // L4: колір комірок. Виділення — з сховища (реактивно), право — `colourableCells`.
   const styleSelection = useSelectedRange(tableInstanceId, periodKey);
   const cellStyles = useCellStyles(documentId, tableInstanceId, periodKey);
-  const colourTargets = useMemo(
-    () =>
-      slice.data === undefined || readOnly
-        ? []
-        : colourableCells(slice.data, styleSelection, hasRowLabels(slice.data) ? 1 : 0),
-    [slice.data, styleSelection, readOnly],
+  const [styleScope, setStyleScope] = useState<StyleScope>('selection');
+  // ⛔ Не матеріалізуємо «всю таблицю» (~180 тис. комірок) на кожну зміну виділення: для області потрібно лише
+  // знати, чи є бодай одна дозволена комірка (early-exit); масив будується лише для «Виділення» й для оптимістики ≤ 5000.
+  const styleOffset = slice.data === undefined || !hasRowLabels(slice.data) ? 0 : 1;
+  const styleRange = useMemo(
+    () => (slice.data === undefined ? null : scopeRange(slice.data, styleSelection, styleOffset, styleScope)),
+    [slice.data, styleSelection, styleOffset, styleScope],
   );
+  const canColour = useMemo(
+    () =>
+      slice.data !== undefined && !readOnly && colourableCells(slice.data, styleRange, styleOffset, 1).length > 0,
+    [slice.data, styleRange, styleOffset, readOnly],
+  );
+  // Сервер вирішив, що фарбувати не можна нічого: причина — його (`styleAccess.deniedReason`, текст `deny.{reason}`).
+  const styleAccess = slice.data?.styleAccess;
+  const styleDenied =
+    styleAccess !== null && styleAccess !== undefined && !styleAccess.canStyle && styleAccess.deniedReason !== null
+      ? { reason: styleAccess.deniedReason, hint: denyText(styleAccess.deniedReason) }
+      : null;
   const applyColour = useCallback(
     (target: ColourTarget, hex: string | null) => {
-      if (colourTargets.length === 0) return;
+      if (slice.data === undefined || !canColour) return;
 
       // Сервер: `""` — зняти, `null` — не чіпати. «Без заливки»/«Автоматичний» = `""`.
       const value = hex ?? '';
+      const style = target === 'fill' ? { backgroundHex: value } : { foregroundHex: value };
+      const area = areaOf(slice.data, styleSelection, styleOffset, styleScope);
+      // Оптимістика — лише для малих областей; велика чекає відповіді сервера й перечитання зрізу.
+      const cells = colourableCells(slice.data, styleRange, styleOffset, area === null ? Number.POSITIVE_INFINITY : OptimisticMaxCells + 1);
 
       cellStyles.mutate({
-        cells: colourTargets.map((cell) => ({
-          ...cell,
-          ...(target === 'fill' ? { backgroundHex: value } : { foregroundHex: value }),
-        })),
+        cells: area !== null && cells.length > OptimisticMaxCells ? [] : cells.map((cell) => ({ ...cell, ...style })),
+        // Рядок/колонка/таблиця — один PATCH зі `scope` (сервер розгортає й дає часткову відмову).
+        areas: area === null ? null : areaChunks(slice.data, area),
+        style,
       });
     },
-    [colourTargets, cellStyles],
+    [canColour, cellStyles, slice.data, styleSelection, styleScope, styleOffset, styleRange],
   );
 
   const queryClient = useQueryClient();
@@ -2334,9 +2351,11 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         </Button>
         <CellColorMenu
           onApply={applyColour}
-          disabled={colourTargets.length === 0}
-          disabledHint={t(readOnly ? 'grid.cellColor.readOnly' : 'grid.cellColor.noSelection')}
-          disabledReason={readOnly ? 'readOnly' : 'noSelection'}
+          disabled={!canColour}
+          disabledHint={styleDenied?.hint ?? t(readOnly ? 'grid.cellColor.readOnly' : 'grid.cellColor.noSelection')}
+          disabledReason={styleDenied?.reason ?? (readOnly ? 'readOnly' : 'noSelection')}
+          scope={styleScope}
+          onScopeChange={setStyleScope}
           pending={cellStyles.isPending}
         />
         {Object.keys(widths).length > 0 && (
@@ -2819,12 +2838,16 @@ export function gridColumns(
     const isNumeric = isNumericColumn(column);
     const numericClass = isNumeric ? 'ecr-cell-numeric' : null;
 
+    const headerStyled = headerStyleProps(slice.headerStyle);
     const headerProperties =
-      requiredHint === null && !isNumeric
+      requiredHint === null && !isNumeric && headerStyled === null
         ? null
         : {
             ...(requiredHint === null ? {} : { title: requiredHint }),
-            ...(isNumeric ? { class: 'ecr-header-numeric' } : {}),
+            ...(isNumeric || headerStyled !== null
+              ? { class: [isNumeric ? 'ecr-header-numeric' : null, headerStyled?.class ?? null].filter((c) => c !== null).join(' ') }
+              : {}),
+            ...(headerStyled === null ? {} : { style: headerStyled.style }),
           };
 
     // ⛔ Директива registry-lookup, PR A4: перелік — за `lookupRegistryDefId`
@@ -3047,7 +3070,8 @@ export function gridColumns(
         // в Excel: правило перекриває ручну заливку). Порядок: колонка < рядок
         // < користувацький < умовний формат < стан.
         const userFormat = userStyleOf(slice, key);
-        const afterUser = userFormat === null ? column.style : withUserStyle(column.style, userFormat);
+        const baseStyle = withRowStyle(column.style, rowIndexOf(slice).get(rowKey)?.style);
+        const afterUser = userFormat === null ? baseStyle : withUserStyle(baseStyle, userFormat);
         const style = conditional === null ? afterUser : withCellFormat(afterUser, conditional);
         const appearance = cellAppearanceOf(style);
 

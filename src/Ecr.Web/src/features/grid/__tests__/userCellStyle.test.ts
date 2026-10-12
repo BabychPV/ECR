@@ -9,7 +9,13 @@ import {
   ThemeShades,
   userStyleOf,
   withUserStyle,
+  areaChunks,
+  areaOf,
+  canColourCell,
   chunkPatches,
+  headerStyleProps,
+  scopeRange,
+  withRowStyle,
   isValidPatch,
 } from '../userCellStyle';
 
@@ -184,5 +190,101 @@ describe('палітра', () => {
     expect(ThemeShades).toHaveLength(5);
     expect(ThemeShades.every((r) => r.length === 10 && r.every((h) => /^#[0-9a-f]{6}$/.test(h)))).toBe(true);
     expect(ThemeShades[0]?.[1]).toBe('#cccccc');
+  });
+});
+
+describe('область застосування кольору', () => {
+  const s = slice();
+  const one = { fromRow: 0, toRow: 0, fromColumn: 0, toColumn: 0 };
+
+  it('рядок — на всю ширину, колонка — на всю висоту, таблиця — усе без виділення', () => {
+    expect(colourableCells(s, scopeRange(s, one, 0, 'row'), 0).map((c) => `${c.rowKey}:${c.columnCode}`)).toEqual(['R1:A', 'R1:B']);
+    expect(colourableCells(s, scopeRange(s, one, 0, 'column'), 0).map((c) => `${c.rowKey}:${c.columnCode}`)).toEqual(['R1:A', 'R2:A']);
+    expect(colourableCells(s, scopeRange(s, null, 0, 'table'), 0)).toHaveLength(4);
+    expect(scopeRange(s, null, 0, 'row')).toBeNull();
+  });
+
+  it('заборонені комірки не потрапляють і в «весь рядок»; зсув колонки підпису враховано', () => {
+    const denied = slice({ cellPermissions: { 'R1:A': 'NoWriteRight' } });
+
+    expect(colourableCells(denied, scopeRange(denied, one, 0, 'row'), 0).map((c) => c.columnCode)).toEqual(['B']);
+
+    const labelled = slice({ rows: [row('R1', 'Підпис')] });
+    expect(colourableCells(labelled, scopeRange(labelled, { fromRow: 0, toRow: 0, fromColumn: 1, toColumn: 1 }, 1, 'row'), 1)).toHaveLength(2);
+  });
+});
+
+describe('шар «рядок» і шапка', () => {
+  const style = (extra: Record<string, unknown>) => ({ isBold: false, isItalic: false, foregroundArgb: null, backgroundArgb: null, horizontalAlign: null, verticalAlign: null, wrapText: false, ...extra }) as never;
+
+  it('рядок перекриває колір колонки, жирність додається, порожній рядок не чіпає', () => {
+    const merged = withRowStyle(style({ backgroundArgb: 1, isBold: true }), style({ backgroundArgb: 2 }));
+
+    expect(merged?.backgroundArgb).toBe(2);
+    expect(merged?.isBold).toBe(true);
+    expect(withRowStyle(style({ backgroundArgb: 1 }), null)?.backgroundArgb).toBe(1);
+    expect(withRowStyle(null, style({ backgroundArgb: 2 }))?.backgroundArgb).toBe(2);
+  });
+
+  it('headerStyleProps: без стилю — null, із заливкою — клас і змінні', () => {
+    expect(headerStyleProps(null)).toBeNull();
+    expect(headerStyleProps(style({ backgroundArgb: (0xff000000 | 0xffc000) | 0 }))).toMatchObject({ class: 'ecr-header-styled', style: { '--ecr-cell-fill': '#ffc000' } });
+  });
+});
+
+describe('areaOf: область запиту scope', () => {
+  const s = slice();
+  const range = { fromRow: 0, toRow: 1, fromColumn: 1, toColumn: 1 };
+
+  it('selection — немає (йдуть items); рядок/колонка/таблиця — scope', () => {
+    expect(areaOf(s, range, 0, 'selection')).toBeNull();
+    expect(areaOf(s, range, 0, 'row')).toEqual({ rowKeys: ['R1', 'R2'], allColumns: true });
+    expect(areaOf(s, range, 0, 'column')).toEqual({ columnCodes: ['B'], allRows: true });
+    expect(areaOf(s, null, 0, 'table')).toEqual({ allRows: true, allColumns: true });
+    expect(areaOf(s, null, 0, 'row')).toBeNull();
+  });
+
+  it('зсув колонки підпису віднімається від індексів сітки', () => {
+    expect(areaOf(s, { fromRow: 0, toRow: 0, fromColumn: 2, toColumn: 2 }, 1, 'column')).toEqual({ columnCodes: ['B'], allRows: true });
+  });
+});
+
+describe('styleAccess: рішення сервера про колір', () => {
+  const access = (extra = {}) => ({ canStyle: true, deniedReason: null, styleDeniedCells: {}, styleDeniedColumnCodes: [], styleDeniedRowKeys: [], truncated: false, ...extra });
+
+  it('без styleAccess — стара логіка нейтральних причин; з ним — лише його перелік', () => {
+    const old = slice({ cellPermissions: { 'R1:A': 'NoWriteRight', 'R1:B': 'CalculatedCell' } });
+    expect(canColourCell(old, 'R1', 'A')).toBe(false);
+    expect(canColourCell(old, 'R1', 'B')).toBe(true);
+
+    // Сервер сказав «можна» — нейтральні причини з cellPermissions більше нічого не вирішують.
+    const withAccess = slice({ cellPermissions: { 'R1:A': 'NoWriteRight' }, styleAccess: access() });
+    expect(canColourCell(withAccess, 'R1', 'A')).toBe(true);
+  });
+
+  it('canStyle=false, заборонені рядки/колонки/комірки виключаються', () => {
+    expect(canColourCell(slice({ styleAccess: access({ canStyle: false, deniedReason: 'PeriodClosed' }) }), 'R1', 'A')).toBe(false);
+
+    const s = slice({ styleAccess: access({ styleDeniedRowKeys: ['R2'], styleDeniedColumnCodes: ['B'], styleDeniedCells: { 'R1:A': 'NoWriteRight' } }) });
+    expect(canColourCell(s, 'R1', 'A')).toBe(false);
+    expect(canColourCell(s, 'R2', 'A')).toBe(false);
+    expect(canColourCell(s, 'R1', 'B')).toBe(false);
+    expect(canColourCell(slice({ styleAccess: access() }), 'R1', 'A')).toBe(true);
+  });
+});
+
+describe('areaChunks: стеля 50 000', () => {
+  const big = { rows: Array.from({ length: 1000 }, (_, i) => row(`R${String(i)}`)), columns: Array.from({ length: 60 }, (_, i) => column(`C${String(i)}`)) };
+
+  it('у межах стелі — одна область', () => {
+    expect(areaChunks(slice(), { allRows: true, allColumns: true })).toEqual([{ allRows: true, allColumns: true }]);
+  });
+
+  it('понад стелю — порції rowKeys, разом усі рядки, кожна ≤ 50 000', () => {
+    const chunks = areaChunks(big, { allRows: true, allColumns: true });
+
+    expect(chunks.length).toBeGreaterThan(1);
+    expect(chunks.flatMap((c) => c.rowKeys ?? [])).toHaveLength(1000);
+    expect(chunks.every((c) => (c.rowKeys?.length ?? 0) * 60 <= 50_000 && c.allColumns === true)).toBe(true);
   });
 });

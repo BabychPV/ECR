@@ -157,3 +157,12 @@
     animation: none;
   }
 }
+
+/* Стиль шапки таблиці (`TableSliceDto.headerStyle`): ті самі змінні, що й у комірок. */
+:root revo-grid[theme] revogr-header .rgHeaderCell.ecr-header-styled,
+:root[data-mantine-color-scheme='dark'] revo-grid[theme] revogr-header .rgHeaderCell.ecr-header-styled {
+  background-color: var(--ecr-cell-fill, inherit);
+  color: var(--ecr-cell-fill-fg, inherit);
+  font-weight: var(--ecr-header-weight, inherit);
+  font-style: var(--ecr-header-style, inherit);
+}
