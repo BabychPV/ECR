@@ -286,8 +286,8 @@ async function submitForm(
 
   const zone = dialog.getByRole('textbox', { name: /time zone|Часов|Часов/i });
   await zone.click();
-  await zone.fill('Europe/Kyiv');
-  await page.getByRole('option', { name: /Europe\/Kyiv/ }).first().click();
+  await zone.fill('Europe/');
+  await page.getByRole('option', { name: /^Europe\// }).first().click();
 
   const policy = dialog.getByRole('textbox', { name: /Period policy|Політика|Политика/i });
   await policy.click();
