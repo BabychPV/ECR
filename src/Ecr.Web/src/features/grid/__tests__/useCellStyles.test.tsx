@@ -92,4 +92,46 @@ describe('useCellStyles', () => {
     expect(apiFetch).not.toHaveBeenCalled();
     expect(client.getQueryData<TableSliceDto>(sliceKey)?.cellStyles).toBeNull();
   });
+
+  it('область: ОДИН PATCH зі scope замість тисяч items', async () => {
+    apiFetch.mockResolvedValue({ appliedCells: 5000, resetCells: 0, deniedCells: 0, skippedCells: 0 });
+    const { result } = setup();
+
+    await act(() =>
+      result.current.mutateAsync({
+        cells: [],
+        areas: [{ allRows: true, columnCodes: ['A'] }],
+        style: { backgroundHex: '#ffff00' },
+      }),
+    );
+
+    expect(apiFetch).toHaveBeenCalledTimes(1);
+    const [, init] = apiFetch.mock.calls[0] as [string, { body: string }];
+    expect(JSON.parse(init.body)).toEqual({
+      periodKey: 202609,
+      reset: false,
+      scope: { allRows: true, allColumns: false, columnCodes: ['A'], reset: false, backgroundHex: '#ffff00', foregroundHex: null, isBold: null },
+    });
+  });
+
+  it('часткова відмова області: тост «N комірок не змінено», зріз інвалідовано', async () => {
+    apiFetch.mockResolvedValue({ appliedCells: 3, resetCells: 0, deniedCells: 2, deniedByReason: { NoWriteRight: 2 }, skippedCells: 0 });
+    const { result, client } = setup();
+    const invalidate = vi.spyOn(client, 'invalidateQueries');
+
+    await act(() => result.current.mutateAsync({ cells: [cell(1)], areas: [{ allRows: true, allColumns: true }] }));
+
+    expect(show.mock.calls[0]?.[0]).toMatchObject({ color: 'statusWarning', 'data-testid': 'cell-color-toast' });
+    await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: sliceKey }));
+  });
+
+  it('понад 50 000 комірок: кілька запитів по rowKeys, відмови підсумовуються', async () => {
+    apiFetch.mockResolvedValue({ appliedCells: 10, resetCells: 0, deniedCells: 1, deniedByReason: { NoWriteRight: 1 }, skippedCells: 0 });
+    const { result } = setup();
+
+    await act(() => result.current.mutateAsync({ cells: [cell(1)], areas: [{ rowKeys: ['R1'], allColumns: true }, { rowKeys: ['R2'], allColumns: true }] }));
+
+    expect(apiFetch).toHaveBeenCalledTimes(2);
+    expect(show.mock.calls[0]?.[0]).toMatchObject({ color: 'statusWarning' });
+  });
 });
