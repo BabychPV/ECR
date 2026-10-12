@@ -605,8 +605,8 @@ public sealed class PublishChecksTests
         var cell = CellConsolidationRequired(FormulaScope.Cell);
         var column = CellConsolidationRequired(FormulaScope.Column);
 
-        Assert.Contains(ExpressionErrors.RequiredNotCovered, Render(Run(cell, Units())), StringComparison.Ordinal);
-        Assert.DoesNotContain(ExpressionErrors.RequiredNotCovered, Render(Run(column, Units())), StringComparison.Ordinal);
+        Assert.Contains(ExpressionErrors.RequiredNotCovered, Render(PublishChecks.CheckRules(cell)), StringComparison.Ordinal);
+        Assert.DoesNotContain(ExpressionErrors.RequiredNotCovered, Render(PublishChecks.CheckRules(column)), StringComparison.Ordinal);
     }
 
     private static TemplateVersion CellConsolidationRequired(FormulaScope scope)
