@@ -323,7 +323,11 @@ test.describe('cellColor: колір комірки на реальному ст
         cells: [{ rowKey: slice.rowKey, columnCode: slice.columnCode, backgroundHex: Yellow }],
       });
       expect(response.status, `PATCH {cells}: ${response.text}`).toBe(422);
-      expect(response.text).toContain('ECR-REQ-0422');
+      // ⚠ Код залежить від того, ЯКИЙ рубіж спрацював першим. До CELL-STYLE scope-2 `items` був обов'язковим, і
+      // чужа форма падала на валідації моделі (`ECR-REQ-0422`). Тепер `items` необов'язкове (запит лише зі `scope`),
+      // модель проходить, а `periodKey` у чужій формі відсутній (= 0) і не збігається з періодом екземпляра:
+      // `ECR-PRD-0422` / `err.ECR-PRD-0422.periodMismatch`. Обидва - 422 ДО будь-якого запису, і саме це контракт.
+      expect(response.text).toMatch(/ECR-(REQ|PRD)-0422/);
     } finally {
       await context.close();
     }
