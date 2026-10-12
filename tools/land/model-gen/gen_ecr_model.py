@@ -890,6 +890,71 @@ for sh in X['sheets']:
                 if (code, val) not in seen_cf:
                     seen_cf.add((code, val))
                     cfs.append({'columnCode': code, 'operator': 'eq', 'value': val, 'backgroundHex': '#D9D9D9', 'foregroundHex': '#7F7F7F', 'isBold': False})
+# ---- відповідність прод-відходів (AF_Waste_Land_08) -> T8_00/T8_01 шаблону (прод-зразок 2026-10-12, прогалина 2).
+# Прод: рядок = (елемент звіту × код відходу), Land_ItemId (= ENTRY_ID довідника LAND_WASTE_REPORT_ENTRY), Land_WasteNo 1..38,
+# Land_WasteCode (= SUBSTANCE_CODE довідника LAND_WASTE_SUBSTANCE), значення — Land_Measure_Weight (т). Шаблон: широка таблиця,
+# рядок M<mm>_<ENTRY_ID>, колонка W_<відхід>. Колонку відходу визначає НАЗВА: заголовок W-колонки починається з NAME_EN
+# відходу (найдовший збіг); мапа мусить бути бієкцією 38 <-> 38, інакше генерація падає (нічого не вгадуємо).
+# Незалежне підтвердження: на прод-зразку Land_WasteNo n -> Land_WasteCode збігся з n-ю W-колонкою для всіх 38.
+def _waste_mapping():
+    sw = next(s for s in out['sheets'] if s['excelName'].startswith('8.'))
+    t_amt = next(t for t in sw['tables'] if t['code'] == 'T8_00')
+    reg = registries['LAND_WASTE_SUBSTANCE']
+    ent = registries['LAND_WASTE_REPORT_ENTRY']
+    wcols = [c for c in t_amt['columns'] if c['code'].startswith('W_')]
+
+    def nrm(s):
+        return re.sub(r'[^a-z0-9]+', '', (s or '').lower())
+
+    by_col, used = {}, {}
+    for c in wcols:
+        h = nrm(c['headerEn'])
+        hits = [(len(nrm(e['fields']['NAME_EN'])), e) for e in reg['entries']
+                if nrm(e['fields']['NAME_EN']) and h.startswith(nrm(e['fields']['NAME_EN']))]
+        if not hits:
+            raise SystemExit('waste mapping: колонка %s без відходу за назвою' % c['code'])
+        best = max(hits, key=lambda x: x[0])
+        if sum(1 for n_, _ in hits if n_ == best[0]) != 1:
+            raise SystemExit('waste mapping: неоднозначний збіг для %s' % c['code'])
+        code = best[1]['fields']['SUBSTANCE_CODE']
+        if code in used:
+            raise SystemExit('waste mapping: відхід %s двічі (%s, %s)' % (code, used[code], c['code']))
+        used[code] = c['code']
+        by_col[c['code']] = code
+    if len(used) != len(reg['entries']):
+        raise SystemExit('waste mapping: %d колонок, %d відходів у довіднику' % (len(used), len(reg['entries'])))
+    items = [e['fields']['ENTRY_ID'] for e in ent['entries']]
+    groups = collections.OrderedDict()
+    for e in ent['entries']:
+        groups.setdefault(e['fields']['GROUP_ID'], []).append(e['fields']['ENTRY_ID'])
+    # рядки січня як представник місяця (структура місяців однакова)
+    amt_items = [rw['key'][4:] for rw in t_amt['rows'] if rw['key'].startswith('M01_') and rw['kind'] == 'Item']
+    txt = next(t for t in sw['tables'] if t['code'] == 'T8_01')
+    txt_items = [rw['key'][4:] for rw in txt['rows'] if rw['key'].startswith('M01_')]
+    return {
+        'prodTable': 'AF_Waste_Land_08',
+        'template': {'sheet': sw['code'], 'amountTable': 'T8_00', 'textTable': 'T8_01'},
+        'rowKey': 'M{month:02d}_{Land_ItemId}',
+        'valueProdColumn': 'Land_Measure_Weight', 'valueUnit': 't',
+        'wasteCodeProdColumn': 'Land_WasteCode', 'wasteNoProdColumn': 'Land_WasteNo',
+        'wasteRegistry': 'LAND_WASTE_SUBSTANCE', 'itemRegistry': 'LAND_WASTE_REPORT_ENTRY',
+        'columnByWasteCode': {by_col[c['code']]: c['code'] for c in wcols},
+        'wasteNoByCode': {by_col[c['code']]: i for i, c in enumerate(wcols, 1)},
+        'itemsInAmountTable': amt_items,
+        'itemsInTextTable': txt_items,
+        'groupItems': groups,
+        'notProven': [
+            {'prodColumn': 'Land_Waste_Name_Area', 'why': 'Звіт: значення псевдонімізоване (area-NNN) і не зіставлене з рядками T8_01 '
+                                                          '(назва об\'єкта/договір/примітки) — відповідність не доведено, потрібне питання замовнику.'},
+            {'prodColumn': 'Land_Value', 'why': 'Текстовий дубль Land_Measure_Weight у зразку (30 -> "30"); у шаблон не переноситься, '
+                                                 'джерелом значення береться Land_Measure_Weight.'},
+            {'prodColumn': 'Land_No', 'why': 'У зразку лише порядковий номер; ключ рядка шаблону — Land_ItemId.'},
+        ],
+    }
+
+
+out['prodMapping'] = {'formatVersion': 1, 'source': 'LAND-PROD-SAMPLE-2026-10-12 (структура; даних прод-БД немає)', 'waste': _waste_mapping()}
+
 out['conditionalFormats'] = []  # ECR підтримує лише числові пороги (eq/ne/gt/...); Excel-правила за текстом «Removed» не переносяться\nout['conditionalFormatsNotTransferred'] = cfs
 out['registries'] = list(registries.values())
 out['stats'] = {'excelSheets': len(X['sheets']), 'reportSheets': len(out['sheets']), 'tables': stat_tables, 'columns': stat_cols,
