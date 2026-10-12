@@ -1,4 +1,4 @@
-using Ecr.Application.Documents;
+﻿using Ecr.Application.Documents;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
 using Ecr.Application.Templates;
@@ -65,7 +65,7 @@ public sealed class TableSliceConditionalFormatTests
         _access.CanReadDocumentAsync(Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<CancellationToken>())
                .Returns(EditDecision.Allow());
 
-        _formats.GetAsync(2, Arg.Any<CancellationToken>()).Returns(
+        _formats.GetAsync(2, Arg.Any<CancellationToken>(), Arg.Any<string?>()).Returns(
             Task.FromResult<IReadOnlyList<ConditionalFormatRule>>(
             [
                 new ConditionalFormatRule(2, "Volume", 1, "gt", "100", null, "#ff0000", "#ffffff", true),
@@ -83,7 +83,7 @@ public sealed class TableSliceConditionalFormatTests
         Assert.Equal(new CellFormatDto("#ff0000", "#ffffff", true), slice.CellFormats["R1:Volume"]);
         Assert.Equal(new CellFormatDto("#cccccc", null, false), slice.CellFormats["R3:Volume"]);
         Assert.False(slice.CellFormats.ContainsKey("R2:Volume"));
-        await _formats.Received(1).GetAsync(2, Arg.Any<CancellationToken>());
+        await _formats.Received(1).GetAsync(2, Arg.Any<CancellationToken>(), "Main");
     }
 
     [Fact]

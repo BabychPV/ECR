@@ -1,4 +1,4 @@
-using Ecr.Application.Calculations;
+﻿using Ecr.Application.Calculations;
 using Ecr.Application.Documents.Dto;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
@@ -468,7 +468,7 @@ public sealed class GetTableSliceHandler(
 
         // L6: правила, прив'язані до ІНШОЇ таблиці, відсікаються одразу — у версії їх можуть бути тисячі
         // (Land: ~3,8 тис. пар «колонка × рядки»), а зріз — найгарячіший запит.
-        var all = (await conditionalFormats.GetAsync(templateVersionId, ct).ConfigureAwait(false))
+        var all = (await conditionalFormats.GetAsync(templateVersionId, ct, tableCode).ConfigureAwait(false))
             .Where(r => r.TableCode is null || string.Equals(r.TableCode, tableCode, StringComparison.Ordinal))
             .ToList();
 

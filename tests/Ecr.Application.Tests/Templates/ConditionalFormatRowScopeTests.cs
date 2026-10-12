@@ -213,6 +213,13 @@ public sealed class ConditionalFormatRowScopeTests
         builder.Column(table, "Land_Status", Ecr.Domain.Enums.CellDataType.Lookup);
         builder.Row(table, "R1");
         builder.Row(table, "R2");
+        builder.Column(table, "OLDREF").SoftDelete(7, Now);
+        builder.Column(table, "OLDCOL").SoftDelete(7, Now);
+        TemplateBuilder.Delete(builder.Row(table, "RDEL"));
+        var gone = builder.Table(sheet, "Gone");
+        builder.Column(gone, "VOL");
+        builder.Column(gone, "Land_Status", Ecr.Domain.Enums.CellDataType.Lookup);
+        TemplateBuilder.Delete(gone);
         var dynamic = builder.Table(sheet, "Dyn", Ecr.Domain.Enums.TableRowMode.Dynamic);
         builder.Column(dynamic, "VOL");
         _draft.AddSheet(sheet);
@@ -289,6 +296,38 @@ public sealed class ConditionalFormatRowScopeTests
         Assert.Equal("err.ECR-CFG-0422.condFormatTable", await Key(Dto(table: null)));   // «*» без таблиці
     }
 
+    [Fact]
+    public async Task L9_22_orphans_of_scoped_rules_are_dropped_silently_and_do_not_take_an_ordinal()
+    {
+        // Таблиця, колонка-джерело, власна колонка (в таблиці) і рядок видалені (м'яко) ПІСЛЯ створення правил.
+        var saved = await Save().HandleAsync(
+            1,
+            [
+                Dto(table: "Gone"),                                                         // таблиця
+                Dto(reference: "OLDREF"),                                                   // колонка-джерело
+                Dto(column: "OLDCOL", reference: "Land_Status"),                            // власна колонка
+                Dto(column: "VOL", op: "ne", value: "0", reference: null, scope: "row", rowKeys: ["RDEL"]), // усі рядки зникли
+                Dto(column: "VOL", op: "ne", value: "0", reference: null, scope: "row", rowKeys: ["R1", "RDEL"]),
+                Dto(column: "VOL", op: "gt", value: "1", table: null, reference: null),
+            ],
+            Etag, CancellationToken.None);
+
+        Assert.Equal(2, saved.Count);
+        // Рядки звужено до живих.
+        Assert.Equal(["R1"], saved[0].RowKeys);
+        Assert.Equal(["VOL", "VOL"], saved.Select(r => r.ColumnCode));
+        // Відкинуті правила не займають Ordinal: нумерація без дір.
+        Assert.Equal([1, 2], _saved!.Select(r => r.Ordinal));
+    }
+
+    [Fact]
+    public async Task L9_22_never_existing_codes_stay_422_even_next_to_deleted_ones()
+    {
+        var ex = await Assert.ThrowsAsync<DomainException>(
+            () => Save().HandleAsync(1, [Dto(table: "Gone"), Dto(reference: "NEVER_EXISTED")], Etag, CancellationToken.None));
+
+        Assert.Equal("err.ECR-CFG-0422.condFormatRef", ex.Details!["messageKey"]);
+    }
     [Fact]
     public async Task Dynamic_table_row_keys_are_not_checked_against_the_template()
     {

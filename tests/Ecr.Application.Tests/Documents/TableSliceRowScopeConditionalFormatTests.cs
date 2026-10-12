@@ -1,4 +1,4 @@
-using Ecr.Application.Documents;
+﻿using Ecr.Application.Documents;
 using Ecr.Application.Documents.Dto;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
@@ -100,7 +100,7 @@ public sealed class TableSliceRowScopeConditionalFormatTests
     }
 
     private void Rules(params ConditionalFormatRule[] rules)
-        => _formats.GetAsync(2, Arg.Any<CancellationToken>())
+        => _formats.GetAsync(2, Arg.Any<CancellationToken>(), Arg.Any<string?>())
                    .Returns(Task.FromResult<IReadOnlyList<ConditionalFormatRule>>(rules));
 
     private async Task<TableSliceDto> Slice()

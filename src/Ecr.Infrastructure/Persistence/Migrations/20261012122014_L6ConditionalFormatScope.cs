@@ -96,6 +96,10 @@ namespace Ecr.Infrastructure.Persistence.Migrations
         }
 
         /// <inheritdoc />
+        /// <remarks>
+        /// ⚠ Down лише на базі БЕЗ правил з textEq/textNe: повернення вузького CK_CondFmt_Operator впаде на таких
+        /// рядках. Спершу видаліть їх (або правила з областю) — дані автоматично не губляться.
+        /// </remarks>
         protected override void Down(MigrationBuilder migrationBuilder)
         {
             migrationBuilder.DropIndex(

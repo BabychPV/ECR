@@ -8,10 +8,12 @@ namespace Ecr.Infrastructure.Persistence;
 public sealed class ConditionalFormatStore(EcrDbContext db) : IConditionalFormatStore
 {
     /// <inheritdoc />
-    public async Task<IReadOnlyList<ConditionalFormatRule>> GetAsync(int templateVersionId, CancellationToken ct)
+    public async Task<IReadOnlyList<ConditionalFormatRule>> GetAsync(
+        int templateVersionId, CancellationToken ct, string? tableCode = null)
         => await db.ConditionalFormatRules
             .AsNoTracking()
             .Where(r => r.TemplateVersionId == templateVersionId)
+            .Where(r => tableCode == null || r.TableCode == null || r.TableCode == tableCode)
             .OrderBy(r => r.ColumnCode).ThenBy(r => r.Ordinal)
             .ToListAsync(ct)
             .ConfigureAwait(false);

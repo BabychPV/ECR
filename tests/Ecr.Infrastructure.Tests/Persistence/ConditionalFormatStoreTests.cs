@@ -91,6 +91,29 @@ public sealed class ConditionalFormatStoreTests(SqlServerFixture sql)
         }
     }
 
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-2.7")]
+    public async Task L6_читання_для_таблиці_фільтрується_в_SQL_правила_без_таблиці_лишаються()
+    {
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var doc = await builder.BuildAsync(ct: CancellationToken.None);
+        var v = doc.TemplateVersionId;
+        await ReplaceAsync(
+            builder, v,
+            new ConditionalFormatRule(v, "A", 1, "gt", "1", null, "#ff0000", null, false),
+            new ConditionalFormatRule(v, "A", 2, "gt", "2", null, "#ff0000", null, false, "column", "T1"),
+            new ConditionalFormatRule(v, "A", 3, "gt", "3", null, "#ff0000", null, false, "column", "T2"));
+
+        await using var db = builder.CreateContext();
+        var store = new ConditionalFormatStore(db);
+
+        var forT1 = await store.GetAsync(v, CancellationToken.None, "T1");
+        var all = await store.GetAsync(v, CancellationToken.None);
+
+        Assert.Equal(["1", "2"], forT1.Select(r => r.Value));
+        Assert.Equal(3, all.Count);
+    }
     private static ConditionalFormatRule Rule(int versionId, int ordinal, string op, string value, string? to = null)
         => new(versionId, "COL", ordinal, op, value, to, "#ff0000", null, false);
 

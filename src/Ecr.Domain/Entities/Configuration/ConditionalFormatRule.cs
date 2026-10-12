@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Text.RegularExpressions;
 using Ecr.Domain.Abstractions;
 
@@ -112,6 +112,15 @@ public sealed partial class ConditionalFormatRule : Entity<int>
 
     /// <summary>Штрих (<see cref="PatternHatch"/>) або <c>null</c>.</summary>
     public string? Pattern { get; private set; }
+
+    private HashSet<string>? _rowKeySet;
+
+    /// <summary>
+    /// Чи ключ рядка в області правила. O(1): множина будується один раз на екземпляр (слайс перебирає
+    /// рядки × колонки; лінійний <c>List.Contains</c> на 500 ключах був би N×M×500).
+    /// </summary>
+    public bool HasRowKey(string rowKey)
+        => RowKeys is not null && (_rowKeySet ??= new HashSet<string>(RowKeys, StringComparer.Ordinal)).Contains(rowKey);
 
     /// <summary>Чи правило несе що-небудь понад колишню колонкову форму.</summary>
     public bool IsScoped

@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using Ecr.Domain.Entities.Configuration;
 
 namespace Ecr.Application.Templates;
@@ -121,7 +121,7 @@ public static class ConditionalFormatEvaluator
             }
 
             if (rule.Scope == ConditionalFormatRule.ScopeRow
-                && (rule.RowKeys is null || !rule.RowKeys.Contains(context.RowKey, StringComparer.Ordinal)))
+                && !rule.HasRowKey(context.RowKey))
             {
                 continue;
             }

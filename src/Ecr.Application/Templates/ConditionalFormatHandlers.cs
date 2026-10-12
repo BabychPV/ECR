@@ -110,6 +110,10 @@ public sealed class SaveConditionalFormatsHandler(
         var deleted = all.Where(c => c.IsDeleted && !columns.Contains(c.Code))
             .Select(c => c.Code).ToHashSet(StringComparer.Ordinal);
 
+        var allTables = version.Sheets.SelectMany(s => s.Tables).ToList();
+        var deletedTables = allTables.Where(t => t.IsDeleted && !tablesByCode.ContainsKey(t.Code))
+            .Select(t => t.Code).ToHashSet(StringComparer.Ordinal);
+
         var ordinals = new Dictionary<string, int>(StringComparer.Ordinal);
         var built = new List<ConditionalFormatRule>(requested.Count);
         for (var i = 0; i < requested.Count; i++)
@@ -120,6 +124,56 @@ public sealed class SaveConditionalFormatsHandler(
                 continue;
             }
 
+            var scope = Blank(r.Scope) ?? ConditionalFormatRule.ScopeColumn;
+            var tableCode = Blank(r.TableCode);
+            var refColumn = Blank(r.RefColumnCode);
+            var rowKeys = r.RowKeys is null ? null : (IReadOnlyList<string>)[.. r.RowKeys.Select(k => k?.Trim() ?? string.Empty)];
+
+            // L9-22 для правил з областю (L6): таблиця, колонка-джерело, власна колонка чи рядок, які видалили
+            // (м'яко) ПІСЛЯ створення правила, не блокують збереження набору — правило-«сирота» мовчки
+            // відкидається (рядки — звужуються до живих; порожній набір рядків — правило відкидається). Код, якого
+            // у версії не було ніколи, лишається 422 нижче. Рішення — ДО нумерації, щоб відкинуте правило не
+            // займало Ordinal.
+            if (tableCode is not null && !tablesByCode.ContainsKey(tableCode) && deletedTables.Contains(tableCode))
+            {
+                continue;
+            }
+
+            if (tableCode is null && refColumn is not null && deleted.Contains(refColumn))
+            {
+                continue;
+            }
+
+            if (tableCode is not null && tablesByCode.TryGetValue(tableCode, out var live))
+            {
+                var tombstones = allTables.Where(t => t.IsDeleted && t.Code == tableCode).ToList();
+                bool Vanished(string column)
+                    => !live.Any(t => t.Columns.Any(c => !c.IsDeleted && c.Code == column))
+                       && (tombstones.Any(t => t.Columns.Any(c => c.Code == column))
+                           || live.Any(t => t.Columns.Any(c => c.IsDeleted && c.Code == column)));
+
+                if ((refColumn is not null && Vanished(refColumn))
+                    || (r.ColumnCode is not null && r.ColumnCode != ConditionalFormatRule.AnyColumn && Vanished(r.ColumnCode)))
+                {
+                    continue;
+                }
+
+                if (rowKeys is { Count: > 0 })
+                {
+                    bool Gone(string key)
+                        => live.All(t => t.RowMode != Domain.Enums.TableRowMode.Dynamic
+                                         && !t.Rows.Any(row => !row.IsDeleted && row.RowKeyValue == key))
+                           && live.Any(t => t.Rows.Any(row => row.IsDeleted && row.RowKeyValue == key));
+
+                    var alive = rowKeys.Where(k => !Gone(k)).ToList();
+                    if (alive.Count == 0)
+                    {
+                        continue;
+                    }
+
+                    rowKeys = alive;
+                }
+            }
             // ⚠ {index} в усіх ключах condFormat* — номер правила серед правил ТІЄЇ Ж
             // колонки (як Ordinal і як у ConditionalFormatRule.Validate), а не позиція
             // в запиті: інакше «правило 3» з одного ключа й «правило 1» з другого
@@ -141,11 +195,6 @@ public sealed class SaveConditionalFormatsHandler(
                         ["columnCode"] = r.ColumnCode,
                     });
             }
-
-            var scope = Blank(r.Scope) ?? ConditionalFormatRule.ScopeColumn;
-            var tableCode = Blank(r.TableCode);
-            var refColumn = Blank(r.RefColumnCode);
-            var rowKeys = r.RowKeys is null ? null : (IReadOnlyList<string>)[.. r.RowKeys.Select(k => k?.Trim() ?? string.Empty)];
 
             // L6: посилання на таблицю, рядки й колонку-джерело мають існувати У ЦІЙ версії — інакше правило
             // мовчки нічого не фарбує (друкарська помилка стає невидимою).
@@ -329,8 +378,8 @@ internal static class ConditionalFormatMapper
 
 /// <summary>Правило умовного форматування (дзеркало клієнтського <c>ConditionalRule</c>).</summary>
 /// <param name="ColumnCode">Код колонки версії.</param>
-/// <param name="Operator">gt, ge, lt, le, eq, ne, between, empty, notEmpty.</param>
-/// <param name="Value">Операнд (число); не потрібен для empty/notEmpty.</param>
+/// <param name="Operator">gt, ge, lt, le, eq, ne, between, empty, notEmpty; текстові (L6): textEq, textNe.</param>
+/// <param name="Value">Операнд: число (для textEq/textNe — текст, регістр ігнорується); не потрібен для empty/notEmpty.</param>
 /// <param name="ValueTo">Верхня межа — лише для between.</param>
 /// <param name="BackgroundHex"><c>#rrggbb</c> або <c>null</c> — колір теми.</param>
 /// <param name="ForegroundHex"><c>#rrggbb</c> або <c>null</c>.</param>
