@@ -105,6 +105,19 @@ public sealed class CiAttestationTests
                 $"{file}: у «{id}» умова `if` не містить протилежної `{FullGuard}` — на PR rc/** обидва завдання (повне й атестація) або жодне.");
             Assert.DoesNotContain("|| true", condition, StringComparison.Ordinal);
             Assert.DoesNotContain("continue-on-error", job.Body, StringComparison.Ordinal);
+
+            // ⛔ протилежна умова з'єднана ЛИШЕ через `&&`: `||` зробив би її «або», і повне
+            // завдання запускалось би (чи атестація пропускалась) там, де не мусить
+            Assert.DoesNotContain("||", condition, StringComparison.Ordinal);
+            var at = condition!.IndexOf(FullGuard, StringComparison.Ordinal);
+            var before = condition[..at].TrimEnd();
+            var after = condition[(at + FullGuard.Length)..].TrimStart();
+            Assert.True(
+                before.EndsWith("&&", StringComparison.Ordinal) || before.EndsWith("${{", StringComparison.Ordinal),
+                $"{file}: у «{id}» перед протилежною умовою має стояти `&&` або початок виразу.");
+            Assert.True(
+                after.StartsWith("&&", StringComparison.Ordinal) || after.StartsWith("}}", StringComparison.Ordinal),
+                $"{file}: у «{id}» після протилежної умови має стояти `&&` або кінець виразу.");
         }
     }
 
@@ -130,10 +143,137 @@ public sealed class CiAttestationTests
         Assert.DoesNotContain("neutral", script, StringComparison.Ordinal);
         // події: push / dispatch / schedule, а PR — лише не з rc/ (сама атестація не є «повним прогоном»)
         Assert.Contains(".event == \"push\"", script, StringComparison.Ordinal);
-        Assert.Contains("(.head_branch | startswith(\"rc/\")) | not", script, StringComparison.Ordinal);
+        Assert.Contains("(((.head_branch // \"\") | startswith(\"rc/\")) | not)", script, StringComparison.Ordinal);
         // той самий SHA, а не гілка
         Assert.Contains("head_sha=$HEAD_SHA", script, StringComparison.Ordinal);
         Assert.Contains("github.event.pull_request.head.sha", job, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("ci.yml")]
+    [InlineData("evidence.yml")]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Скрипт_атестації_виходить_нулем_лише_на_success_і_відхиляє_форки(string file)
+    {
+        var job = Jobs(file).Single(j => j.Id == "attest").Body;
+        var script = Script(job);
+
+        Assert.StartsWith("set -euo pipefail", script, StringComparison.Ordinal);
+
+        // єдиний `exit 0` — усередині гілки `success*)`; жодної гілки-«усе інше» (`*)`)
+        Assert.Single(Regex.Matches(script, @"exit\s+0\b"));
+        Assert.Matches(@"(?ms)^\s*success\*\)\s*\n[^\n]*\n\s*exit 0\s*\n\s*;;\s*\n\s*esac", script);
+        Assert.DoesNotMatch(@"(?m)^\s*\*\)", script);
+        Assert.DoesNotMatch(@"(?m)^\s*\S*\|\s*\*\)", script);
+
+        // перевірка форка: умова + вихід 1, і джерело змінної — репозиторій head PR
+        Assert.Matches(
+            @"(?ms)if \[ ""\$HEAD_REPO"" != ""\$REPO"" \]; then\s*\n\s*echo [^\n]*\n\s*exit 1\s*\n\s*fi",
+            script);
+        Assert.Contains("HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}", job, StringComparison.Ordinal);
+        Assert.Contains("REPO=\"$GITHUB_REPOSITORY\"", script, StringComparison.Ordinal);
+        Assert.Matches(@"(?ms)if \[ -z ""\$HEAD_SHA"" \]; then\s*\n\s*echo [^\n]*\n\s*exit 1\s*\n\s*fi", script);
+
+        // кінець скрипта — помилка й `exit 1`, а не успіх
+        var last = script.Split('\n').Last(l => l.Trim().Length > 0).Trim();
+        Assert.Equal("exit 1", last);
+    }
+
+    [Theory]
+    [InlineData("ci.yml")]
+    [InlineData("evidence.yml")]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Атестація_чекає_і_завершені_прогони_і_їх_відсутність_до_межі_очікування(string file)
+    {
+        var job = Jobs(file).Single(j => j.Id == "attest").Body;
+        var script = Script(job);
+
+        Assert.Contains(
+            "if { [ \"$pending\" -gt 0 ] || [ \"$total\" -eq 0 ]; } && [ \"$(date +%s)\" -lt \"$deadline\" ]; then",
+            script,
+            StringComparison.Ordinal);
+
+        var wait = Regex.Match(job, @"ATTEST_WAIT_MIN:\s*'(?<m>\d+)'");
+        Assert.True(wait.Success, $"{file}: немає ATTEST_WAIT_MIN.");
+        var minutes = int.Parse(wait.Groups["m"].Value, System.Globalization.CultureInfo.InvariantCulture);
+        Assert.InRange(minutes, 1, 15);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Імена_повних_завдань_на_rc_відмінні_від_атестацій_а_на_інших_подіях_незмінні()
+    {
+        // (1) імена, які push-прогін повних завдань дає за не-rc події, і ті, що чекає атестація.
+        var ciJobs = Jobs("ci.yml");
+        var evidenceJobs = Jobs("evidence.yml");
+
+        var themes = Matrix(ciJobs.Single(j => j.Id == "a11y").Body, "theme");
+        Assert.Equal("dark,light", string.Join(',', themes.OrderBy(x => x, StringComparer.Ordinal)));
+
+        var pushNames = new HashSet<string>(StringComparer.Ordinal);
+        var rcNames = new HashSet<string>(StringComparer.Ordinal);
+        var attestNames = new HashSet<string>(StringComparer.Ordinal);
+
+        foreach (var (jobs, ids) in new[]
+                 {
+                     (ciJobs, new[] { "server", "client", "a11y", "windows" }),
+                     (evidenceJobs, new[] { "build", "test" }),
+                 })
+        {
+            foreach (var id in ids)
+            {
+                var name = SingleLine(jobs.Single(j => j.Id == id).Body, "name");
+                Assert.NotNull(name);
+                var m = Regex.Match(
+                    name!,
+                    @"^\$\{\{ \(github\.event_name == 'pull_request' && startsWith\(github\.head_ref, 'rc/'\)\) && '(?<rc>[^']+)' \|\| (?<other>'[^']+'|format\('a11y \(\{0\}\)', matrix\.theme\)) \}\}$");
+                Assert.True(m.Success, $"«{id}»: ім'я не має форми «rc ? інше-ім'я : звичайне». Фактично: {name}");
+
+                var rc = m.Groups["rc"].Value;
+                Assert.Equal($"{(id == "a11y" ? "a11y" : id)} (повний, пропущено на rc)", rc);
+
+                if (id == "a11y")
+                {
+                    Assert.Equal("format('a11y ({0})', matrix.theme)", m.Groups["other"].Value);
+                    foreach (var t in themes)
+                    {
+                        pushNames.Add($"a11y ({t})");
+                    }
+                }
+                else
+                {
+                    Assert.Equal($"'{id}'", m.Groups["other"].Value);
+                    pushNames.Add(id);
+                }
+
+                rcNames.Add(rc);
+            }
+        }
+
+        foreach (var jobs in new[] { ciJobs, evidenceJobs })
+        {
+            foreach (var n in Matrix(jobs.Single(j => j.Id == "attest").Body, "check"))
+            {
+                attestNames.Add(n);
+            }
+        }
+
+        // атестація шукає ті імена, які справді дають повні завдання, і навпаки
+        Assert.Subset(pushNames, attestNames);
+        Assert.Subset(attestNames, pushNames);
+        // кожне обов'язкове атестоване ім'я присутнє
+        foreach (var name in Required.Except(NotAttested))
+        {
+            Assert.Contains(name, attestNames);
+            Assert.Contains(name, pushNames);
+        }
+
+        // skipped-близнюк на rc-PR не має спільного імені з атестацією
+        Assert.Empty(rcNames.Intersect(attestNames, StringComparer.Ordinal));
+        Assert.Empty(rcNames.Intersect(Required, StringComparer.Ordinal));
     }
 
     [Fact]
@@ -208,6 +348,18 @@ public sealed class CiAttestationTests
     {
         var m = Regex.Match(body, @"(?m)^    " + Regex.Escape(key) + @":\s*(?<v>.+?)\s*$");
         return m.Success ? m.Groups["v"].Value : null;
+    }
+
+    /// <summary>Елементи рядка матриці <c>key: [a, b]</c> (лапки одинарні або без них).</summary>
+    private static string[] Matrix(string body, string key)
+    {
+        var m = Regex.Match(body, @"(?m)^\s+" + Regex.Escape(key) + @":\s*\[(?<l>[^\]]*)\]");
+        Assert.True(m.Success, $"немає матриці {key}.");
+        return m.Groups["l"].Value
+            .Split(',')
+            .Select(x => x.Trim().Trim('\''))
+            .Where(x => x.Length > 0)
+            .ToArray();
     }
 
     /// <summary>Блок <c>run: |</c> кроку атестації, без відступу.</summary>

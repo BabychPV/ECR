@@ -241,6 +241,11 @@ jobs:
   # main/integ-* умова істинна й `server` рахує всі частини, як і раніше.
   server:
     needs: server-part
+    # ✎ 2026-10-12 (рев'ю атестації): на PR `rc/*` пропущене повне завдання створює check-run
+    # `skipped` із ТИМ САМИМ іменем, що й атестація, і «пропущений близнюк» міг би перекрити
+    # червону атестацію в обчисленні обов'язкових перевірок. Тому на rc-PR повне завдання
+    # має ІНШЕ ім'я; на решті подій ім'я незмінне (його читає атестація й ruleset `main`).
+    name: ${{ (github.event_name == 'pull_request' && startsWith(github.head_ref, 'rc/')) && 'server (повний, пропущено на rc)' || 'server' }}
     if: ${{ always() && !(github.event_name == 'push' && startsWith(github.ref, 'refs/heads/lane/') && !startsWith(github.ref, 'refs/heads/lane/integ-')) && !(github.event_name == 'pull_request' && startsWith(github.head_ref, 'rc/')) }}
     runs-on: ubuntu-latest
     steps:
@@ -253,6 +258,7 @@ jobs:
           fi
 
   client:
+    name: ${{ (github.event_name == 'pull_request' && startsWith(github.head_ref, 'rc/')) && 'client (повний, пропущено на rc)' || 'client' }}
     if: ${{ !(github.event_name == 'push' && startsWith(github.ref, 'refs/heads/lane/') && !startsWith(github.ref, 'refs/heads/lane/integ-')) && !(github.event_name == 'pull_request' && startsWith(github.head_ref, 'rc/')) }}
     runs-on: ubuntu-latest
     steps:
@@ -282,6 +288,7 @@ jobs:
   # близько 35 с на маршрут, і одна тема іде 16-23 хвилини. У складі
   # `client` вона тримала б решту гейтів заручниками; поруч — не тримає нікого.
   a11y:
+    name: ${{ (github.event_name == 'pull_request' && startsWith(github.head_ref, 'rc/')) && 'a11y (повний, пропущено на rc)' || format('a11y ({0})', matrix.theme) }}
     if: ${{ !(github.event_name == 'push' && startsWith(github.ref, 'refs/heads/lane/') && !startsWith(github.ref, 'refs/heads/lane/integ-')) && !(github.event_name == 'pull_request' && startsWith(github.head_ref, 'rc/')) }}
     runs-on: ubuntu-latest
     # ⚠ W4.3 (accessibility.a11y.test.tsx, коментар над ECR_A11Y_THEME) описував
@@ -533,7 +540,7 @@ jobs:
   # ⚠ `if: always()` — як у `server`: без нього червоне завдання дало б `skipped`,
   # а пропущену обов'язкову перевірку GitHub зараховує як пройдену.
   windows:
-    name: windows
+    name: ${{ (github.event_name == 'pull_request' && startsWith(github.head_ref, 'rc/')) && 'windows (повний, пропущено на rc)' || 'windows' }}
     needs: [ worker-windows, msi-windows, msi-install ]
     # ✎ 2026-10-12: на push у не-інтеграційну `lane/**` Windows-завдання пропущені навмисно — агрегатор теж.
     if: ${{ always() && !(github.event_name == 'push' && startsWith(github.ref, 'refs/heads/lane/') && !startsWith(github.ref, 'refs/heads/lane/integ-')) && !(github.event_name == 'pull_request' && startsWith(github.head_ref, 'rc/')) }}
@@ -595,7 +602,7 @@ jobs:
           WORKFLOW_FILE: ci.yml
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
-          ATTEST_WAIT_MIN: '20'
+          ATTEST_WAIT_MIN: '10'
         run: |
           set -euo pipefail
           REPO="$GITHUB_REPOSITORY"
@@ -611,7 +618,7 @@ jobs:
           while true; do
             : > found.jsonl
             runs="$(gh api "repos/$REPO/actions/workflows/$WORKFLOW_FILE/runs?head_sha=$HEAD_SHA&per_page=100" \
-              --jq '.workflow_runs[] | select(.event == "push" or .event == "workflow_dispatch" or .event == "schedule" or (.event == "pull_request" and ((.head_branch | startswith("rc/")) | not))) | .id')"
+              --jq '.workflow_runs[] | select(.event == "push" or .event == "workflow_dispatch" or .event == "schedule" or (.event == "pull_request" and (((.head_branch // "") | startswith("rc/")) | not))) | .id')"
             for run_id in $runs; do
               gh api --paginate "repos/$REPO/actions/runs/$run_id/jobs?per_page=100&filter=latest" \
                 | jq -c --arg n "$CHECK" '.jobs[] | select(.name == $n) | {run_id, status, conclusion, completed_at, url: .html_url}' >> found.jsonl
@@ -625,8 +632,8 @@ jobs:
                 exit 0
                 ;;
             esac
-            if [ "$pending" -gt 0 ] && [ "$(date +%s)" -lt "$deadline" ]; then
-              echo "повний прогін «$CHECK» на $HEAD_SHA ще йде ($pending у процесі) — чекаю 90 с"
+            if { [ "$pending" -gt 0 ] || [ "$total" -eq 0 ]; } && [ "$(date +%s)" -lt "$deadline" ]; then
+              echo "повний прогін «$CHECK» на $HEAD_SHA ще не завершився (знайдено: $total, у процесі: $pending) — чекаю 90 с"
               sleep 90
               continue
             fi
