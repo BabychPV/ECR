@@ -46,10 +46,13 @@ interface SliceRef {
 const touched: SliceRef[] = [];
 
 test.describe('cellColor: колір комірки на реальному стенді (CELL-STYLE L4)', () => {
-  test.skip(
-    PeriodKey === '' || DocumentId === '',
-    'ECR_E2E_OPTIONAL: стенда немає, перевіряти нічого. Стенд: tools/e2e-stand.ps1.',
-  );
+  // ⛔ Без стенда файл ПАДАЄ, а не пропускається (honesty-guard: пропуск червонить Evidence; те саме робить
+  // `globalSetup.ts` для всього набору). Стенд: `tools/e2e-stand.ps1`.
+  test.beforeAll(() => {
+    if (PeriodKey === '' || DocumentId === '') {
+      throw new Error('стенда немає: в оточенні немає ECR_E2E_PERIOD/ECR_E2E_DOCUMENT (tools/e2e-stand.ps1)');
+    }
+  });
   // ⚠ НЕ `serial`: кожен сценарій сам виставляє грант/стан (`ensureOperatorLevel`, `makeSheetEditable`), тож падіння
   // першого (напр. UI-шлях запису) не має ховати решту. Порядок - за файлом (`workers: 1`).
   test.describe.configure({ timeout: 240_000 });
@@ -256,7 +259,7 @@ test.describe('cellColor: колір комірки на реальному ст
 
     try {
       // Стенд не вміє закрити період з e2e (стан періоду - `PeriodStateJob`, ручного «закрити» немає), тож шукаємо
-      // вже закритий у календарі проєкту. Немає - червоне з «не доведено» (honesty-guard: без Skip).
+      // вже закритий у календарі проєкту. Немає - червоне з «не доведено» (honesty-guard).
       const closed = await findClosedPeriod(page);
       if (closed === null) throw new Error('не доведено: у календарі стенда немає періоду зі станом Closed');
 
