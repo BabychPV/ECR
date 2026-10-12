@@ -3122,7 +3122,7 @@ public interface ICellStyleStore
     "columnCodes": ["Volume"],     // АБО "allColumns": true
     "backgroundHex": "#FFE699", "foregroundHex": null, "isBold": null,
     "reset": false } }             // reset=true — зняти ВСЕ оформлення з області
-// 200: { "appliedCells": 840, "resetCells": 0, "deniedCells": 160, "deniedByReason": { "NoGrant": 100, "RowReadOnly": 60 } }
+// 200: { "appliedCells": 840, "resetCells": 0, "deniedCells": 160, "deniedByReason": { "NoGrant": 100, "RowReadOnly": 60 }, "skippedCells": 0 }
 ```
 
 - Форма: рівно одне з `rowKeys`(непорожній)/`allRows`, рівно одне з `columnCodes`/`allColumns`; поля змін — як у `items` (`null` не чіпати, `""` зняти, `#rrggbb`); `reset` ігнорує поля змін. Порушення — `422 ECR-CELL-4224` (`scopeRows`/`scopeColumns`/`scopeInvalidColor`/`scopeEmptyChange`).
@@ -3131,7 +3131,8 @@ public interface ICellStyleStore
 - Права на кожну комірку — ТІ САМІ, що в `items` (`CanClearCellsAsync`, стан аркуша, період/Grace, передачі зрізу з повторною перевіркою під замком, рядок «лише читання»). Різниця — **часткова відмова**: недозволені комірки `scope` не валять запит — повертаються в `deniedCells` (+ `deniedByReason`, до 10 причин, без назв рядків/колонок), решта застосована. Нуль дозволених і хоч одна відмова — `403 ECR-ACCS-0403` як в `items`. Відмова комірки з `items` у змішаному запиті — повна (`403`, нічого не записано), як і раніше.
 - Ліміт: розгорнуто не більше **100 000** комірок (`ScopeMaxCells`) — інакше `422 ECR-CELL-4224 tooManyCells` (до будь-якого читання прав); `items` — як і раніше ≤ 2000. Запис — одна транзакція, чанки по 1000.
 - Аудит — ОДНА подія `CellStyleSet`/`CellStyleReset` на запит: кількості (`applied`, `reset`, `denied`), опис області (`rowKeys` count/`allRows`, `columnCodes` count/`allColumns`) і задані кольори; без переліку комірок.
-- Ідемпотентність: повтор того самого запиту дає `appliedCells = 0`. Рядки, додані після розгортання, область не охоплює (знімок на момент запиту).
+- `skippedCells` — дозволені комірки без змін (оформлення вже таке саме); `applied + reset + skipped + denied` = розгорнуто комірок.
+- Ідемпотентність: повтор того самого запиту дає `appliedCells = 0` (і `skippedCells` = усе дозволене). Рядки, додані після розгортання, область не охоплює (знімок на момент запиту).
 - Архівація: `doc.CellStyle` не копіюється в `arc.*` і не обрізається з партиціями (немає ключів на `doc.TableRow`). Слайс/експорт читають лише живі рядки (join на `doc.TableRow`), тож оформлення архівного періоду не віддається. Варіанти: (а) не архівувати стилі (поточне; сироти — P3, чистка maintenance-job у беклогу); (б) `arc.CellStyle` + копія/відновлення в `arc.usp_ArchiveYear`/`RestoreYear` — потребує міграції, окреме рішення.
 
 #### `ITableFillStore`

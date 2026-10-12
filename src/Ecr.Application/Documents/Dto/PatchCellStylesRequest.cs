@@ -239,8 +239,13 @@ public sealed record CellStyleScope(
 /// Причини відмови з лічильниками (не більше 10; без назв рядків і колонок), лише коли
 /// <paramref name="DeniedCells"/> більше нуля.
 /// </param>
+/// <param name="SkippedCells">
+/// Дозволених комірок без змін (оформлення вже таке саме; ідемпотентний повтор). Разом
+/// <c>applied + reset + skipped + denied</c> = розгорнуто комірок.
+/// </param>
 public sealed record PatchCellStylesResponse(
     int AppliedCells,
     int ResetCells,
     int DeniedCells = 0,
-    IReadOnlyDictionary<string, int>? DeniedByReason = null);
+    IReadOnlyDictionary<string, int>? DeniedByReason = null,
+    int SkippedCells = 0);
