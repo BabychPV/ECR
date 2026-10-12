@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+﻿import { describe, it, expect, vi } from 'vitest';
 import type { ColumnDto, TableSliceDto } from '@/api/types';
 import { addRowDenialOf, cellKey, confirmationOf, decide, guardOf } from '@/features/grid/permissions';
 
