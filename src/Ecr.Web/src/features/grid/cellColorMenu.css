@@ -1,0 +1,77 @@
+/*
+ * Палітра кольору комірки (L4). Кольори зразків — самі кольори вибору (дані, не
+ * тема), тому рамка зразка — токен межі теми: біла плитка видима і в темній,
+ * чорна — у світлій. Решта — змінні Mantine.
+ */
+.ecr-cell-color-menu {
+  display: inline-flex;
+  gap: var(--mantine-spacing-xs);
+}
+
+.ecr-cell-color-dropdown {
+  width: 232px;
+}
+
+.ecr-cell-color-grid {
+  display: grid;
+  grid-template-columns: repeat(10, 1fr);
+  gap: 3px;
+  margin-bottom: 3px;
+}
+
+.ecr-cell-color-shades {
+  margin-bottom: 1px;
+}
+
+.ecr-cell-color-caption {
+  margin: 6px 0 3px;
+  color: var(--mantine-color-dimmed);
+  font-size: var(--mantine-font-size-xs);
+}
+
+.ecr-cell-color-swatch {
+  box-sizing: border-box;
+  width: 100%;
+  aspect-ratio: 1;
+  padding: 0;
+  cursor: pointer;
+  border: 1px solid var(--mantine-color-default-border);
+  border-radius: 2px;
+}
+
+.ecr-cell-color-swatch:hover {
+  outline: 2px solid var(--mantine-primary-color-filled);
+  outline-offset: 1px;
+}
+
+.ecr-cell-color-swatch:focus-visible,
+.ecr-cell-color-reset:focus-visible {
+  outline: 2px solid var(--mantine-primary-color-filled);
+  outline-offset: 1px;
+}
+
+.ecr-cell-color-reset {
+  display: block;
+  width: 100%;
+  margin: 4px 0;
+  padding: 4px 6px;
+  cursor: pointer;
+  border: 0;
+  border-radius: 2px;
+  background: transparent;
+  color: var(--mantine-color-text);
+  font: inherit;
+  text-align: left;
+}
+
+.ecr-cell-color-reset:hover {
+  background: var(--mantine-color-default-hover);
+}
+
+.ecr-cell-color-native {
+  position: absolute;
+  width: 0;
+  height: 0;
+  opacity: 0;
+  pointer-events: none;
+}
