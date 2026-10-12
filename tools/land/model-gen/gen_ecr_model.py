@@ -901,6 +901,19 @@ for sh in X['sheets']:
                 if (code, val) not in seen_cf:
                     seen_cf.add((code, val))
                     cfs.append({'columnCode': code, 'operator': 'eq', 'value': val, 'backgroundHex': '#D9D9D9', 'foregroundHex': '#7F7F7F', 'isBold': False})
+# ---- масштаб числових колонок: сховище комірки — decimal(34,16) (CellValueConfiguration, CellValueReader.StorageScale = 16).
+# Прод-зразок 2026-10-12 (прогалина 10): прод має 16 знаків, а колонки моделі мали (28,12) — ColumnDef.ValidateValue
+# відхиляє знак понад Scale, тож значення довелось округляти до 10 знаків. Вхідні Decimal і Formula-колонки (мости/суми, що
+# копіюють вхід) отримують (34,16) = межа сховища: без міграції, без втрати знаків. Calculated (виходи методологій) лишаються
+# (28,12): їх масштаб задає прив'язка методології (binding.OutputScales), а Scale колонки лише подача.
+DECIMAL_PRECISION, DECIMAL_SCALE = 34, 16
+for s_ in out['sheets']:
+    for t_ in s_['tables']:
+        for c_ in t_['columns']:
+            if c_.get('dataType') in ('Decimal', 'Formula') and c_.get('precision') is not None:
+                c_['precision'] = DECIMAL_PRECISION
+                c_['scale'] = DECIMAL_SCALE
+
 out['conditionalFormats'] = []  # ECR підтримує лише числові пороги (eq/ne/gt/...); Excel-правила за текстом «Removed» не переносяться\nout['conditionalFormatsNotTransferred'] = cfs
 out['registries'] = list(registries.values())
 out['stats'] = {'excelSheets': len(X['sheets']), 'reportSheets': len(out['sheets']), 'tables': stat_tables, 'columns': stat_cols,
