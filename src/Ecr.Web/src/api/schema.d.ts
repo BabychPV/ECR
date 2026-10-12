@@ -23856,6 +23856,13 @@ export interface components {
              * @description Комірок, з яких знято все оформлення (рядок стилю видалено).
              */
             resetCells: number;
+            /**
+             * Format: int32
+             * @description Дозволених комірок без змін (оформлення вже таке саме; ідемпотентний повтор). Разом
+             *     `applied + reset + skipped + denied` = розгорнуто комірок.
+             * @default 0
+             */
+            skippedCells: number;
         };
         /** @description Пакетна зміна комірок. Часткове застосування заборонене: конфлікт у
          *     будь-якому рядку відхиляє весь батч (B04 §2.3). */

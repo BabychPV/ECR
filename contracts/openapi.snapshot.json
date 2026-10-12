@@ -9417,6 +9417,12 @@
             "description": "Комірок, з яких знято все оформлення (рядок стилю видалено).",
             "format": "int32",
             "type": "integer"
+          },
+          "skippedCells": {
+            "default": 0,
+            "description": "Дозволених комірок без змін (оформлення вже таке саме; ідемпотентний повтор). Разом\n`applied + reset + skipped + denied` = розгорнуто комірок.",
+            "format": "int32",
+            "type": "integer"
           }
         },
         "required": [
