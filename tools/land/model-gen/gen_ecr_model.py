@@ -985,7 +985,8 @@ def _waste_mapping():
 
 out['prodMapping'] = {'formatVersion': 1, 'source': 'LAND-PROD-SAMPLE-2026-10-12 (структура; даних прод-БД немає)', 'waste': _waste_mapping()}
 
-out['conditionalFormats'] = []  # ECR підтримує лише числові пороги (eq/ne/gt/...); Excel-правила за текстом «Removed» не переносяться\nout['conditionalFormatsNotTransferred'] = cfs
+out['conditionalFormats'] = []  # ECR підтримує лише числові пороги (eq/ne/gt/...); Excel-правила за текстом «Removed» не переносяться
+out['conditionalFormatsNotTransferred'] = cfs
 out['registries'] = list(registries.values())
 out['stats'] = {'excelSheets': len(X['sheets']), 'reportSheets': len(out['sheets']), 'tables': stat_tables, 'columns': stat_cols,
                 'registries': len(registries), 'registryEntries': sum(len(r['entries']) for r in registries.values())}
