@@ -131,10 +131,16 @@ internal static class EditAssignmentFactsReader
         var idsJson = System.Text.Json.JsonSerializer.Serialize(assignments.Select(a => a.Id));
 
         var mine = await db.EditAssignmentRecipients
+            // ⛔ P2-N3 (CI integ-1011-k): `WHERE UserId = @u AND AssignmentId IN (…)` оптимізатор виконував через
+            // IX_EditAssignmentRecipient_User (UserId, Status) і брав S на рядки виконавця в ІНШИХ документах.
+            // Тут — вибірка за ПАРАМИ (AssignmentId, UserId): OPENJSON з id першого statement, вкладені цикли й
+            // індекс PK примусово — кожен рядок береться пошуком по первинному ключу (AssignmentId, UserId).
             .FromSql($"""
-                SELECT r.* FROM doc.EditAssignmentRecipient AS r WITH (REPEATABLEREAD, ROWLOCK)
-                WHERE r.UserId = {userId}
-                  AND r.AssignmentId IN (SELECT CAST(j.[value] AS bigint) FROM OPENJSON({idsJson}) AS j)
+                SELECT r.*
+                FROM OPENJSON({idsJson}) AS j
+                INNER LOOP JOIN doc.EditAssignmentRecipient AS r
+                    WITH (REPEATABLEREAD, ROWLOCK, INDEX(PK_EditAssignmentRecipient))
+                    ON r.AssignmentId = CAST(j.[value] AS bigint) AND r.UserId = {userId}
                 """)
             .AsNoTracking()
             .OrderBy(r => r.AssignmentId)

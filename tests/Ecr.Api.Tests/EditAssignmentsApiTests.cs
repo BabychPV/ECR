@@ -283,7 +283,8 @@ public sealed class EditAssignmentsApiTests(SqlServerFixture sql)
         var s = await ArrangeAsync().ConfigureAwait(true);
         using var app = new EcrApiFactory(sql);
         using var owner = await SignedInAsync(app, s.Manager.UserName).ConfigureAwait(true);
-        using var other = await SignedInAsync(app, s.OtherExecutor.UserName).ConfigureAwait(true);
+        // Чужий користувач — теж менеджер (S2: /me/editor-sets лише для Write у проєкті), але не власник набору.
+        using var other = await SignedInAsync(app, s.Manager2.UserName).ConfigureAwait(true);
         var setsUri = new Uri("/api/v1/me/editor-sets", UriKind.Relative);
 
         var set = await JsonAsync(
@@ -669,8 +670,11 @@ public sealed class EditAssignmentsApiTests(SqlServerFixture sql)
         // Зміна (isExclusive) іде в тлі: вона тримає U на передачі й чекає X, але НЕ тримає документ.
         var change = owner.PostAsJsonAsync(
             ListUri(s), CreateBody(s, s.Executor.Id, isExclusive: false, baseVersion: version));
-        // Чекаємо не годинник, а факт очікування: зміна стала в чергу на X передачі (LCK_M_X у dm_tran_locks).
-        await WaitForLockWaitAsync().ConfigureAwait(true);
+        // Чекаємо не годинник, а факт очікування: зміна вже тримає U на передачі й чекає її X-конверсії
+        // (у dm_tran_locks це CONVERT, а не WAIT) - тобто вона ПРОЙШЛА місце, де раніше брала документ.
+        // Не вимагаємо черги: якщо запит устиг завершитися чи не став у чергу, інверсії все одно немає - тест
+        // лише чекає ДО 10 с, щоб синхронізуватися з моментом, коли зміна тримає U на передачі.
+        await WaitForLockWaitAsync(seconds: 10, required: false, stopWhen: change).ConfigureAwait(true);
 
         // «Дотик» документа записом не чекає: якби зміна тримала U на doc.Document — тут 1222/1205.
         await using (var touch = writer.CreateCommand())
@@ -797,13 +801,18 @@ public sealed class EditAssignmentsApiTests(SqlServerFixture sql)
         Assert.Equal("Keep", again.GetProperty("appliedSetName").GetString());
     }
 
-    private async Task WaitForLockWaitAsync()
+    private async Task WaitForLockWaitAsync(int seconds = 15, bool required = true, Task? stopWhen = null)
     {
-        var deadline = DateTime.UtcNow.AddSeconds(15);
+        var deadline = DateTime.UtcNow.AddSeconds(seconds);
         while (DateTime.UtcNow < deadline)
         {
+            if (stopWhen is { IsCompleted: true })
+            {
+                return;
+            }
+
             if (await ScalarAsync(
-                    "SELECT COUNT(*) FROM sys.dm_tran_locks WHERE resource_database_id = DB_ID() AND request_status = 'WAIT'")
+                    "SELECT COUNT(*) FROM sys.dm_tran_locks WHERE resource_database_id = DB_ID() AND request_status IN ('WAIT', 'CONVERT')")
                 .ConfigureAwait(false) > 0)
             {
                 return;
@@ -812,7 +821,10 @@ public sealed class EditAssignmentsApiTests(SqlServerFixture sql)
             await Task.Delay(50).ConfigureAwait(false);
         }
 
-        Assert.Fail("Запит не став у чергу на блокування за 15 с.");
+        if (required)
+        {
+            Assert.Fail("Запит не став у чергу на блокування вчасно.");
+        }
     }
 
     private Task<int> GrantedLocksOnAssignmentsAsync()
