@@ -401,8 +401,8 @@ public sealed class RowStore(
     {
         // ⚠ Журнал не є сутністю EF; `IX_CellChange_Cell (DocumentId, TableRowId, ColumnDefId, ChangedAt DESC)`.
         // Береться ОСТАННЯ зміна кожної комірки, окрім перерахунку (він міняє похідне, а не вхід).
-        var found = withArchive
-            ? await db.Database
+        var query = withArchive
+            ? db.Database
                 .SqlQuery<int>($"""
                     SELECT TOP (1) 1 AS Value
                     FROM (
@@ -421,9 +421,7 @@ public sealed class RowStore(
                     ) x
                     WHERE x.Rn = 1 AND x.Origin = {CellChangeOrigins.Integration}
                     """)
-                .ToListAsync(ct)
-                .ConfigureAwait(false)
-            : await db.Database
+            : db.Database
                 .SqlQuery<int>($"""
                     SELECT TOP (1) 1 AS Value
                     FROM (
@@ -434,9 +432,9 @@ public sealed class RowStore(
                           AND c.Origin <> {CellChangeOrigins.Recalculation}
                     ) x
                     WHERE x.Rn = 1 AND x.Origin = {CellChangeOrigins.Integration}
-                    """)
-                .ToListAsync(ct)
-                .ConfigureAwait(false);
+                    """);
+
+        var found = await query.ToListAsync(ct).ConfigureAwait(false);
 
         return found.Count > 0;
     }
