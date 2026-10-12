@@ -227,8 +227,9 @@ public sealed class EditorSetsHandler(
                 var valid = id != ownerId
                     && found.TryGetValue(id, out var u)
                     && u.IsActive
-                    && EditAssignmentAccess.HasReadInAnyProject(
-                        await access.BuildProfileAsync(id, ct).ConfigureAwait(false));
+                    && await EditAssignmentAccess.TryBuildProfileAsync(access, id, ct).ConfigureAwait(false)
+                        is { } memberProfile
+                    && EditAssignmentAccess.HasReadInAnyProject(memberProfile);
 
                 if (!valid)
                 {

@@ -65,15 +65,35 @@ public sealed class ListEditAssignmentsHandler(
 
         // RC20 D-2: чи бачить кожен виконавець документ за своїми прямими призначеннями. Профіль виконавця
         // будується так само, як при передачі (`PrepareAsync`); стеля — щоб перелік не став N запитів.
+        //
+        // ⛔ Вимкнений/відсутній виконавець профілю не має (служба доступу кидає ECR-AUTH-0401, а клієнт
+        // виходив би з сесії МЕНЕДЖЕРА): для нього visibility = Unknown, перелік — 200 (аудит P1).
+        // ⚠ Порядок — за `userId` і стеля фіксована: при перевищенні однакові виконавці лишаються без позначки в
+        // кожному запиті, а не різні від виклику до виклику. Обрано 200 (профіль кешується; типова передача — до
+        // десятка виконавців), а не 50: нижча стеля ховала б позначку саме в документах із наборами.
         var recipientScopes = new Dictionary<int, DocumentReadScope?>();
-        foreach (var recipientId in visible.SelectMany(a => a.Recipients.Select(r => r.UserId)).Distinct())
+        foreach (var recipientId in visible
+                     .SelectMany(a => a.Recipients.Select(r => r.UserId))
+                     .Distinct()
+                     .OrderBy(id => id))
         {
             if (recipientScopes.Count >= MaxVisibilityProfiles)
             {
                 break;
             }
 
-            var recipientProfile = await access.BuildProfileAsync(recipientId, ct).ConfigureAwait(false);
+            if (!users.TryGetValue(recipientId, out var recipientRef) || !recipientRef.IsActive)
+            {
+                continue;
+            }
+
+            var recipientProfile = await EditAssignmentAccess
+                .TryBuildProfileAsync(access, recipientId, ct).ConfigureAwait(false);
+            if (recipientProfile is null)
+            {
+                continue;
+            }
+
             recipientScopes[recipientId] = recipientProfile.SeesDocumentsOf(document.ProjectId)
                 && PermissionCheck.IsGrantedIn(recipientProfile, "Document.View", document.ProjectId)
                     ? DocumentReadScope.For(recipientProfile, document.ProjectId, snapshot)
@@ -100,7 +120,7 @@ internal static class EditAssignmentMapper
     /// Межі читання виконавця: ключ є і значення <c>null</c> — документ йому не видно; ключа немає чи словника
     /// немає — не обчислювалось.
     /// </param>
-    public static string VisibilityOf(
+    public static RecipientVisibility VisibilityOf(
         EditAssignment a, int userId, EditAssignmentUserRef? user,
         IReadOnlyDictionary<int, DocumentReadScope?>? scopes)
     {
@@ -108,16 +128,16 @@ internal static class EditAssignmentMapper
 
         if (scopes is null || !scopes.TryGetValue(userId, out var scope))
         {
-            return "Unknown";
+            return RecipientVisibility.Unknown;
         }
 
         if (scope is not null && (a.SheetCode is null || scope.CanReadSheetCode(a.SheetCode)))
         {
-            return "Visible";
+            return RecipientVisibility.Visible;
         }
 
         // Доменний обліковий запис міг би бачити документ через групу AD, яку профіль без токена сесії не знає.
-        return user is { IsWindowsAccount: true } ? "Unknown" : "NotVisible";
+        return user is { IsWindowsAccount: true } ? RecipientVisibility.Unknown : RecipientVisibility.NotVisible;
     }
 
     public static EditAssignmentDto ToDto(
@@ -321,8 +341,9 @@ public sealed class UpsertEditAssignmentHandler(
                 throw RecipientInvalid();
             }
 
-            var recipientProfile = await access.BuildProfileAsync(id, ct).ConfigureAwait(false);
-            if (!recipientProfile.SeesDocumentsOf(document.ProjectId)
+            var recipientProfile = await EditAssignmentAccess.TryBuildProfileAsync(access, id, ct).ConfigureAwait(false);
+            if (recipientProfile is null
+                || !recipientProfile.SeesDocumentsOf(document.ProjectId)
                 || !PermissionCheck.IsGrantedIn(recipientProfile, "Document.View", document.ProjectId))
             {
                 throw RecipientInvalid();
@@ -1061,8 +1082,9 @@ public sealed class ListEditAssignmentCandidatesHandler(
                 .SearchCandidatesAsync(q, page * PageSize, PageSize, ct).ConfigureAwait(false);
             foreach (var u in batch.Where(u => u.Id != userId && u.Id != document.CreatedByUserId))
             {
-                var candidate = await access.BuildProfileAsync(u.Id, ct).ConfigureAwait(false);
-                if (candidate.SeesDocumentsOf(document.ProjectId)
+                var candidate = await EditAssignmentAccess.TryBuildProfileAsync(access, u.Id, ct).ConfigureAwait(false);
+                if (candidate is not null
+                    && candidate.SeesDocumentsOf(document.ProjectId)
                     && PermissionCheck.IsGrantedIn(candidate, "Document.View", document.ProjectId))
                 {
                     result.Add(new EditAssignmentCandidateDto(u.Id, u.DisplayName));

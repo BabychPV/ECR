@@ -11,6 +11,19 @@ namespace Ecr.Application.Documents.EditAssignments;
 /// <param name="PeriodKey">Ключ періоду <c>Рік*100+№</c>.</param>
 public sealed record EditAssignmentSliceDto(string? SheetCode, string? TableCode, byte? MonthNumber, int? PeriodKey);
 
+/// <summary>Чи бачить виконавець документ (і аркуш передачі) за прямими призначеннями ролей (RC20 D-2).</summary>
+public enum RecipientVisibility
+{
+    /// <summary>Не обчислювалось або невідомо (групи AD чужої людини, вимкнений обліковий запис, стеля).</summary>
+    Unknown = 0,
+
+    /// <summary>Бачить документ (і аркуш передачі).</summary>
+    Visible = 1,
+
+    /// <summary>Не бачить документ чи аркуш: передача для нього без ефекту.</summary>
+    NotVisible = 2,
+}
+
 /// <summary>Виконавець у передачі.</summary>
 /// <param name="UserId">Користувач.</param>
 /// <param name="DisplayName">Ім'я.</param>
@@ -34,7 +47,7 @@ public sealed record EditAssignmentRecipientDto(
     string? ReturnReason,
     int ReturnCount,
     bool IsActive,
-    string Visibility = "Unknown");
+    RecipientVisibility Visibility = RecipientVisibility.Unknown);
 
 /// <summary>Передача зрізу з виконавцями.</summary>
 /// <param name="Id">Ідентифікатор.</param>
