@@ -83,6 +83,19 @@ public sealed class LandCategoryRulesTests
         { "ECW_C11_14", "6482(003)", "6482(003)" },
         { "ECW_C11_14", "6490", "6490" },
         { "ECW_C11_14", "6482 (003)", "6482(003)" },
+        { "ECW_C11_04", "LPG (HMB) - СУГ (МТБ)", "LPG" },
+        { "ECW_C11_04", "LPG (Internal) - СУГ (Внутренний)", "LPG" },
+        { "ECW_C11_04", "Fuel gas (HMB) - Топливный газ (МТБ)", "NoLPG" },
+        { "ECW_C11_05", "LPG (HMB) - СУГ (МТБ)", "LPG" },
+        { "ECW_C11_05", "Fuel gas (HMB) - Топливный газ (МТБ)", "FGHMB" },
+        { "ECW_C11_05", "Fuel gas (Internal) - Топливный газ (Внутренний)", "FG" },
+    };
+
+    private static string ArgumentOf(string methodology) => methodology switch
+    {
+        "ECW_C11_04" => "Land_TypeFuelOrStream",
+        "ECW_C11_05" => "Land_TypeFuel",
+        _ => "Land_NAE",
     };
 
     [Theory]
@@ -99,7 +112,7 @@ public sealed class LandCategoryRulesTests
             .WithSubstanceFormula("Total", "@X * CST.EF")
             .WithConstants([.. categories.Select((c, i) => Number(c, i + 1))]);
 
-        var output = await stand.RunAsync(RuleStand.In("X", 1m), RuleStand.In("Land_NAE", nae));
+        var output = await stand.RunAsync(RuleStand.In("X", 1m), RuleStand.In(ArgumentOf(methodology), nae));
 
         var expected = categories.IndexOf(expectedCategory) + 1;
         var totals = output.Values.Where(v => v.OutputCode == "Total").ToList();

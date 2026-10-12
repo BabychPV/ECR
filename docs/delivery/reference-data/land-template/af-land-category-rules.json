@@ -4,6 +4,20 @@
     "note":  "Row-level category rules reproduced from the legacy HSE C# classes. No constant values. Per-pollutant-code keys ({nae}_{code}) are NOT here: see LP-07 analysis.",
     "rules":  [
                   {
+                      "methodology":  "ECW_C11_04",
+                      "expression":  "if(in(@Land_TypeFuelOrStream,'LPG (HMB) - СУГ (МТБ)','LPG (Internal) - СУГ (Внутренний)'),'LPG','NoLPG')",
+                      "normalizesNae":  false,
+                      "source":  "docs/source/ECR Current Back end/Assembly/DllProject/DllProject/Realization/Sections/R_EmissionCalculationWork/ECW_C11_OPF_Plant_Operational/ECW_C11_04.cs:124 (fuel.Contains(LPG)); fuel dictionary values: Providers/PrefixProvider.cs",
+                      "note":  "values are dictionary entries of the fuel list (already in PrefixProvider.cs); verified on local prod copy: all rows containing LPG equal exactly these two entries"
+                  },
+                  {
+                      "methodology":  "ECW_C11_05",
+                      "expression":  "if(in(@Land_TypeFuel,'LPG (HMB) - СУГ (МТБ)','LPG (Internal) - СУГ (Внутренний)'),'LPG',if(in(@Land_TypeFuel,'Fuel gas (HMB) - Топливный газ (МТБ)'),'FGHMB','FG'))",
+                      "normalizesNae":  false,
+                      "source":  "docs/source/ECR Current Back end/Assembly/DllProject/DllProject/Realization/Sections/R_EmissionCalculationWork/ECW_C11_OPF_Plant_Operational/ECW_C11_05.cs:114",
+                      "note":  "LPG if contains LPG, else FGHMB if contains HMB, else FG"
+                  },
+                  {
                       "methodology":  "ECW_C11_03",
                       "expression":  "if(in(@Land_NAE,\u00270801\u0027,\u00270926\u0027),\u0027Loc_BeforeMR_A\u0027,if(in(@Land_NAE,\u00270114\u0027,\u00270116\u0027,\u00270603\u0027,\u00270920\u0027,\u00270921\u0027,\u00270924\u0027),\u0027Loc_BeforeMR_B\u0027,if(in(@Land_NAE,\u00270662\u0027,\u00270663\u0027,\u00270664\u0027,\u00270660\u0027,\u00270661\u0027,\u00270672\u0027,\u00270673\u0027),\u0027Loc_BeforeMR_D\u0027,\u0027\u0027)))",
                       "normalizesNae":  false,
