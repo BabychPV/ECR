@@ -46,7 +46,7 @@ namespace Ecr.Application.Documents.VersionMigration;
 /// мапінг не призупинено. Призупинені без відповідника не рахуються: вони нічого не пишуть.
 /// </param>
 /// <param name="MappingsUnmappedKeys">
-/// До <see cref="MigrateDocumentVersionHandler.MaxMappingKeysListed"/> шляхів <c>SHEET.TABLE.COLUMN</c> колонок
+/// До 10 (<c>MaxMappingKeysListed</c>) шляхів <c>SHEET.TABLE.COLUMN</c> колонок
 /// вихідної версії, на які вказують такі мапінги. ⛔ Лише шлях колонки шаблону (його й так показує звіт відмінностей):
 /// джерело, сутність і поле джерела не розкриваються.
 /// </param>
