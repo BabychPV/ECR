@@ -106,5 +106,14 @@ Methodologies) PUT-ить `/methodologies/{m}/bindings/{colId}/{output}` для 
 `gen_ecr_model.py`) додає лише доведене: (1) alias прод-колонки AF із `prodColumnMapping` (`monthColumns` -> місячний міст,
 `column` числова -> `[колонка]`) для входу, який вживає методологія таблиці (`inputs` у `land-result-outputs.json`);
 (2) календарні аргументи `CalculationMonth`, `DaysInCalcYear`, `Winter` тими ж формулами, що в EXTRA таблиць 3-5.
-Усе інше — ключ моделі `argumentBridges.unresolved` (таблиця -> вхід -> причина), без мостів: склад газу HSE400
-(`CompositionMass`, `Density20`...), `DaysInCalcMonth` (правило 7.7 доведено лише для 3-5), `Land_Measure_OperatingTime` та ін.
+Усе інше — ключ моделі `argumentBridges.unresolved` (таблиця -> вхід -> причина), без мостів: `CompositionMass` (склад газу
+по речовині), `DaysInCalcMonth` (правило 7.7 доведено лише для 3-5), `Land_Measure_OperatingTime` та ін.
+
+Склад газу HSE400 (`Density20`, `Density0`, `Density`, `Vddg`, `Vwdg`, `TotalSulphurContent`, `MercaptanSulphurContent`,
+`FuelLowerHeating`, `H2Smass`) мостить `model-gen/hse400_bridges.py` (LP-10): довідники `LAND_HSE400_STREAM` (текст палива ->
+префікс потоку) і `LAND_HSE400_COMPOSITION` (рік, місяць, потік, показник -> значення; у моделі порожній, значення вантажить
+`tools/land/Import-LandHse400Composition.ps1` з локальної копії прода) і Formula-міст
+`REGFIELD(REGFIND('LAND_HSE400_COMPOSITION', [Period].Year, [Period].Sequence, <потік>, '<показник>'), 'VALUE')`. Колонка-
+джерело потоку - лише однозначна (`TypeOfFuel` аркуша 9; `Land_TypeFuel` у 10_01/11_01): ключ `argumentBridges.hse400`.
+Немає запису за період/потік/показник - `#N/A`, рядок без результатів (стара система: `continue`). Одиниці мостів не
+задані (старі одиниці в FInfo/AIR.xml не звірено).
