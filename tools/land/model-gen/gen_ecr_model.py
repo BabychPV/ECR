@@ -18,6 +18,16 @@ def one(v):
     return re.sub(r'\s+', ' ', clean(v)).strip()
 
 
+# Стеля динамічних рядків (MaxDynamicRows) з прод-зразка HSE 2026-10-12 (.sync-local/reports/LAND-PROD-SAMPLE-2026-10-12.md,
+# розділ «Прогалини», п. 1). Excel-шаблон має лише 498/184/100 рядків, а типовий документ старої системи — більше:
+# T3_00 ~788 (обладнання), T9_04 368, T9_07 182. Значення = прод-факт з запасом ~25 %, округлене вгору до 50.
+# Жорсткої стелі продукту немає: TableDef.SetMaxDynamicRows вимагає лише додатне число, CreateRow/PatchCells порівнюють з
+# MaxDynamicRows. Нижню межу (max з рядками Excel і 100) зберігаємо. Інші таблиці зразок не перевищував: «не доведено».
+PROD_ROW_LIMITS = {'T3_00': {'prodRows': 788, 'maxRows': 1000},
+                   'T9_04': {'prodRows': 368, 'maxRows': 500},
+                   'T9_07': {'prodRows': 182, 'maxRows': 250}}
+
+
 UNIT_PAREN = re.compile(r'\((?:[^)]*\b(?:tonne|tonnes|tonn|hour|hours|hr|Sm3|m3|g/s|g/sec|kg|kg/h|mg/l|days?|rpm|kW|ea|No dimension|No Dimension|L/hr|%|number|tons?)\b[^)]*)\)', re.I)
 
 
@@ -497,7 +507,8 @@ for sh in X['sheets']:
         fixed = (sh['name'].startswith(('7. ', '7.0', '7a', '7b', '8.', '9b', '9c')))
         layout = 'PerPeriodInstance' if is_calc else ('MonthsInColumns' if has_month else 'Static')
         t_out = {'code': tcode, 'nameEn': title_en or tcode, 'nameRu': title_ru, 'layout': layout,
-                 'rowMode': 'Fixed' if fixed else 'Dynamic', 'maxRows': None if fixed else max(t['rowCount'], 100),
+                 'rowMode': 'Fixed' if fixed else 'Dynamic',
+                 'maxRows': None if fixed else max(t['rowCount'], 100, PROD_ROW_LIMITS.get(tcode, {}).get('maxRows', 0)),
                  'excel': {'sheet': sh['name'], 'headerRow': t['headerRow'], 'firstDataRow': t['firstDataRow'], 'lastDataRow': t['lastDataRow'],
                            'rowCount': t['rowCount'], 'physicalColumns': sum(c.get('span', 1) for c in cols)},
                  'columns': [], 'rows': [], 'rules': [], 'rowValues': {}}
