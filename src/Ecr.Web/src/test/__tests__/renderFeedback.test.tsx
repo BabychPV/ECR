@@ -569,9 +569,9 @@ async function settle(
 }
 
 /** Вікно без жодного коміту дерева, після якого маршрут вважається осілим. */
-const QuietMs = 100;
+const QuietMs = 250;
 /** Межа вікон {@link QuietMs} (разом 10 с) — далі падіння, а не тихий вимір. */
-const QuietRoundsLimit = 100;
+const QuietRoundsLimit = 40;
 
 /** Корінь `AppShell` на час його CSS-переходу (`@mantine/core`, `use-resizing.mjs`). */
 const ResizingSelector = '[data-resizing="true"]';
