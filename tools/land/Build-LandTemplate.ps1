@@ -223,7 +223,20 @@ function Ensure-Registry($reg) {
     $has = @($d.fields) | Where-Object { $_.code -eq 'NAME' -or ($reg.fieldNames -and $reg.fieldNames -contains $_.code) }
     if (-not $has) {
         $fields = @()
-        if ($reg.fieldNames) {
+        $keys = @()
+        if ($reg.fieldSpecs) {
+            # LP-10: довідник із типізованими полями й складеним ключем (LAND_HSE400_*): fieldSpecs + keys із моделі.
+            $o = 1
+            foreach ($f in @($reg.fieldSpecs)) {
+                $fields += @{ id = $null; code = [string]$f.code; nameL10n = @{ values = @{ en = [string]$f.code } }; dataType = [string]$f.dataType; ordinal = $o++
+                    isRequired = [bool]$f.isKey; isKey = [bool]$f.isKey; lookupRegistryDefId = $null; unitId = $null }
+            }
+            foreach ($k in @($reg.keys)) {
+                $keys += @{ id = $null; code = [string]$k.code; nameL10n = @{ values = @{ en = [string]$k.code } }; fieldCodes = @($k.fields | ForEach-Object { [string]$_ })
+                    isPrimary = [bool]$k.isPrimary; ignoreCase = [bool]$k.ignoreCase; isActive = $true }
+            }
+        }
+        elseif ($reg.fieldNames) {
             $o = 1
             foreach ($f in @($reg.fieldNames)) {
                 $fields += @{ id = $null; code = [string]$f; nameL10n = @{ values = @{ en = [string]$f } }; dataType = 'String'; ordinal = $o++
@@ -234,7 +247,7 @@ function Ensure-Registry($reg) {
             $fields = @(@{ id = $null; code = 'NAME'; nameL10n = @{ values = @{ en = 'Name'; ru = 'Название' } }; dataType = 'String'; ordinal = 1
                     isRequired = $true; isKey = $true; lookupRegistryDefId = $null; unitId = $null })
         }
-        $null = Api PUT "/api/v1/registries/$code/definition" @{ codeMode = $d.codeMode; fields = $fields; keys = @(); rules = @(); reason = 'Land template build' } @{ 'If-Match' = [string]$d.definitionVersion }
+        $null = Api PUT "/api/v1/registries/$code/definition" @{ codeMode = $d.codeMode; fields = $fields; keys = $keys; rules = @(); reason = 'Land template build' } @{ 'If-Match' = [string]$d.definitionVersion }
         $d = (Api GET "/api/v1/registries/$code/definition").Json
     }
     $today = (Get-Date).ToUniversalTime().ToString('yyyy-MM-dd')
