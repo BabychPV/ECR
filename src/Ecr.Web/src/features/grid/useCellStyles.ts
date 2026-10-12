@@ -6,6 +6,7 @@ import type { PatchCellStylesRequest, PatchCellStylesResponse, TableSliceDto } f
 import { t } from '@/shared/i18n';
 import { notificationCloseButtonProps } from '@/shared/ui/notify';
 import { logSuppressedDetail, problemText } from '@/shared/ui/problemText';
+import { denyText } from './permissions';
 import { applyStylePatches, chunkPatches, isValidPatch, type CellStylePatch, type StyleArea } from './userCellStyle';
 
 function mergeResponses(a: PatchCellStylesResponse, b: PatchCellStylesResponse): PatchCellStylesResponse {
@@ -47,15 +48,17 @@ export function useCellStyles(documentId: number, tableInstanceId: number, perio
     mutationFn: async ({
       cells,
       areas = null,
+      style = {},
       reset = false,
     }: {
       cells: readonly CellStylePatch[];
+      /** Кольори для `scope` (`cells` порожні, коли область завелика для оптимістики). */
+      style?: Pick<CellStylePatch, 'backgroundHex' | 'foregroundHex' | 'isBold'>;
       /** Області одного `scope` кожна (≤ 50 000 комірок, `areaChunks`); `null` — йдуть `items`. */
       areas?: readonly StyleArea[] | null;
       reset?: boolean;
     }): Promise<PatchCellStylesResponse | null> => {
       if (areas !== null) {
-        const first = cells[0];
         let total: PatchCellStylesResponse | null = null;
 
         for (const area of areas) {
@@ -67,9 +70,9 @@ export function useCellStyles(documentId: number, tableInstanceId: number, perio
               reset,
               allRows: area.allRows ?? false,
               allColumns: area.allColumns ?? false,
-              backgroundHex: first?.backgroundHex ?? null,
-              foregroundHex: first?.foregroundHex ?? null,
-              isBold: first?.isBold ?? null,
+              backgroundHex: style.backgroundHex ?? null,
+              foregroundHex: style.foregroundHex ?? null,
+              isBold: style.isBold ?? null,
             },
           };
           const response = await apiFetch<PatchCellStylesResponse>(path, { method: 'PATCH', body: JSON.stringify(body) });
@@ -120,7 +123,7 @@ export function useCellStyles(documentId: number, tableInstanceId: number, perio
       if (response === null || response.deniedCells <= 0) return;
 
       const reasons = Object.entries(response.deniedByReason ?? {})
-        .map(([reason, count]) => `${reason}: ${String(count)}`)
+        .map(([reason, count]) => `${denyText(reason) ?? reason}: ${String(count)}`)
         .join(', ');
 
       notifications.show({

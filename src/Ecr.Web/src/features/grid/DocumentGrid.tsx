@@ -19,7 +19,7 @@ import { cellAppearanceClassOf, cellAppearanceOf } from './cellAppearance';
 import { cellFormatOf, withCellFormat } from './conditionalAppearance';
 import { CellColorMenu, type ColourTarget } from './CellColorMenu';
 import { useCellStyles } from './useCellStyles';
-import { areaChunks, areaOf, colourableCells, headerStyleProps, scopeRange, userStyleOf, withRowStyle, withUserStyle, type StyleScope } from './userCellStyle';
+import { OptimisticMaxCells, areaChunks, areaOf, colourableCells, headerStyleProps, scopeRange, userStyleOf, withRowStyle, withUserStyle, type StyleScope } from './userCellStyle';
 import { cellDisplay, cellText, editorValueOf, isNumericColumn, isTextColumnType, sameColumnValue } from './cellValue';
 import { columnIndexOf, rowIndexOf } from './rowIndex';
 import { planPaste, type PasteRejection } from './clipboard';
@@ -390,13 +390,18 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
   const styleSelection = useSelectedRange(tableInstanceId, periodKey);
   const cellStyles = useCellStyles(documentId, tableInstanceId, periodKey);
   const [styleScope, setStyleScope] = useState<StyleScope>('selection');
-  const colourTargets = useMemo(() => {
-    if (slice.data === undefined || readOnly) return [];
-
-    const offset = hasRowLabels(slice.data) ? 1 : 0;
-
-    return colourableCells(slice.data, scopeRange(slice.data, styleSelection, offset, styleScope), offset);
-  }, [slice.data, styleSelection, readOnly, styleScope]);
+  // ⛔ Не матеріалізуємо «всю таблицю» (~180 тис. комірок) на кожну зміну виділення: для області потрібно лише
+  // знати, чи є бодай одна дозволена комірка (early-exit); масив будується лише для «Виділення» й для оптимістики ≤ 5000.
+  const styleOffset = slice.data === undefined || !hasRowLabels(slice.data) ? 0 : 1;
+  const styleRange = useMemo(
+    () => (slice.data === undefined ? null : scopeRange(slice.data, styleSelection, styleOffset, styleScope)),
+    [slice.data, styleSelection, styleOffset, styleScope],
+  );
+  const canColour = useMemo(
+    () =>
+      slice.data !== undefined && !readOnly && colourableCells(slice.data, styleRange, styleOffset, 1).length > 0,
+    [slice.data, styleRange, styleOffset, readOnly],
+  );
   // Сервер вирішив, що фарбувати не можна нічого: причина — його (`styleAccess.deniedReason`, текст `deny.{reason}`).
   const styleAccess = slice.data?.styleAccess;
   const styleDenied =
@@ -405,26 +410,23 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
       : null;
   const applyColour = useCallback(
     (target: ColourTarget, hex: string | null) => {
-      if (colourTargets.length === 0) return;
+      if (slice.data === undefined || !canColour) return;
 
       // Сервер: `""` — зняти, `null` — не чіпати. «Без заливки»/«Автоматичний» = `""`.
       const value = hex ?? '';
-      const offset = slice.data === undefined || !hasRowLabels(slice.data) ? 0 : 1;
+      const style = target === 'fill' ? { backgroundHex: value } : { foregroundHex: value };
+      const area = areaOf(slice.data, styleSelection, styleOffset, styleScope);
+      // Оптимістика — лише для малих областей; велика чекає відповіді сервера й перечитання зрізу.
+      const cells = colourableCells(slice.data, styleRange, styleOffset, area === null ? Number.POSITIVE_INFINITY : OptimisticMaxCells + 1);
 
       cellStyles.mutate({
-        cells: colourTargets.map((cell) => ({
-          ...cell,
-          ...(target === 'fill' ? { backgroundHex: value } : { foregroundHex: value }),
-        })),
+        cells: area !== null && cells.length > OptimisticMaxCells ? [] : cells.map((cell) => ({ ...cell, ...style })),
         // Рядок/колонка/таблиця — один PATCH зі `scope` (сервер розгортає й дає часткову відмову).
-        areas: (() => {
-          const area = slice.data === undefined ? null : areaOf(slice.data, styleSelection, offset, styleScope);
-
-          return area === null || slice.data === undefined ? null : areaChunks(slice.data, area);
-        })(),
+        areas: area === null ? null : areaChunks(slice.data, area),
+        style,
       });
     },
-    [colourTargets, cellStyles, slice.data, styleSelection, styleScope],
+    [canColour, cellStyles, slice.data, styleSelection, styleScope, styleOffset, styleRange],
   );
 
   const queryClient = useQueryClient();
@@ -2349,7 +2351,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         </Button>
         <CellColorMenu
           onApply={applyColour}
-          disabled={colourTargets.length === 0}
+          disabled={!canColour}
           disabledHint={styleDenied?.hint ?? t(readOnly ? 'grid.cellColor.readOnly' : 'grid.cellColor.noSelection')}
           disabledReason={styleDenied?.reason ?? (readOnly ? 'readOnly' : 'noSelection')}
           scope={styleScope}

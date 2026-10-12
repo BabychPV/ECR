@@ -162,6 +162,25 @@ export function withUserStyle(
  */
 const StyleNeutralReasons: ReadonlySet<string> = new Set(['None', 'CalculatedCell', 'ColumnReadOnly']);
 
+interface DeniedSets {
+  readonly rows: ReadonlySet<string>;
+  readonly columns: ReadonlySet<string>;
+}
+
+/** Переліки заборон як `Set` (O(1) на комірку); кеш за об'єктом `styleAccess` — він новий з кожним зрізом. */
+const deniedSetsCache = new WeakMap<object, DeniedSets>();
+
+function deniedSetsOf(access: NonNullable<TableSliceDto['styleAccess']>): DeniedSets {
+  let sets = deniedSetsCache.get(access);
+
+  if (sets === undefined) {
+    sets = { rows: new Set(access.styleDeniedRowKeys), columns: new Set(access.styleDeniedColumnCodes) };
+    deniedSetsCache.set(access, sets);
+  }
+
+  return sets;
+}
+
 /** Чи можна фарбувати комірку: за `styleAccess` сервера (одне джерело істини), інакше — за нейтральними причинами. */
 export function canColourCell(slice: TableSliceDto, rowKey: string, columnCode: string): boolean {
   const access = slice.styleAccess;
@@ -172,13 +191,18 @@ export function canColourCell(slice: TableSliceDto, rowKey: string, columnCode: 
     return permission === undefined || StyleNeutralReasons.has(permission);
   }
 
+  const denied = deniedSetsOf(access);
+
   return (
     access.canStyle &&
-    !access.styleDeniedRowKeys.includes(rowKey) &&
-    !access.styleDeniedColumnCodes.includes(columnCode) &&
+    !denied.rows.has(rowKey) &&
+    !denied.columns.has(columnCode) &&
     access.styleDeniedCells[cellKey(rowKey, columnCode)] === undefined
   );
 }
+
+/** Оптимістичне оновлення кешу — лише до цієї кількості комірок; більше — чекаємо відповідь і перечитуємо зріз. */
+export const OptimisticMaxCells = 5000;
 
 /** Скільки комірок у прямокутнику (для «N з M» у попередженні). */
 export function rangeCellCount(range: GridSelection['range'] | null): number {
@@ -216,6 +240,7 @@ export function colourableCells(
   slice: TableSliceDto,
   range: GridSelection['range'] | null,
   labelOffset: number,
+  limit: number = Number.POSITIVE_INFINITY,
 ): { rowKey: string; columnCode: string }[] {
   if (range === null || slice.rows.length === 0 || slice.columns.length === 0) return [];
 
@@ -234,6 +259,7 @@ export function colourableCells(
 
       if (canColourCell(slice, row.rowKey, column.code)) {
         cells.push({ rowKey: row.rowKey, columnCode: column.code });
+        if (cells.length >= limit) return cells;
       }
     }
   }

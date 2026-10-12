@@ -99,8 +99,9 @@ describe('useCellStyles', () => {
 
     await act(() =>
       result.current.mutateAsync({
-        cells: Array.from({ length: 5000 }, (_, i) => cell(i)),
+        cells: [],
         areas: [{ allRows: true, columnCodes: ['A'] }],
+        style: { backgroundHex: '#ffff00' },
       }),
     );
 
