@@ -339,7 +339,7 @@ async function sheetCodeOf(page: Page, tableInstanceId: number): Promise<string>
 
 /** Id кандидата на передачу за підписом (виконавець - `e2e-operator`). */
 async function candidateId(page: Page, name: RegExp): Promise<number> {
-  const response = await page.request.get(`/api/v1/documents/${DocumentId}/edit-assignments/candidates`);
+  const response = await page.request.get(`/api/v1/documents/${DocumentId}/edit-assignments/candidates?q=${encodeURIComponent('E2E operator')}`);
   expect(response.ok(), `GET candidates: ${String(response.status())}`).toBe(true);
 
   const list = (await response.json()) as { displayName: string; userId: number }[];
