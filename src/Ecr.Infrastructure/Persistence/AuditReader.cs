@@ -5,17 +5,18 @@ using Ecr.Application.Common;
 using Ecr.Application.Ports;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace Ecr.Infrastructure.Persistence;
 
-/// <summary>Читання <c>aud.CellChange</c> прямим ADO.</summary>
+/// <summary>Читання <c>aud.CellChange</c> (і архіву <c>arc.AuditCellChange</c>, НФ-8.9.6) прямим ADO.</summary>
 /// <remarks>
 /// ⚠ Таблиці <c>aud.*</c> живуть поза моделлю EF: журнал append-only, і
 /// обліковий запис застосунку має на ньому лише <c>INSERT</c> і <c>SELECT</c>.
 /// Тримати їх у <c>DbSet</c> означало б дати трекеру змін можливість, якої в
 /// нього немає в базі, — і виявилося б це на першому <c>SaveChanges</c>.
 /// </remarks>
-public sealed class AuditReader(EcrDbContext db) : IAuditReader
+public sealed partial class AuditReader(EcrDbContext db, ILogger<AuditReader>? log = null) : IAuditReader
 {
     /// <summary>Довжина <c>aud.CellChange.RowKey</c> зі схеми (<c>11-audit-tables.sql</c>).</summary>
     private const int RowKeySize = 100;
@@ -50,74 +51,19 @@ public sealed class AuditReader(EcrDbContext db) : IAuditReader
         var order = filter.NewestFirst ? "ChangedAt DESC, Id DESC" : "ChangedAt, Id";
         var outerOrder = filter.NewestFirst ? "a.ChangedAt DESC, a.Id DESC" : "a.ChangedAt, a.Id";
 
-        // ⚠ `R-18`: імена — ПІСЛЯ вибору сторінки, у зовнішньому запиті. Вікно й
-        // курсор лишаються дослівно тими самими над самою `aud.CellChange`
-        // (відсікання партицій), а три LEFT JOIN торкаються лише `@take` рядків.
-        // LEFT, а не INNER: видалений автор, документ чи колонка не мають права
-        // ховати сам факт зміни — журнал append-only.
-        command.CommandText = $"""
-            SELECT a.Id, a.ChangedAt, a.PeriodKey, a.DocumentId, a.RowKey, a.ColumnDefId,
-                   a.OldValue, a.NewValue, a.ChangedByUserId, a.Origin, a.IsLateEdit,
-                   u.DisplayName, d.BusinessKey, d.NameL10n, c.Code, c.HeaderL10n, c.DataType,
-                   a.IsOutOfWindow, sd.Code, sd.NameL10n, td.Code, td.NameL10n, rd.LabelL10n
-              FROM (
-                    SELECT TOP (@take)
-                           Id, ChangedAt, PeriodKey, DocumentId, RowKey, ColumnDefId,
-                           OldValue, NewValue, ChangedByUserId, Origin, IsLateEdit, IsOutOfWindow
-                      FROM aud.CellChange
-                     WHERE {where}
-                     ORDER BY {order}
-                   ) AS a
-              LEFT JOIN sec.[User] AS u ON u.Id = a.ChangedByUserId
-              LEFT JOIN doc.Document AS d ON d.Id = a.DocumentId
-              LEFT JOIN cfg.ColumnDef AS c ON c.Id = a.ColumnDefId
-              LEFT JOIN cfg.TableDef AS td ON td.Id = c.TableDefId
-              LEFT JOIN cfg.SheetDef AS sd ON sd.Id = td.SheetDefId
-              OUTER APPLY (SELECT TOP (1) r.LabelL10n
-                             FROM cfg.RowDef AS r
-                            WHERE r.TableDefId = c.TableDefId AND r.RowKey = a.RowKey AND r.IsDeleted = 0) AS rd
-             ORDER BY {outerOrder};
-            """;
-
+        var whereText = where.ToString();
         command.Parameters.AddWithValue("@take", page.Limit + 1);
 
-        var rows = new List<(long Id, CellChangeView View)>();
-        await using (var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false))
-        {
-            while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        var rows = await WithArchiveFallbackAsync(
+            async withArchive =>
             {
-                rows.Add((
-                    reader.GetInt64(0),
-                    new CellChangeView(
-                        DateTime.SpecifyKind(reader.GetDateTime(1), DateTimeKind.Utc),
-                        reader.GetInt32(2),
-                        reader.GetInt64(3),
-                        reader.GetString(4),
-                        reader.GetInt32(5),
-                        reader.IsDBNull(6) ? null : reader.GetString(6),
-                        reader.IsDBNull(7) ? null : reader.GetString(7),
+                command.CommandText = withArchive
+                    ? CellChangesPageSql(whereText, order, outerOrder)
+                    : CellChangesHotSql(whereText, order, outerOrder);
 
-                        // Автор — UserId, не SID: у локального користувача SID
-                        // не існує взагалі (R-A2, D-86).
-                        reader.GetInt32(8),
-                        reader.GetString(9),
-                        reader.GetBoolean(10),
-                        StringOrNull(reader, 11),
-                        StringOrNull(reader, 12),
-                        LocalizedOrNull(reader, 13),
-                        StringOrNull(reader, 14),
-                        LocalizedOrNull(reader, 15),
-                        reader.IsDBNull(16)
-                            ? null
-                            : ((Ecr.Domain.Enums.CellDataType)reader.GetByte(16)).ToString(),
-                        reader.GetBoolean(17),
-                        StringOrNull(reader, 18),
-                        LocalizedOrNull(reader, 19),
-                        StringOrNull(reader, 20),
-                        LocalizedOrNull(reader, 21),
-                        LocalizedOrNull(reader, 22))));
-            }
-        }
+                return await ReadCellRowsAsync(command, ct).ConfigureAwait(false);
+            },
+            log).ConfigureAwait(false);
 
         var hasMore = rows.Count > page.Limit;
         var items = rows.Take(page.Limit).Select(r => r.View).ToList();
@@ -147,28 +93,256 @@ public sealed class AuditReader(EcrDbContext db) : IAuditReader
 
         // ⚠ Розріз за колонкою, а не одне число: відсів за межами читання (S6) — прерогатива виклику,
         // і сума з прихованих колонок не повинна навіть існувати поруч із відповіддю. Один прохід, без join.
-        command.CommandText = $"""
+        var whereText = where.ToString();
+        command.Parameters.Add("@today", SqlDbType.DateTime2).Value = todayStartUtc;
+
+        return await WithArchiveFallbackAsync(
+            async withArchive =>
+            {
+                command.CommandText = CellChangeCountSql(whereText, withArchive);
+
+                var counts = new List<CellChangeColumnCount>();
+                await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
+                while (await reader.ReadAsync(ct).ConfigureAwait(false))
+                {
+                    counts.Add(new CellChangeColumnCount(
+                        reader.GetInt32(0), reader.GetInt64(1), reader.GetInt64(2), reader.GetInt64(3), reader.GetInt64(4)));
+                }
+
+                return (IReadOnlyList<CellChangeColumnCount>)counts;
+            },
+            log).ConfigureAwait(false);
+    }
+
+    /// <summary>Читає сторінку журналу з вже підготовленої команди.</summary>
+    private static async Task<List<(long Id, CellChangeView View)>> ReadCellRowsAsync(SqlCommand command, CancellationToken ct)
+    {
+        var rows = new List<(long Id, CellChangeView View)>();
+        await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            rows.Add((
+                reader.GetInt64(0),
+                new CellChangeView(
+                    DateTime.SpecifyKind(reader.GetDateTime(1), DateTimeKind.Utc),
+                    reader.GetInt32(2),
+                    reader.GetInt64(3),
+                    reader.GetString(4),
+                    reader.GetInt32(5),
+                    reader.IsDBNull(6) ? null : reader.GetString(6),
+                    reader.IsDBNull(7) ? null : reader.GetString(7),
+
+                    // Автор — UserId, не SID: у локального користувача SID
+                    // не існує взагалі (R-A2, D-86).
+                    reader.GetInt32(8),
+                    reader.GetString(9),
+                    reader.GetBoolean(10),
+                    StringOrNull(reader, 11),
+                    StringOrNull(reader, 12),
+                    LocalizedOrNull(reader, 13),
+                    StringOrNull(reader, 14),
+                    LocalizedOrNull(reader, 15),
+                    reader.IsDBNull(16)
+                        ? null
+                        : ((Ecr.Domain.Enums.CellDataType)reader.GetByte(16)).ToString(),
+                    reader.GetBoolean(17),
+                    StringOrNull(reader, 18),
+                    LocalizedOrNull(reader, 19),
+                    StringOrNull(reader, 20),
+                    LocalizedOrNull(reader, 21),
+                    LocalizedOrNull(reader, 22),
+                    reader.GetBoolean(23))));
+        }
+
+        return rows;
+    }
+
+    /// <summary>
+    /// Виконує читання з архівом; відмова в праві <c>SELECT</c> на архівну таблицю знімає архів, а не журнал.
+    /// </summary>
+    /// <param name="run">Читання: <c>true</c> — пакет з архівом, <c>false</c> — лише гаряче.</param>
+    /// <param name="log">Журнал; <c>null</c> — без запису.</param>
+    /// <remarks>
+    /// ⛔ Пробник архіву читає <c>arc.AuditCellChange</c> на КОЖНОМУ зверненні до журналу. Обліковий запис
+    /// служби з вузьким переліком прав (<c>D-264</c>: DBA замовника дає лише <c>EXECUTE</c> на <c>arc.usp_*</c>)
+    /// без <c>SELECT</c> на архів дав би відмову 229 на КОЖНЕ читання журналу, зокрема гарячого, — регресія
+    /// відносно стану до НФ-8.9.6. Тому відмова в праві (229/230) повторює читання лише по гарячій таблиці, а
+    /// відсутність архіву видно в журналі служби.
+    ///
+    /// ⚠ Безпечний бік: падіння назад на гаряче нічого не відкриває зайвого; повторна відмова вже на гарячій
+    /// таблиці (чужа проблема з правами) пробивається нагору без змін.
+    /// </remarks>
+    internal static async Task<T> WithArchiveFallbackAsync<T>(Func<bool, Task<T>> run, ILogger? log = null)
+    {
+        ArgumentNullException.ThrowIfNull(run);
+
+        try
+        {
+            return await run(true).ConfigureAwait(false);
+        }
+        catch (SqlException ex) when (ex.Number is 229 or 230)
+        {
+            if (log is not null)
+            {
+                LogArchiveNotReadable(log, ex.Number, ex);
+            }
+
+            return await run(false).ConfigureAwait(false);
+        }
+    }
+
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "Журнал змін комірок: немає права SELECT на архів аудиту (arc.AuditCellChange), помилка SQL {Number}; читається лише гарячий журнал. Видайте SELECT службовому обліковому запису (runbook п. 7.3).")]
+    private static partial void LogArchiveNotReadable(ILogger logger, int number, Exception ex);
+
+    /// <summary>Колонки рядка журналу змін комірок, спільні для <c>aud.CellChange</c> і <c>arc.AuditCellChange</c>.</summary>
+    private const string CellChangeColumns =
+        "Id, ChangedAt, PeriodKey, DocumentId, RowKey, ColumnDefId, OldValue, NewValue, ChangedByUserId, Origin, IsLateEdit, IsOutOfWindow";
+
+    /// <summary>
+    /// Пробник архіву: чи є в <c>arc.AuditCellChange</c> бодай один рядок у вікні запиту.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Лише вікно за <c>ChangedAt</c> — перший ключ кластерного індексу <c>(ChangedAt, Id)</c> і ключ
+    /// партиціонування: пробник відсікає партиції так само, як сам запит, тож для вікна «лише гаряче»
+    /// (архівні партиції порожні, а SWITCH перемикає лише старіші за поріг) це одне майже безкоштовне
+    /// звернення до порожніх партицій. Інші звуження (документ, колонка, пошук) у пробник НЕ входять:
+    /// він мусить лишатися вибором між двома ПЛАНАМИ, а не другим запитом.
+    ///
+    /// ⛔ Параметри <c>@from</c>/<c>@to</c> — <c>datetime2(3)</c> (див. <see cref="BuildCellChangeWhere"/>): з
+    /// <c>datetime</c> (<c>AddWithValue(DateTime)</c>) <c>EXISTS</c> по партиційованій таблиці НЕ відсікав
+    /// партиції — виміряно <c>Scan count 19</c> проти 1; на повному архіві це заход у кожну його партицію на
+    /// КОЖЕН запит журналу. Сторож — <c>AuditReaderArchiveTests</c> (заходи в таблиці ≤ 1 на гарячому вікні).
+    /// </remarks>
+    internal const string ArchiveWindowProbe = "ChangedAt >= @from AND ChangedAt < @to";
+
+    /// <summary>
+    /// Текст сторінки журналу змін комірок (НФ-8.9.6, D-247).
+    /// </summary>
+    /// <param name="where">Умова з <see cref="BuildCellChangeWhere"/> — ОДНА для обох таблиць.</param>
+    /// <param name="order">Порядок за кластерним ключем <c>(ChangedAt, Id)</c> у запиті над таблицею.</param>
+    /// <param name="outerOrder">Той самий порядок із префіксом <c>a.</c> — для зовнішнього запиту.</param>
+    /// <remarks>
+    /// ⛔ Два плани в одному пакеті. Вікно, що не зачіпає архів (пробник порожній), іде ДОСЛІВНО колишнім
+    /// запитом над самою <c>aud.CellChange</c> — гарячий шлях не змінюється ні планом, ні вартістю. Вікно, що
+    /// зачіпає архів, — <c>UNION ALL</c> двох таблиць, у кожної гілки свій <c>TOP (@take)</c> за тим самим
+    /// порядком, а зовнішній <c>TOP</c> бере сторінку з не більш ніж <c>2 × @take</c> рядків: вартість
+    /// сторінки не росте з розміром архіву.
+    ///
+    /// ⛔ <c>{where}</c> підставляється в ОБИДВІ гілки дослівно, іменованими параметрами тих самих імен: межі
+    /// читання (<c>VisibleColumnIds</c>, R-11), документ, пошук і курсор застосовуються до архіву тим самим
+    /// текстом, що й до гарячого журналу. Окремої «архівної» умови, яку можна забути чи послабити, немає.
+    ///
+    /// ⚠ Курсор — пара <c>(ChangedAt, Id)</c>, і він не знає межі «гаряче/архів»: SWITCH зберігає <c>Id</c>
+    /// рядків, тож пара унікальна по обох таблицях разом.
+    ///
+    /// ⚠ <c>OBJECT_ID(...) IS NOT NULL</c> — база, де <c>12-archive-tables.sql</c> іще не виконано, читається
+    /// так само, як до D-247 (без архіву), а не падає на кожному зверненні до журналу.
+    /// </remarks>
+    internal static string CellChangesPageSql(string where, string order, string outerOrder)
+        => WithArchiveProbe(
+            CellChangesHotSql(where, order, outerOrder),
+            CellChangesWithArchiveSql(where, order, outerOrder));
+
+    /// <summary>План «лише гаряче»: сторінка журналу над самою <c>aud.CellChange</c> (як до НФ-8.9.6).</summary>
+    internal static string CellChangesHotSql(string where, string order, string outerOrder)
+        => PageWithNames(
+            "SELECT TOP (@take) " + CellChangeColumns + "\n"
+            + "  FROM aud.CellChange\n"
+            + " WHERE " + where + "\n"
+            + " ORDER BY " + order,
+            fromArchive: "CAST(0 AS bit)",
+            outerOrder);
+
+    /// <summary>План «гаряче + архів»: <c>UNION ALL</c> двох таблиць, у кожної гілки свій <c>TOP</c>.</summary>
+    internal static string CellChangesWithArchiveSql(string where, string order, string outerOrder)
+        => PageWithNames(
+            "SELECT TOP (@take) " + CellChangeColumns + ", FromArchive\n"
+            + "  FROM (\n"
+            + "        SELECT " + CellChangeColumns + ", FromArchive\n"
+            + "          FROM (SELECT TOP (@take) " + CellChangeColumns + ", CAST(0 AS bit) AS FromArchive\n"
+            + "                  FROM aud.CellChange\n"
+            + "                 WHERE " + where + "\n"
+            + "                 ORDER BY " + order + ") AS h\n"
+            + "        UNION ALL\n"
+            + "        SELECT " + CellChangeColumns + ", FromArchive\n"
+            + "          FROM (SELECT TOP (@take) " + CellChangeColumns + ", CAST(1 AS bit) AS FromArchive\n"
+            + "                  FROM arc.AuditCellChange\n"
+            + "                 WHERE " + where + "\n"
+            + "                 ORDER BY " + order + ") AS r\n"
+            + "       ) AS u\n"
+            + " ORDER BY " + order,
+            fromArchive: "a.FromArchive",
+            outerOrder);
+
+    /// <summary>
+    /// Підрахунок змін у розрізі колонки (НФ-8.9.6): та сама умова й той самий вибір гарячого/архівного плану.
+    /// </summary>
+    /// <param name="where">Умова з <see cref="BuildCellChangeWhere"/>.</param>
+    /// <param name="withArchive"><c>false</c> — лише гарячий запит (архів не читається).</param>
+    internal static string CellChangeCountSql(string where, bool withArchive = true)
+    {
+        const string select = """
             SELECT ColumnDefId,
                    COUNT_BIG(*),
                    COUNT_BIG(CASE WHEN ChangedAt >= @today THEN 1 END),
                    COUNT_BIG(CASE WHEN Origin IN (N'Import', N'ImportOverwrite') THEN 1 END),
                    COUNT_BIG(CASE WHEN Origin = N'Recalculation' THEN 1 END)
-              FROM aud.CellChange
-             WHERE {where}
-             GROUP BY ColumnDefId;
             """;
-        command.Parameters.Add("@today", SqlDbType.DateTime2).Value = todayStartUtc;
 
-        var counts = new List<CellChangeColumnCount>();
-        await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
-        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        var hot = select + "\n  FROM aud.CellChange\n WHERE " + where + "\n GROUP BY ColumnDefId;";
+        if (!withArchive)
         {
-            counts.Add(new CellChangeColumnCount(
-                reader.GetInt32(0), reader.GetInt64(1), reader.GetInt64(2), reader.GetInt64(3), reader.GetInt64(4)));
+            return hot;
         }
 
-        return counts;
+        var archive = select + "\n"
+            + "  FROM (SELECT ColumnDefId, ChangedAt, Origin FROM aud.CellChange WHERE " + where + "\n"
+            + "        UNION ALL\n"
+            + "        SELECT ColumnDefId, ChangedAt, Origin FROM arc.AuditCellChange WHERE " + where + ") AS x\n"
+            + " GROUP BY ColumnDefId;";
+
+        return WithArchiveProbe(hot, archive);
     }
+
+    /// <summary>Вибір між планом «лише гаряче» і «гаряче + архів» за пробником <see cref="ArchiveWindowProbe"/>.</summary>
+    private static string WithArchiveProbe(string hot, string archive)
+        => "IF OBJECT_ID(N'arc.AuditCellChange', N'U') IS NOT NULL\n"
+           + "BEGIN\n"
+           + "    IF EXISTS (SELECT 1 FROM arc.AuditCellChange WHERE " + ArchiveWindowProbe + ")\n"
+           + "    BEGIN\n" + archive + "\n    END\n"
+           + "    ELSE\n"
+           + "    BEGIN\n" + hot + "\n    END\n"
+           + "END\n"
+           + "ELSE\n"
+           + "BEGIN\n" + hot + "\nEND";
+
+    /// <summary>
+    /// <c>R-18</c>: імена — ПІСЛЯ вибору сторінки, у зовнішньому запиті. Вікно й курсор лишаються над самою
+    /// таблицею журналу (відсікання партицій), а три LEFT JOIN торкаються лише <c>@take</c> рядків. LEFT, а не
+    /// INNER: видалений автор, документ чи колонка не мають права ховати сам факт зміни — журнал append-only.
+    /// </summary>
+    private static string PageWithNames(string pageSource, string fromArchive, string outerOrder)
+        => $"""
+            SELECT a.Id, a.ChangedAt, a.PeriodKey, a.DocumentId, a.RowKey, a.ColumnDefId,
+                   a.OldValue, a.NewValue, a.ChangedByUserId, a.Origin, a.IsLateEdit,
+                   u.DisplayName, d.BusinessKey, d.NameL10n, c.Code, c.HeaderL10n, c.DataType,
+                   a.IsOutOfWindow, sd.Code, sd.NameL10n, td.Code, td.NameL10n, rd.LabelL10n,
+                   {fromArchive}
+              FROM (
+                    {pageSource}
+                   ) AS a
+              LEFT JOIN sec.[User] AS u ON u.Id = a.ChangedByUserId
+              LEFT JOIN doc.Document AS d ON d.Id = a.DocumentId
+              LEFT JOIN cfg.ColumnDef AS c ON c.Id = a.ColumnDefId
+              LEFT JOIN cfg.TableDef AS td ON td.Id = c.TableDefId
+              LEFT JOIN cfg.SheetDef AS sd ON sd.Id = td.SheetDefId
+              OUTER APPLY (SELECT TOP (1) r.LabelL10n
+                             FROM cfg.RowDef AS r
+                            WHERE r.TableDefId = c.TableDefId AND r.RowKey = a.RowKey AND r.IsDeleted = 0) AS rd
+             ORDER BY {outerOrder};
+            """;
 
     /// <summary>Екранує спецсимволи <c>LIKE</c> (<c>\ % _ [</c>) під <c>ESCAPE N'\'</c>; довжина — не більше межі.</summary>
     internal static string EscapeLike(string value)
@@ -185,15 +359,24 @@ public sealed class AuditReader(EcrDbContext db) : IAuditReader
     /// WHERE над <c>aud.CellChange</c> за фільтром: вікно, необов'язковий курсор і звуження.
     /// Параметри додаються в <paramref name="command"/>.
     /// </summary>
-    private static StringBuilder BuildCellChangeWhere(
+    internal static StringBuilder BuildCellChangeWhere(
         CellChangeFilter filter, SqlCommand command, (DateTime At, long Id)? after)
     {
         // ⚠ Вікно за ChangedAt стоїть ПЕРШИМ у WHERE не заради стилю: саме воно
         // відсікає партиції. Курсор за Id додається до нього, а не замість —
         // інакше сторінка 20 читала б журнал цілком.
         var where = new StringBuilder("ChangedAt >= @from AND ChangedAt < @to");
-        command.Parameters.AddWithValue("@from", filter.From);
-        command.Parameters.AddWithValue("@to", filter.To);
+
+        // ⛔ НФ-8.9.6: `datetime2(3)` — ширина колонки, а не `datetime`, який дав би `AddWithValue(DateTime)`.
+        // З параметром `datetime` ЗАПИТ ПО ДВОХ ТАБЛИЦЯХ (гаряче + архів, UNION ALL) не відсікав партиції:
+        // виміряно 19 заходів у кожну з таблиць замість 1 (`AuditReaderArchiveTests`). Той самий урок, що в
+        // `@afterAt` нижче й `@since` у `LastChangesSql`.
+        foreach (var (name, value) in new[] { ("@from", filter.From), ("@to", filter.To) })
+        {
+            var edge = command.Parameters.Add(name, SqlDbType.DateTime2);
+            edge.Scale = 3;
+            edge.Value = value;
+        }
 
         if (after is { } position)
         {

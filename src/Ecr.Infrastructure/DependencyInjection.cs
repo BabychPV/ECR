@@ -116,6 +116,9 @@ public static class DependencyInjection
         services.AddScoped<IDocumentStore, DocumentStore>();
         services.AddScoped<IDocumentDeletionStore, DocumentDeletionStore>();
         services.AddScoped<IDocumentKeyStore, DocumentKeyStore>();
+        services.AddScoped<IEditAssignmentStore, EditAssignmentStore>();
+        services.AddScoped<IEditorSetStore, EditorSetStore>();
+        services.AddScoped<IEditAssignmentManagementStore, EditAssignmentManagementStore>();
         services.AddScoped<IColumnDefSearchStore, ColumnDefSearchStore>();
         services.AddScoped<ISearchStore, SearchStore>();
         services.AddScoped<IValidationResultStore, ValidationResultStore>();
@@ -463,6 +466,7 @@ public static class DependencyInjection
 
         services.AddScoped<IExcelExportJob, Jobs.ExcelExportJob>();
         services.AddScoped<IExcelImportJob, Jobs.ExcelImportJob>();
+        services.AddScoped<IMigrateDocumentVersionJob, Jobs.MigrateDocumentVersionJob>();
 
         // Сховища Етапу 5.
         services.AddScoped<IJobProgressStore, JobProgressStore>();

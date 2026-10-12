@@ -42,7 +42,7 @@ const document_ = {
   sheetStates: {},
 };
 
-function mockFetch(): void {
+function mockFetch(isSimulation = false): void {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL) => {
@@ -53,7 +53,7 @@ function mockFetch(): void {
           JSON.stringify({
             denies: [],
             grants: {},
-            isSimulation: false,
+            isSimulation,
             language: 'en',
             mustChangePassword: false,
             permissions: ['Document.Create'],
@@ -73,10 +73,12 @@ function mockFetch(): void {
       }
 
       if (url.includes('/api/v1/projects')) {
-        return new Response(JSON.stringify({ items: [], nextCursor: null, totalCount: 0 }), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json' },
-        });
+        // ✎ FP-3: перелік проєктів не порожній — без жодного проєкту кнопка «Створити» недоступна
+        // (створювати немає де), а цей тест про ЛІНИВІСТЬ діалогу, а не про відсутність доступу.
+        return new Response(
+          JSON.stringify({ items: [{ id: 1, code: 'PRJ', status: 'Active' }], nextCursor: null, totalCount: 1 }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
       }
 
       return new Response(JSON.stringify(null), { status: 200 });
@@ -84,12 +86,12 @@ function mockFetch(): void {
   );
 }
 
-function show(): void {
+function show(path = '/'): void {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
   render(
     <MantineProvider theme={testTheme}>
-      <MemoryRouter initialEntries={['/']}>
+      <MemoryRouter initialEntries={[path]}>
         <QueryClientProvider client={client}>
           <DocumentsPage />
         </QueryClientProvider>
@@ -124,6 +126,31 @@ describe('DocumentsPage: CreateDocumentModal лінивий (D-132)', () => {
 
       expect(await screen.findByRole('dialog', { name: 'create-stub' })).toBeTruthy();
       expect(probe.evaluated).toBe(true);
+    },
+    SlowEnvTimeout,
+  );
+
+  it(
+    'симуляція: кнопки «Створити» немає',
+    async () => {
+      // ⛔ Мутаційний доказ: прибери `isSimulation` з умови кнопки в `DocumentsPage.tsx` — тест червоніє.
+      mockFetch(true);
+      show();
+
+      await screen.findByText('P1-V1-0001', {}, { timeout: SlowEnvTimeout });
+      expect(screen.queryByRole('button', { name: '⟦documents.create⟧' })).toBeNull();
+    },
+    SlowEnvTimeout,
+  );
+
+  it(
+    'симуляція: ?create=1 в URL не відкриває створення',
+    async () => {
+      mockFetch(true);
+      show('/?create=1');
+
+      await screen.findByText('P1-V1-0001', {}, { timeout: SlowEnvTimeout });
+      expect(screen.queryByRole('dialog')).toBeNull();
     },
     SlowEnvTimeout,
   );

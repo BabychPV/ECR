@@ -23,8 +23,19 @@ import { useCollectionSchedules } from './useCollectionSchedules';
  * з'єднаннями, — окремого звернення вкладка не робить.
  *
  * ⛔ `L10`: відмова читання розкладів — `ErrorAlert`, а не «розкладів немає».
+ *
+ * ⛔ `readOnly` — перелік видно, а вибору сутності й форми створення/правки/видалення НЕМАЄ (не
+ * вимкнені): під симуляцією сервер відхиляє кожну зміну (`ECR-SIM-0403`). Права
+ * `Integration.EditSchedule` вкладка не перевіряє сама — це робить шухляда, яка без нього вкладку
+ * не показує взагалі.
  */
-export function DataSourceScheduleTab({ source }: { readonly source: DataSource }): JSX.Element {
+export function DataSourceScheduleTab({
+  source,
+  readOnly = false,
+}: {
+  readonly source: DataSource;
+  readonly readOnly?: boolean;
+}): JSX.Element {
   const schedules = useCollectionSchedules(source.code);
 
   const entities = useQuery({
@@ -66,15 +77,19 @@ export function DataSourceScheduleTab({ source }: { readonly source: DataSource 
             {schedules.data.map((schedule) => (
               <Table.Tr key={schedule.id} data-schedule-row={schedule.sourceEntityCode}>
                 <Table.Td>
-                  {/* Кнопка, а не клац по рядку: з клавіатури рядок недосяжний. */}
-                  <Anchor
-                    component="button"
-                    type="button"
-                    size="sm"
-                    onClick={() => setSelected(schedule.sourceEntityId)}
-                  >
-                    {schedule.sourceEntityName ?? schedule.sourceEntityCode}
-                  </Anchor>
+                  {readOnly ? (
+                    <Text size="sm">{schedule.sourceEntityName ?? schedule.sourceEntityCode}</Text>
+                  ) : (
+                    /* Кнопка, а не клац по рядку: з клавіатури рядок недосяжний. */
+                    <Anchor
+                      component="button"
+                      type="button"
+                      size="sm"
+                      onClick={() => setSelected(schedule.sourceEntityId)}
+                    >
+                      {schedule.sourceEntityName ?? schedule.sourceEntityCode}
+                    </Anchor>
+                  )}
                 </Table.Td>
                 <Table.Td>
                   <Group gap="xs">
@@ -106,11 +121,13 @@ export function DataSourceScheduleTab({ source }: { readonly source: DataSource 
         </Table>
       )}
 
-      {own.length === 0 ? (
+      {!readOnly && own.length === 0 && (
         <Text size="sm" c="dimmed">
           {t('sources.scheduleNoEntities')}
         </Text>
-      ) : (
+      )}
+
+      {!readOnly && own.length > 0 && (
         <Select
           label={t('sources.scheduleEntity')}
           data={own.map((entity) => ({ value: String(entity.id), label: label(entity) }))}
@@ -120,7 +137,7 @@ export function DataSourceScheduleTab({ source }: { readonly source: DataSource 
         />
       )}
 
-      {selected !== null && (
+      {!readOnly && selected !== null && (
         // ⚠ Нова сутність — нова форма: чернетка однієї не переходить в іншу.
         <CollectionScheduleTab key={selected} sourceEntityId={selected} dataSource={source.code} />
       )}

@@ -2,6 +2,7 @@ import { useQuery, type UseQueryResult } from '@tanstack/react-query';
 import { apiFetch, apiFetchResponse } from '@/api/client';
 import type { components } from '@/api/schema';
 import type { CellChangePage } from '@/api/types';
+import { todayDateOnly } from '@/shared/format';
 
 /*
  * ⛔ Адреса записана ПОВНІСТЮ і поруч із викликом `apiFetch`, а не збирається
@@ -26,6 +27,31 @@ export const humanCellChangeOrigins: readonly string[] = ['UserEdit', 'Import', 
 /** Чи зробила зміну з цим походженням людина (`humanCellChangeOrigins`). */
 export function isHumanOrigin(origin: string | null | undefined): boolean {
   return origin !== null && origin !== undefined && humanCellChangeOrigins.includes(origin);
+}
+
+/**
+ * Скільки місяців зміни лежать у «гарячому» журналі (`aud.CellChange`); старші партиції нічна задача
+ * переносить в архів аудиту (`arc.AuditCellChange`, `arc.usp_ArchiveAudit`).
+ *
+ * ⚠ Те саме число, що `PartitionCheckJob.AuditArchiveOlderThanMonths` на сервері (D-247, припущення
+ * 24 міс.). Тут воно лише для підказки «Archive» — читання архіву від нього НЕ залежить: сервер віддає
+ * і гаряче, і архівне за будь-яким вікном, а рядок архіву сам несе `fromArchive`.
+ */
+export const AuditHotMonths = 24;
+
+/** Ширина вікна «Archive» — менша за серверну стелю в 92 доби: добовий зсув пояса її не перевищить. */
+export const ArchiveWindowDays = 90;
+
+/**
+ * Вікно «останні 90 днів перед межею архіву» (НФ-8.9.6): `to` — день перед першим числом місяця
+ * `AuditHotMonths` місяців тому; обидві дати — включно, у поясі браузера, як решта вікон журналу.
+ */
+export function archiveWindow(today: Date = new Date()): { readonly from: string; readonly to: string } {
+  const boundary = new Date(today.getFullYear(), today.getMonth() - AuditHotMonths, 1);
+  const to = new Date(boundary.getFullYear(), boundary.getMonth(), boundary.getDate() - 1);
+  const from = new Date(to.getFullYear(), to.getMonth(), to.getDate() - (ArchiveWindowDays - 1));
+
+  return { from: todayDateOnly(from), to: todayDateOnly(to) };
 }
 
 /** Календарна дата без години — рівно те, що віддає `<input type="date">`. */

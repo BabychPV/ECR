@@ -141,7 +141,15 @@ public sealed class SetEntryValidityHandler(
                     Operation: "SetValidity",
                     OldJson: Window(previousFrom, previousTo),
                     NewJson: Window(from, to),
-                    ChangeReason: $"Перераховано рядків: {affected}.",
+                    // ⛔ FP-7 (прохід «від першого обличчя» 2026-10-11): готова українська фраза в англійському
+                    // інтерфейсі. Причина пишеться КОНВЕРТОМ `{"k","p"}` (той самий механізм, що й
+                    // `integrationAudit.*`): клієнт розгортає ключ каталогу мовою читача
+                    // (`structureChangeReason.ts`). Старі записи лишаються готовою фразою.
+                    ChangeReason: System.Text.Json.JsonSerializer.Serialize(new
+                    {
+                        k = "registryAudit.entryValidityRescanned",
+                        p = new { count = affected.ToString(System.Globalization.CultureInfo.InvariantCulture) },
+                    }),
                     ChangedByUserId: userId,
                     CorrelationId: currentUser.CorrelationId),
                 innerCt).ConfigureAwait(false);

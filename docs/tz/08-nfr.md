@@ -112,8 +112,9 @@
 ## 8.8 Локалізація
 
 EN + RU + KZ (D-11). Зберігання — JSON-колонки `…L10n` + реєстр `sys.Language`.
-`InvariantGlobalization = true`: форматування чисел і дат — явне, не залежить
-від культури процесу.
+`InvariantGlobalization = false` (`D-383`): режим invariant не підтримує
+`Microsoft.Data.SqlClient` (`Q-040`). Форматування чисел і дат — явне
+(`CultureInfo.InvariantCulture`), не залежить від культури процесу.
 
 ## 8.9 Критерії приймання
 

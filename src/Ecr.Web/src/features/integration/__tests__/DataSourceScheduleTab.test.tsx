@@ -95,7 +95,7 @@ function respond(schedules: (url: URL) => Response = byFilter): void {
           isSimulation: false,
           language: 'en',
           mustChangePassword: false,
-          permissions: ['Integration.View', 'Integration.Manage'],
+          permissions: ['Integration.View', 'Integration.Manage', 'Integration.EditSchedule'],
           simulatedForUserId: null,
           userId: 1,
           userName: 'tester',

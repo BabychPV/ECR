@@ -3,7 +3,9 @@ import { Menu } from '@mantine/core';
 import type { DocumentSummary } from '@/api/types';
 import { can, useSession } from '@/shared/session/useSession';
 import { t } from '@/shared/i18n';
+import { isActiveJob } from '@/features/jobs/myTasks';
 import { hasProjectGrant } from './BusinessKeyChangeAction';
+import { useMigrationJobCompletion } from './useMigrationJobCompletion';
 import { MigrateDocumentVersionPermission } from './versionMigrationApi';
 
 /**
@@ -46,6 +48,20 @@ export function useVersionMigrationAction({ documentId, document }: VersionMigra
   const session = useSession();
   const [opened, setOpened] = useState(false);
 
+  // D-2: задача переносу і її завершення живуть ТУТ, на рівні сторінки, і переживають закриття діалогу.
+  const [jobId, setJobId] = useState<string | null>(null);
+  const job = useMigrationJobCompletion(jobId, opened, () => {
+    setJobId(null);
+    setOpened(false);
+  });
+  const jobActive = jobId !== null && (job.data === undefined ? job.error === null : isActiveJob(job.data.state));
+
+  const close = () => {
+    setOpened(false);
+    // Завершена (відмовлена) задача не тягнеться в наступне відкриття; та, що йде, - лишається.
+    if (!jobActive) setJobId(null);
+  };
+
   // ⛔ L1-08 (HU-11 Q3=A): дзеркало сервера — `Template.Edit` І грант Manage на проєкт документа.
   const allowed =
     can(session.data, MigrateDocumentVersionPermission)
@@ -61,7 +77,7 @@ export function useVersionMigrationAction({ documentId, document }: VersionMigra
   const dialog =
     allowed && opened ? (
       <Suspense fallback={null}>
-        <VersionMigrationDialog documentId={documentId} onClose={() => setOpened(false)} />
+        <VersionMigrationDialog documentId={documentId} onClose={close} jobId={jobId} onJobChange={setJobId} />
       </Suspense>
     ) : null;
 

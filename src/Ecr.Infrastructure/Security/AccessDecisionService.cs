@@ -673,11 +673,37 @@ public sealed class AccessDecisionService(
     {
         ArgumentNullException.ThrowIfNull(profile);
 
-        var context = await BuildContextAsync(
-            documentId, address.PeriodKey, sheetDefId: null, address.ColumnDefId,
-            evaluateAccessWindow: true, ct).ConfigureAwait(false);
+        // ⛔ EA-B (F-A): поштучний шлях — це ПАКЕТНИЙ шлях з однією адресою, а не
+        // окрема копія `BuildContextAsync + EditRules.CanEdit`. Друга копія
+        // не знала б про передачі зрізу (підйом і заборони) і мовчки обходила б
+        // їх: саме так колись загубилося створення рядків.
+        //
+        // Рядок шукається в зрізі документа за парою «період × Id»; рядок
+        // іншого документа чи видалений — відмова без розрізнення (як і
+        // відсутність рішення в пакетного шляху).
+        var instanceId = await (
+                from r in db.TableRows.AsNoTracking()
+                join t in db.TableInstances.AsNoTracking() on r.TableInstanceId equals t.Id
+                where r.PeriodKeyValue == address.PeriodKey.Value
+                      && r.Id == address.TableRowId
+                      && !r.IsDeleted
+                      && t.DocumentId == documentId
+                select (long?)t.Id)
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
 
-        return EditRules.CanEdit(profile, context);
+        if (instanceId is not { } id)
+        {
+            return EditDecision.Deny(EditDenyReason.NoGrant);
+        }
+
+        var all = await CanEditCellsBatchAsync(
+                profile, [new CellsAccessRequest(id, address.PeriodKey, [address])], ct)
+            .ConfigureAwait(false);
+
+        return all[id].TryGetValue(address, out var decision)
+            ? decision
+            : EditDecision.Deny(EditDenyReason.NoGrant);
     }
 
     /// <inheritdoc />
@@ -721,7 +747,7 @@ public sealed class AccessDecisionService(
             return result;
         }
 
-        var slices = await SliceContextsAsync(tableInstanceIds, ct).ConfigureAwait(false);
+        var slices = await SliceContextsAsync(profile, tableInstanceIds, ct).ConfigureAwait(false);
 
         foreach (var byPeriod in slices.GroupBy(s => s.Value.PeriodKey))
         {
@@ -824,7 +850,7 @@ public sealed class AccessDecisionService(
             return result;
         }
 
-        var slices = await SliceContextsAsync([.. asked.Select(r => r.TableInstanceId)], ct).ConfigureAwait(false);
+        var slices = await SliceContextsAsync(profile, [.. asked.Select(r => r.TableInstanceId)], ct).ConfigureAwait(false);
 
         foreach (var byPeriod in asked.GroupBy(r => r.PeriodKey))
         {
@@ -991,7 +1017,7 @@ public sealed class AccessDecisionService(
             return result;
         }
 
-        var slices = await SliceContextsAsync(asked, ct).ConfigureAwait(false);
+        var slices = await SliceContextsAsync(profile, asked, ct).ConfigureAwait(false);
 
         foreach (var tableInstanceId in asked)
         {
@@ -1023,6 +1049,23 @@ public sealed class AccessDecisionService(
                 RowIsReadOnly = RowDefOf(slice, rowKey)?.IsReadOnly ?? false,
             };
 
+            // ⛔ EA-B (D5): виконавець рядків НЕ створює — підйому на рівні рядка
+            // немає; діють лише заборони передачі (рівень рядка, без місяця).
+            if (slice.Delegation is { } delegation)
+            {
+                var facts = EditAssignmentGuard.Evaluate(
+                    delegation.UserId,
+                    delegation.OwnerUserId,
+                    isIntegrationWriter: false,
+                    delegation.Facts,
+                    new EditSliceFacts(
+                        slice.Shared.SheetCode, delegation.TableCode, slice.PeriodKey,
+                        ColumnIsMonth: false, ColumnMonthNumber: null, IsRowLevel: true),
+                    delegation.UtcNow);
+
+                rowContext = rowContext with { AssignmentLock = facts.Lock };
+            }
+
             var columns = new Dictionary<int, EditDecision>(slice.Columns.Count);
             foreach (var column in slice.Columns)
             {
@@ -1032,7 +1075,13 @@ public sealed class AccessDecisionService(
                 columns[column.Id] = Decide(profile, slice, rowKey, column, EmptyWindows);
             }
 
-            result[rowKey] = new NewRowAccess(EditRules.CanEdit(profile, rowContext), columns);
+            var rowDecision = EditRules.CanEdit(profile, rowContext);
+            if (slice.DocumentHasAssignments)
+            {
+                rowDecision = rowDecision with { AssignmentsPresent = true };
+            }
+
+            result[rowKey] = new NewRowAccess(rowDecision, columns);
         }
 
         return result;
@@ -1068,7 +1117,29 @@ public sealed class AccessDecisionService(
             RowIsReadOnly = def?.IsReadOnly ?? false,
         };
 
+        // ⛔ EA-B: «передача місяця». Факти правила — на КОЖНУ комірку (місяць
+        // колонки різний), але список передач уже звужено до зрізу, тож це
+        // кілька порівнянь, не запит. Підйом Read → Write і заборони
+        // (LockedByOwner/Filled/Validated/Expired) діють у `EditRules.CanEdit`
+        // і ДО правил періоду шаблону нижче: ті перекривають передачу так само,
+        // як звичайний дозвіл.
+        if (slice.Delegation is { } delegation)
+        {
+            var facts = EditAssignmentGuard.Evaluate(
+                delegation.UserId,
+                delegation.OwnerUserId,
+                isIntegrationWriter: false,
+                delegation.Facts,
+                new EditSliceFacts(
+                    slice.Shared.SheetCode, delegation.TableCode, slice.PeriodKey,
+                    column.IsMonthColumn, column.MonthNumber),
+                delegation.UtcNow);
+
+            context = context with { DelegatedWrite = facts.DelegatedWrite, AssignmentLock = facts.Lock };
+        }
+
         var decision = EditRules.CanEdit(profile, context);
+        var viaAssignment = decision.ViaAssignment;
 
         // ⚠ Правила періоду перевіряються ЛИШЕ там, де решта дозволила.
         // Інакше комірка в закритому періоді доповідала б про вікно дозволу
@@ -1125,7 +1196,14 @@ public sealed class AccessDecisionService(
             }
         }
 
-        return decision;
+        // Прапорець «через передачу» переживає правила періоду, що замінили
+        // рішення на AllowWithConfirmation/AllowMarked.
+        if (viaAssignment && decision.IsAllowed)
+        {
+            decision = decision with { ViaAssignment = true };
+        }
+
+        return slice.DocumentHasAssignments ? decision with { AssignmentsPresent = true } : decision;
     }
 
     /// <summary>Опис рядка з шаблону за його ключем; <c>null</c> — рядок вільний.</summary>
@@ -1147,11 +1225,35 @@ public sealed class AccessDecisionService(
         CellAccessContext Shared,
         IReadOnlyList<ColumnDef> Columns,
         TemplateVersionSnapshot Snapshot,
-        PeriodRuleContext Rules);
+        PeriodRuleContext Rules)
+    {
+        /// <summary>
+        /// Передачі зрізу документа для ЦЬОГО користувача (EA-B); <c>null</c> — передач
+        /// немає чи вони його не стосуються (документ без передач, симуляція, системний шлях).
+        /// </summary>
+        public DelegationFacts? Delegation { get; init; }
+
+        /// <summary>У документа зрізу є передачі (ознака для повторної перевірки під гейтом).</summary>
+        public bool DocumentHasAssignments { get; init; }
+    }
+
+    /// <summary>Передачі документа, звужені до зрізу, і те, що потрібно правилу <see cref="EditAssignmentGuard"/>.</summary>
+    /// <param name="UserId">Хто пише.</param>
+    /// <param name="OwnerUserId">Автор документа.</param>
+    /// <param name="TableCode">Код таблиці зрізу; <c>null</c> — невідомий.</param>
+    /// <param name="Facts">Передачі документа (вже звужені за аркушем/таблицею/періодом).</param>
+    /// <param name="UtcNow">Годинник служби — для строку дії.</param>
+    private sealed record DelegationFacts(
+        int UserId,
+        int OwnerUserId,
+        string? TableCode,
+        IReadOnlyList<EditAssignmentFact> Facts,
+        DateTime UtcNow);
 
     /// <summary>
     /// Збирає все, що спільне для зрізів, ОДИН раз на групу «документ × період».
     /// </summary>
+    /// <param name="profile">Профіль прав: чиї передачі зрізу (EA-B) читати.</param>
     /// <param name="tableInstanceIds">Екземпляри таблиць.</param>
     /// <param name="ct">Токен скасування.</param>
     /// <returns>Екземпляр → умови його зрізу; кожен запитаний екземпляр присутній.</returns>
@@ -1168,7 +1270,7 @@ public sealed class AccessDecisionService(
     /// групи (1, лише коли аркушів більше одного), правила періоду (1–3).
     /// </remarks>
     private async Task<IReadOnlyDictionary<long, SliceContext>> SliceContextsAsync(
-        IReadOnlyCollection<long> tableInstanceIds, CancellationToken ct)
+        AccessProfile profile, IReadOnlyCollection<long> tableInstanceIds, CancellationToken ct)
     {
         var ids = tableInstanceIds.Distinct().ToList();
 
@@ -1203,6 +1305,7 @@ public sealed class AccessDecisionService(
 
         var result = new Dictionary<long, SliceContext>(instances.Count);
 
+
         foreach (var group in instances.GroupBy(i => (i.DocumentId, i.PeriodKeyValue)))
         {
             var documentId = group.Key.DocumentId;
@@ -1227,6 +1330,13 @@ public sealed class AccessDecisionService(
 
             var projectId = sharedBySheet.Values.First().ProjectId;
 
+            // ⛔ EA-B: передачі читаються З БАЗИ на кожне рішення (не з кешу профілю — профіль не
+            // знає документа) і ЛИШЕ для документа, у якого вони є (ознака — з запиту умов доступу).
+            var documentHasAssignments = sharedBySheet.Values.First().HasEditAssignments;
+            var assignments = documentHasAssignments
+                ? await EditAssignmentsAsync(profile, [documentId], ct).ConfigureAwait(false)
+                : EmptyAssignments;
+
             // ⛔ Правила доступу до періоду (`ФВ-2.15`) і все, що їм потрібно,
             // читається ОДИН раз на групу — див. `PeriodRuleContextAsync`.
             // Вікна чинності ключовані `TableRow.Id`, а він унікальний, тож
@@ -1245,14 +1355,58 @@ public sealed class AccessDecisionService(
 
                 // ⚠ D-214: код аркуша — зі знімка, що вже в руках; без нього
                 // роль, звужена аркушами, у рішеннях зрізу не діяла б.
+                var shared = sharedBySheet[sheetDefId] with { SheetCode = SheetCodeOf(snapshot, sheetDefId) };
+
+                DelegationFacts? delegation = null;
+                if (assignments.TryGetValue(documentId, out var owned))
+                {
+                    var tableCode = snapshot.Sheets
+                        .SelectMany(s => s.Tables)
+                        .FirstOrDefault(t => t.Id == instance.TableDefId)?.Code;
+
+                    var narrowed = EditAssignmentGuard.Narrow(
+                        owned.Facts,
+                        new EditSliceFacts(shared.SheetCode, tableCode, periodKey, false, null));
+
+                    if (narrowed.Count > 0)
+                    {
+                        delegation = new DelegationFacts(
+                            profile.UserId, owned.OwnerUserId, tableCode, narrowed, clock.UtcNow);
+                    }
+                }
+
                 result[instance.Id] = new SliceContext(
-                    periodKey, instance.TableDefId, sheetDefId,
-                    sharedBySheet[sheetDefId] with { SheetCode = SheetCodeOf(snapshot, sheetDefId) },
-                    columns, snapshot, ruleContext);
+                    periodKey, instance.TableDefId, sheetDefId, shared, columns, snapshot, ruleContext)
+                {
+                    Delegation = delegation,
+                    DocumentHasAssignments = documentHasAssignments,
+                };
             }
         }
 
         return result;
+    }
+
+    /// <summary>Передачі документів для користувача профілю: документ → автор і факти.</summary>
+    /// <remarks>
+    /// ⚠ Порожньо без звернення до бази для симуляції (запис відхилено раніше) й
+    /// системних шляхів (D3). Проєкція — `EditAssignmentFactsReader`, спільна з
+    /// повторною перевіркою під блокуванням аркуша.
+    /// </remarks>
+    private static readonly IReadOnlyDictionary<long, (int OwnerUserId, IReadOnlyList<EditAssignmentFact> Facts)>
+        EmptyAssignments = new Dictionary<long, (int, IReadOnlyList<EditAssignmentFact>)>();
+
+    private async Task<IReadOnlyDictionary<long, (int OwnerUserId, IReadOnlyList<EditAssignmentFact> Facts)>>
+        EditAssignmentsAsync(AccessProfile profile, IReadOnlyCollection<long> documentIds, CancellationToken ct)
+    {
+        if (profile.IsSimulation || profile.IsIntegrationWriter || documentIds.Count == 0)
+        {
+            return new Dictionary<long, (int, IReadOnlyList<EditAssignmentFact>)>();
+        }
+
+        return await Persistence.EditAssignmentFactsReader
+            .LoadAsync(db, documentIds, profile.UserId, forUpdate: false, ct)
+            .ConfigureAwait(false);
     }
 
     /// <summary>
@@ -1628,6 +1782,10 @@ public sealed class AccessDecisionService(
                     p.PeriodEnd,
                     p.YearGraceOffsetDays,
                     p.TimeZoneId,
+
+                    // ⛔ EA-B: ознака «у документа є передачі» — EXISTS у тому самому запиті,
+                    // 0 нових звернень; документ без передач не читає їх ні в рішенні, ні під гейтом.
+                    HasAssignments = db.EditAssignments.Any(x => x.DocumentId == documentId),
                     Period = db.Periods
                         .AsNoTracking()
                         .Where(x => x.ProjectId == d.ProjectId && x.PeriodKeyValue == periodValue)
@@ -1726,6 +1884,7 @@ public sealed class AccessDecisionService(
             // комусь потрібен.
             SheetCode = sheetCode,
             Period = periodKey,
+            HasEditAssignments = state.HasAssignments,
         };
     }
 

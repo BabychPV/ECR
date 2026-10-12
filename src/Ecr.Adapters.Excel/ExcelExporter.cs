@@ -29,7 +29,12 @@ public sealed class ExcelExporter(
     ICalculationResultStore? results = null,
     IConditionalFormatStore? conditionalFormats = null,
     IDocumentHeaderStore? headers = null,
-    IUiStringCatalog? catalog = null) : IExcelExporter
+    IUiStringCatalog? catalog = null,
+
+    // ФВ-0.2: граф залежностей версії (`cfg.FormulaDependency`) — за ним діапазони формул у книзі
+    // розкриваються так, як їх розкрила публікація й рахує розрахунок. Необов'язковий лише заради
+    // тестів, що конструюють експортер вручну; без нього діапазон — за макетом книги.
+    ITemplateVersionStore? templateVersions = null) : IExcelExporter
 {
     /// <summary>Рядок, з якого починається перший блок аркуша.</summary>
     private const int FirstRow = 1;
@@ -222,7 +227,13 @@ public sealed class ExcelExporter(
 
         if (options.IncludeFormulas)
         {
-            WriteFormulas(workbook, snapshot, blocks);
+            IReadOnlyList<FormulaDependency> graph = templateVersions is null
+                ? []
+                : await templateVersions
+                    .ListFormulaDependenciesAsync(snapshot.TemplateVersionId, ct)
+                    .ConfigureAwait(false);
+
+            WriteFormulas(workbook, snapshot, blocks, graph);
         }
 
         // A2-12: поля шапки — окремим ВИДИМИМ аркушем ПІСЛЯ аркушів даних і ПЕРЕД
@@ -841,10 +852,47 @@ public sealed class ExcelExporter(
     /// вона лягла б і в текстові колонки, і в дати.
     /// </remarks>
     private void WriteFormulas(
-        XLWorkbook workbook, TemplateVersionSnapshot snapshot, IReadOnlyList<ExcelTableBlock> blocks)
+        XLWorkbook workbook,
+        TemplateVersionSnapshot snapshot,
+        IReadOnlyList<ExcelTableBlock> blocks,
+        IReadOnlyList<FormulaDependency> graph)
     {
         var coordinates = Coordinates(blocks);
         var byTableDef = blocks.ToDictionary(b => b.TableDefId);
+
+        // ⛔ ФВ-0.2: діапазон формули — ті рядки, які розкрила ПУБЛІКАЦІЯ, а не все між кінцями за
+        // макетом книги (макет іде за поточним Ordinal, який презентаційна правка могла змінити).
+        // Граф порожній (чернетка, експортер без порту) — `PublishedRangesOf` дає `null`, і діапазон,
+        // як і раніше, за макетом: перерахунок тоді теж читає поточний порядок.
+        var edgesByFormula = Ecr.Application.Recalculation.PublishedRanges.EdgesByFormula(graph);
+        var allTables = snapshot.Sheets.SelectMany(s => s.Tables).ToDictionary(t => t.Id);
+        var resolver = new Ecr.Expressions.Binding.ReferenceResolver(snapshot);
+        var rangesByFormula = new Dictionary<int, IReadOnlyDictionary<int, IReadOnlyList<string>>?>();
+
+        IReadOnlyDictionary<int, IReadOnlyList<string>>? PublishedRangesOf(TableDef owner, FormulaDef formula)
+        {
+            if (rangesByFormula.TryGetValue(formula.Id, out var cached))
+            {
+                return cached;
+            }
+
+            IReadOnlyDictionary<int, IReadOnlyList<string>>? ranges = null;
+
+            if (edgesByFormula.TryGetValue(formula.Id, out var edges)
+                && formula.Dialect == ExpressionDialect.Template)
+            {
+                var parsed = new Ecr.Expressions.Parsing.Parser().Parse(formula.Expression, ExpressionDialect.Template);
+
+                if (parsed.IsSuccess && parsed.Expression is not null)
+                {
+                    ranges = Ecr.Application.Recalculation.PublishedRanges.Resolve(
+                        formula, parsed.Expression.Root, owner, allTables, resolver, edges);
+                }
+            }
+
+            rangesByFormula[formula.Id] = ranges;
+            return ranges;
+        }
 
         foreach (var table in snapshot.Sheets.SelectMany(s => s.Tables).Where(t => !t.IsDeleted))
         {
@@ -883,7 +931,8 @@ public sealed class ExcelExporter(
                 }
 
                 var translated = formulaTranslator.ToExcel(
-                    formulas[0].Expression, coordinates, new FormulaContext(table.Code, rowKey));
+                    formulas[0].Expression, coordinates,
+                    new FormulaContext(table.Code, rowKey, PublishedRangesOf(table, formulas[0])));
 
                 if (string.IsNullOrEmpty(translated) || FormulaTranslator.IsBroken(translated))
                 {

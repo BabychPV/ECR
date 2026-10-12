@@ -429,6 +429,7 @@ public sealed record CreateReportDefCommand(
 /// і саме тому окремої дії «правити версію» тут немає взагалі.
 /// </remarks>
 public sealed class CreateReportVersionHandler(
+    IReportDefinitionStore definitions,
     IRepository<ReportDef, int> defs,
     IRepository<ReportVersion, int> versions,
     IUnitOfWork uow,
@@ -464,13 +465,24 @@ public sealed class CreateReportVersionHandler(
 
         // Правила першими: від джерела рядків залежить, які колонки можливі.
         var rulesJson = ReportDefinitionSpec.RulesJson(command.Rules, command.Columns);
+        var versionNumber = ReportDefinitionSpec.Version(command.Version);
+        var columnsJson = ReportDefinitionSpec.ColumnsJson(command.Columns, command.Rules);
 
-        var version = new ReportVersion(
-            reportDefId,
-            ReportDefinitionSpec.Version(command.Version),
-            ReportDefinitionSpec.ColumnsJson(command.Columns, command.Rules),
-            rulesJson,
-            clock.UtcNow);
+        // ⛔ Номер версії унікальний в описі (`UQ_ReportVersion`): дублікат відмовляє ТУТ, а не
+        // винятком провайдера, який без цієї перевірки доїжджав клієнтові як `500 ECR-SYS-0500`.
+        if (await definitions.VersionExistsAsync(reportDefId, versionNumber, ct).ConfigureAwait(false))
+        {
+            throw new BusinessRuleException(
+                ErrorCodes.ReportDefDuplicate,
+                $"Версія «{versionNumber}» у описі звіту {reportDefId} уже є: номер версії унікальний.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-RPT-4091.version",
+                    ["version"] = versionNumber,
+                });
+        }
+
+        var version = new ReportVersion(reportDefId, versionNumber, columnsJson, rulesJson, clock.UtcNow);
 
         versions.Add(version);
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);

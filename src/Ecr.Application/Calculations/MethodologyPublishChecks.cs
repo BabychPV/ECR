@@ -386,6 +386,7 @@ public static class MethodologyPublishChecks
         }
 
         var problems = new List<string>();
+        var missingArguments = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var (tableDefId, codes) in columnCodesByTable)
         {
@@ -394,6 +395,7 @@ public static class MethodologyPublishChecks
 
             if (missing.Count > 0)
             {
+                missingArguments.UnionWith(missing);
                 problems.Add(
                     $"TableDefId {tableDefId.ToString(CultureInfo.InvariantCulture)}: немає колонок "
                     + $"для аргументів {string.Join(", ", missing.Select(m => "@" + m))}");
@@ -416,6 +418,9 @@ public static class MethodologyPublishChecks
                 ["problems"] = problems,
                 ["messageKey"] = "err.ECR-CALC-0438.missingColumns",
                 ["tableCount"] = problems.Count.ToString(CultureInfo.InvariantCulture),
+
+                // R16-4: імена аргументів без колонки («@A, @B») — для ключа правила категорії (0422).
+                ["arguments"] = string.Join(", ", missingArguments.Select(a => "@" + a)),
             });
     }
 

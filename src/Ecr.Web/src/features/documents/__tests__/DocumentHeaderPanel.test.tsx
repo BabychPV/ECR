@@ -606,6 +606,38 @@ describe('DocumentHeaderPanel: Lookup-поле — picker за довідник�
     });
   });
 
+  it('обов\'язковий Lookup: повторний клік по обраному не очищає поле; необов\'язковий — очищає', async () => {
+    // ⛔ Мутаційний доказ: прибери `allowDeselect={!field.isRequired}` — перший `expect` червоніє.
+    const registries = {
+      list: [registryDef({ id: 7, code: 'UNITS' })],
+      entries: { UNITS: [registryEntry({ id: 42, display: 'Кілограм' })] },
+    };
+    show({
+      fields: [
+        field({ code: 'REQ', dataType: 'Lookup', isRequired: true, value: 42, lookupRegistryDefId: 7, label: { values: { en: 'Req' } } }),
+        field({ code: 'OPT', dataType: 'Lookup', headerFieldDefId: 2, value: 42, lookupRegistryDefId: 7, label: { values: { en: 'Opt' } } }),
+      ],
+      registries,
+    });
+
+    const required = await screen.findByLabelText(/^Req/);
+    await waitFor(() => expect((required as HTMLInputElement).value).toBe('Кілограм'));
+    fireEvent.click(required);
+    fireEvent.click(await screen.findByRole('option', { name: 'Кілограм' }));
+    expect((required as HTMLInputElement).value).toBe('Кілограм');
+
+    const optional = screen.getByLabelText('Opt');
+    await waitFor(() => expect((optional as HTMLInputElement).value).toBe('Кілограм'));
+    expect(optional.closest('.mantine-InputWrapper-root')?.querySelector('[class*="CloseButton"], [class*="clearButton"]')).not.toBeNull();
+    fireEvent.click(optional);
+    fireEvent.click(await screen.findByRole('option', { name: 'Кілограм' }));
+    await waitFor(() => expect((optional as HTMLInputElement).value).toBe(''));
+
+    // Хрестик: у обов'язкового поля його немає (контроль — у необов'язкового він був би).
+    const clearSelector = '[class*="CloseButton"], [class*="clearButton"]';
+    expect(required.closest('.mantine-InputWrapper-root')?.querySelector(clearSelector)).toBeNull();
+  });
+
   it('великий довідник: у списку не більше 50 пунктів, пошук лишається по всьому переліку (C1-04)', async () => {
     // ⛔ Мутаційний доказ: прибери `limit` у `Select` поля Lookup — у DOM усі 60 пунктів, тест червоніє.
     const entries = Array.from({ length: 60 }, (_, index) =>

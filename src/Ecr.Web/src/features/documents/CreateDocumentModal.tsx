@@ -55,9 +55,16 @@ const NoInitialData: NoData = {};
 export function CreateDocumentModal({
   opened,
   onClose,
+  preferredPeriodKey = null,
 }: {
   opened: boolean;
   onClose: () => void;
+  /**
+   * FP-7 (прохід «від першого обличчя» 2026-10-11): період, обраний у переліку документів, — типовий у
+   * майстрі, якщо його можна обрати для проєкту (відкритий, пільговий чи закритий). Майстер ігнорував
+   * період зі списку й завжди пропонував найновіший відкритий. Вибір людини в самому майстрі сильніший.
+   */
+  preferredPeriodKey?: number | null;
 }): JSX.Element {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
@@ -122,8 +129,13 @@ export function CreateDocumentModal({
     .filter((period) => period.state === 'Open' || period.state === 'Grace' || period.state === 'Closed')
     .sort((a, b) => b.periodKey - a.periodKey);
   const newestOpen = newestOpenPeriodKey(calendar.data?.periods);
+  const preferred =
+    preferredPeriodKey !== null && choosablePeriods.some((period) => period.periodKey === preferredPeriodKey)
+      ? String(preferredPeriodKey)
+      : null;
   const periodKey =
     pickedPeriod ??
+    preferred ??
     (newestOpen === null ? (choosablePeriods[0] === undefined ? null : String(choosablePeriods[0].periodKey)) : String(newestOpen));
   const pickedState = choosablePeriods.find((period) => String(period.periodKey) === periodKey)?.state ?? null;
   const periodLabel = (key: number): string =>

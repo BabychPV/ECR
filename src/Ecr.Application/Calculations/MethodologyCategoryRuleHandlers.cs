@@ -178,7 +178,7 @@ public sealed class SaveMethodologyCategoryRuleHandler(
             .ListColumnCodesAsync([.. methodologyBindings.Select(b => b.TableDefId).Distinct()], ct)
             .ConfigureAwait(false);
 
-        MethodologyPublishChecks.CheckArgumentTableColumns([outcome.Rule], columnCodesByTable);
+        MethodologyCategoryRuleChecks.CheckArgumentColumns(outcome.Rule, columnCodesByTable);
     }
 
     /// <summary>Вираз мусить розбиратись діалектом Methodology і не повертати число.</summary>

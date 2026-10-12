@@ -157,9 +157,12 @@ public static class PublishChecks
     /// означало б, що жодну з них не можна змінити окремо. Ціна — один
     /// зайвий розбір на публікацію.
     ///
-    /// ⚠ Діапазони тут уже РОЗКРИТІ в конкретні <c>RowKey</c>: у рантаймі
-    /// діапазонів не існує (`B03` §4), і саме тому зміна порядку рядків після
-    /// публікації не змінює результат.
+    /// ⚠ Діапазони тут уже РОЗКРИТІ в конкретні <c>RowKey</c>, і саме ці ключі
+    /// читає рантайм (<c>PublishedRangeExpander</c>, ФВ-0.2): тому зміна порядку
+    /// рядків після публікації не змінює результат. Порядок ребер
+    /// (<c>SortOrder</c>) — частина контракту: за ним рантайм знаходить пробіг
+    /// кожного посилання, тож змінювати обхід тут без зміни
+    /// <c>PublishedRanges</c> не можна.
     /// </remarks>
     /// <param name="version">Версія, що публікується.</param>
     /// <param name="formulaEngine">Рушій — розбір виразів і обхід AST.</param>
@@ -518,6 +521,54 @@ public static class PublishChecks
         return diagnostics;
     }
 
+    /// <summary>
+    /// Колонки-приймачі активних зв'язків <c>Rollup</c> версії — джерело значення для
+    /// <c>ECR-TMPL-4226</c> (FP-5).
+    /// </summary>
+    /// <param name="version">Версія зі структурою.</param>
+    /// <param name="relations">Зв'язки версії (<c>ListTableRelationsAsync</c>).</param>
+    /// <returns><c>Id</c> колонок, у які пише Rollup.</returns>
+    /// <remarks>
+    /// ⛔ Прохід «від першого обличчя» 2026-10-11, P2. Приймач Rollup мусить бути колонкою
+    /// <c>Formula</c> («рахує система», D-230: ручний ввід відмовляє <c>ECR-CELL-4221</c>), а
+    /// публікація вимагала для кожної <c>Formula</c>-колонки формулу шаблону чи прив'язку методології
+    /// (<c>ECR-TMPL-4226</c>) — приймач Rollup не мав жодного з двох, і єдиним обходом була фіктивна
+    /// формула <c>0</c>. Джерело значення такої колонки — сам зв'язок (<c>RelationRecalculator</c>),
+    /// тож він рівноправний із формулою й прив'язкою.
+    ///
+    /// ⚠ Лише АКТИВНІ зв'язки виду Rollup, і лише ті, чий <c>MapJson</c> розбирається й вказує колонку
+    /// цієї версії: зв'язок, що нікуди не пише, нічого не джерелить, а відмова розбору — справа
+    /// <c>RelationSpecValidator</c> на збереженні зв'язку, не цієї перевірки.
+    /// </remarks>
+    public static IReadOnlySet<int> RollupTargetColumnIds(
+        TemplateVersion version, IReadOnlyList<TableRelationDef> relations)
+    {
+        ArgumentNullException.ThrowIfNull(version);
+        ArgumentNullException.ThrowIfNull(relations);
+
+        var tables = LiveTables(version.Sheets).ToDictionary(t => t.Id);
+        var ids = new HashSet<int>();
+
+        foreach (var relation in relations.Where(r => r.IsActive && r.RelationKind == TableRelationKind.Rollup))
+        {
+            var spec = RelationSpecParser.ParseRollup(relation.MapJson);
+            if (!spec.IsOk || !tables.TryGetValue(relation.TargetTableDefId, out var table))
+            {
+                continue;
+            }
+
+            var column = table.Columns.FirstOrDefault(c =>
+                !c.IsDeleted && string.Equals(c.Code, spec.Value!.TargetColumn, StringComparison.Ordinal));
+
+            if (column is not null)
+            {
+                ids.Add(column.Id);
+            }
+        }
+
+        return ids;
+    }
+
     /// <summary>Довідники, на які вказують живі <c>Lookup</c>-колонки й <c>Lookup</c>-поля шапки версії.</summary>
     /// <param name="version">Версія зі структурою.</param>
     /// <returns>Різні <c>Id</c> довідників.</returns>
@@ -549,12 +600,45 @@ public static class PublishChecks
     /// </remarks>
     /// <returns>Зауваження публікації; порожньо - усе гаразд.</returns>
     public static IReadOnlyList<ExpressionDiagnostic> CheckLookupRegistries(
-        TemplateVersion version, IReadOnlySet<int> usableRegistryIds)
+        TemplateVersion version, IReadOnlySet<int>? usableRegistryIds)
     {
         ArgumentNullException.ThrowIfNull(version);
-        ArgumentNullException.ThrowIfNull(usableRegistryIds);
 
         var diagnostics = new List<ExpressionDiagnostic>();
+
+        // R16-1 (RC17): Lookup без довідника (висяче значення з бази, створеної до CK) - діагностика, а не мовчання.
+        // usableRegistryIds == null - існування довідників не перевіряється (збирання без сховища довідників).
+        foreach (var table in LiveTables(version.Sheets))
+        {
+            foreach (var column in table.Columns.Where(c =>
+                !c.IsDeleted && c.DataType == CellDataType.Lookup && c.LookupRegistryDefId is null))
+            {
+                diagnostics.Add(new ExpressionDiagnostic(
+                    "ECR-TMPL-0422",
+                    $"Колонка {table.Code}.{column.Code} типу Lookup не має довідника.",
+                    0,
+                    1,
+                    "err.ECR-TMPL-0422.lookupRegistryRequired",
+                    new Dictionary<string, string> { ["columnCode"] = $"{table.Code}.{column.Code}" }));
+            }
+        }
+
+        foreach (var field in version.HeaderFields.Where(f =>
+            !f.IsDeleted && f.DataType == CellDataType.Lookup && f.LookupRegistryDefId is null))
+        {
+            diagnostics.Add(new ExpressionDiagnostic(
+                "ECR-TMPL-0422",
+                $"Поле шапки {field.Code} типу Lookup не має довідника.",
+                0,
+                1,
+                "err.ECR-TMPL-0422.headerFieldLookupRegistryRequired",
+                new Dictionary<string, string> { ["headerFieldCode"] = field.Code }));
+        }
+
+        if (usableRegistryIds is null)
+        {
+            return diagnostics;
+        }
 
         foreach (var table in LiveTables(version.Sheets))
         {

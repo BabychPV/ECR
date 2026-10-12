@@ -99,7 +99,7 @@ describe('AuditPage: вкладка подій безпеки', () => {
       );
 
       await screen.findByText('corr-123', {}, { timeout: SlowEnvTimeout });
-      expect(screen.getAllByText('AccessDenied').length).toBeGreaterThan(0);
+      expect(screen.getAllByText('Access denied').length).toBeGreaterThan(0);
       expect(screen.getByText('Intruder')).toBeTruthy();
 
       // ⛔ Мутація: у `AuditPage` замінити `!other` на `!structure` в `useCellChanges(filter, !other)` —

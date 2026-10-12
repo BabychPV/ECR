@@ -90,6 +90,34 @@ public sealed class ReportSnapshotImmutabilityTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "ФВ-5.14")]
+    [Trait("Decision", "D-387")]
+    public void Незаморожений_зріз_слідує_за_даними_а_заморожений_подачею_ні()
+    {
+        // ⚠ D-387: незмінність фіксується ПОДАННЯМ, а не затвердженням. Зріз, що народився вже за повністю
+        // затвердженим періодом (`Approved`), ще не подавався — він слідує за станом даних (D-65): після
+        // `Reopen` затвердженого аркуша йде в `Draft` і зникає з регуляторної вʼюхи. Це не відкат
+        // зафіксованої версії: зафіксованої в нього не було.
+        var snapshot = new ReportSnapshot(
+            reportVersionId: 1, projectId: 3, periodKey: 202601, SnapshotStatus.Approved, Now, builtByUserId: null);
+        snapshot.Complete(rowCount: 10, contentHash: [1], calculationRunId: 7, parametersJson: null);
+
+        snapshot.RefreshStatus(SnapshotStatus.Draft);
+        Assert.Equal(SnapshotStatus.Draft, snapshot.Status);
+
+        snapshot.RefreshStatus(SnapshotStatus.Approved);
+        Assert.Equal(SnapshotStatus.Approved, snapshot.Status);
+
+        // Подання останнього аркуша заморожує: далі статус не міняється ні на Draft, ні на Approved.
+        snapshot.MarkSubmitted(userId: 9);
+
+        Assert.Throws<DomainException>(() => snapshot.RefreshStatus(SnapshotStatus.Draft));
+        Assert.Throws<DomainException>(() => snapshot.RefreshStatus(SnapshotStatus.Approved));
+        Assert.Equal(SnapshotStatus.Submitted, snapshot.Status);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
     [Trait("Finding", "H-23b")]
     public void Повторне_подання_не_переписує_автора()
     {

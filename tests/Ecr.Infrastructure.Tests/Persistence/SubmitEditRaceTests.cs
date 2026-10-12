@@ -69,6 +69,7 @@ public sealed class SubmitEditRaceTests(SqlServerFixture sql)
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "ФВ-9.4")]
+    [Trait("Requirement", "ФВ-5.13")]
     public async Task Правка_поки_транзакція_подання_відкрита_або_відхилена_або_в_зрізі()
     {
         var doc = await new TestDocumentBuilder(sql.ConnectionString)
@@ -112,6 +113,7 @@ public sealed class SubmitEditRaceTests(SqlServerFixture sql)
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "ФВ-9.4")]
+    [Trait("Requirement", "ФВ-5.13")]
     public async Task Правка_що_перевірила_права_до_подання_а_пише_після_або_відхилена_або_в_зрізі()
     {
         var doc = await new TestDocumentBuilder(sql.ConnectionString)

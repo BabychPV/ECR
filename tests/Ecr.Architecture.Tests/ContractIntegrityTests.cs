@@ -305,12 +305,48 @@ public sealed class ContractIntegrityTests
             PermitWindowReason(),
         };
 
+        // ⛔ EA-B: причини «передачі місяця» повертає лише ланцюг
+        // EditAssignmentGuard → CellAccessContext.AssignmentLock → EditRules;
+        // перелічувати їх константою означало б довести лише написання назви.
+        foreach (var progress in new[] { AssigneeProgress.Filled, AssigneeProgress.Assigned })
+        {
+            foreach (var validated in new[] { false, true })
+            {
+                produced.Add(AssignmentReason(progress, validated, mine: true));
+            }
+        }
+
+        produced.Add(AssignmentReason(AssigneeProgress.Assigned, validated: false, mine: false));
+        produced.Add(AssignmentReason(AssigneeProgress.Assigned, validated: false, mine: true, expired: true));
+
         var unreachable = Enum.GetValues<EditDenyReason>()
             .Except(produced)
             .Select(r => r.ToString())
             .ToList();
 
         Assert.Empty(unreachable);
+    }
+
+    /// <summary>Причина відмови запису від передачі зрізу (EA-B) через правило й <c>EditRules</c>.</summary>
+    private static EditDenyReason AssignmentReason(
+        AssigneeProgress progress, bool validated, bool mine, bool expired = false)
+    {
+        var fact = new EditAssignmentFact(
+            SheetCode: null, TableCode: null, MonthNumber: 1, Period: null,
+            IsExclusive: true, IsValidated: validated, DelegatorActive: true,
+            DelegatedByUserId: 2,
+            ExpiresAt: expired ? new DateTime(2026, 10, 1, 0, 0, 0, DateTimeKind.Utc) : null,
+            MyProgress: mine ? progress : null);
+
+        var facts = EditAssignmentGuard.Evaluate(
+            userId: 7, documentOwnerUserId: 1, isIntegrationWriter: false, [fact],
+            new EditSliceFacts("F1", "T1", new Ecr.Domain.ValueObjects.PeriodKey(202601), ColumnIsMonth: true, ColumnMonthNumber: 1),
+            new DateTime(2026, 10, 11, 0, 0, 0, DateTimeKind.Utc));
+
+        var writer = new AccessBuilder().Grant(ResourceKind.Project, AccessBuilder.ProjectId, GrantLevel.Write).Build();
+
+        return EditRules.CanEdit(
+            writer, AccessBuilder.Cell() with { DelegatedWrite = facts.DelegatedWrite, AssignmentLock = facts.Lock }).Reason;
     }
 
     /// <summary>Причина, яку повертає правило вікна довідника (<c>ФВ-5.20</c>).</summary>

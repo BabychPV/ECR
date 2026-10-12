@@ -166,9 +166,9 @@ export function MethodologyVersionsPage(): JSX.Element {
   // обов'язкові, — вужча відповідальність, і саме тому в неї свій дозвіл.
   const mayManageRequiredInputs = can(session.data, 'Calculation.ManageRequiredInputs');
 
-  // ⛔ Право небезпечне (`sec.Permission.IsDangerous`) і вбудованим ролям
-  // seed-ом не видається взагалі (`PublishMethodologyHandler`, D-40):
-  // публікація змінює числа, які вже подані регуляторові.
+  // ⛔ Право небезпечне (`sec.Permission.IsDangerous`): шаблони сіду його не роздають
+  // (`PublishMethodologyHandler`, D-40) — публікація змінює числа, які вже подані регуляторові.
+  // ✎ 2026-10-11: вбудований `SystemAdministrator` отримує його поіменно (секція `FP:sysadmin-rights`).
   const mayPublish = can(session.data, 'Calculation.Publish');
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -757,6 +757,17 @@ export function MethodologyVersionsPage(): JSX.Element {
               }))}
               onChange={setCopyFrom}
             />
+          )}
+
+          {/* ⛔ FP-3 (прохід «від першого обличчя» 2026-10-11, P2): за замовчуванням джерела немає —
+              це ПОРОЖНЯ чернетка (законний шлях лише для ПЕРШОЇ версії; ТЗ не визначає копіювання
+              за замовчуванням). Алерт угорі каже «змінити = клонувати», і людина, яка просто хоче
+              змінити константу, створювала порожню чернетку з банером «прив'язки лишаться порожніми».
+              Тому коли версії вже є, а джерело не обрано, — пряме попередження поруч із вибором. */}
+          {copyFrom === null && versions.error === null && !versions.isPending && all.length > 0 && (
+            <Alert color="statusWarning" data-testid="empty-draft-warning">
+              {t('methodologies.emptyDraftWarning')}
+            </Alert>
           )}
 
           {/* ⛔ Показується лише для ПОРОЖНЬОЇ чернетки: клон бере рівень із

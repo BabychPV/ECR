@@ -170,6 +170,7 @@ const Strings = {
   'methodologies.copyFrom': 'Copy from',
   'methodologies.copyFromHint': 'The clone keeps formulas, constants and outputs.',
   'methodologies.emptyDraft': 'Empty draft',
+  'methodologies.emptyDraftWarning': 'An empty draft copies nothing. To change a version, choose it in Copy from.',
   'methodologies.level': 'Level',
   'methodologies.levelHint': 'The rung of the expressiveness ladder.',
   'methodologies.createVersion': 'Create version',
@@ -446,6 +447,50 @@ describe('MethodologyVersionsPage: відмова читання не вигля
 
       expect(refusalIn(dialog)).toBeUndefined();
       expect(within(dialog).queryByRole('button', { name: 'Retry' })).toBeNull();
+    },
+    30_000,
+  );
+
+  it(
+    'FP-3: версії є, джерело не обрано — попередження, що порожня чернетка нічого не копіює; з обраним джерелом його немає',
+    async () => {
+      /*
+       * ⛔ Прохід «від першого обличчя» 2026-10-11, P2: «New version» за замовчуванням створює ПОРОЖНЮ
+       * чернетку, і той, хто просто хоче змінити константу, не бачить, що треба обрати «Copy from».
+       */
+      const user = await arrange({ unitsFail: false, versionsFail: false });
+
+      await screen.findByText('1.0');
+      await user.click(await screen.findByRole('button', { name: 'New version' }));
+
+      const dialog = await screen.findByRole('dialog', { name: 'New methodology version' });
+
+      await waitFor(() => {
+        expect(within(dialog).getByLabelText('Copy from')).toHaveProperty('disabled', false);
+      });
+      expect(within(dialog).getByTestId('empty-draft-warning').textContent).toContain('copies nothing');
+
+      // Обрали джерело — це вже клон, попередження зникає.
+      await user.click(within(dialog).getByLabelText('Copy from'));
+      await user.click(await screen.findByRole('option', { name: /1\.0/ }));
+
+      await waitFor(() => {
+        expect(within(dialog).queryByTestId('empty-draft-warning')).toBeNull();
+      });
+    },
+    30_000,
+  );
+
+  it(
+    'FP-3: перелік версій не приїхав — попередження про порожню чернетку не вигадується',
+    async () => {
+      const user = await arrange({ unitsFail: false, versionsFail: true });
+
+      await user.click(await screen.findByRole('button', { name: 'New version' }));
+      const dialog = await screen.findByRole('dialog', { name: 'New methodology version' });
+
+      await waitFor(() => expect(refusalIn(dialog)).toBeDefined());
+      expect(within(dialog).queryByTestId('empty-draft-warning')).toBeNull();
     },
     30_000,
   );

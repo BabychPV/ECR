@@ -16,6 +16,11 @@
 2. Шапка: `Apply-ContractHeader.ps1 -TemplateCode Land` (спершу `-DryRun`).
    `-MigrateDocumentId 3,4` переносить документи на нову версію (Safe) і тоді, коли шапка вже
    на потрібній версії (0 змін). Dry-run міграції виконується завжди, застосування лише при `canApply`.
+   Повторний запуск ідемпотентний: документ, що вже на цільовій версії, дає «документ N: вже на версії X — 0 змін»
+   (код 0); інші відмови лишаються помилкою.
+   ⚠ Список id: з сесії PowerShell — `-MigrateDocumentId 3,10`; через `powershell -File` кома дає один
+   рядок, тому пишіть у лапках `-MigrateDocumentId "3,10"` (приймаються також `"3;10"` і `"3 10"`).
+   Без лапок старіші версії скрипта читали «3,10» як 310.
    Документи переносяться лише на останню опубліковану версію (старіший `-SourceVersionId` без змін —
    помилка). Фонова міграція: відповідь 202 обробляється автоматично (опитування `GET /jobs/{id}`,
    `-MigrateTimeoutMinutes`, за замовчуванням 60). `-Async` просить сервер працювати у фоні.
@@ -48,4 +53,6 @@ $pw = Read-Host 'Пароль ECR' -AsSecureString   # прихований вв
 .\Import-ContractDictionaries.ps1 -BaseUrl http://localhost:5092 -User admin -Password $pw
 .\Apply-ContractHeader.ps1 -TemplateCode Land -BaseUrl http://localhost:5092 -User admin -Password $pw -DryRun
 .\Apply-ContractHeader.ps1 -TemplateCode Land -BaseUrl http://localhost:5092 -User admin -Password $pw -MigrateDocumentId 3,4
+# з cmd / планувальника (powershell -File): список у лапках
+powershell -NoProfile -File .\Apply-ContractHeader.ps1 -TemplateCode Land -MigrateDocumentId "3,10"
 ```

@@ -1,5 +1,5 @@
 ﻿import { useState, type JSX, type ReactNode } from 'react';
-import { Box, Button, Card, Group, Stack, Text, Title } from '@mantine/core';
+import { Box, Button, Card, Group, Skeleton, Stack, Text, Title } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import type { components } from '@/api/schema';
@@ -295,33 +295,39 @@ export function HealthPage(): JSX.Element {
          * `A7-04`: невдалий запит давав порожній дашборд, а порожній дашборд і
          * здорова система виглядали однаково. Тут порожньо ≠ помилка (`ФВ-14.22`).
          */}
-        <AsyncBoundary<HealthReport>
-          isPending={ready.isPending}
-          error={ready.error}
-          data={report}
-          isEmpty={(value) => value.checks.length === 0}
-          emptyTitle={t('health.noChecks')}
-          emptyHint={t('health.noChecksHint')}
-          onRetry={() => void ready.refetch()}
-        >
-          {(value) => (
-            <Stack gap="md">
-              {ordered(value.checks)
-                .filter((check) => check.name !== 'db')
-                .map((check) => (
-                  /* ⛔ Заголовок — `checkLabel`, а не `{check.name}` (`U-14`):
-                     `db`, `jobs`, `sources` — внутрішні ідентифікатори з
-                     `Program.cs` (`AddCheck<…>("db", …)`). */
-                  <HealthSection
-                    key={check.name}
-                    id={check.name}
-                    title={checkLabel(check.name)}
-                    check={check}
-                  />
-                ))}
-            </Stack>
-          )}
-        </AsyncBoundary>
+        {/* ⚠ Перший вхід: звіт `/health/ready` збирає всі перевірки сервера й може йти секунди. Доки
+            він іде, сторінка вже стоїть на місці — шапка, секція бази і скелети секцій за формою
+            справжніх, а не один рядок «Loading…» (приймання RC19: 12–16 с здавалися зависанням). */}
+        {ready.isPending && <HealthChecksSkeleton />}
+        {!ready.isPending && (
+          <AsyncBoundary<HealthReport>
+            isPending={false}
+            error={ready.error}
+            data={report}
+            isEmpty={(value) => value.checks.length === 0}
+            emptyTitle={t('health.noChecks')}
+            emptyHint={t('health.noChecksHint')}
+            onRetry={() => void ready.refetch()}
+          >
+            {(value) => (
+              <Stack gap="md">
+                {ordered(value.checks)
+                  .filter((check) => check.name !== 'db')
+                  .map((check) => (
+                    /* ⛔ Заголовок — `checkLabel`, а не `{check.name}` (`U-14`):
+                       `db`, `jobs`, `sources` — внутрішні ідентифікатори з
+                       `Program.cs` (`AddCheck<…>("db", …)`). */
+                    <HealthSection
+                      key={check.name}
+                      id={check.name}
+                      title={checkLabel(check.name)}
+                      check={check}
+                    />
+                  ))}
+              </Stack>
+            )}
+          </AsyncBoundary>
+        )}
 
         {/* ⚠ Довідкові факти, не вміст екрана: доки їх немає (ще вантажаться,
             відмова, відповідь не тієї форми) — секція не малюється взагалі
@@ -348,6 +354,25 @@ export function HealthPage(): JSX.Element {
         )}
       </Stack>
     </>
+  );
+}
+
+/** Скелети секцій перевірок (`jobs`, `sources`, `worker`): картка із заголовком і двома рядками. */
+function HealthChecksSkeleton(): JSX.Element {
+  return (
+    <Stack gap="md" data-testid="health-checks-skeleton" aria-busy="true">
+      <Text size="sm" c="dimmed" role="status">
+        {t('health.checking')}
+      </Text>
+      {[0, 1, 2].map((index) => (
+        <Card key={index} withBorder>
+          <Stack gap="xs">
+            <Skeleton height={18} width="30%" />
+            <Skeleton height={12} width="80%" />
+          </Stack>
+        </Card>
+      ))}
+    </Stack>
   );
 }
 

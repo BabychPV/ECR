@@ -8,6 +8,7 @@ import { isPasswordPolicyRefusal } from '@/features/security/UserAdminActions';
 import { MeQueryKey } from '@/shared/session/useSession';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { PageHeader } from '@/shared/ui/PageHeader';
+import { showDone } from '@/shared/ui/notify';
 import { problemText } from '@/shared/ui/problemText';
 import { passwordToggleProps } from '@/shared/ui/a11yLabels';
 import { t } from '@/shared/i18n';
@@ -98,6 +99,11 @@ export function ChangePasswordPage(): JSX.Element {
       // Профіль перечитується: саме він несе прапорець MustChangePassword,
       // і без цього користувач лишився б замкненим на цьому екрані.
       await queryClient.invalidateQueries({ queryKey: MeQueryKey });
+
+      // ⛔ FP-7 (прохід «від першого обличчя» 2026-10-11): після зміни пароля сеанс анулюється, і людину
+      // кидало на вхід без жодного слова. Тост живе в кореневому `<Notifications />` (`App.tsx`) і переживає
+      // перехід на `/login`.
+      showDone(t('password.changed'));
       navigate('/', { replace: true });
     } catch (failure) {
       setError(failure);

@@ -187,6 +187,102 @@ public sealed class ReportViewerRoleTests(SqlServerFixture sql)
         Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync(BookOf(a.SnapshotId)).ConfigureAwait(true)).StatusCode);
     }
 
+    // ✎ HTTP-негативи `POST /reports/snapshots/{id}/verify` (звіт покриття вимог 11.10: обробникові
+    // тести є, а відповіді 403/404 на HTTP не перевіряв ніхто). Перевірка суми вмісту не віддає —
+    // лише `matches` і суми, — тому право переліку (`Report.ViewRegulatory`) у проєкті зрізу
+    // достатнє; `Report.ViewSnapshot` не потрібне.
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-6.14")]
+    public async Task Перевірка_суми_зрізу_без_права_переліку_403_однаково_для_наявного_й_неіснуючого_зрізу()
+    {
+        // Є грант Read і суміжні права, але не `Report.ViewRegulatory`: 403 з назвою права, а не 404,
+        // і неіснуючий зріз відповідає так само — існування зрізу не розкривається.
+        var (a, _) = await TwoSnapshotsAsync().ConfigureAwait(true);
+
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInCustomAsync(app, a.ProjectId, "Report.Export", "Report.ViewSnapshot")
+            .ConfigureAwait(true);
+
+        using var existing = await client.PostAsync(VerifyOf(a.SnapshotId), content: null).ConfigureAwait(true);
+        using var missing = await client.PostAsync(VerifyOf(999_999_999), content: null).ConfigureAwait(true);
+
+        await AssertForbiddenAsync(existing, "Report.ViewRegulatory").ConfigureAwait(true);
+        await AssertForbiddenAsync(missing, "Report.ViewRegulatory").ConfigureAwait(true);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-6.14")]
+    public async Task Перевірка_суми_зрізу_чужого_проєкту_і_неіснуючого_відповідають_однаково_404()
+    {
+        // ⛔ Грант Read — на ОБИДВА проєкти, роль «Переглядач звітів» — з областю {A}: зупинити
+        // перевірку зрізу B може лише проєктна перевірка права, гранти її не підмінять.
+        var (a, b) = await TwoSnapshotsAsync().ConfigureAwait(true);
+
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(
+                app, [("ReportViewer", [a.ProjectId])], readOn: [a.ProjectId, b.ProjectId])
+            .ConfigureAwait(true);
+
+        // Контроль: свій зріз — 200 з підсумком перевірки, інакше 404 нижче доводив би лише, що дія завжди відмовляє.
+        using var own = await client.PostAsync(VerifyOf(a.SnapshotId), content: null).ConfigureAwait(true);
+        var ownBody = await own.Content.ReadAsStringAsync().ConfigureAwait(true);
+        Assert.True(own.StatusCode == HttpStatusCode.OK, $"{(int)own.StatusCode}: {ownBody}\n{app.ErrorsText}");
+        using (var verdict = JsonDocument.Parse(ownBody))
+        {
+            Assert.True(verdict.RootElement.TryGetProperty("matches", out _), ownBody);
+        }
+
+        using var foreign = await client.PostAsync(VerifyOf(b.SnapshotId), content: null).ConfigureAwait(true);
+        using var missing = await client.PostAsync(VerifyOf(999_999_999), content: null).ConfigureAwait(true);
+
+        var foreignShape = await NotFoundShapeAsync(foreign).ConfigureAwait(true);
+        var missingShape = await NotFoundShapeAsync(missing).ConfigureAwait(true);
+
+        Assert.Equal("ECR-RPT-0404", foreignShape.ErrorCode);
+        Assert.Equal(missingShape, foreignShape);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-6.14")]
+    public async Task Перевірка_суми_зрізу_без_гранта_Read_у_проєкті_404_а_не_403()
+    {
+        // Право без гранта — «немає проєкту», той самий 404 (див. читання рядків вище).
+        var (a, _) = await TwoSnapshotsAsync().ConfigureAwait(true);
+
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, [("ReportViewer", null)], readOn: []).ConfigureAwait(true);
+
+        using var response = await client.PostAsync(VerifyOf(a.SnapshotId), content: null).ConfigureAwait(true);
+
+        var shape = await NotFoundShapeAsync(response).ConfigureAwait(true);
+        Assert.Equal("ECR-RPT-0404", shape.ErrorCode);
+    }
+
+    private static Uri VerifyOf(long snapshotId)
+        => new($"/api/v1/reports/snapshots/{snapshotId}/verify", UriKind.Relative);
+
+    private sealed record NotFoundShape(string? ErrorCode, string? MessageKey, string? Title);
+
+    /// <summary>Те, за чим можна було б відрізнити «чужий» від «неіснуючого»: статус, код, ключ, заголовок.</summary>
+    private static async Task<NotFoundShape> NotFoundShapeAsync(HttpResponseMessage response)
+    {
+        var body = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+        Assert.True(response.StatusCode == HttpStatusCode.NotFound, $"{(int)response.StatusCode}: {body}");
+
+        using var json = JsonDocument.Parse(body);
+        var root = json.RootElement;
+        string? Str(string name) => root.TryGetProperty(name, out var v) ? v.GetString() : null;
+
+        return new NotFoundShape(Str("errorCode"), Str("messageKey"), Str("title"));
+    }
+
     private static Uri RowsOf(long snapshotId)
         => new($"/api/v1/reports/snapshots/{snapshotId}/rows?limit=10", UriKind.Relative);
 

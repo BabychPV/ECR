@@ -161,6 +161,37 @@ function Assert-EcrOk {
     }
 }
 
+function ConvertTo-DocumentIdList {
+    <#
+    .SYNOPSIS
+        Розбирає список id документів: масив (3,10) або рядок «3,10» / «3;10» / «3 10».
+        `powershell -File x.ps1 -P 3,10` віддає параметру ОДИН рядок «3,10»; [int[]] прочитав би його як 310.
+    #>
+    param($Value)
+    $ids = New-Object System.Collections.Generic.List[int]
+    foreach ($item in @($Value)) {
+        if ($null -eq $item) { continue }
+        foreach ($tok in ([string]$item -split '[,; ]+')) {
+            if ([string]::IsNullOrWhiteSpace($tok)) { continue }
+            $n = 0
+            if (-not [int]::TryParse($tok.Trim(), [ref]$n) -or $n -le 0) { throw "Некоректний id документа: «$tok»." }
+            $ids.Add($n)
+        }
+    }
+    return $ids.ToArray()
+}
+
+function Test-EcrMigrateSameVersion {
+    <#
+    .SYNOPSIS
+        $true, якщо відповідь migrate-version — відмова «документ уже на цільовій версії»
+        (422 ECR-TMPL-0422, messageKey err.ECR-TMPL-0422.migrateSameVersion).
+    #>
+    param([Parameter(Mandatory)]$Response)
+    if ($Response.Status -ne 422) { return $false }
+    return ([string]$Response.Text).Contains('migrateSameVersion')
+}
+
 function Test-EcrTemplateUnsuitable {
     <#
     .SYNOPSIS

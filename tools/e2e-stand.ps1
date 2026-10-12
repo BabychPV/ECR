@@ -614,6 +614,20 @@ try {
     Write-Host "  стенд готовий: період $($open.periodKey), документ $($env:ECR_E2E_DOCUMENT)" -ForegroundColor Green
     Write-Host ''
 
+    # ⛔ EA-5g: «передача місяця» вимагає МІСЯЧНОЇ колонки в шаблоні документа (IsMonthColumn,
+    # EditAssignmentAccess: інакше 422 ECR-REQ-0422 editAssignmentUnknownSlice на січні). Сід-шаблон
+    # DataGen місячних колонок не має, тож - як PatchCells*Tests - позначаємо ОДНУ останню редаговану
+    # числову колонку січнем. Лише тимчасова база стенда; продуктовий сід і шаблони не змінюються.
+    Step 'місячна колонка (січень) для e2e передачі місяця'
+    $previousEapMonth = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        & sqlcmd -S $Server @sqlAuth -C -b -d $Database -Q "SET NOCOUNT ON; UPDATE cfg.ColumnDef SET IsMonthColumn = 1, MonthNumber = 1 WHERE Id = (SELECT TOP 1 c.Id FROM cfg.ColumnDef c JOIN cfg.TableDef t ON t.Id = c.TableDefId WHERE c.IsDeleted = 0 AND t.IsDeleted = 0 AND c.IsReadOnly = 0 AND c.IsHidden = 0 AND c.IsMonthColumn = 0 AND c.DataType = 2 ORDER BY c.Id DESC); IF @@ROWCOUNT <> 1 RAISERROR('no column for month mark', 16, 1);" | Out-Null
+    }
+    finally {
+        $ErrorActionPreference = $previousEapMonth
+    }
+    if ($LASTEXITCODE -ne 0) { Fail 'не вдалося позначити місячну колонку' }
     Step 'прогрів Vite (кеш залежностей)'
     Assert-WebPortFree
     $warmStart = Get-Date

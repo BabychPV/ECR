@@ -1,14 +1,16 @@
 import { useEffect, useState, type JSX } from 'react';
 import { useReturnFocusOnUnmount } from '@/shared/a11y/focus';
-import { Alert, Button, Group, Modal, SegmentedControl, Select, Stack, Table, Text } from '@mantine/core';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Alert, Button, Group, Modal, Progress, SegmentedControl, Select, Stack, Table, Text } from '@mantine/core';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
-import { showDone } from '@/shared/ui/notify';
 import { t } from '@/shared/i18n';
 import { useSettledAction } from '@/features/grid/settleEdits';
+import { isActiveJob } from '@/features/jobs/myTasks';
+import { useJobStatus } from '@/features/jobs/useJobStatus';
 import {
   getVersionMigrationTargets,
   migrateDocumentVersion,
+  startMigrateDocumentVersion,
   type VersionMigrationMode,
   type VersionMigrationReport,
 } from './versionMigrationApi';
@@ -66,6 +68,12 @@ export interface VersionMigrationDialogProps {
 
   /** Закрити діалог (скасування або успішний перенос). */
   readonly onClose: () => void;
+
+  /** Фонова задача переносу, яку тримає сторінка; `null` - переносу немає. */
+  readonly jobId: string | null;
+
+  /** Сторінка запам'ятовує (або забуває, `null`) задачу переносу. */
+  readonly onJobChange: (jobId: string | null) => void;
 }
 
 /**
@@ -84,9 +92,13 @@ export interface VersionMigrationDialogProps {
  * ⚠ Діалог монтується заново на кожне відкриття (див. `VersionMigrationAction.tsx`),
  * тож вибір і звіт щоразу починаються з нуля без окремого скидання.
  */
-export function VersionMigrationDialog({ documentId, onClose }: VersionMigrationDialogProps): JSX.Element {
+export function VersionMigrationDialog({
+  documentId,
+  onClose,
+  jobId,
+  onJobChange,
+}: VersionMigrationDialogProps): JSX.Element {
   useReturnFocusOnUnmount();
-  const queryClient = useQueryClient();
 
   const [targetId, setTargetId] = useState<string | null>(null);
   const [mode, setMode] = useState<VersionMigrationMode>('Safe');
@@ -111,22 +123,26 @@ export function VersionMigrationDialog({ documentId, onClose }: VersionMigration
     onSuccess: (done) => setReportState(done),
   });
 
+  // D-2 RC15B: перенос іде ФОНОВОЮ задачею - POST дає `jobId`, який тримає СТОРІНКА (`jobId`/`onJobChange`):
+  // завершення (інвалідація кешів, тост) теж на сторінці (`useMigrationJobCompletion`) і переживає закриття
+  // діалогу. Тут - лише показ стану і прогресу тією самою задачею (запит `['job', id]` спільний).
   const apply = useMutation({
     meta: { handled: true },
-    mutationFn: () =>
-      migrateDocumentVersion({ documentId, targetVersionId: Number(targetId), mode, dryRun: false }),
-    onSuccess: async (result) => {
-      // ⚠ Змінилась структура ВСІХ документів проєкту: аркуші, таблиці,
-      // колонки. Вузька інвалідація тут лише ризикувала б лишити засталу сітку.
-      await queryClient.invalidateQueries();
-      showDone(t('documents.migrateDone', { version: result.toVersion, count: result.documentCount }));
-      onClose();
-    },
+    mutationFn: () => startMigrateDocumentVersion({ documentId, targetVersionId: Number(targetId), mode }),
+    onSuccess: (accepted) => onJobChange(accepted.jobId),
   });
+
+  const job = useJobStatus(jobId);
+  const jobState = job.data?.state ?? null;
+  // Задача поставлена, але стан ще не приїхав, - теж "йде": кнопка не повинна блимнути активною.
+  const jobRunning = jobId !== null && job.error === null && (jobState === null || isActiveJob(jobState));
+  const jobFailed = jobState === 'Failed' || jobState === 'Cancelled';
+  const jobMessage = job.data?.message ?? null;
 
   const { reset: resetApply } = apply;
 
-  // Будь-яка зміна вибору знецінює звіт — див. коментар до компонента.
+  // Будь-яка зміна вибору знецінює звіт - див. коментар до компонента. Задачу ця зміна НЕ скидає: діалог
+  // монтується й при відкритті над задачею, що ще йде, і скидання на монтуванні губило б її.
   useEffect(() => {
     setReportState(null);
     resetApply();
@@ -135,7 +151,7 @@ export function VersionMigrationDialog({ documentId, onClose }: VersionMigration
   const options = (targets.data?.targets ?? []).map((v) => ({ value: String(v.id), label: v.version }));
   // AN-28 P2-2: зайнятість і на час збереження набраного перед Apply.
   const settled = useSettledAction(apply.isPending);
-  const busy = dryRun.isPending || apply.isPending || settled.settling;
+  const busy = dryRun.isPending || apply.isPending || settled.settling || jobRunning;
 
   return (
     <Modal opened onClose={onClose} title={t('documents.migrateVersionTitle')} size="lg">
@@ -158,7 +174,10 @@ export function VersionMigrationDialog({ documentId, onClose }: VersionMigration
           label={t('documents.migrateTarget')}
           data={options}
           value={targetId}
-          onChange={setTargetId}
+          onChange={(value) => {
+            setTargetId(value);
+            onJobChange(null);
+          }}
           disabled={options.length === 0 || busy}
           data-testid="migrate-target"
         />
@@ -166,7 +185,10 @@ export function VersionMigrationDialog({ documentId, onClose }: VersionMigration
         <SegmentedControl
           aria-label={t('documents.migrateVersionTitle')}
           value={mode}
-          onChange={(value) => setMode(value as VersionMigrationMode)}
+          onChange={(value) => {
+            setMode(value as VersionMigrationMode);
+            onJobChange(null);
+          }}
           disabled={busy}
           data={[
             { value: 'Safe', label: t('documents.migrateModeSafe') },
@@ -184,6 +206,26 @@ export function VersionMigrationDialog({ documentId, onClose }: VersionMigration
 
         {apply.error !== null && <ErrorAlert error={apply.error} />}
 
+        {job.error !== null && <ErrorAlert error={job.error} />}
+
+        {jobRunning && (
+          <Stack gap="xs" data-migrate-progress="">
+            <Progress color="var(--ecr-accent)" value={job.data?.percent ?? 0} aria-label={t('documents.migrateVersionTitle')} />
+            <Text size="sm">{t('documents.migrateRunning', { percent: job.data?.percent ?? 0 })}</Text>
+            {jobMessage !== null && (
+              <Text size="xs" c="dimmed">
+                {jobMessage}
+              </Text>
+            )}
+          </Stack>
+        )}
+
+        {jobFailed && (
+          <Alert color="statusError" data-migrate-job-failed="">
+            {t('documents.migrateJobFailed', { reason: job.data?.error ?? '' })}
+          </Alert>
+        )}
+
         <Group justify="flex-end" mt="xs">
           <Button variant="default" onClick={onClose}>
             {t('common.cancel')}
@@ -199,7 +241,7 @@ export function VersionMigrationDialog({ documentId, onClose }: VersionMigration
           </Button>
           <Button
             disabled={report === null || !report.canApply || busy}
-            loading={apply.isPending || settled.settling}
+            loading={apply.isPending || settled.settling || jobRunning}
             onClick={() => settled.run(() => apply.mutateAsync())}
             data-testid="migrate-apply"
           >

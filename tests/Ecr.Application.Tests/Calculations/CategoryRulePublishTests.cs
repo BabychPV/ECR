@@ -220,6 +220,39 @@ public sealed class CategoryRulePublishTests
         Assert.True(_version.IsPublished);
     }
 
+    /// <summary>
+    /// R16-4: `@`-аргумент правила без колонки в прив'язаній таблиці відхиляє публікацію тим самим кодом
+    /// <c>ECR-CALC-0422</c>, що й <c>CST.X</c>/<c>!X</c>, а не 0438 формул.
+    /// </summary>
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [InlineData("@Nope", true)]
+    [InlineData("@Fuel", false)]
+    public async Task Аргумент_правила_без_колонки_прив_язаної_таблиці_дає_0422_UnknownArgument(string rule, bool rejected)
+    {
+        const int TableDefId = 900;
+        Setup(rule, Sixteen(), formulas: [Formula(1, "T", "CST.EF * 5", MethodologyFormulaScope.Substance)]);
+        _bindings.ListAsync(OwnerId, Arg.Any<CancellationToken>())
+                 .Returns([new CalculationBinding(TableDefId, columnDefId: 1, OwnerId, "tons", "{}")]);
+        _bindings.ListColumnCodesAsync(
+                Arg.Is<IReadOnlyCollection<int>>(ids => ids.Contains(TableDefId)), Arg.Any<CancellationToken>())
+            .Returns(new Dictionary<int, IReadOnlyList<string>> { [TableDefId] = ["Fuel"] });
+
+        if (!rejected)
+        {
+            await Publish();
+            Assert.True(_version.IsPublished);
+            return;
+        }
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(Publish);
+
+        Assert.Equal("ECR-CALC-0422", error.ErrorCode);
+        Assert.Equal("err.ECR-CALC-0422.categoryRuleUnknownArgument", error.Details!["messageKey"]);
+        Assert.Equal("@Nope", error.Details["arguments"]);
+        Assert.False(_version.IsPublished);
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
 
     private void Setup(string? rule, List<MethodologyConstant> constants, List<MethodologyFormula> formulas)

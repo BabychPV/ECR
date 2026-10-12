@@ -127,3 +127,23 @@ describe('ReasonModal: без minLength поріг — один символ', (
     expect(confirm().disabled).toBe(true);
   });
 });
+
+describe('ReasonModal: maxLength', () => {
+  it('передає межу в поле; без межі атрибута немає', async () => {
+    const { rerender } = render(
+      <MantineProvider>
+        <ReasonModal opened title="T" label="L" confirmLabel="OK" maxLength={500} onConfirm={() => undefined} onClose={() => undefined} />
+      </MantineProvider>,
+    );
+
+    expect((await screen.findByLabelText('L')).getAttribute('maxlength')).toBe('500');
+
+    rerender(
+      <MantineProvider>
+        <ReasonModal opened title="T" label="L" confirmLabel="OK" onConfirm={() => undefined} onClose={() => undefined} />
+      </MantineProvider>,
+    );
+
+    expect(screen.getByLabelText('L').hasAttribute('maxlength')).toBe(false);
+  });
+});

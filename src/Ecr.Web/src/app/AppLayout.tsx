@@ -23,6 +23,7 @@ import {
   Text,
 } from '@mantine/core';
 import { useDisclosure, useMediaQuery } from '@mantine/hooks';
+import { NavbarDesktopBreakpoint, NavbarDesktopQuery } from '@/app/navbarBreakpoint';
 import { notifications } from '@mantine/notifications';
 import { Navigate, Outlet, ScrollRestoration, useLocation, useMatches } from 'react-router-dom';
 import { Breadcrumbs, isRouteHandle } from './Breadcrumbs';
@@ -188,12 +189,6 @@ function sessionLanguageOf(profileLanguage: string): string {
  */
 const NavbarWidth = 260;
 const NavbarIconsOnlyWidth = 64;
-
-/**
- * Ширина, від якої меню — колонка поруч зі сторінкою, а не шухляда за
- * бургером (`breakpoint: 'sm'` у `AppShell` нижче, 48em у Mantine).
- */
-const NavbarDesktopQuery = '(min-width: 48em)';
 
 /**
  * Кнопка виходу із симуляції — лінивим чанком (UI-12, бюджет `D-132`).
@@ -418,7 +413,7 @@ export function AppLayout(): JSX.Element {
         header={{ height: 40 }}
         navbar={{
           width: iconsOnly ? NavbarIconsOnlyWidth : NavbarWidth,
-          breakpoint: 'sm',
+          breakpoint: NavbarDesktopBreakpoint,
           // T1-15 (б): під примусовою зміною пароля меню не потрібне — усі API дають 428.
           collapsed: { mobile: !opened || me.mustChangePassword, desktop: me.mustChangePassword },
         }}
@@ -439,11 +434,10 @@ export function AppLayout(): JSX.Element {
         <AppShell.Header className="ecr-app-header">
           <Group h="100%" px="md" justify="space-between" wrap="nowrap">
             <Group gap="sm" wrap="nowrap" className="ecr-topbar-start">
-              {!me.mustChangePassword && (
+              {!me.mustChangePassword && !desktop && (
                 <Burger
                   opened={opened}
                   onClick={toggle}
-                  hiddenFrom="sm"
                   size="sm"
                   aria-label={t('nav.menu')}
                 />
@@ -554,8 +548,8 @@ export function AppLayout(): JSX.Element {
               </NavGroupSection>
             ))}
           </AppShell.Section>
-          {!me.mustChangePassword && (
-            <AppShell.Section visibleFrom="sm" pt="xs">
+          {!me.mustChangePassword && desktop && (
+            <AppShell.Section pt="xs">
               <NavbarCollapseToggle collapsed={iconsOnly} controls={NavbarItemsId} />
             </AppShell.Section>
           )}

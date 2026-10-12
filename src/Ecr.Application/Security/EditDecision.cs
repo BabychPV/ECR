@@ -27,7 +27,26 @@ public readonly record struct EditDecision(
     bool IsAllowed, EditDenyReason Reason, string? Detail = null, bool RequiresConfirmation = false,
     bool OutOfWindowMark = false)
 {
+    /// <summary>
+    /// Дозвіл дала САМЕ передача зрізу (EA-B): без неї рівень був би
+    /// <c>Read</c> і рішення — <c>InsufficientGrantLevel</c>. Потрібен запису,
+    /// щоб повторити перевірку передачі під блокуванням аркуша: відкликання
+    /// чи «Заповнено» між рішенням і комітом не мають пропустити правку.
+    /// </summary>
+    public bool ViaAssignment { get; init; }
+
+    /// <summary>
+    /// У документа цього рішення є передачі зрізу (EA-B): запис мусить повторно перевірити їх
+    /// під блокуванням аркуша, навіть якщо САМЕ це рішення передачею не піднято (заборона
+    /// «Заповнено»/ексклюзивність могла з'явитися між рішенням і комітом). Документ без передач —
+    /// <c>false</c>: повторного читання немає.
+    /// </summary>
+    public bool AssignmentsPresent { get; init; }
+
     public static EditDecision Allow() => new(true, EditDenyReason.None);
+
+    /// <summary>Дозволено завдяки передачі зрізу (підйом <c>Read → Write</c>).</summary>
+    public static EditDecision AllowViaAssignment() => new(true, EditDenyReason.None) { ViaAssignment = true };
     public static EditDecision Deny(EditDenyReason reason, string? detail = null) => new(false, reason, detail);
 
     /// <summary>

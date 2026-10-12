@@ -1,6 +1,8 @@
+using Ecr.Api.Security;
 using Ecr.Application.Reporting;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace Ecr.Api.Controllers;
 
@@ -143,6 +145,8 @@ public sealed class ReportsController(
     /// зрізу), а не ресурс, який можна кешувати чи підвантажувати наперед.
     /// </remarks>
     [HttpPost("snapshots/{id:long}/verify")]
+    [EnableRateLimiting(SnapshotVerifyRateLimitPolicy.PolicyName)] // L1-05: 100/хв на користувача
+    [ProducesResponseType(StatusCodes.Status429TooManyRequests)]
     [ProducesResponseType<SnapshotVerifyResponse>(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> VerifySnapshot(long id, CancellationToken ct)

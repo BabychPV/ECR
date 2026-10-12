@@ -106,10 +106,68 @@ public sealed class SnapshotIgnoresIntermediateTests(SqlServerFixture sql)
 
         var after = await BuildAsync(builder, db, report.Id, document.ProjectId, document.PeriodKey);
 
-        // `RowCount` зрізу рахує КОМІРКИ: три виходи × чотири колонки опису.
-        Assert.Equal(3 * 4, before.RowCount);
+        // R16-5: `RowCount` зрізу рахує РЯДКИ (три виходи), а не комірки (× чотири колонки опису = 12).
+        Assert.Equal(3, before.RowCount);
         Assert.Equal(before.RowCount, after.RowCount);
         Assert.Equal(before.Hash, after.Hash);
+    }
+
+    /// <summary>
+    /// R16-5: <c>RowCount</c> зрізу — кількість РЯДКІВ, а не комірок (<c>rpt.ReportRow</c> — одна комірка:
+    /// рядок × колонка). 1024 рядки × 4 колонки опису давали 4096; це число бачить регулятор у переліку зрізів
+    /// («Rows»), і воно мусить збігатися з кількістю рядків, які він побачить у зрізі.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-10.2")]
+    public async Task RowCount_зрізу_це_кількість_рядків_а_не_комірок_1024_рядки_на_4_колонки()
+    {
+        const int Rows = 1024;
+
+        var chain = new TestDocumentBuilder(sql.ConnectionString);
+        var document = await chain.BuildAsync();
+
+        await using var db = chain.CreateContext();
+
+        var tag = Guid.NewGuid().ToString("N")[..8];
+        var methodology = new Methodology(
+            EcrCode.Create($"RC5_{tag}"), new LocalizedText(new Dictionary<string, string> { ["en"] = "m" }));
+        db.Methodologies.Add(methodology);
+        await db.SaveChangesAsync();
+
+        var methodologyVersion = new MethodologyVersion(methodology.Id, "1.0", CalculationLevel.Configuration, 1, Now);
+        db.MethodologyVersions.Add(methodologyVersion);
+
+        var run = new CalculationRun(document.ProjectId, document.PeriodKey.Value, triggeredByUserId: null, Now);
+        run.Complete("Succeeded", Now, "{}", errorMessage: null);
+        run.MakeCurrent();
+        db.CalculationRuns.Add(run);
+        await db.SaveChangesAsync();
+
+        var unit = await db.Units.AsNoTracking().OrderBy(u => u.Id).Select(u => u.Id).FirstAsync();
+        var store = new CalculationResultStore(db, new TestClock(Now));
+
+        // Один вихід на кожен із 1024 різних рядків документа: 1024 рядки зрізу.
+        await store.WriteResultsAsync(
+            run.Id,
+            [
+                .. Enumerable.Range(1, Rows).Select(i => new CalculationOutput(
+                    document.DocumentId,
+                    $"E-{i:D4}",
+                    [new CalculationOutputValue(methodologyVersion.Id, null, "M_t", i, unit, CalculationResultKind.Output)],
+                    [])),
+            ],
+            CancellationToken.None);
+        await db.SaveChangesAsync();
+
+        var report = await PublishedAsync(db);
+        var builder = new ReportSnapshotBuilder(db, new TestClock(Now), new MemoryCache(new MemoryCacheOptions()));
+
+        var built = await BuildAsync(builder, db, report.Id, document.ProjectId, document.PeriodKey);
+
+        // Четири колонки опису (RowKey, OutputCode, Value, SubstanceEntryId): комірок було б 4096.
+        Assert.Equal(Rows, built.RowCount);
     }
 
     private static async Task<(int RowCount, string Hash)> BuildAsync(

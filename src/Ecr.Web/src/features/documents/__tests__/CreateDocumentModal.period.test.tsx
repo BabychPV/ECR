@@ -75,7 +75,7 @@ function Where(): null {
   return null;
 }
 
-function show(): void {
+function show(preferredPeriodKey: number | null = null): void {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
   render(
@@ -83,7 +83,7 @@ function show(): void {
       <MemoryRouter>
         <QueryClientProvider client={client}>
           <Routes>
-            <Route path="*" element={<><Where /><CreateDocumentModal opened onClose={() => {}} /></>} />
+            <Route path="*" element={<><Where /><CreateDocumentModal opened onClose={() => {}} preferredPeriodKey={preferredPeriodKey} /></>} />
           </Routes>
         </QueryClientProvider>
       </MemoryRouter>
@@ -160,6 +160,27 @@ describe('A2-05: період у формі створення документ�
 
     await createFromPeriodStep();
     await waitFor(() => expect((globalThis as { __where?: string }).__where).toBe('/documents/77?periodKey=202608'));
+  });
+
+  it('FP-7: період, обраний у переліку документів, — типовий у майстрі (не найновіший відкритий)', async () => {
+    mockServer();
+    show(202609);
+    await pickProjectAndSheet();
+
+    const select = (await screen.findByLabelText('⟦documents.period⟧', { selector: 'input' })) as HTMLInputElement;
+    expect(select.value).toBe('September 2026');
+
+    await createFromPeriodStep();
+    await waitFor(() => expect((globalThis as { __where?: string }).__where).toBe('/documents/77?periodKey=202609'));
+  });
+
+  it('FP-7: період зі списку, якого в проєкті не можна обрати (ще не відкритий), ігнорується', async () => {
+    mockServer();
+    show(202611);
+    await pickProjectAndSheet();
+
+    const select = (await screen.findByLabelText('⟦documents.period⟧', { selector: 'input' })) as HTMLInputElement;
+    expect(select.value).toBe('October 2026');
   });
 
   it('вибір людини перекриває типовий', async () => {

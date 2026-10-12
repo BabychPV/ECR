@@ -544,6 +544,36 @@ public sealed partial class PatchCellsHandler
         // поштучного (`PersistCoreAsync`); `ApplyBatchAsync` нижче його вже не повторює.
         await cellStore.LimitLockWaitAsync(ct).ConfigureAwait(false);
 
+        // ⛔ EA-B (G-11): передача зрізу повторно під блокуваннями аркушів — один раз на книгу,
+        // ПІСЛЯ ліміту очікування блокувань. Відкликання між переглядом і застосуванням імпорту →
+        // відмова, нічого не записано.
+        var assignmentsNeeded = active.Exists(x => x.Context.AssignmentsPresent || x.Context.LiftedColumns.Count > 0);
+        var assignmentGate = await ReadAssignmentGateAsync(
+                active[0].Context.Profile, documentId, assignmentsNeeded, ct)
+            .ConfigureAwait(false);
+        if (assignmentGate is not null)
+        {
+            foreach (var item in active)
+            {
+                Blamed(item.Id, () =>
+                {
+                    if (AssignmentDenial(item.Context, assignmentGate) is { } reason)
+                    {
+                        var denied = item.Planned.Upserts.Count + item.Planned.Deletes.Count;
+                        throw new AccessDeniedException(
+                            "ECR-ACCS-0403",
+                            $"Заборонених комірок у батчі: {denied}. Причина першої: {reason}.",
+                            new Dictionary<string, object?>
+                            {
+                                ["messageKey"] = "err.ECR-ACCS-0403.deniedCells",
+                                ["deniedCount"] = denied.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                                ["reason"] = reason.ToString(),
+                            });
+                    }
+                });
+            }
+        }
+
         var ceiling = active.Where(x => CreatesRowsUnderCeiling(x.Context)).ToList();
         if (ceiling.Count > 0)
         {

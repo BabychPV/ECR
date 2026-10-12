@@ -232,6 +232,19 @@ export const CellChangesTable = memo(function CellChangesTable({
               <Text span ff="monospace" fz="sm">
                 <Timestamp value={change.changedAt} />
               </Text>
+              {/* НФ-8.9.6 / D-247: рядок із архіву аудиту — позначка джерела, значення й межі читання ті самі. */}
+              {change.fromArchive && (
+                <Badge
+                  ml="xs"
+                  size="xs"
+                  variant="outline"
+                  color="gray"
+                  title={t('audit.fromArchiveHint')}
+                  data-audit-archive=""
+                >
+                  {t('audit.fromArchive')}
+                </Badge>
+              )}
             </Table.Td>
             {/* ⛔ `R-18`: імена з сервера, а не «user 3». Номер — підказкою: фільтри стоять на ньому.
                 AN-115: перерахунок/інтеграція/міграція — «Система», хто запустив — у підказці. */}

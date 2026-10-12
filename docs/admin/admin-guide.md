@@ -20,21 +20,24 @@
 
 | Роль | Що має за замовчуванням |
 |---|---|
-| `SystemAdministrator` | усі права (`%`), **крім небезпечних** |
+| `SystemAdministrator` | усі безпечні права (`%`) **і вісім адмін-прав керування** (рішення людини 2026-10-11, секція сіду `FP:sysadmin-rights`): `Security.ManageUsers`, `Security.ManageRoles`, `Security.Simulate`, `Integration.Manage`, `System.ManageNotifications`, `System.RunJob`, `Report.ViewCampaign`, `Calculation.Publish`. **Не** має `Report.EditDefinition` (лише `Approver`, `D-203`), `Period.Reopen` і `Document.ChangeKey` — їх видає адміністратор свідомо власною роллю |
 | `TemplateAdministrator` | `Template.*`, `Registry.View`, `Calculation.View`, `Document.View`, `System.ViewHealth` |
 | `PeriodAdministrator` | `Period.*` (крім небезпечного `Period.Reopen`), `Project.Manage`, `Document.View`, `System.ViewHealth` |
 | `DataEntry` | `Document.View/Create/Import/Export/Submit`, `Template.View`, `Registry.View`, `Calculation.View`, `Report.Export` |
 | `Approver` | `Document.View/Export/Reopen`, `Registry.View`, `Calculation.View`, `Report.*` без небезпечних (`ViewRegulatory`, `ViewSnapshot`, `BuildSnapshot`, `Export`) і окремим рядком — небезпечне `Report.EditDefinition` (`D-203`) |
 | `Viewer` | `Document.View`, `Registry.View`, `Calculation.View`, `Report.ViewRegulatory`, `Report.Export` |
 | `Auditor` | `Document.View`, `Registry.View`, `Calculation.View`, `Template.View`, `Integration.View`, `Report.ViewRegulatory`, `Report.ViewSnapshot` (без `Report.Export`), `Security.ViewAudit`, `System.ViewHealth` |
-| `ReportViewer` | `Report.ViewRegulatory`, `Report.ViewSnapshot`, `Report.Export` (секція `SEC:RPT` сіду). Без ресурсного гранта Read на проєкт не бачить нічого |
+| `ReportViewer` | `Report.ViewRegulatory`, `Report.ViewSnapshot`, `Report.Export` (секція `SEC:RPT` сіду). Без ресурсного гранта Read на проєкт не бачить нічого. Стартова сторінка — «Report snapshots» (без `Document.View` перелік документів недоступний); перелік проєктів для вибору (`GET /api/v1/projects`) віддається і за `Report.ViewRegulatory` (FP-1) |
 | `BootstrapAdministrator` | лише `Security.ManageUsers`, `Security.ManageRoles` |
 
 ⛔ Шаблонні роздачі сіду фільтруються `WHERE p.IsDangerous = 0` у самому `MERGE`.
 Поіменні винятки — окремими `MERGE`: `BootstrapAdministrator` (`Security.ManageUsers`,
-`Security.ManageRoles`) і `Approver` (`Report.EditDefinition`, `D-203`). Решту небезпечних
-прав адміністратор дає, **створюючи роль** із ними (п. 2.3); у журналі безпеки — подія
-`DangerousPermissionsGranted`.
+`Security.ManageRoles`), `Approver` (`Report.EditDefinition`, `D-203`) і `SystemAdministrator`
+(вісім адмін-прав керування, секція `FP:sysadmin-rights`, 2026-10-11). Решту небезпечних
+прав (`Period.Reopen`, `Document.ChangeKey`, `Report.EditDefinition` для всіх, крім `Approver`)
+адміністратор дає, **створюючи роль** із ними (п. 2.3); у журналі безпеки — подія
+`DangerousPermissionsGranted`. Призначення групі AD ролі з небезпечними правами
+(зокрема `SystemAdministrator`) вимагає підтвердження.
 
 ⚠ **BREAKING для адміністраторів (`D-285`, 2026-10-05).** Рівень гранта `Write` САМ
 подання аркуша не дає (як і раніше), але тепер його складає право `Document.Submit`:
@@ -99,30 +102,33 @@ Known limitations (не цього циклу): (а) заборона, дода�
 | `Calculation.EditFormula` / `EditConstant` / `EditRule` | | формули, константи, правила | SysAdm |
 | `Calculation.ManageRequiredInputs` | | обов'язкові входи | SysAdm |
 | `Calculation.Recalculate` | | проєктний/масовий перерахунок (перерахунок СВОГО документа кнопкою «Recalculate» — за читанням, `Document.View` + видимість документа). Виконавець без `Calculation.Recalculate` ставить перерахунок документа без витіснення: повторні запити зливаються з наявною задачею; витіснення доступне лише власникам `Calculation.Recalculate`. Частота — дві межі разом (однаково для власників `Calculation.Recalculate`): 6 запитів на хвилину на пару «користувач + документ» (`Security:RateLimit:RecalculatePermitPerMinute`) і 30 на хвилину на користувача для всіх документів разом (`Security:RateLimit:RecalculateUserPermitPerMinute`, мінімум 1); понад будь-яку з них — `429`. Запит, відхилений `4xx` (`403`/`404`/`422`), обидві межі не витрачає; `5xx` і скасований клієнтом запит — витрачають (робота могла вже статися). Відмова межі пари повертає дозвіл користувацької межі. | SysAdm |
-| `Calculation.Publish` | так | публікація версії методики | — |
+| `Calculation.Publish` | так | публікація версії методики | SysAdm |
 | `Report.ViewRegulatory` | | регуляторні зрізи, `/admin/snapshots` | Approver, Viewer, ReportViewer, Auditor, SysAdm |
 | `Report.ViewSnapshot` | | вміст зрізу: «View rows», книга `.xlsx` (разом із `Report.Export`); потрібен ще грант Read на проєкт | Approver, ReportViewer, Auditor, SysAdm |
 | `Report.BuildSnapshot` | | побудова зрізу | Approver, SysAdm |
 | `Report.Export` | | вивантаження звіту | DataEntry, Approver, Viewer, ReportViewer, SysAdm |
 | `Report.EditDefinition` | так | авторство державної форми | Approver (явним рядком seed, `D-203`) |
-| `Report.ViewCampaign` | так | огляд кампанії `/admin/campaign`: усі проєкти періоду без меж грантів | — |
+| `Report.ViewCampaign` | так | огляд кампанії `/admin/campaign`: усі проєкти періоду без меж грантів | SysAdm |
 | `Integration.View` | | джерела даних (лише перегляд) | Auditor, SysAdm |
-| `Integration.Manage` | так | джерела, з'єднання, мапінг (`/admin/sources`, `/admin/mapping`) | — |
+| `Integration.Manage` | так | джерела, з'єднання, мапінг (`/admin/sources`, `/admin/mapping`) | SysAdm |
 | `Integration.EditSchedule` | | розклад збору | SysAdm |
 | `Uom.EditCatalog` | | нова одиниця виміру | SysAdm |
-| `Security.ManageUsers` | так | користувачі | Bootstrap |
-| `Security.ManageRoles` | так | ролі й роздачі, `/admin/security` | Bootstrap |
+| `Security.ManageUsers` | так | користувачі | Bootstrap, SysAdm |
+| `Security.ManageRoles` | так | ролі й роздачі, `/admin/security` | Bootstrap, SysAdm |
 | `Security.ViewAudit` | | журнал аудиту, `/admin/audit` | Auditor, SysAdm |
-| `Security.Simulate` | так | перегляд системи очима іншого користувача | — |
+| `Security.Simulate` | так | перегляд системи очима іншого користувача | SysAdm |
 | `System.ViewHealth` | | стан, задачі, узгодженість (`/admin/health`, `/admin/jobs`, `/admin/consistency`) | TemplateAdm, PeriodAdm, Auditor, SysAdm |
-| `System.RunJob` | так | ручний запуск системних задач, зокрема перевірки узгодженості | — |
+| `System.RunJob` | так | ручний запуск системних задач, зокрема перевірки узгодженості | SysAdm |
 | `System.ManageLocalization` | | рядки інтерфейсу, `/admin/ui-strings` | SysAdm |
-| `System.ManageNotifications` | так | SMTP (панель «SMTP (outgoing mail)»), канали, правила й журнал доставок сповіщень, `/admin/notifications`; керує адресатами, паролем SMTP і секретами каналів | — |
+| `System.ManageNotifications` | так | SMTP (панель «SMTP (outgoing mail)»), канали, правила й журнал доставок сповіщень, `/admin/notifications`; керує адресатами, паролем SMTP і секретами каналів | SysAdm |
 
-⚠ Отже, **одразу після встановлення** `SystemAdministrator` не може: публікувати
-методику, керувати джерелами даних і мапінгом, сповіщеннями, користувачами й
-ролями, запускати системні задачі, повторно відкривати періоди. Ці права дає лише нова
-роль, створена з ними (п. 2.3).
+⚠ **Одразу після встановлення** `SystemAdministrator` може все з наведеного, **крім**: авторства
+державних форм (`Report.EditDefinition`), повторного відкриття закритих періодів
+(`Period.Reopen`) і зміни бізнес-ключа документа (`Document.ChangeKey`). Ці три права
+дає лише нова роль, створена з ними (п. 2.3). До 2026-10-11 роль не мала й решти
+небезпечних прав (публікація методик, джерела й мапінг, сповіщення, користувачі й ролі,
+системні задачі, огляд кампанії, «View as») — на стендах, розгорнутих раніше, вони з'являться
+на наступному старті застосунку (сід додає відсутні пари).
 
 ## 2. Користувачі
 
@@ -395,7 +401,10 @@ Equal to, Not equal to, Between, Is empty, Is not empty) і стиль: колі
 
 - `aggregate`: `sum`, `avg`, `min`, `max`, `count`.
 - `targetColumn` — колонка типу **Formula** у таблиці-приймачі: значення пише система,
-  користувач його не править («The cell is computed», `ECR-CELL-4221`).
+  користувач його не править («The cell is computed», `ECR-CELL-4221`). Формула шаблону на
+  цій колонці **не потрібна**: приймач активного зв'язку `Rollup` — повноцінне джерело
+  значення для перевірки публікації (`ECR-TMPL-4226`, FP-5); фіктивна формула `0` не
+  потрібна. Вимкнений зв'язок джерелом не є.
 - `sourceColumn` числова (Int, Decimal, Formula, Calculated); для `count` — будь-яка.
 - Порожні значення в агрегат не входять (`avg` — середнє непорожніх). Немає значень або
   немає відповідного рядка — порожньо (`count` — 0); порожній результат очищає раніше

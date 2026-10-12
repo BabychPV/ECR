@@ -83,6 +83,13 @@ public sealed record SimulationSessionResponse(long SessionId, int SimulatedForU
 public sealed record RecalculationAcceptedResponse(string JobId, long DocumentId, int PeriodKey);
 
 /// <summary>
+/// Прийнятий у чергу перенос проєкту на нову версію шаблону (D-2 RC15B).
+/// </summary>
+/// <param name="JobId">Задача: <c>GET /jobs/{jobId}</c> дає прогрес і підсумок.</param>
+/// <param name="DocumentId">Документ, з якого відкрили перенос (переноситься весь його проєкт).</param>
+public sealed record MigrationAcceptedResponse(string JobId, long DocumentId);
+
+/// <summary>
 /// Прийнятий у чергу перерахунок УСЬОГО проєкту (Q-151).
 /// </summary>
 /// <param name="JobId">Задача.</param>

@@ -273,6 +273,45 @@ public sealed class RegistryEntryImportApiTests(SqlServerFixture sql)
     [Trait(TestCategories.Stage, TestCategories.Stage4)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Directive", "BE-24")]
+    public async Task Довідник_без_полів_дає_422_з_поясненням_що_полів_ще_немає()
+    {
+        // ⛔ FP-6 (прохід «від першого обличчя» 2026-10-11, P2): новий довідник без полів і файл
+        // `code,name` — відмова «невідома колонка» не казала головного: полів немає взагалі, а колонки
+        // файла — це коди полів.
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, "Registry.EditData").ConfigureAwait(true);
+
+        var tag = $"{Guid.NewGuid():N}"[..8].ToUpperInvariant();
+        int definitionId;
+        string code;
+
+        await using (var db = new EcrDbContext(Options()))
+        {
+            var empty = new RegistryDef(EcrCode.Create($"EMPT{tag}"), Name($"Empty {tag}"), isTemporal: false);
+            db.RegistryDefs.Add(empty);
+            await db.SaveChangesAsync().ConfigureAwait(true);
+            definitionId = empty.Id;
+            code = empty.Code;
+        }
+
+        var response = await ImportAsync(client, code, $"code,name\r\nA{tag},Alpha\r\n", dryRun: false)
+            .ConfigureAwait(true);
+
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, response.StatusCode);
+
+        var problem = JsonDocument
+            .Parse(await response.Content.ReadAsStringAsync().ConfigureAwait(true))
+            .RootElement;
+
+        Assert.Equal("ECR-REG-0422", problem.GetProperty("errorCode").GetString());
+        Assert.Equal("err.ECR-REG-0422.entriesCsvNoFields", problem.GetProperty("messageKey").GetString());
+        Assert.False(await EntryExistsAsync(definitionId, $"A{tag}").ConfigureAwait(true));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Directive", "BE-24")]
     public async Task Посилання_на_неіснуючий_запис_іншого_довідника_дає_помилку_рядка()
     {
         using var app = new EcrApiFactory(sql);

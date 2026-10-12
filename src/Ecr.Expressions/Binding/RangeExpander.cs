@@ -4,17 +4,44 @@ using Ecr.Expressions.Parsing;
 namespace Ecr.Expressions.Binding;
 
 /// <summary>
-/// Розкриває діапазони рядків у явний список <c>RowKey</c> **на момент
-/// `Publish`**. У рантаймі діапазонів не існує (B03 §4).
+/// Розкриває діапазони рядків у явний список <c>RowKey</c> за поточним порядком
+/// (<c>Ordinal</c>) **на момент `Publish`**; ці ключі лягають у
+/// <c>cfg.FormulaDependency</c> (B03 §4).
 /// </summary>
 /// <remarks>
 /// Саме це робить зміну <c>Ordinal</c> після публікації безпечною: формула вже
 /// посилається на конкретні рядки. Якби діапазон обчислювався в рантаймі за
 /// <c>Ordinal</c>, презентаційна правка мовчки змінювала б числа — найгірший
 /// клас помилок, бо даних не зіпсовано, а результат інший.
+/// <para>
+/// ⚠ Тому рантайм (<c>SliceEvaluationContext</c>) і Excel-експорт читають діапазон НЕ цим класом, а
+/// ключами, зафіксованими публікацією, — через похідний <c>PublishedRangeExpander</c>
+/// (<see cref="ExpandAt"/>; ФВ-0.2). Цей клас у рантаймі лишається лише запасним шляхом для
+/// чернетки й версії без збереженого графа; для опублікованої версії з графом такий зворотний
+/// перехід рахується й пишеться в журнал (<c>ecr.recalc.range_fallback</c>).
+/// </para>
 /// </remarks>
-public sealed class RangeExpander
+public class RangeExpander
 {
+    /// <summary>
+    /// Розкриває діапазон так, як його розкрила публікація: <paramref name="dependencyIndex"/> —
+    /// позиція першого ребра цього посилання в списку залежностей формули (<c>SortOrder</c>).
+    /// </summary>
+    /// <remarks>
+    /// За замовчуванням — той самий <see cref="Expand"/> за поточним <c>Ordinal</c>. Рантайм
+    /// (<c>PublishedRangeExpander</c>) перевизначає метод і бере ключі, зафіксовані при
+    /// <c>Publish</c> у <c>cfg.FormulaDependency</c>: презентаційна зміна <c>Ordinal</c> після
+    /// публікації не має міняти склад діапазону.
+    /// </remarks>
+    public virtual IReadOnlyList<string> ExpandAt(
+        TableDef table,
+        string fromRowKey,
+        string toRowKey,
+        int dependencyIndex,
+        List<ExpressionDiagnostic>? diagnostics = null,
+        int position = 0)
+        => Expand(table, fromRowKey, toRowKey, diagnostics, position);
+
     /// <summary>Розкриває діапазон у список ключів.</summary>
     /// <param name="table">Таблиця, в якій живуть рядки.</param>
     /// <param name="fromRowKey">Початок діапазону.</param>

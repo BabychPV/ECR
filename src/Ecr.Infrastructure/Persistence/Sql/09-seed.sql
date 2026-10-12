@@ -1472,6 +1472,7 @@ USING (VALUES
     (N'err.ECR-RPT-0422.nameRequired',       N'en', N'Give the report a name in at least one language: it is addressed by that name in the list.', 1),
     (N'err.ECR-RPT-0422.version',            N'en', N'The report version number must be from 1 to {maxLength} characters.', 1),
     (N'err.ECR-RPT-4091.code',               N'en', N'A report with code "{code}" is already described.', 1),
+    (N'err.ECR-RPT-4091.version',            N'en', N'Version "{version}" already exists in this report definition: the version number must be unique.', 1),
     (N'err.ECR-RPT-0404.def',                N'en', N'Report definition {reportDefId} does not exist.', 1),
     (N'err.ECR-RPT-0404.version',            N'en', N'Report version {reportVersionId} does not exist.', 1),
     (N'err.ECR-RPT-0404.versionWrongDef',    N'en', N'Version {reportVersionId} belongs to definition {versionDefId}, not {reportDefId}.', 1),
@@ -5985,6 +5986,15 @@ USING (VALUES
     (N'documents.migrateItemValues', N'en', N'Entered values', 1),
     (N'documents.migrateMoreItems', N'en', N'More differences not shown: {count}.', 1),
     -- DOC:migrate-version: кінець секції
+    -- EDA:executor-strip ── EA-5b: смуга виконавця над таблицею документа (`ExecutorStrip`); власна порція.
+    (N'editAssign.bar.assigned', N'en', N'Month assigned to you: {slice}', 1),
+    (N'editAssign.bar.returned', N'en', N'{slice} returned by the owner: {reason}', 1),
+    (N'editAssign.bar.returnedNoReason', N'en', N'{slice} returned by the owner', 1),
+    (N'editAssign.bar.filled', N'en', N'{slice}: filled, awaiting the owner''s validation', 1),
+    (N'editAssign.bar.markFilled', N'en', N'Mark as filled', 1),
+    (N'editAssign.bar.confirmFill', N'en', N'After this you can''t edit {slice} until the owner returns it.', 1),
+    (N'editAssign.bar.note', N'en', N'Owner''s note: {note}', 1),
+    -- EDA:executor-strip: кінець секції
     -- REGCTOR812 ── ФВ-8.12: табличний редактор даних довідника (`features/registries/rc812`).
     (N'registries.data.title', N'en', N'Registry data', 1),
     (N'registries.data.open', N'en', N'Open data', 1),
@@ -7386,6 +7396,19 @@ USING (VALUES
     (N'jobs.staleDocuments.open', N'en', N'Open', 1),
     (N'jobs.staleDocuments.error', N'en', N'Could not load the documents that need recalculation.', 1),
     -- COLL:stale-mytasks ── кінець секції ──
+    -- EDA-5c:mytasks ── секції «Assigned to me» / «Awaiting my validation» у My tasks; ru/kz — порцією EDA-5c:mytasks нижче ──
+    (N'myTasks.assignToFill', N'en', N'Assigned to me', 1),
+    (N'myTasks.awaitingValidation', N'en', N'Awaiting my validation', 1),
+    (N'myTasks.edit.error', N'en', N'Could not load the months assigned to you.', 1),
+    (N'myTasks.edit.filledAt', N'en', N'Filled {date}', 1),
+    (N'myTasks.edit.returnedBy', N'en', N'Returned by owner: {reason}', 1),
+    (N'myTasks.edit.validate', N'en', N'Validate…', 1),
+    (N'myTasks.edit.open', N'en', N'Open', 1),
+    (N'myTasks.edit.pendingBadge', N'en', N'{n} assigned months need your action', 1),
+    (N'myTasks.edit.status.Assigned', N'en', N'Assigned', 1),
+    (N'myTasks.edit.status.Filled', N'en', N'Filled, awaiting validation', 1),
+    (N'myTasks.edit.status.Returned', N'en', N'Returned for edits', 1),
+    -- EDA-5c:mytasks ── кінець секції ──
     -- COLL:rc15c-recalc ── перерахунок вимкнений лише коли подані ВСІ аркуші; ru/kz — порцією COLL:rc15c-recalc нижче ──
     (N'workflow.recalculateAllSubmitted', N'en', N'All sheets of period {period} are submitted or approved: there is nothing to recalculate. Return a sheet for edits first (the sheet''s «Return for edits» action).', 1),
     -- COLL:rc15c-recalc ── кінець секції ──
@@ -7570,6 +7593,236 @@ USING (VALUES
     -- COLL:r11l6-target-hidden ── AN-94: ціль зв'язку — довідник, до якого в читача немає доступу (сервер віддає null); ru — порцією нижче, kz — за термінологом ──
     ,(N'registries.relationTargetHidden', N'en', N'Target registry is not available to you', 1)
     -- COLL:r11l6-target-hidden ── кінець секції ──
+    -- COLL:quota-verify-validate ── L1-05/P1-08: межа частоти «Перевірити зріз» і «Перевірити документ» на користувача; ru/kz — порцією COLL:quota-verify-validate нижче ──
+    ,(N'err.ECR-REQ-0429.tooManyVerifications', N'en', N'Too many snapshot verification requests in a short time. Wait a moment and try again.', 1)
+    ,(N'err.ECR-REQ-0429.tooManyValidations', N'en', N'Too many document validation requests in a short time. Wait a moment and try again.', 1)
+    -- COLL:quota-verify-validate ── кінець секції ──
+    -- COLL:rc16mig ── D-2 RC15B: перенос версії шаблону фоновою задачею (прогрес стадій, підсумок, друга людина вже запустила перенос); ru/kz — порцією COLL:rc16mig нижче ──
+    ,(N'jobs.kind.migrateDocumentVersion', N'en', N'Template version migration', 1)
+    ,(N'jobs.migrateStarted', N'en', N'Migration started', 1)
+    ,(N'jobs.migratePlanning', N'en', N'Checking the project and planning the transfer', 1)
+    ,(N'jobs.migrateCells', N'en', N'Moving cell values and rows ({rows} changed so far)', 1)
+    ,(N'jobs.migrateInstances', N'en', N'Moving table instances', 1)
+    ,(N'jobs.migrateNewRows', N'en', N'Adding new rows of the target version ({rows} added so far)', 1)
+    ,(N'jobs.migrateHeader', N'en', N'Moving document headers', 1)
+    ,(N'jobs.migrateIndex', N'en', N'Rebuilding the search index ({rows} rows so far)', 1)
+    ,(N'jobs.migrateWorkflow', N'en', N'Moving document composition and workflow', 1)
+    ,(N'jobs.migrateValidation', N'en', N'Moving validation results ({rows} rows so far)', 1)
+    ,(N'jobs.migrateFinish', N'en', N'Switching the project to the new version', 1)
+    ,(N'jobs.migrateDone', N'en', N'Migrated to version {version}: documents {documents}, values moved {values}', 1)
+    ,(N'err.ECR-JOB-0409.migrationInProgress', N'en', N'A migration of this project is already running (started by another user). Wait for it to finish.', 1)
+    ,(N'documents.migrateRunning', N'en', N'The migration runs in the background: {percent}%. You can close this window; progress stays in My tasks.', 1)
+    ,(N'documents.migrateJobFailed', N'en', N'The migration did not finish, nothing was changed: {reason}', 1)
+    -- COLL:rc16mig ── кінець секції ──
+    -- COLL:rc20lookup ── R16-1: Lookup-колонка/поле шапки без довідника - 422; ru/kz - порцією COLL:rc20lookup нижче ──
+    ,(N'err.ECR-TMPL-0422.lookupRegistryRequired', N'en', N'Column "{columnCode}" is of type Lookup and needs a registry: pick one.', 1)
+    ,(N'err.ECR-TMPL-0422.headerFieldLookupRegistryRequired', N'en', N'Header field "{headerFieldCode}" is of type Lookup and needs a registry: pick one.', 1)
+    -- COLL:rc20lookup ── кінець секції ──
+    -- ARC:audit-reader ── НФ-8.9.6: журнал змін комірок читає й архів аудиту (arc.AuditCellChange): позначка рядка й вибір періоду старше гарячого вікна; ru/kz — порцією ARC:audit-reader нижче ──
+    ,(N'audit.fromArchive', N'en', N'Archive', 1),
+    (N'audit.fromArchiveHint', N'en', N'Read from the audit archive: this change is older than 24 months and was moved out of the working journal. Values and access rules are the same.', 1),
+    (N'audit.archiveWindow', N'en', N'Archive (older than 24 months)', 1),
+    (N'audit.archiveWindowHint', N'en', N'Sets the date range to the 90 days before the archive boundary. Older changes are read from the audit archive and marked "Archive".', 1)
+    -- ARC:audit-reader ── кінець секції ──
+    -- COLL:p3-rc19 ── RC19: підписи журналу Audit (операція, сутність, подія безпеки) і скелет Health; ru/kz — порцією COLL:p3-rc19 нижче ──
+    ,(N'audit.operationLabel.Create', N'en', N'Created', 1)
+    ,(N'audit.operationLabel.Update', N'en', N'Updated', 1)
+    ,(N'audit.operationLabel.Delete', N'en', N'Deleted', 1)
+    ,(N'audit.operationLabel.Import', N'en', N'Imported', 1)
+    ,(N'audit.operationLabel.ImportPackage', N'en', N'Package imported', 1)
+    ,(N'audit.operationLabel.Reopen', N'en', N'Reopened', 1)
+    ,(N'audit.operationLabel.Publish', N'en', N'Published', 1)
+    ,(N'audit.operationLabel.Clone', N'en', N'Cloned', 1)
+    ,(N'audit.operationLabel.Pin', N'en', N'Pinned', 1)
+    ,(N'audit.operationLabel.Unpin', N'en', N'Unpinned', 1)
+    ,(N'audit.operationLabel.SetValidity', N'en', N'Validity changed', 1)
+    ,(N'audit.operationLabel.Invalidated', N'en', N'Marked invalid', 1)
+    ,(N'audit.operationLabel.SwitchSourceSet', N'en', N'Source set switched', 1)
+    ,(N'audit.operationLabel.SaveDefinitionDraft', N'en', N'Definition draft saved', 1)
+    ,(N'audit.operationLabel.DiscardDefinitionDraft', N'en', N'Definition draft discarded', 1)
+    ,(N'audit.operationLabel.SaveRules', N'en', N'Rules saved', 1)
+    ,(N'audit.entityLabel.cfg.RegistryDef', N'en', N'Registry definition', 1)
+    ,(N'audit.entityLabel.cfg.RegistryDefinitionDraft', N'en', N'Registry definition draft', 1)
+    ,(N'audit.entityLabel.cfg.CalculationBinding', N'en', N'Calculation binding', 1)
+    ,(N'audit.entityLabel.cfg.TableDef', N'en', N'Table definition', 1)
+    ,(N'audit.entityLabel.dic.RegistryEntry', N'en', N'Registry entry', 1)
+    ,(N'audit.entityLabel.dic.RegistryExternalKey', N'en', N'Registry external key', 1)
+    ,(N'audit.entityLabel.calc.MethodologyPackage', N'en', N'Methodology package', 1)
+    ,(N'audit.entityLabel.Project', N'en', N'Project', 1)
+    ,(N'audit.entityLabel.Project.CurrentPeriod', N'en', N'Project current period', 1)
+    ,(N'audit.entityLabel.Period', N'en', N'Period', 1)
+    ,(N'audit.entityLabel.PeriodPolicy', N'en', N'Period policy', 1)
+    ,(N'audit.entityLabel.ReportVersion', N'en', N'Report version', 1)
+    ,(N'audit.eventLabel.AccessDenied', N'en', N'Access denied', 1)
+    ,(N'audit.eventLabel.AuditStructureExported', N'en', N'Structure audit exported', 1)
+    ,(N'audit.eventLabel.ConsistencyCheckRunRequested', N'en', N'Consistency check requested', 1)
+    ,(N'audit.eventLabel.DataSourceConnectionTested', N'en', N'Source connection tested', 1)
+    ,(N'audit.eventLabel.DataSourceDeleted', N'en', N'Data source deleted', 1)
+    ,(N'audit.eventLabel.DataSourceSaved', N'en', N'Data source saved', 1)
+    ,(N'audit.eventLabel.DocumentDeleted', N'en', N'Document deleted', 1)
+    ,(N'audit.eventLabel.DocumentExportDownloaded', N'en', N'Document export downloaded', 1)
+    ,(N'audit.eventLabel.DocumentExportRequested', N'en', N'Document export requested', 1)
+    ,(N'audit.eventLabel.DocumentHeaderChanged', N'en', N'Document header changed', 1)
+    ,(N'audit.eventLabel.DocumentKeyChanged', N'en', N'Document key changed', 1)
+    ,(N'audit.eventLabel.DocumentVersionMigrated', N'en', N'Document moved to another template version', 1)
+    ,(N'audit.eventLabel.JobCancelled', N'en', N'Job cancelled', 1)
+    ,(N'audit.eventLabel.JobRestarted', N'en', N'Job restarted', 1)
+    ,(N'audit.eventLabel.MappingDeleted', N'en', N'Mapping deleted', 1)
+    ,(N'audit.eventLabel.MappingPaused', N'en', N'Mapping paused', 1)
+    ,(N'audit.eventLabel.MappingResumed', N'en', N'Mapping resumed', 1)
+    ,(N'audit.eventLabel.MappingSourceUnitChangeAccepted', N'en', N'Source unit change accepted', 1)
+    ,(N'audit.eventLabel.MethodologyVersionDeleted', N'en', N'Methodology version deleted', 1)
+    ,(N'audit.eventLabel.RecalculationApprovalConfirmed', N'en', N'Recalculation approval confirmed', 1)
+    ,(N'audit.eventLabel.RecalculationApprovalRequested', N'en', N'Recalculation approval requested', 1)
+    ,(N'audit.eventLabel.RecalculationApprovalUsed', N'en', N'Recalculation approval used', 1)
+    ,(N'audit.eventLabel.RegistryExported', N'en', N'Registry exported', 1)
+    ,(N'audit.eventLabel.RegistryValueChanged', N'en', N'Registry value changed', 1)
+    ,(N'audit.eventLabel.SheetSubmitWarningsAcknowledged', N'en', N'Sheet submitted with warnings acknowledged', 1)
+    ,(N'audit.eventLabel.TemplateArchived', N'en', N'Template archived', 1)
+    ,(N'audit.eventLabel.TemplateRestored', N'en', N'Template restored', 1)
+    ,(N'audit.eventLabel.UiStringsImported', N'en', N'Interface texts imported', 1)
+    ,(N'audit.eventLabel.UnitUpdated', N'en', N'Unit updated', 1)
+    ,(N'audit.eventLabel.UserEmailChanged', N'en', N'User email changed', 1)
+    ,(N'health.checking', N'en', N'Checking all services… the first check can take a few seconds.', 1)
+    -- COLL:p3-rc19 ── кінець секції ──
+    -- EDA:ea5a ── EA-5a: шторка «Доступ до редагування» (передача місяця); ru/kz — порцією EDA:ea5a нижче ──
+    ,(N'editAssign.menu', N'en', N'Edit access', 1)
+    ,(N'editAssign.title', N'en', N'Edit access', 1)
+    ,(N'editAssign.close', N'en', N'Close edit access panel', 1)
+    ,(N'editAssign.hint', N'en', N'Hand a month to someone to fill in, then validate it.', 1)
+    ,(N'editAssign.owner', N'en', N'Owner: {name}', 1)
+    ,(N'editAssign.awaiting', N'en', N'Awaiting validation: {count}', 1)
+    ,(N'editAssign.view', N'en', N'View', 1)
+    ,(N'editAssign.view.months', N'en', N'Months', 1)
+    ,(N'editAssign.view.people', N'en', N'People', 1)
+    ,(N'editAssign.col.slice', N'en', N'Month', 1)
+    ,(N'editAssign.col.executors', N'en', N'Executors', 1)
+    ,(N'editAssign.col.status', N'en', N'Status', 1)
+    ,(N'editAssign.col.actions', N'en', N'Actions', 1)
+    ,(N'editAssign.col.person', N'en', N'Person', 1)
+    ,(N'editAssign.rowActions', N'en', N'Actions for {slice}', 1)
+    ,(N'editAssign.status.Open', N'en', N'Owner only', 1)
+    ,(N'editAssign.status.Assigned', N'en', N'Assigned', 1)
+    ,(N'editAssign.status.InProgress', N'en', N'In progress', 1)
+    ,(N'editAssign.status.Filled', N'en', N'Filled, awaiting validation', 1)
+    ,(N'editAssign.status.Validated', N'en', N'Validated', 1)
+    ,(N'editAssign.status.Returned', N'en', N'Returned', 1)
+    ,(N'editAssign.ownerOnly', N'en', N'Owner only', 1)
+    ,(N'editAssign.inactive', N'en', N'(disabled)', 1)
+    ,(N'editAssign.returnedWith', N'en', N'Returned: {reason}', 1)
+    ,(N'editAssign.sliceAll', N'en', N'Whole document', 1)
+    ,(N'editAssign.sliceSheet', N'en', N'sheet {sheet}', 1)
+    ,(N'editAssign.sliceTable', N'en', N'table {table}', 1)
+    ,(N'editAssign.assign', N'en', N'Assign month…', 1)
+    ,(N'editAssign.repeatNext', N'en', N'Repeat for next month', 1)
+    ,(N'editAssign.validate', N'en', N'Validate', 1)
+    ,(N'editAssign.return', N'en', N'Return…', 1)
+    ,(N'editAssign.edit', N'en', N'Edit', 1)
+    ,(N'editAssign.remove', N'en', N'Remove', 1)
+    ,(N'editAssign.returnTitle', N'en', N'Return {slice} for rework', 1)
+    ,(N'editAssign.returnReason', N'en', N'What needs to be fixed', 1)
+    ,(N'editAssign.removeTitle', N'en', N'Take {slice} back from the executors?', 1)
+    ,(N'editAssign.removeText', N'en', N'Executors will no longer be able to edit these cells. Values already entered stay in the document.', 1)
+    ,(N'editAssign.empty', N'en', N'Nothing is handed over yet', 1)
+    ,(N'editAssign.emptyHint', N'en', N'Use “Assign month…” to hand a month to someone to fill in.', 1)
+    ,(N'editAssign.done.assigned', N'en', N'Assigned months: {count}', 1)
+    ,(N'editAssign.done.validated', N'en', N'{slice} validated', 1)
+    ,(N'editAssign.done.returned', N'en', N'{slice} returned for rework', 1)
+    ,(N'editAssign.done.removed', N'en', N'{slice} taken back', 1)
+    ,(N'editAssign.done.repeated', N'en', N'Repeated for {month}', 1)
+    ,(N'editAssign.wizard.title', N'en', N'Assign month', 1)
+    ,(N'editAssign.wizard.step.what', N'en', N'What', 1)
+    ,(N'editAssign.wizard.step.who', N'en', N'To whom', 1)
+    ,(N'editAssign.wizard.months', N'en', N'Months to hand over', 1)
+    ,(N'editAssign.wizard.replaces', N'en', N'Already assigned, the executors will be replaced: {months}', 1)
+    ,(N'editAssign.wizard.onlySheet', N'en', N'Only sheet (optional)', 1)
+    ,(N'editAssign.wizard.onlySheetHint', N'en', N'Leave empty to hand over the month on all sheets.', 1)
+    ,(N'editAssign.wizard.set', N'en', N'Saved set of executors', 1)
+    ,(N'editAssign.wizard.setNone', N'en', N'No set', 1)
+    ,(N'editAssign.wizard.search', N'en', N'Find people', 1)
+    ,(N'editAssign.wizard.searchHint', N'en', N'At least 2 characters', 1)
+    ,(N'editAssign.wizard.found', N'en', N'Found people', 1)
+    ,(N'editAssign.wizard.picked', N'en', N'Chosen executors', 1)
+    ,(N'editAssign.wizard.removeUser', N'en', N'Remove {name}', 1)
+    ,(N'editAssign.wizard.saveAsSet', N'en', N'Save as set', 1)
+    ,(N'editAssign.wizard.setName', N'en', N'Set name', 1)
+    ,(N'editAssign.wizard.note', N'en', N'Note for executors (optional)', 1)
+    ,(N'editAssign.wizard.noRecipients', N'en', N'Choose at least one executor or a saved set.', 1)
+    ,(N'editAssign.wizard.noSetName', N'en', N'Enter a name for the set.', 1)
+    ,(N'editAssign.wizard.reviewText', N'en', N'Check the hand-over before applying.', 1)
+    ,(N'editAssign.wizard.apply', N'en', N'Assign', 1)
+    ,(N'editAssign.wizard.summary.months', N'en', N'Months', 1)
+    ,(N'editAssign.wizard.summary.sheet', N'en', N'Only sheet', 1)
+    ,(N'editAssign.wizard.summary.fromSet', N'en', N'From set “{name}”', 1)
+    ,(N'editAssign.wizard.summary.exclusive', N'en', N'Others cannot edit these cells until the month is validated or taken back.', 1)
+    ,(N'editAssign.wizard.summary.shared', N'en', N'Others with editing rights by role can still edit these cells.', 1)
+    ,(N'editAssign.wizard.alsoOthers', N'en', N'Also allow others by role', 1)
+    ,(N'editAssign.validateTitle', N'en', N'Validate {slice}?', 1)
+    ,(N'editAssign.validateText', N'en', N'All executors have marked this month as filled.', 1)
+    ,(N'editAssign.validateConsequence', N'en', N'Executors stay locked out of editing. You can still return the month with a comment.', 1)
+    ,(N'editAssign.returnHint', N'en', N'Say what has to be corrected: the executors ({names}) see this text. Up to {max} characters.', 1)
+    ,(N'editAssign.returnConfirm', N'en', N'Return', 1)
+    -- EDA:ea5a ── кінець секції ──
+    -- COLL:ea-b-deny ── EA-B: причини відмови запису від «передачі місяця» (LockedByOwner/AssignmentFilled/AssignmentValidated); без імен інших людей (R9); ru/kz — порцією COLL:ea-b-deny нижче ──
+    ,(N'deny.LockedByOwner', N'en', N'The document owner handed this part to assigned users. Until the handover is validated or removed, only the owner and those users can edit it.', 1)
+    ,(N'deny.AssignmentFilled', N'en', N'You marked this part as filled, so it is closed for you. You can edit it again only if the owner returns it for rework.', 1)
+    ,(N'deny.AssignmentValidated', N'en', N'The owner validated this part, so it is closed for editing. Ask the owner to return it if a correction is needed.', 1)
+    ,(N'deny.AssignmentExpired', N'en', N'The handover period for this part has expired, so it is closed for you. Ask the owner to extend or renew the handover.', 1)
+    -- COLL:ea-b-deny ── кінець секції ──
+    -- FP:fixes ── прохід «від першого обличчя» 2026-10-11 (P2/P3): тексти en; ru/kz — порцією FP:fixes нижче ──
+    ,(N'documents.noProjects', N'en', N'You have no access to any project', 1)
+    ,(N'documents.noProjectsHint', N'en', N'Documents are shown per project, and your account has not been granted access to any project yet. Ask an administrator to grant you access; "My groups" shows which roles you have.', 1)
+    ,(N'methodologies.emptyDraftWarning', N'en', N'An empty draft has no formulas, constants, rules or outputs: nothing is copied. To change an existing version, choose it in "Copy from".', 1)
+    ,(N'err.ECR-REG-0422.entriesCsvNoFields', N'en', N'Registry "{registryCode}" has no fields yet, so column "{column}" cannot be imported. Add the fields in the registry constructor and publish it first: the file columns are field codes, plus "code".', 1)
+    ,(N'password.changed', N'en', N'Password changed. Use the new password the next time you sign in.', 1)
+    ,(N'registryAudit.entryValidityRescanned', N'en', N'Rows recalculated: {count}.', 1)
+    ,(N'jobs.kind.archive', N'en', N'Year archiving', 1)
+    ,(N'jobs.kind.notification', N'en', N'Notification delivery', 1)
+    ,(N'jobs.kind.partitionCheck', N'en', N'Partition reserve check', 1)
+    ,(N'jobs.kind.periodState', N'en', N'Period state update', 1)
+    ,(N'jobs.kind.registrySync', N'en', N'Registry sync from source', 1)
+    ,(N'jobs.kind.reportRetention', N'en', N'Report snapshot retention', 1)
+    ,(N'jobs.kind.reportSnapshotFormat', N'en', N'Report snapshot format upgrade', 1)
+    ,(N'jobs.kind.rowWindowRefetch', N'en', N'Row window refetch', 1)
+    -- FP:fixes ── кінець секції ──
+    -- COLL:rc20rule ── R16-4: правило категорії - єдиний код ECR-CALC-0422 для @Nope, CST.X, !X; ru/kz - порцією COLL:rc20rule нижче ──
+    ,(N'err.ECR-CALC-0422.categoryRuleUnknownArgument', N'en', N'The category rule uses argument(s) {arguments}, which have no matching column in {tableCount} bound table(s): the rule runs on a row of that table, so the argument would always be empty.', 1)
+    -- COLL:rc20rule ── кінець секції ──
+    -- COLL:ea-api ── EA-C: передача місяця виконавцям (керування, переходи, відмови); ru/kz — порцією COLL:ea-api нижче ──
+    ,(N'err.ECR-ACCS-0403.notEditAssignmentManager', N'en', N'Only the document author or a project manager can manage month assignments.', 1)
+    ,(N'err.ECR-ACCS-0403.editAssignmentReadOnly', N'en', N'The document is read-only now (archive or simulation).', 1)
+    ,(N'err.ECR-DOC-0409.editAssignmentStale', N'en', N'The assignment was changed after you opened it. Reload and repeat the action.', 1)
+    ,(N'err.ECR-DOC-0409.editAssignmentState', N'en', N'This action is not possible in the current state of the assignment.', 1)
+    ,(N'err.ECR-REQ-0422.editAssignmentBaseVersion', N'en', N'The request must say which version of the assignment it started from (baseVersion).', 1)
+    ,(N'err.ECR-REQ-0422.editAssignmentSliceInvalid', N'en', N'The assignment slice is not valid.', 1)
+    ,(N'err.ECR-REQ-0422.editAssignmentNoteTooLong', N'en', N'The instruction is longer than 500 characters.', 1)
+    ,(N'err.ECR-REQ-0422.editAssignmentRecipientInvalid', N'en', N'One of the executors cannot be assigned to this document.', 1)
+    ,(N'err.ECR-REQ-0422.editAssignmentTooManyRecipients', N'en', N'Too many executors in one assignment.', 1)
+    ,(N'err.ECR-REQ-0422.editAssignmentDelegationExceedsOwnRights', N'en', N'You can assign only cells you can edit yourself. Narrow the slice to sheets you can write.', 1)
+    ,(N'err.ECR-REQ-0422.editAssignmentUnknownSlice', N'en', N'The document has no such slice.', 1)
+    ,(N'err.ECR-REQ-0422.editAssignmentTooManyAssignments', N'en', N'Too many assignments in the document.', 1)
+    ,(N'err.ECR-REQ-0422.editAssignmentNotAllFilled', N'en', N'Validation is possible only after all executors have filled the slice.', 1)
+    ,(N'err.ECR-REQ-0422.editAssignmentReasonRequired', N'en', N'State the reason for returning.', 1)
+    ,(N'err.ECR-REQ-0422.editAssignmentReasonTooLong', N'en', N'The reason is longer than 500 characters.', 1)
+    ,(N'err.ECR-REQ-0422.editAssignmentQueryTooShort', N'en', N'Enter at least two characters to search.', 1)
+    ,(N'err.ECR-REQ-0422.editAssignmentRoleInvalid', N'en', N'Unknown role filter.', 1)
+    ,(N'err.ECR-DOC-0409.editorSetStale', N'en', N'The executor set was changed after you opened it. Reload and repeat the action.', 1)
+    ,(N'err.ECR-REQ-0422.editorSetNotFound', N'en', N'The executor set was not found.', 1)
+    ,(N'err.ECR-REQ-0422.editorSetTooMany', N'en', N'Too many executor sets.', 1)
+    ,(N'err.ECR-REQ-0422.editorSetNameTaken', N'en', N'A set with this name already exists.', 1)
+    ,(N'err.ECR-REQ-0422.editorSetNameInvalid', N'en', N'The set name must be 1 to 100 characters without control characters.', 1)
+    ,(N'err.ECR-REQ-0422.editorSetTooManyMembers', N'en', N'Too many executors in the set.', 1)
+    ,(N'err.ECR-REQ-0422.editorSetMemberInvalid', N'en', N'One of the executors cannot be added to the set.', 1)
+    ,(N'err.ECR-REQ-0422.editorSetBaseVersion', N'en', N'The request must say which version of the set it started from (baseVersion).', 1)
+    ,(N'err.ECR-REQ-0422.editAssignmentTooManySlices', N'en', N'Specify from 1 to 12 slices per request.', 1)
+    ,(N'err.ECR-DOC-0404.editorSet', N'en', N'The executor set was not found.', 1)
+    ,(N'err.ECR-DOC-0404.editAssignment', N'en', N'The assignment was not found.', 1)
+    ,(N'err.ECR-DOC-4091.editAssignmentBusy', N'en', N'The assignment is busy with another action. Nothing was saved; try again in a moment.', 1)
+    ,(N'err.ECR-ACCS-0403.editorSetsForbidden', N'en', N'Executor sets are available to users who can write to a project.', 1)
+    -- COLL:ea-api ── кінець секції ──
+    -- COLL:rpt-version-race ── гонка двох створень версії звіту (UQ_ReportVersion) -> 409; ru/kz - порцією COLL:rpt-version-race нижче ──
+    ,(N'err.ECR-RPT-4091.versionConcurrent', N'en', N'Someone else has just created a version with this number in this report definition. Reload the definition and pick another version number.', 1)
+    -- COLL:rpt-version-race ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -14578,6 +14831,29 @@ OPTION (RECOMPILE);
 GO
 -- DOC:migrate-version ── кінець секції ──
 
+-- EDA:executor-strip ── ru/kz смуги виконавця (EA-5b); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'editAssign.bar.assigned', N'ru', N'Месяц передан вам: {slice}'),
+    (N'editAssign.bar.assigned', N'kz', N'Ай сізге берілді: {slice}'),
+    (N'editAssign.bar.returned', N'ru', N'{slice} возвращён владельцем: {reason}'),
+    (N'editAssign.bar.returned', N'kz', N'{slice} иесі қайтарды: {reason}'),
+    (N'editAssign.bar.returnedNoReason', N'ru', N'{slice} возвращён владельцем'),
+    (N'editAssign.bar.returnedNoReason', N'kz', N'{slice} иесі қайтарды'),
+    (N'editAssign.bar.filled', N'ru', N'{slice}: заполнено, ожидает валидации владельцем'),
+    (N'editAssign.bar.filled', N'kz', N'{slice}: толтырылды, иесінің валидациясын күтуде'),
+    (N'editAssign.bar.markFilled', N'ru', N'Отметить заполненным'),
+    (N'editAssign.bar.markFilled', N'kz', N'Толтырылды деп белгілеу'),
+    (N'editAssign.bar.confirmFill', N'ru', N'После этого вы не сможете править {slice}, пока владелец не вернёт его на доработку.'),
+    (N'editAssign.bar.confirmFill', N'kz', N'Осыдан кейін иесі қайтармайынша {slice} өзгерту мүмкін болмайды.'),
+    (N'editAssign.bar.note', N'ru', N'Примечание владельца: {note}'),
+    (N'editAssign.bar.note', N'kz', N'Иесінің ескертпесі: {note}')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- EDA:executor-strip ── кінець секції ──
+
 -- MIMP ── ru/kz імпорту пакета методологій; власна порція ──
 INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val
@@ -18286,6 +18562,36 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:stale-mytasks ── кінець секції ──
+-- EDA-5c:mytasks ── ru/kz секцій передач у My tasks; власна порція
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'myTasks.assignToFill', N'ru', N'Переданы мне'),
+    (N'myTasks.assignToFill', N'kz', N'Маған берілген'),
+    (N'myTasks.awaitingValidation', N'ru', N'Ожидают моей валидации'),
+    (N'myTasks.awaitingValidation', N'kz', N'Менің валидациямды күтуде'),
+    (N'myTasks.edit.error', N'ru', N'Не удалось загрузить переданные вам месяцы.'),
+    (N'myTasks.edit.error', N'kz', N'Сізге берілген айларды жүктеу мүмкін болмады.'),
+    (N'myTasks.edit.filledAt', N'ru', N'Заполнено {date}'),
+    (N'myTasks.edit.filledAt', N'kz', N'Толтырылған күні: {date}'),
+    (N'myTasks.edit.returnedBy', N'ru', N'Возвращено владельцем: {reason}'),
+    (N'myTasks.edit.returnedBy', N'kz', N'Иесі қайтарды: {reason}'),
+    (N'myTasks.edit.validate', N'ru', N'Валидировать…'),
+    (N'myTasks.edit.validate', N'kz', N'Валидациялау…'),
+    (N'myTasks.edit.open', N'ru', N'Открыть'),
+    (N'myTasks.edit.open', N'kz', N'Ашу'),
+    (N'myTasks.edit.pendingBadge', N'ru', N'Месяцев, требующих вашего действия: {n}'),
+    (N'myTasks.edit.pendingBadge', N'kz', N'Сіздің әрекетіңізді қажет ететін айлар: {n}'),
+    (N'myTasks.edit.status.Assigned', N'ru', N'Передано'),
+    (N'myTasks.edit.status.Assigned', N'kz', N'Берілген'),
+    (N'myTasks.edit.status.Filled', N'ru', N'Заполнено, ждёт валидации'),
+    (N'myTasks.edit.status.Filled', N'kz', N'Толтырылған, валидацияны күтуде'),
+    (N'myTasks.edit.status.Returned', N'ru', N'Возвращено на доработку'),
+    (N'myTasks.edit.status.Returned', N'kz', N'Пысықтауға қайтарылған')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- EDA-5c:mytasks ── кінець секції ──
 -- COLL:rc16lookup ── ru/kz: ціль Lookup-колонки/поля шапки - живий активний довідник; власна порція
 INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val
@@ -18343,6 +18649,44 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:rc16rule ── кінець секції ──
+-- COLL:rc16mig ── ru/kz D-2 RC15B: перенос версії шаблону фоновою задачею; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'jobs.kind.migrateDocumentVersion', N'ru', N'Перенос на версию шаблона'),
+    (N'jobs.kind.migrateDocumentVersion', N'kz', N'Үлгі нұсқасына көшіру'),
+    (N'jobs.migrateStarted', N'ru', N'Перенос запущен'),
+    (N'jobs.migrateStarted', N'kz', N'Көшіру басталды'),
+    (N'jobs.migratePlanning', N'ru', N'Проверка проекта и планирование переноса'),
+    (N'jobs.migratePlanning', N'kz', N'Жобаны тексеру және көшіруді жоспарлау'),
+    (N'jobs.migrateCells', N'ru', N'Перенос значений ячеек и строк (изменено строк: {rows})'),
+    (N'jobs.migrateCells', N'kz', N'Ұяшық мәндері мен жолдарды көшіру (өзгертілген жолдар: {rows})'),
+    (N'jobs.migrateInstances', N'ru', N'Перенос экземпляров таблиц'),
+    (N'jobs.migrateInstances', N'kz', N'Кесте даналарын көшіру'),
+    (N'jobs.migrateNewRows', N'ru', N'Добавление новых строк целевой версии (добавлено: {rows})'),
+    (N'jobs.migrateNewRows', N'kz', N'Мақсатты нұсқаның жаңа жолдарын қосу (қосылған: {rows})'),
+    (N'jobs.migrateHeader', N'ru', N'Перенос шапок документов'),
+    (N'jobs.migrateHeader', N'kz', N'Құжат тақырыптарын көшіру'),
+    (N'jobs.migrateIndex', N'ru', N'Перестроение индекса поиска (строк: {rows})'),
+    (N'jobs.migrateIndex', N'kz', N'Іздеу индексін қайта құру (жолдар: {rows})'),
+    (N'jobs.migrateWorkflow', N'ru', N'Перенос состава документов и рабочего процесса'),
+    (N'jobs.migrateWorkflow', N'kz', N'Құжат құрамы мен жұмыс үдерісін көшіру'),
+    (N'jobs.migrateValidation', N'ru', N'Перенос результатов проверки (строк: {rows})'),
+    (N'jobs.migrateValidation', N'kz', N'Тексеру нәтижелерін көшіру (жолдар: {rows})'),
+    (N'jobs.migrateFinish', N'ru', N'Переключение проекта на новую версию'),
+    (N'jobs.migrateFinish', N'kz', N'Жобаны жаңа нұсқаға ауыстыру'),
+    (N'jobs.migrateDone', N'ru', N'Перенос на версию {version} завершён: документов {documents}, перенесено значений {values}'),
+    (N'jobs.migrateDone', N'kz', N'{version} нұсқасына көшіру аяқталды: құжаттар {documents}, көшірілген мәндер {values}'),
+    (N'err.ECR-JOB-0409.migrationInProgress', N'ru', N'Перенос этого проекта уже выполняется (запущен другим пользователем). Дождитесь завершения.'),
+    (N'err.ECR-JOB-0409.migrationInProgress', N'kz', N'Бұл жобаны көшіру қазірдің өзінде орындалуда (басқа пайдаланушы бастаған). Аяқталуын күтіңіз.'),
+    (N'documents.migrateRunning', N'ru', N'Перенос выполняется в фоне: {percent}%. Окно можно закрыть; ход переноса остаётся в «Моих задачах».'),
+    (N'documents.migrateRunning', N'kz', N'Көшіру фонда орындалуда: {percent}%. Терезені жабуға болады; барысы «Менің тапсырмаларымда» қалады.'),
+    (N'documents.migrateJobFailed', N'ru', N'Перенос не завершён, ничего не изменено: {reason}'),
+    (N'documents.migrateJobFailed', N'kz', N'Көшіру аяқталмады, ештеңе өзгертілмеді: {reason}')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:rc16mig ── кінець секції ──
 
 -- COLL:an77-recalc ── ru/kz: перерахунок усього документа без повного читання; перерахунок на поданому аркуші; власна порція
 INSERT INTO #I18N ([Key], Lang, Val)
@@ -18866,6 +19210,484 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:r11l6-target-hidden ── кінець секції ──
+-- COLL:quota-verify-validate ── ru/kz: L1-05/P1-08: межа частоти перевірки зрізу й документа; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-REQ-0429.tooManyVerifications', N'ru', N'Слишком много запросов на проверку среза за короткое время. Подождите немного и повторите попытку.'),
+    (N'err.ECR-REQ-0429.tooManyVerifications', N'kz', N'Қысқа уақыт ішінде кесіндіні тексеруге сұраныстар тым көп. Біраз күтіп, қайталап көріңіз.'),
+    (N'err.ECR-REQ-0429.tooManyValidations', N'ru', N'Слишком много запросов на проверку документа за короткое время. Подождите немного и повторите попытку.'),
+    (N'err.ECR-REQ-0429.tooManyValidations', N'kz', N'Қысқа уақыт ішінде құжатты тексеруге сұраныстар тым көп. Біраз күтіп, қайталап көріңіз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:quota-verify-validate ── кінець секції ──
+-- EDA:ea5a ── ru/kz: EA-5a: шторка «Доступ до редагування»; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'editAssign.menu', N'ru', N'Доступ к редактированию'),
+    (N'editAssign.menu', N'kz', N'Өңдеу рұқсаты'),
+    (N'editAssign.title', N'ru', N'Доступ к редактированию'),
+    (N'editAssign.title', N'kz', N'Өңдеу рұқсаты'),
+    (N'editAssign.close', N'ru', N'Закрыть панель доступа к редактированию'),
+    (N'editAssign.close', N'kz', N'Өңдеу рұқсаты панелін жабу'),
+    (N'editAssign.hint', N'ru', N'Передайте месяц исполнителю на заполнение, затем проверьте его.'),
+    (N'editAssign.hint', N'kz', N'Айды толтыру үшін орындаушыға беріңіз, содан кейін растаңыз.'),
+    (N'editAssign.owner', N'ru', N'Владелец: {name}'),
+    (N'editAssign.owner', N'kz', N'Иесі: {name}'),
+    (N'editAssign.awaiting', N'ru', N'Ожидают проверки: {count}'),
+    (N'editAssign.awaiting', N'kz', N'Растауды күтуде: {count}'),
+    (N'editAssign.view', N'ru', N'Вид'),
+    (N'editAssign.view', N'kz', N'Көрініс'),
+    (N'editAssign.view.months', N'ru', N'Месяцы'),
+    (N'editAssign.view.months', N'kz', N'Айлар'),
+    (N'editAssign.view.people', N'ru', N'Люди'),
+    (N'editAssign.view.people', N'kz', N'Адамдар'),
+    (N'editAssign.col.slice', N'ru', N'Месяц'),
+    (N'editAssign.col.slice', N'kz', N'Ай'),
+    (N'editAssign.col.executors', N'ru', N'Исполнители'),
+    (N'editAssign.col.executors', N'kz', N'Орындаушылар'),
+    (N'editAssign.col.status', N'ru', N'Статус'),
+    (N'editAssign.col.status', N'kz', N'Күйі'),
+    (N'editAssign.col.actions', N'ru', N'Действия'),
+    (N'editAssign.col.actions', N'kz', N'Әрекеттер'),
+    (N'editAssign.col.person', N'ru', N'Человек'),
+    (N'editAssign.col.person', N'kz', N'Адам'),
+    (N'editAssign.rowActions', N'ru', N'Действия для {slice}'),
+    (N'editAssign.rowActions', N'kz', N'{slice} үшін әрекеттер'),
+    (N'editAssign.status.Open', N'ru', N'Только владелец'),
+    (N'editAssign.status.Open', N'kz', N'Тек иесі'),
+    (N'editAssign.status.Assigned', N'ru', N'Передано'),
+    (N'editAssign.status.Assigned', N'kz', N'Берілді'),
+    (N'editAssign.status.InProgress', N'ru', N'В работе'),
+    (N'editAssign.status.InProgress', N'kz', N'Орындалуда'),
+    (N'editAssign.status.Filled', N'ru', N'Заполнено, ждёт проверки'),
+    (N'editAssign.status.Filled', N'kz', N'Толтырылды, растауды күтуде'),
+    (N'editAssign.status.Validated', N'ru', N'Проверено'),
+    (N'editAssign.status.Validated', N'kz', N'Расталды'),
+    (N'editAssign.status.Returned', N'ru', N'Возвращено'),
+    (N'editAssign.status.Returned', N'kz', N'Қайтарылды'),
+    (N'editAssign.ownerOnly', N'ru', N'Только владелец'),
+    (N'editAssign.ownerOnly', N'kz', N'Тек иесі'),
+    (N'editAssign.inactive', N'ru', N'(отключён)'),
+    (N'editAssign.inactive', N'kz', N'(өшірулі)'),
+    (N'editAssign.returnedWith', N'ru', N'Возвращено: {reason}'),
+    (N'editAssign.returnedWith', N'kz', N'Қайтарылды: {reason}'),
+    (N'editAssign.sliceAll', N'ru', N'Весь документ'),
+    (N'editAssign.sliceAll', N'kz', N'Бүкіл құжат'),
+    (N'editAssign.sliceSheet', N'ru', N'лист {sheet}'),
+    (N'editAssign.sliceSheet', N'kz', N'{sheet} парағы'),
+    (N'editAssign.sliceTable', N'ru', N'таблица {table}'),
+    (N'editAssign.sliceTable', N'kz', N'{table} кестесі'),
+    (N'editAssign.assign', N'ru', N'Передать месяц…'),
+    (N'editAssign.assign', N'kz', N'Айды беру…'),
+    (N'editAssign.repeatNext', N'ru', N'Повторить на следующий месяц'),
+    (N'editAssign.repeatNext', N'kz', N'Келесі айға қайталау'),
+    (N'editAssign.validate', N'ru', N'Проверить'),
+    (N'editAssign.validate', N'kz', N'Растау'),
+    (N'editAssign.return', N'ru', N'Вернуть…'),
+    (N'editAssign.return', N'kz', N'Қайтару…'),
+    (N'editAssign.edit', N'ru', N'Изменить'),
+    (N'editAssign.edit', N'kz', N'Өзгерту'),
+    (N'editAssign.remove', N'ru', N'Снять передачу'),
+    (N'editAssign.remove', N'kz', N'Беруді алу'),
+    (N'editAssign.returnTitle', N'ru', N'Вернуть {slice} на доработку'),
+    (N'editAssign.returnTitle', N'kz', N'{slice} кезеңін пысықтауға қайтару'),
+    (N'editAssign.returnReason', N'ru', N'Что нужно исправить'),
+    (N'editAssign.returnReason', N'kz', N'Не түзету керек'),
+    (N'editAssign.removeTitle', N'ru', N'Забрать {slice} у исполнителей?'),
+    (N'editAssign.removeTitle', N'kz', N'{slice} кезеңін орындаушылардан қайтарып алу керек пе?'),
+    (N'editAssign.removeText', N'ru', N'Исполнители больше не смогут редактировать эти ячейки. Уже введённые значения останутся в документе.'),
+    (N'editAssign.removeText', N'kz', N'Орындаушылар бұл ұяшықтарды енді өңдей алмайды. Енгізілген мәндер құжатта қалады.'),
+    (N'editAssign.empty', N'ru', N'Пока ничего не передано'),
+    (N'editAssign.empty', N'kz', N'Әзірге ештеңе берілмеген'),
+    (N'editAssign.emptyHint', N'ru', N'Нажмите «Передать месяц…», чтобы передать месяц на заполнение.'),
+    (N'editAssign.emptyHint', N'kz', N'Айды толтыруға беру үшін «Айды беру…» батырмасын басыңыз.'),
+    (N'editAssign.done.assigned', N'ru', N'Передано месяцев: {count}'),
+    (N'editAssign.done.assigned', N'kz', N'Берілген айлар: {count}'),
+    (N'editAssign.done.validated', N'ru', N'{slice}: проверено'),
+    (N'editAssign.done.validated', N'kz', N'{slice}: расталды'),
+    (N'editAssign.done.returned', N'ru', N'{slice} возвращено на доработку'),
+    (N'editAssign.done.returned', N'kz', N'{slice} пысықтауға қайтарылды'),
+    (N'editAssign.done.removed', N'ru', N'{slice} забрано у исполнителей'),
+    (N'editAssign.done.removed', N'kz', N'{slice} қайтарып алынды'),
+    (N'editAssign.done.repeated', N'ru', N'Повторено на {month}'),
+    (N'editAssign.done.repeated', N'kz', N'{month} үшін қайталанды'),
+    (N'editAssign.wizard.title', N'ru', N'Передача месяца'),
+    (N'editAssign.wizard.title', N'kz', N'Айды беру'),
+    (N'editAssign.wizard.step.what', N'ru', N'Что'),
+    (N'editAssign.wizard.step.what', N'kz', N'Не'),
+    (N'editAssign.wizard.step.who', N'ru', N'Кому'),
+    (N'editAssign.wizard.step.who', N'kz', N'Кімге'),
+    (N'editAssign.wizard.months', N'ru', N'Месяцы для передачи'),
+    (N'editAssign.wizard.months', N'kz', N'Берілетін айлар'),
+    (N'editAssign.wizard.replaces', N'ru', N'Уже переданы, состав исполнителей будет заменён: {months}'),
+    (N'editAssign.wizard.replaces', N'kz', N'Бұрын берілген, орындаушылар құрамы ауыстырылады: {months}'),
+    (N'editAssign.wizard.onlySheet', N'ru', N'Только лист (необязательно)'),
+    (N'editAssign.wizard.onlySheet', N'kz', N'Тек парақ (міндетті емес)'),
+    (N'editAssign.wizard.onlySheetHint', N'ru', N'Оставьте пустым, чтобы передать месяц на всех листах.'),
+    (N'editAssign.wizard.onlySheetHint', N'kz', N'Айды барлық парақтар бойынша беру үшін бос қалдырыңыз.'),
+    (N'editAssign.wizard.set', N'ru', N'Сохранённый набор исполнителей'),
+    (N'editAssign.wizard.set', N'kz', N'Орындаушылардың сақталған жинағы'),
+    (N'editAssign.wizard.setNone', N'ru', N'Без набора'),
+    (N'editAssign.wizard.setNone', N'kz', N'Жинақсыз'),
+    (N'editAssign.wizard.search', N'ru', N'Найти людей'),
+    (N'editAssign.wizard.search', N'kz', N'Адамдарды іздеу'),
+    (N'editAssign.wizard.searchHint', N'ru', N'Не меньше 2 символов'),
+    (N'editAssign.wizard.searchHint', N'kz', N'Кемінде 2 таңба'),
+    (N'editAssign.wizard.found', N'ru', N'Найденные люди'),
+    (N'editAssign.wizard.found', N'kz', N'Табылған адамдар'),
+    (N'editAssign.wizard.picked', N'ru', N'Выбранные исполнители'),
+    (N'editAssign.wizard.picked', N'kz', N'Таңдалған орындаушылар'),
+    (N'editAssign.wizard.removeUser', N'ru', N'Убрать {name}'),
+    (N'editAssign.wizard.removeUser', N'kz', N'{name} алып тастау'),
+    (N'editAssign.wizard.saveAsSet', N'ru', N'Сохранить как набор'),
+    (N'editAssign.wizard.saveAsSet', N'kz', N'Жинақ ретінде сақтау'),
+    (N'editAssign.wizard.setName', N'ru', N'Название набора'),
+    (N'editAssign.wizard.setName', N'kz', N'Жинақ атауы'),
+    (N'editAssign.wizard.note', N'ru', N'Заметка для исполнителей (необязательно)'),
+    (N'editAssign.wizard.note', N'kz', N'Орындаушыларға ескертпе (міндетті емес)'),
+    (N'editAssign.wizard.noRecipients', N'ru', N'Выберите хотя бы одного исполнителя или набор.'),
+    (N'editAssign.wizard.noRecipients', N'kz', N'Кемінде бір орындаушыны немесе жинақты таңдаңыз.'),
+    (N'editAssign.wizard.noSetName', N'ru', N'Введите название набора.'),
+    (N'editAssign.wizard.noSetName', N'kz', N'Жинақ атауын енгізіңіз.'),
+    (N'editAssign.wizard.reviewText', N'ru', N'Проверьте передачу перед применением.'),
+    (N'editAssign.wizard.reviewText', N'kz', N'Қолданар алдында беруді тексеріңіз.'),
+    (N'editAssign.wizard.apply', N'ru', N'Передать'),
+    (N'editAssign.wizard.apply', N'kz', N'Беру'),
+    (N'editAssign.wizard.summary.months', N'ru', N'Месяцы'),
+    (N'editAssign.wizard.summary.months', N'kz', N'Айлар'),
+    (N'editAssign.wizard.summary.sheet', N'ru', N'Только лист'),
+    (N'editAssign.wizard.summary.sheet', N'kz', N'Тек парақ'),
+    (N'editAssign.wizard.summary.fromSet', N'ru', N'Из набора «{name}»'),
+    (N'editAssign.wizard.summary.fromSet', N'kz', N'«{name}» жинағынан'),
+    (N'editAssign.wizard.summary.exclusive', N'ru', N'Остальные не смогут редактировать эти ячейки, пока месяц не проверен или не забран.'),
+    (N'editAssign.wizard.summary.exclusive', N'kz', N'Ай расталмайынша немесе қайтарып алынбайынша, басқалар бұл ұяшықтарды өңдей алмайды.'),
+    (N'editAssign.wizard.summary.shared', N'ru', N'Остальные с правом редактирования по роли тоже смогут их редактировать.'),
+    (N'editAssign.wizard.summary.shared', N'kz', N'Рөл бойынша өңдеу құқығы бар басқалар да оларды өңдей алады.'),
+    (N'editAssign.wizard.alsoOthers', N'ru', N'Разрешить и остальным по ролям'),
+    (N'editAssign.wizard.alsoOthers', N'kz', N'Рөл бойынша басқаларға да рұқсат ету'),
+    (N'editAssign.validateTitle', N'ru', N'Валидировать {slice}?'),
+    (N'editAssign.validateTitle', N'kz', N'{slice} валидациялау керек пе?'),
+    (N'editAssign.validateText', N'ru', N'Все исполнители отметили этот месяц как заполненный.'),
+    (N'editAssign.validateText', N'kz', N'Барлық орындаушылар бұл айды толтырылған деп белгіледі.'),
+    (N'editAssign.validateConsequence', N'ru', N'Исполнители остаются без права правки. Месяц можно будет вернуть с комментарием.'),
+    (N'editAssign.validateConsequence', N'kz', N'Орындаушылар өңдей алмай қалады. Айды кейін пікірмен қайтаруға болады.'),
+    (N'editAssign.returnHint', N'ru', N'Укажите, что нужно исправить: исполнители ({names}) увидят этот текст. Не более {max} символов.'),
+    (N'editAssign.returnHint', N'kz', N'Нені түзету керектігін көрсетіңіз: орындаушылар ({names}) осы мәтінді көреді. {max} таңбадан аспауы керек.'),
+    (N'editAssign.returnConfirm', N'ru', N'Вернуть'),
+    (N'editAssign.returnConfirm', N'kz', N'Қайтару')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- EDA:ea5a ── кінець секції ──
+-- COLL:ea-b-deny ── ru/kz: EA-B: причини відмови запису від «передачі місяця»; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'deny.LockedByOwner', N'ru', N'Владелец документа передал эту часть назначенным пользователям. Пока передача не валидирована или не снята, править её могут только владелец и эти пользователи.'),
+    (N'deny.LockedByOwner', N'kz', N'Құжат иесі бұл бөлікті тағайындалған пайдаланушыларға тапсырды. Тапсыру расталмайынша немесе алынбайынша, оны тек иесі мен осы пайдаланушылар өзгерте алады.'),
+    (N'deny.AssignmentFilled', N'ru', N'Вы отметили эту часть как заполненную, поэтому для вас она закрыта. Править её снова можно, только если владелец вернёт её на доработку.'),
+    (N'deny.AssignmentFilled', N'kz', N'Сіз бұл бөлікті толтырылды деп белгілегенсіз, сондықтан ол сіз үшін жабық. Оны қайта түзету үшін иесі қайта өңдеуге қайтаруы керек.'),
+    (N'deny.AssignmentValidated', N'ru', N'Владелец валидировал эту часть, поэтому она закрыта для правок. Если нужно исправление, попросите владельца вернуть её.'),
+    (N'deny.AssignmentValidated', N'kz', N'Иесі бұл бөлікті растады, сондықтан ол түзетуге жабық. Түзету қажет болса, иесінен оны қайтаруды сұраңыз.'),
+    (N'deny.AssignmentExpired', N'ru', N'Срок передачи этой части истёк, поэтому для вас она закрыта. Попросите владельца продлить или повторить передачу.'),
+    (N'deny.AssignmentExpired', N'kz', N'Бұл бөлікті тапсыру мерзімі аяқталды, сондықтан ол сіз үшін жабық. Иесінен тапсыруды ұзартуды немесе қайталауды сұраңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:ea-b-deny ── кінець секції ──
+
+-- COLL:rpt-version-duplicate ── ru/kz: повторний номер версії опису звіту (ECR-RPT-4091.version); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-RPT-4091.version', N'ru', N'Версия «{version}» в этом описании отчёта уже есть: номер версии должен быть уникальным.'),
+    (N'err.ECR-RPT-4091.version', N'kz', N'«{version}» нұсқасы бұл есеп анықтамасында бұрыннан бар: нұсқа нөмірі бірегей болуы тиіс.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:rpt-version-duplicate ── кінець секції ──
+-- COLL:rc20lookup ── ru/kz R16-1: Lookup-колонка/поле шапки без довідника; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-TMPL-0422.lookupRegistryRequired', N'ru', N'Столбец «{columnCode}» имеет тип «Выбор из справочника» и требует справочник: выберите его.'),
+    (N'err.ECR-TMPL-0422.lookupRegistryRequired', N'kz', N'«{columnCode}» бағаны «Анықтамалықтан таңдау» түрінде және анықтамалықты қажет етеді: оны таңдаңыз.'),
+    (N'err.ECR-TMPL-0422.headerFieldLookupRegistryRequired', N'ru', N'Поле шапки «{headerFieldCode}» имеет тип «Выбор из справочника» и требует справочник: выберите его.'),
+    (N'err.ECR-TMPL-0422.headerFieldLookupRegistryRequired', N'kz', N'«{headerFieldCode}» тақырып өрісі «Анықтамалықтан таңдау» түрінде және анықтамалықты қажет етеді: оны таңдаңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:rc20lookup ── кінець секції ──
+-- ARC:audit-reader ── ru/kz: НФ-8.9.6: позначка «Архів» і вибір періоду в журналі змін комірок; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'audit.fromArchive', N'ru', N'Архив'),
+    (N'audit.fromArchive', N'kz', N'Мұрағат'),
+    (N'audit.fromArchiveHint', N'ru', N'Прочитано из архива аудита: изменение старше 24 месяцев и перенесено из рабочего журнала. Значения и правила доступа те же.'),
+    (N'audit.fromArchiveHint', N'kz', N'Аудит мұрағатынан оқылды: өзгеріс 24 айдан ескі және жұмыс журналынан көшірілген. Мәндер мен қолжетімділік ережелері бірдей.'),
+    (N'audit.archiveWindow', N'ru', N'Архив (старше 24 месяцев)'),
+    (N'audit.archiveWindow', N'kz', N'Мұрағат (24 айдан ескі)'),
+    (N'audit.archiveWindowHint', N'ru', N'Ставит интервал на 90 дней перед границей архива. Более старые изменения читаются из архива аудита и помечаются «Архив».'),
+    (N'audit.archiveWindowHint', N'kz', N'Аралықты мұрағат шекарасына дейінгі 90 күнге қояды. Одан ескі өзгерістер аудит мұрағатынан оқылып, «Мұрағат» деп белгіленеді.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- ARC:audit-reader ── кінець секції ──
+-- COLL:p3-rc19 ── ru/kz: підписи журналу Audit і скелет Health; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'audit.operationLabel.Create', N'ru', N'Создание'),
+    (N'audit.operationLabel.Update', N'ru', N'Изменение'),
+    (N'audit.operationLabel.Delete', N'ru', N'Удаление'),
+    (N'audit.operationLabel.Import', N'ru', N'Импорт'),
+    (N'audit.operationLabel.ImportPackage', N'ru', N'Импорт пакета'),
+    (N'audit.operationLabel.Reopen', N'ru', N'Повторное открытие'),
+    (N'audit.operationLabel.Publish', N'ru', N'Публикация'),
+    (N'audit.operationLabel.Clone', N'ru', N'Копирование'),
+    (N'audit.operationLabel.Pin', N'ru', N'Закрепление'),
+    (N'audit.operationLabel.Unpin', N'ru', N'Открепление'),
+    (N'audit.operationLabel.SetValidity', N'ru', N'Изменение срока действия'),
+    (N'audit.operationLabel.Invalidated', N'ru', N'Признано недействительным'),
+    (N'audit.operationLabel.SwitchSourceSet', N'ru', N'Переключение набора справочников'),
+    (N'audit.operationLabel.SaveDefinitionDraft', N'ru', N'Сохранение черновика определения'),
+    (N'audit.operationLabel.DiscardDefinitionDraft', N'ru', N'Отмена черновика определения'),
+    (N'audit.operationLabel.SaveRules', N'ru', N'Сохранение правил'),
+    (N'audit.entityLabel.cfg.RegistryDef', N'ru', N'Определение справочника'),
+    (N'audit.entityLabel.cfg.RegistryDefinitionDraft', N'ru', N'Черновик определения справочника'),
+    (N'audit.entityLabel.cfg.CalculationBinding', N'ru', N'Привязка расчёта'),
+    (N'audit.entityLabel.cfg.TableDef', N'ru', N'Определение таблицы'),
+    (N'audit.entityLabel.dic.RegistryEntry', N'ru', N'Запись справочника'),
+    (N'audit.entityLabel.dic.RegistryExternalKey', N'ru', N'Внешний ключ справочника'),
+    (N'audit.entityLabel.calc.MethodologyPackage', N'ru', N'Пакет методик'),
+    (N'audit.entityLabel.Project', N'ru', N'Проект'),
+    (N'audit.entityLabel.Project.CurrentPeriod', N'ru', N'Текущий период проекта'),
+    (N'audit.entityLabel.Period', N'ru', N'Период'),
+    (N'audit.entityLabel.PeriodPolicy', N'ru', N'Политика периодов'),
+    (N'audit.entityLabel.ReportVersion', N'ru', N'Версия отчёта'),
+    (N'audit.eventLabel.AccessDenied', N'ru', N'Отказ в доступе'),
+    (N'audit.eventLabel.AuditStructureExported', N'ru', N'Экспорт аудита структуры'),
+    (N'audit.eventLabel.ConsistencyCheckRunRequested', N'ru', N'Запущена проверка согласованности'),
+    (N'audit.eventLabel.DataSourceConnectionTested', N'ru', N'Проверено подключение к источнику'),
+    (N'audit.eventLabel.DataSourceDeleted', N'ru', N'Источник данных удалён'),
+    (N'audit.eventLabel.DataSourceSaved', N'ru', N'Источник данных сохранён'),
+    (N'audit.eventLabel.DocumentDeleted', N'ru', N'Документ удалён'),
+    (N'audit.eventLabel.DocumentExportDownloaded', N'ru', N'Экспорт документа скачан'),
+    (N'audit.eventLabel.DocumentExportRequested', N'ru', N'Запрошен экспорт документа'),
+    (N'audit.eventLabel.DocumentHeaderChanged', N'ru', N'Изменена шапка документа'),
+    (N'audit.eventLabel.DocumentKeyChanged', N'ru', N'Изменён ключ документа'),
+    (N'audit.eventLabel.DocumentVersionMigrated', N'ru', N'Документ перенесён на другую версию шаблона'),
+    (N'audit.eventLabel.JobCancelled', N'ru', N'Задача отменена'),
+    (N'audit.eventLabel.JobRestarted', N'ru', N'Задача перезапущена'),
+    (N'audit.eventLabel.MappingDeleted', N'ru', N'Сопоставление удалено'),
+    (N'audit.eventLabel.MappingPaused', N'ru', N'Сопоставление приостановлено'),
+    (N'audit.eventLabel.MappingResumed', N'ru', N'Сопоставление возобновлено'),
+    (N'audit.eventLabel.MappingSourceUnitChangeAccepted', N'ru', N'Принято изменение единицы источника'),
+    (N'audit.eventLabel.MethodologyVersionDeleted', N'ru', N'Версия методики удалена'),
+    (N'audit.eventLabel.RecalculationApprovalConfirmed', N'ru', N'Подтверждено согласование пересчёта'),
+    (N'audit.eventLabel.RecalculationApprovalRequested', N'ru', N'Запрошено согласование пересчёта'),
+    (N'audit.eventLabel.RecalculationApprovalUsed', N'ru', N'Использовано согласование пересчёта'),
+    (N'audit.eventLabel.RegistryExported', N'ru', N'Справочник экспортирован'),
+    (N'audit.eventLabel.RegistryValueChanged', N'ru', N'Изменено значение справочника'),
+    (N'audit.eventLabel.SheetSubmitWarningsAcknowledged', N'ru', N'Лист отправлен с подтверждёнными предупреждениями'),
+    (N'audit.eventLabel.TemplateArchived', N'ru', N'Шаблон архивирован'),
+    (N'audit.eventLabel.TemplateRestored', N'ru', N'Шаблон восстановлен'),
+    (N'audit.eventLabel.UiStringsImported', N'ru', N'Импортированы тексты интерфейса'),
+    (N'audit.eventLabel.UnitUpdated', N'ru', N'Единица измерения изменена'),
+    (N'audit.eventLabel.UserEmailChanged', N'ru', N'Изменена почта пользователя'),
+    (N'audit.operationLabel.Create', N'kz', N'Құру'),
+    (N'audit.operationLabel.Update', N'kz', N'Өзгерту'),
+    (N'audit.operationLabel.Delete', N'kz', N'Жою'),
+    (N'audit.operationLabel.Import', N'kz', N'Импорттау'),
+    (N'audit.operationLabel.ImportPackage', N'kz', N'Топтаманы импорттау'),
+    (N'audit.operationLabel.Reopen', N'kz', N'Қайта ашу'),
+    (N'audit.operationLabel.Publish', N'kz', N'Жариялау'),
+    (N'audit.operationLabel.Clone', N'kz', N'Көшіру'),
+    (N'audit.operationLabel.Pin', N'kz', N'Бекіту'),
+    (N'audit.operationLabel.Unpin', N'kz', N'Бекітуді алу'),
+    (N'audit.operationLabel.SetValidity', N'kz', N'Жарамдылық мерзімін өзгерту'),
+    (N'audit.operationLabel.Invalidated', N'kz', N'Жарамсыз деп танылды'),
+    (N'audit.operationLabel.SwitchSourceSet', N'kz', N'Анықтамалықтар жиынын ауыстыру'),
+    (N'audit.operationLabel.SaveDefinitionDraft', N'kz', N'Анықтама жобасын сақтау'),
+    (N'audit.operationLabel.DiscardDefinitionDraft', N'kz', N'Анықтама жобасын болдырмау'),
+    (N'audit.operationLabel.SaveRules', N'kz', N'Ережелерді сақтау'),
+    (N'audit.entityLabel.cfg.RegistryDef', N'kz', N'Анықтамалық анықтамасы'),
+    (N'audit.entityLabel.cfg.RegistryDefinitionDraft', N'kz', N'Анықтамалық анықтамасының жобасы'),
+    (N'audit.entityLabel.cfg.CalculationBinding', N'kz', N'Есептеу байламы'),
+    (N'audit.entityLabel.cfg.TableDef', N'kz', N'Кесте анықтамасы'),
+    (N'audit.entityLabel.dic.RegistryEntry', N'kz', N'Анықтамалық жазбасы'),
+    (N'audit.entityLabel.dic.RegistryExternalKey', N'kz', N'Анықтамалықтың сыртқы кілті'),
+    (N'audit.entityLabel.calc.MethodologyPackage', N'kz', N'Әдістеме топтамасы'),
+    (N'audit.entityLabel.Project', N'kz', N'Жоба'),
+    (N'audit.entityLabel.Project.CurrentPeriod', N'kz', N'Жобаның ағымдағы кезеңі'),
+    (N'audit.entityLabel.Period', N'kz', N'Кезең'),
+    (N'audit.entityLabel.PeriodPolicy', N'kz', N'Кезең саясаты'),
+    (N'audit.entityLabel.ReportVersion', N'kz', N'Есеп нұсқасы'),
+    (N'audit.eventLabel.AccessDenied', N'kz', N'Қол жеткізуден бас тарту'),
+    (N'audit.eventLabel.AuditStructureExported', N'kz', N'Құрылым аудитін экспорттау'),
+    (N'audit.eventLabel.ConsistencyCheckRunRequested', N'kz', N'Келісімділік тексеруі сұралды'),
+    (N'audit.eventLabel.DataSourceConnectionTested', N'kz', N'Көзге қосылым тексерілді'),
+    (N'audit.eventLabel.DataSourceDeleted', N'kz', N'Дерек көзі жойылды'),
+    (N'audit.eventLabel.DataSourceSaved', N'kz', N'Дерек көзі сақталды'),
+    (N'audit.eventLabel.DocumentDeleted', N'kz', N'Құжат жойылды'),
+    (N'audit.eventLabel.DocumentExportDownloaded', N'kz', N'Құжат экспорты жүктелді'),
+    (N'audit.eventLabel.DocumentExportRequested', N'kz', N'Құжат экспорты сұралды'),
+    (N'audit.eventLabel.DocumentHeaderChanged', N'kz', N'Құжат тақырыбы өзгертілді'),
+    (N'audit.eventLabel.DocumentKeyChanged', N'kz', N'Құжат кілті өзгертілді'),
+    (N'audit.eventLabel.DocumentVersionMigrated', N'kz', N'Құжат үлгінің басқа нұсқасына көшірілді'),
+    (N'audit.eventLabel.JobCancelled', N'kz', N'Тапсырма тоқтатылды'),
+    (N'audit.eventLabel.JobRestarted', N'kz', N'Тапсырма қайта іске қосылды'),
+    (N'audit.eventLabel.MappingDeleted', N'kz', N'Сәйкестендіру жойылды'),
+    (N'audit.eventLabel.MappingPaused', N'kz', N'Сәйкестендіру тоқтатылды'),
+    (N'audit.eventLabel.MappingResumed', N'kz', N'Сәйкестендіру жалғастырылды'),
+    (N'audit.eventLabel.MappingSourceUnitChangeAccepted', N'kz', N'Көз өлшем бірлігінің өзгеруі қабылданды'),
+    (N'audit.eventLabel.MethodologyVersionDeleted', N'kz', N'Әдістеме нұсқасы жойылды'),
+    (N'audit.eventLabel.RecalculationApprovalConfirmed', N'kz', N'Қайта есептеуді келісу расталды'),
+    (N'audit.eventLabel.RecalculationApprovalRequested', N'kz', N'Қайта есептеуді келісу сұралды'),
+    (N'audit.eventLabel.RecalculationApprovalUsed', N'kz', N'Қайта есептеуді келісу пайдаланылды'),
+    (N'audit.eventLabel.RegistryExported', N'kz', N'Анықтамалық экспортталды'),
+    (N'audit.eventLabel.RegistryValueChanged', N'kz', N'Анықтамалық мәні өзгертілді'),
+    (N'audit.eventLabel.SheetSubmitWarningsAcknowledged', N'kz', N'Парақ ескертулер расталып жіберілді'),
+    (N'audit.eventLabel.TemplateArchived', N'kz', N'Үлгі мұрағатталды'),
+    (N'audit.eventLabel.TemplateRestored', N'kz', N'Үлгі қалпына келтірілді'),
+    (N'audit.eventLabel.UiStringsImported', N'kz', N'Интерфейс мәтіндері импортталды'),
+    (N'audit.eventLabel.UnitUpdated', N'kz', N'Өлшем бірлігі өзгертілді'),
+    (N'audit.eventLabel.UserEmailChanged', N'kz', N'Пайдаланушы поштасы өзгертілді'),
+    (N'health.checking', N'ru', N'Проверяем все службы… первая проверка может занять несколько секунд.'),
+    (N'health.checking', N'kz', N'Барлық қызметтерді тексеріп жатырмыз… алғашқы тексеру бірнеше секунд алуы мүмкін.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:p3-rc19 ── кінець секції ──
+
+-- FP:fixes ── ru/kz: прохід «від першого обличчя» 2026-10-11 (порожній стан документів, нова версія методики, CSV довідника без полів, пароль, журнал, назви задач); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'documents.noProjects', N'ru', N'У вас нет доступа ни к одному проекту'),
+    (N'documents.noProjects', N'kz', N'Сізде ешбір жобаға қолжетімділік жоқ'),
+    (N'documents.noProjectsHint', N'ru', N'Документы показываются по проектам, а вашей учётной записи пока не выдан доступ ни к одному проекту. Попросите администратора выдать доступ; раздел «Мои группы» показывает, какие роли у вас есть.'),
+    (N'documents.noProjectsHint', N'kz', N'Құжаттар жобалар бойынша көрсетіледі, ал сіздің тіркелгіңізге әлі ешбір жобаға қолжетімділік берілмеген. Әкімшіден қолжетімділік беруді сұраңыз; «Менің топтарым» бөлімі сізде қандай рөлдер бар екенін көрсетеді.'),
+    (N'methodologies.emptyDraftWarning', N'ru', N'В пустом черновике нет формул, констант, правил и выходов: ничего не копируется. Чтобы изменить существующую версию, выберите её в поле «Копировать из».'),
+    (N'methodologies.emptyDraftWarning', N'kz', N'Бос нобайда формулалар, тұрақтылар, ережелер және шығыс мәндер жоқ: ештеңе көшірілмейді. Бар нұсқаны өзгерту үшін оны «Көшіру көзі» өрісінде таңдаңыз.'),
+    (N'err.ECR-REG-0422.entriesCsvNoFields', N'ru', N'В справочнике «{registryCode}» ещё нет полей, поэтому столбец «{column}» импортировать некуда. Сначала добавьте поля в конструкторе справочника и опубликуйте его: столбцы файла — это коды полей, плюс «code».'),
+    (N'err.ECR-REG-0422.entriesCsvNoFields', N'kz', N'«{registryCode}» анықтамалығында әлі өрістер жоқ, сондықтан «{column}» бағанын импорттауға болмайды. Алдымен анықтамалық конструкторында өрістерді қосып, оны жариялаңыз: файл бағандары — өріс кодтары, және «code».'),
+    (N'password.changed', N'ru', N'Пароль изменён. При следующем входе используйте новый пароль.'),
+    (N'password.changed', N'kz', N'Құпиясөз өзгертілді. Келесі кіргенде жаңа құпиясөзді пайдаланыңыз.'),
+    (N'registryAudit.entryValidityRescanned', N'ru', N'Пересчитано строк: {count}.'),
+    (N'registryAudit.entryValidityRescanned', N'kz', N'Қайта есептелген жолдар: {count}.'),
+    (N'jobs.kind.archive', N'ru', N'Архивация года'),
+    (N'jobs.kind.archive', N'kz', N'Жылды мұрағаттау'),
+    (N'jobs.kind.notification', N'ru', N'Доставка уведомлений'),
+    (N'jobs.kind.notification', N'kz', N'Хабарламаларды жеткізу'),
+    (N'jobs.kind.partitionCheck', N'ru', N'Проверка запаса секций'),
+    (N'jobs.kind.partitionCheck', N'kz', N'Бөлімдер қорын тексеру'),
+    (N'jobs.kind.periodState', N'ru', N'Обновление состояния периодов'),
+    (N'jobs.kind.periodState', N'kz', N'Кезеңдер күйін жаңарту'),
+    (N'jobs.kind.registrySync', N'ru', N'Синхронизация справочников из источника'),
+    (N'jobs.kind.registrySync', N'kz', N'Анықтамалықтарды дереккөзден синхрондау'),
+    (N'jobs.kind.reportRetention', N'ru', N'Хранение срезов отчётов'),
+    (N'jobs.kind.reportRetention', N'kz', N'Есеп кесінділерін сақтау'),
+    (N'jobs.kind.reportSnapshotFormat', N'ru', N'Обновление формата срезов отчётов'),
+    (N'jobs.kind.reportSnapshotFormat', N'kz', N'Есеп кесінділерінің пішімін жаңарту'),
+    (N'jobs.kind.rowWindowRefetch', N'ru', N'Повторная выборка окон строк'),
+    (N'jobs.kind.rowWindowRefetch', N'kz', N'Жол терезелерін қайта алу')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- FP:fixes ── кінець секції ──
+-- COLL:rc20rule ── ru/kz R16-4: правило категорії з аргументом без колонки; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-CALC-0422.categoryRuleUnknownArgument', N'ru', N'Правило категории использует аргумент(ы) {arguments}, для которых нет столбца в привязанных таблицах (таблиц: {tableCount}): правило считается по строке такой таблицы, и аргумент всегда будет пустым.'),
+    (N'err.ECR-CALC-0422.categoryRuleUnknownArgument', N'kz', N'Санат ережесі {arguments} аргументтерін пайдаланады, бірақ байланыстырылған кестелерде (кестелер саны: {tableCount}) сәйкес баған жоқ: ереже сол кестенің жолы бойынша есептеледі, сондықтан аргумент әрқашан бос болады.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:rc20rule ── кінець секції ──
+-- COLL:ea-api ── ru/kz: передача місяця виконавцям (EA-C); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-ACCS-0403.notEditAssignmentManager', N'ru', N'Передавать месяц исполнителям может только автор документа или менеджер проекта.'),
+    (N'err.ECR-ACCS-0403.notEditAssignmentManager', N'kz', N'Айды орындаушыларға тек құжат авторы немесе жоба менеджері бере алады.'),
+    (N'err.ECR-ACCS-0403.editAssignmentReadOnly', N'ru', N'Документ сейчас доступен только для чтения (архив или имитация).'),
+    (N'err.ECR-ACCS-0403.editAssignmentReadOnly', N'kz', N'Құжат қазір тек оқуға арналған (мұрағат немесе симуляция).'),
+    (N'err.ECR-DOC-0409.editAssignmentStale', N'ru', N'Передачу изменили после того, как вы её открыли. Перезагрузите и повторите действие.'),
+    (N'err.ECR-DOC-0409.editAssignmentStale', N'kz', N'Тапсырманы сіз ашқаннан кейін өзгертті. Қайта жүктеп, әрекетті қайталаңыз.'),
+    (N'err.ECR-DOC-0409.editAssignmentState', N'ru', N'Это действие невозможно в текущем состоянии передачи.'),
+    (N'err.ECR-DOC-0409.editAssignmentState', N'kz', N'Бұл әрекет тапсырманың ағымдағы күйінде мүмкін емес.'),
+    (N'err.ECR-REQ-0422.editAssignmentBaseVersion', N'ru', N'Запрос должен указывать версию передачи, с которой начато действие (baseVersion).'),
+    (N'err.ECR-REQ-0422.editAssignmentBaseVersion', N'kz', N'Сұраныста әрекет басталған тапсырма нұсқасы (baseVersion) көрсетілуі керек.'),
+    (N'err.ECR-REQ-0422.editAssignmentSliceInvalid', N'ru', N'Срез передачи задан некорректно.'),
+    (N'err.ECR-REQ-0422.editAssignmentSliceInvalid', N'kz', N'Тапсырма кесіндісі дұрыс емес.'),
+    (N'err.ECR-REQ-0422.editAssignmentNoteTooLong', N'ru', N'Инструкция длиннее 500 символов.'),
+    (N'err.ECR-REQ-0422.editAssignmentNoteTooLong', N'kz', N'Нұсқаулық 500 таңбадан ұзын.'),
+    (N'err.ECR-REQ-0422.editAssignmentRecipientInvalid', N'ru', N'Одного из исполнителей нельзя назначить на этот документ.'),
+    (N'err.ECR-REQ-0422.editAssignmentRecipientInvalid', N'kz', N'Орындаушылардың бірін бұл құжатқа тағайындау мүмкін емес.'),
+    (N'err.ECR-REQ-0422.editAssignmentTooManyRecipients', N'ru', N'Слишком много исполнителей в одной передаче.'),
+    (N'err.ECR-REQ-0422.editAssignmentTooManyRecipients', N'kz', N'Бір тапсырмада орындаушылар тым көп.'),
+    (N'err.ECR-REQ-0422.editAssignmentDelegationExceedsOwnRights', N'ru', N'Передавать можно только ячейки, которые вы сами можете редактировать. Сузьте срез до листов, на которые у вас есть право записи.'),
+    (N'err.ECR-REQ-0422.editAssignmentDelegationExceedsOwnRights', N'kz', N'Тек өзіңіз өңдей алатын ұяшықтарды беруге болады. Кесіндіні жазуға құқығыңыз бар парақтарға тарылтыңыз.'),
+    (N'err.ECR-REQ-0422.editAssignmentUnknownSlice', N'ru', N'В документе нет такого среза.'),
+    (N'err.ECR-REQ-0422.editAssignmentUnknownSlice', N'kz', N'Құжатта мұндай кесінді жоқ.'),
+    (N'err.ECR-REQ-0422.editAssignmentTooManyAssignments', N'ru', N'В документе слишком много передач.'),
+    (N'err.ECR-REQ-0422.editAssignmentTooManyAssignments', N'kz', N'Құжатта тапсырмалар тым көп.'),
+    (N'err.ECR-REQ-0422.editAssignmentNotAllFilled', N'ru', N'Валидация возможна только после того, как все исполнители заполнили срез.'),
+    (N'err.ECR-REQ-0422.editAssignmentNotAllFilled', N'kz', N'Растау барлық орындаушылар кесіндіні толтырғаннан кейін ғана мүмкін.'),
+    (N'err.ECR-REQ-0422.editAssignmentReasonRequired', N'ru', N'Укажите причину возврата.'),
+    (N'err.ECR-REQ-0422.editAssignmentReasonRequired', N'kz', N'Қайтару себебін көрсетіңіз.'),
+    (N'err.ECR-REQ-0422.editAssignmentReasonTooLong', N'ru', N'Причина длиннее 500 символов.'),
+    (N'err.ECR-REQ-0422.editAssignmentReasonTooLong', N'kz', N'Себеп 500 таңбадан ұзын.'),
+    (N'err.ECR-REQ-0422.editAssignmentQueryTooShort', N'ru', N'Для поиска введите не менее двух символов.'),
+    (N'err.ECR-REQ-0422.editAssignmentQueryTooShort', N'kz', N'Іздеу үшін кемінде екі таңба енгізіңіз.'),
+    (N'err.ECR-REQ-0422.editAssignmentRoleInvalid', N'ru', N'Неизвестная роль фильтра.'),
+    (N'err.ECR-REQ-0422.editAssignmentRoleInvalid', N'kz', N'Сүзгі рөлі белгісіз.'),
+    (N'err.ECR-DOC-0409.editorSetStale', N'ru', N'Набор исполнителей изменили после того, как вы его открыли. Перезагрузите и повторите действие.'),
+    (N'err.ECR-DOC-0409.editorSetStale', N'kz', N'Орындаушылар жиынын сіз ашқаннан кейін өзгертті. Қайта жүктеп, әрекетті қайталаңыз.'),
+    (N'err.ECR-REQ-0422.editorSetNotFound', N'ru', N'Набор исполнителей не найден.'),
+    (N'err.ECR-REQ-0422.editorSetNotFound', N'kz', N'Орындаушылар жиыны табылмады.'),
+    (N'err.ECR-REQ-0422.editorSetTooMany', N'ru', N'Слишком много наборов исполнителей.'),
+    (N'err.ECR-REQ-0422.editorSetTooMany', N'kz', N'Орындаушылар жиындары тым көп.'),
+    (N'err.ECR-REQ-0422.editorSetNameTaken', N'ru', N'Набор с таким названием уже есть.'),
+    (N'err.ECR-REQ-0422.editorSetNameTaken', N'kz', N'Мұндай атаумен жиын бұрыннан бар.'),
+    (N'err.ECR-REQ-0422.editorSetNameInvalid', N'ru', N'Название набора — от 1 до 100 символов без управляющих.'),
+    (N'err.ECR-REQ-0422.editorSetNameInvalid', N'kz', N'Жиын атауы — басқару таңбаларынсыз 1-ден 100-ге дейін таңба.'),
+    (N'err.ECR-REQ-0422.editorSetTooManyMembers', N'ru', N'Слишком много исполнителей в наборе.'),
+    (N'err.ECR-REQ-0422.editorSetTooManyMembers', N'kz', N'Жиында орындаушылар тым көп.'),
+    (N'err.ECR-REQ-0422.editorSetMemberInvalid', N'ru', N'Одного из исполнителей нельзя добавить в набор.'),
+    (N'err.ECR-REQ-0422.editorSetMemberInvalid', N'kz', N'Орындаушылардың бірін жиынға қосу мүмкін емес.'),
+    (N'err.ECR-REQ-0422.editorSetBaseVersion', N'ru', N'Запрос должен указывать версию набора, с которой начато действие (baseVersion).'),
+    (N'err.ECR-REQ-0422.editorSetBaseVersion', N'kz', N'Сұраныста әрекет басталған жиын нұсқасы (baseVersion) көрсетілуі керек.'),
+    (N'err.ECR-REQ-0422.editAssignmentTooManySlices', N'ru', N'Укажите от 1 до 12 срезов в одном запросе.'),
+    (N'err.ECR-REQ-0422.editAssignmentTooManySlices', N'kz', N'Бір сұраныста 1-ден 12-ге дейін кесінді көрсетіңіз.'),
+    (N'err.ECR-DOC-0404.editorSet', N'ru', N'Набор исполнителей не найден.'),
+    (N'err.ECR-DOC-0404.editorSet', N'kz', N'Орындаушылар жиыны табылмады.'),
+    (N'err.ECR-DOC-0404.editAssignment', N'ru', N'Передача не найдена.'),
+    (N'err.ECR-DOC-0404.editAssignment', N'kz', N'Тапсырма табылмады.'),
+    (N'err.ECR-DOC-4091.editAssignmentBusy', N'ru', N'Передача занята другим действием. Ничего не сохранено; повторите через мгновение.'),
+    (N'err.ECR-DOC-4091.editAssignmentBusy', N'kz', N'Тапсырманы басқа әрекет пайдаланып жатыр. Ештеңе сақталмады; сәлден кейін қайталаңыз.'),
+    (N'err.ECR-ACCS-0403.editorSetsForbidden', N'ru', N'Наборы исполнителей доступны пользователям с правом записи в проект.'),
+    (N'err.ECR-ACCS-0403.editorSetsForbidden', N'kz', N'Орындаушылар жиындары жобаға жазу құқығы бар пайдаланушыларға қолжетімді.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:ea-api ── кінець секції ──
+-- COLL:rpt-version-race ── ru/kz: гонка двох створень версії звіту (ECR-RPT-4091.versionConcurrent); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-RPT-4091.versionConcurrent', N'ru', N'Версию с этим номером в этом описании отчёта только что создал кто-то другой. Перечитайте описание и выберите другой номер версии.'),
+    (N'err.ECR-RPT-4091.versionConcurrent', N'kz', N'Осы есеп анықтамасында осы нөмірлі нұсқаны жаңа ғана басқа біреу жасады. Анықтаманы қайта жүктеп, басқа нұсқа нөмірін таңдаңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:rpt-version-race ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t
@@ -19008,3 +19830,72 @@ WHERE  run.PeriodKey IS NULL
 PRINT CONCAT(N'period0-supersede: ', @@ROWCOUNT, N' rows');
 GO
 -- COLL:period0-supersede ── кінець секції ─────────────────────────────────────
+
+-- FP:sysadmin-rights ── Системний адміністратор: адмін-права керування (рішення людини 2026-10-11) ──
+-- ✎ Прохід «від першого обличчя» (FIRST-PERSON-2026-10-11, P2-2): вбудований `SystemAdministrator`
+-- («усе, крім небезпечного») не бачив Security, Mapping, Pipeline, Notifications, Campaign і не
+-- публікував методики — назва ролі обіцяла протилежне. Рішення людини (квіз 11.10): роль має
+-- ВСІ адмін-права керування.
+--
+-- ⛔ Поіменно й ОКРЕМИМ MERGE, а НЕ послабленням фільтра `IsDangerous = 0` у блоці роздач вище:
+-- шаблон `%` решти ролей небезпечного й далі не бере (`Approver` ×
+-- `Report.EditDefinition` — окремий MERGE `D-203`; `BootstrapAdministrator` — два права).
+-- Той самий механізм, що й у двох наявних поіменних винятків.
+--
+-- ⚠ Видано рівно ВІСІМ прав — адмін-керування (`D-207`: розділення обов'язків адміністраторів
+-- не обмежуємо; `D-121`: носій `Security.ManageRoles` і так видає будь-яке право):
+--   Security.ManageUsers · Security.ManageRoles · Security.Simulate  — користувачі, ролі, «View as»;
+--   Integration.Manage — джерела, мапінг, конвеєр; System.ManageNotifications — канали й SMTP;
+--   System.RunJob — ручний запуск системних задач; Report.ViewCampaign — огляд кампанії;
+--   Calculation.Publish — публікація методик.
+-- Захист «чотирьох очей» стоїть у точці ВИКОРИСТАННЯ, не видачі, і цей MERGE його не чіпає:
+-- публікація методики автором її створення відмовляється (`ФВ-9.6`, `D-226`), Reopen вимагає
+-- причини, симуляція пишеться в аудит, а ціль симуляції з небезпечним правом заборонена.
+--
+-- ⛔ НЕ видано навмисно (операційні/бізнесові, а не адмін-керування — на рішення людини):
+--   Report.EditDefinition (авторство державної форми; `D-203`, лише Approver) ·
+--   Period.Reopen (повторне відкриття закритого періоду) · Document.ChangeKey (зміна бізнес-ключа).
+--
+-- ⚠ MERGE … WHEN NOT MATCHED: наявна база отримує пари на наступному старті (`SeedRunner`)
+-- без міграції схеми; право, зняте адміністратором з вбудованої ролі, повторний сід поверне
+-- (так само, як і решту вбудованих пар; потрібен інший набір — власна роль).
+--
+-- ✎ Видача адмін-прав — подія безпеки: знімок пар ролі ДО MERGE; у журнал (`aud.SecurityEvent`,
+-- тип `RolePermissionsGranted`) іде лише те, що додав саме він, тож повторний старт тиші не рве.
+IF OBJECT_ID(N'tempdb..#FpSysAdminRightsBefore') IS NOT NULL DROP TABLE #FpSysAdminRightsBefore;
+SELECT rp.RoleId, rp.PermissionCode INTO #FpSysAdminRightsBefore
+FROM sec.RolePermission AS rp
+JOIN sec.Role AS r ON r.Id = rp.RoleId AND r.IsBuiltIn = 1 AND r.Code = N'SystemAdministrator';
+MERGE sec.RolePermission AS t
+USING (
+    SELECT r.Id AS RoleId, p.Code AS PermissionCode
+    FROM (VALUES
+        (N'Security.ManageUsers'), (N'Security.ManageRoles'), (N'Security.Simulate'),
+        (N'Integration.Manage'), (N'System.ManageNotifications'), (N'System.RunJob'),
+        (N'Report.ViewCampaign'), (N'Calculation.Publish')
+    ) AS m (Code)
+    JOIN sec.Permission AS p ON p.Code = m.Code
+    CROSS JOIN sec.Role AS r
+    WHERE r.Code = N'SystemAdministrator' AND r.IsBuiltIn = 1 -- U1-04
+) AS s
+ON t.RoleId = s.RoleId AND t.PermissionCode = s.PermissionCode
+WHEN NOT MATCHED THEN INSERT (RoleId, PermissionCode) VALUES (s.RoleId, s.PermissionCode);
+GO
+-- ✎ Одна подія безпеки на кожну видачу: роль, кількість, перелік кодів прав, джерело. Без
+-- користувачів (система: ChangedByUserId = 0, як у решти системних записів). Нових пар немає — немає й події.
+INSERT INTO aud.SecurityEvent (ChangedAt, EventType, TargetUserId, TargetRoleId, DetailsJson, ChangedByUserId, CorrelationId)
+SELECT SYSUTCDATETIME(), N'RolePermissionsGranted', NULL, r.Id,
+       CONCAT(N'{"role":"SystemAdministrator","source":"seed FP:sysadmin-rights","count":', COUNT(*),
+              N',"permissions":["',
+              STUFF((SELECT N'","' + CAST(x.PermissionCode AS nvarchar(max)) FROM sec.RolePermission AS x WHERE x.RoleId = r.Id AND NOT EXISTS (SELECT 1 FROM #FpSysAdminRightsBefore AS xb WHERE xb.RoleId = x.RoleId AND xb.PermissionCode = x.PermissionCode) ORDER BY x.PermissionCode FOR XML PATH(N''), TYPE).value(N'.', N'nvarchar(max)'), 1, 3, N''),
+              N'"]}'),
+       0, NULL
+FROM sec.Role AS r
+JOIN sec.RolePermission AS rp ON rp.RoleId = r.Id
+WHERE r.Code = N'SystemAdministrator' AND r.IsBuiltIn = 1
+  AND NOT EXISTS (SELECT 1 FROM #FpSysAdminRightsBefore AS b
+                  WHERE b.RoleId = rp.RoleId AND b.PermissionCode = rp.PermissionCode)
+GROUP BY r.Id;
+DROP TABLE #FpSysAdminRightsBefore;
+GO
+-- FP:sysadmin-rights ── кінець секції ────────────────────────────────────────

@@ -96,7 +96,7 @@ public sealed class LandScriptsHttpContractTests
         Assert.Contains("Invoke-DocumentMigration", zeroChanges.Groups["body"].Value);
         Assert.Contains("$hasMigration", zeroChanges.Groups["body"].Value);
         // @($null).Count == 1: порожній -MigrateDocumentId не має вважатися «є документи».
-        Assert.Matches(@"\$hasMigration = @\(\$MigrateDocumentId \| Where-Object", apply);
+        Assert.Matches(@"\$hasMigration = @\(\$migrateIds \| Where-Object", apply);
 
         Assert.Contains("Test-EcrTemplateUnsuitable $pub", apply);
         Assert.Contains("Test-EcrTemplateUnsuitable $cl", apply);
@@ -105,6 +105,88 @@ public sealed class LandScriptsHttpContractTests
         // 202 + jobId обробляється, `async` без -Async не надсилається.
         Assert.Contains("-Allowed @(200, 202)", apply);
         Assert.Contains("if ($Async) { $body.async = $true }", apply);
+    }
+
+    [Theory]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    [InlineData("'3,10'", "3,10")]
+    [InlineData("'3;10'", "3,10")]
+    [InlineData("'3 10'", "3,10")]
+    [InlineData("'3', '10'", "3,10")]
+    [InlineData("3, 10", "3,10")]
+    [InlineData("'7'", "7")]
+    [InlineData("''", "")]
+    public void Список_id_документів_розбирається_з_рядка_і_масиву_а_не_читається_як_310(string argument, string expected)
+    {
+        var script = ". '" + LandFile("EcrApi.ps1").Replace("'", "''") + "'; " +
+                     "$r = @(ConvertTo-DocumentIdList @(" + argument + ")); ($r | ForEach-Object { [string]$_ }) -join ','";
+        var output = RunPowerShell(script);
+
+        Assert.Equal(expected, output);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Некоректний_id_документа_відхиляється()
+    {
+        var script = ". '" + LandFile("EcrApi.ps1").Replace("'", "''") + "'; " +
+                     "try { ConvertTo-DocumentIdList 'abc' | Out-Null; 'no-throw' } catch { 'threw' }";
+
+        Assert.Equal("threw", RunPowerShell(script));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Повторна_міграція_документа_на_цільовій_версії_дає_0_змін_а_параметр_приймає_рядок()
+    {
+        var apply = File.ReadAllText(LandFile("Apply-ContractHeader.ps1"));
+        var api = File.ReadAllText(LandFile("EcrApi.ps1"));
+
+        // [int[]] прочитав би «3,10» з `powershell -File` як 310.
+        Assert.Contains("[string[]]$MigrateDocumentId", apply);
+        Assert.DoesNotContain("[int[]]$MigrateDocumentId", apply);
+        Assert.Contains("ConvertTo-DocumentIdList $MigrateDocumentId", apply);
+        // Відмова сервера «уже на версії» (422, messageKey migrateSameVersion) — не помилка ні на dry-run, ні на apply.
+        Assert.Contains("migrateSameVersion", api);
+        Assert.Equal(2, Regex.Count(apply, @"Test-EcrMigrateSameVersion \$(preview|apply)"));
+        Assert.True(
+            apply.IndexOf("Test-EcrMigrateSameVersion $preview", StringComparison.Ordinal) <
+            apply.IndexOf("Assert-EcrOk $preview", StringComparison.Ordinal),
+            "Перевірка «вже на версії» має бути до Assert-EcrOk dry-run.");
+        Assert.Contains("0 змін", apply);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void README_tools_land_не_радить_кому_без_лапок_для_powershell_file()
+    {
+        var readme = File.ReadAllText(LandFile("README.md"));
+
+        Assert.Contains("powershell -NoProfile -File .\\Apply-ContractHeader.ps1 -TemplateCode Land -MigrateDocumentId \"3,10\"", readme);
+        Assert.Contains("310", readme);
+        Assert.DoesNotMatch(@"powershell[^\r\n]*-File[^\r\n]*-MigrateDocumentId [0-9]+,[0-9]+", readme);
+    }
+
+    private static string RunPowerShell(string script)
+    {
+        var start = new ProcessStartInfo(DeployScriptHarness.FindPowerShell())
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            StandardOutputEncoding = Encoding.UTF8,
+        };
+        foreach (var argument in new[] { "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script })
+        {
+            start.ArgumentList.Add(argument);
+        }
+
+        using var process = Process.Start(start) ?? throw new InvalidOperationException("PowerShell не запустився");
+        var stdout = process.StandardOutput.ReadToEnd();
+        var stderr = process.StandardError.ReadToEnd();
+        process.WaitForExit();
+        Assert.True(process.ExitCode == 0, $"PowerShell впав: {stderr}");
+        return stdout.Trim();
     }
 
     [Fact]

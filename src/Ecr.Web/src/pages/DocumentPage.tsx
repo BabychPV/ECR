@@ -26,6 +26,8 @@ import { DocumentSaveState } from '@/features/documents/DocumentSaveState';
 import { useDocumentLogActions } from '@/features/documents/DocumentLogActions';
 import { useStaleResultsReminderHost } from '@/features/documents/useStaleResultsReminder';
 import { useVersionMigrationAction } from '@/features/documents/VersionMigrationAction';
+import { useEditAssignmentsAction } from '@/features/editAssignments/EditAssignmentsAction';
+import { ExecutorStrip } from '@/features/editAssignments/ExecutorStrip';
 import { DocumentLockBanner } from '@/features/documents/DocumentLockBanner';
 import { documentLockOf, hasLockedSheet, locksDataActions } from '@/features/documents/documentLock';
 import { DocumentProgress } from '@/features/documents/DocumentProgress';
@@ -537,6 +539,13 @@ export function DocumentPage(): JSX.Element {
   // прогону й відмови — у самому діалозі.
   const versionMigration = useVersionMigrationAction({ documentId, document: summary.data });
 
+  // «Доступ до редагування» (EA-5a): пункт «More → Edit access» і лінива шторка передачі місяця.
+  const editAssignments = useEditAssignmentsAction({
+    documentId,
+    document: summary.data,
+    sheets: sheets.map((s) => ({ code: s.code, name: s.name })),
+  });
+
   // «History» і «Compare versions» — пункти «More» + лінивий діалог (макет: блоків між шапкою й сіткою немає).
   const documentLog = useDocumentLogActions({ documentId, periodKey });
 
@@ -634,7 +643,7 @@ export function DocumentPage(): JSX.Element {
             run: () => validateAction.run(() => validate.mutateAsync({ scope, documentId, periodKey }), { readOnly: true }),
           }}
           calculationsStale={calculationsStale}
-          documentItems={[...documentLog.menuItems, businessKeyChange.menuItem, versionMigration.menuItem, deletion.menuItem]}
+          documentItems={[...documentLog.menuItems, businessKeyChange.menuItem, versionMigration.menuItem, editAssignments.menuItem, deletion.menuItem]}
           resultsStale={document.resultsStale ?? null}
           resultsStaleSince={document.resultsStaleSince ?? null}
           staleReminderHost={staleReminderHost}
@@ -669,6 +678,9 @@ export function DocumentPage(): JSX.Element {
           ✎ UI-26: за наявного аркуша банер малює панель дій (з контекстом). */}
       {active === undefined && <DocumentLockBanner lock={lock} periodKey={periodKey} />}
 
+      {/* EA-5b: передача місяця - «Місяць передано вам», «Заповнено», коментар повернення. Права комірок рішає сервер. */}
+      <ExecutorStrip documentId={documentId} periodKey={periodKey} />
+
       {/* `UI-42`: чому тут нічого не змінити на телефоні — тим самим місцем, що й інші блокування.
           Аркуш і так закритий (банер вище) — другий банер не потрібен. */}
       {narrow && lock === null && isEditable(state) && (
@@ -682,6 +694,8 @@ export function DocumentPage(): JSX.Element {
       {businessKeyChange.dialog}
 
       {versionMigration.dialog}
+
+      {editAssignments.drawer}
 
       {deletion.dialog}
 

@@ -23,10 +23,10 @@ import { describe as report, findViolations } from '@/test/a11y';
  *  - прибрати `closeDrawer`: червоний «фокус повертається на назву».
  */
 
-const me = (permissions: readonly string[]) => ({
+const me = (permissions: readonly string[], isSimulation = false) => ({
   denies: [],
   grants: {},
-  isSimulation: false,
+  isSimulation,
   language: 'en',
   mustChangePassword: false,
   permissions,
@@ -73,7 +73,11 @@ const Usage = {
   ],
 };
 
-function mockFetch(permissions: readonly string[], registries: readonly unknown[] = Registries) {
+function mockFetch(
+  permissions: readonly string[],
+  registries: readonly unknown[] = Registries,
+  isSimulation = false,
+) {
   const calls: string[] = [];
 
   vi.stubGlobal(
@@ -89,7 +93,7 @@ function mockFetch(permissions: readonly string[], registries: readonly unknown[
         });
 
       if (url.includes('/ui-strings/')) return json({ languageCode: 'en', revision: 1, strings: Catalog });
-      if (url.includes('/api/v1/me')) return json(me(permissions));
+      if (url.includes('/api/v1/me')) return json(me(permissions, isSimulation));
       if (url.includes('/usage')) return json(Usage);
       if (url.includes('/entries')) return json([]);
       if (url.includes('/api/v1/registries')) return json(registries);
@@ -129,6 +133,33 @@ afterEach(() => {
 });
 
 describe('RegistriesList (UI-35)', () => {
+  // ⛔ Мутаційний доказ: прибери `isSimulation` з `mayCreate` у `RegistriesList.tsx` — обидва випадки червоні.
+  it('симуляція: «New registry» немає ні в шапці, ні в порожньому стані', async () => {
+    const calls = mockFetch(['Registry.View', 'Registry.EditDefinition'], Registries, true);
+    await loadCatalog('en', 'private');
+    show('/admin/registries');
+    // ⚠ Без фіксу кнопка з'являється лише після `/me`: перевірка відсутності має почекати його, інакше вона порожня.
+    await screen.findByRole('button', { name: 'Units of measure' });
+    await waitFor(() => expect(calls.some((url) => url.includes('/api/v1/me'))).toBe(true));
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    expect(screen.queryByRole('button', { name: 'New registry' })).toBeNull();
+  });
+
+  it('контроль: без симуляції «New registry» є', async () => {
+    mockFetch(['Registry.View', 'Registry.EditDefinition']);
+    await loadCatalog('en', 'private');
+    show('/admin/registries');
+    expect(await screen.findByRole('button', { name: 'New registry' })).toBeTruthy();
+  });
+
+  it('симуляція, порожній перелік: кнопки створення немає', async () => {
+    mockFetch(['Registry.View', 'Registry.EditDefinition'], [], true);
+    await loadCatalog('en', 'private');
+    show('/admin/registries');
+    await screen.findByText('No registries yet');
+    expect(screen.queryByRole('button', { name: 'New registry' })).toBeNull();
+  });
+
   it('перелік: назва з кодом, поля, ознаки; колонок без даних немає', async () => {
     mockFetch(['Registry.View']);
     await loadCatalog('en', 'private');

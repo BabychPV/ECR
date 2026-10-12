@@ -57,7 +57,12 @@ public sealed partial class PatchCellsHandler(
     // ⛔ C1: правила й вимоги методології ключуються Id колонок тієї версії шаблону, у якій їх писали; документ на
     // клон-версії має інші Id тих самих колонок. Контейнер передає завжди; `null` (прямий конструктор у тестах) —
     // Id вважаються локальними.
-    IColumnPathMapper? columnMapper = null)
+    IColumnPathMapper? columnMapper = null,
+
+    // ⛔ EA-B: повторна перевірка передачі зрізу під блокуванням аркуша
+    // (відкликання / «Заповнено» / «Валідовано» між рішенням і комітом).
+    // Необов'язковий лише для прямого конструювання в тестах; контейнер передає завжди.
+    IEditAssignmentStore? assignments = null)
 {
     /// <summary>Застосовує зміни.</summary>
     /// <exception cref="ConcurrencyConflictException">
@@ -256,6 +261,20 @@ public sealed partial class PatchCellsHandler(
         /// ⚠ Лише оновлення наявних комірок: у нових рядків адреси ще немає.
         /// </remarks>
         public HashSet<CellAddress> OutOfWindow { get; } = [];
+
+        /// <summary>
+        /// <c>ColumnDefId</c> колонок, комірки яких дозволено САМЕ передачею зрізу
+        /// (<see cref="EditDecision.ViaAssignment"/>): повторна перевірка під
+        /// блокуванням вимагає, щоб передача там усе ще діяла.
+        /// </summary>
+        public HashSet<int> LiftedColumns { get; } = [];
+
+        /// <summary>
+        /// У документа є передачі зрізу (<see cref="EditDecision.AssignmentsPresent"/> дозволеного
+        /// рішення): під блокуванням аркуша їх треба прочитати знову. <c>false</c> — документ без
+        /// передач, повторного читання немає.
+        /// </summary>
+        public bool AssignmentsPresent { get; set; }
     }
 
     /// <summary>Розподіл змін по upsert/delete разом із супутнім станом.</summary>
@@ -989,6 +1008,16 @@ public sealed partial class PatchCellsHandler(
                 {
                     context.OutOfWindow.Add(address);
                 }
+
+                if (decision.IsAllowed && decision.ViaAssignment)
+                {
+                    context.LiftedColumns.Add(address.ColumnDefId);
+                }
+
+                if (decision.IsAllowed && decision.AssignmentsPresent)
+                {
+                    context.AssignmentsPresent = true;
+                }
             }
         }
 
@@ -1040,6 +1069,16 @@ public sealed partial class PatchCellsHandler(
                     else if (decision.RequiresConfirmation)
                     {
                         needsConfirmation++;
+                    }
+
+                    if (decision.IsAllowed && decision.ViaAssignment)
+                    {
+                        context.LiftedColumns.Add(columnDefId);
+                    }
+
+                    if (decision.IsAllowed && decision.AssignmentsPresent)
+                    {
+                        context.AssignmentsPresent = true;
                     }
                 }
             }
@@ -2278,6 +2317,12 @@ public sealed partial class PatchCellsHandler(
             // а не лише перед записом значень: під ескальованим блокуванням переносу версії вставка в
             // `doc.TableRow` чекала весь `CommandTimeout` і закінчувалась 500. Той самий єдиний `SET`.
             await cellStore.LimitLockWaitAsync(innerCt).ConfigureAwait(false);
+
+            // ⛔ EA-B: передача зрізу повторно — під блокуванням аркуша, ПІСЛЯ ліміту очікування
+            // блокувань (інакше спільні блокування передач чекали б без стелі й дедлок 1205 ішов би
+            // 500, а не ECR-DOC-4091).
+            await EnsureAssignmentsHoldAsync(context, planned, innerCt).ConfigureAwait(false);
+
             await EnsureRowLimitUnderLockAsync(request, context, innerCt).ConfigureAwait(false);
 
             // ⛔ `DAT-04` п. 1: рядки — ПІСЛЯ блокування аркуша й усіх відмов,
@@ -2386,6 +2431,122 @@ public sealed partial class PatchCellsHandler(
             .ConfigureAwait(false);
 
         CheckSheetStatus(status, changes);
+    }
+
+    /// <summary>
+    /// EA-B: передача зрізу повторно — під блокуванням аркуша, у транзакції запису.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Рішення про права прийняте ПОЗА транзакцією, а передачу можуть відкликати,
+    /// позначити «Заповнено» чи «Валідовано» між ним і комітом. Тому тут факти читаються
+    /// знову, під спільними блокуваннями <c>REPEATABLEREAD</c> (переходи чекають цю транзакцію), і ті самі правила
+    /// <see cref="EditAssignmentGuard"/> застосовуються до колонок, що пишуться. Відмова —
+    /// та сама форма <c>ECR-ACCS-0403</c>, що й у <see cref="CheckSheetStatus"/>.
+    ///
+    /// ⚠ Дві умови відмови: з'явилася заборона передачі (Filled/Validated/Expired/LockedByOwner)
+    /// АБО колонка була дозволена САМЕ передачею, а тепер передача не піднімає (відкликана,
+    /// делегатор вимкнений). Без другої умови відкликання між рішенням і комітом пропускало б правку.
+    /// </remarks>
+    private async Task EnsureAssignmentsHoldAsync(
+        RequestContext context, CellChangeLists changes, CancellationToken ct)
+    {
+        var deniedReason = await FindAssignmentDenialAsync(context, ct).ConfigureAwait(false);
+        if (deniedReason is null)
+        {
+            return;
+        }
+
+        var denied = changes.Upserts.Count + changes.Deletes.Count;
+
+        throw new AccessDeniedException(
+            "ECR-ACCS-0403",
+            $"Заборонених комірок у батчі: {denied}. Причина першої: {deniedReason}.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-ACCS-0403.deniedCells",
+                ["deniedCount"] = denied.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                ["reason"] = deniedReason.ToString(),
+            });
+    }
+
+    /// <summary>Причина, з якої передача під блокуванням забороняє запис; <c>null</c> — запис дозволено.</summary>
+    private async Task<EditDenyReason?> FindAssignmentDenialAsync(RequestContext context, CancellationToken ct)
+    {
+        var needed = context.AssignmentsPresent || context.LiftedColumns.Count > 0;
+        var gate = await ReadAssignmentGateAsync(context.Profile, context.Instance.DocumentId, needed, ct)
+            .ConfigureAwait(false);
+
+        return gate is null ? null : AssignmentDenial(context, gate);
+    }
+
+    /// <summary>
+    /// Факти передач документа під блокуванням; <c>null</c> — перевірка не потрібна
+    /// (симуляція, системний шлях, немає сховища).
+    /// </summary>
+    private async Task<EditAssignmentGateFacts?> ReadAssignmentGateAsync(
+        AccessProfile profile, long documentId, bool needed, CancellationToken ct)
+    {
+        if (!needed || profile.IsSimulation || profile.IsIntegrationWriter)
+        {
+            return null;
+        }
+
+        // ⛔ fail-closed: у документа є передачі (або правку дозволила саме передача), а сховища
+        // для повторної перевірки немає — писати не можна. У проді сховище вприснуте завжди
+        // (DependencyInjection); `null` можливий лише в тестових фабриках.
+        if (assignments is null)
+        {
+            throw new InvalidOperationException(
+                "Передачі зрізу діють, але сховища для повторної перевірки під блокуванням немає.");
+        }
+
+        return await assignments.ReadFactsForGateAsync(documentId, profile.UserId, ct).ConfigureAwait(false);
+    }
+
+    private EditDenyReason? AssignmentDenial(RequestContext context, EditAssignmentGateFacts gate)
+    {
+        var profile = context.Profile;
+
+        if (gate.Facts.Count == 0 && context.LiftedColumns.Count == 0)
+        {
+            return null;
+        }
+
+        var sheetCode = context.Snapshot.Sheets.FirstOrDefault(s => s.Id == context.Table.SheetDefId)?.Code;
+        var utcNow = clock.UtcNow;
+
+        var codes = context.Updates.Concat(context.Creations)
+            .SelectMany(r => r.Cells.Select(c => c.ColumnCode))
+            .Distinct(StringComparer.Ordinal);
+
+        foreach (var code in codes)
+        {
+            if (!context.ColumnDefs.TryGetValue(code, out var column))
+            {
+                continue;
+            }
+
+            var facts = EditAssignmentGuard.Evaluate(
+                profile.UserId,
+                gate.OwnerUserId,
+                isIntegrationWriter: false,
+                gate.Facts,
+                new EditSliceFacts(
+                    sheetCode, context.Table.Code, context.PeriodKey, column.IsMonthColumn, column.MonthNumber),
+                utcNow);
+
+            if (facts.Lock != EditDenyReason.None)
+            {
+                return facts.Lock;
+            }
+
+            if (context.LiftedColumns.Contains(column.Id) && !facts.DelegatedWrite)
+            {
+                return EditDenyReason.InsufficientGrantLevel;
+            }
+        }
+
+        return null;
     }
 
     /// <summary>Аркуш, поданий чи затверджений під блокуванням, — відмова.</summary>

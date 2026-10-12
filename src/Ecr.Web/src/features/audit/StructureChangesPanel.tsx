@@ -9,6 +9,7 @@ import { useDebouncedFilter, useFilterCursor } from '@/shared/ui/useDebouncedFil
 import { useFieldDraft } from '@/shared/ui/useFieldDraft';
 import { useUrlNumber, useUrlState } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
+import { entityTypeLabel, operationLabel } from './auditLabels';
 import { structureChangeReasonText } from './structureChangeReason';
 
 /**
@@ -120,11 +121,11 @@ export function StructureChangesPanel({ from, to }: { from: string; to: string }
                     {/* ⛔ `R-18`: ім'я з сервера; номер — у підказці. */}
                     <Table.Td title={`#${String(change.changedByUserId)}`}>{authorName(change)}</Table.Td>
                     <Table.Td>
-                      <Text size="xs">
-                        {change.entityType} · {change.entityId}
+                      <Text size="xs" title={change.entityType}>
+                        {entityTypeLabel(change.entityType)} · {change.entityId}
                       </Text>
                     </Table.Td>
-                    <Table.Td>{change.operation}</Table.Td>
+                    <Table.Td title={change.operation}>{operationLabel(change.operation)}</Table.Td>
                     <Table.Td>
                       {change.changeReason === null ? '—' : structureChangeReasonText(change.changeReason)}
                     </Table.Td>

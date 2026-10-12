@@ -78,7 +78,7 @@ function json(body: unknown, status = 200): Response {
 }
 
 function respond({
-  permissions = ['Integration.View', 'Integration.Manage'],
+  permissions = ['Integration.View', 'Integration.Manage', 'Integration.EditSchedule'],
   create = () => json({ id: 50 }, 201),
   catalogOutage = false,
 }: {
@@ -169,7 +169,7 @@ afterEach(() => {
 
 describe("Шухляда з'єднання: вкладка Entities", () => {
   it('ФВ-13.11: без Integration.Manage вкладки немає', async () => {
-    respond({ permissions: ['Integration.View'] });
+    respond({ permissions: ['Integration.View', 'Integration.EditSchedule'] });
     show();
 
     const drawer = await screen.findByRole('dialog');
