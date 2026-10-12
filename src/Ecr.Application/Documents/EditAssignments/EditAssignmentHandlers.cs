@@ -238,7 +238,7 @@ public sealed class UpsertEditAssignmentHandler(
         // EA6-D2: термін дії — UTC, у майбутньому, не далі за стелю домену; повторно перевіряється під
         // транзакцією (годинник між підготовкою й записом ішов далі).
         DateTime? expiresAt = null;
-        if (request.ExpiresAt is { } requestedExpiry)
+        if (request.ExpiresAtSpecified && request.ExpiresAt is { } requestedExpiry)
         {
             expiresAt = EditAssignmentAccess.RequireValidExpiry(requestedExpiry, clock.UtcNow);
         }
@@ -286,7 +286,8 @@ public sealed class UpsertEditAssignmentHandler(
             request.BaseVersion, overwrite)
         {
             ExpiresAt = expiresAt,
-            KeepExpiresAt = keepExpiresAt,
+            // Поле відсутнє в запиті (або пакетна дія) — термін наявної передачі не змінюється.
+            KeepExpiresAt = keepExpiresAt || !request.ExpiresAtSpecified,
         };
     }
 

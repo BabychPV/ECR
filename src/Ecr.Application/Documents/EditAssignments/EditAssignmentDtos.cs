@@ -77,18 +77,41 @@ public sealed record EditAssignmentListDto(
 /// <param name="Note">Інструкція (≤ 500).</param>
 /// <param name="AppliedSetId">Набір, з якого взято склад (знімок назви беремо на сервері).</param>
 /// <param name="BaseVersion">Обов'язкова для зміни наявної передачі.</param>
-/// <param name="ExpiresAt">
-/// Термін дії передачі, UTC: у майбутньому й не пізніше ніж через 366 діб. Відсутнє чи <c>null</c> —
-/// безстроково (як і <paramref name="Note"/>, значення ЗАМІНЮЄ наявне: пропуск знімає термін).
-/// </param>
 public sealed record UpsertEditAssignmentRequest(
     EditAssignmentSliceDto Slice,
     IReadOnlyList<int> RecipientUserIds,
     bool IsExclusive = true,
     string? Note = null,
     int? AppliedSetId = null,
-    string? BaseVersion = null,
-    DateTime? ExpiresAt = null);
+    string? BaseVersion = null)
+{
+    private DateTime? _expiresAt;
+    private bool _expiresAtSpecified;
+
+    /// <summary>
+    /// Термін дії передачі, UTC: у майбутньому й не пізніше ніж через 366 діб. PATCH-семантика: ПОЛЕ ВІДСУТНЄ в
+    /// тілі — термін наявної передачі не змінюється (нова — без терміну); явний <c>null</c> — термін знімається;
+    /// значення — замінює.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Не параметр конструктора навмисно: <c>System.Text.Json</c> викликає init-аксесор лише для присутнього
+    /// в JSON поля (у тому числі зі значенням <c>null</c>), і тому розрізняє «відсутнє» й «null» —
+    /// <see cref="ExpiresAtSpecified"/>.
+    /// </remarks>
+    public DateTime? ExpiresAt
+    {
+        get => _expiresAt;
+        init
+        {
+            _expiresAt = value;
+            _expiresAtSpecified = true;
+        }
+    }
+
+    /// <summary>Чи було поле <see cref="ExpiresAt"/> у тілі запиту (навіть зі значенням <c>null</c>).</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool ExpiresAtSpecified => _expiresAtSpecified;
+}
 
 /// <summary>Тіло валідації.</summary>
 /// <param name="BaseVersion">Версія передачі, яку бачив власник.</param>
