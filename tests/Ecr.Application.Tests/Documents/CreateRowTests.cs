@@ -318,6 +318,70 @@ public sealed class CreateRowTests
             Arg.Any<long>(), Arg.Any<PeriodKey>(), Arg.Any<RowKey>(), Arg.Any<int>(), Arg.Any<CancellationToken>());
     }
 
+    private void MissingInstance()
+        => _rows.ResolveTableInstanceAsync(TableInstance, Arg.Any<CancellationToken>())
+                .Returns<Task<TableInstanceRef>>(_ => throw new NotFoundException(
+                    "ECR-DOC-0404", $"Екземпляра таблиці {TableInstance} не знайдено.",
+                    new Dictionary<string, object?>
+                    {
+                        ["messageKey"] = "err.ECR-DOC-0404.tableInstance",
+                        ["tableInstanceId"] = TableInstance.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    }));
+
+    private static string Body(NotFoundException e)
+        => $"{e.ErrorCode}|{e.Message}|" + string.Join(
+            ";", e.Details!.OrderBy(p => p.Key, StringComparer.Ordinal).Select(p => $"{p.Key}={p.Value}"));
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "EA6-D1")]
+    public async Task Невидимий_документ_відповідає_однаково_для_власного_чужого_і_відсутнього_екземпляра()
+    {
+        // ⛔ EA6-D1 (P2): документ 701 для читача невидимий (чи його немає). Відповідь не залежить від
+        // того, чий екземпляр у тілі: ні від «чужий існуючий», ні від «такого екземпляра немає», ні від
+        // «екземпляр самого 701» — інакше перебором пар видно, які документи існують.
+        Arrange(TableRowMode.Dynamic, maxRows: null);
+        _access.CanReadDocumentAsync(Arg.Any<AccessProfile>(), 701, Arg.Any<CancellationToken>())
+               .Returns(EditDecision.Deny(EditDenyReason.NoGrant));
+
+        var foreign = await Assert.ThrowsAsync<NotFoundException>(() => Handler().HandleAsync(
+            documentId: 701, TableInstance, requestedKey: null, Profile(), CancellationToken.None));
+
+        _rows.ResolveTableInstanceAsync(TableInstance, Arg.Any<CancellationToken>())
+             .Returns(new TableInstanceRef(TableInstance, 701, 3, 2, Period));
+        var own = await Assert.ThrowsAsync<NotFoundException>(() => Handler().HandleAsync(
+            documentId: 701, TableInstance, requestedKey: null, Profile(), CancellationToken.None));
+
+        MissingInstance();
+        var missing = await Assert.ThrowsAsync<NotFoundException>(() => Handler().HandleAsync(
+            documentId: 701, TableInstance, requestedKey: null, Profile(), CancellationToken.None));
+
+        Assert.Equal("err.ECR-DOC-0404.document", foreign.Details!["messageKey"]);
+        Assert.Equal(Body(foreign), Body(own));
+        Assert.Equal(Body(foreign), Body(missing));
+
+        await _rows.DidNotReceive().CreateRowAsync(
+            Arg.Any<long>(), Arg.Any<PeriodKey>(), Arg.Any<RowKey>(), Arg.Any<int>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "EA6-D1")]
+    public async Task Видимий_документ_чужий_і_відсутній_екземпляр_відповідають_однаково()
+    {
+        // Документ 701 видимий: чужий існуючий і відсутній екземпляр — одне тіло (оракула існування
+        // екземплярів у чужих документах немає), і це не «документа немає».
+        Arrange(TableRowMode.Dynamic, maxRows: null);
+
+        var foreign = await Assert.ThrowsAsync<NotFoundException>(() => Handler().HandleAsync(
+            documentId: 701, TableInstance, requestedKey: null, Profile(), CancellationToken.None));
+
+        MissingInstance();
+        var missing = await Assert.ThrowsAsync<NotFoundException>(() => Handler().HandleAsync(
+            documentId: 701, TableInstance, requestedKey: null, Profile(), CancellationToken.None));
+
+        Assert.Equal("err.ECR-DOC-0404.tableInstance", foreign.Details!["messageKey"]);
+        Assert.Equal(Body(foreign), Body(missing));
+    }
+
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
     [Trait("Requirement", "ФВ-6.8")]
     public async Task Рішення_на_рядок_не_прийшло_це_відмова()

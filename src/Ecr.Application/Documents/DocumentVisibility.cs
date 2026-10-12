@@ -181,6 +181,73 @@ public static class DocumentVisibility
                 ["documentId"] = documentId.ToString(CultureInfo.InvariantCulture),
             });
 
+    /// <summary>
+    /// Розв'язує екземпляр таблиці з тіла запиту запису, нічого не розкриваючи про документ з маршруту (EA6-D1).
+    /// </summary>
+    /// <param name="rows">Сховище рядків.</param>
+    /// <param name="access">Служба доступу.</param>
+    /// <param name="profile">Профіль користувача (читається лише коли екземпляр не з цього документа).</param>
+    /// <param name="documentId">Документ з маршруту.</param>
+    /// <param name="tableInstanceId">Екземпляр з тіла запиту.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Екземпляр, що належить документові з маршруту (видимість документа перевіряє викликач).</returns>
+    /// <exception cref="NotFoundException">
+    /// <c>err.ECR-DOC-0404.document</c> — документ відсутній або невидимий (БУДЬ-ЯКИЙ <paramref name="tableInstanceId"/>);
+    /// <c>err.ECR-DOC-0404.tableInstance</c> — документ видимий, а екземпляра немає або він чужого документа.
+    /// </exception>
+    /// <remarks>
+    /// ⛔ Було: екземпляр чужого документа давав <c>tableInstanceNotInDocument</c> ДО перевірки видимості, а
+    /// екземпляр невидимого документа — <c>document</c>: перебором пари (документ, екземпляр) видно, які
+    /// документи існують у чужих проєктах (EA6-D1, P2). Тепер тіло залежить лише від видимості документа з
+    /// маршруту; чужий і відсутній екземпляр у видимому документі — одне тіло (оракула існування екземплярів
+    /// немає). Щасливий шлях не платить зайвим запитом: видимість питається лише на відмові.
+    /// </remarks>
+    public static async Task<TableInstanceRef> ResolveInDocumentAsync(
+        IRowStore rows, IAccessDecisionService access, Func<CancellationToken, Task<AccessProfile>> profile,
+        long documentId, long tableInstanceId, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(rows);
+        ArgumentNullException.ThrowIfNull(access);
+        ArgumentNullException.ThrowIfNull(profile);
+
+        TableInstanceRef? instance = null;
+        try
+        {
+            instance = await rows.ResolveTableInstanceAsync(tableInstanceId, ct).ConfigureAwait(false);
+        }
+        catch (NotFoundException)
+        {
+            // Нижче: відмова залежить від видимості документа, а не від того, що саме не знайдено.
+        }
+
+        if (instance is not null && instance.DocumentId == documentId)
+        {
+            return instance;
+        }
+
+        var read = await access
+            .CanReadDocumentAsync(await profile(ct).ConfigureAwait(false), documentId, ct)
+            .ConfigureAwait(false);
+        if (!read.IsAllowed)
+        {
+            throw NotFound(documentId);
+        }
+
+        throw TableInstanceNotFound(tableInstanceId);
+    }
+
+    /// <summary>Відповідь «екземпляра таблиці немає» — однакова для відсутнього, чужого й схованого.</summary>
+    /// <param name="tableInstanceId">Екземпляр.</param>
+    public static NotFoundException TableInstanceNotFound(long tableInstanceId)
+        => new(
+            "ECR-DOC-0404",
+            $"Екземпляра таблиці {tableInstanceId} не знайдено.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-DOC-0404.tableInstance",
+                ["tableInstanceId"] = tableInstanceId.ToString(CultureInfo.InvariantCulture),
+            });
+
     /// <summary>Відповідь «документа немає» — однакова для відсутнього й невидимого.</summary>
     /// <param name="documentId">Документ.</param>
     public static NotFoundException NotFound(long documentId)

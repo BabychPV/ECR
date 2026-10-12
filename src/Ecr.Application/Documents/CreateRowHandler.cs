@@ -32,29 +32,20 @@ public sealed class CreateRowHandler(
     {
         ArgumentNullException.ThrowIfNull(profile);
 
-        var instance = await rowStore.ResolveTableInstanceAsync(tableInstanceId, ct).ConfigureAwait(false);
-
         // ⛔ Належність екземпляра таблиці документові з МАРШРУТУ. Без цієї
         // звірки шлях у URL декоративний: клієнт указав би чужий
         // `TableInstanceId` і писав би в чужий документ, маючи право лише на
-        // свій. `Patch` цю перевірку робить і пояснює навіщо
-        // (`CellsController.Patch`); сюди вона не доїхала, хоча `documentId`
-        // сюди приходив — і не читався взагалі.
+        // свій. `Patch` робить те саме тим самим помічником
+        // (`CellsController.Patch`).
+        //
+        // ⛔ EA6-D1: відмова не розкриває існування документа — тіло залежить лише від його видимості
+        // (`DocumentVisibility.ResolveInDocumentAsync`), а не від того, чий екземпляр.
         //
         // ⚠ Стоїть в ОБРОБНИКУ, а не в контролері, як у `Patch`: обробник —
         // єдина точка, повз яку не пройде другий виклик.
-        if (instance.DocumentId != documentId)
-        {
-            throw new Errors.NotFoundException(
-                "ECR-DOC-0404",
-                $"Екземпляр таблиці {tableInstanceId} не належить документу {documentId}.",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = "err.ECR-DOC-0404.tableInstanceNotInDocument",
-                    ["tableInstanceId"] = tableInstanceId.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                    ["documentId"] = documentId.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                });
-        }
+        var instance = await DocumentVisibility
+            .ResolveInDocumentAsync(rowStore, access, _ => Task.FromResult(profile), documentId, tableInstanceId, ct)
+            .ConfigureAwait(false);
 
         // ⛔ Видимість документа — до будь-якої відмови про таблицю (V-02, той
         // самий клас, що й у `PatchCellsHandler`). Нижче відмови кажуть режим
