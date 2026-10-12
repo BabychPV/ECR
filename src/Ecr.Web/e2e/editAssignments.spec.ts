@@ -60,7 +60,10 @@ test.describe('Передача місяця: власник → виконав�
     await openDrawer(admin);
 
     await admin.getByRole('button', { name: /Assign month|Передать месяц/ }).click();
-    await admin.getByRole('checkbox', { name: /January|Январь/ }).check({ force: true });
+    // Mantine Chip ховає <input> поза в'юпортом (`check()` падає «outside of the viewport»): клікаємо по підпису чипа,
+    // а що січень справді обрано - перевіряємо за станом прихованого чекбокса.
+    await admin.getByRole('dialog').getByText(/^(January|Январь)$/).click();
+    await expect(admin.getByRole('checkbox', { name: /January|Январь/ })).toBeChecked();
     await admin.getByTestId('wizard-next').click();
 
     await admin.getByLabel(/Find people|Найти людей/).fill(Executor.search);
