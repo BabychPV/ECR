@@ -47,8 +47,15 @@ test.describe('projectDefaultVersion: форма проєкту пропонує
     await signIn(page);
 
     // ── 1. v2: клон опублікованої версії + публікація ────────────────────────
-    const source = await findPublishedVersion(page);
+    const source = await findSourceVersion(page);
     v1Id = source.versionId;
+    if (source.status !== 'Published') {
+      // Стенд сидить чернеткою: v1 має бути опублікованою, щоб лишатися в переліку форми поруч із v2.
+      const first = await page.request.post(`/api/v1/template-versions/${String(v1Id)}/publish`, {
+        data: { reason: 'e2e: ФВ-1.2, публікація базової версії стенда' },
+      });
+      expect(first.status(), `публікація v1: ${await first.text()}`).toBe(204);
+    }
     templateLabel = source.templateCode;
 
     const clone = await page.request.post(`/api/v1/template-versions/${String(v1Id)}/clone`, {
@@ -161,27 +168,57 @@ async function listVersions(page: Page, templateId: number): Promise<VersionRow[
   return ((await response.json()) as { items: VersionRow[] }).items;
 }
 
-/** Будь-яка опублікована версія будь-якого неархівного шаблону стенда - джерело для клону. */
-async function findPublishedVersion(
-  page: Page,
-): Promise<{ templateId: number; templateCode: string; versionId: number; versionLabel: string }> {
+/**
+ * Версія стенда - джерело для клону: найновіша опублікована неархівного шаблону, інакше (стенд може сидіти
+ * чернеткою) - будь-яка версія, яку тест сам опублікує. Порожній стенд - червоне з переліком побаченого.
+ */
+async function findSourceVersion(page: Page): Promise<{
+  templateId: number;
+  templateCode: string;
+  versionId: number;
+  versionLabel: string;
+  status: string;
+}> {
   const response = await page.request.get('/api/v1/templates?limit=100');
   expect(response.ok(), `GET templates: ${String(response.status())}`).toBe(true);
 
   const templates = ((await response.json()) as { items: { id: number; code: string; isArchived?: boolean }[] }).items;
+  const seen: string[] = [];
+  let draft: { templateId: number; templateCode: string; versionId: number; versionLabel: string; status: string } | null =
+    null;
+
   for (const template of templates) {
+    const rows = await listVersions(page, template.id);
+    seen.push(`${template.code}${template.isArchived === true ? ' (archived)' : ''}: ${rows.map((r) => `${r.version}=${r.status}`).join(', ')}`);
     if (template.isArchived === true) continue;
 
-    const published = (await listVersions(page, template.id)).filter((row) => row.status === 'Published');
-    const latest = published.at(-1);
-    if (latest !== undefined) {
-      return { templateId: template.id, templateCode: template.code, versionId: latest.id, versionLabel: `${template.code} · ${latest.version}` };
+    const published = rows.filter((row) => row.status === 'Published').at(-1);
+    if (published !== undefined) {
+      return {
+        templateId: template.id,
+        templateCode: template.code,
+        versionId: published.id,
+        versionLabel: `${template.code} · ${published.version}`,
+        status: 'Published',
+      };
+    }
+
+    const any = rows.find((row) => row.status === 'Draft');
+    if (any !== undefined && draft === null) {
+      draft = {
+        templateId: template.id,
+        templateCode: template.code,
+        versionId: any.id,
+        versionLabel: `${template.code} · ${any.version}`,
+        status: 'Draft',
+      };
     }
   }
 
-  throw new Error('не доведено: на стенді немає жодної опублікованої версії неархівного шаблону');
-}
+  if (draft !== null) return draft;
 
+  throw new Error(`не доведено: на стенді немає версії для клону. Шаблони: ${seen.join(' | ') || '(порожньо)'}`);
+}
 /**
  * ⚠ Найновіша опублікована версія ВЗАГАЛІ (серед усіх шаблонів) - це саме та, що пропонує форма. Тест клонує
  * версію з першого шаблону, де вона є, і публікує пізніше за всі, тож v2 гарантовано найновіша.
