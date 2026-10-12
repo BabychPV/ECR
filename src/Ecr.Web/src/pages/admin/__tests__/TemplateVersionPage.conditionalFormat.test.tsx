@@ -239,8 +239,14 @@ describe("TemplateVersionPage — умовне форматування (ФВ-2.
 
     await waitFor(() => expect(puts).toHaveLength(1));
     expect(puts[0]?.ifMatch).toBe(Etag);
+    // Гарантія: правило ІНШОЇ таблиці (ZZZ) не губиться й не змінюється, «сирота» (GONE) не повертається,
+    // змінене правило йде з новим значенням.
+    // ⚠ Порядок — ВИХІДНИЙ порядок набору (AAA, ZZZ): з L6 (P2-3) PUT лишає чужі/scoped правила на своїх
+    // місцях (`mergeForSave`), а не ставить їх першими. Раніше тут стояло [ZZZ, AAA] — артефакт «чужі правила
+    // на початку», який міняв Ordinal і тим самим тихо змінював пріоритет правил однієї колонки. Пріоритет у
+    // колонці = порядок у наборі; між різними колонками порядок значення не має. Порядок правил ОДНІЄЇ колонки
+    // фіксує mergeForSave у ConditionalFormatPanel.test.tsx («область» лишається на своєму місці).
     expect(puts[0]?.rules).toEqual([
-      stored[1],
       {
         columnCode: "AAA",
         operator: "gt",
@@ -250,6 +256,7 @@ describe("TemplateVersionPage — умовне форматування (ФВ-2.
         foregroundHex: null,
         isBold: false,
       },
+      stored[1],
     ]);
   });
 
