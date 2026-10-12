@@ -336,14 +336,50 @@ public sealed class MethodologyStore(EcrDbContext db, int constantCap) : IMethod
                 db.RegistryEntries.AsNoTracking(),
                 s => s.SubstanceEntryId,
                 e => e.Id,
-                (s, e) => new { s.SubstanceEntryId, e.Code })
+                (s, e) => new { s.SubstanceEntryId, e.Code, e.RegistryDefId })
+            .OrderBy(p => p.SubstanceEntryId)
             .Take(MaxChildren)
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
+        // ⛔ Код запису довідника (`EcrCode`) мусить починатися з літери, тож числовий код речовини
+        // (301, 1325) не може бути `RegistryEntry.Code`: у довіднику він лежить у полі SUBSTANCE_CODE,
+        // а код запису — `E301` (так само, як LAND_WASTE_SUBSTANCE). Суфікс форми B `{ключ}_301`
+        // береться з поля; немає поля чи значення — код запису (як було).
+        var entryIds = pairs.Select(p => p.SubstanceEntryId).Distinct().ToList();
+        var registryIds = pairs.Select(p => p.RegistryDefId).Distinct().ToList();
+        var fieldIds = await db.RegistryFieldDefs
+            .AsNoTracking()
+            .Where(f => registryIds.Contains(f.RegistryDefId) && f.Code == "SUBSTANCE_CODE")
+            .Select(f => f.Id)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var fromField = new Dictionary<long, string>();
+        if (fieldIds.Count > 0)
+        {
+            var values = await db.RegistryValues
+                .AsNoTracking()
+                .Where(v => entryIds.Contains(v.RegistryEntryId) && fieldIds.Contains(v.RegistryFieldDefId))
+                .Select(v => new { v.RegistryEntryId, v.ValueString, v.ValueNumeric })
+                .ToListAsync(ct)
+                .ConfigureAwait(false);
+
+            foreach (var value in values)
+            {
+                var text = !string.IsNullOrWhiteSpace(value.ValueString)
+                    ? value.ValueString.Trim()
+                    : value.ValueNumeric?.ToString("0.#########", System.Globalization.CultureInfo.InvariantCulture);
+                if (!string.IsNullOrEmpty(text))
+                {
+                    fromField[value.RegistryEntryId] = text;
+                }
+            }
+        }
+
         return pairs
             .GroupBy(p => p.SubstanceEntryId)
-            .ToDictionary(g => g.Key, g => g.First().Code);
+            .ToDictionary(g => g.Key, g => fromField.TryGetValue(g.Key, out var field) ? field : g.First().Code);
     }
 
     /// <inheritdoc />
