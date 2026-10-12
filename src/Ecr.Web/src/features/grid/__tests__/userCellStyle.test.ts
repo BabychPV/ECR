@@ -9,6 +9,7 @@ import {
   ThemeShades,
   userStyleOf,
   withUserStyle,
+  areaOf,
   chunkPatches,
   headerStyleProps,
   scopeRange,
@@ -226,5 +227,22 @@ describe('шар «рядок» і шапка', () => {
   it('headerStyleProps: без стилю — null, із заливкою — клас і змінні', () => {
     expect(headerStyleProps(null)).toBeNull();
     expect(headerStyleProps(style({ backgroundArgb: (0xff000000 | 0xffc000) | 0 }))).toMatchObject({ class: 'ecr-header-styled', style: { '--ecr-cell-fill': '#ffc000' } });
+  });
+});
+
+describe('areaOf: область запиту scope', () => {
+  const s = slice();
+  const range = { fromRow: 0, toRow: 1, fromColumn: 1, toColumn: 1 };
+
+  it('selection — немає (йдуть items); рядок/колонка/таблиця — scope', () => {
+    expect(areaOf(s, range, 0, 'selection')).toBeNull();
+    expect(areaOf(s, range, 0, 'row')).toEqual({ rowKeys: ['R1', 'R2'], allColumns: true });
+    expect(areaOf(s, range, 0, 'column')).toEqual({ columnCodes: ['B'], allRows: true });
+    expect(areaOf(s, null, 0, 'table')).toEqual({ allRows: true, allColumns: true });
+    expect(areaOf(s, null, 0, 'row')).toBeNull();
+  });
+
+  it('зсув колонки підпису віднімається від індексів сітки', () => {
+    expect(areaOf(s, { fromRow: 0, toRow: 0, fromColumn: 2, toColumn: 2 }, 1, 'column')).toEqual({ columnCodes: ['B'], allRows: true });
   });
 });

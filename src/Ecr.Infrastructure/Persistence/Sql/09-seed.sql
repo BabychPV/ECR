@@ -8009,6 +8009,7 @@ USING (VALUES
     ,(N'grid.cellColor.scope.row', N'en', N'Whole row', 1)
     ,(N'grid.cellColor.scope.column', N'en', N'Whole column', 1)
     ,(N'grid.cellColor.scope.table', N'en', N'Whole table', 1)
+    ,(N'grid.cellColor.partial', N'en', N'{count} cells were not changed (reason: {reasons}); the rest were coloured.', 1)
     -- L4:cellcolor ── кінець секції ──
     -- COLL:cellstyle-scope ── CELL-STYLE «область»: фарбування рядків × колонок одним запитом; ru/kz — порцією COLL:cellstyle-scope нижче ──
     ,(N'err.ECR-CELL-4224.scopeRows', N'en', N'Formatting by area: pass either a list of row keys or "all rows", not both and not neither.', 1)
@@ -20105,7 +20106,9 @@ SELECT v.[Key], v.Lang, v.Val
     (N'grid.cellColor.scope.column', N'ru', N'Весь столбец'),
     (N'grid.cellColor.scope.column', N'kz', N'Бүкіл баған'),
     (N'grid.cellColor.scope.table', N'ru', N'Вся таблица'),
-    (N'grid.cellColor.scope.table', N'kz', N'Бүкіл кесте')
+    (N'grid.cellColor.scope.table', N'kz', N'Бүкіл кесте'),
+    (N'grid.cellColor.partial', N'ru', N'Не изменено ячеек: {count} (причина: {reasons}); остальные окрашены.'),
+    (N'grid.cellColor.partial', N'kz', N'Өзгертілмеген ұяшық: {count} (себебі: {reasons}); қалғандары боялды.')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO

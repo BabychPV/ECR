@@ -2,11 +2,11 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { notifications } from '@mantine/notifications';
 import { apiFetch, EcrApiError } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
-import type { PatchCellStylesRequest, TableSliceDto } from '@/api/types';
+import type { PatchCellStylesRequest, PatchCellStylesResponse, TableSliceDto } from '@/api/types';
 import { t } from '@/shared/i18n';
 import { notificationCloseButtonProps } from '@/shared/ui/notify';
 import { logSuppressedDetail, problemText } from '@/shared/ui/problemText';
-import { applyStylePatches, chunkPatches, isValidPatch, type CellStylePatch } from './userCellStyle';
+import { applyStylePatches, chunkPatches, isValidPatch, type CellStylePatch, type StyleArea } from './userCellStyle';
 
 /**
  * Запис користувацького кольору комірок (L4): `PATCH …/tables/{tid}/cell-styles`
@@ -15,6 +15,8 @@ import { applyStylePatches, chunkPatches, isValidPatch, type CellStylePatch } fr
  * Семантика сервера: `null`/відсутнє поле — не чіпати, `""` — зняти, `reset: true` —
  * зняти все оформлення з перелічених комірок.
  *
+ * - Область «рядок/колонка/таблиця» (`area`) йде ОДНИМ запитом зі `scope` (сервер розгортає, стеля 50 000,
+ *   часткова відмова — `deniedCells`); `cells` тоді лише для оптимістичного оновлення.
  * - Виділення понад стелю сервера (2000) йде ПОРЦІЯМИ ≤ 1000, послідовно.
  * - Оптимістичне оновлення — лише після перевірки значень (`isValidPatch`).
  * - Після відмови (і завжди після завершення) зріз інвалідується: відкат іде на
@@ -28,12 +30,41 @@ export function useCellStyles(documentId: number, tableInstanceId: number, perio
   const path = `/api/v1/documents/${String(documentId)}/tables/${String(tableInstanceId)}/cell-styles`;
 
   return useMutation({
-    mutationFn: async ({ cells, reset = false }: { cells: readonly CellStylePatch[]; reset?: boolean }) => {
+    mutationFn: async ({
+      cells,
+      area = null,
+      reset = false,
+    }: {
+      cells: readonly CellStylePatch[];
+      area?: StyleArea | null;
+      reset?: boolean;
+    }): Promise<PatchCellStylesResponse | null> => {
+      if (area !== null) {
+        const first = cells[0];
+        const body: PatchCellStylesRequest = {
+          periodKey,
+          reset: false,
+          scope: {
+            ...area,
+            reset,
+            allRows: area.allRows ?? false,
+            allColumns: area.allColumns ?? false,
+            backgroundHex: first?.backgroundHex ?? null,
+            foregroundHex: first?.foregroundHex ?? null,
+            isBold: first?.isBold ?? null,
+          },
+        };
+
+        return apiFetch<PatchCellStylesResponse>(path, { method: 'PATCH', body: JSON.stringify(body) });
+      }
+
       for (const chunk of chunkPatches(cells)) {
         const body: PatchCellStylesRequest = { periodKey, items: chunk, reset };
 
         await apiFetch<unknown>(path, { method: 'PATCH', body: JSON.stringify(body) });
       }
+
+      return null;
     },
     meta: { handled: true },
     onMutate: async ({ cells }) => {
@@ -59,6 +90,20 @@ export function useCellStyles(documentId: number, tableInstanceId: number, perio
       notifications.show({
         color: conflict ? 'statusWarning' : 'statusError',
         message: conflict ? t('grid.cellColor.conflict') : (shown.detail ?? shown.title),
+        closeButtonProps: notificationCloseButtonProps,
+        ...{ 'data-testid': 'cell-color-toast' },
+      });
+    },
+    onSuccess: (response) => {
+      if (response === null || response.deniedCells <= 0) return;
+
+      const reasons = Object.entries(response.deniedByReason ?? {})
+        .map(([reason, count]) => `${reason}: ${String(count)}`)
+        .join(', ');
+
+      notifications.show({
+        color: 'statusWarning',
+        message: t('grid.cellColor.partial', { count: response.deniedCells, reasons }),
         closeButtonProps: notificationCloseButtonProps,
         ...{ 'data-testid': 'cell-color-toast' },
       });

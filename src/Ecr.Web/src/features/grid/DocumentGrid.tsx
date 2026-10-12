@@ -19,7 +19,7 @@ import { cellAppearanceClassOf, cellAppearanceOf } from './cellAppearance';
 import { cellFormatOf, withCellFormat } from './conditionalAppearance';
 import { CellColorMenu, type ColourTarget } from './CellColorMenu';
 import { useCellStyles } from './useCellStyles';
-import { colourableCells, headerStyleProps, scopeRange, userStyleOf, withRowStyle, withUserStyle, type StyleScope } from './userCellStyle';
+import { areaOf, colourableCells, headerStyleProps, scopeRange, userStyleOf, withRowStyle, withUserStyle, type StyleScope } from './userCellStyle';
 import { cellDisplay, cellText, editorValueOf, isNumericColumn, isTextColumnType, sameColumnValue } from './cellValue';
 import { columnIndexOf, rowIndexOf } from './rowIndex';
 import { planPaste, type PasteRejection } from './clipboard';
@@ -402,15 +402,18 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
 
       // Сервер: `""` — зняти, `null` — не чіпати. «Без заливки»/«Автоматичний» = `""`.
       const value = hex ?? '';
+      const offset = slice.data === undefined || !hasRowLabels(slice.data) ? 0 : 1;
 
       cellStyles.mutate({
         cells: colourTargets.map((cell) => ({
           ...cell,
           ...(target === 'fill' ? { backgroundHex: value } : { foregroundHex: value }),
         })),
+        // Рядок/колонка/таблиця — один PATCH зі `scope` (сервер розгортає й дає часткову відмову).
+        area: slice.data === undefined ? null : areaOf(slice.data, styleSelection, offset, styleScope),
       });
     },
-    [colourTargets, cellStyles],
+    [colourTargets, cellStyles, slice.data, styleSelection, styleScope],
   );
 
   const queryClient = useQueryClient();

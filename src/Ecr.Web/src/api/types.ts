@@ -38,6 +38,12 @@ export type CellFormatDto = Schemas['CellFormatDto'];
 /** Зміна оформлення однієї комірки в `PATCH …/cell-styles`. */
 export type CellStyleChange = Schemas['CellStyleChange'];
 
+/** Область «рядки × колонки» в `PATCH …/cell-styles` (`scope`). */
+export type CellStyleScope = Schemas['CellStyleScope'];
+
+/** Відповідь `PATCH …/cell-styles` (`deniedCells` — часткова відмова області `scope`). */
+export type PatchCellStylesResponse = Schemas['PatchCellStylesResponse'];
+
 /** Тіло `PATCH …/cell-styles`. */
 export type PatchCellStylesRequest = Schemas['PatchCellStylesRequest'];
 

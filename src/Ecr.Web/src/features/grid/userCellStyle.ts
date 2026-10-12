@@ -72,6 +72,34 @@ export function scopeRange(
   return range;
 }
 
+/** Область запиту без кольорів (рядки × колонки) для `PatchCellStylesRequest.scope`; `selection` — `null` (йдуть `items`). */
+export interface StyleArea {
+  readonly rowKeys?: string[];
+  readonly columnCodes?: string[];
+  readonly allRows?: boolean;
+  readonly allColumns?: boolean;
+}
+
+/**
+ * Область для ОДНОГО запиту `scope` (сервер сам розгортає, рахує права і дає часткову відмову).
+ * `row` — виділені рядки × усі колонки; `column` — усі рядки × виділені колонки; `table` — усе.
+ */
+export function areaOf(
+  slice: Pick<TableSliceDto, 'rows' | 'columns'>,
+  range: GridSelection['range'] | null,
+  labelOffset: number,
+  scope: StyleScope,
+): StyleArea | null {
+  if (scope === 'selection') return null;
+  if (scope === 'table') return { allRows: true, allColumns: true };
+  if (range === null) return null;
+
+  const rowKeys = slice.rows.slice(Math.max(0, range.fromRow), range.toRow + 1).map((r) => r.rowKey);
+  const columnCodes = slice.columns.slice(Math.max(0, range.fromColumn - labelOffset), range.toColumn - labelOffset + 1).map((c) => c.code);
+
+  return scope === 'row' ? { rowKeys, allColumns: true } : { columnCodes, allRows: true };
+}
+
 /**
  * Шар «рядок»: шаблонний стиль рядка (`RowDto.style`) поверх стилю колонки. Колір/вирівнювання
  * рядка перекриває колонку, жирність/курсив/перенос — додаються.
