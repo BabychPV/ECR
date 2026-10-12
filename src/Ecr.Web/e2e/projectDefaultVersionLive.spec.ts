@@ -33,9 +33,14 @@ const stamp = Date.now().toString(36).toUpperCase();
 const NewVersion = `FV12-${stamp}`;
 
 /** Усе, що тест створив і що `afterAll` прибирає. */
-const created: { versionId: number | null; projectIds: number[] } = { versionId: null, projectIds: [] };
+const created: { versionId: number | null; baseVersionId: number | null; projectIds: number[] } = {
+  versionId: null,
+  baseVersionId: null,
+  projectIds: [],
+};
 let v1Id = 0;
 let v2Id = 0;
+let v1Label = '';
 let templateLabel = '';
 
 test.describe('projectDefaultVersion: форма проєкту пропонує останню опубліковану версію (ФВ-1.2)', () => {
@@ -49,12 +54,13 @@ test.describe('projectDefaultVersion: форма проєкту пропонує
     // ── 1. v2: клон опублікованої версії + публікація ────────────────────────
     const source = await findSourceVersion(page);
     v1Id = source.versionId;
+    v1Label = v1Label;
     if (source.status !== 'Published') {
-      // Стенд сидить чернеткою: v1 має бути опублікованою, щоб лишатися в переліку форми поруч із v2.
-      const first = await page.request.post(`/api/v1/template-versions/${String(v1Id)}/publish`, {
-        data: { reason: 'e2e: ФВ-1.2, публікація базової версії стенда' },
-      });
-      expect(first.status(), `публікація v1: ${await first.text()}`).toBe(204);
+      // ⚠ Прогін 38293702756: єдина версія стенда - ЧЕРНЕТКА з фіксованою таблицею без рядків, її публікацію
+      // сервер відхиляє (ECR-TMPL-4228). Базову версію стенда не чіпаємо: v1 - її клон із доданим рядком.
+      v1Id = await publishableClone(page, source.versionId, `FV12-${stamp}-BASE`);
+      v1Label = `${source.templateCode} · FV12-${stamp}-BASE`;
+      created.baseVersionId = v1Id;
     }
     templateLabel = source.templateCode;
 
@@ -93,13 +99,13 @@ test.describe('projectDefaultVersion: форма проєкту пропонує
     const listbox = page.getByRole('listbox').filter({ hasText: NewVersion });
     await expect(listbox.getByRole('option', { name: new RegExp(`${reEscape(v2Label())}$`) })).toBeVisible();
     await expect(
-      listbox.getByRole('option', { name: new RegExp(`${reEscape(source.versionLabel)}$`) }),
+      listbox.getByRole('option', { name: new RegExp(`${reEscape(v1Label)}$`) }),
       'v1 зникла зі списку версій',
     ).toBeVisible();
 
     // ── 4. Свідомий вибір v1 не перекривається пропозицією ──────────────────
-    await listbox.getByRole('option', { name: new RegExp(`${reEscape(source.versionLabel)}$`) }).click();
-    await expect(versionField).toHaveValue(new RegExp(`${reEscape(source.versionLabel)}$`));
+    await listbox.getByRole('option', { name: new RegExp(`${reEscape(v1Label)}$`) }).click();
+    await expect(versionField).toHaveValue(new RegExp(`${reEscape(v1Label)}$`));
     const first = await submitForm(page, `E2E-FV12-${stamp}-A`);
     created.projectIds.push(first.projectId);
     expect(first.templateVersionIdSent, 'проєкт мав піти з обраною v1').toBe(v1Id);
@@ -118,7 +124,7 @@ test.describe('projectDefaultVersion: форма проєкту пропонує
 
   test.afterAll(async ({ browser }, testInfo) => {
     testInfo.setTimeout(120_000);
-    if (created.versionId === null && created.projectIds.length === 0) return;
+    if (created.versionId === null && created.baseVersionId === null && created.projectIds.length === 0) return;
 
     const context = await browser.newContext();
     const page = await context.newPage();
@@ -127,9 +133,10 @@ test.describe('projectDefaultVersion: форма проєкту пропонує
       for (const projectId of created.projectIds) {
         await page.request.post(`/api/v1/projects/${String(projectId)}/archive`).catch(() => undefined);
       }
-      if (created.versionId !== null) {
+      for (const versionId of [created.versionId, created.baseVersionId]) {
+        if (versionId === null) continue;
         await page.request
-          .post(`/api/v1/template-versions/${String(created.versionId)}/deprecate`, {
+          .post(`/api/v1/template-versions/${String(versionId)}/deprecate`, {
             data: { reason: 'e2e: ФВ-1.2, повернення стенда до базової лінії' },
           })
           .catch(() => undefined);
@@ -168,6 +175,39 @@ async function listVersions(page: Page, templateId: number): Promise<VersionRow[
   return ((await response.json()) as { items: VersionRow[] }).items;
 }
 
+/**
+ * Клон `sourceId`, у якому кожна таблиця без рядків (фіксована/змішана) отримує один рядок - інакше публікацію
+ * відхиляє ECR-TMPL-4228 - і який публікується. Повертає id опублікованої версії-клону.
+ */
+async function publishableClone(page: Page, sourceId: number, name: string): Promise<number> {
+  const clone = await page.request.post(`/api/v1/template-versions/${String(sourceId)}/clone`, {
+    data: { newVersion: name },
+  });
+  expect(clone.status(), `клон ${String(sourceId)}: ${await clone.text()}`).toBe(201);
+  const id = ((await clone.json()) as { versionId: number }).versionId;
+
+  const structure = await page.request.get(`/api/v1/template-versions/${String(id)}/structure`);
+  expect(structure.ok(), `structure ${String(id)}: ${await structure.text()}`).toBe(true);
+  const sheets = ((await structure.json()) as {
+    sheets: { tables: { id: number; rowMode: string; rows: unknown[] }[] }[];
+  }).sheets;
+
+  for (const table of sheets.flatMap((sheet) => sheet.tables)) {
+    if (table.rowMode === 'Dynamic' || table.rows.length > 0) continue;
+
+    const row = await page.request.put(`/api/v1/template-versions/${String(id)}/tables/${String(table.id)}/rows/E2EFV12`, {
+      data: { labelL10n: { en: 'E2E row' }, ordinal: null, rowKind: 'Item', parentRowKey: null, isReadOnly: false },
+    });
+    expect(row.ok(), `рядок таблиці ${String(table.id)}: ${await row.text()}`).toBe(true);
+  }
+
+  const publish = await page.request.post(`/api/v1/template-versions/${String(id)}/publish`, {
+    data: { reason: 'e2e: ФВ-1.2, базова опублікована версія' },
+  });
+  expect(publish.status(), `публікація ${name}: ${await publish.text()}`).toBe(204);
+
+  return id;
+}
 /**
  * Версія стенда - джерело для клону: найновіша опублікована неархівного шаблону, інакше (стенд може сидіти
  * чернеткою) - будь-яка версія, яку тест сам опублікує. Порожній стенд - червоне з переліком побаченого.
