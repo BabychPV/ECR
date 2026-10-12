@@ -334,6 +334,31 @@ public sealed class CreateRowTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "D3-A S-4")]
+    public async Task Відсутній_і_чужий_екземпляр_відповідають_однаково_байт_у_байт()
+    {
+        // Зміна поведінки D3-A: чужий екземпляр тепер `err.ECR-DOC-0404.document` (раніше
+        // `tableInstanceNotInDocument`) — тіло збігається з відсутнім/недоступним.
+        Arrange(TableRowMode.Dynamic, maxRows: null);
+        var foreign = await Assert.ThrowsAsync<NotFoundException>(() => Handler().HandleAsync(
+            documentId: 701, TableInstance, requestedKey: null, Profile(), CancellationToken.None));
+
+        _rows.ResolveTableInstanceAsync(TableInstance, Arg.Any<CancellationToken>())
+             .Returns<Task<TableInstanceRef>>(_ => throw new NotFoundException(
+                 "ECR-DOC-0404", "Екземпляр таблиці не знайдено.",
+                 new Dictionary<string, object?> { ["messageKey"] = "err.ECR-DOC-0404.tableInstance" }));
+        var missing = await Assert.ThrowsAsync<NotFoundException>(() => Handler().HandleAsync(
+            documentId: 701, TableInstance, requestedKey: null, Profile(), CancellationToken.None));
+
+        Assert.Equal(foreign.ErrorCode, missing.ErrorCode);
+        Assert.Equal(foreign.Message, missing.Message);
+        Assert.Equal(
+            foreign.Details!.OrderBy(p => p.Key).Select(p => $"{p.Key}={p.Value}"),
+            missing.Details!.OrderBy(p => p.Key).Select(p => $"{p.Key}={p.Value}"));
+        Assert.Equal("err.ECR-DOC-0404.document", foreign.Details!["messageKey"]);
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
     [Trait("Requirement", "ФВ-6.8")]
     public async Task Рішення_на_рядок_не_прийшло_це_відмова()
     {

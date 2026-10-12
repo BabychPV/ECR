@@ -32,7 +32,16 @@ public sealed class CreateRowHandler(
     {
         ArgumentNullException.ThrowIfNull(profile);
 
-        var instance = await rowStore.ResolveTableInstanceAsync(tableInstanceId, ct).ConfigureAwait(false);
+        // ⛔ S-4: ВІДСУТНІЙ екземпляр дає те саме тіло 404, що й чужий/недоступний (без оракула існування).
+        TableInstanceRef instance;
+        try
+        {
+            instance = await rowStore.ResolveTableInstanceAsync(tableInstanceId, ct).ConfigureAwait(false);
+        }
+        catch (Errors.NotFoundException)
+        {
+            throw DocumentVisibility.DocumentNotFound(documentId);
+        }
 
         // ⛔ Належність екземпляра таблиці документові з МАРШРУТУ + видимість документа (V-02): 404, не 403.
         // ⛔ P3 (оракул існування): «екземпляр чужого документа» і «документ недоступний» — ОДНА відповідь
@@ -42,20 +51,21 @@ public sealed class CreateRowHandler(
             : EditDecision.Deny(EditDenyReason.NoGrant);
         if (!read.IsAllowed)
         {
-            throw new Errors.NotFoundException(
-                "ECR-DOC-0404",
-                $"Документ {documentId} не знайдено.",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = "err.ECR-DOC-0404.document",
-                    ["documentId"] = documentId.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                });
+            throw DocumentVisibility.DocumentNotFound(documentId);
         }
         // ⛔ D-6: схована таблиця для читача НЕ ІСНУЄ — 404 ДО відмови «RowMode = Fixed», що називала її код.
-        await DocumentVisibility
-            .RequireTableVisibleAsync(
-                access, profile, documentId, instance.TableInstanceId, instance.TableDefId, instance.PeriodKey, ct)
-            .ConfigureAwait(false);
+        try
+        {
+            await DocumentVisibility
+                .RequireTableVisibleAsync(
+                    access, profile, documentId, instance.TableInstanceId, instance.TableDefId, instance.PeriodKey, ct)
+                .ConfigureAwait(false);
+        }
+        catch (Errors.NotFoundException)
+        {
+            // S-4: схована таблиця — те саме тіло, що й «документа немає».
+            throw DocumentVisibility.DocumentNotFound(documentId);
+        }
 
         var snapshot = await metadata.GetAsync(instance.TemplateVersionId, ct).ConfigureAwait(false);
 

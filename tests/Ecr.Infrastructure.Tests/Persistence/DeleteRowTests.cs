@@ -258,7 +258,7 @@ public sealed class DeleteRowTests(SqlServerFixture sql)
                       StringComparer.Ordinal));
 
         // P1-2: рішення на значення комірок рядка — дозволено (колонкові заборони доводить DeleteRowGuardsTests).
-        access.CanEditCellsAsync(
+        access.CanClearCellsAsync(
                   Arg.Any<AccessProfile>(), doc.TableInstanceId, Arg.Any<PeriodKey>(),
                   Arg.Any<IReadOnlyCollection<CellAddress>>(), Arg.Any<CancellationToken>())
               .Returns(call => (IReadOnlyDictionary<CellAddress, EditDecision>)call

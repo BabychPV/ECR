@@ -197,7 +197,7 @@ public sealed class IntegrationCellPatcher(
             {
                 await patch
                     .HandleAsync(
-                        new PatchCellsRequest(tableInstanceId, periodKey.Value, "Integration", plan.Rows),
+                        new PatchCellsRequest(tableInstanceId, periodKey.Value, Ecr.Application.Documents.CellChangeOrigins.Integration, plan.Rows),
                         ct)
                     .ConfigureAwait(false);
 

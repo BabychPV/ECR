@@ -150,6 +150,22 @@ public interface IAccessDecisionService
         IReadOnlyCollection<CellAddress> addresses, CancellationToken ct);
 
     /// <summary>
+    /// Чи можна СТЕРТИ значення цих комірок (видалення рядка, D3-A): те саме рішення, що й
+    /// <see cref="CanEditCellsAsync"/> — грант на колонку, період, правила доступу до періоду, передача зрізу, —
+    /// АЛЕ без ознак колонки «обчислювана»/«лише для читання».
+    /// </summary>
+    /// <remarks>
+    /// ⛔ S-2: <c>CanEdit</c> віддає <c>CalculatedCell</c>/<c>ColumnReadOnly</c> РАНІШЕ за перевірку гранта, тож
+    /// явний Deny на таку колонку лишався б непоміченим. Ознаки колонки тут не заважають (людина не вводила
+    /// ці значення руками), а грант на колонку перевіряється завжди.
+    /// ⚠ Результат ТАКИЙ САМИЙ за формою: <c>RequiresConfirmation</c>/<c>OutOfWindowMark</c> повертаються як є —
+    /// рішення про них приймає викликач (видалення каналу підтвердження не має).
+    /// </remarks>
+    public Task<IReadOnlyDictionary<CellAddress, EditDecision>> CanClearCellsAsync(
+        AccessProfile profile, long tableInstanceId, PeriodKey periodKey,
+        IReadOnlyCollection<CellAddress> addresses, CancellationToken ct);
+
+    /// <summary>
     /// Рішення для рядків, яких у зрізі ще <b>немає</b> — тобто для створення.
     /// </summary>
     /// <param name="profile">Профіль прав користувача.</param>

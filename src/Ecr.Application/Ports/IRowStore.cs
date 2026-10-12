@@ -157,9 +157,13 @@ public interface IRowStore
 
     /// <summary>
     /// Чи має рядок значення, ОСТАННІ (за кожною коміркою, крім перерахунку) від інтеграції, імпорту книги чи
-    /// збору (<c>aud.CellChange.Origin</c> ∈ Integration / Import / ImportOverwrite / Collection) (D3, P1-3).
+    /// збору (<c>aud.CellChange</c>/<c>arc.AuditCellChange</c>, <c>Origin = CellChangeOrigins.Integration</c>) (D3, P1-3).
     /// </summary>
-    /// <remarks>Рядок із такими значеннями людина «рукою» не видаляє: машинні дані «відродить» наступний прогін.</remarks>
+    /// <remarks>
+    /// Рядок із такими значеннями людина «рукою» не видаляє: машинні дані «відродить» наступний прогін.
+    /// ⚠ Імпорт книги (<c>Import</c>/<c>ImportOverwrite</c>) — ПРАВКА ЛЮДИНИ (D2-01/AN-115, <c>CellChangeOrigins.IsHuman</c>)
+    /// і блокування не дає.
+    /// </remarks>
     public Task<bool> HasMachineOriginAsync(long documentId, PeriodKey periodKey, long rowId, CancellationToken ct);
 
     /// <summary>

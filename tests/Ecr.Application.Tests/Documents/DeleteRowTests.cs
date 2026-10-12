@@ -100,7 +100,7 @@ public sealed class DeleteRowTests
 
     /// <summary>Рішення на значення комірок рядка (P1-2): за замовчуванням усе дозволено.</summary>
     private void AllowCells()
-        => _access.CanEditCellsAsync(
+        => _access.CanClearCellsAsync(
                       Arg.Any<AccessProfile>(), TableInstance, Arg.Any<PeriodKey>(),
                       Arg.Any<IReadOnlyCollection<CellAddress>>(), Arg.Any<CancellationToken>())
                   .Returns(call => (IReadOnlyDictionary<CellAddress, EditDecision>)call
@@ -108,7 +108,7 @@ public sealed class DeleteRowTests
                       .ToDictionary(a => a, _ => EditDecision.Allow()));
 
     private void DenyCells(EditDenyReason reason)
-        => _access.CanEditCellsAsync(
+        => _access.CanClearCellsAsync(
                       Arg.Any<AccessProfile>(), TableInstance, Arg.Any<PeriodKey>(),
                       Arg.Any<IReadOnlyCollection<CellAddress>>(), Arg.Any<CancellationToken>())
                   .Returns(call => (IReadOnlyDictionary<CellAddress, EditDecision>)call
@@ -327,27 +327,51 @@ public sealed class DeleteRowTests
 
         Assert.Equal("ECR-ACCS-0403", ex.ErrorCode);
         Assert.Equal("err.ECR-ACCS-0403.deleteRowDenied", ex.Details!["messageKey"]);
-        Assert.Equal(reason.ToString(), ex.Details["reason"]);
+        // S-4: reason ОДИН для всіх заборон на комірки — не розрізняє «прихована колонка» і «відкрита».
+        Assert.Equal(nameof(EditDenyReason.BusinessRule), ex.Details["reason"]);
         Assert.DoesNotContain("31", ex.Message, StringComparison.Ordinal);
         await _rows.DidNotReceive().SoftDeleteRowAsync(Arg.Any<long>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>());
         await _audit.DidNotReceive().WriteStructureChangeAsync(Arg.Any<StructureChangeRecord>(), Arg.Any<CancellationToken>());
     }
 
     [Theory]
-    [InlineData(EditDenyReason.CalculatedCell)]
-    [InlineData(EditDenyReason.ColumnReadOnly)]
+    [InlineData(false)]
+    [InlineData(true)]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
-    [Trait("Requirement", "D3-A P1-2")]
-    public async Task Обчислювана_чи_службова_колонка_не_є_забороною_для_людини(EditDenyReason reason)
+    [Trait("Requirement", "D3-A S-3")]
+    public async Task Дозвіл_за_підтвердженням_або_з_позначкою_поза_вікном_не_дає_видалити(bool marked)
     {
+        // Каналу підтвердження для DELETE немає, а PatchCellsHandler такі комірки без нього теж не пише.
         Arrange();
-        DenyCells(reason);
+        _access.CanClearCellsAsync(
+                   Arg.Any<AccessProfile>(), TableInstance, Arg.Any<PeriodKey>(),
+                   Arg.Any<IReadOnlyCollection<CellAddress>>(), Arg.Any<CancellationToken>())
+               .Returns(call => (IReadOnlyDictionary<CellAddress, EditDecision>)call
+                   .ArgAt<IReadOnlyCollection<CellAddress>>(3)
+                   .ToDictionary(
+                       a => a,
+                       _ => marked ? EditDecision.AllowMarked("поза вікном") : EditDecision.AllowWithConfirmation("поза вікном")));
 
-        await Run();
+        var ex = await Assert.ThrowsAsync<AccessDeniedException>(() => Run());
 
-        await _rows.Received(1).SoftDeleteRowAsync(RowId, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>());
+        Assert.Equal("ECR-ACCS-0403", ex.ErrorCode);
+        await _rows.DidNotReceive().SoftDeleteRowAsync(Arg.Any<long>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>());
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "D3-A S-3")]
+    public async Task Рішення_на_комірку_не_прийшло_це_відмова()
+    {
+        Arrange();
+        _access.CanClearCellsAsync(
+                   Arg.Any<AccessProfile>(), TableInstance, Arg.Any<PeriodKey>(),
+                   Arg.Any<IReadOnlyCollection<CellAddress>>(), Arg.Any<CancellationToken>())
+               .Returns(new Dictionary<CellAddress, EditDecision>());
+
+        await Assert.ThrowsAsync<AccessDeniedException>(() => Run());
+        await _rows.DidNotReceive().SoftDeleteRowAsync(Arg.Any<long>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>());
+    }
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
     [Trait("Requirement", "D3-A P1-3")]
@@ -365,23 +389,38 @@ public sealed class DeleteRowTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
-    [Trait("Requirement", "D3-A P3")]
-    public async Task Чужий_екземпляр_і_недоступний_документ_відповідають_однаково()
+    [Trait("Requirement", "D3-A S-4")]
+    public async Task Відсутній_чужий_і_недоступний_екземпляр_відповідають_однаково_байт_у_байт()
     {
-        // Оракул існування: за різницею тексту не можна вгадувати чужі `TableInstanceId`.
+        // Оракул існування: за різницею тіла не можна вгадувати чужі `TableInstanceId`.
         Arrange();
-        var foreign = await Assert.ThrowsAsync<NotFoundException>(() => Run(documentId: 701));
+        // Екземпляр належить ІНШОМУ документові (999); запитано 700 — як і в двох інших випадках.
+        _rows.ResolveTableInstanceAsync(TableInstance, Arg.Any<CancellationToken>())
+             .Returns(new TableInstanceRef(TableInstance, 999, 3, 2, Period));
+        var foreign = await Assert.ThrowsAsync<NotFoundException>(() => Run());
 
+        _rows.ResolveTableInstanceAsync(TableInstance, Arg.Any<CancellationToken>())
+             .Returns<Task<TableInstanceRef>>(_ => throw new NotFoundException(
+                 "ECR-DOC-0404", "Екземпляр таблиці не знайдено.",
+                 new Dictionary<string, object?> { ["messageKey"] = "err.ECR-DOC-0404.tableInstance" }));
+        var missing = await Assert.ThrowsAsync<NotFoundException>(() => Run());
+
+        Arrange();
         _access.CanReadDocumentAsync(Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<CancellationToken>())
                .Returns(EditDecision.Deny(EditDenyReason.NoGrant));
         var hidden = await Assert.ThrowsAsync<NotFoundException>(() => Run());
 
-        Assert.Equal(foreign.ErrorCode, hidden.ErrorCode);
-        Assert.Equal(
-            foreign.Details!["messageKey"], hidden.Details!["messageKey"]);
-        Assert.Equal("err.ECR-DOC-0404.document", foreign.Details["messageKey"]);
-    }
+        foreach (var other in new[] { missing, hidden })
+        {
+            Assert.Equal(foreign.ErrorCode, other.ErrorCode);
+            Assert.Equal(foreign.Message, other.Message);
+            Assert.Equal(
+                foreign.Details!.OrderBy(p => p.Key).Select(p => $"{p.Key}={p.Value}"),
+                other.Details!.OrderBy(p => p.Key).Select(p => $"{p.Key}={p.Value}"));
+        }
 
+        Assert.Equal("err.ECR-DOC-0404.document", foreign.Details!["messageKey"]);
+    }
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
     [Trait("Requirement", "D3-A P3")]

@@ -92,6 +92,8 @@ public sealed class DeleteRowGuardsTests(SqlServerFixture sql) : IDisposable
         var denied = (AccessDeniedException)error!;
         Assert.Equal("ECR-ACCS-0403", denied.ErrorCode);
         Assert.Equal("err.ECR-ACCS-0403.deleteRowDenied", denied.Details!["messageKey"]);
+        // S-4: reason фіксований — прихована колонка не відрізняється від відкритої.
+        Assert.Equal(nameof(EditDenyReason.BusinessRule), denied.Details["reason"]?.ToString());
 
         // Нерозкриття: ні колонки, ні її значення у відповіді.
         Assert.DoesNotContain(column.ToString(System.Globalization.CultureInfo.InvariantCulture), denied.Message, StringComparison.Ordinal);
@@ -109,12 +111,11 @@ public sealed class DeleteRowGuardsTests(SqlServerFixture sql) : IDisposable
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "D3-A")]
     [InlineData("Integration", null, true)]
-    [InlineData("Import", null, true)]
-    [InlineData("Collection", null, true)]
     [InlineData("Integration", "Recalculation", true)]
     [InlineData("Integration", "UserEdit", false)]
-    [InlineData("UserEdit", null, false)]
-    public async Task Рядок_з_останнім_значенням_від_машини_не_видаляється_а_після_правки_людини_видаляється(
+    [InlineData("Import", null, false)]
+    [InlineData("ImportOverwrite", null, false)]
+    [InlineData("UserEdit", null, false)]    public async Task Рядок_з_останнім_значенням_від_машини_не_видаляється_а_після_правки_людини_видаляється(
         string first, string? second, bool blocked)
     {
         var scene = await ArrangeAsync(withAssignment: false);
@@ -143,6 +144,64 @@ public sealed class DeleteRowGuardsTests(SqlServerFixture sql) : IDisposable
         }
     }
 
+    // ── S-2: колонка «лише читання» з явним Deny ────────────────────────────
+
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "D3-A S-2")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Колонка_лише_для_читання_з_явним_Deny_блокує_а_без_Deny_не_заважає(bool deny)
+    {
+        var scene = await ArrangeAsync(withAssignment: false);
+        var column = scene.Doc.ColumnDefIds[1];
+        await ExecuteAsync($"UPDATE cfg.ColumnDef SET IsReadOnly = 1 WHERE Id = {column}");
+
+        var builder = new AccessBuilder { UserId = scene.StrangerId }
+            .Grant(ResourceKind.Project, scene.Doc.ProjectId, GrantLevel.Write);
+        var profile = (deny ? builder.Deny(ResourceKind.Column, column) : builder).Build();
+
+        var error = await RunAsync(scene, profile, Interference.None);
+
+        if (deny)
+        {
+            var denied = Assert.IsType<AccessDeniedException>(error);
+            Assert.Equal("ECR-ACCS-0403", denied.ErrorCode);
+            Assert.Equal(0, await IsDeletedAsync(scene));
+            Assert.Equal(777.25m, await ValueAsync(scene));
+        }
+        else
+        {
+            Assert.Null(error);
+            Assert.Equal(1, await IsDeletedAsync(scene));
+        }
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "D3-A P1-B")]
+    public async Task Архівний_журнал_теж_враховується_у_машинному_походженні()
+    {
+        var scene = await ArrangeAsync(withAssignment: false);
+        var profile = new AccessBuilder { UserId = scene.StrangerId }
+            .Grant(ResourceKind.Project, scene.Doc.ProjectId, GrantLevel.Write).Build();
+        var doc = scene.Doc;
+        var rowKey = await ScalarAsync<string>(
+            $"SELECT RowKey FROM doc.TableRow WHERE PeriodKey = {doc.PeriodKey.Value} AND Id = {doc.RowIds[0]}");
+        await ExecuteAsync(
+            "INSERT INTO arc.AuditCellChange (ChangedAt, PeriodKey, DocumentId, TableRowId, RowKey, ColumnDefId, OldValue, "
+            + "NewValue, ChangedByUserId, Origin, IsLateEdit, IsOutOfWindow) VALUES "
+            + $"('2026-01-10 09:00:00', {doc.PeriodKey.Value}, {doc.DocumentId}, {doc.RowIds[0]}, N'{rowKey}', "
+            + $"{doc.ColumnDefIds[1]}, NULL, N'777.25', {scene.StrangerId}, N'Integration', 0, 0);");
+
+        var error = await RunAsync(scene, profile, Interference.None);
+
+        var rule = Assert.IsType<BusinessRuleException>(error);
+        Assert.Equal("err.ECR-ROW-0409.sourceRowNotDeletable", rule.Details!["messageKey"]);
+        Assert.Equal(0, await IsDeletedAsync(scene));
+    }
     // ── P1-4: передача зрізу ────────────────────────────────────────────────
 
     [Theory]
@@ -286,10 +345,10 @@ public sealed class DeleteRowGuardsTests(SqlServerFixture sql) : IDisposable
         // Профіль із обмеженнями нижче проєкту (колонковий Deny/Read) проходить через RequireTableVisibleAsync.
         access.ReadScopeAsync(Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<CancellationToken>())
               .Returns(c => real.ReadScopeAsync(c.ArgAt<AccessProfile>(0), c.ArgAt<long>(1), CancellationToken.None));
-        access.CanEditCellsAsync(
+        access.CanClearCellsAsync(
                   Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<PeriodKey>(),
                   Arg.Any<IReadOnlyCollection<CellAddress>>(), Arg.Any<CancellationToken>())
-              .Returns(c => real.CanEditCellsAsync(
+              .Returns(c => real.CanClearCellsAsync(
                   c.ArgAt<AccessProfile>(0), c.ArgAt<long>(1), c.ArgAt<PeriodKey>(2),
                   c.ArgAt<IReadOnlyCollection<CellAddress>>(3), CancellationToken.None));
 

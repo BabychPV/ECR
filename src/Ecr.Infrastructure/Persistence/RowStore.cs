@@ -1,3 +1,4 @@
+using Ecr.Application.Documents;
 using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Domain.Entities.Documents;
@@ -390,13 +391,20 @@ public sealed class RowStore(
             .SqlQuery<int>($"""
                 SELECT TOP (1) 1 AS Value
                 FROM (
-                    SELECT c.Origin,
-                           ROW_NUMBER() OVER (PARTITION BY c.ColumnDefId ORDER BY c.ChangedAt DESC, c.Id DESC) AS Rn
-                    FROM aud.CellChange c
-                    WHERE c.DocumentId = {documentId} AND c.TableRowId = {rowId} AND c.PeriodKey = {periodKey.Value}
-                      AND c.Origin <> N'Recalculation'
+                    SELECT u.Origin,
+                           ROW_NUMBER() OVER (PARTITION BY u.ColumnDefId ORDER BY u.ChangedAt DESC, u.Id DESC) AS Rn
+                    FROM (
+                        SELECT c.Id, c.ChangedAt, c.ColumnDefId, c.Origin
+                        FROM aud.CellChange c
+                        WHERE c.DocumentId = {documentId} AND c.TableRowId = {rowId} AND c.PeriodKey = {periodKey.Value}
+                        UNION ALL
+                        SELECT a.Id, a.ChangedAt, a.ColumnDefId, a.Origin
+                        FROM arc.AuditCellChange a
+                        WHERE a.DocumentId = {documentId} AND a.TableRowId = {rowId} AND a.PeriodKey = {periodKey.Value}
+                    ) u
+                    WHERE u.Origin <> {CellChangeOrigins.Recalculation}
                 ) x
-                WHERE x.Rn = 1 AND x.Origin IN (N'Integration', N'Import', N'ImportOverwrite', N'Collection')
+                WHERE x.Rn = 1 AND x.Origin = {CellChangeOrigins.Integration}
                 """)
             .ToListAsync(ct)
             .ConfigureAwait(false);

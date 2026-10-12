@@ -75,7 +75,16 @@ public sealed class DeleteRowHandler(
     {
         ArgumentNullException.ThrowIfNull(profile);
 
-        var instance = await rowStore.ResolveTableInstanceAsync(tableInstanceId, ct).ConfigureAwait(false);
+        // ⛔ S-4: ВІДСУТНІЙ екземпляр дає те саме тіло 404, що й чужий/недоступний (без оракула існування).
+        TableInstanceRef instance;
+        try
+        {
+            instance = await rowStore.ResolveTableInstanceAsync(tableInstanceId, ct).ConfigureAwait(false);
+        }
+        catch (Errors.NotFoundException)
+        {
+            throw DocumentVisibility.DocumentNotFound(documentId);
+        }
 
         // ⛔ Належність екземпляра документові з МАРШРУТУ — як у `CreateRowHandler`.
         // ⛔ P3 (оракул існування): «екземпляр чужого документа» і «документ недоступний» — ОДНА відповідь
@@ -85,21 +94,22 @@ public sealed class DeleteRowHandler(
             : EditDecision.Deny(EditDenyReason.NoGrant);
         if (!read.IsAllowed)
         {
-            throw new Errors.NotFoundException(
-                "ECR-DOC-0404",
-                $"Документ {documentId} не знайдено.",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = "err.ECR-DOC-0404.document",
-                    ["documentId"] = documentId.ToString(CultureInfo.InvariantCulture),
-                });
+            throw DocumentVisibility.DocumentNotFound(documentId);
         }
 
         // ⛔ D-6: схована таблиця для читача НЕ ІСНУЄ — 404 ДО відмови про рядок.
-        await DocumentVisibility
-            .RequireTableVisibleAsync(
-                access, profile, documentId, instance.TableInstanceId, instance.TableDefId, instance.PeriodKey, ct)
-            .ConfigureAwait(false);
+        try
+        {
+            await DocumentVisibility
+                .RequireTableVisibleAsync(
+                    access, profile, documentId, instance.TableInstanceId, instance.TableDefId, instance.PeriodKey, ct)
+                .ConfigureAwait(false);
+        }
+        catch (Errors.NotFoundException)
+        {
+            // S-4: схована таблиця — те саме тіло, що й «документа немає».
+            throw DocumentVisibility.DocumentNotFound(documentId);
+        }
 
         var snapshot = await metadata.GetAsync(instance.TemplateVersionId, ct).ConfigureAwait(false);
         var table = snapshot.Sheets
@@ -272,32 +282,33 @@ public sealed class DeleteRowHandler(
             : (await cells.ReadCellsAsync(addresses, ct).ConfigureAwait(false)).ToDictionary(p => p.Key, p => p.Value);
 
         // ⛔ P1-2 (безпека): право на РЯДОК (`CanCreateRowsAsync` ≈ `CanEdit` із колонкою 0) не бачить грантів
-        // на колонки, правил доступу до періоду і т.д. Видалення стирає значення КОЖНОЇ непорожньої комірки,
-        // тож для кожної з них питаємо те саме рішення, що й для правки; будь-яка заборона блокує видалення.
-        // ⚠ Лише обчислювана колонка (`CalculatedCell`) і колонка «лише читання» (`ColumnReadOnly`) не є
-        // забороною для ЛЮДИНИ: їх значення не вводилися руками, і причина — не в правах.
-        // Відповідь — наявний `ECR-ACCS-0403` БЕЗ назви колонки (нерозкриття).
+        // на колонки й правил доступу до періоду. Видалення стирає значення КОЖНОЇ непорожньої комірки, тож для
+        // кожної питаємо рішення «стерти» (`CanClearCellsAsync`): те саме, що для правки, але БЕЗ ознак колонки
+        // «обчислювана»/«лише для читання» (S-2: вони йдуть раніше за грант і ховали б явний Deny).
+        // Будь-яка заборона — а також дозвіл «за підтвердженням»/«з позначкою» (S-3: каналу підтвердження для
+        // DELETE немає, а `PatchCellsHandler` такі комірки теж не пише без нього) — блокує видалення.
+        // ⚠ S-4 (нерозкриття): reason ОДИН для всіх заборонених КОМІРОК (`BusinessRule`) і без назви колонки:
+        // різні причини розрізняли б «у прихованій колонці є значення» і «у відкритій».
+        // ⚠ Рядок лише з порожніми комірками цієї перевірки не проходить (нічого стирати) — вікно періоду для
+        // нього перевіряє лише право на рядок (`CanEdit` із ColumnDefId = 0): прийнято свідомо (02-contracts).
         var filled = addresses.Where(a => values.TryGetValue(a, out var v) && v is { IsEmpty: false }).ToList();
         if (filled.Count > 0)
         {
             var decisions = await access
-                .CanEditCellsAsync(profile, instance.TableInstanceId, periodKey, filled, ct)
+                .CanClearCellsAsync(profile, instance.TableInstanceId, periodKey, filled, ct)
                 .ConfigureAwait(false);
 
             foreach (var address in filled)
             {
-                var decision = decisions.TryGetValue(address, out var found)
-                    ? found
-                    : EditDecision.Deny(EditDenyReason.NoGrant);
-
-                if (!decision.IsAllowed
-                    && decision.Reason is not (EditDenyReason.CalculatedCell or EditDenyReason.ColumnReadOnly))
+                if (!decisions.TryGetValue(address, out var decision)
+                    || !decision.IsAllowed
+                    || decision.RequiresConfirmation
+                    || decision.OutOfWindowMark)
                 {
-                    throw DeleteDenied(decision.Reason);
+                    throw DeleteDenied(EditDenyReason.BusinessRule);
                 }
             }
         }
-
         // ⛔ Склад ДО видалення — у тій самій транзакції, що й видалення. P2-1: ЛИШЕ склад (колонка, чи
         // обчислена), БЕЗ значень: `GetStructureChangesHandler` читає за `Security.ViewAudit` без звуження
         // за колонками, а значення лишаються в `aud.CellChange` під фільтром видимості (S6).
@@ -355,13 +366,20 @@ public sealed class DeleteRowHandler(
         TableInstanceRef instance, TableDef table, AccessProfile profile, bool assignmentsPresent,
         string? sheetCode, CancellationToken ct)
     {
-        if (!assignmentsPresent || profile.IsSimulation || profile.IsIntegrationWriter)
+        if (profile.IsSimulation || profile.IsIntegrationWriter)
         {
             return;
         }
 
+        // ⛔ S-5: прапорець «передачі є» з рішення обчислено ДО блокування, тож під замком передачі читаються
+        // ЗАВЖДИ, коли є сховище (видалення рідкісне — один дешевий запит), а не за застарілим прапорцем.
         if (assignments is null)
         {
+            if (!assignmentsPresent)
+            {
+                return;
+            }
+
             throw new InvalidOperationException(
                 "Передачі зрізу діють, але сховища для повторної перевірки під блокуванням немає.");
         }

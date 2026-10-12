@@ -124,6 +124,24 @@ public static class DocumentVisibility
     }
 
     /// <summary>
+    /// ЄДИНА відповідь «документа немає» для мутацій рядків (D3-A, S-4): ВІДСУТНІЙ екземпляр, екземпляр ЧУЖОГО
+    /// документа, недоступний документ і схована таблиця — один і той самий текст і деталі, байт у байт.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Різні тіла (`tableInstance` / `tableInstanceNotInDocument` / `document`) давали оракул існування чужих
+    /// `TableInstanceId`. ⚠ Лише для обробників мутацій рядків; читання зрізу лишає свої ключі.
+    /// </remarks>
+    public static NotFoundException DocumentNotFound(long documentId)
+        => new(
+            "ECR-DOC-0404",
+            $"Документ {documentId} не знайдено.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-DOC-0404.document",
+                ["documentId"] = documentId.ToString(CultureInfo.InvariantCulture),
+            });
+
+    /// <summary>
     /// Таблиця, якої читач не бачить (Deny на таблицю чи її аркуш), для нього НЕ ІСНУЄ: ТА САМА відповідь,
     /// що й на читання зрізу (<c>404 ECR-DOC-0404 tableInstance</c>), — до будь-якої відмови про режим
     /// рядків, версії чи ключі. Інакше 409 «Table "X" has RowMode = Fixed…» називав би схований ресурс (D-6).
