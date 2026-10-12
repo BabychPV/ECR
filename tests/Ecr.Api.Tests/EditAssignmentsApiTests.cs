@@ -376,7 +376,27 @@ public sealed class EditAssignmentsApiTests(SqlServerFixture sql)
         var body = await JsonAsync(await owner.GetAsync(card).ConfigureAwait(true), HttpStatusCode.OK, app).ConfigureAwait(true);
         Assert.Equal(s.Author.Id, body.GetProperty("ownerUserId").GetInt32());
     }
+
     [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Картка_документа_не_розкриває_ownerUserId_звуженому_читачеві()
+    {
+        var s = await ArrangeAsync().ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+        var card = new Uri($"/api/v1/documents/{s.DocumentId.ToString(CultureInfo.InvariantCulture)}", UriKind.Relative);
+
+        // Контроль: незвужений читач (Manage) автора бачить — тест не зелений «за відсутністю поля».
+        using var owner = await SignedInAsync(app, s.Manager.UserName).ConfigureAwait(true);
+        var full = await JsonAsync(await owner.GetAsync(card).ConfigureAwait(true), HttpStatusCode.OK, app).ConfigureAwait(true);
+        Assert.Equal(s.Author.Id, full.GetProperty("ownerUserId").GetInt32());
+
+        // Менеджер із забороною на аркуш документа (звужений): автор документа — те саме розкриття, що й ім'я автора.
+        using var hidden = await SignedInAsync(app, s.HiddenManager.UserName).ConfigureAwait(true);
+        var narrowed = await JsonAsync(await hidden.GetAsync(card).ConfigureAwait(true), HttpStatusCode.OK, app).ConfigureAwait(true);
+        Assert.True(
+            !narrowed.TryGetProperty("ownerUserId", out var v) || v.ValueKind == JsonValueKind.Null,
+            $"ownerUserId звуженому читачеві: {narrowed}");
+    }    [Fact]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     public async Task Автор_документа_з_одним_Write_передає_і_знімає_передачу()
     {
