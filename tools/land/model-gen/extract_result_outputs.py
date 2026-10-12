@@ -34,6 +34,9 @@ PATTERNS = [
 ALREADY_IN_CALC = re.compile(r'^ECW_C0[5-7]_')
 
 
+INPUT_RX = re.compile(r'@([A-Za-z_][A-Za-z0-9_]*)')
+
+
 def table_code(af):
     for rx, fn in PATTERNS:
         m = re.match(rx, af)
@@ -58,21 +61,36 @@ def main():
         n = m['name']
         if ALREADY_IN_CALC.match(n) or n not in tables:
             continue
-        outs, skip = set(), set()
+        outs, skip, ins = set(), set(), set()
         for v in m['versions']:
             for f in v['formulas']:
                 nm = f['name']
+                # входи формули: @Имя у тексті й аргументи без префіксів CST. (константа) і ! (результат іншої формули)
+                ins.update(INPUT_RX.findall(f.get('text') or ''))
+                for arg in re.split(r'[;\n]', f.get('arguments') or ''):
+                    arg = arg.strip().lstrip('@')
+                    if arg and not arg.startswith(('CST.', '!')):
+                        ins.add(arg)
                 if not nm.startswith('ECW_EC_'):
                     continue
                 # результат емісії: ECW_EC_tons_<компонент> (т) або ECW_EC_gsec_<компонент> (г/с); решта — проміжні значення
                 (outs if re.match(r'^ECW_EC_(tons|gsec)_', nm) else skip).add(nm)
         if outs:
-            res[n] = {'tables': sorted(tables[n]), 'outputs': sorted(outs)}
+            # inputs: імена аргументів (без Category*), для мостів аргументів таблиць (gen_ecr_model.py, LP-10); значень немає
+            res[n] = {'tables': sorted(tables[n]), 'outputs': sorted(outs),
+                      'inputs': sorted(i for i in ins if not i.startswith('Category'))}
         if skip:
             excluded[n] = sorted(skip)
     out = {'formatVersion': 1,
            'source': 'tools/land/model-gen/extract_result_outputs.py: формули ECW_EC_* пакета методологій AF x таблиці правил AF (структура, без значень)',
            'methodologies': dict(sorted(res.items())), 'excludedOutputs': dict(sorted(excluded.items()))}
+    # ручний блок (виходи, яких немає в пакеті AF XML) переживає перегенерацію
+    try:
+        prev = json.load(open(a.out, encoding='utf-8-sig'))
+        if prev.get('supplementalMethodologies'):
+            out['supplementalMethodologies'] = prev['supplementalMethodologies']
+    except FileNotFoundError:
+        pass
     with open(a.out, 'w', encoding='utf-8', newline='\n') as fh:
         json.dump(out, fh, ensure_ascii=False, indent=1)
         fh.write('\n')

@@ -48,7 +48,8 @@ public sealed class LandDaysInCalcMonthModelTests
     public void DaysInCalcYear_і_Winter_не_змінилися()
     {
         using var doc = Model();
-        var year = Columns(doc.RootElement, "DaysInCalcYear").Single().GetProperty("expression").GetString();
+        // колонка є й у мостах аргументів таблиць 6, 9-11 (LP-10) - вираз у всіх однаковий
+        var year = Columns(doc.RootElement, "DaysInCalcYear").Select(c => c.GetProperty("expression").GetString()).Distinct().Single();
         Assert.Equal("([Period].Year % 4 = 0) ? 366 : 365", year);
         Assert.All(Columns(doc.RootElement, "Winter"), c =>
             Assert.Equal("([Period].Sequence < 4 OR [Period].Sequence > 9) ? 1 : 0", c.GetProperty("expression").GetString()));

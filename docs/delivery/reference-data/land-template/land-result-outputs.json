@@ -9,6 +9,10 @@
    "outputs": [
     "ECW_EC_gsec_331",
     "ECW_EC_tons_331"
+   ],
+   "inputs": [
+    "Land_FlowRateSulfur",
+    "Land_Measure_OperatingTime"
    ]
   },
   "ECW_C08_04_03": {
@@ -20,6 +24,21 @@
     "ECW_EC_gsec_2908",
     "ECW_EC_tons_2902",
     "ECW_EC_tons_2908"
+   ],
+   "inputs": [
+    "Land_Agent_AccountLoading",
+    "Land_Agent_CoarsenessMaterial",
+    "Land_Agent_Fraction",
+    "Land_Agent_LocalConditions",
+    "Land_Agent_LocalMeteorologicalConditions",
+    "Land_Agent_LocalMeteorologicalConditionsMax",
+    "Land_Agent_MaterialsGrabber",
+    "Land_Agent_MoistureMaterial",
+    "Land_Agent_SalvoEmission",
+    "Land_Agent_Transforming",
+    "Land_FlowRateSulfur",
+    "Land_Measure_OperatingTime",
+    "Land_TrappingEfficienty"
    ]
   },
   "ECW_C11_01": {
@@ -39,6 +58,10 @@
     "ECW_EC_tons_XXX_type1_2",
     "ECW_EC_tons_XXX_type1_3",
     "ECW_EC_tons_XXX_type2"
+   ],
+   "inputs": [
+    "CompositionMass",
+    "Land_Measure_OperatingTime"
    ]
   },
   "ECW_C11_02": {
@@ -52,6 +75,10 @@
     "ECW_EC_gsec_XXX_type2",
     "ECW_EC_tons_XXX_type1",
     "ECW_EC_tons_XXX_type2"
+   ],
+   "inputs": [
+    "CompositionMass",
+    "Land_Measure_OperatingTime"
    ]
   },
   "ECW_C11_03": {
@@ -83,6 +110,11 @@
     "ECW_EC_tons_337",
     "ECW_EC_tons_703",
     "ECW_EC_tons_NOx"
+   ],
+   "inputs": [
+    "Land_Measure_FuelSubstanceConsumptionOrPumpedVolume",
+    "Land_Measure_RunningHours",
+    "Land_Power"
    ]
   },
   "ECW_C11_04": {
@@ -100,6 +132,15 @@
     "ECW_EC_tons_330",
     "ECW_EC_tons_337",
     "ECW_EC_tons_415"
+   ],
+   "inputs": [
+    "Density20",
+    "Land_Measure_OperatingTime",
+    "Land_Measure_SubstanceConsumptionKg",
+    "Land_Measure_SubstanceConsumptionKgH",
+    "TotalSulphurContent",
+    "Vddg",
+    "Vwdg"
    ]
   },
   "ECW_C11_05": {
@@ -119,6 +160,14 @@
     "ECW_EC_tons_337",
     "ECW_EC_tons_415",
     "ECW_EC_tons_703"
+   ],
+   "inputs": [
+    "Density20",
+    "Land_Measure_OperatingTime",
+    "Land_Measure_SubstanceConsumptionSm3",
+    "Land_Measure_SubstanceConsumptionSm3H",
+    "TotalSulphurContent",
+    "Vddg"
    ]
   },
   "ECW_C11_06": {
@@ -136,6 +185,15 @@
     "ECW_EC_tons_330",
     "ECW_EC_tons_337",
     "ECW_EC_tons_415"
+   ],
+   "inputs": [
+    "Density20",
+    "Land_Measure_OperatingTime",
+    "Land_Measure_SubstanceConsumptionKg",
+    "Land_Measure_SubstanceConsumptionKgH",
+    "TotalSulphurContent",
+    "Vddg",
+    "Vwdg"
    ]
   },
   "ECW_C11_07": {
@@ -154,6 +212,10 @@
     "ECW_EC_tons_328",
     "ECW_EC_tons_330",
     "ECW_EC_tons_337"
+   ],
+   "inputs": [
+    "Land_Measure_OperatingTime",
+    "Land_Measure_SubstanceConsumption"
    ]
   },
   "ECW_C11_08": {
@@ -171,6 +233,14 @@
     "ECW_EC_tons_304",
     "ECW_EC_tons_330",
     "ECW_EC_tons_337"
+   ],
+   "inputs": [
+    "Density",
+    "FuelLowerHeating",
+    "H2Smass",
+    "Land_Measure_GasConsumption",
+    "Land_Measure_OperatingTime",
+    "MercaptanSulphurContent"
    ]
   },
   "ECW_C11_10": {
@@ -192,6 +262,12 @@
     "ECW_EC_tons_XXX_type1",
     "ECW_EC_tons_XXX_type2",
     "ECW_EC_tons_XXX_type3"
+   ],
+   "inputs": [
+    "CompositionMass",
+    "Density20",
+    "Land_Measure_OperatingTime",
+    "Land_Measure_SubstanceConsumption"
    ]
   },
   "ECW_C11_11_01": {
@@ -210,6 +286,13 @@
     "ECW_EC_tons_2735",
     "ECW_EC_tons_2754",
     "ECW_EC_tons_333"
+   ],
+   "inputs": [
+    "DaysInCalcMonth",
+    "DaysInCalcYear",
+    "Land_Measure_FuelSubstanceConsumptionOrPumpedVolume",
+    "Land_Measure_OperTimeDays",
+    "Winter"
    ]
   },
   "ECW_C11_11_02": {
@@ -238,6 +321,9 @@
     "ECW_EC_tons_322_type2",
     "ECW_EC_tons_333_type1",
     "ECW_EC_tons_333_type2"
+   ],
+   "inputs": [
+    "Land_Measure_SubstanceConsumption"
    ]
   },
   "ECW_C11_11_03": {
@@ -251,6 +337,10 @@
     "ECW_EC_tons_XXX_type1",
     "ECW_EC_tons_XXX_type2",
     "ECW_EC_tons_XXX_type3"
+   ],
+   "inputs": [
+    "Land_Measure_MaterialResidence",
+    "Land_Measure_OperatingTime"
    ]
   },
   "ECW_C11_11_04": {
@@ -264,6 +354,14 @@
     "ECW_EC_tons_XXX_type1",
     "ECW_EC_tons_XXX_type2",
     "ECW_EC_tons_XXX_type3"
+   ],
+   "inputs": [
+    "Land_MassFraction",
+    "Land_Measure_AmountOil",
+    "Land_Measure_Density20",
+    "Land_Measure_HydrogenSulfide",
+    "Land_Measure_ReidVapourPressure",
+    "Land_Measure_SumMethylEthylMercaptans"
    ]
   },
   "ECW_C11_11_05": {
@@ -276,6 +374,10 @@
     "ECW_EC_gsec_333",
     "ECW_EC_tons_330",
     "ECW_EC_tons_333"
+   ],
+   "inputs": [
+    "Land_Measure_FlowRateSulfur",
+    "Land_Measure_OperatingTime"
    ]
   },
   "ECW_C11_12_01": {
@@ -285,6 +387,9 @@
    "outputs": [
     "ECW_EC_gsec_XXX",
     "ECW_EC_tons_XXX"
+   ],
+   "inputs": [
+    "Land_Measure_OperatingTime"
    ]
   },
   "ECW_C11_12_03": {
@@ -294,6 +399,9 @@
    "outputs": [
     "ECW_EC_gsec_XXX",
     "ECW_EC_tons_XXX"
+   ],
+   "inputs": [
+    "Land_Measure_OperatingTimeDays"
    ]
   },
   "ECW_C11_13": {
@@ -314,6 +422,9 @@
     "ECW_EC_tons_2754_type2",
     "ECW_EC_tons_333_type1",
     "ECW_EC_tons_333_type2"
+   ],
+   "inputs": [
+    "Land_Measure_OperatingTime"
    ]
   },
   "ECW_C11_14": {
@@ -324,6 +435,10 @@
    "outputs": [
     "ECW_EC_gsec_331",
     "ECW_EC_tons_331"
+   ],
+   "inputs": [
+    "Land_Measure_FlowRateSulfur",
+    "Land_Measure_OperatingTime"
    ]
   },
   "ECW_C11_15": {
@@ -335,6 +450,11 @@
     "ECW_EC_gsec_333",
     "ECW_EC_tons_331",
     "ECW_EC_tons_333"
+   ],
+   "inputs": [
+    "Land_Measure_AmountSulfurPlacement",
+    "Land_Measure_DurationSulfurPlacement",
+    "Land_Measure_NumberFilledSulfurBlocks"
    ]
   },
   "ECW_C11_16": {
@@ -348,6 +468,10 @@
     "ECW_EC_gsec_XXX_type2",
     "ECW_EC_tons_XXX_type1",
     "ECW_EC_tons_XXX_type2"
+   ],
+   "inputs": [
+    "Land_Measure_FlowRateSulfur",
+    "Land_Measure_OperatingTime"
    ]
   },
   "ECW_C11_17": {
@@ -357,6 +481,9 @@
    "outputs": [
     "ECW_EC_gsec_XXX",
     "ECW_EC_tons_XXX"
+   ],
+   "inputs": [
+    "Land_Measure_OperatingTimeDays"
    ]
   },
   "ECW_C11_18": {
@@ -366,6 +493,9 @@
    "outputs": [
     "ECW_EC_gsec_XXX",
     "ECW_EC_tons_XXX"
+   ],
+   "inputs": [
+    "Land_Measure_OperatingTimeDays"
    ]
   },
   "ECW_C11_19": {
@@ -375,6 +505,9 @@
    "outputs": [
     "ECW_EC_gsec_XXX",
     "ECW_EC_tons_XXX"
+   ],
+   "inputs": [
+    "Land_Measure_OperatingTimeDays"
    ]
   },
   "ECW_C11_20_01": {
@@ -384,6 +517,9 @@
    "outputs": [
     "ECW_EC_gsec_XXX",
     "ECW_EC_tons_XXX"
+   ],
+   "inputs": [
+    "Land_OperTimeDays"
    ]
   },
   "ECW_C11_20_02": {
@@ -393,6 +529,9 @@
    "outputs": [
     "ECW_EC_gsec_XXX",
     "ECW_EC_tons_XXX"
+   ],
+   "inputs": [
+    "Land_OperTimeDays"
    ]
   },
   "ECW_C12_01": {
@@ -408,6 +547,15 @@
     "ECW_EC_gsec_XXX_type2",
     "ECW_EC_tons_XXX_type1",
     "ECW_EC_tons_XXX_type2"
+   ],
+   "inputs": [
+    "CompositionMass",
+    "Land_Measure_MaterialResidence",
+    "No_DMSpump",
+    "No_Flanges",
+    "No_Pump",
+    "No_SafValves",
+    "No_Valves"
    ]
   },
   "ECW_C12_02": {
@@ -436,6 +584,19 @@
     "ECW_EC_tons_337_type2",
     "ECW_EC_tons_415_type1",
     "ECW_EC_tons_415_type2"
+   ],
+   "inputs": [
+    "Density0",
+    "Land_Measure_Component_301",
+    "Land_Measure_Component_304",
+    "Land_Measure_Component_330",
+    "Land_Measure_Component_337",
+    "Land_Measure_Component_O2",
+    "Land_Measure_GasConsumption",
+    "Land_Measure_MaximumConsumption",
+    "Land_Measure_RunningHours",
+    "TotalSulphurContent",
+    "Vddg"
    ]
   },
   "ECW_C12_03": {
@@ -446,6 +607,11 @@
    "outputs": [
     "ECW_EC_gsec_XXX",
     "ECW_EC_tons_XXX"
+   ],
+   "inputs": [
+    "CompositionMass",
+    "Density20",
+    "Land_Measure_ReleaseColdVent"
    ]
   },
   "ECW_C12_04_01": {
@@ -455,6 +621,9 @@
    "outputs": [
     "ECW_EC_gsec_XXX",
     "ECW_EC_tons_XXX"
+   ],
+   "inputs": [
+    "Land_Measure_QuantityLiquid"
    ]
   },
   "ECW_C12_04_02": {
@@ -466,6 +635,15 @@
    "outputs": [
     "ECW_EC_gsec_XXX",
     "ECW_EC_tons_XXX"
+   ],
+   "inputs": [
+    "CalculationMonth",
+    "DaysInCalcMonth",
+    "DaysInCalcYear",
+    "Land_Gxp",
+    "Land_Kpmax",
+    "Land_Measure_QuantityLiquid",
+    "Land_Vhmax"
    ]
   },
   "ECW_C12_05": {
@@ -492,6 +670,11 @@
     "ECW_EC_tons_337",
     "ECW_EC_tons_703",
     "ECW_EC_tons_NOx"
+   ],
+   "inputs": [
+    "Land_Measure_FuelConsumption",
+    "Land_Measure_RunningHours",
+    "Land_Power"
    ]
   }
  },
