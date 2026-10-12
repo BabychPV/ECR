@@ -890,7 +890,8 @@ for sh in X['sheets']:
                 if (code, val) not in seen_cf:
                     seen_cf.add((code, val))
                     cfs.append({'columnCode': code, 'operator': 'eq', 'value': val, 'backgroundHex': '#D9D9D9', 'foregroundHex': '#7F7F7F', 'isBold': False})
-out['conditionalFormats'] = []  # ECR підтримує лише числові пороги (eq/ne/gt/...); Excel-правила за текстом «Removed» не переносяться\nout['conditionalFormatsNotTransferred'] = cfs
+out['conditionalFormats'] = []  # ECR підтримує лише числові пороги (eq/ne/gt/...); Excel-правила за текстом «Removed» не переносяться
+out['conditionalFormatsNotTransferred'] = cfs
 out['registries'] = list(registries.values())
 out['stats'] = {'excelSheets': len(X['sheets']), 'reportSheets': len(out['sheets']), 'tables': stat_tables, 'columns': stat_cols,
                 'registries': len(registries), 'registryEntries': sum(len(r['entries']) for r in registries.values())}
