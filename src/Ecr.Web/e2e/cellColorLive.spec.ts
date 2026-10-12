@@ -122,7 +122,7 @@ test.describe('cellColor: колір комірки на реальному ст
     });
   }
 
-  test('cellColor: відмова сервера (грант знижено після завантаження) - тост, колір не застосовано', async ({
+  test('cellColor: відмова сервера (аркуш подано після завантаження сторінки) - тост, колір не застосовано', async ({
     browser,
   }) => {
     await ensureOperatorLevel(browser, 'Write');
@@ -133,9 +133,18 @@ test.describe('cellColor: колір комірки на реальному ст
       const target = await selectColourableCell(page);
       touched.push(slice);
 
-      // Меню ВВІМКНЕНЕ (клієнт ще вважає комірку редагованою), а сервер уже ні: це і є «відмова на сервері».
-      await ensureOperatorLevel(browser, 'Read');
+      // Меню ВВІМКНЕНЕ (клієнт ще вважає аркуш редагованим), а сервер уже ні: це і є «відмова на сервері».
+      // ⚠ Не зниженням гранта: перший прогін (38259512984) показав, що зміна гранта скидає сесію оператора - PATCH
+      // відповідає 401, а не 403. Подання аркуша сесію не чіпає.
+      const admin = await openAs(browser, Admin, 'light');
+      try {
+        await makeSheetEditable(admin.page);
+        await submitSheet(admin.page);
+      } finally {
+        await admin.context.close();
+      }
 
+      await expect(page.getByTestId('cell-color-fill').first(), 'клієнт мав ще вважати комірку редагованою').toBeEnabled();
       await page.getByTestId('cell-color-fill').first().click();
       const denied = waitForStylePatch(page);
       await page.getByRole('button', { name: Yellow, exact: true }).first().click();
@@ -151,7 +160,12 @@ test.describe('cellColor: колір комірки на реальному ст
       await expect(cellAt(page, target)).not.toHaveCSS('background-color', YellowRgb);
     } finally {
       await context.close();
-      await ensureOperatorLevel(browser, 'Write');
+      const cleanup = await openAs(browser, Admin, 'light');
+      try {
+        await makeSheetEditable(cleanup.page);
+      } finally {
+        await cleanup.context.close();
+      }
     }
   });
 
