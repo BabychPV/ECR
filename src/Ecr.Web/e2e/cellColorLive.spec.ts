@@ -390,7 +390,31 @@ async function openAs(
   }, scheme);
   await signIn(page, user);
 
+  // ⚠ Прогін 38265555757: тема з сервера (синхронізація вподобань, `usePreferenceSync`) перекрила локальну, і «dark»
+  // насправді йшов у light. Тому тема після входу - тим самим шляхом, що й у людини (меню користувача); це заодно
+  // синхронізує вибір на сервер, і наступні сторінки вже не повернуть іншу.
+  // Двічі з перезавантаженням між ними: вподобання з сервера можуть дійти вже ПІСЛЯ першої перевірки.
+  await ensureScheme(page, user.user, scheme);
+  await page.reload();
+  await ensureScheme(page, user.user, scheme);
+
   return { page, context };
+}
+
+/** Тема `scheme` на `<html>`; якщо інша - перемикається через меню користувача (SegmentedControl «Light»/«Dark»). */
+async function ensureScheme(page: Page, userName: string, scheme: 'light' | 'dark'): Promise<void> {
+  const html = page.locator('html');
+  await expect(page.getByRole('button', { name: new RegExp(userName, 'i') }).first()).toBeVisible({ timeout: 30_000 });
+
+  if ((await html.getAttribute('data-mantine-color-scheme')) !== scheme) {
+    await page.getByRole('button', { name: new RegExp(userName, 'i') }).first().click();
+    await page.getByText(scheme === 'dark' ? 'Dark' : 'Light', { exact: true }).first().click();
+    await page.keyboard.press('Escape');
+  }
+
+  await expect(html, `тема ${scheme} не застосувалась`).toHaveAttribute('data-mantine-color-scheme', scheme, {
+    timeout: 15_000,
+  });
 }
 
 /**
