@@ -36,13 +36,13 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 
 # --- guards: local server, legacy DB only, output outside the repo ---
-$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path.TrimEnd('\') + '\'
+$repoRoot = (Resolve-Path (Join-Path (Join-Path $PSScriptRoot '..') '..')).Path.TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
 $outFull = [System.IO.Path]::GetFullPath($OutFile)
 if ($outFull.StartsWith($repoRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
     throw "OutFile '$OutFile' is inside the repository: real production values must not be written there."
 }
 $s = ($Server.Trim() -replace '^(tcp|np|lpc):', '') -split '[,\\]' | Select-Object -First 1
-$local = @('.', '(local)', 'localhost', '127.0.0.1', '::1', '[::1]', $env:COMPUTERNAME.ToLowerInvariant()) -contains $s.Trim().ToLowerInvariant()
+$local = @('.', '(local)', 'localhost', '127.0.0.1', '::1', '[::1]', [Environment]::MachineName.ToLowerInvariant()) -contains $s.Trim().ToLowerInvariant()
 if (-not $local) { throw "SQL server '$Server' is not local. Refused." }
 if ($Database -notmatch '^[A-Za-z0-9_]+$') { throw "Bad database name '$Database'." }
 

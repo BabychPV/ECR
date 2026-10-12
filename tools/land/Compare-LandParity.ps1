@@ -53,7 +53,7 @@ Set-StrictMode -Version 2.0
 . (Join-Path $PSScriptRoot 'EcrApi.ps1')
 
 # --- guards ---
-$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path.TrimEnd('\') + '\'
+$repoRoot = (Resolve-Path (Join-Path (Join-Path $PSScriptRoot '..') '..')).Path.TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
 foreach ($p in @($OutFile)) {
     if ([System.IO.Path]::GetFullPath($p).StartsWith($repoRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
         throw "OutFile '$p' is inside the repository. Refused."
@@ -299,7 +299,7 @@ $groups = @($agg.Values | ForEach-Object {
         [pscustomobject]@{ methodology = $_.methodology; output = $_.output; class = $_.class; count = $_.count
             maxRel = $_.maxRel; maxAbs = $_.maxAbs; docs = (@($_.docs.Keys | Sort-Object) -join ','); tables = (@($_.tables.Keys | Sort-Object) -join ','); sample = $_.sample }
     } | Sort-Object class, methodology, output)
-$byClass = $groups | Group-Object class | ForEach-Object { [pscustomobject]@{ class = $_.Name; cells = ($_.Group | Measure-Object count -Sum).Sum } } | Sort-Object cells -Descending
+$byClass = $groups | Group-Object class | ForEach-Object { [pscustomobject]@{ class = $_.Name; cells = [int]($_.Group | Measure-Object count -Sum).Sum } } | Sort-Object cells -Descending
 $result = [ordered]@{
     formatVersion = 1
     tolerance = [ordered]@{ abs = $TolAbs; rel = $TolRel; storageAbs = $StorageAbs }
