@@ -755,7 +755,7 @@ public sealed class ExcelExporter(
                 && styleMap.TryGetValue(styleId, out var style)
                 && rowNumbers.TryGetValue(key, out var number))
             {
-                styleMapper.Apply(worksheet.Range(number, 1, number, columnCount).Style, style);
+                styleMapper.ApplyRowStyle(worksheet.Range(number, 1, number, columnCount).Style, style);
             }
         }
     }

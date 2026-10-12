@@ -45,6 +45,7 @@ public sealed class PatchCellStylesScopeTests
     private readonly List<SecurityEventRecord> _events = [];
     private readonly HashSet<CellAddress> _denied = [];
     private readonly List<CellStyle> _existing = [];
+    private readonly List<EditAssignmentFact> _facts = [];
     private int _canClearCalls;
 
     public PatchCellStylesScopeTests()
@@ -60,6 +61,12 @@ public sealed class PatchCellStylesScopeTests
             var column = new ColumnDef(TableDef, EcrCode.Create(code), Text(code), 1, CellDataType.Decimal);
             SetId(column, id);
             column.SetHidden(hidden);
+            if (id == Cost)
+            {
+                // Місячна колонка (травень): під неї можна поставити передачу, що закриває лише її.
+                column.SetMonth(true, 5);
+            }
+
             table.AddColumn(column);
             byId[id] = column;
         }
@@ -93,7 +100,7 @@ public sealed class PatchCellStylesScopeTests
         _gate.EnterEditAsync(Document, Arg.Any<int>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
              .Returns(DocumentStatus.Draft);
         _assignments.ReadFactsForGateAsync(Document, UserId, Arg.Any<CancellationToken>())
-                    .Returns(new EditAssignmentGateFacts(1, []));
+                    .Returns(_ => new EditAssignmentGateFacts(1, [.. _facts]));
 
         _styles.LoadForUpdateAsync(Arg.Any<PeriodKey>(), Arg.Any<IReadOnlyCollection<long>>(), Arg.Any<CancellationToken>())
                .Returns(_ => Task.FromResult<IReadOnlyList<CellStyle>>([.. _existing]));
@@ -128,6 +135,89 @@ public sealed class PatchCellStylesScopeTests
         Assert.Equal(0, json.RootElement.GetProperty("cells").GetArrayLength());
         Assert.DoesNotContain("R1", single.DetailsJson, StringComparison.Ordinal);
         Assert.DoesNotContain("Secret", single.DetailsJson, StringComparison.Ordinal);
+    }
+
+    // ── Гілка «передача змінилась під замком» (blocked.Count > 0): факти приходять ПІСЛЯ рішення про права ──
+
+    private static EditAssignmentFact FilledForMonth(byte month)
+        => new(
+            SheetCode: null, TableCode: null, MonthNumber: month, Period: null,
+            IsExclusive: false, IsValidated: false, DelegatorActive: true,
+            DelegatedByUserId: 1, ExpiresAt: null, MyProgress: AssigneeProgress.Filled);
+
+    [Fact]
+    public async Task Під_замком_закрита_колонка_області_відмовляється_частково_решта_застосована()
+    {
+        _facts.Add(FilledForMonth(5));
+
+        var response = await HandleAsync(new CellStyleScope(
+            AllRows: true, AllColumns: true, BackgroundHex: "#FFFF00"));
+
+        // Volume застосовано (3 рядки); Cost (місяць 5, Filled) відмовлено під замком — 3 комірки.
+        Assert.Equal(3, response.AppliedCells);
+        Assert.Equal(3, response.DeniedCells);
+        Assert.Equal(3, response.DeniedByReason!["AssignmentFilled"]);
+        Assert.All(_added, s => Assert.Equal(Volume, s.ColumnDefId));
+        Assert.Single(_events);
+    }
+
+    [Fact]
+    public async Task Під_замком_item_у_закритій_колонці_це_403_без_запису_навіть_якщо_scope_дозволений()
+    {
+        _facts.Add(FilledForMonth(5));
+        var request = new PatchCellStylesRequest(
+            Period,
+            [new CellStyleChange("R1", "Cost", "#00FF00")],
+            Reset: false,
+            Scope: new CellStyleScope(AllRows: true, ColumnCodes: ["Volume"], BackgroundHex: "#FF0000"));
+
+        var ex = await Assert.ThrowsAsync<AccessDeniedException>(() => HandleAsync(request));
+
+        Assert.Equal("ECR-ACCS-0403", ex.ErrorCode);
+        Assert.Empty(_added);
+        Assert.Empty(_events);
+        await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Під_замком_уся_область_закрита_це_403_без_запису()
+    {
+        _facts.Add(FilledForMonth(5));
+
+        var ex = await Assert.ThrowsAsync<AccessDeniedException>(() => HandleAsync(new CellStyleScope(
+            AllRows: true, ColumnCodes: ["Cost"], BackgroundHex: "#FFFF00")));
+
+        Assert.Equal("ECR-ACCS-0403", ex.ErrorCode);
+        Assert.Empty(_added);
+        Assert.Empty(_events);
+        await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Подія_містить_ключі_рядків_до_ста_і_всі_коди_колонок()
+    {
+        await HandleAsync(new CellStyleScope(
+            RowKeys: ["R1", "R3"], ColumnCodes: ["Volume", "Cost"], BackgroundHex: "#FFFF00"));
+
+        using var json = JsonDocument.Parse(Assert.Single(_events).DetailsJson!);
+        var scope = json.RootElement.GetProperty("scope");
+        Assert.Equal(["R1", "R3"], scope.GetProperty("rowKeys").EnumerateArray().Select(e => e.GetString()!).ToArray());
+        Assert.Equal(
+            ["Volume", "Cost"], scope.GetProperty("columnCodes").EnumerateArray().Select(e => e.GetString()!).ToArray());
+        Assert.False(scope.GetProperty("rowKeysTruncated").GetBoolean());
+        Assert.Equal(0, json.RootElement.GetProperty("cells").GetArrayLength());
+    }
+
+    [Fact]
+    public void Перелік_понад_стелю_відхиляється_формою()
+    {
+        var scope = new CellStyleScope(
+            RowKeys: [.. Enumerable.Range(0, PatchCellStylesRequest.ScopeMaxCells + 1).Select(i => $"K{i}")],
+            AllColumns: true,
+            BackgroundHex: "#FFFF00");
+
+        var ex = Assert.Throws<BusinessRuleException>(scope.EnsureValid);
+        Assert.Equal("err.ECR-CELL-4224.tooManyCells", ex.Details!["messageKey"]);
     }
 
     [Fact]

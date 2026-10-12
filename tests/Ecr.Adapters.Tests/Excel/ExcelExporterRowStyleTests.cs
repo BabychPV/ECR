@@ -24,6 +24,7 @@ public sealed class ExcelExporterRowStyleTests
     private const int TableId = 1;
     private const int ColumnId = 11;
     private const int RowStyleId = 5;
+    private const int ColumnStyleId = 6;
     private static readonly DateTime At = new(2026, 10, 12, 9, 0, 0, DateTimeKind.Utc);
 
     [Fact]
@@ -45,6 +46,18 @@ public sealed class ExcelExporterRowStyleTests
     }
 
     [Fact]
+    public async Task Row_style_without_bold_keeps_column_bold_and_column_number_format()
+    {
+        using var workbook = await ExportAsync(includeStyles: true, boldColumn: true);
+        var cell = workbook.Worksheet("Sheet").Cell(3, 1).Style;
+
+        // Стиль рядка задає лише заливку: жирність колонки не скидається, формат колонки не перекривається.
+        Assert.Equal("99CC00", Hex(cell.Fill.BackgroundColor));
+        Assert.True(cell.Font.Bold);
+        Assert.Equal("0.000", cell.NumberFormat.Format);
+    }
+
+    [Fact]
     public async Task Without_styles_the_row_style_is_not_applied()
     {
         using var workbook = await ExportAsync(includeStyles: false);
@@ -54,7 +67,7 @@ public sealed class ExcelExporterRowStyleTests
         Assert.False(row.Font.Bold);
     }
 
-    private static async Task<XLWorkbook> ExportAsync(bool includeStyles)
+    private static async Task<XLWorkbook> ExportAsync(bool includeStyles, bool boldColumn = false)
     {
         var sheet = new SheetDef(TemplateVersionId, EcrCode.Create("S1"), Text("Sheet"), 1);
         SetId(sheet, 1);
@@ -64,6 +77,11 @@ public sealed class ExcelExporterRowStyleTests
         SetId(table, TableId);
         var column = new ColumnDef(TableId, EcrCode.Create("C1"), Text("C1"), 1, CellDataType.Decimal);
         SetId(column, ColumnId);
+        if (boldColumn)
+        {
+            column.SetPresentation(null, "0.000", ColumnStyleId);
+        }
+
         table.AddColumn(column);
         sheet.AddTable(table);
 
@@ -84,8 +102,12 @@ public sealed class ExcelExporterRowStyleTests
             });
 
         var rowStyle = new StyleDef(TemplateVersionId, EcrCode.Create("ROWSTYLE"));
-        rowStyle.SetAppearance(null, null, true, false, null, unchecked((int)0xFF99CC00), null, null, null, false, null);
+        // Стиль рядка: лише заливка; у сценарії «bold» жирність (як і в першому) задає то колонка, то рядок.
+        rowStyle.SetAppearance(null, null, !boldColumn, false, null, unchecked((int)0xFF99CC00), null, null, null, false, "0.0");
         SetId(rowStyle, RowStyleId);
+        var columnStyle = new StyleDef(TemplateVersionId, EcrCode.Create("COLSTYLE"));
+        columnStyle.SetAppearance(null, null, true, false, null, null, null, null, null, false, null);
+        SetId(columnStyle, ColumnStyleId);
 
         var period = new PeriodKey(PeriodKeyValue);
         var rowIds = new Dictionary<string, long>(StringComparer.Ordinal) { ["R1"] = 1001, ["R2"] = 1002, ["R3"] = 1003 };
@@ -109,7 +131,7 @@ public sealed class ExcelExporterRowStyleTests
 
         var styles = Substitute.For<IStyleCatalog>();
         styles.GetAsync(Arg.Any<int>(), Arg.Any<CancellationToken>())
-              .Returns(new Dictionary<int, StyleDef> { [RowStyleId] = rowStyle });
+              .Returns(new Dictionary<int, StyleDef> { [RowStyleId] = rowStyle, [ColumnStyleId] = columnStyle });
 
         var userStyles = Substitute.For<ICellStyleStore>();
         var user = new CellStyle(new CellAddress(period, 1002, ColumnId), 1, At);

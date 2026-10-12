@@ -196,6 +196,16 @@ public sealed record CellStyleScope(
                 "err.ECR-CELL-4224.scopeColumns");
         }
 
+        // Верхня межа переліків: більше за стелю розгортання їх не буває (захист від гігантського тіла).
+        if (rowKeys.Count > PatchCellStylesRequest.ScopeMaxCells || columnCodes.Count > PatchCellStylesRequest.ScopeMaxCells)
+        {
+            throw PatchCellStylesRequest.Refusal(
+                $"scope: переліків понад {PatchCellStylesRequest.ScopeMaxCells} елементів.",
+                "err.ECR-CELL-4224.tooManyCells",
+                ("count", Math.Max(rowKeys.Count, columnCodes.Count).ToString(CultureInfo.InvariantCulture)),
+                ("max", PatchCellStylesRequest.ScopeMaxCells.ToString(CultureInfo.InvariantCulture)));
+        }
+
         if (rowKeys.Any(string.IsNullOrWhiteSpace) || columnCodes.Any(string.IsNullOrWhiteSpace))
         {
             throw PatchCellStylesRequest.Refusal(
