@@ -107,6 +107,10 @@ public sealed class PackageExportTests
         var xml = new AfXmlBuilder()
             .Formula("ECW_C07_16", "V1", "ECW_Category", "", "'Summer'")
             .Formula("ECW_C07_16", "V1", "ECW_EC_tons_333", "", "1")
+            .Constant("ECW_C07_16", "V1", "k", "1", category: "Summer")
+            .Constant("ECW_C07_16", "V1", "k", "2", category: "Winter")
+            .Formula("ECW_C07_98", "V1", "ECW_Category", "", "'Summer'")
+            .Constant("ECW_C07_98", "V1", "k", "1")
             .Formula("ECW_C07_99", "V1", "ECW_EC_tons_333", "", "1")
             .Build();
 
@@ -115,6 +119,9 @@ public sealed class PackageExportTests
         Assert.Equal(
             "!ECW_Category",
             package.Methodologies.Single(m => m.Name == "ECW_C07_16").Versions.Single().CategoryRule?.Expression);
+
+        // G12: формула ECW_Category без категорійних констант (лише спільна категорія) правила не дає.
+        Assert.Null(package.Methodologies.Single(m => m.Name == "ECW_C07_98").Versions.Single().CategoryRule);
 
         // Без жодної категорійної формули правила немає.
         Assert.Null(package.Methodologies.Single(m => m.Name == "ECW_C07_99").Versions.Single().CategoryRule);
