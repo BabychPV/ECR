@@ -37,8 +37,8 @@ public static class VersionMigrationRenames
     /// <summary>Стеля перейменувань колонок в одному записі.</summary>
     public const int MaxColumnRenames = 500;
 
-    /// <summary>Найдовший код (поле коду в схемі — 100 символів).</summary>
-    public const int MaxCodeLength = 100;
+    /// <summary>Найдовший код (як <c>EcrCode</c>: до 64 символів).</summary>
+    public const int MaxCodeLength = 64;
 
     /// <summary>
     /// Відхиляє мапу зі зламаною формою: порожні чи задовгі коди, повтор джерела, перевищення стелі.
@@ -64,7 +64,7 @@ public static class VersionMigrationRenames
                 || !IsCode(rename.FromTableCode) || !IsCode(rename.ToTableCode)
                 || (rename.SheetCode is not null && !IsCode(rename.SheetCode)))
             {
-                throw Invalid("Кожен запис мапи перейменувань мусить мати непорожні коди таблиць (до 100 символів).");
+                throw Invalid("Кожен запис мапи перейменувань мусить мати непорожні коди таблиць (до 64 символів).");
             }
 
             var onlyColumns = string.Equals(rename.FromTableCode, rename.ToTableCode, StringComparison.Ordinal);
@@ -94,7 +94,7 @@ public static class VersionMigrationRenames
             {
                 if (column is null || !IsCode(column.FromColumnCode) || !IsCode(column.ToColumnCode))
                 {
-                    throw Invalid($"Запис «{rename.FromTableCode}»: коди колонок мусять бути непорожніми (до 100 символів).");
+                    throw Invalid($"Запис «{rename.FromTableCode}»: коди колонок мусять бути непорожніми (до 64 символів).");
                 }
 
                 if (!fromColumns.Add(column.FromColumnCode))

@@ -290,6 +290,39 @@ Describe 'Apply-ContractHeader.ps1: міграція документів тіл
         $applies[0].Path | Should -Be '/api/v1/documents/10/migrate-version'
     }
 
+    It '-TableRenameMap: мапа перейменувань іде в тіло dry-run і застосування migrate-version' {
+        Initialize-FakeEcr @(
+            @{ id = 1; version = '1.0.0.0'; status = 'Published'; match = $true }
+        )
+        $map = Join-Path $TestDrive 'renames.json'
+        Set-Content -LiteralPath $map -Encoding UTF8 -Value '[{"fromTableCode":"T9a_03","toTableCode":"T9a_17a"}]'
+        Invoke-Header @{ MigrateDocumentId = @(3); TableRenameMap = $map }
+
+        $mig = @($global:FakeEcr.Calls | Where-Object { $_.Path -eq '/api/v1/documents/3/migrate-version' })
+        $mig | Should -HaveCount 2
+        foreach ($m in $mig) {
+            @($m.Body.tableRenames) | Should -HaveCount 1
+            $m.Body.tableRenames[0].fromTableCode | Should -Be 'T9a_03'
+            $m.Body.tableRenames[0].toTableCode | Should -Be 'T9a_17a'
+        }
+    }
+
+    It 'без -TableRenameMap тіло migrate-version не містить tableRenames (поведінка не змінилась)' {
+        Initialize-FakeEcr @(
+            @{ id = 1; version = '1.0.0.0'; status = 'Published'; match = $true }
+        )
+        Invoke-Header @{ MigrateDocumentId = @(3) }
+
+        $mig = @($global:FakeEcr.Calls | Where-Object { $_.Path -eq '/api/v1/documents/3/migrate-version' })
+        $mig | Should -HaveCount 2
+        foreach ($m in $mig) { $m.Body.ContainsKey('tableRenames') | Should -BeFalse }
+    }
+
+    It 'готова мапа tools/land/rename-maps/land-9a-missing-tables.json описує три таблиці 9a' {
+        $path = Join-Path (Join-Path $PSScriptRoot '..') 'land/rename-maps/land-9a-missing-tables.json'
+        $map = @(Get-Content -LiteralPath $path -Raw -Encoding UTF8 | ConvertFrom-Json)
+        ($map | ForEach-Object { "$($_.fromTableCode)>$($_.toTableCode)" }) | Should -Be @('T9a_03>T9a_17a', 'T9a_06>T9a_21a', 'T9a_07>T9a_21b')
+    }
     It 'R16-3: «3,10» одним рядком (powershell -File) — два документи, а не 310' {
         Initialize-FakeEcr @(
             @{ id = 1; version = '1.0.0.0'; status = 'Published'; match = $true }
