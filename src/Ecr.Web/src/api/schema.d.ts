@@ -20154,6 +20154,31 @@ export interface components {
              *     ⚠ Додано в L6 останнім необов'язковим полем: клієнт, що його не знає, малює решту як раніше. */
             pattern?: null | string;
         };
+        /** @description Чи можна фарбувати комірки таблиці (CELL-STYLE P1A): те, що клієнт має знати, щоб не вмикати «Заливку»/«Колір
+         *     тексту» там, де `PATCH …/cell-styles` однаково відмовить 403. */
+        CellStyleAccessDto: {
+            /** @description `true` — хоч одну ВИДИМУ комірку зрізу можна фарбувати (те саме рішення, що приймає запис). Ознаки колонки
+             *             «обчислювана»/«лише читання» тут НЕ заважають: колір — оформлення, а не дані. */
+            canStyle: boolean;
+            /** @description Коли `canStyle` = `false`: стабільне ім'я `EditDenyReason` (те саме, що значення
+             *     `CellPermissions`; текст — ключ каталогу `deny.{reason}`) — найчастіша причина серед комірок. `null` — коли
+             *     `canStyle` = `true` або комірок у зрізі немає (фарбувати нічого). */
+            deniedReason: null | string;
+            /** @description Решта заборонених комірок (не покриті повністю рядком чи колонкою): ключ `"{rowKey}:{columnCode}"` →
+             *     назва `EditDenyReason`. Лише коли `canStyle` = `true`. */
+            styleDeniedCells: {
+                [key: string]: string;
+            };
+            /** @description Видимі колонки, у яких не можна фарбувати жодну комірку (напр. заборона/«лише читання» на колонку за грантом).
+             *     Лише коли `canStyle` = `true`. Схованих/заборонених читачеві колонок тут немає (нерозкриття, S6). */
+            styleDeniedColumnCodes: string[];
+            /** @description Рядки, у яких не можна фарбувати жодну видиму комірку (напр. рядок «лише читання»). Лише коли
+             *     `canStyle` = `true`. */
+            styleDeniedRowKeys: string[];
+            /** @description `true` — переліки обрізано до ліміту (`CellStyleAccessPolicy.MaxKeys` ключів усього): комірки, яких тут
+             *             немає, можуть бути заборонені; остаточне рішення — за сервером (403 на запис). */
+            truncated: boolean;
+        };
         /** @description Зміна оформлення однієї комірки. */
         CellStyleChange: {
             /** @description Заливка `#rrggbb`; `null` — не чіпати; `""` — зняти. */
@@ -20186,6 +20211,35 @@ export interface components {
             /** Format: uint8 */
             verticalAlign: null | number;
             wrapText: boolean;
+        };
+        /** @description Область оформлення «рядки × колонки»: сервер розгортає її на живі рядки таблиці й колонки,
+         *     які викликач бачить; права — ті самі, що в `items`. */
+        CellStyleScope: {
+            /**
+             * @description `true` — усі колонки, які бачить викликач (приховані/заборонені не входять).
+             * @default false
+             */
+            allColumns: boolean;
+            /**
+             * @description `true` — усі живі рядки екземпляра.
+             * @default false
+             */
+            allRows: boolean;
+            /** @description Заливка `#rrggbb`; `null` — не чіпати; `""` — зняти. */
+            backgroundHex?: null | string;
+            /** @description Коди колонок; колонки немає чи вона прихована — `unknownCell`. */
+            columnCodes?: null | string[];
+            /** @description Колір тексту `#rrggbb`; `null` — не чіпати; `""` — зняти. */
+            foregroundHex?: null | string;
+            /** @description Жирність; `null` — не чіпати. */
+            isBold?: null | boolean;
+            /**
+             * @description `true` — зняти все оформлення з області.
+             * @default false
+             */
+            reset: boolean;
+            /** @description Ключі рядків; рядка немає в зрізі — `unknownCell`. */
+            rowKeys?: null | string[];
         };
         /**
          * @description Клас структурної зміни (документ 10 «Еволюція схеми»).
@@ -23764,18 +23818,19 @@ export interface components {
         /** @description Користувацьке оформлення комірок (заливка, колір тексту, жирність) —
          *     `PATCH /api/v1/documents/{documentId}/tables/{tableInstanceId}/cell-styles`. */
         PatchCellStylesRequest: {
-            /** @description Комірки й нове оформлення; одна комірка — один раз. */
-            items: components["schemas"]["CellStyleChange"][];
+            /** @description Комірки й нове оформлення; одна комірка — один раз. Може бути порожнім, якщо задано Scope. */
+            items?: null | components["schemas"]["CellStyleChange"][];
             /**
              * Format: int32
              * @description Період екземпляра таблиці (звіряється з періодом екземпляра).
              */
             periodKey: number;
             /**
-             * @description `true` — зняти все оформлення з перелічених комірок.
+             * @description `true` — зняти все оформлення з перелічених у Items комірок.
              * @default false
              */
             reset: boolean;
+            scope?: null | components["schemas"]["CellStyleScope"];
         };
         /** @description Відповідь на `PATCH …/cell-styles`. */
         PatchCellStylesResponse: {
@@ -23784,11 +23839,30 @@ export interface components {
              * @description Комірок, оформлення яких змінено (без no-op).
              */
             appliedCells: number;
+            /** @description Причини відмови з лічильниками (не більше 10; без назв рядків і колонок), лише коли
+             *     DeniedCells більше нуля. */
+            deniedByReason?: null | {
+                [key: string]: number;
+            };
+            /**
+             * Format: int32
+             * @description Комірок області `scope`, відмовлених правами/станом (часткова відмова; решта застосована).
+             *     Для `items` відмова лишається повною (403). Колонки, яких викликач не бачить, не входять у лік.
+             * @default 0
+             */
+            deniedCells: number;
             /**
              * Format: int32
              * @description Комірок, з яких знято все оформлення (рядок стилю видалено).
              */
             resetCells: number;
+            /**
+             * Format: int32
+             * @description Дозволених комірок без змін (оформлення вже таке саме; ідемпотентний повтор). Разом
+             *     `applied + reset + skipped + denied` = розгорнуто комірок.
+             * @default 0
+             */
+            skippedCells: number;
         };
         /** @description Пакетна зміна комірок. Часткове застосування заборонене: конфлікт у
          *     будь-якому рядку відхиляє весь батч (B04 §2.3). */
@@ -27529,6 +27603,7 @@ export interface components {
             periodKey: number;
             /** @description Рядки зі значеннями. */
             rows: components["schemas"]["RowDto"][];
+            styleAccess?: null | components["schemas"]["CellStyleAccessDto"];
             /**
              * Format: int64
              * @description Екземпляр таблиці.

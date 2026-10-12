@@ -152,7 +152,7 @@ function installStandServer(): void {
       const items = request.items ?? [];
       const invalid =
         typeof request.periodKey !== 'number' ||
-        items.length === 0 ||
+        (items.length === 0 && request.scope == null) ||
         items.length > 2000 ||
         (request.reset !== true && items.some((item) => item.backgroundHex == null && item.foregroundHex == null && item.isBold == null));
       if (invalid) return new Response(JSON.stringify({ errorCode: 'ECR-REQ-0422', title: 'Unprocessable' }), { status: 422, headers: { 'Content-Type': 'application/problem+json' } });

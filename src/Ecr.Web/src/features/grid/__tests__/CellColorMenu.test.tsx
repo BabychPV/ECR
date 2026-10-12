@@ -43,7 +43,9 @@ describe('CellColorMenu', () => {
   it('без виділення / права кнопки вимкнені й пояснюють причину', () => {
     show({ disabled: true, disabledHint: 'чому' });
 
-    expect(screen.getByTestId('cell-color-fill')).toHaveProperty('disabled', true);
+    expect(screen.getByTestId('cell-color-fill').getAttribute('aria-disabled')).toBe('true');
+    expect(screen.getByTestId('cell-color-fill').getAttribute('aria-describedby')).toBe('cell-color-fill-why');
+    expect(screen.getAllByText('чому')[0]?.id).toBe('cell-color-fill-why');
     expect(screen.getByTestId('cell-color-fill').getAttribute('title')).toBe('чому');
   });
 

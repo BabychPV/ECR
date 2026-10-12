@@ -106,6 +106,38 @@ public sealed class TableSliceUserCellStyleTests
         Assert.Empty(slice.CellStyles!);
     }
 
+    [Fact]
+    public async Task Slice_style_access_comes_from_style_decision_not_from_edit_permissions()
+    {
+        var period = new PeriodKey(Period);
+
+        // Редагування ЗНАЧЕННЯ заборонене (колонка обчислювана), а колір — дозволений: це різні рішення.
+        _access.CanEditSliceAsync(Arg.Any<AccessProfile>(), TableInstance, Arg.Any<CancellationToken>())
+               .Returns(new Dictionary<CellAddress, EditDecision>
+               {
+                   [new CellAddress(period, 1, VolumeId)] = EditDecision.Deny(EditDenyReason.CalculatedCell),
+                   [new CellAddress(period, 2, VolumeId)] = EditDecision.Deny(EditDenyReason.CalculatedCell),
+               });
+        _access.CanStyleSliceAsync(Arg.Any<AccessProfile>(), TableInstance, Arg.Any<CancellationToken>())
+               .Returns(new Dictionary<CellAddress, EditDecision>
+               {
+                   [new CellAddress(period, 1, VolumeId)] = EditDecision.Allow(),
+                   [new CellAddress(period, 2, VolumeId)] = EditDecision.Deny(EditDenyReason.RowReadOnly),
+
+                   // Колонка схована читачеві: її рішення не потрапляє у згортку (S6).
+                   [new CellAddress(period, 1, HiddenId)] = EditDecision.Deny(EditDenyReason.NoGrant),
+               });
+
+        var slice = await Handler(_styles).HandleAsync(Document, TableInstance, Profile(), "en", CancellationToken.None);
+
+        Assert.Equal("CalculatedCell", slice.CellPermissions["R1:Volume"]);
+        Assert.NotNull(slice.StyleAccess);
+        Assert.True(slice.StyleAccess.CanStyle);
+        Assert.Equal(["R2"], slice.StyleAccess.StyleDeniedRowKeys);
+        Assert.Empty(slice.StyleAccess.StyleDeniedColumnCodes);
+        Assert.DoesNotContain("Secret", string.Concat(slice.StyleAccess.StyleDeniedCells.Keys), StringComparison.Ordinal);
+    }
+
     private GetTableSliceHandler Handler(ICellStyleStore? styles)
     {
         var units = Substitute.For<IUnitCatalog>();

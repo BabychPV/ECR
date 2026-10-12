@@ -75,3 +75,28 @@
   opacity: 0;
   pointer-events: none;
 }
+
+.ecr-cell-color-scope {
+  height: 36px;
+  padding: 0 var(--mantine-spacing-xs, 8px);
+  border: 1px solid var(--ecr-border-strong, var(--mantine-color-default-border));
+  border-radius: var(--mantine-radius-sm, 4px);
+  background: var(--mantine-color-body);
+  color: inherit;
+  font: inherit;
+}
+
+/* Причина недоступності для читалки екрана (`aria-describedby`); на екрані — у `title`. */
+.ecr-cell-color-why {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.ecr-cell-color-menu button[aria-disabled='true'] {
+  opacity: 0.55;
+  cursor: not-allowed;
+}

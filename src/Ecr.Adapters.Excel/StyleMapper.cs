@@ -92,6 +92,69 @@ public sealed class StyleMapper
         ApplyBorders(target, style.BorderJson);
     }
 
+    /// <summary>
+    /// Кладе стиль РЯДКА шаблону на комірки даних: лише ЗАДАНІ складові (D-393, шар «рядок» над колонкою).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ На відміну від <see cref="Apply"/> (шапка/колонка) жирність, курсив і перенос лише ВМИКАЮТЬСЯ: стиль
+    /// рядка без жирності не скидає жирність колонки. Формат числа рядка НЕ застосовується: формат відображення
+    /// колонки (<c>DisplayFormat</c>/<c>Scale</c>) тут важливіший, інакше число в рядку «поїде» відносно колонки.
+    /// </remarks>
+    public void ApplyRowStyle(IXLStyle? target, StyleDef? style)
+    {
+        if (target is null || style is null)
+        {
+            return;
+        }
+
+        if (!string.IsNullOrWhiteSpace(style.FontName))
+        {
+            target.Font.FontName = style.FontName;
+        }
+
+        if (style.FontSize is { } size and > 0)
+        {
+            target.Font.FontSize = (double)size;
+        }
+
+        if (style.IsBold)
+        {
+            target.Font.Bold = true;
+        }
+
+        if (style.IsItalic)
+        {
+            target.Font.Italic = true;
+        }
+
+        if (style.ForegroundArgb is { } foreground)
+        {
+            target.Font.FontColor = XLColor.FromArgb(foreground);
+        }
+
+        if (style.BackgroundArgb is { } background)
+        {
+            target.Fill.BackgroundColor = XLColor.FromArgb(background);
+        }
+
+        if (style.HorizontalAlign is { } horizontal)
+        {
+            target.Alignment.Horizontal = Horizontal(horizontal);
+        }
+
+        if (style.VerticalAlign is { } vertical)
+        {
+            target.Alignment.Vertical = Vertical(vertical);
+        }
+
+        if (style.WrapText)
+        {
+            target.Alignment.WrapText = true;
+        }
+
+        ApplyBorders(target, style.BorderJson);
+    }
+
     /// <summary>Ставить формат відображення колонки.</summary>
     /// <param name="target">Стиль ClosedXML.</param>
     /// <param name="displayFormat">Формат із <c>ColumnDef.DisplayFormat</c>.</param>

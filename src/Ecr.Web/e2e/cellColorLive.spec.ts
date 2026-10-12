@@ -323,7 +323,22 @@ test.describe('cellColor: колір комірки на реальному ст
         cells: [{ rowKey: slice.rowKey, columnCode: slice.columnCode, backgroundHex: Yellow }],
       });
       expect(response.status, `PATCH {cells}: ${response.text}`).toBe(422);
-      expect(response.text).toContain('ECR-REQ-0422');
+      // ⚠ Код залежить від того, ЯКИЙ рубіж спрацював першим. До CELL-STYLE scope-2 `items` був обов'язковим, і
+      // чужа форма падала на валідації моделі (`ECR-REQ-0422`). Тепер `items` необов'язкове, а після фіксу
+      // emptyChange (546775656) `EnsureValid` запиту (без items і без scope) спрацьовує РАНІШЕ за перевірку періоду
+      // в handler: `ECR-CELL-4224` / `err.ECR-CELL-4224.emptyChange`. Лишаємо й старі коди як допустимі:
+      // усі - 422 ДО будь-якого запису, і саме це контракт.
+      expect(response.text).toMatch(/ECR-(REQ|PRD)-0422|ECR-CELL-4224/);
+
+      // З ПРАВИЛЬНИМ periodKey чужа форма не має проходити як «порожній успіх» (регрес scope-2: 200 appliedCells 0):
+      // запит без items і без scope - 422 `ECR-CELL-4224` / `err.ECR-CELL-4224.emptyChange`.
+      const withPeriod = await patchRaw(page, slice, {
+        periodKey: slice.periodKey,
+        cells: [{ rowKey: slice.rowKey, columnCode: slice.columnCode, backgroundHex: Yellow }],
+      });
+      expect(withPeriod.status, `PATCH {periodKey, cells}: ${withPeriod.text}`).toBe(422);
+      expect(withPeriod.text).toContain('ECR-CELL-4224');
+      expect(withPeriod.text).toContain('err.ECR-CELL-4224.emptyChange');
     } finally {
       await context.close();
     }

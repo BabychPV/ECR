@@ -143,8 +143,11 @@ test.describe('Передача місяця: власник → виконав�
   // перевіряє саме поріг гранта Read < Write для оператора БЕЗ передач; файли йдуть за алфавітом, `editAssignments`
   // раніше за `security`). Тому власник знімає передачу тією самою дією «Remove», що й у шторці. `afterAll` - щоб
   // прибирання відбулося й тоді, коли сценарій впав посередині.
-  test.afterAll(async ({ browser }) => {
+  test.afterAll(async ({ browser }, testInfo) => {
     if (PeriodKey === '' || DocumentId === '') return;
+    // Хук має власний ліміт (типові 30 с, `describe.configure({timeout})` на нього не діє): вхід + шторка + знімання
+    // на холодному CI-стенді вже самі займають ~10 с. Як і в `cellColorLive.spec.ts`.
+    testInfo.setTimeout(120_000);
 
     const admin = await asUser(browser, Admin);
     try {
@@ -153,11 +156,19 @@ test.describe('Передача місяця: власник → виконав�
       // Матриця вантажиться асинхронно: без передач рядка не буде - тоді чекання закінчується тихо, і нема що знімати.
       await rowMenu.first().waitFor({ state: 'visible', timeout: 15_000 }).catch(() => undefined);
       // Цикл: передач може бути більше однієї, якщо сценарій обірвався й повторювався.
-      for (let guard = 0; guard < 5 && (await rowMenu.count()) > 0; guard += 1) {
+      for (let guard = 0; guard < 5; guard += 1) {
+        const before = await rowMenu.count();
+        if (before === 0) break;
+
         await rowActions(admin, /^(Remove|Снять передачу)$/);
         const dialog = admin.getByRole('dialog', { name: /Take .* back from the executors|Забрать .* у исполнителей/ });
         await dialog.getByRole('button', { name: /^(Remove|Снять передачу)$/ }).click();
         await expect(dialog).toBeHidden({ timeout: 20_000 });
+        // ⛔ Гонитва «рядок ще в DOM, але вже зникає»: діалог закривається за 204 на DELETE, а список перечитується
+        // ПІСЛЯ (GET …/edit-assignments). `count()` у цей проміжок ще бачив старий рядок, а наступний `click()` на
+        // ньому висів без ліміту до таймауту хука (CI 38283603905: «afterAll hook timeout of 30000ms», кінцевий
+        // стан шторки - «Nothing is handed over yet»). Тож чекаємо, поки рядків стане на один менше.
+        await expect(rowMenu).toHaveCount(before - 1, { timeout: 20_000 });
       }
 
       await expect(rowMenu, 'передачі стенда не знято: security.spec побачить оператора-виконавця').toHaveCount(0, {

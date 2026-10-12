@@ -367,9 +367,16 @@ public sealed class GetTableSliceHandler(
         var userStyles = await UserCellStylesAsync(tableInstanceId, instance.PeriodKey, keyById, columns, ct)
             .ConfigureAwait(false);
 
+        // ⛔ CELL-STYLE P1A: «можна фарбувати» — рішення запису `PATCH …/cell-styles` (`CanStyleSliceAsync` = те саме
+        // `Decide(ignoreColumnFlags: true)`, що й `CanClearCellsAsync`), НЕ `CellPermissions`: ті враховують ознаки
+        // колонки «обчислювана»/«лише читання», а для кольору вони не заважають. Лише видимі колонки (S6).
+        var styleDecisions = await access.CanStyleSliceAsync(profile, tableInstanceId, ct).ConfigureAwait(false);
+        var styleAccess = CellStyleAccessPolicy.Build(
+            styleDecisions, keyById, columns.ToDictionary(c => c.Id, c => c.Code));
+
         return new TableSliceDto(
             tableInstanceId, instance.PeriodKey, columns, rows, permissions, confirmations, formats, outOfWindow,
-            userStyles, StyleOf(styleById, table.HeaderStyleId));
+            userStyles, StyleOf(styleById, table.HeaderStyleId), styleAccess);
     }
 
     /// <summary>
