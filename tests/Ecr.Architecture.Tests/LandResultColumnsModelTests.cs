@@ -89,7 +89,8 @@ public sealed class LandResultColumnsModelTests
             Assert.Equal(e.Methodologies, calc.GetProperty("methodologies").EnumerateArray().Select(x => x.GetString()!).OrderBy(x => x, StringComparer.Ordinal).ToList());
         }
 
-        Assert.True(covered >= 43, $"Колонки результатів мають бути у ≥ 43 таблицях, зараз {covered}.");
+        // 43 таблиці + 9a_17a/21a/21b (LP-09: після виправлення кодів таблиці зіставлення знайшлись у моделі)
+        Assert.True(covered >= 46, $"Колонки результатів мають бути у ≥ 46 таблицях, зараз {covered}.");
     }
 
     [Theory]

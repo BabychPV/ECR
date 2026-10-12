@@ -436,8 +436,13 @@ def af_lookup(prefix, en, ru):
 
 
 def sec_of(title):
-    m = re.match(r'^\s*(\d{1,2}[a-d]?(?:\.\d+)+)\b', title or '')
-    return m.group(1) if m else None
+    # Номер секції з заголовка таблиці: «9a.16 ...», а також з літерою після номера: «9a.17а» (кирилична а), «9a.21a» (латинська a).
+    # Раніше вираз вимагав межі слова одразу після цифр, тож такі заголовки не розпізнавались, а код таблиці брався з
+    # порядкового номера блоку (T9a_03/T9a_06/T9a_07 замість T9a_17a/T9a_21a/T9a_21b) - LP-09.
+    m = re.match(r'^\s*(\d{1,2}[a-d]?(?:\.\d+)+)([a-dа])?(?!\w)', title or '')
+    if not m:
+        return None
+    return m.group(1) + (m.group(2).replace('а', 'a') if m.group(2) else '')
 
 
 def table_code(sh_idx, sheet_name, t, k, nblocks):
@@ -595,7 +600,12 @@ for sh in X['sheets']:
     for k, t in enumerate(sh['tables'], 1):
         tcode = table_code(sh['index'], sh['name'], t, k, nblocks)
         if any(x['code'] == tcode for x in s_out['tables']):
-            tcode = '%s_%d' % (tcode, k)
+            # Excel 9a має два блоки з однаковим заголовком «9a.21a» (62 і 50 колонок); прод має AF_..._9a_21a і ..._9a_21b, тож
+            # другий блок = «b» (позиція між 9a.21a і 9a.22, ті самі 50 колонок і ті самі методології, що в 9a.22/9a.23).
+            if tcode[-1] == 'a' and not any(x['code'] == tcode[:-1] + 'b' for x in s_out['tables']):
+                tcode = tcode[:-1] + 'b'
+            else:
+                tcode = '%s_%d' % (tcode, k)
         title_en, title_ru = split_enru(t.get('title') or sh['name'])
         cols = t['columns']
         has_month = any(c.get('month') for c in cols)

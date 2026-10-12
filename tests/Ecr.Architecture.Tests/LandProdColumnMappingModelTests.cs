@@ -186,8 +186,9 @@ public sealed class LandProdColumnMappingModelTests
         }
 
         Assert.Equal(55, total);
-        // 5147 колонок до prodColumnMapping + 55 колонок введення + 544 колонки результатів C08/C09/C11/C12 (LP-08)
-        const int resultColumns = 544;
+        // 5147 колонок до prodColumnMapping + 55 колонок введення + 570 колонок результатів C08/C09/C11/C12 (LP-08: 544;
+        // ще 26 у таблицях 9a_17a/21a/21b, які LP-09 повернув у модель під правильними кодами)
+        const int resultColumns = 570;
         Assert.Equal(55, model.RootElement.GetProperty("stats").GetProperty("columns").GetInt32() - 5147 - resultColumns);
     }
 

@@ -28,7 +28,7 @@ PATTERNS = [
     (r'^AF_Air_Land_Off_Process_DI_(11_\d+)$', lambda m: 'T' + m.group(1)),
     (r'^AF_Air_Land_11([abcd])_Off_Process', lambda m: 'T11' + m.group(1) + '_01'),
     (r'^AF_Water_Land_07a_(\d+)$', lambda m: 'T7a_%02d' % int(m.group(1))),
-    (r'^AF_Water_Land_07b$', lambda m: 'T7b'),
+    (r'^AF_Water_Land_07b$', lambda m: 'T7b_00'),   # єдина таблиця аркуша 7b (LP-09: у шаблоні це T7b_00, а не T7b)
 ]
 # Методології, чиї таблиці вже мають колонки результатів із CALC генератора (аркуші 3, 4, 5) — тут не дублюються.
 ALREADY_IN_CALC = re.compile(r'^ECW_C0[5-7]_')
