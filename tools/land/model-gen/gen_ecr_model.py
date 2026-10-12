@@ -1129,6 +1129,68 @@ for _d in STYLE_DEFS.values():
     del _d['_al']
 out['styles'] = [STYLE_DEFS[k] for k in sorted(STYLE_DEFS)]
 out['conditionalFormatsRowScoped'] = _cf_scoped()
+
+
+# ---- умовне форматування за СТАТУСОМ РЯДКА: expression-правила Excel N($B5="Inactive") -> правило ECR (L6):
+# columnCode="*" (усі колонки таблиці) + refColumnCode=<статусна колонка> + textEq <значення> -> заливка dxf.
+# Рішення людини 12.10 17:35Z (квіз): «Inactive» 00CCFF додати як запис довідника й перенести CF «як в Excel».
+# Переносяться ЛИШЕ правила, де порівнювана колонка - статусна колонка таблиці з довідником LAND_GENERIC_EQUIPSTATUS
+# (в xlsm це колонка B). Правила на колонці C (аркуші 9a/11) НЕ доведені (що в C - невідомо) і не переносяться: лежать у
+# `conditionalFormatsStatusUnproven` до відповіді замовника.
+STATUS_CF_VALUES = ('Inactive',)
+STATUS_REGISTRY = 'LAND_GENERIC_EQUIPSTATUS'
+_status_expr = re.compile(r'^N\(\$([A-Z]{1,3})\d+\s*=\s*"([^"]+)"\)$')
+
+
+def _cf_status():
+    agg = {}
+    unproven = {}
+    for sh in out['sheets']:
+        xs = next((x for x in X['sheets'] if x['name'] == sh['excelName']), None)
+        if xs is None:
+            continue
+        for cf in xs.get('exprFormats', []):
+            m = _status_expr.match((cf['f'][0] if cf['f'] else '').replace(' ', ''))
+            if not m or m.group(2) not in STATUS_CF_VALUES or not cf['fill']:
+                continue
+            letter, value = m.group(1), m.group(2)
+            for part in (cf['sqref'] or '').split():
+                try:
+                    c1, r1, c2, r2 = _rb(part)
+                except Exception:
+                    continue
+                for t in sh['tables']:
+                    ex = t['excel']
+                    if r2 < ex['firstDataRow'] or r1 > ex['lastDataRow']:
+                        continue
+                    status = next((c for c in t['columns'] if c.get('excel') == letter and c.get('registry') == STATUS_REGISTRY), None)
+                    if status is None:
+                        k = (sh['code'], t['code'], letter, value)
+                        u = unproven.setdefault(k, {'sheet': sh['code'], 'table': t['code'], 'excelColumn': letter, 'value': value,
+                                                    'backgroundHex': '#' + cf['fill'], 'excelRanges': [], 'excelRuleCount': 0})
+                        u['excelRanges'].append(part)
+                        u['excelRuleCount'] += 1
+                        continue
+                    k = (sh['code'], t['code'], status['code'], value, cf['fill'])
+                    a = agg.setdefault(k, {'sheet': sh['code'], 'table': t['code'], 'statusColumn': status['code'], 'excelColumn': letter,
+                                           'operator': 'eq', 'value': value, 'valueKind': 'text', 'backgroundHex': '#' + cf['fill'],
+                                           'foregroundHex': ('#' + cf['font']) if cf['font'] else None, 'isBold': bool(cf['bold']),
+                                           'priority': int(cf['priority']) if cf.get('priority') is not None else None,
+                                           'excelRanges': [], 'excelRuleCount': 0})
+                    a['excelRanges'].append(part)
+                    a['excelRuleCount'] += 1
+    return list(agg.values()), list(unproven.values())
+
+
+out['conditionalFormatsRowStatus'], out['conditionalFormatsStatusUnproven'] = _cf_status()
+print('cf row-status:', len(out['conditionalFormatsRowStatus']), 'rules; unproven:', len(out['conditionalFormatsStatusUnproven']))
+
+# ---- довідник статусів: INACTIVE (рішення людини 12.10 17:35Z). У xlsm значення «Inactive» є лише в CF-формулах
+# (142 правила 00CCFF), у списку Generic_EquipStatus DropdownList!A5:A6 його немає - тож запис додається тут, у моделі,
+# з якої Build створює довідник (не в сіді: довідник Land існує лише в шаблоні, сід його не створює).
+_st_reg = registries.get(STATUS_REGISTRY)
+if _st_reg is not None and not any(e['code'] == 'INACTIVE' for e in _st_reg['entries']):
+    _st_reg['entries'].append({'code': 'INACTIVE', 'name': 'Inactive', 'en': 'Inactive', 'ru': ''})
 print('styles:', len(out['styles']), [(s['code'], s['columns'], s['headers'], s['tables']) for s in out['styles']])
 print('cf row-scoped:', len(out['conditionalFormatsRowScoped']))
 out['registries'] = list(registries.values())
