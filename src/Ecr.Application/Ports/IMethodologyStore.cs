@@ -122,6 +122,15 @@ public interface IMethodologyStore
     /// <summary>Речовини версії: для кожної рахуються власні виходи.</summary>
     public Task<IReadOnlyList<MethodologySubstance>> GetSubstancesAsync(int methodologyVersionId, CancellationToken ct);
 
+    /// <summary>
+    /// Коди записів довідника для речовин версії: <c>SubstanceEntryId</c> → <c>RegistryEntry.Code</c>.
+    /// </summary>
+    /// <remarks>
+    /// LP-07, форма B: категорія константи може мати суфікс коду речовини (<c>{ключ}_{код}</c>), і резолвер
+    /// спершу пробує його. Речовини без запису в довіднику в словник не потрапляють.
+    /// </remarks>
+    public Task<IReadOnlyDictionary<long, string>> GetSubstanceCodesAsync(int methodologyVersionId, CancellationToken ct);
+
     /// <summary>Оголошені виходи версії — з обов'язковими одиницями (ФВ-16.6).</summary>
     public Task<IReadOnlyList<MethodologyOutput>> GetOutputsAsync(int methodologyVersionId, CancellationToken ct);
 

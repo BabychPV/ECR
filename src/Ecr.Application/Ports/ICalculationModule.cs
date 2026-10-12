@@ -146,6 +146,10 @@ public interface ICalculationModule
 /// ✎ L-2 (<c>calc.CategoryRule</c>): вираз, що з рядка дає ключ категорії констант; <c>null</c> —
 /// правила немає, і константи резолвляться без категорії, як до L-2. Читається раз на прив'язку.
 /// </param>
+/// <param name="SubstanceCodes">
+/// ✎ LP-07 (форма B): <c>SubstanceEntryId</c> → код запису довідника речовини; категорія константи
+/// <c>{ключ}_{код}</c> має пріоритет над <c>{ключ}</c>. <c>null</c> — кодів немає, і поведінка та сама, що до форми B.
+/// </param>
 public sealed record CalculationBindingContext(
     MethodologyDescriptor Methodology,
     long DocumentId,
@@ -158,7 +162,8 @@ public sealed record CalculationBindingContext(
     IReadOnlyDictionary<string, IReadOnlyList<MethodologyConstant>> Constants,
     Ecr.Expressions.Evaluation.IRegistrySnapshot? Registries = null,
     CalculationLibraries? Libraries = null,
-    string? CategoryRule = null);
+    string? CategoryRule = null,
+    IReadOnlyDictionary<long, string>? SubstanceCodes = null);
 
 /// <summary>
 /// Замикання бібліотечних формул версії (HSE301 L): що з імпортованих методологій
