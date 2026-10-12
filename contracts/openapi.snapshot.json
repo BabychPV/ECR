@@ -303,6 +303,116 @@
         ],
         "type": "object"
       },
+      "ApprovalQueueDto": {
+        "description": "Сторінка черги «До погодження»: найдавніші подання першими.",
+        "properties": {
+          "items": {
+            "description": "Аркуші, які поточний користувач МОЖЕ затвердити зараз.",
+            "items": {
+              "$ref": "#/components/schemas/ApprovalQueueItemDto"
+            },
+            "type": "array"
+          },
+          "nextCursor": {
+            "description": "Непрозорий курсор наступної сторінки; `null` — кінець черги.",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "type": "object"
+      },
+      "ApprovalQueueItemDto": {
+        "description": "Аркуш, що чекає погодження ПОТОЧНОГО користувача («До погодження», ФВ-12.5).",
+        "properties": {
+          "documentId": {
+            "description": "Документ.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "documentKey": {
+            "description": "Бізнес-ключ документа.",
+            "type": "string"
+          },
+          "periodKey": {
+            "description": "Ключ періоду `Рік*100+№` (для `approve` і для відкриття документа).",
+            "format": "int32",
+            "type": "integer"
+          },
+          "projectCode": {
+            "description": "Код проєкту документа.",
+            "type": "string"
+          },
+          "sheetCode": {
+            "description": "Код аркуша.",
+            "type": "string"
+          },
+          "sheetDefId": {
+            "description": "Аркуш (для `POST /documents/{id}/approve`).",
+            "format": "int32",
+            "type": "integer"
+          },
+          "stepCount": {
+            "description": "Скільки кроків у маршруті; `null` — маршруту немає.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "stepOrdinal": {
+            "description": "Номер поточного кроку маршруту; `null` — маршруту немає (одноетапне).",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "stepRoleCode": {
+            "description": "Код ролі поточного кроку; `null` — маршруту немає.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "submittedAt": {
+            "description": "Коли подано, UTC.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "submittedByDisplayName": {
+            "description": "Хто подав; `null` — користувача вже немає.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "templateCode": {
+            "description": "Код шаблону проєкту.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "documentId",
+          "documentKey",
+          "projectCode",
+          "templateCode",
+          "sheetDefId",
+          "sheetCode",
+          "periodKey",
+          "submittedAt",
+          "submittedByDisplayName",
+          "stepOrdinal",
+          "stepCount",
+          "stepRoleCode"
+        ],
+        "type": "object"
+      },
       "ApprovalRouteDto": {
         "description": "Маршрут погодження проєкту.",
         "properties": {
@@ -27910,6 +28020,75 @@
         ]
       }
     },
+    "/api/v1/me/approval-queue": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Розмір сторінки 1..200 (за замовчуванням 50).",
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Курсор попередньої відповіді.",
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovalQueueDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovalQueueDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovalQueueDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Подані аркуші, які поточний користувач може затвердити зараз: документ і аркуш видимі йому, крок\nмаршруту погодження — його ролі, рівень гранта не нижчий за `Approve`, подав не він сам.\nНайдавніші подання першими; без імен схованого.",
+        "tags": [
+          "MeApprovalQueue"
+        ]
+      }
+    },
     "/api/v1/me/edit-assignments": {
       "get": {
         "parameters": [
@@ -46566,6 +46745,9 @@
     },
     {
       "name": "Languages"
+    },
+    {
+      "name": "MeApprovalQueue"
     },
     {
       "name": "MeEditAssignments"

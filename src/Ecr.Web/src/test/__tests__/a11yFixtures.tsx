@@ -833,6 +833,11 @@ export function emptyBodyFor(url: string): unknown {
   // локальних значеннях, і гейт сканує той самий вигляд, що й раніше.
   if (url.includes('/api/v1/me/preferences')) return [];
 
+  // Черга «До погодження» (`ApprovalQueueSection`): сторінка з курсором, а не `[]`
+  // за замовчуванням — інакше `approvalQueueItems` дає `[undefined]`, і `ApprovalRow`
+  // падає, щойно в немоканому тесті відкривається шухляда.
+  if (url.includes('/api/v1/me/approval-queue')) return { items: [], nextCursor: null };
+
   if (url.includes('/audit/cells')) return { items: [], nextCursor: null };
 
   // ⚠ Форми відповідей, а не `[]` за замовчуванням: матриця правил — об'єкт,

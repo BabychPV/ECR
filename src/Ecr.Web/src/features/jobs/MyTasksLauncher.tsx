@@ -36,6 +36,10 @@ const StaleDocumentsSection = lazy(async () => ({
 }));
 
 // Передані місяці (EA-5c) - так само окремий чанк.
+const ApprovalQueueSection = lazy(async () => ({
+  default: (await import('./ApprovalQueueSection')).ApprovalQueueSection,
+}));
+
 const EditAssignmentsSection = lazy(async () => ({
   default: (await import('./EditAssignmentsSection')).EditAssignmentsSection,
 }));
@@ -139,6 +143,9 @@ export function MyTasksLauncher(): JSX.Element {
             onRetry={() => void tasks.refetch()}
             staleSection={
               <>
+                <Suspense fallback={null}>
+                  <ApprovalQueueSection opened={opened} />
+                </Suspense>
                 <Suspense fallback={null}>
                   <EditAssignmentsSection opened={opened} />
                 </Suspense>

@@ -7521,6 +7521,14 @@ USING (VALUES
     (N'myTasks.edit.status.Assigned', N'en', N'Assigned', 1),
     (N'myTasks.edit.status.Filled', N'en', N'Filled, awaiting validation', 1),
     (N'myTasks.edit.status.Returned', N'en', N'Returned for edits', 1),
+    -- ФВ-12.5:approval-queue ── блок «До погодження» у My tasks ──
+    (N'myTasks.approval.title', N'en', N'Awaiting my approval', 1),
+    (N'myTasks.approval.error', N'en', N'Could not load the sheets awaiting your approval.', 1),
+    (N'myTasks.approval.more', N'en', N'Show more', 1),
+    (N'myTasks.approval.open', N'en', N'Review', 1),
+    (N'myTasks.approval.submittedAt', N'en', N'Submitted {date}', 1),
+    (N'myTasks.approval.submittedBy', N'en', N'Submitted by {name} · {date}', 1),
+    (N'myTasks.approval.step', N'en', N'Step {n} of {count}', 1),
     -- EDA-5c:mytasks ── кінець секції ──
     -- COLL:rc15c-recalc ── перерахунок вимкнений лише коли подані ВСІ аркуші; ru/kz — порцією COLL:rc15c-recalc нижче ──
     (N'workflow.recalculateAllSubmitted', N'en', N'All sheets of period {period} are submitted or approved: there is nothing to recalculate. Return a sheet for edits first (the sheet''s «Return for edits» action).', 1),
@@ -8011,6 +8019,9 @@ USING (VALUES
     ,(N'grid.cellColor.scope.table', N'en', N'Whole table', 1)
     ,(N'grid.cellColor.partial', N'en', N'{count} cells were not changed (reason: {reasons}); the rest were coloured.', 1)
     -- L4:cellcolor ── кінець секції ──
+    -- COLL:approval-queue ── ФВ-12.5: черга «До погодження» (GET /me/approval-queue); ru/kz — порцією COLL:approval-queue нижче ──
+    ,(N'err.ECR-REQ-0422.approvalQueueCursorInvalid', N'en', N'The approval queue page cursor is not valid. Reload the list.', 1)
+    -- COLL:approval-queue ── кінець секції ──
     -- COLL:cellstyle-scope ── CELL-STYLE «область»: фарбування рядків × колонок одним запитом; ru/kz — порцією COLL:cellstyle-scope нижче ──
     ,(N'err.ECR-CELL-4224.scopeRows', N'en', N'Formatting by area: pass either a list of row keys or "all rows", not both and not neither.', 1)
     ,(N'err.ECR-CELL-4224.scopeColumns', N'en', N'Formatting by area: pass either a list of column codes or "all columns", not both and not neither.', 1)
@@ -18811,6 +18822,28 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- EDA-5c:mytasks ── кінець секції ──
+-- ФВ-12.5:approval-queue ── ru/kz блоку «До погодження»; власна порція
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'myTasks.approval.title', N'ru', N'К согласованию'),
+    (N'myTasks.approval.title', N'kz', N'Келісуге'),
+    (N'myTasks.approval.error', N'ru', N'Не удалось загрузить листы, ожидающие вашего согласования.'),
+    (N'myTasks.approval.error', N'kz', N'Сіздің келісуіңізді күтетін парақтарды жүктеу мүмкін болмады.'),
+    (N'myTasks.approval.more', N'ru', N'Показать ещё'),
+    (N'myTasks.approval.more', N'kz', N'Көбірек көрсету'),
+    (N'myTasks.approval.open', N'ru', N'Проверить'),
+    (N'myTasks.approval.open', N'kz', N'Қарау'),
+    (N'myTasks.approval.submittedAt', N'ru', N'Подано {date}'),
+    (N'myTasks.approval.submittedAt', N'kz', N'Жіберілген күні: {date}'),
+    (N'myTasks.approval.submittedBy', N'ru', N'Подал(а) {name} · {date}'),
+    (N'myTasks.approval.submittedBy', N'kz', N'Жіберген: {name} · {date}'),
+    (N'myTasks.approval.step', N'ru', N'Шаг {n} из {count}'),
+    (N'myTasks.approval.step', N'kz', N'{count} қадамның {n}-і')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- ФВ-12.5:approval-queue ── кінець секції ──
 -- COLL:rc16lookup ── ru/kz: ціль Lookup-колонки/поля шапки - живий активний довідник; власна порція
 INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val
@@ -20113,6 +20146,17 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- L4:cellcolor ── кінець секції ──
+
+-- COLL:approval-queue ── ru/kz: ФВ-12.5, черга «До погодження»; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-REQ-0422.approvalQueueCursorInvalid', N'ru', N'Курсор страницы очереди согласования недействителен. Обновите список.'),
+    (N'err.ECR-REQ-0422.approvalQueueCursorInvalid', N'kz', N'Келісу кезегі бетінің курсоры жарамсыз. Тізімді жаңартыңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:approval-queue ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t
