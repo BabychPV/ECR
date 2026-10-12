@@ -79,6 +79,15 @@ describe('DeleteRowControl', () => {
     expect(screen.getByRole('button', { name: /grid\.deleteRow\b/ }).hasAttribute('disabled')).toBe(true);
   });
 
+  it('вимкнена кнопка має пояснення не лише в title: прихований текст за aria-describedby', () => {
+    mount();
+
+    const button = screen.getByRole('button', { name: /grid\.deleteRow\b/ });
+    const id = button.getAttribute('aria-describedby');
+    expect(id).toBeTruthy();
+    expect(document.getElementById(id!)?.textContent).toContain('grid.deleteRowHint');
+  });
+
   it('рядок шаблону не видаляється: кнопка вимкнена', () => {
     publishFocus(TableInstanceId, PeriodKey, { rowIndex: 0, columnIndex: 0 });
     mount();
