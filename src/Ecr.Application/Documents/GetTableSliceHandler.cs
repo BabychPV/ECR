@@ -42,6 +42,10 @@ namespace Ecr.Application.Documents;
 /// C1: переклад Id колонок обов'язкових входів на колонки версії шаблону документа. <c>null</c> — Id локальні
 /// (лише прямий конструктор у тестах).
 /// </param>
+/// <param name="registries">
+/// CELL-STYLE L6: коди записів довідника для правил умовного форматування, що читають колонку-довідник
+/// («статус рядка»). Запитується лише коли такі правила є в таблиці. Необов'язковий лише заради тестів.
+/// </param>
 /// <param name="formulaEngine">
 /// Рушій виразів — для <c>ColumnDto.Expression</c> (UI-25, B4): розбір формули колонки й збір її
 /// посилань. Необов'язковий лише заради тестів; без нього вираз не віддається ніколи.
@@ -65,7 +69,8 @@ public sealed class GetTableSliceHandler(
     IAuditReader? audit = null,
     IFormulaEngine? formulaEngine = null,
     IColumnPathMapper? columnMapper = null,
-    ICellStyleStore? cellStyles = null)
+    ICellStyleStore? cellStyles = null,
+    IRegistryStore? registries = null)
 {
     private readonly MethodologyRequiredColumnsCache _required = new(memory);
 
@@ -353,7 +358,7 @@ public sealed class GetTableSliceHandler(
 
         // ФВ-2.6/2.7: умовне форматування — ОДИН запит на версію й та сама
         // чиста функція, що в Excel-експорті (`ConditionalFormatEvaluator`).
-        var formats = await ConditionalFormatsAsync(instance.TemplateVersionId, columns, rows, ct)
+        var formats = await ConditionalFormatsAsync(instance.TemplateVersionId, table.Code, columns, rows, ct)
             .ConfigureAwait(false);
 
         var outOfWindow = await OutOfWindowCellsAsync(
@@ -452,7 +457,7 @@ public sealed class GetTableSliceHandler(
     /// (правило <c>empty</c> спрацьовує й на ній).
     /// </summary>
     private async Task<IReadOnlyDictionary<string, Templates.CellFormatDto>> ConditionalFormatsAsync(
-        int templateVersionId, List<ColumnDto> columns, IReadOnlyList<RowDto> rows, CancellationToken ct)
+        int templateVersionId, string tableCode, List<ColumnDto> columns, IReadOnlyList<RowDto> rows, CancellationToken ct)
     {
         var result = new Dictionary<string, Templates.CellFormatDto>(StringComparer.Ordinal);
 
@@ -461,12 +466,44 @@ public sealed class GetTableSliceHandler(
             return result;
         }
 
-        var all = await conditionalFormats.GetAsync(templateVersionId, ct).ConfigureAwait(false);
+        // L6: правила, прив'язані до ІНШОЇ таблиці, відсікаються одразу — у версії їх можуть бути тисячі
+        // (Land: ~3,8 тис. пар «колонка × рядки»), а зріз — найгарячіший запит.
+        var all = (await conditionalFormats.GetAsync(templateVersionId, ct).ConfigureAwait(false))
+            .Where(r => r.TableCode is null || string.Equals(r.TableCode, tableCode, StringComparison.Ordinal))
+            .ToList();
+
+        if (all.Count == 0)
+        {
+            return result;
+        }
+
         var byColumn = Templates.ConditionalFormatEvaluator.ByColumn(all);
+
+        // ⛔ Нерозкриття: колонка-джерело правила («статус рядка») читається ЛИШЕ з видимих колонок зрізу
+        // (`columns` уже без прихованих і заборонених доступом). Невидима колонка → правило не застосовується.
+        var visible = columns.ToDictionary(c => c.Code, StringComparer.Ordinal);
+
+        // Код запису довідника для колонок-джерел, що є довідниковими: у комірці лежить Id, а правило
+        // порівнює КОД (як книга Excel, `ExcelExporter.WriteValue`).
+        var codeByColumn = new Dictionary<string, IReadOnlyDictionary<long, string>>(StringComparer.Ordinal);
+        if (registries is not null)
+        {
+            foreach (var reference in all.Select(r => r.RefColumnCode).OfType<string>().Distinct(StringComparer.Ordinal))
+            {
+                if (visible.TryGetValue(reference, out var source) && source.LookupRegistryDefId is { } registryId)
+                {
+                    var entries = await registries.ListEntriesAsync(registryId, ct).ConfigureAwait(false);
+                    codeByColumn[reference] = entries
+                        .GroupBy(e => e.Id)
+                        .ToDictionary(g => g.Key, g => g.First().Code);
+                }
+            }
+        }
 
         foreach (var column in columns)
         {
-            if (!byColumn.TryGetValue(column.Code, out var rules))
+            var rules = Templates.ConditionalFormatEvaluator.RulesFor(byColumn, column.Code);
+            if (rules.Count == 0)
             {
                 continue;
             }
@@ -475,7 +512,26 @@ public sealed class GetTableSliceHandler(
             {
                 row.Cells.TryGetValue(column.Code, out var value);
 
-                if (Templates.ConditionalFormatEvaluator.Evaluate(rules, value) is { } format)
+                var context = new Templates.RuleCellContext(tableCode, row.RowKey, (string code, out object? found) =>
+                {
+                    found = null;
+                    if (!visible.ContainsKey(code))
+                    {
+                        return false;
+                    }
+
+                    row.Cells.TryGetValue(code, out found);
+
+                    if (found is long entryId && codeByColumn.TryGetValue(code, out var codes)
+                        && codes.TryGetValue(entryId, out var entryCode))
+                    {
+                        found = entryCode;
+                    }
+
+                    return true;
+                });
+
+                if (Templates.ConditionalFormatEvaluator.Evaluate(rules, value, context) is { } format)
                 {
                     result[$"{row.RowKey}:{column.Code}"] = format;
                 }

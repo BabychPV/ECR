@@ -17,7 +17,7 @@ namespace Ecr.Application.Tests.Templates;
 /// <remarks>
 /// Значення йде тим самим шляхом, що в зрізі сітки (<c>GetTableSliceHandler</c>) і в
 /// Excel-експорті: <see cref="CellValueData"/> → <see cref="CellValueMapping.ToRuleValue"/>
-/// → <see cref="ConditionalFormatEvaluator.Evaluate"/>.
+/// → <see cref="ConditionalFormatEvaluator"/> (<c>Evaluate</c>).
 ///
 /// ⛔ Мутаційний доказ (2026-10-01, окремий detached-worktree): <c>"ne" =&gt; true</c> для
 /// нечислового значення — червоніють вектори «ne: текст …»; прибрати
