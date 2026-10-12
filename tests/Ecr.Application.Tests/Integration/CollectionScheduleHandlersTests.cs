@@ -300,6 +300,53 @@ public sealed class CollectionScheduleHandlersTests
         }
     }
 
+    /// <summary>
+    /// AN-67: id кореляції в <c>LastError</c>, у повідомленні й у <c>Details["reason"]</c> дорівнює id у
+    /// рядку журналу про відмову планувальника. Мутація: окремий <c>SafeErrorText.NewCorrelationId()</c>
+    /// для тексту — id різні, тест червоний.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "BE-21b")]
+    public async Task Кореляція_з_LastError_і_відповіді_дорівнює_кореляції_в_рядку_журналу()
+    {
+        var schedule = Add(Hourly);
+        _scheduler.RefuseSchedule = true;
+        var log = new CapturingLog();
+        var handler = new SaveCollectionScheduleHandler(
+            _store, _scheduler, new CollectionScheduleApplier(_scheduler), _access, _uow, _user, _clock, _audit, log);
+
+        var refused = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => handler.HandleAsync(schedule.Id, Nightly, isEnabled: true, lookbackDays: null, Version(schedule), CancellationToken.None));
+
+        var entry = Assert.Single(log.Entries);
+        var inLog = System.Text.RegularExpressions.Regex.Match(entry.Text, @"кореляція ([0-9a-f]{8,32})\.");
+        Assert.True(inLog.Success, entry.Text);
+        Assert.NotNull(entry.Exception);
+
+        foreach (var text in new[] { schedule.LastError!, refused.Message, (string)refused.Details!["reason"]! })
+        {
+            var inText = System.Text.RegularExpressions.Regex.Match(text, @"correlation ([0-9a-f]{8,32})");
+            Assert.True(inText.Success, text);
+            Assert.Equal(inLog.Groups[1].Value, inText.Groups[1].Value);
+        }
+    }
+
+    private sealed class CapturingLog : Microsoft.Extensions.Logging.ILogger<SaveCollectionScheduleHandler>
+    {
+        public List<(string Text, Exception? Exception)> Entries { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull => null;
+
+        public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            Microsoft.Extensions.Logging.LogLevel logLevel, Microsoft.Extensions.Logging.EventId eventId,
+            TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+            => Entries.Add((formatter(state, exception), exception));
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
     [Trait("Requirement", "BE-21b")]

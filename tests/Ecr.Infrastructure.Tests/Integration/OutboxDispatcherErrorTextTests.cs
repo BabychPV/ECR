@@ -55,7 +55,47 @@ public sealed class OutboxDispatcherErrorTextTests(SqlServerFixture sql)
         Assert.Equal("Пошту не налаштовано: вкажіть відправника.", error);
     }
 
-    private async Task<string> FailedErrorAsync(Exception thrown)
+    /// <summary>
+    /// AN-67: id кореляції в тексті помилки (<c>itg.NotificationOutbox.Error</c>) дорівнює id у рядку журналу
+    /// з повним винятком — оператор зв'язує текст із журналом. Мутація: окремий
+    /// <c>SafeErrorText.NewCorrelationId()</c> для тексту — id різні, тест червоний.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Кореляція_з_тексту_помилки_дорівнює_кореляції_в_рядку_журналу()
+    {
+        var thrown = new InvalidOperationException("Cannot connect to smtp.corp.internal:587. Password=Secret123");
+        var log = new CapturingLog();
+
+        var error = await FailedErrorAsync(thrown, log);
+
+        var inText = System.Text.RegularExpressions.Regex.Match(error, @"correlation ([0-9a-f]{8,32})");
+        Assert.True(inText.Success, error);
+        var entry = Assert.Single(log.Entries);
+        var inLog = System.Text.RegularExpressions.Regex.Match(entry.Text, @"кореляція ([0-9a-f]{8,32})\.");
+        Assert.True(inLog.Success, entry.Text);
+        Assert.Equal(inText.Groups[1].Value, inLog.Groups[1].Value);
+        Assert.Same(thrown, entry.Exception);
+    }
+
+    private sealed class CapturingLog : Microsoft.Extensions.Logging.ILogger<OutboxDispatcher>
+    {
+        public List<(string Text, Exception? Exception)> Entries { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull => null;
+
+        public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            Microsoft.Extensions.Logging.LogLevel logLevel, Microsoft.Extensions.Logging.EventId eventId,
+            TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+            => Entries.Add((formatter(state, exception), exception));
+    }
+
+    private async Task<string> FailedErrorAsync(
+        Exception thrown, Microsoft.Extensions.Logging.ILogger<OutboxDispatcher>? log = null)
     {
         var start = new DateTime(2036, 1, 1, 0, 0, 0, DateTimeKind.Utc);
         var subject = $"E1-{Guid.NewGuid():N}";
@@ -75,7 +115,7 @@ public sealed class OutboxDispatcherErrorTextTests(SqlServerFixture sql)
 
         await using (var db = CreateContext())
         {
-            await new OutboxDispatcher(db, new TestClock(start.AddMinutes(1)), new ThrowingSender(thrown))
+            await new OutboxDispatcher(db, new TestClock(start.AddMinutes(1)), new ThrowingSender(thrown), log)
                 .FlushAsync(CancellationToken.None)
                 .ConfigureAwait(false);
         }
