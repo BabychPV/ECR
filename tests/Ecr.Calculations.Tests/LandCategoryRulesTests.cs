@@ -89,6 +89,27 @@ public sealed class LandCategoryRulesTests
         { "ECW_C11_05", "LPG (HMB) - СУГ (МТБ)", "LPG" },
         { "ECW_C11_05", "Fuel gas (HMB) - Топливный газ (МТБ)", "FGHMB" },
         { "ECW_C11_05", "Fuel gas (Internal) - Топливный газ (Внутренний)", "FG" },
+        { "ECW_C11_11_03", "0782(001)", "0782(001)" },
+        { "ECW_C11_11_03", "0782 (001)", "0782(001)" },
+        { "ECW_C11_11_03", "0783", "0783" },
+        { "ECW_C12_02", "0013", "0009" },
+        { "ECW_C12_02", "0019", "0009" },
+        { "ECW_C12_02", "0029", "0025" },
+        { "ECW_C12_02", "0041", "0035" },
+        { "ECW_C11_13", "6574", "6568" },
+        { "ECW_C11_13", "6672", "6670" },
+        { "ECW_C11_13", "0501 (003)", "0500(003)" },
+        { "ECW_C11_13", "6567", "6567" },
+        { "ECW_C11_10", "0961", "0960" },
+        { "ECW_C11_10", "0369", "0363" },
+        { "ECW_C11_10", "0894", "0884" },
+        { "ECW_C11_10", "0281", "0220" },
+        { "ECW_C11_10", "0580", "0580" },
+        { "ECW_C11_11_02", "0789(001)", "0788" },
+        { "ECW_C11_11_02", "0789 (001)", "0788" },
+        { "ECW_C11_11_02", "6982", "6975" },
+        { "ECW_C11_11_02", "0563", "0562" },
+        { "ECW_C11_11_02", "0524", "0524" },
     };
 
     private static string ArgumentOf(string methodology) => methodology switch
@@ -128,6 +149,22 @@ public sealed class LandCategoryRulesTests
         var stand = new RuleStand(LoadRules()["ECW_C11_03"])
             .WithSubstanceFormula("Total", "@X * CST.EF")
             .WithConstants(Number("Loc_BeforeMR_A", 1m), Number("Loc_BeforeMR_B", 2m));
+
+        var error = await Assert.ThrowsAsync<DomainException>(
+            () => stand.RunAsync(RuleStand.In("X", 1m), RuleStand.In("Land_NAE", "9999")));
+
+        Assert.Equal("err.ECR-CALC-0422.categoryRuleFailed", error.Details?["messageKey"]);
+    }
+
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [InlineData("ECW_C12_02")]
+    [InlineData("ECW_C11_11_02")]
+    public async Task NAE_поза_групами_відмовляє_рядку_C12_02_і_C11_11_02(string methodology)
+    {
+        var stand = new RuleStand(LoadRules()[methodology])
+            .WithSubstanceFormula("Total", "@X * CST.EF")
+            .WithConstants(Number("A", 1m));
 
         var error = await Assert.ThrowsAsync<DomainException>(
             () => stand.RunAsync(RuleStand.In("X", 1m), RuleStand.In("Land_NAE", "9999")));

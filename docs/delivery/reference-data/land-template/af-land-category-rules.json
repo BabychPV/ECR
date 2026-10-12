@@ -100,6 +100,69 @@
                       "normalizesNae":  true,
                       "source":  "docs/source/ECR Current Back end/Assembly/DllProject/DllProject/Realization/Sections/R_EmissionCalculationWork/ECW_C11_OPF_Plant_Operational/ECW_C11_18.cs:79",
                       "note":  "category = NAE without spaces (Trim + Replace(\u0027 \u0027,\u0027\u0027)); space-insensitive match is done by ConstantResolver"
+                  },
+                  {
+                      "methodology":  "ECW_C11_11_03",
+                      "expression":  "@Land_NAE",
+                      "normalizesNae":  true,
+                      "source":  "docs/source/ECR Current Back end/Assembly/DllProject/DllProject/Realization/Sections/R_EmissionCalculationWork/ECW_C11_OPF_Plant_Operational/ECW_C11_11_03.cs:131",
+                      "note":  "form B: C# key is {nae}_{code}; this rule gives {nae}, the engine appends _{substance code}"
+                  },
+                  {
+                      "methodology":  "ECW_C11_12_01",
+                      "expression":  "@Land_NAE",
+                      "normalizesNae":  true,
+                      "source":  "docs/source/ECR Current Back end/Assembly/DllProject/DllProject/Realization/Sections/R_EmissionCalculationWork/ECW_C11_OPF_Plant_Operational/ECW_C11_12_01.cs:81",
+                      "note":  "form B: C# key is {nae}_{code}; this rule gives {nae}, the engine appends _{substance code}"
+                  },
+                  {
+                      "methodology":  "ECW_C11_19",
+                      "expression":  "@Land_NAE",
+                      "normalizesNae":  true,
+                      "source":  "docs/source/ECR Current Back end/Assembly/DllProject/DllProject/Realization/Sections/R_EmissionCalculationWork/ECW_C11_OPF_Plant_Operational/ECW_C11_19.cs:88",
+                      "note":  "form B: C# key is {nae}_{code}; this rule gives {nae}, the engine appends _{substance code}"
+                  },
+                  {
+                      "methodology":  "ECW_C11_20_01",
+                      "expression":  "@Land_NAE",
+                      "normalizesNae":  true,
+                      "source":  "docs/source/ECR Current Back end/Assembly/DllProject/DllProject/Realization/Sections/R_EmissionCalculationWork/ECW_C11_OPF_Plant_Operational/ECW_C11_20_01.cs:82",
+                      "note":  "form B: C# key is {nae}_{code}; this rule gives {nae}, the engine appends _{substance code}"
+                  },
+                  {
+                      "methodology":  "ECW_C11_20_02",
+                      "expression":  "@Land_NAE",
+                      "normalizesNae":  true,
+                      "source":  "docs/source/ECR Current Back end/Assembly/DllProject/DllProject/Realization/Sections/R_EmissionCalculationWork/ECW_C11_OPF_Plant_Operational/ECW_C11_20_02.cs:83",
+                      "note":  "form B: C# key is {nae}_{code}; this rule gives {nae}, the engine appends _{substance code}"
+                  },
+                  {
+                      "methodology":  "ECW_C12_02",
+                      "expression":  "if(in(@Land_NAE,'0009','0013','0019'),'0009',if(in(@Land_NAE,'0025','0029'),'0025',if(in(@Land_NAE,'0035','0037','0039','0041'),'0035','')))",
+                      "normalizesNae":  true,
+                      "source":  "docs/source/ECR Current Back end/Assembly/DllProject/DllProject/Realization/Sections/R_EmissionCalculationWork/ECW_C12_OFFSHORE_OPERATIONAL/ECW_C12_02.cs:296-316",
+                      "note":  "form B: key {group}_{code}; NAE outside groups keeps Common in C# (no constants found) -> empty key, row rejected"
+                  },
+                  {
+                      "methodology":  "ECW_C11_13",
+                      "expression":  "if(in(@Land_NAE,'6568','6574','6575'),'6568',if(in(@Land_NAE,'6669','6671','6673'),'6669',if(in(@Land_NAE,'6670','6672','6674'),'6670',if(in(@Land_NAE,'0500(003)','0500 (003)','0501(003)','0501 (003)','0502(003)','0502 (003)','0503(003)','0503 (003)','0520(003)','0520 (003)','0521(003)','0521 (003)','0522(003)','0522 (003)','0523(003)','0523 (003)'),'0500(003)',@Land_NAE))))",
+                      "normalizesNae":  true,
+                      "source":  "docs/source/ECR Current Back end/Assembly/DllProject/DllProject/Realization/Sections/R_EmissionCalculationWork/ECW_C11_OPF_Plant_Operational/ECW_C11_13.cs:66-110",
+                      "note":  "form B: key {group or NAE}_{code}; NAE outside groups is the key itself"
+                  },
+                  {
+                      "methodology":  "ECW_C11_10",
+                      "expression":  "if(in(@Land_NAE,'0960','0961','0962','0963'),'0960',if(in(@Land_NAE,'0340','0341','0344','0345'),'0340',if(in(@Land_NAE,'0342','0343','0346','0347'),'0342',if(in(@Land_NAE,'0362','0364','0366','0368'),'0362',if(in(@Land_NAE,'0363','0365','0367','0369'),'0363',if(in(@Land_NAE,'0647','0648','0649','0650','0651','0652'),'0647',if(in(@Land_NAE,'0884','0886','0888','0890','0892','0894'),'0884',if(in(@Land_NAE,'0885','0887','0889','0891','0893','0895'),'0885',if(in(@Land_NAE,'0220','0221','0222','0280','0281'),'0220',@Land_NAE)))))))))",
+                      "normalizesNae":  true,
+                      "source":  "docs/source/ECR Current Back end/Assembly/DllProject/DllProject/Realization/Sections/R_EmissionCalculationWork/ECW_C11_OPF_Plant_Operational/ECW_C11_10.cs:75-100,320-339",
+                      "note":  "key = group(codeGroupConstants) else NAE; formula type (type1/2/3) is chosen by NAE separately in C#"
+                  },
+                  {
+                      "methodology":  "ECW_C11_11_02",
+                      "expression":  "if(in(@Land_NAE,'0788','0789','0790','0791','0788(001)','0788 (001)','0789(001)','0789 (001)','0790(001)','0790 (001)','0791(001)','0791 (001)'),'0788',if(in(@Land_NAE,'6975','6981','6982','6983','6984','6985','6986'),'6975',if(in(@Land_NAE,'6976'),'6976',if(in(@Land_NAE,'0560'),'0560',if(in(@Land_NAE,'0562','0563'),'0562',if(in(@Land_NAE,'0561'),'0561',if(in(@Land_NAE,'0564','0565'),'0564',if(in(@Land_NAE,'0903'),'0903',if(in(@Land_NAE,'0905'),'0905',if(in(@Land_NAE,'6904'),'6904',if(in(@Land_NAE,'0793'),'0793',if(in(@Land_NAE,'0883'),'0883',if(in(@Land_NAE,'0524'),'0524','')))))))))))))",
+                      "normalizesNae":  true,
+                      "source":  "docs/source/ECR Current Back end/Assembly/DllProject/DllProject/Realization/Sections/R_EmissionCalculationWork/ECW_C11_OPF_Plant_Operational/ECW_C11_11_02.cs:98-150",
+                      "note":  "key = group(groupNAE) else row skipped (empty key); Category1 (sum components) is a separate argument, not a constant key"
                   }
               ]
 }
