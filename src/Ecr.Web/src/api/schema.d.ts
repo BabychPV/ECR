@@ -3153,6 +3153,101 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/documents/{documentId}/tables/{tableInstanceId}/cell-styles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Користувацьке оформлення комірок: заливка, колір тексту, жирність.
+         * @description Не дані: значення, версія рядка й перерахунок не зачіпаються. Нерозкриття — як у
+         *     `PATCH …/cells`: чужий/невидимий екземпляр і документ — однакова 404.
+         */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    documentId: number;
+                    tableInstanceId: number;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["PatchCellStylesRequest"];
+                    "application/json": components["schemas"]["PatchCellStylesRequest"];
+                    "text/json": components["schemas"]["PatchCellStylesRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PatchCellStylesResponse"];
+                        "text/json": components["schemas"]["PatchCellStylesResponse"];
+                        "text/plain": components["schemas"]["PatchCellStylesResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        trace?: never;
+    };
     "/api/v1/documents/{documentId}/tables/{tableInstanceId}/rows/{rowKey}": {
         parameters: {
             query?: never;
@@ -20053,6 +20148,19 @@ export interface components {
             foregroundHex: null | string;
             isBold: boolean;
         };
+        /** @description Зміна оформлення однієї комірки. */
+        CellStyleChange: {
+            /** @description Заливка `#rrggbb`; `null` — не чіпати; `""` — зняти. */
+            backgroundHex?: null | string;
+            /** @description Код колонки. */
+            columnCode: string;
+            /** @description Колір тексту `#rrggbb`; `null` — не чіпати; `""` — зняти. */
+            foregroundHex?: null | string;
+            /** @description Жирність; `null` — не чіпати. */
+            isBold?: null | boolean;
+            /** @description Ключ рядка. */
+            rowKey: string;
+        };
         /** @description Підмножина `StyleDef`, потрібна ЖИВІЙ сітці (директива registry-
          *     lookup / cell-style, PR B2) — рамки/формат числа тут НЕ несуться:
          *     перші читає лише Excel-експорт (`StyleMapper.cs`), другий сітка вже має
@@ -23635,6 +23743,35 @@ export interface components {
             isEmpty: boolean;
             /** @description Значення; `null` = стерти. */
             value: unknown;
+        };
+        /** @description Користувацьке оформлення комірок (заливка, колір тексту, жирність) —
+         *     `PATCH /api/v1/documents/{documentId}/tables/{tableInstanceId}/cell-styles`. */
+        PatchCellStylesRequest: {
+            /** @description Комірки й нове оформлення; одна комірка — один раз. */
+            items: components["schemas"]["CellStyleChange"][];
+            /**
+             * Format: int32
+             * @description Період екземпляра таблиці (звіряється з періодом екземпляра).
+             */
+            periodKey: number;
+            /**
+             * @description `true` — зняти все оформлення з перелічених комірок.
+             * @default false
+             */
+            reset: boolean;
+        };
+        /** @description Відповідь на `PATCH …/cell-styles`. */
+        PatchCellStylesResponse: {
+            /**
+             * Format: int32
+             * @description Комірок, оформлення яких змінено (без no-op).
+             */
+            appliedCells: number;
+            /**
+             * Format: int32
+             * @description Комірок, з яких знято все оформлення (рядок стилю видалено).
+             */
+            resetCells: number;
         };
         /** @description Пакетна зміна комірок. Часткове застосування заборонене: конфлікт у
          *     будь-якому рядку відхиляє весь батч (B04 §2.3). */
@@ -27340,6 +27477,16 @@ export interface components {
              *     немає, дозволена. */
             cellPermissions: {
                 [key: string]: string;
+            };
+            /** @description Користувацьке оформлення комірок (заливка, колір тексту, жирність;
+             *     `PATCH …/tables/{id}/cell-styles`): ключ — той самий
+             *     `"{rowKey}:{columnCode}"`; значення — CellFormatDto
+             *     (`BackgroundHex`/`ForegroundHex` у формі `#rrggbb`, `null` — поле не задано).
+             *     Лише комірки з оформленням і лише ВИДИМІ читачеві колонки (нерозкриття: схованої колонки
+             *     тут немає, як і в IReadOnlyList&lt;ColumnDto&gt; TableSliceDto.Columns). Шар у сітці — над стилем колонки, під умовним
+             *     форматуванням (IReadOnlyDictionary&lt;string, CellFormatDto&gt;? TableSliceDto.CellFormats). `null`/порожній — оформлення немає. */
+            cellStyles?: null | {
+                [key: string]: components["schemas"]["CellFormatDto"];
             };
             /** @description Опис колонок таблиці. */
             columns: components["schemas"]["ColumnDto"][];

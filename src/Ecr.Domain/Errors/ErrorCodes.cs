@@ -270,6 +270,20 @@ public static class ErrorCodes
     public const string CellRegistryEntryMissing = "ECR-CELL-4223";
 
     /// <summary>
+    /// Запит <c>PATCH …/tables/{id}/cell-styles</c> (користувацька заливка/колір
+    /// тексту/жирність комірок) має неприйнятну форму.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Окремий код, а не <see cref="CellInvalid"/>: суб'єкт відмови — не ЗНАЧЕННЯ
+    /// комірки, а її ОФОРМЛЕННЯ (воно не є даними й не пише в журнал значень).
+    /// Причина — у <c>messageKey</c>: <c>invalidColor</c> (не <c>#rrggbb</c>),
+    /// <c>tooManyItems</c> (понад ліміт запиту), <c>duplicateCell</c>,
+    /// <c>unknownCell</c> (комірки немає в зрізі), <c>emptyChange</c>.
+    /// Недоступність/нерозкриття документа — наявні <c>ECR-DOC-0404</c> і доступ.
+    /// </remarks>
+    public const string CellStyleInvalid = "ECR-CELL-4224";
+
+    /// <summary>
     /// Код у <c>PATCH …/documents/{id}/header</c> не відповідає жодному полю
     /// шапки версії шаблону цього документа.
     /// </summary>
