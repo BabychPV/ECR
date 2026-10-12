@@ -65,6 +65,8 @@ test.describe('cellColor: колір комірки на реальному ст
         touched.push(slice);
 
         // ── 1. Заливка: відповідь сервера, потім видимий результат ──────────────
+        // «До» знімається перед кліком: скидання порівнюється з ним, а не з жорстким `transparent`.
+        const baseline = normalizeRgb(await backgroundOf(cellAt(page, target)));
         await page.getByTestId('cell-color-fill').first().click();
         const applied = waitForStylePatch(page);
         await page.getByRole('button', { name: Yellow, exact: true }).first().click();
@@ -76,8 +78,8 @@ test.describe('cellColor: колір комірки на реальному ст
           )}`,
         ).toBe(200);
 
+        await expectBackground(cellAt(page, target), YellowRgb, 'заливка не застосувалась (computed)');
         await expect(cellAt(page, target)).toHaveAttribute('data-user-style', 'true');
-        await expect(cellAt(page, target)).toHaveCSS('background-color', YellowRgb);
 
         // ── 2. Колір тексту теж доходить до сервера ──────────────────────
         await page.getByTestId('cell-color-text').first().click();
@@ -92,7 +94,7 @@ test.describe('cellColor: колір комірки на реальному ст
           'data-user-style',
           'true',
         );
-        await expect(cellAt(page, target)).toHaveCSS('background-color', YellowRgb);
+        await expectBackground(cellAt(page, target), YellowRgb, 'після reload заливки немає (computed)');
         await expect(page.locator('html')).toHaveAttribute('data-mantine-color-scheme', scheme);
 
         // ── 4. Скидання заливки і кольору тексту ───────────────────────────────
@@ -107,8 +109,8 @@ test.describe('cellColor: колір комірки на реальному ст
         await page.getByTestId('cell-color-text-reset').click();
         expect((await resetText).status(), 'сервер не прийняв «Автоматичний»').toBe(200);
 
+        await expectBackground(cellAt(page, target), baseline, 'після скидання фон не повернувся до базового');
         await expect(cellAt(page, target)).not.toHaveAttribute('data-user-style', 'true');
-        await expect(cellAt(page, target)).not.toHaveCSS('background-color', YellowRgb);
 
         await page.reload();
         await expect(cellAt(page, target)).toBeVisible({ timeout: 60_000 });
@@ -116,6 +118,12 @@ test.describe('cellColor: колір комірки на реальному ст
           'data-user-style',
           'true',
         );
+        await expect
+          .poll(async () => normalizeRgb(await backgroundOf(cellAt(page, target))), {
+            message: 'після reload фон не базовий (скинутий колір повернувся)',
+            timeout: 15_000,
+          })
+          .not.toBe(normalizeRgb(YellowRgb));
       } finally {
         await context.close();
       }
@@ -136,6 +144,13 @@ test.describe('cellColor: колір комірки на реальному ст
       // Меню ВВІМКНЕНЕ (клієнт ще вважає аркуш редагованим), а сервер уже ні: це і є «відмова на сервері».
       // ⚠ Не зниженням гранта: перший прогін (38259512984) показав, що зміна гранта скидає сесію оператора - PATCH
       // відповідає 401, а не 403. Подання аркуша сесію не чіпає.
+      // Палітра відкривається ДО подання: зразок клікається в одному кроці з очікуванням PATCH (`Promise.all`).
+      // ⚠ Обмеження: якщо клієнт рефетчне стан аркуша ще до кліку, кнопка стане disabled, палітра закриється, і
+      // сценарій впаде на `swatch.click` - обійти це без `page.route` (потрібен справжній сервер) не вдасться.
+      await page.getByTestId('cell-color-fill').first().click();
+      const swatch = page.getByRole('button', { name: Yellow, exact: true }).first();
+      await expect(swatch).toBeVisible({ timeout: 10_000 });
+
       const admin = await openAs(browser, Admin, 'light');
       try {
         await makeSheetEditable(admin.page);
@@ -144,20 +159,23 @@ test.describe('cellColor: колір комірки на реальному ст
         await admin.context.close();
       }
 
-      await expect(page.getByTestId('cell-color-fill').first(), 'клієнт мав ще вважати комірку редагованою').toBeEnabled();
-      await page.getByTestId('cell-color-fill').first().click();
-      const denied = waitForStylePatch(page);
-      await page.getByRole('button', { name: Yellow, exact: true }).first().click();
-      const response = await denied;
-      expect(response.status(), 'очікувалась відмова 403 ECR-ACCS-0403').toBe(403);
+      const [response] = await Promise.all([
+        waitForStylePatch(page),
+        swatch.click({ timeout: 15_000 }),
+      ]);
+      expect(response.status(), `очікувалась відмова 403: ${await response.text()}`).toBe(403);
 
-      // Штатний тост Mantine з текстом відмови (`showApiError`); мова стенда - en.
-      const toast = page.getByRole('alert').filter({ hasText: /may not edit|не можна змінювати|нельзя изменять/i });
-      await expect(toast.first(), 'тосту з текстом відмови немає').toBeVisible({ timeout: 15_000 });
+      // Штатний тост Mantine з текстом відмови (`showApiError`); `data-testid` - якщо додасть L4, інакше role=alert.
+      await expect(
+        errorToast(page).first(),
+        'тосту з текстом відмови немає',
+      ).toBeVisible({ timeout: 15_000 });
 
       // Оптимістичний колір відкочено: у комірці його немає.
       await expect(cellAt(page, target)).not.toHaveAttribute('data-user-style', 'true');
-      await expect(cellAt(page, target)).not.toHaveCSS('background-color', YellowRgb);
+      await expect
+        .poll(async () => normalizeRgb(await backgroundOf(cellAt(page, target))), { timeout: 15_000 })
+        .not.toBe(normalizeRgb(YellowRgb));
     } finally {
       await context.close();
       const cleanup = await openAs(browser, Admin, 'light');
@@ -179,7 +197,7 @@ test.describe('cellColor: колір комірки на реальному ст
 
       for (const id of ['cell-color-fill', 'cell-color-text']) {
         const button = page.getByTestId(id).first();
-        await expect(button, `${id} має бути вимкнена без права Write`).toBeDisabled();
+        await expectMenuDisabled(button, `${id} має бути вимкнена без права Write`);
         // Причина - у `title` (CellColorMenu: `title={disabled && hint !== null ? hint : undefined}`).
         await expect(button, `${id}: немає пояснення причини`).toHaveAttribute('title', /\S+/);
       }
@@ -211,7 +229,7 @@ test.describe('cellColor: колір комірки на реальному ст
       await selectAnyCell(page);
 
       const fill = page.getByTestId('cell-color-fill').first();
-      await expect(fill).toBeDisabled();
+      await expectMenuDisabled(fill, 'кнопка «Заливка» має бути вимкнена на поданому аркуші');
       // `DocumentGrid`: `readOnly` -> підказка `grid.cellColor.readOnly`, а не «виділіть комірки».
       await expect(fill).toHaveAttribute('title', /locked for editing|закрит|закрыт/i);
 
@@ -238,17 +256,17 @@ test.describe('cellColor: колір комірки на реальному ст
 
     try {
       // Стенд не вміє закрити період з e2e (стан періоду - `PeriodStateJob`, ручного «закрити» немає), тож шукаємо
-      // вже закритий у календарі проєкту. Немає - чесно «не доведено», а не зелене.
+      // вже закритий у календарі проєкту. Немає - червоне з «не доведено» (honesty-guard: без Skip).
       const closed = await findClosedPeriod(page);
-      test.skip(closed === null, 'не доведено: у календарі стенда немає періоду зі станом Closed');
-      if (closed === null) return;
+      if (closed === null) throw new Error('не доведено: у календарі стенда немає періоду зі станом Closed');
 
       const watch = watchSlice(page);
       await page.goto(`/documents/${DocumentId}?periodKey=${String(closed)}`);
       await expect(page.getByRole('heading').first()).toBeVisible({ timeout: 30_000 });
       const slice = await watch().catch(() => null);
-      test.skip(slice === null, `не доведено: документ не має зрізу таблиці в закритому періоді ${String(closed)}`);
-      if (slice === null) return;
+      if (slice === null) {
+        throw new Error(`не доведено: документ не має зрізу таблиці в закритому періоді ${String(closed)}`);
+      }
 
       const status = await patchStyles(page, slice, { backgroundHex: Yellow });
       expect(status.status, 'закритий період мав відмовити').toBe(403);
@@ -256,7 +274,53 @@ test.describe('cellColor: колір комірки на реальному ст
       expect(status.text).toMatch(/PeriodClosed/);
 
       await selectAnyCell(page);
-      await expect(page.getByTestId('cell-color-fill').first()).toBeDisabled();
+      await expectMenuDisabled(page.getByTestId('cell-color-fill').first(), 'закритий період: «Заливка» має бути вимкнена');
+    } finally {
+      await context.close();
+    }
+  });
+
+  // ── Контракт сервера: від клієнта L4 не залежить ───────────────────────────────
+
+  test('cellColor: контракт сервера - тіло {periodKey, items} дає 200, скидання {reset} дає 200', async ({
+    browser,
+  }) => {
+    await ensureOperatorLevel(browser, 'Write');
+    const { page, context } = await openAs(browser, Operator, 'light');
+
+    try {
+      const slice = await openDocument(page);
+      touched.push(slice);
+      const item = { rowKey: slice.rowKey, columnCode: slice.columnCode };
+
+      const set = await patchRaw(page, slice, {
+        periodKey: slice.periodKey,
+        items: [{ ...item, backgroundHex: Yellow }],
+      });
+      expect(set.status, `PATCH {periodKey, items}: ${set.text}`).toBe(200);
+      expect(set.text).toMatch(/"appliedCells"\s*:\s*1/);
+
+      const reset = await patchRaw(page, slice, { periodKey: slice.periodKey, items: [item], reset: true });
+      expect(reset.status, `PATCH {reset}: ${reset.text}`).toBe(200);
+      expect(reset.text).toMatch(/"resetCells"\s*:\s*1/);
+    } finally {
+      await context.close();
+    }
+  });
+
+  // Форма клієнта L4 -1/-2 (`{cells: [...]}`) серверу чужа. Після виправлення клієнта цей тест лишається
+  // негативним контрактом сервера: чужа форма не повинна мовчки «прийматися» як порожній запит.
+  test('cellColor: контракт сервера - форма {cells} відхиляється 422', async ({ browser }) => {
+    await ensureOperatorLevel(browser, 'Write');
+    const { page, context } = await openAs(browser, Operator, 'light');
+
+    try {
+      const slice = await openDocument(page);
+      const response = await patchRaw(page, slice, {
+        cells: [{ rowKey: slice.rowKey, columnCode: slice.columnCode, backgroundHex: Yellow }],
+      });
+      expect(response.status, `PATCH {cells}: ${response.text}`).toBe(422);
+      expect(response.text).toContain('ECR-REQ-0422');
     } finally {
       await context.close();
     }
@@ -456,6 +520,57 @@ function waitForStylePatch(page: Page): Promise<Response> {
       response.request().method() === 'PATCH' && /\/tables\/\d+\/cell-styles$/.test(new URL(response.url()).pathname),
     { timeout: 60_000 },
   );
+}
+
+/** Сире тіло PATCH `…/cell-styles` під сесією сторінки. */
+async function patchRaw(page: Page, slice: SliceRef, data: unknown): Promise<{ status: number; text: string }> {
+  const response = await page.request.patch(
+    `/api/v1/documents/${DocumentId}/tables/${String(slice.tableInstanceId)}/cell-styles`,
+    { data },
+  );
+
+  return { status: response.status(), text: await response.text() };
+}
+
+/** Computed `background-color` комірки (сирий рядок браузера). */
+async function backgroundOf(cell: Locator): Promise<string> {
+  return cell.evaluate((node) => getComputedStyle(node).backgroundColor);
+}
+
+/** `rgb(255, 255, 0)` / `rgba(255,255,0,1)` -> `255,255,0`; повністю прозорий -> `transparent`. */
+function normalizeRgb(value: string): string {
+  const parts = (value.match(/[\d.]+/g) ?? []).map(Number);
+  if (parts.length < 3) return value.trim().toLowerCase();
+  if (parts.length >= 4 && parts[3] === 0) return 'transparent';
+
+  return parts.slice(0, 3).join(',');
+}
+
+/** Чекає (poll, без sleep), поки computed-фон комірки стане `expected`. */
+async function expectBackground(cell: Locator, expected: string, message: string): Promise<void> {
+  await expect
+    .poll(async () => normalizeRgb(await backgroundOf(cell)), { message, timeout: 15_000 })
+    .toBe(normalizeRgb(expected));
+}
+
+/** Вимкнена кнопка: нативний `disabled` АБО `aria-disabled="true"` - що саме поставить L4, байдуже. */
+async function expectMenuDisabled(button: Locator, message: string): Promise<void> {
+  await expect(async () => {
+    const native = await button.isDisabled();
+    const aria = await button.getAttribute('aria-disabled');
+    expect(native || aria === 'true', message).toBe(true);
+  }, message).toPass({ timeout: 10_000 });
+}
+
+/** Тост відмови: `data-testid="cell-color-toast"` (якщо з'явиться) або `role=alert`, з текстом коду/причини. */
+function errorToast(page: Page): Locator {
+  return page
+    .getByTestId('cell-color-toast')
+    .or(page.getByRole('alert'))
+    .filter({
+      hasText:
+        /ECR-CELL-4224|ECR-CELL-0409|ECR-ACCS-0403|may not edit|не можна змінювати|нельзя изменять|PeriodClosed|DocumentSubmitted|period is closed|document is submitted/i,
+    });
 }
 
 /** PATCH за ПРАВИЛЬНИМ контрактом (`PatchCellStylesRequest`) під сесією сторінки - доводить сервер, не клієнт. */
