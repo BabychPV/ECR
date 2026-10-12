@@ -31,6 +31,9 @@ _PROD_RULES = [
     (r'^AF_Air_Land_11d_Off_Process', lambda g: ('S11D_OFF_PROCESS_EPC4', 'T11d_01')),
     (r'^AF_Water_Land_07$', lambda g: ('S07_WATER_REPORT', 'T7_00')),
     (r'^AF_Water_Land_07a_(\d+)$', lambda g: ('S07A_WATER_MEASUREMENTS', 'T7a_%02d' % int(g[0]))),
+    # LP-09: таблиці є в шаблоні (код 9a_17a/21a/21b - з літерою в заголовку Excel; 7b - єдина таблиця аркуша, код T7b_00)
+    (r'^AF_Air_Land_ProcessUnits_9a_(\d+[ab]?)$', lambda g: ('S09A_PROCESS_UNITS', 'T9a_' + g[0])),
+    (r'^AF_Water_Land_07b$', lambda g: ('S07B_WATER_MEASUREMENTS', 'T7b_00')),
 ]
 
 
