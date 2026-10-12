@@ -121,6 +121,12 @@ public sealed class GenericCalculationModule(
         var categoryRule = await methodologies
             .GetCategoryRuleAsync(methodology.MethodologyVersionId, ct).ConfigureAwait(false);
 
+        // ✎ LP-07 (форма B): коди записів речовин — лише коли є правило категорії і речовини: без ключа
+        // суфікс не має до чого дописуватися, і зайвого запиту версія без правила не коштує.
+        var substanceCodes = substances.Count > 0 && !string.IsNullOrWhiteSpace(categoryRule)
+            ? await methodologies.GetSubstanceCodesAsync(methodology.MethodologyVersionId, ct).ConfigureAwait(false)
+            : null;
+
         var period = await PeriodAsync(methodology, documentId, periodKey, ct).ConfigureAwait(false);
 
         // ⛔ HSE301 L: формули імпортованих методологій, на які версія посилається
@@ -160,7 +166,8 @@ public sealed class GenericCalculationModule(
         return new CalculationBindingContext(
             methodology, documentId, periodKey, ordered, substances, outputs, period,
             scales ?? EmptyScales, constantsByCode, snapshot, libraries,
-            string.IsNullOrWhiteSpace(categoryRule) ? null : categoryRule);
+            string.IsNullOrWhiteSpace(categoryRule) ? null : categoryRule,
+            substanceCodes);
     }
 
     /// <summary>
@@ -483,9 +490,15 @@ public sealed class GenericCalculationModule(
         foreach (var substance in targets)
         {
             var constantUnits = new Dictionary<string, int?>(StringComparer.OrdinalIgnoreCase);
+            string? substanceCode = null;
+            if (substance is not null && binding.SubstanceCodes is { } codesById)
+            {
+                substanceCode = codesById.GetValueOrDefault(substance.SubstanceEntryId);
+            }
+
             var resolved = ResolveConstants(
                 version.MethodologyVersionId, substanceFormulas, substance?.SubstanceEntryId, period, binding.Constants,
-                constantUnits, categoryKey);
+                constantUnits, categoryKey, substanceCode: substanceCode);
 
             var context = new MethodologyEvaluationContext(
                 period, arguments, resolved, units, binding.Registries,
@@ -496,7 +509,7 @@ public sealed class GenericCalculationModule(
             trace.EnterSubstance(substance?.SubstanceEntryId);
 
             // Бібліотечні формули речовини — з константами бібліотеки на ЦЮ речовину.
-            library?.EvaluateSubstance(substance?.SubstanceEntryId);
+            library?.EvaluateSubstance(substance?.SubstanceEntryId, substanceCode);
 
             // Row-результати — готові, не перераховуються: саме заради цього D-176.
             foreach (var formula in rowFormulas)
@@ -911,6 +924,7 @@ public sealed class GenericCalculationModule(
         private readonly Dictionary<int, MethodologyEvaluationContext> _row = [];
         private Dictionary<int, MethodologyEvaluationContext> _substance = [];
         private long? _substanceId;
+        private string? _substanceCode;
         private string? _category;
 
         /// <summary>
@@ -959,9 +973,11 @@ public sealed class GenericCalculationModule(
 
         /// <summary>Формули речовини замикання — на початку кожної речовини.</summary>
         /// <param name="substanceEntryId">Речовина; <c>null</c> — версія без речовин.</param>
-        public void EvaluateSubstance(long? substanceEntryId)
+        /// <param name="substanceCode">Код запису речовини для суфікса категорії (форма B); <c>null</c> — немає.</param>
+        public void EvaluateSubstance(long? substanceEntryId, string? substanceCode = null)
         {
             _substanceId = substanceEntryId;
+            _substanceCode = substanceCode;
             _substance = [];
 
             foreach (var library in libraries.Versions)
@@ -1009,7 +1025,8 @@ public sealed class GenericCalculationModule(
             var constantUnits = new Dictionary<string, int?>(StringComparer.OrdinalIgnoreCase);
             var constants = module.ResolveConstants(
                 library.MethodologyVersionId, group, substance, period, library.Constants, constantUnits,
-                rowPhase ? null : _category);
+                rowPhase ? null : _category,
+                substanceCode: rowPhase ? null : _substanceCode);
 
             var scope = new TraceScope(
                 input,
@@ -1176,7 +1193,8 @@ public sealed class GenericCalculationModule(
         IReadOnlyDictionary<string, IReadOnlyList<MethodologyConstant>> candidatesByCode,
         Dictionary<string, int?> resolvedUnits,
         string? category,
-        IReadOnlyCollection<string>? extraCodes = null)
+        IReadOnlyCollection<string>? extraCodes = null,
+        string? substanceCode = null)
     {
         var resolved = new Dictionary<string, ExpressionValue>(StringComparer.OrdinalIgnoreCase);
 
@@ -1199,7 +1217,8 @@ public sealed class GenericCalculationModule(
                 // ⚠ Дата періоду, а не «сьогодні»: константа темпоральна, і
                 // перерахунок минулого року цього року має брати коефіцієнт,
                 // чинний тоді (ФВ-16.5).
-                period.End);
+                period.End,
+                substanceCode);
 
             // ⛔ Текстова константа підставляється ТЕКСТОМ, а не числом
             // (поправка 2-біс директиви ПК-1 №05). У корпусі ~90 констант
