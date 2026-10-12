@@ -101,6 +101,48 @@ public sealed class CollectionRunnerMessageEnvelopeTests
         Assert.Equal("jobs.collectionDonePartial", Decode(ProgressMessages(world.Progress)[^1]).Key);
     }
 
+    /// <summary>
+    /// AN-67: id кореляції в причині прогону (<c>detail</c>) дорівнює id у рядку журналу з повним
+    /// винятком. Мутація: окремий <c>SafeErrorText.NewCorrelationId()</c> для тексту — тест червоний.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "U12")]
+    public async Task Кореляція_з_причини_прогону_дорівнює_кореляції_в_рядку_журналу()
+    {
+        var log = new CapturingLog();
+        var world = new World(log);
+        var thrown = new HttpRequestException("No connection could be made (pi01.internal:5450)");
+        world.Source.ReadAsync(Arg.Any<CollectionRequest>(), Arg.Any<CancellationToken>())
+            .Returns<Task<CollectionResult>>(_ => throw thrown);
+
+        await world.Runner.RunAsync(SourceEntityId, Now.AddDays(-1), Now, world.Progress, CancellationToken.None);
+
+        var detail = Decode(FinishedMessage(world.Store, "Degraded")).Inner!.Params!["detail"];
+        var inText = System.Text.RegularExpressions.Regex.Match(detail, @"correlation ([0-9a-f]{8,32})");
+        Assert.True(inText.Success, detail);
+        var entry = Assert.Single(log.Entries, e => e.Exception is not null);
+        var inLog = System.Text.RegularExpressions.Regex.Match(entry.Text, @"кореляція ([0-9a-f]{8,32})\.");
+        Assert.True(inLog.Success, entry.Text);
+        Assert.Equal(inText.Groups[1].Value, inLog.Groups[1].Value);
+        Assert.Same(thrown, entry.Exception);
+    }
+
+    private sealed class CapturingLog : Microsoft.Extensions.Logging.ILogger<CollectionRunner>
+    {
+        public List<(string Text, Exception? Exception)> Entries { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull => null;
+
+        public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            Microsoft.Extensions.Logging.LogLevel logLevel, Microsoft.Extensions.Logging.EventId eventId,
+            TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+            => Entries.Add((formatter(state, exception), exception));
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait("Finding", "U12")]
@@ -236,7 +278,7 @@ public sealed class CollectionRunnerMessageEnvelopeTests
     /// <summary>Сутність без мапінгів: збирач читає її саму.</summary>
     private sealed class World
     {
-        public World()
+        public World(Microsoft.Extensions.Logging.ILogger<CollectionRunner>? logger = null)
         {
             var entity = new SourceEntity(dataSourceId: 5, "STACK-1", RegistrySourceKind.External);
             var dataSource = new DataSource(
@@ -273,7 +315,8 @@ public sealed class CollectionRunnerMessageEnvelopeTests
                 [Source],
                 new SourceUnitConverter(new UnitConverter(), units),
                 new CatchUpPlanner(Store, new TestClock(Now)),
-                Store);
+                Store,
+                logger: logger);
         }
 
         public ICollectionStore Store { get; } = Substitute.For<ICollectionStore>();

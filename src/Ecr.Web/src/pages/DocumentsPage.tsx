@@ -30,7 +30,7 @@ import { Timestamp } from '@/shared/ui/Timestamp';
 import { useDebouncedFilter } from '@/shared/ui/useDebouncedFilter';
 import { useUrlNumber, useUrlParamsSetter, useUrlState } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
-import { fetchAllProjects } from '@/features/projects/allProjects';
+import { projectsQuery } from '@/features/projects/allProjects';
 import { DisabledReason } from '@/features/common/DisabledReason';
 
 /**
@@ -129,11 +129,8 @@ export function DocumentsPage(): JSX.Element {
   // ⛔ Аудит-пас 5: колонка «Project» показувала голий числовий `projectId`
   // — та сама сутність, чий код уже видно в діалозі «New document» одним
   // кліком поруч (`CreateDocumentModal`).
-  const projects = useQuery({
-    queryKey: ['projects'],
-    // ⛔ `X-07`: усі сторінки, а не перші 200 мовчки (`fetchAllProjects`).
-    queryFn: fetchAllProjects,
-  });
+  // ⛔ `X-07`: усі сторінки, а не перші 200 мовчки (`projectsQuery` = `fetchAllProjects` під єдиним ключем).
+  const projects = useQuery({ ...projectsQuery });
 
   /*
    * ⛔ FP-3 (прохід «від першого обличчя» 2026-10-11, P2). Користувач без жодного гранта на

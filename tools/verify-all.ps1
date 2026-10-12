@@ -59,12 +59,12 @@
 
 .PARAMETER ApiParallel
     Скільки паралельних процесів `dotnet test` запускає КОЖЕН із кроків
-    «Тести API (частина 1/2)». Типово — `ECR_API_PARALLEL` з оточення, без
+    «Тести API (частина 1/2/3/4)». Типово — `ECR_API_PARALLEL` з оточення, без
     нього 1.
 
     1 — рівно один процес на крок, як і раніше (так іде конвеєр, доки його
-    не змінять). K > 1 — шарди частини (`tools/api-test-shards.psd1`, по три
-    на частину) розподіляються між min(K, 3) процесами на ту саму зібрану
+    не змінять). K > 1 — шарди частини (`tools/api-test-shards.psd1`, по два
+    на частину) розподіляються між min(K, шарди частини) процесами на ту саму зібрану
     DLL; кожен процес отримує `ECR_TEST_SHARD=<N>` і тому свою базу
     `EcrTest_Api_<мітка>_s<N>`, свій фільтр і свій журнал у
     `tests/Ecr.Api.Tests/TestResults/shards/`. Код виходу спільний: крок
@@ -299,11 +299,11 @@ Step 'Тести .NET' {
         --filter 'FullyQualifiedName!~Ecr.Scenarios.Tests&FullyQualifiedName!~Ecr.Api.Tests.'
 }
 
-# ⛔ `Ecr.Api.Tests` — двома кроками, щоб конвеєр гнав їх ПАРАЛЕЛЬНО на двох
-# агентах (кожен зі своїм SQL Server). Частина 2 — ТОЧНЕ доповнення частини
-# 1: той самий перелік префіксів, заперечений. Тож тест не може випасти з
-# обох частин і не може потрапити в обидві, хоч би які класи додавалися;
-# новий клас лише зсуне баланс, а не покриття.
+# ⛔ `Ecr.Api.Tests` — ЧОТИРМА кроками (✎ 2026-10-12), щоб конвеєр гнав їх
+# ПАРАЛЕЛЬНО на чотирьох агентах (кожен зі своїм SQL Server). Остання частина
+# — ТОЧНЕ доповнення решти: об'єднання їхніх префіксів, заперечене. Тож тест
+# не може випасти з усіх частин і не може потрапити у дві, хоч би які класи
+# додавалися; новий клас лише зсуне баланс, а не покриття.
 #
 # ⚠ Склад частин і шардів — у `tools/api-test-shards.psd1` (замір
 # 2026-09-28). До того тут стояла межа A–M / N–Z за першою літерою; тепер
@@ -320,8 +320,16 @@ function Get-ApiClause {
 # (два шарди-залишки, префікс, що є початком іншого) дала б тест у двох
 # шардах або в жодному, і прогін при цьому лишився б зеленим.
 $restShards = @($apiShards | Where-Object { $_.Rest })
-if ($restShards.Count -ne 1 -or $restShards[0].Part -ne 2) {
-    throw 'api-test-shards.psd1: шард-залишок (Rest) має бути рівно один і в частині 2.'
+$lastApiPart = ($apiShards | ForEach-Object { [int] $_.Part } | Measure-Object -Maximum).Maximum
+if ($restShards.Count -ne 1 -or $restShards[0].Part -ne $lastApiPart) {
+    throw "api-test-shards.psd1: шард-залишок (Rest) має бути рівно один і в останній частині ($lastApiPart)."
+}
+# ⚠ Кожна частина 1..N мусить мати хоч один шард, інакше крок «Тести API
+# (частина K)» відфільтрував би НІЧОГО і вийшов нулем.
+foreach ($k in 1..$lastApiPart) {
+    if (@($apiShards | Where-Object { [int] $_.Part -eq $k }).Count -eq 0) {
+        throw "api-test-shards.psd1: у частині $k немає жодного шарда."
+    }
 }
 $allPrefixes = @($apiShards | Where-Object { -not $_.Rest } | ForEach-Object { $_.Prefixes })
 foreach ($a in $allPrefixes) {
@@ -334,8 +342,6 @@ foreach ($a in $allPrefixes) {
         throw "api-test-shards.psd1: префікс '$a' повторюється."
     }
 }
-
-$apiPart1 = @($apiShards | Where-Object { $_.Part -eq 1 } | ForEach-Object { $_.Prefixes } | ForEach-Object { Get-ApiClause $_ })
 
 <#
 .SYNOPSIS
@@ -368,7 +374,9 @@ function Invoke-ApiPart {
 
     if ($TestSql) { $env:ECR_TEST_SQL = $TestSql }
 
-    $filter = if ($Part -eq 1) { $apiPart1 -join '|' } else { ($apiPart1 -replace '~', '!~') -join '&' }
+    # Частина = група всіх її шардів: об'єднання префіксів, а для частини із
+    # залишком — заперечення префіксів усіх шардів інших частин.
+    $filter = Get-ApiGroupFilter @($apiShards | Where-Object { [int] $_.Part -eq $Part })
 
     if ($ApiParallel -le 1) {
         & dotnet test (Join-Path $root 'tests/Ecr.Api.Tests') --no-build -v q --nologo `
@@ -459,6 +467,10 @@ function Invoke-ApiPart {
 Step 'Тести API (частина 1)' { Invoke-ApiPart -Part 1 }
 
 Step 'Тести API (частина 2)' { Invoke-ApiPart -Part 2 }
+
+Step 'Тести API (частина 3)' { Invoke-ApiPart -Part 3 }
+
+Step 'Тести API (частина 4)' { Invoke-ApiPart -Part 4 }
 
 Step 'Сценарії директиви №09 (довідково)' {
     if ($TestSql) {

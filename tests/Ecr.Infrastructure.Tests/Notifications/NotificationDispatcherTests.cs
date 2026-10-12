@@ -91,6 +91,54 @@ public sealed class NotificationDispatcherTests(SqlServerFixture sql)
         Assert.Contains(workingId, working.Channels);
     }
 
+    /// <summary>
+    /// AN-67: id кореляції в <c>Error</c> рядка доставки дорівнює id у рядку журналу про відмову каналу.
+    /// Мутація: окремий <c>SafeErrorText.NewCorrelationId()</c> для тексту — id різні, тест червоний.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Кореляція_з_Error_доставки_дорівнює_кореляції_в_рядку_журналу_про_відмову_каналу()
+    {
+        var failingId = await AddChannelAsync("corr", NotificationChannelKind.Smtp);
+        var key = $"consistency:{_tag}";
+        var log = new CapturingLog();
+
+        await using var db = Context();
+        var dispatcher = new NotificationDispatcher(
+            new NotificationDispatchStore(db, new MemoryCache(new MemoryCacheOptions())),
+            [new FakeSender(NotificationChannelKind.Smtp, fails: true)],
+            new TestClock(Start),
+            log);
+        await dispatcher.DispatchAsync(Event(key), CancellationToken.None);
+
+        var failed = Assert.Single(await DeliveriesAsync(failingId, key));
+        var inText = System.Text.RegularExpressions.Regex.Match(failed.Error!, @"correlation ([0-9a-f]{8,32})");
+        Assert.True(inText.Success, failed.Error);
+
+        // Спільна база: сусідні канали теж могли відмовити — беремо рядок власного каналу.
+        var entry = Assert.Single(log.Entries, e => e.Text.Contains($"канал {failingId} відмовив", StringComparison.Ordinal));
+        var inLog = System.Text.RegularExpressions.Regex.Match(entry.Text, @"кореляція ([0-9a-f]{8,32})\.");
+        Assert.True(inLog.Success, entry.Text);
+        Assert.Equal(inText.Groups[1].Value, inLog.Groups[1].Value);
+        Assert.IsType<InvalidOperationException>(entry.Exception);
+    }
+
+    private sealed class CapturingLog : Microsoft.Extensions.Logging.ILogger<NotificationDispatcher>
+    {
+        public List<(string Text, Exception? Exception)> Entries { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull => null;
+
+        public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            Microsoft.Extensions.Logging.LogLevel logLevel, Microsoft.Extensions.Logging.EventId eventId,
+            TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+            => Entries.Add((formatter(state, exception), exception));
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]

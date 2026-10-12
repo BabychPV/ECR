@@ -117,6 +117,65 @@ public sealed class RecalculationJobTests(SqlServerFixture sql)
         }
     }
 
+    /// <summary>
+    /// AN-67: id кореляції в <c>calc.CalculationRun.ErrorMessage</c> дорівнює id у рядку журналу з повним
+    /// винятком. Мутація: окремий <c>SafeErrorText.NewCorrelationId()</c> для тексту — тест червоний.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Кореляція_з_ErrorMessage_прогону_дорівнює_кореляції_в_рядку_журналу()
+    {
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var document = await builder.BuildAsync();
+
+        var thrown = new InvalidOperationException("Формули не перерахувалися: Server=db01;Password=Secret123");
+        var rows = Substitute.For<IRowStore>();
+        rows.GetTableInstancesAsync(Arg.Any<long>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+            .Throws(thrown);
+        var log = new CapturingLog();
+
+        await using var db = builder.CreateContext();
+        var job = new RecalculationJob(
+            db,
+            new RecordingRunner([]),
+            RunHandler(),
+            FormulaService(rows),
+            new TestClock(DateTime.UtcNow),
+            logger: log);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => job.ExecuteAsync(Request(document), NoOpProgress.Instance, CancellationToken.None));
+
+        await using var verify = builder.CreateContext();
+        var run = await verify.CalculationRuns
+            .AsNoTracking()
+            .SingleAsync(r => r.ProjectId == document.ProjectId);
+
+        var inText = System.Text.RegularExpressions.Regex.Match(run.ErrorMessage!, @"correlation ([0-9a-f]{8,32})");
+        Assert.True(inText.Success, run.ErrorMessage);
+        var entry = Assert.Single(log.Entries, e => e.Exception is not null);
+        var inLog = System.Text.RegularExpressions.Regex.Match(entry.Text, @"кореляція ([0-9a-f]{8,32})\.");
+        Assert.True(inLog.Success, entry.Text);
+        Assert.Equal(inText.Groups[1].Value, inLog.Groups[1].Value);
+        Assert.Same(thrown, entry.Exception);
+    }
+
+    private sealed class CapturingLog : Microsoft.Extensions.Logging.ILogger<RecalculationJob>
+    {
+        public List<(string Text, Exception? Exception)> Entries { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull => null;
+
+        public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            Microsoft.Extensions.Logging.LogLevel logLevel, Microsoft.Extensions.Logging.EventId eventId,
+            TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+            => Entries.Add((formatter(state, exception), exception));
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]

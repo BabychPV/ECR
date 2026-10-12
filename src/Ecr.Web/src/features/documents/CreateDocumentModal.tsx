@@ -5,7 +5,7 @@ import { useNavigate } from 'react-router-dom';
 import { apiFetch } from '@/api/client';
 import type { components } from '@/api/schema';
 import type { CreateDocumentRequest, DocumentIdResponse, PeriodCalendarDto } from '@/api/types';
-import { fetchAllProjects } from '@/features/projects/allProjects';
+import { projectsQuery } from '@/features/projects/allProjects';
 import { groupRuleViolations } from './groupRuleViolations';
 import { newestOpenPeriodKey } from './newDocumentPeriod';
 import { formatPeriodKey } from '@/shared/format';
@@ -101,8 +101,7 @@ export function CreateDocumentModal({
   }, [opened]);
 
   const projects = useQuery({
-    queryKey: ['projects'],
-    queryFn: fetchAllProjects,
+    ...projectsQuery,
     enabled: opened,
   });
 

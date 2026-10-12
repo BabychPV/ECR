@@ -36,6 +36,7 @@ $st = (Invoke-Ecr -Method GET -Path "/api/v1/template-versions/$($ver.id)/struct
 $hf = @((Invoke-Ecr -Method GET -Path "/api/v1/template-versions/$($ver.id)/header-fields").Json)
 
 $bad = @(); $monthTotal = 0
+$pres = @{ checked = 0; width = 0; format = 0 }
 $rows = @()
 $sheetByCode = @{}
 foreach ($s in @($st.sheets)) { $sheetByCode[[string]$s.code] = $s }
@@ -53,6 +54,15 @@ foreach ($sh in @($mdl.sheets)) {
         $xc += $mc.Count; $ec += $ecs.Count
         $miss = @($mc | Where-Object { $ecs -notcontains $_ })
         if ($miss.Count) { $bad += "$($sh.code)/$($tb.code): немає колонок: $($miss -join ',')" }
+        # L1 (стилі комірок): ширина й формат числа з моделі проти структури версії (styleId у DTO структури немає - див. перелік стилів нижче)
+        foreach ($mcol in @($tb.columns)) {
+            if (-not $mcol.widthPx -and -not $mcol.displayFormat) { continue }
+            $ecol = @($etb.columns) | Where-Object { $_.code -eq $mcol.code } | Select-Object -First 1
+            if ($null -eq $ecol) { continue }
+            $pres.checked++
+            if ($mcol.widthPx -and [int]$ecol.widthPx -ne [int]$mcol.widthPx) { $pres.width++ }
+            if ($mcol.displayFormat -and [string]$ecol.displayFormat -ne [string]$mcol.displayFormat) { $pres.format++ }
+        }
         $xr += @($tb.rows).Count; $er += @($etb.rows).Count
         if (@($tb.rows).Count -ne @($etb.rows).Count) { $bad += "$($sh.code)/$($tb.code): рядків $(@($tb.rows).Count) vs $(@($etb.rows).Count)" }
         if ([string]$etb.layoutKind -ne [string]$tb.layout) { $bad += "$($sh.code)/$($tb.code): layout $($etb.layoutKind) vs $($tb.layout)" }
@@ -83,6 +93,23 @@ foreach ($r in @($mdl.registries)) {
     if ($n -lt @($r.entries).Count) { $bad += "довідник $($r.code): записів $n < $(@($r.entries).Count)" }
 }
 Write-Host "Довідників перевірено: $rn"
+
+# L1: стилі ролей Excel, на які посилаються колонки/шапки таблиць моделі, мусять існувати у версії; ширина/формат збігаються
+$usedStyles = @{}
+foreach ($sh in @($mdl.sheets)) {
+    foreach ($tb in @($sh.tables)) {
+        if ($tb.headerStyleRole) { $usedStyles[[string]$tb.headerStyleRole] = $true }
+        foreach ($c in @($tb.columns)) { if ($c.styleRole) { $usedStyles[[string]$c.styleRole] = $true } }
+    }
+}
+if ($usedStyles.Count -gt 0) {
+    $vs = @((Invoke-Ecr -Method GET -Path "/api/v1/template-versions/$($ver.id)/styles").Json)
+    $have = @($vs | ForEach-Object { [string]$_.code })
+    $absent = @($usedStyles.Keys | Where-Object { $have -notcontains $_ })
+    if ($absent.Count) { $bad += "стилів ролей немає у версії: $($absent -join ', ')" }
+    Write-Host ("Стилів ролей: у моделі використано {0}, у версії {1}; презентація колонок перевірена {2}: розбіжностей ширини {3}, формату {4}" -f $usedStyles.Count, $have.Count, $pres.checked, $pres.width, $pres.format)
+    if ($pres.width -or $pres.format) { $bad += "презентація колонок: ширина $($pres.width), формат $($pres.format) з $($pres.checked) не збігаються з моделлю" }
+}
 
 if ($ExcelModelPath -and (Test-Path $ExcelModelPath)) {
     $x = Get-Content -LiteralPath $ExcelModelPath -Raw -Encoding UTF8 | ConvertFrom-Json

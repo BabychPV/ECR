@@ -217,7 +217,9 @@ public sealed partial class CiPipelineTests
             Assert.Contains($"needs.{windowsJob}.result", job, StringComparison.Ordinal);
         }
 
-        Assert.Contains("if: ${{ always() }}", job, StringComparison.Ordinal);
+        // ✎ 2026-10-12: на push у не-інтеграційну lane/** агрегатор пропускається разом із Windows-завданнями
+        // (`always() && !(…lane…)`); на PR/dev/integration/main/integ-* `always()` лишається істинним.
+        Assert.Contains("if: ${{ always()", job, StringComparison.Ordinal);
         Assert.Contains("exit 1", job, StringComparison.Ordinal);
     }
 

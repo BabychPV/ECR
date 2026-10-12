@@ -271,12 +271,27 @@ const documentKeys = {
 };
 
 /**
+ * Домен `projects`: перелік УСІХ видимих проєктів (AN-91 / L8-10).
+ *
+ * ⛔ Ключ `['projects']` читали шість екранів із власним `queryFn`; один із них
+ * просив `?limit=200` і клав у ТОЙ САМИЙ запис кешу обрізаний перелік — блокування
+ * архіву не спрацьовувало для проєкту поза першою сторінкою. Тепер ключ — лише
+ * звідси, а `queryFn` — лише `fetchAllProjects` (`features/projects/allProjects.ts`,
+ * `projectsQuery`); сторож `projectsQueryKey.guard.test.ts` не пускає літерал
+ * `['projects']` поза цим файлом.
+ */
+const projects = {
+  /** `GET /api/v1/projects` — усі сторінки (`fetchAllProjects`); префікс запитів `['projects', …]`. */
+  all: () => ['projects'] as const,
+};
+
+/**
  * Єдина точка правди для ключів TanStack Query.
  *
  * Охоплює домени, потрібні для першого зрізу навігаційної архітектури —
  * breadcrumbs (`PR #3`) і prefetch за наміром (`PR #5`) резолвитимуть назви й
  * підвантажуватимуть дані саме цими ключами, а не власними рядковими
- * літералами. Інші домени (`documents`, `projects`, `periods`, `units`…)
+ * літералами. Інші домени (`documents`, `periods`, `units`…)
  * лишаються на попередньому взірці — цей зріз навмисно обмежений маршрутами,
  * що отримають breadcrumbs першими (шаблони/версії, довідники, методології).
  */
@@ -287,4 +302,5 @@ export const queryKeys = {
   slices,
   editAssignments,
   document: documentKeys,
+  projects,
 };

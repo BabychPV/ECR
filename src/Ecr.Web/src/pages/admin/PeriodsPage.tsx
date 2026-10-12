@@ -53,7 +53,7 @@ import { notificationCloseButtonProps, showApiError, showDone } from '@/shared/u
 import { errorCodeText } from '@/shared/ui/problemText';
 import { useUrlNumber } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
-import { fetchAllProjects } from '@/features/projects/allProjects';
+import { projectsQuery } from '@/features/projects/allProjects';
 import { FilterInline, FilterRow } from '@/shared/ui/FilterBar';
 
 // Правило поясу майданчика живе в `shared/siteMoment`; ім'я лишається доступним звідси.
@@ -257,11 +257,8 @@ export function PeriodsPage(): JSX.Element {
   // ⛔ Проєкти ВИБИРАЮТЬСЯ зі списку, а не вводяться номером. Це не про
   // зручність: без переліку не видно СТАНУ проєкту, а саме він визначає, чи
   // відкриються періоди взагалі (`A7-25`).
-  const projects = useQuery({
-    queryKey: ['projects'],
-    // ⛔ `X-07`: усі сторінки, а не перші 200 мовчки (`fetchAllProjects`).
-    queryFn: fetchAllProjects,
-  });
+  // ⛔ `X-07`: усі сторінки, а не перші 200 мовчки (`projectsQuery` = `fetchAllProjects` під єдиним ключем).
+  const projects = useQuery({ ...projectsQuery });
 
   const periods = useQuery({
     queryKey: ['periods', projectId],
@@ -326,7 +323,7 @@ export function PeriodsPage(): JSX.Element {
 
   /** Перечитує проєкти і календар після будь-якої зміни. */
   const refresh = async (): Promise<void> => {
-    await queryClient.invalidateQueries({ queryKey: ['projects'] });
+    await queryClient.invalidateQueries({ queryKey: projectsQuery.queryKey });
     await queryClient.invalidateQueries({ queryKey: ['periods', projectId] });
   };
 

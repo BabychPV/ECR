@@ -1,4 +1,5 @@
 import { apiFetch } from '@/api/client';
+import { queryKeys } from '@/api/queryKeys';
 import type { PagedProjects } from '@/api/types';
 
 /** Розмір сторінки — стеля сервера (`CursorRequest.MaxLimit`). */
@@ -42,3 +43,16 @@ export async function fetchAllProjects(): Promise<PagedProjects> {
 
   return { items, nextCursor: cursor, totalCount };
 }
+
+/**
+ * Єдиний опис запиту «усі проєкти» (AN-91 / L8-10): ключ + `queryFn` разом, щоб жоден екран не клав під
+ * `['projects']` власну форму (обрізаний `?limit=200` тощо). Вживати як `useQuery({ ...projectsQuery, enabled })`.
+ *
+ * ⚠ `DocumentPage` лишає ключ `queryKeys.projects.all()` і ледачий `import()` — статичний імпорт цього файлу
+ * додав би ~1 КБ gzip до графа маршруту (бюджет D-132); сторож `projectsQueryKey.guard.test.ts` вимагає, щоб
+ * `queryFn` там усе одно був `fetchAllProjects`.
+ */
+export const projectsQuery = {
+  queryKey: queryKeys.projects.all(),
+  queryFn: fetchAllProjects,
+} as const;

@@ -1365,11 +1365,6 @@ public sealed partial class EndpointCoverageTests
         "PUT /api/v1/template-versions/{p}/tables/{p}/formulas/cell/{p}/{p}",
         "DELETE /api/v1/template-versions/{p}/tables/{p}/formulas/cell/{p}/{p}",
 
-        // 12.10 (CELL-STYLE L3a): користувацька заливка комірок — серверна частина йде першою (контракт),
-        // споживач (CellColorMenu у тулбарі сітки, L4) з'являється окремою хвилею клієнтських ліній.
-        // ⚠ Звільнення тимчасове: прибрати в тому ж коміті, що додає виклик у `features/grid` (L4).
-        "PATCH /api/v1/documents/{p}/tables/{p}/cell-styles",
-
         // ⚠ Тут стояла ще й `POST /api/v1/units/convert` з поясненням
         // «числа конвертуються там, де їх вводять». Пояснення було
         // НЕПРАВДОЮ: жодне місце клієнта нічого не конвертувало.

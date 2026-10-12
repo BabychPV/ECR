@@ -53,7 +53,7 @@ import { errorCodeText } from '@/shared/ui/problemText';
 import { useUrlNumber } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
 import { localized } from '@/shared/i18n/localized';
-import { fetchAllProjects } from '@/features/projects/allProjects';
+import { projectsQuery } from '@/features/projects/allProjects';
 import { DisabledReason } from '@/features/common/DisabledReason';
 import { usePendingLoading } from '@/features/common/usePendingLoading';
 import { FilterRow } from '@/shared/ui/FilterBar';
@@ -108,11 +108,8 @@ export function SnapshotsPage(): JSX.Element {
   const [code, setCode] = useState<string | null>(null);
   const [buildPeriod, setBuildPeriod] = useState(currentPeriodKey());
 
-  const projects = useQuery({
-    queryKey: ['projects'],
-    // ⛔ `X-07`: усі сторінки, а не перші 200 мовчки (`fetchAllProjects`).
-    queryFn: fetchAllProjects,
-  });
+  // ⛔ `X-07`: усі сторінки, а не перші 200 мовчки (`projectsQuery` = `fetchAllProjects` під єдиним ключем).
+  const projects = useQuery({ ...projectsQuery });
 
   // ⛔ Аудит-пас 5: рядок списку показував голий `snapshot.projectId`
   // (число з бази) замість коду проєкту — той самий довідник уже

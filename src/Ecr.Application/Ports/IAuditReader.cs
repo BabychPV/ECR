@@ -73,8 +73,10 @@ public sealed record CellChangeView(
 /// <param name="ByImport">З них — імпортом (<c>Origin = Import</c>).</param>
 /// <param name="ByRecalculation">З них — перерахунком (<c>Origin = Recalculation</c>).</param>
 /// <remarks>
-/// ⚠ Лічильника пізніх правок (<c>late</c>) тут немає навмисно — рішення координатора: індексу по
-/// <c>IsLateEdit</c> у <c>aud.CellChange</c> немає, і його не додаємо без виміру.
+/// ⚠ Лічильника пізніх правок (<c>late</c>) тут немає навмисно — рішення координатора. Фільтрований індекс
+/// <c>IX_CellChange_LateEdit</c> (<c>IsLateEdit = 1</c>) у <c>aud.CellChange</c> УЖЕ існує
+/// (<c>11-audit-tables.sql</c>); окремий <c>COUNT</c> по <c>IsLateEdit = 1</c> — ~8 мс на 6 млн рядків (вимір AN-55),
+/// але підрахунок у розрізі колонки (він же <c>totalCount</c> першої сторінки) дорожчий — ~40 тис. читань.
 /// </remarks>
 public sealed record CellChangeSummaryView(long Total, long Today, long ByImport, long ByRecalculation);
 

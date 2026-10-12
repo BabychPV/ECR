@@ -24,8 +24,13 @@ on:
   # main — нижче. Сім гейтів (ci.yml, evidence.yml) не змінено; їхні lane/**
   # вже скасовують попередній прогін (cancel-in-progress), paths-ignore для
   # lane/** неможливий: Actions застосовує його до всіх гілок того ж `push`.
+  # ✎ 2026-10-12 (CI-швидкість): `rc/**` ПРИБРАНО з push. Тижневий PR `rc/<дата>` → `main`
+  # відкривається одразу після нарізки, і push-прогін та pull_request-прогін йшли на ТОЙ САМИЙ
+  # SHA (два однакові smoke по ~8 хв, замір 12.10: run 38266652367 push + 38266698578 PR).
+  # Прогін на rc тепер дає лише PR-подія (нижче; вона ж потрібна для обов'язкової перевірки
+  # в ruleset). ci.yml/evidence.yml/e2e-stand на push у `rc/**` не йшли й раніше.
   push:
-    branches: [ dev/integration, 'rc/**' ]
+    branches: [ dev/integration ]
   # Тижневий PR `rc/<дата>` → `main`.
   pull_request:
     branches: [ main ]

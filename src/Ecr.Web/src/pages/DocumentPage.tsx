@@ -6,6 +6,7 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 import { useParams } from 'react-router-dom';
 import { usePendingLoading } from '@/features/common/usePendingLoading';
 import { apiFetch, EcrApiError } from '@/api/client';
+import { queryKeys } from '@/api/queryKeys';
 import type {
   DocumentPeriodRequest,
   DocumentSummary,
@@ -467,7 +468,7 @@ export function DocumentPage(): JSX.Element {
   const projectId = summary.data?.projectId ?? null;
 
   const projects = useQuery({
-    queryKey: ['projects'],
+    queryKey: queryKeys.projects.all(),
     // AN-39/L8-10: усі сторінки - проєкт поза першими 200 теж блокує дії в архіві.
     // ⚠ За `import()`: статичний імпорт додавав файл і ~1 КБ gzip до графа маршруту (бюджет D-132).
     queryFn: () => import('@/features/projects/allProjects').then((module) => module.fetchAllProjects()),

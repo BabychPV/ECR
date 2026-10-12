@@ -3,7 +3,7 @@ import { apiFetch } from '@/api/client';
 import type { DocumentSummary, PeriodCalendarDto } from '@/api/types';
 import { listDocuments } from '@/features/documents/api';
 import { openPeriodKeys } from '@/features/documents/newDocumentPeriod';
-import { fetchAllProjects } from '@/features/projects/allProjects';
+import { projectsQuery } from '@/features/projects/allProjects';
 
 /** Скільки проєктів опитувати за календарями: далі - десятки запитів заради блоку «My tasks» не виправдані. */
 const MaxProjects = 20;
@@ -34,7 +34,7 @@ export interface StaleDocumentsState {
  * (`staleTime: 0`), бо стан змінюється перерахунком в іншій вкладці.
  */
 export function useStaleDocuments(enabled: boolean): StaleDocumentsState {
-  const projects = useQuery({ queryKey: ['projects'], queryFn: fetchAllProjects, enabled });
+  const projects = useQuery({ ...projectsQuery, enabled });
   const projectList = (projects.data?.items ?? []).slice(0, MaxProjects);
 
   const calendars = useQueries({
