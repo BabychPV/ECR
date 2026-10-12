@@ -1,0 +1,91 @@
+{
+    "format":  "ecr-land-category-rules",
+    "version":  1,
+    "note":  "Row-level category rules reproduced from the legacy HSE C# classes. No constant values. Per-pollutant-code keys ({nae}_{code}) are NOT here: see LP-07 analysis.",
+    "rules":  [
+                  {
+                      "methodology":  "ECW_C11_03",
+                      "expression":  "if(in(@Land_NAE,\u00270801\u0027,\u00270926\u0027),\u0027Loc_BeforeMR_A\u0027,if(in(@Land_NAE,\u00270114\u0027,\u00270116\u0027,\u00270603\u0027,\u00270920\u0027,\u00270921\u0027,\u00270924\u0027),\u0027Loc_BeforeMR_B\u0027,if(in(@Land_NAE,\u00270662\u0027,\u00270663\u0027,\u00270664\u0027,\u00270660\u0027,\u00270661\u0027,\u00270672\u0027,\u00270673\u0027),\u0027Loc_BeforeMR_D\u0027,\u0027\u0027)))",
+                      "normalizesNae":  false,
+                      "source":  "docs/source/ECR Current Back end/Assembly/DllProject/DllProject/Realization/Sections/R_EmissionCalculationWork/ECW_C11_OPF_Plant_Operational/ECW_C11_03.cs:75-165",
+                      "note":  "category = \u0027Loc_BeforeMR_\u0027 + group(NAE); no group -\u003e row skipped (empty key)"
+                  },
+                  {
+                      "methodology":  "ECW_C11_07",
+                      "expression":  "if(in(@Land_NAE,\u00270900(002)\u0027,\u00270900 (002)\u0027,\u00270901(002)\u0027,\u00270901 (002)\u0027,\u00270902(002)\u0027,\u00270902 (002)\u0027),\u00270900\u0027,if(in(@Land_NAE,\u00270904(001)\u0027,\u00270904 (001)\u0027,\u00270904(002)\u0027,\u00270904 (002)\u0027),\u00270904\u0027,if(in(@Land_NAE,\u00270906(002)\u0027,\u00270906 (002)\u0027,\u00270907(002)\u0027,\u00270907 (002)\u0027),\u00270906\u0027,\u0027\u0027)))",
+                      "normalizesNae":  true,
+                      "source":  "docs/source/ECR Current Back end/Assembly/DllProject/DllProject/Realization/Sections/R_EmissionCalculationWork/ECW_C11_OPF_Plant_Operational/ECW_C11_07.cs:77-99",
+                      "note":  "category = group(NAE without spaces); no group -\u003e row skipped"
+                  },
+                  {
+                      "methodology":  "ECW_C11_08",
+                      "expression":  "if(in(@Land_NAE,\u00270117\u0027,\u00270117(001)\u0027,\u00270117 (001)\u0027,\u00270117(002)\u0027,\u00270117 (002)\u0027,\u00270117(003)\u0027,\u00270117 (003)\u0027,\u00270117(004)\u0027,\u00270117 (004)\u0027,\u00270117(005)\u0027,\u00270117 (005)\u0027,\u00270118\u0027,\u00270118(001)\u0027,\u00270118 (001)\u0027,\u00270118(002)\u0027,\u00270118 (002)\u0027,\u00270118(003)\u0027,\u00270118 (003)\u0027,\u00270118(004)\u0027,\u00270118 (004)\u0027,\u00270118(005)\u0027,\u00270118 (005)\u0027,\u00270119\u0027,\u00270119(001)\u0027,\u00270119 (001)\u0027,\u00270119(002)\u0027,\u00270119 (002)\u0027,\u00270119(003)\u0027,\u00270119 (003)\u0027,\u00270119(004)\u0027,\u00270119 (004)\u0027,\u00270119(005)\u0027,\u00270119 (005)\u0027),\u00270117\u0027,if(in(@Land_NAE,\u00270786\u0027,\u00270786(001)\u0027,\u00270786 (001)\u0027,\u00270786(002)\u0027,\u00270786 (002)\u0027,\u00270786(003)\u0027,\u00270786 (003)\u0027,\u00270786(004)\u0027,\u00270786 (004)\u0027,\u00270786(005)\u0027,\u00270786 (005)\u0027,\u00270787\u0027,\u00270787(001)\u0027,\u00270787 (001)\u0027,\u00270787(002)\u0027,\u00270787 (002)\u0027,\u00270787(003)\u0027,\u00270787 (003)\u0027,\u00270787(004)\u0027,\u00270787 (004)\u0027,\u00270787(005)\u0027,\u00270787 (005)\u0027),\u00270786\u0027,if(in(@Land_NAE,\u00270900(001)\u0027,\u00270900 (001)\u0027,\u00270901(001)\u0027,\u00270901 (001)\u0027,\u00270902(001)\u0027,\u00270902 (001)\u0027),\u00270900\u0027,if(in(@Land_NAE,\u00270906(001)\u0027,\u00270906 (001)\u0027,\u00270907(001)\u0027,\u00270907 (001)\u0027),\u00270906\u0027,\u0027\u0027))))",
+                      "normalizesNae":  true,
+                      "source":  "docs/source/ECR Current Back end/Assembly/DllProject/DllProject/Realization/Sections/R_EmissionCalculationWork/ECW_C11_OPF_Plant_Operational/ECW_C11_08.cs:82-104",
+                      "note":  "category = group(NAE without spaces); no group -\u003e row skipped"
+                  },
+                  {
+                      "methodology":  "ECW_C11_11_01",
+                      "expression":  "if(in(@Land_NAE,\u00270667\u0027,\u00270668\u0027),\u00270667\u0027,if(in(@Land_NAE,\u00270674\u0027,\u00270675\u0027,\u00270676\u0027,\u00270677\u0027,\u00270678\u0027),\u00270674\u0027,if(in(@Land_NAE,\u00270669\u0027,\u00270670\u0027,\u00270671\u0027),\u00270669\u0027,if(in(@Land_NAE,\u00270922\u0027,\u00270923\u0027),\u00270922\u0027,if(in(@Land_NAE,\u00270601\u0027,\u00270602\u0027),\u00270601\u0027,@Land_NAE)))))",
+                      "normalizesNae":  false,
+                      "source":  "docs/source/ECR Current Back end/Assembly/DllProject/DllProject/Realization/Sections/R_EmissionCalculationWork/ECW_C11_OPF_Plant_Operational/ECW_C11_11_01.cs:100-108",
+                      "note":  "category = group(NAE) else NAE itself; formula set per group (groupFormulas) is a separate matter"
+                  },
+                  {
+                      "methodology":  "ECW_C12_05",
+                      "expression":  "if(in(@Land_NAE,\u00270061\u0027,\u00270061(001)\u0027,\u00270061 (001)\u0027,\u00270061(002)\u0027,\u00270061 (002)\u0027,\u00270061(003)\u0027,\u00270061 (003)\u0027,\u00270062\u0027),\u0027Loc_BeforeMR_B\u0027,if(in(@Land_NAE,\u00270046\u0027,\u00270046(001)\u0027,\u00270046 (001)\u0027,\u00270046(002)\u0027,\u00270046 (002)\u0027,\u00270046(003)\u0027,\u00270046 (003)\u0027,\u00270050\u0027,\u00270050(001)\u0027,\u00270050 (001)\u0027,\u00270050(002)\u0027,\u00270050 (002)\u0027,\u00270050(003)\u0027,\u00270050 (003)\u0027,\u00270050(004)\u0027,\u00270050 (004)\u0027,\u00270050(005)\u0027,\u00270050 (005)\u0027,\u00270050(006)\u0027,\u00270050 (006)\u0027,\u00270053\u0027,\u00270053(001)\u0027,\u00270053 (001)\u0027,\u00270053(002)\u0027,\u00270053 (002)\u0027,\u00270053(003)\u0027,\u00270053 (003)\u0027,\u00270053(004)\u0027,\u00270053 (004)\u0027,\u00270079\u0027),\u0027Loc_BeforeMR_D\u0027,\u0027\u0027))",
+                      "normalizesNae":  true,
+                      "source":  "docs/source/ECR Current Back end/Assembly/DllProject/DllProject/Realization/Sections/R_EmissionCalculationWork/ECW_C12_OFFSHORE_OPERATIONAL/ECW_C12_05.cs:72-129",
+                      "note":  "category = \u0027Loc_BeforeMR_\u0027 + group(NAE); NAE normalized upstream (see nae variable)"
+                  },
+                  {
+                      "methodology":  "ECW_C11_11_04",
+                      "expression":  "@Land_NAE",
+                      "normalizesNae":  true,
+                      "source":  "docs/source/ECR Current Back end/Assembly/DllProject/DllProject/Realization/Sections/R_EmissionCalculationWork/ECW_C11_OPF_Plant_Operational/ECW_C11_11_04.cs:124",
+                      "note":  "category = NAE without spaces (Trim + Replace(\u0027 \u0027,\u0027\u0027)); space-insensitive match is done by ConstantResolver"
+                  },
+                  {
+                      "methodology":  "ECW_C11_11_05",
+                      "expression":  "@Land_NAE",
+                      "normalizesNae":  true,
+                      "source":  "docs/source/ECR Current Back end/Assembly/DllProject/DllProject/Realization/Sections/R_EmissionCalculationWork/ECW_C11_OPF_Plant_Operational/ECW_C11_11_05.cs:89",
+                      "note":  "category = NAE without spaces (Trim + Replace(\u0027 \u0027,\u0027\u0027)); space-insensitive match is done by ConstantResolver"
+                  },
+                  {
+                      "methodology":  "ECW_C11_12_03",
+                      "expression":  "@Land_NAE",
+                      "normalizesNae":  true,
+                      "source":  "docs/source/ECR Current Back end/Assembly/DllProject/DllProject/Realization/Sections/R_EmissionCalculationWork/ECW_C11_OPF_Plant_Operational/ECW_C11_12_03.cs:81",
+                      "note":  "category = NAE without spaces (Trim + Replace(\u0027 \u0027,\u0027\u0027)); space-insensitive match is done by ConstantResolver"
+                  },
+                  {
+                      "methodology":  "ECW_C11_14",
+                      "expression":  "@Land_NAE",
+                      "normalizesNae":  true,
+                      "source":  "docs/source/ECR Current Back end/Assembly/DllProject/DllProject/Realization/Sections/R_EmissionCalculationWork/ECW_C11_OPF_Plant_Operational/ECW_C11_14.cs:78",
+                      "note":  "category = NAE without spaces (Trim + Replace(\u0027 \u0027,\u0027\u0027)); space-insensitive match is done by ConstantResolver"
+                  },
+                  {
+                      "methodology":  "ECW_C11_15",
+                      "expression":  "@Land_NAE",
+                      "normalizesNae":  true,
+                      "source":  "docs/source/ECR Current Back end/Assembly/DllProject/DllProject/Realization/Sections/R_EmissionCalculationWork/ECW_C11_OPF_Plant_Operational/ECW_C11_15.cs:77",
+                      "note":  "category = NAE without spaces (Trim + Replace(\u0027 \u0027,\u0027\u0027)); space-insensitive match is done by ConstantResolver"
+                  },
+                  {
+                      "methodology":  "ECW_C11_16",
+                      "expression":  "@Land_NAE",
+                      "normalizesNae":  true,
+                      "source":  "docs/source/ECR Current Back end/Assembly/DllProject/DllProject/Realization/Sections/R_EmissionCalculationWork/ECW_C11_OPF_Plant_Operational/ECW_C11_16.cs:101",
+                      "note":  "category = NAE without spaces (Trim + Replace(\u0027 \u0027,\u0027\u0027)); space-insensitive match is done by ConstantResolver"
+                  },
+                  {
+                      "methodology":  "ECW_C11_18",
+                      "expression":  "@Land_NAE",
+                      "normalizesNae":  true,
+                      "source":  "docs/source/ECR Current Back end/Assembly/DllProject/DllProject/Realization/Sections/R_EmissionCalculationWork/ECW_C11_OPF_Plant_Operational/ECW_C11_18.cs:79",
+                      "note":  "category = NAE without spaces (Trim + Replace(\u0027 \u0027,\u0027\u0027)); space-insensitive match is done by ConstantResolver"
+                  }
+              ]
+}
