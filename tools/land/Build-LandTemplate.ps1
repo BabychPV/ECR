@@ -631,6 +631,29 @@ function Style-IdOf($role) {
     return $null
 }
 
+# L2 плану стилів: шапка таблиці через PATCH .../presentation ([{entityType:'TableDef', entityId, field:'HeaderStyleId', value}]).
+# У режимі Sql HeaderStyleId уже записано напряму (Fill-StructureSql), тож PATCH потрібен лише для -StructureMode Api.
+# Поле HeaderStyleId у білому списку презентаційного патча з'являється з lane cellstyle-l2-2; без нього сервер відповість
+# 422 (presentationFieldUnknown) - це попередження, а не відмова побудови: решта шаблону вже опублікована.
+function Set-TableHeaderStyles {
+    if ($StructureMode -ne 'Api') { return }
+    $changes = @()
+    foreach ($sh in @($Mdl.sheets)) {
+        foreach ($tb in @($sh.tables)) {
+            $sid = Style-IdOf $tb.headerStyleRole
+            $tid = $S.Tables["$($sh.code)/$($tb.code)"]
+            if ($null -ne $sid -and $tid) { $changes += @{ entityType = 'TableDef'; entityId = [int]$tid; field = 'HeaderStyleId'; value = [string]$sid } }
+        }
+    }
+    if ($changes.Count -eq 0) { return }
+    if ($changes.Count -eq 1) { $changes += $changes[0] }   # одиночний елемент конвеєр ConvertTo-Json розгорнув би в об'єкт, а не масив
+    $r = Invoke-Ecr -Method PATCH -Path "/api/v1/template-versions/$($S.VersionId)/presentation" -Body $changes
+    if ($r.Status -ne 200) {
+        Log ("  ПОПЕРЕДЖЕННЯ: стиль шапок таблиць не застосовано (HTTP {0}); потрібна lane cellstyle-l2-2. {1}" -f $r.Status, ([string]$r.Text).Substring(0, [Math]::Min(200, ([string]$r.Text).Length)))
+    }
+    else { Log "  стиль шапок таблиць: $($changes.Count) змін (PATCH presentation)" }
+}
+
 function Stage-Template {
     Log '== Template =='
     LoginAs 'land-owner'
@@ -746,6 +769,7 @@ function Stage-Template {
     if ($null -eq $pub) { throw 'Після Apply-ContractHeader немає опублікованої версії.' }
     $S.VersionId = [int]$pub.id
     Log "  опубліковано версію $($pub.version) (id $($pub.id))"
+    Set-TableHeaderStyles
 }
 
 # ==================== Project ====================
