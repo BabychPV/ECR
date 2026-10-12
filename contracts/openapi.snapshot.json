@@ -13035,6 +13035,13 @@
           },
           "rowKind": {
             "$ref": "#/components/schemas/RowKind"
+          },
+          "styleId": {
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
           }
         },
         "required": [
@@ -13084,6 +13091,17 @@
           "rowVersion": {
             "description": "Версія для оптимістичного блокування.",
             "type": "string"
+          },
+          "style": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/CellStyleDto",
+                "description": "Стиль рядка шаблону (`RowDef.StyleId` → `StyleDef`); `null` — стилю рядка немає (для\nдинамічного рядка, якого немає в шаблоні, — завжди `null`). Порядок шарів у сітці: стиль колонки, стиль\nрядка, користувацьке оформлення, умовний формат."
+              }
+            ]
           }
         },
         "required": [
@@ -14453,6 +14471,14 @@
           "rowKind": {
             "$ref": "#/components/schemas/RowKind",
             "description": "Роль рядка; незмінна після створення."
+          },
+          "styleId": {
+            "description": "Стиль рядка (`cfg.StyleDef` цієї версії); `null` — без стилю.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
           }
         },
         "required": [
@@ -17267,6 +17293,17 @@
               "$ref": "#/components/schemas/ColumnDto"
             },
             "type": "array"
+          },
+          "headerStyle": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/CellStyleDto",
+                "description": "Стиль шапки таблиці, заданий автором шаблону (`TableDef.HeaderStyleId` → `StyleDef`); `null` —\nстиль не задано (або посилання висить). Це дані самої таблиці: таблиця під забороною/схована\nне віддає зрізу взагалі (404), тож стиль шапки окремо розкрити не може."
+              }
+            ]
           },
           "outOfWindowCells": {
             "description": "Комірки, чия остання зміна — правка за політикою `Warn` поза вікном\nдоступу (`ФВ-2.16`, `D-239`); формат — той самий\n`\"{rowKey}:{columnCode}\"`, що й `PatchCellsResponse.OutOfWindow`.\nПорожній — таких немає. Читається з `aud.CellChange.IsOutOfWindow`\nодним запитом на зріз, тож значок на сітці переживає перезавантаження.",
