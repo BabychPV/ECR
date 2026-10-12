@@ -42,7 +42,7 @@ def template_of(prod_table):
     return None
 
 
-# Прод-таблиці зразка (40 із 45 з даними; AF_Waste_Land_08 — окремо, prodMapping.waste).
+# Прод-таблиці зразка, що мають дані (AF_Waste_Land_08 — окремо, prodMapping.waste).
 PROD_TABLES = [
     'AF_Air_Land_11a_Off_Process_AI', 'AF_Air_Land_11b_Off_Process_EPC2', 'AF_Air_Land_11c_Off_Process_EPC3',
     'AF_Air_Land_11d_Off_Process_EPC4', 'AF_Air_Land_Dust_Producing_Activities_6_11', 'AF_Air_Land_Dust_Producing_Activities_6_12',
@@ -126,7 +126,7 @@ for _q in (1, 2, 3, 4):
 # ---------- нові колонки введення (у шаблоні відсутні) ----------
 _FUEL = dict(dataType='Lookup', registry='LAND_STATIONARY_TYPE_OF_FUEL', headerEn='Type of fuel', evidence=(
     'Прод-таблиця має Land_TypeFuel, у таблиці Excel колонки палива немає; значення зразка збігаються з довідником '
-    'LAND_STATIONARY_TYPE_OF_FUEL (4/4 у 10.01, 10.03, 11.01; 1/1 у 10.04)'))
+    'LAND_STATIONARY_TYPE_OF_FUEL (колонка є в типових прод-документах 10.01, 10.03, 11.01, 10.04)'))
 NEW_COLUMNS = []  # (table, spec)
 for _t in ('T10_01', 'T10_03', 'T10_04', 'T11_01'):
     NEW_COLUMNS.append((_t, dict(_FUEL, code='Land_TypeFuel')))
@@ -170,7 +170,7 @@ UNIT_MISMATCHES = [
 WATER = {
     'T7_00': {'prodTable': 'AF_Water_Land_07', 'rowKey': 'R{Land_StringReportId}', 'valueProdColumn': 'Land_Measure_Volume',
               'valueColumn': 'місячна колонка <Month> (January…December) обраного місяця',
-              'evidence': 'схема завантаження зразка 2026-10-12 (0 помилок валідації); рядки без ключа R<id> у шаблоні не мають відповідника (22–27 із 90)'},
+              'evidence': 'схема завантаження зразка 2026-10-12 (0 помилок валідації); рядки без ключа R<id> у шаблоні не мають відповідника (частина рядків типового прод-документа)'},
     'T7a_16': {'prodTable': 'AF_Water_Land_07a_16', 'rowOrder': 'Land_No -> N-й рядок Item таблиці', 'annualLimitColumn': 'AnnualLimit',
                'valueProdColumn': 'Land_Measure_Concentration', 'valueColumn': 'місячна колонка <Month> обраного місяця',
                'evidence': 'схема завантаження зразка 2026-10-12; Land_ComponentEn/Ru — підписи рядка, не вводяться'},
