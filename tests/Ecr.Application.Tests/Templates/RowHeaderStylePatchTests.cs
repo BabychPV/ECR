@@ -104,6 +104,63 @@ public sealed class RowHeaderStylePatchTests(SqlServerFixture sql)
         Assert.Null(state.Header);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Опублікована_версія_з_документами_приймає_стиль_рядка_шапки_і_колонки_як_презентацію()
+    {
+        // P2: поведінка на Published + документах збігається з колонковим стилем — презентаційне поле, без нової
+        // версії і без відмови 409/422; ревізія презентації росте, документи на місці.
+        var document = await new TestDocumentBuilder(sql.ConnectionString).BuildAsync();
+
+        int styleId;
+        await using (var setup = Context())
+        {
+            var style = new StyleDef(document.TemplateVersionId, EcrCode.Create("PUB" + Guid.NewGuid().ToString("N")[..8]));
+            setup.StyleDefs.Add(style);
+            await setup.SaveChangesAsync();
+            styleId = style.Id;
+
+            // Published = 1 (TR_*_Immutable діє на Status IN (1, 2)).
+            await setup.Database.ExecuteSqlInterpolatedAsync(
+                $"UPDATE cfg.TemplateVersion SET Status = 1, PublishedAt = SYSUTCDATETIME(), PublishedByUserId = 1 WHERE Id = {document.TemplateVersionId}");
+        }
+
+        var value = styleId.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        var patch = $$"""
+            [{"entityType":"RowDef","entityId":{{document.RowDefIds[0]}},"field":"StyleId","value":"{{value}}"},
+             {"entityType":"TableDef","entityId":{{document.TableDefId}},"field":"HeaderStyleId","value":"{{value}}"},
+             {"entityType":"ColumnDef","entityId":{{document.ColumnDefIds[0]}},"field":"StyleId","value":"{{value}}"}]
+            """;
+
+        await using (var db = Context())
+        {
+            var revision = await PatchHandler(db).PatchAsync(document.TemplateVersionId, patch, 9, CancellationToken.None);
+            Assert.Equal(1, revision);
+        }
+
+        await using (var fresh = Context())
+        {
+            Assert.Equal(styleId, (await fresh.RowDefs.AsNoTracking().SingleAsync(r => r.Id == document.RowDefIds[0])).StyleId);
+            Assert.Equal(styleId, (await fresh.TableDefs.AsNoTracking().SingleAsync(t => t.Id == document.TableDefId)).HeaderStyleId);
+            Assert.Equal(styleId, (await fresh.ColumnDefs.AsNoTracking().SingleAsync(c => c.Id == document.ColumnDefIds[0])).StyleId);
+            Assert.True(await fresh.Documents.AnyAsync(d => d.Id == document.DocumentId));
+        }
+
+        // Скидання тим самим механізмом (null).
+        var reset = $$"""
+            [{"entityType":"RowDef","entityId":{{document.RowDefIds[0]}},"field":"StyleId","value":null},
+             {"entityType":"TableDef","entityId":{{document.TableDefId}},"field":"HeaderStyleId","value":null}]
+            """;
+        await using (var db = Context())
+        {
+            await PatchHandler(db).PatchAsync(document.TemplateVersionId, reset, 9, CancellationToken.None);
+        }
+
+        await using var last = Context();
+        Assert.Null((await last.RowDefs.AsNoTracking().SingleAsync(r => r.Id == document.RowDefIds[0])).StyleId);
+        Assert.Null((await last.TableDefs.AsNoTracking().SingleAsync(t => t.Id == document.TableDefId)).HeaderStyleId);
+    }
     // ─────────────────────────────────────────────────────────────────────────
 
     private static string Patch(string entity, int id, string field, int? value)

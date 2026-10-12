@@ -95,25 +95,46 @@ public sealed class RowAndHeaderStyleTests
     }
 
     [Fact]
-    public async Task Повторний_PUT_без_стилю_скидає_стиль_рядка()
+    public async Task Повторний_PUT_без_стилю_не_чіпає_стиль_рядка()
     {
         await Save().HandleAsync(1, _table.Id, "7001001", Command(77), CancellationToken.None);
-        var cleared = await Save().HandleAsync(1, _table.Id, "7001001", Command(null), CancellationToken.None);
+        var resaved = await Save().HandleAsync(1, _table.Id, "7001001", Command(null), CancellationToken.None);
 
-        Assert.Null(cleared.StyleId);
-        Assert.Null(_table.Rows.Single().StyleId);
+        Assert.Equal(77, resaved.StyleId);
+        Assert.Equal(77, _table.Rows.Single().StyleId);
     }
 
     [Fact]
-    public async Task Аудит_стану_рядка_несе_стиль()
+    public async Task Повторний_PUT_зі_стилем_задає_новий_стиль()
     {
+        var first = new StyleDef(1, EcrCode.Create("OWN"));
+        var second = new StyleDef(1, EcrCode.Create("SECOND"));
+        typeof(Entity<int>).GetProperty("Id")!.SetValue(first, 77);
+        typeof(Entity<int>).GetProperty("Id")!.SetValue(second, 78);
+        _styles.GetAsync(1, Arg.Any<CancellationToken>())
+               .Returns(new Dictionary<int, StyleDef> { [77] = first, [78] = second });
         await Save().HandleAsync(1, _table.Id, "7001001", Command(77), CancellationToken.None);
+        var changed = await Save().HandleAsync(1, _table.Id, "7001001", Command(78), CancellationToken.None);
 
-        await _audit.Received(1).WriteStructureChangeAsync(
-            Arg.Is<StructureChangeRecord>(r => r.EntityType == "RowDef" && r.NewJson!.Contains("\"StyleId\":77")),
-            Arg.Any<CancellationToken>());
+        Assert.Equal(78, changed.StyleId);
     }
 
+    [Fact]
+    public async Task Аудит_несе_StyleId_лише_коли_стиль_заданий()
+    {
+        // Створення без стилю — форма аудиту без StyleId.
+        await Save().HandleAsync(1, _table.Id, "7001001", Command(null), CancellationToken.None);
+        await _audit.Received(1).WriteStructureChangeAsync(
+            Arg.Is<StructureChangeRecord>(r => r.NewJson!.Contains("RowKey") && !r.NewJson.Contains("StyleId")),
+            Arg.Any<CancellationToken>());
+
+        // Задання стилю: старий стан без StyleId, новий — з ним.
+        await Save().HandleAsync(1, _table.Id, "7001001", Command(77), CancellationToken.None);
+        await _audit.Received(1).WriteStructureChangeAsync(
+            Arg.Is<StructureChangeRecord>(r => r.Operation == "Update"
+                && !r.OldJson!.Contains("StyleId") && r.NewJson!.Contains("\"StyleId\":77")),
+            Arg.Any<CancellationToken>());
+    }
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
