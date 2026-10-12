@@ -1286,6 +1286,12 @@ public sealed partial class SourceEventSyncJob(
         await using var delete = connection.CreateCommand();
         delete.Transaction = tx;
         delete.CommandText = """
+            -- CELL-STYLE L3b: користувацьке оформлення комірок рядка (без FK на рядок — див. CellStyle).
+            DELETE s
+              FROM doc.CellStyle AS s
+             WHERE s.PeriodKey = @period
+               AND s.TableRowId IN (SELECT r.Id FROM doc.TableRow AS r
+                                     WHERE r.PeriodKey = @period AND r.TableInstanceId = @instance AND r.RowKey = @rowKey);
             DELETE c
               FROM doc.CellValue AS c
              WHERE c.PeriodKey = @period

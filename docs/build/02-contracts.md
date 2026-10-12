@@ -3079,6 +3079,40 @@ public interface IConditionalFormatStore
     public Task ReplaceAsync(int templateVersionId, IReadOnlyList<ConditionalFormatRule> rules, CancellationToken ct);
 }
 ```
+
+#### `ICellStyleStore`
+
+Користувацьке оформлення комірок документа (`doc.CellStyle`, CELL-STYLE L3b, 12.10): заливка,
+колір тексту, жирність — розріджена таблиця ПОЗА `doc.CellValue` (не дані: версія рядка, значення
+й журнал значень не змінюються). Ключ — `(PeriodKey, TableRowId, ColumnDefId)` без зовнішніх
+ключів (архівація звільняє партиції `doc.TableRow` через `TRUNCATE`); цілісність тримають явні дії
+видалення документа, переносу версії й синхронізації подій. Зріз віддає оформлення лише видимих
+колонок (`TableSliceDto.CellStyles`); Excel-експорт кладе його між стилем колонки й умовним
+форматуванням.
+
+```csharp
+public interface ICellStyleStore
+{
+    public Task<IReadOnlyList<CellStyle>> ReadInstanceAsync(long tableInstanceId, PeriodKey periodKey, CancellationToken ct);
+    public Task<IReadOnlyDictionary<long, IReadOnlyList<CellStyle>>> ReadInstancesAsync(
+        IReadOnlyCollection<long> tableInstanceIds, PeriodKey periodKey, CancellationToken ct);
+    public Task<IReadOnlyList<CellStyle>> LoadForUpdateAsync(
+        PeriodKey periodKey, IReadOnlyCollection<long> rowIds, CancellationToken ct);
+    public void Add(CellStyle style);
+    public void Remove(CellStyle style);
+}
+```
+
+**Правила `PATCH …/cell-styles` (CELL-STYLE L3b).**
+
+- Поле `null`/відсутнє — не чіпати; `""` — зняти; `#rrggbb` — задати. `isBold: false` означає «не задано» (жирність колонки так не зняти), а не «зняти жирність».
+- Колір комірки дозволений у Grace (оформлення, не дані; IsLateEdit лише для значень); закритий період → 403 PeriodClosed.
+- Колір зберігається в ВЕРХНЬОМУ регістрі (`#RRGGBB`); база тримає `CHECK … LIKE '#[0-9A-Fa-f]…'` (collation бази не чутлива до регістру, тому дозволені обидва — нормалізація робиться в домені).
+- Права = ті самі, що «стерти значення» (`CanClearCellsAsync`): грант `Write`, період, архів, стан аркуша, передача зрізу; ознаки колонки «обчислювана»/«лише читання» не заважають, рядок «лише читання» відмовляє.
+- Відповіді: `404 ECR-DOC-0404` (невидимий документ/таблиця), `422 ECR-CELL-4224` (форма; комірки немає в зрізі або колонка схована — однаково `unknownCell`), `403 ECR-ACCS-0403` (права/стан), `409 ECR-DOC-4091` (структуру документа змінено під час запису) і `409 ECR-CELL-0409 concurrentChange` (два паралельні збереження нового оформлення тієї самої комірки: PK_CellStyle; повторити запит).
+- Копіювання/вставка колір НЕ переносить (оформлення — не значення комірки); перенесення на наступний період і Undo — поза цим контрактом.
+- Архівація: `doc.CellStyle` не копіюється в `arc.*` і не обрізається з партиціями (немає ключів на `doc.TableRow`). Слайс/експорт читають лише живі рядки (join на `doc.TableRow`), тож оформлення архівного періоду не віддається. Варіанти: (а) не архівувати стилі (поточне; сироти — P3, чистка maintenance-job у беклогу); (б) `arc.CellStyle` + копія/відновлення в `arc.usp_ArchiveYear`/`RestoreYear` — потребує міграції, окреме рішення.
+
 #### `ITableFillStore`
 
 Заповненість таблиць документа за період (`BE-10`): скільки рядків
@@ -3648,6 +3682,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `ECR-CELL-4221` | 422 | спроба записати в обчислену комірку |
 | `ECR-CELL-4222` | 422 | значення поза межами реєстру або дії дозволу |
 | `ECR-CELL-4223` | 422 | посилання `Lookup`-комірки на запис довідника, якого не існує |
+| `ECR-CELL-4224` | 422 | `PATCH …/tables/{tableInstanceId}/cell-styles`: колір не `#rrggbb`, понад 2000 комірок, дубль або порожня зміна, комірки немає в зрізі; причина — у `messageKey` |
 | `ECR-HDR-0404` | 404 | код у `PATCH …/documents/{id}/header` не відповідає жодному полю шапки версії шаблону документа |
 | `ECR-HDR-0422` | 422 | значення поля шапки документа не відповідає типу чи обов'язковості |
 | `ECR-HDR-4223` | 422 | поле шапки `Lookup` посилається на запис довідника, який не можна обрати: чужий довідник, видалений, вимкнений або нечинний жодного дня звітного вікна проєкту (дозвіл `Permit` із закінченим строком); причина — у `messageKey` (PS-P1D, D-11) |
@@ -3926,6 +3961,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `PATCH` | `/api/v1/documents/{id}/header` | — (через грант Write на проєкт) | 8 |
 | `GET` | `/api/v1/documents/{id}/tables/{tableInstanceId}` | `Document.View` | 1 |
 | `PATCH` | `/api/v1/documents/{id}/cells` | — (через `IAccessDecisionService`) | 1 |
+| `PATCH` | `/api/v1/documents/{id}/tables/{tableInstanceId}/cell-styles` | — (грант `Write` на комірку через `IAccessDecisionService`, як `PATCH …/cells`; документ/період редаговані; 12.10 — користувацька заливка/колір тексту/жирність) | 1 |
 | `POST` | `/api/v1/documents/{id}/rows` | — | 1 |
 | `DELETE` | `/api/v1/documents/{id}/tables/{tableInstanceId}/rows/{rowKey}` | — (через `IAccessDecisionService`, як `POST …/rows`) | 1 |
 | `POST` | `/api/v1/documents/{id}/validate` | `Document.View` | 2 |
@@ -4148,6 +4184,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `POST` | `/api/v1/registries/{code}/external-keys` | `Registry.EditData` | 8 |
 | `DELETE` | `/api/v1/registries/{code}/external-keys/{id}` | `Registry.EditData` | 8 |
 
+> ✎ 2026-10-12 (CELL-STYLE L2): стиль рядка і шапки таблиці шаблону. `PUT …/template-versions/{id}/tables/{tableId}/rows/{code}` приймає `styleId` (стиль цієї версії, інакше `422 err.ECR-TMPL-0422.presentationValueInvalid`, field `StyleId`); на відміну від колонки (повний PUT), `null`/відсутній `styleId` стиль рядка НЕ чіпає. Скинути або задати на опублікованій версії — `PATCH …/presentation` з `RowDef.StyleId` / `TableDef.HeaderStyleId` (`value: null` скидає; презентаційні поля, нової версії не потрібно, у т. ч. з документами). Зріз `GET …/tables/{id}` віддає `TableSliceDto.headerStyle` і `RowDto.style` (`CellStyleDto`); схована таблиця не віддає зрізу (404).
 > ✎ 2026-10-12 (D3-A): `DELETE /documents/{id}/tables/{tableInstanceId}/rows/{rowKey}` — м'яке видалення рядка, доданого користувачем (`RowDefId = null`), 200 `{recalculationJobId}`. Відмови — наявні коди: `404 ECR-ROW-0404` (рядка немає або видалено — одне тіло), `409 ECR-ROW-0409` (`templateRowNotDeletable`, `sourceRowNotDeletable`), `403 ECR-ACCS-0403` (`deleteRowDenied`). «Чужий/відсутній/недоступний екземпляр» — одне тіло `404 err.ECR-DOC-0404.document` (так само тепер і в `POST …/rows`; раніше чужий екземпляр давав `tableInstanceNotInDocument`). Правила: аркуш Draft/Rejected; право на рядок (`CanCreateRowsAsync`) І право «стерти» кожну непорожню комірку (`CanClearCellsAsync`: грант на колонку, правила доступу до періоду; ознаки колонки «обчислювана/лише читання» не заважають). Дозвіл «за підтвердженням»/«з позначкою» поза вікном = відмова (каналу підтвердження немає). ⚠ Рядок лише з ПОРОЖНІМИ комірками перевіряє вікно періоду тільки через право на рядок (`CanEdit` із `ColumnDefId = 0`): прийнято свідомо. Рядок, чиє останнє значення від інтеграції (`Origin = Integration`, гарячий і архівний журнал) або чий зв'язок — `SourceEventLink`, не видаляється; імпорт книги — правка людини й не блокує. `aud.StructureChange` (`doc.TableRow`/`RowDeleted`) містить лише склад комірок, без значень.
 > ✎ 2026-10-12 (D14): `GET /documents/{id}/calculation-run?periodKey=` → `CalculationRunStatusDto { runId, finishedAt, unmatchedRows? }` — рядки документа, яким не підійшло жодне правило розрахунку (інформація, не помилка; до 10 ключів + `count`). **Формат `calc.CalculationRun.ModulesProfileJson` змінено**: корінь — об'єкт `{"modules":[{module,ms,rows,calls}],"unmatched":[{documentId,count,rows:[{tableInstanceId,rowNumber,rowKey}]}]}` (`unmatched` — лише коли такі рядки є) замість масиву модулів. Прогони, записані раніше, лишаються масивами; читач (`ModuleProfile.ReadUnmatched`) підтримує обидві форми, а профіль часу назовні не віддається. Міграції немає (стовпець той самий `nvarchar(max)`).
 > ✎ 2026-10-05: `GET /documents/{id}` — `sheetStates` і `sheets` повертаються лише за вказаного `periodKey`: стан робочого процесу має гранулярність «аркуш × період» (`D-38`); без `periodKey` обидва поля порожні — це свідомо (`DocumentSummary`: «порожньо без періоду»). Клієнт завжди передає `periodKey`.

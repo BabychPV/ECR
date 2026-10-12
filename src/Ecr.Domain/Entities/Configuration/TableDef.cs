@@ -76,6 +76,13 @@ public sealed class TableDef : Entity<int>
     public void Reorder(int ordinal) => Ordinal = ordinal;
 
     /// <summary>
+    /// Задає стиль шапки таблиці (<c>null</c> — стиль за замовчуванням). Презентаційна операція:
+    /// <see cref="HeaderStyleId"/> — у <see cref="Services.ChangeClassifier.PresentationFields"/>.
+    /// Належність стилю версії перевіряє обробник (ключа на <c>cfg.StyleDef</c> немає).
+    /// </summary>
+    public void SetHeaderStyle(int? styleId) => HeaderStyleId = styleId;
+
+    /// <summary>
     /// Змінює розкладку таблиці.
     /// </summary>
     /// <remarks>

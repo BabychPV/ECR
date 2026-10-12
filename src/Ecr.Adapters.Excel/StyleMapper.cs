@@ -143,6 +143,69 @@ public sealed class StyleMapper
         {
             target.Font.Bold = true;
         }
+
+        // CELL-STYLE L6: штрих «неактуальної комірки» (як lightTrellis оригіналу). Заливка, якщо задана,
+        // лишається фоном штриху; штрих малюється сірим.
+        if (format.Pattern == Ecr.Domain.Entities.Configuration.ConditionalFormatRule.PatternHatch)
+        {
+            if (format.BackgroundHex is null)
+            {
+                target.Fill.BackgroundColor = XLColor.White;
+            }
+
+            target.Fill.PatternType = XLFillPatternValues.LightTrellis;
+            target.Fill.PatternColor = XLColor.FromHtml("#808080");
+        }
+    }
+
+    /// <summary>
+    /// Накладає користувацьке оформлення комірки (заливка/колір тексту/жирність, CELL-STYLE L3b)
+    /// поверх стилю колонки і ДО умовного форматування.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Та сама форма й семантика складових, що й у <see cref="ApplyConditional"/>: лише задані; жирність
+    /// лише вмикається (<c>IsBold = false</c> — «не задано», а не «зняти жирність колонки»).
+    /// Некоректний колір відкидається мовчки — експорт не падає через оформлення (у базі діє CHECK на <c>#rrggbb</c>).
+    /// </remarks>
+    public void ApplyUserStyle(IXLStyle? target, Ecr.Application.Templates.CellFormatDto? format)
+    {
+        if (target is null || format is null)
+        {
+            return;
+        }
+
+        if (format.BackgroundHex is { } background && IsHex(background))
+        {
+            target.Fill.BackgroundColor = XLColor.FromHtml(background);
+        }
+
+        if (format.ForegroundHex is { } foreground && IsHex(foreground))
+        {
+            target.Font.FontColor = XLColor.FromHtml(foreground);
+        }
+
+        if (format.IsBold)
+        {
+            target.Font.Bold = true;
+        }
+    }
+
+    private static bool IsHex(string value)
+    {
+        if (value.Length != 7 || value[0] != '#')
+        {
+            return false;
+        }
+
+        for (var i = 1; i < value.Length; i++)
+        {
+            if (!Uri.IsHexDigit(value[i]))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /// <summary>Позначає комірку як таку, що рахується системою.</summary>

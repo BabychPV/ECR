@@ -1,4 +1,4 @@
-using Ecr.Domain.Entities.Configuration;
+﻿using Ecr.Domain.Entities.Configuration;
 using Ecr.Infrastructure.Persistence;
 using Ecr.TestKit;
 using Microsoft.EntityFrameworkCore;
@@ -52,6 +52,68 @@ public sealed class ConditionalFormatStoreTests(SqlServerFixture sql)
         Assert.Equal("5", cloned[1].ValueTo);
     }
 
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-2.7")]
+    public async Task L6_область_рядків_таблиця_колонка_джерело_і_штрих_переживають_запис_читання_і_клон()
+    {
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var doc = await builder.BuildAsync(ct: CancellationToken.None);
+        var scoped = new ConditionalFormatRule(
+            doc.TemplateVersionId, "*", 1, "textEq", "Removed", null, "#ff9900", null, false,
+            "row", "T7", ["R1", "R2"], "Land_Status", "hatch");
+        var plain = new ConditionalFormatRule(doc.TemplateVersionId, "COL", 1, "gt", "10", null, "#ff0000", null, false);
+        await ReplaceAsync(builder, doc.TemplateVersionId, scoped, plain);
+
+        int cloneId;
+        await using (var db = builder.CreateContext())
+        {
+            cloneId = await new TemplateVersionStore(db).CloneAsync(
+                doc.TemplateVersionId, "9.9.9." + Guid.NewGuid().ToString("N")[..6], 1,
+                new DateTime(2026, 10, 12, 9, 0, 0, DateTimeKind.Utc), CancellationToken.None);
+        }
+
+        await using var verify = builder.CreateContext();
+        foreach (var versionId in new[] { doc.TemplateVersionId, cloneId })
+        {
+            var stored = await new ConditionalFormatStore(verify).GetAsync(versionId, CancellationToken.None);
+            var any = Assert.Single(stored, r => r.ColumnCode == "*");
+
+            Assert.Equal(("row", "T7", "Land_Status", "hatch", "textEq", "Removed"),
+                (any.Scope, any.TableCode, any.RefColumnCode, any.Pattern, any.Operator, any.Value));
+            Assert.Equal(["R1", "R2"], any.RowKeys);
+
+            // Колишнє правило після міграції — колонкове: scope=column, без таблиці/рядків.
+            var legacy = Assert.Single(stored, r => r.ColumnCode == "COL");
+            Assert.Equal("column", legacy.Scope);
+            Assert.Null(legacy.RowKeys);
+            Assert.Null(legacy.TableCode);
+        }
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-2.7")]
+    public async Task L6_читання_для_таблиці_фільтрується_в_SQL_правила_без_таблиці_лишаються()
+    {
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var doc = await builder.BuildAsync(ct: CancellationToken.None);
+        var v = doc.TemplateVersionId;
+        await ReplaceAsync(
+            builder, v,
+            new ConditionalFormatRule(v, "A", 1, "gt", "1", null, "#ff0000", null, false),
+            new ConditionalFormatRule(v, "A", 2, "gt", "2", null, "#ff0000", null, false, "column", "T1"),
+            new ConditionalFormatRule(v, "A", 3, "gt", "3", null, "#ff0000", null, false, "column", "T2"));
+
+        await using var db = builder.CreateContext();
+        var store = new ConditionalFormatStore(db);
+
+        var forT1 = await store.GetAsync(v, CancellationToken.None, "T1");
+        var all = await store.GetAsync(v, CancellationToken.None);
+
+        Assert.Equal(["1", "2"], forT1.Select(r => r.Value));
+        Assert.Equal(3, all.Count);
+    }
     private static ConditionalFormatRule Rule(int versionId, int ordinal, string op, string value, string? to = null)
         => new(versionId, "COL", ordinal, op, value, to, "#ff0000", null, false);
 

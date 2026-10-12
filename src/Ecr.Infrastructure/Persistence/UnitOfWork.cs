@@ -365,6 +365,22 @@ public sealed class UnitOfWork(
                 });
         }
 
+        // ⛔ CELL-STYLE L3b (клас A1-05). `PATCH …/cell-styles`: два користувачі (або подвійний клік) фарбують ще
+        // нефарбовану комірку — обидва читають «рядка оформлення немає» й додають його; другого відбиває лише PK_CellStyle
+        // (2627) — голий 500. Це звичайна гонка: 409, повторний запит уже оновить наявний рядок.
+        // ⚠ Код і ключ ЗАГАЛЬНІ (ті самі, що в `DbUpdateConcurrencyException` вище); лише цей ключ, за ім'ям.
+        if (SqlConflict.ViolatesIndex(ex, "PK_CellStyle")
+            && ex.Entries.Any(e => e.State == EntityState.Added && e.Entity is Domain.Entities.Documents.CellStyle))
+        {
+            return new ConcurrencyConflictException(
+                "ECR-CELL-0409",
+                "Оформлення цієї комірки щойно змінив хтось інший: повторіть дію.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CELL-0409.concurrentChange",
+                });
+        }
+
         // ⛔ Два одночасні `POST /reports` з тим самим кодом проходять `ExistsAsync` обидва (check-then-insert,
         // `CreateReportDefHandler`), і другий відбиває лише `UQ_ReportDef` — голий 500 на звичайну гонку.
         // Та сама відмова, що й перевірка обробника (`409 ECR-RPT-4091`, ключ `err.ECR-RPT-4091.code` з `{code}`):

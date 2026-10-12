@@ -623,6 +623,8 @@ public sealed partial class EndpointCoverageTests
         new("features/audit/auditLabels.ts", "key", 1, "features/audit/auditLabels.ts",
             ["audit.eventLabel.AccessDenied",
              "audit.eventLabel.AuditStructureExported",
+             "audit.eventLabel.CellStyleReset",
+             "audit.eventLabel.CellStyleSet",
              "audit.eventLabel.ConsistencyCheckRunRequested",
              "audit.eventLabel.DataSourceConnectionTested",
              "audit.eventLabel.DataSourceDeleted",
@@ -1362,6 +1364,11 @@ public sealed partial class EndpointCoverageTests
         // ⚠ Звільнення тимчасове: прибрати в тому ж коміті, що додає виклик у `features/templates`.
         "PUT /api/v1/template-versions/{p}/tables/{p}/formulas/cell/{p}/{p}",
         "DELETE /api/v1/template-versions/{p}/tables/{p}/formulas/cell/{p}/{p}",
+
+        // 12.10 (CELL-STYLE L3a): користувацька заливка комірок — серверна частина йде першою (контракт),
+        // споживач (CellColorMenu у тулбарі сітки, L4) з'являється окремою хвилею клієнтських ліній.
+        // ⚠ Звільнення тимчасове: прибрати в тому ж коміті, що додає виклик у `features/grid` (L4).
+        "PATCH /api/v1/documents/{p}/tables/{p}/cell-styles",
 
         // ⚠ Тут стояла ще й `POST /api/v1/units/convert` з поясненням
         // «числа конвертуються там, де їх вводять». Пояснення було

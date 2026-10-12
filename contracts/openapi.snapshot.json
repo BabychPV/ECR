@@ -1334,25 +1334,74 @@
         "description": "Результат спрацювання правила умовного форматування (ФВ-2.6/2.7): колір\n`#rrggbb` (або `null` — колір теми) і жирність.",
         "properties": {
           "backgroundHex": {
+            "description": "`#rrggbb` або `null` — колір теми.",
             "type": [
               "null",
               "string"
             ]
           },
           "foregroundHex": {
+            "description": "`#rrggbb` або `null`.",
             "type": [
               "null",
               "string"
             ]
           },
           "isBold": {
+            "description": "Жирний.",
             "type": "boolean"
+          },
+          "pattern": {
+            "description": "Штрих (`hatch` — «неактуальна комірка»); лише від умовного форматування, `null` — немає.\n⚠ Додано в L6 останнім необов'язковим полем: клієнт, що його не знає, малює решту як раніше.",
+            "type": [
+              "null",
+              "string"
+            ]
           }
         },
         "required": [
           "backgroundHex",
           "foregroundHex",
           "isBold"
+        ],
+        "type": "object"
+      },
+      "CellStyleChange": {
+        "description": "Зміна оформлення однієї комірки.",
+        "properties": {
+          "backgroundHex": {
+            "description": "Заливка `#rrggbb`; `null` — не чіпати; `\"\"` — зняти.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "columnCode": {
+            "description": "Код колонки.",
+            "type": "string"
+          },
+          "foregroundHex": {
+            "description": "Колір тексту `#rrggbb`; `null` — не чіпати; `\"\"` — зняти.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "isBold": {
+            "description": "Жирність; `null` — не чіпати.",
+            "type": [
+              "null",
+              "boolean"
+            ]
+          },
+          "rowKey": {
+            "description": "Ключ рядка.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "rowKey",
+          "columnCode"
         ],
         "type": "object"
       },
@@ -2134,11 +2183,49 @@
             "type": "boolean"
           },
           "operator": {
-            "description": "gt, ge, lt, le, eq, ne, between, empty, notEmpty.",
+            "description": "gt, ge, lt, le, eq, ne, between, empty, notEmpty; текстові (L6): textEq, textNe.",
             "type": "string"
           },
+          "pattern": {
+            "description": "`hatch` — штрих («неактуальна комірка»); `null` — без штриху.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "refColumnCode": {
+            "description": "Колонка, чиє значення в тому самому рядку перевіряє умова («статус рядка»); `null` — значення самої комірки.\nДля колонки довідника порівнюється КОД запису (без урахування регістру).",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "rowKeys": {
+            "description": "Ключі рядків (лише для `row`), до 500.",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "scope": {
+            "description": "`column` (за замовчуванням, поле відсутнє) — усі рядки; `row` — лише RowKeys.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "tableCode": {
+            "description": "Код таблиці; `null` — усі таблиці версії. Обов'язковий для `row` і для колонки `*`.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
           "value": {
-            "description": "Операнд (число); не потрібен для empty/notEmpty.",
+            "description": "Операнд: число (для textEq/textNe — текст, регістр ігнорується); не потрібен для empty/notEmpty.",
             "type": [
               "null",
               "string"
@@ -9151,6 +9238,53 @@
         ],
         "type": "object"
       },
+      "PatchCellStylesRequest": {
+        "description": "Користувацьке оформлення комірок (заливка, колір тексту, жирність) —\n`PATCH /api/v1/documents/{documentId}/tables/{tableInstanceId}/cell-styles`.",
+        "properties": {
+          "items": {
+            "description": "Комірки й нове оформлення; одна комірка — один раз.",
+            "items": {
+              "$ref": "#/components/schemas/CellStyleChange"
+            },
+            "type": "array"
+          },
+          "periodKey": {
+            "description": "Період екземпляра таблиці (звіряється з періодом екземпляра).",
+            "format": "int32",
+            "type": "integer"
+          },
+          "reset": {
+            "default": false,
+            "description": "`true` — зняти все оформлення з перелічених комірок.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "periodKey",
+          "items"
+        ],
+        "type": "object"
+      },
+      "PatchCellStylesResponse": {
+        "description": "Відповідь на `PATCH …/cell-styles`.",
+        "properties": {
+          "appliedCells": {
+            "description": "Комірок, оформлення яких змінено (без no-op).",
+            "format": "int32",
+            "type": "integer"
+          },
+          "resetCells": {
+            "description": "Комірок, з яких знято все оформлення (рядок стилю видалено).",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "appliedCells",
+          "resetCells"
+        ],
+        "type": "object"
+      },
       "PatchCellsRequest": {
         "description": "Пакетна зміна комірок. Часткове застосування заборонене: конфлікт у\nбудь-якому рядку відхиляє весь батч (B04 §2.3).",
         "properties": {
@@ -12949,6 +13083,13 @@
           },
           "rowKind": {
             "$ref": "#/components/schemas/RowKind"
+          },
+          "styleId": {
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
           }
         },
         "required": [
@@ -12998,6 +13139,17 @@
           "rowVersion": {
             "description": "Версія для оптимістичного блокування.",
             "type": "string"
+          },
+          "style": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/CellStyleDto",
+                "description": "Стиль рядка шаблону (`RowDef.StyleId` → `StyleDef`); `null` — стилю рядка немає (для\nдинамічного рядка, якого немає в шаблоні, — завжди `null`). Порядок шарів у сітці: стиль колонки, стиль\nрядка, користувацьке оформлення, умовний формат."
+              }
+            ]
           }
         },
         "required": [
@@ -14367,6 +14519,14 @@
           "rowKind": {
             "$ref": "#/components/schemas/RowKind",
             "description": "Роль рядка; незмінна після створення."
+          },
+          "styleId": {
+            "description": "Стиль рядка (`cfg.StyleDef` цієї версії); `null` — без стилю.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
           }
         },
         "required": [
@@ -17165,12 +17325,33 @@
             "description": "Компактна мапа заборон: ключ — `\"{rowKey}:{columnCode}\"`, значення —\nназва EditDenyReason. Комірка, якої тут\nнемає, дозволена.",
             "type": "object"
           },
+          "cellStyles": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/CellFormatDto"
+            },
+            "description": "Користувацьке оформлення комірок (заливка, колір тексту, жирність;\n`PATCH …/tables/{id}/cell-styles`): ключ — той самий\n`\"{rowKey}:{columnCode}\"`; значення — CellFormatDto\n(`BackgroundHex`/`ForegroundHex` у формі `#rrggbb`, `null` — поле не задано).\nЛише комірки з оформленням і лише ВИДИМІ читачеві колонки (нерозкриття: схованої колонки\nтут немає, як і в IReadOnlyList&lt;ColumnDto&gt; TableSliceDto.Columns). Шар у сітці — над стилем колонки, під умовним\nформатуванням (IReadOnlyDictionary&lt;string, CellFormatDto&gt;? TableSliceDto.CellFormats). `null`/порожній — оформлення немає.",
+            "type": [
+              "null",
+              "object"
+            ]
+          },
           "columns": {
             "description": "Опис колонок таблиці.",
             "items": {
               "$ref": "#/components/schemas/ColumnDto"
             },
             "type": "array"
+          },
+          "headerStyle": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/CellStyleDto",
+                "description": "Стиль шапки таблиці, заданий автором шаблону (`TableDef.HeaderStyleId` → `StyleDef`); `null` —\nстиль не задано (або посилання висить). Це дані самої таблиці: таблиця під забороною/схована\nне віддає зрізу взагалі (404), тож стиль шапки окремо розкрити не може."
+              }
+            ]
           },
           "outOfWindowCells": {
             "description": "Комірки, чия остання зміна — правка за політикою `Warn` поза вікном\nдоступу (`ФВ-2.16`, `D-239`); формат — той самий\n`\"{rowKey}:{columnCode}\"`, що й `PatchCellsResponse.OutOfWindow`.\nПорожній — таких немає. Читається з `aud.CellChange.IsOutOfWindow`\nодним запитом на зріз, тож значок на сітці переживає перезавантаження.",
@@ -23902,6 +24083,159 @@
           }
         },
         "summary": "Зріз таблиці для grid.",
+        "tags": [
+          "Cells"
+        ]
+      }
+    },
+    "/api/v1/documents/{documentId}/tables/{tableInstanceId}/cell-styles": {
+      "patch": {
+        "description": "Не дані: значення, версія рядка й перерахунок не зачіпаються. Нерозкриття — як у\n`PATCH …/cells`: чужий/невидимий екземпляр і документ — однакова 404.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "documentId",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "tableInstanceId",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/PatchCellStylesRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PatchCellStylesRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PatchCellStylesRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PatchCellStylesResponse"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PatchCellStylesResponse"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/PatchCellStylesResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Користувацьке оформлення комірок: заливка, колір тексту, жирність.",
         "tags": [
           "Cells"
         ]

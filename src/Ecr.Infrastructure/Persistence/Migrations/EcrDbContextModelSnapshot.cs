@@ -1015,6 +1015,30 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                     b.Property<int>("Ordinal")
                         .HasColumnType("int");
 
+                    b.Property<string>("Pattern")
+                        .HasMaxLength(16)
+                        .IsUnicode(false)
+                        .HasColumnType("varchar(16)");
+
+                    b.Property<string>("RefColumnCode")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("RowKeys")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("Scope")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(8)
+                        .IsUnicode(false)
+                        .HasColumnType("varchar(8)")
+                        .HasDefaultValue("column", "DF_CondFmt_Scope");
+
+                    b.Property<string>("TableCode")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
                     b.Property<int>("TemplateVersionId")
                         .HasColumnType("int");
 
@@ -1028,6 +1052,9 @@ namespace Ecr.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("TemplateVersionId", "TableCode")
+                        .HasDatabaseName("IX_CondFmt_Table");
+
                     b.HasIndex("TemplateVersionId", "ColumnCode", "Ordinal")
                         .IsUnique()
                         .HasDatabaseName("UQ_CondFmt_Order");
@@ -1036,7 +1063,15 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         {
                             t.HasTrigger("TR_ConditionalFormatRule_Immutable");
 
-                            t.HasCheckConstraint("CK_CondFmt_Operator", "Operator IN (N'gt', N'ge', N'lt', N'le', N'eq', N'ne', N'between', N'empty', N'notEmpty')");
+                            t.HasCheckConstraint("CK_CondFmt_AnyColumn", "ColumnCode <> N'*' OR TableCode IS NOT NULL");
+
+                            t.HasCheckConstraint("CK_CondFmt_Operator", "Operator IN (N'gt', N'ge', N'lt', N'le', N'eq', N'ne', N'between', N'empty', N'notEmpty', N'textEq', N'textNe')");
+
+                            t.HasCheckConstraint("CK_CondFmt_Pattern", "Pattern IS NULL OR Pattern = N'hatch'");
+
+                            t.HasCheckConstraint("CK_CondFmt_RowScope", "(Scope = N'row' AND TableCode IS NOT NULL AND RowKeys IS NOT NULL) OR (Scope = N'column' AND RowKeys IS NULL)");
+
+                            t.HasCheckConstraint("CK_CondFmt_Scope", "Scope IN (N'column', N'row')");
                         });
 
                     b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
@@ -2431,6 +2466,48 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                                     .HasPeriodEnd("PeriodEnd")
                                     .HasColumnName("PeriodEnd");
                             }));
+                });
+
+            modelBuilder.Entity("Ecr.Domain.Entities.Documents.CellStyle", b =>
+                {
+                    b.Property<int>("PeriodKeyValue")
+                        .HasColumnType("int")
+                        .HasColumnName("PeriodKey");
+
+                    b.Property<long>("TableRowId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("TableRowId");
+
+                    b.Property<int>("ColumnDefId")
+                        .HasColumnType("int")
+                        .HasColumnName("ColumnDefId");
+
+                    b.Property<string>("BackgroundHex")
+                        .HasColumnType("char(7)");
+
+                    b.Property<string>("ForegroundHex")
+                        .HasColumnType("char(7)");
+
+                    b.Property<bool>("IsBold")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false, "DF_CellStyle_Bold");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<int>("UpdatedByUserId")
+                        .HasColumnType("int");
+
+                    b.HasKey("PeriodKeyValue", "TableRowId", "ColumnDefId")
+                        .HasName("PK_CellStyle");
+
+                    b.ToTable("CellStyle", "doc", t =>
+                        {
+                            t.HasCheckConstraint("CK_CellStyle_Background", "BackgroundHex IS NULL OR BackgroundHex LIKE '#[0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f]'");
+
+                            t.HasCheckConstraint("CK_CellStyle_Foreground", "ForegroundHex IS NULL OR ForegroundHex LIKE '#[0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f]'");
+                        });
                 });
 
             modelBuilder.Entity("Ecr.Domain.Entities.Documents.CellValue", b =>

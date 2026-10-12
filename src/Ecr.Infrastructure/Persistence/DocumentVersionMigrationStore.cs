@@ -795,6 +795,29 @@ public sealed class DocumentVersionMigrationStore(EcrDbContext db) : IDocumentVe
           AND  NOT EXISTS (SELECT 1 FROM @columnMap m WHERE m.n = cv.ColumnDefId);
         """,
 
+        // 1б. CELL-STYLE L3b: користувацьке оформлення комірок (doc.CellStyle) їде за колонкою так само, як
+        // значення; без місця в новій версії — знімається (колір порожньої комірки колонки, якої немає, нікому
+        // не потрібен). Зовнішніх ключів на колонку немає (див. `CellStyle`), тож порядок тут — лише послідовність.
+        """
+        UPDATE TOP (@batch) cs
+        SET    cs.ColumnDefId = m.n
+        FROM   doc.CellStyle cs
+        JOIN   doc.TableRow r      ON r.PeriodKey = cs.PeriodKey AND r.Id = cs.TableRowId
+        JOIN   @instances i    ON i.PeriodKey = r.PeriodKey AND i.Id = r.TableInstanceId
+        JOIN   @columnMap m    ON m.o = cs.ColumnDefId
+        WHERE  cs.PeriodKey IN (SELECT PeriodKey FROM @periods)
+          AND  m.o <> m.n;
+        """,
+
+        """
+        DELETE TOP (@batch) cs
+        FROM   doc.CellStyle cs
+        JOIN   doc.TableRow r      ON r.PeriodKey = cs.PeriodKey AND r.Id = cs.TableRowId
+        JOIN   @instances i    ON i.PeriodKey = r.PeriodKey AND i.Id = r.TableInstanceId
+        WHERE  cs.PeriodKey IN (SELECT PeriodKey FROM @periods)
+          AND  NOT EXISTS (SELECT 1 FROM @columnMap m WHERE m.n = cs.ColumnDefId);
+        """,
+
         // 2. Рядки: описи рядків — за ключем; рядки без місця в новій версії знімаються.
         """
         UPDATE TOP (@batch) r
@@ -825,6 +848,16 @@ public sealed class DocumentVersionMigrationStore(EcrDbContext db) : IDocumentVe
         JOIN   doc.TableRow r      ON r.PeriodKey = cv.PeriodKey AND r.Id = cv.TableRowId
         JOIN   @instances i    ON i.PeriodKey = r.PeriodKey AND i.Id = r.TableInstanceId
         WHERE  cv.PeriodKey IN (SELECT PeriodKey FROM @periods)
+          AND  NOT EXISTS (SELECT 1 FROM @tableMap t WHERE t.o = i.TableDefId);
+        """,
+
+        // CELL-STYLE L3b: оформлення комірок таблиць, яких немає в новій версії, — до видалення їхніх рядків.
+        """
+        DELETE TOP (@batch) cs
+        FROM   doc.CellStyle cs
+        JOIN   doc.TableRow r      ON r.PeriodKey = cs.PeriodKey AND r.Id = cs.TableRowId
+        JOIN   @instances i    ON i.PeriodKey = r.PeriodKey AND i.Id = r.TableInstanceId
+        WHERE  cs.PeriodKey IN (SELECT PeriodKey FROM @periods)
           AND  NOT EXISTS (SELECT 1 FROM @tableMap t WHERE t.o = i.TableDefId);
         """,
 

@@ -25,6 +25,7 @@ import {
   emptyRule,
   firstMatchingRule,
   operandCount,
+  isScopedWire,
   ruleFromWire,
   ruleToWire,
   whyRuleIncomplete,
@@ -80,6 +81,35 @@ interface Seed {
   readonly own: readonly ConditionalRule[];
   readonly others: readonly ConditionalFormatRuleDto[];
   readonly etag: string | null;
+  /**
+   * Вихідний порядок набору: `'own'` — місце правила цієї таблиці, інакше — чуже/з областю правило як було.
+   * Порядок серед правил однієї колонки — їхній пріоритет (Ordinal), тож `PUT` мусить зберегти його.
+   */
+  readonly layout: readonly ('own' | ConditionalFormatRuleDto)[];
+}
+
+/**
+ * Набір для `PUT`: чужі правила й правила з областю — на своїх місцях, власні правила таблиці — у їхніх
+ * слотах за порядком (нові — в кінці). Без цього чужі/scoped правила їхали б ПЕРЕД власними правилами колонки
+ * й тихо змінювали пріоритет (P2-3, CELL-STYLE L6).
+ */
+export function mergeForSave(
+  layout: Seed['layout'],
+  own: readonly ConditionalRule[],
+): ConditionalFormatRuleDto[] {
+  const queue = own.map(ruleToWire);
+  const result: ConditionalFormatRuleDto[] = [];
+
+  for (const slot of layout) {
+    if (slot === 'own') {
+      const next = queue.shift();
+      if (next !== undefined) result.push(next);
+    } else {
+      result.push(slot);
+    }
+  }
+
+  return [...result, ...queue];
 }
 
 /**
@@ -94,17 +124,29 @@ export function seedOf(
 ): Seed {
   const own: ConditionalRule[] = [];
   const others: ConditionalFormatRuleDto[] = [];
+  const layout: ('own' | ConditionalFormatRuleDto)[] = [];
 
   for (const wire of set.rules) {
-    if (versionCodes !== null && !versionCodes.has(wire.columnCode) && !codes.has(wire.columnCode)) continue;
+    // ⛔ L6 (P1-1): правило з областю (`"*"` — «усі колонки таблиці» — не код колонки; таблиця/рядки/джерело) НЕ
+    // «сирота»: фільтр за кодами колонок його б мовчки викинув, а PUT замінює набір цілком. Сиріт області
+    // (видалена таблиця/колонка/рядок) відкидає сервер.
+    const scoped = isScopedWire(wire);
+    if (!scoped && versionCodes !== null && !versionCodes.has(wire.columnCode) && !codes.has(wire.columnCode)) {
+      continue;
+    }
 
     const rule = codes.has(wire.columnCode) ? ruleFromWire(wire) : null;
     // ⚠ Правило з невідомим оператором не губиться: воно їде назад як було.
-    if (rule === null) others.push(wire);
-    else own.push(rule);
+    if (rule === null) {
+      others.push(wire);
+      layout.push(wire);
+    } else {
+      own.push(rule);
+      layout.push('own');
+    }
   }
 
-  return { own, others, etag: set.etag };
+  return { own, others, etag: set.etag, layout };
 }
 
 /** Канонічний вигляд набору таблиці: те, що піде на сервер. */
@@ -197,7 +239,7 @@ export function ConditionalFormatPanel({
     mutationFn: (next: { own: readonly ConditionalRule[]; base: Seed }) =>
       saveConditionalFormats(
         templateVersionId,
-        [...next.base.others, ...next.own.map(ruleToWire)],
+        mergeForSave(next.base.layout, next.own),
         next.base.etag,
       ),
     onSuccess: (saved) => {

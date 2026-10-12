@@ -125,7 +125,7 @@ public sealed class ConditionalFormatsApiTests(SqlServerFixture sql)
     [InlineData("gt", "abc", "#ffcccc", Column, 1, "err.ECR-CFG-0422.condFormatOperand")]
     [InlineData("gt", "100", "red", Column, 1, "err.ECR-CFG-0422.condFormatColor")]
     [InlineData("gt", "100", "#ffcccc", "NOPE", 1, "err.ECR-CFG-0422.condFormatColumn")]
-    [InlineData("gt", "100", "#ffcccc", Column, 501, "err.ECR-CFG-0422.condFormatLimit")]
+    [InlineData("gt", "100", "#ffcccc", Column, Ecr.Application.Templates.SaveConditionalFormatsHandler.MaxRules + 1, "err.ECR-CFG-0422.condFormatLimit")]
     public async Task Невалідне_правило_дає_422_з_точним_ключем(
         string op, string value, string background, string columnCode, int count, string messageKey)
     {

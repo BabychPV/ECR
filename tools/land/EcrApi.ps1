@@ -8,6 +8,7 @@ Set-StrictMode -Version 2.0
 $script:EcrBase = $null
 $script:EcrSession = $null
 $script:EcrClient = $null
+$script:EcrStandConfirmed = $false
 
 function ConvertTo-PlainText {
     param([Parameter(Mandatory)][securestring]$Secure)
@@ -24,6 +25,105 @@ function Get-LoopbackFlag {
     $u = $null
     if (-not [System.Uri]::TryCreate($Url, [System.UriKind]::Absolute, [ref]$u)) { return $false }
     return [bool]$u.IsLoopback
+}
+
+function Test-LocalHostName {
+    <#
+    .SYNOPSIS
+        $true лише для localhost, 127.0.0.1 і ::1. Жодних інших імен чи адрес (у т.ч. *.localhost:
+        довільне ім'я під .localhost залежить від резолвера, тут воно не довіряється).
+    #>
+    param([Parameter(Mandatory)][string]$Candidate)
+    $h = $Candidate.Trim().Trim('[', ']').ToLowerInvariant()
+    # Uri.Host у .NET Framework віддає IPv6 у розгорнутому вигляді (0000:…:0001): порівнюємо як адресу.
+    $ip = $null
+    if ([System.Net.IPAddress]::TryParse($h, [ref]$ip)) {
+        return ($ip.Equals([System.Net.IPAddress]::Loopback) -or $ip.Equals([System.Net.IPAddress]::IPv6Loopback))
+    }
+    return ($h -eq 'localhost' -or $h -eq '127.0.0.1' -or $h -eq '::1')
+}
+
+function Assert-LocalBaseUrl {
+    <#
+    .SYNOPSIS
+        Відмова, якщо адреса API веде не на цю машину. Скрипти tools/land будують стенд приймальної й
+        не мають права торкатися чужого сервера (ні http, ні https).
+    #>
+    param([Parameter(Mandatory)][string]$Url)
+    $u = $null
+    if (-not [System.Uri]::TryCreate($Url, [System.UriKind]::Absolute, [ref]$u) -or -not (Test-LocalHostName $u.Host)) {
+        throw "Адреса API '$Url' не локальна. Скрипти tools/land працюють лише зі стендом на цій машині (localhost, 127.0.0.1, [::1]). Відмова."
+    }
+}
+
+function Assert-LocalSqlConnection {
+    <#
+    .SYNOPSIS
+        Відмова, якщо рядок підключення SQL Server (а) веде не на локальний сервер (localhost, ., (local),
+        127.0.0.1, ::1, ім'я цієї машини, (localdb); екземпляр і порт дозволені) або (б) вказує базу, чиє
+        ім'я не починається з EcrLand (прод-інстанс старої системи на цій же машині не проходить).
+        Розбір — SqlConnectionStringBuilder, тобто за тими самими правилами, що й SqlClient (при дублі
+        ключів перемагає ОСТАННЄ значення); регулярка тут була б вразливою до `Server=localhost;Data Source=prod`.
+        Повертає ім'я бази.
+    #>
+    param([Parameter(Mandatory)][string]$ConnectionString)
+    $sb = $null
+    try { $sb = New-Object System.Data.SqlClient.SqlConnectionStringBuilder($ConnectionString) }
+    catch { throw "Рядок підключення SQL не розібрано: $($_.Exception.Message)" }
+    $ds = [string]$sb.DataSource
+    $db = [string]$sb.InitialCatalog
+    if ([string]::IsNullOrWhiteSpace($ds)) { throw 'У рядку підключення SQL немає Server/Data Source: відмова.' }
+    if (-not [string]::IsNullOrWhiteSpace([string]$sb.AttachDBFilename)) {
+        throw 'У рядку підключення SQL є AttachDBFilename: база задана файлом, а не іменем. Відмова.'
+    }
+    $s = $ds.Trim()
+    $pipe = ($s -match '^(np:)?\\\\\.\\pipe\\')
+    if (-not $pipe) {
+        $s = $s -replace '^(tcp|np|lpc|admin):', ''
+        $s = ($s -split ',')[0]
+        $s = ($s -split '\\')[0]
+        $s = $s.Trim().Trim('[', ']')
+        $local = ($s -eq '.' -or $s -eq '(local)' -or $s -eq '(localdb)' -or (Test-LocalHostName $s) -or
+            (-not [string]::IsNullOrEmpty($env:COMPUTERNAME) -and $s -ieq $env:COMPUTERNAME))
+        if (-not $local) {
+            throw "SQL-сервер '$ds' не локальний. Скрипти tools/land пишуть у базу лише на цій машині (localhost, ., (local), 127.0.0.1, ::1, ім'я машини). Відмова."
+        }
+    }
+    if ([string]::IsNullOrWhiteSpace($db) -or $db -notmatch '^(?i)EcrLand') {
+        throw "База '$db' не належить стенду приймальної: дозволено лише бази з іменем EcrLand* (наприклад EcrLandUi). Відмова."
+    }
+    return $db
+}
+
+function Set-EcrStandConfirmation {
+    <#
+    .SYNOPSIS
+        Вмикає мутуючі виклики лише за явним підтвердженням стенда: значення має збігатися з адресою
+        API (повною, host:port або host). Без нього Invoke-Ecr відмовляє на будь-який не-GET.
+        Якщо передано -Database (скрипт пише ще й в SQL), підтвердження ОБОВ'ЯЗКОВО несе імʼя бази:
+        `<адреса>/<база>` (наприклад localhost:5094/EcrLandUi): URL API базу не називає, і підтвердження
+        лише адреси не відрізнило б стенд від локального прод-інстансу.
+    #>
+    param([string]$Stand, [Parameter(Mandatory)][string]$Url, [string]$Database)
+    Assert-LocalBaseUrl $Url
+    $u = [System.Uri]$Url
+    $forms = @($Url.TrimEnd('/'), $u.Authority, $u.Host)
+    if (-not [string]::IsNullOrWhiteSpace($Database)) { $forms = @($forms | ForEach-Object { "$_/$Database" }) }
+    if ([string]::IsNullOrWhiteSpace($Stand)) {
+        throw "Мутуючі виклики потребують явного -ConfirmStand <імʼя або URL стенду> (наприклад '$($forms[0])'). Без нього скрипт нічого не змінює; -DryRun лише читає."
+    }
+    $wanted = @($forms | ForEach-Object { $_.ToLowerInvariant() })
+    if ($wanted -notcontains $Stand.Trim().TrimEnd('/').ToLowerInvariant()) {
+        throw "-ConfirmStand '$Stand' не збігається зі стендом (очікується '$($forms[1])' або '$($forms[0])'$(if ($Database) { ': імʼя бази обовʼязкове' })). Відмова."
+    }
+    $script:EcrStandConfirmed = $true
+}
+
+function Assert-EcrMutationAllowed {
+    param([string]$What = 'мутуючий виклик')
+    if (-not $script:EcrStandConfirmed) {
+        throw "Відмова: $What без -ConfirmStand. Скрипти tools/land змінюють стенд лише після явного підтвердження його імені/адреси."
+    }
 }
 
 function Enable-LoopbackHttpCookies {
@@ -79,6 +179,9 @@ function Connect-Ecr {
         throw "Адреса $BaseUrl — http не на локальній машині: використовуйте https (http дозволено лише для localhost, 127.0.0.1, ::1)."
     }
 
+    # Лише локальний стенд: і http, і https не на цій машині — відмова (ні логін, ні cookie не йдуть назовні).
+    Assert-LocalBaseUrl $BaseUrl
+
     $script:EcrBase = $BaseUrl.TrimEnd('/')
     $script:EcrSession = New-Object Microsoft.PowerShell.Commands.WebRequestSession
     $script:EcrClient = $null
@@ -103,6 +206,11 @@ function Invoke-Ecr {
         $Body = $null,
         [hashtable]$Headers = @{}
     )
+
+    # Не-GET (крім самого входу) — лише після -ConfirmStand.
+    if ($Method.ToUpperInvariant() -notin @('GET', 'HEAD') -and -not ($Method -ieq 'POST' -and $Path -eq '/api/v1/login/local')) {
+        Assert-EcrMutationAllowed "$Method $Path"
+    }
 
     # HttpClient, а не Invoke-WebRequest: у Windows PowerShell 5.1 (HttpWebRequest) відповідь 422 problem+json
     # від API (publish шаблону) дає «The connection was closed unexpectedly» без коду і тіла, тож

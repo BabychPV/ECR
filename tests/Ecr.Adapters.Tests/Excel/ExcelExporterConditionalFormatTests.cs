@@ -1,8 +1,9 @@
-using ClosedXML.Excel;
+﻿using ClosedXML.Excel;
 using Ecr.Adapters.Excel;
 using Ecr.Application.Ports;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.Configuration;
+using Ecr.Domain.Entities.Dictionaries;
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
 using NSubstitute;
@@ -22,6 +23,10 @@ public sealed class ExcelExporterConditionalFormatTests
     private const long InstanceId = 729;
     private const int TableId = 1;
     private const int ColumnId = 11;
+    private const int StatusColumnId = 12;
+    private const int StatusRegistry = 55;
+    private const long RemovedEntry = 901;
+    private const long RunningEntry = 902;
 
     [Fact]
     public async Task Cells_are_colored_by_rules_and_empty_rule_hits_missing_cell()
@@ -53,7 +58,36 @@ public sealed class ExcelExporterConditionalFormatTests
         Assert.NotEqual("FF0000", Hex(sheet.Cell(3, 1).Style.Fill.BackgroundColor));
     }
 
-    private static async Task<XLWorkbook> ExportAsync(bool includeStyles)
+    [Fact]
+    public async Task Row_status_rule_paints_the_whole_row_by_registry_code_and_hatch_uses_a_pattern()
+    {
+        // L6: «Removed» у колонці-довіднику (Id 901 → код REMOVED) фарбує ВСІ комірки рядка R2; штрих — N/A.
+        using var workbook = await ExportAsync(
+            includeStyles: true,
+            extraRules:
+            [
+                new ConditionalFormatRule(
+                    TemplateVersionId, "*", 1, "textEq", "Removed", null, "#ff9900", null, false,
+                    "column", "T1", null, "ST"),
+                new ConditionalFormatRule(
+                    TemplateVersionId, "ST", 1, "textEq", "REMOVED", null, null, null, false,
+                    "row", "T1", ["R2"], "ST", "hatch"),
+            ]);
+        var sheet = workbook.Worksheet("Sheet");
+
+        // R2 (статус REMOVED): C1 = 5 не ловиться власними правилами → заливка «усі колонки» FF9900.
+        Assert.Equal("FF9900", Hex(sheet.Cell(4, 1).Style.Fill.BackgroundColor));
+        // Власне правило колонки ST (штрих) перемагає «усі колонки».
+        Assert.Equal(XLFillPatternValues.LightTrellis, sheet.Cell(4, 2).Style.Fill.PatternType);
+        // R1 має статус RUNNING: ні заливки статусу, ні штриху.
+        Assert.NotEqual("FF9900", Hex(sheet.Cell(3, 2).Style.Fill.BackgroundColor));
+        Assert.NotEqual(XLFillPatternValues.LightTrellis, sheet.Cell(3, 2).Style.Fill.PatternType);
+        // Штрих лише там, де правило його задало: C1 в R2 — суцільна заливка.
+        Assert.NotEqual(XLFillPatternValues.LightTrellis, sheet.Cell(4, 1).Style.Fill.PatternType);
+    }
+
+    private static async Task<XLWorkbook> ExportAsync(
+        bool includeStyles, IReadOnlyList<ConditionalFormatRule>? extraRules = null)
     {
         var sheet = new SheetDef(TemplateVersionId, EcrCode.Create("S1"), Text("Sheet"), 1);
         SetId(sheet, 1);
@@ -64,11 +98,15 @@ public sealed class ExcelExporterConditionalFormatTests
         var column = new ColumnDef(TableId, EcrCode.Create("C1"), Text("C1"), 1, CellDataType.Decimal);
         SetId(column, ColumnId);
         table.AddColumn(column);
+        var status = new ColumnDef(TableId, EcrCode.Create("ST"), Text("ST"), 2, CellDataType.Lookup);
+        SetId(status, StatusColumnId);
+        status.SetLookup(StatusRegistry);
+        table.AddColumn(status);
         sheet.AddTable(table);
 
         var snapshot = new TemplateVersionSnapshot(
             TemplateVersionId, 1, [sheet],
-            new Dictionary<int, ColumnDef> { [ColumnId] = column },
+            new Dictionary<int, ColumnDef> { [ColumnId] = column, [StatusColumnId] = status },
             new Dictionary<(int, string), RowDef>());
 
         var period = new PeriodKey(PeriodKeyValue);
@@ -77,6 +115,8 @@ public sealed class ExcelExporterConditionalFormatTests
         {
             new(new CellAddress(period, 1001, ColumnId), TableId, new CellValueData { ValueNumeric = 150m }),
             new(new CellAddress(period, 1002, ColumnId), TableId, new CellValueData { ValueNumeric = 5m }),
+            new(new CellAddress(period, 1001, StatusColumnId), TableId, new CellValueData { ValueRegistryEntryId = RunningEntry }),
+            new(new CellAddress(period, 1002, StatusColumnId), TableId, new CellValueData { ValueRegistryEntryId = RemovedEntry }),
         };
 
         var rows = Substitute.For<IRowStore>();
@@ -101,10 +141,19 @@ public sealed class ExcelExporterConditionalFormatTests
             [
                 new ConditionalFormatRule(TemplateVersionId, "C1", 1, "gt", "100", null, "#ff0000", "#ffffff", true),
                 new ConditionalFormatRule(TemplateVersionId, "C1", 2, "empty", null, null, "#cccccc", null, false),
+                .. extraRules ?? [],
             ]));
 
+        var removed = new RegistryEntry(StatusRegistry, EcrCode.Create("REMOVED"), Text("Removed"));
+        SetId(removed, RemovedEntry);
+        var running = new RegistryEntry(StatusRegistry, EcrCode.Create("RUNNING"), Text("Running"));
+        SetId(running, RunningEntry);
+        var registries = Substitute.For<IRegistryStore>();
+        registries.ListEntriesAsync(StatusRegistry, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<RegistryEntry>>([removed, running]));
+
         var exporter = new ExcelExporter(
-            store, rows, metadata, styles, Substitute.For<IRegistryStore>(),
+            store, rows, metadata, styles, registries,
             new StyleMapper(), new FormulaTranslator(), conditionalFormats: formats);
 
         await using var output = await exporter.ExportAsync(
@@ -126,4 +175,7 @@ public sealed class ExcelExporterConditionalFormatTests
     private static void SetId<T>(T entity, int id)
         where T : Entity<int>
         => typeof(Entity<int>).GetProperty("Id")!.SetValue(entity, id);
+
+    private static void SetId(RegistryEntry entity, long id)
+        => typeof(Entity<long>).GetProperty("Id")!.SetValue(entity, id);
 }

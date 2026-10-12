@@ -88,6 +88,7 @@ public static class DependencyInjection
         // бо тримає EcrDbContext, а той теж Scoped.
         services.AddScoped<ArchiveAwareCellReader>();
         services.AddScoped<ICellStore, NormalizedCellStore>();
+        services.AddScoped<ICellStyleStore, CellStyleStore>();
         services.AddScoped<IRowStore, RowStore>();
         services.AddScoped<IDocumentHeaderStore, DocumentHeaderStore>();
         services.AddScoped<ITableFillStore, TableFillStore>();

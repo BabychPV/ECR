@@ -18,6 +18,11 @@ public sealed class ChangeClassifier
         nameof(Entities.Configuration.ColumnDef.StyleId),
         nameof(Entities.Configuration.ColumnDef.WidthPx),
         nameof(Entities.Configuration.RowDef.LabelL10n),
+
+        // CELL-STYLE L2: стиль рядка й шапки таблиці — вигляд, не структура. Імена збігаються з
+        // ColumnDef.StyleId (класифікація йде за самою назвою поля), тож записи документують намір.
+        nameof(Entities.Configuration.RowDef.StyleId),
+        nameof(Entities.Configuration.TableDef.HeaderStyleId),
         nameof(Entities.Configuration.SheetDef.NameL10n),
         nameof(Entities.Configuration.SheetDef.IsVisible),
         nameof(Entities.Configuration.TableDef.NameL10n),

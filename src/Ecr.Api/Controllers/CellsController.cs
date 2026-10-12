@@ -15,6 +15,7 @@ namespace Ecr.Api.Controllers;
 [Authorize]
 public sealed class CellsController(
     PatchCellsHandler patchHandler,
+    PatchCellStylesHandler cellStylesHandler,
     GetTableSliceHandler sliceHandler,
     CreateRowHandler rowHandler,
     DeleteRowHandler deleteRowHandler,
@@ -101,6 +102,39 @@ public sealed class CellsController(
 
         // Кількість записаних комірок — у метрику бюджету (аудит §9).
         Observability.EcrMetrics.ReportCount(HttpContext, response.AppliedCells);
+
+        return response;
+    }
+
+    /// <summary>Користувацьке оформлення комірок: заливка, колір тексту, жирність.</summary>
+    /// <remarks>
+    /// Не дані: значення, версія рядка й перерахунок не зачіпаються. Нерозкриття — як у
+    /// <c>PATCH …/cells</c>: чужий/невидимий екземпляр і документ — однакова 404.
+    /// </remarks>
+    [HttpPatch("tables/{tableInstanceId:long}/cell-styles")]
+    [ProducesResponseType<PatchCellStylesResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<PatchCellStylesResponse>> PatchStyles(
+        long documentId, long tableInstanceId, [FromBody] PatchCellStylesRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        // Форма запиту — до першого звернення до бази (як стеля `PATCH …/cells`).
+        request.EnsureValid();
+
+        // Чужий/невидимий екземпляр і невидимий документ — ОДНА відповідь (EA6-D1).
+        var instance = await Ecr.Application.Documents.DocumentVisibility
+            .ResolveInDocumentAsync(rows, documentId, tableInstanceId, ct)
+            .ConfigureAwait(false);
+
+        var response = await cellStylesHandler
+            .HandleAsync(documentId, instance, request, ct)
+            .ConfigureAwait(false);
+
+        Observability.EcrMetrics.ReportCount(HttpContext, response.AppliedCells + response.ResetCells);
 
         return response;
     }

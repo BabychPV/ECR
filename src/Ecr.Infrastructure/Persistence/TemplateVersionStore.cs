@@ -695,9 +695,9 @@ public sealed partial class TemplateVersionStore(EcrDbContext db) : ITemplateVer
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
-        db.ConditionalFormatRules.AddRange(source.Select(r => new ConditionalFormatRule(
-            cloneId, r.ColumnCode, r.Ordinal, r.Operator, r.Value, r.ValueTo,
-            r.BackgroundHex, r.ForegroundHex, r.IsBold)));
+        // ⚠ CloneTo копіює ВСІ поля правила (область, таблиця, рядки, колонка-джерело, штрих): перелік полів
+        // не дублюється тут, тож нове поле не загубиться при клоні версії.
+        db.ConditionalFormatRules.AddRange(source.Select(r => r.CloneTo(cloneId)));
     }
     /// <summary>
     /// D-13: правила складу документа (<c>cfg.SheetGroupRule</c>) належать версії й посилаються на групи аркушів
@@ -1335,9 +1335,11 @@ public sealed partial class TemplateVersionStore(EcrDbContext db) : ITemplateVer
             [("ColumnDef", "WidthPx")] = Int(columnScope, "WidthPx"),
             [("RowDef", "LabelL10n")] = Text(rowScope, "LabelL10n"),
             [("RowDef", "Ordinal")] = Int(rowScope, "Ordinal"),
+            [("RowDef", "StyleId")] = Int(rowScope, "StyleId"),
             [("SheetDef", "NameL10n")] = Text(sheetScope, "NameL10n"),
             [("SheetDef", "IsVisible")] = Bit(sheetScope, "IsVisible"),
             [("TableDef", "NameL10n")] = Text(tableScope, "NameL10n"),
+            [("TableDef", "HeaderStyleId")] = Int(tableScope, "HeaderStyleId"),
         };
     }
 

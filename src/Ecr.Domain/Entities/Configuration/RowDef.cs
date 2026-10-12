@@ -70,6 +70,14 @@ public sealed class RowDef : Entity<int>
     public void SetReadOnly(bool readOnly) => IsReadOnly = readOnly;
 
     /// <summary>
+    /// Задає стиль рядка (<c>null</c> — стиль колонки без перекриття). Презентаційна операція за зразком
+    /// <see cref="ColumnDef.SetPresentation"/>: <see cref="StyleId"/> — у
+    /// <see cref="Services.ChangeClassifier.PresentationFields"/>, тож не потребує нової версії шаблону.
+    /// Належність стилю версії перевіряє обробник (ключа на <c>cfg.StyleDef</c> немає).
+    /// </summary>
+    public void SetStyle(int? styleId) => StyleId = styleId;
+
+    /// <summary>
     /// Прив'язує рядок до батьківського в ієрархії; <c>null</c> — корінь.
     /// </summary>
     /// <remarks>

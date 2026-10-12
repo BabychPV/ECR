@@ -255,7 +255,7 @@ public sealed class RecalculateDocumentHandler(
             TriggeredByUserId = currentUser.UserId,
             SheetDefId = sheetDefId,
         };
-        var target = TargetOf(documentId, periodKey);
+        var target = ScopedTargetOf(documentId, periodKey, sheetDefId);
         var projectId = await access.DocumentProjectIdAsync(documentId, ct).ConfigureAwait(false);
         var mayPreempt = projectId is { } pid
             ? Security.PermissionCheck.IsGrantedIn(profile, PreemptPermission, pid)
@@ -288,19 +288,43 @@ public sealed class RecalculateDocumentHandler(
     /// документа — це різна робота над різними партиціями, і витісняти одне
     /// одним означало б, що заповнення грудня скасовує перерахунок листопада.
     /// <para>
-    /// ⚠ Q-331: НЕ пара «документ + аркуш» — умисно. Кожен прогін перемикає
-    /// актуальність усього <c>CalculationRun</c> документа за період
-    /// (<c>RunCalculationHandler.CompleteAsync</c>), а не лише свого аркуша;
-    /// два одночасні прогони над тим самим документом і періодом, хай навіть
-    /// різних аркушів, гонялися б за тим самим перемиканням актуальності —
-    /// той самий клас проблеми, що вже описаний нижче для двох повних
-    /// перерахунків (`H-23c`).
+    /// ⚠ Q-331 / AN-91: ця ціль — перерахунок УСЬОГО документа за період. Аркуш входить у ціль лише
+    /// в <see cref="ScopedTargetOf"/>: інакше постановку аркуша B поглинала б
+    /// наявна <c>Queued</c> аркуша A (payload черга не змінює). Одночасність прогонів різних
+    /// областей знімає лок документа в <c>RecalculationJob</c> (як для цілей періоду й року), а не
+    /// збіг цілі.
     /// </para>
     /// </remarks>
     public static string TargetOf(long documentId, PeriodKey periodKey)
         => string.Create(
             System.Globalization.CultureInfo.InvariantCulture,
             $"doc{documentId}-p{periodKey.Value}");
+
+    /// <summary>Ціль перерахунку з областю: увесь документ (<c>null</c>) або один аркуш.</summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="periodKey">Період.</param>
+    /// <param name="sheetDefId">Аркуш області; <c>null</c> — увесь документ.</param>
+    /// <returns>
+    /// Для <c>null</c> — рівно <see cref="TargetOf"/> (її ж ставлять автоперерахунок,
+    /// правка шапки й нічний розклад); для аркуша — окрема ціль «документ × період × аркуш».
+    /// </returns>
+    /// <remarks>
+    /// ⛔ AN-91 (аудит 2026-10-09, N2): ціль без області давала злиття запитів з різною областю.
+    /// Черга поглинає постановку наявною <c>Queued</c> на ту саму ціль, лишаючи її payload як є
+    /// (<c>DbJobQueue.EnqueueSql</c>, <c>QuartzJobScheduler.CoalesceAsync</c>), тож запит аркуша B —
+    /// або автоперерахунок усього документа після збору PI — тихо зливався в чергову задачу аркуша A
+    /// і не виконувався: B лишався застарілим, поки хтось не перерахує ще раз.
+    /// <para>
+    /// ⚠ Ціна: перерахунок усього документа не витісняє виконуваний перерахунок аркуша — іде ПІСЛЯ
+    /// нього (лок документа, відкладення при зайнятому).
+    /// </para>
+    /// </remarks>
+    public static string ScopedTargetOf(long documentId, PeriodKey periodKey, int? sheetDefId)
+        => sheetDefId is { } sheet
+            ? string.Create(
+                System.Globalization.CultureInfo.InvariantCulture,
+                $"{TargetOf(documentId, periodKey)}-s{sheet}")
+            : TargetOf(documentId, periodKey);
 
     /// <summary>Ціль перерахунку документа за ВЕСЬ рік (нічний розклад, P4 ФВ-9.8).</summary>
     /// <param name="documentId">Документ.</param>

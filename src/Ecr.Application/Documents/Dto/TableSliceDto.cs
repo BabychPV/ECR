@@ -37,6 +37,20 @@ namespace Ecr.Application.Documents.Dto;
 /// Порожній — таких немає. Читається з <c>aud.CellChange.IsOutOfWindow</c>
 /// одним запитом на зріз, тож значок на сітці переживає перезавантаження.
 /// </param>
+/// <param name="CellStyles">
+/// Користувацьке оформлення комірок (заливка, колір тексту, жирність;
+/// <c>PATCH …/tables/{id}/cell-styles</c>): ключ — той самий
+/// <c>"{rowKey}:{columnCode}"</c>; значення — <see cref="Ecr.Application.Templates.CellFormatDto"/>
+/// (<c>BackgroundHex</c>/<c>ForegroundHex</c> у формі <c>#rrggbb</c>, <c>null</c> — поле не задано).
+/// Лише комірки з оформленням і лише ВИДИМІ читачеві колонки (нерозкриття: схованої колонки
+/// тут немає, як і в <see cref="Columns"/>). Шар у сітці — над стилем колонки, під умовним
+/// форматуванням (<see cref="CellFormats"/>). <c>null</c>/порожній — оформлення немає.
+/// </param>
+/// <param name="HeaderStyle">
+/// Стиль шапки таблиці, заданий автором шаблону (<c>TableDef.HeaderStyleId</c> → <c>StyleDef</c>); <c>null</c> —
+/// стиль не задано (або посилання висить). Це дані самої таблиці: таблиця під забороною/схована
+/// не віддає зрізу взагалі (404), тож стиль шапки окремо розкрити не може.
+/// </param>
 public sealed record TableSliceDto(
     long TableInstanceId,
     int PeriodKey,
@@ -45,7 +59,9 @@ public sealed record TableSliceDto(
     IReadOnlyDictionary<string, string> CellPermissions,
     IReadOnlyDictionary<string, string> CellConfirmations,
     IReadOnlyDictionary<string, Ecr.Application.Templates.CellFormatDto>? CellFormats = null,
-    IReadOnlyList<string>? OutOfWindowCells = null);
+    IReadOnlyList<string>? OutOfWindowCells = null,
+    IReadOnlyDictionary<string, Ecr.Application.Templates.CellFormatDto>? CellStyles = null,
+    CellStyleDto? HeaderStyle = null);
 
 /// <summary>Опис колонки для клієнта.</summary>
 /// <remarks>
@@ -133,6 +149,11 @@ public sealed record CellStyleDto(
 /// обчислюється при читанні: перерахунок на кожен зріз не вкладається в
 /// бюджет 400 мс. Читання не блокує, <c>Submit</c> блокує.
 /// </param>
+/// <param name="Style">
+/// Стиль рядка шаблону (<c>RowDef.StyleId</c> → <c>StyleDef</c>); <c>null</c> — стилю рядка немає (для
+/// динамічного рядка, якого немає в шаблоні, — завжди <c>null</c>). Порядок шарів у сітці: стиль колонки, стиль
+/// рядка, користувацьке оформлення, умовний формат.
+/// </param>
 public sealed record RowDto(
     string RowKey,
     int Ordinal,
@@ -140,4 +161,5 @@ public sealed record RowDto(
     string? Label,
     string RowVersion,
     IReadOnlyDictionary<string, object?> Cells,
-    bool IsOrphaned = false);
+    bool IsOrphaned = false,
+    CellStyleDto? Style = null);

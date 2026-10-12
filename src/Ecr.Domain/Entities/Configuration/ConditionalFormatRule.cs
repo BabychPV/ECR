@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Text.RegularExpressions;
 using Ecr.Domain.Abstractions;
 
@@ -17,15 +17,46 @@ namespace Ecr.Domain.Entities.Configuration;
 /// оператор, операнд(и) текстом (порівняння числове на клієнті), кольори
 /// <c>#rrggbb</c> і жирність. Порядок застосування — <see cref="Ordinal"/>,
 /// перше спрацьоване правило виграє.
+///
+/// CELL-STYLE L6 (12.10): правило може бути ОБМЕЖЕНЕ таблицею (<see cref="TableCode"/>), рядками
+/// (<see cref="Scope"/> = <c>row</c>, <see cref="RowKeys"/>), читати значення ІНШОЇ колонки того ж рядка
+/// (<see cref="RefColumnCode"/> — «статус рядка», як <c>$B5="Removed"</c> в Excel), порівнювати ТЕКСТ
+/// (<c>textEq</c>/<c>textNe</c>; для довідника — код запису) і малювати штрих (<see cref="Pattern"/>).
+/// <see cref="ColumnCode"/> = <see cref="AnyColumn"/> — усі видимі колонки таблиці (вимагає <see cref="TableCode"/>).
+/// Без цих полів правило — колишнє колонкове: поведінка не змінилась.
 /// </remarks>
 public sealed partial class ConditionalFormatRule : Entity<int>
 {
     /// <summary>Допустимі оператори (ті самі рядки, що в клієнтському <c>ConditionOperator</c>).</summary>
     public static readonly IReadOnlyList<string> Operators =
-        ["gt", "ge", "lt", "le", "eq", "ne", "between", "empty", "notEmpty"];
+        ["gt", "ge", "lt", "le", "eq", "ne", "between", "empty", "notEmpty", "textEq", "textNe"];
 
     /// <summary>Максимальна довжина операнда.</summary>
     public const int MaxOperandLength = 64;
+
+    /// <summary>Область за замовчуванням: усі рядки (колишня поведінка).</summary>
+    public const string ScopeColumn = "column";
+
+    /// <summary>Область «лише перелічені рядки» (<see cref="RowKeys"/>).</summary>
+    public const string ScopeRow = "row";
+
+    /// <summary>Допустимі області.</summary>
+    public static readonly IReadOnlyList<string> Scopes = [ScopeColumn, ScopeRow];
+
+    /// <summary>Код колонки «усі колонки таблиці».</summary>
+    public const string AnyColumn = "*";
+
+    /// <summary>Штрих (діагональна сітка — «неактуальна комірка» оригіналу).</summary>
+    public const string PatternHatch = "hatch";
+
+    /// <summary>Допустимі штрихи.</summary>
+    public static readonly IReadOnlyList<string> Patterns = [PatternHatch];
+
+    /// <summary>Стеля ключів рядків в одному правилі.</summary>
+    public const int MaxRowKeys = 500;
+
+    /// <summary>Довжина ключа рядка / коду таблиці / коду колонки.</summary>
+    public const int MaxCodeLength = 64;
 
     private ConditionalFormatRule() { }
 
@@ -38,9 +69,16 @@ public sealed partial class ConditionalFormatRule : Entity<int>
         string? valueTo,
         string? backgroundHex,
         string? foregroundHex,
-        bool isBold)
+        bool isBold,
+        string scope = ScopeColumn,
+        string? tableCode = null,
+        IReadOnlyList<string>? rowKeys = null,
+        string? refColumnCode = null,
+        string? pattern = null)
     {
-        Validate(ordinal, columnCode, @operator, value, valueTo, backgroundHex, foregroundHex);
+        Validate(
+            ordinal, columnCode, @operator, value, valueTo, backgroundHex, foregroundHex,
+            scope, tableCode, rowKeys, refColumnCode, pattern);
 
         TemplateVersionId = templateVersionId;
         ColumnCode = columnCode;
@@ -51,7 +89,52 @@ public sealed partial class ConditionalFormatRule : Entity<int>
         BackgroundHex = backgroundHex;
         ForegroundHex = foregroundHex;
         IsBold = isBold;
+        Scope = scope;
+        TableCode = tableCode;
+        RowKeys = rowKeys is null ? null : [.. rowKeys];
+        RefColumnCode = refColumnCode;
+        Pattern = pattern;
     }
+
+    /// <summary><c>column</c> (усі рядки) або <c>row</c> (лише <see cref="RowKeys"/>).</summary>
+    public string Scope { get; private set; } = ScopeColumn;
+
+    /// <summary>Код таблиці, до якої прив'язане правило; <c>null</c> — усі таблиці версії (колишнє).</summary>
+    public string? TableCode { get; private set; }
+
+    /// <summary>Ключі рядків — лише для <see cref="ScopeRow"/>.</summary>
+    public IReadOnlyList<string>? RowKeys { get; private set; }
+
+    /// <summary>
+    /// Код колонки, чиє значення в ТОМУ Ж рядку перевіряє умова; <c>null</c> — значення самої комірки.
+    /// </summary>
+    public string? RefColumnCode { get; private set; }
+
+    /// <summary>Штрих (<see cref="PatternHatch"/>) або <c>null</c>.</summary>
+    public string? Pattern { get; private set; }
+
+    private HashSet<string>? _rowKeySet;
+
+    /// <summary>
+    /// Чи ключ рядка в області правила. O(1): множина будується один раз на екземпляр (слайс перебирає
+    /// рядки × колонки; лінійний <c>List.Contains</c> на 500 ключах був би N×M×500).
+    /// </summary>
+    public bool HasRowKey(string rowKey)
+        => RowKeys is not null && (_rowKeySet ??= new HashSet<string>(RowKeys, StringComparer.Ordinal)).Contains(rowKey);
+
+    /// <summary>Чи правило несе що-небудь понад колишню колонкову форму.</summary>
+    public bool IsScoped
+        => Scope != ScopeColumn || TableCode is not null || RowKeys is not null || RefColumnCode is not null
+           || ColumnCode == AnyColumn;
+
+    /// <summary>Копія правила в іншу версію шаблону (клон версії): усі поля, без дрейфу списку полів.</summary>
+    public ConditionalFormatRule CloneTo(int templateVersionId)
+        => new(
+            templateVersionId, ColumnCode, Ordinal, Operator, Value, ValueTo,
+            BackgroundHex, ForegroundHex, IsBold, Scope, TableCode, RowKeys, RefColumnCode, Pattern);
+
+    /// <summary>Чи оператор текстовий (операнд — довільний текст, не число).</summary>
+    public static bool IsTextOperator(string @operator) => @operator is "textEq" or "textNe";
 
     public int TemplateVersionId { get; private set; }
     public string ColumnCode { get; private set; } = null!;
@@ -76,7 +159,8 @@ public sealed partial class ConditionalFormatRule : Entity<int>
 
     private static void Validate(
         int ordinal, string columnCode, string @operator, string? value, string? valueTo,
-        string? backgroundHex, string? foregroundHex)
+        string? backgroundHex, string? foregroundHex,
+        string scope, string? tableCode, IReadOnlyList<string>? rowKeys, string? refColumnCode, string? pattern)
     {
         if (!Operators.Contains(@operator))
         {
@@ -84,7 +168,15 @@ public sealed partial class ConditionalFormatRule : Entity<int>
         }
 
         var needed = OperandCount(@operator);
-        if (needed >= 1 && !IsNumber(value))
+        if (IsTextOperator(@operator))
+        {
+            // Текстовий операнд: непорожній, до 64 символів (регістр при порівнянні ігнорується).
+            if (string.IsNullOrWhiteSpace(value) || value.Length > MaxOperandLength)
+            {
+                Fail("err.ECR-CFG-0422.condFormatTextOperand", ordinal, columnCode, @operator);
+            }
+        }
+        else if (needed >= 1 && !IsNumber(value))
         {
             Fail("err.ECR-CFG-0422.condFormatOperand", ordinal, columnCode, @operator);
         }
@@ -92,6 +184,54 @@ public sealed partial class ConditionalFormatRule : Entity<int>
         if (needed == 2 && !IsNumber(valueTo))
         {
             Fail("err.ECR-CFG-0422.condFormatOperand", ordinal, columnCode, @operator);
+        }
+
+        if (!Scopes.Contains(scope))
+        {
+            Fail("err.ECR-CFG-0422.condFormatScope", ordinal, columnCode, @operator);
+        }
+
+        if (tableCode is not null && (string.IsNullOrWhiteSpace(tableCode) || tableCode.Length > MaxCodeLength))
+        {
+            Fail("err.ECR-CFG-0422.condFormatTable", ordinal, columnCode, @operator);
+        }
+
+        // «Усі колонки» без таблиці фарбувало б усе в усіх таблицях версії — лише з явною таблицею.
+        if (columnCode == AnyColumn && tableCode is null)
+        {
+            Fail("err.ECR-CFG-0422.condFormatTable", ordinal, columnCode, @operator);
+        }
+
+        if (scope == ScopeRow)
+        {
+            // Ключ рядка осмислений лише в межах таблиці.
+            if (tableCode is null)
+            {
+                Fail("err.ECR-CFG-0422.condFormatTable", ordinal, columnCode, @operator);
+            }
+
+            if (rowKeys is null || rowKeys.Count == 0 || rowKeys.Count > MaxRowKeys
+                || rowKeys.Any(k => string.IsNullOrWhiteSpace(k) || k.Length > MaxCodeLength)
+                || rowKeys.Distinct(StringComparer.Ordinal).Count() != rowKeys.Count)
+            {
+                Fail("err.ECR-CFG-0422.condFormatRowKeys", ordinal, columnCode, @operator);
+            }
+        }
+        else if (rowKeys is not null)
+        {
+            Fail("err.ECR-CFG-0422.condFormatRowKeys", ordinal, columnCode, @operator);
+        }
+
+        if (refColumnCode is not null
+            && (string.IsNullOrWhiteSpace(refColumnCode) || refColumnCode.Length > MaxCodeLength
+                || refColumnCode == AnyColumn))
+        {
+            Fail("err.ECR-CFG-0422.condFormatRef", ordinal, columnCode, @operator);
+        }
+
+        if (pattern is not null && !Patterns.Contains(pattern))
+        {
+            Fail("err.ECR-CFG-0422.condFormatPattern", ordinal, columnCode, @operator);
         }
 
         foreach (var hex in new[] { backgroundHex, foregroundHex })

@@ -34,7 +34,11 @@ public sealed class ExcelExporter(
     // ФВ-0.2: граф залежностей версії (`cfg.FormulaDependency`) — за ним діапазони формул у книзі
     // розкриваються так, як їх розкрила публікація й рахує розрахунок. Необов'язковий лише заради
     // тестів, що конструюють експортер вручну; без нього діапазон — за макетом книги.
-    ITemplateVersionStore? templateVersions = null) : IExcelExporter
+    ITemplateVersionStore? templateVersions = null,
+
+    // CELL-STYLE L3b: користувацька заливка/колір тексту/жирність комірок. Необов'язковий лише заради
+    // тестів, що конструюють експортер вручну; у контейнері розв'язується завжди.
+    ICellStyleStore? cellStyles = null) : IExcelExporter
 {
     /// <summary>Рядок, з якого починається перший блок аркуша.</summary>
     private const int FirstRow = 1;
@@ -152,6 +156,12 @@ public sealed class ExcelExporter(
             .ReadSlicesAsync(instanceIds, periodKey, ct)
             .ConfigureAwait(false);
 
+        // CELL-STYLE L3b: користувацьке оформлення — це стиль, тож лише зі стилями; ОДИН пакетний запит на документ.
+        // Лягає між стилем колонки й умовним форматуванням (як шар у сітці); зворотний імпорт його ігнорує.
+        var userStyles = options.IncludeStyles && cellStyles is not null
+            ? await cellStyles.ReadInstancesAsync(instanceIds, periodKey, ct).ConfigureAwait(false)
+            : new Dictionary<long, IReadOnlyList<Ecr.Domain.Entities.Documents.CellStyle>>();
+
         // ⛔ F-02 (четвертий раунд UX): колонка `Calculated` — числом
         // методології, тим самим розв'язанням посилання, що й сітка
         // (`CalculatedCellOverlay`). Доти книга віддавала її порожньою.
@@ -205,7 +215,8 @@ public sealed class ExcelExporter(
                     versionsBatch.GetValueOrDefault(instance.TableInstanceId, NoVersions),
                     slicesBatch.GetValueOrDefault(instance.TableInstanceId, NoCells),
                     formatRules,
-                    contentLength);
+                    contentLength,
+                    userStyles.GetValueOrDefault(instance.TableInstanceId));
 
                 blocks.Add(block);
                 headerRows.Add(block.HeaderRow);
@@ -458,7 +469,8 @@ public sealed class ExcelExporter(
         IReadOnlyDictionary<string, string> rowVersions,
         IReadOnlyList<CellRecord> cells,
         IReadOnlyDictionary<string, IReadOnlyList<ConditionalFormatRule>> formatRules,
-        List<int> contentLength)
+        List<int> contentLength,
+        IReadOnlyList<Ecr.Domain.Entities.Documents.CellStyle>? userStyles = null)
     {
         // ⛔ S6: колонка під забороною — як прихована: ні заголовка, ні значень.
         // Формула, що посилається на неї, не транслюється (`#REF!` →
@@ -554,7 +566,12 @@ public sealed class ExcelExporter(
             Widen(contentLength, labelColumn, text.Length);
         }
 
-        ApplyConditionalFormats(worksheet, cells, rowIds, columns, columnNumbers, rowNumbers, formatRules);
+        // CELL-STYLE L3b: користувацьке оформлення — ПІСЛЯ стилю колонки й ДО умовного форматування
+        // (порядок шарів сітки: колонка < користувач < умовний формат).
+        ApplyUserStyles(worksheet, userStyles, rowIds, columnNumbers, rowNumbers);
+
+        ApplyConditionalFormats(
+            worksheet, cells, rowIds, columns, columnNumbers, rowNumbers, formatRules, table.Code, lookups);
 
         return new ExcelTableBlock(
             instance.TableInstanceId, table.Id, table.Code, sheetName, headerRow, columnRefs, rowRefs);
@@ -706,6 +723,49 @@ public sealed class ExcelExporter(
     }
 
     /// <summary>
+    /// Користувацьке оформлення комірок (заливка, колір тексту, жирність) поверх стилю колонки.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Лише комірки, чиї рядок і колонка є в книзі: схована/заборонена колонка (S6) і невидимий рядок
+    /// у <paramref name="columnNumbers"/>/<paramref name="rowNumbers"/> не потрапляють — оформлення таких
+    /// комірок мовчки пропускається, як і їх значення.
+    /// </remarks>
+    private void ApplyUserStyles(
+        IXLWorksheet worksheet,
+        IReadOnlyList<Ecr.Domain.Entities.Documents.CellStyle>? userStyles,
+        IReadOnlyDictionary<string, long> rowIds,
+        Dictionary<int, int> columnNumbers,
+        Dictionary<string, int> rowNumbers)
+    {
+        if (userStyles is null || userStyles.Count == 0 || rowNumbers.Count == 0)
+        {
+            return;
+        }
+
+        var numberByRowId = new Dictionary<long, int>(rowNumbers.Count);
+        foreach (var (rowKey, number) in rowNumbers)
+        {
+            if (rowIds.TryGetValue(rowKey, out var id))
+            {
+                numberByRowId[id] = number;
+            }
+        }
+
+        foreach (var style in userStyles)
+        {
+            if (!numberByRowId.TryGetValue(style.TableRowId, out var row)
+                || !columnNumbers.TryGetValue(style.ColumnDefId, out var column))
+            {
+                continue;
+            }
+
+            styleMapper.ApplyUserStyle(
+                worksheet.Cell(row, column).Style,
+                new Ecr.Application.Templates.CellFormatDto(style.BackgroundHex, style.ForegroundHex, style.IsBold));
+        }
+    }
+
+    /// <summary>
     /// Умовне форматування поверх стилю колонки (ФВ-2.6/2.7): лише колонки,
     /// що мають правила; порожня комірка оцінюється як <c>null</c>, як у сітці.
     /// </summary>
@@ -716,7 +776,9 @@ public sealed class ExcelExporter(
         List<ColumnDef> columns,
         Dictionary<int, int> columnNumbers,
         Dictionary<string, int> rowNumbers,
-        IReadOnlyDictionary<string, IReadOnlyList<ConditionalFormatRule>> formatRules)
+        IReadOnlyDictionary<string, IReadOnlyList<ConditionalFormatRule>> formatRules,
+        string tableCode,
+        IReadOnlyDictionary<int, IReadOnlyDictionary<long, string>> lookups)
     {
         if (formatRules.Count == 0 || rowNumbers.Count == 0)
         {
@@ -730,18 +792,51 @@ public sealed class ExcelExporter(
                 Ecr.Expressions.Evaluation.CellValueMapping.ToRuleValue(cell.Value);
         }
 
+        // ⛔ Нерозкриття: колонка-джерело правила («статус рядка») береться ЛИШЕ з колонок, що потрапили в книгу
+        // (`columns` — без прихованих і заборонених доступом); невидима → правило не застосовується.
+        var byCode = columns
+            .GroupBy(c => c.Code, StringComparer.Ordinal)
+            .ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
+
         foreach (var column in columns)
         {
-            if (!formatRules.TryGetValue(column.Code, out var rules))
+            var rules = Ecr.Application.Templates.ConditionalFormatEvaluator.RulesFor(formatRules, column.Code);
+            if (rules.Count == 0)
             {
                 continue;
             }
 
             foreach (var (rowKey, number) in rowNumbers)
             {
-                values.TryGetValue((rowIds[rowKey], column.Id), out var value);
+                var rowId = rowIds[rowKey];
+                values.TryGetValue((rowId, column.Id), out var value);
 
-                if (Ecr.Application.Templates.ConditionalFormatEvaluator.Evaluate(rules, value) is { } format)
+                var context = new Ecr.Application.Templates.RuleCellContext(
+                    tableCode,
+                    rowKey,
+                    (string code, out object? found) =>
+                    {
+                        found = null;
+                        if (!byCode.TryGetValue(code, out var source))
+                        {
+                            return false;
+                        }
+
+                        values.TryGetValue((rowId, source.Id), out found);
+
+                        // Довідник — КОД запису (як у книзі), а не Id.
+                        if (found is long entryId
+                            && source.LookupRegistryDefId is { } registryId
+                            && lookups.TryGetValue(registryId, out var entries)
+                            && entries.TryGetValue(entryId, out var entryCode))
+                        {
+                            found = entryCode;
+                        }
+
+                        return true;
+                    });
+
+                if (Ecr.Application.Templates.ConditionalFormatEvaluator.Evaluate(rules, value, context) is { } format)
                 {
                     styleMapper.ApplyConditional(
                         worksheet.Cell(number, columnNumbers[column.Id]).Style, format);

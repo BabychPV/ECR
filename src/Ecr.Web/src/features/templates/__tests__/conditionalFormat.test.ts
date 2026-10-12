@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   emptyRule,
   firstMatchingRule,
+  isScopedWire,
   ruleFromWire,
   ruleMatches,
   ruleToWire,
@@ -144,6 +145,29 @@ describe('ruleFromWire / ruleToWire', () => {
 
   it('невідомий оператор не вгадується', () => {
     expect(ruleFromWire({ columnCode: 'Q', operator: 'contains', isBold: false })).toBeNull();
+  });
+
+  it('правило з областю (L6) не читається як колонкове: інакше збереження зняло б область', () => {
+    const base = { columnCode: 'Q', operator: 'ne', value: '0', isBold: false };
+
+    // Контроль: без полів області — звичайне правило.
+    expect(ruleFromWire(base)).not.toBeNull();
+
+    for (const scoped of [
+      { ...base, scope: 'row', tableCode: 'T7', rowKeys: ['R1'] },
+      { ...base, tableCode: 'T7' },
+      { ...base, refColumnCode: 'Land_Status' },
+      { ...base, pattern: 'hatch' },
+      { ...base, columnCode: '*', tableCode: 'T7' },
+    ]) {
+      expect(isScopedWire(scoped)).toBe(true);
+      expect(ruleFromWire(scoped)).toBeNull();
+    }
+
+    // Явні null/«column» від сервера — не область.
+    expect(
+      ruleFromWire({ ...base, scope: 'column', tableCode: null, rowKeys: null, refColumnCode: null, pattern: null }),
+    ).not.toBeNull();
   });
 
   it('операнд, якого оператор не бере, не шлеться', () => {
