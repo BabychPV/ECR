@@ -45,6 +45,12 @@ namespace Ecr.Application.Documents.VersionMigration;
 /// переносу «успішно» збирав би точки й нічого не писав, тому перенос відмовляє (<c>mappingsNotMapped</c>), доки
 /// мапінг не призупинено. Призупинені без відповідника не рахуються: вони нічого не пишуть.
 /// </param>
+/// <param name="OtherProjectsOnSourceVersion">
+/// D-1b P3: скільки ІНШИХ проєктів лишається на вихідній версії шаблону. Мапінги збору, подій і вікон глобальні
+/// (одна ціль): після цього переносу вони вказують на нову версію, і ті проєкти не збираються, доки їх не перенесено.
+/// ⛔ Лише кількість, без переліку проєктів.
+/// </param>
+/// <param name="OtherDocumentsOnSourceVersion">D-1b P3: скільки документів у цих проєктах.</param>
 /// <param name="MappingsUnmappedKeys">
 /// До 10 (<c>MaxMappingKeysListed</c>) ключів: <c>SHEET.TABLE.COLUMN</c> колонки вихідної версії для мапінгу збору,
 /// <c>events SHEET.TABLE</c> для мапінгу подій і <c>window SHEET.TABLE.COLUMN</c> для прив'язки вікна (D-1b).
@@ -72,7 +78,9 @@ public sealed record DocumentVersionMigrationDto(
     int? BlockedGrantCount = null,
     int MappingsRemapped = 0,
     int MappingsUnmapped = 0,
-    IReadOnlyList<string>? MappingsUnmappedKeys = null);
+    IReadOnlyList<string>? MappingsUnmappedKeys = null,
+    int OtherProjectsOnSourceVersion = 0,
+    int OtherDocumentsOnSourceVersion = 0);
 
 /// <summary>Куди можна перенести документ: поточна версія й опубліковані версії того самого шаблону.</summary>
 /// <param name="ProjectId">Проєкт документа — переноситься весь.</param>
@@ -709,6 +717,11 @@ public sealed class MigrateDocumentVersionHandler(
             refusals.Add("methodologyKeysNotMapped");
         }
 
+        // D-1b P3: мапінги глобальні, тож інші проєкти на вихідній версії після переносу не збиратимуться — звіт
+        // каже скільки (лише кількість; перенос не блокується: інакше перший перенос у багатопроєктному шаблоні
+        // неможливий).
+        var others = await store.CountOtherProjectsOnVersionAsync(projectId, sourceVersionId, ct).ConfigureAwait(false);
+
         // Спершу те, що зачіпає введені дані, потім решта структури, потім вигляд.
         var ordered = plan.Items
             .OrderByDescending(i => i.Values > 0)
@@ -730,7 +743,9 @@ public sealed class MigrateDocumentVersionHandler(
                 : [.. unmappedKeys
                     .Distinct(StringComparer.Ordinal)
                     .Order(StringComparer.Ordinal)
-                    .Take(MaxMappingKeysListed)]);
+                    .Take(MaxMappingKeysListed)],
+            others.Projects,
+            others.Documents);
 
         return (dto, plan, foreignKeys, extendedPlan.Remap);
     }

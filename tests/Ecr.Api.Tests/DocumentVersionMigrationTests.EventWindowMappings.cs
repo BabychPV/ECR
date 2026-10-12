@@ -166,6 +166,31 @@ public sealed partial class DocumentVersionMigrationTests
         Assert.Equal(s.TargetColumns["C2"], movedColumn);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "D-1b")]
+    public async Task Звіт_каже_скільки_інших_проєктів_і_документів_лишаються_на_вихідній_версії()
+    {
+        var s = await ArrangeAsync(Target.OnlyLabels).ConfigureAwait(true);
+        var other = await new TestDocumentBuilder(sql.ConnectionString).BuildAsync(202601, columnCount: 1, rowCount: 1).ConfigureAwait(true);
+        await using (var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext())
+        {
+            var sourceVersion = s.Doc.TemplateVersionId;
+            await db.Database
+                .ExecuteSqlAsync($"UPDATE doc.Project SET TemplateVersionId = {sourceVersion} WHERE Id = {other.ProjectId}")
+                .ConfigureAwait(true);
+        }
+
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
+
+        var dry = await ReadJsonAsync(await PostAsync(client, s, "Safe", dryRun: true).ConfigureAwait(true)).ConfigureAwait(true);
+        Assert.True(dry.GetProperty("canApply").GetBoolean(), dry.ToString());
+        Assert.Equal(1, dry.GetProperty("otherProjectsOnSourceVersion").GetInt32());
+        Assert.Equal(1, dry.GetProperty("otherDocumentsOnSourceVersion").GetInt32());
+    }
+
     private async Task<int> UnitIdAsync()
     {
         await using var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext();

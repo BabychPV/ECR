@@ -387,6 +387,29 @@ public sealed class DocumentVersionMigrationStore(EcrDbContext db) : IDocumentVe
     }
 
     /// <inheritdoc />
+    public async Task<ProjectsOnVersion> CountOtherProjectsOnVersionAsync(
+        int projectId, int versionId, CancellationToken ct)
+    {
+        var projects = await db.Projects.AsNoTracking()
+            .CountAsync(p => p.TemplateVersionId == versionId && p.Id != projectId, ct)
+            .ConfigureAwait(false);
+        if (projects == 0)
+        {
+            return new ProjectsOnVersion(0, 0);
+        }
+
+        var documents = await (
+                from d in db.Documents.AsNoTracking()
+                join p in db.Projects.AsNoTracking() on d.ProjectId equals p.Id
+                where p.TemplateVersionId == versionId && p.Id != projectId
+                select d.Id)
+            .CountAsync(ct)
+            .ConfigureAwait(false);
+
+        return new ProjectsOnVersion(projects, documents);
+    }
+
+    /// <inheritdoc />
     public async Task<IReadOnlyList<EventMapRef>> ListEventMapsAsync(
         IReadOnlyCollection<long> documentIds, CancellationToken ct)
     {
