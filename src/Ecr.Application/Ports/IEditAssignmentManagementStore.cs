@@ -75,7 +75,12 @@ public sealed record EditAssignmentDocumentRef(
 /// <param name="DisplayName">Відображуване ім'я.</param>
 /// <param name="Email">Адреса для листа; може бракувати.</param>
 /// <param name="IsActive">Не вимкнений.</param>
-public sealed record EditAssignmentUserRef(int Id, string DisplayName, string? Email, bool IsActive);
+/// <param name="IsWindowsAccount">
+/// Доменний (AD) обліковий запис: його групи з токена сесії невідомі, тож «не бачить документ» за профілем без
+/// груп для нього — лише «невідомо» (P-02).
+/// </param>
+public sealed record EditAssignmentUserRef(
+    int Id, string DisplayName, string? Email, bool IsActive, bool IsWindowsAccount = false);
 
 /// <summary>Рядок «Моїх задач»: передача з позиції користувача.</summary>
 /// <param name="AssignmentId">Передача.</param>

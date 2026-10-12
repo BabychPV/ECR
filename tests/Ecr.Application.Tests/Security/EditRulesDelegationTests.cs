@@ -42,6 +42,35 @@ public sealed class EditRulesDelegationTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "RC20-D3")]
+    public void Виконавець_поза_своєю_передачею_бачить_NotAssignedToYou_а_не_InsufficientGrantLevel()
+    {
+        var executor = AccessBuilder.Cell() with { IsAssignmentExecutor = true };
+
+        var outside = EditRules.CanEdit(Reader(), executor);
+        var plainReader = EditRules.CanEdit(Reader(), AccessBuilder.Cell());
+        var inside = EditRules.CanEdit(Reader(), Delegated(executor));
+
+        Assert.Equal(EditDenyReason.NotAssignedToYou, outside.Reason);
+        Assert.Equal(EditDenyReason.InsufficientGrantLevel, plainReader.Reason);
+        Assert.True(inside.IsAllowed);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "RC20-D3")]
+    public void Ознака_виконавця_не_міняє_NoGrant_і_не_відкриває_запис()
+    {
+        var executor = AccessBuilder.Cell() with { IsAssignmentExecutor = true };
+
+        var none = EditRules.CanEdit(new AccessBuilder().Build(), executor);
+
+        Assert.False(none.IsAllowed);
+        Assert.Equal(EditDenyReason.NoGrant, none.Reason);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait("Requirement", "EA-B")]
     public void Без_гранта_взагалі_передача_нічого_не_піднімає()
     {

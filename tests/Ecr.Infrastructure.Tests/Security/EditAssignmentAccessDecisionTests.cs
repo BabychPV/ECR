@@ -157,8 +157,9 @@ public sealed class EditAssignmentAccessDecisionTests(SqlServerFixture sql) : ID
         Assert.True(decisions[w.Cell(w.OwnMonthColumn)].IsAllowed);
         Assert.True(decisions[w.Cell(w.OwnMonthColumn)].ViaAssignment);
         Assert.True(decisions[w.Cell(w.OwnMonthColumn)].AssignmentsPresent);
-        Assert.Equal(EditDenyReason.InsufficientGrantLevel, decisions[w.Cell(w.OtherMonthColumn)].Reason);
-        Assert.Equal(EditDenyReason.InsufficientGrantLevel, decisions[w.Cell(w.PlainColumn)].Reason);
+        // RC20 D-3: виконавець поза своєю передачею бачить «не передано вам», а не «підвищте рівень гранта».
+        Assert.Equal(EditDenyReason.NotAssignedToYou, decisions[w.Cell(w.OtherMonthColumn)].Reason);
+        Assert.Equal(EditDenyReason.NotAssignedToYou, decisions[w.Cell(w.PlainColumn)].Reason);
     }
 
     [Fact]
@@ -277,7 +278,7 @@ public sealed class EditAssignmentAccessDecisionTests(SqlServerFixture sql) : ID
         var single = await service.CanEditCellAsync(profile, w.Doc.DocumentId, own, CancellationToken.None);
         var singleOther = await service.CanEditCellAsync(profile, w.Doc.DocumentId, other, CancellationToken.None);
         Assert.True(single.IsAllowed);
-        Assert.Equal(EditDenyReason.InsufficientGrantLevel, singleOther.Reason);
+        Assert.Equal(EditDenyReason.NotAssignedToYou, singleOther.Reason);
 
         // Чужий документ чи неіснуючий рядок — відмова без розрізнення.
         var wrongDocument = await service.CanEditCellAsync(profile, w.Doc.DocumentId + 1_000_000, own, CancellationToken.None);

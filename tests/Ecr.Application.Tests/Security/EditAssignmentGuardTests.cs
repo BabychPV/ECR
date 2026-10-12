@@ -67,6 +67,27 @@ public sealed class EditAssignmentGuardTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "RC20-D3")]
+    public void Виконавцем_вважається_за_будь_якою_діючою_передачею_навіть_не_збіглою_з_коміркою()
+    {
+        // Передано січень; комірка — лютий: підйому й заборони немає, але користувач — виконавець.
+        var executorElsewhere = new[] { Fact(month: 1, mine: AssigneeProgress.Assigned) };
+        var onlyOthers = new[] { Fact(month: 1, exclusive: false, mine: null) };
+        var inactive = new[] { Fact(month: 1, mine: AssigneeProgress.Assigned, delegatorActive: false) };
+
+        var february = Eval(Executor, executorElsewhere, Cell(month: 2));
+        Assert.True(february.IsExecutor);
+        Assert.False(february.DelegatedWrite);
+        Assert.Equal(EditDenyReason.None, february.Lock);
+
+        Assert.False(Eval(Executor, executorElsewhere, Cell(month: 1, isMonth: false, row: true)).IsExecutor);
+        Assert.False(Eval(Other, onlyOthers, Cell(month: 2)).IsExecutor);
+        Assert.False(Eval(Executor, inactive, Cell(month: 2)).IsExecutor);
+        Assert.False(Eval(Owner, executorElsewhere, Cell(month: 2)).IsExecutor);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait("Requirement", "EA-B")]
     public void Returned_знову_піднімає_а_Filled_і_Validated_замикають()
     {

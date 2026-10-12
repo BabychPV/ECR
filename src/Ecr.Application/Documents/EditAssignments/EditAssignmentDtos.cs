@@ -20,6 +20,11 @@ public sealed record EditAssignmentSliceDto(string? SheetCode, string? TableCode
 /// <param name="ReturnReason">Причина повернення.</param>
 /// <param name="ReturnCount">Скільки разів повертали.</param>
 /// <param name="IsActive">Обліковий запис не вимкнений.</param>
+/// <param name="Visibility">
+/// Чи бачить виконавець документ (і аркуш передачі) за ПРЯМИМИ призначеннями ролей:
+/// <c>Visible</c> | <c>NotVisible</c> | <c>Unknown</c> (групи AD чужої людини невідомі; у відповідях, що не є
+/// переліком передач, не обчислюється). RC20 D-2.
+/// </param>
 public sealed record EditAssignmentRecipientDto(
     int UserId,
     string DisplayName,
@@ -28,7 +33,8 @@ public sealed record EditAssignmentRecipientDto(
     DateTime? ReturnedAt,
     string? ReturnReason,
     int ReturnCount,
-    bool IsActive);
+    bool IsActive,
+    string Visibility = "Unknown");
 
 /// <summary>Передача зрізу з виконавцями.</summary>
 /// <param name="Id">Ідентифікатор.</param>

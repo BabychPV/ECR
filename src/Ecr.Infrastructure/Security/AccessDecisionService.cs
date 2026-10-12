@@ -1083,7 +1083,7 @@ public sealed class AccessDecisionService(
                         ColumnIsMonth: false, ColumnMonthNumber: null, IsRowLevel: true),
                     delegation.UtcNow);
 
-                rowContext = rowContext with { AssignmentLock = facts.Lock };
+                rowContext = rowContext with { AssignmentLock = facts.Lock, IsAssignmentExecutor = facts.IsExecutor };
             }
 
             var columns = new Dictionary<int, EditDecision>(slice.Columns.Count);
@@ -1160,7 +1160,12 @@ public sealed class AccessDecisionService(
                     column.IsMonthColumn, column.MonthNumber),
                 delegation.UtcNow);
 
-            context = context with { DelegatedWrite = facts.DelegatedWrite, AssignmentLock = facts.Lock };
+            context = context with
+            {
+                DelegatedWrite = facts.DelegatedWrite,
+                AssignmentLock = facts.Lock,
+                IsAssignmentExecutor = facts.IsExecutor,
+            };
         }
 
         var decision = EditRules.CanEdit(profile, context);

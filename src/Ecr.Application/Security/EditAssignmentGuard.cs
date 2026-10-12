@@ -64,7 +64,11 @@ public readonly record struct EditSliceFacts(
 /// <see cref="EditDenyReason.AssignmentFilled"/>, <see cref="EditDenyReason.AssignmentValidated"/>,
 /// <see cref="EditDenyReason.AssignmentExpired"/>.
 /// </param>
-public readonly record struct EditAccessFacts(bool DelegatedWrite, EditDenyReason Lock)
+/// <param name="IsExecutor">
+/// Користувач — виконавець хоча б однієї діючої (делегатор активний) передачі серед наданих фактів, навіть
+/// якщо вона не стосується цієї комірки (RC20 D-3: причина відмови «не передано вам»).
+/// </param>
+public readonly record struct EditAccessFacts(bool DelegatedWrite, EditDenyReason Lock, bool IsExecutor = false)
 {
     /// <summary>Передача нічого не змінює.</summary>
     public static EditAccessFacts None => default;
@@ -155,6 +159,7 @@ public static class EditAssignmentGuard
 
         var lift = false;
         var locked = EditDenyReason.None;
+        var isExecutor = false;
 
         foreach (var a in assignments)
         {
@@ -162,6 +167,14 @@ public static class EditAssignmentGuard
             if (!a.DelegatorActive)
             {
                 continue;
+            }
+
+            // RC20 D-3: виконавець за будь-якою діючою передачею (і за такою, що не збіглася з коміркою).
+            // Рівень рядка (створення) — ні: виконавець рядків не створює й у СВОЄМУ місяці (D5), тож «не передано
+            // вам» там було б неправдою.
+            if (a.MyProgress is not null && !slice.IsRowLevel)
+            {
+                isExecutor = true;
             }
 
             var expired = a.ExpiresAt is { } until && until <= utcNow;
@@ -222,8 +235,8 @@ public static class EditAssignmentGuard
 
         // R6: будь-яка заборона виграє, підйом — лише за її відсутності.
         return locked != EditDenyReason.None
-            ? new EditAccessFacts(false, locked)
-            : new EditAccessFacts(lift, EditDenyReason.None);
+            ? new EditAccessFacts(false, locked, isExecutor)
+            : new EditAccessFacts(lift, EditDenyReason.None, isExecutor);
     }
 
     private static EditDenyReason Stronger(EditDenyReason current, EditDenyReason candidate)

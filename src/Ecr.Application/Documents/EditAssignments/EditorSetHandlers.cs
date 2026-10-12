@@ -350,8 +350,8 @@ public sealed class BatchEditAssignmentsHandler(
         {
             prepared.Add(await upsert.PrepareAsync(
                 documentId,
-                new UpsertEditAssignmentRequest(slice, members, source.IsExclusive, source.Note, source.AppliedSetId),
-                overwrite: true, snapshot, ct, keepExpiresAt: true).ConfigureAwait(false));
+                new UpsertEditAssignmentRequest(slice, members, source.IsExclusive, Note: null, source.AppliedSetId),
+                overwrite: true, snapshot, ct, keepExpiresAt: true, keepNote: true).ConfigureAwait(false));
         }
 
         await RequireRoomAsync(documentId, prepared, ct).ConfigureAwait(false);

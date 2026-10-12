@@ -78,6 +78,14 @@ public readonly record struct CellAccessContext(
     /// <see cref="EditDenyReason.AssignmentExpired"/>.
     /// </summary>
     public EditDenyReason AssignmentLock { get; init; }
+
+    /// <summary>
+    /// Користувач — виконавець хоча б однієї діючої передачі в документі (в межах звуженого списку фактів
+    /// зрізу). Лише міняє ПРИЧИНУ відмови <see cref="GrantLevel.Read"/> — з
+    /// <see cref="EditDenyReason.InsufficientGrantLevel"/> на <see cref="EditDenyReason.NotAssignedToYou"/>;
+    /// дозволів не додає й не знімає (RC20 D-3).
+    /// </summary>
+    public bool IsAssignmentExecutor { get; init; }
 }
 
 /// <summary>
@@ -209,8 +217,18 @@ public static class EditRules
 
         if (effective < GrantLevel.Write)
         {
-            return effective == GrantLevel.None
-                ? EditDecision.Deny(EditDenyReason.NoGrant)
+            if (effective == GrantLevel.None)
+            {
+                return EditDecision.Deny(EditDenyReason.NoGrant);
+            }
+
+            // RC20 D-3: виконавцеві (Read за роллю) в частині, яку йому не передано, потрібна порада «попросіть
+            // власника передати», а не «підвищте рівень гранта». Підйом уже відпрацював вище: сюди доходить лише
+            // комірка поза його передачами.
+            return context.IsAssignmentExecutor
+                ? EditDecision.Deny(
+                    EditDenyReason.NotAssignedToYou,
+                    $"Наявний рівень гранта — {effective}; ця частина документа виконавцеві не передана.")
                 : EditDecision.Deny(
                     EditDenyReason.InsufficientGrantLevel,
                     $"Наявний рівень гранта — {effective}; для редагування потрібен {GrantLevel.Write}.");
