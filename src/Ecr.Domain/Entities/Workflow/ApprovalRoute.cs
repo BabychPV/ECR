@@ -76,6 +76,32 @@ public sealed class ApprovalRoute : Entity<int>
     public int Specificity
         => (ProjectId is null ? 0 : 2) + (TemplateVersionId is null ? 0 : 1);
 
+    /// <summary>
+    /// Найконкретніший чинний маршрут для проєкту й версії шаблону; <c>null</c> — маршруту немає
+    /// (затвердження одноетапне).
+    /// </summary>
+    /// <param name="routes">Маршрути-кандидати (з кроками).</param>
+    /// <param name="projectId">Проєкт документа.</param>
+    /// <param name="templateVersionId">Версія шаблону проєкту.</param>
+    /// <remarks>
+    /// ⛔ ЄДИНЕ правило вибору: його викликають і <c>WorkflowStore.FindRouteAsync</c> (затвердження), і черга
+    /// «До погодження» (ФВ-12.5). Друга копія розійшлася б із першою мовчки — користувач бачив би в черзі
+    /// аркуш, який сервер відмовляється йому затвердити, або навпаки. Рівна конкретність — стабільний
+    /// порядок за кодом.
+    /// </remarks>
+    public static ApprovalRoute? Resolve(IEnumerable<ApprovalRoute> routes, int projectId, int templateVersionId)
+    {
+        ArgumentNullException.ThrowIfNull(routes);
+
+        return routes
+            .Where(r => r.IsActive
+                        && (r.ProjectId is null || r.ProjectId == projectId)
+                        && (r.TemplateVersionId is null || r.TemplateVersionId == templateVersionId))
+            .OrderByDescending(r => r.Specificity)
+            .ThenBy(r => r.Code, StringComparer.Ordinal)
+            .FirstOrDefault();
+    }
+
     /// <summary>Додає крок у кінець маршруту.</summary>
     /// <param name="roleId">Роль, яка затверджує на цьому кроці.</param>
     /// <param name="isOptional">Крок можна пропустити.</param>

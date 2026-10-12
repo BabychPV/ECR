@@ -67,10 +67,8 @@ public sealed class WorkflowStore(EcrDbContext db) : IWorkflowStore
 
         // Найконкретніший виграє; при рівній конкретності — стабільний
         // порядок за кодом, щоб вибір не залежав від порядку рядків у базі.
-        return candidates
-            .OrderByDescending(r => r.Specificity)
-            .ThenBy(r => r.Code, StringComparer.Ordinal)
-            .FirstOrDefault();
+        // ⛔ Правило — одне на затвердження й на чергу «До погодження» (ФВ-12.5): `ApprovalRoute.Resolve`.
+        return ApprovalRoute.Resolve(candidates, projectId, templateVersionId);
     }
 
     /// <inheritdoc />
