@@ -1,4 +1,4 @@
-// src/Ecr.Application/Documents/Dto/TableSliceDto.cs
+﻿// src/Ecr.Application/Documents/Dto/TableSliceDto.cs
 using Ecr.Domain.Entities.Configuration;
 
 namespace Ecr.Application.Documents.Dto;

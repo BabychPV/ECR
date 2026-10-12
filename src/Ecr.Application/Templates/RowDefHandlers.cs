@@ -196,7 +196,14 @@ public sealed class SaveRowDefHandler(
                 existing.Rename(label);
                 existing.SetReadOnly(command.IsReadOnly);
                 existing.SetParent(parentRowDefId);
-                existing.SetStyle(command.StyleId);
+
+                // ⚠ На відміну від колонки (повний PUT), `null`/відсутній `styleId` стиль рядка НЕ чіпає: клієнтський
+                // `rowBody()` і білдер Land стилю не несуть, і кожне збереження підпису скидало б його. Скидання —
+                // `PATCH …/presentation` `RowDef.StyleId = null`.
+                if (command.StyleId is { } rowStyle)
+                {
+                    existing.SetStyle(rowStyle);
+                }
 
                 if (command.Ordinal is { } ordinal)
                 {
@@ -283,16 +290,25 @@ public sealed class SaveRowDefHandler(
 
     /// <summary>Стан рядка для аудиту.</summary>
     internal static string Describe(RowDef row)
-        => System.Text.Json.JsonSerializer.Serialize(new
+    {
+        var state = new Dictionary<string, object?>
         {
-            RowKey = row.RowKeyValue,
-            LabelL10n = row.LabelL10n.Values,
-            row.Ordinal,
-            row.RowKind,
-            row.ParentRowDefId,
-            row.IsReadOnly,
-            row.StyleId,
-        });
+            ["RowKey"] = row.RowKeyValue,
+            ["LabelL10n"] = row.LabelL10n.Values,
+            ["Ordinal"] = row.Ordinal,
+            ["RowKind"] = row.RowKind,
+            ["ParentRowDefId"] = row.ParentRowDefId,
+            ["IsReadOnly"] = row.IsReadOnly,
+        };
+
+        // StyleId — лише коли заданий: рядок без стилю й зміна, що стилю не торкається, лишають форму аудиту як була.
+        if (row.StyleId is { } styleId)
+        {
+            state["StyleId"] = styleId;
+        }
+
+        return System.Text.Json.JsonSerializer.Serialize(state);
+    }
 }
 
 /// <summary>Налаштування рядка, що приходять із форми.</summary>
@@ -302,8 +318,8 @@ public sealed class SaveRowDefHandler(
 /// <param name="ParentRowKey">Ключ батьківського рядка в тій самій таблиці; <c>null</c> — корінь.</param>
 /// <param name="IsReadOnly">Заборона ручного вводу (наприклад, підсумковий рядок).</param>
 /// <param name="StyleId">
-/// Стиль рядка (<c>cfg.StyleDef</c> цієї версії); <c>null</c> — без стилю рядка. Повний PUT, як у колонки:
-/// відсутнє значення скидає стиль.
+/// Стиль рядка (<c>cfg.StyleDef</c> цієї версії). <c>null</c>/відсутній — НЕ чіпати наявний стиль (на відміну від
+/// колонки); скинути — <c>PATCH …/presentation</c> з <c>RowDef.StyleId = null</c>.
 /// </param>
 public sealed record SaveRowDefCommand(
     IReadOnlyDictionary<string, string> LabelL10n,
