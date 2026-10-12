@@ -69,3 +69,10 @@
 Знімки Light/Dark до і після — `docs/design/hybrid/grid-fill/` (`before-grid-*`, `after-grid-*`, `after-palette-*`, `after-ctxmenu-*`). Макет не малює шар умовного форматування (лише ручну заливку); порядок шарів з п. 6 вище — норма для застосунку, у `screen-document.js` CF-шару немає.
 
 **Зведення з застосунком (v1 клієнта кольору, `lane/cloud/cell-color-client-3`):** Undo/Redo, «Recent» і ПКМ-меню макета в v1 застосунку **відсутні** — тулбар «Заливка»/«Колір тексту» з палітрою і скиданням; решта — окремою лінією.
+
+## 7. Область застосування, шар «рядок», шапка (v1 клієнта, `lane/cloud/cell-color-rows`)
+
+- Тулбар кольору має селектор області **«Selection / Whole row / Whole column / Whole table»** (`data-testid="cell-color-scope"`): «рядок» і «колонка» розширюють виділення, «таблиця» не потребує виділення. Дія — тими ж `PATCH …/cell-styles` (порції ≤ 1000 послідовно); коли сервер дасть `scope`, один запит замінить розгортання.
+- Шар «рядок» — шаблонний `RowDto.style` (між стилем колонки і ручною заливкою); шапка таблиці — `TableSliceDto.headerStyle` (клас `ecr-header-styled`, ті самі змінні `--ecr-cell-fill*`).
+- Жирність (`isBold`) у v1 UI **немає** (поле контракту приходить із сервера і малюється); кнопки Bold у тулбарі — окремою лінією.
+- Знімки Light/Dark: `grid-fill/rows-toolbar-disabled-*`, `rows-palette-*`, `rows-row-filled-*` (у гілці `lane/cloud/cell-color-rows`).
