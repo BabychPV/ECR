@@ -1,4 +1,4 @@
-import { expect, test, type Browser, type Page } from '@playwright/test';
+import { expect, test, type Browser, type Page, type Route } from '@playwright/test';
 
 /**
  * ФВ-1.2 (рішення людини 12.10) проти РЕАЛЬНОГО сервера стенда (`tools/e2e-stand.ps1`, workflow `e2e-stand`,
@@ -9,13 +9,13 @@ import { expect, test, type Browser, type Page } from '@playwright/test';
  *  1. адмін клонує наявну опубліковану версію -> нова чернетка -> публікує її (v2 того самого шаблону);
  *  2. `/admin/periods` -> «New project»: у полі «Template version» вже стоїть v2 (без жодного кліку);
  *  3. v1 лишається доступною для вибору: в розкритому списку є обидві;
- *  4. адмін обирає v1 свідомо -> проєкт створюється саме на v1 (пропозиція не перекриває вибір людини);
- *  5. другий проєкт створюється без вибору версії -> прив'язаний до v2;
- *  6. зміна шаблону НЕ переносить наявні проєкти (ФВ-1.2): проєкт із кроку 4 лишився на v1.
+ *  4. адмін обирає v1 свідомо -> клієнт шле саме v1 (пропозиція не перекриває вибір людини);
+ *  5. без вибору версії клієнт шле v2;
+ *  Серверну прив'язку (ФВ-1.2: публікація не переносить наявні проєкти) доводить Infra ProjectTemplateVersionBindingTests.
  *
- * ⚠ Стан стенда: тест створює дві опубліковані версії (`99.<n>.0.1/2`) і ДВА проєкти (`E2E_FV12_<мітка>_A/B`).
- * `beforeAll`/`afterAll` (`sweep`) архівують проєкти, виводять версії з обігу (`Deprecated`), щоб наступні файли
- * не бачили «найновішою» чужу версію, і ПЕРЕВІРЯЮТЬ підсумок. Проєкт видалити нічим - лише `Archived`.
+ * ⚠ Стан стенда: тест створює дві опубліковані версії (`99.<n>.0.1/2`) ; проєкти НЕ створюються
+ * (запит форми перехоплюється й скасовується). `beforeAll`/`afterAll` (`sweep`) виводять версії з обігу
+ * (`Deprecated`), щоб наступні файли не бачили «найновішою» чужу версію, і ПЕРЕВІРЯЮТЬ підсумок.
  *
  * ⚠ Написано без локального стенда: живий прогін - workflow `e2e-stand`.
  */
@@ -35,11 +35,7 @@ const NewVersion = `99.${String(serial)}.0.2`;
 const BaseVersion = `99.${String(serial)}.0.1`;
 
 /** Усе, що тест створив і що `afterAll` прибирає. */
-const created: { versionId: number | null; baseVersionId: number | null; projectIds: number[] } = {
-  versionId: null,
-  baseVersionId: null,
-  projectIds: [],
-};
+const created: { versionId: number | null; baseVersionId: number | null } = { versionId: null, baseVersionId: null };
 let v1Id = 0;
 let v2Id = 0;
 let v1Label = '';
@@ -109,24 +105,22 @@ test.describe('projectDefaultVersion: форма проєкту пропонує
     await listbox.getByRole('option', { name: new RegExp(`${reEscape(v1Label)}$`) }).click();
     await expect(versionField).toHaveValue(new RegExp(`${reEscape(v1Label)}$`));
     const first = await submitForm(page, `E2E_FV12_${stamp}_A`);
-    created.projectIds.push(first.projectId);
     expect(first.templateVersionIdSent, 'проєкт мав піти з обраною v1').toBe(v1Id);
 
     // ── 5. Без вибору — пропозиція (v2) ────────────────────────────────────
     await openCreateForm(page);
     await expect(versionField).toHaveValue(new RegExp(`${reEscape(v2Label())}$`), { timeout: 60_000 });
     const second = await submitForm(page, `E2E_FV12_${stamp}_B`);
-    created.projectIds.push(second.projectId);
     expect(second.templateVersionIdSent, 'без вибору проєкт мав піти з пропонованою v2').toBe(v2Id);
 
-    // ── 6. Сервер: прив'язка збережена як створена; публікація v2 нічого не перенесла ──
-    expect(await boundVersion(page, first.projectId), 'проєкт A мав лишитися на v1').toBe(v1Id);
-    expect(await boundVersion(page, second.projectId), 'проєкт B мав бути на v2').toBe(v2Id);
+    // ⚠ Серверний бік (проєкт фіксує версію при створенні; публікація v2 наявні проєкти не переносить) доводить
+    // ProjectTemplateVersionBindingTests (Infra, СУБД). Тут запит перехоплено й скасовано: створений проєкт
+    // на стенді не видалити й не заархівувати (відкриті періоди, ECR-PRD-0409), а він бачився б наступним файлам.
   });
 
-  // ⛔ Прибирання - НАДІЙНЕ, а не best effort: зайвий проєкт/опублікована версія видні наступним файлам
+  // ⛔ Прибирання - НАДІЙНЕ, а не best effort: зайва опублікована версія видна наступним файлам
   // (`periodsOverview`, `zz-walkthrough`, форма проєкту іншого spec). Тому і ДО тесту (залишки аварійного
-  // прогону), і ПІСЛЯ нього: усе, що носить префікс/номер цього тесту, архівується/виводиться з обігу, потім
+  // прогону), і ПІСЛЯ нього: усе, що носить номер цього тесту, виводиться з обігу, потім
   // стан ПЕРЕВІРЯЄТЬСЯ; не вдалось - хук падає з переліком, а не мовчить.
   test.beforeAll(async ({ browser }, testInfo) => {
     testInfo.setTimeout(120_000);
@@ -139,7 +133,6 @@ test.describe('projectDefaultVersion: форма проєкту пропонує
   });
 });
 
-const ProjectPrefix = 'E2E_FV12_';
 /** Версії цього тесту: `99.<serial>.0.1` (база) і `99.<serial>.0.2` (v2). */
 const VersionPattern = /^99\.\d+\.0\.[12]$/;
 
@@ -156,15 +149,6 @@ async function sweep(browser: Browser, phase: string): Promise<void> {
 
   try {
     await signIn(page);
-
-    // Проєкти (з курсорною пагінацією).
-    const projects = await listAllProjects(page);
-    for (const project of projects.filter((p) => p.code.startsWith(ProjectPrefix) && p.status !== 'Archived')) {
-      const response = await page.request.post(`/api/v1/projects/${String(project.id)}/archive`);
-      if (!response.ok()) {
-        problems.push(`проєкт ${project.code} не архівовано: ${String(response.status())} ${await response.text()}`);
-      }
-    }
 
     // Версії всіх шаблонів.
     const templates = await page.request.get('/api/v1/templates?limit=100');
@@ -183,11 +167,6 @@ async function sweep(browser: Browser, phase: string): Promise<void> {
     }
 
     // Підсумок: перечитуємо, а не віримо кодам відповідей.
-    for (const project of await listAllProjects(page)) {
-      if (project.code.startsWith(ProjectPrefix) && project.status !== 'Archived') {
-        problems.push(`проєкт ${project.code} лишився зі станом ${project.status}`);
-      }
-    }
     for (const template of templateRows) {
       for (const row of await listVersions(page, template.id)) {
         if (VersionPattern.test(row.version) && row.status === 'Published') {
@@ -202,28 +181,6 @@ async function sweep(browser: Browser, phase: string): Promise<void> {
   if (problems.length > 0) {
     throw new Error(`projectDefaultVersion: прибирання (${phase}) не вдалося:\n- ${problems.join('\n- ')}`);
   }
-}
-
-async function listAllProjects(page: Page): Promise<{ id: number; code: string; status: string }[]> {
-  const all: { id: number; code: string; status: string }[] = [];
-  let cursor: string | null = null;
-
-  for (let guard = 0; guard < 50; guard += 1) {
-    const url: string =
-      cursor === null ? '/api/v1/projects?limit=100' : `/api/v1/projects?limit=100&cursor=${encodeURIComponent(cursor)}`;
-    const response = await page.request.get(url);
-    expect(response.ok(), `GET projects: ${String(response.status())}`).toBe(true);
-
-    const body = (await response.json()) as {
-      items: { id: number; code: string; status: string }[];
-      nextCursor: string | null;
-    };
-    all.push(...body.items);
-    if (body.nextCursor === null) break;
-    cursor = body.nextCursor;
-  }
-
-  return all;
 }
 
 // ── Помічники ──────────────────────────────────────────────────────────────────
@@ -350,17 +307,19 @@ async function openCreateForm(page: Page): Promise<void> {
   await expect(page.getByRole('dialog')).toBeVisible({ timeout: 10_000 });
 }
 
-/** Заповнює решту полів і натискає «Save»; повертає id проєкту і версію, яку надіслав клієнт. */
-async function submitForm(
-  page: Page,
-  code: string,
-): Promise<{ projectId: number; templateVersionIdSent: number }> {
+/**
+ * Заповнює решту полів і натискає «Save»; повертає версію, яку надіслав клієнт.
+ * ⚠ POST перехоплюється й скасовується: проєкт на стенді не видалити й не заархівувати (відкриті періоди,
+ * ECR-PRD-0409 - прогін 38300078736), а створений він бачився б `periodsOverview`/`zz-walkthrough`. Що саме
+ * надсилає клієнт - і є предмет цього тесту; серверну прив'язку доводить `ProjectTemplateVersionBindingTests`.
+ */
+async function submitForm(page: Page, code: string): Promise<{ templateVersionIdSent: number }> {
   const dialog = page.getByRole('dialog');
 
   await dialog.getByRole('textbox', { name: /^Code|^Код/i }).fill(code);
   await dialog.getByRole('textbox', { name: /^Name|^Назва|^Название/i }).first().fill(`E2E FV-1.2 ${code}`);
 
-  const zone = dialog.getByRole('textbox', { name: /time zone|Часов|Часов/i });
+  const zone = dialog.getByRole('textbox', { name: /time zone|Часов/i });
   await zone.click();
   await zone.fill('Europe/');
   await page.getByRole('option', { name: /^Europe\// }).first().click();
@@ -369,24 +328,28 @@ async function submitForm(
   await policy.click();
   await page.getByRole('listbox').last().getByRole('option').first().click();
 
-  const request = page.waitForResponse(
-    (response) => response.request().method() === 'POST' && new URL(response.url()).pathname === '/api/v1/projects',
-    { timeout: 60_000 },
-  );
-  await dialog.getByRole('button', { name: /^Save$|^Зберегти$|^Сохранить$/i }).click();
+  let postData: string | null = null;
+  const pattern = '**/api/v1/projects';
+  const handler = async (route: Route): Promise<void> => {
+    if (route.request().method() !== 'POST') {
+      await route.continue();
+      return;
+    }
 
-  const response = await request;
-  expect(response.status(), `створення проєкту: ${await response.text()}`).toBe(201);
+    postData = route.request().postData();
+    await route.abort('failed');
+  };
+  await page.route(pattern, handler);
 
-  const sent = JSON.parse(response.request().postData() ?? '{}') as { templateVersionId?: number };
-  const body = (await response.json()) as { projectId: number };
+  try {
+    await dialog.getByRole('button', { name: /^Save$|^Зберегти$|^Сохранить$/i }).click();
+    await expect.poll(() => postData, { message: 'форма не надіслала POST /projects', timeout: 30_000 }).not.toBeNull();
+  } finally {
+    await page.unroute(pattern, handler);
+  }
 
-  return { projectId: body.projectId, templateVersionIdSent: sent.templateVersionId ?? 0 };
-}
+  const sent = JSON.parse(postData ?? '{}') as { templateVersionId?: number; code?: string };
+  expect(sent.code, 'у запиті не той код проєкту').toBe(code);
 
-async function boundVersion(page: Page, projectId: number): Promise<number> {
-  const response = await page.request.get(`/api/v1/projects/${String(projectId)}/document-template`);
-  expect(response.ok(), `GET document-template: ${String(response.status())} ${await response.text()}`).toBe(true);
-
-  return ((await response.json()) as { templateVersionId: number }).templateVersionId;
+  return { templateVersionIdSent: sent.templateVersionId ?? 0 };
 }
