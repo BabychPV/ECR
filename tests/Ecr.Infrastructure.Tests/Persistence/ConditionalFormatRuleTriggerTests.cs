@@ -64,6 +64,44 @@ public sealed class ConditionalFormatRuleTriggerTests(SqlServerFixture sql)
         await Assert.ThrowsAsync<SqlException>(() => InsertAsync(versionId, op: "bogus"));
     }
 
+    [Theory]
+    [InlineData("N'COL', 1, N'gt', N'1', N'row', NULL, N'[\"R1\"]'")]    // область «рядки» без таблиці
+    [InlineData("N'COL', 2, N'gt', N'1', N'row', N'T1', NULL")]          // область «рядки» без ключів
+    [InlineData("N'COL', 3, N'gt', N'1', N'column', N'T1', N'[\"R1\"]'")] // ключі без області «рядки»
+    [InlineData("N'*', 4, N'gt', N'1', N'column', NULL, NULL")]          // «усі колонки» без таблиці
+    [InlineData("N'COL', 5, N'gt', N'1', N'page', NULL, NULL")]          // невідома область
+    [InlineData("N'COL', 6, N'textEq', N'x', N'column', NULL, NULL, N'dots'")] // невідомий штрих
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-2.7")]
+    public async Task L6_CHECK_тримає_інваріанти_області_правила_мимо_конструктора_домену(string values)
+    {
+        var (versionId, _) = await BuildAsync();
+        var pattern = values.Contains("dots", StringComparison.Ordinal);
+
+        await Assert.ThrowsAsync<SqlException>(() => ExecuteAsync(
+            "INSERT INTO cfg.ConditionalFormatRule "
+            + "(TemplateVersionId, ColumnCode, Ordinal, Operator, Value, Scope, TableCode, RowKeys, IsBold"
+            + (pattern ? ", Pattern" : string.Empty) + ") "
+            + $"SELECT {versionId}, {values.Replace(", N'dots'", string.Empty, StringComparison.Ordinal)}, 0"
+            + (pattern ? ", N'dots'" : string.Empty)));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-2.7")]
+    public async Task L6_правило_області_рядків_з_таблицею_і_ключами_приймається()
+    {
+        var (versionId, _) = await BuildAsync();
+
+        await ExecuteAsync(
+            "INSERT INTO cfg.ConditionalFormatRule "
+            + "(TemplateVersionId, ColumnCode, Ordinal, Operator, Value, Scope, TableCode, RowKeys, IsBold) "
+            + $"VALUES ({versionId}, N'*', 1, N'textEq', N'Removed', N'row', N'T1', N'[\"R1\"]', 0)");
+
+        Assert.Equal(1, await ScalarAsync(
+            $"SELECT COUNT(*) FROM cfg.ConditionalFormatRule WHERE TemplateVersionId = {versionId} AND Scope = N'row'"));
+    }
+
     private async Task<(int VersionId, int Unused)> BuildAsync()
     {
         var doc = await new TestDocumentBuilder(sql.ConnectionString).BuildAsync(ct: CancellationToken.None);
