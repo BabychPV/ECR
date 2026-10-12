@@ -476,6 +476,10 @@ async function expectPasteDenied(page: Page): Promise<void> {
   // Перевіряємо текст, а не лише факт модалки, інакше цей самий тест пройшов
   // би і на геть іншій причині — зокрема на `deny.NoGrant`, яка означала б,
   // що `EditRules.CanEdit` знову злив «немає гранта» і «грант замалий».
+  //
+  // ⚠ Передумова: оператор НЕ виконавець жодної діючої передачі в документі. Інакше (RC20 D-3,
+  // `EditAccessFacts.IsExecutor`) причина — `deny.NotAssignedToYou`, і це правильно для продукту. Передачу, яку лишав
+  // `editAssignments.spec.ts` (файл раніше за цей), тепер знімає його `afterAll`; не прибирайте його.
   await expect(
     page.getByText(
       'Your grant level is too low for this action: ask for a higher grant level, not a new grant.',

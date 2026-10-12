@@ -135,4 +135,36 @@ test.describe('Передача місяця: власник → виконав�
     await expect(admin.getByTestId('edit-assignments-months')).toContainText(/Validated|Проверено/, { timeout: 20_000 });
     await admin.context().close();
   });
+
+  // ⛔ Прибирання за собою. Передача «січень → e2e-operator» лишалась у документі стенда після файла, і `e2e-operator`
+  // назавжди ставав «виконавцем діючої передачі» (RC20 D-3, `EditAccessFacts.IsExecutor`): його відмова запису в
+  // частині поза передачею стала `deny.NotAssignedToYou` («попросіть власника передати»), а не
+  // `deny.InsufficientGrantLevel`. Це правильна поведінка продукту, але вона ламала `security.spec.ts` (Q-258
+  // перевіряє саме поріг гранта Read < Write для оператора БЕЗ передач; файли йдуть за алфавітом, `editAssignments`
+  // раніше за `security`). Тому власник знімає передачу тією самою дією «Remove», що й у шторці. `afterAll` - щоб
+  // прибирання відбулося й тоді, коли сценарій впав посередині.
+  test.afterAll(async ({ browser }) => {
+    if (PeriodKey === '' || DocumentId === '') return;
+
+    const admin = await asUser(browser, Admin);
+    try {
+      await openDrawer(admin);
+      const rowMenu = admin.getByTestId('edit-assignments-months').getByRole('button', { name: /Actions for|Действия для/ });
+      // Матриця вантажиться асинхронно: без передач рядка не буде - тоді чекання закінчується тихо, і нема що знімати.
+      await rowMenu.first().waitFor({ state: 'visible', timeout: 15_000 }).catch(() => undefined);
+      // Цикл: передач може бути більше однієї, якщо сценарій обірвався й повторювався.
+      for (let guard = 0; guard < 5 && (await rowMenu.count()) > 0; guard += 1) {
+        await rowActions(admin, /^(Remove|Снять передачу)$/);
+        const dialog = admin.getByRole('dialog', { name: /Take .* back from the executors|Забрать .* у исполнителей/ });
+        await dialog.getByRole('button', { name: /^(Remove|Снять передачу)$/ }).click();
+        await expect(dialog).toBeHidden({ timeout: 20_000 });
+      }
+
+      await expect(rowMenu, 'передачі стенда не знято: security.spec побачить оператора-виконавця').toHaveCount(0, {
+        timeout: 20_000,
+      });
+    } finally {
+      await admin.context().close();
+    }
+  });
 });
