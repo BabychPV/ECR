@@ -411,8 +411,9 @@ public sealed class SeedTests(SqlServerFixture sql)
         //
         // ✎ 2026-10-11 (`FP:sysadmin-rights`, рішення людини за проходом «від першого обличчя»):
         // третій поіменний виняток — SystemAdministrator отримує ВІСІМ адмін-прав керування
-        // (`SysAdminDangerous` нижче), окремим MERGE. Решта небезпечного (Period.Reopen,
-        // Document.ChangeKey, Report.EditDefinition) йому не видана — і цей тест тримає саме це.
+        // (`SysAdminDangerous` нижче), окремим MERGE; ✎ 2026-10-12 — ще `Period.Reopen` і
+        // `Document.ChangeKey` (десять). Решта небезпечного (Report.EditDefinition) йому не видана —
+        // і цей тест тримає саме це.
         Assert.Equal(0, await ScalarAsync($"""
             SELECT COUNT(*)
             FROM sec.RolePermission AS rp
@@ -479,12 +480,14 @@ public sealed class SeedTests(SqlServerFixture sql)
         "Security.ManageUsers", "Security.ManageRoles", "Security.Simulate",
         "Integration.Manage", "System.ManageNotifications", "System.RunJob",
         "Report.ViewCampaign", "Calculation.Publish",
+        // ✎ 2026-10-12 (рішення людини, квіз 12.10, №1): ще два, тією самою секцією.
+        "Period.Reopen", "Document.ChangeKey",
     ];
 
     /// <summary>Небезпечні права, які SystemAdministrator НЕ має (на рішення людини, див. секцію сіду).</summary>
     private static readonly string[] SysAdminWithheld =
     [
-        "Report.EditDefinition", "Period.Reopen", "Document.ChangeKey",
+        "Report.EditDefinition",
     ];
 
     private static string SysAdminDangerousSql
@@ -588,7 +591,7 @@ public sealed class SeedTests(SqlServerFixture sql)
               AND rp.PermissionCode IN ({string.Join(", ", SysAdminWithheld.Select(code => $"N'{code}'"))})
             """));
 
-        // Перелік виданих небезпечних — рівно названі вісім: нічого зайвого.
+        // Перелік виданих небезпечних — рівно названі десять: нічого зайвого.
         Assert.Equal(SysAdminDangerous.Length, await ScalarAsync("""
             SELECT COUNT(*)
             FROM sec.RolePermission AS rp
@@ -632,6 +635,88 @@ public sealed class SeedTests(SqlServerFixture sql)
             JOIN sec.Role AS r ON r.Id = rp.RoleId AND r.IsBuiltIn = 1
             WHERE r.Code = N'SystemAdministrator' AND rp.PermissionCode IN ({SysAdminDangerousSql})
             """));
+    }
+
+    /// <remarks>
+    /// ✎ 2026-10-12 (квіз 12.10, №1). База після RC20 має вісім прав, без `Period.Reopen` і
+    /// `Document.ChangeKey`: сід додає саме ці дві пари, пише про них одну подію й нічого більше;
+    /// повтор — нуль змін. `Report.EditDefinition` лишається утриманим. Мутація: прибрати
+    /// `Period.Reopen`/`Document.ChangeKey` зі списку MERGE — перша частина червоніє; послабити
+    /// `NOT EXISTS` події — червоніє повтор.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-6.12")]
+    public async Task Системний_адміністратор_отримує_Period_Reopen_і_Document_ChangeKey_а_EditDefinition_лишається_утриманим()
+    {
+        const string EventFilter =
+            "EventType = N'RolePermissionsGranted' AND DetailsJson LIKE N'%seed FP:sysadmin-rights%'";
+        const string Added = "N'Period.Reopen', N'Document.ChangeKey'";
+
+        // Стан бази RC20: вісім прав є, двох нових немає.
+        await ExecuteAsync($"""
+            DELETE rp
+            FROM sec.RolePermission AS rp
+            JOIN sec.Role AS r ON r.Id = rp.RoleId AND r.IsBuiltIn = 1
+            WHERE r.Code = N'SystemAdministrator' AND rp.PermissionCode IN ({Added})
+            """);
+
+        var eventsBefore = await ScalarAsync($"SELECT COUNT(*) FROM aud.SecurityEvent WHERE {EventFilter}");
+        var pairsBefore = await ScalarAsync($"""
+            SELECT COUNT(*) FROM sec.RolePermission AS rp
+            JOIN sec.Role AS r ON r.Id = rp.RoleId AND r.IsBuiltIn = 1
+            WHERE r.Code = N'SystemAdministrator'
+            """);
+
+        await using (var db = CreateContext())
+        {
+            await new SeedRunner(db).RunAsync(CancellationToken.None);
+        }
+
+        Assert.Equal(2, await ScalarAsync($"""
+            SELECT COUNT(*) FROM sec.RolePermission AS rp
+            JOIN sec.Role AS r ON r.Id = rp.RoleId AND r.IsBuiltIn = 1
+            WHERE r.Code = N'SystemAdministrator' AND rp.PermissionCode IN ({Added})
+            """));
+        Assert.Equal(0, await ScalarAsync("""
+            SELECT COUNT(*) FROM sec.RolePermission AS rp
+            JOIN sec.Role AS r ON r.Id = rp.RoleId AND r.IsBuiltIn = 1
+            WHERE r.Code = N'SystemAdministrator' AND rp.PermissionCode = N'Report.EditDefinition'
+            """));
+        Assert.Equal(pairsBefore + 2, await ScalarAsync("""
+            SELECT COUNT(*) FROM sec.RolePermission AS rp
+            JOIN sec.Role AS r ON r.Id = rp.RoleId AND r.IsBuiltIn = 1
+            WHERE r.Code = N'SystemAdministrator'
+            """));
+
+        // Одна подія, і в ній рівно дві нові пари.
+        Assert.Equal(
+            eventsBefore + 1,
+            await ScalarAsync($"SELECT COUNT(*) FROM aud.SecurityEvent WHERE {EventFilter}"));
+        var details = await StringAsync(
+            $"SELECT TOP (1) DetailsJson FROM aud.SecurityEvent WHERE {EventFilter} ORDER BY Id DESC");
+        using var json = System.Text.Json.JsonDocument.Parse(details!);
+        Assert.Equal(2, json.RootElement.GetProperty("count").GetInt32());
+        Assert.Equal(
+            ["Document.ChangeKey", "Period.Reopen"],
+            json.RootElement.GetProperty("permissions").EnumerateArray()
+                .Select(p => p.GetString()!).Order(StringComparer.Ordinal));
+
+        // Ідемпотентність: повторний сід — ні пар, ні подій.
+        await using (var db = CreateContext())
+        {
+            await new SeedRunner(db).RunAsync(CancellationToken.None);
+        }
+
+        Assert.Equal(pairsBefore + 2, await ScalarAsync("""
+            SELECT COUNT(*) FROM sec.RolePermission AS rp
+            JOIN sec.Role AS r ON r.Id = rp.RoleId AND r.IsBuiltIn = 1
+            WHERE r.Code = N'SystemAdministrator'
+            """));
+        Assert.Equal(
+            eventsBefore + 1,
+            await ScalarAsync($"SELECT COUNT(*) FROM aud.SecurityEvent WHERE {EventFilter}"));
     }
 
     [Fact]

@@ -20,7 +20,7 @@
 
 | Роль | Що має за замовчуванням |
 |---|---|
-| `SystemAdministrator` | усі безпечні права (`%`) **і вісім адмін-прав керування** (рішення людини 2026-10-11, секція сіду `FP:sysadmin-rights`): `Security.ManageUsers`, `Security.ManageRoles`, `Security.Simulate`, `Integration.Manage`, `System.ManageNotifications`, `System.RunJob`, `Report.ViewCampaign`, `Calculation.Publish`. **Не** має `Report.EditDefinition` (лише `Approver`, `D-203`), `Period.Reopen` і `Document.ChangeKey` — їх видає адміністратор свідомо власною роллю |
+| `SystemAdministrator` | усі безпечні права (`%`) **і десять небезпечних прав керування** (рішення людини 2026-10-11 і 2026-10-12, секція сіду `FP:sysadmin-rights`): `Security.ManageUsers`, `Security.ManageRoles`, `Security.Simulate`, `Integration.Manage`, `System.ManageNotifications`, `System.RunJob`, `Report.ViewCampaign`, `Calculation.Publish`, `Period.Reopen`, `Document.ChangeKey`. **Не** має `Report.EditDefinition` (лише `Approver`, `D-203`) |
 | `TemplateAdministrator` | `Template.*`, `Registry.View`, `Calculation.View`, `Document.View`, `System.ViewHealth` |
 | `PeriodAdministrator` | `Period.*` (крім небезпечного `Period.Reopen`), `Project.Manage`, `Document.View`, `System.ViewHealth` |
 | `DataEntry` | `Document.View/Create/Import/Export/Submit`, `Template.View`, `Registry.View`, `Calculation.View`, `Report.Export` |
@@ -33,8 +33,9 @@
 ⛔ Шаблонні роздачі сіду фільтруються `WHERE p.IsDangerous = 0` у самому `MERGE`.
 Поіменні винятки — окремими `MERGE`: `BootstrapAdministrator` (`Security.ManageUsers`,
 `Security.ManageRoles`), `Approver` (`Report.EditDefinition`, `D-203`) і `SystemAdministrator`
-(вісім адмін-прав керування, секція `FP:sysadmin-rights`, 2026-10-11). Решту небезпечних
-прав (`Period.Reopen`, `Document.ChangeKey`, `Report.EditDefinition` для всіх, крім `Approver`)
+(десять прав: вісім адмін-прав керування 2026-10-11 і з 2026-10-12 ще `Period.Reopen`,
+`Document.ChangeKey`; секція `FP:sysadmin-rights`). Решту небезпечних
+прав (`Report.EditDefinition` для всіх, крім `Approver`)
 адміністратор дає, **створюючи роль** із ними (п. 2.3); у журналі безпеки — подія
 `DangerousPermissionsGranted`. Призначення групі AD ролі з небезпечними правами
 (зокрема `SystemAdministrator`) вимагає підтвердження.

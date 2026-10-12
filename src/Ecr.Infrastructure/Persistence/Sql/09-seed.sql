@@ -19968,7 +19968,7 @@ GO
 -- `Report.EditDefinition` — окремий MERGE `D-203`; `BootstrapAdministrator` — два права).
 -- Той самий механізм, що й у двох наявних поіменних винятків.
 --
--- ⚠ Видано рівно ВІСІМ прав — адмін-керування (`D-207`: розділення обов'язків адміністраторів
+-- ⚠ Видано ВІСІМ прав адмін-керування (+2 нижче, 2026-10-12) (`D-207`: розділення обов'язків адміністраторів
 -- не обмежуємо; `D-121`: носій `Security.ManageRoles` і так видає будь-яке право):
 --   Security.ManageUsers · Security.ManageRoles · Security.Simulate  — користувачі, ролі, «View as»;
 --   Integration.Manage — джерела, мапінг, конвеєр; System.ManageNotifications — канали й SMTP;
@@ -19978,9 +19978,14 @@ GO
 -- публікація методики автором її створення відмовляється (`ФВ-9.6`, `D-226`), Reopen вимагає
 -- причини, симуляція пишеться в аудит, а ціль симуляції з небезпечним правом заборонена.
 --
--- ⛔ НЕ видано навмисно (операційні/бізнесові, а не адмін-керування — на рішення людини):
---   Report.EditDefinition (авторство державної форми; `D-203`, лише Approver) ·
---   Period.Reopen (повторне відкриття закритого періоду) · Document.ChangeKey (зміна бізнес-ключа).
+-- ✎ 2026-10-12 (рішення людини, квіз 12.10, №1): до восьми додано ще ДВА — `Period.Reopen`
+-- (повторне відкриття закритого періоду) і `Document.ChangeKey` (зміна бізнес-ключа), разом ДЕСЯТЬ.
+-- Вони йдуть тим самим MERGE (NOT MATCHED, без міграції) і тією самою подією `RolePermissionsGranted`:
+-- наявна база отримує лише відсутні пари, подія перелічує рівно те, що додано. Захист — у точці
+-- використання: Reopen вимагає причини й гранта на проєкт, зміна ключа пишеться в аудит.
+--
+-- ⛔ НЕ видано навмисно (на рішення людини):
+--   Report.EditDefinition (авторство державної форми; `D-203`, лише Approver).
 --
 -- ⚠ MERGE … WHEN NOT MATCHED: наявна база отримує пари на наступному старті (`SeedRunner`)
 -- без міграції схеми; право, зняте адміністратором з вбудованої ролі, повторний сід поверне
@@ -19998,7 +20003,9 @@ USING (
     FROM (VALUES
         (N'Security.ManageUsers'), (N'Security.ManageRoles'), (N'Security.Simulate'),
         (N'Integration.Manage'), (N'System.ManageNotifications'), (N'System.RunJob'),
-        (N'Report.ViewCampaign'), (N'Calculation.Publish')
+        (N'Report.ViewCampaign'), (N'Calculation.Publish'),
+        -- ✎ 2026-10-12 (рішення людини, квіз 12.10, №1; D-388 доповнено): ще два, у ТІЙ САМІЙ секції.
+        (N'Period.Reopen'), (N'Document.ChangeKey')
     ) AS m (Code)
     JOIN sec.Permission AS p ON p.Code = m.Code
     CROSS JOIN sec.Role AS r
