@@ -75,3 +75,13 @@
   opacity: 0;
   pointer-events: none;
 }
+
+.ecr-cell-color-scope {
+  height: 36px;
+  padding: 0 var(--mantine-spacing-xs, 8px);
+  border: 1px solid var(--ecr-border-strong, var(--mantine-color-default-border));
+  border-radius: var(--mantine-radius-sm, 4px);
+  background: var(--mantine-color-body);
+  color: inherit;
+  font: inherit;
+}

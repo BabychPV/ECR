@@ -8011,6 +8011,11 @@ USING (VALUES
     ,(N'grid.cellColor.noSelection', N'en', N'Select cells you can edit to colour them', 1)
     ,(N'grid.cellColor.readOnly', N'en', N'The sheet is locked for editing, colour cannot be changed', 1)
     ,(N'grid.cellColor.conflict', N'en', N'The table changed while you were colouring. The current state is shown; please repeat the colour.', 1)
+    ,(N'grid.cellColor.scopeLabel', N'en', N'Apply to', 1)
+    ,(N'grid.cellColor.scope.selection', N'en', N'Selection', 1)
+    ,(N'grid.cellColor.scope.row', N'en', N'Whole row', 1)
+    ,(N'grid.cellColor.scope.column', N'en', N'Whole column', 1)
+    ,(N'grid.cellColor.scope.table', N'en', N'Whole table', 1)
     -- L4:cellcolor ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
@@ -20090,7 +20095,17 @@ SELECT v.[Key], v.Lang, v.Val
     (N'grid.cellColor.readOnly', N'ru', N'Лист закрыт для правки, цвет менять нельзя'),
     (N'grid.cellColor.readOnly', N'kz', N'Парақ өңдеуге жабық, түсті өзгертуге болмайды'),
     (N'grid.cellColor.conflict', N'ru', N'Таблица изменилась, пока вы красили ячейки. Показано актуальное состояние, повторите окраску.'),
-    (N'grid.cellColor.conflict', N'kz', N'Сіз бояған кезде кесте өзгерді. Ағымдағы күй көрсетілді, бояуды қайталаңыз.')
+    (N'grid.cellColor.conflict', N'kz', N'Сіз бояған кезде кесте өзгерді. Ағымдағы күй көрсетілді, бояуды қайталаңыз.'),
+    (N'grid.cellColor.scopeLabel', N'ru', N'Применить к'),
+    (N'grid.cellColor.scopeLabel', N'kz', N'Қолдану аймағы'),
+    (N'grid.cellColor.scope.selection', N'ru', N'Выделение'),
+    (N'grid.cellColor.scope.selection', N'kz', N'Белгіленген'),
+    (N'grid.cellColor.scope.row', N'ru', N'Вся строка'),
+    (N'grid.cellColor.scope.row', N'kz', N'Бүкіл жол'),
+    (N'grid.cellColor.scope.column', N'ru', N'Весь столбец'),
+    (N'grid.cellColor.scope.column', N'kz', N'Бүкіл баған'),
+    (N'grid.cellColor.scope.table', N'ru', N'Вся таблица'),
+    (N'grid.cellColor.scope.table', N'kz', N'Бүкіл кесте')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
