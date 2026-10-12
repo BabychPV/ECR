@@ -308,7 +308,125 @@ public sealed class CellStylesScopeApiTests(SqlServerFixture sql)
         Console.WriteLine(string.Create(CultureInfo.InvariantCulture, $"CELLSTYLE-SCOPE 2000x25=50000 patchMs={watch.ElapsedMilliseconds}"));
         Assert.Contains("\"appliedCells\":50000", exactBody, StringComparison.Ordinal);
         Assert.Equal(50000, await StyleCountAsync(s).ConfigureAwait(true));
-        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(60), $"PATCH 50000 комірок: {watch.Elapsed}");
+        // ⚠ Не «м'яка» межа: блокування аркуша на час запису мало бути ≲ 6 с (замір 6.0 с); 15 с — запас на повільніший
+        // раннер. Перевищення — регрес швидкості, а не «плаваючий» тест.
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(15), $"PATCH 50000 комірок: {watch.Elapsed}");
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Два_паралельні_scope_PATCH_однієї_області_без_500_і_без_подвоєння()
+    {
+        // Обидва запити бачать порожнє оформлення; другий або чекає замок аркуша (і бачить уже записане → applied 0),
+        // або отримує 409 concurrentChange на PK_CellStyle. Не 500, і сума застосованого = розмір області рівно.
+        var s = await ArrangeAsync(rowCount: 300, columnCount: 5).ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+        var client = await SignInAsync(app, s.Writer).ConfigureAwait(true);
+        const int cells = 300 * 5;
+
+        for (var round = 0; round < 3; round++)
+        {
+            var body = new
+            {
+                periodKey = PeriodKeyValue,
+                scope = new { allRows = true, allColumns = true, backgroundHex = "#FFFF00" },
+            };
+
+            var responses = await Task.WhenAll(PatchAsync(client, s, body), PatchAsync(client, s, body)).ConfigureAwait(true);
+            var applied = 0;
+            var ok = 0;
+            foreach (var response in responses)
+            {
+                var text = await response.Content.ReadAsStringAsync().ConfigureAwait(true);
+                Assert.True(
+                    response.StatusCode is HttpStatusCode.OK or HttpStatusCode.Conflict,
+                    $"раунд {round}: {response.StatusCode}: {text}\n{app.ErrorsText}");
+
+                if (response.StatusCode == HttpStatusCode.OK)
+                {
+                    ok++;
+                    applied += JsonDocument.Parse(text).RootElement.GetProperty("appliedCells").GetInt32();
+                }
+                else
+                {
+                    Assert.Contains("ECR-CELL-0409", text, StringComparison.Ordinal);
+                }
+            }
+
+            Assert.True(ok >= 1, $"раунд {round}: жоден запит не пройшов");
+            Assert.Equal(cells, applied);
+            Assert.Equal(cells, await StyleCountAsync(s).ConfigureAwait(true));
+
+            var reset = await PatchAsync(client, s, new
+            {
+                periodKey = PeriodKeyValue,
+                scope = new { allRows = true, allColumns = true, reset = true },
+            }).ConfigureAwait(true);
+            Assert.Equal(HttpStatusCode.OK, reset.StatusCode);
+            Assert.Equal(0, await StyleCountAsync(s).ConfigureAwait(true));
+        }
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Запис_значень_іншим_користувачем_під_час_області_на_50000_не_дає_5xx()
+    {
+        var s = await ArrangeAsync(rowCount: 2000, columnCount: 26).ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+        var writer = await SignInAsync(app, s.Writer).ConfigureAwait(true);
+        var manager = await SignInAsync(app, s.Manager).ConfigureAwait(true);
+
+        // Версії рядків — ДО запиту області (оформлення версію рядка не міняє).
+        var slice = await manager.GetAsync(new Uri(
+            $"/api/v1/documents/{s.Document.DocumentId}/tables/{s.Document.TableInstanceId}", UriKind.Relative)).ConfigureAwait(true);
+        var sliceBody = await slice.Content.ReadAsStringAsync().ConfigureAwait(true);
+        Assert.True(slice.IsSuccessStatusCode, $"зріз: {slice.StatusCode}: {sliceBody}");
+        var versions = JsonDocument.Parse(sliceBody).RootElement.GetProperty("rows").EnumerateArray()
+            .Take(60)
+            .Select(r => (Key: r.GetProperty("rowKey").GetString()!, Version: r.GetProperty("rowVersion").GetString()!))
+            .ToList();
+
+        var watch = Stopwatch.StartNew();
+        var scopeTask = PatchAsync(writer, s, new
+        {
+            periodKey = PeriodKeyValue,
+            scope = new { allRows = true, columnCodes = s.ColumnCodes.Take(25).ToArray(), backgroundHex = "#FFFF00" },
+        });
+
+        var statuses = new List<HttpStatusCode>();
+        var index = 0;
+        while (!scopeTask.IsCompleted && index < versions.Count)
+        {
+            var (key, version) = versions[index++];
+            var response = await manager.PatchAsJsonAsync(
+                new Uri($"/api/v1/documents/{s.Document.DocumentId}/cells", UriKind.Relative),
+                new
+                {
+                    tableInstanceId = s.Document.TableInstanceId,
+                    periodKey = PeriodKeyValue,
+                    origin = "UserEdit",
+                    rows = new object[]
+                    {
+                        new { rowKey = key, baseVersion = version, cells = new object[] { new { columnCode = s.ColumnCodes[1], value = 7 } } },
+                    },
+                }).ConfigureAwait(true);
+            statuses.Add(response.StatusCode);
+            if (response.StatusCode >= HttpStatusCode.InternalServerError)
+            {
+                Assert.Fail($"запис значення під час області: {response.StatusCode}: " +
+                            await response.Content.ReadAsStringAsync().ConfigureAwait(true));
+            }
+        }
+
+        var scope = await scopeTask.ConfigureAwait(true);
+        watch.Stop();
+        var scopeBody = await scope.Content.ReadAsStringAsync().ConfigureAwait(true);
+        Console.WriteLine(string.Create(CultureInfo.InvariantCulture,
+            $"CELLSTYLE-SCOPE concurrent50000 scopeMs={watch.ElapsedMilliseconds} cellWrites={statuses.Count} statuses={string.Join(",", statuses.Distinct())}"));
+        Assert.True(scope.StatusCode == HttpStatusCode.OK, $"{scope.StatusCode}: {scopeBody}\n{app.ErrorsText}");
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(15), $"область 50000 з паралельним записом: {watch.Elapsed}");
     }
 
     private static Uri StylesUri(Scenario s)
