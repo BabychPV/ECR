@@ -91,7 +91,7 @@ describe('SheetFillSummary', () => {
     await waitFor(() => {
       const text = screen.getByTestId('sheet-fill-count').textContent ?? '';
 
-      expect(text).toContain('document.tablesFilled');
+      expect(text).toContain('document.tablesFilledInDocument (');
       expect(text).toContain('filled=1');
       expect(text).toContain('total=2');
     });

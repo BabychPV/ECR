@@ -223,6 +223,22 @@ describe('addRowDenialOf (D9: «Add row» без гранту)', () => {
     ).toBeNull();
   });
 
+  it('C1 без гранту, але C2 дозволена — null (сервер вирішує на рівні рядка)', () => {
+    const columns = [column(), column({ id: 2, code: 'C2', ordinal: 2 })];
+    const denied = { [cellKey('R1', 'C1')]: 'NoGrant', [cellKey('R2', 'C1')]: 'NoGrant' };
+    const base = slice(denied, columns);
+    const two: TableSliceDto = { ...base, rows: [...base.rows, { ...base.rows[0]!, rowKey: 'R2', ordinal: 2 }] };
+
+    expect(addRowDenialOf(two)).toBeNull();
+    // усі колонки × усі рядки відхилені — причина з першої відхиленої
+    const all = {
+      ...denied,
+      [cellKey('R1', 'C2')]: 'InsufficientGrantLevel',
+      [cellKey('R2', 'C2')]: 'InsufficientGrantLevel',
+    };
+    expect(addRowDenialOf({ ...two, cellPermissions: all })?.reason).toBe('NoGrant');
+  });
+
   it('порожня таблиця — null (права не відомі)', () => {
     expect(addRowDenialOf({ ...slice({}), rows: [] })).toBeNull();
   });
