@@ -13,7 +13,7 @@ import { expect, test, type Page } from '@playwright/test';
  *  5. другий проєкт створюється без вибору версії -> прив'язаний до v2;
  *  6. зміна шаблону НЕ переносить наявні проєкти (ФВ-1.2): проєкт із кроку 4 лишився на v1.
  *
- * ⚠ Стан стенда: тест створює дві версії-чернетки/публікацію й ДВА проєкти (код `E2E-FV12-<мітка>`). Стенд
+ * ⚠ Стан стенда: тест створює дві версії-чернетки/публікацію й ДВА проєкти (код `E2E_FV12_<мітка>`). Стенд
  * одноразовий; `afterAll` виводить опубліковану тестом версію з обігу (`Deprecated`), щоб наступні файли не
  * бачили «найновішою» чужу версію. Проєкти видалити нічим (архівація — `POST /projects/{id}/archive`, її й
  * викликає `afterAll`, best effort).
@@ -109,14 +109,14 @@ test.describe('projectDefaultVersion: форма проєкту пропонує
     // ── 4. Свідомий вибір v1 не перекривається пропозицією ──────────────────
     await listbox.getByRole('option', { name: new RegExp(`${reEscape(v1Label)}$`) }).click();
     await expect(versionField).toHaveValue(new RegExp(`${reEscape(v1Label)}$`));
-    const first = await submitForm(page, `E2E-FV12-${stamp}-A`);
+    const first = await submitForm(page, `E2E_FV12_${stamp}_A`);
     created.projectIds.push(first.projectId);
     expect(first.templateVersionIdSent, 'проєкт мав піти з обраною v1').toBe(v1Id);
 
     // ── 5. Без вибору — пропозиція (v2) ────────────────────────────────────
     await openCreateForm(page);
     await expect(versionField).toHaveValue(new RegExp(`${reEscape(v2Label())}$`), { timeout: 60_000 });
-    const second = await submitForm(page, `E2E-FV12-${stamp}-B`);
+    const second = await submitForm(page, `E2E_FV12_${stamp}_B`);
     created.projectIds.push(second.projectId);
     expect(second.templateVersionIdSent, 'без вибору проєкт мав піти з пропонованою v2').toBe(v2Id);
 
