@@ -365,6 +365,25 @@ public sealed class UnitOfWork(
                 });
         }
 
+        // ⛔ Два одночасні `POST /reports` з тим самим кодом проходять `ExistsAsync` обидва (check-then-insert,
+        // `CreateReportDefHandler`), і другий відбиває лише `UQ_ReportDef` — голий 500 на звичайну гонку.
+        // Та сама відмова, що й перевірка обробника (`409 ECR-RPT-4091`, ключ `err.ECR-RPT-4091.code` з `{code}`):
+        // код береться з доданого опису, не з тексту СУБД. Лише цей індекс (за ім'ям), не будь-який.
+        if (SqlConflict.ViolatesIndex(ex, "UQ_ReportDef")
+            && ex.Entries.FirstOrDefault(e =>
+                e.State == EntityState.Added && e.Entity is Domain.Entities.Reporting.ReportDef)
+                is { Entity: Domain.Entities.Reporting.ReportDef reportDef })
+        {
+            return new BusinessRuleException(
+                ErrorCodes.ReportDefDuplicate,
+                $"Звіт з кодом «{reportDef.Code}» уже описаний: побудова адресує звіт саме кодом.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-RPT-4091.code",
+                    ["code"] = reportDef.Code,
+                });
+        }
+
         foreach (var entry in ex.Entries)
         {
             switch (entry.Entity)
