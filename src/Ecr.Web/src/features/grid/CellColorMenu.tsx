@@ -19,15 +19,17 @@ interface Props {
   readonly onApply: (target: ColourTarget, hex: string | null) => void;
   readonly disabled: boolean;
   readonly disabledHint: string | null;
+  /** Машинна причина недоступності (`readOnly` — аркуш закрито/немає права, `noSelection`). */
+  readonly disabledReason?: 'readOnly' | 'noSelection';
   /** Рядок стану недоступності для людини, що читає з екрана. */
   readonly pending?: boolean;
 }
 
-export function CellColorMenu({ onApply, disabled, disabledHint, pending = false }: Props): JSX.Element {
+export function CellColorMenu({ onApply, disabled, disabledHint, disabledReason, pending = false }: Props): JSX.Element {
   return (
     <div className="ecr-cell-color-menu" role="group" aria-label={t('grid.cellColor.group')} data-testid="cell-color-menu">
-      <ColourButton target="fill" onApply={onApply} disabled={disabled} hint={disabledHint} pending={pending} />
-      <ColourButton target="text" onApply={onApply} disabled={disabled} hint={disabledHint} pending={pending} />
+      <ColourButton target="fill" onApply={onApply} disabled={disabled} hint={disabledHint} reason={disabledReason} pending={pending} />
+      <ColourButton target="text" onApply={onApply} disabled={disabled} hint={disabledHint} reason={disabledReason} pending={pending} />
     </div>
   );
 }
@@ -37,12 +39,14 @@ function ColourButton({
   onApply,
   disabled,
   hint,
+  reason,
   pending,
 }: {
   target: ColourTarget;
   onApply: Props['onApply'];
   disabled: boolean;
   hint: string | null;
+  reason: Props['disabledReason'];
   pending: boolean;
 }): JSX.Element {
   const [opened, setOpened] = useState(false);
@@ -62,6 +66,8 @@ function ColourButton({
           variant="default"
           disabled={disabled || pending}
           title={disabled && hint !== null ? hint : undefined}
+          aria-disabled={disabled || undefined}
+          data-disabled-reason={disabled ? reason : undefined}
           aria-haspopup="dialog"
           aria-expanded={opened && !disabled}
           data-testid={`cell-color-${target}`}
