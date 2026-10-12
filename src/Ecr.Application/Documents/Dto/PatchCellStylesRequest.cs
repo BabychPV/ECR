@@ -30,7 +30,7 @@ namespace Ecr.Application.Documents.Dto;
 /// </param>
 public sealed record PatchCellStylesRequest(
     int PeriodKey,
-    IReadOnlyList<CellStyleChange> Items,
+    IReadOnlyList<CellStyleChange>? Items = null,
     bool Reset = false,
     CellStyleScope? Scope = null)
 {

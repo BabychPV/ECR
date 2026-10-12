@@ -23794,7 +23794,7 @@ export interface components {
          *     `PATCH /api/v1/documents/{documentId}/tables/{tableInstanceId}/cell-styles`. */
         PatchCellStylesRequest: {
             /** @description Комірки й нове оформлення; одна комірка — один раз. Може бути порожнім, якщо задано Scope. */
-            items: components["schemas"]["CellStyleChange"][];
+            items?: null | components["schemas"]["CellStyleChange"][];
             /**
              * Format: int32
              * @description Період екземпляра таблиці (звіряється з періодом екземпляра).

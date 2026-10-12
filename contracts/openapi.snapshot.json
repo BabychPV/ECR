@@ -9308,7 +9308,10 @@
             "items": {
               "$ref": "#/components/schemas/CellStyleChange"
             },
-            "type": "array"
+            "type": [
+              "null",
+              "array"
+            ]
           },
           "periodKey": {
             "description": "Період екземпляра таблиці (звіряється з періодом екземпляра).",
@@ -9333,8 +9336,7 @@
           }
         },
         "required": [
-          "periodKey",
-          "items"
+          "periodKey"
         ],
         "type": "object"
       },
