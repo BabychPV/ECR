@@ -47,3 +47,11 @@ $pw = Read-Host 'Пароль bootstrap' -AsSecureString
   (O(n)), для 5 тис. колонок це години. Гілка `-StructureMode Api` лишилась для малих шаблонів.
 
 Перелік прогалин і пропозицій по змінах коду — у звіті `.sync-local/reports/LAND-TEMPLATE-BUILD-2026-10-11.md`.
+## Відповідність прод-колонкам HSE (prodColumnMapping)
+
+Зіставлення зі зразком прод-БД HSE (структура, без даних; звіт `.sync-local/reports/LAND-PROD-SAMPLE-2026-10-12.md`):
+ключ `prodColumnMapping` моделі — аліаси прод-колонок AF (`Land_Measure_*`, `Land_EF_*`, `Land_AL_*`, `Land_Agent_*` …)
+на колонки шаблону за заголовком Excel (`evidence`: header / single / position), текстові мости `*Ref`, 55 доданих колонок
+введення (`Land_TypeFuel` у 10.01/10.03/10.04/11.01, `Land_ProcessTrain` у 11.03, `Land_ERG_EmissionSourceType` у 5.08/5.09/5.27,
+`Land_Measure_GTU*` у 10.03/11.03), `unitMismatches` і `notProven`. Перейменувань наявних колонок немає. Джерело мапи —
+`tools/land/model-gen/prod_mapping.py` (генерація падає, якщо заголовок не знайдено або неоднозначний).

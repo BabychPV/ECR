@@ -880,6 +880,12 @@ def _cell_formulas_7_0():
 
 _cell_formulas_7_0()
 
+# ---- відповідність прод-колонок AF і колонки введення, яких немає в Excel (прод-зразок 2026-10-12, прогалини 3-5): див. prod_mapping.py
+import prod_mapping  # noqa: E402
+out['prodColumnMapping'], _added_cols = prod_mapping.apply(out)
+stat_cols += _added_cols
+print('prodColumnMapping: tables %d, new columns %d' % (len(out['prodColumnMapping']['tables']), _added_cols))
+
 cfs = []
 seen_cf = set()
 for sh in X['sheets']:
