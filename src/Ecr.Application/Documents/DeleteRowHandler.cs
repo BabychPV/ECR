@@ -48,7 +48,12 @@ public sealed class DeleteRowHandler(
     IBackgroundJobScheduler jobs,
     IUnitOfWork uow,
     IClock clock,
-    ISheetEditGate sheetGate)
+    ISheetEditGate sheetGate,
+
+    // ⛔ EA-B / P1-4: повторна перевірка передачі зрізу під блокуванням аркуша (як у `CreateRowHandler`).
+    // Контейнер передає завжди; `null` — лише тестові фабрики, і тоді документ із передачами
+    // відхиляється (fail-closed).
+    IEditAssignmentStore? assignments = null)
 {
     /// <summary>Тип сутності запису аудиту (<c>aud.StructureChange.EntityType</c>).</summary>
     public const string AuditEntityType = "doc.TableRow";
@@ -73,21 +78,11 @@ public sealed class DeleteRowHandler(
         var instance = await rowStore.ResolveTableInstanceAsync(tableInstanceId, ct).ConfigureAwait(false);
 
         // ⛔ Належність екземпляра документові з МАРШРУТУ — як у `CreateRowHandler`.
-        if (instance.DocumentId != documentId)
-        {
-            throw new Errors.NotFoundException(
-                "ECR-DOC-0404",
-                $"Екземпляр таблиці {tableInstanceId} не належить документу {documentId}.",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = "err.ECR-DOC-0404.tableInstanceNotInDocument",
-                    ["tableInstanceId"] = tableInstanceId.ToString(CultureInfo.InvariantCulture),
-                    ["documentId"] = documentId.ToString(CultureInfo.InvariantCulture),
-                });
-        }
-
-        // ⛔ Видимість документа — до будь-якої відмови про таблицю чи рядок (нерозкриття): 404, не 403.
-        var read = await access.CanReadDocumentAsync(profile, documentId, ct).ConfigureAwait(false);
+        // ⛔ P3 (оракул існування): «екземпляр чужого документа» і «документ недоступний» — ОДНА відповідь
+        // (404 `err.ECR-DOC-0404.document`), інакше за відмінністю тексту можна вгадувати чужі `TableInstanceId`.
+        var read = instance.DocumentId == documentId
+            ? await access.CanReadDocumentAsync(profile, documentId, ct).ConfigureAwait(false)
+            : EditDecision.Deny(EditDenyReason.NoGrant);
         if (!read.IsAllowed)
         {
             throw new Errors.NotFoundException(
@@ -126,8 +121,10 @@ public sealed class DeleteRowHandler(
             throw RowNotFound();
         }
 
-        // Права — ДО транзакції й блокування аркуша (P3, як у створенні).
-        await RequireDeleteAllowedAsync(profile, tableInstanceId, key, ct).ConfigureAwait(false);
+        // Права на РЯДОК — ДО транзакції й блокування аркуша (P3, як у створенні); права на значення
+        // колонок рядка — під блокуванням, коли відомий склад (P1-2).
+        var rowDecision = await RequireDeleteAllowedAsync(profile, tableInstanceId, key, ct).ConfigureAwait(false);
+        var sheetCode = snapshot.Sheets.FirstOrDefault(s => s.Id == table.SheetDefId)?.Code;
 
         string? jobId = null;
         var enlist = jobs.EnlistsInCallerTransaction;
@@ -136,7 +133,9 @@ public sealed class DeleteRowHandler(
         await uow.ExecuteInTransactionAsync(
             async innerCt =>
             {
-                seeds = await DeleteUnderLockAsync(instance, table, key, profile, innerCt).ConfigureAwait(false);
+                seeds = await DeleteUnderLockAsync(
+                        instance, table, key, profile, rowDecision.AssignmentsPresent, sheetCode, innerCt)
+                    .ConfigureAwait(false);
 
                 // ⛔ MI-02 (в): черга в базі — постановка ВСЕРЕДИНІ транзакції останнім оператором; Quartz — після коміту.
                 if (enlist && seeds.Count > 0)
@@ -155,7 +154,7 @@ public sealed class DeleteRowHandler(
     }
 
     /// <summary>Рішення служби доступу — те саме питання, що й на створення рядка.</summary>
-    private async Task RequireDeleteAllowedAsync(
+    private async Task<EditDecision> RequireDeleteAllowedAsync(
         AccessProfile profile, long tableInstanceId, RowKey key, CancellationToken ct)
     {
         var decisions = await access
@@ -171,6 +170,8 @@ public sealed class DeleteRowHandler(
         {
             throw DeleteDenied(decision.Reason);
         }
+
+        return decision;
     }
 
     private static Errors.AccessDeniedException DeleteDenied(EditDenyReason reason)
@@ -205,8 +206,12 @@ public sealed class DeleteRowHandler(
     /// <summary>Перевірки й видалення під блокуванням аркуша; кличеться лише всередині транзакції.</summary>
     /// <returns>Насіння каскаду перерахунку (порожнє — перераховувати нічого).</returns>
     private async Task<IReadOnlyList<RecalculationSeed>> DeleteUnderLockAsync(
-        TableInstanceRef instance, TableDef table, RowKey key, AccessProfile profile, CancellationToken ct)
+        TableInstanceRef instance, TableDef table, RowKey key, AccessProfile profile, bool assignmentsPresent,
+        string? sheetCode, CancellationToken ct)
     {
+        // ⛔ P3: очікування блокувань обмежене (409 ECR-DOC-4091 замість висіння до CommandTimeout) — до всіх блокувань.
+        await cells.LimitLockWaitAsync(ct).ConfigureAwait(false);
+
         // ⛔ L6-02: структура документа — першою, до блокування аркуша (як у створенні).
         DocumentStructure.EnsureUnchanged(
             await sheetGate.EnterStructureAsync(instance.DocumentId, exclusive: false, ct).ConfigureAwait(false),
@@ -234,6 +239,11 @@ public sealed class DeleteRowHandler(
             throw DeleteDenied(denied);
         }
 
+        // ⛔ P1-4 (EA-B): передача зрізу повторно — під блокуванням аркуша: «Заповнено»/«Валідовано»/строк/
+        // ексклюзивність, що з'явилися між рішенням і комітом, відхиляють видалення (рядковий рівень, без колонки).
+        await EnsureAssignmentsHoldAsync(instance, table, profile, assignmentsPresent, sheetCode, ct)
+            .ConfigureAwait(false);
+
         // Живий рядок: «немає» і «уже видалено» — одна відповідь (нерозкриття).
         var row = await rowStore
             .FindLiveRowAsync(instance.TableInstanceId, periodKey, key.Value, ct)
@@ -246,7 +256,11 @@ public sealed class DeleteRowHandler(
             throw NotDeletable("err.ECR-ROW-0409.templateRowNotDeletable");
         }
 
-        if (row.IsSourceManaged)
+        // ⛔ P1-3: рядок від події джерела або з останнім значенням від інтеграції/імпорту/збору видаляти
+        // «рукою» не можна (за замовчуванням): людина стерла б машинні дані, які «відродить» наступний прогін
+        // (а ключ видаленого рядка зайнятий). Відмова та сама, що й для `SourceEventLink`.
+        if (row.IsSourceManaged
+            || await rowStore.HasMachineOriginAsync(instance.DocumentId, periodKey, row.Id, ct).ConfigureAwait(false))
         {
             throw NotDeletable("err.ECR-ROW-0409.sourceRowNotDeletable");
         }
@@ -257,7 +271,36 @@ public sealed class DeleteRowHandler(
             ? new Dictionary<CellAddress, CellValueData>()
             : (await cells.ReadCellsAsync(addresses, ct).ConfigureAwait(false)).ToDictionary(p => p.Key, p => p.Value);
 
-        // ⛔ Склад ДО видалення — у тій самій транзакції, що й видалення.
+        // ⛔ P1-2 (безпека): право на РЯДОК (`CanCreateRowsAsync` ≈ `CanEdit` із колонкою 0) не бачить грантів
+        // на колонки, правил доступу до періоду і т.д. Видалення стирає значення КОЖНОЇ непорожньої комірки,
+        // тож для кожної з них питаємо те саме рішення, що й для правки; будь-яка заборона блокує видалення.
+        // ⚠ Лише обчислювана колонка (`CalculatedCell`) і колонка «лише читання» (`ColumnReadOnly`) не є
+        // забороною для ЛЮДИНИ: їх значення не вводилися руками, і причина — не в правах.
+        // Відповідь — наявний `ECR-ACCS-0403` БЕЗ назви колонки (нерозкриття).
+        var filled = addresses.Where(a => values.TryGetValue(a, out var v) && v is { IsEmpty: false }).ToList();
+        if (filled.Count > 0)
+        {
+            var decisions = await access
+                .CanEditCellsAsync(profile, instance.TableInstanceId, periodKey, filled, ct)
+                .ConfigureAwait(false);
+
+            foreach (var address in filled)
+            {
+                var decision = decisions.TryGetValue(address, out var found)
+                    ? found
+                    : EditDecision.Deny(EditDenyReason.NoGrant);
+
+                if (!decision.IsAllowed
+                    && decision.Reason is not (EditDenyReason.CalculatedCell or EditDenyReason.ColumnReadOnly))
+                {
+                    throw DeleteDenied(decision.Reason);
+                }
+            }
+        }
+
+        // ⛔ Склад ДО видалення — у тій самій транзакції, що й видалення. P2-1: ЛИШЕ склад (колонка, чи
+        // обчислена), БЕЗ значень: `GetStructureChangesHandler` читає за `Security.ViewAudit` без звуження
+        // за колонками, а значення лишаються в `aud.CellChange` під фільтром видимості (S6).
         var now = clock.UtcNow;
         var oldJson = JsonSerializer.Serialize(
             new
@@ -271,23 +314,17 @@ public sealed class DeleteRowHandler(
                 periodKey = instance.PeriodKey,
                 cells = columns
                     .Select(c => (Column: c, Value: values.GetValueOrDefault(new CellAddress(periodKey, row.Id, c.Id))))
-                    .Where(x => x.Value is not null && !x.Value.IsEmpty)
+                    .Where(x => x.Value is not null)
                     .Select(x => new
                     {
                         column = x.Column.Code,
                         columnDefId = x.Column.Id,
-                        text = x.Value!.ValueString,
-                        number = x.Value.ValueNumeric,
-                        date = x.Value.ValueDate,
-                        flag = x.Value.ValueBool,
-                        registryEntryId = x.Value.ValueRegistryEntryId,
-                        unitId = x.Value.ValueUnitId,
+                        isEmpty = x.Value!.IsEmpty,
                         calculated = x.Value.IsCalculated,
                     })
                     .ToList(),
             },
             JsonOptions);
-
         await audit.WriteStructureChangeAsync(
             new StructureChangeRecord(
                 now, instance.TemplateVersionId, AuditEntityType,
@@ -313,6 +350,42 @@ public sealed class DeleteRowHandler(
         return [.. columns.Select(c => new RecalculationSeed(row.Id, c.Id))];
     }
 
+    /// <summary>Передача зрізу під блокуванням аркуша (дзеркало `CreateRowHandler.EnsureAssignmentsHoldAsync`).</summary>
+    private async Task EnsureAssignmentsHoldAsync(
+        TableInstanceRef instance, TableDef table, AccessProfile profile, bool assignmentsPresent,
+        string? sheetCode, CancellationToken ct)
+    {
+        if (!assignmentsPresent || profile.IsSimulation || profile.IsIntegrationWriter)
+        {
+            return;
+        }
+
+        if (assignments is null)
+        {
+            throw new InvalidOperationException(
+                "Передачі зрізу діють, але сховища для повторної перевірки під блокуванням немає.");
+        }
+
+        var gate = await assignments
+            .ReadFactsForGateAsync(instance.DocumentId, profile.UserId, ct)
+            .ConfigureAwait(false);
+
+        // Рівень рядка: без колонки й місяця, без підйому (D5) — лише заборони передачі.
+        var facts = EditAssignmentGuard.Evaluate(
+            profile.UserId,
+            gate.OwnerUserId,
+            isIntegrationWriter: false,
+            gate.Facts,
+            new EditSliceFacts(
+                sheetCode, table.Code, new PeriodKey(instance.PeriodKey), ColumnIsMonth: false,
+                ColumnMonthNumber: null, IsRowLevel: true),
+            clock.UtcNow);
+
+        if (facts.Lock != EditDenyReason.None)
+        {
+            throw DeleteDenied(facts.Lock);
+        }
+    }
     /// <summary>Та сама задача, що й після PATCH: масив <c>cells</c> зливається з тією, що чекає.</summary>
     private Task<string> EnqueueRecalculationAsync(
         TableInstanceRef instance, IReadOnlyList<RecalculationSeed> seeds, int editorUserId, CancellationToken ct)

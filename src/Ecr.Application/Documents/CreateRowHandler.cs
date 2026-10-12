@@ -34,34 +34,12 @@ public sealed class CreateRowHandler(
 
         var instance = await rowStore.ResolveTableInstanceAsync(tableInstanceId, ct).ConfigureAwait(false);
 
-        // ⛔ Належність екземпляра таблиці документові з МАРШРУТУ. Без цієї
-        // звірки шлях у URL декоративний: клієнт указав би чужий
-        // `TableInstanceId` і писав би в чужий документ, маючи право лише на
-        // свій. `Patch` цю перевірку робить і пояснює навіщо
-        // (`CellsController.Patch`); сюди вона не доїхала, хоча `documentId`
-        // сюди приходив — і не читався взагалі.
-        //
-        // ⚠ Стоїть в ОБРОБНИКУ, а не в контролері, як у `Patch`: обробник —
-        // єдина точка, повз яку не пройде другий виклик.
-        if (instance.DocumentId != documentId)
-        {
-            throw new Errors.NotFoundException(
-                "ECR-DOC-0404",
-                $"Екземпляр таблиці {tableInstanceId} не належить документу {documentId}.",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = "err.ECR-DOC-0404.tableInstanceNotInDocument",
-                    ["tableInstanceId"] = tableInstanceId.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                    ["documentId"] = documentId.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                });
-        }
-
-        // ⛔ Видимість документа — до будь-якої відмови про таблицю (V-02, той
-        // самий клас, що й у `PatchCellsHandler`). Нижче відмови кажуть режим
-        // таблиці, межу рядків і чи зайнятий ключ — і все це діставалося
-        // користувачеві із забороною на проєкт, бо права питалися лише
-        // наприкінці. Відповідь — як на читання: 404, не 403.
-        var read = await access.CanReadDocumentAsync(profile, documentId, ct).ConfigureAwait(false);
+        // ⛔ Належність екземпляра таблиці документові з МАРШРУТУ + видимість документа (V-02): 404, не 403.
+        // ⛔ P3 (оракул існування): «екземпляр чужого документа» і «документ недоступний» — ОДНА відповідь
+        // (404 `err.ECR-DOC-0404.document`); окремий текст дозволяв вгадувати чужі `TableInstanceId`.
+        var read = instance.DocumentId == documentId
+            ? await access.CanReadDocumentAsync(profile, documentId, ct).ConfigureAwait(false)
+            : EditDecision.Deny(EditDenyReason.NoGrant);
         if (!read.IsAllowed)
         {
             throw new Errors.NotFoundException(
@@ -73,7 +51,6 @@ public sealed class CreateRowHandler(
                     ["documentId"] = documentId.ToString(System.Globalization.CultureInfo.InvariantCulture),
                 });
         }
-
         // ⛔ D-6: схована таблиця для читача НЕ ІСНУЄ — 404 ДО відмови «RowMode = Fixed», що називала її код.
         await DocumentVisibility
             .RequireTableVisibleAsync(

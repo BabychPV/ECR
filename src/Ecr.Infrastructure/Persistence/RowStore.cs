@@ -381,6 +381,29 @@ public sealed class RowStore(
             .FirstOrDefaultAsync(ct);
 
     /// <inheritdoc />
+    public async Task<bool> HasMachineOriginAsync(
+        long documentId, PeriodKey periodKey, long rowId, CancellationToken ct)
+    {
+        // ⚠ Журнал не є сутністю EF; `IX_CellChange_Cell (DocumentId, TableRowId, ColumnDefId, ChangedAt DESC)`.
+        // Береться ОСТАННЯ зміна кожної комірки, окрім перерахунку (він міняє похідне, а не вхід).
+        var found = await db.Database
+            .SqlQuery<int>($"""
+                SELECT TOP (1) 1 AS Value
+                FROM (
+                    SELECT c.Origin,
+                           ROW_NUMBER() OVER (PARTITION BY c.ColumnDefId ORDER BY c.ChangedAt DESC, c.Id DESC) AS Rn
+                    FROM aud.CellChange c
+                    WHERE c.DocumentId = {documentId} AND c.TableRowId = {rowId} AND c.PeriodKey = {periodKey.Value}
+                      AND c.Origin <> N'Recalculation'
+                ) x
+                WHERE x.Rn = 1 AND x.Origin IN (N'Integration', N'Import', N'ImportOverwrite', N'Collection')
+                """)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        return found.Count > 0;
+    }
+    /// <inheritdoc />
     public async Task<bool> SoftDeleteRowAsync(long rowId, PeriodKey periodKey, CancellationToken ct)
     {
         // ⚠ З ключем партиції (`PeriodKey`) і лише ЖИВИЙ: повторне видалення — `false`, не помилка бази.

@@ -81,6 +81,7 @@ public sealed class DeleteRowTests
         _access.CanReadDocumentAsync(Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<CancellationToken>())
                .Returns(EditDecision.Allow());
         Allow();
+        AllowCells();
 
         _jobs.EnlistsInCallerTransaction.Returns(true);
         _jobs.EnqueueCoalescedAsync<IFormulaRecalculationJob>(
@@ -96,6 +97,23 @@ public sealed class DeleteRowTests
                       Arg.Any<AccessProfile>(), TableInstance,
                       Arg.Any<IReadOnlyCollection<string>>(), Arg.Any<CancellationToken>())
                   .Returns(call => Rows(call.ArgAt<IReadOnlyCollection<string>>(2), EditDecision.Allow()));
+
+    /// <summary>Рішення на значення комірок рядка (P1-2): за замовчуванням усе дозволено.</summary>
+    private void AllowCells()
+        => _access.CanEditCellsAsync(
+                      Arg.Any<AccessProfile>(), TableInstance, Arg.Any<PeriodKey>(),
+                      Arg.Any<IReadOnlyCollection<CellAddress>>(), Arg.Any<CancellationToken>())
+                  .Returns(call => (IReadOnlyDictionary<CellAddress, EditDecision>)call
+                      .ArgAt<IReadOnlyCollection<CellAddress>>(3)
+                      .ToDictionary(a => a, _ => EditDecision.Allow()));
+
+    private void DenyCells(EditDenyReason reason)
+        => _access.CanEditCellsAsync(
+                      Arg.Any<AccessProfile>(), TableInstance, Arg.Any<PeriodKey>(),
+                      Arg.Any<IReadOnlyCollection<CellAddress>>(), Arg.Any<CancellationToken>())
+                  .Returns(call => (IReadOnlyDictionary<CellAddress, EditDecision>)call
+                      .ArgAt<IReadOnlyCollection<CellAddress>>(3)
+                      .ToDictionary(a => a, _ => EditDecision.Deny(reason)));
 
     private void Deny(EditDenyReason reason)
         => _access.CanCreateRowsAsync(
@@ -130,7 +148,9 @@ public sealed class DeleteRowTests
                 Arg.Is<StructureChangeRecord>(r =>
                     r.EntityType == "doc.TableRow" && r.Operation == "RowDeleted" && r.ChangedByUserId == 9
                     && r.NewJson == null && r.OldJson!.Contains(Key, StringComparison.Ordinal)
-                    && r.OldJson.Contains("12.5", StringComparison.Ordinal)),
+                    // P2-1: лише склад, значення (12.5) у StructureChange не потрапляє.
+                    && !r.OldJson.Contains("12.5", StringComparison.Ordinal)
+                    && r.OldJson.Contains("columnDefId", StringComparison.Ordinal)),
                 Arg.Any<CancellationToken>());
             _ = _rows.SoftDeleteRowAsync(RowId, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>());
             _ = _documents.TouchAsync(700, 9, Arg.Any<DateTime>(), Arg.Any<CancellationToken>());
@@ -290,6 +310,93 @@ public sealed class DeleteRowTests
         await _rows.DidNotReceive().SoftDeleteRowAsync(Arg.Any<long>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>());
     }
 
+    [Theory]
+    [InlineData(EditDenyReason.NoGrant)]
+    [InlineData(EditDenyReason.InsufficientGrantLevel)]
+    [InlineData(EditDenyReason.OutOfAccessWindow)]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "D3-A P1-2")]
+    public async Task Заборона_на_значення_колонки_блокує_видалення_без_назви_колонки(EditDenyReason reason)
+    {
+        // ⛔ `CanCreateRowsAsync` ≈ право на рядок БЕЗ колонкових грантів і правил періоду: без перевірки
+        // значень користувач із Write на таблицю стер би значення колонки, на яку має лише Read.
+        Arrange();
+        DenyCells(reason);
+
+        var ex = await Assert.ThrowsAsync<AccessDeniedException>(() => Run());
+
+        Assert.Equal("ECR-ACCS-0403", ex.ErrorCode);
+        Assert.Equal("err.ECR-ACCS-0403.deleteRowDenied", ex.Details!["messageKey"]);
+        Assert.Equal(reason.ToString(), ex.Details["reason"]);
+        Assert.DoesNotContain("31", ex.Message, StringComparison.Ordinal);
+        await _rows.DidNotReceive().SoftDeleteRowAsync(Arg.Any<long>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>());
+        await _audit.DidNotReceive().WriteStructureChangeAsync(Arg.Any<StructureChangeRecord>(), Arg.Any<CancellationToken>());
+    }
+
+    [Theory]
+    [InlineData(EditDenyReason.CalculatedCell)]
+    [InlineData(EditDenyReason.ColumnReadOnly)]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "D3-A P1-2")]
+    public async Task Обчислювана_чи_службова_колонка_не_є_забороною_для_людини(EditDenyReason reason)
+    {
+        Arrange();
+        DenyCells(reason);
+
+        await Run();
+
+        await _rows.Received(1).SoftDeleteRowAsync(RowId, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "D3-A P1-3")]
+    public async Task Рядок_з_машинним_походженням_значень_не_видаляється()
+    {
+        Arrange();
+        _rows.HasMachineOriginAsync(700, Arg.Any<PeriodKey>(), RowId, Arg.Any<CancellationToken>()).Returns(true);
+
+        var ex = await Assert.ThrowsAsync<BusinessRuleException>(() => Run());
+
+        Assert.Equal("ECR-ROW-0409", ex.ErrorCode);
+        Assert.Equal("err.ECR-ROW-0409.sourceRowNotDeletable", ex.Details!["messageKey"]);
+        await _rows.DidNotReceive().SoftDeleteRowAsync(Arg.Any<long>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "D3-A P3")]
+    public async Task Чужий_екземпляр_і_недоступний_документ_відповідають_однаково()
+    {
+        // Оракул існування: за різницею тексту не можна вгадувати чужі `TableInstanceId`.
+        Arrange();
+        var foreign = await Assert.ThrowsAsync<NotFoundException>(() => Run(documentId: 701));
+
+        _access.CanReadDocumentAsync(Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<CancellationToken>())
+               .Returns(EditDecision.Deny(EditDenyReason.NoGrant));
+        var hidden = await Assert.ThrowsAsync<NotFoundException>(() => Run());
+
+        Assert.Equal(foreign.ErrorCode, hidden.ErrorCode);
+        Assert.Equal(
+            foreign.Details!["messageKey"], hidden.Details!["messageKey"]);
+        Assert.Equal("err.ECR-DOC-0404.document", foreign.Details["messageKey"]);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "D3-A P3")]
+    public async Task Очікування_блокувань_обмежене_до_будь_яких_блокувань_аркуша()
+    {
+        Arrange();
+
+        await Run();
+
+        Received.InOrder(() =>
+        {
+            _ = _cells.LimitLockWaitAsync(Arg.Any<CancellationToken>());
+            _ = _gate.EnterSubmitAsync(700, 1, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>());
+        });
+    }
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
     public async Task Черга_в_базі_ставить_перерахунок_усередині_транзакції_Quartz_після_коміту()

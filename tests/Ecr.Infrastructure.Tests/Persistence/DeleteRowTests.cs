@@ -45,7 +45,7 @@ public sealed class DeleteRowTests(SqlServerFixture sql)
         var doc = await ArrangeAsync();
         var key = RowKeyOf(doc, 2);
         var rowId = doc.RowIds[1];
-        await InsertCellAsync(doc, rowId, column: 2, value: 5);
+        await InsertCellAsync(doc, rowId, column: 2, value: 777.25m);
         await InsertCellAsync(doc, doc.RowIds[0], column: 2, value: 7);
 
         var (handler, jobs) = DeleteHandler(doc);
@@ -71,10 +71,11 @@ public sealed class DeleteRowTests(SqlServerFixture sql)
         Assert.DoesNotContain(rowId, hot.Select(c => c.Address.TableRowId));
         Assert.Contains(doc.RowIds[0], hot.Select(c => c.Address.TableRowId));
 
-        // Слід: склад комірок ДО видалення, автор, тип сутності.
+        // Слід: склад комірок ДО видалення, автор, тип сутності — БЕЗ значень (P2-1).
         Assert.Equal(1, await ScalarAsync<int>(
             "SELECT COUNT(*) FROM aud.StructureChange WHERE EntityType = N'doc.TableRow' AND Operation = N'RowDeleted' " +
-            $"AND ChangedByUserId = {UserId} AND OldJson LIKE N'%{key}%' AND OldJson LIKE N'%\"number\":5%'"));
+            $"AND ChangedByUserId = {UserId} AND OldJson LIKE N'%{key}%' AND OldJson LIKE N'%columnDefId%' " +
+            "AND OldJson NOT LIKE N'%777.25%'"));
 
         // Перерахунок поставлено, насіння — усі колонки видаленого рядка.
         Assert.Equal("job-1", result.RecalculationJobId);
@@ -255,6 +256,13 @@ public sealed class DeleteRowTests(SqlServerFixture sql)
                   .ToDictionary(
                       k => k, _ => new NewRowAccess(EditDecision.Allow(), new Dictionary<int, EditDecision>()),
                       StringComparer.Ordinal));
+
+        // P1-2: рішення на значення комірок рядка — дозволено (колонкові заборони доводить DeleteRowGuardsTests).
+        access.CanEditCellsAsync(
+                  Arg.Any<AccessProfile>(), doc.TableInstanceId, Arg.Any<PeriodKey>(),
+                  Arg.Any<IReadOnlyCollection<CellAddress>>(), Arg.Any<CancellationToken>())
+              .Returns(call => (IReadOnlyDictionary<CellAddress, EditDecision>)call
+                  .ArgAt<IReadOnlyCollection<CellAddress>>(3).ToDictionary(a => a, _ => EditDecision.Allow()));
 
         return access;
     }

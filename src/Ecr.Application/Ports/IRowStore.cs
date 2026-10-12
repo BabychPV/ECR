@@ -156,6 +156,13 @@ public interface IRowStore
     public Task<bool> SoftDeleteRowAsync(long rowId, PeriodKey periodKey, CancellationToken ct);
 
     /// <summary>
+    /// Чи має рядок значення, ОСТАННІ (за кожною коміркою, крім перерахунку) від інтеграції, імпорту книги чи
+    /// збору (<c>aud.CellChange.Origin</c> ∈ Integration / Import / ImportOverwrite / Collection) (D3, P1-3).
+    /// </summary>
+    /// <remarks>Рядок із такими значеннями людина «рукою» не видаляє: машинні дані «відродить» наступний прогін.</remarks>
+    public Task<bool> HasMachineOriginAsync(long documentId, PeriodKey periodKey, long rowId, CancellationToken ct);
+
+    /// <summary>
     /// Створює кілька рядків ОДНИМ пакетом; <c>Id</c> повертаються в тому
     /// самому порядку, що й <paramref name="rowKeys"/>.
     /// </summary>

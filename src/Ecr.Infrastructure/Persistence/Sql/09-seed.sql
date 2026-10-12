@@ -1,4 +1,4 @@
-﻿-- ⚠ SET-опції задаються ЯВНО і першими.
+-- ⚠ SET-опції задаються ЯВНО і першими.
 -- `sqlcmd` за замовчуванням має `QUOTED_IDENTIFIER OFF`, а `SqlClient` — `ON`.
 -- Через це скрипт, який проходить у тестах (їх виконує SqlClient), падає в
 -- розгортанні (його виконує DBA через sqlcmd, `09-commands.md` §3) на будь-якій
@@ -7830,10 +7830,11 @@ USING (VALUES
     ,(N'grid.deleteRowConsequence', N'en', N'The row disappears from the table, totals and reports. Its values are kept in the audit trail.', 1)
     ,(N'grid.deleteRowNote', N'en', N'There is no undo for this action. Only a row you added can be deleted, and only while the sheet is a draft or rejected.', 1)
     ,(N'grid.deleteRowVerb', N'en', N'Delete row', 1)
+    ,(N'grid.deleteRowOrdinalLabel', N'en', N'row #{n}', 1)
     ,(N'err.ECR-ACCS-0403.deleteRowDenied', N'en', N'A row cannot be deleted from this table: {reason}.', 1)
     ,(N'err.ECR-ROW-0404.rowNotFound', N'en', N'The row was not found in this table. It may have been deleted already.', 1)
     ,(N'err.ECR-ROW-0409.templateRowNotDeletable', N'en', N'This row comes from the template and cannot be deleted.', 1)
-    ,(N'err.ECR-ROW-0409.sourceRowNotDeletable', N'en', N'This row is maintained by a source event and cannot be deleted by hand.', 1)
+    ,(N'err.ECR-ROW-0409.sourceRowNotDeletable', N'en', N'This row holds data loaded by an integration, import or collection (or is maintained by a source event) and cannot be deleted by hand.', 1)
     -- COLL:d3rowdelete ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
@@ -19716,14 +19717,16 @@ SELECT v.[Key], v.Lang, v.Val
     (N'grid.deleteRowNote', N'kz', N'Бұл әрекетті болдырмау мүмкін емес. Тек өзіңіз қосқан жолды және тек парақ жоба немесе қабылданбаған күйде болғанда жоюға болады.'),
     (N'grid.deleteRowVerb', N'ru', N'Удалить строку'),
     (N'grid.deleteRowVerb', N'kz', N'Жолды жою'),
+    (N'grid.deleteRowOrdinalLabel', N'ru', N'строка №{n}'),
+    (N'grid.deleteRowOrdinalLabel', N'kz', N'№{n} жол'),
     (N'err.ECR-ACCS-0403.deleteRowDenied', N'ru', N'Из этой таблицы нельзя удалить строку: {reason}.'),
     (N'err.ECR-ACCS-0403.deleteRowDenied', N'kz', N'Бұл кестеден жолды жоюға болмайды: {reason}.'),
     (N'err.ECR-ROW-0404.rowNotFound', N'ru', N'Строка в этой таблице не найдена. Возможно, она уже удалена.'),
     (N'err.ECR-ROW-0404.rowNotFound', N'kz', N'Бұл кестеде жол табылмады. Ол бұрын жойылған болуы мүмкін.'),
     (N'err.ECR-ROW-0409.templateRowNotDeletable', N'ru', N'Эта строка берётся из шаблона, её нельзя удалить.'),
     (N'err.ECR-ROW-0409.templateRowNotDeletable', N'kz', N'Бұл жол үлгіден алынған, оны жоюға болмайды.'),
-    (N'err.ECR-ROW-0409.sourceRowNotDeletable', N'ru', N'Эта строка ведётся событием источника, её нельзя удалить вручную.'),
-    (N'err.ECR-ROW-0409.sourceRowNotDeletable', N'kz', N'Бұл жолды дереккөз оқиғасы жүргізеді, оны қолмен жоюға болмайды.')
+    (N'err.ECR-ROW-0409.sourceRowNotDeletable', N'ru', N'В этой строке данные, загруженные интеграцией, импортом или сбором (или строку ведёт событие источника): удалить её вручную нельзя.'),
+    (N'err.ECR-ROW-0409.sourceRowNotDeletable', N'kz', N'Бұл жолда интеграция, импорт немесе жинау арқылы жүктелген деректер бар (немесе оны дереккөз оқиғасы жүргізеді): оны қолмен жоюға болмайды.')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
