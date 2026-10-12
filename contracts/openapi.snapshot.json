@@ -1366,6 +1366,56 @@
         ],
         "type": "object"
       },
+      "CellStyleAccessDto": {
+        "description": "Чи можна фарбувати комірки таблиці (CELL-STYLE P1A): те, що клієнт має знати, щоб не вмикати «Заливку»/«Колір\nтексту» там, де `PATCH …/cell-styles` однаково відмовить 403.",
+        "properties": {
+          "canStyle": {
+            "description": "`true` — хоч одну ВИДИМУ комірку зрізу можна фарбувати (те саме рішення, що приймає запис). Ознаки колонки\n        «обчислювана»/«лише читання» тут НЕ заважають: колір — оформлення, а не дані.",
+            "type": "boolean"
+          },
+          "deniedReason": {
+            "description": "Коли `canStyle` = `false`: стабільне ім'я `EditDenyReason` (те саме, що значення\n`CellPermissions`; текст — ключ каталогу `deny.{reason}`) — найчастіша причина серед комірок. `null` — коли\n`canStyle` = `true` або комірок у зрізі немає (фарбувати нічого).",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "styleDeniedCells": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Решта заборонених комірок (не покриті повністю рядком чи колонкою): ключ `\"{rowKey}:{columnCode}\"` →\nназва `EditDenyReason`. Лише коли `canStyle` = `true`.",
+            "type": "object"
+          },
+          "styleDeniedColumnCodes": {
+            "description": "Видимі колонки, у яких не можна фарбувати жодну комірку (напр. заборона/«лише читання» на колонку за грантом).\nЛише коли `canStyle` = `true`. Схованих/заборонених читачеві колонок тут немає (нерозкриття, S6).",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "styleDeniedRowKeys": {
+            "description": "Рядки, у яких не можна фарбувати жодну видиму комірку (напр. рядок «лише читання»). Лише коли\n`canStyle` = `true`.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "truncated": {
+            "description": "`true` — переліки обрізано до ліміту (`CellStyleAccessPolicy.MaxKeys` ключів усього): комірки, яких тут\n        немає, можуть бути заборонені; остаточне рішення — за сервером (403 на запис).",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "canStyle",
+          "deniedReason",
+          "styleDeniedRowKeys",
+          "styleDeniedColumnCodes",
+          "styleDeniedCells",
+          "truncated"
+        ],
+        "type": "object"
+      },
       "CellStyleChange": {
         "description": "Зміна оформлення однієї комірки.",
         "properties": {
@@ -17472,6 +17522,17 @@
               "$ref": "#/components/schemas/RowDto"
             },
             "type": "array"
+          },
+          "styleAccess": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/CellStyleAccessDto",
+                "description": "«Можна фарбувати» (CELL-STYLE P1A): те саме рішення, що приймає `PATCH …/cell-styles`; див.\n`CellStyleAccessDto`. `null` — лише в тестах, що конструюють відповідь вручну."
+              }
+            ]
           },
           "tableInstanceId": {
             "description": "Екземпляр таблиці.",

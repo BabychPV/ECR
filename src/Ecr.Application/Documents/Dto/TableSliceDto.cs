@@ -51,6 +51,10 @@ namespace Ecr.Application.Documents.Dto;
 /// стиль не задано (або посилання висить). Це дані самої таблиці: таблиця під забороною/схована
 /// не віддає зрізу взагалі (404), тож стиль шапки окремо розкрити не може.
 /// </param>
+/// <param name="StyleAccess">
+/// «Можна фарбувати» (CELL-STYLE P1A): те саме рішення, що приймає <c>PATCH …/cell-styles</c>; див.
+/// <c>CellStyleAccessDto</c>. <c>null</c> — лише в тестах, що конструюють відповідь вручну.
+/// </param>
 public sealed record TableSliceDto(
     long TableInstanceId,
     int PeriodKey,
@@ -61,7 +65,45 @@ public sealed record TableSliceDto(
     IReadOnlyDictionary<string, Ecr.Application.Templates.CellFormatDto>? CellFormats = null,
     IReadOnlyList<string>? OutOfWindowCells = null,
     IReadOnlyDictionary<string, Ecr.Application.Templates.CellFormatDto>? CellStyles = null,
-    CellStyleDto? HeaderStyle = null);
+    CellStyleDto? HeaderStyle = null,
+    CellStyleAccessDto? StyleAccess = null);
+
+/// <summary>
+/// Чи можна фарбувати комірки таблиці (CELL-STYLE P1A): те, що клієнт має знати, щоб не вмикати «Заливку»/«Колір
+/// тексту» там, де <c>PATCH …/cell-styles</c> однаково відмовить 403.
+/// </summary>
+/// <param name="CanStyle">
+/// <c>true</c> — хоч одну ВИДИМУ комірку зрізу можна фарбувати (те саме рішення, що приймає запис). Ознаки колонки
+/// «обчислювана»/«лише читання» тут НЕ заважають: колір — оформлення, а не дані.
+/// </param>
+/// <param name="DeniedReason">
+/// Коли <c>canStyle</c> = <c>false</c>: стабільне ім'я <c>EditDenyReason</c> (те саме, що значення
+/// <c>CellPermissions</c>; текст — ключ каталогу <c>deny.{reason}</c>) — найчастіша причина серед комірок. <c>null</c> — коли
+/// <c>canStyle</c> = <c>true</c> або комірок у зрізі немає (фарбувати нічого).
+/// </param>
+/// <param name="StyleDeniedRowKeys">
+/// Рядки, у яких не можна фарбувати жодну видиму комірку (напр. рядок «лише читання»). Лише коли
+/// <c>canStyle</c> = <c>true</c>.
+/// </param>
+/// <param name="StyleDeniedColumnCodes">
+/// Видимі колонки, у яких не можна фарбувати жодну комірку (напр. заборона/«лише читання» на колонку за грантом).
+/// Лише коли <c>canStyle</c> = <c>true</c>. Схованих/заборонених читачеві колонок тут немає (нерозкриття, S6).
+/// </param>
+/// <param name="StyleDeniedCells">
+/// Решта заборонених комірок (не покриті повністю рядком чи колонкою): ключ <c>"{rowKey}:{columnCode}"</c> →
+/// назва <c>EditDenyReason</c>. Лише коли <c>canStyle</c> = <c>true</c>.
+/// </param>
+/// <param name="Truncated">
+/// <c>true</c> — переліки обрізано до ліміту (<c>CellStyleAccessPolicy.MaxKeys</c> ключів усього): комірки, яких тут
+/// немає, можуть бути заборонені; остаточне рішення — за сервером (403 на запис).
+/// </param>
+public sealed record CellStyleAccessDto(
+    bool CanStyle,
+    string? DeniedReason,
+    IReadOnlyList<string> StyleDeniedRowKeys,
+    IReadOnlyList<string> StyleDeniedColumnCodes,
+    IReadOnlyDictionary<string, string> StyleDeniedCells,
+    bool Truncated);
 
 /// <summary>Опис колонки для клієнта.</summary>
 /// <remarks>

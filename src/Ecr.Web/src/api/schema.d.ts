@@ -20154,6 +20154,31 @@ export interface components {
              *     ⚠ Додано в L6 останнім необов'язковим полем: клієнт, що його не знає, малює решту як раніше. */
             pattern?: null | string;
         };
+        /** @description Чи можна фарбувати комірки таблиці (CELL-STYLE P1A): те, що клієнт має знати, щоб не вмикати «Заливку»/«Колір
+         *     тексту» там, де `PATCH …/cell-styles` однаково відмовить 403. */
+        CellStyleAccessDto: {
+            /** @description `true` — хоч одну ВИДИМУ комірку зрізу можна фарбувати (те саме рішення, що приймає запис). Ознаки колонки
+             *             «обчислювана»/«лише читання» тут НЕ заважають: колір — оформлення, а не дані. */
+            canStyle: boolean;
+            /** @description Коли `canStyle` = `false`: стабільне ім'я `EditDenyReason` (те саме, що значення
+             *     `CellPermissions`; текст — ключ каталогу `deny.{reason}`) — найчастіша причина серед комірок. `null` — коли
+             *     `canStyle` = `true` або комірок у зрізі немає (фарбувати нічого). */
+            deniedReason: null | string;
+            /** @description Решта заборонених комірок (не покриті повністю рядком чи колонкою): ключ `"{rowKey}:{columnCode}"` →
+             *     назва `EditDenyReason`. Лише коли `canStyle` = `true`. */
+            styleDeniedCells: {
+                [key: string]: string;
+            };
+            /** @description Видимі колонки, у яких не можна фарбувати жодну комірку (напр. заборона/«лише читання» на колонку за грантом).
+             *     Лише коли `canStyle` = `true`. Схованих/заборонених читачеві колонок тут немає (нерозкриття, S6). */
+            styleDeniedColumnCodes: string[];
+            /** @description Рядки, у яких не можна фарбувати жодну видиму комірку (напр. рядок «лише читання»). Лише коли
+             *     `canStyle` = `true`. */
+            styleDeniedRowKeys: string[];
+            /** @description `true` — переліки обрізано до ліміту (`CellStyleAccessPolicy.MaxKeys` ключів усього): комірки, яких тут
+             *             немає, можуть бути заборонені; остаточне рішення — за сервером (403 на запис). */
+            truncated: boolean;
+        };
         /** @description Зміна оформлення однієї комірки. */
         CellStyleChange: {
             /** @description Заливка `#rrggbb`; `null` — не чіпати; `""` — зняти. */
@@ -27578,6 +27603,7 @@ export interface components {
             periodKey: number;
             /** @description Рядки зі значеннями. */
             rows: components["schemas"]["RowDto"][];
+            styleAccess?: null | components["schemas"]["CellStyleAccessDto"];
             /**
              * Format: int64
              * @description Екземпляр таблиці.
