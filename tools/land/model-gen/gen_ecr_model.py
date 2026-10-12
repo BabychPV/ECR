@@ -970,7 +970,7 @@ def _waste_mapping():
         'notProven': [
             {'prodColumn': 'Land_Waste_Name_Area', 'why': 'Звіт: значення псевдонімізоване (area-NNN) і не зіставлене з рядками T8_01 '
                                                           '(назва об\'єкта/договір/примітки) — відповідність не доведено, потрібне питання замовнику.'},
-            {'prodColumn': 'Land_Value', 'why': 'Текстовий дубль Land_Measure_Weight у зразку (30 -> "30"); у шаблон не переноситься, '
+            {'prodColumn': 'Land_Value', 'why': 'Текстовий дубль Land_Measure_Weight у зразку (число як текст); у шаблон не переноситься, '
                                                  'джерелом значення береться Land_Measure_Weight.'},
             {'prodColumn': 'Land_No', 'why': 'У зразку лише порядковий номер; ключ рядка шаблону — Land_ItemId.'},
         ],
