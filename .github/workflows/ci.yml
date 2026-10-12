@@ -109,6 +109,10 @@ jobs:
             only: "-Only 'Складання','Тести API (частина 1)'"
           - part: api-2
             only: "-Only 'Складання','Тести API (частина 2)'"
+          - part: api-3
+            only: "-Only 'Складання','Тести API (частина 3)'"
+          - part: api-4
+            only: "-Only 'Складання','Тести API (частина 4)'"
 
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
