@@ -62,5 +62,19 @@ function ConvertTo-LandCfRules {
                 })
         }
     }
+    # Правила за СТАТУСОМ РЯДКА (expression N($B5="Inactive") в Excel): «усі колонки таблиці» + колонка-джерело (статусна колонка
+    # таблиці з довідником) + textEq за КОДОМ запису без регістру. Рішення людини 12.10 17:35Z; джерело - conditionalFormatsRowStatus.
+    # Правила на колонці C аркушів 9a/11 (conditionalFormatsStatusUnproven) НЕ переносяться: що в C - не доведено.
+    foreach ($s in @($Model.conditionalFormatsRowStatus)) {
+        if ($null -eq $s) { continue }
+        if ([string]::IsNullOrWhiteSpace([string]$s.table) -or [string]::IsNullOrWhiteSpace([string]$s.statusColumn)) { continue }
+        $out.Add(@{
+                columnCode = '*'; operator = 'textEq'; value = [string]$s.value; valueTo = $null
+                backgroundHex = $(if ($s.backgroundHex) { [string]$s.backgroundHex } else { $null })
+                foregroundHex = $(if ($s.foregroundHex) { [string]$s.foregroundHex } else { $null })
+                isBold = [bool]$s.isBold
+                scope = $null; tableCode = [string]$s.table; rowKeys = $null; refColumnCode = [string]$s.statusColumn; pattern = $null
+            })
+    }
     return $out.ToArray()
 }
