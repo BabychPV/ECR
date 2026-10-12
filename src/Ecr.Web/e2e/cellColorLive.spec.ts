@@ -324,10 +324,11 @@ test.describe('cellColor: колір комірки на реальному ст
       });
       expect(response.status, `PATCH {cells}: ${response.text}`).toBe(422);
       // ⚠ Код залежить від того, ЯКИЙ рубіж спрацював першим. До CELL-STYLE scope-2 `items` був обов'язковим, і
-      // чужа форма падала на валідації моделі (`ECR-REQ-0422`). Тепер `items` необов'язкове (запит лише зі `scope`),
-      // модель проходить, а `periodKey` у чужій формі відсутній (= 0) і не збігається з періодом екземпляра:
-      // `ECR-PRD-0422` / `err.ECR-PRD-0422.periodMismatch`. Обидва - 422 ДО будь-якого запису, і саме це контракт.
-      expect(response.text).toMatch(/ECR-(REQ|PRD)-0422/);
+      // чужа форма падала на валідації моделі (`ECR-REQ-0422`). Тепер `items` необов'язкове, а після фіксу
+      // emptyChange (546775656) `EnsureValid` запиту (без items і без scope) спрацьовує РАНІШЕ за перевірку періоду
+      // в handler: `ECR-CELL-4224` / `err.ECR-CELL-4224.emptyChange`. Лишаємо й старі коди як допустимі:
+      // усі - 422 ДО будь-якого запису, і саме це контракт.
+      expect(response.text).toMatch(/ECR-(REQ|PRD)-0422|ECR-CELL-4224/);
 
       // З ПРАВИЛЬНИМ periodKey чужа форма не має проходити як «порожній успіх» (регрес scope-2: 200 appliedCells 0):
       // запит без items і без scope - 422 `ECR-CELL-4224` / `err.ECR-CELL-4224.emptyChange`.
