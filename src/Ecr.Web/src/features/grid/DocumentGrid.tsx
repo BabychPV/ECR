@@ -19,7 +19,7 @@ import { cellAppearanceClassOf, cellAppearanceOf } from './cellAppearance';
 import { cellFormatOf, withCellFormat } from './conditionalAppearance';
 import { CellColorMenu, type ColourTarget } from './CellColorMenu';
 import { useCellStyles } from './useCellStyles';
-import { colourableCells, userStyleOf, withUserStyle, type SliceWithUserStyles } from './userCellStyle';
+import { colourableCells, userStyleOf, withUserStyle } from './userCellStyle';
 import { cellDisplay, cellText, editorValueOf, isNumericColumn, isTextColumnType, sameColumnValue } from './cellValue';
 import { columnIndexOf, rowIndexOf } from './rowIndex';
 import { planPaste, type PasteRejection } from './clipboard';
@@ -399,12 +399,15 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
     (target: ColourTarget, hex: string | null) => {
       if (colourTargets.length === 0) return;
 
-      cellStyles.mutate(
-        colourTargets.map((cell) => ({
+      // Сервер: `""` — зняти, `null` — не чіпати. «Без заливки»/«Автоматичний» = `""`.
+      const value = hex ?? '';
+
+      cellStyles.mutate({
+        cells: colourTargets.map((cell) => ({
           ...cell,
-          ...(target === 'fill' ? { backgroundHex: hex } : { foregroundHex: hex }),
+          ...(target === 'fill' ? { backgroundHex: value } : { foregroundHex: value }),
         })),
-      );
+      });
     },
     [colourTargets, cellStyles],
   );
@@ -2333,6 +2336,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
           onApply={applyColour}
           disabled={colourTargets.length === 0}
           disabledHint={t(readOnly ? 'grid.cellColor.readOnly' : 'grid.cellColor.noSelection')}
+          disabledReason={readOnly ? 'readOnly' : 'noSelection'}
           pending={cellStyles.isPending}
         />
         {Object.keys(widths).length > 0 && (
@@ -3042,7 +3046,7 @@ export function gridColumns(
         // тексту»), — шар ПІД умовним форматуванням (рішення Аудиту 12.10, як
         // в Excel: правило перекриває ручну заливку). Порядок: колонка < рядок
         // < користувацький < умовний формат < стан.
-        const userFormat = userStyleOf(slice as SliceWithUserStyles, key);
+        const userFormat = userStyleOf(slice, key);
         const afterUser = userFormat === null ? column.style : withUserStyle(column.style, userFormat);
         const style = conditional === null ? afterUser : withCellFormat(afterUser, conditional);
         const appearance = cellAppearanceOf(style);
@@ -3135,6 +3139,8 @@ export function gridColumns(
           // і людина з інструментами розробника бачать причину підсвітки.
           ...(conditional === null ? {} : { 'data-conditional-format': 'true' }),
           ...(userFormat === null ? {} : { 'data-user-style': 'true' }),
+          ...(userFormat?.backgroundHex == null ? {} : { 'data-user-fill': 'true' }),
+          ...(userFormat?.foregroundHex == null ? {} : { 'data-user-text': 'true' }),
 
           // ⚠ Підказка СТАНУ має першість над підказкою ЗНАЧЕННЯ, і це
           // вибір, а не випадок: `title` на елементі один, а «сервер

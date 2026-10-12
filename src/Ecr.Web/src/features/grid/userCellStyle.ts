@@ -1,59 +1,65 @@
-import type { TableSliceDto } from '@/api/types';
+import type { CellFormatDto, CellStyleChange, TableSliceDto } from '@/api/types';
+import { isHexColour } from '@/shared/theme/cellPalette';
 import { withCellFormat } from './conditionalAppearance';
 import { cellKey } from './permissions';
 import type { GridSelection } from './selection';
 
 /**
- * Користувацький колір комірки «як в Excel» (L4): заливка і колір тексту, які
- * людина ставить на виділене з тулбара сітки.
+ * Користувацький колір комірки «як в Excel» (L4): заливка, колір тексту і жирність,
+ * які людина ставить на виділене з тулбара сітки.
  *
- * Контракт (L3a, сервер): `TableSliceDto.cellStyles` — ключ `"{rowKey}:{columnCode}"`,
- * значення — `{ backgroundHex, foregroundHex }` (`#rrggbb` або `null` — колір
- * не задано); запис — `PATCH /documents/{id}/tables/{tid}/cell-styles`.
+ * Контракт (CELL-STYLE L3a, `schema.d.ts`): `TableSliceDto.cellStyles` — ключ
+ * `"{rowKey}:{columnCode}"`, значення — `CellFormatDto`; запис —
+ * `PATCH /documents/{id}/tables/{tid}/cell-styles` з `PatchCellStylesRequest`.
  *
- * ⚠ Поки поля немає у згенерованому `schema.d.ts`, клієнт читає його через
- * власний необов'язковий тип: гілка збирається і до, і після сервера, а відсутнє
- * поле означає «користувацьких кольорів немає».
- *
- * ⛔ Шар ПІСЛЯ умовного форматування: що людина пофарбувала сама — сильніше за
- * правило. Далі все йде тим самим шляхом, що стиль автора і CF
- * (`cellAppearanceOf`): контраст під обидві теми, заливка лише там, де її
- * дозволяє `cellEditors.css`.
+ * Шар: колонка < рядок < користувацький < УМОВНИЙ ФОРМАТ < стан (рішення Аудиту
+ * 12.10, як в Excel: правило перекриває ручну заливку). Далі все йде тим самим
+ * шляхом, що стиль автора і CF (`cellAppearanceOf`): контраст під обидві теми,
+ * заливка лише там, де її дозволяє `cellEditors.css`.
  */
-export interface UserCellFormat {
-  readonly backgroundHex?: string | null;
-  readonly foregroundHex?: string | null;
+export type UserCellFormat = Pick<CellFormatDto, 'backgroundHex' | 'foregroundHex' | 'isBold'>;
+
+/** Одна комірка запису: `undefined`/`null` — не чіпати; `""` — зняти; `#rrggbb` — поставити. */
+export type CellStylePatch = Pick<CellStyleChange, 'rowKey' | 'columnCode' | 'backgroundHex' | 'foregroundHex' | 'isBold'>;
+
+/** Стеля сервера на комірок в одному запиті (`PatchCellStylesRequest.MaxItems`). */
+export const CellStyleServerMaxItems = 2000;
+
+/** Розмір порції запису: з запасом під стелю сервера, порції йдуть послідовно. */
+export const CellStyleChunkSize = 1000;
+
+export function chunkPatches<T>(items: readonly T[], size: number = CellStyleChunkSize): T[][] {
+  const chunks: T[][] = [];
+
+  for (let i = 0; i < items.length; i += size) chunks.push(items.slice(i, i + size));
+
+  return chunks;
 }
 
-export type SliceWithUserStyles = TableSliceDto & {
-  cellStyles?: Readonly<Record<string, UserCellFormat>> | null;
-};
-
-/** Одна комірка запиту запису; поле, якого немає, не змінюється, `null` — скидає. */
-export interface CellStylePatch {
-  readonly rowKey: string;
-  readonly columnCode: string;
-  readonly backgroundHex?: string | null;
-  readonly foregroundHex?: string | null;
+/** Колір у запиті — лише `#rrggbb`, `""` (зняти) або «не чіпати». */
+export function isValidPatch(patch: CellStylePatch): boolean {
+  return [patch.backgroundHex, patch.foregroundHex].every(
+    (color) => color === undefined || color === null || color === '' || isHexColour(color),
+  );
 }
 
-export function userStyleOf(slice: Pick<SliceWithUserStyles, 'cellStyles'>, key: string): UserCellFormat | null {
+export function userStyleOf(slice: Pick<TableSliceDto, 'cellStyles'>, key: string): UserCellFormat | null {
   const found = slice.cellStyles?.[key];
 
   if (found === undefined) return null;
 
-  return found.backgroundHex == null && found.foregroundHex == null ? null : found;
+  return found.backgroundHex === null && found.foregroundHex === null && !found.isBold ? null : found;
 }
 
-/** Стиль із накладеним користувацьким кольором; жирність не чіпається. */
+/** Стиль із накладеним користувацьким оформленням (колір, жирність — із сервера). */
 export function withUserStyle(
   style: Parameters<typeof withCellFormat>[0],
   format: UserCellFormat,
 ): ReturnType<typeof withCellFormat> {
   return withCellFormat(style, {
-    backgroundHex: format.backgroundHex ?? null,
-    foregroundHex: format.foregroundHex ?? null,
-    isBold: false,
+    backgroundHex: format.backgroundHex,
+    foregroundHex: format.foregroundHex,
+    isBold: format.isBold,
   });
 }
 
@@ -99,19 +105,22 @@ export function colourableCells(
   return cells;
 }
 
-/** Кеш зрізу після оптимістичного застосування запису. */
-export function applyStylePatches(slice: SliceWithUserStyles, patches: readonly CellStylePatch[]): SliceWithUserStyles {
+/** Кеш зрізу після оптимістичного застосування запису (семантика сервера: `null` — не чіпати, `""` — зняти). */
+export function applyStylePatches(slice: TableSliceDto, patches: readonly CellStylePatch[]): TableSliceDto {
   const next: Record<string, UserCellFormat> = { ...(slice.cellStyles ?? {}) };
 
   for (const patch of patches) {
     const key = cellKey(patch.rowKey, patch.columnCode);
-    const before = next[key] ?? {};
+    const before: UserCellFormat = next[key] ?? { backgroundHex: null, foregroundHex: null, isBold: false };
+    const pick = (value: string | null | undefined, old: string | null): string | null =>
+      value === undefined || value === null ? old : value === '' ? null : value;
     const merged: UserCellFormat = {
-      backgroundHex: patch.backgroundHex === undefined ? before.backgroundHex ?? null : patch.backgroundHex,
-      foregroundHex: patch.foregroundHex === undefined ? before.foregroundHex ?? null : patch.foregroundHex,
+      backgroundHex: pick(patch.backgroundHex, before.backgroundHex),
+      foregroundHex: pick(patch.foregroundHex, before.foregroundHex),
+      isBold: patch.isBold ?? before.isBold,
     };
 
-    if (merged.backgroundHex === null && merged.foregroundHex === null) delete next[key];
+    if (merged.backgroundHex === null && merged.foregroundHex === null && !merged.isBold) delete next[key];
     else next[key] = merged;
   }
 

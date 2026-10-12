@@ -9,7 +9,8 @@ import {
   ThemeShades,
   userStyleOf,
   withUserStyle,
-  type SliceWithUserStyles,
+  chunkPatches,
+  isValidPatch,
 } from '../userCellStyle';
 
 /**
@@ -32,7 +33,7 @@ function row(rowKey: string, label: string | null = null): TableSliceDto['rows']
   return { rowKey, ordinal: 1, rowKind: 'Item', label, rowVersion: '0x01', cells: { A: '1', B: '2' }, isOrphaned: false };
 }
 
-function slice(extra: Partial<SliceWithUserStyles> = {}): SliceWithUserStyles {
+function slice(extra: Partial<TableSliceDto> = {}): TableSliceDto {
   return {
     tableInstanceId: 1,
     periodKey: 202609,
@@ -46,7 +47,7 @@ function slice(extra: Partial<SliceWithUserStyles> = {}): SliceWithUserStyles {
 
 const noRequired = { blocked: new Map<string, string>(), warning: new Map<string, string>() };
 
-function propsFor(s: SliceWithUserStyles, rowKey: string, code = 'A') {
+function propsFor(s: TableSliceDto, rowKey: string, code = 'A') {
   const found = gridColumns(s, false, NoLocalFlags, {}, noRequired).find((c) => c.prop === code);
   if (found === undefined || typeof found.cellProperties !== 'function') throw new Error('Немає колонки');
 
@@ -55,7 +56,7 @@ function propsFor(s: SliceWithUserStyles, rowKey: string, code = 'A') {
 
 describe('шар користувацького кольору в gridColumns', () => {
   it('заливка і колір тексту: клас, змінна й атрибут', () => {
-    const props = propsFor(slice({ cellStyles: { 'R1:A': { backgroundHex: '#ffff00', foregroundHex: '#ff0000' } } }), 'R1');
+    const props = propsFor(slice({ cellStyles: { 'R1:A': { backgroundHex: '#ffff00', foregroundHex: '#ff0000', isBold: false } } }), 'R1');
 
     expect(props.class).toContain('ecr-cell-filled');
     expect(props['data-user-style']).toBe('true');
@@ -65,7 +66,7 @@ describe('шар користувацького кольору в gridColumns', 
   it('умовне форматування перекриває користувацьке', () => {
     const s = slice({
       cellFormats: { 'R1:A': { backgroundHex: '#00ff00', foregroundHex: null, isBold: true } },
-      cellStyles: { 'R1:A': { backgroundHex: '#ffff00', foregroundHex: null } },
+      cellStyles: { 'R1:A': { backgroundHex: '#ffff00', foregroundHex: null, isBold: false } },
     });
     const style = propsFor(s, 'R1').style as Record<string, string>;
 
@@ -74,7 +75,7 @@ describe('шар користувацького кольору в gridColumns', 
   });
 
   it('лише своя комірка', () => {
-    const props = propsFor(slice({ cellStyles: { 'R1:A': { backgroundHex: '#ffff00' } } }), 'R2');
+    const props = propsFor(slice({ cellStyles: { 'R1:A': { backgroundHex: '#ffff00', foregroundHex: null, isBold: false } } }), 'R2');
 
     expect(props).not.toHaveProperty('data-user-style');
   });
@@ -84,7 +85,7 @@ describe('шар користувацького кольору в gridColumns', 
   });
 
   it('незбережена комірка лишається dirty і з кольором', () => {
-    const s = slice({ cellStyles: { 'R1:A': { backgroundHex: '#ffff00' } } });
+    const s = slice({ cellStyles: { 'R1:A': { backgroundHex: '#ffff00', foregroundHex: null, isBold: false } } });
     const found = gridColumns(s, false, { dirty: new Set(['R1:A']), rounded: new Set() }, {}, noRequired).find((c) => c.prop === 'A');
     const props = (typeof found?.cellProperties === 'function' ? found.cellProperties({ model: { __rowKey: 'R1' } } as never) : {}) ?? {};
 
@@ -95,14 +96,14 @@ describe('шар користувацького кольору в gridColumns', 
 
 describe('userStyleOf / withUserStyle', () => {
   it('порожній запис — немає стилю', () => {
-    expect(userStyleOf({ cellStyles: { k: { backgroundHex: null, foregroundHex: null } } }, 'k')).toBeNull();
+    expect(userStyleOf({ cellStyles: { k: { backgroundHex: null, foregroundHex: null, isBold: false } } }, 'k')).toBeNull();
     expect(userStyleOf({ cellStyles: null }, 'k')).toBeNull();
   });
 
-  it('withUserStyle не чіпає жирність автора', () => {
+  it('withUserStyle: жирність — із сервера, але жирність автора не знімається', () => {
     const base = { isBold: true, isItalic: false, foregroundArgb: null, backgroundArgb: null, horizontalAlign: null, verticalAlign: null, wrapText: false };
 
-    expect(withUserStyle(base, { backgroundHex: '#ff0000' }).isBold).toBe(true);
+    expect(withUserStyle(base, { backgroundHex: '#ff0000', foregroundHex: null, isBold: true }).isBold).toBe(true);
   });
 });
 
@@ -135,13 +136,44 @@ describe('colourableCells', () => {
 describe('applyStylePatches', () => {
   it('ставить, зливає поля й скидає (null/null видаляє запис)', () => {
     const one = applyStylePatches(slice(), [{ rowKey: 'R1', columnCode: 'A', backgroundHex: '#ffff00' }]);
-    expect(one.cellStyles?.['R1:A']).toEqual({ backgroundHex: '#ffff00', foregroundHex: null });
+    expect(one.cellStyles?.['R1:A']).toEqual({ backgroundHex: '#ffff00', foregroundHex: null, isBold: false });
 
     const two = applyStylePatches(one, [{ rowKey: 'R1', columnCode: 'A', foregroundHex: '#ff0000' }]);
-    expect(two.cellStyles?.['R1:A']).toEqual({ backgroundHex: '#ffff00', foregroundHex: '#ff0000' });
+    expect(two.cellStyles?.['R1:A']).toEqual({ backgroundHex: '#ffff00', foregroundHex: '#ff0000', isBold: false });
 
-    const three = applyStylePatches(two, [{ rowKey: 'R1', columnCode: 'A', backgroundHex: null, foregroundHex: null }]);
+    // null — «не чіпати» (семантика сервера), а не «скинути».
+    const keep = applyStylePatches(two, [{ rowKey: 'R1', columnCode: 'A', backgroundHex: null, foregroundHex: null }]);
+    expect(keep.cellStyles).toEqual(two.cellStyles);
+
+    // "" — зняти.
+    const three = applyStylePatches(two, [{ rowKey: 'R1', columnCode: 'A', backgroundHex: '', foregroundHex: '' }]);
     expect(three.cellStyles).toEqual({});
+  });
+
+  it('жирність із сервера не губиться при зміні кольору', () => {
+    const bold = applyStylePatches(slice(), [{ rowKey: 'R1', columnCode: 'A', isBold: true }]);
+    const colored = applyStylePatches(bold, [{ rowKey: 'R1', columnCode: 'A', backgroundHex: '#ffff00' }]);
+
+    expect(colored.cellStyles?.['R1:A']?.isBold).toBe(true);
+  });
+});
+
+describe('порції і перевірка запису', () => {
+  it('порції ≤ 1000, порядок збережено', () => {
+    const items = Array.from({ length: 2500 }, (_, i) => i);
+    const chunks = chunkPatches(items);
+
+    expect(chunks.map((c) => c.length)).toEqual([1000, 1000, 500]);
+    expect(chunks.flat()).toEqual(items);
+  });
+
+  it('isValidPatch: #rrggbb, "" і null/undefined дозволені, решта — ні', () => {
+    const base = { rowKey: 'R1', columnCode: 'A' };
+
+    expect(isValidPatch({ ...base, backgroundHex: '#ffff00', foregroundHex: '' })).toBe(true);
+    expect(isValidPatch({ ...base, backgroundHex: null })).toBe(true);
+    expect(isValidPatch({ ...base, backgroundHex: 'red' })).toBe(false);
+    expect(isValidPatch({ ...base, foregroundHex: '#fff' })).toBe(false);
   });
 });
 

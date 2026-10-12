@@ -1,4 +1,5 @@
 import type { JSX } from 'react';
+import type { PatchCellStylesRequest } from '@/api/types';
 import { DocumentGrid } from '@/features/grid/DocumentGrid';
 
 /**
@@ -39,7 +40,7 @@ const standWindow = window as unknown as StandWindow;
 const stored = new Map<string, Record<string, unknown>>();
 
 // L4: користувацький колір комірок ("{rowKey}:{columnCode}" → {backgroundHex, foregroundHex}).
-const styles = new Map<string, { backgroundHex: string | null; foregroundHex: string | null }>();
+const styles = new Map<string, { backgroundHex: string | null; foregroundHex: string | null; isBold: boolean }>();
 
 // D-1: `?calc=1` додає обчислювану колонку TOTAL = 2 × QTY. Як на справжньому сервері, вона
 // відстає від правки: слайс віддає TOTAL лише з ЗАВЕРШЕНОЇ задачі перерахунку (~1.5 с після PATCH).
@@ -145,19 +146,35 @@ function installStandServer(): void {
     }
     // ⚠ Без літерала адреси (як і нижче): шлях запису кольору перевіряє регулярка, не рядок.
     if (/\/documents\/\d+\/tables\/\d+\/cell-styles$/.test(path) && init?.method === 'PATCH') {
-      const cells = (JSON.parse(String(init.body)) as { cells: { rowKey: string; columnCode: string; backgroundHex?: string | null; foregroundHex?: string | null }[] }).cells;
-      for (const cell of cells) {
-        const key = `${cell.rowKey}:${cell.columnCode}`;
-        const before = styles.get(key) ?? { backgroundHex: null, foregroundHex: null };
-        const next = {
-          backgroundHex: cell.backgroundHex === undefined ? before.backgroundHex : cell.backgroundHex,
-          foregroundHex: cell.foregroundHex === undefined ? before.foregroundHex : cell.foregroundHex,
-        };
-        if (next.backgroundHex === null && next.foregroundHex === null) styles.delete(key);
+      // Фейк повторює КОНТРАКТ сервера (`PatchCellStylesRequest`, schema.d.ts), а не клієнтську вигадку:
+      // без `periodKey` або з порожньою зміною — 422, як на справжньому сервері.
+      const request = JSON.parse(String(init.body)) as Partial<PatchCellStylesRequest>;
+      const items = request.items ?? [];
+      const invalid =
+        typeof request.periodKey !== 'number' ||
+        items.length === 0 ||
+        items.length > 2000 ||
+        (request.reset !== true && items.some((item) => item.backgroundHex == null && item.foregroundHex == null && item.isBold == null));
+      if (invalid) return new Response(JSON.stringify({ errorCode: 'ECR-REQ-0422', title: 'Unprocessable' }), { status: 422, headers: { 'Content-Type': 'application/problem+json' } });
+
+      const clearOrSet = (value: string | null | undefined, old: string | null): string | null =>
+        value == null ? old : value === '' ? null : value;
+      for (const item of items) {
+        const key = `${item.rowKey}:${item.columnCode}`;
+        const before = styles.get(key) ?? { backgroundHex: null, foregroundHex: null, isBold: false };
+        const next =
+          request.reset === true
+            ? { backgroundHex: null, foregroundHex: null, isBold: false }
+            : {
+                backgroundHex: clearOrSet(item.backgroundHex, before.backgroundHex),
+                foregroundHex: clearOrSet(item.foregroundHex, before.foregroundHex),
+                isBold: item.isBold ?? before.isBold,
+              };
+        if (next.backgroundHex === null && next.foregroundHex === null && !next.isBold) styles.delete(key);
         else styles.set(key, next);
       }
 
-      return json({ applied: cells.length });
+      return json({ appliedCells: items.length, resetCells: 0 });
     }
     // ⚠ Без літерала адреси: сторож `EndpointCoverageTests` звіряє кожен шлях клієнта з сервером.
     if (/\/StandRecalcJob(%23|#)\d+$/.test(path)) {
