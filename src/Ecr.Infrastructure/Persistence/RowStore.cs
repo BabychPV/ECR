@@ -85,14 +85,7 @@ public sealed class RowStore(
         // незаміненим плейсхолдером (`Q-341`).
         foreach (var missing in ids.Where(id => !found.ContainsKey(id)))
         {
-            throw new NotFoundException(
-                "ECR-DOC-0404",
-                $"Екземпляра таблиці {missing} не знайдено.",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = "err.ECR-DOC-0404.tableInstance",
-                    ["tableInstanceId"] = missing.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                });
+            throw Ecr.Application.Documents.DocumentVisibility.TableInstanceNotFound(missing);
         }
 
         return found;

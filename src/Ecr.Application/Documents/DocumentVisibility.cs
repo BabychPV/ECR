@@ -156,16 +156,26 @@ public static class DocumentVisibility
 
         if (!(key.IsValid ? scope.InPeriod(key) : scope).CanReadTable(tableDefId))
         {
-            throw new NotFoundException(
-                "ECR-DOC-0404",
-                $"Екземпляра таблиці {tableInstanceId} не знайдено.",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = "err.ECR-DOC-0404.tableInstance",
-                    ["tableInstanceId"] = tableInstanceId.ToString(CultureInfo.InvariantCulture),
-                });
+            throw TableInstanceNotFound(tableInstanceId);
         }
     }
+
+    /// <summary>
+    /// Відповідь «екземпляра таблиці немає» — ОДНА для відсутнього, чужого документа й схованого від читача
+    /// (<c>RowStore.ResolveTableInstanceAsync</c>, зріз, записові шляхи). Різниця тіл (<c>tableInstance</c> проти
+    /// <c>tableInstanceNotInDocument</c>) сама була б оракулом існування екземпляра в чужому документі.
+    /// </summary>
+    /// <param name="tableInstanceId">Екземпляр таблиці з маршруту/тіла.</param>
+    /// <remarks>⚠ Ідентифікатор — РЯДКОМ: `ResolveGenericMessageAsync` підставляє лише <c>string</c> (Q-341).</remarks>
+    public static NotFoundException TableInstanceNotFound(long tableInstanceId)
+        => new(
+            "ECR-DOC-0404",
+            $"Екземпляра таблиці {tableInstanceId} не знайдено.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-DOC-0404.tableInstance",
+                ["tableInstanceId"] = tableInstanceId.ToString(CultureInfo.InvariantCulture),
+            });
 
     /// <summary>Відповідь «аркуша немає в складі документа» — однакова для відсутнього й схованого.</summary>
     /// <param name="documentId">Документ.</param>

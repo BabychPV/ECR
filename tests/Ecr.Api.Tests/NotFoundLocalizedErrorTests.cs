@@ -84,20 +84,20 @@ public sealed class NotFoundLocalizedErrorTests
     private static FakeUiStringCatalog Catalog()
         => new FakeUiStringCatalog()
             .Add(
-                "en", "err.ECR-DOC-0404.tableInstanceNotInDocument",
-                "Table instance {tableInstanceId} does not belong to document {documentId}.",
+                "en", "err.ECR-DOC-0404.tableInstance",
+                "Table instance {tableInstanceId} was not found.",
                 UiStringScope.Private);
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
-    public async Task Чужий_екземпляр_таблиці_доїжджає_англійською_з_обома_ідентифікаторами()
+    public async Task Чужий_екземпляр_таблиці_доїжджає_англійською_як_неіснуючий()
     {
         var problem = await ProblemAsync(() => Handler().HandleAsync(
             RouteDocument, TableInstance, Profile(), "en", CancellationToken.None));
 
         var detail = problem.GetProperty("detail").GetString();
 
-        Assert.Equal("Table instance 500 does not belong to document 701.", detail);
+        Assert.Equal("Table instance 500 was not found.", detail);
         AssertNoCyrillic(detail);
 
         // Код і статус не змінилися: локалізація подробиці не має права
@@ -126,7 +126,7 @@ public sealed class NotFoundLocalizedErrorTests
             new FakeUiStringCatalog());
 
         Assert.Equal(
-            "Екземпляр таблиці 500 не належить документу 701.",
+            "Екземпляра таблиці 500 не знайдено.",
             problem.GetProperty("detail").GetString());
     }
 

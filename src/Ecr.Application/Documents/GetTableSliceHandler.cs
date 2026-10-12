@@ -115,15 +115,9 @@ public sealed class GetTableSliceHandler(
         // цю звірку роблять; на читанні її не було ніколи.
         if (instance.DocumentId != documentId)
         {
-            throw new Errors.NotFoundException(
-                "ECR-DOC-0404",
-                $"Екземпляр таблиці {tableInstanceId} не належить документу {documentId}.",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = "err.ECR-DOC-0404.tableInstanceNotInDocument",
-                    ["tableInstanceId"] = tableInstanceId.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                    ["documentId"] = documentId.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                });
+            // ⛔ Оракул існування (P3): окреме тіло «не належить документу» розкривало б, що екземпляр
+            // існує в ЧУЖОМУ документі. Відповідь — та сама, що на відсутній (`RowStore`) і схований.
+            throw DocumentVisibility.TableInstanceNotFound(tableInstanceId);
         }
 
         // ⛔ S6 (ФВ-6.6): заборона на аркуш чи таблицю діє й на ЧИТАННЯ. До
@@ -137,14 +131,7 @@ public sealed class GetTableSliceHandler(
 
         if (!readable.CanReadTable(instance.TableDefId))
         {
-            throw new Errors.NotFoundException(
-                "ECR-DOC-0404",
-                $"Екземпляра таблиці {tableInstanceId} не знайдено.",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = "err.ECR-DOC-0404.tableInstance",
-                    ["tableInstanceId"] = tableInstanceId.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                });
+            throw DocumentVisibility.TableInstanceNotFound(tableInstanceId);
         }
 
         // 1. Метадані — зі знімка, без звернення до БД (D-16).
