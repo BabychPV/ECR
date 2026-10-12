@@ -2,6 +2,7 @@ import type { JSX } from 'react';
 import { Anchor, Button, Card, Group, Stack, Text } from '@mantine/core';
 import { Link } from 'react-router-dom';
 import { formatDateTime } from '@/shared/format/datetime';
+import { formatPeriodKey } from '@/shared/format/periodKey';
 import { t } from '@/shared/i18n';
 import { approvalQueueHref, approvalQueueItems, useApprovalQueue, type ApprovalQueueItem } from './useApprovalQueue';
 
@@ -12,7 +13,14 @@ import { approvalQueueHref, approvalQueueItems, useApprovalQueue, type ApprovalQ
  * Затвердження - на сторінці документа (кнопка там); блок лише веде на потрібний аркуш і період.
  * Ім'я того, хто подав, - екранований текст React; `null` (користувача вже немає) просто не показується.
  */
-export function ApprovalQueueSection({ opened }: { readonly opened: boolean }): JSX.Element | null {
+export function ApprovalQueueSection({
+  opened,
+  onNavigate,
+}: {
+  readonly opened: boolean;
+  /** Перехід на аркуш: шухляда закривається, інакше лишається поверх документа. */
+  readonly onNavigate?: () => void;
+}): JSX.Element | null {
   const query = useApprovalQueue(opened);
 
   if (query.error !== null) {
@@ -34,7 +42,7 @@ export function ApprovalQueueSection({ opened }: { readonly opened: boolean }): 
         {t('myTasks.approval.title')}
       </Text>
       {items.map((item) => (
-        <ApprovalRow key={`${String(item.documentId)}:${String(item.sheetDefId)}:${String(item.periodKey)}`} item={item} />
+        <ApprovalRow key={`${String(item.documentId)}:${String(item.sheetDefId)}:${String(item.periodKey)}`} item={item} onNavigate={onNavigate} />
       ))}
       {query.hasNextPage && (
         <Button
@@ -51,7 +59,13 @@ export function ApprovalQueueSection({ opened }: { readonly opened: boolean }): 
   );
 }
 
-function ApprovalRow({ item }: { readonly item: ApprovalQueueItem }): JSX.Element {
+function ApprovalRow({
+  item,
+  onNavigate,
+}: {
+  readonly item: ApprovalQueueItem;
+  readonly onNavigate: (() => void) | undefined;
+}): JSX.Element {
   return (
     <Card withBorder padding="xs" data-approval-document={item.documentId} data-approval-sheet={item.sheetCode}>
       <Stack gap="xs">
@@ -60,7 +74,7 @@ function ApprovalRow({ item }: { readonly item: ApprovalQueueItem }): JSX.Elemen
             {item.documentKey} · {item.sheetCode}
           </Text>
           <Text size="xs" c="dimmed">
-            {item.projectCode} · {String(item.periodKey)}
+            {item.projectCode} · {formatPeriodKey(item.periodKey) || String(item.periodKey)}
           </Text>
           <Text size="xs" c="dimmed">
             {item.submittedByDisplayName === null
@@ -74,7 +88,7 @@ function ApprovalRow({ item }: { readonly item: ApprovalQueueItem }): JSX.Elemen
           </Text>
         </div>
         <Group justify="flex-end">
-          <Anchor component={Link} to={approvalQueueHref(item)} size="sm" data-action="review">
+          <Anchor component={Link} to={approvalQueueHref(item)} size="sm" data-action="review" onClick={onNavigate}>
             {t('myTasks.approval.open')}
           </Anchor>
         </Group>

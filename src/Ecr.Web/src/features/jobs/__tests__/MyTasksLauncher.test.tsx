@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import type { JSX } from 'react';
+import type { JSX, ReactNode } from 'react';
 import { MantineProvider } from '@mantine/core';
+import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { testTheme } from '@/test/render';
 
@@ -28,11 +29,13 @@ vi.mock('@/features/jobs/MyTasksDrawer', () => {
       onClose,
       onExited,
       jobs,
+      staleSection,
     }: {
       opened: boolean;
       onClose: () => void;
       onExited?: () => void;
       jobs: readonly { jobId: string }[] | undefined;
+      staleSection?: ReactNode;
     }): JSX.Element | null =>
       opened ? (
         <div role="dialog" aria-label="my-tasks-stub">
@@ -44,6 +47,7 @@ vi.mock('@/features/jobs/MyTasksDrawer', () => {
               onExited?.();
             }}
           />
+          {staleSection}
           {(jobs ?? []).map((job) => (
             <span key={job.jobId} data-stub-job={job.jobId} />
           ))}
@@ -112,6 +116,18 @@ function mockFetch(): void {
         );
       }
 
+      if (url.includes('/api/v1/me/approval-queue')) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              items: [{ documentId: 11, documentKey: 'AIR-2026-09', projectCode: 'AIR', templateCode: 'AIR', sheetDefId: 3, sheetCode: 'Stationary', periodKey: 202609, submittedAt: '2026-10-07T09:30:00Z', submittedByDisplayName: null, stepOrdinal: null, stepCount: null, stepRoleCode: null }],
+              nextCursor: null,
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } },
+          ),
+        );
+      }
+
       if (url.includes('/api/v1/me/edit-assignments')) {
         return Promise.resolve(
           new Response(
@@ -135,7 +151,9 @@ function mount(): void {
   render(
     <MantineProvider theme={testTheme}>
       <QueryClientProvider client={client}>
-        <MyTasksLauncher />
+        <MemoryRouter>
+          <MyTasksLauncher />
+        </MemoryRouter>
       </QueryClientProvider>
     </MantineProvider>,
   );
@@ -247,5 +265,25 @@ describe('фокус після закриття шухляди (RC15-E, WCAG 2.
     fireEvent.click(close);
 
     await waitFor(() => expect(document.activeElement).toBe(button));
+  });
+});
+
+describe('перехід із блоку «До погодження»', () => {
+  it('клік «Review» закриває шухляду, щоб вона не лишалась поверх документа', async () => {
+    mockFetch();
+    mount();
+
+    fireEvent.click(await screen.findByRole('button', { name: '⟦jobs.myTasks⟧' }));
+    expect(await screen.findByRole('dialog', { name: 'my-tasks-stub' })).toBeTruthy();
+
+    const review = await waitFor(() => {
+      const el = document.querySelector('[data-action="review"]');
+      expect(el).not.toBeNull();
+
+      return el as HTMLElement;
+    });
+    fireEvent.click(review);
+
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'my-tasks-stub' })).toBeNull());
   });
 });

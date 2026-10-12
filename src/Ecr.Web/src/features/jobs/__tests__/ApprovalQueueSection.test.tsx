@@ -32,7 +32,7 @@ function item(over: Partial<ApprovalQueueItem>): ApprovalQueueItem {
   } as ApprovalQueueItem;
 }
 
-function show(respond: (url: string) => { status: number; body: unknown }): void {
+function show(respond: (url: string) => { status: number; body: unknown }, onNavigate?: () => void): void {
   vi.stubGlobal(
     'fetch',
     vi.fn((input: RequestInfo | URL) => {
@@ -49,7 +49,7 @@ function show(respond: (url: string) => { status: number; body: unknown }): void
     <MantineProvider theme={testTheme}>
       <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
         <MemoryRouter>
-          <ApprovalQueueSection opened />
+          <ApprovalQueueSection opened {...(onNavigate === undefined ? {} : { onNavigate })} />
         </MemoryRouter>
       </QueryClientProvider>
     </MantineProvider>,
@@ -78,6 +78,32 @@ describe('ApprovalQueueSection', () => {
     expect(card.querySelector('a')?.getAttribute('href')).toBe('/documents/11?periodKey=202609&sheet=Stationary');
     expect(screen.queryByTestId('my-tasks-approval-more')).toBeNull();
     expect(calls[0]).toBe('/api/v1/me/approval-queue?limit=50');
+  });
+
+  it('період - людською назвою, а не сирим ключем', async () => {
+    show(() => ({ status: 200, body: { items: [item({})], nextCursor: null } }));
+    const card = await waitFor(() => {
+      const el = document.querySelector('[data-approval-document="11"]');
+      expect(el).not.toBeNull();
+
+      return el as HTMLElement;
+    });
+    expect(card.textContent).toContain('September 2026');
+    expect(card.textContent).not.toContain('202609');
+  });
+
+  it('клік «Review» повідомляє про перехід (шухляда закривається)', async () => {
+    const onNavigate = vi.fn();
+    show(() => ({ status: 200, body: { items: [item({})], nextCursor: null } }), onNavigate);
+    const card = await waitFor(() => {
+      const el = document.querySelector('[data-approval-document="11"]');
+      expect(el).not.toBeNull();
+
+      return el as HTMLElement;
+    });
+    expect(onNavigate).not.toHaveBeenCalled();
+    fireEvent.click(card.querySelector('[data-action="review"]') as HTMLElement);
+    expect(onNavigate).toHaveBeenCalledTimes(1);
   });
 
   it('порожня черга мовчить', async () => {
