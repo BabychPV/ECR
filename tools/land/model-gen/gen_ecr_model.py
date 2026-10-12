@@ -20,12 +20,12 @@ def one(v):
 
 # Стеля динамічних рядків (MaxDynamicRows) з прод-зразка HSE 2026-10-12 (.sync-local/reports/LAND-PROD-SAMPLE-2026-10-12.md,
 # розділ «Прогалини», п. 1). Excel-шаблон має лише 498/184/100 рядків, а типовий документ старої системи — більше:
-# T3_00 ~788 (обладнання), T9_04 368, T9_07 182. Значення = прод-факт з запасом ~25 %, округлене вгору до 50.
+# T3_00 (обладнання), T9_04, T9_07. Значення = обсяг типового прод-документа із запасом, округлене вгору до 50
 # Жорсткої стелі продукту немає: TableDef.SetMaxDynamicRows вимагає лише додатне число, CreateRow/PatchCells порівнюють з
 # MaxDynamicRows. Нижню межу (max з рядками Excel і 100) зберігаємо. Інші таблиці зразок не перевищував: «не доведено».
-PROD_ROW_LIMITS = {'T3_00': {'prodRows': 788, 'maxRows': 1000},
-                   'T9_04': {'prodRows': 368, 'maxRows': 500},
-                   'T9_07': {'prodRows': 182, 'maxRows': 250}}
+PROD_ROW_LIMITS = {'T3_00': {'maxRows': 1000},
+                   'T9_04': {'maxRows': 500},
+                   'T9_07': {'maxRows': 250}}
 
 
 UNIT_PAREN = re.compile(r'\((?:[^)]*\b(?:tonne|tonnes|tonn|hour|hours|hr|Sm3|m3|g/s|g/sec|kg|kg/h|mg/l|days?|rpm|kW|ea|No dimension|No Dimension|L/hr|%|number|tons?)\b[^)]*)\)', re.I)
