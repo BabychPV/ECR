@@ -7597,7 +7597,7 @@ USING (VALUES
     ,(N'err.ECR-TMPL-0422.headerFieldLookupRegistryRequired', N'en', N'Header field "{headerFieldCode}" is of type Lookup and needs a registry: pick one.', 1)
     -- COLL:rc20lookup ── кінець секції ──
     -- LUF:fixes ── приймальна Land 12.10 (D4/D11): текст відмови затвердження без права; лічильники таблиць із підписом області; ru/kz — порцією LUF:fixes нижче ──
-    ,(N'deny.approve.NoRight', N'en', N'you do not have the right to approve or reject sheets in this project: ask an administrator for the approver role', 1)
+    ,(N'deny.approve.NoRight', N'en', N'you cannot approve or reject this sheet right now: you lack the approval right, or the current workflow step is for another role', 1)
     ,(N'grid.tree.tablesFilledSheet', N'en', N'{filled} of {total} tables filled on this sheet', 1)
     ,(N'document.tablesFilledInDocument', N'en', N'Tables filled completely in the whole document: {filled} of {total}', 1)
     -- LUF:fixes ── кінець секції ──
@@ -18974,8 +18974,8 @@ GO
 INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val
   FROM (VALUES
-    (N'deny.approve.NoRight', N'ru', N'у вас нет права утверждать или отклонять листы в этом проекте: попросите администратора выдать роль утверждающего'),
-    (N'deny.approve.NoRight', N'kz', N'осы жобада парақтарды бекіту немесе қайтару құқығыңыз жоқ: әкімшіден бекітуші рөлін беруді сұраңыз'),
+    (N'deny.approve.NoRight', N'ru', N'вы не можете утвердить или отклонить этот лист сейчас: нет права утверждения или очередь другой роли'),
+    (N'deny.approve.NoRight', N'kz', N'қазір бұл парақты бекіте немесе қайтара алмайсыз: бекіту құқығы жоқ немесе кезек басқа рөлге тиесілі'),
     (N'grid.tree.tablesFilledSheet', N'ru', N'Заполнено таблиц на этом листе: {filled} из {total}'),
     (N'grid.tree.tablesFilledSheet', N'kz', N'Осы парақта толтырылған кестелер: {filled} / {total}'),
     (N'document.tablesFilledInDocument', N'ru', N'Полностью заполнено таблиц во всём документе: {filled} из {total}'),

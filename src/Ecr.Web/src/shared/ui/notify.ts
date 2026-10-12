@@ -90,6 +90,11 @@ export function showApiError(error: unknown): void {
   });
 }
 
+/** Показує вже готовий текст відмови (локалізований викликачем) тим самим тостом помилки, що й `showApiError`. */
+export function showErrorText(message: string): void {
+  notifications.show({ color: 'statusError', message, closeButtonProps: notificationCloseButtonProps });
+}
+
 /** Показує попередження (дія не виконана з відомої причини, не помилка запиту). */
 export function showWarning(message: string): void {
   notifications.show({

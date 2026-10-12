@@ -2,8 +2,7 @@ import { useMutation } from '@tanstack/react-query';
 import { apiFetch, EcrApiError } from '@/api/client';
 import type { CreateRowRequest } from '@/api/types';
 import { hasText, t } from '@/shared/i18n';
-import { notifications } from '@mantine/notifications';
-import { notificationCloseButtonProps, showApiError } from '@/shared/ui/notify';
+import { showApiError, showErrorText } from '@/shared/ui/notify';
 import { denyText } from './permissions';
 
 /**
@@ -35,7 +34,7 @@ function showAddRowError(error: unknown): void {
     return;
   }
 
-  notifications.show({ color: 'statusError', message: text, closeButtonProps: notificationCloseButtonProps });
+  showErrorText(text);
 }
 
 /** Скільки разів додавання рядка повторюється саме після минущої зайнятості (Y7-03). */
