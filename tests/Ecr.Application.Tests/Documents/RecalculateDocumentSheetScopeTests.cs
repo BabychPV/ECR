@@ -171,6 +171,52 @@ public sealed class RecalculateDocumentSheetScopeTests
         Assert.Equal("job-1", jobId);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "AN-91-N2")]
+    public async Task Різні_області_одного_документа_й_періоду_мають_різні_цілі_черги()
+    {
+        // AN-91 (N2): черга поглинає постановку наявною Queued на ТУ САМУ ціль і лишає її payload. Ціль без
+        // аркуша зливала б запит аркуша B (чи автоперерахунок усього документа) у чергову задачу аркуша A —
+        // B лишався б застарілим. Мутація: у обробнику `ScopedTargetOf(documentId, periodKey, sheetDefId)` →
+        // `TargetOf(documentId, periodKey)` — тест червоніє (усі три цілі збігаються).
+        var fixture = Arrange(submittedSheet: null, hiddenSheet: null);
+        var period = new PeriodKey(Period);
+
+        await fixture.Handler.HandleAsync(Document, period, sheetDefId: 1, CancellationToken.None);
+        await fixture.Handler.HandleAsync(Document, period, sheetDefId: 3, CancellationToken.None);
+        await fixture.Handler.HandleAsync(Document, period, sheetDefId: null, CancellationToken.None);
+
+        var targets = fixture.Jobs.ReceivedCalls()
+            .Where(c => c.GetMethodInfo().Name == nameof(IBackgroundJobScheduler.EnqueueCoalescedAsync))
+            .Select(c => (string)c.GetArguments()[0]!)
+            .ToList();
+
+        Assert.Equal(3, targets.Count);
+        Assert.Equal(3, targets.Distinct(StringComparer.Ordinal).Count());
+        // Увесь документ — та сама ціль, що в автоперерахунку, правки шапки й нічного розкладу.
+        Assert.Equal(RecalculateDocumentHandler.TargetOf(Document, period), targets[2]);
+        Assert.Equal(RecalculateDocumentHandler.ScopedTargetOf(Document, period, 1), targets[0]);
+        Assert.Equal(RecalculateDocumentHandler.ScopedTargetOf(Document, period, 3), targets[1]);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "AN-91-N2")]
+    public void Ціль_без_області_збігається_з_двопараметровою_а_з_областю_не_є_її_префіксом_іншої_області()
+    {
+        var period = new PeriodKey(Period);
+
+        Assert.Equal(
+            RecalculateDocumentHandler.TargetOf(Document, period),
+            RecalculateDocumentHandler.ScopedTargetOf(Document, period, null));
+        // Аркуш 1 і аркуш 12 — різні цілі (Quartz зіставляє за префіксом із роздільником `~`, але
+        // ключ не повинен залежати від цього).
+        Assert.NotEqual(
+            RecalculateDocumentHandler.ScopedTargetOf(Document, period, 1),
+            RecalculateDocumentHandler.ScopedTargetOf(Document, period, 12));
+    }
+
     private static Fixture Arrange(
         int? submittedSheet, int? hiddenSheet, PeriodState periodState = PeriodState.Open, int? alsoSubmittedSheet = null)
     {

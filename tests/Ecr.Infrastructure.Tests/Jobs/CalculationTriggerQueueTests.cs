@@ -105,6 +105,52 @@ public sealed class CalculationTriggerQueueTests(SqlServerFixture sql) : DbJobQu
         Assert.Equal(manual, auto);
     }
 
+    [Fact]
+    [Trait("Finding", "AN-91-N2")]
+    public async Task Автоперерахунок_усього_документа_не_поглинається_чергою_перерахунку_одного_аркуша()
+    {
+        await using var host = NewHost();
+        var jobs = Scheduler(host);
+        var trigger = Trigger(host);
+        const int sheet = 5;
+
+        // Користувач без права витіснення ставить перерахунок аркуша (Coalesced) — задача чекає.
+        var sheetJob = await jobs.EnqueueCoalescedAsync<IRecalculationJob>(
+            RecalculateDocumentHandler.ScopedTargetOf(DocumentId, Period, sheet),
+            new { DocumentId, PeriodKey = Period.Value, TriggeredByUserId = (int?)9, SheetDefId = (int?)sheet },
+            CancellationToken.None);
+
+        // Збір PI ставить автоперерахунок УСЬОГО документа (SheetDefId = null).
+        var auto = await trigger.RequestAsync(DocumentId, Period, CancellationToken.None);
+
+        // ⛔ До AN-91 ціль була спільна, черга віддавала `sheetJob` із payload аркуша 5 — решта аркушів
+        // документа лишалась непорахованою. Мутація: `ScopedTargetOf(..)` → `TargetOf(..)` у обробнику
+        // і в цьому тесті — `auto == sheetJob`.
+        Assert.NotNull(auto);
+        Assert.NotEqual(sheetJob, auto);
+        Assert.Contains("\"sheetDefId\":5", (await RowAsync(sheetJob))?.Payload);
+        Assert.Contains("\"sheetDefId\":null", (await RowAsync(auto))?.Payload);
+    }
+
+    [Fact]
+    [Trait("Finding", "AN-91-N2")]
+    public async Task Спільна_ціль_поглинає_запит_іншої_області_і_лишає_payload_першої_ось_чому_аркуш_у_цілі()
+    {
+        // Характеризація черги (не вимога до продукту): за ТІЄЇ САМОЇ цілі друга постановка повертає
+        // JobId першої, а payload першої лишається. Тому ціль з областю (AN-91) обов'язкова.
+        await using var host = NewHost();
+        var jobs = Scheduler(host);
+        var target = RecalculateDocumentHandler.TargetOf(DocumentId, Period);
+
+        var first = await jobs.EnqueueCoalescedAsync<IRecalculationJob>(
+            target, new { SheetDefId = (int?)5 }, CancellationToken.None);
+        var second = await jobs.EnqueueCoalescedAsync<IRecalculationJob>(
+            target, new { SheetDefId = (int?)null }, CancellationToken.None);
+
+        Assert.Equal(first, second);
+        Assert.Contains("\"sheetDefId\":5", (await RowAsync(first))?.Payload);
+    }
+
     private static DbBackgroundJobScheduler Scheduler(Host host)
         => new(
             host.Queue,
