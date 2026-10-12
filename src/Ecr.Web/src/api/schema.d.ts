@@ -21330,6 +21330,13 @@ export interface components {
              * @description Користувач.
              */
             userId: number;
+            /**
+             * @description Чи бачить виконавець документ (і аркуш передачі) за ПРЯМИМИ призначеннями ролей:
+             *     `Visible` | `NotVisible` | `Unknown` (групи AD чужої людини невідомі; у відповідях, що не є
+             *     переліком передач, не обчислюється). RC20 D-2.
+             * @default Unknown
+             */
+            visibility: string;
         };
         /** @description Зріз передачі: усі селектори необов'язкові; жодного — «весь документ». */
         EditAssignmentSliceDto: {
@@ -21352,7 +21359,7 @@ export interface components {
          * @description Причина відмови в доступі. Повертається замість `bool` (ФВ-6.8).
          * @enum {unknown}
          */
-        EditDenyReason: "None" | "NoGrant" | "PeriodNotOpenYet" | "PeriodClosed" | "OutOfAccessWindow" | "DocumentSubmitted" | "DocumentApproved" | "ColumnReadOnly" | "RowReadOnly" | "CalculatedCell" | "ProjectArchived" | "ArchivingInProgress" | "BusinessRule" | "SimulationReadOnly" | "OutsidePermitWindow" | "InsufficientGrantLevel" | "LockedByOwner" | "AssignmentFilled" | "AssignmentValidated" | "AssignmentExpired";
+        EditDenyReason: "None" | "NoGrant" | "PeriodNotOpenYet" | "PeriodClosed" | "OutOfAccessWindow" | "DocumentSubmitted" | "DocumentApproved" | "ColumnReadOnly" | "RowReadOnly" | "CalculatedCell" | "ProjectArchived" | "ArchivingInProgress" | "BusinessRule" | "SimulationReadOnly" | "OutsidePermitWindow" | "InsufficientGrantLevel" | "LockedByOwner" | "AssignmentFilled" | "AssignmentValidated" | "AssignmentExpired" | "NotAssignedToYou";
         /** @description Набір виконавців власника. */
         EditorSetDto: {
             /**
