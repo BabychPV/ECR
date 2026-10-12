@@ -30,7 +30,10 @@ interface VersionRow {
 }
 
 const stamp = Date.now().toString(36).toUpperCase();
-const NewVersion = `FV12-${stamp}`;
+// Формат номера версії - Major.Minor.Patch.Build (ECR-TMPL-0422 versionNumberFormat, прогін 38294915509).
+const serial = Date.now() % 1_000_000;
+const NewVersion = `99.${String(serial)}.0.2`;
+const BaseVersion = `99.${String(serial)}.0.1`;
 
 /** Усе, що тест створив і що `afterAll` прибирає. */
 const created: { versionId: number | null; baseVersionId: number | null; projectIds: number[] } = {
@@ -58,8 +61,8 @@ test.describe('projectDefaultVersion: форма проєкту пропонує
     if (source.status !== 'Published') {
       // ⚠ Прогін 38293702756: єдина версія стенда - ЧЕРНЕТКА з фіксованою таблицею без рядків, її публікацію
       // сервер відхиляє (ECR-TMPL-4228). Базову версію стенда не чіпаємо: v1 - її клон із доданим рядком.
-      v1Id = await publishableClone(page, source.versionId, `FV12-${stamp}-BASE`);
-      v1Label = `${source.templateCode} · FV12-${stamp}-BASE`;
+      v1Id = await publishableClone(page, source.versionId, BaseVersion);
+      v1Label = `${source.templateCode} · ${BaseVersion}`;
       created.baseVersionId = v1Id;
     }
     templateLabel = source.templateCode;
