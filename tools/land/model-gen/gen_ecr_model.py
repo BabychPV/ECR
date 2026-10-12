@@ -43,11 +43,14 @@ def split_enru(v):
 # ---------- одиниці ----------
 UNIT_MAP = {'t': 't', 'h': 'h', 'd': 'day', 'Sm3': 'Sm3', 'm3': 'm3', 'kg': 'kg', 'g/s': 'g_per_s', 'kg/h': 'kg_per_h', 't/h': 't_per_h',
             'mg/l': 'mg_per_l', 'kW': None, 'rpm': None, 'l/h': None, 'pcs': 'one'}
+# factor - до БАЗОВОЇ одиниці розмірності (kg/s для MassFlow, kg/m3, m3), а не до dimensionOf; значення мусять
+# збігатися з секцією `-- LAND:units` у 09-seed.sql (G8): kg/h = 1/3600 kg/s, t/h = 1000/3600 kg/s.
+# Раніше kg/h і t/h стояли в g/s (x1000 більше) - LandUnitsModelTests стереже збіг із сідом.
 NEW_UNITS = [
-    {'code': 'kg_per_h', 'symbol': 'kg/h', 'nameEn': 'kilogram per hour', 'dimensionOf': 'g_per_s', 'factor': '0.277777777777777778'},
-    {'code': 't_per_h', 'symbol': 't/h', 'nameEn': 'tonne per hour', 'dimensionOf': 'g_per_s', 'factor': '277.777777777777778'},
-    {'code': 'mg_per_l', 'symbol': 'mg/l', 'nameEn': 'milligram per litre', 'dimensionOf': 'kg_per_m3', 'factor': '0.001'},
-    {'code': 'thousand_m3', 'symbol': 'thous. m3', 'nameEn': 'thousand cubic metres', 'dimensionOf': 'm3', 'factor': '1000'},
+    {'code': 'kg_per_h', 'symbol': 'kg/h', 'nameEn': 'Kilogram per hour', 'dimensionOf': 'g_per_s', 'factor': '0.000277777777777778'},
+    {'code': 't_per_h', 'symbol': 't/h', 'nameEn': 'Tonne per hour', 'dimensionOf': 'g_per_s', 'factor': '0.277777777777777778'},
+    {'code': 'mg_per_l', 'symbol': 'mg/l', 'nameEn': 'Milligram per litre', 'dimensionOf': 'kg_per_m3', 'factor': '0.001'},
+    {'code': 'thousand_m3', 'symbol': 'thous. m3', 'nameEn': 'Thousand cubic metres', 'dimensionOf': 'm3', 'factor': '1000'},
 ]
 UNIT_PATTERNS = [
     (r'tonn/h|tonn/hour|тонн/час|steaming capacity', 't/h'),
