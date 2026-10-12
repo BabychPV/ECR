@@ -34,7 +34,7 @@ function row(over: Partial<JobSummary>): JobSummary {
   } as JobSummary;
 }
 
-function show(jobs: readonly JobSummary[] | undefined, isPending = false): void {
+function show(jobs: readonly JobSummary[] | undefined, isPending = false, onClose: () => void = () => undefined): void {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
   render(
@@ -43,7 +43,7 @@ function show(jobs: readonly JobSummary[] | undefined, isPending = false): void 
         <MemoryRouter>
           <MyTasksDrawer
             opened
-            onClose={() => undefined}
+            onClose={onClose}
             jobs={jobs}
             isPending={isPending}
             error={null}
@@ -71,6 +71,17 @@ describe('шухляда «My tasks»', () => {
      */
     expect(screen.getByText('⟦jobs.recentEmpty⟧')).toBeTruthy();
     expect(screen.getByText('⟦jobs.myTasksHint⟧')).toBeTruthy();
+  });
+
+  it('клік посилання на документ задачі закриває шухляду (onClose)', () => {
+    const onClose = vi.fn();
+    show([row({ state: 'Failed', errorCode: 'ECR-JOB-0409', documentId: 42 })], false, onClose);
+
+    const link = document.querySelector('[data-my-task] a[href=\"/documents/42\"]');
+    expect(link).not.toBeNull();
+    fireEvent.click(link as HTMLElement);
+
+    expect(onClose).toHaveBeenCalled();
   });
 
   it('закрита шухляда не малює нічого (L2)', () => {
