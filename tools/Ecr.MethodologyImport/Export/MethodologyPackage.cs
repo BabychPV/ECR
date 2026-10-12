@@ -115,7 +115,10 @@ public sealed record MethodologyPackage(
                                     .Select(c => new PackageConstantValue(c.Category, c.Version, c.Value, c.StartDate, c.EndDate))
                                     .ToList()))
                             .ToList(),
-                        CategoryRuleOf(formulas[(g.Key, v)])))
+                        CategoryRuleOf(
+                            formulas[(g.Key, v)],
+                            hasCategoryConstants: constants[(g.Key, v)]
+                                .Any(c => c.Category.Length > 0 && !string.Equals(c.Category, library, StringComparison.Ordinal)))))
                     .ToList()))
             .ToList();
 
@@ -133,7 +136,12 @@ public sealed record MethodologyPackage(
     /// Правила за довідником (<c>REGFIELD(@Lookup,'NAME')</c> у 5.4/6.1/7.7/7.8) з AF не виводяться — це рішення
     /// про шаблон, а не властивість методології: їх задає той, хто знає, яка колонка шаблону дає категорію.
     /// </remarks>
-    private static PackageCategoryRule? CategoryRuleOf(IEnumerable<FormulaDef> versionFormulas)
+    /// <remarks>
+    /// ⚠ Гілка <c>ECW_Category</c> — лише для версій, що мають константи НЕ в спільній категорії бібліотеки
+    /// (<paramref name="hasCategoryConstants"/>): формула <c>ECW_Category</c> без категорійних констант не має чого
+    /// резолвити, і правило <c>!ECW_Category</c> там лише додало б версії вимогу, якої методологія не ставить.
+    /// </remarks>
+    private static PackageCategoryRule? CategoryRuleOf(IEnumerable<FormulaDef> versionFormulas, bool hasCategoryConstants)
     {
         var names = versionFormulas.Where(f => f.Available).Select(f => f.Name).ToHashSet(StringComparer.Ordinal);
 
@@ -142,7 +150,7 @@ public sealed record MethodologyPackage(
             return new PackageCategoryRule("!" + CategoryRuleFormula);
         }
 
-        return names.Contains(CategoryFormula) ? new PackageCategoryRule("!" + CategoryFormula) : null;
+        return hasCategoryConstants && names.Contains(CategoryFormula) ? new PackageCategoryRule("!" + CategoryFormula) : null;
     }
 
     /// <summary>Код каталогу ECR, якщо одиницю AF зведено; інакше рядок AF як є (нерезолвну звітує analyze, сервер — <c>unitUnknown</c>).</summary>
