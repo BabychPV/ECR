@@ -21246,13 +21246,10 @@ export interface components {
              * @description Користувач.
              */
             userId: number;
-            /**
-             * @description Чи бачить виконавець документ (і аркуш передачі) за ПРЯМИМИ призначеннями ролей:
+            /** @description Чи бачить виконавець документ (і аркуш передачі) за ПРЯМИМИ призначеннями ролей:
              *     `Visible` | `NotVisible` | `Unknown` (групи AD чужої людини невідомі; у відповідях, що не є
-             *     переліком передач, не обчислюється). RC20 D-2.
-             * @default Unknown
-             */
-            visibility: string;
+             *     переліком передач, не обчислюється). RC20 D-2. */
+            visibility?: components["schemas"]["RecipientVisibility"];
         };
         /** @description Зріз передачі: усі селектори необов'язкові; жодного — «весь документ». */
         EditAssignmentSliceDto: {
@@ -23773,6 +23770,12 @@ export interface components {
              */
             sheetDefId: number;
         };
+        /**
+         * @description Чи бачить виконавець документ (і аркуш передачі) за прямими призначеннями ролей (RC20 D-2).
+         * @default Unknown
+         * @enum {unknown}
+         */
+        RecipientVisibility: "Unknown" | "Visible" | "NotVisible";
         /** @description Один рядок пакета. */
         RegistryBatchItemDto: {
             /** @description `version` рядка з `GET …/rows` (`D-166`); не збігся — помилка рядка `entryChanged`.

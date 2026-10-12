@@ -10,7 +10,7 @@ import { assignment } from './fixture';
  * RC20 D-2: матриця називає виконавця, який не бачить документ/аркуш (`visibility: NotVisible`), - інакше власник
  * вважав би, що передача діє. `Visible` і `Unknown` (групи AD невідомі) не позначаються.
  */
-function recipient(userId: number, displayName: string, visibility: AssignmentRecipient['visibility']): AssignmentRecipient {
+function recipient(userId: number, displayName: string, visibility: NonNullable<AssignmentRecipient['visibility']>): AssignmentRecipient {
   return {
     userId,
     displayName,
