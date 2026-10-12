@@ -4616,9 +4616,8 @@
             "type": "integer"
           },
           "visibility": {
-            "default": "Unknown",
-            "description": "Чи бачить виконавець документ (і аркуш передачі) за ПРЯМИМИ призначеннями ролей:\n`Visible` | `NotVisible` | `Unknown` (групи AD чужої людини невідомі; у відповідях, що не є\nпереліком передач, не обчислюється). RC20 D-2.",
-            "type": "string"
+            "$ref": "#/components/schemas/RecipientVisibility",
+            "description": "Чи бачить виконавець документ (і аркуш передачі) за ПРЯМИМИ призначеннями ролей:\n`Visible` | `NotVisible` | `Unknown` (групи AD чужої людини невідомі; у відповідях, що не є\nпереліком передач, не обчислюється). RC20 D-2."
           }
         },
         "required": [
@@ -10097,6 +10096,15 @@
           "reason"
         ],
         "type": "object"
+      },
+      "RecipientVisibility": {
+        "default": "Unknown",
+        "description": "Чи бачить виконавець документ (і аркуш передачі) за прямими призначеннями ролей (RC20 D-2).",
+        "enum": [
+          "Unknown",
+          "Visible",
+          "NotVisible"
+        ]
       },
       "RegistryBatchItemDto": {
         "description": "Один рядок пакета.",
