@@ -112,12 +112,20 @@
   color: var(--ecr-cell-fg-dark, var(--ecr-grid-text));
 }
 
-:root revo-grid[theme] revogr-data .rgCell.ecr-cell-filled:not([data-cell-state]) {
-  background-color: var(--ecr-cell-fill);
-  color: var(--ecr-cell-fill-fg);
-}
-
-:root[data-mantine-color-scheme='dark'] revo-grid[theme] revogr-data .rgCell.ecr-cell-filled:not([data-cell-state]) {
+/*
+ * L4: заливка (автора, правила чи користувача, «Заливка» в тулбарі) лежить
+ * на комірці без стану І під штрихом «лише читання» / «обчислена»: їхня форма
+ * (штрихування, межа) лишається поверх заливки і читається, а фарбувати
+ * захищену комірку можна, як в Excel. `dirty`, `orphaned` і `rounded` сильніші —
+ * їхній фон лишається станом, бо ховати «не збережено» чи «осиротіла» під
+ * довільним кольором не можна.
+ */
+:root revo-grid[theme] revogr-data .rgCell.ecr-cell-filled:not([data-cell-state]),
+:root revo-grid[theme] revogr-data .rgCell.ecr-cell-filled[data-cell-state='readOnly'],
+:root revo-grid[theme] revogr-data .rgCell.ecr-cell-filled[data-cell-state='calculated'],
+:root[data-mantine-color-scheme='dark'] revo-grid[theme] revogr-data .rgCell.ecr-cell-filled:not([data-cell-state]),
+:root[data-mantine-color-scheme='dark'] revo-grid[theme] revogr-data .rgCell.ecr-cell-filled[data-cell-state='readOnly'],
+:root[data-mantine-color-scheme='dark'] revo-grid[theme] revogr-data .rgCell.ecr-cell-filled[data-cell-state='calculated'] {
   background-color: var(--ecr-cell-fill);
   color: var(--ecr-cell-fill-fg);
 }
