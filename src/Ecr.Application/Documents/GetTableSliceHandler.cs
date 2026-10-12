@@ -104,27 +104,12 @@ public sealed class GetTableSliceHandler(
         // ФВ-6.14: і право — у проєкті документа.
         await DocumentVisibility.RequireVisibleAsync(access, profile, documentId, "Document.View", ct).ConfigureAwait(false);
 
-        var instance = await rowStore.ResolveTableInstanceAsync(tableInstanceId, ct).ConfigureAwait(false);
-
-        // ⛔ Належність екземпляра таблиці документові з МАРШРУТУ (Q-171,
-        // аудит фази 2). Без цієї перевірки шлях у URL декоративний:
-        // `CanReadDocumentAsync` вище перевіряє право на СВІЙ `documentId`,
-        // а `tableInstanceId` читається БЕЗ звірки з ним — клієнт міг би
-        // вказати чужий екземпляр і прочитати чужі дані, маючи право лише
-        // на свій документ. `CreateRowHandler` і `CellsController.Patch`
-        // цю звірку роблять; на читанні її не було ніколи.
-        if (instance.DocumentId != documentId)
-        {
-            throw new Errors.NotFoundException(
-                "ECR-DOC-0404",
-                $"Екземпляр таблиці {tableInstanceId} не належить документу {documentId}.",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = "err.ECR-DOC-0404.tableInstanceNotInDocument",
-                    ["tableInstanceId"] = tableInstanceId.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                    ["documentId"] = documentId.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                });
-        }
+        // ⛔ Належність екземпляра таблиці документові з МАРШРУТУ (Q-171) і НЕрозкриття (P3/P3-7, EA6-D1): відсутній
+        // екземпляр, екземпляр ЧУЖОГО документа й невидимий документ — ОДНА відповідь `err.ECR-DOC-0404.document`,
+        // та сама, що в `PATCH /cells` і `POST /rows` (`DocumentVisibility.ResolveInDocumentAsync`). Окремі тіла
+        // («не належить документу» / «екземпляра немає») давали оракул існування чужих `TableInstanceId`.
+        var instance = await DocumentVisibility
+            .ResolveInDocumentAsync(rowStore, documentId, tableInstanceId, ct).ConfigureAwait(false);
 
         // ⛔ S6 (ФВ-6.6): заборона на аркуш чи таблицю діє й на ЧИТАННЯ. До
         // цього зріз дивився лише на проєкт, і `IsDeny` на таблицю сірив
