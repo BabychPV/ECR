@@ -244,7 +244,7 @@ public sealed class ExcelImportAllOrNothingTests
     {
         // RC20 D-3: «ця частина вам не передана» — відмова лише виконавця передачі. Жодної комірки
         // ViaAssignment/Заповнено немає: без явного розпізнавання план лишився б на частковому шляху.
-        // Мутація: прибрати `IsNotAssignedToYou` з `IsUnderAssignment` — червоний.
+        // Мутація: прибрати `EditDenyReason.NotAssignedToYou` з `IsUnderAssignment` — червоний.
         const byte NotAssignedToYou = 20;
         using var workbook = await ExportAsync();
         workbook.Worksheet("Sheet").Cell(3, 1).Value = 10; // R1.A — не передано
