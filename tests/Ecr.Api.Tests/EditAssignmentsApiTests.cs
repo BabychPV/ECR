@@ -442,10 +442,22 @@ public sealed class EditAssignmentsApiTests(SqlServerFixture sql)
         Assert.True(Math.Abs((ExpiryOf(changed)!.Value - in60).TotalMilliseconds) < 1.0);
         Assert.Contains("EditAssignmentChanged", await EventTypesAsync(s).ConfigureAwait(true));
 
-        // Пропуск строку знімає його (значення замінює наявне, як і note).
+        // Повторне збереження БЕЗ expiresAt (інша ознака змінена) строк, виставлений через API, НЕ знімає.
+        var kept = await JsonAsync(
+            await owner.PostAsJsonAsync(
+                ListUri(s),
+                CreateBody(s, s.Executor.Id, isExclusive: false, baseVersion: changed.GetProperty("version").GetString()))
+                .ConfigureAwait(true),
+            HttpStatusCode.OK, app).ConfigureAwait(true);
+        Assert.False(kept.GetProperty("isExclusive").GetBoolean());
+        Assert.True(Math.Abs((ExpiryOf(kept)!.Value - in60).TotalMilliseconds) < 1.0);
+
+        // Явний null знімає строк.
         var cleared = await JsonAsync(
             await owner.PostAsJsonAsync(
-                ListUri(s), CreateBody(s, s.Executor.Id, baseVersion: changed.GetProperty("version").GetString())).ConfigureAwait(true),
+                ListUri(s),
+                CreateBody(s, s.Executor.Id, isExclusive: false, baseVersion: kept.GetProperty("version").GetString(), clearExpiry: true))
+                .ConfigureAwait(true),
             HttpStatusCode.OK, app).ConfigureAwait(true);
         Assert.Null(ExpiryOf(cleared));
     }
@@ -968,16 +980,29 @@ public sealed class EditAssignmentsApiTests(SqlServerFixture sql)
 
     private static Uri MeUri() => new("/api/v1/me/edit-assignments", UriKind.Relative);
 
-    private static object CreateBody(
-        Scenario s, int recipient, bool isExclusive = true, string? baseVersion = null, DateTime? expiresAt = null)
-        => new
+    /// <summary>
+    /// Тіло upsert. ⚠ <c>expiresAt</c> іде в тіло ЛИШЕ коли задано значення або <paramref name="clearExpiry"/>
+    /// (явний <c>null</c>): пропуск поля означає «не змінювати» (PATCH-семантика, EA6-D2).
+    /// </summary>
+    private static Dictionary<string, object?> CreateBody(
+        Scenario s, int recipient, bool isExclusive = true, string? baseVersion = null, DateTime? expiresAt = null,
+        bool clearExpiry = false)
+    {
+        var body = new Dictionary<string, object?>
         {
-            slice = new { sheetCode = s.SheetCode },
-            recipientUserIds = new[] { recipient },
-            isExclusive,
-            baseVersion,
-            expiresAt,
+            ["slice"] = new { sheetCode = s.SheetCode },
+            ["recipientUserIds"] = new[] { recipient },
+            ["isExclusive"] = isExclusive,
+            ["baseVersion"] = baseVersion,
         };
+
+        if (expiresAt is not null || clearExpiry)
+        {
+            body["expiresAt"] = expiresAt;
+        }
+
+        return body;
+    }
 
     private static async Task<JsonElement> JsonAsync(HttpResponseMessage response, HttpStatusCode status, EcrApiFactory app)
     {
