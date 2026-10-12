@@ -994,5 +994,3 @@ json.dump(out, open(OUT, 'w', encoding='utf-8'), ensure_ascii=False, indent=None
 print(out['stats'])
 for s in out['sheets']:
     print(s['code'], s['calc'], [(t['code'], t['layout'], t['rowMode'], len(t['columns']), len(t['rows']), len(t['rules'])) for t in s['tables']][:6])
-
-
