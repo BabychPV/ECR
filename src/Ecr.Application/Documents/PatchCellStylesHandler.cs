@@ -31,9 +31,8 @@ namespace Ecr.Application.Documents;
 /// ⛔ Нерозкриття: рядок чи колонка, яких немає в зрізі АБО яких читач не бачить (прихована
 /// колонка, заборона S6), — одна відмова <c>unknownCell</c> без назви причини.
 ///
-/// ⚠ Не повторює під транзакцією лише перевірку передачі зрізу (<c>EnsureAssignmentsHold</c>):
-/// вона — про значення; ціна гонки тут — один колір. Стан аркуша й структура документа беруться
-/// під блокуванням (як у запису комірок).
+/// ⛔ Під транзакцією, у порядку блокувань запису комірок: структура документа → стан аркуша →
+/// передачі зрізу (<see cref="IEditAssignmentStore.ReadFactsForGateAsync"/>, завжди, fail-closed).
 /// </remarks>
 public sealed class PatchCellStylesHandler(
     IRowStore rowStore,
@@ -44,7 +43,10 @@ public sealed class PatchCellStylesHandler(
     IUnitOfWork uow,
     IAuditWriter audit,
     ICurrentUser currentUser,
-    IClock clock)
+    IClock clock,
+
+    // ⛔ EA-B: передачі зрізу читаються ПІД блокуванням аркуша ЗАВЖДИ (fail-closed: сховище обов'язкове).
+    IEditAssignmentStore assignments)
 {
     /// <summary>Тип події журналу безпеки: оформлення задано/змінено.</summary>
     public const string SetEventType = "CellStyleSet";
@@ -161,7 +163,8 @@ public sealed class PatchCellStylesHandler(
                 });
         }
 
-        await EnsureAllowedAsync(profile, instance, period, targets, ct).ConfigureAwait(false);
+        var liftedColumns = await EnsureAllowedAsync(profile, instance, period, targets, ct).ConfigureAwait(false);
+        var sheetCode = snapshot.Sheets.FirstOrDefault(s => s.Id == table.SheetDefId)?.Code;
 
         var now = clock.UtcNow;
         var applied = 0;
@@ -188,6 +191,13 @@ public sealed class PatchCellStylesHandler(
                 .EnterEditAsync(documentId, table.SheetDefId, period, innerCt)
                 .ConfigureAwait(false);
             EnsureSheetEditable(status, targets.Count);
+
+            // ⛔ EA-B: передача зрізу ПОВТОРНО — під блокуванням аркуша, і порядок блокувань той самий, що в
+            // CreateRow/DeleteRow/PatchCells: структура → аркуш → передачі (U) → виконавці. Рішення про права
+            // прийняте поза транзакцією, а передачу можуть відкликати, позначити «Заповнено»/«Валідовано»
+            // чи вона може спливти між ним і комітом.
+            await EnsureAssignmentsHoldAsync(profile, instance, table, sheetCode, targets, liftedColumns, innerCt)
+                .ConfigureAwait(false);
 
             var existing = (await styles
                     .LoadForUpdateAsync(period, [.. targets.Select(t => t.Address.TableRowId).Distinct()], innerCt)
@@ -290,7 +300,7 @@ public sealed class PatchCellStylesHandler(
             : new { background = style.BackgroundHex, foreground = style.ForegroundHex, bold = style.IsBold };
 
     /// <summary>Рішення про права на кожну комірку; немає рішення — відмова.</summary>
-    private async Task EnsureAllowedAsync(
+    private async Task<HashSet<int>> EnsureAllowedAsync(
         AccessProfile profile,
         TableInstanceRef instance,
         PeriodKey period,
@@ -304,6 +314,7 @@ public sealed class PatchCellStylesHandler(
 
         EditDecision? first = null;
         var denied = 0;
+        var lifted = new HashSet<int>();
         foreach (var (_, address) in targets)
         {
             // ⛔ Немає рішення — ВІДМОВА (як у `PatchCellsHandler.CheckAccess`).
@@ -314,6 +325,11 @@ public sealed class PatchCellStylesHandler(
 
             if (decision.IsAllowed)
             {
+                if (decision.ViaAssignment)
+                {
+                    lifted.Add(address.ColumnDefId);
+                }
+
                 continue;
             }
 
@@ -323,10 +339,73 @@ public sealed class PatchCellStylesHandler(
 
         if (denied == 0)
         {
-            return;
+            return lifted;
         }
 
         throw DeniedCells(denied, first!.Value.Reason);
+    }
+
+    /// <summary>
+    /// EA-B: повторна перевірка передачі зрізу під блокуванням аркуша. Відмова — та сама форма
+    /// <c>ECR-ACCS-0403 deniedCells</c>, нічого не записано.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Дві умови відмови (як у запису комірок): з'явилася заборона передачі (Filled/Validated/Expired/
+    /// LockedByOwner) АБО колонку дозволила САМЕ передача, а тепер вона не піднімає (відкликана).
+    /// Читання фактів — завжди (не за прапорцем зі старого рішення), крім симуляції й системного писаря.
+    /// </remarks>
+    private async Task EnsureAssignmentsHoldAsync(
+        AccessProfile profile,
+        TableInstanceRef instance,
+        Ecr.Domain.Entities.Configuration.TableDef table,
+        string? sheetCode,
+        List<(CellStyleChange Item, CellAddress Address)> targets,
+        HashSet<int> liftedColumns,
+        CancellationToken ct)
+    {
+        if (profile.IsSimulation || profile.IsIntegrationWriter)
+        {
+            return;
+        }
+
+        var gate = await assignments
+            .ReadFactsForGateAsync(instance.DocumentId, profile.UserId, ct)
+            .ConfigureAwait(false);
+
+        if (gate.Facts.Count == 0 && liftedColumns.Count == 0)
+        {
+            return;
+        }
+
+        var utcNow = clock.UtcNow;
+        var columnsById = table.Columns.ToDictionary(c => c.Id);
+
+        foreach (var columnId in targets.Select(t => t.Address.ColumnDefId).Distinct())
+        {
+            if (!columnsById.TryGetValue(columnId, out var column))
+            {
+                continue;
+            }
+
+            var facts = EditAssignmentGuard.Evaluate(
+                profile.UserId,
+                gate.OwnerUserId,
+                isIntegrationWriter: false,
+                gate.Facts,
+                new EditSliceFacts(
+                    sheetCode, table.Code, new PeriodKey(instance.PeriodKey), column.IsMonthColumn, column.MonthNumber),
+                utcNow);
+
+            if (facts.Lock != EditDenyReason.None)
+            {
+                throw DeniedCells(targets.Count, facts.Lock);
+            }
+
+            if (liftedColumns.Contains(columnId) && !facts.DelegatedWrite)
+            {
+                throw DeniedCells(targets.Count, EditDenyReason.InsufficientGrantLevel);
+            }
+        }
     }
 
     private static void EnsureSheetEditable(DocumentStatus status, int cells)

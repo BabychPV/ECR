@@ -114,6 +114,38 @@ public sealed class CellStyleStoreTests(SqlServerFixture sql)
         Assert.Equal("#FFFF00", single.BackgroundHex);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Гонка_двох_збережень_нового_оформлення_дає_409_а_не_500_і_один_рядок()
+    {
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var doc = await builder.BuildAsync(columnCount: 1, rowCount: 1);
+
+        // Обидва «читали»: оформлення немає — і обидва додають (детерміновано, без таймінгів).
+        await using var first = builder.CreateContext();
+        await using var second = builder.CreateContext();
+        var a = new CellStyleStore(first);
+        var b = new CellStyleStore(second);
+        Assert.Empty(await a.LoadForUpdateAsync(doc.PeriodKey, [doc.RowIds[0]], CancellationToken.None));
+        Assert.Empty(await b.LoadForUpdateAsync(doc.PeriodKey, [doc.RowIds[0]], CancellationToken.None));
+
+        a.Add(Styled(doc, doc.RowIds[0], doc.ColumnDefIds[0], "#FFFF00"));
+        b.Add(Styled(doc, doc.RowIds[0], doc.ColumnDefIds[0], "#FF0000"));
+
+        await new UnitOfWork(first).SaveChangesAsync(CancellationToken.None);
+        var ex = await Assert.ThrowsAsync<Ecr.Application.Errors.ConcurrencyConflictException>(
+            () => new UnitOfWork(second).SaveChangesAsync(CancellationToken.None));
+
+        Assert.Equal("ECR-CELL-0409", ex.ErrorCode);
+        Assert.Equal("err.ECR-CELL-0409.concurrentChange", ex.Details!["messageKey"]);
+
+        await using var check = builder.CreateContext();
+        var stored = await check.CellStyles.AsNoTracking()
+            .Where(s => s.PeriodKeyValue == doc.PeriodKey.Value && s.TableRowId == doc.RowIds[0]).ToListAsync();
+        Assert.Equal("#FFFF00", Assert.Single(stored).BackgroundHex);
+    }
+
     private static CellStyle Styled(TestDocument doc, long rowId, int columnId, string background)
     {
         var style = new CellStyle(new CellAddress(doc.PeriodKey, rowId, columnId), userId: 1, At);

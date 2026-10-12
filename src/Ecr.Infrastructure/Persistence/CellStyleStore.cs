@@ -69,12 +69,20 @@ public sealed class CellStyleStore(EcrDbContext db) : ICellStyleStore
         }
 
         var key = periodKey.Value;
-        var ids = rowIds.ToList();
+        var result = new List<CellStyle>();
 
-        return await db.CellStyles
-            .Where(s => s.PeriodKeyValue == key && ids.Contains(s.TableRowId))
-            .ToListAsync(ct)
-            .ConfigureAwait(false);
+        // ⚠ Чанки по 1000: EF тут розгортає колекцію в окремі параметри (по одному на елемент), а ліміт SQL Server —
+        // 2100 параметрів на запит; 2000 рядків + ключ періоду вкладалися б лише з запасом у 99.
+        foreach (var chunk in rowIds.Distinct().Chunk(1000))
+        {
+            var ids = chunk.ToList();
+            result.AddRange(await db.CellStyles
+                .Where(s => s.PeriodKeyValue == key && ids.Contains(s.TableRowId))
+                .ToListAsync(ct)
+                .ConfigureAwait(false));
+        }
+
+        return result;
     }
 
     /// <inheritdoc />

@@ -1,4 +1,4 @@
-﻿// tests/Ecr.Infrastructure.Tests/Jobs/SourceEventSyncJobTests.cs
+// tests/Ecr.Infrastructure.Tests/Jobs/SourceEventSyncJobTests.cs
 using System.Globalization;
 using Ecr.Application;
 using Ecr.Application.Common;
@@ -1179,6 +1179,39 @@ public sealed class SourceEventSyncJobTests(SqlServerFixture sql)
                 $"DELETE FROM ext.RowWindowValue WHERE RowWindowMapId = {mapId}; DELETE FROM ext.RowWindowMap WHERE Id = {mapId};");
         }
     }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Directive", "HSE301-EFSYNC")]
+    public async Task ВидаленийРядок_знімає_користувацьке_оформлення_комірок_і_не_чіпає_чужий_рядок()
+    {
+        // CELL-STYLE L3b: doc.CellStyle без FK на рядок — жорстке видалення рядка події мусить прибрати й оформлення.
+        // Мутація: прибрати DELETE doc.CellStyle у JournalAndDeleteAsync — рядок EF-E1 лишає сироту.
+        await using var stand = await ArrangeAsync();
+        var source = new FakeEventSource(Ev("E1", Start, End), Ev("E2", Start.AddHours(1), End.AddHours(1)));
+        await RunAsync(stand, source);
+
+        await ExecuteAsync($"""
+            INSERT INTO doc.CellStyle (PeriodKey, TableRowId, ColumnDefId, BackgroundHex, IsBold, UpdatedAt, UpdatedByUserId)
+            SELECT r.PeriodKey, r.Id,
+                   (SELECT TOP 1 c.Id FROM cfg.ColumnDef c WHERE c.TableDefId = ti.TableDefId ORDER BY c.Id),
+                   '#FFFF00', 0, SYSUTCDATETIME(), 1
+            FROM doc.TableRow r JOIN doc.TableInstance ti ON ti.PeriodKey = r.PeriodKey AND ti.Id = r.TableInstanceId
+            WHERE ti.DocumentId = {stand.DocumentId} AND r.RowKey IN (N'EF-E1', N'EF-E2');
+            """);
+        Assert.Equal(2, Convert.ToInt32(await ScalarAsync(StyleCountSql(stand)), CultureInfo.InvariantCulture));
+
+        source.Result = new SourceEventResult([Ev("E2", Start.AddHours(1), End.AddHours(1))], false, null);
+        await RunAsync(stand, source);
+
+        Assert.Equal(["EF-E2"], (await RowsAsync(stand)).Select(r => r.RowKey));
+        Assert.Equal(1, Convert.ToInt32(await ScalarAsync(StyleCountSql(stand)), CultureInfo.InvariantCulture));
+    }
+
+    private static string StyleCountSql(dynamic stand)
+        => $"SELECT COUNT(*) FROM doc.CellStyle s JOIN doc.TableRow r ON r.PeriodKey = s.PeriodKey AND r.Id = s.TableRowId " +
+           $"JOIN doc.TableInstance ti ON ti.PeriodKey = r.PeriodKey AND ti.Id = r.TableInstanceId WHERE ti.DocumentId = {stand.DocumentId}";
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]

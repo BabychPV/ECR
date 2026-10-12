@@ -125,6 +125,8 @@ public sealed class ExcelExporterUserCellStyleTests
                 [
                     Styled(1001, "#FFFF00", null, false),
                     Styled(1002, "#99CCFF", "#0000FF", true),
+                    // Сирота (рядка немає в книзі: архівація/видалення) — мовчки пропускається, експорт не падає.
+                    Styled(9999, "#00FF00", null, false),
                 ],
             });
 

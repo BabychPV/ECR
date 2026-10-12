@@ -215,6 +215,68 @@ public sealed class CellStylesApiTests(SqlServerFixture sql)
         Assert.False(await db.CellStyles.AnyAsync(c => c.PeriodKeyValue == PeriodKeyValue && c.TableRowId == s.RowId));
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Закритий_період_блокує_оформлення_навіть_писаря()
+    {
+        var s = await ArrangeAsync(GrantLevel.Write, closePeriod: true).ConfigureAwait(true);
+
+        using var app = new EcrApiFactory(sql);
+        var client = await SignInAsync(app, s.UserName).ConfigureAwait(true);
+
+        var response = await PatchStylesAsync(client, s, new { rowKey = s.RowKey, columnCode = s.ColumnCode, backgroundHex = "#FFFF00" })
+            .ConfigureAwait(true);
+        var body = await response.Content.ReadAsStringAsync().ConfigureAwait(true);
+
+        Assert.True(response.StatusCode == HttpStatusCode.Forbidden, $"{response.StatusCode}: {body}\n{app.ErrorsText}");
+        Assert.Contains("PeriodClosed", body, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Прихована_колонка_і_видалений_рядок_дають_той_самий_422_unknownCell_що_й_неіснуючі()
+    {
+        var s = await ArrangeAsync(GrantLevel.Write).ConfigureAwait(true);
+
+        await using (var connection = new Microsoft.Data.SqlClient.SqlConnection(sql.ConnectionString))
+        {
+            await connection.OpenAsync().ConfigureAwait(true);
+            await using var command = connection.CreateCommand();
+            command.CommandText = "UPDATE cfg.ColumnDef SET IsHidden = 1 WHERE Id = @c; UPDATE doc.TableRow SET IsDeleted = 1 WHERE PeriodKey = @p AND Id = @r2";
+            command.Parameters.AddWithValue("@c", s.Document.ColumnDefIds[1]);
+            command.Parameters.AddWithValue("@p", PeriodKeyValue);
+            command.Parameters.AddWithValue("@r2", s.Document.RowIds[1]);
+            await command.ExecuteNonQueryAsync().ConfigureAwait(true);
+        }
+
+        await using var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext();
+        var hiddenCode = await db.ColumnDefs.AsNoTracking().Where(c => c.Id == s.Document.ColumnDefIds[1]).Select(c => c.Code).SingleAsync().ConfigureAwait(true);
+        var deletedKey = await db.TableRows.AsNoTracking().Where(r => r.Id == s.Document.RowIds[1]).Select(r => r.RowKeyValue).SingleAsync().ConfigureAwait(true);
+
+        using var app = new EcrApiFactory(sql);
+        var client = await SignInAsync(app, s.UserName).ConfigureAwait(true);
+
+        foreach (var item in new object[]
+                 {
+                     new { rowKey = s.RowKey, columnCode = hiddenCode, backgroundHex = "#FFFF00" },
+                     new { rowKey = deletedKey, columnCode = s.ColumnCode, backgroundHex = "#FFFF00" },
+                     new { rowKey = "NO_SUCH_ROW", columnCode = s.ColumnCode, backgroundHex = "#FFFF00" },
+                 })
+        {
+            var response = await PatchStylesAsync(client, s, item).ConfigureAwait(true);
+            var body = await response.Content.ReadAsStringAsync().ConfigureAwait(true);
+
+            Assert.True(response.StatusCode == HttpStatusCode.UnprocessableEntity, $"{response.StatusCode}: {body}\n{app.ErrorsText}");
+            Assert.Contains("ECR-CELL-4224", body, StringComparison.Ordinal);
+            Assert.Contains("unknownCell", body, StringComparison.Ordinal);
+        }
+
+        var rowIds = s.Document.RowIds.ToList();
+        Assert.False(await db.CellStyles.AnyAsync(c => c.PeriodKeyValue == PeriodKeyValue && rowIds.Contains(c.TableRowId)).ConfigureAwait(true));
+    }
+
     private static Task<HttpResponseMessage> PatchStylesAsync(HttpClient client, Scenario s, params object[] items)
         => PatchStylesAsync(client, s, reset: false, items);
 
@@ -254,7 +316,7 @@ public sealed class CellStylesApiTests(SqlServerFixture sql)
         return client;
     }
 
-    private async Task<Scenario> ArrangeAsync(GrantLevel level, bool deny = false)
+    private async Task<Scenario> ArrangeAsync(GrantLevel level, bool deny = false, bool closePeriod = false)
     {
         var builder = new TestDocumentBuilder(sql.ConnectionString);
         var doc = await builder.BuildAsync(PeriodKeyValue, columnCount: 2, rowCount: 2).ConfigureAwait(false);
@@ -266,6 +328,10 @@ public sealed class CellStylesApiTests(SqlServerFixture sql)
             .FirstAsync(p => p.ProjectId == doc.ProjectId && p.PeriodKeyValue == PeriodKeyValue)
             .ConfigureAwait(false);
         period.AdvanceTo(PeriodState.Open, DateTime.UtcNow);
+        if (closePeriod)
+        {
+            period.AdvanceTo(PeriodState.Closed, DateTime.UtcNow);
+        }
 
         var userName = $"csa_{Guid.NewGuid():N}"[..20];
         var user = new User(userName, userName, AuthProvider.Local);
