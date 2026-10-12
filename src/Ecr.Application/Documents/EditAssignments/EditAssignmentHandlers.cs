@@ -450,6 +450,7 @@ public sealed class UpsertEditAssignmentHandler(
                         EditAssignmentAccess.RequireVersion(p.BaseVersion, existing);
                     }
 
+                    var previousExpiresAt = existing.ExpiresAt;
                     var removed = existing.Recipients.Where(r => !recipientIds.Contains(r.UserId)).Select(r => r.UserId).ToList();
                     foreach (var id in removed)
                     {
@@ -480,7 +481,10 @@ public sealed class UpsertEditAssignmentHandler(
 
                     if (!sameFlags)
                     {
-                        events.Add(Event(ChangedEvent, now, null, userId, documentId, existing, "flags"));
+                        // EA6-D2: зняття строку = безстрокова передача — аудит бачить і новий, і попередній строк.
+                        events.Add(Event(
+                            ChangedEvent, now, null, userId, documentId, existing, "flags",
+                            expiryChanged, previousExpiresAt));
                     }
 
                     result = existing;
@@ -494,7 +498,9 @@ public sealed class UpsertEditAssignmentHandler(
 
                 foreach (var id in newlyAssigned)
                 {
-                    events.Add(Event(GrantedEvent, now, id, userId, documentId, result, "grant"));
+                    events.Add(Event(
+                        GrantedEvent, now, id, userId, documentId, result, "grant",
+                        includeExpiry: result.ExpiresAt is not null));
                 }
 
                 // Лист — лише тим, у кого є адреса; recipients: null (розсилка всім) заборонено.
@@ -531,18 +537,30 @@ public sealed class UpsertEditAssignmentHandler(
     }
 
     private SecurityEventRecord Event(
-        string type, DateTime now, int? targetUserId, int byUserId, long documentId, EditAssignment a, string via)
-        => new(
-            now, type, targetUserId, TargetRoleId: null,
-            JsonSerializer.Serialize(new
-            {
-                documentId,
-                assignmentId = a.Id,
-                slice = a.SliceKey,
-                isExclusive = a.IsExclusive,
-                via,
-            }),
-            byUserId, currentUser.CorrelationId);
+        string type, DateTime now, int? targetUserId, int byUserId, long documentId, EditAssignment a, string via,
+        bool includeExpiry = false, DateTime? previousExpiresAt = null)
+    {
+        // ⚠ Порядок й імена наявних полів не змінюються (журнал шукають за `"documentId":N`); строк дії —
+        // додаткові поля лише коли він передавався/змінився.
+        var payload = new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["documentId"] = documentId,
+            ["assignmentId"] = a.Id,
+            ["slice"] = a.SliceKey,
+            ["isExclusive"] = a.IsExclusive,
+            ["via"] = via,
+        };
+
+        if (includeExpiry)
+        {
+            payload["expiresAt"] = a.ExpiresAt;
+            payload["previousExpiresAt"] = previousExpiresAt;
+        }
+
+        return new(
+            now, type, targetUserId, TargetRoleId: null, JsonSerializer.Serialize(payload), byUserId,
+            currentUser.CorrelationId);
+    }
 
     private static bool IsUniqueViolation(Exception ex)
     {
