@@ -1,4 +1,4 @@
-﻿// tests/Ecr.Application.Tests/Recalculation/RecalculationServiceTests.cs
+// tests/Ecr.Application.Tests/Recalculation/RecalculationServiceTests.cs
 using Ecr.Application.Ports;
 using Ecr.Application.Recalculation;
 using Ecr.Domain.ValueObjects;
@@ -64,6 +64,54 @@ public sealed class RecalculationServiceTests
         Assert.DoesNotContain(2, order);
     }
 
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public void Колонковий_індекс_лише_розширює_набір_для_живих_рядків_і_не_чіпає_чужі_колонки()
+    {
+        // D3 (інваріантність): для адрес, що в плані Є, набір із колонковим індексом ⊇ колишнього
+        // (по комірках), а формули, що залежать лише від ІНШИХ колонок, не додаються.
+        var plan = new RecalculationPlan();
+        plan.Declare(1, evaluationOrder: 0);
+        plan.Declare(2, evaluationOrder: 1);
+        plan.Declare(3, evaluationOrder: 2);
+        plan.DependsOnCell(1, Cell(1001, 11));
+        plan.DependsOnCell(1, Cell(1002, 11));
+        plan.DependsOnCell(2, Cell(1001, 12));
+        plan.DependsOnColumn(1, 11);
+
+        var before = new RecalculationPlan();
+        before.Declare(1, 0);
+        before.Declare(2, 1);
+        before.Declare(3, 2);
+        before.DependsOnCell(1, Cell(1001, 11));
+        before.DependsOnCell(1, Cell(1002, 11));
+        before.DependsOnCell(2, Cell(1001, 12));
+
+        foreach (var address in new[] { Cell(1001, 11), Cell(1002, 11), Cell(1001, 12) })
+        {
+            var with = plan.DependentsOf(address);
+            Assert.Subset(with.ToHashSet(), before.DependentsOf(address).ToHashSet());
+            Assert.Equal(before.DependentsOf(address).ToHashSet(), with.ToHashSet());
+        }
+
+        Assert.Empty(plan.DependentsOf(Cell(1001, 99)));
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public void Підсумок_в_іншій_таблиці_залежить_від_колонки_і_за_адресою_видаленого_рядка()
+    {
+        // Формула 7 (інша таблиця) агрегує колонку 11 таблиці-джерела; рядок 9999 цього джерела видалено.
+        var plan = new RecalculationPlan();
+        plan.Declare(7, evaluationOrder: 0);
+        plan.Declare(8, evaluationOrder: 1);
+        plan.DependsOnColumn(7, 11);
+        plan.DependsOnFormula(8, 7);
+
+        var dirty = new DirtySet();
+        dirty.Add(Cell(9999, 11));
+
+        // Каскад іде далі: формула над результатом агрегату теж перераховується.
+        Assert.Equal([7, 8], Service().Plan(dirty, plan));
+    }
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)]
     public void Залежність_від_колонки_знаходиться_і_за_адресою_видаленого_рядка()
     {
