@@ -20144,9 +20144,15 @@ export interface components {
         /** @description Результат спрацювання правила умовного форматування (ФВ-2.6/2.7): колір
          *     `#rrggbb` (або `null` — колір теми) і жирність. */
         CellFormatDto: {
+            /** @description `#rrggbb` або `null` — колір теми. */
             backgroundHex: null | string;
+            /** @description `#rrggbb` або `null`. */
             foregroundHex: null | string;
+            /** @description Жирний. */
             isBold: boolean;
+            /** @description Штрих (`hatch` — «неактуальна комірка»); лише від умовного форматування, `null` — немає.
+             *     ⚠ Додано в L6 останнім необов'язковим полем: клієнт, що його не знає, малює решту як раніше. */
+            pattern?: null | string;
         };
         /** @description Зміна оформлення однієї комірки. */
         CellStyleChange: {
@@ -20492,6 +20498,17 @@ export interface components {
             isBold: boolean;
             /** @description gt, ge, lt, le, eq, ne, between, empty, notEmpty. */
             operator: string;
+            /** @description `hatch` — штрих («неактуальна комірка»); `null` — без штриху. */
+            pattern?: null | string;
+            /** @description Колонка, чиє значення в тому самому рядку перевіряє умова («статус рядка»); `null` — значення самої комірки.
+             *     Для колонки довідника порівнюється КОД запису (без урахування регістру). */
+            refColumnCode?: null | string;
+            /** @description Ключі рядків (лише для `row`), до 500. */
+            rowKeys?: null | string[];
+            /** @description `column` (за замовчуванням, поле відсутнє) — усі рядки; `row` — лише RowKeys. */
+            scope?: null | string;
+            /** @description Код таблиці; `null` — усі таблиці версії. Обов'язковий для `row` і для колонки `*`. */
+            tableCode?: null | string;
             /** @description Операнд (число); не потрібен для empty/notEmpty. */
             value: null | string;
             /** @description Верхня межа — лише для between. */
