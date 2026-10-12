@@ -8471,6 +8471,135 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/methodologies/{id}/versions/{vid}/substances": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Склад речовин версії. Право `Calculation.View`.
+         * @description ⚠ Порожній склад — законний стан (`200` з порожнім `items`); `404` — версії немає.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Методологія. */
+                    id: number;
+                    /** @description Версія. */
+                    vid: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MethodologySubstancesDto"];
+                        "text/json": components["schemas"]["MethodologySubstancesDto"];
+                        "text/plain": components["schemas"]["MethodologySubstancesDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        /**
+         * Замінює склад речовин версії-чернетки. Право `Calculation.EditFormula`.
+         * @description ⛔ Це набір, а не дельта: те, чого немає в запиті, зі складу прибирається (ідемпотентно). Речовини
+         *     потрібні формі B (ключ константи `{ключ}_{код речовини}`) — без складу ітерація по речовинах
+         *     порожня. Прибрати речовину, на яку звужена константа версії, не можна (`409 ECR-CALC-0409`).
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Методологія. */
+                    id: number;
+                    /** @description Версія-чернетка. */
+                    vid: number;
+                };
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["SaveMethodologySubstancesRequest"];
+                    "application/json": components["schemas"]["SaveMethodologySubstancesRequest"];
+                    "text/json": components["schemas"]["SaveMethodologySubstancesRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MethodologySubstancesDto"];
+                        "text/json": components["schemas"]["MethodologySubstancesDto"];
+                        "text/plain": components["schemas"]["MethodologySubstancesDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/methodologies/{id}/versions/{vid}/tests": {
         parameters: {
             query?: never;
@@ -23390,6 +23519,34 @@ export interface components {
              */
             priority: number;
         };
+        /** @description Речовина, яку рахує версія методології (`calc.MethodologySubstance`). */
+        MethodologySubstanceDto: {
+            /** @description Код запису довідника (`RegistryEntry.Code`, для повітряних речовин — 301, 304, …): те, що
+             *     форма B підставляє у ключ константи `{ключ}_{код}`. */
+            code: string;
+            /** @description Запис довідника видалено логічно (речовина лишилась у складі старої версії). */
+            isDeleted: boolean;
+            /**
+             * Format: int32
+             * @description Порядок у переліку речовин версії.
+             */
+            ordinal: number;
+            /**
+             * Format: int32
+             * @description Довідник, до якого належить запис.
+             */
+            registryDefId: number;
+            /**
+             * Format: int64
+             * @description Запис довідника речовин.
+             */
+            substanceEntryId: number;
+        };
+        /** @description Склад речовин версії методології. */
+        MethodologySubstancesDto: {
+            /** @description Речовини в порядку `ordinal`; порожньо — версія без речовин. */
+            items: components["schemas"]["MethodologySubstanceDto"][];
+        };
         /** @description Методологія-контейнер, як її бачить конфігуратор — <b>без</b> версій. */
         MethodologySummaryDto: {
             /** @description Код — те, чим на неї посилаються імпорти й прив'язки. */
@@ -26317,6 +26474,11 @@ export interface components {
              * @description Менше значення — вищий пріоритет; перший збіг виграє (ФВ-13.4).
              */
             priority: number;
+        };
+        /** @description Запит на заміну складу речовин версії-чернетки. */
+        SaveMethodologySubstancesRequest: {
+            /** @description Записи довідника речовин у порядку переліку; порожній перелік очищує склад, відсутній — 422. */
+            substanceEntryIds: null | number[];
         };
         /** @description Запит на запис тесту золотого набору. */
         SaveMethodologyTestCaseRequest: {

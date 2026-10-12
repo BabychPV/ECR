@@ -1365,6 +1365,12 @@ public sealed partial class EndpointCoverageTests
         "PUT /api/v1/template-versions/{p}/tables/{p}/formulas/cell/{p}/{p}",
         "DELETE /api/v1/template-versions/{p}/tables/{p}/formulas/cell/{p}/{p}",
 
+        // LP-07 (форма B константи): склад речовин версії методології заводить скрипт
+        // `tools/land/Import-LandAirSubstances.ps1` / розгортання шаблону; екрана «Речовини версії» ще немає.
+        // ⚠ Звільнення тимчасове: прибрати в тому ж коміті, що додає виклик у `features/methodologies`.
+        "GET /api/v1/methodologies/{p}/versions/{p}/substances",
+        "PUT /api/v1/methodologies/{p}/versions/{p}/substances",
+
         // ⚠ Тут стояла ще й `POST /api/v1/units/convert` з поясненням
         // «числа конвертуються там, де їх вводять». Пояснення було
         // НЕПРАВДОЮ: жодне місце клієнта нічого не конвертувало.

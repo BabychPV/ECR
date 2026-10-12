@@ -153,6 +153,22 @@ public sealed record MethodologyRuleDto(
 /// <param name="UpdatedAt">Коли правило востаннє змінювали (UTC); <c>null</c> — правила немає.</param>
 public sealed record MethodologyCategoryRuleDto(string? Expression, DateTime? UpdatedAt);
 
+/// <summary>Речовина, яку рахує версія методології (<c>calc.MethodologySubstance</c>).</summary>
+/// <param name="SubstanceEntryId">Запис довідника речовин.</param>
+/// <param name="Code">
+/// Код запису довідника (<c>RegistryEntry.Code</c>, для повітряних речовин — 301, 304, …): те, що
+/// форма B підставляє у ключ константи <c>{ключ}_{код}</c>.
+/// </param>
+/// <param name="RegistryDefId">Довідник, до якого належить запис.</param>
+/// <param name="Ordinal">Порядок у переліку речовин версії.</param>
+/// <param name="IsDeleted">Запис довідника видалено логічно (речовина лишилась у складі старої версії).</param>
+public sealed record MethodologySubstanceDto(
+    long SubstanceEntryId, string Code, int RegistryDefId, int Ordinal, bool IsDeleted);
+
+/// <summary>Склад речовин версії методології.</summary>
+/// <param name="Items">Речовини в порядку <c>ordinal</c>; порожньо — версія без речовин.</param>
+public sealed record MethodologySubstancesDto(IReadOnlyList<MethodologySubstanceDto> Items);
+
 /// <summary>
 /// Обов'язкова вхідна колонка методології — gate перед збереженням клітинки
 /// (директива «обов'язкові вхідні колонки методології»).
