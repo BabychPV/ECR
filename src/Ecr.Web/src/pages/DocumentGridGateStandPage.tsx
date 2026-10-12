@@ -38,6 +38,9 @@ const standWindow = window as unknown as StandWindow;
 
 const stored = new Map<string, Record<string, unknown>>();
 
+// L4: користувацький колір комірок ("{rowKey}:{columnCode}" → {backgroundHex, foregroundHex}).
+const styles = new Map<string, { backgroundHex: string | null; foregroundHex: string | null }>();
+
 // D-1: `?calc=1` додає обчислювану колонку TOTAL = 2 × QTY. Як на справжньому сервері, вона
 // відстає від правки: слайс віддає TOTAL лише з ЗАВЕРШЕНОЇ задачі перерахунку (~1.5 с після PATCH).
 const calcTotals = new Map<string, number>();
@@ -76,6 +79,7 @@ function slice(): Record<string, unknown> {
   return {
     cellConfirmations: {},
     cellPermissions: {},
+    cellStyles: Object.fromEntries(styles),
     periodKey: StandPeriodKey,
     tableInstanceId: StandTableInstanceId,
     columns: [
@@ -138,6 +142,22 @@ function installStandServer(): void {
       }
 
       return json({ appliedCells: rows.length, rowVersions: {}, validation: [] });
+    }
+    // ⚠ Без літерала адреси (як і нижче): шлях запису кольору перевіряє регулярка, не рядок.
+    if (/\/documents\/\d+\/tables\/\d+\/cell-styles$/.test(path) && init?.method === 'PATCH') {
+      const cells = (JSON.parse(String(init.body)) as { cells: { rowKey: string; columnCode: string; backgroundHex?: string | null; foregroundHex?: string | null }[] }).cells;
+      for (const cell of cells) {
+        const key = `${cell.rowKey}:${cell.columnCode}`;
+        const before = styles.get(key) ?? { backgroundHex: null, foregroundHex: null };
+        const next = {
+          backgroundHex: cell.backgroundHex === undefined ? before.backgroundHex : cell.backgroundHex,
+          foregroundHex: cell.foregroundHex === undefined ? before.foregroundHex : cell.foregroundHex,
+        };
+        if (next.backgroundHex === null && next.foregroundHex === null) styles.delete(key);
+        else styles.set(key, next);
+      }
+
+      return json({ applied: cells.length });
     }
     // ⚠ Без літерала адреси: сторож `EndpointCoverageTests` звіряє кожен шлях клієнта з сервером.
     if (/\/StandRecalcJob(%23|#)\d+$/.test(path)) {

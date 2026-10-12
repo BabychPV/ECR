@@ -7999,6 +7999,18 @@ USING (VALUES
     ,(N'err.ECR-CELL-4224.scopeEmptyChange', N'en', N'Formatting by area: nothing to apply. Set a fill, a text color or bold, or reset the formatting.', 1)
     ,(N'err.ECR-CELL-4224.tooManyCells', N'en', N'The area covers {count} cells; one request can format at most {max}. Format the table in parts.', 1)
     -- COLL:cellstyle-scope ── кінець секції ──
+    -- L4:cellcolor ── Колір комірки «як в Excel» (L4); ru/kz — порцією L4:cellcolor нижче ──
+    ,(N'grid.cellColor.group', N'en', N'Cell colour', 1)
+    ,(N'grid.cellColor.fill', N'en', N'Fill', 1)
+    ,(N'grid.cellColor.text', N'en', N'Text colour', 1)
+    ,(N'grid.cellColor.noFill', N'en', N'No fill', 1)
+    ,(N'grid.cellColor.autoText', N'en', N'Automatic', 1)
+    ,(N'grid.cellColor.theme', N'en', N'Theme colours', 1)
+    ,(N'grid.cellColor.standard', N'en', N'Standard colours', 1)
+    ,(N'grid.cellColor.more', N'en', N'More colours…', 1)
+    ,(N'grid.cellColor.noSelection', N'en', N'Select cells you can edit to colour them', 1)
+    ,(N'grid.cellColor.readOnly', N'en', N'The sheet is locked for editing, colour cannot be changed', 1)
+    -- L4:cellcolor ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -20051,6 +20063,35 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:cellstyle-scope ── кінець секції ──
+
+-- L4:cellcolor ── ru/kz: колір комірки; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'grid.cellColor.group', N'ru', N'Цвет ячеек'),
+    (N'grid.cellColor.group', N'kz', N'Ұяшық түсі'),
+    (N'grid.cellColor.fill', N'ru', N'Заливка'),
+    (N'grid.cellColor.fill', N'kz', N'Бояу'),
+    (N'grid.cellColor.text', N'ru', N'Цвет текста'),
+    (N'grid.cellColor.text', N'kz', N'Мәтін түсі'),
+    (N'grid.cellColor.noFill', N'ru', N'Без заливки'),
+    (N'grid.cellColor.noFill', N'kz', N'Бояусыз'),
+    (N'grid.cellColor.autoText', N'ru', N'Автоматический'),
+    (N'grid.cellColor.autoText', N'kz', N'Автоматты'),
+    (N'grid.cellColor.theme', N'ru', N'Цвета темы'),
+    (N'grid.cellColor.theme', N'kz', N'Тақырып түстері'),
+    (N'grid.cellColor.standard', N'ru', N'Стандартные цвета'),
+    (N'grid.cellColor.standard', N'kz', N'Стандартты түстер'),
+    (N'grid.cellColor.more', N'ru', N'Другие цвета…'),
+    (N'grid.cellColor.more', N'kz', N'Басқа түстер…'),
+    (N'grid.cellColor.noSelection', N'ru', N'Выделите ячейки, которые можно менять, чтобы закрасить их'),
+    (N'grid.cellColor.noSelection', N'kz', N'Бояу үшін өзгертуге болатын ұяшықтарды белгілеңіз'),
+    (N'grid.cellColor.readOnly', N'ru', N'Лист закрыт для правки, цвет менять нельзя'),
+    (N'grid.cellColor.readOnly', N'kz', N'Парақ өңдеуге жабық, түсті өзгертуге болмайды')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- L4:cellcolor ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t
