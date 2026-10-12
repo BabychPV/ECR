@@ -20,6 +20,63 @@ public sealed record VersionMigrationScope(
 /// <param name="ColumnPath">Шлях колонки за кодами <c>SHEET.TABLE.COLUMN</c> (джерело й поле не розкриваються).</param>
 public sealed record CollectionMappingRef(int MappingId, int ColumnDefId, bool IsActive, string ColumnPath);
 
+/// <summary>Поле мапінгу подій «атрибут → колонка» (D-1b RC20).</summary>
+/// <param name="FieldId"><c>ext.SourceEventFieldMap.Id</c>.</param>
+/// <param name="ColumnDefId">Колонка-ціль.</param>
+public sealed record EventFieldRef(int FieldId, int ColumnDefId);
+
+/// <summary>Мапінг подій джерела на динамічну таблицю документа (D-1b RC20).</summary>
+/// <param name="MapId"><c>ext.SourceEventMap.Id</c>.</param>
+/// <param name="SourceEntityId">Сутність-шаблон подій.</param>
+/// <param name="DocumentId">Документ ділянки.</param>
+/// <param name="TableDefId">Таблиця-ціль.</param>
+/// <param name="IsActive"><c>false</c> — призупинений.</param>
+/// <param name="Fields">Поля мапінгу.</param>
+public sealed record EventMapRef(
+    int MapId, int SourceEntityId, long DocumentId, int TableDefId, bool IsActive, IReadOnlyList<EventFieldRef> Fields);
+
+/// <summary>Прив'язка «атрибут → колонка, вікно = рядок» (D-1b RC20).</summary>
+/// <param name="MapId"><c>ext.RowWindowMap.Id</c>.</param>
+/// <param name="TableDefId">Таблиця.</param>
+/// <param name="TargetColumnDefId">Колонка-ціль.</param>
+/// <param name="StartColumnDefId">Початок вікна.</param>
+/// <param name="EndColumnDefId">Кінець вікна.</param>
+/// <param name="SelectorColumnDefId">Селектор; <c>null</c> — немає.</param>
+/// <param name="IsActive"><c>false</c> — призупинена.</param>
+public sealed record RowWindowMapRef(
+    int MapId, int TableDefId, int TargetColumnDefId, int StartColumnDefId, int EndColumnDefId,
+    int? SelectorColumnDefId, bool IsActive);
+
+/// <summary>Нова колонка поля мапінгу подій.</summary>
+/// <param name="FieldId">Поле.</param>
+/// <param name="ColumnDefId">Колонка цільової версії.</param>
+public sealed record EventFieldRemap(int FieldId, int ColumnDefId);
+
+/// <summary>Куди переїжджає мапінг подій.</summary>
+/// <param name="MapId">Мапінг.</param>
+/// <param name="TableDefId">Таблиця цільової версії.</param>
+/// <param name="Fields">Нові колонки його полів.</param>
+public sealed record EventMapRemap(int MapId, int TableDefId, IReadOnlyList<EventFieldRemap> Fields);
+
+/// <summary>Куди переїжджає прив'язка вікна.</summary>
+/// <param name="MapId">Прив'язка.</param>
+/// <param name="TableDefId">Таблиця цільової версії.</param>
+/// <param name="TargetColumnDefId">Колонка-ціль.</param>
+/// <param name="StartColumnDefId">Початок вікна.</param>
+/// <param name="EndColumnDefId">Кінець вікна.</param>
+/// <param name="SelectorColumnDefId">Селектор.</param>
+public sealed record WindowMapRemap(
+    int MapId, int TableDefId, int TargetColumnDefId, int StartColumnDefId, int EndColumnDefId, int? SelectorColumnDefId);
+
+/// <summary>Рішення плану: які мапінги подій і вікон переносяться (D-1b RC20).</summary>
+/// <param name="Events">Мапінги подій.</param>
+/// <param name="Windows">Прив'язки вікон.</param>
+public sealed record ExtendedMappingRemap(IReadOnlyList<EventMapRemap> Events, IReadOnlyList<WindowMapRemap> Windows)
+{
+    /// <summary>Нічого переносити.</summary>
+    public static ExtendedMappingRemap Empty { get; } = new([], []);
+}
+
 /// <summary>Користувачі, чиї профілі в кеші треба скинути після переносу.</summary>
 /// <param name="Ids">Користувачі (не більше стелі).</param>
 /// <param name="Overflow">Користувачів більше за стелю: перелік неповний, скидати треба ВЕСЬ кеш.</param>
@@ -97,6 +154,38 @@ public interface IDocumentVersionMigrationStore
     /// інших версій) не зачіпає.
     /// </remarks>
     public Task<int> RemapCollectionMappingsAsync(IReadOnlyDictionary<int, int> columnMap, CancellationToken ct);
+
+    /// <summary>
+    /// Мапінги подій джерела (<c>ext.SourceEventMap</c> із полями) документів проєкту (D-1b RC20).
+    /// </summary>
+    /// <param name="documentIds">Документи проєкту, що переноситься (мапінг належить конкретному документу).</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⛔ Лише мапінги ЦИХ документів: мапінги інших проєктів не читаються й не змінюються.
+    /// </remarks>
+    public Task<IReadOnlyList<EventMapRef>> ListEventMapsAsync(IReadOnlyCollection<long> documentIds, CancellationToken ct);
+
+    /// <summary>
+    /// Прив'язки «вікно = рядок» (<c>ext.RowWindowMap</c>) на таблицях обох версій шаблону (D-1b RC20).
+    /// </summary>
+    /// <param name="tableDefIds">Таблиці вихідної й цільової версій (цільові потрібні для виявлення зайнятої цілі).</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<IReadOnlyList<RowWindowMapRef>> ListRowWindowMapsAsync(IReadOnlyCollection<int> tableDefIds, CancellationToken ct);
+
+    /// <summary>
+    /// Переносить мапінги подій і вікон на таблиці/колонки цільової версії, а провенанс підтягувань
+    /// (<c>ext.RowWindowValue</c>) проєкту — на нові колонки (D-1b RC20).
+    /// </summary>
+    /// <param name="projectId">Проєкт, що переноситься (провенанс — лише його екземплярів таблиць).</param>
+    /// <param name="remap">Що переносити (рішення плану).</param>
+    /// <param name="columnMap">Колонка вихідної версії → колонка цільової (з плану).</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⚠ Лише всередині транзакції переносу, після <c>ApplyAsync</c>. Складені ключі <c>FK_RWM_*</c> —
+    /// (TableDefId, ColumnDefId): таблиця й усі колонки міняються ОДНИМ оператором.
+    /// </remarks>
+    public Task RemapEventAndWindowMapsAsync(
+        int projectId, ExtendedMappingRemap remap, IReadOnlyDictionary<int, int> columnMap, CancellationToken ct);
 
     /// <summary>
     /// Ключі опублікованих версій методологій, прив'язаних до цільової версії, що посилаються на колонки

@@ -221,6 +221,16 @@ public sealed partial class DocumentVersionMigrationTests
         public Task<int> RemapCollectionMappingsAsync(IReadOnlyDictionary<int, int> columnMap, CancellationToken ct)
             => inner.RemapCollectionMappingsAsync(columnMap, ct);
 
+        public Task<IReadOnlyList<EventMapRef>> ListEventMapsAsync(IReadOnlyCollection<long> documentIds, CancellationToken ct)
+            => inner.ListEventMapsAsync(documentIds, ct);
+
+        public Task<IReadOnlyList<RowWindowMapRef>> ListRowWindowMapsAsync(IReadOnlyCollection<int> tableDefIds, CancellationToken ct)
+            => inner.ListRowWindowMapsAsync(tableDefIds, ct);
+
+        public Task RemapEventAndWindowMapsAsync(
+            int projectId, ExtendedMappingRemap remap, IReadOnlyDictionary<int, int> columnMap, CancellationToken ct)
+            => inner.RemapEventAndWindowMapsAsync(projectId, remap, columnMap, ct);
+
         public Task<IReadOnlyList<string>> ListForeignMethodologyKeysAsync(int targetVersionId, int limit, CancellationToken ct)
             => inner.ListForeignMethodologyKeysAsync(targetVersionId, limit, ct);
 

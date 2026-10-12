@@ -7845,8 +7845,8 @@ USING (VALUES
     ,(N'editAssign.notVisibleHint', N'en', N'This person cannot see this document or sheet, so the assignment has no effect for them. Ask an administrator to grant them a role that opens it, for example the Executor role.', 1)
     -- COLL:rc21misc ── кінець секції ──
     -- COLL:d1remap ── D-1 RC20: перенос мапінгів збору разом із версією шаблону; ru/kz — порцією COLL:d1remap нижче ──
-    ,(N'err.ECR-SCHM-0422.migrateMappingsNotMapped', N'en', N'An active collection mapping points to a column that the target version does not have (the column is listed in mappingColumns). After the move, collection would read points and write nothing. Pause that mapping (or add the column to the target version and clone again), then move the project. Mappings with a matching column move automatically.', 1)
-    ,(N'documents.migrateRefusalMappingsNotMapped', N'en', N'Active collection mappings point to columns that the target version does not have; collection would write nothing into them. Pause those mappings first.', 1)
+    ,(N'err.ECR-SCHM-0422.migrateMappingsNotMapped', N'en', N'An active collection, source-event or row-window mapping points to a column or table that the target version does not have, or its place in the target version is already taken (the items are listed in mappingColumns). After the move, collection would read points and write nothing. Pause that mapping (or add the column to the target version and clone again), then move the project. Mappings with a matching column move automatically.', 1)
+    ,(N'documents.migrateRefusalMappingsNotMapped', N'en', N'Active collection, source-event or row-window mappings point to columns or tables that the target version does not have (or whose place is taken); nothing would be written there. Pause those mappings first.', 1)
     -- COLL:d1remap ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
@@ -19768,10 +19768,10 @@ GO
 INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val
   FROM (VALUES
-    (N'err.ECR-SCHM-0422.migrateMappingsNotMapped', N'ru', N'Активное сопоставление сбора указывает на колонку, которой нет в целевой версии (колонка названа в mappingColumns). После переноса сбор читал бы точки и ничего не писал. Приостановите это сопоставление (или добавьте колонку в целевую версию и клонируйте заново), затем переносите проект. Сопоставления с соответствующей колонкой переносятся автоматически.'),
-    (N'err.ECR-SCHM-0422.migrateMappingsNotMapped', N'kz', N'Жинаудың белсенді сәйкестендіруі мақсатты нұсқада жоқ бағанға сілтейді (баған mappingColumns ішінде аталған). Көшіруден кейін жинау нүктелерді оқып, ештеңе жазбас еді. Бұл сәйкестендіруді тоқтатыңыз (немесе бағанды мақсатты нұсқаға қосып, қайта клондаңыз), содан кейін жобаны көшіріңіз. Сәйкес бағаны бар сәйкестендірулер автоматты түрде көшіріледі.'),
-    (N'documents.migrateRefusalMappingsNotMapped', N'ru', N'Активные сопоставления сбора указывают на колонки, которых нет в целевой версии; сбор ничего в них не записал бы. Сначала приостановите эти сопоставления.'),
-    (N'documents.migrateRefusalMappingsNotMapped', N'kz', N'Жинаудың белсенді сәйкестендірулері мақсатты нұсқада жоқ бағандарға сілтейді; жинау оларға ештеңе жазбас еді. Алдымен осы сәйкестендірулерді тоқтатыңыз.')
+    (N'err.ECR-SCHM-0422.migrateMappingsNotMapped', N'ru', N'Активное сопоставление сбора, событий источника или окна строки указывает на колонку или таблицу, которой нет в целевой версии, либо её место в целевой версии уже занято (названы в mappingColumns). После переноса сбор читал бы точки и ничего не писал. Приостановите это сопоставление (или добавьте колонку в целевую версию и клонируйте заново), затем переносите проект. Сопоставления с соответствующей колонкой переносятся автоматически.'),
+    (N'err.ECR-SCHM-0422.migrateMappingsNotMapped', N'kz', N'Жинаудың, көз оқиғаларының немесе жол терезесінің белсенді сәйкестендіруі мақсатты нұсқада жоқ бағанға немесе кестеге сілтейді не оның орны мақсатты нұсқада бос емес (mappingColumns ішінде аталған). Көшіруден кейін жинау нүктелерді оқып, ештеңе жазбас еді. Бұл сәйкестендіруді тоқтатыңыз (немесе бағанды мақсатты нұсқаға қосып, қайта клондаңыз), содан кейін жобаны көшіріңіз. Сәйкес бағаны бар сәйкестендірулер автоматты түрде көшіріледі.'),
+    (N'documents.migrateRefusalMappingsNotMapped', N'ru', N'Активные сопоставления сбора, событий источника или окна строки указывают на колонки или таблицы, которых нет в целевой версии (или чьё место занято); туда ничего не записалось бы. Сначала приостановите эти сопоставления.'),
+    (N'documents.migrateRefusalMappingsNotMapped', N'kz', N'Жинаудың, көз оқиғаларының немесе жол терезесінің белсенді сәйкестендірулері мақсатты нұсқада жоқ бағандарға немесе кестелерге сілтейді (не олардың орны бос емес); оларға ештеңе жазылмас еді. Алдымен осы сәйкестендірулерді тоқтатыңыз.')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
