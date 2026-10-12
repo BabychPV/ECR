@@ -138,7 +138,8 @@ Invoke-RestMethod https://ecr.test.local/health/ready        # status: Healthy �
 3. `/admin/security`: завести собі адміністратора, автора даних (`DataEntry`) і
    погоджувача (`Approver`), видати ресурсний грант на проєкт. Роль `SystemAdministrator`
    несе повний набір адмін-прав (Security, Mapping/Pipeline, Notifications, Campaign,
-   публікація методик). `bootstrap` вимикається **сам лише** тоді, коли доменний (Windows)
+   публікація методик). З RC20 роль `SystemAdministrator` отримує 8 адмін-прав (D-388;
+   повертаються, якщо адміністратор їх зняв; запис у журнал безпеки). `bootstrap` вимикається **сам лише** тоді, коли доменний (Windows)
    адміністратор із `Security.ManageUsers` уже входив у систему. На локальному стенді
    (без домену) заблокуйте `bootstrap` вручну в `/admin/security` (Users → Lock),
    **щойно** є іменований користувач із роллю `SystemAdministrator`, який успішно входить.
@@ -150,7 +151,7 @@ Invoke-RestMethod https://ecr.test.local/health/ready        # status: Healthy �
 
 ## 6. Відомі обмеження першого тестування (не дефекти)
 
-Повний перелік — `docs/TESTER-HANDOVER.md` §5 і `docs/release-notes/` (першим читайте `rc-2026-11-04.md`, RC16; далі `rc-2026-11-03.md`, RC15; далі `rc-2026-11-02.md`, RC14; далі `rc-2026-11-01.md`, RC13; `rc-2026-10-31.md`, RC12; `rc-2026-10-30.md`, RC11; `rc-2026-10-29.md`, RC10; `rc-2026-10-28.md`, RC9; `rc-2026-10-27.md`, RC8, `rc7-ui.md`, UI-частина RC7, `rc-2026-10-26.md`, RC7, `rc-2026-10-25.md`, RC6, `rc-2026-10-24.md`, RC5, і `rc-2026-10-23.md`, RC4). Найважливіше:
+Повний перелік — `docs/TESTER-HANDOVER.md` §5 і `docs/release-notes/` (першим читайте `rc-2026-11-08.md`, RC20; далі `rc-2026-11-07.md`, RC19; далі `rc-2026-11-04.md`, RC16; далі `rc-2026-11-03.md`, RC15; далі `rc-2026-11-02.md`, RC14; далі `rc-2026-11-01.md`, RC13; `rc-2026-10-31.md`, RC12; `rc-2026-10-30.md`, RC11; `rc-2026-10-29.md`, RC10; `rc-2026-10-28.md`, RC9; `rc-2026-10-27.md`, RC8, `rc7-ui.md`, UI-частина RC7, `rc-2026-10-26.md`, RC7, `rc-2026-10-25.md`, RC6, `rc-2026-10-24.md`, RC5, і `rc-2026-10-23.md`, RC4). Найважливіше:
 
 1. **PI на стенді немає**: джерела PI відключені або порожні; сценарії збору з PI
    (И-2…И-5, И-9, И-10) пропускаються (`TESTER-HANDOVER` §4.2).
