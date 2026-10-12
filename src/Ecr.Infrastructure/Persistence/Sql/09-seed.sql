@@ -7521,6 +7521,14 @@ USING (VALUES
     (N'myTasks.edit.status.Assigned', N'en', N'Assigned', 1),
     (N'myTasks.edit.status.Filled', N'en', N'Filled, awaiting validation', 1),
     (N'myTasks.edit.status.Returned', N'en', N'Returned for edits', 1),
+    -- ФВ-12.5:approval-queue ── блок «До погодження» у My tasks ──
+    (N'myTasks.approval.title', N'en', N'Awaiting my approval', 1),
+    (N'myTasks.approval.error', N'en', N'Could not load the sheets awaiting your approval.', 1),
+    (N'myTasks.approval.more', N'en', N'Show more', 1),
+    (N'myTasks.approval.open', N'en', N'Review', 1),
+    (N'myTasks.approval.submittedAt', N'en', N'Submitted {date}', 1),
+    (N'myTasks.approval.submittedBy', N'en', N'Submitted by {name} · {date}', 1),
+    (N'myTasks.approval.step', N'en', N'Step {n} of {count}', 1),
     -- EDA-5c:mytasks ── кінець секції ──
     -- COLL:rc15c-recalc ── перерахунок вимкнений лише коли подані ВСІ аркуші; ru/kz — порцією COLL:rc15c-recalc нижче ──
     (N'workflow.recalculateAllSubmitted', N'en', N'All sheets of period {period} are submitted or approved: there is nothing to recalculate. Return a sheet for edits first (the sheet''s «Return for edits» action).', 1),
@@ -18801,6 +18809,28 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- EDA-5c:mytasks ── кінець секції ──
+-- ФВ-12.5:approval-queue ── ru/kz блоку «До погодження»; власна порція
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'myTasks.approval.title', N'ru', N'К согласованию'),
+    (N'myTasks.approval.title', N'kz', N'Келісуге'),
+    (N'myTasks.approval.error', N'ru', N'Не удалось загрузить листы, ожидающие вашего согласования.'),
+    (N'myTasks.approval.error', N'kz', N'Сіздің келісуіңізді күтетін парақтарды жүктеу мүмкін болмады.'),
+    (N'myTasks.approval.more', N'ru', N'Показать ещё'),
+    (N'myTasks.approval.more', N'kz', N'Көбірек көрсету'),
+    (N'myTasks.approval.open', N'ru', N'Проверить'),
+    (N'myTasks.approval.open', N'kz', N'Қарау'),
+    (N'myTasks.approval.submittedAt', N'ru', N'Подано {date}'),
+    (N'myTasks.approval.submittedAt', N'kz', N'Жіберілген күні: {date}'),
+    (N'myTasks.approval.submittedBy', N'ru', N'Подал(а) {name} · {date}'),
+    (N'myTasks.approval.submittedBy', N'kz', N'Жіберген: {name} · {date}'),
+    (N'myTasks.approval.step', N'ru', N'Шаг {n} из {count}'),
+    (N'myTasks.approval.step', N'kz', N'{count} қадамның {n}-і')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- ФВ-12.5:approval-queue ── кінець секції ──
 -- COLL:rc16lookup ── ru/kz: ціль Lookup-колонки/поля шапки - живий активний довідник; власна порція
 INSERT INTO #I18N ([Key], Lang, Val)
 SELECT v.[Key], v.Lang, v.Val

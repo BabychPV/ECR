@@ -4,7 +4,7 @@ import { expect, test, type APIRequestContext, type Browser, type BrowserContext
  * ФВ-12.5: черга «До погодження» (`GET /api/v1/me/approval-queue`) проти РЕАЛЬНОГО сервера стенда
  * (`tools/e2e-stand.ps1`, workflow `e2e-stand`, `-Grep approvalQueueLive`).
  *
- * Клієнтського блоку в My tasks ще немає (окрема лінія), тому сценарії йдуть через API під справжніми сесіями
+ * Основні сценарії йдуть через API (плюс крок 2б - блок «До погодження» у My tasks) під справжніми сесіями
  * трьох користувачів стенда:
  *  - `e2e-admin` (Manage на проєкт 1) подає аркуш: подавач - не погоджувач власного подання (F-25);
  *  - `e2e-reviewer` (та сама роль, інша людина) - погоджувач: бачить аркуш у черзі, затверджує, аркуш зникає;
@@ -184,6 +184,20 @@ test.describe('approvalQueue: черга «До погодження» на ре
       expect(item.templateCode.length).toBeGreaterThan(0);
       expect(item.submittedByDisplayName).toBe('E2E administrator');
       expect(Number.isNaN(Date.parse(item.submittedAt))).toBe(false);
+
+      // ── 2б. UI: блок «До погодження» у «My tasks» (клієнт ФВ-12.5) ───────────────────────────
+      const page = await reviewer.newPage();
+      await page.goto('/');
+      await page.getByRole('button', { name: /My tasks|Мои задачи/ }).click();
+      const card = page.locator(`[data-approval-document="${DocumentId}"][data-approval-sheet="${table.sheetCode}"]`);
+      await expect(card).toBeVisible({ timeout: 30_000 });
+      await expect(card).toContainText(item.documentKey);
+      await expect(card).toContainText('E2E administrator');
+      await card.locator('[data-action="review"]').click();
+      await expect(page).toHaveURL(
+        new RegExp(`/documents/${DocumentId}\\?periodKey=${PeriodKey}&sheet=${encodeURIComponent(table.sheetCode)}`),
+      );
+      await page.close();
 
       // ── 3. Подавач (F-25) і оператор без права затвердження - порожньо ─────────────
       expect(mine(await wholeQueue(admin.request), sheetDefId), 'власне подання в черзі подавача').toEqual([]);
