@@ -353,6 +353,7 @@ public static class DependencyInjection
         // явна відмова ECR-SYS-0503 (QuartzJobScheduler без фабрики), а справжня
         // черга приходить на Етапі 5 разом із рішенням щодо LGPL (D-09).
         services.AddScoped<Documents.PatchCellsHandler>();
+        services.AddScoped<Documents.PatchCellStylesHandler>();
         services.AddScoped<Documents.RecalculateDocumentHandler>();
 
         // Етап 5: обмін із Excel, звітність, інтеграція, стан задач.

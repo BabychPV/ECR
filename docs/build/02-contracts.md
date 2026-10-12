@@ -3648,6 +3648,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `ECR-CELL-4221` | 422 | спроба записати в обчислену комірку |
 | `ECR-CELL-4222` | 422 | значення поза межами реєстру або дії дозволу |
 | `ECR-CELL-4223` | 422 | посилання `Lookup`-комірки на запис довідника, якого не існує |
+| `ECR-CELL-4224` | 422 | `PATCH …/tables/{tableInstanceId}/cell-styles`: колір не `#rrggbb`, понад 2000 комірок, дубль або порожня зміна, комірки немає в зрізі; причина — у `messageKey` |
 | `ECR-HDR-0404` | 404 | код у `PATCH …/documents/{id}/header` не відповідає жодному полю шапки версії шаблону документа |
 | `ECR-HDR-0422` | 422 | значення поля шапки документа не відповідає типу чи обов'язковості |
 | `ECR-HDR-4223` | 422 | поле шапки `Lookup` посилається на запис довідника, який не можна обрати: чужий довідник, видалений, вимкнений або нечинний жодного дня звітного вікна проєкту (дозвіл `Permit` із закінченим строком); причина — у `messageKey` (PS-P1D, D-11) |
@@ -3926,6 +3927,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `PATCH` | `/api/v1/documents/{id}/header` | — (через грант Write на проєкт) | 8 |
 | `GET` | `/api/v1/documents/{id}/tables/{tableInstanceId}` | `Document.View` | 1 |
 | `PATCH` | `/api/v1/documents/{id}/cells` | — (через `IAccessDecisionService`) | 1 |
+| `PATCH` | `/api/v1/documents/{id}/tables/{tableInstanceId}/cell-styles` | — (грант `Write` на комірку через `IAccessDecisionService`, як `PATCH …/cells`; документ/період редаговані; 12.10 — користувацька заливка/колір тексту/жирність) | 1 |
 | `POST` | `/api/v1/documents/{id}/rows` | — | 1 |
 | `DELETE` | `/api/v1/documents/{id}/tables/{tableInstanceId}/rows/{rowKey}` | — (через `IAccessDecisionService`, як `POST …/rows`) | 1 |
 | `POST` | `/api/v1/documents/{id}/validate` | `Document.View` | 2 |
