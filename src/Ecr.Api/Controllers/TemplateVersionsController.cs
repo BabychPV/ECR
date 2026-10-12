@@ -739,7 +739,7 @@ public sealed class TemplateVersionsController(
                 code,
                 new SaveRowDefCommand(
                     request.LabelL10n, request.Ordinal, request.RowKind,
-                    request.ParentRowKey, request.IsReadOnly),
+                    request.ParentRowKey, request.IsReadOnly, request.StyleId),
                 ct)
             .ConfigureAwait(false));
     }
@@ -1188,12 +1188,14 @@ public sealed record SaveStyleDefRequest(
 /// <param name="RowKind">Роль рядка; незмінна після створення.</param>
 /// <param name="ParentRowKey">Ключ батьківського рядка в тій самій таблиці; <c>null</c> — корінь.</param>
 /// <param name="IsReadOnly">Заборона ручного вводу.</param>
+/// <param name="StyleId">Стиль рядка (<c>cfg.StyleDef</c> цієї версії); <c>null</c> — без стилю.</param>
 public sealed record SaveRowDefRequest(
     IReadOnlyDictionary<string, string> LabelL10n,
     int? Ordinal,
     Ecr.Domain.Enums.RowKind RowKind,
     string? ParentRowKey,
-    bool IsReadOnly);
+    bool IsReadOnly,
+    int? StyleId = null);
 
 /// <summary>Налаштування формули чернетки (<c>W5.3</c>).</summary>
 /// <param name="Dialect">Діалект, за яким читається вираз.</param>
