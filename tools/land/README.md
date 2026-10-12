@@ -30,12 +30,16 @@
 
 ## Безпека стенда (RC21)
 
-- Лише локальний стенд: `-BaseUrl` має вести на `localhost`, `127.0.0.1`, `[::1]` або `*.localhost`, а SQL (`-SqlConnection`
-  у Build-LandTemplate) — на локальний сервер (`localhost`, `.`, `(local)`, `127.0.0.1`, `::1`, ім'я цієї машини, `(localdb)`).
+- Лише локальний стенд: `-BaseUrl` має вести на `localhost`, `127.0.0.1` або `[::1]`, а SQL (`-SqlConnection` у
+  Build-LandTemplate) — на локальний сервер (`localhost`, `.`, `(local)`, `127.0.0.1`, `::1`, ім'я цієї машини, `(localdb)`)
+  і на базу з іменем `EcrLand*` (за замовчуванням `EcrLandUi`): локальний прод-інстанс старої системи не проходить.
+  Рядок підключення розбирається `SqlConnectionStringBuilder` (при дублі ключів перемагає останнє, як у SqlClient).
   Чужа адреса (в т.ч. https) - відмова ще до входу.
-- Мутації — лише з явним `-ConfirmStand <імʼя або адреса стенду>` (наприклад `localhost:5094` або `http://localhost:5094`; має
-  збігатися з `-BaseUrl`). Без нього скрипти не роблять жодного не-GET виклику і SQL-запису; `-DryRun` лише читає.
-  Build-LandTemplate передає підтвердження дочірнім Apply-ContractHeader/Import-ContractDictionaries сам.
+- Мутації — лише з явним `-ConfirmStand`. Apply-ContractHeader/Import-ContractDictionaries: адреса API (`localhost:5094`,
+  `http://localhost:5094` або `localhost`; має збігатися з `-BaseUrl`). Build-LandTemplate: адреса І база —
+  `localhost:5094/EcrLandUi` (або `http://localhost:5094/EcrLandUi`): URL API базу не називає, тож без імені бази
+  підтвердження відхиляється. Без нього скрипти не роблять жодного не-GET виклику і SQL-запису; `-DryRun` лише читає.
+  Build-LandTemplate передає дочірнім скриптам лише адресну частину сам.
 
 ## Адреса і вхід
 

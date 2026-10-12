@@ -62,10 +62,13 @@ if (-not $afFile) { $afFile = Join-Path $repo 'docs\delivery\reference-data\land
 . (Join-Path $here 'EcrApi.ps1')
 Set-StrictMode -Off
 
-# Безпека стенда: лише локальні API і SQL; мутації лише з явним -ConfirmStand (імʼя/адреса стенду).
+# Безпека стенда: лише локальні API і SQL (база з іменем EcrLand*); мутації лише з явним
+# -ConfirmStand <адреса>/<база> (наприклад localhost:5094/EcrLandUi).
 Assert-LocalBaseUrl $BaseUrl
-Assert-LocalSqlConnection $SqlConnection
-if (-not $DryRun) { Set-EcrStandConfirmation -Stand $ConfirmStand -Url $BaseUrl }
+$standDatabase = Assert-LocalSqlConnection $SqlConnection
+if (-not $DryRun) { Set-EcrStandConfirmation -Stand $ConfirmStand -Url $BaseUrl -Database $standDatabase }
+# Дочірні скрипти (API) отримують лише адресу стенду: база їм невідома й не потрібна.
+$childStand = if ($ConfirmStand -and $ConfirmStand.LastIndexOf('/') -gt 0) { $ConfirmStand.Substring(0, $ConfirmStand.LastIndexOf('/')) } else { $ConfirmStand }
 
 # Тимчасові 503 (ECR-SYS-0503 databaseBusy) і 429 повторюємо: стенд ділить SQL Server з іншими сесіями.
 ${function:Invoke-EcrOnce} = ${function:Invoke-Ecr}
@@ -281,7 +284,7 @@ function RegEntryId([string]$regCode, [string]$name) {
 function Stage-Contract {
     Log '== Contract (довідники вкладки 2. Contract) =='
     $pw = ConvertTo-SecureString $Acc['land-owner'] -AsPlainText -Force
-    & (Join-Path $here 'Import-ContractDictionaries.ps1') -BaseUrl $BaseUrl -User 'land-owner' -Password $pw -ConfirmStand $ConfirmStand
+    & (Join-Path $here 'Import-ContractDictionaries.ps1') -BaseUrl $BaseUrl -User 'land-owner' -Password $pw -ConfirmStand $childStand
 }
 
 # ==================== Template ====================
@@ -328,7 +331,7 @@ function Bulk-Insert($cn, [string]$table, $dt) {
 # Дані ті самі, що й через API; публікація, шапка, довідники й усе решта — через API.
 function Fill-StructureSql([int]$vid) {
     Assert-EcrMutationAllowed 'масове SQL-заповнення структури'
-    Assert-LocalSqlConnection $SqlConnection
+    $null = Assert-LocalSqlConnection $SqlConnection
     Log '  структура: SQL-масово (SqlBulkCopy)'
     $cn = New-Object System.Data.SqlClient.SqlConnection($SqlConnection)
     $cn.Open()
@@ -669,7 +672,7 @@ function Stage-Template {
     }
     # шапка Contract (13 полів) — офіційним скриптом на цій чернетці, з публікацією
     $pw = ConvertTo-SecureString $Acc['land-owner'] -AsPlainText -Force
-    & (Join-Path $here 'Apply-ContractHeader.ps1') -TemplateCode $TemplateCode -BaseUrl $BaseUrl -User 'land-owner' -Password $pw -ConfirmStand $ConfirmStand -UseExistingDraft
+    & (Join-Path $here 'Apply-ContractHeader.ps1') -TemplateCode $TemplateCode -BaseUrl $BaseUrl -User 'land-owner' -Password $pw -ConfirmStand $childStand -UseExistingDraft
     $vers = @((Api GET "/api/v1/templates/$($S.TemplateId)/versions?limit=100").Json.items)
     $pub = $vers | Where-Object { $_.status -eq 'Published' } | Sort-Object id -Descending | Select-Object -First 1
     if ($null -eq $pub) { throw 'Після Apply-ContractHeader немає опублікованої версії.' }

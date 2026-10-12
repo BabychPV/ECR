@@ -66,18 +66,14 @@ public sealed partial class LandUnitsModelTests
 
     [Fact]
     [Trait(TestCategories.Category, TestCategories.Architecture)]
-    public void Коли_секція_LAND_units_є_в_сіді_множники_моделі_дорівнюють_сідовим()
+    public void Множники_моделі_дорівнюють_сідовим_із_секції_LAND_units()
     {
-        // ⚠ Секція `-- LAND:units` живе в lane/land-g8-units (e95947fbe) і доїде в dev/integration окремо; у
-        // базі цієї lane її ще немає. Тест не вимикається (honesty-guard): без секції порівнювати нічого, а з
-        // нею стає суворим автоматично — розбіжність моделі з сідом тоді червоніє.
+        // Секція `-- LAND:units` (G8, e95947fbe) уже в сіді цієї бази: тест суворий, її зникнення - червоне
+        // (раніше без секції він мовчки нічого не перевіряв).
         var seed = File.ReadAllText(Path.Combine(
             SourceTree.Root, "src", "Ecr.Infrastructure", "Persistence", "Sql", "09-seed.sql"));
         var start = seed.IndexOf("-- LAND:units", StringComparison.Ordinal);
-        if (start < 0)
-        {
-            return;
-        }
+        Assert.True(start >= 0, "У 09-seed.sql немає секції '-- LAND:units' (G8): units.new моделі нема з чим звіряти.");
 
         var end = seed.IndexOf("-- LAND:units ── кінець секції", start, StringComparison.Ordinal);
         Assert.True(end > start, "Секція LAND:units без кінцевого маркера.");

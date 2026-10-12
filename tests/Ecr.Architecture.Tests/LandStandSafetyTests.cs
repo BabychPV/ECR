@@ -79,13 +79,14 @@ public sealed class LandStandSafetyTests
     {
         string[] allowed =
         [
-            "http://localhost:5094", "http://127.0.0.1:5094", "http://[::1]:5094", "https://ecr.localhost:5001",
+            "http://localhost:5094", "http://127.0.0.1:5094", "http://[::1]:5094",
             "https://LOCALHOST",
         ];
         string[] refused =
         [
             "https://ecr.example.com", "http://10.0.0.5:5094", "http://localhost.evil.com", "http://127.0.0.2:5094",
             "https://evil.com/localhost", "not-a-url", "http://prod-ecr:5094",
+            "https://ecr.localhost:5001", "http://evil.localhost:5094",
         ];
 
         var result = Verdicts("Assert-LocalBaseUrl", [.. allowed, .. refused]);
@@ -101,12 +102,14 @@ public sealed class LandStandSafetyTests
         string[] allowed =
         [
             "Server=localhost;Database=EcrLandUi;Integrated Security=true",
-            @"Server=.\SQLEXPRESS;Database=X;Integrated Security=true",
-            "Server=(local);Database=X;Integrated Security=true",
-            "Server=tcp:127.0.0.1,1433;Database=X;Integrated Security=true",
-            "Server=[::1];Database=X;Integrated Security=true",
-            @"Data Source=(localdb)\MSSQLLocalDB;Initial Catalog=X;Integrated Security=true",
-            @"Server=LOCALHOST\SQL2022,1433;Database=X;Integrated Security=true",
+            @"Server=.\SQLEXPRESS;Database=EcrLandUi;Integrated Security=true",
+            "Server=(local);Database=EcrLandUi;Integrated Security=true",
+            "Server=tcp:127.0.0.1,1433;Database=EcrLandUi;Integrated Security=true",
+            "Server=[::1];Database=EcrLandUi;Integrated Security=true",
+            @"Data Source=(localdb)\MSSQLLocalDB;Initial Catalog=EcrLandTest;Integrated Security=true",
+            @"Server=LOCALHOST\SQL2022,1433;Database=ecrlandui;Integrated Security=true",
+            // SqlClient при дублі ключів бере ОСТАННЄ: тут це localhost.
+            "Data Source=prod01;Server=localhost;Database=EcrLandUi;Integrated Security=true",
         ];
         string[] refused =
         [
@@ -116,6 +119,14 @@ public sealed class LandStandSafetyTests
             @"Data Source=prod\inst;Initial Catalog=X;Integrated Security=true",
             "Server=tcp:db.example.com,1433;Database=X;User Id=sa;Password=x",
             "Database=X;Integrated Security=true",
+            // Локальний сервер, але база не стенду: прод-інстанс старої системи на цій машині.
+            "Server=localhost;Database=ECR;Integrated Security=true",
+            "Server=localhost;Database=EcrDev;Integrated Security=true",
+            "Server=localhost;Integrated Security=true",
+            @"Server=localhost;AttachDBFilename=C:\x\EcrLandUi.mdf;Integrated Security=true",
+            // Дубль: регулярка бачила перше Server, SqlClient бере останнє.
+            "Server=localhost;Data Source=prod01;Database=EcrLandUi;Integrated Security=true",
+            "Server=localhost;Database=EcrLandUi;Initial Catalog=ECR;Integrated Security=true",
         ];
 
         var result = Verdicts("Assert-LocalSqlConnection", [.. allowed, .. refused]);
@@ -139,6 +150,13 @@ public sealed class LandStandSafetyTests
             try { Assert-EcrMutationAllowed 'probe'; 'NOGUARD2' } catch { 'STILL-GUARDED' }
             Set-EcrStandConfirmation -Stand 'localhost:5094' -Url 'http://localhost:5094'
             try { Assert-EcrMutationAllowed 'probe'; 'ALLOWED' } catch { 'BLOCKED' }
+            # Скрипт пише в SQL: підтвердження мусить нести імʼя бази.
+            $script:EcrStandConfirmed = $false
+            try { Set-EcrStandConfirmation -Stand 'localhost:5094' -Url 'http://localhost:5094' -Database 'EcrLandUi'; 'CONFIRMED-NODB' } catch { 'NODB-REFUSED' }
+            try { Set-EcrStandConfirmation -Stand 'localhost:5094/ECR' -Url 'http://localhost:5094' -Database 'EcrLandUi'; 'CONFIRMED-OTHERDB' } catch { 'OTHERDB-REFUSED' }
+            try { Assert-EcrMutationAllowed 'probe'; 'NOGUARD3' } catch { 'STILL-GUARDED2' }
+            Set-EcrStandConfirmation -Stand 'localhost:5094/ecrlandui' -Url 'http://localhost:5094' -Database 'EcrLandUi'
+            try { Assert-EcrMutationAllowed 'probe'; 'ALLOWED-DB' } catch { 'BLOCKED2' }
             """;
         var (exit, output) = RunPowerShell(script, LandFile("EcrApi.ps1"));
         Assert.True(exit == 0, output);
@@ -152,6 +170,10 @@ public sealed class LandStandSafetyTests
         Assert.Contains("REMOTE-REFUSED", output, StringComparison.Ordinal);
         Assert.Contains("STILL-GUARDED", output, StringComparison.Ordinal);
         Assert.Contains("ALLOWED", output, StringComparison.Ordinal);
+        Assert.Contains("NODB-REFUSED", output, StringComparison.Ordinal);
+        Assert.Contains("OTHERDB-REFUSED", output, StringComparison.Ordinal);
+        Assert.Contains("STILL-GUARDED2", output, StringComparison.Ordinal);
+        Assert.Contains("ALLOWED-DB", output, StringComparison.Ordinal);
         Assert.DoesNotContain("CONFIRMED-", output, StringComparison.Ordinal);
     }
 
@@ -182,6 +204,20 @@ public sealed class LandStandSafetyTests
         Assert.Equal(7, confirmExit);
         Assert.Contains("-ConfirmStand", confirm, StringComparison.Ordinal);
 
+        // Локальний прод-інстанс (база не EcrLand*) — відмова навіть із -DryRun.
+        var (prodExit, prod) = RunPowerShell(
+            "try { & $args[0] -SqlConnection 'Server=localhost;Database=ECR;Integrated Security=true' -ConfirmStand 'localhost:5094/ECR' -DryRun; exit 0 } catch { Write-Output $_.Exception.Message; exit 7 }",
+            build);
+        Assert.Equal(7, prodExit);
+        Assert.Contains("EcrLand", prod, StringComparison.Ordinal);
+
+        // Підтвердження лише адреси без імені бази — відмова з підказкою формату `<адреса>/<база>`.
+        var (noDbExit, noDb) = RunPowerShell(
+            "try { & $args[0] -BaseUrl 'http://localhost:5094' -ConfirmStand 'localhost:5094' -Stage Units; exit 0 } catch { Write-Output $_.Exception.Message; exit 7 }",
+            build);
+        Assert.Equal(7, noDbExit);
+        Assert.Contains("EcrLandUi", noDb, StringComparison.Ordinal);
+
         // -DryRun без підтвердження дозволений (лише читання моделі).
         var (dryExit, dry) = RunPowerShell(
             "try { & $args[0] -BaseUrl 'http://localhost:5094' -DryRun; exit 0 } catch { Write-Output $_.Exception.Message; exit 7 }",
@@ -205,8 +241,8 @@ public sealed class LandStandSafetyTests
         }
 
         // Дочірні скрипти отримують підтвердження від Build (інакше їхні мутації відмовили б).
-        Assert.Contains("Import-ContractDictionaries.ps1') -BaseUrl $BaseUrl -User 'land-owner' -Password $pw -ConfirmStand $ConfirmStand", build, StringComparison.Ordinal);
-        Assert.Contains("Apply-ContractHeader.ps1') -TemplateCode $TemplateCode -BaseUrl $BaseUrl -User 'land-owner' -Password $pw -ConfirmStand $ConfirmStand", build, StringComparison.Ordinal);
+        Assert.Contains("Import-ContractDictionaries.ps1') -BaseUrl $BaseUrl -User 'land-owner' -Password $pw -ConfirmStand $childStand", build, StringComparison.Ordinal);
+        Assert.Contains("Apply-ContractHeader.ps1') -TemplateCode $TemplateCode -BaseUrl $BaseUrl -User 'land-owner' -Password $pw -ConfirmStand $childStand", build, StringComparison.Ordinal);
 
         // SQL-запис: кожна точка входу сама перевіряє підтвердження (не лише верхній рівень).
         foreach (var fn in new[] { "function Sql-Exec", "function Bulk-Insert", "function Fill-StructureSql" })
