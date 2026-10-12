@@ -1,0 +1,512 @@
+{
+ "formatVersion": 1,
+ "source": "tools/land/model-gen/extract_result_outputs.py: формули ECW_EC_* пакета методологій AF x таблиці правил AF (структура, без значень)",
+ "methodologies": {
+  "ECW_C08_04_02": {
+   "tables": [
+    "T6_11"
+   ],
+   "outputs": [
+    "ECW_EC_gsec_331",
+    "ECW_EC_tons_331"
+   ]
+  },
+  "ECW_C08_04_03": {
+   "tables": [
+    "T6_12"
+   ],
+   "outputs": [
+    "ECW_EC_gsec_2902",
+    "ECW_EC_gsec_2908",
+    "ECW_EC_tons_2902",
+    "ECW_EC_tons_2908"
+   ]
+  },
+  "ECW_C11_01": {
+   "tables": [
+    "T9_04",
+    "T9a_16",
+    "T9a_17",
+    "T9a_27",
+    "T9a_30"
+   ],
+   "outputs": [
+    "ECW_EC_gsec_XXX_type1_1",
+    "ECW_EC_gsec_XXX_type1_2",
+    "ECW_EC_gsec_XXX_type1_3",
+    "ECW_EC_gsec_XXX_type2",
+    "ECW_EC_tons_XXX_type1_1",
+    "ECW_EC_tons_XXX_type1_2",
+    "ECW_EC_tons_XXX_type1_3",
+    "ECW_EC_tons_XXX_type2"
+   ]
+  },
+  "ECW_C11_02": {
+   "tables": [
+    "T9_04",
+    "T9a_16",
+    "T9a_27"
+   ],
+   "outputs": [
+    "ECW_EC_gsec_XXX_type1",
+    "ECW_EC_gsec_XXX_type2",
+    "ECW_EC_tons_XXX_type1",
+    "ECW_EC_tons_XXX_type2"
+   ]
+  },
+  "ECW_C11_03": {
+   "tables": [
+    "T9_03",
+    "T9_05",
+    "T9_06",
+    "T9_09",
+    "T9_13",
+    "T9_14",
+    "T9a_17"
+   ],
+   "outputs": [
+    "ECW_EC_gsec_1325",
+    "ECW_EC_gsec_2754",
+    "ECW_EC_gsec_301",
+    "ECW_EC_gsec_304",
+    "ECW_EC_gsec_328",
+    "ECW_EC_gsec_330",
+    "ECW_EC_gsec_337",
+    "ECW_EC_gsec_703",
+    "ECW_EC_gsec_NOx",
+    "ECW_EC_tons_1325",
+    "ECW_EC_tons_2754",
+    "ECW_EC_tons_301",
+    "ECW_EC_tons_304",
+    "ECW_EC_tons_328",
+    "ECW_EC_tons_330",
+    "ECW_EC_tons_337",
+    "ECW_EC_tons_703",
+    "ECW_EC_tons_NOx"
+   ]
+  },
+  "ECW_C11_04": {
+   "tables": [
+    "T9_04"
+   ],
+   "outputs": [
+    "ECW_EC_gsec_301",
+    "ECW_EC_gsec_304",
+    "ECW_EC_gsec_330",
+    "ECW_EC_gsec_337",
+    "ECW_EC_gsec_415",
+    "ECW_EC_tons_301",
+    "ECW_EC_tons_304",
+    "ECW_EC_tons_330",
+    "ECW_EC_tons_337",
+    "ECW_EC_tons_415"
+   ]
+  },
+  "ECW_C11_05": {
+   "tables": [
+    "T9_07"
+   ],
+   "outputs": [
+    "ECW_EC_gsec_301",
+    "ECW_EC_gsec_304",
+    "ECW_EC_gsec_330",
+    "ECW_EC_gsec_337",
+    "ECW_EC_gsec_415",
+    "ECW_EC_gsec_703",
+    "ECW_EC_tons_301",
+    "ECW_EC_tons_304",
+    "ECW_EC_tons_330",
+    "ECW_EC_tons_337",
+    "ECW_EC_tons_415",
+    "ECW_EC_tons_703"
+   ]
+  },
+  "ECW_C11_06": {
+   "tables": [
+    "T9a_25"
+   ],
+   "outputs": [
+    "ECW_EC_gsec_301",
+    "ECW_EC_gsec_304",
+    "ECW_EC_gsec_330",
+    "ECW_EC_gsec_337",
+    "ECW_EC_gsec_415",
+    "ECW_EC_tons_301",
+    "ECW_EC_tons_304",
+    "ECW_EC_tons_330",
+    "ECW_EC_tons_337",
+    "ECW_EC_tons_415"
+   ]
+  },
+  "ECW_C11_07": {
+   "tables": [
+    "T9_08",
+    "T9_10"
+   ],
+   "outputs": [
+    "ECW_EC_gsec_301",
+    "ECW_EC_gsec_304",
+    "ECW_EC_gsec_328",
+    "ECW_EC_gsec_330",
+    "ECW_EC_gsec_337",
+    "ECW_EC_tons_301",
+    "ECW_EC_tons_304",
+    "ECW_EC_tons_328",
+    "ECW_EC_tons_330",
+    "ECW_EC_tons_337"
+   ]
+  },
+  "ECW_C11_08": {
+   "tables": [
+    "T9_08",
+    "T9_10",
+    "T9a_17"
+   ],
+   "outputs": [
+    "ECW_EC_gsec_301",
+    "ECW_EC_gsec_304",
+    "ECW_EC_gsec_330",
+    "ECW_EC_gsec_337",
+    "ECW_EC_tons_301",
+    "ECW_EC_tons_304",
+    "ECW_EC_tons_330",
+    "ECW_EC_tons_337"
+   ]
+  },
+  "ECW_C11_10": {
+   "tables": [
+    "T9_02",
+    "T9_04",
+    "T9_07",
+    "T9_11",
+    "T9a_24",
+    "T9a_25",
+    "T9a_26",
+    "T9a_27",
+    "T9a_28"
+   ],
+   "outputs": [
+    "ECW_EC_gsec_XXX_type1",
+    "ECW_EC_gsec_XXX_type2",
+    "ECW_EC_gsec_XXX_type3",
+    "ECW_EC_tons_XXX_type1",
+    "ECW_EC_tons_XXX_type2",
+    "ECW_EC_tons_XXX_type3"
+   ]
+  },
+  "ECW_C11_11_01": {
+   "tables": [
+    "T9_03",
+    "T9_05",
+    "T9_09",
+    "T9_12",
+    "T9_13",
+    "T9_14"
+   ],
+   "outputs": [
+    "ECW_EC_gsec_2735",
+    "ECW_EC_gsec_2754",
+    "ECW_EC_gsec_333",
+    "ECW_EC_tons_2735",
+    "ECW_EC_tons_2754",
+    "ECW_EC_tons_333"
+   ]
+  },
+  "ECW_C11_11_02": {
+   "tables": [
+    "T9_01",
+    "T9_07",
+    "T9_08",
+    "T9a_16",
+    "T9a_17a",
+    "T9a_19"
+   ],
+   "outputs": [
+    "ECW_EC_gsec_1052_type1",
+    "ECW_EC_gsec_1078_type1",
+    "ECW_EC_gsec_2754_type1",
+    "ECW_EC_gsec_2754_type2",
+    "ECW_EC_gsec_322_type1",
+    "ECW_EC_gsec_322_type2",
+    "ECW_EC_gsec_333_type1",
+    "ECW_EC_gsec_333_type2",
+    "ECW_EC_tons_1052_type1",
+    "ECW_EC_tons_1078_type1",
+    "ECW_EC_tons_2754_type1",
+    "ECW_EC_tons_2754_type2",
+    "ECW_EC_tons_322_type1",
+    "ECW_EC_tons_322_type2",
+    "ECW_EC_tons_333_type1",
+    "ECW_EC_tons_333_type2"
+   ]
+  },
+  "ECW_C11_11_03": {
+   "tables": [
+    "T9_06",
+    "T9a_17"
+   ],
+   "outputs": [
+    "ECW_EC_gsec_XXX_type1",
+    "ECW_EC_gsec_XXX_type2",
+    "ECW_EC_tons_XXX_type1",
+    "ECW_EC_tons_XXX_type2",
+    "ECW_EC_tons_XXX_type3"
+   ]
+  },
+  "ECW_C11_11_04": {
+   "tables": [
+    "T9a_19"
+   ],
+   "outputs": [
+    "ECW_EC_gsec_XXX_type1",
+    "ECW_EC_gsec_XXX_type2",
+    "ECW_EC_gsec_XXX_type3",
+    "ECW_EC_tons_XXX_type1",
+    "ECW_EC_tons_XXX_type2",
+    "ECW_EC_tons_XXX_type3"
+   ]
+  },
+  "ECW_C11_11_05": {
+   "tables": [
+    "T9a_21",
+    "T9a_22"
+   ],
+   "outputs": [
+    "ECW_EC_gsec_330",
+    "ECW_EC_gsec_333",
+    "ECW_EC_tons_330",
+    "ECW_EC_tons_333"
+   ]
+  },
+  "ECW_C11_12_01": {
+   "tables": [
+    "T9_10"
+   ],
+   "outputs": [
+    "ECW_EC_gsec_XXX",
+    "ECW_EC_tons_XXX"
+   ]
+  },
+  "ECW_C11_12_03": {
+   "tables": [
+    "T9a_21"
+   ],
+   "outputs": [
+    "ECW_EC_gsec_XXX",
+    "ECW_EC_tons_XXX"
+   ]
+  },
+  "ECW_C11_13": {
+   "tables": [
+    "T9_01",
+    "T9_05"
+   ],
+   "outputs": [
+    "ECW_EC_gsec_1078",
+    "ECW_EC_gsec_2735",
+    "ECW_EC_gsec_2754",
+    "ECW_EC_gsec_333",
+    "ECW_EC_tons_1078_type1",
+    "ECW_EC_tons_1078_type2",
+    "ECW_EC_tons_2735_type1",
+    "ECW_EC_tons_2735_type2",
+    "ECW_EC_tons_2754_type1",
+    "ECW_EC_tons_2754_type2",
+    "ECW_EC_tons_333_type1",
+    "ECW_EC_tons_333_type2"
+   ]
+  },
+  "ECW_C11_14": {
+   "tables": [
+    "T9a_21b",
+    "T9a_22"
+   ],
+   "outputs": [
+    "ECW_EC_gsec_331",
+    "ECW_EC_tons_331"
+   ]
+  },
+  "ECW_C11_15": {
+   "tables": [
+    "T9a_21a"
+   ],
+   "outputs": [
+    "ECW_EC_gsec_331",
+    "ECW_EC_gsec_333",
+    "ECW_EC_tons_331",
+    "ECW_EC_tons_333"
+   ]
+  },
+  "ECW_C11_16": {
+   "tables": [
+    "T9a_21b",
+    "T9a_22",
+    "T9a_23"
+   ],
+   "outputs": [
+    "ECW_EC_gsec_XXX_type1",
+    "ECW_EC_gsec_XXX_type2",
+    "ECW_EC_tons_XXX_type1",
+    "ECW_EC_tons_XXX_type2"
+   ]
+  },
+  "ECW_C11_17": {
+   "tables": [
+    "T9a_23"
+   ],
+   "outputs": [
+    "ECW_EC_gsec_XXX",
+    "ECW_EC_tons_XXX"
+   ]
+  },
+  "ECW_C11_18": {
+   "tables": [
+    "T9a_23"
+   ],
+   "outputs": [
+    "ECW_EC_gsec_XXX",
+    "ECW_EC_tons_XXX"
+   ]
+  },
+  "ECW_C11_19": {
+   "tables": [
+    "T9a_23"
+   ],
+   "outputs": [
+    "ECW_EC_gsec_XXX",
+    "ECW_EC_tons_XXX"
+   ]
+  },
+  "ECW_C11_20_01": {
+   "tables": [
+    "T9_15"
+   ],
+   "outputs": [
+    "ECW_EC_gsec_XXX",
+    "ECW_EC_tons_XXX"
+   ]
+  },
+  "ECW_C11_20_02": {
+   "tables": [
+    "T9_15"
+   ],
+   "outputs": [
+    "ECW_EC_gsec_XXX",
+    "ECW_EC_tons_XXX"
+   ]
+  },
+  "ECW_C12_01": {
+   "tables": [
+    "T11_02",
+    "T11a_01",
+    "T11b_01",
+    "T11c_01",
+    "T11d_01"
+   ],
+   "outputs": [
+    "ECW_EC_gsec_XXX_type1",
+    "ECW_EC_gsec_XXX_type2",
+    "ECW_EC_tons_XXX_type1",
+    "ECW_EC_tons_XXX_type2"
+   ]
+  },
+  "ECW_C12_02": {
+   "tables": [
+    "T10_03",
+    "T11_03"
+   ],
+   "outputs": [
+    "ECW_EC_gsec_301_type1",
+    "ECW_EC_gsec_301_type2",
+    "ECW_EC_gsec_304_type1",
+    "ECW_EC_gsec_304_type2",
+    "ECW_EC_gsec_330_type1",
+    "ECW_EC_gsec_330_type2",
+    "ECW_EC_gsec_337_type1",
+    "ECW_EC_gsec_337_type2",
+    "ECW_EC_gsec_415_type1",
+    "ECW_EC_gsec_415_type2",
+    "ECW_EC_tons_301_type1",
+    "ECW_EC_tons_301_type2",
+    "ECW_EC_tons_304_type1",
+    "ECW_EC_tons_304_type2",
+    "ECW_EC_tons_330_type1",
+    "ECW_EC_tons_330_type2",
+    "ECW_EC_tons_337_type1",
+    "ECW_EC_tons_337_type2",
+    "ECW_EC_tons_415_type1",
+    "ECW_EC_tons_415_type2"
+   ]
+  },
+  "ECW_C12_03": {
+   "tables": [
+    "T10_01",
+    "T11_01"
+   ],
+   "outputs": [
+    "ECW_EC_gsec_XXX",
+    "ECW_EC_tons_XXX"
+   ]
+  },
+  "ECW_C12_04_01": {
+   "tables": [
+    "T11_04"
+   ],
+   "outputs": [
+    "ECW_EC_gsec_XXX",
+    "ECW_EC_tons_XXX"
+   ]
+  },
+  "ECW_C12_04_02": {
+   "tables": [
+    "T10_05",
+    "T10a_02",
+    "T11_04"
+   ],
+   "outputs": [
+    "ECW_EC_gsec_XXX",
+    "ECW_EC_tons_XXX"
+   ]
+  },
+  "ECW_C12_05": {
+   "tables": [
+    "T10_04",
+    "T10a_01"
+   ],
+   "outputs": [
+    "ECW_EC_gsec_1325",
+    "ECW_EC_gsec_2754",
+    "ECW_EC_gsec_301",
+    "ECW_EC_gsec_304",
+    "ECW_EC_gsec_328",
+    "ECW_EC_gsec_330",
+    "ECW_EC_gsec_337",
+    "ECW_EC_gsec_703",
+    "ECW_EC_gsec_NOx",
+    "ECW_EC_tons_1325",
+    "ECW_EC_tons_2754",
+    "ECW_EC_tons_301",
+    "ECW_EC_tons_304",
+    "ECW_EC_tons_328",
+    "ECW_EC_tons_330",
+    "ECW_EC_tons_337",
+    "ECW_EC_tons_703",
+    "ECW_EC_tons_NOx"
+   ]
+  }
+ },
+ "excludedOutputs": {
+  "ECW_C11_11_02": [
+   "ECW_EC_SumXiDivMi",
+   "ECW_EC_SumXiDivMi_0560",
+   "ECW_EC_SumXiDivMi_0788",
+   "ECW_EC_SumXiDivMi_0793",
+   "ECW_EC_SumXiDivMi_6975",
+   "ECW_EC_SumXiDivRi",
+   "ECW_EC_SumXiDivRi_0560",
+   "ECW_EC_SumXiDivRi_0788",
+   "ECW_EC_SumXiDivRi_0793",
+   "ECW_EC_SumXiDivRi_6975"
+  ]
+ }
+}

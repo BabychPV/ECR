@@ -71,3 +71,19 @@ $pw = Read-Host 'Пароль bootstrap' -AsSecureString
 введення (`Land_TypeFuel` у 10.01/10.03/10.04/11.01, `Land_ProcessTrain` у 11.03, `Land_ERG_EmissionSourceType` у 5.08/5.09/5.27,
 `Land_Measure_GTU*` у 10.03/11.03), `unitMismatches` і `notProven`. Перейменувань наявних колонок немає. Джерело мапи —
 `tools/land/model-gen/prod_mapping.py` (генерація падає, якщо заголовок не знайдено або неоднозначний).
+
+## Колонки результатів методологій C08/C09/C11/C12 (LP-08)
+
+До цього колонки `ECW_EC_*` мали лише таблиці аркушів 3, 4, 5 (`CALC` генератора). Для решти їх бракувало, тож вихід
+опублікованих методологій C08/C11/C12 не мав куди прив'язатись. Тепер генератор читає `land-result-outputs.json`
+(складає `tools/land/model-gen/extract_result_outputs.py`: імена формул `ECW_EC_tons_*` / `ECW_EC_gsec_*` пакета
+методологій AF x таблиці правил прода; значень констант і даних у файлі немає) і додає в таблицю колонки результатів тієї
+самої форми, що й на аркушах 3-5: `Calculated`, лише читання, 28/12, `t` (tons) або `g/s` (gsec), код колонки = код
+виходу, `ecrAdded` = `methodology output (CalculationBinding)`. Ключ таблиці `calc` = `{methodologies, outputs}`;
+`resultOutputsPending` — таблиці зі зіставлення, яких у шаблоні ще немає (9a_17a, 9a_21a, 9a_21b — LP-09).
+Виходи, що не є `tons`/`gsec` (проміжні `ECW_EC_SumXiDivMi/Ri` у C11_11_02), колонок не мають (`excludedOutputs`).
+`Build-LandTemplate.ps1` створює колонки в обох режимах (Sql/Api) разом зі структурою, а `Bind-ResultColumns` (етап
+Methodologies) PUT-ить `/methodologies/{m}/bindings/{colId}/{output}` для методологій, що вже є на сервері (імпорт —
+`tools/Ecr.MethodologyImport` / `POST /methodologies/import`, поза цим скриптом); прив'язка активна лише для
+опублікованої останньої версії. Перегенерація: `extract_result_outputs.py` (при зміні пакета методологій або правил), далі
+`run-model-gen.ps1`.
