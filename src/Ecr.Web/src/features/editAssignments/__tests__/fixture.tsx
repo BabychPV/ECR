@@ -43,7 +43,10 @@ function recipient(
   status: 'Assigned' | 'Filled' | 'Returned',
   returnReason: string | null = null,
 ): AssignmentRecipient {
-  return { userId, displayName, status, isActive: true, filledAt: null, returnCount: 0, returnReason, returnedAt: null };
+  return {
+    userId, displayName, status, isActive: true, filledAt: null, returnCount: 0, returnReason, returnedAt: null,
+    visibility: 'Unknown',
+  };
 }
 
 export const January = assignment({

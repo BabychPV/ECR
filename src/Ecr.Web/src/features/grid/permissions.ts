@@ -42,7 +42,8 @@ export type DenyReason =
   | 'LockedByOwner'
   | 'AssignmentFilled'
   | 'AssignmentValidated'
-  | 'AssignmentExpired';
+  | 'AssignmentExpired'
+  | 'NotAssignedToYou';
 
 /** Рішення про комірку. */
 export interface CellDecision {
@@ -86,6 +87,7 @@ const Hints: Record<DenyReason, string> = {
   AssignmentFilled: 'deny.AssignmentFilled',
   AssignmentValidated: 'deny.AssignmentValidated',
   AssignmentExpired: 'deny.AssignmentExpired',
+  NotAssignedToYou: 'deny.NotAssignedToYou',
 };
 
 /** Ключ комірки у словнику прав, який віддає сервер. */
