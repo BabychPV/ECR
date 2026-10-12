@@ -252,9 +252,38 @@ export function cellDisplay(value: unknown, column: ColumnDto): string {
 
   if (!isNumericColumn(column)) return String(value);
 
+  // ✎ Явний формат колонки (`displayFormat`: `0.00`, `#,##0.0`, `N2`) — воля
+  // автора шаблону й має перевагу над `scale`: рівно N знаків, дріб довший за
+  // N округлюється ЛИШЕ в показі. Редактор, PATCH і буфер читають сире
+  // значення (`editorValueOf`, `cellText`), тож даремного округлення в даних
+  // немає. Без формату — попередня поведінка (`scale` як нижня межа).
+  const format = displayFormatDigitsOf(column.displayFormat);
+  if (format !== null) return formatDecimal(value, undefined, format, format) ?? String(value);
+
   const scale = displayScaleOf(column);
 
   return formatDecimal(value, undefined, undefined, scale ?? 0) ?? String(value);
+}
+
+/**
+ * Кількість знаків після коми з формату відображення колонки; `null` — формат
+ * порожній або не фіксованої кількості знаків (тоді діє `scale`).
+ *
+ * Розпізнається Excel-запис (`0`, `0.00`, `#,##0.000`, `#,##0.0#` → найбільше
+ * число позицій після крапки) і .NET-запис `N<d>`/`F<d>`. Решту (відсотки,
+ * наукова нотація, дати) не вгадуємо.
+ */
+export function displayFormatDigitsOf(displayFormat: string | null | undefined): number | null {
+  const text = displayFormat?.trim();
+  if (text === undefined || text === '') return null;
+
+  const dotnet = /^[NnFf](\d{1,2})$/.exec(text);
+  if (dotnet !== null) return Number(dotnet[1]);
+
+  const excel = /^[#0,]*(?:\.([0#]+))?$/.exec(text);
+  if (excel === null || !/[0#]/.test(text)) return null;
+
+  return excel[1]?.length ?? 0;
 }
 
 /**
