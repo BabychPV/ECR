@@ -60,6 +60,13 @@ function MonthsTable({
                             {t('editAssign.inactive')}
                           </Text>
                         )}
+                        {r.visibility === 'NotVisible' ? (
+                          // RC20 D-2: виконавець не бачить документ чи аркуш - передача для нього без ефекту.
+                          <Text size="xs" c="dimmed" data-testid="recipient-not-visible" title={t('editAssign.notVisibleHint')}>
+                            {t('editAssign.notVisible')}
+                            <VisuallyHidden>{t('editAssign.notVisibleHint')}</VisuallyHidden>
+                          </Text>
+                        ) : null}
                         <AssignmentBadge state={r.status} />
                       </Group>
                     ))
