@@ -8005,6 +8005,9 @@ USING (VALUES
     ,(N'grid.cellColor.readOnly', N'en', N'The sheet is locked for editing, colour cannot be changed', 1)
     ,(N'grid.cellColor.conflict', N'en', N'The table changed while you were colouring. The current state is shown; please repeat the colour.', 1)
     -- L4:cellcolor ── кінець секції ──
+    -- COLL:approval-queue ── ФВ-12.5: черга «До погодження» (GET /me/approval-queue); ru/kz — порцією COLL:approval-queue нижче ──
+    ,(N'err.ECR-REQ-0422.approvalQueueCursorInvalid', N'en', N'The approval queue page cursor is not valid. Reload the list.', 1)
+    -- COLL:approval-queue ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -20070,6 +20073,17 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- L4:cellcolor ── кінець секції ──
+
+-- COLL:approval-queue ── ru/kz: ФВ-12.5, черга «До погодження»; власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-REQ-0422.approvalQueueCursorInvalid', N'ru', N'Курсор страницы очереди согласования недействителен. Обновите список.'),
+    (N'err.ECR-REQ-0422.approvalQueueCursorInvalid', N'kz', N'Келісу кезегі бетінің курсоры жарамсыз. Тізімді жаңартыңыз.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:approval-queue ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t
