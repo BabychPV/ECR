@@ -32,6 +32,15 @@ export type ColumnDto = Schemas['ColumnDto'];
  */
 export type CellStyleDto = Schemas['CellStyleDto'];
 
+/** Користувацьке оформлення комірки в зрізі (`TableSliceDto.cellStyles`). */
+export type CellFormatDto = Schemas['CellFormatDto'];
+
+/** Зміна оформлення однієї комірки в `PATCH …/cell-styles`. */
+export type CellStyleChange = Schemas['CellStyleChange'];
+
+/** Тіло `PATCH …/cell-styles`. */
+export type PatchCellStylesRequest = Schemas['PatchCellStylesRequest'];
+
 /**
  * Рядок зі значеннями; ключ у `cells` — код колонки.
  *

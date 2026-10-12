@@ -8010,6 +8010,7 @@ USING (VALUES
     ,(N'grid.cellColor.more', N'en', N'More colours…', 1)
     ,(N'grid.cellColor.noSelection', N'en', N'Select cells you can edit to colour them', 1)
     ,(N'grid.cellColor.readOnly', N'en', N'The sheet is locked for editing, colour cannot be changed', 1)
+    ,(N'grid.cellColor.conflict', N'en', N'The table changed while you were colouring. The current state is shown; please repeat the colour.', 1)
     -- L4:cellcolor ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
@@ -20087,7 +20088,9 @@ SELECT v.[Key], v.Lang, v.Val
     (N'grid.cellColor.noSelection', N'ru', N'Выделите ячейки, которые можно менять, чтобы закрасить их'),
     (N'grid.cellColor.noSelection', N'kz', N'Бояу үшін өзгертуге болатын ұяшықтарды белгілеңіз'),
     (N'grid.cellColor.readOnly', N'ru', N'Лист закрыт для правки, цвет менять нельзя'),
-    (N'grid.cellColor.readOnly', N'kz', N'Парақ өңдеуге жабық, түсті өзгертуге болмайды')
+    (N'grid.cellColor.readOnly', N'kz', N'Парақ өңдеуге жабық, түсті өзгертуге болмайды'),
+    (N'grid.cellColor.conflict', N'ru', N'Таблица изменилась, пока вы красили ячейки. Показано актуальное состояние, повторите окраску.'),
+    (N'grid.cellColor.conflict', N'kz', N'Сіз бояған кезде кесте өзгерді. Ағымдағы күй көрсетілді, бояуды қайталаңыз.')
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
