@@ -734,8 +734,30 @@ public sealed class AccessDecisionService(
     /// групи, а рядки — одним запитом на всі екземпляри періоду. Рішення
     /// рахує той самий <see cref="Decide"/>.
     /// </remarks>
-    public async Task<IReadOnlyDictionary<long, IReadOnlyDictionary<CellAddress, EditDecision>>> CanEditSlicesAsync(
+    public Task<IReadOnlyDictionary<long, IReadOnlyDictionary<CellAddress, EditDecision>>> CanEditSlicesAsync(
         AccessProfile profile, IReadOnlyCollection<long> tableInstanceIds, CancellationToken ct)
+        => SliceDecisionsAsync(profile, tableInstanceIds, ignoreColumnFlags: false, ct);
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⛔ CELL-STYLE P1A: ТА САМА підготовка зрізу й ТОЙ САМИЙ <see cref="Decide"/>, що в
+    /// <see cref="CanClearCellsAsync"/> (рішення <c>PATCH …/cell-styles</c>), — відрізняється від
+    /// <see cref="CanEditSliceAsync"/> єдиним: ознаки колонки «обчислювана»/«лише читання» не враховуються.
+    /// Друга копія правил розійшлася б із записом, і клієнт увімкнув би кнопку, яку сервер відхилить.
+    /// </remarks>
+    public async Task<IReadOnlyDictionary<CellAddress, EditDecision>> CanStyleSliceAsync(
+        AccessProfile profile, long tableInstanceId, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(profile);
+
+        var all = await SliceDecisionsAsync(profile, [tableInstanceId], ignoreColumnFlags: true, ct)
+            .ConfigureAwait(false);
+
+        return all[tableInstanceId];
+    }
+
+    private async Task<IReadOnlyDictionary<long, IReadOnlyDictionary<CellAddress, EditDecision>>> SliceDecisionsAsync(
+        AccessProfile profile, IReadOnlyCollection<long> tableInstanceIds, bool ignoreColumnFlags, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(profile);
         ArgumentNullException.ThrowIfNull(tableInstanceIds);
@@ -775,7 +797,7 @@ public sealed class AccessDecisionService(
                     foreach (var column in slice.Columns)
                     {
                         decisions[new CellAddress(slice.PeriodKey, row.Id, column.Id)] =
-                            Decide(profile, slice, row.RowKey, column, sourceValues);
+                            Decide(profile, slice, row.RowKey, column, sourceValues, ignoreColumnFlags);
                     }
                 }
 

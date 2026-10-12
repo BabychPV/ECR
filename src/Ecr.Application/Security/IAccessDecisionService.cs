@@ -166,6 +166,19 @@ public interface IAccessDecisionService
         IReadOnlyCollection<CellAddress> addresses, CancellationToken ct);
 
     /// <summary>
+    /// Рішення «чи можна змінити ОФОРМЛЕННЯ (колір) комірки» на КОЖНУ комірку зрізу (CELL-STYLE P1A): те саме
+    /// рішення, що й <see cref="CanClearCellsAsync"/> (його приймає <c>PATCH …/cell-styles</c>), але для всього
+    /// зрізу одним викликом — для ознаки «можна фарбувати» у відповіді зрізу.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Окремий метод, а не <see cref="CanEditSliceAsync"/>: ознаки колонки «обчислювана»/«лише читання»
+    /// забороняють ЗНАЧЕННЯ, але не колір (майже весь Land — calculated/readOnly), тож рішення на редагування
+    /// не годиться як «можна фарбувати».
+    /// </remarks>
+    public Task<IReadOnlyDictionary<CellAddress, EditDecision>> CanStyleSliceAsync(
+        AccessProfile profile, long tableInstanceId, CancellationToken ct);
+
+    /// <summary>
     /// Рішення для рядків, яких у зрізі ще <b>немає</b> — тобто для створення.
     /// </summary>
     /// <param name="profile">Профіль прав користувача.</param>
