@@ -111,6 +111,7 @@ public sealed partial class ExceptionHandlingMiddleware(
             // це «спробуйте за мить», яку клієнт уже отримав 503 + Retry-After, а не необроблений виняток: рівень
             // Error слугував хибним сигналом дефекту коду. Стек лишається (Warning) — за ним шукають причину.
             LogDatabaseBusy(exception, code, correlationId);
+            context.RequestServices?.GetService<Observability.EcrMetrics>()?.RecordDatabaseBusy(DatabaseBusyKind(exception));
         }
         else if (status >= StatusCodes.Status500InternalServerError)
         {
@@ -876,6 +877,27 @@ public sealed partial class ExceptionHandlingMiddleware(
         }
 
         return false;
+    }
+
+    /// <summary>Вид тимчасового збою БД для тегу метрики <c>ecr.db.busy.count</c> (закритий перелік).</summary>
+    internal static string DatabaseBusyKind(Exception exception)
+    {
+        for (var current = exception; current is not null; current = current.InnerException)
+        {
+            switch (current)
+            {
+                case Microsoft.Data.SqlClient.SqlException sql when sql.Number == -2:
+                    return "timeout";
+                case Microsoft.Data.SqlClient.SqlException sql when sql.Number == 1205:
+                    return "deadlock";
+                case Microsoft.Data.SqlClient.SqlException sql when sql.Number == 1222:
+                    return "lockTimeout";
+                case InvalidOperationException pool when IsPoolExhausted(pool):
+                    return "pool";
+            }
+        }
+
+        return "other";
     }
 
     /// <summary>Чи це відмова SqlClient «пул з'єднань вичерпано» (повідомлення містить фразу про отримання з'єднання з пулу).</summary>

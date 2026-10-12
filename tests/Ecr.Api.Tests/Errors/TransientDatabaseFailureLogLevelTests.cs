@@ -49,6 +49,20 @@ public sealed class TransientDatabaseFailureLogLevelTests
         Assert.Contains(logger.Entries, e => e.Level == LogLevel.Error);
     }
 
+    [Theory]
+    [Trait("Requirement", "ФВ-6.11")]
+    [InlineData(-2, "timeout")]
+    [InlineData(1205, "deadlock")]
+    [InlineData(1222, "lockTimeout")]
+    [InlineData(10054, "other")]
+    public void Вид_збою_для_метрики_db_busy_береться_з_номера_SqlException(int number, string expected)
+    {
+        var kind = (string)typeof(ExceptionHandlingMiddleware)
+            .GetMethod("DatabaseBusyKind", BindingFlags.NonPublic | BindingFlags.Static)!
+            .Invoke(null, [new DbUpdateException("save failed", Sql(number))])!;
+
+        Assert.Equal(expected, kind);
+    }
     private static DefaultHttpContext NewContext()
     {
         var context = new DefaultHttpContext();
