@@ -195,6 +195,29 @@ public sealed class HiddenSheetRouteMatrixTests(SqlServerFixture sql)
         Assert.Contains(s.VisibleCode, reply.Body, StringComparison.Ordinal);
         Assert.Contains(s.HiddenCode, reply.Body, StringComparison.Ordinal);
         Assert.Contains(s.HiddenName, reply.Body, StringComparison.Ordinal);
+        // AN-61: «без даних» — у відповіді лише конфігурація шаблону. Жодна інша ознака схованого аркуша
+        // (код/назва таблиці, код колонки, ключ рядка, автор, маркер даних) не з'являється...
+        foreach (var token in s.HiddenTokens.Where(
+                     t => !string.Equals(t, s.HiddenCode, StringComparison.Ordinal)
+                          && !string.Equals(t, s.HiddenName, StringComparison.Ordinal)))
+        {
+            Assert.DoesNotContain(token, reply.Body, StringComparison.Ordinal);
+        }
+
+        // ...а форма аркуша пінована: рівно id/code/nameL10n/sheetGroup/isMandatory. Нове поле (стан, лічильник,
+        // пізні правки) у DocumentTemplateSheetDto червонить тест — його додавання має бути свідомим рішенням.
+        var root = JsonNode.Parse(reply.Body)!.AsObject();
+        var sheets = root["sheets"]!.AsArray();
+        Assert.NotEmpty(sheets);
+        string[] expectedKeys = ["code", "id", "isMandatory", "nameL10n", "sheetGroup"];
+        foreach (var sheet in sheets)
+        {
+            var keys = sheet!.AsObject().Select(p => p.Key).OrderBy(k => k, StringComparer.Ordinal).ToArray();
+            Assert.Equal(expectedKeys, keys);
+        }
+        var rootKeys = root.Select(p => p.Key).OrderBy(k => k, StringComparer.Ordinal).ToArray();
+        string[] expectedRootKeys = ["groupRules", "sheets", "templateCode", "templateVersionId", "version"];
+        Assert.Equal(expectedRootKeys, rootKeys);
     }
 
     [Fact]
