@@ -22,7 +22,7 @@ namespace Ecr.Api.Tests;
 /// </remarks>
 public sealed partial class DocumentVersionMigrationTests
 {
-    private async Task<int> AddMappingAsync(int columnDefId, bool active = true)
+    private async Task<int> AddMappingAsync(int columnDefId, bool active = true, string? rowKey = null)
     {
         await using var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext();
         var tag = Guid.NewGuid().ToString("N")[..10];
@@ -44,7 +44,11 @@ public sealed partial class DocumentVersionMigrationTests
         await db.SaveChangesAsync().ConfigureAwait(false);
 
         var map = EntityFieldMap.ToColumn(entity.Id, "Value", columnDefId);
-        map.SetMaterialization("R1", AggregationKind.Sum);
+        if (rowKey is not null)
+        {
+            map.SetMaterialization(rowKey, AggregationKind.Sum);
+        }
+
         if (!active)
         {
             map.Pause();

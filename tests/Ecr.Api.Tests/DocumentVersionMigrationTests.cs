@@ -379,6 +379,9 @@ public sealed partial class DocumentVersionMigrationTests(SqlServerFixture sql)
 
         /// <summary>C2 стає текстовою — а в ній число 42.</summary>
         C2BecomesText,
+
+        /// <summary>Та сама структура, але таблиця стає змішаною (D-1b P2-1).</summary>
+        RowModeBecomesMixed,
     }
 
     private static Task<HttpResponseMessage> PostAsync(HttpClient client, Scenario s, string mode, bool dryRun)
@@ -479,7 +482,8 @@ public sealed partial class DocumentVersionMigrationTests(SqlServerFixture sql)
             .Where(t => t.Id == doc.TableDefId).Select(t => t.Code).SingleAsync().ConfigureAwait(false);
         var table = new TableDef(
             sheet.Id, EcrCode.Create(tableCode), Name($"Table {tag} v2"), 1,
-            TableLayoutKind.PerPeriodInstance, TableRowMode.Fixed);
+            TableLayoutKind.PerPeriodInstance,
+            target == Target.RowModeBecomesMixed ? TableRowMode.Mixed : TableRowMode.Fixed);
         db.TableDefs.Add(table);
         await db.SaveChangesAsync().ConfigureAwait(false);
 
