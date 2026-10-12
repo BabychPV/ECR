@@ -7823,6 +7823,9 @@ USING (VALUES
     -- COLL:rpt-version-race ── гонка двох створень версії звіту (UQ_ReportVersion) -> 409; ru/kz - порцією COLL:rpt-version-race нижче ──
     ,(N'err.ECR-RPT-4091.versionConcurrent', N'en', N'Someone else has just created a version with this number in this report definition. Reload the definition and pick another version number.', 1)
     -- COLL:rpt-version-race ── кінець секції ──
+    -- COLL:rc21misc ── RC21: дрібні пункти черги (EA6-D2 термін дії передачі, RC20 D-2/D-3/D-4); ru/kz — порцією COLL:rc21misc нижче ──
+    ,(N'err.ECR-REQ-0422.editAssignmentExpiresAtInvalid', N'en', N'The assignment expiry must be in the future and no later than 366 days from now (UTC).', 1)
+    -- COLL:rc21misc ── кінець секції ──
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -19688,6 +19691,16 @@ SELECT v.[Key], v.Lang, v.Val
 OPTION (RECOMPILE);
 GO
 -- COLL:rpt-version-race ── кінець секції ──
+-- COLL:rc21misc ── ru/kz: RC21 дрібні пункти черги (EA6-D2, RC20 D-2/D-3/D-4); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-REQ-0422.editAssignmentExpiresAtInvalid', N'ru', N'Срок действия передачи должен быть в будущем и не позже чем через 366 дней (UTC).'),
+    (N'err.ECR-REQ-0422.editAssignmentExpiresAtInvalid', N'kz', N'Тапсыру мерзімі болашақта болуы және бүгіннен бастап 366 күннен кеш болмауы керек (UTC).')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:rc21misc ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

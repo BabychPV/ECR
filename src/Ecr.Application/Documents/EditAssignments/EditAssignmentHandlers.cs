@@ -100,7 +100,8 @@ internal static class EditAssignmentMapper
             a.AppliedSetName,
             recipients,
             a.ModifiedAt,
-            EditAssignmentVersion.Of(a));
+            EditAssignmentVersion.Of(a),
+            a.ExpiresAt);
     }
 
     /// <summary>Текст листа: подробиці зрізу людською мовою (англійська — базова мова каталогу).</summary>
@@ -195,12 +196,17 @@ public sealed class UpsertEditAssignmentHandler(
     /// Знімок набору без пошуку (copy: набір міг бути іншого менеджера — його не шукаємо за власником).
     /// </param>
     /// <param name="ct">Токен скасування.</param>
+    /// <param name="keepExpiresAt">
+    /// Пакетні дії (apply-set/copy) не мають поля терміну: термін НАЯВНОЇ передачі лишається як є, нова — без
+    /// терміну (EA6-D2).
+    /// </param>
     internal async Task<PreparedUpsert> PrepareAsync(
         long documentId,
         UpsertEditAssignmentRequest request,
         bool overwrite,
         AppliedSetSnapshot? appliedSetOverride,
-        CancellationToken ct)
+        CancellationToken ct,
+        bool keepExpiresAt = false)
     {
         ArgumentNullException.ThrowIfNull(request);
 
@@ -227,6 +233,14 @@ public sealed class UpsertEditAssignmentHandler(
         if (recipientIds.Count > EditAssignment.MaxRecipients)
         {
             throw EditAssignmentAccess.Invalid("err.ECR-REQ-0422.editAssignmentTooManyRecipients", "У передачі забагато виконавців.");
+        }
+
+        // EA6-D2: термін дії — UTC, у майбутньому, не далі за стелю домену; повторно перевіряється під
+        // транзакцією (годинник між підготовкою й записом ішов далі).
+        DateTime? expiresAt = null;
+        if (request.ExpiresAt is { } requestedExpiry)
+        {
+            expiresAt = EditAssignmentAccess.RequireValidExpiry(requestedExpiry, clock.UtcNow);
         }
 
         // «Лише в межах власних прав»: з даних шаблону, у сесії того, хто передає.
@@ -269,7 +283,11 @@ public sealed class UpsertEditAssignmentHandler(
 
         return new PreparedUpsert(
             document, userId, slice, recipientIds, request.IsExclusive, note, appliedSet, users,
-            request.BaseVersion, overwrite);
+            request.BaseVersion, overwrite)
+        {
+            ExpiresAt = expiresAt,
+            KeepExpiresAt = keepExpiresAt,
+        };
     }
 
     /// <summary>Записує підготовлену передачу в одній транзакції.</summary>
@@ -332,7 +350,8 @@ public sealed class UpsertEditAssignmentHandler(
 
                     var assignment = new EditAssignment(
                         documentId, slice, p.IsExclusive, delegatedByUserId: userId, Guid.NewGuid(), userId, now,
-                        expiresAt: null, note: note);
+                        expiresAt: p.KeepExpiresAt ? null : EditAssignmentAccess.RequireValidExpiryOrNull(p.ExpiresAt, now),
+                        note: note);
                     foreach (var id in recipientIds)
                     {
                         assignment.AddRecipient(id, userId, now);
@@ -348,8 +367,12 @@ public sealed class UpsertEditAssignmentHandler(
 
                     var sameMembers = existing.Recipients.Select(r => r.UserId).OrderBy(i => i)
                         .SequenceEqual(recipientIds.OrderBy(i => i));
+                    // Термін: пакетні дії його не чіпають; upsert ЗАМІНЮЄ (пропуск знімає). Незмінний термін не
+                    // перевіряється заново — прострочений, але не змінений термін не блокує інших правок.
+                    var expiryChanged = !p.KeepExpiresAt && existing.ExpiresAt != p.ExpiresAt;
                     var sameFlags = existing.IsExclusive == p.IsExclusive
-                        && string.Equals(existing.Note ?? string.Empty, note ?? string.Empty, StringComparison.Ordinal);
+                        && string.Equals(existing.Note ?? string.Empty, note ?? string.Empty, StringComparison.Ordinal)
+                        && !expiryChanged;
                     // Відсутній набір у запиті мітку НЕ знімає (повтор без набору ідемпотентний, знімок лишається).
                     var sameSet = p.AppliedSet is null || existing.AppliedSetId == p.AppliedSet.Id;
 
@@ -381,6 +404,11 @@ public sealed class UpsertEditAssignmentHandler(
 
                     // Додавання/зняття виконавця саме скидає валідацію (домен); знімання «Заповнено»-виконавця її не ламає.
                     existing.Reconfigure(p.IsExclusive, note, userId, now);
+                    if (expiryChanged)
+                    {
+                        existing.SetExpiry(EditAssignmentAccess.RequireValidExpiryOrNull(p.ExpiresAt, now), userId, now);
+                    }
+
                     existing.Redelegate(userId, now);
 
                     foreach (var id in removed)
@@ -495,7 +523,15 @@ internal sealed record PreparedUpsert(
     AppliedSetSnapshot? AppliedSet,
     IReadOnlyDictionary<int, EditAssignmentUserRef> Users,
     string? BaseVersion,
-    bool Overwrite);
+    bool Overwrite)
+{
+    /// <summary>Термін дії (UTC, уже нормалізований); <c>null</c> — безстроково.</summary>
+    public DateTime? ExpiresAt { get; init; }
+
+    /// <summary>Не чіпати термін наявної передачі (apply-set/copy).</summary>
+    public bool KeepExpiresAt { get; init; }
+}
+
 /// <summary>Зняття передачі (разом із виконавцями).</summary>
 public sealed class DeleteEditAssignmentHandler(
     IEditAssignmentStore assignments,
