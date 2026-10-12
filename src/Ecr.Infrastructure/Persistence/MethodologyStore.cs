@@ -326,6 +326,27 @@ public sealed class MethodologyStore(EcrDbContext db, int constantCap) : IMethod
             .ConfigureAwait(false);
 
     /// <inheritdoc />
+    public async Task<IReadOnlyDictionary<long, string>> GetSubstanceCodesAsync(
+        int methodologyVersionId, CancellationToken ct)
+    {
+        var pairs = await db.MethodologySubstances
+            .AsNoTracking()
+            .Where(s => s.MethodologyVersionId == methodologyVersionId)
+            .Join(
+                db.RegistryEntries.AsNoTracking(),
+                s => s.SubstanceEntryId,
+                e => e.Id,
+                (s, e) => new { s.SubstanceEntryId, e.Code })
+            .Take(MaxChildren)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        return pairs
+            .GroupBy(p => p.SubstanceEntryId)
+            .ToDictionary(g => g.Key, g => g.First().Code);
+    }
+
+    /// <inheritdoc />
     public async Task<IReadOnlyList<MethodologyOutput>> GetOutputsAsync(
         int methodologyVersionId, CancellationToken ct)
         => await db.MethodologyOutputs

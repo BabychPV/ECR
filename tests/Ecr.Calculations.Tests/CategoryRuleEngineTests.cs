@@ -247,6 +247,25 @@ internal sealed class RuleStand
         return this;
     }
 
+    /// <summary>Коди записів двох речовин стенда (LP-07, форма B); <c>null</c> — речовина без запису.</summary>
+    public RuleStand WithSubstanceCodes(string? codeA, string? codeB)
+    {
+        var map = new Dictionary<long, string>();
+        if (codeA is not null)
+        {
+            map[SubstanceA] = codeA;
+        }
+
+        if (codeB is not null)
+        {
+            map[SubstanceB] = codeB;
+        }
+
+        _store.GetSubstanceCodesAsync(VersionId, Arg.Any<CancellationToken>())
+              .Returns((IReadOnlyDictionary<long, string>)map);
+        return this;
+    }
+
     public async Task<CalculationOutput> RunAsync(params CalculationArgument[] arguments)
     {
         _store.GetFormulasAsync(VersionId, Arg.Any<CancellationToken>()).Returns(_formulas);
