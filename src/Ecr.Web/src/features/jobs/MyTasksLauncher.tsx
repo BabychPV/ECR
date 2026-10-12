@@ -144,7 +144,7 @@ export function MyTasksLauncher(): JSX.Element {
             staleSection={
               <>
                 <Suspense fallback={null}>
-                  <ApprovalQueueSection opened={opened} />
+                  <ApprovalQueueSection opened={opened} onNavigate={() => setOpened(false)} />
                 </Suspense>
                 <Suspense fallback={null}>
                   <EditAssignmentsSection opened={opened} />

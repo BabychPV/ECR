@@ -401,13 +401,14 @@ async function readSlice(page: Page): Promise<SliceDto> {
         /^\/api\/v1\/documents\/\d+\/tables\/\d+$/.test(new URL(response.url()).pathname),
       { timeout: 90_000 },
     )
+    // Тіло читається ОДРАЗУ: після очікування `response.json()` падає «No resource with given identifier found».
+    .then(async (response) => (await response.json()) as SliceDto)
     .catch(() => null);
 
   await page.goto(DocumentUrl);
-  const response = await watch;
-  if (response === null) throw new Error('зріз таблиці не завантажився (GET …/tables/{id})');
+  const slice = await watch;
+  if (slice === null) throw new Error('зріз таблиці не завантажився (GET …/tables/{id})');
 
-  const slice = (await response.json()) as SliceDto;
   if (slice.rows.length === 0 || slice.columns.length === 0) {
     throw new Error('зріз стенда без рядків або колонок');
   }

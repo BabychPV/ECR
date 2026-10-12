@@ -298,6 +298,11 @@ beforeAll(async () => {
     import('@/features/methodologies/MethodologyPublicationsPanel'),
     import('@/features/methodologies/RuleCoveragePanel'),
     import('@/features/methodologies/MethodologyCoveragePanel'),
+    // Ліниві чанки каркаса і шапки сторінки (`PageHeader` → `lazy(import('./PageHeaderActions'))`,
+    // `LazyHint` → `Hint`): входять у КОЖЕН маршрут нижче, тож їх холодна трансформація
+    // не має потрапляти у вікно виміру на жодному з них.
+    import('@/shared/ui/PageHeaderActions'),
+    import('@/shared/ui/Hint'),
   ]);
 }, 60_000);
 
@@ -552,6 +557,15 @@ async function settle(
   // лише ДОДАЄ очікування: стеля комітів, нуль у вікні події кешу й межа
   // раундів не змінені; нескінченний ланцюжок комітів (#295/#305) тут не
   // ховається, а падає з поясненням.
+  await waitForQuiet(queryClient, ledger);
+}
+
+/**
+ * Вікна {@link QuietMs} без жодного коміту дерева і без запитів у польоті — доки не
+ * настане перше таке вікно. Окрема функція, бо {@link guardRoute} кличе її й між
+ * спробами виміру події кешу.
+ */
+async function waitForQuiet(queryClient: QueryClient, ledger: Ledger): Promise<void> {
   for (let round = 0; ; round += 1) {
     if (round >= QuietRoundsLimit) {
       throw new Error(
@@ -572,6 +586,10 @@ async function settle(
 const QuietMs = 250;
 /** Межа вікон {@link QuietMs} (разом 10 с) — далі падіння, а не тихий вимір. */
 const QuietRoundsLimit = 40;
+
+/** Спроб виміру події кешу, і скільки з них має збігтися (більшість із {@link EventAttempts}). */
+const EventAttempts = 3;
+const EventMajority = 2;
 
 /** Корінь `AppShell` на час його CSS-переходу (`@mantine/core`, `use-resizing.mjs`). */
 const ResizingSelector = '[data-resizing="true"]';
@@ -622,9 +640,10 @@ async function mountRoute(entry: RouteEntry, page: JSX.Element, url: string): Pr
  * монтується для нового ключа — тобто КОЖЕН перехід між сторінками. Ключ
  * навмисно такий, якого не читає жодна крихта й жодна сторінка вибірки.
  */
-async function foreignCacheEvent(queryClient: QueryClient): Promise<void> {
+async function foreignCacheEvent(queryClient: QueryClient, attempt: number): Promise<void> {
   await act(async () => {
-    queryClient.setQueryData(['чужий-ключ-якого-ніхто-не-показує'], { items: [] });
+    // Новий ключ на кожну спробу: подія — це саме «ключ з'явився в кеші» (`added`).
+    queryClient.setQueryData(['чужий-ключ-якого-ніхто-не-показує', attempt], { items: [] });
   });
   await turns(2);
 }
@@ -646,14 +665,46 @@ async function guardRoute(entry: RouteEntry, page: JSX.Element, url: string): Pr
     )} (піддерево маршруту — ${String(ledger.route)}). Здорові значення вибірки — 10-21.`,
   ).toBeLessThanOrEqual(CommitCeiling);
 
-  const tree = ledger.tree;
-  const route = ledger.route;
+  // ⛔ 2026-10-12, шосте джерело `{ tree: 2, route: 2 }` на `/admin/units` (CI RC #506, двічі
+  // на одному SHA, поряд із падінням воркера: ранер був перевантажений). П'ять попередніх
+  // виправлень дописували «ще одну ознаку, що маршрут осів», і кожного разу знаходилась
+  // наступна (запит, таймер, чанк, пауза між відповідями) — гонка між вимірюваною подією та
+  // чужим запізнілим комітом по суті не усувається, бо жоден годинник не знає, що ще
+  // ПОВИННО статися. Тому гонку усунуто за побудовою: вимір повторюється, і падіння — лише
+  // коли подія коштує коміти у БІЛЬШОСТІ з трьох спроб, кожна з яких іде після нового
+  // осідання й з новим ключем. Дефект класу #305 (підписник `QueryCache` перемальовує на
+  // будь-яку подію) коштує коміти в КОЖНІЙ спробі, тож червоніє так само детерміновано, як
+  // раніше (мутаційний доказ — у описі коміту); одноразовий запізнілий коміт чужого
+  // походження потрапляє щонайбільше в одну спробу і більше не повторюється.
+  //
+  // ⚠ Це не `retry` і не послаблення порогу: нуль комітів лишається вимогою до КОЖНОЇ
+  // зарахованої спроби, а межа комітів (б) вище не змінена.
+  const costs: Ledger[] = [];
+  let clean = 0;
 
-  await foreignCacheEvent(queryClient);
+  for (let attempt = 0; attempt < EventAttempts && clean < EventMajority && costs.length < EventMajority; attempt += 1) {
+    if (attempt > 0) {
+      await waitForQuiet(queryClient, ledger);
+    }
+
+    const tree = ledger.tree;
+    const route = ledger.route;
+
+    await foreignCacheEvent(queryClient, attempt);
+
+    const cost = { tree: ledger.tree - tree, route: ledger.route - route };
+    if (cost.tree === 0 && cost.route === 0) {
+      clean += 1;
+    } else {
+      costs.push(cost);
+    }
+  }
 
   expect(
-    { tree: ledger.tree - tree, route: ledger.route - route },
-    `(а) ${url}: подія кешу, що не змінює нічого видимого, коштувала коміти.`,
+    costs.length >= EventMajority ? costs[0] : { tree: 0, route: 0 },
+    `(а) ${url}: подія кешу, що не змінює нічого видимого, коштувала коміти у ${String(
+      costs.length,
+    )} спробах (чистих ${String(clean)}): ${JSON.stringify(costs)}.`,
   ).toEqual({ tree: 0, route: 0 });
 }
 

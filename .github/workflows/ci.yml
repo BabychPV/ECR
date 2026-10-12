@@ -104,7 +104,7 @@ jobs:
   # PR (у т.ч. `rc/*` → `main`) і вручну. Імена обов'язкових перевірок не змінено.
   server-part:
     name: server-part (${{ matrix.part }})
-    if: ${{ !(github.event_name == 'push' && startsWith(github.ref, 'refs/heads/lane/') && !startsWith(github.ref, 'refs/heads/lane/integ-')) }}
+    if: ${{ !(github.event_name == 'push' && startsWith(github.ref, 'refs/heads/lane/') && !startsWith(github.ref, 'refs/heads/lane/integ-')) && !(github.event_name == 'pull_request' && startsWith(github.head_ref, 'rc/')) }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -241,7 +241,12 @@ jobs:
   # main/integ-* умова істинна й `server` рахує всі частини, як і раніше.
   server:
     needs: server-part
-    if: ${{ always() && !(github.event_name == 'push' && startsWith(github.ref, 'refs/heads/lane/') && !startsWith(github.ref, 'refs/heads/lane/integ-')) }}
+    # ✎ 2026-10-12 (рев'ю атестації): на PR `rc/*` пропущене повне завдання створює check-run
+    # `skipped` із ТИМ САМИМ іменем, що й атестація, і «пропущений близнюк» міг би перекрити
+    # червону атестацію в обчисленні обов'язкових перевірок. Тому на rc-PR повне завдання
+    # має ІНШЕ ім'я; на решті подій ім'я незмінне (його читає атестація й ruleset `main`).
+    name: ${{ (github.event_name == 'pull_request' && startsWith(github.head_ref, 'rc/')) && 'server (повний, пропущено на rc)' || 'server' }}
+    if: ${{ always() && !(github.event_name == 'push' && startsWith(github.ref, 'refs/heads/lane/') && !startsWith(github.ref, 'refs/heads/lane/integ-')) && !(github.event_name == 'pull_request' && startsWith(github.head_ref, 'rc/')) }}
     runs-on: ubuntu-latest
     steps:
       - name: Усі частини server зелені
@@ -253,7 +258,8 @@ jobs:
           fi
 
   client:
-    if: ${{ !(github.event_name == 'push' && startsWith(github.ref, 'refs/heads/lane/') && !startsWith(github.ref, 'refs/heads/lane/integ-')) }}
+    name: ${{ (github.event_name == 'pull_request' && startsWith(github.head_ref, 'rc/')) && 'client (повний, пропущено на rc)' || 'client' }}
+    if: ${{ !(github.event_name == 'push' && startsWith(github.ref, 'refs/heads/lane/') && !startsWith(github.ref, 'refs/heads/lane/integ-')) && !(github.event_name == 'pull_request' && startsWith(github.head_ref, 'rc/')) }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -282,7 +288,8 @@ jobs:
   # близько 35 с на маршрут, і одна тема іде 16-23 хвилини. У складі
   # `client` вона тримала б решту гейтів заручниками; поруч — не тримає нікого.
   a11y:
-    if: ${{ !(github.event_name == 'push' && startsWith(github.ref, 'refs/heads/lane/') && !startsWith(github.ref, 'refs/heads/lane/integ-')) }}
+    name: ${{ (github.event_name == 'pull_request' && startsWith(github.head_ref, 'rc/')) && 'a11y (повний, пропущено на rc)' || format('a11y ({0})', matrix.theme) }}
+    if: ${{ !(github.event_name == 'push' && startsWith(github.ref, 'refs/heads/lane/') && !startsWith(github.ref, 'refs/heads/lane/integ-')) && !(github.event_name == 'pull_request' && startsWith(github.head_ref, 'rc/')) }}
     runs-on: ubuntu-latest
     # ⚠ W4.3 (accessibility.a11y.test.tsx, коментар над ECR_A11Y_THEME) описував
     # матрицю light/dark як чинну — вона такою не була: ця джоба досі проганяла
@@ -349,7 +356,7 @@ jobs:
   # зачіпає.
   worker-windows:
     name: worker (windows)
-    if: ${{ !(github.event_name == 'push' && startsWith(github.ref, 'refs/heads/lane/') && !startsWith(github.ref, 'refs/heads/lane/integ-')) }}
+    if: ${{ !(github.event_name == 'push' && startsWith(github.ref, 'refs/heads/lane/') && !startsWith(github.ref, 'refs/heads/lane/integ-')) && !(github.event_name == 'pull_request' && startsWith(github.head_ref, 'rc/')) }}
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
@@ -408,7 +415,7 @@ jobs:
   # зачіпає.
   msi-windows:
     name: msi (windows)
-    if: ${{ !(github.event_name == 'push' && startsWith(github.ref, 'refs/heads/lane/') && !startsWith(github.ref, 'refs/heads/lane/integ-')) }}
+    if: ${{ !(github.event_name == 'push' && startsWith(github.ref, 'refs/heads/lane/') && !startsWith(github.ref, 'refs/heads/lane/integ-')) && !(github.event_name == 'pull_request' && startsWith(github.head_ref, 'rc/')) }}
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
@@ -533,10 +540,10 @@ jobs:
   # ⚠ `if: always()` — як у `server`: без нього червоне завдання дало б `skipped`,
   # а пропущену обов'язкову перевірку GitHub зараховує як пройдену.
   windows:
-    name: windows
+    name: ${{ (github.event_name == 'pull_request' && startsWith(github.head_ref, 'rc/')) && 'windows (повний, пропущено на rc)' || 'windows' }}
     needs: [ worker-windows, msi-windows, msi-install ]
     # ✎ 2026-10-12: на push у не-інтеграційну `lane/**` Windows-завдання пропущені навмисно — агрегатор теж.
-    if: ${{ always() && !(github.event_name == 'push' && startsWith(github.ref, 'refs/heads/lane/') && !startsWith(github.ref, 'refs/heads/lane/integ-')) }}
+    if: ${{ always() && !(github.event_name == 'push' && startsWith(github.ref, 'refs/heads/lane/') && !startsWith(github.ref, 'refs/heads/lane/integ-')) && !(github.event_name == 'pull_request' && startsWith(github.head_ref, 'rc/')) }}
     runs-on: ubuntu-latest
     steps:
       - name: Усі Windows-завдання зелені
@@ -550,6 +557,90 @@ jobs:
               exit 1
             fi
           done
+
+  # ⛔ ✎ 2026-10-12 (CI-швидкість, `lane/integ-ci-speed-2`): АТЕСТАЦІЯ на PR `rc/**` → `main`.
+  # Тижневий `rc/<дата>` нарізається з SHA, на якому повний CI вже пройшов як push
+  # (`lane/integ-*`, `dev/integration`) — повторювати той самий прогін на `pull_request`
+  # (23 завдання в черзі, години) нічого не доводить. Але «просто пропустити» нема чим:
+  # пропущену обов'язкову перевірку GitHub зараховує як пройдену, тож `rc`, нарізаний з SHA,
+  # що ніколи не мав повного CI, замержився б неперевіреним.
+  #
+  # ⚠ Тому на PR з `rc/**` важкі завдання (`server-part`, `server`, `client`, `a11y`,
+  # `worker-windows`, `msi-windows`, `windows`) НЕ запускаються (умова на `github.head_ref`),
+  # а замість них іде це завдання з ТИМИ САМИМИ іменами (`name: ${{ matrix.check }}` —
+  # `server`, `client`, `a11y (light)`, `a11y (dark)`, `windows`). Воно за хвилину питає
+  # Actions API, чи є на ТОМУ САМОМУ head SHA ЗАВЕРШЕНИЙ УСПІШНИЙ job з цим іменем у цьому
+  # workflow на події НЕ-PR (push / workflow_dispatch / schedule) або на PR не з `rc/**`.
+  # Немає — червоне з поясненням. Імена обов'язкових перевірок не змінено; умови `if`
+  # атестації й важких завдань протилежні, тож на одній події працює рівно одне з двох.
+  #
+  # ⚠ Чому Actions API (`actions: read`), а не `commits/{sha}/check-runs`: check-run не
+  # каже, з якої ПОДІЇ він, і зелений check-run `server` від ІНШОГО PR `rc/*` на тому ж SHA
+  # (тобто сама атестація!) виглядав би як «повний прогін». Прогони ж мають `event`.
+  #
+  # ⚠ Вирішує НАЙНОВІШИЙ завершений (success / failure / timed_out) за `completed_at`;
+  # `cancelled`/`skipped` не рахуються ні за, ні проти. Якщо повний прогін ще йде —
+  # атестація чекає до ATTEST_WAIT_MIN хв (опитування раз на 90 с), а не червоніє хибно.
+  # Копія цього скрипта — у `evidence.yml` (`build`, `test`); сторож
+  # `CiAttestationTests` вимагає, щоб вони збігалися дослівно.
+  attest:
+    name: ${{ matrix.check }}
+    if: ${{ github.event_name == 'pull_request' && startsWith(github.head_ref, 'rc/') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      actions: read
+    strategy:
+      fail-fast: false
+      matrix:
+        check: [ 'server', 'client', 'a11y (light)', 'a11y (dark)', 'windows' ]
+    steps:
+      - name: Є зелений повний прогін на цьому SHA
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CHECK: ${{ matrix.check }}
+          WORKFLOW_FILE: ci.yml
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          ATTEST_WAIT_MIN: '10'
+        run: |
+          set -euo pipefail
+          REPO="$GITHUB_REPOSITORY"
+          if [ -z "$HEAD_SHA" ]; then
+            echo "::error::атестація «$CHECK»: порожній head SHA PR."
+            exit 1
+          fi
+          if [ "$HEAD_REPO" != "$REPO" ]; then
+            echo "::error::атестація «$CHECK»: PR із форка ($HEAD_REPO) — повний CI на чужому SHA не атестується."
+            exit 1
+          fi
+          deadline=$(( $(date +%s) + ATTEST_WAIT_MIN * 60 ))
+          while true; do
+            : > found.jsonl
+            runs="$(gh api "repos/$REPO/actions/workflows/$WORKFLOW_FILE/runs?head_sha=$HEAD_SHA&per_page=100" \
+              --jq '.workflow_runs[] | select(.event == "push" or .event == "workflow_dispatch" or .event == "schedule" or (.event == "pull_request" and (((.head_branch // "") | startswith("rc/")) | not))) | .id')"
+            for run_id in $runs; do
+              gh api --paginate "repos/$REPO/actions/runs/$run_id/jobs?per_page=100&filter=latest" \
+                | jq -c --arg n "$CHECK" '.jobs[] | select(.name == $n) | {run_id, status, conclusion, completed_at, url: .html_url}' >> found.jsonl
+            done
+            latest="$(jq -rs '[.[] | select(.status == "completed" and (.conclusion == "success" or .conclusion == "failure" or .conclusion == "timed_out"))] | sort_by(.completed_at) | last // empty | "\(.conclusion) \(.url)"' found.jsonl)"
+            pending="$(jq -s '[.[] | select(.status != "completed")] | length' found.jsonl)"
+            total="$(jq -s 'length' found.jsonl)"
+            case "$latest" in
+              success*)
+                echo "атестація «$CHECK»: на SHA $HEAD_SHA є зелений повний прогін — ${latest#success }"
+                exit 0
+                ;;
+            esac
+            if { [ "$pending" -gt 0 ] || [ "$total" -eq 0 ]; } && [ "$(date +%s)" -lt "$deadline" ]; then
+              echo "повний прогін «$CHECK» на $HEAD_SHA ще не завершився (знайдено: $total, у процесі: $pending) — чекаю 90 с"
+              sleep 90
+              continue
+            fi
+            break
+          done
+          echo "::error::немає зеленого повного прогону «$CHECK» на SHA $HEAD_SHA (знайдено завдань: $total, у процесі: $pending, останній завершений: ${latest:-немає}); запусти lane/integ-… з цим SHA або workflow_dispatch на ньому, а потім перезапусти цю перевірку."
+          exit 1
 
   # ⛔ Набір у ПЕРЕМІШАНОМУ порядку — і це НЕ восьмий гейт. Він не блокує
   # мерж (`continue-on-error`), бо його призначення інше: показати, що набір

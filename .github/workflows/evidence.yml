@@ -51,7 +51,8 @@ env:
 
 jobs:
   build:
-    name: build
+    name: ${{ (github.event_name == 'pull_request' && startsWith(github.head_ref, 'rc/')) && 'build (повний, пропущено на rc)' || 'build' }}
+    if: ${{ !(github.event_name == 'pull_request' && startsWith(github.head_ref, 'rc/')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -69,7 +70,8 @@ jobs:
         run: dotnet build Ecr.sln -c Release --no-incremental --no-restore
 
   test:
-    name: test
+    name: ${{ (github.event_name == 'pull_request' && startsWith(github.head_ref, 'rc/')) && 'test (повний, пропущено на rc)' || 'test' }}
+    if: ${{ !(github.event_name == 'pull_request' && startsWith(github.head_ref, 'rc/')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -142,3 +144,68 @@ jobs:
           echo "honesty-guard: $EVENT_NAME, база $BASE_SHA, вершина $HEAD_SHA"
           export BASE_SHA HEAD_SHA
           bash .github/guards/honesty-guard.sh
+
+  # ✎ 2026-10-12 (CI-швидкість): атестація на PR `rc/**` → `main` — те саме завдання, що й
+  # `attest` у `ci.yml` (пояснення там). На такому PR справжні `build`/`test` пропущені
+  # (протилежна умова на `head_ref`), а це завдання з ТИМИ САМИМИ іменами перевіряє, що на тому
+  # ж head SHA є завершений зелений повний прогін цього workflow на події не-PR.
+  # `honesty-guard` НЕ атестується: він дешевий, а на PR перевіряє diff усього тижня проти
+  # `main`, чого push-прогін не робить.
+  attest:
+    name: ${{ matrix.check }}
+    if: ${{ github.event_name == 'pull_request' && startsWith(github.head_ref, 'rc/') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      actions: read
+    strategy:
+      fail-fast: false
+      matrix:
+        check: [ 'build', 'test' ]
+    steps:
+      - name: Є зелений повний прогін на цьому SHA
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CHECK: ${{ matrix.check }}
+          WORKFLOW_FILE: evidence.yml
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          ATTEST_WAIT_MIN: '10'
+        run: |
+          set -euo pipefail
+          REPO="$GITHUB_REPOSITORY"
+          if [ -z "$HEAD_SHA" ]; then
+            echo "::error::атестація «$CHECK»: порожній head SHA PR."
+            exit 1
+          fi
+          if [ "$HEAD_REPO" != "$REPO" ]; then
+            echo "::error::атестація «$CHECK»: PR із форка ($HEAD_REPO) — повний CI на чужому SHA не атестується."
+            exit 1
+          fi
+          deadline=$(( $(date +%s) + ATTEST_WAIT_MIN * 60 ))
+          while true; do
+            : > found.jsonl
+            runs="$(gh api "repos/$REPO/actions/workflows/$WORKFLOW_FILE/runs?head_sha=$HEAD_SHA&per_page=100" \
+              --jq '.workflow_runs[] | select(.event == "push" or .event == "workflow_dispatch" or .event == "schedule" or (.event == "pull_request" and (((.head_branch // "") | startswith("rc/")) | not))) | .id')"
+            for run_id in $runs; do
+              gh api --paginate "repos/$REPO/actions/runs/$run_id/jobs?per_page=100&filter=latest" \
+                | jq -c --arg n "$CHECK" '.jobs[] | select(.name == $n) | {run_id, status, conclusion, completed_at, url: .html_url}' >> found.jsonl
+            done
+            latest="$(jq -rs '[.[] | select(.status == "completed" and (.conclusion == "success" or .conclusion == "failure" or .conclusion == "timed_out"))] | sort_by(.completed_at) | last // empty | "\(.conclusion) \(.url)"' found.jsonl)"
+            pending="$(jq -s '[.[] | select(.status != "completed")] | length' found.jsonl)"
+            total="$(jq -s 'length' found.jsonl)"
+            case "$latest" in
+              success*)
+                echo "атестація «$CHECK»: на SHA $HEAD_SHA є зелений повний прогін — ${latest#success }"
+                exit 0
+                ;;
+            esac
+            if { [ "$pending" -gt 0 ] || [ "$total" -eq 0 ]; } && [ "$(date +%s)" -lt "$deadline" ]; then
+              echo "повний прогін «$CHECK» на $HEAD_SHA ще не завершився (знайдено: $total, у процесі: $pending) — чекаю 90 с"
+              sleep 90
+              continue
+            fi
+            break
+          done
+          echo "::error::немає зеленого повного прогону «$CHECK» на SHA $HEAD_SHA (знайдено завдань: $total, у процесі: $pending, останній завершений: ${latest:-немає}); запусти lane/integ-… з цим SHA або workflow_dispatch на ньому, а потім перезапусти цю перевірку."
+          exit 1
