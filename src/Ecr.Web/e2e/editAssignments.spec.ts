@@ -53,7 +53,8 @@ test.describe('Передача місяця: власник → виконав�
     PeriodKey === '' || DocumentId === '',
     'ECR_E2E_OPTIONAL: стенда немає, перевіряти нічого. Стенд: tools/e2e-stand.ps1.',
   );
-  test.describe.configure({ mode: 'serial' });
+  // Вхід + холодне відкриття документа на 91 таблицю (Vite, CI-раннер) інколи не вкладаються в типові 30 с.
+  test.describe.configure({ mode: 'serial', timeout: 120_000 });
 
   test('власник передає січень виконавцю через майстер', async ({ browser }) => {
     const admin = await asUser(browser, Admin);
@@ -92,7 +93,9 @@ test.describe('Передача місяця: власник → виконав�
     await page.getByTestId('executor-strip-fill-confirm').click();
 
     await expect(page.getByTestId('executor-strip-fill')).toHaveCount(0, { timeout: 20_000 });
-    await expect(page.getByTestId('executor-strip-row')).toHaveAttribute('data-status', 'Filled');
+    // `GET /me/edit-assignments` віддає виконавцю лише Assigned/Returned (EditAssignmentDtos: AssignedToMe), тож після
+    // «Заповнено» смуга зникає цілком; «чекає валідації» бачить власник (наступний тест).
+    await expect(page.getByTestId('executor-strip')).toHaveCount(0, { timeout: 20_000 });
     await page.context().close();
   });
 
