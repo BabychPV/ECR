@@ -524,6 +524,94 @@ public sealed class EditAssignmentsApiTests(SqlServerFixture sql)
         Assert.Equal(before, ExpiryOf(Assert.Single(copied.GetProperty("assignments").EnumerateArray())));
     }
 
+    // ───────────────────────── RC20 D-2/D-4: visibility виконавця, примітка не копіюється ─────────────────────────
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "RC20-D2")]
+    public async Task Перелік_віддає_visibility_виконавця_а_NotVisible_лише_для_того_хто_втратив_доступ()
+    {
+        var s = await ArrangeAsync().ConfigureAwait(true);
+
+        using (var app = new EcrApiFactory(sql))
+        using (var owner = await SignedInAsync(app, s.Manager.UserName).ConfigureAwait(true))
+        {
+            await JsonAsync(
+                await owner.PostAsJsonAsync(
+                    ListUri(s),
+                    new
+                    {
+                        slice = new { sheetCode = s.SheetCode },
+                        recipientUserIds = new[] { s.Executor.Id, s.OtherExecutor.Id },
+                        isExclusive = true,
+                    }).ConfigureAwait(true),
+                HttpStatusCode.OK, app).ConfigureAwait(true);
+        }
+
+        // Виконавець втрачає роль уже після передачі (передача створюється лише для видимих).
+        await using (var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext())
+        {
+            await db.Database.ExecuteSqlInterpolatedAsync(
+                $"DELETE FROM sec.RoleAssignment WHERE UserId = {s.OtherExecutor.Id}").ConfigureAwait(true);
+        }
+
+        // Свіжий вузол: профілі не з кешу попереднього.
+        using var fresh = new EcrApiFactory(sql);
+        using var manager = await SignedInAsync(fresh, s.Manager.UserName).ConfigureAwait(true);
+        var list = await JsonAsync(await manager.GetAsync(ListUri(s)).ConfigureAwait(true), HttpStatusCode.OK, fresh).ConfigureAwait(true);
+
+        var recipients = Assert.Single(list.GetProperty("assignments").EnumerateArray()).GetProperty("recipients").EnumerateArray()
+            .ToDictionary(r => r.GetProperty("userId").GetInt32(), r => r.GetProperty("visibility").GetString());
+        Assert.Equal("Visible", recipients[s.Executor.Id]);
+        Assert.Equal("NotVisible", recipients[s.OtherExecutor.Id]);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "RC20-D4")]
+    public async Task Копіювання_не_переносить_примітку_джерела_а_примітку_наявної_цілі_лишає()
+    {
+        var s = await ArrangeAsync().ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+        using var owner = await SignedInAsync(app, s.Manager.UserName).ConfigureAwait(true);
+
+        Task<HttpResponseMessage> Upsert(int? periodKey, string note)
+            => owner.PostAsJsonAsync(
+                ListUri(s),
+                new
+                {
+                    slice = new { sheetCode = s.SheetCode, periodKey },
+                    recipientUserIds = new[] { s.Executor.Id },
+                    isExclusive = true,
+                    note,
+                });
+
+        // Джерело — січень із приміткою про січень; лютий уже має власну примітку.
+        await JsonAsync(await Upsert(202601, "Please fill January fuel").ConfigureAwait(true), HttpStatusCode.OK, app).ConfigureAwait(true);
+        await JsonAsync(await Upsert(202602, "February: use meters").ConfigureAwait(true), HttpStatusCode.OK, app).ConfigureAwait(true);
+
+        var copied = await JsonAsync(
+            await owner.PostAsJsonAsync(
+                new Uri($"{ListUri(s)}/copy", UriKind.Relative),
+                new
+                {
+                    fromSlice = new { sheetCode = s.SheetCode, periodKey = (int?)202601 },
+                    toSlices = new[]
+                    {
+                        new { sheetCode = s.SheetCode, periodKey = (int?)202602 },
+                        new { sheetCode = s.SheetCode, periodKey = (int?)202603 },
+                    },
+                }).ConfigureAwait(true),
+            HttpStatusCode.OK, app).ConfigureAwait(true);
+
+        string? NoteOf(int periodKey) => copied.GetProperty("assignments").EnumerateArray()
+            .Single(a => a.GetProperty("slice").GetProperty("periodKey").GetInt32() == periodKey)
+            .GetProperty("note").GetString();
+
+        Assert.Equal("February: use meters", NoteOf(202602));
+        Assert.Null(NoteOf(202603));
+    }
+
     // ───────────────────────── Аудит EA-C (P1/P2): приховані аркуші, IDOR, RequireManager, атомарність ─────────────────────────
 
     /// <summary>Те, що клієнт бачить у відмові: статус, код і ключ каталогу (traceId не порівнюється).</summary>

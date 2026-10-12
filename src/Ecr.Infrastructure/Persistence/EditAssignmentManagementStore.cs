@@ -88,7 +88,8 @@ public sealed class EditAssignmentManagementStore(EcrDbContext db) : IEditAssign
         var ids = userIds.Distinct().ToList();
         var rows = await db.Users.AsNoTracking()
             .Where(u => ids.Contains(u.Id))
-            .Select(u => new EditAssignmentUserRef(u.Id, u.DisplayName, u.Email, u.IsActive))
+            .Select(u => new EditAssignmentUserRef(
+                u.Id, u.DisplayName, u.Email, u.IsActive, u.Provider == AuthProvider.Windows))
             .ToListAsync(ct).ConfigureAwait(false);
         return rows.ToDictionary(u => u.Id);
     }

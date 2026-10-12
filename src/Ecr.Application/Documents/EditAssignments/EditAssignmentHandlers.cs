@@ -25,6 +25,9 @@ public sealed class ListEditAssignmentsHandler(
     IMetadataCache metadata,
     Common.ICurrentUser currentUser)
 {
+    /// <summary>Стеля профілів виконавців, які перелік будує для позначки видимості (решта — <c>Unknown</c>).</summary>
+    private const int MaxVisibilityProfiles = 200;
+
     /// <summary>Повертає передачі документа.</summary>
     /// <exception cref="NotFoundException">Документ невидимий.</exception>
     /// <exception cref="AccessDeniedException">Викликач не автор і не менеджер проєкту.</exception>
@@ -59,7 +62,25 @@ public sealed class ListEditAssignmentsHandler(
         }
 
         var users = await store.GetUsersAsync(ids, ct).ConfigureAwait(false);
-        var items = visible.Select(a => EditAssignmentMapper.ToDto(a, users)).ToList();
+
+        // RC20 D-2: чи бачить кожен виконавець документ за своїми прямими призначеннями. Профіль виконавця
+        // будується так само, як при передачі (`PrepareAsync`); стеля — щоб перелік не став N запитів.
+        var recipientScopes = new Dictionary<int, DocumentReadScope?>();
+        foreach (var recipientId in visible.SelectMany(a => a.Recipients.Select(r => r.UserId)).Distinct())
+        {
+            if (recipientScopes.Count >= MaxVisibilityProfiles)
+            {
+                break;
+            }
+
+            var recipientProfile = await access.BuildProfileAsync(recipientId, ct).ConfigureAwait(false);
+            recipientScopes[recipientId] = recipientProfile.SeesDocumentsOf(document.ProjectId)
+                && PermissionCheck.IsGrantedIn(recipientProfile, "Document.View", document.ProjectId)
+                    ? DocumentReadScope.For(recipientProfile, document.ProjectId, snapshot)
+                    : null;
+        }
+
+        var items = visible.Select(a => EditAssignmentMapper.ToDto(a, users, recipientScopes)).ToList();
 
         return new EditAssignmentListDto(
             users.TryGetValue(document.CreatedByUserId, out var owner) ? owner.DisplayName : string.Empty,
@@ -71,7 +92,37 @@ public sealed class ListEditAssignmentsHandler(
 /// <summary>Мапінг сутностей у DTO.</summary>
 internal static class EditAssignmentMapper
 {
-    public static EditAssignmentDto ToDto(EditAssignment a, IReadOnlyDictionary<int, EditAssignmentUserRef> users)
+    /// <summary>Видимість виконавця: див. <see cref="EditAssignmentRecipientDto.Visibility"/>.</summary>
+    /// <param name="a">Передача.</param>
+    /// <param name="userId">Виконавець.</param>
+    /// <param name="user">Довідка про користувача (може бракувати).</param>
+    /// <param name="scopes">
+    /// Межі читання виконавця: ключ є і значення <c>null</c> — документ йому не видно; ключа немає чи словника
+    /// немає — не обчислювалось.
+    /// </param>
+    public static string VisibilityOf(
+        EditAssignment a, int userId, EditAssignmentUserRef? user,
+        IReadOnlyDictionary<int, DocumentReadScope?>? scopes)
+    {
+        ArgumentNullException.ThrowIfNull(a);
+
+        if (scopes is null || !scopes.TryGetValue(userId, out var scope))
+        {
+            return "Unknown";
+        }
+
+        if (scope is not null && (a.SheetCode is null || scope.CanReadSheetCode(a.SheetCode)))
+        {
+            return "Visible";
+        }
+
+        // Доменний обліковий запис міг би бачити документ через групу AD, яку профіль без токена сесії не знає.
+        return user is { IsWindowsAccount: true } ? "Unknown" : "NotVisible";
+    }
+
+    public static EditAssignmentDto ToDto(
+        EditAssignment a, IReadOnlyDictionary<int, EditAssignmentUserRef> users,
+        IReadOnlyDictionary<int, DocumentReadScope?>? recipientScopes = null)
     {
         var recipients = a.Recipients
             .OrderBy(r => users.TryGetValue(r.UserId, out var u) ? u.DisplayName : string.Empty, StringComparer.CurrentCultureIgnoreCase)
@@ -83,7 +134,8 @@ internal static class EditAssignmentMapper
                 r.ReturnedAt,
                 r.ReturnReason,
                 r.ReturnCount,
-                users.TryGetValue(r.UserId, out var user) && user.IsActive))
+                users.TryGetValue(r.UserId, out var user) && user.IsActive,
+                VisibilityOf(a, r.UserId, users.GetValueOrDefault(r.UserId), recipientScopes)))
             .ToList();
 
         return new EditAssignmentDto(
@@ -200,13 +252,18 @@ public sealed class UpsertEditAssignmentHandler(
     /// Пакетні дії (apply-set/copy) не мають поля терміну: термін НАЯВНОЇ передачі лишається як є, нова — без
     /// терміну (EA6-D2).
     /// </param>
+    /// <param name="keepNote">
+    /// Копіювання не переносить примітку джерела (вона писана про місяць джерела, RC20 D-4): примітка НАЯВНОЇ
+    /// цільової передачі лишається, нова — без примітки.
+    /// </param>
     internal async Task<PreparedUpsert> PrepareAsync(
         long documentId,
         UpsertEditAssignmentRequest request,
         bool overwrite,
         AppliedSetSnapshot? appliedSetOverride,
         CancellationToken ct,
-        bool keepExpiresAt = false)
+        bool keepExpiresAt = false,
+        bool keepNote = false)
     {
         ArgumentNullException.ThrowIfNull(request);
 
@@ -288,6 +345,7 @@ public sealed class UpsertEditAssignmentHandler(
             ExpiresAt = expiresAt,
             // Поле відсутнє в запиті (або пакетна дія) — термін наявної передачі не змінюється.
             KeepExpiresAt = keepExpiresAt || !request.ExpiresAtSpecified,
+            KeepNote = keepNote,
         };
     }
 
@@ -301,7 +359,7 @@ public sealed class UpsertEditAssignmentHandler(
         var userId = p.UserId;
         var slice = p.Slice;
         var recipientIds = p.RecipientIds;
-        var note = p.Note;
+        var requestedNote = p.Note;
         var users = p.Users;
         var now = clock.UtcNow;
         EditAssignment? result = null;
@@ -331,6 +389,9 @@ public sealed class UpsertEditAssignmentHandler(
 
                 var existing = await store
                     .FindBySliceKeyForUpdateAsync(documentId, slice.Key, innerCt).ConfigureAwait(false);
+
+                // RC20 D-4: копія примітку не переносить — вона писана про місяць джерела.
+                var note = p.KeepNote ? existing?.Note : requestedNote;
 
                 var events = new List<SecurityEventRecord>();
                 var newlyAssigned = new List<int>();
@@ -526,6 +587,9 @@ internal sealed record PreparedUpsert(
     string? BaseVersion,
     bool Overwrite)
 {
+    /// <summary>Не переносити примітку з запиту: наявна лишається, нова — без примітки (copy).</summary>
+    public bool KeepNote { get; init; }
+
     /// <summary>Термін дії (UTC, уже нормалізований); <c>null</c> — безстроково.</summary>
     public DateTime? ExpiresAt { get; init; }
 
