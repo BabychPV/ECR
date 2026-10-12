@@ -42,9 +42,23 @@ public sealed class HealthSnapshotCacheTests
             () => cache.GetOrComputeSnapshotAsync(Now, Fail, CancellationToken.None));
 
         _ = await cache.GetOrComputeSnapshotAsync(Now, _ => Task.FromResult(Snap(7)), CancellationToken.None);
-        var stale = await cache.GetOrComputeSnapshotAsync(Now.AddMinutes(5), Fail, CancellationToken.None);
+        var stale = await cache.GetOrComputeSnapshotAsync(Now.AddMinutes(4), Fail, CancellationToken.None);
 
         Assert.Equal(7, stale.Jobs.Running);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public async Task Знімок_старший_за_межу_при_збої_не_віддається()
+    {
+        // Мутація: прибрати перевірку MaxStaleOnFailure - тест червоний (віддається 7-хвилинний знімок).
+        var cache = new HealthCountCache();
+        Task<SystemHealthSnapshot> Fail(CancellationToken _) => throw new InvalidOperationException("x");
+        _ = await cache.GetOrComputeSnapshotAsync(Now, _ => Task.FromResult(Snap(7)), CancellationToken.None);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => cache.GetOrComputeSnapshotAsync(
+                Now + HealthCountCache.MaxStaleOnFailure + TimeSpan.FromSeconds(1), Fail, CancellationToken.None));
     }
 
     [Fact]

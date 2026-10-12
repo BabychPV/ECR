@@ -92,12 +92,12 @@ public sealed partial class SystemHealthStore(
 
         // Активне джерело «провалене», якщо для якоїсь його сутності останній запуск
         // збору завершився провалом (новіших запусків тієї ж сутності немає).
-        // ⚠ Дорогий запит (скан усіх запусків) — число кешується на 60 с (HealthCountCache).
-        var failedSources = await _failedCache
-            .GetOrComputeAsync(
-                utcNow,
-                token => db.Database.SqlQueryRaw<int>(FailedSourcesSql).SingleAsync(token),
-                ct)
+        // ⚠ Дорогий запит (скан усіх запусків). Власного кешу тут немає навмисно: ReadAsync уже
+        // віддає знімок з кешу на 30 с (HealthCountCache.SnapshotTtl) — другий рівень зверху давав б
+        // число віком до 90 с і розходився б із тестом на TTL.
+        var failedSources = await db.Database
+            .SqlQueryRaw<int>(FailedSourcesSql)
+            .SingleAsync(ct)
             .ConfigureAwait(false);
 
         var gaps = await db.CollectionCoverages.AsNoTracking()
