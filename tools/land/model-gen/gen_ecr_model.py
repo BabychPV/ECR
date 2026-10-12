@@ -384,9 +384,10 @@ _ro_all = dict(_ro['methodologies'])
 _ro_all.update(_ro.get('supplementalMethodologies', {}))
 for _m, _d in sorted(_ro_all.items()):
     for _t in _d['tables']:
-        _e = RESULT_TABLES.setdefault(_t, {'methodologies': [], 'outputs': []})
+        _e = RESULT_TABLES.setdefault(_t, {'methodologies': [], 'outputs': [], 'inputs': []})
         _e['methodologies'].append(_m)
         _e['outputs'] = sorted(set(_e['outputs']) | set(_d['outputs']))
+        _e['inputs'] = sorted(set(_e['inputs']) | set(_d.get('inputs', [])))
 TEXT_ARGS = {'T3_00': ['Land_OverhauledEngines', 'Land_Rotation'], 'T5_09': ['Land_TypePetrStation'], 'T5_27': ['Land_TypeBurnFuel']}
 EXTRA = {
     'T3_00': {'CalculationMonth': ('Formula', '[Period].Sequence', 'one', 'Calculation month'),
@@ -1030,6 +1031,87 @@ import prod_mapping  # noqa: E402
 out['prodColumnMapping'], _added_cols = prod_mapping.apply(out)
 stat_cols += _added_cols
 print('prodColumnMapping: tables %d, new columns %d' % (len(out['prodColumnMapping']['tables']), _added_cols))
+
+
+# ---- мости аргументів методологій C08/C09/C11/C12 для таблиць аркушів 6, 9-11 (LP-10).
+# Для аркушів 3-5 (PerPeriodInstance) місячна колонка `X_M01..X_M12` має Formula-міст `X`, що вибирає місяць за
+# [Period].Sequence; аргумент методології (імена з AF) знаходить колонку за кодом. Таблиці 6, 9-11 (MonthsInColumns) мостів
+# не мали. Тут мости робляться ЛИШЕ там, де відповідність доведена prodColumnMapping (alias прод-колонки AF -> колонка(и)
+# шаблону, evidence header/single/position) для входу, який справді використовує методологія таблиці (inputs з
+# land-result-outputs.json), та для календарних аргументів (ті самі формули, що в EXTRA таблиць 3-5). Усе інше — у
+# argumentBridges.unresolved з причиною: нічого не вгадуємо.
+def _arg_bridges():
+    global stat_cols
+    calendar = {'CalculationMonth': EXTRA['T3_00']['CalculationMonth'], 'DaysInCalcYear': EXTRA['T5_08']['DaysInCalcYear'],
+                'Winter': EXTRA['T5_08']['Winter']}
+    by_code = {}
+    for s_ in out['sheets']:
+        for t_ in s_['tables']:
+            by_code.setdefault(t_['code'], (s_, t_))
+    ptabs = out['prodColumnMapping']['tables']
+    bridged, unresolved, added = {}, {}, 0
+
+    def month_expr(cols_):
+        return ''.join('[Period].Sequence = %d ? [%s] : ' % (m, cols_[m - 1]) for m in range(1, 12)) + '[%s]' % cols_[11]
+
+    for tcode in sorted(RESULT_TABLES):
+        if tcode not in by_code or tcode in CALC:
+            continue
+        s_, t_ = by_code[tcode]
+        if t_['layout'] != 'MonthsInColumns':
+            continue
+        cols = {c['code']: c for c in t_['columns']}
+        info = ptabs.get('%s|%s' % (s_['code'], tcode))
+        alias = {a['prod']: a for a in info['aliases']} if info else {}
+        done, left = [], {}
+        for name in RESULT_TABLES[tcode].get('inputs', []):
+            if name in cols:
+                continue   # колонка з такою назвою вже є (пряме відповідання)
+            new = None
+            if name in calendar:
+                typ, expr, unit_, hdr = calendar[name]
+                new = {'code': name, 'dataType': typ, 'headerEn': hdr, 'unit': unit_, 'expression': expr,
+                       'ecrAdded': 'calculation argument (not in the Excel sheet)'}
+            elif name == 'DaysInCalcMonth':
+                # Правило «DaysInCalcMonth = Land_Measure_OperTimeDays» (7.7) доведено для аркушів 3-5; для 6, 9-11 не доведено
+                # (календарні дні [Period].Days чи відпрацьовані дні - рішення власника методології): мост не створюємо.
+                left[name] = 'правило 7.7 (відпрацьовані дні чи календарні) доведено лише для аркушів 3-5; для цієї таблиці питання власнику'
+            elif name in alias:
+                a = alias[name]
+                if a.get('monthColumns'):
+                    mc = a['monthColumns']
+                    ok = len(mc) == 12 and all(c in cols for c in mc) and [cols[c].get('month') for c in mc] == list(range(1, 13))
+                    if ok:
+                        new = {'code': name, 'dataType': 'Formula', 'headerEn': '%s (argument bridge: selects the month column)' % name,
+                               'unit': cols[mc[0]].get('unit'), 'expression': month_expr(mc),
+                               'ecrAdded': 'bridge: methodology argument %s = prod column alias (evidence %s)' % (name, a['evidence'])}
+                    else:
+                        left[name] = 'alias є, але місячні колонки не збігаються з 12 колонками таблиці'
+                elif a.get('column') in cols and cols[a['column']]['dataType'] in ('Decimal', 'Int'):
+                    src = cols[a['column']]
+                    new = {'code': name, 'dataType': 'Formula', 'headerEn': '%s (argument bridge: %s)' % (name, src['code']),
+                           'unit': src.get('unit'), 'expression': '[%s]' % src['code'],
+                           'ecrAdded': 'bridge: methodology argument %s = prod column alias (evidence %s)' % (name, a['evidence'])}
+                else:
+                    left[name] = 'alias є, але колонка шаблону не числова (мост Formula неможливий без рішення замовника)'
+            else:
+                left[name] = 'відповідності прод-колонці в prodColumnMapping немає (не доведено)'
+            if new is not None:
+                col_ = {'headerRu': '', 'hidden': False, 'readOnly': True, 'excel': None, 'month': None, 'precision': 28, 'scale': 12}
+                col_.update({k: v for k, v in new.items() if v is not None})
+                t_['columns'].append(col_)
+                done.append(name)
+                added += 1
+        if done:
+            bridged[tcode] = sorted(done)
+        if left:
+            unresolved[tcode] = dict(sorted(left.items()))
+    out['argumentBridges'] = {'bridged': dict(sorted(bridged.items())), 'unresolved': dict(sorted(unresolved.items()))}
+    stat_cols += added
+    print('argumentBridges: tables %d, columns %d, unresolved inputs %d' % (len(bridged), added, sum(len(v) for v in unresolved.values())))
+
+
+_arg_bridges()
 
 cfs = []
 seen_cf = set()
