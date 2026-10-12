@@ -99,6 +99,14 @@ public sealed class LandMissingTablesModelTests
         Assert.Single(tables);
         Assert.Equal("T7b_00", tables[0].GetProperty("code").GetString());
         Assert.Equal("Fixed", tables[0].GetProperty("rowMode").GetString());
+
+        // вихід C09_02_01: одна формула ECW_EC_tons (т), назва без компонента; взято зі стенда, у AF XML методології немає
+        var column = tables[0].GetProperty("columns").EnumerateArray()
+            .Single(c => c.GetProperty("code").GetString() == "ECW_EC_tons");
+        Assert.Equal("Calculated", column.GetProperty("dataType").GetString());
+        Assert.Equal("t", column.GetProperty("unit").GetString());
+        Assert.True(column.GetProperty("readOnly").GetBoolean());
+        Assert.Contains("ECW_C09_02_01", tables[0].GetProperty("calc").GetProperty("methodologies").EnumerateArray().Select(x => x.GetString()));
     }
 
     [Fact]
@@ -108,7 +116,7 @@ public sealed class LandMissingTablesModelTests
         var gen = File.ReadAllText(Path.Combine(SourceTree.Root, "tools", "land", "model-gen", "gen_ecr_model.py"));
         var map = File.ReadAllText(Path.Combine(SourceTree.Root, "tools", "land", "model-gen", "prod_mapping.py"));
 
-        Assert.Contains(@"([a-dа])?(?!\w)", gen);
+        Assert.Contains(@"([a-d\u0430])?(?!\w)", gen);
         Assert.Contains("tcode[:-1] + 'b'", gen);
         Assert.Contains("AF_Air_Land_ProcessUnits_9a_", map);
         Assert.Contains("'T7b_00'", map);

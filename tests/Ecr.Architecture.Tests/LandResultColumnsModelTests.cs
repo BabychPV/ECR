@@ -149,7 +149,7 @@ public sealed class LandResultColumnsModelTests
     {
         using var model = Load("land-template.model.json");
         var mapped = Mapping().Keys.ToHashSet();
-        var upstream = new HashSet<string> { "T3_00", "T4_01", "T5_08", "T5_09", "T5_22", "T5_27" }; // CALC генератора
+        var upstream = new HashSet<string> { "T3_00", "T4_01", "T5_08", "T5_09", "T5_22", "T5_27", "T7b_00" }; // CALC генератора + supplemental C09_02_01
 
         foreach (var (table, t) in Tables(model))
         {
@@ -161,9 +161,9 @@ public sealed class LandResultColumnsModelTests
             Assert.DoesNotContain(Columns(t).Keys, c => c.StartsWith("ECW_EC_", StringComparison.Ordinal));
         }
 
-        // 7a/7b: методологій із правилами для T7a_* немає, C09_02_01 (T7b) пакета не має — колонок не вигадуємо
+        // 7a: методологій із правилами для T7a_* немає — колонок не вигадуємо (T7b_00: ECW_EC_tons від C09_02_01, LP-09/4)
         var tables = Tables(model);
-        foreach (var code in tables.Keys.Where(k => k.StartsWith("T7a_", StringComparison.Ordinal) || k == "T7b_00"))
+        foreach (var code in tables.Keys.Where(k => k.StartsWith("T7a_", StringComparison.Ordinal)))
         {
             Assert.DoesNotContain(Columns(tables[code]).Keys, c => c.StartsWith("ECW_EC_", StringComparison.Ordinal));
         }

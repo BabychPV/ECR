@@ -508,5 +508,16 @@
    "ECW_EC_SumXiDivRi_0793",
    "ECW_EC_SumXiDivRi_6975"
   ]
+ },
+ "supplementalMethodologies": {
+  "ECW_C09_02_01": {
+   "tables": [
+    "T7b_00"
+   ],
+   "outputs": [
+    "ECW_EC_tons"
+   ],
+   "evidence": "структура методології на стенді EcrLandUi (збудована з AF_Formulas прода): одна формула ECW_EC_tons, Number, вихід у одиницях t; AF XML цієї методології не містить; рул прода AF_Water_Land_07b"
+  }
  }
 }
