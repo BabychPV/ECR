@@ -210,7 +210,7 @@ public sealed class CollectionStore(EcrDbContext db, IClock clock) : ICollection
         EXEC @lock = sp_getapplock @Resource = @resource, @LockMode = 'Exclusive',
                                    @LockOwner = 'Transaction', @LockTimeout = {RawPointLockTimeoutMs};
         IF @lock < 0
-            THROW 50001, N'ext.RawDataPoint: не вдалося взяти лок сутності джерела для запису точок (sp_getapplock < 0).', 1;
+            THROW 50001, N'ext.RawDataPoint: не вдалося взяти лок таблиці для запису точок (sp_getapplock < 0).', 1;
 
         WITH batch AS (
             SELECT j.SourcePath,
