@@ -62,14 +62,14 @@ describe('шар користувацького кольору в gridColumns', 
     expect((props.style as Record<string, string>)['--ecr-cell-fill']).toBe('#ffff00');
   });
 
-  it('користувач сильніший за умовне форматування, а порожнє поле лишає колір правила', () => {
+  it('умовне форматування перекриває користувацьке', () => {
     const s = slice({
       cellFormats: { 'R1:A': { backgroundHex: '#00ff00', foregroundHex: null, isBold: true } },
       cellStyles: { 'R1:A': { backgroundHex: '#ffff00', foregroundHex: null } },
     });
     const style = propsFor(s, 'R1').style as Record<string, string>;
 
-    expect(style['--ecr-cell-fill']).toBe('#ffff00');
+    expect(style['--ecr-cell-fill']).toBe('#00ff00');
     expect(style.fontWeight).toBe('bold');
   });
 

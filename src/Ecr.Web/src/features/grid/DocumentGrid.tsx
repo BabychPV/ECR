@@ -3037,12 +3037,14 @@ export function gridColumns(
         // `slice.cellFormats`) — шар ПОВЕРХ стилю автора, тим самим шляхом
         // (`conditionalAppearance.ts`).
         const conditional = cellFormatOf(slice, key);
-        const afterConditional = conditional === null ? column.style : withCellFormat(column.style, conditional);
 
         // ⛔ L4: колір, який людина поставила сама (тулбар «Заливка» / «Колір
-        // тексту»), — шар ПІСЛЯ умовного форматування.
+        // тексту»), — шар ПІД умовним форматуванням (рішення Аудиту 12.10, як
+        // в Excel: правило перекриває ручну заливку). Порядок: колонка < рядок
+        // < користувацький < умовний формат < стан.
         const userFormat = userStyleOf(slice as SliceWithUserStyles, key);
-        const style = userFormat === null ? afterConditional : withUserStyle(afterConditional, userFormat);
+        const afterUser = userFormat === null ? column.style : withUserStyle(column.style, userFormat);
+        const style = conditional === null ? afterUser : withCellFormat(afterUser, conditional);
         const appearance = cellAppearanceOf(style);
 
         // ⛔ `X-10`: колір і заливка автора — змінними й класами, які читає
