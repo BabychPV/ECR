@@ -18,7 +18,13 @@ public sealed record VersionMigrationScope(
 /// <param name="ColumnDefId">Колонка вихідної версії, на яку він вказує.</param>
 /// <param name="IsActive"><c>false</c> — призупинений (збір за ним нічого не пише).</param>
 /// <param name="ColumnPath">Шлях колонки за кодами <c>SHEET.TABLE.COLUMN</c> (джерело й поле не розкриваються).</param>
-public sealed record CollectionMappingRef(int MappingId, int ColumnDefId, bool IsActive, string ColumnPath);
+/// <param name="TableDefId">Таблиця колонки вихідної версії (режим рядків і рядок-адресат — D-1b P2-1/P2-2).</param>
+/// <param name="TargetRowKey">
+/// Ключ рядка-адресата (<c>null</c> — мапінг не матеріалізується). Для фіксованої таблиці рядок мусить існувати в
+/// цільовій версії, інакше мапінг «переїде» й писатиме в нікуди.
+/// </param>
+public sealed record CollectionMappingRef(
+    int MappingId, int ColumnDefId, bool IsActive, string ColumnPath, int TableDefId = 0, string? TargetRowKey = null);
 
 /// <summary>Скільки проєктів і документів, крім переносимого, лишається на версії шаблону (D-1b P3).</summary>
 /// <param name="Projects">Проєктів.</param>
@@ -76,7 +82,11 @@ public sealed record WindowMapRemap(
 /// <summary>Рішення плану: які мапінги подій і вікон переносяться (D-1b RC20).</summary>
 /// <param name="Events">Мапінги подій.</param>
 /// <param name="Windows">Прив'язки вікон.</param>
-public sealed record ExtendedMappingRemap(IReadOnlyList<EventMapRemap> Events, IReadOnlyList<WindowMapRemap> Windows)
+/// <param name="CollectionMappingIds">Мапінги збору (<c>ext.EntityFieldMap</c>), які переносяться (D-1, D-1b P2-1/P2-2).</param>
+public sealed record ExtendedMappingRemap(
+    IReadOnlyList<EventMapRemap> Events,
+    IReadOnlyList<WindowMapRemap> Windows,
+    IReadOnlyList<int>? CollectionMappingIds = null)
 {
     /// <summary>Нічого переносити.</summary>
     public static ExtendedMappingRemap Empty { get; } = new([], []);
@@ -150,6 +160,10 @@ public interface IDocumentVersionMigrationStore
     /// Переносить мапінги збору з колонок вихідної версії на колонки цільової за мапою переносу (D-1 RC20).
     /// </summary>
     /// <param name="columnMap">Колонка вихідної версії → колонка цільової (з плану).</param>
+    /// <param name="mappingIds">
+    /// Які саме мапінги переносити (рішення плану: з урахуванням режиму рядків і рядка-адресата). Решта,
+    /// навіть із колонкою в мапі, лишається на місці (призупинений мапінг без придатного місця).
+    /// </param>
     /// <param name="ct">Токен скасування.</param>
     /// <returns>Скільки мапінгів перенесено.</returns>
     /// <remarks>
@@ -158,7 +172,8 @@ public interface IDocumentVersionMigrationStore
     /// Чіпає лише мапінги на колонку (<c>TargetKind = Column</c>) з ключем у мапі — решту (довідники, колонки
     /// інших версій) не зачіпає.
     /// </remarks>
-    public Task<int> RemapCollectionMappingsAsync(IReadOnlyDictionary<int, int> columnMap, CancellationToken ct);
+    public Task<int> RemapCollectionMappingsAsync(
+        IReadOnlyDictionary<int, int> columnMap, IReadOnlyCollection<int> mappingIds, CancellationToken ct);
 
     /// <summary>
     /// Скільки ІНШИХ проєктів (і їхніх документів) стоїть на вихідній версії шаблону (D-1b P3).

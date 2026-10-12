@@ -549,7 +549,8 @@ public sealed class MigrateDocumentVersionHandler(
             // планом і оновленням — він теж переїде, якщо його колонка є в мапі).
             var remapped = await store
                 .RemapCollectionMappingsAsync(
-                    plan.Columns.ToDictionary(c => c.SourceColumnDefId, c => c.TargetColumnDefId), innerCt)
+                    plan.Columns.ToDictionary(c => c.SourceColumnDefId, c => c.TargetColumnDefId),
+                    extended.CollectionMappingIds ?? [], innerCt)
                 .ConfigureAwait(false);
 
             // ⛔ D-1b: мапінги подій джерела (документи проєкту) і прив'язки вікна — там само, тією ж транзакцією;
@@ -678,11 +679,13 @@ public sealed class MigrateDocumentVersionHandler(
         // для комірок) переносяться в тій самій транзакції; активний мапінг без відповідника — відмова, як і для
         // прив'язок методологій (призупинений мапінг нічого не пише й перенос не блокує).
         var mappings = await store.ListCollectionMappingsAsync(sourceVersionId, ct).ConfigureAwait(false);
-        var mappingsRemapped = mappings.Count(m => columnMap.ContainsKey(m.ColumnDefId));
 
-        var unmappedMappings = mappings.Where(m => m.IsActive && !columnMap.ContainsKey(m.ColumnDefId)).ToList();
-        var unmappedKeys = unmappedMappings.Select(m => m.ColumnPath).ToList();
-        var unmappedCount = unmappedMappings.Count;
+        // ⛔ D-1b P2-1/P2-2: колонка з відповідником ще не означає придатного місця — режим рядків таблиці мусить
+        // збігатися, а рядок-адресат (TargetRowKey) фіксованої таблиці — існувати в цільовій версії.
+        var collectionPlan = MappingRemapPlanner.PlanCollection(from, to, plan, mappings);
+        var mappingsRemapped = collectionPlan.RemapIds.Count;
+        var unmappedKeys = collectionPlan.Unmapped.Where(u => u.Active).Select(u => u.Mapping.ColumnPath).ToList();
+        var unmappedCount = unmappedKeys.Count;
 
         // ⛔ D-1b (RC20): той самий клас дефекту для мапінгів подій джерела (адресують ТАБЛИЦЮ й колонки версії
         // і належать документу) і прив'язок вікна (таблиця + складені ключі колонок). Відповідність — за тим
@@ -747,7 +750,7 @@ public sealed class MigrateDocumentVersionHandler(
             others.Projects,
             others.Documents);
 
-        return (dto, plan, foreignKeys, extendedPlan.Remap);
+        return (dto, plan, foreignKeys, extendedPlan.Remap with { CollectionMappingIds = collectionPlan.RemapIds });
     }
 
     private async Task<TemplateVersion> RequireTargetAsync(

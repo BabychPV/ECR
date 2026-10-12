@@ -342,6 +342,8 @@ public sealed class DocumentVersionMigrationStore(EcrDbContext db) : IDocumentVe
                     map.Id,
                     ColumnDefId = column.Id,
                     map.IsActive,
+                    TableDefId = table.Id,
+                    map.TargetRowKey,
                     Path = sheet.Code + "." + table.Code + "." + column.Code,
                 })
             .ToListAsync(ct)
@@ -350,13 +352,15 @@ public sealed class DocumentVersionMigrationStore(EcrDbContext db) : IDocumentVe
         return [.. rows
             .OrderBy(r => r.Path, StringComparer.Ordinal)
             .ThenBy(r => r.Id)
-            .Select(r => new CollectionMappingRef(r.Id, r.ColumnDefId, r.IsActive, r.Path))];
+            .Select(r => new CollectionMappingRef(r.Id, r.ColumnDefId, r.IsActive, r.Path, r.TableDefId, r.TargetRowKey))];
     }
 
     /// <inheritdoc />
-    public async Task<int> RemapCollectionMappingsAsync(IReadOnlyDictionary<int, int> columnMap, CancellationToken ct)
+    public async Task<int> RemapCollectionMappingsAsync(
+        IReadOnlyDictionary<int, int> columnMap, IReadOnlyCollection<int> mappingIds, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(columnMap);
+        ArgumentNullException.ThrowIfNull(mappingIds);
 
         _ = db.Database.CurrentTransaction
             ?? throw new InvalidOperationException(
@@ -366,12 +370,13 @@ public sealed class DocumentVersionMigrationStore(EcrDbContext db) : IDocumentVe
             .Where(p => p.Key != p.Value)
             .Select(p => new { o = p.Key, n = p.Value })
             .ToList();
-        if (pairs.Count == 0)
+        if (pairs.Count == 0 || mappingIds.Count == 0)
         {
             return 0;
         }
 
         var json = JsonSerializer.Serialize(pairs);
+        var idsJson = JsonSerializer.Serialize(mappingIds);
 
         // ⚠ Колонка-відповідник — з ІНШОЇ версії (o <> n), тож повторний запуск нічого не міняє. Унікальність
         // `UQ_EntityFieldMap` — за (сутність, поле), а не за колонкою: переніс її не порушує.
@@ -381,6 +386,7 @@ public sealed class DocumentVersionMigrationStore(EcrDbContext db) : IDocumentVe
                 SET    m.TargetColumnDefId = x.n
                 FROM   ext.EntityFieldMap m
                 JOIN   OPENJSON({json}) WITH (o int, n int) x ON x.o = m.TargetColumnDefId
+                JOIN   OPENJSON({idsJson}) WITH (id int '$') k ON k.id = m.Id
                 WHERE  m.TargetKind = 0
                 """, ct)
             .ConfigureAwait(false);

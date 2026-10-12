@@ -163,8 +163,9 @@ public sealed partial class DocumentVersionMigrationTests
         public Task<IReadOnlyList<CollectionMappingRef>> ListCollectionMappingsAsync(int sourceVersionId, CancellationToken ct)
             => inner.ListCollectionMappingsAsync(sourceVersionId, ct);
 
-        public Task<int> RemapCollectionMappingsAsync(IReadOnlyDictionary<int, int> columnMap, CancellationToken ct)
-            => inner.RemapCollectionMappingsAsync(columnMap, ct);
+        public Task<int> RemapCollectionMappingsAsync(
+            IReadOnlyDictionary<int, int> columnMap, IReadOnlyCollection<int> mappingIds, CancellationToken ct)
+            => inner.RemapCollectionMappingsAsync(columnMap, mappingIds, ct);
 
         public Task<ProjectsOnVersion> CountOtherProjectsOnVersionAsync(int projectId, int versionId, CancellationToken ct)
             => inner.CountOtherProjectsOnVersionAsync(projectId, versionId, ct);

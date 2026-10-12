@@ -33,6 +33,60 @@ public sealed record ExtendedMappingPlan(
 /// </remarks>
 public static class MappingRemapPlanner
 {
+    /// <summary>Підсумок плану переносу мапінгів збору (D-1, D-1b P2-1/P2-2).</summary>
+    /// <param name="RemapIds">Які мапінги переносити (колонка має відповідник, режим рядків і рядок-адресат придатні).</param>
+    /// <param name="Unmapped">Мапінги, яким нема куди переїхати (активні й призупинені), з шляхом колонки.</param>
+    public sealed record CollectionPlan(
+        IReadOnlyList<int> RemapIds, IReadOnlyList<(CollectionMappingRef Mapping, bool Active)> Unmapped);
+
+    /// <summary>Планує перенос мапінгів збору (<c>ext.EntityFieldMap</c>) на колонки цільової версії.</summary>
+    /// <param name="source">Вихідна версія.</param>
+    /// <param name="target">Цільова версія.</param>
+    /// <param name="plan">План переносу документів.</param>
+    /// <param name="mappings">Мапінги на колонки вихідної версії.</param>
+    /// <remarks>
+    /// Мапінг не переїздить, коли: колонки немає в цільовій версії; режим рядків таблиці змінився (комірки
+    /// писатимуться за іншими правилами); мапінг матеріалізується в рядок фіксованої таблиці (<c>TargetRowKey</c>), якого
+    /// в цільовій таблиці немає — він «переїхав» би й писав у нікуди.
+    /// </remarks>
+    public static CollectionPlan PlanCollection(
+        TemplateVersionSnapshot source,
+        TemplateVersionSnapshot target,
+        VersionMigrationPlan plan,
+        IReadOnlyList<CollectionMappingRef> mappings)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        ArgumentNullException.ThrowIfNull(target);
+        ArgumentNullException.ThrowIfNull(plan);
+        ArgumentNullException.ThrowIfNull(mappings);
+
+        var sourceTables = source.Sheets.SelectMany(s => s.Tables).ToDictionary(t => t.Id);
+        var targetTables = target.Sheets.SelectMany(s => s.Tables).ToDictionary(t => t.Id);
+        var columns = plan.Columns.ToDictionary(c => c.SourceColumnDefId, c => c.TargetColumnDefId);
+
+        var remap = new List<int>();
+        var unmapped = new List<(CollectionMappingRef, bool)>();
+        foreach (var mapping in mappings)
+        {
+            if (!columns.ContainsKey(mapping.ColumnDefId)
+                || !sourceTables.TryGetValue(mapping.TableDefId, out var from)
+                || !plan.Tables.TryGetValue(mapping.TableDefId, out var newTableId)
+                || !targetTables.TryGetValue(newTableId, out var to)
+                || to.RowMode != from.RowMode
+                || (mapping.TargetRowKey is { } rowKey
+                    && from.RowMode == Ecr.Domain.Enums.TableRowMode.Fixed
+                    && !to.Rows.Any(r => !r.IsDeleted && string.Equals(r.RowKeyValue, rowKey, StringComparison.Ordinal))))
+            {
+                unmapped.Add((mapping, mapping.IsActive));
+                continue;
+            }
+
+            remap.Add(mapping.MappingId);
+        }
+
+        return new CollectionPlan(remap, unmapped);
+    }
+
     /// <summary>Будує план.</summary>
     /// <param name="source">Вихідна версія.</param>
     /// <param name="target">Цільова версія.</param>
@@ -87,6 +141,7 @@ public static class MappingRemapPlanner
                 continue;
             }
 
+            takenEvents.Add((map.SourceEntityId, map.DocumentId, newTable));
             events.Add(new EventMapRemap(
                 map.MapId, newTable, [.. map.Fields.Select(f => new EventFieldRemap(f.FieldId, columns[f.ColumnDefId]))]));
         }
@@ -108,6 +163,8 @@ public static class MappingRemapPlanner
             }
 
             if (!plan.Tables.TryGetValue(map.TableDefId, out var newTable)
+                || !targetTables.TryGetValue(newTable, out var toTable)
+                || toTable.Table.RowMode != sourceTables[map.TableDefId].Table.RowMode
                 || used.Any(c => !columns.ContainsKey(c)))
             {
                 unmapped.Add(new UnmappedExtendedMapping(map.IsActive, key));
@@ -121,6 +178,7 @@ public static class MappingRemapPlanner
                 continue;
             }
 
+            takenTargets.Add((newTable, newTarget));
             windows.Add(new WindowMapRemap(
                 map.MapId, newTable, newTarget,
                 columns[map.StartColumnDefId], columns[map.EndColumnDefId],

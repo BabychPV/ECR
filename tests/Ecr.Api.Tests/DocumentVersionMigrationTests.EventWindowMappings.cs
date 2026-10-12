@@ -46,9 +46,9 @@ public sealed partial class DocumentVersionMigrationTests
 
     /// <returns>(мапінг, поле).</returns>
     private async Task<(int MapId, int FieldId)> AddEventMapAsync(
-        long documentId, int tableDefId, int columnDefId, bool active = true)
+        long documentId, int tableDefId, int columnDefId, bool active = true, int? sharedEntityId = null)
     {
-        var entityId = await AddSourceEntityAsync().ConfigureAwait(false);
+        var entityId = sharedEntityId ?? await AddSourceEntityAsync().ConfigureAwait(false);
         await using var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext();
 
         var isActive = active ? 1 : 0;
@@ -139,7 +139,7 @@ public sealed partial class DocumentVersionMigrationTests
         using var app = new EcrApiFactory(sql);
         using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
 
-        var dry = await ReadJsonAsync(await PostAsync(client, s, "Safe", dryRun: true).ConfigureAwait(true)).ConfigureAwait(true);
+        var dry = await DryRunAsync(client, s).ConfigureAwait(true);
         Assert.True(dry.GetProperty("canApply").GetBoolean(), dry.ToString());
         Assert.Equal(2, dry.GetProperty("mappingsRemapped").GetInt32());
         Assert.Equal(0, dry.GetProperty("mappingsUnmapped").GetInt32());
@@ -185,10 +185,155 @@ public sealed partial class DocumentVersionMigrationTests
         using var app = new EcrApiFactory(sql);
         using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
 
-        var dry = await ReadJsonAsync(await PostAsync(client, s, "Safe", dryRun: true).ConfigureAwait(true)).ConfigureAwait(true);
+        var dry = await DryRunAsync(client, s).ConfigureAwait(true);
         Assert.True(dry.GetProperty("canApply").GetBoolean(), dry.ToString());
         Assert.Equal(1, dry.GetProperty("otherProjectsOnSourceVersion").GetInt32());
         Assert.Equal(1, dry.GetProperty("otherDocumentsOnSourceVersion").GetInt32());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "D-1b")]
+    public async Task Змінений_режим_рядків_таблиці_робить_активні_мапінги_збору_подій_і_вікна_без_відповідника()
+    {
+        var s = await ArrangeAsync(Target.RowModeBecomesMixed).ConfigureAwait(true);
+        var c = s.Doc.ColumnDefIds;
+        await AddMappingAsync(c[1]).ConfigureAwait(true);
+        await AddEventMapAsync(s.Doc.DocumentId, s.Doc.TableDefId, c[1]).ConfigureAwait(true);
+        await AddWindowMapAsync(s.Doc.TableDefId, c[1], c[0], c[2]).ConfigureAwait(true);
+
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
+
+        var dry = await DryRunAsync(client, s).ConfigureAwait(true);
+        Assert.Contains("mappingsNotMapped", dry.GetProperty("refusals").EnumerateArray().Select(r => r.GetString()));
+        Assert.Equal(3, dry.GetProperty("mappingsUnmapped").GetInt32());
+        Assert.Equal(0, dry.GetProperty("mappingsRemapped").GetInt32());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "D-1b")]
+    public async Task Призупинені_мапінги_при_змінному_режимі_рядків_не_переносяться_і_не_блокують_через_себе()
+    {
+        var s = await ArrangeAsync(Target.RowModeBecomesMixed).ConfigureAwait(true);
+        var c = s.Doc.ColumnDefIds;
+        var paused = await AddMappingAsync(c[1], active: false).ConfigureAwait(true);
+
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
+
+        var dry = await DryRunAsync(client, s).ConfigureAwait(true);
+        Assert.DoesNotContain("mappingsNotMapped", dry.GetProperty("refusals").EnumerateArray().Select(r => r.GetString()));
+        Assert.Equal(0, dry.GetProperty("mappingsUnmapped").GetInt32());
+        Assert.Equal(0, dry.GetProperty("mappingsRemapped").GetInt32());
+        Assert.Equal(c[1], await MappingColumnAsync(paused).ConfigureAwait(true));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "D-1b")]
+    public async Task Мапінг_збору_на_рядок_якого_нема_в_цільовій_версії_блокує_перенос_422()
+    {
+        var s = await ArrangeAsync(Target.OnlyLabels).ConfigureAwait(true);
+        var c = s.Doc.ColumnDefIds;
+        var mapping = await AddMappingAsync(c[1], rowKey: $"RX_{s.Tag}").ConfigureAwait(true);   // такого рядка немає
+        var before = await SnapshotAsync(s).ConfigureAwait(true);
+
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
+
+        var dry = await DryRunAsync(client, s).ConfigureAwait(true);
+        Assert.False(dry.GetProperty("canApply").GetBoolean());
+        Assert.Contains("mappingsNotMapped", dry.GetProperty("refusals").EnumerateArray().Select(r => r.GetString()));
+        Assert.Equal(1, dry.GetProperty("mappingsUnmapped").GetInt32());
+
+        var response = await PostAsync(client, s, "Safe", dryRun: false).ConfigureAwait(true);
+        await AssertProblemAsync(
+            response, HttpStatusCode.UnprocessableEntity, "ECR-SCHM-0422", "err.ECR-SCHM-0422.migrateMappingsNotMapped")
+            .ConfigureAwait(true);
+        Assert.Equal(before, await SnapshotAsync(s).ConfigureAwait(true));
+        Assert.Equal(c[1], await MappingColumnAsync(mapping).ConfigureAwait(true));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "D-1b")]
+    public async Task Мапінг_збору_на_наявний_у_цільовій_версії_рядок_переїжджає()
+    {
+        var s = await ArrangeAsync(Target.OnlyLabels).ConfigureAwait(true);
+        var c = s.Doc.ColumnDefIds;
+        var mapping = await AddMappingAsync(c[1], rowKey: $"R1_{s.Tag}").ConfigureAwait(true);
+
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
+
+        var response = await PostAsync(client, s, "Safe", dryRun: false).ConfigureAwait(true);
+        Assert.True(response.StatusCode == HttpStatusCode.OK, await response.Content.ReadAsStringAsync().ConfigureAwait(true));
+        Assert.Equal(s.TargetColumns["C2"], await MappingColumnAsync(mapping).ConfigureAwait(true));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "D-1b")]
+    public async Task Мапінг_подій_того_ж_шаблону_й_документа_вже_на_цільовій_таблиці_блокує_перенос_а_не_падає_на_UQ()
+    {
+        var s = await ArrangeAsync(Target.OnlyLabels).ConfigureAwait(true);
+        var c = s.Doc.ColumnDefIds;
+        var entityId = await AddSourceEntityAsync().ConfigureAwait(true);
+        var mine = await AddEventMapAsync(s.Doc.DocumentId, s.Doc.TableDefId, c[1], sharedEntityId: entityId).ConfigureAwait(true);
+        await AddEventMapAsync(s.Doc.DocumentId, s.TargetTableDefId, s.TargetColumns["C2"], sharedEntityId: entityId)
+            .ConfigureAwait(true);
+
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
+
+        var response = await PostAsync(client, s, "Safe", dryRun: false).ConfigureAwait(true);
+        await AssertProblemAsync(
+            response, HttpStatusCode.UnprocessableEntity, "ECR-SCHM-0422", "err.ECR-SCHM-0422.migrateMappingsNotMapped")
+            .ConfigureAwait(true);
+        Assert.Equal((s.Doc.TableDefId, c[1]), await EventMapStateAsync(mine.MapId, mine.FieldId).ConfigureAwait(true));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "D-1b")]
+    public async Task Фоновий_перенос_переносить_мапінги_подій_і_вікна()
+    {
+        var s = await ArrangeAsync(Target.OnlyLabels).ConfigureAwait(true);
+        var c = s.Doc.ColumnDefIds;
+        var events = await AddEventMapAsync(s.Doc.DocumentId, s.Doc.TableDefId, c[1]).ConfigureAwait(true);
+        var window = await AddWindowMapAsync(s.Doc.TableDefId, c[1], c[0], c[2]).ConfigureAwait(true);
+
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
+
+        var response = await PostAsyncJob(client, s, "Safe").ConfigureAwait(true);
+        var body = await response.Content.ReadAsStringAsync().ConfigureAwait(true);
+        Assert.True(response.StatusCode == HttpStatusCode.Accepted, $"{response.StatusCode}: {body} {app.ErrorsText}");
+        var jobId = JsonDocument.Parse(body).RootElement.GetProperty("jobId").GetString()!;
+
+        var job = await WaitJobAsync(client, jobId, app).ConfigureAwait(true);
+        Assert.True(job.GetProperty("state").GetString() == "Succeeded", $"задача: {job.GetRawText()}\n{app.ErrorsText}");
+
+        Assert.Equal((s.TargetTableDefId, s.TargetColumns["C2"]), await EventMapStateAsync(events.MapId, events.FieldId).ConfigureAwait(true));
+        Assert.Equal(
+            (s.TargetTableDefId, s.TargetColumns["C2"], s.TargetColumns["C1"], s.TargetColumns["C3"]),
+            await WindowMapStateAsync(window).ConfigureAwait(true));
+    }
+
+    private static async Task<JsonElement> DryRunAsync(HttpClient client, Scenario s)
+    {
+        var response = await PostAsync(client, s, "Safe", dryRun: true).ConfigureAwait(false);
+        var body = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+        Assert.True(response.IsSuccessStatusCode, $"{response.StatusCode}: {body}");
+        return JsonDocument.Parse(body).RootElement.Clone();
     }
 
     private async Task<int> UnitIdAsync()
@@ -213,7 +358,7 @@ public sealed partial class DocumentVersionMigrationTests
         using var app = new EcrApiFactory(sql);
         using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
 
-        var dry = await ReadJsonAsync(await PostAsync(client, s, "Safe", dryRun: true).ConfigureAwait(true)).ConfigureAwait(true);
+        var dry = await DryRunAsync(client, s).ConfigureAwait(true);
         Assert.False(dry.GetProperty("canApply").GetBoolean());
         Assert.Contains("mappingsNotMapped", dry.GetProperty("refusals").EnumerateArray().Select(r => r.GetString()));
         Assert.Equal(2, dry.GetProperty("mappingsUnmapped").GetInt32());
@@ -268,7 +413,7 @@ public sealed partial class DocumentVersionMigrationTests
         using var app = new EcrApiFactory(sql);
         using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
 
-        var dry = await ReadJsonAsync(await PostAsync(client, s, "Safe", dryRun: true).ConfigureAwait(true)).ConfigureAwait(true);
+        var dry = await DryRunAsync(client, s).ConfigureAwait(true);
         Assert.False(dry.GetProperty("canApply").GetBoolean());
         Assert.Contains("mappingsNotMapped", dry.GetProperty("refusals").EnumerateArray().Select(r => r.GetString()));
 
