@@ -4053,6 +4053,8 @@ public sealed class NotFoundException(string errorCode, string message)
 | `GET` | `/api/v1/methodologies/{id}/versions/{vid}/category-rule` | `Calculation.View` | 7 |
 | `PUT` | `/api/v1/methodologies/{id}/versions/{vid}/category-rule` | `Calculation.EditRule` | 7 |
 | `DELETE` | `/api/v1/methodologies/{id}/versions/{vid}/category-rule` | `Calculation.EditRule` | 7 |
+| `GET` | `/api/v1/methodologies/{id}/versions/{vid}/substances` | `Calculation.View` | 7 |
+| `PUT` | `/api/v1/methodologies/{id}/versions/{vid}/substances` | `Calculation.EditFormula` | 7 |
 | `GET` | `/api/v1/methodologies/{id}/versions/{vid}/required-inputs` | `Calculation.View` | 7 |
 | `PUT` | `/api/v1/methodologies/{id}/versions/{vid}/required-inputs/{columnDefId}` | `Calculation.ManageRequiredInputs` | 7 |
 | `GET` | `/api/v1/methodologies/{id}/versions/{vid}/outputs` | `Calculation.View` | 7 |
