@@ -25562,6 +25562,8 @@ export interface components {
             parentRowKey: null | string;
             rowKey: string;
             rowKind: components["schemas"]["RowKind"];
+            /** Format: int32 */
+            styleId?: null | number;
         };
         /** @description Рядок зі значеннями. Ключ у Cells — код колонки. */
         RowDto: {
@@ -25591,6 +25593,7 @@ export interface components {
             rowKind: string;
             /** @description Версія для оптимістичного блокування. */
             rowVersion: string;
+            style?: null | components["schemas"]["CellStyleDto"];
         };
         /** @description Створений рядок динамічної таблиці. */
         RowKeyResponse: {
@@ -26220,6 +26223,11 @@ export interface components {
             parentRowKey: null | string;
             /** @description Роль рядка; незмінна після створення. */
             rowKind: components["schemas"]["RowKind"];
+            /**
+             * Format: int32
+             * @description Стиль рядка (`cfg.StyleDef` цієї версії); `null` — без стилю.
+             */
+            styleId?: null | number;
         };
         /** @description Налаштування аркуша чернетки (`ФВ-2.1`). */
         SaveSheetDefRequest: {
@@ -27490,6 +27498,7 @@ export interface components {
             };
             /** @description Опис колонок таблиці. */
             columns: components["schemas"]["ColumnDto"][];
+            headerStyle?: null | components["schemas"]["CellStyleDto"];
             /** @description Комірки, чия остання зміна — правка за політикою `Warn` поза вікном
              *     доступу (`ФВ-2.16`, `D-239`); формат — той самий
              *     `"{rowKey}:{columnCode}"`, що й `PatchCellsResponse.OutOfWindow`.
