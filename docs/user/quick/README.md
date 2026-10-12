@@ -11,6 +11,7 @@
 | [02-documents.md](02-documents.md) | Перелік документів: вибір періоду, фільтри й лічильники, Table / Board, Quick look, майстер «New document» |
 | [03-document.md](03-document.md) | Екран документа: панель дій і «More», аркуші, дерево таблиць, сітка, клавіші й F9, інспектор (Issues / History / Info) |
 | [04-admin-lists.md](04-admin-lists.md) | Адміністративні переліки: Registries, Units, Consistency issues, Jobs, Templates, Security, Health |
+| [05-edit-assignments.md](05-edit-assignments.md) | Передача місяця виконавцю: майстер, смуга виконавця, Заповнено, Валідувати / Повернути, набори, My tasks, FAQ |
 
 Довідник за всіма екранами — [`../user-guide.md`](../user-guide.md), сценарії
 за ролями — [`../role-guide.md`](../role-guide.md), адміністрування —
