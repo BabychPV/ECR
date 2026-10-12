@@ -113,3 +113,10 @@ MISSING_NO_BINDING (немає прив'язки до колонки резул�
 категорії / не завантажено lookup), MISSING_ROW, MISSING_OUTPUT. Стара система не пише Land_No у результат:
 рядки зі спільним NAE (і тим самим паливом) позначаються AMBIGUOUS_KEY і не порівнюються.
 Сторожі: LandParityHarnessTests (Architecture).
+## Довідник повітряних речовин (LP-07, форма B константи)
+
+`Import-LandAirSubstances.ps1` завантажує LAND_AIR_SUBSTANCE з **локальної копії** прода (`AF_PermitConstant`,
+лише `SELECT … WITH (NOLOCK)`; значень у git немає) у стенд через REST: записи `E<код>` з полем SUBSTANCE_CODE
+(3-4 цифри, без провідного нуля); повтор - 0 змін. Параметри: `-SourceDatabase`/`-ConfirmSource` (локальна копія),
+`-ConfirmStand`; `-AttachMethodologyId/-AttachVersionId/-AttachCodes` додає речовини до складу версії-чернетки
+(`PUT /api/v1/methodologies/{id}/versions/{vid}/substances`). Спершу `-DryRun`.
