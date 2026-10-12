@@ -47,6 +47,7 @@ param(
     [string]$TemplateCode = 'LAND_UI',
     [string]$ProjectCode = 'LANDUI2026',
     [int]$Year = 2026,
+    [string]$ConfirmStand,
     [switch]$FillData,
     [switch]$DryRun
 )
@@ -60,6 +61,11 @@ $afFile = $AfPackage
 if (-not $afFile) { $afFile = Join-Path $repo 'docs\delivery\reference-data\land-template\af-land-package.json' }
 . (Join-Path $here 'EcrApi.ps1')
 Set-StrictMode -Off
+
+# Безпека стенда: лише локальні API і SQL; мутації лише з явним -ConfirmStand (імʼя/адреса стенду).
+Assert-LocalBaseUrl $BaseUrl
+Assert-LocalSqlConnection $SqlConnection
+if (-not $DryRun) { Set-EcrStandConfirmation -Stand $ConfirmStand -Url $BaseUrl }
 
 # Тимчасові 503 (ECR-SYS-0503 databaseBusy) і 429 повторюємо: стенд ділить SQL Server з іншими сесіями.
 ${function:Invoke-EcrOnce} = ${function:Invoke-Ecr}
@@ -275,7 +281,7 @@ function RegEntryId([string]$regCode, [string]$name) {
 function Stage-Contract {
     Log '== Contract (довідники вкладки 2. Contract) =='
     $pw = ConvertTo-SecureString $Acc['land-owner'] -AsPlainText -Force
-    & (Join-Path $here 'Import-ContractDictionaries.ps1') -BaseUrl $BaseUrl -User 'land-owner' -Password $pw
+    & (Join-Path $here 'Import-ContractDictionaries.ps1') -BaseUrl $BaseUrl -User 'land-owner' -Password $pw -ConfirmStand $ConfirmStand
 }
 
 # ==================== Template ====================
@@ -300,11 +306,13 @@ function Sql-Query($cn, [string]$sql, [hashtable]$p = @{}) {
     return , $dt
 }
 function Sql-Exec($cn, [string]$sql, [hashtable]$p = @{}) {
+    Assert-EcrMutationAllowed 'SQL-запис (Sql-Exec)'
     $cmd = $cn.CreateCommand(); $cmd.CommandText = $sql; $cmd.CommandTimeout = 300
     foreach ($k in $p.Keys) { [void]$cmd.Parameters.AddWithValue('@' + $k, $p[$k]) }
     return $cmd.ExecuteNonQuery()
 }
 function Bulk-Insert($cn, [string]$table, $dt) {
+    Assert-EcrMutationAllowed "SQL-запис (SqlBulkCopy у $table)"
     if ($dt.Rows.Count -eq 0) { return }
     $bc = New-Object System.Data.SqlClient.SqlBulkCopy($cn)
     $bc.DestinationTableName = $table
@@ -319,6 +327,8 @@ function Bulk-Insert($cn, [string]$table, $dt) {
 # усю версію й двічі DetectChanges на кожну колонку — O(n) на виклик, для 5 тис. колонок це години (див. gap G-API-1).
 # Дані ті самі, що й через API; публікація, шапка, довідники й усе решта — через API.
 function Fill-StructureSql([int]$vid) {
+    Assert-EcrMutationAllowed 'масове SQL-заповнення структури'
+    Assert-LocalSqlConnection $SqlConnection
     Log '  структура: SQL-масово (SqlBulkCopy)'
     $cn = New-Object System.Data.SqlClient.SqlConnection($SqlConnection)
     $cn.Open()
@@ -659,7 +669,7 @@ function Stage-Template {
     }
     # шапка Contract (13 полів) — офіційним скриптом на цій чернетці, з публікацією
     $pw = ConvertTo-SecureString $Acc['land-owner'] -AsPlainText -Force
-    & (Join-Path $here 'Apply-ContractHeader.ps1') -TemplateCode $TemplateCode -BaseUrl $BaseUrl -User 'land-owner' -Password $pw -UseExistingDraft
+    & (Join-Path $here 'Apply-ContractHeader.ps1') -TemplateCode $TemplateCode -BaseUrl $BaseUrl -User 'land-owner' -Password $pw -ConfirmStand $ConfirmStand -UseExistingDraft
     $vers = @((Api GET "/api/v1/templates/$($S.TemplateId)/versions?limit=100").Json.items)
     $pub = $vers | Where-Object { $_.status -eq 'Published' } | Sort-Object id -Descending | Select-Object -First 1
     if ($null -eq $pub) { throw 'Після Apply-ContractHeader немає опублікованої версії.' }

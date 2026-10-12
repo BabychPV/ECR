@@ -8,6 +8,7 @@ Set-StrictMode -Version 2.0
 $script:EcrBase = $null
 $script:EcrSession = $null
 $script:EcrClient = $null
+$script:EcrStandConfirmed = $false
 
 function ConvertTo-PlainText {
     param([Parameter(Mandatory)][securestring]$Secure)
@@ -24,6 +25,83 @@ function Get-LoopbackFlag {
     $u = $null
     if (-not [System.Uri]::TryCreate($Url, [System.UriKind]::Absolute, [ref]$u)) { return $false }
     return [bool]$u.IsLoopback
+}
+
+function Test-LocalHostName {
+    <#
+    .SYNOPSIS
+        $true лише для localhost, 127.0.0.1, ::1 і *.localhost (RFC 6761). Жодних інших імен чи адрес.
+    #>
+    param([Parameter(Mandatory)][string]$Candidate)
+    $h = $Candidate.Trim().Trim('[', ']').ToLowerInvariant()
+    # Uri.Host у .NET Framework віддає IPv6 у розгорнутому вигляді (0000:…:0001): порівнюємо як адресу.
+    $ip = $null
+    if ([System.Net.IPAddress]::TryParse($h, [ref]$ip)) {
+        return ($ip.Equals([System.Net.IPAddress]::Loopback) -or $ip.Equals([System.Net.IPAddress]::IPv6Loopback))
+    }
+    return ($h -eq 'localhost' -or $h -eq '127.0.0.1' -or $h -eq '::1' -or $h.EndsWith('.localhost'))
+}
+
+function Assert-LocalBaseUrl {
+    <#
+    .SYNOPSIS
+        Відмова, якщо адреса API веде не на цю машину. Скрипти tools/land будують стенд приймальної й
+        не мають права торкатися чужого сервера (ні http, ні https).
+    #>
+    param([Parameter(Mandatory)][string]$Url)
+    $u = $null
+    if (-not [System.Uri]::TryCreate($Url, [System.UriKind]::Absolute, [ref]$u) -or -not (Test-LocalHostName $u.Host)) {
+        throw "Адреса API '$Url' не локальна. Скрипти tools/land працюють лише зі стендом на цій машині (localhost, 127.0.0.1, [::1], *.localhost). Відмова."
+    }
+}
+
+function Assert-LocalSqlConnection {
+    <#
+    .SYNOPSIS
+        Відмова, якщо рядок підключення SQL Server веде не на локальний сервер (localhost, ., (local),
+        127.0.0.1, ::1, ім'я цієї машини, (localdb), *.localhost; екземпляр і порт дозволені).
+    #>
+    param([Parameter(Mandatory)][string]$ConnectionString)
+    $m = [regex]::Match($ConnectionString, '(?i)(?:^|;)\s*(?:server|data source|address|addr|network address)\s*=\s*"?([^;"]*)"?')
+    $v = if ($m.Success) { $m.Groups[1].Value } else { $null }
+    if ([string]::IsNullOrWhiteSpace($v)) { throw 'У рядку підключення SQL немає Server/Data Source: відмова.' }
+    $s = $v.Trim()
+    if ($s -match '^\\\\\.\\pipe\\' -or $s -match '^np:\\\\\.\\pipe\\') { return }
+    $s = $s -replace '^(tcp|np|lpc|admin):', ''
+    $s = ($s -split ',')[0]
+    $s = ($s -split '\\')[0]
+    $s = $s.Trim().Trim('[', ']')
+    $local = ($s -eq '.' -or $s -eq '(local)' -or $s -eq '(localdb)' -or (Test-LocalHostName $s) -or
+        (-not [string]::IsNullOrEmpty($env:COMPUTERNAME) -and $s -ieq $env:COMPUTERNAME))
+    if (-not $local) {
+        throw "SQL-сервер '$v' не локальний. Скрипти tools/land пишуть у базу лише на цій машині (localhost, ., (local), 127.0.0.1, ::1, ім'я машини). Відмова."
+    }
+}
+
+function Set-EcrStandConfirmation {
+    <#
+    .SYNOPSIS
+        Вмикає мутуючі виклики лише за явним підтвердженням стенда: значення має збігатися з адресою
+        API (повною, host:port або host). Без нього Invoke-Ecr відмовляє на будь-який не-GET.
+    #>
+    param([string]$Stand, [Parameter(Mandatory)][string]$Url)
+    Assert-LocalBaseUrl $Url
+    if ([string]::IsNullOrWhiteSpace($Stand)) {
+        throw "Мутуючі виклики потребують явного -ConfirmStand <імʼя або URL стенду> (наприклад '$Url'). Без нього скрипт нічого не змінює; -DryRun лише читає."
+    }
+    $u = [System.Uri]$Url
+    $wanted = @($Url.TrimEnd('/').ToLowerInvariant(), $u.Authority.ToLowerInvariant(), $u.Host.ToLowerInvariant())
+    if ($wanted -notcontains $Stand.Trim().TrimEnd('/').ToLowerInvariant()) {
+        throw "-ConfirmStand '$Stand' не збігається зі стендом '$Url' (очікується '$($u.Authority)' або повна адреса). Відмова."
+    }
+    $script:EcrStandConfirmed = $true
+}
+
+function Assert-EcrMutationAllowed {
+    param([string]$What = 'мутуючий виклик')
+    if (-not $script:EcrStandConfirmed) {
+        throw "Відмова: $What без -ConfirmStand. Скрипти tools/land змінюють стенд лише після явного підтвердження його імені/адреси."
+    }
 }
 
 function Enable-LoopbackHttpCookies {
@@ -79,6 +157,9 @@ function Connect-Ecr {
         throw "Адреса $BaseUrl — http не на локальній машині: використовуйте https (http дозволено лише для localhost, 127.0.0.1, ::1)."
     }
 
+    # Лише локальний стенд: і http, і https не на цій машині — відмова (ні логін, ні cookie не йдуть назовні).
+    Assert-LocalBaseUrl $BaseUrl
+
     $script:EcrBase = $BaseUrl.TrimEnd('/')
     $script:EcrSession = New-Object Microsoft.PowerShell.Commands.WebRequestSession
     $script:EcrClient = $null
@@ -103,6 +184,11 @@ function Invoke-Ecr {
         $Body = $null,
         [hashtable]$Headers = @{}
     )
+
+    # Не-GET (крім самого входу) — лише після -ConfirmStand.
+    if ($Method.ToUpperInvariant() -notin @('GET', 'HEAD') -and -not ($Method -ieq 'POST' -and $Path -eq '/api/v1/login/local')) {
+        Assert-EcrMutationAllowed "$Method $Path"
+    }
 
     # HttpClient, а не Invoke-WebRequest: у Windows PowerShell 5.1 (HttpWebRequest) відповідь 422 problem+json
     # від API (publish шаблону) дає «The connection was closed unexpectedly» без коду і тіла, тож
