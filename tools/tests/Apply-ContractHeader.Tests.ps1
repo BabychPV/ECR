@@ -146,7 +146,13 @@ function Invoke-Ecr {
 
     function global:Invoke-Header {
         param([hashtable]$Extra = @{})
-        & $global:EcrTest.ScriptPath -TemplateCode Land -DataDir $global:EcrTest.DataDir -BaseUrl 'http://localhost:5092' @Extra *> $null
+        # guard builder-fixes-r2: мутація (не -DryRun) потребує -ConfirmStand = адреса стенду (той самий BaseUrl).
+        # Тест може передати власне значення (зокрема порожнє — перевірка відмови); guard у скрипті не послаблюється.
+        $baseUrl = 'http://localhost:5092'
+        $args2 = @{ TemplateCode = 'Land'; DataDir = $global:EcrTest.DataDir; BaseUrl = $baseUrl }
+        if (-not $Extra.ContainsKey('DryRun') -and -not $Extra.ContainsKey('ConfirmStand')) { $args2['ConfirmStand'] = $baseUrl }
+        foreach ($k in $Extra.Keys) { $args2[$k] = $Extra[$k] }
+        & $global:EcrTest.ScriptPath @args2 *> $null
     }
 
     # Усе, що змінює стан: не-GET виклики, крім dry-run міграції (читання за змістом).
@@ -162,6 +168,33 @@ AfterAll {
         Remove-Item -LiteralPath "Function:\$f" -ErrorAction SilentlyContinue
     }
     Remove-Variable -Name FakeEcr, EcrTest -Scope Global -ErrorAction SilentlyContinue
+}
+
+Describe 'Apply-ContractHeader.ps1: guard -ConfirmStand (builder-fixes-r2)' {
+    It 'без -ConfirmStand мутуючий виклик зупиняється і нічого не записує' {
+        Initialize-FakeEcr @(
+            @{ id = 1; version = '1.0.0.0'; status = 'Published'; match = $false }
+        )
+        { Invoke-Header @{ ConfirmStand = '' } } | Should -Throw -ExpectedMessage '*-ConfirmStand*'
+        $global:FakeEcr.Calls | Should -HaveCount 0
+        Get-FakeWrites | Should -HaveCount 0
+    }
+
+    It 'чужий -ConfirmStand (інший порт) теж відмовляє і нічого не записує' {
+        Initialize-FakeEcr @(
+            @{ id = 1; version = '1.0.0.0'; status = 'Published'; match = $false }
+        )
+        { Invoke-Header @{ ConfirmStand = 'localhost:9999' } } | Should -Throw -ExpectedMessage '*не збігається*'
+        Get-FakeWrites | Should -HaveCount 0
+    }
+
+    It '-DryRun не вимагає -ConfirmStand і лише читає' {
+        Initialize-FakeEcr @(
+            @{ id = 1; version = '1.0.0.0'; status = 'Published'; match = $false }
+        )
+        { Invoke-Header @{ DryRun = $true } } | Should -Not -Throw
+        Get-FakeWrites | Should -HaveCount 0
+    }
 }
 
 Describe 'Apply-ContractHeader.ps1: наявна чернетка (N5-03)' {
