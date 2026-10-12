@@ -4598,6 +4598,11 @@
             "description": "Користувач.",
             "format": "int32",
             "type": "integer"
+          },
+          "visibility": {
+            "default": "Unknown",
+            "description": "Чи бачить виконавець документ (і аркуш передачі) за ПРЯМИМИ призначеннями ролей:\n`Visible` | `NotVisible` | `Unknown` (групи AD чужої людини невідомі; у відповідях, що не є\nпереліком передач, не обчислюється). RC20 D-2.",
+            "type": "string"
           }
         },
         "required": [
@@ -4676,7 +4681,8 @@
           "LockedByOwner",
           "AssignmentFilled",
           "AssignmentValidated",
-          "AssignmentExpired"
+          "AssignmentExpired",
+          "NotAssignedToYou"
         ]
       },
       "EditorSetDto": {
