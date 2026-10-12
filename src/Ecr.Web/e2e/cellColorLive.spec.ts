@@ -50,7 +50,9 @@ test.describe('cellColor: колір комірки на реальному ст
     PeriodKey === '' || DocumentId === '',
     'ECR_E2E_OPTIONAL: стенда немає, перевіряти нічого. Стенд: tools/e2e-stand.ps1.',
   );
-  test.describe.configure({ mode: 'serial', timeout: 240_000 });
+  // ⚠ НЕ `serial`: кожен сценарій сам виставляє грант/стан (`ensureOperatorLevel`, `makeSheetEditable`), тож падіння
+  // першого (напр. UI-шлях запису) не має ховати решту. Порядок - за файлом (`workers: 1`).
+  test.describe.configure({ timeout: 240_000 });
 
   for (const scheme of ['light', 'dark'] as const) {
     test(`cellColor: заливка -> збереження на сервері -> скидання, тема ${scheme}`, async ({ browser }) => {
@@ -66,7 +68,13 @@ test.describe('cellColor: колір комірки на реальному ст
         await page.getByTestId('cell-color-fill').first().click();
         const applied = waitForStylePatch(page);
         await page.getByRole('button', { name: Yellow, exact: true }).first().click();
-        expect((await applied).status(), 'сервер не прийняв заливку (PATCH cell-styles)').toBe(200);
+        const appliedResponse = await applied;
+        expect(
+          appliedResponse.status(),
+          `сервер не прийняв заливку (PATCH cell-styles): ${await appliedResponse.text()} | запит: ${String(
+            appliedResponse.request().postData(),
+          )}`,
+        ).toBe(200);
 
         await expect(cellAt(page, target)).toHaveAttribute('data-user-style', 'true');
         await expect(cellAt(page, target)).toHaveCSS('background-color', YellowRgb);
