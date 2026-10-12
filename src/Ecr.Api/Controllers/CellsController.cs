@@ -1,4 +1,4 @@
-using Ecr.Application.Documents;
+﻿using Ecr.Application.Documents;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
 using Ecr.Domain.Errors;

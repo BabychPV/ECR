@@ -1,4 +1,4 @@
-// tests/Ecr.Application.Tests/Recalculation/RecalculationServiceTests.cs
+﻿// tests/Ecr.Application.Tests/Recalculation/RecalculationServiceTests.cs
 using Ecr.Application.Ports;
 using Ecr.Application.Recalculation;
 using Ecr.Domain.ValueObjects;
