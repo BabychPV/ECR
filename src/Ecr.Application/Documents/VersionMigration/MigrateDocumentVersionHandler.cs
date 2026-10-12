@@ -46,9 +46,9 @@ namespace Ecr.Application.Documents.VersionMigration;
 /// мапінг не призупинено. Призупинені без відповідника не рахуються: вони нічого не пишуть.
 /// </param>
 /// <param name="MappingsUnmappedKeys">
-/// До 10 (<c>MaxMappingKeysListed</c>) шляхів <c>SHEET.TABLE.COLUMN</c> колонок
-/// вихідної версії, на які вказують такі мапінги. ⛔ Лише шлях колонки шаблону (його й так показує звіт відмінностей):
-/// джерело, сутність і поле джерела не розкриваються.
+/// До 10 (<c>MaxMappingKeysListed</c>) ключів: <c>SHEET.TABLE.COLUMN</c> колонки вихідної версії для мапінгу збору,
+/// <c>events SHEET.TABLE</c> для мапінгу подій і <c>window SHEET.TABLE.COLUMN</c> для прив'язки вікна (D-1b).
+/// ⛔ Лише шлях у шаблоні (його й так показує звіт відмінностей): джерело, сутність і поле джерела не розкриваються.
 /// </param>
 public sealed record DocumentVersionMigrationDto(
     long DocumentId,
@@ -195,7 +195,7 @@ public sealed class MigrateDocumentVersionHandler(
 
         if (dryRun)
         {
-            var (dto, _, _) = await PlanAsync(
+            var (dto, _, _, _) = await PlanAsync(
                 documentId, request.ProjectId, request.SourceVersionId, request.Target, mode, request.Archived,
                 dryRun: true, ct).ConfigureAwait(false);
             return dto;
@@ -502,7 +502,7 @@ public sealed class MigrateDocumentVersionHandler(
                 await onProgress(PlanningPercent, "jobs.migratePlanning", null, innerCt).ConfigureAwait(false);
             }
 
-            var (dto, plan, foreignKeys) = await PlanAsync(
+            var (dto, plan, foreignKeys, extended) = await PlanAsync(
                 documentId, projectId, current, target, mode, archived, dryRun: false, innerCt).ConfigureAwait(false);
             ThrowIfRefused(dto, foreignKeys);
 
@@ -543,7 +543,19 @@ public sealed class MigrateDocumentVersionHandler(
                 .RemapCollectionMappingsAsync(
                     plan.Columns.ToDictionary(c => c.SourceColumnDefId, c => c.TargetColumnDefId), innerCt)
                 .ConfigureAwait(false);
-            result = dto with { Applied = true, MappingsRemapped = remapped };
+
+            // ⛔ D-1b: мапінги подій джерела (документи проєкту) і прив'язки вікна — там само, тією ж транзакцією;
+            // рішення плану (відповідники, зайняті цілі) перераховано під блоком проєкту вище.
+            await store
+                .RemapEventAndWindowMapsAsync(
+                    projectId, extended, plan.Columns.ToDictionary(c => c.SourceColumnDefId, c => c.TargetColumnDefId),
+                    innerCt)
+                .ConfigureAwait(false);
+            result = dto with
+            {
+                Applied = true,
+                MappingsRemapped = remapped + extended.Events.Count + extended.Windows.Count,
+            };
 
             // ⛔ F2-03 (аудит R11): журнал — В ТІЙ САМІЙ транзакції (`AuditWriter` бере поточну
             // транзакцію контексту): перенос структури всіх документів проєкту не комітиться без
@@ -602,7 +614,7 @@ public sealed class MigrateDocumentVersionHandler(
         return new DocumentVersionMigrationTargetsDto(projectId, current.Id, current.Version, targets);
     }
 
-    private async Task<(DocumentVersionMigrationDto Dto, VersionMigrationPlan Plan, IReadOnlyList<string> ForeignKeys)> PlanAsync(
+    private async Task<(DocumentVersionMigrationDto Dto, VersionMigrationPlan Plan, IReadOnlyList<string> ForeignKeys, ExtendedMappingRemap Extended)> PlanAsync(
         long documentId, int projectId, int sourceVersionId, TemplateVersion target,
         VersionMigrationMode mode, bool archived, bool dryRun, CancellationToken ct)
     {
@@ -659,8 +671,27 @@ public sealed class MigrateDocumentVersionHandler(
         // прив'язок методологій (призупинений мапінг нічого не пише й перенос не блокує).
         var mappings = await store.ListCollectionMappingsAsync(sourceVersionId, ct).ConfigureAwait(false);
         var mappingsRemapped = mappings.Count(m => columnMap.ContainsKey(m.ColumnDefId));
+
         var unmappedMappings = mappings.Where(m => m.IsActive && !columnMap.ContainsKey(m.ColumnDefId)).ToList();
-        if (unmappedMappings.Count > 0)
+        var unmappedKeys = unmappedMappings.Select(m => m.ColumnPath).ToList();
+        var unmappedCount = unmappedMappings.Count;
+
+        // ⛔ D-1b (RC20): той самий клас дефекту для мапінгів подій джерела (адресують ТАБЛИЦЮ й колонки версії
+        // і належать документу) і прив'язок вікна (таблиця + складені ключі колонок). Відповідність — за тим
+        // самим планом (plan.Tables/plan.Columns); мапінги лише документів ЦЬОГО проєкту й лише таблиць двох
+        // версій цього шаблону. Активний мапінг без відповідника (або з зайнятою ціллю) — та сама відмова.
+        var eventMaps = await store.ListEventMapsAsync(scope.DocumentIds, ct).ConfigureAwait(false);
+        var windowMaps = await store
+            .ListRowWindowMapsAsync(
+                [.. from.Sheets.Concat(to.Sheets).SelectMany(s => s.Tables).Select(t => t.Id)], ct)
+            .ConfigureAwait(false);
+        var extendedPlan = MappingRemapPlanner.Plan(from, to, plan, eventMaps, windowMaps);
+        mappingsRemapped += extendedPlan.Remapped;
+        var extendedUnmapped = extendedPlan.Unmapped.Where(u => u.IsActive).ToList();
+        unmappedCount += extendedUnmapped.Count;
+        unmappedKeys.AddRange(extendedUnmapped.Select(u => u.Key));
+
+        if (unmappedCount > 0)
         {
             refusals.Add("mappingsNotMapped");
         }
@@ -693,16 +724,15 @@ public sealed class MigrateDocumentVersionHandler(
             [.. ordered.Take(MaxItems)], ordered.Count > MaxItems,
             denied > 0 ? denied : null,
             mappingsRemapped,
-            unmappedMappings.Count,
-            unmappedMappings.Count == 0
+            unmappedCount,
+            unmappedCount == 0
                 ? null
-                : [.. unmappedMappings
-                    .Select(m => m.ColumnPath)
+                : [.. unmappedKeys
                     .Distinct(StringComparer.Ordinal)
                     .Order(StringComparer.Ordinal)
                     .Take(MaxMappingKeysListed)]);
 
-        return (dto, plan, foreignKeys);
+        return (dto, plan, foreignKeys, extendedPlan.Remap);
     }
 
     private async Task<TemplateVersion> RequireTargetAsync(
